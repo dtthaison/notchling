@@ -1,6 +1,3 @@
-//! The Antigravity ops called directly: a fake room, a scripted `agy` (the recorded exchange) and a
-//! database in a temp folder. No test runs `agy` or reads a real `~/.gemini`.
-
 use super::*;
 use crate::acting::ACTING_OFF;
 use crate::acting_ops_tests::{app, setup, FakeRoom};
@@ -28,7 +25,6 @@ fn scratch(tag: &str) -> PathBuf {
     dir
 }
 
-/// A summaries database with the recording's session in `folder`, modified just now.
 fn antigravity_root(folder: &Path) -> PathBuf {
     let root = scratch("root");
     let db = Connection::open(root.join(summaries::DB_NAME)).unwrap();
@@ -39,7 +35,6 @@ fn antigravity_root(folder: &Path) -> PathBuf {
     .unwrap();
     let uris = json!([format!("file://{}", folder.display())]).to_string();
     let when = {
-        // Now in the database's own format.
         let secs = now_secs() as i64;
         let (days, rem) = (secs.div_euclid(86_400), secs.rem_euclid(86_400));
         let (y, m, d) = civil(days);
@@ -58,7 +53,6 @@ fn antigravity_root(folder: &Path) -> PathBuf {
     root
 }
 
-/// Days since 1970-01-01 as (year, month, day).
 fn civil(days: i64) -> (i64, i64, i64) {
     let z = days + 719_468;
     let era = z.div_euclid(146_097);
@@ -72,9 +66,7 @@ fn civil(days: i64) -> (i64, i64, i64) {
 }
 
 struct Rig {
-    /// Antigravity's folder, with its summaries database.
     root: PathBuf,
-    /// Where the daemon makes its copy of that database.
     copies: PathBuf,
     ops: AgyOps,
     room: Arc<FakeRoom>,
@@ -154,7 +146,6 @@ impl Rig {
         self.spawner.spawned().remove(0)
     }
 
-    /// Opens the recorded session and waits for the load.
     fn loaded(&self) -> FakeHandle {
         self.call(OPEN, json!({"id": ROW})).unwrap();
         self.change("loaded");
@@ -194,13 +185,11 @@ fn acting_off_refuses_every_acting_op_before_anything_starts() {
         );
     }
     assert!(rig.spawner.calls().is_empty(), "no agy was started");
-    // The reads work.
     let list = rig.call(SESSIONS, json!({})).unwrap();
     assert_eq!(list[0]["id"], ROW);
     assert_eq!(list[0]["name"], "Edit hello");
     assert_eq!(list[0]["cwd"], rig.folder.to_string_lossy().as_ref());
     assert_eq!(list[0]["working"], false);
-    // The session index gets the same list by title, with no acting and no process.
     let titled = rig.ops.titled_sessions();
     assert_eq!(titled.len(), 1);
     assert_eq!(
@@ -233,7 +222,6 @@ fn the_tiers() {
 
 #[test]
 fn the_conversation_read_works_with_acting_off_and_follows_the_open_runner() {
-    // Off: a read, so it answers; nothing is open, so it is empty and starts nothing.
     let off = rig(false);
     let empty = off.call(CONVERSATION, json!({"id": ROW})).unwrap();
     assert_eq!(empty["open"], false);
@@ -248,7 +236,6 @@ fn the_conversation_read_works_with_acting_off_and_follows_the_open_runner() {
         );
     }
 
-    // On and loaded: the recording's history, decodable as the engine's own type.
     let rig = rig(true);
     rig.loaded();
     let loaded = rig
@@ -262,7 +249,6 @@ fn the_conversation_read_works_with_acting_off_and_follows_the_open_runner() {
         !conversation.items.is_empty(),
         "session/load replayed the history"
     );
-    // Not on the daemon's handler as an agent: the app tier only.
     use crate::daemon::Ops;
     use notchling_local_api::Handler;
     let ops = Ops::new(Arc::new(Mutex::new(json!([])))).with_agy(Arc::new(rig.ops));
@@ -293,7 +279,6 @@ fn open_runs_agy_in_the_sessions_own_folder_and_refuses_one_it_does_not_know() {
     assert_eq!(state["open"], true);
     assert_eq!(state["loading"], false);
     assert!(!state["config"].as_array().unwrap().is_empty());
-    // The caller can't send a folder of its own.
     let again = rig
         .call(OPEN, json!({"id": ROW, "folder": "/etc"}))
         .unwrap();
@@ -339,13 +324,10 @@ fn a_permission_is_held_for_the_app_published_twice_and_answered_by_its_ids() {
         id.as_str(),
         "the notch's own event too"
     );
-    // It is listed for an app that attaches later.
     assert!(rig.ops.prompts().iter().any(|p| p["id"] == id.as_str()));
 
-    // Nothing answers it by itself.
     std::thread::sleep(Duration::from_millis(100));
     assert!(process.written().iter().all(|m| m.get("method").is_some()));
-    // Wrong rpc id and an option it doesn't have are refused, and it still waits.
     for args in [
         json!({"id": ROW, "rpc_id": "2", "option_id": "allow"}),
         json!({"id": ROW, "rpc_id": "1", "option_id": "yes-always"}),
@@ -440,7 +422,6 @@ fn a_draft_starts_a_session_in_its_folder_and_sends_the_first_message() {
     assert_eq!(reply, json!({"id": "agy:fresh-1", "sent": true}));
     assert_eq!(rig.spawner.calls()[0].2, folder);
     rig.change("turn_ended");
-    // The change event carries the row as sessions.list gives rows, as Codex's does.
     let ended = rig
         .room
         .named(topics::SESSION_CHANGED)
@@ -452,7 +433,6 @@ fn a_draft_starts_a_session_in_its_folder_and_sends_the_first_message() {
     assert_eq!(ended["row"]["id"], "agy:fresh-1");
     assert_eq!(ended["row"]["host"], "Antigravity");
     assert_eq!(ended["row"]["group"], "completed");
-    // The new session is listed before Antigravity's database has it, titled from the message.
     let list = rig.call(SESSIONS, json!({})).unwrap();
     let fresh = list
         .as_array()
@@ -462,7 +442,6 @@ fn a_draft_starts_a_session_in_its_folder_and_sends_the_first_message() {
         .unwrap();
     assert_eq!(fresh["name"], "Build the thing");
     assert_eq!(fresh["cwd"], folder.as_str());
-    // And takes its next message without a second process.
     rig.call(SEND, json!({"id": "agy:fresh-1", "text": "more"}))
         .unwrap();
     assert_eq!(rig.spawner.spawned().len(), 1);
@@ -539,7 +518,6 @@ fn a_loaded_sessions_options_become_antigravitys_models_in_the_catalog() {
         "nothing seen yet"
     );
     rig.loaded();
-    // The recording's session offers these Model values, and its Thinking Level's as efforts.
     let models = catalog.models(Tool::Antigravity);
     let ids: Vec<_> = models.iter().map(|m| m.id.as_str()).collect();
     assert!(
@@ -550,7 +528,6 @@ fn a_loaded_sessions_options_become_antigravitys_models_in_the_catalog() {
     assert_eq!(argon.name, "Gemini 4 Argon");
     assert!(!argon.efforts.is_empty(), "{argon:?}");
     assert_eq!(argon.default_effort.as_deref(), Some("medium"));
-    // Cached for the next start, and announced on `tools`.
     let cached = LiveCache::new(state.join("live-models.json"));
     assert!(cached.get(Tool::Antigravity).is_some());
     assert!(!rig.room.named(topics::CATALOG_CHANGED).is_empty());

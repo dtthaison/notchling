@@ -1,8 +1,3 @@
-//! The browser sign-in's pure parts (`AccountLogin.swift`): OAuth with PKCE the way `claude auth
-//! login` does it, with the browser sending the code back to a listener on 127.0.0.1. The daemon
-//! owns the listener; here are the page's address, reading the callback, the exchange's body and
-//! turning its answer into the login Claude Code stores under `claudeAiOauth`.
-
 use crate::accounts::http::{HttpClient, HttpRequest, CLIENT_ID, TOKEN_URL};
 use crate::accounts::{Login, Secret};
 use base64::Engine;
@@ -10,11 +5,9 @@ use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 
 pub const AUTHORIZE_URL: &str = "https://claude.com/cai/oauth/authorize";
-/// Where the browser goes once the code is in.
 pub const SUCCESS_URL: &str = "https://platform.claude.com/oauth/code/success?app=claude-code";
 pub const SCOPES: &str = "org:create_api_key user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload user:plugins";
 
-/// One sign-in: its PKCE verifier and its `state`, both random. Its `Debug` hides both.
 pub struct SignIn {
     verifier: Secret,
     state: Secret,
@@ -27,7 +20,6 @@ impl std::fmt::Debug for SignIn {
     }
 }
 
-/// 64 bytes from the system's secure random source, for [`SignIn::new`].
 pub fn random_seed() -> Option<[u8; 64]> {
     use ring::rand::SecureRandom;
     let mut bytes = [0u8; 64];
@@ -35,17 +27,14 @@ pub fn random_seed() -> Option<[u8; 64]> {
     Some(bytes)
 }
 
-/// Unpadded base64url.
 pub fn base64url(bytes: &[u8]) -> String {
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
 }
 
-/// The S256 challenge for `verifier`.
 pub fn challenge(verifier: &str) -> String {
     base64url(&Sha256::digest(verifier.as_bytes()))
 }
 
-/// Query-string escaping (everything but unreserved characters).
 fn escape(s: &str) -> String {
     s.bytes()
         .map(|b| match b {
@@ -81,17 +70,13 @@ fn unescape(s: &str) -> Option<String> {
     String::from_utf8(out).ok()
 }
 
-/// What a request to the listener was.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Callback {
-    /// `GET /callback?code=…&state=<ours>`: the code (a [`Secret`]).
     Code(Secret),
-    /// Anything else, a wrong `state` included: answered 404, and the sign-in waits on.
     NotOurs,
 }
 
 impl SignIn {
-    /// A sign-in from 64 random bytes (32 for the verifier, 32 for the state).
     pub fn new(random: [u8; 64], port: u16) -> SignIn {
         SignIn {
             verifier: Secret::new(base64url(&random[..32])),
@@ -104,7 +89,6 @@ impl SignIn {
         format!("http://localhost:{}/callback", self.port)
     }
 
-    /// The sign-in page to open in the browser.
     pub fn page_url(&self) -> String {
         let params = [
             ("code", "true".to_string()),
@@ -123,7 +107,6 @@ impl SignIn {
         format!("{AUTHORIZE_URL}?{}", query.join("&"))
     }
 
-    /// Reads the head of a request to the listener (`GET /callback?code=…&state=… HTTP/1.1`).
     pub fn callback(&self, request: &str) -> Callback {
         let target = request.split(' ').nth(1).unwrap_or("");
         let (path, query) = target.split_once('?').unwrap_or((target, ""));
@@ -148,7 +131,6 @@ impl SignIn {
         }
     }
 
-    /// The token request's body for `code`.
     pub fn exchange_body(&self, code: &Secret) -> Value {
         json!({
             "grant_type": "authorization_code",
@@ -160,7 +142,6 @@ impl SignIn {
         })
     }
 
-    /// Exchanges `code` for the login, as Claude Code stores it.
     pub fn exchange(
         &self,
         http: &dyn HttpClient,
@@ -179,8 +160,6 @@ impl SignIn {
     }
 }
 
-/// The `claudeAiOauth` login from a token answer: both tokens, `expiresAt` (ms), the scopes, and
-/// `refreshTokenExpiresAt` when given. `None` without both tokens.
 pub fn login_from_token_answer(json: &Map<String, Value>, now_ms: i64) -> Option<Login> {
     let access = json.get("access_token")?.as_str()?;
     let refresh = json.get("refresh_token")?.as_str()?;
@@ -213,7 +192,6 @@ pub fn login_from_token_answer(json: &Map<String, Value>, now_ms: i64) -> Option
     Some(Login(oauth))
 }
 
-/// The listener's answers: a redirect to [`SUCCESS_URL`], or a 404.
 pub fn reply(found: bool) -> String {
     if found {
         format!("HTTP/1.1 302 Found\r\nContent-Length: 0\r\nConnection: close\r\nLocation: {SUCCESS_URL}\r\n\r\n")

@@ -1,7 +1,3 @@
-//! The `notchling-machines` binary's run (macOS): one titled Machines window, 900 × 780 (at least
-//! 680 × 460), over the engine's parts for the folders and switches the command line named; the
-//! app quits when it closes. `--render` goes through the app's render path with the machines views.
-
 use gpui::{
     prelude::*, px, size, App, Application, Bounds, Context, TitlebarOptions, WindowBounds,
     WindowHandle, WindowKind, WindowOptions,
@@ -15,7 +11,6 @@ use super::view::MachinesView;
 use crate::dock::Policy;
 use crate::mac::dock;
 
-/// Runs a command; the exit code.
 pub fn run_command(command: Command) -> i32 {
     match command {
         Command::Run {
@@ -38,7 +33,6 @@ pub fn run_command(command: Command) -> i32 {
     }
 }
 
-/// The window until it closes; the exit code.
 pub fn run(setup: Setup) -> i32 {
     if setup.live {
         eprintln!("notchling-machines: --live: ssh, gh and open may run");
@@ -66,7 +60,6 @@ pub fn run(setup: Setup) -> i32 {
     0
 }
 
-/// Opens the Machines window over `parts`.
 pub fn open(cx: &mut App, parts: Parts) -> Option<WindowHandle<MachinesView>> {
     let bounds = Bounds::centered(None, size(px(WINDOW_SIZE.0), px(WINDOW_SIZE.1)), cx);
     let options = WindowOptions {

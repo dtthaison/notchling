@@ -1,6 +1,3 @@
-//! A notch render's setting (part U10): the model and scene from `renders`, drawn over a stand-in
-//! desktop with its menu bar, and for Tab Perch a stand-in for the frontmost window.
-
 use std::sync::Arc;
 
 use gpui::{div, prelude::*, px, AnyView, App, Div};
@@ -14,18 +11,14 @@ use super::renders;
 use super::view::NotchView;
 use crate::actions::Actions;
 
-/// `--render notch-<state>`: the model over the fixture, drawn on a backdrop, with what the
-/// scene sets: acting, the pet, picks already made.
 pub fn build_render(name: &str, cx: &mut App) -> Option<AnyView> {
     let shown = renders::shown(name)?;
-    // The part names, as Chat's render switch draws them (`chat::view::PARTS_ENV`).
     if std::env::var_os(crate::chat::view::PARTS_ENV).is_some_and(|v| v == "1") {
         notchling_kit::ui::set_parts(cx, true);
     }
     Some(build_scene(renders::scene(shown), cx))
 }
 
-/// A notch over a backdrop showing `scene` (the tools' renders bring their own).
 pub fn build_scene(scene: renders::Scene, cx: &mut App) -> AnyView {
     let actions = Arc::new(Actions::fixed(scene.acting));
     cx.new(|cx| {
@@ -42,8 +35,6 @@ pub fn build_scene(scene: renders::Scene, cx: &mut App) -> AnyView {
             }
         }
         view.draft.select_tab(scene.tab);
-        // A bench (`NOTCHLING_RENDER_BENCH`) moves the pet as the live panel's tick does, so what
-        // the notch costs while it walks is measured.
         if std::env::var_os(crate::mac::render::BENCH_ENV).is_some() {
             cx.spawn(async move |this, cx| loop {
                 let stepped = this.update(cx, |view, cx| {
@@ -64,7 +55,6 @@ pub fn build_scene(scene: renders::Scene, cx: &mut App) -> AnyView {
 }
 
 impl NotchView {
-    /// A render's stand-in for the desktop: a menu bar the housing's height, the desktop below.
     pub(super) fn backdrop(&self) -> Div {
         div()
             .absolute()
@@ -88,8 +78,6 @@ impl NotchView {
                     .w_full()
                     .fill(Ink::Sidebar, A)
                     .children(self.scene_window.map(|w| {
-                        // The frame is from the top of the screen; this part starts below the
-                        // menu bar.
                         stand_in_window(AxFrame {
                             y: w.y - self.model.notch.h,
                             ..w
@@ -99,8 +87,6 @@ impl NotchView {
     }
 }
 
-/// A stand-in for the frontmost window a render's pet perches on: a card with traffic lights, at
-/// its frame in the canvas (y down).
 pub fn stand_in_window(frame: AxFrame) -> Div {
     let light = |ink: Ink| div().size(px(12.0)).rounded_full().fill(ink, A);
     div()

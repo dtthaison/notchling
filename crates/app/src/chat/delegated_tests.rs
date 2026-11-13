@@ -197,7 +197,6 @@ fn a_session_is_matched_by_its_transcripts_id_and_by_those_its_clears_ended() {
     let ids = parent_ids(&new.to_string_lossy(), "worker");
     assert_eq!(ids, ["new-id", "old-id"]);
 
-    // The job handed over before the clear still shows for the row you see now.
     let (codex, agy) = places(&s);
     let p = Places {
         codex_sessions: &codex,
@@ -211,7 +210,6 @@ fn a_session_is_matched_by_its_transcripts_id_and_by_those_its_clears_ended() {
     let shown = subagents(&records, &ids, &p, 300.0, &alive);
     assert_eq!(shown.len(), 2);
 
-    // A session no clear started is only itself.
     let lone = s.write("q/lone.jsonl", &named("worker"));
     assert_eq!(parent_ids(&lone.to_string_lossy(), "worker"), ["lone"]);
 }

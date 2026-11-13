@@ -1,5 +1,3 @@
-// Removing a computer deletes what the phone kept for it: its chat cache, archive, mutes and token (decision 0012).
-// What belongs to the computers that stay is left alone.
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -19,8 +17,6 @@ import 'support/two_computers.dart';
 
 ChatMessage _message(String text) => ChatMessage.fromJson(<String, Object?>{'id': 'm-$text', 'role': 'user', 'text': text, 'time': 0});
 
-/// A phone that follows A (which kept the bare keys, scope '') and B (scope = its host id), with a cached chat,
-/// a picture, an archived session and a muted session for each.
 ({ProviderContainer container, MemorySecretStore secrets, MemoryChatCache cache, MemoryArchiveStore archive}) phoneWithTwo({List<MacProfile>? macs}) {
   final MemorySecretStore secrets = MemorySecretStore()
     ..values['macs.v1'] = encodeProfiles(macs ?? <MacProfile>[macA, macB])

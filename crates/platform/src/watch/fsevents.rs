@@ -1,7 +1,3 @@
-//! The macOS watcher: one FSEvents stream with file-level events on a serial dispatch queue.
-//! The kernel tells us what changed, so an idle folder costs nothing, however many files it holds.
-//! The stream's callback only maps paths and hands them to the batching thread in `watch.rs`.
-
 use std::ffi::{c_char, c_void, CStr, OsStr};
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
@@ -10,20 +6,16 @@ use std::time::Duration;
 
 use crate::sys_mac::{CFRelease, CfString};
 
-/// What one callback saw, in the folders' own spelling.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub(super) struct Event {
     pub paths: Vec<PathBuf>,
-    /// FSEvents lost track (dropped events, a root moved): the caller must walk everything.
     pub rescan: bool,
 }
 
-// FSEventStreamCreateFlags.
 const CREATE_NO_DEFER: u32 = 0x02;
 const CREATE_WATCH_ROOT: u32 = 0x04;
 const CREATE_FILE_EVENTS: u32 = 0x10;
 
-// FSEventStreamEventFlags.
 const MUST_SCAN_SUB_DIRS: u32 = 0x01;
 const USER_DROPPED: u32 = 0x02;
 const KERNEL_DROPPED: u32 = 0x04;
@@ -45,18 +37,13 @@ const RESCAN: u32 = MUST_SCAN_SUB_DIRS
     | ROOT_CHANGED
     | MOUNT
     | UNMOUNT;
-/// What the polling watcher would notice too (a size, a modified time, a file coming or going);
-/// extended attributes, Finder info and owners alone are left out.
 const CHANGE: u32 =
     ITEM_CREATED | ITEM_REMOVED | ITEM_INODE_META_MOD | ITEM_RENAMED | ITEM_MODIFIED | ITEM_CLONED;
 
 const SINCE_NOW: u64 = u64::MAX;
 
-/// Each watched folder as FSEvents spells it (symlinks resolved, `/var` as `/private/var`) and as
-/// the caller gave it. Two given folders may share one real one (a lane's linked `projects`).
 pub(super) type Roots = Vec<(PathBuf, PathBuf)>;
 
-/// The real path of each folder that has one; a folder that can't be resolved is left out.
 pub(super) fn real_roots(given: &[PathBuf]) -> Roots {
     given
         .iter()
@@ -64,8 +51,6 @@ pub(super) fn real_roots(given: &[PathBuf]) -> Roots {
         .collect()
 }
 
-/// One FSEvents event in the caller's terms: the changed path under every folder that holds it,
-/// and whether to walk everything again.
 pub(super) fn translate(path: &Path, flags: u32, roots: &Roots) -> (Vec<PathBuf>, bool) {
     let rescan = flags & RESCAN != 0;
     if flags & CHANGE == 0 {
@@ -75,7 +60,6 @@ pub(super) fn translate(path: &Path, flags: u32, roots: &Roots) -> (Vec<PathBuf>
         .iter()
         .filter_map(|(real, given)| {
             let rest = path.strip_prefix(real).ok()?;
-            // The folder itself coming or going is a rescan, which the batching thread sees.
             (!rest.as_os_str().is_empty()).then(|| given.join(rest))
         })
         .collect();
@@ -123,14 +107,12 @@ extern "C" {
     ) -> *const c_void;
 }
 
-// libdispatch is part of libSystem, which every binary links.
 extern "C" {
     fn dispatch_queue_create(label: *const c_char, attr: *const c_void) -> *mut c_void;
     fn dispatch_sync_f(queue: *mut c_void, context: *mut c_void, work: extern "C" fn(*mut c_void));
     fn dispatch_release(object: *mut c_void);
 }
 
-/// What the callback reads: the folders and where to send what it saw.
 struct Shared {
     roots: Roots,
     out: Sender<Event>,
@@ -164,15 +146,12 @@ extern "C" fn on_events(
         event.rescan |= rescan;
     }
     if event.rescan || !event.paths.is_empty() {
-        // The batching thread ending first only means nobody listens any more.
         let _ = shared.out.send(event);
     }
 }
 
 extern "C" fn nothing(_: *mut c_void) {}
 
-/// A running stream. Dropping it stops the stream; once the drop returns no callback runs and the
-/// sender it held is gone.
 pub(super) struct Stream {
     stream: *mut c_void,
     queue: *mut c_void,
@@ -184,8 +163,6 @@ pub(super) struct Stream {
 unsafe impl Send for Stream {}
 
 impl Stream {
-    /// Starts reporting changes under `roots`; `None` when FSEvents refuses, so the caller can
-    /// poll instead.
     pub(super) fn start(roots: Roots, latency: Duration, out: Sender<Event>) -> Option<Stream> {
         let mut real: Vec<&Path> = roots.iter().map(|(r, _)| r.as_path()).collect();
         real.sort();
@@ -344,7 +321,6 @@ mod tests {
 
     #[test]
     fn an_attribute_only_change_is_not_a_change() {
-        // Extended attributes (0x8000) and Finder info (0x2000) alone change no size or time.
         let (paths, rescan) = translate(Path::new("/private/var/t/w/f"), 0x8000 | 0x2000, &roots());
         assert!(paths.is_empty() && !rescan);
     }

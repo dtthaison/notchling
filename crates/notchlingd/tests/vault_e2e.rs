@@ -1,8 +1,3 @@
-//! The vault through a real daemon over a temp data root, switch off (as every daemon starts):
-//! each vault op and `notchling secrets` / `secret` / `secret-request` answer with the off
-//! message, the command never runs, the `vault` topic is the app's, and no vault file appears.
-//! With no daemon, the commands say Notchling isn't running. Every run sets
-//! `NOTCHLING_DATA_ROOT` and a fake `HOME`, and a guard stops the daemon.
 #![cfg(unix)]
 
 use notchling_local_api::{ops, topics, Client, ClientError, ClientKind, ErrorCode};
@@ -21,7 +16,6 @@ impl Drop for Dir {
     }
 }
 
-/// A short folder under /tmp (socket paths are capped at 104 bytes on macOS).
 fn scratch(tag: &str) -> Dir {
     let dir = PathBuf::from(format!("/tmp/nl-{tag}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
@@ -102,7 +96,6 @@ fn with_the_switch_off_every_vault_path_says_so() {
             other => panic!("{op}: {other:?}"),
         }
     }
-    // The app's ops and the app's topic are the app's, whatever the switch says.
     match client.call(
         ops::VAULT_APPROVAL_ANSWER,
         json!({"id": "x", "decision": "once"}),

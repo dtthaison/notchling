@@ -1,9 +1,3 @@
-//! Antigravity CLI conversations for the session list, from `conversation_summaries.db` in
-//! `~/.gemini/antigravity-cli` (Swift `AntigravitySessions`).
-//!
-//! The database is in WAL mode and a read-only open fails while no WAL file exists, so it is read
-//! from a copy (database and WAL) in a folder of ours; Antigravity's own file is never opened.
-
 use crate::bridge::foreign::ForeignRow;
 use crate::sessions::iso::parse_iso_ms;
 use rusqlite::{Connection, OpenFlags};
@@ -12,20 +6,14 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-/// Rows older than this are left out (14 days).
 pub const RECENT_SECS: f64 = 14.0 * 86_400.0;
 
-/// The most rows read.
 const LIMIT: usize = 200;
 
-/// The database's name in Antigravity's folder.
 pub const DB_NAME: &str = "conversation_summaries.db";
 
-/// The copy's name in ours.
 const COPY_NAME: &str = "summaries.db";
 
-/// Held while a copy is made or read, so two calls never clobber each other's files; holds when
-/// each copy was last made.
 static COPIES: OnceLock<Mutex<HashMap<PathBuf, Instant>>> = OnceLock::new();
 
 #[derive(Debug, Clone, PartialEq)]
@@ -33,18 +21,15 @@ pub struct Row {
     pub id: String,
     pub title: String,
     pub folder: String,
-    /// Seconds since the epoch.
     pub modified: f64,
     pub running: bool,
 }
 
 impl Row {
-    /// Chat's row id.
     pub fn row_id(&self) -> String {
         format!("agy:{}", self.id)
     }
 
-    /// As the bridge and the notch list it.
     pub fn to_foreign(&self, working: bool) -> ForeignRow {
         ForeignRow {
             id: self.row_id(),
@@ -61,22 +46,15 @@ impl Row {
     }
 }
 
-/// The conversations of the last 14 days, newest first, read through a copy of `root`'s database
-/// made in `copy_dir`. Empty when there is no database or the copy can't be read.
 pub fn rows(root: &Path, copy_dir: &Path, now_secs: f64) -> Vec<Row> {
     rows_cached(root, copy_dir, now_secs, Duration::ZERO)
 }
 
-/// [`rows`], but a copy made less than `reuse` ago is read again instead of being made again:
-/// callers that ask every few seconds (the session list, the index, a folder lookup) share one copy
-/// of the database and its WAL.
 pub fn rows_cached(root: &Path, copy_dir: &Path, now_secs: f64, reuse: Duration) -> Vec<Row> {
     let source = root.join(DB_NAME);
     if !source.is_file() {
         return Vec::new();
     }
-    // One copy being made or read at a time in this process, and when each was made. The folder is
-    // ours alone (the daemon's own, never the Swift app's), so no other process writes there.
     let mut made = COPIES
         .get_or_init(Mutex::default)
         .lock()
@@ -108,7 +86,6 @@ fn with_suffix(path: &Path, suffix: &str) -> PathBuf {
     PathBuf::from(name)
 }
 
-/// Opened read-write so SQLite replays the copied WAL into the copy.
 fn read_copy(copy: &Path, now_secs: f64) -> Result<Vec<Row>, rusqlite::Error> {
     let db = Connection::open_with_flags(copy, OpenFlags::SQLITE_OPEN_READ_WRITE)?;
     let mut statement = db.prepare(
@@ -156,15 +133,12 @@ fn read_copy(copy: &Path, now_secs: f64) -> Result<Vec<Row>, rusqlite::Error> {
     Ok(out)
 }
 
-/// `2026-11-05 16:57:03.335872+00:00` (UTC) as seconds since the epoch; only the first 19
-/// characters count, as in the Swift reader.
 pub fn date(text: &str) -> Option<f64> {
     let head: String = text.chars().take(19).collect();
     let (day, clock) = head.split_once(' ')?;
     parse_iso_ms(&format!("{day}T{clock}Z")).map(|ms| ms as f64 / 1000.0)
 }
 
-/// The first of `["file:///path", ...]`, or empty.
 pub fn folder(uris: &str) -> String {
     let Ok(list) = serde_json::from_str::<Vec<String>>(uris) else {
         return String::new();
@@ -197,7 +171,6 @@ fn percent_decode(text: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-/// A title from the first message, until Antigravity names the session.
 pub fn title(text: &str) -> String {
     let line = text.lines().next().unwrap_or(text);
     if line.chars().count() > 60 {

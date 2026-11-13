@@ -1,7 +1,3 @@
-//! Port of ConsoleCore's `ChatImagesTests`: pictures in the phone's chat view. A message carries a
-//! description of each picture (never its bytes); the bytes are read again on demand. Turning
-//! them into a JPEG is the bridge's (`bridge::images`), so no test here needs an image decoder.
-
 #![cfg_attr(not(unix), allow(dead_code, unused_imports))]
 
 mod common;
@@ -14,8 +10,6 @@ use std::path::Path;
 
 const PNG_SIGNATURE: [u8; 8] = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
 
-/// A PNG whose header says `width` by `height`, padded to `total` bytes. Only the header is ever
-/// read here, so the pixels are filler.
 fn png(width: u32, height: u32, total: usize) -> Vec<u8> {
     let mut data = PNG_SIGNATURE.to_vec();
     data.extend_from_slice(&13u32.to_be_bytes());
@@ -74,8 +68,6 @@ fn tool_use_line(n: usize) -> String {
 fn parse(lines: &[String]) -> Vec<ChatMessage> {
     chat::parse(lines, true, "x", chat::DEFAULT_LIMIT).messages
 }
-
-// MARK: Blocks
 
 #[test]
 fn a_pasted_picture_belongs_to_the_user_message_and_never_carries_its_bytes() {
@@ -163,8 +155,6 @@ fn two_pictures_in_one_line_keep_their_own_sizes_and_order() {
     );
 }
 
-// MARK: Files named in the text
-
 fn scratch_file(dir: &Path, name: &str, data: &[u8]) -> String {
     std::fs::create_dir_all(dir).expect("mkdir");
     let path = dir.join(name);
@@ -172,7 +162,6 @@ fn scratch_file(dir: &Path, name: &str, data: &[u8]) -> String {
     path.to_string_lossy().into_owned()
 }
 
-/// A folder under /tmp, as the Swift tests make, removed on drop.
 #[cfg(unix)]
 struct TmpFolder(std::path::PathBuf);
 
@@ -239,7 +228,6 @@ fn a_link_is_judged_by_where_it_leads() {
     let link = home.join("link.png");
     std::os::unix::fs::symlink("/etc/hosts", &link).expect("link");
     assert!(!images::is_allowed_file(&link.to_string_lossy(), &home));
-    // Inside /tmp is allowed even when the path goes through the link /tmp itself is on macOS.
     let tmp = TmpFolder::new("tmp-rule");
     let path = scratch_file(&tmp.0, "tmp.JPG", &[1, 2, 3]);
     assert!(images::is_allowed_file(&path, &home));
@@ -267,7 +255,6 @@ fn markers_become_references_only_for_allowed_files() {
 #[cfg(unix)]
 #[test]
 fn a_file_marker_carries_the_pictures_real_size() {
-    // A tall screenshot without its size was drawn as a 4:3 thumbnail and cropped on the phone.
     let home = Scratch::new("marker-size");
     let tmp = TmpFolder::new("size");
     let path = scratch_file(&tmp.0, "tall.png", &png(30, 65, 200));
@@ -289,8 +276,6 @@ fn a_file_marker_in_a_message_becomes_the_messages_picture() {
     assert_eq!(messages[0].text, "see");
     assert_eq!(messages[0].images[0].origin, ImageOrigin::File);
 }
-
-// MARK: Reading the bytes
 
 #[test]
 fn a_transcript_picture_is_read_again_from_its_line() {
@@ -365,7 +350,6 @@ fn a_fifo_swapped_in_after_the_check_is_refused_without_waiting() {
     });
     let answer = rx.recv_timeout(std::time::Duration::from_secs(2));
     if answer.is_err() {
-        // Free the blocked reader before failing.
         let _ = std::fs::OpenOptions::new().write(true).open(&resolved);
     }
     assert_eq!(
@@ -399,7 +383,6 @@ fn a_file_is_checked_again_at_fetch_time() {
         images::data(&refs[0], &transcript, &home.dir).map(|d| d.len()),
         Ok(100)
     );
-    // The file is replaced by a link to somewhere else: refused at fetch time, not just at parse time.
     #[cfg(unix)]
     {
         std::fs::remove_file(&path).expect("remove");
@@ -414,15 +397,12 @@ fn a_file_is_checked_again_at_fetch_time() {
 #[test]
 fn pixel_sizes_come_from_the_header_of_each_format() {
     assert_eq!(images::pixel_size(&png(30, 65, 64)), Some((30, 65)));
-    // GIF: "GIF89a", then width and height as little-endian u16.
     let mut gif = b"GIF89a".to_vec();
     gif.extend_from_slice(&[0x40, 0x01, 0xC8, 0x00, 0, 0, 0]);
     assert_eq!(images::pixel_size(&gif), Some((320, 200)));
-    // JPEG: SOI, an APP0 segment to skip, then SOF0 with height 120 and width 80.
     let mut jpeg = vec![0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x04, 0xAA, 0xBB];
     jpeg.extend_from_slice(&[0xFF, 0xC0, 0x00, 0x11, 0x08, 0x00, 120, 0x00, 80, 3]);
     assert_eq!(images::pixel_size(&jpeg), Some((80, 120)));
-    // WebP, lossy (VP8 ): 14-bit sizes after the start code.
     let mut webp = b"RIFF\0\0\0\0WEBPVP8 ".to_vec();
     webp.extend_from_slice(&[
         0, 0, 0, 0, 0, 0, 0, 0x9D, 0x01, 0x2A, 0x20, 0x01, 0x10, 0x00,

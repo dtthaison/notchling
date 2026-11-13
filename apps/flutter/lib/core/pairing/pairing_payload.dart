@@ -15,12 +15,9 @@ final RegExp _fingerprintPattern = RegExp(r'^[0-9a-f]{64}$');
 final RegExp _codePattern = RegExp(r'^[A-Z0-9]{8}$');
 final RegExp _hostPattern = RegExp(r'^[A-Za-z0-9.:\-_]+$');
 
-/// What the Mac shows in its pairing QR: {v, name, port, fp, hosts, code} and, when the Mac offers internet
-/// access, a `tunnel` block {url, accessClientId, accessClientSecret}.
 class PairingPayload {
   const PairingPayload({required this.name, required this.port, required this.fingerprint, required this.hosts, required this.code, this.tunnel});
 
-  /// Parses and validates the QR text. Anything off throws [PairingFormatException].
   factory PairingPayload.parse(String text) {
     final Object? decoded;
     try {

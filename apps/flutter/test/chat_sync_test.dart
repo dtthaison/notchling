@@ -21,7 +21,6 @@ Map<String, Object?> message(String id, String text, {String role = 'user', bool
 ChatMessage parsed(String id, String text, {bool queued = false, double time = 1000}) => ChatMessage.fromJson(message(id, text, queued: queued, time: time));
 
 void main() {
-  /// A Mac that serves [newest] for a plain chat.get and answers `after` with [onAfter].
   FakeWs mac({
     List<Map<String, Object?>> newest = const <Map<String, Object?>>[],
     Map<String, Object?> Function(String after)? onAfter,
@@ -104,7 +103,6 @@ void main() {
       await container.read(chatProvider('c').notifier).refreshNewest();
       expect(asked, <String>['m2']);
       expect(container.read(chatProvider('c')).messages.map((ChatMessage m) => m.id), <String>['m1', 'm2', 'm3', 'm4']);
-      // A second catch-up with nothing new changes nothing and does not duplicate.
       await container.read(chatProvider('c').notifier).refreshNewest();
       expect(container.read(chatProvider('c')).messages, hasLength(4));
     });

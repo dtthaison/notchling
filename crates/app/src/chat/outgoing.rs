@@ -1,22 +1,11 @@
-//! Messages on their way: what you sent shows at once as your bubble, marked "Sending", until the
-//! transcript holds it. Typing it into a background session takes seconds (`claude attach`, then
-//! the transcript is written and read again), and an empty box with nothing in the conversation
-//! looked like a lost message.
-
 use notchling_engine::transcript::model::{Conversation, ItemKind};
 
-/// How long a delivered message waits for the transcript before its bubble goes, in ms: a message
-/// the transcript keeps in other words (a slash command, pasted images) would otherwise stay.
 pub const GRACE_MS: i64 = 30_000;
 
-/// One message sent from this Chat and not yet in its session's transcript.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Outgoing {
     pub text: String,
-    /// How many of your messages (sent or queued) already read `text` when it was sent, so
-    /// sending the same words twice still waits for the second copy.
     pub seen: usize,
-    /// When the daemon said it was typed in (ms), so the wait for the transcript can end.
     pub delivered_at: Option<i64>,
 }
 
@@ -29,13 +18,10 @@ impl Outgoing {
         }
     }
 
-    /// The daemon typed it in at `now_ms`.
     pub fn delivered(&mut self, now_ms: i64) {
         self.delivered_at.get_or_insert(now_ms);
     }
 
-    /// Whether the bubble stays: not in the transcript yet, and still being typed in or delivered
-    /// less than [`GRACE_MS`] ago.
     pub fn keep(&self, conversation: &Conversation, now_ms: i64) -> bool {
         !self.arrived(conversation)
             && self
@@ -43,13 +29,11 @@ impl Outgoing {
                 .is_none_or(|at| now_ms.saturating_sub(at) < GRACE_MS)
     }
 
-    /// Whether the transcript now holds this message, so the bubble gives way to the real one.
     pub fn arrived(&self, conversation: &Conversation) -> bool {
         copies(&self.text, conversation) > self.seen
     }
 }
 
-/// Your messages in `conversation` that read `text`, sent or queued, ignoring the space around.
 fn copies(text: &str, conversation: &Conversation) -> usize {
     let text = comparable(text);
     let sent = conversation
@@ -67,8 +51,6 @@ fn copies(text: &str, conversation: &Conversation) -> usize {
     sent + queued
 }
 
-/// A message as both sides write it: trimmed, and a shell command's `!` without the space the
-/// transcript's reader puts after it ("!ls" is sent, "! ls" read back).
 fn comparable(text: &str) -> String {
     let text = text.trim();
     match text.strip_prefix('!') {
@@ -131,7 +113,6 @@ mod tests {
 
     #[test]
     fn a_shell_command_arrives_as_the_transcript_writes_it() {
-        // Sent as "!ls -la"; the transcript's <bash-input> reads back as "! ls -la".
         let out = Outgoing::new("!ls -la", &with_user(&[]));
         assert!(out.arrived(&with_user(&["! ls -la"])));
     }

@@ -1,15 +1,3 @@
-//! Ported from `MachinesMergeGitTests.swift`: `MergePlan`, `MorningActions::diff` and undo against
-//! real git in a temp folder: an origin (bare), the Mac's `main` checkout, and the worker's repo.
-//! The runner maps the `ssh://` URL to the worker's folder and fakes `gh`; everything else is the
-//! real [`ProcessRunner`]. The fake-runner tests pin the order of the calls; these pin what git
-//! does with them.
-//!
-//! Isolation: the folder is made under `std::env::temp_dir()` with a name no other test shares;
-//! `git` is `/usr/bin/git`; every process gets `GIT_CONFIG_GLOBAL=/dev/null` and
-//! `GIT_CONFIG_NOSYSTEM=1` (no signing, hooks or `followTags` of the developer's own); the only
-//! remotes are local paths, so nothing touches the network; and the runner refuses any command
-//! that names the real user's `~/Library`.
-
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -25,7 +13,6 @@ use super::runner::{Call, CommandResult, Runner, REFUSED};
 use super::status::ReadyEntry;
 
 pub(super) const GIT: &str = "/usr/bin/git";
-/// Keeps the developer's own git config (signing, hooks, followTags) out of the repos.
 const GIT_ENV: [(&str, &str); 7] = [
     ("GIT_CONFIG_GLOBAL", "/dev/null"),
     ("GIT_CONFIG_NOSYSTEM", "1"),
@@ -38,7 +25,6 @@ const GIT_ENV: [(&str, &str); 7] = [
 
 static NEXT: AtomicUsize = AtomicUsize::new(0);
 
-/// Runs a shell line with the user's own git config out of the way; stdout, trimmed.
 pub(super) fn sh(root: &str, line: &str) -> String {
     let mut c = Command::new("/bin/sh");
     c.arg("-c").arg(line).env("HOME", root);
@@ -53,12 +39,9 @@ pub(super) fn sh(root: &str, line: &str) -> String {
 
 type AfterCall = Box<dyn Fn(&[String]) + Send + Sync>;
 
-/// The real `ProcessRunner` for git and the shell, with the `ssh://` URL of the worker mapped to
-/// its folder, `gh` faked, and the login-shell check run with `/bin/sh`.
 pub(super) struct LocalRunner {
     pub(super) machine_path: String,
     pub(super) seen: Mutex<Vec<Vec<String>>>,
-    /// Runs after each call, before its result is returned: a way to change the world between two steps.
     pub(super) after_call: Mutex<Option<AfterCall>>,
     pub(super) violations: Mutex<Vec<String>>,
 }
@@ -84,7 +67,6 @@ impl Runner for LocalRunner {
         if a[0].rsplit('/').next() == Some("gh") {
             return CommandResult::ok("");
         }
-        // the check runs through the user's login shell in the app; the test runs it with sh
         if a.len() == 3 && a[1] == "-lc" {
             a = vec!["/bin/sh".into(), "-c".into(), a[2].clone()];
         }
@@ -102,7 +84,6 @@ impl Runner for LocalRunner {
 }
 
 pub(super) struct Fx {
-    /// git prints real paths, so the root is one
     pub(super) root: String,
     pub(super) runner: Arc<LocalRunner>,
 }
@@ -124,8 +105,6 @@ pub(super) fn entry(issue: i64, branch: &str, commit: &str) -> ReadyEntry {
         ready_at: None,
     }
 }
-
-// Test isolation
 
 #[test]
 fn the_runner_refuses_anything_that_names_the_real_library_folder() {
@@ -174,15 +153,12 @@ fn the_runner_refuses_anything_that_names_the_real_library_folder() {
     assert!(seen.iter().all(|s| s.contains("test isolation")));
     assert!(!Path::new(&never).exists());
 
-    // a temp folder is fine
     lock(&fx.runner.violations).clear();
     let mut call = Call::secs(vec!["/bin/echo".into(), "hi".into()], 5);
     call.cwd = Some(PathBuf::from(&fx.root));
     assert_eq!(fx.runner.run(&call).out, "hi\n");
     assert!(lock(&fx.runner.violations).is_empty());
 }
-
-// Happy path
 
 #[test]
 fn happy_path_pushes_only_main_and_leaves_no_tags() {
@@ -217,10 +193,6 @@ fn happy_path_pushes_only_main_and_leaves_no_tags() {
     );
 }
 
-// C1: tags from a machine
-
-/// A tag named `origin/main` left by an agent on an unreviewed commit, brought in by the fetch
-/// behind Diff.
 #[test]
 fn a_tag_from_a_machine_cannot_move_or_push_main() {
     let fx = Fx::new();
@@ -228,7 +200,6 @@ fn a_tag_from_a_machine_cannot_move_or_push_main() {
     let good = fx.worker_branch("sd/issue-10", "good.txt", "good\n", None);
     fx.git(&fx.machine_path(), &format!("tag main {evil}"));
 
-    // the user only looks at #9's diff and rejects it
     let diff = fx.actions().diff(&fx.item(9, &evil, "sd/issue-9"));
     assert!(
         diff.contains("EVIL"),
@@ -240,7 +211,6 @@ fn a_tag_from_a_machine_cannot_move_or_push_main() {
         "the diff fetch planted a tag from the machine"
     );
 
-    // days later #10 is merged
     let o = fx.merge(&entry(10, "sd/issue-10", &good));
     assert_eq!(o.error, None);
     assert!(o.pushed);
@@ -259,7 +229,6 @@ fn a_tag_from_a_machine_cannot_move_or_push_main() {
     );
 }
 
-/// The reviewer's exact case: only a tag named `origin/main`, left on a commit nobody merged.
 #[test]
 fn an_origin_main_tag_from_a_machine_does_not_push_an_unreviewed_commit() {
     let fx = Fx::new();
@@ -276,7 +245,6 @@ fn an_origin_main_tag_from_a_machine_does_not_push_an_unreviewed_commit() {
     );
 }
 
-/// Tags that are already in the user's repo (left by an older fetch) must not redirect a short name.
 #[test]
 fn tags_already_in_the_repo_do_not_redirect_main_or_origin_main() {
     let fx = Fx::new();
@@ -303,7 +271,6 @@ fn tags_already_in_the_repo_do_not_redirect_main_or_origin_main() {
     assert_eq!(fx.git(&fx.origin(), "rev-parse refs/heads/main^2"), commit);
 }
 
-/// A tag on the machine with the branch's own name must not stand in for the branch.
 #[test]
 fn a_tag_with_the_branchs_name_on_the_machine_is_not_the_branch() {
     let fx = Fx::new();
@@ -317,7 +284,6 @@ fn a_tag_with_the_branchs_name_on_the_machine_is_not_the_branch() {
 }
 
 impl LocalRunner {
-    /// The real home's Library folder, spelled both ways (git prints real paths).
     fn library_folders() -> Vec<String> {
         let Ok(home) = std::env::var("HOME") else {
             return Vec::new();
@@ -433,7 +399,6 @@ impl Fx {
         let _ = std::fs::write(format!("{dir}/{file}"), text);
     }
 
-    /// A branch on the worker with one commit on top of main; returns its sha.
     pub(super) fn worker_branch(
         &self,
         name: &str,
@@ -479,7 +444,6 @@ impl Fx {
 
     pub(super) fn plan(&self) -> MergePlan {
         MergePlan {
-            // the app's own worktree would go under here, never under the real home
             home: self.root.clone(),
             merge_root: format!("{}/data/daemon/machines/merge", self.root),
             environment: Default::default(),

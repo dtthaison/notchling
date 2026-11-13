@@ -1,6 +1,3 @@
-//! One row of the vault sheet's list over GPUI (macOS): the kind, name, URL, variables, note and
-//! expiry of a saved secret (never its value), with Renew…, Edit and Remove.
-
 use gpui::{div, prelude::*, px, Context, Div, SharedString};
 use notchling_kit::part::ButtonKind;
 use notchling_kit::ui::{button, card, label, KitStyled, MONO_FONT};

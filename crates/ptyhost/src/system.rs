@@ -1,7 +1,3 @@
-//! What the host asks the system: whether a pid lives, its parent, the login environment, where
-//! `claude` is, and which Claude session a pty's process became (`SpawnEnvironment.swift`,
-//! `SessionPidMapper.swift`, `parentProcessID`).
-
 use crate::HostError;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -14,7 +10,6 @@ pub fn now_ms() -> i64 {
         .unwrap_or(0)
 }
 
-/// `kill(pid, 0)` succeeds, or fails only for want of permission.
 #[cfg(unix)]
 pub fn is_process_alive(pid: i32) -> bool {
     // SAFETY: signal 0 only checks that the process exists.
@@ -27,7 +22,6 @@ pub fn is_process_alive(_pid: i32) -> bool {
     false
 }
 
-/// The parent of `pid`, or `None` when it is gone or is launchd/init.
 #[cfg(target_os = "macos")]
 pub fn parent_pid(pid: i32) -> Option<i32> {
     // SAFETY: an all-zero proc_bsdinfo is a valid out buffer of the size passed.
@@ -50,7 +44,6 @@ pub fn parent_pid(pid: i32) -> Option<i32> {
     (parent > 1).then_some(parent)
 }
 
-/// The parent of `pid`, from `/proc/<pid>/stat` (the field after the command's closing bracket).
 #[cfg(not(target_os = "macos"))]
 pub fn parent_pid(pid: i32) -> Option<i32> {
     let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
@@ -59,7 +52,6 @@ pub fn parent_pid(pid: i32) -> Option<i32> {
     (parent > 1).then_some(parent)
 }
 
-/// True when `pid` is `root` or descends from it, within eight generations.
 pub fn descends(pid: i32, root: i32, parent_of: &dyn Fn(i32) -> Option<i32>) -> bool {
     let mut current = pid;
     for _ in 0..8 {
@@ -74,8 +66,6 @@ pub fn descends(pid: i32, root: i32, parent_of: &dyn Fn(i32) -> Option<i32>) -> 
     false
 }
 
-/// The Claude session whose process is `root_pid` or one of its descendants, from
-/// `<sessions_dir>/<pid>.json` (`{"pid":…, "sessionId":…}`).
 pub fn session_id_for_root_pid(
     root_pid: i32,
     sessions_dir: &Path,
@@ -113,8 +103,6 @@ pub fn home() -> Option<PathBuf> {
         .map(PathBuf::from)
 }
 
-/// A session started from inside another Claude session inherits `CLAUDE_CODE_*` markers that change
-/// how it behaves (child session: no transcript), so every one of them is dropped.
 pub fn scrubbed(environment: Vec<(String, String)>) -> Vec<(String, String)> {
     let mut result: BTreeMap<String, String> = environment
         .into_iter()
@@ -125,8 +113,6 @@ pub fn scrubbed(environment: Vec<(String, String)>) -> Vec<(String, String)> {
     result.into_iter().collect()
 }
 
-/// The environment a login shell would give a terminal, since a launchd job has almost none (no
-/// PATH entries for ~/.local/bin or Homebrew). Falls back to this process's environment.
 pub fn login_environment(timeout: Duration) -> Vec<(String, String)> {
     let own = || std::env::vars().collect::<Vec<_>>();
     let shell = if cfg!(target_os = "macos") {
@@ -167,7 +153,6 @@ pub fn login_environment(timeout: Duration) -> Vec<(String, String)> {
     }
 }
 
-/// `env -0` output: NUL-separated `KEY=value` entries.
 pub fn parse_env(data: &[u8]) -> Vec<(String, String)> {
     data.split(|b| *b == 0)
         .filter_map(|entry| {
@@ -178,7 +163,6 @@ pub fn parse_env(data: &[u8]) -> Vec<(String, String)> {
         .collect()
 }
 
-/// Where the CLI is usually installed, in the order Notchling prefers.
 pub fn claude_candidates(home: &Path) -> Vec<PathBuf> {
     vec![
         home.join(".local/bin/claude"),

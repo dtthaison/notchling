@@ -1,5 +1,3 @@
-//! The Swift app has no `WakeResumer` test; these pin its rules as written in the class.
-
 use super::*;
 use crate::sessions::agent::sample;
 use crate::sessions::testutil::TempDir;
@@ -46,7 +44,6 @@ fn waits_for_the_settle_time_then_nudges_once_per_cut() {
         }]
     );
     resumer.finished("a");
-    // The same cut-off is never nudged twice; a new one is.
     assert!(resumer
         .check(&agents, SETTLE_MS + 1000, true, &always("cut-1"))
         .is_empty());
@@ -72,7 +69,6 @@ fn skips_working_agents_terminals_and_ones_still_sending() {
     let first = resumer.check(&agents, SETTLE_MS, true, &|a| Some(format!("cut-{}", a.id)));
     assert_eq!(first.len(), 1);
     assert_eq!(first[0].agent_id, "a");
-    // Until `finished`, the agent in flight is left alone even for a fresh cut-off.
     assert!(resumer
         .check(&agents, SETTLE_MS + 1, true, &always("other"))
         .is_empty());
@@ -93,7 +89,6 @@ fn a_cut_off_long_after_the_wake_was_not_this_sleeps() {
     assert!(resumer
         .check(&agents, WINDOW_MS + 1, true, &always("late"))
         .is_empty());
-    // The wake is forgotten: even a fresh check inside the old window finds nothing.
     assert!(resumer
         .check(&agents, SETTLE_MS, true, &always("late"))
         .is_empty());

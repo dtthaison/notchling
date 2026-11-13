@@ -71,7 +71,6 @@ void main() {
     await tester.pump();
     expect(focus.hasFocus, isTrue);
 
-    // The keyboard animates in over several frames.
     for (final double value in <double>[40, 160, 320, 0, 320]) {
       insets.value = value;
       await tester.pump(const Duration(milliseconds: 16));
@@ -131,7 +130,6 @@ void main() {
         sessions.push(<Session>[sessionWith()]);
         await tester.pump();
       }
-      // The same Composer widget instance means its parent did not build again.
       expect(identical(tester.widget<Composer>(find.byType(Composer)), composerBefore), isTrue);
     });
 

@@ -1,37 +1,22 @@
-//! Chat's header account menu, pure (the Swift `ChatAccountMenu`): which account this session
-//! runs on, the targets it can move to (the main login, each lane, each free saved account), Move
-//! All Sessions To, Add Account… and Codex Accounts…. Picking a target is Milestone 3's
-//! `session.move` (acting), after a lane is made for a free account (`lanes.create`).
-
 use super::store::Snapshot;
 
-/// Where a session can run.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Place {
-    /// The main login (`~/.claude`).
     Main,
-    /// A lane, by its config folder.
     Lane(String),
-    /// A saved account not live anywhere yet: a lane is made for it first.
     Saved(String),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Target {
-    /// The email, or "Main Login" when nobody is signed in there.
     pub title: String,
     pub place: Place,
-    /// The account's id, when known.
     pub account: Option<String>,
 }
 
-/// Said when Move All is asked for a lane whose account isn't known.
 pub const LANE_ACCOUNT_UNKNOWN: &str =
     "That lane's account isn't known yet, so its sessions can't be moved there. Open Accounts to check it.";
 
-/// What Move All sends as its target: `None` (the main login's account) only for the main login.
-/// A lane or saved account goes by its account id; one with none is refused, because sending
-/// `null` would move every session to the main login instead.
 pub fn move_all_account(target: &Target) -> Result<Option<String>, &'static str> {
     match &target.place {
         Place::Main => Ok(None),
@@ -41,13 +26,10 @@ pub fn move_all_account(target: &Target) -> Result<Option<String>, &'static str>
     }
 }
 
-/// Whether moving one session there asks the daemon's accounts side: a saved account needs a lane
-/// made first (`lanes.create`). The main login and an existing lane are a plain `session.move`.
 pub fn move_needs_accounts(target: &Target) -> bool {
     matches!(target.place, Place::Saved(_))
 }
 
-/// The targets in the Swift order: the main login, the lanes, then the free saved accounts.
 pub fn targets(s: &Snapshot) -> Vec<Target> {
     let active = s
         .claude
@@ -81,18 +63,12 @@ pub fn targets(s: &Snapshot) -> Vec<Target> {
     out
 }
 
-/// One line of the menu.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Entry {
     Header(&'static str),
-    /// A target; `current` is checked and does nothing.
-    Target {
-        index: usize,
-        current: bool,
-    },
+    Target { index: usize, current: bool },
     Note(&'static str),
     Separator,
-    /// "Move All Sessions To" with every target.
     MoveAll,
     AddAccount,
     CodexAccounts,
@@ -100,18 +76,13 @@ pub enum Entry {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AccountMenu {
-    /// The email shown on the button.
     pub label: String,
-    /// The lane's name when the session runs in one.
     pub lane: Option<String>,
     pub tooltip: String,
     pub targets: Vec<Target>,
     pub entries: Vec<Entry>,
 }
 
-/// The menu for a session. `config_dir` is the session's lane folder (`None` on the main
-/// login); `movable` is a background job with a transcript, which can be moved (a terminal
-/// session can't); `codex` says the Codex CLI is installed.
 pub fn account_menu(
     s: &Snapshot,
     config_dir: Option<&str>,
@@ -307,7 +278,6 @@ mod tests {
                 .count(),
             1
         );
-        // One target only: no Move All.
         let alone = account_menu(&Snapshot::default(), None, true, false);
         assert!(!alone.entries.contains(&Entry::MoveAll));
     }

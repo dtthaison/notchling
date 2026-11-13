@@ -34,7 +34,6 @@ GOOD = [
     ("README.md", "Run `Process()` like this"),
 ]
 
-# Final review I1: equivalents the first patterns missed. One example per pattern.
 I1_BAD = [
     ("CAP-PROCESS", ZONE, "let p = Foundation.Process.launchedProcess(launchPath: path, arguments: args)"),
     ("CAP-PROCESS", ZONE, "typealias Job = Process"),
@@ -64,7 +63,6 @@ I1_BAD = [
     ("CAP-FILEWRITE", ZONE, "try fm.copyItem(atPath: a, toPath: b)"),
 ]
 
-# The app's own wrappers around the powerful APIs, from outside their own files.
 WRAPPER_USES = [
     "TerminalSession(run: cmd, in: dir)",
     "AgentActions.stop(agent)",
@@ -95,7 +93,6 @@ class CapabilityTests(unittest.TestCase):
         self.assertEqual(scan([added("legacy/macos/Sources/Notchling/Limits/LimitWatcher.swift", "// never osascript")]), [])
 
     def test_protected_type_in_own_file_ok(self):
-        # Was ReplySenderQueue.swift, which only matched by name prefix (final review C3d).
         self.assertEqual(scan([added("legacy/macos/Sources/Notchling/Agents/ReplySender.swift", "ReplySender.send(x)")]), [])
 
     def test_protected_type_elsewhere_trips(self):
@@ -115,7 +112,6 @@ def rules_of(path, *lines):
 
 
 class BinaryCodeTests(unittest.TestCase):
-    """C2: git calls a file with a NUL byte binary and prints no lines for it, but swiftc compiles it."""
     PATH = "legacy/macos/Sources/Notchling/Search/S.swift"
 
     def _changes(self, files, base_files=None):
@@ -160,7 +156,6 @@ class BinaryCodeTests(unittest.TestCase):
 
 
 class BareCarriageReturnTests(unittest.TestCase):
-    """C3(a): a bare CR ends a Swift `//` comment, but git and the stripper see one line."""
 
     def test_code_after_cr_is_scanned(self):
         self.assertEqual([t.rule for t in scan([added(ZONE, "// note\rlet p = Process()")])], ["CAP-PROCESS"])
@@ -189,7 +184,6 @@ class BareCarriageReturnTests(unittest.TestCase):
 
 
 class InterpolationTests(unittest.TestCase):
-    """C3(b): code inside `\\( ... )` in a Swift string runs."""
 
     def test_process_inside_interpolation_trips(self):
         line = 'let r = "\\({ let p = Process(); try? p.run(); return 0 }())"'
@@ -221,7 +215,6 @@ class InterpolationTests(unittest.TestCase):
 
 
 class SwiftQuoteTests(unittest.TestCase):
-    """C3(c): only `"` delimits a Swift string; `'` is not a quote and backtick names are identifiers."""
 
     def test_raw_identifier_with_apostrophes_does_not_hide_code(self):
         self.assertIn("CAP-PROCESS", rules_of(ZONE, "let `a'` = 0; let p = Process(); let `b'` = 1"))
@@ -242,7 +235,6 @@ class SwiftQuoteTests(unittest.TestCase):
         self.assertEqual(rules_of(ZONE, 'let s = #"say "hi" Process() now"#'), set())
 
     def test_regex_literal_with_a_quote_does_not_hide_code(self):
-        # Verified with swiftc: this runs the Process.
         self.assertIn("CAP-PROCESS", rules_of(ZONE, 'let r = #/"/#; let p = Process(); let s = #/"/#'))
 
     def test_code_after_raw_string_is_scanned(self):
@@ -256,9 +248,6 @@ class SwiftQuoteTests(unittest.TestCase):
 
 
 class BlockCommentStateTests(unittest.TestCase):
-    """A line can start inside a block comment that an earlier line opened (the diff doesn't show
-    it), and then `// */ code` or a quote before the `*/` is not what the stripper takes it for.
-    Verified with swiftc: `/* ...` then `// */ let p = Process()` runs the Process."""
 
     def test_line_comment_marker_before_the_closing_star_slash(self):
         trips = scan([added(ZONE, "/* an open comment", "// */ let p = Process()")])
@@ -296,7 +285,7 @@ RUST_PROCESS = [
     "use std::process::{Command, Stdio};",
     "use std::process::Command;",
     "use std::process::{self, Command};",
-    "use std::process::{",  # a grouped import that goes on over several lines
+    "use std::process::{",
     "use tokio::process::Command;",
     'let out = Command::new("sh").arg("-c").output()?;',
     "let c = Command::new(program);",
@@ -342,7 +331,7 @@ RUST_FILEWRITE = [
     "tokio::fs::write(path, data).await?;",
     "use std::fs::write;",
     "use std::fs::{self, remove_file};",
-    "use std::fs::{",  # a grouped import that goes on over several lines
+    "use std::fs::{",
     "use std::fs::*;",
     "let f = File::create(path)?;",
     "let f = File::create_new(path)?;",
@@ -367,7 +356,6 @@ RUST_FILEWRITE_OK = [
 
 
 class RustCapabilityTests(unittest.TestCase):
-    """The Rust spellings of the process, network and file-write APIs, imported or called by short name."""
 
     def check(self, rule, bad, good):
         for line in bad:
@@ -393,7 +381,6 @@ class RustCapabilityTests(unittest.TestCase):
 
 
 class OwnFileTests(unittest.TestCase):
-    """C3(d): a protected type's own files are a fixed list of exact paths."""
 
     def test_lookalike_names_are_not_own_files(self):
         for path, line in (("legacy/macos/Sources/Notchling/Chat/Views/VaultStoreRow.swift", "VaultStore.shared.values()"),
@@ -431,7 +418,6 @@ class OwnFileTests(unittest.TestCase):
 
 
 class BroaderPatternTests(unittest.TestCase):
-    """I1: equivalents of the first patterns."""
 
     def test_each_equivalent_trips_its_rule(self):
         for rule, path, line in I1_BAD:

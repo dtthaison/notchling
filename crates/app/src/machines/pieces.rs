@@ -1,7 +1,3 @@
-//! The window's pure pieces (Swift `MachinesWindow`'s `MachineChip`, `RunningSwitch`, `LogTail`,
-//! `FixLine`, `DraftCheck` and `FixPrompt`, and `MachineCards`' `JobFacts`): what a card and a
-//! sheet say, worked out from the engine's results. Nothing here runs anything.
-
 use std::collections::BTreeMap;
 
 use notchling_engine::machines::engine_plan::{
@@ -15,7 +11,6 @@ use notchling_engine::machines::status::WorkerStatus;
 use notchling_engine::machines::step::{CheckResult, CheckState, Detected, FixOutcome, StepId};
 use notchling_engine::machines::usage::SecretUsage;
 
-/// The tone of a machine's health word.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Tone {
     Neutral,
@@ -24,15 +19,12 @@ pub enum Tone {
     Bad,
 }
 
-/// What the Machines header shows for one machine.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MachineChip {
     pub name: String,
     pub word: String,
     pub tone: Tone,
-    /// "3 jobs tonight", "week 42%", the job in flight; only while the last poll worked.
     pub details: Vec<String>,
-    /// Why the last poll failed, when it did.
     pub error: Option<String>,
     pub token_warning: Option<String>,
 }
@@ -76,7 +68,6 @@ impl MachineChip {
         }
     }
 
-    /// "3 jobs tonight", "week 42%", "now me/app #12 · verify".
     pub fn details(status: &WorkerStatus) -> Vec<String> {
         let n = status.jobs_tonight;
         let mut details = vec![format!(
@@ -98,8 +89,6 @@ impl MachineChip {
     }
 }
 
-/// What a job card shows from the worker's status: the chip's details, then what plan C never
-/// showed (paused, health, unrouted, the outbox, TestFlight).
 pub fn job_facts(status: &WorkerStatus) -> Vec<String> {
     let mut lines = MachineChip::details(status);
     if let Some(paused) = status.paused.as_ref().filter(|p| !p.is_empty()) {
@@ -122,8 +111,6 @@ pub fn job_facts(status: &WorkerStatus) -> Vec<String> {
     lines
 }
 
-/// What the Running switch shows and lets the user do. Its position and note come from the
-/// Running probe alone; the steps before it only decide whether the worker may be turned on.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RunningSwitch {
     pub on: bool,
@@ -132,12 +119,8 @@ pub struct RunningSwitch {
 }
 
 impl RunningSwitch {
-    /// `state` is the Running step's own result (✓ is on, ✗ is off, can't tell is neither),
-    /// `blocker` the first step before Running that isn't ✓ (it blocks turning on only), `busy`
-    /// whether a Fix runs on the machine.
     pub fn make(state: Option<&CheckState>, blocker: Option<&str>, busy: bool) -> RunningSwitch {
         match state {
-            // off is always possible
             Some(CheckState::Pass(_)) => RunningSwitch {
                 on: true,
                 enabled: !busy,
@@ -169,7 +152,6 @@ impl RunningSwitch {
     }
 }
 
-/// What the machine card's log pane shows: the last lines, and a note when the rest is hidden.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LogTail {
     pub shown: Vec<String>,
@@ -197,8 +179,6 @@ impl LogTail {
     }
 }
 
-/// The last Fix's outcome on a machine. A step that asks for another round ("Set up again",
-/// "Check again", Set up all's "still not ✓") is guidance, not a red failure.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FixLine {
     pub ok: bool,
@@ -235,14 +215,12 @@ impl FixLine {
     }
 }
 
-/// One line of the Add sheet's Check.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DraftLine {
     pub title: String,
     pub state: CheckState,
 }
 
-/// What the Add sheet's Check found about a draft machine.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct DraftCheck {
     pub reachable: bool,
@@ -251,8 +229,6 @@ pub struct DraftCheck {
     pub abilities_line: String,
     pub problems: Vec<String>,
     pub detected: Detected,
-    /// The name, host and user this check was made for. Add takes the check only for the same
-    /// three.
     pub inputs: Vec<String>,
 }
 
@@ -265,7 +241,6 @@ impl DraftCheck {
         }
     }
 
-    /// From the engine's draft check.
     pub fn from_results(results: &BTreeMap<StepId, CheckResult>, inputs: &[String]) -> DraftCheck {
         let mut check = DraftCheck {
             inputs: inputs.to_vec(),
@@ -294,7 +269,6 @@ impl DraftCheck {
     }
 }
 
-/// What an admin step needs on `m`, as the engine decides it for a plan.
 pub fn admin_need(m: &Machine, needs: bool) -> AdminNeed {
     if !needs {
         return AdminNeed::None;
@@ -308,14 +282,11 @@ pub fn admin_need(m: &Machine, needs: bool) -> AdminNeed {
     }
 }
 
-/// What the Fix sheet shows: a plan the engine showed, with the machine's address. It never holds
-/// a password: the sheet keeps that in its own state and hands it to the one confirm.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FixPrompt {
     pub plan: ShownPlan,
     pub host: String,
     pub user: String,
-    /// Set up all reached this admin step: the answer goes back to the run, not to a new plan.
     pub asked: bool,
 }
 
@@ -329,7 +300,6 @@ impl FixPrompt {
         }
     }
 
-    /// The sheet for an admin step Set up all reached.
     pub fn asking(m: &Machine, step: &ApprovedStep) -> FixPrompt {
         let plan = ShownPlan {
             id: PlanId(0),
@@ -351,7 +321,6 @@ impl FixPrompt {
         &self.plan.title
     }
 
-    /// Why an admin step can't run on this machine at all (Linux, the worker account as admin).
     pub fn blocked(&self) -> Option<&str> {
         match &self.plan.admin {
             AdminNeed::Refused(why) => Some(why),
@@ -378,7 +347,6 @@ impl FixPrompt {
         }
     }
 
-    /// The exact commands, as the sheet prints them.
     pub fn text(&self) -> String {
         match &self.plan.kind {
             PlanKind::SetUpAll => self
@@ -405,18 +373,15 @@ impl FixPrompt {
         }
     }
 
-    /// Run is possible: nothing blocks it, and the password is there when one is needed.
     pub fn can_run(&self, password_given: bool) -> bool {
         self.blocked().is_none() && (!self.needs_password() || password_given)
     }
 }
 
-/// A secret file of a machine with what the checks found about it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SecretRow {
     pub usage: SecretUsage,
     pub text: String,
-    /// Send again is possible: the vault lists the secret.
     pub can_send: bool,
 }
 
@@ -426,7 +391,6 @@ impl SecretRow {
     }
 }
 
-/// "Update N machines", one banner per renewed secret.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct UpdateOfferRow {
     pub secret: String,

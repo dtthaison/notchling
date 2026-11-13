@@ -1,37 +1,16 @@
-//! The service file per OS, as pure functions, and writing it into a folder.
-//!
-//! - macOS: a LaunchAgent plist, label `dev.notchling.daemon`, `RunAtLoad`, `KeepAlive` on a crash,
-//!   output to `notchlingd.log` in the data folder. `Crashed`, not `SuccessfulExit = false`, on
-//!   purpose (ruled 2026-11-08): the daemon exits 0 when stopped and when another already serves,
-//!   and non-zero only on a setup error a restart won't fix, which `SuccessfulExit = false` would
-//!   retry every 10 s into the log. Since an installed daemon ignores `NOTCHLING_APP_TIER_PATHS`
-//!   and `ensure_daemon` passes no `NOTCHLING_*` on, one a client starts after a stop is no weaker
-//!   than one launchd restarts, so launchd needn't win that race.
-//! - Linux: a systemd user unit, restarted on failure.
-//! - Windows: a Task Scheduler XML file, started at logon.
-//!
-//! `install` writes the file (0644) into a folder (the OS's real place unless `--dir` names one)
-//! and prints the command that loads it. Nothing here runs `launchctl`, `systemctl` or `schtasks`.
-
 use notchling_platform::paths::{home_in, Env, Os};
 use std::io;
 use std::path::{Path, PathBuf};
 
-/// The LaunchAgent's label.
 pub const LABEL: &str = "dev.notchling.daemon";
-/// The Task Scheduler task's path.
 pub const TASK_NAME: &str = r"\Notchling\notchlingd";
 
-/// What a service file is made from.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ServiceSpec {
-    /// The `notchling` binary; the service runs `<binary> daemon`.
     pub binary: PathBuf,
-    /// Where its output goes (macOS and Linux).
     pub log: PathBuf,
 }
 
-/// The service file's name.
 pub fn file_name(os: Os) -> &'static str {
     match os {
         Os::Mac => "dev.notchling.daemon.plist",
@@ -40,7 +19,6 @@ pub fn file_name(os: Os) -> &'static str {
     }
 }
 
-/// The service file's text.
 pub fn render(os: Os, spec: &ServiceSpec) -> String {
     match os {
         Os::Mac => launchd_plist(spec),
@@ -91,7 +69,6 @@ fn launchd_plist(spec: &ServiceSpec) -> String {
     )
 }
 
-/// systemd's quoting: the path in double quotes, with `\`, `"` and `%` escaped.
 fn systemd_quote(text: &str) -> String {
     let escaped = text
         .replace('\\', "\\\\")
@@ -162,8 +139,6 @@ fn task_xml(spec: &ServiceSpec) -> String {
     )
 }
 
-/// The OS's real place for the file: `~/Library/LaunchAgents`, `$XDG_CONFIG_HOME/systemd/user`
-/// (else `~/.config/systemd/user`), `%APPDATA%\Notchling`.
 pub fn default_dir(os: Os, env: Env) -> Option<PathBuf> {
     match os {
         Os::Mac => Some(home_in(os, env)?.join("Library/LaunchAgents")),
@@ -179,7 +154,6 @@ fn shell_quote(path: &Path) -> String {
     format!("'{}'", path.to_string_lossy().replace('\'', r"'\''"))
 }
 
-/// The command a person runs to load an installed file.
 pub fn load_command(os: Os, file: &Path, uid: u32) -> String {
     match os {
         Os::Mac => format!("launchctl bootstrap gui/{uid} {}", shell_quote(file)),
@@ -194,7 +168,6 @@ pub fn load_command(os: Os, file: &Path, uid: u32) -> String {
     }
 }
 
-/// The command a person runs to unload it.
 pub fn unload_command(os: Os, file: &Path, uid: u32) -> String {
     match os {
         Os::Mac => format!("launchctl bootout gui/{uid} {}", shell_quote(file)),
@@ -206,7 +179,6 @@ pub fn unload_command(os: Os, file: &Path, uid: u32) -> String {
     }
 }
 
-/// Writes the service file into `dir` (made if missing), mode 0644, replacing an old one.
 pub fn install(os: Os, spec: &ServiceSpec, dir: &Path) -> io::Result<PathBuf> {
     std::fs::create_dir_all(dir)?;
     let path = dir.join(file_name(os));
@@ -227,7 +199,6 @@ pub fn install(os: Os, spec: &ServiceSpec, dir: &Path) -> io::Result<PathBuf> {
     Ok(path)
 }
 
-/// Removes the service file from `dir`; `None` when there was none.
 pub fn uninstall(os: Os, dir: &Path) -> io::Result<Option<PathBuf>> {
     let path = dir.join(file_name(os));
     match std::fs::remove_file(&path) {

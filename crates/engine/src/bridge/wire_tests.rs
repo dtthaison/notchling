@@ -1,5 +1,3 @@
-//! Port of `BridgeRouterTests`' subscription and wire-format cases.
-
 use super::model::*;
 use super::test_support::*;
 use super::wire::{self, BridgeFailure};
@@ -9,8 +7,6 @@ use serde_json::{json, Value};
 fn codes(io: &RecordingIo) -> Option<String> {
     error_code(&io.last_json()).map(String::from)
 }
-
-// MARK: Subscriptions
 
 #[test]
 fn subscribe_sends_sessions_now_and_clamps_phone_options() {
@@ -57,8 +53,6 @@ fn a_phone_subscribe_error_is_reported_and_the_session_must_exist() {
     );
     assert_eq!(codes(&io).as_deref(), Some("not_found"));
 }
-
-// MARK: Wire format
 
 #[test]
 fn response_encoding_shape_and_id_echo() {

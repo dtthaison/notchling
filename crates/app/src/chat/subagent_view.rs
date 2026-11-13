@@ -1,7 +1,3 @@
-//! A subagent opened from the Details Panel: its own transcript read-only where the conversation
-//! goes (the Swift `ChatModel.subagentID`). Which one is open, how a step's tool use id finds its
-//! subagent and what the slim header says are plain functions here; the window keeps one [`Open`].
-
 use std::sync::Arc;
 
 use notchling_engine::transcript::model::Conversation;
@@ -9,12 +5,9 @@ use notchling_engine::transcript::subagents::Subagent;
 
 use super::inspector::subagent_row;
 
-/// The subagent shown in place of the conversation.
 #[derive(Clone, Debug)]
 pub struct Open {
-    /// As the last load listed it, so the header's status word stays current.
     pub agent: Subagent,
-    /// Its transcript once a load has read it; `None` until then.
     pub conversation: Option<Arc<Conversation>>,
 }
 
@@ -26,9 +19,6 @@ impl Open {
         }
     }
 
-    /// Takes a finished load: the listing's newer copy of the subagent (a missing one stays as it
-    /// was, the list can be empty for a moment) and, when `read` is this subagent's file, its
-    /// conversation.
     pub fn apply_shared(&mut self, listed: &[Subagent], read: Option<(String, Arc<Conversation>)>) {
         if let Some(agent) = find(listed, &self.agent.id) {
             self.agent = agent.clone();
@@ -40,18 +30,15 @@ impl Open {
         }
     }
 
-    /// [`Open::apply_shared`] for an owned conversation.
     pub fn apply(&mut self, listed: &[Subagent], read: Option<(String, Conversation)>) {
         self.apply_shared(listed, read.map(|(path, c)| (path, Arc::new(c))));
     }
 }
 
-/// The subagent with this id.
 pub fn find<'a>(subagents: &'a [Subagent], id: &str) -> Option<&'a Subagent> {
     subagents.iter().find(|s| s.id == id)
 }
 
-/// The subagent an Agent step started: its meta file names the call's tool use id.
 pub fn for_step<'a>(subagents: &'a [Subagent], tool_use_id: &str) -> Option<&'a Subagent> {
     if tool_use_id.is_empty() {
         return None;
@@ -61,9 +48,6 @@ pub fn for_step<'a>(subagents: &'a [Subagent], tool_use_id: &str) -> Option<&'a 
         .find(|s| s.tool_use_id.as_deref() == Some(tool_use_id))
 }
 
-/// Which subagent each Agent call opens (its tool call id, the subagent's id): all a conversation
-/// shows of the list, so a load whose subagents only moved on (a running one's file grew) leaves
-/// the conversation as it was.
 pub fn links(subagents: &[Subagent]) -> Vec<(Option<String>, String)> {
     subagents
         .iter()
@@ -71,7 +55,6 @@ pub fn links(subagents: &[Subagent]) -> Vec<(Option<String>, String)> {
         .collect()
 }
 
-/// The subagent an Agent call opens, from `links`.
 pub fn link_for_step<'a>(
     links: &'a [(Option<String>, String)],
     tool_use_id: &str,
@@ -85,8 +68,6 @@ pub fn link_for_step<'a>(
         .map(|(_, id)| id.as_str())
 }
 
-/// What the slim header above a subagent's transcript says: its description, and the detail line
-/// its row in the panel shows ("Running · sonnet high · Explore").
 pub fn header_text(agent: &Subagent) -> (String, String) {
     (agent.description.clone(), subagent_row(agent).detail)
 }
@@ -118,7 +99,6 @@ mod tests {
         let list = [agent("a", Some("toolu_1")), agent("b", Some("toolu_2"))];
         assert_eq!(for_step(&list, "toolu_2").map(|s| s.id.as_str()), Some("b"));
         assert!(for_step(&list, "toolu_9").is_none());
-        // No id on either side never matches.
         let bare = [agent("c", None)];
         assert!(for_step(&bare, "").is_none());
         assert!(for_step(&bare, "toolu_1").is_none());
@@ -146,7 +126,6 @@ mod tests {
         let mut open = Open::new(&agent("a", None));
         assert!(open.conversation.is_none());
 
-        // Another file's conversation is not this one's.
         open.apply(
             &[],
             Some(("/elsewhere.jsonl".into(), Conversation::default())),
@@ -160,7 +139,6 @@ mod tests {
         assert!(open.conversation.is_some());
         assert_eq!(open.agent.status, Status::Completed);
 
-        // A listing without it leaves it open as it was.
         open.apply(&[], None);
         assert_eq!(open.agent.status, Status::Completed);
         assert!(open.conversation.is_some());

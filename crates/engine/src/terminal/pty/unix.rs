@@ -1,12 +1,3 @@
-//! A pty on macOS and Linux. It does what `forkpty` does, step by step, so that no descriptor is ever
-//! inheritable by a process another thread starts meanwhile: `posix_openpt` with `O_CLOEXEC`, the slave
-//! opened with `O_CLOEXEC`, and in the child `setsid`, `TIOCSCTTY` and `dup2` onto 0 to 2 (which clears
-//! the flag on those three alone). `forkpty` left the master inheritable from `openpty` until the
-//! parent's `fcntl`, a window as long as a fork.
-//!
-//! A second pipe, also close-on-exec, carries a failed `chdir` or `execve` from the child to the
-//! parent, so [`Pty::spawn`] fails instead of returning a pty whose child exited 127.
-
 use super::{PtyCommand, PtyError, ReadOutcome, Signal, StartStep};
 use std::ffi::{CStr, CString};
 use std::io;
@@ -15,24 +6,18 @@ use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-/// A child on a pty. Reading, writing and resizing take `&self`, so one thread can read while another
-/// types. Dropping it ends the child (SIGTERM, SIGKILL after two seconds) and closes the pty.
 #[derive(Debug)]
 pub struct Pty {
-    /// -1 once hung up ([`Pty::hang_up`]); reads and writes after that fail with EBADF.
     master: AtomicI32,
     pid: libc::pid_t,
-    /// The exit status once reaped, so the pid is never signalled after it may have been reused.
     status: Mutex<Option<i32>>,
 }
 
-/// `libc` has no `TIOCSCTTY` for macOS: `_IO('t', 97)`.
 #[cfg(target_os = "macos")]
 const TIOCSCTTY: libc::c_ulong = 0x2000_7461;
 #[cfg(target_os = "linux")]
 const TIOCSCTTY: libc::c_ulong = libc::TIOCSCTTY as libc::c_ulong;
 
-/// `ptsname` returns a buffer it owns, so one caller at a time.
 #[cfg(not(target_os = "linux"))]
 static PTSNAME: Mutex<()> = Mutex::new(());
 
@@ -44,7 +29,6 @@ fn last_error() -> io::Error {
     io::Error::last_os_error()
 }
 
-/// A descriptor closed when dropped, so each early return in [`Pty::spawn`] leaves nothing open.
 struct Fd(libc::c_int);
 
 impl Fd {
@@ -52,7 +36,6 @@ impl Fd {
         self.0
     }
 
-    /// Hands the descriptor on without closing it.
     fn into_raw(self) -> libc::c_int {
         let fd = self.0;
         std::mem::forget(self);
@@ -94,7 +77,6 @@ fn set_nonblocking(fd: libc::c_int) -> Result<(), PtyError> {
     Ok(())
 }
 
-/// A pipe whose two ends close on exec (`pipe2` where there is one).
 fn cloexec_pipe() -> Result<(Fd, Fd), PtyError> {
     let mut ends = [0 as libc::c_int; 2];
     #[cfg(target_os = "linux")]
@@ -112,7 +94,6 @@ fn cloexec_pipe() -> Result<(Fd, Fd), PtyError> {
     Ok((read, write))
 }
 
-/// The slave's path, from the master.
 #[cfg(target_os = "linux")]
 fn slave_name(master: libc::c_int) -> Result<CString, PtyError> {
     let mut name = [0 as libc::c_char; 128];
@@ -137,9 +118,6 @@ fn slave_name(master: libc::c_int) -> Result<CString, PtyError> {
     Ok(unsafe { CStr::from_ptr(name) }.to_owned())
 }
 
-/// A new pty pair at `size`, both ends close-on-exec. The slave never lands on 0 to 2 (a daemon
-/// started with its stdio closed would otherwise get it there, and the child's `dup2` onto the same
-/// number would keep the flag).
 fn open_pty(size: &libc::winsize) -> Result<(Fd, Fd), PtyError> {
     // SAFETY: no pointers.
     let master = unsafe { libc::posix_openpt(libc::O_RDWR | libc::O_NOCTTY | libc::O_CLOEXEC) };
@@ -147,10 +125,7 @@ fn open_pty(size: &libc::winsize) -> Result<(Fd, Fd), PtyError> {
         return Err(PtyError::Spawn(last_error()));
     }
     let master = Fd(master);
-    // Some systems ignore O_CLOEXEC here; the flag is checked, not assumed.
     set_cloexec(master.raw())?;
-    // Reads and writes wait with poll, so a child that stops reading can't block the caller for
-    // good. The slave, which the child gets, stays blocking.
     set_nonblocking(master.raw())?;
     // SAFETY: master is a pty master.
     if unsafe { libc::grantpt(master.raw()) } != 0 || unsafe { libc::unlockpt(master.raw()) } != 0 {
@@ -184,7 +159,6 @@ fn open_pty(size: &libc::winsize) -> Result<(Fd, Fd), PtyError> {
     Ok((master, slave))
 }
 
-/// What the child tells the parent when it cannot get as far as exec: the step, then the errno.
 const REPORT_LEN: usize = 1 + std::mem::size_of::<i32>();
 
 fn step_code(step: StartStep) -> u8 {
@@ -203,10 +177,6 @@ fn step_from(code: u8) -> StartStep {
     }
 }
 
-/// In the forked child: writes the report and ends. Async-signal-safe: a `write` and an `_exit`.
-///
-/// # Safety
-/// Only for the child between `fork` and `execve`.
 unsafe fn fail_start(report_fd: libc::c_int, step: StartStep) -> ! {
     let errno = io::Error::last_os_error().raw_os_error().unwrap_or(0);
     let mut report = [0u8; REPORT_LEN];
@@ -220,7 +190,6 @@ unsafe fn fail_start(report_fd: libc::c_int, step: StartStep) -> ! {
     }
 }
 
-/// The parent's side: blocks until the child execs (the write end closes) or reports a failure.
 fn read_start_report(report: &Fd) -> Option<(StartStep, i32)> {
     let mut buf = [0u8; REPORT_LEN];
     let mut have = 0;
@@ -236,7 +205,7 @@ fn read_start_report(report: &Fd) -> Option<(StartStep, i32)> {
         if n > 0 {
             have += n as usize;
         } else if n == 0 || last_error().raw_os_error() != Some(libc::EINTR) {
-            break; // the write end closed (the exec worked), or the pipe failed
+            break;
         }
     }
     if have < REPORT_LEN {
@@ -247,7 +216,6 @@ fn read_start_report(report: &Fd) -> Option<(StartStep, i32)> {
     Some((step_from(buf[0]), i32::from_ne_bytes(errno)))
 }
 
-/// Reaps a child that failed to start, so it isn't left a zombie.
 fn reap(pid: libc::pid_t) {
     loop {
         let mut raw: libc::c_int = 0;
@@ -261,7 +229,6 @@ fn reap(pid: libc::pid_t) {
 
 impl Pty {
     pub fn spawn(command: &PtyCommand) -> Result<Pty, PtyError> {
-        // Everything the child needs is made here: after fork only async-signal-safe calls are allowed.
         let program = cstring(command.program.as_os_str().as_bytes())?;
         let mut argv = vec![program.clone()];
         for arg in &command.args {
@@ -306,9 +273,6 @@ impl Pty {
         // SAFETY: the child below only makes async-signal-safe calls on data made before the fork.
         let pid = unsafe { libc::fork() };
         if pid == 0 {
-            // The child: reset the signal mask and SIGPIPE (Rust ignores it, and an ignored signal
-            // survives exec), take the pty as its terminal, close what it inherited except the
-            // report pipe, then enter the folder and exec. Nothing here allocates.
             // SAFETY: each call is async-signal-safe and the pointers were made before the fork.
             unsafe {
                 libc::sigprocmask(libc::SIG_SETMASK, &no_signals, std::ptr::null_mut());
@@ -341,11 +305,8 @@ impl Pty {
         if pid < 0 {
             return Err(PtyError::Spawn(last_error()));
         }
-        // The parent keeps neither the slave nor the write end of the report: when the child execs,
-        // its copy closes too and the read below returns empty.
         drop(slave);
         drop(report_write);
-        // Keep the pointer vectors alive past the fork (the child used them).
         drop((argv_ptrs, envp_ptrs));
         if let Some((step, errno)) = read_start_report(&report_read) {
             reap(pid);
@@ -365,7 +326,6 @@ impl Pty {
         self.pid
     }
 
-    /// One `read`: `None` when there is nothing to read right now (the master never blocks).
     fn try_read(&self, buf: &mut [u8]) -> Result<Option<ReadOutcome>, PtyError> {
         loop {
             // SAFETY: buf is valid for buf.len() bytes and master stays open while self lives.
@@ -380,16 +340,12 @@ impl Pty {
             match error.raw_os_error() {
                 Some(libc::EINTR) => continue,
                 Some(libc::EAGAIN) => return Ok(None),
-                // Linux reports the closed side as EIO.
                 Some(libc::EIO) => return Ok(Some(ReadOutcome::Closed)),
                 _ => return Err(PtyError::Io(error)),
             }
         }
     }
 
-    /// Waits for `events` on the master for up to `ms` milliseconds (`-1`: as long as it takes);
-    /// false when the time ran out first. A hang-up counts as ready, so the next read or write
-    /// reports it.
     fn wait_ready(&self, events: libc::c_short, ms: libc::c_int) -> Result<bool, PtyError> {
         loop {
             let mut pfd = libc::pollfd {
@@ -409,7 +365,6 @@ impl Pty {
         }
     }
 
-    /// Blocks until there is output or the child's side closes.
     pub fn read(&self, buf: &mut [u8]) -> Result<ReadOutcome, PtyError> {
         loop {
             if let Some(outcome) = self.try_read(buf)? {
@@ -419,7 +374,6 @@ impl Pty {
         }
     }
 
-    /// Waits up to `timeout` for output.
     pub fn read_timeout(&self, buf: &mut [u8], timeout: Duration) -> Result<ReadOutcome, PtyError> {
         let deadline = Instant::now() + timeout;
         loop {
@@ -436,21 +390,14 @@ impl Pty {
         }
     }
 
-    /// Writes it all, however long the child takes to read it. `ptyhost` calls this from a thread of
-    /// its own; anything that must not wait on the child uses [`Pty::write_all_timeout`].
     pub fn write_all(&self, bytes: &[u8]) -> Result<(), PtyError> {
         self.write_until(bytes, None)
     }
 
-    /// Writes it all, or gives up with [`PtyError::Timeout`] once `timeout` has passed without the
-    /// whole of it going in. A child that has stopped reading fills the tty's input queue, and a
-    /// blocking `write` would then wait for as long as the child lives.
     pub fn write_all_timeout(&self, bytes: &[u8], timeout: Duration) -> Result<(), PtyError> {
         self.write_until(bytes, Some(Instant::now() + timeout))
     }
 
-    /// The master is non-blocking: a write takes what fits, and the rest waits for the pty to be
-    /// writable again, until `deadline` if there is one.
     fn write_until(&self, bytes: &[u8], deadline: Option<Instant>) -> Result<(), PtyError> {
         let mut offset = 0;
         while offset < bytes.len() {
@@ -483,7 +430,6 @@ impl Pty {
         Ok(())
     }
 
-    /// Sets the window size; the child gets SIGWINCH.
     pub fn resize(&self, rows: u16, cols: u16) -> Result<(), PtyError> {
         let size = libc::winsize {
             ws_row: rows.max(1),
@@ -498,7 +444,6 @@ impl Pty {
         Ok(())
     }
 
-    /// The exit status if the child has ended: its code, or 128 plus the signal that ended it.
     pub fn try_wait(&self) -> Result<Option<i32>, PtyError> {
         let mut status = self
             .status
@@ -517,7 +462,7 @@ impl Pty {
                 } else if libc::WIFSIGNALED(raw) {
                     128 + libc::WTERMSIG(raw)
                 } else {
-                    return Ok(None); // stopped, not ended
+                    return Ok(None);
                 };
                 *status = Some(code);
                 return Ok(Some(code));
@@ -532,7 +477,6 @@ impl Pty {
         }
     }
 
-    /// Blocks until the child ends.
     pub fn wait(&self) -> Result<i32, PtyError> {
         loop {
             if let Some(code) = self.try_wait()? {
@@ -542,7 +486,6 @@ impl Pty {
         }
     }
 
-    /// Signals the child, unless it has already been reaped.
     pub fn signal(&self, signal: Signal) -> Result<(), PtyError> {
         let status = self
             .status
@@ -564,15 +507,10 @@ impl Pty {
         Ok(())
     }
 
-    /// SIGTERM, then SIGKILL if it is still there after `grace`; returns the exit status.
-    /// The master's descriptor, or -1 once hung up.
     fn fd(&self) -> libc::c_int {
         self.master.load(Ordering::Acquire)
     }
 
-    /// Closes the master, once. A child quitting with output nobody read waits in exit for the tty
-    /// to drain, and no signal ends that wait; closing the master hangs the tty up and drops what
-    /// was queued, so the child can finish and be reaped.
     fn hang_up(&self) {
         let fd = self.master.swap(-1, Ordering::AcqRel);
         if fd >= 0 {
@@ -594,7 +532,6 @@ impl Pty {
                 Err(_) => return None,
             }
         }
-        // Still here after the grace: maybe stuck draining the tty, which SIGKILL can't end.
         self.hang_up();
         let _ = self.signal(Signal::Kill);
         self.wait().ok()
@@ -603,7 +540,6 @@ impl Pty {
 
 impl Drop for Pty {
     fn drop(&mut self) {
-        // The master closes first, for the reason in `hang_up`.
         self.hang_up();
         self.terminate(Duration::from_secs(2));
     }

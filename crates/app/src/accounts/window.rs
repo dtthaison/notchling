@@ -1,7 +1,3 @@
-//! The Accounts window (macOS): a titled window of its own, 560 × 640, over the app's shared store
-//! and switch feed, opened from the menu bar's account item and Chat's Add Account…; and the
-//! `--render` builds for the accounts views, over the made-up snapshot.
-
 use std::sync::Arc;
 
 use gpui::{
@@ -21,10 +17,8 @@ use super::view_rows::{limit_groups, meter};
 use crate::mac::shell::{AppAccounts, AppSwitchFeed};
 use crate::switches::feed::SwitchFeed;
 
-/// The window's size in points.
 pub const WINDOW_SIZE: (f32, f32) = (560.0, 640.0);
 
-/// The app's accounts store and switch feed, or fixed ones with no daemon (a render).
 pub fn app_stores(cx: &App) -> (Arc<Accounts>, Arc<SwitchFeed>) {
     let store = cx
         .try_global::<AppAccounts>()
@@ -37,9 +31,7 @@ pub fn app_stores(cx: &App) -> (Arc<Accounts>, Arc<SwitchFeed>) {
     (store, feed)
 }
 
-/// Opens the Accounts window (or brings the open one forward) on `provider`'s tab.
 pub fn open(cx: &mut App, provider: Option<&str>) -> Option<WindowHandle<AccountsView>> {
-    // One Accounts window: a second open would follow the same feed and double every refresh.
     let open_one = cx
         .windows()
         .into_iter()
@@ -85,7 +77,6 @@ pub fn open(cx: &mut App, provider: Option<&str>) -> Option<WindowHandle<Account
     Some(handle)
 }
 
-/// `--render limit-bars`: grouped bars in every fill, then the Chat header's meters.
 pub struct LimitBarsView;
 
 impl Render for LimitBarsView {
@@ -133,7 +124,6 @@ impl Render for LimitBarsView {
     }
 }
 
-/// `--render accounts-window[-off|-codex]|limit-bars|cost`, over made-up data; nothing is called.
 pub fn build_render(name: &str, cx: &mut App) -> Option<AnyView> {
     let which = renders::shown(name)?;
     let store = Arc::new(Accounts::fixed(renders::snapshot(which)));
@@ -147,8 +137,6 @@ pub fn build_render(name: &str, cx: &mut App) -> Option<AnyView> {
             .new(|_| AccountsView::fixed(store, feed, CODEX, Tab::Accounts, renders::NOW))
             .into(),
         Shown::Claude | Shown::Off => {
-            // The menu render opens the first Claude Desktop row's ⋯: a short row, so the menu
-            // reaches over the next one.
             let menu = name == renders::MENU_RENDER;
             let tab = if menu { CLAUDE_DESKTOP } else { CLAUDE_CODE };
             let mut view = AccountsView::fixed(store, feed, tab, Tab::Accounts, renders::NOW);

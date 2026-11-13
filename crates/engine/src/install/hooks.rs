@@ -1,37 +1,13 @@
-//! Planning the hook entries in settings.json: which of ours to add, replace or remove, and the
-//! new text, with every other byte of the file as it was.
-//!
-//! # What is ours
-//!
-//! An entry is ours when its command is `notchling hook` ([`classify`]) **and** it sits in one of
-//! the [`SLOTS`]: the prompt hooks (`PreToolUse` matching `AskUserQuestion`, `PermissionRequest`
-//! matching `*`) or the page hooks (`PreToolUse`, `PostToolUse` and `PostToolUseFailure`
-//! matching `Artifact`). Prompt and page hooks share `PreToolUse` and are told apart by the
-//! matcher. A hook of ours anywhere else is reported, never changed. The Swift app's `--hook`
-//! entries are reported and never changed: retirement rewrites them, not this.
-//!
-//! # What a change does
-//!
-//! Only entries are removed, never the group around other hooks: a group left with no hook of
-//! any kind goes (and an event, and `hooks`, left empty by that), while a group that holds the
-//! user's hooks too keeps them and everything else it has. New entries go last in their event.
-//! Everything is done by splicing ([`super::edit`]); the result is then compared with what the
-//! same change does to the parsed data, and a difference is a refusal, not a write.
-
 use super::command::{classify, summary, Origin};
 use super::edit::{self, key, Seg};
 use super::jsonc::{self, Kind, Node};
 use super::render::Json;
 use serde_json::{json, Value};
 
-/// A prompt hook may wait this long for an answer: the daemon's hold (290 s) and ten more.
 pub const PROMPT_TIMEOUT: u64 = 300;
-/// A page hook that may publish as the page's owner.
 pub const PAGE_PRE_TIMEOUT: u64 = 60;
-/// A page hook that only copies files.
 pub const PAGE_TIMEOUT: u64 = 10;
 
-/// What to do about a kind of hook.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Want {
     Leave,
@@ -41,13 +17,10 @@ pub enum Want {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Category {
-    /// Questions and permissions answered from the notch.
     Prompt,
-    /// Local copies of Artifact pages.
     Pages,
 }
 
-/// A place in settings.json where one of our entries lives.
 #[derive(Clone, Copy, Debug)]
 pub struct Slot {
     pub category: Category,
@@ -89,10 +62,8 @@ pub const SLOTS: [Slot; 5] = [
     },
 ];
 
-/// What the file should end up holding.
 #[derive(Clone, Debug)]
 pub struct Wanted {
-    /// The hook command ([`super::command::hook_command`]).
     pub command: String,
     pub prompt: Want,
     pub pages: Want,
@@ -107,31 +78,24 @@ impl Wanted {
     }
 }
 
-/// A hook entry of ours or the Swift app's found in the file.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Found {
     pub event: String,
     pub matcher: Option<String>,
     pub origin: Origin,
     pub command: String,
-    /// True for an entry of ours in one of the [`SLOTS`]: the ones a change may touch.
     pub managed: bool,
 }
 
 #[derive(Clone, Debug)]
 pub struct HookPlan {
-    /// The file after the change; the text given when nothing changes.
     pub text: String,
     pub changed: bool,
-    /// One line per change.
     pub changes: Vec<String>,
-    /// What else is worth saying (what is already in place, the Swift app's entries).
     pub notes: Vec<String>,
-    /// What the file holds now.
     pub found: Vec<Found>,
 }
 
-/// Why the file is left alone.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Refused(pub String);
 
@@ -145,10 +109,8 @@ fn refuse(why: impl Into<String>) -> Refused {
     Refused(why.into())
 }
 
-/// One of our or the Swift app's entries with its place.
 struct Entry {
     found: Found,
-    /// The command as written, for comparing; `found.command` is the short form that is shown.
     raw: String,
     group: usize,
     index: usize,
@@ -205,7 +167,6 @@ fn survey(root: &Node, text: &str) -> Vec<Entry> {
 }
 
 fn open(text: &str) -> Result<(String, Node), Refused> {
-    // Nothing to lose in an empty file: start from an empty object.
     let work = if jsonc::is_blank(text) {
         "{\n}\n".to_string()
     } else {
@@ -221,9 +182,6 @@ fn open(text: &str) -> Result<(String, Node), Refused> {
             "settings.json does not hold a JSON object; it was left as it is",
         ));
     }
-    // Which of two equal keys counts is Claude Code's choice (the last), not the reader's (the
-    // first): a plan from the wrong one could remove the user's own hook. Nothing the message
-    // says comes from the file.
     if root.count_key("hooks") > 1 {
         return Err(refuse(
             "settings.json has \"hooks\" twice; it was left as it is",
@@ -237,7 +195,6 @@ fn open(text: &str) -> Result<(String, Node), Refused> {
     Ok((work, root))
 }
 
-/// What is in the file now, with nothing changed. A file that cannot be read is refused.
 pub fn detect(text: &str) -> Result<Vec<Found>, Refused> {
     let (work, root) = open(text)?;
     Ok(survey(&root, &work).into_iter().map(|e| e.found).collect())
@@ -261,8 +218,6 @@ fn group_json(slot: &Slot, command: &str) -> Json {
     ])
 }
 
-/// Plans the change `wanted` asks for in `text` (settings.json as it is now; empty for a file
-/// that is empty or missing).
 pub fn plan_hooks(text: &str, wanted: &Wanted) -> Result<HookPlan, Refused> {
     let (work, root) = open(text)?;
     let entries = survey(&root, &work);
@@ -365,7 +320,6 @@ pub fn plan_hooks(text: &str, wanted: &Wanted) -> Result<HookPlan, Refused> {
         out = add_group(&out, slot, &group_json(slot, &wanted.command))?;
     }
 
-    // The same change made to the data must give the same data.
     let after = jsonc::parse(&out)
         .map(|n| jsonc::to_value(&n, &out))
         .map_err(|_| refuse("the edit did not give valid JSON; nothing was written"))?;
@@ -387,7 +341,6 @@ pub fn plan_hooks(text: &str, wanted: &Wanted) -> Result<HookPlan, Refused> {
     })
 }
 
-/// Refuses a file whose shape makes the edit ambiguous, and returns its data.
 fn check_shape(
     root: &Node,
     text: &str,
@@ -422,7 +375,6 @@ fn edit_failed(e: edit::EditError) -> Refused {
     refuse(format!("the edit failed ({e}); nothing was written"))
 }
 
-/// Removes one hook entry; a group, an event or `hooks` left with nothing goes with it.
 fn remove_entry(text: &str, event: &str, group: usize, index: usize) -> Result<String, Refused> {
     let root = jsonc::parse(text).map_err(|_| refuse("the edit did not give valid JSON"))?;
     let missing = || refuse("the file changed while it was being planned");
@@ -455,7 +407,6 @@ fn remove_entry(text: &str, event: &str, group: usize, index: usize) -> Result<S
     done.map_err(edit_failed)
 }
 
-/// Adds a group at the end of an event, making the event and `hooks` if they are not there.
 fn add_group(text: &str, slot: &Slot, group: &Json) -> Result<String, Refused> {
     let root = jsonc::parse(text).map_err(|_| refuse("the edit did not give valid JSON"))?;
     let done = match root.get("hooks") {
@@ -476,7 +427,6 @@ fn add_group(text: &str, slot: &Slot, group: &Json) -> Result<String, Refused> {
     done.map_err(edit_failed)
 }
 
-/// The data after the change, worked out directly on the data: the check on the splicing.
 fn model(mut root: Value, removals: &[(&str, usize, usize)], adds: &[(&str, Value)]) -> Value {
     let Some(top) = root.as_object_mut() else {
         return root;
@@ -521,7 +471,6 @@ fn model(mut root: Value, removals: &[(&str, usize, usize)], adds: &[(&str, Valu
     root
 }
 
-/// A group without the entries `gone` picks; `None` when nothing but our entries were in it.
 fn strip_group(mut group: Value, gone: impl Fn(usize) -> bool) -> Option<Value> {
     let clean = group
         .as_object()

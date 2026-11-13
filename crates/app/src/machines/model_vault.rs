@@ -1,6 +1,3 @@
-//! The Secret Vault as the Machines window sees it (Swift `MachinesModel`'s vault half): the update
-//! offers of renewed values, the Rename banner of legacy names, Renew….
-
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
@@ -11,12 +8,6 @@ use super::model::{MachinesModel, VaultList};
 use super::pieces::UpdateOfferRow;
 
 impl MachinesModel {
-    // MARK: Renewed secrets, renames
-
-    /// Every tick: when the vault's list changed on disk, each name saved since it was last looked
-    /// at (a new name, or a new `updated`) makes its update offer, and the names are read again
-    /// (Swift: the `vaultValueChanged` notification). Only the list is read, never a value, and
-    /// nothing is sent. Whether anything changed.
     pub fn watch_vault(&mut self) -> bool {
         if self.renaming {
             return false;
@@ -38,7 +29,6 @@ impl MachinesModel {
         true
     }
 
-    /// Takes the list as it is now as seen, without an offer (the window opening, a Rename).
     pub(super) fn rebase_vault(&mut self) {
         self.vault_stamp = self.parts.vault.stamp();
         self.vault_seen = self
@@ -68,8 +58,6 @@ impl MachinesModel {
         rename_note(&names)
     }
 
-    /// The Rename button: what to move, for the background (the vault's value moves through the
-    /// Keychain, never on the UI thread). `None` while a rename runs or when nothing is left.
     pub fn rename_work(&mut self) -> Option<RenameWork> {
         if self.renaming {
             return None;
@@ -88,8 +76,6 @@ impl MachinesModel {
         })
     }
 
-    /// A rename ended: the vault's names again, and a line when one didn't move. The moved names
-    /// hold the values the machines have already, so they make no update offer.
     pub fn renamed(&mut self, failed: bool) {
         self.renaming = false;
         self.refresh_vault();
@@ -97,8 +83,6 @@ impl MachinesModel {
         self.rename_note = failed.then(|| "Rename didn't finish; try again".to_owned());
     }
 
-    /// Renew…: the secret's page (GitHub's token page for a GitHub secret), opened in the
-    /// background.
     pub fn renew_work(&self, name: &str) -> RenewWork {
         let url = self
             .vault_entries
@@ -112,20 +96,17 @@ impl MachinesModel {
         }
     }
 
-    /// Renew… ended: a line at the bottom when the page didn't open.
     pub fn renewed(&mut self, result: Result<(), String>) {
         self.notice = result.err();
     }
 }
 
-/// The Rename button's moves, run off the UI thread.
 pub struct RenameWork {
     vault: Arc<dyn VaultList>,
     pub moves: Vec<(String, String)>,
 }
 
 impl RenameWork {
-    /// Moves each legacy secret to its new name, keeping its value (blocking). Whether one failed.
     pub fn run(&self) -> bool {
         let mut failed = false;
         for (old, new) in &self.moves {
@@ -137,7 +118,6 @@ impl RenameWork {
     }
 }
 
-/// Renew…'s page, opened off the UI thread.
 pub struct RenewWork {
     vault: Arc<dyn VaultList>,
     name: String,

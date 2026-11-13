@@ -1,9 +1,5 @@
-//! The About view's facts: version, build, license, links. Pure; the update line is the
-//! [`super::updates`] outcome.
-
 use super::updates::Version;
 
-/// A link on the About view.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Link {
     pub title: &'static str,
@@ -29,21 +25,17 @@ pub const LINKS: [Link; 4] = [
     },
 ];
 
-/// What the About view shows.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct About {
     pub name: &'static str,
     pub version: String,
-    /// `Beta` or `Stable`, from the version.
     pub channel: &'static str,
-    /// The build: the commit (or `dev`) and the profile, with the system it runs on.
     pub build: String,
     pub license: &'static str,
     pub tagline: &'static str,
     pub links: Vec<Link>,
 }
 
-/// Builds the facts. `commit` is the build's commit when the build named one.
 pub fn about(version: &str, commit: Option<&str>, release_build: bool, system: &str) -> About {
     let beta = Version::parse(version).is_some_and(|v| v.is_beta());
     let commit = commit.filter(|c| !c.is_empty()).unwrap_or("dev");
@@ -61,7 +53,6 @@ pub fn about(version: &str, commit: Option<&str>, release_build: bool, system: &
     }
 }
 
-/// This build's facts.
 pub fn current() -> About {
     let system = format!("{} {}", std::env::consts::OS, std::env::consts::ARCH);
     about(

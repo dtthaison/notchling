@@ -85,7 +85,6 @@ fn a_lane_with_no_report_yet_has_no_ring() {
     let mut s = snapshot();
     s.claude_usage.reports.remove("night");
     assert_eq!(limits_for(&s, "/lanes/night"), None);
-    // A report with no bars is the same.
     s.claude_usage.reports.insert(
         "night".into(),
         UsageReport {
@@ -111,7 +110,6 @@ fn a_lane_nobody_runs_in_has_no_ring() {
 
 #[test]
 fn a_folder_no_lane_names_matches_no_account() {
-    // The main login and an account in no lane are never found by a folder.
     assert_eq!(limits_for(&snapshot(), "/elsewhere"), None);
     assert_eq!(limits_for(&snapshot(), "/lanes/main"), None);
     assert_eq!(limits_for(&snapshot(), ""), None);

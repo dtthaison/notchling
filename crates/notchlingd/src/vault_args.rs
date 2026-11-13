@@ -1,11 +1,7 @@
-//! What the vault service reads from a call: the approval's decision, and argument readers whose errors are fixed texts (serde's
-//! could quote what it read, and that could be a value).
-
 use notchling_engine::vault::{default_vars, Kind, VaultEntry, VaultValue};
 use notchling_local_api::ApiError;
 use serde_json::Value;
 
-/// The app's answer to an approval.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Decision {
     Deny,
@@ -31,7 +27,6 @@ impl Decision {
     }
 }
 
-/// A string field, at most `max` bytes; a field that is there and not a string is an error.
 pub(crate) fn text(args: &Value, key: &str, max: usize) -> Result<Option<String>, ApiError> {
     match args.get(key) {
         None | Some(Value::Null) => Ok(None),
@@ -41,8 +36,6 @@ pub(crate) fn text(args: &Value, key: &str, max: usize) -> Result<Option<String>
     }
 }
 
-/// An entry as the app sends it in `vault.save`. Parse errors are fixed texts: serde's could
-/// quote the text it read.
 pub(crate) fn entry_from(value: Option<&Value>) -> Result<VaultEntry, ApiError> {
     let bad = || ApiError::bad_request("entry must be {name, kind, …} as vault.json holds it");
     let mut entry: VaultEntry =
@@ -57,7 +50,6 @@ pub(crate) fn entry_from(value: Option<&Value>) -> Result<VaultEntry, ApiError> 
     Ok(entry)
 }
 
-/// `{username?, secret}`; `None` keeps the stored value.
 pub(crate) fn value_from(value: Option<&Value>) -> Result<Option<VaultValue>, ApiError> {
     let bad = || ApiError::bad_request("value must be {username?: string, secret: string}");
     let Some(v) = value.filter(|v| !v.is_null()) else {

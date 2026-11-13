@@ -1,34 +1,24 @@
-//! Config folders: `~/.claude` and each lane's. Read-only; making and switching lanes is E16.
-
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
-/// A lane is a Claude Code config folder beside `~/.claude`, on another account, used with
-/// `CLAUDE_CONFIG_DIR=<path>`. The JSON keys are the Swift app's (`lanes.json`, which the hook reads too).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Lane {
     pub name: String,
-    /// The exact value of the variable.
     pub path: String,
     #[serde(rename = "accountID")]
     pub account_id: String,
     pub email: String,
-    /// Where the last terminal for this lane opened.
     #[serde(default)]
     pub folder: Option<String>,
 }
 
-/// Where sessions are read from.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Roots {
-    /// `~/.claude`, the main login's config folder.
     pub main_dir: PathBuf,
-    /// `lanes.json`, in Notchling's data folder.
     pub lanes_file: PathBuf,
 }
 
 impl Roots {
-    /// The usual layout: `<home>/.claude` and `<data_dir>/lanes.json`.
     pub fn new(home: &Path, data_dir: &Path) -> Self {
         Roots {
             main_dir: home.join(".claude"),
@@ -37,14 +27,12 @@ impl Roots {
     }
 }
 
-/// One config folder and, for a lane, its entry.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ConfigDir {
     pub dir: PathBuf,
     pub lane: Option<Lane>,
 }
 
-/// The lanes in `lanes.json`; empty when the file is missing or unreadable.
 pub fn read_lanes(file: &Path) -> Vec<Lane> {
     std::fs::read(file)
         .ok()
@@ -52,8 +40,6 @@ pub fn read_lanes(file: &Path) -> Vec<Lane> {
         .unwrap_or_default()
 }
 
-/// Every folder sessions can live in: the main one, then each lane's. Each has its own `sessions` and
-/// `jobs`; `projects` (transcripts) is shared with the main folder.
 pub fn config_dirs(roots: &Roots) -> Vec<ConfigDir> {
     let mut dirs = vec![ConfigDir {
         dir: roots.main_dir.clone(),
@@ -68,7 +54,6 @@ pub fn config_dirs(roots: &Roots) -> Vec<ConfigDir> {
     dirs
 }
 
-/// The lane whose path is `path` (compared after removing `.` parts and trailing slashes).
 pub fn lane_at_path(roots: &Roots, path: &str) -> Option<Lane> {
     let wanted = standardize(path);
     read_lanes(&roots.lanes_file)

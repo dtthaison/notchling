@@ -1,29 +1,20 @@
-//! Yes/no facts the app keeps in its own settings (`notchling.db`, opened by the path of its old
-//! `settings.json`), past the engine's key list the way
-//! `actingOn` and `bridgeOn` are: the first-run flag and the user's choice for each M6 switch. The
-//! Swift app's preferences are never touched.
-
 use std::path::PathBuf;
 
 use notchling_engine::settings::{Settings, SettingsError};
 use serde_json::Value;
 
-/// Set once the first-run view has been shown and dismissed.
 pub const FIRST_RUN_KEY: &str = "firstRunDone";
 
-/// The key holding the user's choice for a daemon switch (`accounts` -> `accountsOn`).
 pub fn choice_key(switch: &str) -> String {
     format!("{switch}On")
 }
 
-/// Booleans in one data folder's settings; `file` names its old `settings.json`.
 #[derive(Clone, Debug)]
 pub struct Flags {
     pub file: PathBuf,
 }
 
 impl Flags {
-    /// The stored value, false when unset or the file can't be read.
     pub fn get(&self, key: &str) -> bool {
         Settings::open(&self.file)
             .ok()
@@ -31,7 +22,6 @@ impl Flags {
             .unwrap_or(false)
     }
 
-    /// Stores `on` and nothing else (one row); a file that can't be read is left as it is.
     pub fn set(&self, key: &str, on: bool) -> Result<(), String> {
         let mut store = Settings::open(&self.file).map_err(|e| e.to_string())?;
         store
@@ -39,9 +29,6 @@ impl Flags {
             .map_err(|e| e.to_string())
     }
 
-    /// Stores the user's choice for a switch. Unlike [`Flags::set`], an old `settings.json` that
-    /// can't be read doesn't stop it: that file is moved aside (`settings.json.unreadable-<secs>`,
-    /// nothing in it lost) and the choice is written, so "off" is always kept.
     pub fn set_choice(&self, key: &str, on: bool) -> Result<(), String> {
         let mut store = match Settings::open(&self.file) {
             Ok(store) => store,

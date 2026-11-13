@@ -1,7 +1,3 @@
-//! The step model of machine setup (Swift `MachineSetup`): a step has a Check (a read-only probe)
-//! and a Fix (run only after its commands were shown and confirmed). `steps_*` build the steps,
-//! [`super::engine::SetupEngine`] runs them.
-
 use super::github::GitHubHttp;
 use super::masks::Masks;
 use super::registry::{Machine, MachineAbilities, MachineOs};
@@ -15,7 +11,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-/// A step's id. Per-repo steps carry the repo: `clone:owner/name`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct StepId(pub Cow<'static, str>);
 
@@ -51,7 +46,6 @@ impl StepId {
     }
 }
 
-/// What a Check found. The text is shown as plain text, never as Markdown.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CheckState {
     Pass(String),
@@ -80,7 +74,6 @@ impl CheckState {
     }
 }
 
-/// One line under a step: a sub-check and what it found.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SubRow {
     pub name: String,
@@ -98,8 +91,6 @@ impl SubRow {
     }
 }
 
-/// Facts a Check learned. Every value came from the machine and is untrusted until a step validated
-/// it.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Detected {
     pub os: Option<MachineOs>,
@@ -109,12 +100,10 @@ pub struct Detected {
     pub sd_path: Option<String>,
     pub abilities: Option<MachineAbilities>,
     pub token_expires: Option<String>,
-    /// From Plugins installed; not saved. The setup check holds back on it.
     pub sd_version: Option<String>,
 }
 
 impl Detected {
-    /// `self` with what `new` found laid over it.
     pub fn merged(&self, new: &Detected) -> Detected {
         let mut d = self.clone();
         fn over<T: Clone>(slot: &mut Option<T>, v: &Option<T>) {
@@ -167,7 +156,6 @@ impl CheckResult {
         self
     }
 
-    /// Every text masked.
     pub fn masked(&self, masks: &Masks) -> CheckResult {
         CheckResult {
             state: self.state.map(|s| masks.apply(s)),
@@ -185,7 +173,6 @@ impl CheckResult {
     }
 }
 
-/// The output of one probe, at most 64 KiB.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RemoteOutput {
     pub text: String,
@@ -199,10 +186,7 @@ pub type HoldWhen = Arc<dyn Fn(&Detected) -> Option<String> + Send + Sync>;
 
 #[derive(Clone)]
 pub enum Probe {
-    /// A read-only `sh` script for the machine; the engine batches one machine's scripts into one
-    /// ssh and hands each its own output.
     Remote { script: String, parse: RemoteParse },
-    /// A check on this Mac.
     Local(LocalProbe),
 }
 
@@ -233,7 +217,6 @@ pub enum Cadence {
     Slow,
 }
 
-/// What a confirmed Set up runs. `display` is the exact commands the user sees first.
 #[derive(Clone)]
 pub struct FixPlan {
     pub display: String,
@@ -258,12 +241,8 @@ impl FixPlan {
 #[derive(Clone)]
 pub enum StepFix {
     Run(FixPlan),
-    /// A check-only step: text for the user instead of commands.
     HowTo(String),
-    /// Running: a switch, not a Fix.
-    Toggle {
-        needs_admin: bool,
-    },
+    Toggle { needs_admin: bool },
 }
 
 #[derive(Clone)]
@@ -274,9 +253,7 @@ pub struct SetupStep {
     pub cadence: Cadence,
     pub probe: Probe,
     pub fix: StepFix,
-    /// The Deploy key's Replace key: its own button and confirmation, never part of Set up all.
     pub replace: Option<FixPlan>,
-    /// Given what earlier steps detected, a reason not to run this step's probe at all.
     pub hold_when: Option<HoldWhen>,
 }
 
@@ -301,7 +278,6 @@ impl SetupStep {
         }
     }
 
-    /// `Deploy key (o/n)` becomes `Replace key (o/n)`.
     pub fn replace_title(&self) -> String {
         self.title.replace("Deploy key", "Replace key")
     }
@@ -314,22 +290,17 @@ impl SetupStep {
     }
 }
 
-/// The vault as a step sees it. A value is read here and travels only on a process's stdin or in
-/// an HTTP header.
 pub trait SecretSource: Send + Sync {
     fn value(&self, name: &str) -> Option<Secret>;
     fn entry(&self, name: &str) -> Option<VaultEntry>;
-    /// Moves an entry and its value to a new name (Rename, on a click). `Err` says why not.
     fn rename(&self, _old: &str, _new: &str) -> Result<(), String> {
         Err("the vault is off".into())
     }
-    /// Sets or clears an entry's last day, as GitHub reported it.
     fn set_expires(&self, _name: &str, _day: Option<&str>) -> Result<(), String> {
         Err("the vault is off".into())
     }
 }
 
-/// No vault (it is off, or a render): no value, no entry.
 pub struct NoSecrets;
 
 impl SecretSource for NoSecrets {
@@ -341,14 +312,11 @@ impl SecretSource for NoSecrets {
     }
 }
 
-/// What a Fix asks this Mac to open: a page in the browser, the vault's form. The app does it; the
-/// engine only asks.
 pub trait Opener: Send + Sync {
     fn open_page(&self, url: &str);
     fn open_form(&self, request: &VaultRequest);
 }
 
-/// Opens nothing.
 pub struct NoOpener;
 
 impl Opener for NoOpener {
@@ -356,19 +324,15 @@ impl Opener for NoOpener {
     fn open_form(&self, _request: &VaultRequest) {}
 }
 
-/// A plugin as this Mac has it installed.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct InstalledPlugin {
     pub version: String,
     pub path: String,
 }
 
-/// What this Mac has installed: the plugin versions to put on a machine.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct MacFacts {
-    /// By plugin id, e.g. `sd@system-design`.
     pub plugins: BTreeMap<String, InstalledPlugin>,
-    /// The marketplace manifests by marketplace name.
     pub marketplace_json: BTreeMap<String, String>,
 }
 
@@ -381,11 +345,8 @@ pub struct StepContext {
     pub http: Arc<dyn GitHubHttp>,
     pub opener: Arc<dyn Opener>,
     pub mac: MacFacts,
-    /// Seconds since 1970.
     pub now: f64,
-    /// A private folder on this Mac for the files a Fix hands `gh` (a public key).
     pub scratch: PathBuf,
-    /// The machine's vault values; a step masks what a machine said before it cuts it.
     pub masks: Masks,
 }
 
@@ -398,11 +359,8 @@ impl StepContext {
 #[derive(Clone)]
 pub struct FixContext {
     pub step: StepContext,
-    /// For one admin step. Never stored, never logged.
     pub admin_password: Option<Secret>,
-    /// Output of the running Fix, tagged with its pipe.
     pub log: Arc<OutputSink>,
-    /// The machine's vault values and this Fix's admin password.
     pub masks: Masks,
 }
 
@@ -433,8 +391,6 @@ impl FixOutcome {
     }
 }
 
-/// The only ways a Fix touches a machine or runs on this Mac. Each refuses (126) a call whose argv
-/// or environment would hold a vault value or the admin password: a secret travels on stdin only.
 pub mod run {
     use super::*;
 
@@ -454,17 +410,12 @@ pub mod run {
             .run(&call.streaming(Some(Arc::new(move |c: Channel, t: &str| log(c, t)))))
     }
 
-    /// A script for `/bin/sh` on the machine as the worker. `stdin` is for a value to store; it
-    /// never goes into the script.
     pub fn script(ctx: &FixContext, s: &str, stdin: Option<Vec<u8>>, secs: u64) -> CommandResult {
         let mut call = Call::secs(shell::ssh_script(&ctx.step.machine, s), secs);
         call.stdin = stdin;
         guarded(ctx, call)
     }
 
-    /// A script with admin rights. Through sudo the password is the first line of stdin and
-    /// nothing else carries it; with no password the call is refused before anything runs. As
-    /// root over ssh there is no sudo and no stdin. On Linux the worker account is never the admin.
     pub fn admin(ctx: &FixContext, s: &str, secs: u64) -> CommandResult {
         let m = &ctx.step.machine;
         if let Some(why) = shell::admin_refusal(m) {
@@ -481,7 +432,6 @@ pub mod run {
         guarded(ctx, call)
     }
 
-    /// A command on this Mac. `argv[0]` is an absolute path.
     pub fn local(
         ctx: &FixContext,
         argv: Vec<String>,
@@ -493,7 +443,6 @@ pub mod run {
         guarded(ctx, call)
     }
 
-    /// A command on this Mac with variables of its own (never a secret).
     pub fn local_env(
         ctx: &FixContext,
         argv: Vec<String>,

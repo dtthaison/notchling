@@ -1,6 +1,3 @@
-//! Tool steps as the phone shows them: a name, one line of input, and for Edit/MultiEdit/Write the
-//! changed lines; plus the text helpers the message view caps its output with.
-
 use crate::transcript::text::{between, first_line, prefix_chars};
 use crate::transcript::util::str_of;
 use serde_json::{Map, Value};
@@ -16,7 +13,6 @@ pub enum DiffRowKind {
     Removed,
 }
 
-/// One line of a diff.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DiffRow {
     pub kind: DiffRowKind,
@@ -24,7 +20,6 @@ pub struct DiffRow {
 }
 
 impl DiffRow {
-    /// "+added", "-removed", " context": one string per row on the wire.
     pub fn wire(&self) -> String {
         let sign = match self.kind {
             DiffRowKind::Context => ' ',
@@ -35,7 +30,6 @@ impl DiffRow {
     }
 }
 
-/// A call as the phone shows it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ToolStep {
     pub id: String,
@@ -68,7 +62,6 @@ pub fn cap_output(text: &str) -> String {
     }
 }
 
-/// The text of a tool result: a plain string, or the text blocks of a list.
 pub fn result_text(content: Option<&Value>) -> String {
     match content {
         Some(Value::String(s)) => cap_output(s),
@@ -84,7 +77,6 @@ pub fn result_text(content: Option<&Value>) -> String {
     }
 }
 
-/// The text between `<tag>` and `</tag>`, if the text has them.
 pub fn tagged(text: &str, tag: &str) -> Option<String> {
     between(text, &format!("<{tag}>"), &format!("</{tag}>"), true)
 }
@@ -169,7 +161,6 @@ pub fn step(id: &str, name: &str, input: &Map<String, Value>) -> ToolStep {
         }
         "Glob" => ToolStep::new(id, name, summary_line(get("pattern").unwrap_or(""))),
         _ => {
-            // The first text input, by key order so the summary is the same every read.
             let mut keys: Vec<&String> = input.keys().collect();
             keys.sort();
             let text = keys.iter().find_map(|k| input[*k].as_str()).unwrap_or("");

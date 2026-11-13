@@ -1,6 +1,3 @@
-//! The sheet on show: one at a time, so a click that reached a card under it starts nothing, and
-//! the admin password typed into it never outlives it.
-
 use notchling_engine::machines::engine_plan::PlanKind;
 use notchling_engine::machines::step::StepId;
 
@@ -16,7 +13,6 @@ fn no_other_fix_starts_while_a_sheet_is_open() {
     let shown = fix_sheet(&w.model).clone();
     assert_eq!(shown.plan.kind, PlanKind::Fix(StepId::BASE_TOOLS));
 
-    // every button a click under the sheet could reach
     w.model.request_set_up(&StepId::STAYS_AWAKE, "m2");
     w.model.request_replace_key(&StepId::BASE_TOOLS, "m1");
     w.model.request_set_up_all("m2");
@@ -33,7 +29,6 @@ fn no_other_fix_starts_while_a_sheet_is_open() {
         "a refused request leaves no line"
     );
 
-    // its own Run is the one that goes
     let run = w.model.confirm().expect("the shown plan runs");
     assert_eq!(run.kind, PlanKind::Fix(StepId::BASE_TOOLS));
     assert!(w.model.sheet().is_none());
@@ -50,14 +45,12 @@ fn the_password_is_cleared_whenever_the_sheet_changes() {
             .push_str(text);
     };
 
-    // Cancel
     w.model.request_set_up(&StepId::STAYS_AWAKE, "m1");
     type_in(&mut w, "hunter2");
     assert_eq!(w.model.password_len(), 7);
     w.model.cancel_sheet();
     assert_eq!(w.model.password_len(), 0);
 
-    // Run: the password goes into the one confirm and leaves the model
     w.model.request_set_up(&StepId::STAYS_AWAKE, "m1");
     assert_eq!(w.model.password_len(), 0, "a new sheet starts empty");
     type_in(&mut w, "hunter2");
@@ -65,12 +58,10 @@ fn the_password_is_cleared_whenever_the_sheet_changes() {
     assert_eq!(run.kind, PlanKind::Fix(StepId::STAYS_AWAKE));
     assert_eq!(w.model.password_len(), 0);
 
-    // a sheet that takes no password has no field for one
     w.model.request_set_up(&StepId::BASE_TOOLS, "m1");
     assert!(w.model.password_field().is_none());
     w.model.cancel_sheet();
 
-    // the Add sheet, closed
     w.model.request_set_up(&StepId::STAYS_AWAKE, "m1");
     type_in(&mut w, "pw");
     w.model.cancel_sheet();

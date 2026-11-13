@@ -1,10 +1,5 @@
-//! The few JSON values we write into settings.json, rendered the way Claude Code and
-//! `JSON.stringify(value, null, 2)` print them: `"key": value`, one member per line, slashes and
-//! non-ASCII left as they are.
-
 use serde_json::Value;
 
-/// A value to insert. Members keep the order they are given.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Json {
     Str(String),
@@ -14,7 +9,6 @@ pub enum Json {
 }
 
 pub fn string(text: &str) -> String {
-    // `to_string` on a `&str` cannot fail; the fallback keeps the output valid anyway.
     serde_json::to_string(text).unwrap_or_else(|_| "\"\"".to_string())
 }
 
@@ -28,7 +22,6 @@ impl Json {
         )
     }
 
-    /// One line: `{"a": 1, "b": [2]}`.
     pub fn compact(&self) -> String {
         match self {
             Json::Str(s) => string(s),
@@ -47,8 +40,6 @@ impl Json {
         }
     }
 
-    /// Many lines. The first line starts where the caller puts it; every other line starts with
-    /// `indent`, and each level inside adds `unit`. `nl` ends a line.
     pub fn pretty(&self, indent: &str, unit: &str, nl: &str) -> String {
         match self {
             Json::Arr(items) if !items.is_empty() => {

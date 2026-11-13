@@ -1,6 +1,3 @@
-//! One connection: the peer check, then lines until the client goes, a deadline passes or the
-//! server stops. Replies and events leave through a writer thread with a bounded queue.
-
 use crate::audit::audit_reason;
 use crate::framing::{encode_line, FrameError, LineReader};
 use crate::peer::{same_user, PeerInfo};
@@ -18,8 +15,6 @@ use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
 use std::sync::Arc;
 use std::time::Instant;
 
-/// Serves one connection; `slot` is its place under `max_clients`, given back when this returns
-/// or unwinds.
 pub(crate) fn serve(stream: Stream, shared: Arc<Shared>, slot: Slot) {
     let peer = match transport::peer(&stream) {
         Ok(peer) => peer,
@@ -32,7 +27,6 @@ pub(crate) fn serve(stream: Stream, shared: Arc<Shared>, slot: Slot) {
         shared.audit("connect", None, peer.exe.as_deref(), "other_user");
         return;
     }
-    // A slot kept for the app: anyone else goes now (and the app is checked again at hello).
     if slot.reserved && shared.allowlist.tier_of(peer.exe.as_deref()) != Tier::App {
         return;
     }
@@ -54,7 +48,6 @@ pub(crate) fn serve(stream: Stream, shared: Arc<Shared>, slot: Slot) {
     let Ok(writer) = writer else {
         return;
     };
-    // The agent tier until hello, when the peer is read again (the exec race, in `peer`).
     let id = shared.hub.add(Tier::Agent, tx.clone(), hub_half);
     let mut session = Session {
         id,
@@ -77,18 +70,12 @@ pub(crate) fn serve(stream: Stream, shared: Arc<Shared>, slot: Slot) {
     if let Some(reader) = reader {
         session.read_loop(reader);
     }
-    // Off the list (dropping the session does that, also when a handler panics), then let the
-    // writer send what is queued (a refusal's reply, say) before closing. A client that doesn't
-    // read holds this up only until the write timeout.
     drop(session);
     let _ = writer.join();
     let _ = stream.shutdown(Shutdown::Both);
     drop(slot);
 }
 
-/// Takes the connection off the hub however its thread ends. A panic in a handler unwinds through
-/// here: left on the hub, an app-tier entry would keep `app_attached` true and approval would fail
-/// open, and the hub's handle would keep the socket open.
 impl Drop for Session {
     fn drop(&mut self) {
         self.shared.hub.forget(self.id);
@@ -107,18 +94,14 @@ fn write_loop(mut stream: Stream, rx: Receiver<Vec<u8>>) {
 struct Session {
     id: u64,
     tier: Tier,
-    /// The peer read at accept, and again at hello; the tier needs both to be one process.
     at_accept: PeerInfo,
     at_hello: Option<PeerInfo>,
-    /// A handle to read the peer again.
     probe: Stream,
     kind: Option<ClientKind>,
     tx: SyncSender<Vec<u8>>,
     shared: Arc<Shared>,
     accepted: Instant,
-    /// In a slot kept for the app: closed at hello unless it gets the app tier.
     reserved: bool,
-    /// Follows a topic, so it may wait for events as long as it likes.
     subscribed: bool,
     last_request: Instant,
 }
@@ -138,13 +121,11 @@ impl Session {
                 }
                 Ok(None) => return,
                 Err(e) if e.is_timeout() => {}
-                // An oversize line, a line cut off or a read error: close.
                 Err(FrameError::TooLong | FrameError::PartialAtEof | FrameError::Io(_)) => return,
             }
             if self.kind.is_none() && self.accepted.elapsed() > limits.hello_within {
                 return;
             }
-            // Idle and following nothing: a held slot doing no work.
             if self.kind.is_some()
                 && !self.subscribed
                 && self.last_request.elapsed() > limits.idle_within
@@ -160,7 +141,6 @@ impl Session {
         }
     }
 
-    /// Queues a reply; false when the client is gone. Waiting here holds up only this client.
     fn send(&self, value: &Value) -> bool {
         let line = encode_line(value).or_else(|| {
             let id = value.get("id").and_then(Value::as_u64).unwrap_or(0);
@@ -179,7 +159,6 @@ impl Session {
         self.reply_with(id, result, Map::new())
     }
 
-    /// A reply with the handler's extra fields beside `ok`; they never replace the envelope's.
     fn reply_with(
         &self,
         id: u64,
@@ -202,13 +181,11 @@ impl Session {
         }
     }
 
-    /// Handles one line; false closes the connection.
     fn on_line(&mut self, line: &[u8]) -> bool {
         self.last_request = Instant::now();
         let request = match Request::parse(line) {
             Ok(request) => request,
             Err((id, e)) => {
-                // Garbage before hello closes; after it, the client may go on.
                 return self.reply(id, Err(e)) && self.kind.is_some();
             }
         };
@@ -262,7 +239,6 @@ impl Session {
         let listed = |p: Option<&PeerInfo>| {
             p.is_some_and(|p| self.shared.allowlist.tier_of(p.exe.as_deref()) == Tier::App)
         };
-        // An app's file, but not one process from connect to hello: the exec race, or a fork.
         let refused =
             self.tier != Tier::App && (listed(Some(&self.at_accept)) || listed(now.as_ref()));
         self.at_hello = now;
@@ -271,7 +247,6 @@ impl Session {
                 .audit(ops::HELLO, Some(self.tier), self.peer(), "peer_changed");
         }
         if self.reserved && self.tier != Tier::App {
-            // It took a slot kept for the app and isn't the app.
             return false;
         }
         self.kind = Some(hello.client);
@@ -296,7 +271,6 @@ impl Session {
         {
             return Err(ApiError::bad_request(format!("no topic named {bad}")));
         }
-        // A topic for the app alone (the held prompts) is checked like an app-tier op.
         let app_only = subscribe
             .topics
             .iter()
@@ -319,7 +293,6 @@ impl Session {
         Ok(serde_json::json!({ "topics": subscribe.topics }))
     }
 
-    /// The op's result and the handler's extra reply fields (none when the op was refused).
     fn dispatch(&self, op: &str, args: &Value) -> (Result<Value, ApiError>, Map<String, Value>) {
         let mut extras = Map::new();
         let result = self.dispatch_into(op, args, &mut extras);
@@ -348,7 +321,6 @@ impl Session {
             ));
         }
         if spec.tier == Tier::App && !self.still_the_hello_process() {
-            // The kernel names whoever last used the peer's socket: a fork that shares it, say.
             self.shared
                 .audit(op, Some(self.tier), self.peer(), "peer_changed");
             return Err(ApiError::new(
@@ -368,13 +340,11 @@ impl Session {
             tier: self.tier,
             client: self.kind.unwrap_or(ClientKind::Cli),
             peer: self.peer().map(Path::to_path_buf),
-            // Read now: whoever sent this line (the hook's own process, say).
             pid: transport::peer(&self.probe).ok().map(|p| p.pid),
         };
         let (result, more) = handler.call_with_extras(&caller, op, args);
         *extras = more;
         if spec.tier == Tier::App {
-            // Every privileged call is on the record, not only the refusals.
             let (outcome, reason) = match &result {
                 Ok(_) => ("ok", None),
                 Err(e) => (e.code.as_str(), audit_reason(op, &e.message)),
@@ -385,7 +355,6 @@ impl Session {
         result
     }
 
-    /// The peer's file as last read: at hello once said, else at accept.
     fn peer(&self) -> Option<&Path> {
         self.at_hello
             .as_ref()
@@ -394,7 +363,6 @@ impl Session {
             .as_deref()
     }
 
-    /// Whether the peer, read now, is still the process that said hello.
     fn still_the_hello_process(&self) -> bool {
         match (&self.at_hello, transport::peer(&self.probe)) {
             (Some(at_hello), Ok(now)) => at_hello.same_process(&now),

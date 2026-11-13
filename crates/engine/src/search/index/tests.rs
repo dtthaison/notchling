@@ -1,5 +1,3 @@
-//! The index over temp folders: nothing here reads a real `~/.claude` or `~/.codex`.
-
 use super::*;
 use crate::sessions::testutil::TempDir;
 use std::fs::{File, OpenOptions};
@@ -29,14 +27,12 @@ fn assistant(text: &str) -> String {
     )
 }
 
-/// Sets a file's modification time to `ago` seconds before now.
 fn age(path: &Path, ago: f64) {
     let file = OpenOptions::new().write(true).open(path).unwrap();
     file.set_modified(UNIX_EPOCH + Duration::from_secs_f64((now() - ago).max(0.0)))
         .unwrap();
 }
 
-/// Writes `lines` as a transcript and ages it.
 fn transcript(dir: &TempDir, rel: &str, lines: &[String], ago: f64) -> std::path::PathBuf {
     let path = dir.write(rel, &(lines.join("\n") + "\n"));
     age(&path, ago);
@@ -75,7 +71,6 @@ fn claude_codex_and_antigravity_sessions_are_found() {
         ],
         3600.0,
     );
-    // The rollout's day folder is today's, so the walk enters it.
     let day = civil_day_path(now());
     transcript(
         &dir,
@@ -119,14 +114,12 @@ fn claude_codex_and_antigravity_sessions_are_found() {
         codex.meta.session_id,
         "01a1ac75-2a19-7750-a0d3-2df380733486"
     );
-    // No words: the newest first, with no snippet.
     let latest = index.search::<&str>(&[], now(), 2);
     assert_eq!(latest.len(), 2);
     assert!(latest.iter().all(|h| h.snippet.is_none()));
     assert_eq!(latest[0].meta.key, "agy:ag1");
 }
 
-/// `YYYY/MM/DD` of a time, in UTC.
 fn civil_day_path(ts: f64) -> String {
     let c = crate::pages::clock::civil_at(ts, 0);
     format!("{:04}/{:02}/{:02}", c.year, c.month, c.day)
@@ -153,7 +146,6 @@ fn only_changed_files_are_read_again() {
     let again = index.refresh(&r, now());
     assert_eq!((again.read, again.reused), (0, 2));
 
-    // A change to one file (new size and time) reads that file only.
     transcript(
         &dir,
         "claude/projects/p/a.jsonl",
@@ -185,12 +177,10 @@ fn files_outside_the_window_are_left_out_and_aged_out_ones_dropped() {
     let index = SessionIndex::new(None);
     assert_eq!(index.refresh(&r, now()).read, 1);
     assert_eq!(keys(&index, &["ancient"]), Vec::<String>::new());
-    // Later, the fresh file ages out of the window: dropped.
     age(&fresh, 15.0 * DAY);
     let stats = index.refresh(&r, now());
     assert_eq!((stats.read, stats.dropped), (0, 1));
     assert!(index.is_empty());
-    // And a deleted file is dropped too.
     let gone = transcript(
         &dir,
         "claude/projects/p/gone.jsonl",
@@ -211,7 +201,6 @@ fn a_big_file_is_read_by_its_start_and_its_end() {
     writeln!(f, "{}", user("headmarker start", "/w/big")).unwrap();
     let filler = assistant(&"filler text ".repeat(100));
     for i in 0..9_000 {
-        // ~1.2 KB a line: about 11 MB in all.
         if i == 4_500 {
             writeln!(f, "{}", assistant("middlemarker only here")).unwrap();
         }
@@ -236,7 +225,6 @@ fn a_big_file_is_read_by_its_start_and_its_end() {
     );
 }
 
-// Sparse files: where the file system has none (NTFS), the test would write the gap.
 #[cfg(unix)]
 #[test]
 fn a_two_gigabyte_file_costs_two_reads() {
@@ -245,7 +233,6 @@ fn a_two_gigabyte_file_costs_two_reads() {
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     let mut f = File::create(&path).unwrap();
     writeln!(f, "{}", user("headmarker first", "/w")).unwrap();
-    // A sparse gap: 2 GB of nothing, then a newline and the last message.
     f.seek(SeekFrom::Start(2 * 1024 * 1024 * 1024)).unwrap();
     writeln!(f).unwrap();
     writeln!(f, "{}", assistant("tailmarker last")).unwrap();
@@ -263,7 +250,6 @@ fn a_two_gigabyte_file_costs_two_reads() {
     assert_eq!(keys(&index, &["tailmarker"]), vec!["claude:huge"]);
 }
 
-// Sparse files: where the file system has none (NTFS), the test would write the gap.
 #[cfg(unix)]
 #[test]
 fn a_line_of_two_hundred_megabytes_is_never_held() {
@@ -272,7 +258,6 @@ fn a_line_of_two_hundred_megabytes_is_never_held() {
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     let mut f = File::create(&path).unwrap();
     writeln!(f, "{}", user("headmarker one", "/w")).unwrap();
-    // One 200 MB "line" (no newline in it), then a normal one.
     f.seek(SeekFrom::Start(200 * 1024 * 1024)).unwrap();
     writeln!(f).unwrap();
     writeln!(f, "{}", assistant("tailmarker after the monster")).unwrap();
@@ -313,7 +298,6 @@ fn a_file_that_vanishes_or_cannot_be_read_does_not_stop_the_scan() {
         &[user("still here", "/w")],
         10.0,
     );
-    // A dangling link, a folder named like a transcript and an empty file.
     #[cfg(unix)]
     std::os::unix::fs::symlink(
         dir.path("nowhere"),
@@ -326,7 +310,6 @@ fn a_file_that_vanishes_or_cannot_be_read_does_not_stop_the_scan() {
     let stats = index.refresh(&roots(&dir), now());
     assert_eq!(stats.read, 1);
     assert_eq!(keys(&index, &["still"]), vec!["claude:ok"]);
-    // Reading a path that has gone is "gone", not a crash.
     let meta = SessionMeta {
         key: "claude:x".into(),
         tool_key: "claude".into(),
@@ -345,7 +328,6 @@ fn a_file_that_vanishes_or_cannot_be_read_does_not_stop_the_scan() {
         read::read(&meta, SessionTool::Claude),
         read::Read1::Gone
     ));
-    // A missing root is no error either.
     let index = SessionIndex::new(None);
     let nothing = IndexRoots {
         claude: vec![ClaudeRoot {
@@ -373,7 +355,6 @@ fn the_database_carries_the_index_to_the_next_start() {
     first.refresh(&r, now());
     assert!(db.exists());
 
-    // A new index answers from the database before it reads anything, and reuses the entry.
     let second = SessionIndex::new(Some(db.clone()));
     second.load_cache();
     assert_eq!(keys(&second, &["remember"]), vec!["claude:a"]);
@@ -453,7 +434,6 @@ fn a_session_in_two_lanes_keeps_the_newer_copy_and_a_linked_projects_folder_coun
     ];
     #[cfg(unix)]
     {
-        // A second lane whose projects folder is a link to the main one.
         std::fs::create_dir_all(dir.path("lane2")).unwrap();
         std::os::unix::fs::symlink(dir.path("main/projects"), dir.path("lane2/projects")).unwrap();
         r.claude.push(ClaudeRoot {
@@ -494,14 +474,12 @@ fn codex_rollouts_are_found_only_under_recent_day_folders() {
         &line("a"),
         60.0,
     );
-    // Written to recently but started long ago: not found, like the Swift app.
     transcript(
         &dir,
         &format!("codex/sessions/{old}/{}", name(22)),
         &line("b"),
         60.0,
     );
-    // A file that isn't a rollout, and a folder that isn't a date.
     transcript(
         &dir,
         &format!("codex/sessions/{today}/notes.jsonl"),

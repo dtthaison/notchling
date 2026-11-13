@@ -1,13 +1,5 @@
-//! Whether the conversation follows its newest message (the Swift app's `atBottom`): pinned to
-//! the bottom while you are there, left alone once you scroll up, with a "↓ Latest" pill to get
-//! back. Pure, so the rule is tested on every system; `ChatView` feeds it the scroll handle's
-//! numbers before a reload is applied.
-
-/// How far from the bottom still counts as at the bottom, in points.
 pub const TOLERANCE: f32 = 24.0;
 
-/// A scroll position as GPUI keeps it: `offset_y` is 0 at the top and goes negative as you scroll
-/// down; `max_y` is how far the content can scroll (0 when it fits).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Scroll {
     pub offset_y: f32,
@@ -15,7 +7,6 @@ pub struct Scroll {
 }
 
 impl Scroll {
-    /// How far the bottom of the content is below the bottom of the view.
     pub fn from_bottom(self) -> f32 {
         (self.max_y + self.offset_y).max(0.0)
     }
@@ -25,18 +16,12 @@ impl Scroll {
     }
 }
 
-/// What to do with a reload.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Follow {
-    /// Scroll to the end.
     pub scroll: bool,
-    /// Show the "Latest" pill.
     pub pill: bool,
 }
 
-/// `prev` is the position before the reload, `new_max_y` the content's reach after it (`prev`'s
-/// when not known yet). Sending a message and picking another session always go to the end; else
-/// the end follows only if you were at the bottom, and a pill shows while you are not.
 pub fn decide(prev: Scroll, new_max_y: f32, sent: bool, session_changed: bool) -> Follow {
     if sent || session_changed || prev.at_bottom() {
         return Follow {
@@ -71,7 +56,6 @@ mod tests {
                 pill: false
             }
         );
-        // Exactly at the bottom, and within the tolerance of it.
         assert!(decide(at(-500.0, 500.0), 620.0, false, false).scroll);
         assert!(decide(at(-480.0, 500.0), 620.0, false, false).scroll);
         assert!(decide(at(-476.0, 500.0), 620.0, false, false).scroll);
@@ -87,7 +71,6 @@ mod tests {
                 pill: true
             }
         );
-        // Just past the tolerance.
         assert!(!decide(at(-474.0, 500.0), 500.0, false, false).scroll);
     }
 

@@ -1,4 +1,3 @@
-//! Fakes for the host tests (`HostdTests`' FakeHandle and FakeSpawner) and short scratch folders.
 #![allow(dead_code)]
 
 use notchling_ptyhost::host::{ExitHandler, Handle, HostOptions, Listener, SessionHost, Spawner};
@@ -11,8 +10,6 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-/// A scratch folder removed on drop. Unix socket paths are limited to about 104 bytes, so it lives
-/// under /tmp with a short name, not in the temp folder macOS hands out.
 pub struct Scratch {
     pub dir: PathBuf,
 }
@@ -232,7 +229,6 @@ pub fn now_ms() -> i64 {
         .unwrap_or(0)
 }
 
-/// A host over a fake spawner, with quick discovery.
 pub fn make_host(
     scratch: &Scratch,
     spawner: Arc<FakeSpawner>,

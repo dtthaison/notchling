@@ -1,6 +1,3 @@
-//! `HostError`. The texts are the Swift host's, word for word: a refusal's text goes over the wire as
-//! the reply's `error`, and clients show it.
-
 use std::fmt;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -31,7 +28,6 @@ impl fmt::Display for HostError {
 impl std::error::Error for HostError {}
 
 impl HostError {
-    /// A socket call failed with this error.
     pub fn socket(error: &std::io::Error) -> HostError {
         HostError::Socket(error.raw_os_error().unwrap_or(-1))
     }

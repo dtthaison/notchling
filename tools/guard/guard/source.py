@@ -1,21 +1,3 @@
-"""Blank out comments and string contents on one source line, so the checks look only at code.
-
-A small scanner, not regexes across quotes. It knows `//` and `/* */` (Swift, Rust, Dart), `#`
-(shell, Python), and strings with backslash escapes. The result keeps the line's length, so column
-positions still line up. What it takes from each language:
-
-- Swift: only `"` opens a string, with `#"..."#` raw strings, and `\\(...)` inside one is code (the
-  scanner reads it as code, counting parentheses). A backtick name is an identifier, not a string;
-  `'` is nothing; `#/ ... /#` is a regex literal and may hold quotes (the bare `/ ... /` form is
-  off in the build's Swift 5 mode). Dart: `'` and `"`, and `${...}` is code.
-- Rust: `"` strings, `r#"..."#` raw strings (also Dart's `r'...'`: no escapes), and `'x'` char
-  literals (`'a` is a lifetime).
-- Everything else with comments: `'` and `"` strings.
-- A triple quote is skipped, not read as a string: the scanner sees one line at a time, and a line
-  can close a multiline string and carry code after the delimiter (`\"\"\"; run()`).
-- A string that doesn't close on the line is blanked to its end.
-"""
-
 from __future__ import annotations
 
 from typing import Optional, Tuple
@@ -30,15 +12,12 @@ def _ext(path: str) -> str:
 
 
 def _rust_char_literal(line: str, i: int) -> bool:
-    """`'x'` or `'\\n'` is a char literal; `'a` (a lifetime) isn't."""
     if line[i + 1:i + 2] == "\\":
         return True
     return line[i + 2:i + 3] == "'"
 
 
 def strip_comments(path: str, line: str) -> str:
-    """Like `strip_code`, but string contents stay: for patterns that live inside strings
-    (`"/usr/bin/security"`, `import 'package:http/...'`)."""
     return strip_code(path, line, keep_strings=True)
 
 
@@ -59,8 +38,6 @@ class _Scan:
             self._blank(a, b)
 
     def code(self, i: int, closer: str = "") -> Tuple[int, bool]:
-        """Scan code from `i`. With a `closer` (`)` or `}`), stop after the one that balances the
-        interpolation's own opener. Returns where to go on, and whether the closer was found."""
         line, n = self.line, self.n
         opener = {")": "(", "}": "{"}.get(closer, "")
         depth = 0
@@ -93,18 +70,16 @@ class _Scan:
         return n, False
 
     def _skip_string(self, i: int) -> int:
-        """If a string, char literal or identifier starts at `i`: where it ends, with its text
-        blanked. Otherwise -1."""
         line, c = self.line, self.line[i]
         if self.swift:
             if c == "`":
                 end = line.find("`", i + 1)
                 return end + 1 if end >= 0 else -1
             if c == "#":
-                h = 0  # the number of `#`s before the quote
+                h = 0
                 while line.startswith("#", i + h):
                     h += 1
-                if line.startswith("/", i + h):  # `#/ ... /#`, an extended regex literal: it can hold quotes
+                if line.startswith("/", i + h):
                     end = line.find("/" + "#" * h, i + h + 1)
                     self._blank_string(i + h + 1, self.n if end < 0 else end)
                     return self.n if end < 0 else end + 1 + h
@@ -128,9 +103,6 @@ class _Scan:
         return -1
 
     def _raw_open(self, i: int) -> Optional[Tuple[int, int]]:
-        """Rust `r"`, `r#"`, `br#"` and Dart `r'`: a raw string has no escapes, so a quote or a
-        backslash inside it means nothing. Returns where the opening quote is and how many `#`s
-        precede it, or None."""
         line = self.line
         if not (self.rust or self.dart) or (i > 0 and (line[i - 1].isalnum() or line[i - 1] == "_")):
             return None
@@ -145,8 +117,6 @@ class _Scan:
         return (j + h, h) if line.startswith("\"", j + h) else None
 
     def _string(self, i: int, quote: str, hashes: int, raw: bool = False) -> int:
-        """`i` is just past the opening quote. Blanks the text, leaves interpolated code, returns
-        the index past the closing delimiter (`quote` and `hashes` `#`s)."""
         line, n = self.line, self.n
         end, esc = quote + "#" * hashes, "\\" + "#" * hashes
         start = j = i
@@ -177,8 +147,6 @@ class _Scan:
         return n
 
     def _interpolation(self, start: int, code_from: int, closer: str) -> int:
-        """Blank the string text from `start` up to the interpolation's code (which stays), and the
-        closing paren or brace. Returns the index past it."""
         self._blank_string(start, code_from)
         after, found = self.code(code_from, closer)
         if found:
@@ -193,6 +161,6 @@ def strip_code(path: str, line: str, keep_strings: bool = False) -> str:
     scan = _Scan(ext, line, keep_strings)
     try:
         scan.code(0)
-    except RecursionError:  # strings nested in interpolations nested in strings, a thousand deep
-        return line  # nothing blanked: the checks see all of it
+    except RecursionError:
+        return line
     return "".join(scan.out)

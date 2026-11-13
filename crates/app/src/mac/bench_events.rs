@@ -1,8 +1,3 @@
-//! AppKit events for `--render chat`'s bench (`bench`). GPUI's `Window::dispatch_event` returns a
-//! type GPUI keeps private, so a crate outside it can't call it; the bench hands the window's
-//! view the events AppKit would: the same path a real mouse or trackpad takes, ending in GPUI's
-//! `handle_view_event`. Nothing here moves the real pointer or posts a system event.
-
 use std::cell::Cell;
 
 use gpui::Pixels;
@@ -14,18 +9,14 @@ use objc2_core_graphics::{CGEvent, CGEventField, CGEventType, CGMouseButton, CGS
 use objc2_foundation::{NSPoint, NSString};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 
-/// Sends events to one window's content view.
 pub struct Injector {
     view: Retained<NSView>,
     window_number: isize,
-    /// The view's height in points: AppKit's y runs up from the bottom, GPUI's down from the top.
     height: f64,
-    /// What a scroll event's location has to add, found once (see [`Injector::scroll`]).
     scroll_origin: Cell<Option<f64>>,
 }
 
 impl Injector {
-    /// The injector for a GPUI window, or `None` when it has no AppKit view.
     pub fn new(window: &gpui::Window) -> Option<Injector> {
         let handle = HasWindowHandle::window_handle(window).ok()?;
         let RawWindowHandle::AppKit(handle) = handle.as_raw() else {
@@ -43,7 +34,6 @@ impl Injector {
         })
     }
 
-    /// A handle that draws the window by hand (see [`FrameDriver`]).
     pub fn frame_driver(&self) -> FrameDriver {
         FrameDriver {
             view: self.view.clone(),
@@ -77,24 +67,18 @@ impl Injector {
         )
     }
 
-    /// The pointer moved to a point of the window.
     pub fn moved(&self, x: Pixels, y: Pixels) {
         if let Some(event) = self.mouse(NSEventType::MouseMoved, x, y, 0) {
             NSResponder::mouseMoved(&self.view, &event);
         }
     }
 
-    /// The left button went down, or the pointer moved with it held (`drag`), or it came up.
     pub fn press(&self, x: Pixels, y: Pixels) {
         if let Some(event) = self.mouse(NSEventType::LeftMouseDown, x, y, 1) {
             NSResponder::mouseDown(&self.view, &event);
         }
     }
 
-    /// The right button pressed and let go at a point of the window: a context menu's click.
-    /// AppKit's own constructor can't say which button an event is (GPUI reads
-    /// `buttonNumber`, always 0 there), so these come from Core Graphics events, placed the way
-    /// [`Injector::scroll`] places its own.
     pub fn right_click(&self, x: Pixels, y: Pixels) {
         for kind in [CGEventType::RightMouseDown, CGEventType::RightMouseUp] {
             let wanted = self.at(x, y);
@@ -120,8 +104,6 @@ impl Injector {
         }
     }
 
-    /// What an event with no window reports as its location's y when it is at the top of the
-    /// screen: AppKit's y runs up from the bottom, Core Graphics' down from the top. Found once.
     fn screen_origin(&self) -> f64 {
         if let Some(origin) = self.scroll_origin.get() {
             return origin;
@@ -150,8 +132,6 @@ impl Injector {
         }
     }
 
-    /// ⌘ and a key, offered to the window's view as AppKit offers a key equivalent (the first
-    /// thing it does with a ⌘ key): whether the view took it. `code` is the key's virtual code.
     pub fn command_key(&self, letter: &str, code: u16) -> bool {
         let chars = NSString::from_str(letter);
         let Some(event) = NSEvent::keyEventWithType_location_modifierFlags_timestamp_windowNumber_context_characters_charactersIgnoringModifiers_isARepeat_keyCode(
@@ -171,10 +151,6 @@ impl Injector {
         self.view.performKeyEquivalent(&event)
     }
 
-    /// A trackpad scroll of `dy` points at a point of the window; positive moves the content down
-    /// (towards what is above it). AppKit builds a scroll event only from a Core Graphics one,
-    /// and an event with no window reports its location on the screen, from the bottom left: the
-    /// first call finds what that adds to the window's own coordinates.
     pub fn scroll(&mut self, x: Pixels, y: Pixels, dy: f32) {
         let wanted = self.at(x, y);
         let Some(cg) =
@@ -182,7 +158,6 @@ impl Injector {
         else {
             return;
         };
-        // Pixel deltas count as a trackpad's only when the event says it is continuous.
         CGEvent::set_integer_value_field(Some(&cg), CGEventField::ScrollWheelEventIsContinuous, 1);
         let place = |cg: &CGEvent, screen_y: f64| {
             CGEvent::set_location(Some(cg), NSPoint::new(wanted.x, screen_y));
@@ -190,7 +165,6 @@ impl Injector {
         let origin = match self.scroll_origin.get() {
             Some(origin) => origin,
             None => {
-                // At screen y 0 (the top), AppKit's y is the screen's height.
                 place(&cg, 0.0);
                 let Some(probe) = NSEvent::eventWithCGEvent(&cg) else {
                     return;
@@ -207,16 +181,11 @@ impl Injector {
     }
 }
 
-/// Draws the window the way AppKit does when a layer needs display, for a bench that has to run
-/// while no display link ticks (the Mac's screen is locked or its display asleep). GPUI's
-/// `displayLayer:` is its own first-frame path: it runs the window's frame callback, which draws
-/// only when the window is dirty and presents, so a frame costs what a display link's would.
 pub struct FrameDriver {
     view: Retained<NSView>,
 }
 
 impl FrameDriver {
-    /// One frame, if the window has anything to draw.
     pub fn frame(&self) {
         // SAFETY: GPUI's view class implements `displayLayer:` (it ignores its argument); both
         // calls run on the main thread, outside any borrow of the app.

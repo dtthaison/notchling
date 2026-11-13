@@ -1,15 +1,9 @@
-//! Reading a Codex login (`auth.json`) and the usage endpoint Codex's own /status reads
-//! (`CodexLogin` in `Codex.swift`). Pure: nothing here touches a file, the Keychain or the network.
-
 use crate::accounts::jwt;
 use crate::providers::usage::{GroupedGroup, GroupedUsage, UsageWindow};
 use serde_json::Value;
 
-/// Whose login this is.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Identity {
-    /// `<chatgpt_user_id>:<chatgpt_account_id>`: one person can be in a personal and a team
-    /// workspace.
     pub id: String,
     pub email: String,
     pub plan: Option<String>,
@@ -21,8 +15,6 @@ fn tokens(login: &[u8]) -> Option<Value> {
     tokens.is_object().then(|| tokens.clone())
 }
 
-/// Whose login this is, from the id token's claims. `None` for an API key login, which has no
-/// account.
 pub fn identity(login: &[u8]) -> Option<Identity> {
     let tokens = tokens(login)?;
     let claims = jwt::claims(tokens.get("id_token")?.as_str()?)?;
@@ -49,7 +41,6 @@ pub fn identity(login: &[u8]) -> Option<Identity> {
     })
 }
 
-/// The access token and workspace to call the usage endpoint with. Debug shows neither.
 #[derive(Clone, PartialEq, Eq)]
 pub struct Access {
     pub token: String,
@@ -62,10 +53,6 @@ impl std::fmt::Debug for Access {
     }
 }
 
-/// The access token and workspace to call the usage endpoint with, while the token is still good
-/// (a minute to spare). Notchling never renews a Codex token: refresh tokens rotate, and a Codex
-/// session still holding the old one would be signed out. An expired token means no limits for
-/// that account until Codex itself renews it.
 pub fn access(login: &[u8], now: f64) -> Option<Access> {
     let tokens = tokens(login)?;
     let token = tokens.get("access_token")?.as_str()?.to_string();
@@ -78,7 +65,6 @@ pub fn access(login: &[u8], now: f64) -> Option<Access> {
     Some(Access { token, workspace })
 }
 
-/// "plus" → "Plus", "team_plus" → "Team Plus"; `None` for none or empty.
 pub fn plan_name(raw: Option<&str>) -> Option<String> {
     let raw = raw.filter(|r| !r.is_empty())?;
     Some(
@@ -95,7 +81,6 @@ pub fn plan_name(raw: Option<&str>) -> Option<String> {
     )
 }
 
-/// What `GET /backend-api/wham/usage` says: the plan and each limit window, as groups of bars.
 pub fn usage(data: &[u8], now: f64) -> (Option<String>, Option<GroupedUsage>) {
     let Ok(root) = serde_json::from_slice::<Value>(data) else {
         return (None, None);
@@ -149,7 +134,6 @@ pub fn usage(data: &[u8], now: f64) -> (Option<String>, Option<GroupedUsage>) {
     (plan, usage)
 }
 
-/// "5h" (the bar views read it as the short window), "Week", "Month", else hours or days.
 pub fn window_label(seconds: Option<f64>) -> String {
     let Some(seconds) = seconds.filter(|s| *s > 0.0) else {
         return "Limit".to_string();
@@ -164,18 +148,13 @@ pub fn window_label(seconds: Option<f64>) -> String {
     }
 }
 
-/// What a switch interrupts.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct RunningWork {
-    /// The ChatGPT app is open.
     pub app: bool,
-    /// Codex's managed app server runs.
     pub server: bool,
-    /// `codex` processes that are not the app server: CLI sessions and Chat turns.
     pub sessions: usize,
 }
 
-/// From `ps -axo command=` lines and whether the ChatGPT app runs (`runningWork`).
 pub fn running_work(ps: &str, app: bool) -> RunningWork {
     let mut work = RunningWork {
         app,
@@ -201,7 +180,6 @@ pub fn running_work(ps: &str, app: bool) -> RunningWork {
     work
 }
 
-/// The confirmation text for a switch, if it would interrupt anything.
 pub fn switch_warning(work: &RunningWork) -> Option<String> {
     let mut parts: Vec<String> = vec![];
     if work.app {
@@ -223,9 +201,6 @@ pub fn switch_warning(work: &RunningWork) -> Option<String> {
     (!parts.is_empty()).then(|| parts.join(" "))
 }
 
-/// A switch only runs on its own while nothing would be interrupted: no CLI or Chat turn (`codex`
-/// processes), no ChatGPT app to quit. The managed app server alone doesn't count; it restarts
-/// quietly.
 pub fn idle_for_auto_switch(work: &RunningWork) -> bool {
     !work.app && work.sessions == 0
 }

@@ -1,12 +1,6 @@
-//! What the search panel shows and what each key does, pure (the Swift `SearchModel` and
-//! `SearchPanelController.handleKey`): the query, the results grouped Pages, Vault, then Sessions, the
-//! selection, the panel's height for what it shows, the footer's hints, and a short note such as
-//! "Link Copied". The GPUI view (`view`, macOS) only lays it out and asks the daemon.
-
 use super::wire::{Page, Results, SessionRow};
 use crate::notch::answer::{type_key, Typed};
 
-/// The panel's sizes, in points (the Swift `SearchLayout`).
 pub mod layout {
     pub const WIDTH: f32 = 680.0;
     pub const FIELD: f32 = 56.0;
@@ -16,23 +10,16 @@ pub mod layout {
     pub const LIST_PADDING: f32 = 6.0;
     pub const EMPTY: f32 = 52.0;
     pub const FOOTER: f32 = 30.0;
-    /// The list scrolls beyond this height.
     pub const MAX_LIST: f32 = 8.0 * 48.0;
 }
 
-/// How long a note such as "Link Copied" stays in the footer.
 pub const NOTE_MS: i64 = 1600;
-/// How many of each are asked for with an empty query (the newest), and with words.
 pub const EMPTY_LIMIT: usize = 6;
 pub const LIMIT: usize = 30;
-/// How many pages are listed at most with words typed (sessions keep the daemon's limit).
 pub const PAGE_CAP: usize = 20;
-/// How many Secret Vault entries are listed at most.
 pub const SECRET_CAP: usize = 5;
-/// What the footer says while the daemon reads the index again.
 pub const INDEXING: &str = "Indexing sessions…";
 
-/// Which group a row is in.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Section {
     Pages,
@@ -50,17 +37,14 @@ impl Section {
     }
 }
 
-/// One row of the results.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Item {
     Page(Page),
-    /// A Secret Vault entry (no value): Return opens its form in Chat's vault sheet.
     Secret(notchling_engine::vault::VaultEntry),
     Session(SessionRow),
 }
 
 impl Item {
-    /// Stable across searches, so the selection can stay on the same row.
     pub fn id(&self) -> String {
         match self {
             Item::Page(p) => format!("page:{}", p.key()),
@@ -85,12 +69,10 @@ impl Item {
     }
 }
 
-/// A key press, as GPUI reports it, with the modifiers that matter here.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Press {
     pub key: String,
     pub key_char: Option<String>,
-    /// ⌘.
     pub platform: bool,
     pub control: bool,
     pub alt: bool,
@@ -115,26 +97,14 @@ impl Press {
     }
 }
 
-/// What a key press asks the view to do.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Outcome {
-    /// The selection moved.
     Moved,
-    /// Return: open the selected row.
     Open(Item),
-    /// Close the panel; `returning` gives the app you were in its focus back.
-    Hide {
-        returning: bool,
-    },
-    /// Esc with words typed: the query was cleared (search again).
+    Hide { returning: bool },
     Cleared,
-    /// The query changed (search again).
     Typed,
-    /// ⌘C: put `text` on the clipboard and show `note`.
-    Copy {
-        text: String,
-        note: &'static str,
-    },
+    Copy { text: String, note: &'static str },
     Ignored,
 }
 
@@ -143,11 +113,8 @@ pub struct SearchModel {
     pub query: String,
     items: Vec<Item>,
     pub selected: usize,
-    /// A search is out for the current query.
     pub searching: bool,
-    /// The daemon said it is reading the index again; the answer may grow in a moment.
     pub indexing: bool,
-    /// Why the last search failed, if it did.
     pub error: Option<String>,
     note: Option<(String, i64)>,
 }
@@ -179,7 +146,6 @@ impl SearchModel {
         self.items.get(self.selected)
     }
 
-    /// How many of each to ask for: a few of the newest with no words, more with words.
     pub fn limit(&self) -> usize {
         if self.query.trim().is_empty() {
             EMPTY_LIMIT
@@ -188,9 +154,6 @@ impl SearchModel {
         }
     }
 
-    /// Takes a search's answer: pages first (capped), then vault entries (only with words), then
-    /// sessions. The selection stays on
-    /// `keeping`'s row when it is still there, else goes to the top.
     pub fn apply(&mut self, results: Results, keeping: Option<&str>) {
         let cap = if self.query.trim().is_empty() {
             EMPTY_LIMIT
@@ -218,7 +181,6 @@ impl SearchModel {
             .unwrap_or(0);
     }
 
-    /// Whether the row at `index` is the first of its group, which gets a header above it.
     pub fn starts_section(&self, index: usize) -> bool {
         match (
             index.checked_sub(1).and_then(|i| self.items.get(i)),
@@ -230,7 +192,6 @@ impl SearchModel {
         }
     }
 
-    /// The rows and their headers, up to the height the list scrolls beyond.
     pub fn list_height(&self) -> f32 {
         let full: f32 = self
             .items
@@ -248,7 +209,6 @@ impl SearchModel {
         full.min(layout::MAX_LIST)
     }
 
-    /// The panel's height for what it shows now.
     pub fn height(&self) -> f32 {
         let chrome = layout::FIELD + 1.0 + layout::FOOTER;
         if self.items.is_empty() {
@@ -267,7 +227,6 @@ impl SearchModel {
         self.selected = at.clamp(0, last as i64) as usize;
     }
 
-    /// What the empty list says.
     pub fn empty_text(&self) -> &'static str {
         if self.error.is_some() {
             "Search Unavailable"
@@ -284,12 +243,10 @@ impl SearchModel {
         }
     }
 
-    /// Shows `text` in the footer for a moment.
     pub fn flash(&mut self, text: &str, now_ms: i64) {
         self.note = Some((text.to_owned(), now_ms + NOTE_MS));
     }
 
-    /// The note, while it lasts.
     pub fn note(&self, now_ms: i64) -> Option<&str> {
         match &self.note {
             Some((text, until)) if now_ms < *until => Some(text),
@@ -297,8 +254,6 @@ impl SearchModel {
         }
     }
 
-    /// The footer's left side: the note, else the error, else that the index is being read,
-    /// else what the panel searches.
     pub fn footer_text(&self, now_ms: i64) -> String {
         if let Some(note) = self.note(now_ms) {
             return note.to_owned();
@@ -312,7 +267,6 @@ impl SearchModel {
         "Pages, Vault and Sessions".to_owned()
     }
 
-    /// The footer's key hints for the selected row: (key, what it does).
     pub fn hints(&self) -> Vec<(&'static str, &'static str)> {
         let mut hints = Vec::new();
         match self.current() {
@@ -336,8 +290,6 @@ impl SearchModel {
         hints
     }
 
-    /// Arrows move, Return opens, ⌘C copies the link or session id, ⌘W closes, Esc clears then
-    /// closes, and anything else types into the query.
     pub fn press(&mut self, press: &Press) -> Outcome {
         match press.key.as_str() {
             "down" => {
@@ -392,7 +344,6 @@ impl SearchModel {
             press.control,
         ) {
             Typed::Changed => Outcome::Typed,
-            // Return was handled above; anything else that isn't typing.
             Typed::Submit | Typed::Ignored => Outcome::Ignored,
         }
     }

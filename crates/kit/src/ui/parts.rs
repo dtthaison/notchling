@@ -1,10 +1,3 @@
-//! Part labels over GPUI: the names of the parts on screen while the ? button is on, so a change
-//! can be asked for by name ("the Context Meter"). The state is one [`Global`] ([`Labels`]) every
-//! window reads, so Chat and the notch show their names together; a tagged element gets a dashed
-//! guide outline and a name badge on its edge, drawn over it without taking layout space or
-//! clicks (neither has a hitbox). The pure half (where the badge sits, the button's state) is
-//! `crate::labels`. Ported from `KitPartLabel` and `KitPartsButton` in `ChatKit.swift`.
-
 use gpui::{div, prelude::*, px, App, Div, ElementId, FontWeight, Global, Position, Stateful};
 
 use super::icons::icon;
@@ -19,25 +12,21 @@ use crate::{Appearance, Icon, Ink};
 
 impl Global for Labels {}
 
-/// Whether the part names show.
 pub fn parts_on(cx: &App) -> bool {
     cx.try_global::<Labels>().is_some_and(|l| l.on)
 }
 
-/// Shows or hides the part names in every window.
 pub fn set_parts(cx: &mut App, on: bool) {
     cx.default_global::<Labels>().on = on;
     cx.refresh_windows();
 }
 
-/// Flips the part names; the new state.
 pub fn toggle_parts(cx: &mut App) -> bool {
     let on = cx.default_global::<Labels>().toggle();
     cx.refresh_windows();
     on
 }
 
-/// The ? button's hover, for the caller to put on it with its tooltip.
 pub fn parts_tip(on: bool) -> &'static str {
     if on {
         "Hide the part names"
@@ -46,8 +35,6 @@ pub fn parts_tip(on: bool) -> &'static str {
     }
 }
 
-/// The ? button: a ghost button, pressed and in the guide ink while the names show. The caller
-/// adds the click (`toggle_parts`) and the tooltip (`parts_tip`).
 pub fn parts_button(id: impl Into<ElementId>, appearance: Appearance, cx: &App) -> Stateful<Div> {
     let on = parts_on(cx);
     let ink = if on { Ink::Guide } else { Ink::TextMuted };
@@ -60,8 +47,6 @@ pub fn parts_button(id: impl Into<ElementId>, appearance: Appearance, cx: &App) 
     )
 }
 
-/// The name badge: a guide capsule with the name in onGuide, placed by `badge_place`. Its wrapper
-/// spans the outline's width so a centred badge can centre, and is positioned on the edge.
 fn badge(name: &str, corner: Corner, inside: bool, appearance: Appearance) -> Div {
     let place = badge_place(corner, inside);
     let pill = div()
@@ -91,28 +76,19 @@ fn badge(name: &str, corner: Corner, inside: bool, appearance: Appearance) -> Di
     row.child(pill)
 }
 
-/// Names an element for the ? button. Call it last in the chain, so the outline and badge paint
-/// over the element's children.
 pub trait KitPart: Styled + ParentElement + Sized {
-    /// Names this part, the badge at its top left. Use the name the user will see; search the
-    /// code for `.part("Name"` or `.part_at("Name"`.
     fn part(self, name: &str, appearance: Appearance, cx: &App) -> Self {
         self.part_at(name, Corner::TopLeading, appearance, cx)
     }
 
-    /// Names this part with the badge on `corner`, straddling the outline.
     fn part_at(self, name: &str, corner: Corner, appearance: Appearance, cx: &App) -> Self {
         self.tag_part(name, corner, false, appearance, cx)
     }
 
-    /// Names this part with the badge inside the outline, where the edge is clipped (a scroll
-    /// view, the notch's rounded bottom).
     fn part_inside(self, name: &str, corner: Corner, appearance: Appearance, cx: &App) -> Self {
         self.tag_part(name, corner, true, appearance, cx)
     }
 
-    /// The outline and the badge, when the names are on. The element becomes the containing block
-    /// for them (`relative`) unless it is positioned already.
     fn tag_part(
         mut self,
         name: &str,

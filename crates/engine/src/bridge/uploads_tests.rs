@@ -1,7 +1,3 @@
-//! Photos from the phone through the router (Swift `PhoneUploadTests`) and the hostile cases the
-//! M4 review names: a name that climbs out of the folder, a huge or never-finished upload, a photo
-//! typed into a session while acting is off.
-
 use super::backend::BridgeBackend;
 use super::live::{Acting, ActingOff, LiveBackend, Sources, ACTING_OFF};
 use super::model::*;
@@ -25,7 +21,6 @@ fn b64(data: &[u8]) -> String {
     base64::engine::general_purpose::STANDARD.encode(data)
 }
 
-/// Begins an upload and sends it in `chunk`-sized pieces; the last answer is `end`'s.
 fn upload(
     rig: &Rig,
     connection: &Arc<super::Connection>,
@@ -133,10 +128,8 @@ fn refusals() {
     let chunk =
         ask(json!({"id":4,"op":"session.image.chunk","uploadId":"nope","seq":0,"data":"AAAA"}));
     assert_eq!(error_code(&chunk), Some("not_found"));
-    // Not a picture: bytes that are not JPEG, PNG, GIF or WebP.
     let reply = upload(&rig, &connection, &io, "p", "", &[0x41; 5000]);
     assert_eq!(error_code(&reply), Some("invalid"));
-    // Short: fewer bytes than announced.
     let short = data_of(&begin("p", 5000))["uploadId"]
         .as_str()
         .expect("id")
@@ -242,12 +235,8 @@ fn types_are_detected_by_content() {
     assert_eq!(ImageStore::detect(&[]), None);
 }
 
-// MARK: Hostile input
-
 #[test]
 fn a_name_that_climbs_out_of_the_folder_cannot_escape_it() {
-    // The phone names no file: the session id and caption are text, the file name is made here. A
-    // caption full of dots and slashes ends up in the message, never in a path.
     let rig = Rig::new();
     rig.backend.with(|s| {
         s.sessions = vec![session(
@@ -281,7 +270,6 @@ fn a_name_that_climbs_out_of_the_folder_cannot_escape_it() {
         "{name}"
     );
     assert_eq!(files[0].parent(), Some(rig.dir.path("images").as_path()));
-    // A session id that climbs is just an unknown session.
     rig.send(
         &connection,
         r#"{"id":5,"op":"session.image.begin","sessionId":"../../p","bytes":10}"#,
@@ -393,7 +381,6 @@ fn an_upload_not_finished_in_time_is_dropped_and_cannot_be_continued() {
         0,
         "the half-photo was freed, not just ignored"
     );
-    // Finishing late is refused too, even with every byte there.
     let id = uploads.begin(1, "p", 4, "", 0.0);
     assert_eq!(uploads.append(&id, 1, 0, &[1, 2, 3, 4], 1_000.0), Ok(()));
     assert!(matches!(
@@ -469,8 +456,6 @@ fn a_huge_announcement_or_piece_is_refused_without_buffering() {
     );
 }
 
-// MARK: Acting
-
 struct FakeSources;
 
 impl Sources for FakeSources {
@@ -513,7 +498,6 @@ impl Acting for RecordingActing {
     }
 }
 
-/// A router over the live backend, with the acting side the test gives it.
 fn live_rig(
     backend: Arc<dyn BridgeBackend>,
 ) -> (Router, Arc<super::Connection>, Arc<RecordingIo>, TempDir) {
@@ -568,7 +552,6 @@ fn send_photo(router: &Router, connection: &Arc<super::Connection>, io: &Recordi
 
 #[test]
 fn acting_turned_off_mid_photo_refuses_it_and_no_file_is_left_behind() {
-    /// On when the upload begins, off by the time the path is typed.
     struct TurnedOff;
     impl Acting for TurnedOff {
         fn send_message(&self, text: &str, session: &Session) -> Result<(), BridgeFailure> {

@@ -1,7 +1,3 @@
-//! `machines.json` has two writers in one process: the facts a refresh learned (a background
-//! thread) and the window's edits (the UI thread). Each reads, changes and saves the file under
-//! [`super::registry::write_lock`], so neither saves over what the other just wrote.
-
 use super::registry::{write_lock, SdWorkerSettings};
 use super::step::{CheckResult, Detected};
 use super::tests_engine_world::*;
@@ -26,7 +22,6 @@ fn the_facts_a_refresh_learned_wait_for_a_write_in_progress() {
     s.machines = vec![m];
     let w = Arc::new(s.build());
 
-    // the window is in the middle of its own read-modify-write
     let (held_tx, held) = channel::<()>();
     let (release_tx, release) = channel::<()>();
     let writer = std::thread::spawn(move || {

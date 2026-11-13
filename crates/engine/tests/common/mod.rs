@@ -1,4 +1,3 @@
-//! Shared test helpers: fixture paths into the Swift app's test fixtures, and scratch folders.
 #![allow(dead_code)]
 
 use std::fs;
@@ -22,7 +21,6 @@ pub fn s(path: &Path) -> String {
     path.to_string_lossy().into_owned()
 }
 
-/// A scratch folder removed on drop.
 pub struct Scratch {
     pub dir: PathBuf,
 }

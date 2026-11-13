@@ -1,22 +1,14 @@
-//! Just enough URL for the Web tab: `scheme://host[:port][/path][?query][#fragment]`. A page the
-//! transcript mentioned is cut back to an origin and a path, so nothing here needs percent
-//! decoding or relative references.
-
-/// A parsed absolute http(s)-style URL. User info, if any, is dropped.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Url {
     pub scheme: String,
     pub host: String,
     pub port: Option<u16>,
-    /// Empty, or starting with `/`.
     pub path: String,
     pub query: Option<String>,
     pub fragment: Option<String>,
 }
 
 impl Url {
-    /// None for text with spaces or control characters, an empty scheme or host, or a port that is
-    /// not a number up to 65535.
     pub fn parse(text: &str) -> Option<Url> {
         if text.chars().any(|c| c.is_whitespace() || c.is_control()) {
             return None;
@@ -57,7 +49,6 @@ impl Url {
         })
     }
 
-    /// `http` and `https` only, on `localhost` or `127.0.0.1`.
     pub fn parse_local(text: &str) -> Option<Url> {
         let url = Url::parse(text)?;
         let web = url.scheme == "http" || url.scheme == "https";
@@ -68,18 +59,15 @@ impl Url {
         self.scheme == "http" || self.scheme == "https"
     }
 
-    /// The port the URL names, else the scheme's default.
     pub fn effective_port(&self) -> u16 {
         self.port
             .unwrap_or(if self.scheme == "https" { 443 } else { 80 })
     }
 
-    /// `scheme://host:port`, the port always written.
     pub fn origin(&self) -> String {
         format!("{}://{}:{}", self.scheme, self.host, self.effective_port())
     }
 
-    /// The URL as text again: no user info, the port only if it was given.
     pub fn render(&self) -> String {
         let mut text = format!("{}://{}", self.scheme, self.host);
         if let Some(port) = self.port {
@@ -112,7 +100,6 @@ fn split_host_port(text: &str) -> Option<(&str, Option<u16>)> {
     }
 }
 
-/// `Some(None)` for an empty port (`host:`), `Some(Some(n))` for a number, None for anything else.
 fn parse_port(text: &str) -> Option<Option<u16>> {
     if text.is_empty() {
         return Some(None);

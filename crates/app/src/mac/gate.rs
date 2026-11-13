@@ -1,6 +1,3 @@
-//! Action controls over GPUI: a control acting allows is live; one it doesn't is drawn disabled,
-//! takes no click and says why on hover. The tooltip is a small kit card.
-
 use gpui::{div, prelude::*, px, Context, Div, Render, SharedString, Stateful, Window};
 use notchling_kit::metric::RADIUS_SM;
 use notchling_kit::part::PartState;
@@ -9,10 +6,8 @@ use notchling_kit::{Appearance, Ink, TypeRole};
 
 use crate::acting::Control;
 
-/// A tooltip's view.
 pub struct Tip {
     text: SharedString,
-    /// A second, fainter line (a terminal's user, host and folder).
     detail: Option<SharedString>,
     appearance: Appearance,
 }
@@ -49,7 +44,6 @@ impl Render for Tip {
     }
 }
 
-/// A tooltip of a title and a fainter detail line under it.
 pub fn tip_detail(
     element: Stateful<Div>,
     text: SharedString,
@@ -67,7 +61,6 @@ pub fn tip_detail(
     })
 }
 
-/// The part state a control is drawn in.
 pub fn state(control: Control) -> PartState {
     if control.enabled {
         PartState::Rest
@@ -76,7 +69,6 @@ pub fn state(control: Control) -> PartState {
     }
 }
 
-/// Puts a tooltip made at render time (a meter's numbers) on an element.
 pub fn tip_text(
     element: Stateful<Div>,
     text: SharedString,
@@ -88,7 +80,6 @@ pub fn tip_text(
     })
 }
 
-/// Puts a control's tooltip on an element.
 pub fn tip(element: Stateful<Div>, control: Control, appearance: Appearance) -> Stateful<Div> {
     match control.tooltip {
         Some(text) => element.tooltip(move |_, cx| {

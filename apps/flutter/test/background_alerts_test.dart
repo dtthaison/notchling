@@ -43,7 +43,6 @@ void main() {
       final Map<String, AlertKind> first = alertsBetween(running, next, announced);
       expect(first, <String, AlertKind>{'a': AlertKind.needsInput, 'b': AlertKind.finished});
       expect(alertsBetween(next, next, announced), isEmpty, reason: 'the same list again says nothing new');
-      // A poll that flickers back and forth between two states does not repeat the alert for the same change.
       expect(alertsBetween(running, next, announced), isEmpty);
     });
 
@@ -139,7 +138,6 @@ void main() {
         TickerMode(enabled: false, child: StatusDot(state: SessionState.running)),
       ])));
       expect(tester.hasRunningAnimations, isFalse);
-      // Nothing scheduled: pumping a few seconds draws no extra frames for the hidden dot.
       int frames = 0;
       tester.binding.addPersistentFrameCallback((Duration _) => frames++);
       await tester.pump(const Duration(seconds: 2));
@@ -204,7 +202,6 @@ void main() {
       addTearDown(inset.dispose);
       addTearDown(lift.dispose);
       int listBuilds = 0;
-      // Created once, as the chat screen does: its parent does not rebuild with the keyboard.
       final Widget list = ValueListenableBuilder<double>(
         valueListenable: lift.settled,
         builder: (BuildContext context, double room, Widget? _) {
@@ -226,7 +223,7 @@ void main() {
                   composer: composerWidget,
                 ),
               ),
-              const SizedBox(height: 80), // the tab bar below the page
+              const SizedBox(height: 80),
             ]),
           ),
         ),

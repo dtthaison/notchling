@@ -1,7 +1,3 @@
-//! `--json` on the client commands, through the built binary: `status`, `pages`, `page`,
-//! `secrets` and `delegate-models` print one JSON value on stdout, with the exit codes and the
-//! stderr lines the text forms have. Never the real folders: every run sets `NOTCHLING_DATA_ROOT`
-//! and a fake `HOME` under /tmp, and a guard stops the daemon it starts.
 #![cfg(unix)]
 
 use notchling_engine::pages::{PageLibrary, RecordContext};
@@ -21,7 +17,6 @@ impl Drop for Dir {
     }
 }
 
-/// A short folder under /tmp (socket paths are capped at 104 bytes on macOS).
 fn scratch(tag: &str) -> Dir {
     let dir = PathBuf::from(format!("/tmp/nl-{tag}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
@@ -83,7 +78,6 @@ fn run(root: &Path, args: &[&str]) -> (i32, String, String) {
     )
 }
 
-/// A data root with two saved pages.
 fn make_root(dir: &Path) -> PathBuf {
     let root = dir.join("root");
     std::fs::create_dir_all(root.join("work")).unwrap();
@@ -128,7 +122,6 @@ fn status_json_is_the_daemons_status_and_the_text_is_unchanged() {
     let root = dir.0.join("root");
     std::fs::create_dir_all(root.join("claude")).unwrap();
 
-    // No daemon: the same exit code and stderr line as the text form, nothing on stdout.
     let (code, out, err) = run(&root, &["status", "--json"]);
     assert_eq!(code, 3);
     assert!(out.is_empty(), "{out}");
@@ -160,7 +153,6 @@ fn pages_and_page_json_with_and_without_a_daemon() {
     let dir = scratch("json-pages");
     let root = make_root(&dir.0);
 
-    // Without a daemon the library is read directly; the shape is the same either way.
     let check = |root: &Path| {
         let (code, out, err) = run(root, &["pages", "--json"]);
         assert_eq!((code, err.as_str()), (0, ""));
@@ -185,7 +177,6 @@ fn pages_and_page_json_with_and_without_a_daemon() {
         assert_eq!(code, 0);
         assert_eq!(json_of(&out)["pages"][0]["title"], "Cost Report");
 
-        // Nothing found: exit 1 and the same stderr line, and an empty list on stdout.
         let (code, out, err) = run(root, &["page", "no such page", "--json"]);
         assert_eq!(code, 1);
         assert_eq!(err, "No saved page matches \"no such page\".\n");
@@ -195,7 +186,6 @@ fn pages_and_page_json_with_and_without_a_daemon() {
     let _daemon = start_daemon(&root);
     check(&root);
 
-    // The text forms are what they were.
     let (_, table, _) = run(&root, &["pages"]);
     assert!(table.contains("AbCdEfGhIjKlMnOpQrStUv\tCost Report\tme@example.com"));
     assert!(serde_json::from_str::<Value>(&table).is_err());
@@ -207,14 +197,11 @@ fn secrets_json_keeps_the_exit_codes_and_prints_no_value() {
     let root = dir.0.join("root");
     std::fs::create_dir_all(root.join("claude")).unwrap();
 
-    // No daemon.
     let (code, out, err) = run(&root, &["secrets", "--json"]);
     assert_eq!(code, 2);
     assert!(out.is_empty(), "{out}");
     assert!(err.contains("Notchling isn't running"), "{err}");
 
-    // A daemon with the vault switch off, as every daemon starts: the refusal is on stderr, exit
-    // 2, and stdout holds nothing at all (no value, no half-answer).
     let _daemon = start_daemon(&root);
     let (code, out, err) = run(&root, &["secrets", "github", "--json"]);
     assert_eq!((code, err.trim()), (2, OFF));
@@ -248,14 +235,12 @@ fn delegate_models_json_lists_the_codex_cache() {
     assert_eq!(models[1]["slug"], "gpt-b");
     assert_eq!(models[1]["efforts"], json!([]));
 
-    // Both tools, whichever order the flag comes in; agy may or may not be installed here.
     let (code, out, _) = run(&root, &["delegate-models", "--json"]);
     assert_eq!(code, 0);
     let v = json_of(&out);
     assert_eq!(v["codex"]["models"].as_array().unwrap().len(), 2);
     assert!(v["agy"]["available"].is_boolean() && v["agy"]["models"].is_array());
 
-    // Without the flag the listing is the text it was.
     let (code, text, _) = run(&root, &["delegate-models", "codex"]);
     assert_eq!(code, 0);
     assert!(text.starts_with("codex (--model <slug> --effort <level>):\n  gpt-a  efforts: low, medium (default medium)\n"));

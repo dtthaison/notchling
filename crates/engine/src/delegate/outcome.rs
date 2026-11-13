@@ -1,6 +1,3 @@
-//! What a delegated run came to, and how it is printed (Swift `Delegate.Outcome`, `render`,
-//! `json`). Text and `--json` shape and the exit codes are the Swift command's.
-
 use super::options::Tool;
 use serde_json::json;
 use std::collections::BTreeMap;
@@ -12,11 +9,8 @@ pub struct Outcome {
     pub model: Option<String>,
     pub effort: Option<String>,
     pub reply: String,
-    /// Images, videos and audio the tool made, where it saved them.
     pub media: Vec<String>,
-    /// Where `--out` copied them.
     pub copied: Vec<String>,
-    /// Permissions the tool asked for that were declined (agy), by title.
     pub declined: Vec<String>,
     pub error: Option<String>,
     pub timed_out: bool,
@@ -42,7 +36,6 @@ impl Outcome {
         }
     }
 
-    /// 0 when it finished, 1 when it failed, 124 on timeout.
     pub fn exit_code(&self) -> i32 {
         if self.timed_out {
             124
@@ -54,8 +47,6 @@ impl Outcome {
     }
 }
 
-/// The text form: a header line, `Session:`, `Error:`, the files, the declined permissions, then
-/// the reply after a blank line. No trailing newline (the caller prints one).
 pub fn render(o: &Outcome) -> String {
     let mut lines: Vec<String> = Vec::new();
     let mut head = o.tool.title().to_string();
@@ -101,7 +92,6 @@ pub fn render(o: &Outcome) -> String {
     lines.join("\n")
 }
 
-/// The `--json` form: one line, keys sorted (whatever features serde_json is built with), slashes unescaped.
 pub fn to_json(o: &Outcome) -> String {
     let mut d: BTreeMap<&str, serde_json::Value> = BTreeMap::new();
     d.insert("tool", json!(o.tool.raw()));

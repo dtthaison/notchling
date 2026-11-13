@@ -6,8 +6,6 @@ import 'package:flutter/material.dart';
 import '../theme/tokens.dart';
 import 'motion.dart';
 
-/// Parts of the Notchling Chat kit that both screens use: avatar, status pill, Claude's mark, meters and the pet.
-
 const List<(Color, Color)> _avatarPairs = <(Color, Color)>[
   (Color(0xFFF7873B), Color(0xFFE0533A)),
   (Color(0xFF7DCB2C), Color(0xFF2E9E5B)),
@@ -19,7 +17,6 @@ const List<(Color, Color)> _avatarPairs = <(Color, Color)>[
   (Color(0xFFB7A68F), Color(0xFF7D6B55)),
 ];
 
-/// A session keeps its colors: FNV-1a of its name, high bits, like the Mac.
 (Color, Color) avatarColors(String name) {
   int hash = 0xcbf29ce484222325;
   for (final int byte in name.codeUnits.expand(
@@ -53,10 +50,8 @@ class KitAvatar extends StatelessWidget {
   final String name;
   final double size;
 
-  /// The status color for the badge in the corner, if any.
   final Color? status;
 
-  /// A widget for the corner instead of the plain dot (the animated status badge).
   final Widget? badge;
 
   @override
@@ -76,7 +71,6 @@ class KitAvatar extends StatelessWidget {
               alignment: Alignment.center,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                // One light, from above: a lighter top over the session's own colour, no glow.
                 gradient: LinearGradient(
                   begin: Alignment.topCenter,
                   end: Alignment.bottomCenter,
@@ -119,7 +113,6 @@ class KitAvatar extends StatelessWidget {
   }
 }
 
-/// Claude's mark: a sparkle on an orange disc.
 class KitClaudeMark extends StatelessWidget {
   const KitClaudeMark({super.key, this.size = 24});
   final double size;
@@ -145,7 +138,6 @@ class KitClaudeMark extends StatelessWidget {
   }
 }
 
-/// Status as a capsule: icon and word, never color alone.
 class KitStatusPill extends StatelessWidget {
   const KitStatusPill({
     super.key,
@@ -158,7 +150,6 @@ class KitStatusPill extends StatelessWidget {
   final IconData icon;
   final String text;
 
-  /// The needs-input orange is not readable as text on every surface; words use the accent-text color.
   final bool accentText;
 
   @override
@@ -191,7 +182,6 @@ class KitStatusPill extends StatelessWidget {
   }
 }
 
-/// A label, a value and a 3 dp bar (as wide as its text, at least [width]): context in the chat header, the account's limits. The bar turns orange from 80%.
 class KitMeter extends StatelessWidget {
   const KitMeter({
     super.key,
@@ -206,7 +196,6 @@ class KitMeter extends StatelessWidget {
   final double? fraction;
   final double? width;
 
-  /// Shown in place of the label when there is no room for the word (large text).
   final IconData? icon;
 
   @override
@@ -243,9 +232,6 @@ class KitMeter extends StatelessWidget {
               ),
               if (f != null) ...<Widget>[
                 const SizedBox(height: 3),
-                // The fill is a full-width bar scaled from the left (transform only), so a new value glides there
-                // instead of jumping; orange from 80%, red from 95%. (It used to be a FractionallySizedBox around
-                // a child-less ColoredBox, which is 0 tall: only the track showed.)
                 TweenAnimationBuilder<double>(
                   tween: Tween<double>(end: f < 0.02 ? 0.02 : f),
                   duration: motionDuration(
@@ -293,9 +279,6 @@ class KitMeter extends StatelessWidget {
   }
 }
 
-/// The pet from the notch for empty states. It enters with a fade and a small settle, glances to the side every few
-/// seconds for half a minute, then falls asleep and stays still: a gentle idle, not a loop. A missing drawing falls
-/// back to Claude's mark. With Reduce Motion it holds one pose.
 class KitPet extends StatefulWidget {
   const KitPet({
     super.key,
@@ -363,7 +346,6 @@ class _KitPetState extends State<KitPet> {
   }
 }
 
-/// A rounded fill with a hairline, for cards and bubbles.
 BoxDecoration kitCard(
   Kit kit, {
   double radius = Radii.card,
@@ -375,10 +357,6 @@ BoxDecoration kitCard(
   border: Border.all(color: border ?? kit.hairline),
 );
 
-/// The surface of a card, bubble, capsule or sheet, lit from one direction (above): a fill, a 1 px edge that is
-/// light at the top and a little darker at the bottom (no grey outline all around), and a short dark shadow.
-/// [level] 0 is flat (the window), 1 is cards, rows and Claude's bubbles, 2 is the composer, the permission card,
-/// sheets and banners. The corner shape is a superellipse (smooth, not a plain arc).
 class Surface extends StatelessWidget {
   const Surface({
     super.key,
@@ -398,13 +376,10 @@ class Surface extends StatelessWidget {
   final Color? fill;
   final EdgeInsetsGeometry? padding;
 
-  /// A full outline in this colour (the permission card's orange), instead of only the lit edge.
   final Color? outline;
 
-  /// A 2 px ring outside the shape (focus), in this colour.
   final Color? ring;
 
-  /// Clip the child to the shape (images, scrolling code).
   final bool clip;
 
   @override
@@ -476,18 +451,12 @@ class _EdgePainter extends CustomPainter {
       oldDelegate.kit != kit || oldDelegate.shape != shape;
 }
 
-/// A frosted bar: the content that scrolls under it is blurred (one BackdropFilter, in its own repaint boundary) and
-/// tinted by [Kit.glass]; a single hairline marks the edge facing the content.
 class GlassBar extends StatelessWidget {
   const GlassBar({super.key, required this.child, required this.top, this.solid = false});
   final Widget child;
 
-  /// An opaque fill instead of a blur. The Chat tab uses it: its list moves under the bar while the keyboard slides,
-  /// and a BackdropFilter would re-blur the moving content every frame. Any bar also turns solid while the keyboard
-  /// is up, for the same reason.
   final bool solid;
 
-  /// True for the top bar (edge line at the bottom), false for the bottom bar (edge line at the top).
   final bool top;
 
   @override

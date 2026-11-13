@@ -1,5 +1,3 @@
-//! The pieces' tests.
-
 use std::collections::BTreeMap;
 
 use notchling_engine::machines::engine_plan::{

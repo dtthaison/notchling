@@ -1,12 +1,3 @@
-//! `ProviderLimitWatcher`: watches the active account of a provider other than Claude Code (Codex,
-//! Antigravity). Near a limit it says so; with Notify and Switch (only where the provider allows
-//! it) it moves to the saved account with the most room. It reads limits the provider already
-//! fetched, never renews a token, and a switch is the provider's own `switch_to`.
-//!
-//! Codex switches only while nothing would be interrupted (`can_switch_now`: no `codex` process,
-//! the ChatGPT app closed); Antigravity only while it is closed and no `agy` runs, and its
-//! switch then leaves the app closed.
-
 use super::claude::{Announce, Observed};
 use super::logic::{
     announcement, blocked_until, decide_switch, watched_windows, Candidate, Mark, SwitchDecision,
@@ -19,14 +10,11 @@ use super::usage::UsageWindow;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-/// The busy check may list processes; while busy, look again at most this often.
 const BUSY_RECHECK: f64 = 60.0;
 
-/// What differs between providers.
 #[derive(Clone, Debug)]
 pub struct Setup {
     pub provider: WatchedProvider,
-    /// Codex: "Codex" (the 5h and week bars). `None` follows every group (Antigravity).
     pub primary_group: Option<String>,
     pub busy_text: String,
 }
@@ -54,7 +42,6 @@ pub struct ProviderLimitWatcher {
     source: Arc<dyn ProviderSource>,
     setup: Setup,
     config: Arc<LimitConfig>,
-    /// The switch point; Codex follows Claude's, Antigravity the default.
     switch_at: Box<dyn Fn() -> i64 + Send + Sync>,
     can_switch_now: Box<dyn Fn() -> bool + Send + Sync>,
     announce: Announce,
@@ -121,7 +108,6 @@ impl ProviderLimitWatcher {
         format!("{}: ", self.setup.provider.label)
     }
 
-    /// One round, at `now` (seconds since 1970).
     pub fn check(&mut self, now: f64) {
         let mode = self.mode();
         if mode == LimitMode::Off {
@@ -178,7 +164,6 @@ impl ProviderLimitWatcher {
                 )
             })
             .collect();
-        // The idle check may list processes; while busy, look again at most once a minute.
         let mut busy_since = self.busy_since;
         let can_switch_now = &self.can_switch_now;
         let mut idle = || {
@@ -254,8 +239,6 @@ impl ProviderLimitWatcher {
         }
     }
 
-    /// The climb itself when it just crossed 90 or 100, with the reason no switch followed;
-    /// otherwise the reason alone, at most once per half hour.
     fn note(&mut self, text: Option<String>, reason: &str, now: f64) {
         if let Some(text) = text {
             self.last_note = Some(now);

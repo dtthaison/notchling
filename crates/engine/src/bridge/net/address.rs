@@ -1,11 +1,5 @@
-//! `AddressFilter` and `LocalAddresses`.
-//!
-//! Who may even open a connection to the LAN port: this computer, the private LAN, link-local and
-//! Tailscale. Everything else is closed on sight. And the addresses the pairing QR offers.
-
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
-/// Whether a peer at `address` (text, with an optional `%zone` and `[...]`) may connect.
 pub fn is_allowed(address: &str) -> bool {
     let mut text = address;
     if let Some(zone) = text.find('%') {
@@ -23,7 +17,6 @@ pub fn is_allowed(address: &str) -> bool {
     }
 }
 
-/// [`is_allowed`] for an address already parsed.
 pub fn is_allowed_ip(ip: IpAddr) -> bool {
     match ip {
         IpAddr::V4(v4) => allowed_v4(v4),
@@ -33,12 +26,12 @@ pub fn is_allowed_ip(ip: IpAddr) -> bool {
 
 fn allowed_v4(ip: Ipv4Addr) -> bool {
     let [a, b, _, _] = ip.octets();
-    a == 127 // loopback
-        || a == 10 // 10/8
-        || (a == 172 && (16..=31).contains(&b)) // 172.16/12
-        || (a == 192 && b == 168) // 192.168/16
-        || (a == 169 && b == 254) // link-local
-        || (a == 100 && (64..=127).contains(&b)) // Tailscale 100.64/10
+    a == 127
+        || a == 10
+        || (a == 172 && (16..=31).contains(&b))
+        || (a == 192 && b == 168)
+        || (a == 169 && b == 254)
+        || (a == 100 && (64..=127).contains(&b))
 }
 
 fn allowed_v6(ip: Ipv6Addr) -> bool {
@@ -46,12 +39,10 @@ fn allowed_v6(ip: Ipv6Addr) -> bool {
     if ip == Ipv6Addr::LOCALHOST {
         return true;
     }
-    // ::ffff:a.b.c.d is an IPv4 client seen through a dual-stack socket.
     if bytes[..10].iter().all(|b| *b == 0) && bytes[10] == 0xFF && bytes[11] == 0xFF {
         return allowed_v4(Ipv4Addr::new(bytes[12], bytes[13], bytes[14], bytes[15]));
     }
-    bytes[0] & 0xFE == 0xFC // fc00::/7, which holds Tailscale's fd7a:115c:a1e0::/48
-        || (bytes[0] == 0xFE && bytes[1] & 0xC0 == 0x80) // fe80::/10
+    bytes[0] & 0xFE == 0xFC || (bytes[0] == 0xFE && bytes[1] & 0xC0 == 0x80)
 }
 
 pub fn is_tailscale_v4(address: &str) -> bool {
@@ -74,8 +65,6 @@ pub fn is_private_lan_v4(address: &str) -> bool {
     }
 }
 
-/// A peer's address as the limiter and the audit log key it: an IPv4 client seen through a
-/// dual-stack socket is its IPv4 address.
 pub fn canonical(ip: IpAddr) -> String {
     ip.to_canonical().to_string()
 }
@@ -87,8 +76,6 @@ pub struct LocalAddresses {
 }
 
 impl LocalAddresses {
-    /// Sorts interface addresses: private IPv4 of up, non-loopback interfaces, and the Tailscale
-    /// one (100.64/10 on a `utun`, or `tailscale*` on Linux).
     pub fn from_interfaces<'a>(entries: impl IntoIterator<Item = (&'a str, Ipv4Addr)>) -> Self {
         let mut result = LocalAddresses::default();
         for (name, ip) in entries {
@@ -105,14 +92,12 @@ impl LocalAddresses {
         result
     }
 
-    /// This computer's addresses now (empty where the OS isn't read yet: Windows).
     pub fn current() -> LocalAddresses {
         let list = interfaces();
         LocalAddresses::from_interfaces(list.iter().map(|(n, ip)| (n.as_str(), *ip)))
     }
 }
 
-/// Every up, non-loopback IPv4 interface address.
 #[cfg(unix)]
 fn interfaces() -> Vec<(String, Ipv4Addr)> {
     let mut out = Vec::new();

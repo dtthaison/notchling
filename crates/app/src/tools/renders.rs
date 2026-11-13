@@ -1,7 +1,3 @@
-//! The tools' views for `--render` (part U10), over fixtures and made-up data, never a daemon or
-//! the real home: the Antigravity permission card peeking out of the notch, the Codex model
-//! picker over the chat fixture's `models_cache.json`, and the Second Opinion sheet.
-
 use std::path::Path;
 
 use notchling_engine::sessions::{Agent, AgentGroup, AgentTarget};
@@ -45,7 +41,6 @@ pub const VIEWS: [ViewSpec; 3] = [
     },
 ];
 
-/// What a tools render shows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Shown {
     AgyPermission,
@@ -62,7 +57,6 @@ pub fn shown(name: &str) -> Option<Shown> {
     })
 }
 
-/// The demo Antigravity row the permission is for.
 pub const AGY_ROW: &str = "agy:demo-1";
 
 fn agy_prompt() -> Option<Value> {
@@ -71,8 +65,6 @@ fn agy_prompt() -> Option<Value> {
     serde_json::from_slice(&std::fs::read(path).ok()?).ok()
 }
 
-/// The notch over the fixture, with an Antigravity session added that waits on a permission, in a
-/// peek with acting on, so the card's options are live.
 pub fn agy_permission_scene() -> Scene {
     let mut source = Source::keeping_everything(DataRoot::for_render());
     let first = source.load(0);
@@ -119,7 +111,6 @@ pub fn agy_permission_scene() -> Scene {
     }
 }
 
-/// The picker over the chat fixture's models cache, with the last turn on the second model.
 pub fn codex_picker() -> CodexPicker {
     let root = ChatRoot::for_render(None);
     let facts = SessionFacts {
@@ -130,7 +121,6 @@ pub fn codex_picker() -> CodexPicker {
     CodexPicker::new(models::load(&root.codex_dir), Pick::default(), &facts)
 }
 
-/// The sheet over a made-up edit, both tools installed, Codex's models from the fixture.
 pub fn second_opinion() -> SecondOpinionSheet {
     let line = |kind, text: &str| DiffLine {
         kind,

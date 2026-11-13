@@ -1,19 +1,3 @@
-//! `notchling delegate` and `notchling delegate-models`: the engine's delegate command
-//! ([`notchling_engine::delegate`]) over this machine's folders, its signals and its streams.
-//!
-//! It needs no daemon and is not behind the `acting` switch (the plan's ruling): it runs a tool
-//! only because the agent that called it asked.
-//!
-//! - A signal (Ctrl+C, a task stop's SIGTERM, a closed terminal's SIGHUP) stops the other tool and
-//!   reports what it had.
-//! - Under `NOTCHLING_DATA_ROOT` the tools' media folders and Codex's model list are read from the
-//!   fixture root (`codex`, `gemini/antigravity-cli`), as the daemon does, and the tools are still
-//!   found in the real home's usual places and on the real PATH.
-//! - Called from a Claude Code session (`CLAUDE_CODE_SESSION_ID` is set), it leaves a record in
-//!   `<data>/delegations/` so Chat lists the job as that session's subagent (`delegate::record`).
-//! - "Allow Network in Codex Turns" is read, never written, from `settings.json` in the data
-//!   folder; on unless it says off. It only matters with `--write`.
-
 use crate::layout::Layout;
 use notchling_engine::delegate::command::{self, Context, RecordTo};
 use notchling_engine::delegate::options::DEPTH_VARIABLE;
@@ -29,12 +13,9 @@ static SIGNALLED: AtomicBool = AtomicBool::new(false);
 
 #[cfg(unix)]
 extern "C" fn on_signal(_: libc::c_int) {
-    // Only an atomic store: async-signal-safe.
     SIGNALLED.store(true, Ordering::SeqCst);
 }
 
-/// Catches SIGINT, SIGTERM and SIGHUP, and sets `stop` shortly after one arrives. The watcher
-/// thread lives until the process exits.
 #[cfg(unix)]
 fn stop_on_signals(stop: Arc<AtomicBool>) {
     let handler = on_signal as extern "C" fn(libc::c_int) as libc::sighandler_t;
@@ -57,8 +38,6 @@ fn stop_on_signals(_stop: Arc<AtomicBool>) {
     let _ = &SIGNALLED;
 }
 
-/// The folders for this run. `real_home` is where the tools are installed; the layout says where
-/// their data is read.
 pub fn folders(
     layout: &Layout,
     real_home: &Path,
@@ -73,7 +52,6 @@ pub fn folders(
         home: real_home.to_path_buf(),
         codex_home: layout.codex_dir_with(codex_home),
         antigravity: layout.antigravity_dir(),
-        // `~/.claude.json`, or the fixture root's own under `NOTCHLING_DATA_ROOT`: never the real one.
         claude_json: layout.home().join(".claude.json"),
         path,
         network,
@@ -98,7 +76,6 @@ fn setup() -> Option<(Layout, Folders)> {
     Some((layout, folders))
 }
 
-/// `notchling delegate <args>`: the exit code.
 pub fn run(args: &[String]) -> i32 {
     let Some((layout, folders)) = setup() else {
         return 2;
@@ -108,18 +85,13 @@ pub fn run(args: &[String]) -> i32 {
         return 2;
     };
     let raw_depth = std::env::var(DEPTH_VARIABLE).ok();
-    // The tools start their own processes (agy, and what it runs) with this environment: one
-    // level deeper than this one.
     if let Ok(deeper) = notchling_engine::delegate::options::enter_depth(raw_depth.as_deref()) {
         std::env::set_var(DEPTH_VARIABLE, deeper.to_string());
     }
     let stop = Arc::new(AtomicBool::new(false));
     stop_on_signals(stop.clone());
     let deps = real::deps(&folders, stop);
-    // `~` in a path is the user's own home, even over a fixture root.
     let home: PathBuf = folders.home.clone();
-    // An agent session that hands a job over (Claude Code sets its id in every command it runs)
-    // gets the job listed as its subagent; anyone else delegates as before.
     let parent = std::env::var(record::PARENT_VARIABLE)
         .ok()
         .map(|id| id.trim().to_string())
@@ -146,7 +118,6 @@ pub fn run(args: &[String]) -> i32 {
     )
 }
 
-/// `notchling delegate-models [codex|agy] [--json]`.
 pub fn models(args: &[String]) -> i32 {
     let Some((_, folders)) = setup() else {
         return 2;

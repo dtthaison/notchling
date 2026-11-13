@@ -1,5 +1,3 @@
-"""The workflows' security contract, read as text (no YAML library)."""
-
 import os
 import re
 import stat
@@ -14,11 +12,10 @@ WORKFLOWS = ROOT / ".github/workflows"
 
 
 def read(path):
-    """The workflow without its comment lines, which may name what they forbid."""
     return "".join(l for l in (ROOT / path).read_text().splitlines(keepends=True) if not l.lstrip().startswith("#"))
 
 
-FETCH = 'origin "pull/'  # the head is fetched with an auth header: git -c ... fetch --no-tags origin "pull/<n>/head"
+FETCH = 'origin "pull/'
 
 
 def jobs(text):
@@ -31,7 +28,6 @@ DEFAULT_BRANCH_REF = "${{ github.event.repository.default_branch }}"
 
 
 def step_named(text, prefix):
-    """The text of the step whose `name:` starts with prefix (steps start at 6 spaces of indent)."""
     for step in re.split(r"(?m)^(?=      - )", text):
         if re.match(r"      - name: " + re.escape(prefix), step):
             return step
@@ -39,7 +35,6 @@ def step_named(text, prefix):
 
 
 def run_script(step):
-    """The `run: |` block of a step, dedented."""
     m = re.search(r"run: \|\n((?:[ ]{10,}.*\n?|\n)+)", step)
     assert m, step
     return textwrap.dedent(m.group(1))
@@ -50,26 +45,25 @@ class WorkflowTests(unittest.TestCase):
         text = read(GATE)
         self.assertIn("pull_request_target", text)
         self.assertIn("workflow_run", text)
-        self.assertNotIn("github.event.pull_request.head", text)  # the PR head is never a ref
-        # The one checkout names the default branch; any other ref: is refused.
+        self.assertNotIn("github.event.pull_request.head", text)
         refs = re.findall(r"(?m)^\s*(?:-\s*)?ref:\s*(.*?)\s*$", text)
         self.assertEqual(refs, [DEFAULT_BRANCH_REF])
         self.assertEqual(text.count("actions/checkout@"), 1)
         self.assertIn("persist-credentials: false", text)
-        self.assertNotIn("actions/checkout@", text.split(FETCH)[1])  # no second checkout of PR code
+        self.assertNotIn("actions/checkout@", text.split(FETCH)[1])
 
     def test_gate_judges_only_prs_into_main_and_reruns_on_retarget(self):
         text = read(GATE)
         block = text.split("pull_request_target:", 1)[1].split("workflow_run:", 1)[0]
         self.assertRegex(block, r"(?m)^\s+branches: \[main\]\s*$")
         types = re.search(r"types: \[(.*?)\]", block).group(1).replace(" ", "").split(",")
-        self.assertIn("edited", types)  # a retarget to main is an `edited` event
+        self.assertIn("edited", types)
         self.assertLessEqual({"opened", "synchronize", "reopened", "ready_for_review"}, set(types))
 
     def test_gate_merge_base_is_against_the_default_branch(self):
         text = read(GATE)
         self.assertIn("DEFAULT_BRANCH: " + DEFAULT_BRANCH_REF, text)
-        self.assertNotIn("BASE_REF", text)  # the PR's own base never decides what counts as changed
+        self.assertNotIn("BASE_REF", text)
         mb = [l for l in text.splitlines() if "merge-base" in l]
         self.assertEqual(len(mb), 1, mb)
         self.assertIn('"origin/$DEFAULT_BRANCH"', mb[0])
@@ -86,7 +80,7 @@ class WorkflowTests(unittest.TestCase):
     def test_gate_lookup_exits_without_posting_when_base_is_not_the_default_branch(self):
         script = run_script(step_named(read(GATE), "Find the pull request"))
         sha = "0123456789abcdef0123456789abcdef01234567"
-        cases = [  # (event PR, workflow_run pull_requests, base of the PR, posts?)
+        cases = [
             ("7", "null", "main", True),
             ("7", "null", "agent/feature-x", False),
             ("7", "null", "release/1.0", False),
@@ -111,7 +105,7 @@ class WorkflowTests(unittest.TestCase):
                            FAKE_BASE=base, GITHUB_OUTPUT=str(out))
                 r = subprocess.run(["bash", str(tmp / "find.sh")], env=env, capture_output=True, text=True,
                                    timeout=60, stdin=subprocess.DEVNULL)
-                self.assertEqual(r.returncode, 0, r.stderr)  # exits cleanly, never fails the check run
+                self.assertEqual(r.returncode, 0, r.stderr)
                 got = out.read_text()
                 self.assertEqual("post=true" in got.splitlines(), posts, got)
                 if posts:
@@ -121,15 +115,10 @@ class WorkflowTests(unittest.TestCase):
                     self.assertNotIn("number=", got)
 
     def test_only_the_release_workflow_can_write_contents(self):
-        # release-tags lets the GitHub Actions app create v* tags; that is safe only while the workflows
-        # that hold a contents: write token are the release ones (beta and promote write only in jobs
-        # without signing secrets).
         writers = [f.name for f in sorted(WORKFLOWS.glob("*.yml")) if re.search(r"contents:\s*write", read(f".github/workflows/{f.name}"))]
         self.assertEqual(writers, ["beta.yml", "promote.yml", "release.yml"])
 
     def test_phone_checks_run_on_every_pull_request(self):
-        # phone-analyze and phone-test are required on main; a paths: filter leaves them pending forever
-        # on a pull request that touches nothing under apps/flutter/.
         text = read(".github/workflows/phone.yml")
         self.assertNotRegex(text, r"(?m)^\s*paths(-ignore)?:")
         self.assertRegex(text, r"(?m)^  pull_request:\s*$")
@@ -142,7 +131,6 @@ class WorkflowTests(unittest.TestCase):
         self.assertRegex(text, r"statuses:\s*write")
 
     def test_gate_untrusted_values_go_through_env(self):
-        # Event fields are data; `${{ }}` inside `run:` would splice them into the shell.
         text = read(".github/workflows/maintainer-gate.yml")
         for run in re.findall(r"run: \|\n((?:\s{10,}.*\n?)+)", text):
             self.assertNotIn("${{", run)

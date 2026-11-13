@@ -1,21 +1,3 @@
-//! The machines on disk (Swift `MachineRegistry`): `machines.json`, v2 with jobs.
-//!
-//! v2 is `{"version": 2, "machines": [...]}`, pretty-printed with sorted keys. Each machine needs
-//! `name`, `host` and `user`; everything else takes its default. v1 (plan C) was the bare array of
-//! machines with `python`, `sdPath`, `fileVault` and `repos` inline.
-//!
-//! The registry reads from one place and writes to another ([`RegistryFiles`]): until handover the
-//! Rust tool reads the Swift app's `machines.json` and never writes it; its own copy is the
-//! [`REGISTRY_DOC`] document in `<data>/notchling.db` (this tool alone rewrote it whole, so it
-//! moved into the database, decision 0014), changed in one transaction so the app and the daemon
-//! never lose each other's save. Its old file, `<data>/daemon/machines/machines.json`, moves in
-//! once. The first load of a v1 registry copies its bytes to `<old file>.v1-backup` (a file that
-//! stays; never over an existing backup, a stamped name when that one is taken) and writes v2. If
-//! the backup can't be written nothing is written. A registry that can't be read, isn't JSON, has
-//! another version, or has an unknown job kind is [`RegistryState::Unreadable`] and is never
-//! written over (an old file like that stays where it is). A render ([`RegistryFiles::read_only`])
-//! never imports, migrates or saves.
-
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
@@ -48,7 +30,6 @@ pub enum DockerState {
     Rootless,
 }
 
-/// What the Ability checks found on a machine. Every field may be missing.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MachineAbilities {
@@ -74,19 +55,14 @@ pub struct MachineAbilities {
     pub free_disk_gb: Option<i64>,
 }
 
-/// A repository a worker machine serves.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MachineRepo {
-    /// `owner/name`
     pub github: String,
-    /// The checkout on this Mac.
     pub local_path: String,
     pub check_command: String,
-    /// The checkout on the machine; `None` means `~/src/<name>`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub machine_path: Option<String>,
-    /// A path inside the checkout, e.g. `.claude/skills/verify-lingeva/SKILL.md`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub verify_skill: Option<String>,
 }
@@ -95,31 +71,23 @@ fn python3() -> String {
     "python3".into()
 }
 
-/// The settings of a machine's sd worker job. Every key may be missing.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SdWorkerSettings {
-    /// Absolute on the machine; `python3` until Base tools finds it.
     #[serde(default = "python3")]
     pub python: String,
-    /// Absolute path of `sd.py` on the machine; Plugins installed sets it.
     #[serde(default)]
     pub sd_path: String,
     #[serde(default)]
     pub repos: Vec<MachineRepo>,
-    /// `ios`, `backend`.
     #[serde(default)]
     pub kinds: Vec<String>,
     #[serde(default, rename = "healthURL", skip_serializing_if = "Option::is_none")]
     pub health_url: Option<String>,
-    /// `YYYY-MM-DD`, from Token scope.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub token_expires: Option<String>,
-    /// The vault name of the issues token: `<machine>-github-issues`. Empty in a file means the
-    /// machine names it after itself.
     #[serde(default)]
     pub issues_secret: String,
-    /// One issues token for all repositories; written only when true.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub token_all_repos: Option<bool>,
 }
@@ -145,7 +113,6 @@ pub enum JobKind {
     SdWorker,
 }
 
-/// One job a machine does. One job per kind per machine.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Job {
@@ -158,20 +125,16 @@ fn claude_worker() -> String {
     "claude-worker".into()
 }
 
-/// A machine Notchling sets up and watches over Tailscale SSH.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Machine {
     pub name: String,
-    /// Tailscale name.
     pub host: String,
     pub user: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub os: Option<MachineOs>,
-    /// A FileVault machine waits for an unlock after a restart.
     #[serde(default)]
     pub file_vault: bool,
-    /// Missing in a file: root over ssh on Linux (the worker can't be the admin there), sudo else.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     admin: Option<AdminAccess>,
     #[serde(default = "claude_worker")]
@@ -197,7 +160,6 @@ impl Machine {
         }
     }
 
-    /// How admin steps run on this machine.
     pub fn admin(&self) -> AdminAccess {
         self.admin.unwrap_or(match self.os {
             Some(MachineOs::Linux) => AdminAccess::RootSsh,
@@ -209,7 +171,6 @@ impl Machine {
         self.admin = Some(access);
     }
 
-    /// Fills in what a file leaves to the machine: the admin, and the issues secret's name.
     fn settle(&mut self) {
         self.admin = Some(self.admin());
         let name = self.name.clone();
@@ -222,7 +183,6 @@ impl Machine {
         }
     }
 
-    /// The sd worker job's settings.
     pub fn sd_worker(&self) -> Option<&SdWorkerSettings> {
         self.jobs
             .iter()
@@ -237,7 +197,6 @@ impl Machine {
             .and_then(|j| j.sd_worker.as_mut())
     }
 
-    /// Adds the job or replaces its settings; `None` removes it.
     pub fn set_sd_worker(&mut self, value: Option<SdWorkerSettings>) {
         let index = self.jobs.iter().position(|j| j.kind == JobKind::SdWorker);
         match (index, value) {
@@ -274,14 +233,11 @@ impl Machine {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RegistryState {
-    /// No `machines.json`.
     Missing,
-    /// The machines; `migrated` is true on the one load that turned a v1 file into v2.
     Loaded {
         machines: Vec<Machine>,
         migrated: bool,
     },
-    /// The file exists but can't be read or decoded. It is never overwritten.
     Unreadable(String),
 }
 
@@ -294,7 +250,6 @@ impl RegistryState {
     }
 }
 
-/// Plan C's machine: the sd worker's settings inline.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct MachineV1 {
@@ -338,30 +293,17 @@ enum Raw {
     V2(Vec<Machine>),
 }
 
-/// The document in `notchling.db` that holds what `machines.json` used to (v2, as the file's text).
 pub const REGISTRY_DOC: &str = "machines/registry";
 
-/// Where the registry is read from and written to.
-///
-/// It is written to one place, the [`REGISTRY_DOC`] document in `<data>/notchling.db`
-/// (`crate::store`, one transaction per change). It is read from, in this order: that document;
-/// this tool's old file (`old_own`, `<data>/daemon/machines/machines.json`, moved into the
-/// document the first time it is read, unless it can't be read, which leaves it where it is and
-/// makes it the source); the Swift app's file (`swift`, only ever read, until handover).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RegistryFiles {
-    /// Notchling's data folder, where `notchling.db` is.
     pub data_dir: PathBuf,
-    /// This tool's file before it kept the registry in the database; the v1 backup goes beside it.
     pub old_own: PathBuf,
-    /// The Swift app's file, read while there is no document.
     pub swift: Option<PathBuf>,
-    /// A render: nothing is imported, migrated or saved, whatever is there.
     pub read_only: bool,
 }
 
 impl RegistryFiles {
-    /// The database in `data_dir` and the old file at `data_dir/machines.json`, no Swift file.
     pub fn single(data_dir: &Path) -> RegistryFiles {
         RegistryFiles {
             data_dir: data_dir.to_path_buf(),
@@ -371,8 +313,6 @@ impl RegistryFiles {
         }
     }
 
-    /// What loads read, for a line in the window: the database while it holds the registry, else
-    /// the file read. Opens the database, so not for a frame.
     pub fn source(&self) -> PathBuf {
         if matches!(store::doc(&self.data_dir, REGISTRY_DOC), Ok(Some(_))) {
             return store::db_path(&self.data_dir);
@@ -383,8 +323,6 @@ impl RegistryFiles {
         self.swift.clone().unwrap_or_else(|| self.old_own.clone())
     }
 
-    /// Moves the old own file into the document, once. Best effort: a file that stays is read
-    /// as the source.
     fn import_old(&self) {
         if self.read_only {
             return;
@@ -394,7 +332,6 @@ impl RegistryFiles {
         });
     }
 
-    /// The files, when there is no document: the old own file once it exists, else the Swift app's.
     fn read_files(&self) -> Raw {
         if file_exists(&self.old_own) {
             return read(&self.old_own);
@@ -436,14 +373,12 @@ impl RegistryFiles {
                 if self.write_migrated(&machines) {
                     return loaded(true);
                 }
-                // nothing was migrated: don't leave a stray copy
                 let _ = std::fs::remove_file(backup);
                 loaded(false)
             }
         }
     }
 
-    /// Writes the migrated v1 machines as v2, unless a v2 registry got there first.
     fn write_migrated(&self, machines: &[Machine]) -> bool {
         let Some(text) = serialize(machines) else {
             return false;
@@ -459,13 +394,10 @@ impl RegistryFiles {
         .is_ok()
     }
 
-    /// `[]` for a missing and an unreadable registry.
     pub fn all(&self) -> Vec<Machine> {
         self.load().machines()
     }
 
-    /// Writes v2 to the document only when what loads read is missing or a readable v2 registry,
-    /// checked in the same transaction as the write. False means nothing was written.
     pub fn save(&self, machines: &[Machine]) -> bool {
         if self.read_only {
             return false;
@@ -474,7 +406,6 @@ impl RegistryFiles {
             return false;
         };
         self.import_old();
-        // a registry that is refused anyway makes no database
         if !store::exists(&self.data_dir)
             && matches!(self.read_files(), Raw::V1(..) | Raw::Unreadable(_))
         {
@@ -504,7 +435,6 @@ fn file_exists(path: &Path) -> bool {
     std::fs::symlink_metadata(path).is_ok()
 }
 
-/// `<file>.v1-backup`.
 pub fn backup_path(file: &Path) -> PathBuf {
     let mut name = file.file_name().unwrap_or_default().to_os_string();
     name.push(".v1-backup");
@@ -519,7 +449,6 @@ fn read(path: &Path) -> Raw {
     }
 }
 
-/// A registry's bytes (a file's, or the document's text) as v1, v2 or unreadable.
 fn parse(data: &[u8]) -> Raw {
     if let Ok(v1) = serde_json::from_slice::<Vec<MachineV1>>(data) {
         return Raw::V1(
@@ -559,21 +488,16 @@ fn parse(data: &[u8]) -> Raw {
 
 static WRITES: Mutex<()> = Mutex::new(());
 
-/// Held around every read-modify-write of `machines.json` in this process: the facts a refresh
-/// learned (a background thread) and the window's edits (the UI thread) each load, change and save
-/// under it, so neither saves over what the other just wrote.
 pub fn write_lock() -> MutexGuard<'static, ()> {
     WRITES.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-/// Pretty JSON with every object's keys sorted, and a final newline.
 pub fn pretty_sorted(value: Value) -> Vec<u8> {
     let mut data = serde_json::to_vec_pretty(&sort_keys(value)).unwrap_or_else(|_| b"{}".to_vec());
     data.push(b'\n');
     data
 }
 
-/// `value` with every object's keys in sorted order (whatever map serde_json was built with).
 pub fn sort_keys(value: Value) -> Value {
     match value {
         Value::Object(map) => {
@@ -591,7 +515,6 @@ pub fn sort_keys(value: Value) -> Value {
     }
 }
 
-/// The v2 registry's text for `machines`.
 fn serialize(machines: &[Machine]) -> Option<String> {
     let settled: Vec<Machine> = machines
         .iter()
@@ -606,8 +529,6 @@ fn serialize(machines: &[Machine]) -> Option<String> {
     String::from_utf8(pretty_sorted(file)).ok()
 }
 
-/// Copies the original bytes to `<file>.v1-backup`, or to `<file>.v1-backup-<unix seconds>` when
-/// that exists. An existing backup is never overwritten. The backup's path, or `None`.
 fn write_backup(original: &[u8], file: &Path) -> Option<PathBuf> {
     use std::io::Write;
     let base = backup_path(file);

@@ -1,7 +1,3 @@
-//! What Token scope asks of GitHub and of the user's own `gh` (Swift `TokenScope`'s helpers). The
-//! token goes only through [`GitHubHttp`] to `https://api.github.com`; `gh` holds its own login and
-//! is never handed the token.
-
 use super::github::{allows, GitHubHttp, HttpAnswer, BODY_CAP};
 use super::runner::{Call, Runner};
 use super::shell;
@@ -12,14 +8,11 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 const API: &str = "https://api.github.com";
-/// How many requests run at once.
 const MAX_IN_FLIGHT: usize = 4;
-/// `gh repo list --limit`; a list this long may have been cut.
 pub(super) const LIST_LIMIT: usize = 1000;
 pub(super) const VIEW_PAGES: usize = 10;
 const VIEW_DOUBT: &str = "couldn't read the private repos the token reaches";
 
-/// `owner/name`, as GitHub allows, and never a dot-only name that would climb out of the path.
 pub(super) fn is_repo_name(text: &str) -> bool {
     static RE: OnceLock<Option<Regex>> = OnceLock::new();
     let re = RE
@@ -32,7 +25,6 @@ pub(super) fn is_repo_name(text: &str) -> bool {
     name != "." && name != ".."
 }
 
-/// Only ever `https://api.github.com`: `path` comes from validated repo names.
 pub(super) fn api_url(path: &str, query: Option<&str>) -> String {
     match query {
         Some(q) => format!("{API}{path}?{q}"),
@@ -40,7 +32,6 @@ pub(super) fn api_url(path: &str, query: Option<&str>) -> String {
     }
 }
 
-/// A request and the repo it is about, so a row never pairs a name with another's answer.
 pub(super) struct Req {
     pub name: String,
     pub url: String,
@@ -56,7 +47,6 @@ pub(super) fn requests(names: &[String], suffix: &str, query: Option<&str>) -> V
         .collect()
 }
 
-/// All the answers, at most [`MAX_IN_FLIGHT`] requests at a time.
 pub(super) fn fetch_all(
     urls: &[String],
     token: &Secret,
@@ -80,7 +70,6 @@ pub(super) fn fetch_all(
     answers.into_inner().unwrap_or_else(|e| e.into_inner())
 }
 
-/// GitHub's refusal to show a repo: 403 or 404, and not the rate limit speaking.
 pub(super) fn is_denial(a: &HttpAnswer) -> bool {
     (a.status == 403 || a.status == 404) && !rate_limited(a)
 }
@@ -89,23 +78,15 @@ fn rate_limited(a: &HttpAnswer) -> bool {
     a.status == 429
         || a.header("x-ratelimit-remaining") == Some("0")
         || a.header("retry-after").is_some()
-        // A secondary limit may carry neither header; its message says so.
         || String::from_utf8_lossy(&a.body)
             .to_lowercase()
             .contains("rate limit")
 }
 
-// MARK: gh's listing
-
-/// What `gh repo list --visibility private` said for the served owners.
 pub(super) struct Listing {
-    /// Private repos that are not served, sorted.
     pub others: Vec<String>,
-    /// Served repos gh did not list.
     pub served_missing: Vec<String>,
-    /// Lines that were not `owner/name`, which are never probed.
     pub skipped_lines: usize,
-    /// A list as long as `--limit` may have been cut.
     pub maybe_cut: bool,
 }
 
@@ -121,8 +102,6 @@ fn owners(repos: &[String]) -> Vec<String> {
     out
 }
 
-/// The private repos of each served owner, from the user's own `gh`. gh holds its own login; this
-/// probe never hands it the token.
 pub(super) fn private_listing(served: &[String], runner: &dyn Runner) -> Result<Listing, String> {
     let served_keys: BTreeSet<String> = served.iter().map(|s| s.to_lowercase()).collect();
     let mut seen = BTreeSet::new();
@@ -181,25 +160,15 @@ pub(super) fn private_listing(served: &[String], runner: &dyn Runner) -> Result<
     })
 }
 
-// MARK: the token's own view
-
-/// What `GET /user/repos?visibility=private` showed.
 #[derive(Default)]
 pub(super) struct TokenView {
     pub names: Vec<String>,
-    /// Why the list may not be the whole of it: an error, a rate limit, a cut-off body, too many
-    /// pages.
     pub incomplete: Option<String>,
     pub refused: bool,
 }
 
-/// Follows the `Link` header's `next` page only while it stays on
-/// `https://api.github.com/user/repos`, up to [`VIEW_PAGES`] pages. The token goes through `http`
-/// only; nothing of it is kept.
 pub(super) fn token_view(token: &Secret, http: &dyn GitHubHttp) -> TokenView {
     let mut view = TokenView::default();
-    // 50 a page: a page of full repo objects is about 400 KB, which leaves room under the 1 MiB
-    // body cap.
     let mut url = api_url("/user/repos", Some("visibility=private&per_page=50"));
     for page in 1..=VIEW_PAGES {
         let a = http.get(&url, token);
@@ -215,8 +184,6 @@ pub(super) fn token_view(token: &Secret, http: &dyn GitHubHttp) -> TokenView {
         match repo_names_in_page(&a.body, cut) {
             Some((names, unreadable)) => {
                 view.names.extend(names);
-                // a repo whose name can't be read could be the leak: doubt, not something to drop.
-                // Later pages are still read, since a leak they show is a fail.
                 if unreadable > 0 && view.incomplete.is_none() {
                     view.incomplete = Some(format!(
                         "the token's list of private repos has {unreadable} name{} this check can't read",
@@ -253,10 +220,6 @@ pub(super) fn token_view(token: &Secret, http: &dyn GitHubHttp) -> TokenView {
     view
 }
 
-/// The `full_name` of each repo on a page, and how many entries had none the check can read (not
-/// an object, no string `full_name`, or not `owner/name`). A whole page is parsed as JSON; a page
-/// the body cap cut cannot be, so its names are read where they stand, which is enough to show a
-/// repo but never to show there is none (the caller treats a cut page as doubtful).
 fn repo_names_in_page(body: &[u8], cut: bool) -> Option<(Vec<String>, usize)> {
     if !cut {
         let serde_json::Value::Array(list) = serde_json::from_slice(body).ok()? else {
@@ -281,7 +244,6 @@ fn repo_names_in_page(body: &[u8], cut: bool) -> Option<(Vec<String>, usize)> {
     ))
 }
 
-/// The URL of `rel="next"` in a `Link` header, if any.
 fn next_link(header: &str) -> Option<String> {
     let re = Regex::new(r#"<([^>]*)>\s*;\s*rel="next""#).ok()?;
     re.captures(header).map(|c| c[1].to_string())

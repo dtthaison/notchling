@@ -1,16 +1,3 @@
-//! Keeps a copy of every Codex CLI login it has seen and swaps them in on request (`CodexStore`).
-//!
-//! The Codex CLI, its background app server and the ChatGPT app's Codex all share one login,
-//! `<CODEX_HOME>/auth.json` (ChatGPT OAuth tokens plus an id token naming the account). A switch
-//! saves the live file back to its account's copy first, since Codex renews it in place, then
-//! writes the other account's copy and restarts the app server so it reads it. Adding runs
-//! `codex login` in a scratch `CODEX_HOME`, so the account in use stays signed in.
-//!
-//! Never renews a token. Saved copies are base64 in the Keychain item `Notchling Codex`, because
-//! `security -w` prints a value containing newlines as hex; a real login is too long for one
-//! `security -i` line, so it is split over several items ([`crate::accounts::chunked`]). A switch
-//! writes `auth.json` only once the login it replaces reads back from its saved copy byte for byte.
-
 use super::live::{auth_path, write_live, LOCK_WAIT};
 use super::login::{self, Identity, RunningWork};
 use crate::accounts::book::{self, Saved};
@@ -31,38 +18,27 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
-/// The Keychain service the saved copies are under.
 pub const SERVICE: &str = "Notchling Codex";
-/// The ChatGPT app, which shares Codex's login.
 pub const APP_BUNDLE_ID: &str = "com.openai.codex";
 const USAGE_URL: &str = "https://chatgpt.com/backend-api/wham/usage";
-/// A usage read for one account is repeated no sooner than this, unless forced.
 const MIN_REFRESH_SECS: f64 = 120.0;
 const SIGN_IN_PREFIX: &str = "https://auth.openai.com/";
 
 pub type Clock = Arc<dyn Fn() -> f64 + Send + Sync>;
 
-/// Everything the store reaches outside itself through.
 #[derive(Clone)]
 pub struct CodexDeps {
     pub keychain: Arc<dyn Keychain>,
     pub http: Arc<dyn HttpClient>,
     pub procs: Arc<dyn Procs>,
     pub apps: Arc<dyn Apps>,
-    /// Seconds since 1970.
     pub clock: Clock,
 }
 
-/// Where things are.
 #[derive(Clone, Debug)]
 pub struct CodexPaths {
-    /// `CODEX_HOME`, else `~/.codex`.
     pub home: PathBuf,
-    /// The daemon's own folder for this store: the scratch homes, and the file the list of saved
-    /// accounts was before the database (`codex.json`, moved in once).
     pub state_dir: PathBuf,
-    /// Notchling's data folder: the saved accounts are the `accounts/codex` document in the
-    /// `notchling.db` there.
     pub data_dir: PathBuf,
 }
 
@@ -94,7 +70,6 @@ struct Inner {
     fetched: HashMap<String, f64>,
     busy: bool,
     sign_in_url: Option<String>,
-    /// The login as last saved, so an unchanged one isn't written to the Keychain every minute.
     last_saved: Option<Vec<u8>>,
     add: Option<AddFlow>,
 }
@@ -103,7 +78,6 @@ pub struct CodexStore {
     deps: CodexDeps,
     paths: CodexPaths,
     inner: Mutex<Inner>,
-    /// One operation that reads or changes the login at a time.
     op: Mutex<()>,
     binary: Mutex<Option<Option<PathBuf>>>,
 }
@@ -113,7 +87,6 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 }
 
 impl CodexStore {
-    /// Loads the saved account names from the daemon's own list; touches nothing else.
     pub fn new(deps: CodexDeps, paths: CodexPaths) -> CodexStore {
         let accounts = book::read_accounts(&paths.book());
         CodexStore {
@@ -132,14 +105,12 @@ impl CodexStore {
         (self.deps.clock)()
     }
 
-    /// The codex command, looked up once (the menu asks every time it opens).
     fn codex_binary(&self) -> Option<PathBuf> {
         lock(&self.binary)
             .get_or_insert_with(|| self.deps.procs.find_binary("codex"))
             .clone()
     }
 
-    /// What a switch would interrupt right now.
     pub fn running_work(&self) -> RunningWork {
         let ps = self
             .deps
@@ -149,13 +120,10 @@ impl CodexStore {
         login::running_work(&ps, self.deps.apps.is_running(APP_BUNDLE_ID))
     }
 
-    // MARK: The login
-
     fn saved(&self, id: &str) -> Option<Vec<u8>> {
         self.saved_checked(id).ok().flatten()
     }
 
-    /// The saved copy, put back together if it was split; a damaged one is an error.
     fn saved_checked(&self, id: &str) -> Result<Option<Vec<u8>>, KeychainError> {
         let Some(text) = chunked::read(&Plain(self.deps.keychain.as_ref()), SERVICE, id)? else {
             return Ok(None);
@@ -174,9 +142,6 @@ impl CodexStore {
         chunked::write(&keychain, SERVICE, id, &STANDARD.encode(login))
     }
 
-    /// Ok when the live login is safely saved (read back byte for byte) or there is none, so a
-    /// switch may overwrite `auth.json`. Codex renews the login in place, so the live file can be
-    /// the only copy of a working refresh token.
     fn live_is_saved(&self) -> Result<(), AccountError> {
         let refuse = |why: &str| {
             Err(AccountError::new(&format!(
@@ -202,7 +167,6 @@ impl CodexStore {
         book::write_accounts(&self.paths.book(), accounts);
     }
 
-    /// Saves the live login under its account and says whose it is (`capture`). Holds the op lock.
     fn capture(&self) -> Option<Identity> {
         let live = std::fs::read(auth_path(&self.paths.home)).ok();
         let who = live.as_deref().and_then(login::identity);
@@ -235,8 +199,6 @@ impl CodexStore {
         }
         Some(who)
     }
-
-    // MARK: Limits
 
     fn fetch_usage(&self, token: &login::Access) -> Option<Vec<u8>> {
         let request = HttpRequest {
@@ -298,8 +260,6 @@ impl CodexStore {
         }
     }
 
-    // MARK: Adding
-
     fn finish_add(&self, flow: AddFlow, code: i32) -> AddProgress {
         let AddFlow {
             scratch, cancelled, ..
@@ -313,7 +273,6 @@ impl CodexStore {
         } else {
             self.save_new_login(&scratch, code)
         };
-        // The scratch home holds the new login; it is gone either way.
         let _ = std::fs::remove_dir_all(&scratch);
         if result == AddProgress::Done {
             self.sync(true);
@@ -365,8 +324,6 @@ impl CodexStore {
     }
 }
 
-/// The sign-in page `codex login` printed: the first `https://auth.openai.com/…`, up to the next
-/// white space or control character (so a colour code after it isn't part of it).
 pub fn sign_in_url(output: &str) -> Option<String> {
     let start = output.find(SIGN_IN_PREFIX)?;
     let url: String = output[start..]
@@ -413,8 +370,6 @@ impl AccountProvider for CodexStore {
         }
     }
 
-    /// Saves the live login, then reads limits for every account whose token is still good (at
-    /// most every two minutes each, unless `force`).
     fn sync(&self, force: bool) {
         let _op = lock(&self.op);
         self.capture();
@@ -439,8 +394,6 @@ impl AccountProvider for CodexStore {
         result
     }
 
-    /// Runs `codex login` in a scratch home: the browser opens, the new login lands there and is
-    /// saved as another account. The live login isn't touched.
     fn begin_add(&self) -> Result<AddStarted, AccountError> {
         let _op = lock(&self.op);
         {
@@ -512,8 +465,6 @@ impl AccountProvider for CodexStore {
         }
     }
 
-    /// Stops `codex login` and removes its scratch home, which holds the new login if one landed;
-    /// the live login and the Keychain are not touched.
     fn abandon_add(&self) -> Option<String> {
         let flow = {
             let mut inner = lock(&self.inner);
@@ -565,7 +516,6 @@ impl CodexStore {
             .ok_or_else(|| {
                 AccountError::new("Notchling has no saved login for this account. Add it again.")
             })?;
-        // The ChatGPT app quits first and opens again, so it never reads a half-changed login.
         let reopen = self.deps.apps.quit(APP_BUNDLE_ID).map_err(|_| {
             AccountError::new(
                 "The ChatGPT app didn't quit, so the Codex account wasn't changed. Quit it and try again.",
@@ -587,7 +537,6 @@ impl CodexStore {
         }
         if self.running_work().server {
             if let Some(codex) = self.codex_binary() {
-                // Output to /dev/null: a daemon that keeps a pipe open would hang a read.
                 let _ = self.deps.procs.run_null(
                     &codex,
                     &["app-server", "daemon", "restart"],

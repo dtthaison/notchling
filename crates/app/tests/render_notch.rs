@@ -1,6 +1,3 @@
-//! `--render notch-<state>` end to end over the checked-in fixture: needs a window server, so it is
-//! ignored by default. Run it with `cargo test -p notchling-app -- --ignored` on a Mac with a display.
-
 #![cfg(target_os = "macos")]
 
 use std::collections::HashSet;
@@ -9,7 +6,6 @@ use std::process::Command;
 
 use notchling_app::notch::renders::VIEWS;
 
-/// Black, the shape's color, as the capture writes it (RGBA or RGB).
 fn is_black(pixel: &[u8]) -> bool {
     pixel[..3] == [0, 0, 0]
 }
@@ -27,7 +23,6 @@ fn renders_every_notch_state_over_the_fixture() {
         let output = Command::new(env!("CARGO_BIN_EXE_notchling-app"))
             .args(["--render", spec.name, "--out"])
             .arg(&out)
-            // Never the real ~/.claude: the fixture, named explicitly.
             .env("NOTCHLING_DATA_ROOT", fixture)
             .output()
             .expect("run notchling-app");
@@ -55,14 +50,12 @@ fn renders_every_notch_state_over_the_fixture() {
         let rows: Vec<&[u8]> = pixels[..info.line_size * info.height as usize]
             .chunks_exact(info.line_size)
             .collect();
-        // The shape hangs from the top centre: the top row's middle pixel is black.
         let middle = (info.width as usize / 2) * bpp;
         assert!(
             is_black(&rows[0][middle..middle + bpp]),
             "{}: no black shape at the top centre",
             spec.name
         );
-        // Every state but the closed one has text and color in it.
         let distinct: HashSet<&[u8]> = rows.iter().flat_map(|r| r.chunks_exact(bpp)).collect();
         let least = if matches!(spec.name, "notch-collapsed" | "notch-pet" | "notch-perch") {
             3

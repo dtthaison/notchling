@@ -1,5 +1,3 @@
-"""The schema against the fixtures, and against the real router: every fixture validates, every op has one."""
-
 from __future__ import annotations
 
 import copy
@@ -25,7 +23,6 @@ def fixture_files():
 
 
 def def_name(path: Path) -> str:
-    """`ChatGetResponse.before.json` is a ChatGetResponse."""
     return path.name.split(".")[0]
 
 
@@ -45,7 +42,6 @@ class SchemaShapeTests(unittest.TestCase):
                     self.assertIs(definition.get("additionalProperties"), True)
 
     def test_the_root_rejects_an_empty_object(self):
-        # {} is neither a request, an event nor an error: the root rejects it.
         self.assertNotEqual(validate({}, SCHEMA), [])
 
 
@@ -81,7 +77,6 @@ class FixtureTests(unittest.TestCase):
 
 
 class BadExampleTests(unittest.TestCase):
-    """The schema is not so loose that anything passes."""
 
     def load(self, name):
         return json.loads((FIXTURES / (name + ".json")).read_text(encoding="utf-8"))

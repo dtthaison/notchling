@@ -1,6 +1,3 @@
-//! Ports of TranscriptTests, ShellCommandTests, QueuedMessageTests, ModelConfirmationTests and the
-//! incremental conversation tests. They read the Swift app's own fixtures.
-
 mod common;
 
 use common::*;
@@ -123,7 +120,6 @@ fn missing_file_is_empty() {
 
 #[test]
 fn one_compaction_shows_once() {
-    // Claude Code writes a compact_boundary line and then the summary; older builds only the summary.
     let compacted = ItemKind::Notice {
         text: "Conversation compacted".into(),
         symbol: "rectangle.compress.vertical".into(),
@@ -138,7 +134,6 @@ fn one_compaction_shows_once() {
 
 #[test]
 fn huge_token_counts_saturate_instead_of_overflowing() {
-    // Two messages whose counts add past u64; a negative count is zero.
     let line = |id: &str, usage: &str| {
         format!(
             r#"{{"type":"assistant","timestamp":"2026-11-01T10:00:02.000Z","message":{{"id":"{id}","model":"m","content":[{{"type":"text","text":"hi"}}],"usage":{usage}}}}}"#
@@ -153,10 +148,8 @@ fn huge_token_counts_saturate_instead_of_overflowing() {
 
 #[test]
 fn context_is_the_latest_request() {
-    // The last message's input (with cache) and output, not the session's total.
     let c = conversation::read(&s(&notchling_fixture("conversation.jsonl")));
     assert_eq!(c.facts.context_tokens, 1 + 3);
-    // Right after a compaction, what it left.
     let c = conversation::read(&s(&notchling_fixture("compact.jsonl")));
     assert_eq!(c.facts.context_tokens, 28610);
 }
@@ -183,11 +176,10 @@ fn shell_commands_and_output() {
         kinds,
         [
             user("! git branch"),
-            out("  feat/x\n* main"), // indentation kept
+            out("  feat/x\n* main"),
             user("! ped"),
             out("(eval):1: command not found: ped"),
             user("! true"),
-            // Printed nothing: no output row.
             out("green"),
         ]
     );
@@ -257,10 +249,6 @@ fn dequeued_leaves_the_queue() {
     assert_eq!(c.items.last().map(|i| i.kind.clone()), Some(user("fifth")));
 }
 
-/// Claude Code 2.1.322 (2026-11-11): a dequeue took the newest entry, a subagent's notification,
-/// before two older shell ones, which it then removed. Read as "the oldest went", one stale entry
-/// stayed, every later dequeue took the wrong one, and the next prompt you sent stayed "Queued"
-/// after it was answered.
 #[test]
 fn a_dequeue_is_the_entry_the_next_user_line_names() {
     let c = read_lines_as_file(&[
@@ -272,7 +260,6 @@ fn a_dequeue_is_the_entry_the_next_user_line_names() {
         r#"{"type":"user","message":{"role":"user","content":"<task-notification>\n<task-id>ac4a89276a567d6e4</task-id>\n</task-notification>"},"timestamp":"2026-11-11T16:15:17.142Z"}"#,
         r#"{"type":"queue-operation","operation":"remove","timestamp":"2026-11-11T16:15:17.151Z","content":"<task-notification>\n<task-id>bx58scrt5</task-id>\n</task-notification>"}"#,
         r#"{"type":"queue-operation","operation":"remove","timestamp":"2026-11-11T16:15:17.151Z","content":"<task-notification>\n<task-id>bphsofi5u</task-id>\n</task-notification>"}"#,
-        // Later: your prompt is queued, dequeued, the turn before it ends, then its user line.
         r#"{"type":"queue-operation","operation":"enqueue","timestamp":"2026-11-11T17:02:07.716Z","content":"do we have any way to make the movie correctly"}"#,
         r#"{"type":"queue-operation","operation":"dequeue","timestamp":"2026-11-11T17:02:08.847Z"}"#,
         r#"{"type":"system","subtype":"turn_duration","durationMs":2531659,"timestamp":"2026-11-11T17:02:08.836Z"}"#,
@@ -288,7 +275,6 @@ fn a_dequeue_with_no_user_line_naming_another_takes_the_oldest() {
         r#"{"type":"queue-operation","operation":"enqueue","timestamp":"2026-11-04T04:27:12.000Z","content":"first"}"#,
         r#"{"type":"queue-operation","operation":"enqueue","timestamp":"2026-11-04T04:27:13.000Z","content":"second"}"#,
         r#"{"type":"queue-operation","operation":"dequeue","timestamp":"2026-11-04T04:27:32.000Z"}"#,
-        // A tool result names no prompt.
         r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"ok"}]},"timestamp":"2026-11-04T04:27:33.000Z"}"#,
     ]);
     assert_eq!(c.queued, ["second"]);
@@ -326,8 +312,6 @@ fn model_confirmation_sets_the_header_model_at_once() {
     assert_eq!(c.facts.model.as_deref(), Some("claude-sonnet-5-5"));
 }
 
-/// The cursor must always agree with reading the whole file fresh: a file appended to line by line
-/// (half a line first, as when Claude Code is mid-write) reads the same as a fresh copy.
 #[test]
 fn conversation_append_matches_a_fresh_read() {
     let scratch = Scratch::new("incr");

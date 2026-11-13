@@ -1,6 +1,3 @@
-//! Ported from `MachinesMorningTests.swift`: screenshots copied from a machine, and the names a
-//! machine may and may not give them (C20).
-
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -70,9 +67,6 @@ fn screenshots_copy_only_images_with_quoted_sources() {
     }
 }
 
-// C20: names from the machine, repos from the machine
-
-/// The names come from the machine's `ls`: none of them may leave the item's cache folder.
 #[test]
 fn screenshot_names_cannot_leave_the_cache_folder() {
     let cache = temp_cache("shots");
@@ -153,7 +147,6 @@ fn a_hostile_evidence_folder_is_never_listed() {
     }
 }
 
-/// The cache folder is named after the registered machine; a name with a slash would leave it.
 #[test]
 fn a_machine_name_that_would_leave_the_cache_folder_gets_no_screenshots() {
     let cache = temp_cache("shots");

@@ -175,7 +175,6 @@ fn a_session_id_cannot_point_the_media_pickup_out_of_the_folder() {
     let secret = rig.root.join("secret");
     std::fs::create_dir_all(&secret).unwrap();
     std::fs::write(secret.join("loot.png"), "x").unwrap();
-    // Codex "names" a session with dots in it.
     rig.codex.push(FakeRun::ok(&[
         r#"{"type":"thread.started","thread_id":"../../secret"}"#,
         MESSAGE,
@@ -228,7 +227,6 @@ fn a_turn_that_ignores_the_interrupt_and_the_terminate_is_killed_so_the_timeout_
     });
     let outcome = outcome.recv_timeout(Duration::from_secs(5));
     let process = rig.codex.processes().remove(0);
-    // A run that never ends is let go, so a failure says so instead of hanging the suite.
     process.release();
     let outcome = outcome.expect("the run ended without a release: it was killed");
     assert!(outcome.timed_out);

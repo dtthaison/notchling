@@ -1,6 +1,3 @@
-//! Port of `BridgeRouterTests`' hub cases: pushes only what changed, prompts appearing and
-//! resolving, and `open` only to logged-in phones.
-
 use super::model::*;
 use super::test_support::*;
 use notchling_protocol::generated::ChatRole;

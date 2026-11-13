@@ -1,5 +1,3 @@
-"""Changelog fragments: parse, check (PR needs one), notes and fold. Temp dirs and temp git repos only."""
-
 from __future__ import annotations
 
 import io
@@ -239,7 +237,6 @@ class FoldTests(Dir):
 
 
 class Repo(unittest.TestCase):
-    """A temp git repo with the paths the check cares about."""
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -368,7 +365,6 @@ class CheckTests(Repo):
         self.assertTrue(err)
 
     def test_uses_merge_base_so_base_moving_on_is_not_a_change(self):
-        # main gains app code after the PR branched; the PR itself touches only docs.
         self.git("checkout", "-q", "-b", "pr")
         self.write("docs/x.md", "x\n")
         self.commit("pr")
@@ -380,7 +376,6 @@ class CheckTests(Repo):
 
 
 class NamesAtTests(Repo):
-    """Which fragment files a commit's tree holds: what version.py and fold --only-at rely on."""
 
     def test_lists_fragment_files_only(self):
         self.write("changes/a.md", frag("fix"))
@@ -552,7 +547,6 @@ class NotesSinceTests(Repo):
         self.assertIn("v9.9.9", err)
 
     def test_since_honours_a_custom_changes_dir(self):
-        # The tree is listed under the same folder the working copy is read from, not always changes/.
         self.write("notes/old.md", frag("fix", "Old fix."))
         self.commit("old")
         self.git("tag", "v1.4.1-beta.1")

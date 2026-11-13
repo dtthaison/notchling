@@ -1,21 +1,3 @@
-//! `notchling daemon`: serves the session list and its changes over the local API. Milestone 3
-//! adds the acting ops and the hook's request ([`ActingOps`]), all behind the `acting` switch,
-//! which is off: until the maintainer turns it on the daemon acts on nothing and owns none of the
-//! resources in decision 0011.
-//!
-//! One [`Monitor`] polls the config folders (the main one and each lane's) on a change that
-//! `platform::watch` reports under their `jobs/` and `sessions/` folders, and every few seconds
-//! anyway (a process can end without touching a file, and a lane can appear). A list that differs
-//! from the last one goes out as `sessions.changed` with the whole new list.
-//!
-//! Every area's ops are built and served by [`crate::daemon_wiring`]; this module runs them: the
-//! locks, the socket, the session list and the loop.
-//!
-//! Start order: the single-instance locks, then the socket (so a second daemon is refused before it
-//! reads anything and a client that started this one finds it answering at once), and only then the
-//! first read of the list. `sessions.list` waits for that read, up to [`FIRST_LIST_WAIT`], and
-//! answers with what it has after that; the read then follows as `sessions.changed`.
-
 use crate::acting::{file_says_on, FILE_SAID_ON, SETTINGS_NAME};
 use crate::acting_ops::Room;
 pub use crate::daemon_wiring::{Ops, Wired};
@@ -36,17 +18,12 @@ use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-/// How often the list is read again with no change seen.
 pub const RESCAN_EVERY: Duration = Duration::from_secs(5);
 
-/// How long `sessions.list` waits for the first read of the list. Under a client's call timeout
-/// ([`notchling_local_api::CALL_TIMEOUT`], 5 s), so the client hears an answer, not silence.
 pub const FIRST_LIST_WAIT: Duration = Duration::from_secs(4);
 
-/// Why the daemon didn't serve.
 #[derive(Debug)]
 pub enum DaemonError {
-    /// Another daemon holds this socket's lock. Not a failure: exits 0.
     AlreadyRunning(PathBuf),
     Io(io::Error),
 }
@@ -62,17 +39,12 @@ impl std::fmt::Display for DaemonError {
     }
 }
 
-/// Opens once the first read of the session list is stored (or failed). The daemon binds its
-/// socket before that read, which on a long list or a cold disk can take longer than the 3 s a
-/// client that started the daemon waits for the socket; `sessions.list` waits here instead, so
-/// the answer is the real list and not an empty one.
 pub struct FirstScan {
     done: Mutex<bool>,
     landed: Condvar,
 }
 
 impl FirstScan {
-    /// Closed until [`FirstScan::finish`].
     pub fn pending() -> Arc<FirstScan> {
         Arc::new(FirstScan {
             done: Mutex::new(false),
@@ -80,21 +52,17 @@ impl FirstScan {
         })
     }
 
-    /// Already open, for an `Ops` whose list is never read late.
     pub fn open() -> Arc<FirstScan> {
         let first = FirstScan::pending();
         first.finish();
         first
     }
 
-    /// The first read is stored; wakes every `sessions.list` that waits. Also called as the daemon
-    /// stops, so none outlasts it.
     pub fn finish(&self) {
         *self.done.lock().unwrap_or_else(|e| e.into_inner()) = true;
         self.landed.notify_all();
     }
 
-    /// Waits up to `within` for the first read; true when it is in.
     pub fn wait(&self, within: Duration) -> bool {
         let guard = self.done.lock().unwrap_or_else(|e| e.into_inner());
         let (guard, _) = self
@@ -105,7 +73,6 @@ impl FirstScan {
     }
 }
 
-/// The server, for the acting ops: set once it's bound, which is after they're made.
 #[derive(Default)]
 pub struct LateRoom(OnceLock<ServerHandle>);
 
@@ -131,7 +98,6 @@ impl Room for LateRoom {
     }
 }
 
-/// The session list now, as JSON with the engine's field names.
 struct Lister {
     layout: Layout,
     monitor: Monitor,
@@ -141,7 +107,6 @@ impl Lister {
     fn new(layout: Layout) -> Lister {
         let mut monitor = Monitor::default();
         if layout.fixture {
-            // A fixture's dates are fixed: keep its finished rows, as the app's renders do.
             monitor.completed_window_ms = i64::MAX / 4;
         }
         Lister { layout, monitor }
@@ -154,7 +119,6 @@ impl Lister {
         serde_json::to_value(agents).unwrap_or(Value::Array(Vec::new()))
     }
 
-    /// The `jobs/` and `sessions/` folders that exist now, across the main folder and the lanes.
     fn watched(&self) -> Vec<PathBuf> {
         config_dirs(&self.layout.roots())
             .into_iter()
@@ -164,9 +128,6 @@ impl Lister {
     }
 }
 
-/// Runs one read of the session list; `None` when it panicked, so the caller keeps serving the
-/// last good list. A bug in a reader (a file shaped in a way nobody expected) must not take the
-/// daemon down for every client.
 fn poll_or_keep(poll: impl FnOnce() -> Value) -> Option<Value> {
     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(poll)) {
         Ok(list) => Some(list),
@@ -182,9 +143,6 @@ fn poll_or_keep(poll: impl FnOnce() -> Value) -> Option<Value> {
     }
 }
 
-/// One read of the list: kept, and sent as `sessions.changed` when it differs from the last one.
-/// A read that panicked changes nothing. The store comes before the send, so a client that
-/// subscribed and then lists never misses it: it gets the event, the list or both.
 fn scan(
     lister: &mut Lister,
     options: &DaemonOptions,
@@ -217,17 +175,12 @@ fn now_ms() -> i64 {
         .unwrap_or(0)
 }
 
-/// How the daemon watches and how long it waits; tests shorten these and can hold the first read.
 #[derive(Clone)]
 pub struct DaemonOptions {
     pub watch: WatchConfig,
     pub rescan_every: Duration,
-    /// How long `sessions.list` waits for the first read before it answers with what it has.
     pub first_list_wait: Duration,
-    /// Runs before every read of the list. A test blocks the first read here to stand in for a
-    /// slow disk or a long list; nothing in the app sets it.
     pub before_scan: Option<Arc<dyn Fn() + Send + Sync>>,
-    /// The phone bridge's LAN and tunnel ports, used only once the app turns the bridge on.
     pub bridge_ports: (u16, u16),
 }
 
@@ -243,7 +196,6 @@ impl Default for DaemonOptions {
     }
 }
 
-/// Serves until `stop()` says so, then shuts the server down and removes the socket.
 pub fn run(
     layout: Layout,
     options: DaemonOptions,
@@ -253,8 +205,6 @@ pub fn run(
         notchling_platform::files::ensure_private_dir(&layout.state_dir())
             .map_err(|e| DaemonError::Io(io::Error::other(e)))?;
     }
-    // One daemon per real data folder, wherever its socket is (the socket's own lock comes with
-    // `Server::bind`). Held until this returns.
     let _data_lock = match layout.data_lock() {
         Some(path) => {
             notchling_platform::files::ensure_private_dir(&layout.data_dir)
@@ -272,12 +222,9 @@ pub fn run(
         std::env::current_exe().ok().as_deref(),
     );
     let mut lister = Lister::new(layout.clone());
-    // Empty until the first read, which comes after the socket answers (below).
     let sessions = Arc::new(Mutex::new(Value::Array(Vec::new())));
     let first_scan = FirstScan::pending();
     let room = Arc::new(LateRoom::default());
-    // Every area's ops, each off at every start whatever a file says (decision 0007's note: files
-    // at rest are not a tier boundary): acting, the bridge and Milestone 6's three switches.
     let wired = Wired::build(
         &layout,
         sessions.clone(),
@@ -303,7 +250,6 @@ pub fn run(
         io::ErrorKind::AddrInUse => DaemonError::AlreadyRunning(layout.socket.clone()),
         _ => DaemonError::Io(e),
     })?;
-    // Bound, so the audit log's folder exists.
     if file_says_on(&layout.data_dir.join(SETTINGS_NAME)) {
         let entry = AuditEntry::now(ops::SETTINGS_SET_ACTING, None, None, FILE_SAID_ON);
         let _ = AuditLog::new(layout.audit_path()).append(&entry);
@@ -318,11 +264,8 @@ pub fn run(
         layout.socket.display()
     );
 
-    // Watching starts before the first read, so a file that changes during it is read again.
     let mut watched = lister.watched();
     let mut watch = start_watch(&watched, options.watch);
-    // The socket answers by now, so a slow first read holds up only `sessions.list`, and for
-    // `first_list_wait` at most. Whatever it finds goes out like any change.
     scan(&mut lister, &options, &sessions, &handle);
     first_scan.finish();
     let mut last_poll = Instant::now();
@@ -340,7 +283,6 @@ pub fn run(
         last_poll = Instant::now();
         scan(&mut lister, &options, &sessions, &handle);
         wired.agy.reap();
-        // A lane or a jobs/sessions folder that came or went: watch the new set.
         let now = lister.watched();
         if now != watched {
             drop(watch.take());
@@ -348,8 +290,6 @@ pub fn run(
             watched = now;
         }
     }
-    // Held hooks pass now rather than at their deadline; the bridge's ports close; a list still
-    // waiting for the first read stops waiting.
     first_scan.finish();
     wired.close();
     handle.shutdown();
@@ -368,12 +308,10 @@ fn start_watch(folders: &[PathBuf], config: WatchConfig) -> Option<(Watcher, Rec
     Watcher::start(folders.to_vec(), config).ok()
 }
 
-/// True when a batch arrived within `wait`.
 fn wait_batch(rx: &Receiver<Batch>, wait: Duration) -> bool {
     match rx.recv_timeout(wait) {
         Ok(_) => true,
         Err(RecvTimeoutError::Timeout) => false,
-        // The watcher ended; the periodic poll carries on and a rescan restarts it.
         Err(RecvTimeoutError::Disconnected) => {
             std::thread::sleep(wait);
             false
@@ -431,7 +369,6 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_second_daemon_on_another_socket_over_the_same_data_folder_is_refused() {
-        // A stand-in for the real folders, in /tmp (socket paths are short); never the real ones.
         let root = PathBuf::from(format!("/tmp/nl-datalock-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(root.join("data")).unwrap();
@@ -442,7 +379,6 @@ mod tests {
             socket_given: true,
             fixture: false,
         };
-        // The first daemon, as far as the data folder knows.
         let _first = InstanceLock::try_acquire(&root.join("data/notchlingd.lock"))
             .unwrap()
             .unwrap();
@@ -457,7 +393,6 @@ mod tests {
 
     #[test]
     fn the_first_list_wait_ends_before_a_client_gives_up() {
-        // A client's call times out at CALL_TIMEOUT: the wait must end first, so it hears an answer.
         assert!(FIRST_LIST_WAIT < notchling_local_api::CALL_TIMEOUT);
     }
 
@@ -472,7 +407,6 @@ mod tests {
         std::thread::sleep(Duration::from_millis(50));
         first.finish();
         assert!(waiter.join().unwrap(), "woken by the first read");
-        // Open for good, and a list with nothing to wait for doesn't wait.
         assert!(first.wait(Duration::ZERO));
         assert!(FirstScan::open().wait(Duration::ZERO));
     }

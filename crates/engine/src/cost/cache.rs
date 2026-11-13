@@ -1,18 +1,3 @@
-//! The tracker's own cache: what was counted, read offsets and the ids already counted, kept so a
-//! month of transcripts (several GB) is read once and then only from where the last scan stopped.
-//!
-//! It is the [`CACHE_DOC`] document of `<data>/notchling.db` (it used to be the daemon's
-//! `<data>/daemon/cost-cache.json`, which moves in once), never the Swift app's `cost-cache.json`,
-//! and carries its own [`CURRENT`] version. A cache of an unknown version, or one that can't be
-//! read, is dropped and the history is read again; a version 2 cache is moved over in place (see
-//! [`Cache::load`]), since the cache is the only record of a day whose transcripts are gone.
-//!
-//! What was counted is kept per day as [`Cell`]s (account, channel, model, project) with their
-//! dollars and tokens, and each model's price is kept beside them (`priced_at`), so a price fixed
-//! later reprices that model alone (the tracker's `reprice`) and nothing else is touched. Offsets,
-//! cells and counted ids are saved together (one row), so a crash only means re-reading from the
-//! last save, never double counting.
-
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -24,23 +9,16 @@ use super::tracker::{ANTIGRAVITY, CLAUDE_CODE, CODEX};
 use crate::catalog::{Catalog, Price, Tool};
 use crate::store;
 
-/// The document that holds the cache.
 pub const CACHE_DOC: &str = "daemon/cost-cache";
 
-/// The file the cache was kept in before the database.
 pub fn old_cache_file(data: &Path) -> PathBuf {
     data.join("daemon").join("cost-cache.json")
 }
 
-/// Bump when the stored fields change, and move the last version over in `load`: a full re-read
-/// loses every day whose transcripts are gone.
 pub const CURRENT: u32 = 3;
 
-/// The version before cells, moved over by `load`.
 pub const V2: u32 = 2;
 
-/// Where reading stopped in one file. The rest is what a file's later lines depend on: Codex and
-/// Antigravity name the model, folder and account once, before the lines that use them.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Mark {
     pub size: u64,
@@ -48,41 +26,31 @@ pub struct Mark {
     pub model: Option<String>,
     pub project: Option<String>,
     pub account: Option<String>,
-    /// Codex: `total_token_usage.total_tokens` of the last event counted, to skip a repeated one.
     pub total: Option<f64>,
 }
 
 type DayTable<V> = BTreeMap<String, BTreeMap<String, V>>;
 
-/// Input, output, cache read, five-minute cache write and one-hour cache write tokens.
 pub type Tokens = [f64; 5];
 
-/// What one account spent on one model in one project through one channel on one day.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Cell {
-    /// Dollars, at the model's `priced_at` price.
     pub cost: f64,
     pub tokens: Tokens,
-    /// Moved over from a version 2 cache, which kept a day per account and model, not per
-    /// project and channel: the split over projects and channels is a share, not where the
-    /// requests ran. A reprice then covers that account's model for the whole day at once.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub moved: bool,
 }
 
-/// "account\tchannel\tmodel\tproject", the key of a day's cells.
 pub fn cell_key(account: &str, channel: &str, model: &str, project: &str) -> String {
     format!("{account}\t{channel}\t{model}\t{project}")
 }
 
-/// A cell key's account, channel, model and project.
 pub fn cell_parts(key: &str) -> (&str, &str, &str, &str) {
     let mut parts = key.splitn(4, '\t');
     let mut next = || parts.next().unwrap_or("");
     (next(), next(), next(), next())
 }
 
-/// The tool whose prices a channel's models have.
 pub fn tool_of(channel: &str) -> Tool {
     match channel {
         CODEX => Tool::Codex,
@@ -91,7 +59,6 @@ pub fn tool_of(channel: &str) -> Tool {
     }
 }
 
-/// "tool\tmodel", the key of `priced_at`.
 pub fn price_key(tool: Tool, model: &str) -> String {
     format!("{}\t{model}", tool.name())
 }
@@ -100,19 +67,13 @@ pub fn price_key(tool: Tool, model: &str) -> String {
 pub struct Cache {
     pub version: u32,
     pub files: BTreeMap<String, Mark>,
-    /// Day ("2026-10-26", local time) to `cell_key` to what was counted.
     pub cells: DayTable<Cell>,
-    /// `price_key` to the price its cells were counted at (`null`: the model had none, so its
-    /// cells cost 0 and it is listed as unpriced). A model missing here was counted at a price
-    /// nobody knows any more (a version 2 cache counted at other prices), and is priced again.
     pub priced_at: BTreeMap<String, Option<Price>>,
-    /// Day to the hashes of the message ids counted on that day.
     #[serde(with = "packed")]
     pub seen: BTreeMap<String, Vec<u64>>,
 }
 
 impl Cache {
-    /// Nothing counted yet.
     pub fn empty() -> Cache {
         Cache {
             version: CURRENT,
@@ -124,7 +85,6 @@ impl Cache {
     }
 }
 
-/// Hashes packed as little-endian bytes, base64 in the file.
 mod packed {
     use super::*;
 
@@ -162,9 +122,6 @@ mod packed {
 }
 
 impl Cache {
-    /// The saved cache in `data`'s database (the old file moves in first, once), or an empty one
-    /// when there is none, it can't be read or it is of an unknown version. A version 2 cache is
-    /// moved over (`from_v2`), keeping every day it counted.
     pub fn load(data: &Path, catalog: &Catalog) -> Cache {
         let _ = store::import_file(data, CACHE_DOC, &old_cache_file(data), parses);
         let Some(text) = store::doc(data, CACHE_DOC).ok().flatten() else {
@@ -183,8 +140,6 @@ impl Cache {
             .unwrap_or_else(Cache::empty)
     }
 
-    /// Writes the cache as one row. An old file left beside the database (an unreadable one, or
-    /// another version, which `load` ignored) is removed: the row replaces it.
     pub fn save(&self, data: &Path) -> std::io::Result<()> {
         let text = serde_json::to_string(self).map_err(std::io::Error::other)?;
         store::put_doc(data, CACHE_DOC, &text).map_err(std::io::Error::other)?;
@@ -192,25 +147,16 @@ impl Cache {
         Ok(())
     }
 
-    /// Every hash counted, for the dedupe set.
     pub fn seen_set(&self) -> HashSet<u64> {
         self.seen.values().flatten().copied().collect()
     }
 
-    /// Forgets a day older than `cutoff` ("yyyy-MM-dd" strings compare in date order).
     pub fn prune_before(&mut self, cutoff: &str) {
         let old = |day: &String| day.as_str() < cutoff;
         self.seen.retain(|d, _| !old(d));
         self.cells.retain(|d, _| !old(d));
     }
 
-    /// A version 2 cache, which kept a day's dollars by model, by project and by channel apart,
-    /// moved over without reading a transcript: its offsets and counted ids stay, so nothing is
-    /// read again. Each model's day is split over its account's projects and its tool's channels
-    /// in proportion to their dollars (tokens: to the channels' tokens), which keeps every total,
-    /// per model, per project and per channel, as it was. When the cache was counted at the
-    /// catalog's prices (`prices_hash` is the same), each model's price is the catalog's; else it
-    /// is left unknown and the tracker prices those days again.
     fn from_v2(old: CacheV2, catalog: &Catalog) -> Cache {
         let known = old.prices == catalog.prices_hash();
         let mut cache = Cache::empty();
@@ -277,7 +223,6 @@ impl Cache {
                         let cell = cells.entry(cell_key(account, ch, model, p)).or_default();
                         cell.cost += cost * cs * ps;
                         cell.moved = true;
-                        // Version 2 kept cache writes as one number; they read as five-minute ones.
                         for (sum, n) in cell.tokens.iter_mut().zip(t) {
                             *sum += n * ts * ps;
                         }
@@ -295,7 +240,6 @@ impl Cache {
     }
 }
 
-/// Each name's share of the values' sum, or an equal share when they sum to nothing.
 fn shares(values: &BTreeMap<String, f64>) -> BTreeMap<String, f64> {
     let sum: f64 = values.values().sum();
     let n = values.len().max(1) as f64;
@@ -305,8 +249,6 @@ fn shares(values: &BTreeMap<String, f64>) -> BTreeMap<String, f64> {
         .collect()
 }
 
-/// The tool a version 2 model key was counted for, which it didn't keep: Antigravity's requests
-/// are all on the account "agy", Claude's model ids start `claude-`, and the rest are Codex's.
 fn v2_tool(account: &str, model: &str) -> Tool {
     if account == "agy" {
         Tool::Antigravity
@@ -317,7 +259,6 @@ fn v2_tool(account: &str, model: &str) -> Tool {
     }
 }
 
-/// The channel a tool's requests are counted in when nothing says which.
 fn main_channel(tool: Tool) -> &'static str {
     match tool {
         Tool::Claude => CLAUDE_CODE,
@@ -326,8 +267,6 @@ fn main_channel(tool: Tool) -> &'static str {
     }
 }
 
-/// The version 2 cache: dollars by model, project and channel apart, counted at the prices with
-/// the fingerprint `prices` (`Catalog::prices_hash`).
 #[derive(Deserialize)]
 struct CacheV2 {
     version: u32,
@@ -342,7 +281,6 @@ struct CacheV2 {
     seen: BTreeMap<String, Vec<u64>>,
 }
 
-/// Whether an old file's text is a cache this version reads (anything else isn't moved in).
 fn parses(text: &str) -> bool {
     serde_json::from_str::<Cache>(text).is_ok_and(|c| c.version == CURRENT)
         || serde_json::from_str::<CacheV2>(text).is_ok_and(|c| c.version == V2)

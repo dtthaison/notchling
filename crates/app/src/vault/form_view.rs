@@ -1,7 +1,3 @@
-//! The vault form over GPUI (macOS): the rows of the Swift `VaultSheet` form in its order, drawn
-//! from the pure [`Form`]. Typing reaches the form through the owning view's key handler; a click
-//! on a row moves the focus there. The value field draws dots, never the value.
-
 use std::rc::Rc;
 
 use gpui::{div, prelude::*, px, Context, Div, SharedString, Stateful};
@@ -16,7 +12,6 @@ use super::list::expiry_label;
 use crate::accounts::view_rows::{segmented, Handler};
 use crate::mac::gate;
 
-/// What the form's controls do.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum FormEvent {
     Focus(Field),
@@ -24,17 +19,12 @@ pub enum FormEvent {
     ToggleAsk,
     ToggleAdvanced,
     EditHowTo,
-    /// Renewing: Pick a date (`false`) or No expiry (`true`); editing: the No expiry checkbox.
     NoExpiry(bool),
-    /// The person confirms (or takes back) an agent's request moving the address.
     ConfirmHost,
     Save,
     Cancel,
 }
 
-/// ⌘V, ⌘C, ⌘X and ⌘A in the form's fields, through the system clipboard: paste into the focused
-/// field, copy or cut it whole (never the value). ⌘A has nothing to select and is swallowed.
-/// Whether the key was one of them.
 pub fn clipboard_key<V: 'static>(
     form: &mut Form,
     k: &gpui::Keystroke,
@@ -174,7 +164,6 @@ fn checkbox<V: 'static>(
         .on_click(cx.listener(move |this, _, _, cx| handler(this, event.clone(), cx)))
 }
 
-/// The how-to help box (`VaultHelpView`): the text with its Edit button.
 fn help_box<V: 'static>(
     form: &Form,
     a: Appearance,
@@ -285,7 +274,6 @@ fn expiry_row<V: 'static>(
     )
 }
 
-/// The form's rows, scrolling.
 pub fn form_body<V: 'static>(
     form: &Form,
     today: i64,
@@ -489,7 +477,6 @@ pub fn form_body<V: 'static>(
     body
 }
 
-/// The form's footer: the note, the error or blocker, Cancel and Save.
 pub fn form_footer<V: 'static>(
     form: &Form,
     busy: bool,

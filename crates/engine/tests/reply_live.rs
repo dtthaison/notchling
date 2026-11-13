@@ -1,6 +1,3 @@
-//! The reply executor's terminal on E3a's real pty, with `/bin/sh` standing in for `claude`: the
-//! [`Pty`] adapter, and a [`PtyScript`] (Trust Folder's shape) played into it. Nothing else is
-//! started, and every child is ended when its terminal drops.
 #![cfg(any(target_os = "macos", target_os = "linux"))]
 
 use notchling_engine::control::{Command, KeyStep, PtyScript, Quiet};
@@ -76,7 +73,6 @@ fn a_script_waits_for_its_prompt_then_plays_its_keys() {
     let mut pty = LiveTerminal::spawn(&script_command(&script, Path::new("/unused/claude")))
         .expect("sh starts");
     assert!(play_script(&script, &mut pty));
-    // Down then Enter reached the program: `read` got the arrow's bytes.
     let text = pty.screen().join("\n");
     assert!(text.contains("033   [   B"), "{text}");
 }

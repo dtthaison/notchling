@@ -1,14 +1,7 @@
-//! User notifications.
-//!
-//! [`Notifier`] is what the rest of the code calls; tests use [`RecordingNotifier`]. The macOS
-//! implementation is not exercised by tests, and never goes through `osascript`, whose banners
-//! carry Script Editor's name and icon.
-
 use std::sync::Mutex;
 
 use crate::{Error, Result};
 
-/// One banner.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Notification {
     pub title: String,
@@ -24,12 +17,10 @@ impl Notification {
     }
 }
 
-/// Shows a banner to the user.
 pub trait Notifier: Send + Sync {
     fn notify(&self, notification: &Notification) -> Result<()>;
 }
 
-/// Keeps what it was asked to show, for tests.
 #[derive(Default)]
 pub struct RecordingNotifier {
     sent: Mutex<Vec<Notification>>,
@@ -40,7 +31,6 @@ impl RecordingNotifier {
         RecordingNotifier::default()
     }
 
-    /// Everything shown so far, oldest first.
     pub fn sent(&self) -> Vec<Notification> {
         match self.sent.lock() {
             Ok(list) => list.clone(),
@@ -59,8 +49,6 @@ impl Notifier for RecordingNotifier {
     }
 }
 
-/// The notifier for this system: the notification center on macOS, otherwise one that says it is
-/// not supported yet.
 pub fn system_notifier() -> Box<dyn Notifier> {
     #[cfg(target_os = "macos")]
     {
@@ -72,7 +60,6 @@ pub fn system_notifier() -> Box<dyn Notifier> {
     }
 }
 
-/// Fails every call with [`Error::Unsupported`].
 pub struct Unsupported;
 
 impl Notifier for Unsupported {
@@ -95,13 +82,8 @@ mod mac {
     use std::sync::mpsc;
     use std::time::Duration;
 
-    /// How long to wait for macOS to answer before giving up.
     const ANSWER_WAIT: Duration = Duration::from_secs(10);
 
-    /// macOS's notification center (`UNUserNotificationCenter`). Not covered by tests: it needs an
-    /// app bundle and the user's permission. A process without a bundle (the daemon on its own) gets
-    /// [`Error::Unsupported`] instead of the exception macOS would throw; the app then shows its own
-    /// banner window, as the Swift app does when macOS refuses an ad hoc signed build.
     pub struct UserNotificationCenter;
 
     fn has_bundle() -> bool {

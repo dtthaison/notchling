@@ -46,7 +46,6 @@ class ZoneTests(unittest.TestCase):
         self.assertFalse(Z.in_zone("apps/flutter/lib/core/pairing/keys.dart"))
 
     def test_crate_sources_in_zone_but_manifests_and_build_scripts_not(self):
-        # A Cargo.toml adds dependencies and a build.rs runs code at build time: both wait for the maintainer.
         for p in ["crates/app/src/view.rs", "crates/kit/src/button.rs", "crates/engine/src/transcript/reader.rs",
                   "crates/engine/src/search/rank.rs"]:
             self.assertTrue(Z.in_zone(p), p)
@@ -88,7 +87,6 @@ class ZoneTests(unittest.TestCase):
     def test_deleting_zone_file_ok(self):
         self.assertEqual(protected_paths([chg("legacy/macos/Sources/Notchling/Search/Old.swift", "D")], Z), [])
 
-    # I4: the spec's protected files stay protected inside a zone folder.
     def test_spec_protected_files_in_zone_folders_are_protected(self):
         for p in ["docs/AGENTS.md", "docs/CLAUDE.md", "legacy/macos/Sources/Notchling/Search/CLAUDE.md",
                   "legacy/macos/Sources/Notchling/Search/AGENTS.md", "legacy/macos/Sources/Notchling/Search/.claude/skills/x/SKILL.md",
@@ -128,7 +126,6 @@ class ZoneTests(unittest.TestCase):
                   "legacy/macos/Tests/NotchlingTests/.gitattributes", "legacy/macos/Fixtures/.gitattributes", "apps/flutter/test/CODEOWNERS"]:
             self.assertEqual(protected_paths([chg(p, "A")], Z), [p], p)
 
-    # I3: a new test-config file changes how every existing phone test runs.
     def test_new_flutter_test_config_and_dart_test_yaml_are_protected(self):
         for p in ["apps/flutter/test/flutter_test_config.dart", "apps/flutter/test/chat/flutter_test_config.dart",
                   "apps/flutter/test/dart_test.yaml", "apps/flutter/test/goldens/dart_test.yaml"]:
@@ -138,7 +135,6 @@ class ZoneTests(unittest.TestCase):
         self.assertEqual(protected_paths([chg("apps/flutter/test/chat/new_test.dart", "A")], Z), [])
         self.assertEqual(protected_paths([chg("apps/flutter/test/goldens/new.png", "A")], Z), [])
 
-    # I2: on a Mac a path that differs only by case is the same path.
     def test_case_shadowed_zone_folders(self):
         for p in ["docs/Decisions/x.md", "docs/DECISIONS/x.md", "apps/flutter/lib/features/Pairing/pair.dart",
                   "docs/Rules.md", "docs/Goals.md", "docs/Agents.md", "docs/claude.md",

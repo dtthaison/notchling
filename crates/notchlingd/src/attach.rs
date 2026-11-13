@@ -1,8 +1,3 @@
-//! The daemon's real terminal and launcher: [`ClaudeAttacher`] opens `claude attach <job>` on E3a's
-//! pty for the reply executor, [`LiveLauncher`] is E11's [`RealLauncher`] with the hidden-pty
-//! scripts (Trust Folder) played on the same pty. Both run only behind the acting switch, which is
-//! off until the maintainer hands sessions over; tests use fakes.
-
 use crate::acting_ops::Attacher;
 use notchling_engine::control::{
     Command, LaunchError, LaunchOutput, Launcher, PtyScript, RealLauncher,
@@ -15,7 +10,6 @@ use notchling_local_api::{ApiError, ErrorCode};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-/// `claude attach` for a background job.
 pub struct ClaudeAttacher {
     claude: PathBuf,
 }
@@ -40,7 +34,6 @@ impl Attacher for ClaudeAttacher {
     }
 }
 
-/// [`RealLauncher`], plus a pty for the scripts it can't play.
 pub struct LiveLauncher {
     real: RealLauncher,
 }
@@ -68,8 +61,6 @@ mod tests {
     use super::*;
     use notchling_engine::control::{KeyStep, Quiet};
 
-    /// A `claude` that is a shell script in a scratch folder: what the attach starts, with which
-    /// arguments and lane, without any real Claude Code.
     fn fake_claude(tag: &str, body: &str) -> (PathBuf, PathBuf) {
         let dir = std::env::temp_dir().join(format!("nl-attach-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -105,7 +96,6 @@ mod tests {
         match attacher.attach("abcd1234", None) {
             Err(e) => assert_eq!(e.code, ErrorCode::Failed),
             Ok(mut pty) => {
-                // forkpty starts the child before exec fails: nothing is drawn and it ends.
                 assert!(!pty.screen().iter().any(|l| l.contains("Yes, I trust")));
             }
         }

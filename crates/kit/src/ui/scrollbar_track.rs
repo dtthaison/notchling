@@ -1,11 +1,7 @@
-//! What the overlay bar scrolls (`scrollbar`): a div's [`ScrollHandle`] or a GPUI [`ListState`],
-//! and the kit's numbers for it this frame.
-
 use gpui::{point, px, Bounds, ListState, Pixels, ScrollHandle};
 
 use crate::scrollbar::{self as math, list_scrolled, EDGE_INSET};
 
-/// The scrolling thing the bar follows and moves.
 #[derive(Clone)]
 pub(super) enum Track {
     Div(ScrollHandle),
@@ -13,8 +9,6 @@ pub(super) enum Track {
 }
 
 impl Track {
-    /// How far the content can scroll, in points, as measured so far (a list only measures the
-    /// rows it has drawn).
     pub fn max_offset(&self) -> f32 {
         match self {
             Track::Div(handle) => f32::from(handle.max_offset().height),
@@ -22,8 +16,6 @@ impl Track {
         }
     }
 
-    /// The thumb was grabbed: a list holds the height it reports to the bar still, so rows
-    /// measured during the drag don't move the thumb away from the pointer.
     pub fn drag_started(&self) {
         if let Track::List(state) = self {
             state.scrollbar_drag_started();
@@ -37,8 +29,6 @@ impl Track {
     }
 }
 
-/// The scroll container's numbers this frame, in the kit's terms (points scrolled down, not
-/// GPUI's negative offset).
 #[derive(Clone, Copy)]
 pub(super) struct Geometry {
     pub track: f32,
@@ -54,8 +44,6 @@ impl Geometry {
         let scrolled = match track {
             Track::Div(handle) => -f32::from(handle.offset().y),
             Track::List(state) => {
-                // A list that follows its end has no offset to read (`logical_scroll_top` is past
-                // the last item); `list_scrolled` puts it at the end.
                 let following = state.logical_scroll_top().item_ix >= state.item_count();
                 list_scrolled(
                     following,
@@ -77,7 +65,6 @@ impl Geometry {
     }
 }
 
-/// Scrolls the container to `scrolled` points down (a div keeps its horizontal offset).
 pub(super) fn scroll_to(track: &Track, scrolled: f32) {
     match track {
         Track::Div(handle) => {

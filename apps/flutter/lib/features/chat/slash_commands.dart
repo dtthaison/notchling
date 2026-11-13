@@ -6,7 +6,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/net/bridge_client.dart';
 import '../connection/connection.dart';
 
-/// A command the session can run: Claude Code's built-ins, plus the user's, the project's and plugins' commands.
 class SlashCommand {
   const SlashCommand({required this.name, required this.description, this.argumentHint});
   final String name;
@@ -14,8 +13,6 @@ class SlashCommand {
   final String? argumentHint;
 }
 
-/// Claude Code's built-ins, the same list the Mac keeps. The phone offers these until the Mac answers `commands.list`
-/// with the session's real list (the user's and the project's own commands too), and keeps them on an older Mac.
 const List<SlashCommand> builtInSlashCommands = <SlashCommand>[
   SlashCommand(name: 'clear', description: 'Clear the conversation and start fresh'),
   SlashCommand(name: 'compact', description: 'Summarise the conversation to free up context'),
@@ -35,7 +32,6 @@ const List<SlashCommand> builtInSlashCommands = <SlashCommand>[
   SlashCommand(name: 'help', description: 'Show help'),
 ];
 
-/// The commands of one session: the built-ins at once, the Mac's list when it arrives (and again after a reconnect).
 final slashCommandsProvider = NotifierProvider.family<SlashCommandsNotifier, List<SlashCommand>, String>(SlashCommandsNotifier.new);
 
 class SlashCommandsNotifier extends Notifier<List<SlashCommand>> {
@@ -56,13 +52,11 @@ class SlashCommandsNotifier extends Notifier<List<SlashCommand>> {
       if (!ref.mounted || rows.isEmpty) return;
       state = <SlashCommand>[for (final r in rows) SlashCommand(name: r.name, description: r.description, argumentHint: r.argumentHint)];
     } on BridgeException catch (error) {
-      // An older Mac does not know the op: the built-ins stay.
       debugPrint('SlashCommandsNotifier($sessionId): ${error.code} ${error.message}');
     }
   }
 }
 
-/// Commands matching what is typed after the slash: prefix matches first, then the rest.
 List<SlashCommand> matchSlashCommands(String typed, List<SlashCommand> commands, {int limit = 6}) {
   final String q = typed.toLowerCase();
   if (q.isEmpty) return commands.take(limit).toList();

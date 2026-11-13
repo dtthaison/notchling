@@ -1,7 +1,3 @@
-//! ISO 8601 timestamps from `state.json`, without a date crate.
-
-/// Milliseconds since the epoch for `2026-11-02T08:21:06.159Z`, with or without a fraction, and with
-/// `Z` or a `+hh:mm` offset. `None` for anything else.
 pub fn parse_iso_ms(text: &str) -> Option<i64> {
     let (date, rest) = text.split_once('T')?;
     let mut d = date.split('-');
@@ -35,7 +31,6 @@ pub fn parse_iso_ms(text: &str) -> Option<i64> {
         }
         Some(_) => return None,
     };
-    // A year that isn't one the calendar can hold overflows somewhere in the sum: that is `None`.
     let days = days_from_civil(year, month, day)?;
     let minutes = days
         .checked_mul(24)?
@@ -48,7 +43,6 @@ pub fn parse_iso_ms(text: &str) -> Option<i64> {
         .checked_sub(offset_ms)
 }
 
-/// The clock part and the zone's offset in milliseconds (east of UTC positive).
 fn split_zone(rest: &str) -> Option<(&str, i64)> {
     if let Some(clock) = rest.strip_suffix('Z') {
         return Some((clock, 0));
@@ -67,7 +61,6 @@ fn split_zone(rest: &str) -> Option<(&str, i64)> {
     Some((clock, sign * offset))
 }
 
-/// Days since 1970-01-01 of a proleptic Gregorian date (Howard Hinnant's algorithm).
 fn days_from_civil(year: i64, month: i64, day: i64) -> Option<i64> {
     let y = if month <= 2 {
         year.checked_sub(1)?

@@ -8,15 +8,11 @@ import 'package:path_provider/path_provider.dart';
 import '../../core/protocol/models.dart';
 import '../macs/session_ref.dart';
 
-/// Which sessions the user archived on this phone, and when. Stored on the phone, not on the Mac: archiving is a
-/// preference about this list (the Mac's own sessions are untouched), it works offline, and each phone keeps its own.
 abstract interface class ArchiveStore {
-  /// Session id to the time it was archived, in milliseconds.
   Future<Map<String, int>> load();
   Future<void> save(Map<String, int> archived);
 }
 
-/// A JSON file in the app's support folder. A file that cannot be read or written is logged and treated as empty.
 class DiskArchiveStore implements ArchiveStore {
   DiskArchiveStore([Future<Directory> Function()? root]) : _root = root ?? getApplicationSupportDirectory;
   final Future<Directory> Function() _root;
@@ -80,8 +76,6 @@ class ArchivedSessionsNotifier extends Notifier<Map<String, int>> {
     return <String, int>{};
   }
 
-  /// Forgets what was archived on the computer whose storage scope is [scope], when that computer is removed.
-  /// Waits for the saved list to load first, so it can't come back over the change.
   Future<void> removeScope(String scope) async {
     await _loading;
     if (!ref.mounted) return;
@@ -104,11 +98,8 @@ class ArchivedSessionsNotifier extends Notifier<Map<String, int>> {
   void _persist() => ref.read(archiveStoreProvider).save(state);
 }
 
-/// The archived sessions still hidden: one that has moved since it was archived (new activity) comes back by itself.
 Set<String> hiddenSessionIds(Map<String, int> archived, List<Session> sessions) => hiddenSessionIdsIn(archived, sessions, '');
 
-/// [hiddenSessionIds] for the sessions of the computer whose storage scope is [scope]: the archive keys carry the
-/// scope (decision 0012), so archiving `s1` on one computer leaves `s1` on another in the list. Returns bare ids.
 Set<String> hiddenSessionIdsIn(Map<String, int> archived, List<Session> sessions, String scope) => <String>{
       for (final Session s in sessions)
         if (archived[scope.isEmpty ? s.id : '$scope/${s.id}'] case final int at when s.lastActivity.millisecondsSinceEpoch <= at) s.id,

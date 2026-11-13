@@ -1,4 +1,3 @@
-/// Typed access to decoded JSON. A wrong shape throws [FormatException] instead of a cast error.
 typedef Json = Map<String, Object?>;
 
 extension JsonAccess on Json {

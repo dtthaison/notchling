@@ -1,6 +1,3 @@
-//! Ports of ACPTranscriptTests. `acp-agy.jsonl` is a real `agy acp` exchange (Antigravity CLI 1.5.1):
-//! `>` lines Notchling sent, `<` lines it got.
-
 mod common;
 
 use common::*;

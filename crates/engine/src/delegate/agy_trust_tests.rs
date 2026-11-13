@@ -163,7 +163,6 @@ fn a_worktree_under_a_folder_claude_trusts_is_added_to_agys_list() {
     let v: Value =
         serde_json::from_str(&std::fs::read_to_string(&w.files.settings).unwrap()).unwrap();
     assert_eq!(v["x"], true);
-    // A second delegation from the same folder changes nothing.
     assert_eq!(trust(&w.files, &w.work), Trusted::Already);
     assert_eq!(listed(&w), list);
     let _ = std::fs::remove_dir_all(&w.root);

@@ -228,7 +228,7 @@ void main() {
     expect(request['op'], 'web.snapshot');
     expect(request['url'], 'http://localhost:3000');
     socket.reply(request['id']!, data: <String, Object?>{'binary': true, 'bytes': 3});
-    socket.binary('WEB1', 999, <int>[0]); // another request's picture is ignored
+    socket.binary('WEB1', 999, <int>[0]);
     socket.binary('WEB1', request['id']! as int, <int>[0xFF, 0xD8, 0xFF]);
     expect(await snapshot, <int>[0xFF, 0xD8, 0xFF]);
     await client.dispose();

@@ -1,8 +1,3 @@
-//! `WebSocketWire`, the frame half (RFC 6455): what the server writes (final, unmasked frames) and
-//! a decoder for what clients send. Clients must mask; anything off the rules ends in a
-//! [`Event::Failure`] with the close code to answer with, and the decoder takes nothing more.
-
-/// The largest message a phone may send: a frame of 256 KB plus one byte is refused (1009).
 pub const MAX_MESSAGE_BYTES: usize = 256 * 1024;
 
 pub const TEXT: u8 = 0x1;
@@ -11,7 +6,6 @@ pub const CLOSE: u8 = 0x8;
 pub const PING: u8 = 0x9;
 pub const PONG: u8 = 0xA;
 
-/// A final, unmasked frame (servers never mask).
 pub fn encode(opcode: u8, payload: &[u8]) -> Vec<u8> {
     let mut frame = Vec::with_capacity(payload.len() + 10);
     frame.push(0x80 | opcode);
@@ -126,7 +120,6 @@ impl FrameDecoder {
                 length = wide as usize;
                 offset = 10;
             }
-            // Refused on the header alone: a too-big frame is never buffered.
             if length > self.max_message_bytes {
                 return fail(1009, "message too big");
             }
@@ -195,7 +188,6 @@ impl FrameDecoder {
     }
 }
 
-/// A masked client frame (tests and test clients).
 #[cfg(test)]
 pub(crate) fn masked(opcode: u8, payload: &[u8], fin: bool) -> Vec<u8> {
     let mask = [1u8, 2, 3, 4];

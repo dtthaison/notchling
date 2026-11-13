@@ -1,14 +1,7 @@
-//! Files dropped on the reply box (Finder, the screenshot thumbnail): each path goes into the
-//! text at the caret, so Claude reads the file where it is, as a pasted path would. The Swift app
-//! showed them as attachments and sent the paths after the text; here the path is the text, set
-//! apart by spaces and quoted for the shell when it has any.
-
 use std::path::{Path, PathBuf};
 
 use notchling_kit::text_edit::TextEdit;
 
-/// A path as a shell takes it: as is, or in single quotes when it holds a space, a quote or a
-/// character the shell would read (a `'` inside becomes `'\''`).
 pub fn quoted(path: &Path) -> String {
     let text = path.to_string_lossy();
     let plain = !text.is_empty()
@@ -22,11 +15,8 @@ pub fn quoted(path: &Path) -> String {
     }
 }
 
-/// How long a kept copy stays: long enough for the session to read it, and to read it again.
 pub const KEEP_FOR_MS: i64 = 7 * 24 * 3600 * 1000;
 
-/// A file macOS deletes soon after the drop: the screenshot thumbnail hands over a file in
-/// `…/TemporaryItems/NSIRD_screencaptureui_…/`, gone as soon as the thumbnail is.
 pub fn passing(path: &Path) -> bool {
     path.components().any(|c| {
         c.as_os_str()
@@ -35,9 +25,6 @@ pub fn passing(path: &Path) -> bool {
     })
 }
 
-/// The paths to put in the box: a [`passing`] file copied first into `store/<now_ms>/` (its own
-/// name kept) so the session can still read it after macOS deletes the original; every other path
-/// as it is, and a copy that fails keeps the original. Copies older than [`KEEP_FOR_MS`] go.
 pub fn keep(paths: &[PathBuf], store: &Path, now_ms: i64) -> Vec<PathBuf> {
     if paths.iter().any(|p| passing(p)) {
         prune(store, now_ms);
@@ -49,7 +36,6 @@ pub fn keep(paths: &[PathBuf], store: &Path, now_ms: i64) -> Vec<PathBuf> {
             let (true, Some(name)) = (passing(path), path.file_name()) else {
                 return path.clone();
             };
-            // A folder of its own, so two drops of one name never meet.
             let mut dir = store.join(stamp.to_string());
             while dir.join(name).exists() {
                 stamp += 1;
@@ -68,7 +54,6 @@ pub fn keep(paths: &[PathBuf], store: &Path, now_ms: i64) -> Vec<PathBuf> {
         .collect()
 }
 
-/// Removes the copies' folders older than [`KEEP_FOR_MS`]; folders not named by a time stay.
 fn prune(store: &Path, now_ms: i64) {
     let Ok(entries) = std::fs::read_dir(store) else {
         return;
@@ -85,7 +70,6 @@ fn prune(store: &Path, now_ms: i64) {
     }
 }
 
-/// The dropped paths as one piece of text, a space between them.
 pub fn paths_text(paths: &[impl AsRef<Path>]) -> String {
     paths
         .iter()
@@ -94,21 +78,15 @@ pub fn paths_text(paths: &[impl AsRef<Path>]) -> String {
         .join(" ")
 }
 
-/// The kinds of file drawn as a picture.
 const IMAGE_KINDS: [&str; 8] = [
     ".png", ".jpg", ".jpeg", ".gif", ".webp", ".heic", ".tiff", ".bmp",
 ];
 
-/// Whether `path` names a picture, by its kind.
 pub fn is_image(path: &Path) -> bool {
     let lower = path.to_string_lossy().to_lowercase();
     IMAGE_KINDS.iter().any(|k| lower.ends_with(k))
 }
 
-/// The words of `text` that are pictures, with where each sits (its quotes included): the words
-/// read as the shell reads them (single quotes, a backslash before one character), kept when one
-/// is an absolute path ending in an image kind. A quote left open ends the reading. Trailing
-/// punctuation after a bare path is not part of it.
 fn image_spans(text: &str) -> Vec<(std::ops::Range<usize>, PathBuf)> {
     let mut out = Vec::new();
     let mut keep = |word: &mut String, from: usize, to: usize, bare_end: bool| {
@@ -126,9 +104,7 @@ fn image_spans(text: &str) -> Vec<(std::ops::Range<usize>, PathBuf)> {
         word.clear();
     };
     let mut word = String::new();
-    // Where the word being read starts, if one is.
     let mut from: Option<usize> = None;
-    // Whether the word's last piece was outside quotes, so its punctuation may be trimmed.
     let mut bare = false;
     let mut chars = text.char_indices();
     while let Some((at, c)) = chars.next() {
@@ -173,7 +149,6 @@ fn image_spans(text: &str) -> Vec<(std::ops::Range<usize>, PathBuf)> {
     out
 }
 
-/// The pictures `text` names, each once, in order. What [`paths_text`] writes reads back here.
 pub fn image_words(text: &str) -> Vec<PathBuf> {
     let mut out: Vec<PathBuf> = Vec::new();
     for (_, path) in image_spans(text) {
@@ -184,8 +159,6 @@ pub fn image_words(text: &str) -> Vec<PathBuf> {
     out
 }
 
-/// A sent message as its bubble shows it: the words, without the pictures `exists` finds (with a
-/// space beside each), and those pictures, to be drawn as pictures.
 pub fn split_images(text: &str, exists: impl Fn(&Path) -> bool) -> (String, Vec<PathBuf>) {
     let mut words = String::new();
     let mut pictures: Vec<PathBuf> = Vec::new();
@@ -211,7 +184,6 @@ pub fn split_images(text: &str, exists: impl Fn(&Path) -> bool) -> (String, Vec<
     (words.trim().to_owned(), pictures)
 }
 
-/// What goes to the session: the typed words, then the attached files' paths after a blank line.
 pub fn with_attachments(text: &str, files: &[PathBuf]) -> String {
     let text = text.trim();
     let paths = paths_text(files);
@@ -222,7 +194,6 @@ pub fn with_attachments(text: &str, files: &[PathBuf]) -> String {
     }
 }
 
-/// A file on this Mac as a `file://` URL, for macOS to open: every byte but the plain ones escaped.
 pub fn file_url(path: &Path) -> String {
     let mut url = String::from("file://");
     for b in path.to_string_lossy().bytes() {
@@ -235,10 +206,6 @@ pub fn file_url(path: &Path) -> String {
     url
 }
 
-/// The file or folder on this Mac a reply's link names, or `None` for a web link or a path that
-/// isn't there. Agents link files relative to the session's `folder` (Codex: `<out/a.png>`), and
-/// macOS can't open a bare relative path (Finder's error -50). A `:12` or `#L12` after the name
-/// is a line, tried off when the whole doesn't exist.
 pub fn local_link(url: &str, folder: &str) -> Option<std::path::PathBuf> {
     let raw = match url.strip_prefix("file://") {
         Some(path) => path,
@@ -270,7 +237,6 @@ pub fn local_link(url: &str, folder: &str) -> Option<std::path::PathBuf> {
     })
 }
 
-/// `https:`, `mailto:`: letters before a colon, and no digit after it (`a.rs:12` is a line).
 fn has_scheme(url: &str) -> bool {
     let Some(colon) = url.find(':') else {
         return false;
@@ -284,7 +250,6 @@ fn has_scheme(url: &str) -> bool {
         && !url[colon + 1..].starts_with(|c: char| c.is_ascii_digit())
 }
 
-/// `%20` and the like back to their bytes; anything that isn't a valid escape stays as written.
 pub(crate) fn percent_decoded(text: &str) -> String {
     let bytes = text.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
@@ -304,17 +269,14 @@ pub(crate) fn percent_decoded(text: &str) -> String {
     String::from_utf8(out).unwrap_or_else(|_| text.to_owned())
 }
 
-/// Where a row's attached files are kept among the drafts: the row's id and a separator no id has.
 pub fn attachments_key(row: &str) -> String {
     format!("{row}\u{1f}files")
 }
 
-/// The row an [`attachments_key`] belongs to; `None` for a row's own draft.
 pub fn attachments_row(key: &str) -> Option<&str> {
     key.strip_suffix("\u{1f}files")
 }
 
-/// Attached files as a draft's text, a line each.
 pub fn attachments_text(files: &[PathBuf]) -> String {
     files
         .iter()
@@ -323,7 +285,6 @@ pub fn attachments_text(files: &[PathBuf]) -> String {
         .join("\n")
 }
 
-/// [`attachments_text`] read back.
 pub fn attachments_from(text: &str) -> Vec<PathBuf> {
     text.lines()
         .filter(|l| !l.is_empty())
@@ -331,9 +292,6 @@ pub fn attachments_from(text: &str) -> Vec<PathBuf> {
         .collect()
 }
 
-/// Puts the paths at the caret (over the selection), with a space before them unless the caret
-/// follows one or starts the text, and one after so typing goes on. `false` when there was
-/// nothing to put.
 pub fn insert_paths(edit: &mut TextEdit, paths: &[impl AsRef<Path>]) -> bool {
     let text = paths_text(paths);
     if text.is_empty() {
@@ -353,8 +311,6 @@ pub fn insert_paths(edit: &mut TextEdit, paths: &[impl AsRef<Path>]) -> bool {
 mod tests {
     use super::*;
 
-    /// Codex links its files relative to the session's folder (`[a.png](<out/a.png>)`); handed to
-    /// macOS as they are, Finder said "The application can't be opened. -50".
     #[test]
     fn a_relative_link_is_the_file_in_the_session_folder() {
         let dir = std::env::temp_dir().join(format!("nl-link-{}", std::process::id()));
@@ -368,10 +324,8 @@ mod tests {
         let abs = dir.join("out/S1 a.png").to_string_lossy().into_owned();
         assert_eq!(at(&abs), Some(dir.join("out/S1 a.png")));
         assert_eq!(at(&format!("file://{abs}")), Some(dir.join("out/S1 a.png")));
-        // A line after the name (`a.rs:12`, `a.rs#L12`) still finds the file.
         assert_eq!(at("out/S1 a.png:12"), Some(dir.join("out/S1 a.png")));
         assert_eq!(at("out/S1 a.png#L3"), Some(dir.join("out/S1 a.png")));
-        // A folder opens too; a web link, a missing file or no session folder is not a file.
         assert_eq!(at("out"), Some(dir.join("out")));
         assert_eq!(at("https://example.com/out"), None);
         assert_eq!(at("mailto:a@b.c"), None);
@@ -496,16 +450,13 @@ mod tests {
             "Screenshot 1.png"
         );
         assert_eq!(std::fs::read(&kept[0]).unwrap(), b"png");
-        // macOS deletes its file; the copy stays.
         std::fs::remove_dir_all(&temp).unwrap();
         assert!(kept[0].exists());
-        // The same name dropped again doesn't overwrite the first.
         std::fs::create_dir_all(&temp).unwrap();
         std::fs::write(&shot, b"second").unwrap();
         let again = keep(std::slice::from_ref(&shot), &store, 2_000);
         assert_ne!(again[0], kept[0]);
         assert_eq!(std::fs::read(&again[0]).unwrap(), b"second");
-        // A file already gone keeps its path: the box shows what was dropped.
         let gone = temp.join("gone.png");
         assert_eq!(keep(std::slice::from_ref(&gone), &store, 3_000), vec![gone]);
     }
@@ -524,25 +475,21 @@ mod tests {
         assert!(insert_paths(&mut e, &[Path::new("/a/b.rs")]));
         assert_eq!(e.text(), "look at /a/b.rs ");
         assert_eq!(e.caret(), e.text().len());
-        // After a space, or at the start, no extra space before.
         let mut s = TextEdit::new("see ");
         insert_paths(&mut s, &[Path::new("/x")]);
         assert_eq!(s.text(), "see /x ");
         let mut empty = TextEdit::new("");
         insert_paths(&mut empty, &[Path::new("/x y"), Path::new("/z")]);
         assert_eq!(empty.text(), "'/x y' /z ");
-        // Over a selection, in the middle.
         let mut mid = TextEdit::new("fix THIS please");
         mid.set_selection(4, 8);
         insert_paths(&mut mid, &[Path::new("/f.rs")]);
         assert_eq!(mid.text(), "fix /f.rs  please");
         assert_eq!(mid.caret(), 10);
-        // Nothing dropped, nothing done.
         let mut none = TextEdit::new("a");
         let nothing: [PathBuf; 0] = [];
         assert!(!insert_paths(&mut none, &nothing));
         assert_eq!(none.text(), "a");
-        // One undo step.
         assert!(mid.undo());
         assert_eq!(mid.text(), "fix THIS please");
     }

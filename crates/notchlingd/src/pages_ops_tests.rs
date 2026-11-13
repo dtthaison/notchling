@@ -1,5 +1,3 @@
-//! The pages and search ops over temp folders: no real `~/.claude`, `~/.codex` or Notchling data.
-
 use crate::pages_ops::*;
 use notchling_engine::pages::{PageLibrary, RecordContext};
 use notchling_engine::search::index::TitledSession;
@@ -64,7 +62,6 @@ fn setup(dir: &Dir) -> PagesSetup {
     }
 }
 
-/// Saves a page the way the hook does, through a writable view of the same folder.
 fn save_page(dir: &Dir, file: &str, html: &str, url: &str, account: &str, at: f64) {
     dir.write(&format!("work/{file}"), html);
     let event = json!({
@@ -204,7 +201,6 @@ fn a_damaged_entry_has_no_path_and_a_big_library_is_cut() {
     assert_eq!(list["truncated"], true);
     assert_eq!(list["pages"].as_array().unwrap().len(), 1000);
     assert!(list.to_string().len() < notchling_local_api::MAX_LINE);
-    // Newest first: the damaged one is on top, and gives no path to open.
     assert_eq!(list["pages"][0]["title"], "Evil");
     assert_eq!(list["pages"][0]["path"], Value::Null);
 }
@@ -247,7 +243,6 @@ fn search_returns_pages_and_sessions_grouped() {
     }));
 
     let reply = call(&ops_, ops::SEARCH_QUERY, json!({"text": "Token"}));
-    // Words in the title come first, then the rest (the account matched).
     assert_eq!(titles(&reply, "pages"), ["Token Report", "Release Plan"]);
     let sessions = reply["sessions"].as_array().unwrap();
     let keys: Vec<&str> = sessions
@@ -275,7 +270,6 @@ fn search_returns_pages_and_sessions_grouped() {
     assert_eq!(snippet[s..e].to_lowercase(), "token");
     assert!(reply.get("indexing").is_some());
 
-    // An empty query lists the newest of each, with no snippets.
     let latest = call(&ops_, ops::SEARCH_QUERY, json!({}));
     assert_eq!(titles(&latest, "pages"), ["Release Plan", "Token Report"]);
     assert!(latest["sessions"]
@@ -283,7 +277,6 @@ fn search_returns_pages_and_sessions_grouped() {
         .unwrap()
         .iter()
         .all(|s| s["snippet"].is_null()));
-    // limit caps both.
     let one = call(
         &ops_,
         ops::SEARCH_QUERY,
@@ -291,12 +284,10 @@ fn search_returns_pages_and_sessions_grouped() {
     );
     assert_eq!(one["pages"].as_array().unwrap().len(), 1);
     assert_eq!(one["sessions"].as_array().unwrap().len(), 1);
-    // A pasted link finds its page.
     assert_eq!(
         titles(&call(&ops_, ops::SEARCH_QUERY, json!({"text": B})), "pages"),
         ["Release Plan"]
     );
-    // Nothing matches nothing.
     let none = call(&ops_, ops::SEARCH_QUERY, json!({"text": "zzzzqqq"}));
     assert!(
         none["pages"].as_array().unwrap().is_empty()
@@ -317,12 +308,10 @@ fn bad_search_arguments_are_refused() {
         let e = ops_.call(ops::SEARCH_QUERY, &bad).unwrap_err();
         assert_eq!(e.code, ErrorCode::BadRequest, "{bad}");
     }
-    // Null and missing are the defaults.
     assert!(ops_.call(ops::SEARCH_QUERY, &Value::Null).is_ok());
     assert!(ops_
         .call(ops::SEARCH_QUERY, &json!({"text": null, "limit": null}))
         .is_ok());
-    // A huge limit is capped, not refused.
     assert!(ops_
         .call(ops::SEARCH_QUERY, &json!({"limit": 1_000_000}))
         .is_ok());
@@ -377,7 +366,6 @@ fn reads_leave_the_swift_apps_folder_alone() {
         before,
         "the pages folder is read, not written"
     );
-    // The index cache is the daemon's own file, not the Swift app's.
     assert!(dir.path("data/daemon/search.db").exists());
     assert!(!dir.path("data/search-index.json").exists());
 }
@@ -393,10 +381,8 @@ fn a_refresh_runs_after_the_first_and_only_when_due() {
     let clock = Arc::new(std::sync::Mutex::new(now()));
     let reader = clock.clone();
     let ops_ = PagesOps::new(setup(&dir)).with_clock(Arc::new(move || *reader.lock().unwrap()));
-    // The very first query waits for the first read.
     let first = call(&ops_, ops::SEARCH_QUERY, json!({"text": "first"}));
     assert_eq!(first["sessions"].as_array().unwrap().len(), 1);
-    // A new transcript is not seen until a refresh is due (8 s later), which runs in the background.
     let newer = dir.write(
         "claude/projects/p/t.jsonl",
         r#"{"type":"user","message":{"role":"user","content":"second words"}}"#,
@@ -437,7 +423,6 @@ fn the_setup_follows_the_layout() {
         s.cache,
         Some(PathBuf::from("/r/notchling/daemon/search.db"))
     );
-    // A daemon given a socket (a test) keeps no cache file.
     let with_socket = Layout::resolve(
         Some(Path::new("/tmp/x.sock")),
         Some(root.as_os_str()),
@@ -445,7 +430,6 @@ fn the_setup_follows_the_layout() {
     )
     .unwrap();
     assert_eq!(PagesSetup::from_layout(&with_socket).cache, None);
-    // Over the real folders it is read-only and its cache is not the Swift app's file.
     let real = Layout::resolve(None, None, || {
         Some((
             "/Users/me".into(),

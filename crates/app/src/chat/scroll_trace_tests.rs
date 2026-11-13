@@ -1,9 +1,5 @@
-//! The trajectory judge over made-up frames.
-
 use super::*;
 
-/// A frame at `at_ms` after `injected` points of wheel, with rows `a`, `b`, `c` at `ys` (`None`: not
-/// painted).
 fn frame(at_ms: f64, injected: f64, ys: [Option<f32>; 3]) -> Frame {
     let keys = ["a", "b", "c"];
     Frame {
@@ -26,7 +22,6 @@ fn at(y: f32) -> [Option<f32>; 3] {
 fn a_move_by_what_the_wheel_asked_is_fine() {
     let (a, b) = (frame(0.0, 0.0, at(0.0)), frame(16.0, 12.0, at(12.0)));
     assert_eq!(judge(&a, &b), None);
-    // Sub-point rounding is not a jump.
     let c = frame(32.0, 24.0, at(24.8));
     assert_eq!(judge(&b, &c), None);
 }
@@ -56,7 +51,6 @@ fn a_move_by_another_amount_is_a_jump_and_the_other_way_a_reversal() {
             moved: -40.0
         })
     );
-    // Less than asked (a list that can't go past the rows it has measured) is a jump too.
     let d = frame(16.0, 600.0, at(100.0));
     assert!(matches!(judge(&a, &d), Some(Event::Jump { .. })));
 }
@@ -72,7 +66,6 @@ fn frames_with_no_row_in_common_are_lost() {
 fn content_that_moves_with_no_wheel_is_a_drift() {
     let (a, b) = (frame(0.0, 0.0, at(0.0)), frame(16.0, 0.0, at(30.0)));
     assert_eq!(judge(&a, &b), Some(Event::Drift { moved: 30.0 }));
-    // New rows pushing a list that follows its end up are not.
     let (mut a, mut b) = (a, b);
     a.at_end = true;
     b.at_end = true;
@@ -85,12 +78,10 @@ fn scrolling_down_at_the_end_has_nowhere_to_go() {
     a.at_end = true;
     let b = frame(16.0, -20.0, at(0.0));
     assert_eq!(judge(&a, &b), None);
-    // Down with less than asked left to the end: it stops there, which is no jump.
     let near = frame(0.0, 0.0, at(0.0));
     let mut end = frame(16.0, -50.0, at(-10.0));
     end.at_end = true;
     assert_eq!(judge(&near, &end), None);
-    // Up from the end must move.
     let c = frame(16.0, 20.0, at(0.0));
     assert_eq!(judge(&a, &c), Some(Event::Stall { asked: 20.0 }));
 }
@@ -98,7 +89,6 @@ fn scrolling_down_at_the_end_has_nowhere_to_go() {
 #[test]
 fn the_median_of_the_rows_is_how_far_the_content_moved() {
     let a = frame(0.0, 0.0, at(0.0));
-    // One row grew under the others: the median still says 10, the spread says a row changed.
     let b = frame(16.0, 10.0, [Some(10.0), Some(110.0), Some(240.0)]);
     assert_eq!(moved(&a, &b), Some((10.0, 30.0)));
 }
@@ -108,7 +98,6 @@ fn a_report_counts_each_kind_and_keeps_the_first_few() {
     let mut frames = vec![frame(0.0, 0.0, at(0.0))];
     let mut y = 0.0;
     let mut wheel = 0.0;
-    // Ten good steps, two stalls, one jump, then a step shown 60 ms late.
     for n in 1..=10 {
         wheel += 10.0;
         y += 10.0;
@@ -124,7 +113,6 @@ fn a_report_counts_each_kind_and_keeps_the_first_few() {
     wheel += 10.0;
     y += 10.0;
     frames.push(frame(13.0 * 16.0 + 60.0, wheel, at(y)));
-    // Each step was made 1 ms before the draw that showed it, the last one 60 ms before.
     let mut steps: Vec<(f64, f64)> = frames
         .iter()
         .skip(1)
@@ -149,7 +137,6 @@ fn a_step_waits_for_the_draw_that_shows_it() {
         frame(20.0, 10.0, at(10.0)),
         frame(36.0, 20.0, at(20.0)),
     ];
-    // Injected at 5 ms (total 10): shown at 20 ms; at 25 ms (total 20): shown at 36 ms.
     let r = report(&frames, &[(5.0, 10.0), (25.0, 20.0)], 700.0);
     assert_eq!(r.latency_max_ms, 15.0);
     assert!(r.latency_p50_ms >= 11.0);
@@ -214,15 +201,12 @@ fn no_draws_report_nothing() {
 #[test]
 fn up_at_the_top_has_nowhere_to_go() {
     let at_top = |f: Frame| Frame { at_top: true, ..f };
-    // Asked 30 up; the list is at its top and stays: not a stall.
     let a = at_top(frame(0.0, 0.0, at(0.0)));
     let b = at_top(frame(16.0, 30.0, at(0.0)));
     assert_eq!(judge(&a, &b), None);
-    // Reaching the top with less to go than asked is fine too.
     let c = frame(0.0, 0.0, at(0.0));
     let d = at_top(frame(16.0, 30.0, at(10.0)));
     assert_eq!(judge(&c, &d), None);
-    // Away from the top, no move is a stall.
     let e = frame(32.0, 60.0, at(10.0));
     let f = frame(48.0, 90.0, at(10.0));
     assert_eq!(judge(&e, &f), Some(Event::Stall { asked: 30.0 }));
@@ -230,7 +214,6 @@ fn up_at_the_top_has_nowhere_to_go() {
 
 #[test]
 fn a_step_of_a_viewport_or_more_is_not_a_lost_frame() {
-    // Two flings: 900 points with a 700 point list (no row can be in both), and 300 that lost its rows.
     let frames = [
         frame(0.0, 0.0, at(0.0)),
         frame(16.0, 900.0, [None, None, None]),

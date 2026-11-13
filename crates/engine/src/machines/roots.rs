@@ -1,9 +1,3 @@
-//! Where Machines reads and writes, as parameters (decision: the Swift app owns the machines until
-//! handover). The Swift app's `machines.json` sits in the data folder and is only read. This tool's
-//! own copy of it and the pending offers are documents in `<data>/notchling.db` (the files they
-//! used to be are in `<data>/daemon/machines/` and move in once); its audit log, merge worktrees,
-//! scratch files and cache stay files there.
-
 use super::registry::RegistryFiles;
 use super::step::SecretSource;
 use crate::accounts::Secret;
@@ -12,16 +6,12 @@ use std::path::{Path, PathBuf};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MachineRoots {
-    /// Notchling's data folder: `notchling.db` is in it.
     pub data_dir: PathBuf,
-    /// The Swift app's file, read only.
     pub swift_file: PathBuf,
-    /// This tool's folder.
     pub own_dir: PathBuf,
 }
 
 impl MachineRoots {
-    /// From Notchling's data folder (`~/Library/Application Support/Notchling`, or a fixture's).
     pub fn in_data(data: &Path) -> MachineRoots {
         MachineRoots {
             data_dir: data.to_path_buf(),
@@ -30,7 +20,6 @@ impl MachineRoots {
         }
     }
 
-    /// The registry: this tool's own document once it saved one, until then the Swift app's file.
     pub fn registry(&self) -> RegistryFiles {
         RegistryFiles {
             data_dir: self.data_dir.clone(),
@@ -40,24 +29,19 @@ impl MachineRoots {
         }
     }
 
-    /// One line per Fix that ran.
     pub fn audit_file(&self) -> PathBuf {
         self.own_dir.join("audit.jsonl")
     }
 
-    /// The app's own `main` worktrees a merge from the morning items uses.
     pub fn merge_dir(&self) -> PathBuf {
         self.own_dir.join("merge")
     }
 
-    /// A private folder for files a Fix hands `gh` (a public key).
     pub fn scratch(&self) -> PathBuf {
         self.own_dir.join("scratch")
     }
 }
 
-/// The Secret Vault as Machines reads it. Made only when the vault is switched on: until then the
-/// tool takes [`super::step::NoSecrets`] and never opens the Keychain item.
 pub struct VaultSecrets {
     store: VaultStore,
 }

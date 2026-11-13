@@ -63,7 +63,6 @@ class WeakeningTests(unittest.TestCase):
     def test_source_edit_ok(self):
         self.assertEqual(rules(chg("legacy/macos/Sources/Notchling/Search/S.swift", "M", added=["let a = 1"])), [])
 
-    # I3: hooks that rewrite how every existing test runs count as skips.
     def test_swift_test_run_hooks_trip(self):
         for line in ["    override func invokeTest() {}", "override class var defaultTestSuite: XCTestSuite { XCTestSuite() }",
                      "override class var testInvocations: [NSInvocation] { [] }"]:
@@ -76,7 +75,6 @@ class WeakeningTests(unittest.TestCase):
     def test_skip_lookalikes_ok(self):
         self.assertEqual(rules(chg("legacy/macos/Tests/X/New.swift", "A", added=["let invokeTestCount = 1", "var testInvocationsLog = 2"])), [])
 
-    # I6: anything invisible or control-like in an added line goes to the maintainer.
     def test_invisible_characters_rejected(self):
         bad = {
             "U+061C arabic letter mark": "let a = 1 \u061c",

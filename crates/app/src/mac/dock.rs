@@ -1,5 +1,3 @@
-//! Applying the Dock policy and the main menu (`crate::dock` decides; this file does).
-
 use gpui::{actions, App, KeyBinding, Menu, MenuItem, OsAction};
 use objc2::MainThreadMarker;
 use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy};
@@ -22,7 +20,6 @@ actions!(
     ]
 );
 
-/// Sets the activation policy. A no-op off the main thread, where AppKit must not be touched.
 pub fn apply(policy: Policy) {
     let Some(mtm) = MainThreadMarker::new() else {
         return;
@@ -37,7 +34,6 @@ pub fn apply(policy: Policy) {
     }
 }
 
-/// The main menu for the policy: the three menus while regular, nothing while in the menu bar only.
 pub fn set_main_menu(cx: &mut App, policy: Policy) {
     let menus = match policy {
         Policy::Regular => main_menu()
@@ -69,8 +65,6 @@ fn menu_item(item: MainItem) -> MenuItem {
     }
 }
 
-/// Quit, Minimize and Close, and the key equivalents the menu shows. The edit actions reach the
-/// focused text view once there is one (U1).
 pub fn register(cx: &mut App) {
     cx.on_action(|_: &Quit, cx| cx.quit());
     cx.on_action(|_: &OpenSettings, cx| super::shell::open_chat_settings(cx));
@@ -91,8 +85,6 @@ pub fn register(cx: &mut App) {
     bind_keys(cx);
 }
 
-/// The main menu's key equivalents as GPUI key bindings (⌘C is the `Copy` action, and so on).
-/// A render binds them too, so a check sends the keys the real window gets.
 pub fn bind_keys(cx: &mut App) {
     let bindings = main_menu()
         .into_iter()

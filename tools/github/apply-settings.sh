@@ -1,11 +1,4 @@
 #!/usr/bin/env bash
-# Applies the repository settings that live in this repo: the rulesets in .github/rulesets/,
-# secret scanning, the Actions allowlist, auto-merge and the agent run caps.
-#
-# It changes live repository settings, so it prints every request first and asks before sending
-# any of them. Run with --dry-run to only print: that mode never calls gh at all.
-#
-#   tools/github/apply-settings.sh [--dry-run] [--repo owner/name]
 set -euo pipefail
 
 DRY=0
@@ -32,7 +25,6 @@ if [ -z "$REPO" ]; then
   REPO="$(gh repo view --json nameWithOwner -q .nameWithOwner)"
 fi
 
-# Plan: parallel arrays of method, path and JSON body ("" for none), printed then sent in order.
 METHODS=()
 PATHS=()
 BODIES=()
@@ -41,9 +33,6 @@ add() { METHODS+=("$1"); PATHS+=("$2"); BODIES+=("${3:-}"); NOTES+=("${4:-}"); }
 
 compact() { python3 -c 'import json,sys; print(json.dumps(json.load(sys.stdin), separators=(",", ":")))'; }
 
-# Sends one planned request (method, path, JSON body or ""). A 404 on the DELETE of the classic
-# branch protection means there is none to remove, which is what this script wants, so it counts as
-# done: every re-run after the first meets it, and failing there would skip the steps after it.
 send() {
   local method="$1" path="$2" body="${3:-}" out rc=0
   if [ -n "$body" ]; then
@@ -63,7 +52,6 @@ send() {
   return "$rc"
 }
 
-# Id of the ruleset with this name (empty when none), from the "id<TAB>name" lines in $EXISTING.
 EXISTING=""
 if [ "$DRY" = 1 ]; then
   echo "would look up existing rulesets and variables (dry run: no gh calls)"
@@ -72,7 +60,6 @@ else
 fi
 ruleset_id() { printf '%s\n' "$EXISTING" | awk -F'\t' -v n="$1" '$2 == n { print $1; exit }'; }
 
-# 1. Rulesets, created or updated by name.
 for f in "$RULESETS"/*.json; do
   name="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["name"])' "$f")"
   body="$(compact < "$f")"
@@ -84,14 +71,11 @@ for f in "$RULESETS"/*.json; do
   fi
 done
 
-# 2. The classic branch protection on main is replaced by the main ruleset.
 add DELETE "/repos/$REPO/branches/main/protection"
 
-# 3. Secret scanning, push protection, Dependabot security updates, private vulnerability reporting.
 add PATCH "/repos/$REPO" '{"security_and_analysis":{"secret_scanning":{"status":"enabled"},"secret_scanning_push_protection":{"status":"enabled"},"dependabot_security_updates":{"status":"enabled"}}}'
 add PUT "/repos/$REPO/private-vulnerability-reporting"
 
-# 4. Actions: only GitHub's own plus the allowlist, every action pinned to a SHA.
 add PUT "/repos/$REPO/actions/permissions" '{"enabled":true,"allowed_actions":"selected","sha_pinning_required":true}'
 patterns="$(python3 -c 'import json,sys
 allow = json.load(open(sys.argv[1]))["allow"]
@@ -99,10 +83,8 @@ print(json.dumps({"github_owned_allowed": True, "verified_allowed": False,
                   "patterns_allowed": [a + "@*" for a in allow]}, separators=(",", ":")))' "$ALLOWLIST")"
 add PUT "/repos/$REPO/actions/permissions/selected-actions" "$patterns"
 
-# 5. Auto-merge, so a pull request that passes every check can merge itself.
 add PATCH "/repos/$REPO" '{"allow_auto_merge":true}'
 
-# 6. Daily caps the agent worker and the review agent read.
 for pair in AGENT_DAILY_RUN_CAP=20 REVIEW_DAILY_CAP=40; do
   vname="${pair%%=*}"; vvalue="${pair#*=}"
   body="{\"name\":\"$vname\",\"value\":\"$vvalue\"}"
@@ -123,7 +105,6 @@ for i in "${!METHODS[@]}"; do
   [ -n "${NOTES[$i]}" ] && echo "  ${NOTES[$i]}"
 done
 
-# Who may skip a ruleset, read from the files that are about to be sent.
 echo
 echo "Bypass actors these rulesets set:"
 for f in "$RULESETS"/*.json; do
@@ -139,7 +120,6 @@ echo "    makes the tag with GITHUB_TOKEN. Only a workflow holding contents: wri
 echo "    beta.yml's publish job and promote.yml's release, appcast and fold jobs, none of them with"
 echo "    signing secrets (a guard test pins that)."
 
-# 7. Not something a script can do.
 echo
 echo "Manual step: set a hard monthly spend limit at the model provider's console (a spend limit"
 echo "caps the cost even if the run caps above are bypassed)."

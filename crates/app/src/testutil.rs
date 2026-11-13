@@ -1,5 +1,3 @@
-//! Scratch folders for unit tests: one per test, in the temp folder, removed when dropped.
-
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -8,7 +6,6 @@ static COUNTER: AtomicU32 = AtomicU32::new(0);
 pub(crate) struct Scratch(PathBuf);
 
 impl Scratch {
-    /// A new empty folder. The counter keeps tests that run at the same time apart.
     pub(crate) fn new(tag: &str) -> Scratch {
         let n = COUNTER.fetch_add(1, Ordering::SeqCst);
         let dir =
@@ -22,7 +19,6 @@ impl Scratch {
         &self.0
     }
 
-    /// A folder inside it, made. Only Unix tests use it so far.
     #[cfg(unix)]
     pub(crate) fn dir(&self, rel: &str) -> PathBuf {
         let path = self.0.join(rel);
@@ -30,7 +26,6 @@ impl Scratch {
         path
     }
 
-    /// A file inside it with `text`, its folders made.
     pub(crate) fn write(&self, rel: &str, text: &str) -> PathBuf {
         let path = self.0.join(rel);
         std::fs::create_dir_all(path.parent().expect("a parent")).expect("make the folder");

@@ -1,6 +1,3 @@
-//! `limits.usage` over a fake Claude source: what it lists, that `refresh` reads every account
-//! now and only once at a time, and that off it touches nothing.
-
 use super::*;
 use notchling_engine::limits::sources::{AccountInfo, LaneInfo};
 use notchling_engine::limits::usage::{AccountUsage, UsageWindow};
@@ -23,10 +20,8 @@ fn usage(session: f64) -> AccountUsage {
     }
 }
 
-/// Two accounts: `a` read at 42%, `b` with a failed read and no limits.
 struct Fake {
     forced: AtomicU32,
-    /// A forced read waits here until it is released.
     hold: Mutex<Option<Receiver<()>>>,
     entered: Mutex<Option<Sender<()>>>,
 }
@@ -118,7 +113,6 @@ fn off_it_reads_nothing_and_lists_nothing() {
         json!({"accounts_on": false, "reports": {}, "errors": {}})
     );
     assert_eq!(fake.forced.load(Ordering::SeqCst), 0);
-    // And with no source at all.
     let bare = ClaudeUsage::default();
     assert_eq!(bare.call(true, &json!({})).unwrap()["reports"], json!({}));
 }

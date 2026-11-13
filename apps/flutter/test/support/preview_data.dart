@@ -1,6 +1,5 @@
 import 'package:agent_console/core/protocol/models.dart';
 
-/// Made-up sessions and a made-up conversation, for the design previews and the widget tests of the new parts.
 final DateTime previewNow = DateTime(2026, 11, 4, 15, 30);
 
 DateTime _ago(Duration d) => previewNow.subtract(d);
@@ -96,7 +95,6 @@ List<Session> previewSessions() => <Session>[
 ChatMessage _msg(String id, ChatRole role, String text, {Duration ago = const Duration(minutes: 10), ChatKind kind = ChatKind.text, List<ToolStep> steps = const <ToolStep>[], String? output, String? toolSummary}) =>
     ChatMessage(id: id, role: role, text: text, time: _ago(ago), kind: kind, steps: steps, output: output, toolSummary: toolSummary);
 
-/// Oldest to newest.
 List<ChatMessage> previewConversation() => <ChatMessage>[
       _msg('m1', ChatRole.user, 'Sửa lỗi redirect loop khi đăng nhập, rồi chạy test giúp mình.', ago: const Duration(minutes: 40)),
       _msg('m2', ChatRole.assistant, '''I'll start with the router, then the guard that decides where to send you after sign-in.
@@ -149,8 +147,6 @@ Running the auth tests next.''', ago: const Duration(minutes: 34)),
       _msg('m8', ChatRole.user, '!git status --short', ago: const Duration(minutes: 5), kind: ChatKind.shell, output: ' M lib/auth/auth_guard.dart\n M test/auth/auth_guard_test.dart\n?? docs/login-flow.md'),
       _msg('m9', ChatRole.assistant, 'Two files changed and one new doc. Want me to push the branch? I need your OK for `git push`.', ago: const Duration(minutes: 1)),
     ];
-
-// MARK: Long, real-looking strings (the real device is 392.7 dp wide: these are what breaks a layout).
 
 List<Session> longSessions() => <Session>[
       previewSession(

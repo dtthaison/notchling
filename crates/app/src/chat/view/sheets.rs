@@ -1,7 +1,3 @@
-//! Chat's sheets (part U8): New Session from the sidebar's +, Settings from its footer, each drawn
-//! over the window until it asks to close. The actions are the app's shared ones (`AppActions`),
-//! so the sheets and the notch agree on acting; without them nothing can be sent.
-
 use std::path::Path;
 use std::sync::Arc;
 
@@ -29,7 +25,6 @@ use crate::tools::second_opinion::SecondOpinionSheet;
 use crate::vault::store::Vault;
 use crate::vault::view::VaultSheetView;
 
-/// The sheet on show.
 pub struct Sheet {
     pub view: AnyView,
     _closing: gpui::Subscription,
@@ -40,7 +35,6 @@ impl ChatView {
         self.acts_in(cx)
     }
 
-    /// The same, from what an `App` reads (the conversation's input is made without a context).
     pub(super) fn acts_in(&self, cx: &App) -> Acts {
         let actions = cx
             .try_global::<AppActions>()
@@ -52,7 +46,6 @@ impl ChatView {
         }
     }
 
-    /// The Accounts sheet's entity, on `provider`'s tab, not shown yet (Move All sets it up first).
     pub(super) fn accounts_sheet_entity(
         &mut self,
         provider: Option<&str>,
@@ -69,13 +62,11 @@ impl ChatView {
         })
     }
 
-    /// The Accounts sheet (Add Account…, Codex Accounts…, the Move All plan).
     pub(super) fn open_accounts_sheet(&mut self, provider: Option<&str>, cx: &mut Context<Self>) {
         let entity = self.accounts_sheet_entity(provider, cx);
         self.show(entity, cx);
     }
 
-    /// The Secret Vault sheet over the app's shared store.
     pub(super) fn open_vault_sheet(&mut self, cx: &mut Context<Self>) {
         let vault = cx
             .try_global::<AppVault>()
@@ -86,8 +77,6 @@ impl ChatView {
         self.show(entity, cx);
     }
 
-    /// The Secret Vault sheet with `name`'s form open (Search's Return on a vault entry); just the
-    /// list when it is gone.
     pub fn show_secret(&mut self, name: &str, window: &mut gpui::Window, cx: &mut Context<Self>) {
         let vault = cx
             .try_global::<AppVault>()
@@ -127,8 +116,6 @@ impl ChatView {
         cx.notify();
     }
 
-    /// New Session over every account (Claude Code's main login, lanes and saved accounts, then
-    /// Codex's and Antigravity's) and Claude Code's folders.
     pub(super) fn open_new_session(&mut self, cx: &mut Context<Self>) {
         let agents: Vec<_> = self
             .sessions
@@ -157,7 +144,6 @@ impl ChatView {
         self.show(entity, cx);
     }
 
-    /// A new Codex or Antigravity row in `folder`, selected, for its first message to start.
     fn open_draft(&mut self, provider: &str, folder: &str, cx: &mut Context<Self>) {
         let Some(draft) = draft_session(provider, folder, super::now_ms()) else {
             return;
@@ -168,8 +154,6 @@ impl ChatView {
         self.select(&id, cx);
     }
 
-    /// Second Opinion over a reply or an edit of the selected session: the tools installed, Codex's
-    /// cached models, and the app's store (none for a fixture root, so Run is off).
     pub(super) fn open_second_opinion(
         &mut self,
         subject: Subject,
@@ -202,8 +186,6 @@ impl ChatView {
         self.show(entity, cx);
     }
 
-    /// Settings over Notchling's own store; a fixture root has none.
-    /// The Settings sheet, from ⌘, or the menu bar.
     pub fn show_settings(&mut self, cx: &mut Context<Self>) {
         self.open_settings(cx);
     }
@@ -220,14 +202,12 @@ impl ChatView {
     }
 }
 
-/// The sheet over a dimmed window.
 pub fn render(view: &ChatView, a: Appearance) -> Option<Div> {
     let sheet = view.sheet.as_ref()?;
     Some(
         div()
             .absolute()
             .size_full()
-            // The backdrop takes every click and hover: nothing in Chat under the sheet is live.
             .occlude()
             .flex()
             .items_center()

@@ -1,8 +1,3 @@
-//! Spinners the platform draws and turns. A window's slots (`spin_layer`) are handed to a
-//! [`SpinSink`] each time the window draws; the sink keeps one platform layer per slot, turning in
-//! the compositor, so the app asks for no frame to turn them. The kit stays free of the platform:
-//! the sink is the app's (`mac/native_spin.rs`).
-
 use std::cell::Cell;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -13,19 +8,12 @@ use gpui::Window;
 use super::icons::{spin_clock, SPIN};
 use super::spin_layer::SpinSlot;
 
-/// Draws and turns the slots it is given.
 pub trait SpinSink {
-    /// The spinners on screen now (every host's, keys unique across hosts), at the window's
-    /// current layout. Called on each draw of the window; a key that was there before keeps its
-    /// layer and its turn.
     fn sync(&self, window: &Window, slots: &[SpinSlot]);
 }
 
-/// Whether the window's slots may be drawn natively: the owner clears it while something GPUI
-/// draws over the window could cover a spinner (a sheet, a menu).
 pub type SpinGate = Rc<Cell<bool>>;
 
-/// A [`SpinSink`] with its gate, and whether the sink holds layers.
 pub(super) struct NativeSpin {
     sink: Rc<dyn SpinSink>,
     allowed: SpinGate,
@@ -50,7 +38,6 @@ impl NativeSpin {
         self.sink.sync(window, slots);
     }
 
-    /// Native drawing is off: takes the sink's layers away, once.
     pub(super) fn leave(&self, window: &Window) {
         if self.live.replace(false) {
             self.sink.sync(window, &[]);
@@ -58,36 +45,25 @@ impl NativeSpin {
     }
 }
 
-/// How long a spinner takes to turn once.
 pub fn spin_period() -> Duration {
     SPIN
 }
 
-/// Where in its turn a spinner is now, as time since a turn began: every native spinner starts
-/// its animation at the same phase, so they turn together as the GPUI ones do.
 pub fn spin_phase() -> Duration {
     Duration::from_nanos((spin_clock().as_nanos() % SPIN.as_nanos()) as u64)
 }
 
-/// A host's place and a slot's key as one key across hosts.
 pub(super) fn mix_key(place: usize, key: u64) -> u64 {
     key.rotate_left(7) ^ (place as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15)
 }
 
-/// What changed between two syncs, by key.
 #[derive(Debug, PartialEq)]
 pub struct Diff<T> {
-    /// Keys not there before: a layer is made and starts turning.
     pub added: Vec<(u64, T)>,
-    /// Keys there before whose placement or ink differs: the layer moves, keeping its turn.
     pub changed: Vec<(u64, T)>,
-    /// Keys no longer there: their layers go.
     pub removed: Vec<u64>,
 }
 
-/// The difference from `prev` to `next`. A key that occurs twice in `next` counts once, by its
-/// last occurrence (a list's autoscroll retry lays a spinner out twice in a frame). Order follows
-/// `next`; `removed` is sorted.
 pub fn diff<T: PartialEq + Clone>(prev: &HashMap<u64, T>, next: &[(u64, T)]) -> Diff<T> {
     let mut last: HashMap<u64, usize> = HashMap::new();
     for (at, (key, _)) in next.iter().enumerate() {

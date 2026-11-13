@@ -1,10 +1,3 @@
-//! The audit log: `<data dir>/audit.jsonl`, 0600, one line per privileged call or refusal, with the
-//! time, op, tier, peer path and result. It rotates at 5 MB, keeping one old file
-//! (`audit.jsonl.1`). Refusals are logged, and since Milestone 3 every app-tier call with its
-//! outcome (`ok`, or the error code). A failed call that types into a session's terminal also
-//! keeps why, as `reason` ([`audit_reason`]): without it "failed" says nothing about which check
-//! stopped the answer.
-
 use crate::wire::Tier;
 use serde::Serialize;
 use std::fs::{self, OpenOptions};
@@ -13,24 +6,15 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-/// The size past which the log starts over.
 pub const ROTATE_AT: u64 = 5 * 1024 * 1024;
 
-/// One line.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct AuditEntry {
-    /// Milliseconds since the epoch.
     pub time_ms: u64,
-    /// The op, or `connect` for a peer refused before any op.
     pub op: String,
-    /// `None` when the peer was refused before it had a tier.
     pub tier: Option<Tier>,
-    /// The peer's executable, when known.
     pub peer: Option<String>,
-    /// `forbidden`, `needs_approval`, `other_user`...
     pub result: String,
-    /// Why a failed call failed: one capped line, only for the ops [`audit_reason`] names. Left
-    /// out of the line when there is none.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
 }
@@ -51,17 +35,12 @@ impl AuditEntry {
         }
     }
 
-    /// The same line with the reason the call failed.
     pub fn with_reason(mut self, reason: Option<String>) -> AuditEntry {
         self.reason = reason;
         self
     }
 }
 
-/// The ops whose failures keep their message in the audit line: the ones that type into a
-/// session's terminal. Their messages are fixed sentences about the screen ("The terminal asks
-/// about something else than Chat shows"), not paths, accounts or secrets, which other ops' errors
-/// may carry.
 const REASON_OPS: [&str; 6] = [
     "session.permission",
     "session.answer",
@@ -71,11 +50,8 @@ const REASON_OPS: [&str; 6] = [
     "session.question",
 ];
 
-/// The longest reason kept, in characters.
 pub const REASON_CHARS: usize = 200;
 
-/// What the audit line keeps of a failed call's message: `None` for an op not listed, else the
-/// message on one line, cut at [`REASON_CHARS`] characters.
 pub fn audit_reason(op: &str, message: &str) -> Option<String> {
     if !REASON_OPS.contains(&op) {
         return None;
@@ -91,7 +67,6 @@ pub fn audit_reason(op: &str, message: &str) -> Option<String> {
     Some(format!("{cut}…"))
 }
 
-/// An append-only log shared by every connection.
 pub struct AuditLog {
     path: PathBuf,
     rotate_at: u64,
@@ -103,7 +78,6 @@ impl AuditLog {
         AuditLog::with_rotation(path, ROTATE_AT)
     }
 
-    /// A log that rotates at another size, for tests.
     pub fn with_rotation(path: PathBuf, rotate_at: u64) -> AuditLog {
         AuditLog {
             path,
@@ -116,14 +90,12 @@ impl AuditLog {
         &self.path
     }
 
-    /// The old file kept after a rotation.
     pub fn rotated_path(&self) -> PathBuf {
         let mut name = self.path.as_os_str().to_owned();
         name.push(".1");
         PathBuf::from(name)
     }
 
-    /// Appends one line, rotating first when it would pass the size.
     pub fn append(&self, entry: &AuditEntry) -> io::Result<()> {
         let mut line = serde_json::to_vec(entry).map_err(io::Error::other)?;
         line.push(b'\n');
@@ -145,7 +117,6 @@ fn open_private_append(path: &Path) -> io::Result<fs::File> {
         use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
         options.mode(0o600);
         let file = options.open(path)?;
-        // A file someone made looser before us is tightened.
         if file.metadata()?.permissions().mode() & 0o077 != 0 {
             file.set_permissions(fs::Permissions::from_mode(0o600))?;
         }
@@ -212,7 +183,6 @@ mod tests {
         let dir = TempDir::new("audit-rotate");
         let path = dir.path().join("audit.jsonl");
         let one = serde_json::to_vec(&entry(1)).unwrap().len() as u64 + 1;
-        // Room for two lines, not three.
         let log = AuditLog::with_rotation(path.clone(), one * 2 + 1);
         for n in 1..=5 {
             log.append(&entry(n)).unwrap();

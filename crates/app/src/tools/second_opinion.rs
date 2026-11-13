@@ -1,12 +1,3 @@
-//! The Second Opinion sheet, pure (`SecondOpinionForm`): ask Codex or Antigravity CLI to review an
-//! edit or a reply. The prompt is built from what is being reviewed (the engine's
-//! `delegate::second_opinion`), the tool, model and effort are picked, and Run hands a
-//! [`Request`] to the engine's [`SecondOpinionStore`], which runs the `notchling delegate` command
-//! (the `notchling` binary beside this app, not the app itself) through a `ProcessHost`.
-//!
-//! Starting one launches `codex` or `agy`, so Run is an acting control: disabled with the off
-//! message while acting isn't on, like every other control that runs a tool.
-
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -21,13 +12,11 @@ use crate::acting::{Acting, Control};
 use crate::chat::data::DataRoot;
 use crate::session_source::notchling_binary;
 
-/// Why Run is off while there is no store (a render, a fixture root).
 pub const NO_STORE: &str =
     "Second opinions run through this app's notchling delegate, which a fixture root never starts";
 pub const NO_TOOLS: &str = "Neither Codex nor Antigravity CLI is installed.";
 pub const READ_ONLY_NOTE: &str = "Read-only. It can look at the folder but not change it.";
 
-/// A tool's name in the sheet.
 pub fn tool_name(tool: Tool) -> &'static str {
     match tool {
         Tool::Codex => "Codex",
@@ -35,29 +24,23 @@ pub fn tool_name(tool: Tool) -> &'static str {
     }
 }
 
-/// Where the sheet is.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Stage {
     Editing,
-    /// Started; the opinion's id.
     Running(String),
     Failed(String),
 }
 
-/// The sheet's state.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SecondOpinionSheet {
     pub subject: Subject,
-    /// The Chat row the opinion is asked in, and the message or step the card sits under.
     pub session: String,
     pub anchor: String,
     pub folder: String,
-    /// The tools installed, in order; empty shows [`NO_TOOLS`].
     pub tools: Vec<Tool>,
     pub tool: Tool,
     pub codex_models: Vec<ModelOption>,
     pub agy_models: Vec<ModelOption>,
-    /// `None` is the tool's default (the flag is left off).
     pub model: Option<String>,
     pub effort: Option<String>,
     pub prompt: String,
@@ -88,12 +71,10 @@ impl SecondOpinionSheet {
         }
     }
 
-    /// What is reviewed, for the card ("Reply", a file name).
     pub fn subject_title(&self) -> String {
         title(&self.subject)
     }
 
-    /// The picked tool's models.
     pub fn models(&self) -> &[ModelOption] {
         match self.tool {
             Tool::Codex => &self.codex_models,
@@ -101,8 +82,6 @@ impl SecondOpinionSheet {
         }
     }
 
-    /// The picked model's efforts; with the default model, every effort any model offers, each
-    /// once.
     pub fn efforts(&self) -> Vec<String> {
         if let Some(m) = self
             .models()
@@ -120,7 +99,6 @@ impl SecondOpinionSheet {
         seen
     }
 
-    /// Another tool: its own models, so the pick starts over.
     pub fn pick_tool(&mut self, tool: Tool) {
         if self.tool != tool {
             self.tool = tool;
@@ -129,7 +107,6 @@ impl SecondOpinionSheet {
         }
     }
 
-    /// `None` is the default model. An effort the new model doesn't offer is dropped.
     pub fn pick_model(&mut self, model: Option<&str>) {
         self.model = model.map(str::to_owned);
         if let Some(effort) = &self.effort {
@@ -143,8 +120,6 @@ impl SecondOpinionSheet {
         self.effort = effort.map(str::to_owned);
     }
 
-    /// Run's gate: acting on (it launches a tool), a store to hand it to, a tool installed, a
-    /// prompt and nothing running.
     pub fn run_control(&self, acting: Acting, has_store: bool) -> Control {
         let gate = acting.control();
         if !gate.enabled {
@@ -165,7 +140,6 @@ impl SecondOpinionSheet {
         }
     }
 
-    /// What Run hands to the store.
     pub fn request(&self) -> Request {
         Request {
             session: self.session.clone(),
@@ -186,7 +160,6 @@ impl SecondOpinionSheet {
         };
     }
 
-    /// The line at the bottom: the failure, or the read-only note.
     pub fn footer(&self) -> String {
         match &self.stage {
             Stage::Failed(why) => why.clone(),
@@ -206,7 +179,6 @@ fn now_secs() -> f64 {
         .map_or(0.0, |d| d.as_secs_f64())
 }
 
-/// An id for a new opinion: the time and a counter, unique within this run and across runs.
 fn make_id() -> String {
     static N: AtomicU64 = AtomicU64::new(0);
     format!(
@@ -217,12 +189,6 @@ fn make_id() -> String {
     )
 }
 
-/// The running app's store: the `app/second-opinions` document in the data folder's
-/// `notchling.db` (the old `<data>/app/second-opinions.json` moves in once; never the data
-/// folder's `second-opinions.json`, which is the Swift app's `SecondOpinionStore` file in the same
-/// format, kept by a process that may be running beside this one). It runs the `notchling` binary
-/// beside `exe` (the app's own executable rejects `delegate`). `None` for a fixture root, which
-/// never starts a tool, and when the binary can't be named.
 pub fn store_for_run(root: Option<&DataRoot>, exe: Option<&Path>) -> Option<SecondOpinionStore> {
     let root = root.filter(|r| r.fixture.is_none())?;
     let program: PathBuf = notchling_binary(exe?)?;
@@ -361,7 +327,6 @@ mod tests {
         assert!(store_for_run(Some(&fixture), Some(Path::new("/bin/true"))).is_none());
         assert!(store_for_run(None, Some(Path::new("/bin/true"))).is_none());
         assert_ne!(make_id(), make_id());
-        // A real root over a scratch folder: the store opens over our own document, writing nothing yet.
         let scratch = crate::testutil::Scratch::new("opinions");
         let root = real_root(&scratch);
         let store = store_for_run(Some(&root), Some(Path::new("/bin/true"))).expect("a store");
@@ -388,14 +353,11 @@ mod tests {
         );
     }
 
-    /// A card asked for lands in the app's own document, and the Swift app's file is never touched
-    /// or made.
     #[test]
     fn an_opinion_is_saved_in_the_apps_own_document() {
         use notchling_engine::delegate::second_opinion_store::DOC;
         let scratch = crate::testutil::Scratch::new("opinions-saved");
         let root = real_root(&scratch);
-        // The program does not exist, so the card fails at once and nothing runs.
         let app = scratch.path().join("nowhere/notchling-app");
         let store = store_for_run(Some(&root), Some(&app)).expect("a store");
         store.start(&request_in(&scratch));
@@ -405,8 +367,6 @@ mod tests {
         assert!(!scratch.path().join("data/second-opinions.json").exists());
     }
 
-    /// The Swift app's `second-opinions.json` is neither read nor written, and the app's old file
-    /// moves in once.
     #[test]
     fn the_swift_apps_opinions_file_is_left_alone_and_the_old_app_file_moves_in() {
         use notchling_engine::delegate::second_opinion_store::{old_file, DOC};
@@ -458,7 +418,6 @@ mod tests {
         );
     }
 
-    /// The app's own executable rejects `delegate`; the store has to run the sibling.
     #[cfg(unix)]
     #[test]
     fn a_second_opinion_runs_the_binary_beside_the_app_not_the_app() {
@@ -470,7 +429,6 @@ mod tests {
         std::fs::create_dir_all(&bin).expect("a folder");
         for name in ["notchling", "notchling-app"] {
             let script = bin.join(name);
-            // Each records its first argument beside itself, and prints nothing.
             std::fs::write(&script, "#!/bin/sh\necho \"$1\" > \"$0.arg\"\n").expect("a script");
             std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755))
                 .expect("executable");

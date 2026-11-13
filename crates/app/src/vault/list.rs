@@ -1,8 +1,3 @@
-//! The vault sheet's list, pure (the Swift `VaultSheet` without a form open): each saved secret
-//! without its value, its kind, URL, variables, note and expiry, with Renew…, Edit and Remove;
-//! the empty state; and the usage text. Every control that needs the `vault` switch carries the
-//! daemon's off message while it is off.
-
 use notchling_engine::vault::entry::{Kind, VaultEntry};
 use notchling_engine::vault::expiry::{self, Status};
 
@@ -14,15 +9,12 @@ pub const EMPTY: &str = "Save a login or a token once. Agents use it by name, an
 pub const USAGE: &str = "Only Notchling can read the values. Agents run `notchling secret <name> -- <command>`: the command gets them as environment variables, and its output comes back with them hidden. An agent that needs one you haven't saved opens this form for you.";
 pub const RENEW_TIP: &str = "Open the page for a new value, then enter it here";
 
-/// The expiry under a row.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ExpiryLabel {
-    /// "Expired 2026-11-01", "Expires 2026-12-06 (in 30 days)", "Expires 2026-12-06".
     pub text: String,
     pub expired: bool,
 }
 
-/// The Swift `VaultExpiryLabel`.
 pub fn expiry_label(day: &str, today: i64) -> ExpiryLabel {
     match expiry::status(day, today) {
         Some(Status::Expired) => ExpiryLabel {
@@ -46,31 +38,24 @@ pub fn expiry_label(day: &str, today: i64) -> ExpiryLabel {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Row {
     pub name: String,
-    /// "Login" or "Token".
     pub kind: &'static str,
     pub asks_first: bool,
     pub url: Option<String>,
-    /// "$GITHUB_TOKEN  $GITHUB_URL", two spaces between names.
     pub vars: String,
     pub note: Option<String>,
     pub expiry: Option<ExpiryLabel>,
-    /// Renew…, only for an entry with an expiry or a how-to.
     pub renew: Option<Control>,
     pub edit: Control,
     pub remove: Control,
-    /// "Remove github".
     pub remove_tip: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct List {
     pub rows: Vec<Row>,
-    /// The empty state's text and its Add Secret button, when there are no rows.
     pub empty: Option<(&'static str, Control)>,
-    /// The header's Add button, when there are rows.
     pub add: Option<Control>,
     pub usage: &'static str,
-    /// Why nothing here can be changed, while that's so.
     pub off: Option<&'static str>,
     pub error: Option<String>,
 }
@@ -82,7 +67,6 @@ pub fn kind_label(kind: Kind) -> &'static str {
     }
 }
 
-/// The list over the entries, at `today` (a day number), with `error` from the store.
 pub fn list(
     entries: &[VaultEntry],
     switches: &Switches,
@@ -123,7 +107,6 @@ pub fn list(
     }
 }
 
-/// The Remove alert's words.
 pub fn remove_alert(name: &str) -> (String, &'static str) {
     (
         format!("Remove {name}?"),
@@ -136,7 +119,6 @@ mod tests {
     use super::*;
     use crate::switches::VAULT_OFF;
 
-    /// 2026-11-08 as a day number.
     const TODAY: i64 = 20_765;
 
     #[test]

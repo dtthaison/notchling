@@ -8,8 +8,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'support/harness.dart';
 
 void main() {
-  /// A full-screen Chat the way the shell builds it: the page extends to the screen bottom, the tab bar and gesture bar
-  /// are in the MediaQuery's bottom padding, the composer pads itself with it.
   Future<void> pump(WidgetTester tester, ValueNotifier<double> insets, {required double screenHeight, required double bottomPadding}) async {
     final KeyboardLiftController lift = KeyboardLiftController();
     addTearDown(lift.dispose);

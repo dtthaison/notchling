@@ -247,7 +247,6 @@ void main() {
       final List<InlineSpan> children = (text.textSpan! as TextSpan).children!;
       expect(children.whereType<TextSpan>().map((TextSpan s) => s.text), <String?>['Chạy ', 'flutter test', ' rồi ', ' xong']);
       expect(children.whereType<TextSpan>().elementAt(1).style?.fontWeight, FontWeight.w600);
-      // Short inline code is a small box on the text baseline, in the mono font.
       expect(children.whereType<WidgetSpan>().length, 1);
       expect(tester.widget<Text>(find.text('git diff')).style?.fontFamily, 'GeistMono');
     });

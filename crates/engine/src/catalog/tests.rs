@@ -44,18 +44,18 @@ fn prices_match_todays_tables() {
     assert_eq!(
         c.price(Tool::Claude, "claude-fable-5-3").unwrap().input,
         8.0
-    ); // borrows Fable 5.2's
+    );
     assert!(c.price_borrowed(Tool::Claude, "claude-fable-5-3"));
     assert!(!c.price_borrowed(Tool::Claude, "claude-fable-5-2"));
     assert_eq!(
         c.price(Tool::Claude, "claude-fable-4").unwrap().cache_read,
         1.0
-    ); // older: the bare family entry
+    );
     assert_eq!(
         c.price(Tool::Codex, "gpt-5.1-2026-01-01").unwrap().input,
         1.25
     );
-    assert!(c.price(Tool::Codex, "gpt-5.6-sol").is_none()); // whole-id match, no "gpt-5" prefix
+    assert!(c.price(Tool::Codex, "gpt-5.6-sol").is_none());
     assert!(c.price(Tool::Claude, "claude-new-9").is_none());
     assert!(c.price(Tool::Antigravity, "gemini-4").is_none());
     let haiku = c.price(Tool::Claude, "claude-haiku-5-5").unwrap();
@@ -85,7 +85,6 @@ fn suffixed_ids_are_the_bare_model() {
         c.context_window(Tool::Claude, "claude-opus-5-5[1m]"),
         Some(400000)
     );
-    // A suffixed live id is allowed both bare and as listed.
     let a = c.allowed(Tool::Claude, &[live("claude-opus-9[1m]")]);
     assert!(a.contains(&"claude-opus-9".to_string()));
     assert!(a.contains(&"claude-opus-9[1m]".to_string()));
@@ -120,7 +119,6 @@ fn an_id_is_allowed_only_in_the_shape_of_a_model_id() {
     ] {
         assert!(!c.is_allowed(Tool::Claude, &[], id), "{id:?}");
     }
-    // Another tool's id is the listed one, exactly.
     let l = [live("gpt-test")];
     assert!(c.is_allowed(Tool::Codex, &l, "gpt-test"));
     assert!(!c.is_allowed(Tool::Codex, &l, "gpt-test[1m]"));
@@ -130,12 +128,10 @@ fn an_id_is_allowed_only_in_the_shape_of_a_model_id() {
 #[test]
 fn a_two_digit_version_is_not_another_models_entry() {
     let c = Catalog::built_in();
-    // `fable-5-10` starts with `fable-5-1` but is newer than Fable 5.2: it costs what 5.2 costs.
     for id in ["claude-fable-5-10", "claude-fable-5-19"] {
         let p = c.price(Tool::Claude, id).unwrap();
         assert_eq!((p.input, p.output), (8.0, 40.0), "{id}");
     }
-    // Mythos is no listed model, so there is nothing to borrow: the bare family entry, not 5.1's.
     assert_eq!(
         c.price(Tool::Claude, "claude-mythos-5-10")
             .unwrap()
@@ -143,7 +139,6 @@ fn a_two_digit_version_is_not_another_models_entry() {
         1.0
     );
     assert!(c.price_borrowed(Tool::Claude, "claude-fable-5-10"));
-    // An entry made for that id, on a segment boundary, still wins.
     let path = temp_file(
         "tendigit",
         r#"{"claude": {"prices": [{"match": "fable-5-10", "input": 1.0, "output": 2.0, "cache_read": 0.1}]}}"#,
@@ -187,7 +182,6 @@ fn the_override_adds_prices_windows_and_names() {
             "codex": {"prices": [{"id": "GPT-7", "input": 3.0, "output": 6.0, "cache_read": 0.3}]}}"#,
     );
     let c = Catalog::load(&path);
-    // A new, more specific Claude entry beats the bare family entry whatever its place in the file.
     assert_eq!(
         c.price(Tool::Claude, "claude-fable-5-3-x").unwrap().input,
         1.0
@@ -223,11 +217,11 @@ fn a_bad_override_entry_is_skipped_alone() {
             "codex": 5}"#,
     );
     let c = Catalog::load(&path);
-    assert_eq!(c.price(Tool::Claude, "claude-opus-5-5").unwrap().input, 3.0); // the good one
+    assert_eq!(c.price(Tool::Claude, "claude-opus-5-5").unwrap().input, 3.0);
     assert_eq!(
         c.price(Tool::Claude, "claude-sonnet-5-5").unwrap().input,
         2.0
-    ); // built-in intact
+    );
     assert_eq!(
         c.context_window(Tool::Claude, "claude-opus-5-5"),
         Some(400000)
@@ -323,7 +317,6 @@ fn an_older_live_model_stays_older() {
             "claude-haiku-5-5"
         ]
     );
-    // Already listed ids do not repeat; an unknown family is added last, older, with no price.
     assert_eq!(m.len(), before + 1);
     let last = m.last().unwrap();
     assert_eq!((last.id.as_str(), last.tier), ("claude-new-9", Tier::Older));
@@ -469,7 +462,6 @@ fn only_a_plain_release_takes_its_familys_place() {
         .find(|m| m.id == "claude-opus-6-preview")
         .expect("listed");
     assert_eq!(preview.tier, Tier::Older);
-    // Alone, the preview still doesn't displace Opus 5.5.
     let alone = c.models(Tool::Claude, &[live("claude-opus-6-preview")]);
     assert!(alone
         .iter()

@@ -1,6 +1,3 @@
-//! Ported from `MachinesMorningTests.swift`: the diff, which fetches the machine's branch and so
-//! holds the item like an action does.
-
 use std::sync::Arc;
 
 use super::actions::MorningActions;
@@ -9,8 +6,6 @@ use super::morning::{MorningEntry, MorningItem, MorningKind};
 use super::runner::{Call, CommandResult, Runner};
 use super::status::NeedsYouEntry;
 use super::tests_actions::{actions, item, m1, passed, plan, ready, ready_item, silent, REPO};
-
-// diff and screenshots
 
 fn diff_runner() -> Arc<AnswerRunner> {
     Arc::new(AnswerRunner::new(|argv| {
@@ -101,7 +96,6 @@ fn diff_reports_a_failed_fetch_and_a_failed_diff() {
     );
 }
 
-/// Diff fetches into the ref a merge uses, so the two must never overlap.
 #[test]
 fn diff_never_runs_while_an_action_has_the_item() {
     let gate = Arc::new(Gate::default());
@@ -128,7 +122,6 @@ fn diff_never_runs_while_an_action_has_the_item() {
     });
 }
 
-/// Answers at once, except a fetch, which waits for the gate.
 struct GatedRunner {
     gate: Gate,
     entered: Counter,
@@ -162,7 +155,7 @@ fn a_merge_cannot_start_while_a_diff_holds_the_item() {
     let it = item(MorningKind::Ready, 7);
     std::thread::scope(|scope| {
         let diff = scope.spawn(|| a.diff(&it));
-        runner.entered.wait_for_first(); // the diff is inside its fetch
+        runner.entered.wait_for_first();
         assert!(a.is_running(&it.id));
         assert!(!a.merge(&it));
         assert_eq!(
@@ -178,8 +171,6 @@ fn a_merge_cannot_start_while_a_diff_holds_the_item() {
     assert_eq!(merge_calls.value(), 1);
 }
 
-/// BatchMode and a short connect timeout for the fetch from the machine, so a prompt or a dead
-/// host cannot hang the card.
 #[test]
 fn the_diff_fetch_runs_with_batch_mode_ssh() {
     let runner = diff_runner();
@@ -266,7 +257,6 @@ fn diff_of_a_needs_you_item_uses_its_branch_and_worktree_when_it_has_them() {
         ..item(MorningKind::NeedsYou, 7)
     };
     assert_eq!(actions(&runner).diff(&it), "DIFF TEXT");
-    // a triage item has neither
     let triage = item(MorningKind::NeedsYou, 8);
     assert_eq!(
         actions(&diff_runner()).diff(&triage),

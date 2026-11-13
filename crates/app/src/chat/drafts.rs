@@ -1,28 +1,19 @@
-//! Every row's unsent reply text, kept in the app's database (`notchling.db`, the engine's
-//! `store`), one row each, so a quit, a crash or an install in the middle of typing finds it again.
-//! The JSON file the build before used (`chat-drafts.json`) is read in once and removed.
-
 use std::collections::HashMap;
 use std::path::Path;
 
 use notchling_engine::store;
 
-/// The file the build before kept drafts in.
 const OLD_FILE: &str = "chat-drafts.json";
 
-/// The drafts saved for `data_dir`, by row id; none when nothing can be read.
 pub fn load(data_dir: &Path) -> HashMap<String, String> {
     import_old(data_dir);
     store::drafts(data_dir).unwrap_or_default()
 }
 
-/// Saves one row's draft (`""` forgets it).
 pub fn put(data_dir: &Path, row_id: &str, text: &str) -> Result<(), String> {
     store::put_draft(data_dir, row_id, text, now_ms())
 }
 
-/// Moves the old JSON file's drafts into the database, then removes the file. A file that can't be
-/// read is left alone.
 fn import_old(data_dir: &Path) {
     let old = data_dir.join(OLD_FILE);
     let Ok(bytes) = std::fs::read(&old) else {

@@ -1,6 +1,3 @@
-//! The router's security parts ([`crate::bridge::backend`]'s `Devices`, `PairingCodes`,
-//! `RateLimiter` and `Audit`) on the transport's stores, which keep the Swift app's files.
-
 use super::audit::{AuditEntry, AuditLog};
 use super::devices::DeviceStore;
 use super::jwt::Clock;
@@ -9,7 +6,6 @@ use super::pairing::PairingCodes;
 use crate::bridge::backend;
 use std::sync::Arc;
 
-/// `devices.json` for the router. A failed write is logged; the phone is told by the router.
 pub struct StoreDevices {
     pub store: Arc<DeviceStore>,
     pub now: Clock,
@@ -73,7 +69,6 @@ impl backend::RateLimiter for AuthRateLimiter {
     }
 }
 
-/// `remote-log.jsonl` for the router, stamped with the bridge's clock.
 pub struct LogAudit {
     pub log: Arc<AuditLog>,
     pub now: Clock,

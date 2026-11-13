@@ -1,14 +1,7 @@
-//! `AuthRateLimiter`: per-address backoff for failed logins, 1, 2, 4, 8 seconds, then a 5-minute lock
-//! on the 5th failure. A tunnel client is keyed by its own address (`Cf-Connecting-Ip`), never by
-//! the loopback cloudflared connects from. An IPv6 address counts as its /64 ([`key`]), and at
-//! most [`MAX_ENTRIES`] addresses are remembered, the oldest failure forgotten first.
-
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv6Addr};
 use std::sync::Mutex;
 
-/// What an address is counted under: itself, or for IPv6 its /64, since one host may hold a whole
-/// /64 and pick a new address per try. Text that isn't an address is its own key.
 pub fn key(address: &str) -> String {
     match address.parse::<IpAddr>().map(|ip| ip.to_canonical()) {
         Ok(IpAddr::V6(v6)) => {
@@ -21,14 +14,12 @@ pub fn key(address: &str) -> String {
 }
 
 pub const MAX_FAILURES: u32 = 5;
-/// Addresses remembered at once; past it the one whose last failure is oldest is forgotten.
 pub const MAX_ENTRIES: usize = 4096;
 pub const LOCK_MS: i64 = 5 * 60 * 1000;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Verdict {
     Allowed,
-    /// Blocked until this time (milliseconds since the epoch).
     Blocked(i64),
 }
 
@@ -69,7 +60,6 @@ impl AuthRateLimiter {
             }
         }
         let mut entry = entries.get(&address).copied().unwrap_or_default();
-        // A lock that has run out starts counting from zero again.
         if entry.failures >= MAX_FAILURES && entry.blocked_until.is_some_and(|u| u <= now_ms) {
             entry = Entry::default();
         }

@@ -1,12 +1,3 @@
-//! Replace key: the Deploy key step's own button (Swift `RepoSteps.replaceKeyPlan`). It lives only in
-//! [`super::step::SetupStep::replace`], never in the step's Fix, so Set up and Set up all can't run it.
-//!
-//! The old key stays valid until the new one is proven: the new pair is made beside the old
-//! (`<key>.new`), added read-only, and has to authenticate, be refused a push and be listed
-//! read-only before it is moved over the old files. Only then is the old key deleted from GitHub,
-//! found by its public key text (never by title). A failure before the move removes the `.new`
-//! files and the new key from GitHub and leaves the old key and the ssh alias as they were.
-
 use super::registry::Machine;
 use super::repo_common::*;
 use super::runner::CommandResult;
@@ -17,8 +8,6 @@ use crate::lanes::quote;
 use serde_json::Value;
 use std::collections::BTreeSet;
 
-/// The titles this machine gives its keys: `agents-<machine>` (Set up) or
-/// `agents-<machine>-<8 digits>` (Replace key).
 fn is_own_key_title(title: &str, machine: &str) -> bool {
     let base = format!("agents-{machine}");
     if title == base {
@@ -30,10 +19,8 @@ fn is_own_key_title(title: &str, machine: &str) -> bool {
     }
 }
 
-/// The scripts of one Replace key, built once from the machine's name and the repo.
 struct Scripts {
     read_old: String,
-    /// The new private and public key files, quoted for the shell.
     new_key: String,
     new_pub: String,
     ssh_check: String,
@@ -50,12 +37,9 @@ impl Scripts {
         let new_key = shell::path(&format!("{path}.new"));
         let new_pub = shell::path(&format!("{path}.new.pub"));
         let read_old = format!("f={key_pub}; if [ -f \"$f\" ]; then head -c 1024 \"$f\"; fi");
-        // -F /dev/null: the check uses the new key alone, not whatever the ssh config would offer
         let ssh_check = format!(
             "ssh -F /dev/null -i {new_key} -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o BatchMode=yes -o ConnectTimeout=8 -T git@github.com </dev/null 2>&1 || true"
         );
-        // a throwaway repo, so no checkout is needed; hooks off and stdin closed, as the
-        // Push-is-refused check
         let push_check = format!(
             "k={new_key}; t=$(mktemp -d) || {{ echo '@@push 99'; exit 0; }}\n\
              trap 'rm -rf \"$t\"' EXIT\n\
@@ -66,11 +50,6 @@ impl Scripts {
              git -c core.hooksPath=/dev/null -C \"$t\" push --dry-run git@github.com:{github}.git HEAD:refs/heads/agents-push-test </dev/null 2>&1\n\
              echo \"@@push $?\""
         );
-        // Exit 43: a file is missing and 41: the private key could not move, so nothing moved; 42:
-        // only the .pub could not move (it is then rewritten from the private key, through a
-        // temporary file). These are far from the codes a signal (1 to 15, as the runner reports
-        // it), ssh (255) or a timeout (124) can give: any other code proves nothing about what was
-        // moved.
         let tmp_pub = shell::path(&format!("{path}.pub.tmp"));
         let swap = format!(
             "[ -f {new_key} ] && [ -f {new_pub} ] || exit 43\n\
@@ -89,7 +68,6 @@ impl Scripts {
         }
     }
 
-    /// The script that makes the new pair and prints its public line.
     fn keygen(&self, comment: &str) -> String {
         let (new_key, new_pub) = (&self.new_key, &self.new_pub);
         format!(
@@ -102,7 +80,6 @@ impl Scripts {
     }
 }
 
-/// The plan Replace key runs, shown first in full.
 pub fn replace_key_plan(m: &Machine, github: &str) -> FixPlan {
     let name = m.name.clone();
     let scripts = Scripts::new(github);
@@ -141,14 +118,12 @@ pub fn replace_key_plan(m: &Machine, github: &str) -> FixPlan {
     })
 }
 
-/// One run: what it knows while it goes, and how it undoes itself.
 struct Run<'a> {
     ctx: &'a FixContext,
     github: &'a str,
     name: &'a str,
     title: String,
     scripts: &'a Scripts,
-    /// The ids on GitHub before the add: nothing in this list is ever deleted by this run.
     before: BTreeSet<i64>,
 }
 
@@ -169,9 +144,6 @@ impl Run<'_> {
         run::local(self.ctx, list_argv(self.github), None, 120)
     }
 
-    /// Deletes the new key from GitHub: `None` when it is gone (or was never there), else what to
-    /// tell the user. Only an entry with the new key's text that this run added is deleted: its id
-    /// was not in the listing before the add and its title is this run's own.
     fn remove_new_key_from_github(&self, pubkey: &str) -> Option<String> {
         let still = format!(
             "the new key ({}) is still on GitHub; remove it in Settings \u{2192} Deploy keys",
@@ -206,8 +178,6 @@ impl Run<'_> {
         (gone.code != 0).then_some(still)
     }
 
-    /// A failure before the move: the `.new` files go, and so does the new key on GitHub if it
-    /// got there.
     fn undo(&self, why: &str, new_key: Option<&str>, on_github: bool) -> FixOutcome {
         let mut notes: Vec<String> = Vec::new();
         let removed = run::script(self.ctx, &self.scripts.cleanup, None, 60);
@@ -260,7 +230,6 @@ fn run_replace(ctx: &FixContext, name: &str, github: &str, scripts: &Scripts) ->
         before: BTreeSet::new(),
     };
 
-    // 1. the old public key, read before anything changes: it is how the old key is found on GitHub
     let reading = run::script(ctx, &scripts.read_old, None, 60);
     let old_pub = if reading.code == 0 {
         single_ed25519_line(&reading.out)
@@ -273,7 +242,6 @@ fn run_replace(ctx: &FixContext, name: &str, github: &str, scripts: &Scripts) ->
         ));
     };
 
-    // 2. the new pair, next to the old one; only its public line comes back
     let made = run::script(ctx, &scripts.keygen(&title), None, 600);
     if made.code != 0 {
         return r.undo(
@@ -293,8 +261,6 @@ fn run_replace(ctx: &FixContext, name: &str, github: &str, scripts: &Scripts) ->
         return r.undo("the new key is the old key; nothing was added", None, false);
     }
 
-    // 2b. what GitHub lists now. The new key must not be on the repo already (a machine could hand
-    // back another key's text); and nothing in this list is ever deleted by this run.
     let prior = r.list();
     let prior_keys = if prior.code == 0 {
         parse_keys(&prior.out)
@@ -320,8 +286,6 @@ fn run_replace(ctx: &FixContext, name: &str, github: &str, scripts: &Scripts) ->
     }
     r.before = prior_keys.iter().filter_map(key_id).collect();
 
-    // 3. read-only, through the user's gh. A failed add is looked for on GitHub too: gh may have
-    // been cut short.
     let file_name = format!("{name}-{}-new.pub", slug(github));
     let Some(file) = write_pub_file(&ctx.step.scratch, &file_name, &pubkey) else {
         return r.undo(
@@ -341,7 +305,6 @@ fn run_replace(ctx: &FixContext, name: &str, github: &str, scripts: &Scripts) ->
         );
     }
 
-    // 4. the new key has to work and still be read-only, from three sides
     let auth = run::script(ctx, &scripts.ssh_check, None, 60);
     if !auth.out.contains("successfully authenticated") {
         let line = first_line(
@@ -426,9 +389,6 @@ fn run_replace(ctx: &FixContext, name: &str, github: &str, scripts: &Scripts) ->
             &pubkey,
         );
     }
-    // the old key's id comes from GitHub's JSON and goes into an argv: it has to be an integer,
-    // and it is found before the move so that a bad one stops everything while the old key is
-    // still in place
     let mut old_id: Option<i64> = None;
     let mut foreign_title: Option<String> = None;
     if let Some(old) = listed(&old_pub, &keys) {
@@ -438,7 +398,6 @@ fn run_replace(ctx: &FixContext, name: &str, github: &str, scripts: &Scripts) ->
                 &pubkey,
             );
         };
-        // the text matches; it is deleted only when the title is this machine's own as well
         let found = old.get("title").and_then(Value::as_str).unwrap_or("");
         if is_own_key_title(found, name) {
             old_id = Some(id);
@@ -447,8 +406,6 @@ fn run_replace(ctx: &FixContext, name: &str, github: &str, scripts: &Scripts) ->
         }
     }
 
-    // 5. every check passed: the new pair takes the old one's file names, so ~/.ssh/config stays
-    // as it is
     let moved = run::script(ctx, &scripts.swap, None, 60);
     match moved.code {
         0 => {}
@@ -458,7 +415,6 @@ fn run_replace(ctx: &FixContext, name: &str, github: &str, scripts: &Scripts) ->
             ));
         }
         41 | 43 => {
-            // the script's own failures: nothing was moved
             return r.undo_new(
                 &format!(
                     "could not move the new key over the old one on {name}: {}",
@@ -468,15 +424,12 @@ fn run_replace(ctx: &FixContext, name: &str, github: &str, scripts: &Scripts) ->
             );
         }
         code => {
-            // 255 (the connection dropped), a timeout, a kill or a bare 1, 2, 3 (a signal): the
-            // move may have happened. Nothing is deleted anywhere.
             return FixOutcome::fail(format!(
                 "can't tell whether the key was replaced on {name} (code {code}); the swap may have happened; Check again before anything else. Nothing was removed from GitHub or from {name}"
             ));
         }
     }
     if let Some(found) = foreign_title {
-        // the title came from GitHub: masked, then cut, like any text from outside
         let shown = first_line(&found, &|s| ctx.mask(s), 80);
         return FixOutcome::fail(format!(
             "replaced the key on {name}; the old key on GitHub is titled '{shown}', not agents-{name}, so nothing was deleted; remove it in Settings \u{2192} Deploy keys if it's {name}'s"

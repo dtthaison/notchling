@@ -1,7 +1,3 @@
-//! Pins every key and timing to the Swift app: first as literal values, then against the Swift
-//! source itself, so a change on either side fails here until the other follows (and the reply
-//! fixtures are recorded again, docs/recording.md).
-
 use super::keys::{self, timing::*};
 use super::plan::{self, Plan, PlanError, Step, Until};
 use super::question::{Choice, PendingQuestion, QuestionItem};
@@ -15,9 +11,7 @@ fn the_keys_are_the_swift_apps() {
     let clear = keys::clear_input();
     assert_eq!(clear, "\x05\x15\x7f".repeat(20) + "\x05\x15");
     assert_eq!(clear.len(), 62);
-    // QueuedMessageTests.testClearInputNeverInterrupts: no Esc, Ctrl+C or Ctrl+K.
     assert!(!clear.contains('\x1b') && !clear.contains('\x03') && !clear.contains('\x0b'));
-    // RecordReplyFixturesTests.testRecordedKeysAreTheAppsOwn.
     assert_eq!(keys::bracketed("a"), "\x1b[200~a\x1b[201~");
     assert_eq!(keys::ESC, "\x1b");
     assert_eq!(keys::ENTER, "\r");
@@ -51,7 +45,6 @@ fn the_timings_are_the_swift_apps() {
     assert_eq!((WALK_BACK_QUIET_MS, WALK_BACK_TIMEOUT_MS), (400, 1_500));
 }
 
-// InputRoutingTests.testPastedTextCantEndThePasteEarly and testReplyChunksUseBracketedPasteThenReturn.
 #[test]
 fn pasted_text_cant_end_the_paste_early() {
     let pasted = keys::bracketed("hi\x1b[201~1\rmore\u{9b}201~x");
@@ -59,7 +52,6 @@ fn pasted_text_cant_end_the_paste_early() {
     assert_eq!(pasted.matches(keys::PASTE_END).count(), 1);
     assert!(pasted.ends_with(keys::PASTE_END));
     assert_eq!(keys::bracketed("a\r\nb"), "\x1b[200~a\nb\x1b[201~");
-    // A lone Esc, a paste start inside the text, and Esc at the very end.
     assert_eq!(keys::bracketed("\x1b"), "\x1b[200~\x1b[201~");
     assert_eq!(
         keys::bracketed("x\x1b[200~y\x1b"),
@@ -94,7 +86,6 @@ fn the_dialog_markers_are_the_swift_apps() {
         ""
     ])));
     assert!(!keys::dialog_open(&lines(&["> ", "  ? for shortcuts"])));
-    // Only the last six drawn lines count; blank rows under them don't.
     let mut far = lines(&["Esc to cancel", "1", "2", "3", "4", "5", "6"]);
     assert!(!keys::dialog_open(&far));
     far.extend(lines(&["", "  ", ""]));
@@ -139,7 +130,6 @@ fn a_reply_is_clear_paste_enter_with_their_pauses() {
             "\r".into()
         ]
     );
-    // A `!` command copied from a terminal goes back together first.
     assert_eq!(
         plan::reply("! ls \n  -la").writes()[1],
         "\x1b[200~!ls -la\x1b[201~"
@@ -239,7 +229,6 @@ fn an_answer_checks_each_page_types_its_keys_and_submits_on_review() {
     assert_eq!(plan.steps, want);
     assert_eq!(plan.detach, vec![wait(400, 3_000, false)]);
     assert_eq!(plan.writes(), s(&["1", "3", "\t", "3", "x y", "\r", "1"]));
-    // Nothing to answer: nothing to type, no attach.
     let none = PendingQuestion {
         tool_use_id: "t".into(),
         items: vec![],
@@ -247,15 +236,10 @@ fn an_answer_checks_each_page_types_its_keys_and_submits_on_review() {
     assert!(plan::answer(&[], &none).is_empty());
 }
 
-/// Where the Swift sources are, from this crate.
 fn swift_root() -> std::path::PathBuf {
     std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../legacy/macos/Sources")
 }
 
-/// A Swift source file under `root`. A missing one fails the test: with `legacy/` gone the
-/// comparison used to be skipped and the test passed having checked nothing. The Rust values above
-/// stay pinned as literals either way; whoever removes `legacy/` removes
-/// `the_swift_source_still_says_the_same` in the same change, on purpose.
 fn swift_from(root: &std::path::Path, rel: &str) -> String {
     let path = root.join(rel);
     std::fs::read_to_string(&path).unwrap_or_else(|error| {

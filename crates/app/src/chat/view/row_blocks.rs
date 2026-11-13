@@ -1,7 +1,3 @@
-//! The conversation's rows as selectable blocks, from the model alone: what a copy reads
-//! (`ConversationView::copied`) and what the render check holds the drawn texts to
-//! (`ChatView::check_blocks`, `NOTCHLING_RENDER_CHECK_BLOCKS=1`).
-
 use std::cell::RefCell;
 
 use gpui::{App, SharedString};
@@ -15,9 +11,6 @@ use crate::chat::blocks::{plain_blocks, Shown};
 use crate::chat::markdown_cache::Cache;
 use crate::chat::rows::{rows, with_outgoing};
 
-/// Every row on show with its key and its `plain_blocks`: the items, the queued messages, what is
-/// still being sent (`outgoing`). `live` is the newest step group of a working session, `folder`
-/// the session's, where a reply's paths are read from.
 pub(super) fn rows_blocks(
     shown: &Conversation,
     outgoing: &[String],
@@ -49,7 +42,6 @@ pub(super) fn rows_blocks(
         .collect()
 }
 
-/// The blocks of the rows `input` shows, with the state's open groups and Markdown cache.
 pub(super) fn input_blocks(
     input: &ConversationInput,
     s: &ConversationState,
@@ -66,11 +58,6 @@ pub(super) fn input_blocks(
 }
 
 impl ChatView {
-    /// The render check (`NOTCHLING_RENDER_CHECK_BLOCKS=1`): the texts the last draw made
-    /// selectable, each with the row and block it noted itself as, against
-    /// `chat::blocks::plain_blocks` over the rows the draw built (the list builds only the rows on
-    /// screen, and a row's texts are noted whole), from the model alone. The number of texts, or
-    /// what differs first.
     pub fn check_blocks(&self, cx: &App) -> Result<usize, String> {
         let input = self.conversation_input(cx);
         let view = self.parts.conversation.read(cx);

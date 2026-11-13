@@ -1,6 +1,3 @@
-//! The Token Cost page over GPUI (macOS): the account filter, three tiles, the range, the day
-//! bars and the breakdowns, drawn from the pure [`CostView`].
-
 use gpui::{div, prelude::*, px, Context, Div, SharedString, Stateful};
 use notchling_kit::metric::{RADIUS_MD, SIDE_PADDING, SPINNER_SMALL as SMALL};
 use notchling_kit::ui::{card, hsla, label, spinner as kit_spinner, KitStyled};
@@ -93,7 +90,6 @@ fn breakdown(b: &Breakdown, a: Appearance) -> Div {
         .child(rows)
 }
 
-/// The page. `on_range` and `on_account` take the picked range and account id.
 pub fn cost_page<V: 'static>(
     view: &CostView,
     a: Appearance,

@@ -1,8 +1,3 @@
-//! GitHub's API for the token checks (Swift `HTTPFetching`, `URLSessionFetcher`). The token goes
-//! only in the Authorization header of a request to `https://api.github.com`; any other URL is
-//! refused (status 0) before a socket opens. [`LiveGitHub`] follows no redirect: a 3xx comes back as
-//! it is, so the header can never reach another host.
-
 use crate::accounts::Secret;
 use std::collections::BTreeMap;
 use std::fmt;
@@ -12,11 +7,9 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 pub const API_HOST: &str = "api.github.com";
-/// The most of a body kept.
 pub const BODY_CAP: usize = 1 << 20;
 const TIMEOUT: Duration = Duration::from_secs(20);
 
-/// An answer. Header names are lower case. Status 0 means none came. `Debug` hides the body.
 #[derive(Clone, PartialEq, Eq, Default)]
 pub struct HttpAnswer {
     pub status: u16,
@@ -51,12 +44,10 @@ impl HttpAnswer {
     }
 }
 
-/// `GET url` with `Authorization: Bearer <token>`.
 pub trait GitHubHttp: Send + Sync {
     fn get(&self, url: &str, bearer: &Secret) -> HttpAnswer;
 }
 
-/// `https://api.github.com/…` and nothing else: no other host, scheme, port or user info.
 pub fn allows(url: &str) -> Option<&str> {
     let rest = url.strip_prefix("https://")?;
     let (authority, path) = match rest.find(['/', '?', '#']) {
@@ -72,7 +63,6 @@ pub fn allows(url: &str) -> Option<&str> {
     Some(path)
 }
 
-/// No network: every answer is status 0 (the vault is off, a render, a test that doesn't care).
 pub struct NoGitHub;
 
 impl GitHubHttp for NoGitHub {
@@ -81,8 +71,6 @@ impl GitHubHttp for NoGitHub {
     }
 }
 
-/// Answers by URL and records each URL asked (never the token: tests read [`FakeGitHub::bearers`]
-/// only as a count of which tokens were used).
 #[derive(Default)]
 pub struct FakeGitHub {
     answers: Mutex<BTreeMap<String, HttpAnswer>>,
@@ -100,7 +88,6 @@ impl FakeGitHub {
     pub fn urls(&self) -> Vec<String> {
         lock(&self.asked).iter().map(|(u, _)| u.clone()).collect()
     }
-    /// The tokens used, in order.
     pub fn bearers(&self) -> Vec<String> {
         lock(&self.asked).iter().map(|(_, b)| b.clone()).collect()
     }
@@ -120,8 +107,6 @@ impl GitHubHttp for FakeGitHub {
     }
 }
 
-/// The real client: blocking HTTPS through rustls with the OS's roots, no cookies, no cache, no
-/// redirects.
 pub struct LiveGitHub;
 
 impl GitHubHttp for LiveGitHub {
@@ -180,7 +165,6 @@ fn fetch(path: &str, bearer: &Secret) -> Result<HttpAnswer, String> {
     parse(&data)
 }
 
-/// Status, lower-case headers and body (plain or chunked, cut at [`BODY_CAP`]).
 pub fn parse(data: &[u8]) -> Result<HttpAnswer, String> {
     let end = data
         .windows(4)
@@ -212,7 +196,6 @@ pub fn parse(data: &[u8]) -> Result<HttpAnswer, String> {
     })
 }
 
-/// A chunked body joined; a cut last chunk keeps what came.
 fn dechunk(mut raw: &[u8]) -> Vec<u8> {
     let mut out = Vec::new();
     loop {

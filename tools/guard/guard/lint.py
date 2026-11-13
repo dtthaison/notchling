@@ -1,9 +1,3 @@
-"""The architecture lint: the first rules from CLAUDE.md, each with a bad and a good example.
-
-Existing violations live in `tools/guard/lint-baseline.json`, which may only shrink; the lint
-fails on any violation the baseline doesn't hold. A fingerprint is the rule, the file and the
-line's text (spacing ignored), so moving code around doesn't count as new."""
-
 from __future__ import annotations
 
 import json
@@ -78,7 +72,6 @@ DEFAULTS_KEY = [re.compile(r"(?i)defaults[^\n]*forKey:\s*\"([^\"]+)\""), re.comp
 
 
 def migrated_keys(repo: Path) -> frozenset:
-    """The keys in `AppDelegate.migrateFromAwake`'s `for key in [...]` list."""
     path = Path(repo) / "legacy/macos/Sources/Notchling/App/AppDelegate.swift"
     cache_key = str(path)
     if cache_key not in _MIGRATED_CACHE:
@@ -102,14 +95,9 @@ def _defaults_migrated(path: str, lines: List[str], repo: Path) -> Found:
 
 
 def _gpui_macos_only(path: str, lines: List[str], repo: Path) -> Found:
-    """A line that makes `gpui` a dependency under any table but the macOS target's: by key (`gpui = `,
-    `gpui.workspace = true`, `"gpui" = `), by table (`[dependencies.gpui]`), by rename (`package = "gpui"`),
-    or in the root manifest's `[workspace.dependencies]` (which can't be per target). The manifest is
-    read as TOML (`guard.tomldeps`), not matched line by line."""
     return lines_naming_outside_macos(lines, "gpui")
 
 
-# What tools/protocol/gen.py writes, and nobody splits. Exact paths: a mark inside a file would let any file opt out.
 GENERATED_FILES = frozenset({
     "crates/protocol/src/generated.rs",
     "apps/flutter/lib/core/protocol/generated.dart",

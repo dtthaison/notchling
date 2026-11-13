@@ -1,30 +1,22 @@
-//! Antigravity's login: what the Keychain item and the mirror file hold, and whose it is
-//! (`AntigravityStore.account(in:)` and its go-keyring helpers). Pure.
-
 use crate::accounts::book::Saved;
 use crate::accounts::jwt;
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
 use serde_json::Value;
 
-/// go-keyring stores the JSON as `go-keyring-base64:<base64>`.
 pub const KEYRING_PREFIX: &str = "go-keyring-base64:";
 
-/// Id for an account known only by its email (the newer login format), until it matches a saved
-/// one.
 pub const EMAIL_ID_PREFIX: &str = "email:";
 
 pub fn encode_keyring(login: &str) -> String {
     format!("{KEYRING_PREFIX}{}", STANDARD.encode(login.as_bytes()))
 }
 
-/// The JSON inside a go-keyring value; `None` when it isn't one.
 pub fn decode_keyring(value: &str) -> Option<String> {
     let data = STANDARD.decode(value.strip_prefix(KEYRING_PREFIX)?).ok()?;
     String::from_utf8(data).ok()
 }
 
-/// The older format (the file mirror's) carries an `id_token`; the mirror is written only for it.
 pub fn has_id_token(login: &str) -> bool {
     serde_json::from_str::<Value>(login)
         .ok()
@@ -32,10 +24,6 @@ pub fn has_id_token(login: &str) -> bool {
         .unwrap_or(false)
 }
 
-/// The account a login belongs to. The older format (Antigravity's first releases, still in the
-/// file mirror) carries an `id_token`, whose `sub` is the id. The newer one, which agy and current
-/// Antigravity write to the Keychain item when they renew it (`{token, auth_method,
-/// id_token_email}`), names only the email.
 pub fn account_in(login: &str) -> Option<Saved> {
     let json: Value = serde_json::from_str(login).ok()?;
     let Some(token) = json.get("id_token").and_then(Value::as_str) else {
@@ -62,7 +50,6 @@ pub fn account_in(login: &str) -> Option<Saved> {
     })
 }
 
-/// A made-up login for tests (no real token).
 #[cfg(test)]
 pub fn fake_login(sub: &str, email: &str, access: &str) -> String {
     serde_json::json!({
@@ -73,7 +60,6 @@ pub fn fake_login(sub: &str, email: &str, access: &str) -> String {
     .to_string()
 }
 
-/// A made-up login in the newer, email-only format.
 #[cfg(test)]
 pub fn fake_email_login(email: &str, access: &str) -> String {
     serde_json::json!({

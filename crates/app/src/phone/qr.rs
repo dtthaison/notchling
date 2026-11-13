@@ -1,12 +1,7 @@
-//! The pairing QR code as a grid of modules, drawn by the view. The payload is the daemon's, encoded
-//! as is (`bridge.pair.begin`); the phone app reads the same JSON the Swift app's QR carried.
-
 use qrcode::{Color, QrCode};
 
-/// Empty modules around the code that scanners need (the standard's quiet zone).
 pub const QUIET_ZONE: usize = 4;
 
-/// A square grid of modules, row by row; `true` is dark.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Qr {
     width: usize,
@@ -14,7 +9,6 @@ pub struct Qr {
 }
 
 impl Qr {
-    /// Encodes `payload`; the error says why it can't be drawn (too long for any QR version).
     pub fn new(payload: &str) -> Result<Qr, String> {
         let code = QrCode::new(payload.as_bytes()).map_err(|e| format!("QR code: {e}"))?;
         Ok(Qr {
@@ -27,7 +21,6 @@ impl Qr {
         })
     }
 
-    /// Modules per side, without the quiet zone.
     pub fn width(&self) -> usize {
         self.width
     }
@@ -36,8 +29,6 @@ impl Qr {
         x < self.width && y < self.width && self.dark.get(y * self.width + x) == Some(&true)
     }
 
-    /// The dark stretches of row `y` as `(start, length)`, so a row draws as a few bars rather than
-    /// a quad per module.
     pub fn runs(&self, y: usize) -> Vec<(usize, usize)> {
         let mut runs = Vec::new();
         let mut start = None;
@@ -69,8 +60,6 @@ mod tests {
     fn the_three_finder_patterns_are_in_place() {
         let qr = Qr::new("{\"v\":1,\"code\":\"K7M4XQ2P\"}").unwrap();
         let w = qr.width();
-        // The 7x7 finder: a dark ring, a light ring, a 3x3 dark centre. Top left, top right and
-        // bottom left.
         for (ox, oy) in [(0, 0), (w - 7, 0), (0, w - 7)] {
             assert!(qr.is_dark(ox, oy) && qr.is_dark(ox + 6, oy + 6));
             assert!(!qr.is_dark(ox + 1, oy + 1) && !qr.is_dark(ox + 5, oy + 5));
@@ -90,7 +79,6 @@ mod tests {
             let dark: Vec<bool> = (0..qr.width()).map(|x| qr.is_dark(x, y)).collect();
             assert_eq!(from_runs, dark, "row {y}");
         }
-        // The top row starts with the finder's seven dark modules.
         assert_eq!(qr.runs(0).first(), Some(&(0, 7)));
     }
 

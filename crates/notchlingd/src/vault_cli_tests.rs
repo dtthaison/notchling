@@ -1,6 +1,3 @@
-//! The vault commands' arguments and text (Swift `VaultCLI.parseRequest` and the `--secrets`,
-//! `--secret-request` output), with "today" a day number.
-
 use super::*;
 use notchling_engine::vault::expiry::day_number;
 
@@ -42,7 +39,6 @@ fn request_parsing_keeps_newlines_and_checks_expiry() {
     assert!(parse_request(&args(&[])).is_err());
     assert!(parse_request(&args(&["--kind", "token"])).is_err());
     assert!(parse_request(&args(&["gh", "--colour", "x"])).is_err());
-    // A value that looks like a flag is still the value, as the Swift command read it.
     let (odd, _) = parse_request(&args(&["gh", "--note", "--not-a-flag"])).unwrap();
     assert_eq!(odd.note.as_deref(), Some("--not-a-flag"));
 }
@@ -132,7 +128,6 @@ fn find_words_socket_and_json() {
 fn find_json_lists_names_and_never_a_value() {
     let gh = json!({"name": "gh", "kind": "token", "secretVar": "GH_TOKEN", "url": "https://api.github.com",
                     "note": "my repos", "expires": "2026-11-09", "ask": true, "userVar": "", "updated": "",
-                    // Fields no list entry has: whatever sits in a reply, none of it comes out.
                     "secret": "ghp_TOPSECRET", "value": "ghp_TOPSECRET", "password": "ghp_TOPSECRET"});
     let (code, value) = find_json(&json!({"entries": [gh], "saved": ["gh", "npm"]}), "github");
     assert_eq!(code, 0);

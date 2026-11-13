@@ -3,9 +3,6 @@ import 'dart:typed_data';
 
 const int voiceSampleRate = 16000;
 
-/// Cuts leading and trailing silence off 16-bit mono PCM with a simple energy gate: a frame counts as speech
-/// when its RMS is well above the quietest tenth of the recording. Returns an empty list when nothing in it
-/// sounds like speech, so the caller can say "no speech" instead of feeding Whisper silence (it invents text).
 Int16List trimSilence(Int16List pcm, {int sampleRate = voiceSampleRate, int frameMs = 20, int padMs = 250, int minSpeechMs = 200}) {
   final int frame = sampleRate * frameMs ~/ 1000;
   if (frame == 0 || pcm.length < frame) return Int16List(0);
@@ -19,7 +16,6 @@ Int16List trimSilence(Int16List pcm, {int sampleRate = voiceSampleRate, int fram
   });
   final List<double> sorted = List<double>.of(energy)..sort();
   final double floor = sorted[(sorted.length * 0.1).floor().clamp(0, sorted.length - 1)];
-  // Capped by the peak so a clip that is speech from start to end (no quiet frames to measure) still counts.
   final double threshold = math.max(200, math.min(floor * 3, sorted.last * 0.35));
 
   int first = -1;
@@ -39,7 +35,6 @@ Int16List trimSilence(Int16List pcm, {int sampleRate = voiceSampleRate, int fram
   return Int16List.sublistView(pcm, from, to);
 }
 
-/// A 44-byte RIFF header plus the samples: what whisper.cpp reads.
 Uint8List encodeWav(Int16List pcm, {int sampleRate = voiceSampleRate}) {
   final int dataBytes = pcm.length * 2;
   final ByteData header = ByteData(44);
@@ -68,7 +63,6 @@ Uint8List encodeWav(Int16List pcm, {int sampleRate = voiceSampleRate}) {
   return out.toBytes();
 }
 
-/// RMS of a PCM16 little-endian chunk as 0..1, for the level meter.
 double chunkLevel(Uint8List bytes) {
   final int samples = bytes.length ~/ 2;
   if (samples == 0) return 0;
@@ -78,6 +72,5 @@ double chunkLevel(Uint8List bytes) {
     final int s = view.getInt16(i * 2, Endian.little);
     sum += s * s.toDouble();
   }
-  // Speech sits around 1000-8000 of 32768; this maps it onto most of the meter.
   return (math.sqrt(sum / samples) / 6000).clamp(0.0, 1.0);
 }

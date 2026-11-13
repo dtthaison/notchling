@@ -1,7 +1,3 @@
-//! `notchling delegate` as an agent runs it: the built binary, a fake `codex` (a `/bin/sh` script in
-//! the fake home's `~/.local/bin`, which is where the command looks first), its stdout and exit
-//! code. No daemon is started and none is needed. No real tool is run and no real folder is read:
-//! every run sets a fake `HOME` and `NOTCHLING_DATA_ROOT`, and a job's `agy` is never asked for.
 #![cfg(unix)]
 
 use std::os::unix::fs::PermissionsExt;
@@ -25,7 +21,6 @@ fn scratch(tag: &str) -> Dir {
     Dir(dir)
 }
 
-/// Puts `script` where the command finds `codex`.
 fn fake_codex(home: &Path, script: &str) {
     let path = home.join(".local/bin/codex");
     std::fs::write(&path, format!("#!/bin/sh\n{script}\n")).unwrap();
@@ -86,7 +81,6 @@ fn a_codex_job_runs_read_only_prints_the_reply_and_copies_its_images() {
         stdout.contains("Session: 019e-s1\nGenerated:\n  "),
         "{stdout}"
     );
-    // The current folder may be spelled through a link (/tmp is /private/tmp on a Mac).
     assert!(
         stdout.contains("Copied to:\n  /") && stdout.contains("/work/assets/cup.png\n"),
         "{stdout}"

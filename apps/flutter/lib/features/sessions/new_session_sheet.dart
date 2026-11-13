@@ -9,7 +9,6 @@ import '../../core/net/bridge_client.dart';
 import '../../l10n/app_localizations.dart';
 import '../connection/connection.dart';
 
-/// Recent folders on the Mac, for "Session mới".
 final FutureProvider<List<String>> recentProjectsProvider = FutureProvider.autoDispose<List<String>>((Ref ref) async {
   final BridgeClient? client = ref.watch(bridgeClientProvider);
   if (client == null) throw const BridgeException('disconnected', 'Chưa kết nối tới Mac.');

@@ -1,5 +1,3 @@
-//! The model's rules: the card sources, the size per state through the model, hover and peeks.
-
 use super::*;
 use crate::notch::layout::{NotchState, Size, MAX_LIST};
 use notchling_engine::transcript::snapshot::{ChatLine, LineKind};
@@ -123,8 +121,6 @@ fn a_permission_card_beats_a_question() {
     );
 }
 
-// Port of NotchForeignTests.testModelCountsAndAnswersPermission's size check, on Claude's own
-// permission prompt: taller than a plain peek, and the plain path untouched.
 #[test]
 fn a_permission_peek_is_taller_than_a_plain_one() {
     let mut m = model(vec![
@@ -193,7 +189,6 @@ fn opening_the_list_picks_the_tab_most_likely_to_need_you() {
     m.tab = AgentGroup::Completed;
     m.go(NotchState::List);
     assert_eq!(m.tab, AgentGroup::Working);
-    // Coming back from a conversation keeps the tab you were on.
     m.tab = AgentGroup::Completed;
     m.open("d");
     m.go(NotchState::List);
@@ -220,7 +215,6 @@ fn hovering_opens_after_a_moment_and_leaving_folds_after_one() {
     assert!(m.tick(1_250));
     assert_eq!(m.state, NotchState::List);
     m.hover(false, 2_000);
-    // The pointer only slipped off: back in before the fold.
     m.hover(true, 2_300);
     assert!(!m.tick(2_700));
     assert_eq!(m.state, NotchState::List);
@@ -253,7 +247,6 @@ fn a_peek_ends_on_its_own_and_waits_longer_for_a_card() {
     m.requests.insert("q".into(), permission("q"));
     m.peek("q", 10_000);
     assert!(!m.tick(10_000 + 44_999));
-    // Moving away starts the long wait over; hovering holds it.
     m.hover(true, 20_000);
     assert!(!m.tick(100_000));
     m.hover(false, 100_000);
@@ -321,7 +314,6 @@ fn updates_peek_for_a_new_question_then_someone_waiting_then_something_done() {
         Some("w2")
     );
 
-    // A question the transcript just showed beats everything, even without a group change.
     let mut snaps = HashMap::new();
     let s = Snapshot {
         question: Some(PendingQuestion {
@@ -381,7 +373,6 @@ fn an_answered_card_hides_until_the_files_catch_up() {
     m.requests.insert("j".into(), permission("j"));
     m.mark_answered("j");
     assert!(m.answered.contains("r1"), "a hook request by its id");
-    // The permission is gone; the question underneath shows.
     assert!(matches!(m.card("j"), Some(Card::Question(_))));
     m.requests.clear();
     m.mark_answered("j");
@@ -393,10 +384,8 @@ fn an_answered_card_hides_until_the_files_catch_up() {
 fn an_answer_hides_the_prompt_it_answered_and_not_one_that_came_after() {
     let mut m = model(vec![agent("j", AgentGroup::NeedsInput)]);
     m.requests.insert("j".into(), permission("j"));
-    // The key is taken when the button is pressed...
     let key = m.answer_key("j").expect("a prompt to answer");
     assert_eq!(key, "r1");
-    // ...and a newer prompt for the same session arrives before the reply comes back.
     let mut newer = permission("j");
     newer.id = "r2".into();
     m.requests.insert("j".into(), newer);
@@ -407,7 +396,6 @@ fn an_answer_hides_the_prompt_it_answered_and_not_one_that_came_after() {
         "the newer prompt still shows"
     );
     assert_eq!(m.answer_key("j").as_deref(), Some("r2"));
-    // Nothing to answer, nothing to key.
     assert_eq!(m.answer_key("nobody"), None);
 }
 

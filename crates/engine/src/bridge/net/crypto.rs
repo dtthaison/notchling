@@ -1,9 +1,6 @@
-//! `BridgeCrypto`: hashes, constant-time compares, random tokens and the base64 the bridge uses.
-
 use ring::digest;
 use ring::rand::{SecureRandom, SystemRandom};
 
-/// The system's random source failed (never expected; reported, not panicked on).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RandomFailed;
 
@@ -35,8 +32,6 @@ pub fn sha256_hex(data: &[u8]) -> String {
     hex(&sha256(data))
 }
 
-/// Hex text to bytes, as Swift's `DeviceStore.hexBytes`: pairs of digits, a bad pair is 0, an odd
-/// last digit is dropped.
 pub fn hex_bytes(text: &str) -> Vec<u8> {
     text.as_bytes()
         .as_chunks::<2>()
@@ -51,7 +46,6 @@ pub fn hex_bytes(text: &str) -> Vec<u8> {
         .collect()
 }
 
-/// Compares without stopping at the first difference, so timing does not leak how much matched.
 pub fn constant_time_eq(lhs: &[u8], rhs: &[u8]) -> bool {
     if lhs.len() != rhs.len() {
         return false;
@@ -71,12 +65,10 @@ pub fn random_bytes(count: usize) -> Result<Vec<u8>, RandomFailed> {
     Ok(bytes)
 }
 
-/// `bytes` random bytes as base64url without padding (32 bytes: 43 characters).
 pub fn random_token(bytes: usize) -> Result<String, RandomFailed> {
     Ok(base64url(&random_bytes(bytes)?))
 }
 
-/// A random (version 4) UUID in Foundation's uppercase form, as `UUID().uuidString`.
 pub fn uuid_v4() -> Result<String, RandomFailed> {
     let mut b = random_bytes(16)?;
     b[6] = (b[6] & 0x0F) | 0x40;
@@ -94,7 +86,6 @@ pub fn uuid_v4() -> Result<String, RandomFailed> {
 
 const STD: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
-/// Standard base64 with padding.
 pub fn base64(data: &[u8]) -> String {
     let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
     for chunk in data.chunks(3) {
@@ -113,7 +104,6 @@ pub fn base64(data: &[u8]) -> String {
     out
 }
 
-/// base64url without padding.
 pub fn base64url(data: &[u8]) -> String {
     base64(data)
         .trim_end_matches('=')
@@ -121,7 +111,6 @@ pub fn base64url(data: &[u8]) -> String {
         .replace('/', "_")
 }
 
-/// Decodes standard or url-safe base64, padded or not; `None` for anything else.
 pub fn base64_decode(text: &str) -> Option<Vec<u8>> {
     let body = text.trim_end_matches('=');
     if text.len() - body.len() > 2 || body.len() % 4 == 1 {

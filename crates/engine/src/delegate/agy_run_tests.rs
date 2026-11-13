@@ -35,10 +35,8 @@ fn answer(h: &FakeHandle, message: &Value, result: Value) {
     h.push(&json!({"jsonrpc": "2.0", "id": message["id"], "result": result}));
 }
 
-/// How the scripted agent behaves on `session/prompt`.
 type OnPrompt = Arc<dyn Fn(&FakeHandle, &Value) + Send + Sync>;
 
-/// An agent that opens `sess-1`, accepts options and calls `on_prompt` for the turn.
 fn agent(on_prompt: OnPrompt) -> Responder {
     Arc::new(move |m: &Value, h: &FakeHandle| {
         let Some(method) = m.get("method").and_then(Value::as_str) else {
@@ -52,7 +50,6 @@ fn agent(on_prompt: OnPrompt) -> Responder {
                 json!({"sessionId": "sess-1", "configOptions": config()}),
             ),
             "session/load" => {
-                // The history comes first and is not this turn's reply.
                 chunk(h, "OLD history");
                 answer(
                     h,
@@ -454,7 +451,6 @@ fn the_run_waits_for_a_subagent_that_is_still_working() {
     let seen = root_for_agent.clone();
     let on_prompt: OnPrompt = Arc::new(move |h, m| {
         let media_root = seen.lock().unwrap().clone();
-        // The subagent is working: no message, no answer yet.
         let system = brain_session(&media_root).join(".system_generated");
         for sub in ["subagents", "messages", "logs"] {
             std::fs::create_dir_all(system.join(sub)).unwrap();
@@ -503,7 +499,6 @@ fn the_timeout_also_ends_the_wait_for_subagents() {
     assert!(progress.contains("Waiting for Antigravity's subagents (1)"));
 }
 
-/// The real recording: `session/load` replays history, then a prompt that asks to edit a file.
 fn recorded() -> Responder {
     let replay = replaying(RECORDING);
     Arc::new(move |m: &Value, h: &FakeHandle| {

@@ -1,6 +1,3 @@
-//! `notchling hook` against a real server on a temp socket, with the daemon's own ops behind it.
-//! One test per way the hook passes (decision 0004), and the decisions it prints, against the
-//! fixtures in `tests/fixtures/hook`. Nothing here reads `~/.claude` or starts `claude`.
 #![cfg(unix)]
 
 use crate::acting::Acting;
@@ -31,7 +28,6 @@ fn input(name: &str) -> Vec<u8> {
     std::fs::read(fixtures().join(name)).unwrap()
 }
 
-/// A short folder under /tmp (socket paths are capped at 104 bytes on macOS).
 struct Dir(PathBuf);
 
 impl Drop for Dir {
@@ -64,7 +60,6 @@ impl Drop for Daemon {
     }
 }
 
-/// The daemon's ops on a temp socket. `app_tier`: this test binary gets the app tier.
 fn daemon(acting: bool, app_tier: bool) -> Daemon {
     let dir = scratch("d");
     let socket = dir.0.join("s.sock");
@@ -107,8 +102,6 @@ fn daemon(acting: bool, app_tier: bool) -> Daemon {
     }
 }
 
-/// Makes this test process look like a hook Claude Code started: its parent is the Claude Code
-/// process whose `sessions/<pid>.json` holds the fixtures' session.
 fn claim_session(d: &Daemon) {
     let sessions = d.dir.0.join("claude/sessions");
     std::fs::create_dir_all(&sessions).unwrap();
@@ -139,7 +132,6 @@ fn options(socket: &Path, claude_dir: &Path, wait_ms: u64) -> HookOptions {
     }
 }
 
-/// An app that answers the first prompt it sees with `op` and `args` (its `id` filled in).
 fn answering_app(socket: &Path, op: &'static str, args: Value) -> std::thread::JoinHandle<Value> {
     let mut app = connect(socket, ClientKind::App);
     app.subscribe(&[topics::PROMPTS]).unwrap();
@@ -188,7 +180,6 @@ fn passes_when_no_app_is_attached() {
 #[test]
 fn passes_on_a_socket_error() {
     let dir = scratch("err");
-    // A listener that hangs up on every connection, and a plain file where the socket should be.
     let socket = dir.0.join("rude.sock");
     let listener = UnixListener::bind(&socket).unwrap();
     let rude = std::thread::spawn(move || {
@@ -230,7 +221,6 @@ fn passes_for_a_claude_p_session_without_asking() {
         d.ops.prompts().list().is_empty(),
         "the daemon never heard of it"
     );
-    // The same prompt from an interactive session is answered.
     let cli = fixtures().join("cli/claude");
     assert!(!headless(&cli.join("sessions"), &[4242]));
     let out = decide(
@@ -295,7 +285,6 @@ fn daemon_status_carries_the_switch_for_the_app() {
         assert_eq!(app.status().unwrap().acting, Some(on));
         let raw = app.call(ops::DAEMON_STATUS, json!({})).unwrap();
         assert_eq!(raw["acting"], json!(on), "{raw}");
-        // It follows the switch without a reconnect.
         app.call(ops::SETTINGS_SET_ACTING, json!({"on": !on}))
             .unwrap();
         assert_eq!(app.status().unwrap().acting, Some(!on));
@@ -366,8 +355,6 @@ fn the_agent_tier_reaches_no_acting_op_and_no_decision() {
             other => panic!("{op}: {other:?}"),
         }
     }
-    // Saying it's the app changes nothing; saying it's the hook, from a process no Claude Code
-    // session started, is refused: the hook's identity is its process, not its word.
     let mut posing = connect(&d.socket, ClientKind::App);
     assert!(posing
         .call(ops::SESSION_REPLY, json!({"id": "job-a", "text": "x"}))
@@ -390,7 +377,6 @@ fn the_agent_tier_reaches_no_acting_op_and_no_decision() {
         other => panic!("{other:?}"),
     }
     assert!(d.ops.prompts().list().is_empty());
-    // And the agent tier can't follow the prompts to learn their ids.
     match agent.subscribe(&[topics::PROMPTS]) {
         Err(notchling_local_api::ClientError::Api(e)) => assert_eq!(e.code, ErrorCode::Forbidden),
         other => panic!("{other:?}"),
@@ -407,7 +393,6 @@ fn a_hook_from_another_session_is_refused_and_passes() {
     let d = daemon(true, true);
     let mut app = connect(&d.socket, ClientKind::App);
     app.subscribe(&[topics::PROMPTS]).unwrap();
-    // The parent's session file names another session: this process is no hook of this one.
     claim_session(&d);
     let mut other = fixture("permission-request.json");
     other["session_id"] = json!("00000000-0000-0000-0000-000000000000");
@@ -421,7 +406,6 @@ fn a_hook_from_another_session_is_refused_and_passes() {
         app.next_event(Duration::from_millis(200)),
         Ok(None)
     ));
-    // The one it belongs to is held, under the caller's own pid whatever it says.
     let mut hook = connect(&d.socket, ClientKind::Hook);
     let waiter = std::thread::spawn(move || {
         hook.call(
@@ -444,7 +428,6 @@ fn a_daemon_that_accepts_and_never_answers_lets_the_hook_pass_by_its_deadline() 
     let dir = scratch("mute");
     let socket = dir.0.join("mute.sock");
     let listener = UnixListener::bind(&socket).unwrap();
-    // Accepts, reads nothing, says nothing, and keeps the connection open.
     let mute = std::thread::spawn(move || {
         let held = listener.accept();
         std::thread::sleep(Duration::from_secs(4));
@@ -463,8 +446,6 @@ fn a_daemon_that_accepts_and_never_answers_lets_the_hook_pass_by_its_deadline() 
 
 #[test]
 fn an_event_over_the_line_cap_passes_at_once() {
-    // A Write of a big file: the event is over the local API's 1 MiB line, so it can't be sent,
-    // and the hook passes (Claude Code asks in its own terminal) rather than hang or fail.
     let d = daemon(true, true);
     claim_session(&d);
     let mut app = connect(&d.socket, ClientKind::App);

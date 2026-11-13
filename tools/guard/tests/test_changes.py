@@ -63,7 +63,6 @@ class DiffTests(unittest.TestCase):
         self.assertEqual([c.path for c in diff(repo, base, head)], ["docs/a b.md"])
 
     def test_nul_byte_file_still_gives_its_added_lines(self):
-        # git calls a file with a NUL byte binary and prints no lines for it; swiftc only warns.
         repo = make_repo({"legacy/macos/Sources/Notchling/Search/S.swift": "import SwiftUI\nstruct S {}\n"})
         base = head_of(repo)
         head = commit(repo, {"legacy/macos/Sources/Notchling/Search/S.swift":
@@ -82,7 +81,6 @@ class DiffTests(unittest.TestCase):
         self.assertIn("let p = Process()", [t for _, t in swift.added])
 
     def test_gitattributes_nodiff_in_base_does_not_hide_lines(self):
-        # The second pull request after a `-diff` attribute was merged.
         repo = make_repo({"legacy/macos/Sources/Notchling/Search/.gitattributes": "*.swift -diff\n",
                           "legacy/macos/Sources/Notchling/Search/S.swift": "import SwiftUI\nstruct S {}\n"})
         base = head_of(repo)

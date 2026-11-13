@@ -1,12 +1,5 @@
-//! Antigravity's model and effort (Swift `Delegate.agyPick`, `agyLevel`, `agyModels`).
-//!
-//! `agy models` ids carry the thinking level as a suffix (`gemini-4-argon-high`), while a session
-//! sets the model (`gemini-4-argon`) and `thought_level` apart.
-
 const LEVELS: [&str; 3] = ["low", "medium", "high"];
 
-/// Accepts a model with or without the level suffix; an effort given on its own wins over the
-/// suffix. Claude Code's levels map onto agy's three. Returns `(model, level)`.
 pub fn pick(
     model: Option<&str>,
     effort: Option<&str>,
@@ -25,7 +18,6 @@ pub fn pick(
                 }
             }
         }
-        // A model offered only with its level in the name (`gpt-oss-120b-medium`).
         if let Some(b) = base.clone().filter(|b| !models.iter().any(|x| x == b)) {
             if let Some(whole) = models.iter().find(|x| x.starts_with(&format!("{b}-"))) {
                 base = Some(whole.clone());
@@ -35,7 +27,6 @@ pub fn pick(
     (base, level)
 }
 
-/// Claude Code's effort words as agy's `low`, `medium` and `high`; anything else lower-cased.
 pub fn level_of(effort: &str) -> String {
     match effort.to_lowercase().as_str() {
         "minimal" | "none" | "low" => "low".into(),
@@ -44,8 +35,6 @@ pub fn level_of(effort: &str) -> String {
     }
 }
 
-/// `agy models` lines (`id<TAB>name`) grouped as model and its thinking levels, in the order
-/// listed. A line whose first field has a space (a progress message) is skipped.
 pub fn models(listing: &str) -> Vec<(String, Vec<String>)> {
     let mut order: Vec<String> = Vec::new();
     let mut levels: Vec<(String, Vec<String>)> = Vec::new();

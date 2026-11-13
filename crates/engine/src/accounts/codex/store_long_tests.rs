@@ -1,6 +1,3 @@
-//! Codex logins the size of real ones (4–8 KB, too long for one Keychain line), and the rule that
-//! a switch never writes `auth.json` unless the login it replaces is safely saved.
-
 use super::store::{APP_BUNDLE_ID, SERVICE};
 use super::store_tests::Rig;
 use super::testkit::big_login_for;
@@ -20,7 +17,6 @@ fn rig(tag: &str) -> Rig {
     )
 }
 
-/// The saved copy as the store would read it back, split or not.
 fn saved_copy(rig: &Rig, id: &str) -> Option<Vec<u8>> {
     chunked::read(&Plain(rig.keychain.as_ref()), SERVICE, id)
         .ok()
@@ -59,7 +55,6 @@ fn a_real_sized_live_login_is_saved_before_the_switch_and_comes_back_whole() {
             .keychain
             .get(SERVICE, &part_name("user-1:ws-1", 0))
             .is_some());
-        // And back: the first account's split copy is a good login to switch to.
         rig.store.switch_to("user-1:ws-1").unwrap();
         assert_eq!(std::fs::read(rig.auth()).unwrap(), a);
     }
@@ -134,7 +129,6 @@ fn a_damaged_saved_copy_is_refused_and_nothing_changes() {
 fn a_long_one_item_copy_the_swift_app_saved_still_switches() {
     let a = big_login_for("user-1", "ws-1", "rt-a", 4_500);
     let b = big_login_for("user-2", "ws-2", "rt-b", 4_500);
-    // The Swift app put a long value's hex on argv: one item, read back as it is.
     let keychain = FakeKeychain::new().with(SERVICE, "user-2:ws-2", &STANDARD.encode(&b));
     let root = std::env::temp_dir().join(format!("nl-codex-swift-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);

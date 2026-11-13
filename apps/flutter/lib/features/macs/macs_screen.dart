@@ -14,7 +14,6 @@ import '../pairing/pairing_screen.dart';
 import 'computer_heading.dart';
 import 'macs_notifier.dart';
 
-/// The paired Macs: switch the active one, add another, remove one.
 class MacsScreen extends ConsumerWidget {
   const MacsScreen({super.key});
 
@@ -57,7 +56,6 @@ class MacsScreen extends ConsumerWidget {
                   const SizedBox(height: Space.xs),
                   Text('${mac.lastGoodHost ?? mac.hosts.first}:${mac.port}', style: Kit.of(context).codeSm),
                   const SizedBox(height: Space.xs),
-                  // Each computer has its own token and connection; this is its own link, not the one in use.
                   ComputerLinkLabel(status: ref.watch(computerStatusProvider(mac.id))),
                   const SizedBox(height: Space.md),
                   Wrap(spacing: Space.sm, runSpacing: Space.sm, children: <Widget>[

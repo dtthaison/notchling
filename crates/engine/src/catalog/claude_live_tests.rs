@@ -62,7 +62,6 @@ fn a_401_or_a_500_or_garbage_is_an_error_and_nothing_else_is_sent() {
         assert!(http.seen_headers()[0]
             .contains(&("anthropic-version".to_string(), "2023-06-01".to_string())));
     }
-    // No answer at all (status 0) is an error too.
     let http = ScriptedHttp::new();
     assert!(fetch(&http, &Secret::new("t")).is_err());
 }

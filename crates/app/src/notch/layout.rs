@@ -1,22 +1,11 @@
-//! The notch's geometry, pure: the black shape's size per state (`NotchModel.size(for:)`), where the
-//! camera housing is, the transparent canvas around it and the hit test that decides whether the
-//! canvas takes the mouse (`NotchController`). Coordinates are AppKit's: points, y grows upward from
-//! the bottom of the screen.
-
-/// What the notch shows.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum NotchState {
-    /// Exactly the camera housing.
     Collapsed,
-    /// An agent just replied or asked something; shown briefly.
     Peek(String),
-    /// The three tabs and their rows.
     List,
-    /// One agent's conversation.
     Detail(String),
 }
 
-/// How wide the notch opens (the Swift app's menu setting; Medium by default).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum NotchWidth {
     Small,
@@ -26,7 +15,6 @@ pub enum NotchWidth {
 }
 
 impl NotchWidth {
-    /// The `notchWidth` setting's value.
     pub fn from_key(key: &str) -> Option<NotchWidth> {
         match key {
             "small" => Some(NotchWidth::Small),
@@ -36,7 +24,6 @@ impl NotchWidth {
         }
     }
 
-    /// The agent list and short peeks.
     pub fn list(self) -> f64 {
         match self {
             NotchWidth::Small => 300.0,
@@ -45,7 +32,6 @@ impl NotchWidth {
         }
     }
 
-    /// The conversation and the question and permission cards, which carry more text.
     pub fn panel(self) -> f64 {
         match self {
             NotchWidth::Small => 360.0,
@@ -55,7 +41,6 @@ impl NotchWidth {
     }
 }
 
-/// A width and a height in points.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Size {
     pub w: f64,
@@ -68,50 +53,31 @@ impl Size {
     }
 }
 
-/// The outward curves where the shape meets the top of the screen.
 pub const FLARE: f64 = 8.0;
-/// The tallest a peek's card opens; taller cards are cut.
 pub const MAX_CARD: f64 = 520.0;
-/// The tab row under the camera.
 pub const TAB_BAR: f64 = 34.0;
-/// The tallest the list's rows get before they scroll.
 pub const MAX_LIST: f64 = 300.0;
-/// The camera housing of a 14" MacBook Pro, the model's default before a screen is read.
 pub const DEFAULT_NOTCH: Size = Size::new(185.0, 32.0);
-/// The canvas's width: the widest shape (the Large panel) with room either side; the renders'
-/// width too.
 pub const CANVAS_WIDTH: f64 = 560.0;
-/// Room below the tallest shape, so nothing drawn at its bottom edge is cut.
 pub const CANVAS_SLACK: f64 = 16.0;
-/// How far the walking pet reaches past the collapsed shape: its centre rolls `RADIUS + 2` out,
-/// the badge swings a rope's length round it at each end, and the badge is 30 × 16
-/// (`pet::reach_stays_within_the_canvas_margin` holds the pet to it).
 pub const PET_REACH: f64 = 48.0;
-/// Slack below the collapsed strip, so it's easier to hit.
 pub const COLLAPSED_SLACK: f64 = 4.0;
 
-/// What a peek holds, which decides its size.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum PeekContent {
-    /// A message of Notchling's own; `long` past 70 characters.
     Notice { long: bool },
-    /// A question or permission card, by its estimated height.
     Card { height: f64 },
-    /// The agent's name and, when `has_text`, its last reply.
     Plain { has_text: bool },
 }
 
-/// The notch's own height plus the flare above and below the content.
 fn chrome(notch: Size) -> f64 {
     notch.h + 2.0 * FLARE
 }
 
-/// Exactly the camera housing; the pet and its count live outside it.
 pub fn collapsed_size(notch: Size) -> Size {
     Size::new(notch.w + 2.0 * FLARE, notch.h)
 }
 
-/// A peek. A card's measured height (`card_height`) beats its estimate; either is capped.
 pub fn peek_size(
     notch: Size,
     width: NotchWidth,
@@ -133,8 +99,6 @@ pub fn peek_size(
     }
 }
 
-/// The open list: the tab row, then the rows of the tab on show (each `row_height` plus 4 between),
-/// a "Clear all" line under the Done tab, capped at [`MAX_LIST`].
 pub fn list_size(notch: Size, width: NotchWidth, rows: &[f64], done_tab: bool) -> Size {
     let content = if rows.is_empty() {
         44.0
@@ -148,7 +112,6 @@ pub fn list_size(notch: Size, width: NotchWidth, rows: &[f64], done_tab: bool) -
     )
 }
 
-/// One agent's conversation, taller while a question or permission card is on show.
 pub fn detail_size(notch: Size, width: NotchWidth, has_card: bool) -> Size {
     Size::new(
         width.panel(),
@@ -156,7 +119,6 @@ pub fn detail_size(notch: Size, width: NotchWidth, has_card: bool) -> Size {
     )
 }
 
-/// A row: one line for a finished agent or one without a prompt yet, two otherwise.
 pub fn row_height(completed: bool, has_prompt: bool) -> f64 {
     if completed || !has_prompt {
         44.0
@@ -165,22 +127,17 @@ pub fn row_height(completed: bool, has_prompt: bool) -> f64 {
     }
 }
 
-/// A question card's estimate: header, up to three lines of question, an option row each, the
-/// answer line.
 pub fn question_height(question_chars: usize, options: usize) -> f64 {
     let lines = (question_chars / 60 + 1).min(3) as f64;
     28.0 + lines * 17.0 + options as f64 * 36.0 + 40.0 + 8.0
 }
 
-/// A permission card's estimate: header, the tool line, up to four lines of summary, two or three
-/// options, the answer line.
 pub fn permission_height(summary_chars: usize, can_always_allow: bool) -> f64 {
     let lines = (summary_chars / 62 + 1).min(4) as f64;
     let options = if can_always_allow { 3.0 } else { 2.0 };
     28.0 + 20.0 + lines * 16.0 + 14.0 + options * 36.0 + 42.0 + 28.0
 }
 
-/// A rectangle in AppKit screen coordinates (y up).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Rect {
     pub x: f64,
@@ -207,20 +164,15 @@ impl Rect {
     }
 }
 
-/// What AppKit says about a display.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ScreenInfo {
     pub frame: Rect,
-    /// The top of the area windows may use (below the menu bar).
     pub visible_max_y: f64,
-    /// `safeAreaInsets.top`: the camera housing's height, 0 without one.
     pub safe_top: f64,
-    /// The menu bar areas left and right of the camera; `None` without a notch.
     pub aux_left_width: Option<f64>,
     pub aux_right_width: Option<f64>,
 }
 
-/// Where the shape hangs from: the housing's size and the horizontal centre of the camera.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Geometry {
     pub screen: Rect,
@@ -228,8 +180,6 @@ pub struct Geometry {
     pub center_x: f64,
 }
 
-/// The camera housing: the frame's width minus the two menu bar areas beside it, at the top of the
-/// frame. `None` on a display without one.
 pub fn notch_rect(s: &ScreenInfo) -> Option<Rect> {
     let (left, right) = (s.aux_left_width?, s.aux_right_width?);
     let w = s.frame.w - left - right;
@@ -244,8 +194,6 @@ pub fn notch_rect(s: &ScreenInfo) -> Option<Rect> {
     ))
 }
 
-/// The geometry for a display (`screensChanged`): the camera housing when there is one, else a
-/// zero-width strip as tall as the menu bar (at least 24) in the middle of the screen.
 pub fn geometry(s: &ScreenInfo) -> Geometry {
     match notch_rect(s) {
         Some(n) => Geometry {
@@ -261,12 +209,6 @@ pub fn geometry(s: &ScreenInfo) -> Geometry {
     }
 }
 
-/// The transparent canvas's size: the largest shape the model can take for a housing, whatever the
-/// width setting (the tallest peek card, the conversation with a card, the list at its cap) or the
-/// collapsed shape with the walking pet round it, plus [`CANVAS_SLACK`]. GPUI backs the whole
-/// canvas with Metal drawables (three, plus the path textures, at Retina scale), so a screen-wide
-/// canvas cost the app most of its memory; this one is as small as the shapes allow. A pet perching
-/// on another window (the Swift app's Tab Perch) would need a canvas of its own, not a wider one.
 pub fn canvas_size(notch: Size) -> Size {
     let closed = collapsed_size(notch);
     let largest = NotchWidth::Large;
@@ -274,7 +216,6 @@ pub fn canvas_size(notch: Size) -> Size {
     let tallest = [
         peek_size(notch, largest, card, None).h,
         detail_size(notch, largest, true).h,
-        // More rows than the cap holds.
         list_size(notch, largest, &[44.0; 16], true).h,
         closed.h + PET_REACH,
     ]
@@ -286,14 +227,11 @@ pub fn canvas_size(notch: Size) -> Size {
     )
 }
 
-/// The transparent canvas on screen: [`canvas_size`] centred on the camera and hanging from the
-/// top of the screen. It changes only with the display; the black shape inside it is what animates.
 pub fn canvas_frame(g: &Geometry) -> Rect {
     let c = canvas_size(g.notch);
     Rect::new(g.center_x - c.w / 2.0, g.screen.max_y() - c.h, c.w, c.h)
 }
 
-/// The black shape's area on screen for a size, with a little slack below the collapsed strip.
 pub fn shape_rect(g: &Geometry, size: Size, collapsed: bool) -> Rect {
     let extra = if collapsed { COLLAPSED_SLACK } else { 0.0 };
     Rect::new(
@@ -304,9 +242,6 @@ pub fn shape_rect(g: &Geometry, size: Size, collapsed: bool) -> Rect {
     )
 }
 
-/// Whether the mouse is over the shape. Half-open on the right, so a boundary point belongs to one
-/// side only; the top edge is inside, since a pointer pushed to the top of the screen reports exactly
-/// that y and `NSMouseInRect` counts it in.
 pub fn hit_test(shape: Rect, mouse: (f64, f64)) -> bool {
     let (mx, my) = mouse;
     mx >= shape.x && mx < shape.max_x() && my >= shape.y && my <= shape.max_y()
@@ -317,13 +252,11 @@ mod tests {
     use super::*;
 
     const NOTCH: Size = DEFAULT_NOTCH;
-    /// 32 + 2 × 8.
     const CHROME: f64 = 48.0;
 
     #[test]
     fn collapsed_is_the_housing_plus_the_flares() {
         assert_eq!(collapsed_size(NOTCH), Size::new(201.0, 32.0));
-        // No notch: a zero-width strip still gets its flares.
         assert_eq!(collapsed_size(Size::new(0.0, 24.0)), Size::new(16.0, 24.0));
     }
 
@@ -376,8 +309,6 @@ mod tests {
         );
     }
 
-    // Port of NotchForeignTests.testModelCountsAndAnswersPermission's size check: a permission peek
-    // is taller than a plain one.
     #[test]
     fn a_permission_peek_is_taller_than_a_plain_one() {
         let w = NotchWidth::Medium;
@@ -399,7 +330,6 @@ mod tests {
             list_size(NOTCH, w, &[44.0, 58.0], false).h,
             CHROME + 34.0 + (48.0 + 62.0) + 6.0
         );
-        // The Done tab has a "Clear all" line.
         assert_eq!(
             list_size(NOTCH, w, &[44.0], true).h,
             CHROME + 34.0 + (28.0 + 48.0) + 6.0
@@ -457,7 +387,6 @@ mod tests {
         }
     }
 
-    // Ported from the spike's notch_rect tests.
     #[test]
     fn notch_rect_on_a_macbook() {
         assert_eq!(
@@ -476,7 +405,6 @@ mod tests {
             aux_right_width: None,
         };
         assert_eq!(notch_rect(&s), None);
-        // The fallback: a zero-width strip as tall as the menu bar, in the middle.
         let g = geometry(&s);
         assert_eq!(g.notch, Size::new(0.0, 25.0));
         assert_eq!(g.center_x, 1280.0);
@@ -490,7 +418,6 @@ mod tests {
     #[test]
     fn the_canvas_fits_the_largest_shape_whatever_the_width_setting() {
         let c = canvas_size(NOTCH);
-        // The tallest shape is a peek with a card at the cap: chrome + 520 + 16.
         assert_eq!(c, Size::new(560.0, CHROME + MAX_CARD + 16.0 + CANVAS_SLACK));
         for width in [NotchWidth::Small, NotchWidth::Medium, NotchWidth::Large] {
             let shapes = [
@@ -508,13 +435,10 @@ mod tests {
                 );
             }
         }
-        // The walking pet's reach round the collapsed shape fits too.
         let closed = collapsed_size(NOTCH);
         assert!(closed.w + 2.0 * PET_REACH <= c.w && closed.h + PET_REACH < c.h);
-        // A taller housing makes a taller canvas; no housing (a plain display) a shorter one.
         assert_eq!(canvas_size(Size::new(200.0, 40.0)).h, c.h + 8.0);
         assert_eq!(canvas_size(Size::new(0.0, 24.0)).h, c.h - 8.0);
-        // A housing wide enough for the pet to need more room gets it.
         assert_eq!(
             canvas_size(Size::new(600.0, 32.0)).w,
             616.0 + 2.0 * PET_REACH
@@ -534,14 +458,12 @@ mod tests {
         );
         assert_eq!(c.mid_x(), g.center_x);
         assert_eq!(c.max_y(), g.screen.max_y());
-        // It never follows the screen's width: a wide screen gets the same canvas.
         let wide = Geometry {
             screen: Rect::new(0.0, 0.0, 5120.0, 2880.0),
             notch: g.notch,
             center_x: 2560.0,
         };
         assert_eq!(canvas_frame(&wide).w, size.w);
-        // A camera off centre (a second display to the right) keeps it centred on the camera.
         let off = Geometry {
             screen: Rect::new(1512.0, 0.0, 1000.0, 800.0),
             notch: Size::new(0.0, 24.0),
@@ -549,7 +471,6 @@ mod tests {
         };
         let c = canvas_frame(&off);
         assert_eq!((c.w, c.mid_x(), c.max_y()), (CANVAS_WIDTH, 1812.0, 800.0));
-        // Every shape hangs inside it.
         let open = shape_rect(&g, Size::new(520.0, 584.0), false);
         let canvas = canvas_frame(&g);
         assert!(open.x >= canvas.x && open.max_x() <= canvas.max_x() && open.y >= canvas.y);
@@ -564,7 +485,6 @@ mod tests {
         assert_eq!(open, Rect::new(586.0, 850.0, 340.0, 132.0));
     }
 
-    // Ported from the spike's hit_test tests.
     #[test]
     fn hit_test_edges() {
         let shape = Rect::new(100.0, 900.0, 200.0, 32.0);
@@ -590,7 +510,6 @@ mod tests {
         let closed = shape_rect(&g, collapsed_size(g.notch), true);
         assert!(hit_test(closed, (756.0, 982.0 - 34.0)));
         assert!(!hit_test(closed, (756.0, 982.0 - 37.0)));
-        // Beside the housing the click falls through.
         assert!(!hit_test(closed, (756.0 - 120.0, 970.0)));
     }
 }

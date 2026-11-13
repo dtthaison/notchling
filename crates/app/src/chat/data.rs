@@ -1,8 +1,3 @@
-//! Where Chat reads from: the real folders, or a fixture root laid out like the notch's
-//! (`<root>/claude`, `<root>/notchling`, `<root>/codex`; never a `.claude` path), named by
-//! `--data-root`, by `NOTCHLING_DATA_ROOT`, or for a render the checked-in `crates/app/fixtures/chat`.
-//! A render never reads the real `~/.claude`. Everything here only reads files.
-
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -24,13 +19,10 @@ use crate::transcripts::Locator;
 
 pub use super::loader::{Loaded, Loader};
 
-/// Which tool a session belongs to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Tool {
     Claude,
     Codex,
-    /// Antigravity CLI: its rows come from a copy of its summaries database, and its conversation
-    /// from the daemon (`agy.conversation`), since the files are protobuf.
     Antigravity,
 }
 
@@ -52,9 +44,6 @@ impl Tool {
     }
 }
 
-/// The folders with none scanned twice. A lane's `projects` is a symlink to the main one, so
-/// several config folders reach the same files by different paths; and a folder inside another
-/// watched one is scanned with it. The first spelling of each is kept, in order.
 fn distinct_folders(folders: Vec<PathBuf>) -> Vec<PathBuf> {
     let keyed: Vec<(PathBuf, PathBuf)> = folders
         .into_iter()
@@ -72,7 +61,6 @@ fn distinct_folders(folders: Vec<PathBuf>) -> Vec<PathBuf> {
         .collect()
 }
 
-/// A sidebar session: the engine's row, its tool and where its transcript is.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Session {
     pub agent: Agent,
@@ -80,26 +68,17 @@ pub struct Session {
     pub transcript: Option<PathBuf>,
 }
 
-/// The folders Chat reads.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DataRoot {
-    /// Read as `~/.claude`: `jobs/`, `sessions/`, `projects/`.
     pub claude_dir: PathBuf,
-    /// Notchling's data folder (`lanes.json`).
     pub data_dir: PathBuf,
-    /// Read as `~/.codex`: Codex's `sessions/`.
     pub codex_dir: PathBuf,
-    /// Read as `~/.gemini/antigravity-cli`, through a copy of its summaries database.
     pub antigravity_dir: PathBuf,
-    /// The user's home, for `~` in paths.
     pub home: PathBuf,
-    /// A fixture root: transcript paths in it may be relative to this folder, its rows never age
-    /// out of the Done section and its Codex files aren't filtered by date.
     pub fixture: Option<PathBuf>,
 }
 
 impl DataRoot {
-    /// The user's real folders. `None` when the environment doesn't say where home is.
     pub fn real() -> Option<DataRoot> {
         let home = paths::home()?;
         Some(DataRoot {
@@ -112,8 +91,6 @@ impl DataRoot {
         })
     }
 
-    /// A fixture root: `<root>/claude`, `<root>/notchling`, `<root>/codex`,
-    /// `<root>/antigravity-cli`.
     pub fn fixture(root: &Path) -> DataRoot {
         DataRoot {
             claude_dir: root.join("claude"),
@@ -125,16 +102,10 @@ impl DataRoot {
         }
     }
 
-    /// The app's own folder under the data folder, for what only the app keeps: the second
-    /// opinions and its copy of Antigravity's database. Beside `daemon/` (the daemon's) and apart
-    /// from the Swift app's files in the data folder itself, which a Swift app running next to
-    /// this one keeps writing.
     pub fn app_dir(&self) -> PathBuf {
         self.data_dir.join(APP_DIR)
     }
 
-    /// The Antigravity list, read through a copy in our own folder: the one the notch reads too,
-    /// so the two make one read between them.
     pub fn new_agy_list(&self) -> AgyList {
         AgyList::shared(
             self.antigravity_dir.clone(),
@@ -142,13 +113,10 @@ impl DataRoot {
         )
     }
 
-    /// The fixture root the environment names (`NOTCHLING_DATA_ROOT`), if any.
     pub fn from_env() -> Option<DataRoot> {
         DataRoot::named(None, std::env::var_os(DATA_ROOT_ENV).as_deref())
     }
 
-    /// The fixture root a `--data-root` argument names, else the environment variable's value
-    /// (empty names nothing).
     fn named(data_root: Option<&Path>, env: Option<&OsStr>) -> Option<DataRoot> {
         let dir = match data_root {
             Some(dir) => dir.to_path_buf(),
@@ -157,16 +125,12 @@ impl DataRoot {
         Some(DataRoot::fixture(&dir))
     }
 
-    /// What a render reads: the `--data-root` folder, else the environment's, else the fixture this
-    /// crate carries. Never the real home.
     pub fn for_render(data_root: Option<&Path>) -> DataRoot {
         DataRoot::named(data_root, std::env::var_os(DATA_ROOT_ENV).as_deref()).unwrap_or_else(
             || DataRoot::fixture(&Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/chat")),
         )
     }
 
-    /// What the running app reads, for Chat and the notch alike: the `--data-root` folder, else the
-    /// environment's, else the user's real folders (`None` without a home).
     pub fn for_run(data_root: Option<&Path>) -> Option<DataRoot> {
         DataRoot::resolve_run(
             data_root,
@@ -175,7 +139,6 @@ impl DataRoot {
         )
     }
 
-    /// [`DataRoot::for_run`] with the environment and the real folders passed in.
     fn resolve_run(
         data_root: Option<&Path>,
         env: Option<&OsStr>,
@@ -184,7 +147,6 @@ impl DataRoot {
         DataRoot::named(data_root, env).or_else(real)
     }
 
-    /// The notch's source over this root: the same folders, and a fixture's finished rows stay.
     pub fn notch_source(&self) -> Source {
         let root = NotchRoot {
             claude_dir: self.claude_dir.clone(),
@@ -206,8 +168,6 @@ impl DataRoot {
         }
     }
 
-    /// The folders whose changes mean a reload: jobs, sessions and transcripts of every config
-    /// folder, and Codex's sessions. Each real folder once: the watcher scans all of it every poll.
     pub fn watch_folders(&self) -> Vec<PathBuf> {
         let mut out = Vec::new();
         for config in notchling_engine::sessions::config_dirs(&self.roots()) {
@@ -223,7 +183,6 @@ impl DataRoot {
         self.claude_dir.join("projects")
     }
 
-    /// A monitor for this root: a fixture root never ages its Done rows out.
     pub fn new_monitor(&self) -> Monitor {
         let mut monitor = Monitor::default();
         if self.fixture.is_some() {
@@ -232,21 +191,14 @@ impl DataRoot {
         monitor
     }
 
-    /// Finds transcripts for this root (a fixture's job state may name them relative to it).
     pub fn new_locator(&self) -> Locator {
         Locator::new(self.fixture.clone())
     }
 
-    /// Every session with a throwaway monitor and locator: nothing is remembered between calls.
     pub fn sessions(&self, now_ms: i64) -> Vec<Session> {
         self.sessions_with(&mut self.new_monitor(), &mut self.new_locator(), now_ms)
     }
 
-    /// Every session, needs input first, then working, then done, newest first in each: Claude
-    /// Code's across the main folder and the lanes, then Codex's rollouts (30 newest, 14 days)
-    /// and Antigravity's summaries (14 days). Each Claude row's transcript is found the way the
-    /// notch finds it (`Locator`). The monitor and the locator keep what polls need between them:
-    /// ended terminal sessions, and rows with no transcript yet.
     pub fn sessions_with(
         &self,
         monitor: &mut Monitor,
@@ -256,8 +208,6 @@ impl DataRoot {
         self.sessions_from(monitor, locator, &mut self.new_agy_list(), None, now_ms)
     }
 
-    /// [`DataRoot::sessions_with`] with Claude Code's rows given: the daemon's list
-    /// (`session_source`) in place of reading the jobs and sessions folders here. `None` reads them.
     pub fn sessions_from(
         &self,
         monitor: &mut Monitor,
@@ -305,8 +255,6 @@ impl DataRoot {
         out
     }
 
-    /// The session's conversation, read incrementally by the engine; empty without a transcript. An
-    /// unchanged file gives the same `Arc` as the last read.
     pub fn conversation_shared(&self, session: &Session) -> Arc<Conversation> {
         let Some(path) = &session.transcript else {
             return Arc::default();
@@ -319,23 +267,18 @@ impl DataRoot {
                 conversation::read_shared(&path),
             ),
             Tool::Codex => codex::read_shared(&path),
-            // The daemon's, fetched by the view; never read from Antigravity's files.
             Tool::Antigravity => Arc::default(),
         }
     }
 
-    /// [`DataRoot::conversation_shared`] as an owned copy.
     pub fn conversation(&self, session: &Session) -> Conversation {
         (*self.conversation_shared(session)).clone()
     }
 
-    /// The jobs agent sessions handed to Codex or Antigravity CLI (`notchling delegate`).
     pub fn delegations(&self) -> Vec<Delegation> {
         super::delegated::read(&self.data_dir)
     }
 
-    /// The subagents a Claude Code session started, with how each ended, and the jobs it handed
-    /// to Codex or Antigravity CLI (`delegations`, read once per load by the caller).
     pub fn subagents(
         &self,
         session: &Session,
@@ -347,7 +290,6 @@ impl DataRoot {
             (Some(path), Tool::Claude) => {
                 let path = path.to_string_lossy();
                 let mut list = subagents::list(&path, &conversation.finished_agents, now_secs);
-                // A /clear leaves the old conversation's running subagents beside the old file.
                 for agent in super::cleared::running_before(&path, &session.agent.name, now_secs) {
                     if !list.iter().any(|a| a.id == agent.id) {
                         list.push(agent);
@@ -399,13 +341,11 @@ mod tests {
     fn antigravity_is_copied_into_the_apps_own_folder_and_read_once_for_chat_and_the_notch() {
         let root = DataRoot::fixture(Path::new("/f"));
         let list = root.new_agy_list();
-        // Not data/antigravity, which the Swift app copies over, and not daemon/, the daemon's.
         assert_eq!(list.copy_dir, PathBuf::from("/f/notchling/app/antigravity"));
         assert_eq!(
             list.copy_dir,
             NotchRoot::fixture(Path::new("/f")).antigravity_copy_dir()
         );
-        // The notch's source and Chat's loader hold the one list.
         let notch = root.notch_source();
         assert!(notch.agy_list().is_same_list(&list));
         assert!(Loader::new(root).agy_list().is_same_list(&list));
@@ -425,7 +365,6 @@ mod tests {
             root.projects_dir(),
             PathBuf::from("/Users/me/.claude/projects")
         );
-        // Real rows age out of Done after a day; a fixture's never do.
         assert_eq!(root.new_monitor().completed_window_ms, 24 * 3600 * 1000);
         assert!(
             DataRoot::fixture(Path::new("/f"))
@@ -447,7 +386,6 @@ mod tests {
         let lane = s.dir("lanes/work");
         s.dir("lanes/work/jobs");
         s.dir("lanes/work/sessions");
-        // The lane's projects is the main one, as `LaneStore.shared` links it.
         std::os::unix::fs::symlink(main.join("projects"), lane.join("projects")).unwrap();
         s.write(
             "notchling/lanes.json",
@@ -464,7 +402,6 @@ mod tests {
             .filter(|f| std::fs::canonicalize(f).ok().as_ref() == Some(&projects))
             .count();
         assert_eq!(hits, 1, "{folders:?}");
-        // The lane's own jobs and sessions are still watched.
         assert!(folders.contains(&lane.join("jobs")), "{folders:?}");
         assert!(folders.contains(&lane.join("sessions")), "{folders:?}");
         assert!(folders.contains(&main.join("jobs")), "{folders:?}");
@@ -537,7 +474,6 @@ mod tests {
     #[test]
     fn a_fixture_notch_keeps_finished_rows_however_old() {
         let root = DataRoot::fixture(&Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/chat"));
-        // Years after the fixture's dates: a real source would have aged every Done row out.
         let far = 1_900_000_000_000;
         let loaded = root.notch_source().load(far);
         assert!(
@@ -554,7 +490,6 @@ mod tests {
         let default = DataRoot::for_render(None);
         assert!(default.fixture.is_some());
         assert!(!default.claude_dir.ends_with(".claude"));
-        // The environment may name another fixture; either way it's a fixture, never ~/.claude.
         assert!(default.claude_dir.ends_with("claude"));
     }
 }

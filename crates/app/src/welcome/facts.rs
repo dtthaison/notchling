@@ -1,31 +1,21 @@
-//! What the app finds out about its surroundings before it says anything: whether the Swift app is
-//! here, and what `install.plan` says about Claude Code's hooks. Both are plain data the first-run
-//! view draws from; nothing here changes anything.
-
 use std::path::PathBuf;
 
 use serde_json::Value;
 
-/// The Swift app's bundle id.
 pub const SWIFT_BUNDLE_ID: &str = "local.notchling";
 
-/// Whether the Swift app is on this Mac.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SwiftApp {
-    /// Running now.
     Running,
-    /// Installed in Applications, not running.
     Installed,
     NotFound,
 }
 
 impl SwiftApp {
-    /// True when the Swift app could be doing any of the work: running or installed.
     pub fn present(self) -> bool {
         self != SwiftApp::NotFound
     }
 
-    /// The first line of the first-run view.
     pub fn line(self) -> &'static str {
         match self {
             SwiftApp::Running => "The Swift Notchling is running on this Mac.",
@@ -35,14 +25,11 @@ impl SwiftApp {
     }
 }
 
-/// Looks for the Swift app. A trait so a test (and a render) decide what is "on this Mac".
 pub trait SwiftProbe: Send + Sync {
     fn find(&self) -> SwiftApp;
 }
 
-/// The real probe: the app by bundle id, then `Notchling.app` in the applications folder.
 pub struct SystemProbe {
-    /// `/Applications`.
     pub applications: PathBuf,
 }
 
@@ -66,15 +53,11 @@ impl SwiftProbe for SystemProbe {
     }
 }
 
-/// Whether the bundle at `app` is the Swift app, by its bundle id: once it retires, this app is
-/// installed under the same name (`local.notchling.next`), and macOS file names ignore case, so
-/// the Swift executable `Notchling` can't tell them apart.
 fn is_swift_bundle(app: &std::path::Path) -> bool {
     std::fs::read_to_string(app.join("Contents/Info.plist"))
         .is_ok_and(|plist| plist.contains(&format!("<string>{SWIFT_BUNDLE_ID}</string>")))
 }
 
-/// A probe that answers as told.
 pub struct FixedProbe(pub SwiftApp);
 
 impl SwiftProbe for FixedProbe {
@@ -83,7 +66,6 @@ impl SwiftProbe for FixedProbe {
     }
 }
 
-/// One skill the plan would write, update or remove.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SkillChange {
     pub name: String,
@@ -91,31 +73,19 @@ pub struct SkillChange {
     pub action: String,
 }
 
-/// `install.plan` or `install.apply`, read: what is in Claude Code's `settings.json` and what an
-/// install would change.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct HookFacts {
-    /// The daemon's `install` switch.
     pub install_on: bool,
-    /// Something was written (never while `install_on` is false).
     pub applied: bool,
-    /// What the daemon says beside a dry run: the off message.
     pub message: Option<String>,
-    /// `missing`, `empty`, `present` or `refused`.
     pub state: String,
-    /// Why the file can't be edited, when it can't.
     pub refused: Option<String>,
-    /// The Swift app's `--hook` commands found in the file.
     pub swift_entries: Vec<String>,
-    /// `notchling hook` entries found in the file.
     pub our_entries: usize,
-    /// What an install would do to the file, one line each.
     pub changes: Vec<String>,
     pub notes: Vec<String>,
-    /// Why an apply would be refused (the Swift hooks are still there).
     pub blocked: Option<String>,
     pub skills: Vec<SkillChange>,
-    /// The copy made before a change.
     pub backup: Option<String>,
 }
 
@@ -131,7 +101,6 @@ fn strings(v: &Value) -> Vec<String> {
 }
 
 impl HookFacts {
-    /// Reads the daemon's reply; `None` when it isn't the plan envelope.
     pub fn parse(reply: &Value) -> Option<HookFacts> {
         let plan = reply.get("plan")?;
         let hooks = plan.get("hooks")?;
@@ -196,12 +165,10 @@ impl HookFacts {
         })
     }
 
-    /// True when the Swift app's hook is in the file: the hook is its until it is retired.
     pub fn swift_owns_hook(&self) -> bool {
         !self.swift_entries.is_empty()
     }
 
-    /// True when this app's hook is in the file.
     pub fn we_own_hook(&self) -> bool {
         self.our_entries > 0 && self.swift_entries.is_empty()
     }
@@ -307,10 +274,7 @@ mod tests {
                 applications: dir.join(folder),
             }
         };
-        // The bundle id of a Swift Notchling that happens to be running is the real machine's;
-        // only the not-running answers are pinned here.
         assert_ne!(plist("swift", SWIFT_BUNDLE_ID).find(), SwiftApp::NotFound);
-        // This app installed as Notchling.app once the Swift app retired is not the Swift app.
         assert!(matches!(
             plist("next", "local.notchling.next").find(),
             SwiftApp::NotFound | SwiftApp::Running

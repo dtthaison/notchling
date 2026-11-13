@@ -1,21 +1,12 @@
-//! The render map (the ? button's second layer), the pure half: which regions of Chat draw on
-//! their own, what each badge says, and when a badge flashes. The GPUI half is the app's
-//! `chat::view::render_map`, which paints outlines and badges from the window's own draw so a
-//! cached part is never asked to draw for the map's sake.
-
 use crate::Ink;
 
-/// How long a badge keeps its stronger tint after its region drew.
 pub const FLASH_MS: u64 = 300;
 
-/// A region of the Chat window the map marks.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Region {
-    /// A cached part: draws only when its own model changes.
     Sidebar,
     Conversation,
     Details,
-    /// Everything the window's root view draws: the header, reply box, Tasks bar and panels.
     Window,
 }
 
@@ -36,7 +27,6 @@ impl Region {
         }
     }
 
-    /// What the region does about drawing, in a few plain words.
     pub fn word(self) -> &'static str {
         if self.is_part() {
             "draws alone"
@@ -45,7 +35,6 @@ impl Region {
         }
     }
 
-    /// The outline and badge color: one per separate part, one shared by the window's own.
     pub fn ink(self) -> Ink {
         match self {
             Region::Sidebar => Ink::Done,
@@ -55,7 +44,6 @@ impl Region {
         }
     }
 
-    /// The text ink on a badge filled with `ink()`.
     pub fn on_ink(self) -> Ink {
         match self {
             Region::Sidebar | Region::Conversation => Ink::OnAccent,
@@ -64,13 +52,11 @@ impl Region {
         }
     }
 
-    /// Whether the region draws apart from the window (a cached part).
     pub fn is_part(self) -> bool {
         self != Region::Window
     }
 }
 
-/// "1 draw", "2 draws", "0 draws".
 pub fn plural(n: u64, word: &str) -> String {
     if n == 1 {
         format!("1 {word}")
@@ -79,8 +65,6 @@ pub fn plural(n: u64, word: &str) -> String {
     }
 }
 
-/// A badge's text: the name, how it draws, its draws since the map came on, and for the
-/// conversation the rows its last draw built.
 pub fn badge_text(region: Region, draws: u64, rows: Option<u64>) -> String {
     let mut text = format!(
         "{} \u{b7} {} \u{b7} {}",
@@ -95,18 +79,13 @@ pub fn badge_text(region: Region, draws: u64, rows: Option<u64>) -> String {
     text
 }
 
-/// What a region's badge shows for one frame.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Reading {
-    /// Draws since the map came on (the first reading is 0).
     pub draws: u64,
-    /// Rows built by the latest draw of the region, if it drew since the map came on.
     pub rows: u64,
-    /// Whether the region drew within the last `FLASH_MS`.
     pub flashing: bool,
 }
 
-/// One region's counter history, read once per frame from the region's cumulative draw count.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Track {
     started: bool,
@@ -115,12 +94,10 @@ pub struct Track {
     shown: u64,
     rows_in_last: u64,
     flash_until: u64,
-    /// Draws the map caused itself, not to be counted when they show up.
     ignore: u64,
 }
 
 impl Track {
-    /// Reads the cumulative counters at `now_ms`. The first reading only sets the baseline.
     pub fn observe(&mut self, draws: u64, rows: u64, now_ms: u64) -> Reading {
         if !self.started {
             self.started = true;
@@ -146,12 +123,10 @@ impl Track {
         }
     }
 
-    /// Notes that the next draw of the region is the map's own (its timer clearing a flash).
     pub fn ignore_next_draw(&mut self) {
         self.ignore += 1;
     }
 
-    /// Milliseconds until the flash ends, if one is on: when to wake once to clear it.
     pub fn wake_in(&self, now_ms: u64) -> Option<u64> {
         (now_ms < self.flash_until).then(|| self.flash_until - now_ms)
     }
@@ -267,11 +242,8 @@ mod tests {
     fn rows_are_those_built_since_the_frame_before_the_latest_draw() {
         let mut t = Track::default();
         t.observe(1, 10, 0);
-        // A draw that built 5 rows.
         assert_eq!(t.observe(2, 15, 16).rows, 5);
-        // A frame without a draw keeps the last draw's rows.
         assert_eq!(t.observe(2, 15, 32).rows, 5);
-        // A draw that built none.
         assert_eq!(t.observe(3, 15, 48).rows, 0);
     }
 
@@ -283,7 +255,6 @@ mod tests {
         let r = t.observe(101, 0, 300);
         assert_eq!(r.draws, 0);
         assert!(!r.flashing);
-        // The next one is real again.
         let r = t.observe(102, 0, 316);
         assert_eq!(r.draws, 1);
         assert!(r.flashing);
@@ -294,7 +265,6 @@ mod tests {
         let mut t = Track::default();
         t.observe(10, 0, 0);
         t.ignore_next_draw();
-        // No draw has come yet: the ignore waits for it and nothing is counted.
         let r = t.observe(10, 0, 5);
         assert_eq!(r.draws, 0);
         assert!(!r.flashing);

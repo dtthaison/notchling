@@ -1,16 +1,9 @@
-//! The little URL reading the vault needs, as Foundation's `URL(string:)` gave the Swift app: a
-//! host to match a task by, an origin to tell where a secret is sent, and the page Renew opens.
-//! Text without a scheme is read as `https://`. Anything `URL(string:)` would refuse (spaces, a
-//! port that isn't a number) has no host here either.
-
-/// The parts of `scheme://[user@]host[:port][/path…]`.
 struct Parts {
     scheme: String,
     host: String,
     port: Option<u16>,
 }
 
-/// Characters a URL may hold unescaped (RFC 3986's unreserved, reserved and `%`).
 fn url_char(c: char) -> bool {
     c.is_ascii_alphanumeric() || "-._~:/?#[]@!$&'()*+,;=%".contains(c)
 }
@@ -59,8 +52,6 @@ fn parse(text: &str) -> Option<Parts> {
     })
 }
 
-/// `api.github.com` from `https://api.github.com/v3` or `api.github.com`, without `www.`; `None`
-/// for text that names no host (a bare word, or something that isn't a URL).
 pub fn host_of(text: &str) -> Option<String> {
     let trimmed = text.trim();
     if !trimmed.contains("://") && !trimmed.contains('.') {
@@ -77,8 +68,6 @@ pub fn host_of(text: &str) -> Option<String> {
     )
 }
 
-/// `https://api.github.com`, `http://localhost:8080`: scheme, host without `www.`, and the port
-/// unless it is the scheme's default. `None` when it has no host.
 pub fn origin_of(text: &str) -> Option<String> {
     let host = host_of(text)?;
     let parts = parse(text)?;
@@ -94,9 +83,6 @@ pub fn origin_of(text: &str) -> Option<String> {
     Some(origin)
 }
 
-/// The page Renew opens for a secret with this URL: GitHub's token settings for a GitHub secret,
-/// else the URL itself. Only http(s) with a host: the URL comes from an agent, and `file:`,
-/// `smb:` or an app's scheme must never be handed to the system to open.
 pub fn renew_url(url: Option<&str>) -> Option<String> {
     let text = url?.trim();
     if text.is_empty() {
@@ -119,7 +105,6 @@ pub fn renew_url(url: Option<&str>) -> Option<String> {
     Some(full)
 }
 
-/// The secret's URL when Renew won't open it (not http or https), to show as plain text.
 pub fn renew_refusal(url: Option<&str>) -> Option<String> {
     let text = url?.trim();
     if text.is_empty() || renew_url(Some(text)).is_some() {

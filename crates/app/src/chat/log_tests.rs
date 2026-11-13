@@ -1,5 +1,3 @@
-//! `chat::log::diff`: what changed between two loads of a conversation, by item.
-
 use std::sync::Arc;
 
 use notchling_engine::transcript::model::{ChatItem, Conversation, ItemKind};
@@ -21,7 +19,6 @@ fn conversation(items: &[(usize, &str)]) -> Arc<Conversation> {
     })
 }
 
-/// Items `from..to` with their own number as text.
 fn run(from: usize, to: usize) -> Arc<Conversation> {
     Arc::new(Conversation {
         items: (from..to).map(|n| item(n, &format!("t{n}"))).collect(),
@@ -60,7 +57,6 @@ fn an_appended_item_is_one_splice_at_the_end() {
 
 #[test]
 fn a_changed_last_item_is_replaced_in_place() {
-    // A tools group gained a step: same id, different content.
     let old = conversation(&[(0, "a"), (1, "b"), (2, "c")]);
     let new = conversation(&[(0, "a"), (1, "b"), (2, "c and more")]);
     assert_eq!(
@@ -87,7 +83,6 @@ fn neighbouring_changed_items_are_one_splice() {
 
 #[test]
 fn a_front_trim_and_an_append_are_two_splices() {
-    // The engine keeps the newest 500 items: two fell off the front, one was added.
     assert_eq!(
         diff(&run(0, 5), &run(2, 6)),
         Change::Items {
@@ -99,11 +94,9 @@ fn a_front_trim_and_an_append_are_two_splices() {
 
 #[test]
 fn renumbered_ids_reset() {
-    // A fresh cursor numbers the lines again: the first new id isn't in the old items.
     let old = conversation(&[(10, "a"), (11, "b")]);
     let new = conversation(&[(0, "a"), (1, "b")]);
     assert_eq!(diff(&old, &new), Change::Reset);
-    // Or it is, but what follows doesn't line up.
     let old = conversation(&[(0, "a"), (1, "b"), (2, "c")]);
     let new = conversation(&[(0, "a"), (5, "b"), (6, "c")]);
     assert_eq!(diff(&old, &new), Change::Reset);
@@ -118,7 +111,6 @@ fn an_empty_side_resets() {
 
 #[test]
 fn more_than_reset_above_changes_resets() {
-    // Room for RESET_ABOVE + 1 changed items with an unchanged one between each, so none merge.
     let total = 2 * (RESET_ABOVE + 1) + 2;
     let old = Arc::new(Conversation {
         items: (0..total).map(|n| item(n, "old")).collect(),

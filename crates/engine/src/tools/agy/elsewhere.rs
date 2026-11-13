@@ -1,15 +1,3 @@
-//! A conversation another `agy` holds: a delegation (`notchling delegate agy`), an `agy` in a
-//! terminal, another daemon. Two `agy` processes on one conversation don't see each other's turns:
-//! the second one's `session/load` replays only what was written when it loaded, and a prompt sent
-//! through it makes Antigravity stop the first one's work as after a server restart. So while
-//! another process holds the conversation, the daemon starts none of its own and shows the
-//! conversation read-only from Antigravity's own log (`brain/<id>/.system_generated/logs/
-//! transcript.jsonl`), which every process appends to.
-//!
-//! An `agy` that has a conversation loaded keeps its `brain/<id>` folder open, so `lsof` on that
-//! folder names the holders; the daemon's own are its children. Found with the commands through
-//! [`Procs`], so a test runs none.
-
 use std::collections::VecDeque;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
@@ -27,19 +15,15 @@ use crate::transcript::util::json_sorted;
 const LSOF: &str = "/usr/sbin/lsof";
 const PS: &str = "/bin/ps";
 const TIMEOUT: Duration = Duration::from_secs(3);
-/// The most of the log's end that is read; the newest steps are at its end.
 const LOG_TAIL: u64 = 4 << 20;
 
-/// Another `agy` holding a conversation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Holder {
     pub pid: u32,
-    /// Started by a delegation (`notchling delegate`), which ends on its own.
     pub delegation: bool,
 }
 
 impl Holder {
-    /// What Chat says about it, under the conversation and on the reply box.
     pub fn note(&self) -> &'static str {
         if self.delegation {
             DELEGATION_NOTE
@@ -54,17 +38,14 @@ pub const DELEGATION_NOTE: &str =
 pub const OTHER_NOTE: &str =
     "Another Antigravity CLI has this session open. Read only here until it closes.";
 
-/// The conversation's folder in Antigravity's data folder (`root` is `~/.gemini/antigravity-cli`).
 pub fn brain_dir(root: &Path, session: &str) -> PathBuf {
     root.join("brain").join(session)
 }
 
-/// Its log, which every `agy` on the conversation appends to.
 pub fn log_path(root: &Path, session: &str) -> PathBuf {
     brain_dir(root, session).join(".system_generated/logs/transcript.jsonl")
 }
 
-/// The `agy` processes in `lsof -F pc` output.
 pub fn agy_pids(lsof: &str) -> Vec<u32> {
     let mut out = Vec::new();
     let mut pid: Option<u32> = None;
@@ -82,7 +63,6 @@ pub fn agy_pids(lsof: &str) -> Vec<u32> {
     out
 }
 
-/// Whether a parent's command line is a delegation's.
 pub fn is_delegation(parent_command: &str) -> bool {
     let words: Vec<&str> = parent_command.split_whitespace().collect();
     let named = words.iter().any(|w| {
@@ -93,8 +73,6 @@ pub fn is_delegation(parent_command: &str) -> bool {
     named && words.iter().any(|w| *w == "delegate" || *w == "--delegate")
 }
 
-/// The first `agy` holding the conversation whose parent isn't `own` (the daemon). `None` when
-/// nothing else holds it, or the folder doesn't exist.
 pub fn find(procs: &dyn Procs, root: &Path, session: &str, own: u32) -> Option<Holder> {
     let dir = brain_dir(root, session);
     if !dir.is_dir() {
@@ -122,21 +100,15 @@ pub fn find(procs: &dyn Procs, root: &Path, session: &str, own: u32) -> Option<H
     })
 }
 
-/// The log's last change, to tell when there is more to show.
 pub fn log_stamp(root: &Path, session: &str) -> Option<(u64, std::time::SystemTime)> {
     let meta = std::fs::metadata(log_path(root, session)).ok()?;
     Some((meta.len(), meta.modified().ok()?))
 }
 
-/// The conversation as the log has it, read-only: your messages, its thinking, replies and tool
-/// steps, and `note` at the end; and whether a turn is still going. While one is, `activity`
-/// names the call still waiting for its result.
 pub fn from_log(root: &Path, session: &str, note: &str) -> (Conversation, bool) {
     from_log_file(&log_path(root, session), Some(note))
 }
 
-/// [`from_log`] for a log at `path`, with no note at the end when `note` is `None` (a delegation
-/// shown as a subagent has nothing to say about who holds it).
 pub fn from_log_file(path: &Path, note: Option<&str>) -> (Conversation, bool) {
     let lines = read_tail(path);
     let (mut conversation, working) = from_lines(&lines);
@@ -175,20 +147,12 @@ fn read_tail(path: &Path) -> Vec<String> {
     }
     let text = String::from_utf8_lossy(&data);
     let mut lines: Vec<String> = text.lines().map(str::to_owned).collect();
-    // A cut first line is part of an older step.
     if start > 0 && !lines.is_empty() {
         lines.remove(0);
     }
     lines
 }
 
-/// The log's steps as the conversation ACP's replay makes of them, and whether a turn is still
-/// going. `USER_INPUT` is your message (the text inside `<USER_REQUEST>`); a `PLANNER_RESPONSE` is
-/// its thinking, its reply text and a group of tool calls; each `GENERIC` after it is the result of
-/// the next call. System notes, checkpoints and errors of the service itself are left out.
-///
-/// A turn goes on from your message until a planner step that calls nothing. Item ids come from the
-/// line's place in `lines`, not its `step_index`, which restarts when a session does.
 pub fn from_lines(lines: &[String]) -> (Conversation, bool) {
     let mut log = Log::default();
     for (n, line) in lines.iter().enumerate() {
@@ -205,9 +169,7 @@ struct Log {
     working: bool,
     turn_start: Option<Timestamp>,
     turn_tokens: u64,
-    /// Calls with no result step yet, oldest first: the item's index and the call's in it.
     waiting: VecDeque<(usize, usize)>,
-    /// Calls whose step says it is still running (a command left in the background).
     running: Vec<(usize, usize)>,
 }
 
@@ -238,7 +200,6 @@ impl Log {
         self.conversation.items.push(ChatItem { id, kind, date });
     }
 
-    /// The model went on, so a call it never got a step for is over too.
     fn close_calls(&mut self) {
         let open: Vec<(usize, usize)> = self
             .waiting
@@ -268,7 +229,6 @@ impl Log {
         if calls.is_empty() {
             self.working = false;
         } else if !self.working {
-            // Woken with no message of yours (a subagent reported): a turn of its own.
             self.working = true;
             self.turn_start = date;
             self.turn_tokens = 0;
@@ -302,7 +262,6 @@ impl Log {
             let name = call.get("name").and_then(Value::as_str).unwrap_or("tool");
             make_call(&format!("agy-log-{n}-call-{k}"), name, args)
         });
-        // Calls with nothing between them are one group, as in ACP's replay.
         if !matches!(
             self.conversation.items.last().map(|i| &i.kind),
             Some(ItemKind::Tools(_))
@@ -326,7 +285,6 @@ impl Log {
         }
     }
 
-    /// A `GENERIC` step is the result of the oldest call without one.
     fn result(&mut self, step: &Value, content: &str) {
         let Some((i, j)) = self.waiting.pop_front() else {
             return;
@@ -351,7 +309,6 @@ impl Log {
                 call.finished = true;
                 call.output = body;
             }
-            // Still running: what it printed so far, and no result yet.
             Some(_) => {
                 call.output = body;
                 self.running.push((i, j));
@@ -368,7 +325,6 @@ impl Log {
     }
 }
 
-/// A tool step's output: its `content` without the Created At / Completed At lines that head it.
 fn result_text(content: &str) -> Option<String> {
     let body: Vec<&str> = content
         .lines()
@@ -378,8 +334,6 @@ fn result_text(content: &str) -> Option<String> {
     (!text.is_empty()).then_some(text)
 }
 
-/// A tool argument as text. The log keeps each value as JSON text, a string inside a string
-/// (`"\"ls -la\""`), so one that parses as a JSON string is unwrapped; any other text stays.
 fn arg(args: &Value, key: &str) -> String {
     match args.get(key) {
         Some(Value::String(text)) => match serde_json::from_str::<Value>(text) {
@@ -391,8 +345,6 @@ fn arg(args: &Value, key: &str) -> String {
     }
 }
 
-/// One of Antigravity's tool calls as Chat's step, titled the way Claude Code's are ("Read a.rs",
-/// "Ran ls"); a tool not named here shows under its own name.
 fn make_call(id: &str, name: &str, args: &Value) -> ToolCall {
     let call =
         |kind: ToolKind, title: String, input: String| ToolCall::new(id, name, kind, title, input);
@@ -443,7 +395,6 @@ fn make_call(id: &str, name: &str, args: &Value) -> ToolCall {
     }
 }
 
-/// The text you typed: inside `<USER_REQUEST>`, else all of it.
 fn user_request(content: &str) -> String {
     let inner = content
         .split_once("<USER_REQUEST>")

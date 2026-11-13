@@ -1,5 +1,3 @@
-"""Tests for tools/release/appcast.py: no network, no signing, only temp files."""
-
 import base64
 import contextlib
 import datetime
@@ -18,13 +16,11 @@ import appcast
 SPARKLE = "http://www.andymatuschak.org/xml-namespaces/sparkle"
 GOLDEN = os.path.join(os.path.dirname(__file__), "golden")
 
-# 2026-11-08 is a Sunday. The only date format the tool writes or accepts for pubDate.
 FIXED_NOW = datetime.datetime(2026, 11, 8, 9, 5, 3, tzinfo=datetime.timezone.utc)
 FIXED_NOW_TEXT = "Sun, 08 Nov 2026 09:05:03 +0000"
 EXACT_DATE = re.compile(r"^(Mon|Tue|Wed|Thu|Fri|Sat|Sun), \d\d (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) "
                         r"\d{4} \d\d:\d\d:\d\d \+0000$")
 
-# Written by hand, not by the tool, so the exact-format rule has something to reject.
 NOT_EXACT_DATES = {
     "unpadded day": "Sun, 8 Nov 2026 10:00:00 +0000",
     "GMT zone": "Sun, 08 Nov 2026 10:00:00 GMT",
@@ -47,7 +43,6 @@ NOT_EXACT_DATES = {
     "words": "yesterday",
 }
 
-# A real Ed25519 signature is 64 bytes. These are fixed made-up ones, never keys.
 SIG_A = base64.b64encode(bytes(range(64))).decode()
 SIG_B = base64.b64encode(bytes(range(64, 128))).decode()
 SIG_C = base64.b64encode(bytes(range(128, 192))).decode()
@@ -58,7 +53,6 @@ def q(name):
 
 
 def canon(element):
-    """Serialized form without the tail, which depends on where the element sits."""
     element.tail = None
     return ET.tostring(element)
 
@@ -102,7 +96,6 @@ class CliCase(unittest.TestCase):
             return f.read()
 
     def build_sample(self):
-        """Stable 12 and 14, Beta 15 and 16; the second Beta has every optional field."""
         self.assertEqual(self.run_cli(add_args(self.feed, 12, "1.2.0"))[0], 0)
         self.assertEqual(self.run_cli(add_args(self.feed, 15, "1.3.0-beta.1", SIG_B, "beta"))[0], 0)
         self.assertEqual(self.run_cli(add_args(self.feed, 14, "1.2.1", SIG_C))[0], 0)
@@ -142,8 +135,6 @@ class TestAdd(CliCase):
         self.assertEqual(enc.get(q("edSignature")), SIG_A)
 
     def test_sparkle_two_placement(self):
-        # In Sparkle 2.6 the version strings, channel, minimum system, rollout, critical flag and notes
-        # link are children of item; only url, length, type and edSignature are enclosure attributes.
         self.run_cli(add_args(self.feed, 9, "1.0.0-beta.1", SIG_A, "beta", ["--critical"]))
         item = self.items()[0]
         for name in ("version", "shortVersionString", "channel", "minimumSystemVersion",
@@ -173,9 +164,8 @@ class TestAdd(CliCase):
         self.assertTrue(before <= email.utils.parsedate_to_datetime(text) <= after, (before, text, after))
 
     def test_pub_date_now_is_converted_to_utc(self):
-        # A clock that reports another zone still writes UTC with +0000.
         berlin = datetime.timezone(datetime.timedelta(hours=1))
-        local = datetime.datetime(2026, 11, 8, 23, 30, 0, tzinfo=berlin)  # 22:30 UTC, still Sunday
+        local = datetime.datetime(2026, 11, 8, 23, 30, 0, tzinfo=berlin)
         with mock.patch.object(appcast, "now_utc", return_value=local):
             self.run_cli(add_args(self.feed, 7, "1.0.0", extra=["--pub-date", "now"]))
         self.assertEqual(self.items()[0].findtext("pubDate"), "Sun, 08 Nov 2026 22:30:00 +0000")
@@ -191,7 +181,7 @@ class TestAdd(CliCase):
         else:
             self.skipTest("no non-English locale installed")
         try:
-            self.assertNotEqual(datetime.date(2026, 11, 8).strftime("%a"), "Sun")  # the trap is real here
+            self.assertNotEqual(datetime.date(2026, 11, 8).strftime("%a"), "Sun")
             with mock.patch.object(appcast, "now_utc", return_value=FIXED_NOW):
                 self.run_cli(add_args(self.feed, 7, "1.0.0", extra=["--pub-date", "now"]))
         finally:
@@ -219,7 +209,7 @@ class TestAdd(CliCase):
     def test_any_other_pub_date_form_is_refused_and_writes_nothing(self):
         for label, text in NOT_EXACT_DATES.items():
             with self.subTest(label):
-                if os.path.exists(self.feed):  # only after a wrong acceptance, so one miss is one failure
+                if os.path.exists(self.feed):
                     os.remove(self.feed)
                 code, _, err = self.run_cli(add_args(self.feed, 7, "1.0.0", extra=["--pub-date", text]))
                 self.assertEqual(code, 1, err)
@@ -272,7 +262,6 @@ class TestAdd(CliCase):
         for name, override in cases.items():
             with self.subTest(name):
                 args = add_args(self.feed, 7, "1.0.0")
-                # later flags win in argparse, so appending overrides
                 code, _, err = self.run_cli(args + override)
                 self.assertEqual(code, 1, err)
                 self.assertTrue(err.strip(), name)
@@ -288,7 +277,6 @@ class TestAdd(CliCase):
     def test_deterministic_output(self):
         self.build_sample()
         first = self.read()
-        # Rebuilding from scratch in a different order gives the same bytes.
         os.remove(self.feed)
         self.run_cli(add_args(self.feed, 16, "1.3.0-beta.2", SIG_A, "beta",
                               ["--rollout", "3600", "--critical", "--pub-date", "Sun, 08 Nov 2026 10:00:00 +0000"]))
@@ -392,8 +380,6 @@ class TestPromote(CliCase):
         self.run_cli(["promote", "--feed", self.feed, "--version", "16"])
         self.assertEqual(self.run_cli(["verify", "--feed", self.feed])[0], 0)
 
-    # --- what a Stable release changes besides the channel ---------------------------------------
-
     NOTES = "https://github.com/dtthaison/notchling/releases/tag/v1.3.0"
 
     def item(self, version):
@@ -490,8 +476,6 @@ class TestPromote(CliCase):
         self.assertEqual((after.findtext(q("releaseNotesLink")), after.findtext(q("phasedRolloutInterval")),
                           after.findtext("pubDate")), (notes, rollout, date))
 
-    # --- expectations: the workflow names the Beta it means to promote -----------------------------
-
     BETA_URL = ("https://github.com/dtthaison/notchling/releases/download/v1.3.0-beta.1/"
                 "Notchling-1.3.0-beta.1.dmg")
 
@@ -513,8 +497,8 @@ class TestPromote(CliCase):
                                     "--expect-short", "1.3.0-beta.1", "--short", "1.3.0", "--rollout", "0",
                                     "--notes-url", self.NOTES, "--pub-date", "now")
         self.assertEqual(code, 1)
-        self.assertIn(self.BETA_URL, err)  # what the feed has
-        self.assertIn("Other-1.3.0", err)  # what was expected
+        self.assertIn(self.BETA_URL, err)
+        self.assertIn("Other-1.3.0", err)
         self.assertEqual(self.read(), before)
 
     def test_a_different_short_version_is_refused_and_the_feed_is_untouched(self):
@@ -527,7 +511,6 @@ class TestPromote(CliCase):
         self.assertEqual(self.read(), before)
 
     def test_the_version_number_pointing_at_another_build_is_refused(self):
-        # Right version number, but the item is not the Beta the workflow built: the tag and the feed disagree.
         self.build_sample()
         before = self.read()
         code, _, _ = self.promote(16, "--expect-url", self.BETA_URL, "--expect-short", "1.3.0-beta.1")
@@ -556,7 +539,6 @@ class TestPromote(CliCase):
         self.assertEqual(self.run_cli(["verify", "--feed", self.feed])[0], 0)
 
     def test_a_promoted_item_matches_one_added_as_stable_with_the_same_fields(self):
-        # Child order must be the one `add` writes, wherever promote had to insert an element.
         self.run_cli(add_args(self.feed, 15, "1.3.0-beta.1", SIG_B, "beta", ["--rollout", "0"]))
         self.promote(15, "--short", "1.3.0", "--notes-url", self.NOTES, "--pub-date", "Sun, 08 Nov 2026 11:00:00 +0000",
                      "--rollout", "86400")
@@ -604,7 +586,6 @@ class TestVerify(CliCase):
 
     def test_missing_sparkle_namespace_declaration(self):
         self.write('<?xml version="1.0"?><rss version="2.0"><channel><title>x</title><link>https://x</link></channel></rss>')
-        # ElementTree cannot tell a missing declaration from none needed, so check an item uses it.
         text = self.sample_text().replace("xmlns:sparkle=", "xmlns:other=")
         self.write(text)
         code, _, err = self.run_cli(["verify", "--feed", self.feed])
@@ -677,7 +658,6 @@ class TestVerify(CliCase):
         self.assertIn("duplicate", err.lower())
 
     def test_unsorted(self):
-        # Swap two versions' numbers so the order on disk is wrong but each stays unique.
         text = self.sample_text()
         text = text.replace("<sparkle:version>16</sparkle:version>", "<sparkle:version>X</sparkle:version>")
         text = text.replace("<sparkle:version>12</sparkle:version>", "<sparkle:version>16</sparkle:version>")
@@ -713,7 +693,6 @@ class TestVerify(CliCase):
         self.assertIn("pubDate", err)
 
     def test_other_rfc_822_pub_dates_still_pass(self):
-        # Only our own writers are held to one format; verify asks whether Sparkle can read the feed.
         code, _, err = self.mutate("<pubDate>Sun, 08 Nov 2026 10:00:00 +0000</pubDate>",
                                    "<pubDate>Sun, 08 Nov 2026 10:00:00 GMT</pubDate>")
         self.assertEqual((code, err), (0, ""))

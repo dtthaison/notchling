@@ -7,8 +7,6 @@ import '../core/protocol/models.dart';
 import '../features/macs/session_ref.dart';
 import 'alerts.dart';
 
-/// Claude said something new in a session. [text] is its first line. [quiet] is true when the same session was
-/// announced a moment ago: the alert then only updates what is already showing (no sound, no new heads-up).
 class MessageAlert {
   const MessageAlert({required this.sessionId, required this.name, required this.text, required this.quiet});
   final String sessionId;
@@ -17,20 +15,14 @@ class MessageAlert {
   final bool quiet;
 }
 
-/// Finds new replies by comparing each session's `lastMessage.id` with the one seen before. It does not depend on the
-/// session ever showing "running" in a list, so a turn that starts and ends between two pushes is still announced; and
-/// the same reply is never announced twice, however often the list repeats it.
 class MessageAlertTracker {
   MessageAlertTracker({this.window = const Duration(seconds: 8)});
 
-  /// A session announced within this long ago is updated in place, quietly.
   final Duration window;
   final Map<String, String> _seen = <String, String>{};
   final Map<String, DateTime> _lastLoud = <String, DateTime>{};
   bool _primed = false;
 
-  /// The first list only records what is there (an old reply is not news). Muted sessions are recorded but not
-  /// announced. Deciding whether to show an alert for the chat that is open is the caller's.
   List<MessageAlert> update(List<Session> sessions, {required DateTime now, Set<String> muted = const <String>{}}) {
     final List<MessageAlert> alerts = <MessageAlert>[];
     for (final Session s in sessions) {
@@ -55,16 +47,12 @@ class MessageAlertTracker {
   }
 }
 
-/// What the app announces: a session that needs the user, a new reply, or a finished turn.
 class AlertEvent {
   const AlertEvent({required this.sessionId, required this.name, required this.body, required this.kind, this.quiet = false, this.host = ''});
 
-  /// The computer that raised the alert: [sessionId] is that computer's own id, and means nothing on another one.
-  /// Empty only for an alert made before a computer is known.
   final String host;
   final String sessionId;
 
-  /// The session this alert is about, with its computer.
   SessionRef get session => SessionRef(host, sessionId);
 
   final String name;
@@ -73,7 +61,6 @@ class AlertEvent {
   final bool quiet;
 }
 
-/// One event per session, the most important first: needs you, then a new reply, then finished.
 List<AlertEvent> buildAlertEvents({
   required List<Session> sessions,
   required Map<String, AlertKind> stateAlerts,
@@ -104,8 +91,6 @@ List<AlertEvent> buildAlertEvents({
   return bySession.values.toList();
 }
 
-/// The banner shown inside the app. Auto-hides after 4 s; a newer alert for any session replaces it (and for the same
-/// session it simply updates the text in place).
 final NotifierProvider<InAppAlertNotifier, AlertEvent?> inAppAlertProvider = NotifierProvider<InAppAlertNotifier, AlertEvent?>(InAppAlertNotifier.new);
 
 class InAppAlertNotifier extends Notifier<AlertEvent?> {
@@ -131,8 +116,6 @@ class InAppAlertNotifier extends Notifier<AlertEvent?> {
   }
 }
 
-/// A short sound for an alert while the app is open. Android plays the res/raw sound unless the ringer is not normal or
-/// Do Not Disturb is on; elsewhere the system's alert sound.
 abstract interface class AlertSounds {
   Future<void> play(AlertKind kind);
 }
@@ -147,7 +130,6 @@ class PlatformAlertSounds implements AlertSounds {
     } on MissingPluginException {
       await SystemSound.play(SystemSoundType.alert);
     } on PlatformException {
-      // No sound is not an error: the banner shows.
     }
   }
 }

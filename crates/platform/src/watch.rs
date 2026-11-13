@@ -1,14 +1,3 @@
-//! Tells which files changed under some folders, so a scanner can look at just those.
-//!
-//! On macOS the kernel says what changed (an FSEvents stream with file-level events), so a quiet
-//! folder costs nothing however many files it holds. Elsewhere, and on a Mac where the stream won't
-//! start, a polling loop compares file sizes and modified times each tick, which on a real
-//! `~/.claude` (tens of thousands of files) took a third of a core. Either way the changed paths
-//! are reported once the folders have been quiet for the debounce time, or after the maximum
-//! latency when something keeps writing; callers only see [`Batch`]es. inotify and
-//! ReadDirectoryChangesW can replace the loop on Linux and Windows behind the same
-//! [`Watcher::start`].
-
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -21,30 +10,18 @@ use crate::{Error, Result};
 #[cfg(target_os = "macos")]
 mod fsevents;
 
-/// Folders deeper than this are not read, which also ends any loop a mount might make.
 const MAX_DEPTH: usize = 32;
 
-/// What changed since the last batch.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Batch {
-    /// Files added, removed or changed. The native watcher also names a folder made, removed or
-    /// renamed, where the polling one names the files inside it.
     pub paths: BTreeSet<PathBuf>,
-    /// The caller should walk everything again: a watched folder appeared or went away, or the
-    /// system lost track of some changes.
     pub rescan: bool,
 }
 
-/// How often to look, how long to wait for quiet, and how long a change may wait at most.
 #[derive(Clone, Copy, Debug)]
 pub struct WatchConfig {
-    /// How often the polling watcher looks; the native one is told and never looks.
     pub poll: Duration,
-    /// A batch is sent once nothing has changed for this long.
     pub debounce: Duration,
-    /// ... or this long after its first change, whichever comes first, so something that writes
-    /// during every poll (a log, a busy session) still gets its batches through. Keep it above
-    /// `debounce`: below it the debounce never gets to wait.
     pub max_latency: Duration,
 }
 
@@ -60,7 +37,6 @@ impl Default for WatchConfig {
 
 type Snapshot = BTreeMap<PathBuf, (SystemTime, u64)>;
 
-/// Reads every file under `dir`; symlinks are not followed.
 fn scan_into(dir: &Path, depth: usize, out: &mut Snapshot) {
     if depth > MAX_DEPTH {
         return;
@@ -89,7 +65,6 @@ fn scan(folders: &[PathBuf]) -> Snapshot {
     out
 }
 
-/// Paths added, removed or changed between two snapshots.
 fn diff(old: &Snapshot, new: &Snapshot) -> BTreeSet<PathBuf> {
     let mut changed = BTreeSet::new();
     for (path, stamp) in new {
@@ -105,12 +80,9 @@ fn diff(old: &Snapshot, new: &Snapshot) -> BTreeSet<PathBuf> {
     changed
 }
 
-/// Gathers changes into the next batch and says when it is due: after `debounce` of quiet, or
-/// `max_latency` after its first change.
 struct Collector {
     pending: Batch,
     quiet_since: Instant,
-    /// When the batch now being collected got its first change.
     first_change: Instant,
 }
 
@@ -132,14 +104,12 @@ impl Collector {
         let was_waiting = self.waiting();
         let mut any = rescan;
         for path in paths {
-            // A path already pending changing again still counts: the folder isn't quiet.
             any = true;
             self.pending.paths.insert(path);
         }
         if !any {
             return;
         }
-        // While a batch is already collecting only the quiet clock restarts.
         if !was_waiting {
             self.first_change = now;
         }
@@ -147,7 +117,6 @@ impl Collector {
         self.quiet_since = now;
     }
 
-    /// When the batch being collected should go out; `None` while there is none.
     fn due_at(&self, config: &WatchConfig) -> Option<Instant> {
         self.waiting().then(|| {
             (self.quiet_since + config.debounce).min(self.first_change + config.max_latency)
@@ -160,25 +129,18 @@ impl Collector {
     }
 }
 
-/// Ends the watcher's thread when dropped.
 enum Stop {
-    /// Dropping the sender wakes the polling loop's wait at once.
     Poll(Sender<()>),
-    /// The stream's callback holds the only sender of the batching thread's events, so stopping
-    /// the stream ends the thread too.
     #[cfg(target_os = "macos")]
     Native(fsevents::Stream),
 }
 
-/// A running watcher. Dropping it stops the thread.
 pub struct Watcher {
     stop: Option<Stop>,
     thread: Option<JoinHandle<()>>,
 }
 
 impl Watcher {
-    /// Starts watching the folders that exist now. Fails when none do. Batches arrive on the
-    /// returned channel; dropping the receiver also ends the watch.
     pub fn start(folders: Vec<PathBuf>, config: WatchConfig) -> Result<(Watcher, Receiver<Batch>)> {
         let existing: Vec<PathBuf> = folders.into_iter().filter(|f| f.is_dir()).collect();
         if existing.is_empty() {
@@ -196,7 +158,6 @@ impl Drop for Watcher {
     fn drop(&mut self) {
         match self.stop.take() {
             Some(Stop::Poll(sender)) => drop(sender),
-            // Stops the stream; once this returns no callback runs and its sender is gone.
             #[cfg(target_os = "macos")]
             Some(Stop::Native(stream)) => drop(stream),
             None => {}
@@ -207,9 +168,7 @@ impl Drop for Watcher {
     }
 }
 
-/// `folders` all exist and there is at least one.
 fn start_polling(folders: Vec<PathBuf>, config: WatchConfig) -> Result<(Watcher, Receiver<Batch>)> {
-    // Taken here, not on the thread, so a change right after `start` returns is seen.
     let first = scan(&folders);
     let (stop_tx, stop_rx) = mpsc::channel();
     let (batch_tx, batch_rx) = mpsc::channel();
@@ -234,7 +193,6 @@ fn poll(
     out: Sender<Batch>,
 ) {
     let mut last = first;
-    // Every folder existed when `start` filtered them.
     let mut roots_present = vec![true; folders.len()];
     let mut collector = Collector::new();
     loop {
@@ -258,15 +216,11 @@ fn poll(
     }
 }
 
-/// How long FSEvents gathers events before calling back. The first change after a quiet spell is
-/// delivered at once (`NoDefer`); this only groups the ones that follow it, so it stays well under
-/// the debounce, which is what decides when a batch goes out.
 #[cfg(target_os = "macos")]
 fn stream_latency(config: &WatchConfig) -> Duration {
     (config.debounce / 4).clamp(Duration::from_millis(10), Duration::from_millis(500))
 }
 
-/// The FSEvents watcher; `None` when the stream won't start, so the caller polls instead.
 #[cfg(target_os = "macos")]
 fn start_native(folders: &[PathBuf], config: WatchConfig) -> Option<(Watcher, Receiver<Batch>)> {
     let (event_tx, event_rx) = mpsc::channel();
@@ -277,7 +231,6 @@ fn start_native(folders: &[PathBuf], config: WatchConfig) -> Option<(Watcher, Re
     )?;
     let (batch_tx, batch_rx) = mpsc::channel();
     let folders = folders.to_vec();
-    // On failure the stream drops here and stops.
     let thread = std::thread::Builder::new()
         .name("notchling-watch".into())
         .spawn(move || batch_events(folders, config, event_rx, batch_tx))
@@ -291,8 +244,6 @@ fn start_native(folders: &[PathBuf], config: WatchConfig) -> Option<(Watcher, Re
     ))
 }
 
-/// Turns the stream's events into batches. Sleeps until an event comes or a batch is due, so it
-/// costs nothing while the folders are quiet.
 #[cfg(target_os = "macos")]
 fn batch_events(
     folders: Vec<PathBuf>,
@@ -300,7 +251,6 @@ fn batch_events(
     events: Receiver<fsevents::Event>,
     out: Sender<Batch>,
 ) {
-    // Every folder existed when `start` filtered them.
     let mut roots_present = vec![true; folders.len()];
     let mut collector = Collector::new();
     loop {
@@ -310,15 +260,12 @@ fn batch_events(
         };
         match got {
             Ok(event) => {
-                // A watched folder coming or going is a rescan, as with polling; a few stats per
-                // event, never while quiet.
                 let now_present: Vec<bool> = folders.iter().map(|f| f.is_dir()).collect();
                 let roots_changed = now_present != roots_present;
                 roots_present = now_present;
                 collector.add(event.paths, event.rescan || roots_changed, Instant::now());
             }
             Err(RecvTimeoutError::Timeout) => {}
-            // The stream stopped: the watcher was dropped.
             Err(RecvTimeoutError::Disconnected) => return,
         }
         if let Some(batch) = collector.take_if_due(Instant::now(), &config) {
@@ -431,7 +378,6 @@ mod tests {
 
     #[test]
     fn steady_writes_still_produce_a_batch_within_the_max_latency() {
-        // Something writes during every poll, so the folder is never quiet for the debounce.
         let dir = TempDir::new();
         let file = dir.path().join("busy.log");
         fs::write(&file, b"x").unwrap();
@@ -465,7 +411,6 @@ mod tests {
 
     #[test]
     fn the_max_latency_does_not_cut_a_debounce_short() {
-        // One change, then quiet: sent after the debounce, not at once.
         let dir = TempDir::new();
         let config = WatchConfig {
             poll: Duration::from_millis(20),
@@ -537,7 +482,6 @@ mod tests {
 
     #[test]
     fn dropping_the_watcher_stops_delivery() {
-        // A change still waiting for its debounce when the watcher goes is never sent.
         let dir = TempDir::new();
         let config = WatchConfig {
             debounce: Duration::from_secs(30),
@@ -556,7 +500,6 @@ mod tests {
 
     #[test]
     fn the_polling_fallback_reports_changes_and_a_vanished_folder() {
-        // Tested on its own too, since on a Mac `start` only polls when FSEvents fails.
         let dir = TempDir::new();
         let watched = dir.path().join("w");
         fs::create_dir(&watched).unwrap();
@@ -588,7 +531,6 @@ mod tests {
         assert!(c
             .take_if_due(t0 + Duration::from_millis(150), &config)
             .is_none());
-        // Something writing all the time still goes out at the max latency.
         for ms in (100..1200).step_by(50) {
             c.add([PathBuf::from("/a")], false, t0 + Duration::from_millis(ms));
         }

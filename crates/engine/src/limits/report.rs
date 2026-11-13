@@ -1,24 +1,13 @@
-//! What every provider reports about its limits, whatever its API calls them: groups of bars, each
-//! a used percentage with a reset time and a kind (`UsageReport` in Swift). The watchers read this,
-//! never a provider's own type.
-//!
-//! Milestone 6's provider registry (`engine::providers`, task E8b) has its own `UsageReport`; the
-//! daemon's wiring maps it onto this one (same fields), or replaces this by a re-export.
-
 use super::usage::{AccountUsage, UsageWindow};
 use serde::{Deserialize, Serialize};
 
-/// A group's name and its `(label, window)` bars.
 pub type GroupSpec = (Option<String>, Vec<(String, UsageWindow)>);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BarKind {
-    /// The short window: Claude's 5 hours, Codex's and Antigravity's "5h".
     Session,
-    /// A weekly window, account-wide or for one model.
     Week,
-    /// Anything else (a month, a limit the app doesn't know yet).
     Other,
 }
 
@@ -41,7 +30,6 @@ impl Bar {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Group {
-    /// Shown over the bars; `None` for a provider with one unnamed set (Claude).
     pub name: Option<String>,
     pub bars: Vec<Bar>,
 }
@@ -49,7 +37,6 @@ pub struct Group {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct UsageReport {
     pub groups: Vec<Group>,
-    /// When it was read, seconds since 1970.
     pub fetched: f64,
 }
 
@@ -62,8 +49,6 @@ impl UsageReport {
         self.bars().next().is_none()
     }
 
-    /// Claude: one unnamed group, the 5-hour and week bars first, then the limits the app doesn't
-    /// know (which stop the account like the two above), then the per-model weekly ones.
     pub fn from_account(usage: &AccountUsage) -> UsageReport {
         let bar = |label: &str, kind, w: &UsageWindow| Bar {
             label: label.to_string(),
@@ -90,7 +75,6 @@ impl UsageReport {
         }
     }
 
-    /// Codex and Antigravity: named groups of `(label, window)`, each bar's kind from its label.
     pub fn from_groups(groups: Vec<GroupSpec>, fetched: f64) -> UsageReport {
         UsageReport {
             groups: groups
@@ -113,7 +97,6 @@ impl UsageReport {
     }
 }
 
-/// "5h" is the short window, "Week" the weekly one, anything else is neither.
 pub fn kind_of_label(label: &str) -> BarKind {
     match label {
         "5h" => BarKind::Session,

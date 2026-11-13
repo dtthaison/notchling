@@ -1,5 +1,3 @@
-//! The header over the conversation: title, folder, context, status.
-
 use std::path::Path;
 
 use notchling_engine::catalog::ModelInfo;
@@ -14,25 +12,16 @@ use super::sidebar::status_of;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Header {
     pub title: String,
-    /// The working folder, with `~` for the home folder.
     pub folder: String,
     pub status: Status,
-    /// The status word beside the pill's icon.
     pub status_word: String,
-    /// "148.8k / 400k · 37%", or the count alone, or nothing yet.
     pub context: Option<String>,
-    /// Says the context window is another model's, or `None`: "Window as Opus 5.5 until Notchling
-    /// knows this model".
     pub context_note: Option<String>,
-    /// "Opus 5.5".
     pub model: Option<String>,
-    /// "Claude Code" or "Codex", plus where it runs.
     pub host: String,
-    /// Background shells the transcript launched.
     pub shells: usize,
 }
 
-/// What the Context Meter says when its window is borrowed from the family's newest known model.
 fn window_note(model: Option<&str>, catalog: &[ModelInfo]) -> Option<String> {
     let from = context_window_source(model, catalog)?;
     Some(format!(
@@ -41,7 +30,6 @@ fn window_note(model: Option<&str>, catalog: &[ModelInfo]) -> Option<String> {
     ))
 }
 
-/// The header for a session and its conversation.
 pub fn header(
     session: &Session,
     conversation: &Conversation,
@@ -162,14 +150,11 @@ mod tests {
             new.context_note.as_deref(),
             Some("Window as Opus 5.5 until Notchling knows this model")
         );
-        // The chip names it as the catalog does.
         assert_eq!(new.model.as_deref(), Some("Opus 5.6"));
         let known = header(&session(), &on("claude-opus-5-5"), home, &catalog);
         assert_eq!(known.context_note, None);
-        // No window known (Sonnet 5.5): nothing to borrow, nothing said.
         let none = header(&session(), &on("claude-sonnet-5-5"), home, &catalog);
         assert_eq!(none.context_note, None);
-        // Before the daemon answers, the built-in list stands in and knows no borrowed model.
         let early = header(&session(), &on("claude-opus-5-5"), home, &[]);
         assert_eq!(early.context_note, None);
     }

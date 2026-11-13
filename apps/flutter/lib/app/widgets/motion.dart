@@ -2,11 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/physics.dart';
 import 'package:flutter/scheduler.dart';
 
-/// Motion tier: calm (DESIGN.md). Fades and color changes use short timing with an ease-out curve; moves are
-/// a few dp with no overshoot; nothing starts at scale 0. Everything here honours Reduce Motion by dropping to zero
-/// duration, so a state change is still visible (color, shape, text) without movement.
 abstract final class Motion {
-  /// Springs of the lively tier: UI (rows, bubbles, cards) settles in ~350 ms with a little overshoot; sheets are softer.
   static const SpringDescription springUi = SpringDescription(mass: 1, stiffness: 380, damping: 30);
   static const SpringDescription springSheet = SpringDescription(mass: 1, stiffness: 260, damping: 26);
 
@@ -17,12 +13,9 @@ abstract final class Motion {
   static const Curve inOut = Curves.easeInOutCubic;
 }
 
-/// [d], or zero when the user asked the system for less motion.
 Duration motionDuration(BuildContext context, [Duration d = Motion.ui]) =>
     MediaQuery.disableAnimationsOf(context) ? Duration.zero : d;
 
-/// A child that grows and fades in when [expanded] turns true and shrinks and fades out when it turns false. Height
-/// is animated with AnimatedSize (one layout per frame while it runs, none at rest); opacity is a layer property.
 class ExpandReveal extends StatelessWidget {
   const ExpandReveal({
     super.key,
@@ -39,7 +32,6 @@ class ExpandReveal extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final Duration d = motionDuration(context, duration);
-    // AnimatedSize with a zero duration asserts (it re-dirties itself in layout): with Reduce Motion there is none.
     if (d == Duration.zero) return expanded ? child : const SizedBox(width: double.infinity);
     return AnimatedSize(
       duration: d,
@@ -67,16 +59,12 @@ class ExpandReveal extends StatelessWidget {
   }
 }
 
-/// Arrives on its first build: fades in while it springs from [offset] (dp) and a slight scale (0.97 to 1) into place,
-/// once. Opacity, translation and scale only (no layout). Reduce Motion keeps only a short fade.
 class Entrance extends StatefulWidget {
   const Entrance({super.key, required this.child, this.rise = 12, this.offset, this.scale = 0.97, this.delay = Duration.zero, this.spring = Motion.springUi});
   final Widget child;
 
-  /// How far below it starts (dp), when [offset] is not given.
   final double rise;
 
-  /// Where it starts relative to its place (dp), e.g. from the right: Offset(24, 12).
   final Offset? offset;
   final double scale;
   final Duration delay;
@@ -87,7 +75,6 @@ class Entrance extends StatefulWidget {
 }
 
 class _EntranceState extends State<Entrance> with SingleTickerProviderStateMixin {
-  // Unbounded, so the spring may overshoot a little before it settles at 1.
   late final AnimationController _controller = AnimationController.unbounded(vsync: this, value: 0);
   bool _started = false;
   bool _still = false;
@@ -98,7 +85,6 @@ class _EntranceState extends State<Entrance> with SingleTickerProviderStateMixin
     if (_started) return;
     _started = true;
     _still = MediaQuery.disableAnimationsOf(context);
-    // The delay is part of the simulation (it holds at 0), not a Timer: nothing is left pending if the widget goes away.
     if (_still) {
       _controller.animateTo(1, duration: Motion.quick, curve: Curves.easeOut);
     } else {
@@ -134,7 +120,6 @@ class _EntranceState extends State<Entrance> with SingleTickerProviderStateMixin
   }
 }
 
-/// A button face that settles to 0.96 while pressed and back, with the tap going through. Transform only.
 class PressScale extends StatefulWidget {
   const PressScale({
     super.key,
@@ -175,9 +160,6 @@ class _PressScaleState extends State<PressScale> {
   }
 }
 
-/// When the row is laid out somewhere else after its data changed (a session moved to another group, the list above
-/// it grew), it starts at its old place and glides to the new one: transform only, 280 ms, no overshoot. Rows that did
-/// not move do nothing. Scrolling does not count as a move: positions are measured in the scrollable's content space.
 class FlipOnMove extends StatefulWidget {
   const FlipOnMove({super.key, required this.child});
   final Widget child;
@@ -223,7 +205,6 @@ class _FlipOnMoveState extends State<FlipOnMove>
         before != null &&
         (before - now).abs() > 1 &&
         !MediaQuery.disableAnimationsOf(context)) {
-      // Where it is drawn now minus where it was: starts there, ends at zero.
       _from = before - now;
       _controller.forward(from: 0);
     }
@@ -265,7 +246,6 @@ class _FlipOnMoveState extends State<FlipOnMove>
   }
 }
 
-/// AnimatedSize that is simply absent under Reduce Motion (a zero-duration AnimatedSize asserts in layout).
 class SmoothSize extends StatelessWidget {
   const SmoothSize({super.key, required this.child, this.alignment = Alignment.topCenter, this.duration = Motion.sheet});
   final Widget child;
@@ -280,7 +260,6 @@ class SmoothSize extends StatelessWidget {
   }
 }
 
-/// 0 for [delay], then a spring from 0 to 1.
 class _DelayedSpring extends Simulation {
   _DelayedSpring(SpringDescription spring, this.delay) : _spring = SpringSimulation(spring, 0, 1, 0);
   final SpringSimulation _spring;

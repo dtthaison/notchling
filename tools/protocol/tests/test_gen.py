@@ -1,6 +1,3 @@
-"""The generator: a tiny schema gives exactly the expected Rust and Dart, output is deterministic, and
-`--check` fails when the committed files differ."""
-
 from __future__ import annotations
 
 import copy

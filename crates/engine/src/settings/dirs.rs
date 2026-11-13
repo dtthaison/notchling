@@ -1,29 +1,17 @@
-//! Data folders per OS, as a pure function of the environment.
-//!
-//! The rule itself lives in one place, `notchling_platform::paths`, which the app uses too; this
-//! module is the engine's form of it, a plain struct to fill in instead of an environment lookup.
-//! So the two cannot disagree (a relative `HOME`, or Windows without `%APPDATA%`, is `None` in both).
-
 use notchling_platform::paths::{data_dir_in, process_env};
 use std::path::PathBuf;
 
 pub use notchling_platform::paths::Os;
 
-/// The environment a data folder is computed from. Build it with [`DirEnv::from_process`] or fill it
-/// in for a test.
 #[derive(Clone, Debug, Default)]
 pub struct DirEnv {
     pub os: Option<Os>,
-    /// `$HOME` (`%USERPROFILE%` on Windows).
     pub home: Option<PathBuf>,
-    /// `$XDG_DATA_HOME`.
     pub xdg_data_home: Option<PathBuf>,
-    /// `%APPDATA%`.
     pub appdata: Option<PathBuf>,
 }
 
 impl DirEnv {
-    /// Reads the real environment. The only impure function in this module.
     pub fn from_process() -> DirEnv {
         let var = |name: &str| process_env(name).map(PathBuf::from);
         let os = Os::current();
@@ -40,17 +28,6 @@ impl DirEnv {
     }
 }
 
-/// Where Notchling keeps its files (`settings.json`, `lanes.json`, `pages.json`, `vault.json`):
-///
-/// | OS | Folder |
-/// | --- | --- |
-/// | macOS | `~/Library/Application Support/Notchling` |
-/// | Linux | `$XDG_DATA_HOME/notchling`, else `~/.local/share/notchling` |
-/// | Windows | `%APPDATA%\Notchling` |
-///
-/// `None` when the environment lacks what the OS needs. Empty and relative values are ignored: a
-/// relative `XDG_DATA_HOME` as the XDG spec says, and a relative home or `%APPDATA%` because the
-/// folder would then follow the working directory.
 pub fn data_dir(env: &DirEnv) -> Option<PathBuf> {
     let lookup = |name: &str| -> Option<String> {
         let value = match name {
@@ -64,7 +41,6 @@ pub fn data_dir(env: &DirEnv) -> Option<PathBuf> {
     data_dir_in(env.os?, &lookup)
 }
 
-/// `settings.json` inside [`data_dir`].
 pub fn settings_file(env: &DirEnv) -> Option<PathBuf> {
     data_dir(env).map(|d| d.join("settings.json"))
 }
@@ -121,7 +97,6 @@ mod tests {
 
     #[test]
     fn a_relative_home_is_not_a_home() {
-        // Settings would otherwise be written relative to whatever the working folder is.
         for os in [Os::Mac, Os::Linux, Os::Windows] {
             let mut e = env(os);
             e.home = Some("relative/home".into());
@@ -137,7 +112,6 @@ mod tests {
 
     #[test]
     fn it_is_the_platform_rule() {
-        // Every combination the two could disagree on gives the same answer.
         let values: [Option<&str>; 4] = [None, Some(""), Some("rel/x"), Some("/abs/x")];
         for os in [Os::Mac, Os::Linux, Os::Windows] {
             for home in values {

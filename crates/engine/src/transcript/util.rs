@@ -1,10 +1,7 @@
-//! Time and JSON helpers the readers share.
-
 use super::model::Timestamp;
 use serde_json::{Map, Value};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-/// Now, in seconds since the epoch.
 pub fn now_secs() -> Timestamp {
     system_time_secs(SystemTime::now()).unwrap_or(0.0)
 }
@@ -13,8 +10,6 @@ pub fn system_time_secs(t: SystemTime) -> Option<Timestamp> {
     t.duration_since(UNIX_EPOCH).ok().map(|d| d.as_secs_f64())
 }
 
-/// When a file was last written and created (creation falls back to the modification time where the
-/// file system has none). None when the file can't be read.
 pub fn file_times(path: &str) -> Option<(Timestamp, Timestamp)> {
     let meta = std::fs::metadata(path).ok()?;
     let modified = system_time_secs(meta.modified().ok()?)?;
@@ -30,7 +25,6 @@ pub fn modified_secs(path: &str) -> Option<Timestamp> {
     file_times(path).map(|t| t.0)
 }
 
-/// Days since 1970-01-01 for a civil date (proleptic Gregorian).
 fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
     let y = if m <= 2 { y - 1 } else { y };
     let era = if y >= 0 { y } else { y - 399 } / 400;
@@ -49,8 +43,6 @@ fn digits(s: &[u8], from: usize, n: usize) -> Option<i64> {
     std::str::from_utf8(part).ok()?.parse().ok()
 }
 
-/// An ISO 8601 date-time such as `2026-11-01T10:00:02.000Z` or `...+07:00`, with or without
-/// fractional seconds. None for anything else.
 pub fn parse_date(text: &str) -> Option<Timestamp> {
     let b = text.as_bytes();
     if b.len() < 20
@@ -105,7 +97,6 @@ pub fn date_field(obj: &Value) -> Option<Timestamp> {
         .and_then(parse_date)
 }
 
-/// A JSON line as an object; None for anything else.
 pub fn parse_object(line: &[u8]) -> Option<Map<String, Value>> {
     match serde_json::from_slice::<Value>(line).ok()? {
         Value::Object(map) => Some(map),
@@ -117,7 +108,6 @@ pub fn str_of<'a>(v: &'a Value, key: &str) -> Option<&'a str> {
     v.get(key).and_then(Value::as_str)
 }
 
-/// A JSON number as a count (a float with no fraction counts too, like `NSNumber.intValue`).
 pub fn count_of(v: &Value) -> u64 {
     match v {
         Value::Number(n) => n
@@ -135,8 +125,6 @@ pub fn int_of(v: &Value) -> Option<i64> {
     }
 }
 
-/// Compact JSON with every object's keys sorted, so equal values print equal. `escape_slashes`
-/// writes `/` as `\/`, the way Foundation's `JSONSerialization` does by default.
 pub fn json_sorted(v: &Value, escape_slashes: bool) -> String {
     match v {
         Value::Object(map) => {

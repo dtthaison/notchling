@@ -1,6 +1,3 @@
-//! The type scale (`KitType`): seven roles, one size and weight each.
-
-/// A font weight, by the CSS number it maps to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Weight {
     Regular,
@@ -10,7 +7,6 @@ pub enum Weight {
 }
 
 impl Weight {
-    /// The CSS weight: 400, 500, 600, 700.
     pub fn css(self) -> u16 {
         match self {
             Weight::Regular => 400,
@@ -21,36 +17,23 @@ impl Weight {
     }
 }
 
-/// What a run of text is for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum TypeRole {
-    /// Sidebar and header titles.
     Title,
-    /// Session names, card titles.
     Heading,
-    /// Messages.
     Body,
-    /// Buttons, pills.
     Label,
-    /// Status lines, hints.
     Meta,
-    /// Sidebar groups: tracked, uppercase.
     Section,
-    /// Code, tables, tool input.
     Mono,
 }
 
-/// How a role is set.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TypeSpec {
-    /// Point size.
     pub size: f32,
     pub weight: Weight,
-    /// The monospaced family instead of the system one.
     pub mono: bool,
-    /// Drawn in capitals.
     pub uppercase: bool,
-    /// Extra letter spacing in points (0 for most roles).
     pub tracking: f32,
 }
 
@@ -77,7 +60,6 @@ impl TypeRole {
         }
     }
 
-    /// Spec: the Type table.
     pub fn spec(self) -> TypeSpec {
         let plain = |size: f32, weight: Weight| TypeSpec {
             size,
@@ -104,7 +86,6 @@ impl TypeRole {
         }
     }
 
-    /// The text as this role draws it (section headers are uppercase).
     pub fn display(self, text: &str) -> String {
         if self.spec().uppercase {
             text.to_uppercase()
@@ -114,9 +95,6 @@ impl TypeRole {
     }
 }
 
-/// A line of user-facing text starting with a capital letter. The daemon's messages start
-/// lowercase ("acting is off: …") so they can follow a colon in a log line; shown on their own in
-/// a view they read as a sentence.
 pub fn sentence(text: &str) -> String {
     let mut chars = text.chars();
     match chars.next() {

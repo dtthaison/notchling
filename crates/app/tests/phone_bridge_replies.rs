@@ -1,7 +1,3 @@
-//! The pairing panel's readers (`phone::wire`) on the engine bridge's real replies: a bridge folder
-//! laid out as the Swift app leaves it (test certificate, its `devices.json` and `access.json`) in
-//! a temp folder, ports picked by the OS, no network.
-
 use notchling_app::phone::wire::{self, BridgeState, TunnelState};
 use notchling_engine::bridge::live::{ActingOff, LiveBackend, Sources};
 use notchling_engine::bridge::model::Session;
@@ -33,7 +29,6 @@ fn scratch() -> Scratch {
     Scratch(dir)
 }
 
-/// `identity.p12` + `identity.pass` + `cert.pem`, as `BridgeIdentity.generate` leaves them.
 fn swift_bridge_folder(bridge: &Path) {
     std::fs::create_dir_all(bridge).unwrap();
     let key = rcgen::KeyPair::generate().unwrap();
@@ -113,7 +108,6 @@ fn the_panel_reads_every_reply_the_bridge_gives() {
         wire::parse_status(&bridge.set(false)).unwrap().state,
         BridgeState::Off
     );
-    // A folder without the Swift app's certificate: the panel shows why.
     let empty = scratch();
     let bridge = Bridge::new(
         BridgeConfig::new(

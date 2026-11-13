@@ -1,22 +1,9 @@
 #!/bin/zsh
-# Builds the Rust app as build/next/Notchling.app: notchling-app and the notchling daemon side by
-# side in Contents/MacOS (the app starts the notchling beside it) and the terminal host,
-# notchling-ptyhost, in Contents/Helpers (its LaunchAgent runs it there), signed ad hoc. Its own
-# folder, since the Swift app's build.sh makes build/Notchling.app. The Swift app has retired on
-# the maintainer's Mac, so this installs as /Applications/Notchling.app; the daemon trusts that
-# path as the app tier (notchling_local_api::tier::installed_app_paths). The bundle id stays
-# local.notchling.next, apart from the Swift app's local.notchling preferences it imports.
-#
-#   tools/bundle-next.sh             build only
-#   tools/bundle-next.sh --install   also copy it to /Applications (quits a running one); refused
-#                                    while /Applications/Notchling.app is still the Swift app
 set -euo pipefail
 cd "$(dirname "$0")/.."
 export PATH="$HOME/.cargo/bin:$PATH"
 
 cargo build --release --locked -p notchling-app -p notchling-notchlingd -p notchling-ptyhost
-# Where cargo put it: a shared `build.target-dir` in ~/.cargo/config.toml moves it out of `target/`,
-# and copying from there would bundle whatever older build was left behind.
 TARGET="$(cargo metadata --format-version 1 --no-deps | python3 -c 'import json, sys; print(json.load(sys.stdin)["target_directory"])')/release"
 NAME="Notchling"
 APP="build/next/$NAME.app"
@@ -25,7 +12,6 @@ VERSION=$(cargo pkgid -p notchling-app | sed 's/.*[#@]//')
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Helpers"
 cp "$TARGET/notchling-app" "$TARGET/notchling" "$APP/Contents/MacOS/"
-# The terminal host (the Swift app's agent-console-hostd, ported): its LaunchAgent runs it from here.
 cp "$TARGET/notchling-ptyhost" "$APP/Contents/Helpers/"
 cp legacy/macos/Icon/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 cat > "$APP/Contents/Info.plist" <<PLIST

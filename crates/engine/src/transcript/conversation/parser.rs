@@ -1,6 +1,3 @@
-//! The Chat conversation, built one transcript line at a time so a cursor can keep the state between
-//! reads.
-
 use super::queue::Queue;
 use super::tools::{apply_task_result, clip, diff_lines, make_call, result_text, written_lines};
 use super::user::{model_id_in_confirmation, user_item};
@@ -13,33 +10,23 @@ use crate::transcript::util::{count_of, date_field, parse_object, str_of};
 use serde_json::{Map, Value};
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-/// Lines longer than this (screenshots, huge tool output) are not decoded.
 const MAX_LINE: usize = 400_000;
-/// A long session keeps its last 500 items; trimming happens once 1000 pile up.
 const KEEP_ITEMS: usize = 500;
 const TRIM_AT: usize = 1000;
 
 #[derive(Default)]
 pub struct Parser {
     c: Conversation,
-    /// Where each tool call sits: (item, call).
     call_index: HashMap<String, (usize, usize)>,
-    /// Message ids whose usage was counted, oldest first, so the set can be kept small.
     counted: HashSet<String>,
     counted_order: Vec<String>,
-    /// Output tokens per message in the current turn; a message's lines repeat its usage as it streams.
     turn_output: HashMap<String, u64>,
     files: Vec<String>,
     serial: u64,
-    /// A turn's thinking shows as one row, at its first thought: where it is, and seconds per message
-    /// (a message's lines each carry its duration, so the largest counts).
     thinking_at: Option<usize>,
     thinking_seconds: BTreeMap<String, f64>,
-    /// Claude Code's input queue (its queue-operation lines), task notifications included, oldest first.
     queue: Queue,
-    /// Reading a subagent's transcript: its lines are all marked sidechain.
     pub include_sidechain: bool,
-    /// The last AskUserQuestion asked and whether a tool result has answered it since.
     last_question: Option<PendingQuestion>,
     last_question_answered: bool,
 }
@@ -56,7 +43,6 @@ impl Parser {
         Parser::default()
     }
 
-    /// A parser for a subagent's own transcript, whose every line is a sidechain line.
     pub fn for_subagent() -> Parser {
         Parser {
             include_sidechain: true,
@@ -85,7 +71,6 @@ impl Parser {
         self.c.items.push(ChatItem { id, kind, date });
     }
 
-    /// Appends a user-line result; a prompt of yours starts a new turn.
     fn append_user(&mut self, kind: ItemKind, date: Option<Timestamp>, starts_turn: bool) {
         let is_user = matches!(kind, ItemKind::User { .. });
         self.append(kind, date);
@@ -110,10 +95,8 @@ impl Parser {
         {
             return;
         }
-        // A background subagent's end arrives as a task notification, queued and then as a user line.
         if contains(line, b"<task-notification>") {
             if let Ok(text) = std::str::from_utf8(line) {
-                // JSON escapes the tags' slashes and newlines; unescaping the slash is enough to find them.
                 for (id, status) in notification_statuses(&text.replace("\\/", "/")) {
                     self.c.finished_agents.insert(id, status);
                 }
@@ -156,9 +139,7 @@ impl Parser {
                 }
             }
             Some("local_command") => {
-                // Claude Code 2.1.31x logs slash commands and their output here instead of as user lines.
                 if let Some(text) = str_of(obj, "content") {
-                    // /model takes effect now, not at the next reply, so the header shouldn't wait for one.
                     if let Some(id) = model_id_in_confirmation(text) {
                         self.c.facts.model = Some(id);
                     }
@@ -218,7 +199,6 @@ impl Parser {
                 .saturating_add(n(usage, "cache_creation_input_tokens"))
                 .saturating_add(n(usage, "cache_read_input_tokens"))
                 .saturating_add(n(usage, "output_tokens"));
-            // Synthetic messages (errors, interruptions) carry zeros.
             if held > 0 {
                 self.c.facts.context_tokens = held;
             }
@@ -369,7 +349,6 @@ impl Parser {
             return;
         };
         if obj.get("isCompactSummary").and_then(Value::as_bool) == Some(true) {
-            // The compact_boundary line just before it already showed this; older builds wrote only the summary.
             if self.c.items.last().map(|i| &i.kind) != Some(&compacted()) {
                 self.append(compacted(), date);
             }
@@ -377,7 +356,6 @@ impl Parser {
         }
         let result = obj.get("toolUseResult").filter(|r| r.is_object());
         if let Some(text) = str_of(message, "content") {
-            // Older builds, and /model with an argument, log a command's output as a user line.
             if let Some(id) = model_id_in_confirmation(text) {
                 self.c.facts.model = Some(id);
             }
@@ -419,8 +397,6 @@ impl Parser {
             self.last_question_answered = true;
         }
         let is_error = block.get("is_error").and_then(Value::as_bool) == Some(true);
-        // A foreground subagent ends with its Agent call's result (a background one's result only says
-        // it launched; `subagents::status_of` ignores it for those).
         if let (Some(id), Some(agent)) = (tool_use_id, result.and_then(|r| str_of(r, "agentId"))) {
             if result.and_then(|r| str_of(r, "status")) != Some("async_launched") {
                 let ended = if is_error { "failed" } else { "completed" };
@@ -487,7 +463,6 @@ impl Parser {
     }
 
     fn attachment(&mut self, obj: &Value, date: Option<Timestamp>) {
-        // A message sent while it worked is taken in mid-turn as an attachment, with no user line.
         let Some(a) = obj.get("attachment") else {
             return;
         };
@@ -514,8 +489,6 @@ impl Parser {
         }
     }
 
-    /// Keeps a long session bounded: the chat shows the last 500 items, and calls can only finish in
-    /// recent ones.
     fn trim(&mut self) {
         if self.c.items.len() > TRIM_AT {
             let drop = self.c.items.len() - KEEP_ITEMS;
@@ -533,7 +506,6 @@ impl Parser {
         }
     }
 
-    /// The conversation as of the lines read so far.
     pub fn conversation(&self) -> Conversation {
         let mut c = self.c.clone();
         c.facts.files = self.files.clone();

@@ -1,7 +1,3 @@
-//! Codex behind Chat's parts: each message is a `codex exec` turn the daemon runs (`codex.send`,
-//! queued in its outbox while one runs), Stop is `codex.stop`, the pickers set the next turn's
-//! model and effort, and the account and limits are the active Codex login's.
-
 use gpui::{App, Context};
 
 use super::{active_email, AccountButton, ChatTool};
@@ -48,7 +44,6 @@ impl ChatTool for Codex {
         pickers::codex(&view.codex_picker())
     }
 
-    /// Codex's models come from its cache, read again as a menu opens.
     fn menu_opening(&self, view: &mut ChatView) {
         view.tools.codex_models = Some(models::load(&view.root.codex_dir));
     }
@@ -84,7 +79,6 @@ impl ChatTool for Codex {
         view.open_accounts_sheet(Some(CODEX), cx);
     }
 
-    /// The active login's first group.
     fn limits(&self, view: &ChatView, _session: &Session) -> Option<Shown> {
         let s = view.accounts.snapshot();
         let codex = s.providers.providers.iter().find(|p| p.id == CODEX)?;

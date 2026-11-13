@@ -4,17 +4,14 @@ import '../../app/theme/tokens.dart';
 import '../../core/net/bridge_client.dart';
 import '../../l10n/app_localizations.dart';
 
-/// A paired computer as a heading in the session list.
 class ComputerHeading {
   const ComputerHeading({required this.id, required this.name, required this.status});
 
-  /// `MacProfile.id`, the host part of its sessions' qualified ids.
   final String id;
   final String name;
   final ConnectionStatus status;
 }
 
-/// The computer's name and its link state, as an icon and a word.
 class ComputerHeader extends StatelessWidget {
   const ComputerHeader({super.key, required this.computer, required this.count});
   final ComputerHeading computer;
@@ -50,7 +47,6 @@ String linkWord(AppL10n l10n, ConnectionStatus status) => switch (status.phase) 
       LinkPhase.disconnected => l10n.computerOffline,
     };
 
-/// A computer's link state as an icon and a word (never color alone).
 class ComputerLinkLabel extends StatelessWidget {
   const ComputerLinkLabel({super.key, required this.status});
   final ConnectionStatus status;

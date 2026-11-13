@@ -1,8 +1,3 @@
-//! The tools' app icons, the way the Swift `ToolIcon` takes them: the installed app's icon from
-//! the system (`NSWorkspace`), found by bundle id, drawn at twice the row's 14 pt into a bitmap and
-//! handed to the kit as PNG bytes in memory. Read once per tool; a tool whose app isn't installed
-//! keeps the kit's own mark. Nothing is written to disk, and no logo is in the repository.
-
 use std::ptr;
 use std::sync::{Arc, Once};
 
@@ -17,10 +12,8 @@ use objc2_app_kit::{
 };
 use objc2_foundation::{NSDictionary, NSPoint, NSRect, NSSize, NSString};
 
-/// The icon's pixels a side: twice its point size.
 const PIXELS: usize = (TOOL_ICON as usize) * 2;
 
-/// The app's icon as PNG bytes `pixels` square, or `None` when no app has the bundle id.
 fn icon_png(bundle_id: &str, pixels: usize) -> Option<Vec<u8>> {
     let workspace = NSWorkspace::sharedWorkspace();
     let url = workspace.URLForApplicationWithBundleIdentifier(&NSString::from_str(bundle_id))?;
@@ -65,8 +58,6 @@ fn icon_png(bundle_id: &str, pixels: usize) -> Option<Vec<u8>> {
     Some(data.to_vec())
 }
 
-/// Hands the kit each installed tool's app icon, once per run (the main thread, before a view
-/// that draws them).
 pub fn install() {
     static ONCE: Once = Once::new();
     ONCE.call_once(|| {

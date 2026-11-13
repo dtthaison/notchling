@@ -1,11 +1,3 @@
-//! The phone's view of a transcript (ConsoleCore's `ChatTranscript`): the last messages of a main or
-//! subagent transcript, with tool runs collapsed to one summary message carrying its steps, `!` shell
-//! commands with their output, compaction notices, and the user's queued messages marked as waiting.
-//!
-//! Pictures (`ChatImages`) are described in [`images`]: a message lists them, the bytes are read on
-//! demand. Not ported: message UUIDs (a message's `id` is its seed text, which is stable across
-//! reads; hash it where a UUID is needed) and the paging cache (`ChatTranscriptCache`).
-
 pub mod images;
 mod steps;
 mod window;
@@ -25,7 +17,6 @@ use std::collections::HashMap;
 pub const TAIL_BYTES: u64 = 2_000_000;
 pub const MAX_TEXT_CHARACTERS: usize = 3000;
 pub const DEFAULT_LIMIT: usize = 200;
-/// `Date.distantPast` as seconds since the epoch: messages without a timestamp sort first.
 const DISTANT_PAST: Timestamp = -62_135_769_600.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -48,44 +39,33 @@ pub struct ChatMessage {
     pub role: ChatRole,
     pub text: String,
     pub timestamp: Timestamp,
-    /// Set on `Tools` messages: "Read 2 files, ran 1 shell command".
     pub tool_summary: Option<String>,
-    /// A message the user sent while the agent was working: waiting for the agent to take it.
     pub queued: bool,
-    /// Where this message's first line starts in the transcript file (None for lines given directly).
     pub source_offset: Option<u64>,
     pub kind: ChatKind,
-    /// On `Tools` messages: the calls with their input, output and diff.
     pub steps: Vec<ToolStep>,
-    /// On `Shell` messages: what the command printed.
     pub output: Option<String>,
-    /// Pictures: pasted ones on the user's message, a tool's under its row, files the text names.
     pub images: Vec<ImageRef>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ParseResult {
     pub messages: Vec<ChatMessage>,
-    /// Lines that were not JSON objects.
     pub malformed_lines: usize,
-    /// `message.model` of the newest assistant line, for the chat header.
     pub model: Option<String>,
 }
 
-/// A transcript line and the byte offset it starts at.
 #[derive(Debug, Clone)]
 pub struct SourceLine {
     pub offset: u64,
     pub text: String,
 }
 
-/// Reads the last 2 MB of a main or subagent transcript into chat messages (the newest `limit`).
 pub fn read(path: &str, is_main: bool, limit: usize) -> ParseResult {
     let home = notchling_platform::paths::home().unwrap_or_default();
     read_in(path, is_main, limit, &home)
 }
 
-/// [`read`] with the folder whose pictures a message may name by file (`home`, besides `/tmp`).
 pub fn read_in(path: &str, is_main: bool, limit: usize, home: &std::path::Path) -> ParseResult {
     match read_window(path, TAIL_BYTES) {
         Some(lines) => parse_source(&lines, is_main, path, limit, home),
@@ -93,13 +73,10 @@ pub fn read_in(path: &str, is_main: bool, limit: usize, home: &std::path::Path) 
     }
 }
 
-/// The last `bytes` of the file as lines, starting at a line boundary: a read that begins inside a line
-/// backs up to where that line starts (see [`read_window`]). None when the file can't be read.
 pub fn tail(path: &str, bytes: u64) -> Option<Vec<String>> {
     read_window(path, bytes).map(|l| l.into_iter().map(|s| s.text).collect())
 }
 
-/// Parses lines given directly (offsets are their positions); `limit` keeps the newest messages.
 pub fn parse(lines: &[String], is_main: bool, path: &str, limit: usize) -> ParseResult {
     let source: Vec<SourceLine> = lines
         .iter()
@@ -145,7 +122,6 @@ impl Draft {
     }
 }
 
-/// A message the user sent while the agent was busy: waiting until Claude Code takes it.
 struct Waiting {
     content: String,
     timestamp: Timestamp,
@@ -156,17 +132,14 @@ struct Waiting {
 struct State {
     drafts: Vec<Draft>,
     waiting: Vec<Waiting>,
-    /// Content taken from the queue lately, so the user line that follows it is not shown twice.
     taken: Vec<(String, Timestamp)>,
     tally: ToolTally,
     tally_timestamp: Timestamp,
     tally_seed: String,
     tally_offset: u64,
-    /// The calls of the current tool run, and where each call's result goes once it arrives.
     tally_steps: Vec<ToolStep>,
     tally_index: HashMap<String, usize>,
     flushed_steps: HashMap<String, (usize, usize)>,
-    /// Pictures the current tool run's results carried.
     tally_images: Vec<ImageRef>,
 }
 
@@ -189,7 +162,6 @@ impl State {
             }
             self.drafts.push(d);
         } else if !self.tally_images.is_empty() {
-            // Pictures with no tool row of their own (the row was already written): under the last message.
             let pictures = std::mem::take(&mut self.tally_images);
             if let Some(last) = self.drafts.last_mut() {
                 last.images.extend(pictures);
@@ -270,7 +242,6 @@ fn cap(text: &str) -> String {
     }
 }
 
-/// A small stable hash for the seed of a queued message.
 fn fnv(text: &str) -> u64 {
     text.bytes().fold(0xcbf2_9ce4_8422_2325, |h, b| {
         (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3)
@@ -289,7 +260,6 @@ fn parse_source(
     let mut latest_model: Option<String> = None;
 
     for (index, source) in lines.iter().enumerate() {
-        // A line with pictures is big because of the base64; that is cut out first, then the size is judged.
         let (text, stripped) = images::strip_base64_blocks(&source.text);
         if text.len() > MAX_LINE_BYTES {
             continue;
@@ -302,12 +272,10 @@ fn parse_source(
         let timestamp = date_field(&object).unwrap_or(DISTANT_PAST);
         let kind = str_of(&object, "type");
 
-        // Claude Code's input queue: a message typed while the agent works.
         if kind == Some("queue-operation") {
             let content = str_of(&object, "content").unwrap_or("").trim().to_string();
             match str_of(&object, "operation") {
                 Some("enqueue") => {
-                    // Notifications and other injected wrappers are queued the same way; they are not the user's words.
                     if !content.is_empty() && !content.starts_with('<') {
                         st.waiting.push(Waiting {
                             content,
@@ -316,15 +284,12 @@ fn parse_source(
                         });
                     }
                 }
-                // Taken while idle: the user line that follows is the message, so it must still be shown.
                 Some("dequeue") => {
                     if !st.waiting.is_empty() {
                         st.waiting.remove(0);
                     }
                 }
                 Some("remove") if !content.is_empty() && !content.starts_with('<') => {
-                    // Absorbed into the running turn: from here it counts as sent. (The attachment that
-                    // carries it follows and is skipped as a duplicate.)
                     st.take_waiting(&content);
                     if !st.was_taken(&content, timestamp) {
                         let seed = str_of(&object, "commandUuid")
@@ -345,7 +310,6 @@ fn parse_source(
             continue;
         }
 
-        // The queued message delivered into the turn.
         if kind == Some("attachment") {
             if let Some(attachment) = object
                 .get("attachment")
@@ -396,7 +360,6 @@ fn parse_source(
             }
         }
 
-        // Claude Code's notice that it compacted the conversation.
         if kind == Some("system") && str_of(&object, "subtype") == Some("compact_boundary") {
             st.flush_tools();
             let before = object
@@ -417,7 +380,6 @@ fn parse_source(
             st.drafts.push(d);
             continue;
         }
-        // The summary that replaces the old conversation is not a message of the user's.
         if object.get("isCompactSummary").and_then(Value::as_bool) == Some(true) {
             continue;
         }
@@ -485,7 +447,6 @@ fn parse_source(
             }
         }
         let text = collapse_pastes(&text).trim().to_string();
-        // Pictures: pasted ones belong to the message, a tool's belong under its row, files named in the text too.
         let (own, tool_pictures): (Vec<_>, Vec<_>) =
             images::refs(message.get("content"), source.offset, &stripped)
                 .into_iter()
@@ -496,7 +457,6 @@ fn parse_source(
         st.tally_images
             .extend(tool_pictures.into_iter().map(|(image, _)| image));
 
-        // A `!` command and what it printed, as Claude Code logs them.
         if role == "user" {
             if let Some(command) = tagged(&text, "bash-input") {
                 st.flush_tools();
@@ -524,7 +484,6 @@ fn parse_source(
                 continue;
             }
         }
-        // Injected wrappers (<command-name>, <system-reminder>) and interrupt markers are not chat.
         if (text.is_empty() && pictures.is_empty())
             || text.starts_with('<')
             || text.starts_with("[Request interrupted")
@@ -558,7 +517,6 @@ fn parse_source(
         }
     }
     st.flush_tools();
-    // Still waiting for the agent to take them: shown now, marked queued.
     for item in std::mem::take(&mut st.waiting) {
         let seed = format!("queued:{}:{:x}", item.offset, fnv(&item.content));
         let mut d = Draft::new(

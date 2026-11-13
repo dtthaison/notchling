@@ -1,15 +1,10 @@
-//! The Phone panel's views for `--render` (part U10): one per state, over made-up data (an example
-//! Mac and example phones), never the real daemon, certificate or pairings.
-
 use super::approval::PairRequest;
 use super::bridge::Snapshot;
 use super::wire::{BridgeState, Device, Pairing, Tunnel, TunnelState};
 use crate::views::ViewSpec;
 
-/// The fixed clock every render draws at.
 pub const NOW_MS: i64 = 1_800_000_000_000;
 
-/// `--render phone-pair-request`: the Allow/Deny prompt, not a panel state.
 pub const PAIR_REQUEST: &str = "phone-pair-request";
 
 pub const VIEWS: [ViewSpec; 6] = [
@@ -46,15 +41,11 @@ pub const VIEWS: [ViewSpec; 6] = [
     },
 ];
 
-/// What a panel render shows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Shown {
-    /// On, a code on show, two phones.
     Paired,
     Off,
-    /// On, nothing paired and no code yet.
     Unpaired,
-    /// Paired, with the tunnel up.
     Tunnel,
     Detached,
 }
@@ -70,7 +61,6 @@ pub fn shown(name: &str) -> Option<Shown> {
     })
 }
 
-/// An example certificate fingerprint; no real one.
 const FINGERPRINT: &str = "3F:A1:09:C4:7B:52:E8:1D:90:6A:B3:F7:2C:5E:84:D0:19:AE:63:7F:B2:48:C5:0E:9D:31:F6:8A:57:E2:1B:A4";
 
 fn phones() -> Vec<Device> {
@@ -92,7 +82,6 @@ fn phones() -> Vec<Device> {
     ]
 }
 
-/// The phones a pairing-request render has asking: made-up names and addresses.
 pub fn pair_requests() -> Vec<PairRequest> {
     vec![
         PairRequest {
@@ -123,7 +112,6 @@ fn code() -> Pairing {
     }
 }
 
-/// The state a render draws.
 pub fn snapshot(shown: Shown) -> Snapshot {
     let on = Snapshot {
         attached: true,

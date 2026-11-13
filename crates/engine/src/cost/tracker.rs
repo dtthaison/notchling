@@ -1,22 +1,3 @@
-//! `CostTracker`: what the token use in the transcripts would have cost at API prices, from the
-//! `usage` of every assistant message (Claude Code, Claude Desktop), every Codex `token_count` and
-//! every Antigravity `PLANNER_RESPONSE`.
-//!
-//! A month of transcripts can be several GB, so each file is read once and then only from where
-//! the last scan stopped. What was counted, read offsets and the ids already counted are kept in a
-//! [`Cache`]. It only reads: transcripts and the account log are never written.
-//!
-//! The scan walks the roots (symlinks are not followed) and reads the files whose size moved. A
-//! message is counted once whichever transcript holds it: Claude Code copies messages into the new
-//! transcript when it compacts or resumes, so totals are lower than its `/stats`. The key is
-//! `message.id|requestId` (Codex: file and ordinal; Antigravity: file and step), hashed with
-//! FNV-1a.
-//!
-//! A model whose price changed since it was counted (the cache keeps each model's price) is priced
-//! again when the cache loads ([`Tracker`]'s `reprice`): what its transcripts still on disk hold is
-//! counted again at the new price, and the rest, days whose transcripts are gone, is priced again
-//! from the tokens the cache kept. No other model and no day is dropped.
-
 use super::account_log::{self, Entry};
 use super::cache::{cell_key, cell_parts, price_key, tool_of, Cache, Cell, Mark, Tokens};
 use super::other::{antigravity, codex, OtherPrices};
@@ -39,25 +20,19 @@ pub const DESKTOP: &str = "Desktop";
 pub const CODEX: &str = "Codex";
 pub const ANTIGRAVITY: &str = "Antigravity CLI";
 
-/// Days are kept this long.
 const KEEP_DAYS: i64 = 400;
-/// The cache is several MB of JSON in one row, so it is saved at most this often.
 const PERSIST_EVERY: f64 = 5.0 * 60.0;
-/// Folders deeper than this are not read, which also ends any loop a mount might make.
 pub(super) const MAX_DEPTH: usize = 32;
 const CHUNK: usize = 8 << 20;
 
-/// A folder of transcripts and the channel its files belong to.
 #[derive(Clone, Debug)]
 pub struct Root {
     pub dir: PathBuf,
     pub channel: &'static str,
 }
 
-/// Seconds the zone is ahead of UTC at a time.
 pub type ZoneFn = fn(f64) -> i64;
 
-/// What a file's later lines depend on, kept between reads.
 #[derive(Default)]
 struct Reading {
     model: Option<String>,
@@ -66,38 +41,27 @@ struct Reading {
     total: Option<f64>,
 }
 
-/// Per file: where its lines are counted from.
 struct Ctx<'a> {
     channel: &'static str,
-    /// The folder name under the root, for a message with no `cwd`.
     project: String,
-    /// Desktop transcripts carry the account in their path.
     account: Option<String>,
     file_id: &'a str,
 }
 
-/// One request read from a transcript, before it is counted.
 struct Request<'a> {
     day: String,
-    /// The hash of its dedupe key.
     key: u64,
     account: String,
     channel: &'static str,
     model: String,
     project: String,
     tokens: Tokens,
-    /// What it costs at a price.
     price: &'a dyn Fn(&Price) -> f64,
 }
 
-/// A price change being applied: the models whose price changed, and what their transcripts still
-/// on disk hold, counted at the old and the new price.
 struct Recount {
-    /// `price_key` to the price it was counted at (`None`: not known) and its price now.
     changed: HashMap<String, (Option<Option<Price>>, Option<Price>)>,
-    /// Requests already counted again, so a message copied to two transcripts counts once.
     seen: HashSet<u64>,
-    /// Day and cell key to what the transcripts on disk hold of that cell.
     covered: HashMap<(String, String), Covered>,
 }
 
@@ -108,7 +72,6 @@ struct Covered {
     tokens: Tokens,
 }
 
-/// All the summaries, per window and per account.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Ranged {
     pub overall: BTreeMap<Window, Summary>,
@@ -120,22 +83,16 @@ pub struct Tracker {
     cache_data: Option<PathBuf>,
     account_log: Option<PathBuf>,
     zone: ZoneFn,
-    /// Held for the tracker's life: a changed price means a new tracker (a restart), whose first
-    /// load prices again the models whose price changed.
     catalog: Arc<Catalog>,
     cache: Option<Cache>,
     seen: HashSet<u64>,
     log: Vec<Entry>,
     unsaved: bool,
     last_persist: Option<f64>,
-    /// Set only while `reprice` reads the transcripts again.
     recount: Option<Recount>,
 }
 
 impl Tracker {
-    /// `cache_data` is the data folder whose `notchling.db` holds the cache; `None` keeps it in
-    /// memory (tests). `account_log` is the account store's
-    /// `account-log.json`, read for the CLI's transcripts. `catalog` prices every request.
     pub fn new(
         roots: Vec<Root>,
         cache_data: Option<PathBuf>,
@@ -157,7 +114,6 @@ impl Tracker {
         }
     }
 
-    /// A fixed zone for day boundaries (tests).
     pub fn with_zone(mut self, zone: ZoneFn) -> Tracker {
         self.zone = zone;
         self
@@ -178,7 +134,6 @@ impl Tracker {
         }
     }
 
-    /// The day number (days since 1970 in the zone) of a time.
     pub fn day_number(&self, ts: f64) -> i64 {
         (ts.floor() as i64 + (self.zone)(ts)).div_euclid(86_400)
     }
@@ -187,8 +142,6 @@ impl Tracker {
         day_key(self.day_number(ts))
     }
 
-    /// Reads whatever was added to the transcripts since the last scan; true when anything was
-    /// counted or an offset moved. Saves the cache if it is due.
     pub fn refresh(&mut self, now: f64) -> bool {
         self.log = self
             .account_log
@@ -207,7 +160,6 @@ impl Tracker {
         dirty
     }
 
-    /// Writes counts not saved yet.
     pub fn save_now(&mut self, now: f64) {
         if self.unsaved {
             self.persist(now);
@@ -242,7 +194,6 @@ impl Tracker {
         cache.prune_before(&cutoff);
     }
 
-    /// Every window's summary, overall and per account, as of `now`.
     pub fn ranged(&self, now: f64) -> Ranged {
         let Some(cache) = &self.cache else {
             return Ranged::default();
@@ -269,14 +220,6 @@ impl Tracker {
         out
     }
 
-    // MARK: Repricing
-
-    /// Prices again every model whose price is not the one its cells were counted at, and only
-    /// those (a price added for a model nobody used changes nothing). What the transcripts still
-    /// on disk hold of a cell is counted again exactly; the rest of it, requests whose transcript
-    /// is gone, is priced again from the cell's tokens: scaled by how the new price compares with
-    /// the old one when the old one is known, else at the new price's base rates. A model that
-    /// lost its price costs 0 and is listed as unpriced. True when anything changed.
     fn reprice(&mut self) -> bool {
         let Some(cache) = self.cache.as_ref() else {
             return false;
@@ -301,7 +244,6 @@ impl Tracker {
         if changed.is_empty() {
             return false;
         }
-        // Only the transcripts of a tool with a changed model are read again.
         let tools: HashSet<String> = changed
             .keys()
             .filter_map(|pk| pk.split('\t').next())
@@ -379,11 +321,6 @@ impl Tracker {
         true
     }
 
-    // MARK: Scanning
-
-    /// Whether a file under a channel's root is a transcript to read: Codex's rollouts (the
-    /// compressed `.zst` ones are skipped) and Antigravity's `transcript.jsonl` (not
-    /// `transcript_full.jsonl` or the chunk files), or any `.jsonl` for the Claude channels.
     pub fn accepts(path: &str, channel: &str) -> bool {
         if !path.ends_with(".jsonl") {
             return false;
@@ -396,8 +333,6 @@ impl Tracker {
         }
     }
 
-    /// Every transcript, however old: "All Time" needs the whole history. Each is read once (by
-    /// offset).
     fn scan_all(&mut self) -> bool {
         let mut dirty = false;
         let mut present: HashSet<String> = HashSet::new();
@@ -430,7 +365,6 @@ impl Tracker {
         dirty
     }
 
-    /// Reads what was added to one transcript since its saved offset. True when anything moved.
     fn update(&mut self, path: &Path, size: u64, root: &Root) -> bool {
         let text = path.to_string_lossy().into_owned();
         let mut mark = self
@@ -442,7 +376,6 @@ impl Tracker {
         if mark.size == size {
             return false;
         }
-        // A file that shrank was rewritten; read it again (ids already counted are skipped).
         if size < mark.offset {
             mark = Mark::default();
         }
@@ -471,8 +404,6 @@ impl Tracker {
         true
     }
 
-    /// Counts every complete line from `offset` on (up to `end`, when given) and returns where the
-    /// last complete line read ends.
     fn read(
         &mut self,
         path: &Path,
@@ -513,7 +444,6 @@ impl Tracker {
         line_start
     }
 
-    /// One line of a transcript, by the channel it came from.
     fn ingest(&mut self, line: &[u8], ctx: &Ctx, reading: &mut Reading) {
         match ctx.channel {
             CODEX => self.codex_line(line, ctx, reading),
@@ -522,7 +452,6 @@ impl Tracker {
         }
     }
 
-    /// True when `key` is new (and now counted on `day`).
     fn first_time(&mut self, key: u64, day: &str) -> bool {
         if !self.seen.insert(key) {
             return false;
@@ -570,7 +499,6 @@ impl Tracker {
             .and_then(|cwd| Path::new(cwd).file_name())
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_else(|| ctx.project.clone());
-        // Desktop transcripts carry the account in their path; the CLI's come from the switch log.
         let account = ctx
             .account
             .clone()
@@ -618,8 +546,6 @@ impl Tracker {
                 }
             }
             codex::Event::Tokens(t) => {
-                // Codex repeats an event now and then; a real request always moves the running
-                // total.
                 if t.total >= 0.0 {
                     if reading.total == Some(t.total) {
                         return;
@@ -678,9 +604,6 @@ impl Tracker {
         }
     }
 
-    /// Counts one request: once, and only when it used tokens. A model with no price still counts
-    /// its tokens, at $0, and is listed as unpriced so it never passes for free; a price of 0 counts
-    /// it at $0 like any other. While `reprice` runs, it is added to the recount instead.
     fn take(&mut self, r: Request) {
         let tool = tool_of(r.channel);
         if let Some(recount) = self.recount.as_mut() {
@@ -710,7 +633,6 @@ impl Tracker {
 }
 
 impl Recount {
-    /// Adds a request of a model being priced again, when it was counted and isn't added yet.
     fn add(&mut self, counted: &HashSet<u64>, tool: Tool, r: &Request) {
         let Some(&(then, now)) = self.changed.get(&price_key(tool, &r.model)) else {
             return;
@@ -733,8 +655,6 @@ impl Recount {
     }
 }
 
-/// A cell's dollars at the price `now`, given what the transcripts on disk still hold of it
-/// (`covered`) and the price it was counted at (`then`, `None` when not known).
 fn repriced(
     cell: &Cell,
     covered: &Covered,
@@ -744,8 +664,6 @@ fn repriced(
     covered.new + uncovered(cell, covered, then, now).1
 }
 
-/// What of `cell` no transcript on disk still holds: its tokens, and its dollars at the price
-/// `now` (scaled from its old dollars when the old price is known, else from the tokens).
 fn uncovered(
     cell: &Cell,
     covered: &Covered,
@@ -774,12 +692,6 @@ fn uncovered(
     (gone, rest)
 }
 
-/// Prices again one account's model on one day whose cells came from a version 2 cache. Those
-/// cells split the day over projects and channels by share, not by where the requests ran, so
-/// coverage is taken for the whole day of that model: what the transcripts on disk hold goes to
-/// the cells it really belongs to, exactly, and only the rest (the requests whose transcripts are
-/// gone) stays spread over the old cells by their token share. A day fully covered is exact
-/// from then on and no longer marked as moved over.
 fn reprice_moved(
     cells: &mut BTreeMap<String, Cell>,
     day: &str,
@@ -823,7 +735,6 @@ fn reprice_moved(
     }
     let (gone, rest) = uncovered(&total, &all, then, now);
     let gone_sum: f64 = gone.iter().sum();
-    // Tokens are whole numbers: less than half a token left is rounding, not a lost transcript.
     let moved = gone_sum >= 0.5;
     let weight = |c: &Cell| c.tokens.iter().sum::<f64>();
     let weights: f64 = keys.iter().map(|k| weight(&cells[k])).sum();
@@ -855,7 +766,6 @@ fn reprice_moved(
     cells.retain(|k, c| !mine(k) || weight(c) >= 0.5 || c.cost.abs() > 1e-9);
 }
 
-/// Four token counts (no one-hour cache writes) as five.
 fn five(c: [f64; 4]) -> Tokens {
     [c[0], c[1], c[2], c[3], 0.0]
 }

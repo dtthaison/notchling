@@ -1,8 +1,3 @@
-//! Pictures in the phone's chat view (ConsoleCore's `ChatImages`). A chat message only ever
-//! carries a description of each picture ([`ImageRef`]); the bytes are read on demand, from the
-//! transcript line the picture sits in or from a file the message names, and the bridge sends them
-//! as a downscaled JPEG (`bridge::images`).
-
 use base64::Engine;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -12,10 +7,7 @@ use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
 pub const ALLOWED_EXTENSIONS: [&str; 6] = ["png", "jpg", "jpeg", "gif", "webp", "heic"];
-/// The largest picture file read for the phone. Swift read any size; a screenshot is a few MB,
-/// and the phone gets a downscaled JPEG anyway.
 pub const MAX_FILE_BYTES: u64 = 20 * 1024 * 1024;
-/// A line holding a picture is read whole up to this size.
 const MAX_LINE_BYTES: usize = 64 * 1024 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -25,27 +17,20 @@ pub enum ImageOrigin {
     File,
 }
 
-/// A picture a chat message refers to.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImageRef {
-    /// Stable within one transcript: where the picture lives (`b-<line offset>-<block>` or
-    /// `f-<hash of the path>`).
     pub id: String,
     pub media_type: String,
     pub width: Option<i64>,
     pub height: Option<i64>,
     pub origin: ImageOrigin,
-    /// Size of the original, for the viewer.
     pub byte_count: i64,
-    /// For a transcript block: the line's offset in the file and the picture's index among the line's.
     pub line_offset: Option<u64>,
     pub block_index: Option<usize>,
-    /// For a file named in the text.
     pub path: Option<String>,
 }
 
 impl ImageRef {
-    /// A user picture at block `index` of the line at `offset`, with no size known.
     pub fn for_block(offset: u64, index: usize, media_type: &str) -> ImageRef {
         ImageRef {
             id: format!("b-{offset}-{index}"),
@@ -65,15 +50,12 @@ impl ImageRef {
 pub enum ImageError {
     NotFound,
     NotAllowed,
-    /// A file over [`MAX_FILE_BYTES`].
     TooLarge,
 }
 
-/// What a line's picture was before its base64 was cut out.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Stripped {
     pub base64_length: usize,
-    /// Read from the head of a PNG; the other formats keep theirs in places a 64-character head misses.
     pub size: Option<(i64, i64)>,
 }
 
@@ -82,9 +64,6 @@ const MEDIA_MARKER: &[u8] = b"\"type\":\"base64\",\"media_type\":\"";
 const DATA_KEY: &[u8] = b"\",\"data\":\"";
 const PNG_SIGNATURE: [u8; 8] = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
 
-/// Cuts the pictures' base64 out of a line before the JSON is read, so the chat parser never holds a
-/// picture in memory. Returns the line without the data (each `data` string becomes empty) and the
-/// pictures' sizes in the order they appear.
 pub fn strip_base64_blocks(line: &str) -> (Cow<'_, str>, Vec<Stripped>) {
     if !line.contains(BASE64_MARKER) {
         return (Cow::Borrowed(line), Vec::new());
@@ -97,7 +76,6 @@ pub fn strip_base64_blocks(line: &str) -> (Cow<'_, str>, Vec<Stripped>) {
         let Some(found) = find(MEDIA_MARKER, bytes, index) else {
             break;
         };
-        // The media type runs to its closing quote, then comes `","data":"`.
         let after_marker = found + MEDIA_MARKER.len();
         let mut cursor = after_marker;
         while cursor < bytes.len() && bytes[cursor] != b'"' {
@@ -122,7 +100,6 @@ pub fn strip_base64_blocks(line: &str) -> (Cow<'_, str>, Vec<Stripped>) {
         index = data_end;
     }
     out.extend_from_slice(&bytes[index..]);
-    // Every cut sits on an ASCII quote, so what remains is still valid UTF-8.
     (
         Cow::Owned(String::from_utf8_lossy(&out).into_owned()),
         blocks,
@@ -139,8 +116,6 @@ fn find(needle: &[u8], haystack: &[u8], from: usize) -> Option<usize> {
         .map(|i| from + i)
 }
 
-/// Width and height from the start of a PNG (the IHDR chunk is in the first 24 bytes), when that is
-/// what the base64 head holds.
 fn png_size_of_base64_head(head: &[u8]) -> Option<(i64, i64)> {
     let usable = head.len().min(44) / 4 * 4;
     let data = base64::engine::general_purpose::STANDARD
@@ -164,8 +139,6 @@ fn png_size(data: &[u8]) -> Option<(i64, i64)> {
     Some((int(16), int(20)))
 }
 
-/// The picture blocks of a message's content in the order they appear (also inside tool results),
-/// with whether each one is a tool's result.
 fn ordered_images(content: Option<&Value>) -> Vec<(&Value, bool)> {
     fn walk<'a>(value: Option<&'a Value>, nested: bool, found: &mut Vec<(&'a Value, bool)>) {
         let Some(blocks) = value.and_then(Value::as_array) else {
@@ -188,9 +161,6 @@ fn ordered_images(content: Option<&Value>) -> Vec<(&Value, bool)> {
     found
 }
 
-/// References for the pictures in `content` (a message's content or a queued command's prompt) of
-/// the line at `line_offset`, each with whether it is a tool's result. `stripped` are the sizes the
-/// line's base64 had before it was cut out.
 pub fn refs(
     content: Option<&Value>,
     line_offset: u64,
@@ -218,16 +188,10 @@ pub fn refs(
         .collect()
 }
 
-// MARK: Files named in the text
-
-/// Whether a path from a chat message may be shown: an image file that exists, under the home folder
-/// or /tmp. Paths are checked after symlinks and `..` are resolved. Unix paths only: on Windows
-/// nothing named in the text is shown yet.
 pub fn is_allowed_file(path: &str, home: &Path) -> bool {
     allowed_file(path, home).is_some()
 }
 
-/// [`is_allowed_file`]'s answer as the resolved path, which is what gets read.
 pub fn allowed_file(path: &str, home: &Path) -> Option<PathBuf> {
     if !path.starts_with('/') {
         return None;
@@ -247,7 +211,6 @@ pub fn allowed_file(path: &str, home: &Path) -> Option<PathBuf> {
     if let Ok(home) = std::fs::canonicalize(home) {
         roots.push(home);
     }
-    // `Path::starts_with` compares whole components, so /tmpfoo is not under /tmp.
     let allowed = roots.iter().any(|root| resolved.starts_with(root))
         && std::fs::metadata(&resolved).is_ok_and(|m| m.is_file());
     allowed.then_some(resolved)
@@ -274,8 +237,6 @@ fn media_type_of(path: &str) -> &'static str {
     }
 }
 
-/// `[Image: source: /path/x.png]` markers in `text`: the text without the ones that point at a shown
-/// file, and the references. Markers whose path is not allowed stay in the text as written.
 pub fn file_markers(text: &str, home: &Path) -> (String, Vec<ImageRef>) {
     let Some(pattern) = marker_pattern().filter(|_| text.contains("[Image: source:")) else {
         return (text.trim().to_string(), Vec::new());
@@ -291,7 +252,6 @@ pub fn file_markers(text: &str, home: &Path) -> (String, Vec<ImageRef>) {
             continue;
         }
         let byte_count = std::fs::metadata(&path).map_or(0, |m| m.len() as i64);
-        // Without the real size the phone draws a 4:3 box and crops a tall screenshot to its middle.
         let size = pixel_size_of_file(&path);
         refs.push(ImageRef {
             id: format!("f-{}", &sha256_hex(&path)[..16]),
@@ -317,7 +277,6 @@ fn sha256_hex(text: &str) -> String {
         .collect()
 }
 
-/// Width and height of an image file, read from its header only (the pixels are not decoded).
 pub fn pixel_size_of_file(path: &str) -> Option<(i64, i64)> {
     let mut file = File::open(path).ok()?;
     let mut head = vec![0u8; 32];
@@ -329,8 +288,6 @@ pub fn pixel_size_of_file(path: &str) -> Option<(i64, i64)> {
     pixel_size(&head)
 }
 
-/// Width and height from the first bytes of a PNG, GIF, WebP or JPEG (a JPEG's size sits after its
-/// leading segments, so give it the whole file or use [`pixel_size_of_file`]).
 pub fn pixel_size(data: &[u8]) -> Option<(i64, i64)> {
     if data.starts_with(&PNG_SIGNATURE) {
         return png_size(data);
@@ -374,7 +331,6 @@ fn webp_size(data: &[u8]) -> Option<(i64, i64)> {
     }
 }
 
-/// Walks a JPEG's segments to its start-of-frame marker.
 fn jpeg_size<R: Read + Seek>(reader: &mut R) -> Option<(i64, i64)> {
     reader.seek(SeekFrom::Start(2)).ok()?;
     loop {
@@ -385,7 +341,6 @@ fn jpeg_size<R: Read + Seek>(reader: &mut R) -> Option<(i64, i64)> {
         }
         let kind = marker[1];
         if kind == 0xD8 || kind == 0x01 || (0xD0..=0xD7).contains(&kind) || kind == 0xFF {
-            // No length follows these; 0xFF is fill, so look at the next byte as a marker.
             if kind == 0xFF {
                 reader.seek(SeekFrom::Current(-1)).ok()?;
             }
@@ -409,11 +364,6 @@ fn jpeg_size<R: Read + Seek>(reader: &mut R) -> Option<(i64, i64)> {
     }
 }
 
-// MARK: Reading the bytes
-
-/// The original bytes of a picture. For a transcript block the line is read again and the block
-/// decoded; a file is checked again now, since it may have changed or become a link since the chat
-/// was read.
 pub fn data(image: &ImageRef, transcript: &Path, home: &Path) -> Result<Vec<u8>, ImageError> {
     if let Some(path) = &image.path {
         let resolved = allowed_file(path, home).ok_or(ImageError::NotAllowed)?;
@@ -440,15 +390,10 @@ pub fn data(image: &ImageRef, transcript: &Path, home: &Path) -> Result<Vec<u8>,
         .map_err(|_| ImageError::NotFound)
 }
 
-/// The bytes of a file [`allowed_file`] resolved. The path could have changed since that check, so
-/// the file is opened without following a link and judged by the open handle: a regular file of at
-/// most [`MAX_FILE_BYTES`], read through a cap in case it grows. A FIFO opens without waiting for a
-/// writer and is refused.
 pub fn read_allowed(resolved: &Path) -> Result<Vec<u8>, ImageError> {
     let file = match open_no_follow(resolved) {
         Ok(file) => file,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Err(ImageError::NotFound),
-        // A link put there since the check (ELOOP), or no permission.
         Err(_) => return Err(ImageError::NotAllowed),
     };
     let meta = file.metadata().map_err(|_| ImageError::NotFound)?;
@@ -482,7 +427,6 @@ fn open_no_follow(path: &Path) -> std::io::Result<File> {
     File::open(path)
 }
 
-/// The line starting at `offset`, without its newline. A line is read in pieces until its newline.
 fn read_line(path: &Path, offset: u64) -> Option<Vec<u8>> {
     let mut file = File::open(path).ok()?;
     file.seek(SeekFrom::Start(offset)).ok()?;

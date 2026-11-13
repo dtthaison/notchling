@@ -1,18 +1,8 @@
-//! The text of the `notchling-vault` skill (Swift `VaultSkill`): the vault exists, which names it
-//! holds, how to pick one, how to use it without reading it, and how to ask the user for a missing
-//! one. The Swift text with the `notchling` subcommands (`secrets`, `secret`, `secret-request`) in
-//! place of the app's `--secrets`/`--secret`/`--secret-request` flags.
-//!
-//! This is only the text. Installing it into the tools' skills folders belongs to E13 (`install`),
-//! and nothing here writes a file.
-
 use super::entry::VaultEntry;
 use super::list::label;
 
-/// The skill's name and its folder name.
 pub const NAME: &str = "notchling-vault";
 
-/// Whose skills folder the text is for; each gets a note on its sandbox.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SkillTool {
     Claude,
@@ -23,7 +13,6 @@ pub enum SkillTool {
 impl SkillTool {
     pub const ALL: [SkillTool; 3] = [SkillTool::Claude, SkillTool::Codex, SkillTool::Antigravity];
 
-    /// What the agent must know about running `notchling` from inside this tool's sandbox.
     pub fn sandbox_note(self) -> &'static str {
         match self {
             SkillTool::Claude => "",
@@ -33,14 +22,12 @@ impl SkillTool {
     }
 }
 
-/// The names the description lists: `github (api.github.com)`, sorted.
 pub fn names(entries: &[VaultEntry]) -> Vec<String> {
     let mut names: Vec<String> = entries.iter().map(label).collect();
     names.sort();
     names
 }
 
-/// The skill's text, with `binary` (the `notchling` program's path) and the saved `names`.
 pub fn content(binary: &str, names: &[String], tool: SkillTool) -> String {
     let saved = if names.is_empty() {
         "none yet".to_string()

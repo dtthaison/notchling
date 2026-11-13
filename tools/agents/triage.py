@@ -1,19 +1,4 @@
 #!/usr/bin/env python3
-"""Issue triage: a model reads a new issue and answers JSON; this script turns that into labels.
-
-    triage.py prompt   env ISSUE_TITLE, ISSUE_BODY, TRIAGE_MODEL -> the model request (JSON) on stdout
-    triage.py ask      request on stdin, env ANTHROPIC_API_KEY   -> the model's raw answer on stdout
-    triage.py parse    answer on stdin                           -> the validated plan (one JSON line)
-    triage.py apply    env PLAN, GITHUB_TOKEN, ISSUE_NUMBER      -> labels and one templated comment
-
-The model has no token and no tools: it only answers a fixed JSON shape. Everything it says is
-validated strictly and mapped onto an allowlist (triage_labels.json) and fixed comment templates, so
-the issue's own words can neither choose a label nor appear in a comment. The script never closes an
-issue and never adds a `notchling:*` label. Fail closed: no key, an API error or an answer that is
-not exactly the shape means an empty plan, which does nothing.
-
-Python 3.9+, standard library only.
-"""
 
 import json
 import os
@@ -37,7 +22,6 @@ MAX_BODY = 6000
 
 TYPES = ("bug", "feature", "question", "other")
 
-# What the reporter can be asked for. The model picks ids from this set; the words are ours.
 MISSING_TEXT = {
     "steps": "the steps that make it happen",
     "version": "your macOS and Notchling versions",
@@ -57,19 +41,14 @@ FOOTER = "I'm an automated triage script, not a person. A maintainer decides wha
 
 
 class TriageError(Exception):
-    """A failure whose message is safe to print: it never holds issue text, answer text or a key."""
+    pass
 
 
 def load_labels():
     return json.loads((HERE / "triage_labels.json").read_text())
 
 
-# ---- prompt ---------------------------------------------------------------------------------
-
-
 def build_request(title, body, model):
-    """The Messages API request. The issue is one JSON line between fixed fences, so no text of
-    the reporter's can start a line of its own, let alone repeat a fence."""
     data = json.dumps({"title": (title or "")[:MAX_TITLE], "body": (body or "")[:MAX_BODY]})
     prompt = (
         "You triage new issues for Notchling, a macOS menu bar app that shows coding-agent "
@@ -91,12 +70,7 @@ def build_request(title, body, model):
     return {"model": model, "max_tokens": 300, "messages": [{"role": "user", "content": prompt}]}
 
 
-# ---- ask ------------------------------------------------------------------------------------
-
-
 def ask(request, env, timeout=60):
-    """POST the request to the Messages API and return the answer's text. Only the Anthropic key
-    is read from env; nothing else goes into the request."""
     key = env.get("ANTHROPIC_API_KEY") or ""
     base = (env.get("ANTHROPIC_BASE_URL") or ANTHROPIC_URL).rstrip("/")
     req = urllib.request.Request(
@@ -120,11 +94,7 @@ def ask(request, env, timeout=60):
                    if isinstance(b, dict) and b.get("type") == "text" and isinstance(b.get("text"), str))
 
 
-# ---- parse ----------------------------------------------------------------------------------
-
-
 def _unfence(text):
-    """Models often wrap JSON in one code fence; accept exactly that wrapper and nothing more."""
     s = text.strip()
     if not s.startswith("```"):
         return s
@@ -139,7 +109,6 @@ def _is_int(v):
 
 
 def parse_answer_checked(text):
-    """The model's answer -> a plan, or TriageError."""
     try:
         data = json.loads(_unfence(text))
     except ValueError:
@@ -158,7 +127,6 @@ def parse_answer_checked(text):
         raise TriageError("security is not a boolean")
 
     if security:
-        # No label, no other comment: a public label would announce it, so only the private-report ask.
         return {"labels": [], "comment": "security", "missing": [], "duplicate_of": None}
 
     cfg = load_labels()
@@ -172,7 +140,6 @@ def parse_answer_checked(text):
 
 
 def parse_answer(text):
-    """Like parse_answer_checked, but anything wrong gives the empty plan, which does nothing."""
     try:
         return parse_answer_checked(text)
     except TriageError:
@@ -180,7 +147,6 @@ def parse_answer(text):
 
 
 def validate_plan(plan):
-    """Check a plan a second time before it touches GitHub (it crossed a job boundary)."""
     if not isinstance(plan, dict) or set(plan) != PLAN_KEYS:
         raise TriageError("the plan does not have exactly the expected keys")
     labels, comment, missing, dup = plan["labels"], plan["comment"], plan["missing"], plan["duplicate_of"]
@@ -206,12 +172,7 @@ def validate_plan(plan):
     return plan
 
 
-# ---- comment templates ----------------------------------------------------------------------
-
-
 def render_comment(plan):
-    """The comment for a plan, from fixed text. Only template ids, fixed phrases and one issue
-    number (an integer) go in; nothing the reporter wrote."""
     kind = plan["comment"]
     if kind is None:
         return None
@@ -227,9 +188,6 @@ def render_comment(plan):
         items = "\n".join("- " + MISSING_TEXT[m] for m in plan["missing"])
         text = "Thanks for the report. To look into it, we still need:\n\n" + items
     return text + "\n\n" + FOOTER
-
-
-# ---- apply ----------------------------------------------------------------------------------
 
 
 def _post(api, path, token, body, timeout=30):
@@ -252,8 +210,6 @@ def _post(api, path, token, body, timeout=30):
 
 
 def apply_plan(plan, repo, issue, token, api=GITHUB_API):
-    """Post the plan's labels, then its comment. Only these two POSTs exist here: nothing edits or
-    closes an issue."""
     plan = validate_plan(plan)
     if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repo or "") or ".." in repo:
         raise TriageError("GITHUB_REPOSITORY is not owner/name")
@@ -263,7 +219,7 @@ def apply_plan(plan, repo, issue, token, api=GITHUB_API):
         raise TriageError("GITHUB_TOKEN is missing")
     comment = plan["comment"]
     if comment == "duplicate" and plan["duplicate_of"] == int(issue):
-        comment = None  # "a duplicate of itself" is the model being wrong
+        comment = None
         plan = dict(plan, comment=None)
     base = "/repos/%s/issues/%s" % (repo, issue)
     if plan["labels"]:
@@ -271,9 +227,6 @@ def apply_plan(plan, repo, issue, token, api=GITHUB_API):
     text = render_comment(plan)
     if text:
         _post(api, base + "/comments", token, {"body": text})
-
-
-# ---- command line ---------------------------------------------------------------------------
 
 
 def main(argv=None, env=None, stdin=None, stdout=None, stderr=None):

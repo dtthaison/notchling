@@ -1,6 +1,3 @@
-//! The live clients, and what changed since each last heard: sessions, prompts and chat messages
-//! (Swift `BridgeHub`). [`Hub::tick`] runs every 300 ms, which is also what debounces the pushes.
-
 use super::backend::BridgeBackend;
 use super::connection::{lock, Connection, ConnectionIo};
 use super::model::Session;
@@ -21,7 +18,6 @@ impl Hub {
         Hub::default()
     }
 
-    /// A new client. Nothing is served to it before `hello` or `pair`.
     pub fn connect(
         &self,
         remote_address: &str,
@@ -42,7 +38,6 @@ impl Hub {
         lock(&self.connections).values().cloned().collect()
     }
 
-    /// Closes every live connection of a device (after a revoke). Returns how many.
     pub fn disconnect(&self, device_id: &str) -> usize {
         let targets: Vec<_> = self
             .all()
@@ -55,7 +50,6 @@ impl Hub {
         targets.len()
     }
 
-    /// Tells every logged-in client to open. Returns how many were told.
     pub fn notify_open(&self) -> usize {
         let targets: Vec<_> = self
             .all()
@@ -69,7 +63,6 @@ impl Hub {
         targets.len()
     }
 
-    /// Pushes what changed to every subscriber.
     pub fn tick(&self, backend: &dyn BridgeBackend) {
         let subscribers: Vec<_> = self
             .all()
@@ -158,13 +151,11 @@ impl Hub {
     }
 }
 
-/// The text the hub compares to tell whether the list changed.
 pub(crate) fn sessions_json(sessions: &[Session]) -> String {
     let list: Vec<_> = sessions.iter().map(Session::to_wire).collect();
     wire::text(&wire::object(&list))
 }
 
-/// The `sessions` event.
 pub(crate) fn sessions_event(sessions: &[Session]) -> String {
     let list: Vec<_> = sessions.iter().map(Session::to_wire).collect();
     let mut fields = Map::new();

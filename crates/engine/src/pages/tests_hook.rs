@@ -1,5 +1,3 @@
-//! The Artifact hook functions against event fixtures (`fixtures/*.json`).
-
 use super::hook::*;
 use super::owner::Outcome;
 use super::tests::{ctx, URL_A};
@@ -19,7 +17,6 @@ fn event(text: &str) -> Value {
     serde_json::from_str(text).unwrap()
 }
 
-/// A library holding the page behind `URL_A`, published from a temp folder.
 fn library_with_page(dir: &TempDir) -> PageLibrary {
     dir.write(
         "work/report.html",
@@ -82,15 +79,11 @@ fn a_read_of_a_saved_page_is_answered_from_the_copy() {
 fn a_read_that_is_not_for_a_saved_whole_page_passes() {
     let dir = TempDir::new("hook-pass");
     let lib = library_with_page(&dir);
-    // One file of the page: the live page is fetched.
     assert_eq!(pre_tool_use(&lib, &event(PRE_READ_ONE_FILE), None), None);
-    // A page we don't keep.
     assert_eq!(pre_tool_use(&lib, &event(PRE_READ_UNSAVED), None), None);
-    // Not a read.
     let mut publish = event(PRE_READ_SAVED);
     publish["tool_input"] = json!({"file_path": "x.html", "url": URL_A});
     assert_eq!(pre_tool_use(&lib, &publish, None), None);
-    // A kept page whose file is gone falls through to the real read.
     let page = lib.entries().remove(0);
     std::fs::remove_file(lib.local_path(&page).unwrap()).unwrap();
     assert_eq!(pre_tool_use(&lib, &event(PRE_READ_SAVED), None), None);
@@ -114,7 +107,6 @@ fn an_owner_publish_outcome_decides_the_pre_hook() {
             json!(reason)
         );
     }
-    // A failed owner publish lets the real one run, with the reason as context.
     let out = pre_tool_use(&lib, &e, Some(Outcome::Failed("why".into()))).unwrap();
     assert_eq!(
         out,
@@ -138,7 +130,6 @@ fn a_failed_read_is_pointed_at_the_local_copy() {
         assert!(context.contains("from another account, publishing makes a new link"));
         assert!(h.get("permissionDecision").is_none());
     }
-    // A read that worked says nothing; so does a failed read of a page we don't keep.
     assert_eq!(
         post_tool_use(&lib, &event(POST_READ_OK), &ctx("x", dir.root())),
         None
@@ -157,7 +148,6 @@ fn a_read_only_library_stays_silent_and_unchanged() {
     let publish = event(&POST_PUBLISH.replace("WORK", &dir.path("work").to_string_lossy()));
     assert_eq!(post_tool_use(&ro, &publish, &ctx("x", dir.root())), None);
     assert_eq!(std::fs::read(ro.list_path()).unwrap(), before);
-    // Reads still work from a read-only library.
     assert!(pre_tool_use(&ro, &event(PRE_READ_SAVED), None).is_some());
 }
 
@@ -178,16 +168,13 @@ fn answer_runs_the_event_by_its_name_and_leaves_the_rest_alone() {
     let dir = TempDir::new("hook-answer");
     let lib = library_with_page(&dir);
     let c = ctx("x", dir.root());
-    // PreToolUse: a read of a saved page is denied with the local copy's path.
     let out = answer(&lib, &event(PRE_READ_SAVED), &c).unwrap();
     assert_eq!(out["hookSpecificOutput"]["permissionDecision"], "deny");
     assert!(out["hookSpecificOutput"]["permissionDecisionReason"]
         .as_str()
         .unwrap()
         .contains("Local copy: "));
-    // An unsaved link passes.
     assert_eq!(answer(&lib, &event(PRE_READ_UNSAVED), &c), None);
-    // PostToolUseFailure and a 404-looking PostToolUse get the fallback.
     for fixture in [POST_FAILURE_READ, POST_READ_404] {
         let out = answer(&lib, &event(fixture), &c).unwrap();
         assert!(out["hookSpecificOutput"]["additionalContext"]
@@ -195,11 +182,9 @@ fn answer_runs_the_event_by_its_name_and_leaves_the_rest_alone() {
             .unwrap()
             .starts_with("Notchling keeps a local copy"));
     }
-    // A publish is recorded and says nothing; a read that worked says nothing.
     let publish = event(&POST_PUBLISH.replace("WORK", &dir.path("work").to_string_lossy()));
     assert_eq!(answer(&lib, &publish, &c), None);
     assert_eq!(answer(&lib, &event(POST_READ_OK), &c), None);
-    // Events that aren't the Artifact tool's are not ours, even with the same shape.
     for other in [
         json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": "ls"}}),
         json!({"hook_event_name": "PermissionRequest", "tool_name": "Artifact"}),

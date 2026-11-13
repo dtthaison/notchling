@@ -13,12 +13,9 @@ import '../connection/connection.dart';
 import '../macs/computers.dart';
 import 'chat_cache.dart';
 
-/// Widths the phone asks the Mac for: a thumbnail under a message, and the full-screen view.
 const int thumbnailWidth = 480;
 const int viewerWidth = 1600;
 
-/// Fetches pictures once: memory first, then the phone's disk cache, then the Mac. Two widgets asking for the
-/// same picture share one request.
 class ChatPictureLoader {
   ChatPictureLoader(this._cache, this._client, {this.memoryLimit = 48});
   final ChatCache _cache;
@@ -36,7 +33,6 @@ class ChatPictureLoader {
       return Future<Uint8List>.value(hit);
     }
     return _inFlight[key] ??= _fetch(key, sessionId, image, width).whenComplete(() {
-      // A block body: returning the removed future would make this wait on itself.
       _inFlight.remove(key);
     });
   }
@@ -62,8 +58,6 @@ final Provider<ChatPictureLoader> chatPictureLoaderProvider = Provider<ChatPictu
   return ChatPictureLoader(cache, () => ref.read(bridgeClientProvider));
 });
 
-/// The pictures of one message, as thumbnails. Each loads when it is built (so only the ones scrolled into
-/// view cost anything), shows its shape while loading, and says so when it failed.
 class MessagePictures extends StatelessWidget {
   const MessagePictures({super.key, required this.sessionId, required this.images, this.alignEnd = false});
   final String sessionId;
@@ -140,7 +134,6 @@ class _PictureThumbnailState extends ConsumerState<PictureThumbnail> {
     final AppL10n l10n = AppL10n.of(context);
     final Size box = _box;
     final Widget child = switch (_phase) {
-      // An unknown shape gets the 4:3 guess; cover would crop a tall screenshot to its middle, so show it whole.
       PictureLoad.ready => Image.memory(_bytes!,
           fit: widget.image.aspect == null ? BoxFit.contain : BoxFit.cover,
           gaplessPlayback: true,
@@ -179,7 +172,6 @@ class _PictureThumbnailState extends ConsumerState<PictureThumbnail> {
   }
 }
 
-/// Full screen, with pinch-zoom. Starts from the thumbnail and swaps in the large version when it arrives.
 class PictureViewer extends ConsumerStatefulWidget {
   const PictureViewer({super.key, required this.sessionId, required this.image, required this.preview});
   final String sessionId;

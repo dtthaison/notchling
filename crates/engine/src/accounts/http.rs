@@ -1,8 +1,3 @@
-//! The account endpoints over HTTPS: the profile check (`GET /api/oauth/profile`) and the token
-//! endpoint (sign-in and renewing a saved login that isn't live anywhere). Behind [`HttpClient`]
-//! so tests never reach the network; [`LiveHttp`] is the real one, which talks only to the two
-//! hosts Claude's login uses.
-
 use super::Secret;
 use serde_json::{Map, Value};
 use std::fmt;
@@ -11,18 +6,11 @@ use std::net::{TcpStream, ToSocketAddrs};
 use std::sync::Arc;
 use std::time::Duration;
 
-/// Claude Code's OAuth client id (`AccountStore.clientID`).
 pub const CLIENT_ID: &str = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
-/// The account behind a token.
 pub const PROFILE_URL: &str = "https://api.anthropic.com/api/oauth/profile";
-/// An account's limits (`AccountStore.fetchUsage`), read with a token from
-/// [`super::claude::ClaudeAccounts::usage_token`].
 pub const USAGE_URL: &str = "https://api.anthropic.com/api/oauth/usage";
-/// Codes and refresh tokens are exchanged here.
 pub const TOKEN_URL: &str = "https://platform.claude.com/v1/oauth/token";
-/// The only hosts [`LiveHttp`] will call.
 pub const HOSTS: [&str; 2] = ["api.anthropic.com", "platform.claude.com"];
-/// Each request's time, as the Swift app's `timeoutInterval`.
 pub const TIMEOUT: Duration = Duration::from_secs(15);
 const LIMIT: usize = 1024 * 1024;
 
@@ -32,16 +20,12 @@ pub enum Method {
     Post,
 }
 
-/// One request. Its `Debug` hides the bearer token and the body (a token exchange carries a code
-/// or a refresh token).
 #[derive(Clone)]
 pub struct HttpRequest {
     pub method: Method,
     pub url: String,
     pub bearer: Option<Secret>,
-    /// Sent as JSON.
     pub body: Option<Value>,
-    /// Extra headers, written after the fixed ones (`anthropic-version` on the model list).
     pub headers: Vec<(&'static str, String)>,
 }
 
@@ -52,7 +36,6 @@ impl fmt::Debug for HttpRequest {
 }
 
 impl HttpRequest {
-    /// `GET url` with `Authorization: Bearer <token>` and the OAuth beta header.
     pub fn get(url: &str, token: &Secret) -> HttpRequest {
         HttpRequest {
             method: Method::Get,
@@ -63,7 +46,6 @@ impl HttpRequest {
         }
     }
 
-    /// The same request with one more header.
     pub fn with_header(mut self, name: &'static str, value: &str) -> HttpRequest {
         self.headers.push((name, value.to_string()));
         self
@@ -80,7 +62,6 @@ impl HttpRequest {
     }
 }
 
-/// An answer. Status 0 means none came. Its `Debug` hides the body (a token answer holds tokens).
 #[derive(Clone, PartialEq, Eq)]
 pub struct HttpResponse {
     pub status: u16,
@@ -99,7 +80,6 @@ impl fmt::Debug for HttpResponse {
 }
 
 impl HttpResponse {
-    /// The body as a JSON object, for a 200 only.
     pub fn json_ok(&self) -> Option<Map<String, Value>> {
         if self.status != 200 {
             return None;
@@ -111,12 +91,10 @@ impl HttpResponse {
     }
 }
 
-/// The network.
 pub trait HttpClient: Send + Sync {
     fn send(&self, request: &HttpRequest) -> HttpResponse;
 }
 
-/// The real client: blocking HTTPS through rustls with the OS's roots, to [`HOSTS`] only.
 pub struct LiveHttp;
 
 impl HttpClient for LiveHttp {
@@ -128,7 +106,6 @@ impl HttpClient for LiveHttp {
     }
 }
 
-/// A client that sends nothing (a fixture root).
 pub struct NoNetwork;
 
 impl HttpClient for NoNetwork {
@@ -140,7 +117,6 @@ impl HttpClient for NoNetwork {
     }
 }
 
-/// `(host, path)` of an https URL on one of [`HOSTS`].
 pub fn split_url(url: &str) -> Option<(&str, &str)> {
     let rest = url.strip_prefix("https://")?;
     let (host, path) = match rest.find('/') {
@@ -150,7 +126,6 @@ pub fn split_url(url: &str) -> Option<(&str, &str)> {
     HOSTS.contains(&host).then_some((host, path))
 }
 
-/// The request's bytes: head and JSON body.
 pub fn request_bytes(request: &HttpRequest, host: &str, path: &str) -> Vec<u8> {
     let method = match request.method {
         Method::Get => "GET",
@@ -227,7 +202,6 @@ fn send(request: &HttpRequest) -> Result<HttpResponse, String> {
     parse_response(&data)
 }
 
-/// Status and body (plain or chunked) of an HTTP/1.1 answer.
 pub fn parse_response(data: &[u8]) -> Result<HttpResponse, String> {
     let end = data
         .windows(4)

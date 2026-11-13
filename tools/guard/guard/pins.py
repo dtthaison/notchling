@@ -1,8 +1,3 @@
-"""Every workflow action is pinned to a commit SHA and comes from an allowlisted repository.
-
-A tag can be moved to other code after review; a SHA can't. Local `./` actions are fine (they're
-in this repository, behind CODEOWNERS). Docker images and unknown owners are refused."""
-
 from __future__ import annotations
 
 import json
@@ -46,7 +41,6 @@ def check(workflows_dir: Path, allowlist: Set[str]) -> List[str]:
 
 
 def peeled_sha(ls_remote: str) -> Optional[str]:
-    """The commit a tag points at: the peeled `^{}` line for an annotated tag, else the only line."""
     plain = None
     for line in ls_remote.splitlines():
         sha, _, ref = line.partition("\t")
@@ -66,7 +60,6 @@ def resolve_tag(repo: str, tag: str) -> str:
 
 
 def pin(workflows_dir: Path, resolve: Callable[[str, str], str] = resolve_tag) -> List[str]:
-    """Rewrite tag-pinned `uses:` lines as `owner/repo@<sha> # <tag>`. Returns what changed."""
     changed: List[str] = []
     for f in _workflows(workflows_dir):
         lines = f.read_text().splitlines(keepends=True)

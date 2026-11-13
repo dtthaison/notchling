@@ -1,18 +1,11 @@
-//! The search panel's views for `--render` (part U10): the panel just opened, with the newest
-//! pages and conversations, and the panel with words typed and a match selected. Made-up pages and
-//! sessions, never the real library or the daemon.
-
 use notchling_engine::search::SessionTool;
 
 use super::model::SearchModel;
 use super::wire::{Page, Results, SessionRow};
 use crate::views::ViewSpec;
 
-/// The fixed clock every render draws at (seconds since 1970).
 pub const NOW_SECS: f64 = 1_800_000_000.0;
 
-/// Each window is exactly the panel's height for its data (`SearchModel::height`), as the live
-/// panel's is.
 pub const VIEWS: [ViewSpec; 2] = [
     ViewSpec {
         name: "search-panel",
@@ -27,12 +20,9 @@ pub const VIEWS: [ViewSpec; 2] = [
     },
 ];
 
-/// What a panel render shows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Shown {
-    /// Just opened: no words, the newest of each.
     Opened,
-    /// "bridge" typed: the matches, the first session selected.
     Results,
 }
 
@@ -80,10 +70,8 @@ fn session(
     }
 }
 
-/// The words a results render has typed.
 pub const QUERY: &str = "bridge";
 
-/// The answer a render draws.
 pub fn results(shown: Shown) -> Results {
     match shown {
         Shown::Opened => Results {
@@ -170,8 +158,6 @@ pub fn results(shown: Shown) -> Results {
     }
 }
 
-/// The model a render starts from: the words typed and the answer applied, a session selected in
-/// the results view.
 pub fn model(shown: Shown) -> SearchModel {
     let mut m = SearchModel::new();
     if shown == Shown::Results {
@@ -212,7 +198,6 @@ mod tests {
             results.current().map(Item::section),
             Some(Section::Sessions)
         );
-        // The highlights point at the word in each snippet.
         for item in results.items() {
             if let Item::Session(s) = item {
                 let snippet = s.snippet.as_deref().unwrap();
@@ -221,7 +206,6 @@ mod tests {
                 }
             }
         }
-        // Each render window is the panel's own height.
         assert_eq!(opened.height(), VIEWS[0].size.1);
         assert_eq!(results.height(), VIEWS[1].size.1);
     }

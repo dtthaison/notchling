@@ -1,10 +1,7 @@
-//! Ports of `MenuCommandTests` and `EnabledPluginsTests`, plus matching and scanning.
-
 use super::*;
 use crate::sessions::testutil::TempDir;
 use std::collections::HashMap;
 
-// Port of MenuCommandTests.testMenuCommands.
 #[test]
 fn menu_commands() {
     assert!(opens_menu("/plugin"));
@@ -14,7 +11,6 @@ fn menu_commands() {
     assert_eq!(route("/plugin"), Route::Terminal);
 }
 
-// Port of MenuCommandTests.testCommandsWithOutputOrAValueStayInChat.
 #[test]
 fn commands_with_output_or_a_value_stay_in_chat() {
     assert!(!opens_menu("/effort high"));
@@ -37,7 +33,6 @@ fn built_ins_mark_the_menu_ones() {
     assert_eq!(bare.description, "Edit memory files · Opens a menu");
     let clear = all.iter().find(|c| c.name == "clear").expect("clear");
     assert_eq!(clear.description, "Clear the conversation and start fresh");
-    // Every menu command is a built-in, so the marker reaches it.
     for name in MENU_COMMANDS {
         assert!(all.iter().any(|c| c.name == name), "{name}");
     }
@@ -73,7 +68,6 @@ fn names(tmp: &TempDir, cwd: &str) -> HashMap<String, String> {
         .collect()
 }
 
-// Port of EnabledPluginsTests.testUserSettingsOnly.
 #[test]
 fn user_settings_only() {
     let (tmp, _) = setup("plug-user");
@@ -83,7 +77,6 @@ fn user_settings_only() {
     assert_eq!(found["off"], "/cache/off");
 }
 
-// Port of EnabledPluginsTests.testProjectScopedPluginShowsInItsFolder.
 #[test]
 fn project_scoped_plugin_shows_in_its_folder() {
     let (tmp, project) = setup("plug-project");
@@ -99,7 +92,6 @@ fn project_scoped_plugin_shows_in_its_folder() {
     assert_eq!(found["sd"], "/cache/sd", "user plugins stay");
 }
 
-// Port of EnabledPluginsTests.testLocalSettingsOverrideProjectAndUser.
 #[test]
 fn local_settings_override_project_and_user() {
     let (tmp, project) = setup("plug-local");
@@ -124,7 +116,6 @@ fn files_become_commands_with_a_plugin_prefix_and_no_override_of_built_ins() {
         "home/.claude/commands/ship.md",
         "---\ndescription: \"Ship it. Then relax.\"\nargument-hint: [branch]\n---\nbody\n",
     );
-    // A user command named like a built-in never replaces it.
     tmp.write(
         "home/.claude/commands/clear.md",
         "---\ndescription: mine\n---\n",

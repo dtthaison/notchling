@@ -1,12 +1,3 @@
-//! Prompts a hook is holding open. Two sources:
-//!
-//! - the daemon's (`notchling hook` under `notchlingd`): `prompt.pending` events, which the session
-//!   source keeps ([`from_daemon`]). A card answers one by its prompt id.
-//! - the Swift hook's (`HookBridge.pendingRequests`), read only while the daemon's aren't followed:
-//!   `requests/<id>.json` in Notchling's data folder ([`read_dir`]). The notch never writes a
-//!   response, removes a file or signals a process there, so it reads by age instead of checking
-//!   the hook's process: past the hook's wait, a file is stale.
-
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -16,37 +7,27 @@ use serde_json::{Map, Value};
 
 use crate::tools::agy_permission::AgyPermission;
 
-/// The hook waits 290 s for a decision; a request older than this is gone or about to be.
 pub const STALE_SECS: f64 = 300.0;
 
-/// What the hook is asking.
 #[derive(Clone, Debug, PartialEq)]
 pub enum RequestKind {
     Question(PendingQuestion),
     Permission,
 }
 
-/// One held prompt.
 #[derive(Clone, Debug, PartialEq)]
 pub struct HookRequest {
     pub id: String,
     pub session_id: String,
-    /// Seconds since the epoch.
     pub created: f64,
     pub kind: RequestKind,
     pub tool_name: String,
-    /// The command, path, URL or pattern the tool would use; a question's first question.
     pub summary: String,
-    /// Claude Code offered an "always allow" rule.
     pub can_always_allow: bool,
-    /// An Antigravity permission's own options and preview (the daemon's `tool: "agy"` prompts);
-    /// `None` for Claude Code's, which Allow, Always and Deny answer.
     pub agy: Option<AgyPermission>,
 }
 
 impl HookRequest {
-    /// `HookRequest.init(_:)`: `None` without an id, session, pid and event name, or for a question
-    /// with no questions in it.
     pub fn parse(obj: &Value) -> Option<HookRequest> {
         let id = obj.get("id")?.as_str()?;
         let session = obj.get("session_id")?.as_str()?;
@@ -65,7 +46,6 @@ impl HookRequest {
                 s.iter()
                     .any(|r| r.get("type").and_then(Value::as_str) != Some("setMode"))
             });
-        // In auto mode the question also comes as a permission prompt once PreToolUse passes.
         let (kind, summary) = if event == "PreToolUse" || tool_name == "AskUserQuestion" {
             let q = question(&format!("hook:{id}"), input)?;
             let first = q
@@ -90,8 +70,6 @@ impl HookRequest {
     }
 }
 
-/// The questions in a `{"items": [{header, question, options, details, multiSelect}]}` object, as
-/// the daemon writes them (a held prompt's `question`, or `session.question`'s screen read).
 pub fn question_items(value: &Value) -> Vec<QuestionItem> {
     let strings = |v: Option<&Value>| -> Vec<String> {
         v.and_then(Value::as_array)
@@ -126,8 +104,6 @@ pub fn question_items(value: &Value) -> Vec<QuestionItem> {
 }
 
 impl HookRequest {
-    /// A prompt the daemon holds, from `prompt.pending`'s data (the daemon's `Prompt::to_json`).
-    /// `None` without an id and session, or for a question with no questions in it.
     pub fn from_prompt(p: &Value) -> Option<HookRequest> {
         let text = |key: &str| p.get(key).and_then(Value::as_str).unwrap_or("").to_owned();
         let id = p.get("id")?.as_str()?.to_owned();
@@ -168,7 +144,6 @@ impl HookRequest {
     }
 }
 
-/// A tool's input in one line or a few: the field that says what it does, else `key: value` lines.
 pub fn describe(input: &Map<String, Value>) -> String {
     for key in [
         "command",
@@ -193,9 +168,6 @@ pub fn describe(input: &Map<String, Value>) -> String {
         .join("\n")
 }
 
-/// The daemon's held prompts by row id: the row whose id or Claude Code session is the prompt's
-/// session, else the session id itself. The oldest wins when a row has several: it has waited
-/// longest, and the next shows once it's answered.
 pub fn from_daemon(prompts: &[Value], agents: &[Agent]) -> HashMap<String, HookRequest> {
     let mut found: HashMap<String, HookRequest> = HashMap::new();
     for request in prompts.iter().filter_map(HookRequest::from_prompt) {
@@ -216,8 +188,6 @@ pub fn from_daemon(prompts: &[Value], agents: &[Agent]) -> HashMap<String, HookR
     found
 }
 
-/// Every fresh request in `dir`, by session id (the newest wins when a session has several).
-/// Hidden files (the hook's half-written `.<id>.json.tmp`) and anything unreadable are skipped.
 pub fn read_dir(dir: &Path, now_secs: f64) -> HashMap<String, HookRequest> {
     let mut found: HashMap<String, HookRequest> = HashMap::new();
     let Ok(entries) = std::fs::read_dir(dir) else {

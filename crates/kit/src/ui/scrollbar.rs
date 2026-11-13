@@ -1,28 +1,3 @@
-//! A macOS-style overlay scroll bar, since GPUI 0.2.2's `overflow_y_scroll()` draws none.
-//!
-//! `scrollable(div().id("list").overflow_y_scroll()...)` is that same scrolling div, with the bar
-//! painted over its right edge. It is the same layout node (no wrapper, so the div's `flex_1`,
-//! `h`, padding and the rest keep meaning what they did) and takes no room of its own.
-//!
-//! - The thumb is thin and rounded, 7 pt wide and 9 under the pointer, 2 pt in from the edge, with
-//!   no track behind it. It shows while you scroll (the wheel or trackpad, a drag, a press in the
-//!   track), never for a scroll the app makes (following new messages, opening at the end), as on
-//!   macOS, and fades about a second after you stop; the pointer over a shown bar keeps it (so it
-//!   can be grabbed), but never shows a hidden one. Its frames come from a timer, at the fade's
-//!   start and 30 times a second through it, not every display frame: each one draws the whole
-//!   view the bar is in again (Chat's conversation, with every message).
-//! - Dragging the thumb scrolls; a press in the track pages toward it. Both take the press, so the
-//!   content under the 14 pt strip doesn't also get it, and the pointer stays an arrow there. While
-//!   the bar is hidden its strip passes presses and the pointer through; wheel scrolling over it
-//!   always reaches the list.
-//! - Hidden when the content fits.
-//!
-//! The scroll position is the container's [`ScrollHandle`]: pass the view's own with
-//! [`Scrollable::tracking`] (which also does `track_scroll`), or leave it out and the bar keeps one in
-//! element state under the div's id. Over a GPUI list, [`scrollable_list`] follows its
-//! [`ListState`] instead: the list scrolls itself, the bar reads where it is and moves it. The
-//! numbers are in [`crate::scrollbar`].
-
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
@@ -40,18 +15,13 @@ use super::{hsla, window_appearance};
 use crate::scrollbar::{self as math, EDGE_INSET, THUMB_WIDTH, THUMB_WIDTH_HOVER, ZONE_WIDTH};
 use crate::Ink;
 
-/// The thumb at rest and while its bar is hovered or dragged: the ink's alpha.
 const THUMB_ALPHA: f32 = 0.55;
 const THUMB_ALPHA_ACTIVE: f32 = 0.9;
 
-/// Draws every bar as if it had just scrolled, for a render (a still frame has no scroll). Set by the
-/// render path (`NOTCHLING_RENDER_SCROLLBARS=1`), never by the app.
 pub struct PinScrollbars;
 
 impl Global for PinScrollbars {}
 
-/// The scrolling div `inner` (an `id`, `overflow_y_scroll()` and whatever sizing it had) with the
-/// overlay bar on top.
 pub fn scrollable(mut inner: Stateful<Div>) -> Scrollable {
     let id = inner
         .interactivity()
@@ -67,8 +37,6 @@ pub fn scrollable(mut inner: Stateful<Div>) -> Scrollable {
     }
 }
 
-/// The bar over a GPUI list. `list` must fill the box the bar sits in (give it `size_full()` or
-/// `flex_1()`), and `state` is the list's own `ListState`.
 pub fn scrollable_list(id: impl Into<ElementId>, list: List, state: &ListState) -> Scrollable {
     Scrollable {
         id: id.into(),
@@ -80,22 +48,18 @@ pub fn scrollable_list(id: impl Into<ElementId>, list: List, state: &ListState) 
 }
 
 enum Inner {
-    // Boxed: a styled div is far larger than the list's one element.
     Div(Box<Stateful<Div>>),
     Any(AnyElement),
 }
 
-/// Where the thumb sat in the last frame (window coordinates), for a render that checks it.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ThumbAt {
     pub top: f32,
     pub bottom: f32,
-    /// The track the thumb travels in.
     pub track_top: f32,
     pub track_bottom: f32,
 }
 
-/// Where [`Scrollable::record_thumb`] writes.
 pub type ThumbRecord = Rc<Cell<Option<ThumbAt>>>;
 
 pub struct Scrollable {
@@ -107,32 +71,23 @@ pub struct Scrollable {
 }
 
 impl Scrollable {
-    /// Follows (and moves) this handle, the view's own: for a view that scrolls it from code or
-    /// reads its offset. Replaces the div's own `track_scroll`.
     pub fn tracking(mut self, handle: &ScrollHandle) -> Self {
         self.handle = Some(handle.clone());
         self
     }
 
-    /// Writes the thumb's place each frame to `record` (`None` when the content fits): for a
-    /// render that checks the bar, never for the app.
     pub fn record_thumb(mut self, record: &ThumbRecord) -> Self {
         self.thumb = Some(record.clone());
         self
     }
 }
 
-/// What the bar remembers between frames, in element state under the div's id.
 struct Bar {
-    /// The handle when the view gave none.
     own: ScrollHandle,
-    /// A timer will draw the bar again (its fade); one at a time.
     waking: bool,
-    /// When it last moved, or the pointer last left.
     active: Option<Instant>,
     hovered: bool,
     drag: Option<Drag>,
-    /// Whether the bar was on screen last frame: it takes presses only then.
     shown: bool,
 }
 
@@ -235,10 +190,8 @@ impl Element for Scrollable {
         cx: &mut App,
     ) -> Prepainted {
         layout.inner.prepaint(window, cx);
-        // The div has measured its content by now.
         let scrolls = layout.track.max_offset() > 0.5;
         let zone = scrolls.then(|| {
-            // The strip passes presses and the pointer through while the bar is hidden.
             let behavior = if layout.bar.borrow().shown {
                 HitboxBehavior::BlockMouseExceptScroll
             } else {
@@ -266,7 +219,6 @@ impl Element for Scrollable {
         };
         let track = layout.track.clone();
         let bar = layout.bar.clone();
-        // The view the bar is in: its changes draw that view, not the whole window.
         let view = window.current_view();
         let geometry = Geometry::of(bounds, &track);
         if let Some(record) = &self.thumb {
@@ -288,8 +240,6 @@ impl Element for Scrollable {
                 state.active = Some(now);
             }
             let dragging = state.drag.is_some();
-            // The pointer only holds a bar that scrolling already showed (so it can be grabbed);
-            // over a hidden bar it shows nothing.
             let hovered =
                 dragging || math::holds(zone.is_hovered(window), state.shown, state.hovered);
             if hovered != state.hovered {
@@ -307,9 +257,6 @@ impl Element for Scrollable {
                 math::visibility(since)
             };
             state.shown = alpha > 0.0;
-            // Frames only while the bar is on screen and changing: a timer at the fade's start and
-            // for each of its steps, never every display frame, since each draws the whole list
-            // again (the view the bar is in).
             if !hovered && state.shown && !pinned && !state.waking {
                 if let Some(wait) = math::next_frame_in(since) {
                     state.waking = true;
@@ -328,7 +275,6 @@ impl Element for Scrollable {
             (alpha, hovered, dragging)
         };
 
-        // The pointer stays an arrow over the bar, whatever is beneath it.
         window.set_cursor_style(CursorStyle::Arrow, &zone);
 
         if alpha > 0.0 {
@@ -354,7 +300,6 @@ impl Element for Scrollable {
             }
         }
 
-        // The pointer moving: hover, and the thumb following a drag.
         {
             let (bar, track, zone) = (bar.clone(), track.clone(), zone.clone());
             window.on_mouse_event(move |event: &MouseMoveEvent, phase, window, cx| {
@@ -382,7 +327,6 @@ impl Element for Scrollable {
                     cx.stop_propagation();
                     return;
                 }
-                // Not `is_hovered` alone: over a hidden bar that would show it on the next draw.
                 let over = math::holds(zone.is_hovered(window), state.shown, state.hovered);
                 if over != state.hovered {
                     state.hovered = over;
@@ -393,7 +337,6 @@ impl Element for Scrollable {
                 }
             });
         }
-        // A press: on the thumb it grabs it, in the track it pages. The content never sees it.
         {
             let (bar, track, zone) = (bar.clone(), track.clone(), zone.clone());
             window.on_mouse_event(move |event: &MouseDownEvent, phase, window, cx| {
@@ -445,7 +388,6 @@ impl Element for Scrollable {
                 }
             });
         }
-        // A wheel over the list counts as scrolling even when it is already at an end.
         {
             let bar = bar.clone();
             window.on_mouse_event(move |event: &ScrollWheelEvent, phase, _, _| {
@@ -457,7 +399,6 @@ impl Element for Scrollable {
     }
 }
 
-/// The bar's strip: along the container's right edge, its whole height.
 fn strip(bounds: Bounds<Pixels>) -> Bounds<Pixels> {
     Bounds {
         origin: point(bounds.right() - px(ZONE_WIDTH), bounds.top()),

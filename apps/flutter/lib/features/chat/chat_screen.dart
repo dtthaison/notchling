@@ -31,7 +31,6 @@ import 'slash_commands.dart';
 import 'composer.dart';
 import 'pending_card.dart';
 
-/// The Chat tab for the selected session.
 class ChatScreen extends ConsumerWidget {
   const ChatScreen({super.key});
 
@@ -84,7 +83,6 @@ class _SessionChatState extends ConsumerState<_SessionChat> {
         });
       }
     });
-    // Opening the chat again: catch up on whatever was said while the phone was elsewhere.
     unawaited(
       Future<void>.microtask(
         () => mounted
@@ -96,7 +94,6 @@ class _SessionChatState extends ConsumerState<_SessionChat> {
 
   @override
   void dispose() {
-    // A dictation belongs to the chat it started in: leaving drops it instead of typing into another one.
     unawaited(_transcripts?.cancel());
     unawaited(_voice.cancel());
     _controller.dispose();
@@ -105,13 +102,9 @@ class _SessionChatState extends ConsumerState<_SessionChat> {
     super.dispose();
   }
 
-  /// Confirms (twice for a running session whose original must be stopped), then asks the Mac to resume this
-  /// session in its own terminal and switches to the result.
   Future<void> _takeOver() async {
     final Session? session = ref.read(sessionsProvider).byId(widget.sessionId);
     if (session == null) return;
-    // The computer this session is on, taken now: the answer can come after the user picked another
-    // computer's session with the same id, and the resumed session is on the computer that resumed it.
     final String host = ref.read(selectedSessionProvider)?.host ?? ref.read(macsProvider).active?.id ?? '';
     final TakeoverChoice choice = await confirmTakeover(context, session);
     if (choice == TakeoverChoice.cancel || !mounted) return;
@@ -123,7 +116,6 @@ class _SessionChatState extends ConsumerState<_SessionChat> {
     }
   }
 
-  /// Tap to start, tap to stop; a tap while transcribing cancels. The text goes into the composer, never out.
   Future<void> _toggleMic() async {
     final Session? session = ref.read(sessionsProvider).byId(widget.sessionId);
     final ChatState chat = ref.read(chatProvider(widget.sessionId));
@@ -158,11 +150,7 @@ class _SessionChatState extends ConsumerState<_SessionChat> {
   Widget build(BuildContext context) {
     final AppL10n l10n = AppL10n.of(context);
     final String id = widget.sessionId;
-    // Only whether the session exists: the Mac pushes new Session objects often and the screen must not rebuild
-    // for each. Parts that show session fields watch their own slice below.
     ref.watch(sessionsProvider.select((SessionsState s) => s.byId(id) != null));
-    // Only what the list shows. The send state, takeover progress and dictation tick on their own (the voice
-    // timer fires every 100 ms) and belong to the composer, so they must not rebuild the messages.
     final _ListData data = ref.watch(
       chatProvider(id).select(
         (ChatState c) => _ListData(
@@ -250,7 +238,6 @@ class _SessionChatState extends ConsumerState<_SessionChat> {
                       final TakeoverProgress takeoverProgress = ref.watch(
                         chatProvider(id).select((ChatState c) => c.takeover),
                       );
-                      // A record compares by value, so a push with the same values does not rebuild the composer.
                       final ({
                         bool? canMessage,
                         String? cwd,
@@ -323,7 +310,6 @@ class _SessionChatState extends ConsumerState<_SessionChat> {
   List<ChatMessage>? _groupedFor;
   List<ChatEntry> _entries = const <ChatEntry>[];
 
-  /// The messages with tool runs folded, made again only when the list itself changed.
   List<ChatEntry> _entriesOf(List<ChatMessage> messages) {
     if (!identical(_groupedFor, messages)) {
       _groupedFor = messages;
@@ -351,7 +337,6 @@ class _SessionChatState extends ConsumerState<_SessionChat> {
     final ChatNotifier notifier = ref.read(
       chatProvider(widget.sessionId).notifier,
     );
-    // The room the keyboard has taken, once it has settled (see KeyboardLift): the newest message stays above the composer.
     return ValueListenableBuilder<double>(
       valueListenable: _lift.settled,
       builder: (BuildContext context, double room, Widget? _) => Stack(
@@ -398,7 +383,6 @@ class _ChatHeader extends ConsumerWidget {
       sessionsProvider.select((SessionsState s) => s.byId(sessionId)),
     );
     if (session == null) return const SizedBox.shrink();
-    // Muted per computer: the same id on another computer is another session.
     final String scope = ref.watch(macsProvider.select((MacsState s) => s.activeScope));
     final bool muted = ref.watch(
       alertPrefsProvider.select((AlertPrefs p) => p.isMuted(scope, session.id)),
@@ -451,7 +435,6 @@ class _ChatSkeleton extends StatelessWidget {
   }
 }
 
-/// What the message list depends on. Equal when nothing it shows changed.
 class _ListData {
   const _ListData(
     this.phase,
@@ -487,7 +470,6 @@ class _ListData {
   );
 }
 
-/// A thin line under the header while newer messages are being fetched. The messages already shown stay.
 class _UpdatingLine extends ConsumerWidget {
   const _UpdatingLine({required this.sessionId});
   final String sessionId;
@@ -509,8 +491,6 @@ class _UpdatingLine extends ConsumerWidget {
   }
 }
 
-/// A round button that pops in (a spring-like scale) once the list is scrolled up, with the count of messages that
-/// arrived meanwhile. Tap: back to the newest.
 class ScrollDownButton extends StatelessWidget {
   const ScrollDownButton({super.key, required this.visible, required this.unread, required this.onTap});
   final bool visible;

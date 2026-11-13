@@ -1,6 +1,3 @@
-//! A Set up all's admin ask and a confirmed plan on its way to run, shared between the window
-//! and the background thread that runs it.
-
 use std::collections::VecDeque;
 use std::sync::mpsc::{channel, Sender};
 use std::sync::{Arc, Mutex};
@@ -13,7 +10,6 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-/// An admin step Set up all reached: its run waits on the window's answer.
 pub struct PendingAdmin {
     pub machine: String,
     pub step: ApprovedStep,
@@ -26,14 +22,10 @@ impl PendingAdmin {
     }
 }
 
-/// Where Set up all runs leave their admin asks for the window (`ask`, on each run's thread), and
-/// where the window picks them up one at a time (`take`, on each tick). Runs on two machines can
-/// ask at once: each waits its turn in the queue, and none drops another's.
 #[derive(Clone, Default)]
 pub struct AdminAsks(Arc<Mutex<VecDeque<PendingAdmin>>>);
 
 impl AdminAsks {
-    /// Blocks until the window answers; a window gone before that cancels.
     pub fn ask(&self, machine: &str, step: &ApprovedStep) -> AdminAnswer {
         let (tx, rx) = channel();
         lock(&self.0).push_back(PendingAdmin {
@@ -44,23 +36,19 @@ impl AdminAsks {
         rx.recv().unwrap_or(AdminAnswer::None)
     }
 
-    /// The oldest ask still waiting.
     pub fn take(&self) -> Option<PendingAdmin> {
         lock(&self.0).pop_front()
     }
 
-    /// How many asks wait for the window.
     pub fn waiting(&self) -> usize {
         lock(&self.0).len()
     }
 
-    /// An ask the window couldn't show yet goes back to the front.
     pub(super) fn put_back(&self, pending: PendingAdmin) {
         lock(&self.0).push_front(pending);
     }
 }
 
-/// A confirmed plan, to run off the UI thread.
 pub struct Run {
     pub machine: String,
     pub kind: PlanKind,
@@ -68,7 +56,6 @@ pub struct Run {
     asks: AdminAsks,
 }
 
-/// What a run was, for recording its outcome.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RunDone {
     pub machine: String,
@@ -90,7 +77,6 @@ impl Run {
         }
     }
 
-    /// Runs the plan (blocking). Set up all's admin steps ask through the window.
     pub fn execute(self, engine: &SetupEngine) -> (RunDone, FixOutcome) {
         let Run {
             machine,
@@ -146,7 +132,6 @@ mod tests {
 
         let a = asks.take().expect("the first ask");
         assert_eq!(a.machine, "m1", "the oldest first");
-        // the window shows another sheet meanwhile: the ask goes back to the front
         asks.put_back(a);
         let a = asks.take().unwrap();
         assert_eq!(a.machine, "m1");

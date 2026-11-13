@@ -1,8 +1,3 @@
-"""Phase 4 moved the Swift app to legacy/macos/ and the phone app to apps/flutter/. These tests pin
-the layout: the old paths are gone, the new ones exist, nothing outside the moved folders (and the
-history docs) still names an old path, and the auto-merge zone covers the same files as before.
-"""
-
 from __future__ import annotations
 
 import json
@@ -20,19 +15,16 @@ from guard.zones import Zones, load  # noqa: E402
 
 ZONES_BEFORE = Path(__file__).resolve().parent / "fixtures" / "zones-before-phase4.json"
 
-# What moved into legacy/macos/ (a path prefix, or a whole file at the root), and where the phone went.
 SWIFT_MOVED = ["Sources", "Tests", "Demo", "Icon", "Pet", "Info.plist", "release.sh", "build.sh"]
 PHONE_OLD, PHONE_NEW = "mobile", "apps/flutter"
 SWIFT_NEW = "legacy/macos"
 
-# Text that keeps the old paths on purpose: history, and the fixtures that record the old layout.
 HISTORY = (
     "docs/superpowers/", "docs/plans/", "docs/decisions/", "CHANGELOG.md",
     "tools/guard/tests/fixtures/notes-before-phase3.txt",
     "tools/guard/tests/fixtures/zones-before-phase4.json",
     "tools/guard/tests/test_layout.py",
 )
-# Their own folders read paths relative to themselves ("Sources/Notchling" is right inside legacy/macos/).
 OWN_FOLDERS = (SWIFT_NEW + "/", PHONE_NEW + "/")
 
 OLD_SWIFT = re.compile(r"(?<![\w/])(?:Sources/(?:Notchling|ConsoleCore|hostd|AGENTS\.md)|Tests/(?:NotchlingTests|ConsoleCoreTests))")
@@ -45,7 +37,6 @@ def tracked() -> List[str]:
 
 
 def text_of(path: str):
-    """The file's text, or None for a binary one (or one that's gone)."""
     try:
         data = (ROOT / path).read_bytes()
     except OSError:
@@ -59,7 +50,6 @@ def text_of(path: str):
 
 
 def new_path(old: str) -> str:
-    """Where a path from before the move lives now."""
     for name in SWIFT_MOVED:
         if old == name or old.startswith(name + "/"):
             return SWIFT_NEW + "/" + old
@@ -69,13 +59,10 @@ def new_path(old: str) -> str:
 
 
 def survivors(before: Dict[str, List[bool]], have) -> List[Tuple[str, str, List[bool]]]:
-    """(old path, new path, flags before) for each pre-move file still tracked at its new path. A file
-    deleted or renamed after the move left the zone question with it, so it is neither compared nor counted."""
     return [(old, new_path(old), flags) for old, flags in before.items() if new_path(old) in have]
 
 
 def zone_diffs(before: Dict[str, List[bool]], zones: Zones, have) -> List[str]:
-    """Surviving files whose (in_zone, new_file_ok) is not what it was before the move."""
     diffs = []
     for old, new, (in_zone, new_ok) in survivors(before, have):
         now = (zones.in_zone(new), zones.new_file_ok(new))
@@ -85,7 +72,6 @@ def zone_diffs(before: Dict[str, List[bool]], zones: Zones, have) -> List[str]:
 
 
 def zone_counts(before: Dict[str, List[bool]], zones: Zones, have) -> Tuple[Tuple[int, int], Tuple[int, int]]:
-    """((in zone now, in zone before), (new-files-only now, before)), over the surviving files only."""
     alive = survivors(before, have)
     return (
         (sum(zones.in_zone(new) for _, new, _ in alive), sum(flags[0] for _, _, flags in alive)),
@@ -98,7 +84,6 @@ class LayoutTests(unittest.TestCase):
         self.files = tracked()
 
     def test_old_paths_are_gone(self):
-        # A new root build.sh exists (the wrapper); every other old path is gone.
         gone = [p for p in self.files if p != "build.sh" and any(p == n or p.startswith(n + "/") for n in SWIFT_MOVED)]
         gone += [p for p in self.files if p.startswith(PHONE_OLD + "/")]
         self.assertEqual(gone, [])
@@ -148,7 +133,6 @@ class LayoutTests(unittest.TestCase):
         self.assertEqual(hits, [], "\n".join(f"{p}:{n}: {s}" for p, n, s in hits))
 
     def test_moved_folders_do_not_name_the_other_side_by_its_old_path(self):
-        """Inside legacy/macos/ the phone is apps/flutter/, never mobile/."""
         hits = []
         for path in self.files:
             if not path.startswith(OWN_FOLDERS) or path.startswith(HISTORY):
@@ -166,7 +150,6 @@ class LayoutTests(unittest.TestCase):
         zones = load(ROOT / "tools" / "guard" / "zones.json")
         have = set(self.files)
         self.assertGreater(len(before), 700)
-        # A later deletion or rename of a pre-move file is not a zone change; most of them must survive.
         self.assertGreater(len(survivors(before, have)), len(before) // 2)
         diffs = zone_diffs(before, zones, have)
         self.assertEqual(diffs, [], "\n".join(diffs[:20]))
@@ -180,7 +163,6 @@ class LayoutTests(unittest.TestCase):
 
 
 class ZoneCompareTests(unittest.TestCase):
-    """The comparison helpers on a small zone: only files that survive are compared."""
 
     ZONES = Zones(("docs/**", "!docs/rules.md", "legacy/macos/Sources/Notchling/Chat/Views/**"), ("legacy/macos/Tests/**",))
     BEFORE = {
@@ -201,7 +183,7 @@ class ZoneCompareTests(unittest.TestCase):
         self.assertEqual(zone_counts(self.BEFORE, self.ZONES, have), ((2, 2), (0, 0)))
 
     def test_a_file_whose_zone_flag_flipped_still_fails(self):
-        before = dict(self.BEFORE, **{"docs/rules.md": [True, False]})  # the zone now keeps rules.md out
+        before = dict(self.BEFORE, **{"docs/rules.md": [True, False]})
         have = self.ALL | {"docs/rules.md"}
         diffs = zone_diffs(before, self.ZONES, have)
         self.assertEqual(len(diffs), 1, diffs)

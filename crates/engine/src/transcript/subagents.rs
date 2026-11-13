@@ -1,8 +1,3 @@
-//! Subagents a session started with the Agent tool. Claude Code 2.1.31x keeps each one's transcript
-//! beside the session's: `<session>.jsonl` becomes `<session>/subagents/agent-<id>.jsonl`, with
-//! `agent-<id>.meta.json` holding its type, description, model, effort, the Agent call's tool use id
-//! and `requestShape` ("background" when it runs on while the session goes on).
-
 use super::model::{Conversation, Timestamp};
 use super::util::{file_times, modified_secs};
 use serde::Deserialize;
@@ -13,9 +8,7 @@ use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 
-/// A subagent that wrote nothing for this long, with no word that it finished, counts as quiet.
 pub const QUIET_AFTER: f64 = 600.0;
-/// The notch's quicker guess, without reading the session's transcript.
 pub const ACTIVE_WINDOW: f64 = 90.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -24,13 +17,9 @@ pub enum Status {
     Completed,
     Failed,
     Stopped,
-    /// No word that it finished, but nothing written for a while: the session may have stopped.
     Quiet,
 }
 
-/// Where a subagent's transcript comes from, and so how it is read: Claude Code's own subagent
-/// files, or a job the session handed to Codex or Antigravity CLI (`delegate::record`), whose
-/// session is the other tool's own.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Origin {
     #[default]
@@ -61,7 +50,6 @@ impl Subagent {
     }
 }
 
-/// `<session>/subagents` for a session transcript.
 pub fn folder(transcript_path: &str) -> String {
     let base = Path::new(transcript_path).with_extension("");
     base.join("subagents").to_string_lossy().into_owned()
@@ -72,7 +60,6 @@ fn meta_cache() -> &'static Mutex<HashMap<String, Value>> {
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-/// Written once when the subagent starts, so it's read once.
 fn read_meta(path: &str) -> Value {
     let mut cache = meta_cache().lock().unwrap_or_else(|e| e.into_inner());
     if let Some(hit) = cache.get(path) {
@@ -95,8 +82,6 @@ fn opt_str(v: &Value, key: &str) -> Option<String> {
     v.get(key).and_then(Value::as_str).map(String::from)
 }
 
-/// Every subagent of a session, oldest first. `finished` maps an agent id (background) or an Agent
-/// call's tool use id (foreground) to how it ended, from the session's transcript.
 pub fn list(
     transcript_path: &str,
     finished: &HashMap<String, String>,
@@ -135,7 +120,6 @@ pub fn list(
             origin: Origin::Claude,
         };
         agent.status = status_of(&agent, finished, now);
-        // The session's notice can be older than the part of its transcript that was read.
         if agent.status != Status::Completed && agent.status != Status::Failed && handed_back(&file)
         {
             agent.status = Status::Completed;
@@ -147,7 +131,6 @@ pub fn list(
 }
 
 pub fn status_of(agent: &Subagent, finished: &HashMap<String, String>, now: Timestamp) -> Status {
-    // A background agent's tool call returns at once ("launched"); only its notification says it ended.
     let word = finished.get(&agent.id).or_else(|| {
         if agent.background {
             None
@@ -164,8 +147,6 @@ pub fn status_of(agent: &Subagent, finished: &HashMap<String, String>, now: Time
     }
 }
 
-/// A background subagent's last step is handing its report back: the tool result says "Report
-/// delivered to your caller" (2.1.318). Read from the last 8 KB.
 pub fn handed_back(path: &str) -> bool {
     let Ok(mut file) = File::open(path) else {
         return false;
@@ -187,7 +168,6 @@ pub fn handed_back(path: &str) -> bool {
     tail.windows(needle.len()).any(|w| w == needle)
 }
 
-/// How many look busy right now: written to in the last `ACTIVE_WINDOW`. For the notch's rows.
 pub fn active_count(transcript_path: &str, now: Timestamp) -> usize {
     let dir = folder(transcript_path);
     let Ok(entries) = std::fs::read_dir(&dir) else {
@@ -208,7 +188,6 @@ fn tag(name: &str, text: &str) -> Option<String> {
     Some(text[a..b].trim().to_string())
 }
 
-/// `<task-id>...</task-id>` and `<status>...</status>` pairs in task notifications.
 pub fn notification_statuses(text: &str) -> Vec<(String, String)> {
     let mut out = Vec::new();
     let mut rest = text;
@@ -224,17 +203,13 @@ pub fn notification_statuses(text: &str) -> Vec<(String, String)> {
     out
 }
 
-/// A subagent's own transcript as a conversation (every line is a sidechain line).
 pub fn read(path: &str) -> Conversation {
     super::conversation::read_subagent(path)
 }
 
-/// [`read`] as a shared conversation: an unchanged file gives the same `Arc`.
 pub fn read_shared(path: &str) -> std::sync::Arc<Conversation> {
     super::conversation::read_subagent_shared(path)
 }
-
-// MARK: The phone bridge's view
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -247,7 +222,6 @@ struct ConsoleMeta {
     finished: Option<bool>,
 }
 
-/// A subagent as the phone bridge lists it (ConsoleCore's `Subagent`).
 #[derive(Debug, Clone, PartialEq)]
 pub struct ConsoleSubagent {
     pub id: String,
@@ -262,9 +236,6 @@ pub struct ConsoleSubagent {
     pub running: bool,
 }
 
-/// Reads `<project dir>/<session id>/subagents/agent-<id>.meta.json` beside each `agent-<id>.jsonl`.
-/// A subagent that never wrote `finished` counts as running only while its transcript keeps moving
-/// (`running_window` seconds, 600 in the app). Running ones come first, then the newest.
 pub fn console_list(
     session_id: &str,
     transcript_path: Option<&str>,

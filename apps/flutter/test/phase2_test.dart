@@ -146,10 +146,8 @@ void main() {
       await until(() => second.read(archivedSessionsProvider).containsKey('s3'));
 
       final List<Session> sessions = previewSessions();
-      // Archived after its last activity: hidden.
       final Map<String, int> later = <String, int>{'s3': previewNow.add(const Duration(hours: 1)).millisecondsSinceEpoch};
       expect(hiddenSessionIds(later, sessions), <String>{'s3'});
-      // The same session active after the archive time shows again.
       final Map<String, int> early = <String, int>{'s3': previewNow.subtract(const Duration(hours: 1)).millisecondsSinceEpoch};
       expect(hiddenSessionIds(early, sessions), isEmpty);
       second.read(archivedSessionsProvider.notifier).restore('s3');

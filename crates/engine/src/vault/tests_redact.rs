@@ -1,7 +1,3 @@
-//! The redactor (Swift `SecretVaultTests`' first four, then the guarantees the Swift tests didn't
-//! pin: the output never depends on how the input was cut, overlapping values are hidden whole,
-//! a mask is never matched again) and the runner, with `/bin/sh` only.
-
 use super::redact::Redactor;
 use super::runner;
 use std::collections::BTreeMap;
@@ -87,7 +83,6 @@ fn only_a_possible_start_is_held() {
 fn overlapping_values_are_hidden_whole() {
     let pairs = [("abcd", "[A]"), ("cdefgh", "[B]")];
     assert_eq!(run(&pairs, &["xabcdefghy"]), "x[A][B]y");
-    // A value inside another, and one that repeats into itself.
     assert_eq!(run(&[("aaaa", "[a]")], &["aaaaaa"]), "[a][a]");
     assert_eq!(run(&[("abab", "[w]")], &["ababab!"]), "[w][w]!");
     assert_eq!(
@@ -98,7 +93,6 @@ fn overlapping_values_are_hidden_whole() {
 
 #[test]
 fn a_mask_is_never_matched_again() {
-    // A value that is part of another's mask, and a value made of a mask's tail and what follows.
     let pairs = [("token-value", "[secret:gh]"), ("secret", "[secret:s]")];
     assert_eq!(
         run(&pairs, &["token-value"]),
@@ -110,7 +104,6 @@ fn a_mask_is_never_matched_again() {
     assert_eq!(run(&pairs, &["abcdefgh", "zz"]), "[x]zz");
 }
 
-/// The cuts of `input` into 1 to 3 reads, every way, plus one byte at a time.
 fn every_cut(input: &[u8]) -> Vec<Vec<&[u8]>> {
     let n = input.len();
     let mut cuts = vec![vec![input], input.chunks(1).collect()];
@@ -123,7 +116,6 @@ fn every_cut(input: &[u8]) -> Vec<Vec<&[u8]>> {
     cuts
 }
 
-/// The output for the whole input in one read, which every cut must equal.
 fn whole(h: &BTreeMap<String, String>, input: &[u8]) -> Vec<u8> {
     run_chunks(h, &[input])
 }
@@ -174,7 +166,6 @@ fn every_cut_gives_the_same_output() {
     }
 }
 
-/// A small deterministic generator: no `rand` crate in the engine.
 struct XorShift(u64);
 
 impl XorShift {
@@ -193,7 +184,6 @@ impl XorShift {
 fn random_texts_never_show_a_value_however_they_are_cut() {
     let mut rng = XorShift(0x5eed_1234_abcd_0001);
     for _ in 0..300 {
-        // Values and text over a two-letter alphabet overlap often; masks use other bytes.
         let alphabet = b"ab";
         let word = |rng: &mut XorShift, len: usize| -> String {
             (0..len).map(|_| alphabet[rng.below(2)] as char).collect()
@@ -210,7 +200,6 @@ fn random_texts_never_show_a_value_however_they_are_cut() {
         for value in h.keys() {
             assert!(!contains(&expected, value.as_bytes()), "{h:?} {input:?}");
         }
-        // Every two-read cut, and a few random many-read ones.
         for i in 0..=input.len() {
             assert_eq!(run_chunks(&h, &[&input[..i], &input[i..]]), expected);
         }

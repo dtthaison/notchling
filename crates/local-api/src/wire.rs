@@ -1,20 +1,9 @@
-//! What goes over the socket: one JSON object per line.
-//!
-//! - Request `{"id": <u64>, "op": "<name>", "args": {...}}`.
-//! - Reply `{"id": <u64>, "ok": <result>}` or `{"id": <u64>, "err": {"code": "<code>", "message": "..."}}`.
-//!   A success may carry more fields beside `ok` (`sessions.list`: `"partial": true` when it
-//!   answered before the daemon's first read of the list); a client ignores ones it doesn't know.
-//! - Event, only after `events.subscribe`: `{"event": "<name>", "data": {...}}`.
-
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::fmt;
 
-/// The API version this crate speaks; `hello` must name it.
 pub const API_VERSION: u32 = 1;
 
-/// The op names: Milestone 2's reads, then Milestone 3's acting ops (app tier, refused while the
-/// daemon's `acting` setting is off), their reads, and the hook's.
 pub mod ops {
     pub const HELLO: &str = "hello";
     pub const DAEMON_STATUS: &str = "daemon.status";
@@ -23,10 +12,6 @@ pub mod ops {
 
     pub const SESSION_REPLY: &str = "session.reply";
     pub const SESSION_ANSWER: &str = "session.answer";
-    /// `{id: <prompt id>, decision, message?}` decides a hook-held prompt; `{id: <row id>,
-    /// decision, expect: {tool, summary}}` types the decision's digit into a background job's
-    /// permission dialog, only when the dialog on screen asks about `expect` (`notchlingd`'s
-    /// `acting_ops` module docs).
     pub const SESSION_PERMISSION: &str = "session.permission";
     pub const SESSION_INTERRUPT: &str = "session.interrupt";
     pub const SESSION_STOP: &str = "session.stop";
@@ -42,21 +27,12 @@ pub mod ops {
     pub const SESSION_QUESTION: &str = "session.question";
     pub const HOOK_REQUEST: &str = "hook.request";
 
-    /// Milestone 5's Codex ops (E6a), app tier and refused while acting is off:
-    /// `codex.send {id | draft_folder, text, model?, effort?, draft?}`, `codex.stop {id}`,
-    /// `codex.delete {id}`. A new session or a delete that takes over 4.5 s is answered
-    /// `starting` / `deleting` and ends as an event.
     pub const CODEX_SEND: &str = "codex.send";
     pub const CODEX_STOP: &str = "codex.stop";
     pub const CODEX_DELETE: &str = "codex.delete";
 
-    /// Milestone 5's Antigravity CLI ops (E6b), the shapes in `notchlingd`'s `agy_ops` module
-    /// docs. `agy.sessions` is agent tier; the rest app tier. The ones that start, type into or
-    /// answer `agy` are refused while acting is off; `agy.state` and `agy.conversation` are reads.
     pub const AGY_SESSIONS: &str = "agy.sessions";
     pub const AGY_STATE: &str = "agy.state";
-    /// `{id, peek?}` → `{id, open, loading, working, loadError, conversation}`: what the open
-    /// runner holds; an empty conversation with `open: false` for a session it doesn't.
     pub const AGY_CONVERSATION: &str = "agy.conversation";
     pub const AGY_OPEN: &str = "agy.open";
     pub const AGY_SEND: &str = "agy.send";
@@ -64,65 +40,36 @@ pub mod ops {
     pub const AGY_SET_OPTION: &str = "agy.set_option";
     pub const AGY_PERMISSION: &str = "agy.permission";
 
-    /// Milestone 4's phone bridge, app tier. The bridge is off at every start; `bridge.set
-    /// {"on": bool}` and `bridge.status` answer `{state, port, fingerprint, ...}`.
     pub const BRIDGE_SET: &str = "bridge.set";
     pub const BRIDGE_STATUS: &str = "bridge.status";
-    /// `{code, payload, expires_at, hosts}`: a one-time code and the QR's text.
     pub const BRIDGE_PAIR_BEGIN: &str = "bridge.pair.begin";
-    /// `{"request": id, "allow": bool}`: the answer to a `bridge.pair.request` event.
     pub const BRIDGE_PAIR_ANSWER: &str = "bridge.pair.answer";
-    /// `{devices: [{id, name, platform, paired_at, last_seen}]}`.
     pub const BRIDGE_DEVICES: &str = "bridge.devices";
-    /// `{"device": id}` → `{revoked: bool}`.
     pub const BRIDGE_REVOKE: &str = "bridge.revoke";
-    /// `{enabled, configured, connected, last_connection, listening, hostname}`.
     pub const BRIDGE_TUNNEL_STATUS: &str = "bridge.tunnel.status";
 
-    /// Milestone 5's pages library and session index, agent tier, reads that work whatever the
-    /// `acting` switch says. The shapes are in `notchlingd`'s `pages_ops` module docs.
-    /// `{text?, limit?}` → `{pages: [Page], sessions: [Session], indexing}`.
     pub const SEARCH_QUERY: &str = "search.query";
-    /// `{}` → `{pages: [Page], truncated}`.
     pub const PAGES_LIST: &str = "pages.list";
-    /// `{query}` → `{pages: [Page + describe], truncated}`.
     pub const PAGES_FIND: &str = "pages.find";
 
-    /// Milestone 6's installing into other tools (E13), app tier, behind the daemon's `install`
-    /// switch: while it is off `apply` and `remove` answer with the dry-run plan and the off
-    /// message, and write nothing. The shapes are in `notchlingd`'s `install_ops` module docs.
-    /// `{action?, what?, with_swift_hooks?}` → `{on, applied, plan}`; reads only.
     pub const INSTALL_PLAN: &str = "install.plan";
-    /// `{what?, with_swift_hooks?}` → `{on, applied, plan, backup?}`.
     pub const INSTALL_APPLY: &str = "install.apply";
-    /// `{what?}` → `{on, applied, plan, backup?}`.
     pub const INSTALL_REMOVE: &str = "install.remove";
-    /// Milestone 6's switches (`notchlingd`'s `switches` module): `{switch, on}` (app tier) and a
-    /// read of all three (agent tier).
     pub const SETTINGS_SET_SWITCH: &str = "settings.set_switch";
     pub const SETTINGS_SWITCHES: &str = "settings.switches";
 
-    /// Milestone 6's Claude Code accounts and lanes (E8a), app tier, behind the `accounts` switch;
-    /// the shapes are in `notchlingd`'s `accounts_ops` module docs. `accounts.list` and
-    /// `lanes.list` read the daemon's own files while the switch is off.
     pub const ACCOUNTS_LIST: &str = "accounts.list";
     pub const ACCOUNTS_SWITCH: &str = "accounts.switch";
     pub const ACCOUNTS_ADD_BEGIN: &str = "accounts.add.begin";
     pub const ACCOUNTS_ADD_FINISH: &str = "accounts.add.finish";
     pub const ACCOUNTS_REMOVE: &str = "accounts.remove";
     pub const ACCOUNTS_MOVE_ALL: &str = "accounts.move_all";
-    /// `{ticket}`: the result of an accounts op that answered `{state: "working", ticket}`, after
-    /// up to 4 s; `{state: "working", ticket}` again while it still runs.
     pub const ACCOUNTS_RESULT: &str = "accounts.result";
     pub const LANES_LIST: &str = "lanes.list";
     pub const LANES_CREATE: &str = "lanes.create";
     pub const LANES_REMOVE: &str = "lanes.remove";
     pub const LANES_SWITCH: &str = "lanes.switch";
 
-    /// Milestone 6's other providers (E8b: Codex, Antigravity, Claude Desktop), app tier, behind
-    /// the daemon's `accounts` switch; the shapes are in `notchlingd`'s `providers_ops` module
-    /// docs. While the switch is off all answer `forbidden` except `providers.list`, which lists
-    /// the saved names from the daemon's own files.
     pub const PROVIDERS_LIST: &str = "providers.list";
     pub const PROVIDERS_SWITCH: &str = "providers.switch";
     pub const PROVIDERS_ADD_BEGIN: &str = "providers.add.begin";
@@ -130,101 +77,52 @@ pub mod ops {
     pub const PROVIDERS_REMOVE: &str = "providers.remove";
     pub const PROVIDERS_USAGE: &str = "providers.usage";
 
-    /// Milestone 6's Secret Vault (E9), behind the daemon's `vault` switch; the shapes are in
-    /// `notchlingd`'s `vault_ops` module docs. Agent tier: `vault.find`, `vault.use` (an entry
-    /// marked ask-first waits for the app's approval) and `vault.request` (waits for the app's
-    /// form). App tier: the rest.
     pub const VAULT_FIND: &str = "vault.find";
     pub const VAULT_USE: &str = "vault.use";
     pub const VAULT_REQUEST: &str = "vault.request";
     pub const VAULT_LIST: &str = "vault.list";
     pub const VAULT_SAVE: &str = "vault.save";
     pub const VAULT_REMOVE: &str = "vault.remove";
-    /// `{id, decision: "deny" | "once" | "always"}`: the answer to a `vault.approval.pending`.
     pub const VAULT_APPROVAL_ANSWER: &str = "vault.approval.answer";
-    /// `{id}`: the user closed a `vault.request.pending` form without saving.
     pub const VAULT_REQUEST_CANCEL: &str = "vault.request.cancel";
-    /// `{}` → `{approvals: [..], requests: [..]}`: the `vault.approval.pending` and
-    /// `vault.request.pending` events still waiting, oldest first, for an app that (re)connects.
     pub const VAULT_PENDING: &str = "vault.pending";
 
-    /// The model catalog, agent tier, read only (`notchlingd`'s `catalog_ops` module docs):
-    /// `{tool: "claude" | "codex" | "antigravity"}` → `{tool, models: [ModelInfo], fetchedAt}`.
     pub const CATALOG_GET: &str = "catalog.get";
 }
 
-/// Event topics and the events they carry.
 pub mod topics {
-    /// `events.subscribe {"topics": ["sessions"]}`.
     pub const SESSIONS: &str = "sessions";
-    /// The full new session list, as `sessions.list` returns it.
     pub const SESSIONS_CHANGED: &str = "sessions.changed";
-    /// Questions and permissions a hook holds open, so the app (and later the phone) share one
-    /// answered state.
     pub const PROMPTS: &str = "prompts";
     pub const PROMPT_PENDING: &str = "prompt.pending";
     pub const PROMPT_RESOLVED: &str = "prompt.resolved";
-    /// The daemon's own settings.
     pub const SETTINGS: &str = "settings";
-    /// `{"acting": bool}`, after `settings.set_acting`.
     pub const ACTING_CHANGED: &str = "settings.acting";
-    /// `{"switch": "accounts" | "vault" | "install", "on": bool}`, after `settings.set_switch`.
     pub const SWITCH_CHANGED: &str = "settings.switch";
-    /// Claude Code accounts and lanes (app tier).
     pub const ACCOUNTS: &str = "accounts";
-    /// `{accounts, active, lanes}` after a change.
     pub const ACCOUNTS_CHANGED: &str = "accounts.changed";
-    /// `{login, state: "added" | "failed" | "cancelled", account?, error?}`: a sign-in ended.
     pub const ACCOUNTS_ADD_ENDED: &str = "accounts.add.ended";
-    /// `{ticket, op, ok, result?, error?}`: an accounts op that outlasted its call ended.
     pub const ACCOUNTS_DONE: &str = "accounts.done";
-    /// Other tools' sessions (Milestone 5): Codex turns and the rows they change.
     pub const TOOLS: &str = "tools";
-    /// `{"tool"}`: that tool's model list changed (Anthropic's list fetched, Antigravity's options
-    /// seen); a client asks `catalog.get` again.
     pub const CATALOG_CHANGED: &str = "catalog.changed";
-    /// `{"id": "codex:<session>" | null, "session", "state": "started" | "queued" | "ended" |
-    /// "failed", "waiting"?, "error"?}`.
     pub const CODEX_TURN: &str = "codex.turn";
-    /// `{"id", "session", "row": <a sessions.list row> | null, "deleted"?: true}`: a session
-    /// another tool runs changed (its row is given as `sessions.list` would, or `null` when it is
-    /// gone).
     pub const SESSION_CHANGED: &str = "session.changed";
-    /// On `prompts`: an Antigravity permission waiting or answered, each also sent as
-    /// `prompt.pending` / `prompt.resolved` (the id is `agy-perm:<row id>:<rpc id>`).
     pub const AGY_PERMISSION_PENDING: &str = "agy.permission.pending";
     pub const AGY_PERMISSION_RESOLVED: &str = "agy.permission.resolved";
-    /// The phone bridge (app tier).
     pub const BRIDGE: &str = "bridge";
-    /// `{"request", "name", "platform", "address"}`: a phone gave the right code and waits for the person at
-    /// the computer (`bridge.pair.answer`). Unanswered, it is refused.
     pub const BRIDGE_PAIR_REQUEST: &str = "bridge.pair.request";
-    /// The status after a change (`bridge.status`'s answer).
     pub const BRIDGE_CHANGED: &str = "bridge.changed";
-    /// Accounts of the other providers (app tier): a switch that outlasted its reply, an add flow
-    /// that moved, a refresh that finished.
     pub const PROVIDERS: &str = "providers";
-    /// `{"provider", "reason": "sync" | "usage" | "switch" | "add" | "remove", ...}`; the app asks
-    /// `providers.list` again.
     pub const PROVIDERS_CHANGED: &str = "providers.changed";
 
-    /// The Secret Vault (app tier). Never carries a value.
     pub const VAULT: &str = "vault";
-    /// `{id, names, entries, command, folder, verified: {exe, pid, cwd, parents,
-    /// folder_matches}}`: an agent waits to use secrets marked ask-first. `command` and `folder`
-    /// are what it claims; `verified` is what the daemon checked with the kernel.
     pub const VAULT_APPROVAL_PENDING: &str = "vault.approval.pending";
-    /// `{id, decision}`: answered, timed out, or the app left.
     pub const VAULT_APPROVAL_RESOLVED: &str = "vault.approval.resolved";
-    /// `{id, request, entry, existing, changes}`: an agent asks the user to add or update one.
     pub const VAULT_REQUEST_PENDING: &str = "vault.request.pending";
-    /// `{id, saved}`.
     pub const VAULT_REQUEST_RESOLVED: &str = "vault.request.resolved";
-    /// `{names, value_changed}`: the list changed (a save, a remove, Always Allow).
     pub const VAULT_CHANGED: &str = "vault.changed";
 }
 
-/// Who the caller says it is. Self-reported, so it never decides the tier.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ClientKind {
@@ -233,17 +131,13 @@ pub enum ClientKind {
     Hook,
 }
 
-/// What a caller may do (decision 0007). Decided by the daemon from the peer's executable path.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Tier {
-    /// The installed desktop app: may do everything.
     App,
-    /// Everything else, the command line agents run included: only its narrow operations.
     Agent,
 }
 
-/// Why a call failed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ErrorCode {
@@ -252,9 +146,7 @@ pub enum ErrorCode {
     Forbidden,
     NeedsApproval,
     Internal,
-    /// The op exists and was allowed, but this daemon doesn't hold its code yet.
     Unimplemented,
-    /// The op ran and the session refused it (a dialog open, a question gone); the message says why.
     Failed,
 }
 
@@ -272,7 +164,6 @@ impl ErrorCode {
     }
 }
 
-/// An `err` reply's body.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ApiError {
     pub code: ErrorCode,
@@ -304,7 +195,6 @@ impl fmt::Display for ApiError {
 
 impl std::error::Error for ApiError {}
 
-/// A request line.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Request {
     pub id: u64,
@@ -314,8 +204,6 @@ pub struct Request {
 }
 
 impl Request {
-    /// Reads a request line. On failure the error carries the line's `id` when it had one, so the
-    /// reply can still name it (0 otherwise).
     pub fn parse(line: &[u8]) -> Result<Request, (u64, ApiError)> {
         let value: Value = serde_json::from_slice(line)
             .map_err(|e| (0, ApiError::bad_request(format!("not JSON: {e}"))))?;
@@ -325,7 +213,6 @@ impl Request {
     }
 }
 
-/// `hello`'s arguments.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Hello {
     pub client: ClientKind,
@@ -333,7 +220,6 @@ pub struct Hello {
     pub api: u32,
 }
 
-/// `hello`'s result.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HelloReply {
     pub api: u32,
@@ -341,7 +227,6 @@ pub struct HelloReply {
     pub tier: Tier,
 }
 
-/// How many clients of each kind have said hello.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ClientCounts {
     pub app: u32,
@@ -349,7 +234,6 @@ pub struct ClientCounts {
     pub hook: u32,
 }
 
-/// `daemon.status`'s result.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DaemonStatus {
@@ -357,19 +241,15 @@ pub struct DaemonStatus {
     pub pid: u32,
     pub uptime_secs: u64,
     pub clients: ClientCounts,
-    /// Whether the daemon may act on sessions (Milestone 3's switch, off by default); left out by
-    /// a handler that has no switch ([`crate::Handler::acting`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub acting: Option<bool>,
 }
 
-/// `events.subscribe`'s arguments.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Subscribe {
     pub topics: Vec<String>,
 }
 
-/// An event line.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Event {
     pub event: String,
@@ -377,7 +257,6 @@ pub struct Event {
     pub data: Value,
 }
 
-/// A line the client reads: a reply to one of its requests, or an event.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Incoming {
     Reply {
@@ -388,7 +267,6 @@ pub enum Incoming {
 }
 
 impl Incoming {
-    /// Reads a line from the daemon. A reply whose `ok` is `null` is still a success.
     pub fn parse(line: &[u8]) -> Result<Incoming, String> {
         let value: Value = serde_json::from_slice(line).map_err(|e| format!("not JSON: {e}"))?;
         let Value::Object(mut map) = value else {
@@ -418,17 +296,14 @@ impl Incoming {
     }
 }
 
-/// A success reply.
 pub fn ok_reply(id: u64, result: Value) -> Value {
     json!({ "id": id, "ok": result })
 }
 
-/// A failure reply.
 pub fn err_reply(id: u64, error: &ApiError) -> Value {
     json!({ "id": id, "err": { "code": error.code.as_str(), "message": error.message } })
 }
 
-/// An event line's object.
 pub fn event_line(event: &str, data: &Value) -> Value {
     json!({ "event": event, "data": data })
 }

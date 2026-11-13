@@ -1,6 +1,3 @@
-//! The shared readers: `read_shared` hands out one `Arc<Conversation>` per change of a file, so an
-//! unchanged transcript costs a pointer copy and `read` returns the same content as before.
-
 mod common;
 
 use common::*;

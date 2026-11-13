@@ -1,10 +1,3 @@
-"""The repository rulesets in .github/rulesets/ say what the guard relies on, and CI checks them.
-
-The JSON files are applied by tools/github/apply-settings.sh; nothing else stops someone from
-loosening one in a pull request. Every required status check must also be a job (or, for the
-maintainer gate, a posted status) in a workflow, or main would wait forever on a check that never
-runs."""
-
 from __future__ import annotations
 
 import json
@@ -14,12 +7,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Set
 
 GITHUB_ACTIONS_APP = 15368
-# The maintainer can't approve his own pull request and is the only code owner, so repository admins
-# (role 5) may merge a pull request without the review. Only through a pull request, never a push.
 ADMIN_BYPASS = [{"actor_id": 5, "actor_type": "RepositoryRole", "bypass_mode": "pull_request"}]
-# `gh release create` makes the v* tag with GITHUB_TOKEN, which is the GitHub Actions app. Only a
-# workflow holding contents: write can use this: release.yml, beta.yml's publish job and promote.yml's
-# release, appcast and fold jobs, none with signing secrets (test_workflows pins that).
 ACTIONS_BYPASS = [{"actor_id": GITHUB_ACTIONS_APP, "actor_type": "Integration", "bypass_mode": "always"}]
 CONTEXTS = ["build", "app-build", "guard", "maintainer-gate", "phone-analyze", "phone-test",
             "rust-test", "rust-clippy", "rust-deny"]
@@ -36,7 +24,6 @@ JOB_ID = re.compile(r"^  ([A-Za-z0-9_-]+):\s*(?:#.*)?$")
 
 
 def job_ids(text: str) -> Set[str]:
-    """Job ids of one workflow: the 2-space-indented keys under a top-level `jobs:` line."""
     ids: Set[str] = set()
     in_jobs = False
     for line in text.splitlines():
@@ -84,7 +71,6 @@ def _common(name: str, data: Dict[str, Any], target: str, include: str, types: L
 
 
 def _check_main(data: Dict[str, Any], problems: List[str]) -> List[str]:
-    """Checks main.json; returns the required status contexts it names."""
     rules = _common("main.json", data, "branch", "~DEFAULT_BRANCH",
                     ["deletion", "non_fast_forward", "pull_request", "required_status_checks"], problems,
                     ADMIN_BYPASS)

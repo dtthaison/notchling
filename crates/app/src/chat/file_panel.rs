@@ -1,36 +1,21 @@
-//! The file panel's pure rules (the Swift `FilePanel` and `FilePreviewKind`): what a clicked path
-//! opens, what kind of file it is, and how it is read. A folder opens in Finder; a Markdown, text,
-//! code or picture file shows in the panel beside the chat; anything else (a PDF, a video, a
-//! binary) opens in its own app. The GPUI panel (`view::page_panel`) only draws what is loaded
-//! here, and reloads when [`stamp`] says the file changed.
-
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use crate::chat::page_panel::Opens;
 
-/// How much of a text or Markdown file is read; the panel says when the rest is left out.
 pub const MAX_TEXT: usize = 1024 * 1024;
-/// The biggest picture the panel reads; a larger one opens in its own app.
 pub const MAX_IMAGE: u64 = 25 * 1024 * 1024;
-/// How much of a file is looked at to tell text from a binary.
 const SNIFF: usize = 8 * 1024;
 
-/// How the panel shows a file.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
-    /// Drawn with Chat's Markdown, so it looks as a message does.
     Markdown,
-    /// Monospaced: code, config, logs, anything that reads as UTF-8.
     Text,
-    /// A picture.
     Image(Pic),
-    /// Not shown here.
     Other,
 }
 
-/// A picture's format, from its name.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Pic {
     Png,
@@ -48,7 +33,6 @@ fn extension(path: &Path) -> String {
         .unwrap_or_default()
 }
 
-/// The picture format a file name says, if any.
 pub fn pic(path: &Path) -> Option<Pic> {
     Some(match extension(path).as_str() {
         "png" => Pic::Png,
@@ -62,8 +46,6 @@ pub fn pic(path: &Path) -> Option<Pic> {
     })
 }
 
-/// Whether `head` (the start of a file) reads as text: UTF-8 with no NUL. A multi-byte character
-/// cut by the end of `head` doesn't count against it.
 fn reads_as_text(head: &[u8]) -> bool {
     if head.contains(&0) {
         return false;
@@ -74,8 +56,6 @@ fn reads_as_text(head: &[u8]) -> bool {
     }
 }
 
-/// The kind of file `path` is, given its first bytes: Markdown and pictures by name, anything
-/// else text if it reads as text.
 pub fn kind(path: &Path, head: &[u8]) -> Kind {
     if let Some(pic) = pic(path) {
         return Kind::Image(pic);
@@ -101,8 +81,6 @@ fn head_of(path: &Path) -> Vec<u8> {
     head
 }
 
-/// What a click on an existing `path` opens: a folder in Finder, a file the panel can show in the
-/// panel, any other file in its own app.
 pub fn opens(path: &Path) -> Opens {
     if path.is_dir() {
         return Opens::Folder(path.to_path_buf());
@@ -115,8 +93,6 @@ pub fn opens(path: &Path) -> Opens {
     }
 }
 
-/// When a file was last written and how big it is: the panel reloads when this changes. `None`
-/// when the file is gone.
 pub type Stamp = Option<(Option<SystemTime>, u64)>;
 
 pub fn stamp(path: &Path) -> Stamp {
@@ -124,25 +100,12 @@ pub fn stamp(path: &Path) -> Stamp {
     Some((meta.modified().ok(), meta.len()))
 }
 
-/// A file as read for the panel.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Body {
-    Markdown {
-        text: String,
-        /// Only the first [`MAX_TEXT`] bytes were read.
-        cut: bool,
-    },
-    Text {
-        text: String,
-        cut: bool,
-    },
-    Image {
-        format: Pic,
-        bytes: Vec<u8>,
-    },
-    /// Neither text nor a picture the panel can show.
+    Markdown { text: String, cut: bool },
+    Text { text: String, cut: bool },
+    Image { format: Pic, bytes: Vec<u8> },
     Other,
-    /// Gone, or not readable.
     Missing(String),
 }
 
@@ -152,8 +115,6 @@ pub struct Loaded {
     pub body: Body,
 }
 
-/// Reads `path` for the panel. The stamp is taken first, so a write during the read shows as a
-/// change on the next look.
 pub fn load(path: &Path) -> Loaded {
     let stamp = stamp(path);
     let missing = |why: &str| Loaded {
@@ -167,7 +128,6 @@ pub fn load(path: &Path) -> Loaded {
         return missing("This file can't be read.");
     };
     let mut bytes = Vec::new();
-    // One byte past the cap says whether there was more.
     let limit = if pic(path).is_some() {
         MAX_IMAGE + 1
     } else {
@@ -186,7 +146,6 @@ pub fn load(path: &Path) -> Loaded {
         },
         kind @ (Kind::Markdown | Kind::Text) => {
             bytes.truncate(MAX_TEXT);
-            // Cut at a character, not in the middle of one.
             let text = String::from_utf8_lossy(&bytes)
                 .trim_end_matches('\u{FFFD}')
                 .to_owned();
@@ -201,8 +160,6 @@ pub fn load(path: &Path) -> Loaded {
     Loaded { stamp, body }
 }
 
-/// The header's line under the file's name: the folder it is in (home as `~`), and a note when
-/// only the start of it shows.
 pub fn subtitle(path: &Path, home: Option<&Path>, body: &Body) -> String {
     let folder = path.parent().unwrap_or(Path::new("/"));
     let shown = match home.and_then(|h| folder.strip_prefix(h).ok()) {
@@ -218,14 +175,12 @@ pub fn subtitle(path: &Path, home: Option<&Path>, body: &Body) -> String {
     }
 }
 
-/// The file's name for the header.
 pub fn title(path: &Path) -> String {
     path.file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| path.display().to_string())
 }
 
-/// The folder a Markdown file's own links and paths are read against.
 pub fn folder_of(path: &Path) -> PathBuf {
     path.parent().unwrap_or(Path::new("/")).to_path_buf()
 }
@@ -251,7 +206,6 @@ mod tests {
             kind(Path::new("a/doc.pdf"), b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n"),
             Kind::Other
         );
-        // A multi-byte character cut by the end of the sniffed bytes is still text.
         let cut = &"héllo wörld".as_bytes()[..2];
         assert_eq!(kind(Path::new("a/n.txt"), cut), Kind::Text);
         assert_eq!(kind(Path::new("a/empty"), &[]), Kind::Text);

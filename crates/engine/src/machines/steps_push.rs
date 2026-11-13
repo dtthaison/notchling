@@ -1,22 +1,9 @@
-//! The Push-is-refused step of a repo (Swift `RepoSteps` push part).
-//!
-//! `git push --dry-run` talks to GitHub's receive-pack and sends nothing: with a read-only key
-//! GitHub closes the connection first, and with a writable one git only lists what it would do. No
-//! ref is ever created. After the dry run, the worker account's own ways into GitHub (I5). The dry
-//! run goes through the `github-agents-*` alias with `IdentitiesOnly yes`, so it never sees a
-//! personal `gh` login, a default ssh key, a keychain password or a stored credential of the
-//! account. Each check keeps what its tool printed on the machine and says only a token line: an
-//! exit code, or for ssh the account name GitHub greeted (cut to GitHub's own name characters).
-//! None of them writes: `ssh -T` only authenticates, and `StrictHostKeyChecking=yes` keeps a user's
-//! ssh config (`accept-new`) from letting it add a host key.
-
 use super::registry::MachineRepo;
 use super::repo_common::{checkout_path, first_line};
 use super::shell;
 use super::step::{CheckResult, Probe, SubRow};
 use std::collections::BTreeMap;
 
-/// What the card tells the user when the check fails: the step has no Fix, only a way out.
 pub const HOW_TO: &str = "A push GitHub accepted means the key can write. Remove it on GitHub (Settings > Deploy keys) and run Deploy key's Set up again; it adds the key read-only.\nA login of the worker account itself (gh, a default ssh key, the keychain, ~/.git-credentials) is a second way to push: log it out or remove it on the machine, then Check again.";
 
 fn login_checks(linux: bool) -> String {
@@ -46,7 +33,6 @@ pub fn push_probe(repo: &MachineRepo, linux: bool) -> Probe {
     );
     let github = repo.github.clone();
     Probe::remote(script, move |out, ctx| {
-        // git's output, then its exit code on the marker line, then the login checks' token lines
         let lines: Vec<&str> = out.text.split('\n').collect();
         let mask = |s: &str| ctx.mask(s);
         let marker = lines.iter().position(|l| l.starts_with("@@push "));
@@ -77,13 +63,10 @@ pub fn push_probe(repo: &MachineRepo, linux: bool) -> Probe {
     })
 }
 
-/// A GitHub login name as GitHub allows it: 1 to 39 letters, digits and hyphens.
 fn is_plain_login(name: &str) -> bool {
     (1..=39).contains(&name.len()) && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
 }
 
-/// The verdict of the login checks' token lines. A login is a fail with its reason; a check that
-/// couldn't tell is can't tell, never a pass.
 fn login_result(tokens: &[&str]) -> CheckResult {
     let mut values: BTreeMap<&str, &str> = BTreeMap::new();
     for line in tokens {
@@ -114,8 +97,6 @@ fn login_result(tokens: &[&str]) -> CheckResult {
     let ssh = values.get("ssh").copied().unwrap_or("");
     if let Some(name) = ssh.strip_prefix("hi:") {
         if name.contains('/') {
-            // a deploy key greets with owner/repo: scoped to one repo, and a writable one fails
-            // the dry run above
             rows.push(SubRow::new(
                 "Default ssh key",
                 true,

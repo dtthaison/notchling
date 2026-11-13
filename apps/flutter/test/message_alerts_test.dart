@@ -132,7 +132,6 @@ void main() {
       c.listen<AlertEvent?>(inAppAlertProvider, (AlertEvent? a, AlertEvent? b) {});
       c.listen<AppSettings>(appSettingsProvider, (AppSettings? a, AppSettings b) {});
       c.listen<AlertPrefs>(alertPrefsProvider, (AlertPrefs? a, AlertPrefs b) {});
-      // Let the stored settings and prefs load before the test pushes lists.
       await Future<void>.delayed(Duration.zero);
       return c;
     }
@@ -157,7 +156,6 @@ void main() {
       push(c, <Session>[_s('a', reply: 'a2')]);
       expect(c.read(inAppAlertProvider), isNull);
       expect(sounds.played, isEmpty);
-      // The same session while another tab is showing does count.
       c.read(activeTabProvider.notifier).show(0);
       push(c, <Session>[_s('a', reply: 'a3')]);
       expect(c.read(inAppAlertProvider)?.sessionId, 'a');

@@ -1,6 +1,3 @@
-//! The approval prompt's tests: its words, the bound model, arming and resolving after the
-//! daemon takes the answer.
-
 use super::*;
 use serde_json::json;
 
@@ -54,7 +51,6 @@ fn the_daemons_verified_caller_is_shown_and_a_wrong_folder_warns() {
         Some("Requested by zsh ← claude ← Terminal")
     );
     assert_eq!(p.warning, Some(FOLDER_WARNING));
-    // A matching folder: no warning, nothing extra.
     let ok = Approval::from_event(&json!({"id": "ap-2", "names": ["github"],
         "folder": "/w", "verified": {"cwd": "/w", "parents": [], "folder_matches": true}}))
     .unwrap();
@@ -63,7 +59,6 @@ fn the_daemons_verified_caller_is_shown_and_a_wrong_folder_warns() {
         (p.warning, p.claimed_folder.clone(), p.requested_by.clone()),
         (None, None, None)
     );
-    // The daemon couldn't read where it runs: no warning, but the prompt says it wasn't checked.
     let unknown = Approval::from_event(&json!({"id": "ap-4", "names": ["github"],
         "folder": "/w", "verified": {"cwd": null, "parents": ["zsh"], "folder_matches": null}}))
     .unwrap();
@@ -71,12 +66,10 @@ fn the_daemons_verified_caller_is_shown_and_a_wrong_folder_warns() {
     assert_eq!(p.warning, None);
     assert_eq!(p.unchecked, Some(FOLDER_UNCHECKED));
     assert_eq!(p.folder, "/w");
-    // No verified object at all (an older daemon): nothing was checked either.
     let old =
         Approval::from_event(&json!({"id": "ap-5", "names": ["github"], "folder": "/w"})).unwrap();
     assert_eq!(Prompt::new(&old).unchecked, Some(FOLDER_UNCHECKED));
     assert_eq!(Prompt::new(&ok).unchecked, None);
-    // An odd verified object is read as far as it goes.
     let odd = Approval::from_event(&json!({"id": "ap-3", "verified": "yes"})).unwrap();
     assert_eq!(odd.verified, None);
 }
@@ -124,7 +117,6 @@ fn allow_waits_for_arming_after_the_window_shows_and_deny_never_does() {
     assert!(m.live(Decision::Deny, 1_000));
     assert!(m.live(Decision::Once, 1_000 + ARMING_MS));
     assert_eq!(m.arms_at(), Some(1_000 + ARMING_MS));
-    // Losing the key and getting it back arms again from then.
     m.hidden();
     assert!(!m.live(Decision::Once, 5_000));
     m.shown(5_000);

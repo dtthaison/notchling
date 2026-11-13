@@ -1,5 +1,3 @@
-"""python3 -m guard <command>, run from the repository root (PYTHONPATH=tools/guard)."""
-
 from __future__ import annotations
 
 import argparse

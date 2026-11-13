@@ -1,7 +1,3 @@
-//! Running a Fix (Swift `SetupEngine`, the Fix half): the refusals, the Fix in flight with its
-//! masked log, Set up all, the Running switch. Reached only from a confirmed plan
-//! ([`super::engine_plan`]).
-
 use super::engine::{lock, SetupEngine};
 use super::engine_plan::{AdminAnswer, ApprovedStep};
 use super::masks::{FixLog, Masks};
@@ -17,13 +13,10 @@ fn fail(m: impl Into<String>) -> FixOutcome {
 }
 
 impl SetupEngine {
-    // MARK: running a Fix
-
     fn append_log(&self, machine: &str, lines: Vec<String>) {
         append(&self.state, machine, lines);
     }
 
-    /// Why a Fix can't run now, or `None`. Nothing has run when this answers.
     pub(super) fn refusal(
         &self,
         step: &SetupStep,
@@ -98,7 +91,6 @@ impl SetupEngine {
         if let Some(why) = self.refusal(&step, &m, admin, plan.needs_admin, true, false) {
             return fail(why);
         }
-        // only an admin step on a sudo machine gets the password, and only for this one step
         let password = (plan.needs_admin && m.admin() == AdminAccess::Sudo)
             .then(|| admin.password().cloned())
             .flatten();
@@ -135,10 +127,6 @@ impl SetupEngine {
         outcome
     }
 
-    /// Runs `body` as the Fix in flight on `m`: logs `▸ <title>` and the outcome, streams its masked
-    /// output into the log. The machine is claimed under the same lock that checks it is free, so
-    /// two Fixes that both passed [`SetupEngine::refusal`] can't both start: the later one is
-    /// refused here and its body never runs.
     pub(super) fn perform(
         &self,
         id: StepId,
@@ -194,8 +182,6 @@ impl SetupEngine {
         }
     }
 
-    // MARK: Set up all
-
     pub(super) fn set_up_all_steps(&self, m: &Machine) -> Vec<ApprovedStep> {
         let results = self.results(&m.name);
         self.step_list(m)
@@ -221,9 +207,6 @@ impl SetupEngine {
             .collect()
     }
 
-    /// Runs the approved steps that are ✗ when their turn comes, in catalog order, and stops at the
-    /// first that fails. A step outside `approved` that is ✗ at its turn, or one whose commands
-    /// differ from the ones shown, stops the run.
     pub(super) fn set_up_all(
         &self,
         machine: &str,
@@ -312,10 +295,6 @@ impl SetupEngine {
         fail(format!("{done}; still not ✓: {shown}"))
     }
 
-    // MARK: the Running switch
-
-    /// The first step before Running that isn't ✓, or `None`. Turning the worker on waits for it;
-    /// turning it off never does.
     pub fn turn_on_blocker(&self, machine: &str) -> Option<String> {
         let m = self.machine(machine)?;
         let results = self.results(machine);
@@ -330,7 +309,6 @@ impl SetupEngine {
         None
     }
 
-    /// Turns the worker on or off with the script the sheet showed (`expected`), and only that one.
     pub(super) fn toggle_running(
         &self,
         machine: &str,
@@ -388,8 +366,6 @@ impl SetupEngine {
         outcome
     }
 
-    /// A machine was removed: drops everything held for it, so one added later under the same
-    /// name starts clean. The counters stay.
     pub fn forget(&self, machine: &str) {
         {
             let mut s = lock(&self.state);
@@ -429,8 +405,6 @@ pub(super) fn append(
 }
 
 impl SetupEngine {
-    /// Appends one line to the audit log: when, which machine, which Fix, whether it worked. The
-    /// output and the message stay out of it.
     fn audit(&self, machine: &str, title: &str, ok: bool) {
         let Some(path) = &self.deps.audit else {
             return;

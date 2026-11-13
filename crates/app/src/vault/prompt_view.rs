@@ -1,9 +1,3 @@
-//! An agent's request form over GPUI (macOS), in a floating window of its own
-//! (`mac::vault_prompts` opens it without taking the focus when the daemon asks, and closes it when
-//! the answer is in; closing it is Cancel). Esc cancels; Return never saves an agent's request, so
-//! a key pressed in another app can't add a secret. The approval card is `approval_view`. A render
-//! has a fixed request and no daemon.
-
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -20,10 +14,8 @@ use crate::accounts::view_rows::Handler;
 use crate::switches::feed::SwitchFeed;
 use crate::switches::Switch;
 
-/// The request window's size in points.
 pub const REQUEST_SIZE: (f32, f32) = (540.0, 720.0);
 
-/// An agent's request form in a window of its own.
 pub struct VaultRequestView {
     feed: Arc<SwitchFeed>,
     vault: Arc<Vault>,

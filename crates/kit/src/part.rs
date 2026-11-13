@@ -1,6 +1,3 @@
-//! What each part looks like in each state: the pure half of the kit's button, row and option
-//! styles. The GPUI widgets apply a [`Look`]; a gallery forces a [`PartState`] to show it.
-
 use crate::appearance::Appearance;
 use crate::color::Color;
 use crate::ink::Ink;
@@ -36,20 +33,15 @@ impl PartState {
         }
     }
 
-    /// Hover or pressed: the fill lights up.
     fn lit(self) -> bool {
         matches!(self, PartState::Hover | PartState::Pressed)
     }
 }
 
-/// The kit's three button styles.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ButtonKind {
-    /// Accent fill, dark text.
     Primary,
-    /// Raised fill, hairline border.
     Secondary,
-    /// Nothing until hover.
     Ghost,
 }
 
@@ -75,29 +67,22 @@ pub struct Border {
     pub width: f32,
 }
 
-/// How a part is drawn in one state.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Look {
     pub fill: Option<Color>,
     pub text: Color,
-    /// The part's own border.
     pub border: Option<Border>,
-    /// The focus ring, drawn over the border.
     pub ring: Option<Border>,
-    /// 1 normally, 0.4 disabled.
     pub opacity: f32,
-    /// 1 normally, 0.97 pressed.
     pub scale: f32,
 }
 
 impl Look {
-    /// The border to draw when a renderer has one border: the ring wins.
     pub fn edge(&self) -> Option<Border> {
         self.ring.or(self.border)
     }
 }
 
-/// Spec: Button. Height 28, padding 12, radius sm, label type.
 pub fn button_look(kind: ButtonKind, state: PartState, appearance: Appearance) -> Look {
     let ink = |i: Ink| i.color(appearance);
     let fill = match kind {
@@ -141,7 +126,6 @@ pub fn button_look(kind: ButtonKind, state: PartState, appearance: Appearance) -
     }
 }
 
-/// Spec: Session row. Height 52, inset 8, radius md. `focused` adds the 2 pt ring to a selected row.
 pub fn row_look(state: PartState, focused: bool, appearance: Appearance) -> Look {
     let ink = |i: Ink| i.color(appearance);
     let fill = match state {
@@ -167,7 +151,6 @@ pub fn row_look(state: PartState, focused: bool, appearance: Appearance) -> Look
     }
 }
 
-/// An option's look plus its number badge.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct OptionLook {
     pub look: Look,
@@ -175,8 +158,6 @@ pub struct OptionLook {
     pub badge_text: Color,
 }
 
-/// Spec: Option. Card fill, hairline; hover raised; pressed accent border. A ticked multi-select
-/// row (`selected`) shows a check in an accent badge and an accent outline.
 pub fn option_look(state: PartState, selected: bool, appearance: Appearance) -> OptionLook {
     let ink = |i: Ink| i.color(appearance);
     let hot = selected || state.lit();
@@ -209,7 +190,6 @@ pub fn option_look(state: PartState, selected: bool, appearance: Appearance) -> 
     }
 }
 
-/// Spec: Field. Card fill, radius sm, hairline border; accent 1.5 pt while focused.
 pub fn field_look(focused: bool, appearance: Appearance) -> Look {
     let ink = |i: Ink| i.color(appearance);
     Look {
@@ -232,8 +212,6 @@ pub fn field_look(focused: bool, appearance: Appearance) -> Look {
     }
 }
 
-/// The initials on an avatar: the first letter of the first two words, uppercased; `?` for none.
-/// Words split on anything that isn't a letter or a digit, as the Swift app's do.
 pub fn initials(name: &str) -> String {
     let letters: String = name
         .split(|c: char| !c.is_alphanumeric())
@@ -345,7 +323,6 @@ mod tests {
             row_look(Selected, true, Dark).ring.map(|b| b.width),
             Some(2.0)
         );
-        // Focus without selection draws no ring: the ring marks the selected row.
         assert_eq!(row_look(Rest, true, Dark).ring, None);
     }
 

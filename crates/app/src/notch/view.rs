@@ -1,7 +1,3 @@
-//! The notch over GPUI (`NotchView`): the black shape at the top centre of its canvas, growing out
-//! of the camera housing, and what it holds in each state. Read-only: rows open a conversation,
-//! tabs switch, Back and Close move between states; nothing replies or answers.
-
 use std::sync::Arc;
 
 use gpui::{
@@ -36,37 +32,25 @@ use crate::actions::Actions;
 use crate::chat::prompt_flow::Sending;
 use crate::session_source::{Link, SessionSource};
 
-/// The notch's root view: a transparent canvas with the shape at its top centre.
 pub struct NotchView {
     pub model: NotchModel,
-    /// A render draws a stand-in desktop and menu bar behind the shape; the live canvas is clear.
     backdrop: bool,
-    /// The live panel's: the window, the display's geometry and the data being read.
     pub(super) ns_window: Option<Retained<NSWindow>>,
     pub(super) geometry: Option<Geometry>,
     pub(super) source: Option<Source>,
-    /// Where the rows come from first: the daemon, else `source` reads the files.
     pub(super) sessions: Option<Arc<SessionSource>>,
-    /// The conversation scrolls to its end when it opens and when a line arrives.
     scroll: ScrollHandle,
     scrolled_for: Option<(String, usize)>,
-    /// Where the actions go, and what is known about acting.
     pub(super) actions: Arc<Actions>,
-    /// The answers being put together for the question on show.
     pub(super) draft: QuestionDraft,
-    /// What is going out now: the card's controls are off meanwhile and say so.
     pub(super) sending: Option<Sending>,
     pub(super) send_error: Option<String>,
-    /// The answer box's focus, and whether it had it at the last draw.
     pub(super) focus: FocusHandle,
     pub(super) focused: bool,
-    /// The Settings sheet's Notch switches, as last read.
     pub(super) prefs: NotchPrefs,
-    /// The pet: its place and what a render forces.
     pub(super) walk: Walk,
     pub(super) forced_pet: Option<PetMode>,
     pub(super) perch: Option<Perch>,
-    /// A render's stand-in for the frontmost window, in the canvas (y down).
     pub(super) scene_window: Option<AxFrame>,
 }
 
@@ -100,7 +84,6 @@ impl NotchView {
         }
     }
 
-    /// What acting is now: the daemon must be the rows' source and have said it's on.
     pub fn acting(&self) -> Acting {
         let attached = self
             .sessions
@@ -109,13 +92,10 @@ impl NotchView {
         self.actions.acting(attached)
     }
 
-    /// Every action control's gate: acting, unless answering from the notch is off in Settings.
     pub(super) fn gate(&self) -> Control {
         self.prefs.answer_gate(self.acting().control())
     }
 
-    /// Takes the Settings sheet's Notch switches: the model's, the pet's, and whether the panel
-    /// is on screen at all. True when anything drawn changed.
     pub(super) fn apply_prefs(&mut self, prefs: NotchPrefs) -> bool {
         let changed = self.model.apply(&prefs) | (self.prefs != prefs);
         self.prefs = prefs;
@@ -129,7 +109,6 @@ impl NotchView {
         changed
     }
 
-    /// The card on show in a state, and its drawn height.
     fn card(&self, id: &str) -> Option<(Card, f32)> {
         let card = self.model.card(id)?;
         let gate = self.gate();
@@ -144,7 +123,6 @@ impl NotchView {
         Some((card, height))
     }
 
-    /// The draft follows the question on show; another question starts a fresh one.
     pub(super) fn sync_draft(&mut self) {
         let id = match &self.model.state {
             NotchState::Peek(id) | NotchState::Detail(id) => id.clone(),
@@ -158,7 +136,6 @@ impl NotchView {
         }
     }
 
-    /// Answered from a peek: fold it away unless the pointer is on it.
     pub(super) fn fold_peek(&mut self) {
         if matches!(self.model.state, NotchState::Peek(_)) && !self.model.hovering() {
             self.model.go(NotchState::Collapsed);
@@ -166,13 +143,10 @@ impl NotchView {
     }
 }
 
-/// Pure black, like the camera housing it continues; no ink is that dark.
 fn black() -> gpui::Hsla {
     hsla(Color::BLACK)
 }
 
-/// The curve where the shape meets the top of the screen: an 8 pt square less a quarter circle,
-/// drawn as the ring of a circle clipped to the square.
 fn flare(left: bool) -> Div {
     let f = FLARE as f32;
     let ring = div()
@@ -239,8 +213,6 @@ impl NotchView {
             .children(pet)
     }
 
-    /// The housing's own height. Active sessions are counted at its right while the shape is open
-    /// on something else; the list says it in its tabs.
     fn top_bar(&self, cx: &gpui::App) -> Div {
         let m = &self.model;
         let active = m.count(AgentGroup::NeedsInput) + m.count(AgentGroup::Working);
@@ -257,7 +229,6 @@ impl NotchView {
             .items_center()
             .justify_between()
             .px(px(14.0))
-            // Beside the camera, only while the list is open: the collapsed shape is too small.
             .child(
                 div().children(
                     m.daemon_note
@@ -266,7 +237,6 @@ impl NotchView {
                 ),
             )
             .children(counted.then(|| text(active.to_string(), TypeRole::Label, ink)))
-            // Inside: the housing's top is the screen's edge.
             .part_inside("Notch Bar", Corner::TopTrailing, A, cx)
     }
 
@@ -302,11 +272,9 @@ impl NotchView {
             .flex_col()
             .child(self.tabs(cx))
             .child(body)
-            // Inside: the shape's rounded bottom clips the edge.
             .part_inside("Notch List", Corner::BottomTrailing, A, cx)
     }
 
-    /// The three tabs under the camera, each with its count.
     fn tabs(&self, cx: &mut Context<Self>) -> Div {
         let m = &self.model;
         div()
@@ -350,8 +318,6 @@ impl NotchView {
             .part_at("Notch Tabs", Corner::TopTrailing, A, cx)
     }
 
-    /// A row: name, status pill, host and age; then the last reply (done) or the last prompt and
-    /// what it's doing.
     fn row(&self, agent: &Agent, cx: &mut Context<Self>) -> Stateful<Div> {
         let m = &self.model;
         let snapshot = m.snapshot(&agent.id);
@@ -414,7 +380,6 @@ impl NotchView {
             .cursor_pointer()
             .hover(|s| s.bg(hsla(Ink::Raised.color(A))))
             .child(first)
-            // One line each, cut with an ellipsis at the edge.
             .children(lines.into_iter().map(|l| l.elide()))
             .on_click(cx.listener(move |this, _, _, cx| {
                 this.model.open(&id);
@@ -423,7 +388,6 @@ impl NotchView {
             .part_at("Notch Session Row", Corner::TopTrailing, A, cx)
     }
 
-    /// A peek: the card waiting on you, or who finished and what it last said.
     fn peek(&self, id: &str, cx: &mut Context<Self>) -> Option<Div> {
         let agent = self.model.agent(id)?;
         if let Some((card, _)) = self.card(id) {
@@ -477,7 +441,6 @@ impl NotchView {
         )
     }
 
-    /// One session's last lines, and its card or what it waits on.
     fn detail(&mut self, id: &str, cx: &mut Context<Self>) -> Option<Div> {
         let count = self.model.snapshot(id).map_or(0, |s| s.lines.len());
         let seen = Some((id.to_owned(), count));
@@ -533,7 +496,6 @@ impl NotchView {
                 .child(self.header(agent, cx))
                 .child(conversation)
                 .child(footer.flex_shrink_0())
-                // Inside: the shape's rounded bottom clips the edge.
                 .part_inside("Notch Detail", Corner::BottomTrailing, A, cx),
         )
     }

@@ -1,17 +1,11 @@
-//! The first-run view's model: what the app found, what it says about who owns what, and the two
-//! things it offers (bringing over the Swift app's settings, and the hook). Pure; the view draws it
-//! and the window runs the calls.
-
 use super::defaults::Imported;
 use super::facts::{HookFacts, SwiftApp};
 
 pub const TITLE: &str = "Welcome to Notchling";
 
-/// The plain statement of who owns what, until the maintainer hands each area over (decision 0011).
 pub const OWNERSHIP: &str =
     "Until each area is handed over, the Swift Notchling owns it. This app only watches.";
 
-/// What the Swift app owns, one line each.
 pub const OWNED_BY_SWIFT: [(&str, &str); 5] = [
     (
         "The hook",
@@ -26,27 +20,20 @@ pub const OWNED_BY_SWIFT: [(&str, &str); 5] = [
     ("Sessions", "replies, answers, stop and new sessions"),
 ];
 
-/// What the hook part of the view shows.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum HookBlock {
-    /// Couldn't be checked: no daemon, or it refused.
     Unknown(String),
-    /// The Swift app's `--hook` is in the file: it stays, and no install is offered.
-    SwiftOwns { entries: usize },
-    /// settings.json can't be edited.
+    SwiftOwns {
+        entries: usize,
+    },
     Refused(String),
-    /// This app's hook is already there and the Swift app's is not.
     Installed,
-    /// Nothing answers prompts yet: an install may be offered.
     Offer {
         changes: Vec<String>,
         notes: Vec<String>,
-        /// The daemon's `install` switch.
         install_on: bool,
-        /// What the daemon says while it is off.
         off_message: Option<String>,
     },
-    /// An install was asked for. `applied` is false for a dry run.
     Asked {
         applied: bool,
         message: Option<String>,
@@ -56,7 +43,6 @@ pub enum HookBlock {
 }
 
 impl HookBlock {
-    /// True only for [`HookBlock::Offer`], the one state with an install button.
     pub fn offers_install(&self) -> bool {
         matches!(self, HookBlock::Offer { .. })
     }
@@ -65,11 +51,8 @@ impl HookBlock {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FirstRun {
     pub swift: SwiftApp,
-    /// `install.plan`, or why it couldn't be had.
     pub hook: Result<HookFacts, String>,
-    /// After the install button: the daemon's answer.
     pub asked: Option<Result<HookFacts, String>>,
-    /// After the import button.
     pub imported: Option<Result<Imported, String>>,
 }
 
@@ -83,7 +66,6 @@ impl FirstRun {
         }
     }
 
-    /// The hook part, from what is known now.
     pub fn hook_block(&self) -> HookBlock {
         if let Some(asked) = &self.asked {
             return match asked {
@@ -119,7 +101,6 @@ impl FirstRun {
         }
     }
 
-    /// The words on the install button.
     pub fn install_button(&self) -> &'static str {
         match self.hook_block() {
             HookBlock::Offer {
@@ -129,7 +110,6 @@ impl FirstRun {
         }
     }
 
-    /// The line under the settings button.
     pub fn import_line(&self) -> String {
         match &self.imported {
             None => "Reads the Swift app's preferences and copies them here. The Swift app's own are never changed.".into(),
@@ -138,7 +118,6 @@ impl FirstRun {
         }
     }
 
-    /// The line about the Swift app, plus what it means for this run.
     pub fn swift_line(&self) -> String {
         self.swift.line().to_owned()
     }

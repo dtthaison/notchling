@@ -1,6 +1,3 @@
-//! The window's root draw: the three parts, the panels, the header, the reply box and every
-//! overlay.
-
 use super::*;
 use crate::mac::dock::Copy as CopyAction;
 
@@ -10,7 +7,6 @@ impl Render for ChatView {
         let a = window_appearance(window);
         super::render_map::sync(self.chrome.entity_id(), cx);
         self.take_terminal_focus(window);
-        // With no focus a key reaches only the window's outermost node: keep Copy reachable.
         self.keys.hold(window, cx);
         if let Some(text) = self.slash_preview.clone() {
             if self.selected_session().is_some() && self.tools.editor.read(cx).text() != text {
@@ -21,8 +17,6 @@ impl Render for ChatView {
             }
         }
         self.sync_prompt(cx);
-        // The Tasks bar's room is the conversation's input, and this is where the bar's state is
-        // taken: a change in it is drawn in the same frame.
         let inset = super::tasks::shown(self);
         self.sync_tasks(cx);
         if super::tasks::shown(self) != inset {
@@ -36,9 +30,7 @@ impl Render for ChatView {
             || self.tools.picker.is_some()
             || self.composer.is_open()
             || parts_on(cx);
-        // Set again when the composer draws the Activity Line below.
         self.activity_drawn.set(None);
-        // The Activity Line's spinner is laid out below: this draw's slot replaces last draw's.
         self.parts.root_spins.clear();
         self.parts.root_spins.seen();
         self.parts
@@ -59,7 +51,6 @@ impl Render for ChatView {
                 phone: self.phone.is_some(),
                 parts: parts_on(cx),
             });
-        // Files from Finder land anywhere on the middle column while the box can take them.
         let in_subagent = self.open_subagent.is_some();
         let takes_drops = !in_subagent && self.composer_control(cx).enabled;
         let conversation = div()
@@ -69,7 +60,6 @@ impl Render for ChatView {
             .flex()
             .flex_col()
             .child(self.parts.conversation(cx))
-            // Over the messages, so it stays while they scroll.
             .children(tasks::render(self, a, cx))
             .children(super::render_map::overlay(
                 notchling_kit::render_map::Region::Conversation,
@@ -100,7 +90,6 @@ impl Render for ChatView {
             .flex_col()
             .children(subagent::header(self, a, cx))
             .child(conversation)
-            // A subagent's transcript is read-only: no reply box under it.
             .children((!in_subagent).then(|| composer::render(self, a, window, cx)))
             .when(takes_drops, |column| {
                 column.on_drop::<ExternalPaths>(cx.listener(
@@ -109,8 +98,6 @@ impl Render for ChatView {
                     },
                 ))
             })
-            // The hint only where a drop would land; a render over a fixture has no acting, so
-            // its switch draws the hint anyway.
             .when(takes_drops || self.drop_preview, |column| {
                 column.child(drop::hint(self.drop_preview, a))
             });
@@ -119,14 +106,7 @@ impl Render for ChatView {
             .size_full()
             .flex()
             .fill(Ink::Window, a)
-            // A click in the page panel gives its web view the keyboard; a click anywhere GPUI
-            // draws takes it back, or typing would go on reaching the page.
             .capture_any_mouse_down(cx.listener(|this, _, _, _| this.page.take_keys_back()))
-            // Copy (⌘C, the Edit menu, the right-click menu): the selection in the conversation
-            // (`row_select`), the file panel (`select`) or the reply box. A press anywhere else
-            // lets the first two go, so the reply box's own ⌘C isn't taken. Without a selection
-            // the action goes on to the key. Then the command list's keys, before the reply box
-            // moves its caret on Up and Down.
             .on_action(cx.listener(|this, _: &CopyAction, window, cx| {
                 if !this.copy_selection(window, cx) {
                     cx.propagate();
@@ -137,7 +117,6 @@ impl Render for ChatView {
             }))
             .child(self.keys.anchor())
             .children((!self.sidebar_hidden).then(|| self.parts.sidebar(a, cx)))
-            // The header runs across the conversation and the Details Panel, so both start under it.
             .child(
                 div()
                     .flex_1()
@@ -146,13 +125,11 @@ impl Render for ChatView {
                     .flex()
                     .flex_col()
                     .child(header::render(self, a, cx))
-                    // A page opened from a link takes the Details Panel's place.
                     .child(page_panel::follows_edge(
                         div()
                             .flex_1()
                             .min_h(px(0.0))
                             .flex()
-                            // An expanded terminal takes the conversation's room too.
                             .when(!terminal_expanded, |row| row.child(column))
                             .children(page_panel::render(self, a, window, cx))
                             .children(terminal::render(self, a, window, cx))
@@ -171,9 +148,7 @@ impl Render for ChatView {
                         cx,
                     )),
             )
-            // The spinners of the parts above, over them and under what follows.
             .child(self.parts.spins.clone())
-            // Beside the traffic lights, over the sidebar's top or the header's start.
             .child(sidebar::toggle_button(self, a, cx))
             .child(sidebar::new_session_button(self, a, cx))
             .children(accounts::render_menu(self, a, cx))

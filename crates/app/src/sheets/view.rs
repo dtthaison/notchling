@@ -1,7 +1,3 @@
-//! The sheets and pop-ups over GPUI (parts U7 and U8, macOS): the New Session sheet with its Trust
-//! Folder pop-up, and the banners. Start and Trust Folder and Start send through the daemon
-//! (`session.new`, `folder.trust`) and are disabled, with the reason on hover, while acting isn't on.
-
 use std::sync::Arc;
 
 use gpui::{
@@ -30,29 +26,23 @@ use crate::mac::gate;
 use crate::session_source::{Link, SessionSource};
 use crate::switches::feed::SwitchFeed;
 
-/// A sheet asks to close.
 pub struct Dismiss;
 
-/// New Session picked a Codex or Antigravity account (switched to first when it wasn't in use):
-/// Chat opens a draft row in `folder`, and its first message starts the session.
 pub struct StartDraft {
     pub provider: String,
     pub folder: String,
 }
 
-/// New Session started a Claude Code job (`session.new`'s `jobId`): Chat opens it once listed.
 pub struct StartedJob {
     pub job: String,
 }
 
-/// The accounts store New Session makes lanes and switches logins through.
 #[derive(Clone)]
 pub struct AccountsHandle {
     pub store: Arc<Accounts>,
     pub feed: Arc<SwitchFeed>,
 }
 
-/// Where a sheet's acting comes from: the app's actions and whether the daemon serves the rows.
 #[derive(Clone)]
 pub struct Acts {
     pub actions: Arc<Actions>,
@@ -69,7 +59,6 @@ impl Acts {
     }
 }
 
-/// A sheet's header: icon, title, and a button on the right.
 pub fn sheet_header(icon: Icon, title: &str, end: Stateful<Div>, a: Appearance) -> Div {
     div()
         .h(px(TITLE_BAR + 6.0))
@@ -92,7 +81,6 @@ pub fn sheet_header(icon: Icon, title: &str, end: Stateful<Div>, a: Appearance) 
         .child(end)
 }
 
-/// A pickable row in a column: a title over a faint detail, filled while picked.
 pub fn choice_row(
     id: impl Into<SharedString>,
     title: &str,
@@ -105,7 +93,6 @@ pub fn choice_row(
         .id(id)
         .w_full()
         .flex_shrink_0()
-        // The Sidebar's session row is the standard: its height, inset and line heights.
         .min_h(px(SESSION_ROW))
         .px(px(10.0))
         .rounded(px(RADIUS_MD))
@@ -139,7 +126,6 @@ fn column_title(text: &str, a: Appearance) -> Div {
     ))
 }
 
-/// A tool's title over its accounts, with the tool's icon.
 fn section_title(section: Section, a: Appearance) -> Div {
     let tool = match section {
         Section::Claude => ToolMark::Claude,
@@ -157,11 +143,9 @@ fn section_title(section: Section, a: Appearance) -> Div {
         .child(label(section.title(), TypeRole::Section, Ink::TextFaint, a))
 }
 
-/// The New Session sheet.
 pub struct NewSessionView {
     pub model: NewSession,
     acts: Acts,
-    /// None in a render: a lane or a switch then fails with a reason.
     accounts: Option<AccountsHandle>,
 }
 
@@ -178,7 +162,6 @@ impl NewSessionView {
         }
     }
 
-    /// Sends `request`, then hands the answer to `done`; a follow-up request it returns is sent too.
     fn send(
         &mut self,
         request: crate::acting::Request,
@@ -257,7 +240,6 @@ impl NewSessionView {
         cx.notify();
     }
 
-    /// A lane for a saved Claude Code account (`lanes.create`), then `session.new` in it.
     fn make_lane(&mut self, account: String, cx: &mut Context<Self>) {
         let Some(handle) = self.accounts.clone() else {
             self.model
@@ -292,8 +274,6 @@ impl NewSessionView {
         .detach();
     }
 
-    /// Switches Codex or Antigravity to `account` (`providers.switch`; a yes first when the
-    /// daemon asks), then opens the draft.
     fn switch_then_draft(
         &mut self,
         provider: String,
@@ -386,7 +366,6 @@ impl NewSessionView {
             .flex_shrink_0()
             .h_full()
             .overflow_y_scroll()
-            // The Sidebar's list inset and row spacing.
             .pl(px(8.0))
             .pr(px(GUTTER))
             .pt(px(4.0))
@@ -432,7 +411,6 @@ impl NewSessionView {
             .min_w(px(0.0))
             .h_full()
             .overflow_y_scroll()
-            // The Sidebar's list inset and row spacing.
             .pl(px(8.0))
             .pr(px(GUTTER))
             .pt(px(4.0))
@@ -489,7 +467,6 @@ impl NewSessionView {
             .child(start)
     }
 
-    /// The Trust Folder pop-up, over the dimmed sheet.
     fn trust_pop_up(&self, a: Appearance, cx: &mut Context<Self>) -> Option<Div> {
         let folder = self.model.untrusted_folder()?.to_owned();
         let control = match self.model.stage {
@@ -527,7 +504,6 @@ impl NewSessionView {
             div()
                 .absolute()
                 .size_full()
-                // The backdrop takes every click and hover: nothing under the dialog is live.
                 .occlude()
                 .flex()
                 .items_center()
@@ -607,8 +583,6 @@ impl Render for NewSessionView {
     }
 }
 
-/// `--render banner|new-session|trust-folder|settings`, over the fixture with acting as the
-/// render says; nothing is ever sent.
 pub fn build_render(name: &str, cx: &mut gpui::App) -> Option<gpui::AnyView> {
     use super::renders::{acting, banners, new_session, shown, Shown};
     use super::settings_view::{BannersView, SettingsView};

@@ -1,7 +1,3 @@
-//! Claude Code behind Chat's parts: replies and Stop through the daemon's `session.reply` and
-//! `session.interrupt`, the pickers as `/model` and `/effort` replies, the account menu of lanes,
-//! and the 5-hour and weekly limits of the account in use (the main login's, or its lane's).
-
 use gpui::{App, Context};
 
 use super::{AccountButton, ChatTool};
@@ -39,8 +35,6 @@ impl ChatTool for Claude {
         session.agent.group == AgentGroup::Working
     }
 
-    /// A command that opens a menu runs in a terminal tab attached to the session, where the menu
-    /// shows; typed through the hidden attach it would hold the session on a menu unseen.
     fn intercept(
         &self,
         view: &mut ChatView,
@@ -94,8 +88,6 @@ impl ChatTool for Claude {
         )
     }
 
-    /// The model list is read again as a menu opens: the daemon fetches Anthropic's list only when
-    /// asked, so a new model shows without waiting for the hourly read.
     fn menu_opening(&self, view: &mut ChatView) {
         view.source.ask_catalog();
     }
@@ -125,8 +117,6 @@ impl ChatTool for Claude {
         view.toggle_account_menu(cx);
     }
 
-    /// The main login's windows from the limit watcher; a session in a lane has the report of the
-    /// account its lane runs (`lane_limits`).
     fn limits(&self, view: &ChatView, session: &Session) -> Option<Shown> {
         let s = view.accounts.snapshot();
         if let Some(dir) = session.agent.config_dir.as_deref() {

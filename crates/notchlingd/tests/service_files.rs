@@ -1,7 +1,3 @@
-//! The service files against golden copies (`tests/golden/`), and `notchling service install --dir`
-//! writing into a temp folder. Nothing here touches `~/Library/LaunchAgents` or runs launchctl,
-//! systemctl or schtasks. `NOTCHLING_UPDATE_GOLDEN=1` rewrites the golden files; read the diff.
-
 use notchling_notchlingd::service::{file_name, render, ServiceSpec};
 use notchling_platform::paths::Os;
 use std::path::{Path, PathBuf};
@@ -73,7 +69,6 @@ fn scratch(tag: &str) -> Dir {
     Dir(dir)
 }
 
-/// The binary with a fake home and data root, so nothing it works out points at real folders.
 fn notchling(home: &Path) -> Command {
     let mut c = Command::new(env!("CARGO_BIN_EXE_notchling"));
     c.env("HOME", home)
@@ -109,7 +104,6 @@ fn install_dir_writes_0644_and_prints_the_load_command() {
         let mode = std::fs::metadata(&file).unwrap().permissions().mode();
         assert_eq!(mode & 0o777, 0o644);
     }
-    // Only the one file, no temp left behind.
     assert_eq!(std::fs::read_dir(&target).unwrap().count(), 1);
 
     let out = notchling(&home.0)

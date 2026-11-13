@@ -1,7 +1,3 @@
-//! Test-only fakes for the Jobs side (what the Swift tests keep as private `FakeRunner`,
-//! `MergeFakeRunner`, `MorningFakeRunner`, `HoldingRunner`, `Gate` and `Counter`): runners that
-//! start nothing and record every call. No test using them runs ssh, `gh`, `git` or `sudo`.
-
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -27,8 +23,6 @@ pub fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-/// A machine with an sd worker job whose sd path has a space in it (a quoting trap), serving the
-/// repo `acme/app`.
 pub fn machine(name: &str) -> Machine {
     let mut m = Machine::new(name, &format!("{name}.tail"), "agent");
     let mut job = SdWorkerSettings::new(name);
@@ -48,7 +42,6 @@ pub fn repo() -> MachineRepo {
     }
 }
 
-/// One call a fake saw.
 #[derive(Clone, Debug)]
 pub struct Rec {
     pub argv: Vec<String>,
@@ -67,12 +60,10 @@ impl Rec {
         }
     }
 
-    /// The executable by name, then its arguments: `git -C /t status --porcelain`.
     pub fn line(&self) -> String {
         line(&self.argv)
     }
 
-    /// The executable's name only.
     pub fn exe(&self) -> &str {
         self.argv
             .first()
@@ -92,8 +83,6 @@ pub fn line(argv: &[String]) -> String {
 
 type Answer = Box<dyn Fn(&[String]) -> CommandResult + Send + Sync>;
 
-/// Answers from a closure over the argv and records every call (Swift `FakeRunner` and
-/// `MorningFakeRunner`).
 pub struct AnswerRunner {
     answer: Answer,
     seen: Mutex<Vec<Rec>>,
@@ -109,12 +98,10 @@ impl AnswerRunner {
         }
     }
 
-    /// Succeeds with `{}` for everything.
     pub fn quiet() -> AnswerRunner {
         AnswerRunner::new(|_| ok("{}"))
     }
 
-    /// Succeeds with no output for everything.
     pub fn silent() -> AnswerRunner {
         AnswerRunner::new(|_| ok(""))
     }
@@ -127,7 +114,6 @@ impl AnswerRunner {
         self.recs().into_iter().map(|r| r.argv).collect()
     }
 
-    /// The calls to `gh`, without the path of the executable.
     pub fn gh_calls(&self) -> Vec<Vec<String>> {
         self.recs()
             .into_iter()
@@ -144,10 +130,6 @@ impl Runner for AnswerRunner {
     }
 }
 
-/// Scripted answers by text (Swift `MergeFakeRunner`): a rule matches when its text is in the call
-/// written as `git -C /t status --porcelain` (the executable shown by name only); the first match
-/// wins and anything else succeeds with no output. A queue answers one call at a time and repeats
-/// its last answer; queues win over rules.
 pub struct RuleRunner {
     rules: Vec<(String, CommandResult)>,
     queues: Vec<(String, Vec<CommandResult>)>,
@@ -179,7 +161,6 @@ impl RuleRunner {
         self.recs().into_iter().map(|r| r.argv).collect()
     }
 
-    /// Each call as one line, executable by name.
     pub fn lines(&self) -> Vec<String> {
         self.recs().iter().map(Rec::line).collect()
     }
@@ -208,7 +189,6 @@ impl Runner for RuleRunner {
     }
 }
 
-/// Holds a thread until the test lets it go.
 #[derive(Default)]
 pub struct Gate {
     open: Mutex<bool>,
@@ -241,7 +221,6 @@ impl Counter {
         self.0.load(Ordering::SeqCst)
     }
 
-    /// Waits (a few seconds at most) until the count is above zero.
     pub fn wait_for_first(&self) {
         for _ in 0..1000 {
             if self.value() > 0 {
@@ -252,8 +231,6 @@ impl Counter {
     }
 }
 
-/// Answers a status at once, except the first call, which waits for [`HoldingRunner::release`]
-/// (Swift `HoldingRunner`).
 pub struct HoldingRunner {
     answer: String,
     calls: Counter,

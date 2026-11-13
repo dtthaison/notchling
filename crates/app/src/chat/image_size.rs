@@ -1,7 +1,3 @@
-//! An image's size in pixels from the start of its file (PNG, GIF, JPEG, WebP), so Chat can draw
-//! a linked image at its own shape before it loads. Nothing is decoded.
-
-/// The width and height `head` (the file's first bytes) says, or `None` for anything else.
 pub fn size(head: &[u8]) -> Option<(u32, u32)> {
     let le16 = |i: usize| Some(u16::from_le_bytes([*head.get(i)?, *head.get(i + 1)?]) as u32);
     let be32 = |i: usize| {
@@ -22,8 +18,6 @@ pub fn size(head: &[u8]) -> Option<(u32, u32)> {
     (found.0 > 0 && found.1 > 0).then_some(found)
 }
 
-/// A JPEG's frame header (any SOF marker but the DHT, JPG and DAC ones), found by walking the
-/// segments from the start.
 fn jpeg(head: &[u8]) -> Option<(u32, u32)> {
     let mut i = 2;
     while i + 9 < head.len() {
@@ -85,7 +79,6 @@ mod tests {
         gif.extend(640u16.to_le_bytes());
         gif.extend(480u16.to_le_bytes());
         assert_eq!(size(&gif), Some((640, 480)));
-        // SOI, an APP0 segment of 16 bytes, then SOF0: length, precision, height, width.
         let mut jpeg = vec![0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10];
         jpeg.extend([0u8; 14]);
         jpeg.extend([0xFF, 0xC0, 0x00, 0x11, 0x08]);

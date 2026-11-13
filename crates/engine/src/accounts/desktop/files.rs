@@ -1,12 +1,3 @@
-//! Claude Desktop's files, in `~/Library/Application Support/Claude` (`ClaudeDesktopStore`'s
-//! capture, restore and sign-out): the `Cookies` store, its write-ahead files, `config.json` and
-//! our one-time backup `Cookies.notchling-backup`. Every function takes the folder, so a test
-//! works in a temp one.
-//!
-//! What decides the desktop app's account is its claude.ai **web session cookies**, not the OAuth
-//! token. The cookies are encrypted with a constant machine key, so a saved copy of the whole
-//! store stays valid. Nothing here reads a cookie's value: the store is copied as one file.
-
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 
@@ -25,12 +16,10 @@ fn config(claude_dir: &Path) -> PathBuf {
     claude_dir.join("config.json")
 }
 
-/// An account id that is safe to use as a file name: letters, digits and `-`, up to 64.
 pub fn valid_uuid(id: &str) -> bool {
     !id.is_empty() && id.len() <= 64 && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
 }
 
-/// The account Desktop is on: `lastKnownAccountUuid` in `config.json`.
 pub fn active_account(claude_dir: &Path) -> Option<String> {
     let data = std::fs::read(config(claude_dir)).ok()?;
     let root: Value = serde_json::from_slice(&data).ok()?;
@@ -39,8 +28,6 @@ pub fn active_account(claude_dir: &Path) -> Option<String> {
         .map(str::to_string)
 }
 
-/// Copies the live cookie store to `mine` (0600, in a 0700 folder), unless it already is an exact
-/// copy. False when there is nothing to copy or it couldn't be written.
 pub fn capture(claude_dir: &Path, mine: &Path) -> bool {
     let Ok(live) = std::fs::read(cookies(claude_dir)) else {
         return false;
@@ -58,7 +45,6 @@ pub fn capture(claude_dir: &Path, mine: &Path) -> bool {
         && notchling_platform::files::write_private_no_follow(mine, &live).is_ok()
 }
 
-/// Backs the live cookie store up once, so there is always the file Notchling found.
 fn backup_once(claude_dir: &Path) {
     let live = cookies(claude_dir);
     let copy = backup(claude_dir);
@@ -67,16 +53,12 @@ fn backup_once(claude_dir: &Path) {
     }
 }
 
-/// Chromium's write-ahead files; stale ones would override a freshly restored Cookies file.
 fn clear_write_ahead(claude_dir: &Path) {
     for name in WRITE_AHEAD {
         let _ = std::fs::remove_file(claude_dir.join(name));
     }
 }
 
-/// Restores a saved cookie store and marks the account active in `config.json`. Backs the live
-/// cookie store up once and clears any stale write-ahead files so the restore isn't overwritten.
-/// The caller has quit Desktop.
 pub fn restore(claude_dir: &Path, saved: &Path, uuid: &str) -> Result<(), &'static str> {
     let data = std::fs::read(saved).map_err(|_| "the saved session can't be read")?;
     if data.is_empty() {
@@ -89,8 +71,6 @@ pub fn restore(claude_dir: &Path, saved: &Path, uuid: &str) -> Result<(), &'stat
     set_active(claude_dir, Some(uuid))
 }
 
-/// Removes the live cookie session (backing it up once) so Claude Desktop opens at its sign-in
-/// screen, and clears the active-account markers. The caller has quit Desktop.
 pub fn sign_out(claude_dir: &Path) -> Result<(), &'static str> {
     backup_once(claude_dir);
     let _ = std::fs::remove_file(cookies(claude_dir));
@@ -98,9 +78,6 @@ pub fn sign_out(claude_dir: &Path) -> Result<(), &'static str> {
     set_active(claude_dir, None)
 }
 
-/// Points `config.json` at the account (`lastKnownAccountUuid` and `bootSideSessions`), or clears
-/// both; keeps every other key and the file's permissions. A missing or unreadable config is left
-/// alone.
 fn set_active(claude_dir: &Path, uuid: Option<&str>) -> Result<(), &'static str> {
     let path = config(claude_dir);
     let Ok(data) = std::fs::read(&path) else {
@@ -127,7 +104,6 @@ fn set_active(claude_dir: &Path, uuid: Option<&str>) -> Result<(), &'static str>
     write_keeping_mode(&path, &out).map_err(|_| "config.json can't be written")
 }
 
-/// Writes through a temp file in the same folder and renames, keeping the old file's mode.
 fn write_keeping_mode(path: &Path, data: &[u8]) -> std::io::Result<()> {
     let temp = path.with_file_name(format!(".config.json.{}.tmp", std::process::id()));
     let result = (|| {
@@ -217,7 +193,6 @@ mod tests {
             json!({"accountUuid": "u-2", "supported": true})
         );
         assert_eq!(config["theme"], "dark", "other keys stay");
-        // A second restore keeps the first backup: it is the file Notchling found.
         restore(&dir, &saved, "u-2").unwrap();
         assert_eq!(std::fs::read(backup(&dir)).unwrap(), b"live-store");
         let _ = std::fs::remove_dir_all(&dir);

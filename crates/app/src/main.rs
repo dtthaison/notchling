@@ -1,5 +1,3 @@
-//! `notchling-app`: the menu bar app, or `--render <view> --out <file.png>` for a picture of a view.
-
 use notchling_app::cli::{self, Command};
 
 fn main() {
@@ -10,7 +8,6 @@ fn main() {
             std::process::exit(2);
         }
     };
-    // The real app (not a fixture root or a render) writes its panics down before it aborts.
     if matches!(
         command,
         Command::Run {
@@ -34,8 +31,6 @@ fn run(command: Command) -> i32 {
     notchling_app::mac::run(command)
 }
 
-/// Linux and Windows: the GPUI app isn't built there yet, so say so and exit 0 (the CI matrix
-/// builds and runs this on every system).
 #[cfg(not(target_os = "macos"))]
 fn run(_command: Command) -> i32 {
     println!("{}", notchling_app::NOT_SUPPORTED);

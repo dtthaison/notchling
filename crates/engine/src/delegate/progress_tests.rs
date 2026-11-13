@@ -25,7 +25,6 @@ const ASKED: &str = r#"{"step_index":5,"type":"PLANNER_RESPONSE","status":"DONE"
 const WOKEN: &str = r#"{"step_index":6,"type":"SYSTEM_MESSAGE","status":"DONE","content":"x"}"#;
 const ANSWER: &str = r#"{"step_index":7,"type":"PLANNER_RESPONSE","status":"DONE","content":"Saved: /x/teapot.jpg"}"#;
 
-/// Laid out the way agy 1.5.1 left a session whose image subagent finished after the turn ended.
 #[test]
 fn it_waits_for_the_subagent_and_then_for_the_parents_answer() {
     let s = system();
@@ -91,9 +90,7 @@ fn an_unfinished_or_unusable_answer_keeps_waiting() {
     let waiting = Progress::Waiting {
         subagents: vec!["s".into()],
     };
-    // Nothing logged yet.
     assert_eq!(progress(&s, since), waiting);
-    // The last line is not the parent's finished, non-empty answer.
     for tail in [
         r#"{"type":"PLANNER_RESPONSE","status":"RUNNING","content":"x"}"#,
         r#"{"type":"PLANNER_RESPONSE","status":"DONE","content":"  "}"#,
@@ -101,7 +98,6 @@ fn an_unfinished_or_unusable_answer_keeps_waiting() {
         "not json at all",
     ] {
         write(&s, "logs/transcript.jsonl", &format!("{WOKEN}\n{tail}\n"));
-        // An unreadable line is skipped, which leaves the wake-up last: no answer after it.
         assert_eq!(progress(&s, since), waiting, "{tail}");
     }
     let _ = fs::remove_dir_all(s.parent().unwrap());
@@ -117,7 +113,7 @@ fn a_huge_transcript_is_read_from_its_end() {
         "{{\"type\":\"TOOL_CALL\",\"content\":\"{}\"}}\n",
         "x".repeat(1000)
     );
-    let mut text = filler.repeat(6000); // about 6 MB, past the tail that is read
+    let mut text = filler.repeat(6000);
     text.push_str(&format!("{WOKEN}\n{ANSWER}"));
     write(&s, "logs/transcript.jsonl", &text);
     assert!(matches!(
@@ -198,7 +194,6 @@ fn a_folder_that_vanishes_cannot_be_watched() {
     let since = SystemTime::now();
     write(&s, "subagents/sub1.json", r#"{"conversationId":"sub1"}"#);
     let gone = s.clone();
-    // Waiting is reported; then the watch fails to start because the folder is gone.
     let waited = wait(&gone, since, &|| false, &mut |_| {
         let _ = fs::remove_dir_all(gone.parent().unwrap());
     });

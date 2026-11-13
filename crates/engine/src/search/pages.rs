@@ -1,9 +1,6 @@
-//! Finding saved Artifact pages by link, id or words (the Swift app's `PageLibrary.find`).
-
 use super::rank::lowercase;
 use serde::{Deserialize, Serialize};
 
-/// One saved page in the library list (`pages.json`).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(from = "RawEntry")]
 pub struct PageEntry {
@@ -14,13 +11,10 @@ pub struct PageEntry {
     pub source: String,
     pub project: String,
     pub account: String,
-    /// Seconds since 1970.
     pub updated: f64,
-    /// claude.ai's id of the version last published from this Mac ("" when unknown).
     pub version: String,
 }
 
-/// The list's lenient shape: only `folder` and `file` are required.
 #[derive(Deserialize)]
 struct RawEntry {
     folder: String,
@@ -57,7 +51,6 @@ impl From<RawEntry> for PageEntry {
 }
 
 impl PageEntry {
-    /// The last part of the claude.ai link; `None` for a page that never got one.
     pub fn artifact_id(&self) -> Option<&str> {
         if self.url.is_empty() {
             None
@@ -66,8 +59,6 @@ impl PageEntry {
         }
     }
 
-    /// Every word (already lowercase) is in the title, project, account or link. The link holds
-    /// the id, so a pasted id or link matches too.
     pub fn matches<W: AsRef<str>>(&self, words: &[W]) -> bool {
         let text = lowercase(&format!(
             "{} {} {} {}",
@@ -81,8 +72,6 @@ fn is_id_char(c: char) -> bool {
     c.is_ascii_alphanumeric() || c == '_' || c == '-'
 }
 
-/// The artifact id in a claude.ai link (`claude.ai/artifact/<id>` or `claude.ai/code/artifact/<id>`),
-/// or the text itself when it is a bare id (16 or more of `A-Za-z0-9_-`).
 pub fn artifact_id_in(text: &str) -> Option<String> {
     let t = text.trim();
     let mut from = 0;
@@ -103,8 +92,6 @@ pub fn artifact_id_in(text: &str) -> Option<String> {
     (t.chars().count() >= 16 && t.chars().all(is_id_char)).then(|| t.to_string())
 }
 
-/// The page with this link or id (exact, else ignoring case), else the pages whose text holds
-/// every word of the query (split on spaces only). An empty query returns every page.
 pub fn find_pages<'a>(query: &str, all: &'a [PageEntry]) -> Vec<&'a PageEntry> {
     if let Some(id) = artifact_id_in(query) {
         let exact: Vec<_> = all

@@ -8,9 +8,6 @@ import '../../core/net/ws_transport.dart';
 import '../../core/pairing/mac_profile.dart';
 import '../macs/macs_notifier.dart';
 
-/// The client of one paired computer (by `MacProfile.id`), with its own token and connection, running while the
-/// computer stays paired. Null when it isn't. Every op on a session goes through the client of the session's
-/// own computer (decision 0012).
 final computerClientProvider = Provider.family<BridgeClient?, String>((Ref ref, String hostId) {
   final String? key = ref.watch(macsProvider.select((MacsState s) => s.keyOf(hostId)));
   final MacProfile? mac = ref.read(macsProvider).byId(hostId);
@@ -26,13 +23,11 @@ final computerClientProvider = Provider.family<BridgeClient?, String>((Ref ref, 
   return client;
 });
 
-/// The client for the computer in use. Null when none is paired.
 final Provider<BridgeClient?> bridgeClientProvider = Provider<BridgeClient?>((Ref ref) {
   final String? id = ref.watch(macsProvider.select((MacsState s) => s.active?.id));
   return id == null ? null : ref.watch(computerClientProvider(id));
 });
 
-/// One computer's link state, for its heading in the list.
 final computerStatusProvider = NotifierProvider.family<ComputerStatusNotifier, ConnectionStatus, String>(ComputerStatusNotifier.new);
 
 class ComputerStatusNotifier extends Notifier<ConnectionStatus> {
@@ -49,7 +44,6 @@ class ComputerStatusNotifier extends Notifier<ConnectionStatus> {
   }
 }
 
-/// Connecting / connected / disconnected for the banner.
 final NotifierProvider<ConnectionStatusNotifier, ConnectionStatus> connectionStatusProvider =
     NotifierProvider<ConnectionStatusNotifier, ConnectionStatus>(ConnectionStatusNotifier.new);
 
@@ -64,7 +58,6 @@ class ConnectionStatusNotifier extends Notifier<ConnectionStatus> {
   }
 }
 
-/// Becomes true each time the link comes up, so data notifiers can reload.
 final NotifierProvider<ConnectedCountNotifier, int> connectedCountProvider =
     NotifierProvider<ConnectedCountNotifier, int>(ConnectedCountNotifier.new);
 

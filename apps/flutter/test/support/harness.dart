@@ -25,7 +25,6 @@ const MacProfile testMac = MacProfile(
   token: 'tok',
 );
 
-/// A container whose Mac is already paired and whose socket is [socket].
 ProviderContainer containerWith(FakeWs socket, {WsConnector? connector, MacProfile mac = testMac, Stream<void>? networkChanges, ChatCache? cache}) {
   final MemorySecretStore secrets = MemorySecretStore()
     ..values['macs.v1'] = encodeProfiles(<MacProfile>[mac])
@@ -41,7 +40,6 @@ ProviderContainer containerWith(FakeWs socket, {WsConnector? connector, MacProfi
   return container;
 }
 
-/// Loads the Macs and waits until the link is up.
 Future<void> connect(ProviderContainer container) async {
   container.read(macsProvider);
   await until(() => container.read(macsProvider).loaded);
@@ -57,7 +55,6 @@ Future<void> until(bool Function() condition, {Duration within = const Duration(
   }
 }
 
-/// A Mac that answers hello, lists the given sessions, and serves one chat page.
 FakeWs macWithSessions(List<Map<String, Object?>> sessions, {List<Map<String, Object?>> chat = const <Map<String, Object?>>[]}) {
   return happyMac(auto: <String, Map<String, Object?>>{
     'sessions.list': <String, Object?>{'sessions': sessions},
@@ -68,8 +65,6 @@ FakeWs macWithSessions(List<Map<String, Object?>> sessions, {List<Map<String, Ob
   });
 }
 
-/// Wraps a widget the way the app does: dark theme, localizations (Vietnamese unless [locale] says otherwise).
-/// With [screen], [child] is the whole page (a Scaffold of its own) instead of sitting in a scroll view.
 Widget host(Widget child, {Locale locale = const Locale('vi'), double textScale = 1, bool screen = false}) {
   return MaterialApp(
     theme: buildTheme(),

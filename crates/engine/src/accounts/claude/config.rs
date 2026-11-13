@@ -1,22 +1,15 @@
-//! `oauthAccount` in `~/.claude.json`: read to know the main login's account, and replaced (only
-//! it) on a switch. The file is Claude Code's, written often; everything else in it stays byte for
-//! byte ([`set_top_level`]), a copy of the old file is kept beside it
-//! (`.claude.json.notchling-backup`, as the Swift app names it) and both keep the file's mode.
-
 use crate::accounts::json_splice::set_top_level;
 use crate::accounts::Login;
 use serde_json::Value;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// The backup beside `file`.
 pub fn backup_path(file: &Path) -> PathBuf {
     let mut name = file.as_os_str().to_owned();
     name.push(".notchling-backup");
     PathBuf::from(name)
 }
 
-/// The `oauthAccount` block, when the file has one.
 pub fn oauth_account(file: &Path) -> Option<Login> {
     let data = fs::read(file).ok()?;
     match serde_json::from_slice::<Value>(&data).ok()? {
@@ -25,7 +18,6 @@ pub fn oauth_account(file: &Path) -> Option<Login> {
     }
 }
 
-/// The file's text with `oauthAccount` set to `account`, checked but not written.
 pub fn spliced(file: &Path, account: &Value) -> Result<(String, String), String> {
     let text =
         fs::read_to_string(file).map_err(|_| format!("{} can't be read.", file.display()))?;
@@ -34,9 +26,6 @@ pub fn spliced(file: &Path, account: &Value) -> Result<(String, String), String>
     Ok((text, out))
 }
 
-/// Sets `oauthAccount`, keeping every other byte, the mode, and a backup of the old text. Claude
-/// Code may write the file meanwhile, so the text is read again just before the write and the
-/// change made on what is there then.
 pub fn set_account(file: &Path, account: &Value) -> Result<(), String> {
     let real = fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
     let mode = file_mode(&real);

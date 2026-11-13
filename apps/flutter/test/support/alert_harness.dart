@@ -1,4 +1,3 @@
-// The alert watcher over two paired computers, with a stand-in session list so nothing connects.
 import 'package:agent_console/app/alerts.dart';
 import 'package:agent_console/app/message_alerts.dart';
 import 'package:agent_console/app/notifications.dart';
@@ -19,7 +18,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'harness.dart';
 import 'two_computers.dart';
 
-/// A session on whichever computer is in use, with an optional last reply.
 Session alertSession(String id, {String? reply, SessionState state = SessionState.running}) => Session(
       id: id,
       name: 'Session $id',
@@ -43,7 +41,6 @@ class _Connected extends ConnectionStatusNotifier {
   ConnectionStatus build() => const ConnectionStatus(LinkPhase.connected);
 }
 
-/// Records the system notifications instead of showing them.
 class RecordingNotifications extends NotificationService {
   final List<AlertEvent> shown = <AlertEvent>[];
   @override
@@ -55,7 +52,6 @@ class _Silent implements AlertSounds {
   Future<void> play(AlertKind kind) async {}
 }
 
-/// Two paired computers, [active] in use, the watchers running. [secrets] starts the phone from stored state.
 Future<({ProviderContainer container, RecordingNotifications service})> watchedComputers({
   required MacProfile active,
   AppLifecycleState lifecycle = AppLifecycleState.resumed,
@@ -87,5 +83,4 @@ Future<({ProviderContainer container, RecordingNotifications service})> watchedC
   return (container: container, service: service);
 }
 
-/// The session list of the computer in use, as the bridge would push it.
 void pushSessions(ProviderContainer c, List<Session> sessions) => (c.read(sessionsProvider.notifier) as StandInSessions).push(sessions);

@@ -1,10 +1,3 @@
-//! Renewed secrets (Swift `SetupEngine`'s update offer): a vault value changed, so the machines'
-//! files that hold it are offered an update. The offer is kept in the [`OFFERS_DOC`] document of
-//! `<data>/notchling.db` (version 1, vault names and machine names only, never a value; it used
-//! to be `<data>/daemon/machines/pending-updates.json`, which moves in once). Sending happens only
-//! through a confirmed plan ([`super::engine_fix::PlanKind::SendAgain`],
-//! [`super::engine_fix::PlanKind::Update`]).
-
 use super::engine::{lock, SetupEngine};
 use super::registry::Machine;
 use super::step::{FixOutcome, StepId};
@@ -14,10 +7,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-/// The document that holds the pending offers.
 pub const OFFERS_DOC: &str = "machines/pending-updates";
 
-/// The file the offers were kept in before the database.
 pub fn old_offers_file(data: &Path) -> PathBuf {
     data.join("daemon")
         .join("machines")
@@ -30,7 +21,6 @@ struct OfferFile {
     offers: BTreeMap<String, Vec<String>>,
 }
 
-/// The file's bytes for `offers`, or `None` when there is nothing to keep.
 pub fn offer_bytes(offers: &BTreeMap<String, Vec<SecretUsage>>) -> Option<Vec<u8>> {
     if offers.is_empty() {
         return None;
@@ -46,7 +36,6 @@ pub fn offer_bytes(offers: &BTreeMap<String, Vec<SecretUsage>>) -> Option<Vec<u8
     Some(super::registry::pretty_sorted(value))
 }
 
-/// The offers in `data` that still name a usage of `usages`; anything else is dropped.
 pub fn parse_offers(data: &[u8], usages: &[SecretUsage]) -> BTreeMap<String, Vec<SecretUsage>> {
     let Ok(file) = serde_json::from_slice::<OfferFile>(data) else {
         return BTreeMap::new();
@@ -89,14 +78,12 @@ impl SetupEngine {
         let old = old_offers_file(data);
         let offers = lock(&self.state).offers.clone();
         let written = match offer_bytes(&offers).and_then(|b| String::from_utf8(b).ok()) {
-            // nothing to keep: forget the document, but never make a database to do it
             None => {
                 !store::exists(data) || store::update_doc(data, OFFERS_DOC, |_| Ok(None)).is_ok()
             }
             Some(text) => store::put_doc(data, OFFERS_DOC, &text).is_ok(),
         };
         if written {
-            // an old file left behind would come back as the offers
             let _ = std::fs::remove_file(old);
         }
     }
@@ -117,7 +104,6 @@ impl SetupEngine {
         self.changed();
     }
 
-    /// A vault value was saved or renewed: makes the update offer from the name. Sends nothing.
     pub fn vault_value_changed(&self, name: &str) {
         *lock(&self.state)
             .offer_revision
@@ -130,7 +116,6 @@ impl SetupEngine {
         self.set_offer(name, Some(found));
     }
 
-    /// Sends the vault value of `usage` to its file again, whatever the file's check says.
     pub(super) fn send_again(&self, usage: &SecretUsage) -> FixOutcome {
         let Some(m) = self.machine(&usage.machine) else {
             return FixOutcome::fail(format!("no machine named {}", usage.machine));
@@ -173,8 +158,6 @@ impl SetupEngine {
         outcome
     }
 
-    /// Delivers the renewed value to each usage in the offer, checks that usage's step again, and
-    /// clears the offer. A usage whose delivery failed stays in it.
     pub(super) fn update_machines(&self, secret: &str) -> Vec<FixOutcome> {
         let revision = lock(&self.state).offer_revision.get(secret).copied();
         let mut outcomes = Vec::new();
@@ -207,7 +190,6 @@ impl SetupEngine {
             }
             outcomes.push(outcome);
         }
-        // a value renewed while this ran has its own, newer offer
         if lock(&self.state).offer_revision.get(secret).copied() == revision {
             self.set_offer(secret, Some(failed));
         }

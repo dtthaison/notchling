@@ -4,7 +4,6 @@ use std::rc::Rc;
 use super::*;
 use crate::testutil::Scratch;
 
-/// The real disk under a scratch home, counting every question asked of it.
 struct Counting {
     home: PathBuf,
     asked: Rc<Cell<usize>>,
@@ -33,7 +32,6 @@ fn cache(s: &Scratch) -> (Cache<Counting>, Rc<Cell<usize>>) {
     (Cache::with_probe(probe), asked)
 }
 
-/// Where the first paragraph's spans link, by their text.
 fn links(message: &Message) -> Vec<(String, Option<String>)> {
     let spans = match message.first() {
         Some(Part::Paragraph(inline)) => &inline.spans,
@@ -97,7 +95,6 @@ fn a_reload_asks_the_disk_again_and_finds_a_new_file() {
         vec![("out/report.md".to_owned(), None)]
     );
     let report = s.write("out/report.md", "# Report");
-    // Until the next load, the disk's earlier answer stands: draws never ask it.
     let before = asked.get();
     assert_eq!(
         links(&cache.message("m1", text, &folder)),

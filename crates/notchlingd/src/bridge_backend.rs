@@ -1,7 +1,3 @@
-//! What the phone bridge reads from and does through the daemon: [`DaemonSources`] (the session
-//! list, the held prompts, the pairing approval) and [`DaemonActing`] (the acting ops, so the
-//! acting switch applies: while it's off, the phone reads and never types, answers or starts).
-
 use crate::acting_ops::{ActingOps, Room};
 use crate::catalog_ops::CatalogService;
 use crate::prompts::{Kind, Prompt};
@@ -22,11 +18,8 @@ use std::sync::mpsc::{sync_channel, SyncSender};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-/// How long a phone that gave the right code waits for the person at the computer.
 pub const APPROVAL_WAIT: Duration = Duration::from_secs(120);
 
-/// Pairing requests waiting for `bridge.pair.answer`. With no app attached, nobody can answer:
-/// refused at once.
 pub struct Approvals {
     room: Arc<dyn Room>,
     waiting: Mutex<HashMap<String, SyncSender<bool>>>,
@@ -44,9 +37,6 @@ impl Approvals {
         }
     }
 
-    /// Publishes `bridge.pair.request` and waits for the answer; false when there's none. Needs an
-    /// app that follows the `bridge` topic: one that is merely attached would not see the request
-    /// and the phone would wait out the whole time to be refused.
     pub fn request(&self, name: &str, platform: &str, address: &str) -> bool {
         if !self.room.can_follow(topics::BRIDGE) {
             return false;
@@ -68,7 +58,6 @@ impl Approvals {
         allowed
     }
 
-    /// The app's answer; false when no request has that id (answered, timed out or never made).
     pub fn answer(&self, id: &str, allow: bool) -> bool {
         match lock(&self.waiting).remove(id) {
             Some(tx) => tx.try_send(allow).is_ok(),
@@ -76,7 +65,6 @@ impl Approvals {
         }
     }
 
-    /// Every waiting phone is refused (the bridge stops or the daemon quits).
     pub fn refuse_all(&self) {
         for (_, tx) in lock(&self.waiting).drain() {
             let _ = tx.try_send(false);
@@ -84,12 +72,10 @@ impl Approvals {
     }
 }
 
-/// The daemon's list and prompts, as the bridge's live backend reads them.
 pub struct DaemonSources {
     pub sessions: Arc<Mutex<Value>>,
     pub acting: Arc<ActingOps>,
     pub approvals: Arc<Approvals>,
-    /// `~/.claude/projects`, for the recent folders of `session.new`.
     pub projects_dir: PathBuf,
 }
 
@@ -151,7 +137,6 @@ impl Sources for DaemonSources {
     }
 }
 
-/// A held hook as the phone's prompt.
 pub fn pending(prompt: &Prompt) -> PendingPrompt {
     let kind = match (prompt.kind, &prompt.question) {
         (Kind::Question, Some(question)) => PromptKind::Question(
@@ -183,13 +168,11 @@ pub fn pending(prompt: &Prompt) -> PendingPrompt {
     }
 }
 
-/// The bridge's actions on the acting ops, as the app would call them.
 pub struct DaemonActing {
     pub ops: Arc<ActingOps>,
     pub sessions: Arc<Mutex<Value>>,
 }
 
-/// The phone acts with the app's rights; the acting switch still decides.
 fn bridge_caller() -> Caller {
     Caller {
         tier: Tier::App,
@@ -212,7 +195,6 @@ impl DaemonActing {
         self.ops.call(&bridge_caller(), op, &args).map_err(failure)
     }
 
-    /// The list row of a background job, by its job id.
     fn row_of(&self, session: &Session) -> Result<String, BridgeFailure> {
         let Control::Job(job) = &session.control else {
             return Err(BridgeFailure::view_only("Session này chỉ xem được."));
@@ -277,7 +259,6 @@ impl Acting for DaemonActing {
         self.call(ops::SESSION_NEW, args).map(|_| ())
     }
 
-    /// The id goes to `session.new` as it is, so the daemon's own catalog check applies again.
     fn new_session_with_model(&self, cwd: &Path, model_id: &str) -> Result<(), BridgeFailure> {
         let args = json!({"folder": cwd.to_string_lossy(), "flags": ["--model", model_id]});
         self.call(ops::SESSION_NEW, args).map(|_| ())
@@ -290,8 +271,6 @@ impl Acting for DaemonActing {
     }
 }
 
-/// The phone's short model name as the catalog's current id of that family (`opus` →
-/// `claude-opus-5-5`); none for a name that is no family or has no current model.
 pub(crate) fn model_id(short: &str, catalog: &CatalogService) -> Option<String> {
     catalog
         .models(Tool::Claude)
@@ -300,8 +279,6 @@ pub(crate) fn model_id(short: &str, catalog: &CatalogService) -> Option<String> 
         .map(|m| m.id)
 }
 
-/// The phone answers with option labels or free text; `session.answer` takes option numbers
-/// (1-based, a list each) or text.
 fn answer_json(answers: &[String], items: &[PromptQuestion]) -> Value {
     Value::Array(
         answers

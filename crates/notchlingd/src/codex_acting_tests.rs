@@ -1,5 +1,3 @@
-//! The Codex ops while the `acting` switch is off, and when it is turned off under a running turn.
-
 use super::*;
 
 #[test]
@@ -18,7 +16,6 @@ fn the_ops_are_app_tier_and_refused_while_acting_is_off() {
     assert!(s.spawner.specs().is_empty(), "nothing started");
     assert!(s.launcher.calls().is_empty(), "nothing ran");
     assert!(s.room.events.lock().unwrap().is_empty());
-    // Turning it on lets the same call through.
     s.acting.set(true);
     s.spawner.push(FakeRun::ok(&[DONE]));
     assert!(s
@@ -30,7 +27,6 @@ fn the_ops_are_app_tier_and_refused_while_acting_is_off() {
     s.idle();
 }
 
-/// The M3 ops sharing the Codex setup's switch, with the Codex ops attached as the daemon does.
 fn acting_ops(s: &Setup) -> crate::acting_ops::ActingOps {
     let ops = crate::acting_ops::ActingOps::new(
         s.acting.clone(),
@@ -81,8 +77,6 @@ fn turning_acting_off_stops_running_turns_and_drops_what_waited() {
 
 #[test]
 fn a_start_that_loses_the_race_with_acting_off_is_stopped() {
-    // `set_acting(false)` lands while the process is being started: `stop_all` found nothing, so
-    // the start notices the switch itself.
     let s = setup("racing", true);
     let acting = Arc::new(acting_ops(&s));
     s.spawner.push(FakeRun::held(&[]));

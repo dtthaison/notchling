@@ -1,8 +1,3 @@
-//! The daemon end to end over a copy of the M1 notch fixture in a temp data root: it serves
-//! `sessions.list`, sends `sessions.changed` after a fixture file changes, refuses a second daemon,
-//! starts past a stale socket and stops cleanly on SIGTERM, removing its socket. It never sees the
-//! real data folder: every run sets `NOTCHLING_DATA_ROOT` and a fake `HOME`. A guard stops every
-//! daemon a test starts, detached ones included, even when an assert fails midway.
 #![cfg(unix)]
 
 use notchling_local_api::{ensure_daemon_with, Client, ClientKind, SpawnOptions, Started};
@@ -19,7 +14,6 @@ impl Drop for Dir {
     }
 }
 
-/// A short folder under /tmp (socket paths are capped at 104 bytes on macOS).
 fn scratch(tag: &str) -> Dir {
     let dir = PathBuf::from(format!("/tmp/nl-{tag}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
@@ -40,7 +34,6 @@ fn copy_tree(from: &Path, to: &Path) {
     }
 }
 
-/// A data root holding a copy of `crates/app/fixtures/notch`.
 fn fixture_root(dir: &Path) -> PathBuf {
     let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("../app/fixtures/notch");
     let root = dir.join("root");
@@ -60,11 +53,6 @@ fn daemon(root: &Path, home: &Path) -> Command {
     c
 }
 
-/// How long a test lets a started daemon take to answer. A load allowance, not a speed check: the
-/// daemon binds before it reads the session list (`daemon_tests.rs` pins that, with the read held),
-/// so a daemon that is up answers at once and this only matters when the machine is starved (a
-/// full workspace test run starts the process late). A test that waits less fails under that load
-/// without anything being wrong.
 const START_ALLOWANCE: Duration = Duration::from_secs(30);
 
 fn wait_for_socket(socket: &Path) {
@@ -78,12 +66,8 @@ fn wait_for_socket(socket: &Path) {
     panic!("no daemon on {}", socket.display());
 }
 
-/// Stops a daemon a test started, however the test ends: an assert that fails mid-test must not
-/// leave a daemon running. SIGTERM, a short wait, then SIGKILL.
 struct Daemon {
-    /// Started here as a child.
     child: Option<Child>,
-    /// Started detached by `ensure_daemon`: found by its socket, its pid asked of it.
     socket: Option<PathBuf>,
 }
 
@@ -154,7 +138,6 @@ fn terminate(child: &mut Child) -> std::process::ExitStatus {
     }
 }
 
-/// `sessions.list` once it holds at least `min` rows, within the load allowance.
 fn full_list(client: &mut Client, min: usize) -> Value {
     let deadline = Instant::now() + START_ALLOWANCE;
     loop {
@@ -185,7 +168,6 @@ fn serves_the_fixture_and_its_changes_then_stops_on_sigterm() {
     let dir = scratch("e2e");
     let root = fixture_root(&dir.0);
     let socket = root.join("notchling/notchlingd.sock");
-    // A socket file left by a crashed daemon.
     drop(std::os::unix::net::UnixListener::bind(&socket).unwrap());
     assert!(socket.exists());
 
@@ -195,12 +177,8 @@ fn serves_the_fixture_and_its_changes_then_stops_on_sigterm() {
     let mut client = Client::connect(&socket, ClientKind::Cli, "0.1.0").unwrap();
     assert_eq!(client.tier(), notchling_local_api::Tier::Agent);
     client.subscribe(&["sessions"]).unwrap();
-    // The socket answers before the first read of the list, and `sessions.list` waits for that
-    // read only so long (4 s) before it answers with what it has: on a starved machine the first
-    // answer can be the empty list. Ask again within the load allowance.
     let list = full_list(&mut client, 5);
     let rows = list.as_array().unwrap();
-    // The engine's own field names, through serde.
     let first = &rows[0];
     for key in [
         "id", "name", "project", "group", "label", "sinceMs", "target",
@@ -211,14 +189,10 @@ fn serves_the_fixture_and_its_changes_then_stops_on_sigterm() {
     let working = rows.iter().find(|r| r["id"] == "sess-notch").unwrap();
     assert_eq!(working["group"], "working");
 
-    // The job stops to ask: its state file changes.
     let state = root.join("claude/jobs/a1b2c3d4/state.json");
     let text = std::fs::read_to_string(&state).unwrap();
     std::fs::write(&state, text.replace("\"working\"", "\"blocked\"")).unwrap();
 
-    // The first read went out as `sessions.changed` too, and this client may have subscribed
-    // before it did (the socket answers first): skip that one, still `working`, and wait for the
-    // event that shows the change.
     let deadline = Instant::now() + Duration::from_secs(15);
     let row = loop {
         let left = deadline.saturating_duration_since(Instant::now());
@@ -241,13 +215,11 @@ fn serves_the_fixture_and_its_changes_then_stops_on_sigterm() {
     };
     assert_ne!(row["group"], "working", "{row}");
 
-    // A second daemon on the same socket says so and exits 0, leaving the first serving.
     let second = daemon(&root, &dir.0).output().unwrap();
     assert!(second.status.success());
     assert!(String::from_utf8_lossy(&second.stderr).contains("already serves"));
     assert!(client.status().is_ok());
 
-    // `notchling status` and `sessions` talk to it.
     let status = Command::new(env!("CARGO_BIN_EXE_notchling"))
         .args(["status", "--socket"])
         .arg(&socket)
@@ -266,8 +238,6 @@ fn serves_the_fixture_and_its_changes_then_stops_on_sigterm() {
     let status = terminate(running.child.as_mut().unwrap());
     assert!(status.success(), "{status:?}");
     assert!(!socket.exists(), "the socket is removed on SIGTERM");
-    // The lock file stays (it holds nothing once the process is gone); nothing else was written
-    // outside the data root's notchling folder.
     assert!(root.join("notchling/notchlingd.lock").exists());
 }
 
@@ -289,13 +259,10 @@ fn ensure_daemon_starts_one_and_then_finds_it() {
     let root = fixture_root(&dir.0);
     let socket = dir.0.join("s/notchlingd.sock");
     let binary = Path::new(env!("CARGO_BIN_EXE_notchling"));
-    // The production wait is 3 s; this test asks whether a daemon starts and is found, not how
-    // fast, so it gets the load allowance (see `START_ALLOWANCE`).
     let options = SpawnOptions {
         wait: START_ALLOWANCE,
         data_root: Some(root.clone()),
     };
-    // Detached, so not our child to kill: the guard finds it by its socket if the test fails.
     let _running = Daemon::detached(&socket);
     assert_eq!(
         ensure_daemon_with(binary, &socket, &options).unwrap(),
@@ -308,7 +275,6 @@ fn ensure_daemon_starts_one_and_then_finds_it() {
     let mut client = Client::connect(&socket, ClientKind::App, "0.1.0").unwrap();
     let rows: Vec<Value> = client.sessions().unwrap();
     assert!(!rows.is_empty());
-    // Its log, lock and audit log sit beside the given socket, not in the data root.
     assert!(dir.0.join("s/notchlingd.log").exists());
     assert!(dir.0.join("s/notchlingd.lock").exists());
     let pid = client.status().unwrap().pid;

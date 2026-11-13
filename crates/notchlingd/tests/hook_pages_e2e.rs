@@ -1,7 +1,3 @@
-//! `notchling hook` with the Artifact tool's events, as Claude Code runs it: the built binary, the
-//! event on stdin, its stdout and exit code, over a temp data root and a fake `HOME`. No daemon is
-//! running and no real folder is read. A publish is saved where `notchling pages` finds it, a read
-//! of the saved link is denied with the local copy, and everything else passes.
 #![cfg(unix)]
 
 use serde_json::{json, Value};
@@ -36,7 +32,6 @@ fn notchling(dir: &Path, args: &[&str]) -> Command {
 }
 
 fn hook(dir: &Path, stdin: &[u8]) -> Output {
-    // The socket is a name nobody listens on: pages events never ask for it.
     let socket = dir.join("missing.sock");
     let mut child = notchling(dir, &["hook", "--socket", socket.to_str().unwrap()])
         .stdin(Stdio::piped())
@@ -85,7 +80,6 @@ fn a_publish_is_saved_and_a_read_of_its_link_is_answered_from_the_copy() {
         "<title>pages-hook-probe</title><p>hello</p>",
     )
     .unwrap();
-    // Under a fixture root the root is read as `~`.
     std::fs::create_dir_all(dir.0.join("root")).unwrap();
     std::fs::write(
         dir.0.join("root/.claude.json"),
@@ -93,7 +87,6 @@ fn a_publish_is_saved_and_a_read_of_its_link_is_answered_from_the_copy() {
     )
     .unwrap();
 
-    // The publish is recorded, silently, with no daemon.
     assert_eq!(say(&dir.0, &publish(&dir.0)), None);
     let library = dir.0.join("root/notchling/pages");
     let list: Value =
@@ -101,14 +94,12 @@ fn a_publish_is_saved_and_a_read_of_its_link_is_answered_from_the_copy() {
     assert_eq!(list["pages"].as_array().unwrap().len(), 1, "{list}");
     assert_eq!(list["pages"][0]["account"], "me@example.com");
 
-    // `notchling pages` reads the same folder.
     let found = notchling(&dir.0, &["pages", "pages-hook-probe"])
         .output()
         .unwrap();
     assert_eq!(found.status.code(), Some(0), "{found:?}");
     assert!(String::from_utf8_lossy(&found.stdout).contains("AAAAAAAAAAAAAAAAAAAAAA"));
 
-    // A whole-page read of the link is denied with the local copy's path.
     let out = say(&dir.0, &read("PreToolUse", LINK)).unwrap();
     let h = &out["hookSpecificOutput"];
     assert_eq!(h["permissionDecision"], "deny");
@@ -122,7 +113,6 @@ fn a_publish_is_saved_and_a_read_of_its_link_is_answered_from_the_copy() {
         "{reason}"
     );
 
-    // A read of a link we don't keep passes; a failed read of the kept one gets the fallback.
     assert_eq!(
         say(
             &dir.0,

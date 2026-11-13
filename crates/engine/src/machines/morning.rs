@@ -1,8 +1,3 @@
-//! The morning list (Swift `MorningItems`): what the overnight workers left for you, a branch to
-//! merge, a question to answer, or a job to retry, built from the poller's reports and the open
-//! issues `gh` lists. Issue titles and comments are text from GitHub and from the machines:
-//! shown, never run.
-
 use regex::Regex;
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
@@ -19,7 +14,6 @@ pub enum MorningKind {
     Stuck,
 }
 
-/// The worker entry behind a morning item.
 #[derive(Clone, Debug, PartialEq)]
 pub enum MorningEntry {
     Ready(ReadyEntry),
@@ -27,10 +21,8 @@ pub enum MorningEntry {
     Stuck(StuckEntry),
 }
 
-/// One thing the overnight workers left for you.
 #[derive(Clone, Debug, PartialEq)]
 pub struct MorningItem {
-    /// `<machine>/<repo>#<issue>`
     pub id: String,
     pub kind: MorningKind,
     pub machine: String,
@@ -38,11 +30,9 @@ pub struct MorningItem {
     pub issue: i64,
     pub title: String,
     pub entry: MorningEntry,
-    /// The latest worker comment on the issue, with the hidden `<!-- sd:… -->` marks removed.
     pub comment: Option<String>,
 }
 
-/// One comment on an issue.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct GhComment {
     pub author: String,
@@ -59,7 +49,6 @@ impl GhComment {
     }
 }
 
-/// One issue as `gh issue list --json number,title,labels,comments` prints it.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct GhIssue {
     pub number: i64,
@@ -77,8 +66,6 @@ impl GhIssue {
         }
     }
 
-    /// Reads the JSON array `gh issue list --json …` prints; empty when it is not one, or when
-    /// an element has no integer `number`.
     pub fn decode_list(text: &str) -> Vec<GhIssue> {
         let Ok(Value::Array(all)) = serde_json::from_str::<Value>(text) else {
             return Vec::new();
@@ -97,7 +84,6 @@ impl GhIssue {
             .and_then(Value::as_str)
             .unwrap_or_default()
             .to_string();
-        // a label that is not an object with a name is skipped, not fatal
         let labels = match o.get("labels") {
             Some(Value::Array(list)) => list
                 .iter()
@@ -105,7 +91,6 @@ impl GhIssue {
                 .collect(),
             _ => Vec::new(),
         };
-        // one comment that is not an object makes the whole list empty
         let comments = match o.get("comments") {
             Some(Value::Array(list)) => list
                 .iter()
@@ -144,16 +129,12 @@ impl GhIssue {
 
 pub const WORKER_MARK: &str = "<!-- sd:worker -->";
 
-/// The labels the worker puts on an issue it leaves for you.
 pub const LABELS: [&str; 3] = ["sd:ready", "sd:needs-you", "sd:stuck"];
 
 pub fn item_id(machine: &str, repo: &str, issue: i64) -> String {
     format!("{machine}/{repo}#{issue}")
 }
 
-/// Ready first, then Needs you, then Stuck. Within a group the oldest comes first: a ready branch
-/// by when it became ready, the others (the status carries no date) by issue number, which grows
-/// with time. `issues` is keyed by repo (`owner/name`).
 pub fn build(
     reports: &BTreeMap<String, LastReport>,
     issues: &BTreeMap<String, Vec<GhIssue>>,
@@ -162,7 +143,6 @@ pub fn build(
     let mut needs: Vec<MorningItem> = Vec::new();
     let mut stuck: Vec<MorningItem> = Vec::new();
 
-    // the map's keys are sorted: machines in name order
     for (machine, report) in reports {
         let Some(status) = &report.status else {
             continue;
@@ -228,14 +208,10 @@ pub fn build(
     out
 }
 
-/// A worker comment ends with the hidden `<!-- sd:worker -->` mark (trailing whitespace allowed)
-/// or starts with `<machine>: `.
 pub fn is_worker_comment(body: &str, machine: &str) -> bool {
     body.trim_end().ends_with(WORKER_MARK) || body.starts_with(&format!("{machine}: "))
 }
 
-/// Removes every `<!-- sd:… -->` mark and the blank space around what is left; `None` when nothing
-/// is left.
 pub fn clean_comment(body: &str) -> Option<String> {
     let Ok(re) = Regex::new(r"(?s)<!--\s*sd:.*?-->") else {
         return None;
@@ -254,7 +230,6 @@ pub fn latest_worker_comment(issue: &GhIssue, machine: &str) -> Option<String> {
         .and_then(|c| clean_comment(&c.body))
 }
 
-/// A repo as `owner/name`, plain characters only and not starting with `-`: it goes after `-R`.
 pub fn is_repo_slug(repo: &str) -> bool {
     let plain = |s: &str| {
         !s.is_empty()
@@ -268,15 +243,10 @@ pub fn is_repo_slug(repo: &str) -> bool {
     }
 }
 
-/// The open issues under each label of each repo, merged by issue number. A failing call leaves
-/// that label out; the items then show `#<n>` for a title.
 pub fn fetch_issues(repos: &[String], runner: &dyn Runner) -> BTreeMap<String, Vec<GhIssue>> {
     fetch_issues_checked(repos, runner).0
 }
 
-/// Like [`fetch_issues`], and also names the repos where any `gh` call failed (their issues are
-/// then partial, so a caller that holds older issues for them should keep those). A repo name
-/// that is not `owner/name` is never given to `gh` and counts as failed.
 pub fn fetch_issues_checked(
     repos: &[String],
     runner: &dyn Runner,
@@ -318,8 +288,6 @@ pub fn fetch_issues_checked(
     (all, failed)
 }
 
-/// The issues to show after a fetch: the new ones, except for a repo whose fetch failed, which
-/// keeps what was last known.
 pub fn merged(
     old: &BTreeMap<String, Vec<GhIssue>>,
     fetched: &BTreeMap<String, Vec<GhIssue>>,

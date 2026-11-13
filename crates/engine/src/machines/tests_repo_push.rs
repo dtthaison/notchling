@@ -1,11 +1,7 @@
-//! Tests of Push is refused, masking and step order (Swift `MachinesRepoStepsTests`, the rest).
-
 use super::fakes_b::*;
 use super::registry::Machine;
 use super::step::{CheckState, RemoteOutput, StepFix, StepId};
 use super::tests_repo::{fail_text, fix_plan, probe, remote_text, steps};
-
-// MARK: Push is refused
 
 fn push_output(git: &str, code: i32, checks: &[&str]) -> RemoteOutput {
     let mut lines = vec![git.to_string(), format!("@@push {code}")];
@@ -52,7 +48,6 @@ fn push_refused_needs_githubs_read_only_message() {
         other.state,
         CheckState::Fail("fatal: not a git repository".into())
     );
-    // an output without the marker (the script was cut) is a failure with its first line
     let cut = parse(
         &RemoteOutput {
             text: "fatal: something\n".into(),
@@ -63,8 +58,6 @@ fn push_refused_needs_githubs_read_only_message() {
     assert_eq!(cut.state, CheckState::Fail("fatal: something".into()));
 }
 
-/// I5: the worker's own GitHub logins. Each check's output stays on the machine; only a token line
-/// comes back.
 #[test]
 fn push_refused_fails_when_the_worker_has_its_own_github_login() {
     let rig = Rig::new(mac("m1"));
@@ -113,7 +106,6 @@ fn an_ssh_key_that_answers_for_a_repo_or_not_at_all_is_not_a_login() {
     let (_, parse) = push_parse(&rig.machine);
     let ctx = rig.step();
     let run = |checks: [&str; 4]| parse(&push_output(READ_ONLY_MSG, 128, &checks), &ctx);
-    // a deploy key answers "Hi owner/repo!": it is repo-scoped
     let deploy = run([
         "gh=1",
         "ssh=hi:dtthaison/lingeva-mono",
@@ -121,16 +113,12 @@ fn an_ssh_key_that_answers_for_a_repo_or_not_at_all_is_not_a_login() {
         "credfile=1",
     ]);
     assert!(matches!(deploy.state, CheckState::Pass(_)));
-    // no GitHub answer at all: can't tell, and not a pass
     let unknown = run(["gh=1", "ssh=unknown", "keychain=44", "credfile=1"]);
     assert!(matches!(unknown.state, CheckState::CantTell(_)));
-    // a keychain that can't be read is not "no password"
     let locked = run(["gh=1", "ssh=denied", "keychain=36", "credfile=1"]);
     assert!(matches!(locked.state, CheckState::CantTell(_)));
-    // gh not installed: nothing to log out of
     let no_gh = run(["gh=none", "ssh=denied", "keychain=44", "credfile=1"]);
     assert!(matches!(no_gh.state, CheckState::Pass(_)));
-    // a name that is not a GitHub login is not shown
     let odd = run(["gh=1", "ssh=hi:$(touch x)", "keychain=44", "credfile=1"]);
     assert_eq!(
         odd.state,
@@ -139,15 +127,11 @@ fn an_ssh_key_that_answers_for_a_repo_or_not_at_all_is_not_a_login() {
     assert!(!format!("{:?} {:?}", odd.state, odd.rows).contains("touch"));
 }
 
-/// The login checks read exit codes and a name only: no `-g`/`-w` on the keychain, no output kept,
-/// nothing writes.
 #[test]
 fn the_login_checks_keep_no_output_and_write_nothing() {
     for m in [mac("m1"), linux("vps")] {
         let (script, _) = push_parse(&m);
         assert!(script.contains("gh auth status --hostname github.com >/dev/null 2>&1"));
-        // a user's ssh config with StrictHostKeyChecking accept-new would let this check add a
-        // known_hosts entry
         assert!(script.contains(
             "ssh -o BatchMode=yes -o ConnectTimeout=8 -o StrictHostKeyChecking=yes -T git@github.com"
         ));
@@ -179,8 +163,6 @@ fn the_login_checks_keep_no_output_and_write_nothing() {
     );
 }
 
-/// Run in a real shell with stubs for gh, ssh and security: only token lines come back, never what
-/// they printed.
 #[cfg(unix)]
 #[test]
 fn the_login_checks_run_to_token_lines_and_never_print_the_tools_output() {
@@ -244,7 +226,6 @@ fn push_refused_never_sends_a_push() {
     let (script, _) = remote(&step);
     assert_eq!(script.split(" push ").count(), 2);
     assert!(script.contains("push --dry-run"));
-    // a checkout's own pre-push hook must not run, and the push reads no stdin
     assert!(script.contains("git -c core.hooksPath=/dev/null -C"));
     assert!(script.contains("</dev/null 2>&1"));
     let StepFix::HowTo(text) = &step.fix else {
@@ -254,8 +235,6 @@ fn push_refused_never_sends_a_push() {
     assert_eq!(step.cadence, super::step::Cadence::Slow);
 }
 
-/// A line of machine or gh output is masked before it is cut to 200 characters: the cut falls
-/// inside the token.
 #[test]
 fn machine_text_is_masked_before_it_is_cut_in_checks_and_fixes() {
     let token = long_token();
@@ -264,7 +243,6 @@ fn machine_text_is_masked_before_it_is_cut_in_checks_and_fixes() {
     let rig = Rig::new(mac("m1")).hiding("m1-github-issues", &token);
     let m = rig.machine.clone();
 
-    // the push check: the first line of what git said
     let (_, push) = push_parse(&m);
     let r = push(
         &RemoteOutput {
@@ -277,7 +255,6 @@ fn machine_text_is_masked_before_it_is_cut_in_checks_and_fixes() {
     assert_no_fragment(&token, &shown);
     assert!(shown.contains(marker), "{shown}");
 
-    // the clone check: the origin line
     let (_, clone) = probe(&StepId::clone_repo(REPO), &m);
     let r = clone(
         &RemoteOutput {
@@ -288,7 +265,6 @@ fn machine_text_is_masked_before_it_is_cut_in_checks_and_fixes() {
     );
     assert_no_fragment(&token, &format!("{:?}", r.state));
 
-    // the deploy key check: gh's error when it can't list the keys, and what ssh said to GitHub
     let listing = Rig::new(mac("m1")).hiding("m1-github-issues", &token);
     listing.runner.on(is_list, result(1, "", &said));
     let (_, key) = probe(&StepId::deploy_key(REPO), &m);
@@ -314,7 +290,6 @@ fn machine_text_is_masked_before_it_is_cut_in_checks_and_fixes() {
     );
     assert_no_fragment(&token, &format!("{:?} {:?}", r.state, r.rows));
 
-    // the Fixes: clone's failure line and gh's, each cut to 200 characters
     let failing = Rig::new(mac("m1")).hiding("m1-github-issues", &token);
     failing.runner.on(|_| true, result(128, "", &said));
     let cloned = (fix_plan(&StepId::clone_repo(REPO), &m).run)(&failing.fix());

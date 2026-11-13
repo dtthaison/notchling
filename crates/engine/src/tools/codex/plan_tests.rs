@@ -54,7 +54,6 @@ fn network_is_opened_only_in_the_workspace_write_sandbox() {
         !with("read-only", true).iter().any(|a| a == open),
         "read-only stays as it is"
     );
-    // The option sits before the session id and prompt, which stay last.
     let args = arguments(
         "more",
         Some("abc"),
@@ -123,7 +122,6 @@ fn the_codex_command_is_found_in_the_usual_places() {
         find_binary(home, "", only("/opt/homebrew/bin/codex")),
         Some(PathBuf::from("/opt/homebrew/bin/codex"))
     );
-    // The order is Swift's: ~/.local/bin first.
     assert_eq!(
         find_binary(home, "", |_| true),
         Some(PathBuf::from("/home/me/.local/bin/codex"))
@@ -133,7 +131,6 @@ fn the_codex_command_is_found_in_the_usual_places() {
         Some(PathBuf::from("/y/bin/codex"))
     );
     assert_eq!(find_binary(home, "/x/bin", |_| false), None);
-    // A relative PATH entry is never run.
     assert_eq!(find_binary(home, "bin:.", only("bin/codex")), None);
 }
 
@@ -191,7 +188,6 @@ fn a_turn_runs_with_the_codex_home_the_daemon_reads() {
     assert!(spec
         .env
         .contains(&("CODEX_HOME".to_string(), Some("/r/codex".to_string()))));
-    // Without one the variable is left as the process has it.
     let spec = turn_spec(Path::new("/bin/codex"), &turn(None), None);
     assert!(spec.env.iter().all(|(key, _)| key != "CODEX_HOME"));
 }
@@ -204,7 +200,6 @@ fn over_a_fixture_root_only_the_roots_own_codex_is_found() {
         find_fixture_binary(root, only("/r/.local/bin/codex")),
         Some(PathBuf::from("/r/.local/bin/codex"))
     );
-    // The machine's own installs are never run against a fixture.
     for real in [
         "/opt/homebrew/bin/codex",
         "/usr/local/bin/codex",

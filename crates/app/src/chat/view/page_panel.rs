@@ -1,14 +1,3 @@
-//! The page panel (the Swift `PagePanel`): an Artifact clicked in a conversation, in the Details
-//! Panel's place beside the chat. A header (the page's title, where it comes from, Open in Browser,
-//! Back to Details) over the page, which is a `wry` web view (`pages::web::PanelWeb`) laid over the
-//! panel's page area: a canvas there reports its bounds each frame and the web view's frame follows
-//! them. The web view hides while a sheet, menu or the part names are up, since GPUI draws those
-//! under it, and goes when the page is closed or the window is (the view drops it).
-//!
-//! The panel belongs to the window, not to a session: picking another session keeps it, as the
-//! Swift panel sat outside the per-session identity. Its left edge drags to resize it.
-//! `chat::page_panel` decides what a click opens and holds the panel's pure rules.
-
 use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -38,38 +27,26 @@ use crate::pages::web::{PanelHooks, PanelPage, PanelWeb};
 use crate::pages::window::AppPagesDir;
 use crate::search::panel::app_library;
 
-/// Set to a page's id or folder, a render draws the page panel over it: a page the made-up library
-/// (`pages::renders`) has as its saved copy, any other id as a live page. The panel's chrome only:
-/// the web view is an AppKit view a render doesn't make.
 pub const PAGE_ENV: &str = "NOTCHLING_RENDER_PAGE";
 
-/// Set to a file's path, a render draws the file panel over it.
 pub const FILE_ENV: &str = "NOTCHLING_RENDER_FILE";
 
-/// What the header's height is (the Swift panel's 48).
 const HEADER: f32 = 36.0;
 
-/// The panel's left edge, dragged.
 struct PanelEdge;
 
-/// The page shown, as the header names it.
 pub struct Shown {
     pub opens: Opens,
     pub title: String,
     pub subtitle: String,
-    /// What Open in Browser opens; "" when there is nothing on claude.ai to open.
     pub link: String,
-    /// Why the page can't show (its copy is gone or outside the library, the web view failed).
     pub error: Option<String>,
-    /// The file shown, for [`Opens::File`].
     pub file: Option<FileState>,
 }
 
-/// A file as last read for the panel.
 pub struct FileState {
     pub path: PathBuf,
     pub loaded: Loaded,
-    /// A picture's bytes made once for GPUI, which draws from them.
     image: Option<Arc<gpui::Image>>,
 }
 
@@ -101,16 +78,10 @@ impl FileState {
 
 pub struct State {
     pub shown: Option<Shown>,
-    /// The width asked for, by default or by dragging the edge; shown within `panel_width`.
     pub width: f32,
-    /// The web view while a page is open in a live window. Shared with the frame's canvas, which
-    /// lays it out.
     web: Rc<RefCell<Option<PanelWeb>>>,
-    /// A render draws the chrome alone.
     pub render_only: bool,
-    /// Counts the clicks, so the library's answer to an older one is dropped.
     asked: u64,
-    /// The width last drawn, for what is placed beside the panel (the account menu).
     drawn_width: Cell<f32>,
 }
 
@@ -128,7 +99,6 @@ impl Default for State {
 }
 
 impl State {
-    /// A render's panel over `id` (`NOTCHLING_RENDER_PAGE`).
     pub fn preview(&mut self, id: &str) {
         let pages = crate::pages::renders::pages();
         let opens = match pages.iter().find(|p| p.id == id || p.folder == id) {
@@ -142,7 +112,6 @@ impl State {
         self.shown = Some(shown(opens));
     }
 
-    /// A render's panel over the file at `path` (`NOTCHLING_RENDER_FILE`).
     pub fn preview_file(&mut self, path: &str) {
         self.render_only = true;
         self.shown = Some(shown(Opens::File(PathBuf::from(path))));
@@ -152,20 +121,17 @@ impl State {
         self.shown.is_some()
     }
 
-    /// Gives the keyboard back to Chat if the page has it.
     pub fn take_keys_back(&self) {
         if let Some(web) = self.web.borrow().as_ref() {
             web.take_keys_back();
         }
     }
 
-    /// The panel's width as last drawn.
     pub fn shown_width(&self) -> f32 {
         self.drawn_width.get()
     }
 }
 
-/// The header's words and link for what a click opened.
 fn shown(opens: Opens) -> Shown {
     let (title, link) = match &opens {
         Opens::Saved(page) => (page.title.clone(), page.link.clone()),
@@ -197,8 +163,6 @@ fn home() -> Option<PathBuf> {
     std::env::var_os("HOME").map(PathBuf::from)
 }
 
-/// A link clicked in a reply (`markdown`): in the Chat window, the window's view decides; anywhere
-/// else, the browser.
 pub fn follow_link(url: &str, window: &mut Window, cx: &mut App) {
     match window.root::<ChatView>() {
         Some(Some(chat)) => chat.update(cx, |view, cx| view.open_link(url.to_owned(), window, cx)),
@@ -207,12 +171,7 @@ pub fn follow_link(url: &str, window: &mut Window, cx: &mut App) {
 }
 
 impl ChatView {
-    /// A clicked link: an Artifact opens in the page panel (its saved copy when the library has
-    /// one, else the live page), anything else in the browser. The library is asked off the UI
-    /// thread; without a daemon it has no pages, so an Artifact opens live.
     pub(super) fn open_link(&mut self, url: String, window: &mut Window, cx: &mut Context<Self>) {
-        // A file or folder on this Mac (a path in a reply, a picture's tile, a path relative to the
-        // session's folder): a file shows beside the chat, a folder opens in Finder.
         let folder = self
             .selected_session()
             .map(|s| s.agent.cwd.clone())
@@ -227,11 +186,9 @@ impl ChatView {
             return;
         }
         if url.starts_with('/') {
-            // A path that isn't there has nothing to open; macOS would only say -50.
             return;
         }
         if artifact_link(&url).is_none() {
-            // A path that isn't there has nothing to open; macOS would only say -50.
             if url.contains("://") || url.starts_with("mailto:") {
                 cx.open_url(&url);
             }
@@ -255,13 +212,10 @@ impl ChatView {
         .detach();
     }
 
-    /// A file or folder a click named: a file the panel can show goes in it, a folder opens in
-    /// Finder and any other file in its own app.
     pub(super) fn open_path(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
         self.show_page(file_panel::opens(&path), "", window, cx);
     }
 
-    /// Shows what a click opens: the page or file in the panel, in place of the one there.
     fn show_page(&mut self, opens: Opens, url: &str, window: &mut Window, cx: &mut Context<Self>) {
         match &opens {
             Opens::Browser => {
@@ -286,7 +240,6 @@ impl ChatView {
         cx.notify();
     }
 
-    /// Reads the open file again when it has changed on disk (looked at on every tick).
     pub(super) fn refresh_file(&mut self, cx: &mut Context<Self>) {
         let Some(Shown {
             file: Some(file), ..
@@ -301,8 +254,6 @@ impl ChatView {
         cx.notify();
     }
 
-    /// The web view for `opens`: a saved page's copy, checked to be in the library as a page
-    /// window's is, or the live page.
     fn make_web(
         &self,
         opens: &Opens,
@@ -313,7 +264,6 @@ impl ChatView {
         let weak = cx.weak_entity();
         let titles = cx.to_async();
         let links = cx.to_async();
-        // Both are called from WebKit, maybe mid-update: act a moment later, on the app's queue.
         let hooks = PanelHooks {
             title: Box::new(move |title| {
                 let weak = weak.clone();
@@ -358,18 +308,15 @@ impl ChatView {
         }
     }
 
-    /// Back to Details: the page goes, and the Details Panel shows in its place.
     pub(super) fn close_page(&mut self, cx: &mut Context<Self>) {
         self.page.asked += 1;
         self.page.shown = None;
         self.page.web.borrow_mut().take();
-        // Its text is gone: a selection in it must not answer a later Copy.
         super::select::clear();
         self.details_hidden = false;
         cx.notify();
     }
 
-    /// The panel's edge dragged over the area it shares with the conversation.
     fn drag_edge(&mut self, event: &DragMoveEvent<PanelEdge>, cx: &mut Context<Self>) {
         let area = event.bounds;
         self.page.width = dragged_width(
@@ -381,14 +328,10 @@ impl ChatView {
     }
 }
 
-/// Lets the row holding the conversation and the panel follow the panel's edge while it is
-/// dragged.
 pub fn follows_edge<E: InteractiveElement>(element: E, cx: &mut Context<ChatView>) -> E {
     element.on_drag_move::<PanelEdge>(cx.listener(|this, event, _, cx| this.drag_edge(event, cx)))
 }
 
-/// Under the web view: what shows while it loads, while an overlay hides it, and in a render.
-/// The canvas over it carries the web view's frame.
 fn web_page(view: &ChatView, shown: &Shown, a: Appearance) -> AnyElement {
     let note = match (&shown.error, &shown.opens) {
         (Some(error), _) => error.clone(),
@@ -439,14 +382,9 @@ fn web_page(view: &ChatView, shown: &Shown, a: Appearance) -> AnyElement {
         .into_any_element()
 }
 
-/// Room around a file's content.
 const FILE_PAD: f32 = 16.0;
-/// Lines of a text file drawn as one element: each is laid out once, so a long file isn't one
-/// huge text.
 const CHUNK_LINES: usize = 80;
 
-/// A file's content, scrolling below the header: Markdown as a message is drawn, text in the mono
-/// face, a picture at the panel's width, and for anything else a note and a button to its own app.
 fn file_body(
     file: &FileState,
     width: f32,
@@ -495,8 +433,6 @@ fn file_body(
                 let (w, h) = crate::chat::image_size::size(&bytes[..bytes.len().min(64 * 1024)])
                     .unwrap_or((4, 3));
                 let room = (width - 2.0 * FILE_PAD).max(40.0);
-                // Never drawn larger than it is; GPUI sizes an image's box from its pixels, so
-                // the height follows the shape.
                 let shown_w = room.min(w.max(1) as f32);
                 let shown_h = shown_w * h as f32 / w.max(1) as f32;
                 div()
@@ -549,7 +485,6 @@ fn file_body(
                 .flex()
                 .flex_col()
                 .gap(px(10.0))
-                // First, so each frame's texts are noted afresh before the panel places theirs.
                 .child(super::select::listener(chat))
                 .child(content)
                 .when(cut, |d| {
@@ -564,7 +499,6 @@ fn file_body(
         .into_any_element()
 }
 
-/// The panel, while a page is open.
 pub fn render(
     view: &ChatView,
     a: Appearance,
@@ -584,8 +518,6 @@ pub fn render(
     let file_path = shown.file.as_ref().map(|f| f.path.clone());
     let is_file = file_path.is_some();
 
-    // One line: the Artifact mark (where the page comes from on hover), the title in all the room
-    // the three icon buttons leave, then Refresh, Open in Browser and Back to Details.
     let mark = gate::tip_text(
         div().id("page-panel-mark").flex_shrink_0().child(icon(
             if file_path.is_some() {
@@ -632,7 +564,6 @@ pub fn render(
         tool("page-panel-browser", Icon::Web, "Open in Browser")
             .on_click(move |_, _, cx| cx.open_url(&link))
     });
-    // A file: where it is, and its own app.
     let reveal = file_path.clone().map(|path| {
         tool("page-panel-reveal", Icon::Folder, "Show in Finder")
             .on_click(move |_, _, cx| cx.reveal_path(&path))
@@ -667,7 +598,6 @@ pub fn render(
         .children(open_with)
         .child(back);
 
-    // A file: its text, in the room below the header.
     let page = match shown.file.as_ref() {
         Some(file) => file_body(
             file,
@@ -679,8 +609,6 @@ pub fn render(
         None => web_page(view, shown, a),
     };
 
-    // The edge to drag: over the hairline and just left of it, never over the web view, which
-    // would take the press.
     let edge = div()
         .id("page-panel-edge")
         .absolute()

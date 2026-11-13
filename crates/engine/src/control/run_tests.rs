@@ -1,10 +1,7 @@
-//! Reading `claude --bg` output (port of `LaunchOutputTests`) and walking plans through the fake.
-
 use super::run::is_untrusted;
 use super::*;
 use std::cell::RefCell;
 
-// Port of LaunchOutputTests.testJobID.
 #[test]
 fn job_id_in_launch_output_across_versions() {
     assert_eq!(
@@ -17,7 +14,6 @@ fn job_id_in_launch_output_across_versions() {
     let v318 = "note: background session 8f985af0 keeps its own saved options, so the flags you passed started a copy as 6220cc2b.\nbackgrounded · 6220cc2b (idle — send a prompt to start)\n  claude agents          list sessions\n";
     assert_eq!(job_id_in_launch_output(v318).as_deref(), Some("6220cc2b"));
     assert_eq!(job_id_in_launch_output("error: no such session"), None);
-    // Eight characters, all hex: a word that happens to follow the dot is not an id.
     assert_eq!(job_id_in_launch_output("backgrounded · notahexid"), None);
     assert_eq!(job_id_in_launch_output("backgrounded · 6ce4c19"), None);
 }
@@ -127,8 +123,6 @@ fn a_timeout_names_the_command_and_the_limit() {
     );
 }
 
-/// A Remove-shaped plan: the current copy counts, the stale ones are best effort, and none waits on
-/// another (Swift's loop in `AppDelegate.remove`).
 fn rm_plan(current_keeps_going: bool) -> Plan {
     let rm = |required, keep_going| {
         Step::Run(RunStep {
@@ -160,7 +154,6 @@ fn best_effort_steps_do_not_stop_the_plan() {
     assert_eq!(fake.commands().len(), 3);
 }
 
-/// The old test pinned the opposite: a failing current copy ended the plan, so the stale copies stayed.
 #[test]
 fn a_failing_current_copy_is_the_error_after_every_copy_was_tried() {
     let failing = FakeLauncher::new();

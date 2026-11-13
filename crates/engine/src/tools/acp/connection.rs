@@ -1,10 +1,3 @@
-//! One Agent Client Protocol connection: requests with callbacks, notifications and the agent's own
-//! requests handed to a [`Handler`]. Everything the process prints is handled on one thread, in
-//! order, so a handler sees updates in the order they arrived.
-//!
-//! Callbacks (`Done`, the handler) run on that thread, or on the caller's thread when the
-//! connection is already closed. They must not be called with a lock held that they take themselves.
-
 use super::process::{Killer, Output, Spawned, ToolProcess};
 use serde_json::{json, Map, Value};
 use std::collections::HashMap;
@@ -12,22 +5,13 @@ use std::sync::mpsc::Receiver;
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, TryLockError};
 use std::time::{Duration, Instant};
 
-/// How long a message waits for another thread's write to finish before the process is given up
-/// on. A write only takes this long when the agent isn't reading its input (it hangs, or isn't
-/// listening), and under the local API's call timeout so the op that asked still answers.
 const WRITER_WAIT: Duration = Duration::from_secs(3);
 
-/// Runs with a request's result (`result` object, `{}` when it had none) or its error text.
 pub type Done = Box<dyn FnOnce(Result<Value, String>) + Send>;
 
-/// Who hears what the agent sends on its own.
 pub trait Handler: Send + Sync {
-    /// A message with a method and no id (`session/update`).
     fn notification(&self, method: &str, params: &Value);
-    /// A call that wants an answer: `id` as it came (a string or a number), to be given back to
-    /// [`Connection::respond`] or [`Connection::respond_error`] unchanged.
     fn request(&self, id: &Value, method: &str, params: &Value);
-    /// The process ended on its own (not through [`Connection::close`]), with its last stderr line.
     fn exit(&self, message: Option<String>);
 }
 
@@ -37,13 +21,9 @@ pub struct Connection {
 }
 
 struct Inner {
-    /// The tool's name, for error messages.
     name: String,
     state: Mutex<State>,
-    /// Held for the length of a write, which blocks while the agent isn't reading.
     process: Mutex<Box<dyn ToolProcess>>,
-    /// Ends the process without the writer's lock, so a blocked write fails instead of holding
-    /// up `close`.
     killer: Arc<dyn Killer>,
     output: Mutex<Option<Receiver<Output>>>,
     handler: OnceLock<Arc<dyn Handler>>,
@@ -56,7 +36,6 @@ struct State {
 }
 
 impl Connection {
-    /// Wraps a started process; nothing is read until [`Connection::start`].
     pub fn new(spawned: Spawned, name: &str) -> Connection {
         let killer = spawned.process.killer();
         Connection {
@@ -75,7 +54,6 @@ impl Connection {
         }
     }
 
-    /// Starts reading, handing what the agent sends to `handler`. Once.
     pub fn start(&self, handler: Arc<dyn Handler>) {
         let Some(rx) = self
             .inner
@@ -92,7 +70,6 @@ impl Connection {
             for out in rx {
                 match out {
                     Output::Line(line) => inner.handle(&line),
-                    // Dropped by the reader: nothing to act on, and the connection carries on.
                     Output::Oversize => {}
                     Output::Closed(message) => {
                         inner.ended(message);
@@ -108,7 +85,6 @@ impl Connection {
         self.inner.lock_state().closed
     }
 
-    /// A request; `done` runs with the result or the error.
     pub fn request(&self, method: &str, params: Value, done: Done) {
         let id = {
             let mut state = self.inner.lock_state();
@@ -129,7 +105,6 @@ impl Connection {
         self.send(&json!({"jsonrpc": "2.0", "method": method, "params": params}));
     }
 
-    /// Answers the agent's request `id`.
     pub fn respond(&self, id: &Value, result: Value) {
         self.send(&json!({"jsonrpc": "2.0", "id": id, "result": result}));
     }
@@ -140,14 +115,12 @@ impl Connection {
         );
     }
 
-    /// Writes a message; a broken pipe ends the connection, failing whatever waited.
     fn send(&self, message: &Value) {
         if !self.inner.write(message) {
             self.inner.ended(None);
         }
     }
 
-    /// Ends the process; whatever waited fails. The handler's `exit` doesn't run.
     pub fn close(&self) {
         let waiting = {
             let mut state = self.inner.lock_state();
@@ -168,7 +141,6 @@ impl Inner {
         self.state.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    /// Writes one message; false when the connection is closed or the pipe broke.
     fn write(&self, message: &Value) -> bool {
         if self.lock_state().closed {
             return false;
@@ -182,8 +154,6 @@ impl Inner {
         process.write_line(&line).is_ok()
     }
 
-    /// The writer's lock, waiting a little for a write in progress; `None` when it stays busy
-    /// ([`WRITER_WAIT`]) or the connection closes meanwhile.
     fn writer(&self) -> Option<MutexGuard<'_, Box<dyn ToolProcess>>> {
         let until = Instant::now() + WRITER_WAIT;
         loop {
@@ -243,8 +213,6 @@ impl Inner {
         }
     }
 
-    /// The process ended (or its pipe broke): everything waiting fails with its last stderr line,
-    /// and the handler hears of it unless we closed it ourselves.
     fn ended(&self, message: Option<String>) {
         let (waiting, was_closed) = {
             let mut state = self.lock_state();
@@ -273,7 +241,6 @@ impl Inner {
     }
 }
 
-/// A response's id: an integer, or a string holding one.
 fn response_id(id: &Value) -> Option<i64> {
     match id {
         Value::Number(n) => n.as_i64(),

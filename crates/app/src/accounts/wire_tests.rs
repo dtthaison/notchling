@@ -1,5 +1,3 @@
-//! The calls' shapes and the readers over the module docs' examples.
-
 use super::*;
 
 #[test]
@@ -148,7 +146,6 @@ fn a_move_all_result_names_what_failed_and_a_late_reply_is_pending() {
         (banner.text.as_str(), banner.warning),
         ("Moved 1 session.", false)
     );
-    // A daemon that answers before the move ends: the result comes as an event.
     let late = parse_move_result(&json!({"state": "moving"}));
     assert!(late.pending && late.moved.is_empty());
     assert_eq!(

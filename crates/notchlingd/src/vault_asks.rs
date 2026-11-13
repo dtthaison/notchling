@@ -1,12 +1,6 @@
-//! The vault's waits on the user, for [`super::VaultOps`]: an approval of a use of secrets
-//! marked ask-first, and an agent's request for a secret (the form). Each announces itself on the
-//! `vault` topic and is kept until it ends, so `vault.pending` can show it to an app that
-//! connects later.
-
 use super::*;
 
 impl VaultOps {
-    /// Asks the app and waits. With no app following the vault, a no at once.
     pub(super) fn approve(
         &self,
         caller: &Caller,
@@ -144,7 +138,6 @@ impl VaultOps {
         Ok(json!({"answered": self.requests.answer(id, None)}))
     }
 
-    /// What waits for the user now, oldest first: the events that announced each.
     pub(super) fn pending(&self) -> Value {
         json!({"approvals": self.approvals.pending(), "requests": self.requests.pending()})
     }

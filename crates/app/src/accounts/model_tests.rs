@@ -1,5 +1,3 @@
-//! The window's rows and pages over the render's made-up snapshot.
-
 use super::*;
 use crate::accounts::flows::AddPanel;
 use crate::accounts::renders::{snapshot, Shown, NOW};
@@ -87,7 +85,6 @@ fn the_claude_page_has_in_use_switch_signed_out_and_lane_rows() {
             line: "Added team@example.com.".into()
         }
     );
-    // Busy: Switch waits with no reason to give.
     let busy = page(CLAUDE_CODE, &s, &on(), true, NOW, Zone::UTC);
     let c = busy.rows[3].switch.unwrap();
     assert!(!c.enabled && c.tooltip.is_none());
@@ -98,7 +95,6 @@ fn every_claude_account_shows_its_own_limits_a_pending_read_or_why_it_failed() {
     use crate::accounts::renders::claude_report;
     let mut s = snapshot(Shown::Claude);
     let team = |s: &Snapshot| page(CLAUDE_CODE, s, &on(), false, NOW, Zone::UTC).rows[3].clone();
-    // Not read yet: pending, not a promise about later.
     assert_eq!(
         team(&s).content,
         RowContent::Text {
@@ -106,7 +102,6 @@ fn every_claude_account_shows_its_own_limits_a_pending_read_or_why_it_failed() {
             warning: false
         }
     );
-    // A failed read says so, in plain words with the daemon's reason.
     s.claude_usage.errors.insert(
         "a4".into(),
         "The saved login has expired. Add the account again to sign in.".into(),
@@ -119,14 +114,12 @@ fn every_claude_account_shows_its_own_limits_a_pending_read_or_why_it_failed() {
             warning: true
         }
     );
-    // A report wins over an older failure (the daemon keeps the last good read).
     s.claude_usage.reports.insert("a4".into(), claude_report());
     let RowContent::Limits(groups) = team(&s).content else {
         panic!("its own read");
     };
     assert_eq!(groups[0].lines.len(), 2);
     assert_eq!(groups[0].lines[1].percent_text, "58%");
-    // A plan that reports nothing.
     s.claude_usage.reports.insert(
         "a4".into(),
         notchling_engine::limits::report::UsageReport {
@@ -141,8 +134,6 @@ fn every_claude_account_shows_its_own_limits_a_pending_read_or_why_it_failed() {
             warning: false
         }
     );
-    // The account in use: the watcher's windows while they are the newer check, its own read once
-    // that is newer.
     let in_use = |s: &Snapshot| page(CLAUDE_CODE, s, &on(), false, NOW, Zone::UTC).rows[0].clone();
     s.claude_usage.reports.insert("a1".into(), claude_report());
     let RowContent::Limits(own) = in_use(&s).content else {
@@ -154,7 +145,6 @@ fn every_claude_account_shows_its_own_limits_a_pending_read_or_why_it_failed() {
         panic!("the watcher's windows");
     };
     assert_eq!(watched[0].lines[0].percent, 41.0);
-    // A signed-out account never shows a read.
     s.claude_usage.reports.insert("a3".into(), claude_report());
     let signed_out = page(CLAUDE_CODE, &s, &on(), false, NOW, Zone::UTC).rows[2].clone();
     assert!(matches!(
@@ -174,7 +164,6 @@ fn off_lists_the_names_and_every_control_says_why() {
         if let Some(c) = row.switch {
             assert_eq!(c.tooltip, Some(ACCOUNTS_OFF));
         }
-        // ⋯ Remove asks the daemon too: off, it is drawn disabled with the reason.
         assert_eq!(
             row.menu[0].control,
             Control {
@@ -197,7 +186,6 @@ fn off_lists_the_names_and_every_control_says_why() {
     let live = page(CLAUDE_CODE, &s, &on(), false, NOW, Zone::UTC);
     assert!(live.rows.iter().all(|r| r.menu[0].control.enabled));
     assert!(codex.rows.iter().all(|r| !r.in_use));
-    // Detached: the daemon's absence is the reason.
     let d = page(
         CLAUDE_CODE,
         &s,
@@ -242,7 +230,6 @@ fn provider_pages_show_their_reports_defaults_and_remove_words() {
         "not saved in Desktop: no Switch"
     );
     assert_eq!(desktop.rows[1].menu[0].title, "Remove from List…");
-    // A sign-in under way disables Switch and shows the waiting panel.
     let waiting = snapshot(Shown::Codex);
     let codex = page(CODEX, &waiting, &on(), false, NOW, Zone::UTC);
     assert!(codex.rows[1].switch.is_some_and(|c| !c.enabled));
@@ -254,7 +241,6 @@ fn provider_pages_show_their_reports_defaults_and_remove_words() {
             ..
         }
     ));
-    // An unknown provider is an empty page.
     let none = page("gemini", &s, &on(), false, NOW, Zone::UTC);
     assert!(none.rows.is_empty() && none.empty.is_some());
 }
@@ -266,7 +252,6 @@ fn a_claude_desktop_row_shows_the_limits_of_the_same_claude_code_account() {
     let uuid = page(CLAUDE_DESKTOP, &s, &on(), false, NOW, Zone::UTC).rows[0]
         .id
         .clone();
-    // Claude Code's id for the same account is `<uuid>:<org>`.
     let code_id = format!("{uuid}:org-1");
     s.claude.accounts[0].id = code_id.clone();
     s.claude_usage.reports.insert(code_id, claude_report());

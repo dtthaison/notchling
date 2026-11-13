@@ -1,67 +1,32 @@
-//! Long values in Notchling's own Keychain items, split over several items.
-//!
-//! `security -i` reads a command into a 4 KB line and the value goes in as hex, so a value over
-//! about 1.9 KB can't be written in one item without putting it on argv (which Notchling never
-//! does). A saved Codex `auth.json` (3.5–5 KB) or a saved Claude Code login with a long profile
-//! doesn't fit. So a value too long for one line is kept like this:
-//!
-//! - account `<id>` holds a header, `notchling-chunks:v1:<n>:<sha256>`: the number of parts and the
-//!   SHA-256 of the whole value, lowercase hex;
-//! - accounts `<id>#0` … `<id>#<n-1>` (same service) hold the parts: consecutive slices of the
-//!   value's bytes, at most [`PART_BYTES`] each, each stored as base64 (printable, so `security -w`
-//!   prints it as is and never as hex), each line well under the cap.
-//!
-//! A write puts the parts first and the header last, reads the whole value back, and only then
-//! deletes parts a longer earlier value left behind. A read checks the SHA-256, so a half-written
-//! or damaged value is an error ([`KeychainError::Damaged`]), never a wrong login. A value that
-//! fits one line is still written as one item, the format the Swift app wrote and reads; a read
-//! accepts both.
-//!
-//! Only Notchling's own saved-copy services ([`OWN_SERVICES`]) are ever split. Items another tool
-//! reads (Claude Code's `Claude Code-credentials*`, Antigravity's `gemini`/`antigravity`) keep
-//! their one-item shape; a value too long for them is refused ([`KeychainError::TooLong`]).
-
 use super::generic_password::Keychain;
 use super::keychain::{add_line, KeychainError};
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
 use sha2::{Digest, Sha256};
 
-/// What a split value's header starts with.
 pub const HEADER: &str = "notchling-chunks:v1:";
-/// The services whose items only Notchling reads: Claude Code saved logins, Codex and Antigravity
-/// saved copies.
 pub const OWN_SERVICES: [&str; 3] = [
     "Notchling Accounts",
     "Notchling Codex",
     "Notchling Antigravity",
 ];
-/// Bytes of the value per part: 1400 base64 characters, 2800 hex on the line.
 pub const PART_BYTES: usize = 1050;
-/// The most parts a value may have (about 67 KB).
 pub const MAX_PARTS: usize = 64;
 
-/// True for a service only Notchling reads, whose long values may be split.
 pub fn is_own(service: &str) -> bool {
     OWN_SERVICES.contains(&service)
 }
 
-/// The item that holds part `i` of `account`'s value.
 pub fn part_name(account: &str, i: usize) -> String {
     format!("{account}#{i}")
 }
 
-/// One item at a time: what [`read`], [`write`] and [`delete`] are built on.
 pub trait Items {
-    /// The item's text as `security -w` printed it, trimmed; `None` when there is none.
     fn get(&self, service: &str, account: &str) -> Result<Option<String>, KeychainError>;
-    /// Adds or updates one item; a value too long for the line is refused.
     fn put(&self, service: &str, account: &str, value: &str) -> Result<(), KeychainError>;
-    /// Removes one item; true when there was one.
     fn remove(&self, service: &str, account: &str) -> Result<bool, KeychainError>;
 }
 
-/// [`Items`] over the plain [`Keychain`] the E8b stores use.
 pub struct Plain<'a>(pub &'a dyn Keychain);
 
 impl Items for Plain<'_> {
@@ -83,7 +48,6 @@ fn sha_hex(bytes: &[u8]) -> String {
     super::keychain::hex(&Sha256::digest(bytes))
 }
 
-/// The part count and checksum in a header's text after [`HEADER`].
 fn parse_header(rest: &str) -> Option<(usize, &str)> {
     let (n, sha) = rest.split_once(':')?;
     let n: usize = n.parse().ok()?;
@@ -95,7 +59,6 @@ fn parse_header(rest: &str) -> Option<(usize, &str)> {
     ok.then_some((n, sha))
 }
 
-/// The number of parts the item's current header names (0 for none or a one-item value).
 fn parts_now(items: &dyn Items, service: &str, account: &str) -> Result<usize, KeychainError> {
     Ok(items
         .get(service, account)?
@@ -105,7 +68,6 @@ fn parts_now(items: &dyn Items, service: &str, account: &str) -> Result<usize, K
         .map_or(0, |(n, _)| n))
 }
 
-/// The value: one item's text, or a split value put back together and checked.
 pub fn read(
     items: &dyn Items,
     service: &str,
@@ -139,8 +101,6 @@ pub fn read(
         .map_err(|_| KeychainError::Damaged)
 }
 
-/// Stores `value`: one item when it fits the line (or the service isn't Notchling's own), else
-/// parts and a header. Read back whole before it counts as stored.
 pub fn write(
     items: &dyn Items,
     service: &str,
@@ -174,7 +134,6 @@ pub fn write(
     Ok(())
 }
 
-/// Removes the value and any parts; true when there was an item.
 pub fn delete(items: &dyn Items, service: &str, account: &str) -> Result<bool, KeychainError> {
     if !is_own(service) {
         return items.remove(service, account);
@@ -185,8 +144,6 @@ pub fn delete(items: &dyn Items, service: &str, account: &str) -> Result<bool, K
     Ok(existed)
 }
 
-/// Removes parts from `from` on: every one an earlier header named, then any found after them (a
-/// write that stopped before its header). Best effort: a part no header names is never read.
 fn remove_parts(items: &dyn Items, service: &str, account: &str, from: usize, named: usize) {
     for i in from..MAX_PARTS {
         let name = part_name(account, i);

@@ -1,20 +1,13 @@
-//! Matching and ranking sessions against a query's words.
-
 use super::meta::SessionMeta;
 use super::snippet::{self, find};
 
-/// Recent sessions only: the same 14 days the Chat sidebar lists.
 pub const RECENT_SECS: f64 = 14.0 * 86400.0;
-/// How many hits `rank` returns when the caller has no other number in mind.
 pub const DEFAULT_LIMIT: usize = 30;
 
-/// Lowercases per Unicode scalar, with no context rules (Swift's `lowercased()`; Rust's
-/// `str::to_lowercase` would turn a word-final Σ into ς).
 pub fn lowercase(s: &str) -> String {
     s.chars().flat_map(char::to_lowercase).collect()
 }
 
-/// The query's words, lowercased, split on Unicode whitespace.
 pub fn words(query: &str) -> Vec<String> {
     lowercase(query)
         .split(char::is_whitespace)
@@ -23,8 +16,6 @@ pub fn words(query: &str) -> Vec<String> {
         .collect()
 }
 
-/// A session ready to search: its text lowercased once, so a key press costs a substring search
-/// per word and no allocation.
 #[derive(Clone, Debug)]
 pub struct IndexedSession {
     pub meta: SessionMeta,
@@ -53,10 +44,6 @@ pub struct SessionHit {
     pub score: f64,
 }
 
-/// Every word must appear in the title, the folder or the text. Title matches rank first, then a
-/// phrase match, how often the words occur, and how recently the session changed. Best first, at
-/// most `limit`. `words` are expected lowercase (see [`words`]); empty ones are ignored. `now` is
-/// seconds since 1970.
 pub fn rank<W: AsRef<str>>(
     words: &[W],
     sessions: &[IndexedSession],
@@ -134,7 +121,6 @@ fn score(words: &[&str], phrase: Option<&str>, session: &IndexedSession, now: f6
     Some(score)
 }
 
-/// Non-overlapping occurrences of `needle`, counting no more than `cap`.
 fn count(needle: &str, haystack: &str, cap: usize) -> usize {
     let (mut n, mut at) = (0, 0);
     while n < cap {
@@ -149,7 +135,6 @@ fn count(needle: &str, haystack: &str, cap: usize) -> usize {
     n
 }
 
-/// The most recently changed sessions, with no snippet: what the panel shows before you type.
 pub fn latest(sessions: &[IndexedSession], limit: usize) -> Vec<SessionHit> {
     let mut sorted: Vec<&IndexedSession> = sessions.iter().collect();
     sorted.sort_by(|a, b| {

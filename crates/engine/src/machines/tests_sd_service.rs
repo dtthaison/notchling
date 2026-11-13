@@ -1,6 +1,3 @@
-//! Tests of the service files and the Service installed step (Swift `MachinesSDWorkerStepsTests`,
-//! service part). The templates are sd's own, read from the Swift tests' fixtures.
-
 use super::fakes_b::*;
 use super::registry::{AdminAccess, Machine};
 use super::runner::CommandResult;
@@ -65,15 +62,12 @@ pub(super) fn run_service(rig: &Rig) -> FixOutcome {
     (plan(&step_of(&rig.machine, &StepId::SERVICE)).run)(&rig.fix())
 }
 
-/// A rig on `m` with sd 1.19.2's templates on this Mac.
 pub(super) fn rig_with_templates(m: Machine, tmp: TempDir) -> Rig {
     let facts = mac_facts("1.19.2", &sd_folder(&tmp, "sd"));
     let mut rig = Rig::new(m).with_mac(facts);
     rig.tmp = tmp;
     rig
 }
-
-// MARK: service files
 
 #[test]
 fn service_files_for_linux() {
@@ -271,7 +265,6 @@ fn linux_service_fix_only_writes_the_four_units_and_reloads() {
     );
     assert!(script.contains("systemctl daemon-reload"));
     assert!(script.starts_with("set -e\numask 022\n"));
-    // the words are looked for outside the base64 payloads
     let outside: Vec<String> = lines
         .iter()
         .map(|l| match l.strip_prefix("printf '%s' '") {
@@ -293,7 +286,6 @@ fn linux_service_fix_only_writes_the_four_units_and_reloads() {
     for word in ["enable", "start", "restart", "stop", "disable"] {
         assert!(!joined.contains(word), "{word}");
     }
-    // each unit goes through a temp file and a move
     assert_eq!(
         lines
             .iter()
@@ -311,7 +303,7 @@ fn linux_service_fix_only_writes_the_four_units_and_reloads() {
 fn linux_service_fix_runs_one_admin_call_as_root_with_no_stdin() {
     let tmp = TempDir::new("linuxfix");
     let mut vps = linux("vps-sing-1");
-    vps.set_admin(AdminAccess::RootSsh); // on Linux the admin is root over ssh, never the worker
+    vps.set_admin(AdminAccess::RootSsh);
     let rig = rig_with_templates(vps, tmp);
     let outcome = run_service(&rig);
     assert!(outcome.ok, "{}", outcome.message);
@@ -339,8 +331,6 @@ fn service_fix_on_a_mac_writes_only_the_launch_agent_without_admin() {
     assert!(!p.needs_admin);
     let outcome = (p.run)(&rig.fix());
     assert!(outcome.ok, "{}", outcome.message);
-    // it looks at whether Running is on, then the label is disabled first, so a failure leaves no
-    // plist for a login to start
     let calls = rig.calls();
     assert!(last(&calls[0].argv).contains("print-disabled"));
     assert!(last(&calls[1].argv).contains(MAC_DISABLE_SCRIPT));
@@ -351,12 +341,9 @@ fn service_fix_on_a_mac_writes_only_the_launch_agent_without_admin() {
     assert!(!last(&write.argv).contains("launchctl"));
     let plist = write.stdin_text();
     assert!(plist.contains("<string>/opt/homebrew/bin/python3</string>"));
-    // the plist is sd's own (RunAtLoad and KeepAlive stay), so the Fix disables the label until
-    // Running is turned on
     assert!(plist.contains("<key>RunAtLoad</key>\n\t<true/>"));
     assert!(plist.contains("<key>KeepAlive</key>\n\t<true/>"));
     assert_eq!(calls.len(), 3, "the state probe, the disable, the write");
-    // never loads or enables it
     let all: String = rig
         .argvs()
         .iter()

@@ -1,6 +1,3 @@
-//! Port of `CostSourcesTests`' parser half, and the price tables. The fixtures have the real
-//! files' shape with made-up numbers.
-
 use super::other::{antigravity, codex, OtherPrices};
 use super::prices;
 use super::tracker::{Tracker, ANTIGRAVITY, CLAUDE_CODE, CODEX};
@@ -101,7 +98,6 @@ fn model_selection_change() {
 
 #[test]
 fn other_prices() {
-    // gpt-5.1: $1.25 in, $0.125 cached, $10 out per million.
     let near = |a: Option<f64>, b: f64| {
         let a = a.expect("priced");
         assert!((a - b).abs() < 1e-9, "{a} vs {b}");
@@ -156,7 +152,6 @@ fn claude_prices() {
         let a = a.expect("priced");
         assert!((a - b).abs() < 1e-9, "{a} vs {b}");
     };
-    // Opus 5.5: $4 in, $20 out, $0.20 cache read.
     near(
         prices::cost(
             &c,
@@ -165,7 +160,6 @@ fn claude_prices() {
         ),
         4.0 + 20.0 + 0.20,
     );
-    // Cache writes: 1.25x input for five minutes, 2x for an hour; the split wins over the total.
     near(
         prices::cost(
             &c,
@@ -183,7 +177,6 @@ fn claude_prices() {
         ),
         5.0,
     );
-    // Fast mode doubles it.
     near(
         prices::cost(
             &c,
@@ -192,7 +185,6 @@ fn claude_prices() {
         ),
         40.0,
     );
-    // Haiku 5.5 costs five times as much once the prompt is over 100K tokens.
     near(
         prices::cost(&c, "claude-haiku-5-5", &json!({"input_tokens": 50_000})),
         0.005,
@@ -201,7 +193,6 @@ fn claude_prices() {
         prices::cost(&c, "claude-haiku-5-5", &json!({"input_tokens": 200_000})),
         0.1,
     );
-    // Longer ids come first: opus-5-5 is not opus-5.
     near(
         prices::cost(&c, "claude-opus-5-1", &json!({"output_tokens": 1_000_000})),
         25.0,

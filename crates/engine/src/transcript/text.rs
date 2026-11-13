@@ -1,7 +1,3 @@
-//! Small text helpers the readers share. Counting is in Unicode scalars (`chars`), where the Swift
-//! app counted grapheme clusters; the two differ only for combined emoji and accents.
-
-/// Characters Swift's `CharacterSet.newlines` holds.
 fn is_newline(c: char) -> bool {
     matches!(
         c,
@@ -13,7 +9,6 @@ pub fn trim_newlines(text: &str) -> &str {
     text.trim_matches(is_newline)
 }
 
-/// The first `n` characters.
 pub fn prefix_chars(text: &str, n: usize) -> &str {
     match text.char_indices().nth(n) {
         Some((i, _)) => &text[..i],
@@ -21,7 +16,6 @@ pub fn prefix_chars(text: &str, n: usize) -> &str {
     }
 }
 
-/// The last `n` characters.
 pub fn suffix_chars(text: &str, n: usize) -> &str {
     let count = text.chars().count();
     if count <= n {
@@ -33,7 +27,6 @@ pub fn suffix_chars(text: &str, n: usize) -> &str {
     }
 }
 
-/// The text between two tags. `trim: false` keeps leading spaces, which shell output lines up with.
 pub fn between(text: &str, open: &str, close: &str, trim: bool) -> Option<String> {
     let a = text.find(open)? + open.len();
     let b = a + text[a..].find(close)?;
@@ -45,7 +38,6 @@ pub fn between(text: &str, open: &str, close: &str, trim: bool) -> Option<String
     })
 }
 
-/// Removes terminal color and cursor sequences (`ESC [ ... letter`).
 pub fn strip_ansi(text: &str) -> String {
     let chars: Vec<char> = text.chars().collect();
     let mut out = String::with_capacity(text.len());
@@ -69,7 +61,6 @@ pub fn strip_ansi(text: &str) -> String {
     out
 }
 
-/// Text pasted into a prompt shows as "[Pasted text +N lines]", like the terminal shows it.
 pub fn collapse_pastes(text: &str) -> String {
     if !text.contains("<pasted_content") {
         return text.to_string();
@@ -102,7 +93,6 @@ pub fn collapse_pastes(text: &str) -> String {
     out
 }
 
-/// The last path component, the way `NSString.lastPathComponent` reads it.
 pub fn last_path_component(path: &str) -> &str {
     let trimmed = path.trim_end_matches('/');
     if trimmed.is_empty() {
@@ -111,7 +101,6 @@ pub fn last_path_component(path: &str) -> &str {
     trimmed.rsplit('/').next().unwrap_or(trimmed)
 }
 
-/// The first non-empty line.
 pub fn first_line(text: &str) -> &str {
     text.split('\n').find(|l| !l.is_empty()).unwrap_or(text)
 }

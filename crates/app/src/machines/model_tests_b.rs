@@ -1,6 +1,3 @@
-//! The window's edits against the engine's own writes, and what it watches while open: the vault's
-//! list (for the update offers) and the machines (checks again after each poll).
-
 use std::sync::mpsc::channel;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -13,7 +10,6 @@ use super::data::Setup;
 use super::model::MachinesModel;
 use super::model_tests::{lock, mac, off_world, scripted_world, with_job};
 
-/// A fresh folder under the system's temp folder, removed on drop.
 struct Scratch(std::path::PathBuf);
 
 impl Scratch {
@@ -43,7 +39,6 @@ fn entry(name: &str, updated: &str) -> VaultEntry {
     e
 }
 
-/// Saves the vault's list as the daemon does: into the document in the data folder's database.
 fn save_list(index: &VaultIndex, entries: &[VaultEntry]) {
     index.write(entries).unwrap();
 }
@@ -67,7 +62,6 @@ fn a_value_saved_in_the_vault_offers_the_update_without_reading_any_value() {
     );
     assert!(model.update_offers().is_empty());
 
-    // claude-worker renewed: its machine is offered the update
     let renewed = [
         entry("claude-worker", "2026-11-09T08:00:00Z"),
         entry("unrelated", "2026-11-01T00:00:00Z"),
@@ -82,7 +76,6 @@ fn a_value_saved_in_the_vault_offers_the_update_without_reading_any_value() {
     );
     assert!(!model.watch_vault(), "nothing new since");
 
-    // the issues token added: its own offer, and the window lists it
     let added = [
         entry("claude-worker", "2026-11-09T08:00:00Z"),
         entry("m1-github-issues", "2026-11-09T09:00:00Z"),
@@ -97,7 +90,6 @@ fn a_value_saved_in_the_vault_offers_the_update_without_reading_any_value() {
         .collect();
     assert_eq!(names, ["claude-worker", "m1-github-issues"]);
     assert_eq!(model.vault_entries.len(), 3);
-    // the offer is kept in the database, names only
     let kept = notchling_engine::store::doc(&setup.data_dir, "machines/pending-updates")
         .unwrap()
         .expect("kept");
@@ -120,7 +112,6 @@ fn a_rename_of_legacy_names_makes_no_update_offer() {
 #[test]
 fn an_edit_waits_for_a_save_of_learned_facts_in_progress() {
     let mut w = scripted_world(vec![mac("m1")]);
-    // a refresh is saving what it learned (the engine holds the same lock for that)
     let released = Arc::new(Mutex::new(false));
     let (held_tx, held) = channel::<()>();
     let flag = released.clone();

@@ -1,9 +1,3 @@
-//! The Artifacts window's view over GPUI (part U4, macOS): the library list with its search on the
-//! left, the selected page's details on the right, and Open Page, which shows the local copy in a
-//! web view in its own window (`window::show_page`), since GPUI has no web view. The list is read
-//! from the daemon when the window opens and every few seconds while it is open (a publish lands
-//! from the hook process). A render has fixed pages and never calls anything.
-
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
@@ -28,11 +22,8 @@ use crate::search::library::Library;
 use crate::search::model::Press;
 use crate::search::wire::Page;
 
-/// The list column's width.
 const LIST_WIDTH: f32 = 300.0;
-/// How often the list is read again while the window is open.
 const REFRESH_EVERY: Duration = Duration::from_secs(3);
-/// What the right side says about where a page opens.
 const OPENS_NOTE: &str =
     "Open Page shows the local copy in a window of its own. Nothing is sent to claude.ai.";
 
@@ -41,16 +32,12 @@ pub struct PagesView {
     library: Arc<Library>,
     focus: FocusHandle,
     scroll: ScrollHandle,
-    /// A render's: fixed pages, nothing called.
     fixed: bool,
-    /// A page to select once the list arrives.
     pending: Option<String>,
-    /// The last thing that failed, until the next click.
     note: Option<String>,
 }
 
 impl PagesView {
-    /// The live window: reads the list now and every few seconds while it is open.
     pub fn live(
         library: Arc<Library>,
         select: Option<String>,
@@ -77,7 +64,6 @@ impl PagesView {
         view
     }
 
-    /// A render's: `model` as given, nothing behind it.
     pub fn fixed(model: PagesModel, cx: &mut Context<Self>) -> PagesView {
         PagesView {
             model,
@@ -117,7 +103,6 @@ impl PagesView {
         .detach();
     }
 
-    /// Selects a page, now or once the list has it.
     pub fn select(&mut self, key: &str, cx: &mut Context<Self>) {
         if self.model.pages().iter().any(|p| p.key() == key) {
             self.model.select(key);
@@ -286,7 +271,6 @@ impl PagesView {
     }
 
     fn detail(&self, page: &Page, a: Appearance, cx: &mut Context<Self>) -> Div {
-        // A render's pages are made up: drawn as if their copies were there.
         let exists = self.fixed || Path::new(&page.path).is_file();
         let open_state = if exists {
             PartState::Rest
@@ -410,7 +394,6 @@ impl Render for PagesView {
     }
 }
 
-/// `--render pages-window`, over made-up pages; nothing is called.
 pub fn build_render(name: &str, cx: &mut gpui::App) -> Option<AnyView> {
     (name == NAME).then(|| cx.new(|cx| PagesView::fixed(model(), cx)).into())
 }

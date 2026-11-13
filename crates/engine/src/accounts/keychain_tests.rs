@@ -41,7 +41,6 @@ fn the_line_is_the_swift_apps() {
 #[test]
 fn a_value_too_long_for_the_line_is_refused_not_put_on_argv() {
     let chain = Arc::new(MemoryKeychain::new());
-    // Too long even as text, so neither line form takes it.
     let long = "x".repeat(MAX_LINE);
     assert_eq!(
         keys(&chain).write("svc", "acct", &long),
@@ -128,8 +127,6 @@ fn errors_and_outputs_never_print_a_value() {
         .contains("fixture root"));
 }
 
-/// Claude Code's login with its MCP logins beside it: too long as hex (two characters a byte),
-/// short enough as text. Quotes, backslashes and other text JSON can hold are in it.
 fn long_login() -> String {
     let note = r#"a \"q\" b\\c $HOME #x; é"#;
     format!(
@@ -172,7 +169,6 @@ fn the_text_line_escapes_quotes_and_backslashes_only() {
 
 #[test]
 fn a_value_with_a_control_character_never_goes_as_text() {
-    // A newline would end the line early: such a value goes as hex or not at all.
     assert_eq!(
         text_line("svc", "acct", "a\nb").map(|_| ()),
         Err(KeychainError::TooLong)

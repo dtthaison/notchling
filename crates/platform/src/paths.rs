@@ -1,12 +1,5 @@
-//! Data, cache and home folders per OS, worked out from the environment.
-//!
-//! The functions take the OS and a lookup so they can be tested for every OS on any machine.
-//! Data folder rule: macOS `~/Library/Application Support/Notchling`, Linux `$XDG_DATA_HOME/notchling`
-//! or `~/.local/share/notchling`, Windows `%APPDATA%\Notchling`.
-
 use std::path::PathBuf;
 
-/// The operating systems with a folder rule.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Os {
     Mac,
@@ -15,7 +8,6 @@ pub enum Os {
 }
 
 impl Os {
-    /// The OS this build runs on. Anything that is not macOS or Windows follows the Linux rule.
     pub fn current() -> Os {
         if cfg!(target_os = "macos") {
             Os::Mac
@@ -27,23 +19,18 @@ impl Os {
     }
 }
 
-/// A variable lookup: the real environment, or a fake in tests.
 pub type Env<'a> = &'a dyn Fn(&str) -> Option<String>;
 
-/// The real process environment.
 pub fn process_env(name: &str) -> Option<String> {
     std::env::var(name).ok()
 }
 
-/// A value that is set, non-empty and absolute. The XDG rules ignore relative paths. A leading `/`
-/// counts on every host, so a Mac or Linux rule can be tested on Windows.
 fn absolute(env: Env, name: &str) -> Option<PathBuf> {
     let value = env(name)?;
     let path = PathBuf::from(&value);
     (!value.is_empty() && (path.is_absolute() || value.starts_with('/'))).then_some(path)
 }
 
-/// The user's home folder, or `None` when the environment does not say.
 pub fn home_in(os: Os, env: Env) -> Option<PathBuf> {
     let name = if os == Os::Windows {
         "USERPROFILE"
@@ -53,7 +40,6 @@ pub fn home_in(os: Os, env: Env) -> Option<PathBuf> {
     absolute(env, name)
 }
 
-/// Where Notchling keeps its data.
 pub fn data_dir_in(os: Os, env: Env) -> Option<PathBuf> {
     match os {
         Os::Mac => Some(home_in(os, env)?.join("Library/Application Support/Notchling")),
@@ -65,7 +51,6 @@ pub fn data_dir_in(os: Os, env: Env) -> Option<PathBuf> {
     }
 }
 
-/// Where Notchling keeps what it can rebuild.
 pub fn cache_dir_in(os: Os, env: Env) -> Option<PathBuf> {
     match os {
         Os::Mac => Some(home_in(os, env)?.join("Library/Caches/Notchling")),
@@ -81,17 +66,14 @@ pub fn cache_dir_in(os: Os, env: Env) -> Option<PathBuf> {
     }
 }
 
-/// The home folder of the user running this process.
 pub fn home() -> Option<PathBuf> {
     home_in(Os::current(), &process_env)
 }
 
-/// This OS's data folder for the real environment.
 pub fn data_dir() -> Option<PathBuf> {
     data_dir_in(Os::current(), &process_env)
 }
 
-/// This OS's cache folder for the real environment.
 pub fn cache_dir() -> Option<PathBuf> {
     cache_dir_in(Os::current(), &process_env)
 }
@@ -171,7 +153,6 @@ mod tests {
 
     #[test]
     fn windows_uses_appdata_and_localappdata() {
-        // Bases start with `/` so they count as absolute on every host; joins use the host's rules.
         let env = fake(&[
             ("APPDATA", "/w/roaming"),
             ("LOCALAPPDATA", "/w/local"),

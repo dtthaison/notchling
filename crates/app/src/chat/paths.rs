@@ -1,21 +1,14 @@
-//! Paths in a message (the Swift `ChatPaths`): a word that names a file or folder that exists
-//! becomes a link, in prose and in inline code alike. A relative path ("film/plan/plan.md") is read
-//! against the folders the same message names ("the project is in ~/Downloads/reel/"), then the
-//! session's folder. Pure over a [`Probe`], so it is tested on every system with a temp folder.
-
 use std::path::{Component, Path, PathBuf};
 
 use crate::chat::drops::percent_decoded;
 use crate::chat::markdown::Span;
 
-/// What the rules ask of the disk and the home folder.
 pub trait Probe {
     fn exists(&self, path: &Path) -> bool;
     fn is_dir(&self, path: &Path) -> bool;
     fn home(&self) -> Option<&Path>;
 }
 
-/// The real disk.
 pub struct Disk {
     pub home: Option<PathBuf>,
 }
@@ -46,13 +39,10 @@ impl Probe for Disk {
     }
 }
 
-/// A word that is not a path: it has a space, a quote, a bracket, a comma, a semicolon or a pipe.
 fn splits(c: char) -> bool {
     c.is_whitespace() || "()[]<>\"'`,;|".contains(c)
 }
 
-/// The words of `text` that could be paths (they hold a `/`), without trailing `.`, `:`, `!` or
-/// `?`, with where each sits (byte range).
 pub fn tokens(text: &str) -> Vec<(std::ops::Range<usize>, &str)> {
     let mut out = Vec::new();
     let mut start: Option<usize> = None;
@@ -78,7 +68,6 @@ pub fn tokens(text: &str) -> Vec<(std::ops::Range<usize>, &str)> {
     out
 }
 
-/// `.` and `..` folded away without touching the disk (a `..` past the root stays at the root).
 pub fn normalized(path: &Path) -> PathBuf {
     let mut out = PathBuf::new();
     for c in path.components() {
@@ -98,7 +87,6 @@ pub fn normalized(path: &Path) -> PathBuf {
     out
 }
 
-/// `~` and `~/…` as the home folder's path; any other `~name` is not expanded.
 fn expanded(token: &str, probe: &dyn Probe) -> Option<PathBuf> {
     if token == "~" {
         return probe.home().map(Path::to_path_buf);
@@ -110,8 +98,6 @@ fn expanded(token: &str, probe: &dyn Probe) -> Option<PathBuf> {
     }
 }
 
-/// The folders to read relative paths against: absolute folders the text names (in the order it
-/// names them), then the session's folder.
 pub fn bases(text: &str, cwd: &str, probe: &dyn Probe) -> Vec<PathBuf> {
     let mut out: Vec<PathBuf> = Vec::new();
     for (_, token) in tokens(text) {
@@ -133,7 +119,6 @@ pub fn bases(text: &str, cwd: &str, probe: &dyn Probe) -> Vec<PathBuf> {
     out
 }
 
-/// `path` without a trailing line number (`:12`, `:12:3`, `#L12`, `#L12-L20`), if it has one.
 fn without_line(token: &str) -> Option<&str> {
     let digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
     if let Some(i) = token.rfind("#L") {
@@ -160,10 +145,6 @@ fn without_line(token: &str) -> Option<&str> {
     (seen > 0).then(|| &token[..cut])
 }
 
-/// The existing file or folder `token` names, or `None`. An absolute or `~` path is taken as it
-/// is; a relative one is tried under each base in turn. A word with no `/`, a URL, and a bare root
-/// are never paths. With `bare`, a lone file name with an extension (`plan.md`, inline code only)
-/// is tried under the bases too.
 pub fn resolve(token: &str, bases: &[PathBuf], bare: bool, probe: &dyn Probe) -> Option<PathBuf> {
     let direct = |token: &str| -> Option<PathBuf> {
         if token.is_empty() || token.contains("://") || token == "/" || token == "~/" {
@@ -191,8 +172,6 @@ pub fn resolve(token: &str, bases: &[PathBuf], bare: bool, probe: &dyn Probe) ->
     direct(token).or_else(|| without_line(token).and_then(direct))
 }
 
-/// A Markdown destination as a path: percent escapes undone, a `file://` start dropped. `None`
-/// for a web link, a `mailto:` and the like (anything with a scheme).
 fn destination(url: &str) -> Option<String> {
     let url = url.trim();
     let raw = match url.strip_prefix("file://") {
@@ -203,10 +182,6 @@ fn destination(url: &str) -> Option<String> {
     Some(percent_decoded(raw))
 }
 
-/// The spans with every existing path made a link to its absolute path: inside prose and inline
-/// code, a word that names one becomes a linked piece of its span (the span's own style kept); a
-/// link's own destination that names one is replaced by the absolute path, so a click finds it
-/// whatever folder it was written against. Spans that link to the web are left alone.
 pub fn link_spans(spans: Vec<Span>, bases: &[PathBuf], probe: &dyn Probe) -> Vec<Span> {
     let mut out: Vec<Span> = Vec::with_capacity(spans.len());
     for span in spans {
@@ -224,7 +199,6 @@ pub fn link_spans(spans: Vec<Span>, bases: &[PathBuf], probe: &dyn Probe) -> Vec
             .into_iter()
             .filter_map(|(r, t)| resolve(t, bases, false, probe).map(|p| (r, p)))
             .collect();
-        // `plan.md`: no slash, so no token, but inline code that is one file name under a base.
         let word = span.text.trim();
         if found.is_empty() && span.code && !word.contains(char::is_whitespace) {
             if let (Some(p), Some(from)) = (resolve(word, bases, true, probe), span.text.find(word))
@@ -326,8 +300,6 @@ mod tests {
             reel.display()
         );
         let got = bases(&text, "/work/session", &probe);
-        // The folder named twice (absolute, then with `~`) once; a missing one and a file are not
-        // bases; the session's folder is last.
         assert_eq!(got, vec![reel, PathBuf::from("/work/session")]);
         assert_eq!(
             bases("nothing", "", &probe),
@@ -345,7 +317,6 @@ mod tests {
             home: s.path().to_path_buf(),
         };
         let base = vec![s.path().join("film"), s.path().join("other")];
-        // Relative: the first base that has it.
         assert_eq!(
             resolve("plan/colab/plan.md", &base, false, &probe),
             Some(plan.clone())
@@ -354,7 +325,6 @@ mod tests {
             resolve("./plan/../plan/colab/plan.md", &base, false, &probe),
             Some(plan.clone())
         );
-        // Absolute and `~`.
         assert_eq!(
             resolve(&plan.to_string_lossy(), &[], false, &probe),
             Some(plan.clone())
@@ -363,7 +333,6 @@ mod tests {
             resolve("~/film/plan/colab/plan.md", &[], false, &probe),
             Some(plan.clone())
         );
-        // A line number is not part of the name.
         for token in [
             "plan/colab/plan.md:12",
             "plan/colab/plan.md:12:3",
@@ -375,7 +344,6 @@ mod tests {
                 "{token}"
             );
         }
-        // Missing, a URL, a bare root, a word with no slash, `~name`.
         for token in [
             "plan/colab/nope.md",
             "https://example.com/plan/colab/plan.md",
@@ -386,7 +354,6 @@ mod tests {
         ] {
             assert_eq!(resolve(token, &base, false, &probe), None, "{token}");
         }
-        // A folder counts.
         assert_eq!(
             resolve("plan/colab", &base, false, &probe),
             Some(s.path().join("film/plan/colab"))
@@ -417,7 +384,6 @@ mod tests {
         let base = vec![s.path().to_path_buf()];
         let plan_s = plan.to_string_lossy().into_owned();
 
-        // Inline code that is the path: one linked span, still code.
         let got = link_spans(spans("Open `film/plan/colab/plan.md` now"), &base, &probe);
         assert_eq!(
             words(&got),
@@ -429,7 +395,6 @@ mod tests {
         );
         assert!(got[1].code);
 
-        // Prose: the word links, the sentence's dot does not.
         let got = link_spans(spans("It is in film/plan/colab/plan.md."), &base, &probe);
         assert_eq!(
             words(&got),
@@ -440,7 +405,6 @@ mod tests {
             ]
         );
 
-        // Code with a command: only the path inside links.
         let got = link_spans(spans("`open film/plan/colab/plan.md`"), &base, &probe);
         assert_eq!(
             words(&got),
@@ -450,7 +414,6 @@ mod tests {
             ]
         );
 
-        // A path that isn't there stays as written; so does a web link.
         let text = "`film/nope.md` and [site](https://example.com/film/plan.md)";
         let got = link_spans(spans(text), &base, &probe);
         assert_eq!(
@@ -488,7 +451,6 @@ mod tests {
         assert_eq!(got[4].link.as_deref(), Some("mailto:a@b.c"));
     }
 
-    /// Antigravity links a file it wrote as an absolute `file://` URL with its spaces escaped.
     #[test]
     fn a_file_url_with_escaped_spaces_links_the_file() {
         let s = Scratch::new("paths-file-url");

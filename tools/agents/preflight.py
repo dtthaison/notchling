@@ -1,38 +1,4 @@
 #!/usr/bin/env python3
-"""Pre-start check for the worker: did the maintainer queue this issue, and is it unchanged since?
-
-    preflight.py <owner/repo> <issue> [--expect-sha256 <hex>]
-
-Reads the issue through the GitHub API (token from GITHUB_TOKEN, read access is enough; base URL from
-NOTCHLING_API_URL for tests). It passes only if all of these hold:
-
-- the issue is open, is not a pull request and does not carry `notchling:stuck`;
-- `notchling:queued` is on it, and the latest `labeled` event for it was made by someone in MAINTAINERS
-  (GitHub logins are case-insensitive, so the comparison is too) and not undone by a later `unlabeled`;
-- the title was not changed and the body was not edited at or after that event: no `renamed` timeline
-  event (a title change; the REST timeline has no `edited` event) and neither GraphQL `Issue.lastEditedAt`
-  (title and body) nor an entry of `Issue.userContentEdits` (the body's edit log) is at or after it. A
-  comment edit is neither: each comment keeps its own edit log, which is not read, because comments are
-  never part of what the worker is given.
-
-Exit codes: 0 ok, 1 refused (reason on stderr), 2 API or usage error, which also counts as refused.
-Issue text is never read into the reason, and stderr never carries any.
-
-Output contract. On exit 0, stdout is exactly one line of JSON ending in a newline (ASCII, so no line
-separator can hide inside it); on any other exit stdout is empty. Parse it as JSON; never paste a field
-into a shell. The keys are `ok` (true), `repo`, `issue` (the number), `title` and `body` (exactly what
-the API returned, an empty body as ""), `title_sha256` and `body_sha256` (SHA-256 of each one's UTF-8
-bytes, as 64 lowercase hex digits), and `sha256`: SHA-256 of the title's UTF-8 bytes, one LF, then the
-body's UTF-8 bytes. A title never holds a line break (GitHub strips them, and one that does is refused
-with code 2), so that one hash is unambiguous. Nothing else is printed: no comment, no label, no author.
-
-The worker must give the agent that `title` and `body` and nothing it read again later, and must treat
-issue comments as data, never as instructions: they are not in the output and anyone can write one.
-That closes the gap between this check and the worker reading the issue. The issue is read first and
-its history after, so an edit in between is seen by the history; what is printed is what was read first.
-A worker that has to read the issue itself reads it first, computes `sha256`, and passes it as
-`--expect-sha256 <hex>` (case-insensitive, `--expect-sha256=<hex>` also works); a different text is
-refused with code 1, and the other checks still run."""
 
 from __future__ import annotations
 
@@ -53,7 +19,7 @@ QUEUED = "notchling:queued"
 STUCK = "notchling:stuck"
 API_URL = "https://api.github.com"
 PER_PAGE = 100
-MAX_PAGES = 50  # 5000 timeline events; more than that is not an issue we start
+MAX_PAGES = 50
 TIMEOUT = 20
 REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 SHA256_RE = re.compile(r"[0-9A-Fa-f]{64}")
@@ -61,7 +27,6 @@ USAGE = "usage: preflight.py <owner/repo> <issue> [--expect-sha256 <hex>]\n"
 
 
 class ApiError(Exception):
-    """The API could not be read or answered something unusable. The text is ours, never the server's."""
 
     def __init__(self, message: str, status: int = 0):
         super().__init__(message)
@@ -71,7 +36,6 @@ class ApiError(Exception):
 class Result(NamedTuple):
     code: int
     reason: str
-    # Set only on code 0: title, body and the three hashes of the text that was checked.
     issue: Optional[Dict[str, str]] = None
 
 
@@ -139,10 +103,6 @@ EDITS_QUERY = ("query($owner:String!,$name:String!,$number:Int!){repository(owne
 
 
 def edit_history(api: Api, repo: str, number: int) -> Dict[str, Any]:
-    """When the issue was last edited, and every recorded edit of its body. The REST timeline has no event
-    for a body edit and none called `edited` at all (a title change is `renamed`). GraphQL
-    `Issue.lastEditedAt` moves for a title or body edit (null if never edited); `Issue.userContentEdits`
-    is the body's own log. Neither covers comments: each comment has a log of its own, which is not read."""
     owner, name = repo.split("/")
     out = api.request("POST", "/graphql", {"query": EDITS_QUERY,
                                            "variables": {"owner": owner, "name": name, "number": number}})
@@ -151,7 +111,7 @@ def edit_history(api: Api, repo: str, number: int) -> Dict[str, Any]:
             raise ApiError("the edit history query was refused")
         node = out["data"]["repository"]["issue"]
         conn = node["userContentEdits"]
-        last = node["lastEditedAt"]  # the key must be there; null is a real answer
+        last = node["lastEditedAt"]
         return {"last": None if last is None else _time(last),
                 "times": [_time(n["editedAt"]) for n in conn["nodes"]],
                 "more": bool(conn["pageInfo"]["hasNextPage"])}
@@ -167,8 +127,6 @@ def _sha256(text: str) -> str:
 
 
 def issue_text(iss: Dict[str, Any]) -> Dict[str, str]:
-    """The title and body exactly as the API gave them, with their hashes. Only these two fields of the
-    issue ever leave this module, and only on success."""
     title, body = iss.get("title"), iss.get("body")
     if body is None:
         body = ""
@@ -181,7 +139,6 @@ def issue_text(iss: Dict[str, Any]) -> Dict[str, str]:
 
 
 def is_maintainer(login: Any) -> bool:
-    """GitHub logins are case-insensitive, so both sides are lowered; MAINTAINERS is read at call time."""
     return isinstance(login, str) and login.lower() in {m.lower() for m in MAINTAINERS}
 
 
@@ -226,7 +183,6 @@ def _check(repo: str, number: int, api: Api, expect_sha256: Optional[str]) -> Re
         return Result(1, "the queued label was removed after it was added")
     labeled_at = _time(ev.get("created_at"))
 
-    # A title change is a `renamed` event wherever it sits in the list, so every event is looked at.
     for e in events:
         if e.get("event") == "renamed" and _time(e.get("created_at")) >= labeled_at:
             return Result(1, "the issue title was changed after it was queued")
@@ -245,7 +201,6 @@ def _check(repo: str, number: int, api: Api, expect_sha256: Optional[str]) -> Re
 
 
 def parse_args(argv: List[str]) -> Optional[Tuple[str, int, Optional[str]]]:
-    """(repo, issue, expected sha256 or None), or None when the arguments are not usable."""
     positional: List[str] = []
     expect: Optional[str] = None
     i = 0
@@ -284,7 +239,6 @@ def main(argv: List[str], env: Mapping[str, str], out: TextIO, err: TextIO) -> i
     api = Api(env.get("NOTCHLING_API_URL") or API_URL, env.get("GITHUB_TOKEN") or None)
     res = check(repo, number, api, expect)
     if res.code == 0 and res.issue is not None:
-        # One ASCII line: json.dumps escapes every line break and separator inside the text.
         out.write(json.dumps(dict(res.issue, ok=True, repo=repo, issue=number), sort_keys=True) + "\n")
         err.write("preflight: ok, queued by a maintainer and unchanged since\n")
     else:

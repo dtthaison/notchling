@@ -28,7 +28,6 @@ fn the_keychain_name_is_claude_codes_exactly() {
         service_for("/tmp/x").unwrap(),
         "Claude Code-credentials-2e56aa36"
     );
-    // The exact string: a trailing slash is another variable value, so another item.
     assert_ne!(
         service_for("/tmp/x/").unwrap(),
         service_for("/tmp/x").unwrap()
@@ -103,11 +102,9 @@ fn prepare_links_the_shared_entries_and_copies_the_main_config() {
         config,
         "{\n  \"projects\": {\"/w\": {\"cost\": 1.50}},\n  \"oauthAccount\": {\n    \"accountUuid\": \"acc\"\n  }\n}"
     );
-    // The main file is untouched.
     assert!(std::fs::read_to_string(tmp.path("home/.claude.json"))
         .unwrap()
         .contains("main"));
-    // A second prepare only sets the profile.
     s.prepare(&l, &json!({"accountUuid": "acc2"}), 8).unwrap();
     let config = std::fs::read_to_string(Path::new(&l.path).join(".claude.json")).unwrap();
     assert!(config.contains("acc2") && config.contains("1.50"));
@@ -121,7 +118,6 @@ fn relink_lets_the_newer_copy_win_and_never_deletes() {
     let l = lane(&s, "work");
     let dir = Path::new(&l.path).to_path_buf();
     std::fs::create_dir_all(&dir).unwrap();
-    // The main copy is old; the lane's plain copy (an atomic save replaced the link) is newer.
     tmp.write("home/.claude/settings.json", "main");
     let old = std::time::SystemTime::now() - std::time::Duration::from_secs(600);
     std::fs::File::options()
@@ -131,7 +127,6 @@ fn relink_lets_the_newer_copy_win_and_never_deletes() {
         .set_modified(old)
         .unwrap();
     std::fs::write(dir.join("settings.json"), "lane").unwrap();
-    // An older plain file, and a folder made before the link.
     std::fs::write(dir.join("CLAUDE.md"), "old lane").unwrap();
     std::fs::File::options()
         .write(true)
@@ -162,7 +157,6 @@ fn relink_lets_the_newer_copy_win_and_never_deletes() {
         std::fs::read_to_string(dir.join("CLAUDE.md")).unwrap(),
         "main md"
     );
-    // A link that is right already stays.
     let again = relink(&l, &s.main_dir, 43);
     assert!(again.linked.is_empty() && again.set_aside.is_empty());
 }
@@ -248,14 +242,12 @@ fn a_lane_config_that_cant_be_read_is_never_written_over() {
     let l = lane(&s, "w");
     std::fs::create_dir_all(&l.path).unwrap();
     let config = Path::new(&l.path).join(".claude.json");
-    // Not UTF-8: reading it as text fails, and that is not "there is no file".
     let bytes = b"{\"projects\": \"\xff\xfe\"}".to_vec();
     std::fs::write(&config, &bytes).unwrap();
     assert!(s
         .set_profile(&l, &json!({"emailAddress": "w@example.com"}))
         .is_err());
     assert_eq!(std::fs::read(&config).unwrap(), bytes);
-    // A missing file is a new one.
     std::fs::remove_file(&config).unwrap();
     s.set_profile(&l, &json!({"emailAddress": "w@example.com"}))
         .unwrap();
@@ -264,8 +256,6 @@ fn a_lane_config_that_cant_be_read_is_never_written_over() {
         .contains("w@example.com"));
 }
 
-/// A lane whose `.claude.json` Claude Code made itself (no onboarding flags) opened `claude` on
-/// its first-run theme screen, so Trust Folder never saw the trust question and gave up.
 #[cfg(unix)]
 #[test]
 fn a_lane_claude_code_made_its_own_config_for_skips_first_run_setup() {
@@ -291,12 +281,9 @@ fn a_lane_claude_code_made_its_own_config_for_skips_first_run_setup() {
     assert_eq!(v["lastOnboardingVersion"], json!("2.1.310"));
     assert_eq!(v["firstStartTime"], json!("x"), "the rest is kept");
     assert_eq!(v["oauthAccount"]["accountUuid"], json!("acc"));
-    // Done once: a second call changes nothing.
     assert!(!s.finish_onboarding(&l).unwrap());
     assert_eq!(std::fs::read_to_string(&config).unwrap(), text);
 
-    // A lane's own newer version is never replaced, and a lane with no config yet is left to
-    // `prepare`.
     std::fs::write(
         &config,
         "{\"hasCompletedOnboarding\": true, \"lastOnboardingVersion\": \"2.1.400\"}",

@@ -1,19 +1,12 @@
-//! The `notchling` command line: its subcommands are modes (`daemon`) and clients (the rest).
-
 use std::path::PathBuf;
 
-/// What `notchling service` does.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ServiceAction {
-    /// Writes the service file and prints the command that loads it.
     Install,
-    /// Removes the service file and prints the command that unloads it.
     Uninstall,
-    /// Prints the service file.
     Print,
 }
 
-/// A parsed command line.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Command {
     Daemon {
@@ -31,41 +24,31 @@ pub enum Command {
         action: ServiceAction,
         dir: Option<PathBuf>,
     },
-    /// Claude Code's hook: stdin in, the answer (or nothing) out, always exit 0.
     Hook {
         socket: Option<PathBuf>,
     },
-    /// `notchling pages [words]`: the saved Artifact pages, one line each.
     Pages {
         query: String,
         json: bool,
         socket: Option<PathBuf>,
     },
-    /// `notchling page <link|id|words>`: where a saved page is and who can republish it.
     Page {
         query: String,
         json: bool,
         socket: Option<PathBuf>,
     },
-    /// `notchling delegate <codex|agy> … -- <prompt>`: hands a job to another tool. `args` are
-    /// what follows `delegate`, parsed by the engine (it has flags of its own).
     Delegate {
         args: Vec<String>,
     },
-    /// `notchling delegate-models [codex|agy]`.
     DelegateModels {
         args: Vec<String>,
     },
-    /// `notchling secrets [words]`: the saved secrets that fit, never values. `args` are what
-    /// follows, parsed by [`crate::vault_cli`] (so is each of the two below).
     Secrets {
         args: Vec<String>,
     },
-    /// `notchling secret <a,b> -- <command…>`: runs the command with those secrets, output hidden.
     Secret {
         args: Vec<String>,
     },
-    /// `notchling secret-request <name> [--kind --url --note --how --expires --reason]`.
     SecretRequest {
         args: Vec<String>,
     },
@@ -73,7 +56,6 @@ pub enum Command {
     Help,
 }
 
-/// `notchling <version>`.
 pub fn version_line() -> String {
     format!("notchling {}", env!("CARGO_PKG_VERSION"))
 }
@@ -107,7 +89,6 @@ fn value(args: &mut impl Iterator<Item = String>, flag: &str) -> Result<PathBuf,
     }
 }
 
-/// Reads the arguments after the program name.
 pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Command, String> {
     let mut args = args.into_iter();
     let Some(first) = args.next() else {
@@ -118,7 +99,6 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Command, String> 
         "--help" | "-h" | "help" => return Ok(Command::Help),
         _ => {}
     }
-    // The prompt may hold anything, flags included, so these take the rest as it is.
     match first.as_str() {
         "delegate" => {
             return Ok(Command::Delegate {

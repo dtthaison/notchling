@@ -1,18 +1,3 @@
-//! The conversation as a GPUI `list`: only the rows on screen (and the overdraw) are built and
-//! laid out in a draw, not all five hundred.
-//!
-//! The list's items are `[top spacer] + rows + [bottom spacer]`; the rows are the conversation's
-//! items, then the queued messages and the ones still being sent. [`ListRows`] keeps the list in
-//! step with the conversation on show: a load's change (`chat::log::Change`) becomes splices of
-//! the items it touched, so the rest keep their measured heights, and the scroll position
-//! follows the rules of the Chat window: a reader at the end stays at the end, one scrolled up is
-//! not moved. It works on the `ListState` alone, so the rules are tested without a window.
-//!
-//! What the list can't know (found by the probe, `list_probe`): a row nothing has laid out has no
-//! height, so "at the bottom" comes from the list's own state and never from sums of pixels;
-//! splicing the row at the scroll top resets its offset, so a row is re-measured by saving the
-//! scroll top and putting it back ([`ListRows::remeasure`]).
-
 use std::collections::HashMap;
 use std::ops::Range;
 use std::sync::Arc;
@@ -33,31 +18,22 @@ use crate::chat::follow::Scroll;
 use crate::chat::log::{Change, Splice};
 use crate::chat::rows::{row_of, Row};
 
-/// How far beyond the viewport the list measures rows, so a scroll doesn't pop them in.
 pub const OVERDRAW: f32 = 600.0;
 
-/// What a load changed: the conversation it started from, the one it made, and the difference.
 pub(super) type Pending = (Arc<Conversation>, Arc<Conversation>, Change);
 
-/// What a [`ListRows::sync`] did.
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct Synced {
-    /// The rows' keys changed (the selection's places are to be made again).
     pub keys: bool,
-    /// The conversation on show is another one than the list was built from.
     pub replaced: bool,
 }
 
-/// What the list was last built from.
 struct Built {
     shown: Arc<Conversation>,
     session: Option<String>,
     agent: Option<String>,
-    /// Each row's key: the items', then the queued and sending messages'.
     keys: Vec<SharedString>,
-    /// The messages after the items: whether each is still being sent, and its text.
     tail: Vec<(bool, String)>,
-    /// The key of the live step group.
     live: Option<SharedString>,
     inset: bool,
 }
@@ -65,14 +41,10 @@ struct Built {
 pub(super) struct ListRows {
     pub state: ListState,
     built: Option<Built>,
-    /// The splices made, for the tests: the list items replaced, and how many replaced them.
     #[cfg(test)]
     pub spliced: std::cell::RefCell<Vec<(Range<usize>, usize)>>,
 }
 
-/// Each row's key: the item's id; a message at the tail is `queued-<k>` (in the transcript's queue)
-/// or `sending-<k>` (still being typed into the session), `k` its place after the items (as
-/// `row_select::key_of` names them).
 pub(super) fn keys_of(shown: &Conversation, outgoing: &[String]) -> Vec<SharedString> {
     let mut keys: Vec<SharedString> = shown
         .items
@@ -97,7 +69,6 @@ fn tail_of(shown: &Conversation, outgoing: &[String]) -> Vec<(bool, String)> {
     queued.chain(sending).collect()
 }
 
-/// Row `i` of what `input` shows (`rows` and `with_outgoing`, one row at a time).
 pub(super) fn row_at(input: &ConversationInput, i: usize) -> Option<Row> {
     let shown = &*input.shown;
     if let Some(item) = shown.items.get(i) {
@@ -119,16 +90,10 @@ pub(super) fn row_at(input: &ConversationInput, i: usize) -> Option<Row> {
     }
 }
 
-/// Whether the list is at its end: it follows it (its scroll top is past the last item, which is
-/// what a bottom-aligned list holds when nothing was scrolled, and what `scroll_to` the end
-/// sets), or what is left below is within `follow::TOLERANCE`. Rows nothing has measured count as
-/// no height, so this never reads a number it can't trust: a list whose rows aren't measured
-/// either follows or has nothing below.
 pub(super) fn at_bottom(state: &ListState) -> bool {
     if state.logical_scroll_top().item_ix >= state.item_count() {
         return true;
     }
-    // A list nothing has laid out has no heights to count what is below by.
     if state.viewport_bounds().size.height <= px(0.0) {
         return false;
     }
@@ -139,7 +104,6 @@ pub(super) fn at_bottom(state: &ListState) -> bool {
     .at_bottom()
 }
 
-/// To the end, and following it.
 pub(super) fn scroll_to_end(state: &ListState) {
     state.scroll_to(ListOffset {
         item_ix: state.item_count(),
@@ -147,30 +111,18 @@ pub(super) fn scroll_to_end(state: &ListState) {
     });
 }
 
-/// Whether a sync puts the list at its end. Being at the bottom (within `follow::TOLERANCE` of
-/// it) only says that content which *changes* keeps following; a draw with nothing new in it
-/// leaves the reader where they are. Pulling back on every draw undid each scroll step of a few
-/// points taken from the end, until one step alone passed the tolerance: the first moment of every
-/// scroll up stuck. `forced` (a message just sent, another session picked) goes whatever was read.
 pub(super) fn goes_to_end(at_bottom: bool, forced: bool, changed: bool) -> bool {
     forced || (at_bottom && changed)
 }
 
-/// Where the scroll bar's offset goes when the list moves `delta` points down (negative: up) from
-/// `offset` (the scroll bar's number, `-y` from the top; a list that follows its end reads past
-/// `max`), kept within `0..=max`. Going through the bar's offset, not `scroll_by`, moves a list
-/// that follows its end by a few points at once instead of after a viewport's worth.
 pub(super) fn scroll_target(offset: f32, max: f32, delta: f32) -> f32 {
     (offset.min(max) + delta).clamp(0.0, max.max(0.0))
 }
 
-/// How often a drag at the edge scrolls.
 const DRAG_TICK: Duration = Duration::from_millis(16);
 
 enum Plan {
-    /// Another session, or the first load: all new.
     Rebuild,
-    /// The same session with ids that don't line up: all new, the reader keeps their place.
     Reset,
     Splices(Vec<Splice>),
     Nothing,
@@ -190,12 +142,10 @@ impl ListRows {
         at_bottom(&self.state)
     }
 
-    /// The rows' keys, in order.
     pub fn keys(&self) -> &[SharedString] {
         self.built.as_ref().map_or(&[], |b| &b.keys)
     }
 
-    /// Each row's key and its place, for the selection.
     pub fn places(&self) -> HashMap<SharedString, usize> {
         self.keys()
             .iter()
@@ -209,8 +159,6 @@ impl ListRows {
         self.spliced.borrow().clone()
     }
 
-    /// Replaces list items `range` by `count` unmeasured ones, and puts the scroll top back if it
-    /// was in the range and the range kept its size (a bare splice would reset its offset).
     fn splice(&self, range: Range<usize>, count: usize) {
         let top = self.state.logical_scroll_top();
         let kept = top.item_ix < self.state.item_count()
@@ -224,17 +172,11 @@ impl ListRows {
         }
     }
 
-    /// Measures the list items `items` again (their rows changed height with no change in the
-    /// conversation), where the reader is.
     pub fn remeasure(&self, items: Range<usize>) {
         let count = items.len();
         self.splice(items, count);
     }
 
-    /// Brings the list in line with what `input` shows. `change` is the last load's, used only if
-    /// it goes from the conversation the list was built from to this one; anything else starts
-    /// over, keeping the reader's place if they are in the same session. `force_follow` is a
-    /// message just sent or another session picked: go to the end whatever was being read.
     pub fn sync(
         &mut self,
         input: &ConversationInput,
@@ -338,8 +280,6 @@ impl ListRows {
         }
     }
 
-    /// The row at the reader's place, by key (`None`: the top spacer), and how far into it: what
-    /// to put back after a reset. Nothing when the reader is at the end.
     fn anchor(&self, old: &Built) -> Option<(Option<SharedString>, gpui::Pixels)> {
         let top = self.state.logical_scroll_top();
         if top.item_ix >= self.state.item_count() {
@@ -354,7 +294,6 @@ impl ListRows {
         }
     }
 
-    /// The messages after the items, when they changed.
     fn tail(&self, old: &Built, next: &Built, input: &ConversationInput) {
         if old.tail != next.tail {
             let start = input.shown.items.len() + 1;
@@ -362,8 +301,6 @@ impl ListRows {
         }
     }
 
-    /// What changed height with no change in the items: the live group (open while the session
-    /// works, folded after) and the room the Tasks bar takes at the top.
     fn measured_again(&self, old: &Built, next: &Built) {
         if old.live != next.live {
             for key in [&old.live, &next.live].into_iter().flatten() {
@@ -378,8 +315,6 @@ impl ListRows {
     }
 }
 
-/// Whether `splices` take the rows `old` had to the items `next` shows: in old order, inside
-/// both, and ending at the new count.
 fn fits(splices: &[Splice], old: &Built, next: &Built) -> bool {
     let (before, after) = (old.shown.items.len(), next.shown.items.len());
     let mut at = 0;
@@ -395,8 +330,6 @@ fn fits(splices: &[Splice], old: &Built, next: &Built) -> bool {
 }
 
 impl ConversationView {
-    /// The drag's speed now: how far to scroll each tick, 0 when not dragging or the pointer is
-    /// inside the column.
     fn drag_speed(&self) -> f32 {
         let frame = self.s.sel.borrow();
         let (true, Some(pointer)) = (frame.selection.dragging, frame.pointer) else {
@@ -410,9 +343,6 @@ impl ConversationView {
         )
     }
 
-    /// A selection drag moved: while the pointer rests past the column's top or bottom, scrolls
-    /// the list on a 16 ms timer (one at a time) and keeps the focus at the row under the edge;
-    /// it stops on release or when the pointer comes back inside.
     pub(super) fn drag_scroll(&mut self, cx: &mut Context<Self>) {
         if self.s.sel.borrow().scrolling || self.drag_speed() == 0.0 {
             return;
@@ -427,7 +357,6 @@ impl ConversationView {
         .detach();
     }
 
-    /// One tick of a drag scroll: whether the timer goes on.
     fn drag_tick(&mut self, cx: &mut Context<Self>) -> bool {
         let speed = self.drag_speed();
         if speed == 0.0 {
@@ -442,7 +371,6 @@ impl ConversationView {
             px(0.0),
             px(-scroll_target(offset, max, speed)),
         ));
-        // The rows drawn so far give the focus: the edge row, and the next draw's notes carry it on.
         let mut frame = self.s.sel.borrow_mut();
         if let Some(spot) = frame.pointer.and_then(|p| frame.spot_at(p)) {
             frame.drag_to(spot);
@@ -451,7 +379,6 @@ impl ConversationView {
         cx.notify();
         true
     }
-    /// One item of the list: a spacer at each end, or the row between them.
     pub(super) fn render_item(
         &mut self,
         ix: usize,
@@ -463,8 +390,6 @@ impl ConversationView {
         };
         let rows = input.shown.items.len() + input.shown.queued.len() + input.outgoing.len();
         if ix == 0 {
-            // Above the first row, which has the gap's worth of room over it itself. The Tasks bar
-            // sits over the top, so the first row starts under it.
             let inset = if input.tasks_inset {
                 super::tasks::INSET
             } else {
@@ -493,7 +418,6 @@ impl ConversationView {
             .px(px(SIDE_PADDING))
             .pt(px(ROW_GAP))
             .child(element);
-        // The bench's trajectory recorder notes where each row painted (`scroll_probe`).
         if super::scroll_probe::enabled() {
             let key = super::row_select::key_of(&input.shown.items, i, &row);
             item = item.relative().child(super::scroll_probe::row_canvas(key));
@@ -501,7 +425,6 @@ impl ConversationView {
         item.into_any_element()
     }
 
-    /// The column: the list inside the kit's scroll bar.
     pub(super) fn list_column(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
         let rows = list(self.s.list.clone(), cx.processor(Self::render_item))
             .with_sizing_behavior(ListSizingBehavior::Auto)

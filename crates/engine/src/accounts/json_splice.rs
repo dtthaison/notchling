@@ -1,23 +1,10 @@
-//! Replacing one top-level key of a JSON object in its text, leaving every other byte as it was.
-//!
-//! A switch changes only `oauthAccount` in `~/.claude.json` and only `claudeAiOauth` in Claude
-//! Code's Keychain item. Parsing and writing the whole object again would reorder keys, respace the
-//! file and could change how a number is spelled; Claude Code (and the user) would see every line
-//! change. So the value's span is found in the text and only it is replaced (or the key is added
-//! after the opening brace). The result is parsed back and checked: the key holds the new value and
-//! every other top-level key holds what it held. Anything odd (not an object, the key twice, text
-//! after the object) is refused rather than guessed at.
-
 use serde_json::{Map, Value};
 use std::fmt;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SpliceError {
-    /// The text isn't a JSON object.
     NotAnObject,
-    /// The key is there more than once.
     Duplicate,
-    /// The result didn't read back as intended (a bug, or text this scanner misread).
     Mismatch,
 }
 
@@ -31,8 +18,6 @@ impl fmt::Display for SpliceError {
     }
 }
 
-/// `text` with top-level `key` set to `value`. A pretty-printed text (one with a newline after its
-/// opening brace) gets the value pretty-printed at its indent; a compact one gets it compact.
 pub fn set_top_level(text: &str, key: &str, value: &Value) -> Result<String, SpliceError> {
     let before = match serde_json::from_str::<Value>(text) {
         Ok(Value::Object(map)) => map,
@@ -85,8 +70,6 @@ fn check(
     }
 }
 
-/// `value` as JSON; pretty with every line after the first indented by `indent` (a member's
-/// indent, so nested lines sit one level in, as Claude Code's own two-space file has them).
 fn render(value: &Value, indent: Option<&str>) -> String {
     match indent {
         None => value.to_string(),
@@ -104,10 +87,8 @@ struct Span {
 }
 
 struct Spans {
-    /// Where the opening brace is.
     open: usize,
     members: Vec<Span>,
-    /// The first member's indent, when the object is pretty-printed.
     indent: Option<String>,
 }
 
@@ -118,7 +99,6 @@ fn skip_ws(b: &[u8], mut i: usize) -> usize {
     i
 }
 
-/// The end (one past the closing quote) of the string starting at `i`.
 fn skip_string(b: &[u8], mut i: usize) -> Option<usize> {
     if b.get(i) != Some(&b'"') {
         return None;
@@ -134,7 +114,6 @@ fn skip_string(b: &[u8], mut i: usize) -> Option<usize> {
     None
 }
 
-/// The end of the value starting at `i`.
 fn skip_value(b: &[u8], i: usize) -> Option<usize> {
     match b.get(i)? {
         b'"' => skip_string(b, i),
@@ -227,7 +206,6 @@ mod tests {
             out,
             "{\n  \"numStartups\": 12,\n  \"oauthAccount\": {\n    \"accountUuid\": \"new\"\n  },\n  \"projects\": {\n    \"/w\": {\"allowedTools\": [], \"cost\": 1.50}\n  },\n  \"userID\": \"x\"\n}\n"
         );
-        // `1.50` keeps its spelling, which parsing and writing back would lose.
         assert!(out.contains("\"cost\": 1.50"));
     }
 

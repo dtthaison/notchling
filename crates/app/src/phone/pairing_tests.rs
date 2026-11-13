@@ -1,7 +1,3 @@
-//! The pairing feed end to end over an in-process local-api server that plays the daemon: it
-//! publishes `bridge.pair.request` and `bridge.changed`, and records the `bridge.pair.answer` the
-//! app sends. Nothing touches a real daemon, the data folder or a phone.
-
 use super::*;
 use crate::phone::approval::{ALLOW, DENY, TITLE};
 use crate::testutil::Scratch;
@@ -14,7 +10,6 @@ use std::thread::JoinHandle;
 type Running = (ServerHandle, JoinHandle<std::io::Result<()>>);
 type Answers = Arc<Mutex<Vec<Value>>>;
 
-/// The daemon's end of pairing: the `bridge` topic (app tier) and `bridge.pair.answer`.
 struct Daemon {
     answers: Answers,
 }
@@ -60,7 +55,6 @@ fn serve(socket: &Path, answers: &Answers) -> Running {
     .expect("serve")
 }
 
-/// One call as the app would make it, without the trusted-server check (this binary serves).
 struct Direct {
     socket: std::path::PathBuf,
 }
@@ -112,7 +106,6 @@ fn the_app_follows_the_bridge_shows_each_request_and_answers_what_the_person_pic
     let answers: Answers = Arc::default();
     let daemon = serve(&socket, &answers);
     let feed = start(&socket);
-    // The daemon asks the person only when an app follows `bridge`: this is that app.
     wait_until("the app to follow the bridge", || {
         daemon.0.app_following("bridge") && feed.following()
     });
@@ -131,7 +124,6 @@ fn the_app_follows_the_bridge_shows_each_request_and_answers_what_the_person_pic
     assert_eq!(prompt.from.as_deref(), Some("Connecting from 192.168.1.40"));
     assert_eq!((prompt.allow, prompt.deny), (ALLOW, DENY));
 
-    // Allow: the daemon is told which request and that the person said yes.
     feed.answer(&prompt.request, true).unwrap();
     assert_eq!(
         *answers.lock().unwrap(),
@@ -139,7 +131,6 @@ fn the_app_follows_the_bridge_shows_each_request_and_answers_what_the_person_pic
     );
     assert_eq!(feed.prompt(now_ms()), None, "answered: the prompt is gone");
 
-    // Two at once queue; Deny answers the one on show and the next takes its place.
     daemon
         .0
         .publish("bridge", "bridge.pair.request", &request("pair-2", "First"));
@@ -208,7 +199,6 @@ fn bridge_changed_is_counted_and_off_drops_the_waiting_phones() {
     wait_until("the change", || feed.bridge_changes() == 1);
     assert!(feed.prompt(now_ms()).is_some(), "on changes nobody's mind");
 
-    // The bridge going off refuses every phone still waiting, so no prompt is left to answer.
     daemon
         .0
         .publish("bridge", "bridge.changed", &json!({"state": "off"}));

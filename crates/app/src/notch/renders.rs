@@ -1,8 +1,3 @@
-//! The notch's views for `--render` (part U10): one per state, the cards, Peek, the pet and Tab
-//! Perch, each over the fixture data root (`source::DataRoot::for_render`), never the real home.
-//! A [`Scene`] adds what a fixture can't hold: whether acting is on, the pet's place, a window to
-//! perch on, picks already made on a question.
-
 use std::path::Path;
 
 use notchling_engine::sessions::AgentGroup;
@@ -18,31 +13,20 @@ use super::source::{fixture_clock, DataRoot, Source};
 use crate::acting::Acting;
 use crate::views::ViewSpec;
 
-/// What a notch render shows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Shown {
     Collapsed,
-    /// A finished session's last reply.
     Peek,
     List,
-    /// A working session's last lines.
     Detail,
-    /// A session asking a question, open, with acting off: its options disabled.
     Question,
-    /// A permission prompt peeking out, with acting off.
     Permission,
-    /// Three questions in tabs, the first answered and two picked on the multi-select second,
-    /// with acting on.
     QuestionTabs,
-    /// A permission prompt peeking out with Allow, Always and Deny live.
     PermissionActions,
-    /// The pet rolling round the closed notch, towing the needs badge.
     Pet,
-    /// Nothing going on: the pet sits on the frontmost window, right of its traffic lights.
     Perch,
 }
 
-/// Width fits the canvas; heights fit each state's shape with a margin.
 pub const VIEWS: [ViewSpec; 10] = [
     ViewSpec {
         name: "notch-collapsed",
@@ -96,7 +80,6 @@ pub const VIEWS: [ViewSpec; 10] = [
     },
 ];
 
-/// The render for a view name.
 pub fn shown(name: &str) -> Option<Shown> {
     Some(match name {
         "notch-collapsed" => Shown::Collapsed,
@@ -113,24 +96,18 @@ pub fn shown(name: &str) -> Option<Shown> {
     })
 }
 
-/// A render's model and what goes with it.
 pub struct Scene {
     pub model: NotchModel,
     pub acting: Acting,
-    /// The pet's mode, forced; `None` follows the sessions.
     pub pet: Option<PetMode>,
     pub motion: Motion,
     pub perch: Option<Perch>,
-    /// The stand-in window the perch is on, in the canvas (y down from its top).
     pub window: Option<AxFrame>,
-    /// The question on show, and picks to make on it as (tab, option).
     pub question: Option<PendingQuestion>,
     pub picks: Vec<(usize, usize)>,
-    /// The tab to show at the end.
     pub tab: usize,
 }
 
-/// The perch scene's window, in a canvas 560 wide whose camera is at its middle.
 pub const PERCH_WINDOW: AxFrame = AxFrame {
     x: 60.0,
     y: 92.0,
@@ -138,7 +115,6 @@ pub const PERCH_WINDOW: AxFrame = AxFrame {
     h: 150.0,
 };
 
-/// The question-tabs scene's hook request, checked in beside the notch fixture.
 fn tabs_request(session: &str) -> Option<HookRequest> {
     let path =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/notch-scenes/question-tabs.json");
@@ -147,13 +123,10 @@ fn tabs_request(session: &str) -> Option<HookRequest> {
     HookRequest::parse(&value)
 }
 
-/// The model over the render's data root, on the fixture's fixed clock, showing `shown`. The
-/// session each state shows is picked by rule, so another fixture root works too.
 pub fn model(shown: Shown) -> NotchModel {
     scene(shown).model
 }
 
-/// The whole scene for a render.
 pub fn scene(shown: Shown) -> Scene {
     let mut source = Source::keeping_everything(DataRoot::for_render());
     let first = source.load(0);
@@ -211,7 +184,6 @@ pub fn scene(shown: Shown) -> Scene {
         }
         Shown::QuestionTabs => {
             scene.acting = Acting::On;
-            // A session waiting on you without a permission held for it takes the questions.
             let id = pick(&model, &|m, id| {
                 m.agent(id)
                     .is_some_and(|a| a.group == AgentGroup::NeedsInput)
@@ -222,7 +194,6 @@ pub fn scene(shown: Shown) -> Scene {
                 scene.question = request.question().cloned();
                 model.requests.insert(request.session_id.clone(), request);
             }
-            // Postgres, then Sign-in and Search on the multi-select page on show.
             scene.picks = vec![(0, 1), (1, 1), (1, 3)];
             scene.tab = 1;
             id.map(NotchState::Peek)
@@ -239,14 +210,12 @@ pub fn scene(shown: Shown) -> Scene {
         }
         Shown::Perch => {
             scene.pet = Some(PetMode::Idle);
-            // The canvas stands in for the screen: AX coordinates are the canvas's own.
             let screen = Rect::new(0.0, 0.0, 560.0, 260.0);
             scene.perch = perch::find(PERCH_WINDOW, false, screen, 280.0, 260.0);
             scene.window = Some(PERCH_WINDOW);
             Some(NotchState::Collapsed)
         }
     };
-    // A fixture without such a session shows the list rather than nothing.
     model.go(state.unwrap_or(NotchState::List));
     scene.model = model;
     scene

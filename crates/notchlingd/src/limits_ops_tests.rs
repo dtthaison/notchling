@@ -1,6 +1,3 @@
-//! The limit ops and the watcher loop over fakes. The fakes that stand for a login, a usage
-//! request or a switch panic when called, so a test that leaves `accounts` off proves nothing ran.
-
 use crate::acting_ops_tests::FakeRoom;
 use crate::cost_ops::CostSetup;
 use crate::limits_ops::*;
@@ -21,7 +18,6 @@ use std::time::{Duration, Instant};
 
 pub(crate) const NOW: f64 = 1_800_000_000.0;
 
-/// A scratch folder under the system temp folder, removed on drop.
 pub(crate) struct TempDir(std::path::PathBuf);
 
 impl TempDir {
@@ -55,7 +51,6 @@ impl Drop for TempDir {
     }
 }
 
-/// Panics on any call: the stand-in for a store that must not be touched.
 struct Untouchable;
 
 impl ClaudeSource for Untouchable {
@@ -109,7 +104,6 @@ impl ProviderSource for Untouchable {
     }
 }
 
-/// A Claude store with two accounts; the active one is at `me` percent.
 #[derive(Default)]
 struct Claude {
     me: Mutex<f64>,
@@ -219,7 +213,6 @@ fn with_accounts_off_no_store_is_ever_touched() {
     for i in 0..5 {
         assert!(!ops.tick_at(NOW + f64::from(i) * 400.0), "nothing ran");
     }
-    // Asking for the status or setting a mode reads no store either.
     let status = ops.call(LIMITS_STATUS, &json!({})).unwrap();
     assert_eq!(status["accounts_on"], json!(false));
     assert_eq!(status["watching"], json!(false));
@@ -244,8 +237,6 @@ fn the_loop_thread_does_nothing_while_off_and_works_once_on() {
     ops.set_claude(Arc::new(Untouchable), Arc::new(Untouchable));
     ops.spawn_loop();
     std::thread::sleep(Duration::from_millis(80));
-    // Had the loop touched the untouchable store, its thread would have died there and the wait
-    // below would time out.
     ops.set_claude(claude.clone(), Arc::new(NoJobs));
     flag.set(true);
     let deadline = Instant::now() + Duration::from_secs(5);
@@ -286,7 +277,6 @@ fn a_climb_is_said_once_and_sent_as_an_event() {
         "Notify never switches"
     );
     assert_eq!(claude.syncs.load(Ordering::SeqCst), 1);
-    // Five minutes on, the stores are asked again.
     ops.tick_at(NOW + 301.0);
     assert_eq!(claude.syncs.load(Ordering::SeqCst), 2);
 
@@ -318,7 +308,6 @@ fn turning_accounts_off_drops_what_was_seen_and_the_next_round_on_syncs_afresh()
     assert_eq!(status["providers"][0]["active"], Value::Null, "forgotten");
     assert_eq!(status["providers"][0]["windows"], json!([]));
     flag.set(true);
-    // Within the five minutes, yet the stores are asked again: what they said may be stale.
     assert!(ops.tick_at(NOW + 10.0));
     assert_eq!(claude.syncs.load(Ordering::SeqCst), 2);
 }
@@ -491,7 +480,6 @@ fn the_codex_watcher_is_notify_by_default() {
         .as_str()
         .unwrap()
         .starts_with("Codex: me@x.com"));
-    // Turned to Notify and Switch, it switches (the process check says idle).
     ops.call(
         LIMITS_SET_MODE,
         &json!({"provider": "codex", "mode": "notifyAndSwitch"}),

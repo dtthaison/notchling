@@ -1,10 +1,6 @@
-//! The views `--render` can draw, by name, with the window size each wants.
-
-/// A renderable view.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ViewSpec {
     pub name: &'static str,
-    /// Window size in points; the capture is at the display's scale.
     pub size: (f32, f32),
     pub about: &'static str,
 }
@@ -49,7 +45,6 @@ pub fn spec(name: &str) -> Option<&'static ViewSpec> {
     every().find(|v| v.name == name)
 }
 
-/// Every renderable view: these, then each part's own (the notch's, the sheets').
 pub fn every() -> impl Iterator<Item = &'static ViewSpec> {
     ALL.iter()
         .chain(crate::chat::renders::VIEWS.iter())

@@ -1,13 +1,9 @@
-//! `notchling status` and `notchling sessions`: clients of a running daemon. They never start one.
-
 use notchling_engine::sessions::{Agent, AgentGroup};
 use notchling_local_api::{Client, ClientError, ClientKind, DaemonStatus};
 use std::path::Path;
 
-/// Exit code when no daemon listens.
 pub const NOT_RUNNING: i32 = 3;
 
-/// One line about the daemon.
 pub fn status_line(s: &DaemonStatus) -> String {
     let acting = match s.acting {
         Some(true) => "; acting on",
@@ -28,7 +24,6 @@ fn group_name(g: AgentGroup) -> &'static str {
     }
 }
 
-/// One line per session: group, label, name, project.
 pub fn session_lines(agents: &[Agent]) -> Vec<String> {
     if agents.is_empty() {
         return vec!["No sessions.".into()];
@@ -68,19 +63,16 @@ fn fail(e: ClientError) -> i32 {
 
 pub fn status(socket: &Path, json: bool) -> i32 {
     match connect(socket).and_then(|mut c| c.status()) {
-        Ok(s) if json => {
-            // The wire's own shape: version, pid, uptimeSecs, clients {app, cli, hook}, acting?.
-            match serde_json::to_string_pretty(&s) {
-                Ok(text) => {
-                    println!("{text}");
-                    0
-                }
-                Err(e) => {
-                    eprintln!("notchling: {e}");
-                    1
-                }
+        Ok(s) if json => match serde_json::to_string_pretty(&s) {
+            Ok(text) => {
+                println!("{text}");
+                0
             }
-        }
+            Err(e) => {
+                eprintln!("notchling: {e}");
+                1
+            }
+        },
         Ok(s) => {
             println!("{}", status_line(&s));
             0

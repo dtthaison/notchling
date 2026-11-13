@@ -1,24 +1,4 @@
 #!/bin/bash
-# One-time move from "Agent Console.app + Notchling.app" to Notchling alone. Written to be run by hand; the
-# build alone never runs it.
-#
-#   tools/migrate-and-install.sh
-#
-# WARNING: this ends the Claude sessions that run under the old Agent Console (inside its session host, or as
-# children of the app itself) and brings them back through the new host with `claude --resume`. A session you are
-# typing in from Agent Console is one of them. Run it from a normal terminal, not from inside Agent Console or Notchling.
-#
-# 1. builds Notchling (the old apps keep running meanwhile);
-# 2. lists the claude sessions that are children of a running AgentConsole app and reads each one's session id and
-#    folder from ~/.claude/sessions/<pid>.json (sessions inside the old host need no recording: the host keeps its
-#    own records and resumes them on its next start);
-# 3. quits Agent Console and Notchling, and stops the old session host (SIGTERM: its records stay);
-# 4. records the sessions of step 2 for resume, installs Notchling into /Applications and loads the LaunchAgent
-#    local.agentconsole.hostd onto the helper inside Notchling.app; the new host resumes every recorded session;
-# 5. moves /Applications/Agent Console.app to the Trash and relaunches Notchling.
-#
-# The phone stays paired: Notchling uses the same ~/Library/Application Support/AgentConsole folder (certificate,
-# paired devices, tunnel settings) and the same ports 47821 and 47822.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -35,7 +15,7 @@ HELPER="build/Notchling.app/Contents/Helpers/agent-console-hostd"
 echo "== finding sessions that are children of the running Agent Console"
 SESSIONS_DIR="$HOME/.claude/sessions"
 RECORDS=()
-descendants() {  # pid -> itself and all its descendants
+descendants() {
   local pid="$1"
   echo "$pid"
   for child in $(pgrep -P "$pid" 2>/dev/null || true); do descendants "$child"; done

@@ -20,7 +20,6 @@ class PairingUiState {
 final NotifierProvider<PairingController, PairingUiState> pairingControllerProvider =
     NotifierProvider<PairingController, PairingUiState>(PairingController.new);
 
-/// Pairs with the Mac in a QR or typed payload, waits for the Mac's Cho phép, and stores the Mac.
 class PairingController extends Notifier<PairingUiState> {
   @override
   PairingUiState build() => const PairingUiState();
@@ -29,7 +28,6 @@ class PairingController extends Notifier<PairingUiState> {
 
   void fail(PairingFailure failure) => state = PairingUiState(phase: PairingPhase.failed, failure: failure);
 
-  /// Returns true when the Mac was paired and is now the active one.
   Future<bool> pair(PairingPayload payload) async {
     state = const PairingUiState(phase: PairingPhase.waiting);
     try {

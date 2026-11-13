@@ -1,17 +1,11 @@
-//! Text selected across a conversation's messages, as plain positions: each piece of text drawn is
-//! a block, in the order it's drawn, and an end of the selection is a byte in one of them. The
-//! view (`view::select`) turns presses into these and paints what [`range_in`] says.
-
 use std::ops::Range;
 
-/// One end of a selection: the `order`th block drawn, byte `index` into its text.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct At {
     pub order: usize,
     pub index: usize,
 }
 
-/// The two ends in reading order, whichever way the pointer went.
 pub fn ordered(anchor: At, focus: At) -> (At, At) {
     if focus < anchor {
         (focus, anchor)
@@ -20,8 +14,6 @@ pub fn ordered(anchor: At, focus: At) -> (At, At) {
     }
 }
 
-/// The bytes of block `order` (of `len` bytes) between `start` and `end`, or `None` when none of
-/// it is selected.
 pub fn range_in(start: At, end: At, order: usize, len: usize) -> Option<Range<usize>> {
     if order < start.order || order > end.order {
         return None;
@@ -32,7 +24,6 @@ pub fn range_in(start: At, end: At, order: usize, len: usize) -> Option<Range<us
     (from < to).then_some(from..to)
 }
 
-/// What a copy takes: each selected block's part, a line apart.
 pub fn copied(blocks: &[&str], start: At, end: At) -> String {
     blocks
         .iter()
@@ -46,7 +37,6 @@ pub fn copied(blocks: &[&str], start: At, end: At) -> String {
         .join("\n")
 }
 
-/// `index` moved back to the start of the character it falls in, so a slice never cuts one.
 pub fn floor(text: &str, index: usize) -> usize {
     let mut i = index.min(text.len());
     while !text.is_char_boundary(i) {
@@ -55,12 +45,9 @@ pub fn floor(text: &str, index: usize) -> usize {
     i
 }
 
-/// The word around byte `index` (letters, digits and `_`), or the one character there when it's
-/// neither (a space, a comma).
 pub fn word_at(text: &str, index: usize) -> Range<usize> {
     let word = |c: char| c.is_alphanumeric() || c == '_';
     let i = floor(text, index);
-    // At the very end, the word before it.
     let i = if i == text.len() {
         text[..i].char_indices().last().map_or(0, |(j, _)| j)
     } else {
@@ -148,7 +135,6 @@ mod tests {
     #[test]
     fn a_copy_never_cuts_a_character() {
         let blocks = ["Chào bạn"];
-        // Byte 3 is inside "à" (bytes 2..4).
         assert_eq!(copied(&blocks, at(0, 0), at(0, 3)), "Ch");
         assert_eq!(floor("à", 1), 0);
     }

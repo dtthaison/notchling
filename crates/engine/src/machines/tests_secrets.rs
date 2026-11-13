@@ -1,6 +1,3 @@
-//! Secrets: usages, delivery, verification, the two steps, token creation, renames (Swift
-//! `MachinesSecretsTests`). No ssh starts and no vault is read; every value is a fake.
-
 use super::fakes::*;
 use super::registry::Machine;
 use super::runner::{Channel, CommandResult, ScriptedRunner};
@@ -52,8 +49,6 @@ pub(super) fn deliver_with(
     (deliver(usage, &fix), log)
 }
 
-// MARK: Usages
-
 #[test]
 fn usages_of_every_machine() {
     let list = usages(&[mac(), TestMachines::linux("vps-sing-1")]);
@@ -78,8 +73,6 @@ fn usages_of_every_machine() {
         format: SecretFormat::Raw,
     }));
 }
-
-// MARK: Delivery
 
 #[test]
 fn delivery_puts_the_value_only_on_stdin() {
@@ -108,8 +101,6 @@ fn delivery_puts_the_value_only_on_stdin() {
     assert!(!outcome.message.contains("SECRETVALUE"));
 }
 
-/// A value with quotes, `$(...)` and backticks is still only bytes on stdin: no argv holds a piece
-/// of it.
 #[test]
 fn a_hostile_looking_value_never_reaches_a_command_line() {
     let value = "tok'; $(id) `x` \"q\" 1234";
@@ -170,8 +161,6 @@ fn a_too_short_value_is_refused() {
     assert!(runner.calls().is_empty());
 }
 
-/// A realistic Claude token is 108 characters. The echo starts 250 characters in, so a cut at 300
-/// would split it; no 8-character piece of it may reach the message.
 #[test]
 fn an_echo_that_starts_late_is_redacted_before_the_message_is_cut() {
     let alphabet: Vec<char> = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
@@ -202,8 +191,6 @@ fn an_echo_that_starts_late_is_redacted_before_the_message_is_cut() {
     }
 }
 
-/// Mask first, trim afterwards: a value with a space at its edge no longer matches once the edge
-/// is trimmed.
 #[test]
 fn a_value_with_edge_spaces_echoed_alone_is_still_masked() {
     let value = "  sk-ant-oat01-SPACEDVALUE  ";
@@ -230,7 +217,6 @@ fn a_value_with_edge_spaces_echoed_alone_is_still_masked() {
     }
 }
 
-/// The engine's mask (every vault value of the machine) is applied to deliver's message too.
 #[test]
 fn deliver_runs_its_message_through_the_contexts_mask() {
     let runner = Arc::new(ScriptedRunner::new());
@@ -344,8 +330,6 @@ fn a_usage_whose_key_is_not_a_variable_name_is_refused() {
     assert!(runner.calls().is_empty());
 }
 
-// MARK: Verification
-
 pub(super) fn run_probe(
     probe: &Probe,
     text: &str,
@@ -371,7 +355,6 @@ fn verify_never_prints_the_files_content() {
     for linux in [false, true] {
         let probe = verify_probe(&claude_usage("m1"), linux);
         let script = probe.script().unwrap().to_string();
-        // mode and size first, then the hash of the file; the content itself is never printed
         assert!(
             script.starts_with(&shell::stat(&[shell::CLAUDE_ENV], linux)),
             "{script}"
@@ -408,14 +391,10 @@ fn verify_never_prints_the_files_content() {
     ));
 }
 
-// MARK: Content check
-
 fn text_of(state: &CheckState) -> &str {
     state.text()
 }
 
-/// The file on the machine is compared with the vault by hash, in memory. The result says "same" or
-/// "different" and holds neither hash.
 #[test]
 fn verify_compares_the_files_hash_with_the_vaults_and_shows_neither_hash() {
     let values = [
@@ -445,7 +424,6 @@ fn verify_compares_the_files_hash_with_the_vaults_and_shows_neither_hash() {
         assert!(!text.contains(CLAUDE_VALUE));
     }
 
-    // the issues token is the raw value, no newline
     let issues = verify_probe(&raw_usage(), true);
     let raw_ok = run_probe(
         &issues,
@@ -469,7 +447,6 @@ fn verify_compares_the_files_hash_with_the_vaults_and_shows_neither_hash() {
         "a trailing newline is a different file"
     );
 
-    // upper case hex from the machine counts the same
     let upper = run_probe(
         &claude,
         &format!("600 41\n{}\n", same.to_uppercase()),
@@ -495,8 +472,6 @@ fn the_content_check_comes_after_mode_and_size_and_needs_a_hash_to_say_anything(
         run_probe(&probe, "missing\n", 0, &values),
         CheckState::Fail("not on the machine".into())
     );
-    // no hash line (the tool is missing) or a line that is not a hash: can't tell, with no part of
-    // it shown
     let short = format!("600 41\n{}\n", &hash[..63]);
     let zs = format!("600 41\n{}\n", "z".repeat(64));
     for text in [
@@ -511,7 +486,6 @@ fn the_content_check_comes_after_mode_and_size_and_needs_a_hash_to_say_anything(
         };
         assert!(!why.contains("sha256sum: command"), "{why}");
     }
-    // nothing in the vault to compare with: mode and size only, as before
     assert_eq!(
         run_probe(&probe, &format!("600 41\n{hash}\n"), 0, &[]),
         CheckState::Pass("mode 600, 41 bytes".into())

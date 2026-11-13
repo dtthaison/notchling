@@ -1,21 +1,3 @@
-"""Which lines of a Cargo manifest name a dependency on a crate, outside the tables allowed to.
-
-Python 3.9 has no `tomllib`, so this reads table headers and keys itself, line by line, the way TOML
-spells them rather than the way one hand-written manifest happens to:
-
-- keys are dotted (`gpui.workspace = true`, `ui.package = "gpui"`), bare or in `"basic"` or
-  `'literal'` quotes (`"gpui" = "1"`, `"\\u0067pui"`), with spaces allowed around the dots;
-- a table header is a dotted path too (`[dependencies."gpui"]`, `[ dependencies . gpui ]`), and
-  `[dependencies.ui]` followed by `package = "gpui"` is the crate under another name;
-- an inline table is read into its entries, however deep (`ui = { version = "1", package = "gpui" }`,
-  `dependencies = { gpui = "1" }`), and a value that goes on over several lines (an array, a TOML 1.1
-  inline table, a triple-quoted string) is read to its end, so a line inside it is never taken for a key.
-
-A dependency table is `[dependencies]`, `[dev-dependencies]`, `[build-dependencies]` (and the
-underscore spellings Cargo still reads), `[workspace.dependencies]`, or one of those three under
-`[target.<cfg>]`. It is the macOS one when the cfg is exactly `cfg(target_os = "macos")` (spaces
-aside). Only what the rule needs is parsed; a malformed line is skipped, not an error."""
-
 from __future__ import annotations
 
 from typing import Iterator, List, Optional, Tuple
@@ -29,7 +11,6 @@ _ESCAPES = {"b": "\b", "t": "\t", "n": "\n", "f": "\f", "r": "\r", '"': '"', "\\
 
 
 def _unescape(body: str) -> str:
-    """A basic string's contents with its escapes resolved (`\\u0067` is a `g`)."""
     out = []
     i = 0
     while i < len(body):
@@ -57,7 +38,6 @@ def _unescape(body: str) -> str:
 
 
 def _string_end(text: str, i: int) -> int:
-    """The index after the string that opens at `i`, or -1 when it doesn't close in `text`."""
     quote = text[i]
     j = i + 1
     while j < len(text):
@@ -71,7 +51,6 @@ def _string_end(text: str, i: int) -> int:
 
 
 def _outside(text: str) -> Iterator[Tuple[int, str]]:
-    """Every (index, character) that is not inside a string, strings skipped whole."""
     i = 0
     while i < len(text):
         c = text[i]
@@ -93,7 +72,6 @@ def _strip_comment(line: str) -> str:
 
 
 def _dotted(text: str) -> Optional[Segments]:
-    """A dotted key (`a."b.c".'d'`) as its segments; `None` when it isn't one."""
     segments: Segments = []
     i, n = 0, len(text)
     while True:
@@ -126,7 +104,6 @@ def _dotted(text: str) -> Optional[Segments]:
 
 
 def _header(code: str) -> Optional[Segments]:
-    """The path of a `[table]` or `[[array of tables]]` line."""
     s = code.strip()
     if not s.startswith("["):
         return None
@@ -138,7 +115,6 @@ def _header(code: str) -> Optional[Segments]:
 
 
 def _pair(code: str) -> Optional[Tuple[Segments, str]]:
-    """A `key = value` line as the key's segments and the value's text."""
     for i, c in _outside(code):
         if c == "=":
             key = _dotted(code[:i])
@@ -147,7 +123,6 @@ def _pair(code: str) -> Optional[Tuple[Segments, str]]:
 
 
 def _string_value(value: str) -> Optional[str]:
-    """What a whole-value string says, `None` when the value isn't one string."""
     v = value.strip()
     if not v or v[0] not in "\"'":
         return None
@@ -158,7 +133,6 @@ def _string_value(value: str) -> Optional[str]:
 
 
 def _inline(value: str) -> Optional[List[Tuple[Segments, str]]]:
-    """The entries of an inline table value, `None` when the value isn't one."""
     v = value.strip()
     if not (v.startswith("{") and v.endswith("}")):
         return None
@@ -183,7 +157,6 @@ def _inline(value: str) -> Optional[List[Tuple[Segments, str]]]:
 
 
 def _leaves(path: Segments, value: str) -> Iterator[Tuple[Segments, str]]:
-    """The value at `path`, or each of its entries' when it is a (non-empty) inline table."""
     entries = _inline(value)
     if entries:
         for key, inner in entries:
@@ -193,8 +166,6 @@ def _leaves(path: Segments, value: str) -> Iterator[Tuple[Segments, str]]:
 
 
 def _dependency_tables(path: Segments) -> Optional[Tuple[int, bool]]:
-    """When `path` starts inside a dependency table: how many segments the table is and whether it
-    is the macOS target's."""
     for j, segment in enumerate(path):
         if segment not in DEP_KINDS:
             continue
@@ -207,9 +178,6 @@ def _dependency_tables(path: Segments) -> Optional[Tuple[int, bool]]:
 
 
 def _names(path: Segments, value: Optional[str], crate: str) -> bool:
-    """Whether `path` is, in a dependency table that isn't the macOS one, an entry for `crate`: by its
-    key (`gpui`, `gpui.version`, a `[dependencies.gpui]` table) or by `package = "gpui"` under any
-    name."""
     found = _dependency_tables(path)
     if found is None:
         return False
@@ -223,8 +191,6 @@ def _names(path: Segments, value: Optional[str], crate: str) -> bool:
 
 
 def lines_naming_outside_macos(lines: List[str], crate: str) -> List[Tuple[int, str]]:
-    """The (1-based line, text) of every line that names `crate` as a dependency outside the macOS
-    target tables: a key, a table header, or a `package = "<crate>"` rename."""
     out: List[Tuple[int, str]] = []
     table: Segments = []
     table_flagged = False
@@ -245,7 +211,6 @@ def lines_naming_outside_macos(lines: List[str], crate: str) -> List[Tuple[int, 
         if pair is None:
             continue
         key, value = pair
-        # A value that goes on over more lines is read to its end.
         for quote in ('"""', "'''"):
             if value.startswith(quote) and value.find(quote, 3) < 0:
                 while i < len(lines) and quote not in lines[i]:
@@ -266,7 +231,6 @@ def lines_naming_outside_macos(lines: List[str], crate: str) -> List[Tuple[int, 
 
 
 def _depth(text: str) -> int:
-    """How many brackets `text` opens and doesn't close, strings and comments aside."""
     depth = 0
     for _, c in _outside(_strip_comment(text)):
         if c in "[{":

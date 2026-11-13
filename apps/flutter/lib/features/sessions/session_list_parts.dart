@@ -6,7 +6,6 @@ import '../../core/protocol/models.dart';
 import '../../l10n/app_localizations.dart';
 import 'status_style.dart';
 
-/// A project filter above the session list.
 class ProjectChip extends StatelessWidget {
   const ProjectChip({
     super.key,
@@ -63,8 +62,6 @@ class ProjectChip extends StatelessWidget {
   }
 }
 
-/// Swipe right: take a view-only session over. Swipe left: archive. Both also exist inside the session (the
-/// Tiếp quản button, the chat), since swipes are not discoverable.
 class SessionSwipeRow extends StatelessWidget {
   const SessionSwipeRow({
     super.key,

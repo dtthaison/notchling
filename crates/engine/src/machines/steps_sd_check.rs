@@ -1,10 +1,3 @@
-//! The "sd worker setup --check" step (Swift `SDWorkerSteps` setup-check part).
-//!
-//! The check is read-only (sd 1.19.3: it reports missing labels and creates none). Its Fix, on a
-//! click, runs `--create-labels`, the one GitHub write sd makes, and the engine checks again after
-//! it. An sd older than [`MIN_SD`] runs `--check` and makes labels, so the step holds back on it
-//! (see [`super::steps_sd::all`]).
-
 use super::registry::SdWorkerSettings;
 use super::shell;
 use super::step::{run, CheckResult, FixContext, FixOutcome, FixPlan, Probe, RemoteOutput, SubRow};
@@ -13,12 +6,8 @@ use crate::lanes::quote;
 use serde_json::Value;
 
 const ROW_CAP: usize = 200;
-/// The Running row: the worker's own LaunchAgent. It is listed but never counted as a failure.
 const NOT_COUNTED: &str = "com.sd.worker";
 
-/// Stdout, then `@@exit N`, then stderr, so the parse tells the two apart whatever the engine does
-/// with `code`. `python -B` keeps the interpreter from writing `.pyc` files next to sd.py: a check
-/// changes nothing on the machine. A python or sd.py that isn't a safe absolute path never runs.
 pub(super) fn setup_script(job: &SdWorkerSettings, flag: &str) -> String {
     if !shell::is_safe_machine_path(&job.python) || !shell::is_safe_machine_path(&job.sd_path) {
         return "echo; echo '@@exit 2'; echo 'python or sd.py is not an absolute path yet'".into();
@@ -53,11 +42,7 @@ pub(super) fn create_labels_plan(job: &SdWorkerSettings) -> FixPlan {
     FixPlan::new(shown, false, move |ctx| create_labels(&job, ctx))
 }
 
-/// The click-run Fix of the setup check. It runs `--create-labels` only; the engine checks again
-/// after it.
 fn create_labels(job: &SdWorkerSettings, ctx: &FixContext) -> FixOutcome {
-    // the sd on the machine is the one copied from this Mac (Plugins installed compares them), so
-    // this Mac's decides
     let Some(sd) = ctx.step.mac.plugins.get(SD_PLUGIN) else {
         return FixOutcome::fail(format!(
             "this Mac has no sd plugin; install sd {MIN_SD} or newer first"
@@ -104,7 +89,6 @@ fn create_labels(job: &SdWorkerSettings, ctx: &FixContext) -> FixOutcome {
         return FixOutcome::fail(format!("{}: {}", bad.name, bad.detail));
     }
     if labels.is_empty() {
-        // no label row: the command itself failed, and its state holds the reason
         if result.state.is_fail() {
             return FixOutcome::fail(result.state.text());
         }
@@ -123,8 +107,6 @@ fn create_labels(job: &SdWorkerSettings, ctx: &FixContext) -> FixOutcome {
     FixOutcome::ok(format!("The labels are in place ({done})"))
 }
 
-/// Reads the setup command's output: rows as JSON, then `@@exit N`, then stderr. Every text from
-/// the machine is masked, then cut.
 pub(super) fn setup_check_result(out: &RemoteOutput, mask: &dyn Fn(&str) -> String) -> CheckResult {
     let text = &out.text;
     let Some(marker) = text.rfind("@@exit ") else {

@@ -1,5 +1,3 @@
-//! Ports of MovedJobTests and the job half of AgentMonitor, plus new cases for the "bit before" notes.
-
 use super::agent::{AgentGroup, AgentTarget};
 use super::jobs::*;
 use super::lanes::Roots;
@@ -20,7 +18,6 @@ fn job(state: &str, extra: Value) -> Value {
     v
 }
 
-// MovedJobTests.testLiveCopyFirst
 #[test]
 fn live_copy_first() {
     let old = json!({"createdAt": "2026-10-28T08:20:11.786Z", "updatedAt": "2026-11-02T08:21:06.159Z", "state": "stopped"});
@@ -30,7 +27,6 @@ fn live_copy_first() {
         newest_first(&[(None, old.clone()), (lane.clone(), moved)]),
         vec![lane.clone(), None]
     );
-    // Moved back: the old main copy is woken (created in October, still) and the lane's is stopped.
     let woken = json!({"createdAt": "2026-10-28T08:20:11.786Z", "updatedAt": "2026-11-04T03:22:20.219Z", "state": "running"});
     let left = json!({"createdAt": "2026-11-02T08:21:08.279Z", "updatedAt": "2026-11-04T03:15:40.662Z", "state": "stopped"});
     assert_eq!(
@@ -39,7 +35,6 @@ fn live_copy_first() {
     );
 }
 
-// MovedJobTests.testBothStoppedNewestUpdateFirst
 #[test]
 fn both_stopped_newest_update_first() {
     let a = json!({"updatedAt": "2026-11-02T08:21:06.159Z", "state": "stopped"});
@@ -57,7 +52,6 @@ fn both_stopped_newest_update_first() {
 
 #[test]
 fn created_at_never_decides() {
-    // The older-created copy updated later wins, even though its createdAt is first.
     let a = json!({"createdAt": "2026-10-01T00:00:00Z", "updatedAt": "2026-11-05T00:00:00Z", "state": "working"});
     let b = json!({"createdAt": "2026-11-01T00:00:00Z", "updatedAt": "2026-11-02T00:00:00Z", "state": "working"});
     assert_eq!(
@@ -68,7 +62,6 @@ fn created_at_never_decides() {
 
 #[test]
 fn live_status_wins_over_state_json() {
-    // A turn stopped with Esc leaves state "working" until the next turn (Claude Code 2.1.318).
     let live = json!({"status": "idle", "jobId": "ab12cd34"});
     let a = agent_from_job(&job("working", json!({})), "ab12cd34", Some(&live), &none);
     assert_eq!((a.group, a.label.as_str()), (AgentGroup::Completed, "Idle"));
@@ -213,7 +206,6 @@ fn transcript_follows_the_session_into_its_worktree() {
 
 #[test]
 fn equal_modification_times_keep_the_recorded_path() {
-    // Swift's `max(by:)` keeps the first of equal elements, so a tie is the recorded `linkScanPath`.
     let start = "/h/.claude/projects/-Users-me-app/sess-1.jsonl";
     let moved = "/h/.claude/projects/-Users-me-app--claude-worktrees-music/sess-1.jsonl";
     let j = job(
@@ -302,7 +294,6 @@ fn finds_the_current_lane_of_a_moved_job() {
     assert_eq!(config_dir_for_job(&roots, "ffffffff"), None);
 }
 
-// ChatModel+Moves.launchFlags and resumeArguments
 #[test]
 fn launch_flags_drop_resume_and_background() {
     let j = json!({"respawnFlags": ["--name", "x", "--resume", "abc", "--bg", "-r", "def", "--model", "opus", "--background"]});

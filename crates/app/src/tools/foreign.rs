@@ -1,8 +1,3 @@
-//! Codex and Antigravity rows beside Claude Code's (`NotchForeign`, `ForeignSessions`): the
-//! Antigravity list ([`AgyList`], over a copy of its summaries database, never the original), what the notch
-//! shows of each tool's rows (12 hours of Done rows, 8 per tool), and a conversation as the notch's
-//! lines. Codex rows come from the engine's rollout listing, as Chat's do.
-
 use std::path::Path;
 
 use notchling_engine::bridge::foreign::tool_summary;
@@ -14,14 +9,10 @@ use notchling_engine::transcript::snapshot::{ChatLine, LineKind, Snapshot};
 pub use super::agy_list::AgyList;
 use super::requests::RowTool;
 
-/// Done rows older than this are left out of the notch (Chat lists 14 days).
 pub const MAX_AGE_MS: i64 = 12 * 3600 * 1000;
-/// At most this many rows of each tool in the notch.
 pub const PER_TOOL: usize = 8;
-/// A reply shows at most this many characters in the notch.
 const REPLY_CHARS: usize = 3000;
 
-/// An Antigravity summaries row as a session row (`AntigravitySessions.list`).
 pub fn agy_agent(row: &Row) -> Agent {
     Agent {
         id: row.row_id(),
@@ -62,8 +53,6 @@ pub fn agy_agent(row: &Row) -> Agent {
     }
 }
 
-/// The rows the notch shows of the other tools: newest first, at most [`PER_TOOL`] of each, and
-/// Done rows only from the last [`MAX_AGE_MS`]. Claude Code rows pass through untouched.
 pub fn visible(rows: Vec<Agent>, now_ms: i64) -> Vec<Agent> {
     let (mut foreign, claude): (Vec<Agent>, Vec<Agent>) = rows
         .into_iter()
@@ -88,9 +77,6 @@ pub fn visible(rows: Vec<Agent>, now_ms: i64) -> Vec<Agent> {
     claude.into_iter().chain(kept).collect()
 }
 
-/// A conversation as the notch's detail bubbles: your messages, the replies, and one dim line for
-/// the tools between them. Thinking, turn ends and notices stay in Chat. Ids count from the start,
-/// so the tail keeps the ids it had.
 pub fn lines(conversation: &Conversation, limit: usize) -> Vec<ChatLine> {
     let mut out: Vec<ChatLine> = Vec::new();
     for item in &conversation.items {
@@ -116,7 +102,6 @@ pub fn lines(conversation: &Conversation, limit: usize) -> Vec<ChatLine> {
     out.split_off(skip)
 }
 
-/// The notch's snapshot of a Codex or Antigravity conversation.
 pub fn snapshot(conversation: &Conversation) -> Snapshot {
     let lines = lines(conversation, 60);
     Snapshot {

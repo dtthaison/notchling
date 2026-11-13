@@ -1,7 +1,3 @@
-//! The header over the conversation: the session's title and the window's buttons. The context,
-//! the account and the limits are under the reply box; the folder, host, model, shells and status
-//! are in the Details Panel and the Sidebar.
-
 use gpui::{div, prelude::*, px, Context, Div};
 use notchling_kit::labels::Corner;
 use notchling_kit::metric::SIDE_PADDING;
@@ -16,7 +12,6 @@ use super::ChatView;
 use crate::chat::header::header;
 use crate::mac::gate;
 
-/// A small raised chip of meta text (the context meter under the reply box).
 pub(super) fn chip(text: &str, a: Appearance) -> Div {
     div()
         .h(px(20.0))
@@ -29,7 +24,6 @@ pub(super) fn chip(text: &str, a: Appearance) -> Div {
         .child(label(text, TypeRole::Meta, Ink::TextMuted, a))
 }
 
-/// The Phone button at the right end of the header; a green dot says the bridge is on.
 fn phone_button(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> impl IntoElement {
     let on = view.bridge_on();
     let kind = if view.phone.is_some() {
@@ -72,7 +66,6 @@ fn phone_button(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> i
     .part_at("Phone Button", Corner::BottomTrailing, a, cx)
 }
 
-/// The Details button, the Swift header's `sidebar.right`: raised while the panel shows.
 fn details_button(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> impl IntoElement {
     let shown = !view.details_hidden;
     let kind = if shown {
@@ -113,7 +106,6 @@ pub fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Div
         .gap(px(4.0))
         .border_b(px(1.0))
         .border_color(hsla(Ink::Hairline.color(a)))
-        // With the sidebar hidden the traffic lights and its button sit over this row's start.
         .when(view.sidebar_hidden, |bar| bar.pl(px(HIDDEN_HEADER_START)));
     let Some(session) = view.selected_session() else {
         return bar

@@ -1,20 +1,9 @@
-//! The hook command line: writing ours, and telling whose a command in settings.json is.
-//!
-//! Ours is `'<path>/notchling' hook`. The Swift app's is `'<app>/Contents/MacOS/Notchling'
-//! --hook` (and, from when the app was called Awake, `.../Awake' --hook`), each with any
-//! `NAME=value` settings before it and, for ours, `--` options after `hook`. Anything else is the
-//! user's, and is never touched: a pipe, `;`, `&&`, a substitution or a wrapper (`sh -c`, `env`,
-//! `exec`) around our program makes the line theirs.
-
 use notchling_platform::paths::Os;
 use std::path::Path;
 
-/// Whose a hook command is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Origin {
-    /// `notchling hook`, this program.
     Notchling,
-    /// The Swift app's `--hook`.
     Swift,
 }
 
@@ -27,7 +16,6 @@ impl Origin {
     }
 }
 
-/// The command for `binary`: quoted for the shell Claude Code runs hooks with.
 pub fn hook_command(binary: &Path, os: Os) -> String {
     let path = binary.to_string_lossy();
     match os {
@@ -36,10 +24,6 @@ pub fn hook_command(binary: &Path, os: Os) -> String {
     }
 }
 
-/// Words as a POSIX shell splits them (quotes and backslashes only), and whether the line holds
-/// anything else a shell acts on: a pipe, `;`, `&`, a redirect, a subshell, a substitution or a
-/// line break outside quotes (a substitution also inside double quotes). `None` for an
-/// unbalanced quote.
 fn words(command: &str) -> Option<(Vec<String>, bool)> {
     let mut out = Vec::new();
     let mut word = String::new();
@@ -97,7 +81,6 @@ fn words(command: &str) -> Option<(Vec<String>, bool)> {
     Some((out, control))
 }
 
-/// A backtick or `$(`: the shell runs what is inside.
 fn is_substitution(c: char, next: Option<&char>) -> bool {
     c == '`' || (c == '$' && next == Some(&'('))
 }
@@ -109,7 +92,6 @@ fn file_name(path: &str) -> String {
         .to_lowercase()
 }
 
-/// `NAME=value`: a setting a shell takes off the front of a command.
 fn is_assignment(word: &str) -> bool {
     word.split_once('=').is_some_and(|(name, _)| {
         name.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_')
@@ -117,10 +99,6 @@ fn is_assignment(word: &str) -> bool {
     })
 }
 
-/// The program, its first argument and the rest, for a line that is one program run with its
-/// arguments after any `NAME=value` settings. A pipe, a second command, a wrapper (`sh -c`,
-/// `env`, `exec`) or a substitution gives `None`: what runs is then not what the line names, so
-/// a command that merely has our program inside it is the user's.
 fn call(command: &str) -> Option<(String, String, Vec<String>)> {
     let (mut words, control) = words(command.trim())?;
     if control {
@@ -133,9 +111,7 @@ fn call(command: &str) -> Option<(String, String, Vec<String>)> {
     Some((program, first, rest.collect()))
 }
 
-/// Whose a command is, or `None` for the user's own.
 pub fn classify(command: &str) -> Option<Origin> {
-    // What the Swift app itself matches on, so anything it would call its own is.
     if command.contains("/Contents/MacOS/Notchling' --hook")
         || command.contains("/Contents/MacOS/Awake' --hook")
     {
@@ -153,8 +129,6 @@ pub fn classify(command: &str) -> Option<Origin> {
     }
 }
 
-/// The program and its `hook` word without any environment settings or options before or after
-/// them (a hook line can carry a value that must not be repeated in a report).
 pub fn summary(command: &str) -> String {
     let Some((program, first, _)) = call(command) else {
         return "(a hook command)".to_string();

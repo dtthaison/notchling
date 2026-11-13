@@ -1,18 +1,3 @@
-//! The update check (decision 0010): reads the Phase 6 feed and says whether a newer release
-//! exists. It never downloads a disk image, never installs anything and never opens the feed's
-//! links by itself; installing is a later, signed step (the feed is Sparkle's, `tools/release/
-//! appcast.py`).
-//!
-//! The kill switch: the Phase 6 pipeline stops at its first step unless the repository variable
-//! `NOTCHLING_RELEASES` is `on`, and a missing one counts as off. The app can't read a repository
-//! variable, so it keeps the same name and rule for itself: the check runs only when its
-//! environment has `NOTCHLING_RELEASES=on`. Otherwise it says updates are off and makes no
-//! request at all ([`check`] is given a fetcher and never calls it).
-//!
-//! The fetch is behind [`FeedFetcher`]; the real one runs `curl` through the engine's launcher and
-//! no test uses it. The feed is data: only its version numbers and `https://github.com` links are
-//! read from it.
-
 use std::cmp::Ordering;
 use std::time::Duration;
 
@@ -20,27 +5,20 @@ use notchling_engine::control::{Command, Launcher};
 
 use super::xml::{self, Node};
 
-/// Where the feed lives: the asset `appcast.xml` of the release tagged `appcast`.
 pub const FEED_URL: &str =
     "https://github.com/dtthaison/notchling/releases/download/appcast/appcast.xml";
-/// The kill switch's name, the Phase 6 repository variable's.
 pub const KILL_SWITCH: &str = "NOTCHLING_RELEASES";
-/// What the check says while the switch is off.
 pub const OFF_MESSAGE: &str =
     "Updates are off. Notchling checks for updates only once the maintainer turns releases on.";
 
-/// How long the real fetch may take.
 const FETCH_TIMEOUT: Duration = Duration::from_secs(20);
-/// A feed larger than this is refused.
 const MAX_FEED: usize = 2 * 1024 * 1024;
 
-/// A release number: `X.Y.Z` (Stable) or `X.Y.Z-beta.N` (Beta).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Version {
     pub major: u64,
     pub minor: u64,
     pub patch: u64,
-    /// The Beta's number; `None` is a Stable release.
     pub beta: Option<u64>,
 }
 
@@ -70,15 +48,14 @@ impl Version {
 impl Ord for Version {
     fn cmp(&self, other: &Self) -> Ordering {
         let core = |v: &Version| (v.major, v.minor, v.patch);
-        core(self).cmp(&core(other)).then_with(|| {
-            // A Beta comes before the Stable of the same number.
-            match (self.beta, other.beta) {
+        core(self)
+            .cmp(&core(other))
+            .then_with(|| match (self.beta, other.beta) {
                 (None, None) => Ordering::Equal,
                 (None, Some(_)) => Ordering::Greater,
                 (Some(_), None) => Ordering::Less,
                 (Some(a), Some(b)) => a.cmp(&b),
-            }
-        })
+            })
     }
 }
 
@@ -98,29 +75,22 @@ impl std::fmt::Display for Version {
     }
 }
 
-/// One release in the feed.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Release {
     pub version: Version,
-    /// A security or critical fix.
     pub critical: bool,
-    /// The release notes page, when it is an https GitHub link.
     pub notes: Option<String>,
 }
 
-/// What a check found.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Outcome {
-    /// The kill switch is off; nothing was requested.
     Off,
     UpToDate(Version),
     Available(Release),
-    /// Couldn't ask, or the feed isn't one this app reads.
     Failed(String),
 }
 
 impl Outcome {
-    /// The line the About view shows.
     pub fn line(&self) -> String {
         match self {
             Outcome::Off => OFF_MESSAGE.to_owned(),
@@ -134,12 +104,10 @@ impl Outcome {
     }
 }
 
-/// Fetches the feed's text.
 pub trait FeedFetcher: Send + Sync {
     fn fetch(&self, url: &str) -> Result<String, String>;
 }
 
-/// The real fetcher: `curl`, https only, a size cap, a timeout.
 pub struct CurlFetcher<L: Launcher> {
     launcher: L,
 }
@@ -149,11 +117,9 @@ impl<L: Launcher> CurlFetcher<L> {
         CurlFetcher { launcher }
     }
 
-    /// The command for `url`; public so a test can pin it.
     pub fn command(url: &str) -> Command {
         Command::new(&[
             "/usr/bin/curl",
-            // First, or curl reads ~/.curlrc, which could add an output file, a proxy or http.
             "-q",
             "--silent",
             "--show-error",
@@ -188,7 +154,6 @@ impl<L: Launcher> FeedFetcher for CurlFetcher<L> {
     }
 }
 
-/// Fetches nothing: a render's, and a fixture root's.
 pub struct NoFeed;
 
 impl FeedFetcher for NoFeed {
@@ -197,12 +162,10 @@ impl FeedFetcher for NoFeed {
     }
 }
 
-/// True only when the variable's value is exactly `on`; missing is off.
 pub fn releases_on(value: Option<&str>) -> bool {
     value == Some("on")
 }
 
-/// A link from the feed that may be shown: https on github.com, nothing else.
 fn safe_link(link: &str) -> Option<String> {
     let rest = link.strip_prefix("https://github.com/")?;
     let clean = !rest.is_empty()
@@ -224,7 +187,6 @@ fn release_of(item: &Node) -> Option<(Release, bool)> {
     let beta_channel = item
         .child("sparkle:channel")
         .is_some_and(|c| c.text == "beta");
-    // A channel word and the version string must agree, or the item is not trusted for either.
     if beta_channel != version.is_beta() {
         return None;
     }
@@ -240,8 +202,6 @@ fn release_of(item: &Node) -> Option<(Release, bool)> {
     ))
 }
 
-/// The newest release in `feed` that an app at `current` may be offered: a Beta app sees Beta and
-/// Stable, a Stable app only Stable.
 pub fn newest(feed: &str, current: &Version) -> Result<Option<Release>, String> {
     if feed.len() > MAX_FEED {
         return Err("the feed is too large".into());
@@ -263,8 +223,6 @@ pub fn newest(feed: &str, current: &Version) -> Result<Option<Release>, String> 
     Ok(best.filter(|r| r.version > *current))
 }
 
-/// Runs the check. With the kill switch off (`switch` is the variable's value) the fetcher is
-/// never called.
 pub fn check(current: &str, switch: Option<&str>, fetcher: &dyn FeedFetcher) -> Outcome {
     if !releases_on(switch) {
         return Outcome::Off;
@@ -292,7 +250,6 @@ mod tests {
     const FEED: &str = include_str!("../../fixtures/welcome/appcast.xml");
     const EMPTY: &str = include_str!("../../fixtures/welcome/appcast-empty.xml");
 
-    /// Answers with a feed and counts the asks.
     struct Feed {
         text: Result<String, String>,
         asked: Mutex<Vec<String>>,
@@ -391,7 +348,6 @@ mod tests {
     #[test]
     fn a_beta_app_sees_betas_too_and_a_critical_one_is_flagged() {
         let feed = Feed::of(FEED);
-        // A Stable app at 1.2.1 is not offered the Betas above it.
         assert_eq!(
             check("1.2.1", Some("on"), &feed),
             Outcome::UpToDate(v("1.2.1"))

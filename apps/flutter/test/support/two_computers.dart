@@ -1,4 +1,3 @@
-// Two paired computers for tests of what the phone keeps per computer (decision 0012).
 import 'package:agent_console/app/providers.dart';
 import 'package:agent_console/core/net/ws_transport.dart';
 import 'package:agent_console/core/pairing/mac_profile.dart';
@@ -29,8 +28,6 @@ const MacProfile macB = MacProfile(
   token: 'tok-b',
 );
 
-/// A computer whose `s1` is view-only and can be taken over. It answers the usual ops at once, and a takeover only
-/// when the test says so (`reply` on the socket).
 FakeWs computerSocket() => FakeWs(onSend: (FakeWs socket, Map<String, Object?> message) {
       final Object id = message['id']!;
       switch (message['op']) {
@@ -49,8 +46,6 @@ FakeWs computerSocket() => FakeWs(onSend: (FakeWs socket, Map<String, Object?> m
       }
     });
 
-/// Both computers paired with [active] in use, each reached through its own fake socket. [secrets] starts the
-/// phone from stored state; [cache] and [archive] are the stores to look into afterwards; [extra] replaces a store or a provider.
 ProviderContainer pairedComputers(
   FakeWs a,
   FakeWs b, {

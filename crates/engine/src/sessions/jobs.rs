@@ -1,5 +1,3 @@
-//! Background jobs and session files: `jobs/<id>/state.json` and `sessions/<pid>.json`.
-
 use super::agent::{Agent, AgentGroup, AgentTarget};
 use super::iso::parse_iso_ms;
 use super::lanes::{config_dirs, Roots};
@@ -9,15 +7,12 @@ use serde_json::Value;
 use std::collections::BTreeMap;
 use std::path::Path;
 
-/// How current a copy of a job is: one that isn't stopped beats one that is, then the most recently
-/// updated. Not `createdAt`: waking an old copy (a session moved back) keeps its first creation date.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Rank {
     pub live: bool,
     pub updated_ms: i64,
 }
 
-/// A job copy's [`Rank`]; a missing or unreadable `updatedAt` counts as the distant past.
 pub fn rank(job: &Value) -> Rank {
     Rank {
         live: str_field(job, "state") != Some("stopped"),
@@ -27,18 +22,15 @@ pub fn rank(job: &Value) -> Rank {
     }
 }
 
-/// The folders of one job's copies (`None` is the main folder), the current copy first.
 pub fn newest_first(copies: &[(Option<String>, Value)]) -> Vec<Option<String>> {
     let mut ranked: Vec<(Option<String>, Rank)> = copies
         .iter()
         .map(|(dir, job)| (dir.clone(), rank(job)))
         .collect();
-    ranked.sort_by_key(|a| std::cmp::Reverse(a.1)); // stable: ties keep the folder order
+    ranked.sort_by_key(|a| std::cmp::Reverse(a.1));
     ranked.into_iter().map(|(dir, _)| dir).collect()
 }
 
-/// Every folder holding this job, current copy first (`None` is `~/.claude`). Moving a session to
-/// another account resumes it there under the same id, and the stopped copy stays where it was.
 pub fn job_dirs(roots: &Roots, id: &str) -> Vec<Option<String>> {
     let copies: Vec<(Option<String>, Value)> = config_dirs(roots)
         .into_iter()
@@ -50,14 +42,10 @@ pub fn job_dirs(roots: &Roots, id: &str) -> Vec<Option<String>> {
     newest_first(&copies)
 }
 
-/// The lane folder a background job lives in, `None` for `~/.claude`. `claude attach`, `rm` and
-/// `respawn` for it need `CLAUDE_CONFIG_DIR` set to this.
 pub fn config_dir_for_job(roots: &Roots, id: &str) -> Option<String> {
     job_dirs(roots, id).into_iter().next().flatten()
 }
 
-/// The row for a background job. `live` is its `sessions/<pid>.json`, when a process is attached.
-/// `modified` gives a file's modification time (seconds since the epoch) for finding the transcript.
 pub fn agent_from_job(
     job: &Value,
     short_id: &str,
@@ -73,15 +61,10 @@ pub fn agent_from_job(
     } else if state == "blocked" || tempo == Some("blocked") || status == Some("waiting") {
         (AgentGroup::NeedsInput, "Needs input".to_string())
     } else if status == Some("idle") {
-        // The live status wins: a turn stopped with Esc leaves `state: "working"` in state.json
-        // until the next turn (2.1.318).
         (AgentGroup::Completed, "Idle".to_string())
     } else if state == "working" || tempo == Some("active") {
         (AgentGroup::Working, "Working".to_string())
-    } else if state == "running" {
-        // A session woken with `--bg --resume` (2.1.318): up, waiting for a prompt.
-        (AgentGroup::Completed, "Idle".to_string())
-    } else if state.is_empty() {
+    } else if state == "running" || state.is_empty() {
         (AgentGroup::Completed, "Idle".to_string())
     } else {
         (AgentGroup::Completed, capitalized(state))
@@ -131,8 +114,6 @@ pub fn agent_from_job(
     }
 }
 
-/// The row for a live terminal session, `None` without a session id and pid. `host_app` names the
-/// app hosting a terminal's process; `sdk-cli` sessions are `claude -p`.
 pub fn agent_from_session(s: &Value, host_app: &dyn Fn(u32) -> Option<String>) -> Option<Agent> {
     let id = str_field(s, "sessionId")?;
     let pid = pid_of(s)?;
@@ -172,7 +153,6 @@ pub fn agent_from_session(s: &Value, host_app: &dyn Fn(u32) -> Option<String>) -
     })
 }
 
-/// Every `jobs/<id>/state.json` under a config folder, by short id. Unreadable files are skipped.
 pub fn read_jobs(base: &Path) -> BTreeMap<String, Value> {
     let mut jobs = BTreeMap::new();
     let Ok(entries) = std::fs::read_dir(base.join("jobs")) else {
@@ -189,7 +169,6 @@ pub fn read_jobs(base: &Path) -> BTreeMap<String, Value> {
     jobs
 }
 
-/// The `sessions/<pid>.json` files whose process is still alive, in file-name order.
 pub fn read_sessions(base: &Path, alive: &dyn Fn(u32) -> bool) -> Vec<Value> {
     let Ok(entries) = std::fs::read_dir(base.join("sessions")) else {
         return Vec::new();
@@ -207,8 +186,6 @@ pub fn read_sessions(base: &Path, alive: &dyn Fn(u32) -> bool) -> Vec<Value> {
         .collect()
 }
 
-/// The flags a job was started with (name, model, permission mode), so a moved session keeps them.
-/// Never carries a resume or background flag twice.
 pub fn launch_flags(job: &Value, name: &str) -> Vec<String> {
     let Some(flags) = job.get("respawnFlags").and_then(Value::as_array) else {
         return vec!["--name".to_string(), name.to_string()];
@@ -227,10 +204,6 @@ pub fn launch_flags(job: &Value, name: &str) -> Vec<String> {
     out
 }
 
-/// `--resume` arguments for a session moving into a folder. Where that folder already has a job for the
-/// conversation (`existing`: the copy an earlier move left), Claude Code continues it with its own saved
-/// options, and since 2.1.318 any flags passed start a separate copy instead; so flags go along only
-/// when there is no job to continue.
 pub fn resume_arguments(conversation: &str, existing: bool, flags: &[String]) -> Vec<String> {
     let mut args = if existing { Vec::new() } else { flags.to_vec() };
     args.extend(["--bg", "--resume", conversation].map(String::from));
@@ -253,7 +226,6 @@ pub(crate) fn read_json(path: &Path) -> Option<Value> {
     serde_json::from_slice(&data).ok().filter(Value::is_object)
 }
 
-/// The last path component the way `NSString.lastPathComponent` gives it.
 pub(crate) fn last_component(path: &str) -> String {
     let trimmed = path.trim_end_matches('/');
     if trimmed.is_empty() {
@@ -266,7 +238,6 @@ pub(crate) fn last_component(path: &str) -> String {
     trimmed.rsplit('/').next().unwrap_or(trimmed).to_string()
 }
 
-/// `stopped` becomes `Stopped`: the first letter of each word upper, the rest lower.
 fn capitalized(text: &str) -> String {
     let mut out = String::new();
     let mut start = true;

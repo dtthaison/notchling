@@ -1,5 +1,3 @@
-//! The conversation's selection as positions: no window, no layout.
-
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -62,7 +60,6 @@ fn note(row: &str, block: u16, text: &str) -> Note {
 #[test]
 fn ends_order_by_row_then_block_then_byte() {
     let on_show = rows(&["a", "b", "c"]);
-    // The row decides first, whatever the block or byte.
     let (start, end) = selection(spot("c", 0, 0), spot("a", 5, 99))
         .ends(&on_show)
         .expect("both rows are on show");
@@ -72,7 +69,6 @@ fn ends_order_by_row_then_block_then_byte() {
         "row a comes first"
     );
     assert_eq!((end.order >> 16, end.index), (2, 0));
-    // Within a row, the block, then the byte.
     let (start, end) = selection(spot("b", 3, 1), spot("b", 1, 40))
         .ends(&on_show)
         .expect("on show");
@@ -86,7 +82,6 @@ fn ends_order_by_row_then_block_then_byte() {
 
 #[test]
 fn copy_takes_rows_that_are_not_drawn() {
-    // Nothing is drawn here at all: the copy reads the model's blocks.
     let model = blocks(&[
         ("u1", &["first message"]),
         ("a1", &["a heading", "the middle row's paragraph"]),
@@ -107,7 +102,6 @@ fn a_selection_on_a_trimmed_row_is_dropped() {
     let sel = selection(spot("a", 0, 0), spot("gone", 0, 3));
     assert_eq!(copied(&sel, &model), None, "nor is its focus row");
 
-    // The frame lets it go for good when it sees the rows without it.
     let mut frame = SelFrame {
         rows: rows(&["a", "b"]),
         ..SelFrame::default()
@@ -165,12 +159,10 @@ fn queued_rows_have_distinct_keys() {
 
 #[test]
 fn the_file_panel_keeps_its_own_selection() {
-    // The conversation has none: ⌘C copies the file panel's.
     assert_eq!(
         clipboard_text(None, || Some("from the file".into())).as_deref(),
         Some("from the file")
     );
-    // The conversation has one: it wins, and the file panel isn't even asked.
     assert_eq!(
         clipboard_text(Some("from the chat".into()), || unreachable!("not asked")).as_deref(),
         Some("from the chat")
@@ -199,7 +191,6 @@ fn a_double_click_takes_the_word_and_a_triple_click_the_text() {
         Some("Make ONE size_chart, please")
     );
 
-    // A single click selects nothing yet.
     frame.begin(spot("a", 0, 6), 1);
     assert_eq!(copied(&frame.selection, &model), None);
 }
@@ -212,7 +203,7 @@ fn a_drag_after_a_double_click_widens_to_whole_words() {
     };
     frame.note_drawn(note("a", 0, "one two three"));
     frame.note_drawn(note("b", 0, "four five six"));
-    frame.begin(spot("a", 0, 5), 2); // "two"
+    frame.begin(spot("a", 0, 5), 2);
     assert!(frame.drag_to(spot("b", 0, 6)), "the focus moved");
     let model = blocks(&[("a", &["one two three"]), ("b", &["four five six"])]);
     assert_eq!(
@@ -220,8 +211,6 @@ fn a_drag_after_a_double_click_widens_to_whole_words() {
         Some("two three\nfour five"),
         "the end word is taken whole"
     );
-    // Dragging back above the anchor (the start of the word that was double-clicked) widens the
-    // other way, as the draw-order selection always did.
     assert!(frame.drag_to(spot("a", 0, 1)));
     assert_eq!(copied(&frame.selection, &model).as_deref(), Some("one "));
     assert!(!frame.drag_to(spot("a", 0, 2)), "same word, same end");
@@ -232,7 +221,6 @@ fn a_selection_survives_a_reload_that_appends() {
     let before = blocks(&[("a", &["alpha beta"]), ("b", &["gamma"])]);
     let sel = selection(spot("a", 0, 6), spot("b", 0, 3));
     assert_eq!(copied(&sel, &before).as_deref(), Some("beta\ngam"));
-    // Two rows come in at the end, and one at the front (the places shift).
     let after = blocks(&[
         ("new-front", &["x"]),
         ("a", &["alpha beta"]),
@@ -251,16 +239,13 @@ fn a_changed_message_clamps_the_selection_to_its_new_text() {
         copied(&sel, &long).as_deref(),
         Some("beta gamma delta epsilon zeta eta")
     );
-    // The message was edited and got shorter: the end is the end of what is left.
     let short = blocks(&[("a", &["alpha beta gamma"])]);
     assert_eq!(copied(&sel, &short).as_deref(), Some("beta gamma"));
-    // A cut inside a character takes the whole character's start, never half of it.
     let sel = selection(spot("a", 0, 0), spot("a", 0, 3));
     assert_eq!(
         copied(&sel, &blocks(&[("a", &["Chào bạn"])])).as_deref(),
         Some("Ch")
     );
-    // The block went (the message lost a paragraph): nothing is copied from it.
     let sel = selection(spot("a", 2, 0), spot("a", 2, 4));
     assert_eq!(copied(&sel, &long), None);
 }
@@ -305,8 +290,6 @@ fn fixture_conversations() -> Vec<(String, notchling_engine::transcript::model::
     out
 }
 
-/// Every drag over the fixtures' conversations copies what the draw-order selection did: the
-/// same blocks in the same order, with the same cuts.
 #[test]
 fn copies_the_same_text_as_the_draw_order_selection_on_every_fixture() {
     let conversations = fixture_conversations();
@@ -315,8 +298,6 @@ fn copies_the_same_text_as_the_draw_order_selection_on_every_fixture() {
     let mut blocks_seen = 0;
     for (name, conversation) in conversations {
         let cache = std::cell::RefCell::new(Cache::default());
-        // Everything open, so step details are blocks too, and two queued and one sent message
-        // at the tail.
         let model = rows_blocks(
             &conversation,
             &["still going".to_owned()],
@@ -383,7 +364,6 @@ fn no_speed_inside() {
 
 #[test]
 fn speed_grows_with_distance_and_is_capped() {
-    // A quarter of the distance past the edge, at least 2 and at most 40.
     assert_eq!(autoscroll_speed(401.0, 100.0, 400.0), 2.0);
     assert_eq!(autoscroll_speed(440.0, 100.0, 400.0), 10.0);
     assert_eq!(autoscroll_speed(480.0, 100.0, 400.0), 20.0);

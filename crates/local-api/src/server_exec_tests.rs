@@ -1,8 +1,3 @@
-//! The exec race (review C1): a process connects, forks, and the original execs the app while the
-//! fork, which shares the socket, does the talking. Here a child connects on a socket this test
-//! process shares, then execs `/bin/sleep` (allowlisted for the test, like the app would be), and
-//! this process says hello. The connection must never get the app tier.
-
 use super::*;
 use std::ffi::CString;
 use std::os::fd::{FromRawFd, RawFd};
@@ -10,16 +5,13 @@ use std::os::unix::ffi::OsStrExt;
 
 const SLEEP: &str = "/bin/sleep";
 
-/// The child that connected; killed and reaped on drop.
 struct Forked {
     stream: UnixStream,
     pid: libc::pid_t,
-    /// The write end of the pipe the child waits on before it execs, when it waits.
     go: Option<RawFd>,
 }
 
 impl Forked {
-    /// Lets a waiting child exec, then waits until it runs `/bin/sleep`.
     fn exec(&mut self) {
         if let Some(go) = self.go.take() {
             // SAFETY: our own pipe end, written once and closed.
@@ -50,7 +42,6 @@ impl Drop for Forked {
     }
 }
 
-/// The file a process runs now.
 fn exe_of(pid: libc::pid_t) -> Option<PathBuf> {
     #[cfg(target_os = "macos")]
     {
@@ -66,10 +57,7 @@ fn exe_of(pid: libc::pid_t) -> Option<PathBuf> {
     }
 }
 
-/// A child connects to `socket` on a descriptor this process shares, then execs `/bin/sleep`, at
-/// once or (`hold`) only after [`Forked::exec`]. The server's peer is the child.
 fn connect_in_child(socket: &Path, hold: bool) -> Forked {
-    // Everything the child touches is made before the fork: after it, only system calls.
     let program = CString::new(SLEEP).unwrap();
     let secs = CString::new("30").unwrap();
     let argv = [program.as_ptr(), secs.as_ptr(), std::ptr::null()];
@@ -133,7 +121,6 @@ fn connect_in_child(socket: &Path, hold: bool) -> Forked {
     }
 }
 
-/// Says hello on the shared socket and returns the tier the server gave.
 fn hello_tier(stream: &UnixStream) -> String {
     let mut s = stream.try_clone().unwrap();
     send(&mut s, HELLO);
@@ -142,7 +129,6 @@ fn hello_tier(stream: &UnixStream) -> String {
     v["ok"]["tier"].as_str().unwrap_or("closed").to_string()
 }
 
-/// `/bin/sleep` stands for the app; this test binary is the attacker that speaks.
 fn sleep_is_the_app() -> Allowlist {
     Allowlist::new([PathBuf::from(SLEEP)])
 }
@@ -154,9 +140,6 @@ fn roomy() -> Limits {
     }
 }
 
-/// The one order Linux can see too: the server reads the peer at accept while the child still
-/// runs this test binary, the child then execs the "app", and another process says hello. The
-/// hello-time read must not upgrade the connection.
 #[test]
 fn a_peer_that_execs_between_accept_and_hello_is_not_the_app() {
     let run = start_with(sleep_is_the_app(), roomy());
@@ -170,10 +153,6 @@ fn a_peer_that_execs_between_accept_and_hello_is_not_the_app() {
     assert_eq!(hello_tier(&forked.stream), "agent");
 }
 
-/// The race itself: the child execs at once and the speaker waits a little (the attacker picks its
-/// timing), so the server's accept-time read lands before or after the exec, and before or after
-/// the hello. No order may give the app tier. macOS only: on Linux an exec before accept can't be
-/// told apart from the app connecting (best effort, decision 0007).
 #[cfg(target_os = "macos")]
 #[test]
 fn connect_fork_exec_never_gets_the_app_tier() {
@@ -188,8 +167,6 @@ fn connect_fork_exec_never_gets_the_app_tier() {
     }
 }
 
-/// Once the app tier is given, each app-tier request is checked against the process that said
-/// hello: one written by another process (a fork sharing the socket) is refused.
 #[cfg(target_os = "macos")]
 #[test]
 fn an_app_tier_request_from_another_process_is_refused() {
@@ -213,7 +190,6 @@ fn an_app_tier_request_from_another_process_is_refused() {
     unsafe { libc::waitpid(pid, std::ptr::null_mut(), 0) };
     let v = reply(&mut r);
     assert_eq!(v["err"]["code"], "forbidden", "{v}");
-    // The app itself still may.
     send(&mut s, r#"{"id":3,"op":"settings.set","args":{}}"#);
     assert_eq!(reply(&mut r)["ok"], "done");
 }

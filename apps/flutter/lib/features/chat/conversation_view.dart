@@ -9,8 +9,6 @@ import '../../app/widgets/motion.dart';
 import 'chat_notifier.dart';
 import 'chat_parts.dart';
 
-/// The conversation, newest at the bottom. Pure: everything it shows comes in as arguments, so the screen, the
-/// previews and the tests draw it the same way. [entries] are oldest to newest.
 class ConversationList extends StatelessWidget {
   const ConversationList({
     super.key,
@@ -39,13 +37,10 @@ class ConversationList extends StatelessWidget {
   final void Function(String) onDiscard;
   final ScrollController? controller;
 
-  /// The room the keyboard has taken, once it settled (see KeyboardLift).
   final double room;
 
-  /// Ids of tool groups drawn open (previews and tests).
   final Set<String> openGroups;
 
-  /// The session is running: dots and its activity line sit under the newest message.
   final bool working;
   final String? activity;
 
@@ -121,9 +116,6 @@ class ConversationList extends StatelessWidget {
   }
 }
 
-/// One entry: a message in its own shape, or a folded run of tool calls. New ones fade and rise 8 dp over 200 ms;
-/// Reduce Motion keeps only the fade, and a message that was already there stays still (a fading bubble is drawn offscreen,
-/// which costs frames while scrolling or while the keyboard resizes the list).
 class ChatEntryView extends StatefulWidget {
   const ChatEntryView({
     super.key,
@@ -140,8 +132,6 @@ class ChatEntryView extends StatefulWidget {
 }
 
 class _ChatEntryViewState extends State<ChatEntryView> {
-  /// Only a message that just arrived springs in; one that was already there (history, scrolling, the keyboard
-  /// resizing the list) stays still, because a fading bubble is drawn offscreen, which costs frames.
   late final bool _fresh = switch (widget.entry) {
     MessageEntry(:final ChatMessage message) => DateTime.now().difference(message.time).inSeconds < 4,
     ToolGroupEntry(:final List<ChatMessage> messages) => DateTime.now().difference(messages.last.time).inSeconds < 4,
@@ -160,7 +150,6 @@ class _ChatEntryViewState extends State<ChatEntryView> {
       },
     };
     if (!_fresh) return content;
-    // Yours come in from the right, Claude's from the left.
     final bool mine = entry is MessageEntry && entry.message.role == ChatRole.user;
     return Entrance(offset: mine ? const Offset(28, 16) : const Offset(-20, 16), child: content);
   }

@@ -1,5 +1,3 @@
-//! Ports of `MoveAllPlanTests`, plus the stop and resume plans built from a move.
-
 use super::super::plan::{Command, Expect, Step};
 use super::*;
 use crate::sessions::agent::sample;
@@ -33,7 +31,6 @@ fn job_ids(plan: &MoveAllPlan) -> Vec<&str> {
     plan.jobs.iter().map(|j| j.job_id.as_str()).collect()
 }
 
-// Port of MoveAllPlanTests.testAccountInALane.
 #[test]
 fn account_in_a_lane() {
     let lanes = [
@@ -70,7 +67,6 @@ fn account_in_a_lane() {
     assert_eq!(plan.signed_out, ["a-term"]);
 }
 
-// Port of MoveAllPlanTests.testMainAccountOnlyGathersLaneSessions.
 #[test]
 fn main_account_only_gathers_lane_sessions() {
     let lanes = [
@@ -84,13 +80,11 @@ fn main_account_only_gathers_lane_sessions() {
     assert_eq!(plan.switch_main, None);
 }
 
-// Port of MoveAllPlanTests.testNothingToDo.
 #[test]
 fn nothing_to_do() {
     let lanes = [lane("a", "/lanes/a", "acct-a")];
     let agents = [job("main-job", None, "m1")];
     assert!(MoveAllPlan::make(&agents, &lanes, Some("main"), None).is_empty());
-    // A free account: only the main login switches.
     let free = MoveAllPlan::make(&agents, &lanes, Some("main"), Some("acct-free"));
     assert_eq!(free.switch_main.as_deref(), Some("acct-free"));
     assert_eq!(free.close_lane, None);
@@ -109,7 +103,6 @@ fn a_job_without_a_transcript_stays() {
 #[test]
 fn each_job_stops_in_its_lane_and_resumes_on_the_main_login_with_its_flags() {
     let tmp = TempDir::new("moveall");
-    // The lane folder is a temp one, so lanes.json points at it.
     let lane_dir = tmp.path("lane-b");
     let lane_path = lane_dir.to_string_lossy().into_owned();
     tmp.write(

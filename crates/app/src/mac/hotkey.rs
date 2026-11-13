@@ -1,12 +1,3 @@
-//! ⌘⇧P from anywhere, through Carbon's hot key API (the Swift `GlobalHotKey`). A registered hot
-//! key needs no Accessibility permission and sees no other key press: macOS delivers only that
-//! combination, as a Carbon event on the main run loop. The other systems have no implementation
-//! yet (`search::hotkey::NoHotKey`).
-//!
-//! Carbon has no `objc2` crate, so the five functions are declared here and the framework is
-//! linked by name. Each press reaches the handler registered for its id; the handlers live in a
-//! thread-local, since Carbon calls back on the main thread and GPUI's contexts aren't `Send`.
-
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::ffi::c_void;
@@ -25,7 +16,6 @@ type EventTargetRef = *mut c_void;
 type EventHandlerCallRef = *mut c_void;
 type EventHandlerUPP = extern "C" fn(EventHandlerCallRef, EventRef, *mut c_void) -> OSStatus;
 
-/// Carbon's `EventHotKeyID`: who registered the key and which one it is.
 #[repr(C)]
 #[derive(Clone, Copy)]
 struct EventHotKeyID {
@@ -33,7 +23,6 @@ struct EventHotKeyID {
     id: u32,
 }
 
-/// Carbon's `EventTypeSpec`: the class and kind of event a handler takes.
 #[repr(C)]
 struct EventTypeSpec {
     event_class: u32,
@@ -43,7 +32,6 @@ struct EventTypeSpec {
 #[link(name = "Carbon", kind = "framework")]
 extern "C" {
     fn GetApplicationEventTarget() -> EventTargetRef;
-    /// `ItemCount` and `ByteCount` are `unsigned long`: `usize` on every Mac this builds for.
     fn InstallEventHandler(
         target: EventTargetRef,
         handler: EventHandlerUPP,
@@ -72,7 +60,6 @@ extern "C" {
     ) -> OSStatus;
 }
 
-/// A four-character code as Carbon reads it.
 const fn four(code: &[u8; 4]) -> u32 {
     u32::from_be_bytes(*code)
 }
@@ -81,24 +68,19 @@ const K_EVENT_CLASS_KEYBOARD: u32 = four(b"keyb");
 const K_EVENT_HOT_KEY_PRESSED: u32 = 5;
 const K_EVENT_PARAM_DIRECT_OBJECT: u32 = four(b"----");
 const TYPE_EVENT_HOT_KEY_ID: u32 = four(b"hkid");
-/// Our hot keys' signature, so another library's in this process are left alone.
 const SIGNATURE: u32 = four(b"NTCL");
 const K_VK_ANSI_P: u32 = 0x23;
 const CMD_KEY: u32 = 1 << 8;
 const SHIFT_KEY: u32 = 1 << 9;
 const NO_ERR: OSStatus = 0;
-/// Carbon's `eventNotHandledErr`: "not for me, pass it on". Anything else, `noErr` included, says
-/// the event was handled, and Carbon stops offering it to the other handlers in the process.
 const EVENT_NOT_HANDLED_ERR: OSStatus = -9874;
 
 thread_local! {
-    /// What to call for each registered id, on the main thread.
     static HANDLERS: RefCell<HashMap<u32, Rc<dyn Fn()>>> = RefCell::new(HashMap::new());
     static INSTALLED: Cell<bool> = const { Cell::new(false) };
     static NEXT_ID: Cell<u32> = const { Cell::new(1) };
 }
 
-/// Carbon's callback for a press: reads which key it was and calls its handler.
 extern "C" fn on_hot_key(_: EventHandlerCallRef, event: EventRef, _: *mut c_void) -> OSStatus {
     let mut id = EventHotKeyID {
         signature: 0,
@@ -118,7 +100,6 @@ extern "C" fn on_hot_key(_: EventHandlerCallRef, event: EventRef, _: *mut c_void
         )
     };
     let handler = if is_ours(status, id) {
-        // Cloned out of the map first: a handler may register or drop a key itself.
         HANDLERS.with(|h| h.borrow().get(&id.id).cloned())
     } else {
         None
@@ -130,13 +111,10 @@ extern "C" fn on_hot_key(_: EventHandlerCallRef, event: EventRef, _: *mut c_void
     reply(handled)
 }
 
-/// Whether a hot key event, read with `status`, names one of ours.
 fn is_ours(status: OSStatus, id: EventHotKeyID) -> bool {
     status == NO_ERR && id.signature == SIGNATURE
 }
 
-/// What the handler tells Carbon: handled only when one of our keys was pressed and its handler
-/// ran. A press of another library's key in this process is passed on, not swallowed.
 fn reply(handled: bool) -> OSStatus {
     if handled {
         NO_ERR
@@ -145,7 +123,6 @@ fn reply(handled: bool) -> OSStatus {
     }
 }
 
-/// Installs the one Carbon handler for hot key presses, the first time.
 fn install_handler() -> Result<(), String> {
     if INSTALLED.with(Cell::get) {
         return Ok(());
@@ -175,7 +152,6 @@ fn install_handler() -> Result<(), String> {
     Ok(())
 }
 
-/// A system-wide key over Carbon.
 pub struct CarbonHotKey {
     key_code: u32,
     modifiers: u32,
@@ -183,7 +159,6 @@ pub struct CarbonHotKey {
 }
 
 impl CarbonHotKey {
-    /// The search panel's key.
     pub fn command_shift_p() -> CarbonHotKey {
         CarbonHotKey {
             key_code: K_VK_ANSI_P,
@@ -198,7 +173,6 @@ impl HotKey for CarbonHotKey {
         self.label
     }
 
-    /// Registers the key. `Err` when another app already holds it, or off the main thread.
     fn register(&self, on_press: Box<dyn Fn()>) -> Result<Box<dyn Registration>, String> {
         MainThreadMarker::new().ok_or("a hot key is registered on the main thread")?;
         install_handler()?;
@@ -233,7 +207,6 @@ impl HotKey for CarbonHotKey {
     }
 }
 
-/// A registered key; dropping it unregisters.
 struct CarbonRegistration {
     id: u32,
     hot_key: EventHotKeyRef,
@@ -255,7 +228,6 @@ mod tests {
 
     #[test]
     fn the_codes_are_carbons() {
-        // Four-character codes read big-endian, as Carbon's headers spell them.
         assert_eq!(K_EVENT_CLASS_KEYBOARD, 0x6B65_7962);
         assert_eq!(TYPE_EVENT_HOT_KEY_ID, 0x686B_6964);
         assert_eq!(K_EVENT_PARAM_DIRECT_OBJECT, 0x2D2D_2D2D);
@@ -265,7 +237,6 @@ mod tests {
         assert_eq!((key.key_code, key.modifiers), (0x23, 0x300));
         assert_eq!(std::mem::size_of::<EventHotKeyID>(), 8);
         assert_eq!(EVENT_NOT_HANDLED_ERR, -9874);
-        // Nothing is registered here: that needs the running app and takes the real shortcut.
     }
 
     #[test]
@@ -281,7 +252,6 @@ mod tests {
         assert!(is_ours(NO_ERR, ours));
         assert!(!is_ours(NO_ERR, theirs), "another library's key");
         assert!(!is_ours(-50, ours), "a parameter that could not be read");
-        // Handled: noErr. Not ours, or no handler left for it: pass it on.
         assert_eq!(reply(true), NO_ERR);
         assert_eq!(reply(false), EVENT_NOT_HANDLED_ERR);
     }

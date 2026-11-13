@@ -1,7 +1,3 @@
-//! Ported from `MachinesMergeTests.swift` (first half): the target, the refusals, the fetch, the
-//! refs, the check's shell and the happy path, against a scripted runner that starts nothing.
-//! The guards, retry and undo are in `tests_merge_b.rs`.
-
 use std::collections::BTreeMap;
 
 use super::fakes_jobs::{bad, machine, ok, repo, RuleRunner};
@@ -19,7 +15,6 @@ pub(super) fn plan() -> MergePlan {
     MergePlan {
         home: "/Users/me".into(),
         merge_root: "/data/notchling/daemon/machines/merge".into(),
-        // no SHELL: the check runs in /bin/zsh
         environment: BTreeMap::from([("PATH".to_string(), "/usr/bin:/bin".to_string())]),
         git: "/usr/bin/git".into(),
         gh: "/usr/bin/gh".into(),
@@ -42,7 +37,6 @@ pub(super) fn main_listing() -> &'static str {
     "worktree /Users/me/code/app\nHEAD aaa\nbranch refs/heads/main\n"
 }
 
-/// `git -C <target> <rest>`
 pub(super) fn t(rest: &str) -> String {
     format!("git -C {TARGET} {rest}")
 }
@@ -50,7 +44,6 @@ pub(super) fn t(rest: &str) -> String {
 type Rules = Vec<(&'static str, CommandResult)>;
 type Queues = Vec<(&'static str, Vec<CommandResult>)>;
 
-/// Rules for a run where every step passes.
 fn happy_rules() -> Rules {
     vec![
         ("worktree list", ok(main_listing())),
@@ -65,7 +58,6 @@ fn happy_rules() -> Rules {
     ]
 }
 
-/// `rev-parse HEAD` answers the sha before the merge, then the merge commit (also at each re-check).
 pub(super) fn happy_queues() -> Queues {
     vec![(
         "rev-parse HEAD",
@@ -86,8 +78,6 @@ pub(super) fn merge(e: &ReadyEntry, runner: &RuleRunner) -> MergeOutcome {
 pub(super) fn any_line(runner: &RuleRunner, f: impl Fn(&str) -> bool) -> bool {
     runner.lines().iter().any(|l| f(l))
 }
-
-// Target
 
 #[test]
 fn merge_target_prefers_clean_main_worktree() {
@@ -149,8 +139,6 @@ fn own_worktree_is_made_under_the_data_folder() {
     assert_eq!(lines[4], format!("git -C {own} status --porcelain"));
     assert!(!lines.join("").contains('~'));
 }
-
-// Refusals
 
 #[test]
 fn dirty_main_refuses() {
@@ -218,8 +206,6 @@ fn moved_branch_refuses() {
         || l.starts_with("gh ")));
 }
 
-// Branch names (C16)
-
 #[test]
 fn a_branch_that_looks_like_an_option_never_reaches_git() {
     for branch in ["-x", "--upload-pack=sh", "", "a b", "a\nb", "a\u{7f}b"] {
@@ -238,7 +224,6 @@ fn a_branch_that_looks_like_an_option_never_reaches_git() {
 
 #[test]
 fn git_must_accept_the_branch_name_and_print_it_back_unchanged() {
-    // refused by git
     let runner = happy(
         vec![(
             "check-ref-format",
@@ -257,7 +242,6 @@ fn git_must_accept_the_branch_name_and_print_it_back_unchanged() {
     );
     assert!(!o.fetched);
 
-    // accepted, but expanded to another name (`@{-1}` is "the branch before this one")
     let runner = happy(vec![("check-ref-format", ok("some-other-branch\n"))], None);
     let o = merge(&entry(), &runner);
     assert_eq!(
@@ -269,10 +253,6 @@ fn git_must_accept_the_branch_name_and_print_it_back_unchanged() {
         || l.contains("push")));
 }
 
-// Fetch over ssh (C20)
-
-/// BatchMode and a short connect timeout: a prompt or a dead host must not hold the card for the
-/// fetch's 300 s.
 #[test]
 fn the_fetch_from_the_machine_runs_with_batch_mode_ssh() {
     let runner = happy(vec![], None);
@@ -292,7 +272,6 @@ fn the_fetch_from_the_machine_runs_with_batch_mode_ssh() {
             "ssh -o BatchMode=yes -o ConnectTimeout=8".to_string()
         )]
     );
-    // the other fetch is origin's; it keeps whatever ssh config the user has
     let origin = recs
         .iter()
         .find(|r| r.argv.contains(&"fetch".to_string()) && r.argv.contains(&"origin".to_string()))
@@ -300,7 +279,6 @@ fn the_fetch_from_the_machine_runs_with_batch_mode_ssh() {
     assert!(origin.env.is_empty());
 }
 
-/// The worktree path is the machine's word, and it becomes part of an ssh URL.
 #[test]
 fn a_worktree_path_that_is_not_absolute_never_reaches_git() {
     for path in [
@@ -330,7 +308,6 @@ fn a_worktree_path_that_is_not_absolute_never_reaches_git() {
     }
 }
 
-/// An absolute path with a quote, a space, a `;` or a `..` is not passed to a command either.
 #[test]
 fn a_worktree_path_with_odd_characters_never_reaches_git() {
     for path in [
@@ -352,7 +329,6 @@ fn a_worktree_path_with_odd_characters_never_reaches_git() {
     }
 }
 
-/// An issue number from a machine must be a positive integer: `-5` would read as an option.
 #[test]
 fn an_issue_number_that_is_not_positive_never_reaches_a_command() {
     for issue in [0, -1, -5] {
@@ -365,7 +341,6 @@ fn an_issue_number_that_is_not_positive_never_reaches_a_command() {
     }
 }
 
-/// The commit is merged only when it is what git printed for the fetched ref.
 #[test]
 fn a_commit_that_is_not_what_git_printed_is_never_merged() {
     for commit in ["--upload-pack=x", "", "main", "abc"] {
@@ -381,8 +356,6 @@ fn a_commit_that_is_not_what_git_printed_is_never_merged() {
         assert!(!any_line(&runner, |l| l.contains(" merge --no-ff")));
     }
 }
-
-// Main ahead of origin (C18)
 
 #[test]
 fn unpushed_main_refuses_without_suggesting_a_push() {

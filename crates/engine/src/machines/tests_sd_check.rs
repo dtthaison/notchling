@@ -1,6 +1,3 @@
-//! Tests of the setup check, its create-labels Fix and the Running switch (Swift
-//! `MachinesSDWorkerStepsTests`, last part).
-
 use super::fakes_b::*;
 use super::registry::Machine;
 use super::runner::CommandResult;
@@ -46,8 +43,6 @@ const CHECK_ROWS: &str = r#"
  {"name":"token expiry","ok":false,"detail":"9 days left"},
  {"name":"com.sd.worker","ok":false,"detail":"the LaunchAgent is not loaded"}]"#;
 
-// MARK: sd worker setup --check
-
 #[test]
 fn setup_check_rows_become_sub_steps() {
     let m1 = mac("m1");
@@ -68,7 +63,6 @@ fn setup_check_rows_become_sub_steps() {
     let ok = check(&StepId::SD_CHECK, &m1, &format!("{pass_rows}\n@@exit 0\n"));
     assert_eq!(ok.state, CheckState::Pass("all 2 checks passed".into()));
 
-    // only the Running row fails: exit 4, but nothing the user has to fix here
     let only_running = r#"[{"name":"tools","ok":true,"detail":"x"},{"name":"com.sd.worker","ok":false,"detail":"not loaded"}]"#;
     let idle = check(
         &StepId::SD_CHECK,
@@ -98,7 +92,6 @@ fn setup_check_rows_become_sub_steps() {
         CheckState::Fail("token_file /x is empty".into())
     );
 
-    // exit 4 with every failing row being the uncounted one is still a fail when no row is named
     let none_named = check(
         &StepId::SD_CHECK,
         &m1,
@@ -138,8 +131,6 @@ fn setup_check_bounds_what_the_machine_sends() {
         .is_fail());
 }
 
-/// A row's text and a failure line are masked before they are cut to 300 characters: the cut falls
-/// inside the token.
 #[test]
 fn setup_check_masks_what_the_machine_says_before_it_cuts_it() {
     let token = long_token();
@@ -182,8 +173,6 @@ fn setup_check_masks_what_the_machine_says_before_it_cuts_it() {
     assert_no_fragment(&token, text);
     assert!(text.contains(marker), "{text}");
 }
-
-// MARK: sd 1.19.3: the check is read-only, its Fix creates the labels
 
 const LABEL_ROWS: &str = r#"
 [{"name":"tools","ok":true,"detail":"claude, git, gh"},
@@ -289,7 +278,6 @@ fn the_create_labels_fix_fails_on_a_label_row_and_asks_for_a_check_when_other_ro
         bad.message
     );
 
-    // the command itself exits non-zero: the first line it said
     let (failed, _) = fix_with(&mac("m1"), mac_1193(), |r| {
         r.runner.on(
             |_| true,
@@ -299,8 +287,6 @@ fn the_create_labels_fix_fails_on_a_label_row_and_asks_for_a_check_when_other_ro
     assert_eq!(failed.message, "ssh: connect timed out");
 }
 
-/// sd 1.19.3 is the first with `--create-labels`: an older sd on this Mac (which is the one copied
-/// to the machine) stops the Fix before any command.
 #[test]
 fn the_create_labels_fix_needs_sd_1_19_3_on_this_mac() {
     let m1 = mac("m1");
@@ -372,8 +358,6 @@ fn a_python_or_sd_path_from_a_machine_with_shell_characters_never_runs() {
     }
 }
 
-// MARK: Running
-
 #[cfg(unix)]
 fn uid() -> String {
     let out = std::process::Command::new("/usr/bin/id")
@@ -383,7 +367,6 @@ fn uid() -> String {
     String::from_utf8_lossy(&out.stdout).trim().to_string()
 }
 
-/// Runs the macOS toggle scripts with `/bin/sh` and a fake `launchctl` that logs its arguments.
 #[cfg(unix)]
 fn run_toggle(on: bool, loaded: bool) -> Vec<String> {
     let dir = TempDir::new("toggle");
@@ -515,7 +498,6 @@ fn running_toggle_scripts_and_state() {
             "{off:?}"
         );
     }
-    // macOS: on is loaded and not disabled; a label print-disabled doesn't list counts as enabled
     let line = |state: &str| format!("\t\"com.sd.worker\" => {state}\n");
     assert_eq!(
         check(&StepId::RUNNING, &m1, "loaded\n").state,
@@ -545,7 +527,6 @@ fn running_toggle_scripts_and_state() {
         );
     }
 
-    // the toggle is a click's switch, not a Fix
     assert!(matches!(
         step_of(&vps, &StepId::RUNNING).fix,
         StepFix::Toggle { needs_admin: true }

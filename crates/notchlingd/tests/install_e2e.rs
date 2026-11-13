@@ -1,7 +1,3 @@
-//! The install ops through a real daemon over a temp data root: the switch is off, so the plan is
-//! readable and `install.apply` / `install.remove` answer the dry run and write nothing. The
-//! daemon sees a fixture root and a fake `HOME`, never the real `~/.claude`, `~/.codex` or
-//! `~/.gemini`, and is stopped even when an assert fails.
 #![cfg(unix)]
 
 use notchling_local_api::{ops, Client, ClientKind, Tier};
@@ -18,7 +14,6 @@ impl Drop for Dir {
     }
 }
 
-/// A short folder under /tmp (socket paths are capped at 104 bytes on macOS).
 fn scratch(tag: &str) -> Dir {
     let dir = PathBuf::from(format!("/tmp/nl-inst-{tag}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
@@ -41,7 +36,6 @@ impl Drop for Daemon {
     }
 }
 
-/// Every file under `dir`, relative and sorted.
 fn tree(dir: &Path) -> Vec<String> {
     fn walk(dir: &Path, base: &Path, out: &mut Vec<String>) {
         let Ok(read) = std::fs::read_dir(dir) else {
@@ -56,7 +50,6 @@ fn tree(dir: &Path) -> Vec<String> {
                 .unwrap()
                 .to_string_lossy()
                 .into_owned();
-            // The socket, its lock and the audit log are the daemon's own.
             if !rel.starts_with("root/notchling") {
                 out.push(rel);
             }
@@ -115,10 +108,8 @@ fn a_real_daemon_plans_but_with_the_switch_off_writes_nothing() {
     );
     let file = plan["plan"]["hooks"]["file"].as_str().unwrap();
     assert_eq!(Path::new(file), root.join("claude/settings.json"));
-    // The daemon's own program is what the hook would run.
     let change = plan["plan"]["hooks"]["changes"][0].as_str().unwrap();
     assert!(change.contains(" hook (timeout 300 s)"), "{change}");
-    // The fake home holds no tool but Claude Code, so only its skills would be written.
     let skills = plan["plan"]["skills"].as_array().unwrap();
     assert!(skills
         .iter()
@@ -143,7 +134,6 @@ fn a_real_daemon_plans_but_with_the_switch_off_writes_nothing() {
         settings
     );
 
-    // Each app-tier call is on the record.
     let audit = std::fs::read_to_string(root.join("notchling/audit.jsonl")).unwrap();
     assert!(audit.contains("\"op\":\"install.apply\""), "{audit}");
     assert!(audit.contains("\"op\":\"install.plan\""), "{audit}");

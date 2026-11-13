@@ -1,23 +1,13 @@
-//! Keep the computer awake, and sleep and wake events.
-//!
-//! macOS: an IOKit power assertion held by [`AwakeGuard`], and IOKit's system power notices for
-//! [`PowerEvents`], both through plain C calls (no process is started, no AppKit needed). Other
-//! systems return [`Error::Unsupported`] until their implementation lands.
-
 use std::sync::mpsc::Receiver;
 
 use crate::{Error, Result};
 
-/// A sleep or wake notice.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PowerEvent {
-    /// The system is about to sleep.
     WillSleep,
-    /// The system has woken.
     DidWake,
 }
 
-/// Keeps the machine from idle-sleeping while it is alive. Dropping it releases the hold.
 #[derive(Debug)]
 pub struct AwakeGuard {
     #[cfg(target_os = "macos")]
@@ -25,22 +15,17 @@ pub struct AwakeGuard {
 }
 
 impl AwakeGuard {
-    /// Holds the system awake; with `keep_display_on` the display stays on too. `reason` is shown
-    /// by `pmset -g assertions`.
     pub fn acquire(reason: &str, keep_display_on: bool) -> Result<AwakeGuard> {
         imp::acquire(reason, keep_display_on)
     }
 }
 
-/// A stream of [`PowerEvent`]s. Dropping it stops the notices.
 pub struct PowerEvents {
     events: Receiver<PowerEvent>,
-    // Held so the watcher thread stops on drop.
     _stop: imp::Monitor,
 }
 
 impl PowerEvents {
-    /// Starts listening for sleep and wake.
     pub fn start() -> Result<PowerEvents> {
         let (events, monitor) = imp::monitor()?;
         Ok(PowerEvents {
@@ -49,7 +34,6 @@ impl PowerEvents {
         })
     }
 
-    /// The channel the notices arrive on.
     pub fn events(&self) -> &Receiver<PowerEvent> {
         &self.events
     }
@@ -98,7 +82,6 @@ mod imp {
         }
     }
 
-    /// What an IOKit system power message means for us.
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub(super) enum Message {
         CanSleep,
@@ -132,7 +115,6 @@ mod imp {
         // SAFETY: `refcon` is the `State` the monitor thread keeps alive until it deregisters.
         let state = unsafe { &*(refcon as *const State) };
         let allow = || {
-            // Never hold up sleep: say yes to the question and to the notice.
             // SAFETY: plain call with the port IOKit gave us and the id it passed in.
             unsafe {
                 IOAllowPowerChange(state.root_port.load(Ordering::SeqCst), argument as isize)
@@ -151,7 +133,6 @@ mod imp {
         }
     }
 
-    /// The thread that runs IOKit's notification source; stopped and joined on drop.
     pub(super) struct Monitor {
         stop: Arc<AtomicBool>,
         run_loop: usize,
@@ -227,11 +208,10 @@ mod imp {
         };
         let _ = ready.send(Ok(run_loop as usize));
         while !stop.load(Ordering::SeqCst) {
-            // A short slice so a missed stop still ends the loop; the source wakes it sooner.
             // SAFETY: plain call on this thread's run loop.
             let code = unsafe { CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.5, 0) };
             if code == 1 {
-                break; // kCFRunLoopRunFinished
+                break;
             }
         }
         // SAFETY: tears down exactly what was set up above, once.
@@ -252,7 +232,6 @@ mod imp {
             assert_eq!(classify(0xe000_0270), Some(Message::CanSleep));
             assert_eq!(classify(0xe000_0280), Some(Message::WillSleep));
             assert_eq!(classify(0xe000_0300), Some(Message::PoweredOn));
-            // WillPowerOn comes before HasPoweredOn; the system isn't up yet.
             assert_eq!(classify(0xe000_0320), None);
             assert_eq!(classify(0), None);
         }
@@ -312,7 +291,6 @@ mod tests {
             Err(Error::Unsupported(_))
         ));
         assert!(matches!(PowerEvents::start(), Err(Error::Unsupported(_))));
-        // Keep the imports used on every system.
         let _ = (Duration::ZERO, Instant::now());
     }
 }

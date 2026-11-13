@@ -1,38 +1,3 @@
-//! Milestone 6's Claude Code accounts and lanes (E8a) as daemon ops, over
-//! `notchling_engine::accounts::claude` and `notchling_engine::lanes`. Built and switched off:
-//! while `accounts` is off every op but the two list reads answers `forbidden` with
-//! [`ACCOUNTS_OFF`], and nothing reads the Keychain, a token or the network, or writes a file.
-//! The two reads then use the daemon's own data only (the saved accounts list, a document in
-//! `notchling.db` or, until a save moves it in, `<data>/daemon/accounts.json`; and `lanes.json`),
-//! and write nothing, not even a database.
-//! Besides the check at the top of [`AccountsOps::call`], the store's Keychain runner and HTTP
-//! client are gated on the switch too ([`GatedSecurity`], [`GatedHttp`]), so a path that forgot
-//! the check still reaches nothing.
-//!
-//! | Op | Tier | Args | Reply |
-//! | --- | --- | --- | --- |
-//! | `accounts.list` | app | `{sync?: bool}` | `{on, active, accounts: [{id, email, plan, needsLogin, lane}]}`; `sync` reads the live login first (switch on) |
-//! | `accounts.switch` | app | `{id}` | as `accounts.list` |
-//! | `accounts.add.begin` | app | `{}` | `{login, url}`: open `url` in the browser |
-//! | `accounts.add.finish` | app | `{login, cancel?: bool}` | `{login, state: "waiting" \| "added" \| "failed" \| "cancelled", account?, error?}`, after up to 4 s |
-//! | `accounts.remove` | app | `{id}` | as `accounts.list` |
-//! | `accounts.move_all` | app | `{target: id \| null, dryRun?: bool}` | dry run `{plan: {jobs, closeLane, switchMain, signedOut}}`; else `{closedLane, switchedTo, moved, errors}` |
-//! | `accounts.result` | app | `{ticket}` | the op's own reply, after up to 4 s; `{state: "working", ticket}` while it still runs |
-//! | `lanes.list` | app | `{}` | `{lanes: [{name, path, accountID, email, folder, startCommand}]}` |
-//! | `lanes.create` | app | `{account}` | `{lane}` |
-//! | `lanes.remove` | app | `{name}` | `{removed: bool}` |
-//! | `lanes.switch` | app | `{name, account}` | `{lane}` |
-//!
-//! Every op that reads the Keychain or the network (`accounts.list {sync}`, switch, remove, Move
-//! All, the lane ops) runs on its own thread ([`crate::accounts_late`]): one that takes more than
-//! 4.5 s answers `{state: "working", ticket, op}` (a sync answers the list as last read, with
-//! `syncing: true`), and its reply comes from `accounts.result` and as `accounts.done`.
-//!
-//! A refusal by the store (an account in a lane, no saved login, a Keychain error) is `failed` with
-//! words for the user. After a change the list goes out on `accounts` as `accounts.changed`; a
-//! sign-in's end as `accounts.add.ended`. Move All stops and resumes lane sessions too, so with any
-//! to move it needs `acting` on as well.
-
 use crate::accounts_late::{self, ticket_arg, Tickets, REPLY_WAIT, RESULT_WAIT};
 use crate::accounts_signin::{Added, SignIns};
 use crate::acting::ACTING_OFF;
@@ -58,7 +23,6 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
-/// Every op here.
 pub const ACCOUNT_OPS: [&str; 11] = [
     ops::ACCOUNTS_LIST,
     ops::ACCOUNTS_SWITCH,
@@ -73,10 +37,8 @@ pub const ACCOUNT_OPS: [&str; 11] = [
     ops::LANES_SWITCH,
 ];
 
-/// How long `accounts.add.finish` waits, under a client's 5 s call timeout.
 pub const FINISH_WAIT: Duration = Duration::from_millis(4000);
 
-/// The Keychain only while `accounts` is on.
 pub struct GatedSecurity {
     pub flag: Arc<SwitchFlag>,
     pub inner: Arc<dyn SecurityRunner>,
@@ -91,7 +53,6 @@ impl SecurityRunner for GatedSecurity {
     }
 }
 
-/// The network only while `accounts` is on.
 pub struct GatedHttp {
     pub flag: Arc<SwitchFlag>,
     pub inner: Arc<dyn HttpClient>,
@@ -109,10 +70,8 @@ impl HttpClient for GatedHttp {
     }
 }
 
-/// 64 random bytes for a sign-in's verifier and state.
 pub type Random = Arc<dyn Fn() -> Option<[u8; 64]> + Send + Sync>;
 
-/// What an op's thread needs: cheap to clone.
 #[derive(Clone)]
 struct Ctx {
     flag: Arc<SwitchFlag>,
@@ -138,7 +97,6 @@ impl AccountsOps {
     ) -> AccountsOps {
         let signins = Arc::new(SignIns::default());
         let off = signins.clone();
-        // A sign-in listening when the switch goes off stops at once.
         flag.subscribe(move |on| {
             if !on {
                 off.cancel_all();
@@ -158,8 +116,6 @@ impl AccountsOps {
         }
     }
 
-    /// The daemon's: the real Keychain and network, both gated on `flag`. Under a fixture root
-    /// neither is reached, whatever the switch says.
     pub fn for_daemon(layout: &Layout, flag: Arc<SwitchFlag>, room: Arc<dyn Room>) -> AccountsOps {
         let (runner, http): (Arc<dyn SecurityRunner>, Arc<dyn HttpClient>) = if layout.fixture {
             (
@@ -178,7 +134,6 @@ impl AccountsOps {
                 }),
                 user: user_name(),
             },
-            // Only to undo a half-done switch; never to read or change a login otherwise.
             undo_keys: Keys {
                 runner,
                 user: user_name(),
@@ -201,23 +156,19 @@ impl AccountsOps {
         )
     }
 
-    /// The session ops, for Move All's stops and resumes. Once.
     pub fn attach_acting(&self, acting: Arc<ActingOps>) {
         let _ = self.ctx.acting.set(acting);
     }
 
-    /// The store (the limits watcher asks it for tokens).
     pub fn store(&self) -> Arc<ClaudeAccounts> {
         self.ctx.store.clone()
     }
 
-    /// How long a call waits for a slow op before answering `working` (tests shorten it).
     pub fn set_reply_wait(&self, wait: Duration) {
         self.reply_wait_ms
             .store(wait.as_millis() as u64, Ordering::SeqCst);
     }
 
-    /// Runs `job` on its own thread; see [`crate::accounts_late`].
     fn slow(
         &self,
         op: &'static str,
@@ -273,7 +224,6 @@ impl Ctx {
         json!({"lanes": lanes})
     }
 
-    /// Publishes the list after a change (no Keychain: the list file and the last known login).
     fn changed(&self) {
         let mut data = self.snapshot_json(&self.store.snapshot());
         data["lanes"] = self.lanes_json()["lanes"].clone();
@@ -323,7 +273,6 @@ impl Ctx {
         if !accounts.errors.is_empty() {
             errors.insert("accounts".into(), accounts.errors.join(" "));
         }
-        // The sessions still resume, on the main login's current account, rather than stay stopped.
         let mut moved = Vec::new();
         for job in stopped {
             match acting.run_raw(&job.resume) {
@@ -353,7 +302,6 @@ fn lane_json(lane: &notchling_engine::lanes::Lane) -> Value {
     v
 }
 
-/// The login name Keychain items are filed under (`NSUserName()`).
 fn user_name() -> String {
     ["USER", "LOGNAME"]
         .iter()
@@ -375,8 +323,6 @@ impl OpGroup for AccountsOps {
                 if !(on && sync) {
                     return Ok(ctx.snapshot_json(&ctx.store.snapshot()));
                 }
-                // A sync that outlasts the call answers the list as last read; the fresh one
-                // follows as `accounts.changed`.
                 let reply = self.slow(ops::ACCOUNTS_LIST, |ctx| {
                     let snap = ctx.store.sync().map_err(failed)?;
                     ctx.changed();

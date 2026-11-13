@@ -1,50 +1,3 @@
-//! E9 in the daemon: the Secret Vault as a service of its own, behind the `vault` switch
-//! (decision 0007: the vault is a separate service inside the daemon, with its own checks).
-//!
-//! While the switch is off (every start, until the app's `settings.set_switch`), every op below
-//! answers `forbidden` with [`VAULT_OFF`], nothing reads the Keychain item or the list, values
-//! read earlier are dropped, and no socket beyond the daemon's own is bound.
-//!
-//! | Op | Tier | Args | Reply |
-//! | --- | --- | --- | --- |
-//! | `vault.find` | agent | `{query?}` | `{entries: [Entry], saved: ["github (api.github.com)", …]}` |
-//! | `vault.use` | agent | `{names: [..], folder, command}` | `{env: {VAR: value}, hide: {value: "[secret:name]"}}` |
-//! | `vault.request` | agent | `{name, kind?, url?, note?, how?, expires?, reason?}` | `{entry: Entry}` once saved |
-//! | `vault.list` | app | `{}` | `{entries: [Entry]}` |
-//! | `vault.save` | app | `{entry: Entry, value?: {username?, secret}, replacing?: name, request?: id}` | `{entry, answered}` |
-//! | `vault.remove` | app | `{name}` | `{removed}` |
-//! | `vault.approval.answer` | app | `{id, decision: "deny"\|"once"\|"always"}` | `{answered}` |
-//! | `vault.request.cancel` | app | `{id}` | `{answered}` |
-//! | `vault.pending` | app | `{}` | `{approvals: [..], requests: [..]}`, the pending events below |
-//!
-//! The list is the `daemon/vault` document in `notchling.db` (the daemon's own `vault.json`
-//! moves in once; the Swift app's stays its own); `Entry` is its shape: `{name, kind, note, url?, howTo?, expires?, userVar,
-//! secretVar, ask?, updated}`. No reply but `vault.use`'s carries a value, and no event ever does.
-//!
-//! **Approval.** `vault.use` of an entry marked ask-first publishes `vault.approval.pending {id,
-//! names, entries, command, folder, verified}` on the `vault` topic (`command` and `folder` as the
-//! caller claims them, `verified` what the kernel says about it: see [`crate::vault_caller`]), which only the app tier may follow, and
-//! waits up to [`APPROVAL_WAIT`] for `vault.approval.answer`. The id is 128 random bits. The
-//! answer must come from an app-tier client that said hello as the app; an agent-tier client is
-//! refused by the server before this module sees the call. With no app following `vault` the use
-//! is denied at once, and a wait ends denied when the app leaves, the switch goes off or the
-//! daemon stops. Always Allow turns ask-first off for those entries. A denial is `needs_approval`
-//! ("The user didn't allow it."), which `notchling secret` exits 3 on.
-//!
-//! **Requests.** `vault.request` publishes `vault.request.pending {id, request, entry, existing,
-//! changes}` (the form, filled in: an existing entry with the passed fields laid over it, and what
-//! that changed) and waits up to [`REQUEST_WAIT`] for the app's `vault.save {…, request: id}` or
-//! `vault.request.cancel {id}`. A cancel is `needs_approval` ("The user cancelled.").
-//!
-//! **Reconnecting.** `vault.pending` answers the `vault.approval.pending` and
-//! `vault.request.pending` events of the waits still open, oldest first, as they were sent: an
-//! app that (re)connects asks it after following `vault`, so nothing that waits for the user is
-//! missed.
-//!
-//! Errors carry names and fixed texts only: never a value, never a parse error that could quote
-//! one. Agent-tier calls are written to the audit log here (op, tier, peer, outcome and the
-//! names used); the server logs every app-tier call.
-
 use crate::acting_ops::Room;
 use crate::layout::Layout;
 use crate::op_group::OpGroup;
@@ -65,20 +18,16 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::Duration;
 
-/// How long a use waits for the user's approval, and a request for the form.
 pub const APPROVAL_WAIT: Duration = Duration::from_secs(300);
 pub const REQUEST_WAIT: Duration = Duration::from_secs(540);
-/// How many approvals, and requests, may wait at once.
 pub const MAX_APPROVALS: usize = 8;
 pub const MAX_REQUESTS: usize = 4;
 
-/// Caps on what an agent sends, so an event stays small.
 const MAX_NAMES: usize = 16;
 const MAX_COMMAND: usize = 64 * 1024;
 const MAX_TEXT: usize = 8 * 1024;
 const MAX_SHORT: usize = 2 * 1024;
 
-/// Every vault op.
 pub const VAULT_OPS: [&str; 9] = [
     ops::VAULT_FIND,
     ops::VAULT_USE,
@@ -91,7 +40,6 @@ pub const VAULT_OPS: [&str; 9] = [
     ops::VAULT_PENDING,
 ];
 
-/// How long waits last and how often they look up; tests shorten them.
 #[derive(Clone, Copy, Debug)]
 pub struct VaultTiming {
     pub approval_wait: Duration,
@@ -109,7 +57,6 @@ impl Default for VaultTiming {
     }
 }
 
-/// The vault service.
 pub struct VaultOps {
     switch: Arc<SwitchFlag>,
     store: Arc<VaultStore>,
@@ -118,7 +65,6 @@ pub struct VaultOps {
     approvals: Arc<Waiters<Decision>>,
     requests: Arc<Waiters<Option<VaultEntry>>>,
     timing: VaultTiming,
-    /// What the kernel says about a caller, for the approval prompt.
     processes: Arc<dyn Processes>,
 }
 
@@ -142,8 +88,6 @@ impl VaultOps {
             timing: VaultTiming::default(),
             processes: Arc::new(SystemProcesses),
         };
-        // Off forgets at once, not at the next call: a value must not sit in memory, nor an agent
-        // wait for an approval, after the user turned the vault off.
         let hook = ops.off_hook();
         ops.switch.subscribe(move |on| {
             if !on {
@@ -161,8 +105,6 @@ impl VaultOps {
         }
     }
 
-    /// The daemon's: its own vault list ([`Layout::vault_index`]), the system's Keychain item
-    /// (never under a fixture root, whatever the switch says) and its audit log.
     pub fn for_daemon(layout: &Layout, switch: Arc<SwitchFlag>, room: Arc<dyn Room>) -> VaultOps {
         let keychain: Box<dyn VaultKeychain> = if layout.fixture {
             Box::new(Unsupported(
@@ -179,7 +121,6 @@ impl VaultOps {
         .with_audit(AuditLog::new(layout.audit_path()))
     }
 
-    /// Writes agent-tier calls to this log.
     pub fn with_audit(mut self, audit: AuditLog) -> VaultOps {
         self.audit = Some(audit);
         self
@@ -190,7 +131,6 @@ impl VaultOps {
         self
     }
 
-    /// Asks `processes` about callers instead of the kernel (tests).
     pub fn with_processes(mut self, processes: Arc<dyn Processes>) -> VaultOps {
         self.processes = processes;
         self
@@ -200,8 +140,6 @@ impl VaultOps {
         self.switch.is_on()
     }
 
-    /// The names the `notchling-vault` skill's description lists (`github (api.github.com)`),
-    /// read from the vault list only while the vault is on: none while off, when nothing reads it.
     pub fn skill_names(&self) -> Vec<String> {
         if !self.switch.is_on() {
             return Vec::new();
@@ -222,7 +160,6 @@ impl VaultOps {
 
     pub fn call(&self, caller: &Caller, op: &str, args: &Value) -> Result<Value, ApiError> {
         if !self.switch.is_on() {
-            // Values read while it was on don't outlive it (the switch's listener did this too).
             self.off_hook().run();
             self.audit_agent(caller, op, "off");
             return Err(self.switch.refusal());
@@ -249,7 +186,6 @@ impl VaultOps {
         result
     }
 
-    /// The daemon stops: every wait ends with a no.
     pub fn close(&self) {
         self.approvals.drain();
         self.requests.drain();
@@ -276,7 +212,6 @@ impl VaultOps {
         Ok(json!({"entries": list::find(&query, &all), "saved": saved}))
     }
 
-    /// Only the app, as the app, answers what it was asked: not a command line run from its file.
     fn the_app(caller: &Caller) -> Result<(), ApiError> {
         if caller.tier == Tier::App && caller.client == ClientKind::App {
             Ok(())
@@ -301,7 +236,6 @@ impl VaultOps {
         result.map(|(v, _)| v).map_err(|(e, _)| e)
     }
 
-    /// The reply and the names used (for the audit log; only names that exist).
     #[allow(clippy::type_complexity)]
     fn use_inner(
         &self,
@@ -340,7 +274,6 @@ impl VaultOps {
                             .collect::<Vec<_>>()
                             .join(", ")
                     };
-                    // A name that isn't one could be anything an agent pasted: not repeated.
                     let which = if valid_name(name) {
                         format!("No secret named {name}.")
                     } else {
@@ -359,7 +292,6 @@ impl VaultOps {
             let decision = self
                 .approve(caller, &asking, &command, &folder)
                 .map_err(fail)?;
-            // The switch may have gone off while the user looked.
             if !self.switch.is_on() {
                 return Err(fail(self.switch.refusal()));
             }
@@ -389,7 +321,6 @@ impl VaultOps {
                 Err(e) => return Err(fail(failed(e.to_string()))),
             }
         }
-        // A Keychain read can wait on the user's prompt: a vault turned off meanwhile answers off.
         if !self.switch.is_on() {
             return Err(fail(self.switch.refusal()));
         }
@@ -473,7 +404,6 @@ impl OpGroup for VaultOps {
         &[topics::VAULT]
     }
 
-    /// The approvals and forms are the app's: their ids are what answers them.
     fn topic_tier(&self, topic: &str) -> Option<Tier> {
         (topic == topics::VAULT).then_some(Tier::App)
     }

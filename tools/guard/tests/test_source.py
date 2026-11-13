@@ -40,8 +40,6 @@ class StripTests(unittest.TestCase):
         line = 'let s = "abc" // c'
         self.assertEqual(len(strip_code("x.swift", line)), len(line))
 
-    # --- Final review C3(b): `\( ... )` in a Swift string is code. ---
-
     def test_swift_interpolation_is_code(self):
         out = strip_code("x.swift", 'Text("abc \\(Process()) def")')
         self.assertIn("Process()", out)
@@ -94,8 +92,6 @@ class StripTests(unittest.TestCase):
         line = 'run("/usr/bin/security \\(args)") // x'
         self.assertEqual(strip_comments("x.swift", line).rstrip(), 'run("/usr/bin/security \\(args)")')
 
-    # --- C3(c): in Swift only `"` is a quote. ---
-
     def test_swift_apostrophe_is_not_a_quote(self):
         self.assertIn("Process()", strip_code("x.swift", "let a = x' ; let p = Process(); let b = y'"))
 
@@ -117,12 +113,10 @@ class StripTests(unittest.TestCase):
         self.assertNotIn("osascript", strip_code("a.sh", "echo 'osascript'"))
 
     def test_swift_triple_quote_is_not_a_string_opener(self):
-        # The closing delimiter of a multiline string can be followed by code.
         self.assertIn("Process()", strip_code("x.swift", '  """; let p = Process()'))
         self.assertIn("Process()", strip_code("x.swift", '  """; let p = Process(); let t = """'))
 
     def test_swift_regex_literal_may_hold_a_quote(self):
-        # `#/"/#` is a regex literal (Swift 5.7+), not the start of a string.
         out = strip_code("x.swift", 'let r = #/"/#; let p = Process(); let s = #/"/#')
         self.assertIn("; let p = Process(); ", out)
 

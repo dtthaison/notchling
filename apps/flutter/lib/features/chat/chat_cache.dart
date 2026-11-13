@@ -9,32 +9,23 @@ import 'package:path_provider/path_provider.dart';
 import '../../core/protocol/models.dart';
 import '../macs/session_ref.dart';
 
-/// How many messages per session stay on the phone.
 const int cachedMessageLimit = 100;
 
-/// The last messages of each session and the thumbnails of their pictures, kept on the phone so a chat opens
-/// at once and only what is newer has to be fetched.
 abstract interface class ChatCache {
   Future<List<ChatMessage>> loadMessages(String sessionId);
   Future<void> saveMessages(String sessionId, List<ChatMessage> messages);
   Future<Uint8List?> loadImage(String sessionId, String imageId, int width);
   Future<void> saveImage(String sessionId, String imageId, int width, Uint8List jpeg);
 
-  /// Forgets everything kept for the computer whose storage scope is [scope] (see `storageKey`), when it is removed.
   Future<void> deleteScope(String scope);
 }
 
-/// Files under the app's support folder. A cache that cannot be read or written is logged and treated as empty:
-/// the chat still works from the network.
 class DiskChatCache implements ChatCache {
   DiskChatCache([Future<Directory> Function()? root]) : _root = root ?? getApplicationSupportDirectory;
   final Future<Directory> Function() _root;
 
   String _key(String value) => sha1.convert(utf8.encode(value)).toString().substring(0, 24);
 
-  /// Where a session's files go. File names are hashes, which can't be searched for a computer's entries, so a
-  /// computer other than the first (a key `<host>/<id>`) keeps its files under its own folder and removing it
-  /// deletes that folder. A bare key (the computer a phone had before it followed several) keeps the flat layout.
   Future<({String dir, String name})> _place(String kind, String sessionId) async {
     final String base = (await _root()).path;
     final SessionRef? on = SessionRef.parse(sessionId);
@@ -93,7 +84,6 @@ class DiskChatCache implements ChatCache {
   @override
   Future<void> deleteScope(String scope) async {
     final String base = (await _root()).path;
-    // The first computer's entries are the flat ones; any other's are its folder.
     final List<String> paths = scope.isEmpty ? <String>['$base/chat_cache', '$base/chat_images'] : <String>['$base/computers/$scope'];
     for (final String path in paths) {
       try {
@@ -117,10 +107,8 @@ class DiskChatCache implements ChatCache {
   }
 }
 
-/// Overridden in tests with an in-memory cache.
 final Provider<ChatCache> chatCacheProvider = Provider<ChatCache>((Ref ref) => DiskChatCache());
 
-/// Keeps everything in memory. For tests, and as a stand-in where no disk is wanted.
 class MemoryChatCache implements ChatCache {
   final Map<String, List<ChatMessage>> messages = <String, List<ChatMessage>>{};
   final Map<String, Uint8List> images = <String, Uint8List>{};
@@ -141,13 +129,10 @@ class MemoryChatCache implements ChatCache {
   @override
   Future<void> deleteScope(String scope) async {
     messages.removeWhere((String key, List<ChatMessage> _) => keyInScope(scope, key));
-    // An image is `<session key>|<image id>|<width>`.
     images.removeWhere((String key, Uint8List _) => keyInScope(scope, key.split('|').first));
   }
 }
 
-/// One computer's view of the cache: its session ids carry its scope (decision 0012), so `s1` on two computers
-/// are two entries. The empty scope passes ids through, which is what a phone paired before 0012 has on disk.
 class ScopedChatCache implements ChatCache {
   const ScopedChatCache(this._inner, this.scope);
   final ChatCache _inner;

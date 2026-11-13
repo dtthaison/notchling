@@ -1,21 +1,12 @@
-//! Stand-ins for the Keychain and the network, for tests (the engine's and the daemon's). Nothing
-//! here reaches a real login: [`MemoryKeychain`] answers `security`'s commands from a map, and
-//! [`ScriptedHttp`] answers requests from a list. Each records what it was asked, so a test can
-//! check that nothing was asked at all.
-
 use super::http::{HttpClient, HttpRequest, HttpResponse};
 use super::keychain::{hex, KeychainError, SecurityOutput, SecurityRunner, NOT_FOUND};
 use std::collections::BTreeMap;
 use std::sync::Mutex;
 
-/// An in-memory Keychain that speaks the three `security` commands Notchling uses:
-/// `find-generic-password -s -a -w`, `delete-generic-password -s -a`, and `-i` with an
-/// `add-generic-password -U -a "…" -s "…" -X "<hex>"` (or `-w "<text>"`) line on stdin.
 #[derive(Default)]
 pub struct MemoryKeychain {
     items: Mutex<BTreeMap<(String, String), String>>,
     calls: Mutex<Vec<Vec<String>>>,
-    /// When set, a value is printed as hex, as `security -w` does for one that isn't plain text.
     pub print_hex: bool,
 }
 
@@ -24,7 +15,6 @@ impl MemoryKeychain {
         MemoryKeychain::default()
     }
 
-    /// One that prints every value as hex.
     pub fn printing_hex() -> MemoryKeychain {
         MemoryKeychain {
             print_hex: true,
@@ -47,13 +37,11 @@ impl MemoryKeychain {
             .cloned()
     }
 
-    /// Every (service, account) held now.
     pub fn names(&self) -> Vec<(String, String)> {
         let items = self.items.lock().unwrap_or_else(|e| e.into_inner());
         items.keys().cloned().collect()
     }
 
-    /// The argument lists it was run with, in order.
     pub fn calls(&self) -> Vec<Vec<String>> {
         self.calls.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
@@ -64,15 +52,12 @@ impl MemoryKeychain {
             .and_then(|i| args.get(i + 1).cloned())
     }
 
-    /// `"<value>"` after `flag` in a `-i` line.
     fn quoted(line: &str, flag: &str) -> Option<String> {
         let start = line.find(&format!("{flag} \""))? + flag.len() + 2;
         let end = line[start..].find('"')? + start;
         Some(line[start..end].to_string())
     }
 
-    /// The text after `-w "`, read as `security -i` reads it: a backslash makes the next character
-    /// stand for itself.
     fn text(line: &str) -> Option<String> {
         let start = line.find("-w \"")? + 4;
         let mut out = String::new();
@@ -159,7 +144,6 @@ impl SecurityRunner for MemoryKeychain {
     }
 }
 
-/// A runner that fails the test if it is ever called: for paths that must not touch the Keychain.
 pub struct PanicKeychain;
 
 impl SecurityRunner for PanicKeychain {
@@ -168,8 +152,6 @@ impl SecurityRunner for PanicKeychain {
     }
 }
 
-/// Answers requests in order from a script of (URL prefix, response); records each request's URL
-/// and bearer token. A request no entry matches gets status 0 ("no answer").
 #[derive(Default)]
 pub struct ScriptedHttp {
     script: Mutex<Vec<(String, HttpResponse)>>,
@@ -182,7 +164,6 @@ impl ScriptedHttp {
         ScriptedHttp::default()
     }
 
-    /// The next request whose URL starts with `url` gets this answer (once).
     pub fn answer(&self, url: &str, status: u16, body: &str) {
         self.script.lock().unwrap_or_else(|e| e.into_inner()).push((
             url.into(),
@@ -193,13 +174,10 @@ impl ScriptedHttp {
         ));
     }
 
-    /// (URL, bearer token) of each request so far.
     pub fn seen(&self) -> Vec<(String, Option<String>)> {
         self.seen.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
-    /// The extra headers (`HttpRequest::headers`) of each request so far, in the order of
-    /// [`ScriptedHttp::seen`].
     pub fn seen_headers(&self) -> Vec<Vec<(String, String)>> {
         self.headers
             .lock()
@@ -235,7 +213,6 @@ impl HttpClient for ScriptedHttp {
     }
 }
 
-/// A client that fails the test if it is ever called.
 pub struct PanicHttp;
 
 impl HttpClient for PanicHttp {

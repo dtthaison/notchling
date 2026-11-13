@@ -1,6 +1,3 @@
-//! The Accounts window's views for `--render` (part U10), over made-up accounts, limits and cost:
-//! example emails and numbers, never a store, a login or a transcript.
-
 use std::collections::BTreeMap;
 
 use notchling_engine::cost::summary::{AccountCost, DayCost, ModelStat, NameCost, Summary};
@@ -14,10 +11,8 @@ use super::wire::{
 use crate::switches::Switches;
 use crate::views::ViewSpec;
 
-/// The fixed clock every render draws at, seconds since 1970.
 pub const NOW: f64 = 1_800_000_000.0;
 
-/// The render with a row's ⋯ menu open, over the row under it.
 pub const MENU_RENDER: &str = "accounts-window-menu";
 
 pub const VIEWS: [ViewSpec; 6] = [
@@ -53,14 +48,10 @@ pub const VIEWS: [ViewSpec; 6] = [
     },
 ];
 
-/// What an accounts render shows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Shown {
-    /// Claude Code tab, switch on.
     Claude,
-    /// Claude Code tab, switch off.
     Off,
-    /// Codex tab, a sign-in waiting.
     Codex,
     LimitBars,
     Cost,
@@ -93,7 +84,6 @@ fn bar(label: &str, kind: BarKind, percent: f64, resets_in: Option<f64>) -> Bar 
     }
 }
 
-/// Codex's report: a 5-hour and a weekly bar.
 pub fn codex_report() -> UsageReport {
     UsageReport {
         groups: vec![Group {
@@ -112,7 +102,6 @@ pub fn codex_report() -> UsageReport {
     }
 }
 
-/// A Claude Code account's own read: an unnamed group of a 5-hour and a weekly bar.
 pub fn claude_report() -> UsageReport {
     UsageReport {
         groups: vec![Group {
@@ -126,7 +115,6 @@ pub fn claude_report() -> UsageReport {
     }
 }
 
-/// Antigravity's report: two named groups, one bar in the red.
 pub fn antigravity_report() -> UsageReport {
     UsageReport {
         groups: vec![
@@ -243,8 +231,6 @@ fn cost_reply() -> CostReply {
     }
 }
 
-/// The made-up state: three Claude Code accounts (one in use, one in a lane, one signed out),
-/// Codex, Antigravity and Claude Desktop, the watcher's windows and a month of cost.
 pub fn snapshot(shown: Shown) -> Snapshot {
     let on = shown != Shown::Off;
     let account = |id: &str, email: &str, plan: Option<&str>| ClaudeAccount {
@@ -344,8 +330,6 @@ pub fn snapshot(shown: Shown) -> Snapshot {
             syncing: false,
         },
         usage,
-        // The account in a lane has its own read; the one in use shows the watcher's windows and
-        // the team account has not been read yet.
         claude_usage: ClaudeUsage {
             reports: if on {
                 BTreeMap::from([("a2".to_owned(), claude_report())])

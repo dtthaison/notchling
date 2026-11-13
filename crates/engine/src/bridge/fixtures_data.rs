@@ -1,16 +1,13 @@
-//! The canned data `ProtocolFixturesTests` runs the router on: the same sessions, chat, prompts
-//! and viz specs as the Swift test, so the answers match `protocol/fixtures/` byte for byte.
-
 use super::model::*;
 use super::test_support::NOW_MS;
 use notchling_protocol::generated as wire;
 use std::collections::BTreeMap;
 
-pub const SESSION_A: &str = "5b6d9a30-6f0e-4d0a-9b57-0c1f3a2e8d11"; // owned terminal, permission pending
-pub const SESSION_B: &str = "c3a1e5f2-0b4d-4f6e-8a7c-2d9e1b0f4a65"; // view-only, original still running
-pub const SESSION_C: &str = "e8f0a7b4-3c2d-4a19-b6e5-7f1d0c9a2b38"; // background job, question pending
+pub const SESSION_A: &str = "5b6d9a30-6f0e-4d0a-9b57-0c1f3a2e8d11";
+pub const SESSION_B: &str = "c3a1e5f2-0b4d-4f6e-8a7c-2d9e1b0f4a65";
+pub const SESSION_C: &str = "e8f0a7b4-3c2d-4a19-b6e5-7f1d0c9a2b38";
 pub const SESSION_D: &str = "codex:0199e0c5-7a31-7c52-9d4e-5b8a1f2c3d60";
-pub const SESSION_E: &str = "1f4b8c27-9d3e-4a60-8b15-6c0e2a7d9f43"; // view-only, can be taken over
+pub const SESSION_E: &str = "1f4b8c27-9d3e-4a60-8b15-6c0e2a7d9f43";
 
 pub fn message_id(n: usize) -> String {
     format!("0A000000-0000-4000-8000-00000000000{n}")

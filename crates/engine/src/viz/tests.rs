@@ -1,5 +1,3 @@
-//! Port of `VizEngineTests`, `WebURLCandidateTests` and `VisualizeSuggesterTests`.
-
 use super::engine::{GitSnapshot, VizEngine};
 use super::facts::{analyze_lines, mermaid_sources, TranscriptFacts};
 use crate::bridge::model::{Control, Session, SessionSubagent};
@@ -7,7 +5,6 @@ use crate::sessions::testutil::TempDir;
 use notchling_protocol::generated as wire;
 use std::path::Path;
 
-/// 2026-11-01 13:57:45 UTC, in seconds: the Swift tests' `fixtureNow`.
 const NOW: f64 = 1_793_541_465.0;
 
 fn assistant(blocks: &str, id: &str, time: &str, usage: Option<&str>) -> String {
@@ -389,8 +386,6 @@ fn only_conversation_text_feeds_the_urls() {
     );
 }
 
-// MARK: The engine on a real transcript
-
 fn fixture_session(transcript: &Path) -> Session {
     let mut session = Session::new("fx", "n", "", Control::ViewOnly, wire::SessionState::Done);
     session.transcript_path = Some(transcript.to_string_lossy().into_owned());
@@ -408,7 +403,6 @@ fn the_recent_mermaid_signal_uses_the_clock() {
     );
     let file = dir.write("t.jsonl", &format!("{line}\n"));
     let mut session = fixture_session(&file);
-    // NOW is 13:57:45, seven minutes after the block.
     assert!(engine().build(&session, None).signals.has_recent_mermaid);
     let later = VizEngine::new(Box::new(|| NOW + 3600.0), Box::new(|_| no_git()));
     assert!(!later.build(&session, None).signals.has_recent_mermaid);
@@ -445,7 +439,6 @@ fn a_subagents_transcript_adds_to_the_session_and_changes_invalidate_the_cache()
     assert_eq!(blocks[0].origin, "Scan the repo");
     assert!(first.signals.has_recent_mermaid);
 
-    // The file grows: the cached facts are replaced, not served again.
     std::fs::write(
         &sub,
         format!(

@@ -1,13 +1,7 @@
-//! The models Codex offers, from the list it caches (`<codex home>/models_cache.json`, refreshed by
-//! Codex itself): the ones its own picker lists (`visibility: "list"`), in its order, with each
-//! one's reasoning efforts. Nothing is hard-coded, so new models show up when Codex learns of them
-//! (`CodexModels`).
-
 use serde_json::Value;
 use std::io::Read;
 use std::path::Path;
 
-/// The cache is a few KB; one that is bigger than this is not read.
 const MAX_CACHE_BYTES: u64 = 4 * 1024 * 1024;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -17,11 +11,9 @@ pub struct Model {
     pub summary: String,
     pub efforts: Vec<String>,
     pub default_effort: Option<String>,
-    /// The window Codex reports for the model; `None` when the cache has none.
     pub context_window: Option<u64>,
 }
 
-/// The models in Codex's cache file under `codex_home`; none when it is missing or unreadable.
 pub fn load(codex_home: &Path) -> Vec<Model> {
     let Ok(file) = std::fs::File::open(codex_home.join("models_cache.json")) else {
         return Vec::new();
@@ -71,8 +63,6 @@ pub fn parse(data: &[u8]) -> Vec<Model> {
         .collect()
 }
 
-/// Whether `effort` is one `model` supports; any effort is accepted for a model the cache doesn't
-/// list (Codex may know models its cache doesn't).
 pub fn supports(models: &[Model], model: &str, effort: &str) -> bool {
     match models.iter().find(|m| m.slug == model) {
         Some(m) => m.efforts.is_empty() || m.efforts.iter().any(|e| e == effort),

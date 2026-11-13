@@ -1,9 +1,3 @@
-//! Platform adapters: keep awake, sleep and wake, notifications, file watching, private files, folders.
-//!
-//! Everything OS-specific sits behind `cfg`; where an OS has no implementation yet the call returns
-//! [`Error::Unsupported`] so the caller can say so instead of silently doing nothing.
-
-// The pure matching is built and tested everywhere; only macOS asks the process table for now.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 mod app_procs;
 pub mod apps;
@@ -18,14 +12,10 @@ pub mod watch;
 use std::fmt;
 use std::io;
 
-/// What a platform call can fail with.
 #[derive(Debug)]
 pub enum Error {
-    /// This OS has no implementation of the call yet.
     Unsupported(&'static str),
-    /// The OS refused; the text says what was asked.
     System(String),
-    /// A file operation failed.
     Io(io::Error),
 }
 
@@ -54,10 +44,8 @@ impl From<io::Error> for Error {
     }
 }
 
-/// A platform result.
 pub type Result<T> = std::result::Result<T, Error>;
 
-/// The crate's short name.
 pub fn crate_name() -> &'static str {
     "platform"
 }

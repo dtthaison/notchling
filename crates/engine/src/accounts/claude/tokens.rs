@@ -1,33 +1,18 @@
-//! Tokens for reading limits, and renewing a saved login that is live nowhere.
-//!
-//! The main login belongs to Claude Code and a lane's to the sessions in it: renewing either here
-//! would rotate its refresh token out from under them and sign them out, so an expired one is
-//! skipped until its owner renews it. Only a saved slot of an account that is neither the main
-//! login nor in a lane is renewed, and that is checked again (from `~/.claude.json` and
-//! `lanes.json`) right before the request.
-
 use super::profile::{access_token, is_expired};
 use super::{err, AccountError, ClaudeAccount, ClaudeAccounts, State, SAVED_SERVICE};
 use crate::accounts::http::{HttpRequest, CLIENT_ID, TOKEN_URL};
 use crate::accounts::{Login, Secret};
 use serde_json::{json, Map, Value};
 
-/// What renewing a saved login came to.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Renewal {
-    /// Renewed and saved.
     Renewed,
-    /// The refresh token was refused (400/401): the account needs a new sign-in.
     Refused,
-    /// No answer, or one that made no sense; nothing changed.
     Failed,
-    /// Not renewed because the account is live (the main login or a lane).
     Live,
 }
 
 impl ClaudeAccounts {
-    /// A token for reading `id`'s limits (the limits watcher's), or `None` when there is no usable
-    /// one without renewing a login in use.
     pub fn usage_token(&self, id: &str) -> Result<Option<Secret>, AccountError> {
         let mut state = self.lock();
         let mut list = self.saved_list();
@@ -36,11 +21,6 @@ impl ClaudeAccounts {
         Ok(token)
     }
 
-    /// The main login's access token as Keychain holds it now, read only, for a caller that only
-    /// wants to ask Anthropic something as the logged-in user (the model list). `None` when no
-    /// login is known or the live one has expired. There is no saved slot, no lane and no renewal
-    /// on this path at all, so it can't rotate a refresh token, whichever account is main by the
-    /// time it runs.
     pub fn live_token(&self) -> Result<Option<Secret>, AccountError> {
         let state = self.lock();
         if state.active.is_none() {
@@ -108,14 +88,12 @@ impl ClaudeAccounts {
             .and_then(access_token))
     }
 
-    /// Whether `id` is the main login's or a lane's, by every source at hand.
     pub(super) fn live_somewhere(&self, state: &State, id: &str) -> bool {
         state.active.as_deref() == Some(id)
             || self.config_account().as_deref() == Some(id)
             || self.env.lanes.lane_for_account(id).is_some()
     }
 
-    /// Renews the saved login `saved` of `id`, which must be live nowhere.
     fn renew_saved(
         &self,
         state: &State,
@@ -151,7 +129,6 @@ impl ClaudeAccounts {
     }
 }
 
-/// `POST /v1/oauth/token` with the refresh token; the fields to merge into the login.
 fn refresh_request(
     store: &ClaudeAccounts,
     refresh: &Secret,

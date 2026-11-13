@@ -1,13 +1,3 @@
-//! Steps 9-11 for one repo of the sd worker job: deploy key, clone, push refused (Swift
-//! `RepoSteps`).
-//!
-//! The machine gets a read-only deploy key: an ed25519 pair made on the machine, so the private key
-//! never leaves it. Only the public line comes back, and only a line that is exactly one ed25519
-//! key is accepted. GitHub's host key is compared with `gh api meta` before the machine trusts it,
-//! and the key is added with the user's own `gh`, never with the flag that makes it writable.
-//! Nothing here pushes: the last step only asks git for a dry run. Replacing the key is
-//! [`super::steps_replace`]; the push check is [`super::steps_push`].
-
 use super::registry::{Machine, MachineRepo};
 use super::repo_common::*;
 use super::runner::Call;
@@ -20,8 +10,6 @@ use crate::lanes::quote;
 use std::collections::BTreeSet;
 use std::path::Path;
 
-/// The deploy key, clone and push-refused steps of one repo. A repo that isn't `owner/name` gets
-/// three steps with no script and no Fix, only the way to repair it.
 pub fn all(m: &Machine, repo: &MachineRepo) -> Vec<SetupStep> {
     let github = repo.github.as_str();
     if !is_valid_repo(github) {
@@ -89,9 +77,6 @@ pub fn all(m: &Machine, repo: &MachineRepo) -> Vec<SetupStep> {
     ]
 }
 
-/// Whether the card offers Replace key for this Check: the key is a pass, or it is on the machine
-/// and GitHub has no record of it. A missing key, a writable one, a missing alias and "can't tell"
-/// are not offered.
 pub fn offers_replace(result: Option<&CheckResult>) -> bool {
     match result {
         Some(r) => match &r.state {
@@ -107,11 +92,6 @@ fn mask_with(ctx: &StepContext) -> impl Fn(&str) -> String + '_ {
     move |s| ctx.mask(s)
 }
 
-// MARK: Deploy key
-
-/// The remote part prints the key, then `@@config` with the alias check, then `@@ssh` with what
-/// GitHub said. The markers are read from the end, so a key file that holds a marker line cannot
-/// fake a later part.
 fn deploy_key_probe(github: &str) -> Probe {
     let alias = alias(github);
     let pubfile = shell::path(&format!("{}.pub", key_file(github)));
@@ -206,8 +186,6 @@ fn parse_deploy_key(out: &RemoteOutput, github: &str, ctx: &StepContext) -> Chec
     CheckResult::cant_tell(format!("can't tell if ssh reaches GitHub{tail}")).rows(rows)
 }
 
-/// Writes the public key line where `gh` can read it: a private folder under `scratch`, a file that
-/// is removed again by the caller. `None` when it can't be written.
 pub(super) fn write_pub_file(scratch: &Path, file_name: &str, line: &str) -> Option<ScratchFile> {
     notchling_platform::files::ensure_private_dir(scratch).ok()?;
     let path = scratch.join(file_name);
@@ -215,7 +193,6 @@ pub(super) fn write_pub_file(scratch: &Path, file_name: &str, line: &str) -> Opt
     Some(ScratchFile(path))
 }
 
-/// A file under the scratch folder, removed when it goes out of scope.
 pub(super) struct ScratchFile(std::path::PathBuf);
 
 impl ScratchFile {
@@ -299,7 +276,6 @@ fn deploy_key_run(
         first_line(if r.err.is_empty() { &r.out } else { &r.err }, &mask, 200)
     };
 
-    // 1. the key and the ssh alias, made on the machine; only the public line comes back
     let made = run::script(ctx, keygen, None, 600);
     if made.code != 0 {
         return FixOutcome::fail(format!("could not make the key on {name}: {}", said(&made)));
@@ -310,7 +286,6 @@ fn deploy_key_run(
         ));
     };
 
-    // 2. GitHub's host keys, from this Mac
     let meta = run::local(ctx, meta_argv.to_vec(), None, 120);
     let trusted: BTreeSet<String> = meta
         .out
@@ -326,7 +301,6 @@ fn deploy_key_run(
         ));
     }
 
-    // 3. what the machine sees at github.com must be one of them
     let scanned = run::script(ctx, keyscan, None, 600);
     let seen: Vec<String> = scanned
         .out
@@ -348,7 +322,6 @@ fn deploy_key_run(
         ));
     };
 
-    // 4. trust this Mac's copy of it, never the machine's
     let trust = run::script(ctx, &known_hosts_script(host_key), None, 600);
     if trust.code != 0 {
         return FixOutcome::fail(format!(
@@ -357,8 +330,6 @@ fn deploy_key_run(
         ));
     }
 
-    // 5. a key GitHub already lists is not added again: read-only is a repair that worked,
-    // writable stops
     let current = run::local(ctx, list_argv(github), None, 120);
     let keys = if current.code == 0 {
         parse_keys(&current.out)
@@ -380,7 +351,6 @@ fn deploy_key_run(
         return FixOutcome::fail(can_write(github));
     }
 
-    // 6. the public key goes to GitHub through the user's gh, read-only
     let file_name = format!("{name}-{}.pub", slug(github));
     let Some(file) = write_pub_file(&ctx.step.scratch, &file_name, &pubkey) else {
         return FixOutcome::fail("could not write the public key file on this Mac");
@@ -395,8 +365,6 @@ fn deploy_key_run(
     }
     FixOutcome::ok(format!("added a read-only deploy key to {github}"))
 }
-
-// MARK: Clone
 
 fn clone_probe(repo: &MachineRepo) -> Probe {
     let path = shell::path(&checkout_path(repo));

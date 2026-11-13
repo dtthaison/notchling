@@ -1,9 +1,3 @@
-//! Second opinions in the conversation (`SecondOpinionButton`, `SecondOpinionCards`): a small
-//! button on a reply or an edit opens the sheet, and the opinions asked under that message show as
-//! cards: running with Cancel, done with the reply, failed with the error. The store is the
-//! engine's, shared app-wide (`AppOpinions`); a render and a fixture root have none, so the
-//! button is off.
-
 use gpui::{div, prelude::*, px, App, Context, Div, SharedString, WeakEntity};
 use notchling_engine::delegate::second_opinion::{SecondOpinion, Status, Subject};
 use notchling_engine::delegate::second_opinion_store::SecondOpinionStore;
@@ -21,19 +15,13 @@ use crate::mac::gate;
 use crate::mac::shell::AppOpinions;
 use crate::tools::second_opinion::tool_name;
 
-/// The button's hover.
 pub const TIP: &str = "Second Opinion: ask Codex or Antigravity to review this";
-/// Why the button is off.
 pub const NO_STORE: &str = "Second opinions need the app's own data folder, not a fixture";
 
-/// The store, when this app has one.
 pub fn store(cx: &App) -> Option<SecondOpinionStore> {
     cx.try_global::<AppOpinions>().and_then(|o| o.0.clone())
 }
 
-/// What a conversation item can have reviewed, each with the anchor its card sits under: a
-/// reply (the item's id), or a file's changes in a step group (the first edit's call id; several
-/// edits of one file are one review with all their diffs, so the group shows one button per file).
 pub fn subjects(item: &ChatItem) -> Vec<(String, Subject)> {
     match &item.kind {
         ItemKind::Assistant { text } if !text.trim().is_empty() => {
@@ -72,8 +60,6 @@ pub fn subjects(item: &ChatItem) -> Vec<(String, Subject)> {
     }
 }
 
-/// The button's title: the file's name too when the group changed more than one (`of` subjects),
-/// so the buttons say which is which.
 pub fn button_label(subject: &Subject, of: usize) -> String {
     match subject {
         Subject::Change { path, .. } if of > 1 => {
@@ -84,7 +70,6 @@ pub fn button_label(subject: &Subject, of: usize) -> String {
     }
 }
 
-/// The small button that opens the sheet for `subject` under `anchor`.
 pub fn opinion_button(
     anchor: &str,
     subject: Subject,
@@ -134,7 +119,6 @@ fn pick_line(run: &SecondOpinion) -> String {
         .join(" · ")
 }
 
-/// One opinion's card.
 fn card_for(run: &SecondOpinion, a: Appearance, cx: &mut Context<ConversationView>) -> Div {
     let tool = tool_name(run.tool_value());
     let title = match run.status {
@@ -236,7 +220,6 @@ fn card_for(run: &SecondOpinion, a: Appearance, cx: &mut Context<ConversationVie
         .part_inside("Second Opinion Card", Corner::TopTrailing, a, cx)
 }
 
-/// The cards for the opinions asked under `anchors` in `session`.
 pub fn cards(
     session: &str,
     anchors: &[String],
@@ -257,7 +240,6 @@ pub fn cards(
     )
 }
 
-/// Whether an opinion in the selected session is still running (the view redraws for its clock).
 pub fn any_running(view: &ChatView, cx: &App) -> bool {
     let Some(session) = &view.selected else {
         return false;

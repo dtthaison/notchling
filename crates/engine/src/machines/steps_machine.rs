@@ -1,12 +1,3 @@
-//! Steps 1-6 and 8 of the catalog: the machine itself (Swift `MachineSteps`). Claude login (7) comes
-//! from [`super::steps_secret`].
-//!
-//! Every probe is a read-only `sh` script whose output is keyed by name (`os=Darwin`, `@@runtimes`),
-//! never by line position, so a probe that printed nothing for one key shifts nothing else.
-//! Everything a machine prints is untrusted: a value is validated before it is kept
-//! ([`shell::is_safe_machine_path`]), masked, cut to 200 characters, and otherwise only shown. No
-//! machine text goes into a script.
-
 use super::process::CUT_NOTICE;
 use super::registry::{DockerState, Machine, MachineOs};
 use super::runner::CommandResult;
@@ -18,8 +9,6 @@ use super::step::{
 use super::steps_xcode::{parse_xcode, XCODE_SCRIPT};
 use std::collections::BTreeMap;
 
-/// Reachable, Worker user, Stays awake, FileVault, Base tools, Claude Code, Xcode. The catalog
-/// leaves out the macOS-only ones for a Linux machine.
 pub fn all(m: &Machine) -> Vec<SetupStep> {
     vec![
         SetupStep::new(
@@ -30,8 +19,6 @@ pub fn all(m: &Machine) -> Vec<SetupStep> {
             Probe::remote(REACHABLE_SCRIPT, parse_reachable),
             StepFix::HowTo(format!("Turn the machine on and check it from this Mac with `tailscale ping {}`. For a new Linux user, add the user to the Tailscale ACL's ssh users. Then check again.", m.host)),
         ),
-        // slow: its `sudo -n -l` can write a line to the machine's sudo auth log, so not on every
-        // 60 s refresh
         SetupStep::new(
             StepId::WORKER_USER,
             "Worker user",
@@ -83,17 +70,12 @@ pub fn all(m: &Machine) -> Vec<SetupStep> {
     ]
 }
 
-// MARK: Parsing helpers
-
-/// Machine text is cut to this many characters.
 const CUT_LENGTH: usize = 200;
 
 pub(super) fn cut(s: &str) -> String {
     s.chars().take(CUT_LENGTH).collect()
 }
 
-/// A piece of machine text for a message or a saved fact: masked first (`mask` is the context's),
-/// then cut, so a cut can't leave a piece of a vault value.
 pub(super) fn shown(s: &str, mask: &dyn Fn(&str) -> String) -> String {
     cut(&mask(s))
 }
@@ -105,18 +87,14 @@ pub(super) fn is_newline(c: char) -> bool {
     )
 }
 
-/// Spaces and tabs only, as Swift's `.whitespaces`.
 pub(super) fn trim_ws(s: &str) -> &str {
     s.trim_matches(|c: char| c == '\t' || (c.is_whitespace() && !is_newline(c)))
 }
 
-/// The non-empty lines of `text`.
 fn lines(text: &str) -> impl Iterator<Item = &str> {
     text.split(is_newline).filter(|l| !l.is_empty())
 }
 
-/// The first `key=value` line for each wanted key. Lines are matched by their key, so a missing
-/// line, a banner before the output or a repeated key moves nothing.
 fn keyed(text: &str, keys: &[&str]) -> BTreeMap<String, String> {
     let mut found = BTreeMap::new();
     for raw in lines(text) {
@@ -138,11 +116,6 @@ fn first_line(text: &str) -> String {
         .to_string()
 }
 
-/// A short failure line from a Fix's result: the last line of stderr (where brew, apt and curl say
-/// what went wrong), or of stdout when stderr is empty. The vault values and the admin password
-/// are masked first (`ctx.mask`, which the engine builds with both), then the line is cut, so no
-/// piece of a secret survives a cut. Output the runner cut at its start is a notice and a half line
-/// that can hold the end of a value: that half line is not shown.
 fn outcome(r: &CommandResult, ok: &str, ctx: &FixContext) -> FixOutcome {
     if r.code == 0 {
         return FixOutcome::ok(ok);
@@ -163,8 +136,6 @@ fn outcome(r: &CommandResult, ok: &str, ctx: &FixContext) -> FixOutcome {
         .unwrap_or_else(|| "no output".into());
     FixOutcome::fail(format!("failed (code {}): {}", r.code, cut(&last)))
 }
-
-// MARK: 1 Reachable
 
 const REACHABLE_SCRIPT: &str = r#"echo "os=$(uname -s)"
 echo "arch=$(uname -m)"
@@ -187,7 +158,6 @@ fn docker_state(text: &str) -> Option<DockerState> {
 }
 
 fn parse_reachable(out: &RemoteOutput, ctx: &StepContext) -> CheckResult {
-    // masked before anything is cut from it
     let text = ctx.mask(&out.text);
     let kv = keyed(
         &text,
@@ -257,16 +227,11 @@ fn parse_reachable(out: &RemoteOutput, ctx: &StepContext) -> CheckResult {
     CheckResult::pass(arch.map_or(label.clone(), |a| format!("{label}, {a}"))).detected(detected)
 }
 
-// MARK: 2 Worker user
-
-/// The user id, then (keyed) the OS, the groups, and on Linux whether `sudo -n -l` works.
-/// Read-only: `sudo -n` never asks for a password.
 const WORKER_USER_SCRIPT: &str = r#"id -u
 echo "os=$(uname -s)"
 echo "groups=$(id -nG 2>/dev/null)"
 if [ "$(uname -s)" = Linux ]; then sudo -n -l >/dev/null 2>&1; echo "sudo_l=$?"; fi"#;
 
-/// The groups that let a Linux account use sudo.
 const SUDO_GROUPS: [&str; 3] = ["sudo", "wheel", "admin"];
 
 fn parse_worker_user(out: &RemoteOutput, _ctx: &StepContext) -> CheckResult {
@@ -281,9 +246,6 @@ fn parse_worker_user(out: &RemoteOutput, _ctx: &StepContext) -> CheckResult {
             "signed in as root; use the worker account. Root is only for steps marked needs admin",
         );
     }
-    // On Linux the worker account must not be able to use sudo: the admin password would pass
-    // through shell files it owns, and it could sudo as itself. On a Mac the user's own account is
-    // the admin.
     let kv = keyed(&out.text, &["os", "groups", "sudo_l"]);
     if kv.get("os").map(String::as_str) == Some("Linux") {
         let groups = kv.get("groups").map(String::as_str).unwrap_or("");
@@ -296,8 +258,6 @@ fn parse_worker_user(out: &RemoteOutput, _ctx: &StepContext) -> CheckResult {
     }
     CheckResult::pass(format!("user id {number}, not root"))
 }
-
-// MARK: 3 Stays awake
 
 fn parse_stays_awake(out: &RemoteOutput, _ctx: &StepContext) -> CheckResult {
     const WANTED: [(&str, i64); 3] = [("sleep", 0), ("disksleep", 0), ("autorestart", 1)];
@@ -351,8 +311,6 @@ fn stays_awake_fix() -> FixPlan {
     })
 }
 
-// MARK: 4 FileVault
-
 fn parse_file_vault(out: &RemoteOutput, ctx: &StepContext) -> CheckResult {
     if out.text.contains("FileVault is On") {
         return CheckResult::pass("on: after a restart it waits for an unlock").detected(
@@ -376,8 +334,6 @@ fn parse_file_vault(out: &RemoteOutput, ctx: &StepContext) -> CheckResult {
     })
 }
 
-// MARK: 5 Base tools
-
 const BASE_TOOL_NAMES: [&str; 4] = ["git", "python3", "jq", "gh"];
 
 const BASE_TOOLS_SCRIPT: &str = r#"echo "git=$(command -v git)"
@@ -388,7 +344,6 @@ if [ "$(uname -s)" = Darwin ] && ! xcode-select -p >/dev/null 2>&1; then echo cl
 echo "pyver=$pv"
 if command -v brew >/dev/null 2>&1; then echo brew=yes; else echo brew=no; fi"#;
 
-/// `3.12` as (3, 12), or `None`.
 fn major_minor(s: &str) -> Option<(i64, i64)> {
     let parts: Vec<&str> = s.split('.').collect();
     let [major, minor] = parts.as_slice() else {
@@ -421,8 +376,6 @@ fn parse_base_tools(out: &RemoteOutput, ctx: &StepContext) -> CheckResult {
         &["git", "python3", "jq", "gh", "pyver", "brew", "clt"],
     );
     let has = |name: &str| kv.get(name).is_some_and(|v| !v.is_empty());
-    // Without the Command Line Tools /usr/bin/git and /usr/bin/python3 are stubs that open an
-    // install dialog on the machine when run, so the probe never runs them there.
     if kv.get("clt").map(String::as_str) == Some("missing") {
         return CheckResult::fail("Command Line Tools missing").rows(base_tool_rows(&kv, ctx));
     }
@@ -471,7 +424,6 @@ fn parse_base_tools(out: &RemoteOutput, ctx: &StepContext) -> CheckResult {
 
 const MAC_BASE_TOOLS_SCRIPT: &str = r##"xcode-select -p >/dev/null 2>&1 || { echo 'Command Line Tools are missing: run xcode-select --install in the machine'"'"'s own Terminal, then Check again.'; exit 1; }; command -v brew >/dev/null 2>&1 || { echo 'Homebrew is missing: install it from https://brew.sh in the machine'"'"'s own Terminal, then Check again.'; exit 1; }; brew install git python jq gh"##;
 
-/// Runs as root through sudo, so it names no path of the worker's home.
 const LINUX_BASE_TOOLS_SCRIPT: &str = r#"set -e
 export DEBIAN_FRONTEND=noninteractive NEEDRESTART_SUSPEND=1 NEEDRESTART_MODE=l
 apt-get update
@@ -493,8 +445,6 @@ fn not_settled(now: Option<MachineOs>) -> String {
     }
 }
 
-/// The Fix is chosen by the OS the step was built with and checked again when it runs. With the OS
-/// not detected yet it refuses, rather than guess Homebrew.
 fn base_tools_fix(os: Option<MachineOs>) -> FixPlan {
     match os {
         Some(MachineOs::Linux) => FixPlan::new(
@@ -519,8 +469,6 @@ fn base_tools_fix(os: Option<MachineOs>) -> FixPlan {
     }
 }
 
-// MARK: 6 Claude Code
-
 const CLAUDE_SCRIPT: &str = "command -v claude >/dev/null 2>&1 && claude --version 2>/dev/null";
 
 fn parse_claude_code(out: &RemoteOutput, ctx: &StepContext) -> CheckResult {
@@ -531,8 +479,6 @@ fn parse_claude_code(out: &RemoteOutput, ctx: &StepContext) -> CheckResult {
     CheckResult::pass(cut(&line))
 }
 
-/// The download is held in a variable first: in `curl ... | bash` a failed download leaves `bash`
-/// an empty script, which exits 0, and the Fix would report success.
 pub const CLAUDE_INSTALL: &str =
     r#"s=$(curl -fsSL https://claude.ai/install.sh) && printf '%s\n' "$s" | bash"#;
 

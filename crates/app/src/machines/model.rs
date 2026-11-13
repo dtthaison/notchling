@@ -1,14 +1,3 @@
-//! The Machines window's state over the engine (Swift `MachinesModel`): the registry as last
-//! read, the vault's names, the notes and banners, the sheet on show, each machine's last Fix
-//! line, and the morning items. It starts no Fix on its own: opening the window, Refresh, Check,
-//! Add and a vault change run checks only, and every Fix starts in a method a button calls
-//! (`request_*`), which only asks the engine for its plan and shows it. [`MachinesModel::confirm`]
-//! then takes the one click on Run, and the [`Run`] it gives is executed off the UI thread.
-//!
-//! Blocking work (ssh, `gh`) is never done here: a method either changes state or hands back what
-//! to run ([`Run`], [`IssueFetch`]); the view runs it on a background thread and brings the result
-//! back ([`MachinesModel::finished`], [`MachinesModel::issues_fetched`]).
-
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
@@ -36,18 +25,13 @@ pub use super::model_sheet::AdminPassword;
 use super::pieces::{DraftCheck, FixLine, FixPrompt, MachineChip, RunningSwitch, SecretRow};
 pub use super::runs::{AdminAsks, PendingAdmin, Run, RunDone};
 
-/// `machines.json` as the window reads and writes it.
 pub trait Registry: Send + Sync {
     fn load(&self) -> RegistryState;
     fn all(&self) -> Vec<Machine> {
         self.load().machines()
     }
-    /// `false`: not saved (the file can't be read and is never written over).
     fn save(&self, machines: &[Machine]) -> bool;
-    /// Where it was read from (the database or a file), for the window's notes. May open the
-    /// database: the model asks once per read, never per frame.
     fn path(&self) -> String;
-    /// Where a v1 file's bytes went.
     fn backup(&self) -> String;
 }
 
@@ -66,24 +50,17 @@ impl Registry for RegistryFiles {
     }
 }
 
-/// The Secret Vault as the window lists it: names only, and the two actions a button takes.
 pub trait VaultList: Send + Sync {
     fn entries(&self) -> Vec<VaultEntry>;
-    /// Rename (on a click): moves the entry and its value to the new name.
     fn rename(&self, old: &str, new: &str) -> Result<(), String>;
-    /// Renew…: opens the secret's page.
     fn renew(&self, name: &str, url: Option<&str>) -> Result<(), String>;
-    /// What changes when the list is saved (its time and size), to watch it cheaply; `None` when
-    /// there is nothing to watch.
     fn stamp(&self) -> Option<VaultStamp> {
         None
     }
 }
 
-/// The vault list's modified time and size.
 pub type VaultStamp = (std::time::SystemTime, u64);
 
-/// The engine's parts the window holds, shared with its background work.
 #[derive(Clone)]
 pub struct Parts {
     pub engine: Arc<SetupEngine>,
@@ -92,9 +69,7 @@ pub struct Parts {
     pub registry: Arc<dyn Registry>,
     pub vault: Arc<dyn VaultList>,
     pub runner: Arc<dyn Runner>,
-    /// Seconds since 1970.
     pub clock: Arc<dyn Fn() -> f64 + Send + Sync>,
-    /// Why nothing runs, while the tool is off.
     pub off: Option<&'static str>,
 }
 
@@ -122,7 +97,6 @@ impl Tab {
     }
 }
 
-/// The sheet on show.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Sheet {
     Fix(FixPrompt),
@@ -130,7 +104,6 @@ pub enum Sheet {
     Job(JobForm),
 }
 
-/// The issues to fetch from GitHub for the morning items, after a reload.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct IssueFetch {
     pub generation: u64,
@@ -138,13 +111,11 @@ pub struct IssueFetch {
 }
 
 impl IssueFetch {
-    /// Runs `gh` through the runner (blocking).
     pub fn run(&self, runner: &dyn Runner) -> (BTreeMap<String, Vec<GhIssue>>, BTreeSet<String>) {
         morning::fetch_issues_checked(&self.repos, runner)
     }
 }
 
-/// The diff sheet of a ready branch.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DiffSheet {
     pub id: String,
@@ -158,32 +129,22 @@ pub struct MachinesModel {
     pub(super) pending: Option<PendingAdmin>,
     pub tab: Tab,
     pub registry: RegistryState,
-    /// Where the registry was read from, kept as of the last read: asking the registry costs a
-    /// database open, and the view wants it every frame.
     registry_path: String,
     pub machines: Vec<Machine>,
     pub vault_entries: Vec<VaultEntry>,
-    /// The list's stamp and each name's `updated` when last looked at (`model_vault`).
     pub(super) vault_stamp: Option<VaultStamp>,
     pub(super) vault_seen: BTreeMap<String, String>,
     pub migration_note: Option<String>,
     pub rename_note: Option<String>,
-    /// A Rename is moving the legacy secrets in the background.
     pub(super) renaming: bool,
-    /// A round of checks a poll started is running.
     pub(super) checking: bool,
     pub registry_problem: Option<String>,
-    /// Renew… and the like: a line at the bottom.
     pub notice: Option<String>,
     pub outcomes: BTreeMap<String, FixLine>,
     pub update_notes: BTreeMap<String, String>,
-    /// The sheet on show; changed only through `open_sheet`, `close_sheet` and the Fix requests,
-    /// which clear the admin password with it (`model_sheet`).
     pub(super) sheet: Option<Sheet>,
-    /// The Fix sheet's admin password, for its one Run.
     pub(super) password: AdminPassword,
     pub items: Vec<MorningItem>,
-    /// A line for an item whose last action worked, by item id. It leaves with the item.
     pub done: BTreeMap<String, String>,
     pub github_note: Option<String>,
     issues: BTreeMap<String, Vec<GhIssue>>,
@@ -231,8 +192,6 @@ impl MachinesModel {
         &self.parts.engine
     }
 
-    // MARK: Registry
-
     fn refresh_machines(&mut self) {
         self.registry = self.parts.registry.load();
         self.registry_path = self.parts.registry.path();
@@ -260,18 +219,14 @@ impl MachinesModel {
         !matches!(self.registry, RegistryState::Unreadable(_))
     }
 
-    /// Why nothing can act, while the tool is off (no `--live`): checks, fixes, sends and Add
-    /// would all be refused by the engine's runner, so the controls say so up front.
     pub fn off_reason(&self) -> Option<&'static str> {
         self.parts.off
     }
 
-    /// Whether the controls that run something (Check, Set up, Refresh, Send again, Add) are live.
     pub fn can_act(&self) -> bool {
         self.parts.off.is_none()
     }
 
-    /// Why Add machine… is disabled: the unreadable registry, else the tool being off.
     pub fn add_block(&self) -> Option<String> {
         self.unreadable_note()
             .or_else(|| self.off_reason().map(str::to_owned))
@@ -288,8 +243,6 @@ impl MachinesModel {
         self.migration_note = None;
     }
 
-    /// Reads the registry and the vault again and rebuilds the items from the latest reports;
-    /// what to fetch from GitHub for them, if anything.
     pub fn reload(&mut self) -> Option<IssueFetch> {
         self.refresh_machines();
         self.refresh_vault();
@@ -305,7 +258,6 @@ impl MachinesModel {
         })
     }
 
-    /// The issues a fetch found; dropped when a later reload began meanwhile.
     pub fn issues_fetched(
         &mut self,
         generation: u64,
@@ -324,8 +276,6 @@ impl MachinesModel {
         self.rebuild();
     }
 
-    /// A machine whose last poll failed still shows the items of its last good status; acting on
-    /// them fails with a plain error while it is away.
     fn rebuild(&mut self) {
         let mut reports = self.parts.poller.reports();
         for (name, report) in reports.iter_mut() {
@@ -346,8 +296,6 @@ impl MachinesModel {
         self.parts.actions.prune_outcomes(&self.items);
     }
 
-    // MARK: What the cards read
-
     pub fn chip(&self, machine: &Machine) -> MachineChip {
         let report = self.parts.poller.report(&machine.name);
         let previous = self.parts.poller.previous_of(&machine.name);
@@ -366,7 +314,6 @@ impl MachinesModel {
             .collect()
     }
 
-    /// The status the poller last got from a machine, or the one before a failed poll.
     pub fn status_for(&self, machine: &Machine) -> Option<WorkerStatus> {
         let last = self
             .parts
@@ -385,7 +332,6 @@ impl MachinesModel {
         self.parts.poller.report(&machine.name)
     }
 
-    /// `name`'s record with the facts the checks learned laid over it.
     pub fn machine(&self, name: &str) -> Option<Machine> {
         self.machines
             .iter()
@@ -406,7 +352,6 @@ impl MachinesModel {
         )
     }
 
-    /// The secret files of a machine with what the checks found about each.
     pub fn secret_rows(&self, machine: &Machine) -> Vec<SecretRow> {
         let results = self.parts.engine.results(&machine.name);
         let today = today_local((self.parts.clock)());
@@ -432,11 +377,7 @@ impl MachinesModel {
             .collect()
     }
 
-    // MARK: Changing the record (never touches a machine)
-
     fn commit(&mut self, change: impl FnOnce(&mut Vec<Machine>) -> bool) -> Result<(), String> {
-        // the latest file, not the last render: the engine saves what the checks learn, under the
-        // same lock, so the load, the change and the save are one step against it
         let saved = {
             let _writing = write_lock();
             let mut list = match self.parts.registry.load() {
@@ -456,7 +397,6 @@ impl MachinesModel {
             return Err("Couldn't save machines.json".into());
         }
         self.registry_problem = None;
-        // the record only: no GitHub fetch for a change that did not touch the repos' issues
         self.refresh_machines();
         Ok(())
     }
@@ -471,7 +411,6 @@ impl MachinesModel {
         });
     }
 
-    /// Removes the record only. Nothing on the machine changes.
     pub fn remove(&mut self, machine: &str) {
         let removed = self.commit(|list| {
             let before = list.len();
@@ -479,13 +418,11 @@ impl MachinesModel {
             list.len() != before
         });
         self.outcomes.remove(machine);
-        // gone from the registry: the engine drops its results, log and learned facts too
         if removed.is_ok() {
             self.parts.engine.forget(machine);
         }
     }
 
-    /// Adds or replaces the machine's sd worker job.
     pub fn save_job(&mut self, draft: &JobDraft) -> Result<(), String> {
         if let Some(first) = job_problems(draft).first() {
             return Err(first.clone());
@@ -502,10 +439,6 @@ impl MachinesModel {
         )
     }
 
-    // MARK: Add machine
-
-    /// The Add sheet's Check (blocking: one ssh): Reachable, the OS and the abilities of a machine
-    /// that is not in the registry yet. An unsafe form is not checked at all.
     pub fn draft_check(
         engine: &SetupEngine,
         name: &str,
@@ -522,8 +455,6 @@ impl MachinesModel {
         DraftCheck::from_results(&results, &inputs)
     }
 
-    /// Saves the machine (the record only). It runs no check and no Fix; the caller checks the
-    /// new machine afterwards.
     pub fn add(
         &mut self,
         name: &str,
@@ -546,7 +477,6 @@ impl MachinesModel {
         let mut machine = Machine::new(name, host, user);
         machine.os = check.detected.os;
         if machine.os == Some(MachineOs::Linux) {
-            // sudo as the worker account is refused on Linux
             machine.set_admin(AdminAccess::RootSsh);
         }
         if let Some(fv) = check.detected.file_vault {
@@ -572,14 +502,10 @@ impl MachinesModel {
         })
     }
 
-    // MARK: Actions on the morning items (called from buttons only)
-
-    /// Whether an action on `item` may start: one at a time per item, and not after it was done.
     pub fn may_act(&self, item: &MorningItem) -> bool {
         !self.parts.actions.is_running(&item.id) && !self.done.contains_key(&item.id)
     }
 
-    /// An action ended: notes the success on the item when it left no error.
     pub fn acted(&mut self, item_id: &str, success: Option<&str>) {
         if let Some(text) = success {
             if self.parts.actions.last_error(item_id).is_none() {

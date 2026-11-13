@@ -1,19 +1,3 @@
-//! Where `notchling-machines` reads and writes, and the engine's parts for a run or a render.
-//!
-//! The data folder is Chat's (`DataRoot`: `--data-root`, `NOTCHLING_DATA_ROOT`, else the real
-//! one). In it the Swift app's `machines.json` is only read; this tool's own copy of it and its
-//! pending update offers are documents in `<data>/notchling.db` (the files they used to be, under
-//! `<data>/daemon/machines/`, move in once), and its audit log, merge worktrees, scratch and cache
-//! stay files there (`MachineRoots`). A render opens nothing for writing: it neither imports,
-//! migrates nor saves, so a checked-in fixture folder gets no database. Every process goes
-//! through the engine's runner:
-//! `ProcessRunner` only with `--live`, else `Refusing`, which answers each call with the off
-//! message and starts nothing. The vault's values are read only with `--vault`; the list of names
-//! (the `daemon/vault` document in `<data>/notchling.db`, or the old `<data>/daemon/vault.json`
-//! until the daemon moves it in; no values) is read for the banners either way, and a read
-//! never writes. A fixture root
-//! turns both switches off whatever the flags say.
-
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -38,25 +22,16 @@ use notchling_engine::vault::VaultRequest;
 use super::model::{Parts, VaultList, VaultStamp};
 use crate::chat::data::DataRoot;
 
-/// What the tool runs over.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Setup {
-    /// Notchling's data folder (the Swift app's `machines.json` is in it).
     pub data_dir: PathBuf,
-    /// The user's home (the plugin versions to put on a machine are read under it).
     pub home: PathBuf,
-    /// ssh, `gh` and `open` may run.
     pub live: bool,
-    /// The Secret Vault's values may be read.
     pub vault: bool,
-    /// A fixture root: never a process, never the vault.
     pub fixture: bool,
-    /// A render: it imports, migrates and saves nothing (a fixture folder is checked in, and the
-    /// database would land in it).
     pub read_only: bool,
 }
 
-/// Seconds since 1970.
 pub fn now_secs() -> f64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -65,14 +40,10 @@ pub fn now_secs() -> f64 {
 }
 
 impl Setup {
-    /// For the window: the `--data-root` folder, else the environment's, else the real folders
-    /// (`None` without a home). A fixture root never runs a process or opens the vault.
     pub fn for_run(data_root: Option<&Path>, live: bool, vault: bool) -> Option<Setup> {
         Some(Setup::of(DataRoot::for_run(data_root)?, live, vault))
     }
 
-    /// For a render: the `--data-root` folder, else the environment's, else the fixture this
-    /// crate carries (`fixtures/machines`). Never the real home, never a process.
     pub fn for_render(data_root: Option<&Path>) -> Setup {
         let root = match data_root {
             Some(dir) => DataRoot::fixture(dir),
@@ -105,14 +76,10 @@ impl Setup {
         MachineRoots::in_data(&self.data_dir)
     }
 
-    /// The daemon's own vault list (a document in `<data>/notchling.db`; the old
-    /// `<data>/daemon/vault.json` is read until the daemon moves it in), never the Swift app's.
-    /// Reading it makes no database, so a render over a fixture folder writes nothing.
     pub fn vault_index(&self) -> VaultIndex {
         VaultIndex::in_data(&self.data_dir)
     }
 
-    /// The engine, the poller, the morning actions, the registry and the vault list.
     pub fn parts(&self) -> Parts {
         let roots = self.roots();
         let registry = Arc::new(RegistryFiles {
@@ -187,8 +154,6 @@ impl Setup {
     }
 }
 
-/// Opens a page in the browser through the runner, so an off tool opens nothing. The vault form
-/// is the daemon's: a Fix that asks for it says so in its message instead.
 struct UrlOpener {
     runner: Arc<dyn Runner>,
 }
@@ -200,7 +165,6 @@ impl Opener for UrlOpener {
     fn open_form(&self, _request: &VaultRequest) {}
 }
 
-/// `/usr/bin/open <url>` on macOS; nowhere else yet.
 fn open_url(runner: &dyn Runner, url: &str) {
     if !cfg!(target_os = "macos") || !(url.starts_with("https://") || url.starts_with("http://")) {
         return;
@@ -211,8 +175,6 @@ fn open_url(runner: &dyn Runner, url: &str) {
     ));
 }
 
-/// The vault as the window lists it: the names from the index, renames and renewals through the
-/// engine's secret source (which refuses while the vault is off).
 struct VaultFiles {
     index: VaultIndex,
     secrets: Arc<dyn SecretSource>,
@@ -230,8 +192,6 @@ impl VaultList for VaultFiles {
         self.secrets.rename(old, new)
     }
 
-    /// What differs whenever the list does: the list is a document, which has no modified time
-    /// of its own, so this is its text hashed (one small read; the window's tick calls it).
     fn stamp(&self) -> Option<VaultStamp> {
         self.index.stamp()
     }

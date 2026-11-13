@@ -1,7 +1,3 @@
-//! The registry: `machines.json` v2 kept as a document in `notchling.db`, the one-time v1
-//! migration, the old file moving in, and what is never overwritten (Swift `MachinesRegistryTests`).
-//! Files live in a private temp folder; nothing real is read.
-
 use super::fakes::TempDir;
 use super::registry::*;
 use crate::store;
@@ -17,7 +13,6 @@ fn repo() -> MachineRepo {
     }
 }
 
-/// A machine with an sd worker job, as the Swift convenience initializer made it.
 fn machine(name: &str, user: &str, python: &str, sd_path: &str, file_vault: bool) -> Machine {
     let mut m = Machine::new(name, name, user);
     m.file_vault = file_vault;
@@ -42,13 +37,10 @@ fn sample() -> Vec<Machine> {
     ]
 }
 
-/// A registry over the data folder `dir/<tag>`, its old own file there as `machines.json`, no
-/// Swift file.
 fn registry(dir: &TempDir, tag: &str) -> RegistryFiles {
     RegistryFiles::single(&dir.join(tag))
 }
 
-/// The same, with the old own file's text written first.
 fn with_old_file(dir: &TempDir, tag: &str, text: &str) -> RegistryFiles {
     let reg = registry(dir, tag);
     write(&reg.old_own, text);
@@ -60,7 +52,6 @@ fn write(path: &Path, text: &str) {
     std::fs::write(path, text).unwrap();
 }
 
-/// The files in `dir`, without the database's.
 fn names(dir: &Path) -> Vec<String> {
     let mut list: Vec<String> = std::fs::read_dir(dir)
         .unwrap()
@@ -119,9 +110,6 @@ fn python_defaults_when_the_key_is_missing() {
     assert_eq!(reg.all()[0].python(), "python3");
 }
 
-// MARK: machines.json v2 and the one-time migration
-
-/// Plan C's doc-comment example, as the v1 file a user may already have.
 const V1_TEXT: &str = r#"[
   {"name": "m1", "host": "m1", "user": "sondoan", "python": "python3",
    "sdPath": "/Users/sondoan/sd/sd.py", "fileVault": true,
@@ -216,7 +204,6 @@ fn a_second_v1_registry_gets_its_own_backup() {
     let dir = TempDir::new("reg");
     let reg = with_old_file(&dir, "data", V1_TEXT);
     reg.load();
-    // the registry is gone (a removed document), and another v1 file turns up
     store::update_doc(&reg.data_dir, REGISTRY_DOC, |_| Ok(None)).unwrap();
     write(&reg.old_own, V1_OTHER);
 
@@ -317,8 +304,6 @@ fn unknown_version_or_job_kind_is_unreadable() {
     }
 }
 
-/// A Linux machine's admin can't be the worker account, so a file that doesn't say defaults it to
-/// root over SSH. A Mac keeps sudo, and what a file says is kept.
 #[test]
 fn a_linux_machine_without_an_admin_key_defaults_to_root_over_ssh() {
     let dir = TempDir::new("reg");
@@ -361,7 +346,6 @@ fn v2_fields_may_be_missing_except_name_host_user() {
     assert!(m.sd_worker().is_none());
     assert_eq!(m.claude_secret, "claude-worker");
     assert_eq!(m.admin(), AdminAccess::Sudo);
-    // A job with no settings in it gets the defaults, with the secret named after the machine.
     let reg = with_old_file(
         &dir,
         "job",
@@ -413,14 +397,12 @@ fn save_writes_when_missing_and_round_trips_v2() {
     assert_eq!(m.python(), "/usr/bin/python3.12");
     let text = doc(&reg).unwrap();
     assert!(text.contains("\"version\": 2"));
-    // keys are sorted: admin before claudeSecret
     assert!(text.find("\"admin\"").unwrap() < text.find("\"claudeSecret\"").unwrap());
     assert!(
         text.contains("\"root-ssh\"")
             && text.contains("\"sd-worker\"")
             && text.contains("\"linux\"")
     );
-    // A saved v2 registry is saved again without a backup.
     assert!(reg.save(&[m]));
     assert!(!backup_path(&reg.old_own).exists());
 }
@@ -446,9 +428,6 @@ fn the_sd_worker_setter_adds_replaces_and_removes_the_job() {
     assert!(m.jobs.is_empty());
 }
 
-// MARK: the Rust tool's own copy next to the Swift app's file
-
-/// A registry with a Swift file as well, in `dir/swift/machines.json`.
 fn with_swift(dir: &TempDir, text: &str) -> (RegistryFiles, PathBuf) {
     let swift = dir.join("swift/machines.json");
     write(&swift, text);
@@ -461,8 +440,6 @@ fn with_swift(dir: &TempDir, text: &str) -> (RegistryFiles, PathBuf) {
     (reg, swift)
 }
 
-/// Until handover the Swift app's file is only ever read: a v1 file there migrates into the tool's
-/// own document, and the Swift file's bytes stay as they were.
 #[test]
 fn the_swift_apps_file_is_read_and_never_written() {
     let dir = TempDir::new("reg");
@@ -495,8 +472,6 @@ fn a_v2_swift_file_is_read_and_saving_starts_the_documents() {
     assert!(std::fs::read_to_string(swift).unwrap().contains("\"s\""));
 }
 
-// MARK: the old own file moving into the database
-
 const OLD_V2: &str = r#"{"version":2,"machines":[{"name":"old","host":"old","user":"u"}]}"#;
 
 #[test]
@@ -515,7 +490,6 @@ fn an_unreadable_old_own_file_stays_and_is_read_as_the_source() {
     let dir = TempDir::new("reg");
     let (reg, swift) = with_swift(&dir, V1_TEXT);
     write(&reg.old_own, "{ not json");
-    // the broken own file shadows the Swift app's, as the broken own file did before
     assert!(matches!(reg.load(), RegistryState::Unreadable(_)));
     assert!(!reg.save(&sample()));
     assert_eq!(std::fs::read(&reg.old_own).unwrap(), b"{ not json");
@@ -539,7 +513,6 @@ fn an_existing_document_wins_over_the_old_own_file() {
         "the file is dropped, its content lost"
     );
 
-    // a broken old file doesn't shadow a document either, and stays
     write(&reg.old_own, "{ not json");
     assert_eq!(reg.all(), sample());
     assert!(reg.save(&sample()[..1]));
@@ -568,8 +541,6 @@ fn a_render_never_imports_migrates_or_saves() {
     assert!(!backup_path(&reg.old_own).exists());
     assert_eq!(std::fs::read(swift).unwrap(), V1_TEXT.as_bytes());
 }
-
-// MARK: writers at once
 
 #[test]
 fn writers_at_once_never_corrupt_the_registry() {

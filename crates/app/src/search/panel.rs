@@ -1,10 +1,3 @@
-//! The search panel's window (macOS; the Swift `SearchPanel` and `SearchPanelController`).
-//! Borderless and non-activating, like Spotlight: it floats near the top of the screen the mouse
-//! is on, over every Space and beside full-screen apps, and goes away when you click elsewhere.
-//! A non-activating panel only gets the keyboard while its app is active, so showing it activates
-//! Notchling, and closing it with Esc gives the app you were in its focus back; opening a page or
-//! a session doesn't, since the Artifacts or Chat window takes over.
-
 use std::sync::Arc;
 
 use gpui::{
@@ -24,12 +17,10 @@ use super::view::SearchPanelView;
 use super::wire::Results;
 use crate::mac::capture::ns_window;
 
-/// The library the panel and the Artifacts window read, shared. Not set in a render.
 pub struct AppSearch(pub Arc<Library>);
 
 impl Global for AppSearch {}
 
-/// The panel while it is open, and the app to give focus back to when it closes.
 #[derive(Default)]
 pub struct SearchWindows {
     panel: Option<WindowHandle<SearchPanelView>>,
@@ -38,14 +29,12 @@ pub struct SearchWindows {
 
 impl Global for SearchWindows {}
 
-/// The app's library, or one with nothing behind it (a render, a fixture root).
 pub fn app_library(cx: &App) -> Arc<Library> {
     cx.try_global::<AppSearch>()
         .map(|l| l.0.clone())
         .unwrap_or_else(|| Arc::new(Library::fixed(Results::default())))
 }
 
-/// ⌘⇧P: opens the panel, or closes it when it is open.
 pub fn toggle(cx: &mut App) {
     let open = cx.default_global::<SearchWindows>().panel.is_some();
     if open {
@@ -55,8 +44,6 @@ pub fn toggle(cx: &mut App) {
     }
 }
 
-/// Opens the panel near the top of the screen the mouse is on and activates the app, remembering
-/// the app that was in front.
 pub fn show(cx: &mut App) {
     let Some(mtm) = MainThreadMarker::new() else {
         return;
@@ -66,8 +53,6 @@ pub fn show(cx: &mut App) {
     let top = top_point(mtm);
     let height = SearchModel::new().height();
     let options = WindowOptions {
-        // Placed for real once open: AppKit keeps a new titled window below the menu bar, and
-        // GPUI sets the frame again after opening.
         window_bounds: Some(WindowBounds::Windowed(Bounds {
             origin: point(px(0.0), px(0.0)),
             size: size(px(WIDTH), px(height)),
@@ -101,7 +86,6 @@ pub fn show(cx: &mut App) {
     }
 }
 
-/// Closes the panel from outside its window. `returning` gives the app you were in its focus back.
 pub fn hide(cx: &mut App, returning: bool) {
     let (handle, previous) = forget(cx);
     if let Some(handle) = handle {
@@ -114,7 +98,6 @@ pub fn hide(cx: &mut App, returning: bool) {
     }
 }
 
-/// Closes the panel from inside its own window (a key, a click on a row, a click elsewhere).
 pub fn close(cx: &mut App, window: &mut Window, returning: bool) {
     let (_, previous) = forget(cx);
     window.remove_window();
@@ -123,28 +106,23 @@ pub fn close(cx: &mut App, window: &mut Window, returning: bool) {
     }
 }
 
-/// Lets go of the panel's handle and the remembered app.
 fn forget(cx: &mut App) -> (Option<WindowHandle<SearchPanelView>>, Option<i32>) {
     let windows = cx.default_global::<SearchWindows>();
     (windows.panel.take(), windows.previous_pid.take())
 }
 
-/// The app that was in front, unless it was this one.
 fn previous_app() -> Option<i32> {
     let front = NSWorkspace::sharedWorkspace().frontmostApplication()?;
     let pid = front.processIdentifier();
     (pid != std::process::id() as i32).then_some(pid)
 }
 
-/// Brings the remembered app back to the front.
 fn give_back(pid: Option<i32>) {
     if let Some(app) = pid.and_then(NSRunningApplication::runningApplicationWithProcessIdentifier) {
         app.activateWithOptions(NSApplicationActivationOptions::empty());
     }
 }
 
-/// Like Spotlight: centred, about a quarter of the way down the screen the mouse is on (the main
-/// screen without one). AppKit coordinates: the point the panel hangs from.
 fn top_point(mtm: MainThreadMarker) -> (f64, f64) {
     let mouse = NSEvent::mouseLocation();
     let screens = NSScreen::screens(mtm);
@@ -165,9 +143,6 @@ fn top_point(mtm: MainThreadMarker) -> (f64, f64) {
     )
 }
 
-/// What makes the window the panel: borderless and non-activating (GPUI makes every window
-/// Titled), at the modal panel level, on every Space and beside full-screen apps, transient, with
-/// a shadow, and staying put when the app deactivates (closing is the panel's own decision).
 fn configure(w: &NSWindow) {
     w.setStyleMask(NSWindowStyleMask::Borderless | NSWindowStyleMask::NonactivatingPanel);
     w.setLevel(NSModalPanelWindowLevel);
@@ -181,7 +156,6 @@ fn configure(w: &NSWindow) {
     w.setHidesOnDeactivate(false);
 }
 
-/// Hangs the panel from `top` at `height`, when its frame differs.
 pub(super) fn place(w: &NSWindow, top: (f64, f64), height: f32) {
     let height = f64::from(height);
     let want = NSRect::new(

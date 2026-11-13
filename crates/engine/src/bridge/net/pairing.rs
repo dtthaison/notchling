@@ -1,18 +1,13 @@
-//! `PairingCodes`: one live pairing code at a time, 8 characters, valid 5 minutes, used once.
-
 use super::crypto::{constant_time_eq, random_bytes, RandomFailed};
 use std::sync::Mutex;
 
-/// How long a code lives, in milliseconds.
 pub const LIFETIME_MS: i64 = 5 * 60 * 1000;
 
-/// No 0/O or 1/I/L, which look alike on a phone screen.
 const ALPHABET: &[u8] = b"ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PairingCode {
     pub code: String,
-    /// Milliseconds since the epoch.
     pub expires_at: i64,
 }
 
@@ -26,7 +21,6 @@ impl PairingCodes {
         PairingCodes::default()
     }
 
-    /// A new code, replacing any live one.
     pub fn issue(&self, now_ms: i64) -> Result<PairingCode, RandomFailed> {
         let code: String = random_bytes(8)?
             .iter()
@@ -40,7 +34,6 @@ impl PairingCodes {
         Ok(issued)
     }
 
-    /// True once, for the live code, before it expires. A wrong guess leaves the live code alone.
     pub fn consume(&self, candidate: &str, now_ms: i64) -> bool {
         let mut current = self.lock();
         let Some(live) = current.as_ref().filter(|l| now_ms < l.expires_at) else {

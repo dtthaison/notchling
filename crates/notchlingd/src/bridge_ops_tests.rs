@@ -1,7 +1,3 @@
-//! The bridge ops called directly over a temp `AgentConsole` folder laid out as the Swift app
-//! leaves it: off at the start binds no port and writes nothing, the app's replies, pairing
-//! approval through the room, and the bridge's actions going through the acting switch.
-
 use super::*;
 use crate::acting::{Acting, ACTING_OFF};
 use crate::acting_ops::NoTerminal;
@@ -38,7 +34,6 @@ fn scratch(tag: &str) -> Scratch {
     Scratch(dir)
 }
 
-/// The Swift app's bridge folder: identity, two paired phones, internet access configured.
 fn swift_folder(data: &Path) {
     let bridge = data.join("bridge");
     std::fs::create_dir_all(&bridge).unwrap();
@@ -64,7 +59,6 @@ fn swift_folder(data: &Path) {
     std::fs::write(bridge.join("access.json"), access.to_string()).unwrap();
 }
 
-/// Two ports nobody listens on now.
 fn free_ports() -> (u16, u16) {
     let a = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let b = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -205,7 +199,6 @@ fn a_pairing_waits_for_the_apps_answer_and_none_is_no() {
     );
     assert!(room.named(topics::BRIDGE_PAIR_REQUEST).is_empty());
 
-    // Attached is not enough: an app that doesn't follow the bridge topic would never see it.
     room.app.store(true, Ordering::SeqCst);
     assert!(
         !approvals.request("Phone", "ios", "192.168.1.40"),
@@ -240,9 +233,6 @@ fn a_pairing_waits_for_the_apps_answer_and_none_is_no() {
     );
 }
 
-/// The real server and the real room: `can_follow` is true only for an app client that has
-/// subscribed to `bridge`, and then the request reaches it and its `bridge.pair.answer` is what
-/// the phone gets.
 #[test]
 fn a_pairing_is_asked_only_of_an_app_that_follows_the_bridge() {
     use notchling_local_api::{
@@ -387,11 +377,9 @@ fn the_phones_short_names_still_map() {
     ] {
         assert_eq!(model_id(short, &built_in).as_deref(), Some(id), "{short}");
     }
-    // Neither a name the phone doesn't know nor a family without a current model maps.
     assert_eq!(model_id("default", &built_in), None);
     assert_eq!(model_id("evil", &built_in), None);
 
-    // A newer Fable the tool lists is the current one.
     let newer = LiveModel {
         id: "claude-fable-5-3".into(),
         ..LiveModel::default()

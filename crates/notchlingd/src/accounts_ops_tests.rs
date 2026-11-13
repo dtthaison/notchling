@@ -1,6 +1,3 @@
-//! The accounts and lanes ops called directly: off, nothing reaches the Keychain, the network or a
-//! file; on, they run over an in-memory Keychain and scripted HTTP. Every value is a fake one.
-
 use crate::accounts_ops::{AccountsOps, GatedHttp, GatedSecurity, ACCOUNT_OPS};
 use crate::acting_ops_tests::{app, sessions, setup_in, FakeRoom, PROMPT};
 use crate::op_group::OpGroup;
@@ -224,7 +221,6 @@ fn on_a_switch_changes_the_login_and_says_so() {
     assert_eq!(events.len(), 1);
     let printed = format!("{got} {events:?}");
     assert!(!printed.contains("test-access"), "{printed}");
-    // A refusal is `failed`, in words.
     let e = w
         .ops
         .call(&app(), ops::ACCOUNTS_SWITCH, &json!({"id": "a9a9:0909"}))
@@ -261,7 +257,6 @@ fn lanes_are_made_listed_and_closed() {
     assert_eq!(w.room.named("accounts.changed").len(), 2);
 }
 
-/// The sign-in page's `state`, from its URL.
 fn state_of(url: &str) -> String {
     url.split('&')
         .find_map(|p| p.strip_prefix("state="))
@@ -343,7 +338,6 @@ fn turning_accounts_off_stops_a_sign_in() {
         .unwrap();
     w.flag.set(false);
     let login = begun["login"].as_str().unwrap();
-    // `finish` itself is refused while off; the sign-in ended on its own.
     assert!(w
         .ops
         .call(&app(), ops::ACCOUNTS_ADD_FINISH, &json!({"login": login}))
@@ -372,7 +366,6 @@ fn move_all_needs_acting_for_sessions_and_closes_the_lane_then_switches() {
     );
     chain.put(SAVED_SERVICE, ID2, &slot(ID2, "two@example.com", "2"));
     std::fs::create_dir_all(w.d.0.join("data")).unwrap();
-    // The sessions' rows run in the lane `/lanes/b`, which holds account 2.
     std::fs::write(
         w.d.0.join("data/lanes.json"),
         format!(
@@ -423,7 +416,6 @@ fn move_all_needs_acting_for_sessions_and_closes_the_lane_then_switches() {
         "nothing switched"
     );
 
-    // With acting on (a fresh ops, since `attach_acting` takes one).
     let w2 = world("move-all-on", true, chain.clone(), http.clone());
     std::fs::write(
         w2.d.0.join("home/.claude.json"),

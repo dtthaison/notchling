@@ -9,8 +9,6 @@ import '../protocol/models.dart';
 import 'tunnel.dart';
 import 'ws_transport.dart';
 
-/// An error answer from the Mac ({"ok":false,"error":{"code","message"}}), or a local failure
-/// (`timeout`, `disconnected`).
 class BridgeException implements Exception {
   const BridgeException(this.code, this.message);
   final String code;
@@ -31,15 +29,12 @@ class ConnectionStatus {
   const ConnectionStatus(this.phase, {this.retryAt, this.error, this.host, this.route, this.revoked = false});
   final LinkPhase phase;
 
-  /// How the link reaches the Mac while connected: home network or the internet tunnel.
   final RouteKind? route;
 
-  /// When the next attempt starts (while disconnected).
   final DateTime? retryAt;
   final Object? error;
   final String? host;
 
-  /// The Mac no longer accepts our token (it was revoked): reconnecting is pointless.
   final bool revoked;
 }
 
@@ -58,7 +53,6 @@ class ChatEvent extends BridgeEvent {
   final List<ChatMessage> messages;
 }
 
-/// A prompt appeared ([prompt] set) or went away ([resolvedRequestId] set).
 class PromptEvent extends BridgeEvent {
   const PromptEvent({this.prompt, this.resolvedRequestId});
   final PendingPrompt? prompt;
@@ -69,14 +63,12 @@ class OpenEvent extends BridgeEvent {
   const OpenEvent();
 }
 
-/// A frame of the phone stream: 4-byte magic "PHN1", uint32 big-endian sequence, then the JPEG.
 class PhoneFrame {
   const PhoneFrame(this.sequence, this.jpeg);
   final int sequence;
   final Uint8List jpeg;
 }
 
-/// What this connection wants pushed. Re-sent after every reconnect.
 class SubscriptionSpec {
   const SubscriptionSpec({this.sessions = false, this.sessionId, this.subagentId, this.phoneFps, this.phoneWidth, this.phoneWindowId});
   final bool sessions;
@@ -106,8 +98,6 @@ const List<Duration> defaultBackoff = <Duration>[
   Duration(seconds: 30),
 ];
 
-/// The typed client for the Mac bridge protocol (Console/Sources/ConsoleCore/Bridge). It keeps the link
-/// up on its own: it tries the Mac's hosts in order, says hello, re-subscribes, and backs off between rounds.
 class BridgeClient {
   BridgeClient({
     required this.connector,
@@ -123,7 +113,6 @@ class BridgeClient {
   final Duration requestTimeout;
   final List<Duration> backoff;
 
-  /// Called with the route that just worked, so the caller can remember it.
   final void Function(Endpoint route)? onGoodRoute;
   final DateTime Function() _clock;
 
@@ -140,10 +129,8 @@ class BridgeClient {
   final Map<int, Completer<Uint8List>> _snapshotWaiters = <int, Completer<Uint8List>>{};
   final Map<int, Completer<Uint8List>> _imageWaiters = <int, Completer<Uint8List>>{};
 
-  /// The newest chat message seen per session. Sent with every subscribe so the Mac pushes what came after it.
   final Map<String, String> _newestChatId = <String, String>{};
 
-  /// Notes that the phone already has [messageId] of [sessionId] (for instance from its disk cache).
   void rememberNewest(String sessionId, String messageId) => _newestChatId[sessionId] = messageId;
 
   Json _subscribeParams(SubscriptionSpec spec) {
@@ -189,11 +176,8 @@ class BridgeClient {
     await _frameController.close();
   }
 
-  /// Skips the wait before the next attempt.
   void retryNow() => _wake?.complete();
 
-  /// The phone's network changed (Wi-Fi to mobile data or back). Routes are tried again with the LAN first,
-  /// so the link moves to the home network when the phone arrives and to the tunnel when it leaves.
   void networkChanged() {
     if (_stopped) return;
     _preferLan = true;
@@ -207,8 +191,6 @@ class BridgeClient {
         unawaited(_connection?.close());
     }
   }
-
-  // MARK: - Connection loop
 
   Future<void> _run() async {
     int round = 0;
@@ -273,7 +255,6 @@ class BridgeClient {
         try {
           await connection?.close();
         } on Object {
-          // Already gone.
         }
         if (error is BridgeException && error.isUnauthorized) return null;
       }
@@ -287,11 +268,8 @@ class BridgeClient {
     try {
       await request('subscribe', _subscribeParams(spec));
     } on BridgeException {
-      // The caller sees the same error when it subscribes itself; a failed phone stream must not drop the link.
     }
   }
-
-  // MARK: - Wire
 
   void _onMessage(Object message) {
     if (message is String) {
@@ -335,7 +313,6 @@ class BridgeClient {
           _eventController.add(const OpenEvent());
       }
     } on FormatException {
-      // A push we cannot read is dropped; the next full list corrects any drift.
     }
   }
 
@@ -367,7 +344,6 @@ class BridgeClient {
     }
   }
 
-  /// Sends one request and returns its `data`. Errors from the Mac become [BridgeException].
   Future<Json> request(String op, [Json params = const <String, Object?>{}, Duration? timeout, int? idOverride]) async {
     final WsConnection? connection = _connection;
     if (connection == null) throw const BridgeException('disconnected', 'Chưa kết nối tới Mac.');
@@ -393,16 +369,11 @@ class BridgeClient {
     throw const BridgeException('internal', 'Phản hồi không đúng định dạng.');
   }
 
-  // MARK: - Ops
-
   Future<List<Session>> listSessions() async {
     final Json data = await request('sessions.list');
     return data.objects('sessions').map(Session.fromJson).toList();
   }
 
-  /// Messages oldest to newest. `before` is the id of the oldest message you already have; `after` the newest.
-  /// With `after`, [reset] true means the Mac no longer has that message in reach and the page is the newest
-  /// window to show instead of what you have.
   Future<({List<ChatMessage> messages, bool hasMore, bool reset})> chatGet(String sessionId,
       {String? subagentId, int limit = 50, String? before, String? after}) async {
     final Json data = await request('chat.get', <String, Object?>{
@@ -417,7 +388,6 @@ class BridgeClient {
     return (messages: messages, hasMore: data.boolean('hasMore'), reset: data['reset'] == true);
   }
 
-  /// A JPEG of a picture in [sessionId]'s chat, at most [maxWidth] wide.
   Future<Uint8List> chatImage(String sessionId, String imageId, {int maxWidth = 800}) async {
     final int id = _nextId++;
     final Completer<Uint8List> frame = Completer<Uint8List>();
@@ -433,8 +403,6 @@ class BridgeClient {
     }
   }
 
-  /// The slash commands of [sessionId] (built-ins plus the user's, the project's and plugins'). Macs that do not
-  /// know the op answer `invalid`; the caller keeps its built-in list then.
   Future<List<({String name, String description, String? argumentHint})>> commandsList(String sessionId) async {
     final Json data = await request('commands.list', <String, Object?>{'sessionId': sessionId});
     return <({String name, String description, String? argumentHint})>[
@@ -442,8 +410,6 @@ class BridgeClient {
     ];
   }
 
-  /// Sends a photo to [sessionId] with an optional caption. The bridge caps a message at 256 KB, so the bytes go in
-  /// base64 pieces between `session.image.begin` and `.end`; [onProgress] gets 0..1 after each piece.
   Future<void> sessionImage(String sessionId, Uint8List bytes, {String caption = '', void Function(double fraction)? onProgress}) async {
     final Json begin = await request(
       'session.image.begin',
@@ -468,7 +434,6 @@ class BridgeClient {
   Future<Json> vizGet(String sessionId, {bool entity = false}) =>
       request('viz.get', <String, Object?>{'sessionId': sessionId, if (entity) 'entity': true}, const Duration(seconds: 30));
 
-  /// A JPEG of a localhost page (the session's own URL when [url] is null).
   Future<Uint8List> webSnapshot(String sessionId, {String? url, int width = 400}) async {
     final int id = _nextId++;
     final Completer<Uint8List> frame = Completer<Uint8List>();
@@ -484,12 +449,10 @@ class BridgeClient {
     }
   }
 
-  /// Sends [text] to exactly [sessionId]. A view-only session answers `view_only`.
   Future<void> sessionMessage(String sessionId, String text) async {
     await request('session.message', <String, Object?>{'sessionId': sessionId, 'text': text}, const Duration(seconds: 60));
   }
 
-  /// Interrupts the running turn so the queued message runs next. Macs from before this op answer `invalid`.
   Future<void> sessionSendNow(String sessionId) async {
     await request('session.sendNow', <String, Object?>{'sessionId': sessionId}, const Duration(seconds: 15));
   }
@@ -498,7 +461,6 @@ class BridgeClient {
     await request('prompt.answer', <String, Object?>{'requestId': requestId, 'allow': allow});
   }
 
-  /// One entry per question: a 1-based option number or an option label.
   Future<void> promptChoose(String requestId, List<Object> choices) async {
     await request('prompt.answer', <String, Object?>{'requestId': requestId, 'choice': choices.length == 1 ? choices.single : choices});
   }
@@ -507,8 +469,6 @@ class BridgeClient {
     await request('session.new', <String, Object?>{'cwd': cwd, 'model': ?model}, const Duration(seconds: 30));
   }
 
-  /// Resumes a view-only session whose original process is gone in a Console-owned terminal on the Mac.
-  /// Returns the id of the session to switch to (it may still be a starting terminal's `pty:` id).
   Future<String> sessionTakeover(String sessionId, {bool stopOriginal = false}) async {
     final Json data = await request('session.takeover', <String, Object?>{'sessionId': sessionId, if (stopOriginal) 'stopOriginal': true},
         const Duration(seconds: 45));
@@ -521,7 +481,6 @@ class BridgeClient {
     await request('ping');
   }
 
-  /// Replaces what the Mac pushes to this connection and remembers it for reconnects.
   Future<void> subscribe(SubscriptionSpec spec) async {
     _subscription = spec;
     if (!isConnected) return;
@@ -535,9 +494,6 @@ class BridgeClient {
   }
 }
 
-/// Pairs with a Mac: tries each host with the one-time code, then the tunnel if the QR had one, and returns
-/// the device token. Throws [FingerprintMismatch] if a host presents another certificate, [BridgeException]
-/// if the Mac says no.
 Future<({String token, String host, bool viaTunnel})> pairWithMac({
   required WsConnector connector,
   required List<String> hosts,

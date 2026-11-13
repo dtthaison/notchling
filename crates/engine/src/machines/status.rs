@@ -1,15 +1,3 @@
-//! What `sd.py worker status --json` prints (Swift `WorkerStatus`; sd 1.19.1, `Worker.status()` in
-//! sdlib/worker.py is the contract). A machine never sends this to us: the poller reads it over ssh.
-//!
-//! It decodes leniently on purpose, because the worker on a machine can be older or newer than
-//! Notchling: an unknown key is ignored, and a missing key, a `null` or a value of the wrong type
-//! becomes the field's default (`None`, 0, "" or empty). One malformed entry in `ready`,
-//! `needs_you` or `stuck` is dropped and the rest are kept. [`WorkerStatus::decode`] reads
-//! snake_case keys and ISO-8601 dates with or without fractional seconds (as seconds since 1970).
-//!
-//! Everything in here came from a machine: it is data to show, and the actions treat each field as
-//! untrusted before it reaches a command.
-
 use serde_json::{Map, Value};
 use std::collections::BTreeMap;
 
@@ -19,9 +7,7 @@ use crate::transcript::util::parse_date;
 pub struct WorkerStatus {
     pub machine: String,
     pub version: String,
-    /// Why the worker is paused (host load or the production health check), `None` while it works.
     pub paused: Option<String>,
-    /// `github`, `claude`, `host` -> "ok" or "error: ..." / "limit" / "paused: ...".
     pub health: BTreeMap<String, String>,
     pub current: Option<Job>,
     pub ready: Vec<ReadyEntry>,
@@ -30,17 +16,10 @@ pub struct WorkerStatus {
     pub jobs_tonight: i64,
     pub weekly_pct: Option<f64>,
     pub token_expires_in_days: Option<i64>,
-    /// When the worker process last started (a reboot or a restart); `None` before its first start.
     pub booted_at: Option<f64>,
-    /// When the worker's state file was first made.
     pub since: Option<f64>,
-    /// GitHub writes the worker gave up on. `status` itself does not print them in 1.19.1 (only
-    /// `health.github` says "N outbox items failed"), so this is 0 unless a worker sends a list
-    /// (counted) or a number.
     pub outbox_failed: i64,
-    /// Issues queued for a kind no machine serves, e.g. `["ios"]`.
     pub unrouted: Vec<String>,
-    /// `None` when the machine has no TestFlight poller.
     pub testflight: Option<TestFlightStatus>,
 }
 
@@ -53,15 +32,11 @@ pub struct Job {
     pub started_at: Option<f64>,
 }
 
-/// The TestFlight feedback poller's state (`testflight.status()` in sdlib/testflight.py).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct TestFlightStatus {
-    /// No new feedback for over 7 days.
     pub quiet: bool,
     pub last_new_at: Option<f64>,
-    /// Submissions skipped after GitHub refused them.
     pub failed: Option<TestFlightFailed>,
-    /// The poller's state file is damaged.
     pub error: Option<String>,
 }
 
@@ -73,28 +48,22 @@ pub struct TestFlightFailed {
     pub at: Option<f64>,
 }
 
-/// A branch the worker verified and left ready to merge.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ReadyEntry {
     pub repo: String,
     pub issue: i64,
     pub branch: String,
     pub commit: String,
-    /// The worktree on the machine.
     pub worktree: String,
-    /// The verify evidence on the machine; empty from a worker that does not send it.
     pub evidence_dir: String,
     pub ready_at: Option<f64>,
 }
 
-/// A job that waits for you: a question, a failed verify, or a triage decision.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct NeedsYouEntry {
     pub repo: String,
     pub issue: i64,
-    /// `None` for an issue the worker's triage sent to you before any branch existed.
     pub branch: Option<String>,
-    /// `None` for the same triage entries.
     pub worktree: Option<String>,
     pub reason: String,
     pub question: Option<String>,
@@ -102,7 +71,6 @@ pub struct NeedsYouEntry {
     pub options: Vec<String>,
 }
 
-/// A job the worker gave up on.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct StuckEntry {
     pub repo: String,
@@ -113,13 +81,9 @@ pub struct StuckEntry {
     pub report_tail: String,
 }
 
-/// A date as ISO 8601, with or without fractional seconds (the worker writes
-/// `2026-11-05T22:10:31Z`). Seconds since 1970.
 pub fn parse_status_date(text: &str) -> Option<f64> {
     parse_date(text)
 }
-
-// Lenient readers: the value for a key, or `None` when it is missing, null or of another type.
 
 pub(super) fn string(o: &Map<String, Value>, key: &str) -> Option<String> {
     o.get(key)?.as_str().map(str::to_string)
@@ -130,7 +94,6 @@ pub(super) fn int(o: &Map<String, Value>, key: &str) -> Option<i64> {
     if let Some(n) = v.as_i64() {
         return Some(n);
     }
-    // 3.0 is an integer to Foundation's decoder; 3.5 is not.
     let f = v.as_f64()?;
     (f.fract() == 0.0 && f.abs() < 9.0e15).then_some(f as i64)
 }
@@ -151,7 +114,6 @@ fn object<'a>(o: &'a Map<String, Value>, key: &str) -> Option<&'a Map<String, Va
     o.get(key)?.as_object()
 }
 
-/// An array of strings; one element of another type makes the whole value `None`.
 fn strings(o: &Map<String, Value>, key: &str) -> Option<Vec<String>> {
     o.get(key)?
         .as_array()?
@@ -160,7 +122,6 @@ fn strings(o: &Map<String, Value>, key: &str) -> Option<Vec<String>> {
         .collect()
 }
 
-/// The elements that are objects and decode; anything else is dropped.
 fn lossy<T>(o: &Map<String, Value>, key: &str, read: fn(&Map<String, Value>) -> T) -> Vec<T> {
     let Some(Value::Array(all)) = o.get(key) else {
         return Vec::new();
@@ -169,7 +130,6 @@ fn lossy<T>(o: &Map<String, Value>, key: &str, read: fn(&Map<String, Value>) -> 
 }
 
 impl WorkerStatus {
-    /// Reads one `worker status --json` document; `None` when it is not a JSON object at all.
     pub fn decode(data: &[u8]) -> Option<WorkerStatus> {
         let Value::Object(o) = serde_json::from_slice::<Value>(data).ok()? else {
             return None;
@@ -178,7 +138,6 @@ impl WorkerStatus {
     }
 
     fn read(o: &Map<String, Value>) -> WorkerStatus {
-        // key by key: one value that is not a string drops that key only
         let health = object(o, "health")
             .map(|h| {
                 h.iter()

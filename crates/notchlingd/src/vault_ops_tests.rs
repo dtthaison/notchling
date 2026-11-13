@@ -1,7 +1,3 @@
-//! The vault service against a fake Keychain item, a temp database and a fake room: the
-//! switch, the tiers, the approval and request protocols, and that no value reaches an error, an
-//! event or the audit log. Every value here is an obvious fake.
-
 use super::*;
 use crate::switches::VAULT;
 use notchling_engine::vault::list::VaultIndex;
@@ -75,7 +71,6 @@ impl Drop for Setup {
 }
 
 impl Setup {
-    /// The list's text in the database (the daemon's list is a document in `notchling.db`).
     fn list_text(&self) -> String {
         notchling_engine::store::doc(&self.dir, notchling_engine::vault::list::INDEX_DOC)
             .unwrap()
@@ -84,7 +79,6 @@ impl Setup {
     fn audit(&self) -> String {
         std::fs::read_to_string(self.dir.join("audit.jsonl")).unwrap_or_default()
     }
-    /// Everything that left the service other than a reply: events, the audit log, the list.
     fn outside(&self) -> String {
         let events = format!("{:?}", self.room.events.lock().unwrap());
         let list = self.list_text();
@@ -136,7 +130,6 @@ pub(super) fn agent() -> Caller {
     caller(Tier::Agent, ClientKind::Cli)
 }
 
-/// Saves `gh` (a token, ask-first when `ask`) and `reg` (a login) through the app op.
 pub(super) fn seed(s: &Setup, ask: bool) {
     let gh = json!({"name": "gh", "kind": "token", "url": "https://api.github.com", "ask": ask});
     s.ops
@@ -229,12 +222,10 @@ fn turning_it_off_drops_the_values_read_while_on() {
 #[test]
 fn the_switch_going_off_forgets_and_ends_the_waits_at_once_with_no_call() {
     let s = setup("forget-now", true);
-    // `gh` asks first; `reg` doesn't.
     seed(&s, true);
     let use_reg = json!({"names": ["reg"], "folder": "/w", "command": "true"});
     s.ops.call(&agent(), ops::VAULT_USE, &use_reg).unwrap();
     let reads = *s.item.reads.lock().unwrap();
-    // Off then on with no call between: the listener forgot the values, so the next use reads.
     s.switch.set(false);
     s.switch.set(true);
     s.ops.call(&agent(), ops::VAULT_USE, &use_reg).unwrap();
@@ -335,7 +326,6 @@ fn ask_first_with_no_app_is_denied_without_reading_a_value() {
     assert!(s.audit().contains("\"result\":\"denied:gh\""));
 }
 
-/// Starts a use of `gh` on its own thread and returns it with the pending event once published.
 pub(super) fn pending_use(s: &Setup) -> (std::thread::JoinHandle<Result<Value, ApiError>>, Value) {
     s.room.follows.store(true, Ordering::SeqCst);
     let asked = || {
@@ -371,7 +361,6 @@ fn the_app_approves_once_with_the_id_it_was_sent() {
     assert_eq!(event["folder"], "/w/app");
     let id = event["id"].as_str().unwrap().to_string();
     assert_eq!(id.len(), "vault-approval-".len() + 32);
-    // Nobody but the app, as the app, answers; a guessed id answers nothing.
     let answer = |d: &str| json!({"id": id, "decision": d});
     for who in [
         agent(),
@@ -406,7 +395,6 @@ fn the_app_approves_once_with_the_id_it_was_sent() {
         s.room.pending(topics::VAULT_APPROVAL_RESOLVED).unwrap()["decision"],
         "once"
     );
-    // Once is once: the next use asks again.
     assert_eq!(s.ops.store.entry("gh").unwrap().unwrap().ask, Some(true));
     let again = s
         .ops

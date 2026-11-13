@@ -1,5 +1,3 @@
-//! The real pty handle's scrollback, and the `notchling-ptyhost` binary itself, always with
-//! `--socket` and `--state` in a scratch folder so the running hostd is never asked or replaced.
 #![cfg(unix)]
 
 mod common;

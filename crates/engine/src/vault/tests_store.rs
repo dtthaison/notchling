@@ -1,6 +1,3 @@
-//! The store against a fake Keychain item and a temp database (Swift `VaultStoreRenameTests`,
-//! plus saves, removes, Always Allow and the errors, which never hold a value).
-
 use super::entry::{Kind, VaultEntry, VaultValue};
 use super::list::VaultIndex;
 use super::store::{KeychainError, VaultError, VaultKeychain, VaultStore};
@@ -8,7 +5,6 @@ use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-/// The item in memory; `fail_writes` makes the next writes fail.
 #[derive(Clone, Default)]
 pub(crate) struct FakeItem {
     pub data: Arc<Mutex<Option<Vec<u8>>>>,
@@ -46,11 +42,9 @@ impl Temp {
         std::fs::create_dir_all(&dir).unwrap();
         Temp(dir)
     }
-    /// The list as the daemon keeps it: a document in `<temp>/notchling.db`.
     fn index(&self) -> VaultIndex {
         VaultIndex::in_data(&self.0)
     }
-    /// The file the list was before the database.
     fn old_file(&self) -> PathBuf {
         self.0.join("daemon/vault.json")
     }
@@ -114,7 +108,6 @@ fn two_stores_saving_at_once_both_keep_their_entries() {
         for t in 0..4 {
             let index = temp.index();
             scope.spawn(move || {
-                // each its own store, as the daemon and the Machines tool each have one
                 let store = VaultStore::new(index, Box::new(FakeItem::default()));
                 for i in 0..5 {
                     let entry = VaultEntry::new(&format!("s{t}-{i}"), Kind::Token);
@@ -180,7 +173,6 @@ fn a_save_writes_the_list_0600_and_the_value_to_the_item_only() {
         store.value(&entry).unwrap(),
         Some(value("fake-gh-token-0001"))
     );
-    // The same value again is no change; another is.
     let again = store
         .save(&entry, Some(value("fake-gh-token-0001")), Some(&entry), "t")
         .unwrap();
@@ -270,7 +262,6 @@ fn a_rename_that_failed_at_the_list_finishes_on_the_second_try() {
     store
         .save(&old, Some(value("the-claude-token-value")), None, "t")
         .unwrap();
-    // The list can't be changed (a trigger refuses the update): the item is, the list isn't.
     let db = crate::store::open(&temp.0).unwrap();
     db.execute_batch(
         "CREATE TRIGGER refuse_vault BEFORE UPDATE ON docs
@@ -344,7 +335,6 @@ fn remove_stop_asking_and_expiry() {
 #[test]
 fn remove_never_touches_a_value_the_daemons_list_doesnt_name() {
     let (_temp, item, store) = store("remove-unlisted");
-    // A value the Swift app saved in the same item, under a name only its own list has.
     *item.data.lock().unwrap() =
         Some(br#"{"swift-only":{"username":"","secret":"fake-swift-0001"}}"#.to_vec());
     let theirs = serde_json::json!({"swift-only": {"username": "", "secret": "fake-swift-0001"}});

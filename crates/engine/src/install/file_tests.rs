@@ -49,15 +49,12 @@ fn applying_backs_up_first_then_replaces_the_file() {
     assert_ne!(new, USER_HOOKS);
     #[cfg(unix)]
     assert_eq!(mode(&backup), 0o600);
-    // No temp file is left behind.
     assert_eq!(dir.names().len(), 2, "{:?}", dir.names());
 
-    // Nothing to do: no write, no new backup.
     let again = apply(&path, &install_all(), 1_700_000_000_999).unwrap();
     assert!(!again.wrote && again.backup.is_none());
     assert_eq!(backups(&dir).len(), 1);
 
-    // Removing backs up the installed state and gives the original back.
     let removed = apply(&path, &remove_all(), 1_700_000_001_000).unwrap();
     assert!(removed.wrote);
     assert_eq!(fs::read_to_string(&path).unwrap(), USER_HOOKS);
@@ -86,7 +83,6 @@ fn a_backup_never_replaces_an_older_one() {
     apply(&path, &remove_all(), 5).unwrap();
     let names = backups(&dir);
     assert_eq!(names.len(), 2, "{names:?}");
-    // The first one still holds the file as it was before anything.
     let first = fs::read_to_string(dir.path("settings.json.notchling-backup-5")).unwrap();
     assert_eq!(first, NO_HOOKS);
 }
@@ -141,7 +137,6 @@ fn a_missing_file_is_made_when_its_folder_is_there() {
         Err(FileError::NoFolder(_))
     ));
     assert!(!dir.path("no-such-folder").exists());
-    // Removing from a missing file does nothing, and makes nothing.
     let nope = dir.path("x/settings.json");
     assert!(matches!(
         plan(&nope, &remove_all()),
@@ -216,7 +211,6 @@ fn a_read_only_file_is_refused_unchanged_and_without_a_backup() {
     let dir = Scratch::new("readonly");
     let path = settings(&dir, USER_HOOKS);
     fs::set_permissions(&path, fs::Permissions::from_mode(0o444)).unwrap();
-    // Planning still works, and says so.
     let p = plan(&path, &install_all()).unwrap();
     assert!(p.read_only && p.hooks.changed);
     let err = apply(&path, &install_all(), 1).unwrap_err();
@@ -227,7 +221,6 @@ fn a_read_only_file_is_refused_unchanged_and_without_a_backup() {
     assert_eq!(fs::read_to_string(&path).unwrap(), USER_HOOKS);
     assert_eq!(dir.names(), vec!["settings.json"]);
     assert_eq!(mode(&path), 0o444);
-    // A read-only file with nothing to change is not an error.
     let done = apply(
         &path,
         &wanted(super::hooks::Want::Leave, super::hooks::Want::Leave),
@@ -257,14 +250,12 @@ fn a_symlinked_settings_file_is_written_through_and_stays_a_link() {
         .is_symlink());
     assert_eq!(fs::read_link(&link).unwrap(), real);
     assert_eq!(fs::read_to_string(&real).unwrap(), done.plan.hooks.text);
-    // The backup sits beside the link, where the user looks; nothing else lands in either folder.
     let backup = done.backup.unwrap();
     assert_eq!(backup.parent().unwrap(), dir.path("claude"));
     assert_eq!(fs::read_to_string(&backup).unwrap(), USER_HOOKS);
     assert_eq!(fs::read_dir(dir.path("dotfiles")).unwrap().count(), 1);
     assert_eq!(fs::read_dir(dir.path("claude")).unwrap().count(), 2);
 
-    // A relative link, and a chain of links, work the same.
     let two = dir.path("claude/two.json");
     symlink("settings.json", &two).unwrap();
     assert!(apply(&two, &remove_all(), 12).unwrap().wrote);
@@ -296,7 +287,6 @@ fn a_file_changed_after_it_was_planned_from_is_not_overwritten() {
     let dir = Scratch::new("changed");
     let path = settings(&dir, USER_HOOKS);
     let loaded = load(&path).unwrap();
-    // Claude Code saves its own change in between.
     let theirs = USER_HOOKS.replace("opus", "sonnet");
     fs::write(&path, &theirs).unwrap();
     let err = write_checked(&loaded, b"{}").unwrap_err();
@@ -304,7 +294,6 @@ fn a_file_changed_after_it_was_planned_from_is_not_overwritten() {
     assert_eq!(fs::read_to_string(&path).unwrap(), theirs);
     assert_eq!(dir.names(), vec!["settings.json"]);
 
-    // A file that appeared after it was seen missing is not replaced either.
     let gone = dir.path("later.json");
     let missing = load(&gone).unwrap();
     fs::write(&gone, "{\"theirs\": true}").unwrap();

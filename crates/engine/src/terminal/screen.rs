@@ -1,24 +1,15 @@
-//! A terminal's screen: a grid of cells fed with the bytes a program writes. A port of
-//! `TerminalScreen.swift`. It covers what Claude Code's interface sends through `claude attach`
-//! (recorded on 2.1.318: cursor moves, erases, 24-bit color, the alternate screen, mouse and paste
-//! modes) and skips everything else. Control sequences are in `csi.rs`, character widths in
-//! `width.rs`.
-
 use std::collections::VecDeque;
 
 use super::width;
 
-/// How many rows that scrolled off the top a screen keeps for scrolling back.
 pub const SCROLLBACK: usize = 5000;
 
-/// A cell's color: one of the 256 indexed ones, or 24-bit.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TermColor {
     Indexed(u8),
     Rgb(u8, u8, u8),
 }
 
-/// How a cell is drawn.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct TermStyle {
     pub fg: Option<TermColor>,
@@ -30,13 +21,10 @@ pub struct TermStyle {
     pub inverse: bool,
 }
 
-/// One cell of the grid.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TermCell {
-    /// The character, with any combining marks joined onto it; "" for the right half of a wide one.
     pub text: String,
     pub style: TermStyle,
-    /// 2 for the left half of a wide character, 0 for its right half.
     pub width: u8,
 }
 
@@ -56,7 +44,6 @@ pub(super) enum State {
     Escape,
     EscapeIntermediate,
     Csi,
-    /// OSC, DCS and the like: titles, links, queries. Skipped up to BEL or ESC \.
     Str,
     StrEscape,
 }
@@ -68,7 +55,6 @@ pub(super) struct SavedCursor {
     pub style: TermStyle,
 }
 
-/// The screen. Rows and columns are at least 1.
 #[derive(Clone, Debug)]
 pub struct TerminalScreen {
     pub(super) rows: usize,
@@ -81,7 +67,6 @@ pub struct TerminalScreen {
     pub(super) bracketed_paste: bool,
     pub(super) mouse_tracking: bool,
     pub(super) sgr_mouse: bool,
-    /// Answers the program asked for (cursor position, status), to write back to it.
     pub(super) replies: Vec<u8>,
     pub(super) style: TermStyle,
     pub(super) wrap_pending: bool,
@@ -89,7 +74,6 @@ pub struct TerminalScreen {
     pub(super) bottom: usize,
     pub(super) saved_cursor: Option<SavedCursor>,
     pub(super) saved_main: Option<Vec<Vec<TermCell>>>,
-    /// Rows scrolled off the top of the main screen, oldest first, at most [`SCROLLBACK`].
     pub(super) scrollback: VecDeque<Vec<TermCell>>,
     pub(super) state: State,
     pub(super) params: Vec<u8>,
@@ -138,7 +122,6 @@ impl TerminalScreen {
     pub fn cells(&self) -> &[Vec<TermCell>] {
         &self.cells
     }
-    /// (row, column), from 0.
     pub fn cursor(&self) -> (usize, usize) {
         (self.cursor_row, self.cursor_col)
     }
@@ -157,8 +140,6 @@ impl TerminalScreen {
     pub fn sgr_mouse(&self) -> bool {
         self.sgr_mouse
     }
-    /// Rows that scrolled off the top of the main screen, oldest first. The alternate screen (full
-    /// screen programs) adds none.
     pub fn scrollback(&self) -> &VecDeque<Vec<TermCell>> {
         &self.scrollback
     }
@@ -166,12 +147,10 @@ impl TerminalScreen {
         self.saved_main.is_some()
     }
 
-    /// The answers queued since the last call. Device-attribute queries never queue one.
     pub fn take_replies(&mut self) -> Vec<u8> {
         std::mem::take(&mut self.replies)
     }
 
-    /// Each row as plain text, trailing spaces dropped.
     pub fn lines(&self) -> Vec<String> {
         self.cells
             .iter()
@@ -190,8 +169,6 @@ impl TerminalScreen {
         if new_rows == self.rows && new_cols == self.cols {
             return;
         }
-        // Rows stay where they were: Claude Code redraws only what changed from its last frame, so
-        // moving rows up left pieces of the old frame on screen.
         let fit = |grid: &mut Vec<Vec<TermCell>>| {
             grid.truncate(new_rows);
             for row in grid.iter_mut() {
@@ -211,8 +188,6 @@ impl TerminalScreen {
         self.cursor_col = self.cursor_col.min(new_cols - 1);
         self.wrap_pending = false;
     }
-
-    // Parsing
 
     pub fn feed(&mut self, bytes: &[u8]) {
         for &b in bytes {
@@ -320,8 +295,6 @@ impl TerminalScreen {
         }
     }
 
-    // Writing
-
     fn put(&mut self, c: char) {
         if self.join_next || width::is_combining(c) {
             self.join_next = c == '\u{200D}';
@@ -377,7 +350,6 @@ impl TerminalScreen {
         row[col].text.push(c);
     }
 
-    /// An erased cell keeps the current background.
     pub(super) fn blank(&self) -> TermCell {
         TermCell {
             text: " ".to_string(),

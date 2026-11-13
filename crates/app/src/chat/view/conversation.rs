@@ -1,10 +1,3 @@
-//! The conversation column: the rows of `chat::rows`, drawn with the kit the way the Swift app's
-//! `ChatParts` draws them. A run of tool calls is one chip ("Ran 4 commands, read 1 file", the
-//! kinds' icons, a red failure count, a spinner while one runs, a chevron) that opens to a line
-//! per call, each opening to its command, output or diff; a thought is one faint line that opens
-//! to its text; a reply is Markdown; a turn ends in "Worked for 48s · Opus 5.5" between hairlines.
-//! What is open is `ChatView::expanded`; the newest group of a working session is always open.
-
 use std::cell::Cell;
 
 use gpui::{
@@ -28,13 +21,9 @@ use super::{message_actions, opinions, ChatView};
 use crate::chat::activity::Activity;
 use crate::chat::rows::Row;
 
-/// Rows sit this far apart (the Swift app's conversation stack).
 pub(super) const ROW_GAP: f32 = 14.0;
-/// Above the first row and below the last.
 pub(super) const COLUMN_PADDING_VERTICAL: f32 = 20.0;
 
-/// The chevron that opens and closes a row: right when folded, down when open. `points` is the
-/// Swift app's symbol size (9 on steps, 8 on a thought).
 pub(super) fn chevron(open: bool, points: f32, a: Appearance) -> Div {
     let shape = if open {
         Icon::ChevronDown
@@ -44,13 +33,6 @@ pub(super) fn chevron(open: bool, points: f32, a: Appearance) -> Div {
     icon(shape, points, Ink::TextFaint, a)
 }
 
-/// The live line after the last row (the Swift app's live row): a spinner, what the session is
-/// doing, "(50s · ↓ 2.9k tokens)" faint after it, and any background command still running. Its
-/// spinner's frames draw it again, so its clock moves with them.
-/// The activity line, just above the reply box: one line, its words cut with an ellipsis before
-/// the counts beside them. A prompt with nothing back for a while (`stalled`) gets "No reply
-/// yet" and Retry, which stops the stuck turn and sends the prompt again. With a background
-/// command still running (`shell`: its name and output file), the line is a link to its output.
 pub(super) fn activity_row(
     activity: &Activity,
     stalled: bool,
@@ -112,9 +94,6 @@ pub(super) fn activity_row(
     row.part_at("Activity Line", Corner::Trailing, a, cx)
 }
 
-/// The "↓ Latest" pill over the conversation's bottom right, while it is scrolled up (the Swift
-/// button: a secondary kit button with an arrow, 20 pt from the corner). It sits in the
-/// conversation, above the reply box. A click goes to the newest message and follows again.
 pub(super) fn latest_pill(
     s: &ConversationState,
     loading: bool,
@@ -151,7 +130,6 @@ pub(super) fn latest_pill(
     )
 }
 
-/// Your message: `split` is its words and the pictures it sent (`drops::split_images`).
 fn user_row(
     sel: &Sel,
     split: (String, Vec<std::path::PathBuf>),
@@ -162,7 +140,6 @@ fn user_row(
     cx: &App,
 ) -> Div {
     let id = sel.id();
-    // The Swift names: a sent message is "Your Message", one waiting for the turn "Queued Bubble".
     let name = match (queued, sending) {
         (_, true) => "Sending Bubble",
         (true, false) => "Queued Bubble",
@@ -170,8 +147,6 @@ fn user_row(
     };
     let note = if sending { "Sending…" } else { "Queued" };
     let (words, pictures) = split;
-    // Under the bubble where its delivered mark, time and Copy go once it's in (same gray, same
-    // row height), so nothing moves when it lands.
     let status = queued.then(|| {
         div()
             .h(px(super::message_actions::ROW_HEIGHT))
@@ -230,10 +205,8 @@ fn user_row(
         .children(status)
 }
 
-/// How tall a picture you sent shows over your words.
 const SENT_PICTURE: f32 = 120.0;
 
-/// A picture you sent, over your bubble; a click opens it.
 fn sent_picture(id: &str, path: &std::path::Path, a: Appearance) -> impl IntoElement {
     let text = path.to_string_lossy().into_owned();
     let (w, h) = super::markdown::image_shape(&text).unwrap_or((4, 3));
@@ -256,8 +229,6 @@ fn sent_picture(id: &str, path: &std::path::Path, a: Appearance) -> impl IntoEle
         )
 }
 
-/// A row, drawn. `id` is the item's (the queued bubbles at the end have none), `live` whether this
-/// is the newest step group of a working session.
 fn row_element(
     input: &ConversationInput,
     s: &ConversationState,
@@ -275,12 +246,9 @@ fn row_element(
             queued,
             sending,
         } => {
-            // The pictures you sent show as pictures, their paths taken out of the words.
             let split = crate::chat::drops::split_images(text, |p| s.markdown.borrow().is_file(p));
             user_row(sel, split, *images, *queued, *sending, a, cx)
         }
-        // No mark before each reply: the bubble alone says who wrote it. Its edge is the column's
-        // left edge, which the thoughts, the steps and the reply box share.
         Row::Assistant { text } => {
             let folder = input.session.as_ref().map_or("", |s| s.cwd.as_str());
             div().w_full().flex().items_start().child(
@@ -344,8 +312,6 @@ fn row_element(
     }
 }
 
-/// A row with its Second Opinion buttons and the cards of the opinions asked under it, when the
-/// item has something to review.
 fn row_with_opinions(
     input: &ConversationInput,
     s: &ConversationState,
@@ -357,7 +323,6 @@ fn row_with_opinions(
 ) -> AnyElement {
     super::pane::ROWS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let item = input.shown.items.get(i);
-    // The row's key, and the texts it makes selectable, numbered as they are drawn.
     let key = key_of(&input.shown.items, i, row);
     let next = Cell::new(0);
     let sel = Sel::Row {
@@ -366,13 +331,11 @@ fn row_with_opinions(
         state: &s.sel,
     };
     let element = row_element(input, s, row, &sel, live, a, cx);
-    // A subagent's transcript is only read: no second opinions on it.
     let subjects = item
         .filter(|_| input.subagent.is_none())
         .map(opinions::subjects)
         .unwrap_or_default();
     let anchors: Vec<String> = subjects.iter().map(|(anchor, _)| anchor.clone()).collect();
-    // The Second Opinion buttons show on hover, at the right end of the message's row of actions.
     let buttons = (!subjects.is_empty()).then(|| {
         let of = subjects.len();
         div()
@@ -385,7 +348,6 @@ fn row_with_opinions(
                 opinions::opinion_button(&anchor, subject, of, a, &input.chat, cx)
             }))
     });
-    // Your messages and Claude's replies get their row of actions beneath.
     let element = message_actions::with_actions(s, row, item, element, buttons, a, cx);
     if anchors.is_empty() {
         return element;
@@ -403,8 +365,6 @@ fn row_with_opinions(
         .into_any_element()
 }
 
-/// The newest step group of a working session stays open with its running call spinning (the
-/// Swift app's `liveTools`): the session works, and the last item is that group.
 pub(super) fn live_group_of(input: &ConversationInput) -> Option<usize> {
     let working = match &input.subagent {
         Some(sub) => sub.running,
@@ -413,7 +373,6 @@ pub(super) fn live_group_of(input: &ConversationInput) -> Option<usize> {
     crate::chat::activity::live_group(&input.shown, working)
 }
 
-/// A row of the list: row `i` of what `input` shows, with its Second Opinion buttons and cards.
 pub(super) fn render_row(
     input: &ConversationInput,
     s: &ConversationState,
@@ -426,8 +385,6 @@ pub(super) fn render_row(
     row_with_opinions(input, s, i, row, live, a, cx)
 }
 
-/// What the column shows in place of the rows, when there are none to show: a subagent still
-/// loading, a session on its way in, no session, no transcript. `None` when the rows are shown.
 pub(super) fn empty_column(
     input: &ConversationInput,
     s: &ConversationState,
@@ -439,7 +396,6 @@ pub(super) fn empty_column(
     let state = if input.subagent.as_ref().is_some_and(|sub| !sub.loaded) {
         Empty::Loading
     } else if input.loading {
-        // The picked session's conversation is on its way; the previous one's would mislead.
         Empty::Blank
     } else if input.session.is_none() {
         Empty::NoSessions
@@ -454,7 +410,6 @@ pub(super) fn empty_column(
         .min_h(px(0.0))
         .px(px(SIDE_PADDING))
         .pb(px(COLUMN_PADDING_VERTICAL))
-        // The Tasks bar sits over the top, so the first row starts under it.
         .pt(px(if input.tasks_inset {
             super::tasks::INSET + COLUMN_PADDING_VERTICAL
         } else {
@@ -463,7 +418,6 @@ pub(super) fn empty_column(
         .flex()
         .flex_col()
         .gap(px(ROW_GAP))
-        // First, so each draw's texts are noted afresh.
         .child(row_select::listener(s.sel.clone(), cx.entity().downgrade()));
     Some(match state {
         Empty::Loading => column.child(label("Loading…", TypeRole::Meta, Ink::TextMuted, a)),

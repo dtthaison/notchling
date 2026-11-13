@@ -1,7 +1,3 @@
-//! Session control (E11) through the daemon's ops: the planners' commands reach a fake launcher, a
-//! lane is named by its folder, and a slash command is typed like a reply unless it opens a menu.
-//! Nothing is started: the launcher is `FakeLauncher` and the terminal the tests' fake.
-
 use crate::acting_ops_tests::{app, code, sessions, setup_in, Setup, PROMPT, SESSION};
 use crate::catalog_ops_tests::seeded;
 use notchling_engine::catalog::LiveModel;
@@ -23,7 +19,6 @@ impl Drop for Dir {
     }
 }
 
-/// A data folder whose `lanes.json` has one lane, `/lanes/b`.
 fn roots(tag: &str) -> (Dir, Roots) {
     let dir = std::env::temp_dir().join(format!("nl-ctl-{tag}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
@@ -90,7 +85,6 @@ fn stop_and_remove_run_claude_for_the_job() {
             main_login(&["claude", "rm", "abcd1234"])
         ]
     );
-    // A terminal session isn't a job; an unknown id is no session.
     let (c, m) = call(&s, ops::SESSION_STOP, json!({"id": "term"})).unwrap_err();
     assert_eq!(c, ErrorCode::BadRequest);
     assert!(m.contains("only a background session"), "{m}");
@@ -228,7 +222,6 @@ fn new_session_refuses_a_folder_it_cannot_use() {
         json!({"folder": ""}),
         json!({"folder": "/w", "flags": "--bg"}),
         json!({"folder": "/w", "config_dir": "/somewhere/else"}),
-        // Only `--model <an allowed model>`: nothing that changes what the session may do.
         json!({"folder": "/w", "flags": ["--dangerously-skip-permissions"]}),
         json!({"folder": "/w", "flags": ["--model", "opus"]}),
         json!({"folder": "/w", "flags": ["--model"]}),
@@ -246,14 +239,12 @@ fn new_session_refuses_a_folder_it_cannot_use() {
         );
     }
     assert!(fake.calls().is_empty());
-    // Claude Code's own refusal comes back as it said it, which the app reads as untrusted.
     fake.push_output(Ok(LaunchOutput::failed(1, "Workspace not trusted: /w/new")));
     let (c, m) = call(&s, ops::SESSION_NEW, json!({"folder": "/w/new"})).unwrap_err();
     assert_eq!(c, ErrorCode::Failed);
     assert!(m.contains("not trusted"), "{m}");
 }
 
-/// `session.new` in `folder`, refused by Claude Code as untrusted.
 fn refused_new(s: &Setup, fake: &FakeLauncher, folder: &str) {
     fake.push_output(Ok(LaunchOutput::failed(
         1,
@@ -311,10 +302,8 @@ fn trust_takes_only_a_real_folder_that_session_new_was_just_refused() {
     let file = d.0.join("work/notes.txt");
     std::fs::write(&file, "x").unwrap();
     let folder = work.to_str().unwrap().to_string();
-    // Never refused: nothing to trust.
     let (c, m) = call(&s, ops::FOLDER_TRUST, json!({"folder": folder})).unwrap_err();
     assert_eq!(c, ErrorCode::BadRequest, "{m}");
-    // Not absolute, missing, a file, the root, the home folder (also by another spelling).
     let dotted = format!("{}/work/..", home.display());
     for bad in [
         "work/api".to_string(),
@@ -328,7 +317,6 @@ fn trust_takes_only_a_real_folder_that_session_new_was_just_refused() {
         let (c, m) = call(&s, ops::FOLDER_TRUST, json!({"folder": bad})).unwrap_err();
         assert_eq!(c, ErrorCode::BadRequest, "{bad}: {m}");
     }
-    // Refused for another folder: still nothing to trust here.
     let other = d.0.join("work/other");
     std::fs::create_dir_all(&other).unwrap();
     refused_new(&s, &fake, other.to_str().unwrap());
@@ -338,7 +326,6 @@ fn trust_takes_only_a_real_folder_that_session_new_was_just_refused() {
             .0,
         ErrorCode::BadRequest
     );
-    // A refusal older than ten minutes is too old.
     refused_new(&s, &fake, &folder);
     s.ops.age_refusals(std::time::Duration::from_secs(11 * 60));
     assert_eq!(
@@ -351,7 +338,6 @@ fn trust_takes_only_a_real_folder_that_session_new_was_just_refused() {
         !fake.calls().iter().any(|c| matches!(c, Call::Pty(_))),
         "nothing was trusted"
     );
-    // The same folder by another spelling is the same folder.
     refused_new(&s, &fake, &folder);
     let spelled = format!("{}/work/../work/api/", home.display());
     assert_eq!(
@@ -384,7 +370,6 @@ fn move_stops_then_resumes_in_the_target_folder() {
         commands[1].env.get("CLAUDE_CONFIG_DIR"),
         Some(&Some("/lanes/b".into()))
     );
-    // The main login is named by its folder (or left out), and the variable is removed.
     let main = d.0.join("claude");
     let _ = call(
         &s,
@@ -392,7 +377,6 @@ fn move_stops_then_resumes_in_the_target_folder() {
         json!({"id": "job-a", "to_config_dir": main}),
     );
     assert_eq!(fake.commands()[3].env.get("CLAUDE_CONFIG_DIR"), Some(&None));
-    // Nowhere else, and only a job with a transcript.
     assert_eq!(
         call(
             &s,

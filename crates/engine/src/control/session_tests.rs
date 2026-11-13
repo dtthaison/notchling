@@ -1,5 +1,3 @@
-//! The session planners against a temp `~/.claude` and lanes, nothing run.
-
 use super::*;
 use crate::sessions::agent::sample;
 use crate::sessions::testutil::TempDir;
@@ -11,7 +9,6 @@ struct Rig {
     lane: String,
 }
 
-/// A main folder and one lane folder, both under a temp root.
 fn rig(tag: &str) -> Rig {
     let tmp = TempDir::new(tag);
     let lane = tmp.path("lane-b").to_string_lossy().into_owned();
@@ -67,7 +64,6 @@ fn stop_runs_claude_stop_in_the_jobs_lane() {
     assert_eq!(steps[0].pause_after_ms, 1500);
     assert_eq!(plan.outcome, Outcome::Done);
 
-    // A main-login job removes the variable so it cannot inherit a lane's.
     r.tmp
         .write("home/.claude/jobs/m1/state.json", r#"{"state":"working"}"#);
     let main = plan_stop(&job("m1"), &r.roots).expect("plan");
@@ -95,7 +91,6 @@ fn only_background_jobs_are_controlled() {
 #[test]
 fn remove_runs_rm_on_every_copy_and_only_the_current_one_counts() {
     let r = rig("remove");
-    // Moved to the lane: a stopped copy stays in the main folder.
     r.tmp.write(
         "home/.claude/jobs/ab12/state.json",
         r#"{"state":"stopped","updatedAt":"2026-11-02T08:00:00.000Z"}"#,
@@ -114,7 +109,6 @@ fn remove_runs_rm_on_every_copy_and_only_the_current_one_counts() {
     assert!(!steps[1].required);
 }
 
-/// Swift's remove loop runs `claude rm` in every folder and keeps only the current copy's result.
 fn moved_job(tag: &str) -> Rig {
     let r = rig(tag);
     r.tmp.write(

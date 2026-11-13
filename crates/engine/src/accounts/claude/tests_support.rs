@@ -1,6 +1,3 @@
-//! A world for the store's tests: temp folders, an in-memory Keychain, scripted HTTP, a fixed clock.
-//! Every value is an obviously fake one.
-
 use super::*;
 use crate::accounts::fake::{MemoryKeychain, ScriptedHttp};
 use crate::accounts::http::PROFILE_URL;
@@ -27,7 +24,6 @@ pub fn email(n: u8) -> String {
     format!("user{n}@example.com")
 }
 
-/// `claudeAiOauth` for account `n`, version `v` of its tokens.
 pub fn oauth(n: u8, v: u8, expires: i64) -> Value {
     json!({
         "accessToken": format!("test-access-{n}-{v}"),
@@ -62,7 +58,6 @@ impl World {
         World::over(tag, |chain| chain)
     }
 
-    /// A world whose Keychain runner is `wrap` around the in-memory one (a gate, say).
     pub fn over(
         tag: &str,
         wrap: impl FnOnce(Arc<MemoryKeychain>) -> Arc<dyn crate::accounts::keychain::SecurityRunner>,
@@ -100,8 +95,6 @@ impl World {
         }
     }
 
-    /// Claude Code signed in to account `n` (its item, with an MCP login beside it, and
-    /// `~/.claude.json`).
     pub fn signed_in(&self, n: u8, v: u8) {
         let item = json!({"claudeAiOauth": oauth(n, v, LATER), "mcpOAuth": {"srv": {"accessToken": "test-mcp"}}});
         self.chain.put(LIVE_SERVICE, "me", &item.to_string());
@@ -112,7 +105,6 @@ impl World {
         self.tmp.write("home/.claude.json", &config);
     }
 
-    /// A saved slot for account `n` with tokens version `v`.
     pub fn saved(&self, n: u8, v: u8, expires: i64) {
         let slot = json!({"claudeAiOauth": oauth(n, v, expires), "oauthAccount": oauth_account(n)});
         self.chain.put(SAVED_SERVICE, &id(n), &slot.to_string());
@@ -145,7 +137,6 @@ impl World {
         std::fs::read_to_string(self.tmp.path("home/.claude.json")).unwrap_or_default()
     }
 
-    /// Every request sent to the token endpoint, with the refresh token it carried.
     pub fn token_requests(&self) -> usize {
         self.http
             .seen()

@@ -14,13 +14,12 @@ Z = load(ROOT / "tools/guard/zones.json")
 
 
 def owner_of(text, path):
-    """Last matching line wins, the way GitHub reads CODEOWNERS (gitignore patterns). None = no owner."""
     owner = None
     for line in text.splitlines():
         if not line.strip() or line.startswith("#"):
             continue
         pattern, *who = line.split()
-        if "/" not in pattern:  # no slash: matches at any depth
+        if "/" not in pattern:
             pattern = "**/" + pattern
         pattern = pattern.lstrip("/")
         if pattern.endswith("/"):
@@ -60,7 +59,6 @@ class CodeownersTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("GUARD-CODEOWNERS", out.getvalue())
 
-    # I4 and C2: AGENTS.md, CLAUDE.md, .claude/, .gitattributes and CODEOWNERS are re-owned everywhere.
     def test_spec_protected_files_reowned_after_the_zone(self):
         lines = render(Z).splitlines()
         for pattern in ["**/AGENTS.md", "**/CLAUDE.md", "**/.claude/", "**/.gitattributes", "**/CODEOWNERS"]:

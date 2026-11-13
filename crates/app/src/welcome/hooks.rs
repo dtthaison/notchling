@@ -1,7 +1,3 @@
-//! Asking the daemon about Claude Code's hooks: `install.plan` (reads only, works with `install`
-//! off) and `install.apply` (a dry run while `install` is off, answering the plan and the off
-//! message). The app never edits `settings.json` itself.
-
 use notchling_local_api::{ClientError, SOCKET_NAME};
 use serde_json::{json, Value};
 
@@ -12,7 +8,6 @@ use crate::chat::data::DataRoot;
 pub const OP_PLAN: &str = "install.plan";
 pub const OP_APPLY: &str = "install.apply";
 
-/// What is said while there is no daemon to ask.
 pub const DETACHED: &str = "Notchling's daemon isn't attached, so the hook can't be checked.";
 
 pub struct Hooks {
@@ -27,8 +22,6 @@ fn line(e: &ClientError) -> String {
     }
 }
 
-/// The arguments both ops take: no `what`, so every part, the hooks and the `notchling-*` skills.
-/// Nothing else installs the skills, and skills left from the Swift app call its binary.
 fn args() -> Value {
     json!({})
 }
@@ -40,7 +33,6 @@ impl Hooks {
         }
     }
 
-    /// No daemon: a render's, and a fixture root's.
     pub fn none() -> Hooks {
         Hooks { transport: None }
     }
@@ -63,13 +55,10 @@ impl Hooks {
         HookFacts::parse(&reply).ok_or_else(|| "the daemon's plan isn't one this app reads".into())
     }
 
-    /// What is in the file and what an install would change. Blocking.
     pub fn plan(&self) -> Result<HookFacts, String> {
         self.ask(OP_PLAN)
     }
 
-    /// Asks for the install. While the daemon's `install` switch is off it writes nothing and the
-    /// answer carries the plan and the off message. Blocking.
     pub fn apply(&self) -> Result<HookFacts, String> {
         self.ask(OP_APPLY)
     }

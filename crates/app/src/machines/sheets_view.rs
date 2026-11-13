@@ -1,9 +1,3 @@
-//! The sheets over the Machines window (Swift `FixConfirmSheet`, `AddMachineSheet`, `JobSheet`):
-//! the Fix sheet shows the exact commands, then the admin password field (or the root warning, or
-//! why the step can't run at all), then Cancel and Run; the Add sheet checks a machine before it
-//! is saved; the Job sheet edits the sd worker job. Typing reaches the forms through the window's
-//! key handler; a click on a field moves the focus there.
-
 use gpui::{div, prelude::*, px, Context, Div, SharedString, Stateful};
 use notchling_kit::metric::{RADIUS_CARD, RADIUS_MD};
 use notchling_kit::part::{ButtonKind, PartState};
@@ -25,7 +19,6 @@ fn state(enabled: bool) -> PartState {
     }
 }
 
-/// A label on the left of a field.
 fn row_label(text: &str, width: f32, a: Appearance) -> Div {
     div()
         .w(px(width))
@@ -33,7 +26,6 @@ fn row_label(text: &str, width: f32, a: Appearance) -> Div {
         .child(label(text, TypeRole::Label, Ink::TextMuted, a))
 }
 
-/// A checkbox row.
 fn checkbox<V: 'static>(
     id: SharedString,
     title: &str,
@@ -75,7 +67,6 @@ fn checkbox<V: 'static>(
 }
 
 impl MachinesView {
-    /// The sheet on show, over the dimmed window.
     pub(super) fn sheet_overlay(&self, a: Appearance, cx: &mut Context<Self>) -> Option<Div> {
         let (width, body) = match self.model.sheet()? {
             Sheet::Fix(prompt) => (600.0, self.fix_sheet(prompt, a, cx)),
@@ -86,7 +77,6 @@ impl MachinesView {
             div()
                 .absolute()
                 .size_full()
-                // The backdrop takes every click and hover: no card button under it is live.
                 .occlude()
                 .flex()
                 .items_center()
@@ -116,8 +106,6 @@ impl MachinesView {
             .children(buttons)
     }
 
-    /// The commands, then the admin password (or the root warning, or the block), then Cancel
-    /// and Run. The password lives in the model only while this sheet does (`model_sheet`).
     fn fix_sheet(&self, prompt: &FixPrompt, a: Appearance, cx: &mut Context<Self>) -> Div {
         let mut column = div()
             .flex()
@@ -175,7 +163,6 @@ impl MachinesView {
         column.child(Self::footer(vec![cancel, run], None))
     }
 
-    /// A field row of the Add sheet.
     fn add_field(
         &self,
         form: &AddForm,
@@ -294,7 +281,6 @@ impl MachinesView {
         column.child(Self::footer(vec![cancel, check, add], checking))
     }
 
-    /// A field row of the Job sheet.
     fn job_field(
         &self,
         form: &JobForm,

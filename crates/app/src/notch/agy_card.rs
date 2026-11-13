@@ -1,8 +1,3 @@
-//! The notch's Antigravity permission card (`AgyPermissionCard`): the shared card from
-//! `tools::view` with Antigravity's own options, answered through `agy.permission` by the row's
-//! id, the rpc id and the option picked. The daemon resolves the held prompt for Chat and the notch
-//! alike, so answering in one clears the other.
-
 use gpui::{div, prelude::*, px, Context, Div};
 use notchling_kit::metric::OPTION_BADGE;
 use notchling_kit::TypeRole;
@@ -16,13 +11,11 @@ use crate::tools::agy_permission::{AgyPermission, PREVIEW_LINES};
 use crate::tools::requests::agy_permission;
 use crate::tools::view::agy_card;
 
-/// The kit's option row: 10 padding around the title over its detail, or the 22 badge.
 fn option_height() -> f32 {
     let text = line(TypeRole::Heading) + 2.0 + line(TypeRole::Meta);
     text.max(OPTION_BADGE) + 20.0
 }
 
-/// The card's drawn height: header, the title line, the preview box, the options, the status.
 pub fn agy_permission_height(agy: &AgyPermission, status: Option<&str>) -> f32 {
     let lines = agy.preview(PREVIEW_LINES).len() as f32;
     let preview = lines * (line(TypeRole::Mono) + 1.0) + 16.0;
@@ -37,7 +30,6 @@ pub fn agy_permission_height(agy: &AgyPermission, status: Option<&str>) -> f32 {
 }
 
 impl NotchView {
-    /// The card for a row whose held prompt is Antigravity's.
     pub(super) fn agy_permission_card(
         &self,
         request: &HookRequest,

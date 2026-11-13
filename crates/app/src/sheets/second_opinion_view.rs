@@ -1,8 +1,3 @@
-//! The Second Opinion sheet over GPUI (part U8, macOS): the tool, model and effort to ask, the
-//! prompt built from what is reviewed (editable), and Run. Run is disabled, with the reason on
-//! hover, while acting isn't on, and while nothing runs opinions yet (`OpinionRunner`, see
-//! `tools::second_opinion`).
-
 use gpui::{
     div, prelude::*, px, Context, Div, EventEmitter, FocusHandle, Render, SharedString, Stateful,
     Window,
@@ -43,8 +38,6 @@ impl SecondOpinionView {
         }
     }
 
-    /// Run: the store records the opinion and starts `notchling delegate`; the sheet closes and
-    /// the card under the message shows it running.
     fn run(&mut self, cx: &mut Context<Self>) {
         let control = self
             .model
@@ -58,7 +51,6 @@ impl SecondOpinionView {
         cx.notify();
     }
 
-    /// A row of pills, "Default" first, the picked one filled.
     #[allow(clippy::too_many_arguments)]
     fn choice_row(
         &self,
@@ -135,7 +127,6 @@ impl SecondOpinionView {
         )
     }
 
-    /// The prompt, editable: typing adds at the end, Return adds a line, Backspace deletes.
     fn prompt_box(&self, a: Appearance, window: &Window, cx: &mut Context<Self>) -> Stateful<Div> {
         let focused = self.focus.is_focused(window);
         div()
@@ -269,7 +260,6 @@ impl Render for SecondOpinionView {
                     cx,
                     |m, v| m.pick_effort(v),
                 ))
-                // The section role draws uppercase; the file name keeps its own case.
                 .child(
                     div()
                         .flex()

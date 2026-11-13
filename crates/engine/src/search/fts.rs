@@ -1,13 +1,3 @@
-//! The session index on disk and its full-text search: one SQLite database (`search.db` in the
-//! daemon's folder) with an FTS5 table over each session's title, folder and text, ranked by bm25
-//! (title weighed most, then folder, then text) with a bonus for a recent change. It replaces the
-//! JSON cache: the index loads its sessions from here at start and writes only the ones a refresh
-//! read or dropped.
-//!
-//! Words match as prefixes of the text's words, case and accents folded (`unicode61
-//! remove_diacritics 2`), so "sua" finds "sửa" and "rank" finds "ranking". A word inside another
-//! ("ank") isn't a prefix; the index falls back to its substring match when bm25 finds nothing.
-
 use std::path::Path;
 use std::sync::Mutex;
 use std::time::Duration;
@@ -16,17 +6,12 @@ use rusqlite::{params, Connection, OpenFlags};
 
 use super::{IndexedSession, SessionMeta, RECENT_SECS};
 
-/// The schema's version (`PRAGMA user_version`); another version is dropped and rebuilt.
 const SCHEMA: i64 = 1;
 
-/// Column weights for bm25: title, folder, text.
 const WEIGHTS: (f64, f64, f64) = (10.0, 4.0, 1.0);
 
-/// How much a session changed just now counts over one changed [`RECENT_SECS`] ago.
 const RECENT_BONUS: f64 = 0.5;
 
-/// The FTS5 query for `words`: each one quoted (its quotes doubled) and matched as a prefix, all of
-/// them required. `None` when no word is left.
 pub fn match_expr<W: AsRef<str>>(words: &[W]) -> Option<String> {
     let terms: Vec<String> = words
         .iter()
@@ -38,20 +23,16 @@ pub fn match_expr<W: AsRef<str>>(words: &[W]) -> Option<String> {
     (!terms.is_empty()).then(|| terms.join(" AND "))
 }
 
-/// The score a bm25 rank (lower is better) and an age give; higher is better.
 pub fn score(bm25: f64, age_secs: f64) -> f64 {
     let fresh = (1.0 - age_secs.max(0.0) / RECENT_SECS).max(0.0);
     -bm25 * (1.0 + RECENT_BONUS * fresh)
 }
 
-/// The database. Shared by reference; one call at a time.
 pub struct SearchDb {
     db: Mutex<Connection>,
 }
 
 impl SearchDb {
-    /// Opens (or makes) the database at `path`: 0600, its folder 0700 when made here, a symlink in
-    /// its place refused.
     pub fn open(path: &Path) -> Result<SearchDb, String> {
         if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
             if !dir.is_dir() {
@@ -66,8 +47,6 @@ impl SearchDb {
         }
         match Self::open_file(path) {
             Ok(db) => Ok(db),
-            // Not a database (damaged, or something else wrote there): it's only an index, so it
-            // is set aside and built again.
             Err(_) if path.is_file() => {
                 let aside = path.with_extension("db.damaged");
                 std::fs::rename(path, &aside).map_err(|e| e.to_string())?;
@@ -89,7 +68,6 @@ impl SearchDb {
         Self::setup(db)
     }
 
-    /// A database in memory only (tests, and an index with nowhere to keep it).
     pub fn memory() -> Result<SearchDb, String> {
         Self::setup(Connection::open_in_memory().map_err(|e| e.to_string())?)
     }
@@ -123,7 +101,6 @@ impl SearchDb {
         self.db.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    /// Every session kept, as the index holds them.
     pub fn sessions(&self) -> Vec<IndexedSession> {
         let db = self.lock();
         let Ok(mut query) =
@@ -143,7 +120,6 @@ impl SearchDb {
             .collect()
     }
 
-    /// Adds or replaces `sessions`, by key, in one transaction.
     pub fn put(&self, sessions: &[IndexedSession]) -> Result<(), String> {
         if sessions.is_empty() {
             return Ok(());
@@ -174,7 +150,6 @@ impl SearchDb {
         tx.commit().map_err(|e| e.to_string())
     }
 
-    /// Forgets the sessions with these keys.
     pub fn remove<K: AsRef<str>>(&self, keys: &[K]) -> Result<(), String> {
         if keys.is_empty() {
             return Ok(());
@@ -193,8 +168,6 @@ impl SearchDb {
         tx.commit().map_err(|e| e.to_string())
     }
 
-    /// The best keys for `words` with their scores, best first, at most `limit`. `now` is seconds
-    /// since 1970.
     pub fn rank<W: AsRef<str>>(&self, words: &[W], now: f64, limit: usize) -> Vec<(String, f64)> {
         let Some(expr) = match_expr(words) else {
             return Vec::new();
@@ -208,7 +181,6 @@ impl SearchDb {
         let Ok(mut query) = db.prepare(&sql) else {
             return Vec::new();
         };
-        // More than asked, so the recency bonus can lift a slightly weaker match into the list.
         let wide = (limit.saturating_mul(4)).max(limit) as i64;
         let rows = query.query_map(params![expr, wide], |r| {
             Ok((

@@ -1,8 +1,3 @@
-//! The restart notice over GPUI (macOS): "Notchling restarted: Sessions, Vault are off" with Turn
-//! Back On, which opens one confirmation naming each switch; only that confirmation's button turns
-//! anything on. `mac::restart_notice` opens it in a small window that doesn't take the focus. A
-//! render has a fixed notice and turns nothing on.
-
 use std::sync::Arc;
 
 use gpui::{div, prelude::*, px, size, AnyView, Context, Render, Window};
@@ -13,14 +8,10 @@ use notchling_kit::{Icon, Ink, TypeRole};
 
 use super::restart::{turn_back_on, Area, Restart, RestartNotice, Said, TurnOn, NOTICE_BUTTON};
 
-/// The notice window's size in points: the heading, one note and the buttons.
 pub const NOTICE_SIZE: (f32, f32) = (460.0, 168.0);
-/// The confirmation's: a title, a line per switch and the closing line, then the buttons.
 pub const CONFIRM_SIZE: (f32, f32) = (460.0, 300.0);
-/// What a failed Turn Back On adds under the notice: one line of `note`.
 const NOTE_HEIGHT: f32 = 28.0;
 
-/// The window's size for what it shows, so the buttons sit right under the text.
 pub fn window_size(confirming: bool, has_note: bool) -> (f32, f32) {
     match (confirming, has_note) {
         (true, _) => CONFIRM_SIZE,
@@ -48,7 +39,6 @@ impl RestartNoticeView {
         }
     }
 
-    /// A render's: a notice for `areas`, the confirmation open when asked; nothing is sent.
     pub fn fixed(areas: &[Area], confirming: bool) -> Self {
         let notice = Arc::new(RestartNotice::default());
         for area in areas {
@@ -67,7 +57,6 @@ impl RestartNoticeView {
         self.notice.state()
     }
 
-    /// Resizes the window to what it now shows (a render's window is fixed by the harness).
     fn fit(&self, window: &mut Window) {
         if self.turn_on.is_none() {
             return;
@@ -93,7 +82,6 @@ impl RestartNoticeView {
         cx.notify();
     }
 
-    /// The person confirmed: exactly the switches the confirmation named, each through its op.
     fn confirmed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let (Some(turn_on), Some(confirm)) = (self.turn_on.clone(), self.state().confirm()) else {
             return;
@@ -234,7 +222,6 @@ impl Render for RestartNoticeView {
     }
 }
 
-/// `--render restart-notice|restart-notice-confirm`, over a made-up restart; nothing is sent.
 pub fn build_render(name: &str, cx: &mut gpui::App) -> Option<AnyView> {
     let confirming = match name {
         "restart-notice" => false,
@@ -261,7 +248,6 @@ mod tests {
             notice.1 < confirm.1,
             "the notice is not the confirmation's height"
         );
-        // a failure line under the notice makes room for itself; the confirmation is unchanged
         assert!(window_size(false, true).1 > notice.1);
         assert_eq!(window_size(true, true), confirm);
         assert_eq!(notice.0, confirm.0);

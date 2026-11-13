@@ -1,21 +1,12 @@
-//! How much an Antigravity session's context holds, from its own log: the latest model step
-//! (`PLANNER_RESPONSE`) in `brain/<id>/.system_generated/logs/transcript.jsonl` counts the tokens
-//! it read (`input_tokens`, plus `cache_read_tokens`, which Antigravity counts apart) and wrote.
-//! The ACP stream says this only at the end of a turn, so a session opened from the list showed
-//! no Context Meter until its next turn.
-
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
-/// How much of the log's end is read: a model step is one line, and the latest is near the end.
 const TAIL_BYTES: u64 = 512 * 1024;
 
-/// The session's log under `home`, for a Chat row id (`agy:<id>`).
 pub fn log_path(home: &Path, row_id: &str) -> Option<PathBuf> {
     let id = row_id.strip_prefix("agy:")?;
-    // An id is a UUID: never a path of its own.
     if id.is_empty() || !id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-') {
         return None;
     }
@@ -26,7 +17,6 @@ pub fn log_path(home: &Path, row_id: &str) -> Option<PathBuf> {
     )
 }
 
-/// The tokens in the context at the latest model step, or `None` without one.
 pub fn context_tokens(path: &Path) -> Option<u64> {
     let mut file = std::fs::File::open(path).ok()?;
     let len = file.metadata().ok()?.len();

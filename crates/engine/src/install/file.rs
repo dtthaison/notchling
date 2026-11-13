@@ -1,41 +1,16 @@
-//! Reading and writing `settings.json` itself, with the care a file of the user's own needs.
-//!
-//! - **Nothing is read that cannot be edited safely**: not UTF-8, bigger than [`MAX_BYTES`], not a
-//!   regular file, a link to nothing, or text that is not a JSON object is refused with the file
-//!   untouched. An empty file is the one case treated as `{}`: there is nothing in it to lose.
-//! - **A backup comes first**: `settings.json.notchling-backup-<stamp>`, mode 0600, never over an
-//!   older one. The newest [`KEEP_BACKUPS`] stay.
-//! - **The write is atomic**: a temp file beside the real one, flushed, then renamed over it, with
-//!   the old file's mode. Just before the rename the file is read again; if it changed since it
-//!   was planned from (Claude Code writes it too) nothing is written.
-//! - **A symlink is written through**: `~/.claude/settings.json` is a link when the user keeps
-//!   their dotfiles elsewhere, and a lane's copy is a link into `~/.claude`. The link stays a
-//!   link and the file it points at is replaced. A link to nothing is refused (nothing is created
-//!   at a place the user did not name). The backup sits beside the link, where the user looks.
-//! - **A read-only file is refused**: its owner said not to change it, and a rename would ignore
-//!   that.
-//! - **A missing file is made**, when its folder is there (Claude Code's own folder is not ours to
-//!   create), mode 0600, and never over a file that appeared meanwhile.
-
 use super::hooks::{plan_hooks, HookPlan, Refused, Wanted};
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-/// A settings file bigger than this is not read.
 pub const MAX_BYTES: u64 = 4 * 1024 * 1024;
-/// How many backups stay.
 pub const KEEP_BACKUPS: usize = 20;
-/// The backups' name, followed by `-<stamp>`.
 pub const BACKUP_SUFFIX: &str = ".notchling-backup";
 
 #[derive(Debug)]
 pub enum FileError {
-    /// The file (or the plan for it) is not one to change; nothing was written.
     Refused(String),
-    /// The file's folder is not there.
     NoFolder(PathBuf),
-    /// It changed while it was being updated; nothing was written.
     Changed,
     Io(String),
 }
@@ -64,7 +39,6 @@ fn io(what: &str, e: std::io::Error) -> FileError {
     FileError::Io(format!("{what}: {e}"))
 }
 
-/// What the file is like now.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum State {
     Missing,
@@ -82,10 +56,8 @@ impl State {
     }
 }
 
-/// The file as read.
 #[derive(Debug)]
 pub struct Loaded {
-    /// The file the write goes to: `path` with links followed.
     pub target: PathBuf,
     pub state: State,
     pub text: String,
@@ -153,7 +125,6 @@ pub fn load(path: &Path) -> Result<Loaded, FileError> {
     })
 }
 
-/// What a change to the file would be.
 #[derive(Debug)]
 pub struct FilePlan {
     pub path: PathBuf,
@@ -162,7 +133,6 @@ pub struct FilePlan {
     pub hooks: HookPlan,
 }
 
-/// Reads the file and plans the change. Writes nothing.
 pub fn plan(path: &Path, wanted: &Wanted) -> Result<FilePlan, FileError> {
     let loaded = load(path)?;
     plan_loaded(path, &loaded, wanted)
@@ -184,7 +154,6 @@ pub struct Applied {
     pub backup: Option<PathBuf>,
 }
 
-/// Makes the change. `stamp` names the backup (milliseconds since 1970, say).
 pub fn apply(path: &Path, wanted: &Wanted, stamp: u64) -> Result<Applied, FileError> {
     let loaded = load(path)?;
     let plan = plan_loaded(path, &loaded, wanted)?;
@@ -221,7 +190,6 @@ fn file_name(path: &Path) -> String {
         .unwrap_or_else(|| "settings.json".into())
 }
 
-/// A copy of the old text in the file's folder, mode 0600, under a name nothing has.
 fn write_backup(path: &Path, text: &str, stamp: u64) -> Result<PathBuf, FileError> {
     let dir = path.parent().unwrap_or(Path::new("."));
     let base = format!("{}{BACKUP_SUFFIX}-{stamp}", file_name(path));
@@ -242,7 +210,6 @@ fn write_backup(path: &Path, text: &str, stamp: u64) -> Result<PathBuf, FileErro
     Err(FileError::Io("no free name for the backup".into()))
 }
 
-/// Keeps the newest [`KEEP_BACKUPS`] backups of this file, by the stamp in the name.
 fn prune_backups(dir: &Path, path: &Path) {
     let prefix = format!("{}{BACKUP_SUFFIX}-", file_name(path));
     let Ok(read) = fs::read_dir(dir) else {
@@ -268,7 +235,6 @@ fn prune_backups(dir: &Path, path: &Path) {
     }
 }
 
-/// Replaces the file, if it is still what was planned from.
 pub(super) fn write_checked(loaded: &Loaded, data: &[u8]) -> Result<(), FileError> {
     let target = &loaded.target;
     let dir = target.parent().unwrap_or(Path::new("."));
@@ -295,11 +261,9 @@ pub(super) fn write_checked(loaded: &Loaded, data: &[u8]) -> Result<(), FileErro
         }
         file.sync_all().map_err(|e| io("the temp file", e))?;
         drop(file);
-        // The last look before the swap.
         let now = fs::read(target).ok();
         match (loaded.state, now) {
             (State::Missing, None) => {
-                // No-clobber: a hard link fails if the name is taken meanwhile.
                 if fs::hard_link(&temp, target).is_err() {
                     if target.exists() {
                         return Err(FileError::Changed);

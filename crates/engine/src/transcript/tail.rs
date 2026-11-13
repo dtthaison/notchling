@@ -1,6 +1,3 @@
-//! Bounded transcript reading: the last few MB of a file as whole lines, and incremental cursors that
-//! parse only what was appended since the last read.
-
 use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::{self, Read, Seek, SeekFrom};
@@ -8,19 +5,12 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::SystemTime;
 
-/// Transcripts are read from the last 2 MB (the notch) or 4 MB (Chat), never whole.
 pub const TAIL_BYTES: u64 = 2_000_000;
 pub const CHAT_TAIL_BYTES: u64 = 4_000_000;
-/// A line this long is a screenshot or huge tool output: slow to decode and nothing the chat shows.
 pub const MAX_LINE_BYTES: usize = 100_000;
 
-/// Bytes every [`Cursors`] in this process has parsed, for `--render`'s bench: an unchanged file
-/// adds nothing, an append adds only what was appended.
 pub static PARSED_BYTES: AtomicU64 = AtomicU64::new(0);
 
-/// The complete lines in `start..end` and how many bytes they span. `skip_first_line`: `start` may be
-/// mid-line, so everything up to the first newline is dropped. A last line with no newline yet is not
-/// returned (its writer is still adding to it).
 pub fn read_chunk(
     path: &str,
     start: u64,
@@ -53,9 +43,6 @@ pub fn read_chunk(
     Ok((lines, last as u64 + 1))
 }
 
-/// The last `max_bytes` of the file as lines (empty lines left out), starting at a line boundary: when
-/// the read starts mid-file the first, partial line is dropped. A line that isn't valid UTF-8 is read
-/// with the bad bytes replaced.
 pub fn read_lines(path: &str, max_bytes: u64) -> io::Result<Vec<String>> {
     let mut file = File::open(path)?;
     let size = file.seek(SeekFrom::End(0))?;
@@ -74,17 +61,12 @@ pub fn read_lines(path: &str, max_bytes: u64) -> io::Result<Vec<String>> {
     Ok(lines)
 }
 
-/// Where a tail read should start so that its `budget` bytes hold lines of at most [`MAX_LINE_BYTES`]:
-/// longer lines (base64 images) are still read but don't use the budget, so a few of them can't push a
-/// session's first prompt out of the read. Always a line start (0 or just past a newline). Looks back at
-/// most `scan_limit` bytes and then starts at the oldest whole line it reached.
 pub fn tail_start(path: &str, size: u64, budget: u64, scan_limit: u64) -> io::Result<u64> {
     const BLOCK: u64 = 1 << 20;
     let after = |line_end: u64| if line_end >= size { size } else { line_end + 1 };
     let mut file = File::open(path)?;
     let floor = size.saturating_sub(scan_limit);
     let mut kept = 0u64;
-    // Where the line being measured ends: its newline's offset, or `size` for the last line.
     let mut line_end = size;
     let mut pos = size;
     let mut buf = vec![0u8; BLOCK as usize];
@@ -112,7 +94,6 @@ pub fn tail_start(path: &str, size: u64, budget: u64, scan_limit: u64) -> io::Re
     if pos > 0 {
         return Ok(after(line_end));
     }
-    // The file's first line, [0, line_end).
     if line_end > MAX_LINE_BYTES as u64 || kept + line_end < budget {
         Ok(0)
     } else {
@@ -120,20 +101,17 @@ pub fn tail_start(path: &str, size: u64, budget: u64, scan_limit: u64) -> io::Re
     }
 }
 
-/// A parser that takes a transcript one JSONL line at a time and keeps its own state between lines.
 pub trait LineParser: Default {
     fn consume(&mut self, line: &[u8]);
 }
 
 struct Cursor<P, O> {
     inode: u64,
-    /// Just past the last complete line parsed; a line still being written is read next time.
     offset: u64,
     modified: SystemTime,
     size: u64,
     parser: P,
     output: O,
-    /// The clock at the last read, to find the cursor read longest ago.
     used: u64,
 }
 
@@ -142,19 +120,12 @@ struct State<P, O> {
     clock: u64,
 }
 
-/// Reads transcripts incrementally: each file keeps a cursor (where it was read up to, and the
-/// parser's state there), so a call parses only the lines appended since the last one. The first
-/// call, and a file that was replaced, truncated or grew by more than `tail_bytes` at once, starts from
-/// the last `tail_bytes` of the file. At most `limit` files are kept; reading one more drops the one
-/// read longest ago.
 pub struct Cursors<P: LineParser, O: Clone> {
     tail_bytes: u64,
     limit: usize,
-    /// Above 0, lines over [`MAX_LINE_BYTES`] don't count toward `tail_bytes` ([`tail_start`]).
     long_line_scan: u64,
     render: Box<dyn Fn(&P) -> O + Send + Sync>,
     state: Mutex<State<P, O>>,
-    /// Bytes this set of cursors has parsed (the same count as [`PARSED_BYTES`], for one set).
     parsed: AtomicU64,
 }
 
@@ -169,7 +140,6 @@ fn inode_of(_meta: &fs::Metadata) -> u64 {
 }
 
 impl<P: LineParser, O: Clone> Cursors<P, O> {
-    /// `render` turns the parser's state into what callers get; it runs only when the file changed.
     pub fn new(
         tail_bytes: u64,
         limit: usize,
@@ -188,7 +158,6 @@ impl<P: LineParser, O: Clone> Cursors<P, O> {
         }
     }
 
-    /// Bytes parsed by this set of cursors so far.
     pub fn parsed_bytes(&self) -> u64 {
         self.parsed.load(Ordering::Relaxed)
     }
@@ -198,21 +167,17 @@ impl<P: LineParser, O: Clone> Cursors<P, O> {
         PARSED_BYTES.fetch_add(bytes, Ordering::Relaxed);
     }
 
-    /// Lines over [`MAX_LINE_BYTES`] are read but don't use the tail budget, looking back at most
-    /// `scan_limit` bytes: for transcripts whose huge lines hold nothing the reader shows.
     pub fn long_lines_free(mut self, scan_limit: u64) -> Self {
         self.long_line_scan = scan_limit;
         self
     }
 
-    /// None when the file can't be read.
     pub fn read(&self, path: &str) -> Option<O> {
         let meta = fs::metadata(path).ok()?;
         let modified = meta.modified().ok()?;
         let size = meta.len();
         let inode = inode_of(&meta);
 
-        // Held while a cursor reads and parses, so two callers never advance the same one.
         let mut guard = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let state = &mut *guard;
         state.clock += 1;
@@ -327,7 +292,6 @@ mod tests {
         fs::create_dir_all(&dir).expect("dir");
         let path = dir.join("a.jsonl");
         let big = "x".repeat(MAX_LINE_BYTES + 1);
-        // A prompt, three image-sized lines, then a short answer: a Codex image turn.
         let text = format!("old\nprompt\n{big}\n{big}\n{big}\nanswer\n");
         fs::write(&path, &text).expect("write");
         let p = path.to_string_lossy().into_owned();

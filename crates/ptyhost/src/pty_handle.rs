@@ -1,7 +1,3 @@
-//! The real [`Handle`]: a process on the engine's forkpty [`Pty`] (`PTYSession.swift`), with the last
-//! 2 MB of output kept so a client attaching later sees what is already on screen; and
-//! [`PtySpawner`], which starts `claude` or any command that way with a scrubbed login environment.
-
 use crate::host::{ExitHandler, Handle, Listener, Spawner};
 use crate::system;
 use crate::wire::SessionId;
@@ -14,30 +10,20 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
-/// Bytes kept so a terminal attached later can show what is already on screen.
 pub const SCROLLBACK_LIMIT: usize = 2 * 1024 * 1024;
 
-/// The size a host session starts at (`PTYSession.spawn`'s defaults).
 const START_COLUMNS: u16 = 200;
 const START_ROWS: u16 = 50;
 
-/// How far behind a listener may fall before it is dropped. A client that stopped reading would
-/// otherwise grow the queue without end; one that has fallen this far behind (twice the scrollback)
-/// has lost the thread of the screen anyway and attaches again to get it back.
 pub const LISTENER_BACKLOG_LIMIT: usize = 2 * SCROLLBACK_LIMIT;
 
-/// One listener's queue. Each listener is called from a thread of its own, so a client whose socket
-/// is full (its call blocks in `write`) holds up neither the pty's reader nor the other clients.
 struct Slot {
     queue: Sender<Vec<u8>>,
-    /// Bytes queued or being delivered; the listener's thread subtracts as it finishes a chunk.
     pending: Arc<AtomicUsize>,
-    /// Cleared when the slot goes (removed or dropped for lagging): the thread stops at once.
     alive: Arc<AtomicBool>,
 }
 
 impl Slot {
-    /// Queues `chunk`; false when the listener is gone or has fallen too far behind.
     fn push(&self, chunk: &[u8]) -> bool {
         let queued = self.pending.fetch_add(chunk.len(), Ordering::SeqCst);
         if queued + chunk.len() > LISTENER_BACKLOG_LIMIT {
@@ -53,7 +39,6 @@ impl Drop for Slot {
     }
 }
 
-/// The listener's thread: calls it for each queued chunk, in order, until the slot is dropped.
 fn deliver(
     listener: &Listener,
     chunks: &Receiver<Vec<u8>>,
@@ -83,8 +68,6 @@ struct Exit {
 }
 
 struct Shared {
-    /// Held only to copy bytes into the scrollback and the listeners' queues, never while a listener
-    /// runs (a client that stopped reading would hold up the rest, and its own removal).
     delivery: Mutex<Delivery>,
     exit: Mutex<Exit>,
 }
@@ -113,13 +96,10 @@ pub struct PtyHandle {
     pid: i32,
     pty: Arc<Pty>,
     shared: Arc<Shared>,
-    /// Input goes through a writer thread: a pty that isn't reading never blocks the caller.
     input: Mutex<Sender<Vec<u8>>>,
 }
 
 impl PtyHandle {
-    /// Starts `executable` on a pty in `cwd` with exactly `environment` (minus `NO_COLOR`, which the
-    /// engine's pty never passes on).
     pub fn spawn(
         executable: &Path,
         arguments: &[String],
@@ -183,14 +163,12 @@ fn read_loop(pty: &Pty, shared: &Shared) {
                 if over > 0 {
                     delivery.scrollback.drain(..over);
                 }
-                // A listener that has fallen too far behind is dropped here.
                 delivery.listeners.retain(|_, slot| slot.push(chunk));
             }
             Ok(ReadOutcome::Timeout) => continue,
             Ok(ReadOutcome::Closed) | Err(_) => break,
         }
     }
-    // The child's side closed: reap it, then tell whoever waits.
     let _ = pty.wait();
     shared.finish();
 }
@@ -229,9 +207,6 @@ impl Handle for PtyHandle {
         }
         exit.handlers.push(handler);
     }
-    /// The replay is delivered on the caller's thread before this returns (`PTYSession.addListener`),
-    /// outside the lock; live chunks that arrive meanwhile wait in the queue for the listener's own
-    /// thread, which starts after the replay, so the two never interleave.
     fn add_listener(&self, listener: Listener) -> u64 {
         let (queue, chunks) = channel::<Vec<u8>>();
         let slot = Slot {
@@ -272,7 +247,6 @@ impl Handle for PtyHandle {
     fn resize(&self, columns: u16, rows: u16) {
         let _ = self.pty.resize(rows, columns);
     }
-    /// SIGTERM first; the process gets two seconds to save its session before SIGKILL.
     fn terminate(&self) {
         if !self.is_running() {
             self.shared.finish();
@@ -285,8 +259,6 @@ impl Handle for PtyHandle {
     }
 }
 
-/// The real spawner: `claude` (or any command) on a pty, with the same scrubbed environment as a new
-/// session. The login environment is read once, on the first spawn.
 pub struct PtySpawner {
     environment: OnceLock<Vec<(String, String)>>,
     home: Option<PathBuf>,
@@ -300,7 +272,6 @@ impl PtySpawner {
         }
     }
 
-    /// A spawner with a fixed environment (scrubbed all the same), for tests and tools.
     pub fn with_environment(environment: Vec<(String, String)>) -> PtySpawner {
         let spawner = PtySpawner::new();
         let _ = spawner.environment.set(system::scrubbed(environment));

@@ -1,25 +1,14 @@
-//! The HTTP the providers make, behind a trait so no test reaches a network: Codex's usage
-//! endpoint on chatgpt.com (the system's root certificates) and Antigravity's language server on
-//! the loopback address (a self-signed certificate, trusted for `127.0.0.1` only).
-//!
-//! A request carries tokens in its headers, so it never prints them: [`HttpRequest`]'s `Debug`
-//! names the headers and shows no values.
-
 use std::sync::Mutex;
 use std::time::Duration;
 
-/// Whose certificate the server may present.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Trust {
-    /// The operating system's roots.
     System,
-    /// Any certificate, but only from `https://127.0.0.1:<port>`.
     LoopbackSelfSigned,
 }
 
 #[derive(Clone, PartialEq, Eq)]
 pub struct HttpRequest {
-    /// `GET` or `POST`.
     pub method: &'static str,
     pub url: String,
     pub headers: Vec<(String, String)>,
@@ -47,13 +36,10 @@ pub struct HttpResponse {
     pub body: Vec<u8>,
 }
 
-/// Sends one request. The error text never holds a header or a body.
 pub trait HttpClient: Send + Sync {
     fn send(&self, request: &HttpRequest) -> Result<HttpResponse, String>;
 }
 
-/// Records every request and answers from a queue (an empty queue is an error), for tests. Tests
-/// of a switched-off daemon check that [`FakeHttp::calls`] stayed 0.
 #[derive(Default)]
 pub struct FakeHttp {
     seen: Mutex<Vec<HttpRequest>>,
@@ -65,7 +51,6 @@ impl FakeHttp {
         FakeHttp::default()
     }
 
-    /// The next call answers this.
     pub fn push(&self, answer: Result<HttpResponse, String>) {
         lock(&self.answers).push_back(answer);
     }

@@ -1,6 +1,3 @@
-//! Everything the Visualize tabs need from one transcript, read in a single pass (ConsoleCore's
-//! `TranscriptFacts` and `TranscriptAnalyzer`).
-
 use crate::transcript::chat;
 use crate::transcript::tail::MAX_LINE_BYTES;
 use crate::transcript::text::{last_path_component, prefix_chars};
@@ -11,19 +8,14 @@ use serde_json::{Map, Value};
 use std::collections::{BTreeMap, HashMap};
 use std::sync::OnceLock;
 
-/// How much of the main transcript's end is read.
 pub const TAIL_BYTES: u64 = 8_000_000;
-/// `Date.distantPast` in seconds: a line without a timestamp.
 const DISTANT_PAST: f64 = -62_135_769_600.0;
 const EDIT_TOOLS: [&str; 4] = ["Edit", "Write", "MultiEdit", "NotebookEdit"];
 
-/// A fenced mermaid block in an assistant reply.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MermaidBlock {
     pub source: String,
-    /// `main`, or the subagent's description.
     pub origin: String,
-    /// Seconds since the epoch.
     pub time: Option<f64>,
     pub message_id: String,
 }
@@ -35,11 +27,8 @@ pub struct TranscriptFacts {
     pub mermaid: Vec<MermaidBlock>,
     pub usage: Vec<wire::UsagePoint>,
     pub tool_counts: BTreeMap<String, i64>,
-    /// `http(s)://localhost` or `127.0.0.1` URLs in order of appearance.
     pub local_urls: Vec<String>,
-    /// Device names seen next to simctl or adb, for example "iPhone 16 Pro".
     pub device_hints: Vec<String>,
-    /// Seconds since the epoch.
     pub newest_activity: Option<f64>,
 }
 
@@ -65,7 +54,6 @@ impl TranscriptFacts {
     }
 }
 
-/// The patterns are fixed literals; if one ever failed to compile it would find nothing.
 fn url_pattern() -> Option<&'static Regex> {
     static PATTERN: OnceLock<Option<Regex>> = OnceLock::new();
     PATTERN
@@ -94,8 +82,6 @@ fn mermaid_pattern() -> Option<&'static Regex> {
         .as_ref()
 }
 
-/// Reads the last `tail_bytes` of a transcript. `is_main` keeps only the main thread's own lines for
-/// the timeline; a subagent file is all sidechain, so it keeps everything.
 pub fn analyze_file(path: &str, is_main: bool, origin: &str, tail_bytes: u64) -> TranscriptFacts {
     match chat::tail(path, tail_bytes) {
         Some(lines) => analyze_lines(&lines, is_main, origin, path),
@@ -145,13 +131,11 @@ pub fn analyze_lines(lines: &[String], is_main: bool, origin: &str, path: &str) 
             continue;
         }
 
-        // Assistant: usage, tool calls, mermaid blocks.
         let message_id = str_of(message, "id")
             .map(String::from)
             .or_else(|| str_of(&object, "uuid").map(String::from))
             .unwrap_or_else(|| format!("{path}:{index}"));
         if let Some(usage) = message.get("usage").filter(|u| u.is_object()) {
-            // Claude Code writes the same message several times while streaming; the last wins.
             if !usage_by_id.contains_key(&message_id) {
                 usage_order.push(message_id.clone());
             }
@@ -217,7 +201,6 @@ fn user_line(
         .iter()
         .filter(|b| str_of(b, "type") == Some("tool_result"))
     {
-        // A dev server's banner ("Local: http://localhost:5173") arrives as a tool result.
         match block.get("content") {
             Some(Value::String(output)) => collect_urls(output, facts),
             Some(Value::Array(parts)) => {
@@ -288,7 +271,6 @@ fn tool_use(
     }
 }
 
-/// The bodies of the fenced mermaid blocks in `text`, trimmed; empty ones are left out.
 pub fn mermaid_sources(text: &str) -> Vec<String> {
     if !text.contains("```mermaid") {
         return Vec::new();
@@ -304,8 +286,6 @@ pub fn mermaid_sources(text: &str) -> Vec<String> {
         .collect()
 }
 
-/// One tool call as the timeline shows it: the tool, a short target, whether it started a subagent
-/// or edited a file. `time` is seconds; the wire has milliseconds.
 pub fn flow_call(name: &str, input: &Map<String, Value>, time: Option<f64>) -> wire::FlowCall {
     let text = |key: &str| input.get(key).and_then(Value::as_str);
     let base = |key: &str| last_path_component(text(key).unwrap_or("")).to_string();

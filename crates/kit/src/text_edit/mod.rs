@@ -1,10 +1,3 @@
-//! The text editor's model, with no GPUI in it: a buffer, a selection (an anchor and the caret),
-//! the input method's marked text, undo groups, and the moves and deletes a Mac text view has.
-//! Indices are UTF-8 byte offsets; the `*_utf16` methods speak the platform input handler's
-//! UTF-16 units, since that is what AppKit's `NSTextInputClient` sends. What needs a layout
-//! (up and down across wrapped lines, ⌘-arrows to the edge of a wrapped row) lives in
-//! `ui::text_editor`, which calls [`TextEdit::move_to`] and [`TextEdit::select_to`].
-
 mod history;
 mod moves;
 #[cfg(test)]
@@ -15,8 +8,6 @@ use std::ops::Range;
 use history::{Group, History, State};
 pub use moves::Unit;
 
-/// What Return does in a box that can hold several lines: with Shift or Option it adds a line,
-/// bare (or with ⌘ or Ctrl) it submits.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ReturnKey {
     Newline,
@@ -31,31 +22,23 @@ pub fn return_key(shift: bool, alt: bool) -> ReturnKey {
     }
 }
 
-/// A selection in UTF-16 units, as the platform asks for it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Selection16 {
     pub range: Range<usize>,
-    /// The caret is at the start.
     pub reversed: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct TextEdit {
     text: String,
-    /// Where the selection began.
     anchor: usize,
-    /// The caret.
     head: usize,
-    /// Text the input method is still composing, drawn underlined.
     marked: Option<Range<usize>>,
-    /// What was composing when the owner cleared the box (it sent the text): the input method
-    /// may still commit it afterwards, and that one commit is dropped.
     stale_composition: Option<String>,
     history: History,
 }
 
 impl TextEdit {
-    /// The caret at the end, nothing selected.
     pub fn new(text: &str) -> TextEdit {
         TextEdit {
             text: text.to_owned(),
@@ -75,9 +58,6 @@ impl TextEdit {
         self.text.is_empty()
     }
 
-    /// Another text altogether (another session's draft, or nothing after a send): the caret at
-    /// its end, no history. A composition in progress is remembered, so its commit, if the input
-    /// method still sends it, doesn't put the sent words back (see [`TextEdit::replace_text`]).
     pub fn set_text(&mut self, text: &str) {
         let stale = self
             .marked
@@ -91,12 +71,10 @@ impl TextEdit {
         self.head
     }
 
-    /// The selection, start before end; empty at the caret.
     pub fn selection(&self) -> Range<usize> {
         self.anchor.min(self.head)..self.anchor.max(self.head)
     }
 
-    /// The caret is at the selection's start (it was extended leftwards).
     pub fn is_reversed(&self) -> bool {
         self.head < self.anchor
     }
@@ -124,25 +102,20 @@ impl TextEdit {
         self.marked = None;
     }
 
-    /// `index` on a character boundary, at or before it, inside the text.
     pub fn snap(&self, index: usize) -> usize {
         moves::clamp(&self.text, index)
     }
 
-    /// Selects from `anchor` to `head` (the caret); both snap to character boundaries. Closes the
-    /// undo group, as any caret move does.
     pub fn set_selection(&mut self, anchor: usize, head: usize) {
         self.anchor = moves::clamp(&self.text, anchor);
         self.head = moves::clamp(&self.text, head);
         self.history.close();
     }
 
-    /// Puts the caret at `index`, nothing selected.
     pub fn move_to(&mut self, index: usize) {
         self.set_selection(index, index);
     }
 
-    /// Moves the caret to `index`, keeping the anchor (Shift-click, Shift-arrows).
     pub fn select_to(&mut self, index: usize) {
         self.set_selection(self.anchor, index);
     }
@@ -151,12 +124,10 @@ impl TextEdit {
         self.set_selection(0, self.text.len());
     }
 
-    /// The word-boundary run at `index`: a double-click's pick.
     pub fn word_range_at(&self, index: usize) -> Range<usize> {
         moves::word_at(&self.text, index)
     }
 
-    /// The paragraph holding `index`, without its newline.
     pub fn line_range_at(&self, index: usize) -> Range<usize> {
         moves::line_start(&self.text, index)..moves::line_end(&self.text, index)
     }
@@ -171,8 +142,6 @@ impl TextEdit {
         self.set_selection(range.start, range.end);
     }
 
-    /// Left (or ⌥/⌘ Left). Without `extend`, a selection collapses to its start for a grapheme
-    /// step; the other units move from the caret.
     pub fn move_left(&mut self, unit: Unit, extend: bool) {
         let selection = self.selection();
         let target = if !extend && unit == Unit::Grapheme && !selection.is_empty() {
@@ -183,7 +152,6 @@ impl TextEdit {
         self.go(target, extend);
     }
 
-    /// Right (or ⌥/⌘ Right), the mirror of [`TextEdit::move_left`].
     pub fn move_right(&mut self, unit: Unit, extend: bool) {
         let selection = self.selection();
         let target = if !extend && unit == Unit::Grapheme && !selection.is_empty() {
@@ -202,7 +170,6 @@ impl TextEdit {
         }
     }
 
-    /// Replaces `range` with `text`, records the step in `group`, and puts the caret after it.
     fn splice(&mut self, range: Range<usize>, text: &str, group: Option<Group>) {
         self.stale_composition = None;
         self.history.record(self.state(), group);
@@ -213,17 +180,14 @@ impl TextEdit {
         self.marked = None;
     }
 
-    /// Typed text: replaces the selection; one undo step with the keystrokes around it.
     pub fn insert(&mut self, text: &str) {
         self.splice(self.selection(), text, Some(Group::Typing));
     }
 
-    /// Pasted text: replaces the selection; an undo step of its own.
     pub fn paste(&mut self, text: &str) {
         self.splice(self.selection(), text, None);
     }
 
-    /// Backspace, ⌥ Backspace or ⌘ Backspace: the selection if there is one, else back by `unit`.
     pub fn delete_backward(&mut self, unit: Unit) {
         let selection = self.selection();
         if !selection.is_empty() {
@@ -235,7 +199,6 @@ impl TextEdit {
         }
     }
 
-    /// Delete (fn Backspace), with ⌥ or ⌘: forward by `unit`, or the selection.
     pub fn delete_forward(&mut self, unit: Unit) {
         let selection = self.selection();
         if !selection.is_empty() {
@@ -247,7 +210,6 @@ impl TextEdit {
         }
     }
 
-    /// ⌘X: removes the selection and returns it, or `None` when nothing is selected.
     pub fn cut(&mut self) -> Option<String> {
         let selection = self.selection();
         if selection.is_empty() {
@@ -258,7 +220,6 @@ impl TextEdit {
         Some(text)
     }
 
-    /// ⌘Z. `false` when there is nothing to undo.
     pub fn undo(&mut self) -> bool {
         match self.history.undo(self.state()) {
             Some(before) => {
@@ -269,7 +230,6 @@ impl TextEdit {
         }
     }
 
-    /// ⌘⇧Z.
     pub fn redo(&mut self) -> bool {
         match self.history.redo(self.state()) {
             Some(after) => {
@@ -279,8 +239,6 @@ impl TextEdit {
             None => false,
         }
     }
-
-    // The platform input handler's side (NSTextInputClient), in UTF-16 units.
 
     pub fn utf8_to_utf16(&self, index: usize) -> usize {
         moves::to_utf16(&self.text, index)
@@ -310,8 +268,6 @@ impl TextEdit {
         self.marked.as_ref().map(|m| self.range_to_utf16(m))
     }
 
-    /// The text in a UTF-16 range, and the range it really covers (snapped to characters and
-    /// the text's end).
     pub fn text_for_range_utf16(&self, range: Range<usize>) -> (String, Range<usize>) {
         let utf8 = self.range_from_utf16(&range);
         (
@@ -320,8 +276,6 @@ impl TextEdit {
         )
     }
 
-    /// The range an input method edit applies to: the one it names, else the marked text, else
-    /// the selection.
     fn target(&self, range_utf16: Option<Range<usize>>) -> Range<usize> {
         range_utf16
             .map(|r| self.range_from_utf16(&r))
@@ -329,8 +283,6 @@ impl TextEdit {
             .unwrap_or_else(|| self.selection())
     }
 
-    /// `insertText`: typed or committed text in `range_utf16` (see [`TextEdit::target`]). The
-    /// commit of a composition the owner already cleared away is dropped, once.
     pub fn replace_text(&mut self, range_utf16: Option<Range<usize>>, text: &str) {
         let stale = self.stale_composition.take();
         if range_utf16.is_none() && self.marked.is_none() && stale.as_deref() == Some(text) {
@@ -340,8 +292,6 @@ impl TextEdit {
         self.splice(range, text, Some(Group::Typing));
     }
 
-    /// `setMarkedText`: the composition so far, kept marked, with the input method's selection
-    /// inside it (UTF-16, relative to the new text). An empty text ends the composition.
     pub fn replace_and_mark(
         &mut self,
         range_utf16: Option<Range<usize>>,
@@ -362,7 +312,6 @@ impl TextEdit {
         }
     }
 
-    /// `unmarkText`: the composition stands as typed.
     pub fn unmark(&mut self) {
         self.marked = None;
     }

@@ -1,6 +1,3 @@
-//! The menu a right click on a sidebar row opens, at the pointer: Copy Session ID, Remove Session
-//! for a Claude Code background session, Close for Codex and Antigravity rows.
-
 use notchling_engine::sessions::AgentTarget;
 use notchling_engine::settings::Settings;
 
@@ -22,18 +19,15 @@ use crate::chat::sidebar::copyable_id;
 use crate::chat::used;
 use crate::phone::bridge::now_ms;
 
-/// An open row menu: the row it is for and where the click was, in the window.
 #[derive(Clone, Debug)]
 pub struct RowMenu {
     pub row_id: String,
     pub at: Point<Pixels>,
-    /// Remove Session… was clicked: the menu asks once more before removing.
     pub confirm_remove: bool,
 }
 
 const WIDTH: f32 = 200.0;
 
-/// Opens the menu on a right click on `row_id`'s row.
 pub(super) fn on_right_click(
     row: Stateful<Div>,
     row_id: String,
@@ -53,13 +47,11 @@ pub(super) fn on_right_click(
     )
 }
 
-/// The open menu over a click-away layer, or nothing.
 pub(super) fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Option<Div> {
     let menu = view.row_menu.as_ref()?;
     let id = copyable_id(&menu.row_id).map(str::to_owned);
     let session = view.sessions.iter().find(|s| s.agent.id == menu.row_id);
     let tool = session.map(|s| s.tool);
-    // `claude rm` removes a background job; a terminal session belongs to its terminal.
     let removable = session
         .is_some_and(|s| s.tool == Tool::Claude && matches!(s.agent.target, AgentTarget::Job(_)));
     if removable && menu.confirm_remove {
@@ -86,7 +78,6 @@ pub(super) fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>)
                 cx.notify();
             })),
         ),
-        // A draft has no id yet: the item shows, faint, and does nothing.
         None => items.child(held_item(
             SharedString::from("row-copy-id"),
             "Copy Session ID",
@@ -97,7 +88,6 @@ pub(super) fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>)
             a,
         )),
     };
-    // Codex and Antigravity rows close: off the sidebar until they're used again.
     if let Some(tool) = tool.filter(|t| closed::closable(*t)) {
         let row = menu.row_id.clone();
         let all = match tool {
@@ -148,7 +138,6 @@ pub(super) fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>)
     Some(layer(menu, items, cx))
 }
 
-/// The second step of Remove Session…: what it does, then Remove or Cancel.
 fn confirm_card(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Div {
     let title = view
         .row_menu
@@ -194,7 +183,6 @@ fn confirm_card(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> D
         )
 }
 
-/// The menu at the click, over a layer that closes it on a click anywhere else.
 fn layer(menu: &RowMenu, items: Div, cx: &mut Context<ChatView>) -> Div {
     popup("row-menu-click-away", menu.at, items, close_row_menu, cx)
 }
@@ -204,8 +192,6 @@ fn close_row_menu(this: &mut ChatView, cx: &mut Context<ChatView>) {
     cx.notify();
 }
 
-/// `items` at `at` over a layer that runs `close` on a press anywhere else, either button. The
-/// right-click menus share it (this one, `copy_menu`).
 pub(super) fn popup(
     id: &'static str,
     at: Point<Pixels>,
@@ -243,7 +229,6 @@ pub(super) fn popup(
 }
 
 impl ChatView {
-    /// Reads the closed rows from the settings file (none in a fixture or a render).
     pub(super) fn load_closed(&mut self) {
         if let Some(store) = self.settings_store() {
             self.closed = closed::from_value(store.get(closed::KEY).as_ref());
@@ -251,7 +236,6 @@ impl ChatView {
         }
     }
 
-    /// Records that `id` was used here, so the Sidebar keeps showing it.
     pub(super) fn mark_used(&mut self, id: &str) {
         if !used::mark(&mut self.used, id, now_ms() as f64 / 1000.0) {
             return;
@@ -282,9 +266,6 @@ impl ChatView {
         }
     }
 
-    /// The rows the sidebar shows: Claude Code's, and the Codex and Antigravity ones used here or
-    /// working or recent (`chat::used`; the selected one too) that weren't closed since. A fixture or a render, with
-    /// no settings to remember uses in, shows every row.
     pub(super) fn open_rows(&self, all: Vec<Session>) -> Vec<Session> {
         let remembers = self.root.fixture.is_none();
         let now_s = now_ms() as f64 / 1000.0;
@@ -299,20 +280,16 @@ impl ChatView {
             .collect()
     }
 
-    /// A closed row opened again (from Search).
     pub(super) fn reopen_row(&mut self, id: &str) {
         if self.closed.remove(id).is_some() {
             self.save_closed();
         }
     }
 
-    /// Whether session actions may run now (the daemon is up and acting), with why not.
     fn acting_control(&self, cx: &mut Context<Self>) -> Control {
         self.acting(cx).control()
     }
 
-    /// Removes a Claude Code background session (`session.remove`, `claude rm` in every folder
-    /// holding a copy). The row goes when the daemon's list drops it; a failure shows as the error.
     fn remove_row(&mut self, id: String, cx: &mut Context<Self>) {
         if self.tools.sending || !self.acting_control(cx).enabled {
             cx.notify();
@@ -333,8 +310,6 @@ impl ChatView {
         );
     }
 
-    /// Closes `ids`: off the sidebar now and after a restart; the selection moves to the first row
-    /// left when it was one of them.
     fn close_rows(&mut self, ids: Vec<String>, cx: &mut Context<Self>) {
         self.row_menu = None;
         if ids.is_empty() {

@@ -1,17 +1,8 @@
-//! Chat acting on sessions (Milestone 5's app side): the reply box sends `session.reply`,
-//! `codex.send` or `agy.send` by the row's tool, Stop sends `session.interrupt`, `codex.stop` or
-//! `agy.cancel`, the pickers send nothing (Codex) or `agy.set_option`, and an Antigravity
-//! permission is answered with `agy.permission`. An Antigravity row's conversation comes from the
-//! daemon (`agy.conversation`), fetched again whenever the `tools` topic says it changed. Every
-//! control follows `Acting::control`; nothing is sent while acting isn't on.
-
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use gpui::{App, AppContext, Context, Entity, FocusHandle, Focusable, Global, Subscription};
 
-/// Every row's unsent text, kept by the app rather than the Chat window, so closing Chat and
-/// opening it again finds what you were typing.
 #[derive(Clone, Default)]
 struct SavedDrafts(HashMap<String, String>);
 
@@ -40,67 +31,40 @@ use crate::tools::requests::{
 };
 use notchling_kit::ui::{TextEditor, TextEditorEvent};
 
-/// How long after Stop a stalled prompt is sent again.
 const RETRY_AFTER_STOP_MS: u64 = 1_500;
 
-/// Why a Claude Code row that isn't a background job takes no reply.
 pub const READ_ONLY: &str = "Read only here. Reply where the session runs.";
-/// Antigravity takes one turn at a time (Codex queues; the daemon says so).
 pub const AGY_BUSY: &str = "Antigravity is still on the last turn. Send again when it ends.";
 pub const EXITED: &str = "This session has exited.";
 
-/// A pop-up over the composer.
-/// The picker menu open under the reply box (`chat::pickers`): its id, and for a menu with older
-/// rows whether they show.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Picker {
     pub menu: String,
     pub more: bool,
 }
 
-/// What Chat keeps about acting on the other tools.
 pub struct ChatTools {
-    /// What the `tools` topic last said, from the session source.
     pub live: ToolLive,
-    /// The reply box's text per row, so switching sessions keeps what was typed. The selected
-    /// row's is what [`ChatTools::editor`] shows, kept the same on every change.
     pub drafts: HashMap<String, String>,
     pub sending: bool,
     pub error: Option<String>,
-    /// Each Codex row's model and effort for its next turns (kept for this run).
     pub picks: HashMap<String, Pick>,
-    /// The selected Antigravity row's conversation and state from the daemon.
     pub agy: Option<AgyConversation>,
-    /// Which row and change count the last fetch was for.
     pub agy_fetched: Option<(String, u64)>,
-    /// The reads of Antigravity conversations: one in flight per row, none out of order.
     pub fetches: FetchGate,
     pub agy_config: Vec<ConfigOption>,
-    /// Which Antigravity rows this Chat asked the daemon to open, and when to ask again (the
-    /// daemon closes a session after ten idle minutes).
     pub opens: OpenGate,
-    /// Messages the daemon queued behind a Codex turn, shown until that turn ends.
     pub queued: HashMap<String, Vec<String>>,
-    /// Each row's messages sent from here and not in its transcript yet, drawn as "Sending…".
     pub outgoing: HashMap<String, Vec<Outgoing>>,
-    /// Draft rows whose first message the daemon is still starting a Codex session for, with the
-    /// text sent: the row follows the session when it is named, or gets the text back.
     pub starting: HashMap<String, String>,
-    /// Antigravity prompts answered here, hidden until the daemon resolves them.
     pub answered: HashSet<String>,
     pub picker: Option<Picker>,
-    /// Codex's models from its cache, read when a Codex picker first needs them.
     pub codex_models: Option<Vec<models::Model>>,
-    /// A model or effort picked for a Claude Code row, shown until its transcript says so.
     pub model_hints: HashMap<String, Hint>,
     pub effort_hints: HashMap<String, Hint>,
-    /// The row a Stop was sent to and when (ms), until it stops working or 20 s pass.
     pub stopping: Option<(String, i64)>,
-    /// A stalled prompt being sent again (row, when): Retry hides meanwhile.
     pub retrying: Option<(String, i64)>,
-    /// The reply box: the kit's editor (caret, selection, input method), one for every row.
     pub editor: Entity<TextEditor>,
-    /// The editor's focus handle.
     pub focus: FocusHandle,
     _editor_events: Subscription,
 }
@@ -146,12 +110,10 @@ impl ChatTools {
         }
     }
 
-    /// The box's text for a row.
     pub fn draft(&self, id: &str) -> &str {
         self.drafts.get(id).map(String::as_str).unwrap_or("")
     }
 
-    /// The daemon typed `text` into `row`'s session: its bubble now waits only so long.
     fn delivered(&mut self, row: &str, text: &str, now_ms: i64) {
         if let Some(out) = self.outgoing.get_mut(row).and_then(|list| {
             list.iter_mut()
@@ -161,7 +123,6 @@ impl ChatTools {
         }
     }
 
-    /// Drops `text`'s bubble from `row` (it failed, or another bubble shows it now).
     fn take_outgoing(&mut self, row: &str, text: &str) {
         if let Some(list) = self.outgoing.get_mut(row) {
             if let Some(i) = list.iter().position(|o| o.text == text) {
@@ -172,7 +133,6 @@ impl ChatTools {
 }
 
 impl ChatView {
-    /// The selected row's messages on their way, for the conversation's "Sending…" bubbles.
     pub(super) fn outgoing_texts(&self) -> Vec<String> {
         let now = now_ms();
         self.selected
@@ -191,12 +151,10 @@ impl ChatView {
         self.acts(cx).acting()
     }
 
-    /// [`Self::acting`] from an `App`, for what is drawn outside the chat's own context.
     pub(super) fn acting_in(&self, cx: &App) -> Acting {
         self.acts_in(cx).acting()
     }
 
-    /// The editor's text changed: it is the selected row's draft.
     fn draft_changed(&mut self, cx: &mut Context<Self>) {
         let Some(id) = self.selected.clone() else {
             return;
@@ -210,11 +168,9 @@ impl ChatView {
             self.tools.drafts.insert(id, text);
         }
         self.share_drafts(cx);
-        // The box and the slash menu are drawn by the root; no cached part shows a draft.
         self.redraw_chrome(cx);
     }
 
-    /// Sets a row's draft; the editor follows when that row is the one on show.
     pub(super) fn put_draft(&mut self, id: &str, text: String, cx: &mut Context<Self>) {
         self.save_draft(id, &text, cx);
         if text.is_empty() {
@@ -228,16 +184,12 @@ impl ChatView {
         }
     }
 
-    /// Hands the drafts to the app, which outlives this window.
     fn share_drafts(&self, cx: &mut Context<Self>) {
         cx.set_global(SavedDrafts(self.tools.drafts.clone()));
     }
 
-    /// Writes one row's draft to the app's database, which outlives the app (a quit, a crash, an
-    /// install). Nothing is written over a fixture or a render.
     fn save_draft(&self, id: &str, text: &str, _cx: &mut Context<Self>) {
         if let Some(dir) = self.drafts_dir() {
-            // A draft that can't be written still lives in memory; the next keystroke tries again.
             let _ = crate::chat::drafts::put(&dir, id, text);
         }
     }
@@ -249,7 +201,6 @@ impl ChatView {
             .then(|| self.root.data_dir.clone())
     }
 
-    /// The first Chat window since the app started: the drafts saved on disk come back.
     pub(super) fn restore_drafts(&mut self, cx: &mut Context<Self>) {
         if cx.has_global::<SavedDrafts>() {
             return;
@@ -261,7 +212,6 @@ impl ChatView {
         self.share_drafts(cx);
     }
 
-    /// Puts the selected row's draft in the editor (after a switch of rows).
     pub(super) fn show_draft(&mut self, cx: &mut Context<Self>) {
         let text = self
             .selected
@@ -273,7 +223,6 @@ impl ChatView {
             .update(cx, |editor, cx| editor.set_text(&text, cx));
     }
 
-    /// The reply box's gate: acting, then what the row takes.
     pub(super) fn composer_control(&self, cx: &mut Context<Self>) -> Control {
         let gate = self.acting(cx).control();
         let Some(session) = self.selected_session() else {
@@ -283,7 +232,6 @@ impl ChatView {
             };
         };
         match super::tool::of(session.tool).refusal(self, session) {
-            // Acting off says so first, except where the row could never take a reply.
             Some(AGY_BUSY) if !gate.enabled => gate,
             Some(why) => Control {
                 enabled: false,
@@ -293,24 +241,18 @@ impl ChatView {
         }
     }
 
-    /// Whether the selected row's turn runs, so Stop shows.
     pub(super) fn selected_working(&self) -> bool {
         self.selected_session().is_some_and(|s| {
             self.tools.live.is_working(&s.agent.id) || super::tool::of(s.tool).working(s)
         })
     }
 
-    /// Whether another `agy` (a delegation) is working the selected Antigravity row: the live
-    /// line and the open step group show it, but it is not a turn Stop can reach (`agy.cancel`
-    /// only ends this daemon's own), so Stop and Esc keep using [`Self::selected_working`].
     pub(super) fn selected_held_working(&self) -> bool {
         self.selected_session()
             .is_some_and(|s| s.tool == Tool::Antigravity)
             && self.tools.agy.as_ref().is_some_and(|a| a.held_working())
     }
 
-    /// Whether a Stop sent to the selected row is still on its way (a second Esc to a session
-    /// that has just stopped would open the terminal's rewind menu).
     pub(super) fn stopping(&self) -> bool {
         let Some((row, at)) = &self.tools.stopping else {
             return false;
@@ -319,7 +261,6 @@ impl ChatView {
             && crate::chat::activity::is_stopping(Some(*at), self.selected_working(), now_ms())
     }
 
-    /// Sends `request` off the UI thread; `done` takes the answer.
     pub(super) fn spawn_send(
         &mut self,
         request: Request,
@@ -345,7 +286,6 @@ impl ChatView {
         cx.notify();
     }
 
-    /// Return in the reply box: the text goes to the row's tool.
     pub(super) fn send_text(&mut self, cx: &mut Context<Self>) {
         if self.tools.sending || !self.composer_control(cx).enabled {
             return;
@@ -354,12 +294,9 @@ impl ChatView {
             return;
         };
         let id = session.agent.id.clone();
-        // The first message is still starting this session: another would start a second one.
         if self.tools.starting.contains_key(&id) {
             return;
         }
-        // The editor's text, which is this row's draft, read live rather than from the copy; the
-        // attached files' paths follow it.
         let files = self.attached(&id);
         let text = crate::chat::drops::with_attachments(self.tools.editor.read(cx).text(), &files);
         if text.is_empty() {
@@ -373,13 +310,11 @@ impl ChatView {
         let queues = tool.queues();
         self.put_draft(&id, String::new(), cx);
         self.set_attached(&id, &[], cx);
-        // Shown at once as your bubble: typing it into the session takes seconds.
         self.tools
             .outgoing
             .entry(id.clone())
             .or_default()
             .push(Outgoing::new(&text, &self.conversation));
-        // The next reload goes to the end, wherever you were reading.
         self.follow_sent_now(cx);
         let sent_text = text;
         self.spawn_send(
@@ -390,7 +325,6 @@ impl ChatView {
                     if queues {
                         match sent_state(&reply) {
                             Sent::Queued(_) => {
-                                // Its Queued bubble takes over from the Sending one.
                                 view.tools.take_outgoing(&id, &sent_text);
                                 view.tools
                                     .queued
@@ -398,14 +332,12 @@ impl ChatView {
                                     .or_default()
                                     .push(sent_text.clone());
                             }
-                            // Not named yet: the draft follows it when the daemon says so.
                             Sent::Starting => {
                                 view.tools.starting.insert(id.clone(), sent_text.clone());
                             }
                             Sent::Started => {}
                         }
                     }
-                    // A draft's first message names the real row: follow it.
                     if let Some(row) = sent_row(&reply).filter(|row| *row != id) {
                         if let Some(pick) = view.tools.picks.remove(&id) {
                             view.tools.picks.insert(row.clone(), pick);
@@ -422,7 +354,6 @@ impl ChatView {
                 }
                 Err(message) => {
                     view.tools.take_outgoing(&id, &sent_text);
-                    // Back into the box, in front of anything typed since.
                     let typed = view.tools.drafts.remove(&id).unwrap_or_default();
                     let back = if typed.is_empty() {
                         sent_text.clone()
@@ -430,7 +361,6 @@ impl ChatView {
                         format!("{sent_text}\n\n{typed}")
                     };
                     view.put_draft(&id, back, cx);
-                    // A question or permission is open: read it again, for the card.
                     let asking = is_dialog(&message);
                     view.tools.error = Some(message);
                     if asking {
@@ -442,7 +372,6 @@ impl ChatView {
         );
     }
 
-    /// Stop: the row's tool is asked to end its turn.
     pub(super) fn stop(&mut self, cx: &mut Context<Self>) {
         if self.tools.sending || !self.acting(cx).control().enabled {
             return;
@@ -468,9 +397,6 @@ impl ChatView {
         );
     }
 
-    /// Retry, on a prompt that got nothing back (`activity::stalled`): the stuck turn is stopped,
-    /// so a late answer can't come with a second copy queued behind it, then the same text goes
-    /// again on a fresh request.
     pub(super) fn retry_stalled(&mut self, cx: &mut Context<Self>) {
         if self.tools.sending {
             return;
@@ -490,7 +416,6 @@ impl ChatView {
                     view.tools.error = Some(message);
                     return;
                 }
-                // Claude Code takes a moment to drop the turn before the box takes keys again.
                 cx.spawn(async move |this, cx| {
                     cx.background_executor()
                         .timer(std::time::Duration::from_millis(RETRY_AFTER_STOP_MS))
@@ -508,7 +433,6 @@ impl ChatView {
                                         view.reload_now(cx);
                                     }
                                     Err(message) => {
-                                        // Into an empty box, so the words aren't lost.
                                         if view.tools.drafts.get(&row).is_none_or(String::is_empty)
                                         {
                                             view.put_draft(&row, sent.clone(), cx);
@@ -528,7 +452,6 @@ impl ChatView {
         );
     }
 
-    /// The Antigravity options picker's pick.
     pub(super) fn set_agy_option(&mut self, option: &str, value: &str, cx: &mut Context<Self>) {
         let Some(id) = self.selected.clone() else {
             return;
@@ -545,8 +468,6 @@ impl ChatView {
         );
     }
 
-    /// An option of the Antigravity permission card: the answer goes for the session the prompt
-    /// belongs to, which is what the daemon named, not whichever row is selected now.
     pub(super) fn answer_agy(&mut self, held: &HeldPrompt, option: String, cx: &mut Context<Self>) {
         let prompt_id = held.prompt_id.clone();
         self.spawn_send(
@@ -561,14 +482,12 @@ impl ChatView {
         );
     }
 
-    /// The Antigravity permission waiting on the selected row, from the daemon's held prompts.
     pub(super) fn agy_prompt(&self) -> Option<HeldPrompt> {
         let id = self.selected.as_deref()?;
         let prompts = self.source.view().prompts?;
         held_prompt(&prompts, id, &self.tools.answered)
     }
 
-    /// The selected row's pickers, from its tool (`chat::pickers`): the same parts for every tool.
     pub(super) fn menus(&self, cx: &App) -> Vec<crate::chat::pickers::Menu> {
         match self.selected_session() {
             Some(session) => super::tool::of(session.tool).menus(self, session, cx),
@@ -576,7 +495,6 @@ impl ChatView {
         }
     }
 
-    /// The selected Codex row's model and effort: its pick over what its last turn ran with.
     pub(super) fn codex_picker(&self) -> CodexPicker {
         let id = self.selected.clone().unwrap_or_default();
         CodexPicker::new(
@@ -586,7 +504,6 @@ impl ChatView {
         )
     }
 
-    /// Opens or closes a picker's menu (any other closes). Codex's models are read on the way.
     pub(super) fn toggle_menu(&mut self, menu: &str, cx: &mut Context<Self>) {
         let open = self.tools.picker.as_ref().is_some_and(|p| p.menu == menu);
         if let Some(tool) = self.selected_session().filter(|_| !open).map(|s| s.tool) {
@@ -599,23 +516,18 @@ impl ChatView {
         cx.notify();
     }
 
-    /// A pick in any picker menu, handed to the selected row's tool: a Claude Code reply
-    /// (`/model`, `/effort`), Codex's next-turn pick, or an Antigravity option.
     pub(super) fn pick(&mut self, menu: &str, value: &str, cx: &mut Context<Self>) {
         if let Some(tool) = self.selected_session().map(|s| s.tool) {
             super::tool::of(tool).pick(self, menu, value, cx);
         }
     }
 
-    /// Claude Code's models from the daemon; empty until it has answered, which the pickers and the
-    /// meter read as the built-in list.
     pub(super) fn claude_catalog(&self) -> &[ModelInfo] {
         self.catalog
             .get(&CatalogTool::Claude)
             .map_or(&[], Vec::as_slice)
     }
 
-    /// The model the selected row shows: the pick not yet in the transcript, else the transcript's.
     pub(super) fn claude_model(&self, cx: &App) -> Option<&str> {
         let hint = self
             .selected
@@ -628,7 +540,6 @@ impl ChatView {
         )
     }
 
-    /// The effort the selected row shows, the same way.
     pub(super) fn claude_effort(&self, cx: &App) -> Option<&str> {
         let hint = self
             .selected
@@ -641,8 +552,6 @@ impl ChatView {
         )
     }
 
-    /// A pick in the Model or Effort menu: `/model <id>` or `/effort <level>` goes to the session
-    /// as a reply (`session.reply`), as the reply box would send it. The box's own text stays.
     pub(super) fn pick_claude(&mut self, kind: Kind, value: &str, cx: &mut Context<Self>) {
         self.tools.picker = None;
         if self.tools.sending || !self.composer_control(cx).enabled {
@@ -671,7 +580,6 @@ impl ChatView {
             move |view, result, cx| match result {
                 Ok(_) => view.reload_now(cx),
                 Err(message) => {
-                    // Not sent: what the label showed goes back to the transcript's.
                     match kind {
                         Kind::Model => view.tools.model_hints.remove(&id),
                         Kind::Effort => view.tools.effort_hints.remove(&id),
@@ -687,7 +595,6 @@ impl ChatView {
         );
     }
 
-    /// Keeps a Codex pick for the row.
     pub(super) fn keep_pick(&mut self, picker: &CodexPicker) {
         if let Some(id) = &self.selected {
             if picker.is_default() {
@@ -698,8 +605,6 @@ impl ChatView {
         }
     }
 
-    /// After a load or a tools event: the live state, and the selected Antigravity row's
-    /// conversation from the daemon (asking it to open the session first while acting is on).
     pub(super) fn sync_tools(&mut self, cx: &mut Context<Self>) {
         let view = self.source.view();
         self.tools.live = view.tools;
@@ -708,7 +613,6 @@ impl ChatView {
             return;
         };
         let id = session.agent.id;
-        // Messages the transcript now holds give way to the real bubbles.
         let now = now_ms();
         if let Some(list) = self.tools.outgoing.get_mut(&id) {
             list.retain(|o| o.keep(&self.conversation, now));
@@ -745,9 +649,6 @@ impl ChatView {
         }
     }
 
-    /// A draft whose session was still starting when the daemon replied: once Codex names it the
-    /// row becomes the session's (if it is the one on show, it is shown), and if it never starts
-    /// the text goes back into the box with the reason.
     fn follow_starting_drafts(&mut self, cx: &mut Context<Self>) {
         if self.tools.starting.is_empty() {
             return;
@@ -789,9 +690,6 @@ impl ChatView {
         cx.notify();
     }
 
-    /// Reads the row's conversation and options from the daemon, off the UI thread: one read at a
-    /// time per row, and a change that comes meanwhile is covered by the read that follows
-    /// (`FetchGate`).
     fn fetch_agy(&mut self, id: String, cx: &mut Context<Self>) {
         if let Ask::Start(number) = self.tools.fetches.request(&id) {
             self.read_agy(id, number, cx);
@@ -808,7 +706,6 @@ impl ChatView {
                 .spawn(async move {
                     let conversation = actions.read(&agy_conversation(&id, false)).ok();
                     let state = actions.read(&agy_state(&id)).ok();
-                    // The stream tells the context's size only as a turn ends; the log has it now.
                     let context = log
                         .as_deref()
                         .and_then(crate::tools::agy_context::context_tokens);

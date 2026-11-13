@@ -1,16 +1,7 @@
-//! Which expiry reminders are due (Swift `VaultReminder`). A secret with an `expires` day gets one
-//! reminder at 7 days before, one at 1 day before, one on the day and one once it has passed; each
-//! fires once. Only the nearest threshold that applies is considered, so a computer that was off
-//! for days gets one reminder (with the days left), not three.
-//!
-//! What was sent is a map `"<id>|<day>"` → thresholds, kept by whoever posts the reminders; a new
-//! day starts again. Nothing here posts or stores anything.
-
 use super::entry::VaultEntry;
 use super::expiry::{self, Status, RENEW_SOON_DAYS};
 use std::collections::{BTreeMap, BTreeSet};
 
-/// What was sent: `"<id>|<day>"` → the thresholds' keys.
 pub type Sent = BTreeMap<String, Vec<String>>;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -22,7 +13,6 @@ pub enum Threshold {
 }
 
 impl Threshold {
-    /// The key kept in [`Sent`]: `7d`, `1d`, `0d`, `expired`.
     pub fn key(self) -> &'static str {
         match self {
             Threshold::Week => "7d",
@@ -33,19 +23,16 @@ impl Threshold {
     }
 }
 
-/// One reminder to post.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Due {
     pub name: String,
     pub id: String,
     pub day: String,
     pub threshold: Threshold,
-    /// `github expires in 3 days (2026-11-09)`.
     pub message: String,
 }
 
 impl Due {
-    /// The title the reminder is posted with.
     pub fn title(&self) -> &'static str {
         if self.threshold == Threshold::Expired {
             "Secret expired"
@@ -59,7 +46,6 @@ pub fn key(id: &str, day: &str) -> String {
     format!("{id}|{day}")
 }
 
-/// The reminders due `today` (a day number, [`expiry::today_local`]) that weren't sent yet.
 pub fn due(entries: &[VaultEntry], sent: &Sent, today: i64) -> Vec<Due> {
     entries
         .iter()
@@ -102,7 +88,6 @@ pub fn mark_sent(due: &Due, sent: &Sent) -> Sent {
     sent
 }
 
-/// Forgets what was sent for one secret (a new value was saved).
 pub fn clearing(id: &str, sent: &Sent) -> Sent {
     let prefix = format!("{id}|");
     sent.iter()
@@ -111,7 +96,6 @@ pub fn clearing(id: &str, sent: &Sent) -> Sent {
         .collect()
 }
 
-/// Drops the memory of secrets that are gone or whose day changed.
 pub fn pruned(sent: &Sent, entries: &[VaultEntry]) -> Sent {
     let live: BTreeSet<String> = entries
         .iter()

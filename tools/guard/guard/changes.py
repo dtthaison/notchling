@@ -1,13 +1,3 @@
-"""What a pull request changed: one `Change` per touched file, from `git diff base...head`.
-
-Only the PR's own changes count (three dots: from the merge base). Paths come from
-`--name-status -z`, so spaces and odd characters survive; each file's lines come from its
-own `--unified=0 --text --no-textconv` diff. Without `--text` git prints no lines for a file it
-thinks is binary (a NUL byte, or a `-diff` line in a `.gitattributes` the PR or an earlier PR
-added), and swiftc compiles such a file anyway. `--numstat` says which files git calls binary,
-so the caller can still send those to the maintainer.
-"""
-
 from __future__ import annotations
 
 import os
@@ -19,8 +9,6 @@ from typing import List, Optional, Tuple
 
 HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@")
 
-# Files that are binary on purpose: their bytes aren't read as lines. Any other file the diff
-# calls binary is still read as text, since a code file with a NUL byte in a comment compiles.
 ASSET_EXTS = frozenset({".png", ".jpg", ".jpeg", ".gif", ".webp", ".heic", ".ico", ".icns", ".pdf", ".mp3",
                         ".mp4", ".mov", ".wav", ".m4a", ".zip", ".gz", ".tar", ".ttf", ".otf", ".woff", ".woff2"})
 
@@ -28,7 +16,7 @@ ASSET_EXTS = frozenset({".png", ".jpg", ".jpeg", ".gif", ".webp", ".heic", ".ico
 @dataclass(frozen=True)
 class Change:
     path: str
-    status: str  # A, M, D or R
+    status: str
     old_path: Optional[str] = None
     added: Tuple[Tuple[int, str], ...] = ()
     removed: Tuple[str, ...] = ()
@@ -42,7 +30,6 @@ def _git(repo: Path, *args: str) -> str:
 
 
 def _entries(repo: Path, base: str, head: str) -> List[Tuple[str, Optional[str], str]]:
-    """(status, old path, path) for each touched file."""
     fields = _git(repo, "diff", "-M", "--name-status", "-z", f"{base}...{head}").split("\0")
     out, i = [], 0
     while i < len(fields) and fields[i]:
@@ -76,7 +63,6 @@ def _lines(patch: str) -> Tuple[Tuple[Tuple[int, str], ...], Tuple[str, ...]]:
 
 
 def _binary(repo: Path, base: str, head: str, paths: List[str]) -> bool:
-    """Does git call this file binary? `--numstat` prints `-` for both counts then."""
     stat = _git(repo, "diff", "-M", "--numstat", "--no-color", "--no-ext-diff", "--no-textconv",
                 f"{base}...{head}", "--", *paths)
     return stat.startswith("-\t-\t")

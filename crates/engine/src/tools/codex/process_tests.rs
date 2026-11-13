@@ -10,7 +10,6 @@ fn sh(script: &str) -> TurnSpec {
     }
 }
 
-/// Every line and the exit, to the end.
 fn drain(process: &Arc<dyn ToolProcess>) -> (Vec<ToolLine>, ExitInfo) {
     let mut lines = Vec::new();
     loop {
@@ -41,7 +40,6 @@ fn it_reads_both_streams_and_the_exit_code() {
     assert!(lines
         .iter()
         .any(|l| l.stream == Stream::Err && l.text == "two"));
-    // Asked again, it says the same.
     assert_eq!(process.next(), Next::Exited(exit));
 }
 
@@ -62,7 +60,6 @@ fn it_runs_in_the_given_folder() {
 
 #[test]
 fn interrupt_is_sigint_and_a_stop_is_not_a_failure() {
-    // `sh` dies of SIGINT while it waits.
     let process = RealSpawner
         .spawn(&sh("echo ready; sleep 30"))
         .expect("starts");
@@ -71,13 +68,11 @@ fn interrupt_is_sigint_and_a_stop_is_not_a_failure() {
     let (_, exit) = drain(&process);
     assert!(exit.signaled || exit.code == Some(130), "{exit:?}");
     assert_eq!(super::super::plan::failure_of(&exit, ""), None);
-    // After the end an interrupt does nothing (and doesn't signal a reused pid).
     process.interrupt();
 }
 
 #[test]
 fn a_line_over_the_cap_is_cut_not_buffered() {
-    // 3 MB without a newline, then a normal line: the first is cut to the cap, the next is intact.
     let (lines, exit) = drain(
         &RealSpawner
             .spawn(&sh(

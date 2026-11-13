@@ -1,6 +1,3 @@
-//! The step rows of a conversation: a run of tool calls as one chip, each call's detail (command,
-//! output, diff) and a thought's line. `conversation` draws the rows around them.
-
 use std::path::Path;
 
 use gpui::{div, prelude::*, px, Context, Div, FontWeight, SharedString, Stateful};
@@ -75,7 +72,6 @@ fn diff_line(line: &DiffLine, a: Appearance) -> Div {
         )
 }
 
-/// A file change (`DiffView`): the file and its folder, Show in Finder, then the lines.
 fn diff_view(step: &ToolRow, a: Appearance, cx: &mut Context<ConversationView>) -> Div {
     let path = Path::new(&step.input);
     let name = path
@@ -136,7 +132,6 @@ fn diff_view(step: &ToolRow, a: Appearance, cx: &mut Context<ConversationView>) 
         )
 }
 
-/// What opens under a step: its diff, or its command or input and its output.
 fn step_detail(
     step: &ToolRow,
     sel: &Sel,
@@ -174,7 +169,6 @@ fn step_detail(
     Some(detail)
 }
 
-/// One call (`ToolCallRow`): icon, title, diff counts, its state, a chevron when something opens.
 fn step_row(
     input: &ConversationInput,
     s: &ConversationState,
@@ -193,7 +187,6 @@ fn step_row(
         Ink::TextMuted
     };
     let id = step.id.clone();
-    // An Agent call whose subagent is listed opens that subagent's transcript.
     let subagent = (step.kind == ToolKind::Agent)
         .then(|| crate::chat::subagent_view::link_for_step(&input.subagents, &step.id))
         .flatten()
@@ -233,7 +226,6 @@ fn step_row(
                 .cursor_pointer()
                 .child(label("Open", TypeRole::Label, Ink::AccentText, a))
                 .on_click(cx.listener(move |this, _, _, cx| {
-                    // The row itself folds and opens on a click; this one is only Open.
                     cx.stop_propagation();
                     this.act(|chat, cx| chat.open_subagent(&agent_id, cx), cx);
                 }))
@@ -252,7 +244,6 @@ fn step_row(
                 a,
             ))
         })
-        // No spinner on a running step: the live line at the bottom says what's going on.
         .when(!running && step.is_error, |d| {
             d.child(icon(Icon::Failed, 11.0, Ink::Expired, a))
         })
@@ -266,8 +257,6 @@ fn step_row(
         .when(open, |d| d.children(step_detail(step, sel, a, cx)))
 }
 
-/// The chip over a run of calls (`ToolStepView`): the kinds' icons stacked, the summary, how many
-/// failed, the chevron. Click to open.
 fn step_chip(
     id: &str,
     steps: &[ToolRow],
@@ -322,7 +311,6 @@ fn step_chip(
         .child(chevron(open, 9.0, a))
 }
 
-/// A run of calls: the chip, and when open each call on its own line beside a hairline.
 pub(super) fn step_group(
     input: &ConversationInput,
     s: &ConversationState,
@@ -360,8 +348,6 @@ pub(super) fn step_group(
         .part_at("Tool Steps", Corner::TopTrailing, a, cx)
 }
 
-/// "Thought for 16s" (`ThinkingRow`): faint, with the text under it when opened. Claude Code keeps
-/// the text only sometimes; without it there is nothing to open.
 pub(super) fn thinking(
     s: &ConversationState,
     id: &str,

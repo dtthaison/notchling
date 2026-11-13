@@ -1,6 +1,3 @@
-//! The pages and search ops through a real daemon over a temp data root, and `notchling page` /
-//! `notchling pages` against it and without it. It never sees the real folders: every run sets
-//! `NOTCHLING_DATA_ROOT` and a fake `HOME`, and a guard stops every daemon it starts.
 #![cfg(unix)]
 
 use notchling_engine::pages::{PageLibrary, RecordContext};
@@ -18,7 +15,6 @@ impl Drop for Dir {
     }
 }
 
-/// A short folder under /tmp (socket paths are capped at 104 bytes on macOS).
 fn scratch(tag: &str) -> Dir {
     let dir = PathBuf::from(format!("/tmp/nl-{tag}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
@@ -72,7 +68,6 @@ fn now() -> f64 {
 
 const LINK: &str = "https://claude.ai/code/artifact/AbCdEfGhIjKlMnOpQrStUv";
 
-/// A data root with two saved pages and one recent Claude Code transcript.
 fn make_root(dir: &Path) -> PathBuf {
     let root = dir.join("root");
     std::fs::create_dir_all(root.join("work")).unwrap();
@@ -139,7 +134,6 @@ fn the_ops_and_the_commands_work_with_and_without_a_daemon() {
     wait_for_socket(&socket);
 
     let mut client = Client::connect(&socket, ClientKind::Cli, "0.1.0").unwrap();
-    // Acting is off, and reads work.
     assert_eq!(client.status().unwrap().acting, Some(false));
     let list = client.call(ops::PAGES_LIST, json!({})).unwrap();
     assert_eq!(list["pages"].as_array().unwrap().len(), 2, "{list}");
@@ -152,7 +146,6 @@ fn the_ops_and_the_commands_work_with_and_without_a_daemon() {
     let search = client
         .call(ops::SEARCH_QUERY, json!({"text": "numbers"}))
         .unwrap();
-    // Pages match on title, project, account and link, not on what is inside.
     assert!(search["pages"].as_array().unwrap().is_empty(), "{search}");
     assert_eq!(search["sessions"][0]["key"], "claude:sess1", "{search}");
     assert!(search["sessions"][0]["snippet"]
@@ -165,7 +158,6 @@ fn the_ops_and_the_commands_work_with_and_without_a_daemon() {
     assert_eq!(by_title["pages"][0]["title"], "Cost Report", "{by_title}");
     assert!(client.call(ops::PAGES_FIND, json!({})).is_err());
 
-    // The commands, through the daemon.
     let page = notchling(&root).args(["page", LINK]).output().unwrap();
     let text = String::from_utf8_lossy(&page.stdout).into_owned();
     assert!(
@@ -192,12 +184,10 @@ fn the_ops_and_the_commands_work_with_and_without_a_daemon() {
         String::from_utf8_lossy(&none.stderr).contains("No saved page matches \"no such page\".")
     );
 
-    // The daemon read; it wrote the pages folder not at all, and its cache is its own.
     assert_eq!(std::fs::read(&list_file).unwrap(), list_before);
     assert!(root.join("notchling/daemon/search.db").exists());
     assert!(!root.join("notchling/search-index.json").exists());
 
-    // Without a daemon the same commands read the library themselves, with the same text.
     drop(client);
     drop(daemon);
     let deadline = Instant::now() + Duration::from_secs(10);

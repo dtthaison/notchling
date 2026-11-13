@@ -1,7 +1,3 @@
-//! The pinned guarantees across the engine and the real steps (Swift `MachinesSafetyTests`): a
-//! vault value reaches a machine only on ssh's stdin, never an argv, an environment, a log line or a
-//! result; nothing a refresh does changes a machine; a hostile home never reaches a script.
-
 use super::catalog;
 use super::engine::{Deps, SetupEngine};
 use super::engine_plan::{AdminAnswer, PlanKind};
@@ -42,7 +38,6 @@ fn worker_mac() -> super::registry::Machine {
     m
 }
 
-/// Every call a machine's output could echo the value into: the runner says it back on both pipes.
 fn echoing() -> Arc<ScriptedRunner> {
     let r = ScriptedRunner::new();
     r.on_call(

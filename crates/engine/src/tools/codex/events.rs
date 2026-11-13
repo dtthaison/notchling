@@ -1,36 +1,15 @@
-//! The lines `codex exec --json` prints, one JSON object each. The Swift runner reads three:
-//! `thread.started` (the new session's id), `error` and `turn.failed` (what went wrong). The rest
-//! are named so the daemon can say a turn is making progress, but nothing depends on them: Chat
-//! reads the conversation from the session's rollout file, as for any Codex session.
-
 use serde_json::Value;
 
-/// One `exec --json` event.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Event {
-    /// `{"type":"thread.started","thread_id":"…"}`: the session's id.
-    ThreadStarted {
-        thread_id: String,
-    },
+    ThreadStarted { thread_id: String },
     TurnStarted,
-    /// `{"type":"turn.completed","usage":{…}}`.
     TurnCompleted,
-    /// `turn.failed` (`{"error":{"message"}}`) or `error` (`{"message"}`).
-    Failed {
-        message: Option<String>,
-    },
-    /// `item.started`, `item.updated` or `item.completed`, with the item's type
-    /// (`agent_message`, `command_execution`, `file_change`…).
-    Item {
-        phase: String,
-        kind: String,
-    },
-    /// Anything else, or a line that isn't JSON.
+    Failed { message: Option<String> },
+    Item { phase: String, kind: String },
     Other,
 }
 
-/// The longest line read: a line over this is dropped by the reader before it gets here, and
-/// anything longer than it is not parsed.
 pub const MAX_LINE_BYTES: usize = 1024 * 1024;
 
 pub fn parse_line(line: &str) -> Event {

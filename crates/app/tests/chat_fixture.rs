@@ -1,7 +1,3 @@
-//! The read-only Chat's view models over the fixture data root (`fixtures/chat`, laid out as the
-//! notch's: `claude`, `notchling`, `codex`), on every system: what the sidebar lists, what the
-//! conversation shows, what the header and inspector say. Nothing here reads the real `~/.claude`.
-
 use std::path::{Path, PathBuf};
 
 use notchling_app::chat::data::{DataRoot, Tool};
@@ -11,7 +7,6 @@ use notchling_app::chat::rows::{rows, Row};
 use notchling_app::chat::sidebar::sections;
 use notchling_kit::{Icon, Status};
 
-/// Late 2026-11-08, the fixture's day.
 const NOW_MS: i64 = 1_794_182_400_000;
 
 fn fixture_root() -> PathBuf {
@@ -133,8 +128,6 @@ fn a_reads_numbered_output_lines_up_in_the_view_model() {
         .flatten()
         .find(|t| t.title.starts_with("Read "))
         .expect("the Read call");
-    // Claude Code's `cat -n` output is `     1<tab>code`; the engine trims the first line's
-    // leading spaces, so the first number must not drag its code left of the others.
     let out = read.output.as_ref().expect("its output");
     assert!(!out.text.contains('\t'), "{:?}", out.text);
     let lines: Vec<&str> = out.text.lines().collect();

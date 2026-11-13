@@ -1,26 +1,16 @@
-//! An Antigravity permission as the daemon publishes it (`prompt.pending` with `tool: "agy"`,
-//! plus `rpcId`, `options` and `diff`): what the tool would do, and Antigravity's own options in
-//! the order the notch lists them (`NotchForeign.orderedOptions`, `preview`, `AgyPermissionCard`).
-//! Answering goes through `agy.permission` by the prompt's own session id, the rpc id and the
-//! option picked.
-
 use std::collections::HashSet;
 
 use notchling_engine::bridge::foreign::PermissionOption;
 use notchling_engine::transcript::model::{DiffKind, DiffLine};
 use serde_json::Value;
 
-/// The card shows at most this many lines of the diff or the input.
 pub const PREVIEW_LINES: usize = 8;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct AgyPermission {
-    /// The JSON-RPC id to answer, as text.
     pub rpc_id: String,
-    /// What the tool would do ("File hello.txt"), else its name.
     pub title: String,
     pub tool_name: String,
-    /// The command or input, as plain text.
     pub input: String,
     pub diff: Vec<DiffLine>,
     pub options: Vec<PermissionOption>,
@@ -34,7 +24,6 @@ fn text(v: &Value, key: &str) -> String {
 }
 
 impl AgyPermission {
-    /// From a held prompt's data; `None` unless it is Antigravity's with an rpc id and options.
     pub fn from_prompt(p: &Value) -> Option<AgyPermission> {
         if p.get("tool").and_then(Value::as_str) != Some("agy") {
             return None;
@@ -95,8 +84,6 @@ impl AgyPermission {
         })
     }
 
-    /// Antigravity's options in the order the card lists them: the one-time allow first, other
-    /// allows next, then the rejections, so the first row is the safe default a Return would take.
     pub fn ordered_options(&self) -> Vec<&PermissionOption> {
         let rank = |o: &PermissionOption| match o.kind.as_str() {
             "allow_once" => 0,
@@ -112,7 +99,6 @@ impl AgyPermission {
         indexed.into_iter().map(|(_, o)| o).collect()
     }
 
-    /// What the card shows of the call: the edit's diff, else the command or input, a few lines.
     pub fn preview(&self, max_lines: usize) -> Vec<(String, DiffKind)> {
         if !self.diff.is_empty() {
             return self
@@ -134,27 +120,19 @@ impl AgyPermission {
             .collect()
     }
 
-    /// The card's estimated height (`NotchForeign.permissionHeight`): header, title, the preview
-    /// box, the options and the "Answer in Chat" line.
     pub fn height(&self) -> f64 {
         let lines = self.preview(PREVIEW_LINES).len() as f64;
         28.0 + 20.0 + 18.0 + lines * 15.0 + 22.0 + self.options.len() as f64 * 36.0 + 28.0
     }
 }
 
-/// A permission the daemon holds for a row, with what answering it needs.
 #[derive(Clone, Debug, PartialEq)]
 pub struct HeldPrompt {
-    /// The prompt's id, to hide it once answered.
     pub prompt_id: String,
-    /// The session the prompt belongs to, as the daemon named it: what the answer is sent for.
-    /// Not whichever row Chat has selected when the button is pressed.
     pub session_id: String,
     pub permission: AgyPermission,
 }
 
-/// The Antigravity permission waiting on `row` among the daemon's held `prompts`, unless it was
-/// already answered here.
 pub fn held_prompt(prompts: &[Value], row: &str, answered: &HashSet<String>) -> Option<HeldPrompt> {
     prompts.iter().find_map(|p| {
         let session_id = p.get("sessionId").and_then(Value::as_str)?;
@@ -255,7 +233,6 @@ mod tests {
             held_prompt(&prompts, "agy:s2", &none).map(|h| h.session_id),
             Some("agy:s2".to_owned())
         );
-        // Answered here, and not Antigravity's, and nobody's.
         let answered: HashSet<String> = ["agy-perm:agy:s1:1".to_owned()].into();
         assert_eq!(held_prompt(&prompts, "agy:s1", &answered), None);
         assert_eq!(held_prompt(&prompts, "agy:s3", &none), None);

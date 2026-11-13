@@ -31,9 +31,6 @@ jobs:
 
 
 def fixtures():
-    """A copy of the real rulesets, with phone.yml's and rust.yml's jobs and a stub for the guard, build and gate ones.
-
-    The stub keeps these tests independent of the other workflows being edited."""
     tmp = Path(tempfile.mkdtemp())
     rs, wf = tmp / "rulesets", tmp / "workflows"
     shutil.copytree(REAL_RULESETS, rs)
@@ -115,7 +112,6 @@ class RulesetsTests(unittest.TestCase):
         self.expect(bad, needle="integration_id")
 
     def test_main_lets_only_repository_admins_bypass_through_a_pull_request(self):
-        # The maintainer can't approve his own pull request, and he is the only code owner.
         self.assertEqual(json.loads((REAL_RULESETS / "main.json").read_text())["bypass_actors"], [ADMIN_ON_PR])
         bad = [[], [dict(ADMIN_ON_PR, bypass_mode="always")], [dict(ADMIN_ON_PR, actor_id=4)],
                [dict(ADMIN_ON_PR, actor_id=2)], [dict(ADMIN_ON_PR, actor_type="Team")],
@@ -125,7 +121,6 @@ class RulesetsTests(unittest.TestCase):
                 self.expect(lambda d: d.update(bypass_actors=actors), name="main.json", needle="bypass_actors")
 
     def test_release_tags_let_only_the_actions_app_bypass(self):
-        # release.yml's `gh release create` makes the v* tag with GITHUB_TOKEN.
         self.assertEqual(json.loads((REAL_RULESETS / "release-tags.json").read_text())["bypass_actors"],
                          [ACTIONS_APP])
         bad = [[], [dict(ACTIONS_APP, bypass_mode="pull_request")], [dict(ACTIONS_APP, actor_id=1)],
@@ -211,16 +206,13 @@ class ApplySettingsTests(unittest.TestCase):
         r = subprocess.run(["bash", str(SCRIPT), "--dry-run", "--repo", "example/repo"], capture_output=True,
                            text=True, timeout=60, stdin=subprocess.DEVNULL)
         self.assertEqual(r.returncode, 0, r.stderr)
-        # The requests carry the actors ...
         self.assertIn('"actor_type":"RepositoryRole"', r.stdout)
         self.assertIn('"actor_type":"Integration"', r.stdout)
-        # ... and a note names them, with the reason for the release one.
         note = r.stdout.split("Bypass", 1)[1]
         for needle in ("repository admins", "pull request", "GitHub Actions", "15368", "release.yml", "v*"):
             self.assertIn(needle, note)
 
     def send_function(self):
-        """The script's `send` function, alone: tests run it against a fake gh, never the script."""
         m = re.search(r"(?ms)^send\(\) \{.*?^\}\n", SCRIPT.read_text())
         self.assertIsNotNone(m, "apply-settings.sh must define send()")
         return m.group(0)
@@ -257,7 +249,7 @@ class ApplySettingsTests(unittest.TestCase):
                 r, _ = self.run_send(method, path, err, 1, body)
                 self.assertNotEqual(r.returncode, 0)
                 self.assertNotIn("after: reached", r.stdout)
-                self.assertIn(err, r.stdout + r.stderr)  # the error stays visible
+                self.assertIn(err, r.stdout + r.stderr)
 
     def test_send_sends_the_body_on_stdin(self):
         r, calls = self.run_send("PUT", "/repos/example/repo/rulesets/1", "", 0, '{"a":1}')

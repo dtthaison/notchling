@@ -1,8 +1,3 @@
-//! The held prompts end to end over an in-process server: the daemon's `prompts.list`,
-//! `prompt.pending` and `prompt.resolved` reach the notch's cards through the session source and
-//! the notch's source, and a card answers by the prompt's id. The agent tier never sees them and
-//! the notch falls back to the Swift hook's `requests/` folder, read-only.
-
 use super::*;
 use crate::acting::{Decision, Request};
 use crate::notch::model::{Card, NotchModel};
@@ -19,7 +14,6 @@ const SESSION: &str = "6f1c2a9e-3b7d-4e21-9a0c-5d8e7f6a1b2c";
 
 type Running = (ServerHandle, JoinHandle<std::io::Result<()>>);
 
-/// The daemon's session list and held prompts.
 struct Daemon {
     list: Value,
     held: Arc<Mutex<Vec<Value>>>,
@@ -77,7 +71,6 @@ fn row(id: &str) -> Agent {
     }
 }
 
-/// What the daemon's `Prompt::to_json` sends for the permission fixture.
 fn permission(id: &str) -> Value {
     json!({
         "id": id, "sessionId": SESSION, "kind": "permission", "toolName": "Bash",
@@ -152,7 +145,6 @@ fn prompt_ids(view: &View) -> Vec<String> {
         .collect()
 }
 
-/// One notch poll over what the source has now.
 fn poll(notch: &mut Source, model: &mut NotchModel, view: View) -> Option<String> {
     let loaded = notch.load_from(view.agents, view.prompts, 10_000);
     model.update(loaded.agents, loaded.snapshots, loaded.requests)
@@ -162,14 +154,12 @@ fn poll(notch: &mut Source, model: &mut NotchModel, view: View) -> Option<String
 fn held_prompts_reach_the_notch_and_leave_when_resolved() {
     let scratch = Scratch::new("ssp-follow");
     let socket = scratch.path().join(SOCKET_NAME);
-    // One held before the app connects: listed, not only followed.
     let held = Arc::new(Mutex::new(vec![permission("p1")]));
     let running = serve(&socket, true, &held);
     let source = SessionSource::start(config(&socket));
     let view = wait_for(&source, "the held prompt", |v| prompt_ids(v) == ["p1"]);
     assert_eq!(view.link, Link::Daemon);
 
-    // The notch reads the daemon's prompts, not the Swift `requests/` folder.
     let mut notch = Source::new(NotchRoot::fixture(&scratch.path().join("no-files")));
     let mut model = NotchModel::default();
     assert_eq!(poll(&mut notch, &mut model, view), None, "the baseline");
@@ -178,15 +168,12 @@ fn held_prompts_reach_the_notch_and_leave_when_resolved() {
     };
     assert_eq!(card.id, "p1", "the card carries the prompt's id");
     assert_eq!(card.summary, "rm -rf build");
-    // A held prompt is waiting on you: the row is in Needs Input.
     assert_eq!(model.count(AgentGroup::NeedsInput), 1);
-    // Its answer names the prompt, never the row.
     assert_eq!(
         Request::permission(&card.id, Decision::Allow).args,
         json!({"id": "p1", "decision": "allow"})
     );
 
-    // Resolved: the card goes. A new question comes: the notch peeks for it.
     running
         .0
         .publish("prompts", "prompt.resolved", &json!({"id": "p1"}));
@@ -208,7 +195,6 @@ fn held_prompts_reach_the_notch_and_leave_when_resolved() {
     assert_eq!(q.items[0].options, ["Postgres", "SQLite"]);
     assert_eq!(model.prompt_id("job-a").as_deref(), Some("p2"));
 
-    // A permission arriving later peeks too.
     running.0.publish(
         "prompts",
         "prompt.resolved",

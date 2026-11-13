@@ -1,16 +1,8 @@
-//! Step 8 of the catalog: Xcode (Swift `MachineSteps`, Xcode). Split from `steps_machine`.
-
 use super::registry::MachineAbilities;
 use super::step::{CheckResult, Detected, RemoteOutput, StepContext};
 use super::steps_machine::{is_newline, shown, trim_ws};
 use std::cmp::Ordering;
 
-// MARK: 8 Xcode
-
-/// Without the Command Line Tools `xcodebuild` and `xcrun` are stubs that open an install dialog,
-/// so nothing runs then. `simctl list devices iPhone` keeps only the iPhones in the JSON (the full
-/// list can pass the 64 KiB cap with several runtimes); each device's `isAvailable` is still read
-/// from it.
 pub(super) const XCODE_SCRIPT: &str = r#"if ! xcode-select -p >/dev/null 2>&1; then echo @@noclt; exit 0; fi
 xcodebuild -version | head -1
 echo @@runtimes
@@ -18,12 +10,9 @@ xcrun simctl list runtimes available 2>/dev/null | grep '^iOS '
 echo @@devices
 xcrun simctl list devices iPhone -j 2>/dev/null"#;
 
-/// The engine's batch wrapper puts a `head -c 65536` on each probe's output on the machine; output
-/// that reaches it was cut there.
 const OUTPUT_CAP: usize = 65_536;
 const CUT_MARKER: &str = "[earlier output cut]";
 
-/// Compares as Foundation's `.numeric`: runs of digits by value, the rest by text.
 fn numeric_cmp(a: &str, b: &str) -> Ordering {
     fn chunks(s: &str) -> Vec<(bool, String)> {
         let mut out: Vec<(bool, String)> = Vec::new();
@@ -51,7 +40,6 @@ fn numeric_cmp(a: &str, b: &str) -> Ordering {
     left.len().cmp(&right.len())
 }
 
-/// `26.5` or `26.5.1`: digits and dots only.
 fn major_minor_or_more(s: &str) -> bool {
     let parts: Vec<&str> = s.split('.').collect();
     parts.len() >= 2
@@ -60,8 +48,6 @@ fn major_minor_or_more(s: &str) -> bool {
             .all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()))
 }
 
-/// Output that was cut, or sections that can't be read, say nothing about the machine: "can't
-/// tell", and the abilities already saved stay as they are.
 pub(super) fn parse_xcode(out: &RemoteOutput, ctx: &StepContext) -> CheckResult {
     let unreadable =
         || CheckResult::cant_tell("the Xcode check's output was too long or not readable");
@@ -78,7 +64,7 @@ pub(super) fn parse_xcode(out: &RemoteOutput, ctx: &StepContext) -> CheckResult 
     let mut xcode_line: Option<String> = None;
     let mut runtime_lines: Vec<&str> = Vec::new();
     let mut devices_json = String::new();
-    let mut section = 0; // 0 head, 1 runtimes, 2 devices
+    let mut section = 0;
     let (mut saw_runtimes, mut saw_devices) = (false, false);
     for line in &all_lines {
         if *line == "@@runtimes" {
@@ -105,13 +91,9 @@ pub(super) fn parse_xcode(out: &RemoteOutput, ctx: &StepContext) -> CheckResult 
         }
     }
     if !saw_runtimes || !saw_devices {
-        // no marker at all: the probe did not run; markers missing next to an Xcode line: part of
-        // it is gone
         return unreadable();
     }
 
-    // iOS runtimes from `simctl list runtimes available | grep '^iOS '`:
-    // `iOS 26.5 (26.5 - 23F77) - com.apple...`
     let mut runtimes: Vec<(String, String)> = Vec::new();
     for line in runtime_lines.iter().filter(|l| l.starts_with("iOS ")) {
         let Some(open) = line.find(" (") else {
@@ -128,7 +110,6 @@ pub(super) fn parse_xcode(out: &RemoteOutput, ctx: &StepContext) -> CheckResult 
     }
     runtimes.sort_by(|a, b| numeric_cmp(&b.1, &a.1));
 
-    // iPhone names under iOS runtimes, the newest runtime first, without repeats
     let mut phones: Vec<String> = Vec::new();
     if !devices_json.trim().is_empty() {
         let Ok(root) = serde_json::from_str::<serde_json::Value>(&devices_json) else {

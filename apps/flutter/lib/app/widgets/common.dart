@@ -4,12 +4,9 @@ import '../../l10n/app_localizations.dart';
 import '../theme/tokens.dart';
 import 'kit.dart';
 
-/// True when the user asked the system for less motion.
 bool reduceMotion(BuildContext context) =>
     MediaQuery.disableAnimationsOf(context);
 
-/// Loading state: bars in the footprint of the real rows (avatar, two lines, the age) with a soft light sweeping across
-/// them, one controller for all. Reduce Motion and a hidden tab keep them still.
 class SkeletonRows extends StatefulWidget {
   const SkeletonRows({super.key, this.count = 6});
   final int count;
@@ -111,7 +108,6 @@ class _SkeletonRowsState extends State<SkeletonRows>
   }
 }
 
-/// A centred message with an icon, optional body and optional action.
 class StateMessage extends StatelessWidget {
   const StateMessage({
     super.key,
@@ -124,7 +120,6 @@ class StateMessage extends StatelessWidget {
   });
   final IconData? icon;
 
-  /// A pose of the pet (assets/pet) instead of an icon, for the friendly empty states.
   final String? pet;
   final String title;
   final String? body;
@@ -185,7 +180,6 @@ class StateMessage extends StatelessWidget {
   }
 }
 
-/// Error with the plain-language sentence and a Thử lại button.
 class ErrorState extends StatelessWidget {
   const ErrorState({super.key, required this.message, required this.onRetry});
   final String message;
@@ -205,7 +199,6 @@ class ErrorState extends StatelessWidget {
   }
 }
 
-/// The one primary button of a screen: `primary` fill, `on-primary` text, 48 dp tall, presses to 0.98.
 class PrimaryButton extends StatelessWidget {
   const PrimaryButton({
     super.key,
@@ -345,7 +338,6 @@ class _PressButtonState extends State<_PressButton> {
   }
 }
 
-/// 11 px uppercase section title.
 class PanelTitle extends StatelessWidget {
   const PanelTitle(this.text, {super.key});
   final String text;

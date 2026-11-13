@@ -1,10 +1,7 @@
-//! The form's modes, typing, variables and what it saves. No value leaves the test.
-
 use super::*;
 use notchling_engine::vault::entry::{HostChange, VaultRequest};
 use std::collections::BTreeMap;
 
-/// 2026-11-08 as a day number.
 const TODAY: i64 = 20_765;
 
 fn saved() -> VaultEntry {
@@ -47,7 +44,6 @@ fn a_new_form_types_its_name_and_the_variables_follow() {
             Field::HowTo
         ]
     );
-    // Tab walks the fields; Return in a multi-line field adds a line, elsewhere asks to save.
     f.key("tab", None, false);
     assert_eq!(f.focus, Field::Url);
     type_text(&mut f, "https://x.example");
@@ -67,7 +63,6 @@ fn a_new_form_types_its_name_and_the_variables_follow() {
     assert!(f.can_save());
     assert_eq!(f.secret_mask(), "••••••");
     assert!(!format!("{f:?}").contains("s3cret"));
-    // Custom variables stop following the name.
     f.advanced = true;
     f.focus = Field::SecretVar;
     type_text(&mut f, "X");
@@ -199,14 +194,12 @@ fn an_agents_request_shows_its_reason_and_marks_what_it_changed() {
         f.host_warning().as_deref(),
         Some("The request changes where this secret is sent: https://api.github.com → https://evil.example")
     );
-    // A moved address must be confirmed before Save is live.
     let mut f = f;
     assert!(!f.can_save(), "the new address isn't confirmed");
     assert_eq!(f.blocker(), Some(CONFIRM_HOST_BLOCKER));
     f.confirm_host();
     assert!(f.can_save(), "an existing entry keeps its value");
     assert_eq!(f.blocker(), None);
-    // Return never saves an agent's request, in any field.
     f.focus = Field::Url;
     assert_eq!(f.key("enter", Some("\r"), false), Typed::Ignored);
     f.focus = Field::Secret;
@@ -246,7 +239,6 @@ fn paste_copy_and_cut_work_in_the_fields_but_the_value_is_never_copied() {
     assert_eq!(f.cut(), None, "nor cut");
     assert_eq!(f.secret, "ghp_abc");
     assert_eq!(f.paste(""), Typed::Ignored);
-    // Control characters other than line breaks and tabs never reach a field.
     f.focus = Field::Url;
     f.paste("https://x\u{7}.example");
     assert_eq!(f.url, "https://x.example");

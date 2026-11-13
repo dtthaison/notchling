@@ -1,5 +1,3 @@
-"""LINT-GPUI-MACOS-ONLY: a `gpui` dependency sits only under the macOS target table."""
-
 import unittest
 from pathlib import Path
 
@@ -61,7 +59,6 @@ def lines(text, path=MANIFEST):
 
 
 class BypassTests(unittest.TestCase):
-    """Ways to name gpui that a line match on `gpui =` let through."""
 
     def test_a_dotted_key_fails(self):
         self.assertEqual(lines("[dependencies]\ngpui.workspace = true\n"), [2])
@@ -127,7 +124,6 @@ class BypassTests(unittest.TestCase):
         text = '[dependencies]\ndoc = """\ngpui = "x"\n[dependencies.gpui]\n"""\nserde = "1"\n'
         self.assertEqual(lines(text), [])
         self.assertEqual(lines('[dependencies]\ndoc = """\nx\n"""\ngpui = "1"\n'), [5])
-        # A TOML 1.1 inline table over several lines is still an inline table.
         self.assertEqual(lines('[dependencies]\nui = {\n  package = "gpui",\n  version = "1",\n}\n'), [2])
 
     def test_other_crates_names_and_text_are_ignored(self):

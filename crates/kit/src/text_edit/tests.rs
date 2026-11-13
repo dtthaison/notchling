@@ -40,7 +40,6 @@ fn insert_replaces_the_selection_and_puts_the_caret_after() {
 
 #[test]
 fn grapheme_moves_step_over_combining_marks_and_emoji_sequences() {
-    // e + combining acute, a family emoji (ZWJ sequence), then "t".
     let mut e = edit("e\u{301}\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}t");
     let len = e.text().len();
     assert_eq!(e.caret(), len);
@@ -81,7 +80,6 @@ fn word_moves_skip_spaces_and_punctuation_the_way_option_arrows_do() {
     assert_eq!(e.caret(), 0);
     e.move_left(Unit::Word, false);
     assert_eq!(e.caret(), 0);
-    // Vietnamese words are words too.
     let mut v = edit("xin chào việt nam");
     v.move_to(0);
     v.move_right(Unit::Word, false);
@@ -127,7 +125,6 @@ fn shift_moves_extend_the_selection_and_plain_moves_collapse_it() {
     assert_eq!(e.caret(), 6);
     e.move_left(Unit::Grapheme, true);
     assert_eq!(e.selection(), 5..11);
-    // Extending past the anchor flips the selection.
     e.move_to(5);
     e.move_right(Unit::Grapheme, true);
     e.move_left(Unit::Grapheme, true);
@@ -231,7 +228,6 @@ fn typing_is_one_undo_group_until_the_caret_moves_or_the_kind_changes() {
     assert!(e.undo());
     assert_eq!(e.text(), "");
     assert!(!e.undo());
-    // Deleting is its own group, and a new edit drops the redo stack.
     e.insert("abc");
     e.delete_backward(Unit::Grapheme);
     e.delete_backward(Unit::Grapheme);
@@ -272,8 +268,6 @@ fn utf16_offsets_map_both_ways_over_astral_characters() {
     assert_eq!(actual, 3..4);
 }
 
-/// How macOS's Vietnamese Telex input method composes: each key replaces the marked word, the
-/// caret inside it at its end, and a commit inserts the final word unmarked.
 #[test]
 fn a_telex_composition_ends_with_viet() {
     let mut e = edit("");
@@ -290,7 +284,6 @@ fn a_telex_composition_ends_with_viet() {
     assert_eq!(e.text(), "việt");
     assert_eq!(e.marked(), None, "a commit unmarks");
     assert_eq!(e.caret(), "việt".len());
-    // Then a space, as usual, and a second word, marked after the first.
     e.replace_text(None, " ");
     e.replace_and_mark(None, "n", Some(1..1));
     e.replace_and_mark(None, "na", Some(2..2));
@@ -322,13 +315,11 @@ fn marked_text_replaces_the_selection_first_and_an_explicit_range_wins() {
     e.unmark();
     assert_eq!(e.marked(), None);
     assert_eq!(e.text(), "HELLO w");
-    // The selection inside the marked text is in UTF-16 units, relative to it.
     let mut m = edit("x");
     m.replace_and_mark(None, "a😀b", Some(1..3));
     assert_eq!(m.text(), "xa😀b");
     assert_eq!(m.selection(), 2..6);
     assert!(!m.is_reversed());
-    // An empty marked text clears the mark (the composition was cancelled).
     m.replace_and_mark(None, "", None);
     assert_eq!(m.text(), "x");
     assert_eq!(m.marked(), None);
@@ -382,38 +373,28 @@ fn history_keeps_a_bounded_number_of_steps() {
     assert_eq!(undone, history::LIMIT);
 }
 
-/// The bug the old box had: Return sent and cleared the draft, then the input method committed
-/// the composition it was still holding, and the whole sentence came back. Here the owner's clear
-/// remembers what was composing, and that exact commit, arriving late, is dropped; anything else
-/// typed afterwards gets in.
 #[test]
 fn a_commit_that_lands_after_the_box_was_cleared_is_dropped() {
     let mut e = edit("xin chào ");
     e.replace_and_mark(None, "v", Some(1..1));
     e.replace_and_mark(None, "việt", Some(4..4));
     assert_eq!(e.text(), "xin chào việt");
-    // Return: the owner sent the text and emptied the box.
     e.set_text("");
     assert_eq!(e.marked(), None);
-    // The input method commits what it was composing, late.
     e.replace_text(None, "việt");
     assert_eq!(e.text(), "", "the late commit is dropped");
-    // Only once: the next thing typed is real.
     e.replace_text(None, "việt");
     assert_eq!(e.text(), "việt");
-    // A clear with no composition going drops nothing.
     let mut plain = edit("sent");
     plain.set_text("");
     plain.replace_text(None, "s");
     assert_eq!(plain.text(), "s");
-    // A different commit after the clear is kept, and the stale one is forgotten.
     let mut other = edit("");
     other.replace_and_mark(None, "ab", Some(2..2));
     other.set_text("");
     other.replace_text(None, "x");
     other.replace_text(None, "ab");
     assert_eq!(other.text(), "xab");
-    // Composing again after the clear starts fresh.
     let mut again = edit("");
     again.replace_and_mark(None, "ab", Some(2..2));
     again.set_text("");

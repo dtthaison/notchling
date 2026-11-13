@@ -1,10 +1,3 @@
-//! The Tasks bar: the session's task list pinned over the top of the conversation column, the
-//! Swift `TaskPanel`. Folded it is one line (a checklist icon, "Tasks 1/3", the task under way,
-//! a thin progress bar, a chevron); a click opens the list under it, each task with its status
-//! icon, and a second click folds it. A session with no tasks has no bar. × hides it until the
-//! list changes, and a finished list goes on its own a little after its last task is done
-//! (`chat::tasks_bar`).
-
 use std::time::Duration;
 
 use gpui::{div, prelude::*, px, relative, Context, Div, FontWeight};
@@ -21,25 +14,17 @@ use crate::chat::tasks_bar::{self, DONE_FOR_MS};
 use crate::mac::gate;
 use crate::phone::bridge::now_ms;
 
-/// The id the bar's open state is kept under in `ChatView::expanded`.
 pub const OPEN_ID: &str = "tasks-open";
 
-/// The bar sits this far under the header.
 const TOP: f32 = 16.0;
-/// The folded bar's height: 10 + 10 padding, a 16 pt line, the 1 pt border each side.
 const FOLDED_HEIGHT: f32 = 38.0;
-/// How much room the conversation leaves above its first row so the folded bar doesn't cover it.
 pub const INSET: f32 = TOP + FOLDED_HEIGHT;
-/// The progress bar's width and height (Swift `ProgressBar().frame(width: 90)`, 5 pt tall).
 const PROGRESS_WIDTH: f32 = 90.0;
 const PROGRESS_HEIGHT: f32 = 5.0;
-/// An open list scrolls past this height rather than covering the conversation.
 const LIST_MAX_HEIGHT: f32 = 260.0;
 
-/// Whether the conversation has a bar, so it leaves room for it.
 pub fn shown(view: &ChatView) -> bool {
     !view.conversation.tasks.is_empty()
-        // The session's tasks aren't the subagent's.
         && view.open_subagent.is_none()
         && view
             .selected
@@ -49,8 +34,6 @@ pub fn shown(view: &ChatView) -> bool {
 }
 
 impl ChatView {
-    /// Before a draw: what Chat saw of the selected session's task list, and a redraw for when a
-    /// finished list is due to go.
     pub(super) fn sync_tasks(&mut self, cx: &mut Context<Self>) {
         let Some(id) = self.selected.clone() else {
             return;
@@ -87,7 +70,6 @@ impl ChatView {
         }
     }
 
-    /// ×: hides the bar until the list changes.
     fn dismiss_tasks(&mut self, cx: &mut Context<Self>) {
         if let Some(seen) = self
             .selected
@@ -100,7 +82,6 @@ impl ChatView {
     }
 }
 
-/// The bar, absolute at the top of the conversation column; `None` without tasks.
 pub fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Option<Div> {
     if !shown(view) {
         return None;
@@ -204,7 +185,6 @@ pub fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Opt
     )
 }
 
-/// The thin bar: a faint track, the accent fill at least a dot wide.
 fn progress(share: f32, a: Appearance) -> Div {
     div()
         .w(px(PROGRESS_WIDTH))
@@ -222,9 +202,6 @@ fn progress(share: f32, a: Appearance) -> Div {
         )
 }
 
-/// A task in the open list (Swift `TaskStatusIcon` and a body-type subject): done is a green
-/// check and faint struck-through text, under way a half-filled accent circle and semibold text,
-/// waiting an empty faint circle.
 fn task_line(task: &TaskRow, a: Appearance) -> Div {
     let (shape, ink) = match task.status {
         Status::Done => (Icon::Done, Ink::Done),
@@ -249,7 +226,6 @@ fn task_line(task: &TaskRow, a: Appearance) -> Div {
         .flex()
         .items_start()
         .gap(px(8.0))
-        // The icon box is the body line's height, so a wrapped subject keeps it on the first line.
         .child(
             div()
                 .h(px(17.0))

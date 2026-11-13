@@ -293,7 +293,6 @@ void main() {
       expect(script, startsWith('window.renderViz(JSON.parse('));
       expect(script, endsWith('));'));
       expect(script.contains('\n'), isFalse, reason: 'newlines are escaped inside the literal');
-      // The argument of JSON.parse is a JSON string literal: decoding it twice gives the original spec back.
       final String literal = script.substring('window.renderViz(JSON.parse('.length, script.length - '));'.length);
       expect(jsonDecode(jsonDecode(literal) as String), spec);
     });

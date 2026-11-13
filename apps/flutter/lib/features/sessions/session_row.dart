@@ -7,7 +7,6 @@ import '../../core/protocol/models.dart';
 import '../../l10n/app_localizations.dart';
 import 'status_style.dart';
 
-/// What a session is doing in one line: the live activity ("Editing main.swift"), or what it waits for.
 String? activityLine(Session session) {
   if (session.state == SessionState.needsInput && session.pending != null) {
     final PendingPrompt prompt = session.pending!;
@@ -22,10 +21,6 @@ String? activityLine(Session session) {
   return null;
 }
 
-/// One main session in two lines: the title with its age on the right, then the project and the live activity (or what
-/// it waits for) with a small eye for view-only and a subagent count that opens the tree. The status is the badge on
-/// the avatar and the group the row sits in: a pill that repeats the group would only make the row taller. The whole
-/// row opens the chat; long-press (and the swipe) offer Tiếp quản and Lưu trữ. At least 56 dp tall; grows with text.
 class SessionRow extends StatelessWidget {
   const SessionRow({
     super.key,
@@ -47,7 +42,6 @@ class SessionRow extends StatelessWidget {
   final VoidCallback? onToggleExpand;
   final VoidCallback? onLongPress;
 
-  /// An action at the end of the row; the list does not use one (it is a long-press menu now), kept for callers that do.
   final Widget? trailing;
 
   @override
@@ -275,7 +269,6 @@ class SessionRow extends StatelessWidget {
   }
 }
 
-/// The subagents of a session as a tree under it: a trunk line from the parent's avatar and an elbow to each child.
 class SubagentTree extends StatelessWidget {
   const SubagentTree({super.key, required this.agents});
   final List<Subagent> agents;
@@ -291,7 +284,6 @@ class SubagentTree extends StatelessWidget {
   }
 }
 
-/// A subagent: type, description, model chip and state. 44 dp tall at least; the elbow joins the trunk.
 class SubagentRow extends StatelessWidget {
   const SubagentRow({super.key, required this.agent, this.last = true});
   final Subagent agent;

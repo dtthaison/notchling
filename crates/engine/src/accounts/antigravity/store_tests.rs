@@ -1,6 +1,3 @@
-//! The Antigravity store against fakes: a temp token file, an in-memory Keychain, no process, no
-//! network, no real app.
-
 use super::login::{decode_keyring, encode_keyring, fake_email_login, fake_login};
 use super::store::{
     AntigravityDeps, AntigravityPaths, AntigravityStore, BUNDLE_IDS, LIVE_ACCOUNT, LIVE_SERVICE,
@@ -59,7 +56,6 @@ impl Rig {
         self.root.join("gemini/jetski-standalone-oauth-token")
     }
 
-    /// Antigravity's own item, as it would have written it.
     pub(super) fn set_live(&self, login: &str) {
         self.keychain
             .write(LIVE_SERVICE, LIVE_ACCOUNT, &encode_keyring(login))
@@ -96,7 +92,6 @@ fn sync_saves_the_live_login_under_its_account() {
     let state = rig.store.state();
     assert_eq!(state.active_id.as_deref(), Some("1234"));
     assert_eq!(state.accounts[0].email, "a@example.com");
-    // A second sync of an unchanged login doesn't write the Keychain again.
     let writes = rig
         .keychain
         .calls()
@@ -124,7 +119,6 @@ fn the_email_only_format_joins_the_saved_account_with_that_email() {
     let state = rig.store.state();
     assert_eq!(state.accounts.len(), 1, "no second row for the same person");
     assert_eq!(state.active_id.as_deref(), Some("1234"));
-    // An email Notchling hasn't seen is its own account until an id login names it.
     rig.set_live(&fake_email_login("new@example.com", "t3"));
     rig.store.sync(false);
     assert_eq!(
@@ -175,7 +169,6 @@ fn a_switch_quits_first_then_sets_the_item_and_the_mirror_then_reopens() {
         b,
         "the mirror is set too"
     );
-    // Our copy of the account being left holds what was live (it might have been renewed).
     assert_eq!(rig.keychain.get(SERVICE, "1").as_deref(), Some(a.as_str()));
     let events: Vec<_> = rig
         .apps
@@ -281,7 +274,6 @@ fn add_account_saves_the_current_login_deletes_the_item_and_waits_for_the_next()
         rig.store.poll_add(),
         AddProgress::Waiting { sign_in_url: None }
     );
-    // The user signs in to another account in Antigravity.
     rig.set_live(&fake_login("2", "b@example.com", "tb"));
     assert_eq!(rig.store.poll_add(), AddProgress::Done);
     let state = rig.store.state();

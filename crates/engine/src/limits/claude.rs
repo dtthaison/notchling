@@ -1,15 +1,3 @@
-//! `LimitWatcher`: watches the account Claude Code is using. Near a limit it says so; with Notify
-//! and Switch it moves Claude Code to the saved account with the most room, then restarts and
-//! nudges background agents that stopped on the limit so they read the new login. Each lane
-//! switches on its own.
-//!
-//! It reads limits the store already fetched, never fetches one itself, never renews a token and
-//! switches only through [`ClaudeSource::switch_to`] / [`ClaudeSource::switch_lane`]. It runs only
-//! while the daemon's `accounts` switch is on (the loop checks it, see `notchlingd::limits_loop`).
-//!
-//! The Swift watcher switched asynchronously and returned at once; this one switches inside
-//! `check`, on the loop's thread, and the next `check` does the nudging.
-
 use super::logic::{
     announcement, blocked_until, lane_pool, may_switch, pick_target, Candidate, Mark,
     IN_USE_FRESH_FOR, SWITCH_GAP,
@@ -22,36 +10,26 @@ use crate::transcript::errors::LimitHit;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-/// What a restarted job is told.
 pub const NUDGE: &str =
     "Switched to another account after the usage limit. Continue where you stopped.";
-/// Only limit errors this fresh start a switch; older ones were someone else's.
 const FRESH_HIT: f64 = 10.0 * 60.0;
-/// Errors this old still get their job restarted once a switch happens.
 const NUDGE_WINDOW: f64 = 12.0 * 3600.0;
-/// Nudges follow a switch for this long.
 const NUDGE_AFTER_SWITCH: f64 = 2.0 * 3600.0;
 const TRANSCRIPT_EVERY: f64 = 15.0;
 
-/// Where messages go (sound, notch peek, notification: the app's job).
 pub type Announce = Arc<dyn Fn(&str) + Send + Sync>;
 
-/// What the watcher last saw, for `limits.status`.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Observed {
     pub active_email: Option<String>,
-    /// Name, percent and reset of each window it follows.
     pub windows: Vec<(String, f64, Option<f64>)>,
     pub last_switch: Option<f64>,
     pub checked: Option<f64>,
 }
 
 enum Outcome {
-    /// A switch ran (or failed): the message has been said.
     Switched,
-    /// A message about the lack of a target has been said.
     Announced,
-    /// Nothing was said; the caller says the climb.
     Nothing,
 }
 
@@ -105,7 +83,6 @@ impl ClaudeWatcher {
         }
     }
 
-    /// A fixed zone for the clock in messages (tests).
     pub fn with_zone(mut self, zone: Zone) -> ClaudeWatcher {
         self.zone = zone;
         self
@@ -126,7 +103,6 @@ impl ClaudeWatcher {
         (self.announce)(text);
     }
 
-    /// One round, at `now` (seconds since 1970).
     pub fn check(&mut self, now: f64) {
         let mode = self.mode();
         if mode == LimitMode::Off {
@@ -175,7 +151,6 @@ impl ClaudeWatcher {
         let fired = announcement(&mut self.marks, &active.id, &windows, skip90)
             .map(|f| climb("", &active.email, &f, now, self.zone));
 
-        // What pushes toward a switch: a window at the chosen point, or a job stopped on the limit.
         let hits = self.limit_hits(now);
         let mut reason = windows
             .iter()
@@ -200,7 +175,6 @@ impl ClaudeWatcher {
             self.say(text);
         }
 
-        // Each switch restarts only the jobs it moved: the main login's, or one lane's.
         if let Some(switched) = self.last_switch {
             let main: Vec<_> = hits.iter().filter(|h| h.config_dir.is_none()).collect();
             self.nudge_stopped(&main, switched, now);
@@ -217,8 +191,6 @@ impl ClaudeWatcher {
         }
     }
 
-    // MARK: Switching
-
     fn try_switch(
         &mut self,
         active: &AccountInfo,
@@ -234,7 +206,6 @@ impl ClaudeWatcher {
         let target = pick_target(&candidates, Some(&active.id), now, &self.blocked)
             .and_then(|t| accounts.iter().find(|a| a.id == t.id));
         let Some(to) = target else {
-            // Say it once per half hour; the climb itself may already have been announced.
             if self.last_no_room.is_some_and(|t| now - t <= SWITCH_GAP) {
                 return Outcome::Announced;
             }
@@ -292,7 +263,6 @@ impl ClaudeWatcher {
         Outcome::Switched
     }
 
-    /// Every saved account as a switch target; an account live in a lane can't be taken from it.
     fn candidates(&self, accounts: &[AccountInfo]) -> Vec<Candidate> {
         let in_lanes: HashSet<String> = self
             .source
@@ -304,7 +274,6 @@ impl ClaudeWatcher {
             .iter()
             .map(|a| {
                 let u = self.source.usage(&a.id);
-                // An unknown account-wide limit leaves no more room than the 5-hour one it sits beside.
                 let short = u
                     .as_ref()
                     .map(|u| {
@@ -328,10 +297,6 @@ impl ClaudeWatcher {
             .collect()
     }
 
-    // MARK: Lanes
-
-    /// Each lane switches on its own: when its account reaches the switch point, the lane moves to
-    /// the saved account with the most room that isn't live anywhere, and its sessions carry on.
     fn check_lanes(&mut self, now: f64, mode: LimitMode, switch_at: i64) {
         if mode != LimitMode::NotifyAndSwitch {
             return;
@@ -391,8 +356,6 @@ impl ClaudeWatcher {
         }
     }
 
-    // MARK: Jobs stopped on the limit
-
     fn limit_hits(&mut self, now: f64) -> Vec<StoppedJob> {
         if now - self.last_scan >= TRANSCRIPT_EVERY {
             self.last_scan = now;
@@ -409,8 +372,6 @@ impl ClaudeWatcher {
         now - at <= FRESH_HIT && since.is_none_or(|s| at > s)
     }
 
-    /// After a switch: restart each background job that stopped on the limit, then tell it to go
-    /// on. One nudge per error entry, and per job at most once in half an hour.
     fn nudge_stopped(&mut self, hits: &[&StoppedJob], switched: f64, now: f64) {
         if now - switched >= NUDGE_AFTER_SWITCH {
             return;

@@ -1,6 +1,3 @@
-//! The accounts store over a fake transport that plays the daemon's replies. No socket, no
-//! daemon, no login anywhere.
-
 use super::*;
 use crate::switches::ACCOUNTS_OFF;
 use notchling_local_api::{ApiError, ErrorCode};
@@ -40,8 +37,6 @@ fn sent(calls: &Calls) -> Vec<String> {
     calls.lock().unwrap().iter().map(|c| c.0.clone()).collect()
 }
 
-/// A daemon with the switch `on`: the lists, one Codex account with a report, the watcher's
-/// windows.
 fn daemon(on: bool) -> impl Fn(&str, &Value) -> Result<Value, ClientError> + Send + Sync {
     move |op, args| match op {
         "accounts.list" => Ok(
@@ -131,7 +126,6 @@ fn a_refresh_reads_every_list_and_the_limits_only_with_the_switch_on() {
     assert_eq!(s.limits.providers[0].windows[0].percent, 41.0);
     assert_eq!(s.error, None);
 
-    // Off: the lists still show, nothing syncs and no usage is asked for.
     let (store, calls) = fake(daemon(false));
     store.refresh(&Switches::all_off());
     assert_eq!(
@@ -164,7 +158,6 @@ fn nothing_but_the_lists_is_sent_while_the_switch_is_off() {
     );
     assert_eq!(store.move_all_plan(&off, None).unwrap_err(), ACCOUNTS_OFF);
     assert!(calls.lock().unwrap().is_empty(), "refused here, unsent");
-    // Detached: the daemon's absence is the reason.
     let detached = Switches::detached();
     assert_eq!(
         store.remove_claude(&detached, "a1").unwrap_err(),
@@ -263,7 +256,6 @@ fn the_live_login_is_synced_at_most_every_30_seconds_and_usage_with_it() {
     };
     let usage = |c: &Calls| sent(c).iter().filter(|o| *o == "providers.usage").count();
     assert_eq!((syncs(&calls), usage(&calls)), (2, 1));
-    // An event a second later reads the lists without syncing and keeps the limits it has.
     store.refresh_at(&on, 1_001.0);
     store.refresh_at(&on, 1_029.0);
     assert_eq!((syncs(&calls), usage(&calls)), (2, 1));
@@ -277,7 +269,6 @@ fn the_live_login_is_synced_at_most_every_30_seconds_and_usage_with_it() {
     assert_eq!((syncs(&calls), usage(&calls)), (4, 2));
 }
 
-/// Every call with its arguments, as "op {args}".
 fn log(calls: &Calls) -> Vec<String> {
     calls
         .lock()
@@ -293,7 +284,6 @@ fn the_refresh_button_reads_every_providers_limits_afresh_whatever_the_throttle_
     let on = Switches::all_on();
     store.refresh_at(&on, 1_000.0);
     calls.lock().unwrap().clear();
-    // One second later a plain refresh syncs nothing; the button forces it all.
     store.refresh_at(&on, 1_001.0);
     assert!(
         !log(&calls).iter().any(|c| c.contains("\"refresh\":true")),
@@ -305,7 +295,6 @@ fn the_refresh_button_reads_every_providers_limits_afresh_whatever_the_throttle_
     assert_eq!(
         log(&calls),
         [
-            // Before the lists, so the lists' own syncs don't take the daemon's slot first.
             r#"providers.usage {"provider":"codex","refresh":true}"#,
             r#"limits.usage {"refresh":true}"#,
             r#"accounts.list {"sync":true}"#,
@@ -317,7 +306,6 @@ fn the_refresh_button_reads_every_providers_limits_afresh_whatever_the_throttle_
     let s = store.snapshot();
     assert_eq!(s.usage["codex"]["u:a"].groups[0].bars[0].percent, 41.0);
     assert_eq!(s.claude_usage.reports["a1"].groups[0].bars[0].percent, 12.0);
-    // The button counts as the sync: the next plain refresh waits its 30 s again.
     calls.lock().unwrap().clear();
     store.refresh_at(&on, 1_020.0);
     assert!(!log(&calls).iter().any(|c| c.contains("\"sync\":true")));
@@ -331,11 +319,11 @@ fn a_forced_refresh_asks_again_while_the_daemon_is_still_reading_and_never_force
     let b = busy.clone();
     let (store, calls) = fake(move |op, args| {
         let mut reply = inner(op, args)?;
-        if op == "limits.usage" && b.load(Ordering::SeqCst) > 0 {
-            // Still reading for the first two asks.
-            if b.fetch_sub(1, Ordering::SeqCst) > 1 {
-                reply["refreshing"] = json!(true);
-            }
+        if op == "limits.usage"
+            && b.load(Ordering::SeqCst) > 0
+            && b.fetch_sub(1, Ordering::SeqCst) > 1
+        {
+            reply["refreshing"] = json!(true);
         }
         Ok(reply)
     });
@@ -418,7 +406,6 @@ fn refreshes_never_overlap_and_one_asked_meanwhile_runs_once_after() {
         std::thread::spawn(move || store.refresh_at(&Switches::all_on(), 0.0))
     };
     entered_rx.recv().unwrap();
-    // Three more while the first is stuck: none runs alongside it.
     store.refresh_at(&Switches::all_on(), 1.0);
     store.refresh_at(&Switches::all_on(), 2.0);
     store.refresh_at(&Switches::all_on(), 3.0);
@@ -439,7 +426,6 @@ fn one_sign_in_poll_at_a_time_and_one_that_ends_early_resets_the_row() {
         !store.claim_add_poll(),
         "a second Add while one polls starts none"
     );
-    // The poll that saw the end stops; the row shows how it ended.
     assert!(!store.add_poll_step(&on));
     assert_eq!(store.snapshot().add.unwrap().state, "added");
     store.end_add_poll(&on);
@@ -447,8 +433,6 @@ fn one_sign_in_poll_at_a_time_and_one_that_ends_early_resets_the_row() {
     assert!(store.claim_add_poll(), "free again");
     store.end_add_poll(&on);
 
-    // A poll that ends while the sign-in still waits (the window closed, the daemon went away)
-    // gives the daemon's sign-in up and puts the Add button back, rather than "Waiting" forever.
     store.clear_add();
     store.begin_add_claude(&on).unwrap();
     calls.lock().unwrap().clear();
@@ -463,7 +447,6 @@ fn one_sign_in_poll_at_a_time_and_one_that_ends_early_resets_the_row() {
             .map(|c| (c.0.clone(), c.1["cancel"].clone())),
         Some(("accounts.add.finish".to_owned(), json!(true)))
     );
-    // A poll the daemon refuses ends too.
     store.begin_add_claude(&on).unwrap();
     assert!(store.claim_add_poll());
     assert!(!store.add_poll_step(&Switches::all_off()));

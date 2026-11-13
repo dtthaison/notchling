@@ -1,40 +1,20 @@
-//! How Chat reads an Antigravity row's conversation from the daemon (`agy.conversation`): at most
-//! one read in flight per row, and nothing older than what is on screen ever replaces it. A
-//! streaming turn changes the conversation many times a second; asking once per change put a
-//! read behind every event, and the answers could land out of order and draw the conversation
-//! going backwards.
-//!
-//! A change while a read is out waits for it; when it returns, one more read goes, which covers
-//! every change that came meanwhile. An answer is shown unless a newer one already was. (An
-//! answer that is older than the newest change but newer than the screen is still shown: the
-//! read behind it follows at once, and holding it back would starve the screen under a stream
-//! faster than the daemon answers.)
-
 use std::collections::HashMap;
 
-/// What to do with a change.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Ask {
-    /// Read now; hand the number back with the answer.
     Start(u64),
-    /// A read is out: this change is covered by the one that follows it.
     Wait,
 }
 
-/// What to do with an answer.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Done {
-    /// Show it.
     pub apply: bool,
-    /// Read again now, for changes that came while this read was out.
     pub next: Option<u64>,
 }
 
 #[derive(Default)]
 struct Row {
-    /// The newest read asked for (a change that may be waiting).
     requested: u64,
-    /// The newest answer shown.
     shown: u64,
     in_flight: bool,
 }
@@ -46,7 +26,6 @@ pub struct FetchGate {
 }
 
 impl FetchGate {
-    /// The row's conversation changed (or was never read).
     pub fn request(&mut self, id: &str) -> Ask {
         self.counter += 1;
         let row = self.rows.entry(id.to_owned()).or_default();
@@ -58,7 +37,6 @@ impl FetchGate {
         Ask::Start(self.counter)
     }
 
-    /// The read numbered `number` for the row is back.
     pub fn finished(&mut self, id: &str, number: u64) -> Done {
         let Some(row) = self.rows.get_mut(id) else {
             return Done {
@@ -94,7 +72,6 @@ mod tests {
         assert!(done.apply, "newer than the screen");
         let next = done.next.expect("the changes that waited");
         assert!(next > first);
-        // That read is out: another change waits again.
         assert_eq!(g.request("agy:a"), Ask::Wait);
         let done = g.finished("agy:a", next);
         assert!(done.apply);
@@ -114,7 +91,6 @@ mod tests {
                 next: None
             }
         );
-        // Idle: the next change reads at once.
         assert!(matches!(g.request("agy:a"), Ask::Start(_)));
     }
 
@@ -124,7 +100,6 @@ mod tests {
         let Ask::Start(first) = g.request("agy:a") else {
             panic!("a read");
         };
-        // The first read came back late, after a newer read had been shown (a restarted view).
         g.rows.get_mut("agy:a").expect("a row").shown = first + 5;
         assert!(!g.finished("agy:a", first).apply);
     }

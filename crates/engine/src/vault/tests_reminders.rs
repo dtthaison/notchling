@@ -1,6 +1,3 @@
-//! Swift `SecretVaultTests`' reminders and Renew, ported: which reminder is due, once per
-//! threshold, reset by a new day or a new value, and what Renew may open.
-
 use super::entry::{Kind, VaultEntry};
 use super::expiry;
 use super::reminders::{self, Due, Sent, Threshold};
@@ -54,7 +51,6 @@ fn reminder_thresholds() {
     );
     assert_eq!(at("2026-11-05")[0].title(), "Secret expired");
     assert_eq!(at("2026-11-07")[0].title(), "Secret expiring");
-    // Off for days: the nearest threshold fires once, with the real days left.
     assert_eq!(
         at("2026-11-09")[0].message,
         "sd-worker-m1 expires in 3 days (2026-11-09)"

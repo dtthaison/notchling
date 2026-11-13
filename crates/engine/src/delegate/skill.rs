@@ -1,13 +1,5 @@
-//! The text of the `notchling-delegate` skill (Swift `DelegateSkill`): how an agent hands a job (an
-//! image, a video, a second-opinion review) to another tool with `notchling delegate`.
-//!
-//! This is only the text. Installing it into Claude Code's, Codex's and Antigravity's skills
-//! folders belongs to E13 (milestone 6), and nothing here writes a file.
-
-/// The skill's name and its folder name.
 pub const NAME: &str = "notchling-delegate";
 
-/// Whose skills folder the text is for; each gets its own notes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SkillTool {
     Claude,
@@ -15,8 +7,6 @@ pub enum SkillTool {
     Antigravity,
 }
 
-/// The skill, with `{binary}` (the path of the `notchling` program), `{wait_note}`, `{codex_model}`
-/// (a model Codex offers, for the example) and `{tool_note}` to fill in.
 pub const TEMPLATE: &str = r#"---
 name: notchling-delegate
 description: Use to hand a job to another AI tool on this Mac and get its result back — generate an image (Codex or Antigravity), get a second-opinion code review from a different model (Antigravity CLI with Gemini, or Codex with GPT), or any task the user wants another agent to do — with a chosen model and effort. Runs through Notchling, waits for the other tool to finish, prints its reply and the files it made.
@@ -53,7 +43,6 @@ Write the prompt so the other agent needs nothing from this conversation: the go
 {tool_note}"#;
 
 impl SkillTool {
-    /// How to wait for the command in this tool.
     pub fn wait_note(self) -> &'static str {
         match self {
             SkillTool::Claude => "with Bash `run_in_background: true` you are told when it exits, then read its output. In the foreground give it the longest timeout (600000 ms); an image takes about a minute, a review several.",
@@ -62,7 +51,6 @@ impl SkillTool {
         }
     }
 
-    /// The closing section for this tool (empty for Claude Code).
     pub fn tool_note(self) -> &'static str {
         match self {
             SkillTool::Claude => "",
@@ -72,8 +60,6 @@ impl SkillTool {
     }
 }
 
-/// The skill for `tool`. `codex_model` is a model slug Codex offers, for the third example (any
-/// placeholder when Codex has not cached its list).
 pub fn content(binary: &str, tool: SkillTool, codex_model: Option<&str>) -> String {
     TEMPLATE
         .replace("{wait_note}", tool.wait_note())
@@ -112,7 +98,6 @@ mod tests {
                 assert!(!text.contains(left), "{left}");
             }
         }
-        // The flags it lists are the ones the command parses.
         for flag in [
             "--model",
             "--effort",
@@ -130,7 +115,6 @@ mod tests {
 
     #[test]
     fn it_matches_the_swift_text_apart_from_the_command_name() {
-        // `Notchling --delegate` became `notchling delegate`; the rest of the prose is the same.
         assert!(TEMPLATE.contains("Exit code 0 when it finished, 1 when it failed, 124 on timeout (default 1800 s). Nested delegation stops at two levels."));
         assert!(TEMPLATE.contains("It sees the folder, not your context."));
     }

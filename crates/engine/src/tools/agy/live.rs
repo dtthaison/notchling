@@ -1,6 +1,3 @@
-//! The open sessions behind [`super::Runner`]: one [`Live`] per session (its connection and state),
-//! the shared [`Inner`] that opens, loads and closes them, and [`Wire`], what a connection hears.
-
 use super::config::{rpc_text, AgyCommand, ConfigOption, Permission};
 use super::runner::{Change, Clock, RunError, Sink, Timing, NAME};
 use crate::tools::acp::{Connection, Handler, Spawner, METHOD_NOT_FOUND};
@@ -10,7 +7,6 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, Weak};
 
-/// How many `agy` processes run at once, over all sessions.
 pub const MAX_OPEN: usize = 8;
 
 pub(super) type Job = Box<dyn FnOnce() + Send>;
@@ -34,7 +30,6 @@ pub(super) struct St {
     pub(super) last_used: f64,
     pub(super) failed_at: Option<f64>,
     pub(super) load_error: Option<String>,
-    /// Work waiting for the load to finish.
     pub(super) when_loaded: Vec<Job>,
 }
 
@@ -51,9 +46,7 @@ pub(super) struct Inner {
     pub(super) now: Clock,
     pub(super) timing: Timing,
     pub(super) live: Mutex<HashMap<String, Arc<Live>>>,
-    /// How many processes may run at once ([`MAX_OPEN`] unless a test sets less).
     pub(super) max_open: AtomicUsize,
-    /// Asked before each process is started: the daemon's `acting` switch (without it any may).
     pub(super) may_start: OnceLock<Arc<dyn Fn() -> bool + Send + Sync>>,
 }
 
@@ -86,8 +79,6 @@ impl Inner {
         }
     }
 
-    /// A session that goes away with a permission waiting in it: nothing can answer that any more,
-    /// so it ends as cancelled, before the session's `Closed`.
     pub(super) fn cancel_waiting(&self, live: &Live, id: &str) {
         let waiting = live.lock().permission.take();
         if let Some(p) = waiting {
@@ -101,7 +92,6 @@ impl Inner {
         }
     }
 
-    /// Whether another process may start: fewer than `max_open` are running.
     fn make_room(&self, map: &HashMap<String, Arc<Live>>) -> Result<(), RunError> {
         let max = self.max_open.load(Ordering::SeqCst);
         if map.values().filter(|l| !l.conn.is_closed()).count() >= max {
@@ -150,13 +140,11 @@ impl Inner {
         live.lock().session_id = Some(id.to_string());
         {
             let mut map = self.lock_live();
-            // Two opens at once: the first wins, the second's process is not kept.
             if let Some(existing) = map.get(id).cloned() {
                 drop(map);
                 live.conn.close();
                 return Ok(existing);
             }
-            // Or the last room went to someone else while this one started.
             if let Err(full) = self.make_room(&map) {
                 drop(map);
                 live.conn.close();
@@ -191,7 +179,6 @@ impl Inner {
         Ok(live)
     }
 
-    /// Starts the process and its reader; nothing is sent yet.
     pub(super) fn launch(self: &Arc<Self>, folder: &str) -> Result<Arc<Live>, RunError> {
         let binary = self.binary.clone().ok_or(RunError::NoBinary)?;
         if self.may_start.get().is_some_and(|may| !may()) {
@@ -220,7 +207,6 @@ impl Inner {
         Ok(live)
     }
 
-    /// `initialize`, offering no file system and no terminal; `then` runs with whether it worked.
     pub(super) fn initialize(
         self: &Arc<Self>,
         live: &Arc<Live>,
@@ -277,8 +263,6 @@ impl Inner {
         self.emit(live, Change::Loaded);
     }
 
-    /// Loading failed: the error stays on show, sends that waited for the load end with it (they
-    /// would otherwise wait forever), and the process is closed so a later open starts a new one.
     pub(super) fn fail_load(&self, live: &Arc<Live>, message: &str) {
         let waiting = {
             let mut st = live.lock();
@@ -358,7 +342,6 @@ impl Inner {
     }
 }
 
-/// What a connection hears, for one session.
 pub(super) struct Wire {
     live: Weak<Live>,
     runner: Weak<Inner>,
@@ -420,7 +403,6 @@ impl Handler for Wire {
             None
         };
         let Some(permission) = permission else {
-            // No file system or terminal access is offered in `initialize`; anything else is refused.
             live.conn
                 .respond_error(id, METHOD_NOT_FOUND, "Not supported");
             return;
@@ -435,8 +417,6 @@ impl Handler for Wire {
             }
             st.permission.replace(permission.clone())
         };
-        // A second request while one waits: the first can't be answered any more, so it is
-        // cancelled rather than left hanging in the agent.
         if let Some(old) = replaced {
             live.conn.respond(&old.rpc_id, cancelled());
             runner.emit(

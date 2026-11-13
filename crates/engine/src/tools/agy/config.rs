@@ -1,20 +1,14 @@
-//! What `agy acp` tells a session besides its conversation: the choices it offers (Model, Thinking
-//! Level, Mode), its slash commands, and a permission it is waiting on (Swift `ACPConfigOption`,
-//! `ACPPermission`, `SlashCommand` as ACPRunner fills them).
-
 use crate::bridge::foreign::PermissionOption;
 use crate::transcript::acp::tool_call;
 use crate::transcript::model::{DiffKind, ToolCall};
 use serde_json::{json, Value};
 
-/// One value a choice can take.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConfigValue {
     pub value: String,
     pub name: String,
 }
 
-/// A choice the agent offers for the session: `configOptions` of `session/load` and `session/new`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConfigOption {
     pub id: String,
@@ -24,7 +18,6 @@ pub struct ConfigOption {
 }
 
 impl ConfigOption {
-    /// The `select` options of a `configOptions` list; others are skipped.
     pub fn parse(list: Option<&Value>) -> Vec<ConfigOption> {
         let Some(list) = list.and_then(Value::as_array) else {
             return Vec::new();
@@ -67,7 +60,6 @@ impl ConfigOption {
             .collect()
     }
 
-    /// The current value's name, else the value itself.
     pub fn current_name(&self) -> &str {
         self.values
             .iter()
@@ -83,7 +75,6 @@ impl ConfigOption {
     }
 }
 
-/// A slash command the agent offers (`available_commands_update`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgyCommand {
     pub name: String,
@@ -120,17 +111,14 @@ impl AgyCommand {
     }
 }
 
-/// A permission the agent asked for mid-turn (`session/request_permission`), waiting for the user.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Permission {
-    /// The JSON-RPC id to answer, a string or a number, kept as it came.
     pub rpc_id: Value,
     pub call: ToolCall,
     pub options: Vec<PermissionOption>,
 }
 
 impl Permission {
-    /// From the request's `toolCall` and `options`; `None` without a tool call object.
     pub fn parse(rpc_id: &Value, params: &Value) -> Option<Permission> {
         let call = params.get("toolCall").filter(|c| c.is_object())?;
         let options = params
@@ -155,7 +143,6 @@ impl Permission {
         })
     }
 
-    /// The id as text, the way a caller names it (`1` for `"1"` and for `1` alike).
     pub fn rpc_text(&self) -> String {
         rpc_text(&self.rpc_id)
     }
@@ -164,11 +151,6 @@ impl Permission {
         self.options.iter().find(|o| o.id == id)
     }
 
-    /// What the tool would do, for a card: id, name, title, input, diff and the options. It goes
-    /// out as one line of the local API (1 MiB), so a big edit is cut: the first [`MAX_DIFF_LINES`]
-    /// lines (and [`MAX_DIFF_BYTES`] of them), each at most [`MAX_DIFF_LINE_CHARS`] characters,
-    /// then a `hunk` line saying how many were left out; the input, title and name are clipped
-    /// to [`MAX_TEXT_CHARS`].
     pub fn to_json(&self) -> Value {
         let mut diff: Vec<Value> = Vec::new();
         let mut bytes = 0;
@@ -204,16 +186,12 @@ impl Permission {
     }
 }
 
-/// The most diff lines a permission card carries, and their text in all.
 pub const MAX_DIFF_LINES: usize = 400;
 pub const MAX_DIFF_BYTES: usize = 128 * 1024;
-/// The longest diff line, and the longest input, title or name, in characters.
 pub const MAX_DIFF_LINE_CHARS: usize = 1000;
 pub const MAX_TEXT_CHARS: usize = 4000;
-/// The most options listed.
 const MAX_OPTIONS: usize = 20;
 
-/// `text` cut to `max` characters, with `…` where it was.
 pub fn clip(text: &str, max: usize) -> String {
     match text.char_indices().nth(max) {
         None => text.to_string(),
@@ -221,7 +199,6 @@ pub fn clip(text: &str, max: usize) -> String {
     }
 }
 
-/// A JSON-RPC id as text: a string as it is, anything else as JSON.
 pub fn rpc_text(id: &Value) -> String {
     match id {
         Value::String(s) => s.clone(),
@@ -292,7 +269,6 @@ mod tests {
 
     #[test]
     fn a_huge_diff_is_cut_to_its_first_lines_and_a_marker() {
-        // 200,000 lines of 100 bytes: 20 MB, far over the local API's 1 MiB line.
         let p = big_permission(200_000, &"y".repeat(100), "ls");
         let card = p.to_json();
         let size = card.to_string().len();
@@ -304,10 +280,8 @@ mod tests {
         assert_eq!(last["kind"], "hunk");
         let marker = last["text"].as_str().unwrap();
         assert!(marker.contains("more lines"), "{marker}");
-        // The marker counts what was left out.
         let shown = diff.len() - 1;
         assert!(marker.contains(&(200_000 - shown).to_string()), "{marker}");
-        // A diff that fits is untouched.
         let small = big_permission(3, "z", "ls").to_json();
         assert_eq!(small["diff"].as_array().unwrap().len(), 3);
         assert!(small["diff"][2]["text"]

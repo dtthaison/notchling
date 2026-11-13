@@ -1,7 +1,3 @@
-//! The Artifact events of `notchling hook` over a temp library: a publish is recorded, a read of
-//! a saved link is answered from the copy, a failed read is pointed at it, and everything else
-//! passes. Nothing here reads `~/.claude` or the real data folder.
-
 use crate::hook_pages::{answer, answer_now, PagesEnv};
 use notchling_engine::pages::PageLibrary;
 use serde_json::{json, Value};
@@ -34,7 +30,6 @@ fn scratch(tag: &str) -> Dir {
     Dir(dir)
 }
 
-/// `dir` as `~`, with Notchling's data folder and library under it.
 fn env(dir: &Path) -> PagesEnv {
     PagesEnv {
         pages_dir: dir.join("data/pages"),
@@ -87,9 +82,7 @@ fn a_publish_event_is_recorded_into_the_library_and_says_nothing() {
     assert_eq!(saved[0].project, "work");
     let copy = env.pages_dir.join(&saved[0].folder).join(&saved[0].file);
     assert!(std::fs::read_to_string(copy).unwrap().contains("numbers"));
-    // The list page beside the folders is regenerated, as the Swift app's was.
     assert!(env.pages_dir.join("index.html").is_file());
-    // The same link republished updates the entry instead of adding one.
     assert_eq!(answer(publish(&dir.0), env.clone()), None);
     assert_eq!(pages(&env).len(), 1);
 }
@@ -112,7 +105,6 @@ fn a_publish_is_saved_under_the_account_in_use() {
     answer(publish(&dir.0), main.clone());
     assert_eq!(pages(&main)[0].account, "main@example.com");
 
-    // A session in a lane (the hook inherits its CLAUDE_CONFIG_DIR) publishes as the lane's account.
     let lane_dir = scratch("account-lane");
     std::fs::create_dir_all(lane_dir.0.join("data")).unwrap();
     std::fs::copy(
@@ -143,10 +135,8 @@ fn a_read_of_a_saved_link_is_denied_with_the_local_copys_path() {
         "{reason}"
     );
     assert!(reason.contains("this is not an error"));
-    // The /artifact/ spelling of the same link finds the same page.
     let same = LINK.replace("/code/artifact/", "/artifact/");
     assert!(answer(read("PreToolUse", &same, None), env.clone()).is_some());
-    // Reading one file of the page still goes to claude.ai.
     let mut one_file = read("PreToolUse", LINK, None);
     one_file["tool_input"]["path"] = json!("index.html");
     assert_eq!(answer(one_file, env), None);
@@ -161,7 +151,6 @@ fn a_link_we_do_not_keep_passes() {
         answer(read("PreToolUse", OTHER_LINK, None), env.clone()),
         None
     );
-    // A library that doesn't exist yet passes too, and reading it makes nothing.
     let empty = scratch("unsaved-empty");
     let none = self::env(&empty.0);
     assert_eq!(answer(read("PreToolUse", LINK, None), none.clone()), None);
@@ -189,7 +178,6 @@ fn a_failed_read_gets_the_local_copy_as_context() {
         assert!(context.contains("Local copy: "));
         assert!(h.get("permissionDecision").is_none());
     }
-    // A read that worked says nothing, and a failed read of an unsaved page has nothing to point at.
     assert_eq!(
         answer(
             read("PostToolUse", LINK, Some("<html>fine</html>")),
@@ -222,11 +210,9 @@ fn events_that_are_not_ours_pass_and_touch_nothing() {
 fn a_library_that_cannot_be_written_is_a_silent_pass() {
     let dir = scratch("readonly");
     let mut env = env(&dir.0);
-    // The library's place is a file: no folder can be made there.
     std::fs::create_dir_all(dir.0.join("data")).unwrap();
     std::fs::write(dir.0.join("data/pages"), "not a folder").unwrap();
     assert_eq!(answer(publish(&dir.0), env.clone()), None);
-    // A publish whose file is gone records nothing either.
     env.pages_dir = dir.0.join("data/library");
     let mut gone = publish(&dir.0);
     gone["tool_input"]["file_path"] = json!("missing.html");

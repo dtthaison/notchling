@@ -1,10 +1,5 @@
-//! The tracker over a version 2 cache: what it counted moves over, and a reprice counts each day
-//! once whatever share of it version 2 put in each project.
-
 use super::*;
 
-/// A version 2 cache holding one day, forty days ago, of $20 of Opus 5.5 output over projects
-/// "demo" and "other" on account "acct", counted at the prices with fingerprint `prices`.
 fn v2_cache(prices: &str) -> String {
     let day = day_key(((NOW - 40.0 * DAY) / DAY).floor() as i64);
     serde_json::json!({
@@ -43,7 +38,6 @@ fn a_version_2_cache_moves_over_with_the_days_it_counted() {
     t.save_now(NOW);
     assert_eq!(Cache::load(&data, &catalog()).version, CURRENT);
 
-    // Counted at other prices: the day is priced again from its tokens, at today's.
     let tmp = TempDir::new("cost-v2-other-prices");
     store::put_doc(&tmp.path("data"), CACHE_DOC, &v2_cache("0000000000000000")).unwrap();
     let doubled = overridden(
@@ -55,7 +49,6 @@ fn a_version_2_cache_moves_over_with_the_days_it_counted() {
     near(month(&t.ranged(NOW), Window::All), 40.0);
 }
 
-/// Opus 5.5's output price doubled, laid over the built-in prices.
 fn doubled(tmp: &TempDir) -> Catalog {
     overridden(
         tmp,
@@ -63,10 +56,6 @@ fn doubled(tmp: &TempDir) -> Catalog {
     )
 }
 
-/// A version 2 cache split each model's day over every project the account used that day, so a
-/// model that ran in one project of two has half its day in the other. When its transcript is
-/// still on disk, a reprice counts that day once, from the transcript, not once from it and
-/// again from the other project's share; a moved-over day whose transcript is gone is kept.
 #[test]
 fn a_version_2_day_still_on_disk_is_repriced_once_whatever_its_project_split() {
     let tmp = TempDir::new("cost-v2-split");
@@ -109,7 +98,6 @@ fn a_version_2_day_still_on_disk_is_repriced_once_whatever_its_project_split() {
     t.refresh(NOW + 1.0);
     let r = t.ranged(NOW);
     let s = &r.overall[&Window::All];
-    // Today is the recount, $40 for 1M output tokens, all in the project it ran in.
     near(s.today, 40.0);
     let today_projects: Vec<_> = r.overall[&Window::Days(7)]
         .projects
@@ -117,11 +105,9 @@ fn a_version_2_day_still_on_disk_is_repriced_once_whatever_its_project_split() {
         .map(|p| (p.name.as_str(), p.cost))
         .collect();
     assert_eq!(today_projects, [(project, 40.0)]);
-    // The day forty days ago, with no transcript, is kept and priced from its tokens.
     near(s.month, 80.0);
     near(s.model_detail[0].output, 2_000_000.0);
 
-    // Saved and read again at the same prices, nothing moves.
     t.save_now(NOW + 1.0);
     let mut again = tracker_with(&tmp, doubled(&tmp));
     again.refresh(NOW + 2.0);

@@ -1,23 +1,3 @@
-//! Claude Code's accounts (`AccountStore` in `Accounts/Accounts.swift`): a copy of every login
-//! seen, swapped in on request so switching needs no new sign-in.
-//!
-//! Claude Code keeps its login in the Keychain item `Claude Code-credentials` (JSON: `claudeAiOauth`
-//! beside MCP logins) and the account's profile in `oauthAccount` of `~/.claude.json`. A switch
-//! replaces only those two pieces. Saved logins are Keychain items of their own (service
-//! `Notchling Accounts`, account `<id>`, the Swift app's, holding `{claudeAiOauth, oauthAccount}`),
-//! never on disk; the list of saved accounts (id, email, plan, needs-login: no token) is the
-//! daemon's own until handover: the [`LIST_DOC`] document in `<data>/notchling.db` (decision 0014;
-//! it was the file `<data>/daemon/accounts.json`, which moves in once, on the first save, and is
-//! read until then).
-//!
-//! One lock serializes every operation, so a removal can't be undone by a sync that read the list
-//! before it (the Swift app's issue #7, which its `removedSince` stamps worked around).
-//!
-//! The rules: the main login's token and a lane's are never renewed here (refresh tokens rotate,
-//! and the copy in use would be signed out); only a saved login live nowhere is renewed, and that
-//! is checked again just before. An account is live in one place: the main switch refuses an
-//! account in a lane, and a lane refuses the main login's account or another lane's.
-
 mod config;
 mod lanes_side;
 pub mod profile;
@@ -44,34 +24,25 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard};
 
-/// Claude Code's own login item.
 pub const LIVE_SERVICE: &str = "Claude Code-credentials";
-/// Notchling's saved logins, one item per account id.
 pub const SAVED_SERVICE: &str = "Notchling Accounts";
-/// The document of the saved accounts list.
 pub const LIST_DOC: &str = "daemon/accounts";
 
-/// A Claude subscription Notchling can switch Claude Code to (the Swift `ClaudeAccount`).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ClaudeAccount {
-    /// `<accountUuid>:<organizationUuid>`.
     pub id: String,
     pub email: String,
     pub plan: String,
-    /// The saved login was refused; the user has to sign in to this account again.
     #[serde(rename = "needsLogin", default)]
     pub needs_login: bool,
 }
 
-/// The saved accounts and the main login's, as last seen.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct Snapshot {
     pub accounts: Vec<ClaudeAccount>,
-    /// The main login's account; `None` when signed out or not read yet.
     pub active: Option<String>,
 }
 
-/// Why an operation failed, in words for the user. Never holds a token.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AccountError(pub String);
 
@@ -97,22 +68,13 @@ impl From<crate::lanes::LaneError> for AccountError {
     }
 }
 
-/// Everything the store reaches outside itself.
 pub struct ClaudeEnv {
     pub keys: Keys,
-    /// The same Keychain without the daemon's switch in front: used only to put Claude Code's
-    /// login back when a switch fails half way, so the item and `~/.claude.json` keep naming one
-    /// account even if the switch went off meanwhile.
     pub undo_keys: Keys,
     pub http: Arc<dyn HttpClient>,
     pub now_ms: Arc<dyn Fn() -> i64 + Send + Sync>,
-    /// `~/.claude.json`.
     pub config_file: PathBuf,
-    /// Notchling's data folder: the saved accounts list (no tokens) is the [`LIST_DOC`] document
-    /// in the `notchling.db` there.
     pub data_dir: PathBuf,
-    /// The file the list was before the database (`<data>/daemon/accounts.json`); read while the
-    /// document is missing, moved in once by the first save.
     pub list_file: PathBuf,
     pub lanes: LaneStore,
 }
@@ -120,21 +82,15 @@ pub struct ClaudeEnv {
 #[derive(Default)]
 struct State {
     active: Option<String>,
-    /// SHA-256 of access tokens already matched to an account, so the profile is asked once per
-    /// token. Hashes, so no token sits in memory longer than a call.
     known: HashMap<[u8; 32], String>,
 }
 
 pub struct ClaudeAccounts {
     env: ClaudeEnv,
-    /// Held for a whole operation, Keychain and network included.
     state: Mutex<State>,
-    /// The main login's account as the last operation left it, for [`ClaudeAccounts::snapshot`],
-    /// which must not wait behind a switch stuck on a Keychain prompt.
     seen: Mutex<Option<String>>,
 }
 
-/// The operation lock. On release it publishes `active` to [`ClaudeAccounts::seen`].
 struct Op<'a> {
     state: MutexGuard<'a, State>,
     seen: &'a Mutex<Option<String>>,
@@ -187,8 +143,6 @@ impl ClaudeAccounts {
         DocFile::new(&self.env.data_dir, LIST_DOC, self.env.list_file.clone())
     }
 
-    /// The saved accounts list, from its document (else the old file) only: no Keychain, no
-    /// network, and nothing written, so a read while the switch is off makes no database.
     pub fn saved_list(&self) -> Vec<ClaudeAccount> {
         self.list_doc()
             .read()
@@ -208,8 +162,6 @@ impl ClaudeAccounts {
             .map_err(|e| err(format!("Couldn't save the accounts list: {e}")))
     }
 
-    /// The list and the main login's account as last read; no Keychain, no network, and no
-    /// waiting for an operation under way.
     pub fn snapshot(&self) -> Snapshot {
         Snapshot {
             accounts: self.saved_list(),
@@ -217,7 +169,6 @@ impl ClaudeAccounts {
         }
     }
 
-    /// Reads the current login, saves a copy, and returns the list.
     pub fn sync(&self) -> Result<Snapshot, AccountError> {
         let mut state = self.lock();
         let mut list = self.saved_list();
@@ -229,8 +180,6 @@ impl ClaudeAccounts {
         })
     }
 
-    /// Points Claude Code at a saved account. The current login is saved first, since Claude Code
-    /// may have renewed it since the last sync.
     pub fn switch_to(&self, id: &str) -> Result<Snapshot, AccountError> {
         if !valid_id(id) {
             return Err(err("That isn't an account id."));
@@ -259,7 +208,6 @@ impl ClaudeAccounts {
         })
     }
 
-    /// Saves a login made in Notchling's own sign-in. Claude Code keeps the account it's on.
     pub fn add(&self, oauth: &Login) -> Result<ClaudeAccount, AccountError> {
         let unreadable = || err("Signed in, but couldn't read the account's profile. Try again.");
         let access = access_token(oauth).ok_or_else(unreadable)?;
@@ -298,8 +246,6 @@ impl ClaudeAccounts {
         Ok(account)
     }
 
-    /// Forgets a saved account and its saved login. Claude Code stays signed in if it's the current
-    /// one. An account live in a lane is refused: the lane gives its login back to that slot.
     pub fn remove(&self, id: &str) -> Result<Snapshot, AccountError> {
         if !valid_id(id) {
             return Err(err("That isn't an account id."));
@@ -321,9 +267,6 @@ impl ClaudeAccounts {
         })
     }
 
-    // MARK: Capturing the current login
-
-    /// Works out which account Claude Code is signed in to and stores a copy of its login.
     fn capture(
         &self,
         state: &mut State,
@@ -346,7 +289,6 @@ impl ClaudeAccounts {
             profile = self.profile(&access);
             id = profile.as_ref().and_then(account_id_from_profile);
         }
-        // An expired token can't be checked; Claude Code keeps ~/.claude.json in step with its login.
         if id.is_none() {
             id = config.as_ref().and_then(account_id_from_config);
         }
@@ -387,11 +329,6 @@ impl ClaudeAccounts {
         Ok(())
     }
 
-    // MARK: Switching
-
-    /// Ok when Claude Code has no login, or its `claudeAiOauth` reads back from the active
-    /// account's saved slot unchanged: only then may a switch replace it, since Claude Code renews
-    /// it in place and the live item can hold the only working refresh token.
     fn live_is_saved(&self, state: &State) -> Result<(), AccountError> {
         let live = self.env.keys.read_json(LIVE_SERVICE, &self.env.keys.user)?;
         let Some(oauth) = live.and_then(|l| l.object("claudeAiOauth")) else {
@@ -421,19 +358,16 @@ impl ClaudeAccounts {
                 "No saved login for this account. Sign in to it once with claude auth login.",
             ));
         };
-        // Checked before the Keychain changes, so a file that can't take it stops the switch.
         config::spliced(&self.env.config_file, &account).map_err(err)?;
         let user = self.env.keys.user.clone();
         let old = self.env.keys.read_text(LIVE_SERVICE, &user)?;
         let value = oauth.into_value();
-        // Keep the MCP logins and anything else in the item; replace only the Claude login.
         let new = old
             .as_ref()
             .and_then(|t| set_top_level(t.expose(), "claudeAiOauth", &value).ok())
             .or_else(|| set_top_level("{}", "claudeAiOauth", &value).ok())
             .ok_or_else(|| err("Couldn't update Claude Code's login."))?;
         if let Err(e) = self.env.keys.write(LIVE_SERVICE, &user, &new) {
-            // A write can land and then fail its read-back (the switch went off between them).
             self.undo_live(&user, old.as_ref());
             return Err(err(format!(
                 "Couldn't update Claude Code's login in the Keychain: {e}"
@@ -446,17 +380,12 @@ impl ClaudeAccounts {
         Ok(())
     }
 
-    /// Puts Claude Code's item back as it was before a switch that failed half way, so it and
-    /// `~/.claude.json` name one account; through [`ClaudeEnv::undo_keys`], which the switch going
-    /// off doesn't stop.
     fn undo_live(&self, user: &str, old: Option<&Secret>) {
         let _ = match old {
             Some(old) => self.env.undo_keys.write(LIVE_SERVICE, user, old.expose()),
             None => self.env.undo_keys.delete(LIVE_SERVICE, user).map(|_| ()),
         };
     }
-
-    // MARK: Keychain and profile
 
     fn saved_login(&self, id: &str) -> Result<Option<Login>, AccountError> {
         Ok(self.env.keys.read_json(SAVED_SERVICE, id)?)
@@ -470,7 +399,6 @@ impl ClaudeAccounts {
             .map_err(|e| err(format!("Couldn't save the login in the Keychain: {e}")))
     }
 
-    /// `GET /api/oauth/profile` with `token`; `None` unless it answered 200 with an object.
     fn profile(&self, token: &Secret) -> Option<Login> {
         self.env
             .http
@@ -479,7 +407,6 @@ impl ClaudeAccounts {
             .map(Login)
     }
 
-    /// The main login's account by `~/.claude.json` (no Keychain).
     fn config_account(&self) -> Option<String> {
         config::oauth_account(&self.env.config_file)
             .as_ref()
@@ -487,7 +414,6 @@ impl ClaudeAccounts {
     }
 }
 
-/// An account as JSON (`{id, email, plan, needsLogin}`: no token).
 pub fn account_value(account: &ClaudeAccount) -> serde_json::Value {
     serde_json::to_value(account).unwrap_or_default()
 }

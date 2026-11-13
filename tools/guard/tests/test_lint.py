@@ -114,7 +114,7 @@ class BaselineTests(unittest.TestCase):
                           "legacy/macos/Sources/Notchling/Search/S.swift": "let a = b!\n"})
         self.assertEqual(in_repo(repo, ["lint", "--write-baseline"])[0], 0)
         self.assertEqual(in_repo(repo, ["lint"])[0], 0)
-        self.assertEqual(in_repo(repo, ["lint", "--write-baseline"])[0], 1)  # never overwrites
+        self.assertEqual(in_repo(repo, ["lint", "--write-baseline"])[0], 1)
 
     def test_baseline_cannot_grow(self):
         repo = make_repo({"legacy/macos/Sources/Notchling/App/AppDelegate.swift": APP_DELEGATE,

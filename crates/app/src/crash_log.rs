@@ -1,21 +1,12 @@
-//! The app's crash log: a panic's message, where it happened and a backtrace, appended to
-//! `<data dir>/logs/crash.log` (0600) before the process aborts. macOS's own crash report
-//! (`~/Library/Logs/DiagnosticReports/notchling-app-*.ips`) has the stack but not the message, which
-//! is what says what went wrong. Nothing is sent anywhere. A panic message can quote the text it
-//! choked on, so the file stays private to the user.
-
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-/// The log rolls over to `crash.log.1` past this size, so it never grows without end.
 const MAX_BYTES: u64 = 1024 * 1024;
 
-/// Where the log goes for `data_dir`.
 pub fn path(data_dir: &Path) -> PathBuf {
     data_dir.join("logs").join("crash.log")
 }
 
-/// One entry: when, the thread, the message, the place, then the backtrace.
 pub fn entry(when: &str, thread: &str, message: &str, location: &str, backtrace: &str) -> String {
     format!(
         "=== {when} thread '{thread}' panicked at {location}\n{message}\n{}\n\n",
@@ -23,7 +14,6 @@ pub fn entry(when: &str, thread: &str, message: &str, location: &str, backtrace:
     )
 }
 
-/// The text of a panic's payload, whatever type it was raised with.
 fn payload_text(info: &std::panic::PanicHookInfo<'_>) -> String {
     let payload = info.payload();
     payload
@@ -33,8 +23,6 @@ fn payload_text(info: &std::panic::PanicHookInfo<'_>) -> String {
         .unwrap_or_else(|| "(no message)".to_owned())
 }
 
-/// Appends `text` to the log at `file`, rolling it over when it is too big. Errors are ignored:
-/// the process is going down and the default hook still prints to stderr.
 pub fn append(file: &Path, text: &str) {
     let Some(dir) = file.parent() else {
         return;
@@ -57,7 +45,6 @@ pub fn append(file: &Path, text: &str) {
     }
 }
 
-/// `O_NOFOLLOW`: a link planted where the log goes isn't followed.
 #[cfg(unix)]
 fn libc_no_follow() -> i32 {
     #[cfg(target_os = "macos")]
@@ -70,7 +57,6 @@ fn libc_no_follow() -> i32 {
     }
 }
 
-/// Installs the hook for `data_dir`, keeping the default one (stderr) after it.
 pub fn install(data_dir: PathBuf) {
     let file = path(&data_dir);
     let default = std::panic::take_hook();
@@ -96,7 +82,6 @@ pub fn install(data_dir: PathBuf) {
     }));
 }
 
-/// Seconds since 1970 in UTC, as `unix <secs>`: no date crate in the hook, which runs mid-panic.
 fn chrono_free_now() -> String {
     let secs = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

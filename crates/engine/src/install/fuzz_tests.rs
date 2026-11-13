@@ -1,8 +1,3 @@
-//! Many generated settings files, in many layouts, through every change. Each change is checked
-//! inside `plan_hooks` against the same change made to the data; here the files are the input
-//! nobody wrote by hand: inline and spread-out containers mixed, comments, trailing commas,
-//! tabs, `\r\n`, a final newline or none.
-
 use super::command::{classify, Origin};
 use super::hooks::{plan_hooks, Want};
 use super::testutil::*;
@@ -32,12 +27,10 @@ impl Rng {
     }
 }
 
-/// How a file is laid out.
 struct Style {
     unit: &'static str,
     colon: &'static str,
     nl: &'static str,
-    /// Percent of containers written on one line.
     inline: u64,
     jsonc: bool,
 }
@@ -94,7 +87,6 @@ fn layout(v: &Value, style: &Style, rng: &mut Rng, depth: usize, out: &mut Strin
     }
 }
 
-/// The comma after an item, a trailing one sometimes, and a comment sometimes.
 fn tail(last: bool, inline: bool, style: &Style, rng: &mut Rng, out: &mut String) {
     let comma = !inline && (!last || (style.jsonc && rng.chance(40)));
     if comma {
@@ -216,7 +208,6 @@ fn without_ours(mut v: Value) -> Value {
     v
 }
 
-/// Empty groups and events are not compared: a group of only ours goes, others stay.
 fn normalised(v: Value) -> Value {
     let mut v = without_ours(v);
     if let Some(hooks) = v.get_mut("hooks").and_then(Value::as_object_mut) {
@@ -272,7 +263,6 @@ fn two_thousand_generated_files_through_every_choice() {
             "case {case}\n{text}\n----\n{}",
             plan.text
         );
-        // Nothing of the user's is lost, in the text either: every non-ours command is still there.
         for command in [
             "~/bin/guard.sh",
             "echo hi",
@@ -292,8 +282,6 @@ fn two_thousand_generated_files_through_every_choice() {
         );
         let again = plan_hooks(&plan.text, &w).unwrap_or_else(|e| panic!("case {case} again: {e}"));
         assert!(!again.changed, "case {case} {w:?}\n{}", plan.text);
-        // Taking ours out of the result and of the start gives the same file for the same layout
-        // (comments and trailing commas may move, the data may not).
         let removed = plan_hooks(&plan.text, &remove_all()).unwrap();
         assert_eq!(
             normalised(value(&removed.text)),

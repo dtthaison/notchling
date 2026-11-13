@@ -1,8 +1,3 @@
-//! The Accounts window's parts over GPUI (macOS): the shared account row (avatar, email, subtitle,
-//! In Use or Switch, the ⋯ menu, a content slot), limit bars and the Chat header's meters, the add
-//! panel in its phases, a segmented control and the alert over the window. Each takes the pure
-//! model and the owning view's handlers; nothing here reads a store.
-
 use std::rc::Rc;
 
 use gpui::{deferred, div, prelude::*, px, Context, Div, ElementId, SharedString, Stateful};
@@ -21,10 +16,8 @@ use super::limits::{Fill, LimitGroup, LimitLine, Meter};
 use super::model::{AccountRow, RowContent};
 use crate::mac::gate;
 
-/// A handler for one of a part's events.
 pub type Handler<V, E> = Rc<dyn Fn(&mut V, E, &mut Context<V>)>;
 
-/// The ink a bar is filled with: green under 70, orange to 90, red from 90.
 pub fn fill_ink(fill: Fill) -> Ink {
     match fill {
         Fill::Fine => Ink::Done,
@@ -33,7 +26,6 @@ pub fn fill_ink(fill: Fill) -> Ink {
     }
 }
 
-/// A capsule bar filled to `percent`.
 fn bar(percent: f64, fill: Fill, height: f32, a: Appearance) -> Div {
     div()
         .flex_1()
@@ -54,7 +46,6 @@ fn relative(percent: f64) -> gpui::DefiniteLength {
     gpui::relative((percent / 100.0).clamp(0.0, 1.0) as f32)
 }
 
-/// The Swift `LimitRow`: label 52 wide, the bar, the percent right-aligned, when it resets.
 pub fn limit_line(line: &LimitLine, a: Appearance) -> Div {
     div()
         .flex()
@@ -84,7 +75,6 @@ pub fn limit_line(line: &LimitLine, a: Appearance) -> Div {
         )
 }
 
-/// The Swift `GroupedLimits`: each group's name over its bars.
 pub fn limit_groups(groups: &[LimitGroup], a: Appearance) -> Div {
     let mut column = div().flex().flex_col().gap(px(10.0)).w_full();
     for group in groups {
@@ -100,7 +90,6 @@ pub fn limit_groups(groups: &[LimitGroup], a: Appearance) -> Div {
     column
 }
 
-/// A Chat header meter (`SessionLimit`): label and percent over a thin bar, the reset under it.
 pub fn meter(id: impl Into<ElementId>, m: &Meter, a: Appearance) -> Stateful<Div> {
     let tip: SharedString = m.tooltip.clone().into();
     let element = div()
@@ -126,7 +115,6 @@ pub fn meter(id: impl Into<ElementId>, m: &Meter, a: Appearance) -> Stateful<Div
     gate::tip_text(element, tip, a)
 }
 
-/// What a row's controls do.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RowEvent {
     Switch,
@@ -134,7 +122,6 @@ pub enum RowEvent {
     Remove,
 }
 
-/// The shared account row (`AccountRow`). `menu_open` draws the ⋯ menu's items under it.
 pub fn account_row<V: 'static>(
     row: &AccountRow,
     menu_open: bool,
@@ -233,8 +220,6 @@ pub fn account_row<V: 'static>(
             };
             items = items.child(entry);
         }
-        // Painted after every row and taking the clicks under it: a menu that reaches past its
-        // own row is drawn over the next one, not under it.
         deferred(items.occlude()).with_priority(1)
     });
     card(a)
@@ -273,19 +258,15 @@ pub fn account_row<V: 'static>(
         .children(menu)
 }
 
-/// What the add panel's controls do.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AddEvent {
     Add,
-    /// Open Again / Open Page.
     Open,
     CopyLink,
     Cancel,
-    /// Done after Added, or Cancel after Failed: back to idle.
     Dismiss,
 }
 
-/// The add panel (`SignInPanel` and the providers' panels), under the list.
 pub fn add_panel<V: 'static>(
     panel: &AddPanel,
     a: Appearance,
@@ -461,7 +442,6 @@ pub fn add_panel<V: 'static>(
     }
 }
 
-/// A segmented control: one button per option, the picked one filled.
 pub fn segmented<V: 'static>(
     id: &str,
     options: &[(String, String)],
@@ -498,7 +478,6 @@ pub fn segmented<V: 'static>(
     row
 }
 
-/// The alert over a dimmed view: title, message, Cancel and its button.
 pub fn alert_overlay<V: 'static>(
     alert: &Alert,
     busy: bool,
@@ -532,7 +511,6 @@ pub fn alert_overlay<V: 'static>(
     div()
         .absolute()
         .size_full()
-        // The backdrop takes every click and hover: no row under the alert is live.
         .occlude()
         .flex()
         .items_center()
@@ -559,7 +537,6 @@ pub fn alert_overlay<V: 'static>(
         )
 }
 
-/// A faint line of mono text (a folder, a command).
 pub fn mono(text: &str, a: Appearance) -> Div {
     div()
         .font_family(MONO_FONT)

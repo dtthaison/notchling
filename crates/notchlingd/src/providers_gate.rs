@@ -1,11 +1,3 @@
-//! The providers' outside effects gated on the `accounts` switch, like Claude Code's
-//! `GatedSecurity`/`GatedHttp`: besides each op's own check, the Keychain, the network, processes
-//! and apps reach nothing while the switch is off, so a path that forgot the check (a background
-//! sync that started just before the switch went off) still touches no login.
-//!
-//! Off, a read finds nothing, a write or a launch fails, and every app counts as running, so a
-//! switch that got this far refuses rather than writes.
-
 use crate::switches::{SwitchFlag, ACCOUNTS_OFF};
 use notchling_engine::accounts::generic_password::{Keychain, KeychainError};
 use notchling_engine::accounts::procs::{Apps, DidNotQuit, LoginChild, LoginSpawn, Procs};
@@ -14,7 +6,6 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-/// One of the four effects, reached only while `flag` is on.
 pub struct Gated<T: ?Sized> {
     pub flag: Arc<SwitchFlag>,
     pub inner: Arc<T>,
@@ -90,7 +81,6 @@ impl<T: Procs + ?Sized> Procs for Gated<T> {
 }
 
 impl<T: Apps + ?Sized> Apps for Gated<T> {
-    /// Off, every app counts as running: a switch that got this far stops instead of writing.
     fn is_running(&self, bundle_id: &str) -> bool {
         !self.on() || self.inner.is_running(bundle_id)
     }

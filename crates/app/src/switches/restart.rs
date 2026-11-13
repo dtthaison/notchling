@@ -1,16 +1,3 @@
-//! What the app does after the daemon restarted with switches the user had on.
-//!
-//! Every switch (`acting`, the phone bridge, `accounts`, `vault`, `install`) is off at every daemon
-//! start. When a switch this app saw on (or the remembered choice in the app's `settings.json`
-//! says on) reads off, the app turns it back on by itself ([`restore`]), as the Swift app kept
-//! its own on: the maintainer's choice of 2026-11-11, once the Swift app retired. The daemon
-//! still starts with each one off, so only this app (the app tier) can turn one on. A switch
-//! that fails to come back is offered in a notice, "Notchling restarted: Vault is off", with Turn
-//! Back On, which opens one confirmation naming each switch ([`turn_back_on`]).
-//!
-//! A switch the user turned off here stays off: [`Restart::chose`] quiets it, and the remembered
-//! choice says off.
-
 use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
 
@@ -19,7 +6,6 @@ use super::Switch;
 use crate::actions::Actions;
 use crate::phone::bridge::Bridge;
 
-/// One switch the notice can name.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Area {
     Acting,
@@ -38,7 +24,6 @@ impl Area {
         Area::Install,
     ];
 
-    /// The word the notice uses.
     pub fn title(self) -> &'static str {
         match self {
             Area::Acting => "Sessions",
@@ -49,7 +34,6 @@ impl Area {
         }
     }
 
-    /// What turning it back on lets this app do, for the confirmation.
     pub fn meaning(self) -> &'static str {
         match self {
             Area::Acting => "Sessions: this app replies, answers and acts on live sessions.",
@@ -71,10 +55,8 @@ impl Area {
     }
 }
 
-/// What the daemon says about a switch right now.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Said {
-    /// No daemon to ask: nothing is learnt.
     Detached,
     On,
     Off,
@@ -90,7 +72,6 @@ impl Said {
     }
 }
 
-/// The confirmation Turn Back On opens.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Confirm {
     pub title: &'static str,
@@ -101,7 +82,6 @@ pub struct Confirm {
 
 pub const NOTICE_BUTTON: &str = "Turn Back On";
 
-/// `--render` names for the notice (`restart_view`).
 pub const VIEWS: [crate::views::ViewSpec; 2] = [
     crate::views::ViewSpec {
         name: "restart-notice",
@@ -117,20 +97,14 @@ pub const VIEWS: [crate::views::ViewSpec; 2] = [
 ];
 pub const CONFIRM_TITLE: &str = "Turn These Back On?";
 
-/// The notice's state. Pure.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Restart {
-    /// Switches this app process saw on, or the user turned on here.
     seen_on: BTreeSet<Area>,
-    /// Switches on offer.
     offered: BTreeSet<Area>,
-    /// Switches the user turned off, or whose offer was dismissed: not offered again until seen
-    /// on again.
     quiet: BTreeSet<Area>,
 }
 
 impl Restart {
-    /// What the daemon says now, and whether the remembered choice says on.
     pub fn observe(&mut self, area: Area, said: Said, remembered: bool) {
         match said {
             Said::Detached => {}
@@ -147,8 +121,6 @@ impl Restart {
         }
     }
 
-    /// The user turned a switch on or off in this app (or the daemon said it was turned off while
-    /// the app followed it): no notice for it.
     pub fn chose(&mut self, area: Area, on: bool) {
         self.offered.remove(&area);
         if on {
@@ -160,7 +132,6 @@ impl Restart {
         }
     }
 
-    /// Not now: the notice goes until one of them is seen on again.
     pub fn dismiss(&mut self) {
         let offered = std::mem::take(&mut self.offered);
         self.quiet.extend(offered);
@@ -170,7 +141,6 @@ impl Restart {
         self.offered.iter().copied().collect()
     }
 
-    /// "Notchling restarted: Sessions, Vault are off", or nothing to say.
     pub fn banner(&self) -> Option<String> {
         let names: Vec<&str> = self.offered.iter().map(|a| a.title()).collect();
         match names.len() {
@@ -180,7 +150,6 @@ impl Restart {
         }
     }
 
-    /// The one confirmation, naming each switch it turns on.
     pub fn confirm(&self) -> Option<Confirm> {
         if self.offered.is_empty() {
             return None;
@@ -203,7 +172,6 @@ impl Restart {
     }
 }
 
-/// The notice, shared by the parts that learn what the daemon says and the window that shows it.
 #[derive(Default)]
 pub struct RestartNotice(Mutex<Restart>);
 
@@ -229,12 +197,10 @@ impl RestartNotice {
     }
 }
 
-/// What turns a switch on, for [`turn_back_on`]: the app's own sources in the app, a fake in tests.
 pub trait TurnOn: Send + Sync {
     fn turn_on(&self, area: Area) -> Result<(), String>;
 }
 
-/// The running app's: each area through the one place that turns it on.
 pub struct LiveTurnOn {
     pub actions: Arc<Actions>,
     pub bridge: Arc<Bridge>,
@@ -242,7 +208,6 @@ pub struct LiveTurnOn {
 }
 
 impl LiveTurnOn {
-    /// Turns `area` on or off (Settings' switches). Blocking.
     pub fn set(&self, area: Area, on: bool) -> Result<(), String> {
         let switch = match area {
             Area::Acting => return self.actions.choose(on).map(|_| ()),
@@ -261,8 +226,6 @@ impl TurnOn for LiveTurnOn {
     }
 }
 
-/// Turns `areas` back on by itself after a restart, each through its own op, and tells `notice`
-/// of each one that came back, so only the ones that failed stay offered. The failures.
 pub fn restore(areas: &[Area], with: &dyn TurnOn, notice: &RestartNotice) -> Vec<String> {
     areas
         .iter()
@@ -276,8 +239,6 @@ pub fn restore(areas: &[Area], with: &dyn TurnOn, notice: &RestartNotice) -> Vec
         .collect()
 }
 
-/// The user confirmed: turns on exactly `areas`, each through its own op. The failures, each
-/// with its area's word.
 pub fn turn_back_on(areas: &[Area], with: &dyn TurnOn) -> Vec<String> {
     areas
         .iter()
@@ -310,7 +271,6 @@ mod tests {
     fn a_remembered_choice_only_offers_and_the_confirm_turns_on_exactly_those() {
         let mut r = Restart::default();
         for area in Area::ALL {
-            // The file says on for everything; the daemon says off for everything.
             r.observe(area, Said::Off, true);
         }
         assert_eq!(r.offer(), Area::ALL.to_vec());
@@ -339,7 +299,6 @@ mod tests {
         assert_eq!(*recorder.0.lock().unwrap(), Area::ALL.to_vec());
         assert_eq!(failed, ["Install: app tier only"]);
         assert_eq!(notice.state().offer(), [Area::Install]);
-        // Turned off here: a later restart leaves it off.
         notice.chose(Area::Vault, false);
         notice.observe(Area::Vault, Said::Off, false);
         assert!(!notice.state().offer().contains(&Area::Vault));
@@ -352,7 +311,6 @@ mod tests {
         r.observe(Area::Acting, Said::Off, false);
         r.observe(Area::Bridge, Said::Detached, true);
         assert_eq!(r.banner(), None, "never on, never chosen: nothing to offer");
-        // The daemon restarts: off again.
         r.observe(Area::Vault, Said::Detached, false);
         assert_eq!(r.offer(), []);
         r.observe(Area::Vault, Said::Off, false);
@@ -361,7 +319,6 @@ mod tests {
             r.banner().as_deref(),
             Some("Notchling restarted: Vault is off")
         );
-        // Turned back on elsewhere: the offer goes.
         r.observe(Area::Vault, Said::On, false);
         assert_eq!(r.offer(), []);
     }

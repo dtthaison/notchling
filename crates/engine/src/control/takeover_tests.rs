@@ -1,6 +1,3 @@
-//! Ports of `TakeoverTests` (eligibility, spawn, pid to session) and the takeover cases of
-//! `HostReplyTests`.
-
 use super::*;
 use crate::sessions::agent::sample;
 use crate::sessions::testutil::TempDir;
@@ -57,7 +54,6 @@ fn eval(f: &Fixture, s: &TakeoverSession) -> Result<TakeoverPlan, TakeoverError>
     evaluate(s, &f.roots, false, &probes(&dead))
 }
 
-// Port of TakeoverTests.testAnExitedSessionWithATranscriptAndFolderCanBeTakenOver.
 #[test]
 fn an_exited_session_with_a_transcript_and_folder_can_be_taken_over() {
     let f = fixture(true, true);
@@ -72,7 +68,6 @@ fn an_exited_session_with_a_transcript_and_folder_can_be_taken_over() {
     assert_eq!(state, Some(TakeoverState::Available));
 }
 
-// Port of TakeoverTests.testARunningOriginalIsBusyNoMatterWhat.
 #[test]
 fn a_running_original_is_busy_no_matter_what() {
     let f = fixture(true, true);
@@ -110,7 +105,6 @@ fn a_verified_original_is_stoppable_and_busy_says_so() {
         state(&running, &f.roots, &probes(&everything_alive), &|_| true),
         Some(TakeoverState::Stoppable { busy: true })
     );
-    // Stoppable only when everything else needed to resume is there.
     let missing = fixture(false, true);
     assert_eq!(
         state(
@@ -123,7 +117,6 @@ fn a_verified_original_is_stoppable_and_busy_says_so() {
     );
 }
 
-// Port of TakeoverTests.testAnotherLiveProcessWritingTheSameSessionIdIsBusy.
 #[test]
 fn another_live_process_writing_the_same_session_id_is_busy() {
     let f = fixture(true, true);
@@ -145,7 +138,6 @@ fn another_live_process_writing_the_same_session_id_is_busy() {
     );
 }
 
-// Port of TakeoverTests.testNoResumableTranscriptMeansNoTakeover.
 #[test]
 fn no_resumable_transcript_means_no_takeover() {
     let f = fixture(false, true);
@@ -153,7 +145,6 @@ fn no_resumable_transcript_means_no_takeover() {
         error(eval(&f, &session(&f))),
         Some(TakeoverError::NoTranscript)
     );
-    // Desktop sessions keep their transcript elsewhere; the CLI cannot resume those.
     f.tmp
         .write(&format!("local-agent-mode-sessions/x/{ID}.jsonl"), "{}");
     assert_eq!(
@@ -162,7 +153,6 @@ fn no_resumable_transcript_means_no_takeover() {
     );
 }
 
-// Port of TakeoverTests.testBadIdsNeverReachThePath.
 #[test]
 fn bad_ids_never_reach_the_path() {
     let f = fixture(true, true);
@@ -177,7 +167,6 @@ fn bad_ids_never_reach_the_path() {
     }
 }
 
-// Port of TakeoverTests.testSdkMissingFolderAndAlreadyControllableAreRefused.
 #[test]
 fn sdk_missing_folder_and_already_controllable_are_refused() {
     let f = fixture(true, true);
@@ -206,7 +195,6 @@ fn sdk_missing_folder_and_already_controllable_are_refused() {
     );
 }
 
-// Port of TakeoverTests.testSpawnRequestMatchesANewSessionWithResumeAndAScrubbedEnvironment.
 #[test]
 fn spawn_request_has_resume_and_a_scrubbed_environment() {
     let f = fixture(true, true);
@@ -231,7 +219,6 @@ fn spawn_request_has_resume_and_a_scrubbed_environment() {
     assert_eq!(request.environment, scrubbed(&env));
 }
 
-// Port of TakeoverTests.testTheResumedProcessMapsBackToItsSessionWhetherTheIdStaysOrChanges.
 #[test]
 fn the_resumed_process_maps_back_to_its_session() {
     let f = fixture(true, true);
@@ -265,7 +252,6 @@ fn the_resumed_process_maps_back_to_its_session() {
     assert_eq!(session_id_for_root_pid(777, &dir, &parents), None);
 }
 
-// Port of HostReplyTests.testTakeoverIsOfferedOnlyForTerminalsTheHostDoesNotOwnAndEndedSessions.
 #[test]
 fn takeover_is_offered_only_for_terminals_the_host_does_not_own_and_ended_sessions() {
     let terminal = |pid| sample(AgentTarget::Process(pid), None);
@@ -288,7 +274,6 @@ fn takeover_is_offered_only_for_terminals_the_host_does_not_own_and_ended_sessio
     assert!(offers_takeover(&ended, false));
 }
 
-// Port of HostReplyTests.testTakeoverPromptsFollowTheState.
 #[test]
 fn takeover_prompts_follow_the_state() {
     let available = prompt_for(Some(&TakeoverState::Available), "x").expect("prompt");

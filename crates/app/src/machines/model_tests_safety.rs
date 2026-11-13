@@ -1,10 +1,3 @@
-//! No vault value in anything the window shows or holds (Swift `MachinesSafetyTests`
-//! `testNoDisplayTextOrScriptContainsAVaultValue`), over the real step catalog of a Mac and a Linux
-//! machine: every Set up sheet, Set up all, the Running switch and Update N machines, with the two
-//! delivery Fixes run for real against a scripted runner. A value reaches only the stdin of the
-//! call that writes its file; no argv, environment, sheet, log, line, result or model field holds
-//! it or an 8-character piece of it.
-
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -46,8 +39,6 @@ fn reachable_text(m: &Machine) -> &'static str {
     }
 }
 
-/// Answers the batched checks (Reachable with the machine's facts, every other probe with an empty
-/// success) and every other call with an empty success, recording each.
 fn reachable_runner(m: &Machine) -> Arc<ScriptedRunner> {
     const PROBE: &str = "out=$( /bin/sh -c ";
     let runner = ScriptedRunner::new();
@@ -75,7 +66,6 @@ fn reachable_runner(m: &Machine) -> Arc<ScriptedRunner> {
     Arc::new(runner)
 }
 
-/// The value, and the pieces of it a cut or a split could leave.
 fn pieces(value: &str) -> Vec<String> {
     let chars: Vec<char> = value.chars().collect();
     let mid = chars.len() / 2;
@@ -112,7 +102,6 @@ fn no_display_text_or_script_contains_a_vault_value() {
         let engine = w.model.parts.engine.clone();
         engine.refresh(None, true);
 
-        // every confirmation the window can show, and the two delivery Fixes run for real
         let mut shown: Vec<String> = Vec::new();
         let mut delivered = Vec::new();
         for step in engine.steps(&w.model.machine(&name).unwrap()) {
@@ -137,7 +126,6 @@ fn no_display_text_or_script_contains_a_vault_value() {
             shown.push(all.text());
             w.model.cancel_sheet();
         }
-        // off is always possible; on waits for every step before Running
         w.model.request_toggle(&name, false);
         if let Some(Sheet::Fix(toggle)) = w.model.sheet() {
             shown.push(toggle.text());
@@ -148,7 +136,6 @@ fn no_display_text_or_script_contains_a_vault_value() {
             shown.push(toggle.text());
             w.model.cancel_sheet();
         }
-        // Update N machines for both renewed values
         for secret in ["claude-worker", issues.as_str()] {
             engine.vault_value_changed(secret);
             w.model.request_update(secret);
@@ -167,7 +154,6 @@ fn no_display_text_or_script_contains_a_vault_value() {
             w.model.update_notes
         );
 
-        // 1. what ran: a value only in the stdin of the call that writes its file
         let calls = runner.calls();
         for value in [&values["claude-worker"], &values[&issues]] {
             let carrying: Vec<_> = calls
@@ -197,7 +183,6 @@ fn no_display_text_or_script_contains_a_vault_value() {
             }
         }
 
-        // 2. what the window says: sheets, scripts, logs, lines, results, notes
         let mut said = shown.clone();
         said.extend(engine.log(&name));
         said.extend(w.model.outcomes.values().map(|l| l.text.clone()));
@@ -219,7 +204,6 @@ fn no_display_text_or_script_contains_a_vault_value() {
             }
         }
 
-        // 3. what the model holds
         let held = format!(
             "{:?} {:?} {:?} {:?} {:?} {:?} {:?} {:?} {:?}",
             w.model.sheet(),

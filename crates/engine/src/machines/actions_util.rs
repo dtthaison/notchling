@@ -1,5 +1,3 @@
-//! Small pure helpers of [`super::actions`]: what a machine may name, and the words for a failure.
-
 use std::path::{Path, PathBuf};
 
 use super::merge::MergeOutcome;
@@ -15,10 +13,6 @@ pub(super) fn branch_source(item: &MorningItem) -> Option<(String, String)> {
     }
 }
 
-/// A file name the machine may name in its evidence folder: one plain name, no folders (`/`, `.`,
-/// `..`), nothing an option parser could take for a flag (leading `-`), no control character (NUL,
-/// newline, ...), and an image extension. The names come from the machine's `ls`, so each is
-/// untrusted.
 pub fn is_plain_image_name(name: &str) -> bool {
     if name.is_empty() || name == "." || name == ".." || name.starts_with('-') || name.contains('/')
     {
@@ -34,7 +28,6 @@ pub fn is_plain_image_name(name: &str) -> bool {
     matches!(ext.as_deref(), Some("png" | "jpg" | "jpeg"))
 }
 
-/// Where a copy of `name` goes: a file directly inside `dir`, or `None`.
 pub fn destination(name: &str, dir: &Path) -> Option<PathBuf> {
     let plain = !name.is_empty()
         && name != "."
@@ -56,7 +49,6 @@ pub(super) fn failure(r: &CommandResult, what: &str) -> String {
     }
 }
 
-/// `None` when the merge or the push retry went all the way through.
 pub(super) fn failure_of(o: &MergeOutcome) -> Option<String> {
     if let Some(e) = &o.error {
         return Some(e.clone());

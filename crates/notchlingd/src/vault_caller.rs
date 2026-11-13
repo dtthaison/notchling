@@ -1,36 +1,17 @@
-//! What the daemon can check about a process that asks to use secrets marked ask-first, for the
-//! approval prompt. `vault.use`'s `folder` and `command` are what the caller says; beside them
-//! the `vault.approval.pending` event carries `verified {exe, pid, cwd, parents, folder_matches}`:
-//!
-//! - `exe` and `pid` from the socket's peer credentials ([`Caller`]), never from the request;
-//! - `cwd`, the process's real working folder (`proc_pidinfo(PROC_PIDVNODEPATHINFO)` on macOS,
-//!   `/proc/<pid>/cwd` on Linux; `null` elsewhere or when the kernel won't say);
-//! - `parents`, the names of up to [`PARENTS_DEPTH`] processes above it, nearest first
-//!   (`notchling` ← `zsh` ← `claude` gives `["zsh", "claude"]`);
-//! - `folder_matches`, whether the claimed folder is that working folder: compared as written
-//!   once `.`, `..`, repeated and trailing slashes are folded (no link is followed), or else as
-//!   the file system resolves the claimed one. `null` when the working folder is unknown.
-//!
-//! The OS lookups sit behind [`Processes`], so tests never read a real process.
-
 use notchling_local_api::Caller;
 use serde_json::{json, Value};
 use std::collections::HashSet;
 use std::path::{Component, Path, PathBuf};
 
-/// How many processes above the caller are named.
 pub const PARENTS_DEPTH: usize = 4;
 
-/// What the OS says about a process.
 pub trait Processes: Send + Sync {
     fn parent(&self, pid: u32) -> Option<u32>;
     fn name(&self, pid: u32) -> Option<String>;
     fn cwd(&self, pid: u32) -> Option<PathBuf>;
-    /// A folder with every link resolved (the claimed folder, to compare with the kernel's).
     fn resolve(&self, path: &Path) -> Option<PathBuf>;
 }
 
-/// The kernel's answers.
 pub struct SystemProcesses;
 
 impl Processes for SystemProcesses {
@@ -48,8 +29,6 @@ impl Processes for SystemProcesses {
     }
 }
 
-/// The names of the processes above `pid`, nearest first: at most [`PARENTS_DEPTH`], ending at
-/// launchd/init, an unknown parent or a pid already seen.
 pub fn parent_names(processes: &dyn Processes, pid: u32) -> Vec<String> {
     let mut seen = HashSet::from([pid]);
     let mut names = Vec::new();
@@ -64,8 +43,6 @@ pub fn parent_names(processes: &dyn Processes, pid: u32) -> Vec<String> {
     names
 }
 
-/// An absolute path with `.`, `..`, repeated and trailing slashes folded, following no link;
-/// `None` for an empty or relative one.
 pub fn standardize(path: &str) -> Option<PathBuf> {
     let path = Path::new(path);
     if !path.is_absolute() {
@@ -84,7 +61,6 @@ pub fn standardize(path: &str) -> Option<PathBuf> {
     Some(out)
 }
 
-/// Whether the claimed folder is the real working folder; `None` when that is unknown.
 pub fn folder_matches(
     processes: &dyn Processes,
     claimed: &str,
@@ -101,7 +77,6 @@ pub fn folder_matches(
     Some(matches!((real(&claimed), real(&cwd)), (Some(a), Some(b)) if a == b))
 }
 
-/// The event's `verified` object for this caller and the folder it claims.
 pub fn verified(processes: &dyn Processes, caller: &Caller, claimed: &str) -> Value {
     let cwd = caller.pid.and_then(|pid| processes.cwd(pid));
     let parents = caller
@@ -160,7 +135,6 @@ fn process_cwd(pid: u32) -> Option<PathBuf> {
     if n != size {
         return None;
     }
-    // vip_path is MAXPATHLEN C chars, laid out as 32 rows of 32.
     let raw: Vec<u8> = info
         .pvi_cdir
         .vip_path
@@ -188,7 +162,6 @@ mod tests {
     use notchling_local_api::{ClientKind, Tier};
     use std::collections::HashMap;
 
-    /// A process table: pid → (parent, name), working folders, and links.
     #[derive(Default)]
     pub(crate) struct FakeProcesses {
         pub table: HashMap<u32, (u32, &'static str)>,

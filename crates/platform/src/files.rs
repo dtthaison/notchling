@@ -1,10 +1,3 @@
-//! Private files: written atomically, readable by the owner only. [`write_private`] follows a
-//! symlink (a lane's shared files are links); [`write_private_no_follow`] refuses one, for the files
-//! Notchling owns.
-//!
-//! On Unix the file is created 0600 and folders 0700. On Windows the default access control of the
-//! user's profile folders already limits them to the user, so only the atomic write applies.
-
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -12,7 +5,6 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 use crate::Result;
 
-/// A temp file beside `target`, so the final rename stays on one filesystem.
 fn temp_beside(target: &Path) -> PathBuf {
     static N: AtomicU32 = AtomicU32::new(0);
     let name = target
@@ -38,11 +30,8 @@ fn create_private(path: &Path) -> std::io::Result<File> {
     options.open(path)
 }
 
-/// How many links in a row are followed before it counts as a loop (Linux's own limit is 40).
 const MAX_LINK_HOPS: usize = 40;
 
-/// Follows `path` while it is a symlink, a dangling one included, to the file the write is really for.
-/// A lane's shared files are links into `~/.claude`: renaming over the link would unshare them.
 fn resolve_links(path: &Path) -> std::io::Result<PathBuf> {
     let mut current = path.to_path_buf();
     for _ in 0..MAX_LINK_HOPS {
@@ -63,26 +52,11 @@ fn resolve_links(path: &Path) -> std::io::Result<PathBuf> {
     )))
 }
 
-/// Writes `data` to `path` so no reader sees a half-written file and no other user can read it:
-/// a 0600 temp file in the same folder, flushed to disk, then renamed over the target. The temp
-/// file is removed when anything fails, and the old content stays. When `path` is a symlink the
-/// write goes to the file it points at (the link stays a link), with the temp file beside that file.
-///
-/// That is for a lane's shared files, which are links into `~/.claude`. For a file Notchling owns
-/// (the daemon's settings, say), use [`write_private_no_follow`]: a link planted there must not
-/// steer the write.
 pub fn write_private(path: &Path, data: &[u8]) -> Result<()> {
     let path = resolve_links(path)?;
     write_atomic(&path, data)
 }
 
-/// [`write_private`] for files Notchling owns: when `path` is a symlink (dangling or not) it is
-/// refused with an error and nothing is written, so a link planted where the file belongs can't send
-/// the write to another file. Anything else is written the same way: a 0600 temp file beside it,
-/// flushed, then renamed over the old content.
-///
-/// A link swapped in between the check and the rename is replaced, not followed: the temp file is
-/// created exclusively and `rename` replaces the link itself, so no target is ever opened.
 pub fn write_private_no_follow(path: &Path, data: &[u8]) -> Result<()> {
     if let Ok(meta) = fs::symlink_metadata(path) {
         if meta.file_type().is_symlink() {
@@ -96,7 +70,6 @@ pub fn write_private_no_follow(path: &Path, data: &[u8]) -> Result<()> {
     write_atomic(path, data)
 }
 
-/// The temp file and rename both writes share. `path` is written as given (links resolved by the caller).
 fn write_atomic(path: &Path, data: &[u8]) -> Result<()> {
     let temp = temp_beside(path);
     let result = (|| -> std::io::Result<()> {
@@ -115,7 +88,6 @@ fn write_atomic(path: &Path, data: &[u8]) -> Result<()> {
     Ok(())
 }
 
-/// Makes the rename itself durable. A failure here only loses durability, so it is ignored.
 fn sync_parent(path: &Path) {
     #[cfg(unix)]
     if let Some(parent) = path.parent() {
@@ -127,9 +99,6 @@ fn sync_parent(path: &Path) {
     let _ = path;
 }
 
-/// Creates `path` and any missing parents as 0700 folders, and tightens `path` itself if it
-/// already exists with looser access. A symlink is left as it is: the folder it points at (a lane's
-/// shared one, say) is not ours to change.
 pub fn ensure_private_dir(path: &Path) -> Result<()> {
     let mut builder = fs::DirBuilder::new();
     builder.recursive(true);
@@ -158,7 +127,6 @@ pub(crate) mod testdir {
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicU32, Ordering};
 
-    /// A scratch folder under the system temp dir, removed on drop.
     pub struct TempDir(PathBuf);
 
     impl TempDir {
@@ -215,7 +183,6 @@ mod tests {
     #[test]
     fn failure_leaves_the_old_file_and_no_temp() {
         let dir = TempDir::new();
-        // The target is a directory, so the rename fails.
         let target = dir.path().join("t");
         std::fs::create_dir(&target).unwrap();
         assert!(write_private(&target, b"x").is_err());
@@ -238,7 +205,6 @@ mod tests {
         write_private(&file, b"x").unwrap();
         let mode = std::fs::metadata(&file).unwrap().permissions().mode();
         assert_eq!(mode & 0o777, 0o600);
-        // Replacing keeps the mode private too.
         write_private(&file, b"y").unwrap();
         let mode = std::fs::metadata(&file).unwrap().permissions().mode();
         assert_eq!(mode & 0o777, 0o600);
@@ -274,7 +240,6 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn writing_to_a_symlink_writes_through_to_its_target() {
-        // A lane's shared files are links into ~/.claude; replacing the link would unshare them.
         use std::os::unix::fs::symlink;
         let dir = TempDir::new();
         std::fs::create_dir(dir.path().join("real")).unwrap();
@@ -311,7 +276,6 @@ mod tests {
             .unwrap()
             .file_type()
             .is_symlink());
-        // Nothing was left beside it either.
         assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 2);
     }
 

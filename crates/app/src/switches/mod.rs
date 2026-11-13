@@ -1,17 +1,3 @@
-//! Milestone 6's switches as the app sees them: `accounts`, `vault` and `install`, each off at
-//! every daemon start until an app-tier `settings.set_switch` turns it on (decision 0011).
-//!
-//! The app never guesses: a control that needs a switch is live only while the daemon is attached
-//! and has said that switch is on ([`Switches::control`]); otherwise it is drawn disabled with the
-//! daemon's own off message as its tooltip, word for word, so the user reads the same sentence a
-//! refused op would give. The daemon's `settings.switch {switch, on}` events keep [`Switches`]
-//! current ([`Switches::apply`]); the first read is `settings.switches`.
-//!
-//! The user's choice per switch is kept in the app's own `settings.json` (`accountsOn`, `vaultOn`,
-//! `installOn`, like `actingOn`), but the app never turns a switch on from that file: a file any
-//! agent can write must not hand out the vault or the logins. After a daemon restart the
-//! [`restart`] notice offers the switches back, and only the person's confirmation sends them.
-
 pub mod feed;
 pub mod restart;
 #[cfg(target_os = "macos")]
@@ -22,7 +8,6 @@ use serde_json::{json, Value};
 
 use crate::acting::{Control, DETACHED_MESSAGE};
 
-/// What the daemon says, word for word, while each switch is off (`notchlingd`'s `switches`).
 pub const ACCOUNTS_OFF: &str =
     "accounts are off: the Swift app owns logins until the maintainer turns this on";
 pub const VAULT_OFF: &str =
@@ -30,7 +15,6 @@ pub const VAULT_OFF: &str =
 pub const INSTALL_OFF: &str =
     "install is off: the Swift app owns hooks and skills until the maintainer turns this on";
 
-/// One of the three switches.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Switch {
     Accounts,
@@ -41,7 +25,6 @@ pub enum Switch {
 impl Switch {
     pub const ALL: [Switch; 3] = [Switch::Accounts, Switch::Vault, Switch::Install];
 
-    /// The name on the wire.
     pub fn wire(self) -> &'static str {
         match self {
             Switch::Accounts => "accounts",
@@ -54,7 +37,6 @@ impl Switch {
         Switch::ALL.into_iter().find(|s| s.wire() == name)
     }
 
-    /// The daemon's refusal while this switch is off.
     pub fn off_message(self) -> &'static str {
         match self {
             Switch::Accounts => ACCOUNTS_OFF,
@@ -63,7 +45,6 @@ impl Switch {
         }
     }
 
-    /// The key in the app's `settings.json` that keeps the user's choice.
     pub fn choice_key(self) -> &'static str {
         match self {
             Switch::Accounts => "accountsOn",
@@ -72,7 +53,6 @@ impl Switch {
         }
     }
 
-    /// The op that turns it on or off, and its arguments.
     pub fn set_request(self, on: bool) -> (&'static str, Value) {
         (
             notchling_local_api::ops::SETTINGS_SET_SWITCH,
@@ -81,10 +61,8 @@ impl Switch {
     }
 }
 
-/// What the daemon last said about the switches, and whether it is there to say anything.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Switches {
-    /// A daemon answered; without one every switch reads as detached.
     pub attached: bool,
     pub accounts: bool,
     pub vault: bool,
@@ -92,12 +70,10 @@ pub struct Switches {
 }
 
 impl Switches {
-    /// Nothing known: a render's, a fixture root's.
     pub fn detached() -> Switches {
         Switches::default()
     }
 
-    /// Every switch on, attached: a render that shows the live state.
     pub fn all_on() -> Switches {
         Switches {
             attached: true,
@@ -107,7 +83,6 @@ impl Switches {
         }
     }
 
-    /// Attached, every switch off: what every daemon start looks like.
     pub fn all_off() -> Switches {
         Switches {
             attached: true,
@@ -132,7 +107,6 @@ impl Switches {
         }
     }
 
-    /// Why a control that needs `switch` is off, or `None` while it is live.
     pub fn message(&self, switch: Switch) -> Option<&'static str> {
         if !self.attached {
             Some(DETACHED_MESSAGE)
@@ -143,7 +117,6 @@ impl Switches {
         }
     }
 
-    /// How a control that needs `switch` is drawn.
     pub fn control(&self, switch: Switch) -> Control {
         let message = self.message(switch);
         Control {
@@ -152,7 +125,6 @@ impl Switches {
         }
     }
 
-    /// The Settings sheet's word for a switch.
     pub fn word(&self, switch: Switch) -> &'static str {
         if !self.attached {
             "Daemon not attached"
@@ -163,8 +135,6 @@ impl Switches {
         }
     }
 
-    /// Reads `settings.switches`' reply (`{accounts, vault, install}`): a missing or odd field is
-    /// off, since off is the daemon's default.
     pub fn from_reply(reply: &Value) -> Switches {
         let on = |key: &str| reply.get(key).and_then(Value::as_bool).unwrap_or(false);
         Switches {
@@ -175,8 +145,6 @@ impl Switches {
         }
     }
 
-    /// Applies a `settings.switch {switch, on}` event (or a `settings.set_switch` reply, the same
-    /// shape). Whether anything changed.
     pub fn apply(&mut self, data: &Value) -> bool {
         let Some(switch) = data
             .get("switch")
@@ -193,7 +161,6 @@ impl Switches {
     }
 }
 
-/// Whether this error means there is no daemon to talk to.
 pub fn detaches(error: &ClientError) -> bool {
     crate::acting::after_error(error) == Some(crate::acting::Acting::Detached)
 }
@@ -251,7 +218,6 @@ mod tests {
         assert!(!s.vault);
         assert!(!s.apply(&json!({"switch": "acting", "on": true})));
         assert!(!s.apply(&json!("x")));
-        // An event attaches a detached state.
         let mut d = Switches::detached();
         assert!(d.apply(&json!({"switch": "install", "on": true})));
         assert!(d.attached && d.is_on(Switch::Install));

@@ -1,20 +1,10 @@
-//! Running one command and waiting for it (Swift `CommandRunning`), behind [`Runner`] so no test
-//! starts ssh, `gh`, `git`, `sudo` or `tar`. The real one is [`super::process::ProcessRunner`]; tests
-//! use [`ScriptedRunner`].
-//!
-//! A secret travels only in [`Call::stdin`]: never in `argv` or `env`. [`Call`]'s `Debug` shows the
-//! argv and the stdin's length only.
-
 use std::fmt;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-/// A timeout's code.
 pub const TIMED_OUT: i32 = 124;
-/// A missing executable's code.
 pub const NOT_FOUND: i32 = 127;
-/// A call refused before anything ran.
 pub const REFUSED: i32 = 126;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -42,24 +32,19 @@ impl CommandResult {
     }
 }
 
-/// Which pipe a chunk of output came from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Channel {
     Stdout,
     Stderr,
 }
 
-/// Output as it arrives, tagged with its pipe. Called from the readers' threads.
 pub type OutputSink = dyn Fn(Channel, &str) + Send + Sync;
 
-/// One command. `argv[0]` is the executable's absolute path.
 #[derive(Clone)]
 pub struct Call {
     pub argv: Vec<String>,
     pub cwd: Option<PathBuf>,
-    /// Laid over this process's own environment (a key here wins).
     pub env: Vec<(String, String)>,
-    /// Written to the command's stdin, then closed; `None` gives it `/dev/null`.
     pub stdin: Option<Vec<u8>>,
     pub timeout: Duration,
     pub on_output: Option<Arc<OutputSink>>,
@@ -114,17 +99,12 @@ impl Call {
     }
 }
 
-/// Runs one command and waits for it. A timeout returns [`TIMED_OUT`], a missing executable
-/// [`NOT_FOUND`].
 pub trait Runner: Send + Sync {
     fn run(&self, call: &Call) -> CommandResult;
 }
 
-/// Answers every call with [`REFUSED`] and the reason: the machines tool before the maintainer hands
-/// it over (no ssh, no `gh`), and a render.
 pub struct Refusing(pub &'static str);
 
-/// What [`Refusing`] says until handover.
 pub const OFF: &str =
     "Machines is off: the Swift app sets up machines until the maintainer turns this on";
 
@@ -134,12 +114,10 @@ impl Runner for Refusing {
     }
 }
 
-/// `s` as owned strings.
 pub fn argv(parts: &[&str]) -> Vec<String> {
     parts.iter().map(|s| s.to_string()).collect()
 }
 
-/// One call a [`ScriptedRunner`] saw.
 #[derive(Clone, PartialEq, Eq)]
 pub struct Recorded {
     pub argv: Vec<String>,
@@ -179,9 +157,6 @@ struct Rule {
     chunks: Vec<(Channel, String)>,
 }
 
-/// A runner that starts nothing. Rules are tried in order and the first match answers; its
-/// chunks go to the stream before the result, as a real run's output arrives. No match gives an
-/// empty success. Every call is recorded.
 #[derive(Default)]
 pub struct ScriptedRunner {
     rules: Mutex<Vec<Rule>>,
@@ -197,7 +172,6 @@ impl ScriptedRunner {
         ScriptedRunner::default()
     }
 
-    /// Adds a rule after the existing ones.
     pub fn on(
         &self,
         matches: impl Fn(&[String]) -> bool + Send + Sync + 'static,
@@ -206,7 +180,6 @@ impl ScriptedRunner {
         self.on_with(matches, result, Vec::new())
     }
 
-    /// A rule whose answer also streams `chunks`.
     pub fn on_with(
         &self,
         matches: impl Fn(&[String]) -> bool + Send + Sync + 'static,
@@ -221,7 +194,6 @@ impl ScriptedRunner {
         self
     }
 
-    /// A rule that works its answer out from the call.
     pub fn on_call(
         &self,
         matches: impl Fn(&[String]) -> bool + Send + Sync + 'static,
@@ -235,7 +207,6 @@ impl ScriptedRunner {
         self
     }
 
-    /// A rule for calls whose last argument (the remote script) contains `needle`.
     pub fn on_script(&self, needle: &'static str, result: CommandResult) -> &Self {
         self.on(
             move |a| a.last().is_some_and(|s| s.contains(needle)),
@@ -269,7 +240,6 @@ impl Runner for ScriptedRunner {
     }
 }
 
-/// Any runner behind an `Arc`.
 impl<R: Runner + ?Sized> Runner for Arc<R> {
     fn run(&self, call: &Call) -> CommandResult {
         (**self).run(call)

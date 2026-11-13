@@ -1,9 +1,3 @@
-"""The capability check: a new use of a powerful API sends the PR to the maintainer, wherever the
-file is. It reads only added lines in code files, with comments removed. Most patterns ignore
-string contents too; the ones that only appear inside strings (a tool's path, a Dart import) keep
-them. A code file git calls binary (a NUL byte, a `-diff` attribute) also goes to the maintainer,
-though its lines are still read: swiftc compiles such a file all the same."""
-
 from __future__ import annotations
 
 import os
@@ -16,11 +10,9 @@ from guard.source import SLASH, strip_code, strip_comments
 
 CODE_EXTS = {".swift", ".rs", ".dart", ".sh", ".py"}
 BINARY_RULE = "CAP-BINARY"
-OBSCURE_RULE = "CAP-OBSCURE"  # a line with more `*/` than any real one has
+OBSCURE_RULE = "CAP-OBSCURE"
 MAX_COMMENT_ENDS = 8
 
-# Each protected type, with every file that may name it: exact paths, never a name prefix and never
-# a path in the auto-merge zone. Found with `grep -rnE "(class|struct|enum|actor|protocol|extension) Type"`.
 OWN_FILES: Dict[str, Tuple[str, ...]] = {
     "VaultStore": ("legacy/macos/Sources/Notchling/Vault/VaultStore.swift",),
     "AccountStore": ("legacy/macos/Sources/Notchling/Accounts/Accounts.swift",),
@@ -28,7 +20,6 @@ OWN_FILES: Dict[str, Tuple[str, ...]] = {
     "ReplySender": ("legacy/macos/Sources/Notchling/Agents/ReplySender.swift", "legacy/macos/Sources/Notchling/Agents/ReplySender+Dialog.swift"),
     "HookBridge": ("legacy/macos/Sources/Notchling/Hook/HookBridge.swift",),
     "OwnerPublish": ("legacy/macos/Sources/Notchling/Pages/OwnerPublish.swift",),
-    # The app's wrappers around processes, ptys and credentials: using one is using the API.
     "TerminalSession": ("legacy/macos/Sources/Notchling/Terminal/TerminalSession.swift",),
     "AgentActions": ("legacy/macos/Sources/Notchling/Agents/AgentActions.swift",),
     "CodexRunner": ("legacy/macos/Sources/Notchling/Agents/CodexRunner.swift",),
@@ -55,28 +46,14 @@ def _c(*patterns: str) -> List[Pattern[str]]:
     return [re.compile(p) for p in patterns]
 
 
-# FileManager calls that must trip when `fm` was set on another line (`let fm = FileManager.default`).
-# These names mean nothing else. `removeItem(at:)` is matched too, though NSMenu has one (a menu
-# edit then goes to the maintainer); `setAttributes` stays tied to FileManager on the line, since
-# NSMutableAttributedString has it and text code calls it all the time.
 _FM_CALLS = r"createFile|createDirectory|createSymbolicLink|copyItem|moveItem|replaceItem|replaceItemAt|linkItem|trashItem"
-# Data(contentsOf: url) fetches a URL; append(contentsOf:) doesn't, so only the initialisers count.
 _FETCHERS = r"Data|NSData|String|NSString|NSArray|NSMutableArray|NSDictionary|NSMutableDictionary|NSImage|NSAttributedString"
 
-# Rust's file-writing functions in `std::fs` (or `tokio::fs`). Matched as `fs::write(..)` too, since
-# `use std::fs;` is how they are usually called, and in an import (`use std::fs::{self, remove_file}`,
-# or one that goes on over several lines), where the bare name is then called with no `fs::` before it.
 _RS_FS_WRITES = r"write|remove_\w+|rename|create_dir\w*|copy|hard_link|symlink\w*|set_permissions"
-# `Command` imported from a std or tokio `process` module, singly or in a group (an unclosed group can
-# hold it on a later line, `Command as C` included).
 _RS_COMMAND_IMPORT = r"\bprocess::(?:Command\b|\{(?:[^}]*\bCommand\b|[^}]*$))"
 
-# NSWorkspace opens files and starts apps, but most of it is harmless (the frontmost app, Reveal in
-# Finder, accessibility flags). So: its open and launch calls, and `NSWorkspace.shared` kept in a
-# variable, whose calls the pattern can't see.
 _WORKSPACE_OPEN = r"\bNSWorkspace\b[^;]*\.(open|openApplication|openURLs?|launchApplication|launchApp|openFile|openTemporaryFile)\b"
 
-# Matched against the line with comments and string contents blanked.
 RULES: Dict[str, List[Pattern[str]]] = {
     "CAP-PROCESS": _c(r"\bProcess\b", r"\blaunchPath\b", r"\.launch\s*\(\s*\)", r"\.executableURL\b",
                       r"std::process::Command", _RS_COMMAND_IMPORT, r"\bCommand::new\b", r"\bCommandExt\b",
@@ -96,10 +73,9 @@ RULES: Dict[str, List[Pattern[str]]] = {
                         r"\bfs::(%s)\b" % _RS_FS_WRITES, r"\bfs::\*", r"\bfs::\{(?:[^}]*\b(?:%s)\b|[^}]*$)" % _RS_FS_WRITES,
                         r"\bFile::(create|create_new|options)\b", r"\bOpenOptions\b",
                         r"\bFile\([^)]*\)\.(writeAs\w+|delete|rename)\b"),
-    "CAP-PROTECTED-TYPE": [],  # by file name, below
+    "CAP-PROTECTED-TYPE": [],
 }
 
-# Matched against the line with only comments blanked: these live inside string literals.
 IN_STRINGS: Dict[str, List[Pattern[str]]] = {
     "CAP-APPLESCRIPT": _c(r"\bosascript\b"),
     "CAP-KEYCHAIN": _c(r"/usr/bin/security\b"),
@@ -123,10 +99,6 @@ def _view_trips(path: str, text: str) -> List[str]:
 
 
 def _line_trips(path: str, text: str) -> List[str]:
-    """A diff shows added lines, not what state the compiler is in when each starts: a line can
-    begin inside a block comment an earlier line opened. Then `// */ code`, or a quote before the
-    `*/`, hides code from the stripper that the compiler runs. So a line with a `*/` is also read as
-    if it began just after each `*/`. Too many of them is itself a trip, so reading stays cheap."""
     views = [text]
     if os.path.splitext(path)[1].lower() in SLASH:
         ends = [m.end() for m in re.finditer(r"\*/", text)]
@@ -140,8 +112,6 @@ def _line_trips(path: str, text: str) -> List[str]:
 
 
 def _pieces(text: str) -> List[str]:
-    """A bare CR ends a Swift `//` comment, but git and the stripper see one line, so each piece
-    is scanned as a line of its own. (A CRLF ending leaves one empty piece.)"""
     return text.split("\r")
 
 

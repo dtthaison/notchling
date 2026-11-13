@@ -1,7 +1,3 @@
-//! `--render banner|new-session|trust-folder|settings` end to end over the checked-in fixture:
-//! needs a window server, so it is ignored by default. Run it with
-//! `cargo test -p notchling-app -- --ignored` on a Mac with a display.
-
 #![cfg(target_os = "macos")]
 
 use std::collections::HashSet;
@@ -23,7 +19,6 @@ fn renders_every_sheet_over_the_fixture() {
         let output = Command::new(env!("CARGO_BIN_EXE_notchling-app"))
             .args(["--render", spec.name, "--out"])
             .arg(&out)
-            // Never the real ~/.claude: the fixture, named explicitly.
             .env("NOTCHLING_DATA_ROOT", fixture)
             .output()
             .expect("run notchling-app");

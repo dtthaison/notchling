@@ -13,9 +13,6 @@ import '../theme/tokens.dart';
 import 'kit.dart';
 import 'motion.dart';
 
-/// The banner for an alert while the app is open: the session's avatar, its name and the first line of what Claude said
-/// (or what it needs). It slides in from the top, stays 4 s, opens that chat on tap and goes away on a swipe up. Put
-/// it at the top of a Stack, under the status bar.
 class InAppAlertBanner extends ConsumerWidget {
   const InAppAlertBanner({super.key});
 
@@ -26,7 +23,6 @@ class InAppAlertBanner extends ConsumerWidget {
       event: event,
       onTap: () {
         if (event == null) return;
-        // The computer that raised the alert, not whichever one is in use now.
         ref.read(selectedSessionProvider.notifier).select(event.session.onHostIfUnknown(ref.read(macsProvider).active?.id ?? ''));
         ref.read(activeTabProvider.notifier).show(1);
         ref.read(inAppAlertProvider.notifier).dismiss();
@@ -36,7 +32,6 @@ class InAppAlertBanner extends ConsumerWidget {
   }
 }
 
-/// The banner without providers (previews and tests). [event] null hides it.
 class AlertBannerView extends StatelessWidget {
   const AlertBannerView({super.key, required this.event, required this.onTap, required this.onDismiss});
   final AlertEvent? event;
@@ -60,7 +55,6 @@ class AlertBannerView extends StatelessWidget {
       child: e == null
           ? const SizedBox.shrink(key: ValueKey<String>('no-alert'))
           : Padding(
-              // The same session keeps its key, so a newer alert for it changes the text in place instead of re-entering.
               key: ValueKey<String>('alert-${e.session.qualified}'),
               padding: const EdgeInsets.fromLTRB(Space.md, Space.sm, Space.md, 0),
               child: Semantics(

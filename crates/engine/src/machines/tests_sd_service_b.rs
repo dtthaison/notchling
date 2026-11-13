@@ -1,5 +1,3 @@
-//! The Service installed step: its Check and the Fix while Running is on (Swift `MachinesSDWorkerStepsTests`).
-
 use super::fakes_b::*;
 use super::registry::AdminAccess;
 use super::runner::CommandResult;
@@ -35,7 +33,6 @@ fn mac_service_check_fails_when_installed_but_not_disabled() {
         "{probe}"
     );
 
-    // plist present, label not disabled (unlisted or enabled), not loaded: a login would start it
     for extra in [
         "notloaded\n".to_string(),
         format!("notloaded\n{}", line("enabled")),
@@ -46,12 +43,10 @@ fn mac_service_check_fails_when_installed_but_not_disabled() {
             "{extra}"
         );
     }
-    // plist present and disabled: pass, loaded or not
     for extra in [
         format!("notloaded\n{}", line("disabled")),
         format!("notloaded\n{}", line("true")),
         format!("loaded\n{}", line("disabled")),
-        // Running is on: enabled and loaded
         "loaded\n".to_string(),
         format!("loaded\n{}", line("enabled")),
     ] {
@@ -61,7 +56,6 @@ fn mac_service_check_fails_when_installed_but_not_disabled() {
             "{extra}"
         );
     }
-    // a plist that differs still says so first
     assert_eq!(
         mac_check(false, "notloaded\n").state,
         CheckState::Fail("differs: com.sd.worker.plist".into())
@@ -143,15 +137,12 @@ fn a_hostile_home_never_reaches_a_unit_a_script_or_a_command() {
     }
 }
 
-/// A write failure is masked before it is cut to 300 characters (the units, the LaunchAgent,
-/// worker.json's read).
 #[test]
 fn fix_failures_are_masked_before_they_are_cut() {
     let token = long_token();
     let marker = "[secret:claude-worker]";
     let said = format!("{}{token}", "f".repeat(270));
 
-    // the LaunchAgent write (the disable before it succeeds)
     let tmp = TempDir::new("maskmac");
     let rig = rig_with_templates(mac("m1"), tmp).hiding("claude-worker", &token);
     rig.runner
@@ -161,7 +152,6 @@ fn fix_failures_are_masked_before_they_are_cut() {
     assert_no_fragment(&token, &written.message);
     assert!(written.message.contains(marker), "{}", written.message);
 
-    // the Linux units
     let tmp = TempDir::new("masklinux");
     let mut vps = linux("vps-sing-1");
     vps.set_admin(AdminAccess::RootSsh);
@@ -171,7 +161,6 @@ fn fix_failures_are_masked_before_they_are_cut() {
     assert!(!units.ok);
     assert_no_fragment(&token, &units.message);
 
-    // worker.json: a read error shows the first line of stderr
     let rig = Rig::new(mac("m1")).hiding("claude-worker", &token);
     rig.runner.on(|_| true, CommandResult::new(1, "", &said));
     let json = (plan(&step_of(&rig.machine, &StepId::WORKER_JSON)).run)(&rig.fix());
@@ -179,12 +168,9 @@ fn fix_failures_are_masked_before_they_are_cut() {
     assert_no_fragment(&token, &json.message);
 }
 
-// MARK: Service Fix while Running is on
-
 fn mac_service_fix(probe: CommandResult) -> (FixOutcome, Rig) {
     let tmp = TempDir::new("running-on");
     let rig = rig_with_templates(mac("m1"), tmp);
-    // the Running probe: `loaded`/`notloaded`, then the label's `print-disabled` line
     rig.runner.on(script_has("print-disabled"), probe);
     let outcome = run_service(&rig);
     (outcome, rig)
@@ -197,8 +183,6 @@ fn count(rig: &Rig, needle: &str) -> usize {
         .count()
 }
 
-/// With the label loaded and enabled, Running is on: the Fix rewrites the plist and leaves the
-/// label enabled.
 #[test]
 fn service_fix_leaves_the_label_enabled_while_running_is_on() {
     let (outcome, rig) = mac_service_fix(CommandResult::new(1, "loaded\n", ""));
@@ -216,7 +200,6 @@ fn service_fix_leaves_the_label_enabled_while_running_is_on() {
     assert_eq!(calls.len(), 2, "the state probe, then the write");
 }
 
-/// A loaded label that `print-disabled` lists as enabled is Running on too.
 #[test]
 fn service_fix_leaves_a_listed_enabled_label_enabled() {
     let (outcome, rig) = mac_service_fix(CommandResult::new(
@@ -238,7 +221,6 @@ fn service_fix_leaves_a_listed_enabled_label_enabled() {
     );
 }
 
-/// Anything but loaded-and-enabled disables the label before the plist is written.
 #[test]
 fn service_fix_disables_first_unless_running_is_on() {
     let disabled = line("disabled");

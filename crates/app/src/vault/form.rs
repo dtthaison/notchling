@@ -1,8 +1,3 @@
-//! The vault form, pure (the Swift `VaultSheet` form): add, edit, renew, or an agent's request,
-//! with the name, URL, kind, username, value, note, how-to, expiry, Ask First and the variables.
-//! The value is typed into [`Form::secret`] and goes out once in the save; the form never shows
-//! it back, never keeps it after the save, and `Debug` hides it.
-
 use std::fmt;
 
 use notchling_engine::vault::entry::{
@@ -14,16 +9,13 @@ use notchling_engine::vault::url::renew_refusal;
 
 use super::wire::PendingRequest;
 
-/// What the footer says while an agent's request moves the address and it isn't confirmed.
 pub const CONFIRM_HOST_BLOCKER: &str = "Confirm the new address before saving.";
 
-/// Why the form is open.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mode {
     Add,
     Edit,
     Renew,
-    /// An agent asked (`vault.request.pending`).
     Request,
 }
 
@@ -38,7 +30,6 @@ impl Mode {
     }
 }
 
-/// A field that takes typing, in tab order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Field {
     Name,
@@ -58,20 +49,16 @@ impl Field {
     }
 }
 
-/// What a request changed in the saved form, under its field.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Marker {
     pub text: &'static str,
-    /// "Was: …".
     pub was: String,
 }
 
 #[derive(Clone, PartialEq, Eq)]
 pub struct Form {
     pub mode: Mode,
-    /// The saved entry this edits, to keep its `updated` and to rename from.
     pub original: Option<VaultEntry>,
-    /// The request id a save answers.
     pub request: Option<String>,
     pub reason: Option<String>,
     pub name: String,
@@ -81,22 +68,17 @@ pub struct Form {
     pub secret: String,
     pub note: String,
     pub how_to: String,
-    /// The how-to editor is open (else the help box shows).
     pub editing_how_to: bool,
-    /// `YYYY-MM-DD`, or empty.
     pub expires: String,
-    /// Renewing: whether an expiry choice was made yet.
     pub expiry_chosen: bool,
     pub no_expiry: bool,
     pub ask: bool,
     pub user_var: String,
     pub secret_var: String,
-    /// Custom variables were typed; the name no longer sets them.
     pub custom_vars: bool,
     pub advanced: bool,
     pub focus: Field,
     pub changes: PrefillChanges,
-    /// The person ticked that the request's new address is right; Save waits for it.
     pub host_confirmed: bool,
     pub error: Option<String>,
 }
@@ -112,7 +94,6 @@ impl fmt::Debug for Form {
 }
 
 impl Form {
-    /// An empty form for a new secret; Name has the focus.
     pub fn add() -> Form {
         let (user_var, secret_var) = default_vars("", Kind::Token);
         Form {
@@ -167,7 +148,6 @@ impl Form {
         }
     }
 
-    /// Editing a saved secret: the value field reads "Unchanged" and stays empty to keep it.
     pub fn edit(entry: &VaultEntry) -> Form {
         let mut form = Form::from_entry(entry, Mode::Edit);
         if entry.kind == Kind::Login {
@@ -176,7 +156,6 @@ impl Form {
         form
     }
 
-    /// Renewing: a new value and an expiry choice are needed before Save.
     pub fn renew(entry: &VaultEntry) -> Form {
         let mut form = Form::from_entry(entry, Mode::Renew);
         form.expires.clear();
@@ -185,7 +164,6 @@ impl Form {
         form
     }
 
-    /// An agent's request: its form as the daemon filled it in, with the changes marked.
     pub fn request(pending: &PendingRequest) -> Form {
         let mut form = Form::from_entry(&pending.entry, Mode::Request);
         if !pending.existing {
@@ -206,7 +184,6 @@ impl Form {
         self.mode.title()
     }
 
-    /// "An agent asks: …", when the request gave a reason.
     pub fn reason_line(&self) -> Option<String> {
         self.reason.as_ref().map(|r| format!("An agent asks: {r}"))
     }
@@ -215,7 +192,6 @@ impl Form {
         self.kind == Kind::Login
     }
 
-    /// The fields in tab order, for what this form shows.
     pub fn fields(&self) -> Vec<Field> {
         let mut f = vec![Field::Name, Field::Url];
         if self.is_login() {
@@ -266,8 +242,6 @@ impl Form {
         }
     }
 
-    /// The value field's placeholder: empty for a new entry, "New value" renewing, "Unchanged"
-    /// editing.
     pub fn secret_placeholder(&self) -> &'static str {
         match (self.mode, self.original.is_some()) {
             (Mode::Renew, _) => "New value",
@@ -276,7 +250,6 @@ impl Form {
         }
     }
 
-    /// The expiry row's label.
     pub fn expires_label(&self) -> &'static str {
         if self.mode == Mode::Renew {
             "New expiry"
@@ -285,14 +258,10 @@ impl Form {
         }
     }
 
-    /// The dots drawn for the value typed, never the value.
     pub fn secret_mask(&self) -> String {
         "•".repeat(self.secret.chars().count())
     }
 
-    /// Typing into the focused field. Return inserts a line in a multi-line field, submits in
-    /// the others, except in an agent's request, which only a click on Save saves; Tab moves on.
-    /// Whether anything changed, and whether Return asked to save.
     pub fn key(&mut self, key: &str, key_char: Option<&str>, modified: bool) -> Typed {
         let field = self.focus;
         match key {
@@ -357,7 +326,6 @@ impl Form {
         }
     }
 
-    /// Renewing: Pick a date (30 days out) or No expiry.
     pub fn choose_expiry(&mut self, no_expiry: bool, today: i64) {
         self.expiry_chosen = true;
         self.no_expiry = no_expiry;
@@ -367,7 +335,6 @@ impl Form {
         self.error = None;
     }
 
-    /// The variables summary when Advanced is closed: "$NAME_TOKEN $NAME_URL".
     pub fn vars_summary(&self) -> String {
         let mut vars = Vec::new();
         if self.is_login() {
@@ -386,7 +353,6 @@ impl Form {
             .join(" ")
     }
 
-    /// The marker under a field a request changed.
     pub fn marker(&self, field: Changed) -> Option<Marker> {
         let old = self.changes.old.get(&field)?;
         let none = match field {
@@ -405,12 +371,10 @@ impl Form {
         })
     }
 
-    /// The red warning when a request moves the URL to another origin.
     pub fn host_warning(&self) -> Option<String> {
         self.changes.host_change.as_ref().map(|h| h.warning())
     }
 
-    /// Renewing a URL that isn't http or https: what the form says instead of opening it.
     pub fn renew_note(&self) -> Option<String> {
         if self.mode != Mode::Renew {
             return None;
@@ -419,7 +383,6 @@ impl Form {
             .map(|url| format!("This address isn't http or https, so Renew won't open it: {url}"))
     }
 
-    /// Whether Save is live: a name, and a value where one is needed.
     pub fn can_save(&self) -> bool {
         if self.name.trim().is_empty() || self.host_unconfirmed() {
             return false;
@@ -430,7 +393,6 @@ impl Form {
         }
     }
 
-    /// What the footer says when Save can't go: the Swift messages.
     pub fn blocker(&self) -> Option<&'static str> {
         if self.host_unconfirmed() {
             return Some(CONFIRM_HOST_BLOCKER);
@@ -447,8 +409,6 @@ impl Form {
         }
     }
 
-    /// The entry and value to save, and the name replaced when renaming. An empty value keeps the
-    /// stored one. A bad name, variable or date is an error instead.
     pub fn to_save(&self) -> Result<(VaultEntry, Option<VaultValue>, Option<String>), String> {
         let name = self.name.trim();
         if !valid_name(name) {
@@ -476,7 +436,6 @@ impl Form {
         entry.how_to = Some(self.how_to.trim().to_owned()).filter(|h| !h.is_empty());
         entry.expires = expires;
         entry.ask = self.ask.then_some(true);
-        // Variables follow the name unless custom ones were typed.
         let (user_var, secret_var) = if self.custom_vars {
             (self.user_var.clone(), self.secret_var.clone())
         } else {
@@ -500,8 +459,6 @@ impl Form {
         Ok((entry, value, replacing))
     }
 
-    /// Pastes `text` into the focused field: a single-line field drops line breaks, the value its
-    /// trailing one; control characters other than line breaks and tabs are dropped.
     pub fn paste(&mut self, text: &str) -> Typed {
         let field = self.focus;
         let clean: String = text
@@ -521,12 +478,10 @@ impl Form {
         Typed::Changed
     }
 
-    /// The focused field's text for the clipboard; never the value.
     pub fn copy(&self) -> Option<String> {
         (self.focus != Field::Secret).then(|| self.text(self.focus).to_owned())
     }
 
-    /// Copies the focused field and empties it; never the value.
     pub fn cut(&mut self) -> Option<String> {
         let text = self.copy()?;
         let field = self.focus;
@@ -535,25 +490,21 @@ impl Form {
         Some(text)
     }
 
-    /// An agent's request moved the address: the person confirms it (or takes it back).
     pub fn confirm_host(&mut self) {
         self.host_confirmed = !self.host_confirmed;
         self.error = None;
     }
 
-    /// Whether Save waits for the new address to be confirmed.
     pub fn host_unconfirmed(&self) -> bool {
         self.mode == Mode::Request && self.changes.host_change.is_some() && !self.host_confirmed
     }
 
-    /// After a save: the value is gone from memory at once.
     pub fn forget_value(&mut self) {
         self.secret.clear();
         self.username.clear();
     }
 }
 
-/// What a key press did.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Typed {
     Changed,

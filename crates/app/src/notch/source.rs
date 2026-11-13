@@ -1,12 +1,3 @@
-//! Where the notch's data comes from, read-only: the rows (`engine::sessions`), each row's
-//! transcript snapshot (`engine::transcript::snapshot`) and the prompts the hook holds.
-//!
-//! A [`DataRoot`] names the two folders read: the Claude Code config folder (`~/.claude`) and
-//! Notchling's data folder (`lanes.json`, `requests/`). The app reads the real ones; a render reads
-//! a fixture root laid out as `<root>/claude` and `<root>/notchling` (never `.claude`, which the
-//! repository's zones protect wherever it sits), from `NOTCHLING_DATA_ROOT` or the checked-in
-//! `crates/app/fixtures/notch`, and never the real home.
-
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -24,33 +15,22 @@ use crate::tools::live::ToolLive;
 use crate::tools::requests::RowTool;
 use crate::transcripts::Locator;
 
-/// The fixture root a render reads, when set.
 pub const DATA_ROOT_ENV: &str = "NOTCHLING_DATA_ROOT";
 
-/// Antigravity's folder under a home or a fixture root.
 pub const ANTIGRAVITY_DIR: &str = ".gemini/antigravity-cli";
 
-/// The app's own folder under the data folder: what only the app keeps. Beside the daemon's
-/// `daemon/`, and apart from the Swift app's files in the data folder itself.
 pub const APP_DIR: &str = "app";
 
-/// The folders read.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DataRoot {
-    /// Read as `~/.claude`: `jobs/`, `sessions/`, `projects/`.
     pub claude_dir: PathBuf,
-    /// Notchling's data folder: `lanes.json`, `requests/`.
     pub data_dir: PathBuf,
-    /// Read as `~/.codex`: Codex's `sessions/`.
     pub codex_dir: PathBuf,
-    /// Read as `~/.gemini/antigravity-cli`, through a copy of its summaries database.
     pub antigravity_dir: PathBuf,
-    /// A fixture root: a relative transcript path in a job's state belongs to it.
     pub fixture: Option<PathBuf>,
 }
 
 impl DataRoot {
-    /// This user's real folders; `None` when the environment has no home.
     pub fn real() -> Option<DataRoot> {
         let env = DirEnv::from_process();
         let home = env.home.as_ref()?;
@@ -63,8 +43,6 @@ impl DataRoot {
         })
     }
 
-    /// A fixture root: `<root>/claude`, `<root>/notchling`, `<root>/codex` and
-    /// `<root>/antigravity-cli`.
     pub fn fixture(root: &Path) -> DataRoot {
         DataRoot {
             claude_dir: root.join("claude"),
@@ -75,13 +53,10 @@ impl DataRoot {
         }
     }
 
-    /// Where the Antigravity summaries copy goes: the app's own folder, never Antigravity's and
-    /// never the Swift app's or the daemon's copy, which other processes rewrite.
     pub fn antigravity_copy_dir(&self) -> PathBuf {
         self.data_dir.join(APP_DIR).join("antigravity")
     }
 
-    /// What a render reads: [`DATA_ROOT_ENV`]'s folder, else the fixture this crate carries.
     pub fn for_render() -> DataRoot {
         let root = std::env::var_os(DATA_ROOT_ENV)
             .filter(|v| !v.is_empty())
@@ -106,7 +81,6 @@ impl DataRoot {
     }
 }
 
-/// One read of everything the notch shows.
 #[derive(Clone, Debug, Default)]
 pub struct Loaded {
     pub agents: Vec<Agent>,
@@ -114,19 +88,13 @@ pub struct Loaded {
     pub requests: HashMap<String, HookRequest>,
 }
 
-/// Reads an open Antigravity session's conversation from the daemon (`agy.conversation`, peeking);
-/// `None` when it isn't open or the daemon doesn't answer.
 pub type AgyReader = Arc<dyn Fn(&str) -> Option<Conversation> + Send + Sync>;
 
-/// Reads a data root, keeping what polls need between them: the monitor's memory of ended terminal
-/// sessions, which rows had no transcript, and the Antigravity list's last read.
 pub struct Source {
     pub root: DataRoot,
     monitor: Monitor,
     locator: Locator,
     agy_list: AgyList,
-    /// Set by the live panel; a render and a fixture have none, so their Antigravity rows show no
-    /// lines.
     pub agy_reader: Option<AgyReader>,
 }
 
@@ -141,27 +109,21 @@ impl Source {
         }
     }
 
-    /// The Antigravity list this source reads (a test checks it is Chat's too).
     #[cfg(test)]
     pub fn agy_list(&self) -> &AgyList {
         &self.agy_list
     }
 
-    /// A source that shows every finished row however old: a fixture's dates are fixed.
     pub fn keeping_everything(root: DataRoot) -> Source {
         let mut source = Source::new(root);
         source.monitor.completed_window_ms = i64::MAX / 4;
         source
     }
 
-    /// Polls the rows, reads each row's snapshot and the held prompts. `now_ms` is the clock.
     pub fn load(&mut self, now_ms: i64) -> Loaded {
         self.load_from(None, None, now_ms)
     }
 
-    /// [`Source::load`] with the rows and held prompts given: the daemon's (`session_source`) in
-    /// place of reading the jobs and sessions folders and the Swift hook's `requests/` here. `None`
-    /// reads them. Snapshots are read here either way.
     pub fn load_from(
         &mut self,
         claude: Option<Vec<Agent>>,
@@ -171,9 +133,6 @@ impl Source {
         self.load_live(claude, prompts, &ToolLive::default(), now_ms)
     }
 
-    /// [`Source::load_from`] with what the daemon's `tools` topic said laid over the Codex and
-    /// Antigravity rows (`NotchForeign.merge`): a running turn is Working, a session the daemon
-    /// holds gets its lines from it, and the notch's cap on the other tools' rows applies.
     pub fn load_live(
         &mut self,
         claude: Option<Vec<Agent>>,
@@ -222,8 +181,6 @@ impl Source {
         }
     }
 
-    /// Codex's rollouts (30 newest, 14 days; a fixture's whatever their date) and Antigravity's
-    /// summaries, with the live state over them, as many as the notch shows.
     fn foreign_rows(&mut self, live: &ToolLive, now_ms: i64) -> Vec<Agent> {
         let days = self.root.fixture.is_none().then_some(14);
         let sessions = self.root.codex_dir.join("sessions");
@@ -232,7 +189,6 @@ impl Source {
             .filter_map(|path| codex_list::session(path))
             .collect();
         rows.extend(self.agy_list.rows(now_ms));
-        // Jobs another session handed over are its subagents, not rows (`chat::delegated`).
         let delegated =
             crate::chat::delegated::hidden(&crate::chat::delegated::read(&self.root.data_dir));
         rows.retain(|row| !delegated.contains(&row.id));
@@ -241,7 +197,6 @@ impl Source {
     }
 }
 
-/// Now, in milliseconds since the epoch.
 pub fn now_ms() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -249,7 +204,6 @@ pub fn now_ms() -> i64 {
         .unwrap_or(0)
 }
 
-/// A fixed clock for a fixture: a minute after its newest row, so ages read the same every render.
 pub fn fixture_clock(agents: &[Agent]) -> i64 {
     agents.iter().map(|a| a.since_ms).max().unwrap_or(0) + 60_000
 }
@@ -323,7 +277,6 @@ mod tests {
     fn the_other_tools_rows_follow_the_notch_fixture_and_the_live_state() {
         use crate::tools::live::ToolLive;
         use notchling_engine::sessions::AgentTarget;
-        // The chat fixture has Codex rollouts; the notch one has none, so nothing foreign shows.
         let mut plain = Source::keeping_everything(fixture());
         let now = fixture_clock(&plain.load(0).agents);
         assert!(plain
@@ -331,7 +284,6 @@ mod tests {
             .agents
             .iter()
             .all(|a| !a.id.starts_with("codex:") && !a.id.starts_with("agy:")));
-        // A session the daemon described (one it started) shows with its lines from the daemon.
         let mut live = ToolLive::default();
         let row = Agent {
             id: "agy:live-1".into(),

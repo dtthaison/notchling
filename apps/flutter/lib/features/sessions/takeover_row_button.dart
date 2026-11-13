@@ -13,10 +13,6 @@ import '../connection/connection.dart';
 import '../macs/session_ref.dart';
 import 'sessions_notifier.dart';
 
-/// "Tiếp quản" on a view-only session's row: one tap (and the confirmation) from the list, no need to open the
-/// chat first. On success the chat of the resumed session opens.
-/// Confirms, asks the Mac to resume [session] in a terminal it owns, and switches to the Chat of the result.
-/// Used by the row button and the swipe.
 Future<void> runTakeover(
   BuildContext context,
   WidgetRef ref,
@@ -26,7 +22,6 @@ Future<void> runTakeover(
   final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
   final TakeoverChoice choice = await confirmTakeover(context, session);
   if (choice == TakeoverChoice.cancel || !context.mounted) return;
-  // A row in a list of several computers carries a host-qualified id: the takeover goes to that computer.
   final SessionRef? on = SessionRef.parse(session.id);
   final BridgeClient? client = on == null
       ? ref.read(bridgeClientProvider)

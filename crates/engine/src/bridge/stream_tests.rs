@@ -1,6 +1,3 @@
-//! The device-window stream: port of the picker test in `VizEngineTests`, plus the rate and
-//! framing logic and the orchestration over a fake capture.
-
 use super::connection::{lock, Connection};
 use super::hub::Hub;
 use super::model::PhoneOptions;
@@ -190,8 +187,6 @@ fn no_windows_and_hidden_windows_are_not_found() {
     assert!(hidden.message.contains("ẩn"));
 }
 
-// MARK: Orchestration over a fake capture
-
 #[derive(Default)]
 struct CaptureState {
     sinks: Mutex<Vec<FrameSink>>,
@@ -249,7 +244,6 @@ fn fake(permitted: bool, windows: Vec<DeviceWindowInfo>) -> (FakeCapture, Arc<Ca
 
 fn connect() -> (Arc<Connection>, Arc<RecordingIo>) {
     let io = Arc::new(RecordingIo::default());
-    // One hub, so every connection has its own id.
     static HUB: OnceLock<Hub> = OnceLock::new();
     let connection = HUB
         .get_or_init(Hub::new)

@@ -1,5 +1,3 @@
-//! The install ops over temp folders: no real `~/.claude`, `~/.codex`, `~/.gemini` or LaunchAgents.
-
 use crate::daemon::Ops;
 use crate::install_ops::*;
 use crate::op_group::OpGroup;
@@ -46,7 +44,6 @@ impl Dir {
         self.0.join(rel)
     }
 
-    /// Every file under the folder, relative, sorted: what a call left behind.
     fn tree(&self) -> Vec<String> {
         fn walk(dir: &Path, base: &Path, out: &mut Vec<String>) {
             let mut entries: Vec<_> = fs::read_dir(dir).unwrap().map(|e| e.unwrap()).collect();
@@ -76,7 +73,6 @@ impl Drop for Dir {
     }
 }
 
-/// All three tools' folders exist; settings.json holds `settings`.
 fn rig(dir: &Dir, settings: Option<&str>) -> InstallSetup {
     for tool in [".claude", ".codex", ".gemini/config"] {
         fs::create_dir_all(dir.path(&format!("home/{tool}"))).unwrap();
@@ -126,7 +122,6 @@ fn the_switch_starts_off_and_the_ops_are_app_tier() {
         assert_eq!(ops.spec(op), Some(OpSpec::APP), "{op}");
     }
     assert_eq!(ops.spec("install.other"), None);
-    // The daemon's ops hand them out too, and an agent-tier caller is not let in by the spec.
     let handler = Ops::new(Arc::new(Mutex::new(json!([])))).with_group(Arc::new(InstallOps::new(
         rig(&dir, None),
         SwitchFlag::off(INSTALL, INSTALL_OFF),
@@ -154,13 +149,11 @@ fn a_plan_works_with_the_switch_off_and_reads_only() {
         .unwrap()
         .contains("add PreToolUse (AskUserQuestion)"));
     let skills = plan["skills"].as_array().unwrap();
-    // delegate in three tools, pages in Claude Code.
     assert_eq!(skills.len(), 4);
     assert!(skills.iter().all(|s| s["action"] == "write"));
     assert_eq!(dir.tree(), before);
     assert_eq!(settings_text(&dir), USER_SETTINGS);
 
-    // The same for a removal plan.
     let reply = ops
         .run(ops::INSTALL_PLAN, &json!({"action": "remove"}))
         .unwrap();
@@ -189,7 +182,6 @@ fn apply_and_remove_with_the_switch_off_answer_the_dry_run_and_write_nothing() {
         assert_eq!(dir.tree(), before, "{op}");
         assert_eq!(settings_text(&dir), USER_SETTINGS);
     }
-    // The dry run is the plan the call would have carried out.
     let apply = ops.run(ops::INSTALL_APPLY, &json!({})).unwrap();
     assert_eq!(
         apply["plan"]["hooks"]["changes"].as_array().unwrap().len(),
@@ -210,14 +202,11 @@ fn a_switch_turned_off_while_a_call_waits_for_the_writing_lock_stops_the_write()
         let (ops, switch) = ops_for(rig(&dir, Some(USER_SETTINGS)), true);
         let ops = Arc::new(ops);
         let before = dir.tree();
-        // Another change is going on: the call has to wait for it.
         let held = ops.hold_writes();
         let waiting = {
             let ops = ops.clone();
             std::thread::spawn(move || ops.run(op, &json!({})))
         };
-        // Time enough for it to reach the lock; it cannot pass while the lock is held, and
-        // however late it arrives it reads the switch only once it has the lock.
         std::thread::sleep(std::time::Duration::from_millis(200));
         switch.set(false);
         drop(held);
@@ -270,7 +259,6 @@ fn with_the_switch_on_apply_installs_hooks_and_skills_and_remove_undoes_it() {
             .unwrap()
             .contains(BINARY));
     }
-    // Pages is Claude Code's alone.
     assert!(!dir.path("home/.codex/skills/notchling-pages").exists());
     assert!(reply["plan"]["skills"]
         .as_array()
@@ -278,7 +266,6 @@ fn with_the_switch_on_apply_installs_hooks_and_skills_and_remove_undoes_it() {
         .iter()
         .all(|s| s["error"].is_null()));
 
-    // Again: nothing to do, no second backup.
     let again = ops.run(ops::INSTALL_APPLY, &json!({})).unwrap();
     assert_eq!(again["applied"], true);
     assert_eq!(again["plan"]["changed"], false);
@@ -348,11 +335,9 @@ fn the_swift_apps_hook_blocks_an_install_unless_told_and_never_a_removal() {
     assert!(e.message.contains("Swift app"));
     assert_eq!(dir.tree(), before);
     assert_eq!(settings_text(&dir), SWIFT_HOOK);
-    // Skills alone are not held up by it.
     ops.run(ops::INSTALL_APPLY, &json!({"what": ["notchling-pages"]}))
         .unwrap();
 
-    // A removal never touches theirs.
     let removed = ops
         .run(
             ops::INSTALL_REMOVE,
@@ -362,7 +347,6 @@ fn the_swift_apps_hook_blocks_an_install_unless_told_and_never_a_removal() {
     assert_eq!(removed["plan"]["changed"], false);
     assert_eq!(settings_text(&dir), SWIFT_HOOK);
 
-    // Told to go ahead, ours is added beside theirs; theirs stays.
     ops.run(ops::INSTALL_APPLY, &json!({"with_swift_hooks": true}))
         .unwrap();
     let v = data(&settings_text(&dir));
@@ -390,7 +374,6 @@ fn a_broken_settings_file_is_reported_refused_and_never_written() {
     assert_eq!(e.code, ErrorCode::Failed);
     assert_eq!(dir.tree(), before, "no backup, no skills, nothing");
     assert_eq!(settings_text(&dir), broken);
-    // Neither the error nor the plan carries a word of the file.
     assert!(!e.message.contains("NEVERSHOWN"), "{}", e.message);
     assert!(!plan.to_string().contains("NEVERSHOWN"));
 }
@@ -434,7 +417,6 @@ fn a_skill_folder_that_is_not_ours_is_skipped_with_its_reason() {
         fs::read_to_string(swift.join("SKILL.md")).unwrap(),
         "---\nname: notchling-delegate\n---\nswift's\n"
     );
-    // The other tools got theirs.
     assert!(dir
         .path("home/.codex/skills/notchling-delegate/SKILL.md")
         .is_file());
@@ -512,14 +494,11 @@ fn the_layout_puts_every_tool_where_the_swift_app_looked() {
         setup.tools.antigravity,
         PathBuf::from("/Users/me/.gemini/config")
     );
-    // A fixture root keeps all of them inside the root.
     let fixture = Layout::resolve(None, Some(std::ffi::OsStr::new("/r")), || None).unwrap();
     let setup = InstallSetup::from_layout(&fixture, Some("/bin/notchling".into()));
     assert_eq!(setup.settings, PathBuf::from("/r/claude/settings.json"));
     assert_eq!(setup.tools.codex, PathBuf::from("/r/codex"));
     assert_eq!(setup.tools.antigravity, PathBuf::from("/r/gemini/config"));
-    // The delegate skill for all three tools and the pages skill for Claude Code's, none without
-    // a program to point them at.
     let names: Vec<_> = setup
         .skills
         .iter()

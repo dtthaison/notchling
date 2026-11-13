@@ -1,7 +1,3 @@
-//! Builds the viz specs from a session's transcripts and folder (ConsoleCore's `VizEngine`). Pure
-//! data in, specs out; it caches parsed transcripts by modification time so a recompute after a
-//! small change reads only what moved. Call it off the thread that reads sockets.
-
 use super::facts::{self, TranscriptFacts};
 use super::suggest::{git_branch, VizSignals};
 use super::web_url;
@@ -18,12 +14,9 @@ const SUBAGENT_TAIL_BYTES: u64 = 1_000_000;
 const MAX_CALLS_SHOWN: usize = 300;
 const MAX_TURNS_SHOWN: usize = 40;
 const MAX_CHART_POINTS: usize = 300;
-/// How long a folder's git status is reused.
 const GIT_TTL_SECS: f64 = 10.0;
-/// A diagram this recent makes the Diagram tab the suggestion.
 const RECENT_MERMAID_SECS: f64 = 30.0 * 60.0;
 
-/// The branch and `git diff --stat` of a folder, for the Flow tab.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct GitSnapshot {
     pub branch: Option<String>,
@@ -31,7 +24,6 @@ pub struct GitSnapshot {
 }
 
 impl GitSnapshot {
-    /// The branch from `.git/HEAD`; the diff stat is the caller's (a process).
     pub fn with_branch(cwd: &str, diff_stat: Option<String>) -> GitSnapshot {
         GitSnapshot {
             branch: git_branch(cwd),
@@ -40,21 +32,16 @@ impl GitSnapshot {
     }
 }
 
-/// What a folder's schema files make: the Entity tab.
 pub enum Scan {
     Found(wire::EntitySpec),
-    /// No tables in the folder.
     NoTables,
-    /// This computer does not read schemas yet.
     Unsupported,
 }
 
-/// Reads Prisma, SQL and Drift schemas (Swift `SchemaScanner`, not ported yet).
 pub trait Schemas: Send + Sync {
     fn scan(&self, cwd: &str) -> Scan;
 }
 
-/// No schema reader: the Entity tab says so.
 pub struct NoSchemas;
 
 impl Schemas for NoSchemas {
@@ -63,7 +50,6 @@ impl Schemas for NoSchemas {
     }
 }
 
-/// The three specs a session always has, plus what the suggester and the Web tab need.
 #[derive(Debug, Clone, PartialEq)]
 pub struct VizBundle {
     pub flow: wire::VizSpec,
@@ -86,7 +72,6 @@ type Clock = Box<dyn Fn() -> f64 + Send + Sync>;
 type Listening = Box<dyn Fn(u16) -> bool + Send + Sync>;
 
 pub struct VizEngine {
-    /// Seconds since the epoch.
     now: Clock,
     git: GitReader,
     schemas: Box<dyn Schemas>,
@@ -97,7 +82,6 @@ pub struct VizEngine {
 }
 
 impl VizEngine {
-    /// With no schema reader, the real listening probe and no home folder (so no home launch file).
     pub fn new(now: Clock, git: GitReader) -> VizEngine {
         VizEngine {
             now,
@@ -110,7 +94,6 @@ impl VizEngine {
         }
     }
 
-    /// `~/.claude/launch.json` is read from here.
     pub fn with_home(mut self, home: PathBuf) -> VizEngine {
         self.home = home;
         self
@@ -121,7 +104,6 @@ impl VizEngine {
         self
     }
 
-    /// Replaces the check that a local port has a server on it.
     pub fn with_listening(mut self, is_listening: Listening) -> VizEngine {
         self.is_listening = is_listening;
         self
@@ -179,8 +161,6 @@ impl VizEngine {
         }
     }
 
-    // MARK: Cached reads
-
     fn facts(&self, path: &str, is_main: bool, origin: &str, tail: u64) -> TranscriptFacts {
         let meta = std::fs::metadata(path).ok();
         let modified = meta.as_ref().and_then(|m| m.modified().ok());
@@ -213,8 +193,6 @@ impl VizEngine {
         lock(&self.git_cache).insert(cwd.to_string(), (now, snapshot.clone()));
         snapshot
     }
-
-    // MARK: Specs
 
     pub fn flow_spec(
         &self,
@@ -271,7 +249,6 @@ impl VizEngine {
     pub fn diagram_spec(facts: &TranscriptFacts) -> wire::VizSpec {
         let mut ordered: Vec<(usize, &facts::MermaidBlock)> =
             facts.mermaid.iter().enumerate().collect();
-        // Newest first; a block with no time goes after the dated ones; ties keep the later one first.
         ordered.sort_by(
             |(left_at, left), (right_at, right)| match (left.time, right.time) {
                 (Some(a), Some(b)) => b.total_cmp(&a).then(right_at.cmp(left_at)),
@@ -310,8 +287,6 @@ impl VizEngine {
         spec
     }
 
-    /// Scanning a folder for schemas can take a while on a big tree, so it is separate from
-    /// [`Self::build`] and runs only when the Entity tab is open.
     pub fn entity_spec(&self, cwd: &str) -> wire::VizSpec {
         if cwd.is_empty() {
             return with_empty(wire::VizKind::Entity, "Session chưa có thư mục", None);

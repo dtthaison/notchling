@@ -1,20 +1,13 @@
-//! The Secret Vault's app-tier ops as the app sends and reads them (`notchlingd`'s `vault_ops`
-//! module docs). No reply read here carries a value: `vault.use` is the agents' op and the app
-//! never calls it. The pending events (`vault.approval.pending`, `vault.request.pending`) are
-//! read tolerantly; one without an id is nothing to answer.
-
 use notchling_engine::vault::entry::{PrefillChanges, VaultEntry, VaultRequest, VaultValue};
 use notchling_local_api::ops;
 use serde_json::{json, Value};
 
-/// One op and its arguments.
 #[derive(Clone, PartialEq)]
 pub struct Call {
     pub op: &'static str,
     pub args: Value,
 }
 
-/// A call's `Debug` never shows a value: `vault.save`'s `value` is printed as hidden.
 impl std::fmt::Debug for Call {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut args = self.args.clone();
@@ -28,7 +21,6 @@ impl std::fmt::Debug for Call {
     }
 }
 
-/// An approval's answer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Decision {
     Deny,
@@ -55,8 +47,6 @@ impl Call {
         Call::new(ops::VAULT_LIST, json!({}))
     }
 
-    /// Saves `entry` with `value` (left out to keep the stored value), `replacing` the entry it
-    /// renames, answering `request` (a `vault.request.pending` id) when an agent asked.
     pub fn save(
         entry: &VaultEntry,
         value: Option<&VaultValue>,
@@ -92,8 +82,6 @@ impl Call {
     }
 }
 
-/// `vault.list`'s entries, sorted by name as the list shows them. An entry that doesn't read is
-/// skipped, never the whole list.
 pub fn parse_entries(v: &Value) -> Vec<VaultEntry> {
     let mut entries: Vec<VaultEntry> = v
         .get("entries")
@@ -108,19 +96,12 @@ pub fn parse_entries(v: &Value) -> Vec<VaultEntry> {
     entries
 }
 
-/// What the daemon checked about the process asking (`verified` on `vault.approval.pending`):
-/// read from the socket's peer, not from anything the agent said. Older daemons don't send it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Verified {
-    /// The caller's executable.
     pub exe: Option<String>,
     pub pid: Option<i64>,
-    /// Its real working folder.
     pub cwd: Option<String>,
-    /// Process names, nearest first.
     pub parents: Vec<String>,
-    /// Whether the folder the request names is where it runs; `None` when the daemon couldn't
-    /// tell (it couldn't read the caller's folder).
     pub folder_matches: Option<bool>,
 }
 
@@ -141,13 +122,11 @@ impl Verified {
                         .collect()
                 })
                 .unwrap_or_default(),
-            // Missing or null: nothing was checked, which is neither a match nor a mismatch.
             folder_matches: v.get("folder_matches").and_then(Value::as_bool),
         })
     }
 }
 
-/// An agent waiting to use secrets marked ask-first (`vault.approval.pending`).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Approval {
     pub id: String,
@@ -188,15 +167,11 @@ impl Approval {
     }
 }
 
-/// An agent asking for a secret to be added or updated (`vault.request.pending`): the form, filled
-/// in by the daemon.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PendingRequest {
     pub id: String,
     pub request: VaultRequest,
-    /// The form's entry: the saved one with the request laid over it, or a new one.
     pub entry: VaultEntry,
-    /// Whether a saved entry of that name exists.
     pub existing: bool,
     pub changes: PrefillChanges,
 }

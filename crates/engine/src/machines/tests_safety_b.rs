@@ -1,7 +1,3 @@
-//! End-to-end safety properties of the repo and sd worker steps, over a Mac and a Linux machine
-//! (Swift `MachinesSafetyTests`, the parts that concern these steps). Nothing starts ssh or `gh`:
-//! every Fix runs against a scripted runner that records and answers success.
-
 use super::fakes_b::*;
 use super::registry::{AdminAccess, Machine, MachineRepo};
 use super::runner::CommandResult;
@@ -22,7 +18,6 @@ fn catalog(m: &Machine) -> Vec<SetupStep> {
     all
 }
 
-/// A Linux machine runs its admin steps as root over ssh (sudo as the worker is refused).
 fn admin_runnable(m: &Machine) -> Machine {
     let mut m = m.clone();
     if m.os == Some(super::registry::MachineOs::Linux) {
@@ -39,7 +34,6 @@ fn is_linux(m: &Machine) -> bool {
     m.os == Some(super::registry::MachineOs::Linux)
 }
 
-/// The base64 blobs a script carries (the files an admin step installs), decoded and appended.
 fn with_decoded_blobs(text: &str) -> String {
     let mut out = text.to_string();
     let mut run = String::new();
@@ -88,8 +82,6 @@ fn decode_base64(s: &str) -> Option<Vec<u8>> {
     Some(out)
 }
 
-/// A rig with the sd templates and a sd 1.19.3 on this Mac, so the service and check Fixes get as
-/// far as their commands.
 fn full_rig(m: &Machine) -> Rig {
     let rig = Rig::new(admin_runnable(m));
     let sd = sd_folder(&rig.tmp, "sd");
@@ -102,8 +94,6 @@ fn run_plan(m: &Machine, plan: &FixPlan) -> Vec<String> {
     rig.argvs().into_iter().map(|a| a.join(" ")).collect()
 }
 
-/// Every text a step can put in front of a machine or the user: displays, probe scripts, toggle
-/// scripts, and the argv of every Fix run against a recording runner.
 fn all_texts(m: &Machine, admin_only: bool) -> Vec<(String, String)> {
     let mut texts = vec![];
     for step in catalog(m) {
@@ -136,7 +126,6 @@ fn all_texts(m: &Machine, admin_only: bool) -> Vec<(String, String)> {
                 }
             }
         }
-        // Replace key is no Fix of Set up, but its commands are held to the same scans
         if let Some(replace) = &step.replace {
             if !admin_only {
                 texts.push((format!("{label} replace display"), replace.display.clone()));
@@ -180,8 +169,6 @@ fn admin_scripts_never_touch_production_services() {
         for (label, raw) in all_texts(&m, true) {
             admin += 1;
             let text = with_decoded_blobs(&raw);
-            // the unit file's own `Restart=on-failure` is a directive, not a restart of a service,
-            // and its comments name tools the worker needs; neither is a command
             let lower = text
                 .to_lowercase()
                 .lines()
@@ -193,7 +180,6 @@ fn admin_scripts_never_touch_production_services() {
                 assert!(!lower.contains(name), "{label} names {name}");
             }
             for word in ["restart", "reload-or-restart", "docker"] {
-                // the verb, not words that contain it (`pmset autorestart`)
                 let verb = lower
                     .split(|c: char| !c.is_ascii_alphanumeric() && c != '-')
                     .any(|w| w == word || w == format!("try-{word}"));
@@ -221,9 +207,6 @@ fn admin_scripts_never_touch_production_services() {
     assert!(systemctl >= 2, "the systemctl commands were looked at");
 }
 
-/// Every admin command (the service Fix and the Running switch) goes out through the absolute
-/// `/usr/bin/sudo` (or as root over ssh, with no sudo), runs its script under `env -i` with a fixed
-/// PATH, and carries nothing of the worker account's own.
 #[test]
 fn every_admin_command_uses_the_absolute_sudo_and_a_fixed_environment() {
     let mut seen = 0;
@@ -311,8 +294,6 @@ fn the_admin_steps_of_these_catalogs_are_the_ones_the_spec_names() {
     assert_eq!(names, ["vps-sing-1/service", "vps-sing-1/running"]);
 }
 
-/// Nothing pushes except the dry run of Replace key, and only the read-only deploy-key add writes
-/// to GitHub; the one delete is by an integer id.
 #[test]
 fn nothing_pushes_except_the_read_only_deploy_key_add() {
     let writers = [
@@ -354,7 +335,6 @@ fn nothing_pushes_except_the_read_only_deploy_key_add() {
             for found in find_all(&text, "deploy-key delete", stop) {
                 assert!(replacing, "{label} deletes a deploy key: {found}");
                 if label.ends_with("replace run") {
-                    // `<gh> repo deploy-key delete <integer id> -R <repo>`
                     let words: Vec<&str> = found.split_whitespace().collect();
                     assert!(
                         words[2].chars().all(|c| c.is_ascii_digit()) && !words[2].is_empty(),
@@ -376,7 +356,6 @@ fn nothing_pushes_except_the_read_only_deploy_key_add() {
             {
                 assert!(!format!("{found} ").contains(" -w "), "{label} has -w");
             }
-            // `gh api` only reads (the host-key `meta` call): a field or an input body turns it into a POST
             for found in find_all(&text, "gh api", stop) {
                 let found = format!(" {found} ");
                 for flag in [" -f ", " -F ", " --field", " --raw-field", " --input"] {
@@ -399,8 +378,6 @@ fn nothing_pushes_except_the_read_only_deploy_key_add() {
     );
 }
 
-/// Replace key is the Deploy key step's `replace` and nothing else: no Fix, toggle or probe of any
-/// step in the catalog deletes a deploy key or makes a `.new` key.
 #[test]
 fn no_step_but_replace_key_deletes_a_key_or_makes_a_new_one() {
     for m in machines() {
@@ -441,8 +418,6 @@ fn no_step_but_replace_key_deletes_a_key_or_makes_a_new_one() {
     }
 }
 
-/// The text with every single-quoted part taken out (`'\''` is a quote inside one), so what is
-/// left is what a shell would expand.
 fn outside_quotes(s: &str) -> String {
     let mut out = String::new();
     let mut inside = false;
@@ -458,7 +433,6 @@ fn outside_quotes(s: &str) -> String {
 
 #[test]
 fn hostile_remote_values_never_reach_a_script() {
-    // a home folder with characters Notchling won't use, a checkout path that quotes and expands
     let mut m = linux("vps-sing-1");
     m.abilities.as_mut().unwrap().home = Some("/home/a b;x".into());
     {
@@ -475,7 +449,6 @@ fn hostile_remote_values_never_reach_a_script() {
             for bad in [";x", "a b"] {
                 assert!(!s.contains(bad), "{label} probe carries {bad}: {s}");
             }
-            // a checkout path may be there, but only inside single quotes
             assert!(
                 !outside_quotes(s).contains("$(id)"),
                 "{label} probe expands a path: {s}"
@@ -505,7 +478,6 @@ fn hostile_remote_values_never_reach_a_script() {
     }
 }
 
-/// A non-integer key id from GitHub never becomes part of a command.
 #[test]
 fn a_hostile_key_id_from_github_never_becomes_part_of_a_command() {
     let m = mac("m1");
@@ -521,8 +493,6 @@ fn a_hostile_key_id_from_github_never_becomes_part_of_a_command() {
     }
 }
 
-/// Machine output with a vault value in it never reaches an outcome or a display unmasked, whichever
-/// Fix it came back to.
 #[test]
 fn a_vault_value_in_machine_output_is_masked_in_every_fix_outcome() {
     let token = long_token();

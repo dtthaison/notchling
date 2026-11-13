@@ -1,8 +1,3 @@
-//! Reading a data root again and again for Chat ([`Loader`]): the sessions, with the daemon's
-//! live state over the other tools' rows, and the selected session's conversation. Keeps what
-//! polls need between reads; owns no view state, so a view sends it to the background executor
-//! and takes it back.
-
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::Arc;
@@ -21,51 +16,29 @@ use crate::tools::foreign::AgyList;
 use crate::tools::live::ToolLive;
 use crate::transcripts::Locator;
 
-/// One read of everything Chat shows.
 #[derive(Clone, Debug)]
 pub struct Loaded {
     pub sessions: Vec<Session>,
-    /// The session the conversation is of: the one asked for if it is listed, else the first.
     pub selected: Option<String>,
     pub conversation: Arc<Conversation>,
-    /// What changed from the conversation this loader handed out last, when that was the same
-    /// session's: the conversation the change starts from, and the change. `None` for the first
-    /// load, another session or a draft: the view then compares the conversations itself.
     pub change: Option<(Arc<Conversation>, Change)>,
     pub subagents: Vec<Subagent>,
-    /// The Codex and Antigravity rows that are jobs another session handed over: the Sidebar leaves
-    /// them out (Search still finds them, and opening one from there brings it back).
     pub delegated: HashSet<String>,
-    /// The transcript of the subagent Chat has open ([`Loader::subagent_path`]), by that path, read
-    /// again with every load so a running one follows.
     pub subagent: Option<(String, Arc<Conversation>)>,
-    /// The selected Claude Code session's unanswered AskUserQuestion, from its transcript tail.
     pub question: Option<PendingQuestion>,
-    /// The Swift hook's held prompts by session id (`requests/`), read only while the daemon's
-    /// aren't followed ([`Loader::files_prompts`]).
     pub requests: HashMap<String, HookRequest>,
     pub now_ms: i64,
 }
 
-/// Reads a data root again and again, keeping what polls need between them: the monitor's memory of
-/// ended terminal sessions (they show as Exited), which rows had no transcript, and the Antigravity
-/// list's last read.
 pub struct Loader {
     root: DataRoot,
     monitor: Monitor,
     locator: Locator,
     agy: AgyList,
-    /// Read the Swift hook's `requests/` folder too: set while the daemon's held prompts aren't
-    /// followed (no daemon, or this isn't the app tier), as the notch does.
     pub files_prompts: bool,
-    /// The file of the subagent Chat shows in place of the conversation, read with each load, and
-    /// whose it is (a job handed to Codex or Antigravity is read by that tool's reader).
     pub subagent_path: Option<String>,
     pub subagent_origin: Origin,
-    /// Antigravity's log as last read, by its path and the file's size and date, so a log that
-    /// hasn't changed gives the same conversation (and no redraw).
     agy_log: Option<AgyLog>,
-    /// The session and conversation of the last load, what the next one's change starts from.
     last: Option<(String, Arc<Conversation>)>,
 }
 
@@ -84,19 +57,15 @@ impl Loader {
         }
     }
 
-    /// The Antigravity list this loader reads (a test checks it is the notch's too).
     #[cfg(test)]
     pub fn agy_list(&self) -> &AgyList {
         &self.agy
     }
 
-    /// The sessions, and the conversation and subagents of `selected` (else the first session).
-    /// `now_ms` is the clock.
     pub fn load(&mut self, selected: Option<&str>, now_ms: i64) -> Loaded {
         self.load_from(selected, None, now_ms)
     }
 
-    /// [`Loader::load`] with Claude Code's rows from the daemon when it gave any.
     pub fn load_from(
         &mut self,
         selected: Option<&str>,
@@ -106,8 +75,6 @@ impl Loader {
         self.load_live(selected, claude, &ToolLive::default(), now_ms)
     }
 
-    /// [`Loader::load_from`] with what the daemon said about the other tools laid over their rows
-    /// (a running turn, a session it started that the files don't list yet, one deleted).
     pub fn load_live(
         &mut self,
         selected: Option<&str>,
@@ -162,11 +129,9 @@ impl Loader {
             }
             None => (Arc::default(), Vec::new()),
         };
-        // The open question comes from the same read as the conversation, not a second one.
         let question = session
             .filter(|s| s.tool == Tool::Claude && s.agent.command.is_none())
             .and_then(|_| conversation.pending_question.clone());
-        // Compared here, off the main thread: the view only checks the pointer it starts from.
         let change = match (&selected, self.last.take()) {
             (Some(id), Some((last_id, last))) if *id == last_id => {
                 let change = log::diff(&last, &conversation);
@@ -200,7 +165,6 @@ impl Loader {
     }
 }
 
-/// A log's last read.
 struct AgyLog {
     path: String,
     stamp: Option<(u64, std::time::SystemTime)>,
@@ -208,7 +172,6 @@ struct AgyLog {
 }
 
 impl Loader {
-    /// The open subagent's transcript, by whose it is.
     fn read_subagent(&mut self, path: &str) -> Arc<Conversation> {
         match self.subagent_origin {
             Origin::Claude => subagents::read_shared(path),
@@ -240,8 +203,6 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
-    /// A fixture root with one live terminal session (this process's pid, so it is alive wherever
-    /// the tests run) and its transcript; the returned path is the session's file.
     fn terminal_world(s: &crate::testutil::Scratch) -> PathBuf {
         s.write(
             "claude/projects/-work-app/term-1.jsonl",
@@ -266,12 +227,10 @@ mod tests {
         let row = first.sessions.iter().find(|r| r.agent.id == "term-1");
         assert_eq!(row.map(|r| r.agent.label.as_str()), Some("Idle"));
 
-        // The terminal closes: its session file goes away.
         std::fs::remove_file(&file).unwrap();
         let second = loader.load(first.selected.as_deref(), 2_000);
         let row = second.sessions.iter().find(|r| r.agent.id == "term-1");
         assert_eq!(row.map(|r| r.agent.label.as_str()), Some("Exited"));
-        // Its conversation is still readable by id.
         assert!(!second.conversation.items.is_empty());
     }
 
@@ -359,11 +318,9 @@ mod tests {
         let (read_path, conversation) = loaded.subagent.expect("the open subagent is read");
         assert_eq!(read_path, path);
         assert_eq!(conversation.items.len(), 1);
-        // And it is listed, so the header has its row.
         assert_eq!(loaded.subagents.len(), 1);
     }
 
-    /// A job `term-1` handed to Codex, with its rollout in the fixture's Codex folder.
     fn handed_to_codex(s: &crate::testutil::Scratch) -> std::path::PathBuf {
         use notchling_engine::delegate::options::{Options, Tool as DelegateTool};
         use notchling_engine::delegate::record::{self, Delegation};
@@ -416,10 +373,8 @@ mod tests {
         assert_eq!(jobs[0].description, "Review the diff");
         assert_eq!(jobs[0].path, rollout.to_string_lossy());
         assert!(loaded.delegated.contains("codex:c1"));
-        // The row is still in the loader's list (Search opens it from there); the view leaves it out.
         assert!(loaded.sessions.iter().any(|x| x.agent.id == "codex:c1"));
 
-        // Another session shows no jobs of this one.
         let other = loaded
             .sessions
             .iter()
@@ -443,7 +398,6 @@ mod tests {
             .expect("the open job is read");
         assert_eq!(conversation.items.len(), 1, "{:?}", conversation.items);
 
-        // Antigravity's log is read through its own reader, and again only when it changes.
         let log = s.write(
             "agy/log.jsonl",
             "{\"type\":\"USER_INPUT\",\"step_index\":0,\"content\":{\"user_input\":\"<USER_REQUEST>hi</USER_REQUEST>\"}}\n",

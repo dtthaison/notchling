@@ -1,8 +1,3 @@
-//! End to end: the bridge switched on over a Swift-made bridge folder (in a temp folder, ports
-//! picked by the OS), a phone over TLS pinned to the QR's fingerprint pairs with a one-time code,
-//! then `sessions.list` returns the M1 notch fixture's sessions through the live backend. Acting
-//! is off, so a message is refused.
-
 use super::bridge::tests::test_config;
 use super::bridge::Bridge;
 use super::core::tests::no_fetch;
@@ -16,12 +11,10 @@ use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-/// The M1 notch fixture, read in place (nothing here writes to it).
 fn fixture() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../app/fixtures/notch")
 }
 
-/// What the daemon would hand the bridge: its session list, read from the fixture.
 struct FixtureSources {
     sessions: Mutex<Vec<Session>>,
 }
@@ -34,7 +27,6 @@ impl FixtureSources {
             lanes_file: root.join("notchling/lanes.json"),
         };
         let mut monitor = Monitor::default();
-        // A fixture's dates are fixed: keep its finished rows, as the daemon does.
         monitor.completed_window_ms = i64::MAX / 4;
         let rows = monitor.poll(&roots, &Probes::from_proc(), super::files::now_ms());
         FixtureSources {
@@ -90,7 +82,6 @@ fn a_phone_pairs_over_tls_and_lists_the_fixture_sessions() {
     let (lan, _) = bridge.ports().unwrap();
     assert_ne!(lan, super::ports::LAN, "an OS-picked port in tests");
 
-    // What the QR carries: the port, the certificate's fingerprint and the code.
     let pairing = bridge.pair_begin().unwrap();
     let qr: Value = serde_json::from_str(pairing["payload"].as_str().unwrap()).unwrap();
     assert_eq!(qr["port"], lan);
@@ -125,14 +116,12 @@ fn a_phone_pairs_over_tls_and_lists_the_fixture_sessions() {
     assert_eq!(row["state"], "running", "{row}");
     assert_eq!(row["control"], "job");
 
-    // Acting is off: the bridge reads, it never types.
     let sent = request(
         &mut phone,
         r#"{"id":3,"op":"session.message","sessionId":"sess-notch","text":"hi"}"#.into(),
     );
     assert_eq!(sent["ok"], false, "{sent}");
 
-    // The new phone is in the Swift app's devices.json beside the two it had.
     let devices = bridge.devices().unwrap();
     assert_eq!(devices["devices"].as_array().unwrap().len(), 3);
     assert_eq!(bridge.set(false)["state"], "off");

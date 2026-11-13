@@ -7,14 +7,10 @@ import '../../app/widgets/common.dart';
 import '../../l10n/app_localizations.dart';
 import 'voice_controller.dart';
 
-/// The composer's microphone: tap to start, tap to stop. While recording the button breathes with the voice
-/// (a halo that follows the level) and a timer runs; while transcribing it says so, and a tap cancels.
-/// With Reduce Motion on the halo is a steady ring.
 class MicButton extends StatelessWidget {
   const MicButton({super.key, required this.state, required this.onPressed});
   final VoiceState state;
 
-  /// Null disables the button (no connection, say).
   final VoidCallback? onPressed;
 
   @override

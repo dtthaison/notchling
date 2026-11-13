@@ -1,12 +1,9 @@
-//! The small text rules Chat shows (`ChatFormat` in the Swift app).
-
 use std::path::Path;
 
 use notchling_engine::catalog::ModelInfo;
 
 use super::claude_picker;
 
-/// "now", "5m", "2h", "3d"; empty for an unknown time (0, the Swift app's `distantPast`).
 pub fn age(now_ms: i64, since_ms: i64) -> String {
     if since_ms <= 0 {
         return String::new();
@@ -23,7 +20,6 @@ pub fn age(now_ms: i64, since_ms: i64) -> String {
     }
 }
 
-/// "12s", "4m 05s", "1h 12m".
 pub fn duration(seconds: f64) -> String {
     let s = seconds.round().max(0.0) as i64;
     if s < 60 {
@@ -35,7 +31,6 @@ pub fn duration(seconds: f64) -> String {
     }
 }
 
-/// "claude-opus-5-5" -> "Opus 5.5"; "gpt-6-luna" -> "Gpt 6".
 pub fn model_name(id: &str) -> String {
     let stripped = id.replace("claude-", "");
     let parts: Vec<&str> = stripped.split('-').collect();
@@ -59,7 +54,6 @@ pub fn model_name(id: &str) -> String {
     name
 }
 
-/// "12.4k", "1.2M", "400k", "950".
 pub fn tokens(n: u64) -> String {
     fn short(v: f64, unit: &str) -> String {
         let mut s = format!("{v:.1}");
@@ -77,23 +71,16 @@ pub fn tokens(n: u64) -> String {
     }
 }
 
-/// The model's context window in Claude Code, where the catalog knows it (Opus 5.5's /context
-/// says 400k). Others give `None`, and the header shows the count alone rather than guess a
-/// percentage. An empty `catalog` (the daemon hasn't answered) is the built-in one.
 pub fn context_window(model: Option<&str>, catalog: &[ModelInfo]) -> Option<u64> {
     claude_picker::find(catalog, model?)?.context_window
 }
 
-/// The known model a window is borrowed from (a model newer than any the catalog has heard of),
-/// when the window is known at all.
 pub fn context_window_source(model: Option<&str>, catalog: &[ModelInfo]) -> Option<String> {
     let entry = claude_picker::find(catalog, model?)?;
     entry.context_window?;
     entry.borrowed_from.clone().filter(|_| entry.borrowed)
 }
 
-/// The header's context text: "148.8k / 400k · 37%" when the window is known, else "148.8k".
-/// `None` when nothing has been counted yet.
 pub fn context_text(
     context_tokens: u64,
     model: Option<&str>,
@@ -113,7 +100,6 @@ pub fn context_text(
     })
 }
 
-/// A folder with the home folder shortened to `~`.
 pub fn short_path(path: &str, home: &Path) -> String {
     let home = home.to_string_lossy();
     let home = home.trim_end_matches('/');
@@ -196,7 +182,6 @@ mod tests {
 
     #[test]
     fn the_window_sees_through_a_suffix_and_falls_back_to_the_built_in_catalog() {
-        // The daemon hasn't answered: the built-in list stands in.
         assert_eq!(
             context_window(Some("claude-opus-5-5[1m]"), &[]),
             Some(400_000)

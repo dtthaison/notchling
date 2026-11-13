@@ -1,6 +1,3 @@
-//! The Codex store against fakes: a temp `CODEX_HOME`, an in-memory Keychain, no network, no
-//! process, no real app.
-
 use super::login;
 use super::store::{CodexDeps, CodexPaths, CodexStore, APP_BUNDLE_ID, SERVICE};
 use super::testkit::{login as login_at, login_for};
@@ -109,7 +106,6 @@ fn a_switch_saves_the_live_login_first_then_writes_the_other_and_restarts_the_se
         .binary("codex", &PathBuf::from("/opt/homebrew/bin/codex"));
     let rig = Rig::new("switch", procs, FakeApps::new().running(APP_BUNDLE_ID));
     let (a, b) = two_accounts(&rig);
-    // Codex renewed the live login since Notchling last saw it: the saved copy must not be older.
     let renewed = login_for("a@example.com", "user-1", "ws-1", FUTURE, "rt-a-renewed");
     rig.live(&renewed);
     let seen = Arc::new(std::sync::Mutex::new(None));
@@ -226,7 +222,6 @@ fn sync_lists_the_live_account_and_remembers_it_across_a_restart() {
     let report = rig.store.usage_report("user-1:ws-1").unwrap();
     assert_eq!(report.groups[0].name.as_deref(), Some("Codex"));
     assert_eq!(report.bars()[0].percent, 30.0);
-    // The daemon's own list survives a restart; nothing is read from the Keychain or Codex to show it.
     let kc = rig.keychain.clone();
     let again = Rig::at(rig.root.clone(), kc, FakeProcs::new(), FakeApps::new());
     let names: Vec<_> = again
@@ -287,7 +282,7 @@ fn an_expired_token_is_never_renewed_so_no_request_is_made() {
 fn a_saved_account_that_is_not_live_is_read_from_its_saved_copy() {
     let rig = Rig::new("saved-usage", FakeProcs::new(), FakeApps::new());
     two_accounts(&rig);
-    rig.store.sync(false); // learns account 1 from the live file
+    rig.store.sync(false);
     let file = crate::docfile::DocFile::new(
         &rig.root,
         crate::accounts::book::CODEX_DOC,

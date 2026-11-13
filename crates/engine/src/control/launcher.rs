@@ -1,21 +1,13 @@
-//! Starting processes. Everything that launches `claude` or `git` goes through [`Launcher`], so a
-//! test swaps in [`FakeLauncher`] and no test ever runs a real session.
-
 use super::plan::{Command, PtyScript};
 use std::fs::{File, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-/// What a finished process left.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LaunchOutput {
-    /// The exit code; -1 when a signal ended it.
     pub code: i32,
-    /// Standard output.
     pub output: String,
-    /// Standard error. `git` reads only [`output`](Self::output) (the Swift app sends its stderr to
-    /// nowhere); `claude` messages use [`combined`](Self::combined), as `runCapturing` does.
     pub stderr: String,
 }
 
@@ -36,7 +28,6 @@ impl LaunchOutput {
         }
     }
 
-    /// Standard output, then standard error.
     pub fn combined(&self) -> String {
         format!("{}{}", self.output, self.stderr)
     }
@@ -44,11 +35,8 @@ impl LaunchOutput {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LaunchError {
-    /// The process could not be started (no such program, no such folder).
     Spawn(String),
-    /// It did not finish in this many seconds and was killed.
     Timeout(u64),
-    /// This launcher cannot do that (a pty on a platform without one built).
     Unsupported,
 }
 
@@ -65,22 +53,17 @@ impl std::fmt::Display for LaunchError {
 impl std::error::Error for LaunchError {}
 
 pub trait Launcher: Send + Sync {
-    /// Runs `command` to its end (or `timeout`), with its output collected.
     fn run(&self, command: &Command, timeout: Duration) -> Result<LaunchOutput, LaunchError>;
 
-    /// Plays a key script into a hidden pty; true when the prompt it waits for appeared and the keys
-    /// went in. The real pty belongs to `ptyhost`; [`RealLauncher`] answers `Unsupported`.
     fn run_pty(&self, script: &PtyScript) -> Result<bool, LaunchError>;
 }
 
-/// What a [`FakeLauncher`] was asked.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Call {
     Run(Command, Duration),
     Pty(PtyScript),
 }
 
-/// Records every call and answers from a queue (an empty queue answers exit 0 with no output).
 #[derive(Default)]
 pub struct FakeLauncher {
     calls: Mutex<Vec<Call>>,
@@ -94,17 +77,14 @@ impl FakeLauncher {
         FakeLauncher::default()
     }
 
-    /// Every `run` takes this long to answer (a slow command).
     pub fn set_delay(&self, delay: Duration) {
         *lock(&self.delay) = delay;
     }
 
-    /// The next `run` answers this.
     pub fn push_output(&self, answer: Result<LaunchOutput, LaunchError>) {
         lock(&self.outputs).push_back(answer);
     }
 
-    /// The next `run_pty` answers this (the default is `Ok(true)`).
     pub fn push_pty(&self, answer: Result<bool, LaunchError>) {
         lock(&self.pty).push_back(answer);
     }
@@ -113,7 +93,6 @@ impl FakeLauncher {
         lock(&self.calls).clone()
     }
 
-    /// The commands of the `run` calls, in order.
     pub fn commands(&self) -> Vec<Command> {
         self.calls()
             .into_iter()
@@ -147,20 +126,11 @@ impl Launcher for FakeLauncher {
     }
 }
 
-/// Starts real processes with `std::process`.
-///
-/// The environment is the daemon's own, less `NO_COLOR` (it left Claude Code's menus gray), then the
-/// command's changes. Output goes to a temporary file rather than a pipe: the first `claude --bg` in
-/// a lane starts a host that inherits the output, so reading a pipe to its end would wait as long as
-/// that host lives. Input is always null.
 pub struct RealLauncher {
     claude: PathBuf,
-    /// Where the output files go: the system's temp folder unless a test names another.
     temp_dir: PathBuf,
 }
 
-/// `claude` is `<home>/.local/bin/claude` when that is a file, else `/usr/local/bin/claude`. The
-/// reply attach (`reply::live`) runs the same one.
 pub fn claude_path(home: &Path) -> PathBuf {
     let local = home.join(".local").join("bin").join("claude");
     if local.is_file() {
@@ -170,16 +140,13 @@ pub fn claude_path(home: &Path) -> PathBuf {
     }
 }
 
-/// Variables never passed to a launched program.
 const DROPPED_ENV: [&str; 1] = ["NO_COLOR"];
 
 impl RealLauncher {
-    /// `claude` is found by [`claude_path`].
     pub fn new(home: &Path) -> Self {
         RealLauncher::with_claude(claude_path(home))
     }
 
-    /// The `claude` this launcher runs.
     pub fn claude(&self) -> &Path {
         &self.claude
     }
@@ -191,7 +158,6 @@ impl RealLauncher {
         }
     }
 
-    /// Puts the output files in `dir` instead of the system's temp folder.
     pub fn with_temp_dir(mut self, dir: PathBuf) -> Self {
         self.temp_dir = dir;
         self
@@ -206,8 +172,6 @@ impl RealLauncher {
     }
 }
 
-/// Creates `path` for writing and reading back, owner-only (0600), and only if nothing is there: `O_EXCL` refuses an
-/// existing file or link, and `O_NOFOLLOW` a link even where `O_EXCL` alone would not be checked.
 fn create_exclusive(path: &Path) -> std::io::Result<File> {
     let mut options = OpenOptions::new();
     options.read(true).write(true).create_new(true);
@@ -219,7 +183,6 @@ fn create_exclusive(path: &Path) -> std::io::Result<File> {
     options.open(path)
 }
 
-/// A name nobody can guess: `RandomState` is keyed from the operating system's randomness.
 fn random_name() -> String {
     use std::hash::{BuildHasher, Hasher};
     let mut hasher = std::collections::hash_map::RandomState::new().build_hasher();
@@ -227,8 +190,6 @@ fn random_name() -> String {
     format!("{:016x}", hasher.finish())
 }
 
-/// One run's output files: standard output and standard error, both new, both 0600, under names made
-/// of random digits. A name already taken is tried again with another.
 struct OutputFiles {
     out: (File, PathBuf),
     err: (File, PathBuf),
@@ -277,7 +238,6 @@ impl Launcher for RealLauncher {
             OutputFiles::create(&self.temp_dir).map_err(|e| LaunchError::Spawn(e.to_string()))?;
         let (out_path, err_path) = (files.out.1.clone(), files.err.1.clone());
         let result = self.run_to_files(name, command, timeout, files);
-        // Whatever happened, including a timeout, nothing is left behind.
         let _ = std::fs::remove_file(&out_path);
         let _ = std::fs::remove_file(&err_path);
         result
@@ -300,9 +260,6 @@ impl RealLauncher {
             out: (out, _),
             err: (err, _),
         } = files;
-        // Read back through our own handles, not by path: a link swapped in at the path afterwards
-        // must not make this read some other file. The offset is shared with the child's, so it is
-        // rewound first.
         let (mut out_reader, mut err_reader) = (
             out.try_clone()
                 .map_err(|e| LaunchError::Spawn(e.to_string()))?,
@@ -351,7 +308,6 @@ impl RealLauncher {
     }
 }
 
-/// Everything the child wrote to its output file, from the start.
 fn read_back(file: &mut File) -> String {
     use std::io::{Read, Seek, SeekFrom};
     let mut bytes = Vec::new();
@@ -394,8 +350,6 @@ mod tests {
         assert_eq!(got.output.trim(), "[unset][/lanes/a][unset]");
     }
 
-    /// The files in `dir`, with their modes, while a slow command runs through a launcher that keeps
-    /// its output there.
     fn files_while_running(dir: &Path) -> Vec<(PathBuf, u32)> {
         use std::os::unix::fs::PermissionsExt;
         let launcher = real().with_temp_dir(dir.to_path_buf());
@@ -426,8 +380,6 @@ mod tests {
         dir
     }
 
-    /// The output files hold whatever `claude` printed (a job's name, a prompt, an error with a path
-    /// in it), so they are the owner's alone: mode 0600, not 0644.
     #[test]
     fn the_output_files_are_private_to_the_owner() {
         let dir = scratch("mode");
@@ -439,7 +391,6 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// `notchling-<pid>-<n>.out` could be guessed, and a link planted at the guess followed.
     #[test]
     fn the_output_file_names_cannot_be_guessed() {
         let dir = scratch("names");
@@ -459,7 +410,6 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// Nothing is left behind, even by a command that was killed at the timeout.
     #[test]
     fn the_output_files_are_removed_after_a_timeout_too() {
         let dir = scratch("cleanup");
@@ -470,7 +420,6 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// A file already at the path (or a link planted there) is never opened.
     #[test]
     fn an_existing_file_or_symlink_is_not_opened() {
         let dir = scratch("exclusive");

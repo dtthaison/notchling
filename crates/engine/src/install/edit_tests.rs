@@ -67,7 +67,6 @@ fn an_empty_top_object_gets_its_first_member() {
     let out = append("{\n}\n", &[], Some("hooks"), &Json::Obj(vec![])).unwrap();
     assert_eq!(out, "{\n  \"hooks\": {}\n}\n");
     assert_eq!(remove(&out, &[], 0).unwrap(), "{}\n");
-    // On one line it stays on one line.
     let out = append("{}\n", &[], Some("hooks"), &Json::Obj(vec![])).unwrap();
     assert_eq!(out, "{\"hooks\": {}}\n");
 }
@@ -111,7 +110,6 @@ fn trailing_commas_and_comments_stay_where_they_were() {
     assert_eq!(remove(&out, &[], 2).unwrap(), "[\n  1,\n  2 // two\n]");
 }
 
-/// The numbers in the list at the top of `text`.
 fn numbers(text: &str) -> Vec<u64> {
     let root = jsonc::parse(text).unwrap();
     let items = root.items().unwrap();
@@ -124,16 +122,12 @@ fn numbers(text: &str) -> Vec<u64> {
 #[test]
 fn removing_an_item_keeps_every_comment_before_between_and_after_the_items() {
     let lists = [
-        // Inline.
         "[/* before */ 1, /* between */ 2, /* more */ 3 /* after */]",
         "[ 1 , /* b1 */ 2 /* x */ , /* b2 */ 3 ]",
         "[1,/* b1 */2,/* b2 */3]",
         "[/* before */ 1, /* b1 */ 2, /* b2 */ 3, /* after */]",
-        // The first item on the bracket's line, a comment ending that line.
         "[1, // one\n  // between\n  2,\n  /* b2 */ 3\n  // after\n]",
-        // Every item on its own line, comments on lines of their own.
         "[\n  // before\n  1,\n  // between\n  2,\n  /* more\n     lines */\n  3\n  // after\n]",
-        // The last item shares its line with the closing bracket.
         "[\n  1,\n  // between\n  2,\n  /* b2 */ 3 ]",
     ];
     for text in lists {
@@ -269,7 +263,6 @@ fn every_fixture_takes_an_element_in_every_list_and_gives_it_back() {
             assert_eq!(arr(&out, &path), before + 1, "{name} {path:?}");
             let back = remove(&out, &path, before).unwrap();
             if name == "odd" {
-                // Comments may sit where the new item went; the data must come back.
                 assert_eq!(value(&back), value(text), "{name} {path:?}");
             } else {
                 assert_eq!(back, text, "{name} {path:?}");

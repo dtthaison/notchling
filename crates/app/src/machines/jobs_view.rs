@@ -1,8 +1,3 @@
-//! The Jobs tab (Swift `JobCardView`, `ReadyCard`, `NeedsYouCard`, `StuckCard`): a card per
-//! machine with its sd worker job, the Running switch and what the worker says about itself; then
-//! what the overnight workers left for you, in Ready to merge, Needs you and Stuck. Every action
-//! runs `gh`, `git` or `scp` on this Mac through the model's actions, from a click.
-
 use gpui::{div, prelude::*, px, Context, Div, SharedString, Stateful};
 use notchling_engine::machines::forms::JobDraft;
 use notchling_engine::machines::morning::{MorningEntry, MorningItem, MorningKind};
@@ -16,7 +11,6 @@ use super::model::Sheet;
 use super::pieces::job_facts;
 use super::view::{marked, text_line, MachinesView, CARD_PADDING};
 
-/// A switch: a capsule with its knob at the end it's set to.
 pub(super) fn switch(id: SharedString, on: bool, enabled: bool, a: Appearance) -> Stateful<Div> {
     div()
         .id(id)
@@ -222,7 +216,6 @@ impl MachinesView {
     }
 }
 
-/// The repos, kinds, health URL and token facts of a job.
 fn settings(job: &SdWorkerSettings, a: Appearance) -> Div {
     let mut column = div().flex().flex_col().gap(px(3.0));
     for repo in &job.repos {

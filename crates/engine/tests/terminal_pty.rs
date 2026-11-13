@@ -1,6 +1,3 @@
-//! The pty: `/bin/cat` and `/bin/sh` on a forkpty, in a scratch folder. Nothing else is started, and
-//! every child is ended when its `Terminal` drops.
-
 mod common;
 
 use common::Scratch;
@@ -22,7 +19,6 @@ mod unix {
         terminal.screen().lines().join("\n")
     }
 
-    /// Reads until `needle` is on screen, or fails with what is there.
     fn wait_for(terminal: &mut Terminal, needle: &str) {
         let found = terminal
             .wait_until(Duration::from_secs(5), |s| {
@@ -39,7 +35,6 @@ mod unix {
         command.cwd(&scratch.dir).size(10, 40);
         let mut terminal = Terminal::spawn(&command).expect("cat starts");
         terminal.write(b"hello pty\n").expect("typed");
-        // The tty echoes the line, then cat prints it back.
         let twice = terminal
             .wait_until(Duration::from_secs(5), |s| {
                 s.lines()
@@ -65,8 +60,6 @@ mod unix {
         );
     }
 
-    /// The pty is the child's controlling terminal, so a resize reaches it as SIGWINCH (with
-    /// posix_spawn, `claude attach` got the signal but never repainted).
     #[test]
     fn a_resize_reaches_the_child() {
         let scratch = Scratch::new("pty-winch");
@@ -93,7 +86,6 @@ mod unix {
         assert!(!text(&terminal).contains("not a tty"));
     }
 
-    /// An inherited NO_COLOR left Claude Code's menus all one gray.
     #[test]
     fn no_color_is_dropped() {
         let scratch = Scratch::new("pty-nocolor");
@@ -106,8 +98,6 @@ mod unix {
         wait_for(&mut terminal, "nc=unset term=xterm-256color other=yes");
     }
 
-    /// Answered, Claude Code dropped its colors and the answer landed in its input box. With cat
-    /// reading, an answer would be echoed onto the screen.
     #[test]
     fn device_attribute_queries_get_no_answer() {
         let scratch = Scratch::new("pty-da");
@@ -133,14 +123,12 @@ mod unix {
     fn it_runs_in_the_folder_given() {
         let scratch = Scratch::new("pty-cwd");
         let mut command = sh("pwd -P", &scratch);
-        command.size(10, 400); // a temp path is longer than one 60-column line
+        command.size(10, 400);
         let mut terminal = Terminal::spawn(&command).expect("sh starts");
         let real = std::fs::canonicalize(&scratch.dir).expect("canonical");
         wait_for(&mut terminal, &real.to_string_lossy());
     }
 
-    /// A program that has stopped reading (raw mode, never reads) fills the tty's input queue, and
-    /// the next write would block for as long as it lives.
     #[test]
     fn writing_to_a_child_that_never_reads_gives_up() {
         use std::time::Instant;
@@ -153,7 +141,6 @@ mod unix {
             let started = Instant::now();
             let result = terminal.write_timeout(&vec![b'x'; 1 << 20], Duration::from_millis(300));
             let _ = done.send((result, started.elapsed()));
-            // Dropping the terminal ends the child.
         });
         let (result, took) = finished
             .recv_timeout(Duration::from_secs(5))
@@ -162,7 +149,6 @@ mod unix {
         assert!(took < Duration::from_secs(3), "{took:?}");
     }
 
-    /// A reader that keeps up is not timed out, however much is written.
     #[test]
     fn a_large_write_to_a_reading_child_completes() {
         let scratch = Scratch::new("pty-big");
@@ -193,8 +179,6 @@ mod unix {
         assert_eq!(status, Some(128 + 15), "ended by SIGTERM");
     }
 
-    /// The child reports a failed exec through a close-on-exec pipe, so the caller learns it at spawn
-    /// instead of seeing a pty whose child exited 127.
     #[test]
     fn a_missing_program_is_an_error_at_spawn() {
         let scratch = Scratch::new("pty-missing");
@@ -238,7 +222,6 @@ mod unix {
         assert!(error.to_string().contains("enter the folder"), "{error}");
     }
 
-    /// A program that starts and then exits 127 itself is not a spawn failure.
     #[test]
     fn a_program_that_runs_and_exits_127_still_spawns() {
         let scratch = Scratch::new("pty-127");
@@ -246,7 +229,6 @@ mod unix {
         assert_eq!(pty.wait().expect("waited"), 127);
     }
 
-    /// The os error behind a spawn failure.
     fn errno(error: &PtyError) -> Option<i32> {
         match error {
             PtyError::Spawn(e) | PtyError::Io(e) | PtyError::Start { error: e, .. } => {
@@ -256,8 +238,6 @@ mod unix {
         }
     }
 
-    /// Lists, from inside a child, every descriptor above stderr that is a terminal (a pty master
-    /// or slave) by walking /dev/fd.
     fn leaked_ttys() -> Vec<String> {
         let script = r#"for f in /dev/fd/*; do n=${f##*/}; if [ "$n" -gt 2 ] && [ -t "$n" ]; then echo "$n"; fi; done"#;
         let out = std::process::Command::new("/bin/sh")
@@ -272,16 +252,12 @@ mod unix {
             .collect()
     }
 
-    /// With forkpty, the master was inheritable from the moment it opened until the parent set
-    /// close-on-exec, so a `Command` another thread started in that window got it (and kept the pty
-    /// open after the session ended). posix_openpt with O_CLOEXEC has no such window.
     #[test]
     fn a_command_started_meanwhile_inherits_no_pty_descriptor() {
         use std::sync::atomic::{AtomicBool, Ordering};
         use std::sync::Arc;
         use std::time::Instant;
 
-        // The probe has to see a descriptor that does leak, or finding none proves nothing.
         // SAFETY: opens a pty master on purpose without close-on-exec, and closes it below.
         let leaking = unsafe { libc::posix_openpt(libc::O_RDWR | libc::O_NOCTTY) };
         assert!(leaking >= 0, "a pty to leak");
@@ -341,13 +317,9 @@ mod unix {
         assert!(String::from_utf8_lossy(&seen).contains("bye"));
     }
 
-    /// A program that quits with output nobody read (Claude Code after Trust Folder's Ctrl+C, with
-    /// an MCP server's lines still queued) waits in exit for the tty to drain. Dropping the pty
-    /// must not wait for it forever: it hung the daemon's `folder.trust` on 2026-11-11.
     #[test]
     fn dropping_a_pty_ends_a_child_stuck_on_unread_output() {
         let scratch = Scratch::new("pty-drain");
-        // Ignores TERM and HUP, fills the tty's output queue past what it holds, and is never read.
         let script = "trap '' TERM HUP; i=0; while [ $i -lt 4000 ]; do \
                       echo 'line of output nobody reads'; i=$((i+1)); done; exit 0";
         let pty = Pty::spawn(&sh(script, &scratch)).expect("sh starts");
@@ -363,9 +335,6 @@ mod unix {
         );
     }
 
-    /// The same child, ended the usual way: `Terminal::close` (every hidden attach and Trust
-    /// Folder's pty) signals, then waits. It waited forever with the master still open, and hung
-    /// `folder.trust` for a lane again on 2026-11-11 after the drop fix above.
     #[test]
     fn closing_a_terminal_ends_a_child_stuck_on_unread_output() {
         let scratch = Scratch::new("pty-drain-close");

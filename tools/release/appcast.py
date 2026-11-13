@@ -1,44 +1,4 @@
 #!/usr/bin/env python3
-"""Build and check Notchling's Sparkle 2 appcast (the update feed). Python 3.9+, standard library only.
-
-    appcast.py add     --feed F --version N --short X.Y.Z[-beta.N] --url https://... --length BYTES
-                       --ed-signature B64 --min-system 13.0 --notes-url https://...
-                       [--channel beta] [--rollout 86400] [--critical] [--pub-date now|DATE]
-    appcast.py promote --feed F --version N [--short X.Y.Z] [--notes-url https://...]
-                       [--pub-date now|DATE] [--rollout SECONDS] [--expect-url URL --expect-short X.Y.Z-beta.N]
-    appcast.py verify  --feed F
-
-Exit codes: 0 ok, 1 refused or invalid (reasons on stderr), 2 usage error (argparse). A refused command
-never touches the feed: writes go to a temp file that replaces the feed in one step, and a feed that
-can't be parsed is never overwritten.
-
-Ed25519 signing is NOT done here. Python's standard library has no ed25519, so the signature is made by
-Sparkle's `sign_update` in the sign job and passed in as `--ed-signature`. This tool only checks that
-it is base64 of 64 bytes (the size of an Ed25519 signature), which catches a misplaced argument.
-
-Sparkle 2.6 layout, which is what the output follows. Children of <item>: title, pubDate (only when
-given; Sparkle does not need it), sparkle:version (CFBundleVersion, an integer here), sparkle:shortVersionString,
-sparkle:channel (absent = Stable, "beta" = Beta), sparkle:minimumSystemVersion, sparkle:phasedRolloutInterval
-(seconds), sparkle:criticalUpdate (empty element), sparkle:releaseNotesLink, enclosure. Attributes of
-<enclosure>: url, length, type, sparkle:edSignature. Items are sorted newest first by sparkle:version,
-the number Sparkle compares. Output is deterministic: fixed child and attribute order, two-space
-indent, no timestamps.
-
-Promotion keeps the enclosure and signature byte for byte (the same dmg goes from Beta to Stable), so
-the channel element is removed and nothing else changes unless asked. The dmg's own
-CFBundleShortVersionString stays the Beta string, as the bytes are not rebuilt; `promote --short` changes
-the feed's display string and title only, and verify does not tie the string to the channel. A Stable
-release also gets its own notes link (`--notes-url`), a fresh pubDate (`--pub-date`) and its own rollout
-(`--rollout`, 0 removes the element); the elements are added where `add` writes them when the item has none.
-`--expect-url` and `--expect-short` name the Beta the caller means to promote: unless the item's enclosure
-url and its current (not yet renamed) shortVersionString are exactly those, nothing is written.
-
-pubDate is written and accepted in one form only, `Sun, 08 Nov 2026 10:00:00 +0000` (UTC, English day and
-month names whatever the locale, the weekday matching the date); `--pub-date now` is the current UTC time.
-`verify` still accepts any RFC 822 date, since Sparkle reads them all.
-
-The feed is our own file, so it is parsed with xml.etree (which resolves no external entities).
-"""
 
 import argparse
 import base64
@@ -75,9 +35,6 @@ def q(name):
     return "{%s}%s" % (SPARKLE_NS, name)
 
 
-# --- checks shared by add and verify -------------------------------------------------------------
-
-
 def https_problem(label, value):
     if not value or re.search(r"\s", value) or not value.startswith("https://") or len(value) <= len("https://"):
         return "%s must be an https URL without spaces, got %r" % (label, value)
@@ -110,8 +67,6 @@ def pub_date_problem(value):
     return None
 
 
-# Fixed tables, not strftime: %a and %b follow the locale of whoever runs this, and a feed with "So, 08 Nov"
-# is not RFC 822.
 DAY_NAMES = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 MONTH_NAMES = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 PUB_DATE_RE = re.compile(r"(%s), ([0-9]{2}) (%s) ([0-9]{4}) ([0-9]{2}):([0-9]{2}):([0-9]{2}) \+0000"
@@ -123,7 +78,6 @@ def now_utc():
 
 
 def format_pub_date(moment):
-    """`Sun, 08 Nov 2026 10:00:00 +0000`: UTC, English names, whatever the locale."""
     moment = moment.astimezone(datetime.timezone.utc)
     return "%s, %02d %s %04d %02d:%02d:%02d +0000" % (
         DAY_NAMES[moment.weekday()], moment.day, MONTH_NAMES[moment.month - 1], moment.year,
@@ -131,7 +85,6 @@ def format_pub_date(moment):
 
 
 def exact_pub_date_problem(value):
-    """None when `value` is exactly what format_pub_date writes for a real moment, else the reason."""
     m = PUB_DATE_RE.fullmatch(value)
     if m:
         try:
@@ -141,14 +94,13 @@ def exact_pub_date_problem(value):
         except ValueError:
             m = None
         else:
-            m = m if format_pub_date(moment) == value else None  # the weekday must be that day's
+            m = m if format_pub_date(moment) == value else None
     if not m:
         return "pubDate must look like 'Sun, 08 Nov 2026 10:00:00 +0000' (UTC, a real date) or be 'now', got %r" % value
     return None
 
 
 def resolve_pub_date(value):
-    """(text to write or None, problem or None): `now` is the current time, anything else the exact form."""
     if value is None:
         return None, None
     if value == "now":
@@ -158,7 +110,6 @@ def resolve_pub_date(value):
 
 
 def check_fields(version, short, url, length, signature, min_system, notes_url, channel, rollout, pub_date):
-    """Reasons an item's values are unusable; the same rules `add` applies and `verify` re-checks."""
     problems = []
     for problem in (
         positive_int_problem("sparkle:version", version),
@@ -182,9 +133,6 @@ def check_fields(version, short, url, length, signature, min_system, notes_url, 
         if problem:
             problems.append(problem)
     return problems
-
-
-# --- reading and writing -------------------------------------------------------------------------
 
 
 def new_feed():
@@ -213,7 +161,6 @@ def channel_of(root):
 
 
 def item_version(item):
-    """The integer sparkle:version of an item, or None when absent or not an integer."""
     text = item.findtext(q("version"))
     return int(text) if text is not None and INT_RE.match(text.strip()) else None
 
@@ -237,7 +184,6 @@ def write_atomic(path, text):
 
 
 def sort_items(channel):
-    """Newest first by sparkle:version, other channel children (title, link, ...) stay in front."""
     items = channel.findall("item")
     others = [c for c in list(channel) if c.tag != "item"]
     items.sort(key=lambda i: item_version(i) or 0, reverse=True)
@@ -247,20 +193,15 @@ def sort_items(channel):
         channel.append(child)
 
 
-# --- commands ------------------------------------------------------------------------------------
-
-
 def make_title(short):
     return "%s %s" % (FEED_TITLE, short)
 
 
-# Children of <item> in the order `add` writes them; promote puts anything it has to add in the same place.
 ITEM_ORDER = ("title", "pubDate", q("version"), q("shortVersionString"), q("channel"), q("minimumSystemVersion"),
               q("phasedRolloutInterval"), q("criticalUpdate"), q("releaseNotesLink"), "enclosure")
 
 
 def set_child(item, tag, text):
-    """Set the text of an item's child, creating it in ITEM_ORDER's place when the item has none."""
     child = item.find(tag)
     if child is None:
         rank = ITEM_ORDER.index(tag)
@@ -282,7 +223,6 @@ def rollout_problem(value):
 
 def cmd_add(a):
     pub_date, date_problem = resolve_pub_date(a.pub_date)
-    # check_fields gets no pubDate: add holds it to the exact form, which verify does not ask of other feeds.
     problems = check_fields(a.version, a.short, a.url, a.length, a.ed_signature, a.min_system, a.notes_url,
                             a.channel, None if a.rollout == "0" else a.rollout, None)
     if date_problem:
@@ -354,7 +294,6 @@ def cmd_promote(a):
     if marker is None:
         raise AppcastError("version %d is already stable" % version)
 
-    # Everything is checked before the first change; the feed is only written at the end.
     enclosure = item.find("enclosure")
     actual_url = enclosure.get("url") if enclosure is not None else None
     old_short = item.findtext(q("shortVersionString"))
@@ -387,7 +326,6 @@ def cmd_promote(a):
 
 
 def verify_feed(root):
-    """Every reason the feed is not a good Sparkle 2 appcast; an empty list means it is."""
     problems = []
     if root.tag != "rss":
         return ["the root element must be <rss>, got <%s>" % root.tag]
@@ -436,7 +374,6 @@ def verify_feed(root):
             item.findtext(q("minimumSystemVersion")), notes,
             channel_text, rollout, pub_date)
         if enclosure is None:
-            # the enclosure fields are all missing; one reason is enough
             checks = [c for c in checks if not c.startswith(("enclosure", "sparkle:edSignature"))]
         for c in checks:
             problems.append("%s: %s" % (where, c))
@@ -456,9 +393,6 @@ def cmd_verify(a):
         raise AppcastError("\n".join(problems))
     count = len(channel_of(root).findall("item"))
     print("%s ok: %d item%s" % (a.feed, count, "" if count == 1 else "s"))
-
-
-# --- command line --------------------------------------------------------------------------------
 
 
 def parser():

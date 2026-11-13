@@ -5,8 +5,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
 
-/// Preferences of this phone: the theme and whether in-app sounds play. Stored as a small JSON file next to the
-/// archive; a file that cannot be read gives the defaults (follow the system, sounds on).
 @immutable
 class AppSettings {
   const AppSettings({this.themeMode = ThemeMode.system, this.sound = true});
@@ -87,11 +85,9 @@ class SettingsNotifier extends Notifier<AppSettings> {
 
   @override
   AppSettings build() {
-    // Read the store now: the Ref may be gone by the time the file is read (a test, a hot restart).
     final SettingsStore store = ref.read(settingsStoreProvider);
     Future<void>(() async {
       final AppSettings saved = await store.load();
-      // A choice made before the file was read wins over what was stored.
       if (ref.mounted && !_touched) state = saved;
     });
     return const AppSettings();

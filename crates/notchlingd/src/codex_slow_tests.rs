@@ -1,10 +1,6 @@
-//! A new session and a delete that outlast the reply: answered `starting`/`deleting` within the
-//! client's 5 s and ended by an event.
-
 use super::*;
 
 impl Setup {
-    /// The first `codex.turn` event in `state`, waited for.
     fn wait_turn_state(&self, state: &str) -> Value {
         let until = Instant::now() + Duration::from_secs(10);
         while Instant::now() < until {
@@ -40,7 +36,6 @@ fn a_new_session_slow_to_be_named_is_answered_starting_and_named_later_with_its_
         "within the client's 5 s"
     );
     assert_eq!(reply, json!({"state": "starting", "draft": "codex-new:u1"}));
-    // Codex names it: the app is told which draft became which session.
     s.spawner.processes()[0].release();
     let named = s.wait_turn_state("named");
     assert_eq!(

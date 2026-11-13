@@ -1,6 +1,3 @@
-//! Token scope: the token's own list of private repos, requests, expiry (Swift
-//! `MachinesTokenScopeTests`, middle).
-
 use super::fakes::*;
 use super::github::{allows, HttpAnswer, BODY_CAP};
 use super::registry::MachineRepo;
@@ -14,11 +11,8 @@ use super::token_scope::expiry_day;
 use std::sync::Arc;
 use std::time::Duration;
 
-// MARK: the token's own view (GET /user/repos?visibility=private)
-
 #[test]
 fn a_token_that_lists_all_31_private_repos_fails() {
-    // Every per-repo probe says denied; the token's own list is what shows the mistake.
     let mut names = vec![REPO.to_string()];
     names.extend(others(30));
     let result = check(&ctx(
@@ -37,14 +31,11 @@ fn a_token_that_lists_only_the_served_repo_passes() {
     assert!(result.state.is_pass(), "{:?}", result.state);
 }
 
-/// The issues probe passes, so the token reaches the served repo; a private-repo list that does not
-/// show it is not the whole truth, so the result is can't tell, never a pass.
 #[test]
 fn a_view_that_lacks_a_served_repo_cant_tell() {
     let result = check(&ctx(http_with_view(view_answer(&[], 200, None)), &runner()));
     assert!(cant_tell_text(&result).contains(REPO));
     assert!(!row(&result, "Denied elsewhere").ok);
-    // another repo in the list is a fail, which wins over the missing one
     let other = check(&ctx(
         http_with_view(view_answer(
             &["dtthaison/something-else".to_string()],
@@ -54,7 +45,6 @@ fn a_view_that_lacks_a_served_repo_cant_tell() {
         &runner(),
     ));
     assert!(other.state.is_fail(), "{:?}", other.state);
-    // the served repo's name is compared without regard to case
     let upper = check(&ctx(
         http_with_view(view_answer(&[REPO.to_uppercase()], 200, None)),
         &runner(),
@@ -62,8 +52,6 @@ fn a_view_that_lacks_a_served_repo_cant_tell() {
     assert!(upper.state.is_pass(), "{:?}", upper.state);
 }
 
-/// A name that is not owner/name is doubt, not something to drop: the repo it names could be a
-/// leak.
 #[test]
 fn a_repo_name_the_check_cant_read_makes_the_view_doubtful() {
     let odd = check(&ctx(
@@ -90,7 +78,6 @@ fn a_repo_name_the_check_cant_read_makes_the_view_doubtful() {
             result.state
         );
     }
-    // a leak that can be read still fails, whatever else is odd
     let leak = format!(
         r#"[{{"full_name":"{REPO}"}},{{"full_name":"dtthaison/leaked"}},{{"full_name":"bad name"}}]"#
     );
@@ -235,8 +222,6 @@ fn the_view_stops_after_ten_pages_and_cant_tell() {
 
 #[test]
 fn a_cut_off_view_page_still_fails_on_what_it_showed_but_never_passes() {
-    // A page the 1 MiB cap cut: the names seen before the cut count, and without one the result is
-    // can't tell.
     let pad = "x".repeat(BODY_CAP);
     let cut_to_cap = |head: &str| -> HttpAnswer {
         let mut body = format!("{head}{pad}").into_bytes();
@@ -320,7 +305,6 @@ fn gh_lists_each_owner_once_with_the_documented_arguments() {
 
 #[test]
 fn token_scope_never_puts_the_token_in_any_result() {
-    // A good run, a shared-token run, a 401 run and a wide-open run: none shows the value anywhere.
     let two: Vec<(&str, &str)> = vec![
         ("m1-github-issues", SECRET),
         ("vps-sing-1-github-issues", "github_pat_OTHER"),
@@ -353,7 +337,6 @@ fn token_scope_never_puts_the_token_in_any_result() {
             assert!(call.stdin.is_none());
         }
     }
-    // The other machine's value stays out as well, and is never sent as a bearer.
     let h = good_http();
     let result = check(&ctx(h.clone(), &runner()));
     assert!(!format!("{result:?}").contains("github_pat_OTHER"));
@@ -364,7 +347,6 @@ fn token_scope_never_puts_the_token_in_any_result() {
 fn the_token_goes_only_to_api_github_com() {
     let h = good_http();
     check(&ctx(h.clone(), &runner()));
-    // issues, commits, the others, the token's own list
     assert_eq!(h.requests().len(), 2 + 30 + 1);
     for (url, _) in h.requests() {
         assert!(url.starts_with("https://api.github.com/"), "{url}");

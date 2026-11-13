@@ -1,25 +1,11 @@
-//! Whether the app may act on sessions, and what it asks the daemon to do (Milestone 3).
-//!
-//! The daemon ships with acting switched off: every acting op answers `forbidden` with
-//! [`OFF_MESSAGE`] until the maintainer turns it on. The app never guesses: an action control is
-//! live only while the daemon is attached and has said acting is on ([`Acting::control`]). The
-//! daemon's own refusal or a lost connection turns every control off again ([`after_error`]).
-//!
-//! The op names and their arguments are the plan's (`docs/superpowers/plans/
-//! 2026-11-08-phase7-m3-daemon-acts.md`, "Daemon ops"); [`Request`] builds them, pure, so the
-//! shapes are tested here and the socket only carries them.
-
 use notchling_engine::transcript::snapshot::PendingQuestion;
 use notchling_local_api::{ClientError, ErrorCode};
 use serde_json::{json, Value};
 
-/// What the daemon says, word for word, while acting is off.
 pub const OFF_MESSAGE: &str =
     "acting is off: the Swift app owns sessions until the maintainer turns this on";
-/// What a control says while there is no daemon to ask.
 pub const DETACHED_MESSAGE: &str = "Notchling's daemon isn't attached, so nothing can be sent";
 
-/// The acting ops (app tier) and the status read.
 pub mod ops {
     pub const DAEMON_STATUS: &str = "daemon.status";
     pub const SETTINGS_SET_ACTING: &str = "settings.set_acting";
@@ -37,27 +23,20 @@ pub mod ops {
     pub const SESSION_QUESTION: &str = "session.question";
 }
 
-/// Whether actions can be sent.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Acting {
-    /// The daemon is attached and acting is on.
     On,
-    /// The daemon is attached and acting is off (the default), or it hasn't said.
     Off,
-    /// No daemon to ask: down, not trusted, a render or a fixture root.
     Detached,
 }
 
-/// How an action control is drawn.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Control {
     pub enabled: bool,
-    /// Why it's disabled, shown on hover.
     pub tooltip: Option<&'static str>,
 }
 
 impl Acting {
-    /// Every action control follows this: live only while acting is on.
     pub fn control(self) -> Control {
         Control {
             enabled: self == Acting::On,
@@ -65,7 +44,6 @@ impl Acting {
         }
     }
 
-    /// Why nothing can be sent, or `None` while it can.
     pub fn message(self) -> Option<&'static str> {
         match self {
             Acting::On => None,
@@ -74,7 +52,6 @@ impl Acting {
         }
     }
 
-    /// The Settings sheet's read-only line.
     pub fn word(self) -> &'static str {
         match self {
             Acting::On => "On",
@@ -84,7 +61,6 @@ impl Acting {
     }
 }
 
-/// What acting is, given whether the daemon is attached and what it last said. Detached wins.
 pub fn effective(attached: bool, said: Acting) -> Acting {
     if attached {
         said
@@ -93,8 +69,6 @@ pub fn effective(attached: bool, said: Acting) -> Acting {
     }
 }
 
-/// Reads `daemon.status`'s `acting` (`true`, or `"on"`): anything else, a missing field included,
-/// is off, since off is the daemon's default.
 pub fn from_status(status: &Value) -> Acting {
     match status.get("acting") {
         Some(Value::Bool(true)) => Acting::On,
@@ -103,8 +77,6 @@ pub fn from_status(status: &Value) -> Acting {
     }
 }
 
-/// What a failed call says about acting: the daemon's off refusal turns it off; a connection that
-/// is gone or never was detaches it; any other refusal (a bad id, a dialog open) changes nothing.
 pub fn after_error(error: &ClientError) -> Option<Acting> {
     match error {
         ClientError::Api(e) if e.code == ErrorCode::Forbidden && is_off(&e.message) => {
@@ -120,17 +92,14 @@ pub fn after_error(error: &ClientError) -> Option<Acting> {
     }
 }
 
-/// The daemon's off refusal, however it is prefixed.
 pub fn is_off(message: &str) -> bool {
     message.contains("acting is off")
 }
 
-/// Claude Code refused a folder it hasn't trusted (`ReplySender.isUntrusted`).
 pub fn is_untrusted(message: &str) -> bool {
     message.contains("not trusted")
 }
 
-/// One answer to one question: options by their 1-based number (one for single select), or text.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Answer {
     Options(Vec<usize>),
@@ -146,7 +115,6 @@ impl Answer {
     }
 }
 
-/// A permission prompt's answer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Decision {
     Allow,
@@ -164,7 +132,6 @@ impl Decision {
     }
 }
 
-/// One op and its arguments.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Request {
     pub op: &'static str,
@@ -185,10 +152,6 @@ impl Request {
         Request::new(ops::SESSION_ANSWER, json!({ "id": id, "answers": answers }))
     }
 
-    /// Answers the question on a row's card. One a hook holds (`hook:<prompt id>`) is answered by
-    /// its prompt id, never the row's, so the answer reaches the prompt the card showed; any other
-    /// (read from the transcript or the screen) is typed into the row's dialog, with the question
-    /// it was read as so the daemon checks each page.
     pub fn answer_for(row: &str, question: &PendingQuestion, answers: &[Answer]) -> Request {
         if let Some(prompt) = question.tool_use_id.strip_prefix("hook:") {
             return Request::answer(prompt, answers);
@@ -206,7 +169,6 @@ impl Request {
         request
     }
 
-    /// `id` is the held prompt's id (`HookRequest::id`), never a row's.
     pub fn permission(id: &str, decision: Decision) -> Request {
         Request::new(
             ops::SESSION_PERMISSION,
@@ -214,9 +176,6 @@ impl Request {
         )
     }
 
-    /// A background job's permission dialog no hook holds, by its row id: the daemon types the
-    /// decision's digit only when the dialog on screen asks about `tool` and `summary`, what the
-    /// card showed.
     pub fn permission_on_screen(
         row: &str,
         decision: Decision,
@@ -230,7 +189,6 @@ impl Request {
         )
     }
 
-    /// Reads the question on a row's screen (`session.question`): the app only, with acting on.
     pub fn question(id: &str) -> Request {
         Request::new(ops::SESSION_QUESTION, json!({ "id": id }))
     }
@@ -251,7 +209,6 @@ impl Request {
         Request::new(ops::SESSION_TAKE_BACK, json!({ "id": id }))
     }
 
-    /// `config_dir` is a lane's folder; `None` is the main login, and the field is left out.
     pub fn new_session(folder: &str, config_dir: Option<&str>, flags: &[String]) -> Request {
         let mut args = json!({ "folder": folder });
         if let Some(dir) = config_dir {
@@ -263,8 +220,6 @@ impl Request {
         Request::new(ops::SESSION_NEW, args)
     }
 
-    /// `folder.trust` for the main login, or for a lane: trust is kept per config folder, so a
-    /// lane's session needs the lane's own.
     pub fn trust_folder(folder: &str, config_dir: Option<&str>) -> Request {
         let mut args = json!({ "folder": folder });
         if let Some(dir) = config_dir {
@@ -332,7 +287,6 @@ mod tests {
     fn the_off_refusal_turns_acting_off() {
         let off = ClientError::Api(ApiError::new(ErrorCode::Forbidden, OFF_MESSAGE));
         assert_eq!(after_error(&off), Some(Acting::Off));
-        // A forbidden for another reason (the agent tier) says nothing about acting.
         let tier = ClientError::Api(ApiError::new(ErrorCode::Forbidden, "app tier only"));
         assert_eq!(after_error(&tier), None);
         let bad = ClientError::Api(ApiError::bad_request("no session s9"));
@@ -380,7 +334,6 @@ mod tests {
             Request::answer_for("job-a", &held, &picked).args,
             json!({"id": "p7-19a", "answers": [[2]]})
         );
-        // Read from the transcript or the screen: typed into the row's dialog, page by page.
         let typed = PendingQuestion {
             tool_use_id: "toolu_01".into(),
             items: vec![item],

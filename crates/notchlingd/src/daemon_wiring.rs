@@ -1,11 +1,3 @@
-//! What the daemon serves: [`Ops`], the [`Handler`] over every area's ops, and [`Wired`], which
-//! builds each area for one run of [`crate::daemon::run`] and closes them when it stops.
-//!
-//! Every switch starts off, whatever a file says: `acting` (M3, and M5's Codex and Antigravity
-//! behind it), the bridge (M4), and Milestone 6's `accounts` (Claude Code's accounts and lanes,
-//! the other providers, the limit watchers), `vault` and `install` ([`crate::switches`]). Under a
-//! fixture root every login effect is a fake or refused: no Keychain, no network, no real folder.
-
 use crate::accounts_ops::AccountsOps;
 use crate::acting::Acting;
 use crate::acting_ops::{ActingOps, Room};
@@ -40,8 +32,6 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-/// The ops: M2's session list (agent tier), with [`Ops::with_acting`] M3's ([`ActingOps`]), and
-/// with [`Ops::with_bridge`] M4's phone bridge ([`BridgeOps`], app tier).
 pub struct Ops {
     sessions: Arc<Mutex<Value>>,
     acting: Option<Arc<ActingOps>>,
@@ -49,11 +39,8 @@ pub struct Ops {
     codex: Option<Arc<CodexOps>>,
     agy: Option<Arc<AgyOps>>,
     pages: Option<Arc<PagesOps>>,
-    /// Milestone 6's areas ([`Ops::with_group`]).
     groups: Vec<Arc<dyn OpGroup>>,
-    /// The topics a client may follow: those of the ops this daemon has.
     topic_list: Vec<&'static str>,
-    /// What `sessions.list` waits for, and for how long.
     first: Arc<FirstScan>,
     first_wait: Duration,
 }
@@ -87,7 +74,6 @@ impl Ops {
         self.with_topics()
     }
 
-    /// M5's Codex ops ([`CodexOps`]), and the `tools` topic they publish on.
     pub fn with_codex(mut self, codex: Arc<CodexOps>) -> Ops {
         self.codex = Some(codex);
         self.with_topics()
@@ -113,8 +99,6 @@ impl Ops {
         self
     }
 
-    /// A group of ops served beside these (Milestone 6's switches, accounts, vault, install), and
-    /// the topics it publishes on.
     pub fn with_group(mut self, group: Arc<dyn OpGroup>) -> Ops {
         self.groups.push(group);
         self.with_topics()
@@ -124,19 +108,16 @@ impl Ops {
         self.groups.iter().find(|g| g.spec(op).is_some())
     }
 
-    /// M5's Antigravity ops ([`AgyOps`]), publishing on the `tools` topic too.
     pub fn with_agy(mut self, agy: Arc<AgyOps>) -> Ops {
         self.agy = Some(agy);
         self.with_topics()
     }
 
-    /// M5's pages library and session index ([`PagesOps`], agent tier, reads only).
     pub fn with_pages(mut self, pages: Arc<PagesOps>) -> Ops {
         self.pages = Some(pages);
         self
     }
 
-    /// `sessions.list` waits up to `wait` for `first`, then answers with what the list holds.
     pub fn with_first_scan(mut self, first: Arc<FirstScan>, wait: Duration) -> Ops {
         self.first = first;
         self.first_wait = wait;
@@ -145,9 +126,6 @@ impl Ops {
 }
 
 impl Ops {
-    /// The list, and whether the first read was in. Only this client's thread waits. Past the wait
-    /// the list is what there is, and the first read follows as `sessions.changed` to a client that
-    /// subscribed.
     fn sessions_list(&self) -> (Value, bool) {
         let landed = self.first.wait(self.first_wait);
         let list = self
@@ -160,8 +138,6 @@ impl Ops {
 }
 
 impl Handler for Ops {
-    /// `sessions.list` answered before the first read adds `"partial": true` beside `ok`; the
-    /// result itself stays a bare list, which every client reads as one.
     fn call_with_extras(
         &self,
         caller: &Caller,
@@ -221,8 +197,6 @@ impl Handler for Ops {
         &self.topic_list
     }
 
-    /// The held prompts are the app's: their ids are what answers them. So are the bridge's
-    /// pairing requests. A group says for its own topics (the vault's approvals and forms).
     fn topic_tier(&self, topic: &str) -> Tier {
         match topic {
             topics::PROMPTS | topics::BRIDGE => Tier::App,
@@ -239,9 +213,6 @@ impl Handler for Ops {
     }
 }
 
-/// Where the bridge keeps its files: `AgentConsole` beside Notchling's data folder (the Swift
-/// app's, so paired phones carry over; `<root>/AgentConsole` under a fixture root), and photos in
-/// `AgentConsole/phone-images` beside the cache folder.
 fn bridge_setup(layout: &Layout, ports: (u16, u16)) -> BridgeSetup {
     let beside = |dir: &std::path::Path| dir.parent().unwrap_or(dir).join("AgentConsole");
     let data_dir = beside(&layout.data_dir);
@@ -261,7 +232,6 @@ fn bridge_setup(layout: &Layout, ports: (u16, u16)) -> BridgeSetup {
     }
 }
 
-/// Every area's ops for one daemon run.
 pub struct Wired {
     pub acting: Arc<ActingOps>,
     pub codex: Arc<CodexOps>,
@@ -271,24 +241,19 @@ pub struct Wired {
     pub accounts: Arc<AccountsOps>,
     pub providers: Arc<ProvidersOps>,
     pub limits: Arc<LimitsOps>,
-    /// The one catalog: `catalog.get`, and the prices cost reads.
     pub catalog: Arc<CatalogService>,
     pub vault: Arc<VaultOps>,
     pub install: Arc<InstallOps>,
 }
 
 impl Wired {
-    /// Builds every area, all off. `room` is the server's, set once it is bound.
     pub fn build(
         layout: &Layout,
         sessions: Arc<Mutex<Value>>,
         room: Arc<dyn Room>,
         bridge_ports: (u16, u16),
     ) -> Wired {
-        // Off at every start, whatever a file says: only the app's `settings.set_acting` during
-        // this run turns it on.
         let acting_switch = Arc::new(Acting::off());
-        // The real terminal and launcher, used only while acting is on.
         let claude = claude_path(Path::new(&home_of(&layout.roots())));
         let acting = Arc::new(
             ActingOps::new(
@@ -304,7 +269,6 @@ impl Wired {
             )
             .with_screen_file(layout.state_dir().join("permission-screen.txt")),
         );
-        // Codex turns (M5), behind the same switch: nothing starts until acting is on.
         let codex = Arc::new(CodexOps::for_daemon(
             layout,
             acting_switch,
@@ -312,16 +276,12 @@ impl Wired {
             &claude,
         ));
         acting.attach_codex(codex.clone());
-        // No port is bound and nothing is written under `AgentConsole` until the app's
-        // `bridge.set` in this run.
         let bridge = Arc::new(BridgeOps::new(
             bridge_setup(layout, bridge_ports),
             sessions,
             acting.clone(),
             room.clone(),
         ));
-        // `agy` starts only on an acting op, and the copy of its list is made only when the list
-        // is read.
         let agy = Arc::new(AgyOps::for_daemon(
             layout,
             acting.acting_switch(),
@@ -329,13 +289,10 @@ impl Wired {
         ));
         acting.attach_agy(agy.clone());
 
-        // Milestone 6: no login, vault value or install target is touched until the app turns
-        // that switch on in this run.
         let switches = Arc::new(Switches::off());
         let on = switches.accounts.clone();
         let accounts = Arc::new(AccountsOps::for_daemon(layout, on.clone(), room.clone()));
         accounts.attach_acting(acting.clone());
-        // Desktop's rows match Claude Code's saved accounts: the daemon's own list file, no login.
         let claude_store = accounts.store();
         let names = claude_store.clone();
         let stores = ProviderStores::for_daemon(
@@ -357,9 +314,6 @@ impl Wired {
             stores.registry(),
             room.clone(),
         ));
-        // The one catalog: the data file with `catalog.json` over it, Claude's list fetched with
-        // the main login's token only while `accounts` is on, Codex's from its cache file and
-        // Antigravity's from the options an open `agy acp` reports.
         let catalog = Arc::new(CatalogService::for_daemon(
             layout,
             (accounts.store(), on.clone()),
@@ -367,8 +321,6 @@ impl Wired {
         ));
         agy.attach_catalog(catalog.clone());
         acting.attach_catalog(catalog.clone());
-        // The limit watchers, over the same stores. The loop calls them only while `accounts` is
-        // on; `cost.summary` only reads transcripts and needs no switch.
         let limits = Arc::new(LimitsOps::for_daemon(
             layout,
             on.clone(),
@@ -428,7 +380,6 @@ impl Wired {
         }
     }
 
-    /// What the server serves.
     pub fn ops(
         &self,
         layout: &Layout,
@@ -456,12 +407,10 @@ impl Wired {
             .with_first_scan(first_scan, first_wait)
     }
 
-    /// The server answers: the limits loop starts (a flag check per tick while `accounts` is off).
     pub fn start(&self) {
         self.limits.spawn_loop();
     }
 
-    /// The daemon stops: held hooks pass, turns and waits end, the bridge's ports close.
     pub fn close(&self) {
         self.acting.close();
         self.codex.close();
@@ -472,14 +421,11 @@ impl Wired {
         self.limits.close();
     }
 
-    /// The accounts switch (tests).
     pub fn accounts_switch(&self) -> &Arc<SwitchFlag> {
         &self.switches.accounts
     }
 }
 
-/// The `notchling-vault` skill for the install ops (Swift `VaultSkill`), in all three tools. Its
-/// description lists the saved names, read only while the vault is on.
 fn vault_skill_spec(binary: &Path, vault: Arc<VaultOps>) -> SkillSpec {
     let binary = binary.to_string_lossy().into_owned();
     SkillSpec {

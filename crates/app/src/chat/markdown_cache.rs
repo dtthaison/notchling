@@ -1,10 +1,3 @@
-//! A message's Markdown ready to draw, kept between draws: its blocks and spans parsed once per
-//! text, and the paths in it looked up on disk once per conversation load. Before, every frame
-//! parsed every message again and asked the disk about each path in it (a spinner asked for 60 or
-//! 120 frames a second). `ChatView` keeps one: [`Cache::reloaded`] when a load lands (the disk is
-//! asked again, the parses stay), [`Cache::switched`] when another session is picked (all of it
-//! goes). Pure over a [`Probe`], so it is tested on every system.
-
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -13,10 +6,8 @@ use std::rc::Rc;
 use crate::chat::markdown::{blocks, image_links, spans, Block, Span};
 use crate::chat::paths::{self, Disk, Probe};
 
-/// Messages kept at most; past this the cache starts over (a session has a few hundred).
 const MAX_MESSAGES: usize = 4096;
 
-/// A paragraph's text as spans, with the image files it links that exist (drawn under it).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Inline {
     pub spans: Vec<Span>,
@@ -24,18 +15,15 @@ pub struct Inline {
 }
 
 impl Inline {
-    /// The words, the spans' text joined: what the paragraph's text element holds and selects.
     pub fn text(&self) -> String {
         spans_text(&self.spans)
     }
 }
 
-/// The spans' text joined.
 pub fn spans_text(spans: &[Span]) -> String {
     spans.iter().map(|span| span.text.as_str()).collect()
 }
 
-/// A list item, ready to draw.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Item {
     pub marker: String,
@@ -43,7 +31,6 @@ pub struct Item {
     pub inline: Inline,
 }
 
-/// A block of `chat::markdown`, its texts as spans with their paths linked.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Part {
     Heading {
@@ -64,10 +51,8 @@ pub enum Part {
     Rule,
 }
 
-/// A message, ready to draw.
 pub type Message = Rc<Vec<Part>>;
 
-/// The disk as the path rules see it: each path asked once, until [`Probes::forget`].
 pub struct Probes<P: Probe> {
     inner: P,
     seen: RefCell<HashMap<PathBuf, (bool, bool)>>,
@@ -108,18 +93,15 @@ impl<P: Probe> Probe for Probes<P> {
     }
 }
 
-/// A message as parsed, before its paths are looked up.
 struct Entry {
     text: String,
     folder: String,
     parsed: Vec<Part>,
-    /// Linked against the disk as it was in load `.0`.
     linked: Option<(u64, Message)>,
 }
 
 pub struct Cache<P: Probe = Disk> {
     probes: Probes<P>,
-    /// Counts the loads, so a message linked in an older one is linked again.
     load: u64,
     messages: HashMap<String, Entry>,
 }
@@ -139,7 +121,6 @@ impl<P: Probe> Cache<P> {
         }
     }
 
-    /// The message under `key` (unique among those drawn), `text` read against `folder`.
     pub fn message(&mut self, key: &str, text: &str, folder: &str) -> Message {
         let fresh = self
             .messages
@@ -173,19 +154,16 @@ impl<P: Probe> Cache<P> {
         }
     }
 
-    /// Whether `path` is a file, as this load's disk said.
     pub fn is_file(&self, path: &Path) -> bool {
         let (exists, dir) = self.probes.look(path);
         exists && !dir
     }
 
-    /// A load landed: what the disk said is asked again; the parses stay.
     pub fn reloaded(&mut self) {
         self.probes.forget();
         self.load += 1;
     }
 
-    /// Another session was picked: nothing of the last one is kept.
     pub fn switched(&mut self) {
         self.reloaded();
         self.messages.clear();
@@ -199,8 +177,6 @@ fn inline(text: &str) -> Inline {
     }
 }
 
-/// The message's blocks with their texts as spans; the images are every one linked, kept or
-/// dropped by [`link`].
 fn parse(text: &str) -> Vec<Part> {
     blocks(text)
         .into_iter()
@@ -234,8 +210,6 @@ fn parse(text: &str) -> Vec<Part> {
         .collect()
 }
 
-/// The parsed message with the paths that exist made links (`chat::paths`) and only the linked
-/// images that are files.
 fn link(parsed: &[Part], text: &str, folder: &str, probe: &dyn Probe) -> Vec<Part> {
     let bases = paths::bases(text, folder, probe);
     let spans = |spans: &[Span]| link_spans(spans, &bases, probe);
@@ -282,7 +256,6 @@ fn link(parsed: &[Part], text: &str, folder: &str, probe: &dyn Probe) -> Vec<Par
         .collect()
 }
 
-/// `paths::link_spans`, skipped for a text with no slash and nothing to read it against.
 fn link_spans(spans: &[Span], bases: &[PathBuf], probe: &dyn Probe) -> Vec<Span> {
     if bases.is_empty()
         && !spans

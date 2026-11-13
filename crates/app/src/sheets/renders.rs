@@ -1,7 +1,3 @@
-//! The sheets' views for `--render` (part U10), over the notch's fixture data root, never the real
-//! home: the banners, the New Session sheet (acting off, so Start shows disabled), the same sheet
-//! with the Trust Folder pop-up (acting on), and Settings (acting off, read-only).
-
 use crate::acting::Acting;
 use crate::notch::source::{fixture_clock, DataRoot, Source};
 use crate::views::ViewSpec;
@@ -34,7 +30,6 @@ pub const VIEWS: [ViewSpec; 4] = [
     },
 ];
 
-/// What a sheet render shows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Shown {
     Banner,
@@ -53,7 +48,6 @@ pub fn shown(name: &str) -> Option<Shown> {
     })
 }
 
-/// What acting a render shows.
 pub fn acting(shown: Shown) -> Acting {
     match shown {
         Shown::TrustFolder => Acting::On,
@@ -61,8 +55,6 @@ pub fn acting(shown: Shown) -> Acting {
     }
 }
 
-/// The New Session sheet over the fixture's sessions; for Trust Folder, after Claude Code refused
-/// the folder picked.
 pub fn new_session(shown: Shown) -> NewSession {
     let mut source = Source::keeping_everything(DataRoot::for_render());
     let agents = source.load(0).agents;
@@ -81,7 +73,6 @@ pub fn new_session(shown: Shown) -> NewSession {
     sheet
 }
 
-/// A switch on the main login, one in a lane, an error and a notice, on the fixture's clock.
 pub fn banners() -> Banners {
     let mut source = Source::keeping_everything(DataRoot::for_render());
     let now = fixture_clock(&source.load(0).agents);

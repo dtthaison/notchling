@@ -1,5 +1,3 @@
-//! Recording a publish: the copy a `PostToolUse(Artifact)` event leaves in the library.
-
 use super::content::{
     artifact_url_in, looks_failed, make_folder, page_title, project_name, published_version,
     wrapped,
@@ -10,24 +8,16 @@ use serde_json::{Map, Value};
 use std::io::Read;
 use std::path::{Component, Path, PathBuf};
 
-/// Biggest page or supporting file copied; anything larger is skipped.
 pub const MAX_FILE_BYTES: u64 = 16 * 1024 * 1024;
-/// Most bytes of supporting files copied for one publish.
 pub const MAX_TOTAL_BYTES: u64 = 64 * 1024 * 1024;
 
-/// What the hook knows that the event doesn't.
 #[derive(Clone, Copy, Debug)]
 pub struct RecordContext<'a> {
-    /// The account active where the session runs (a lane's, else the main login's email); "" when
-    /// unknown. It is the owner of a page recorded for the first time.
     pub account: &'a str,
-    /// Now, seconds since 1970.
     pub now: f64,
-    /// Where a relative `file_path` is read from when the event has no `cwd`.
     pub home: &'a Path,
 }
 
-/// A tool result as one string, whatever shape it has.
 pub fn flatten(value: Option<&Value>) -> String {
     match value {
         None | Some(Value::Null) => String::new(),
@@ -36,7 +26,6 @@ pub fn flatten(value: Option<&Value>) -> String {
     }
 }
 
-/// `rel` resolved against `base` with `.` and `..` removed, without touching the disk.
 pub fn join_normalized(base: &Path, rel: &str) -> PathBuf {
     let joined = if Path::new(rel).is_absolute() {
         PathBuf::from(rel)
@@ -56,8 +45,6 @@ pub fn join_normalized(base: &Path, rel: &str) -> PathBuf {
     out
 }
 
-/// The file's bytes when it is a regular file of at most `MAX_FILE_BYTES`. Growing past that
-/// while being read is cut off, not trusted.
 pub fn read_bounded(path: &Path) -> Option<Vec<u8>> {
     let meta = std::fs::metadata(path).ok()?;
     if !meta.is_file() || meta.len() > MAX_FILE_BYTES {
@@ -77,9 +64,6 @@ fn text<'a>(map: &'a Map<String, Value>, key: &str) -> Option<&'a str> {
 }
 
 impl PageLibrary {
-    /// Saves the page behind a `PostToolUse` event for the Artifact tool. `Ok(None)` for an event
-    /// that isn't a publish of a page (a read, an asset, a refused or failed publish, a file that
-    /// isn't there). Fails with [`PagesError::ReadOnly`] on a read-only library.
     pub fn record(
         &self,
         event: &Value,
@@ -114,13 +98,11 @@ impl PageLibrary {
         let url = artifact_url_in(&response)
             .or_else(|| text(input, "url").and_then(artifact_url_in))
             .unwrap_or_default();
-        // A refused or failed publish has no page behind it.
         if url.is_empty() && looks_failed(&response) {
             return Ok(None);
         }
 
         let cwd = event.get("cwd").and_then(Value::as_str).unwrap_or("");
-        // Only an import of older publishes sets this: their real time, and an account (or none).
         let backfill = event.get("notchling_backfill").and_then(Value::as_object);
         let base = if cwd.is_empty() {
             ctx.home.to_path_buf()
@@ -152,7 +134,6 @@ impl PageLibrary {
                 Some(i) => list[i].folder.clone(),
                 None => make_folder(&title, key),
             };
-            // A damaged entry (a folder name from a hand-edited list) is never written through.
             if !super::library::safe_component(&folder) {
                 return Ok(None);
             }
@@ -166,7 +147,6 @@ impl PageLibrary {
                 data.clone()
             };
             notchling_platform::files::write_private_no_follow(&folder_dir.join(&file), &body)?;
-            // A republish may change the kind of page; drop the other index file.
             let other = if ext == "html" {
                 "index.md"
             } else {
@@ -208,8 +188,6 @@ impl PageLibrary {
     }
 }
 
-/// Copies the files named in `files` next to the page. Published paths must stay inside the
-/// folder; best effort, a file that can't be copied is skipped.
 fn copy_supporting(input: &Map<String, Value>, cwd: &Path, folder: &Path, main: &str) {
     let mut root = cwd.to_path_buf();
     if let Some(r) = text(input, "root").filter(|r| !r.is_empty()) {

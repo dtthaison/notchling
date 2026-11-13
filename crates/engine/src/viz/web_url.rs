@@ -1,11 +1,3 @@
-//! Which URL the Web tab opens for a session (ConsoleCore's `WebURLResolver`).
-//!
-//! Page URLs the transcript mentioned come first (newest first, one per origin, API paths cut back
-//! to the origin, queries dropped because they carry tokens), and a server that is actually listening
-//! beats one that is not. Then a launch config in `<cwd>/.claude/launch.json`, then one in
-//! `~/.claude/launch.json` that mentions the folder. If nothing listens, the newest candidate still
-//! comes back so the phone can say which server is down.
-
 use super::url::Url;
 use serde_json::Value;
 use std::collections::HashSet;
@@ -33,7 +25,6 @@ pub fn resolve(
         .or_else(|| launch.into_iter().next())
 }
 
-/// Page URLs of servers that are listening right now, newest first, for the phone's suggestion chips.
 pub fn live_candidates(
     transcript_urls: &[String],
     cwd: &str,
@@ -61,8 +52,6 @@ pub fn live_candidates(
     result
 }
 
-/// Newest first, one per origin. A path under /api/ (or an asset path) says nothing about the page,
-/// so it becomes the origin; a query or fragment is dropped.
 pub fn page_candidates(transcript_urls: &[String]) -> Vec<String> {
     let mut seen = HashSet::new();
     let mut result = Vec::new();
@@ -100,7 +89,6 @@ fn launch_urls(cwd: &str, home: &Path) -> Vec<String> {
     }
     let project = Path::new(cwd).join(".claude/launch.json");
     let mut urls = from_launch_file(&project, None);
-    // An empty home is "no home folder", never the current directory.
     if !home.as_os_str().is_empty() {
         urls.extend(from_launch_file(
             &home.join(".claude/launch.json"),
@@ -130,7 +118,6 @@ fn from_launch_file(file: &Path, matching_cwd: Option<&str>) -> Vec<String> {
                     .is_some_and(|args| args.iter().any(|a| a.as_str() == Some(cwd)))
         });
     }
-    // A dev server is the one you look at while coding; production previews come second.
     let is_dev = |c: &Value| {
         c.get("name")
             .and_then(Value::as_str)
@@ -153,7 +140,6 @@ fn from_launch_file(file: &Path, matching_cwd: Option<&str>) -> Vec<String> {
         .collect()
 }
 
-/// A cheap check that something accepts connections on a local port.
 pub fn tcp_is_listening(port: u16) -> bool {
     if port == 0 {
         return false;

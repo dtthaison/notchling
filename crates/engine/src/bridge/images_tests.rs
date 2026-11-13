@@ -1,5 +1,3 @@
-//! The JPEG a chat picture is sent as (Swift `ChatImages.jpeg`, tested there on a noise PNG).
-
 use super::images::{ImageCrate, Imaging, ImagingError};
 use image::{codecs::png::PngEncoder, ImageEncoder, Rgba, RgbaImage};
 
@@ -56,7 +54,6 @@ fn a_small_picture_is_not_enlarged_and_the_limit_is_clamped() {
         size_of_jpeg(&ImageCrate.jpeg(&small, 800).expect("jpeg")),
         (40, 30)
     );
-    // Asking for 1 pixel gives the 16-pixel floor; asking for 100 000 gives the 1600 ceiling.
     assert_eq!(
         size_of_jpeg(&ImageCrate.jpeg(&small, 1).expect("jpeg")),
         (16, 12)
@@ -70,7 +67,6 @@ fn a_small_picture_is_not_enlarged_and_the_limit_is_clamped() {
 
 #[test]
 fn a_transparent_picture_is_flattened_onto_white() {
-    // JPEG has no transparency: without flattening a transparent screenshot turns black.
     let clear = RgbaImage::from_pixel(32, 32, Rgba([0, 0, 0, 0]));
     let jpeg = ImageCrate.jpeg(&encode(&clear), 32).expect("jpeg");
     let decoded = image::load_from_memory(&jpeg).expect("jpeg").to_rgb8();
@@ -89,7 +85,6 @@ fn bytes_that_are_not_a_picture_are_unreadable() {
 
 #[test]
 fn a_picture_claiming_a_huge_size_is_refused_before_it_is_decoded() {
-    // A PNG header that says 60 000 x 60 000 (3.6 billion pixels) and holds no pixels.
     let mut header = vec![0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 13];
     header.extend_from_slice(b"IHDR");
     header.extend_from_slice(&60_000u32.to_be_bytes());

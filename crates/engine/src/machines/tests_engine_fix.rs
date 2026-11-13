@@ -1,6 +1,3 @@
-//! The engine's Fixes behind plan → confirm → run (Swift `MachinesSetupEngineTests`, Fixes, admin,
-//! Set up all, Running, renewed secrets).
-
 use super::engine_plan::{AdminAnswer, AdminNeed, PlanKind};
 use super::registry::AdminAccess;
 use super::runner::{CommandResult, REFUSED};
@@ -21,7 +18,6 @@ fn admin_step() -> super::step::SetupStep {
         .build()
 }
 
-/// The fake machine behind sudo (or as root) echoes whatever came on stdin.
 fn echo_stdin(s: &Setup) {
     s.runner.on_call(
         |a| {
@@ -259,7 +255,6 @@ fn a_linux_admin_step_as_the_worker_is_refused_before_any_command_runs() {
     );
     assert!(w.runner.calls().is_empty());
 
-    // Set up all reaches the step and stops there without asking
     w.answer("echo probe-adm", "bad", 1);
     w.refresh("vps", false);
     let asked = Arc::new(Mutex::new(0));
@@ -293,7 +288,6 @@ fn a_non_admin_step_never_gets_the_password_and_a_secret_never_reaches_argv() {
         vec![StepBuilder::new("p")
             .fix(StepFix::Run(FixPlan::new("plain", false, move |ctx| {
                 *lock(&s2) = ctx.admin_password.as_ref().map(|p| p.expose().to_string());
-                // a step that put a vault value on a command line is refused before anything runs
                 let r = run::local(
                     ctx,
                     vec!["/bin/echo".into(), "fake-claude-0000".into()],
@@ -409,7 +403,6 @@ fn set_up_all_stops_at_a_step_that_was_not_listed_and_says_what_is_still_not_ok(
     w.refresh("m1", false);
     let plan = w.engine.plan("m1", PlanKind::SetUpAll).unwrap();
     assert_eq!(plan.steps.len(), 1);
-    // the Fix of a breaks b, which the user was never shown
     w.answer("echo probe-b", "no", 1);
     let out = w
         .engine
@@ -465,8 +458,6 @@ fn a_second_fix_on_a_machine_is_refused_even_after_both_passed_the_refusals() {
     let w = Arc::new(s.build());
     let m = lock(&w.store.list)[0].clone();
 
-    // the claim and the start are one step: a Fix that got past the refusals while another began
-    // is still turned away when it starts, and its body never runs
     let (held_tx, held) = channel::<()>();
     let (release_tx, release) = channel::<()>();
     let holder = {
@@ -495,7 +486,6 @@ fn a_second_fix_on_a_machine_is_refused_even_after_both_passed_the_refusals() {
         "the first one's claim ended"
     );
 
-    // two confirms on the real path: the one that runs second is refused, the first runs on
     let one = w.engine.plan("m1", PlanKind::Fix(sid("slow"))).unwrap();
     let two = w.engine.plan("m1", PlanKind::Fix(sid("slow"))).unwrap();
     let one = w.engine.confirm(one.id, AdminAnswer::None).unwrap();
@@ -520,7 +510,6 @@ fn the_running_switch_runs_only_the_script_it_showed() {
             .fix(StepFix::Toggle { needs_admin: false })
             .build()]
     });
-    // the plan and the check before the run see one script; the run would build another
     let built = Arc::new(Mutex::new(0));
     let b = built.clone();
     s.toggle = Some(Arc::new(move |_, on| {

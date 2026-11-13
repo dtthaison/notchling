@@ -1,8 +1,3 @@
-//! A machine's card (Swift `MachineCardView`): the header with Check, Set up all and Remove…,
-//! the health chip, the abilities line, a row per setup step with its Check result and its
-//! action (Set up, How to…, Replace key…), the secret files, the Fix in flight, its outcome and
-//! the log. Every action only asks the model to show a plan.
-
 use std::rc::Rc;
 
 use gpui::{div, prelude::*, px, Context, Div, SharedString};
@@ -40,13 +35,10 @@ fn state(busy: bool) -> PartState {
     }
 }
 
-/// The state of a control that runs something: disabled while a Fix is in flight (`busy`) or the
-/// tool is off.
 fn acting_state(busy: bool, off: Option<&str>) -> PartState {
     state(busy || off.is_some())
 }
 
-/// Puts the tool-off reason on a control as its tooltip; a live control is left as it is.
 fn off_tip(
     element: gpui::Stateful<Div>,
     off: Option<&'static str>,
@@ -348,7 +340,6 @@ impl MachinesView {
         let live = !busy && off.is_none();
         let failed = result.is_some_and(|r| r.state.is_fail());
         let (name, id) = (machine.name.clone(), step.id.clone());
-        // Replace key: only on a click, and only while the key is ✓ or GitHub has no record of it
         if step.replace.is_some() && offers_replace(result) {
             let (n, i) = (name.clone(), id.clone());
             let replace = button(
@@ -483,7 +474,6 @@ impl MachinesView {
         if lines.is_empty() {
             return None;
         }
-        // a Fix in flight opens its log
         let open = self.log_open.contains(&machine.name)
             || self.model.engine().running(&machine.name).is_some();
         let name = machine.name.clone();
@@ -531,7 +521,6 @@ impl MachinesView {
         Some(column)
     }
 
-    /// The Remove machine, Close issue and Drop alerts.
     pub(super) fn confirm_overlay(&self, a: Appearance, cx: &mut Context<Self>) -> Option<Div> {
         use crate::accounts::flows::Alert;
         use crate::accounts::view_rows::alert_overlay;

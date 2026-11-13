@@ -1,20 +1,14 @@
-//! Tests of Replace key, the second half: deletes, ambiguous swaps, the offer and the scripts in a
-//! real shell (Swift `MachinesRepoStepsTests`).
-
 use super::fakes_b::*;
 use super::repo_common::*;
 use super::step::{CheckResult, StepId, SubRow};
 use super::steps_repo::{self, offers_replace};
 use super::tests_repo_replace::*;
 
-// MARK: a delete only removes a key of this run or of this machine (I1)
-
 pub(super) const OTHER_PUB: &str =
     "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOtherKeyThatIsNotGitHubs0123456789abcdef agents-m2";
 
 #[test]
 fn a_hostile_keygen_that_returns_a_listed_key_is_refused_and_nothing_is_deleted() {
-    // the "new" key is m2's, already on the repo under m2's title
     let m2 = key_json("5", OTHER_BODY, "agents-m2", true);
     let rig = replace_rig(Opts {
         new_read_only: None,
@@ -55,7 +49,6 @@ fn an_old_pub_that_holds_another_machines_key_is_never_deleted() {
         !outcome.ok,
         "the old key is left on GitHub: not a silent pass"
     );
-    // it names the title found, says nothing was deleted, and stays red
     assert!(
         outcome.message.contains("replaced the key on m1; the old key on GitHub is titled 'agents-m2', not agents-m1, so nothing was deleted; remove it in Settings \u{2192} Deploy keys if it's m1's"),
         "{}",
@@ -119,8 +112,6 @@ fn the_old_key_is_deleted_only_under_this_machines_own_titles() {
 
 #[test]
 fn cleanup_deletes_only_a_key_of_this_run_under_this_runs_title() {
-    // ssh fails after the add; GitHub now lists a key with the new text but another title: not
-    // ours to delete
     let rig = replace_rig(Opts {
         ssh_ok: false,
         new_title_on_github: Some("somebody-elses-title".into()),
@@ -145,9 +136,6 @@ fn cleanup_deletes_only_a_key_of_this_run_under_this_runs_title() {
 
 #[test]
 fn cleanup_after_a_failed_add_deletes_nothing_that_was_already_listed() {
-    // The add fails, and the listing after it holds a key with the new key's text that this run
-    // did not add: it has another id and another title (someone else's, put there meanwhile). The
-    // cleanup must delete nothing and say so. m2's key, listed all along, stays too.
     let m2 = key_json("5", OTHER_BODY, "agents-m2", true);
     let rig = replace_rig(Opts {
         new_read_only: Some(true),
@@ -216,7 +204,6 @@ fn key_text_is_normalised_to_type_and_base64_on_a_one_line_input() {
 
 #[test]
 fn a_multi_line_key_field_from_github_never_matches() {
-    // a listed "key" that holds two lines, the first one the new key plus a comment: not a match
     let hostile = format!(
         "{{\"id\":7,\"key\":\"ssh-ed25519 {NEW_BODY} x\\nssh-ed25519 {OTHER_BODY}\",\"title\":\"x\",\"read_only\":true}}"
     );
@@ -228,11 +215,8 @@ fn a_multi_line_key_field_from_github_never_matches() {
     assert!(outcome.ok, "{}", outcome.message);
 }
 
-// MARK: an ambiguous swap deletes nothing (I2)
-
 #[test]
 fn a_swap_that_returns_255_is_cant_tell_and_deletes_nothing() {
-    // 1, 2 and 3 are what a signal looks like to the runner: they prove nothing either
     for code in [255, 124, 125, 137, 4, 15, 9, 1, 2, 3, 40, 44] {
         let rig = replace_rig(Opts {
             swap_code: code,
@@ -265,7 +249,6 @@ fn a_swap_that_returns_255_is_cant_tell_and_deletes_nothing() {
 
 #[test]
 fn a_swap_that_fails_with_its_own_codes_is_undone_as_before() {
-    // 41 the private key would not move, 43 a file was missing
     for code in [41, 43] {
         let rig = replace_rig(Opts {
             swap_code: code,
@@ -351,8 +334,6 @@ fn an_unsafe_machine_name_runs_nothing() {
     assert!(rig.calls().is_empty());
 }
 
-/// A machine named `m1-20261001` would own the title `agents-m1-20261001`, which is how `m1`'s
-/// replaced key is titled: Replace key refuses such a name, before any command.
 #[test]
 fn a_machine_name_that_looks_like_a_replaced_key_title_is_refused() {
     for name in ["m1-20261001", "vps-99999999", "a-00000000"] {
@@ -418,7 +399,6 @@ fn replace_key_is_offered_when_the_check_passes_or_the_key_is_not_on_github() {
     let not_listed = CheckResult::fail(format!("the key is not on {REPO} yet"))
         .rows(vec![SubRow::new("Key on GitHub", false, "not listed")]);
     assert!(offers_replace(Some(&not_listed)));
-    // no key on the machine, a writable key, a missing alias, can't tell, no result yet
     assert!(!offers_replace(Some(&CheckResult::fail(
         "no deploy key on m1 yet"
     ))));
@@ -490,6 +470,5 @@ fn only_the_deploy_key_step_of_a_valid_repo_has_a_replace_plan() {
     for step in steps_repo::all(&m, &bad) {
         assert!(step.replace.is_none(), "{}", step.id.raw());
     }
-    // and the Deploy key's Fix itself is no Replace key
     assert!(!all[0].plan().unwrap().display.contains("deploy-key delete"));
 }

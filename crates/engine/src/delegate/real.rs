@@ -1,7 +1,3 @@
-//! The real [`Deps`]: the tools found on this machine and started as child processes. Which
-//! folders are read is the caller's choice ([`Folders`]), so a fixture root can stand in for the
-//! user's own.
-
 use super::deps::Deps;
 use crate::tools::acp::RealSpawner as AcpSpawner;
 use crate::tools::codex::plan::{augmented_path, find_binary};
@@ -13,24 +9,16 @@ use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-/// Where things are on this machine.
 #[derive(Clone, Debug)]
 pub struct Folders {
-    /// The home folder: the tools' usual install places are looked for under it.
     pub home: PathBuf,
-    /// Codex's own folder (`$CODEX_HOME` or `~/.codex`).
     pub codex_home: PathBuf,
-    /// `~/.gemini/antigravity-cli`.
     pub antigravity: PathBuf,
-    /// Claude Code's state file (`~/.claude.json`), read for the folders it trusts.
     pub claude_json: PathBuf,
-    /// The process's PATH.
     pub path: String,
-    /// "Allow Network in Codex Turns".
     pub network: bool,
 }
 
-/// How long `agy models` may take.
 const MODELS_TIMEOUT: Duration = Duration::from_secs(60);
 
 pub fn deps(folders: &Folders, stop: Arc<AtomicBool>) -> Deps {
@@ -59,8 +47,6 @@ pub fn deps(folders: &Folders, stop: Arc<AtomicBool>) -> Deps {
     }
 }
 
-/// Runs `program` with `args` and no input, and returns its standard output if it exits 0 within
-/// `timeout`; a program that does not start, fails or hangs gives `None` (and is killed).
 pub fn capture(program: &Path, args: &[&str], timeout: Duration) -> Option<String> {
     let mut child = Command::new(program)
         .args(args)
@@ -142,8 +128,6 @@ mod tests {
         assert_eq!(d.codex_media_root, home.join(".codex/generated_images"));
         assert_eq!(d.agy_media_root, home.join(".gemini/antigravity-cli/brain"));
         assert!(d.path.contains("/opt/homebrew/bin"));
-        // The usual places outside the home may hold a real install on a developer's machine;
-        // what is checked here is only that nothing under the empty home was found.
         assert!(d
             .codex_binary
             .as_ref()

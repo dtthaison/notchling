@@ -1,11 +1,5 @@
-//! The add flow of [`super::ProvidersOps`]: one thread per flow, from the provider's start
-//! to its end, the switch going off or the daemon stopping.
-
 use super::*;
 
-/// Lists `provider`'s add flow as waiting, unless the daemon is already stopping. Under the same
-/// lock [`ProvidersOps::close`] reads the list with, after it set `closing`: so exactly one of
-/// them cancels the flow.
 pub(super) fn enlist(sh: &Shared, provider: &str) -> bool {
     let mut adding = lock(&sh.adding);
     if sh.closing.load(Ordering::SeqCst) {
@@ -15,9 +9,6 @@ pub(super) fn enlist(sh: &Shared, provider: &str) -> bool {
     true
 }
 
-/// One add flow, on its own thread: start it, hand the reply its first answer, then look for the
-/// user's sign-in until it lands, is cancelled, fails, takes too long, the switch turns off or the
-/// daemon stops. Holds the provider's slot until it ends.
 pub(super) fn add_flow(
     sh: Arc<Shared>,
     p: Arc<dyn AccountProvider>,
@@ -40,8 +31,6 @@ pub(super) fn add_flow(
         }
     }
     let started = p.begin_add();
-    // Listed as waiting before the reply goes out, so a stop right after the reply cancels this
-    // flow; a stop that came while it started is seen here instead, and cancels it here once.
     if started.is_ok() && !enlist(&sh, &provider) && sh.accounts.is_on() {
         p.cancel_add();
     }
@@ -61,12 +50,10 @@ pub(super) fn add_flow(
     let limit = Duration::from_millis(sh.add_limit_ms.load(Ordering::SeqCst));
     loop {
         sh.nap(Duration::from_millis(sh.poll_ms.load(Ordering::SeqCst)));
-        // The daemon stopping, or the switch off: stop touching logins.
         if sh.closing.load(Ordering::SeqCst) {
             return;
         }
         if !sh.accounts.is_on() {
-            // Stopped without writing a login: no restore, only the provider's own cleanup.
             let note = p.abandon_add();
             return event("cancelled", json!({"error": ACCOUNTS_OFF, "note": note}));
         }

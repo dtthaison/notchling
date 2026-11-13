@@ -1,11 +1,3 @@
-"""The Beta and Promote workflows' security contract, read as text (no YAML library, no network) and, where a
-claim is about what a shell snippet does, by running the snippet itself under every bash the machine has.
-
-The build runs repository code and holds no secret; the signing job runs none and holds the secrets; the
-publishing jobs hold a write token and run only the tools of the commit the gate pinned. Every job stops at
-its first step unless the kill switch is on. Nothing here runs a workflow or touches the network: snippets run
-in temp folders, `gh` is a stand-in that logs its arguments, and `sha256sum` (GNU) gets a stand-in on macOS."""
-
 import hashlib
 import os
 import plistlib
@@ -24,25 +16,21 @@ PROMOTE = ".github/workflows/promote.yml"
 BOTH = (BETA, PROMOTE)
 SIGNING_SECRETS = ("APPLE_CERT_P12", "APPLE_CERT_PASSWORD", "APPLE_ID", "APPLE_TEAM_ID", "APPLE_APP_PASSWORD",
                    "SPARKLE_ED_PRIVATE_KEY")
-# GitHub's macOS runners run `bash` 3.2 or newer, Linux ones 5.x; a snippet has to work on every bash here.
 BASHES = sorted({p for p in ("/bin/bash", shutil.which("bash")) if p and os.path.exists(p)})
 GOOD_SIG = "A" * 86 + "=="
 
 
 def read(path):
-    """The workflow without its comment lines, which may name what they forbid."""
     return "".join(l for l in (ROOT / path).read_text().splitlines(keepends=True) if not l.lstrip().startswith("#"))
 
 
 def job_texts(text):
-    """{job name: its text}; jobs sit at 2 spaces of indent under `jobs:`."""
     block = text.split("\njobs:\n", 1)[1]
     parts = re.split(r"(?m)^  ([A-Za-z0-9_-]+):\n", block)
     return {parts[i]: parts[i + 1] for i in range(1, len(parts), 2)}
 
 
 def steps_of(job):
-    """The job's steps, each as its text (steps start at 6 spaces of indent)."""
     body = job.split("\n    steps:\n", 1)[1]
     return [s for s in re.split(r"(?m)^(?=      - )", body) if s.strip()]
 
@@ -55,13 +43,10 @@ def step_named(job, name):
 
 RUN_KEY = re.compile(r"^( *)(- )?run:[ \t]*(.*?)[ \t]*$")
 BLOCK_HEADER = re.compile(r"^[|>](?:[+-]?[1-9]?|[1-9][+-])(?:[ \t]+#.*)?$")
-STEP_KEY_COLUMN = 8  # a step's keys sit at 8 spaces; a `run:` at 6 is a job output that happens to be called run
+STEP_KEY_COLUMN = 8
 
 
 def run_blocks(text):
-    """Every step's `run:` body, whatever its YAML style: a `|`, `|-`, `|+`, `>` or `>-` block (with or without
-    an indent digit), a quoted or plain one-liner, or a plain scalar that goes on over later lines. Block
-    bodies are dedented; a folded `>` block keeps its line breaks, which only makes the checks stricter."""
     lines = text.split("\n")
     blocks = []
     for i, line in enumerate(lines):
@@ -90,7 +75,6 @@ def script_of(job, name):
 
 
 def commands(text):
-    """Text with backslash line continuations joined, so one command is one line."""
     return re.sub(r"\\\n\s*", " ", text)
 
 
@@ -137,7 +121,6 @@ def sha256_of(data):
 
 
 class ScriptCase(unittest.TestCase):
-    """Runs workflow snippets in temp folders with stand-ins first on PATH."""
 
     @classmethod
     def setUpClass(cls):
@@ -150,7 +133,6 @@ class ScriptCase(unittest.TestCase):
     def run_script(self, script, cwd, bash, **env):
         full = {"PATH": "%s:%s" % (self.bin, os.environ.get("PATH", os.defpath)), "HOME": str(cwd), "LC_ALL": "C"}
         full.update(env)
-        # `bash -e` is what GitHub runs for the default shell on Linux and macOS.
         return subprocess.run([bash, "-e", "-c", script], cwd=cwd, env=full, capture_output=True, text=True,
                               timeout=120, stdin=subprocess.DEVNULL)
 
@@ -190,7 +172,7 @@ class WorkflowContract(unittest.TestCase):
                     r = subprocess.run([bash, "-c", script], env=env, capture_output=True, text=True, timeout=30,
                                        stdin=subprocess.DEVNULL)
                     self.assertEqual(r.returncode == 0, ok, r.stderr)
-            with self.subTest(bash=bash, value="unset"):  # unset counts as off
+            with self.subTest(bash=bash, value="unset"):
                 env = {k: v for k, v in os.environ.items() if k != "NOTCHLING_RELEASES"}
                 r = subprocess.run([bash, "-u", "-c", script], env=env, capture_output=True, text=True, timeout=30,
                                    stdin=subprocess.DEVNULL)
@@ -269,8 +251,6 @@ class WorkflowContract(unittest.TestCase):
         self.assertEqual(seen, set(expected))
 
     def test_jobs_that_read_tags_or_history_check_out_all_of_both(self):
-        # version.py next reads the last Stable tag's tree and fails if it can't; fragments.py fold --only-at
-        # and notes --since read other commits and tags. A shallow checkout has none of them.
         needs_history = re.compile(r"version\.py next|fragments\.py (fold|notes)|git describe|git tag --list|git worktree")
         pinned = {(BETA, "gate"), (BETA, "build"), (PROMOTE, "authorize"), (PROMOTE, "fold")}
         seen = set()
@@ -283,7 +263,6 @@ class WorkflowContract(unittest.TestCase):
         self.assertEqual(seen, pinned)
 
     def test_no_job_that_checks_out_repository_code_runs_in_the_release_environment(self):
-        # An environment hands its secrets to every step of the job, repository code included.
         for f in BOTH:
             for name, job in job_texts(read(f)).items():
                 if "actions/checkout@" in job:
@@ -301,7 +280,6 @@ class WorkflowContract(unittest.TestCase):
                 self.assertTrue(b.strip(), f)
 
     def test_validation_is_a_bash_regex_not_a_grep_over_printf(self):
-        # `printf | grep -Eq '^...$'` passes a value whose first line is right and whose second is not.
         for f in BOTH:
             blocks = run_blocks(read(f))
             for block in blocks:
@@ -448,7 +426,6 @@ class BetaWorkflow(unittest.TestCase):
             self.assertNotIn("secrets.", job_head(job), name)
         for secret in SIGNING_SECRETS:
             self.assertTrue([s for s in steps_of(self.jobs["sign"]) if f"secrets.{secret}" in s], secret)
-        # Third-party actions get no secret: only a step with `run:` may name one.
         for step in steps_of(self.jobs["sign"]):
             if "secrets." in step:
                 self.assertIn("run:", step)
@@ -483,7 +460,7 @@ class BetaWorkflow(unittest.TestCase):
         self.assertRegex(sign, r"SPARKLE_SHA256: [0-9a-f]{64}\b")
         self.assertIn('shasum -a 256 -c -', sign)
         self.assertLess(sign.index("shasum -a 256 -c -"), sign.index("tar -xJf"))
-        self.assertEqual(len(re.findall("SPARKLE_ED_PRIVATE_KEY", sign)), 6)  # check step: 3; sign step: 3
+        self.assertEqual(len(re.findall("SPARKLE_ED_PRIVATE_KEY", sign)), 6)
 
     def test_sign_job_imports_the_certificate_for_codesign_only(self):
         sign = self.jobs["sign"]
@@ -524,8 +501,6 @@ class BetaWorkflow(unittest.TestCase):
         script = script_of(self.jobs["sign"], "Sign, notarize and staple")
         body = re.search(r"<<'PLIST'\n(.*?)\nPLIST\n", script, re.S)
         self.assertIsNotNone(body)
-        # The app drives Terminal and iTerm2 with Apple events (NSAppleScript in AgentActions.swift). Nothing
-        # else: no JIT, no unsigned memory, no library-validation exception (its code is linked statically).
         self.assertEqual(plistlib.loads(body.group(1).encode()), {"com.apple.security.automation.apple-events": True})
         sign_lines = [l for l in commands(script).splitlines() if l.startswith("codesign --force")]
         by_target = {l.rsplit(" ", 1)[1]: l for l in sign_lines}
@@ -624,7 +599,6 @@ class BetaWorkflow(unittest.TestCase):
 
 
 class BetaScripts(ScriptCase):
-    """The publish job's shell, run against good and hostile files."""
 
     TAG = "v1.3.0-beta.2"
     DMG = b"dmg-bytes"
@@ -724,11 +698,11 @@ class BetaScripts(ScriptCase):
 
     def test_a_value_is_checked_against_the_tag_the_sign_output_and_the_file(self):
         cases = (
-            ("BUNDLE_VERSION", "1030003", {}),              # not the build number for this tag
-            ("SHORT_VERSION", "1.3.0-beta.3", {}),          # not the tag
-            ("SHORT_VERSION", "1.3.0", {}),                 # a prefix of the tag is not the tag
-            ("ED_SIGNATURE", "B" * 86 + "==", {}),          # well formed, but not the one the sign job made
-            ("DMG_LENGTH", "10", {}),                       # not the size of the file
+            ("BUNDLE_VERSION", "1030003", {}),
+            ("SHORT_VERSION", "1.3.0-beta.3", {}),
+            ("SHORT_VERSION", "1.3.0", {}),
+            ("ED_SIGNATURE", "B" * 86 + "==", {}),
+            ("DMG_LENGTH", "10", {}),
             ("TAG", "v1.3.0-beta.2", {"TAG": "v1.3.0-beta.1"}),
         )
         for bash in BASHES:
@@ -881,7 +855,6 @@ class PromoteWorkflow(unittest.TestCase):
         self.assertIn("sha256sum -c SHA256SUMS", job)
         self.assertIn("gh attestation verify", job)
         self.assertIn("--signer-workflow \"$GH_REPO/.github/workflows/beta.yml\"", job)
-        # The Stable files are copies of the Beta's and each is compared with the Beta's list entry.
         self.assertIn('cp "beta/Notchling-$bv.dmg" "stable/Notchling-$sv.dmg"', job)
         self.assertIn('cp "beta/Notchling-$bv.zip" "stable/Notchling-$sv.zip"', job)
         self.assertIn('grep -F "Notchling-$bv.$ext" beta/SHA256SUMS', job)
@@ -930,7 +903,6 @@ class PromoteWorkflow(unittest.TestCase):
             self.assertIn(part, promote[0])
         self.assertNotIn("gh release upload", auth)
         self.assertNotIn("gh release create", auth)
-        # It is the very command the appcast job runs later, on a copy of the feed.
         later = [l for l in commands(step_named(self.jobs["appcast"], "Move the feed item to Stable")).splitlines()
                  if "appcast.py promote" in l]
         self.assertEqual(len(later), 1, later)
@@ -970,7 +942,7 @@ class PromoteWorkflow(unittest.TestCase):
         self.assertNotIn("secrets.", job)
         self.assertEqual(permissions_of(job), {"contents": "write", "pull-requests": "write"})
         self.assertIn('branch="promote/$STABLE_TAG"', job)
-        self.assertNotRegex(job, r"branch=\"release/|--head \"release/")  # merging a release/ branch starts the old release.yml
+        self.assertNotRegex(job, r"branch=\"release/|--head \"release/")
         pushes = [l for l in job.splitlines() if " push " in l]
         self.assertEqual(len(pushes), 1, pushes)
         self.assertIn('push origin "$branch"', pushes[0])
@@ -985,7 +957,7 @@ class PromoteWorkflow(unittest.TestCase):
         self.assertIn('fragments.py fold "${STABLE_TAG#v}" --only-at "$SHA"', job)
         self.assertIn("SHA: ${{ needs.authorize.outputs.sha }}", job)
         checkout = next(s for s in steps_of(job) if "actions/checkout@" in s)
-        self.assertIn("fetch-depth: 0", checkout)  # the Beta's commit has to be there to be read
+        self.assertIn("fetch-depth: 0", checkout)
 
 
 class PromoteScripts(ScriptCase):

@@ -1,9 +1,3 @@
-//! The daemon's start order, in process. The first read of the session list can be slow (a long
-//! list, a cold disk, a loaded machine), and a client that starts the daemon gives its socket 3 s,
-//! so the socket must not wait for that read: it answers at once, `sessions.list` waits for the
-//! first read (bounded) and a read that lands later follows as `sessions.changed`. A test holds the
-//! first read at `DaemonOptions::before_scan` to stand in for the slow one. The data is a copy of
-//! `crates/app/fixtures/notch` in /tmp with a socket of its own, never the real folders.
 #![cfg(unix)]
 
 use crate::daemon::{run, DaemonError, DaemonOptions};
@@ -30,8 +24,6 @@ fn copy_tree(from: &Path, to: &Path) {
     }
 }
 
-/// A hold for `before_scan` that blocks its first call until the sender is dropped (or sent to).
-/// Later calls pass. A test that is lost can't keep the thread for more than 30 s.
 fn hold() -> (Arc<dyn Fn() + Send + Sync>, Sender<()>) {
     let (release, wait) = mpsc::channel::<()>();
     let wait = Mutex::new(Some(wait));
@@ -44,7 +36,6 @@ fn hold() -> (Arc<dyn Fn() + Send + Sync>, Sender<()>) {
     (hold, release)
 }
 
-/// A daemon running on a thread of this process over a fixture copy.
 struct Running {
     layout: Layout,
     stop: Arc<AtomicBool>,
@@ -54,7 +45,6 @@ struct Running {
 }
 
 impl Running {
-    /// Starts it; with `held` the first read of the list waits until [`Running::release`].
     fn start(tag: &str, mut options: DaemonOptions, held: bool) -> Running {
         let root = PathBuf::from(format!("/tmp/nl-dt-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
@@ -83,7 +73,6 @@ impl Running {
         }
     }
 
-    /// Lets the held first read go on.
     fn release(&mut self) {
         self.release.take();
     }
@@ -92,7 +81,6 @@ impl Running {
         &self.layout.socket
     }
 
-    /// True once something accepts connections on the socket.
     fn answers_within(&self, wait: Duration) -> bool {
         let deadline = Instant::now() + wait;
         while Instant::now() < deadline {
@@ -104,8 +92,6 @@ impl Running {
         false
     }
 
-    /// A client of this daemon. Its server is this test binary, not a `notchling`, so the check on
-    /// who serves is off.
     fn client(&self) -> Client {
         let options = ConnectOptions {
             timeout: Duration::from_secs(20),
@@ -149,7 +135,6 @@ fn sessions_list_waits_for_the_first_read_and_returns_it() {
     let mut daemon = Running::start("wait", DaemonOptions::default(), true);
     assert!(daemon.answers_within(Duration::from_secs(10)));
     let mut client = daemon.client();
-    // Subscribe, then list: the order that loses no change.
     client.subscribe(&["sessions"]).unwrap();
     let (answer, answered) = mpsc::channel();
     let asking = std::thread::spawn(move || {
@@ -191,7 +176,6 @@ fn a_list_that_runs_out_of_patience_gets_what_there_is_and_the_read_follows_as_a
         .expect("the first read, as sessions.changed");
     assert_eq!(event.event, "sessions.changed");
     assert!(ids(&event.data).contains(&"sess-notch".to_string()));
-    // The list now is the same one.
     assert_eq!(
         client.call(ops::SESSIONS_LIST, json!({})).unwrap(),
         event.data
@@ -220,6 +204,5 @@ fn a_second_daemon_is_refused_before_it_reads_the_list() {
         !read.load(Ordering::SeqCst),
         "the second daemon read the list before the lock refused it"
     );
-    // The first goes on serving.
     assert!(first.client().status().is_ok());
 }

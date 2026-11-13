@@ -1,11 +1,7 @@
-//! The conversation reader and the notch's snapshot reader agree on the open question, so Chat can
-//! take it from the one read of the transcript.
-
 use std::path::{Path, PathBuf};
 
 use notchling_engine::transcript::{conversation, snapshot};
 
-/// Every Claude Code transcript under the checked-in fixture roots.
 fn transcripts(dir: &Path, out: &mut Vec<PathBuf>) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;

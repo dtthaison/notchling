@@ -1,19 +1,12 @@
-//! The Details Panel's terminal, the pure part: which bytes a GPUI key press sends (through the
-//! engine's `terminal::keys`, which speaks macOS key codes), how many rows and columns fit, a cell's
-//! color, and a screen row cut into runs of one style for drawing.
-
 use notchling_engine::control::slash;
 use notchling_engine::sessions::AgentTarget;
 use notchling_engine::terminal::keys::{self, Press};
 use notchling_engine::terminal::{TermCell, TermColor, TermStyle};
 
-/// The terminal's type size and line height, in points (`metric::TERMINAL_FONT` is the sheet's).
 pub const FONT: f32 = 12.0;
 pub const LINE: f32 = 16.0;
-/// One cell's width: Menlo's advance is 0.602 em.
 pub const CELL: f32 = FONT * 0.602;
 
-/// GPUI's key names onto the macOS key codes `keys::bytes` reads.
 fn key_code(key: &str) -> u16 {
     match key {
         "enter" => 36,
@@ -29,14 +22,10 @@ fn key_code(key: &str) -> u16 {
         "end" => 119,
         "pageup" => 116,
         "pagedown" => 121,
-        // Not one of the keys above: what it types decides.
         _ => u16::MAX,
     }
 }
 
-/// What a key press writes to the shell, or `None` when it types nothing. `key_char` is what the
-/// key types with its modifiers (GPUI's `Keystroke::key_char`); with Control it is often missing,
-/// so the key's own name stands in.
 pub fn bytes(
     key: &str,
     key_char: Option<&str>,
@@ -61,20 +50,17 @@ pub fn bytes(
     keys::bytes(&press, app_cursor_keys)
 }
 
-/// Rows and columns that fit `width` × `height` points, at least 2 × 10.
 pub fn grid(width: f32, height: f32) -> (u16, u16) {
     let cols = (width / CELL).floor().clamp(10.0, 500.0) as u16;
     let rows = (height / LINE).floor().clamp(2.0, 300.0) as u16;
     (rows, cols)
 }
 
-/// The 16 standard colors as a dark terminal draws them (Terminal.app's Basic in dark mode).
 const BASIC: [u32; 16] = [
     0x000000, 0xc23621, 0x25bc24, 0xadad27, 0x492ee1, 0xd338d3, 0x33bbc8, 0xcbcccd, 0x818383,
     0xfc391f, 0x31e722, 0xeaec23, 0x5833ff, 0xf935f8, 0x14f0f0, 0xe9ebeb,
 ];
 
-/// A cell color as 0xRRGGBB: the 16 standard ones, the 6×6×6 cube, the grays, or 24-bit.
 pub fn rgb(color: TermColor) -> u32 {
     match color {
         TermColor::Rgb(r, g, b) => (u32::from(r) << 16) | (u32::from(g) << 8) | u32::from(b),
@@ -91,7 +77,6 @@ pub fn rgb(color: TermColor) -> u32 {
     }
 }
 
-/// A row as runs of one style, for drawing; the right half of a wide character adds nothing.
 pub fn runs(row: &[TermCell]) -> Vec<(String, TermStyle)> {
     let mut out: Vec<(String, TermStyle)> = Vec::new();
     for cell in row.iter().filter(|c| c.width != 0) {
@@ -103,8 +88,6 @@ pub fn runs(row: &[TermCell]) -> Vec<(String, TermStyle)> {
     out
 }
 
-/// A mouse drag across the grid: where it started and where the mouse is, as (row, column), the
-/// column a boundary between cells (0 is before the first, the width after the last).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Selection {
     pub anchor: (usize, usize),
@@ -123,7 +106,6 @@ impl Selection {
         self.anchor == self.head
     }
 
-    /// The columns selected on `row` (from..to) in a row `width` wide, None when it's outside.
     pub fn columns(&self, row: usize, width: usize) -> Option<(usize, usize)> {
         let (start, end) = if self.anchor <= self.head {
             (self.anchor, self.head)
@@ -140,15 +122,12 @@ impl Selection {
     }
 }
 
-/// The boundary nearest a point in the grid (x, y from its top left), clamped to `rows` × `cols`.
 pub fn boundary_at(x: f32, y: f32, rows: usize, cols: usize) -> (usize, usize) {
     let row = (y / LINE).floor().max(0.0) as usize;
     let col = (x / CELL).round().max(0.0) as usize;
     (row.min(rows.saturating_sub(1)), col.min(cols))
 }
 
-/// The rows on show when the view is scrolled `back` rows into the scrollback (0: the live screen),
-/// as many as the screen has. `back` is clamped to the scrollback there is.
 pub fn shown_rows<'a>(
     history: impl ExactSizeIterator<Item = &'a Vec<TermCell>> + DoubleEndedIterator,
     cells: &'a [Vec<TermCell>],
@@ -166,7 +145,6 @@ pub fn shown_rows<'a>(
         .collect()
 }
 
-/// The word around column `col` (from..to): the run of non-blank cells it's in, or just that cell.
 pub fn word_at(row: &[TermCell], col: usize) -> (usize, usize) {
     let blank = |c: &TermCell| c.width != 0 && c.text.trim().is_empty();
     let col = col.min(row.len().saturating_sub(1));
@@ -181,7 +159,6 @@ pub fn word_at(row: &[TermCell], col: usize) -> (usize, usize) {
     (from, to)
 }
 
-/// The selected text: each row's part with its trailing blanks cut, rows joined by newlines.
 pub fn selected_text(cells: &[Vec<TermCell>], selection: Selection) -> String {
     let mut lines = Vec::new();
     for (r, row) in cells.iter().enumerate() {
@@ -198,8 +175,6 @@ pub fn selected_text(cells: &[Vec<TermCell>], selection: Selection) -> String {
     lines.join("\n")
 }
 
-/// The text to write for a paste: wrapped in the bracketed-paste marks when the shell asked for
-/// them, so a pasted newline doesn't run half a command.
 pub fn paste(text: &str, bracketed: bool) -> String {
     let text = text.replace("\r\n", "\r").replace('\n', "\r");
     if bracketed {
@@ -209,8 +184,6 @@ pub fn paste(text: &str, bracketed: bool) -> String {
     }
 }
 
-/// The terminal's tabs: each a shell, named "Terminal N" in the order they opened, one of them on
-/// show. `T` is the shell, so the order and the numbering are tested without one.
 #[derive(Debug)]
 pub struct Tabs<T> {
     tabs: Vec<(u32, T)>,
@@ -229,15 +202,12 @@ impl<T> Default for Tabs<T> {
 }
 
 impl<T> Tabs<T> {
-    /// A new tab after the others, on show.
     pub fn add(&mut self, tab: T) {
         self.tabs.push((self.next, tab));
         self.next += 1;
         self.active = self.tabs.len() - 1;
     }
 
-    /// Closes tab `i`; the one after it shows (or before, for the last), and the numbers restart
-    /// once none is left.
     pub fn close(&mut self, i: usize) -> Option<T> {
         if i >= self.tabs.len() {
             return None;
@@ -270,25 +240,18 @@ impl<T> Tabs<T> {
         self.tabs.is_empty()
     }
 
-    /// Each tab's title ("Terminal 2") and shell, in order.
     pub fn iter(&self) -> impl Iterator<Item = (String, &T)> {
         self.tabs.iter().map(|(n, t)| (format!("Terminal {n}"), t))
     }
 }
 
-/// Where a Claude Code command typed in the box goes.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum MenuRoute {
-    /// Not a command that opens a menu: it goes to the session like any reply.
     Reply,
-    /// A menu: a terminal tab attached to this background job runs it, where the menu shows.
     Attach { job: String },
-    /// A menu in a session that runs in a terminal of its own, which Chat can't attach to.
     OwnTerminal,
 }
 
-/// A menu command (`/mcp`, `/plugin`, a bare `/model`…) writes nothing to the transcript, so typed
-/// through the hidden attach it would open on a screen nobody sees and hold the session.
 pub fn menu_route(text: &str, target: &AgentTarget) -> MenuRoute {
     if !slash::opens_menu(text) {
         return MenuRoute::Reply;
@@ -299,9 +262,6 @@ pub fn menu_route(text: &str, target: &AgentTarget) -> MenuRoute {
     }
 }
 
-/// What a menu command's tab types once `claude attach` has drawn: clear the session's input box
-/// (Ctrl+E, Ctrl+U: never Ctrl+K or Esc), the command, then Enter, each after a pause, since in one
-/// burst they read as a paste.
 pub fn menu_keys(command: &str) -> [(u64, String); 3] {
     [
         (1500, "\x05\x15".to_owned()),

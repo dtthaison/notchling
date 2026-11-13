@@ -1,46 +1,27 @@
-//! Migration from the Swift app's UserDefaults. Reading the real defaults domain is the app's job: it
-//! exports `local.notchling` (and `local.awake.menubar` for an upgrade from Awake) to a JSON object and
-//! passes it here.
-
 use super::keys::{awake_keys, spec, KeySpec, Kind};
 use super::store::{Settings, SettingsError};
 use serde_json::{Map, Value};
 
-/// What the app exports from the Swift app's UserDefaults.
 #[derive(Clone, Debug, Default)]
 pub struct DefaultsExport {
-    /// The `local.notchling` domain.
     pub current: Map<String, Value>,
-    /// The old `local.awake.menubar` domain, when it exists.
     pub awake: Option<Map<String, Value>>,
 }
 
-/// What a migration did, for the app to log.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Report {
-    /// Keys copied from the Awake domain because the current domain lacked them.
     pub copied_from_awake: Vec<String>,
-    /// `mode` was made from Awake v1's `active` flag.
     pub folded_active: bool,
-    /// Keys in the export that aren't settings (Apple's own, window frames); dropped.
     pub ignored: Vec<String>,
-    /// Settings whose value had the wrong type; dropped.
     pub invalid: Vec<String>,
 }
 
-/// The new settings and what happened.
 #[derive(Clone, Debug, Default)]
 pub struct Migrated {
     pub values: Map<String, Value>,
     pub report: Report,
 }
 
-/// Turns the exported defaults into new settings. Same rules as `AppDelegate.migrateFromAwake`: when
-/// `migratedFromAwake` is already set, or there is no Awake domain, nothing is copied; otherwise each
-/// of the 24 listed keys is copied from the Awake domain unless the current one has it, and
-/// `migratedFromAwake` is set. Then every value is checked against its key (a bool exported as 0 or 1
-/// becomes a bool; `Data` holding JSON, exported as base64, becomes the JSON), and `active` is folded
-/// into `mode`.
 pub fn migrate(input: &DefaultsExport) -> Migrated {
     let mut report = Report::default();
     let mut merged = input.current.clone();
@@ -71,7 +52,6 @@ pub fn migrate(input: &DefaultsExport) -> Migrated {
         }
     }
 
-    // Awake v1 stored a plain on/off flag; `mode` replaced it and wins when both exist.
     if let Some(active) = values.remove("active") {
         if !values.contains_key("mode") {
             let mode = if active == Value::Bool(true) {
@@ -86,8 +66,6 @@ pub fn migrate(input: &DefaultsExport) -> Migrated {
     Migrated { values, report }
 }
 
-/// Migrates the export into `settings` and saves. Values the store already has win, so running it again
-/// (or after the user changed a setting in the new app) loses nothing.
 pub fn import(settings: &mut Settings, export: &DefaultsExport) -> Result<Report, SettingsError> {
     let migrated = migrate(export);
     let mut values = migrated.values;
@@ -98,7 +76,6 @@ pub fn import(settings: &mut Settings, export: &DefaultsExport) -> Result<Report
     Ok(migrated.report)
 }
 
-/// A bool the way `UserDefaults.bool(forKey:)` reads it: `true`/`false`, or a number that is 0 or 1.
 fn loose_bool(value: &Value) -> Option<bool> {
     match value {
         Value::Bool(b) => Some(*b),
@@ -111,7 +88,6 @@ fn loose_bool(value: &Value) -> Option<bool> {
     }
 }
 
-/// The value as the key stores it, or `None` when it can't be that type.
 fn coerce(spec: &KeySpec, value: &Value) -> Option<Value> {
     match spec.kind {
         Kind::Bool => loose_bool(value).map(Value::Bool),
@@ -139,7 +115,6 @@ fn coerce(spec: &KeySpec, value: &Value) -> Option<Value> {
     }
 }
 
-/// Standard base64 (with or without padding; whitespace ignored); `None` for anything else.
 pub fn base64_decode(text: &str) -> Option<Vec<u8>> {
     let mut out = Vec::with_capacity(text.len() * 3 / 4);
     let (mut acc, mut bits, mut padding) = (0u32, 0u32, 0usize);
@@ -157,7 +132,7 @@ pub fn base64_decode(text: &str) -> Option<Vec<u8>> {
             _ => return None,
         };
         if padding > 0 {
-            return None; // data after padding
+            return None;
         }
         acc = (acc << 6) | v;
         bits += 6;
@@ -167,7 +142,6 @@ pub fn base64_decode(text: &str) -> Option<Vec<u8>> {
             acc &= (1 << bits) - 1;
         }
     }
-    // A single leftover sextet can't encode a byte; leftover bits must be zero.
     if bits >= 6 || acc != 0 || padding > 2 {
         return None;
     }
@@ -183,7 +157,6 @@ mod tests {
         v.as_object().cloned().unwrap_or_default()
     }
 
-    /// The list in `AppDelegate.migrateFromAwake`, copied from the Swift source.
     const SWIFT_LIST: [&str; 24] = [
         "mode",
         "active",
@@ -284,14 +257,12 @@ mod tests {
             awake: None,
         });
         assert_eq!(off.values["mode"], json!("off"));
-        // An explicit mode wins over the flag.
         let both = migrate(&DefaultsExport {
             current: map(json!({"active": true, "mode": "whileWorking"})),
             awake: None,
         });
         assert_eq!(both.values["mode"], json!("whileWorking"));
         assert!(!both.report.folded_active);
-        // Folding also works for an `active` that came from the Awake domain.
         let from_awake = migrate(&DefaultsExport {
             current: Map::new(),
             awake: Some(map(json!({"active": true}))),
@@ -350,7 +321,6 @@ mod tests {
 
     #[test]
     fn data_holding_json_is_decoded_from_base64() {
-        // base64 of [{"email":"a@b.c"}]
         let input = DefaultsExport {
             current: map(
                 json!({"accounts": "W3siZW1haWwiOiJhQGIuYyJ9XQ==", "codexPicks": {"codex:1": {"model": "x"}}}),
@@ -364,7 +334,6 @@ mod tests {
             json!({"codex:1": {"model": "x"}}),
             "already JSON stays"
         );
-        // Text that isn't base64 JSON is kept as given.
         let odd = migrate(&DefaultsExport {
             current: map(json!({"accounts": "not base64!"})),
             awake: None,

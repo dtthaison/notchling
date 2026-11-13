@@ -1,9 +1,3 @@
-//! Every fixture in `protocol/fixtures/` parses into its generated type and writes back the same JSON.
-//!
-//! "The same" ignores key order (a JSON object has none), tells `1` from `1.0` only when the values
-//! differ, and allows a field the type adds because the schema gives it a default (`queued: false`
-//! when the Mac left it out). Anything else the type adds, drops or changes is a failure.
-
 use notchling_protocol::generated::roundtrip;
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -40,8 +34,6 @@ fn fixtures() -> Vec<(String, String, Value)> {
     found
 }
 
-/// Every property name with a `default` in the schema, and that default. Two definitions that give
-/// one name different defaults would make this ambiguous, so the helper refuses.
 fn schema_defaults(node: &Value, into: &mut BTreeMap<String, Value>) {
     match node {
         Value::Object(map) => {
@@ -63,8 +55,6 @@ fn schema_defaults(node: &Value, into: &mut BTreeMap<String, Value>) {
     }
 }
 
-/// `input` as the type wrote it back (`output`): every part of `input` is in `output`, and what
-/// `output` has beyond it is a default the schema names. Returns the problems found.
 fn compare(
     input: &Value,
     output: &Value,
@@ -137,7 +127,6 @@ fn every_fixture_round_trips_through_its_generated_type() {
         let mut problems = Vec::new();
         compare(&input, &output, &defaults, "$", &mut problems);
         assert!(problems.is_empty(), "{file}: {problems:#?}");
-        // Writing the result back again changes nothing: defaults are filled in once.
         let again = roundtrip(&name, &output).expect("known").expect("parses");
         assert_eq!(output, again, "{file}: a second round trip differs");
     }
