@@ -1,3 +1,4 @@
+use crate::transcript::typed::typed_prompt;
 use crate::transcript::util::str_of;
 use serde_json::Value;
 
@@ -31,11 +32,17 @@ impl Queue {
         }
     }
 
-    pub(super) fn user_line(&mut self, message: &Value) {
+    pub(super) fn user_line(&mut self, line: &Value) {
+        let Some(message) = line.get("message") else {
+            return;
+        };
         let Some(text) = prompt_text(message) else {
             return;
         };
         let Some((at, guessed)) = self.dequeued.take() else {
+            if typed_prompt(line, &text) {
+                self.items.clear();
+            }
             return;
         };
         if names(&guessed, &text) {
