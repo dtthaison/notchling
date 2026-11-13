@@ -18,6 +18,7 @@ impl Handler for Acting {
         match op {
             "session.reply" | "session.stop" => Some(OpSpec::APP),
             "slow" | "read" => Some(OpSpec::AGENT),
+            "peek" | "peek.fail" => Some(OpSpec::APP_QUIET),
             _ => None,
         }
     }
@@ -37,6 +38,7 @@ impl Handler for Acting {
     fn call(&self, _caller: &Caller, op: &str, _args: &Value) -> Result<Value, ApiError> {
         match op {
             "session.stop" => Err(ApiError::new(ErrorCode::Unimplemented, "not yet")),
+            "peek.fail" => Err(ApiError::new(ErrorCode::Failed, "no")),
             "slow" => {
                 std::thread::sleep(Duration::from_millis(400));
                 Ok(json!("late"))
@@ -128,6 +130,37 @@ fn app_tier_calls_are_audited_with_their_outcome() {
             ("session.stop".into(), "app".into(), "unimplemented".into()),
         ],
         "agent-tier reads aren't audited"
+    );
+}
+
+#[test]
+fn a_quiet_op_leaves_no_audit_line_on_success_but_failures_stay_audited() {
+    let me = std::env::current_exe().unwrap();
+    let run = start(Allowlist::new([me]));
+    let mut app = connect(&run, ClientKind::App);
+    assert!(app.call("peek", json!({})).is_ok());
+    assert!(app.call("peek.fail", json!({})).is_err());
+    let agent_run = start(Allowlist::empty());
+    let mut agent = connect(&agent_run, ClientKind::Cli);
+    assert!(agent.call("peek", json!({})).is_err());
+    let summary = |run: &Running| -> Vec<(String, String)> {
+        audit_lines(run)
+            .iter()
+            .map(|l| {
+                (
+                    l["op"].as_str().unwrap().to_string(),
+                    l["result"].as_str().unwrap().to_string(),
+                )
+            })
+            .collect()
+    };
+    assert_eq!(
+        summary(&run),
+        vec![("peek.fail".to_owned(), "failed".to_owned())]
+    );
+    assert_eq!(
+        summary(&agent_run),
+        vec![("peek".to_owned(), "forbidden".to_owned())]
     );
 }
 

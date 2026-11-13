@@ -92,6 +92,9 @@ pub mod ops {
     pub const INBOX_LIST: &str = "inbox.list";
     pub const INBOX_ANSWER: &str = "inbox.answer";
     pub const INBOX_SEEN: &str = "inbox.seen";
+
+    pub const GIT_STATUS: &str = "git.status";
+    pub const GIT_DIFF: &str = "git.diff";
 }
 
 pub mod topics {

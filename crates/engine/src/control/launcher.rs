@@ -55,6 +55,24 @@ impl std::error::Error for LaunchError {}
 pub trait Launcher: Send + Sync {
     fn run(&self, command: &Command, timeout: Duration) -> Result<LaunchOutput, LaunchError>;
 
+    fn run_capped(
+        &self,
+        command: &Command,
+        timeout: Duration,
+        max_bytes: usize,
+    ) -> Result<(LaunchOutput, bool), LaunchError> {
+        let mut out = self.run(command, timeout)?;
+        let capped = out.output.len() > max_bytes;
+        if capped {
+            let mut cut = max_bytes;
+            while !out.output.is_char_boundary(cut) {
+                cut -= 1;
+            }
+            out.output.truncate(cut);
+        }
+        Ok((out, capped))
+    }
+
     fn run_pty(&self, script: &PtyScript) -> Result<bool, LaunchError>;
 }
 
@@ -237,7 +255,25 @@ impl Launcher for RealLauncher {
         let files =
             OutputFiles::create(&self.temp_dir).map_err(|e| LaunchError::Spawn(e.to_string()))?;
         let (out_path, err_path) = (files.out.1.clone(), files.err.1.clone());
-        let result = self.run_to_files(name, command, timeout, files);
+        let result = self.run_to_files(name, command, timeout, None, files);
+        let _ = std::fs::remove_file(&out_path);
+        let _ = std::fs::remove_file(&err_path);
+        result.map(|(out, _)| out)
+    }
+
+    fn run_capped(
+        &self,
+        command: &Command,
+        timeout: Duration,
+        max_bytes: usize,
+    ) -> Result<(LaunchOutput, bool), LaunchError> {
+        let Some(name) = command.argv.first() else {
+            return Err(LaunchError::Spawn("empty command".to_string()));
+        };
+        let files =
+            OutputFiles::create(&self.temp_dir).map_err(|e| LaunchError::Spawn(e.to_string()))?;
+        let (out_path, err_path) = (files.out.1.clone(), files.err.1.clone());
+        let result = self.run_to_files(name, command, timeout, Some(max_bytes), files);
         let _ = std::fs::remove_file(&out_path);
         let _ = std::fs::remove_file(&err_path);
         result
@@ -254,8 +290,9 @@ impl RealLauncher {
         name: &str,
         command: &Command,
         timeout: Duration,
+        max_bytes: Option<usize>,
         files: OutputFiles,
-    ) -> Result<LaunchOutput, LaunchError> {
+    ) -> Result<(LaunchOutput, bool), LaunchError> {
         let OutputFiles {
             out: (out, _),
             err: (err, _),
@@ -288,9 +325,23 @@ impl RealLauncher {
             .spawn()
             .map_err(|e| LaunchError::Spawn(e.to_string()))?;
         let start = Instant::now();
-        let status = loop {
+        let mut over = false;
+        let code = loop {
             match child.try_wait() {
-                Ok(Some(status)) => break status,
+                Ok(Some(status)) => break status.code().unwrap_or(-1),
+                Ok(None)
+                    if max_bytes.is_some_and(|max| {
+                        out_reader
+                            .metadata()
+                            .map(|m| m.len() > max as u64)
+                            .unwrap_or(false)
+                    }) =>
+                {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    over = true;
+                    break 0;
+                }
                 Ok(None) if start.elapsed() >= timeout => {
                     let _ = child.kill();
                     let _ = child.wait();
@@ -300,21 +351,39 @@ impl RealLauncher {
                 Err(e) => return Err(LaunchError::Spawn(e.to_string())),
             }
         };
-        Ok(LaunchOutput {
-            code: status.code().unwrap_or(-1),
-            output: read_back(&mut out_reader),
-            stderr: read_back(&mut err_reader),
-        })
+        let (output, cut) = read_back(&mut out_reader, max_bytes);
+        let (stderr, _) = read_back(&mut err_reader, max_bytes.map(|_| STDERR_BYTES));
+        Ok((
+            LaunchOutput {
+                code,
+                output,
+                stderr,
+            },
+            over || cut,
+        ))
     }
 }
 
-fn read_back(file: &mut File) -> String {
+const STDERR_BYTES: usize = 64 * 1024;
+
+fn read_back(file: &mut File, max_bytes: Option<usize>) -> (String, bool) {
     use std::io::{Read, Seek, SeekFrom};
     let mut bytes = Vec::new();
     if file.seek(SeekFrom::Start(0)).is_ok() {
-        let _ = file.read_to_end(&mut bytes);
+        match max_bytes {
+            Some(max) => {
+                let _ = file.take(max as u64 + 1).read_to_end(&mut bytes);
+            }
+            None => {
+                let _ = file.read_to_end(&mut bytes);
+            }
+        }
     }
-    String::from_utf8_lossy(&bytes).into_owned()
+    let cut = max_bytes.is_some_and(|max| bytes.len() > max);
+    if let Some(max) = max_bytes.filter(|_| cut) {
+        bytes.truncate(max);
+    }
+    (String::from_utf8_lossy(&bytes).into_owned(), cut)
 }
 
 #[cfg(all(test, unix))]
@@ -333,6 +402,39 @@ mod tests {
         assert_eq!(got.output.trim(), "out");
         assert_eq!(got.stderr.trim(), "err");
         assert_eq!(got.combined().trim(), "out\nerr");
+    }
+
+    #[test]
+    fn a_capped_run_stops_a_program_that_writes_past_the_cap() {
+        let command = Command::new(&["/bin/sh", "-c", "yes x | head -c 50000000; sleep 5"]);
+        let started = Instant::now();
+        let (got, capped) = real()
+            .run_capped(&command, Duration::from_secs(10), 1000)
+            .expect("runs");
+        assert!(capped);
+        assert_eq!(got.output.len(), 1000);
+        assert!(started.elapsed() < Duration::from_secs(4));
+    }
+
+    #[test]
+    fn a_capped_run_under_the_cap_is_whole_and_keeps_its_code() {
+        let command = Command::new(&["/bin/sh", "-c", "echo hi; exit 1"]);
+        let (got, capped) = real()
+            .run_capped(&command, Duration::from_secs(10), 1000)
+            .expect("runs");
+        assert!(!capped);
+        assert_eq!((got.code, got.output.trim()), (1, "hi"));
+    }
+
+    #[test]
+    fn the_default_capped_run_cuts_on_a_character() {
+        let fake = FakeLauncher::new();
+        fake.push_output(Ok(LaunchOutput::ok("\u{65e5}\u{65e5}\u{65e5}")));
+        let (got, capped) = fake
+            .run_capped(&Command::new(&["x"]), Duration::from_secs(1), 7)
+            .expect("runs");
+        assert!(capped);
+        assert_eq!(got.output, "\u{65e5}\u{65e5}");
     }
 
     #[test]

@@ -8,6 +8,7 @@ use crate::bridge_ops::{BridgeOps, BridgeSetup};
 use crate::catalog_ops::CatalogService;
 use crate::codex_ops::CodexOps;
 use crate::daemon::{FirstScan, FIRST_LIST_WAIT};
+use crate::git_ops::{live_folders, GitOps};
 use crate::inbox_ops::InboxOps;
 use crate::install_ops::{InstallOps, InstallSetup};
 use crate::layout::Layout;
@@ -25,6 +26,7 @@ use notchling_engine::control::launcher::claude_path;
 use notchling_engine::control::session::home_of;
 use notchling_engine::control::RealLauncher;
 use notchling_engine::delegate::skill::SkillTool;
+use notchling_engine::git::SandboxedLauncher;
 use notchling_engine::install::skills::SkillSpec;
 use notchling_engine::vault::skill as vault_skill;
 use notchling_local_api::{ops, topics, ApiError, AuditLog, Caller, Handler, OpSpec, Tier};
@@ -394,6 +396,19 @@ impl Wired {
         first_scan: Arc<FirstScan>,
         first_wait: Duration,
     ) -> Ops {
+        let folders = live_folders(
+            sessions.clone(),
+            self.agy.titles(),
+            layout.codex_dir().join("sessions"),
+            layout.fixture,
+        );
+        let claude = claude_path(Path::new(&home_of(&layout.roots())));
+        let git = GitOps::new(
+            Arc::new(SandboxedLauncher::new(Arc::new(RealLauncher::with_claude(
+                claude,
+            )))),
+            folders,
+        );
         Ops::with_acting(sessions, self.acting.clone())
             .with_bridge(self.bridge.clone())
             .with_codex(self.codex.clone())
@@ -412,6 +427,7 @@ impl Wired {
             .with_group(self.catalog.clone())
             .with_group(self.inbox.clone())
             .with_group(self.vault.clone())
+            .with_group(Arc::new(git))
             .with_first_scan(first_scan, first_wait)
     }
 

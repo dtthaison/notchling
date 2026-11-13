@@ -5,6 +5,7 @@ pub mod control;
 pub mod cost;
 pub mod delegate;
 pub mod docfile;
+pub mod git;
 pub mod inbox;
 pub mod install;
 pub mod lanes;

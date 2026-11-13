@@ -8,7 +8,7 @@ use notchling_engine::transcript::subagents::{
 use notchling_kit::ui::ToolMark;
 use notchling_kit::{Icon, Ink, Status};
 
-use super::format::{model_name, tokens};
+use super::format::tokens;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TaskRow {
@@ -306,12 +306,6 @@ pub fn facts(conversation: &Conversation) -> Vec<(&'static str, String)> {
     if let Some(branch) = &f.branch {
         out.push(("Branch", branch.clone()));
     }
-    if let Some(model) = &f.model {
-        out.push(("Model", model_name(model)));
-    }
-    if let Some(effort) = &f.effort {
-        out.push(("Effort", effort.clone()));
-    }
     if f.turns > 0 {
         out.push(("Turns", f.turns.to_string()));
     }
@@ -396,8 +390,6 @@ pub fn fact_icon(label: &str) -> Icon {
     match label {
         "Folder" => Icon::Folder,
         "Branch" => Icon::Branch,
-        "Model" => Icon::Cpu,
-        "Effort" => Icon::Gauge,
         "Turns" => Icon::Turns,
         "Tokens" => Icon::Tokens,
         "Commands" => Icon::Terminal,
@@ -416,7 +408,6 @@ pub fn fact_text(label: &str, value: &str) -> String {
     match label {
         "Turns" => plural("turn"),
         "Commands" => plural("command"),
-        "Effort" => format!("{value} effort"),
         _ => value.to_owned(),
     }
 }
@@ -482,8 +473,6 @@ mod tests {
             i.facts,
             [
                 ("Branch", "main".to_owned()),
-                ("Model", "Opus 5.5".to_owned()),
-                ("Effort", "high".to_owned()),
                 ("Turns", "2".to_owned()),
                 ("Tokens", "15.4k in · 900 out".to_owned()),
                 ("Commands", "3".to_owned()),
@@ -715,13 +704,12 @@ mod tests {
     #[test]
     fn fact_rows_read_like_the_swift_panel() {
         assert_eq!(fact_icon("Folder"), Icon::Folder);
-        assert_eq!(fact_icon("Model"), Icon::Cpu);
+        assert_eq!(fact_icon("Branch"), Icon::Branch);
         assert_eq!(fact_icon("Commands"), Icon::Terminal);
         assert_eq!(fact_icon("Files"), Icon::File);
         assert_eq!(fact_text("Turns", "1"), "1 turn");
         assert_eq!(fact_text("Turns", "2"), "2 turns");
         assert_eq!(fact_text("Commands", "3"), "3 commands");
-        assert_eq!(fact_text("Effort", "high"), "high effort");
         assert_eq!(
             fact_text("Tokens", "15.4k in · 900 out"),
             "15.4k in · 900 out"
