@@ -242,3 +242,6 @@ The code carries no comments (see [AGENTS.md](../../AGENTS.md)). What a change c
 - `crates/engine/src/viz/git.rs`: The Flow tab runs only `git diff --stat` with optional locks off so refreshing never writes or holds the index lock the session's own git needs.
 - `crates/engine/src/viz/web_url.rs`: Web tab URLs drop queries because they carry tokens, API paths cut back to the origin; a listening server beats a silent one; an empty home means no home folder, never the current directory.
 - `crates/engine/tests/terminal_pty.rs, src/terminal/pty`: Pty traps found live: forkpty leaks an inheritable master, so use posix_openpt with O_CLOEXEC; never answer device-attribute queries; drop NO_COLOR; close and drop must not wait on an undrained tty (hung folder.trust 2026-11-11).
+- `crates/engine/src/search/text.rs::clean`: A user message starting with `<` (slash commands, their output, system reminders and hook text are wrapped in tags), `Caveat:` or `[Request interrupted` is not a message and is not indexed.
+- `crates/engine/src/sessions/jobs.rs::agent_from_job`: A job whose state is `running` (a session woken with `--bg --resume`, 2.1.318) is up and waiting for a prompt, so it shows Idle, as an empty state does.
+- `crates/engine/src/limits/provider_tests.rs::rig`: A mode the provider doesn't allow stays unset, so the default reads.
