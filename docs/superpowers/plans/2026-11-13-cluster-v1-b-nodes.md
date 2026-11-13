@@ -8,9 +8,14 @@
 
 **Tech Stack:** Rust (engine, platform, local-api, notchlingd, new `cluster-net`, GPUI app with `crates/kit`), rustls 0.23 with ring, rcgen 0.14, rusqlite, `agentconsole.v1` (additive), Flutter.
 
-**Spec:** `docs/superpowers/specs/2026-11-13-notchling-cluster-design.md`: "Scope: v1 first" (step 1 and the "Must exist first" row), "Work placement", "Sending a session to a Worker", "Node connections and joining", "Software architecture" (principles, ports, invariants), review issues 3, 5, 10, 12, 13, 14. Read the cross-plan notes in `2026-11-13-cluster-v1-overview.md` first.
+**Spec:** `docs/superpowers/specs/2026-11-13-notchling-cluster-design.md`: "Scope: v1 first" (step 1 and the "Must exist first" row), "Work placement", "Sending a session to a Worker", "Node connections and joining", "Software architecture" (principles, ports, invariants), review issues 3, 5, 10, 12, 13, 14. Read the cross-plan notes and "Decisions 2026-11-14" in `2026-11-13-cluster-v1-overview.md` first; where they differ from the spec, the decisions win.
+
+**Version sync:** this plan builds on version sync Phase 1 Tasks 1 to 4 (`origin/agent/version-sync-plans`, `2026-11-14-versions-p1-see.md`: `engine::versions`, `versions::mac::detect`, `versions::mismatch`). Its conflicts C1 to C3 are settled (overview): a tool-version mismatch at dispatch warns until version sync Phase 6; the node's Mac probe calls `versions::mac::detect`; `cluster::Tool` and `versions::Tool` both stay, with `tool_of`.
 
 ## Global Constraints
+
+- Words: "home" in code and in these plans is the maintainer's **primary** (the laptop m5 when the cluster is made). A **Standby** is any member with **Can Be Master** on that isn't the primary (m1, and any other machine the maintainer marks). User-facing text says Primary, Standby, Worker and Can Be Master, never "home".
+- Terms fence everything: every `Hello`, `Call` and `Members` carries the sender's term; a node refuses a call stamped with a term older than the highest it has seen, and a node that sees a newer term adopts it (a home that sees one steps down: plan E does the session side).
 
 - No comments in code, doc comments included; the why goes in the crate's `AGENTS.md` (plan A ruling R2).
 - Package names: `notchling-engine`, `notchling-notchlingd`, `notchling-local-api`, `notchling-platform`, `notchling-app`, new `notchling-cluster-net`; one test filter per `cargo test` run (plan A ruling R1).
@@ -32,31 +37,32 @@
 
 1. A removed node that reconnects with its old certificate: the TLS handshake fails, nothing is dispatched to it, its sessions leave every list. (Task 5 `removed_member_is_refused_and_never_dispatched`, Task 9 `unpinned_peer_fails_handshake`, Task 11 `removed_node_is_dropped_and_wipes_on_contact`.)
 2. A dispatch retried over a flaky link, duplicated or replayed: exactly one job starts. (Task 5 `same_key_dispatch_is_one_job`, Task 6 `duplicate_call_runs_once`, Task 7 seeds with duplicates on.)
-3. A Worker whose tool version differs from the reference Mac: the dispatch is refused with both versions named; the app offers Run Anyway, an agent never gets it. (Task 3 `dispatch_refuses_a_tool_mismatch_naming_both`, Task 13 `agent_dispatch_never_runs_anyway`.)
+3. A Worker whose tool version differs from the reference Mac: the dispatch goes with a warning naming both versions (version sync's call 10, conflict C1: it refuses only from version sync Phase 6, which adds Run Anyway then); a missing tool, another node protocol or schema still refuses. (Task 3 `dispatch_warns_on_a_tool_mismatch_until_phase_6`, `absent_tool_still_refuses`; Task 13 `tool_mismatch_dispatches_with_a_warning`.)
+6. A call from a home whose term is older than one the receiver has seen: refused with the newer term, never run; the stale home steps down when it hears it. (Task 6 `older_term_call_is_refused`, `home_seeing_newer_term_steps_down`; Task 7 `a_planted_stale_call_is_caught`.)
 4. A Worker forwarding a call it may not make (start work on another node, relay the app tier): refused and audited. (Task 4 `worker_may_not_dispatch`, `non_client_claiming_app_is_refused`; Task 12 `forward_from_worker_is_refused`.)
 5. Chat on a remote session whose node goes offline: the row says Offline, the conversation stays readable from the mirror, Reply is off with the reason. (Task 16 `offline_remote_row_disables_reply`, Task 17 `remote_row_uses_mirror_transcript`.)
 
 ---
 
-### Task 1: Decision record 0021, cluster v1 nodes
+### Task 1: Decision record, cluster v1 nodes
 
 **Zone:** maintainer (`docs/decisions/`). No CAP.
 
 **Files:**
-- Create: `docs/decisions/0021-cluster-v1-nodes.md` (Proposed; use the next free number at merge time: 0019 and 0020 are taken on `agent/agents-setup-decision` and `agent/agent-settings-cli`)
+- Create: `docs/decisions/XXXX-cluster-v1-nodes.md` (Proposed). `XXXX` is a placeholder: the number is assigned at merge, in merge order (0019 and 0020 are on unmerged branches, 0021 is search and 0022 localization); the PR that merges it renames the file and every reference.
 - Modify: `docs/decisions/README.md` (index row)
 
 - [ ] **Step 1: Write the record** from the template in `docs/decisions/README.md`. Decision bullets, each one line:
-  - Roles in v1: one Home, Standbys, Workers; no Witness, no election, no lease until plan E. The home is the node the cluster was created on until a planned move (plan D) or a promote (plan E). Terms only grow.
+  - Roles in v1: one primary (the home), Standbys, Workers; no Witness, no election. A member's **Can Be Master** switch (default on for Macs, off for other machines; needs disk encryption, plan D) makes it a Standby; any number may have it. The primary is the node the cluster was created on (the laptop m5) until a planned move (plan D) or a promote (plan E). Automatic failover is a setting, off by default (plan E). Terms only grow and fence every call.
   - Identity: a node certificate per data folder (v3 ECDSA P-256, made once), node id = 0012's host id rule applied to it. The phone bridge keeps its own certificate; the logging design's `host` should use the node id once one exists.
   - Transport: TCP and TLS 1.3 on 47823, bound only to Tailscale addresses, both sides pinned. No QUIC in v1 (the daemon has no async runtime).
-  - Topology: every node links to the home; a client node (a Mac with the app, marked `client` at approval) links to every member. Control goes through the home; data goes to the session's owner.
+  - Topology: every node links to the primary; a client node (a Mac with the app, marked `client` at approval) and every Can Be Master node link to every member, so Standbys hear each other and the primary without it. Control goes through the primary; data goes to the session's owner.
   - Node tier: a closed table of ops one node may ask of another, by the sender's role and the origin's tier. A client node relays its own app's tier; a Worker relays the agent tier at most.
   - Headless switches: `acting`, `bridge`, `install` follow the home's stored choice for a node with no app attached, set only by an app-tier click; `accounts` and `vault` never.
   - Joins need the maintainer's Allow in the inbox; join tokens are one-time, 10 minutes.
   - Relaying: the home and client nodes relay other nodes' sessions to the phone and the app with qualified ids on the wire.
 - [ ] **Step 2:** Consequences name what it amends: 0012's "Nothing is replicated" (superseded by the cluster design), 0012's "computers never relay" and "on the wire nothing changes" (amended), 0007's tiers (a third origin, the node, through the table only). Status: Proposed, settled by the maintainer merging plan B.
-- [ ] **Step 3: Commit** `docs: decision 0021, cluster v1 nodes (proposed)`.
+- [ ] **Step 3: Commit** `docs: decision record, cluster v1 nodes (proposed, number at merge)`.
 
 ### Task 2: Platform: boot clock, boot id, Tailscale addresses, load
 
@@ -92,36 +98,35 @@
 
 **Files:**
 - Create: `crates/engine/src/cluster/mod.rs`, `crates/engine/src/cluster/id.rs`, `crates/engine/src/cluster/versions.rs`
-- Create (unless version-sync's Phase 1 merged first; then use its names): `crates/engine/src/versions/mod.rs`, `crates/engine/src/versions/version.rs`, `crates/engine/src/versions/parse.rs`
-- Test: `crates/engine/src/cluster/id_tests.rs`, `crates/engine/src/cluster/versions_tests.rs`, `crates/engine/src/versions/parse_tests.rs`
-- Modify: `crates/engine/src/lib.rs` (`pub mod cluster; pub mod versions;`), `docs/feature-map.md` (rows for `crates/engine/src/cluster/` and `crates/engine/src/versions/`)
+- Uses (version sync Phase 1 Tasks 1 and 4, `2026-11-14-versions-p1-see.md`): `crates/engine/src/versions/` (`Tool`, `Version` with the strict pattern, `cli_output`, `mismatch`, `Mismatch::text`). If those tasks haven't merged when this one starts, build them first, on this branch, exactly as that plan writes them (its call V3: the strict pattern wins); version sync then only extends them.
+- Test: `crates/engine/src/cluster/id_tests.rs`, `crates/engine/src/cluster/versions_tests.rs`
+- Modify: `crates/engine/src/lib.rs` (`pub mod cluster;`), `docs/feature-map.md` (a row for `crates/engine/src/cluster/`)
 
 **Interfaces:**
 - Produces:
   - `pub struct NodeId(String)` (serde transparent, `Ord`): `fn from_fingerprint(fp: &str) -> Option<NodeId>` (64 lowercase hex in, first 16 out), `fn as_str(&self) -> &str`, `Display`.
   - `pub fn fingerprint(der: &[u8]) -> String` (SHA-256, 64 lowercase hex).
   - `pub struct Qualified { pub node: NodeId, pub id: String }`, `fn parse(s: &str) -> Option<Qualified>` (`^[0-9a-f]{16}/.+$`, split at the first `/`), `pub fn qualify(node: &NodeId, id: &str) -> String`.
-  - `pub enum Role { Home, Standby, Worker }` and `pub enum Tool { Claude, Codex, Agy, Shell }`, serde `snake_case`.
-  - `versions::Version(String)`: `fn parse(s: &str) -> Option<Version>` (`[0-9A-Za-z.+-]`, at most 32 chars, starts with a digit).
-  - `versions::parse::cli_output(tool: Tool, text: &str) -> Option<Version>` (`2.1.322 (Claude Code)` → 2.1.322, `codex-cli 0.166.0` → 0.166.0, `agy 1.4.2` → 1.4.2).
-  - `cluster::versions::Versions { pub notchling: String, pub proto: u32, pub features: Vec<String>, pub schema: u32, pub os: String, pub arch: String, pub tools: BTreeMap<Tool, Version>, pub logins: BTreeMap<Tool, bool> }` (`logins` filled by plan C; empty here).
+  - `pub enum Role { Home, Standby, Worker }` (derived, never stored: Task 5's `role_of`) and `pub enum Tool { Claude, Codex, Agy, Shell }` (what a job runs), serde `snake_case`.
+  - `pub fn tool_of(t: Tool) -> Option<versions::Tool>` (conflict C3: both enums stay; `Shell` has none; Claude, Codex and Agy map one to one).
+  - `cluster::versions::Versions { pub notchling: String, pub proto: u32, pub features: Vec<String>, pub schema: u32, pub os: String, pub arch: String, pub tools: BTreeMap<versions::Tool, versions::Version>, pub logins: BTreeMap<versions::Tool, bool> }` (`logins` filled by plan C; empty here; `tools` from `versions::mac::detect`, Task 10).
   - `pub enum Purpose { Link, Dispatch(Tool), Promote }`, `pub enum Compat { Ok, Warn(String), Refuse(String) }`.
   - `pub fn compat(reference: &Versions, node: &Versions, node_name: &str, purpose: Purpose) -> Compat`.
   - consts `NODE_PROTO: u32 = 1`, `CLUSTER_SCHEMA: u32 = 1`, `LINUX_CLAUDE_PROVEN: bool = false` (flipped only after the maintainer's proof M4 in the overview).
 - Rules of `compat`, in order (version-sync design §17.5 is the source for the tool rule):
   - any purpose: `proto` differs → Refuse `"<node> speaks node protocol <n>, this Mac <m>"`.
   - `Link`: else Ok.
-  - `Dispatch(t)`: feature `"dispatch"` missing → Refuse; `schema` differs → Refuse; tool not installed → Refuse `"<Tool> isn't installed on <node>"`; `os == "windows"` and `t == Claude` → Refuse `"Claude Code doesn't run on Windows nodes in v1"`; `os == "linux"`, `t == Claude`, `!LINUX_CLAUDE_PROVEN` → Refuse `"Claude Code on Linux isn't proven yet"`; tool version differs from the reference's → Refuse `"<node> runs <Tool> <v1>, the Mac <v2>"`; `notchling` differs → Warn `"<node> runs Notchling <v1>, the Mac <v2>"`; else Ok.
+  - `Dispatch(t)`: feature `"dispatch"` missing → Refuse; `schema` differs → Refuse; tool not installed → Refuse `"<Tool> isn't installed on <node>"`; `os == "windows"` and `t == Claude` → Refuse `"Claude Code doesn't run on Windows nodes in v1"`; `os == "linux"`, `t == Claude`, `!LINUX_CLAUDE_PROVEN` → Refuse `"Claude Code on Linux isn't proven yet"`; tool version differs from the reference's → **Warn** with `versions::mismatch`'s text `"<node> runs <Tool> <v1>, the Mac <v2>"` (conflict C1: warn, never refuse, until version sync Phase 6 Task 5 makes it a refusal with Run Anyway); `notchling` differs → Warn `"<node> runs Notchling <v1>, the Mac <v2>"`; two warnings join with `"; "`; else Ok. `Shell` skips the tool rules.
   - `Promote`: `notchling`, `schema` and Claude Code's version must equal the reference's, else Refuse naming the first that differs.
 
 - [ ] **Step 1: Write the failing tests:**
   - `node_id_is_first_16_of_fingerprint`, `rejects_uppercase_or_short_fingerprint`
   - `qualified_splits_at_first_slash` (`0123456789abcdef/codex:a/b` → node `0123456789abcdef`, id `codex:a/b`), `bare_uuid_is_not_qualified`
-  - `cli_output_reads_each_tool`, `junk_is_not_a_version`
-  - `link_refuses_other_proto`, `dispatch_refuses_missing_tool`, `dispatch_refuses_a_tool_mismatch_naming_both` (asserts the exact text `"m1 runs Claude Code 2.1.323, the Mac 2.1.324"`), `dispatch_warns_on_notchling_mismatch`, `dispatch_refuses_linux_claude_until_proven`, `promote_needs_same_build`
-- [ ] **Step 2: Run** `cargo test -p notchling-engine --lib cluster::` and `cargo test -p notchling-engine --lib versions::`. Expected: FAIL.
+  - `tool_of_maps_each_tool_and_shell_has_none`
+  - `link_refuses_other_proto`, `dispatch_refuses_missing_tool`, `absent_tool_still_refuses`, `dispatch_warns_on_a_tool_mismatch_until_phase_6` (asserts `Warn` with the exact text `"m1 runs Claude Code 2.1.323, the Mac 2.1.324"`; the same name version sync Phase 1 Task 10 planned, so that task shrinks to `delegate --machine`'s stderr line and no test is weakened), `dispatch_warns_on_notchling_mismatch`, `dispatch_refuses_linux_claude_until_proven`, `promote_needs_same_build`
+- [ ] **Step 2: Run** `cargo test -p notchling-engine --lib cluster::`. Expected: FAIL.
 - [ ] **Step 3: Implement** the types and `compat`. `Tool`'s display names: Claude Code, Codex, Antigravity, Shell.
-- [ ] **Step 4: Run** both filters, then `PYTHONPATH=tools/guard python3 -m guard featuremap`. Expected: PASS, clean.
+- [ ] **Step 4: Run** `cargo test -p notchling-engine --lib cluster::` and `cargo test -p notchling-engine --lib versions::`, then `PYTHONPATH=tools/guard python3 -m guard featuremap`. Expected: PASS, clean.
 - [ ] **Step 5: Commit** `engine: cluster ids, versions and the compatibility check`.
 
 ### Task 4: The node wire and the node tier
@@ -136,13 +141,13 @@
 - Consumes: `NodeId`, `Versions`, `Role` (Task 3).
 - Produces:
   - `pub enum Msg` (serde `tag = "type"`, `snake_case`):
-    - `Hello { node: NodeId, cluster: Option<String>, versions: Versions, boot_id: String }`
+    - `Hello { node: NodeId, cluster: Option<String>, versions: Versions, boot_id: String, term: Option<Term> }` (the highest term the sender has seen)
     - `HelloOk { node: NodeId, cluster: String, term: Term, home: NodeId }`
-    - `Refused { reason: String }`
+    - `Refused { reason: String, term: Option<Term>, home: Option<NodeId> }` (`reason: "stale_term"` carries the newer term and its home)
     - `Join { secret: String, name: String, fingerprint: String, addrs: Vec<String>, port: u16, versions: Versions }`
     - `JoinPending { item: String }`, `JoinOk { cluster: String, term: Term, home: NodeId, members: Vec<Member> }`
     - `Members { term: Term, home: NodeId, members: Vec<Member> }`
-    - `Call { id: u64, op: String, args: Value, origin: Origin }`, `Reply { id: u64, ok: Option<Value>, err: Option<WireError> }`
+    - `Call { id: u64, op: String, args: Value, origin: Origin, term: Term }` (the sender's current term), `Reply { id: u64, ok: Option<Value>, err: Option<WireError> }`
     - `Event { topic: String, name: String, data: Value }`
     - `Ping { boot_ms: u64 }`, `Pong { echo: u64 }`
     - `#[serde(other)] Unknown`
@@ -151,7 +156,7 @@
   - `pub const MAX_LINE: usize = 1 << 20`; `pub fn encode(msg: &Msg) -> Result<Vec<u8>, String>` (one line ending `\n`, over `MAX_LINE` is an error); `pub fn decode(line: &[u8]) -> Result<Msg, String>`
   - `pub enum Sent { Home, Client, Member }` (the sender's standing as the receiver sees it)
   - `pub struct Rule { pub op: &'static str, pub from: &'static [Sent], pub tier: OriginTier, pub id_field: Option<&'static str> }`
-  - `pub const RULES: &[Rule]` and `pub fn check(op: &str, sender: &SenderFacts, origin: &Origin) -> Result<&'static Rule, Denied>`; `SenderFacts { id: NodeId, role: Role, client: bool, state: MemberState, is_home: bool }`; `enum Denied { NotAMember, Removed, NotAllowed, TierTooHigh }`
+  - `pub const RULES: &[Rule]` and `pub fn check(op: &str, sender: &SenderFacts, origin: &Origin) -> Result<&'static Rule, Denied>`; `SenderFacts { id: NodeId, role: Role, client: bool, state: MemberState, is_home: bool }` (`role` from Task 5's `role_of`); `enum Denied { NotAMember, Removed, NotAllowed, TierTooHigh }` (the term check is the core's, Task 6, before `check`)
   - `pub fn cluster_may_set(switch: &str) -> bool` (true for `acting`, `bridge`, `install`)
 - `RULES` for plan B (later plans append to this table; keep it one table):
   - from `Home`, origin `Node` or `App`: `session.new`, `codex.send`, `agy.open`, `agy.send`, `shell.run`, `shell.stop`, `session.stop`, `codex.stop`, `agy.cancel`, `node.switch.set`, `node.put`, `node.put.end`, `workspace.prepare`, `workspace.return`
@@ -162,7 +167,7 @@
   - from any `Member`, origin `Agent`, to the home only: `cluster.dispatch` with `tool` limited to the delegate form (Task 13 enforces it)
 
 - [ ] **Step 1: Write the failing tests:**
-  - `encodes_one_line_and_round_trips`, `unknown_type_decodes_as_unknown`, `line_over_1mib_is_refused`, `bad_json_is_an_error`
+  - `encodes_one_line_and_round_trips`, `unknown_type_decodes_as_unknown`, `line_over_1mib_is_refused`, `bad_json_is_an_error`, `call_and_hello_carry_term`
   - `home_may_start_sessions`, `worker_may_not_dispatch` (a Worker's `session.new` is `NotAllowed`), `client_app_origin_may_reply`, `non_client_claiming_app_is_refused` (`TierTooHigh`), `removed_member_is_refused`, `unknown_op_is_not_allowed`
   - `cluster_never_sets_vault_or_accounts`
   - `every_rule_names_a_known_op` (each op in `RULES` is in a list the test holds of local-api op names plus the node-only ones; keeps typos out)
@@ -181,21 +186,24 @@
 
 **Interfaces:**
 - Produces:
-  - `pub struct Member { pub id: NodeId, pub name: String, pub role: Role, pub fingerprint: String, pub addrs: Vec<String>, pub port: u16, pub client: bool, pub reference: bool, pub accepts_delegation: bool, pub state: MemberState, pub versions: Option<Versions>, pub desired: Desired, pub joined_ms: i64 }`
+  - `pub struct Member { pub id: NodeId, pub name: String, pub fingerprint: String, pub addrs: Vec<String>, pub port: u16, pub client: bool, pub can_be_master: bool, pub reference: bool, pub accepts_delegation: bool, pub state: MemberState, pub versions: Option<Versions>, pub desired: Desired, pub joined_ms: i64 }`
+  - `pub fn role_of(state: &ClusterState, id: &NodeId) -> Role`: `Home` when `id == state.home`, `Standby` when the member has `can_be_master`, else `Worker`. The role is never stored, so a promote or a move changes it by changing `home` only.
+  - `pub fn can_be_master_default(os: &str) -> bool` (true for `macos`, false otherwise: the maintainer's default, on for the two Macs, off for workers; plan D gates it on disk encryption)
   - `pub enum MemberState { Pending, Active, Removed }`, `pub struct Desired { pub acting: bool, pub bridge: bool, pub install: bool }`
   - `pub struct JobSpec { pub node: NodeId, pub tool: Tool, pub cwd: String, pub args: Value, pub secrets: Vec<String> }` (`secrets` used by plan C)
   - `pub struct Job { pub id: String, pub key: String, pub spec: JobSpec, pub state: JobState, pub term: Term, pub created_ms: i64, pub session: Option<String>, pub detail: Option<String> }`, `pub enum JobState { Dispatching, Running, Done, Failed, Interrupted, Lost }`; job id `"j-"` + first 12 hex of SHA-256 of the key
   - `pub struct Term { pub n: u64, pub node: NodeId }` (`Ord` by `n`, then `node`; a new cluster starts at `Term { n: 1, node: <home> }`; plan E relies on the node half to keep two promotes apart)
-  - `pub struct ClusterState { pub id: String, pub name: String, pub term: Term, pub home: NodeId, pub members: BTreeMap<NodeId, Member>, pub jobs: BTreeMap<String, Job>, pub seq: u64 }`
-  - `pub enum Command { Create { id: String, name: String, home: Member }, ProposeJoin { member: Member, item: String }, Approve { node: NodeId, role: Role, client: bool }, Deny { node: NodeId }, Remove { node: NodeId }, SetMember { node: NodeId, role: Option<Role>, client: Option<bool>, reference: Option<bool>, accepts_delegation: Option<bool>, desired: Option<Desired> }, Versions { node: NodeId, versions: Versions }, Dispatch { key: String, spec: JobSpec }, JobState { id: String, state: JobState, session: Option<String>, detail: Option<String> } }`
+  - `pub struct ClusterState { pub id: String, pub name: String, pub term: Term, pub home: NodeId, pub vault: NodeId, pub members: BTreeMap<NodeId, Member>, pub jobs: BTreeMap<String, Job>, pub seq: u64 }` (`vault` is the node the cluster was created on, whose Keychain holds the vault; it never changes in v1: plan C)
+  - `pub enum Command { Create { id: String, name: String, home: Member }, ProposeJoin { member: Member, item: String }, Approve { node: NodeId, client: bool, can_be_master: bool }, Deny { node: NodeId }, Remove { node: NodeId }, SetMember { node: NodeId, can_be_master: Option<bool>, client: Option<bool>, reference: Option<bool>, accepts_delegation: Option<bool>, desired: Option<Desired> }, Versions { node: NodeId, versions: Versions }, Dispatch { key: String, spec: JobSpec }, JobState { id: String, state: JobState, session: Option<String>, detail: Option<String> } }`
   - `pub struct JournalEntry { pub seq: u64, pub at_ms: i64, pub term: Term, pub command: Command }`
   - `pub fn apply(state: &mut ClusterState, cmd: Command, now_ms: i64) -> Result<(JournalEntry, Vec<Change>), CommandError>`; `pub enum Change { Member(Member), Job(Job), Cluster { term: Term, home: NodeId } }`; `pub enum CommandError { NotActive(NodeId), Unknown(NodeId), Removed(NodeId), BadTransition, Exists }`
   - `pub struct JoinToken { pub cluster: String, pub home: NodeId, pub fingerprint: String, pub addrs: Vec<String>, pub port: u16, pub secret: String }`, `pub fn encode_token(t: &JoinToken) -> String` (`"nlj1."` + base64url JSON, no padding), `pub fn decode_token(s: &str) -> Result<JoinToken, String>`
   - `pub struct Tokens` with `fn issue(&mut self, secret: String, now_ms: i64)` and `fn take(&mut self, secret: &str, now_ms: i64) -> bool` (one-time, `TOKEN_TTL_MS = 600_000`)
-- Rules: a `Dispatch` with a key already in `jobs` returns no change and no journal entry beyond the read; dispatch to a member that isn't Active is `NotActive`; `JobState` moves only forward (Dispatching → Running → Done/Failed/Interrupted/Lost; Dispatching → Failed); `Remove` marks Removed and keeps the row; the home can't be removed.
+- Rules: a `Dispatch` with a key already in `jobs` returns no change and no journal entry beyond the read; dispatch to a member that isn't Active is `NotActive`; `JobState` moves only forward (Dispatching → Running → Done/Failed/Interrupted/Lost; Dispatching → Failed); `Remove` marks Removed and keeps the row; the home can't be removed; `Create` sets `vault` = `home` and gives the home `can_be_master: true`.
 
 - [ ] **Step 1: Write the failing tests:**
-  - `create_sets_home_and_term_one`, `terms_order_by_n_then_node`, `join_is_pending_until_approved`, `deny_drops_the_pending_member`, `home_cannot_be_removed`
+  - `create_sets_home_and_term_one`, `create_sets_vault_to_home`, `terms_order_by_n_then_node`, `join_is_pending_until_approved`, `deny_drops_the_pending_member`, `home_cannot_be_removed`
+  - `role_follows_home_and_can_be_master` (home is Home whatever its switch; a member with the switch is Standby; without, Worker; any number may be Standby), `can_be_master_defaults_on_for_macs_only`
   - `removed_member_is_refused_and_never_dispatched`
   - `same_key_dispatch_is_one_job`, `job_ids_come_from_keys`, `job_state_moves_forward_only`
   - `token_round_trips`, `token_is_one_time_and_expires` (taken once at 0; again false; a fresh one at 600_001 false)
@@ -218,25 +226,27 @@
 - Consumes: Tasks 3 to 5.
 - Produces:
   - `pub enum Input { Tick { boot_ms: u64, wall_ms: i64 }, Linked { peer: NodeId }, Unlinked { peer: NodeId }, Msg { from: NodeId, msg: Msg }, Local { id: u64, cmd: LocalCmd }, LocalDone { call: u64, result: Result<Value, WireError> } }`
-  - `pub enum LocalCmd { Create { name: String, me: Member }, IssueToken { secret: String }, Approve { node: NodeId, role: Role, client: bool }, Deny { node: NodeId }, Remove { node: NodeId }, SetMember { .. as Command::SetMember }, Dispatch { key: String, spec: JobSpec, override_versions: bool }, Forward { node: NodeId, op: String, args: Value, origin: Origin }, JoinWith { token: JoinToken, me: Member } }`
-  - `pub enum Effect { Send { to: NodeId, msg: Msg }, Dial { to: NodeId, addrs: Vec<String>, port: u16, fingerprint: String }, Close { peer: NodeId }, Pins { fingerprints: Vec<String> }, Persist { entry: JournalEntry, changes: Vec<Change> }, Publish { topic: String, name: String, data: Value }, RunLocal { call: u64, op: String, args: Value, origin: Origin }, Answer { local: u64, result: Result<Value, WireError> }, Raise { item: crate::inbox::Item }, Wipe }`
-  - `pub struct NodeCore`: `fn new(me: NodeId, versions: Versions, state: Option<ClusterState>, client: bool) -> NodeCore`, `fn step(&mut self, input: Input) -> Vec<Effect>`, `fn state(&self) -> Option<&ClusterState>`, `fn online(&self) -> BTreeSet<NodeId>`, `fn status(&self) -> Value` (the `cluster.status` reply body of Task 10)
+  - `pub enum LocalCmd { Create { name: String, me: Member }, IssueToken { secret: String }, Approve { node: NodeId, client: bool, can_be_master: bool }, Deny { node: NodeId }, Remove { node: NodeId }, SetMember { .. as Command::SetMember }, Dispatch { key: String, spec: JobSpec }, Forward { node: NodeId, op: String, args: Value, origin: Origin }, JoinWith { token: JoinToken, me: Member } }`
+  - `pub enum Effect { Send { to: NodeId, msg: Msg }, Dial { to: NodeId, addrs: Vec<String>, port: u16, fingerprint: String }, Close { peer: NodeId }, Pins { fingerprints: Vec<String> }, Persist { entry: JournalEntry, changes: Vec<Change> }, Publish { topic: String, name: String, data: Value }, RunLocal { call: u64, op: String, args: Value, origin: Origin }, Answer { local: u64, result: Result<Value, WireError> }, Raise { item: crate::inbox::Item }, SteppedDown { term: Term, home: NodeId }, Wipe }`
+  - `pub struct NodeCore`: `fn new(me: NodeId, versions: Versions, state: Option<ClusterState>, client: bool) -> NodeCore`, `fn step(&mut self, input: Input) -> Vec<Effect>`, `fn state(&self) -> Option<&ClusterState>`, `fn online(&self) -> BTreeSet<NodeId>`, `fn highest_term(&self) -> Option<&Term>`, `fn status(&self) -> Value` (the `cluster.status` reply body of Task 10)
   - consts `PING_MS = 5_000`, `OFFLINE_MS = 20_000`, `CALL_MS = 30_000`, `DIAL_BACKOFF_MS = (1_000, 60_000)`, `DEDUPE_MS = 300_000`
 - Behavior:
   - On `Linked`, send `Hello`. On `Hello`, `compat(Link)`; Refuse → `Refused` + `Close`; a sender that isn't an Active member gets `Refused { reason: "removed" }` if Removed, else `Refused { reason: "not a member" }`. A Removed node that receives `Refused { "removed" }` from its pinned home emits `Wipe`.
+  - Terms: the core keeps the highest term it has seen (journaled with `Persist`, so a restart never forgets it). An incoming `Call` whose `term` is older than that is answered `WireError { code: "stale_term" }` with the newer term and home in its message, never run, and a Publish `cluster.refused`; a `Hello` with an older term gets `Refused { reason: "stale_term", term, home }`. Any message carrying a newer term is adopted: the state's `term` and `home` change, and a node that was the home emits `SteppedDown { term, home }` (plan E stops its moving sessions and keeps their side copies) and stops acting as home at once (no `Dispatch`, no `Members` push).
   - Ping every `PING_MS`; a peer silent for `OFFLINE_MS` goes offline (Publish `cluster.changed`).
-  - A node not linked to the home dials it with backoff; a client node dials every Active member; others only answer.
+  - A node not linked to the home dials it with backoff; a client node and every Can Be Master node dial every Active member (so Standbys hear the home and each other, and an old home that comes back hears a newer term from any member); Workers only answer.
   - `Pins` lists the fingerprints of every Active member (and the joiner during a join) whenever membership changes.
   - The home pushes `Members` to every linked node after a membership change.
-  - `Forward` sends a `Call` with a fresh id; a `Reply` answers the local id; no reply in `CALL_MS` answers `timeout`. An incoming `Call` passes `policy::check` or is answered with a `WireError { code: "forbidden" }` and a Publish `cluster.refused` (the daemon audits it). A repeated `(from, id)` within `DEDUPE_MS` is answered from the first result and never run twice.
-  - `Dispatch` on the home: `apply`; a new job to an online node sends the tool's op (`session.new`, `codex.send` with `draft_folder`, `agy.open`, `shell.run`); an offline node is an error `"<node> is offline"`; `compat(Dispatch)` Refuse is an error unless `override_versions` (the app's Run Anyway); the reply moves the job to Running with its session id or to Failed. On a non-home node `Dispatch` becomes a `Forward` of `cluster.dispatch` to the home.
+  - `Forward` sends a `Call` with a fresh id and the current term; a `Reply` answers the local id; no reply in `CALL_MS` answers `timeout`. An incoming `Call` passes the term check, then `policy::check`, or is answered with a `WireError { code: "forbidden" }` and a Publish `cluster.refused` (the daemon audits it). A repeated `(from, id)` within `DEDUPE_MS` is answered from the first result and never run twice.
+  - `Dispatch` on the home: `apply`; a new job to an online node sends the tool's op (`session.new`, `codex.send` with `draft_folder`, `agy.open`, `shell.run`); an offline node is an error `"<node> is offline"`; `compat(Dispatch)` Refuse is an error, Warn goes with the job and its reply carries `warning`; the reply moves the job to Running with its session id or to Failed. On a non-home node `Dispatch` becomes a `Forward` of `cluster.dispatch` to the home.
 
 - [ ] **Step 1: Write the failing tests** (drive two or three cores by hand, routing `Send` effects):
   - `hello_with_other_proto_is_refused`, `removed_node_gets_removed_and_wipes`
-  - `peer_goes_offline_after_20s_silence`, `node_dials_home_with_backoff`
+  - `peer_goes_offline_after_20s_silence`, `node_dials_home_with_backoff`, `can_be_master_node_dials_every_member`, `worker_only_answers`
   - `call_reply_correlates_and_times_out`, `incoming_call_from_worker_to_dispatch_is_refused`, `duplicate_call_runs_once`
+  - `older_term_call_is_refused` (a Worker that saw term 3 refuses a term 2 call with `stale_term` naming term 3's home, and runs nothing), `newer_term_is_adopted`, `home_seeing_newer_term_steps_down` (emits `SteppedDown`, then refuses to dispatch), `highest_term_survives_restart`
   - `home_pushes_members_on_change`, `pins_follow_membership`
-  - `dispatch_to_offline_node_is_refused`, `dispatch_from_client_goes_through_home`, `run_anyway_overrides_a_version_refusal_only_from_app`
+  - `dispatch_to_offline_node_is_refused`, `dispatch_from_client_goes_through_home`, `tool_mismatch_dispatches_with_a_warning`
 - [ ] **Step 2: Run** `cargo test -p notchling-engine --lib cluster::core`. Expected: FAIL.
 - [ ] **Step 3: Implement.** Keep each file under 600 lines.
 - [ ] **Step 4: Run.** Expected: PASS.
@@ -255,18 +265,19 @@
 - Consumes: `NodeCore`, `Input`, `Effect` (Task 6).
 - Produces (later plans add scenario ops and invariants here):
   - `pub struct Rng(u64)` (SplitMix64): `fn new(seed: u64)`, `fn below(&mut self, n: u64) -> u64`, `fn chance(&mut self, pct: u8) -> bool`
-  - `pub struct World`: `fn new(seed: u64) -> World`, `fn add_node(&mut self, name: &str, client: bool) -> NodeId`, `fn create(&mut self, home: NodeId)`, `fn join(&mut self, node: NodeId, role: Role)`, `fn partition(&mut self, a: NodeId, b: NodeId)`, `fn heal(&mut self)`, `fn crash(&mut self, n: NodeId)`, `fn restart(&mut self, n: NodeId)`, `fn suspend(&mut self, n: NodeId)`, `fn resume(&mut self, n: NodeId)`, `fn local(&mut self, n: NodeId, cmd: LocalCmd) -> u64`, `fn run_for(&mut self, ms: u64)`, `fn trace(&self) -> &[String]`, `fn now(&self) -> u64`
+  - `pub struct World`: `fn new(seed: u64) -> World`, `fn add_node(&mut self, name: &str, client: bool) -> NodeId`, `fn create(&mut self, home: NodeId)`, `fn join(&mut self, node: NodeId, can_be_master: bool)`, `fn partition(&mut self, a: NodeId, b: NodeId)`, `fn heal(&mut self)`, `fn crash(&mut self, n: NodeId)`, `fn restart(&mut self, n: NodeId)`, `fn suspend(&mut self, n: NodeId)`, `fn resume(&mut self, n: NodeId)`, `fn local(&mut self, n: NodeId, cmd: LocalCmd) -> u64`, `fn run_for(&mut self, ms: u64)`, `fn trace(&self) -> &[String]`, `fn now(&self) -> u64`; test-only `fn bump_term(&mut self, to: NodeId)` (a stand-in for plan E's promote, so the term rules are checked before E exists)
   - Each node has its own boot clock: it keeps counting while suspended (the node processes nothing), restarts at 0 with a new boot id after a reboot, and drifts by at most 1 ms per 10 s (seeded).
   - `SimNet`: delay 1 to 50 ms, `drop_pct`, `dup_pct`, partitions; all seeded; delivery order deterministic for a seed.
   - `SimHost` runs `RunLocal`: records every started job as `(node, job, sim_ms)` and answers with a fake session id; `Persist` goes to a per-node in-memory journal that survives `crash`/`restart`.
-  - `pub enum Violation { TwoHomesInTerm { term: Term, a: NodeId, b: NodeId }, TermWentDown { node: NodeId }, JobStartedTwice { job: String }, JobOnTwoNodes { job: String }, DispatchToRemoved { job: String, node: NodeId }, KeyTwoJobs { key: String } }`
-  - `pub fn check(world: &World) -> Result<(), Violation>` (I1 as far as plan B can see: one home per term, terms never go down per node; I2: a job starts on one node, once; plus membership: nothing dispatched after a removal starts; a key maps to one job)
-  - `pub struct Failure { pub seed: u64, pub violation: Violation, pub trace_tail: Vec<String> }`, `pub fn run_seed(seed: u64, steps: usize) -> Result<(), Failure>`: four nodes (one client), weighted random ops (dispatch with a reused key 20% of the time, partition, heal, crash, restart, suspend, resume, remove a Worker, advance time), `check` after every step.
+  - `pub enum Violation { TwoHomesInTerm { term: Term, a: NodeId, b: NodeId }, TermWentDown { node: NodeId }, StaleTermAccepted { node: NodeId, call: String }, JobStartedTwice { job: String }, JobOnTwoNodes { job: String }, DispatchToRemoved { job: String, node: NodeId }, KeyTwoJobs { key: String } }`
+  - `pub fn check(world: &World) -> Result<(), Violation>` (I1 as far as plan B can see: one home per term, terms never go down per node, no node runs a call stamped with a term older than one it had seen; I2: a job starts on one node, once; plus membership: nothing dispatched after a removal starts; a key maps to one job)
+  - `pub struct Failure { pub seed: u64, pub violation: Violation, pub trace_tail: Vec<String> }`, `pub fn run_seed(seed: u64, steps: usize) -> Result<(), Failure>`: four nodes (two Macs with Can Be Master, one of them the home and a client; two Workers), weighted random ops (dispatch with a reused key 20% of the time, partition, heal, crash, restart, suspend, resume, remove a Worker, `bump_term` to the other Mac 5% of the time, advance time), `check` after every step.
 
 - [ ] **Step 1: Write the failing tests:**
   - `same_seed_same_trace`
   - `invariants_hold_over_seeds`: seeds `0..N`, `N` from `NOTCHLING_SIM_SEEDS` (default 200), 300 steps each, under 20 s in debug; on failure the message holds the seed and the last 40 trace lines, and `NOTCHLING_SIM_SEED=<s>` replays one seed.
   - `a_planted_double_start_is_caught`: a test-only `SimHost` flag starts every job twice; `run_seed` returns `JobStartedTwice` (the checker isn't vacuous).
+  - `a_planted_stale_call_is_caught`: a test-only core flag skips the term check on Workers; after a `bump_term` and a heal, `run_seed` returns `StaleTermAccepted`.
   - `suspended_node_clock_keeps_counting`, `rebooted_node_gets_new_boot_id`
 - [ ] **Step 2: Run** `cargo test -p notchling-engine --lib cluster::sim`. Expected: FAIL.
 - [ ] **Step 3: Implement.** No `HashMap`, no system time; the trace is plain text with sim time, node name and the effect.
@@ -289,7 +300,7 @@
   - `pub fn load(cluster_dir: &Path) -> Result<Option<ClusterState>, String>` (no file → `None`, creating nothing)
   - `pub fn save(cluster_dir: &Path, entry: &JournalEntry, changes: &[Change]) -> Result<(), String>` (one IMMEDIATE transaction: the journal row and each changed row)
   - `pub fn wipe(cluster_dir: &Path) -> Result<(), String>` (removes `cluster.db` and its `-wal`/`-shm`, never follows a link)
-  - schema `user_version = CLUSTER_SCHEMA`: `meta(key PRIMARY KEY, value)`, `state(key PRIMARY KEY, value)` (id, name, term, home), `members(id PRIMARY KEY, value)`, `jobs(id PRIMARY KEY, key UNIQUE, value)`, `journal(seq INTEGER PRIMARY KEY, at_ms INTEGER, term INTEGER, command TEXT)`
+  - schema `user_version = CLUSTER_SCHEMA`: `meta(key PRIMARY KEY, value)`, `state(key PRIMARY KEY, value)` (id, name, term, home, vault, the highest term seen), `members(id PRIMARY KEY, value)`, `jobs(id PRIMARY KEY, key UNIQUE, value)`, `journal(seq INTEGER PRIMARY KEY, at_ms INTEGER, term INTEGER, command TEXT)`
   - a `user_version` above `CLUSTER_SCHEMA` → `Err("cluster.db is from a newer Notchling")`, never written
   - `store_class::Class { Node, Cluster }`, `fn table_class(name: &str) -> Option<Class>`, `fn doc_class(name: &str) -> Option<Class>`: in `notchling.db` `meta`, `settings`, `drafts`, `docs` are Node; `inbox` is Cluster (it moves into `cluster.db` in plan D); every doc constant listed in the overview's "notchling.db today" is Node
 
@@ -343,7 +354,7 @@
 
 ### Task 10: The node driver, `cluster.status` and the versions probe
 
-**Zone:** maintainer (`notchlingd`, `local-api`). CAP-NETWORK (listener), CAP-PROCESS (`agy --version`), CAP-FILEWRITE (identity, database).
+**Zone:** maintainer (`notchlingd`, `local-api`). CAP-NETWORK (listener), CAP-FILEWRITE (identity, database). No CAP-PROCESS of its own: tool versions come from version sync's `versions::mac::detect` (files only) and its daemon's agy probe (conflict C2).
 
 **Files:**
 - Create: `crates/notchlingd/src/cluster_node.rs`, `crates/notchlingd/src/cluster_ops.rs`, `crates/notchlingd/src/cluster_versions.rs`
@@ -358,15 +369,15 @@
   - `pub struct ClusterNode`: `fn start(setup: ClusterSetup, room: Arc<dyn Room>, local: Arc<dyn LocalCalls>, transport: Arc<dyn Transport>, audit: AuditLog) -> Arc<ClusterNode>`, `fn local(&self, cmd: LocalCmd) -> Result<Value, ApiError>` (waits up to `CALL_MS`, never on the UI's thread), `fn status(&self) -> Value`, `fn close(&self)`
   - effects: `Persist` → `persist::save` (a save error is logged and the op fails; the in-memory core is not advanced past a failed save); `Publish` → `room.publish`; `Pins` → `Pins::set`; `RunLocal` → `LocalCalls` on a worker thread, then `Input::LocalDone`; `Wipe` → `persist::wipe` and the mirror folder (Task 12)
   - a tick thread every second feeds `Input::Tick` from `boot_ms()` and the wall clock; under a fixture root nothing listens or dials
-  - `cluster.status {}` (`OpSpec::AGENT`): `{"cluster": {"id", "name", "term", "home"} | null, "me": "<node id>", "tailscale": bool, "members": [{"id", "name", "role", "online", "client", "reference", "state", "versions", "load", "desired", "acceptsDelegation"}]}`
+  - `cluster.status {}` (`OpSpec::AGENT`): `{"cluster": {"id", "name", "term", "home", "vault"} | null, "me": "<node id>", "tailscale": bool, "members": [{"id", "name", "role", "canBeMaster", "online", "client", "reference", "state", "versions", "load", "desired", "acceptsDelegation"}]}` (`role` from `role_of`: `home`, `standby`, `worker`)
   - topic `cluster` (agent tier): `cluster.changed` with the same body after any change
-  - `cluster_versions::probe(home: &Path, runner: &dyn VersionRunner) -> Versions`: Claude Code from the native link `~/.local/bin/claude` → `.../versions/<v>` or npm's `@anthropic-ai/claude-code/package.json`; Codex from its standalone `codex-package.json` or npm's `@openai/codex/package.json`; `agy --version` (5 s) only where no file is known, at most every 10 minutes (version-sync design §7); `notchling` is the daemon's own version
+  - `cluster_versions::probe(roots: &versions::mac::Roots, cache: &mut IdentityCache, agy: Option<versions::Version>) -> Versions` (conflict C2): the tool versions are `versions::mac::detect(roots, tool, cache)` for Claude Code, Codex and Antigravity (version sync Phase 1 Task 3; it reads files only, on any OS, since the layouts are the same under a home); agy's version is the one version sync's daemon already asks for (its Phase 1 Task 5: at most every 10 minutes, and on a node that isn't the Mac not at all until version sync's agy knob is verified, its call V2), passed in, else unknown; this module keeps only the node-level fields: `notchling` (the daemon's own version), `proto`, `features`, `schema`, `os`, `arch`. Needs version sync Phase 1 Tasks 2 and 3; if they haven't merged, build them first from that plan as written.
 - [ ] **Step 1: Write the failing tests** (two `ClusterNode`s on one `MemTransport` net, temp data folders, a recording `Room`):
   - `two_nodes_link_and_see_each_other` (after Create and an approved join done through `local`, both statuses list both, online)
   - `status_is_agent_tier`, `status_without_cluster_is_null`
   - `fixture_root_binds_nothing`
   - `failed_save_fails_the_op_and_keeps_state`
-  - `versions_read_from_files_first` (temp home with a fake native link and package files), `agy_version_asked_at_most_every_ten_minutes` (a counting fake runner)
+  - `probe_uses_detect_and_adds_node_fields` (temp home with a fake native link and package files: the tools equal what `detect` returns; nothing is started, as in version sync's `detect_starts_nothing`), `unknown_agy_version_stays_unknown`
 - [ ] **Step 2: Run** `cargo test -p notchling-notchlingd --lib cluster_node` (then `cluster_ops`, `cluster_versions`). Expected: FAIL.
 - [ ] **Step 3: Implement.** No lock held across a send, a save or a local call (crates/AGENTS.md, "Locks held across blocking work").
 - [ ] **Step 4: Run** the three filters and `cargo test -p notchling-local-api`. Expected: PASS.
@@ -384,18 +395,18 @@
 **Interfaces:**
 - Consumes: Tasks 5, 6, 10; `InboxOps::raise`, `Responder` (plan A).
 - Produces (all additive; shapes go in `docs/local-api-ops.md` in Task 19):
-  - `cluster.create {name}` → `{cluster}`: `OpSpec::APP`; this node becomes the home, term 1, `client: true`, `reference: true`.
+  - `cluster.create {name}` → `{cluster}`: `OpSpec::APP`; this node becomes the home (the primary) and the vault node, term 1, `client: true`, `reference: true`, `can_be_master: true`.
   - `cluster.join.token {}` → `{token}`: `OpSpec::AGENT` (every join still needs Allow); on a non-home member it is forwarded to the home.
   - `cluster.join {token}` → `{state: "pending" | "joined"}`: `OpSpec::AGENT`, refused `"this node is already in a cluster"` when it has one.
-  - `cluster.member.set {node, role?, client?, reference?, acceptsDelegation?, desired?}`: `OpSpec::APP`, forwarded to the home from a client node.
+  - `cluster.member.set {node, canBeMaster?, client?, reference?, acceptsDelegation?, desired?}`: `OpSpec::APP`, forwarded to the home from a client node. (Plan D's readiness check gates `canBeMaster: true` on disk encryption and the same home path; until D lands the flag is stored and nothing uses it.)
   - `cluster.remove {node}`: `OpSpec::APP`, forwarded to the home.
-  - Join on the home: `Tokens::take`, `ProposeJoin`, then an inbox item `node-join:<node id>`, kind `node_join`, title `Add <name> to the cluster`, detail `<os> <arch> · <first address> · <node id>`, actions `[Allow "Add as Worker" primary, Deny "Deny"]`, expires in 10 minutes; its responder applies `Approve { role: Worker, client: false }` or `Deny` and answers `true`; the joiner gets `JoinOk` or `Refused`.
+  - Join on the home: `Tokens::take`, `ProposeJoin`, then an inbox item `node-join:<node id>`, kind `node_join`, title `Add <name> to the cluster`, detail `<os> <arch> · <first address> · <node id>` and, for a Mac, `· Can Be Master`, actions `[Allow "Add" primary, Deny "Deny"]`, expires in 10 minutes; its responder applies `Approve { client: false, can_be_master: can_be_master_default(os) }` or `Deny` and answers `true`; the joiner gets `JoinOk` or `Refused`. The maintainer changes either flag later in the cluster view.
   - Headless switches: when a node with no app attached gets `Members` or `HelloOk`, it sets `acting`, `bridge` and `install` to its `desired` (only those three: `policy::cluster_may_set`); a node with an app attached ignores them (the app owns its switches, 0011's note of 2026-11-11). `node.switch.set {switch, on}` from the home does the same at once. Every change is audited `cluster_set:<switch>:<on|off>`.
   - Removal: the home applies `Remove`, pushes `Members`; every node drops the pin; the removed node's next hello gets `Refused { "removed" }` and it wipes (Task 6).
   - `notchling cluster join --token-stdin` reads the token from stdin only; a token in argv is refused `"pass the token on stdin"`.
 
 - [ ] **Step 1: Write the failing tests:**
-  - `join_with_token_raises_inbox_item_and_allow_adds_worker`, `deny_refuses_the_joiner`, `token_is_one_time`, `join_refused_when_already_in_a_cluster`
+  - `join_with_token_raises_inbox_item_and_allow_adds_worker` (a Linux joiner: Worker, Can Be Master off), `allowed_mac_joins_with_can_be_master_on`, `deny_refuses_the_joiner`, `token_is_one_time`, `join_refused_when_already_in_a_cluster`
   - `join_token_from_client_node_is_minted_by_home`
   - `removed_node_is_dropped_and_wipes_on_contact`
   - `home_desired_turns_acting_on_headless_node`, `desired_never_touches_vault_or_accounts`, `node_with_app_ignores_home_desired`, `switch_changes_are_audited`
@@ -446,7 +457,7 @@
 **Interfaces:**
 - Consumes: `LocalCmd::Dispatch` (Task 6), `compat` (Task 3).
 - Produces:
-  - `cluster.dispatch {node, tool, cwd, model?, text?, command?, secrets?, key, runAnyway?}` → `{job, session?, warning?}`: `OpSpec::APP`; `runAnyway` only from the app tier. The agent-tier form (from `notchling delegate --machine`) carries `{node, delegate: [args], key}`, never `runAnyway`, and only to a member with `acceptsDelegation`.
+  - `cluster.dispatch {node, tool, cwd, model?, text?, command?, secrets?, key}` → `{job, session?, warning?}`: `OpSpec::APP`; `warning` carries `compat`'s Warn text (a tool or Notchling version mismatch). No `runAnyway` here: nothing it would override refuses until version sync Phase 6 Task 5, which adds it with the refusal (conflict C1). The agent-tier form (from `notchling delegate --machine`) carries `{node, delegate: [args], key}`, only to a member with `acceptsDelegation`; its warning is printed to stderr before the job's output (version sync Phase 1 Task 10's half that remains).
   - On the Worker: `shell.run {job, cwd, command}` (from the home) runs `/bin/sh -c <command>` in `cwd` in its own process group, environment scrubbed of `NOTCHLING_*` and `CLAUDE_CODE_*`, output to `<data>/cluster/jobs/<job>.log` (0600), and its exit as a `JobState` event; `shell.stop {job}` sends SIGTERM to the group, SIGKILL after 2 s. The row it adds to `sessions.list` has `id` `shell:<job>`, `tool` `shell`, `transcriptPath` the log.
   - `delegate.run {args}` on the Worker runs the engine's delegate there and returns its outcome JSON.
   - engine: `pub fn shell_plan(job: &str, cwd: &str, command: &str, data_dir: &Path) -> Result<ShellPlan, String>` (`cwd` absolute and existing; `ShellPlan { argv, env_remove: Vec<String>, log: PathBuf }`).
@@ -454,10 +465,10 @@
 
 - [ ] **Step 1: Write the failing tests:**
   - `dispatch_on_home_starts_session_on_worker` (a fake `LocalCalls` on the Worker records `session.new {folder}`)
-  - `dispatch_from_client_goes_through_home`, `dispatch_to_offline_node_is_an_error`, `dispatch_refused_by_versions_says_why`, `retry_with_same_key_returns_same_job`, `agent_dispatch_never_runs_anyway`, `agent_dispatch_needs_accepts_delegation`
+  - `dispatch_from_client_goes_through_home`, `dispatch_to_offline_node_is_an_error`, `dispatch_refused_by_versions_says_why` (a missing tool), `tool_mismatch_dispatches_with_a_warning` (the reply's `warning` names both versions), `retry_with_same_key_returns_same_job`, `agent_dispatch_needs_accepts_delegation`, `dispatch_from_stepped_down_home_is_refused` (after a newer term, the old home's `cluster.dispatch` answers `"<name> is primary now"`)
   - `shell_plan_scrubs_env_and_needs_absolute_cwd`
   - `shell_job_runs_and_logs` (`#[cfg(unix)]`, `printf hi` in a temp folder: the log holds `hi`, the job ends Done), `shell_stop_kills_the_group`
-  - `delegate_machine_unknown_is_error`
+  - `delegate_machine_unknown_is_error`, `delegate_machine_prints_the_warning_and_runs`
   - e2e `two_daemons_join_and_run_a_shell_job`: two `notchling daemon` processes over copied fixture roots, `NOTCHLING_CLUSTER_LOOPBACK=1`, free ports, a test-built app-tier path list (`NOTCHLING_APP_TIER_PATHS` to the test client), create, token, join, Allow through `inbox.answer`, dispatch `printf ok`; the log ends with `ok`; both daemons stopped by a guard.
 - [ ] **Step 2: Run** `cargo test -p notchling-notchlingd --lib cluster_dispatch` (then `shell_jobs`; `cargo test -p notchling-engine --lib cluster::shell_job`; `cargo test -p notchling-notchlingd --test cluster_e2e`). Expected: FAIL.
 - [ ] **Step 3: Implement.**
@@ -500,7 +511,7 @@
 **Files:**
 - Create: `crates/engine/src/machines/steps_node.rs`
 - Test: `crates/engine/src/machines/tests_node_steps.rs`, `crates/app/src/machines/model_tests_node.rs`
-- Modify: `crates/engine/src/machines/step.rs` (`StepId::NODE_TAILSCALE`, `NODE_BINARY`, `NODE_SERVICE`, `NODE_JOINED`), `crates/engine/src/machines/catalog.rs` (node steps after `REACHABLE` when `m.node.is_some()`), `crates/engine/src/machines/registry.rs` (`pub node: Option<NodeSettings>` with serde default; `NodeSettings { role: Role }`), `crates/engine/src/machines/mod.rs`, `crates/engine/src/machines/step.rs` (`StepContext` gains `tokens: Arc<dyn ClusterTokens>`; `trait ClusterTokens { fn join_token(&self) -> Result<String, String>; fn cluster_id(&self) -> Option<String>; }`, with a refusing default), `crates/app/src/machines/model.rs` and its view (a "Cluster Node" toggle and role picker on a machine)
+- Modify: `crates/engine/src/machines/step.rs` (`StepId::NODE_TAILSCALE`, `NODE_BINARY`, `NODE_SERVICE`, `NODE_JOINED`), `crates/engine/src/machines/catalog.rs` (node steps after `REACHABLE` when `m.node.is_some()`), `crates/engine/src/machines/registry.rs` (`pub node: Option<NodeSettings>` with serde default; `NodeSettings {}` for now: Can Be Master is not stored here but in the cluster, set at approval by OS and changed in the cluster view, Task 16), `crates/engine/src/machines/mod.rs`, `crates/engine/src/machines/step.rs` (`StepContext` gains `tokens: Arc<dyn ClusterTokens>`; `trait ClusterTokens { fn join_token(&self) -> Result<String, String>; fn cluster_id(&self) -> Option<String>; fn can_be_master(&self, machine: &str) -> Option<bool>; }`, with a refusing default), `crates/app/src/machines/model.rs` and its view (a "Cluster Node" toggle on a machine, and a read-only "Can Be Master" line from `cluster.status`; plan D Task 12 adds its readiness steps there)
 
 **Interfaces:**
 - Produces the four steps:
@@ -515,7 +526,7 @@
   - `service_fix_installs_and_loads_linux`, `service_fix_installs_and_loads_macos`, `linger_off_needs_admin_fix`
   - `join_fix_sends_token_on_stdin_only` (no recorded argv holds the token; output masked)
   - `node_steps_absent_without_node_settings`
-  - app: `node_toggle_sets_settings_and_role`
+  - app: `node_toggle_sets_settings`, `can_be_master_line_reads_cluster_status`
 - [ ] **Step 2: Run** `cargo test -p notchling-engine --lib machines::tests_node_steps` and `cargo test -p notchling-app --lib machines::model_tests_node`. Expected: FAIL.
 - [ ] **Step 3: Implement.** The `ClusterTokens` the Machines window gets asks the local daemon `cluster.join.token` and `cluster.status` (agent tier is enough: Task 11).
 - [ ] **Step 4: Run** both and `cargo test -p notchling-engine --lib machines::`. Expected: PASS.
@@ -541,13 +552,13 @@
 - Consumes: `cluster.status`, topic `cluster`, `cluster.create`, `cluster.member.set`, `cluster.remove`, `cluster.join.token` (Tasks 10, 11).
 - Produces:
   - `ClusterModel::from_status(status: &Value, me: &str) -> ClusterModel`, `fn rows(&self) -> Vec<NodeRow>`, `fn can_create(&self) -> bool`
-  - `NodeRow { id, name, role: &'static str ("Home", "Standby", "Worker"), online: bool, os: String, cpu: Option<u8>, mem: Option<(u64, u64)>, tools: Vec<(String, Option<String>)>, warnings: Vec<String>, desired: (bool, bool, bool), me: bool }`; `warnings` come from `compat` against the reference node
-  - the view: a sheet from the footer button, one row per node (name, role, online dot, OS, CPU and memory, tool versions, warnings), row menu Set Role (Worker, Standby), Acting On/Off, Remove (confirm); Create Cluster when there is none; Copy Join Token
+  - `NodeRow { id, name, role: &'static str ("Primary", "Standby", "Worker"), can_be_master: bool, online: bool, os: String, cpu: Option<u8>, mem: Option<(u64, u64)>, tools: Vec<(String, Option<String>)>, warnings: Vec<String>, desired: (bool, bool, bool), me: bool }`; `warnings` come from `compat` against the reference node
+  - the view: a sheet from the footer button, one row per node (name, role, online dot, OS, CPU and memory, tool versions, warnings), row menu Can Be Master (a check), Acting On/Off, Remove (confirm); Create Cluster when there is none; Copy Join Token. Plans D and E add Move to <name> Now and Take Back to this menu.
   - Sidebar: a remote row's meta line shows the node's name; an offline node's rows are dimmed and its reply box says `"<node> is offline"`
   - parts `"Cluster Button"`, `"Cluster View"`, `"Node Row"`
 
 - [ ] **Step 1: Write the failing tests:**
-  - `status_maps_roles_and_online`, `compat_warning_shows_on_row`, `no_cluster_offers_create`, `this_mac_is_marked`
+  - `status_maps_roles_and_online` (labels Primary, Standby, Worker; never "Home"), `can_be_master_check_sends_member_set`, `compat_warning_shows_on_row`, `no_cluster_offers_create`, `this_mac_is_marked`
   - `remote_row_label_is_node_name`, `offline_remote_row_disables_reply`
 - [ ] **Step 2: Run** `cargo test -p notchling-app --lib cluster::` and `chat::sidebar_node_tests`. Expected: FAIL.
 - [ ] **Step 3: Implement** the model, the feed (calls off the UI thread, like `inbox/feed.rs`), the view with kit tokens and menus (`menu_panel`), and a `ViewSpec` `cluster` in `renders.rs` over a fixture status.
@@ -566,13 +577,13 @@
 **Interfaces:**
 - Consumes: `cluster.status`, `cluster.dispatch`, `cluster.follow`, qualified ids (Tasks 10 to 14).
 - Produces:
-  - `RunOn { nodes: Vec<RunOnRow> }` with `RunOnRow { id, name, online, reason: Option<String>, warning: Option<String> }`; online nodes first, this Mac first of all; a refused node shows its reason and can't be picked unless the reason is a version mismatch, where Run Anyway is offered
+  - `RunOn { nodes: Vec<RunOnRow> }` with `RunOnRow { id, name, online, reason: Option<String>, warning: Option<String> }`; online nodes first, this Mac first of all; a refused node shows its reason and can't be picked; a node with a version mismatch can be picked and shows the warning under its name (no Run Anyway until version sync Phase 6)
   - `NewSession::start` sends `cluster.dispatch` with a fresh key (`ns-<uuid>`) when the node isn't this Mac, else today's request
   - `chat::remote::follow_due(selected: Option<&Session>, last_ms: i64, now_ms: i64) -> bool`
   - the shell job adapter: the log as one growing code block, a Stop button (`shell.stop`), no reply box
 
 - [ ] **Step 1: Write the failing tests:**
-  - `run_on_lists_online_nodes_first_with_reasons`, `version_mismatch_offers_run_anyway`, `start_on_worker_sends_dispatch_with_key`, `send_repository_sets_code_send`
+  - `run_on_lists_online_nodes_first_with_reasons`, `version_mismatch_is_pickable_with_warning`, `start_on_worker_sends_dispatch_with_key`, `send_repository_sets_code_send`
   - `remote_row_uses_mirror_transcript`, `follow_is_due_every_minute_while_selected`, `shell_job_row_shows_log_tail`
 - [ ] **Step 2: Run** `cargo test -p notchling-app --lib sheets::new_session_run_on_tests` and `chat::remote_tests`. Expected: FAIL.
 - [ ] **Step 3: Implement.**
@@ -600,7 +611,7 @@
 **Zone:** maintainer (AGENTS files, `ARCHITECTURE.md`, `docs/policies/`, `docs/feature-map.md`). No CAP.
 
 **Files:**
-- Modify: `crates/AGENTS.md` (a "Cluster" bullet in Architecture in one pass: the core, the driver, the node tier, the mirror; "Things that bit before" stays as is), `crates/engine/AGENTS.md`, `crates/notchlingd/AGENTS.md`, `crates/app/AGENTS.md` (the why of each new file in their format), `ARCHITECTURE.md` (the Remote computers row points at 0021), `docs/local-api-ops.md` (every new op and topic with its shape), `docs/policies/privacy.md` (what crosses machines: session lists, transcript tails, commands and folders of dispatched work, git bundles; only over Tailscale and pinned TLS; nothing to a third party), `docs/feature-map.md` (a Cluster row), `CHANGELOG.md` (`[Unreleased]` → Added)
+- Modify: `crates/AGENTS.md` (a "Cluster" bullet in Architecture in one pass: the core, the driver, the node tier, the mirror; "Things that bit before" stays as is), `crates/engine/AGENTS.md`, `crates/notchlingd/AGENTS.md`, `crates/app/AGENTS.md` (the why of each new file in their format), `ARCHITECTURE.md` (the Remote computers row points at the nodes decision, by its number once merged), `docs/local-api-ops.md` (every new op and topic with its shape), `docs/policies/privacy.md` (what crosses machines: session lists, transcript tails, commands and folders of dispatched work, git bundles; only over Tailscale and pinned TLS; nothing to a third party), `docs/feature-map.md` (a Cluster row), `CHANGELOG.md` (`[Unreleased]` → Added)
 
 - [ ] **Step 1: Write the docs.**
 - [ ] **Step 2: Run** `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings`, `cargo test --workspace --locked`, `cargo deny check`. Expected: clean, PASS.
@@ -610,4 +621,4 @@
 
 ### Checkpoint 3: the live check (maintainer only)
 
-Gated by the overview's M1 (Tailscale), M2 (Linux binary), M3 (the node user). The maintainer installs the build, creates the cluster on the Mac, adds a VPS as a node in Machines, allows the join, then: a shell job `uname -a` on it, a Codex session on it, both seen in Chat and on the phone. Claude Code on a Linux node waits for M4.
+Gated by the overview's M1 (Tailscale), M2 (Linux binary), M3 (the node user). The maintainer installs the build, creates the cluster on m5 (the laptop, primary), allows m1's join (it shows as a Standby with Can Be Master on; nothing is sent to it before plan D), adds a VPS as a node in Machines, allows the join (a Worker), then: a shell job `uname -a` on it, a Codex session on it, both seen in Chat and on the phone. Claude Code on a Linux node waits for M4.
