@@ -34,8 +34,7 @@ fn an_html_file_opens_as_a_page_and_other_text_stays_text() {
 #[test]
 fn a_file_named_html_that_is_not_text_goes_to_the_system() {
     let s = Scratch::new("html-binary");
-    let fake = s.write("site/blob.html", "");
-    std::fs::write(&fake, [0u8, 1, 2, 0, 255]).unwrap();
+    let fake = s.write("site/blob.html", "\0\u{1}\u{2}\0");
     assert_eq!(opens(&fake), Opens::System(fake.clone()));
     assert_eq!(kind(&fake, &[0, 1]), Kind::Other);
     assert_eq!(kind(Path::new("a/x.html"), b"<p>"), Kind::Html);
@@ -95,16 +94,18 @@ fn a_page_is_served_from_its_own_folder_and_a_gone_file_says_so() {
 #[test]
 fn the_view_notices_when_the_file_changes() {
     let s = Scratch::new("html-stamp");
-    let html = s.write("index.html", "one");
+    let html = s.path().join("index.html");
     let mut view = HtmlView::file(html.clone(), None);
     assert!(view.is_page());
     assert!(!view.changes);
+    assert_eq!(view.stamp, None);
     assert!(!view.moved());
-    std::fs::write(&html, "one and more").unwrap();
-    assert!(view.moved());
+    s.write("index.html", "one");
+    assert!(view.moved(), "the file appeared");
     assert!(!view.moved());
-    std::fs::remove_file(&html).unwrap();
-    assert!(view.moved());
+    s.write("index.html", "one and more");
+    assert!(view.moved(), "the size changed");
+    assert!(!view.moved());
     assert_eq!(view.page_tip(), "Show as Page");
     assert_eq!(view.other_tip(), "Show Source");
     let git = HtmlView::git(html, Look::Source, None);
