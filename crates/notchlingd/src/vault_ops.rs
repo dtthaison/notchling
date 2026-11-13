@@ -46,6 +46,7 @@
 //! names used); the server logs every app-tier call.
 
 use crate::acting_ops::Room;
+use crate::inbox_ops::InboxOps;
 use crate::layout::Layout;
 use crate::op_group::OpGroup;
 pub use crate::switches::{SwitchFlag, VAULT_OFF};
@@ -120,6 +121,7 @@ pub struct VaultOps {
     timing: VaultTiming,
     /// What the kernel says about a caller, for the approval prompt.
     processes: Arc<dyn Processes>,
+    inbox: Option<Arc<InboxOps>>,
 }
 
 fn failed(message: impl Into<String>) -> ApiError {
@@ -141,6 +143,7 @@ impl VaultOps {
             requests: Arc::new(Waiters::new("vault-request-", MAX_REQUESTS)),
             timing: VaultTiming::default(),
             processes: Arc::new(SystemProcesses),
+            inbox: None,
         };
         // Off forgets at once, not at the next call: a value must not sit in memory, nor an agent
         // wait for an approval, after the user turned the vault off.
@@ -163,7 +166,12 @@ impl VaultOps {
 
     /// The daemon's: its own vault list ([`Layout::vault_index`]), the system's Keychain item
     /// (never under a fixture root, whatever the switch says) and its audit log.
-    pub fn for_daemon(layout: &Layout, switch: Arc<SwitchFlag>, room: Arc<dyn Room>) -> VaultOps {
+    pub fn for_daemon(
+        layout: &Layout,
+        switch: Arc<SwitchFlag>,
+        room: Arc<dyn Room>,
+        inbox: Arc<InboxOps>,
+    ) -> VaultOps {
         let keychain: Box<dyn VaultKeychain> = if layout.fixture {
             Box::new(Unsupported(
                 "a daemon over a fixture root reads no Keychain",
@@ -177,6 +185,12 @@ impl VaultOps {
             room,
         )
         .with_audit(AuditLog::new(layout.audit_path()))
+        .with_inbox(inbox)
+    }
+
+    pub fn with_inbox(mut self, inbox: Arc<InboxOps>) -> VaultOps {
+        self.inbox = Some(inbox);
+        self
     }
 
     /// Writes agent-tier calls to this log.
@@ -452,6 +466,8 @@ impl VaultOps {
 
 #[path = "vault_asks.rs"]
 mod asks;
+#[path = "vault_inbox.rs"]
+mod inbox;
 
 #[cfg(test)]
 #[path = "vault_ops_pending_tests.rs"]
@@ -459,6 +475,9 @@ mod pending_tests;
 #[cfg(test)]
 #[path = "vault_ops_tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "vault_ops_inbox_tests.rs"]
+mod vault_ops_inbox_tests;
 
 impl OpGroup for VaultOps {
     fn spec(&self, op: &str) -> Option<OpSpec> {

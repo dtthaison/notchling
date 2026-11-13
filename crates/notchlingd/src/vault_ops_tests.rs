@@ -93,6 +93,15 @@ impl Setup {
 }
 
 pub(super) fn setup(tag: &str, on: bool) -> Setup {
+    setup_with(tag, on, None, None)
+}
+
+pub(super) fn setup_with(
+    tag: &str,
+    on: bool,
+    inbox: Option<Arc<crate::inbox_ops::InboxOps>>,
+    timing: Option<VaultTiming>,
+) -> Setup {
     let dir = std::env::temp_dir().join(format!("nl-vault-ops-{tag}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
@@ -101,15 +110,18 @@ pub(super) fn setup(tag: &str, on: bool) -> Setup {
     let switch = SwitchFlag::off(VAULT, VAULT_OFF);
     switch.set(on);
     let store = VaultStore::new(VaultIndex::in_data(&dir), Box::new(item.clone()));
-    let timing = VaultTiming {
+    let timing = timing.unwrap_or(VaultTiming {
         approval_wait: Duration::from_secs(10),
         request_wait: Duration::from_secs(10),
         slice: Duration::from_millis(10),
-    };
-    let ops = VaultOps::new(switch.clone(), store, room.clone())
+    });
+    let mut ops = VaultOps::new(switch.clone(), store, room.clone())
         .with_audit(AuditLog::new(dir.join("audit.jsonl")))
         .with_timing(timing)
         .with_processes(Arc::new(super::pending_tests::FakeProcesses));
+    if let Some(inbox) = inbox {
+        ops = ops.with_inbox(inbox);
+    }
     Setup {
         ops: Arc::new(ops),
         room,

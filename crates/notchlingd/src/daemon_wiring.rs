@@ -371,11 +371,13 @@ impl Wired {
         acting.attach_catalog(catalog.clone());
         // The limit watchers, over the same stores. The loop calls them only while `accounts` is
         // on; `cost.summary` only reads transcripts and needs no switch.
+        let inbox = InboxOps::new(layout.data_dir.clone(), room.clone());
         let limits = Arc::new(LimitsOps::for_daemon(
             layout,
             on.clone(),
             room.clone(),
             catalog.shared_catalog(),
+            inbox.clone(),
         ));
         limits.set_claude(
             Arc::new(ClaudeLimits::new(on.clone(), claude_store)),
@@ -402,11 +404,11 @@ impl Wired {
             Box::new(move || agy_on.is_on() && agy_idle.idle_for_auto_switch()),
         );
 
-        let inbox = InboxOps::new(layout.data_dir.clone(), room.clone());
         let vault = Arc::new(VaultOps::for_daemon(
             layout,
             switches.vault.clone(),
             room.clone(),
+            inbox.clone(),
         ));
         let binary = std::env::current_exe().and_then(std::fs::canonicalize).ok();
         let mut install = InstallOps::new(
@@ -473,10 +475,10 @@ impl Wired {
         self.codex.close();
         self.agy.close();
         self.providers.close();
-        self.inbox.close();
         self.vault.close();
         self.bridge.close();
         self.limits.close();
+        self.inbox.close();
     }
 
     /// The accounts switch (tests).

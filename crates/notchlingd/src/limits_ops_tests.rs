@@ -500,3 +500,75 @@ fn the_codex_watcher_is_notify_by_default() {
     ops.tick_at(NOW + 1.0);
     assert_eq!(codex.1.load(Ordering::SeqCst), 1);
 }
+
+fn inbox_app() -> notchling_local_api::Caller {
+    notchling_local_api::Caller {
+        tier: notchling_local_api::Tier::App,
+        client: notchling_local_api::ClientKind::App,
+        peer: None,
+        pid: None,
+    }
+}
+
+fn inbox_items(inbox: &crate::inbox_ops::InboxOps) -> Vec<Value> {
+    use crate::op_group::OpGroup;
+    inbox.flush();
+    let list = inbox
+        .call(
+            &inbox_app(),
+            notchling_local_api::ops::INBOX_LIST,
+            &json!({}),
+        )
+        .unwrap();
+    list["items"].as_array().unwrap().clone()
+}
+
+#[test]
+fn limit_notice_raises_done_item() {
+    use crate::inbox_ops::InboxOps;
+    use crate::op_group::OpGroup;
+    let (tmp, flag, _room, ops) = rig();
+    let inbox = InboxOps::new(tmp.path("inbox"), Arc::new(FakeRoom::default()));
+    let ops = ops.with_inbox(inbox.clone());
+    let claude = Arc::new(Claude::default());
+    *claude.me.lock().unwrap() = 92.0;
+    ops.config().set_mode(&CLAUDE, LimitMode::Notify).unwrap();
+    ops.set_claude(claude.clone(), Arc::new(NoJobs));
+    flag.set(true);
+    assert!(ops.tick_at(NOW));
+    let items = inbox_items(&inbox);
+    assert_eq!(items.len(), 1);
+    let item = &items[0];
+    assert_eq!(item["kind"], "limit_notice");
+    assert!(item["title"]
+        .as_str()
+        .unwrap()
+        .contains("at 92% of its 5-hour limit"));
+    assert_eq!(item["state"], "open");
+    assert_eq!(
+        item["actions"],
+        json!([{"id": "done", "label": "Done", "primary": false}])
+    );
+    let id = item["id"].as_str().unwrap().to_string();
+    assert!(id.starts_with("limit:"));
+    let got = inbox
+        .call(
+            &inbox_app(),
+            notchling_local_api::ops::INBOX_ANSWER,
+            &json!({"id": id, "action": "done"}),
+        )
+        .unwrap();
+    assert_eq!(got["answered"], true);
+}
+
+#[test]
+fn two_limit_notices_are_two_items() {
+    use crate::inbox_ops::InboxOps;
+    let (tmp, _flag, _room, ops) = rig();
+    let inbox = InboxOps::new(tmp.path("inbox"), Arc::new(FakeRoom::default()));
+    let ops = ops.with_inbox(inbox.clone());
+    let say = ops.announcer();
+    say("one");
+    say("one");
+    assert_eq!(inbox_items(&inbox).len(), 2);
+}

@@ -36,14 +36,17 @@
 //! - Every message the watchers say goes out as `limits.notice {"at", "text"}` on the `limits`
 //!   topic (app tier), for the app to show.
 
+use crate::acting_ops::now_ms;
 use crate::acting_ops::Room;
 use crate::cost_ops;
+use crate::inbox_ops::InboxOps;
 use crate::layout::Layout;
 use crate::limits_usage::{ClaudeUsage, LIMITS_USAGE};
 use crate::op_group::OpGroup;
 use crate::switches::SwitchFlag;
 use notchling_engine::catalog::Catalog;
 use notchling_engine::cost::CostService;
+use notchling_engine::inbox::{Action, ActionId, Item, Kind, Source, State};
 use notchling_engine::limits::claude::Announce;
 use notchling_engine::limits::mode::{LimitConfig, LimitMode, CLAUDE, PROVIDERS};
 use notchling_engine::limits::provider::Setup;
@@ -52,7 +55,7 @@ use notchling_engine::limits::{ClaudeWatcher, Observed, ProviderLimitWatcher};
 use notchling_local_api::{ApiError, Caller, ErrorCode, OpSpec, Tier};
 use serde_json::{json, Value};
 use std::collections::{HashMap, VecDeque};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{channel, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread::JoinHandle;
@@ -147,9 +150,33 @@ pub struct LimitsOps {
     /// `limits.usage`: each Claude Code account's limits.
     claude_usage: ClaudeUsage,
     now: Arc<dyn Fn() -> f64 + Send + Sync>,
+    inbox: Option<Arc<InboxOps>>,
     tick: Duration,
     stop: Mutex<Option<Sender<()>>>,
     thread: Mutex<Option<JoinHandle<()>>>,
+}
+
+fn limit_item(id: String, text: &str, created_ms: i64) -> Item {
+    Item {
+        id,
+        kind: Kind::LimitNotice,
+        title: text.chars().take(120).collect(),
+        detail: String::new(),
+        source: Source::default(),
+        created_ms,
+        expires_ms: None,
+        actions: vec![Action {
+            id: ActionId::Done,
+            label: "Done".to_string(),
+            primary: false,
+        }],
+        state: State::Open,
+        answer: None,
+        answered_by: None,
+        seen: false,
+        open: None,
+        closed_ms: None,
+    }
 }
 
 fn system_now() -> f64 {
@@ -192,6 +219,7 @@ impl LimitsOps {
             unpriced: cost_ops::UnpricedLog::new(),
             claude_usage: ClaudeUsage::default(),
             now: Arc::new(system_now),
+            inbox: None,
             tick: TICK_EVERY,
             stop: Mutex::new(None),
             thread: Mutex::new(None),
@@ -206,6 +234,7 @@ impl LimitsOps {
         accounts: Arc<SwitchFlag>,
         room: Arc<dyn Room>,
         catalog: Arc<Catalog>,
+        inbox: Arc<InboxOps>,
     ) -> LimitsOps {
         let config = if layout.socket_given {
             LimitConfig::in_memory()
@@ -218,6 +247,12 @@ impl LimitsOps {
             cost_ops::CostSetup::from_layout(layout, catalog).service(),
             room,
         )
+        .with_inbox(inbox)
+    }
+
+    pub fn with_inbox(mut self, inbox: Arc<InboxOps>) -> LimitsOps {
+        self.inbox = Some(inbox);
+        self
     }
 
     /// A fixed clock (tests).
@@ -247,10 +282,12 @@ impl LimitsOps {
     }
 
     /// Where the watchers' messages go: remembered for `limits.status`, and sent as an event.
-    fn announcer(&self) -> Announce {
+    pub(crate) fn announcer(&self) -> Announce {
         let notices = self.notices.clone();
         let room = self.room.clone();
         let now = self.now.clone();
+        let inbox = self.inbox.clone();
+        let raised = AtomicU64::new(0);
         Arc::new(move |text: &str| {
             let at = now();
             let mut list = lock(&notices);
@@ -260,6 +297,14 @@ impl LimitsOps {
             }
             drop(list);
             room.publish(TOPIC_LIMITS, EVENT_NOTICE, &json!({"at": at, "text": text}));
+            if let Some(inbox) = &inbox {
+                let created_ms = now_ms();
+                let seq = raised.fetch_add(1, Ordering::SeqCst);
+                inbox.raise(
+                    limit_item(format!("limit:{created_ms}:{seq}"), text, created_ms),
+                    None,
+                );
+            }
         })
     }
 
