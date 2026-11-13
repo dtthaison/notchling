@@ -18,13 +18,16 @@ String compactTokens(int tokens) {
 /// with a small bar, the account's 5h and week limits). The facts line scrolls sideways when it does not fit; it never
 /// wraps, so no single item is left alone on a second line. The full numbers are in each fact's tooltip (tap or hold).
 class ChatHeaderView extends StatelessWidget {
-  const ChatHeaderView({super.key, required this.session, required this.muted, required this.onToggleMute, this.onOpenMacs});
+  const ChatHeaderView({super.key, required this.session, required this.muted, required this.onToggleMute, this.onOpenMacs, this.onBack});
   final Session session;
   final bool muted;
   final VoidCallback onToggleMute;
 
   /// The laptop button (paired Macs); the generic app bar is gone on this tab, so its action lives here.
   final VoidCallback? onOpenMacs;
+
+  /// Shown when the chat is a page pushed over the session list (a phone); the wide layout has the list beside it.
+  final VoidCallback? onBack;
 
   @override
   Widget build(BuildContext context) {
@@ -48,7 +51,7 @@ class ChatHeaderView extends StatelessWidget {
       container: true,
       label: '${session.name}, ${session.project}, ${session.state.label(l10n)}, $control',
       child: Container(
-        padding: const EdgeInsets.fromLTRB(Space.lg, Space.sm, Space.xs, Space.sm),
+        padding: EdgeInsets.fromLTRB(onBack == null ? Space.lg : Space.xs, Space.sm, Space.xs, Space.sm),
         decoration: BoxDecoration(color: kit.window, border: Border(bottom: BorderSide(color: kit.hairline))),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -56,6 +59,13 @@ class ChatHeaderView extends StatelessWidget {
             Row(
               crossAxisAlignment: CrossAxisAlignment.center,
               children: <Widget>[
+                if (onBack != null)
+                  IconButton(
+                    onPressed: onBack,
+                    tooltip: MaterialLocalizations.of(context).backButtonTooltip,
+                    icon: const BackButtonIcon(),
+                    color: kit.textMuted,
+                  ),
                 KitAvatar(name: session.name, size: 36, badge: StatusDot(state: session.state, size: 12, ring: true)),
                 const SizedBox(width: Space.md),
                 Expanded(

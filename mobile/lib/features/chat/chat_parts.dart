@@ -642,56 +642,62 @@ class PendingBubble extends StatelessWidget {
     final Kit kit = Kit.of(context);
     final AppL10n l10n = AppL10n.of(context);
     final bool shell = RegExp(r'^\s*!').hasMatch(text);
-    return Align(
-      alignment: Alignment.centerRight,
-      child: FractionallySizedBox(
-        widthFactor: 0.82,
-        alignment: Alignment.centerRight,
-        // Loosens the 82% box so the bubble hugs its text like UserBubble; without it the bubble filled the box
-        // while sending and shrank once the transcript had the message.
-        child: Align(
-          alignment: Alignment.centerRight,
-          child: AnimatedOpacity(
-            duration: motionDuration(context),
-            opacity: failed ? 1 : 0.75,
-            child: Surface(
-              level: 0,
-              fill: shell ? kit.shellWash : kit.accentWash,
-              radius: BorderRadius.only(topLeft: Radius.circular(Radii.bubble), topRight: Radius.circular(Radii.bubble), bottomLeft: Radius.circular(Radii.bubble), bottomRight: Radius.circular(Radii.bubbleTail)),
-              outline: failed ? kit.danger : null,
-              padding: const EdgeInsets.symmetric(horizontal: Space.lg, vertical: Space.md),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                mainAxisSize: MainAxisSize.min,
-                children: <Widget>[
-                  shell ? Text(text, style: kit.mono) : MarkdownText(text),
-                  const SizedBox(height: Space.xs),
-                  if (!failed)
-                    Text(l10n.chatSending, style: kit.meta)
-                  else
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: <Widget>[
-                        Flexible(
-                          child: Text(
-                            reason ?? l10n.chatSendFailed,
-                            style: kit.meta.copyWith(color: kit.danger),
-                          ),
-                        ),
-                        TextButton(onPressed: onRetry, child: Text(l10n.retry)),
-                        IconButton(
-                          onPressed: onDiscard,
-                          tooltip: l10n.close,
-                          icon: Icon(Icons.close, size: 18, color: kit.textMuted),
-                        ),
-                      ],
-                    ),
-                ],
-              ),
-            ),
+    final BorderRadius radius = BorderRadius.only(topLeft: Radius.circular(Radii.bubble), topRight: Radius.circular(Radii.bubble), bottomLeft: Radius.circular(Radii.bubble), bottomRight: Radius.circular(Radii.bubbleTail));
+    // The bubble is drawn exactly like the UserBubble that replaces it (same fill, padding, opacity, text, 82% at
+    // most). "Sending" sits beside it, not inside or under it: the list is anchored at the bottom, so any height that
+    // goes away when the Mac's transcript has the message would move the bubble. Only a failure, which needs its
+    // buttons, goes underneath.
+    return LayoutBuilder(
+      builder: (BuildContext context, BoxConstraints box) {
+        final Widget bubble = ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: box.maxWidth * 0.82),
+          child: Surface(
+            level: 0,
+            fill: shell ? kit.shellWash : kit.accentWash,
+            radius: radius,
+            outline: failed ? kit.danger : null,
+            padding: const EdgeInsets.symmetric(horizontal: Space.lg, vertical: Space.md),
+            child: shell ? Text(text, style: kit.mono) : MarkdownText(text),
           ),
-        ),
-      ),
+        );
+        if (!failed) {
+          return Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: <Widget>[
+              Flexible(
+                child: Text(l10n.chatSending, style: kit.meta, textAlign: TextAlign.end, maxLines: 1, overflow: TextOverflow.ellipsis),
+              ),
+              const SizedBox(width: Space.sm),
+              bubble,
+            ],
+          );
+        }
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            bubble,
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                Flexible(
+                  child: Text(
+                    reason ?? l10n.chatSendFailed,
+                    style: kit.meta.copyWith(color: kit.danger),
+                  ),
+                ),
+                TextButton(onPressed: onRetry, child: Text(l10n.retry)),
+                IconButton(
+                  onPressed: onDiscard,
+                  tooltip: l10n.close,
+                  icon: Icon(Icons.close, size: 18, color: kit.textMuted),
+                ),
+              ],
+            ),
+          ],
+        );
+      },
     );
   }
 }

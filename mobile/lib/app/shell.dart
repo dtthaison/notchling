@@ -2,7 +2,9 @@ import 'dart:async';
 import 'dart:io' show Platform;
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart' show Ticker;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/net/bridge_client.dart';
@@ -460,18 +462,66 @@ class KeyboardLift extends StatefulWidget {
   State<KeyboardLift> createState() => _KeyboardLiftState();
 }
 
-class _KeyboardLiftState extends State<KeyboardLift> {
+class _KeyboardLiftState extends State<KeyboardLift> with SingleTickerProviderStateMixin {
   /// How long the inset must hold still before the list's layout is updated.
   static const Duration settleAfter = Duration(milliseconds: 90);
+
+  /// Android draws the keyboard window itself, a frame or two before Flutter has drawn the inset it was told about,
+  /// so a composer that follows the reported inset trails the keyboard and is covered by it while it rises (iOS keeps
+  /// the two in step). On Android the composer is drawn this far ahead along the inset's current speed, every vsync
+  /// rather than at the ~80 Hz the insets arrive at. Measured on a 120 Hz Redmi: insets every 10-13 ms.
+  static const double leadMs = 22;
+
+  /// A step that stops for this long has ended; prediction stops and the reported inset is drawn as is.
+  static const int quietMs = 40;
+
+  static final bool _predict = defaultTargetPlatform == TargetPlatform.android;
 
   double _below = 0;
   double _lastLift = 0;
   Timer? _settle;
 
+  /// What the composer is drawn at: the reported lift, or on Android the predicted one.
+  final ValueNotifier<double> _shown = ValueNotifier<double>(0);
+  late final Ticker _ticker = createTicker(_tick);
+  double _sampleInset = 0;
+  double _velocity = 0; // inset px per ms
+  int _sampleAt = 0;
+  double _reserved = 0;
+
+  /// The tallest keyboard seen, so a prediction never draws the composer above where the keyboard will stop.
+  double _tallest = 0;
+
   @override
   void initState() {
     super.initState();
     widget.controller.settled.addListener(_onSettled);
+  }
+
+  void _sample(double inset) {
+    final int now = DateTime.now().microsecondsSinceEpoch;
+    if (inset == _sampleInset) return;
+    final double elapsedMs = (now - _sampleAt) / 1000;
+    final bool fresh = elapsedMs > 0 && elapsedMs < 60;
+    _velocity = fresh ? (inset - _sampleInset) / elapsedMs : 0;
+    _sampleInset = inset;
+    _sampleAt = now;
+    if (inset > _tallest && _velocity <= 0) _tallest = inset;
+    if (!_ticker.isActive) unawaited(_ticker.start());
+  }
+
+  void _tick(Duration _) {
+    final double sinceMs = (DateTime.now().microsecondsSinceEpoch - _sampleAt) / 1000;
+    double inset = _sampleInset;
+    if (sinceMs < quietMs && _velocity != 0) {
+      inset += _velocity * (sinceMs + leadMs);
+      // Never past where this movement can end: the keyboard's full height going up, its rest going down.
+      final double ceiling = _tallest > 0 ? math.max(_tallest, _sampleInset) : _sampleInset + 120;
+      inset = _velocity > 0 ? inset.clamp(_sampleInset, ceiling) : inset.clamp(0, _sampleInset);
+    } else {
+      _ticker.stop();
+    }
+    _shown.value = math.max(0, inset - _reserved);
   }
 
   @override
@@ -486,6 +536,8 @@ class _KeyboardLiftState extends State<KeyboardLift> {
   @override
   void dispose() {
     _settle?.cancel();
+    _ticker.dispose();
+    _shown.dispose();
     widget.controller.settled.removeListener(_onSettled);
     super.dispose();
   }
@@ -514,6 +566,13 @@ class _KeyboardLiftState extends State<KeyboardLift> {
     // was that padding.
     final double reserved = _below + MediaQuery.paddingOf(context).bottom;
     final double lift = math.max(0, inset - reserved);
+    _reserved = reserved;
+    if (_predict) {
+      _sample(inset);
+      if (!_ticker.isActive) _shown.value = lift;
+    } else {
+      _shown.value = lift;
+    }
     if (inset == 0) {
       WidgetsBinding.instance.addPostFrameCallback((Duration _) => _measure());
     }
@@ -546,13 +605,20 @@ class _KeyboardLiftState extends State<KeyboardLift> {
       children: <Widget>[
         Expanded(
           child: ClipRect(
-            child: Transform.translate(
-              offset: Offset(0, settled - lift),
+            child: ValueListenableBuilder<double>(
+              valueListenable: _shown,
               child: widget.list,
+              builder: (BuildContext context, double shown, Widget? list) =>
+                  Transform.translate(offset: Offset(0, settled - shown), child: list),
             ),
           ),
         ),
-        Transform.translate(offset: Offset(0, -lift), child: widget.composer),
+        ValueListenableBuilder<double>(
+          valueListenable: _shown,
+          child: widget.composer,
+          builder: (BuildContext context, double shown, Widget? composer) =>
+              Transform.translate(offset: Offset(0, -shown), child: composer),
+        ),
       ],
     );
   }

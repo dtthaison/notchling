@@ -396,9 +396,11 @@ class _ChatHeader extends ConsumerWidget {
     final bool muted = ref.watch(
       alertPrefsProvider.select((AlertPrefs p) => p.muted.contains(session.id)),
     );
+    final bool pushed = ModalRoute.of(context)?.canPop ?? false;
     return ChatHeaderView(
       session: session,
       muted: muted,
+      onBack: pushed ? () => unawaited(Navigator.of(context).maybePop()) : null,
       onOpenMacs: () => unawaited(
         Navigator.of(context).push(
           MaterialPageRoute<void>(builder: (BuildContext context) => const MacsScreen()),
