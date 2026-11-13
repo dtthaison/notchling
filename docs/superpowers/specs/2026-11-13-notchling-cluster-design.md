@@ -278,3 +278,22 @@ Asked for by the maintainer on 2026-11-13. One place that collects what needs th
 | Access tokens, delivered secrets | Leader | The Worker running the job, with TTL | Mode-600 file, deleted at job end |
 | Worker sessions' repos and transcripts | That Worker | Nobody (code returns by git) | Node's choice |
 | Notchling app data (`notchling.db`, pages) | Leader | Standbys | Yes |
+
+## Review (2026-11-13): issues the design must answer
+
+An independent review (Fable) and the maintainer-owner pass found these. They hold whatever shape is chosen.
+
+1. **Self-fencing doesn't reach the tools.** `claude --bg` turns run in Claude Code's own background host, not under `notchlingd`; a suspended or crashed daemon can't stop them, so a woken laptop may finish a `git push` the Standby already resumed. Fencing must happen at the tool call: the `PreToolUse` hook denies when this node's term isn't current (checked on a suspend-aware clock), and a takeover first tries `claude stop` on the old node.
+2. **Clocks across sleep.** Rust's `Instant` doesn't count sleep on macOS, so a lease looks valid after hours asleep; wall clocks skew. Leases are judged by the granting majority's clocks, with a suspend-aware clock locally (`CLOCK_BOOTTIME`, `mach_continuous_time`) and a stated skew bound.
+3. **Headless leaders.** Switches turn on only from an app-tier call (`crates/notchlingd/src/switches.rs`) and approvals fail closed without an app (`crates/local-api/src/tier.rs`). A node tier and a headless switch policy must be defined before a VPS can lead.
+4. **Vault off macOS.** The vault store is one Keychain item and unsupported elsewhere (`crates/engine/src/vault/store.rs`); a file-backed encrypted store is new work.
+5. **Cluster state vs node-local state.** `notchling.db` mixes settings, the machines registry and the cost cache (0014). Replicating the whole file would overwrite a Standby's own state; split it, with a schema version.
+6. **Live `.git` and SQLite.** "Lock files gone and quiet" races with git and with gc; a WAL database copied file by file can tear; `agy acp` holds its databases open. Replicate consistent snapshots (git objects plus a private index, SQLite's backup API), not live files.
+7. **Resume needs identical paths and more than the transcript.** Transcripts embed absolute paths the model reuses, so only identical paths work. `claude --resume` also needs folder trust in `~/.claude.json`, hooks pointing at the local binary, MCP servers, plugins and file-history; `sessions/<pid>.json` and jobs' `state.json` are machine-local. Prove a cross-host resume first.
+8. **Access-only credentials are unproven** for all three tools; on Linux the CLIs keep tokens in plain files. Google refresh tokens don't rotate, so Antigravity doesn't need a single refresher. The Antigravity and ChatGPT apps on the Mac also refresh the same logins. Whether a third party refreshing with Claude Code's client id, from several IPs, fits the providers' terms needs the maintainer's own reading.
+9. **Revocation.** A single shared unlock key means removing a node really requires rotating the vault key, every secret and every login. Wrap the vault key per node public key and write the runbook.
+10. **Version skew.** Nodes need a handshake that refuses dispatch or promotion on a schema or tool-version mismatch (reply keys and parsing are pinned to observed Claude Code versions, `crates/engine/src/reply/`).
+11. **Notifications without the leader.** The phone has local notifications only (`flutter_local_notifications`), so "failover happened" or "no leader" reaches nobody unless the app is connected. Decide on push (APNs/FCM) or an always-connected fallback; notification ids must survive failover.
+12. **Platform gaps.** File watching is FSEvents on macOS and polling elsewhere (`crates/platform/src/watch.rs`); replying through `claude attach` is proven on macOS only. Windows can't share Mac paths, so it is Worker-only.
+13. **Network.** Two NATed nodes have no rendezvous with an outbound ssh tunnel; a WireGuard mesh (Tailscale) as the v1 network, with pinned mTLS on top, solves NAT, Windows and "no open port".
+14. **A deterministic simulator** (fake clock, network, disk) must exist before any lease or replication code runs on a real node.
