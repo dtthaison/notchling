@@ -1,3 +1,4 @@
+use super::continued;
 use super::subagents;
 use super::tail::{Cursors, LineParser, LONG_LINE_SCAN, MAX_LINE_BYTES, TAIL_BYTES};
 use super::tally::{describe, ToolTally};
@@ -96,6 +97,7 @@ pub fn question(id: &str, input: &Map<String, Value>) -> Option<PendingQuestion>
     })
 }
 
+const SHOWN_LINES: usize = 40;
 const KEPT_MESSAGES: usize = 120;
 const KEPT_BYTES: usize = 16_000;
 
@@ -228,7 +230,7 @@ impl SnapshotParser {
         if let Some(summary) = self.tools.summary() {
             shown.push((LineKind::Tools, summary));
         }
-        let start = shown.len().saturating_sub(40);
+        let start = shown.len().saturating_sub(SHOWN_LINES);
         let lines = shown[start..]
             .iter()
             .enumerate()
@@ -267,8 +269,33 @@ fn cursors() -> &'static Cursors<SnapshotParser, Snapshot> {
     })
 }
 
+fn carry_earlier(path: &str, snapshot: &mut Snapshot) {
+    let before = continued::earlier(path);
+    if before.is_empty() {
+        return;
+    }
+    let mut lines: Vec<ChatLine> = Vec::new();
+    let mut prompt = None;
+    for earlier in &before {
+        let read = cursors().read(earlier).unwrap_or_default();
+        lines.extend(read.lines);
+        prompt = read.last_prompt.or(prompt);
+    }
+    lines.append(&mut snapshot.lines);
+    let start = lines.len().saturating_sub(SHOWN_LINES);
+    snapshot.lines = lines
+        .drain(start..)
+        .enumerate()
+        .map(|(id, line)| ChatLine { id, ..line })
+        .collect();
+    snapshot.last_prompt = snapshot.last_prompt.take().or(prompt);
+}
+
 pub fn read(path: &str) -> Snapshot {
     let mut snapshot = cursors().read(path).unwrap_or_default();
+    if snapshot.lines.len() < SHOWN_LINES || snapshot.last_prompt.is_none() {
+        carry_earlier(path, &mut snapshot);
+    }
     snapshot.subagents_active = subagents::active_count(path, now_secs());
     snapshot
 }
