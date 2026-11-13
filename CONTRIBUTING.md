@@ -141,7 +141,7 @@ Notchling works on your actual Claude Code, Claude Desktop, Codex and Antigravit
 
 ## Code style
 
-- No comments in code: don't add new ones, doc comments included. Why code is the way it is goes in the docs and the AGENTS.md files. Existing comments stay until the code around them changes.
+- No comments in code, doc comments included. Why code is the way it is goes in the docs and the AGENTS.md files. `python3 tools/strip_comments.py --check` lists any that slipped in; without `--check` it removes them (run `cargo fmt --all` after).
 - Match the surrounding code: `guard` early, no force-unwraps.
 - User-facing text is short and plain. Menu titles use Title Case.
 - When you add a setting, add its key to `AppDelegate.migrateFromAwake()`.

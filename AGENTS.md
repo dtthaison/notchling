@@ -61,8 +61,7 @@ Details and the PR checklist: [CONTRIBUTING.md](CONTRIBUTING.md).
 ## Style
 
 - User-facing text is short and plain. Menu titles use Title Case.
-- No comments in code: don't add new ones, doc comments included. The docs and the AGENTS.md files are the source of truth for why code is the way it is; write it there. Existing comments stay until the code around them changes.
-- Match the surrounding code: `guard` early, no force-unwraps outside probes.
+- No comments in code, doc comments included: the docs and the AGENTS.md files (one per crate, `tools/` and `apps/flutter/`) are the source of truth for why code is the way it is; write it there. `python3 tools/strip_comments.py --check` lists any that slipped in. Match the surrounding code: `guard` early, no force-unwraps outside probes.
 - Replies are short; build rather than ask. Ask only when a decision is genuinely the user's: accounts, tokens, anything outward-facing.
 
 ## Safety, for any change
