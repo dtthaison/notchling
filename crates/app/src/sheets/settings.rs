@@ -2,6 +2,7 @@ use notchling_engine::settings::spec;
 use serde_json::{json, Value};
 
 use crate::acting::Acting;
+use crate::appearance;
 use crate::chat::history;
 use crate::switches::restart::Area;
 
@@ -168,6 +169,16 @@ pub fn sections(read: &dyn Fn(&str) -> Option<Value>, daemon: &Daemon) -> Vec<Se
         });
     }
     vec![
+        Section {
+            title: "General",
+            rows: vec![choice(
+                read,
+                appearance::KEY,
+                "Appearance",
+                &appearance::CHOICES,
+            )],
+            footer: None,
+        },
         Section {
             title: "Daemon",
             rows: DAEMON_ROWS
@@ -361,7 +372,7 @@ mod tests {
     }
 
     #[test]
-    fn the_daemons_switches_come_first_with_what_it_said() {
+    fn the_daemons_switches_follow_general_with_what_it_said() {
         let daemon = Daemon {
             acting: Acting::On,
             bridge: Some(false),
@@ -369,7 +380,7 @@ mod tests {
             vault: None,
             install: Some(false),
         };
-        let first = sections(&|_| None, &daemon).remove(0);
+        let first = sections(&|_| None, &daemon).remove(1);
         assert_eq!(first.title, "Daemon");
         let fields: Vec<Field> = first.rows.iter().map(|r| r.field.clone()).collect();
         assert_eq!(
@@ -398,7 +409,7 @@ mod tests {
             ]
         );
         assert_eq!(change(&first.rows[0], ""), None, "not a settings key");
-        let off = sections(&|_| None, &with(Acting::Off)).remove(0);
+        let off = sections(&|_| None, &with(Acting::Off)).remove(1);
         assert_eq!(
             off.rows[0].field,
             Field::Daemon {
@@ -406,11 +417,28 @@ mod tests {
                 on: Some(false)
             }
         );
-        let none = sections(&|_| None, &Daemon::detached()).remove(0);
+        let none = sections(&|_| None, &Daemon::detached()).remove(1);
         assert!(none
             .rows
             .iter()
             .all(|r| matches!(r.field, Field::Daemon { on: None, .. })));
+    }
+
+    #[test]
+    fn the_general_section_offers_appearance_with_system_the_default() {
+        let general = sections(&|_| None, &with(Acting::Off)).remove(0);
+        assert_eq!(general.title, "General");
+        assert_eq!(general.rows.len(), 1);
+        let row = &general.rows[0];
+        assert_eq!(row.title, "Appearance");
+        let Field::Choice { selected, options } = row.field.clone() else {
+            panic!("a choice");
+        };
+        assert_eq!(selected, "system");
+        let names: Vec<&str> = options.iter().map(|(_, label)| *label).collect();
+        assert_eq!(names, ["System", "Light", "Dark"]);
+        assert_eq!(change(row, "dark"), Some(("appearance", json!("dark"))));
+        assert_eq!(change(row, "sepia"), None);
     }
 
     #[test]
@@ -422,6 +450,7 @@ mod tests {
         assert_eq!(
             titles,
             [
+                "General",
                 "Daemon",
                 "Keep Mac Awake",
                 "Notch",
