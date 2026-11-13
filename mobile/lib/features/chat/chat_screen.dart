@@ -209,11 +209,14 @@ class _SessionChatState extends ConsumerState<_SessionChat> {
                     alignment: Alignment.bottomCenter,
                     child: Consumer(
                       builder: (BuildContext context, WidgetRef ref, Widget? _) {
-                        final PendingPrompt? pending = ref.watch(
+                        // The id, not the prompt: every push brings a new PendingPrompt with no value equality.
+                        final String? pendingId = ref.watch(
                           sessionsProvider.select(
-                            (SessionsState s) => s.byId(id)?.pending,
+                            (SessionsState s) => s.byId(id)?.pending?.requestId,
                           ),
                         );
+                        final PendingPrompt? pending =
+                            pendingId == null ? null : ref.read(sessionsProvider).byId(id)?.pending;
                         final String? answerError = ref.watch(
                           chatProvider(id).select((ChatState c) => c.answerError),
                         );
@@ -387,11 +390,29 @@ class _ChatHeader extends ConsumerWidget {
   const _ChatHeader({required this.sessionId});
   final String sessionId;
 
+  /// What the header shows, as a value: a running session is pushed again for every step, as a new Session with no
+  /// value equality, and watching the Session itself rebuilt and repainted the header (5-7 ms on a Redmi) each time.
+  static Object? _shown(Session? s) {
+    if (s == null) return null;
+    final SessionFacts? f = s.facts;
+    return (
+      s.name,
+      s.project,
+      s.state,
+      s.control,
+      f?.contextTokens,
+      f?.contextWindow,
+      f?.model,
+      <Object?>[for (final LimitMeter l in f?.limits ?? const <LimitMeter>[]) (l.label, l.percent, l.resetsAt)].join('|'),
+    );
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final Session? session = ref.watch(
-      sessionsProvider.select((SessionsState s) => s.byId(sessionId)),
+    final Object? shown = ref.watch(
+      sessionsProvider.select((SessionsState s) => _shown(s.byId(sessionId))),
     );
+    final Session? session = shown == null ? null : ref.read(sessionsProvider).byId(sessionId);
     if (session == null) return const SizedBox.shrink();
     final bool muted = ref.watch(
       alertPrefsProvider.select((AlertPrefs p) => p.muted.contains(session.id)),

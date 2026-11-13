@@ -66,9 +66,9 @@ class _SendNowActionState extends ConsumerState<SendNowAction> {
 
   @override
   Widget build(BuildContext context) {
-    final Session? session = ref.watch(sessionsProvider.select((SessionsState s) => s.byId(widget.sessionId)));
+    final SessionControl? control = ref.watch(sessionsProvider.select((SessionsState s) => s.byId(widget.sessionId)?.control));
     final bool supported = ref.watch(sendNowSupportProvider);
-    if (!supported || session == null || session.control != SessionControl.console) return const SizedBox.shrink();
+    if (!supported || control != SessionControl.console) return const SizedBox.shrink();
     final Kit kit = Kit.of(context);
     final AppL10n l10n = AppL10n.of(context);
     return Padding(
