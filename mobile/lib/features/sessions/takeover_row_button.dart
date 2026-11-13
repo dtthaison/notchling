@@ -3,14 +3,13 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../app/nav_state.dart';
+import '../chat/open_chat.dart';
 import '../../app/theme/tokens.dart';
 import '../../core/net/bridge_client.dart';
 import '../../core/protocol/models.dart';
 import '../../l10n/app_localizations.dart';
 import '../chat/takeover_flow.dart';
 import '../connection/connection.dart';
-import 'sessions_notifier.dart';
 
 /// "Tiếp quản" on a view-only session's row: one tap (and the confirmation) from the list, no need to open the
 /// chat first. On success the chat of the resumed session opens.
@@ -32,8 +31,7 @@ Future<void> runTakeover(
       session.id,
       stopOriginal: choice == TakeoverChoice.stopAndResume,
     );
-    ref.read(selectedSessionIdProvider.notifier).select(newId);
-    ref.read(activeTabProvider.notifier).show(1);
+    if (context.mounted) openChat(context, ref, newId);
   } on BridgeException catch (error) {
     messenger.showSnackBar(
       SnackBar(content: Text(l10n.takeoverFailed(error.message))),

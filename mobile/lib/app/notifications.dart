@@ -156,7 +156,8 @@ final Provider<void> attentionWatcherProvider = Provider<void>((Ref ref) {
     final AppLifecycleState lifecycle = ref.read(lifecycleProvider);
     if (lifecycle == AppLifecycleState.resumed) {
       // The chat the user is looking at needs no banner.
-      final String? open = ref.read(activeTabProvider) == 1 ? ref.read(selectedSessionIdProvider) : null;
+      // The chat is a page pushed over the list now, not a tab.
+      final String? open = ref.read(chatRouteOpenProvider) ? ref.read(selectedSessionIdProvider) : null;
       final bool sound = ref.read(appSettingsProvider).sound;
       for (final AlertEvent event in events) {
         if (event.sessionId == open) continue;

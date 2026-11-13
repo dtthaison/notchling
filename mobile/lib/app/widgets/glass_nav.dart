@@ -24,7 +24,6 @@ class GlassNav extends StatelessWidget {
     final List<(IconData, IconData, String)> items =
         <(IconData, IconData, String)>[
           (Icons.view_list_outlined, Icons.view_list, l10n.tabSessions),
-          (Icons.chat_bubble_outline, Icons.chat_bubble, l10n.tabChat),
           (Icons.insights_outlined, Icons.insights, l10n.tabVisualize),
         ];
     return GlassBar(
