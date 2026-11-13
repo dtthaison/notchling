@@ -1,7 +1,7 @@
 # Localization: one English source, every platform generated
 
 Status: design, waiting for the maintainer's approval. Date: 2026-11-13.
-Approach A (a Fluent source) was chosen by the maintainer on 2026-11-13; this document turns it into a design. Once approved it becomes decision record 0019 (step L0 below). Nothing is built yet.
+Approach A (a Fluent source) was chosen by the maintainer on 2026-11-13; this document turns it into a design. Once approved it becomes decision record 0022 (step L0 below; 0019 to 0021 are taken by other branches). Nothing is built yet.
 
 ## Contents
 
@@ -85,12 +85,14 @@ Approach A, 2026-11-13:
 A builder read the first version of this design; the coordinator settled these on 2026-11-14. Each is worked into the sections it touches.
 
 1. **Phone scope** (coordinator's call). Every user-visible phone string becomes a message, including the hard-coded Dart literals outside `lib/l10n/` (`core/net/bridge_client.dart`, `features/chat/photo_send.dart`, `chat_notifier.dart`, `features/sessions/new_session_sheet.dart`, `features/visualize/viz_providers.dart`, `app/notifications.dart`). `BridgeException` carries a code and the UI maps the code to its own message. Notifications and other code without a `BuildContext` use a context-free lookup: the current locale's `AppL10n`, held once at app start and on a locale change. The dictation prompt and cleanup text (`features/voice/prompt_builder.dart`, `transcript_cleanup.dart`) are not UI: they stay Vietnamese for now, pending open question 3.
-2. **Base and order** (coordinator's call). The rebuild merges into `agent-run-oss`, not `main`; every L-step targets `agent-run-oss`, through the integration branch `merge/settings-batch` first. Branches in flight merge first. An area's literal migration (L3 on) starts only after the branches touching that area have merged, and `areas.json` arms the lint for an area in the same pull request that moves it. L0 to L2 (the crate, the generator, the guards, the phone switch) come before the Settings search registry and the log event-kind registry are built, so both are written with messages from the start; their plans depend on L1.
+2. **Base and order** (coordinator's call). The rebuild merges into `agent-run-oss`, not `main`; every L-step targets `agent-run-oss`, through the integration branch `merge/settings-batch` first. Branches in flight merge first: the ones in `merge/settings-batch` plus any open `agent/*` branch touching an area; the decision record keeps no fixed list. An area's literal migration (L3 on) starts only after the branches touching that area have merged, and `areas.json` arms the lint for an area in the same pull request that moves it. L0 to L2 (the crate, the generator, the guards, the phone switch) come before the Settings search registry and the log event-kind registry are built, so both are written with messages from the start; their plans depend on L1.
 3. **Shared versus per-app wording** (coordinator's call). A message goes in `shared.ftl` only when both apps show exactly the same text, case included. The Mac keeps Title Case for menus and buttons; the phone keeps its casing; where they differ they are two keys, one in `mac/` and one in `phone/`. Anti-goal 5 reads accordingly. English rendering stays pixel-identical.
 4. **Outputs follow file location** (coordinator's call). `shared.ftl` (and `consent.ftl`) go to both outputs; `mac/**` only to Rust; `phone/**` only to ARB. Mac-only content (settings titles and search words, log event kinds, the Mac's units and dates) lives in `mac/` files, not `shared.ftl`, which stays small: session states, inbox kinds and actions, anything both apps show. The generator does no usage scanning.
 5. **`choose`** (coordinator's call) lives in the `notchling-locale` crate; every entry point calls it once at start: `notchling-app`'s shell, `notchling-machines`, `--render` and the benches, all honoring `NOTCHLING_LOCALE`.
 6. **Inbox** (coordinator's call). All five kinds (secret approval, secret request, limit notice, action failed, notice) get a `code` and `facts` in L6, so titles and action labels translate. Any free-text detail from the daemon stays English and is shown as detail.
 7. **Splitting sentences** (coordinator's call). Splitting a sentence into separate messages is accepted where a part is styled or clickable; a new line is a separate message; literal braces on the Mac are escaped by the generator. Each case is decided in its migration pull request.
+8. **Wrong English plurals** (coordinator's call). A migration pull request keeps English pixel-identical, wrong plurals included ("1 subagents running"). Plural fixes go in their own pull request right after the step that moved the area, with before and after renders.
+9. **Decision number** (coordinator's call). The decision record is 0022: 0019, 0020 and 0021 are taken or reserved by other branches.
 
 ## What is there today
 
@@ -549,7 +551,7 @@ Step L2, in two pull requests.
 5. `l10n.yaml`: `template-arb-file: app_en.arb`. `use-escaping` stays off, since the subset keeps braces out of phone text.
 6. `app.dart` drops `localeResolutionCallback`; Flutter picks the first supported locale, English.
 7. Tests: the harness defaults to `Locale('en')` and the 14 files that assert Vietnamese assert English. These are existing tests (`WEAK-TEST-EDIT`), so the maintainer approves them. The kit goldens already render English and should not change; if one does, the maintainer decides.
-8. Plurals: the English forms stay as they render today (call 3). Where today's English is wrong ("1 subagents running"), fixing it is a separate, listed change (see "Longer text", rule 6).
+8. Plurals: the English forms stay as they render today (call 3). Where today's English is wrong ("1 subagents running"), the fix is its own pull request right after L2a, with before and after renders (call 8).
 9. `apps/flutter/AGENTS.md`, rule 3 becomes: "Text wraps and grows (German is about 30% longer than English); targets are at least 48 dp. Words go in `locales/en/` (`shared.ftl`, `consent.ftl`, `phone/`); run `python3 tools/locale/gen.py`; never edit `lib/l10n/` by hand (`GUARD-LOCALE-GEN`)."
 10. Dictation keeps Whisper's Vietnamese, its prompt and its cleanup text: it is the language you speak, not the app's (open question 3). `LINT-LOCALE-LITERAL` covers all of `lib/` once L2a lands, with those two files in its baseline.
 
@@ -627,7 +629,7 @@ German runs about 30% longer than English, and short labels much more ("Off" to 
 3. Menus already hug up to `MENU_MAX_WIDTH`; a note or detail that may wrap goes in `menu_panel_wide`.
 4. The notch's shapes have fixed sizes (`notch::layout::canvas_size`): text in the notch always elides.
 5. A sentence is one message with variables, not pieces joined in code: word order differs. The exception (call 7): a sentence may be split where a part is styled or clickable ("Read the [guide] first"), decided per case in the migration pull request; each part's translator note names the messages it is shown with. A new line is a new message, never a `\n` inside one. No code changes the case of translated text.
-6. Each migration step renders its area's views with `NOTCHLING_LOCALE=en-XA`; the pull request shows them. Renders in English are pixel-identical before and after the step (call 3). A designer's proposal, not part of the call: where today's English plural is wrong ("1 subagents running"), the fix may ride along only as a listed exception in that pull request, with the before and after render; if the maintainer prefers, each fix is its own pull request after the step.
+6. Each migration step renders its area's views with `NOTCHLING_LOCALE=en-XA`; the pull request shows them. Renders in English are pixel-identical before and after the step (call 3), wrong plurals included. Where today's English plural is wrong ("1 subagents running"), the fix is its own pull request right after the step that moved the area, with before and after renders (call 8).
 7. The phone already wraps and grows; new phone layout tests also run at the harness's `textScale: 1.3`.
 
 Right to left (Arabic, Hebrew, Persian, Urdu) is not in this design. It would take: mirrored layout (GPUI 0.2.2 has no layout direction; the kit's `Corner` already says leading and trailing, a start), bidirectional caret movement and selection in the kit's text input and Chat's selection, mirrored icons (chevrons, arrows), isolation marks around variables at run time (a path inside Arabic text), and Flutter's `EdgeInsetsDirectional` where the phone uses `left`/`right`. Nothing here blocks it: the format and the generator carry right-to-left text unchanged.
@@ -639,13 +641,14 @@ Named L0 to L8, so they don't collide with the project's Phase 5 and Phase 6. Ea
 Order (call 2):
 
 - Every step targets `agent-run-oss`, where the rebuild merges, through the integration branch `merge/settings-batch` first; none targets `main`.
-- The branches in flight merge first. An area's migration (L3 to L6) starts only after the branches touching that area have merged, so no pull request rewrites literals another branch is still changing.
+- The branches in flight merge first: the ones in `merge/settings-batch` plus any open `agent/*` branch touching an area. An area's migration (L3 to L6) starts only after the branches touching that area have merged, so no pull request rewrites literals another branch is still changing.
 - `tools/locale/areas.json` marks an area moved, arming `LINT-LOCALE-LITERAL` there, in the same pull request that moves it.
 - L0 to L2 come before the Settings search registry and the log event-kind registry are built, so both are written with messages from their first line.
+- A step that moves an area changes no English; the area's wrong plurals are fixed in the pull request right after it, with before and after renders (call 8).
 
 | Step | What | Tests | Zone |
 | --- | --- | --- | --- |
-| L0 | This design accepted; decision record 0019 | none | protected (`docs/decisions/`) |
+| L0 | This design accepted; decision record 0022 | none | protected (`docs/decisions/`) |
 | L1 | The foundation: `locales/en/` (`shared.ftl` with brand terms, `language-name` and the few texts both apps show alike; `consent.ftl`), `languages.json`; `tools/locale/` (parser, checks, Rust and ARB writers, the iOS and Android writers off, report, `--new`, `--prune`); `crates/locale` (tables, `choose`, fallback, plurals, numbers, `fmt`, pseudo-language); `platform::locale`; every entry point calls `choose` at start (`mac/shell.rs`, `notchling-machines`, `--render`); guard rules and probes, zones, CODEOWNERS, `LINT-FILE-SIZE` exemption, CI step; `crates/locale/AGENTS.md`, notes in `tools/AGENTS.md` and `crates/AGENTS.md`, a feature-map row, `docs/translating.md`, the CONTRIBUTING section. The app looks the same | generator tests with golden outputs and every refusal; crate tests incl. `fluent-bundle` conformance; `cargo deny check`; guard probes | protected |
 | L2a | The phone to English and generated ARB, every visible literal included, `BridgeException` codes mapped in the UI, the context-free lookup (above) | the changed phone tests, `flutter analyze`, `gen-l10n` freshness | protected (existing tests, `lib/app/`, `lib/core/net/`, `lib/l10n/` until this step adds it to the zone, `zones.json`, `areas.json`, `AGENTS.md`) |
 | L2b | The daemon's text to English; the protocol's description | the changed engine and bridge tests; `tools/protocol/gen.py --check` | protected |
