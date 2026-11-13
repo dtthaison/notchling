@@ -9,6 +9,7 @@ Approach A (a Fluent source) was chosen by the maintainer on 2026-11-13; this do
 - [Goals, non-goals, anti-goals](#goals)
 - [Decided by the maintainer](#decided-by-the-maintainer)
 - [Calls settled after review](#calls-settled-after-review)
+- [Decided by the user after review](#decided-by-the-user-after-review)
 - [What is there today](#what-is-there-today)
 - [Approaches considered](#approaches-considered)
 - [Constraints](#constraints)
@@ -84,7 +85,7 @@ Approach A, 2026-11-13:
 
 A builder read the first version of this design; the coordinator settled these on 2026-11-14. Each is worked into the sections it touches.
 
-1. **Phone scope** (coordinator's call). Every user-visible phone string becomes a message, including the hard-coded Dart literals outside `lib/l10n/` (`core/net/bridge_client.dart`, `features/chat/photo_send.dart`, `chat_notifier.dart`, `features/sessions/new_session_sheet.dart`, `features/visualize/viz_providers.dart`, `app/notifications.dart`). `BridgeException` carries a code and the UI maps the code to its own message. Notifications and other code without a `BuildContext` use a context-free lookup: the current locale's `AppL10n`, held once at app start and on a locale change. The dictation prompt and cleanup text (`features/voice/prompt_builder.dart`, `transcript_cleanup.dart`) are not UI: they stay Vietnamese for now, pending open question 3.
+1. **Phone scope** (coordinator's call). Every user-visible phone string becomes a message, including the hard-coded Dart literals outside `lib/l10n/` (`core/net/bridge_client.dart`, `features/chat/photo_send.dart`, `chat_notifier.dart`, `features/sessions/new_session_sheet.dart`, `features/visualize/viz_providers.dart`, `app/notifications.dart`). `BridgeException` carries a code and the UI maps the code to its own message. Notifications and other code without a `BuildContext` use a context-free lookup: the current locale's `AppL10n`, held once at app start and on a locale change. The dictation prompt and cleanup text (`features/voice/prompt_builder.dart`, `transcript_cleanup.dart`) are not UI: they stay Vietnamese (the user's decision 3, below).
 2. **Base and order** (coordinator's call). The rebuild merges into `agent-run-oss`, not `main`; every L-step targets `agent-run-oss`, through the integration branch `merge/settings-batch` first. Branches in flight merge first: the ones in `merge/settings-batch` plus any open `agent/*` branch touching an area; the decision record keeps no fixed list. An area's literal migration (L3 on) starts only after the branches touching that area have merged, and `areas.json` arms the lint for an area in the same pull request that moves it. L0 to L2 (the crate, the generator, the guards, the phone switch) come before the Settings search registry and the log event-kind registry are built, so both are written with messages from the start; their plans depend on L1.
 3. **Shared versus per-app wording** (coordinator's call). A message goes in `shared.ftl` only when both apps show exactly the same text, case included. The Mac keeps Title Case for menus and buttons; the phone keeps its casing; where they differ they are two keys, one in `mac/` and one in `phone/`. Anti-goal 5 reads accordingly. English rendering stays pixel-identical.
 4. **Outputs follow file location** (coordinator's call). `shared.ftl` (and `consent.ftl`) go to both outputs; `mac/**` only to Rust; `phone/**` only to ARB. Mac-only content (settings titles and search words, log event kinds, the Mac's units and dates) lives in `mac/` files, not `shared.ftl`, which stays small: session states, inbox kinds and actions, anything both apps show. The generator does no usage scanning.
@@ -93,6 +94,14 @@ A builder read the first version of this design; the coordinator settled these o
 7. **Splitting sentences** (coordinator's call). Splitting a sentence into separate messages is accepted where a part is styled or clickable; a new line is a separate message; literal braces on the Mac are escaped by the generator. Each case is decided in its migration pull request.
 8. **Wrong English plurals** (coordinator's call). A migration pull request keeps English pixel-identical, wrong plurals included ("1 subagents running"). Plural fixes go in their own pull request right after the step that moved the area, with before and after renders.
 9. **Decision number** (coordinator's call). The decision record is 0022: 0019, 0020 and 0021 are taken or reserved by other branches.
+
+## Decided by the user after review
+
+The first version asked three open questions; the user answered all three on 2026-11-14, each with the recommendation. None is left open.
+
+1. **ICU4X as a direct dependency** (user's decision). `icu_plurals` and `icu_decimal` (Unicode-3.0) are taken as direct runtime dependencies, for CLDR plural rules and number formats. Decision 0008 gets a note naming Unicode-3.0 as permissive, which is what `deny.toml` already says; the note is written with record 0022 in step L0. Not taken: `intl_pluralrules` (Apache/MIT, last released 2022, older CLDR) with English-only number formatting.
+2. **The review line for translations** (user's decision). The maintainer approves a new language's first pull request and every `consent.ftl` change, in any language, English included. Other changes to a shipped language's words merge as auto-zone changes once Phase 5 is on (until then the maintainer merges every pull request). A new language's first pull request is caught because it must add the language to `locales/languages.json`, which is protected (below). Not taken: every translation waiting for the maintainer.
+3. **Dictation on the phone** (user's decision). Dictation stays Vietnamese: Whisper's language `vi`, the Vietnamese prompt and the cleanup text, while the phone's UI becomes English. A "Dictation Language" setting comes later, when someone needs another language. Not taken: dictation following the UI language.
 
 ## What is there today
 
@@ -167,7 +176,7 @@ Checked against `deny.toml` on crates.io and the RustSec advisory database on 20
 - Every crate passes the allow list. Two are dual-licensed with a side the list doesn't name (`self_cell`'s GPL-2.0-only, `memchr`'s Unlicense) and pass on their permissive side, as they already do today.
 - No advisory names any new crate. `self_cell`'s RUSTSEC-2023-0070 is patched from 1.0.2; the tree has 1.3.0. `intl_pluralrules` last released in 2022 but has no unmaintained advisory, so `unmaintained = "all"` stays green; it is dev only.
 - ICU4X 2.4 needs Rust 1.88; we pin 1.99.1. `fixed_decimal`'s optional `ryu` (Apache-2.0 OR BSL-1.0) stays off.
-- Unicode-3.0 is on `deny.toml`'s list and ICU4X is already linked through `idna`, but [decision 0008](../../decisions/0008-mit-permissive-crates.md) names only MIT, Apache and BSD, and these would be our first direct Unicode-3.0 dependencies. Open question 1.
+- Unicode-3.0 is on `deny.toml`'s list and ICU4X is already linked through `idna`, but [decision 0008](../../decisions/0008-mit-permissive-crates.md) names only MIT, Apache and BSD, and these are our first direct Unicode-3.0 dependencies. The user took them (decision 1 after review); step L0 adds a note to 0008 naming Unicode-3.0 as permissive.
 
 ### GPUI text
 
@@ -239,7 +248,7 @@ category  = "zero" | "one" | "two" | "few" | "many"
 
 ```
 locales/
-  languages.json            the languages that ship (protected)
+  languages.json            every language folder, shipped or draft (protected)
   en/                        the source
     shared.ftl               both apps, only text both show exactly alike: brand terms, language-name,
                              session states, inbox kinds and results
@@ -258,7 +267,7 @@ locales/
 - `consent.ftl` is a file of its own so its zone can differ: it holds the buttons and titles of every prompt that allows, denies, approves, pairs, signs in, trusts a folder, installs the hook or turns a switch back on, and the line that says what is being allowed ("Allow { $names } for { $command }"). Settings rows are not consent.
 - Outputs follow file location (call 4): `shared.ftl` and `consent.ftl` go to both apps, `mac/**` only to the Rust tables, `phone/**` only to the ARB files (and, once on, to the iOS and Android files, which are the phone's). The generator never scans code for which keys are used.
 - `shared.ftl` stays small. A message goes there only when both apps show exactly the same text, case included (call 3). The Mac's menus and buttons are Title Case and the phone keeps its own casing; where the words or the casing differ, they are two keys, one in `mac/<area>.ftl` and one in `phone/<feature>.ftl`.
-- `languages.json`: `{"source": "en", "ship": ["en"]}`. A folder not listed is checked and reported but not built into either app.
+- `languages.json`: `{"source": "en", "ship": ["en"], "draft": []}`. Every language folder is listed, under `ship` (built into the apps) or `draft` (checked and reported, not built); `gen.py --check` fails on a folder it doesn't list. So a new language's first pull request has to touch `languages.json`, which is protected, and that is where the maintainer approves it (the user's decision 2). `gen.py --new de` adds `de` to `draft`.
 - Each language's `shared.ftl` defines `language-name`, its own name as its speakers write it ("Deutsch"), for the Language row.
 
 Key rules, enforced by `gen.py`:
@@ -501,7 +510,7 @@ Every shipped language formats every message with sample numbers (0, 1, 2, 3, 5,
 | Wire and protocol strings | Two sides of different versions and languages | Codes and ids go over the wire; free text there is English and never parsed |
 | Part names (`.part("Send Button")`) | They name code an agent greps | `LINT-LOCALE-LITERAL` exempts them; the ? overlay may show the translated title beside them later |
 | Text matched against another program (`prompt_flow.rs::NOT_PERMISSION`, the dialog markers, Claude Code's screen) | Translating it would break the match | Stays a constant in code, listed in the lint baseline, which only shrinks |
-| The phone's dictation prompt and cleanup text (`features/voice/prompt_builder.dart`, `transcript_cleanup.dart`) | They steer Whisper and its cleanup in the language spoken, not the UI's (call 1) | Stay Vietnamese in code, in the lint baseline, until open question 3 is answered |
+| The phone's dictation prompt and cleanup text (`features/voice/prompt_builder.dart`, `transcript_cleanup.dart`) | They steer Whisper and its cleanup in the language spoken, not the UI's (call 1) | Stay Vietnamese in code, in the lint baseline, until a Dictation Language setting exists (the user's decision 3) |
 | Other tools' output | The app parses it | Child processes keep their locale (`LC_ALL=C` for git) |
 | Brand names | They are names | `-brand-*` terms, defined once in English |
 
@@ -553,7 +562,7 @@ Step L2, in two pull requests.
 7. Tests: the harness defaults to `Locale('en')` and the 14 files that assert Vietnamese assert English. These are existing tests (`WEAK-TEST-EDIT`), so the maintainer approves them. The kit goldens already render English and should not change; if one does, the maintainer decides.
 8. Plurals: the English forms stay as they render today (call 3). Where today's English is wrong ("1 subagents running"), the fix is its own pull request right after L2a, with before and after renders (call 8).
 9. `apps/flutter/AGENTS.md`, rule 3 becomes: "Text wraps and grows (German is about 30% longer than English); targets are at least 48 dp. Words go in `locales/en/` (`shared.ftl`, `consent.ftl`, `phone/`); run `python3 tools/locale/gen.py`; never edit `lib/l10n/` by hand (`GUARD-LOCALE-GEN`)."
-10. Dictation keeps Whisper's Vietnamese, its prompt and its cleanup text: it is the language you speak, not the app's (open question 3). `LINT-LOCALE-LITERAL` covers all of `lib/` once L2a lands, with those two files in its baseline.
+10. Dictation keeps Whisper's Vietnamese, its prompt and its cleanup text: it is the language you speak, not the app's (the user's decision 3; a Dictation Language setting comes when someone needs it). `LINT-LOCALE-LITERAL` covers all of `lib/` once L2a lands, with those two files in its baseline.
 
 **L2b, the daemon's words:** the Vietnamese text in `crates/engine/src/bridge/`, `viz/engine.rs`, `control/takeover.rs`, `crates/notchlingd/src/bridge_backend.rs` and `crates/ptyhost/` becomes English, with the tests that assert it and the protocol's description (regenerated by `tools/protocol/gen.py`).
 
@@ -564,7 +573,7 @@ New rows in `docs/rules.md`, each with a probe in `tools/guard/guard/rules.py` t
 | ID | Rule | Why | Check |
 | --- | --- | --- | --- |
 | GUARD-LOCALE-GEN | The files in `crates/locale/src/generated.rs` and `apps/flutter/lib/l10n/*.arb` are exactly what `tools/locale/gen.py` writes from `locales/` | A hand-edited or stale file lets the apps show words no source holds | `python3 tools/locale/gen.py --check` |
-| GUARD-LOCALE-SUBSET | Every `.ftl` stays in the subset, and keys, variables, file names and language tags follow their rules | A construct one target can't express breaks that app, maybe only later | `python3 tools/locale/gen.py --check` |
+| GUARD-LOCALE-SUBSET | Every `.ftl` stays in the subset, and keys, variables, file names and language tags follow their rules; every language folder is listed in `languages.json` | A construct one target can't express breaks that app, maybe only later | `python3 tools/locale/gen.py --check` |
 | GUARD-LOCALE-MATCH | A translation has no key English lacks, the same variables with the same types, and nothing English doesn't have: no link, address or markup, no value over three times English's length plus 20 characters | A translation must not be able to break the app, carry a link, or say more than English | `python3 tools/locale/gen.py --check` |
 | LINT-LOCALE-LITERAL | In an area that has moved, no Rust or Dart literal looks like user-facing text: a word of two letters or more with a space, or a capital first letter. The phone is one area, all of `apps/flutter/lib/`, moved in L2a. Exempt: tests, part names (`.part`, `.part_at`, `.part_inside`, `.window_region`), element ids, log lines; what remains (text matched against other programs, the phone's dictation prompt and cleanup text) sits in the baseline | Moved areas stay moved | `python3 -m guard lint` |
 | LINT-LOCALE-CONSENT | A warning: an English message outside `consent.ftl` that starts with Allow, Deny, Always Allow, Approve, Pair, Trust, Install or Sign In | Consent words belong where the maintainer reviews them | `python3 -m guard lint --warnings` |
@@ -592,8 +601,8 @@ de        100%    100%     74%    90%    79%    41
 | --- | --- | --- |
 | English words in an area file or `shared.ftl` | auto | Today these words are literals in `crates/app`, which is auto; moving them must not make a text fix wait |
 | Generated Rust and ARB | auto | `GUARD-LOCALE-GEN` binds them to the source; a hand edit fails CI |
-| A translation's area files and `shared.ftl`, in a language that ships or is being prepared | auto | The words can't break the app (the checks above), and can't carry a link or grow unbounded |
-| A new language: adding it to `languages.json` | maintainer | It decides what every user of that language sees |
+| A translation's area files and `shared.ftl`, in a language already listed in `languages.json` | auto | The words can't break the app (the checks above), and can't carry a link or grow unbounded |
+| A new language's first pull request (it adds the tag to `languages.json`), and moving a language from `draft` to `ship` | maintainer | It decides what every user of that language sees (the user's decision 2) |
 | `consent.ftl` in any language, English included | maintainer | A mistranslated Allow or Deny is a security problem no check can see |
 | `tools/locale/`, the runtime in `crates/locale/`, `Cargo.toml`, `areas.json`, the guard | maintainer | As today for `tools/` and crates outside `app` and `kit` |
 | A hidden character, an edited test | maintainer | `WEAK-UNICODE`, `WEAK-TEST-EDIT`, as everywhere |
@@ -613,7 +622,7 @@ A section for `CONTRIBUTING.md` (protected, step L1), with style notes in `docs/
 > 3. For a number, keep the `{ $count -> … }` block and give the forms your language needs: `zero`, `one`, `two`, `few`, `many`, `other`. Keep `*[other]`.
 > 4. Don't translate product names (`{ -brand-notchling }`), commands or file names. Delete a message you don't translate; it shows in English.
 > 5. Run `python3 tools/locale/gen.py` (Python 3.9 or later, nothing to install). It checks your files, writes the app files that come from them, and prints how much is translated. Fix what it reports.
-> 6. For a new language, add its tag to `ship` in `locales/languages.json`.
+> 6. For a new language, add its tag to `draft` in `locales/languages.json` (`--new` does it). The maintainer moves it to `ship` when it is ready.
 > 7. Commit everything with `git commit -s` and open a pull request.
 >
 > The maintainer reviews a new language's first pull request and every change to `consent.ftl`, the words that allow or refuse something. Other changes to a language that ships follow the usual flow.
@@ -648,7 +657,7 @@ Order (call 2):
 
 | Step | What | Tests | Zone |
 | --- | --- | --- | --- |
-| L0 | This design accepted; decision record 0022 | none | protected (`docs/decisions/`) |
+| L0 | This design accepted; decision record 0022, with the calls and the user's decisions above; a note on decision 0008 naming Unicode-3.0 as permissive | none | protected (`docs/decisions/`) |
 | L1 | The foundation: `locales/en/` (`shared.ftl` with brand terms, `language-name` and the few texts both apps show alike; `consent.ftl`), `languages.json`; `tools/locale/` (parser, checks, Rust and ARB writers, the iOS and Android writers off, report, `--new`, `--prune`); `crates/locale` (tables, `choose`, fallback, plurals, numbers, `fmt`, pseudo-language); `platform::locale`; every entry point calls `choose` at start (`mac/shell.rs`, `notchling-machines`, `--render`); guard rules and probes, zones, CODEOWNERS, `LINT-FILE-SIZE` exemption, CI step; `crates/locale/AGENTS.md`, notes in `tools/AGENTS.md` and `crates/AGENTS.md`, a feature-map row, `docs/translating.md`, the CONTRIBUTING section. The app looks the same | generator tests with golden outputs and every refusal; crate tests incl. `fluent-bundle` conformance; `cargo deny check`; guard probes | protected |
 | L2a | The phone to English and generated ARB, every visible literal included, `BridgeException` codes mapped in the UI, the context-free lookup (above) | the changed phone tests, `flutter analyze`, `gen-l10n` freshness | protected (existing tests, `lib/app/`, `lib/core/net/`, `lib/l10n/` until this step adds it to the zone, `zones.json`, `areas.json`, `AGENTS.md`) |
 | L2b | The daemon's text to English; the protocol's description | the changed engine and bridge tests; `tools/protocol/gen.py --check` | protected |
@@ -675,8 +684,4 @@ Order (call 2):
 
 ## Open questions
 
-Only the maintainer can answer these.
-
-1. **ICU4X as a direct dependency.** Plural rules and number formats come from `icu_plurals` and `icu_decimal` (Unicode-3.0). `deny.toml` allows Unicode-3.0 and ICU4X is already linked through `idna`, but decision 0008 says "only MIT, Apache and BSD crates", and these would be our first direct Unicode-3.0 dependencies. The alternative is `intl_pluralrules` (Apache/MIT, last released 2022, older CLDR) for plurals and English-only number formatting until a language needs more. **Recommendation:** take ICU4X and add a note to 0008 naming Unicode-3.0 as permissive, which is what `deny.toml` already says.
-2. **The review line for translations.** Proposed: the maintainer approves a language's first pull request and every `consent.ftl` change; other changes to a shipped language's words merge like any auto-zone change once Phase 5 is on. The stricter choice is that every translation waits for the maintainer. **Recommendation:** the proposed line. Nobody here reads most languages, so reviewing every word would catch little the checks don't; consent is where a mistranslation does harm, and that stays with the maintainer.
-3. **Dictation on the phone.** The phone's UI becomes English, but Whisper listens for Vietnamese with a Vietnamese prompt. Keep that, follow the UI language (English), or add a "Dictation Language" setting? **Recommendation:** keep Vietnamese now, since that is how the maintainer uses it, and add the setting when someone needs another language.
+None. The three this design asked (ICU4X as a direct dependency, the review line for translations, dictation on the phone) were answered by the user on 2026-11-14; see [Decided by the user after review](#decided-by-the-user-after-review).
