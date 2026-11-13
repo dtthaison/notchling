@@ -4,6 +4,7 @@ import 'package:agent_console/core/net/bridge_client.dart';
 import 'package:agent_console/core/protocol/models.dart';
 import 'package:agent_console/features/chat/chat_cache.dart';
 import 'package:agent_console/features/chat/chat_notifier.dart';
+import 'package:agent_console/features/chat/chat_parts.dart';
 import 'package:agent_console/features/chat/chat_pictures.dart';
 import 'package:agent_console/features/connection/connection.dart';
 import 'package:agent_console/features/sessions/sessions_notifier.dart';
@@ -263,6 +264,24 @@ void main() {
       await tester.pump();
       expect(find.byType(Image), findsOneWidget);
       expect(find.text('Không tải được ảnh'), findsNothing);
+    });
+
+    testWidgets("a tool group shows its tools' pictures without being opened, and none without a session", (WidgetTester tester) async {
+      final ChatPictureLoader loader = _ScriptedLoader(() => throw const BridgeException('timeout', 'x'));
+      final ToolGroupEntry group = ToolGroupEntry(<ChatMessage>[
+        ChatMessage(id: 't1', role: ChatRole.tools, text: '', time: DateTime(2026), toolSummary: 'Read shot.png', images: const <ChatImage>[image]),
+        ChatMessage(id: 't2', role: ChatRole.tools, text: '', time: DateTime(2026), toolSummary: 'Bash ls'),
+      ]);
+      Widget view({String? sessionId}) => ProviderScope(
+            overrides: <Override>[chatPictureLoaderProvider.overrideWithValue(loader)],
+            child: host(ToolGroupView(entry: group, sessionId: sessionId)),
+          );
+      await tester.pumpWidget(view(sessionId: 'c'));
+      await tester.pump();
+      expect(find.byType(PictureThumbnail), findsOneWidget);
+      await tester.pumpWidget(view());
+      await tester.pump();
+      expect(find.byType(PictureThumbnail), findsNothing);
     });
   });
 }

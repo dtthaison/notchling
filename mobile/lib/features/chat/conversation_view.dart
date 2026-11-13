@@ -151,7 +151,7 @@ class _ChatEntryViewState extends State<ChatEntryView> {
   Widget build(BuildContext context) {
     final ChatEntry entry = widget.entry;
     final Widget content = switch (entry) {
-      ToolGroupEntry() => ToolGroupView(entry: entry, initiallyOpen: widget.open),
+      ToolGroupEntry() => ToolGroupView(entry: entry, initiallyOpen: widget.open, sessionId: widget.sessionId),
       MessageEntry(:final ChatMessage message) => switch ((message.role, message.kind)) {
         (ChatRole.user, ChatKind.shell) => ShellBubble(message: message),
         (ChatRole.user, _) => UserBubble(message: message, sessionId: widget.sessionId),

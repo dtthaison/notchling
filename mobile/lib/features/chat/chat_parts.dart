@@ -296,9 +296,13 @@ class ToolGroupView extends StatefulWidget {
     super.key,
     required this.entry,
     this.initiallyOpen = false,
+    this.sessionId,
   });
   final ToolGroupEntry entry;
   final bool initiallyOpen;
+
+  /// Needed to load the group's pictures; without it they are not shown.
+  final String? sessionId;
 
   @override
   State<ToolGroupView> createState() => _ToolGroupViewState();
@@ -317,6 +321,9 @@ class _ToolGroupViewState extends State<ToolGroupView> {
         : l10n.toolStepsCount(steps.length);
     final ToolStep last = steps.last;
     final bool edits = steps.any((ToolStep s) => s.isEdit);
+    final List<ChatImage> pictures = <ChatImage>[
+      for (final ChatMessage m in widget.entry.messages) ...m.images,
+    ];
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
@@ -390,6 +397,9 @@ class _ToolGroupViewState extends State<ToolGroupView> {
             ),
           ),
         ),
+        // A tool's pictures (a screenshot, an image it read) stay outside the fold, as Chat on the Mac shows them.
+        if (pictures.isNotEmpty && widget.sessionId != null)
+          MessagePictures(sessionId: widget.sessionId!, images: pictures),
       ],
     );
   }
