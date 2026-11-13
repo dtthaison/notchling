@@ -146,6 +146,21 @@ protocol/                 the bridge protocol the Mac and the phone speak: JSON 
 crates/                   the Rust rebuild: stubs for now, and the generated protocol types
 ```
 
+## Logs
+
+Every log stays on your Mac. `Notchling` below is `~/Library/Application Support/Notchling`.
+
+| File | What it holds | Size |
+| --- | --- | --- |
+| `Notchling/audit.jsonl` (and `.1`) | What the daemon refused or failed, and what the app asked it to do: time, operation, who, result. Never message text, and not the polls that succeed. | Rotates at 5 MB, one old copy |
+| `Notchling/notchlingd.log` (and `.1`) | The daemon's own output: start, errors, a missing price. | Rotates at 5 MB, one old copy |
+| `AgentConsole/bridge/remote-log.jsonl` | What paired phones did: the device, the operation, the length of a message, never its text. | Grows |
+| `Notchling/account-log.json` | When each account became the active one. | Grows slowly |
+| `Notchling/logs/crash.log` | A panic's message and place. It can quote what the app was showing. | Grows only on a crash |
+| `Notchling/permission-screen.txt` | The last permission prompt the daemon could not read. | One screen |
+
+**Settings > Activity** shows the first four together, newest first: refusals and failures stand out, and you can filter by kind and search. It reads the files when you open it or press Refresh.
+
 ## Uninstall
 
 1. Turn off **Answer Prompts from the Notch** and **Keep Local Copies of Artifacts** so the hook entries are removed from `~/.claude/settings.json`.

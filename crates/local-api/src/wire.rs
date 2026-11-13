@@ -95,6 +95,8 @@ pub mod ops {
 
     pub const GIT_STATUS: &str = "git.status";
     pub const GIT_DIFF: &str = "git.diff";
+
+    pub const ACTIVITY_LIST: &str = "activity.list";
 }
 
 pub mod topics {

@@ -18,6 +18,7 @@ use super::agents_view::agents_page;
 use super::banner::Banners;
 use super::hook_rows::HooksShown;
 use super::settings::{change, sections, Daemon, Field, Row};
+use super::settings_activity_view::activity_section;
 use super::view::{sheet_header, Acts, Dismiss};
 mod shortcut;
 use crate::mac::shell::{AppAccounts, AppActions, AppBridge, AppSwitchFeed};
@@ -42,7 +43,11 @@ pub struct SettingChanged {
     pub value: Value,
 }
 
+pub struct OpenActivity;
+
 impl EventEmitter<Dismiss> for SettingsView {}
+
+impl EventEmitter<OpenActivity> for SettingsView {}
 
 impl EventEmitter<SettingChanged> for SettingsView {}
 
@@ -381,6 +386,17 @@ impl Render for SettingsView {
         }
         if self.page == Page::Agents {
             list = list.child(agents_page(self.tool, &self.hooks, a, cx));
+        }
+        if self.page == Page::General {
+            let open_activity = button(
+                "settings-activity",
+                "Open",
+                ButtonKind::Secondary,
+                PartState::Rest,
+                a,
+            )
+            .on_click(cx.listener(|_, _, _, cx| cx.emit(OpenActivity)));
+            list = list.child(activity_section(open_activity, a));
         }
         div()
             .size_full()
