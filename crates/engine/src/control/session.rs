@@ -183,7 +183,19 @@ pub fn resume_plan_step(
     start_step(&cwd, to, &resume_arguments(conversation, existing, flags))
 }
 
-pub fn plan_move(agent: &Agent, to: Option<&str>, roots: &Roots) -> Result<Plan, PlanError> {
+pub fn claude_json_for(roots: &Roots, config_dir: Option<&str>) -> PathBuf {
+    match config_dir {
+        Some(dir) => Path::new(dir).join(".claude.json"),
+        None => Path::new(&home_of(roots)).join(".claude.json"),
+    }
+}
+
+pub fn plan_move(
+    agent: &Agent,
+    to: Option<&str>,
+    roots: &Roots,
+    trust: bool,
+) -> Result<Plan, PlanError> {
     let id = job_id(agent)?;
     let transcript = agent
         .transcript_path
@@ -191,18 +203,22 @@ pub fn plan_move(agent: &Agent, to: Option<&str>, roots: &Roots) -> Result<Plan,
         .ok_or(PlanError::NoTranscript)?;
     let conversation = conversation_of(transcript).ok_or(PlanError::NoTranscript)?;
     let flags = flags_for_job(roots, id, &agent.name);
+    let trust_step = trust.then(|| Step::Pty(plan_trust_folder(&agent.cwd, to)));
     Ok(Plan {
-        steps: vec![
-            Step::Run(stop_step(id, config_dir_for_job(roots, id).as_deref())),
-            Step::Run(resume_plan_step(
-                roots,
-                id,
-                &conversation,
-                &agent.cwd,
-                to,
-                &flags,
-            )),
-        ],
+        steps: trust_step
+            .into_iter()
+            .chain([
+                Step::Run(stop_step(id, config_dir_for_job(roots, id).as_deref())),
+                Step::Run(resume_plan_step(
+                    roots,
+                    id,
+                    &conversation,
+                    &agent.cwd,
+                    to,
+                    &flags,
+                )),
+            ])
+            .collect(),
         outcome: Outcome::NewJob,
     })
 }

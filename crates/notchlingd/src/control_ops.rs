@@ -4,9 +4,10 @@ use notchling_engine::catalog::Tool;
 use notchling_engine::control::session::home_of;
 use notchling_engine::control::slash::{route, Route};
 use notchling_engine::control::{
-    execute, plan_move, plan_new_session, plan_remove, plan_stop, plan_trust_folder, ControlError,
-    NewSession, Outcome, Plan, PlanError, Step,
+    claude_json_for, execute, plan_move, plan_new_session, plan_remove, plan_stop,
+    plan_trust_folder, ControlError, NewSession, Outcome, Plan, PlanError, Step,
 };
+use notchling_engine::delegate::agy_trust::claude_trusts;
 use notchling_engine::reply::plan as keys_plan;
 use notchling_engine::sessions::lanes::lane_at_path;
 use notchling_local_api::{ops, ApiError, ErrorCode};
@@ -59,7 +60,9 @@ impl ActingOps {
                     ));
                 }
                 let to = self.config_dir_arg(args, "to_config_dir")?;
-                let plan = plan_move(&agent, to.as_deref(), &self.roots).map_err(refused)?;
+                self.onboard_lane(to.as_deref());
+                let trust = self.needs_trust(&agent.cwd, to.as_deref());
+                let plan = plan_move(&agent, to.as_deref(), &self.roots, trust).map_err(refused)?;
                 Ok(json!({"jobId": self.run(&plan)?}))
             }
             ops::SESSION_COMMAND => self.command(args),
@@ -134,9 +137,7 @@ impl ActingOps {
         if !real.is_dir() {
             return Err(bad(format!("{folder} isn't a folder")));
         }
-        let home = Path::new(&home_of(&self.roots)).to_path_buf();
-        let home = std::fs::canonicalize(&home).unwrap_or(home);
-        if real.parent().is_none() || real == home {
+        if self.never_trusted(&real) {
             return Err(bad(
                 "the root and the home folder are never trusted from here",
             ));
@@ -151,6 +152,24 @@ impl ActingOps {
             ));
         }
         Ok(real)
+    }
+
+    fn never_trusted(&self, real: &Path) -> bool {
+        let home = Path::new(&home_of(&self.roots)).to_path_buf();
+        let home = std::fs::canonicalize(&home).unwrap_or(home);
+        real.parent().is_none() || real == home
+    }
+
+    fn needs_trust(&self, folder: &str, config_dir: Option<&str>) -> bool {
+        let Ok(real) = std::fs::canonicalize(folder) else {
+            return false;
+        };
+        if !real.is_dir() || self.never_trusted(&real) {
+            return false;
+        }
+        let login =
+            std::fs::read_to_string(claude_json_for(&self.roots, config_dir)).unwrap_or_default();
+        !claude_trusts(&login, Path::new(folder)) && !claude_trusts(&login, &real)
     }
 
     fn command(&self, args: &Value) -> Result<Value, ApiError> {

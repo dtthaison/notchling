@@ -361,7 +361,7 @@ impl ChatView {
             .outgoing
             .entry(id.clone())
             .or_default()
-            .push(Outgoing::new(&text, &self.conversation));
+            .push(Outgoing::new(&text, &self.conversation, now_ms()));
         self.follow_sent_now(cx);
         let sent_text = text;
         self.spawn_send(

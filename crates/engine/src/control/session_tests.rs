@@ -77,13 +77,13 @@ fn only_background_jobs_are_controlled() {
     assert_eq!(plan_stop(&terminal, &r.roots), Err(PlanError::NotAJob));
     assert_eq!(plan_remove(&terminal, &r.roots), Err(PlanError::NotAJob));
     assert_eq!(
-        plan_move(&terminal, None, &r.roots),
+        plan_move(&terminal, None, &r.roots, false),
         Err(PlanError::NotAJob)
     );
     let mut no_transcript = job("ab12");
     no_transcript.transcript_path = None;
     assert_eq!(
-        plan_move(&no_transcript, None, &r.roots),
+        plan_move(&no_transcript, None, &r.roots, false),
         Err(PlanError::NoTranscript)
     );
 }
@@ -214,7 +214,7 @@ fn move_stops_in_the_old_lane_then_resumes_in_the_target_with_the_jobs_flags() {
         "home/.claude/jobs/ab12/state.json",
         r#"{"state":"working","respawnFlags":["--model","opus","--bg","--resume","old","--permission-mode","plan"]}"#,
     );
-    let plan = plan_move(&job("ab12"), Some(&r.lane), &r.roots).expect("plan");
+    let plan = plan_move(&job("ab12"), Some(&r.lane), &r.roots, false).expect("plan");
     let steps = runs(&plan);
     assert_eq!(steps.len(), 2);
     assert_eq!(steps[0].command.argv, ["claude", "stop", "ab12"]);
@@ -243,6 +243,32 @@ fn move_stops_in_the_old_lane_then_resumes_in_the_target_with_the_jobs_flags() {
 }
 
 #[test]
+fn a_move_that_needs_trust_trusts_the_folder_in_the_target_before_stopping() {
+    let r = rig("move-trust");
+    let plan = plan_move(&job("ab12"), Some(&r.lane), &r.roots, true).expect("plan");
+    assert_eq!(
+        plan.steps[0],
+        Step::Pty(plan_trust_folder("/work", Some(&r.lane)))
+    );
+    let steps = runs(&plan);
+    assert_eq!(steps[0].command.argv, ["claude", "stop", "ab12"]);
+    assert_eq!(steps.len(), 2);
+}
+
+#[test]
+fn the_login_file_is_the_lanes_own_or_the_home_one() {
+    let r = rig("claude-json");
+    assert_eq!(
+        claude_json_for(&r.roots, Some("/lanes/b")),
+        std::path::PathBuf::from("/lanes/b/.claude.json")
+    );
+    assert_eq!(
+        claude_json_for(&r.roots, None),
+        r.roots.main_dir.parent().unwrap().join(".claude.json")
+    );
+}
+
+#[test]
 fn moving_back_where_a_copy_exists_sends_no_flags() {
     let r = rig("move-back");
     r.tmp.write(
@@ -253,7 +279,7 @@ fn moving_back_where_a_copy_exists_sends_no_flags() {
         "lane-b/jobs/ab12/state.json",
         r#"{"state":"working","updatedAt":"2026-11-03T08:00:00.000Z","respawnFlags":["--model","opus"]}"#,
     );
-    let plan = plan_move(&job("ab12"), None, &r.roots).expect("plan");
+    let plan = plan_move(&job("ab12"), None, &r.roots, false).expect("plan");
     let steps = runs(&plan);
     assert_eq!(
         config(&steps[0].command),
@@ -272,7 +298,7 @@ fn a_job_without_state_keeps_its_name_and_an_empty_cwd_means_home() {
     let r = rig("move-name");
     let mut agent = job("ab12");
     agent.cwd = String::new();
-    let plan = plan_move(&agent, None, &r.roots).expect("plan");
+    let plan = plan_move(&agent, None, &r.roots, false).expect("plan");
     let start = runs(&plan)[1];
     assert_eq!(
         start.command.argv,
