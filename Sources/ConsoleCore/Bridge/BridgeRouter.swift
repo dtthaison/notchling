@@ -149,6 +149,8 @@ public final class BridgeRouter: @unchecked Sendable {
             return try await sessionNew(body, connection)
         case "chat.image":
             return try await chatImage(body, id: id, connection)
+        case "chat.audio":
+            return try await chatAudio(body)
         case "session.takeover":
             return try await sessionTakeover(body, connection)
         case "projects.recent":
@@ -202,6 +204,22 @@ public final class BridgeRouter: @unchecked Sendable {
         connection.io.sendText(BridgeWire.ok(id: id, data: ["binary": true, "bytes": jpeg.count, "format": "jpeg", "imageId": imageId]))
         connection.io.sendBinary(PhoneFrame.encodeImage(requestId: requestId, jpeg: jpeg)) {}
         return ["sent": true]
+    }
+
+    /// `chat.audio {sessionId, audioId, offset, length}`: one piece (at most 160 KB) of an audio file the chat names,
+    /// as `{data: base64, offset, total, mediaType}`. The phone asks again from `offset + data length` until `total`.
+    private func chatAudio(_ body: [String: Any]) async throws -> Any {
+        let sessionId = try requireString(body, "sessionId")
+        let audioId = try requireString(body, "audioId")
+        guard audioId.count <= 80, audioId.range(of: #"^[A-Za-z0-9\-]+$"#, options: .regularExpression) != nil else {
+            throw BridgeFailure(.invalid, "audioId không hợp lệ.")
+        }
+        let offset = (body["offset"] as? Int) ?? 0
+        let length = min((body["length"] as? Int) ?? ChatAudio.maxChunk, ChatAudio.maxChunk)
+        guard offset >= 0, length > 0 else { throw BridgeFailure(.invalid, "offset hoặc length không hợp lệ.") }
+        _ = try await session(sessionId)
+        let chunk = try await backend.chatAudio(sessionId: sessionId, audioId: audioId, offset: offset, length: length)
+        return ["data": chunk.data.base64EncodedString(), "offset": chunk.offset, "total": chunk.total, "mediaType": chunk.mediaType]
     }
 
     private func vizGet(_ body: [String: Any]) async throws -> Any {

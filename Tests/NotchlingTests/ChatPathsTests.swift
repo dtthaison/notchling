@@ -58,6 +58,18 @@ final class ChatPathsTests: XCTestCase {
         }
     }
 
+    func testBareAudioNamesLinkUnderARelativeFolderTheMessageNames() {
+        let voices = "/Users/me/Desktop/Voices/Bay"
+        let present: Set<String> = [voices, voices + "/line.bay1.mp3", "/Users/me"]
+        let existsHere: ChatPaths.Exists = { present.contains($0) }
+        let text = "Copied into `Desktop/Voices/Bay/`:\n- `line.bay1.mp3`\n- `missing.mp3`"
+        let bases = ChatPaths.bases(in: text, cwd: "/Users/me", isFolder: existsHere)
+        XCTAssertEqual(bases, [voices, "/Users/me"])
+        let links = ChatPaths.links(in: text, bases: bases, exists: existsHere)
+        XCTAssertEqual(links.map(\.1), [voices, voices + "/line.bay1.mp3"])
+        XCTAssertEqual((text as NSString).substring(with: links[1].0), "line.bay1.mp3")
+    }
+
     func testCommandRunsWhereItsFilesAre() {
         let cmd = "npx remotion render src/index.ts AptusReel out/aptusfit-reel-v2.mp4 --codec h264 --crf 16 --overwrite"
         XCTAssertEqual(ChatPaths.directory(for: cmd, bases: [edit, "/repo"], exists: exists), edit)

@@ -1,3 +1,4 @@
+import ConsoleCore
 import SwiftUI
 
 /// Paths and commands in a message: paths that exist become links that show them in Finder, and
@@ -11,20 +12,28 @@ enum ChatPaths {
         return FileManager.default.fileExists(atPath: path, isDirectory: &dir) && dir.boolValue
     }
 
-    /// Folders to read relative paths against: absolute folders the text names, then the session's.
+    /// Folders to read relative paths against: folders the text names (absolute, then relative to the session's
+    /// folder: "Desktop/Voices/" followed by a bare "line.mp3"), then the session's.
     static func bases(in text: String, cwd: String?, isFolder: Exists = isFolder) -> [String] {
         var out: [String] = []
         for (_, token) in tokens(in: text) where token.hasPrefix("/") || token.hasPrefix("~/") {
             let path = expand(token)
             if isFolder(path), !out.contains(path) { out.append(path) }
         }
-        if let cwd, !cwd.isEmpty, !out.contains(cwd) { out.append(cwd) }
+        if let cwd, !cwd.isEmpty {
+            for (_, token) in tokens(in: text) where !token.hasPrefix("/") && !token.hasPrefix("~") && !token.contains("://") && !ChatAudio.isAudioName(token) {
+                let path = ((cwd as NSString).appendingPathComponent(token) as NSString).standardizingPath
+                if isFolder(path), !out.contains(path) { out.append(path) }
+            }
+            if !out.contains(cwd) { out.append(cwd) }
+        }
         return out
     }
 
     /// The existing file or folder a token names, or nil.
     static func resolve(_ token: String, bases: [String], exists: Exists = onDisk) -> String? {
-        guard token.contains("/"), !token.contains("://"), token != "/", token != "~/" else { return nil }
+        // A bare audio name ("line.mp3") counts: agents list voice files under a folder they named once.
+        guard token.contains("/") || ChatAudio.isAudioName(token), !token.contains("://"), token != "/", token != "~/" else { return nil }
         if token.hasPrefix("/") || token.hasPrefix("~") {
             let path = expand(token)
             return exists(path) ? path : nil
@@ -142,7 +151,7 @@ enum ChatPaths {
         return tokenPattern.matches(in: text, range: NSRange(location: 0, length: ns.length)).compactMap { match in
             let raw = ns.substring(with: match.range)
             let token = trim(raw)
-            guard token.contains("/") else { return nil }
+            guard token.contains("/") || ChatAudio.isAudioName(token) else { return nil }
             return (NSRange(location: match.range.location, length: (token as NSString).length), token)
         }
     }

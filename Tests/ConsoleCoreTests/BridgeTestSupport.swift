@@ -64,6 +64,15 @@ final class FakeBackend: BridgeBackend, @unchecked Sendable {
     func sessions() async -> [Session] { lock.withLock { sessionCalls += 1; return sessionList } }
     func chatMessages(sessionId: String, subagentId: String?) async throws -> [ChatMessage] { lock.withLock { chat } }
     func commands(sessionId: String) async -> [CommandInfo] { lock.withLock { commandList } }
+    var audioResult: ChatAudio.Chunk?
+    private(set) var audioCalls: [(String, Int, Int)] = []
+    func chatAudio(sessionId: String, audioId: String, offset: Int, length: Int) async throws -> ChatAudio.Chunk {
+        try lock.withLock {
+            audioCalls.append((audioId, offset, length))
+            guard let audioResult else { throw BridgeFailure(.notFound, "Không thấy tệp âm thanh này.") }
+            return audioResult
+        }
+    }
     func viz(sessionId: String, includeEntity: Bool) async throws -> BridgeViz { vizResult }
     func webSnapshot(url: URL, width: Int) async throws -> Data { snapshot }
     func sendMessage(_ text: String, to session: Session) async throws {

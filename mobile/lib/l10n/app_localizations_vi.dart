@@ -494,6 +494,15 @@ class AppL10nVi extends AppL10n {
   String get pictureOpen => 'Mở ảnh';
 
   @override
+  String get audioPlay => 'Phát âm thanh';
+
+  @override
+  String get audioPause => 'Tạm dừng âm thanh';
+
+  @override
+  String get audioFailed => 'Không tải được âm thanh. Chạm để thử lại';
+
+  @override
   String get allProjects => 'Tất cả project';
 
   @override

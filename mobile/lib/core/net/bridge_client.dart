@@ -97,6 +97,13 @@ class SubscriptionSpec {
       };
 }
 
+/// Raw bytes asked per `chat.audio` call; the Mac caps it at the same 160 KB because base64 plus the envelope has to
+/// stay under the bridge's 256 KB message limit.
+const int audioPieceBytes = 160 * 1024;
+
+/// A longer file is refused: it would sit whole in memory before it is written to disk.
+const int maxAudioBytes = 64 * 1024 * 1024;
+
 const List<Duration> defaultBackoff = <Duration>[
   Duration(seconds: 1),
   Duration(seconds: 2),
@@ -431,6 +438,33 @@ class BridgeClient {
     } finally {
       _imageWaiters.remove(id);
     }
+  }
+
+  /// The whole audio file [audioId] of [sessionId]'s chat, fetched piece by piece (the bridge caps a message at
+  /// 256 KB). [onProgress] gets 0..1 after each piece.
+  Future<Uint8List> chatAudio(String sessionId, String audioId, {void Function(double fraction)? onProgress}) async {
+    final BytesBuilder file = BytesBuilder(copy: false);
+    int total = -1;
+    while (total < 0 || file.length < total) {
+      final Json data = await request(
+        'chat.audio',
+        <String, Object?>{'sessionId': sessionId, 'audioId': audioId, 'offset': file.length, 'length': audioPieceBytes},
+        const Duration(seconds: 20),
+      );
+      total = data.integer('total');
+      if (total > maxAudioBytes) throw const BridgeException('invalid', 'Tệp âm thanh quá lớn.');
+      final Uint8List piece;
+      try {
+        piece = base64Decode(data.str('data'));
+      } on FormatException {
+        throw const BridgeException('invalid', 'Mac gửi dữ liệu âm thanh hỏng.');
+      }
+      // A piece that adds nothing before the end would loop forever.
+      if (piece.isEmpty && file.length < total) throw const BridgeException('invalid', 'Tệp âm thanh bị cắt ngắn.');
+      file.add(piece);
+      onProgress?.call(total == 0 ? 1 : (file.length / total).clamp(0, 1));
+    }
+    return file.takeBytes();
   }
 
   /// The slash commands of [sessionId] (built-ins plus the user's, the project's and plugins'). Macs that do not

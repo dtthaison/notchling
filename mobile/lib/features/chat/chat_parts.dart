@@ -6,6 +6,7 @@ import '../../app/widgets/kit.dart';
 import '../../app/widgets/motion.dart';
 import '../../core/protocol/models.dart';
 import '../../l10n/app_localizations.dart';
+import 'chat_audio.dart';
 import 'chat_pictures.dart';
 import 'code_highlight.dart';
 import 'markdown_text.dart';
@@ -147,6 +148,7 @@ class AssistantCard extends StatelessWidget {
           ),
           if (message.text.isNotEmpty) MarkdownText(message.text),
           MessagePictures(sessionId: sessionId, images: message.images),
+          MessageAudio(sessionId: sessionId, audio: message.audio),
         ],
       ),
       ),

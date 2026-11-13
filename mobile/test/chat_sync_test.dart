@@ -1,7 +1,10 @@
+import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:agent_console/core/net/bridge_client.dart';
 import 'package:agent_console/core/protocol/models.dart';
+import 'package:agent_console/features/chat/chat_audio.dart';
 import 'package:agent_console/features/chat/chat_cache.dart';
 import 'package:agent_console/features/chat/chat_notifier.dart';
 import 'package:agent_console/features/chat/chat_parts.dart';
@@ -284,6 +287,97 @@ void main() {
       expect(find.byType(PictureThumbnail), findsNothing);
     });
   });
+
+  group('audio', () {
+    const ChatAudio voice = ChatAudio(id: 'a-0123456789abcdef', name: 'line.bay1.mp3', mediaType: 'audio/mpeg', bytes: 10);
+
+    test('a message parses its audio, tolerates its absence, and never carries a Mac path', () {
+      final ChatMessage withAudio = ChatMessage.fromJson(<String, Object?>{
+        ...message('m', 'hi', role: 'assistant'),
+        'audio': <Object?>[<String, Object?>{'id': 'a-1', 'mediaType': 'audio/wav', 'bytes': 7, 'name': 'x.wav'}],
+      });
+      expect(withAudio.audio.single.name, 'x.wav');
+      expect(withAudio.audio.single.extension, 'wav');
+      expect(parsed('m', 'hi').audio, isEmpty);
+      expect(ChatMessage.fromJson(withAudio.toJson()).audio.single.id, 'a-1');
+    });
+
+    test('chat.audio is fetched piece by piece until the total, and the loader keeps the file for next time', () async {
+      final Uint8List whole = Uint8List.fromList(List<int>.generate(25, (int i) => i));
+      final List<int> offsets = <int>[];
+      final FakeWs socket = mac(other: (FakeWs s, Map<String, Object?> m) {
+        if (m['op'] == 'chat.audio') {
+          final int offset = m['offset']! as int;
+          offsets.add(offset);
+          // The Mac gives less than asked: the phone has to keep asking from where it got to.
+          final int end = offset + 10 > whole.length ? whole.length : offset + 10;
+          s.reply(m['id']!, data: <String, Object?>{
+            'data': base64Encode(whole.sublist(offset, end)),
+            'offset': offset,
+            'total': whole.length,
+            'mediaType': 'audio/mpeg',
+          });
+        }
+      });
+      final MemoryChatCache cache = MemoryChatCache();
+      final ProviderContainer container = await open(socket, cache: cache);
+      final List<double> progress = <double>[];
+      final String path = await container.read(chatAudioLoaderProvider).load('c', voice, onProgress: progress.add);
+      expect(offsets, <int>[0, 10, 20]);
+      expect(progress.last, 1);
+      expect(await File(path).readAsBytes(), whole);
+      final ChatAudioLoader offline = ChatAudioLoader(cache, () => null);
+      expect(await offline.load('c', voice), path, reason: 'from the phone disk, no Mac needed');
+      expect(offsets, hasLength(3));
+    });
+
+    test('a refused file is an error to retry', () async {
+      final FakeWs socket = mac(other: (FakeWs s, Map<String, Object?> m) {
+        if (m['op'] == 'chat.audio') s.fail(m['id']!, 'not_found', 'Không thấy tệp âm thanh này.');
+      });
+      final ProviderContainer container = await open(socket);
+      await expectLater(container.read(chatAudioLoaderProvider).load('c', voice), throwsA(isA<BridgeException>()));
+    });
+
+    testWidgets('a chip shows the name, loads on play, fails with a retry, and only one chip plays at a time', (WidgetTester tester) async {
+      bool fail = true;
+      final _FakePlayback playback = _FakePlayback();
+      final ChatAudioLoader loader = _ScriptedAudioLoader(() => fail ? throw const BridgeException('timeout', 'x') : '/tmp/line.bay1.mp3');
+      const ChatAudio other = ChatAudio(id: 'a-fedcba9876543210', name: 'other.wav', mediaType: 'audio/wav', bytes: 5);
+      await tester.pumpWidget(ProviderScope(
+        overrides: <Override>[chatAudioLoaderProvider.overrideWithValue(loader), chatAudioPlaybackProvider.overrideWithValue(playback)],
+        child: host(const MessageAudio(sessionId: 'c', audio: <ChatAudio>[voice, other])),
+      ));
+      expect(find.text('line.bay1.mp3'), findsOneWidget);
+      expect(find.text('other.wav'), findsOneWidget);
+      expect(find.byIcon(Icons.play_arrow), findsNWidgets(2));
+
+      await tester.tap(find.text('line.bay1.mp3'));
+      await tester.pump();
+      await tester.pump();
+      expect(find.text('Không tải được âm thanh. Chạm để thử lại'), findsOneWidget);
+      expect(playback.played, isEmpty);
+
+      fail = false;
+      await tester.tap(find.text('line.bay1.mp3'));
+      await tester.pump();
+      await tester.pump();
+      expect(playback.played, <String>['c|a-0123456789abcdef']);
+      expect(find.byIcon(Icons.pause), findsOneWidget);
+
+      await tester.tap(find.text('other.wav'));
+      await tester.pump();
+      await tester.pump();
+      expect(playback.activeKey, 'c|a-fedcba9876543210');
+      expect(find.byIcon(Icons.pause), findsOneWidget, reason: 'the first chip went back to play');
+      expect(find.byIcon(Icons.play_arrow), findsOneWidget);
+    });
+
+    testWidgets('an assistant card with no audio shows no chips', (WidgetTester tester) async {
+      await tester.pumpWidget(ProviderScope(child: host(MessageAudio(sessionId: 'c', audio: const <ChatAudio>[]))));
+      expect(find.byType(AudioChip), findsNothing);
+    });
+  });
 }
 
 class _ScriptedLoader extends ChatPictureLoader {
@@ -292,4 +386,24 @@ class _ScriptedLoader extends ChatPictureLoader {
 
   @override
   Future<Uint8List> load(String sessionId, ChatImage image, {int width = thumbnailWidth}) async => _script();
+}
+
+class _ScriptedAudioLoader extends ChatAudioLoader {
+  _ScriptedAudioLoader(this._script) : super(MemoryChatCache(), () => null);
+  final String Function() _script;
+
+  @override
+  Future<String> load(String sessionId, ChatAudio audio, {void Function(double fraction)? onProgress}) async => _script();
+}
+
+/// Stands in for the platform player: it only records which chip is the active one.
+class _FakePlayback extends ChatAudioPlayback {
+  final List<String> played = <String>[];
+
+  @override
+  Future<void> toggle(String key, String path) async {
+    if (activeKey == key) return;
+    played.add(key);
+    debugActivate(key);
+  }
 }

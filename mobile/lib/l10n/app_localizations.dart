@@ -967,6 +967,24 @@ abstract class AppL10n {
   /// **'Mở ảnh'**
   String get pictureOpen;
 
+  /// No description provided for @audioPlay.
+  ///
+  /// In vi, this message translates to:
+  /// **'Phát âm thanh'**
+  String get audioPlay;
+
+  /// No description provided for @audioPause.
+  ///
+  /// In vi, this message translates to:
+  /// **'Tạm dừng âm thanh'**
+  String get audioPause;
+
+  /// No description provided for @audioFailed.
+  ///
+  /// In vi, this message translates to:
+  /// **'Không tải được âm thanh. Chạm để thử lại'**
+  String get audioFailed;
+
   /// No description provided for @allProjects.
   ///
   /// In vi, this message translates to:

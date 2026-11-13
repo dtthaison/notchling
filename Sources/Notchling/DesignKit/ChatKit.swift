@@ -169,7 +169,7 @@ extension View {
 // MARK: - Icons
 
 enum KitIcon {
-    case needs, working, done, terminal, resume, send, tools, question, permission, claude, search, info, back, sessions, phone, check, more
+    case needs, working, done, terminal, resume, send, tools, question, permission, claude, search, info, back, sessions, phone, check, more, play, pause
 
     var symbol: String {
         switch self {
@@ -190,6 +190,8 @@ enum KitIcon {
         case .phone: return "iphone"
         case .check: return "checkmark"
         case .more: return "ellipsis"
+        case .play: return "play.fill"
+        case .pause: return "pause.fill"
         }
     }
 

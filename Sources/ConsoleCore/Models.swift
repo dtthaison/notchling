@@ -208,6 +208,8 @@ public struct ChatMessage: Identifiable, Sendable, Equatable {
     public var sourceOffset: UInt64? = nil
     /// Pictures in this message (a pasted screenshot, a tool's screenshot, a file named in the text).
     public var images: [ImageRef] = []
+    /// Audio files an assistant message names (ElevenLabs voices, sound effects).
+    public var audio: [AudioRef] = []
     public var kind: ChatKind = .text
     /// On `.tools` messages: the calls with their input, output and diff.
     public var steps: [ToolStep] = []

@@ -231,6 +231,8 @@ public struct ChatMessageDTO: Codable, Equatable, Sendable {
     public let queued: Bool
     /// Descriptions only; the bytes come from `chat.image`.
     public let images: [ImageDTO]
+    /// Audio files the message names; the bytes come from `chat.audio`. Absent when there are none.
+    public let audio: [AudioDTO]?
     /// "shell" or "compaction"; absent for a normal message.
     public let kind: String?
     /// On tool messages: the calls with their input, output and diff. Absent when there are none.
@@ -250,6 +252,7 @@ public struct ChatMessageDTO: Codable, Equatable, Sendable {
         toolSummary = message.toolSummary
         queued = message.queued
         images = message.images.map(ImageDTO.init)
+        audio = message.audio.isEmpty ? nil : message.audio.map(AudioDTO.init)
         kind = message.kind == .text ? nil : message.kind.rawValue
         steps = message.steps.isEmpty ? nil : message.steps.map(ToolStepDTO.init)
         output = message.output
@@ -267,6 +270,18 @@ public struct ToolStepDTO: Codable, Equatable, Sendable {
     public init(_ step: ToolStep) {
         name = step.name; summary = step.summary; output = step.output; path = step.path
         diff = step.diff.isEmpty ? nil : step.diff.map(\.wire)
+    }
+}
+
+/// No path: the phone asks for the file by id and never learns where it is on the Mac.
+public struct AudioDTO: Codable, Equatable, Sendable {
+    public let id: String
+    public let mediaType: String
+    public let bytes: Int
+    public let name: String
+
+    public init(_ ref: AudioRef) {
+        id = ref.id; mediaType = ref.mediaType; bytes = ref.byteCount; name = ref.name
     }
 }
 
@@ -326,6 +341,8 @@ public protocol BridgeBackend: Sendable {
     /// A JPEG of a picture the session's chat refers to, at most `maxWidth` wide. Only pictures referenced by that
     /// session's transcript can be asked for. Throws BridgeFailure (not_found, invalid).
     func chatImage(sessionId: String, imageId: String, maxWidth: Int) async throws -> Data
+    /// A piece of an audio file the session's chat names (at most 160 KB). Throws BridgeFailure (not_found, invalid).
+    func chatAudio(sessionId: String, audioId: String, offset: Int, length: Int) async throws -> ChatAudio.Chunk
     /// The slash commands the session can run (built-ins plus the user's, the project's and plugins').
     func commands(sessionId: String) async -> [CommandInfo]
     func viz(sessionId: String, includeEntity: Bool) async throws -> BridgeViz
@@ -400,6 +417,10 @@ extension BridgeBackend {
 
     public func chatImage(sessionId: String, imageId: String, maxWidth: Int) async throws -> Data {
         throw BridgeFailure(.notFound, "Không thấy ảnh này.")
+    }
+
+    public func chatAudio(sessionId: String, audioId: String, offset: Int, length: Int) async throws -> ChatAudio.Chunk {
+        throw BridgeFailure(.notFound, "Không thấy tệp âm thanh này.")
     }
 
     public func chatPage(sessionId: String, subagentId: String?, before: String?, after: String?, limit: Int) async throws -> BridgeChatPage {

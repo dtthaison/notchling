@@ -317,6 +317,32 @@ class ChatImage {
       width != null && height != null && height! > 0 ? width! / height! : null;
 }
 
+/// An audio file a message names (a voice line, a sound effect). Only this description travels with the chat; the
+/// Mac sends the bytes in pieces on demand and never says where the file is.
+class ChatAudio {
+  const ChatAudio({required this.id, required this.name, required this.mediaType, this.bytes = 0});
+
+  factory ChatAudio.fromJson(Json json) => ChatAudio(
+    id: json.str('id'),
+    name: json.strOrNull('name') ?? json.str('id'),
+    mediaType: json.strOrNull('mediaType') ?? 'audio/mpeg',
+    bytes: json['bytes'] is num ? (json['bytes']! as num).toInt() : 0,
+  );
+
+  Json toJson() => <String, Object?>{'id': id, 'name': name, 'mediaType': mediaType, 'bytes': bytes};
+
+  final String id;
+  final String name;
+  final String mediaType;
+  final int bytes;
+
+  /// The file's extension, for the local copy: the player picks its decoder from it.
+  String get extension {
+    final int dot = name.lastIndexOf('.');
+    return dot > 0 && dot < name.length - 1 ? name.substring(dot + 1).toLowerCase() : 'mp3';
+  }
+}
+
 class ChatMessage {
   const ChatMessage({
     required this.id,
@@ -326,6 +352,7 @@ class ChatMessage {
     this.toolSummary,
     this.queued = false,
     this.images = const <ChatImage>[],
+    this.audio = const <ChatAudio>[],
     this.kind = ChatKind.text,
     this.steps = const <ToolStep>[],
     this.output,
@@ -341,6 +368,9 @@ class ChatMessage {
     images: json['images'] is List<Object?>
         ? json.objects('images').map(ChatImage.fromJson).toList()
         : const <ChatImage>[],
+    audio: json['audio'] is List<Object?>
+        ? json.objects('audio').map(ChatAudio.fromJson).toList()
+        : const <ChatAudio>[],
     kind: ChatKind.parse(json.strOrNull('kind')),
     steps: json['steps'] is List<Object?>
         ? json.objects('steps').map(ToolStep.fromJson).toList()
@@ -356,6 +386,7 @@ class ChatMessage {
     'toolSummary': toolSummary,
     'queued': queued,
     'images': images.map((ChatImage i) => i.toJson()).toList(),
+    if (audio.isNotEmpty) 'audio': audio.map((ChatAudio a) => a.toJson()).toList(),
     'kind': kind.name,
     'steps': steps.map((ToolStep t) => t.toJson()).toList(),
     'output': output,
@@ -371,6 +402,9 @@ class ChatMessage {
   final bool queued;
 
   final List<ChatImage> images;
+
+  /// Audio files the message names; empty from a Mac that does not know them.
+  final List<ChatAudio> audio;
 
   /// A normal message, a `!` shell command (text is the command, [output] what it printed), or the notice that the
   /// conversation was compacted (text is the summary line).

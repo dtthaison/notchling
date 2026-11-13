@@ -18,6 +18,10 @@ abstract interface class ChatCache {
   Future<void> saveMessages(String sessionId, List<ChatMessage> messages);
   Future<Uint8List?> loadImage(String sessionId, String imageId, int width);
   Future<void> saveImage(String sessionId, String imageId, int width, Uint8List jpeg);
+
+  /// The local copy of an audio file, or null. Players need a file path, not bytes.
+  Future<String?> loadAudio(String sessionId, ChatAudio audio);
+  Future<String> saveAudio(String sessionId, ChatAudio audio, Uint8List bytes);
 }
 
 /// Files under the app's support folder. A cache that cannot be read or written is logged and treated as empty:
@@ -31,6 +35,9 @@ class DiskChatCache implements ChatCache {
   Future<File> _messagesFile(String sessionId) async => File('${(await _root()).path}/chat_cache/${_key(sessionId)}.json');
   Future<File> _imageFile(String sessionId, String imageId, int width) async =>
       File('${(await _root()).path}/chat_images/${_key(sessionId)}/${_key(imageId)}-$width.jpg');
+
+  Future<File> _audioFile(String sessionId, ChatAudio audio) async =>
+      File('${(await _root()).path}/chat_audio/${_key(sessionId)}/${_key(audio.id)}.${audio.extension}');
 
   @override
   Future<List<ChatMessage>> loadMessages(String sessionId) async {
@@ -81,6 +88,28 @@ class DiskChatCache implements ChatCache {
       debugPrint('ChatCache.saveImage($sessionId, $imageId): $error');
     }
   }
+
+  @override
+  Future<String?> loadAudio(String sessionId, ChatAudio audio) async {
+    try {
+      final File file = await _audioFile(sessionId, audio);
+      return file.existsSync() ? file.path : null;
+    } on Object catch (error) {
+      debugPrint('ChatCache.loadAudio($sessionId, ${audio.id}): $error');
+      return null;
+    }
+  }
+
+  @override
+  Future<String> saveAudio(String sessionId, ChatAudio audio, Uint8List bytes) async {
+    final File file = await _audioFile(sessionId, audio);
+    await file.parent.create(recursive: true);
+    // Written aside and renamed: a copy cut short by a crash must never be mistaken for the whole file.
+    final File scratch = File('${file.path}.part');
+    await scratch.writeAsBytes(bytes, flush: true);
+    await scratch.rename(file.path);
+    return file.path;
+  }
 }
 
 /// Overridden in tests with an in-memory cache.
@@ -103,4 +132,16 @@ class MemoryChatCache implements ChatCache {
 
   @override
   Future<void> saveImage(String sessionId, String imageId, int width, Uint8List jpeg) async => images['$sessionId|$imageId|$width'] = jpeg;
+
+  final Map<String, String> audioPaths = <String, String>{};
+
+  @override
+  Future<String?> loadAudio(String sessionId, ChatAudio audio) async => audioPaths['$sessionId|${audio.id}'];
+
+  @override
+  Future<String> saveAudio(String sessionId, ChatAudio audio, Uint8List bytes) async {
+    final File file = File('${Directory.systemTemp.path}/chat-audio-${audio.id}.${audio.extension}');
+    await file.writeAsBytes(bytes, flush: true);
+    return audioPaths['$sessionId|${audio.id}'] = file.path;
+  }
 }

@@ -137,6 +137,7 @@ public enum ChatTranscript {
             var offset: UInt64
             var queued = false
             var images: [ImageRef] = []
+            var audio: [AudioRef] = []
             var kind: ChatKind = .text
             var steps: [ToolStep] = []
             var output: String?
@@ -154,6 +155,8 @@ public enum ChatTranscript {
         var taken: [(content: String, time: Date)] = []
         var malformed = 0
         var latestModel: String?
+        /// Claude Code writes the session's folder on every line; relative audio names are read against it.
+        var latestCwd: String?
         var tally = ToolTally()
         var tallyTimestamp = Date.distantPast
         var tallySeed = ""
@@ -223,6 +226,7 @@ public enum ChatTranscript {
                 continue
             }
             let timestamp = (object["timestamp"] as? String).flatMap(parseISO) ?? .distantPast
+            if let cwd = object["cwd"] as? String, !cwd.isEmpty { latestCwd = cwd }
 
             // Claude Code's input queue: a message typed while the agent works.
             if object["type"] as? String == "queue-operation" {
@@ -335,6 +339,7 @@ public enum ChatTranscript {
                     continue
                 }
             }
+            let audio = type == "assistant" ? ChatAudio.refs(in: text, cwd: latestCwd) : []
             // Injected wrappers (<command-name>, <system-reminder>) and interrupt markers are not chat.
             if (text.isEmpty && pictures.isEmpty) || text.hasPrefix("<") || text.hasPrefix("[Request interrupted") { continue }
 
@@ -348,8 +353,9 @@ public enum ChatTranscript {
             if let last = drafts.last, last.role == .assistant, last.kind == .text {
                 if !text.isEmpty { drafts[drafts.count - 1].text += "\n\n" + text }
                 drafts[drafts.count - 1].images += pictures
+                for ref in audio where !drafts[drafts.count - 1].audio.contains(ref) { drafts[drafts.count - 1].audio.append(ref) }
             } else {
-                drafts.append(Draft(role: .assistant, text: text, timestamp: timestamp, seed: seed, toolSummary: nil, offset: source.offset, images: pictures))
+                drafts.append(Draft(role: .assistant, text: text, timestamp: timestamp, seed: seed, toolSummary: nil, offset: source.offset, images: pictures, audio: audio))
             }
         }
         flushTools()
@@ -361,7 +367,7 @@ public enum ChatTranscript {
 
         let messages = drafts.suffix(limit).map { draft in
             ChatMessage(id: stableUUID(draft.seed), role: draft.role, text: cap(draft.text),
-                        timestamp: draft.timestamp, toolSummary: draft.toolSummary, queued: draft.queued, sourceOffset: draft.offset, images: draft.images,
+                        timestamp: draft.timestamp, toolSummary: draft.toolSummary, queued: draft.queued, sourceOffset: draft.offset, images: draft.images, audio: draft.audio,
                         kind: draft.kind, steps: draft.steps, output: draft.output)
         }
         return ChatParseResult(messages: messages, malformedLines: malformed, model: latestModel)
@@ -554,6 +560,8 @@ public final class ChatTranscriptCache {
     private var offsets: [URL: [UUID: UInt64]] = [:]
     /// Pictures the chat of each transcript has shown. Only these can be fetched: a phone cannot name another file.
     private var pictures: [URL: [String: ImageRef]] = [:]
+    /// Audio files the chat of each transcript has named; the same rule as pictures.
+    private var sounds: [URL: [String: AudioRef]] = [:]
 
     public init() {}
 
@@ -623,6 +631,19 @@ public final class ChatTranscriptCache {
         var known = pictures[url] ?? [:]
         for message in messages { for ref in message.images { known[ref.id] = ref } }
         pictures[url] = known
+        var heard = sounds[url] ?? [:]
+        for message in messages { for ref in message.audio { heard[ref.id] = ref } }
+        sounds[url] = heard
+    }
+
+    /// A piece of an audio file this transcript's chat has named.
+    public func audio(at url: URL, id: String, offset: Int, length: Int,
+                      home: URL = FileManager.default.homeDirectoryForCurrentUser) throws -> ChatAudio.Chunk {
+        lock.lock()
+        let ref = sounds[url]?[id]
+        lock.unlock()
+        guard let ref else { throw AudioError.notFound }
+        return try ChatAudio.chunk(of: ref, offset: offset, length: length, home: home)
     }
 
     /// The JPEG of a picture this transcript's chat has shown, at most `maxWidth` wide.

@@ -151,6 +151,21 @@ final class LiveBridgeBackend: BridgeBackend, @unchecked Sendable {
         }.value
     }
 
+    func chatAudio(sessionId: String, audioId: String, offset: Int, length: Int) async throws -> ChatAudio.Chunk {
+        if ForeignSessions.parse(sessionId) != nil { throw BridgeFailure(.notFound, "Không thấy tệp âm thanh này.") }
+        let session = try await session(sessionId)
+        guard let url = session.transcriptURL else { throw BridgeFailure(.notFound, "Chưa tìm thấy transcript.") }
+        let cache = chatCache
+        return try await Task.detached(priority: .userInitiated) {
+            do { return try cache.audio(at: url, id: audioId, offset: offset, length: length) } catch let error as AudioError {
+                throw BridgeFailure(error == .notFound ? .notFound : .invalid, error.localizedDescription)
+            } catch {
+                ConsoleLog.error("LiveBridgeBackend.chatAudio", sessionId, "\(error)")
+                throw BridgeFailure(.notFound, "Không đọc được tệp âm thanh.")
+            }
+        }.value
+    }
+
     func viz(sessionId: String, includeEntity: Bool) async throws -> BridgeViz {
         if ForeignSessions.parse(sessionId) != nil { throw BridgeFailure(.invalid, "Codex và Antigravity chưa có tab hình.") }
         let session = try await session(sessionId)

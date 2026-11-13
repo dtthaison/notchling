@@ -212,6 +212,7 @@ struct ConversationView: View, Equatable {
         case .assistant(let text):
             VStack(alignment: .leading, spacing: 0) {
                 AssistantMessage(text: text, date: item.date, anchor: item.id).part("Claude's Reply")
+                AudioPlayerRows(text: text)
                 SecondOpinionCards(anchors: [item.id])
             }
         case .thinking(let seconds, let text):

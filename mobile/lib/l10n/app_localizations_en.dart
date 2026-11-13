@@ -494,6 +494,15 @@ class AppL10nEn extends AppL10n {
   String get pictureOpen => 'Open picture';
 
   @override
+  String get audioPlay => 'Play audio';
+
+  @override
+  String get audioPause => 'Pause audio';
+
+  @override
+  String get audioFailed => 'Could not load the audio. Tap to retry';
+
+  @override
   String get allProjects => 'All projects';
 
   @override
