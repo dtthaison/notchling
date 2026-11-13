@@ -25,6 +25,7 @@ pub enum Opens {
     Saved(Box<Page>),
     Live(ArtifactLink),
     File(PathBuf),
+    Html(PathBuf),
     Diff(String),
     Folder(PathBuf),
     System(PathBuf),
@@ -123,9 +124,12 @@ pub fn subtitle(opens: &Opens) -> String {
         }
         Opens::Saved(_) => "Saved copy".to_owned(),
         Opens::Live(_) => "Live on claude.ai".to_owned(),
-        Opens::File(_) | Opens::Diff(_) | Opens::Folder(_) | Opens::System(_) | Opens::Browser => {
-            String::new()
-        }
+        Opens::File(_)
+        | Opens::Html(_)
+        | Opens::Diff(_)
+        | Opens::Folder(_)
+        | Opens::System(_)
+        | Opens::Browser => String::new(),
     }
 }
 

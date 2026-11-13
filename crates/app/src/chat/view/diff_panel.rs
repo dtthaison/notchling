@@ -115,6 +115,7 @@ pub fn shown(path: &str) -> Shown {
         link: String::new(),
         error: None,
         file: None,
+        html: None,
         diff: Some(DiffState {
             path: path.to_owned(),
             body: DiffBody::Loading,

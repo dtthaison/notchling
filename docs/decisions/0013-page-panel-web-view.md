@@ -22,6 +22,10 @@
 
 Proposed. It amends the Web content point of 0005 for Chat's page panel only. The maintainer asked for the feature on 2026-11-10; accepting this record settles it.
 
+## Note of 2026-11-13: a local HTML file
+
+Asked for on 2026-11-13: a clicked `.html` file shows rendered, not as source. Chat's file panel now opens an `.html`, `.htm` or `.xhtml` file in the same web view (`PanelPage::Untrusted`), with a Page and Source toggle in its header (Page and Changes for a new file in the Details Panel's Git section, whose diff is only its source; a changed file still opens its diff, with the page one click away). Unlike a saved copy, the file is not a published Artifact: an agent wrote it, so it runs with JavaScript off, in a non-persistent data store, with navigation, new windows and file access held to its own folder, as a saved copy's are, and with no way to the bridge or the local API. Remote images and styles still load, since WebKit does not ask the navigation handler about subresources; with no script they cannot read or send anything the file's author did not already hold. Open in Default App runs the file's scripts in the user's browser.
+
 ## Date
 
 2026-11-10

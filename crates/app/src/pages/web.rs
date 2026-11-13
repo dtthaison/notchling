@@ -183,6 +183,7 @@ fn retire(view: &WebView) {
 
 pub enum PanelPage<'a> {
     Local(&'a PageSource),
+    Untrusted(&'a PageSource),
     Live(&'a str),
 }
 
@@ -220,6 +221,9 @@ impl PanelWeb {
         let PanelHooks { title, leave } = hooks;
         let builder = match page {
             PanelPage::Local(source) => local_builder(source),
+            PanelPage::Untrusted(source) => local_builder(source)
+                .with_javascript_disabled()
+                .with_incognito(true),
             PanelPage::Live(url) => WebViewBuilder::new()
                 .with_navigation_handler(|url| live_allows(&url))
                 .with_new_window_req_handler(move |url, _| {
@@ -245,7 +249,7 @@ impl PanelWeb {
             .with_focused(false)
             .build_as_child(&ViewHandle(content))
             .map_err(|e| format!("the web view couldn't be made: {e}"))?;
-        if let PanelPage::Local(source) = page {
+        if let PanelPage::Local(source) | PanelPage::Untrusted(source) = page {
             load_local(&view, source);
         }
         Ok(PanelWeb {
