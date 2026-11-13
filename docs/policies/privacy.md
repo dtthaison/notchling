@@ -143,6 +143,21 @@ Links you click open in your browser.
 - Voice dictation runs on the phone with a Whisper model bundled in the app.
 - None of its direct dependencies is an analytics or crash-reporting package (`apps/flutter/pubspec.yaml`).
 
+## Logs on this Mac
+
+Notchling writes these files, in `~/Library/Application Support/Notchling` unless noted. None leaves the
+Mac, and Settings > Activity reads only the first four.
+
+- `audit.jsonl` (and `audit.jsonl.1`, rotated at 5 MB): the daemon's refusals and failures and what the app
+  asked it to do: time, operation, which program, result. For a failed call that types into a session it keeps
+  the error message, never the text typed. A vault use is logged with the names of the secrets, never a value.
+- `notchlingd.log` (and `.1`, rotated at 5 MB): the daemon's output.
+- `AgentConsole/bridge/remote-log.jsonl`: each remote change a paired phone made, with the phone's name, the
+  operation and the length of any text, never the text. It is not rotated.
+- `account-log.json`: when each account became the active one, by account id.
+- `logs/crash.log`: a panic's message and place (opened 0600; a message can quote what was on screen).
+- `permission-screen.txt`: the last permission screen the daemon could not read.
+
 ## What stays on the Mac
 
 Transcripts, conversations and search are read from files on this Mac and stay there, except what a

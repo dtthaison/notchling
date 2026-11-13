@@ -16,6 +16,7 @@ use serde_json::{Map, Value};
 use super::banner::Banners;
 use super::hook_rows::HooksShown;
 use super::settings::{change, sections, Daemon, Field, Row};
+use super::settings_activity_view::activity_section;
 use super::settings_hooks_view::hooks_section;
 use super::view::{sheet_header, Acts, Dismiss};
 use crate::mac::shell::{AppAccounts, AppActions, AppBridge, AppSwitchFeed};
@@ -37,7 +38,11 @@ pub struct SettingChanged {
     pub value: Value,
 }
 
+pub struct OpenActivity;
+
 impl EventEmitter<Dismiss> for SettingsView {}
+
+impl EventEmitter<OpenActivity> for SettingsView {}
 
 impl EventEmitter<SettingChanged> for SettingsView {}
 
@@ -329,6 +334,15 @@ impl Render for SettingsView {
             );
         }
         list = list.child(hooks_section(&self.hooks, a));
+        let open_activity = button(
+            "settings-activity",
+            "Open",
+            ButtonKind::Secondary,
+            PartState::Rest,
+            a,
+        )
+        .on_click(cx.listener(|_, _, _, cx| cx.emit(OpenActivity)));
+        list = list.child(activity_section(open_activity, a));
         div()
             .size_full()
             .flex()

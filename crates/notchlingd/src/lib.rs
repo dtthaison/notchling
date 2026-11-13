@@ -3,6 +3,7 @@ pub mod accounts_ops;
 mod accounts_signin;
 pub mod acting;
 pub mod acting_ops;
+pub mod activity_ops;
 pub mod agy_elsewhere;
 pub mod agy_ops;
 pub mod agy_sink;
@@ -31,6 +32,7 @@ pub mod layout;
 pub mod limits_ops;
 pub mod limits_sources;
 pub mod limits_usage;
+pub mod log_rotate;
 pub mod op_group;
 pub mod pages_cli;
 pub mod pages_ops;
@@ -38,6 +40,7 @@ pub mod prompts;
 pub mod providers_daemon;
 mod providers_gate;
 pub mod providers_ops;
+pub mod quiet_ops;
 pub mod service;
 pub mod signals;
 pub mod switches;
@@ -55,6 +58,8 @@ mod accounts_ops_tests;
 mod acting_ops_tests;
 #[cfg(test)]
 mod acting_permission_tests;
+#[cfg(test)]
+mod activity_ops_tests;
 #[cfg(test)]
 mod bridge_models_tests;
 #[cfg(test)]
@@ -93,6 +98,8 @@ mod providers_add_tests;
 mod providers_ops_tests;
 #[cfg(test)]
 mod providers_sync_tests;
+#[cfg(test)]
+mod quiet_ops_tests;
 #[cfg(test)]
 mod vault_ops_lock_tests;
 

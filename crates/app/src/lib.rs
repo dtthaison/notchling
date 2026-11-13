@@ -3,6 +3,7 @@
 pub mod accounts;
 pub mod acting;
 pub mod actions;
+pub mod activity;
 pub mod chat;
 pub mod cli;
 pub mod crash_log;

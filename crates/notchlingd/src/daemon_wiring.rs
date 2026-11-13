@@ -1,6 +1,7 @@
 use crate::accounts_ops::AccountsOps;
 use crate::acting::Acting;
 use crate::acting_ops::{ActingOps, Room};
+use crate::activity_ops::ActivityOps;
 use crate::agy_ops::AgyOps;
 use crate::attach::{ClaudeAttacher, LiveLauncher};
 use crate::bridge_backend::APPROVAL_WAIT;
@@ -18,6 +19,7 @@ use crate::op_group::OpGroup;
 use crate::pages_ops::{PagesOps, PagesSetup};
 use crate::providers_daemon::ProviderStores;
 use crate::providers_ops::ProvidersOps;
+use crate::quiet_ops;
 use crate::switches::{SwitchFlag, SwitchOps, Switches};
 use crate::vault_ops::VaultOps;
 use notchling_engine::accounts::codex::login::idle_for_auto_switch;
@@ -158,8 +160,12 @@ impl Handler for Ops {
         (Ok(list), extras)
     }
 
+    fn loud(&self, op: &str, args: &Value) -> bool {
+        quiet_ops::loud(op, args)
+    }
+
     fn spec(&self, op: &str) -> Option<OpSpec> {
-        match op {
+        let spec = match op {
             ops::SESSIONS_LIST => Some(OpSpec::AGENT),
             op => self
                 .pages
@@ -170,7 +176,8 @@ impl Handler for Ops {
                 .or_else(|| self.codex.as_ref().and_then(|c| c.spec(op)))
                 .or_else(|| self.agy.as_ref().and_then(|a| a.spec(op)))
                 .or_else(|| self.group(op).and_then(|g| g.spec(op))),
-        }
+        };
+        quiet_ops::quiet(spec, op)
     }
 
     fn call(&self, caller: &Caller, op: &str, args: &Value) -> Result<Value, ApiError> {
@@ -428,6 +435,7 @@ impl Wired {
             .with_group(self.inbox.clone())
             .with_group(self.vault.clone())
             .with_group(Arc::new(git))
+            .with_group(Arc::new(ActivityOps::for_daemon(layout)))
             .with_first_scan(first_scan, first_wait)
     }
 

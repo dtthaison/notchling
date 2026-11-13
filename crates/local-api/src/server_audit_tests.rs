@@ -18,9 +18,13 @@ impl Handler for Acting {
         match op {
             "session.reply" | "session.stop" => Some(OpSpec::APP),
             "slow" | "read" => Some(OpSpec::AGENT),
-            "peek" | "peek.fail" => Some(OpSpec::APP_QUIET),
+            "peek" | "peek.fail" | "peek.loud" => Some(OpSpec::APP_QUIET),
             _ => None,
         }
+    }
+
+    fn loud(&self, op: &str, args: &Value) -> bool {
+        op == "peek.loud" && args["refresh"] == json!(true)
     }
 
     fn topics(&self) -> &[&str] {
@@ -162,6 +166,19 @@ fn a_quiet_op_leaves_no_audit_line_on_success_but_failures_stay_audited() {
         summary(&agent_run),
         vec![("peek".to_owned(), "forbidden".to_owned())]
     );
+}
+
+#[test]
+fn a_quiet_op_the_handler_calls_loud_is_audited_on_success() {
+    let me = std::env::current_exe().unwrap();
+    let run = start(Allowlist::new([me]));
+    let mut app = connect(&run, ClientKind::App);
+    assert!(app.call("peek.loud", json!({"refresh": false})).is_ok());
+    assert!(app.call("peek.loud", json!({"refresh": true})).is_ok());
+    let lines = audit_lines(&run);
+    assert_eq!(lines.len(), 1);
+    assert_eq!(lines[0]["op"], "peek.loud");
+    assert_eq!(lines[0]["result"], "ok");
 }
 
 #[test]
