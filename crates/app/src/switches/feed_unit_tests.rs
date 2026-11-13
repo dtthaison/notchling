@@ -220,3 +220,59 @@ impl Shared {
         self.state().last_move.clone()
     }
 }
+
+#[test]
+fn a_settings_change_queues_its_key_once_until_it_is_taken() {
+    let s = shared();
+    let feed = SwitchFeed {
+        shared: Arc::new(s),
+        transport: None,
+        choice: Arc::new(NoChoice),
+    };
+    for (key, value) in [
+        ("chatHistory", json!("8mb")),
+        ("showPet", json!(false)),
+        ("chatHistory", json!("16mb")),
+    ] {
+        feed.shared.apply(&event(
+            topics::SETTINGS_CHANGED,
+            json!({"key": key, "value": value, "by": "agent"}),
+        ));
+    }
+    feed.shared
+        .apply(&event(topics::SETTINGS_CHANGED, json!({"value": 1})));
+    assert_eq!(feed.take_settings(), ["chatHistory", "showPet"]);
+    assert_eq!(feed.changes().limits, 0);
+    feed.shared.apply(&event(
+        topics::SETTINGS_CHANGED,
+        json!({"key": "limitMode", "value": "off"}),
+    ));
+    assert_eq!(
+        feed.changes().limits,
+        1,
+        "the Accounts window reads limits again"
+    );
+    assert_eq!(feed.take_settings(), ["limitMode"]);
+    assert!(feed.take_settings().is_empty(), "taken once");
+    for n in 0..100 {
+        feed.shared.apply(&event(
+            topics::SETTINGS_CHANGED,
+            json!({"key": format!("k{n}")}),
+        ));
+    }
+    let kept = feed.take_settings();
+    assert_eq!(kept.len(), SETTINGS_KEPT);
+    assert_eq!(
+        kept.last().map(String::as_str),
+        Some("k99"),
+        "the newest are kept"
+    );
+}
+
+#[test]
+fn a_reconnect_reads_every_key_an_agent_can_change_again() {
+    let keys = shown_keys();
+    assert!(keys.iter().any(|k| k == "chatHistory"));
+    assert!(keys.iter().any(|k| k == "limitMode"));
+    assert!(!keys.iter().any(|k| k == "accounts"));
+}

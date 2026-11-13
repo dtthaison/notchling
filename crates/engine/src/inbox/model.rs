@@ -8,6 +8,7 @@ pub enum Kind {
     LimitNotice,
     ActionFailed,
     Notice,
+    SettingChange,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]

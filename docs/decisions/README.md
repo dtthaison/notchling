@@ -14,7 +14,7 @@ Most of them come from the design, [revision 2](https://github.com/dtthaison/not
 | [0004](0004-notchlingd-engine-service.md) | The Rust engine runs as the always-on `notchlingd` service | Accepted |
 | [0005](0005-gpui-desktop-app.md) | GPUI for every desktop app, web content in `wry` windows | Accepted |
 | [0006](0006-flutter-phone-generated-types.md) | Flutter phone with generated protocol types and no Rust | Proposed |
-| [0007](0007-local-api-tiers.md) | Local API with an app tier and an agent tier, callers known by executable path | Accepted |
+| [0007](0007-local-api-tiers.md) | Local API with an app tier and an agent tier, callers known by executable path | Accepted, amended by 0020 |
 | [0008](0008-mit-permissive-crates.md) | Stay MIT; only MIT, Apache and BSD crates, enforced by `cargo-deny` | Accepted |
 | [0009](0009-rulesets-as-code.md) | Rulesets as code in `.github/rulesets/`, applied by the maintainer | Accepted |
 | [0010](0010-build-then-sign-beta-then-stable.md) | Build, then sign apart; Beta daily, Stable by one click | Accepted |
@@ -26,6 +26,7 @@ Most of them come from the design, [revision 2](https://github.com/dtthaison/not
 | [0016](0016-provider-interface-in-the-engine.md) | One provider interface per tool, in the engine, and model data from a catalog | Proposed |
 | [0017](0017-rust-notes-load-by-default.md) | The Rust notes load by default; the Swift notes are read on demand | Proposed |
 | [0018](0018-chat-state-per-area.md) | Chat's state per screen area, the transcript as a log, selection on the model, the conversation as a list | Proposed |
+| [0020](0020-agents-change-settings-by-class.md) | Agents read every setting and change one by its class: free at once, ask through the Inbox, never the switches | Proposed |
 
 0001 was written before records had a Status section. Its status is Accepted.
 

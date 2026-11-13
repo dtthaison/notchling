@@ -20,6 +20,7 @@ use crate::pages_ops::{PagesOps, PagesSetup};
 use crate::providers_daemon::ProviderStores;
 use crate::providers_ops::ProvidersOps;
 use crate::quiet_ops;
+use crate::settings_ops::{SettingsOps, SwitchStates};
 use crate::switches::{SwitchFlag, SwitchOps, Switches};
 use crate::vault_ops::VaultOps;
 use notchling_engine::accounts::codex::login::idle_for_auto_switch;
@@ -255,6 +256,7 @@ pub struct Wired {
     pub inbox: Arc<InboxOps>,
     pub vault: Arc<VaultOps>,
     pub install: Arc<InstallOps>,
+    pub settings: Arc<SettingsOps>,
 }
 
 impl Wired {
@@ -380,6 +382,20 @@ impl Wired {
         if let Some(binary) = binary {
             install = install.with_skill(vault_skill_spec(&binary, vault.clone()));
         }
+        let states: SwitchStates = {
+            let (acting, bridge, switches) = (acting.clone(), bridge.clone(), switches.clone());
+            Arc::new(move |name: &str| match name {
+                "acting" => Some(acting.is_on()),
+                "bridge" => Some(bridge.is_on()),
+                other => switches.get(other).map(|s| s.is_on()),
+            })
+        };
+        let settings = Arc::new(
+            SettingsOps::new(layout.data_dir.clone(), room.clone(), states)
+                .with_audit(AuditLog::new(layout.audit_path()))
+                .with_limits(limits.config().clone())
+                .with_inbox(inbox.clone()),
+        );
         Wired {
             acting,
             codex,
@@ -393,6 +409,7 @@ impl Wired {
             inbox,
             vault,
             install: Arc::new(install),
+            settings,
         }
     }
 
@@ -434,6 +451,7 @@ impl Wired {
             .with_group(self.catalog.clone())
             .with_group(self.inbox.clone())
             .with_group(self.vault.clone())
+            .with_group(self.settings.clone())
             .with_group(Arc::new(git))
             .with_group(Arc::new(ActivityOps::for_daemon(layout)))
             .with_first_scan(first_scan, first_wait)
@@ -458,6 +476,7 @@ impl Wired {
         self.vault.close();
         self.bridge.close();
         self.limits.close();
+        self.settings.close();
         self.inbox.close();
     }
 

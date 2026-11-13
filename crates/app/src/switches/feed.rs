@@ -14,6 +14,7 @@ use crate::chat::data::DataRoot;
 use crate::session_source::Backoff;
 
 const NOTICES_KEPT: usize = 20;
+const SETTINGS_KEPT: usize = 64;
 
 pub trait SwitchChoice: Send + Sync {
     fn get(&self, switch: Switch) -> bool;
@@ -92,6 +93,7 @@ struct State {
     requests: Vec<Value>,
     notices: Vec<Notice>,
     last_move: Option<Value>,
+    settings: Vec<String>,
 }
 
 struct Shared {
@@ -216,6 +218,17 @@ impl Shared {
             topics::VAULT_REQUEST_PENDING => push_pending(&mut s.requests, &event.data),
             topics::VAULT_REQUEST_RESOLVED => remove_pending(&mut s.requests, &event.data),
             topics::VAULT_CHANGED => s.changes.vault += 1,
+            topics::SETTINGS_CHANGED => {
+                let key = event.data.get("key").and_then(Value::as_str);
+                if key.is_some_and(|k| crate::accounts::wire::Call::LIMIT_KEYS.contains(&k)) {
+                    s.changes.limits += 1;
+                }
+                if let Some(key) = key.filter(|k| !s.settings.iter().any(|seen| seen == k)) {
+                    s.settings.push(key.to_owned());
+                    let extra = s.settings.len().saturating_sub(SETTINGS_KEPT);
+                    s.settings.drain(..extra);
+                }
+            }
             _ => {}
         }
     }
@@ -340,6 +353,10 @@ impl SwitchFeed {
         self.shared.state().notices.clone()
     }
 
+    pub fn take_settings(&self) -> Vec<String> {
+        std::mem::take(&mut self.shared.state().settings)
+    }
+
     pub fn chosen(&self, switch: Switch) -> bool {
         self.choice.get(switch)
     }
@@ -378,6 +395,14 @@ impl Drop for SwitchFeed {
     }
 }
 
+fn shown_keys() -> Vec<String> {
+    notchling_engine::settings::KEYS
+        .iter()
+        .filter(|k| k.access.shown())
+        .map(|k| k.name.to_owned())
+        .collect()
+}
+
 const TOPICS: [&str; 5] = [
     topics::SETTINGS,
     topics::ACCOUNTS,
@@ -409,6 +434,7 @@ fn run(config: &FeedConfig, shared: &Shared, choice: &dyn SwitchChoice) {
                     s.changes.providers += 1;
                     s.changes.limits += 1;
                     s.changes.vault += 1;
+                    s.settings = shown_keys();
                 }
                 follow(client, shared);
             }

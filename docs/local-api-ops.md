@@ -408,7 +408,7 @@ start, and until the maintainer turns it on the Swift app owns both (decision 00
 `what` names the parts to act on; left out it is all of them. The names are `prompt_hooks`
 (`PreToolUse` `AskUserQuestion` and `PermissionRequest` `*`), `page_hooks` (`PreToolUse`,
 `PostToolUse` and `PostToolUseFailure` matching `Artifact`) and the skills' folder names
-(`notchling-delegate`, `notchling-pages`, and `notchling-vault` once the vault supplies it).
+(`notchling-delegate`, `notchling-pages`, `notchling-settings` (Claude Code and Codex), and `notchling-vault` once the vault supplies it).
 
 The envelope:
 
@@ -571,6 +571,25 @@ One switch or add flow per provider at a time. A flow that waits for the user st
 polled the moment the switch turns off and is abandoned (`AccountProvider::abandon_add`: Codex's
 `codex login` stopped and its scratch home removed; nothing written or restored, the event's
 `note` says where a provider was left), and is cancelled when the daemon stops while it is on.
+
+## `settings_ops.rs`
+
+Agents read and change Notchling's settings ([decision 0020](decisions/0020-agents-change-settings-by-class.md)). Every key in `crates/engine/src/settings/keys.rs` carries a class for agents: `free` (an agent sets it at once), `ask` (the user allows or denies the change in the Inbox) or `never` (only the user, in Notchling). The five switches are listed as `switch.acting`, `switch.bridge`, `switch.accounts`, `switch.vault` and `switch.install` (a bare `acting`, `bridge`, `vault` or `install` finds them too; `accounts` is the saved-logins key), always `never`: `settings.set_acting`, `bridge.set` and `settings.set_switch` stay app tier.
+
+| Op | Tier | Args | Reply |
+| --- | --- | --- | --- |
+| `settings.list` | agent | `{}` | `{settings: [Entry]}`: the five switches first, then every key in `keys.rs` order |
+| `settings.get` | agent | `{key}` | `Entry`, plus `pending: [{id, value}]` while asks for the key wait |
+| `settings.set` | agent | `{key, value, wait?: seconds}` | `{key, value, state: "applied", changed}` for a `free` key, or any `free` or `ask` key from the app tier; `Ask` for an `ask` key from the agent tier |
+| `settings.asked` | agent | `{id, wait?: seconds}` | `Ask` |
+
+`Entry` is `{key, title, description, kind, class, why, allowed?, range?: [low, high], value?, default?, switch?: true}`, `kind` one of `bool`, `int`, `number`, `string`, `list`, `object`, `json`, and `class` one of `free`, `ask`, `never`. An agent-tier caller gets `value` and `default` only for `free` and `ask` keys and the switches (a switch's `value` is its state in this run, `null` when unknown); the app tier gets every value.
+
+`value` is JSON of the key's type, or text: `"true"`, `"off"`, `"90"` and `"8MB"` become `true`, `false`, `90` and `"8mb"` (`KeySpec::read_value`). It is then checked against the key's type, `allowed` list and range (`KeySpec::check`); a bad one is `bad_request` saying what the key takes ("chatHistory takes one of 2mb, 4mb, 8mb, 16mb."). An unknown key is `bad_request`, naming up to three agent-settable keys whose name or title holds the word. A switch or a `never` key is `forbidden`, for the app tier too: the app writes its own records itself.
+
+`Ask` is `{id, key, value, state, message}`, `state` one of `waiting`, `applying`, `applied`, `denied`, `expired`, `withdrawn` (the daemon stopped first) or `failed`. An ask raises an inbox item (`setting:<id>`, kind `setting_change`, actions `allow` and `deny`, expiring with the ask after [`ASK_WAIT`], 300 s) that the Mac or a paired phone answers; the first answer wins. Allow writes the value; Deny, no answer or a stop leave it as it was. The item's responder only marks the ask (it runs under the inbox lock); the ask thread in `settings_asks.rs` writes the value, closes expired asks and their items, and withdraws the asks still waiting at `close`. `wait` (0 to 60 s, default 0) holds the call until the ask ends; `settings.asked` polls it, and an ended ask is kept 10 minutes. An allowed ask is written even when nothing polls it any more. With no app following `inbox` an ask is refused at once with `needs_approval`; at most 8 wait at a time (`failed` beyond that).
+
+A write goes to `notchling.db` (the limit keys `limitMode`, `codexLimitMode`, `antigravityLimitMode` and `limitSwitchAt` first to the daemon's `LimitConfig`, as `limits.set_mode` does), then out on `settings` as `settings.changed {key, value, by: "agent" | "app", ask?: id}`, set or not. The app reads the key back from the store on that event, so an older event never undoes a newer write. The Settings sheet writes the store itself and applies its own change in place; it doesn't go through this op, so it isn't on the topic. Every `settings.set`, from either tier, is in the audit log as op `settings.set` with result `set`, `asked`, `allowed`, `denied`, `expired`, `withdrawn`, `failed`, `refused`, `bad_value`, `unknown_key`, `no_app` or `full`, and `reason` `<key>=<value as JSON>` (cut at 64 and 120 characters). Reads are not audited.
 
 ## `vault_ops.rs`
 

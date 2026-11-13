@@ -42,6 +42,9 @@ mod providers_gate;
 pub mod providers_ops;
 pub mod quiet_ops;
 pub mod service;
+pub mod settings_asks;
+pub mod settings_cli;
+pub mod settings_ops;
 pub mod signals;
 pub mod switches;
 pub mod vault_args;
@@ -150,6 +153,7 @@ pub fn run(command: Command) -> i32 {
         Command::Secrets { args } => vault_cli::secrets(&args),
         Command::Secret { args } => vault_cli::secret(&args),
         Command::SecretRequest { args } => vault_cli::secret_request(&args),
+        Command::Settings { args } => settings_cli::run(&args),
         Command::Service { action, dir } => run_service(action, dir.as_deref()),
         Command::Hook { socket } => match Layout::from_env(socket.as_deref()) {
             Some(l) => hook::run(&l),
