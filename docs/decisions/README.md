@@ -26,6 +26,7 @@ Most of them come from the design, [revision 2](https://github.com/dtthaison/not
 | [0016](0016-provider-interface-in-the-engine.md) | One provider interface per tool, in the engine, and model data from a catalog | Proposed |
 | [0017](0017-rust-notes-load-by-default.md) | The Rust notes load by default; the Swift notes are read on demand | Proposed |
 | [0018](0018-chat-state-per-area.md) | Chat's state per screen area, the transcript as a log, selection on the model, the conversation as a list | Proposed |
+| [0019](0019-agent-instructions-per-tool.md) | The skills, rules and hooks Notchling installs in each agent tool, owned file by file | Proposed |
 
 0001 was written before records had a Status section. Its status is Accepted.
 
