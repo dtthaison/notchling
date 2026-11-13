@@ -275,7 +275,7 @@ fn request_cancel_from_inbox_cancels_request() {
 }
 
 #[test]
-fn request_cancel_from_the_window_withdraws_the_item() {
+fn request_cancel_from_the_form_reads_as_cancelled_by_the_mac() {
     let r = rig("inbox-cancel-window", None);
     let (asker, event) = r.start_request();
     r.s.ops
@@ -285,8 +285,35 @@ fn request_cancel_from_the_window_withdraws_the_item() {
             &json!({"id": event["id"]}),
         )
         .unwrap();
-    assert!(asker.join().unwrap().is_err());
-    assert_eq!(r.item(&request_item_id(&event))["state"], "withdrawn");
+    let e = asker.join().unwrap().unwrap_err();
+    assert_eq!(e.message, "The user cancelled.");
+    let item = r.item(&request_item_id(&event));
+    assert_eq!(item["state"], "answered");
+    assert_eq!(item["answer"], "cancel");
+    assert_eq!(item["answered_by"], "mac");
+}
+
+#[test]
+fn an_op_thread_that_unwinds_after_the_raise_withdraws_its_item() {
+    let r = rig("inbox-unwind", None);
+    seed(&r.s, true);
+    r.s.room.follows.store(true, Ordering::SeqCst);
+    let room = r.s.room.clone();
+    let _ = std::thread::spawn(move || {
+        let _held = room.events.lock().unwrap();
+        panic!("poison the room so the next publish unwinds");
+    })
+    .join();
+    let ops = r.s.ops.clone();
+    let user = std::thread::spawn(move || {
+        let args = json!({"names": ["gh"], "folder": "/w/app", "command": "curl"});
+        ops.call(&agent(), ops::VAULT_USE, &args)
+    });
+    assert!(user.join().is_err());
+    let items = r.list();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["kind"], "secret_approval");
+    assert_eq!(items[0]["state"], "withdrawn");
 }
 
 #[test]

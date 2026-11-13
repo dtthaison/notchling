@@ -6,7 +6,6 @@ use notchling_local_api::{ops, topics, ApiError, Caller, ClientKind, ErrorCode, 
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread::JoinHandle;
@@ -61,7 +60,6 @@ impl Inner {
 pub struct InboxOps {
     clock: Clock,
     data_dir: PathBuf,
-    loaded: AtomicBool,
     inner: Mutex<Inner>,
     stop: Mutex<Option<Sender<()>>>,
     thread: Mutex<Option<JoinHandle<()>>>,
@@ -137,7 +135,6 @@ impl InboxOps {
         let ops = InboxOps {
             clock,
             data_dir,
-            loaded: AtomicBool::new(false),
             inner: Mutex::new(inner),
             stop: Mutex::new(None),
             thread: Mutex::new(None),
@@ -146,34 +143,21 @@ impl InboxOps {
         Arc::new(ops)
     }
 
-    pub fn start(self: &Arc<Self>) {
-        self.load_saved();
-        self.spawn_loop();
-    }
-
-    fn load_saved(&self) {
-        if self.loaded.swap(true, Ordering::SeqCst) {
-            return;
-        }
+    pub fn load(&self) {
         let now = (self.clock)();
         let saved = inbox::load(&self.data_dir, now).unwrap_or_else(|why| {
             eprintln!("notchling: reading the inbox failed ({why}); starting it empty");
             Book::new()
         });
-        let mut inner = lock(&self.inner);
-        let held = inner.book.items();
-        let fresh: Vec<Item> = saved
+        let withdrawn: Vec<Change> = saved
             .items()
             .into_iter()
-            .filter(|item| !held.iter().any(|h| h.id == item.id))
-            .collect();
-        let withdrawn: Vec<Change> = fresh
-            .iter()
             .filter(|item| item.state == State::Withdrawn && item.closed_ms == Some(now))
-            .cloned()
             .map(Change::Updated)
             .collect();
-        inner.book = Book::from_items(fresh.into_iter().chain(held).collect());
+        let mut inner = lock(&self.inner);
+        inner.book = saved;
+        inner.responders.clear();
         inner.send(withdrawn);
     }
 

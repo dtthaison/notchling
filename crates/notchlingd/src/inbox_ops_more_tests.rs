@@ -2,7 +2,7 @@ use crate::acting_ops_tests::FakeRoom;
 use crate::inbox_ops::InboxOps;
 use crate::inbox_ops_tests::{answer, app, caller, changed, item, rig, Calls, NOW};
 use crate::op_group::OpGroup;
-use notchling_engine::inbox::{ActionId, State};
+use notchling_engine::inbox::{self, ActionId, State};
 use notchling_local_api::{ops, ClientKind, ErrorCode, Tier};
 use serde_json::json;
 use std::sync::Arc;
@@ -37,7 +37,7 @@ fn only_the_mac_or_a_phone_may_allow_a_secret() {
 }
 
 #[test]
-fn the_saved_book_loads_at_start_not_before() {
+fn load_replaces_the_book_with_the_saved_one() {
     let r = rig();
     r.ops.raise(item("a"), None);
     r.ops.flush();
@@ -46,22 +46,40 @@ fn the_saved_book_loads_at_start_not_before() {
     let reopened = InboxOps::with_clock(r.dir.clone(), room.clone(), Arc::new(move || later));
     let list = || reopened.call(&app(), ops::INBOX_LIST, &json!({})).unwrap();
     assert_eq!(list()["items"], json!([]));
-    let mut b = item("b");
-    b.created_ms = NOW + 1;
-    reopened.raise(b, None);
-    reopened.start();
-    let ids: Vec<String> = reopened.items().into_iter().map(|i| i.id).collect();
-    assert_eq!(ids, ["b", "a"]);
-    assert_eq!(list()["items"][0]["state"], "open");
-    assert_eq!(list()["items"][1]["state"], "withdrawn");
-    reopened.start();
-    assert_eq!(reopened.items().len(), 2);
+    reopened.load();
+    assert_eq!(list()["items"][0]["id"], "a");
+    assert_eq!(list()["items"][0]["state"], "withdrawn");
     reopened.close();
     let saved: Vec<String> = changed(&room)
         .iter()
         .map(|e| e["item"]["id"].as_str().unwrap_or_default().to_string())
         .collect();
-    assert!(saved.contains(&"a".to_string()));
+    assert_eq!(saved, ["a"]);
+}
+
+#[test]
+fn a_restart_keeps_the_order_of_items_raised_together() {
+    let r = rig();
+    for n in 0..=inbox::MAX_DONE {
+        let id = r.ops.raise(item(&format!("i{n:03}")), None);
+        r.ops.resolve(&id, State::Withdrawn, None, None);
+    }
+    r.ops.flush();
+    let before: Vec<String> = r.ops.items().into_iter().map(|i| i.id).collect();
+    let reopened = InboxOps::with_clock(
+        r.dir.clone(),
+        Arc::new(FakeRoom::default()),
+        Arc::new(|| NOW + 5_000),
+    );
+    reopened.load();
+    let after: Vec<String> = reopened.items().into_iter().map(|i| i.id).collect();
+    assert_eq!(after, before);
+    reopened.tick(NOW + 6_000);
+    let kept: Vec<String> = reopened.items().into_iter().map(|i| i.id).collect();
+    assert_eq!(kept.len(), inbox::MAX_DONE);
+    assert!(!kept.contains(&"i000".to_string()));
+    assert!(kept.contains(&format!("i{:03}", inbox::MAX_DONE)));
+    reopened.close();
 }
 
 #[test]

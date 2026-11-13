@@ -1,6 +1,6 @@
 use super::*;
 use crate::acting_ops::now_ms;
-use crate::inbox_ops::Responder;
+use crate::inbox_ops::{InboxOps, Responder};
 use notchling_engine::inbox::{Action, ActionId, Item, Kind as ItemKind, Source, State};
 use std::time::Instant;
 
@@ -35,6 +35,42 @@ impl Responder for RequestResponder {
     }
 }
 
+pub(super) struct Raised {
+    inbox: Option<Arc<InboxOps>>,
+    id: String,
+}
+
+impl Raised {
+    fn new(inbox: &Arc<InboxOps>, id: String) -> Raised {
+        Raised {
+            inbox: Some(inbox.clone()),
+            id,
+        }
+    }
+
+    fn none() -> Raised {
+        Raised {
+            inbox: None,
+            id: String::new(),
+        }
+    }
+
+    pub(super) fn close(mut self, state: State, answer: Option<ActionId>) {
+        if let Some(inbox) = self.inbox.take() {
+            let by = (state == State::Answered).then_some(ANSWERED_BY_MAC);
+            inbox.resolve(&self.id, state, answer, by);
+        }
+    }
+}
+
+impl Drop for Raised {
+    fn drop(&mut self) {
+        if let Some(inbox) = self.inbox.take() {
+            inbox.resolve(&self.id, State::Withdrawn, None, None);
+        }
+    }
+}
+
 fn action(id: ActionId, label: &str, primary: bool) -> Action {
     Action {
         id,
@@ -62,11 +98,11 @@ fn item(id: String, kind: ItemKind, title: String, detail: String) -> Item {
     }
 }
 
-pub(super) fn approval_item_id(ticket: &str) -> String {
+fn approval_item_id(ticket: &str) -> String {
     format!("vault-approval:{ticket}")
 }
 
-pub(super) fn request_item_id(ticket: &str) -> String {
+fn request_item_id(ticket: &str) -> String {
     format!("vault-request:{ticket}")
 }
 
@@ -79,9 +115,15 @@ pub(super) fn action_of(decision: Decision) -> ActionId {
 }
 
 impl VaultOps {
-    pub(super) fn raise_approval(&self, ticket: &str, names: &[&str], command: &str, folder: &str) {
+    pub(super) fn raise_approval(
+        &self,
+        ticket: &str,
+        names: &[&str],
+        command: &str,
+        folder: &str,
+    ) -> Raised {
         let Some(inbox) = &self.inbox else {
-            return;
+            return Raised::none();
         };
         let command: String = command.chars().take(COMMAND_CUT).collect();
         let mut raised = item(
@@ -102,12 +144,12 @@ impl VaultOps {
             approvals: self.approvals.clone(),
             ticket: ticket.to_string(),
         };
-        inbox.raise(raised, Some(Arc::new(responder)));
+        Raised::new(inbox, inbox.raise(raised, Some(Arc::new(responder))))
     }
 
-    pub(super) fn raise_request(&self, ticket: &str, request: &VaultRequest) {
+    pub(super) fn raise_request(&self, ticket: &str, request: &VaultRequest) -> Raised {
         let Some(inbox) = &self.inbox else {
-            return;
+            return Raised::none();
         };
         let detail = request
             .reason
@@ -129,14 +171,7 @@ impl VaultOps {
             requests: self.requests.clone(),
             ticket: ticket.to_string(),
         };
-        inbox.raise(raised, Some(Arc::new(responder)));
-    }
-
-    pub(super) fn close_item(&self, id: &str, state: State, answer: Option<ActionId>) {
-        if let Some(inbox) = &self.inbox {
-            let by = (state == State::Answered).then_some(ANSWERED_BY_MAC);
-            inbox.resolve(id, state, answer, by);
-        }
+        Raised::new(inbox, inbox.raise(raised, Some(Arc::new(responder))))
     }
 
     pub(super) fn ended_without_answer(

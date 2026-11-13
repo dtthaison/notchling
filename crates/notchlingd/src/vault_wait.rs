@@ -1,16 +1,3 @@
-//! What the vault service waits on: an approval (Deny / Allow Once / Always Allow) or a request's
-//! form, each answered by the app under an id.
-//!
-//! - Ids are 128 random bits from the OS ([`notchling_engine::vault::random_id`]): nobody can
-//!   answer one without having been sent it, and only the app follows the topic it is sent on.
-//!   No randomness, no id, and the wait is refused.
-//! - At most `max` wait at once, so agents can't pile them up.
-//! - Each keeps the event that announced it ([`Waiters::describe`]), so an app that connects
-//!   later still sees it ([`Waiters::pending`]).
-//! - A wait ends at its deadline, when `still` says stop (the app left, the vault went off), or
-//!   when [`Waiters::drain`] drops every answer channel (the daemon stops). All of those are a
-//!   "no": the caller gets `None`.
-
 use crate::vault_args::Decision;
 use notchling_engine::vault::{VaultEntry, VaultStore};
 use serde_json::Value;
