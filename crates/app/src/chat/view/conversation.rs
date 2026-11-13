@@ -394,7 +394,10 @@ pub(super) fn empty_column(
     cx: &mut Context<ConversationView>,
 ) -> Option<Stateful<Div>> {
     let shown = &*input.shown;
-    let empty = shown.items.is_empty() && shown.queued.is_empty() && input.outgoing.is_empty();
+    let empty = shown.items.is_empty()
+        && shown.queued.is_empty()
+        && input.held.is_none()
+        && input.outgoing.is_empty();
     let state = if input.subagent.as_ref().is_some_and(|sub| !sub.loaded) {
         Empty::Loading
     } else if input.loading {

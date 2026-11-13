@@ -300,6 +300,7 @@ fn copies_the_same_text_as_the_draw_order_selection_on_every_fixture() {
         let cache = std::cell::RefCell::new(Cache::default());
         let model = rows_blocks(
             &conversation,
+            Some("held"),
             &["still going".to_owned()],
             None,
             "",

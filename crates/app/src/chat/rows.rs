@@ -222,6 +222,16 @@ pub fn rows(conversation: &Conversation) -> Vec<Row> {
     out
 }
 
+pub fn with_held(mut rows: Vec<Row>, held: Option<&str>) -> Vec<Row> {
+    rows.extend(held.map(|text| Row::User {
+        text: text.to_owned(),
+        images: 0,
+        queued: true,
+        sending: false,
+    }));
+    rows
+}
+
 pub fn with_outgoing(mut rows: Vec<Row>, outgoing: &[String]) -> Vec<Row> {
     rows.extend(outgoing.iter().map(|text| Row::User {
         text: text.clone(),

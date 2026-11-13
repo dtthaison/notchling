@@ -248,6 +248,14 @@ impl ChatView {
         })
     }
 
+    pub(super) fn held_text(&self) -> Option<String> {
+        let session = self.selected_session()?;
+        if session.tool != Tool::Claude {
+            return None;
+        }
+        self.tools.live.held.get(&session.agent.id).cloned()
+    }
+
     pub(super) fn selected_held_working(&self) -> bool {
         self.selected_session()
             .is_some_and(|s| s.tool == Tool::Antigravity)
@@ -369,7 +377,10 @@ impl ChatView {
             move |view, result, cx| match result {
                 Ok(reply) => {
                     view.tools.delivered(&id, &sent_text, now_ms());
-                    if queues {
+                    if let Some(held) = reply.get("held").and_then(|h| h.as_str()) {
+                        view.tools.take_outgoing(&id, &sent_text);
+                        view.tools.live.held.insert(id.clone(), held.to_owned());
+                    } else if queues {
                         match sent_state(&reply) {
                             Sent::Queued(_) => {
                                 view.tools.take_outgoing(&id, &sent_text);

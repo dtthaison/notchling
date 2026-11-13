@@ -131,6 +131,7 @@ pub(super) struct ConversationInput {
     pub subagent: Option<SubagentShown>,
     pub session: Option<SessionShown>,
     pub held_working: bool,
+    pub held: Option<String>,
     pub outgoing: Vec<String>,
     pub loading: bool,
     pub empty_note: Option<&'static str>,
@@ -147,6 +148,7 @@ impl PartialEq for ConversationInput {
             && self.subagent == other.subagent
             && self.session == other.session
             && self.held_working == other.held_working
+            && self.held == other.held
             && self.outgoing == other.outgoing
             && self.loading == other.loading
             && self.empty_note == other.empty_note
@@ -368,7 +370,15 @@ impl ChatView {
         } else {
             self.outgoing_texts()
         };
-        let empty = shown.items.is_empty() && shown.queued.is_empty() && outgoing.is_empty();
+        let held = if self.open_subagent.is_some() {
+            None
+        } else {
+            self.held_text()
+        };
+        let empty = shown.items.is_empty()
+            && shown.queued.is_empty()
+            && held.is_none()
+            && outgoing.is_empty();
         let empty_note = empty.then(|| match session.map(|s| s.tool) {
             Some(Tool::Antigravity) if !self.tools.agy.as_ref().is_some_and(|c| c.open) => {
                 match self.acting_in(cx) {
@@ -389,6 +399,7 @@ impl ChatView {
                 working: s.agent.group == notchling_engine::sessions::agent::AgentGroup::Working,
             }),
             held_working: self.selected_held_working(),
+            held,
             outgoing,
             loading: self.loading,
             empty_note,

@@ -345,7 +345,7 @@ fn the_bridge_acts_only_through_the_acting_switch() {
     let sessions = Arc::new(Mutex::new(json!([row(
         "job-a",
         json!({"job": "abc12345"}),
-        "working",
+        "completed",
         None
     )])));
     let off = DaemonActing {

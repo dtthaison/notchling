@@ -260,12 +260,12 @@ fn a_reply_types_the_plan_into_the_jobs_attach_terminal() {
     let out = s.ops.call(
         &app(),
         ops::SESSION_REPLY,
-        &json!({"id": "job-a", "text": "hi\x1b[201~\r1"}),
+        &json!({"id": "job-idle", "text": "hi\x1b[201~\r1"}),
     );
     assert_eq!(out.unwrap(), json!({"sent": true}));
     assert_eq!(
         *s.attached.lock().unwrap(),
-        vec![("abcd1234".to_string(), Some("/lanes/b".to_string()))],
+        vec![("idle0001".to_string(), Some("/lanes/b".to_string()))],
         "the lane's config folder goes with the job"
     );
     assert_eq!(
@@ -305,7 +305,7 @@ fn replies_go_only_to_background_jobs_and_never_into_a_dialog() {
     let (c, m) = code(dialog.ops.call(
         &app(),
         ops::SESSION_REPLY,
-        &json!({"id": "job-a", "text": "1"}),
+        &json!({"id": "job-idle", "text": "1"}),
     ));
     assert_eq!(c, ErrorCode::Failed);
     assert!(m.starts_with("The session is asking you something"), "{m}");

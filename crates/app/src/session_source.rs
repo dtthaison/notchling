@@ -171,7 +171,7 @@ impl Shared {
                     self.set_prompts(prompts);
                 }
             }
-            topics::CODEX_TURN | topics::SESSION_CHANGED => {
+            topics::CODEX_TURN | topics::SESSION_CHANGED | topics::SESSION_HELD => {
                 let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
                 if state.tools.apply(&event) {
                     state.generation += 1;

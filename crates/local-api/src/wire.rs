@@ -114,6 +114,7 @@ pub mod topics {
     pub const CATALOG_CHANGED: &str = "catalog.changed";
     pub const CODEX_TURN: &str = "codex.turn";
     pub const SESSION_CHANGED: &str = "session.changed";
+    pub const SESSION_HELD: &str = "session.held";
     pub const AGY_PERMISSION_PENDING: &str = "agy.permission.pending";
     pub const AGY_PERMISSION_RESOLVED: &str = "agy.permission.resolved";
     pub const BRIDGE: &str = "bridge";

@@ -434,6 +434,7 @@ impl Wired {
     pub fn start(&self) {
         self.limits.spawn_loop();
         self.inbox.spawn_loop();
+        self.acting.spawn_held_loop();
     }
 
     pub fn load(&self) {
@@ -441,6 +442,7 @@ impl Wired {
     }
 
     pub fn close(&self) {
+        self.acting.stop_held_loop();
         self.acting.close();
         self.codex.close();
         self.agy.close();
