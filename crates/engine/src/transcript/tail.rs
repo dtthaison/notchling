@@ -1,6 +1,7 @@
 //! Bounded transcript reading: the last few MB of a file as whole lines, and incremental cursors that
 //! parse only what was appended since the last read.
 
+use super::scan::{scan_lines, Line};
 use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::{self, Read, Seek, SeekFrom};
@@ -13,6 +14,9 @@ pub const TAIL_BYTES: u64 = 2_000_000;
 pub const CHAT_TAIL_BYTES: u64 = 4_000_000;
 /// A line this long is a screenshot or huge tool output: slow to decode and nothing the chat shows.
 pub const MAX_LINE_BYTES: usize = 100_000;
+/// How far back a reader whose long lines are free looks for its budget of real lines: a file of
+/// nothing but pictures stops costing at this many bytes.
+pub const LONG_LINE_SCAN: u64 = 64_000_000;
 
 /// Bytes every [`Cursors`] in this process has parsed, for `--render`'s bench: an unchanged file
 /// adds nothing, an append adds only what was appended.
@@ -79,7 +83,22 @@ pub fn read_lines(path: &str, max_bytes: u64) -> io::Result<Vec<String>> {
 /// session's first prompt out of the read. Always a line start (0 or just past a newline). Looks back at
 /// most `scan_limit` bytes and then starts at the oldest whole line it reached.
 pub fn tail_start(path: &str, size: u64, budget: u64, scan_limit: u64) -> io::Result<u64> {
+    tail_start_with(path, size, budget, scan_limit, MAX_LINE_BYTES)
+}
+
+/// [`tail_start`] where a line is long when it is over `max_line` bytes.
+pub fn tail_start_with(
+    path: &str,
+    size: u64,
+    budget: u64,
+    scan_limit: u64,
+    max_line: usize,
+) -> io::Result<u64> {
     const BLOCK: u64 = 1 << 20;
+    // Whatever the lines are, they can't outweigh a budget the whole file fits in.
+    if size <= budget {
+        return Ok(0);
+    }
     let after = |line_end: u64| if line_end >= size { size } else { line_end + 1 };
     let mut file = File::open(path)?;
     let floor = size.saturating_sub(scan_limit);
@@ -99,7 +118,7 @@ pub fn tail_start(path: &str, size: u64, budget: u64, scan_limit: u64) -> io::Re
             }
             let newline = from + i as u64;
             let length = line_end - (newline + 1);
-            if length > 0 && length <= MAX_LINE_BYTES as u64 {
+            if length > 0 && length <= max_line as u64 {
                 kept += length + 1;
                 if kept > budget {
                     return Ok(after(line_end));
@@ -113,7 +132,7 @@ pub fn tail_start(path: &str, size: u64, budget: u64, scan_limit: u64) -> io::Re
         return Ok(after(line_end));
     }
     // The file's first line, [0, line_end).
-    if line_end > MAX_LINE_BYTES as u64 || kept + line_end < budget {
+    if line_end > max_line as u64 || kept + line_end < budget {
         Ok(0)
     } else {
         Ok(after(line_end))
@@ -123,6 +142,10 @@ pub fn tail_start(path: &str, size: u64, budget: u64, scan_limit: u64) -> io::Re
 /// A parser that takes a transcript one JSONL line at a time and keeps its own state between lines.
 pub trait LineParser: Default {
     fn consume(&mut self, line: &[u8]);
+
+    /// A line over the reader's cap ([`Cursors::skipping_lines_over`]), which is not held in memory: its
+    /// first bytes and its length. Most parsers have no use for it.
+    fn consume_oversized(&mut self, _head: &[u8], _len: u64) {}
 }
 
 struct Cursor<P, O> {
@@ -150,8 +173,10 @@ struct State<P, O> {
 pub struct Cursors<P: LineParser, O: Clone> {
     tail_bytes: u64,
     limit: usize,
-    /// Above 0, lines over [`MAX_LINE_BYTES`] don't count toward `tail_bytes` ([`tail_start`]).
+    /// Above 0, long lines don't count toward `tail_bytes` ([`tail_start_with`]).
     long_line_scan: u64,
+    /// With [`Cursors::skipping_lines_over`]: the length over which a line is not read at all.
+    line_cap: Option<usize>,
     render: Box<dyn Fn(&P) -> O + Send + Sync>,
     state: Mutex<State<P, O>>,
     /// Bytes this set of cursors has parsed (the same count as [`PARSED_BYTES`], for one set).
@@ -179,6 +204,7 @@ impl<P: LineParser, O: Clone> Cursors<P, O> {
             tail_bytes,
             limit,
             long_line_scan: 0,
+            line_cap: None,
             render: Box::new(render),
             state: Mutex::new(State {
                 cursors: HashMap::new(),
@@ -205,6 +231,49 @@ impl<P: LineParser, O: Clone> Cursors<P, O> {
         self
     }
 
+    /// The budget is of parsed bytes: a line over `max_line` bytes (a picture) is neither parsed nor
+    /// counted, and is never held in memory (the parser hears of it through
+    /// [`LineParser::consume_oversized`]). The window therefore holds up to `tail_bytes` of real lines
+    /// however many pictures sit between them, looking back at most `scan_limit` bytes of the file.
+    pub fn skipping_lines_over(mut self, max_line: usize, scan_limit: u64) -> Self {
+        self.line_cap = Some(max_line);
+        self.long_line_scan = scan_limit;
+        self
+    }
+
+    /// Whether the lines from `offset` on fit the parsed-bytes budget even though the file grew by more
+    /// than `tail_bytes`: only pictures made it so big.
+    fn fits_the_budget(&self, path: &str, size: u64, offset: u64) -> bool {
+        self.long_line_scan > 0
+            && tail_start_with(
+                path,
+                size,
+                self.tail_bytes,
+                self.long_line_scan,
+                self.line_cap.unwrap_or(MAX_LINE_BYTES),
+            )
+            .is_ok_and(|start| start <= offset)
+    }
+
+    /// Gives the lines in `start..end` to the parser and returns where the read got to, in bytes from
+    /// `start`.
+    fn feed(&self, parser: &mut P, path: &str, start: u64, end: u64, cut: bool) -> io::Result<u64> {
+        let Some(cap) = self.line_cap else {
+            let (lines, consumed) = read_chunk(path, start, end, cut)?;
+            self.count_parsed(consumed);
+            for line in &lines {
+                parser.consume(line);
+            }
+            return Ok(consumed);
+        };
+        let done = scan_lines(path, start, end, cut, cap, |line| match line {
+            Line::Whole(line) => parser.consume(line),
+            Line::Oversized { head, len } => parser.consume_oversized(head, len),
+        })?;
+        self.count_parsed(done.parsed);
+        Ok(done.span)
+    }
+
     /// None when the file can't be read.
     pub fn read(&self, path: &str) -> Option<O> {
         let meta = fs::metadata(path).ok()?;
@@ -220,7 +289,10 @@ impl<P: LineParser, O: Clone> Cursors<P, O> {
 
         let reusable = match state.cursors.get(path) {
             Some(c)
-                if c.inode == inode && c.offset <= size && size - c.offset <= self.tail_bytes =>
+                if c.inode == inode
+                    && c.offset <= size
+                    && (size - c.offset <= self.tail_bytes
+                        || self.fits_the_budget(path, size, c.offset)) =>
             {
                 if c.modified == modified && c.size == size {
                     let output = c.output.clone();
@@ -237,12 +309,10 @@ impl<P: LineParser, O: Clone> Cursors<P, O> {
         if reusable {
             if let Some(mut cursor) = state.cursors.remove(path) {
                 if size > cursor.offset {
-                    if let Ok((lines, consumed)) = read_chunk(path, cursor.offset, size, false) {
+                    if let Ok(consumed) =
+                        self.feed(&mut cursor.parser, path, cursor.offset, size, false)
+                    {
                         cursor.offset += consumed;
-                        self.count_parsed(consumed);
-                        for line in &lines {
-                            cursor.parser.consume(line);
-                        }
                     }
                 }
                 cursor.modified = modified;
@@ -256,7 +326,10 @@ impl<P: LineParser, O: Clone> Cursors<P, O> {
         }
 
         let aligned = (self.long_line_scan > 0)
-            .then(|| tail_start(path, size, self.tail_bytes, self.long_line_scan).ok())
+            .then(|| {
+                let cap = self.line_cap.unwrap_or(MAX_LINE_BYTES);
+                tail_start_with(path, size, self.tail_bytes, self.long_line_scan, cap).ok()
+            })
             .flatten();
         let (start, cut) = match aligned {
             Some(start) => (start, false),
@@ -265,12 +338,8 @@ impl<P: LineParser, O: Clone> Cursors<P, O> {
                 (start, start > 0)
             }
         };
-        let (lines, consumed) = read_chunk(path, start, size, cut).ok()?;
-        self.count_parsed(consumed);
         let mut parser = P::default();
-        for line in &lines {
-            parser.consume(line);
-        }
+        let consumed = self.feed(&mut parser, path, start, size, cut).ok()?;
         let output = (self.render)(&parser);
         if !state.cursors.contains_key(path) && state.cursors.len() >= self.limit {
             let oldest = state

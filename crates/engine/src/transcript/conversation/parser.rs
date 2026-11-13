@@ -5,6 +5,7 @@ use super::queue::Queue;
 use super::tools::{apply_task_result, clip, diff_lines, make_call, result_text, written_lines};
 use super::user::{model_id_in_confirmation, user_item};
 use crate::transcript::model::*;
+use crate::transcript::scan::HEAD_BYTES;
 use crate::transcript::shells;
 use crate::transcript::snapshot::{self, PendingQuestion};
 use crate::transcript::subagents::notification_statuses;
@@ -13,8 +14,9 @@ use crate::transcript::util::{count_of, date_field, parse_object, str_of};
 use serde_json::{Map, Value};
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-/// Lines longer than this (screenshots, huge tool output) are not decoded.
-const MAX_LINE: usize = 400_000;
+/// Lines longer than this (screenshots, huge tool output) are not decoded. The readers don't even hold
+/// them (`Cursors::skipping_lines_over`); [`Parser::consume_oversized`] hears of them.
+pub(super) const MAX_LINE: usize = 400_000;
 /// A long session keeps its last 500 items; trimming happens once 1000 pile up.
 const KEEP_ITEMS: usize = 500;
 const TRIM_AT: usize = 1000;
@@ -49,6 +51,10 @@ impl LineParser for Parser {
         self.parse_line(line);
         self.trim();
     }
+
+    fn consume_oversized(&mut self, head: &[u8], _len: u64) {
+        self.oversized_result(head);
+    }
 }
 
 impl Parser {
@@ -66,6 +72,42 @@ impl Parser {
 
     pub fn consume(&mut self, line: &[u8]) {
         LineParser::consume(self, line);
+    }
+
+    /// A line too big to decode, given by its first bytes: [`MAX_LINE`] and over (the Read of a picture).
+    pub fn consume_oversized(&mut self, head: &[u8], len: u64) {
+        LineParser::consume_oversized(self, head, len);
+    }
+
+    /// The call a skipped tool result answers is over, so its step doesn't show as running for good. Only
+    /// a user line counts (an `api-request-blob` repeats the same results), and only the picture or text
+    /// is missing: the answer to the call is known to have come.
+    fn oversized_result(&mut self, head: &[u8]) {
+        let Some(id) = oversized_tool_result(head) else {
+            return;
+        };
+        let Some(&(item, index)) = self.call_index.get(id.0) else {
+            return;
+        };
+        let Some(ChatItem {
+            kind: ItemKind::Tools(calls),
+            ..
+        }) = self.c.items.get_mut(item)
+        else {
+            return;
+        };
+        let Some(call) = calls.get_mut(index) else {
+            return;
+        };
+        call.finished = true;
+        call.output = Some(
+            if id.1 {
+                "[Image]"
+            } else {
+                "(too large to show)"
+            }
+            .to_string(),
+        );
     }
 
     fn next_id(&mut self, prefix: &str) -> String {
@@ -97,6 +139,7 @@ impl Parser {
 
     fn parse_line(&mut self, line: &[u8]) {
         if line.len() > MAX_LINE {
+            self.oversized_result(&line[..line.len().min(HEAD_BYTES)]);
             return;
         }
         let Some(map) = parse_object(line) else {
@@ -569,6 +612,26 @@ impl Parser {
             .filter(|_| !self.last_question_answered);
         c
     }
+}
+
+/// The `tool_use_id` of a user line's first tool result and whether its content starts with a picture,
+/// read from the line's first bytes (Claude Code writes the id first, then the type, then the content).
+/// None for any other line.
+fn oversized_tool_result(head: &[u8]) -> Option<(&str, bool)> {
+    let message = find(head, br#""message":"#)?;
+    find(&head[..message], br#""type":"user""#)?;
+    const KEY: &[u8] = br#""tool_use_id":""#;
+    let from = message + find(&head[message..], KEY)? + KEY.len();
+    let len = head[from..].iter().position(|&b| b == b'"')?;
+    let id = std::str::from_utf8(&head[from..from + len]).ok()?;
+    let rest = &head[from + len..];
+    // The first block of the result is a picture, as in Read's: `"content":[{"type":"image"`.
+    let image = find(rest, br#""content":[{"type":"image""#).is_some();
+    Some((id, image))
+}
+
+fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    haystack.windows(needle.len()).position(|w| w == needle)
 }
 
 fn compacted() -> ItemKind {

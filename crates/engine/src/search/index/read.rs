@@ -8,8 +8,10 @@ use crate::search::{
     MAX_LINE_BYTES,
 };
 use crate::transcript::codex as codex_transcript;
+use crate::transcript::scan::{scan_lines, Line};
+use crate::transcript::tail::{tail_start_with, LONG_LINE_SCAN};
 use std::fs::File;
-use std::io::{Read, Seek, SeekFrom};
+use std::io::Read;
 
 /// What reading a file gave.
 pub(super) enum Read1 {
@@ -20,9 +22,11 @@ pub(super) enum Read1 {
     Built(Box<IndexedSession>),
 }
 
-/// The bytes to index: the whole file when it is small, else its start and its end joined at line
-/// boundaries (both ends are cut in the middle of a line, so the partial lines are dropped). Never
-/// more than `HEAD_BYTES + TAIL_BYTES` or `WHOLE_FILE_BYTES`, even when the file grows meanwhile.
+/// The bytes to index: the whole file when it is small, else its start and the newest `TAIL_BYTES` of
+/// its lines, joined at line boundaries (the start is cut in the middle of a line, so the partial line
+/// is dropped). Lines over the cap (base64 pictures) take no room in that tail, so a few of them can't
+/// push the conversation before them out, and they are never held. Never more than
+/// `HEAD_BYTES + TAIL_BYTES` or `WHOLE_FILE_BYTES`, even when the file grows meanwhile.
 pub(super) fn contents(path: &str) -> Option<Vec<u8>> {
     let mut file = File::open(path).ok()?;
     // The size of the file we hold open, not the one a listing saw earlier.
@@ -37,21 +41,21 @@ pub(super) fn contents(path: &str) -> Option<Vec<u8>> {
     }
     let mut head = Vec::new();
     (&mut file).take(HEAD_BYTES).read_to_end(&mut head).ok()?;
-    file.seek(SeekFrom::Start(size.saturating_sub(TAIL_BYTES)))
-        .ok()?;
-    let mut tail = Vec::new();
-    (&mut file).take(TAIL_BYTES).read_to_end(&mut tail).ok()?;
     if let Some(cut) = head.iter().rposition(|&b| b == b'\n') {
         head.truncate(cut + 1);
     } else {
         head.clear();
     }
-    if let Some(cut) = tail.iter().position(|&b| b == b'\n') {
-        tail.drain(..=cut);
-    } else {
-        tail.clear();
-    }
-    head.extend_from_slice(&tail);
+    let start = tail_start_with(path, size, TAIL_BYTES, LONG_LINE_SCAN, MAX_LINE_BYTES).ok()?;
+    // The newest lines may reach back into the head's: it keeps only what comes before them.
+    head.truncate(usize::try_from(start).unwrap_or(usize::MAX));
+    scan_lines(path, start, size, false, MAX_LINE_BYTES, |line| {
+        if let Line::Whole(line) = line {
+            head.extend_from_slice(line);
+            head.push(b'\n');
+        }
+    })
+    .ok()?;
     Some(head)
 }
 
@@ -103,4 +107,60 @@ pub(super) fn read(candidate: &SessionMeta, tool: SessionTool) -> Read1 {
         None => builder.title(),
     };
     Read1::Built(Box::new(IndexedSession::new(meta, text)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::sessions::testutil::TempDir;
+
+    fn lines_of(data: &[u8]) -> Vec<String> {
+        String::from_utf8_lossy(data)
+            .lines()
+            .map(str::to_string)
+            .collect()
+    }
+
+    #[test]
+    fn pictures_do_not_push_the_text_between_them_out_of_a_big_file() {
+        let dir = TempDir::new("idx-pictures");
+        let picture = "A".repeat(2_000_000);
+        let mut text = String::new();
+        for (n, part) in ["head", "mid", "late", "tail"].iter().enumerate() {
+            for i in 0..3 {
+                text.push_str(&format!("{part}-{i}\n"));
+            }
+            if n < 3 {
+                text.push_str(&picture);
+                text.push('\n');
+            }
+        }
+        let path = dir.write("a.jsonl", &text);
+        assert!(text.len() as u64 > WHOLE_FILE_BYTES);
+        let data = contents(&path.to_string_lossy()).expect("contents");
+        let want: Vec<String> = ["head", "mid", "late", "tail"]
+            .iter()
+            .flat_map(|p| (0..3).map(move |i| format!("{p}-{i}")))
+            .collect();
+        assert_eq!(lines_of(&data), want, "every text line, no picture");
+    }
+
+    #[test]
+    fn a_big_file_without_pictures_is_its_start_and_its_end() {
+        let dir = TempDir::new("idx-plain");
+        let line = "x".repeat(99);
+        let count = 90_000;
+        let text: String = (0..count).map(|i| format!("{i:05}{line}\n")).collect();
+        let path = dir.write("a.jsonl", &text);
+        assert!(text.len() as u64 > WHOLE_FILE_BYTES + TAIL_BYTES);
+        let data = contents(&path.to_string_lossy()).expect("contents");
+        assert!(data.len() as u64 <= HEAD_BYTES + TAIL_BYTES + 1_000);
+        let lines = lines_of(&data);
+        assert!(lines[0].starts_with("00000"));
+        assert!(lines[lines.len() - 1].starts_with(&format!("{:05}", count - 1)));
+        assert!(
+            lines.len() < count,
+            "the middle of a file this big is left out"
+        );
+    }
 }

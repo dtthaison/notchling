@@ -7,6 +7,7 @@ Notable changes to Notchling. The format follows [Keep a Changelog](https://keep
 ### Fixed
 
 - The Artifact pages library saves again. Since the Rust app replaced the Swift one, published pages were no longer copied to `~/Library/Application Support/Notchling/pages`, reads of a saved link no longer came from the local copy, and a failed read no longer pointed at it. `notchling hook` now handles the Artifact tool's events itself, with or without the app running.
+- Chat showed almost nothing of a long session that had read pictures (a Read of a .jpg writes megabytes of base64 into the transcript, which filled the part Chat reads). Pictures no longer count toward what is read, so the conversation before them is back, the Read steps finish instead of showing as running, and the notch and Search read around them too.
 
 ## [1.2.0] - 2026-11-07
 
