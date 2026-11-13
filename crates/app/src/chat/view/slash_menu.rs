@@ -1,8 +1,8 @@
 use gpui::{div, prelude::*, px, relative, Context, Div, KeyDownEvent, SharedString, Window};
 use notchling_engine::control::slash::{self, SlashCommand};
 use notchling_kit::labels::Corner;
-use notchling_kit::metric::SIDE_PADDING;
-use notchling_kit::ui::{card, label, KitPart, KitStyled};
+use notchling_kit::metric::{MENU_GAP, SIDE_PADDING};
+use notchling_kit::ui::{label, menu_panel, menu_row, KitPart, KitStyled};
 use notchling_kit::{Appearance, Ink, TypeRole};
 
 use super::ChatView;
@@ -90,29 +90,14 @@ pub fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Opt
         return None;
     }
     let selected = view.slash.selected.min(rows.len() - 1);
-    let mut list = card(a)
-        .w(relative(1.0))
-        .p(px(6.0))
-        .flex()
-        .flex_col()
-        .gap(px(2.0))
-        .shadow_lg();
+    let mut list = menu_panel(a).w(relative(1.0)).max_w(relative(1.0));
     for (i, command) in rows.into_iter().enumerate() {
         let hint = command.argument_hint.clone().unwrap_or_default();
         let pick = command.clone();
-        let row = div()
-            .id(SharedString::from(format!("slash-{}", command.name)))
-            .w_full()
-            .px(px(10.0))
-            .py(px(5.0))
-            .rounded(px(6.0))
-            .flex()
-            .items_center()
-            .gap(px(10.0))
-            .cursor_pointer()
+        let row = menu_row(SharedString::from(format!("slash-{}", command.name)), a)
             .when(i == selected, |r| r.fill(Ink::Raised, a))
             .child(
-                label(&format!("/{}", command.name), TypeRole::Label, Ink::Text, a).flex_shrink_0(),
+                label(&format!("/{}", command.name), TypeRole::Meta, Ink::Text, a).flex_shrink_0(),
             )
             .when(!hint.is_empty(), |r| {
                 r.child(label(&hint, TypeRole::Meta, Ink::TextFaint, a).flex_shrink_0())
@@ -132,7 +117,7 @@ pub fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Opt
             .bottom(relative(1.0))
             .left(px(SIDE_PADDING))
             .right(px(SIDE_PADDING))
-            .pb(px(6.0))
+            .pb(px(MENU_GAP))
             .child(list)
             .part_at("Command List", Corner::TopTrailing, a, cx),
     )

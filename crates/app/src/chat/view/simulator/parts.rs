@@ -6,9 +6,11 @@ use gpui::{
     RenderImage, SharedString, Stateful, Window,
 };
 use notchling_kit::labels::Corner;
-use notchling_kit::metric::{RADIUS_MD, SIDEBAR_WIDTH};
+use notchling_kit::metric::{MENU_RADIUS, MENU_ROW_X, MENU_ROW_Y, SIDEBAR_WIDTH};
 use notchling_kit::part::{ButtonKind, PartState};
-use notchling_kit::ui::{button, card, hsla, icon, icon_button, label, KitPart, KitStyled};
+use notchling_kit::ui::{
+    button, hsla, icon, icon_button, label, menu_panel, menu_rule, KitPart, KitStyled, MenuItem,
+};
 use notchling_kit::{Appearance, Icon, IconSize, Ink, TypeRole};
 
 use super::super::render_map::WindowRegion;
@@ -144,48 +146,21 @@ fn device_row(
     cx: &mut Context<ChatView>,
 ) -> Stateful<Div> {
     let picked = d.clone();
-    div()
-        .id(SharedString::from(id))
-        .px(px(10.0))
-        .py(px(5.0))
-        .rounded(px(6.0))
-        .flex()
-        .items_center()
-        .gap(px(8.0))
-        .cursor_pointer()
-        .hover(move |s| s.bg(hsla(Ink::Raised.color(a))))
-        .child(
-            div()
-                .flex_1()
-                .min_w(px(0.0))
-                .flex()
-                .flex_col()
-                .child(label(&d.name, TypeRole::Label, Ink::Text, a).elide())
-                .child(label(&d.runtime, TypeRole::Meta, Ink::TextMuted, a)),
-        )
-        .when(ticked, |r| r.child(icon(Icon::Check, 12.0, Ink::Accent, a)))
+    MenuItem::new(id, d.name.clone())
+        .detail(&d.runtime)
+        .checked(ticked)
+        .build(a)
         .on_click(cx.listener(move |this, _, _, cx| this.pick_simulator(&picked, cx)))
 }
 
 fn menu_action(id: &'static str, title: &str, enabled: bool, a: Appearance) -> Stateful<Div> {
-    let ink = if enabled { Ink::Text } else { Ink::TextFaint };
-    div()
-        .id(id)
-        .px(px(10.0))
-        .py(px(6.0))
-        .rounded(px(6.0))
-        .when(enabled, |r| {
-            r.cursor_pointer()
-                .hover(move |s| s.bg(hsla(Ink::Raised.color(a))))
-        })
-        .child(label(title, TypeRole::Label, ink, a))
+    MenuItem::new(id, title.to_owned()).held(!enabled).build(a)
 }
 
 fn section(title: &str, dot: bool, a: Appearance) -> Div {
     div()
-        .px(px(10.0))
-        .pt(px(6.0))
-        .pb(px(2.0))
+        .px(px(MENU_ROW_X))
+        .pt(px(MENU_ROW_Y))
         .flex()
         .items_center()
         .gap(px(6.0))
@@ -193,14 +168,6 @@ fn section(title: &str, dot: bool, a: Appearance) -> Div {
         .when(dot, |d| {
             d.child(div().size(px(6.0)).rounded_full().fill(Ink::Working, a))
         })
-}
-
-fn rule(a: Appearance) -> Div {
-    div()
-        .mx(px(10.0))
-        .my(px(4.0))
-        .h(px(1.0))
-        .fill(Ink::Hairline, a)
 }
 
 fn device_menu(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Option<Div> {
@@ -211,13 +178,7 @@ fn device_menu(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Op
     let (booted, available) = menu(&s.all);
     let shown = s.device().cloned();
     let has = shown.is_some();
-    let mut items = card(a)
-        .w(px(270.0))
-        .p(px(6.0))
-        .flex()
-        .flex_col()
-        .shadow_lg()
-        .child(section("Booted", !booted.is_empty(), a));
+    let mut items = menu_panel(a).child(section("Booted", !booted.is_empty(), a));
     if booted.is_empty() {
         items = items.child(menu_action("sim-none", "None", false, a));
     }
@@ -227,7 +188,7 @@ fn device_menu(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Op
     }
     if !available.is_empty() {
         items = items
-            .child(rule(a))
+            .child(menu_rule(a))
             .child(section("Available (will boot)", false, a));
         for (i, d) in available.iter().enumerate() {
             items = items.child(device_row(format!("sim-avail-{i}"), d, false, a, cx));
@@ -238,12 +199,12 @@ fn device_menu(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Op
         .map(|d| format!("Shut Down {}", d.name))
         .unwrap_or_else(|| "Shut Down".into());
     items = items
-        .child(rule(a))
+        .child(menu_rule(a))
         .child(
             menu_action("sim-add", "Add Simulator…", true, a)
                 .on_click(cx.listener(|this, _, _, cx| this.begin_new_simulator(cx))),
         )
-        .child(rule(a))
+        .child(menu_rule(a))
         .child(
             menu_action("sim-media", "Add Photos or Videos…", has, a).when(has, |r| {
                 r.on_click(cx.listener(|this, _, _, cx| this.pick_media(cx)))
@@ -284,7 +245,7 @@ fn device_menu(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Op
                     .left(px(8.0))
                     .top(px(HEADER - 4.0))
                     .occlude()
-                    .rounded(px(RADIUS_MD))
+                    .rounded(px(MENU_RADIUS))
                     .child(items),
             ),
     )

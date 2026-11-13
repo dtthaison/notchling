@@ -1,6 +1,6 @@
-use gpui::{prelude::*, px, Context, Div, Pixels, Point, SharedString};
+use gpui::{prelude::*, Context, Div, Pixels, Point, SharedString};
 use notchling_kit::labels::Corner;
-use notchling_kit::ui::{card, KitPart};
+use notchling_kit::ui::{menu_panel, KitPart};
 use notchling_kit::Appearance;
 
 use super::accounts::{held_item, menu_item};
@@ -14,8 +14,6 @@ pub struct CopyMenu {
     pub enabled: bool,
 }
 
-const WIDTH: f32 = 120.0;
-
 pub fn selects<T: PartialEq>(anchor: Option<&T>, focus: Option<&T>) -> bool {
     matches!((anchor, focus), (Some(a), Some(f)) if a != f)
 }
@@ -24,7 +22,7 @@ pub(super) fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>)
     let menu = view.copy_menu.as_ref()?;
     let id = SharedString::from("copy-menu-copy");
     let item = if menu.enabled {
-        menu_item(id, "Copy", false, a)
+        menu_item(id, "Copy", a)
             .on_click(cx.listener(|this, _, window, cx| {
                 this.close_copy_menu(cx);
                 this.copy_selection(window, cx);
@@ -42,12 +40,7 @@ pub(super) fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>)
         )
         .into_any_element()
     };
-    let card = card(a)
-        .w(px(WIDTH))
-        .p(px(6.0))
-        .flex()
-        .flex_col()
-        .shadow_lg()
+    let card = menu_panel(a)
         .child(item)
         .part_at("Copy Menu", Corner::TopTrailing, a, cx);
     Some(popup(

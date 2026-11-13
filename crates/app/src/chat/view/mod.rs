@@ -94,6 +94,7 @@ pub const SIMULATOR_ENV: &str = simulator::RENDER_ENV;
 pub const SLASH_ENV: &str = "NOTCHLING_RENDER_SLASH";
 pub const ROW_MENU_ENV: &str = "NOTCHLING_RENDER_ROW_MENU";
 pub const COPY_MENU_ENV: &str = "NOTCHLING_RENDER_COPY_MENU";
+pub const ACCOUNT_MENU_ENV: &str = "NOTCHLING_RENDER_ACCOUNT_MENU";
 pub const PAGE_ENV: &str = page_panel::PAGE_ENV;
 pub const INBOX_ENV: &str = "NOTCHLING_RENDER_INBOX";
 pub const SENDING_ENV: &str = "NOTCHLING_RENDER_SENDING";
@@ -221,13 +222,15 @@ impl ChatView {
         if let Ok(how) = std::env::var(SIMULATOR_ENV) {
             view.render_simulator(&how, cx);
         }
-        if switch(ROW_MENU_ENV) {
+        if let Ok(how) = std::env::var(ROW_MENU_ENV) {
+            let job = how == "job" || how == "confirm";
             view.row_menu = Some(row_menu::RowMenu {
-                row_id: "render-session".into(),
+                row_id: if job { "fix-the-bug" } else { "render-session" }.into(),
                 at: gpui::point(px(120.0), px(110.0)),
-                confirm_remove: false,
+                confirm_remove: how == "confirm",
             });
         }
+        view.account_menu = switch(ACCOUNT_MENU_ENV);
         if let Ok(how) = std::env::var(COPY_MENU_ENV) {
             view.copy_menu = Some(copy_menu::CopyMenu {
                 at: gpui::point(px(520.0), px(240.0)),

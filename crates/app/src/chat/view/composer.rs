@@ -3,11 +3,14 @@ use gpui::{
     KeyDownEvent, ObjectFit, PathPromptOptions, SharedString, Stateful, Window,
 };
 use notchling_kit::labels::Corner;
-use notchling_kit::metric::{CONTROL, RADIUS_COMPOSER, RADIUS_SM, SIDE_PADDING, SPINNER_MINI};
+use notchling_kit::metric::{
+    CONTROL, MENU_GAP, MENU_MAX_HEIGHT, RADIUS_COMPOSER, RADIUS_SM, SIDE_PADDING, SPINNER_MINI,
+};
 use notchling_kit::part::{button_look, ButtonKind, PartState};
 use notchling_kit::typescale::sentence;
 use notchling_kit::ui::{
-    button_with, card as kit_card, hsla, icon, label, spinner_in, KitPart, KitStyled,
+    button_with, hsla, icon, label, menu_note, menu_panel, menu_panel_wide, menu_rule, spinner_in,
+    KitPart, KitStyled, MenuItem,
 };
 use notchling_kit::{Appearance, Icon, IconSize, Ink, TypeRole};
 
@@ -19,7 +22,7 @@ use crate::chat::pickers;
 use crate::chat::prompts::error_text;
 use crate::mac::gate;
 use crate::tools::requests::is_draft;
-use crate::tools::view::{agy_card, pick_row, pop_up as menu_card};
+use crate::tools::view::{agy_card, pick_row};
 
 pub const MAX_LINES: usize = 8;
 pub const LINE_HEIGHT: f32 = 16.0;
@@ -31,8 +34,6 @@ const PAD_BOTTOM: f32 = 6.0;
 const TEXT_PAD_LEADING: f32 = 6.0;
 const TEXT_PAD_VERTICAL: f32 = 6.0;
 const STOP_SQUARE: f32 = 12.0;
-const MENU_WIDTH: f32 = 260.0;
-const MENU_GAP: f32 = 6.0;
 
 fn inset(base: f32, edge: f32) -> f32 {
     base - (edge - EDGE_REST)
@@ -125,34 +126,14 @@ fn menu_row(
         .on_click(cx.listener(move |this, _, _, cx| this.pick(&menu, &value, cx)))
 }
 
-fn more_row(open: bool, a: Appearance, cx: &mut Context<ChatView>) -> Stateful<Div> {
-    div()
-        .id("model-more")
-        .w_full()
-        .px(px(8.0))
-        .py(px(3.0))
-        .rounded(px(RADIUS_SM))
-        .flex()
-        .items_center()
-        .gap(px(8.0))
-        .cursor_pointer()
-        .hover(move |s| s.bg(hsla(Ink::Raised.color(a))))
-        .child(div().flex_1().child(label(
-            claude_picker::MORE_MODELS,
-            TypeRole::Meta,
-            Ink::Text,
-            a,
-        )))
-        .child(icon(
-            if open {
-                Icon::ChevronDown
-            } else {
-                Icon::ChevronRight
-            },
-            9.0,
-            Ink::TextMuted,
-            a,
-        ))
+fn more_row(open: bool, cx: &mut Context<ChatView>, a: Appearance) -> Stateful<Div> {
+    MenuItem::new("model-more", claude_picker::MORE_MODELS)
+        .chevron(if open {
+            Icon::ChevronDown
+        } else {
+            Icon::ChevronRight
+        })
+        .build(a)
         .on_click(cx.listener(|this, _, _, cx| {
             if let Some(picker) = &mut this.tools.picker {
                 picker.more = !picker.more;
@@ -167,31 +148,31 @@ fn picker_menu(
     a: Appearance,
     cx: &mut Context<ChatView>,
 ) -> impl IntoElement {
-    let mut card = menu_card(a)
-        .id("picker-menu")
-        .p(px(4.0))
-        .w(px(if menu.rows.iter().any(|r| !r.detail.is_empty()) {
-            260.0
-        } else {
-            190.0
-        }))
-        .max_h(px(420.0))
-        .overflow_y_scroll()
-        .gap(px(0.0))
-        .shadow_lg()
-        .occlude();
+    let wraps = menu.note.is_some()
+        || menu.empty.is_some() && menu.rows.is_empty()
+        || menu
+            .rows
+            .iter()
+            .chain(&menu.more)
+            .any(|r| !r.detail.is_empty());
+    let mut card = if wraps {
+        menu_panel_wide(a)
+    } else {
+        menu_panel(a)
+    }
+    .id("picker-menu")
+    .max_h(px(MENU_MAX_HEIGHT))
+    .overflow_y_scroll();
     if menu.rows.is_empty() {
         if let Some(empty) = &menu.empty {
-            card = card.child(label(empty, TypeRole::Meta, Ink::TextMuted, a).px(px(8.0)));
+            card = card.child(menu_note(empty, a));
         }
     }
     for (i, row) in menu.rows.iter().enumerate() {
         card = card.child(menu_row(format!("{}-{i}", menu.id), &menu.id, row, a, cx));
     }
     if !menu.more.is_empty() {
-        card = card
-            .child(div().h(px(1.0)).w_full().bg(hsla(Ink::Hairline.color(a))))
-            .child(more_row(more, a, cx));
+        card = card.child(menu_rule(a)).child(more_row(more, cx, a));
         if more {
             for (i, row) in menu.more.iter().enumerate() {
                 card = card.child(menu_row(
@@ -205,7 +186,7 @@ fn picker_menu(
         }
     }
     if let Some(note) = &menu.note {
-        card = card.child(label(note, TypeRole::Meta, Ink::TextFaint, a).px(px(8.0)));
+        card = card.child(menu_note(note, a));
     }
     deferred(
         div()
@@ -469,26 +450,12 @@ fn add_row(
     a: Appearance,
     cx: &mut Context<ChatView>,
 ) -> Stateful<Div> {
-    div()
-        .id(SharedString::from(format!("add-item-{index}")))
-        .px(px(10.0))
-        .py(px(7.0))
-        .rounded(px(RADIUS_SM))
-        .flex()
-        .items_center()
-        .gap(px(10.0))
-        .cursor_pointer()
-        .hover(move |s| s.bg(hsla(Ink::Raised.color(a))))
-        .child(icon(item.icon, 13.0, Ink::TextMuted, a))
-        .child(
-            div()
-                .flex_1()
-                .child(label(item.title, TypeRole::Label, Ink::Text, a)),
-        )
-        .children(
-            item.shortcut
-                .map(|k| label(k, TypeRole::Meta, Ink::TextFaint, a)),
-        )
+    let row = MenuItem::new(format!("add-item-{index}"), item.title).icon(item.icon);
+    let row = match item.shortcut {
+        Some(key) => row.shortcut(key),
+        None => row,
+    };
+    row.build(a)
         .on_click(cx.listener(move |this, _, window, cx| this.pick_add(item.add, window, cx)))
 }
 
@@ -529,17 +496,12 @@ fn add_button(
             .enumerate()
             .map(|(i, item)| add_row(i, item, a, cx))
             .collect::<Vec<_>>();
-        let card = kit_card(a)
-            .id("add-menu")
-            .w(px(MENU_WIDTH))
-            .p(px(6.0))
-            .flex()
-            .flex_col()
-            .gap(px(2.0))
-            .shadow_lg()
-            .occlude()
-            .children(rows)
-            .part_at("Add Menu", Corner::TopTrailing, a, cx);
+        let card = menu_panel(a).id("add-menu").children(rows).part_at(
+            "Add Menu",
+            Corner::TopTrailing,
+            a,
+            cx,
+        );
         deferred(
             div()
                 .absolute()

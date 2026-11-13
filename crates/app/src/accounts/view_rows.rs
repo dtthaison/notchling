@@ -6,8 +6,8 @@ use notchling_kit::metric::{
 };
 use notchling_kit::part::{ButtonKind, PartState};
 use notchling_kit::ui::{
-    avatar, button, card, hsla, icon, icon_button, label, spinner as kit_spinner, KitStyled,
-    MONO_FONT,
+    avatar, button, card, hsla, icon, icon_button, label, menu_panel, spinner as kit_spinner,
+    KitStyled, MenuItem, MONO_FONT,
 };
 use notchling_kit::{Appearance, Icon, IconSize, Ink, TypeRole};
 
@@ -188,33 +188,17 @@ pub fn account_row<V: 'static>(
         RowContent::Limits(groups) => Some(limit_groups(groups, a).into_any_element()),
     };
     let menu = menu_open.then(|| {
-        let mut items = card(a)
-            .absolute()
-            .right(px(10.0))
-            .top(px(44.0))
-            .p(px(4.0))
-            .shadow_lg();
+        let mut items = menu_panel(a).absolute().right(px(10.0)).top(px(44.0));
         for (i, item) in row.menu.iter().enumerate() {
             let handler = on.clone();
             let enabled = item.control.enabled;
-            let entry = div()
-                .id(SharedString::from(format!("menu-item-{key}-{i}")))
-                .px(px(10.0))
-                .py(px(5.0))
-                .rounded(px(RADIUS_SM))
-                .child(label(
-                    item.title,
-                    TypeRole::Label,
-                    if enabled { Ink::Text } else { Ink::TextFaint },
-                    a,
-                ));
+            let entry = MenuItem::new(format!("menu-item-{key}-{i}"), item.title)
+                .held(!enabled)
+                .build(a);
             let entry = if enabled {
-                entry
-                    .cursor_pointer()
-                    .hover(move |s| s.bg(hsla(Ink::Raised.color(a))))
-                    .on_click(
-                        cx.listener(move |this, _, _, cx| handler(this, RowEvent::Remove, cx)),
-                    )
+                entry.on_click(
+                    cx.listener(move |this, _, _, cx| handler(this, RowEvent::Remove, cx)),
+                )
             } else {
                 gate::tip(entry, item.control, a)
             };
