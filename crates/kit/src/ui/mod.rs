@@ -11,7 +11,7 @@ mod tool_images;
 mod widgets;
 
 pub use gallery::KitGallery;
-pub use icons::{icon, icon_in, spinner, KitAssets};
+pub use icons::{icon, icon_in, spinner, spinner_in, KitAssets};
 pub use parts::{parts_button, parts_on, parts_tip, set_parts, toggle_parts, KitPart, RegionScope};
 pub use resize::{resize_edges, TopBorder};
 pub use scrollbar::{scrollable, scrollable_list, PinScrollbars, Scrollable, ThumbAt, ThumbRecord};
