@@ -146,6 +146,44 @@ final class AgentMonitor {
     /// Completed agents older than this are hidden.
     var completedWindow: TimeInterval = 24 * 3600
 
+    /// Claude Code deletes a terminal session's file when it ends, so an exited session is known only to us: kept in
+    /// defaults, it is still listed (and resumable) after Notchling restarts.
+    static let exitedKey = "exitedSessions"
+    private let defaults: UserDefaults
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        for agent in Self.decodeExited(defaults.array(forKey: Self.exitedKey)) { exited[agent.id] = agent }
+    }
+
+    static func encodeExited(_ agents: [Agent]) -> [[String: Any]] {
+        agents.map { agent in
+            var entry: [String: Any] = ["id": agent.id, "name": agent.name, "project": agent.project, "cwd": agent.cwd,
+                                        "since": agent.since.timeIntervalSince1970]
+            if let detail = agent.detail { entry["detail"] = detail }
+            if let configDir = agent.configDir { entry["configDir"] = configDir }
+            return entry
+        }
+    }
+
+    static func decodeExited(_ stored: [Any]?) -> [Agent] {
+        (stored ?? []).compactMap { item in
+            guard let entry = item as? [String: Any], let id = entry["id"] as? String, !id.isEmpty,
+                  let since = entry["since"] as? Double else { return nil }
+            let cwd = entry["cwd"] as? String ?? ""
+            return exitedAgent(id: id, name: entry["name"] as? String ?? (cwd as NSString).lastPathComponent,
+                               project: entry["project"] as? String ?? (cwd as NSString).lastPathComponent, cwd: cwd,
+                               detail: entry["detail"] as? String, since: Date(timeIntervalSince1970: since),
+                               configDir: entry["configDir"] as? String)
+        }
+    }
+
+    static func exitedAgent(id: String, name: String, project: String, cwd: String, detail: String?, since: Date,
+                            configDir: String?) -> Agent {
+        Agent(id: id, name: name, project: project, cwd: cwd, group: .completed, label: "Exited", detail: detail,
+              since: since, target: .resume(sessionID: id, cwd: cwd), configDir: configDir)
+    }
+
     func poll() -> [Agent] {
         var result: [Agent] = []
         var live: [String: Agent] = [:]
@@ -196,17 +234,22 @@ final class AgentMonitor {
         }
 
         let jobSessionIDs = Set(result.map(\.id))
+        let cutoff = Date().addingTimeInterval(-completedWindow)
+        let exitedBefore = Set(exited.keys)
         for (id, old) in lastLive where live[id] == nil && !jobSessionIDs.contains(id) {
-            exited[id] = Agent(id: id, name: old.name, project: old.project, cwd: old.cwd,
-                               group: .completed, label: "Exited", detail: old.detail, since: Date(),
-                               target: .resume(sessionID: id, cwd: old.cwd), configDir: old.configDir)
+            exited[id] = Self.exitedAgent(id: id, name: old.name, project: old.project, cwd: old.cwd,
+                                          detail: old.detail, since: Date(), configDir: old.configDir)
+        }
+        // A restored one that is now a job, or has aged out, is dropped rather than shown twice or kept forever.
+        exited = exited.filter { !jobSessionIDs.contains($0.key) && $0.value.since > cutoff }
+        if Set(exited.keys) != exitedBefore {
+            defaults.set(Self.encodeExited(Array(exited.values)), forKey: Self.exitedKey)
         }
         lastLive = live
 
         result += live.values
         result += exited.values
 
-        let cutoff = Date().addingTimeInterval(-completedWindow)
         return result
             .filter { $0.group != .completed || $0.since > cutoff }
             .sorted { $0.group.rawValue != $1.group.rawValue ? $0.group.rawValue < $1.group.rawValue : $0.since > $1.since }
