@@ -1,24 +1,3 @@
-//! Milestone 6's switches: `accounts`, `vault` and `install`, each off until the maintainer hands
-//! that area over from the Swift app (decision 0011), with M3's `acting` rule:
-//!
-//! - every switch is off at every daemon start, whatever any file says (a file at rest is not a
-//!   tier boundary: an agent that can run a shell can write it, then restart the daemon);
-//! - only an app-tier `settings.set_switch {switch, on}` during this run turns one on;
-//! - the app keeps the user's choice and asserts it again after each hello.
-//!
-//! An area takes its [`SwitchFlag`] (an `Arc`) and asks [`SwitchFlag::is_on`] before it touches
-//! anything the Swift app owns, answering [`SwitchFlag::refusal`] while off. One that holds
-//! something open (the vault's socket, a sign-in listener) calls [`SwitchFlag::subscribe`] to close
-//! it when the switch goes off.
-//!
-//! | Op | Tier | Args | Reply |
-//! | --- | --- | --- | --- |
-//! | `settings.set_switch` | app | `{switch: "accounts" \| "vault" \| "install", on: bool}` | `{switch, on}` |
-//! | `settings.switches` | agent | `{}` | `{accounts: bool, vault: bool, install: bool}` |
-//!
-//! A change is published on `settings` as `settings.switch {switch, on}`. App-tier calls are
-//! written to the audit log by the server, with their outcome.
-
 use crate::acting_ops::{bad, forbidden, Room};
 use crate::op_group::OpGroup;
 use notchling_local_api::{ops, topics, ApiError, AuditEntry, AuditLog, Caller, OpSpec};
@@ -32,38 +11,27 @@ pub const ACCOUNTS: &str = "accounts";
 pub const VAULT: &str = "vault";
 pub const INSTALL: &str = "install";
 
-/// What every account op answers while `accounts` is off (code `forbidden`).
 pub const ACCOUNTS_OFF: &str =
     "accounts are off: the Swift app owns logins until the maintainer turns this on";
-/// What every vault op answers while `vault` is off.
 pub const VAULT_OFF: &str =
     "the vault is off: the Swift app owns it until the maintainer turns this on";
-/// What install ops say beside their dry run while `install` is off.
 pub const INSTALL_OFF: &str =
     "install is off: the Swift app owns hooks and skills until the maintainer turns this on";
 
 type Listener = Arc<dyn Fn(bool) + Send + Sync>;
 type Listeners = Arc<Mutex<Vec<Listener>>>;
-/// A change for the listeners, and where to say they have all heard it.
 type Change = (bool, SyncSender<()>);
 
-/// How long [`SwitchFlag::set`] waits for its listeners before it answers anyway: a listener
-/// stuck on something (a Keychain prompt) must not hold up `settings.set_switch` past the app's
-/// client timeout.
 const LISTENER_WAIT: Duration = Duration::from_millis(500);
 
-/// One switch, for this daemon run only.
 pub struct SwitchFlag {
     name: &'static str,
     off_message: &'static str,
     on: AtomicBool,
     listeners: Listeners,
-    /// One change at a time, each queued for the listeners' thread (started by the first change)
-    /// in the order it was made.
     changing: Mutex<Option<Sender<Change>>>,
 }
 
-/// The thread that calls the listeners, one change after another; it ends with its switch.
 fn listen(name: &str, listeners: Listeners) -> Option<Sender<Change>> {
     let (tx, rx) = channel::<Change>();
     std::thread::Builder::new()
@@ -83,12 +51,10 @@ fn listen(name: &str, listeners: Listeners) -> Option<Sender<Change>> {
 }
 
 impl SwitchFlag {
-    /// Off: how every daemon run starts.
     pub fn off(name: &'static str, off_message: &'static str) -> Arc<SwitchFlag> {
         SwitchFlag::in_memory(name, off_message, false)
     }
 
-    /// A switch set as given (tests).
     pub fn in_memory(name: &'static str, off_message: &'static str, on: bool) -> Arc<SwitchFlag> {
         Arc::new(SwitchFlag {
             name,
@@ -107,12 +73,10 @@ impl SwitchFlag {
         self.on.load(Ordering::SeqCst)
     }
 
-    /// `forbidden` with the switch's off message.
     pub fn refusal(&self) -> ApiError {
         forbidden(self.off_message)
     }
 
-    /// `Ok` while on, else [`SwitchFlag::refusal`].
     pub fn check(&self) -> Result<(), ApiError> {
         if self.is_on() {
             Ok(())
@@ -121,10 +85,6 @@ impl SwitchFlag {
         }
     }
 
-    /// Calls `listener` with the new state after each change, after the flag has flipped, on the
-    /// switch's own thread: every listener hears every change, in the order they were made.
-    /// [`SwitchFlag::set`] waits up to [`LISTENER_WAIT`] for them. A listener must not set this
-    /// switch itself.
     pub fn subscribe(&self, listener: impl Fn(bool) + Send + Sync + 'static) {
         self.listeners
             .lock()
@@ -132,10 +92,6 @@ impl SwitchFlag {
             .push(Arc::new(listener));
     }
 
-    /// Flips it; true when that changed it, and only then are the listeners called. Only
-    /// `settings.set_switch` calls this in the daemon. It answers once the listeners have heard
-    /// the change or [`LISTENER_WAIT`] has passed, whichever is first; the flag itself has
-    /// flipped either way.
     pub(crate) fn set(&self, on: bool) -> bool {
         let heard = {
             let mut queue = self.changing.lock().unwrap_or_else(|e| e.into_inner());
@@ -148,8 +104,6 @@ impl SwitchFlag {
             let (tx, rx) = sync_channel(1);
             match queue.as_ref().map(|q| q.send((on, tx))) {
                 Some(Ok(())) => rx,
-                // No thread (the OS refused one, or a listener panicked on it): called here, still
-                // one change at a time.
                 _ => {
                     *queue = None;
                     let now: Vec<Listener> = self
@@ -169,7 +123,6 @@ impl SwitchFlag {
     }
 }
 
-/// The three switches.
 pub struct Switches {
     pub accounts: Arc<SwitchFlag>,
     pub vault: Arc<SwitchFlag>,
@@ -177,7 +130,6 @@ pub struct Switches {
 }
 
 impl Switches {
-    /// All off: how every daemon run starts.
     pub fn off() -> Switches {
         Switches {
             accounts: SwitchFlag::off(ACCOUNTS, ACCOUNTS_OFF),
@@ -194,7 +146,6 @@ impl Switches {
         self.all().into_iter().find(|s| s.name() == name)
     }
 
-    /// `{accounts: bool, vault: bool, install: bool}`.
     pub fn to_json(&self) -> Value {
         let map: Map<String, Value> = self
             .all()
@@ -205,11 +156,9 @@ impl Switches {
     }
 }
 
-/// The two ops.
 pub struct SwitchOps {
     switches: Arc<Switches>,
     room: Arc<dyn Room>,
-    /// Each change, with the switch's name (the server's own line names only the op).
     audit: Option<AuditLog>,
 }
 
@@ -222,7 +171,6 @@ impl SwitchOps {
         }
     }
 
-    /// Writes `settings.set_switch <name>` with `on` or `off` to `audit` on each change.
     pub fn with_audit(mut self, audit: AuditLog) -> SwitchOps {
         self.audit = Some(audit);
         self

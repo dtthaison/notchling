@@ -1,8 +1,3 @@
-"""The review agent: rotation, fencing, strict verdicts, fail-closed paths and two strikes.
-
-Everything talks to a fake server on 127.0.0.1 that plays both GitHub and the model API; no real
-network, token or model is involved."""
-
 import datetime
 import json
 import re
@@ -27,13 +22,12 @@ TOKEN = "ghs_testtoken1234"
 DIFF = "diff --git a/Sources/A.swift b/Sources/A.swift\n+let x = 1\n"
 GOOD = {"verdict": "merge", "reasons": ["Matches the goals."], "pointers": []}
 NOW = datetime.datetime(2026, 11, 8, 15, 0, 0, tzinfo=datetime.timezone.utc)
-EARLIER = "2026-11-08T09:00:00Z"  # today, before the verdict under test
+EARLIER = "2026-11-08T09:00:00Z"
 LATER = "2026-11-08T12:00:00Z"
 YESTERDAY = "2026-11-07T23:59:59Z"
 
 
 class Fake:
-    """GitHub plus the model API, with canned state and a log of every request."""
 
     def __init__(self):
         self.pr = {"number": 7, "state": "open", "title": "Add x", "body": "Agent-Model: claude-fable-5-2\nPlease merge.",
@@ -46,15 +40,14 @@ class Fake:
         self.diff = DIFF
         self.model_status = 200
         self.model_text = json.dumps(GOOD)
-        self.model_raw = None  # a whole response body, in place of one text block
+        self.model_raw = None
         self.model_body = None
-        self.fail = set()  # path prefixes that answer 500
-        self.repo_comments = []  # every comment in the repository, for the daily count
-        self.queries = []  # (path, query) of every request
+        self.fail = set()
+        self.repo_comments = []
+        self.queries = []
         self.log = []
 
     def writes(self):
-        """The GitHub writes (the model call is a POST too, but changes nothing)."""
         return [(m, p) for m, p, _h, _b in self.log if m != "GET" and p != "/v1/messages"]
 
     def sent(self, method, path_re):
@@ -200,7 +193,7 @@ class RotationTests(ReviewTestCase):
     def test_agent_model_in_the_body_does_not_choose_the_reviewer(self):
         self.fake.pr["body"] = "Agent-Model: claude-opus-5-5"
         self.assertEqual(self.run_review(), 0)
-        self.assertEqual(self.fake.model_body["model"], review.MODELS[7 % 3])  # sonnet, whatever the PR says
+        self.assertEqual(self.fake.model_body["model"], review.MODELS[7 % 3])
 
     def test_the_rotation_skips_the_model_that_wrote_the_change(self):
         for n in range(0, 9):
@@ -224,12 +217,11 @@ class RotationTests(ReviewTestCase):
         self.assertEqual(review.pick_model(7, review.author_model(body)), "claude-fable-5-2")
 
     def test_an_app_pr_is_not_reviewed_by_the_model_that_wrote_it(self):
-        self.fake.pr["body"] = "Fixes it.\nAgent-Model: claude-sonnet-5-5\n"  # 7 % 3 would pick sonnet
+        self.fake.pr["body"] = "Fixes it.\nAgent-Model: claude-sonnet-5-5\n"
         self.assertEqual(self.run_review(), 0)
         self.assertEqual(self.fake.model_body["model"], "claude-fable-5-2")
 
     def test_a_strangers_agent_model_line_is_not_used(self):
-        """Only the App's own pull requests carry a line we wrote; anyone else's text steers nothing."""
         self.fake.pr["user"]["login"] = "stranger"
         self.fake.pr["labels"] = [{"name": "notchling:review"}]
         self.fake.events = [labeled("dtthaison")]
@@ -328,7 +320,6 @@ class VerdictTests(unittest.TestCase):
 
 
 class CleanTests(unittest.TestCase):
-    """What a model-written reason may do once it is in a pull request comment."""
 
     ZW = "​"
 
@@ -355,7 +346,7 @@ class CleanTests(unittest.TestCase):
         out = review.clean("the same as #7 and GH-7", own=7)
         self.assertIn("#7", out)
         self.assertIn("GH-7", out)
-        self.assertNotIn("#7", review.clean("the same as #7"))  # no own number known: broken like the rest
+        self.assertNotIn("#7", review.clean("the same as #7"))
 
     def test_a_longer_number_is_not_the_own_number(self):
         self.assertNotRegex(review.clean("see #70 and #17", own=7), r"#[0-9]")
@@ -440,13 +431,13 @@ class VerdictFlowTests(ReviewTestCase):
         self.assertEqual(body["model"], "claude-sonnet-5-5")
         self.assertIsInstance(body["max_tokens"], int)
         text = body["messages"][0]["content"]
-        self.assertIn("Sources/A.swift", text)  # the diff
+        self.assertIn("Sources/A.swift", text)
         self.assertIn((ROOT / "docs/goals.md").read_text()[:200], text)
         self.assertIn((ROOT / "docs/rules.md").read_text()[:200], text)
         self.assertIn((ROOT / "ARCHITECTURE.md").read_text()[:200], text)
         self.assertIn("build: success", text)
         checks = text.split("BEGIN CHECKS")[1].split("END CHECKS")[0]
-        self.assertNotIn("review-agent", checks)  # its own status is left out
+        self.assertNotIn("review-agent", checks)
 
     def test_secrets_stay_with_their_own_server(self):
         self.run_review()
@@ -481,15 +472,12 @@ class VerdictFlowTests(ReviewTestCase):
         self.assertEqual(self.fake.sent("PATCH", r"/issues/comments/"), [])
 
     def test_the_verdict_comment_is_written_before_the_status(self):
-        """The comment is the record a rerun finds, so it goes first: if the status then fails, the rerun
-        replays the verdict without asking the model again."""
         self.run_review()
         order = [p for m, p in self.fake.writes()]
         self.assertEqual(order, ["/repos/o/r/issues/7/comments", f"/repos/o/r/statuses/{SHA}"])
 
 
 class FindPullRequestTests(unittest.TestCase):
-    """Which pull request a "Review run" belongs to, from fields GitHub sets and the PR author can't."""
 
     def pr(self, number, repo="o/r", ref="agent/1-x", sha=SHA, state="open"):
         return {"number": number, "state": state, "head": {"repo": {"full_name": repo}, "ref": ref, "sha": sha}}
@@ -501,8 +489,7 @@ class FindPullRequestTests(unittest.TestCase):
         self.assertEqual(self.find([self.pr(12)]), 12)
 
     def test_a_fork_pull_request_with_the_apps_head_commit_maps_to_itself(self):
-        """The attack: a fork pushes the App's commit and opens a PR; the commit then belongs to two PRs."""
-        prs = [self.pr(7), self.pr(12, repo="mallory/r")]  # the App's comes first, as the API lists it
+        prs = [self.pr(7), self.pr(12, repo="mallory/r")]
         self.assertEqual(self.find(prs, repo="mallory/r"), 12)
         self.assertEqual(self.find(prs, repo="o/r"), 7)
 
@@ -511,17 +498,17 @@ class FindPullRequestTests(unittest.TestCase):
 
     def test_anything_other_than_exactly_one_match_is_none(self):
         self.assertIsNone(self.find([]))
-        self.assertIsNone(self.find([self.pr(7), self.pr(8)]))  # the same head to two bases
+        self.assertIsNone(self.find([self.pr(7), self.pr(8)]))
         self.assertIsNone(self.find([self.pr(7, ref="other")]))
         self.assertIsNone(self.find([self.pr(7, sha="f" * 40)]))
         self.assertIsNone(self.find([self.pr(7, state="closed")]))
 
     def test_names_compare_the_way_github_does(self):
-        self.assertEqual(self.find([self.pr(7, repo="O/R")], repo="o/r"), 7)  # repository names ignore case
-        self.assertIsNone(self.find([self.pr(7, ref="Agent/1-x")]))  # branch names don't
+        self.assertEqual(self.find([self.pr(7, repo="O/R")], repo="o/r"), 7)
+        self.assertIsNone(self.find([self.pr(7, ref="Agent/1-x")]))
 
     def test_missing_or_odd_data_is_none(self):
-        self.assertIsNone(self.find([self.pr(7)], repo=""))  # a deleted fork has no name
+        self.assertIsNone(self.find([self.pr(7)], repo=""))
         self.assertIsNone(self.find([self.pr(7)], branch=""))
         self.assertIsNone(self.find([self.pr(7)], sha="nothex"))
         self.assertIsNone(self.find(None))
@@ -541,7 +528,6 @@ class FindPullRequestTests(unittest.TestCase):
 
 
 class OneReviewPerHeadTests(ReviewTestCase):
-    """At most one model call per (pull request, head commit); a maintainer's newer label asks again."""
 
     def reviewed(self, verdict, at=EARLIER, cid=40):
         self.fake.comments = [bot_comment(verdict, SHA, cid=cid, at=at)]
@@ -558,14 +544,14 @@ class OneReviewPerHeadTests(ReviewTestCase):
                 self.assertEqual((st["state"], st["context"]), (state, "review-agent"))
                 self.assertIn(word, st["description"])
                 self.assertEqual(st["target_url"], "https://example.test/run/1")
-                self.assertEqual(self.comments(), [])  # nothing new to say
-                self.assertEqual(self.fake.sent("PATCH", "."), [])  # and the earlier verdict is never rewritten
+                self.assertEqual(self.comments(), [])
+                self.assertEqual(self.fake.sent("PATCH", "."), [])
 
     def test_a_first_review_then_every_rerun_is_one_model_call(self):
         self.run_review()
         (c,) = self.comments()
         self.fake.comments = [{"id": 9, "user": {"login": BOT}, "body": c["body"], "created_at": EARLIER}]
-        for _ in range(3):  # ready_for_review, a label: whatever starts the run again
+        for _ in range(3):
             self.run_review()
         self.assertEqual(len(self.fake.sent("POST", "/v1/messages")), 1)
         self.assertEqual([s["state"] for s in self.statuses()], ["success"] * 4)
@@ -602,7 +588,6 @@ class OneReviewPerHeadTests(ReviewTestCase):
         self.run_review()
         self.assertEqual(len(self.fake.sent("POST", "/v1/messages")), 1)
         self.assertEqual([s["state"] for s in self.statuses()], ["success"])
-        # The earlier comment is left alone; the new verdict is a comment of its own.
         self.assertEqual(self.fake.sent("PATCH", "."), [])
         (c,) = self.comments()
         self.assertIn("verdict=merge sha=" + SHA, c["body"])
@@ -653,7 +638,6 @@ class OneReviewPerHeadTests(ReviewTestCase):
                 self.assertNoModelCall()
 
     def test_a_fresh_review_cannot_erase_a_strike(self):
-        """Two failed heads is two strikes however many times a head is looked at again."""
         self.fake.comments = [bot_comment("changes", OLD1, 1, at="2026-11-08T07:00:00Z"),
                               bot_comment("changes", SHA, 2, at=EARLIER)]
         self.maintainer_relabels(at=LATER)
@@ -664,7 +648,6 @@ class OneReviewPerHeadTests(ReviewTestCase):
 
 
 class CapTests(ReviewTestCase):
-    """A cap per pull request and one per day for the repository, counted from the bot's own markers."""
 
     def per_pr(self, n, verdict="merge"):
         self.fake.comments = [bot_comment(verdict, sha_n(i + 100), cid=i + 1) for i in range(n)]
@@ -738,7 +721,7 @@ class CapTests(ReviewTestCase):
         self.run_review(REVIEW_DAILY_CAP="3")
         self.assertEqual(len(self.fake.sent("POST", "/v1/messages")), 1)
         self.setUp()
-        self.run_review(REVIEW_DAILY_CAP="0")  # zero turns reviews off
+        self.run_review(REVIEW_DAILY_CAP="0")
         self.assertNoModelCall()
 
     def test_only_todays_markers_by_the_bot_count(self):
@@ -780,7 +763,6 @@ class CapTests(ReviewTestCase):
 
 
 class StrikeTimingTests(ReviewTestCase):
-    """The second failed verdict hands the pull request to the maintainer when it is posted."""
 
     def failing(self, verdict="changes"):
         self.fake.model_text = json.dumps({"verdict": verdict, "reasons": ["Built differently."], "pointers": ["a.swift:1"]})
@@ -795,7 +777,7 @@ class StrikeTimingTests(ReviewTestCase):
         self.assertEqual(self.labels(), [{"labels": ["notchling:needs-you"]}])
         (c,) = self.comments()
         self.assertIn("verdict=not_right", c["body"])
-        self.assertIn("notchling:needs-you", c["body"])  # it says why it will stop
+        self.assertIn("notchling:needs-you", c["body"])
         self.assertEqual([s["state"] for s in self.statuses()], ["failure"])
 
     def test_the_first_failed_verdict_does_not(self):
@@ -865,7 +847,6 @@ class EligibilityTests(ReviewTestCase):
         self.assertSkipped(AGENT_APP_LOGIN="")
 
     def test_an_app_login_without_the_bot_suffix_is_ignored(self):
-        """A person's login set by mistake (or by a hostile variable) must not make their PRs the App's."""
         for login in ("stranger", "dtthaison", "notchling-agent", "[bot]", "x [bot]", "a[bot]b", "a/b[bot]"):
             with self.subTest(login=login):
                 self.setUp()
@@ -887,7 +868,7 @@ class EligibilityTests(ReviewTestCase):
     def test_label_added_by_a_non_maintainer_is_not_enough(self):
         self.fake.pr["user"]["login"] = "stranger"
         self.fake.pr["labels"] = [{"name": "notchling:review"}]
-        self.fake.events = [labeled("dtthaison"), labeled("mallory")]  # the latest one counts
+        self.fake.events = [labeled("dtthaison"), labeled("mallory")]
         self.assertSkipped()
 
     def test_label_without_a_labeled_event_is_not_enough(self):
@@ -927,13 +908,11 @@ class FailClosedTests(ReviewTestCase):
         self.run_review(ANTHROPIC_API_KEY=None)
         self.assertNoModelCall()
         self.assertOnlyFailedStatus()
-        self.run_review(ANTHROPIC_API_KEY="")  # an empty secret is missing too
+        self.run_review(ANTHROPIC_API_KEY="")
         self.assertEqual(len(self.statuses()), 2)
         self.assertNoModelCall()
 
     def assertFailedAfterTheModelCall(self, asked=1):
-        """The model was asked once; the status fails and a `missing` marker records the attempt, so a
-        rerun of the same head replays it instead of asking again."""
         self.assertEqual(len(self.fake.sent("POST", "/v1/messages")), asked)
         st = self.statuses()
         self.assertEqual(len(st), 1)
@@ -950,7 +929,6 @@ class FailClosedTests(ReviewTestCase):
         self.assertFailedAfterTheModelCall()
 
     def test_model_unreachable(self):
-        """A timeout may have been billed, so any failure of the model call is one attempt for this head."""
         self.run_review(ANTHROPIC_BASE_URL="http://127.0.0.1:9")
         self.assertFailedAfterTheModelCall(asked=0)
 
@@ -976,7 +954,7 @@ class FailClosedTests(ReviewTestCase):
         self.run_review()
         (c,) = self.comments()
         self.fake.comments = [{"id": 5, "user": {"login": BOT}, "body": c["body"], "created_at": EARLIER}]
-        self.fake.model_text = json.dumps(GOOD)  # the model would now answer; it must not be asked
+        self.fake.model_text = json.dumps(GOOD)
         self.run_review()
         self.assertEqual(len(self.fake.sent("POST", "/v1/messages")), 1)
         st = self.statuses()
@@ -1057,7 +1035,6 @@ class TwoStrikesTests(ReviewTestCase):
         self.assertEqual(len(self.fake.sent("POST", "/v1/messages")), 1)
 
     def test_the_current_head_does_not_count_against_itself(self):
-        """Only earlier heads send a new push to the maintainer; this head's own failure is replayed."""
         self.fake.comments = [bot_comment("changes", SHA, 2)]
         self.run_review()
         self.assertNoModelCall()
@@ -1073,7 +1050,7 @@ class TwoStrikesTests(ReviewTestCase):
         self.assertNoModelCall()
         self.assertEqual(self.comments(), [])
         self.assertEqual(self.fake.sent("POST", "/labels$"), [])
-        self.assertEqual([s["state"] for s in self.statuses()], ["failure"])  # the new head still gets its status
+        self.assertEqual([s["state"] for s in self.statuses()], ["failure"])
 
 
 if __name__ == "__main__":

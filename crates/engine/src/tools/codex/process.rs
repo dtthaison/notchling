@@ -1,8 +1,3 @@
-//! Starting a tool and reading it as it runs. A Codex turn is a process that prints JSON lines for
-//! as long as it works and can be stopped with SIGINT, which [`crate::control::Launcher`] (run to the
-//! end, output collected) can't do. Everything that starts `codex` for a turn goes through
-//! [`ToolSpawner`], so a test swaps in [`super::fake::FakeSpawner`] and no test runs a real tool.
-
 use super::plan::{ExitInfo, TurnSpec};
 use std::io::{BufRead, BufReader, Read};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -10,7 +5,6 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-/// Which output a line came from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Stream {
     Out,
@@ -23,33 +17,23 @@ pub struct ToolLine {
     pub text: String,
 }
 
-/// What a running tool did next.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Next {
     Line(ToolLine),
-    /// The process ended and its output was read; every later call says so again.
     Exited(ExitInfo),
 }
 
-/// A running tool.
 pub trait ToolProcess: Send + Sync {
-    /// The next line of its output, waiting for one; [`Next::Exited`] once it has ended.
     fn next(&self) -> Next;
-    /// Stops the turn the way Ctrl+C would (SIGINT). Does nothing once it has ended.
     fn interrupt(&self);
-    /// Ends it harder (SIGTERM), for a turn that ignored [`ToolProcess::interrupt`]; by default
-    /// the same as an interrupt.
     fn terminate(&self) {
         self.interrupt();
     }
-    /// Ends it for good (SIGKILL), for a turn that ignored [`ToolProcess::terminate`] too; by
-    /// default the same as a terminate.
     fn kill(&self) {
         self.terminate();
     }
 }
 
-/// Why a tool did not start.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SpawnError(pub String);
 
@@ -65,16 +49,10 @@ pub trait ToolSpawner: Send + Sync {
     fn spawn(&self, spec: &TurnSpec) -> Result<Arc<dyn ToolProcess>, SpawnError>;
 }
 
-/// The longest line kept. A longer one is cut to this and its rest dropped, so a tool that prints
-/// 200 MB without a newline costs this much memory and no more.
 pub const MAX_LINE_BYTES: usize = 1024 * 1024;
 
-/// How long output may keep arriving after the process ended (a grandchild holding the pipe open
-/// would otherwise be waited on for as long as it lives; the Swift runner waited 0.3 s too).
 const DRAIN_GRACE: Duration = Duration::from_millis(300);
 
-/// Reads `reader` line by line, each at most `cap` bytes (the rest of a longer line is dropped),
-/// until its end or until `emit` says stop.
 pub fn read_capped_lines(reader: impl Read, cap: usize, mut emit: impl FnMut(String) -> bool) {
     let mut reader = BufReader::with_capacity(64 * 1024, reader);
     let mut line: Vec<u8> = Vec::new();
@@ -110,7 +88,6 @@ enum Msg {
     Exit(ExitInfo),
 }
 
-/// A real process with `std::process`: output read by two threads, the exit by a third.
 pub struct RealSpawner;
 
 impl ToolSpawner for RealSpawner {
@@ -178,7 +155,6 @@ fn wait_for_exit(child: &Mutex<std::process::Child>, readers: &AtomicUsize, tx: 
             Err(_) => break None,
         }
     };
-    // Let the last output be read first, but not for a pipe someone else keeps open.
     let until = Instant::now() + DRAIN_GRACE;
     while readers.load(Ordering::SeqCst) > 0 && Instant::now() < until {
         std::thread::sleep(Duration::from_millis(5));
@@ -259,10 +235,8 @@ impl ToolProcess for RealProcess {
 }
 
 impl RealProcess {
-    /// Sends `signal` (any number on a system without signals: the child is killed).
     fn signal(&self, signal: i32) {
         let mut child = self.child.lock().unwrap_or_else(|e| e.into_inner());
-        // Reaped already: the pid may be someone else's now.
         if !matches!(child.try_wait(), Ok(None)) {
             return;
         }

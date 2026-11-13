@@ -1,13 +1,3 @@
-//! Antigravity sessions another `agy` holds ([`notchling_engine::tools::agy::elsewhere`]): a
-//! delegation, an `agy` in a terminal. While one does, the daemon starts no `agy` of its own on
-//! the session and sends nothing to it; `agy.state` and `agy.conversation` read Antigravity's log
-//! instead, with `elsewhere` set to what Chat says.
-//!
-//! A watched session is looked at every [`GAP`] by one thread, which runs only while something is
-//! watched: a log that grew is `session.changed {change: "elsewhere"}` (Chat reads it again), and
-//! once nothing else holds the session it is `released`, after closing the daemon's own `agy` on it
-//! if one was open, so the next open loads the whole conversation.
-
 use crate::agy_sink::{lock, Shared};
 use notchling_engine::accounts::procs::SystemProcs;
 use notchling_engine::tools::agy::elsewhere::{self, Holder};
@@ -17,10 +7,8 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
-/// How often a watched session is looked at.
 pub const GAP: Duration = Duration::from_secs(2);
 
-/// Who else holds a session, by its id.
 pub type Finder = Arc<dyn Fn(&str) -> Option<Holder> + Send + Sync>;
 
 type Stamp = Option<(u64, SystemTime)>;
@@ -33,12 +21,10 @@ struct Watched {
 #[derive(Default)]
 struct State {
     watched: HashMap<String, Watched>,
-    /// The thread is running.
     running: bool,
 }
 
 pub(crate) struct Elsewhere {
-    /// Antigravity's folder (`~/.gemini/antigravity-cli`).
     root: PathBuf,
     finder: Mutex<Finder>,
     gap: Mutex<Duration>,
@@ -48,8 +34,6 @@ pub(crate) struct Elsewhere {
 }
 
 impl Elsewhere {
-    /// Over the real processes: an `agy` that isn't this daemon's child holds a session when it
-    /// has the session's folder open.
     pub(crate) fn new(
         root: PathBuf,
         home: PathBuf,
@@ -71,7 +55,6 @@ impl Elsewhere {
         }
     }
 
-    /// A test's processes and pace.
     #[cfg(test)]
     pub fn set_finder(&self, finder: Finder, gap: Duration) {
         *lock(&self.finder) = finder;
@@ -83,7 +66,6 @@ impl Elsewhere {
         finder(session)
     }
 
-    /// Asks now whether another `agy` holds the session; if one does, the session is watched.
     pub fn check(self: &Arc<Self>, session: &str) -> Option<Holder> {
         let holder = self.find(session)?;
         let start = {
@@ -103,12 +85,10 @@ impl Elsewhere {
         Some(holder)
     }
 
-    /// The holder of a watched session, as last seen (no process is asked).
     pub fn watched(&self, session: &str) -> Option<Holder> {
         lock(&self.state).watched.get(session).map(|w| w.holder)
     }
 
-    /// The conversation as Antigravity's log has it, and whether a turn goes on there.
     pub fn conversation(
         &self,
         session: &str,
@@ -138,7 +118,6 @@ impl Elsewhere {
     fn look(&self, session: &str) {
         if self.find(session).is_none() {
             lock(&self.state).watched.remove(session);
-            // Ours loaded before the other one wrote; a fresh open loads all of it.
             if self.runner.is_open(session) {
                 self.runner.close(session);
             }

@@ -2,7 +2,6 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import 'mac_profile.dart';
 
-/// Where secrets live. The real one is the platform keychain; tests use memory.
 abstract class SecretStore {
   Future<String?> read(String key);
   Future<void> write(String key, String value);
@@ -36,7 +35,6 @@ class MemorySecretStore implements SecretStore {
   Future<void> delete(String key) async => values.remove(key);
 }
 
-/// The list of paired Macs (tokens included) and which one is active.
 class MacStore {
   const MacStore(this._secrets);
   final SecretStore _secrets;
@@ -59,6 +57,5 @@ class MacStore {
 
   Future<void> setActive(String id) => _secrets.write(_activeKey, id);
 
-  /// No computer is in use: forget which one was.
   Future<void> clearActive() => _secrets.delete(_activeKey);
 }

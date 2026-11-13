@@ -1,13 +1,6 @@
-//! What the bridge's files share with the Swift app's `BridgeFiles`: the clock, Foundation's
-//! `.iso8601` dates, and private writes (0600 files in a 0700 folder) under an advisory lock, so
-//! two writers of the same file take turns.
-
 use std::fs::{File, OpenOptions};
 use std::path::{Path, PathBuf};
 
-/// The same JSON with every object's keys in sorted order, as Swift's `.sortedKeys` writes them.
-/// Needed because serde_json's map keeps insertion order when another crate in the build turns
-/// on its `preserve_order` feature (the desktop app's dependencies do).
 pub fn sorted(value: serde_json::Value) -> serde_json::Value {
     use serde_json::Value;
     match value {
@@ -21,7 +14,6 @@ pub fn sorted(value: serde_json::Value) -> serde_json::Value {
     }
 }
 
-/// Milliseconds since the epoch, now.
 pub fn now_ms() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -29,9 +21,6 @@ pub fn now_ms() -> i64 {
         .unwrap_or(0)
 }
 
-/// `2026-11-08T10:20:30Z`: Foundation's `.iso8601` (`ISO8601DateFormatter` with
-/// `.withInternetDateTime`), whole seconds in UTC. Its decoder reads nothing else, so the bridge
-/// writes exactly this.
 pub fn iso8601(ms: i64) -> String {
     let secs = ms.div_euclid(1000);
     let days = secs.div_euclid(86_400);
@@ -45,12 +34,10 @@ pub fn iso8601(ms: i64) -> String {
     )
 }
 
-/// Milliseconds for an ISO 8601 date (what [`iso8601`] writes, and fractions or offsets too).
 pub fn parse_iso8601(text: &str) -> Option<i64> {
     crate::sessions::iso::parse_iso_ms(text)
 }
 
-/// Year, month and day of a day count since 1970-01-01 (Howard Hinnant's algorithm).
 fn civil_from_days(days: i64) -> (i64, i64, i64) {
     let z = days + 719_468;
     let era = z.div_euclid(146_097);
@@ -64,7 +51,6 @@ fn civil_from_days(days: i64) -> (i64, i64, i64) {
     (y, m, d)
 }
 
-/// The lock file beside `file`: `.<name>.lock`.
 pub fn lock_path(file: &Path) -> PathBuf {
     let name = file
         .file_name()
@@ -73,8 +59,6 @@ pub fn lock_path(file: &Path) -> PathBuf {
     file.with_file_name(format!(".{name}.lock"))
 }
 
-/// Holds the exclusive lock on `file`'s lock file until dropped. Making it creates the folder
-/// (0700) and the lock file, so it's taken only on the way to a write.
 pub struct FileLock(File);
 
 impl FileLock {
@@ -101,7 +85,6 @@ impl Drop for FileLock {
     }
 }
 
-/// Writes `data` to `file` as a 0600 file inside a 0700 folder, atomically, refusing a symlink.
 pub fn write_private(file: &Path, data: &[u8]) -> std::io::Result<()> {
     if let Some(dir) = file.parent() {
         notchling_platform::files::ensure_private_dir(dir).map_err(std::io::Error::other)?;

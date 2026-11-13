@@ -1,6 +1,3 @@
-//! Tests of the repo steps' names, Deploy key Check and Fix, Clone and Push is refused (Swift
-//! `MachinesRepoStepsTests`, first half). Replace key is `tests_repo_replace`.
-
 use super::fakes_b::*;
 use super::registry::{Machine, MachineRepo};
 use super::repo_common::*;
@@ -25,7 +22,6 @@ pub(super) fn remote_text(pubkey: &str, alias_line: &str, ssh: &str) -> String {
     format!("{pubkey}\n@@config\n{alias_line}\n@@ssh\n{ssh}\n")
 }
 
-/// Runs the Deploy key Check on `text` with GitHub listing `keys`.
 pub(super) fn check(text: &str, keys: &str) -> (CheckResult, Rig) {
     let rig = Rig::new(mac("m1"));
     rig.runner.on(is_list, ok(keys));
@@ -46,8 +42,6 @@ pub(super) fn fail_text(r: &CheckResult) -> String {
         other => panic!("not a fail: {other:?}"),
     }
 }
-
-// MARK: Names
 
 #[test]
 fn alias_key_and_remote_names() {
@@ -150,8 +144,6 @@ fn the_checkout_defaults_to_src_name() {
     assert_eq!(checkout_path(&r), "/srv/mono");
 }
 
-// MARK: Deploy key Check
-
 #[test]
 fn deploy_key_passes_only_when_github_lists_it_read_only_and_ssh_t_works() {
     let (good, rig) = check(
@@ -231,7 +223,6 @@ fn a_public_key_that_is_not_one_ed25519_line_is_refused() {
         format!("ssh-ed25519 {BODY} x$(id)"),
         format!("ssh-ed25519 {BODY} a;b"),
         format!("ssh-ed25519 {BODY}\nrm -rf x"),
-        // a key file that holds marker lines must not fake the later parts
         format!("ssh-ed25519 {BODY}\n@@config\nalias=yes\n@@ssh\n{WELCOME}"),
     ];
     for text in cases {
@@ -266,11 +257,8 @@ fn the_probe_only_reads_and_asks_github_with_ssh_t() {
     assert!(script.contains(&format!("grep -Eq '{}'", alias_pattern(ALIAS))));
     assert!(!script.contains("ssh-keygen"));
     assert!(!script.contains(">>"));
-    // the private key is never printed
     assert!(!script.contains("cat "));
 }
-
-// MARK: Deploy key Fix
 
 const GH_META: &str = "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQCj7ndNxQowgcQnjshcLrqPEiiphnt+VTTvDP6mHBL9j1aNUkY4Ue1gvwnGLVlOhGeYrnZaMgRK6\n";
 
@@ -332,7 +320,6 @@ fn deploy_key_fix_order() {
     assert!(last(&calls[3]).contains("known_hosts"));
     assert!(last(&calls[3]).contains(&format!("github.com ssh-ed25519 {GITHUB_HOST_BODY}")));
     assert!(!last(&calls[3]).contains(OTHER_BODY));
-    // a key GitHub does not list yet is added, after the list call
     assert_eq!(calls[4], list_argv(REPO));
     assert_eq!(
         &calls[5][..4],
@@ -348,7 +335,6 @@ fn deploy_key_fix_order() {
         &["-R", REPO, "--title", "agents-m1"]
     );
     assert_eq!(calls[5].len(), 9);
-    // the public key file is gone again
     assert!(!std::path::Path::new(&calls[5][4]).exists());
 }
 
@@ -363,7 +349,6 @@ fn a_key_already_listed_read_only_is_not_added_again() {
     assert!(outcome.ok, "{}", outcome.message);
     let calls = rig.argvs();
     assert!(!mentions_add(&calls));
-    // the machine was still repaired first
     assert!(last(&calls[0]).contains("ssh-keygen"));
     assert!(calls.iter().any(|a| last(a).contains("known_hosts")));
 }
@@ -411,7 +396,6 @@ fn the_write_flag_can_never_appear() {
     assert!(!fix_plan(&StepId::deploy_key(REPO), &rig.machine)
         .display
         .contains("allow-write"));
-    // and not in the source either
     for source in [
         include_str!("steps_repo.rs"),
         include_str!("steps_replace.rs"),
@@ -511,8 +495,6 @@ fn an_unsafe_repo_name_gets_no_scripts() {
         assert!(step.replace.is_none());
     }
 }
-
-// MARK: Clone
 
 #[test]
 fn clone_uses_the_alias_and_refuses_another_checkout() {

@@ -1,19 +1,9 @@
-//! What every provider reports about its limits, whatever its API calls them: groups of bars, each
-//! bar a used percentage with a reset time and a kind (`UsageReport.swift`). Cards and menu rows
-//! read this, never a provider's own type.
-//!
-//! Times are seconds since 1970 (the rest of the API's convention); `None` when unknown.
-
 use serde_json::{json, Value};
 
-/// A bar's meaning.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
-    /// The short window: Claude's 5 hours, Codex's and Antigravity's "5h".
     Session,
-    /// A weekly window, account-wide or for one model.
     Week,
-    /// Anything else (a month, a limit the app doesn't know yet).
     Other,
 }
 
@@ -26,7 +16,6 @@ impl Kind {
         }
     }
 
-    /// "5h" is the short window, "Week" the weekly one, anything else is other.
     pub fn of_label(label: &str) -> Kind {
         match label {
             "5h" => Kind::Session,
@@ -36,7 +25,6 @@ impl Kind {
     }
 }
 
-/// How much of a window is used and when it resets (`UsageWindow`).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct UsageWindow {
     pub percent: f64,
@@ -62,7 +50,6 @@ impl Bar {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Group {
-    /// Shown over the bars; `None` for a provider with one unnamed set (Claude).
     pub name: Option<String>,
     pub bars: Vec<Bar>,
 }
@@ -98,8 +85,6 @@ impl UsageReport {
     }
 }
 
-/// A named set of bars (Codex's "Codex" and "Code Review", Antigravity's model groups), each bar a
-/// label and a window (`GroupedUsage`).
 #[derive(Clone, Debug, PartialEq)]
 pub struct GroupedUsage {
     pub groups: Vec<GroupedGroup>,
@@ -113,7 +98,6 @@ pub struct GroupedGroup {
 }
 
 impl From<&GroupedUsage> for UsageReport {
-    /// Each bar is classified by its label ("5h", "Week", anything else).
     fn from(usage: &GroupedUsage) -> UsageReport {
         UsageReport {
             groups: usage

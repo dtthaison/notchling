@@ -1,43 +1,24 @@
-//! A generated data root for `--render chat`'s bench: one working Claude Code job with a long
-//! transcript (the cost of a conversation shows only when it is long) and three done jobs with
-//! two turns each. Pure: the same arguments give the same files, and the root is made at run
-//! time by the bench, never checked in (a 200-turn transcript under `crates/` would pass
-//! `LINT-FILE-SIZE`).
-
 use serde_json::{json, Value};
 
 use notchling_engine::bridge::net::files::iso8601;
 
-/// The working job's id, its project folder under `claude/projects/` and its transcript's name:
-/// where a bench that appends to the open conversation writes.
 pub const WORKING_JOB: &str = "bn000001";
 pub const PROJECT: &str = "-Users-me-work-bench";
 pub const WORKING_TRANSCRIPT: &str = "claude/projects/-Users-me-work-bench/bench-working.jsonl";
 
-/// Milliseconds between two lines of a transcript: whole seconds, which is all `iso8601` writes.
 const LINE_GAP_MS: i64 = 1000;
 
-/// How tall a turn's rows are.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Shape {
-    /// Every turn the same: an 800 pt reply and a 20-line tool output.
     Plain,
-    /// Some turns have rows much taller than a window: a 3,000-line tool output, and a long
-    /// reply of many sections with tables and code, as a real session's long answers are.
     Tall,
-    /// Some turns run sixty tool calls in a row: one step group a few thousand points tall once
-    /// it is open, as a long working turn's is.
     Busy,
 }
 
-/// The files of a data root, as relative paths and texts: the working job first, then three done
-/// ones. `now_ms` is the time the newest working line carries, so the sessions are recent when
-/// the bench passes the current time.
 pub fn files(turns: usize, now_ms: i64) -> Vec<(String, String)> {
     files_shaped(turns, now_ms, Shape::Plain)
 }
 
-/// [`files`] with the working transcript's turns shaped as `shape` says.
 pub fn files_shaped(turns: usize, now_ms: i64, shape: Shape) -> Vec<(String, String)> {
     let mut out = Vec::new();
     out.push(job(WORKING_JOB, "bench-working", "working", now_ms));
@@ -47,7 +28,6 @@ pub fn files_shaped(turns: usize, now_ms: i64, shape: Shape) -> Vec<(String, Str
     ));
     for n in 1..=3 {
         let (id, session) = (format!("bd00000{n}"), format!("bench-done-{n}"));
-        // An hour apart, newest first, so the Done section's order is the same every time.
         let at = now_ms - n as i64 * 3_600_000;
         out.push(job(&id, &session, "done", at));
         out.push((
@@ -58,7 +38,6 @@ pub fn files_shaped(turns: usize, now_ms: i64, shape: Shape) -> Vec<(String, Str
     out
 }
 
-/// A job's `state.json`.
 fn job(id: &str, session: &str, state: &str, at_ms: i64) -> (String, String) {
     let state = json!({
         "state": state,
@@ -71,8 +50,6 @@ fn job(id: &str, session: &str, state: &str, at_ms: i64) -> (String, String) {
     (format!("claude/jobs/{id}/state.json"), state.to_string())
 }
 
-/// `turns` turns ending at `end_ms`, one JSON line each and a newline after every one: a user
-/// line, an assistant line with a Bash call, its result and a Markdown reply.
 fn transcript(session: &str, turns: usize, end_ms: i64, shape: Shape) -> String {
     let lines = turns as i64 * 4;
     let start = end_ms - lines * LINE_GAP_MS;
@@ -87,10 +64,8 @@ fn transcript(session: &str, turns: usize, end_ms: i64, shape: Shape) -> String 
     out
 }
 
-/// One turn's four lines. `at(k)` is the time of its `k`-th line.
 fn turn_lines(session: &str, turn: usize, shape: Shape, at: &dyn Fn(i64) -> String) -> Vec<Value> {
     let tool = format!("{session}-t{turn}");
-    // A tall turn's output is 3,000 lines (every seventh turn); the others' are 20.
     let lines = if shape == Shape::Tall && turn % 7 == 3 {
         3000
     } else {
@@ -151,8 +126,6 @@ fn turn_lines(session: &str, turn: usize, shape: Shape, at: &dyn Fn(i64) -> Stri
         }),
     ];
     if shape == Shape::Busy && turn % 6 == 2 {
-        // Sixty more calls between the first result and the reply: they join the first one's
-        // group (no text between them), the way a long working turn's do.
         let extra: Vec<Value> = (0..60)
             .flat_map(|k| busy_call(session, turn, k, at(2)))
             .collect();
@@ -161,7 +134,6 @@ fn turn_lines(session: &str, turn: usize, shape: Shape, at: &dyn Fn(i64) -> Stri
     lines
 }
 
-/// Call `k` of a busy turn: a Read of one file and its result.
 fn busy_call(session: &str, turn: usize, k: usize, when: String) -> [Value; 2] {
     let tool = format!("{session}-x{turn}-{k}");
     [
@@ -193,8 +165,6 @@ fn busy_call(session: &str, turn: usize, k: usize, when: String) -> [Value; 2] {
     ]
 }
 
-/// A reply with a heading, a paragraph, a three-item list, an eight-line code block and a 3x3
-/// table: the parts a real conversation lays out.
 fn reply(turn: usize) -> String {
     format!(
         "## Result of turn {turn}\n\n\
@@ -221,7 +191,6 @@ fn reply(turn: usize) -> String {
     )
 }
 
-/// A long answer: forty sections like [`reply`], a few thousand points tall.
 fn long_reply(turn: usize) -> String {
     (0..40)
         .map(|section| reply(turn * 100 + section))
@@ -239,7 +208,6 @@ mod tests {
     use crate::chat::data::DataRoot;
     use crate::testutil::Scratch;
 
-    /// Mid-November 2026, whatever the day: only the order and the recency matter.
     const T: i64 = 1_794_000_000_000;
 
     #[test]

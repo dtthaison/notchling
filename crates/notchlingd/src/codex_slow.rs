@@ -1,27 +1,9 @@
-//! The Codex jobs that can outlast a reply: starting a new session (Codex names it when it is
-//! ready) and `codex delete`. A client gives up on a call after 5 s, so each runs on its own thread
-//! ([`late_reply`]) and the reply waits [`REPLY_WAIT`]: a job done by then answers the call as
-//! before, and a job still going is answered `starting`/`deleting` and reports its end as an event
-//! on topic `tools`, so the call never fails while the job goes on.
-//!
-//! | Late end | Event |
-//! | --- | --- |
-//! | a new session is named | `codex.turn {id: "codex:<session>", session, state: "named", draft}` |
-//! | a new session isn't started | `codex.turn {id: null, state: "not_started", draft, error}` |
-//! | `codex delete` worked | `session.changed {id, session, row: null, deleted: true}` |
-//! | `codex delete` failed | `codex.turn {id, state: "delete_failed", error}` |
-//!
-//! `draft` is the row id the caller sent as `draft` (`codex-new:<uuid>`): the app follows its draft
-//! row to the session it became. Without one a new session's events are the ordinary ones.
-
 use super::*;
 use crate::late_reply;
 
-/// The draft row ids a caller may name: the app's, `codex-new:<uuid>`.
 const DRAFT_PREFIX: &str = "codex-new:";
 const MAX_DRAFT_BYTES: usize = 80;
 
-/// The reply for a message that was sent.
 pub(super) fn sent_json(sent: Sent) -> Value {
     match sent {
         Sent::Started { session } => {
@@ -45,7 +27,6 @@ impl CodexOps {
         Duration::from_millis(self.reply_wait_ms.load(Ordering::SeqCst))
     }
 
-    /// `args.draft`: the row id of the draft a new session comes from, if the caller sent one.
     pub(super) fn draft_arg(args: &Value, new_session: bool) -> Result<Option<String>, ApiError> {
         if args.get("draft").is_none() {
             return Ok(None);
@@ -60,8 +41,6 @@ impl CodexOps {
         Ok(Some(draft.to_string()))
     }
 
-    /// Starts a new session. The reply waits for Codex to name it, but only [`REPLY_WAIT`]; after
-    /// that it is `starting` and the naming (or the failure) comes as an event carrying `draft`.
     pub(super) fn send_new(
         &self,
         request: Request,
@@ -84,8 +63,6 @@ impl CodexOps {
         }
     }
 
-    /// Stops the session's turn, then runs `codex delete --force` on it. The reply waits
-    /// [`REPLY_WAIT`]; a delete still going is `deleting` and ends as an event.
     pub(super) fn delete_session(
         &self,
         session: String,
@@ -128,7 +105,6 @@ impl CodexOps {
     }
 }
 
-/// What a new session's late end tells the app (nothing without a draft to name).
 fn announce_late(room: &dyn Room, draft: Option<&str>, late: Result<Sent, SendError>) {
     let Some(draft) = draft else {
         return;
@@ -145,7 +121,6 @@ fn announce_late(room: &dyn Room, draft: Option<&str>, late: Result<Sent, SendEr
     room.publish(topics::TOOLS, topics::CODEX_TURN, &data);
 }
 
-/// Everything a delete needs, owned, so it can run on its own thread.
 struct DeleteJob {
     runs: CodexRuns,
     launcher: Arc<dyn Launcher>,
@@ -158,8 +133,6 @@ struct DeleteJob {
 
 impl DeleteJob {
     fn run(self) -> Result<(), ApiError> {
-        // The turn is stopped and its waiting messages dropped first, and given a moment to let go
-        // of the file `codex delete` removes.
         if self.runs.forget(&self.session) {
             let until = Instant::now() + STOP_SETTLE;
             while self.runs.is_running(&self.session) && Instant::now() < until {

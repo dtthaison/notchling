@@ -1,36 +1,34 @@
-//! The Settings sheet, pure (part U8, the Swift `SettingsPage`): the daemon's switches first (acting,
-//! the phone bridge, logins, the vault, install), then the Milestone 1 settings keys in the Swift
-//! app's sections, each row reading the store (or the key's default). The switches are the daemon's,
-//! not keys: each is off at every daemon start, and only a click here (or Turn Back On in the
-//! restart notice) turns one on. Launch at login is the system's login item, not a key, so it waits
-//! for its part.
-
 use notchling_engine::settings::spec;
 use serde_json::{json, Value};
 
 use crate::acting::Acting;
 use crate::switches::restart::Area;
 
-/// How a row is changed.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Field {
-    /// A switch. `inverted` shows the opposite of the stored value ("Show agents in the notch" is
-    /// `hideNotch` off).
-    Toggle { on: bool, inverted: bool },
-    /// One of a few values, each with its title.
+    Toggle {
+        on: bool,
+        inverted: bool,
+    },
     Choice {
         options: Vec<(&'static str, &'static str)>,
         selected: String,
     },
-    /// A whole number stepped within a range.
-    Stepper { value: i64, min: i64, max: i64 },
-    /// Shown, never changed here.
-    ReadOnly { value: String, note: Option<String> },
-    /// One of the daemon's switches; `on` is `None` while no daemon answered (drawn disabled).
-    Daemon { area: Area, on: Option<bool> },
+    Stepper {
+        value: i64,
+        min: i64,
+        max: i64,
+    },
+    ReadOnly {
+        value: String,
+        note: Option<String>,
+    },
+    Daemon {
+        area: Area,
+        on: Option<bool>,
+    },
 }
 
-/// The daemon's switches as the app last knew them; `None` while no daemon answered.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Daemon {
     pub acting: Acting,
@@ -41,7 +39,6 @@ pub struct Daemon {
 }
 
 impl Daemon {
-    /// Nothing known: no daemon.
     pub fn detached() -> Daemon {
         Daemon {
             acting: Acting::Detached,
@@ -67,7 +64,6 @@ impl Daemon {
     }
 }
 
-/// The daemon's switch rows, in order, with their titles.
 const DAEMON_ROWS: [(Area, &str); 5] = [
     (Area::Acting, "Act on Sessions"),
     (Area::Bridge, "Phone Bridge"),
@@ -78,7 +74,6 @@ const DAEMON_ROWS: [(Area, &str); 5] = [
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Row {
-    /// The settings key; empty for a read-only row that isn't one.
     pub key: &'static str,
     pub title: &'static str,
     pub field: Field,
@@ -103,7 +98,6 @@ const LIMIT_MODES: [(&str, &str); 3] = [
     ("notifyAndSwitch", "Notify and Switch"),
 ];
 
-/// The key's value from `read`, else its default.
 fn value(read: &dyn Fn(&str) -> Option<Value>, key: &str) -> Option<Value> {
     read(key).or_else(|| spec(key).and_then(|s| s.default_value()))
 }
@@ -138,7 +132,6 @@ fn choice(
     }
 }
 
-/// The sheet's sections over `read` (the store's raw values) and acting as the app knows it.
 pub fn sections(read: &dyn Fn(&str) -> Option<Value>, daemon: &Daemon) -> Vec<Section> {
     let mut show_notch = toggle(read, "hideNotch", "Show agents in the notch");
     if let Field::Toggle { on, inverted } = &mut show_notch.field {
@@ -173,7 +166,6 @@ pub fn sections(read: &dyn Fn(&str) -> Option<Value>, daemon: &Daemon) -> Vec<Se
             },
         });
     }
-    // The daemon's switch first: it decides whether anything here can act at all.
     vec![
         Section {
             title: "Daemon",
@@ -244,9 +236,6 @@ pub fn sections(read: &dyn Fn(&str) -> Option<Value>, daemon: &Daemon) -> Vec<Se
     ]
 }
 
-/// What a click on a row writes: a toggle flips (stored inverted where it shows inverted), a
-/// choice takes `option`, a stepper moves by `option` read as +1 or -1. `None` for a read-only
-/// row or an option that isn't one.
 pub fn change(row: &Row, option: &str) -> Option<(&'static str, Value)> {
     match &row.field {
         Field::Toggle { on, inverted } => {
@@ -317,7 +306,6 @@ mod tests {
             panic!()
         };
         assert_eq!(selected, "medium");
-        // limitMode defaults to notifyAndSwitch, so the stepper shows at 95.
         assert_eq!(
             row(&rows, "limitSwitchAt").field,
             Field::Stepper {
@@ -326,7 +314,6 @@ mod tests {
                 max: 99
             }
         );
-        // Every key shown is a real one.
         for r in rows.iter().filter(|r| !r.key.is_empty()) {
             assert!(spec(r.key).is_some(), "{}", r.key);
         }
@@ -419,7 +406,6 @@ mod tests {
             change(&row(&rows, "showPet"), ""),
             Some(("showPet", json!(false)))
         );
-        // Turning "Show agents in the notch" off stores hideNotch true.
         assert_eq!(
             change(&row(&rows, "hideNotch"), ""),
             Some(("hideNotch", json!(true)))

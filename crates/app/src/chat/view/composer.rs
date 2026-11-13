@@ -1,21 +1,3 @@
-//! The reply box: one rounded card (fill card, radius composer, hairline that turns accent while
-//! focused, soft shadow). The text spans the card's full width on top; under it, inside the same
-//! card, one row: the + menu at the left (Add files or photos ⌘U, Add folder, Slash commands) and
-//! at the right the action button, a return arrow while there is text, a solid square (Stop)
-//! while the session works, nothing otherwise (`chat::composer::action`). The text is the kit's
-//! `TextEditor` (a caret, click and drag, the input method's marked text, ⌘Z); it grows from one
-//! line to [`MAX_LINES`], then scrolls. Return sends (the editor's `Submit`, also while working,
-//! when it queues), Shift or Option Return adds a line, Esc stops a working session
-//! (`view::mod`). Files dropped anywhere on the middle column go in at the caret as paths
-//! (`chat::drops`, the drop target is the column in `view::mod`); the card's edge turns accent
-//! while one is over it. Under the card, one row: the model or options picker at the left (for a Claude
-//! Code session the Model and Effort pickers, `chat::claude_picker`), the
-//! status line (the error, "Sending…", what waits, or why the box is off), the context meter, the
-//! session's account and the usage-limit ring
-//! (`view::limit_ring`). Above it, the question or permission a Claude Code session waits on
-//! (`view::prompts`), an Antigravity permission card when the daemon holds one for the row, and the picker's pop-up. Disabled while acting isn't on; the reason is the status
-//! line, and only there.
-
 use gpui::{
     deferred, div, img, point, prelude::*, px, relative, BoxShadow, Context, Div, ExternalPaths,
     KeyDownEvent, ObjectFit, PathPromptOptions, SharedString, Stateful, Window,
@@ -39,27 +21,19 @@ use crate::mac::gate;
 use crate::tools::requests::is_draft;
 use crate::tools::view::{agy_card, pick_row, pop_up as menu_card};
 
-/// The text grows to this many lines, then scrolls (the Swift `ReplyMeasurer.maxLines`).
 pub const MAX_LINES: usize = 8;
-/// One line of body text in the box, in points: the system font at 13 lays out at 16.
 pub const LINE_HEIGHT: f32 = 16.0;
-/// The card's edge: 1 pt hairline at rest, 1.5 pt accent while focused (the spec's Composer).
 const EDGE_REST: f32 = 1.0;
 const EDGE_FOCUSED: f32 = 1.5;
-/// Inside the card: 8 at the sides and above, 6 below the bottom row, plus the text's own 6
-/// before it (14 in all) and above and below it.
 const PAD_HORIZONTAL: f32 = 8.0;
 const PAD_VERTICAL: f32 = 8.0;
 const PAD_BOTTOM: f32 = 6.0;
 const TEXT_PAD_LEADING: f32 = 6.0;
 const TEXT_PAD_VERTICAL: f32 = 6.0;
-/// The Stop square, in points.
 const STOP_SQUARE: f32 = 12.0;
-/// The + menu's width, and the gap between it and the button.
 const MENU_WIDTH: f32 = 260.0;
 const MENU_GAP: f32 = 6.0;
 
-/// The card's padding at an edge width, so focusing (a thicker edge) moves nothing inside.
 fn inset(base: f32, edge: f32) -> f32 {
     base - (edge - EDGE_REST)
 }
@@ -72,7 +46,6 @@ fn placeholder(view: &ChatView) -> &'static str {
     }
 }
 
-/// The Antigravity permission the daemon holds for the row, above the box.
 fn permission(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Option<Div> {
     let held = view.agy_prompt()?;
     let gate = view.acting(cx).control();
@@ -94,8 +67,6 @@ fn permission(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Opt
     )
 }
 
-/// The status line under the card: the error, what waits, or why the box is off.
-/// Shown once, here, as a sentence; the box itself carries no tooltip for it.
 fn status(
     view: &ChatView,
     control: crate::acting::Control,
@@ -103,10 +74,8 @@ fn status(
     cx: &Context<ChatView>,
 ) -> Option<Div> {
     let (text, ink) = if let Some(error) = &view.tools.error {
-        // The daemon's "asking you something" refusal points at the card when one is up.
         (error_text(error, view.prompt.is_shown()), Ink::Needs)
     } else if view.tools.sending {
-        // The message's own bubble says "Sending…"; the line here would only repeat it.
         return None;
     } else if let Some(n) = view
         .selected
@@ -133,7 +102,6 @@ fn status(
     )
 }
 
-/// Which picker menu is open: the one clicked, or the one a render forces.
 fn open_menu(view: &ChatView) -> Option<(String, bool)> {
     match &view.tools.picker {
         Some(p) => Some((p.menu.clone(), p.more)),
@@ -145,7 +113,6 @@ fn open_menu(view: &ChatView) -> Option<(String, bool)> {
     }
 }
 
-/// One row of a picker menu.
 fn menu_row(
     id: String,
     menu: &str,
@@ -158,7 +125,6 @@ fn menu_row(
         .on_click(cx.listener(move |this, _, _, cx| this.pick(&menu, &value, cx)))
 }
 
-/// The More Models row: opens the rows under it.
 fn more_row(open: bool, a: Appearance, cx: &mut Context<ChatView>) -> Stateful<Div> {
     div()
         .id("model-more")
@@ -195,8 +161,6 @@ fn more_row(open: bool, a: Appearance, cx: &mut Context<ChatView>) -> Stateful<D
         }))
 }
 
-/// A picker's menu, over its button and the layer that closes it on an outside click (both
-/// `deferred`, as the + menu). The same for every tool (`chat::pickers`).
 fn picker_menu(
     menu: &pickers::Menu,
     more: bool,
@@ -267,8 +231,6 @@ fn picker_menu(
     .with_priority(1)
 }
 
-/// One picker button: its icon, the current choice and a chevron in the Meta type and the muted
-/// ink, a ghost button; the same for every tool.
 fn picker_button(
     view: &ChatView,
     menu: &pickers::Menu,
@@ -313,7 +275,6 @@ fn picker_button(
     )
     .h(px(20.0))
     .px(px(6.0));
-    // The acting reason when acting is off, else what the picker does (or why it can't yet).
     let tip = control
         .tooltip
         .map(str::to_owned)
@@ -333,7 +294,6 @@ fn picker_button(
         .children(is_open.then(|| picker_menu(menu, more, a, cx)))
 }
 
-/// The pickers under the card: Model, Effort and any other choice the session's tool offers.
 fn pickers_row(
     view: &ChatView,
     control: crate::acting::Control,
@@ -351,24 +311,17 @@ fn pickers_row(
     Some(row)
 }
 
-/// What a render can force, since nothing types, works or clicks in a picture.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Preview {
-    /// The box holds text (`NOTCHLING_RENDER_TYPED=1`).
     pub typed: bool,
-    /// The session works, so Stop shows (`NOTCHLING_RENDER_WORKING=1`).
     pub working: bool,
-    /// The + menu is open (`NOTCHLING_RENDER_ADD=1`).
     pub menu: bool,
-    /// A Claude Code picker's menu is open (`NOTCHLING_RENDER_PICKER=model|effort`).
     pub picker: Option<Kind>,
 }
 
-/// What Chat keeps for the box's controls.
 #[derive(Default)]
 pub struct State {
     preview: Preview,
-    /// The + menu is open.
     add_menu: bool,
 }
 
@@ -386,7 +339,6 @@ impl State {
         }
     }
 
-    /// Esc closes the menu: whether there was one to close.
     pub fn close_menu(&mut self) -> bool {
         std::mem::take(&mut self.add_menu)
     }
@@ -395,17 +347,14 @@ impl State {
         self.add_menu || self.preview.menu
     }
 
-    /// Whether the + menu is up, for the window's "something is open" (Esc then isn't Stop).
     pub fn is_open(&self) -> bool {
         self.menu_open()
     }
 }
 
-/// The text a typed render shows.
 const SAMPLE: &str = "Can you check why the build fails on CI?\nIt passes here.";
 
 impl ChatView {
-    /// Applies a render's switches (the constructor's only).
     pub(super) fn preview_composer(&mut self, preview: Preview, cx: &mut Context<Self>) {
         self.composer = State::preview(preview);
         if preview.typed {
@@ -413,8 +362,6 @@ impl ChatView {
         }
     }
 
-    /// Opens a path picker (files or folders, several) and puts what is chosen into the box at the
-    /// caret, as dropped files go.
     fn pick_paths(&mut self, folders: bool, window: &mut Window, cx: &mut Context<Self>) {
         let picked = cx.prompt_for_paths(PathPromptOptions {
             files: !folders,
@@ -452,8 +399,6 @@ impl ChatView {
     }
 }
 
-/// The action button: a return arrow while there is text to send, a solid square while the session
-/// works (Stop), nothing otherwise.
 fn action_button(
     action: Action,
     enabled: bool,
@@ -478,7 +423,6 @@ fn action_button(
             },
             "Send Button",
         ),
-        // A message is going out: the small spinner where the arrow goes, as the Swift disc.
         Action::Sending => (
             "sending",
             kit_spinner("send-spin", SPINNER_MINI, Ink::TextMuted, a).into_any_element(),
@@ -487,7 +431,6 @@ fn action_button(
         ),
         Action::Stop { dim } => (
             "stop",
-            // A drawn square, not an icon: the kit keeps filled icons for status.
             div()
                 .size(px(STOP_SQUARE))
                 .rounded(px(3.0))
@@ -514,7 +457,6 @@ fn action_button(
     Some(b.part_at(part, Corner::Top, a, cx))
 }
 
-/// One row of the + menu: the icon, the title and the key at the right.
 fn add_row(
     index: usize,
     item: AddItem,
@@ -544,8 +486,6 @@ fn add_row(
         .on_click(cx.listener(move |this, _, window, cx| this.pick_add(item.add, window, cx)))
 }
 
-/// The + button at the card's bottom left, with its menu above it while open. The menu and the
-/// layer that closes it on an outside click are drawn over everything (`deferred`).
 fn add_button(
     view: &ChatView,
     enabled: bool,
@@ -601,7 +541,6 @@ fn add_button(
                 .left(px(0.0))
                 .pb(px(MENU_GAP))
                 .child(
-                    // Anywhere else, a click closes it; the layer blocks the window under it.
                     div()
                         .id("add-menu-click-away")
                         .absolute()
@@ -621,15 +560,9 @@ fn add_button(
     Some(div().relative().flex_shrink_0().child(b).children(menu))
 }
 
-/// How full the session's context is (the latest request's tokens against the model's window).
-/// How tall an attached file's tile is over the text.
 const THUMB_HEIGHT: f32 = 64.0;
-/// A file that isn't a picture: its tile's width.
 const FILE_TILE: f32 = 180.0;
 
-/// The files attached to the reply (dropped, or picked with +), a tile each over the text: a
-/// picture shows as itself, anything else as its name; a click opens it, × takes it off. Pictures
-/// whose paths are typed in the text show too, without ×. A file that's gone shows nothing.
 fn thumbnails(view: &ChatView, id: &str, a: Appearance, cx: &mut Context<ChatView>) -> Option<Div> {
     let attached = view.attached(id);
     let mut tiles: Vec<(std::path::PathBuf, bool)> =
@@ -759,7 +692,6 @@ fn context_meter(
     );
     let context = h.context?;
     let chip = super::header::chip(&format!("Context {context}"), a).id("context-meter");
-    // A borrowed window says so on hover.
     let chip = match h.context_note {
         Some(note) => gate::tip_text(chip, note.into(), a),
         None => chip,
@@ -769,7 +701,6 @@ fn context_meter(
 
 pub fn render(view: &ChatView, a: Appearance, window: &Window, cx: &mut Context<ChatView>) -> Div {
     let mut control = view.composer_control(cx);
-    // A render forcing a state has no acting; the box is drawn as if it could take input.
     if view.composer.preview.any() {
         control.enabled = true;
     }
@@ -784,19 +715,15 @@ pub fn render(view: &ChatView, a: Appearance, window: &Window, cx: &mut Context<
     } else {
         Ink::Hairline.color(a)
     };
-    // The editor follows the row and the gate (both no-ops when nothing changed).
     let hint = placeholder(view);
     let typed = view.composer.preview.typed;
     view.tools.editor.update(cx, |editor, cx| {
         editor.set_enabled(control.enabled, cx);
         editor.set_placeholder(hint, cx);
-        // A typed render keeps its sample through the loads that reset the box.
         if typed && editor.text() != SAMPLE {
             editor.set_text(SAMPLE, cx);
         }
     });
-    // The text itself, the card's full width, wrapping there: one line to MAX_LINES, then it
-    // scrolls (the editor's own height and scroll); the type and the ink come from here.
     let text_area = div()
         .id("composer-text")
         .w_full()
@@ -808,7 +735,6 @@ pub fn render(view: &ChatView, a: Appearance, window: &Window, cx: &mut Context<
         .ink(Ink::Text, a)
         .child(view.tools.editor.clone())
         .part("Reply Box", a, cx);
-    // Under the text, inside the card: + at the left, send or stop at the right.
     let working = view.selected_working() || view.composer.preview.working;
     let act = action(!empty, working, view.stopping(), view.tools.sending);
     let bottom = div()
@@ -841,13 +767,11 @@ pub fn render(view: &ChatView, a: Appearance, window: &Window, cx: &mut Context<
         .child(text_area)
         .child(bottom)
         .when(control.enabled, |c| {
-            // A click anywhere on the card puts the caret in the box; keys are the editor's.
             c.cursor_text()
                 .on_click(cx.listener(|this, _, window, cx| {
                     window.focus(&this.tools.focus);
                     cx.notify();
                 }))
-                // ⌘U adds files, caught on the way down because the editor takes every key.
                 .capture_key_down(cx.listener(|this, e: &KeyDownEvent, window, cx| {
                     let (k, m) = (&e.keystroke, &e.keystroke.modifiers);
                     if is_add_files(&k.key, m.platform, m.shift, m.alt, m.control) {
@@ -855,8 +779,6 @@ pub fn render(view: &ChatView, a: Appearance, window: &Window, cx: &mut Context<
                         cx.stop_propagation();
                     }
                 }))
-                // Files from Finder: an accent edge while one is over the card. The drop itself
-                // lands on the whole middle column (`ChatView::render`), the card included.
                 .drag_over::<ExternalPaths>(move |style, _, _, _| style.border_color(accent_edge))
         })
         .part_at("Composer", Corner::BottomLeading, a, cx);
@@ -873,7 +795,6 @@ pub fn render(view: &ChatView, a: Appearance, window: &Window, cx: &mut Context<
                 .min_w(px(0.0))
                 .children(status(view, control, a, cx)),
         )
-        // The session's context, then its account and limits: click the account to switch or add one.
         .children(context_meter(view, a, cx))
         .children(
             super::accounts::account_control(view, a, cx)
@@ -889,7 +810,6 @@ pub fn render(view: &ChatView, a: Appearance, window: &Window, cx: &mut Context<
         .pb(px(SIDE_PADDING))
         .children(super::prompts::card(view, a, window, cx))
         .children(permission(view, a, cx))
-        // What the session is doing, right over the box rather than at the end of the messages.
         .children(view.activity_line().map(|activity| {
             view.activity_drawn.set(Some(super::now_ms()));
             let stalled = view.stalled_prompt().is_some();

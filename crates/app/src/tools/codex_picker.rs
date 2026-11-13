@@ -1,45 +1,32 @@
-//! The Codex model picker, pure (`CodexModelPicker`): Codex's own models (`engine::tools::codex::
-//! models`, from its cache under the Codex home), each with its reasoning efforts, and Codex
-//! Default to go back to Codex's own setting. A pick applies to the session's next turns: it rides
-//! on `codex.send` as `model` and `effort`; nothing is sent when it changes.
-
 use notchling_engine::tools::codex::models::Model;
 use notchling_engine::transcript::model::SessionFacts;
 
 use super::requests::Pick;
 
-/// What the pop-up says when Codex's cache lists nothing.
 pub const NO_MODELS: &str = "Codex hasn't listed its models yet";
-/// Under the list.
 pub const NOTE: &str = "Applies from the next turn.";
 pub const DEFAULT_TITLE: &str = "Codex Default";
 
-/// One effort under a model.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EffortRow {
     pub effort: String,
-    /// "High", or "Medium (Default)".
     pub title: String,
     pub selected: bool,
 }
 
-/// One model in the pop-up.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ModelRow {
     pub slug: String,
     pub name: String,
     pub summary: String,
     pub efforts: Vec<EffortRow>,
-    /// The next turn runs on it: picked, else what the last turn ran with.
     pub selected: bool,
 }
 
-/// The picker's state for one session.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct CodexPicker {
     pub models: Vec<Model>,
     pub pick: Pick,
-    /// What the last turn ran with, from the transcript's facts.
     pub running_model: Option<String>,
     pub running_effort: Option<String>,
 }
@@ -62,7 +49,6 @@ impl CodexPicker {
         }
     }
 
-    /// The model the next turn uses: the pick, else the last turn's.
     fn effective_model(&self) -> Option<&str> {
         self.pick.model.as_deref().or(self.running_model.as_deref())
     }
@@ -71,7 +57,6 @@ impl CodexPicker {
         self.models.iter().find(|m| m.slug == slug)
     }
 
-    /// The composer's label: "Codex · GPT-6.1 Sol · high", or "Codex · Default Model".
     pub fn label(&self) -> String {
         let name = match self.effective_model() {
             Some(slug) => self
@@ -91,12 +76,10 @@ impl CodexPicker {
         parts.join(" · ")
     }
 
-    /// Nothing picked: Codex's own defaults.
     pub fn is_default(&self) -> bool {
         self.pick == Pick::default()
     }
 
-    /// The pop-up's rows, in Codex's order.
     pub fn rows(&self) -> Vec<ModelRow> {
         let current = self.effective_model();
         self.models
@@ -127,8 +110,6 @@ impl CodexPicker {
             .collect()
     }
 
-    /// Picks a model. A new model keeps the effort picked only if it offers it, else it starts
-    /// at its own default.
     pub fn choose_model(&mut self, slug: &str) {
         let keep = self.pick.effort.take().filter(|e| {
             self.model_named(slug)
@@ -197,7 +178,6 @@ mod tests {
         assert!(rows[0].selected && !rows[1].selected);
         assert_eq!(rows[0].efforts[1].title, "Medium (Default)");
         assert!(rows[0].efforts[2].selected);
-        // An unknown slug shows as itself.
         let other = CodexPicker::new(
             models(),
             Pick {

@@ -1,6 +1,3 @@
-//! Add flows through the provider ops over the fakes of `providers_ops_tests`: the sign-in page,
-//! the end, and what the `accounts` switch going off or the daemon stopping does to a flow.
-
 use crate::providers_ops::*;
 use crate::providers_ops_tests::{codex_login, no_secrets, Rig};
 use notchling_engine::accounts::procs::{FakeApps, FakeProcs, ProcCall};
@@ -66,7 +63,6 @@ fn an_add_flow_stops_touching_logins_the_moment_accounts_turn_off() {
             _ => None,
         })
         .unwrap();
-    // The scratch home is gone with `codex login`: a login that would have landed there can't.
     assert!(!scratch.exists());
     rig.procs.login_state().lock().unwrap().exit = Some(0);
     std::thread::sleep(Duration::from_millis(100));
@@ -76,7 +72,6 @@ fn an_add_flow_stops_touching_logins_the_moment_accounts_turn_off() {
         "no Keychain call after the switch went off"
     );
     assert!(!rig.events().iter().any(|e| e["state"] == "done"));
-    // And a cancel is refused like any op.
     assert_eq!(
         rig.call(ops::PROVIDERS_ADD_CANCEL, json!({"provider": "codex"}))
             .unwrap_err()
@@ -89,7 +84,6 @@ fn an_add_flow_stops_touching_logins_the_moment_accounts_turn_off() {
 fn a_waiting_add_flow_ends_when_accounts_turn_off_not_at_its_next_poll() {
     let procs = FakeProcs::new().binary("codex", &PathBuf::from("/usr/local/bin/codex"));
     let rig = Rig::new("addoffnow", true, procs, FakeApps::new());
-    // A poll so far away that only the switch's listener can end the wait in time.
     rig.ops
         .set_add_timing(Duration::from_secs(600), Duration::from_secs(900));
     rig.call(ops::PROVIDERS_ADD_BEGIN, json!({"provider": "codex"}))
@@ -100,8 +94,6 @@ fn a_waiting_add_flow_ends_when_accounts_turn_off_not_at_its_next_poll() {
     assert!(started.elapsed() < Duration::from_secs(5));
     assert_eq!(ended["error"], ACCOUNTS_OFF);
     no_secrets(&ended);
-    // `codex login` is stopped and its scratch home removed, but nothing is written: a cancel
-    // could put a login back, an abandon never does.
     assert!(rig.procs.login_state().lock().unwrap().killed);
     let scratch: Vec<_> = std::fs::read_dir(rig.root.join("state/codex-login"))
         .map(|d| d.flatten().collect())
@@ -129,7 +121,6 @@ fn stopping_the_daemon_cancels_a_waiting_add_only_while_accounts_are_on() {
         .unwrap();
     off.flag.set(false);
     off.ops.close();
-    // Off, the flow is abandoned (codex login stopped) and nothing is written.
     assert!(!off
         .keychain
         .calls()

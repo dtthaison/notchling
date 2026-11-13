@@ -1,7 +1,3 @@
-//! The first-run and About views over GPUI (part U11, macOS). Every call to the daemon, to
-//! `defaults` and to the network runs on the background
-//! executor. A render has fixed models and nothing behind it.
-
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -21,7 +17,6 @@ use super::hooks::Hooks;
 use super::renders::{self, Shown};
 use super::updates::{self, FeedFetcher, Outcome};
 
-/// A section's title over its content.
 pub fn section(title: &str, a: Appearance) -> Div {
     div()
         .flex()
@@ -30,7 +25,6 @@ pub fn section(title: &str, a: Appearance) -> Div {
         .child(label(title, TypeRole::Section, Ink::TextFaint, a))
 }
 
-/// A heading and a muted line under it.
 pub fn titled_line(title: &str, detail: &str, a: Appearance) -> Div {
     div()
         .flex()
@@ -40,7 +34,6 @@ pub fn titled_line(title: &str, detail: &str, a: Appearance) -> Div {
         .child(label(detail, TypeRole::Meta, Ink::TextMuted, a))
 }
 
-/// A list of lines in the mono face, for the changes an install would make.
 pub fn mono_lines(lines: &[String], a: Appearance) -> Div {
     div()
         .p(px(10.0))
@@ -56,11 +49,9 @@ pub fn mono_lines(lines: &[String], a: Appearance) -> Div {
         )
 }
 
-/// What the live first-run view calls.
 pub struct FirstRunEnv {
     pub hooks: Arc<Hooks>,
     pub defaults: Arc<dyn DefaultsSource>,
-    /// The app's own `settings.json`.
     pub settings: PathBuf,
 }
 
@@ -352,10 +343,8 @@ impl Render for FirstRunView {
     }
 }
 
-/// What the live About view calls.
 pub struct AboutEnv {
     pub fetcher: Arc<dyn FeedFetcher>,
-    /// The kill switch's value, read once from the environment.
     pub switch: Option<String>,
 }
 
@@ -513,13 +502,11 @@ impl Render for AboutView {
     }
 }
 
-/// The live About view's model: this build, no outcome yet unless the kill switch is off.
 pub fn live_about(env: AboutEnv) -> AboutView {
     let outcome = (!updates::releases_on(env.switch.as_deref())).then_some(Outcome::Off);
     AboutView::new(current(), Some(env), outcome)
 }
 
-/// `--render first-run|first-run-swift-hook|about`, over made-up data; nothing is called.
 pub fn build_render(name: &str, cx: &mut gpui::App) -> Option<AnyView> {
     Some(match renders::shown(name)? {
         which @ (Shown::FirstRun | Shown::FirstRunSwiftHook) => cx

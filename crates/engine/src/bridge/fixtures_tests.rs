@@ -1,7 +1,3 @@
-//! Port of `ProtocolFixturesTests`: the real router and hub, on the canned backend, against every
-//! file in `protocol/fixtures/`. What the Mac sends must equal its fixture (key order aside); what
-//! only the phone sends must be accepted. The Swift test writes the fixtures; this one only reads.
-
 use super::fixtures_data::*;
 use super::test_support::{inbox_item, is_ok, RecordingIo, Rig, NOW_MS};
 use super::wire::{self, BridgeFailure};
@@ -73,7 +69,6 @@ impl Run {
         object.to_string()
     }
 
-    /// Compares what the Mac sent with its fixture, after `scrub` replaced the random values.
     fn capture(&mut self, name: &str, text: &str, scrub: impl FnOnce(&mut Value)) {
         self.touched.insert(name.to_string());
         let mut sent: Value =
@@ -92,7 +87,6 @@ impl Run {
         phone.io.texts()[before..].to_vec()
     }
 
-    /// Sends a request fixture, expects `ok`, and compares the reply with `response`.
     fn round_trip(
         &mut self,
         phone: &Phone,
@@ -211,7 +205,6 @@ fn queries(run: &mut Run) {
         none(),
         Some("SessionsListResponse"),
     );
-    // With a catalog behind the bridge, the list carries the current models.
     phone.rig.backend.with(|s| s.models = models());
     run.round_trip(
         &phone,
@@ -261,7 +254,6 @@ fn queries(run: &mut Run) {
         Some("VizGetResponse.entity"),
     );
 
-    // Two text frames for one request: the binary announcement, then `{sent: true}`.
     let snapshot = run.round_trip(&phone, "WebSnapshotRequest", none(), None);
     assert_eq!(snapshot.len(), 2);
     run.capture("WebSnapshotResponse", &snapshot[0], |_| {});
@@ -355,7 +347,6 @@ fn actions(run: &mut Run) {
         .rig
         .backend
         .with(|s| s.new_sessions.iter().map(|n| n.1.clone()).collect());
-    // `modelId` wins over the `model` the same request carries.
     assert_eq!(
         started,
         [
@@ -427,7 +418,6 @@ fn uploads(run: &mut Run) {
 
 fn subscriptions(run: &mut Run) {
     let phone = connect();
-    // `lastMessageId` is the second message, so the next tick pushes the ones after it.
     let subscribed = run.round_trip(
         &phone,
         "SubscribeRequest",
@@ -447,7 +437,6 @@ fn subscriptions(run: &mut Run) {
     assert!(chat_text.contains("\"event\":\"chat\""), "{chat_text}");
     run.capture("ChatEvent", &chat_text, |_| {});
 
-    // The permission is answered elsewhere: a `sessions` update and a resolved `prompt`.
     phone.rig.backend.with(|s| {
         s.sessions = sessions();
         s.sessions[0].pending = None;
@@ -460,7 +449,6 @@ fn subscriptions(run: &mut Run) {
         .expect("resolved");
     run.capture("PromptResolvedEvent", &resolved, |_| {});
 
-    // A new permission appears on a session.
     let mut fresh = permission();
     fresh.id = "req-0003".into();
     fresh.tool_name = "Write".into();
@@ -556,14 +544,12 @@ fn errors(run: &mut Run) {
     let view_only = run.request("SessionMessageRequest", json!({ "sessionId": SESSION_B }));
     let view_only = last(run.send(&phone, &view_only));
     run.capture("ErrorResponse.view_only", &view_only, |_| {});
-    // busy: the second interrupt inside the gate's three seconds.
     run.round_trip(&phone, "SessionSendNowRequest", json!({}), None);
     let busy = run.request("SessionSendNowRequest", json!({}));
     let busy = last(run.send(&phone, &busy));
     run.capture("ErrorResponse.busy", &busy, |_| {});
     let no_id = last(run.send(&phone, "not json"));
     run.capture("ErrorResponse.no-id", &no_id, |_| {});
-    // The two codes only the live backend raises, through the same encoder.
     let nine = json!(9);
     let unreachable = wire::error(
         Some(&nine),
@@ -577,7 +563,6 @@ fn errors(run: &mut Run) {
     run.capture("ErrorResponse.internal", &internal, |_| {});
 }
 
-/// The three binary frames after a JSON answer, as `protocol/README.md` lays them out.
 fn binary_frames() {
     let jpeg = [0xFF, 0xD8, 0xFF, 0xD9];
     let tail = [1, 2, 3, 4, 0xFF, 0xD8, 0xFF, 0xD9];

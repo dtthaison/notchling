@@ -1,13 +1,7 @@
-//! Replace key's scripts run in a real shell on a throwaway HOME (Swift `MachinesRepoStepsTests`).
-
 use super::fakes_b::*;
 use super::repo_common::*;
 use super::tests_repo_replace::*;
 
-// MARK: the scripts, run in a real shell on a throwaway HOME
-
-/// The script an ssh call carries, without the PATH prelude (which would replace the stubs' PATH)
-/// and the quotes around it.
 fn script_of(rig: &Rig, needle: &str) -> String {
     let argv = rig
         .argvs()
@@ -47,16 +41,12 @@ fn sh(script: &str, bin: &std::path::Path, home: &std::path::Path) -> (i32, Stri
     (out.status.code().unwrap_or(-1), text)
 }
 
-/// The scripts run in a real shell against a throwaway HOME: they parse, the new pair appears
-/// beside the old one, and the swap leaves the new key under the old file names and no `.new` file
-/// behind.
 #[test]
 fn the_scripts_run_in_a_real_shell_on_a_throwaway_home() {
     let dir = TempDir::new("replace");
     let home = dir.path().join("home");
     let bin = dir.path().join("bin");
     std::fs::create_dir_all(home.join(".ssh")).unwrap();
-    // no network even if a script reached them: git and ssh are stubs that fail, first in the PATH
     stub_bin(&bin, &[("git", "exit 255"), ("ssh", "exit 255")]);
     let key = home.join(".ssh/agents-dtthaison-lingeva-mono");
     let key_pub = format!("{}.pub", key.display());
@@ -100,15 +90,11 @@ fn the_scripts_run_in_a_real_shell_on_a_throwaway_home() {
     assert!(!std::path::Path::new(&format!("{}.new", key.display())).exists());
     assert!(!std::path::Path::new(&format!("{}.new.pub", key.display())).exists());
 
-    // a second swap has nothing to move: it fails without touching the key now in place
     let (again, _) = sh(&script_of(&rig, "mv -f"), &bin, &home);
     assert_eq!(again, 43);
     assert_eq!(std::fs::read_to_string(&key_pub).unwrap(), new_pub_text);
 }
 
-/// The push check in a real shell with a stub git: a throwaway repo is made, the dry run goes to
-/// the repo's GitHub URL through the new key alone, and the exit code comes back on the marker
-/// line.
 #[test]
 fn the_push_check_runs_a_throwaway_repo_through_the_new_key_only() {
     let dir = TempDir::new("pushcheck");
@@ -120,7 +106,6 @@ fn the_push_check_runs_a_throwaway_repo_through_the_new_key_only() {
         "echo \"GIT_SSH_COMMAND=$GIT_SSH_COMMAND :: $*\" >> '{}'\ncase \"$*\" in *push*) echo 'ERROR: The key you are authenticating with has been marked as read only.' >&2; exit 128;; esac\nexit 0",
         log.display()
     );
-    // no network even if a stub is bypassed: ssh is a stub too
     stub_bin(&bin, &[("git", &git), ("ssh", "exit 255")]);
     let rig = replace_rig(Opts::default());
     go(&rig);

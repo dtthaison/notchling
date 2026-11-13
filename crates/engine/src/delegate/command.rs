@@ -1,11 +1,3 @@
-//! `notchling delegate` and `notchling delegate-models` as functions of their streams (Swift
-//! `DelegateCLI.run` and `models`): parse, refuse a third level of nesting, run the tool, copy
-//! its media to `--out`, print, and answer the exit code (0 done, 1 failed, 124 timed out, 2 for a
-//! command line that can't be run).
-//!
-//! The command needs no daemon and is not behind the `acting` switch: it runs a tool only
-//! because the agent that called it asked, and it never touches a session it didn't start.
-
 use super::agy_trust::{self, Trusted};
 use super::deps::Deps;
 use super::options::{self, Tool};
@@ -19,33 +11,20 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
-/// Where the command runs.
 pub struct Context<'a> {
-    /// Relative paths are read against this.
     pub cwd: &'a Path,
-    /// What `~` stands for.
     pub home: Option<&'a Path>,
-    /// The value of `NOTCHLING_DELEGATE_DEPTH` in this process, if set.
     pub depth: Option<&'a str>,
-    /// Where to leave a record of the job and for which session, when an agent session called
-    /// ([`super::record`]); `None` records nothing.
     pub record: Option<RecordTo<'a>>,
 }
 
-/// The record a job leaves for Chat.
 pub struct RecordTo<'a> {
-    /// `<data>/delegations`.
     pub dir: &'a Path,
-    /// Claude Code's id of the session that called (`CLAUDE_CODE_SESSION_ID`).
     pub parent_session: &'a str,
-    /// The caller's folder.
     pub parent_cwd: &'a str,
-    /// This process.
     pub pid: u32,
 }
 
-/// Runs a job; `args` are what follows `delegate`. Prints the outcome on `out` and returns the
-/// exit code. Anything wrong with the command line goes to `err` with exit 2.
 pub fn run(
     args: &[String],
     ctx: &Context<'_>,
@@ -106,7 +85,6 @@ pub fn run(
     finish(&outcome, parsed.json, out)
 }
 
-/// A folder Claude Code trusts is one agy needn't ask about either: add it to agy's list, saying so.
 fn trust_folder(folder: &str, deps: &Deps, err: &mut dyn Write) {
     let Some(files) = &deps.agy_trust else {
         return;
@@ -134,7 +112,6 @@ fn usage_error(err: &mut dyn Write, message: &str) -> i32 {
     2
 }
 
-/// `notchling delegate-models [codex|agy]`: each tool's models and efforts. Exit 0.
 pub fn models_listing(args: &[String], deps: &Deps, out: &mut dyn Write) -> i32 {
     let only = args.first().and_then(|a| Tool::from_name(a));
     let mut lines: Vec<String> = Vec::new();
@@ -180,11 +157,6 @@ pub fn models_listing(args: &[String], deps: &Deps, out: &mut dyn Write) -> i32 
     0
 }
 
-/// `notchling delegate-models [codex|agy] --json`: the same listing as one JSON value, camelCase
-/// like `delegate --json`: `{"codex": {"models": [{"slug", "name", "summary", "efforts",
-/// "defaultEffort"?, "contextWindow"?}]}, "agy": {"available": bool, "models": [{"model",
-/// "efforts"}]}}`; only the tool asked for when one is named. A tool with nothing to list has
-/// `"models": []` (agy also `"available": false` when `agy models` can't run). Exit 0.
 pub fn models_listing_json(args: &[String], deps: &Deps, out: &mut dyn Write) -> i32 {
     let only = args.first().and_then(|a| Tool::from_name(a));
     let mut root = serde_json::Map::new();

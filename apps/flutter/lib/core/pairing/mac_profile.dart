@@ -4,7 +4,6 @@ import '../net/tunnel.dart';
 import '../net/ws_transport.dart';
 import '../protocol/json.dart';
 
-/// A paired Mac: how to reach it, the certificate fingerprint it is pinned to, and our device token.
 class MacProfile {
   const MacProfile({
     required this.id,
@@ -38,23 +37,17 @@ class MacProfile {
   final String token;
   final String? lastGoodHost;
 
-  /// The route through the Cloudflare tunnel, when the QR carried one.
   final TunnelInfo? tunnel;
   final bool lastGoodWasTunnel;
 
-  /// The host that worked last time goes first.
   List<String> get orderedHosts {
     final String? good = lastGoodHost;
     if (good == null || !hosts.contains(good)) return hosts;
     return <String>[good, ...hosts.where((String h) => h != good)];
   }
 
-  /// The routes in the order to try them: the one that worked last, then the LAN hosts, then the tunnel.
-  /// With [preferLan] (the network just changed) the LAN goes first even if the tunnel worked last, so
-  /// arriving home moves the link off the internet.
   List<Endpoint> endpoints({bool preferLan = false}) {
     final TunnelInfo? via = tunnel;
-    // With a tunnel to fall back on, an unreachable LAN address should not hold things up for long.
     final Duration lanTimeout = via == null ? const Duration(seconds: 6) : const Duration(seconds: 3);
     Endpoint lan(String host) => Endpoint(host: host, port: port, fingerprint: fingerprint, timeout: lanTimeout);
     final List<Endpoint> routes = <Endpoint>[

@@ -1,6 +1,3 @@
-//! Renewed secrets behind plan, confirm, run (Swift `MachinesSetupEngineTests`, update offers,
-//! Send again, the pending-updates file).
-
 use super::engine_plan::{AdminAnswer, PlanKind};
 use super::registry::SdWorkerSettings;
 use super::step::{run, FixOutcome, StepId};

@@ -1,5 +1,3 @@
-//! The Flow tab's git snapshot, through a fake launcher.
-
 use super::engine::GitSnapshot;
 use super::tests_urls::folder;
 
@@ -32,7 +30,6 @@ fn the_git_snapshot_is_the_branch_and_the_diff_stat_from_the_launcher() {
         Some(&Some("0".to_string()))
     );
 
-    // git failing or printing nothing leaves the branch alone.
     launcher.push_output(Ok(LaunchOutput::failed(128, "fatal")));
     assert_eq!(super::git::read(&cwd, &launcher).diff_stat, None);
     launcher.push_output(Ok(LaunchOutput::ok("  \n")));
@@ -44,7 +41,6 @@ fn the_git_snapshot_is_the_branch_and_the_diff_stat_from_the_launcher() {
         (Some("feat/x"), None)
     );
 
-    // No folder, no process.
     let calls = launcher.calls().len();
     assert_eq!(super::git::read("", &launcher), GitSnapshot::default());
     assert_eq!(

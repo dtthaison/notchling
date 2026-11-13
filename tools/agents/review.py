@@ -1,29 +1,3 @@
-"""The review agent: reads a pull request through the API, asks a model for a verdict, posts it.
-
-Recommend-only. It posts the `review-agent` commit status and a comment per model call on the PR's head and nothing
-else it can be argued into: it never approves, requests reviews on or merges a PR. Run by
-.github/workflows/review-post.yml with the default branch's code (never the PR's), which supplies
-everything through the environment:
-
-  GH_TOKEN, GH_REPO, PR_NUMBER, RUN_HEAD (the head the run saw), DEFAULT_BRANCH, ANTHROPIC_API_KEY,
-  AGENT_APP_LOGIN (optional; ignored unless it ends in `[bot]`), REVIEW_DAILY_CAP (optional, default 20),
-  RUN_URL (optional); GITHUB_API_URL and ANTHROPIC_BASE_URL are overridable so tests can point both at a
-  fake server.
-
-The model is asked at most once for a pull request's head commit. A rerun of the same head (a new label,
-ready for review again, a re-run of the workflow) replays the earlier verdict's status from the bot's own
-comment and stops; only a maintainer's `notchling:review` label added after that verdict asks for a fresh
-look. A pull request gets at most 6 model calls and the repository at most REVIEW_DAILY_CAP a UTC day,
-both counted from the bot's own marker comments.
-
-`review.py find-pr` is the workflow's lookup step: it names the pull request a "Review run" belongs to.
-
-Issue and PR text is data: it is fenced in the prompt, and what the model answers is validated against a
-fixed shape, scrubbed of markup and capped before it reaches a comment. Fail closed: no key, an API
-error or an answer that doesn't validate gives the status `failure` ("review missing"), never a default
-verdict. Exit codes: 0 handled (including a posted failure and a skip), 1 GitHub unreachable or a post
-refused, 2 bad environment."""
-
 from __future__ import annotations
 
 import ast
@@ -38,20 +12,19 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Set
 
-# The reviewer is picked by the PR number, never by what the PR says about its author.
 MODELS = ["claude-opus-5-5", "claude-sonnet-5-5", "claude-fable-5-2"]
 STATUS_CONTEXT = "review-agent"
 REVIEW_LABEL = "notchling:review"
 NEEDS_YOU_LABEL = "notchling:needs-you"
-COMMENT_BOT = "github-actions[bot]"  # who the workflow's token comments as; only its comments are trusted
+COMMENT_BOT = "github-actions[bot]"
 MARKER = "<!-- review-agent:v1 verdict=%s sha=%s -->"
 MARKER_RE = re.compile(r"\A<!-- review-agent:v1 verdict=([a-z_-]+) sha=([0-9a-f]{40}) -->")
-FAILED = {"changes", "not_right"}  # verdicts that count as a failed review
-MODEL_VERDICTS = ("merge", "changes", "not_right", "missing")  # a marker with one of these is a model call made
+FAILED = {"changes", "not_right"}
+MODEL_VERDICTS = ("merge", "changes", "not_right", "missing")
 STRIKES = 2
-MAX_REVIEWS_PER_PR = 6  # model calls (markers) on one pull request, however many heads it has
-DEFAULT_DAILY_CAP = 20  # model calls in the repository per UTC day when REVIEW_DAILY_CAP is unset or not a number
-MAX_LISTED = 2000  # GitHub.pages() reads at most this many rows; a longer day than that is not counted, it stops
+MAX_REVIEWS_PER_PR = 6
+DEFAULT_DAILY_CAP = 20
+MAX_LISTED = 2000
 MAX_DIFF = 200_000
 CONTEXT_FILES = ["docs/goals.md", "docs/rules.md", "ARCHITECTURE.md"]
 CONTEXT_CAP = 60_000
@@ -61,11 +34,10 @@ VERDICTS = ("merge", "changes", "not_right")
 POINTER_RE = re.compile(r"[A-Za-z0-9_./+@-]{1,200}:[1-9][0-9]{0,6}")
 APP_LOGIN_RE = re.compile(r"(?i)[a-z0-9][a-z0-9-]*\[bot\]")
 ZWSP = "\u200b"
-WWW_RE = re.compile(r"(?i)\bwww\.")  # GitHub links `www.example.com` with no scheme
-# `#N`, `GH-N` and `owner/repo#N` become links and leave a back-reference in the issue they name.
+WWW_RE = re.compile(r"(?i)\bwww\.")
 REF_RE = re.compile(r"(?i)(?P<repo>[a-z0-9_.-]+/[a-z0-9_.-]+)?(?P<kind>#|(?<![a-z0-9_])GH-)(?P<n>[0-9]+)")
-LEADING_NUMBER_RE = re.compile(r"\A([0-9]{1,9})([.)])")  # "1." starts an ordered list
-LEADING_MARK_RE = re.compile(r"\A[#*+=_~-]")  # heading, bullet, rule or setext underline
+LEADING_NUMBER_RE = re.compile(r"\A([0-9]{1,9})([.)])")
+LEADING_MARK_RE = re.compile(r"\A[#*+=_~-]")
 
 SYSTEM = """You review one pull request for the Notchling project. You are advisory: a person decides.
 
@@ -84,14 +56,11 @@ def utcnow() -> datetime.datetime:
 
 
 class Invalid(Exception):
-    """The model's answer, or the environment, is not in the required shape."""
+    pass
 
 
 class Unavailable(Exception):
-    """Something needed for the review could not be read; the message is safe to show."""
-
-
-# ---- prompt ----------------------------------------------------------------------------------
+    pass
 
 
 def fence_token(name: str, text: str, n: int) -> str:
@@ -99,8 +68,6 @@ def fence_token(name: str, text: str, n: int) -> str:
 
 
 def fence(name: str, text: str) -> str:
-    """The text between BEGIN/END lines carrying a token that does not occur in it, so no text can
-    close its own fence."""
     n = 0
     while True:
         token = fence_token(name, text, n)
@@ -125,23 +92,15 @@ AGENT_MODEL_RE = re.compile(r"(?mi)^Agent-Model:[ \t]*([A-Za-z0-9._-]{1,64})")
 
 
 def author_model(body: Optional[str]) -> Optional[str]:
-    """The model the push wrapper says wrote the change: its `Agent-Model:` line, the last one, since the
-    wrapper appends its own after whatever the agent wrote."""
     found = AGENT_MODEL_RE.findall(body or "")
     return found[-1].lower() if found else None
 
 
 def pick_model(pr_number: int, author: Optional[str] = None) -> str:
-    """Rotation by pull request number (a fixed, public rule: which model reviews gives the author
-    nothing, since the comment names it and no single verdict merges anything). Never the model that
-    wrote the change: if the rotation lands on it, the next one in the list reviews."""
     i = pr_number % len(MODELS)
     if author and (author == MODELS[i] or author.startswith(MODELS[i] + "-")):
         i = (i + 1) % len(MODELS)
     return MODELS[i]
-
-
-# ---- verdict ---------------------------------------------------------------------------------
 
 
 def _no_duplicates(pairs):
@@ -183,10 +142,6 @@ def parse_verdict(text: str) -> Dict[str, Any]:
 
 
 def _plain(text: str) -> str:
-    """No control, separator or invisible format characters. Controls and the Zl/Zp/Zs separators
-    become a space; format characters (Cf: bidi marks and overrides, zero-width joiners, soft hyphens,
-    the BOM), surrogates and private-use characters go, so none can hide a mention, a link or the order
-    the text is read in."""
     out = []
     for ch in text:
         cat = unicodedata.category(ch)
@@ -197,9 +152,6 @@ def _plain(text: str) -> str:
 
 
 def clean(text: str, limit: int = 500, own: Optional[int] = None) -> str:
-    """Plain, single-line text that can't mention people, make links, cross-reference other issues,
-    spell markup with entities or open a heading or list in a comment. `own` is the pull request's
-    number, the one `#N` / `GH-N` reference left alone."""
     s = _plain(str(text)).replace("&", "&amp;").replace("@", "@" + ZWSP)
     s = s.replace("<", "&lt;").replace(">", "&gt;")
     s = s.replace("[", "(").replace("]", ")").replace("`", "'").replace("://", ":" + ZWSP + "//")
@@ -214,11 +166,8 @@ def clean(text: str, limit: int = 500, own: Optional[int] = None) -> str:
     s = re.sub(r" {2,}", " ", s).strip()
     s = LEADING_NUMBER_RE.sub(lambda m: m.group(1) + "\\" + m.group(2), s, count=1)
     if LEADING_MARK_RE.match(s):
-        s = "\\" + s  # a backslash keeps the first character from starting a heading, rule or list
+        s = "\\" + s
     return s[:limit]
-
-
-# ---- GitHub and the model --------------------------------------------------------------------
 
 
 def _fetch(req: urllib.request.Request, timeout: int) -> bytes:
@@ -288,7 +237,6 @@ def ask_model(base: str, key: str, model: str, prompt: str) -> str:
 
 
 def load_maintainers(root: Path) -> Set[str]:
-    """MAINTAINERS from the guard's gate.py, read as source so the list lives in one place."""
     try:
         tree = ast.parse((Path(root) / "tools/guard/guard/gate.py").read_text())
     except (OSError, SyntaxError, ValueError):
@@ -306,9 +254,6 @@ def load_maintainers(root: Path) -> Set[str]:
     raise Unavailable("cannot read the maintainers list")
 
 
-# ---- the review ------------------------------------------------------------------------------
-
-
 class Config:
     def __init__(self, env: Mapping[str, str]):
         def get(k, default=""):
@@ -322,8 +267,6 @@ class Config:
         cap = get("REVIEW_DAILY_CAP")
         self.daily_cap = int(cap) if re.fullmatch(r"[0-9]{1,6}", cap) else DEFAULT_DAILY_CAP
         login = get("AGENT_APP_LOGIN")
-        # An App's pull requests are authored by `<slug>[bot]`; a login without that suffix is a person's
-        # (or a typo), so it is ignored and no pull request takes the App path.
         self.app_login = login if APP_LOGIN_RE.fullmatch(login) else ""
         url = get("RUN_URL")
         self.run_url = url if re.fullmatch(r"https?://\S+", url) else ""
@@ -343,19 +286,10 @@ RUN_WORKFLOW_RE = re.compile(r"\.github/workflows/review-run\.yml(?:@\S+)?")
 
 
 def run_path_ok(path: Optional[str]) -> bool:
-    """The triggering run is `review-run.yml`'s: a run of any other file in a PR that merely reuses the
-    name "Review run" is not. (GitHub may append `@<ref>` to the path.) Which version of that file ran
-    can't be told, and doesn't matter: a pull_request run uses the file from the PR's own merge commit,
-    and nothing from the run is used but the fields GitHub sets, below."""
     return isinstance(path, str) and RUN_WORKFLOW_RE.fullmatch(path) is not None
 
 
 def find_pull_request(prs: Any, head_repo: str, head_branch: str, head_sha: str) -> Optional[int]:
-    """The number of the one open pull request whose head is exactly this repository, branch and commit,
-    taken from the run's own head_repository, head_branch and head_sha (which GitHub sets, not the PR's
-    author). A commit can belong to several pull requests, e.g. a fork that pushed the App's commit and
-    opened its own; matching on the commit alone would let that fork start reviews of the App's. Anything
-    but exactly one match is None."""
     if not head_repo or not head_branch or not re.fullmatch(r"[0-9a-f]{40}", head_sha or ""):
         return None
     hits = []
@@ -371,8 +305,6 @@ def find_pull_request(prs: Any, head_repo: str, head_branch: str, head_sha: str)
 
 
 def find_pr_main(env: Mapping[str, str], listed: str) -> int:
-    """`review.py find-pr`: reads the JSON list `commits/<sha>/pulls` gave on stdin and prints the number
-    of the pull request this run is for, or nothing."""
     if not run_path_ok((env.get("RUN_PATH") or "").strip()):
         print("review: the run is not review-run.yml's: skipped", file=sys.stderr)
         return 0
@@ -405,7 +337,6 @@ def is_app_pr(cfg: Config, pr: Mapping[str, Any]) -> bool:
 
 
 def eligible(cfg: Config, pr: Mapping[str, Any], gh: GitHub, root: Path) -> bool:
-    """The App's own PR, or one a maintainer labeled `notchling:review` (the latest such event decides)."""
     if is_app_pr(cfg, pr):
         return True
     if REVIEW_LABEL not in {l.get("name") for l in pr.get("labels") or [] if isinstance(l, dict)}:
@@ -429,7 +360,6 @@ def bot_markers(comments: List[Any]) -> List[Dict[str, Any]]:
 
 
 def _ts(value: Any) -> Optional[datetime.datetime]:
-    """A GitHub timestamp (`2026-11-08T09:00:00Z`) or None; a time that can't be read is never trusted."""
     try:
         return datetime.datetime.strptime(str(value), "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=datetime.timezone.utc)
     except ValueError:
@@ -441,7 +371,6 @@ def label_names(pr: Mapping[str, Any]) -> Set[str]:
 
 
 def asked_again(cfg: Config, gh: GitHub, pr: Mapping[str, Any], prior: Mapping[str, Any], root: Path) -> bool:
-    """A maintainer's `labeled notchling:review` event newer than the verdict, with the label still on."""
     if REVIEW_LABEL not in label_names(pr):
         return False
     since = _ts(prior.get("created"))
@@ -458,9 +387,6 @@ def asked_again(cfg: Config, gh: GitHub, pr: Mapping[str, Any], prior: Mapping[s
 
 
 def reviews_today(gh: GitHub) -> Optional[int]:
-    """Model calls made in the repository since 00:00 UTC, counted from the bot's own markers in the
-    repository's comments of today (one list call per 100 comments, not a search). None when the day has
-    more comments than can be read: the caller treats that as the cap reached."""
     midnight = utcnow().astimezone(datetime.timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
     comments = gh.pages("issues/comments?since=" + midnight.strftime("%Y-%m-%dT%H:%M:%SZ"))
     if len(comments) >= MAX_LISTED:
@@ -527,7 +453,6 @@ REPLAYS = {"merge": "merge recommended (this commit was reviewed before; a recom
 
 
 def replay(prior: Mapping[str, Any]) -> Outcome:
-    """The status of a verdict already given for this head, with no model call and nothing new to say."""
     return Outcome("success" if prior["verdict"] == "merge" else "failure", REPLAYS[prior["verdict"]])
 
 
@@ -543,13 +468,13 @@ def decide(cfg: Config, gh: GitHub, pr: Mapping[str, Any], head: str, root: Path
     done = [m for m in markers if m["verdict"] in MODEL_VERDICTS]
     latest: Dict[str, Dict[str, Any]] = {}
     for m in done:
-        latest[m["sha"]] = m  # comments come oldest first, so the newest verdict for a head wins
+        latest[m["sha"]] = m
     failed = {sha for sha, m in latest.items() if m["verdict"] in FAILED}
     asked = NEEDS_YOU_LABEL in label_names(pr)
     prior = latest.get(head)
     if prior and not asked_again(cfg, gh, pr, prior, root):
         out = replay(prior)
-        out.label = len(failed) >= STRIKES and not asked  # in case the label from the second strike never landed
+        out.label = len(failed) >= STRIKES and not asked
         return out
     if len(failed - {head}) >= STRIKES:
         return Outcome("failure", "needs-you: two reviews did not pass; waiting for the maintainer",
@@ -571,8 +496,6 @@ def decide(cfg: Config, gh: GitHub, pr: Mapping[str, Any], head: str, root: Path
     prompt = build_prompt(load_context(root), {"number": int(cfg.number), "title": str(pr.get("title") or "")[:300],
                                               "body": str(pr.get("body") or "")[:10_000]}, diff, check_lines(gh, head))
     model = pick_model(int(cfg.number), author_model(pr.get("body")) if is_app_pr(cfg, pr) else None)
-    # From here on the model has been asked for this head. Whatever happens, it leaves a marker, so the
-    # attempt counts against the caps and a rerun replays it instead of asking again.
     try:
         v = parse_verdict(ask_model(cfg.model_base, cfg.key, model, prompt))
     except Invalid:
@@ -582,7 +505,7 @@ def decide(cfg: Config, gh: GitHub, pr: Mapping[str, Any], head: str, root: Path
     desc = {"merge": f"merge recommended by {model} (a recommendation, not an approval)",
             "changes": f"changes requested by {model}", "not_right": f"not right for this project, per {model}"}[v["verdict"]]
     strikes = (failed - {head}) | ({head} if v["verdict"] in FAILED else set())
-    final = v["verdict"] in FAILED and len(strikes) >= STRIKES  # hand it over now, not on the next push
+    final = v["verdict"] in FAILED and len(strikes) >= STRIKES
     return Outcome("success" if v["verdict"] == "merge" else "failure", desc,
                    render_comment(v["verdict"], head, model, v, int(cfg.number), final), label=final and not asked)
 
@@ -620,8 +543,6 @@ def main(env: Mapping[str, str], root: Path) -> int:
         print("review: " + str(e))
         out = missing(str(e)[:100])
     try:
-        # The comment is the record a rerun finds, so it goes first: if the status then fails, the rerun
-        # replays the verdict without asking the model again. It is never edited, so the count stays true.
         if out.comment:
             gh.send("POST", f"issues/{cfg.number}/comments", {"body": out.comment})
         status = {"state": out.state, "context": STATUS_CONTEXT, "description": out.description}

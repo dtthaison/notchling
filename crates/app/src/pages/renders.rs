@@ -1,11 +1,7 @@
-//! The Artifacts window for `--render pages-window` (part U10): made-up pages, one selected,
-//! never the real library.
-
 use super::model::PagesModel;
 use crate::search::wire::Page;
 use crate::views::ViewSpec;
 
-/// The fixed clock the render draws at (seconds since 1970).
 pub const NOW_SECS: f64 = 1_800_000_000.0;
 
 pub const NAME: &str = "pages-window";
@@ -41,7 +37,6 @@ fn page(id: &str, title: &str, project: &str, account: &str, age_secs: f64) -> P
     }
 }
 
-/// The pages the render lists.
 pub fn pages() -> Vec<Page> {
     vec![
         page(
@@ -82,7 +77,6 @@ pub fn pages() -> Vec<Page> {
     ]
 }
 
-/// The model the render draws: every page, the second selected.
 pub fn model() -> PagesModel {
     let mut m = PagesModel::new();
     m.set_pages(pages());

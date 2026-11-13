@@ -1,18 +1,9 @@
-//! A job that may outlast the reply to the call that asked for it.
-//!
-//! A client waits 5 s for a reply (`CALL_TIMEOUT`), and a new Codex session can take longer than
-//! that to be named, and `codex delete` longer than that to finish. [`Late::run`] starts the job
-//! on its own thread and waits up to a budget for its result; if the job is still going it says so
-//! (`None`) and hands the result, when it comes, to a `finish` function instead, which publishes
-//! it as an event. The result goes to exactly one of the two: never both, never neither.
-
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
 enum Slot<T> {
     Waiting,
     Done(T),
-    /// The caller stopped waiting: the job's result is for `finish`.
     Abandoned,
 }
 
@@ -21,9 +12,6 @@ struct Shared<T> {
     ready: Condvar,
 }
 
-/// Runs `job` on a thread. Returns its result if it came within `wait`; otherwise `None`, and
-/// `finish` takes the result when the job ends. A thread that can't start gives `job`'s result
-/// as `on_no_thread`.
 pub fn run<T, J, F>(wait: Duration, job: J, finish: F, on_no_thread: T) -> Option<T>
 where
     T: Send + 'static,
@@ -111,7 +99,6 @@ mod tests {
 
     #[test]
     fn a_result_is_never_lost_when_job_and_budget_end_together() {
-        // The job ends right around the budget: whichever way it falls, exactly one side has it.
         for n in 0..50u64 {
             let (tx, rx) = channel::<u64>();
             let got = run(

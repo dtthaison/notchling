@@ -1,10 +1,3 @@
-"""`python3 -m guard rules`: every rule in docs/rules.md has a check, and the check works.
-
-`REGISTRY` maps a rule id to a probe. A probe runs that rule's real check on the rule's bad
-example and returns True when the check reports that exact id. `check` fails with GUARD-RULES when
-a listed id has no probe, a probe has no listed id, an id is listed twice, or a probe returns
-False (or raises). Each probe builds what it needs in a temp folder and cleans up after itself."""
-
 from __future__ import annotations
 
 import contextlib
@@ -25,7 +18,7 @@ from guard.zones import Zones
 RULE = "GUARD-RULES"
 DOCS = Path("docs/rules.md")
 ID = re.compile(r"^[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*$")
-PACKAGE_ROOT = Path(__file__).resolve().parents[1]  # tools/guard, so `-m guard` imports
+PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 
 GIT_ENV = {**os.environ, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_SYSTEM": os.devnull}
 GIT = ["git", "-c", "user.name=x", "-c", "user.email=x@x", "-c", "commit.gpgsign=false", "-c", "core.ignorecase=false"]
@@ -44,7 +37,6 @@ def _git(repo: Path, *args: str, stdin: Optional[str] = None) -> str:
 
 
 def _repo(root: Path, files: Dict[str, str]) -> str:
-    """Make `root` a git repo holding `files` in one commit; returns that commit."""
     _git(root, "init", "-q")
     write(root, files)
     _git(root, "add", "-A")
@@ -59,8 +51,6 @@ def write(root: Path, files: Dict[str, str]) -> None:
         p.write_text(text, encoding="utf-8")
 
 
-# ---- lint ------------------------------------------------------------------------------------
-
 def _lint_probe(rule_id: str) -> Callable[[], bool]:
     def probe() -> bool:
         path, text = lint.rule(rule_id).bad
@@ -70,10 +60,7 @@ def _lint_probe(rule_id: str) -> Callable[[], bool]:
     return probe
 
 
-# ---- capability ------------------------------------------------------------------------------
-
 ZONE_FILE = "legacy/macos/Sources/Notchling/Search/X.swift"
-# One bad line for each capability rule (the tests hold more).
 CAP_BAD: Dict[str, Tuple[str, str]] = {
     "CAP-PROCESS": (ZONE_FILE, "let p = Process()"),
     "CAP-PTY": (ZONE_FILE, "let pid = forkpty(&master, nil, nil, nil)"),
@@ -83,7 +70,6 @@ CAP_BAD: Dict[str, Tuple[str, str]] = {
     "CAP-KEYCHAIN": (ZONE_FILE, "SecItemCopyMatching(query, &out)"),
     "CAP-FILEWRITE": (ZONE_FILE, "try data.write(to: url)"),
     "CAP-PROTECTED-TYPE": ("legacy/macos/Sources/Notchling/Chat/Views/Row.swift", "ReplySender.send(text, to: agent)"),
-    # More `*/` on one line than any real line has.
     "CAP-OBSCURE": (ZONE_FILE, "a /* b */ " * (capability.MAX_COMMENT_ENDS + 1)),
 }
 
@@ -100,13 +86,9 @@ def _cap_binary() -> bool:
     return any(t.rule == capability.BINARY_RULE for t in trips)
 
 
-# ---- weakening -------------------------------------------------------------------------------
-
 def _weak(rule_id: str, change: Change) -> Callable[[], bool]:
     return lambda: any(t.rule == rule_id for t in weakening.scan([change]))
 
-
-# ---- gate ------------------------------------------------------------------------------------
 
 def _gate_zone() -> bool:
     with _tmp() as root:
@@ -119,7 +101,6 @@ def _gate_zone() -> bool:
 
 
 def _gate_case_collision() -> bool:
-    """Adds `docs/notes.md` beside `docs/Notes.md`, through git's plumbing (a Mac checkout can't hold both)."""
     with _tmp() as root:
         base = _repo(root, {"docs/Notes.md": "one\n"})
         blob = _git(root, "hash-object", "-w", "--stdin", stdin="two\n")
@@ -131,10 +112,7 @@ def _gate_case_collision() -> bool:
     return any(r.startswith("CASE-COLLISION:") for r in reasons)
 
 
-# ---- guard checks ----------------------------------------------------------------------------
-
 def _guard_codeowners() -> bool:
-    """CODEOWNERS missing next to a zones.json: the real CLI says it is out of date."""
     with _tmp() as root:
         write(root, {"tools/guard/zones.json": json.dumps({"auto": ["docs/**"]})})
         env = dict(GIT_ENV, PYTHONPATH=str(PACKAGE_ROOT))
@@ -158,7 +136,6 @@ def _guard_rulesets() -> bool:
 
 
 def _guard_baseline() -> bool:
-    """A head commit that adds a baseline entry is a gate reason, and writing a first baseline over one that exists is refused."""
     with _tmp() as root:
         base = _repo(root, {str(lint.BASELINE): json.dumps({"entries": ["A|a.swift|x"]})})
         write(root, {str(lint.BASELINE): json.dumps({"entries": ["A|a.swift|x", "B|b.swift|y"]})})
@@ -181,7 +158,6 @@ def _guard_claude_md() -> bool:
 
 
 def _guard_feature_map() -> bool:
-    """A crate folder the map names passes; one it doesn't is reported by path."""
     with _tmp() as root:
         _repo(root, {"docs/feature-map.md": "| Notch | `crates/app/src/notch/` | t | auto | U2 |\n",
                      "crates/app/src/notch/mod.rs": "", "crates/app/src/phone/mod.rs": ""})
@@ -191,7 +167,6 @@ def _guard_feature_map() -> bool:
 
 
 def _guard_rules() -> bool:
-    """A docs file listing an id nothing checks. (Probes aren't run, or this would call itself.)"""
     with _tmp() as root:
         write(root, {"rules.md": "| ID | Rule | Why | Check |\n| --- | --- | --- | --- |\n"
                                  "| NOT-A-RULE | r | w | c |\n"})
@@ -200,7 +175,6 @@ def _guard_rules() -> bool:
 
 
 def _guard_protocol_gen() -> bool:
-    """Types generated from a copy of the schema pass `gen.py --check`; the same copy with a field added fails it, by id."""
     repo = PACKAGE_ROOT.parents[1]
     gen = repo / "tools/protocol/gen.py"
     schema = json.loads((repo / "protocol/agentconsole.v1.schema.json").read_text(encoding="utf-8"))
@@ -249,7 +223,6 @@ del _r, _id
 
 
 def listed_ids(text: str) -> List[str]:
-    """The first cell of each table row in rules.md, in order (repeats kept)."""
     ids = []
     for line in text.splitlines():
         if not line.lstrip().startswith("|"):
@@ -284,7 +257,7 @@ def check(docs: Path, registry: Optional[Registry] = None, run_probes: bool = Tr
                 continue
             try:
                 fired = probe()
-            except Exception as e:  # a broken probe is a failed probe, never a crash that hides the rest
+            except Exception as e:
                 problems.append(f"{RULE}: {rule_id} probe failed to run: {type(e).__name__}: {e}")
                 continue
             if not fired:

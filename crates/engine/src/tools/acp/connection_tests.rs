@@ -6,7 +6,6 @@ use crate::tools::acp::{Spawner, METHOD_NOT_FOUND};
 use std::sync::mpsc::{channel, Sender};
 use std::time::Duration;
 
-/// What the handler heard.
 #[derive(Debug, Clone, PartialEq)]
 enum Heard {
     Note(String, Value),
@@ -74,7 +73,6 @@ fn a_request_goes_out_with_a_counting_id_and_its_result_comes_back() {
     assert_eq!(sent[0]["jsonrpc"], "2.0");
     assert_eq!(sent[0]["method"], "initialize");
     assert_eq!(sent[1]["id"], 2);
-    // Answers may come in any order.
     process.push(&json!({"jsonrpc":"2.0","id":2,"result":{"sessionId":"s"}}));
     process.push(&json!({"jsonrpc":"2.0","id":1,"result":{"ok":true}}));
     assert_eq!(done(&second).unwrap()["sessionId"], "s");
@@ -160,7 +158,6 @@ fn framing_faults_are_dropped_and_the_connection_carries_on() {
     process.push_line("");
     process.push_line("{\"jsonrpc\":\"2.0\"}");
     process.push_oversize();
-    // A response to an id nobody waits for, and one with an id of the wrong kind.
     process.push(&json!({"jsonrpc":"2.0","id":99,"result":{}}));
     process.push(&json!({"jsonrpc":"2.0","id":true,"result":{}}));
     process.push(&json!({"jsonrpc":"2.0","id":1.5,"result":{}}));
@@ -181,7 +178,6 @@ fn a_process_that_dies_fails_everything_waiting_and_tells_the_handler_once() {
     assert_eq!(done(&b), Err("agy: auth expired".to_string()));
     assert_eq!(heard(&rx), Heard::Exit(Some("agy: auth expired".into())));
     assert!(conn.is_closed());
-    // Later calls fail at once, without writing.
     let late = call(&conn, "session/prompt");
     assert_eq!(done(&late), Err("Antigravity isn't running.".to_string()));
     let writes = process.written().len();
@@ -218,15 +214,12 @@ fn closing_kills_the_process_fails_waiters_and_is_not_an_exit() {
 fn a_broken_pipe_ends_the_connection_like_a_death() {
     let (conn, process, rx) = rig();
     let a = call(&conn, "session/prompt");
-    // The process is gone from under the writer (its stdin closed), without having said so.
     process.break_pipe();
     conn.notify("session/cancel", json!({}));
     assert_eq!(done(&a), Err("Antigravity stopped.".to_string()));
     assert_eq!(heard(&rx), Heard::Exit(None));
 }
 
-/// A real child that never reads its input, with a prompt too big for the pipe in flight: the
-/// writer thread is blocked in `write` and holds the process's lock.
 #[cfg(unix)]
 struct Stuck {
     conn: Connection,
@@ -254,10 +247,6 @@ fn stuck() -> Stuck {
             }),
         );
     });
-    // Wait until the prompt's write holds the process's lock. A sleep isn't enough: under load the
-    // thread may not have built and serialized its 8 MB message yet, and a message sent then
-    // takes the lock first, goes through the empty pipe, and nothing is blocked. Once the lock is
-    // held, the write can't finish: the child never reads, and the pipe holds far less than 8 MB.
     let until = Instant::now() + Duration::from_secs(30);
     while !writing(&conn) {
         assert!(Instant::now() < until, "the prompt's write never started");
@@ -266,13 +255,11 @@ fn stuck() -> Stuck {
     Stuck { conn, writer }
 }
 
-/// A write holds the process's lock (the only thing that takes it).
 #[cfg(unix)]
 fn writing(conn: &Connection) -> bool {
     matches!(conn.inner.process.try_lock(), Err(TryLockError::WouldBlock))
 }
 
-/// Runs `f` on another thread and says whether it returned within `limit`.
 #[cfg(unix)]
 fn returns_within(limit: Duration, f: impl FnOnce() + Send + 'static) -> bool {
     let (tx, rx) = channel();
@@ -293,7 +280,6 @@ fn closing_ends_a_process_that_is_not_reading_and_frees_the_blocked_write() {
         "close waited on the blocked write"
     );
     assert!(s.conn.is_closed());
-    // Killing the child broke the pipe, so the write came back and its request failed.
     assert_eq!(
         s.writer.recv_timeout(Duration::from_secs(5)).unwrap(),
         Err("Antigravity was closed.".to_string())
@@ -305,8 +291,6 @@ fn closing_ends_a_process_that_is_not_reading_and_frees_the_blocked_write() {
 fn a_message_behind_a_blocked_write_gives_up_and_ends_the_connection() {
     let s = stuck();
     let conn = s.conn.clone();
-    // A cancel while the prompt is still stuck in the pipe: it can't be written either, and
-    // waits for the writer only a few seconds before the process is given up on.
     assert!(
         returns_within(Duration::from_secs(10), move || {
             conn.notify("session/cancel", json!({}));

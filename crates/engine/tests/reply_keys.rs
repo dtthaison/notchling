@@ -1,8 +1,3 @@
-//! The reply planner's keys against a question read off a recorded screen, the Swift tests E3a left
-//! for E3b (`AskDialogTests.testKeysForAReadQuestion`, `testMultiSelectTicksThenTabsOn`,
-//! `RecordReplyFixturesTests.testRecordedKeysAreTheAppsOwn` and `InputRoutingTests`' paste), and the
-//! reply's dialog check agreeing with the screen reader's on every recording.
-
 mod common;
 
 use common::notchling_fixture;
@@ -24,7 +19,6 @@ fn s(keys: &[&str]) -> Vec<String> {
     keys.iter().map(|k| k.to_string()).collect()
 }
 
-/// `testKeysForAReadQuestion`: the item comes from the recorded dialog's first page.
 #[test]
 fn keys_for_a_read_question() {
     let page = ask_dialog::page(&screen("question-open.bin").lines()).expect("a page");
@@ -42,7 +36,6 @@ fn keys_for_a_read_question() {
     );
 }
 
-/// `testMultiSelectTicksThenTabsOn`: on a multi-select page Tab moves to the next question.
 #[test]
 fn multi_select_ticks_then_tabs_on() {
     let pets = QuestionItem {
@@ -63,7 +56,6 @@ fn multi_select_ticks_then_tabs_on() {
     );
 }
 
-/// `testRecordedKeysAreTheAppsOwn` and `testPastedTextCantEndThePasteEarly`.
 #[test]
 fn bracketed() {
     assert_eq!(keys::bracketed("a"), "\u{1b}[200~a\u{1b}[201~");
@@ -76,8 +68,6 @@ fn bracketed() {
     assert_eq!(pasted.split("\u{1b}[201~").count(), 2);
 }
 
-/// The reply's check (on lines) and the screen reader's (on the screen) say the same of every
-/// recording: a reply is refused exactly where the reader sees a dialog.
 #[test]
 fn the_two_dialog_checks_agree_on_every_recording() {
     assert!(dialog_open(&screen("question-open.bin")));
@@ -102,7 +92,6 @@ fn the_two_dialog_checks_agree_on_every_recording() {
     }
 }
 
-/// What the executor checks a page with is the screen reader.
 #[test]
 fn the_executor_reads_pages_with_ask_dialog() {
     let lines = screen("question-open.bin").lines();

@@ -1,5 +1,3 @@
-//! The views for `--render` (part U10): first run and About, over made-up data. Nothing is read from the real Mac and nothing is called.
-
 use serde_json::json;
 
 use super::about::{self, About};
@@ -26,7 +24,6 @@ pub const VIEWS: [ViewSpec; 3] = [
     },
 ];
 
-/// What a render shows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Shown {
     FirstRun,
@@ -78,13 +75,11 @@ fn swift_plan() -> HookFacts {
     )
 }
 
-/// The first-run model for a render.
 pub fn first_run(shown: Shown) -> FirstRun {
     match shown {
         Shown::FirstRunSwiftHook => FirstRun::new(SwiftApp::Running, Ok(swift_plan())),
         _ => {
             let mut run = FirstRun::new(SwiftApp::Running, Ok(offer_plan()));
-            // The button was pressed with install off: the plan and the off message come back.
             run.asked = Some(Ok(offer_plan()));
             run.imported = Some(Ok(super::defaults::Imported {
                 added: (0..14).map(|n| format!("key{n}")).collect(),
@@ -95,12 +90,10 @@ pub fn first_run(shown: Shown) -> FirstRun {
     }
 }
 
-/// A made-up build, so the picture doesn't change with the checkout.
 pub fn about_model() -> About {
     about::about("0.1.0", Some("0bdc0b0"), true, "macos aarch64")
 }
 
-/// Releases are off in a render, so the line is the off message.
 pub fn update_outcome() -> Outcome {
     Outcome::Off
 }

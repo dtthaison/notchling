@@ -1,15 +1,3 @@
-//! Reads the signed-in account's limits from Antigravity's local language server, the same source
-//! as its own View Usage panel (`AntigravityQuota`). Three programs run that server: Antigravity.app,
-//! Antigravity IDE.app and the `agy` CLI (each `agy acp` Chat or a delegation opens). It runs only
-//! while one of them does, listens on a random local port (the apps' behind a CSRF token; `agy`'s
-//! takes none), and speaks Connect (JSON over HTTPS with a self-signed certificate), so this finds
-//! the processes, their tokens and ports, then calls each port until one answers for the account.
-//! A server that isn't signed in (the IDE's answers 500 then) or is on another account is passed.
-//!
-//! The processes go through [`Procs`] and the calls through [`HttpClient`] (loopback-only trust),
-//! so a test runs neither. The CSRF token comes from the server's own command line and goes only
-//! into a request header; it is never stored, logged or returned.
-
 use crate::accounts::procs::Procs;
 use crate::providers::usage::{GroupedGroup, GroupedUsage, UsageWindow};
 use crate::providers::{HttpClient, HttpRequest, Trust};
@@ -25,31 +13,20 @@ const LSOF: &str = "/usr/sbin/lsof";
 const SHELL_TIMEOUT: Duration = Duration::from_secs(5);
 const CALL_TIMEOUT: Duration = Duration::from_secs(3);
 
-/// The account's plan and limits, read together from the local server.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Snapshot {
     pub plan: Option<String>,
     pub usage: Option<GroupedUsage>,
 }
 
-/// The servers that can answer, in the order they are tried: each runs the same language server
-/// and serves the same calls. `pgrep` arguments, and whether the server wants the CSRF token from
-/// its command line.
 const SERVERS: [(&[&str], bool); 3] = [
-    // Antigravity.app.
     (&["-f", "bin/language_server --standalone"], true),
-    // Antigravity IDE.app (`language_server_macos_arm`, no `--standalone`).
     (&["-f", "bin/language_server_macos"], true),
-    // The `agy` CLI (`agy acp`, Chat's and delegation's): its server takes no token, so none is sent.
     (&["-x", "agy"], false),
 ];
 
-/// At most this many processes of one kind are asked (several `agy acp` run at once).
 const PER_KIND: usize = 3;
 
-/// The first server that answers for the account. `expected_email` guards against reading while
-/// one is signed in to another account (or still loading it): that server is skipped, and another
-/// may answer.
 pub fn fetch(
     procs: &dyn Procs,
     http: &dyn HttpClient,
@@ -79,7 +56,6 @@ pub fn fetch(
     None
 }
 
-/// One server: each of its ports until one answers GetUserStatus for the account.
 fn fetch_from(
     procs: &dyn Procs,
     http: &dyn HttpClient,
@@ -105,12 +81,10 @@ fn fetch_from(
     None
 }
 
-/// The first line, if it is a process id.
 pub fn parse_pid(out: &str) -> Option<String> {
     parse_pids(out).into_iter().next()
 }
 
-/// Every line that is a process id, in order.
 pub fn parse_pids(out: &str) -> Vec<String> {
     out.lines()
         .map(str::trim)
@@ -119,7 +93,6 @@ pub fn parse_pids(out: &str) -> Vec<String> {
         .collect()
 }
 
-/// From the server's own command line (`--csrf_token <uuid>`).
 fn csrf_token(procs: &dyn Procs, pid: &str) -> Option<String> {
     let args = procs.capture(PS, &["-o", "command=", "-p", pid], SHELL_TIMEOUT)?;
     csrf_from_args(&args)
@@ -128,15 +101,12 @@ fn csrf_token(procs: &dyn Procs, pid: &str) -> Option<String> {
 pub fn csrf_from_args(args: &str) -> Option<String> {
     let re = Regex::new(r"--csrf_token\s+(\S+)").ok()?;
     let token = re.captures(args)?.get(1)?.as_str();
-    // It goes into a header: a plain token only.
     token
         .bytes()
         .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
         .then(|| token.to_string())
 }
 
-/// The lsof arguments: `-a` ANDs the filters, so this is the one process's TCP listeners only;
-/// without it lsof lists every listener on the Mac (the port probe once had this bug).
 pub fn lsof_args(pid: &str) -> Vec<&str> {
     vec!["-nP", "-a", "-p", pid, "-iTCP", "-sTCP:LISTEN"]
 }
@@ -148,8 +118,6 @@ fn ports(procs: &dyn Procs, pid: &str) -> Vec<u16> {
         .unwrap_or_default()
 }
 
-/// The server picks random ports, so read the ones it's listening on. Lowest first: the server
-/// opens its HTTPS port, then a plain HTTP one just above it.
 pub fn ports_from_lsof(out: &str) -> Vec<u16> {
     let Ok(re) = Regex::new(r":(\d+) \(LISTEN\)") else {
         return vec![];
@@ -166,7 +134,6 @@ pub fn ports_from_lsof(out: &str) -> Vec<u16> {
     seen
 }
 
-/// One Connect unary call; the body only on a 200. The token header only for a server that wants it.
 fn post(http: &dyn HttpClient, method: &str, port: u16, csrf: Option<&str>) -> Option<Vec<u8>> {
     let mut headers = vec![
         ("Content-Type".into(), "application/json".into()),
@@ -187,9 +154,6 @@ fn post(http: &dyn HttpClient, method: &str, port: u16, csrf: Option<&str>) -> O
     (reply.status == 200).then_some(reply.body)
 }
 
-/// The signed-in account's email and plan from GetUserStatus. The plan is `userTier.name` (the real
-/// Antigravity tier, e.g. "Antigravity Starter Quota"), not `planInfo.planName` (which is the
-/// underlying Codeium plan and always reads "Pro"). Shortened to just the tier word.
 pub fn parse_status(data: &[u8]) -> (Option<String>, Option<String>) {
     let Ok(root) = serde_json::from_slice::<Value>(data) else {
         return (None, None);
@@ -210,7 +174,6 @@ pub fn parse_status(data: &[u8]) -> (Option<String>, Option<String>) {
     (email, plan)
 }
 
-/// `RetrieveUserQuotaSummary`: groups of buckets, each a weekly or five-hour window.
 pub fn parse_usage(data: &[u8], now: f64) -> Option<GroupedUsage> {
     let root: Value = serde_json::from_slice(data).ok()?;
     let groups = root.get("response")?.get("groups")?.as_array()?;
@@ -329,7 +292,7 @@ mod tests {
     fn fetch_calls_each_port_with_the_csrf_header_over_loopback_only() {
         let procs = rig();
         let http = FakeHttp::new();
-        http.push(Err("closed".into())); // the lower port refuses
+        http.push(Err("closed".into()));
         http.ok(200, STATUS);
         http.ok(200, QUOTA);
         let snap = fetch(&procs, &http, Some("a@example.com"), 9.0).unwrap();
@@ -369,7 +332,6 @@ mod tests {
         assert_eq!(http.calls(), 1, "no usage call after the mismatch");
     }
 
-    /// What `agy acp`'s server answered on 2026-11-11 (Google AI Pro, nothing used yet).
     const AGY_QUOTA: &str = include_str!("testdata/agy-quota.json");
     const IDE_PGREP: &str = "/usr/bin/pgrep -f bin/language_server_macos";
     const AGY_PGREP: &str = "/usr/bin/pgrep -x agy";
@@ -446,10 +408,8 @@ mod tests {
             .answer(AGY_PGREP, "777\n")
             .answer("/usr/sbin/lsof -nP -a -p 777 -iTCP -sTCP:LISTEN", AGY_LSOF);
         let http = FakeHttp::new();
-        // The IDE: not signed in on one port (a 500), another account on the next.
         http.ok(500, r#"{"code":"unknown"}"#);
         http.ok(200, r#"{"userStatus":{"email":"other@example.com"}}"#);
-        // agy: the account's.
         http.ok(200, STATUS);
         http.ok(200, AGY_QUOTA);
         let snap = fetch(&procs, &http, Some("a@example.com"), 0.0).unwrap();

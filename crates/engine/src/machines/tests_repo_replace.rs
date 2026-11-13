@@ -1,8 +1,3 @@
-//! Tests of Replace key (Swift `MachinesRepoStepsTests`, second half): the order of its checks, its
-//! undo, what it deletes and what it never does. The machine and GitHub are scripted; the three
-//! tests that run the scripts in a real `/bin/sh` use a throwaway HOME and stubs for `git` and
-//! `ssh`.
-
 use super::fakes_b::*;
 use super::registry::Machine;
 use super::repo_common::*;
@@ -33,8 +28,6 @@ pub(super) fn key_json(id: &str, body: &str, title: &str, read_only: bool) -> St
     )
 }
 
-/// What a machine and GitHub do for Replace key: the old key is id 11 on GitHub, the new one
-/// becomes id 22.
 pub(super) struct Opts {
     pub(super) ssh_ok: bool,
     pub(super) push_accepted: bool,
@@ -86,7 +79,6 @@ pub(super) fn replace_rig(o: Opts) -> Rig {
         format!("[{}]", before.join(",")),
         format!("[{}]", after.join(",")),
     );
-    // the first listing is the one before the add; every later one is after it
     let listings = Arc::new(AtomicUsize::new(0));
     rig.runner.on_call(is_list, move |_| {
         if listings.fetch_add(1, Ordering::SeqCst) == 0 {
@@ -162,8 +154,6 @@ pub(super) fn replace_rig(o: Opts) -> Rig {
     rig
 }
 
-/// What each call was, in order: `gh list`, `gh add`, `gh delete <id>`, or the kind of script sent
-/// to the machine.
 pub(super) fn kinds(rig: &Rig) -> Vec<String> {
     rig.argvs()
         .iter()
@@ -329,7 +319,6 @@ fn never_uses_the_write_flag_and_the_display_shows_the_commands() {
         assert!(d.contains(needle), "{needle}");
     }
     assert!(!plan.needs_admin);
-    // every GitHub call is shown, the cleanup's too, and the date is said to be UTC
     assert!(d.contains("deploy-key delete <id of the new key>"), "{d}");
     assert!(d.contains("deploy-key delete <id of the old key>"), "{d}");
     assert!(
@@ -535,7 +524,6 @@ fn when_github_does_not_list_the_old_key_nothing_is_deleted_and_it_says_so() {
 
 #[test]
 fn the_old_key_is_matched_by_its_key_text_not_by_title() {
-    // another key with the old key's title and a lower id must not be deleted
     let decoy = key_json("5", OTHER_BODY, "agents-m1", true);
     let rig = replace_rig(Opts {
         extra_listed: vec![decoy],

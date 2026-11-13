@@ -1,12 +1,3 @@
-//! Codex turns that are running, and the messages waiting behind them (`CodexRunner.run`,
-//! `ChatModel.sendCodex` and its outbox).
-//!
-//! One turn at a time per session: `exec` can't take a message mid-turn, so a message sent while
-//! one runs waits and goes out, in order, as the session's next turn when the running one ends,
-//! whether it ended well or not. A new session starts with its first message; `thread.started`
-//! names it, and [`CodexRuns::send`] returns once it has. Stop sends SIGINT to the running turn and
-//! leaves the waiting messages to go on, as Chat's Stop does.
-
 use super::events::{parse_line, Event};
 use super::plan::{failure_of, turn_spec, Pick, Turn, TurnSpec};
 use super::process::{Next, Stream, ToolProcess, ToolSpawner};
@@ -17,31 +8,27 @@ use std::sync::mpsc::{channel, Sender};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
-/// How many turns may run at once, over all sessions. Each is a `codex` process.
 pub const MAX_RUNNING: usize = 8;
 
-/// How long a new session may take to be named by `thread.started` before its turn is stopped.
 pub const ANNOUNCE_WAIT: Duration = Duration::from_secs(30);
 
-/// A message to send.
 #[derive(Clone, Debug)]
 pub struct Request {
     pub text: String,
-    /// The session this goes to; `None` starts a new one in `folder`.
     pub session: Option<String>,
     pub folder: String,
     pub pick: Pick,
 }
 
-/// What a caller is told about a turn.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TurnEvent {
-    /// A turn is running for `session` (for a new session, once Codex has named it).
-    Started { session: String },
-    /// A message is waiting behind the running turn; `waiting` counts the queue.
-    Queued { session: String, waiting: usize },
-    /// A turn ended. `failure` is what it printed last when it did not end well. `session` is
-    /// `None` only when Codex never named one.
+    Started {
+        session: String,
+    },
+    Queued {
+        session: String,
+        waiting: usize,
+    },
     Ended {
         session: Option<String>,
         failure: Option<String>,
@@ -52,8 +39,6 @@ pub trait TurnSink: Send + Sync {
     fn event(&self, event: TurnEvent);
 }
 
-/// Whether a turn may start now: the daemon's `acting` switch. Asked under the state lock right
-/// before a process is spawned, and again once it has been (the switch may have gone off between).
 pub type MayStart = Arc<dyn Fn() -> bool + Send + Sync>;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -64,13 +49,9 @@ pub enum Sent {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SendError {
-    /// [`MAX_RUNNING`] turns are running.
     TooMany,
-    /// The process did not start.
     Spawn(String),
-    /// A new session's turn ended, or took too long, before Codex named the session.
     NotStarted(String),
-    /// Starting turns is switched off (see [`MayStart`]).
     NotAllowed,
 }
 
@@ -101,11 +82,8 @@ struct Waiting {
 #[derive(Default)]
 struct State {
     running: HashMap<String, Live>,
-    /// Sessions a turn is being started for (between the check and the registration), with the
-    /// folder it runs in, so a message queued meanwhile can run there too.
     reserved: HashMap<String, String>,
     outbox: HashMap<String, VecDeque<Waiting>>,
-    /// Turns that hold a slot: running, starting or about to start the next waiting message.
     active: usize,
 }
 
@@ -113,7 +91,6 @@ struct Inner {
     spawner: Arc<dyn ToolSpawner>,
     codex: Mutex<PathBuf>,
     path: Mutex<Option<String>>,
-    /// `CODEX_HOME` for every turn, once set.
     home: OnceLock<PathBuf>,
     sink: Arc<dyn TurnSink>,
     network: AtomicBool,
@@ -122,7 +99,6 @@ struct Inner {
     state: Mutex<State>,
 }
 
-/// The turns of every Codex session the daemon runs.
 #[derive(Clone)]
 pub struct CodexRuns {
     inner: Arc<Inner>,
@@ -131,7 +107,6 @@ pub struct CodexRuns {
 type Announce = Sender<Result<String, String>>;
 
 impl CodexRuns {
-    /// `codex` is the command to run; `path` the PATH the tools it runs are found in.
     pub fn new(
         spawner: Arc<dyn ToolSpawner>,
         codex: PathBuf,
@@ -153,31 +128,24 @@ impl CodexRuns {
         }
     }
 
-    /// "Allow Network in Codex Turns" (`codexNetwork`, on unless turned off).
     pub fn set_network(&self, on: bool) {
         self.inner.network.store(on, Ordering::SeqCst);
     }
 
-    /// The command to run and the PATH it runs with, looked up again before each send so a Codex
-    /// installed while the daemon runs is found.
     pub fn set_command(&self, codex: PathBuf, path: Option<String>) {
         *self.inner.codex.lock().unwrap_or_else(|e| e.into_inner()) = codex;
         *self.inner.path.lock().unwrap_or_else(|e| e.into_inner()) = path;
     }
 
-    /// The Codex home every turn runs with (`CODEX_HOME`), once: the folder whose sessions the
-    /// daemon lists, so a turn can't write its rollout into another home the environment names.
     pub fn set_codex_home(&self, home: PathBuf) {
         let _ = self.inner.home.set(home);
     }
 
-    /// How long a new session may take to be named (tests shorten it).
     pub fn set_announce_wait(&self, wait: Duration) {
         let ms = u64::try_from(wait.as_millis()).unwrap_or(u64::MAX);
         self.inner.announce_ms.store(ms, Ordering::SeqCst);
     }
 
-    /// What decides whether a turn may start (once; without it any may).
     pub fn set_may_start(&self, may_start: MayStart) {
         let _ = self.inner.may_start.set(may_start);
     }
@@ -190,7 +158,6 @@ impl CodexRuns {
         self.inner.state.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    /// Session ids with a turn running from here.
     pub fn running(&self) -> Vec<String> {
         let mut ids: Vec<String> = self.state().running.keys().cloned().collect();
         ids.sort();
@@ -202,18 +169,14 @@ impl CodexRuns {
         state.running.contains_key(session) || state.reserved.contains_key(session)
     }
 
-    /// Messages waiting behind `session`'s running turn.
     pub fn waiting(&self, session: &str) -> usize {
         self.state().outbox.get(session).map_or(0, VecDeque::len)
     }
 
-    /// Turns holding a slot (none: nothing is running or about to).
     pub fn active(&self) -> usize {
         self.state().active
     }
 
-    /// Starts a turn, or queues the message behind the session's running one. A new session blocks
-    /// until Codex names it.
     pub fn send(&self, request: Request) -> Result<Sent, SendError> {
         if let Some(session) = request.session.clone() {
             let mut state = self.state();
@@ -221,8 +184,6 @@ impl CodexRuns {
                 return Err(SendError::NotAllowed);
             }
             if state.running.contains_key(&session) || state.reserved.contains_key(&session) {
-                // A waiting message with no folder runs where the session's turn does, whether
-                // that turn is running or still starting.
                 let folder = if request.folder.is_empty() {
                     let live = state.running.get(&session).map(|live| live.folder.clone());
                     live.or_else(|| state.reserved.get(&session).cloned())
@@ -311,7 +272,6 @@ impl CodexRuns {
         )
     }
 
-    /// Starts the process and the thread that follows it.
     fn begin(
         &self,
         request: &Request,
@@ -335,11 +295,9 @@ impl CodexRuns {
                 },
             );
         }
-        // The switch may have gone off while the process was starting, after `stop_all` looked.
         if !self.may_start() {
             process.interrupt();
         }
-        // Before the thread starts, so `Started` always comes before this turn's `Ended`.
         if let Some(session) = session {
             self.inner.sink.event(TurnEvent::Started {
                 session: session.to_string(),
@@ -366,7 +324,6 @@ impl CodexRuns {
         Ok(process)
     }
 
-    /// Reads a turn to its end, then runs the messages waiting behind it, one turn each.
     fn follow(
         &self,
         mut process: Arc<dyn ToolProcess>,
@@ -462,9 +419,6 @@ impl CodexRuns {
         }
     }
 
-    /// Under one lock: the next waiting message, which keeps the session's slot, or nothing, which
-    /// frees it. So a message sent in between is queued behind the turn that is ending, never lost.
-    /// With starting turns switched off, what waits is dropped instead of started.
     fn finish(&self, session: Option<&str>) -> Option<Waiting> {
         let mut state = self.state();
         let allowed = self.may_start();
@@ -498,15 +452,12 @@ impl CodexRuns {
                 folder: request.folder.clone(),
             },
         );
-        // As in `begin`: the switch may have gone off while the process was starting.
         if !self.may_start() {
             process.interrupt();
         }
         Ok(process)
     }
 
-    /// Stops the running turn the way Ctrl+C would; true when one was running. The messages
-    /// waiting behind it go out as the next turns.
     pub fn stop(&self, session: &str) -> bool {
         let process = self.state().running.get(session).map(|l| l.process.clone());
         match process {
@@ -518,7 +469,6 @@ impl CodexRuns {
         }
     }
 
-    /// Stops every running turn (the daemon is going away); what waits behind them is dropped.
     pub fn stop_all(&self) {
         let processes: Vec<Arc<dyn ToolProcess>> = {
             let mut state = self.state();
@@ -530,7 +480,6 @@ impl CodexRuns {
         }
     }
 
-    /// Drops the messages waiting for `session` and stops its turn (before the session is deleted).
     pub fn forget(&self, session: &str) -> bool {
         self.state().outbox.remove(session);
         self.stop(session)

@@ -1,15 +1,6 @@
-//! Edits by splicing: add a member or element at the end of an object or array, or remove one.
-//! Every byte outside the few it touches stays as it was (spacing, comments, key order, number
-//! spelling). Each call reads the text afresh, so a caller that makes several edits needs no
-//! bookkeeping of moved positions.
-//!
-//! New text follows the file: the indent unit it uses, `\r\n` if it uses them, and one line per
-//! item in a container that has one line per item.
-
 use super::jsonc::{self, next_significant, Kind, Node, ParseError};
 use super::render::{string, Json};
 
-/// One step of a path into the document.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Seg {
     Key(String),
@@ -23,7 +14,6 @@ pub fn key(name: &str) -> Seg {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EditError {
     Parse(ParseError),
-    /// The path leads nowhere, or to something that holds no items.
     Path(&'static str),
 }
 
@@ -53,7 +43,6 @@ fn locate<'a>(root: &'a Node, path: &[Seg]) -> Option<&'a Node> {
     Some(node)
 }
 
-/// The byte ranges of a container's items: a member runs from its key to the end of its value.
 fn spans(node: &Node) -> Result<Vec<(usize, usize)>, EditError> {
     match &node.kind {
         Kind::Object(members) => Ok(members.iter().map(|m| (m.start, m.value.end)).collect()),
@@ -74,7 +63,6 @@ fn line_start(text: &str, pos: usize) -> usize {
     text[..pos].rfind('\n').map_or(0, |i| i + 1)
 }
 
-/// The end of the line holding `pos`, before its `\r\n` or `\n`.
 fn line_end(text: &str, pos: usize) -> usize {
     let end = text[pos..].find('\n').map_or(text.len(), |i| pos + i);
     if end > pos && text.as_bytes()[end - 1] == b'\r' {
@@ -92,12 +80,10 @@ fn indent_of_line(text: &str, pos: usize) -> &str {
     &text[from..from + len]
 }
 
-/// Whether only space comes before `pos` on its line.
 fn starts_line(text: &str, pos: usize) -> bool {
     text[line_start(text, pos)..pos].trim().is_empty()
 }
 
-/// The indent one level adds: what the first member of the top object is indented by.
 fn indent_unit(text: &str, root: &Node) -> String {
     if let Some(first) = root.members().and_then(<[_]>::first) {
         if starts_line(text, first.start) {
@@ -124,7 +110,6 @@ fn splice(text: &str, mut edits: Vec<(usize, usize, String)>) -> String {
     out
 }
 
-/// Adds `value` (under `key` in an object) after the last item of the container at `path`.
 pub fn append(
     text: &str,
     path: &[Seg],
@@ -190,7 +175,6 @@ pub fn append(
         format!("{base}{unit}")
     };
     let item = format!("{nl}{indent}{}", render(false, &indent));
-    // A comment after the last item stays on that item's line.
     let eol = line_end(text, anchor);
     let at = if comment_only(&text[anchor..eol]) {
         eol
@@ -208,8 +192,6 @@ pub fn append(
     Ok(splice(text, edits))
 }
 
-/// Removes item `index` of the container at `path`, with the comma that went with it. Comments
-/// between the items stay; one on the same lines as an item that goes on whole lines goes too.
 pub fn remove(text: &str, path: &[Seg], index: usize) -> Result<String, EditError> {
     let root = jsonc::parse(text)?;
     let target = locate(&root, path).ok_or(EditError::Path("no such place"))?;
@@ -218,7 +200,6 @@ pub fn remove(text: &str, path: &[Seg], index: usize) -> Result<String, EditErro
     let (open, close) = (target.start, target.end - 1);
     let last = index + 1 == items.len();
 
-    // Nothing else inside: leave `[]` or `{}`.
     if items.len() == 1 {
         let others = format!("{}{}", &text[open + 1..start], &text[end..close]);
         if others.chars().all(|c| c.is_whitespace() || c == ',') {
@@ -242,8 +223,6 @@ pub fn remove(text: &str, path: &[Seg], index: usize) -> Result<String, EditErro
             edits.push((p, p + 1, String::new()));
         }
     } else if !last {
-        // The item, its comma and the space after it: a comment after the comma is the user's
-        // and stays (so does one between the item and its comma).
         let next = text[done..]
             .find(|c: char| !c.is_whitespace())
             .map_or(text.len(), |i| done + i);
@@ -254,7 +233,6 @@ pub fn remove(text: &str, path: &[Seg], index: usize) -> Result<String, EditErro
             edits.push((after, next, String::new()));
         }
     } else if index > 0 {
-        // The item and the comma before it, leaving whatever comments sit between them.
         let p = next_significant(text, items[index - 1].1);
         if text[p + 1..start].trim().is_empty() {
             edits.push((p, end, String::new()));

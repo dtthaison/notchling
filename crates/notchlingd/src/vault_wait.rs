@@ -6,36 +6,29 @@ use std::sync::mpsc::{sync_channel, Receiver, RecvTimeoutError, SyncSender};
 use std::sync::{Mutex, Weak};
 use std::time::{Duration, Instant};
 
-/// Why a wait couldn't start.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Refused {
-    /// `max` already wait.
     Full,
-    /// The OS gave no randomness for an id.
     NoId,
 }
 
-/// One open wait: where its answer goes, when it opened, and the event that announced it.
 struct Open<T> {
     tx: SyncSender<T>,
     order: u64,
     event: Option<Value>,
 }
 
-/// The open waits, and how many have opened.
 struct Waiting<T> {
     open: HashMap<String, Open<T>>,
     opened: u64,
 }
 
-/// Open waits of one kind.
 pub struct Waiters<T> {
     prefix: &'static str,
     max: usize,
     waiting: Mutex<Waiting<T>>,
 }
 
-/// One open wait: its id, and where its answer arrives.
 pub struct Ticket<T> {
     pub id: String,
     rx: Receiver<T>,
@@ -57,7 +50,6 @@ impl<T> Waiters<T> {
         self.waiting.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    /// A new wait under a fresh id.
     pub fn open(&self) -> Result<Ticket<T>, Refused> {
         let mut waiting = self.lock();
         if waiting.open.len() >= self.max {
@@ -78,14 +70,12 @@ impl<T> Waiters<T> {
         Ok(Ticket { id, rx })
     }
 
-    /// Keeps the event that announces the wait under `id`, for [`Waiters::pending`].
     pub fn describe(&self, id: &str, event: &Value) {
         if let Some(open) = self.lock().open.get_mut(id) {
             open.event = Some(event.clone());
         }
     }
 
-    /// The events of the waits still open, oldest first.
     pub fn pending(&self) -> Vec<Value> {
         let waiting = self.lock();
         let mut open: Vec<&Open<T>> = waiting.open.values().collect();
@@ -93,7 +83,6 @@ impl<T> Waiters<T> {
         open.into_iter().filter_map(|o| o.event.clone()).collect()
     }
 
-    /// The app's answer; false when nothing waits under `id` (answered, ended or never opened).
     pub fn answer(&self, id: &str, value: T) -> bool {
         match self.lock().open.remove(id) {
             Some(open) => open.tx.try_send(value).is_ok(),
@@ -101,12 +90,10 @@ impl<T> Waiters<T> {
         }
     }
 
-    /// Ends a wait without an answer.
     pub fn close(&self, id: &str) {
         self.lock().open.remove(id);
     }
 
-    /// Ends every wait without an answer.
     pub fn drain(&self) {
         self.lock().open.clear();
     }
@@ -119,8 +106,6 @@ impl<T> Waiters<T> {
         self.len() == 0
     }
 
-    /// Waits for `ticket`'s answer up to `within`, looking at `still` every `slice`; `None` for
-    /// no answer. The id is closed either way.
     pub fn wait(
         &self,
         ticket: Ticket<T>,
@@ -145,8 +130,6 @@ impl<T> Waiters<T> {
     }
 }
 
-/// What the switch going off clears: the values read while it was on, and every wait (which then
-/// ends with a no).
 pub(crate) struct OffHook {
     pub(crate) store: Weak<VaultStore>,
     pub(crate) approvals: Weak<Waiters<Decision>>,

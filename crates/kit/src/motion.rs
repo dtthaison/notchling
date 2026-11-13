@@ -1,17 +1,10 @@
-//! Motion (`KitMotion`): three curves, all off under Reduce Motion.
-
-/// What an animation is for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Motion {
-    /// Hover fills.
     Hover,
-    /// Button press scale.
     Press,
-    /// A new message, a pending reply.
     Appear,
 }
 
-/// A timing curve.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Curve {
     EaseOut { seconds: f32 },
@@ -21,7 +14,6 @@ pub enum Curve {
 impl Motion {
     pub const ALL: [Motion; 3] = [Motion::Hover, Motion::Press, Motion::Appear];
 
-    /// The curve, or `None` (no animation) when the user asked for reduced motion.
     pub fn curve(self, reduce_motion: bool) -> Option<Curve> {
         if reduce_motion {
             return None;

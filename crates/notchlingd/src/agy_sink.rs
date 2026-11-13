@@ -1,9 +1,3 @@
-//! What the Antigravity runner reports, turned into the daemon's events ([`agy_ops`]'s sink): a
-//! session's row on `tools`, and a permission waiting or answered on `prompts`, each also as the
-//! M3 `prompt.*` events so the notch shares one answered state with Chat.
-//!
-//! [`agy_ops`]: crate::agy_ops
-
 use crate::acting_ops::{now_ms, Room};
 use crate::catalog_ops::CatalogService;
 use notchling_engine::bridge::foreign::PROMPT_PREFIX;
@@ -16,24 +10,20 @@ use std::path::Path;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-/// Chunk events are thinned to one per session in this long.
 const CHUNK_EVERY: Duration = Duration::from_millis(250);
 
-/// A session this daemon started that the summaries copy may not list yet.
 pub(crate) struct Started {
     pub name: String,
     pub folder: String,
     pub at: f64,
 }
 
-/// What the runner reports, turned into events; also the permissions waiting.
 pub(crate) struct Shared {
     pub room: Arc<dyn Room>,
     pub pending: Mutex<BTreeMap<String, Value>>,
     pub last_chunk: Mutex<HashMap<String, Instant>>,
     pub started: Mutex<HashMap<String, Started>>,
     pub runner: OnceLock<Runner>,
-    /// Told the model and thinking-level options each loaded session reports.
     pub catalog: OnceLock<Arc<CatalogService>>,
 }
 
@@ -72,17 +62,12 @@ impl Shared {
         self.room.publish(topics::PROMPTS, prompt_event, data);
     }
 
-    /// Hands the catalog the options a session offers (its Model values are the models the
-    /// picker lists), before the change is announced, so a client that asks then sees them.
     fn options_seen(&self, session: &str) {
         if let (Some(catalog), Some(runner)) = (self.catalog.get(), self.runner.get()) {
             catalog.record_agy_options(&runner.config(session));
         }
     }
 
-    /// `session.changed` on the `tools` topic, as Codex's: `{id, session, row, change, error?}`.
-    /// `row` is the session as `sessions.list` would give it, or null when this daemon no longer
-    /// holds it (read `agy.sessions` again).
     pub fn session_changed(&self, session: &str, change: &str, error: Option<String>) {
         let mut data = json!({"id": row_id(session), "session": session,
                               "row": self.row(session), "change": change});
@@ -93,7 +78,6 @@ impl Shared {
             .publish(topics::TOOLS, topics::SESSION_CHANGED, &data);
     }
 
-    /// The row of a session the runner holds, working or idle by its own word.
     pub fn row(&self, session: &str) -> Value {
         let Some(runner) = self.runner.get() else {
             return Value::Null;
@@ -136,9 +120,6 @@ impl Shared {
         serde_json::to_value(agent).unwrap_or(Value::Null)
     }
 
-    /// `prompt.pending`'s shape (as a hook prompt's) plus `tool`, `rpcId`, `options` and `diff`.
-    /// The card's own text is used, which [`Permission::to_json`] keeps small enough for the
-    /// local API's line however big the edit is.
     pub fn prompt_json(&self, session: &str, p: &Permission, folder: &str) -> Value {
         let card = p.to_json();
         let summary = match card["title"].as_str() {
@@ -166,7 +147,6 @@ impl Shared {
     }
 }
 
-/// What the runner reports to.
 pub(crate) struct DaemonSink {
     pub shared: Arc<Shared>,
 }

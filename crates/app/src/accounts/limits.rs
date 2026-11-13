@@ -1,14 +1,8 @@
-//! Limit bars, pure (the Swift `LimitRow`, `GroupedLimits` and Chat's `SessionLimit`): a label, a
-//! used percentage, the fill it is drawn in (green under 70, orange to 90, red from 90) and when
-//! it resets, in the Swift app's words. The window and the Chat header draw [`LimitGroup`]s;
-//! nothing here reads a login.
-
 use notchling_engine::limits::report::{BarKind, UsageReport};
 use notchling_engine::pages::clock::{civil_at, local_offset_secs};
 
 use super::wire::Window;
 
-/// Seconds the zone is ahead of UTC at a time; a test passes a fixed one.
 #[derive(Clone, Copy)]
 pub struct Zone(pub fn(f64) -> i64);
 
@@ -17,14 +11,10 @@ impl Zone {
     pub const UTC: Zone = Zone(|_| 0);
 }
 
-/// How full a bar is drawn.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Fill {
-    /// Under 70%.
     Fine,
-    /// 70% to under 90%.
     Warm,
-    /// 90% and up.
     Hot,
 }
 
@@ -40,21 +30,15 @@ impl Fill {
     }
 }
 
-/// One bar.
 #[derive(Clone, Debug, PartialEq)]
 pub struct LimitLine {
-    /// "5 hours", "Week", or the limit's own name.
     pub label: String,
     pub percent: f64,
-    /// "41%".
     pub percent_text: String,
-    /// "resets in 2h 13m", "resets Tue 13:00", "resets resetting" (the Swift app's words), or
-    /// nothing when the window has no reset time.
     pub resets: Option<String>,
     pub fill: Fill,
 }
 
-/// Bars under an optional group name.
 #[derive(Clone, Debug, PartialEq)]
 pub struct LimitGroup {
     pub name: Option<String>,
@@ -63,8 +47,6 @@ pub struct LimitGroup {
 
 const WEEKDAYS: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
-/// The Swift `resetText`: "resetting" once past; "in Xh Ym" or "in Nm" (at least 1m) within six
-/// hours or for a short window; else the weekday and time, "Tue 13:00".
 pub fn reset_text(resets_at: f64, now: f64, short: bool, zone: Zone) -> String {
     let left = resets_at - now;
     if left <= 0.0 {
@@ -81,7 +63,6 @@ pub fn reset_text(resets_at: f64, now: f64, short: bool, zone: Zone) -> String {
     let offset = (zone.0)(resets_at);
     let c = civil_at(resets_at, offset);
     let days = (resets_at.floor() as i64 + offset).div_euclid(86_400);
-    // 1970-01-01 was a Thursday.
     let weekday = (days + 4).rem_euclid(7) as usize;
     format!("{} {}:{:02}", WEEKDAYS[weekday], c.hour, c.minute)
 }
@@ -104,7 +85,6 @@ fn line(
     }
 }
 
-/// The Accounts window's label for a bar: the session window reads "5 hours".
 fn window_label(label: &str, kind: BarKind) -> String {
     match kind {
         BarKind::Session => "5 hours".to_owned(),
@@ -112,7 +92,6 @@ fn window_label(label: &str, kind: BarKind) -> String {
     }
 }
 
-/// A provider's report as the window draws it (`GroupedLimits`).
 pub fn groups(report: &UsageReport, now: f64, zone: Zone) -> Vec<LimitGroup> {
     report
         .groups
@@ -137,8 +116,6 @@ pub fn groups(report: &UsageReport, now: f64, zone: Zone) -> Vec<LimitGroup> {
         .collect()
 }
 
-/// The watcher's windows for the account in use (`limits.status`), as one unnamed group: the
-/// 5-hour window reads "5 hours", the weekly one "Week", the rest keep their names.
 pub fn from_windows(windows: &[Window], now: f64, zone: Zone) -> Vec<LimitLine> {
     windows
         .iter()
@@ -157,16 +134,13 @@ pub fn from_windows(windows: &[Window], now: f64, zone: Zone) -> Vec<LimitLine> 
         .collect()
 }
 
-/// A Chat header meter: the short label ("5h", "Week") with its reset text alone, no "resets".
 #[derive(Clone, Debug, PartialEq)]
 pub struct Meter {
     pub label: String,
     pub percent_text: String,
     pub percent: f64,
-    /// "in 2h 13m", "Tue 13:00" or "resetting"; `None` without a reset time.
     pub resets: Option<String>,
     pub fill: Fill,
-    /// "5-hour limit: 41% used, resets in 2h 13m".
     pub tooltip: String,
 }
 
@@ -196,7 +170,6 @@ fn meter(
     }
 }
 
-/// The header's meters for a Claude Code session: its account's 5-hour and weekly windows.
 pub fn claude_meters(windows: &[Window], now: f64, zone: Zone) -> Vec<Meter> {
     windows
         .iter()
@@ -227,7 +200,6 @@ pub fn claude_meters(windows: &[Window], now: f64, zone: Zone) -> Vec<Meter> {
         .collect()
 }
 
-/// The header's meters for a Codex session: the bars of the group named "Codex", else the first.
 pub fn codex_meters(report: &UsageReport, now: f64, zone: Zone) -> Vec<Meter> {
     let group = report
         .groups
@@ -266,7 +238,6 @@ mod tests {
             reset_text(NOW + 2.0 * 3600.0 + 13.0 * 60.0, NOW, false, Zone::UTC),
             "in 2h 13m"
         );
-        // Far off: the weekday and time, unless the window is a short one.
         let far = NOW + 2.0 * 86_400.0;
         let text = reset_text(far, NOW, false, Zone::UTC);
         assert!(WEEKDAYS.iter().any(|d| text.starts_with(d)), "{text}");

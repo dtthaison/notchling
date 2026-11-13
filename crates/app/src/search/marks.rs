@@ -1,15 +1,5 @@
-//! The words to draw bold in a snippet, made safe for the text layer. The daemon sends byte
-//! ranges into the snippet; GPUI's `StyledText` assumes its highlight runs are sorted, disjoint
-//! and on character boundaries, and slices the text with them while it lays out (a range in the
-//! middle of a character, or inside another range, panics there). So whatever arrives is
-//! cleaned here first, and a daemon that sends overlapping or stray ranges costs a missing bold
-//! word, never a crash.
-
 use std::ops::Range;
 
-/// `raw` as sorted, disjoint, non-empty ranges inside `snippet`, each on character boundaries.
-/// A range that reaches past the end is cut at it; one that starts or ends inside a character
-/// shrinks to the whole characters within it; ranges that overlap or touch are joined.
 pub fn clean(snippet: &str, raw: &[(usize, usize)]) -> Vec<Range<usize>> {
     let mut ranges: Vec<Range<usize>> = raw
         .iter()
@@ -30,7 +20,6 @@ pub fn clean(snippet: &str, raw: &[(usize, usize)]) -> Vec<Range<usize>> {
     out
 }
 
-/// The nearest character boundary at or before `at` (`at` is within the text).
 fn floor(text: &str, mut at: usize) -> usize {
     while !text.is_char_boundary(at) {
         at -= 1;
@@ -38,7 +27,6 @@ fn floor(text: &str, mut at: usize) -> usize {
     at
 }
 
-/// The nearest character boundary at or after `at` (`at` is within the text).
 fn ceil(text: &str, mut at: usize) -> usize {
     while !text.is_char_boundary(at) {
         at += 1;
@@ -47,7 +35,6 @@ fn ceil(text: &str, mut at: usize) -> usize {
 }
 
 #[cfg(test)]
-// Several tests compare against a list of one range, which is the point of them.
 #[allow(clippy::single_range_in_vec_init)]
 mod tests {
     use super::*;
@@ -58,12 +45,10 @@ mod tests {
 
     #[test]
     fn overlapping_ranges_are_joined() {
-        // "bridge b" over "the bridge’s state": the daemon marks "b" and "bridge" separately.
         let text = "the bridge\u{2019}s state";
         let ranges = clean(text, &[(4, 5), (4, 10)]);
         assert_eq!(ranges, [4..10]);
         assert_eq!(slices(text, &ranges), ["bridge"]);
-        // "cache c" over "cache—stale".
         let text = "cache\u{2014}stale";
         let ranges = clean(text, &[(0, 1), (0, 5), (2, 3)]);
         assert_eq!(ranges, [0..5]);
@@ -78,13 +63,9 @@ mod tests {
 
     #[test]
     fn ranges_are_cut_to_the_text_and_to_whole_characters() {
-        // ’ is bytes 10..13.
         let text = "the bridge\u{2019}s state";
-        // Past the end: cut at the end.
         assert_eq!(clean(text, &[(14, 999)]), [14..text.len()]);
-        // Both ends inside the character: nothing is left.
         assert!(clean(text, &[(11, 12)]).is_empty());
-        // Start inside it moves on past it, end inside it moves back before it.
         assert_eq!(clean(text, &[(11, 15)]), [13..15]);
         assert_eq!(clean(text, &[(4, 12)]), [4..10]);
         for r in clean(text, &[(1, 11), (12, 20), (9, 14)]) {

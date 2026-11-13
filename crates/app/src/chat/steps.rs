@@ -1,17 +1,10 @@
-//! A run of tool calls as the Swift app's `ToolStepView` folds it: one chip with the kinds' icons,
-//! a summary ("Ran 4 commands, read 1 file"), how many failed, and whether one is still running.
-//! Open, each call is a line of its own (`ToolCallRow`): what opens under it is `detail`. Pure, so
-//! the wording is tested on every system.
-
 use notchling_engine::transcript::model::ToolKind;
 use notchling_kit::Icon;
 
 use super::rows::ToolRow;
 
-/// How many kind icons the chip stacks.
 pub const CHIP_ICONS: usize = 4;
 
-/// The verb and the noun's two forms for a kind (`ToolSummary.line` in the Swift app).
 fn words(kind: ToolKind) -> (&'static str, &'static str, &'static str) {
     match kind {
         ToolKind::Shell => ("ran", "command", "commands"),
@@ -28,9 +21,6 @@ fn words(kind: ToolKind) -> (&'static str, &'static str, &'static str) {
     }
 }
 
-/// "Ran 2 commands, edited 3 files, searched 1 time", the kinds in the order they first appear.
-/// Files are counted once each (the same file read twice is "read 1 file"). One call of a tool the
-/// kinds don't name keeps its own title ("Used SendMessage"), since "used 1 tool" says nothing.
 pub fn summary(steps: &[ToolRow]) -> String {
     let mut order: Vec<ToolKind> = Vec::new();
     let mut counts: Vec<usize> = Vec::new();
@@ -74,12 +64,10 @@ pub fn summary(steps: &[ToolRow]) -> String {
     notchling_kit::sentence(&text)
 }
 
-/// How many of the calls failed.
 pub fn failed(steps: &[ToolRow]) -> usize {
     steps.iter().filter(|s| s.is_error).count()
 }
 
-/// "1 failed", "3 failed"; `None` when none did.
 pub fn failed_text(steps: &[ToolRow]) -> Option<String> {
     match failed(steps) {
         0 => None,
@@ -87,12 +75,10 @@ pub fn failed_text(steps: &[ToolRow]) -> Option<String> {
     }
 }
 
-/// A call is still running.
 pub fn running(steps: &[ToolRow]) -> bool {
     steps.iter().any(|s| !s.finished)
 }
 
-/// The kinds' icons, each once, in order of first use, at most [`CHIP_ICONS`].
 pub fn icons(steps: &[ToolRow]) -> Vec<Icon> {
     let mut out: Vec<Icon> = Vec::new();
     for step in steps {
@@ -106,23 +92,16 @@ pub fn icons(steps: &[ToolRow]) -> Vec<Icon> {
     out
 }
 
-/// What opens under a step's line.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Detail {
-    /// Nothing: not clickable.
     None,
-    /// A diff of the file; `path` is the input.
     Diff,
-    /// The command or input in a box ("Command" for a shell, "Input" otherwise), then the output
-    /// if any. A Read's input is its path, already in the title, so it shows only the output.
     Text {
         input_title: Option<&'static str>,
         has_output: bool,
     },
 }
 
-/// What opens under `step`, the Swift app's `hasDetail` rule: a diff, an output, or an input that
-/// isn't a Read's path.
 pub fn detail(step: &ToolRow) -> Detail {
     if !step.diff.is_empty() {
         return Detail::Diff;
@@ -144,8 +123,6 @@ pub fn detail(step: &ToolRow) -> Detail {
     }
 }
 
-/// The text of the input box under a step (a shell's command, any other call's input): the
-/// string `step_detail` shows, when it shows one.
 pub fn input_text(step: &ToolRow) -> Option<String> {
     match detail(step) {
         Detail::Text {
@@ -156,7 +133,6 @@ pub fn input_text(step: &ToolRow) -> Option<String> {
     }
 }
 
-/// The text of the output box under a step: the output, with "… +n lines" when it was cut.
 pub fn output_text(step: &ToolRow) -> Option<String> {
     match detail(step) {
         Detail::Text {
@@ -212,7 +188,6 @@ mod tests {
             ]),
             "Edited 2 files"
         );
-        // The same file twice is one file; a write is its own verb.
         assert_eq!(
             summary(&[
                 step("e1", ToolKind::Edit, "Edited a.rs", "/x/a.rs"),
@@ -221,7 +196,6 @@ mod tests {
             ]),
             "Edited 1 file, wrote 1 file"
         );
-        // Kinds in order of first use, the first word capitalized.
         assert_eq!(
             summary(&[
                 shell("a"),
@@ -279,7 +253,6 @@ mod tests {
         );
         assert!(!running(&[ok.clone(), bad.clone()]));
         assert!(running(&[ok.clone(), open.clone()]));
-        // Each icon once, in order, at most four.
         assert_eq!(
             icons(&[ok.clone(), bad, open.clone(), ok.clone()]),
             [Icon::Terminal, Icon::File]

@@ -1,26 +1,18 @@
-//! The pure parts of `AccountStore`: which account a profile or `oauthAccount` block names, the
-//! `oauthAccount` Claude Code would write for a profile, the plan's name, and whether a login has
-//! expired.
-
 use crate::accounts::Login;
 use serde_json::{json, Map, Value};
 
-/// `<accountUuid>:<organizationUuid>`: one person can be in several organizations.
 pub fn account_id_from_config(config: &Login) -> Option<String> {
     let a = config.str("accountUuid")?;
     let o = config.str("organizationUuid")?;
     Some(format!("{a}:{o}"))
 }
 
-/// The id from `GET /api/oauth/profile`'s `account.uuid` and `organization.uuid`.
 pub fn account_id_from_profile(profile: &Login) -> Option<String> {
     let a = profile.object("account")?;
     let o = profile.object("organization")?;
     Some(format!("{}:{}", a.str("uuid")?, o.str("uuid")?))
 }
 
-/// Whether `id` is shaped like an account id: two UUID-ish parts (hex digits and dashes) around
-/// one colon. Anything else from a caller is refused before it names a Keychain item.
 pub fn valid_id(id: &str) -> bool {
     let part = |p: &str| {
         !p.is_empty() && p.len() <= 64 && p.chars().all(|c| c.is_ascii_hexdigit() || c == '-')
@@ -28,7 +20,6 @@ pub fn valid_id(id: &str) -> bool {
     matches!(id.split_once(':'), Some((a, o)) if part(a) && part(o))
 }
 
-/// The `oauthAccount` block Claude Code would write for this profile.
 pub fn oauth_account_from_profile(profile: &Login) -> Value {
     let a = profile.object("account").unwrap_or_default();
     let o = profile.object("organization").unwrap_or_default();
@@ -71,7 +62,6 @@ pub fn oauth_account_from_profile(profile: &Login) -> Value {
     Value::Object(out)
 }
 
-/// "Max 5x", "Pro", "Team"… from the organization's type and rate limit tier.
 pub fn plan_name(account: &Login, oauth: &Login) -> String {
     let kind = account
         .str("organizationType")
@@ -97,15 +87,12 @@ pub fn plan_name(account: &Login, oauth: &Login) -> String {
     name
 }
 
-/// The `\d+x` at the end of a tier (`default_claude_max_20x` → `20x`).
 fn multiplier(tier: &str) -> Option<&str> {
     let body = tier.strip_suffix('x')?;
     let digits = body.len() - body.trim_end_matches(|c: char| c.is_ascii_digit()).len();
     (digits > 0).then(|| &tier[tier.len() - digits - 1..])
 }
 
-/// Expired, or within a minute of it (`expiresAt` is milliseconds). A login without the field
-/// counts as live.
 pub fn is_expired(oauth: &Login, now_ms: i64) -> bool {
     match oauth.get("expiresAt").and_then(Value::as_f64) {
         Some(ms) => ms / 1000.0 < now_ms as f64 / 1000.0 + 60.0,
@@ -113,7 +100,6 @@ pub fn is_expired(oauth: &Login, now_ms: i64) -> bool {
     }
 }
 
-/// The access token, when there is a non-empty one.
 pub fn access_token(oauth: &Login) -> Option<crate::accounts::Secret> {
     oauth
         .str("accessToken")

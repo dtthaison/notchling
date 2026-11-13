@@ -1,7 +1,3 @@
-//! A failed call that types into a session keeps why in its audit line. Before, the line said
-//! `failed` and nothing else, so a click that was refused by the screen check (a permission that
-//! wasn't on screen, another request in its place, no "don't ask again" option) left no trace of
-//! which one.
 #![cfg(unix)]
 
 use crate::audit::{audit_reason, REASON_CHARS};
@@ -122,7 +118,6 @@ fn a_failed_answer_into_a_terminal_keeps_why_in_the_audit_line() {
 
 #[test]
 fn another_ops_error_text_stays_out_of_the_log() {
-    // Their messages may name accounts or folders; only the terminal ops' fixed sentences are kept.
     let run = start();
     let mut client = app(&run);
     assert!(client.call("accounts.switch", json!({})).is_err());
@@ -144,7 +139,6 @@ fn a_reason_is_one_capped_line_and_only_for_the_terminal_ops() {
     assert_eq!(audit_reason("accounts.switch", "no login for x"), None);
     assert_eq!(audit_reason("session.stop", "folder /x"), None);
     assert_eq!(audit_reason("session.answer", "   "), None);
-    // Cut at a character, never inside one, with a mark that it was cut.
     let long = "é".repeat(REASON_CHARS + 50);
     let kept = audit_reason("session.answer", &long).unwrap();
     assert_eq!(kept.chars().count(), REASON_CHARS + 1);

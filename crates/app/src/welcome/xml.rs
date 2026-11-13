@@ -1,20 +1,11 @@
-//! A small XML reader for the two files this part reads: a property list (the Swift app's
-//! preferences, from `defaults export`) and the update feed. Both are our own or the system's
-//! output, small and plain: elements, attributes, text, comments, CDATA and the five named
-//! entities. A DOCTYPE is skipped and never resolved, so no entity can name a file or a URL.
-
-/// How deep elements may nest and how much text is read: far past either real file.
 const MAX_DEPTH: usize = 64;
 const MAX_BYTES: usize = 4 * 1024 * 1024;
 
-/// One element.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Node {
-    /// The qualified name as written (`sparkle:version`).
     pub name: String,
     pub attrs: Vec<(String, String)>,
     pub children: Vec<Node>,
-    /// The text directly inside, with entities decoded, trimmed.
     pub text: String,
 }
 
@@ -35,7 +26,6 @@ impl Node {
     }
 }
 
-/// Reads the document's root element.
 pub fn parse(text: &str) -> Result<Node, String> {
     if text.len() > MAX_BYTES {
         return Err("the file is too large".into());
@@ -84,8 +74,6 @@ impl Reader<'_> {
         self.at = self.text.len() - trimmed.len();
     }
 
-    /// The prolog, comments, processing instructions and a DOCTYPE (its internal subset in
-    /// brackets included), before and after the root.
     fn skip_misc(&mut self) -> Result<(), String> {
         loop {
             self.skip_space();
@@ -210,7 +198,6 @@ impl Reader<'_> {
     }
 }
 
-/// Decodes `&amp; &lt; &gt; &quot; &apos;` and numeric references. Any other entity is an error.
 fn decode(raw: &str) -> Result<String, String> {
     if !raw.contains('&') {
         return Ok(raw.to_owned());

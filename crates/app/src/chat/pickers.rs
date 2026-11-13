@@ -1,24 +1,14 @@
-//! The pickers under the reply box, one design for every tool (docs/chat-composer-parity.md):
-//! each tool says which menus its session has (a Model menu, an Effort menu, and any other choice
-//! the tool offers, such as Antigravity's Mode), and Chat draws every one the same way, a button
-//! with an icon, the current choice and a chevron that opens a menu of rows. A new tool (Grok)
-//! adds one function here that returns its menus, and the picks it understands in
-//! `ChatView::pick`; nothing in the drawing changes. Pure, so every system tests it.
-
 use notchling_engine::catalog::ModelInfo;
 use notchling_engine::tools::agy::ConfigOption;
 
 use super::claude_picker;
 use crate::tools::codex_picker::{CodexPicker, DEFAULT_TITLE, NOTE as CODEX_NOTE, NO_MODELS};
 
-/// The menu ids every tool uses for its model and its effort; other choices use the tool's own id.
 pub const MODEL: &str = "model";
 pub const EFFORT: &str = "effort";
 
-/// A Codex row that goes back to Codex's own defaults.
 pub const RESET: &str = "";
 
-/// Which icon the button carries.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Glyph {
     Model,
@@ -26,40 +16,28 @@ pub enum Glyph {
     Other,
 }
 
-/// One choice in a menu.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Row {
-    /// What a pick hands the tool: a model id, a level, an option value; [`RESET`] for a default.
     pub value: String,
     pub title: String,
-    /// A line under the title (Codex's model summary), or empty.
     pub detail: String,
     pub selected: bool,
 }
 
-/// One picker: its button and its menu.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Menu {
-    /// [`MODEL`], [`EFFORT`] or the tool's own id for another choice.
     pub id: String,
     pub glyph: Glyph,
-    /// What the button says: the current choice.
     pub label: String,
-    /// The button's hover text.
     pub tip: String,
     pub rows: Vec<Row>,
-    /// Rows under a More Models row (older Claude models); empty for none.
     pub more: Vec<Row>,
-    /// Under the rows ("Applies from the next turn.").
     pub note: Option<String>,
-    /// Said in place of the rows when there are none.
     pub empty: Option<String>,
-    /// False: the button shows, disabled, and the tip says why.
     pub enabled: bool,
 }
 
 impl Menu {
-    /// The button's part name: "Model Picker", "Effort Picker", "Mode Picker".
     pub fn part(&self) -> String {
         match self.glyph {
             Glyph::Model => "Model Picker".to_owned(),
@@ -68,7 +46,6 @@ impl Menu {
         }
     }
 
-    /// The menu's part name: "Model Menu", "Effort Menu", "Mode Menu".
     pub fn menu_part(&self) -> String {
         self.part().replace(" Picker", " Menu")
     }
@@ -102,9 +79,6 @@ fn claude_rows(rows: Vec<claude_picker::Row>) -> Vec<Row> {
         .collect()
 }
 
-/// A Claude Code session: its model and effort, picked as `/model` and `/effort` replies. The
-/// models and the efforts the model in use offers come from `catalog` (the built-in one while it
-/// is empty).
 pub fn claude(model: Option<&str>, effort: Option<&str>, catalog: &[ModelInfo]) -> Vec<Menu> {
     let in_use = model.and_then(|id| claude_picker::find(catalog, id));
     let efforts = claude_picker::efforts(effort, in_use);
@@ -139,8 +113,6 @@ const CODEX_MODEL_TIP: &str =
     "The model this Codex session's next turns use. Codex Default follows Codex's own setting.";
 const CODEX_EFFORT_TIP: &str = "How hard the model reasons on this session's next turns.";
 
-/// A Codex session: its models (Codex's own list, Codex Default first) and the efforts the model
-/// in use offers. A pick rides on the next turn.
 pub fn codex(picker: &CodexPicker) -> Vec<Menu> {
     let rows = picker.rows();
     let mut models = vec![Row {
@@ -166,7 +138,6 @@ pub fn codex(picker: &CodexPicker) -> Vec<Menu> {
         },
         |m| m.name.clone(),
     );
-    // The effort the next turn uses: the pick, else the last turn's, else the model's default.
     let default_effort = current
         .and_then(|m| picker.models.iter().find(|x| x.slug == m.slug))
         .and_then(|m| m.default_effort.clone());
@@ -236,9 +207,6 @@ const AGY_NOT_STARTED: &str =
     "Your first message starts the session; then this can be picked here.";
 const AGY_LOADING: &str = "Antigravity is still opening this session.";
 
-/// An Antigravity session: each option the session offers, its model as the Model menu, its
-/// thinking level as the Effort menu, and any other (Mode) as a menu of its own. Before the
-/// session starts, or while it loads, the Model and Effort buttons show disabled and say why.
 pub fn antigravity(options: &[ConfigOption], started: bool, loading: bool) -> Vec<Menu> {
     let why = if !started {
         Some(AGY_NOT_STARTED)
@@ -291,7 +259,6 @@ pub fn antigravity(options: &[ConfigOption], started: bool, loading: bool) -> Ve
             off(EFFORT, Glyph::Effort, claude_picker::EFFORT_PLACEHOLDER),
         ];
     }
-    // Model first, then effort, then the rest in the tool's order.
     let mut menus: Vec<Menu> = options.iter().map(menu).collect();
     menus.sort_by_key(|m| match m.glyph {
         Glyph::Model => 0,
@@ -301,7 +268,6 @@ pub fn antigravity(options: &[ConfigOption], started: bool, loading: bool) -> Ve
     menus
 }
 
-/// The menu id of a render's forced picker.
 pub fn id_of(kind: claude_picker::Kind) -> &'static str {
     match kind {
         claude_picker::Kind::Model => MODEL,
@@ -309,7 +275,6 @@ pub fn id_of(kind: claude_picker::Kind) -> &'static str {
     }
 }
 
-/// The Antigravity option id a menu id stands for.
 pub fn agy_option(menu: &str) -> &str {
     match menu {
         MODEL => "model",
@@ -368,17 +333,14 @@ mod tests {
         };
         let catalog = Catalog::built_in().models(CatalogTool::Claude, &[live]);
         let menus = claude(Some("claude-fable-5-3"), Some("high"), &catalog);
-        // The borrowed price rides in the row's detail line.
         let fable = menus[0].rows.iter().find(|r| r.title == "Fable 5.3");
         assert!(fable.is_some_and(|r| r.detail.contains("Fable 5.2")));
         assert_eq!(menus[0].label, "Fable 5.3");
         assert_eq!(menus[1].rows.len(), 5);
         assert!(menus[1].empty.is_none());
-        // Haiku 4.5 has no effort levels: the menu says so.
         let menus = claude(Some("claude-haiku-4-5"), None, &catalog);
         assert!(menus[1].rows.is_empty());
         assert_eq!(menus[1].empty.as_deref(), Some(claude_picker::NO_EFFORTS));
-        // Before the daemon answers (no catalog) the built-in list shows.
         assert_eq!(claude(None, None, &[])[0].rows.len(), 4);
     }
 

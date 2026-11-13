@@ -1,12 +1,3 @@
-//! The iOS Simulator in the Details Panel's place, as in Claude Desktop. The header's Simulator
-//! button shows a booted simulator's screen, live (a `simctl io screenshot` about twice a second),
-//! in a phone's frame. Along the top: the device, a menu (the booted ones, the ones it can boot,
-//! Add Simulator…, Add Photos or Videos, Open in Simulator, Detach, Shut Down), and the zoom (−,
-//! Fit, 1×, +). Along the bottom: Home and Rotate (Simulator's own keys, since `simctl` has
-//! neither), Screenshot and Record (to the Desktop), and Annotate: draw on a still of the screen
-//! and add it to the reply. Taps and typing still go to Simulator itself. The pure part is
-//! `chat::simulator`.
-
 use std::cell::Cell;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Stdio};
@@ -26,31 +17,22 @@ use crate::chat::simulator::{
 };
 use crate::phone::bridge::now_ms;
 
-/// Set, a render draws the panel with a sample device; set to a PNG's path, with that screen
-/// (`<png>#menu`: the device menu open too).
 pub const RENDER_ENV: &str = "NOTCHLING_RENDER_SIMULATOR";
 
-/// The panel's width beside the conversation: a phone's screen at a readable size.
 const WIDTH: f32 = 400.0;
 const HEADER: f32 = 52.0;
-/// The pause between two frames, after the one before has come in.
 const FRAME_GAP: Duration = Duration::from_millis(120);
-/// How often the list of simulators is read again while the panel shows.
 const LIST_EVERY: Duration = Duration::from_secs(4);
-/// The space around the phone in its area.
 const AREA_PAD: f32 = 20.0;
-/// Annotate's pen: red, a share of the screenshot's width.
 const PEN: u32 = 0xff3b30;
 const PEN_SHARE: f32 = 0.008;
 
-/// A recording under way. Dropping it stops it, so closing Chat doesn't leave `simctl` recording.
 struct Recording {
     child: Child,
     path: PathBuf,
 }
 
 impl Recording {
-    /// SIGINT, which makes `simctl` finish the file.
     fn stop(&self) {
         let _ = std::process::Command::new("/bin/kill")
             .args(["-INT", &self.child.id().to_string()])
@@ -64,46 +46,34 @@ impl Drop for Recording {
     }
 }
 
-/// Add Simulator…: the runtimes, and which runtime and device type are picked.
 struct NewSimulator {
     runtimes: Vec<Runtime>,
     runtime: usize,
     kind: usize,
 }
 
-/// Annotate: a still of the screen and the lines drawn on it, as shares 0–1 of its size.
 struct Annotation {
     image: Arc<RenderImage>,
     strokes: Vec<Vec<(f32, f32)>>,
     drawing: bool,
 }
 
-/// The panel's state in the Chat window.
 #[derive(Default)]
 pub struct State {
     pub open: bool,
-    /// Every simulator `simctl` lists, booted or not.
     all: Vec<Device>,
-    /// The device shown, by udid, so a new list keeps it.
     active: Option<String>,
-    /// The latest frame, and its device.
     frame: Option<(String, Arc<RenderImage>)>,
-    /// Bumped when the panel opens, so an older loop stops.
     run: u64,
-    /// Whether the list has been read once since the panel opened.
     listed: bool,
-    /// The loop reads the list again at once (after a boot or a shutdown).
     relist: bool,
     recording: Option<Recording>,
-    /// A line under the toolbar: where a file went, or what failed.
     note: Option<String>,
-    /// Something under way that the screen area says ("Booting Lingeva Revamp…").
     busy: Option<String>,
     menu_open: bool,
     zoom: Option<Zoom>,
     adding: Option<NewSimulator>,
     annotation: Option<Annotation>,
-    /// Where the screen was drawn last, and the room the phone had, for the pen and for Fit.
     screen_at: Rc<Cell<Bounds<Pixels>>>,
     room: Rc<Cell<(f32, f32)>>,
 }
@@ -113,7 +83,6 @@ impl State {
         self.open
     }
 
-    /// The booted device shown: the one picked, else the first.
     fn device(&self) -> Option<&Device> {
         let active = self.active.as_deref();
         let booted = || self.all.iter().filter(|d| d.booted);
@@ -127,7 +96,6 @@ impl State {
     }
 }
 
-/// The frame's file: one per app, overwritten each time.
 fn frame_path() -> PathBuf {
     std::env::temp_dir().join(format!("notchling-simulator-{}.jpg", std::process::id()))
 }
@@ -149,7 +117,6 @@ fn now_civil() -> Civil {
     civil_at(ts, local_offset_secs(ts))
 }
 
-/// Runs `command` to its end; its output, or what went wrong.
 fn run(home: &Path, command: &Command, timeout: Duration) -> Result<String, String> {
     let out = RealLauncher::new(home)
         .run(command, timeout)
@@ -167,7 +134,6 @@ fn run(home: &Path, command: &Command, timeout: Duration) -> Result<String, Stri
     }
 }
 
-/// The still with its lines burned in, as a PNG.
 fn annotated_png(image: &RenderImage, strokes: &[Vec<(f32, f32)>]) -> Result<Vec<u8>, String> {
     let size = image.size(0);
     let (w, h) = (size.width.0 as usize, size.height.0 as usize);
@@ -193,7 +159,6 @@ fn annotated_png(image: &RenderImage, strokes: &[Vec<(f32, f32)>]) -> Result<Vec
 }
 
 impl ChatView {
-    /// The render's panel: one sample device, with the screen in the PNG `how` names, if any.
     pub(super) fn render_simulator(&mut self, how: &str, cx: &mut Context<Self>) {
         self.simulator.all = vec![Device {
             udid: "render".into(),
@@ -203,7 +168,6 @@ impl ChatView {
             last_used: String::new(),
             kind: "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro".into(),
         }];
-        // `<png>#menu` opens the device menu as well, with two simulators it could boot.
         let (how, open_menu) = match how.strip_suffix("#menu") {
             Some(path) => (path, true),
             None => (how, false),
@@ -232,7 +196,6 @@ impl ChatView {
         self.simulator.open = true;
     }
 
-    /// The header's Simulator button: shows the panel and starts its live view, or hides it.
     pub(super) fn toggle_simulator(&mut self, cx: &mut Context<Self>) {
         if self.simulator.open {
             self.close_simulator(cx);
@@ -260,7 +223,6 @@ impl ChatView {
         s.adding = None;
         s.annotation = None;
         s.run += 1;
-        // A recording ends with the panel.
         self.stop_recording(cx);
         if let Some((_, old)) = self.simulator.frame.take() {
             cx.drop_image(old, None);
@@ -268,15 +230,11 @@ impl ChatView {
         cx.notify();
     }
 
-    /// While the panel shows: the simulators every few seconds, and the shown one's screen as fast
-    /// as `simctl` gives it. Ends when the panel closes or opens again (`run` changed).
     fn watch_simulator(&mut self, run_id: u64, cx: &mut Context<Self>) {
         let home = self.root.home.clone();
         let renderer = cx.svg_renderer();
         cx.spawn(async move |this, cx| {
             let mut listed_at: Option<std::time::Instant> = None;
-            // The last frame's bytes, hashed: a screen that hasn't changed isn't drawn again, since
-            // every draw of the Chat window sets the cursor and fights AppKit's (it flickers).
             let mut last: Option<(String, u64)> = None;
             loop {
                 let (open, relist) = this
@@ -309,7 +267,6 @@ impl ChatView {
                                 }
                             }
                             v.simulator.listed = true;
-                            // The panel is drawn by the root: the cached parts have no news.
                             v.redraw_chrome(cx);
                             true
                         })
@@ -370,8 +327,6 @@ impl ChatView {
                             }
                             Ok((hash, Some(image))) => {
                                 last = Some((udid.clone(), hash));
-                                // The old frame leaves the GPU's atlas, or each one would stay. A
-                                // still being annotated holds its own handle and is kept.
                                 if let Some((_, old)) = v.simulator.frame.replace((udid, image)) {
                                     let held = v
                                         .simulator
@@ -383,13 +338,11 @@ impl ChatView {
                                     }
                                 }
                             }
-                            // The device shut down between two lists: the next list says so.
                             Err(_) => {
                                 listed_at = None;
                                 last = None;
                             }
                         }
-                        // Each frame is the panel's alone: the cached parts keep their drawing.
                         v.redraw_chrome(cx);
                         true
                     })
@@ -403,8 +356,6 @@ impl ChatView {
         .detach();
     }
 
-    /// Runs a `simctl` step in the background with `busy` said meanwhile, then `done` with its
-    /// answer, and reads the list again.
     fn simctl_step(
         &mut self,
         busy: String,
@@ -469,7 +420,6 @@ impl ChatView {
         );
     }
 
-    /// Add Simulator…: reads the runtimes, then shows the form in the screen's place.
     fn begin_new_simulator(&mut self, cx: &mut Context<Self>) {
         self.simulator.menu_open = false;
         let home = self.root.home.clone();
@@ -501,7 +451,6 @@ impl ChatView {
         cx.notify();
     }
 
-    /// Create: the picked device type on the picked runtime, named as the type, then booted.
     fn create_simulator(&mut self, cx: &mut Context<Self>) {
         let Some(form) = self.simulator.adding.take() else {
             return;
@@ -544,7 +493,6 @@ impl ChatView {
         cx.notify();
     }
 
-    /// Add Photos or Videos: a file picker, then into the device's Photos.
     fn pick_media(&mut self, cx: &mut Context<Self>) {
         self.simulator.menu_open = false;
         let picked = cx.prompt_for_paths(PathPromptOptions {
@@ -584,7 +532,6 @@ impl ChatView {
         );
     }
 
-    /// Home and Rotate: Simulator's own keys in the device's window, then Chat comes back.
     fn press_simulator_key(&mut self, key: SimKey, cx: &mut Context<Self>) {
         let Some(device) = self.simulator.device().cloned() else {
             return;
@@ -636,7 +583,6 @@ impl ChatView {
         self.set_zoom(next, cx);
     }
 
-    /// The shown frame's size in pixels, its points per pixel, and whether it is an iPad's.
     fn frame_pixels(&self) -> Option<((f32, f32), f32, bool)> {
         let device = self.simulator.device()?;
         let (_, image) = self.simulator.frame.as_ref()?;
@@ -648,7 +594,6 @@ impl ChatView {
         ))
     }
 
-    /// Screenshot: a PNG of the shown device on the Desktop.
     fn save_screenshot(&mut self, cx: &mut Context<Self>) {
         let Some(device) = self.simulator.device().cloned() else {
             return;
@@ -687,7 +632,6 @@ impl ChatView {
         }
     }
 
-    /// Record: a video of the shown device on the Desktop, until Stop.
     fn start_recording(&mut self, cx: &mut Context<Self>) {
         let Some(device) = self.simulator.device().cloned() else {
             return;
@@ -710,7 +654,6 @@ impl ChatView {
         cx.notify();
     }
 
-    /// Stop: `simctl` finishes the file, then the note names it.
     fn stop_recording(&mut self, cx: &mut Context<Self>) {
         let Some(mut recording) = self.simulator.recording.take() else {
             return;
@@ -722,7 +665,6 @@ impl ChatView {
             let saved = cx
                 .background_executor()
                 .spawn(async move {
-                    // Up to 15 s for simctl to write the file's end.
                     for _ in 0..150 {
                         if let Ok(Some(_)) = recording.child.try_wait() {
                             return true;
@@ -733,7 +675,6 @@ impl ChatView {
                 })
                 .await;
             this.update(cx, |v, cx| {
-                // A note only when nothing newer replaced it.
                 if v.simulator.recording.is_none() {
                     v.simulator.note = Some(if saved && path.exists() {
                         format!("Saved {}", file_name(&path))
@@ -764,7 +705,6 @@ impl ChatView {
         cx.notify();
     }
 
-    /// Annotate: the screen as it is now, still, to draw on.
     fn begin_annotation(&mut self, cx: &mut Context<Self>) {
         let device = self.simulator.device().map(|d| d.udid.clone());
         let Some((udid, image)) = self.simulator.frame.clone() else {
@@ -797,7 +737,6 @@ impl ChatView {
         cx.notify();
     }
 
-    /// Where `at` (in the window) is on the screen, as shares of its size.
     fn on_screen(&self, at: gpui::Point<Pixels>) -> (f32, f32) {
         let b = self.simulator.screen_at.get();
         let w = f32::from(b.size.width).max(1.0);
@@ -833,8 +772,6 @@ impl ChatView {
         }
     }
 
-    /// Add to Reply: the still with its lines, saved under the data folder's `drops/`, its path
-    /// in the reply box as a dropped file's.
     fn add_annotation(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(n) = self.simulator.annotation.as_ref() else {
             return;

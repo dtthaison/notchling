@@ -1,17 +1,12 @@
-//! What Claude's token use would have cost at API prices (`CostTracker.cost`, `prices`).
-
 use crate::catalog::{Catalog, Price, Tool};
 use serde_json::Value;
 
-// The catalog owns it now; cost and the sources still ask here.
 pub use crate::catalog::model_key;
 
 fn n(from: &Value, key: &str) -> f64 {
     from.get(key).and_then(Value::as_f64).unwrap_or(0.0)
 }
 
-/// Input, output, cache-read, five-minute and one-hour cache-write token counts from one message's
-/// usage.
 pub fn tokens(usage: &Value) -> [f64; 5] {
     let (write5m, write1h) = cache_writes(usage);
     [
@@ -23,9 +18,6 @@ pub fn tokens(usage: &Value) -> [f64; 5] {
     ]
 }
 
-/// Dollars for token totals (input, output, cache read, five-minute and one-hour cache writes) at
-/// `price`'s base rates. Used to price again a day whose transcripts are gone, so a long prompt's
-/// dearer tier and `speed: fast`, which the totals don't keep, are not in it.
 pub fn estimate(price: &Price, t: &[f64; 5]) -> f64 {
     (t[0] * price.input
         + t[1] * price.output
@@ -35,7 +27,6 @@ pub fn estimate(price: &Price, t: &[f64; 5]) -> f64 {
         / 1_000_000.0
 }
 
-/// Five-minute and one-hour cache writes: the split when the usage has one, else all five-minute.
 fn cache_writes(usage: &Value) -> (f64, f64) {
     match usage.get("cache_creation").filter(|v| v.is_object()) {
         Some(split) => (
@@ -46,21 +37,18 @@ fn cache_writes(usage: &Value) -> (f64, f64) {
     }
 }
 
-/// Dollars for one message, or `None` for a model the catalog has no price for.
 pub fn cost(catalog: &Catalog, model: &str, usage: &Value) -> Option<f64> {
     catalog
         .price(Tool::Claude, model)
         .map(|price| cost_at(&price, usage))
 }
 
-/// Dollars for one message at `price`.
 pub fn cost_at(price: &Price, usage: &Value) -> f64 {
     let in_tokens = n(usage, "input_tokens");
     let out_tokens = n(usage, "output_tokens");
     let read_tokens = n(usage, "cache_read_input_tokens");
     let (write5m, write1h) = cache_writes(usage);
     let (mut input, mut output, mut read) = (price.input, price.output, price.cache_read);
-    // A long prompt (Haiku 5.5's) costs the dearer tier.
     if let Some(over) = price.over {
         if in_tokens + read_tokens + write5m + write1h > over.tokens {
             (input, output, read) = (over.input, over.output, over.cache_read);
@@ -77,8 +65,6 @@ pub fn cost_at(price: &Price, usage: &Value) -> f64 {
     dollars / 1_000_000.0
 }
 
-/// "claude-opus-5-5" is "Opus 5.5". Other tools' models ("gpt-6.1-sol", "Gemini 4 Argon") are
-/// already named.
 pub fn display_name(key: &str) -> String {
     let Some(rest) = key.strip_prefix("claude-") else {
         return key.to_string();

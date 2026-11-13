@@ -1,37 +1,3 @@
-//! Milestone 3's ops: acting on sessions (E3b, E4), the `acting` switch, the held prompts and the
-//! hook's request. Built and switched off: while [`Acting`] is off every acting op answers
-//! `forbidden` with [`ACTING_OFF`], nothing is typed, and `hook.request` passes.
-//!
-//! | Op | Tier | Args | Reply |
-//! | --- | --- | --- | --- |
-//! | `session.reply` | app | `{id, text}` | `{"sent": true}` |
-//! | `session.answer` | app | `{id, answers: [[n...] or "text"], question?: {items}}` | `{"answered": "hook" or "terminal", "promptId"?}` |
-//! | `session.permission` | app | `{id, decision: "allow"/"deny"/"always", message?}` | `{"decided": decision, "promptId"}` |
-//! | `session.permission` (no hook) | app | `{id: <row id>, decision, expect: {tool, summary}}` | `{"decided": decision, "answered": "terminal"}` |
-//! | `session.interrupt` | app | `{id}` | `{"sent": true}` |
-//! | `session.take_back` | app | `{id}` | `{"taken": bool}` |
-//! | `session.stop`, `.remove`, `.new`, `.move`, `.command`, `folder.trust` | app | see [`crate::control_ops`] | |
-//! | `settings.set_acting` | app | `{on: bool}` | `{"acting": bool}` |
-//! | `prompts.list` | app | `{}` | `[prompt...]` |
-//! | `settings.get_acting` | agent | `{}` | `{"acting": bool}` |
-//! | `session.question` | agent (a held prompt), app (the screen) | `{id}` | `{"promptId", "items"}` for a held question; else, for the app with acting on, the job's screen read (`{"id": "screen:…", "items"}`, `{"items": []}` when no question shows) |
-//! | `hook.request` | agent, `client: "hook"` only, from a process a Claude Code session started | `{event, waitMs?}` | a decision (`prompts`) |
-//!
-//! An `id` is a row id from `sessions.list`. A held prompt is answered by its own id from
-//! `prompt.pending` only (`session.permission` and `session.answer` when the id is a prompt's,
-//! else they type into the row's dialog), never found from a row: a prompt is the one the app showed.
-//! A typing failure (a dialog open, the question gone) is code `failed`.
-//!
-//! `session.permission` with a row id and `expect` answers a background job's permission dialog
-//! that no hook holds (the app read it from the job's state, "approve Bash: ls"): it attaches,
-//! reads the dialog off the screen and types nothing unless it is a permission dialog asking about
-//! `expect` (the same tool, the summary's text in it, compared without whitespace and with an
-//! elided summary matched piece by piece) with an option for the decision; then it presses that
-//! option's digit only (Allow "Yes", Always the "don't ask again" one, Deny the "No" one) and
-//! waits for the dialog to go. Never Enter, Esc or Ctrl+C. A deny message isn't taken there.
-//!
-//! The hook is who its process is, never what it says: see [`crate::hook_ops`].
-
 use crate::acting::{Acting, ACTING_OFF};
 use crate::agy_ops::AgyOps;
 use crate::catalog_ops::CatalogService;
@@ -56,14 +22,10 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-/// The longest a hook is held (the Swift hook's `waitSeconds`), under Claude Code's 300 s timeout.
 pub const HOOK_WAIT: Duration = Duration::from_secs(290);
 
-/// After an Esc, a session that still shows working is stopping for this long, and a second Esc
-/// isn't sent (`ChatModel.isStopping`): on a session that went idle meanwhile it would open rewind.
 pub const STOPPING_FOR: Duration = Duration::from_secs(20);
 
-/// The ops that act on a session, refused while acting is off.
 pub const ACTING_OPS: [&str; 11] = [
     ops::SESSION_REPLY,
     ops::SESSION_ANSWER,
@@ -78,7 +40,6 @@ pub const ACTING_OPS: [&str; 11] = [
     ops::SESSION_COMMAND,
 ];
 
-/// Session control (E11, `engine::control`), run by [`crate::control_ops`].
 pub const CONTROL_OPS: [&str; 6] = [
     ops::SESSION_STOP,
     ops::SESSION_REMOVE,
@@ -88,31 +49,19 @@ pub const CONTROL_OPS: [&str; 6] = [
     ops::SESSION_COMMAND,
 ];
 
-/// The topics these ops publish on.
 pub const TOPICS: [&str; 2] = [topics::PROMPTS, topics::SETTINGS];
 
-/// Where events go, and whether anyone who can answer is there.
 pub trait Room: Send + Sync {
     fn publish(&self, topic: &str, event: &str, data: &Value);
-    /// An app-tier client is attached (later a paired phone too).
     fn can_answer(&self) -> bool;
-    /// An app-tier client is attached and follows `topic`, so an event published there is seen.
-    /// Attached alone says nothing about what the client reads: the pairing request needs this,
-    /// not [`Room::can_answer`].
     fn can_follow(&self, topic: &str) -> bool;
 }
 
-/// Opens the attach terminal of a background job: `claude attach <job>` in a pty of
-/// [`notchling_engine::reply::keys::timing`]'s size, `TERM=xterm-256color`, `NO_COLOR` dropped,
-/// `CLAUDE_CONFIG_DIR` set to `config_dir` for a lane's job.
 pub trait Attacher: Send + Sync {
     fn attach(&self, job: &str, config_dir: Option<&str>) -> Result<Box<dyn Pty>, ApiError>;
-    /// What reads the screen (E3a's `AskDialog`).
     fn screen_check(&self) -> &dyn ScreenCheck;
 }
 
-/// An attacher that opens nothing, for tests that must not type (the daemon uses
-/// [`crate::attach::ClaudeAttacher`]).
 pub struct NoTerminal;
 
 impl Attacher for NoTerminal {
@@ -136,17 +85,13 @@ pub(crate) fn bad(message: impl Into<String>) -> ApiError {
     ApiError::bad_request(message)
 }
 
-/// Whether `real` (a canonical path) is `/` or the home folder: a session the daemon starts for a
-/// caller never begins there, since its tool can write the folder it starts in.
 pub(crate) fn broad_folder(real: &std::path::Path, home: &std::path::Path) -> bool {
     let home = std::fs::canonicalize(home).unwrap_or_else(|_| home.to_path_buf());
     real.parent().is_none() || real == home
 }
 
-/// Waits this many milliseconds (session control's pauses).
 pub type Pause = Box<dyn Fn(u64) + Send + Sync>;
 
-/// The launcher until [`ActingOps::with_launcher`] sets one: nothing starts.
 struct NoLaunch;
 
 impl Launcher for NoLaunch {
@@ -158,7 +103,6 @@ impl Launcher for NoLaunch {
     }
 }
 
-/// The ops, with what they need.
 pub struct ActingOps {
     pub(crate) acting: Arc<Acting>,
     pub(crate) prompts: PromptStore,
@@ -166,29 +110,16 @@ pub struct ActingOps {
     pub(crate) roots: Roots,
     pub(crate) room: Arc<dyn Room>,
     attacher: Box<dyn Attacher>,
-    /// Starts `claude stop`, `rm`, `--bg` and the trust pty (session control).
     pub(crate) launcher: Arc<dyn Launcher>,
     pub(crate) pause: Pause,
-    /// One attach at a time, so a question read can't move the tabs under an answer.
     typing: Mutex<()>,
-    /// How often a held hook looks at the app and its own process.
     pub(crate) tick: Duration,
-    /// Walks a hook's process up to its Claude Code.
     pub(crate) parent_of: Parents,
-    /// Sessions sent an Esc, and when (by row id).
     stopping: Mutex<HashMap<String, Instant>>,
-    /// Folders `session.new` was refused as untrusted, canonical, and when: `folder.trust` takes
-    /// only these ([`crate::control_ops`]).
     pub(crate) refused: Mutex<HashMap<PathBuf, Instant>>,
-    /// Antigravity sessions (Milestone 5): what turning acting off must close, and whose waiting
-    /// permissions `prompts.list` shows.
     agy: OnceLock<Arc<AgyOps>>,
-    /// Codex turns: what turning acting off must stop.
     codex: OnceLock<Arc<CodexOps>>,
-    /// The models a session may start on; the data file's alone until [`ActingOps::attach_catalog`].
     catalog: OnceLock<Arc<CatalogService>>,
-    /// Where a screen refused by the permission dialog check is kept (0600, overwritten), so a real
-    /// dialog can become the reader's fixture (docs/recording.md, `dialog-permission`).
     screen_file: Option<PathBuf>,
 }
 
@@ -221,61 +152,48 @@ impl ActingOps {
         }
     }
 
-    /// Keeps a screen the permission check refused at `file`.
     pub fn with_screen_file(mut self, file: PathBuf) -> ActingOps {
         self.screen_file = Some(file);
         self
     }
 
-    /// The switch, shared with the ops of Milestone 5 that act on their own sessions.
     pub fn acting_switch(&self) -> Arc<Acting> {
         self.acting.clone()
     }
 
-    /// The Antigravity ops, so acting off closes their sessions and `prompts.list` includes
-    /// their permissions. Once.
     pub fn attach_agy(&self, agy: Arc<AgyOps>) {
         let _ = self.agy.set(agy);
     }
 
-    /// The Codex ops, so acting off stops their turns and drops the messages waiting. Once.
     pub fn attach_codex(&self, codex: Arc<CodexOps>) {
         let _ = self.codex.set(codex);
     }
 
-    /// The daemon's catalog, so `session.new --model` takes what it lists (built in or live).
-    /// Once, before the first op: the daemon's wiring builds it after these ops, since its
-    /// accounts store needs them.
     pub fn attach_catalog(&self, catalog: Arc<CatalogService>) {
         let _ = self.catalog.set(catalog);
     }
 
-    /// The catalog a session's model is checked against.
     pub(crate) fn catalog(&self) -> &CatalogService {
         self.catalog
             .get_or_init(|| Arc::new(CatalogService::built_in()))
     }
 
-    /// Moves every stopping mark `by` into the past (tests).
     #[cfg(test)]
     pub(crate) fn age_stopping(&self, by: Duration) {
         age(&self.stopping, by);
     }
 
-    /// Moves every recorded refusal `by` into the past (tests).
     #[cfg(test)]
     pub(crate) fn age_refusals(&self, by: Duration) {
         age(&self.refused, by);
     }
 
-    /// Session control runs through `launcher`, and waits with `pause`.
     pub fn with_launcher(mut self, launcher: Arc<dyn Launcher>, pause: Pause) -> ActingOps {
         self.launcher = launcher;
         self.pause = pause;
         self
     }
 
-    /// The switch, for `daemon.status`.
     pub fn is_on(&self) -> bool {
         self.acting.is_on()
     }
@@ -284,7 +202,6 @@ impl ActingOps {
         &self.prompts
     }
 
-    /// The daemon is stopping: every held hook passes.
     pub fn close(&self) {
         for prompt in self.prompts.close() {
             self.resolved(&prompt, "pass", "stopping");
@@ -315,8 +232,6 @@ impl ActingOps {
                 if let Some(agy) = self.agy.get() {
                     list.extend(agy.prompts());
                 }
-                // One reply is one line of the local API: an oversized prompt is trimmed or left
-                // out rather than failing the list and hiding the rest.
                 Ok(Value::Array(fit_list(list)))
             }
             ops::SESSION_QUESTION => self.question(caller, args),
@@ -338,15 +253,12 @@ impl ActingOps {
             .ok_or_else(|| bad("settings.set_acting takes {\"on\": true|false}"))?;
         self.acting.set(on);
         if !on {
-            // Every held hook passes now, not at its deadline: nobody may decide them any more.
             for prompt in self.prompts.drain() {
                 self.resolved(&prompt, "pass", "acting_off");
             }
-            // No `agy` stays running while the Swift app owns the sessions.
             if let Some(agy) = self.agy.get() {
                 agy.acting_off();
             }
-            // Nor does a Codex turn run on, or the message waiting behind it start.
             if let Some(codex) = self.codex.get() {
                 codex.acting_off();
             }
@@ -357,7 +269,6 @@ impl ActingOps {
         Ok(data)
     }
 
-    /// Every Claude Code row in the current session list (Move All's plan reads them).
     pub(crate) fn agents_now(&self) -> Vec<Agent> {
         let list = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
         list.as_array()
@@ -369,7 +280,6 @@ impl ActingOps {
             .unwrap_or_default()
     }
 
-    /// The row `args.id` names in the current session list.
     pub(crate) fn agent(&self, args: &Value) -> Result<Agent, ApiError> {
         let id = text_arg(args, "id")?;
         let list = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
@@ -380,7 +290,6 @@ impl ActingOps {
         serde_json::from_value(row.clone()).map_err(|e| ApiError::internal(e.to_string()))
     }
 
-    /// Plays `plan` into the job's attach terminal, one attach at a time.
     pub(crate) fn play(
         &self,
         agent: &Agent,
@@ -391,9 +300,6 @@ impl ActingOps {
         self.play_locked(agent, plan, log, None)
     }
 
-    /// [`ActingOps::play`] for a caller that holds `typing` already.
-    /// `keep`: the request a permission answer was checked against; a screen the check refuses
-    /// is then kept with it ([`ActingOps::with_screen_file`]).
     fn play_locked(
         &self,
         agent: &Agent,
@@ -408,7 +314,6 @@ impl ActingOps {
             AgentTarget::Job(job) if agent.can_reply() => job.clone(),
             _ => return Err(bad("this session takes no replies")),
         };
-        // A lane's job is reachable only through its own config folder.
         let config_dir = config_dir_for_job(&self.roots, &job).or_else(|| agent.config_dir.clone());
         let mut pty = self.attacher.attach(&job, config_dir.as_deref())?;
         let played = execute(plan, pty.as_mut(), self.attacher.screen_check(), log);
@@ -430,9 +335,6 @@ impl ActingOps {
         Ok(json!({"sent": true}))
     }
 
-    /// Esc for a working session, once: the row and its stopping mark are read under the typing
-    /// lock, so two interrupts can't both see it working and both send Esc, and a second one within
-    /// [`STOPPING_FOR`] of the first is a no-op (`{"sent": false, "stopping": true}`).
     fn interrupt(&self, args: &Value) -> Result<Value, ApiError> {
         let id = text_arg(args, "id")?.to_string();
         let _one = self.typing.lock().unwrap_or_else(|e| e.into_inner());
@@ -471,13 +373,10 @@ impl ActingOps {
         Ok(json!({"taken": outcome.taken}))
     }
 
-    /// The held prompt `args.id` names by its own id. Never found from a session row: an answer
-    /// goes to the prompt the app showed, not to whichever one a session has now.
     fn held(&self, args: &Value) -> Result<Option<Prompt>, ApiError> {
         Ok(self.prompts.get(text_arg(args, "id")?))
     }
 
-    /// For reading only (`session.question`): a prompt id, or the row's oldest held question.
     fn held_for_reading(&self, args: &Value) -> Result<Option<Prompt>, ApiError> {
         if let Some(prompt) = self.held(args)? {
             return Ok(Some(prompt));
@@ -493,7 +392,6 @@ impl ActingOps {
     fn permission(&self, args: &Value) -> Result<Value, ApiError> {
         let decision = text_arg(args, "decision")?;
         let Some(prompt) = self.held(args)? else {
-            // No hook holds it: with what the app showed, typed into the row's dialog.
             if args.get("expect").is_some() {
                 return self.permission_on_screen(args, decision);
             }
@@ -517,9 +415,6 @@ impl ActingOps {
         Ok(json!({"decided": decision, "promptId": prompt.id}))
     }
 
-    /// A background job's permission dialog that no hook holds, answered from its screen: the
-    /// dialog must ask about `expect` (the tool and summary the app showed), and then only the
-    /// chosen option's digit is typed ([`plan::permission`]).
     fn permission_on_screen(&self, args: &Value, decision: &str) -> Result<Value, ApiError> {
         let decision =
             Decision::parse(decision).ok_or_else(|| bad("decision is allow, deny or always"))?;
@@ -557,7 +452,6 @@ impl ActingOps {
             self.decide(&prompt, response, "answer")?;
             return Ok(json!({"answered": "hook", "promptId": prompt.id}));
         }
-        // Not held by a hook: typed into the job's dialog, checked page by page.
         let agent = self.agent(args)?;
         let question = question_arg(args)?;
         let choices = choices_from_json(answers, &question.items).map_err(bad)?;
@@ -589,7 +483,6 @@ impl ActingOps {
                 return Ok(out);
             }
         }
-        // Reading the screen moves the dialog's tabs: that's acting.
         if !self.acting.is_on() {
             return Err(forbidden(ACTING_OFF));
         }
@@ -634,8 +527,6 @@ pub(crate) fn text_arg<'a>(args: &'a Value, key: &str) -> Result<&'a str, ApiErr
         .ok_or_else(|| bad(format!("{key} is needed")))
 }
 
-/// `args.expect`: `{"tool": "Bash", "summary": "ls -la"}`, what the app's card showed. The tool
-/// is needed; the summary may be empty (a card that showed the tool alone).
 fn expect_arg(args: &Value) -> Result<Expected, ApiError> {
     let expect = args
         .get("expect")
@@ -658,7 +549,6 @@ fn expect_arg(args: &Value) -> Result<Expected, ApiError> {
     })
 }
 
-/// `args.question`: `{"items": [{header?, question, options, details?, multiSelect?}]}`.
 fn question_arg(args: &Value) -> Result<PendingQuestion, ApiError> {
     let items = args
         .get("question")
@@ -709,8 +599,6 @@ pub(crate) fn now_ms() -> i64 {
     notchling_engine::reply::popall::now_ms()
 }
 
-/// Writes the refused screen, with the request it was checked against, to `file` (0600). Errors
-/// are ignored: keeping it only helps fix the reader.
 fn keep_screen(file: &Path, expect: &Expected, failure: &Failure, lines: &[String]) {
     use std::io::Write;
     use std::os::unix::fs::OpenOptionsExt;

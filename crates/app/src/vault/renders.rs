@@ -1,6 +1,3 @@
-//! The vault's views for `--render` (part U10), over made-up entries, never a store, a Keychain or
-//! a value: the sheet's list, the form, the approval prompt and an agent's request form.
-
 use std::collections::BTreeMap;
 
 use notchling_engine::vault::entry::{
@@ -11,9 +8,7 @@ use serde_json::{json, Value};
 use super::wire::PendingRequest;
 use crate::views::ViewSpec;
 
-/// The fixed clock every render draws at, seconds since 1970 (2026-11-08 UTC).
 pub const NOW: f64 = 1_794_096_000.0;
-/// 2026-11-08 as a day number.
 pub const TODAY: i64 = 20_765;
 
 pub const VIEWS: [ViewSpec; 4] = [
@@ -57,7 +52,6 @@ pub fn shown(name: &str) -> Option<Shown> {
     })
 }
 
-/// Three saved secrets: a token with an expiry and a how-to, a login that asks first, a plain one.
 pub fn entries() -> Vec<VaultEntry> {
     let mut github = VaultEntry::new("github", Kind::Token);
     github.url = Some("https://api.github.com".into());
@@ -79,7 +73,6 @@ pub fn entries() -> Vec<VaultEntry> {
     vec![github, registry, weather]
 }
 
-/// The approvals a render has waiting.
 pub fn approvals() -> Vec<Value> {
     vec![
         json!({"id": "ap-1", "names": ["github", "registry"],
@@ -92,7 +85,6 @@ pub fn approvals() -> Vec<Value> {
     ]
 }
 
-/// An agent asking to update `github` with another URL and note.
 pub fn pending_request() -> PendingRequest {
     let saved = entries().remove(0);
     let request = VaultRequest {

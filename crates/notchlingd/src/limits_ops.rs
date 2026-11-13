@@ -1,41 +1,3 @@
-//! E8c in the daemon (Milestone 6): the limit watchers and their ops. Built and switched off.
-//!
-//! While the `accounts` switch is off the watcher loop does nothing at all: it calls no source (so
-//! no Keychain read, no usage request, no switch), runs no check and says nothing. The switch is
-//! the daemon's [`SwitchFlag`], in memory only and off at every start; turning it off also drops
-//! what the watchers last saw, so the first round after it comes back on syncs afresh. Everything
-//! that reads or writes a login sits behind the traits in
-//! [`notchling_engine::limits::sources`]; the daemon's implementations over the real stores are
-//! [`crate::limits_sources`].
-//!
-//! | Op | Tier | Args | Reply |
-//! | --- | --- | --- | --- |
-//! | `limits.status` | app | `{}` | see below |
-//! | `limits.set_mode` | app | `{provider, mode?, switch_at?}` | `{"provider", "mode", "switch_at"}` |
-//! | `limits.usage` | app | `{refresh?}` | each Claude Code account's limits, see [`crate::limits_usage`] |
-//! | `cost.summary` | agent | `{range?}` | see [`crate::cost_ops`] |
-//!
-//! ```json
-//! {"accounts_on": false, "watching": false, "switch_at": 95,
-//!  "providers": [{"id": "claude", "label": "Claude Code", "mode": "notifyAndSwitch",
-//!                 "modes": ["off", "notify", "notifyAndSwitch"], "default": "notifyAndSwitch",
-//!                 "registered": false, "active": "me@example.com" | null,
-//!                 "windows": [{"name": "5-hour", "percent": 41.0, "resets_at": 1794150245.0}],
-//!                 "last_switch": 1794150245.0 | null, "checked": 1794150245.0 | null}],
-//!  "notices": [{"at": 1794150245.0, "text": "me@example.com is at 91% of its 5-hour limit."}]}
-//! ```
-//!
-//! - `providers` are `claude`, `codex` and `antigravity`. `registered` says a store feeds that
-//!   watcher; `active`, `windows`, `last_switch` and `checked` are what its last check saw (`null`
-//!   or empty before one). `notices` are the last 20 things the watchers said, newest last.
-//! - `limits.status` and `limits.set_mode` work while `accounts` is off: they read and write only
-//!   the daemon's own memory and its own `daemon/limits` document in `<data>/notchling.db` (the modes and the switch
-//!   point, under the Swift keys), never a login.
-//! - `limits.set_mode` takes a `provider` and a `mode` (`off`, `notify`, `notifyAndSwitch`) or a
-//!   `switch_at` (80 to 99, refused outside it) or both. Antigravity refuses `notifyAndSwitch`.
-//! - Every message the watchers say goes out as `limits.notice {"at", "text"}` on the `limits`
-//!   topic (app tier), for the app to show.
-
 use crate::acting_ops::Room;
 use crate::cost_ops;
 use crate::inbox_ops::InboxOps;
@@ -63,22 +25,17 @@ use std::time::Duration;
 pub const LIMITS_STATUS: &str = "limits.status";
 pub const LIMITS_SET_MODE: &str = "limits.set_mode";
 pub const COST_SUMMARY: &str = "cost.summary";
-/// The topic and event the watchers' messages go out on.
 pub const TOPIC_LIMITS: &str = "limits";
 pub const EVENT_NOTICE: &str = "limits.notice";
 
-/// How often the loop looks, and how often it asks the stores for fresh limits (the Swift
-/// `AccountStore`'s own round).
 pub const TICK_EVERY: Duration = Duration::from_secs(10);
 pub const SYNC_EVERY: f64 = 5.0 * 60.0;
-/// Messages kept for `limits.status`.
 const NOTICES: usize = 20;
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-/// A watcher and the store that feeds it.
 enum Slot {
     Claude {
         source: Arc<dyn ClaudeSource>,
@@ -126,8 +83,6 @@ struct Watchers {
     last_sync: Option<f64>,
 }
 
-/// What `limits.status` shows, kept apart from the watchers so a status call never waits for a
-/// check (which may be a switch).
 #[derive(Default)]
 struct Board {
     registered: Vec<&'static str>,
@@ -136,7 +91,6 @@ struct Board {
 
 pub struct LimitsOps {
     accounts: Arc<SwitchFlag>,
-    /// Set when `accounts` goes off: the next round syncs before it checks.
     resync: Arc<AtomicBool>,
     config: Arc<LimitConfig>,
     watchers: Mutex<Watchers>,
@@ -144,9 +98,7 @@ pub struct LimitsOps {
     notices: Arc<Mutex<VecDeque<(f64, String)>>>,
     room: Arc<dyn Room>,
     cost: Arc<CostService>,
-    /// Which unpriced models `cost.summary` has already logged.
     unpriced: cost_ops::UnpricedLog,
-    /// `limits.usage`: each Claude Code account's limits.
     claude_usage: ClaudeUsage,
     now: Arc<dyn Fn() -> f64 + Send + Sync>,
     inbox: Option<Arc<InboxOps>>,
@@ -195,8 +147,6 @@ impl LimitsOps {
     ) -> LimitsOps {
         let resync = Arc::new(AtomicBool::new(false));
         let board = Arc::new(Mutex::new(Board::default()));
-        // Off: forget what the stores said (it may be stale by the time accounts come back), and
-        // never wait here for a round that may be mid-switch.
         let (flag, seen) = (resync.clone(), Arc::downgrade(&board));
         accounts.subscribe(move |on| {
             if on {
@@ -227,9 +177,6 @@ impl LimitsOps {
         }
     }
 
-    /// The daemon's: its own limits document (`daemon/limits` in `<data>/notchling.db`, in memory for a daemon
-    /// given `--socket`) and the cost tracker over the layout's folders, priced by the daemon's
-    /// one `catalog`.
     pub fn for_daemon(
         layout: &Layout,
         accounts: Arc<SwitchFlag>,
@@ -256,19 +203,16 @@ impl LimitsOps {
         self
     }
 
-    /// A fixed clock (tests).
     pub fn with_clock(mut self, now: Arc<dyn Fn() -> f64 + Send + Sync>) -> LimitsOps {
         self.now = now;
         self
     }
 
-    /// Where the once-per-run "no price" lines go (tests).
     pub fn with_unpriced_sink(mut self, sink: Box<dyn Fn(&str) + Send + Sync>) -> LimitsOps {
         self.unpriced = cost_ops::UnpricedLog::with_sink(sink);
         self
     }
 
-    /// A shorter tick for the loop (tests).
     pub fn with_tick(mut self, tick: Duration) -> LimitsOps {
         self.tick = tick;
         self
@@ -282,7 +226,6 @@ impl LimitsOps {
         &self.cost
     }
 
-    /// Where the watchers' messages go: remembered for `limits.status`, and sent as an event.
     pub(crate) fn announcer(&self) -> Announce {
         let notices = self.notices.clone();
         let room = self.room.clone();
@@ -309,7 +252,6 @@ impl LimitsOps {
         })
     }
 
-    /// Feeds the Claude Code watcher from the account store and the jobs that stopped on a limit.
     pub fn set_claude(&self, source: Arc<dyn ClaudeSource>, jobs: Arc<dyn StoppedJobs>) {
         self.claude_usage.set_source(source.clone());
         let watcher =
@@ -320,8 +262,6 @@ impl LimitsOps {
         });
     }
 
-    /// Feeds Codex's watcher. `idle` says nothing would be interrupted by a switch (no `codex`
-    /// process, the ChatGPT app closed); it runs only once a target exists.
     pub fn set_codex(
         &self,
         source: Arc<dyn ProviderSource>,
@@ -342,8 +282,6 @@ impl LimitsOps {
         });
     }
 
-    /// Feeds Antigravity's watcher, at Claude's switch point like Codex. `idle` says nothing
-    /// would be interrupted by a switch (Antigravity closed, no `agy` running).
     pub fn set_antigravity(
         &self,
         source: Arc<dyn ProviderSource>,
@@ -377,8 +315,6 @@ impl LimitsOps {
         board.seen.remove(id);
     }
 
-    /// One round of the loop at `now`. With `accounts` off it does nothing and touches no source;
-    /// true when it ran.
     pub fn tick_at(&self, now: f64) -> bool {
         if !self.accounts.is_on() {
             return false;
@@ -407,8 +343,6 @@ impl LimitsOps {
         true
     }
 
-    /// Starts the loop on a thread of its own: one wake-up per tick, and each tick is a flag check
-    /// while `accounts` is off. [`LimitsOps::close`] ends it.
     pub fn spawn_loop(self: &Arc<Self>) {
         let mut thread = lock(&self.thread);
         if thread.is_some() {
@@ -420,7 +354,6 @@ impl LimitsOps {
         *thread = std::thread::Builder::new()
             .name("notchling-limits".into())
             .spawn(move || {
-                // A timeout is a tick; a message or a closed channel ends the loop.
                 while let Err(RecvTimeoutError::Timeout) = stop_rx.recv_timeout(ops.tick) {
                     ops.tick_at((ops.now)());
                 }
@@ -428,7 +361,6 @@ impl LimitsOps {
             .ok();
     }
 
-    /// Stops the loop and saves the cost cache.
     pub fn close(&self) {
         let stop = lock(&self.stop).take();
         drop(stop);
@@ -438,8 +370,6 @@ impl LimitsOps {
         }
         self.cost.save((self.now)());
     }
-
-    // MARK: Ops
 
     pub fn spec(&self, op: &str) -> Option<OpSpec> {
         match op {
@@ -523,7 +453,6 @@ impl LimitsOps {
                 "limits.set_mode takes a mode or a switch_at",
             ));
         }
-        // Everything is checked before anything is written.
         if let Some(m) = mode.filter(|m| !provider.modes.contains(m)) {
             return Err(ApiError::bad_request(format!(
                 "{} can't be set to {}",

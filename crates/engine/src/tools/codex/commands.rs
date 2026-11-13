@@ -1,27 +1,15 @@
-//! Codex's slash commands (CLI 0.166, descriptions as its own picker shows them). A Chat turn is
-//! `codex exec`, which has no slash commands, so Chat does a few itself and runs the rest in
-//! Codex's own interface: the terminal sheet opens `codex resume <id>` and types the command there
-//! (`CodexCommands`).
-
 use crate::control::slash::SlashCommand;
 use std::path::Path;
 
-/// What Chat does with a command.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Route {
-    /// Chat's own model and effort picker.
     ModelPicker,
-    /// A new Codex session in the same folder.
     NewSession,
-    /// Delete this session, after asking.
     Delete,
-    /// Nothing to do: Chat isn't a Codex process to quit.
     Ignore,
-    /// Typed into `codex resume` in the terminal sheet.
     Terminal,
 }
 
-/// Codex's own commands, in its order.
 const COMMANDS: [(&str, &str); 41] = [
     ("model", "choose what model and reasoning effort to use"),
     ("review", "review my current changes and find issues"),
@@ -87,10 +75,8 @@ const COMMANDS: [(&str, &str); 41] = [
     ("logout", "log out of Codex"),
 ];
 
-/// `quit`, the last of Codex's list.
 const QUIT: (&str, &str) = ("quit", "exit Codex");
 
-/// How many saved prompts are listed, and how much of each file is read for its description.
 const MAX_PROMPTS: usize = 500;
 const PROMPT_HEAD_BYTES: u64 = 64 * 1024;
 
@@ -102,7 +88,6 @@ fn command(name: &str, description: &str) -> SlashCommand {
     }
 }
 
-/// Codex's own commands.
 pub fn all() -> Vec<SlashCommand> {
     COMMANDS
         .iter()
@@ -111,8 +96,6 @@ pub fn all() -> Vec<SlashCommand> {
         .collect()
 }
 
-/// Codex's commands plus the saved prompts in `<codex home>/prompts/<name>.md`, run as
-/// `/prompts:<name>`.
 pub fn available(codex_home: &Path) -> Vec<SlashCommand> {
     let dir = codex_home.join("prompts");
     let mut files: Vec<String> = std::fs::read_dir(&dir)
@@ -146,7 +129,6 @@ fn read_head(path: &Path) -> String {
     String::from_utf8_lossy(&bytes).into_owned()
 }
 
-/// A prompt file's `description:` front matter, else its first line (cut to 80 characters).
 pub fn prompt_description(text: &str) -> Option<String> {
     let lines: Vec<&str> = text
         .split([
@@ -172,7 +154,6 @@ pub fn prompt_description(text: &str) -> Option<String> {
         .map(|l| l.chars().take(80).collect())
 }
 
-/// The command name in `text` ("/review focus on auth" is "review"), if it's one of `among`.
 pub fn command_in(text: &str, among: &[SlashCommand]) -> Option<String> {
     let rest = text.strip_prefix('/')?;
     let name = rest.split_whitespace().next().unwrap_or("");
@@ -192,9 +173,6 @@ pub fn route(name: &str) -> Route {
     }
 }
 
-/// What the terminal sheet runs: Codex's interface on this session, or on a new one in the folder
-/// when it hasn't started yet. `session` is a Codex session id (see [`super::plan::valid_session_id`]);
-/// anything else makes this start a new session rather than carry the text into a shell.
 pub fn script(session: &str) -> String {
     if session.is_empty() || !super::plan::valid_session_id(session) {
         "codex".to_string()

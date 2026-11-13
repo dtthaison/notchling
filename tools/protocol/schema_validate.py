@@ -1,11 +1,3 @@
-"""A small JSON Schema validator for the subset `protocol/agentconsole.v1.schema.json` is written in.
-
-Supported: type (one name or a list), const, enum, properties, required, additionalProperties (a bool),
-items, $ref (to `#/...` in the root schema), oneOf (exactly one must match) and anyOf. Annotations
-(title, description, default, $comment, $schema, $id, version, $defs) are ignored. Any other keyword
-raises `SchemaError` instead of passing silently, so the schema cannot grow past what the tests check.
-Python 3.9, standard library only."""
-
 from __future__ import annotations
 
 from typing import Any, Dict, List
@@ -15,11 +7,10 @@ KEYWORDS = {"type", "const", "enum", "properties", "required", "additionalProper
 
 
 class SchemaError(ValueError):
-    """The schema uses something this validator does not implement, or points at nothing."""
+    pass
 
 
 def validate(instance: Any, schema: Dict[str, Any]) -> List[str]:
-    """Problems found in `instance` against the root `schema`; an empty list means it is valid."""
     return _check(instance, schema, schema, "$")
 
 
@@ -42,7 +33,6 @@ def _is_type(value: Any, name: str) -> bool:
 
 
 def _same(a: Any, b: Any) -> bool:
-    """Equal, but True is not 1 and False is not 0."""
     if isinstance(a, bool) != isinstance(b, bool):
         return False
     return a == b

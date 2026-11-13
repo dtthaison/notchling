@@ -1,7 +1,3 @@
-//! Slash commands a session can run: Claude Code's built-ins, plus the user's, the project's and
-//! enabled plugins' commands and skills (`SlashCommands`). Commands that open a menu go to a
-//! terminal; the rest are typed into the session. Reading is from files only; the caller caches.
-
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{BTreeMap, HashSet};
@@ -9,14 +5,11 @@ use std::path::{Path, PathBuf};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SlashCommand {
-    /// Without the slash, e.g. "clear" or "sd:approve".
     pub name: String,
     pub description: String,
     pub argument_hint: Option<String>,
 }
 
-/// Commands that open a menu in the session's terminal and write nothing to the transcript, so a
-/// hidden attach shows nothing (`/plugin` logged "(no content)"). Chat runs them in its terminal sheet.
 pub const MENU_COMMANDS: [&str; 17] = [
     "plugin",
     "mcp",
@@ -37,12 +30,8 @@ pub const MENU_COMMANDS: [&str; 17] = [
     "logout",
 ];
 
-/// These take a value; only the bare command opens a menu. (Chat answers a bare /model itself.)
 const MENU_WHEN_BARE: [&str; 2] = ["model", "effort"];
 
-/// Commands built into Claude Code, with no file on disk to scan. Most names come from the
-/// `slash_commands` list `claude -p --output-format stream-json` printed on 2.1.318; the rest are
-/// interactive-only and missing from that list. Update it when Claude Code adds commands.
 const BUILT_INS: [(&str, &str); 63] = [
     ("clear", "Clear the conversation and start fresh"),
     ("compact", "Summarise the conversation to free up context"),
@@ -112,18 +101,15 @@ const BUILT_INS: [(&str, &str); 63] = [
     ("help", "Show help"),
 ];
 
-/// True when `name` (lower case) is a command that opens a menu.
 pub fn is_menu_command(name: &str) -> bool {
     MENU_COMMANDS.contains(&name)
 }
 
-/// True when the text is a command that needs a terminal, like "/plugin" or a bare "/effort".
 pub fn opens_menu(text: &str) -> bool {
     let trimmed = text.trim();
     let Some(rest) = trimmed.strip_prefix('/') else {
         return false;
     };
-    // The text is trimmed, so a second word exists exactly when the command is not bare.
     let mut parts = rest.trim_start().splitn(2, char::is_whitespace);
     let Some(first) = parts.next().filter(|p| !p.is_empty()) else {
         return false;
@@ -133,12 +119,9 @@ pub fn opens_menu(text: &str) -> bool {
     is_menu_command(&name) || (MENU_WHEN_BARE.contains(&name.as_str()) && bare)
 }
 
-/// Where a typed command goes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Route {
-    /// Typed into the session like any reply.
     Session,
-    /// Run in a terminal (`claude attach` in a visible pty): it opens a menu.
     Terminal,
 }
 
@@ -150,7 +133,6 @@ pub fn route(text: &str) -> Route {
     }
 }
 
-/// The built-in commands, menu ones marked "Opens a menu".
 pub fn built_ins() -> Vec<SlashCommand> {
     BUILT_INS
         .iter()
@@ -170,8 +152,6 @@ pub fn built_ins() -> Vec<SlashCommand> {
         .collect()
 }
 
-/// Every command a session in `cwd` offers: built-ins first, then user, project and plugin ones by
-/// name; a later source never overrides an earlier name. `home` is the user's home folder.
 pub fn all(home: &Path, cwd: &str) -> Vec<SlashCommand> {
     let mut found = scan(&home.join(".claude"), None);
     if !cwd.is_empty() {
@@ -189,7 +169,6 @@ pub fn all(home: &Path, cwd: &str) -> Vec<SlashCommand> {
         .collect()
 }
 
-/// Commands matching what is typed after the slash: prefix matches first, then the rest.
 pub fn matches(typed: &str, commands: &[SlashCommand], limit: usize) -> Vec<SlashCommand> {
     let q = typed.to_lowercase();
     let is_prefix = |c: &SlashCommand| {
@@ -217,7 +196,6 @@ pub fn matches(typed: &str, commands: &[SlashCommand], limit: usize) -> Vec<Slas
         .collect()
 }
 
-/// `<dir>/commands/*.md` and `<dir>/skills/<name>/SKILL.md`.
 fn scan(dir: &Path, prefix: Option<&str>) -> Vec<SlashCommand> {
     let mut result = Vec::new();
     let commands_dir = dir.join("commands");
@@ -253,7 +231,6 @@ fn names_in(dir: &Path) -> Vec<String> {
 
 fn make(name: &str, meta: &BTreeMap<String, String>, prefix: Option<&str>) -> SlashCommand {
     let mut description = meta.get("description").cloned().unwrap_or_default();
-    // The first sentence, when it ends within 110 characters.
     if let Some((index, _)) = description.char_indices().find(|(_, c)| *c == '.') {
         if description[..index].chars().count() < 110 {
             description.truncate(index + 1);
@@ -266,7 +243,6 @@ fn make(name: &str, meta: &BTreeMap<String, String>, prefix: Option<&str>) -> Sl
     }
 }
 
-/// The simple `key: value` lines between the opening `---` lines.
 fn front_matter(path: &Path) -> BTreeMap<String, String> {
     use std::io::Read;
     let mut meta = BTreeMap::new();
@@ -306,9 +282,6 @@ fn read_object(path: &Path) -> Option<Value> {
     serde_json::from_slice(&data).ok().filter(Value::is_object)
 }
 
-/// Plugin name to install path, for plugins turned on in settings. Like Claude Code, the project's
-/// `.claude/settings.json` overrides the user's, and `settings.local.json` overrides both, so a
-/// plugin installed with `--scope project` shows up in that folder's sessions.
 pub fn enabled_plugins(home: &Path, cwd: &str) -> Vec<(String, String)> {
     let claude = home.join(".claude");
     let mut files: Vec<PathBuf> = vec![claude.join("settings.json")];
@@ -348,7 +321,6 @@ pub fn enabled_plugins(home: &Path, cwd: &str) -> Vec<(String, String)> {
                     .and_then(Value::as_str)
                     .map(String::from)
             };
-            // A project or local install records its folder; prefer this folder's, then a user install.
             let entry = entries
                 .iter()
                 .find(|e| project_of(e).as_deref() == Some(cwd))

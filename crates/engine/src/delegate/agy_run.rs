@@ -1,14 +1,3 @@
-//! One Antigravity CLI turn for a delegated job (Swift `AgyDelegate`), over `agy acp`.
-//!
-//! Nobody is there to answer the tool's permission requests, so they are declined (and listed in
-//! the result), except edits in the workspace with `--write`, which also sets accept-edits mode.
-//! `initialize` offers no file system or terminal, so any other call from the agent gets `-32601`.
-//! What its subagents (the image generator) make is picked up from their own folders; see
-//! [`super::progress`] for why the run waits for them.
-//!
-//! The reply is the agent's text after its last tool call (the last stretch of text that is not
-//! empty). The history `session/load` replays is not part of it.
-
 use super::agy_pick;
 use super::deps::Deps;
 use super::media;
@@ -29,13 +18,10 @@ const TICK: Duration = Duration::from_millis(50);
 
 #[derive(Default)]
 struct State {
-    /// `session/load` is replaying history; none of it is this turn's reply.
     loading: bool,
-    /// The agent's text since its last tool call.
     segment: String,
     last_segment: String,
     declined: Vec<String>,
-    /// The process ended on its own, with its last stderr line.
     exited: Option<String>,
 }
 
@@ -49,7 +35,6 @@ impl State {
     }
 }
 
-/// Hears what the agent says on its own.
 struct Listener {
     write: bool,
     state: Mutex<State>,
@@ -71,7 +56,6 @@ impl Listener {
             .get("options")
             .and_then(Value::as_array)
             .map_or(&[], Vec::as_slice);
-        // The `<prefix>_once` option, else any whose kind starts with the prefix.
         let option = |prefix: &str| -> Option<String> {
             let kind_of = |o: &Value| {
                 o.get("kind")
@@ -154,7 +138,6 @@ impl Handler for Listener {
     }
 }
 
-/// Why the run is being cut short.
 enum Stop {
     Error(String),
     Timeout,
@@ -185,8 +168,6 @@ struct Run<'a> {
 }
 
 impl Run<'_> {
-    /// A request, waited for. `ends_load` clears the replay flag on the connection's own thread,
-    /// before anything that follows the result is heard.
     fn call(&self, method: &str, params: Value, ends_load: bool) -> Result<Value, Stop> {
         let (tx, rx) = channel();
         let listener = self.listener.clone();
@@ -294,7 +275,6 @@ pub fn run(options: &Options, deps: &Deps, progress_out: &mut dyn Write) -> Outc
     o
 }
 
-/// Asks the agent to cancel its turn and gives it a moment to end cleanly.
 fn cancel(run: &Run<'_>, o: &Outcome, deps: &Deps) {
     if let Some(session) = &o.session {
         run.conn
@@ -325,7 +305,6 @@ fn drive(
         false,
     )?;
 
-    // `session/load` replays the history first; none of it is this turn's reply.
     let opened = match &options.session {
         Some(id) => {
             run.listener.lock().loading = true;
@@ -348,7 +327,6 @@ fn drive(
         .session
         .clone()
         .ok_or_else(|| Stop::Error("Antigravity didn't open a session.".into()))?;
-    // Chat lists the job as a subagent from the moment its session has an id.
     if let Some(recorder) = &deps.recorder {
         recorder.session_known(&session, None, None);
     }
@@ -383,7 +361,6 @@ fn drive(
     await_subagents(run, deps, &session, since, subagents, progress_out)
 }
 
-/// Sets model, thinking level and (with `--write`) accept-edits, one after another.
 fn configure(
     run: &Run<'_>,
     options: &Options,
@@ -445,8 +422,6 @@ fn configure(
     Ok(())
 }
 
-/// The turn may have left subagents working (the image generator does). Closing agy now would kill
-/// them, so wait, woken by changes to the session's files, until they report and agy answers.
 fn await_subagents(
     run: &Run<'_>,
     deps: &Deps,

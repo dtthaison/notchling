@@ -1,5 +1,3 @@
-//! Owner publish with a fake network and fake logins: nothing here makes a call.
-
 use super::owner::*;
 use super::tests::{ctx, publish_event};
 use super::*;
@@ -90,8 +88,6 @@ struct Setup {
     event: Value,
 }
 
-/// A library with the page `ID`, owned by `OWNER` at version `100000-aa`, and a PreToolUse event
-/// publishing `work/p.html` to it.
 fn setup(recorded_version: &str) -> Setup {
     let dir = TempDir::new("owner");
     dir.write("work/p.html", "<title>Old</title><p>old</p>");
@@ -138,8 +134,6 @@ fn live(version: &str) -> HttpResponse {
     ok(json!({"live": version}))
 }
 
-// MARK: ids
-
 #[test]
 fn a_link_id_is_the_pages_uuid_in_base58() {
     assert_eq!(uuid_from_short_id(ID), SLUG);
@@ -161,8 +155,6 @@ fn a_link_id_is_the_pages_uuid_in_base58() {
         None
     );
 }
-
-// MARK: the version rule and the body
 
 #[test]
 fn a_newer_version_is_never_overwritten_without_force() {
@@ -221,8 +213,6 @@ fn the_request_headers_are_claude_codes() {
         .contains(&("Content-Type", "application/json".to_string())));
 }
 
-// MARK: run
-
 #[test]
 fn a_publish_as_the_owner_goes_through_and_updates_the_copy() {
     let s = setup("100000-aa");
@@ -252,9 +242,7 @@ fn a_publish_as_the_owner_goes_through_and_updates_the_copy() {
     assert_eq!(body["title"], "New");
     assert!(body["content"].as_str().unwrap().contains("<p>new</p>"));
     assert!(body.get("force").is_none());
-    // Only the owner's login was asked for.
     assert_eq!(*tokens.asked.borrow(), vec![OWNER.to_string()]);
-    // The copy has the new version, and the owner stays the account.
     let page = s.lib.entries().remove(0);
     assert_eq!(page.version, "200000-bb");
     assert_eq!(page.account, OWNER);
@@ -344,7 +332,6 @@ fn without_a_login_the_normal_publish_runs() {
         assert_eq!(run_with(&s, &tokens, &http, 1.0), None);
     }
     assert!(http.sent.borrow().is_empty());
-    // The real source, until accounts arrive.
     assert_eq!(
         UnavailableTokens.token_for(OWNER),
         Err(TokenError::Unavailable("accounts arrive in M6".into()))
@@ -386,7 +373,6 @@ fn publishes_it_does_not_handle_are_left_to_claude_code() {
 #[test]
 fn a_page_with_no_known_owner_is_left_alone() {
     let s = setup("100000-aa");
-    // Wipe the owner out of the list.
     let mut list = s.lib.entries();
     list[0].account.clear();
     std::fs::write(
@@ -422,7 +408,6 @@ fn edits_are_applied_once_and_saved_to_the_file() {
 
 #[test]
 fn trouble_on_the_way_fails_open_with_a_reason() {
-    // Reading the live version fails.
     let s = setup("100000-aa");
     let http = Http::new(vec![HttpResponse {
         status: 404,
@@ -435,13 +420,11 @@ fn trouble_on_the_way_fails_open_with_a_reason() {
         text.contains("reading the page failed (HTTP 404: not found)."),
         "{text}"
     );
-    // The read answers without a live version.
     let http = Http::new(vec![ok(json!({"other": 1}))]);
     assert!(matches!(
         run_with(&s, &Tokens::owner(), &http, 1.0),
         Some(Outcome::Failed(t)) if t.contains("HTTP 200)")
     ));
-    // The publish gets no answer: it may have gone through.
     let http = Http::new(vec![live("100000-aa")]);
     let Some(Outcome::Failed(text)) = run_with(&s, &Tokens::owner(), &http, 1.0) else {
         panic!()
@@ -450,7 +433,6 @@ fn trouble_on_the_way_fails_open_with_a_reason() {
         text.contains("couldn't confirm the publish")
             && text.contains("may still have gone through")
     );
-    // The publish is rejected.
     let http = Http::new(vec![
         live("100000-aa"),
         HttpResponse {
@@ -462,7 +444,6 @@ fn trouble_on_the_way_fails_open_with_a_reason() {
         panic!()
     };
     assert!(text.contains("(HTTP 500: boom)."), "{text}");
-    // The copy is untouched by all of it.
     assert_eq!(s.lib.entries()[0].version, "100000-aa");
 }
 
@@ -470,12 +451,10 @@ fn trouble_on_the_way_fails_open_with_a_reason() {
 fn a_slow_read_leaves_no_time_to_publish() {
     let s = setup("100000-aa");
     let http = Http::new(vec![live("100000-aa"), ok(json!({"version": "200000-bb"}))]);
-    // Each look at the clock costs 25 s: the read takes the budget.
     let Some(Outcome::Failed(text)) = run_with(&s, &Tokens::owner(), &http, 25.0) else {
         panic!()
     };
     assert!(text.contains("answered too slowly"));
     assert_eq!(http.sent.borrow().len(), 1, "only the read was sent");
-    // The read's own wait is capped at 20 s, and at what is left.
     assert!(http.sent.borrow()[0].timeout_secs <= PERM_TIMEOUT_SECS);
 }

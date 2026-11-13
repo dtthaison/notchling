@@ -1,21 +1,7 @@
-//! The search ops (Milestone 5, Task 3; `crates/notchlingd/src/pages_ops.rs` has the shapes) as
-//! the panel and the pages window send and read them.
-//!
-//! `search.query {text?, limit?}` answers `{pages, sessions, indexing}`; `pages.list {}` and
-//! `pages.find {query}` answer `{pages, truncated}`. A page is the `pages.json` entry plus `id`
-//! (the end of its claude.ai link, `null` without one) and `path` (the local copy, absolute,
-//! `null` when the stored names aren't plain); a session is the index's record with `key`
-//! (Chat's row id), `snippet` (`null` without a match in the text) and `highlights` (byte ranges
-//! into the snippet). The readers here take an answer tolerantly: unknown fields are ignored, a
-//! missing or `null` field gets its default, a key may be spelled the Swift way (`link`,
-//! `sessionID`), and a time may be seconds or milliseconds. Changing to a new shape means
-//! changing this file alone.
-
 use notchling_engine::search::{artifact_id_in, PageEntry, SessionTool};
 use notchling_local_api::ops;
 use serde_json::{json, Value};
 
-/// One op and its arguments.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Call {
     pub op: &'static str,
@@ -23,7 +9,6 @@ pub struct Call {
 }
 
 impl Call {
-    /// Pages and sessions for `text`, at most `limit` of each.
     pub fn query(text: &str, limit: usize) -> Call {
         Call {
             op: ops::SEARCH_QUERY,
@@ -46,31 +31,21 @@ impl Call {
     }
 }
 
-/// One saved Artifact page, as the daemon lists it.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Page {
-    /// The artifact id (the end of its claude.ai link); "" for a page that never got a link.
     pub id: String,
     pub title: String,
-    /// The folder's name in the library.
     pub folder: String,
-    /// The copy's file name in that folder.
     pub file: String,
     pub project: String,
-    /// The account that first published it.
     pub account: String,
-    /// Seconds since 1970.
     pub updated_secs: f64,
-    /// The claude.ai link; "" when there is none.
     pub link: String,
-    /// The local copy, absolute; "" when the daemon has none to give.
     pub path: String,
-    /// claude.ai's id of the version last published from this Mac; "" when unknown.
     pub version: String,
 }
 
 impl Page {
-    /// What tells one page from another: its folder, else its id.
     pub fn key(&self) -> &str {
         if self.folder.is_empty() {
             &self.id
@@ -79,7 +54,6 @@ impl Page {
         }
     }
 
-    /// The engine's record of the same page, for `find_pages`.
     pub fn entry(&self) -> PageEntry {
         PageEntry {
             folder: self.folder.clone(),
@@ -95,20 +69,15 @@ impl Page {
     }
 }
 
-/// A conversation search found.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SessionRow {
-    /// Chat's row id, `<tool>:<session id>`.
     pub id: String,
     pub tool: SessionTool,
     pub session_id: String,
     pub title: String,
     pub folder: String,
-    /// The text around the match; none when only the title or folder matched, or without words.
     pub snippet: Option<String>,
-    /// Byte ranges into the snippet to draw bold.
     pub highlights: Vec<(usize, usize)>,
-    /// Seconds since 1970.
     pub updated_secs: f64,
 }
 
@@ -121,7 +90,6 @@ impl SessionRow {
     }
 }
 
-/// What Chat needs to open a conversation.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SessionRef {
     pub tool: SessionTool,
@@ -129,7 +97,6 @@ pub struct SessionRef {
 }
 
 impl SessionRef {
-    /// `codex:abc` → Codex, `abc`. A key with an unknown tool is Claude Code's, like the index.
     pub fn parse(key: &str) -> Option<SessionRef> {
         if key.is_empty() {
             return None;
@@ -153,29 +120,22 @@ impl SessionRef {
         }
     }
 
-    /// The index's key, `<tool>:<session id>`.
     pub fn key(&self) -> String {
         format!("{}:{}", self.tool.key(), self.session_id)
     }
 }
 
-/// `search.query`'s answer.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Results {
     pub pages: Vec<Page>,
     pub sessions: Vec<SessionRow>,
-    /// Secret Vault entries that fit the words: the list's part only, never a value. The app fills
-    /// these from its own vault list; the daemon's answer has none.
     pub secrets: Vec<notchling_engine::vault::VaultEntry>,
-    /// The index is being read again: ask once more in a moment.
     pub indexing: bool,
 }
 
-/// `pages.list`'s and `pages.find`'s answer.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct PageList {
     pub pages: Vec<Page>,
-    /// The list stopped short (a reply is one line of at most 1 MiB).
     pub truncated: bool,
 }
 
@@ -197,8 +157,6 @@ fn flag(v: &Value, name: &str) -> bool {
     field(v, &[name]).and_then(Value::as_bool).unwrap_or(false)
 }
 
-/// A time as seconds: a number of 100 billion or more is milliseconds (that is the year 5138 in
-/// seconds, and 1973 in milliseconds).
 fn secs(v: &Value, names: &[&str]) -> f64 {
     let n = field(v, names).and_then(Value::as_f64).unwrap_or(0.0);
     if n >= 100_000_000_000.0 {
@@ -208,7 +166,6 @@ fn secs(v: &Value, names: &[&str]) -> f64 {
     }
 }
 
-/// `v[name]` as a list, or `v` itself when it is one.
 fn list<'a>(v: &'a Value, name: &str) -> &'a [Value] {
     field(v, &[name])
         .or(Some(v))
@@ -217,12 +174,10 @@ fn list<'a>(v: &'a Value, name: &str) -> &'a [Value] {
         .unwrap_or(&[])
 }
 
-/// The last part of a path, as a name.
 fn last_component(path: &str) -> Option<String> {
     path.rsplit('/').find(|p| !p.is_empty()).map(str::to_owned)
 }
 
-/// `[start, end]` pairs, or `{start, end}` objects; anything else is skipped.
 fn pairs(v: Option<&Value>) -> Vec<(usize, usize)> {
     v.and_then(Value::as_array)
         .map(|items| {
@@ -246,7 +201,6 @@ fn pairs(v: Option<&Value>) -> Vec<(usize, usize)> {
         .unwrap_or_default()
 }
 
-/// Reads `search.query`'s answer. A missing list is empty; a row that can't be read is skipped.
 pub fn parse_results(v: &Value) -> Results {
     Results {
         pages: list(v, "pages").iter().filter_map(parse_page).collect(),
@@ -259,7 +213,6 @@ pub fn parse_results(v: &Value) -> Results {
     }
 }
 
-/// Reads `pages.list`'s and `pages.find`'s answer.
 pub fn parse_pages(v: &Value) -> PageList {
     PageList {
         pages: list(v, "pages").iter().filter_map(parse_page).collect(),
@@ -267,7 +220,6 @@ pub fn parse_pages(v: &Value) -> PageList {
     }
 }
 
-/// One page; `None` without an id, a folder or a path to tell it by.
 pub fn parse_page(v: &Value) -> Option<Page> {
     if !v.is_object() {
         return None;
@@ -298,7 +250,6 @@ pub fn parse_page(v: &Value) -> Option<Page> {
     })
 }
 
-/// One session; `None` without a key.
 pub fn parse_session(v: &Value) -> Option<SessionRow> {
     let id = text(v, &["key", "id"])?;
     let from_key = SessionRef::parse(&id);
@@ -449,7 +400,6 @@ mod tests {
         assert_eq!(r.sessions[0].tool, SessionTool::Antigravity);
         assert_eq!(r.sessions[0].session_id, "9");
         assert_eq!(r.sessions[0].title, "agy:9", "nothing else to call it");
-        // A bad highlight is dropped, the rest kept; an empty snippet is none.
         let s = parse_session(
             &json!({"key": "claude:1", "snippet": "", "highlights": [[2], [0, 2], "x", [-1, 2]]}),
         )
@@ -469,7 +419,6 @@ mod tests {
         assert_eq!(list.pages[1].key(), "b-2");
         let none = parse_pages(&json!({"pages": "x"}));
         assert!(none.pages.is_empty() && !none.truncated);
-        // A bare list works too.
         assert_eq!(parse_pages(&json!([{"folder": "c-3"}])).pages.len(), 1);
     }
 

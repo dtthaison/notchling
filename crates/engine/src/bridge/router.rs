@@ -1,7 +1,3 @@
-//! Reads one text frame from a client and answers it (Swift `BridgeRouter`). Nothing is served
-//! before `hello` or `pair`; a frame that isn't JSON closes an unauthenticated connection, and a
-//! locked-out address gets silence and the door. The ops themselves are in `router_ops`.
-
 use super::backend::{Audit, AuditEntry, BridgeBackend, Devices, PairingCodes, RateLimiter};
 use super::connection::{lock, Connection};
 use super::hub::Hub;
@@ -12,14 +8,10 @@ use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-/// A frame larger than this is refused (`protocol/README.md`: 256 KB).
 pub const MAX_MESSAGE_BYTES: usize = 256 * 1024;
-/// The longest message or caption the phone may send.
 pub const MAX_TEXT_CHARACTERS: usize = 20_000;
-/// What `session.new` takes as `model`; `default` means none.
 pub const MODELS: [&str; 4] = ["default", "opus", "sonnet", "haiku"];
 
-/// Everything the router is built from.
 pub struct RouterParts {
     pub backend: Arc<dyn BridgeBackend>,
     pub devices: Arc<dyn Devices>,
@@ -27,11 +19,8 @@ pub struct RouterParts {
     pub limiter: Arc<dyn RateLimiter>,
     pub audit: Arc<dyn Audit>,
     pub hub: Arc<Hub>,
-    /// `session.new` opens only folders inside it.
     pub home: PathBuf,
-    /// Where phone photos are saved (`~/Library/Caches/AgentConsole/phone-images` on the Mac).
     pub images_dir: PathBuf,
-    /// Milliseconds since the epoch.
     pub now_ms: Arc<dyn Fn() -> f64 + Send + Sync>,
 }
 
@@ -49,7 +38,6 @@ pub struct Router {
     now: Arc<dyn Fn() -> f64 + Send + Sync>,
 }
 
-/// One interrupt per session every three seconds: a second Esc would cancel the queued message.
 const SEND_NOW_INTERVAL_MS: f64 = 3000.0;
 
 impl Router {
@@ -73,19 +61,14 @@ impl Router {
         (self.now)()
     }
 
-    /// Photos being uploaded right now.
     pub fn pending_uploads(&self) -> usize {
         self.uploads.pending()
     }
 
-    /// Frees uploads past their expiry; the transport runs it on the hub's tick.
     pub fn sweep_uploads(&self) {
         self.uploads.sweep(self.now_ms());
     }
 
-    /// Answers one text frame. Blocks until the backend has (a `pair` waits for the person at the
-    /// computer), so the transport calls it off its reading thread; frames of one connection may be
-    /// handled at the same time.
     pub fn handle(&self, connection: &Arc<Connection>, text: &str) {
         let authenticated = connection.is_authenticated();
         if !authenticated
@@ -140,7 +123,6 @@ impl Router {
         }
     }
 
-    /// The transport calls this when a connection ends: its upload and phone stream are dropped.
     pub fn closed(&self, connection: &Arc<Connection>) {
         self.uploads.drop_connection(connection.id);
         let streaming = std::mem::take(&mut connection.subscription().phone_active);
@@ -149,8 +131,6 @@ impl Router {
         }
         self.hub.remove(connection);
     }
-
-    // MARK: Auth
 
     fn fail(&self, connection: &Connection) {
         self.limiter
@@ -249,8 +229,6 @@ impl Router {
         }
     }
 
-    // MARK: Ops
-
     fn dispatch(
         &self,
         op: &str,
@@ -304,7 +282,6 @@ impl Router {
         }
     }
 
-    /// Records an executed action, never its text.
     pub(crate) fn audit(
         &self,
         connection: &Connection,
@@ -326,7 +303,6 @@ impl Router {
         self.audit.append(entry);
     }
 
-    /// False while an interrupt to this session went out less than three seconds ago.
     pub(crate) fn allow_send_now(&self, session_id: &str) -> bool {
         let now = self.now_ms();
         let mut last = lock(&self.send_now_gate);
@@ -345,8 +321,6 @@ pub(crate) fn reply_error(connection: &Connection, id: Option<&Value>, failure: 
     connection.send_text(wire::error(id, failure));
 }
 
-/// An existing folder inside `home`, with `..` and symlinks resolved first, so neither can lead
-/// out of it.
 pub fn validated_folder(path: &str, home: &Path) -> Result<PathBuf, BridgeFailure> {
     if !path.starts_with('/') {
         return Err(BridgeFailure::invalid("cwd phải là đường dẫn tuyệt đối."));
@@ -364,8 +338,6 @@ pub fn validated_folder(path: &str, home: &Path) -> Result<PathBuf, BridgeFailur
     Ok(resolved)
 }
 
-/// `..` removed by name, then the longest part that exists resolved through its symlinks, as
-/// Foundation's `standardizedFileURL.resolvingSymlinksInPath()` does.
 fn resolve(path: &Path) -> PathBuf {
     let mut plain = PathBuf::new();
     for component in path.components() {

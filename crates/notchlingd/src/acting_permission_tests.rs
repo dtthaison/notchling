@@ -1,7 +1,3 @@
-//! `session.permission` for a permission no hook holds: read off the job's screen, checked against
-//! what the app showed, answered with one digit. A fake terminal whose dialog closes on a digit
-//! (made up from Claude Code's known layout; no recording of the dialog exists yet).
-
 use crate::acting::{Acting, ACTING_OFF};
 use crate::acting_ops::{ActingOps, Attacher};
 use crate::acting_ops_tests::{app, code, row, FakeRoom};
@@ -37,7 +33,6 @@ fn dialog() -> Vec<String> {
     ])
 }
 
-/// Shows `screen` until a digit is typed, then the prompt.
 struct DialogPty {
     screen: Vec<String>,
     writes: Arc<Mutex<Vec<String>>>,
@@ -168,8 +163,6 @@ fn no_dialog_on_screen_is_refused_with_nothing_typed() {
     assert!(s.writes.lock().unwrap().is_empty());
 }
 
-/// The dialog reader was written from made-up screens (docs/recording.md, `dialog-permission`):
-/// a screen it refuses is kept, private, so a real one can become the fixture.
 #[test]
 fn a_refused_screen_is_kept_private_and_a_typed_answer_keeps_none() {
     use std::os::unix::fs::PermissionsExt;
@@ -224,7 +217,6 @@ fn the_args_are_checked_before_anything_is_attached() {
     for a in bad {
         assert_eq!(code(ask(&s, a.clone())).0, ErrorCode::BadRequest, "{a}");
     }
-    // A terminal session has no attach terminal to type into.
     let (c, m) = code(ask(
         &s,
         json!({"id": "term", "decision": "allow", "expect": {"tool": "Bash", "summary": ""}}),
@@ -234,7 +226,6 @@ fn the_args_are_checked_before_anything_is_attached() {
         (ErrorCode::BadRequest, "this session takes no replies")
     );
     assert!(s.attached.lock().unwrap().is_empty());
-    // A summary left out is the tool alone.
     let out = ask(
         &s,
         json!({"id": "job-p", "decision": "allow", "expect": {"tool": "Bash"}}),

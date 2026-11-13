@@ -1,5 +1,3 @@
-//! The library: content helpers, recording, the account rule, versions, paths, concurrency.
-
 use super::content::*;
 use super::*;
 use crate::search::PageEntry;
@@ -17,7 +15,6 @@ pub(super) fn ctx<'a>(account: &'a str, home: &'a Path) -> RecordContext<'a> {
     }
 }
 
-/// A `PostToolUse(Artifact)` event publishing `file_path` from `cwd`.
 pub(super) fn publish_event(cwd: &str, file_path: &str, response: &str) -> Value {
     json!({
         "hook_event_name": "PostToolUse",
@@ -41,8 +38,6 @@ fn entry(folder: &str, file: &str) -> PageEntry {
         version: String::new(),
     }
 }
-
-// MARK: content
 
 #[test]
 fn titles_come_from_title_tags_and_headings() {
@@ -88,7 +83,6 @@ fn folder_names_are_a_slug_and_a_stable_hash() {
     );
     assert!(make_folder("日本語", "k").starts_with("page-"));
     assert!(make_folder(&"a".repeat(100), "k").len() <= 40 + 9);
-    // FNV-1a 64 of "a" is af63dc4c8601ec8c; the folder keeps the low 32 bits.
     assert_eq!(make_folder("x", "a"), "x-8601ec8c");
 }
 
@@ -117,8 +111,6 @@ fn the_result_names_a_link_and_a_version() {
     assert_eq!(project_name(""), "");
 }
 
-// MARK: paths
-
 #[test]
 fn only_plain_names_are_safe() {
     for ok in ["index.html", "cost-report-1a2b3c4d"] {
@@ -143,12 +135,9 @@ fn a_hand_edited_list_cannot_point_outside_the_library() {
         lib.local_path(&entry("a", "index.html")),
         Some(dir.path("pages/a/index.html"))
     );
-    // `describe` and the supporting-file walk give nothing away for a damaged entry.
     assert!(lib.supporting_files(&entry("..", "x")).is_empty());
     assert!(lib.describe(&entry("..", "x")).contains("damaged"));
 }
-
-// MARK: recording
 
 #[test]
 fn a_publish_is_saved_wrapped_and_listed() {
@@ -177,7 +166,6 @@ fn a_publish_is_saved_wrapped_and_listed() {
     let saved =
         std::fs::read_to_string(dir.path("pages").join(&e.folder).join("index.html")).unwrap();
     assert!(saved.starts_with("<!doctype html>") && saved.contains("<p>hi</p>"));
-    // The list on disk is the Swift app's shape.
     let raw: Value = serde_json::from_slice(&std::fs::read(lib.list_path()).unwrap()).unwrap();
     assert_eq!(raw["pages"][0]["folder"], json!(e.folder));
     assert_eq!(raw["pages"][0]["version"], json!("1793506664-65e3"));
@@ -222,7 +210,6 @@ fn the_first_publisher_owns_the_page_and_a_republish_updates_it() {
     assert_eq!(second.title, "Two");
     assert_eq!(second.version, "1793506999-bbbb");
     assert_eq!(lib.entries().len(), 1);
-    // A publish whose result has no version clears it, as the Swift app does.
     let third = lib
         .record(
             &publish_event(cwd, "p.html", URL_A),
@@ -305,7 +292,6 @@ fn events_that_are_not_a_page_publish_record_nothing() {
         assert_eq!(lib.record(&event, &c).unwrap(), None, "{event}");
     }
     assert!(lib.entries().is_empty());
-    // A refused publish with a link in the result is still a page (the link is what the copy is for).
     assert!(lib
         .record(
             &publish_event(&cwd, "p.html", &format!("conflict, see {URL_A}")),
@@ -367,12 +353,10 @@ fn supporting_files_are_copied_inside_the_folder_only() {
     assert!(!dir.path("pages/abs.txt").exists());
     assert!(!dir.path("b.txt").exists() && !dir.path("pages/b.txt").exists());
     assert!(!folder.join("other.html").exists());
-    // The page itself is not overwritten by a supporting file of the same name.
     assert!(std::fs::read_to_string(folder.join("index.html"))
         .unwrap()
         .contains("<title>S</title>"));
     assert_eq!(lib.supporting_files(&e), vec!["data.json", "img/a.png"]);
-    // A files array and a root work too.
     dir.write("w/assets/c.css", "css");
     let mut event = publish_event(&cwd, "p.html", URL_A);
     event["tool_input"]["root"] = json!("assets");
@@ -449,7 +433,6 @@ fn remove_forgets_the_page_and_its_folder() {
         )
         .unwrap()
         .unwrap();
-    // A name that would climb out of the library deletes nothing outside it.
     dir.write("keep.txt", "k");
     lib.remove("..").unwrap();
     assert!(dir.path("keep.txt").exists());
@@ -457,8 +440,6 @@ fn remove_forgets_the_page_and_its_folder() {
     assert!(lib.entries().is_empty());
     assert!(!dir.path("pages").join(&e.folder).exists());
 }
-
-// MARK: reading and describing
 
 #[test]
 fn entries_are_newest_first_and_bad_ones_are_skipped() {
@@ -520,7 +501,6 @@ fn describe_names_the_copy_and_who_can_republish() {
     );
     assert_eq!(lines[6], "Supporting files (next to it): x.css");
     assert_eq!(lines[7], format!("Original source file: {}", e.source));
-    // Nothing known: the placeholders.
     let mut bare = e.clone();
     bare.url.clear();
     bare.account.clear();
@@ -552,7 +532,6 @@ fn an_id_or_query_with_dots_and_slashes_never_becomes_a_path() {
     ] {
         assert!(lib.find(query).is_empty(), "{query}");
     }
-    // A lookup only ever selects entries; the paths come from the entries, inside the library.
     let found = lib.find("AbCdEfGhIjKlMnOpQrStUv");
     assert_eq!(found.len(), 1);
     let path = lib.local_path(&found[0]).unwrap();

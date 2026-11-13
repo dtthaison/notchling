@@ -1,8 +1,3 @@
-//! The caller's end: connect, `hello`, then calls; after [`Client::subscribe`], events too.
-//!
-//! Every call blocks until its reply or the client's timeout, so the app runs a client on a
-//! background thread, never its UI thread; [`Client::into_events`] does that for an event stream.
-
 use crate::framing::{write_line, FrameError, LineReader};
 use crate::peer::{same_user, PeerInfo};
 use crate::spawn::spawn_allowed;
@@ -19,26 +14,16 @@ use std::path::Path;
 use std::sync::mpsc::{self, Receiver};
 use std::time::{Duration, Instant};
 
-/// How long a call waits for its reply by default.
 pub const CALL_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// Why a call failed.
 #[derive(Debug)]
 pub enum ClientError {
-    /// No daemon listens on the socket (missing, or a stale file nobody accepts on).
     NotRunning(io::Error),
-    /// The daemon answered with an error.
     Api(ApiError),
-    /// No reply in time.
     Timeout,
-    /// The daemon closed the connection.
     Closed,
-    /// A line that isn't the protocol.
     Protocol(String),
-    /// This system has no transport yet (Windows in Milestone 2).
     Unsupported,
-    /// The process serving the socket isn't a Notchling daemon this client trusts: another user,
-    /// or (macOS) not a `notchling` in an app bundle or a cargo target folder. Nothing was sent.
     UntrustedServer(String),
     Io(io::Error),
 }
@@ -77,7 +62,6 @@ impl From<FrameError> for ClientError {
     }
 }
 
-/// Connects without saying hello: `NotRunning` when nobody listens.
 pub fn connect_raw(socket: &Path) -> Result<Stream, ClientError> {
     transport::connect(socket).map_err(|e| match e.kind() {
         io::ErrorKind::NotFound | io::ErrorKind::ConnectionRefused => ClientError::NotRunning(e),
@@ -86,10 +70,6 @@ pub fn connect_raw(socket: &Path) -> Result<Stream, ClientError> {
     })
 }
 
-/// Whether the process serving a socket, `server`, may be talked to: it runs as this user, and on
-/// macOS its file (from its audit token) is one [`spawn_allowed`] would start, a `notchling` in an
-/// app bundle or a cargo target folder. Linux checks the user only: a Linux install has no fixed
-/// place yet.
 pub fn server_trusted(server: &PeerInfo, my_uid: u32) -> Result<(), String> {
     if !same_user(server.uid, my_uid) {
         return Err(format!("it runs as user {}", server.uid));
@@ -105,13 +85,9 @@ pub fn server_trusted(server: &PeerInfo, my_uid: u32) -> Result<(), String> {
     Ok(())
 }
 
-/// How [`Client::connect_with`] connects.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ConnectOptions {
-    /// How long each call waits for its reply.
     pub timeout: Duration,
-    /// Check who serves the socket before saying anything ([`server_trusted`]). On by default;
-    /// only a test serving from its own binary turns it off.
     pub check_server: bool,
 }
 
@@ -124,7 +100,6 @@ impl Default for ConnectOptions {
     }
 }
 
-/// A connection that has said hello.
 pub struct Client {
     stream: Stream,
     reader: LineReader<Stream>,
@@ -135,13 +110,10 @@ pub struct Client {
 }
 
 impl Client {
-    /// Connects, checks that a Notchling daemon serves the socket ([`server_trusted`]), and says
-    /// hello as `kind` with `version`, waiting up to [`CALL_TIMEOUT`].
     pub fn connect(socket: &Path, kind: ClientKind, version: &str) -> Result<Client, ClientError> {
         Client::connect_with_timeout(socket, kind, version, CALL_TIMEOUT)
     }
 
-    /// [`Client::connect`] with another call timeout.
     pub fn connect_with_timeout(
         socket: &Path,
         kind: ClientKind,
@@ -155,7 +127,6 @@ impl Client {
         Client::connect_with(socket, kind, version, &options)
     }
 
-    /// Connects, checks the server unless `options` say not to, and says hello.
     pub fn connect_with(
         socket: &Path,
         kind: ClientKind,
@@ -165,7 +136,6 @@ impl Client {
         let timeout = options.timeout;
         let stream = connect_raw(socket)?;
         if options.check_server {
-            // Before a word is sent: a stranger on the socket hears nothing from us.
             let server = transport::peer(&stream).map_err(|e| {
                 ClientError::UntrustedServer(format!("its process can't be identified ({e})"))
             })?;
@@ -201,7 +171,6 @@ impl Client {
         Ok(client)
     }
 
-    /// What the daemon said to hello: its version and this connection's tier.
     pub fn hello(&self) -> &HelloReply {
         &self.hello
     }
@@ -210,14 +179,10 @@ impl Client {
         self.hello.tier
     }
 
-    /// How long later calls wait for their reply. The hook says hello with a short wait, then
-    /// waits for the user's answer as long as its own deadline allows.
     pub fn set_timeout(&mut self, timeout: Duration) {
         self.timeout = timeout;
     }
 
-    /// Calls an op and waits for its reply. Events that arrive meanwhile are kept for
-    /// [`Client::next_event`].
     pub fn call(&mut self, op: &str, args: Value) -> Result<Value, ClientError> {
         let id = self.next_id;
         self.next_id += 1;
@@ -229,14 +194,12 @@ impl Client {
                 Incoming::Reply { id: got, result } if got == id => {
                     return result.map_err(ClientError::Api)
                 }
-                // A reply to a request this client gave up on.
                 Incoming::Reply { .. } => {}
                 Incoming::Event(event) => self.events.push_back(event),
             }
         }
     }
 
-    /// [`Client::call`], read as `T`.
     pub fn call_as<T: DeserializeOwned>(
         &mut self,
         op: &str,
@@ -246,23 +209,19 @@ impl Client {
         serde_json::from_value(value).map_err(|e| ClientError::Protocol(e.to_string()))
     }
 
-    /// `daemon.status`.
     pub fn status(&mut self) -> Result<DaemonStatus, ClientError> {
         self.call_as(ops::DAEMON_STATUS, json!({}))
     }
 
-    /// `sessions.list`, read as the caller's row type (`notchling_engine::sessions::Agent`).
     pub fn sessions<T: DeserializeOwned>(&mut self) -> Result<Vec<T>, ClientError> {
         self.call_as(ops::SESSIONS_LIST, json!({}))
     }
 
-    /// `events.subscribe`. Subscribe first, then list, so no change falls between the two.
     pub fn subscribe(&mut self, topics: &[&str]) -> Result<(), ClientError> {
         self.call(ops::EVENTS_SUBSCRIBE, json!({ "topics": topics }))
             .map(|_| ())
     }
 
-    /// The next event, waiting up to `wait`; `None` when none came.
     pub fn next_event(&mut self, wait: Duration) -> Result<Option<Event>, ClientError> {
         if let Some(event) = self.events.pop_front() {
             return Ok(Some(event));
@@ -278,8 +237,6 @@ impl Client {
         }
     }
 
-    /// Moves the client to a thread that forwards its events; the channel ends with the error that
-    /// ended the connection (or when the receiver is dropped, at the next event).
     pub fn into_events(mut self) -> Receiver<Result<Event, ClientError>> {
         let (tx, rx) = mpsc::channel();
         let spawned = std::thread::Builder::new()

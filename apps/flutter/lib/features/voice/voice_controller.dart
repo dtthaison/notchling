@@ -8,7 +8,6 @@ import 'speech_engine.dart';
 import 'transcript_cleanup.dart';
 import 'voice_recorder.dart';
 
-/// Longest dictation; recording stops by itself here and what was said so far is transcribed.
 const Duration maxDictation = Duration(seconds: 60);
 
 enum VoiceProblem { permissionDenied, noSpeech, engineError, recorderError }
@@ -20,7 +19,6 @@ sealed class VoiceState {
 class VoiceIdle extends VoiceState {
   const VoiceIdle({this.stoppedAtLimit = false});
 
-  /// The last dictation hit the 60 s limit; shown once as a hint.
   final bool stoppedAtLimit;
 }
 
@@ -48,13 +46,10 @@ final Provider<VoiceRecorder> voiceRecorderProvider = Provider<VoiceRecorder>((R
 
 final Provider<SpeechEngine> speechEngineProvider = Provider<SpeechEngine>((Ref ref) => WhisperSpeechEngine());
 
-/// Dictation lifetimes override this in tests to shorten the limit.
 final Provider<Duration> maxDictationProvider = Provider<Duration>((Ref ref) => maxDictation);
 
 final NotifierProvider<VoiceController, VoiceState> voiceProvider = NotifierProvider<VoiceController, VoiceState>(VoiceController.new);
 
-/// Tap to start, tap to stop: record, trim silence, transcribe off the UI isolate, clean the text up, and hand
-/// it to whoever listens on [transcripts]. Nothing is ever sent from here; the text only lands in the composer.
 class VoiceController extends Notifier<VoiceState> {
   final StreamController<String> _transcripts = StreamController<String>.broadcast();
   StreamSubscription<double>? _levelSubscription;
@@ -76,7 +71,6 @@ class VoiceController extends Notifier<VoiceState> {
     return const VoiceIdle();
   }
 
-  /// Starts recording. [prompt] is Whisper's initial prompt for this dictation.
   Future<void> start({required String prompt}) async {
     if (state is VoiceRecording || state is VoiceTranscribing) return;
     final VoiceRecorder recorder = ref.read(voiceRecorderProvider);
@@ -109,7 +103,6 @@ class VoiceController extends Notifier<VoiceState> {
     });
   }
 
-  /// Stops recording and transcribes. Returns the cleaned text, or null when there is none (the state says why).
   Future<String?> finish({bool hitLimit = false}) async {
     if (state is! VoiceRecording) return null;
     final VoiceRecorder recorder = ref.read(voiceRecorderProvider);
@@ -134,8 +127,6 @@ class VoiceController extends Notifier<VoiceState> {
     }
   }
 
-  /// Drops a recording or a transcription in progress. An inference already running in its isolate finishes,
-  /// but its text is thrown away.
   Future<void> cancel() async {
     _generation++;
     final bool recording = state is VoiceRecording;
@@ -143,8 +134,7 @@ class VoiceController extends Notifier<VoiceState> {
     if (recording) {
       try {
         await ref.read(voiceRecorderProvider).cancel();
-      } on Object {
-        // Nothing left to cancel.
+      } on Object catch (_) {
       }
     }
     if (ref.mounted) state = const VoiceIdle();

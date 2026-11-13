@@ -1,8 +1,5 @@
-//! A conversation's text, gathered line by line.
-
 use super::text::{first_line_title, SessionRole, TranscriptLine};
 
-/// Enough for the gist of a long session; the newest text is kept (counted in characters).
 pub const MAX_CHARS: usize = 40_000;
 
 #[derive(Clone, Debug, Default)]
@@ -35,17 +32,14 @@ impl SessionTextBuilder {
         }
     }
 
-    /// The folder of the first line that named one.
     pub fn cwd(&self) -> Option<&str> {
         self.cwd.as_deref()
     }
 
-    /// The first thing the user said.
     pub fn first_prompt(&self) -> Option<&str> {
         self.first_prompt.as_deref()
     }
 
-    /// What you named it, else Claude Code's own title, else the start of the first prompt.
     pub fn title(&self) -> String {
         if let Some(t) = &self.custom_title {
             return t.clone();
@@ -59,7 +53,6 @@ impl SessionTextBuilder {
             .unwrap_or_else(|| "Session".to_string())
     }
 
-    /// The messages joined with newlines, cut from the front to fit `MAX_CHARS`.
     pub fn text(&self) -> String {
         let mut kept: Vec<String> = Vec::new();
         let mut total = 0;

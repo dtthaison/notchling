@@ -1,8 +1,3 @@
-//! `--render chat` with the file panel open over a fixture Markdown file (`NOTCHLING_RENDER_FILE`):
-//! needs a window server, so it is ignored by default. Run it with
-//! `cargo test -p notchling-app -- --ignored` on a Mac. `NOTCHLING_FILE_PANEL_PNG=<path>` keeps
-//! the picture there instead of deleting it.
-
 #![cfg(target_os = "macos")]
 
 use std::collections::HashSet;

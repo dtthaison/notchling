@@ -1,5 +1,3 @@
-//! A child process as the connection sees it: lines in, lines out, and a way to end it.
-
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
@@ -7,53 +5,35 @@ use std::sync::mpsc::{channel, Receiver};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-/// The longest line read (1 MiB, the local API's cap). A longer one is dropped whole.
 pub const MAX_LINE: usize = 1 << 20;
 
-/// How many characters of stderr are kept for an error message.
 const ERROR_TAIL: usize = 2000;
 
-/// What a process printed, in order.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Output {
-    /// One stdout line without its newline.
     Line(String),
-    /// A line over [`MAX_LINE`] was dropped.
     Oversize,
-    /// The process ended; its last stderr line, if it said anything. Always the last output.
     Closed(Option<String>),
 }
 
-/// Ends a process from any thread, including while another thread is blocked writing to it.
 pub trait Killer: Send + Sync {
-    /// Ends the process. An [`Output::Closed`] follows, and a blocked write fails.
     fn kill(&self);
 }
 
-/// A running tool.
 pub trait ToolProcess: Send {
-    /// Writes `line` and a newline. It blocks while the process isn't reading and the pipe is
-    /// full, which is why ending the process goes through a [`Killer`] that needs no lock the
-    /// writer holds.
     fn write_line(&mut self, line: &str) -> io::Result<()>;
-    /// The handle that ends this process.
     fn killer(&self) -> Arc<dyn Killer>;
 }
 
-/// A started process and its output.
 pub struct Spawned {
     pub process: Box<dyn ToolProcess>,
     pub output: Receiver<Output>,
 }
 
-/// Starts processes. The real one runs a child; tests use [`super::fake::FakeSpawner`].
 pub trait Spawner: Send + Sync {
     fn spawn(&self, program: &str, args: &[String], folder: &str) -> Result<Spawned, String>;
 }
 
-/// Cuts `reader` into lines of at most `max` bytes, calling `emit` for each; a longer line gives one
-/// [`Output::Oversize`] and its rest is skipped up to the next newline. A last line with no newline
-/// is dropped (the process died mid-message).
 pub fn read_lines<R: Read>(mut reader: R, max: usize, mut emit: impl FnMut(Output)) {
     let mut line: Vec<u8> = Vec::new();
     let mut skipping = false;
@@ -98,8 +78,6 @@ pub fn read_lines<R: Read>(mut reader: R, max: usize, mut emit: impl FnMut(Outpu
     }
 }
 
-/// Starts real child processes. Standard input and output are pipes; `NO_COLOR` is set and `PATH`
-/// gets the usual install folders in front, as the Swift app's did.
 pub struct RealSpawner {
     home: PathBuf,
 }
@@ -181,7 +159,6 @@ impl Spawner for RealSpawner {
     }
 }
 
-/// Waits for the child to be gone: a moment for it to exit after closing its output, then it is killed.
 fn reap(child: &Mutex<Child>) {
     let deadline = Instant::now() + Duration::from_secs(2);
     loop {
@@ -224,8 +201,6 @@ impl ToolProcess for RealProcess {
     }
 }
 
-/// Kills the child. It takes only the child's own lock, which the waiter holds for a moment at a
-/// time, never the writer's: the dead child's pipe then breaks the blocked write.
 struct ChildKiller(Arc<Mutex<Child>>);
 
 impl Killer for ChildKiller {
@@ -269,7 +244,6 @@ mod tests {
         let mut data = vec![b'x'; 40];
         data.extend_from_slice(b"\nok\n");
         assert_eq!(lines(&data, 10), vec![Output::Oversize, line("ok")]);
-        // Exactly at the cap is fine.
         let mut at = vec![b'y'; 10];
         at.push(b'\n');
         assert_eq!(lines(&at, 10), vec![line(&"y".repeat(10))]);
@@ -277,7 +251,6 @@ mod tests {
 
     #[test]
     fn a_line_over_one_mebibyte_does_not_buffer_the_rest() {
-        // 3 MiB of x, one newline, then a good line.
         let mut data = vec![b'x'; 3 << 20];
         data.extend_from_slice(b"\n{\"a\":1}\n");
         assert_eq!(

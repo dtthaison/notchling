@@ -1,25 +1,15 @@
-//! What a card says while an answer is on its way, when it fails, and right after it went through
-//! (pure). A permission in a background job is answered by typing a digit into its terminal, which
-//! takes seconds; a job with several permissions in a row then shows the next one in the same
-//! place, looking the same, so without these words a click read as "nothing happened".
-
 use notchling_kit::sentence;
 
 use crate::acting::Decision;
 
-/// How long "Allowed: Write notes.md" stays above whatever follows, in ms.
 pub const CONFIRM_MS: i64 = 6_000;
 
-/// What is being sent.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Sending {
-    /// An answer to a question.
     Answer,
-    /// A permission's decision. `on_screen`: typed into the job's terminal, not given to a hook.
     Decision { decision: Decision, on_screen: bool },
 }
 
-/// The line on a card while its answer is going out.
 pub fn sending_text(sending: Sending) -> &'static str {
     match sending {
         Sending::Answer => "Sending…",
@@ -42,23 +32,17 @@ pub fn sending_text(sending: Sending) -> &'static str {
     }
 }
 
-/// The tools whose summary is the path of the file they work on.
 const FILE_TOOLS: [&str; 5] = ["Write", "Edit", "MultiEdit", "NotebookEdit", "Read"];
 
-/// The marker of the daemon's "not on screen any more" refusal (`Failure::NotPermission`).
 const GONE: &str = "isn't showing that permission";
 
-/// How much of a command a confirmation names.
 const SUBJECT_CHARS: usize = 48;
 
-/// The file a tool works on, when the summary is its path: the last part of it, for the card's
-/// headline (a long path wraps, and two requests in one folder look alike).
 pub fn file_name<'a>(tool: &str, summary: &'a str) -> Option<&'a str> {
     if !FILE_TOOLS.contains(&tool.trim()) {
         return None;
     }
     let path = summary.trim();
-    // A path cut short ("…") or spread over lines isn't one to take a name from.
     if path.contains('\n') || path.contains('…') || path.ends_with("...") {
         return None;
     }
@@ -66,7 +50,6 @@ pub fn file_name<'a>(tool: &str, summary: &'a str) -> Option<&'a str> {
     (!name.is_empty()).then_some(name)
 }
 
-/// What a confirmation names after the tool: the file, or the command's first line, cut short.
 fn subject(tool: &str, summary: &str) -> String {
     if let Some(name) = file_name(tool, summary) {
         return name.to_owned();
@@ -79,7 +62,6 @@ fn subject(tool: &str, summary: &str) -> String {
     format!("{}…", cut.trim_end())
 }
 
-/// "Allowed: Write notes.md": what the answer that just went through was about.
 pub fn confirmation(tool: &str, summary: &str, decision: Decision) -> String {
     let verb = match decision {
         Decision::Allow => "Allowed",
@@ -94,12 +76,9 @@ pub fn confirmation(tool: &str, summary: &str, decision: Decision) -> String {
     }
 }
 
-/// What a permission card leaves behind, by how its answer ended.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Told {
-    /// The answer went through: "Allowed: Write notes.md".
     pub went_through: String,
-    /// The terminal showed no such permission any more: "Already answered in the terminal: …".
     pub already_answered: String,
 }
 
@@ -112,7 +91,6 @@ impl Told {
     }
 }
 
-/// A decision that went through, shown for a moment.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Confirmed {
     pub text: String,
@@ -132,14 +110,10 @@ impl Confirmed {
     }
 }
 
-/// Whether the daemon refused because the terminal shows no such permission any more
-/// (`Failure::NotPermission`, pinned by a test against the engine's words): it was answered
-/// there, or by an earlier click whose state hasn't caught up.
 pub fn is_gone(message: &str) -> bool {
     message.contains(GONE)
 }
 
-/// What the card leaves behind when its permission turns out to be answered already.
 pub fn already_answered(tool: &str, summary: &str) -> String {
     let subject = subject(tool, summary);
     if subject.is_empty() {
@@ -152,8 +126,6 @@ pub fn already_answered(tool: &str, summary: &str) -> String {
     }
 }
 
-/// The daemon's reason for a refusal as the card shows it. A call that timed out or lost the
-/// connection may still have reached the session, which the words say.
 pub fn failure_text(message: &str) -> String {
     let said = sentence(message.trim());
     if said.is_empty() {
@@ -184,7 +156,6 @@ mod tests {
         assert!(sending_text(on_screen(Decision::Always)).starts_with("Allowing"));
         assert!(sending_text(on_screen(Decision::Always)).contains("not asking again"));
         assert!(sending_text(on_screen(Decision::Deny)).starts_with("Denying"));
-        // Typed into a terminal: it takes seconds, and the card says so.
         assert!(sending_text(on_screen(Decision::Allow)).contains("few seconds"));
         let held = Sending::Decision {
             decision: Decision::Allow,
@@ -204,9 +175,7 @@ mod tests {
         assert_eq!(file_name("MultiEdit", "/w/src/main.rs"), Some("main.rs"));
         assert_eq!(file_name("NotebookEdit", "/w/x.ipynb"), Some("x.ipynb"));
         assert_eq!(file_name("Read", "~/notes/today.md"), Some("today.md"));
-        // A bare name is its own headline.
         assert_eq!(file_name("Write", "notes.md"), Some("notes.md"));
-        // Not a path tool, a path that is cut short, or nothing to name.
         assert_eq!(file_name("Bash", "ls /tmp/a.txt"), None);
         assert_eq!(file_name("Write", "/Users/me/…/memory/a.md"), None);
         assert_eq!(file_name("Write", "/Users/me/memory/…"), None);
@@ -237,7 +206,6 @@ mod tests {
             confirmation("Bash", "cargo test --workspace", Decision::Deny),
             "Denied: Bash cargo test --workspace"
         );
-        // A long command is cut at a character, never mid-way through one, and keeps one line.
         let long = format!("echo {}é{}\nsecond line", "a".repeat(40), "b".repeat(40));
         let text = confirmation("Bash", &long, Decision::Allow);
         assert!(text.starts_with("Allowed: Bash echo aaaa"), "{text}");
@@ -258,7 +226,6 @@ mod tests {
     fn a_refusal_is_shown_in_the_daemons_words() {
         let said = "The terminal asks about something else than Chat shows, so nothing was typed. Answer it in the terminal.";
         assert_eq!(failure_text(said), said);
-        // A reply that never came may still have gone through.
         let late = failure_text("the daemon didn't answer in time");
         assert!(
             late.starts_with("The daemon didn't answer in time."),
@@ -279,7 +246,6 @@ mod tests {
             ("permission-next", Preview::PermissionNext),
         ] {
             assert_eq!(Preview::parse(word), Some(preview), "{word}");
-            // Read from a job's state like a real one, so it is typed into the terminal.
             let Prompt::Permission(r) = preview_prompt(preview) else {
                 panic!("a permission")
             };

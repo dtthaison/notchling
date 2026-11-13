@@ -1,18 +1,3 @@
-//! The limit watchers' sources ([`notchling_engine::limits::sources`]) over the daemon's real
-//! stores, registered on [`crate::limits_ops::LimitsOps`] by the daemon's wiring:
-//!
-//! - [`ClaudeLimits`]: Claude Code's accounts and lanes ([`ClaudeAccounts`]), with each account's
-//!   usage read from `/api/oauth/usage` with [`ClaudeAccounts::usage_token`], which never renews a
-//!   token in use (the main login's or a lane's);
-//! - [`ProviderLimits`]: Codex's or Antigravity's [`AccountProvider`];
-//! - [`SessionJobs`]: the background jobs in the session list that stopped on a limit, and the
-//!   nudge that restarts one (`claude respawn`, then a typed reply through M3's attach path).
-//!
-//! The watcher loop calls none of these while `accounts` is off. Each also checks the switch
-//! itself before it touches a login, so a call that slips past the loop still does nothing; the
-//! stores' Keychain and network are gated on the same switch underneath. A nudge also needs
-//! `acting` on: it types into a session.
-
 use crate::acting_ops::{now_ms, ActingOps, NoLog};
 use crate::limits_ops::SYNC_EVERY;
 use crate::switches::SwitchFlag;
@@ -44,13 +29,10 @@ fn now_secs() -> f64 {
     now_ms() as f64 / 1000.0
 }
 
-/// Claude Code's accounts for the watcher.
 pub struct ClaudeLimits {
     accounts: Arc<SwitchFlag>,
     store: Arc<ClaudeAccounts>,
-    /// The last limits read, by account id.
     usage: Mutex<HashMap<String, AccountUsage>>,
-    /// Why the last read of an account failed, by account id; gone once one works.
     errors: Mutex<HashMap<String, String>>,
     now: Arc<dyn Fn() -> f64 + Send + Sync>,
 }
@@ -66,19 +48,16 @@ impl ClaudeLimits {
         }
     }
 
-    /// A fixed clock (tests).
     pub fn with_clock(mut self, now: Arc<dyn Fn() -> f64 + Send + Sync>) -> ClaudeLimits {
         self.now = now;
         self
     }
 
-    /// Whether `id` is the main login's account or a lane's: its token is read, never renewed.
     fn in_use(&self, id: &str) -> bool {
         self.store.snapshot().active.as_deref() == Some(id)
             || self.store.lanes().iter().any(|l| l.account_id == id)
     }
 
-    /// One account's limits, or why there are none (words for the user).
     fn fetch(&self, id: &str, now: f64) -> Result<AccountUsage, String> {
         let expired = || {
             if self.in_use(id) {
@@ -108,8 +87,6 @@ impl ClaudeLimits {
         }
     }
 
-    /// Reads one account and keeps the answer or the reason. A failed read leaves the last good
-    /// one in place for the watcher.
     fn read(&self, id: &str, now: f64) {
         match self.fetch(id, now) {
             Ok(usage) => {
@@ -122,8 +99,6 @@ impl ClaudeLimits {
         }
     }
 
-    /// Reads the main login (it may have changed under us), then every signed-in account's limits
-    /// that were not read in the last round, or all of them when `force`.
     fn sync_with(&self, force: bool) {
         if !self.accounts.is_on() {
             return;
@@ -151,7 +126,6 @@ impl ClaudeLimits {
 }
 
 impl ClaudeSource for ClaudeLimits {
-    /// Each account's limits not read in the last round (`AccountStore.fetchUsage`).
     fn sync_usage(&self) {
         self.sync_with(false);
     }
@@ -211,12 +185,9 @@ impl ClaudeSource for ClaudeLimits {
     }
 }
 
-/// Codex's or Antigravity's accounts for the watcher.
 pub struct ProviderLimits {
     accounts: Arc<SwitchFlag>,
     provider: Arc<dyn AccountProvider>,
-    /// The watcher's own switch, when it differs from the provider's (Antigravity's leaves a
-    /// closed app closed).
     switch: Option<SwitchFn>,
 }
 
@@ -237,7 +208,6 @@ impl ProviderLimits {
     }
 }
 
-/// The registry's report as the watchers' (the same fields; two parts made them apart).
 pub fn report_of(report: &ProviderReport) -> UsageReport {
     let kind = |k: Kind| match k {
         Kind::Session => BarKind::Session,
@@ -306,7 +276,6 @@ impl ProviderSource for ProviderLimits {
     }
 }
 
-/// How long a respawned job's state file may take to move, and how long it settles after.
 #[derive(Clone, Copy, Debug)]
 pub struct NudgeTiming {
     pub respawn_wait: Duration,
@@ -315,7 +284,6 @@ pub struct NudgeTiming {
 }
 
 impl Default for NudgeTiming {
-    /// `LimitWatcher.respawn`'s: up to 60 s, looking every 2 s, then 6 s.
     fn default() -> Self {
         NudgeTiming {
             respawn_wait: Duration::from_secs(60),
@@ -325,10 +293,8 @@ impl Default for NudgeTiming {
     }
 }
 
-/// The session list's jobs that stopped on a limit, and the nudge.
 pub struct SessionJobs {
     acting: Arc<ActingOps>,
-    /// Jobs being restarted now.
     working: Arc<Mutex<HashSet<String>>>,
     timing: NudgeTiming,
 }
@@ -347,8 +313,6 @@ impl SessionJobs {
         self
     }
 
-    /// `claude respawn`, a wait for the job to run again, then the reply. Each step looks at
-    /// `acting` first: turned off meanwhile, the rest is dropped.
     fn restart(acting: &ActingOps, job_id: &str, text: &str, timing: NudgeTiming) {
         let state = job_state_path(&acting.roots, job_id);
         let stamp = || std::fs::metadata(&state).and_then(|m| m.modified()).ok();
@@ -383,8 +347,6 @@ impl StoppedJobs for SessionJobs {
         stopped_in(&self.acting.agents_now())
     }
 
-    /// False when it is already being restarted, or `acting` is off (nothing may type into a
-    /// session then).
     fn nudge(&self, job_id: &str, text: &str) -> bool {
         if !self.acting.is_on() || !lock(&self.working).insert(job_id.to_string()) {
             return false;

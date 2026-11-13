@@ -38,7 +38,6 @@ from typing import List, Optional, Sequence, Tuple
 
 import fragments
 
-# (major, minor, patch, beta number or None for a Stable)
 Version = Tuple[int, int, int, Optional[int]]
 
 NUM = r"(0|[1-9][0-9]*)"
@@ -66,10 +65,6 @@ def format_tag(v: Version) -> str:
 
 
 def build_number(v: Version) -> int:
-    """CFBundleVersion: X*1000000 + Y*10000 + Z*100 + N for a Beta, + 99 for a Stable.
-
-    Sparkle compares it as a number, so a Stable sorts after every Beta of it and betas sort by N. Minor and
-    patch stop at 99 and a beta number at 98, or two versions could collide or invert."""
     x, y, z, n = v
     if y > MAX_PART or z > MAX_PART:
         raise ValueError(f"minor and patch stop at {MAX_PART} ({format_tag(v)})")
@@ -109,7 +104,6 @@ def last_stable(tags: Sequence[str]) -> Optional[Version]:
 
 
 def new_fragment_kinds(tags: Sequence[str], repo: str, changes_dir: str) -> set:
-    """Kinds of the fragments in changes/ that the last Stable tag did not already contain."""
     stable = last_stable(tags)
     released = set()
     if stable is not None:
@@ -124,7 +118,6 @@ def new_fragment_kinds(tags: Sequence[str], repo: str, changes_dir: str) -> set:
 
 def next_tag(channel: str, tags: Sequence[str], kinds: set, allow_breaking: bool,
              from_tag: Optional[str], info_plist: Path) -> Version:
-    """`kinds` are the kinds of the fragments the last Stable tag did not contain (new_fragment_kinds)."""
     parsed = [v for v in (parse_tag(t) for t in tags) if v]
     stables = sorted(v for v in parsed if v[3] is None)
     betas = [v for v in parsed if v[3] is not None]
@@ -153,7 +146,7 @@ def next_tag(channel: str, tags: Sequence[str], kinds: set, allow_breaking: bool
     base = stables[-1] if stables else plist_stable_version(info_plist)
     x, y, z, _ = base
     major = (x + 1, 0, 0)
-    above = [b for b in betas if b[:3] > base[:3]]  # Betas still ahead of the last Stable
+    above = [b for b in betas if b[:3] > base[:3]]
     newest = max(above) if above else None
     if "breaking" in kinds and not allow_breaking and not any(b[:3] == major for b in above):
         raise VersionError("changes/ holds a new 'breaking' fragment and no Beta of "
@@ -176,14 +169,13 @@ def next_tag(channel: str, tags: Sequence[str], kinds: set, allow_breaking: bool
         else:
             line = (x, y, z + 1)
         if newest is not None and line < newest[:3]:
-            line = newest[:3]  # the fragments went back (reverted, or an older Beta was promoted)
+            line = newest[:3]
     n = max([b[3] for b in betas if b[:3] == line] + [0]) + 1
     return line + (n,)
 
 
 def cmd_next(args) -> int:
     tags = read_tags(args.tags_file, args.repo)
-    # A Stable never looks at fragments: the maintainer's click on Promote is the approval.
     kinds = new_fragment_kinds(tags, args.repo, args.changes_dir) if args.channel == "beta" else set()
     v = next_tag(args.channel, tags, kinds, args.allow_breaking, args.from_tag, Path(args.info_plist))
     try:

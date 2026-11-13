@@ -1,11 +1,3 @@
-//! The daemon's real providers for [`ProvidersOps`]: where each provider keeps its files, and which
-//! effects are real. Under a fixture root (`NOTCHLING_DATA_ROOT`) every effect is a fake, so a dev
-//! run never touches the real Keychain, apps or processes.
-//!
-//! [`ProviderStores`] keeps the concrete stores too: the limit watchers read Codex's and
-//! Antigravity's ([`crate::limits_sources::ProviderLimits`]), and Codex's watcher asks whether
-//! anything would be interrupted by a switch.
-
 use crate::acting_ops::Room;
 use crate::layout::Layout;
 use crate::providers_gate::Gated;
@@ -26,7 +18,6 @@ use notchling_engine::providers::http_real::TlsHttp;
 use notchling_engine::providers::{FakeHttp, HttpClient, ProviderRegistry};
 use std::sync::Arc;
 
-/// The four outside effects, real or fake.
 type Effects = (
     Arc<dyn Keychain>,
     Arc<dyn HttpClient>,
@@ -34,7 +25,6 @@ type Effects = (
     Arc<dyn Apps>,
 );
 
-/// The daemon's three provider stores.
 pub struct ProviderStores {
     pub desktop: Arc<DesktopStore>,
     pub codex: Arc<CodexStore>,
@@ -42,8 +32,6 @@ pub struct ProviderStores {
 }
 
 impl ProviderStores {
-    /// In the Accounts window's order: Claude Code (E8a, apart), Claude Desktop, Codex,
-    /// Antigravity.
     pub fn registry(&self) -> ProviderRegistry {
         let mut registry = ProviderRegistry::new();
         registry.register(self.desktop.clone());
@@ -52,13 +40,6 @@ impl ProviderStores {
         registry
     }
 
-    /// The daemon's stores. Under a fixture root (`NOTCHLING_DATA_ROOT`) every effect is a fake,
-    /// so a dev run never touches the real Keychain, apps or processes; otherwise the real
-    /// `/usr/bin/security`, apps, processes and HTTPS. The saved account names and Claude
-    /// Desktop's copies are the daemon's own: the names are documents in `<data dir>/notchling.db`
-    /// (`accounts/codex`, `accounts/antigravity`; the files they were, in
-    /// `<data dir>/daemon/accounts`, move in once), Desktop's copies stay files there. `claude_accounts`
-    /// is E8a's account list, which Desktop's rows are matched against.
     pub fn for_daemon(
         layout: &Layout,
         accounts: &Arc<SwitchFlag>,
@@ -74,7 +55,6 @@ impl ProviderStores {
                 Arc::new(FakeApps::new()),
             )
         } else {
-            // Gated on the switch as well as each op's own check ([`crate::providers_gate`]).
             (
                 Gated::new(accounts, Arc::new(SecurityTool)),
                 Gated::new(accounts, Arc::new(TlsHttp)),
@@ -155,8 +135,6 @@ impl ProviderStores {
 }
 
 impl ProvidersOps {
-    /// The daemon's provider ops over [`ProviderStores::for_daemon`], with no Claude Code accounts
-    /// for Desktop to match (the daemon's wiring passes E8a's list).
     pub fn for_daemon(
         layout: &Layout,
         accounts: Arc<SwitchFlag>,

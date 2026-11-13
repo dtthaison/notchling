@@ -1,14 +1,5 @@
-//! The phone bridge's daemon ops (Milestone 4, Task 2) as the panel sends and reads them.
-//!
-//! The names are the plan's (`docs/superpowers/plans/2026-11-08-phase7-m4-phone.md`, Task 2).
-//! The plan fixes the names and what each returns in words, not the JSON, so the readers here
-//! take what the daemon sends tolerantly: snake_case or camelCase keys, a state as a word or as
-//! a flag, a time in milliseconds or seconds. A field that is missing is left out of the
-//! answer; it never fails the whole read.
-
 use serde_json::{json, Value};
 
-/// The bridge ops (app tier).
 pub mod ops {
     pub const BRIDGE_SET: &str = "bridge.set";
     pub const BRIDGE_STATUS: &str = "bridge.status";
@@ -18,7 +9,6 @@ pub mod ops {
     pub const BRIDGE_TUNNEL_STATUS: &str = "bridge.tunnel.status";
 }
 
-/// One op and its arguments.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Call {
     pub op: &'static str,
@@ -55,12 +45,10 @@ impl Call {
     }
 }
 
-/// What the bridge is doing, as the daemon says.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum BridgeState {
     Off,
     Starting,
-    /// Listening; the port when the daemon names it.
     On(Option<u16>),
     Failed(String),
 }
@@ -71,26 +59,20 @@ impl BridgeState {
     }
 }
 
-/// `bridge.status` and `bridge.set`'s answer.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Status {
     pub state: BridgeState,
-    /// The certificate's SHA-256 fingerprint, once the daemon has read it.
     pub fingerprint: Option<String>,
 }
 
-/// A live pairing code and the QR payload that carries it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Pairing {
     pub code: String,
-    /// What the QR encodes, verbatim.
     pub payload: String,
-    /// Where the phone can reach this Mac, one per line.
     pub hosts: Vec<String>,
     pub expires_at_ms: i64,
 }
 
-/// One paired phone.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Device {
     pub id: String,
@@ -100,20 +82,14 @@ pub struct Device {
     pub last_seen_ms: Option<i64>,
 }
 
-/// Where the tunnel is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TunnelState {
-    /// The user hasn't turned the tunnel on.
     Off,
-    /// On, but a field Cloudflare Access needs is missing.
     NeedsSetup,
-    /// On and configured; nothing has come through yet.
     Waiting,
-    /// On, and a connection has come through.
     Up,
 }
 
-/// `bridge.tunnel.status`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Tunnel {
     pub state: TunnelState,
@@ -138,8 +114,6 @@ fn flag(v: &Value, names: &[&str]) -> Option<bool> {
     field(v, names).and_then(Value::as_bool)
 }
 
-/// A time as milliseconds: a number below 100 billion is seconds (that is the year 5138 in
-/// milliseconds, and 1973 in seconds).
 fn millis(v: &Value, names: &[&str]) -> Option<i64> {
     let n = field(v, names)?;
     let n = n
@@ -154,7 +128,6 @@ fn millis(v: &Value, names: &[&str]) -> Option<i64> {
     }
 }
 
-/// Reads `bridge.status` / `bridge.set`. `None` when the answer says nothing about the bridge.
 pub fn parse_status(v: &Value) -> Option<Status> {
     let port = field(v, &["port"])
         .and_then(Value::as_u64)
@@ -183,7 +156,6 @@ pub fn parse_status(v: &Value) -> Option<Status> {
     })
 }
 
-/// Reads `bridge.pair.begin`. A reply without a code or a payload is no pairing.
 pub fn parse_pairing(v: &Value) -> Option<Pairing> {
     let hosts = field(v, &["hosts"])
         .and_then(Value::as_array)
@@ -202,8 +174,6 @@ pub fn parse_pairing(v: &Value) -> Option<Pairing> {
     })
 }
 
-/// Reads `bridge.devices`: `{devices: [...]}` or the array itself. A row without an id is
-/// skipped, since Revoke could not name it.
 pub fn parse_devices(v: &Value) -> Vec<Device> {
     let rows = v
         .get("devices")
@@ -225,8 +195,6 @@ pub fn parse_devices(v: &Value) -> Vec<Device> {
     .unwrap_or_default()
 }
 
-/// Reads `bridge.tunnel.status`: a `state` word, or `enabled`, `configured` and `connected`
-/// flags. `None` when it says neither.
 pub fn parse_tunnel(v: &Value) -> Option<Tunnel> {
     let last_connection_ms = millis(v, &["last_connection", "lastConnection"]);
     let state = match text(v, &["state", "status"])
@@ -300,7 +268,6 @@ mod tests {
             failed,
             Some(BridgeState::Failed("port 47821 is busy".into()))
         );
-        // Off with an error is the bridge that tried and could not.
         let tried = parse_status(&json!({"on": false, "error": "port busy"})).map(|s| s.state);
         assert_eq!(tried, Some(BridgeState::Failed("port busy".into())));
     }
@@ -326,7 +293,6 @@ mod tests {
                 expires_at_ms: 1_800_000_300_000,
             })
         );
-        // Seconds, camelCase.
         let secs = json!({"code": "A", "payload": "p", "expiresAt": 1_800_000_300});
         assert_eq!(
             parse_pairing(&secs).map(|p| p.expires_at_ms),

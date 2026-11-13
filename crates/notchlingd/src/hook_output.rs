@@ -1,16 +1,7 @@
-//! What `notchling hook` prints for Claude Code: the Swift `HookBridge.output(for:event:)`, key for
-//! key. The daemon's `hook.request` answers with the Swift app's response file shape
-//! (`{"action": "allow"|"deny"|"answer"|"pass", "always"?, "message"?, "answers"?}`); this turns
-//! that into the hook's stdout. `None` is a pass: print nothing, and Claude Code shows its own
-//! prompt.
-
 use serde_json::{json, Map, Value};
 
-/// The deny message when the app gives none.
 pub const DENIED: &str = "Denied from the notch.";
 
-/// The hook events the daemon is asked about: a permission prompt, or an AskUserQuestion about to
-/// run. Everything else passes at once.
 pub fn is_prompt_event(event: &Value) -> bool {
     let name = event.get("hook_event_name").and_then(Value::as_str);
     let tool = event.get("tool_name").and_then(Value::as_str);
@@ -18,7 +9,6 @@ pub fn is_prompt_event(event: &Value) -> bool {
         || (name == Some("PreToolUse") && tool == Some("AskUserQuestion"))
 }
 
-/// The suggestions behind "Always allow": new rules and directories, never a change of mode.
 pub fn always_rules(event: &Value) -> Vec<Value> {
     event
         .get("permission_suggestions")
@@ -32,7 +22,6 @@ pub fn always_rules(event: &Value) -> Vec<Value> {
         .unwrap_or_default()
 }
 
-/// The hook's stdout for the daemon's `response` to `event`; `None` passes.
 pub fn output(response: &Value, event: &Value) -> Option<Value> {
     let input = event
         .get("tool_input")
@@ -41,9 +30,7 @@ pub fn output(response: &Value, event: &Value) -> Option<Value> {
         .unwrap_or_default();
     match response.get("action").and_then(Value::as_str) {
         Some("answer") => {
-            // updatedInput replaces the whole input, so the questions go back with the answers.
             let mut updated = input;
-            // `as? [String: String] ?? [:]`: one value that isn't text and there are none.
             let answers: Map<String, Value> = response
                 .get("answers")
                 .and_then(Value::as_object)
@@ -143,7 +130,6 @@ mod tests {
         );
     }
 
-    // HookAndPagesTests, case for case.
     #[test]
     fn the_swift_cases() {
         let pre = json!({"hook_event_name": "PreToolUse", "tool_input": {"questions": ["q"]}});

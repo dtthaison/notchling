@@ -10,8 +10,6 @@ import 'viz_providers.dart';
 import 'viz_webview.dart';
 import 'web_tab.dart';
 
-/// The Visualize tab: Phone, Web, Flow, Diagram, Entity, Chart for the selected session. The Mac
-/// suggests one; a tab the user picks is kept for that session.
 class VisualizeScreen extends ConsumerWidget {
   const VisualizeScreen({super.key});
 

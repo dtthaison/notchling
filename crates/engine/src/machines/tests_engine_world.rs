@@ -1,6 +1,3 @@
-//! A world for the engine tests (Swift `MachinesSetupEngineTests`' fakes): machines in memory, a
-//! runner that answers each batched probe the way a machine would, a clock, a counting vault.
-
 use super::engine::{Catalog, Deps, MachineStore, SetupEngine};
 use super::engine_plan::{AdminAnswer, PlanKind};
 use super::github::NoGitHub;
@@ -55,7 +52,6 @@ impl MachineStore for Store {
     }
 }
 
-/// A vault that counts its reads (each is a Keychain read in the app).
 #[derive(Default)]
 pub struct Secrets {
     pub values: Mutex<BTreeMap<String, String>>,
@@ -88,7 +84,6 @@ impl SecretSource for Secrets {
     }
 }
 
-/// The probes of a batched script, unquoted, and its nonce.
 pub fn batch_probes(script: &str) -> Option<(String, Vec<String>)> {
     if !script.contains("out=$( /bin/sh -c ") {
         return None;
@@ -137,9 +132,7 @@ pub struct Setup {
     pub deliver: super::engine::Deliver,
     pub offers_data: Option<PathBuf>,
     pub audit: Option<PathBuf>,
-    /// Rules tried before the batch answer.
     pub runner: ScriptedRunner,
-    /// The Running switch's script; `toggle <mac|linux> <on|off>` when `None`.
     pub toggle: Option<super::engine::ToggleScript>,
 }
 
@@ -244,7 +237,6 @@ impl World {
     pub fn batches(&self) -> Vec<Recorded> {
         self.runner.calls().into_iter().filter(is_batch).collect()
     }
-    /// plan → confirm → run in one go, as a click on a sheet does.
     pub fn click(&self, machine: &str, kind: PlanKind, admin: AdminAnswer) -> FixOutcome {
         let plan = match self.engine.plan(machine, kind) {
             Ok(p) => p,
@@ -271,7 +263,6 @@ pub fn pw(s: &str) -> AdminAnswer {
     AdminAnswer::Password(Secret::new(s))
 }
 
-/// A remote step: `echo probe-<raw>`, ✓ on code 0 with its output, else ✗.
 pub fn step(raw: &str) -> SetupStep {
     StepBuilder::new(raw).build()
 }
@@ -335,7 +326,6 @@ impl StepBuilder {
     }
 }
 
-/// A Fix that records its name and answers `ok`.
 pub fn counting_fix(
     counter: &Arc<Mutex<Vec<String>>>,
     name: &str,

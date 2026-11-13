@@ -1,13 +1,8 @@
-//! Opens GitHub's token page, pre-filled, and the vault form for the value (Swift
-//! `TokenCreation`). Nothing is saved until the user presses Save in the form.
-
 use super::step::Opener;
 use crate::vault::{expiry, VaultRequest};
 
-/// How many days the token page asks for.
 const TOKEN_DAYS: i64 = 366;
 
-/// Percent-encodes everything but the unreserved characters, so a name can't add a parameter.
 fn encode(text: &str) -> String {
     let mut out = String::new();
     for b in text.bytes() {
@@ -20,8 +15,6 @@ fn encode(text: &str) -> String {
     out
 }
 
-/// GitHub's pre-fill parameters. The link can't preset the repository choice, so [`clicks`] names
-/// it.
 pub fn page_url(secret: &str, machine: &str, repos: &[String]) -> String {
     let mut items = vec![
         ("name", secret.to_string()),
@@ -48,7 +41,6 @@ pub fn page_url(secret: &str, machine: &str, repos: &[String]) -> String {
     )
 }
 
-/// The clicks the user makes on that page, in order.
 pub fn clicks(repos: &[String], all_repos: bool) -> Vec<String> {
     vec![
         if all_repos {
@@ -66,7 +58,6 @@ pub fn clicks(repos: &[String], all_repos: bool) -> Vec<String> {
     ]
 }
 
-/// The vault form's prefill. `today` is a day number ([`expiry::today_local`]).
 pub fn request(
     secret: &str,
     machine: &str,
@@ -95,7 +86,6 @@ pub fn request(
     }
 }
 
-/// Opens the page and the form. `now` is seconds since 1970.
 pub fn start(
     opener: &dyn Opener,
     secret: &str,

@@ -1,9 +1,3 @@
-//! Claude's Markdown as blocks (`MarkdownParser` in the Swift app): headings, paragraphs, lists,
-//! quotes, rules, fenced code and tables, each paragraph's text then as spans of bold, italics,
-//! `code`, strikethrough and links. No dependency: the subset Claude writes, parsed by hand and
-//! tested on every system. An unclosed fence (a reply still streaming) runs to the end.
-
-/// One block of a message.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Block {
     Heading {
@@ -24,7 +18,6 @@ pub enum Block {
     Rule,
 }
 
-/// A list item: its marker as drawn ("•", or "1." as written), its text, how deep it nests.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ListItem {
     pub marker: String,
@@ -32,7 +25,6 @@ pub struct ListItem {
     pub depth: usize,
 }
 
-/// A run of a paragraph's text in one style.
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct Span {
     pub text: String,
@@ -40,11 +32,9 @@ pub struct Span {
     pub italic: bool,
     pub code: bool,
     pub strike: bool,
-    /// Where a link goes.
     pub link: Option<String>,
 }
 
-/// The message as blocks.
 pub fn blocks(text: &str) -> Vec<Block> {
     let text = text.replace("\r\n", "\n");
     let lines: Vec<&str> = text.split('\n').collect();
@@ -77,7 +67,6 @@ pub fn blocks(text: &str) -> Vec<Block> {
         let line = lines[i];
         let trimmed = line.trim();
 
-        // Fenced code.
         if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
             flush(&mut out, &mut paragraph, &mut list, &mut quote);
             let fence = &trimmed[..3];
@@ -96,8 +85,6 @@ pub fn blocks(text: &str) -> Vec<Block> {
             continue;
         }
 
-        // Tables: two or more lines with cells. The |---| row is optional; the first row is the
-        // header either way.
         if is_table_line(trimmed) && i + 1 < lines.len() && is_table_line(lines[i + 1].trim()) {
             flush(&mut out, &mut paragraph, &mut list, &mut quote);
             let mut rows: Vec<Vec<String>> = Vec::new();
@@ -109,8 +96,6 @@ pub fn blocks(text: &str) -> Vec<Block> {
                 }
                 i += 1;
             }
-            // A copied table often drags in the end of the sentence before it: a header without
-            // the leading pipe, one cell wider than every row below.
             if rows.len() > 1
                 && !first.starts_with('|')
                 && rows[0].len() > 1
@@ -124,7 +109,6 @@ pub fn blocks(text: &str) -> Vec<Block> {
                 for row in &mut rows {
                     row.resize(width, String::new());
                 }
-                // A column that's empty everywhere (a stray trailing pipe) is dropped.
                 let keep: Vec<usize> = (0..width)
                     .filter(|col| rows.iter().any(|r| !r[*col].is_empty()))
                     .collect();
@@ -164,7 +148,6 @@ pub fn blocks(text: &str) -> Vec<Block> {
             }
             list.push(item);
         } else if !list.is_empty() && (line.starts_with("  ") || line.starts_with('\t')) {
-            // A wrapped list item continues on an indented line.
             if let Some(last) = list.last_mut() {
                 last.text.push(' ');
                 last.text.push_str(trimmed);
@@ -181,7 +164,6 @@ pub fn blocks(text: &str) -> Vec<Block> {
     out
 }
 
-/// `# Title` to `###### Title`: the level and the text.
 fn heading(trimmed: &str) -> Option<(usize, &str)> {
     let level = trimmed.bytes().take_while(|b| *b == b'#').count();
     if level == 0 || level > 6 {
@@ -201,7 +183,6 @@ fn is_rule(trimmed: &str) -> bool {
             .any(|c| trimmed.chars().all(|ch| ch.to_string() == *c))
 }
 
-/// `- a`, `* a`, `+ a`, `• a`, `1. a`, `12) a`, with any indent.
 fn list_item(line: &str) -> Option<ListItem> {
     let indent: usize = line
         .chars()
@@ -257,9 +238,6 @@ fn cells(row: &str) -> Vec<String> {
     parts.into_iter().map(str::to_owned).collect()
 }
 
-/// The text's spans: `**bold**`, `*italics*` or `_italics_`, `` `code` ``, `~~struck~~`, and
-/// `[text](url)` links, and bare `http(s)://` URLs. A marker with no closing twin is kept as written. Adjacent spans in the
-/// same style are one span.
 pub fn spans(text: &str) -> Vec<Span> {
     let mut out: Vec<Span> = Vec::new();
     let mut current = Span::default();
@@ -296,7 +274,6 @@ pub fn spans(text: &str) -> Vec<Span> {
 
     while i < bytes.len() {
         let rest = &text[i..];
-        // Code: to the next backtick run of the same length; its text is taken as written.
         if rest.starts_with('`') {
             let ticks = rest.bytes().take_while(|b| *b == b'`').count();
             let fence = &rest[..ticks];
@@ -313,7 +290,6 @@ pub fn spans(text: &str) -> Vec<Span> {
                 continue;
             }
         }
-        // A link: [text](url). Its text keeps the styles around it, and none inside.
         if rest.starts_with('[') {
             if let Some((label, url, len)) = link(rest) {
                 push(&mut out, &mut current);
@@ -327,7 +303,6 @@ pub fn spans(text: &str) -> Vec<Span> {
                 continue;
             }
         }
-        // A bare http(s) URL starting a word is a link to itself.
         let word_start = i == 0 || !bytes[i - 1].is_ascii_alphanumeric();
         if word_start && (rest.starts_with("https://") || rest.starts_with("http://")) {
             if let Some(len) = bare_url(rest) {
@@ -342,8 +317,6 @@ pub fn spans(text: &str) -> Vec<Span> {
                 continue;
             }
         }
-        // Bold (`**` or `__`) and strikethrough (`~~`): opening needs a closing twin after it
-        // (so the twin, when reached, closes).
         let double = [("**", true), ("__", true), ("~~", false)]
             .into_iter()
             .find(|(marker, _)| rest.starts_with(marker));
@@ -384,14 +357,10 @@ pub fn spans(text: &str) -> Vec<Span> {
         current.text.push(c);
         i += c.len_utf8();
     }
-    // Styles left open had no closing twin after all: their text stays, as written.
     push(&mut out, &mut current);
     out
 }
 
-/// How many bytes of `rest` (which starts with `http://` or `https://`) are the URL: up to the
-/// first space or `<>"`, less trailing sentence punctuation and a `)` that closes nothing in it.
-/// None when nothing follows the scheme.
 fn bare_url(rest: &str) -> Option<usize> {
     let scheme = if rest.starts_with("https://") { 8 } else { 7 };
     let mut end = rest
@@ -412,8 +381,6 @@ fn bare_url(rest: &str) -> Option<usize> {
     (end > scheme).then_some(end)
 }
 
-/// The links in `text` to image files on this Mac (an absolute path ending in .png, .jpg, .jpeg,
-/// .gif or .webp), each once: Chat draws them under the paragraph, so a generated image shows.
 pub fn image_links(text: &str) -> Vec<String> {
     const KINDS: [&str; 5] = [".png", ".jpg", ".jpeg", ".gif", ".webp"];
     let mut out: Vec<String> = Vec::new();
@@ -427,7 +394,6 @@ pub fn image_links(text: &str) -> Vec<String> {
     out
 }
 
-/// `[label](url)` at the start of `rest`: the label, the url, how many bytes it took.
 fn link(rest: &str) -> Option<(&str, &str, usize)> {
     let close = rest.find("](")?;
     let label = &rest[1..close];
@@ -435,7 +401,6 @@ fn link(rest: &str) -> Option<(&str, &str, usize)> {
         return None;
     }
     let after = &rest[close + 2..];
-    // `(<url>)`: the url is what's inside the brackets, spaces and all (Codex links its images so).
     if let Some(inside) = after.strip_prefix('<') {
         let gt = inside.find('>')?;
         let url = &inside[..gt];
@@ -452,23 +417,16 @@ fn link(rest: &str) -> Option<(&str, &str, usize)> {
     Some((label, url, close + 2 + end + 1))
 }
 
-/// A press on a message's link, held from mouse down to mouse up: the link opens when the button
-/// comes up over the link it went down on. Kept here rather than in GPUI's clickable text, which
-/// listens for the release only after a redraw, so a quick click on a long conversation (a slow
-/// frame) was missed and took a second click.
 #[derive(Default, Debug)]
 pub struct LinkPress {
-    /// The text's key and the link's index there.
     down: Option<(String, usize)>,
 }
 
 impl LinkPress {
-    /// The button went down over `link` (the index of the link under it, if any) in text `key`.
     pub fn down(&mut self, key: &str, link: Option<usize>) {
         self.down = link.map(|i| (key.to_owned(), i));
     }
 
-    /// The button came up over `link` in text `key`: the link to open, when it's the one pressed.
     pub fn up(&mut self, key: &str, link: Option<usize>) -> Option<usize> {
         let (k, i) = self.down.take()?;
         (k == key && link == Some(i)).then_some(i)
@@ -484,7 +442,6 @@ mod tests {
         let mut press = LinkPress::default();
         press.down("i3-0", Some(1));
         assert_eq!(press.up("i3-0", Some(1)), Some(1));
-        // Released: a second release alone opens nothing.
         assert_eq!(press.up("i3-0", Some(1)), None);
     }
 
@@ -528,7 +485,6 @@ mod tests {
                 Block::Paragraph("End.".into()),
             ]
         );
-        // Nested items keep their depth; a `#` without a space is text.
         assert_eq!(
             blocks("- a\n  - b\n    - c\n#tag"),
             [
@@ -540,7 +496,6 @@ mod tests {
                 Block::Paragraph("#tag".into()),
             ]
         );
-        // A list right after a paragraph ends it.
         assert_eq!(
             blocks("Steps:\n- one\n- two"),
             [
@@ -594,7 +549,6 @@ mod tests {
             blocks("| Check | Result |\n| fmt | passed |\n| tests | 1 failed |"),
             [table]
         );
-        // A sentence's end dragged into the header comes out before the table.
         assert_eq!(
             blocks("like | A | B |\n| 1 | 2 |\n| 3 | 4 |"),
             [
@@ -605,7 +559,6 @@ mod tests {
                 }
             ]
         );
-        // A short row is padded.
         assert_eq!(
             blocks("| A | B |\n| 1 | 2 |\n| 3 |"),
             [Block::Table {
@@ -613,7 +566,6 @@ mod tests {
                 rows: vec![vec!["1".into(), "2".into()], vec!["3".into(), "".into()]],
             }]
         );
-        // One line with pipes is a paragraph.
         assert_eq!(blocks("a | b | c"), [Block::Paragraph("a | b | c".into())]);
     }
 
@@ -656,7 +608,6 @@ mod tests {
                 plain("."),
             ]
         );
-        // Bold around code, italics with underscores, bold italics.
         assert_eq!(
             spans("**`name`** in _rows.rs_ is ***both***"),
             [
@@ -692,7 +643,6 @@ mod tests {
         );
         assert_eq!(spans("`unclosed code"), [plain("`unclosed code")]);
         assert_eq!(spans("**unclosed bold"), [plain("**unclosed bold")]);
-        // Markdown inside code is code.
         assert_eq!(
             spans("`a **b** c`"),
             [Span {
@@ -716,7 +666,6 @@ mod tests {
 
     #[test]
     fn a_link_in_angle_brackets_goes_to_what_is_inside() {
-        // Codex writes its images' links so, and a path in brackets may hold spaces.
         let link = |text: &str, to: &str| Span {
             text: text.into(),
             link: Some(to.into()),
@@ -749,7 +698,6 @@ mod tests {
                 plain(" and [x]( not a link )."),
             ]
         );
-        // A link inside bold keeps the bold; a bare bracket is text.
         assert_eq!(
             spans("**[a](b)** [c"),
             [
@@ -769,7 +717,6 @@ mod tests {
         let text = "Mixed **bold** `code` and _it_ plus [l](u) end";
         let joined: String = spans(text).iter().map(|s| s.text.as_str()).collect();
         assert_eq!(joined, "Mixed bold code and it plus l end");
-        // Multi-byte text is kept whole.
         assert_eq!(
             spans("é **ü** ∿"),
             [
@@ -809,7 +756,6 @@ mod tests {
                 plain(", ok")
             ]
         );
-        // Not a word's tail, and `https://` alone isn't a link.
         assert_eq!(spans("xhttps://a.b"), [plain("xhttps://a.b")]);
         assert_eq!(spans("https:// x"), [plain("https:// x")]);
     }

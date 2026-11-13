@@ -1,15 +1,3 @@
-//! Antigravity CLI sessions over `agy acp` (Swift `ACPRunner` / `AntigravityRunner`): one process per
-//! opened session, which loads the conversation (`session/load` replays it), takes prompts,
-//! streams the turn, asks permissions and switches options. A process nobody has looked at for ten
-//! minutes, with no turn running and no permission waiting, is closed by [`Runner::reap`].
-//!
-//! Nothing is auto-approved, and `initialize` offers no file system or terminal, so any other
-//! call from the agent gets `-32601`. What the runner learns goes out through a [`Sink`], on the
-//! connection's thread: a sink must not call back into the runner's session it is told about while
-//! holding a lock the runner needs.
-//!
-//! Locks are never held across a call into the connection (its callbacks may run inline).
-
 use super::config::{AgyCommand, ConfigOption, Permission};
 use super::live::{cancelled, Inner, Job, MAX_OPEN};
 use crate::tools::acp::Spawner;
@@ -22,22 +10,16 @@ use std::sync::mpsc::channel;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
-/// The tool's name in messages.
 pub const NAME: &str = "Antigravity";
 
 pub const NO_BINARY: &str = "Couldn't find the agy command. Install Antigravity CLI first.";
 
-/// Seconds since the epoch.
 pub type Clock = Arc<dyn Fn() -> f64 + Send + Sync>;
 
-/// When things are given up on, in seconds.
 #[derive(Debug, Clone, Copy)]
 pub struct Timing {
-    /// A process unused this long is closed (10 minutes).
     pub idle: f64,
-    /// A load that has not answered in this long fails (a hung process).
     pub load: f64,
-    /// A failed load is shown this long before opening the session tries again.
     pub retry: f64,
 }
 
@@ -51,27 +33,17 @@ impl Default for Timing {
     }
 }
 
-/// What happened to a session; `session` is `agy`'s own id, not Chat's row id.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Change {
-    /// The conversation has loaded.
     Loaded,
     LoadFailed(String),
-    /// Text or a tool call arrived. Frequent: a sink may thin these out.
     Chunk,
     TurnStarted,
-    /// The turn ended; the error if it failed (the process died, the request was refused).
     TurnEnded(Option<String>),
     PermissionPending(Permission),
-    /// A permission is no longer waiting: `outcome` is the chosen option's kind, or `cancelled`.
-    PermissionResolved {
-        rpc_id: String,
-        outcome: String,
-    },
-    /// The options (model, thinking level, mode) changed.
+    PermissionResolved { rpc_id: String, outcome: String },
     Options,
     OptionFailed(String),
-    /// The process is gone; reopening the session starts a new one.
     Closed,
 }
 
@@ -82,12 +54,9 @@ pub trait Sink: Send + Sync {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RunError {
     NoBinary,
-    /// A turn is running; one at a time.
     Busy,
-    /// Not open, or not the permission that is waiting, or not a value the session offers.
     Refused(String),
     Start(String),
-    /// Starting processes is switched off (see [`Runner::set_may_start`]).
     NotAllowed,
 }
 
@@ -104,14 +73,12 @@ impl fmt::Display for RunError {
 
 impl std::error::Error for RunError {}
 
-/// The sessions open over `agy acp`. Cheap to clone.
 #[derive(Clone)]
 pub struct Runner {
     inner: Arc<Inner>,
 }
 
 impl Runner {
-    /// `binary` is the `agy` to run (None: nothing can start, with [`NO_BINARY`]).
     pub fn new(
         spawner: Arc<dyn Spawner>,
         binary: Option<String>,
@@ -133,24 +100,18 @@ impl Runner {
         }
     }
 
-    /// What decides whether a process may start (once; without it any may): the daemon's `acting`
-    /// switch, so no `agy` is spawned while it's off, whichever op reaches the spawn.
     pub fn set_may_start(&self, may_start: Arc<dyn Fn() -> bool + Send + Sync>) {
         let _ = self.inner.may_start.set(may_start);
     }
 
-    /// How many processes may run at once (tests set a small number).
     pub fn set_max_open(&self, max: usize) {
         self.inner.max_open.store(max, Ordering::SeqCst);
     }
 
-    /// Starts a process for the session and loads it, unless one is open already. A load that
-    /// failed is tried again once the retry time has passed, or at once with `retry_now`.
     pub fn open(&self, id: &str, folder: &str, retry_now: bool) -> Result<(), RunError> {
         self.inner.open(id, folder, retry_now).map(|_| ())
     }
 
-    /// A new session in `folder`; waits up to `wait` for its id.
     pub fn start(&self, folder: &str, wait: Duration) -> Result<String, RunError> {
         let inner = &self.inner;
         let live = inner.launch(folder)?;
@@ -208,11 +169,8 @@ impl Runner {
         }
     }
 
-    /// Sends a prompt and returns at once; the turn's end comes as [`Change::TurnEnded`]. One turn
-    /// at a time per session: while one runs this is [`RunError::Busy`].
     pub fn prompt(&self, id: &str, text: &str, folder: &str) -> Result<(), RunError> {
         let inner = &self.inner;
-        // Sending is a clear request to try again after a failed load.
         let retry = inner.get(id).is_some_and(|l| l.lock().failed_at.is_some());
         let live = inner.open(id, folder, retry)?;
         {
@@ -245,8 +203,6 @@ impl Runner {
         Ok(())
     }
 
-    /// Stops the running turn; what was said so far stays. A waiting permission is answered as
-    /// cancelled first.
     pub fn cancel(&self, id: &str) {
         let Some(live) = self.inner.get(id) else {
             return;
@@ -271,9 +227,6 @@ impl Runner {
         live.conn.notify("session/cancel", json!({"sessionId": id}));
     }
 
-    /// Answers the waiting permission `rpc_id` with one of its options (None: cancelled). Returns
-    /// the outcome, the option's kind or `cancelled`. Refused when that permission isn't waiting
-    /// (answered already, or the turn ended) or the option isn't one of its own.
     pub fn answer(&self, id: &str, rpc_id: &str, option: Option<&str>) -> Result<String, RunError> {
         let live = self
             .inner
@@ -313,8 +266,6 @@ impl Runner {
         Ok(outcome)
     }
 
-    /// Picks a value for one of the session's options; applies from the next turn. A failure comes
-    /// as [`Change::OptionFailed`].
     pub fn set_option(&self, id: &str, option: &str, value: &str) -> Result<(), RunError> {
         let live = self
             .inner
@@ -369,12 +320,10 @@ impl Runner {
         Ok(())
     }
 
-    /// Ends the process for a session (it is reloaded when opened again).
     pub fn close(&self, id: &str) {
         self.inner.close(id);
     }
 
-    /// No `agy` process left behind.
     pub fn close_all(&self) {
         let ids: Vec<String> = self.inner.lock_live().keys().cloned().collect();
         for id in ids {
@@ -382,8 +331,6 @@ impl Runner {
         }
     }
 
-    /// Closes what has sat unused past the idle time (no turn, no waiting permission) and fails a
-    /// load that has not answered in the load time. Called every so often.
     pub fn reap(&self) {
         let inner = &self.inner;
         let now = (inner.now)();
@@ -408,8 +355,6 @@ impl Runner {
         }
     }
 
-    // MARK: Reads
-
     pub fn is_open(&self, id: &str) -> bool {
         self.inner.lock_live().contains_key(id)
     }
@@ -418,7 +363,6 @@ impl Runner {
         self.inner.get(id).is_some_and(|l| l.lock().working)
     }
 
-    /// The open sessions with a turn running.
     pub fn working(&self) -> Vec<String> {
         self.inner
             .lock_live()
@@ -457,19 +401,16 @@ impl Runner {
             .unwrap_or_default()
     }
 
-    /// Antigravity's own title for the conversation, once it has named it.
     pub fn title(&self, id: &str) -> Option<String> {
         self.inner
             .get(id)
             .and_then(|l| l.lock().transcript.title().map(String::from))
     }
 
-    /// The folder the session runs in.
     pub fn folder(&self, id: &str) -> Option<String> {
         self.inner.get(id).map(|l| l.folder.clone())
     }
 
-    /// The conversation as far as it has loaded, counting as use.
     pub fn conversation(&self, id: &str) -> Option<Conversation> {
         let live = self.inner.get(id)?;
         let mut st = live.lock();
@@ -477,8 +418,6 @@ impl Runner {
         Some(st.transcript.conversation())
     }
 
-    /// The same without counting as use: a list read every few seconds must not keep an idle
-    /// process from being reaped.
     pub fn peek_conversation(&self, id: &str) -> Option<Conversation> {
         let live = self.inner.get(id)?;
         let conversation = live.lock().transcript.conversation();

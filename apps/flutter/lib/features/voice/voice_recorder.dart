@@ -7,17 +7,13 @@ import 'silence_trim.dart';
 
 enum MicPermission { granted, denied }
 
-/// The microphone as the voice controller sees it. The real one wraps `record`; tests use a fake.
 abstract class VoiceRecorder {
-  /// Asks for the microphone permission if it is not decided yet.
   Future<MicPermission> ensurePermission();
 
-  /// 0..1 loudness of what is being recorded, about ten times a second.
   Stream<double> get levels;
 
   Future<void> start();
 
-  /// Stops and returns everything recorded as 16 kHz mono 16-bit PCM.
   Future<Int16List> stop();
 
   Future<void> cancel();
@@ -60,7 +56,6 @@ class RecordPackageRecorder implements VoiceRecorder {
     _subscription = null;
     final Uint8List all = _bytes.takeBytes();
     final int samples = all.length ~/ 2;
-    // Copy into an aligned buffer: the builder's bytes may start at an odd offset.
     return Int16List.view(Uint8List.fromList(all.sublist(0, samples * 2)).buffer);
   }
 

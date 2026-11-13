@@ -1,5 +1,3 @@
-"""The review workflows' security shape, read as text (no YAML library), and their PR lookup run for real."""
-
 import json
 import os
 import re
@@ -21,7 +19,6 @@ def raw(path):
 
 
 def read(path):
-    """The workflow without its comment lines, which may name what they forbid."""
     return "".join(l for l in raw(path).splitlines(keepends=True) if not l.lstrip().startswith("#"))
 
 
@@ -50,7 +47,7 @@ class ReviewRunTests(unittest.TestCase):
         self.assertRegex(text, r"(?m)^  pull_request:\s*$")
         self.assertNotIn("pull_request_target", text)
         self.assertNotIn("secrets.", text)
-        self.assertNotIn("uses:", text)  # nothing from the PR is checked out or run, and no action is pulled in
+        self.assertNotIn("uses:", text)
         self.assertNotIn("GITHUB_TOKEN", text)
         self.assertNotIn("github.token", text)
 
@@ -71,7 +68,6 @@ class ReviewRunTests(unittest.TestCase):
         self.assertIn("github.event.label.name == 'notchling:review'", text)
 
     def test_reopening_does_not_start_a_run(self):
-        """A reopen brings no new commit, so it would only ask the model about a head it has already judged."""
         self.assertNotIn("reopened", read(RUN))
 
     def test_drafts_are_skipped(self):
@@ -82,8 +78,6 @@ class ReviewRunTests(unittest.TestCase):
 
 class ReviewPostTests(unittest.TestCase):
     def test_trusted_job_permissions_are_the_minimum(self):
-        """Nothing at the top; the one job asks for what review.py uses: the diff (contents), the check
-        results (checks), comments and labels (pull requests) and the commit status (statuses)."""
         text = read(POST)
         self.assertRegex(text, r"(?m)^permissions: \{\}\s*$")
         self.assertNotRegex(text, r"(?m)^permissions:\n")
@@ -98,7 +92,6 @@ class ReviewPostTests(unittest.TestCase):
         self.assertNotRegex(text, r"contents:\s*write")
 
     def test_a_run_is_never_cancelled_after_it_may_have_asked_the_model(self):
-        """A cancelled run could lose the comment that records the model call, and the next one would ask again."""
         text = read(POST)
         self.assertRegex(text, r"(?m)^concurrency:\n  group: review-post-.*\n  cancel-in-progress: false\n")
 
@@ -123,7 +116,7 @@ class ReviewPostTests(unittest.TestCase):
         self.assertEqual(text.count("persist-credentials: false"), 1)
         self.assertEqual(re.findall(r"(?m)^\s*(?:-\s+)?uses: (\S+)", text), ["actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"])
         self.assertNotIn("github.event.pull_request.head", text)
-        for line in text.splitlines():  # the run's head fields may only be copied into env: for the lookup step
+        for line in text.splitlines():
             if "workflow_run.head_branch" in line or "workflow_run.head_repository" in line:
                 self.assertRegex(line, r"^ {10}RUN_HEAD_(BRANCH|REPO): \$\{\{ github\.event\.workflow_run\.head_(branch|repository\.full_name) \}\}$")
         self.assertNotRegex(text, r"git (checkout|switch|worktree|fetch|clone|merge|cherry-pick)")
@@ -165,7 +158,6 @@ class ReviewPostTests(unittest.TestCase):
 
 
 class LookupTests(unittest.TestCase):
-    """Run the 'Find the pull request' step for real (with review.py from this tree) and a fake gh."""
 
     SHA = "0123456789abcdef0123456789abcdef01234567"
     APP_PR = {"number": 7, "state": "open", "head": {"repo": {"full_name": "o/r"}, "ref": "agent/1-x", "sha": SHA}}

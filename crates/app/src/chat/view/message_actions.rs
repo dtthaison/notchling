@@ -1,13 +1,3 @@
-//! The row under a message, shown while the pointer is over the message or the row. Under yours,
-//! at the right: the delivered mark, how long ago, "·", Copy. Under Claude's reply, at the left:
-//! Copy, then how long ago. The time comes from the transcript line's timestamp
-//! (`chat::message_meta`), with the full local date as its tooltip. Copy puts the message's text
-//! (a reply's raw Markdown) on the clipboard and shows a check for a moment.
-//!
-//! The row is always laid out, so showing it moves nothing, and is drawn clear until the message's
-//! group is hovered (the group is the message and the row together, so the pointer can go from one
-//! to the other). Rewind, Fork, Pin and Read Aloud are not here: see `chat::message_meta`.
-
 use gpui::{
     div, prelude::*, px, svg, AnyElement, ClipboardItem, Context, Div, SharedString, Stateful,
 };
@@ -23,16 +13,10 @@ use crate::chat::message_meta::{self, Plan, Role};
 use crate::chat::rows::Row;
 use crate::mac::gate;
 
-/// The row's height, the buttons' size plus a hair.
 pub(super) const ROW_HEIGHT: f32 = 24.0;
-/// A button's box.
 const BUTTON: f32 = 22.0;
-/// The icons' size (points, as `icon` takes them).
 const ICON: f32 = 14.0;
 
-/// A faint icon button: its icon is `TextFaint` and turns `Text` under the pointer, which has the
-/// pointing hand. An SVG takes its color from its own style, so the turn is a group hover on the
-/// icon itself.
 fn ghost_icon(id: SharedString, glyph: Icon, a: Appearance) -> Stateful<Div> {
     let group = SharedString::from(format!("{id}-hot"));
     let faint = Ink::TextFaint.color(a);
@@ -63,7 +47,6 @@ fn ghost_icon(id: SharedString, glyph: Icon, a: Appearance) -> Stateful<Div> {
         .child(drawn)
 }
 
-/// The Copy button: the copy icon, or a check for a moment after a click.
 fn copy_button(
     id: &str,
     text: &str,
@@ -85,7 +68,6 @@ fn copy_button(
     gate::tip_text(button, if copied { "Copied" } else { "Copy" }.into(), a)
 }
 
-/// "4 minutes ago", its tooltip the full date and time.
 fn time_label(id: &str, at: f64, a: Appearance, cx: &Context<ConversationView>) -> Stateful<Div> {
     let text = message_meta::relative_local(now_ms() as f64 / 1000.0, at);
     let tip = message_meta::full_local(at);
@@ -96,7 +78,6 @@ fn time_label(id: &str, at: f64, a: Appearance, cx: &Context<ConversationView>) 
     gate::tip_text(time, tip.into(), a).part("Message Time", a, cx)
 }
 
-/// The double check on your message.
 fn delivered_mark(id: &str, a: Appearance) -> Stateful<Div> {
     let mark = div()
         .id(SharedString::from(format!("delivered-{id}")))
@@ -109,7 +90,6 @@ fn separator(a: Appearance) -> Div {
     label("·", TypeRole::Meta, Ink::TextFaint, a).flex_shrink_0()
 }
 
-/// The row for a message of `role` with its `plan`.
 #[allow(clippy::too_many_arguments)]
 fn actions_row(
     role: Role,
@@ -148,7 +128,6 @@ fn actions_row(
             .justify_start()
             .when(plan.copy, |d| d.child(copy_button(id, text, copied, a, cx)))
             .children(time.map(|at| time_label(id, at, a, cx)))
-            // Second Opinion, at the far right.
             .when_some(trailing, |d, t| {
                 d.child(div().flex_1().min_w(px(0.0)).flex().justify_end().child(t))
             }),
@@ -156,8 +135,6 @@ fn actions_row(
     .part("Message Actions", a, cx)
 }
 
-/// `element` (a message) with its row beneath, when it is a message that has one. `item` is the
-/// transcript line it came from; a queued bubble has none and no row.
 pub fn with_actions(
     s: &ConversationState,
     row: &Row,
@@ -177,7 +154,6 @@ pub fn with_actions(
     };
     let date = item.date;
     let plan = message_meta::plan(role, queued, date.is_some(), text);
-    // Only a reply's row carries Second Opinion; anywhere else it gets a row of its own.
     if !plan.any() || (role == Role::User && trailing.is_some()) {
         return hover_only(s, Some(item), element, trailing, cx);
     }
@@ -219,8 +195,6 @@ pub fn with_actions(
         .into_any_element()
 }
 
-/// `element` with `trailing` (the Second Opinion buttons) on a row of its own beneath, shown only
-/// while the pointer is over the two, for a row that has no actions of its own to share.
 fn hover_only(
     s: &ConversationState,
     item: Option<&ChatItem>,

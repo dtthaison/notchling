@@ -4,8 +4,6 @@ use crate::sessions::testutil::TempDir;
 
 const SESSION: &str = "a9394b3f-f90c-4789-8e2d-dac1775db79a";
 
-/// The shapes `agy` 1.5 writes (2026-11-11): a delegation's prompt, tool steps, the answer, then a
-/// second prompt through another process that hasn't answered yet.
 fn log() -> String {
     [
         r#"{"step_index":0,"source":"USER_EXPLICIT","type":"USER_INPUT","status":"DONE","created_at":"2026-11-11T16:43:10Z","content":"<USER_REQUEST>\nReview the script, read-only.\n</USER_REQUEST>\n<ADDITIONAL_METADATA>\nThe current local time is: 2026-11-11T23:43:10+07:00.\n</ADDITIONAL_METADATA>"}"#,
@@ -157,15 +155,11 @@ fn only_the_daemons_own_or_none_means_nothing_else_holds_it() {
         .answer("/bin/ps -o ppid= -p 65070", "17468\n");
     assert_eq!(find(&procs, tmp.root(), SESSION, 17468), None);
     assert_eq!(find(&FakeProcs::new(), tmp.root(), SESSION, 17468), None);
-    // No folder: nothing is asked at all.
     let calls = FakeProcs::new();
     assert_eq!(find(&calls, tmp.root(), "never-made", 1), None);
     assert!(calls.calls().is_empty());
 }
 
-// MARK: Steps, thinking and tool calls while held
-
-/// What `agy` 1.5 writes for a step, with invented names and paths. `extra` is more fields.
 fn step(index: u32, kind: &str, status: &str, at: &str, extra: &str) -> String {
     format!(
         r#"{{"step_index":{index},"source":"MODEL","type":"{kind}","status":"{status}","created_at":"{at}"{extra}}}"#
@@ -183,7 +177,6 @@ fn user(index: u32, at: &str, text: &str) -> String {
     )
 }
 
-/// A tool step's `content`: the Created/Completed header, then the output.
 fn done(index: u32, at: &str, output: &str) -> String {
     let header =
         "Created At: 2026-11-11T23:00:05+07:00\\nCompleted At: 2026-11-11T23:00:05+07:00\\n";
@@ -241,7 +234,6 @@ fn a_held_turn_shows_its_thinking_and_steps_with_the_unfinished_one_open() {
             _ => "other",
         })
         .collect();
-    // The second planner step has no thoughts of its own: its call joins the group above it.
     assert_eq!(kinds, ["user", "thinking", "tools"]);
     match &c.items[1].kind {
         ItemKind::Thinking { text, .. } => {
@@ -281,7 +273,6 @@ fn a_held_turn_shows_its_thinking_and_steps_with_the_unfinished_one_open() {
         )
     );
     assert!(!open.finished && open.output.is_none());
-    // The clock and the tokens count from your prompt.
     assert_eq!(c.turn_start, Some(1_794_412_800.0));
     assert_eq!(c.turn_tokens, 200);
 }
@@ -362,7 +353,6 @@ fn calls_the_model_moved_past_are_closed_and_a_running_step_keeps_its_output_ope
             r#","tool_calls":[{"name":"read_file","args":{"Path":"\"/work/a.txt\""}},{"name":"read_file","args":{"Path":"\"/work/b.txt\""}}]"#,
         ),
         done(2, T1, "alpha"),
-        // The second call never got a step of its own; the model went on to the next one.
         step(
             3,
             "PLANNER_RESPONSE",
@@ -449,7 +439,6 @@ fn the_log_view_ends_with_the_note_and_names_the_open_call() {
             "agy-elsewhere"
         ]
     );
-    // The command has no result yet, and it is what the session is doing now.
     assert_eq!(c.activity.as_deref(), Some("List the folder"));
     assert!(matches!(
         &c.items.last().unwrap().kind,

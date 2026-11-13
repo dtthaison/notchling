@@ -1,9 +1,3 @@
-//! The Secret Vault sheet over GPUI (macOS): the list of saved secrets without their values, with
-//! Add, Renew…, Edit and Remove, and the form in place of the list. Every call to the daemon runs
-//! on the background executor through the store; while the `vault` switch is off every control is
-//! drawn disabled with the daemon's off message. A render has fixed entries and never calls
-//! anything.
-
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
@@ -32,19 +26,16 @@ use crate::sheets::view::{sheet_header, Dismiss};
 use crate::switches::feed::SwitchFeed;
 use crate::switches::{Switch, Switches};
 
-/// How often the sheet asks the daemon while it is open.
 const REFRESH_EVERY: Duration = Duration::from_secs(5);
 
 pub struct VaultSheetView {
     vault: Arc<Vault>,
     feed: Arc<SwitchFeed>,
     form: Option<Form>,
-    /// The entry Remove asks about.
     pub(super) removing: Option<String>,
     busy: bool,
     note: Option<String>,
     focus: FocusHandle,
-    /// A render's day and switches; the live ones otherwise.
     fixed: Option<(i64, Switches)>,
     seen_vault: u64,
 }
@@ -59,8 +50,6 @@ fn now_secs() -> f64 {
 }
 
 impl VaultSheetView {
-    /// The live sheet: reads the list now, then every few seconds and whenever the feed says the
-    /// vault changed.
     pub fn live(vault: Arc<Vault>, feed: Arc<SwitchFeed>, cx: &mut Context<Self>) -> Self {
         let view = VaultSheetView {
             seen_vault: feed.changes().vault,
@@ -100,7 +89,6 @@ impl VaultSheetView {
         view
     }
 
-    /// A render's: the entries as given, `form` open if any, at a fixed day.
     pub fn fixed(
         vault: Arc<Vault>,
         feed: Arc<SwitchFeed>,
@@ -148,7 +136,6 @@ impl VaultSheetView {
         .detach();
     }
 
-    /// Runs `job` off the UI thread, then reads the list again. `after` takes the result.
     fn run(
         &mut self,
         job: impl FnOnce(&Vault, &Switches) -> Result<(), String> + Send + 'static,
@@ -222,7 +209,6 @@ impl VaultSheetView {
             }
         };
         let request = form.request.clone();
-        // The value leaves the form the moment it is handed to the save.
         form.forget_value();
         self.run(
             move |v, sw| {
@@ -433,8 +419,6 @@ impl Render for VaultSheetView {
 }
 
 impl VaultSheetView {
-    /// A form event from a click: it needs the window for focus, which a render-time handler
-    /// doesn't carry, so the focus is taken on the next key instead.
     fn pending_form_event(&mut self, event: FormEvent, cx: &mut Context<Self>) {
         match event {
             FormEvent::Save => self.save(cx),
@@ -467,8 +451,6 @@ impl VaultSheetView {
     }
 }
 
-/// `--render vault-sheet|vault-form|vault-approval|vault-request`, over made-up entries; nothing
-/// is called.
 pub fn build_render(name: &str, cx: &mut gpui::App) -> Option<AnyView> {
     use super::approval_view::VaultApprovalView;
     use super::prompt_view::VaultRequestView;

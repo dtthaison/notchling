@@ -1,5 +1,3 @@
-//! Tier spoofing with a real second process: this test binary, run as a copy elsewhere, must get
-//! the agent tier; run through a symlink, it is the same file and keeps the app tier.
 #![cfg(any(target_os = "macos", target_os = "linux"))]
 
 use notchling_local_api::{
@@ -24,14 +22,12 @@ impl Handler for Nothing {
     }
 }
 
-/// Run in a child process only: connects to the socket the parent names and prints its tier.
 #[test]
 #[ignore]
 fn peer_helper() {
     let Some(socket) = std::env::var_os(SOCKET_ENV) else {
         return;
     };
-    // The parent serving the socket is a test binary, not a `notchling`: no server check.
     let options = ConnectOptions {
         check_server: false,
         ..ConnectOptions::default()

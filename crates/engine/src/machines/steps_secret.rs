@@ -1,11 +1,3 @@
-//! Secrets: usages, delivery, steps 7 (Claude login) and 13 (issues token), renames (Swift
-//! `SecretSteps`, `SecretNames`, `VaultSecretSource`).
-//!
-//! A value is read from the vault here and goes one way: the bytes of ssh's stdin. It is never in
-//! an argv, an environment, a log line, a display, a check result or a message; anything a machine
-//! says back is redacted with the value first, and only a file's mode and size are ever read from
-//! the machine.
-
 use super::registry::{Machine, MachineOs, SdWorkerSettings};
 use super::runner::{Channel, OutputSink};
 use super::shell;
@@ -22,8 +14,6 @@ use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
-/// The shortest value delivered. Real tokens are 90 characters or more; the redactor holds a tail
-/// back across reads only for values it can match.
 const MINIMUM_LENGTH: usize = 8;
 
 pub fn claude_usage(m: &Machine) -> SecretUsage {
@@ -44,7 +34,6 @@ pub fn issues_usage(m: &Machine, job: &SdWorkerSettings) -> SecretUsage {
     }
 }
 
-/// Step 7. When the vault lacks the token the Fix opens the vault form; otherwise it delivers.
 pub fn claude_login(m: &Machine) -> SetupStep {
     let usage = claude_usage(m);
     let request = VaultRequest {
@@ -85,12 +74,9 @@ pub fn claude_login(m: &Machine) -> SetupStep {
     )
 }
 
-/// Step 13. When the vault lacks the token the Fix starts the creation flow through
-/// [`token_creation::start`] (GitHub's page and the vault form); otherwise it delivers.
 pub fn issues_token(m: &Machine, job: &SdWorkerSettings) -> SetupStep {
     let usage = issues_usage(m, job);
     let repos: Vec<String> = job.repos.iter().map(|r| r.github.clone()).collect();
-    // ruling: the creation flow follows the job's all-repositories choice, as Token scope's does
     let all_repos = job.token_all_repos == Some(true);
     let machine = m.name.clone();
     let display = display(
@@ -126,8 +112,6 @@ pub fn issues_token(m: &Machine, job: &SdWorkerSettings) -> SetupStep {
     )
 }
 
-/// Every secret file of the machines: the Claude token per machine, the issues token per sd worker
-/// job.
 pub fn usages(machines: &[Machine]) -> Vec<SecretUsage> {
     let mut list = Vec::new();
     for m in machines {
@@ -141,10 +125,6 @@ pub fn usages(machines: &[Machine]) -> Vec<SecretUsage> {
     list
 }
 
-// MARK: Delivery
-
-/// Writes the vault value to the usage's file over ssh's stdin. The outcome never contains the
-/// value.
 pub fn deliver(usage: &SecretUsage, ctx: &FixContext) -> FixOutcome {
     if usage.machine != ctx.step.machine.name {
         return FixOutcome::fail(format!(
@@ -179,7 +159,6 @@ pub fn deliver(usage: &SecretUsage, ctx: &FixContext) -> FixOutcome {
             SecretFormat::Raw => format!("the file for {} can't be built", usage.name),
         });
     };
-    // this value hidden as well as whatever the engine's masks hide
     let mut masks = ctx.masks.clone();
     masks.hide(&usage.name, value);
     let filter = Arc::new(SecretLogFilter::new(value, &usage.name, ctx.log.clone()));
@@ -197,7 +176,6 @@ pub fn deliver(usage: &SecretUsage, ctx: &FixContext) -> FixOutcome {
         600,
     );
     filter.finish();
-    // this value's own mask, then the engine's (every vault value of the machine), in both places
     let hide = |t: &str| masks.apply(&filter.redact(t));
     if result.code != 0 {
         let said = shown(
@@ -224,8 +202,6 @@ pub fn deliver(usage: &SecretUsage, ctx: &FixContext) -> FixOutcome {
     ))
 }
 
-/// The exact text [`deliver`] writes for `value`, or `None` when the format is not a plain
-/// variable name.
 pub fn file_text(format: &SecretFormat, value: &str) -> Option<String> {
     match format {
         SecretFormat::Raw => Some(value.to_string()),
@@ -244,10 +220,6 @@ fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
-/// A read-only check of the delivered file: its mode and size, and whether it is the vault's
-/// value. The machine prints the SHA-256 of the file and nothing else about its content; the app
-/// hashes the text it would send and compares the two in memory. The result says "same" or
-/// "different" and holds neither hash, and no hash is stored or logged.
 pub fn verify_probe(usage: &SecretUsage, linux: bool) -> Probe {
     let script = format!(
         "{}; {}",
@@ -277,7 +249,6 @@ pub fn verify_probe(usage: &SecretUsage, linux: bool) -> Probe {
             return CheckResult::fail("empty");
         }
         let found = format!("mode 600, {} bytes", facts.size);
-        // nothing in the vault to compare with: the mode and size are all there is to say
         let Some(expected) = ctx
             .secrets
             .value(&usage.name)
@@ -299,10 +270,6 @@ pub fn verify_probe(usage: &SecretUsage, linux: bool) -> Probe {
     })
 }
 
-/// What a machine said, for a failure message: masked first, then trimmed and cut, so neither can
-/// leave a piece of the value (a value with a space at its edge no longer matches once the edge is
-/// trimmed). Output that the runner itself cut (the value's front may be gone) or that is far
-/// longer than an error is not shown.
 fn shown(said: &str, hide: &dyn Fn(&str) -> String) -> String {
     if said.starts_with("[earlier output cut]") || said.chars().count() > 4000 {
         return "(output not shown)".into();
@@ -314,13 +281,10 @@ fn has_value(secrets: &dyn SecretSource, name: &str) -> bool {
     secrets.value(name).is_some_and(|v| !v.is_empty())
 }
 
-/// The commands the user sees before the Fix runs: the placeholder stands for the value, which
-/// only ssh's stdin carries.
 fn display(usage: &SecretUsage, m: &Machine, missing: &str) -> String {
     format!("{missing}\nOtherwise: {}", send_command(usage, m))
 }
 
-/// The confirmation of Send again: the same delivery as the Fix, with the value as a placeholder.
 pub fn send_display(usage: &SecretUsage, m: &Machine) -> String {
     format!(
         "Send the vault value of {} to {} again:\n{}",
@@ -345,13 +309,6 @@ fn send_command(usage: &SecretUsage, m: &Machine) -> String {
     format!("{source} | {ssh}")
 }
 
-/// Hides one value in a Fix's output. [`Redactor`] holds back the tail of a read that could start
-/// the value, so a value split across two reads is still caught ([`deliver`] refuses values too
-/// short for that to hold).
-///
-/// One redactor per pipe: what a redactor holds back belongs to the pipe it came from, and the
-/// next read of the other pipe must not carry it on. The log keeps a partial line per pipe, so a
-/// held tail sent out under the other pipe's tag would split the value across two lines.
 struct SecretLogFilter {
     value: String,
     hide: BTreeMap<String, String>,
@@ -382,8 +339,6 @@ impl SecretLogFilter {
         self.emit(channel, &data);
     }
 
-    /// Flushes what each redactor held back while a value might have been split across chunks, to
-    /// the pipe it came from.
     fn finish(&self) {
         let mut redactors = self.lock();
         for channel in [Channel::Stdout, Channel::Stderr] {
@@ -406,17 +361,12 @@ impl SecretLogFilter {
     }
 }
 
-// MARK: Names
-
-/// The vault names machine management uses, and the earlier names they replace: (from, to).
 pub const LEGACY_NAMES: [(&str, &str); 3] = [
     ("sd-worker-m1", "m1-github-issues"),
     ("sd-worker-vps-sing-1", "vps-sing-1-github-issues"),
     ("sd-claude", "claude-worker"),
 ];
 
-/// The saved entries still under an old name whose new name is free. A rename happens only on the
-/// user's click.
 pub fn pending_renames(entries: &[VaultEntry]) -> Vec<(VaultEntry, String)> {
     LEGACY_NAMES
         .iter()
@@ -430,14 +380,9 @@ pub fn pending_renames(entries: &[VaultEntry]) -> Vec<(VaultEntry, String)> {
         .collect()
 }
 
-// MARK: The vault as a source
-
 type EntryLookup = Arc<dyn Fn(&str) -> Option<VaultEntry> + Send + Sync>;
 type ValueRead = Arc<dyn Fn(&VaultEntry) -> Option<VaultValue> + Send + Sync>;
 
-/// The vault as a [`SecretSource`]. The app reads the Keychain itself for a delivery, which is the
-/// user's own click; an entry's "ask before each use" flag gates agents and is not consulted here.
-/// The index and the store are injected: the engine passes the real ones, tests their own.
 #[derive(Clone)]
 pub struct VaultSecretSource {
     lookup: EntryLookup,

@@ -1,6 +1,3 @@
-//! A color as the kit's tables write one: `#RRGGBB` and a percentage.
-
-/// An sRGB color: 8-bit channels and an alpha from 0 to 1.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Color {
     pub r: u8,
@@ -10,7 +7,6 @@ pub struct Color {
 }
 
 impl Color {
-    /// `Color::hex(0xF7873B)`, opaque.
     pub const fn hex(rgb: u32) -> Color {
         Color {
             r: ((rgb >> 16) & 0xFF) as u8,
@@ -20,7 +16,6 @@ impl Color {
         }
     }
 
-    /// The same color at another alpha (`accent.with_alpha(0.12)` is the spec's "orange500 12%").
     pub const fn with_alpha(self, a: f32) -> Color {
         Color {
             r: self.r,
@@ -34,7 +29,6 @@ impl Color {
     pub const WHITE: Color = Color::hex(0xFFFFFF);
     pub const CLEAR: Color = Color::hex(0x000000).with_alpha(0.0);
 
-    /// Channels from 0 to 1, red, green, blue, alpha: what a renderer takes.
     pub fn channels(self) -> [f32; 4] {
         [
             f32::from(self.r) / 255.0,
@@ -44,7 +38,6 @@ impl Color {
         ]
     }
 
-    /// `#RRGGBB`, or `#RRGGBBAA` when the color isn't opaque.
     pub fn hex_string(self) -> String {
         if (self.a - 1.0).abs() < f32::EPSILON {
             format!("#{:02X}{:02X}{:02X}", self.r, self.g, self.b)
@@ -54,8 +47,6 @@ impl Color {
         }
     }
 
-    /// This color drawn over `below` (source-over), opaque. What a translucent fill looks like on
-    /// its surface, for checks and previews.
     pub fn over(self, below: Color) -> Color {
         let a = self.a.clamp(0.0, 1.0);
         let mix = |top: u8, under: u8| -> u8 {
@@ -69,7 +60,6 @@ impl Color {
         }
     }
 
-    /// Relative luminance (WCAG), 0 black to 1 white, from the opaque channels.
     pub fn luminance(self) -> f32 {
         let lin = |c: u8| {
             let v = f32::from(c) / 255.0;
@@ -82,7 +72,6 @@ impl Color {
         0.2126 * lin(self.r) + 0.7152 * lin(self.g) + 0.0722 * lin(self.b)
     }
 
-    /// WCAG contrast ratio between two opaque colors, 1 to 21.
     pub fn contrast(self, other: Color) -> f32 {
         let (a, b) = (self.luminance(), other.luminance());
         let (hi, lo) = if a > b { (a, b) } else { (b, a) };

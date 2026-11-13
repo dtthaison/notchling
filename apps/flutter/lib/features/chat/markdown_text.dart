@@ -9,8 +9,6 @@ import '../../app/widgets/kit.dart';
 import '../../app/widgets/motion.dart';
 import 'code_highlight.dart';
 
-/// Markdown for chat: headings, paragraphs, bullet and numbered lists, quotes, **bold**, *italic*, `inline code`,
-/// links and fenced code blocks (highlighted, with a copy button). Anything else shows as written.
 class MarkdownText extends StatefulWidget {
   const MarkdownText(this.text, {super.key});
   final String text;
@@ -20,11 +18,9 @@ class MarkdownText extends StatefulWidget {
 }
 
 class _MarkdownTextState extends State<MarkdownText> {
-  // Parsed once per text: the page rebuilds this widget often (keyboard, scrolling), the markdown does not change.
   late List<MarkdownSegment> _segments = splitSegments(widget.text);
   late List<MdBlock> _blocks = _parseSegments(_segments);
 
-  // The widgets are built once per theme too: a table measures its columns, which should not repeat per frame.
   Kit? _builtFor;
   List<Widget> _built = const <Widget>[];
 
@@ -58,8 +54,6 @@ class _MarkdownTextState extends State<MarkdownText> {
   }
 }
 
-// MARK: - Block model
-
 sealed class MdBlock {
   const MdBlock();
 }
@@ -85,12 +79,10 @@ class MdItem extends MdBlock {
   const MdItem({required this.marker, required this.text, required this.depth, this.checked, this.ordered = false});
   final String marker;
 
-  /// A numbered item: [marker] is its number. Bullets are painted, not typed, so no font can lack the glyph.
   final bool ordered;
   final String text;
   final int depth;
 
-  /// Null for an ordinary item; true or false for a task list box.
   final bool? checked;
 }
 
@@ -120,7 +112,6 @@ final RegExp _quoteRe = RegExp(r'^\s*>\s?(.*)$');
 final RegExp _ruleRe = RegExp(r'^\s{0,3}([-*_])(\s*\1){2,}\s*$');
 final RegExp _separatorCellRe = RegExp(r'^:?-+:?$');
 
-/// Cells of one table row: split on `|` outside inline code, `\|` is a literal pipe, outer pipes are optional.
 List<String> splitTableRow(String line) {
   String row = line.trim();
   if (row.startsWith('|')) row = row.substring(1);
@@ -147,7 +138,6 @@ List<String> splitTableRow(String line) {
   return cells;
 }
 
-/// The alignments if [line] is a table separator row (`|---|:--:|--:|`), else null.
 List<MdAlign>? _separatorAligns(String line) {
   if (!line.contains('-') || !(line.contains('|') || line.trim().startsWith(':'))) return null;
   final List<String> cells = splitTableRow(line);
@@ -175,7 +165,6 @@ List<MdBlock> _parseSegments(List<MarkdownSegment> segments) {
   return blocks;
 }
 
-/// Prose lines to blocks: headings, rules, tables, quotes, bullet, numbered and task items (nested by indent), paragraphs.
 List<MdBlock> parseProse(String text) {
   final List<MdBlock> blocks = <MdBlock>[];
   final List<String> paragraph = <String>[];
@@ -211,7 +200,6 @@ List<MdBlock> parseProse(String text) {
       blocks.add(const MdRule());
       continue;
     }
-    // A table: a header row with a pipe, then the separator row with as many cells.
     if (line.contains('|') && index + 1 < lines.length) {
       final List<MdAlign>? aligns = _separatorAligns(lines[index + 1]);
       final List<String> header = splitTableRow(line);
@@ -324,7 +312,6 @@ Widget _buildBlock(Kit kit, MdBlock block) {
   }
 }
 
-/// A bullet drawn as a shape: a filled dot, a ring one level down, a smaller dot below that.
 class _BulletDot extends StatelessWidget {
   const _BulletDot({required this.depth, required this.color});
   final int depth;
@@ -351,7 +338,6 @@ class _BulletDot extends StatelessWidget {
   }
 }
 
-/// Cells are at most this wide; longer text wraps instead of stretching the table.
 const double _maxCellWidth = 240;
 const double _minCellWidth = 56;
 const EdgeInsets _cellPadding = EdgeInsets.symmetric(horizontal: 10, vertical: 8);
@@ -360,9 +346,6 @@ String _plain(String markdown) => markdown
     .replaceAllMapped(RegExp(r'\[([^\]\n]+)\]\([^)\s]+\)'), (Match m) => m.group(1)!)
     .replaceAll(RegExp(r'[*`~]'), '');
 
-/// A GitHub-style table: header in muted semibold, hairlines between rows, columns as wide as their text up to 240
-/// logical pixels (then the cell wraps). Wider than the bubble, it scrolls sideways inside it, with a fade on the
-/// edge that still has more.
 class MarkdownTable extends StatefulWidget {
   const MarkdownTable({super.key, required this.table});
   final MdTable table;
@@ -435,7 +418,6 @@ class _MarkdownTableState extends State<MarkdownTable> {
     final double natural = _widths.fold<double>(0, (double a, double b) => a + b);
     return LayoutBuilder(
       builder: (BuildContext context, BoxConstraints box) {
-        // Narrower than the bubble: spread the extra width over the columns. Wider: scroll.
         final double scale = natural < box.maxWidth ? box.maxWidth / natural : 1;
         final bool overflows = natural > box.maxWidth + 0.5;
         Widget cell(String text, int column, {required bool head}) => Padding(
@@ -488,7 +470,6 @@ class _MarkdownTableState extends State<MarkdownTable> {
   }
 }
 
-/// A fenced code block: raised box, language label, copy button, highlighted, scrolls sideways.
 class CodeBlock extends StatefulWidget {
   const CodeBlock({super.key, required this.code, this.language});
   final String code;
@@ -584,7 +565,6 @@ class MarkdownSegment {
   final String? language;
 }
 
-/// Splits on ``` fences. An unclosed fence runs to the end.
 List<MarkdownSegment> splitSegments(String text) {
   final List<MarkdownSegment> result = <MarkdownSegment>[];
   final List<String> prose = <String>[];
@@ -634,12 +614,8 @@ final RegExp _italicRe = RegExp(
 final RegExp _strikeRe = RegExp(r'~~(?=\S)(.+?)(?<=\S)~~');
 final RegExp _linkRe = RegExp(r'\[([^\]\n]+)\]\(([^)\s]+)\)');
 
-/// Inline code up to this many characters is drawn as a small box aligned to the text baseline; longer runs wrap
-/// like text, with a background.
 const int _boxedCodeLimit = 28;
 
-/// **bold**, *italic*, `code` and [links](url) runs; the rest is plain. Runs nest: `code`, links and italics inside
-/// **bold**, bold inside italics. Code is never parsed further.
 List<InlineSpan> inlineSpans(String text, Kit kit, {TextStyle? style}) {
   final List<InlineSpan> spans = <InlineSpan>[];
   int cursor = 0;

@@ -1,23 +1,5 @@
-//! Which processes are an app: the pure matching behind [`crate::apps`].
-//!
-//! The daemon has no main run loop, so the system's running-application list can be stale. The
-//! process table can't be: a process either runs or it doesn't. [`app_pids`] picks an app's
-//! processes out of a snapshot of it, by the file each one runs.
-
-/// The Data volume's firmlink prefix; some tools report paths with it, `/Applications/X` without.
 const DATA_VOLUME: &str = "/System/Volumes/Data";
 
-/// The pids, sorted, whose executable is one of `executables` (the file inside each installed copy
-/// of the app, `<bundle>/Contents/MacOS/<CFBundleExecutable>`).
-///
-/// A process counts when its path is exactly an executable, compared whole and without regard to
-/// ASCII case (a default Mac volume ignores case, so the kernel's spelling can differ from the
-/// bundle's). A helper in the bundle (`<bundle>/Contents/Frameworks/X Helper.app/...`) is another
-/// executable and does not count: it has its own bundle id, as it did when the system's list was
-/// asked, and quitting the app takes it away. A path that only starts the same way
-/// (`Codex.app.bak`, `CodexBeta.app`) is another app. A translocated copy (Gatekeeper runs a
-/// downloaded app from `.../AppTranslocation/<uuid>/d/<App>.app/...`, hiding where it came from)
-/// counts when the path after `/d/` is the end of an executable, whole components only.
 pub(crate) fn app_pids(processes: &[(i32, String)], executables: &[String]) -> Vec<i32> {
     let wanted: Vec<String> = executables
         .iter()
@@ -34,7 +16,6 @@ pub(crate) fn app_pids(processes: &[(i32, String)], executables: &[String]) -> V
     pids
 }
 
-/// A path as compared: no firmlink prefix, ASCII lowercase.
 fn fold(path: &str) -> String {
     let path = match path.strip_prefix(DATA_VOLUME) {
         Some(rest) if rest.starts_with('/') => rest,
@@ -43,7 +24,6 @@ fn fold(path: &str) -> String {
     path.to_ascii_lowercase()
 }
 
-/// Whether a process path (folded) is the executable `exe` (folded).
 fn is_executable(process: &str, exe: &str) -> bool {
     if process == exe {
         return true;
@@ -56,8 +36,6 @@ fn is_executable(process: &str, exe: &str) -> bool {
     }
 }
 
-/// What follows `.../AppTranslocation/<uuid>/d/` in a translocated path, when it starts with the
-/// app's own folder (`<App>.app/...`): the part of the original path that survives translocation.
 fn translocated_rest(path: &str) -> Option<&str> {
     let after = path.split_once("/apptranslocation/")?.1;
     let (_uuid, tail) = after.split_once('/')?;
@@ -147,7 +125,6 @@ mod tests {
         assert_eq!(pids(&rows, &[CODEX]), vec![5]);
         let rows = [(6, CODEX)];
         assert_eq!(pids(&rows, &[on_data.as_str()]), vec![6]);
-        // Only a whole leading folder is the prefix.
         let rows = [(
             7,
             "/System/Volumes/DataX/Applications/Codex.app/Contents/MacOS/Codex",

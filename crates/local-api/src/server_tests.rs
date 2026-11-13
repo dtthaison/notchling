@@ -1,4 +1,3 @@
-//! The server over a real socket in a temp folder; the peer is this test process.
 #![cfg(unix)]
 
 use crate::client::{Client, ClientError, ConnectOptions};
@@ -23,9 +22,7 @@ impl Handler for TestHandler {
         match op {
             "echo" => Some(OpSpec::AGENT),
             "settings.set" => Some(OpSpec::APP),
-            // Stands for an op that would need the user's approval (approval.* comes later).
             "test.needsApproval" => Some(OpSpec::APPROVAL),
-            // A handler bug: the connection's thread unwinds.
             "test.panic" => Some(OpSpec::AGENT),
             "test.extras" => Some(OpSpec::AGENT),
             _ => None,
@@ -41,7 +38,6 @@ impl Handler for TestHandler {
         let mut extras = Map::new();
         if op == "test.extras" {
             extras.insert("partial".into(), json!(true));
-            // Never over the envelope's own keys.
             extras.insert("id".into(), json!(99));
             extras.insert("ok".into(), json!("forged"));
         }
@@ -131,7 +127,6 @@ fn client(socket: &Path) -> Client {
     connect_as(socket, ClientKind::Cli)
 }
 
-/// The server here is this test binary, not a `notchling`, so the client's server check is off.
 fn relaxed() -> ConnectOptions {
     ConnectOptions {
         check_server: false,
@@ -145,20 +140,16 @@ fn connect_as(socket: &Path, kind: ClientKind) -> Client {
 
 #[test]
 fn a_client_refuses_a_server_that_is_not_a_notchling_daemon() {
-    // Strict by default: the test binary serving here is no `notchling`.
     let run = start();
     match Client::connect(&run.socket, ClientKind::App, "0.1.0") {
         Err(ClientError::UntrustedServer(why)) => assert!(why.contains("not a notchling"), "{why}"),
         Err(e) => panic!("{e}"),
         Ok(c) => panic!("said hello to {:?}", c.hello()),
     }
-    // It said nothing: the server never heard a hello.
     assert_eq!(run.handle.status().clients, Default::default());
-    // Relaxed, as tests do, the same server is fine.
     assert!(Client::connect_with(&run.socket, ClientKind::App, "0.1.0", &relaxed()).is_ok());
 }
 
-/// A raw connection and its lines.
 fn raw(socket: &Path) -> (UnixStream, LineReader<UnixStream>) {
     let s = UnixStream::connect(socket).unwrap();
     s.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
@@ -175,9 +166,7 @@ fn reply(r: &mut LineReader<UnixStream>) -> Value {
     serde_json::from_slice(&r.next_line().unwrap().unwrap()).unwrap()
 }
 
-/// True when the server closed the connection (EOF or reset).
 fn closed(s: &mut UnixStream) -> bool {
-    // macOS refuses setsockopt (EINVAL) on a socket whose peer has already shut it down.
     if s.set_read_timeout(Some(Duration::from_secs(5))).is_err() {
         return true;
     }
@@ -269,8 +258,6 @@ fn an_unknown_op_says_so() {
 
 #[test]
 fn the_tier_comes_from_the_allowlist_not_the_hello() {
-    // The peer is this test binary: listed, it is the app tier; unlisted, the agent tier, even
-    // when its hello says "app".
     let listed = start_with(Allowlist::new([me()]), fast());
     assert_eq!(client(&listed.socket).tier(), Tier::App);
     let unlisted = start();
@@ -334,7 +321,6 @@ fn with_an_app_attached_the_approval_op_reaches_the_handler() {
 
 #[test]
 fn an_app_connection_whose_handler_panics_is_forgotten() {
-    // Left on the hub, it would keep `app_attached` true and approval would fail open.
     let run = start_with(Allowlist::new([me()]), fast());
     let mut app = connect_as(&run.socket, ClientKind::App);
     assert_eq!(app.tier(), Tier::App);
@@ -360,7 +346,6 @@ fn status_counts_clients_by_kind() {
         (status.clients.cli, status.clients.hook, status.clients.app),
         (1, 1, 0)
     );
-    // A handler that has no acting switch leaves the field out.
     assert_eq!(status.acting, None);
     let raw: Value = c.call(crate::ops::DAEMON_STATUS, json!({})).unwrap();
     assert!(raw.get("acting").is_none(), "{raw}");
@@ -397,7 +382,6 @@ fn an_oversize_line_closes_that_client_and_others_go_on() {
     send(&mut s, HELLO);
     reply(&mut r);
     let big = vec![b'x'; MAX_LINE + 10];
-    // The server may close mid-write; that's the point.
     let _ = s.write_all(&big);
     assert!(closed(&mut s));
     let mut c = client(&run.socket);
@@ -411,7 +395,6 @@ fn a_line_that_never_ends_is_cut_off_after_the_deadline() {
     send(&mut s, HELLO);
     reply(&mut r);
     s.write_all(br#"{"id":2,"op":"ec"#).unwrap();
-    // Meanwhile another client is served at once.
     let started = Instant::now();
     let mut c = client(&run.socket);
     c.status().unwrap();
@@ -439,11 +422,9 @@ fn a_subscriber_that_never_reads_is_dropped_without_stalling_the_publisher() {
     let started = Instant::now();
     for _ in 0..40 {
         run.handle.publish("sessions", "sessions.changed", &big);
-        // The good one reads; the slow one doesn't.
         let _ = good.next_event(Duration::from_millis(50));
     }
     assert!(started.elapsed() < Duration::from_secs(10));
-    // The slow one was closed: two connections became one.
     let deadline = Instant::now() + Duration::from_secs(5);
     while run.handle.connections() > 1 && Instant::now() < deadline {
         std::thread::sleep(Duration::from_millis(20));
@@ -465,7 +446,6 @@ fn clients_past_the_limit_are_closed_on_accept() {
     assert!(closed(&mut s));
 }
 
-/// Says hello on a raw connection; true when the server answered it.
 fn hello_answered(s: &mut UnixStream) -> bool {
     if s.write_all(format!("{HELLO}\n").as_bytes()).is_err() {
         return false;
@@ -481,12 +461,10 @@ fn the_cap_is_counted_at_accept_so_a_burst_cannot_pass_it() {
         ..fast()
     };
     let run = start_with(Allowlist::empty(), limits);
-    // All at once, before any connection's thread has run.
     let mut burst: Vec<UnixStream> = (0..12)
         .map(|_| UnixStream::connect(&run.socket).unwrap())
         .collect();
     for s in &burst {
-        // macOS refuses this (EINVAL) on a socket the server already shut: one that was turned away.
         let _ = s.set_read_timeout(Some(Duration::from_secs(5)));
     }
     let served = burst
@@ -504,13 +482,11 @@ fn the_last_slots_are_kept_for_the_app() {
         app_reserved: 2,
         ..fast()
     };
-    // Agents get two of the four.
     let agents = start_with(Allowlist::empty(), limits);
     let _a = client(&agents.socket);
     let _b = client(&agents.socket);
     let (mut third, _r) = raw(&agents.socket);
     assert!(!hello_answered(&mut third));
-    // The app (this binary, listed) gets all four.
     let apps = start_with(Allowlist::new([me()]), limits);
     let held: Vec<Client> = (0..4)
         .map(|_| connect_as(&apps.socket, ClientKind::App))
@@ -568,7 +544,6 @@ fn a_second_server_on_the_same_socket_is_refused() {
         .err()
         .unwrap();
     assert_eq!(err.kind(), std::io::ErrorKind::AddrInUse);
-    // The first one still serves.
     assert!(client(&run.socket).status().is_ok());
 }
 
@@ -576,7 +551,6 @@ fn a_second_server_on_the_same_socket_is_refused() {
 fn a_stale_socket_from_a_crash_does_not_stop_a_start() {
     let dir = TempDir::new("srv-stale");
     let socket = dir.path().join("notchlingd.sock");
-    // A listener dropped without cleanup leaves its socket file, as a crash would.
     drop(std::os::unix::net::UnixListener::bind(&socket).unwrap());
     assert!(socket.exists());
     assert!(UnixStream::connect(&socket).is_err());

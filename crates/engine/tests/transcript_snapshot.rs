@@ -1,6 +1,3 @@
-//! Ports of SnapshotTests, the incremental snapshot tests, TranscriptTests' limit-hit cases,
-//! SuccessorTests, ProjectFolderTests, JobTranscriptTests and TranscriptCursorsTests.
-
 mod common;
 
 use common::*;
@@ -17,7 +14,6 @@ use std::time::Duration;
 #[test]
 fn notch_snapshot() {
     let snap = snapshot::read(&s(&notchling_fixture("notch.jsonl")));
-    // A message's tools are tallied before its text is added, so they show above it.
     assert_eq!(
         snap.lines.iter().map(|l| l.kind).collect::<Vec<_>>(),
         [
@@ -90,7 +86,6 @@ fn replaced_or_truncated_file_is_read_again() {
     let path = scratch.write("t.jsonl", &(lines.join("\n") + "\n"));
     assert_eq!(snapshot::read(&s(&path)).lines.len(), 7);
 
-    // Truncated in place to the first line.
     scratch.write("t.jsonl", &(lines[0].clone() + "\n"));
     assert_eq!(
         snapshot::read(&s(&path))
@@ -101,7 +96,6 @@ fn replaced_or_truncated_file_is_read_again() {
         [LineKind::User]
     );
 
-    // Replaced by a new file (new inode) with different content.
     std::fs::remove_file(&path).expect("remove");
     scratch.write("t.jsonl", &(lines[9].clone() + "\n"));
     assert_eq!(
@@ -147,8 +141,6 @@ fn a_429_is_not_a_limit_hit() {
     assert!(limit_hit_in_file(&s(&notchling_fixture("rate-limited-429.jsonl"))).is_none());
 }
 
-// MARK: successor
-
 fn cleared(agent: &str) -> String {
     format!(r#"{{"type":"system","agentName":"{agent}","content":"SessionStart:clear"}}"#) + "\n"
 }
@@ -172,7 +164,7 @@ fn a_new_file_is_seen_after_a_cached_miss() {
     let scratch = Scratch::new("succ");
     let old = s(&scratch.write("old.jsonl", "{}\n"));
     assert_eq!(successor(&old, "worker"), None);
-    tick(); // file systems with coarse timestamps need a moment to tell the folder's dates apart
+    tick();
     tick();
     let new = s(&scratch.write("new.jsonl", &cleared("worker")));
     assert_eq!(
@@ -216,7 +208,6 @@ fn a_name_with_quotes_is_matched_as_json() {
 
 #[test]
 fn two_matching_files_are_followed_oldest_created_first() {
-    // Created z then a: the chain ends at the newest (a), whatever the names sort like.
     let scratch = Scratch::new("succ-order");
     let old = s(&scratch.write("old.jsonl", "{}\n"));
     tick();
@@ -228,7 +219,6 @@ fn two_matching_files_are_followed_oldest_created_first() {
 
 #[test]
 fn folder_names() {
-    // Checked against real folder names in ~/.claude/projects.
     assert_eq!(
         project_folder("/Users/sondoan/go/src/pp/notchling"),
         "-Users-sondoan-go-src-pp-notchling"
@@ -242,8 +232,6 @@ fn folder_names() {
         "-private-tmp-claude-501-x-y"
     );
 }
-
-// MARK: job transcript
 
 const START: &str = "/h/.claude/projects/-Users-me-app/abc.jsonl";
 const MOVED: &str = "/h/.claude/projects/-Users-me-app--claude-worktrees-music/abc.jsonl";
@@ -281,7 +269,6 @@ fn the_newer_file_wins_when_both_exist() {
 
 #[test]
 fn equal_dates_keep_the_recorded_path() {
-    // Swift's `max(by:)` keeps the first of equal elements.
     assert_eq!(
         job_transcript(Some(START), Some("abc"), Some(WORKTREE), |_| Some(7.0)).as_deref(),
         Some(START)
@@ -299,8 +286,6 @@ fn without_a_worktree_it_is_the_recorded_path() {
         None
     );
 }
-
-// MARK: cursors
 
 #[derive(Default)]
 struct LineCount {
@@ -334,9 +319,9 @@ fn full_cache_drops_only_the_least_recently_read() {
 
     assert_eq!(cursors.read(&a), Some(1));
     assert_eq!(cursors.read(&b), Some(1));
-    assert_eq!(cursors.read(&a), Some(1)); // a is now newer than b
+    assert_eq!(cursors.read(&a), Some(1));
     assert_eq!(n(), 2);
-    assert_eq!(cursors.read(&c), Some(1)); // full: b goes, a stays
+    assert_eq!(cursors.read(&c), Some(1));
     assert_eq!(n(), 3);
     assert_eq!(cursors.read(&a), Some(1));
     assert_eq!(n(), 3, "a was kept");
@@ -353,7 +338,6 @@ fn replacing_a_file_in_a_full_cache_drops_nothing_else() {
     let n = || renders.load(Ordering::SeqCst);
     let _ = cursors.read(&a);
     let _ = cursors.read(&b);
-    // A new file at a's path (new inode) is read from scratch under the same key.
     std::fs::remove_file(&a).expect("remove");
     scratch.write("a.jsonl", "{}\n{}\n");
     assert_eq!(cursors.read(&a), Some(2));
@@ -378,8 +362,6 @@ fn unreadable_file_is_none() {
     assert_eq!(cursors.read("/nonexistent/x.jsonl"), None);
 }
 
-// MARK: predecessor
-
 fn named(agent: &str) -> String {
     format!(r#"{{"type":"agent-name","agentName":"{agent}"}}"#) + "\n"
 }
@@ -395,7 +377,6 @@ fn a_cleared_transcript_finds_the_one_the_clear_ended() {
     tick();
     let new = s(&scratch.write("new.jsonl", &cleared("worker")));
     assert_eq!(predecessor(&new, "worker"), Some(old.clone()));
-    // A transcript no clear started has none, and neither has an unknown name.
     assert_eq!(predecessor(&old, "worker"), None);
     assert_eq!(predecessor(&new, "nobody"), None);
 }

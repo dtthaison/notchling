@@ -15,7 +15,6 @@ fn a_sync_saves_the_live_login_and_asks_the_profile_once_per_token() {
     let slot = w.saved_item(1);
     assert_eq!(slot["claudeAiOauth"]["accessToken"], "test-access-1-1");
     assert_eq!(slot["oauthAccount"]["emailAddress"], email(1));
-    // The same token again: no second profile request.
     w.store.sync().unwrap();
     assert_eq!(w.http.seen().len(), 1);
     assert_eq!(
@@ -113,7 +112,6 @@ fn a_switch_replaces_only_the_claude_login_and_the_oauth_account() {
     let snap = w.store.switch_to(&id(2)).unwrap();
     assert_eq!(snap.active, Some(id(2)));
     let after_item = w.chain.get(LIVE_SERVICE, "me").unwrap();
-    // The MCP login keeps its bytes; only claudeAiOauth's value changed.
     assert!(
         after_item.ends_with(r#","mcpOAuth":{"srv":{"accessToken":"test-mcp"}}}"#),
         "{after_item}"
@@ -135,7 +133,6 @@ fn a_switch_replaces_only_the_claude_login_and_the_oauth_account() {
     assert!(config.contains(&email(2)) && !config.contains(&email(1)));
     let backup = std::fs::read_to_string(w.tmp.path("home/.claude.json.notchling-backup")).unwrap();
     assert_eq!(backup, before_config);
-    // The login it left was saved first.
     assert_eq!(
         w.saved_item(1)["claudeAiOauth"]["accessToken"],
         "test-access-1-1"
@@ -225,7 +222,6 @@ fn adding_saves_the_login_and_leaves_claude_code_alone() {
         Some("test-access-3-1"),
         "checked with its own token"
     );
-    // A profile that doesn't answer: refused, and the message names no token.
     let Value::Object(map) = oauth(4, 1, LATER) else {
         unreachable!()
     };
@@ -260,7 +256,6 @@ fn removing_forgets_the_login_unless_a_lane_holds_it() {
 
 #[test]
 fn a_removal_stays_removed_after_a_later_sync() {
-    // The Swift app's issue #7: one lock, so a sync can't write back a list read before a removal.
     let w = World::new("acc-remove-race");
     w.signed_in(1, 1);
     w.answers_profile(1);
@@ -289,7 +284,6 @@ fn the_main_logins_token_is_never_renewed() {
 #[test]
 fn the_live_token_reads_only_the_live_login_and_never_reaches_the_network() {
     let w = World::new("acc-live-token");
-    // No login known yet: nothing.
     assert_eq!(w.store.live_token().unwrap(), None);
     w.signed_in(1, 1);
     w.answers_profile(1);
@@ -299,8 +293,6 @@ fn the_live_token_reads_only_the_live_login_and_never_reaches_the_network() {
         w.store.live_token().unwrap().unwrap().expose(),
         "test-access-1-1"
     );
-    // The live login expires, and an expired saved slot is there to tempt a renewal: still
-    // nothing, and nothing asked of the network.
     w.saved(2, 1, NOW - 1);
     w.saved(1, 1, NOW - 1);
     w.clock.store(LATER, std::sync::atomic::Ordering::SeqCst);
@@ -311,7 +303,6 @@ fn the_live_token_reads_only_the_live_login_and_never_reaches_the_network() {
 
 #[test]
 fn a_saved_login_live_by_the_config_file_is_never_renewed_either() {
-    // No sync yet, so the store hasn't read the live login: ~/.claude.json still says it's main.
     let w = World::new("acc-token-config");
     w.signed_in(1, 1);
     w.saved(1, 1, NOW - 1);
@@ -339,7 +330,6 @@ fn a_saved_login_live_nowhere_is_renewed_and_a_refusal_marks_it() {
         slot["claudeAiOauth"]["scopes"],
         json!(["user:inference", "user:profile"])
     );
-    // Expired again, and refused this time.
     w.clock
         .store(NOW + 10_000_000, std::sync::atomic::Ordering::SeqCst);
     w.http

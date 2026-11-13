@@ -1,18 +1,11 @@
-//! What a published page is made of: its title, the skeleton that lets a fragment render from
-//! disk, the folder name, and the facts read out of the Artifact tool's result. All pure; ported
-//! from the Swift app's `PageLibrary` (page content, folders, the result's link and version).
-
 use crate::search::lowercase;
 use regex::Regex;
 use std::sync::OnceLock;
 
-/// A pattern compiled once; `None` if it ever failed to compile (it can't for these constants).
 fn re(cell: &'static OnceLock<Option<Regex>>, pattern: &str) -> Option<&'static Regex> {
     cell.get_or_init(|| Regex::new(pattern).ok()).as_ref()
 }
 
-/// The title of the page's source: `<title>` for HTML, the first `# ` heading for Markdown, else
-/// `fallback`. Whitespace collapses to single spaces and the title is cut to 200 characters.
 pub fn page_title(data: &[u8], ext: &str, fallback: &str) -> String {
     let head = &data[..data.len().min(200_000)];
     let text = String::from_utf8_lossy(head);
@@ -58,7 +51,6 @@ fn unescape(s: &str) -> String {
         .replace("&amp;", "&")
 }
 
-/// HTML-escapes text for the list page.
 pub fn escape(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")
@@ -67,8 +59,6 @@ pub fn escape(s: &str) -> String {
         .replace('\'', "&#39;")
 }
 
-/// Published pages are fragments (the publisher adds a skeleton), so give them one to render from
-/// disk. A page that already starts with a doctype is kept as it is.
 pub fn wrapped(data: &[u8]) -> Vec<u8> {
     let head = String::from_utf8_lossy(&data[..data.len().min(2048)]).to_lowercase();
     if head.contains("<!doctype") {
@@ -84,8 +74,6 @@ pub fn wrapped(data: &[u8]) -> Vec<u8> {
     out
 }
 
-/// A folder name for a new page: the title as a lowercase ASCII slug (40 characters at most), then
-/// the FNV-1a hash of `key` (the link, or the source path when there is none) in 8 hex digits.
 pub fn make_folder(title: &str, key: &str) -> String {
     let dashed: String = lowercase(title)
         .chars()
@@ -109,7 +97,6 @@ pub fn make_folder(title: &str, key: &str) -> String {
     format!("{slug}-{:08x}", hash as u32)
 }
 
-/// The first claude.ai artifact link in a tool result, whatever shape the result has.
 pub fn artifact_url_in(text: &str) -> Option<String> {
     static URL: OnceLock<Option<Regex>> = OnceLock::new();
     re(
@@ -120,8 +107,6 @@ pub fn artifact_url_in(text: &str) -> Option<String> {
     .map(|m| m.as_str().to_string())
 }
 
-/// The version id a publish result names: Claude Code's "version id 1793506664-65e3", or
-/// Notchling's own "(version 1793506664-65e3)". Empty when there is none.
 pub fn published_version(text: &str) -> String {
     static VERSION: OnceLock<Option<Regex>> = OnceLock::new();
     re(&VERSION, r"version (?:id )?[0-9]{6,}-[0-9a-f]{2,}")
@@ -131,14 +116,11 @@ pub fn published_version(text: &str) -> String {
         .to_string()
 }
 
-/// True when a result with no link reads as a refused or failed publish.
 pub fn looks_failed(response: &str) -> bool {
     static FAILED: OnceLock<Option<Regex>> = OnceLock::new();
     re(&FAILED, r"(?i)refused|error|failed|conflict").is_some_and(|r| r.is_match(response))
 }
 
-/// True when a short result reads as "not found" or "not allowed": a read that failed without
-/// saying so.
 pub fn looks_missing(response: &str) -> bool {
     static MISSING: OnceLock<Option<Regex>> = OnceLock::new();
     response.chars().count() < 2000
@@ -149,7 +131,6 @@ pub fn looks_missing(response: &str) -> bool {
         .is_some_and(|r| r.is_match(response))
 }
 
-/// The project's folder name, also from a subagent's `.claude/worktrees/<name>` checkout.
 pub fn project_name(cwd: &str) -> String {
     let root = cwd.find("/.claude/worktrees/").map_or(cwd, |i| &cwd[..i]);
     root.trim_end_matches('/')

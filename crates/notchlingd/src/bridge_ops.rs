@@ -1,12 +1,3 @@
-//! Milestone 4's phone bridge in the daemon: the app-tier `bridge.*` ops over the engine's
-//! [`Bridge`] (E5, TLS on the LAN port, the tunnel origin on loopback, the router).
-//!
-//! The bridge is off at every start, whatever a file says: it binds no port and writes nothing
-//! under the data folder (`AgentConsole`) until the app's `bridge.set {"on": true}` in this run
-//! (decision 0007's note: files at rest are not a tier boundary). While the Swift app still runs
-//! its own bridge it holds both ports, so turning this one on then fails with a busy port and says
-//! so (decision 0011: one owner).
-
 use crate::acting_ops::{ActingOps, Room};
 use crate::bridge_backend::{Approvals, DaemonActing, DaemonSources};
 use crate::inbox_ops::InboxOps;
@@ -18,7 +9,6 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-/// Every bridge op; all app tier.
 pub const BRIDGE_OPS: [&str; 7] = [
     ops::BRIDGE_SET,
     ops::BRIDGE_STATUS,
@@ -29,19 +19,14 @@ pub const BRIDGE_OPS: [&str; 7] = [
     ops::BRIDGE_TUNNEL_STATUS,
 ];
 
-/// Where the bridge lives and listens. `data_dir` is `AgentConsole`, the Swift app's folder, so
-/// paired phones and the Cloudflare setup carry over.
 #[derive(Clone, Debug)]
 pub struct BridgeSetup {
     pub data_dir: PathBuf,
     pub home: PathBuf,
     pub images_dir: PathBuf,
-    /// `~/.claude/projects`, for the phone's recent folders.
     pub projects_dir: PathBuf,
-    /// The LAN and tunnel ports (47821 and 47822 unless a test or a flag says otherwise).
     pub lan_port: u16,
     pub tunnel_port: u16,
-    /// Binds the LAN port on loopback only (tests).
     pub loopback_only: bool,
     pub approval_wait: Duration,
 }
@@ -53,7 +38,6 @@ pub struct BridgeOps {
 }
 
 impl BridgeOps {
-    /// Off.
     pub fn new(
         setup: BridgeSetup,
         sessions: Arc<Mutex<Value>>,
@@ -98,7 +82,6 @@ impl BridgeOps {
         BRIDGE_OPS.contains(&op).then_some(OpSpec::APP)
     }
 
-    /// The pairing requests waiting for the app.
     pub fn approvals(&self) -> Arc<Approvals> {
         self.approvals.clone()
     }
@@ -107,7 +90,6 @@ impl BridgeOps {
         self.bridge.is_on()
     }
 
-    /// The bound (LAN, tunnel) ports while on.
     pub fn ports(&self) -> Option<(u16, u16)> {
         self.bridge.ports()
     }
@@ -120,7 +102,6 @@ impl BridgeOps {
                     ApiError::bad_request("bridge.set takes {\"on\": true|false}")
                 })?;
                 if !on {
-                    // Halted first: a pair approved just before the refusal can't write either.
                     self.bridge.halt();
                     self.approvals.refuse_all();
                 }
@@ -153,7 +134,6 @@ impl BridgeOps {
         }
     }
 
-    /// The daemon is stopping: phones waiting to pair are refused and the ports close.
     pub fn close(&self) {
         self.bridge.halt();
         self.approvals.refuse_all();

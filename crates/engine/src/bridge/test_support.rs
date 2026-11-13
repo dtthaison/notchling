@@ -1,6 +1,3 @@
-//! Fakes for the bridge tests (Swift `BridgeTestSupport`): a recording connection, a canned
-//! backend, in-memory devices, codes, limiter and audit, and a rig wiring them to a real router.
-
 use super::backend::{
     Audit, AuditEntry, BridgeBackend, Devices, PairedDevice, PairingCodes, RateLimiter,
 };
@@ -19,7 +16,6 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-/// 2026-11-01 09:44:25 UTC, the fixtures' "now" (Swift `fixtureNow`).
 pub const NOW_MS: f64 = 1_793_541_465_000.0;
 
 type Done = Box<dyn FnOnce() + Send>;
@@ -85,14 +81,12 @@ pub fn data(reply: &Value) -> Value {
     reply.get("data").cloned().unwrap_or(Value::Null)
 }
 
-/// The canned backend; every field is public so a test sets what it needs.
 #[derive(Default)]
 pub struct FakeState {
     pub sessions: Vec<Session>,
     pub chat: Vec<ChatMessage>,
     pub prompts: HashMap<String, PendingPrompt>,
     pub refuse_approval: bool,
-    /// How long `request_approval` waits, as the person at the computer would.
     pub approval_delay_ms: u64,
     pub send_delay_ms: u64,
     pub phone_error: Option<BridgeFailure>,
@@ -101,9 +95,7 @@ pub struct FakeState {
     pub takeover: Option<Result<TakeoverOutcome, BridgeFailure>>,
     pub sent: Vec<(String, String)>,
     pub responses: Vec<(String, PromptResponse)>,
-    /// A started session's folder and its model: the short name, or the id of a `modelId`.
     pub new_sessions: Vec<(PathBuf, Option<String>)>,
-    /// The models the backend lists and allows.
     pub models: Vec<ModelChoice>,
     pub phone_starts: Vec<PhoneOptions>,
     pub interrupted: Vec<String>,
@@ -273,7 +265,6 @@ impl BridgeBackend for FakeBackend {
     }
 }
 
-/// Devices in memory; tokens are `tok-<n>`.
 #[derive(Default)]
 pub struct MemoryDevices {
     pub list: Mutex<Vec<(PairedDevice, String)>>,
@@ -309,7 +300,6 @@ impl Devices for MemoryDevices {
     }
 }
 
-/// One live code at a time, valid five minutes, used once (Swift `PairingCodes`).
 #[derive(Default)]
 pub struct MemoryCodes {
     current: Mutex<Option<(String, f64)>>,
@@ -336,7 +326,6 @@ impl PairingCodes for MemoryCodes {
     }
 }
 
-/// 1, 2, 4, 8 seconds of backoff, then five minutes locked (Swift `AuthRateLimiter`).
 #[derive(Default)]
 pub struct MemoryLimiter {
     entries: Mutex<HashMap<String, (u32, f64)>>,
@@ -373,7 +362,6 @@ pub struct MemoryAudit {
 }
 
 impl MemoryAudit {
-    /// Newest first, as `AuditLog.recent()`.
     pub fn recent(&self) -> Vec<AuditEntry> {
         lock(&self.entries).iter().rev().cloned().collect()
     }
@@ -385,7 +373,6 @@ impl Audit for MemoryAudit {
     }
 }
 
-/// A router on a temp home with the fakes, and a clock the test moves.
 pub struct Rig {
     pub hub: Arc<Hub>,
     pub router: Router,
@@ -449,7 +436,6 @@ impl Rig {
         self.router.handle(connection, text);
     }
 
-    /// A paired device's connection, already past `hello`.
     pub fn login(&self, name: &str) -> (Arc<Connection>, Arc<RecordingIo>, String) {
         let (_, token) = self.devices.register(name, "ios").expect("register");
         let (connection, io) = self.connect("192.168.1.20");

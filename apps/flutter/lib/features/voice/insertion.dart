@@ -1,7 +1,5 @@
 import 'package:flutter/widgets.dart';
 
-/// Puts dictated [text] into the composer: at the cursor (replacing a selection), with a space on either side
-/// where it would otherwise touch a word; at the end when the field has no cursor. The cursor lands after it.
 void insertAtCursor(TextEditingController controller, String text) {
   final String insert = text.trim();
   if (insert.isEmpty) return;

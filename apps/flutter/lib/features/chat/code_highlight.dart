@@ -2,9 +2,6 @@ import 'package:flutter/material.dart';
 
 import '../../app/theme/tokens.dart';
 
-/// A small syntax highlighter: comments, strings, numbers, keywords and type names. One pass, no grammar per
-/// language; the keyword set covers the languages Claude writes most (Dart, Swift, TS/JS, Python, Kotlin, Go,
-/// Rust, shell). Good enough to read code on a phone; not an editor.
 const Set<String> _keywords = <String>{
   'abstract',
   'as',
@@ -86,7 +83,6 @@ const Set<String> _keywords = <String>{
   'pass',
 };
 
-/// The language from a fence word or a file path ("swift", "main.dart"); null when unknown.
 String? languageOf(String? hint) {
   if (hint == null || hint.isEmpty) return null;
   final String lower = hint.toLowerCase();

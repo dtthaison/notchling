@@ -1,6 +1,3 @@
-//! What a [`Loader`] says about the conversation between two loads: the same `Arc` and `Same` when
-//! nothing changed, the splice for an appended line, and no change for another session.
-
 use std::sync::Arc;
 
 use super::data::DataRoot;
@@ -20,7 +17,6 @@ const ONE_MORE: &str = concat!(
     "\n"
 );
 
-/// Two background sessions, `fix-the-bug` and `port-search`, from the `chat` fixture's files.
 fn world(s: &Scratch) -> Loader {
     s.write("claude/jobs/aa11bb22/state.json", FIX_JOB);
     s.write(LOG_PATH, FIX_LOG);
@@ -86,7 +82,6 @@ fn another_session_has_no_change() {
     let other = loader.load(Some("port-search"), 2_000);
     assert_eq!(other.selected.as_deref(), Some("port-search"));
     assert!(other.change.is_none(), "another session isn't compared");
-    // And back: the loader remembers only the last one it loaded.
     let back = loader.load(Some("fix-the-bug"), 3_000);
     assert!(back.change.is_none());
 }

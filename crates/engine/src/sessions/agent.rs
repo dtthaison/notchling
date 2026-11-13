@@ -1,8 +1,5 @@
-//! The row a background job or a terminal session becomes.
-
 use serde::{Deserialize, Serialize};
 
-/// Which tab a row sits in. The order is the sort order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum AgentGroup {
@@ -11,19 +8,14 @@ pub enum AgentGroup {
     Completed,
 }
 
-/// What clicking a row does.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum AgentTarget {
-    /// A background job, by its short id (`claude attach <id>`).
     Job(String),
-    /// A live terminal session, by process id.
     Process(u32),
-    /// An exited session (`claude --resume <id>`).
     Resume { session_id: String, cwd: String },
 }
 
-/// One session or job, as the notch and Chat list it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Agent {
@@ -34,33 +26,22 @@ pub struct Agent {
     pub group: AgentGroup,
     pub label: String,
     pub detail: Option<String>,
-    /// When it last changed, in milliseconds since the epoch; 0 when unknown (the Swift app's
-    /// `distantPast`), which the completed-window filter then hides.
     pub since_ms: i64,
     pub target: AgentTarget,
     pub suggested_reply: Option<String>,
-    /// The job's transcript, following it into a git worktree. To follow `/clear` too, pass it
-    /// through `transcript::locate::successor`.
     pub transcript_path: Option<String>,
-    /// Where it runs: "Background", "claude -p", or the app hosting its terminal.
     pub host: String,
-    /// True for `claude -p` sessions (entrypoint `sdk-cli`): headless, so no hook and no replies.
     pub headless: bool,
-    /// The lane's config folder (`CLAUDE_CONFIG_DIR`); `None` for `~/.claude`, the main login.
     pub config_dir: Option<String>,
-    /// The shell command of a template "exec" job (it has no transcript and takes no replies).
     pub command: Option<String>,
-    /// The conversation a job was resumed from, when `state.json` names one.
     pub resume_session_id: Option<String>,
 }
 
 impl Agent {
-    /// Replies can be typed in only for background conversations.
     pub fn can_reply(&self) -> bool {
         matches!(self.target, AgentTarget::Job(_)) && self.command.is_none()
     }
 
-    /// Claude Code's own session id: a resume target's, or the transcript file's stem.
     pub fn session_id(&self) -> Option<String> {
         match &self.target {
             AgentTarget::Resume { session_id, .. } => {
@@ -101,7 +82,6 @@ pub(crate) fn sample(target: AgentTarget, transcript: Option<&str>) -> Agent {
 mod tests {
     use super::*;
 
-    // Port of SessionIDTests.testIDs.
     #[test]
     fn session_ids() {
         let job = sample(

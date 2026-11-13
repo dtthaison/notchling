@@ -1,12 +1,3 @@
-//! What the app knows about the Secret Vault and what it asks the daemon (Milestone 6, U9):
-//! the list without values, saving and removing, and the answers to an agent's approval or
-//! request. Every call blocks, so the caller makes it off the UI thread. A value goes out in a
-//! `vault.save` and never comes back: the [`Snapshot`] holds entries only, and nothing here keeps
-//! or prints a value after the call returns.
-//!
-//! Every op needs the `vault` switch; while it is off the daemon refuses them all, so nothing is
-//! sent ([`Vault::gate`]) and the sheet says why.
-
 use std::sync::Mutex;
 
 use notchling_engine::vault::entry::{VaultEntry, VaultValue};
@@ -18,13 +9,10 @@ use crate::actions::{Socket, Transport};
 use crate::chat::data::DataRoot;
 use crate::switches::{self, Switch, Switches};
 
-/// The list as the daemon last gave it.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Snapshot {
-    /// A daemon answered the last read.
     pub attached: bool,
     pub entries: Vec<VaultEntry>,
-    /// The last failure to show, or none.
     pub error: Option<String>,
 }
 
@@ -52,7 +40,6 @@ impl Vault {
         }
     }
 
-    /// No daemon behind it, showing `entries`: a render's.
     pub fn fixed(entries: Vec<VaultEntry>) -> Vault {
         Vault {
             transport: None,
@@ -64,7 +51,6 @@ impl Vault {
         }
     }
 
-    /// The running app's: the daemon's socket in the data folder, or nothing for a fixture root.
     pub fn for_run(root: Option<&DataRoot>) -> Vault {
         match root.filter(|r| r.fixture.is_none()) {
             Some(root) => Vault::over(Box::new(Socket {
@@ -87,7 +73,6 @@ impl Vault {
         f(&mut lock(&self.snapshot));
     }
 
-    /// Refuses, unsent, an op the `vault` switch doesn't allow; the error is the line to show.
     fn gate(&self, switches: &Switches) -> Result<(), String> {
         if self.transport.is_none() {
             return Err(crate::acting::DETACHED_MESSAGE.into());
@@ -117,8 +102,6 @@ impl Vault {
         })
     }
 
-    /// Reads the list (`vault.list`). Blocking. With the switch off nothing is asked and the list
-    /// empties: the daemon has nothing to say about the vault until the switch is on.
     pub fn refresh(&self, switches: &Switches) {
         if self.transport.is_none() {
             return;
@@ -140,8 +123,6 @@ impl Vault {
         }
     }
 
-    /// Saves an entry (`vault.save`). `value` is sent and forgotten; `None` keeps the stored one.
-    /// `request` answers an agent's form. Blocking.
     pub fn save(
         &self,
         switches: &Switches,
@@ -163,7 +144,6 @@ impl Vault {
         Ok(())
     }
 
-    /// Removes an entry and its value (`vault.remove`). Blocking.
     pub fn remove(&self, switches: &Switches, name: &str) -> Result<(), String> {
         self.send(switches, &Call::remove(name))?;
         self.update(|s| {
@@ -173,14 +153,11 @@ impl Vault {
         Ok(())
     }
 
-    /// Answers an approval (`vault.approval.answer`). A request the daemon no longer holds answers
-    /// `answered: false`, which is not an error. Blocking.
     pub fn answer(&self, switches: &Switches, id: &str, decision: Decision) -> Result<(), String> {
         self.send(switches, &Call::approval_answer(id, decision))
             .map(|_| ())
     }
 
-    /// The user closed an agent's form without saving (`vault.request.cancel`). Blocking.
     pub fn cancel_request(&self, switches: &Switches, id: &str) -> Result<(), String> {
         self.send(switches, &Call::request_cancel(id)).map(|_| ())
     }

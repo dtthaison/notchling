@@ -1,7 +1,3 @@
-//! The Machines window for `--render` (part U10), over the fixture `crates/app/fixtures/machines`
-//! with the tool off: every check says Machines is off, since the `Refusing` runner answers each
-//! probe with that and no process starts. Never the real home, never ssh.
-
 use notchling_engine::machines::step::StepId;
 
 use super::data::Setup;
@@ -16,7 +12,6 @@ pub const MACHINES_ADD: &str = "machines-add";
 pub const MACHINES_JOBS: &str = "machines-jobs";
 pub const MACHINES_JOB_SHEET: &str = "machines-job-sheet";
 
-/// The window's size in points, as the Swift app opened it.
 pub const WINDOW_SIZE: (f32, f32) = (900.0, 780.0);
 pub const WINDOW_MIN: (f32, f32) = (680.0, 460.0);
 
@@ -48,7 +43,6 @@ pub const VIEWS: [ViewSpec; 5] = [
     },
 ];
 
-/// What a machines render shows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Shown {
     Machines,
@@ -69,8 +63,6 @@ pub fn shown(name: &str) -> Option<Shown> {
     })
 }
 
-/// The model over the fixture, checked once (the off runner answers at once), with the sheet or
-/// tab the render asks for.
 pub fn model(which: Shown) -> MachinesModel {
     let mut model = MachinesModel::new(Setup::for_render(None).parts());
     model.engine().refresh(None, true);

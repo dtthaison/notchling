@@ -1,9 +1,3 @@
-//! Chat and the notch find a session's transcript with the same function (`notchling_app::transcripts`):
-//! a terminal session has no `linkScanPath`, so its file is found by session id in the project
-//! folders, and a job that ran `/clear` is followed to the file `/clear` started. The data is built
-//! in a scratch folder laid out as a fixture root (`claude`, `notchling`, `codex`); nothing reads the
-//! real `~/.claude`.
-
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -11,12 +5,10 @@ use notchling_app::chat::data::DataRoot;
 use notchling_app::chat::rows::{rows, Row};
 use notchling_app::notch::source::{DataRoot as NotchRoot, Source};
 
-/// The fixture's day; its rows are dated a few hours earlier.
 const NOW_MS: i64 = 1_794_182_400_000;
 
 static COUNTER: AtomicU32 = AtomicU32::new(0);
 
-/// A fixture root in the temp folder, one per test (they run at the same time).
 struct World(PathBuf);
 
 impl World {
@@ -36,8 +28,6 @@ impl World {
         path
     }
 
-    /// A terminal session's file, `sessions/<pid>.json`: the pid is this process's, so it is alive
-    /// wherever the tests run.
     fn terminal_session(&self, id: &str, cwd: &str) {
         let pid = std::process::id();
         self.write(
@@ -102,7 +92,6 @@ fn a_terminal_session_without_a_link_path_finds_its_transcript_by_id() {
         "typed in the terminal"
     ));
 
-    // The notch finds the same file.
     let loaded = Source::keeping_everything(NotchRoot::fixture(&w.0)).load(NOW_MS);
     let snapshot = &loaded.snapshots["term-1"];
     assert_eq!(
@@ -144,8 +133,6 @@ fn a_job_after_clear_shows_the_file_clear_started() {
 
 #[test]
 fn a_job_whose_file_moved_into_a_worktree_folder_is_found_by_the_file_name() {
-    // EnterWorktree moves the transcript to the worktree's project folder; the job's state keeps
-    // the old path and names no worktree.
     let w = World::new();
     let gone = w.0.join("claude/projects/-work-app/conv-1.jsonl");
     let moved = w.write(

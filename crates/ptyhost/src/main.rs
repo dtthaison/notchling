@@ -1,11 +1,3 @@
-//! `notchling-ptyhost`: the session host (`legacy/macos/Sources/hostd/main.swift`).
-//!
-//!   notchling-ptyhost                          run the host
-//!   notchling-ptyhost --status                 print {"running":N,"total":M} and exit (asks the running host)
-//!   notchling-ptyhost --record-resume SESSION_ID CWD    remember a session for the next start
-//!   notchling-ptyhost --socket PATH --state PATH        (tests: other paths)
-//!   notchling-ptyhost --version
-
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.iter().any(|a| a == "--version") {
@@ -43,7 +35,6 @@ mod unix {
     static STOP: AtomicBool = AtomicBool::new(false);
 
     extern "C" fn on_sigterm(_: libc::c_int) {
-        // Only an atomic store: async-signal-safe.
         STOP.store(true, Ordering::SeqCst);
     }
 
@@ -71,8 +62,6 @@ mod unix {
             return status(&socket);
         }
 
-        // Migration: remember a session that is running somewhere else right now, so the next host
-        // start resumes it.
         if let Some(index) = args.iter().position(|a| a == "--record-resume") {
             let (Some(session), Some(cwd)) = (args.get(index + 1), args.get(index + 2)) else {
                 println!("hostd: --record-resume SESSION_ID CWD");
@@ -98,7 +87,6 @@ mod unix {
                     number("total")
                 );
             }
-            // No host answering: nothing is running.
             Err(_) => println!("{{\"running\":0,\"total\":0,\"host\":false}}"),
         }
         0
@@ -122,19 +110,15 @@ mod unix {
         }
         println!("hostd: listening on {}", socket.display());
 
-        // Bring back sessions that were recorded and whose process is gone (a reboot, a crash, an update).
         let resumed = host.resume_recorded();
         if resumed > 0 {
             println!("hostd: resumed {resumed} session(s)");
         }
 
-        // SIGTERM from launchd: stop listening and leave. The ptys end with the host, and the next
-        // start resumes them.
         let handler = on_sigterm as extern "C" fn(libc::c_int) as libc::sighandler_t;
         // SAFETY: the handler only stores to an atomic, which is async-signal-safe.
         unsafe { libc::signal(libc::SIGTERM, handler) };
 
-        // An update was installed next to the running binary: take it over as soon as nothing runs.
         let binary = std::env::current_exe()
             .and_then(std::fs::canonicalize)
             .unwrap_or_default();
@@ -153,12 +137,11 @@ mod unix {
             if decide(stamp(&binary) != started, host.running_count()) == UpdateAction::RestartNow {
                 println!("hostd: a newer helper is installed and nothing is running; restarting");
                 server.stop();
-                return 0; // launchd KeepAlive starts the new binary
+                return 0;
             }
         }
     }
 
-    /// The binary's modification time and size.
     fn stamp(binary: &Path) -> String {
         let Ok(meta) = std::fs::metadata(binary) else {
             return "0-0".to_string();

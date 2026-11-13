@@ -1,6 +1,3 @@
-//! The check passes of [`SetupEngine`]: one machine's probes in waves, the cheap and slow remote
-//! ones each in one ssh, cut apart at marker lines that carry a random nonce.
-
 use super::engine::applying;
 use super::engine::{
     lock, Batch, Evaluation, SetupEngine, CHEAP_TIMEOUT, CONNECT_ERRORS, LOCAL_PARALLEL, PROBE_CAP,
@@ -17,7 +14,6 @@ use super::step::{
 use crate::lanes::quote;
 use std::collections::{BTreeMap, BTreeSet};
 
-/// 16 hex characters from the OS's random source.
 fn nonce() -> Option<String> {
     use ring::rand::{SecureRandom, SystemRandom};
     let mut b = [0u8; 8];
@@ -26,8 +22,6 @@ fn nonce() -> Option<String> {
 }
 
 impl SetupEngine {
-    /// Checks one machine. A fact the first pass detected (a home, an sd path) changes the steps
-    /// after it, so when it changed the machine the steps are built again and checked once more.
     pub(super) fn evaluate(
         &self,
         m: &Machine,
@@ -200,8 +194,6 @@ impl SetupEngine {
         e
     }
 
-    /// One ssh for the probes of `steps`. Each probe's output ends at a marker line carrying this
-    /// call's random nonce and the probe's index; anything else, whatever it looks like, is output.
     fn run_batch(
         &self,
         steps: &[&SetupStep],
@@ -264,8 +256,6 @@ impl SetupEngine {
     }
 }
 
-/// Each probe's output by index, cut at its marker. A marker for an index already seen, out of
-/// range or with a bad code is output like any other line.
 pub fn split_markers(out: &str, nonce: &str, count: usize) -> BTreeMap<usize, RemoteOutput> {
     let prefix = format!("@@{nonce} ");
     let mut answers = BTreeMap::new();
@@ -297,7 +287,6 @@ pub fn split_markers(out: &str, nonce: &str, count: usize) -> BTreeMap<usize, Re
     answers
 }
 
-/// The local probes, four at a time.
 fn run_locals(steps: &[&SetupStep], ctx: &StepContext) -> Vec<(StepId, CheckResult)> {
     let mut out = Vec::new();
     for chunk in steps.chunks(LOCAL_PARALLEL) {
@@ -321,7 +310,6 @@ fn run_locals(steps: &[&SetupStep], ctx: &StepContext) -> Vec<(StepId, CheckResu
 }
 
 impl CheckState {
-    /// `waits for …`: the step becomes ✗ once the earlier one is fixed.
     pub fn is_waiting(&self) -> bool {
         matches!(self, CheckState::CantTell(t) if t.starts_with("waits for"))
     }

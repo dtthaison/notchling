@@ -1,7 +1,3 @@
-//! The Simulator panel's drawing: the top row and its device menu, Add Simulator…'s form, the phone
-//! in its frame with the pen's lines, the bar under it, and the header's button. The state and what
-//! the buttons do are in the parent module.
-
 use std::sync::Arc;
 
 use gpui::{
@@ -48,7 +44,6 @@ fn tool(
     .flex_shrink_0()
 }
 
-/// The top row: the device and its menu, then the zoom.
 fn header(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Div {
     let s = &view.simulator;
     let device = s.device();
@@ -141,7 +136,6 @@ fn header(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Div {
         .child(zin)
 }
 
-/// A row of the device menu: a name over its runtime, ticked when shown.
 fn device_row(
     id: String,
     d: &Device,
@@ -209,7 +203,6 @@ fn rule(a: Appearance) -> Div {
         .fill(Ink::Hairline, a)
 }
 
-/// The device menu, over the panel under the device's name.
 fn device_menu(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Option<Div> {
     let s = &view.simulator;
     if !s.menu_open {
@@ -297,7 +290,6 @@ fn device_menu(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Op
     )
 }
 
-/// Add Simulator…'s form, in the screen's place: a runtime, a device type, Create.
 fn new_simulator_form(form: &NewSimulator, a: Appearance, cx: &mut Context<ChatView>) -> Div {
     let mut runtimes = div().flex().flex_wrap().gap(px(6.0));
     for (i, r) in form.runtimes.iter().enumerate() {
@@ -408,7 +400,6 @@ fn new_simulator_form(form: &NewSimulator, a: Appearance, cx: &mut Context<ChatV
         )
 }
 
-/// The screen in a phone's frame, at the zoom; the pen's lines over it while annotating.
 fn phone(
     view: &ChatView,
     image: Arc<RenderImage>,
@@ -435,7 +426,6 @@ fn phone(
         .unwrap_or_default();
     let annotating = s.annotation.is_some();
     let screen_at = s.screen_at.clone();
-    // The line on screen is as thick, for its size, as the one burned into the file.
     let pen_width = (w * PEN_SHARE).max(1.5);
     let overlay = canvas(
         move |bounds, _, _| {
@@ -476,7 +466,6 @@ fn phone(
         .rounded(px(corner))
         .overflow_hidden()
         .bg(rgb(0x000000))
-        // GPUI doesn't clip an image to its parent's corners: the image rounds its own.
         .child(
             img(image)
                 .size_full()
@@ -501,7 +490,6 @@ fn phone(
                 cx.listener(|this, _, _, _| this.pen_up()),
             );
     }
-    // Side buttons: the action button and volume on the left, the side button on the right.
     let tall = h + 2.0 * bezel;
     let side = |left: bool, top: f32, length: f32| {
         let b = div()
@@ -537,7 +525,6 @@ fn phone(
         .children(buttons.into_iter().flatten())
 }
 
-/// The area under the top row: the phone, the form, or why there's none.
 fn area(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> AnyElement {
     let s = &view.simulator;
     if let Some(form) = s.adding.as_ref() {
@@ -572,7 +559,6 @@ fn area(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> AnyElemen
         .child(measure);
     let busy = s.busy.clone();
     if let (Some(image), Some(device), None) = (image, device, busy.as_ref()) {
-        // Zoomed past the room it scrolls; at Fit it is centred.
         let zoomed = !matches!(s.zoom(), Zoom::Fit);
         let phone = phone(view, image, device, cx);
         let inner = div()
@@ -591,7 +577,6 @@ fn area(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> AnyElemen
             .size_full()
             .when(zoomed, |d| d.overflow_scroll())
             .child(inner);
-        // Photos and videos dropped on the phone go into its Photos.
         return body
             .child(scroller)
             .on_drop::<ExternalPaths>(cx.listener(|this, paths: &ExternalPaths, _, cx| {
@@ -643,8 +628,6 @@ fn divider(a: Appearance) -> Div {
         .fill(Ink::Hairline, a)
 }
 
-/// The bar under the screen: Home, Rotate | Screenshot, Record | Annotate; while annotating,
-/// Clear, Cancel and Add to Reply. The note under it.
 fn controls(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Div {
     let s = &view.simulator;
     let has = s.device().is_some() && s.busy.is_none() && s.adding.is_none();
@@ -772,7 +755,6 @@ fn controls(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Div {
         .children(note)
 }
 
-/// The panel while it shows, beside the conversation.
 pub fn render(
     view: &ChatView,
     a: Appearance,
@@ -811,7 +793,6 @@ pub fn render(
     )
 }
 
-/// The header's Simulator button, raised while the panel shows.
 pub fn button_in_header(
     view: &ChatView,
     a: Appearance,

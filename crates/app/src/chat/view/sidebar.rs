@@ -1,7 +1,3 @@
-//! The sidebar: sessions in their groups, the selected one highlighted; a click selects, and files
-//! dropped on a row select it and go into its reply box at the caret. Its
-//! footer holds the ? button, which names every part on screen (`notchling_kit::ui::KitPart`).
-
 use gpui::{div, prelude::*, px, AnyElement, App, Context, Div, ExternalPaths, SharedString};
 use notchling_kit::labels::Corner;
 use notchling_kit::metric::{SIDEBAR_WIDTH, TITLE_BAR};
@@ -19,8 +15,6 @@ use crate::chat::data::Tool;
 use crate::chat::sidebar::{sidebar_model, SidebarModel};
 use crate::mac::gate;
 
-/// A footer button, an icon with its words as the tooltip as in the Swift sidebar, named
-/// "<Title> Button" for the ? button.
 fn footer_button(
     id: &'static str,
     mark: Icon,
@@ -80,7 +74,6 @@ fn inbox_button(unread: usize, a: Appearance, cx: &Context<ChatView>) -> Div {
     div().relative().child(button).children(badge)
 }
 
-/// The footer, with what there is to say about the daemon (down, or not trusted).
 fn footer(
     a: Appearance,
     note: Option<&'static str>,
@@ -147,22 +140,15 @@ fn footer(
         }))
 }
 
-/// Where the sidebar button sits: just right of the traffic lights (which end near 64), on their
-/// row, the button 24 tall about the lights' centre.
 const TOGGLE_LEFT: f32 = 76.0;
 const TOGGLE_TOP: f32 = (HEADER_ROW - HEADER_BUTTON) / 2.0;
 const TOGGLE_HEIGHT: f32 = HEADER_BUTTON;
 const TOGGLE_WIDTH: f32 = HEADER_BUTTON;
 
-/// The top row of the Sidebar and of Chat's header: one height, so their buttons line up.
 pub const HEADER_ROW: f32 = 40.0;
-/// Every button on that row: a square this size.
 pub const HEADER_BUTTON: f32 = 28.0;
-/// How far a header starts from the window's left edge while the sidebar is hidden: past the
-/// traffic lights and this button.
 pub const HIDDEN_HEADER_START: f32 = TOGGLE_LEFT + TOGGLE_WIDTH + 4.0 + TOGGLE_WIDTH + 12.0;
 
-/// The button that hides and shows the sidebar, over the window beside the traffic lights.
 pub fn toggle_button(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Div {
     let hidden = view.sidebar_hidden;
     let tip = if hidden {
@@ -194,8 +180,6 @@ pub fn toggle_button(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>)
         ))
 }
 
-/// The New Session button on the same row: at the sidebar's right end, or, with the sidebar
-/// hidden, right after the sidebar button so it stays beside the traffic lights.
 pub fn new_session_button(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Div {
     let left = if view.sidebar_hidden {
         TOGGLE_LEFT + TOGGLE_WIDTH + 4.0
@@ -232,8 +216,6 @@ fn mark_of(tool: Tool) -> ToolMark {
     }
 }
 
-/// What the Sidebar shows, from the chat now: its rows and their accounts (from what the accounts
-/// store holds), the selection and the footer's note.
 pub(super) fn model(view: &ChatView, _: &App) -> SidebarModel {
     SidebarModel {
         unread: view.inbox.unread(),
@@ -247,7 +229,6 @@ pub(super) fn model(view: &ChatView, _: &App) -> SidebarModel {
     }
 }
 
-/// The Sidebar, drawn from its model alone.
 pub(super) fn render(m: &SidebarModel, a: Appearance, cx: &mut Context<ChatView>) -> AnyElement {
     let mut list = div()
         .id("sessions")
@@ -333,8 +314,6 @@ pub(super) fn render(m: &SidebarModel, a: Appearance, cx: &mut Context<ChatView>
                 a,
             )
             .on_click(cx.listener(move |this, _, _, cx| this.select(&id, cx)))
-            // Files from Finder: the row lights up while one is over it; the drop opens this
-            // session with the paths in its reply box.
             .drag_over::<ExternalPaths>(move |style, _, _, _| style.bg(over))
             .on_drop::<ExternalPaths>(cx.listener(
                 move |this, paths: &ExternalPaths, w, cx| {
@@ -362,7 +341,6 @@ pub(super) fn render(m: &SidebarModel, a: Appearance, cx: &mut Context<ChatView>
         .border_color(hsla(Ink::Hairline.color(a)))
         .flex()
         .flex_col()
-        // The traffic lights and the two buttons beside them (drawn over this row) sit here.
         .child(div().h(px(TITLE_BAR)).flex_shrink_0())
         .child(scrollable(list))
         .child(footer(a, m.daemon_note, m.unread, cx))

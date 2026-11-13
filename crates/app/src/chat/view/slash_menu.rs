@@ -1,7 +1,3 @@
-//! The command list over the reply box (`chat::slash_menu` decides what it holds): each row the
-//! command, its arguments' hint and what it does; the picked row raised. Its keys are taken before
-//! the reply box sees them (`capture_key`), so Up and Down move in the list, not the text.
-
 use gpui::{div, prelude::*, px, relative, Context, Div, KeyDownEvent, SharedString, Window};
 use notchling_engine::control::slash::{self, SlashCommand};
 use notchling_kit::labels::Corner;
@@ -14,7 +10,6 @@ use crate::chat::data::Tool;
 use crate::chat::slash_menu::{picked, query};
 
 impl ChatView {
-    /// The rows the list shows now: a Claude Code session's commands for what the box holds.
     pub(super) fn slash_rows(&self, cx: &gpui::App) -> Vec<SlashCommand> {
         let Some(session) = self.selected_session() else {
             return Vec::new();
@@ -32,8 +27,6 @@ impl ChatView {
         self.slash.rows(&text, commands)
     }
 
-    /// After the box changed: the list starts again from its first row, and the session's commands
-    /// are read once a "/" is typed in a folder not read yet.
     pub(super) fn slash_typed(&mut self, text: &str) {
         self.slash.typed(text);
         if query(text).is_none() {
@@ -56,7 +49,6 @@ impl ChatView {
         self.redraw_chrome(cx);
     }
 
-    /// Up, Down, Tab, Return and Esc while the list shows; anything else goes on to the box.
     pub(super) fn capture_slash_key(
         &mut self,
         event: &KeyDownEvent,
@@ -92,7 +84,6 @@ impl ChatView {
     }
 }
 
-/// The list, its bottom on the composer's top, or nothing.
 pub fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Option<Div> {
     let rows = view.slash_rows(cx);
     if rows.is_empty() {

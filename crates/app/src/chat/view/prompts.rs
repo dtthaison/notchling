@@ -1,13 +1,3 @@
-//! The question or permission a Claude Code session waits on, as a card above the reply box, the
-//! composer's width: "Claude asks" (a tab per question, options picked by click, toggled for
-//! multi select, a box for something else, Next and Submit) and "Permission needed" (Allow, Always
-//! allow, Deny). What it shows and where it comes from is `chat::prompts`; the answers are the
-//! notch's (`notch::answer::QuestionDraft`, `acting::Request::answer_for`/`permission`), sent
-//! through the same daemon ops; a permission read only from a job's state goes to its terminal
-//! (`chat::prompts::permission_request`). Answering here hides the card in the notch, and the other way
-//! round, by the session source's one answered set. Every control follows `Acting::control`: drawn
-//! disabled with the reason, and nothing is sent, while acting isn't on.
-
 use std::collections::HashMap;
 
 use std::time::Duration;
@@ -38,37 +28,22 @@ use crate::notch::answer::{type_key, QuestionDraft, Typed};
 use crate::notch::requests::HookRequest;
 use crate::phone::bridge::now_ms;
 
-/// How long after a screen read that found no question the next one may go.
 const SCREEN_RETRY_MS: i64 = 3_000;
 
-/// The permission's command shows at most this many lines.
 const SUMMARY_LINES: usize = 12;
 
-/// What Chat keeps for the prompt card.
 pub struct State {
-    /// The prompt on show, worked out once per draw (`ChatView::sync_prompt`).
     pub shown: Option<Prompt>,
-    /// The Swift hook's held prompts, read while the daemon's aren't followed.
     pub files: HashMap<String, HookRequest>,
-    /// The selected session's unanswered question in its transcript.
     pub transcript: Option<PendingQuestion>,
-    /// The question read off a job's screen, by its read key (`chat::prompts::screen_read_key`).
     screen: Option<(String, PendingQuestion)>,
-    /// The read key last asked for, so each question is read once (an answer or a new question
-    /// changes the job's summary, and with it the key).
     screen_asked: Option<String>,
-    /// When a read that found nothing may be tried again (the dialog draws after the state says
-    /// it waits), in ms.
     screen_retry_ms: i64,
     draft: QuestionDraft,
-    /// What is going out now: the card's controls are off meanwhile and say so.
     sending: Option<Sending>,
     error: Option<String>,
-    /// The decision that last went through, with the session it was for: shown for a moment above
-    /// the card that follows, which can look just like the one answered.
     confirmed: Option<(String, Confirmed)>,
     focus: FocusHandle,
-    /// A render's forced prompt (`NOTCHLING_RENDER_PROMPT`).
     pub(super) preview: Option<Preview>,
 }
 
@@ -90,16 +65,13 @@ impl State {
         }
     }
 
-    /// Whether a card is up: the reply box's refusal points at it then.
     pub fn is_shown(&self) -> bool {
         self.shown.is_some()
     }
 
-    /// A render's forced prompt, and the state around it that a picture can't wait for.
     pub fn apply_preview(&mut self, preview: Preview) {
         use crate::chat::prompts::PREVIEW_BEFORE;
         self.preview = Some(preview);
-        // Shown from the first draw, so the state set below isn't cleared as another card's.
         self.shown = Some(preview_prompt(preview));
         match preview {
             Preview::PermissionSending => {
@@ -128,7 +100,6 @@ impl State {
 }
 
 impl ChatView {
-    /// The prompt the selected session waits on, from the sources in `chat::prompts`.
     fn prompt_now(&self) -> Option<Prompt> {
         let session = self.selected_session()?;
         if let Some(preview) = self.prompt.preview {
@@ -153,9 +124,6 @@ impl ChatView {
         )
     }
 
-    /// Asks the daemon to read the question off the selected job's screen, once per question, when
-    /// no hook holds it and the transcript doesn't have it yet. Nothing is asked while acting is
-    /// off (the read moves the dialog's tabs) or in a render.
     fn read_screen_question(&mut self, cx: &mut Context<Self>) {
         if self.prompt.preview.is_some() || self.root.fixture.is_some() {
             return;
@@ -178,7 +146,6 @@ impl ChatView {
             return;
         }
         self.prompt.screen_asked = Some(key.clone());
-        // Never two reads at once: the next try waits for this one's answer, then a pause.
         self.prompt.screen_retry_ms = i64::MAX;
         let actions = self.acts(cx).actions;
         cx.spawn(async move |this, cx| {
@@ -189,7 +156,6 @@ impl ChatView {
             this.update(cx, |view, cx| {
                 match result.ok().as_ref().and_then(screen_question) {
                     Some(q) => view.prompt.screen = Some((key, q)),
-                    // Nothing on screen yet, or the read failed: tried again after a pause.
                     None => view.prompt.screen_retry_ms = now_ms() + SCREEN_RETRY_MS,
                 }
                 cx.notify();
@@ -199,8 +165,6 @@ impl ChatView {
         .detach();
     }
 
-    /// Before a draw: works out the prompt on show, and keeps the answers being put together
-    /// following it (another question starts afresh, and so does its error).
     pub(super) fn sync_prompt(&mut self, cx: &mut Context<Self>) {
         self.read_screen_question(cx);
         let shown = self.prompt_now();
@@ -214,7 +178,6 @@ impl ChatView {
         self.prompt.shown = shown;
     }
 
-    /// The card's gate: acting, and a render's forced prompt is live.
     fn prompt_gate(&self, cx: &mut Context<Self>) -> Control {
         if self.prompt.preview.is_some() {
             return Control {
@@ -225,13 +188,6 @@ impl ChatView {
         self.acting(cx).control()
     }
 
-    /// Sends an answer or a decision; on success the prompt it answered (`key`, taken when the
-    /// button was pressed) is hidden everywhere, and no other: the session may have a newer one
-    /// by the time the reply comes back.
-    /// `sending` is what the card says meanwhile; `told` is what it leaves behind (a permission's
-    /// decision, named so the next card isn't taken for the same one). A refusal that the
-    /// terminal shows no such permission any more means it was answered there: the card goes, as
-    /// after an answer, with a note saying so, instead of an error nothing can be done about.
     fn answer_prompt(
         &mut self,
         key: String,
@@ -246,7 +202,6 @@ impl ChatView {
         self.prompt.sending = Some(sending);
         self.prompt.error = None;
         let row = self.selected.clone();
-        // As a sent message does: the answer and what the session does next show at the end.
         self.follow_sent_now(cx);
         let actions = self.acts(cx).actions;
         cx.spawn(async move |this, cx| {
@@ -262,7 +217,6 @@ impl ChatView {
                         if let (Some(told), Some(row)) = (&told, &row) {
                             view.keep_note(row, told.went_through.clone(), cx);
                         }
-                        // "Answer it above" is answered.
                         if view.tools.error.as_deref().is_some_and(is_dialog) {
                             view.tools.error = None;
                         }
@@ -285,13 +239,11 @@ impl ChatView {
         cx.notify();
     }
 
-    /// Shows `text` over what follows for a moment ([`confirmed`]).
     fn keep_note(&mut self, row: &str, text: String, cx: &mut Context<Self>) {
         self.prompt.confirmed = Some((row.to_owned(), Confirmed::new(text, now_ms())));
         self.draw_when_confirmation_ends(cx);
     }
 
-    /// The confirmation goes by itself: one more draw when its moment is over.
     fn draw_when_confirmation_ends(&self, cx: &mut Context<Self>) {
         cx.spawn(async move |this, cx| {
             cx.background_executor()
@@ -303,7 +255,6 @@ impl ChatView {
     }
 }
 
-/// The line under the controls: what is going out, or why they are off.
 fn status(view: &ChatView, gate: Control, a: Appearance) -> Option<Div> {
     let text = match view.prompt.sending {
         Some(sending) => sending_text(sending),
@@ -312,8 +263,6 @@ fn status(view: &ChatView, gate: Control, a: Appearance) -> Option<Div> {
     Some(label(&sentence(text), TypeRole::Meta, Ink::TextMuted, a))
 }
 
-/// Why the last answer didn't go through, over the options: where a click's eye goes, not a small
-/// line under them. The card stays answerable.
 fn failed(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Option<Div> {
     let message = view.prompt.error.as_deref()?;
     Some(
@@ -343,7 +292,6 @@ fn failed(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Option<
     )
 }
 
-/// "Allowed: Write notes.md": the answer that just went through, for a moment, over what follows.
 fn confirmed(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Option<Div> {
     let (row, done) = view.prompt.confirmed.as_ref()?;
     let for_this_session = view.prompt.preview.is_some() || view.selected.as_ref() == Some(row);
@@ -363,7 +311,6 @@ fn confirmed(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Opti
     )
 }
 
-/// A card's header: icon and title in an ink, and a step count.
 fn header(icon_: Icon, title: &str, ink: Ink, step: Option<String>, a: Appearance) -> Div {
     div()
         .h(px(22.0))
@@ -375,7 +322,6 @@ fn header(icon_: Icon, title: &str, ink: Ink, step: Option<String>, a: Appearanc
         .children(step.map(|s| label(&s, TypeRole::Meta, Ink::TextMuted, a)))
 }
 
-/// The card's frame: the composer's width, an accent edge as the permission card has.
 fn frame(prompt: &Prompt, content: Div, a: Appearance, cx: &mut Context<ChatView>) -> Div {
     div()
         .mx(px(SIDE_PADDING))
@@ -389,7 +335,6 @@ fn frame(prompt: &Prompt, content: Div, a: Appearance, cx: &mut Context<ChatView
         .part_at(prompt.part(), Corner::TopTrailing, a, cx)
 }
 
-/// The card above the reply box, when the session waits on something.
 pub(super) fn card(
     view: &ChatView,
     a: Appearance,
@@ -415,7 +360,6 @@ pub(super) fn card(
     )
 }
 
-/// "Claude asks": tabs across the questions, the one on show with its options, a box and Submit.
 fn question(
     view: &ChatView,
     row: &str,
@@ -448,7 +392,6 @@ fn question(
                 a,
             );
             let (session, question) = (row.to_owned(), q.clone());
-            // `w_auto`: see the permission card's rows.
             gate::tip(row_el.w_auto(), gate, a).when(gate.enabled, |el| {
                 el.on_click(cx.listener(move |this, _, _, cx| {
                     if let Some(answers) = this.prompt.draft.choose(&question, i + 1) {
@@ -485,8 +428,6 @@ fn question(
         .children(status(view, gate, a))
 }
 
-/// One pill per question; a tick on the answered ones. Moving between tabs answers nothing, so
-/// the tabs work whatever acting is.
 fn tabs(view: &ChatView, q: &PendingQuestion, a: Appearance, cx: &mut Context<ChatView>) -> Div {
     div()
         .h(px(24.0))
@@ -527,7 +468,6 @@ fn tabs(view: &ChatView, q: &PendingQuestion, a: Appearance, cx: &mut Context<Ch
         )
 }
 
-/// "Type something else…": a one-line box; Return takes it as this question's answer.
 fn answer_box(
     view: &ChatView,
     row: &str,
@@ -585,7 +525,6 @@ fn answer_box(
     })
 }
 
-/// Next (multi select) and Submit, live once every question has an answer.
 fn submit_row(
     view: &ChatView,
     row: &str,
@@ -639,7 +578,6 @@ fn submit_row(
         .child(submit)
 }
 
-/// "Permission needed": the tool and what it would run, then Allow, Always allow and Deny.
 fn permission(
     view: &ChatView,
     r: &HookRequest,
@@ -666,8 +604,6 @@ fn permission(
         .into_iter()
         .enumerate()
         .map(|(i, (decision, title, detail))| {
-            // While one goes out, the one picked is lit and the rest are off, so a second click
-            // can't send another and the card shows something is happening.
             let (state, picked) = match sending {
                 None => (gate::state(gate), false),
                 Some(_) if chosen == Some(decision) => (PartState::Selected, true),
@@ -682,8 +618,6 @@ fn permission(
                 state,
                 a,
             );
-            // A hook's prompt is decided by its own id; one read from the job's state is typed
-            // into its terminal, checked against what this card shows. Either hides that one only.
             let (key, request) = (r.id.clone(), permission_request(r, decision));
             let (sent, said) = (
                 Sending::Decision {
@@ -692,8 +626,6 @@ fn permission(
                 },
                 Told::new(&r.tool_name, &r.summary, decision),
             );
-            // `w_auto`: the kit's row is `w_full`, which a card with wrapped text above it (a long
-            // path) doesn't resolve, and the rows shrank to their text; stretch gives the width.
             gate::tip(row.w_auto(), gate, a).when(gate.enabled && sending.is_none(), |el| {
                 el.on_click(cx.listener(move |this, _, _, cx| {
                     this.answer_prompt(key.clone(), request.clone(), sent, Some(said.clone()), cx);
@@ -701,7 +633,6 @@ fn permission(
             })
         })
         .collect::<Vec<_>>();
-    // The file's own name, big: a long path wraps, and the next request in the folder reads alike.
     let file = file_name(&r.tool_name, &r.summary).map(|name| {
         div()
             .flex()

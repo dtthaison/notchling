@@ -12,12 +12,8 @@ import '../../l10n/app_localizations.dart';
 
 const String vizAssetPath = 'assets/viz/index.html';
 
-/// Safe JavaScript call for a spec: the JSON text becomes a JS string literal (via a second jsonEncode),
-/// which `JSON.parse` reads back, so no spec text is ever spliced into the script itself.
 String renderScript(Json spec) => 'window.renderViz(JSON.parse(${jsonEncode(jsonEncode(spec))}));';
 
-/// The shared viz bundle (../viz, copied by tool/sync_viz.sh) in a WebView, loaded from Flutter assets.
-/// It never leaves the bundle: navigation to anything but local files is refused.
 class VizWebView extends StatefulWidget {
   const VizWebView({super.key, required this.spec});
   final Json spec;

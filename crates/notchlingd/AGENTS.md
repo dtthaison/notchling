@@ -1,0 +1,44 @@
+# notchlingd: notes for agents
+
+## Why the code is this way
+
+The code carries no comments (see [AGENTS.md](../../AGENTS.md)). What a change could break without knowing it, by file:
+
+- `src/accounts_late.rs`: Accounts ops that can outlast the client's 5 s call answer `{state: "working", ticket, op}`; the result is kept for `accounts.result` and also sent as `accounts.done`, so a reconnected client never loses it.
+- `src/accounts_late_tests.rs::config write failure`: If the live Keychain write lands and then `~/.claude.json` fails, the switch must put the Keychain item back; a switch is never left half done.
+- `src/accounts_signin.rs`: One browser sign-in at a time on a 127.0.0.1 listener; it stops at once when cancelled or `accounts` goes off, and the code is exchanged and the login saved only while the switch is on.
+- `src/acting_ops_tests.rs::interrupt`: A stop sends one Esc only if the session still works a moment later: a second Esc on an idle prompt opens rewind.
+- `src/acting_permission_tests.rs`: The permission dialog reader was written from made-up screens (no real recording exists); a screen it refuses is kept, private, so a real one can become the fixture (`docs/recording.md`).
+- `src/agy_ops_limits_tests.rs::session/new`: After `session/new` is answered acting may go off as the reply is made; the first message must not reopen the session it would be sent to.
+- `src/agy_sink.rs::options`: A session's model and thinking-level options go to the catalog before the change is announced, so a client that reacts to the event and then asks sees them.
+- `src/bridge_backend.rs::pairing`: A pairing request is asked only of an app that follows the `bridge` topic; an app merely attached would not see it and the phone would wait out the whole time before being refused.
+- `src/bridge_backend.rs::session.new`: The phone's `modelId` goes to `session.new` as given so the daemon's own catalog check applies again; the phone's family names (`opus`) map to the catalog's current id.
+- `src/catalog_ops_tests.rs::fetch`: The live Claude model list is fetched with the main login's token only, never another saved account's expired slot (that would renew it); a refused token is not retried until it changes or a day passes, a 5xx holds off 15 minutes.
+- `src/cli.rs::delegate`: `notchling delegate` takes everything after the subcommand as is, because the prompt may hold flags; the engine parses its own flags.
+- `src/codex_acting_tests.rs::set_acting(false)`: If acting goes off while a Codex process is starting, `stop_all` finds nothing, so the start itself must re-check the switch and abandon.
+- `src/codex_slow.rs::delete`: Before `codex delete --force` the turn is stopped and its waiting messages dropped, with a moment to release the rollout file the delete removes; late ends carry the caller's `draft` row id.
+- `src/control_ops_tests.rs::session.new`: `session.new` passes only `--model <allowed model>` to `claude`; nothing that changes what the session may do. Trust Folder refuses non-absolute, missing, root and home folders, and a refusal older than ten minutes.
+- `src/daemon.rs::read_list`: One read of the session list runs under catch-unwind: a panic in a reader keeps the last good list and the daemon serving every client.
+- `src/daemon.rs::scan`: A list read is stored before `sessions.changed` is sent, and the watcher starts before the first read; clients subscribe, then list, and lose no change that way.
+- `src/daemon_wiring.rs::bridge folder`: The bridge keeps its files in `AgentConsole` beside the data folder (the Swift app's, so paired phones carry over; `<root>/AgentConsole` under a fixture root); nothing is bound or written until `bridge.set`.
+- `src/daemon_wiring.rs::sessions.list`: A `sessions.list` answered before the first read adds `"partial": true` beside `ok` while the result stays a bare list, which every client reads as one.
+- `src/delegate_cli.rs::run`: Delegation sets `NOTCHLING_DELEGATE_DEPTH` one level deeper for the tools' own processes, resolves `~` to the real home even over a fixture root, and reads `~/.claude.json` from the root, never the real one.
+- `src/delegate_cli.rs::signals, src/signals.rs`: Signal handlers only do an atomic store (async-signal-safe); a watcher thread or the main loop does the stopping and the socket cleanup.
+- `src/hook_output.rs::answer`: A hook answer's `updatedInput` replaces the whole tool input, so an AskUserQuestion answer sends the questions back with the answers.
+- `src/install_ops_tests.rs::lock`: Install ops read the `install` switch only after taking the install lock, so a call that waited behind another change still honors a switch turned off meanwhile.
+- `src/late_reply.rs::Late::run`: A job that outlasts its call's budget hands its result to exactly one of the reply or the `finish` event: never both, never neither, even when it ends right at the budget.
+- `src/layout.rs::agy_copy`: The copy of Antigravity's summaries database lives in `<data dir>/daemon`, never `<data dir>/antigravity`, where the Swift app keeps the same file names and the daemon would delete and rewrite its copy.
+- `src/layout.rs::from_args`: The app always passes `--socket`; naming the usual socket is not choosing another, so the daemon still keeps its documents in the data folder. A relative `CODEX_HOME` is ignored.
+- `src/layout.rs::vault_path`: The daemon's vault list and search index are its own (`daemon/vault` doc in `notchling.db`, `daemon/` folder), never the Swift app's `vault.json` or pages index, until the maintainer hands them over.
+- `src/lib.rs, src/main.rs::hook`: `notchling hook` always exits 0 with no output on trouble or odd arguments: Claude Code reads exit 2 as "block the tool".
+- `src/limits_sources.rs`: Watcher sources read each account's usage with its own token and never renew a token in use (main login or lane), and re-check `accounts` themselves; a nudge also needs `acting`, as it types into a session.
+- `src/prompts.rs::Kind`: In auto mode an AskUserQuestion also arrives as a permission request once the PreToolUse hook passes, so a prompt of either kind may need to be found by session id.
+- `src/providers_add.rs::list_waiting`: An add flow is listed as waiting before its reply goes out, under the lock `close` reads after setting `closing`, so exactly one of them cancels it; an abandoned flow never writes a login.
+- `src/providers_gate.rs`: The provider effects (Keychain, network, processes, apps) are gated on `accounts` besides each op's check; off, reads find nothing, writes fail, and every app counts as running so a switch refuses.
+- `src/service.rs::plist`: The LaunchAgent uses `KeepAlive` `Crashed`, not `SuccessfulExit = false`: the daemon exits 0 when stopped or when another serves, and non-zero only on setup errors a restart would retry every 10 s.
+- `src/switches.rs::SwitchFlag`: Switch listeners run on the switch's own thread, after the flag flips, in order; `set` waits at most `LISTENER_WAIT`, and a listener must never set its own switch.
+- `src/vault_args.rs`: Vault argument parsing returns fixed error texts, never serde's, because serde errors can quote the text read, which may be a secret value.
+- `src/vault_caller.rs`: An ask-first approval shows `verified {exe, pid, cwd, parents, folder_matches}` taken from the socket's peer credentials and the OS, never from the request; the caller's claimed folder and command are only claims.
+- `src/vault_cli.rs`: `notchling secrets/secret/secret-request` never touch the Keychain or a vault file; `--json` output is read through `VaultEntry`, which has no field for a value, and a refusal leaves stdout empty.
+- `src/vault_ops_lock_tests.rs`: Turning the vault off must answer at once even while a Keychain read waits on a prompt; the read that was in flight answers "off" and its values are dropped, so the next use reads the item again.
+- `src/vault_wait.rs`: Vault approval and form ids are 128 random bits from the OS (no randomness, no wait); only the app follows the topic; waits are capped; every timeout, departure, switch-off or stop is a "no".

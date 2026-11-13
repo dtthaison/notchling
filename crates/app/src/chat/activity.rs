@@ -1,26 +1,14 @@
-//! The live line at the end of the conversation while a session works (the Swift app's live row in
-//! `ConversationView`): what it is doing, then "(50s · ↓ 2.9k tokens)" since your prompt. A turn
-//! that has ended while the session still works is a background command, and the line says so.
-//! Pure, so the wording is tested on every system; the view draws it and redraws once a second
-//! only while there is one.
-
 use notchling_engine::transcript::model::{Conversation, ItemKind, ToolCall, ToolKind};
 
-/// A Stop sent to a session counts as in flight this long, or until the session stops working.
 pub const STOPPING_MS: i64 = 20_000;
 
-/// What the live line says.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Activity {
-    /// "Thinking…", "Running cargo test…", "Writing…", "2 background commands running".
     pub text: String,
-    /// "50s · ↓ 2.9k tokens" (the view wraps it in parentheses); none once the turn is over.
     pub stats: Option<String>,
-    /// Background commands still running beside a live turn ("1 background command running").
     pub shells: Option<String>,
 }
 
-/// "1 background command running", "2 background commands running".
 fn shells_text(n: usize) -> String {
     if n == 1 {
         "1 background command running".to_owned()
@@ -29,8 +17,6 @@ fn shells_text(n: usize) -> String {
     }
 }
 
-/// "47s · ↓ 2.3k tokens", "3m 5s · ↓ 12k tokens" (the Swift `ChatFormat.workStats`); the tokens
-/// are left out while there are none.
 pub fn work_stats(seconds: i64, tokens: u64) -> String {
     let s = seconds.max(0);
     let time = if s < 60 {
@@ -53,8 +39,6 @@ pub fn work_stats(seconds: i64, tokens: u64) -> String {
     format!("{time} · ↓ {count} tokens")
 }
 
-/// A call's title as something happening now: "Ran cargo test" is "Running cargo test", "Read a.rs"
-/// is "Reading a.rs". A Bash call's own description reads as it is.
 fn present(call: &ToolCall) -> String {
     const NOW: [(&str, &str); 8] = [
         ("Ran ", "Running "),
@@ -78,13 +62,10 @@ fn present(call: &ToolCall) -> String {
     title.to_owned()
 }
 
-/// What the newest item says is going on, as a verb with its object (also a running subagent's
-/// line in the Details Panel).
 pub fn doing(conversation: &Conversation) -> String {
     match newest_step(conversation).map(|(_, kind)| kind) {
         Some(ItemKind::Tools(calls)) => match calls.iter().rev().find(|call| !call.finished) {
             Some(call) => format!("{}…", present(call).trim_end_matches('…')),
-            // Every call has its result: the model is reading them.
             None => "Thinking…".to_owned(),
         },
         Some(ItemKind::Assistant { .. }) => "Writing…".to_owned(),
@@ -92,11 +73,6 @@ pub fn doing(conversation: &Conversation) -> String {
     }
 }
 
-/// The live line, or none. `working` is the session's own state (a working group, a running turn):
-/// without it nothing is shown, whatever a stale transcript says. `now_s` is the wall clock in
-/// seconds since the epoch, like the transcript's timestamps.
-/// The newest background shell with no notification yet: what a click on the activity line
-/// opens. Its name (the Bash call's description, else the command) and its output file.
 pub fn newest_unfinished_shell(conversation: &Conversation) -> Option<(String, String)> {
     conversation
         .shells
@@ -117,7 +93,6 @@ pub fn line(conversation: &Conversation, working: bool, now_s: f64) -> Option<Ac
     if !working {
         return None;
     }
-    // A shell counts until its notification says it ended.
     let shells = conversation
         .shells
         .iter()
@@ -128,7 +103,6 @@ pub fn line(conversation: &Conversation, working: bool, now_s: f64) -> Option<Ac
         Some(ItemKind::TurnEnd { .. })
     );
     if turn_over {
-        // Working outlasts the turn only for a command left running in the background.
         return (shells > 0).then(|| Activity {
             text: shells_text(shells),
             stats: None,
@@ -145,8 +119,6 @@ pub fn line(conversation: &Conversation, working: bool, now_s: f64) -> Option<Ac
     })
 }
 
-/// The newest item that is a real step, past the notices at the end of the conversation (a session
-/// another `agy` runs ends with its lock note).
 fn newest_step(conversation: &Conversation) -> Option<(usize, &ItemKind)> {
     conversation
         .items
@@ -157,8 +129,6 @@ fn newest_step(conversation: &Conversation) -> Option<(usize, &ItemKind)> {
         .find(|(_, kind)| !matches!(kind, ItemKind::Notice { .. }))
 }
 
-/// The index of the step group that stays open with its running call spinning: a working
-/// session's newest item is that group, notices after it aside.
 pub fn live_group(conversation: &Conversation, working: bool) -> Option<usize> {
     match newest_step(conversation) {
         Some((i, ItemKind::Tools(_))) if working => Some(i),
@@ -166,13 +136,8 @@ pub fn live_group(conversation: &Conversation, working: bool) -> Option<usize> {
     }
 }
 
-/// How long a prompt may go with nothing back before the live line offers Retry.
 pub const STALL_S: f64 = 45.0;
 
-/// The prompt to send again when the turn stalled: the session works, your prompt is still the
-/// last thing in the conversation, nothing has come back (no token, thinking or call) and
-/// [`STALL_S`] went by. A request Claude Code sent on a connection that died while the Mac slept
-/// waits like this with no error; sending again starts a fresh one.
 pub fn stalled(conversation: &Conversation, working: bool, now_s: f64) -> Option<String> {
     if !working || conversation.turn_tokens > 0 {
         return None;
@@ -187,16 +152,10 @@ pub fn stalled(conversation: &Conversation, working: bool, now_s: f64) -> Option
     }
 }
 
-/// Whether a Stop sent at `stopped_ms` is still on its way: the session works and it was sent
-/// less than [`STOPPING_MS`] ago.
 pub fn is_stopping(stopped_ms: Option<i64>, working: bool, now_ms: i64) -> bool {
     working && stopped_ms.is_some_and(|at| now_ms - at < STOPPING_MS)
 }
 
-/// Whether the Activity Line's clock ("Writing… (26s)") needs drawing again: it was drawn in
-/// the whole second `drawn_ms` falls in (`None`: it isn't on screen) and a new second has begun.
-/// The line's spinner used to redraw the window ten times a second and the clock came along; a
-/// native spinner draws nothing, so the tick asks for this once a second.
 pub fn clock_due(drawn_ms: Option<i64>, now_ms: i64) -> bool {
     drawn_ms.is_some_and(|drawn| now_ms.div_euclid(1000) > drawn.div_euclid(1000))
 }
@@ -323,7 +282,6 @@ mod tests {
             false,
         )])]);
         assert_eq!(line(&reading, true, 0.0).unwrap().text, "Reading b.rs…");
-        // A Bash call's description is its title as given.
         let described = conversation(vec![ItemKind::Tools(vec![call(
             "Run the test suite",
             ToolKind::Shell,
@@ -337,7 +295,6 @@ mod tests {
 
     #[test]
     fn a_notice_at_the_end_does_not_hide_what_the_session_is_doing() {
-        // A session another `agy` runs: Chat ends its conversation with the lock note.
         let note = ItemKind::notice("A delegation is running this session.", "lock");
         let running = conversation(vec![
             ItemKind::user("Check the image."),
@@ -386,7 +343,6 @@ mod tests {
         c.turn_tokens = 2_900;
         let a = line(&c, true, 1_050.4).unwrap();
         assert_eq!(a.stats.as_deref(), Some("50s · ↓ 2.9k tokens"));
-        // The clock moving is all that changes.
         let later = line(&c, true, 1_061.0).unwrap();
         assert_eq!(later.stats.as_deref(), Some("1m 1s · ↓ 2.9k tokens"));
     }
@@ -468,7 +424,6 @@ mod tests {
             None,
             "an idle session isn't stalled"
         );
-        // Anything back (thinking, a token, a call) means it's under way.
         c.turn_tokens = 12;
         assert_eq!(stalled(&c, true, 9_999.0), None);
         c.turn_tokens = 0;
@@ -477,12 +432,10 @@ mod tests {
             text: String::new(),
         }));
         assert_eq!(stalled(&c, true, 9_999.0), None);
-        // No prompt time to count from: nothing to say.
         let mut bare = conversation(vec![ItemKind::user("hi")]);
         assert_eq!(stalled(&bare, true, 9_999.0), None);
         bare.turn_start = Some(0.0);
         assert_eq!(stalled(&bare, true, 9_999.0).as_deref(), Some("hi"));
-        // A prompt of only images has nothing to send again.
         let mut image = conversation(vec![ItemKind::User {
             text: "  ".into(),
             images: 1,

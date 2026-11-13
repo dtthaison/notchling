@@ -10,10 +10,8 @@ struct FakeHost {
     launched: Mutex<Vec<(Vec<String>, String)>>,
     waiting: Mutex<Vec<Done>>,
     terminated: Arc<AtomicUsize>,
-    /// Jobs stopped with `stop_within`, and the grace each was given (milliseconds).
     stopped: Arc<Mutex<Vec<u128>>>,
     refuse: Mutex<Option<String>>,
-    /// Calls `done` before `launch` returns.
     instant: Mutex<Option<String>>,
 }
 
@@ -47,7 +45,6 @@ impl Host for FakeHost {
 }
 
 impl FakeHost {
-    /// The oldest running command ends with this output.
     fn finish(&self, output: &str) {
         let done = self.waiting.lock().unwrap().remove(0);
         done(output.into());
@@ -230,7 +227,6 @@ fn cancel_marks_the_card_at_once_and_keeps_what_the_tool_said_so_far() {
     assert_eq!(card.status, Status::Cancelled);
     assert_eq!(card.reply, "Half an answer.");
     assert_eq!(card.delegated_session.as_deref(), Some("conv-1"));
-    // Nothing to cancel any more.
     rig.store.cancel(&run.id);
     assert_eq!(rig.host.terminated.load(Ordering::SeqCst), 1);
 }
@@ -280,9 +276,7 @@ fn stop_all_within_stops_each_job_for_good_and_removes_the_prompt_files() {
         "the quit stop waits; it does not leave the kill to a thread that dies with the app"
     );
     assert!(files.iter().all(|f| !f.exists()), "the prompts are gone");
-    // A late end (the command's output arriving after all) finds nothing to remove or fail on.
     rig.host.finish("");
-    // Nothing is running any more: a second stop has nothing to stop.
     rig.store.stop_all_within(Duration::from_millis(1500));
     assert_eq!(rig.host.stopped.lock().unwrap().len(), 2);
 }
@@ -336,7 +330,6 @@ fn the_old_file_moves_in_once_and_the_swift_apps_file_is_never_read() {
     rig.store.start(&request("a"));
     rig.host.finish(&answer("Mine."));
     let saved = store::doc(&data, DOC).unwrap().unwrap();
-    // Back to the old file, with a different file of the Swift app's beside it.
     store::update_doc(&data, DOC, |_| Ok(None)).unwrap();
     std::fs::create_dir_all(rig.file().parent().unwrap()).unwrap();
     std::fs::write(rig.file(), &saved).unwrap();

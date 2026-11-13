@@ -1,8 +1,3 @@
-//! An Antigravity session's options picker, pure (`ACPOptionsPicker`): the choices the session
-//! offers (Model, Thinking Level, Mode) as `agy.state` lists them, the composer's label, and the
-//! `agy.set_option` a pick sends. A session not started yet has none; a pick applies from the
-//! next turn.
-
 use notchling_engine::tools::agy::{ConfigOption, ConfigValue};
 use serde_json::Value;
 
@@ -11,7 +6,6 @@ pub const DRAFT_TIP: &str =
     "Your first message starts the session; then its model and mode can be picked here.";
 pub const TIP: &str = "The model, thinking level and mode for this session's next turns.";
 
-/// The `config` list of an `agy.state` reply (`ConfigOption::to_json`'s shape).
 pub fn parse_config(state: &Value) -> Vec<ConfigOption> {
     let Some(list) = state.get("config").and_then(Value::as_array) else {
         return Vec::new();
@@ -48,8 +42,6 @@ pub fn parse_config(state: &Value) -> Vec<ConfigOption> {
         .collect()
 }
 
-/// The composer's label: "Antigravity · Gemini 3 Pro · High", or the tool's name alone while the
-/// session isn't started or still loading ("Antigravity · Loading…").
 pub fn label(options: &[ConfigOption], started: bool, loading: bool) -> String {
     if !started {
         return "Antigravity".to_owned();
@@ -72,7 +64,6 @@ pub fn label(options: &[ConfigOption], started: bool, loading: bool) -> String {
     all.join(" · ")
 }
 
-/// What the picker's hover says.
 pub fn tip(started: bool) -> &'static str {
     if started {
         TIP

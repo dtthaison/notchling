@@ -1,8 +1,3 @@
-//! The Machines window's frame (Swift `MachinesView`'s top bar and `MachinesTab`'s banners):
-//! Machines | Jobs, Refresh and Add machine…; the notes and banners (machines.json unreadable or
-//! migrated, Rename, Update N machines, what wasn't saved, the off message); the empty state and
-//! the cards of the Machines tab.
-
 use std::rc::Rc;
 
 use gpui::{div, prelude::*, px, Context, Div, SharedString};
@@ -18,8 +13,6 @@ use crate::accounts::view_rows::{segmented, Handler};
 use crate::mac::gate;
 
 impl MachinesView {
-    // MARK: Top bar and banners
-
     pub(super) fn top_bar(&self, a: Appearance, cx: &mut Context<Self>) -> Div {
         let tabs: Vec<(String, String)> = Tab::ALL
             .iter()
@@ -88,8 +81,6 @@ impl MachinesView {
             .when(self.model.tab == Tab::Machines, |bar| bar.child(add))
     }
 
-    /// A banner: an icon, plain text (it may carry a reason that came from a file or a machine),
-    /// and a button on the right.
     pub(super) fn banner(
         mark: Icon,
         message: &str,

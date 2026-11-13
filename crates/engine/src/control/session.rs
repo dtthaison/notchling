@@ -1,7 +1,3 @@
-//! Planners for one session: New Session, Stop, Remove and Move. Each answers with a [`Plan`] and
-//! starts nothing. A job's lane comes from [`crate::sessions::job_dirs`], the way
-//! `AgentMonitor.configDir(forJob:)` finds it.
-
 use super::plan::{Command, Expect, Outcome, Plan, PlanError, RunStep, Step};
 use super::trust::plan_trust_folder;
 use crate::sessions::jobs::read_json;
@@ -11,13 +7,10 @@ use crate::sessions::{
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 
-/// `claude stop`/`--bg` give up after this long.
 const START_STOP_TIMEOUT_SECS: u64 = 60;
 const REMOVE_TIMEOUT_SECS: u64 = 120;
-/// The host lets go of the transcript this long after `claude stop`; resuming sooner opens it too early.
 pub const STOP_SETTLE_MS: u64 = 1500;
 
-/// The user's home folder: the parent of `~/.claude`.
 pub fn home_of(roots: &Roots) -> String {
     roots
         .main_dir
@@ -66,21 +59,14 @@ fn start_step(cwd: &str, config_dir: Option<&str>, args: &[String]) -> RunStep {
     )
 }
 
-/// What a New Session asks for.
 #[derive(Clone, Debug, Default)]
 pub struct NewSession<'a> {
     pub folder: &'a str,
-    /// The lane's folder; `None` is the main login (the variable is removed).
     pub config_dir: Option<&'a str>,
-    /// Extra `claude` flags, put before `--bg`.
     pub flags: &'a [String],
-    /// Accept Claude Code's trust prompt for the folder first (after a refused start).
     pub trust: bool,
 }
 
-/// `claude --bg` in the folder. A folder Claude Code has not trusted is refused with "Workspace not
-/// trusted": [`super::run::execute`] reports that as `Untrusted`, and the caller plans again with
-/// `trust: true`, which puts the hidden-pty trust script first.
 pub fn plan_new_session(request: &NewSession) -> Result<Plan, PlanError> {
     if request.folder.is_empty() {
         return Err(PlanError::NoFolder);
@@ -105,7 +91,6 @@ pub fn plan_new_session(request: &NewSession) -> Result<Plan, PlanError> {
     })
 }
 
-/// `claude stop <id>` for a background job, in the lane that holds it. The conversation is kept.
 pub fn plan_stop(agent: &Agent, roots: &Roots) -> Result<Plan, PlanError> {
     let id = job_id(agent)?;
     Ok(Plan {
@@ -117,8 +102,6 @@ pub fn plan_stop(agent: &Agent, roots: &Roots) -> Result<Plan, PlanError> {
     })
 }
 
-/// `claude respawn <id>` in the folder holding the job: restarts it on that folder's current login,
-/// after a limit switch (`LimitWatcher.respawn`). The conversation is kept.
 pub fn plan_respawn(id: &str, roots: &Roots) -> Plan {
     Plan {
         steps: vec![Step::Run(run(
@@ -131,8 +114,6 @@ pub fn plan_respawn(id: &str, roots: &Roots) -> Plan {
     }
 }
 
-/// The job's `state.json`, in the folder holding its current copy: it changes when the job runs
-/// again after a respawn.
 pub fn job_state_path(roots: &Roots, id: &str) -> PathBuf {
     job_dir(roots, config_dir_for_job(roots, id).as_deref())
         .join("jobs")
@@ -140,10 +121,6 @@ pub fn job_state_path(roots: &Roots, id: &str) -> PathBuf {
         .join("state.json")
 }
 
-/// `claude rm <id>` in every folder holding a copy of the job. A session moved to another account
-/// left a stopped copy behind; remove that too, or it shows up again. Only the current copy's
-/// result counts: the others are best effort, and none of them waits on another (a current copy
-/// that fails still lets the stale ones go, as Swift's loop does).
 pub fn plan_remove(agent: &Agent, roots: &Roots) -> Result<Plan, PlanError> {
     let id = job_id(agent)?;
     let mut dirs = job_dirs(roots, id);
@@ -179,21 +156,16 @@ fn state_of(dir: &Path, id: &str) -> Option<Value> {
     read_json(&dir.join("jobs").join(id).join("state.json"))
 }
 
-/// The flags the job was started with (name, model, permission mode), read from the folder holding
-/// its current copy, so the moved session keeps them.
 pub fn flags_for_job(roots: &Roots, id: &str, name: &str) -> Vec<String> {
     let dir = job_dir(roots, config_dir_for_job(roots, id).as_deref());
     launch_flags(&state_of(&dir, id).unwrap_or(Value::Null), name)
 }
 
-/// The conversation id a transcript path names (its file stem).
 pub fn conversation_of(transcript: &str) -> Option<String> {
     let stem = Path::new(transcript).file_stem()?.to_str()?;
     (!stem.is_empty()).then(|| stem.to_string())
 }
 
-/// `claude --bg --resume <conversation>` for a job moving into `to` (`None`: the main login), with
-/// the flags passed along only when that folder has no copy of the job to continue.
 pub fn resume_plan_step(
     roots: &Roots,
     id: &str,
@@ -211,10 +183,6 @@ pub fn resume_plan_step(
     start_step(&cwd, to, &resume_arguments(conversation, existing, flags))
 }
 
-/// Moves one background session to another account: `claude stop` (keeps the conversation), then
-/// `claude --bg --resume <transcript id>` with the target's config folder and the job's
-/// `respawnFlags`. `to` is the lane's folder, `None` the main login. The prompt cache stays with the
-/// old account, so the first reply re-reads the whole conversation.
 pub fn plan_move(agent: &Agent, to: Option<&str>, roots: &Roots) -> Result<Plan, PlanError> {
     let id = job_id(agent)?;
     let transcript = agent

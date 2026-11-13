@@ -1,5 +1,3 @@
-//! Port of `UsageParsingTests`.
-
 use super::usage::*;
 use serde_json::json;
 
@@ -21,7 +19,6 @@ fn fixed_keys() {
     assert_eq!(usage.fetched, 7.0);
 }
 
-/// Max 20x from October 2026: `five_hour` is null and everything comes from `limits`.
 #[test]
 fn limits_list_fills_a_missing_session() {
     let usage = parse_usage(

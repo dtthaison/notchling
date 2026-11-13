@@ -1,6 +1,3 @@
-//! The Desktop store against a temp copy of Claude's folder and a fake app. The "cookies" are
-//! made-up bytes; no real session is anywhere.
-
 use super::files::{backup, cookies};
 use super::store::{ClaudeName, DesktopDeps, DesktopPaths, DesktopStore, BUNDLE_ID};
 use crate::accounts::procs::FakeApps;
@@ -117,7 +114,7 @@ fn a_switch_quits_desktop_first_then_swaps_the_whole_cookie_store() {
     rig.store.sync(false);
     std::fs::create_dir_all(rig.root.join("ours/desktop")).unwrap();
     std::fs::write(rig.ours("uuid-b"), b"cookies-b").unwrap();
-    let rig = Rig::at(rig.root.clone(), FakeApps::new().running(BUNDLE_ID)); // restart: saved sessions are read from the folder
+    let rig = Rig::at(rig.root.clone(), FakeApps::new().running(BUNDLE_ID));
     let seen = Arc::new(std::sync::Mutex::new(None));
     let (live, s2) = (cookies(&rig.claude()), seen.clone());
     rig.apps
@@ -176,7 +173,6 @@ fn a_switch_to_an_account_never_signed_in_asks_for_that_first() {
     let err = rig.store.switch_to("uuid-b").unwrap_err();
     assert!(err.message().contains("Sign in to it in Claude once"));
     assert!(!rig.apps.events().iter().any(|e| e.starts_with("quit")));
-    // An id that is not a plain name never becomes a path.
     for bad in ["../Claude/Cookies", "a/b", ""] {
         assert!(rig.store.switch_to(bad).is_err(), "{bad}");
     }

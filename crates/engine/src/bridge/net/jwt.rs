@@ -1,12 +1,3 @@
-//! `AccessJWT`: the `Cf-Access-Jwt-Assertion` check for clients that come through the Cloudflare
-//! tunnel. RS256 against the team's keys, then audience, issuer and time claims (60 s of skew).
-//!
-//! Keys are cached per team for an hour. A token whose `kid` isn't cached makes one refetch, but
-//! never more often than every 30 s, so a client sending random `kid`s can't make the computer
-//! hammer Cloudflare. A failed fetch keeps serving the keys it has only while they are under an
-//! hour old; past that every tunnel token is refused until a fetch succeeds (fails closed, as
-//! Swift's `AccessKeySet` does).
-
 use super::crypto::base64_decode;
 use ring::signature::{RsaPublicKeyComponents, RSA_PKCS1_2048_8192_SHA256};
 use serde_json::Value;
@@ -18,9 +9,7 @@ pub const MAXIMUM_AGE_MS: i64 = 60 * 60 * 1000;
 pub const MINIMUM_REFETCH_MS: i64 = 30 * 1000;
 pub const SKEW_SECS: f64 = 60.0;
 
-/// Fetches a URL's body (the live one is a blocking GET with a short timeout; tests pass a fake).
 pub type Fetch = Arc<dyn Fn(&str) -> Result<Vec<u8>, String> + Send + Sync>;
-/// Milliseconds since the epoch.
 pub type Clock = Arc<dyn Fn() -> i64 + Send + Sync>;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -46,11 +35,9 @@ impl std::fmt::Display for JwtError {
 pub struct AccessClaims {
     pub audiences: Vec<String>,
     pub issuer: String,
-    /// Seconds since the epoch.
     pub expires_at: f64,
 }
 
-/// An RSA public key: modulus and exponent, big-endian.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RsaKey {
     pub n: Vec<u8>,
@@ -68,7 +55,6 @@ struct Cache {
     last_attempt: HashMap<String, i64>,
 }
 
-/// The signing keys of each Cloudflare Access team (`https://<team>/cdn-cgi/access/certs`).
 pub struct AccessKeySet {
     fetch: Fetch,
     now: Clock,
@@ -114,7 +100,6 @@ impl AccessKeySet {
         }
         self.lock().last_attempt.insert(team.to_string(), current);
         self.fetch_count.fetch_add(1, Ordering::SeqCst);
-        // Fetched without the lock: a slow Cloudflare holds up only this handshake.
         match (self.fetch)(&Self::certs_url(team)).and_then(|data| parse_jwks(&data)) {
             Ok(keys) => {
                 let found = keys.get(kid).cloned();
@@ -136,7 +121,6 @@ impl AccessKeySet {
     }
 }
 
-/// The RSA keys of a JWKS document, by `kid`. Other key types are skipped.
 pub fn parse_jwks(data: &[u8]) -> Result<HashMap<String, RsaKey>, String> {
     let value: Value = serde_json::from_slice(data).map_err(|e| e.to_string())?;
     let list = value
@@ -161,7 +145,6 @@ pub fn parse_jwks(data: &[u8]) -> Result<HashMap<String, RsaKey>, String> {
     Ok(keys)
 }
 
-/// Verifies Access tokens against an [`AccessKeySet`].
 pub struct AccessJwtVerifier {
     keys: Arc<AccessKeySet>,
     now: Clock,

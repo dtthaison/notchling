@@ -1,18 +1,3 @@
-//! The windows for the vault's prompts (part U9): while an agent waits for approval to use a
-//! secret, or asks for one to be added, a floating card over everything, whether or not Chat is
-//! open, as the Swift `VaultPrompt` panels were (one panel per request). A short loop looks at the
-//! switch feed a few times a second:
-//!
-//! - each pending approval gets a window of its own, bound to it; the app is brought forward once,
-//!   when that window opens, never again on a tick. The window goes when the daemon took the
-//!   answer. Closing it is Deny, sent to the daemon.
-//! - each pending request gets a form window of its own, opened without taking the focus or
-//!   bringing the app forward (an agent asked; the person comes to it). Closing it is Cancel
-//!   (`vault.request.cancel`).
-//!
-//! Only the app follows `vault`, so only the app can show these; an agent-tier client never sees
-//! them.
-
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
@@ -31,7 +16,6 @@ use crate::vault::prompt_view::{VaultRequestView, REQUEST_SIZE};
 use crate::vault::store::Vault;
 use crate::vault::wire::{Approval, Decision, PendingRequest};
 
-/// How often the feed is looked at.
 const TICK: Duration = Duration::from_millis(200);
 
 static RAISE: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
@@ -65,16 +49,13 @@ fn bring_forward(cx: &mut App, open: &Open, tickets: &[String]) {
     }
 }
 
-/// What the loop keeps between ticks.
 #[derive(Default)]
 struct Open {
     approvals: HashMap<String, WindowHandle<VaultApprovalView>>,
     requests: HashMap<String, WindowHandle<VaultRequestView>>,
-    /// Closed by the person: Deny or Cancel is on its way; never opened again.
     closed: HashSet<String>,
 }
 
-/// Starts the loop that opens and closes the prompt windows for `feed`'s pending items.
 pub fn watch(cx: &mut App, feed: Arc<SwitchFeed>, vault: Arc<Vault>) {
     cx.spawn(async move |cx| {
         let mut open = Open::default();
@@ -95,7 +76,6 @@ pub fn watch(cx: &mut App, feed: Arc<SwitchFeed>, vault: Arc<Vault>) {
                 next
             }) {
                 Ok(next) => open = next,
-                // The app is quitting.
                 Err(_) => return,
             }
         }
@@ -105,7 +85,6 @@ pub fn watch(cx: &mut App, feed: Arc<SwitchFeed>, vault: Arc<Vault>) {
 
 fn floating(size_pt: (f32, f32), nth: usize, focus: bool, cx: &App) -> WindowOptions {
     let mut bounds = Bounds::centered(None, size(px(size_pt.0), px(size_pt.1)), cx);
-    // Each further prompt a little lower and to the right, so none hides another.
     let step = px(24.0 * (nth % 8) as f32);
     bounds.origin = point(bounds.origin.x + step, bounds.origin.y + step);
     WindowOptions {
@@ -123,7 +102,6 @@ fn floating(size_pt: (f32, f32), nth: usize, focus: bool, cx: &App) -> WindowOpt
 
 fn float_over_everything(window: &mut gpui::Window) {
     if let Some(w) = ns_window(window) {
-        // Over other windows and on the Space the person is on, like the panels were.
         w.setLevel(NSFloatingWindowLevel);
         w.setCollectionBehavior(
             NSWindowCollectionBehavior::CanJoinAllSpaces
@@ -134,8 +112,6 @@ fn float_over_everything(window: &mut gpui::Window) {
     }
 }
 
-/// Sends what closing a window means (Deny for an approval, Cancel for a request) off the UI
-/// thread; the item leaves the feed's list only once the daemon took it.
 fn send_closed(cx: &mut App, id: String, approval: bool, feed: Arc<SwitchFeed>, vault: Arc<Vault>) {
     cx.spawn(async move |cx: &mut AsyncApp| {
         let switches = feed.switches();
@@ -177,7 +153,6 @@ fn sync(
     };
     for (id, handle) in was.approvals.drain() {
         match handle.update(cx, |view, _, _| view.resolved()) {
-            // Answered and taken, or no longer waiting: the window goes.
             Ok(true) => {
                 handle.update(cx, |_, w, _| w.remove_window()).ok();
             }
@@ -187,7 +162,6 @@ fn sync(
             Ok(false) => {
                 next.approvals.insert(id, handle);
             }
-            // Closed by the person: that is Deny.
             Err(_) => {
                 if waiting.contains(&id) {
                     next.closed.insert(id.clone());
@@ -203,7 +177,6 @@ fn sync(
         } else if alive {
             handle.update(cx, |_, w, _| w.remove_window()).ok();
         } else if waiting.contains(&id) {
-            // Closed by the person: that is Cancel.
             next.closed.insert(id.clone());
             send_closed(cx, id, false, feed.clone(), vault.clone());
         }
@@ -223,8 +196,6 @@ fn sync(
             .map_err(|e| eprintln!("open the vault approval: {e}"))
             .ok();
         if let Some(handle) = opened {
-            // Once, as this window opens: a prompt nobody sees is an agent that waits five minutes
-            // to be refused. Allow stays unarmed for a moment after.
             cx.activate(true);
             next.approvals.insert(id, handle);
         }

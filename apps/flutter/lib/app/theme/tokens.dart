@@ -1,10 +1,5 @@
 import 'package:flutter/material.dart';
 
-/// The Notchling Chat kit (docs/chat-kit.md, Sources/Notchling/DesignKit/ChatKit.swift) on the phone: same palette,
-/// same meanings, same radii, so the Mac and the phone read as one product. Sizes are phone sizes (the roles are the
-/// same; body is 15 here, 13 on the Mac). Names follow DESIGN.md.
-/// Widgets read colors and text styles from `Kit.of(context)`, never a hex, font name or radius of their own.
-
 abstract final class _Palette {
   static const Color night0 = Color(0xFF0F0E0D);
   static const Color night1 = Color(0xFF151311);
@@ -34,10 +29,6 @@ abstract final class _Palette {
   static const Color red600 = Color(0xFFC2362B);
 }
 
-/// Radii of the kit: sm controls, md rows and chips, card messages and cards, composer the input.
-/// One documented scale (DESIGN.md). Chips, pills, badges and avatars are fully round (use 999).
-/// sm: small controls (buttons, fields, code boxes). md: cards, rows, capsules. bubble: chat bubbles, with the corner
-/// nearest the sender at bubbleTail. composer: the input. sheet: bottom sheets and dialogs, top corners only.
 abstract final class Radii {
   static const double sm = 10;
   static const double md = 16;
@@ -49,7 +40,6 @@ abstract final class Radii {
   static const double full = 999;
 }
 
-/// 4 pt grid.
 abstract final class Space {
   static const double xs = 4;
   static const double sm = 8;
@@ -69,11 +59,9 @@ abstract final class Metric {
 }
 
 abstract final class Fonts {
-  /// Code only. Text uses the system font, as the Mac kit does (Roboto on Android, San Francisco on iOS).
   static const String mono = 'GeistMono';
 }
 
-/// Colors and text styles, light and dark, as a theme extension.
 @immutable
 class Kit extends ThemeExtension<Kit> {
   const Kit._({
@@ -197,14 +185,12 @@ class Kit extends ThemeExtension<Kit> {
   final Color accent;
   final Color accentText;
 
-  /// Text on an accent fill: dark, because white fails on orange.
   final Color onAccent;
   final Color accentWash;
   final Color needs;
   final Color working;
   final Color done;
 
-  /// A `!` shell command, as Claude Code's terminal marks shell mode.
   final Color shell;
   final Color shellWash;
   final Color onShell;
@@ -217,8 +203,6 @@ class Kit extends ThemeExtension<Kit> {
   final Color syntaxNumber;
   final Color syntaxType;
 
-  /// Frosted bars: the fill over the blurred content. One light, from above: [highlight] is the 1 px top edge of a
-  /// surface, [edge] the slightly darker bottom edge, [shadowTint] the hue shadows are made of (black on dark, warm brown on light).
   final Color glass;
   final Color highlight;
   final Color edge;
@@ -226,19 +210,15 @@ class Kit extends ThemeExtension<Kit> {
 
   bool get isDark => brightness == Brightness.dark;
 
-  /// Level 1: cards, bubbles, capsules. One short contact shadow: a large blur on every bubble is re-rasterised
-  /// whenever the list relayouts (keyboard), so only the composer and sheets (level 2) keep a soft one.
   List<BoxShadow> get shadow1 => <BoxShadow>[
         BoxShadow(color: shadowTint.withValues(alpha: isDark ? 0.40 : 0.12), blurRadius: 3, offset: const Offset(0, 1)),
       ];
 
-  /// Level 2: the composer, the permission card, sheets, banners.
   List<BoxShadow> get shadow2 => <BoxShadow>[
         BoxShadow(color: shadowTint.withValues(alpha: isDark ? 0.40 : 0.12), blurRadius: 3, offset: const Offset(0, 1)),
         BoxShadow(color: shadowTint.withValues(alpha: isDark ? 0.35 : 0.14), blurRadius: 30, offset: const Offset(0, 10)),
       ];
 
-  // Text styles. Sizes scale with the system font size.
   static const List<FontFeature> _tabular = <FontFeature>[
     FontFeature.tabularFigures(),
   ];
@@ -289,7 +269,6 @@ class Kit extends ThemeExtension<Kit> {
     color: text,
   );
 
-  // Names the screens used before the kit; they map onto the kit's roles.
   TextStyle get panelTitle => section;
   TextStyle get titleMd => heading;
   TextStyle get bodyMd => body;
@@ -307,7 +286,6 @@ class Kit extends ThemeExtension<Kit> {
   @override
   Kit copyWith() => this;
 
-  /// A real blend, so changing the theme crossfades every colour instead of flipping halfway.
   @override
   Kit lerp(ThemeExtension<Kit>? other, double t) {
     if (other is! Kit) return this;
@@ -350,7 +328,6 @@ class Kit extends ThemeExtension<Kit> {
   }
 }
 
-/// [fontFamily] is null in the app (the system font); the preview renderer names a bundled Roboto.
 ThemeData buildTheme([
   Brightness brightness = Brightness.dark,
   String? fontFamily,

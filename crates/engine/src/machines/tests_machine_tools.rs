@@ -1,5 +1,3 @@
-//! Base tools, Claude Code and Xcode steps (Swift `MachinesMachineStepsTests`, second half).
-
 use super::fakes::*;
 use super::process::CUT_NOTICE;
 use super::registry::AdminAccess;
@@ -11,8 +9,6 @@ use super::tests_machine_steps::{
     check, failing_runner, how_to, linux, mac, parse, parse_in, plan, run_fix, script, step,
 };
 use std::sync::Arc;
-
-// MARK: Base tools
 
 const GOOD_TOOLS: &str = "git=/opt/homebrew/bin/git\npython3=/opt/homebrew/bin/python3\njq=/opt/homebrew/bin/jq\ngh=/opt/homebrew/bin/gh\npyver=3.12\nbrew=yes\n";
 
@@ -79,7 +75,7 @@ fn base_tools_probe_is_read_only() {
 #[test]
 fn linux_base_tools_fix_keeps_production_untouched() {
     let mut machine = linux();
-    machine.set_admin(AdminAccess::RootSsh); // on Linux the admin is root over ssh
+    machine.set_admin(AdminAccess::RootSsh);
     let runner = Arc::new(ScriptedRunner::new());
     let ctx = Ctx::new(machine.clone()).runner(&runner);
     let p = plan(&step(StepId::BASE_TOOLS, &machine));
@@ -104,7 +100,6 @@ fn linux_base_tools_fix_keeps_production_untouched() {
         2,
         "both installs keep installed packages as they are"
     );
-    // "upgrade" appears only inside the --no-upgrade flag
     let without_flag = sent.replace("--no-upgrade", "");
     for word in ["restart", "upgrade", "systemctl"] {
         assert!(!without_flag.contains(word), "{word}");
@@ -118,7 +113,6 @@ fn linux_base_tools_fix_keeps_production_untouched() {
     }
 }
 
-/// With the worker account as the admin the Fix is refused, a password or not.
 #[test]
 fn linux_base_tools_fix_as_the_worker_is_refused_before_any_command_runs() {
     let machine = linux();
@@ -202,7 +196,6 @@ fn base_tools_without_command_line_tools_fails_without_running_python() {
         CheckState::Fail("Command Line Tools missing".into())
     );
     assert_eq!(r.detected.python, None);
-    // the probe asks xcode-select before it runs python3, and only on macOS
     let s = script(&step(StepId::BASE_TOOLS, &mac()));
     let guard_at = s.find("xcode-select -p >/dev/null 2>&1").unwrap();
     let python_at = s.find("python3 -c").unwrap();
@@ -224,8 +217,6 @@ fn mac_base_tools_fix_reports_a_missing_homebrew() {
     );
 }
 
-// MARK: Claude Code
-
 #[test]
 fn claude_code_shows_its_version() {
     let ok = check(StepId::CLAUDE_CODE, "2.1.330 (Claude Code)\n");
@@ -236,15 +227,12 @@ fn claude_code_shows_its_version() {
     assert_eq!(missing.state, CheckState::Fail("not installed".into()));
 }
 
-/// A line of machine output is masked before it is cut to 200 characters: the cut falls inside the
-/// token.
 #[test]
 fn machine_text_is_masked_before_it_is_cut_in_checks_and_fixes() {
     let token = long_token();
     let marker = "[secret:claude-worker]";
     let ctx = Ctx::mac().hiding("claude-worker", &token);
 
-    // claude --version, Reachable's failure reason, fdesetup's answer
     let version = parse_in(
         StepId::CLAUDE_CODE,
         &format!("2.1.0 {}{token}\n", "f".repeat(164)),
@@ -268,7 +256,6 @@ fn machine_text_is_masked_before_it_is_cut_in_checks_and_fixes() {
     );
     assert_no_fragment(&token, &format!("{:?}", vault.state));
 
-    // a Fix's failure line (the last line of stderr), cut to 200 characters
     let said = format!("{}{token}", "f".repeat(170));
     let runner = failing_runner(1, "", &said);
     let fix_ctx = Ctx::mac().runner(&runner).hiding("claude-worker", &token);
@@ -281,8 +268,6 @@ fn machine_text_is_masked_before_it_is_cut_in_checks_and_fixes() {
     assert_no_fragment(&token, &fix.message);
     assert!(fix.message.contains(marker), "{}", fix.message);
 
-    // output the runner cut at its start: the half line after the notice may hold the end of the
-    // token
     let suffix: String = token.chars().skip(token.chars().count() - 60).collect();
     let cut_runner = failing_runner(1, "", &format!("{CUT_NOTICE}{suffix}"));
     let cut_ctx = Ctx::mac()
@@ -296,15 +281,11 @@ fn machine_text_is_masked_before_it_is_cut_in_checks_and_fixes() {
     assert_no_fragment(&token, &cut.message);
 }
 
-/// The base-tool path rows, the Xcode line, the runtime names and the phone names are masked before
-/// they are cut to 200 characters, and what is saved as abilities is masked too.
 #[test]
 fn tool_paths_and_xcode_names_are_masked_before_they_are_cut() {
     let token = long_token();
     let marker = "[secret:claude-worker]";
     let ctx = Ctx::mac().hiding("claude-worker", &token);
-    // short enough that the marker fits inside the 200 characters, long enough that the cut falls
-    // in the token
     let filler = "f".repeat(150);
 
     let tools = parse_in(
@@ -317,7 +298,6 @@ fn tool_paths_and_xcode_names_are_masked_before_they_are_cut() {
     assert_no_fragment(&token, &git_row.detail);
     assert!(git_row.detail.contains(marker), "{}", git_row.detail);
 
-    // the Xcode line, an iOS runtime name and an iPhone name
     let devices = format!("{{\"devices\":{{\"com.apple.CoreSimulator.SimRuntime.iOS-26-5\":[{{\"name\":\"iPhone {filler}{token}\",\"isAvailable\":true}}]}}}}");
     let xcode = parse_in(
         StepId::XCODE,
@@ -340,8 +320,6 @@ fn tool_paths_and_xcode_names_are_masked_before_they_are_cut() {
     assert!(a.simulators[0].contains(marker), "{:?}", a.simulators);
 }
 
-/// A failure line hides the admin password through the context's mask (the engine's mask has it;
-/// the step does not replace it a second time).
 #[test]
 fn a_fix_failure_hides_the_admin_password_through_the_mask() {
     let runner = failing_runner(1, "", "sudo: wrong password hunter22 for agent");
@@ -378,7 +356,6 @@ fn claude_code_fix_installs_as_the_worker_without_admin() {
     assert!(!run_fix(&p, &ctx, None).ok);
 }
 
-/// Runs the install script under `/bin/sh` with a fake `curl` first on PATH.
 #[cfg(unix)]
 fn run_install(curl: &str) -> i32 {
     use std::os::unix::fs::PermissionsExt;
@@ -403,12 +380,9 @@ fn run_install(curl: &str) -> i32 {
 fn claude_install_script_fails_when_the_download_fails() {
     assert_eq!(run_install("exit 22"), 22);
     assert_ne!(run_install("exit 6"), 0);
-    // and still runs what it downloaded when the download works
     assert_eq!(run_install("echo 'exit 0'"), 0);
     assert_eq!(run_install("echo 'exit 3'"), 3);
 }
-
-// MARK: Xcode
 
 #[test]
 fn xcode_needs_a_runtime_and_an_iphone() {
@@ -442,7 +416,6 @@ fn xcode_needs_a_runtime_and_an_iphone() {
         CheckState::Fail("Xcode is not installed".into())
     );
 
-    // grep '^iOS ' printed nothing: there is no iOS runtime
     let no_runtime = check(
         StepId::XCODE,
         &text.replace(
@@ -452,7 +425,6 @@ fn xcode_needs_a_runtime_and_an_iphone() {
     );
     assert_eq!(no_runtime.state, CheckState::Fail("no iOS runtime".into()));
 
-    // the newest iOS runtime is shown
     let two = check(
         StepId::XCODE,
         &text.replace(
@@ -478,8 +450,6 @@ fn xcode_probe_asks_for_a_runtime_line_not_runtime_json() {
         !s.contains("runtimes available -j"),
         "the runtimes JSON alone is 48 KB"
     );
-    // only iPhones come back (the unfiltered list passes 64 KiB with several runtimes);
-    // `isAvailable` is read from the JSON
     assert!(s.contains("xcrun simctl list devices iPhone -j"));
     assert!(
         !s.contains("devices available"),
@@ -487,8 +457,6 @@ fn xcode_probe_asks_for_a_runtime_line_not_runtime_json() {
     );
 }
 
-/// Without the Command Line Tools `xcodebuild` and `xcrun` are the install-dialog stubs, so
-/// nothing runs.
 #[test]
 fn xcode_probe_asks_xcode_select_first_and_says_so_when_the_tools_are_missing() {
     let s = script(&step(StepId::XCODE, &mac()));
@@ -539,7 +507,6 @@ fn xcode_cant_tell_when_the_output_was_cut_or_cannot_be_read() {
             "{name} must not overwrite the abilities"
         );
     }
-    // an unreadable runtime line is can't tell too
     let odd = parse(
         StepId::XCODE,
         "Xcode 26.1\n@@runtimes\niOS ??\n@@devices\n{\"devices\":{}}\n",
@@ -551,14 +518,9 @@ fn xcode_cant_tell_when_the_output_was_cut_or_cannot_be_read() {
 
 #[test]
 fn xcode_fixture_has_three_iphones() {
-    // the fixture itself: three iPhones and an iPad under iOS, an Apple TV under tvOS
     assert_eq!(SIMCTL_OK.matches("\"name\" : \"iPhone").count(), 3);
 }
 
-// MARK: Safety
-
-/// No Fix script holds anything a machine reported: a home folder like `/home/a b;x` in the
-/// machine's saved abilities never reaches a command.
 #[test]
 fn no_fix_command_holds_text_the_machine_reported() {
     let hostile = "/home/a b;x$(id)";

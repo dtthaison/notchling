@@ -13,8 +13,6 @@ import '../connection/connection.dart';
 
 enum PhotoOrigin { camera, gallery }
 
-/// Where a photo comes from. The real one is the system camera or photo picker, which hands back a JPEG already
-/// scaled to 1600 px and compressed (a phone photo is 3 to 8 MB; the bridge takes 6).
 abstract interface class PhotoPicker {
   Future<Uint8List?> pick(PhotoOrigin origin);
 }
@@ -36,7 +34,6 @@ class SystemPhotoPicker implements PhotoPicker {
 
 final Provider<PhotoPicker> photoPickerProvider = Provider<PhotoPicker>((Ref ref) => SystemPhotoPicker());
 
-/// Asks camera or gallery, then shows the preview with a caption field. Sending goes to exactly [sessionId].
 Future<void> pickAndSendPhoto(BuildContext context, WidgetRef ref, String sessionId) async {
   final AppL10n l10n = AppL10n.of(context);
   final PhotoOrigin? origin = await showModalBottomSheet<PhotoOrigin>(
@@ -90,7 +87,6 @@ Future<void> pickAndSendPhoto(BuildContext context, WidgetRef ref, String sessio
   if (sent) messenger.showSnackBar(SnackBar(content: Text(l10n.photoSent)));
 }
 
-/// The photo, a caption field and Send. Shows progress while the pieces go, and the Mac's reason if it refuses.
 class PhotoPreview extends StatefulWidget {
   const PhotoPreview({super.key, required this.bytes, required this.send});
   final Uint8List bytes;

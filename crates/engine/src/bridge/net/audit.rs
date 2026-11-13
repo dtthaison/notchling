@@ -1,27 +1,18 @@
-//! `AuditLog`: every remote op that changes something, one JSON line each, in
-//! `bridge/remote-log.jsonl` (0600), in the Swift app's format (sorted keys, `.iso8601` time). A
-//! message's length is logged, never its text.
-
 use super::files::{iso8601, parse_iso8601, write_private, FileLock};
 use serde_json::{json, Map, Value};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-/// The file's name in the bridge folder.
 pub const FILE_NAME: &str = "remote-log.jsonl";
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct AuditEntry {
-    /// Milliseconds since the epoch (whole seconds on disk).
     pub time: i64,
     pub device: String,
     pub op: String,
     pub session: Option<String>,
-    /// Length of the text that was sent, never the text itself.
     pub length: Option<i64>,
-    /// Where the command came from; for the internet route this is the client's own address.
     pub address: Option<String>,
-    /// For a takeover that stopped the original session: its pid.
     pub stopped_pid: Option<i64>,
 }
 
@@ -69,7 +60,6 @@ impl AuditEntry {
 
 pub struct AuditLog {
     file: PathBuf,
-    /// Set by [`AuditLog::halt`]; held through a write, so none outlasts the halt.
     halted: Mutex<bool>,
 }
 
@@ -85,12 +75,10 @@ impl AuditLog {
         &self.file
     }
 
-    /// No more lines, from now on: the bridge is going off. Waits for a write in progress.
     pub fn halt(&self) {
         *self.halted.lock().unwrap_or_else(|e| e.into_inner()) = true;
     }
 
-    /// Appends one line. A failure is returned for the caller to report; the op itself goes on.
     pub fn append(&self, entry: &AuditEntry) -> std::io::Result<()> {
         let halted = self.halted.lock().unwrap_or_else(|e| e.into_inner());
         if *halted {
@@ -110,7 +98,6 @@ impl AuditLog {
         write_private(&self.file, &data)
     }
 
-    /// The newest `limit` entries, newest first; a bad line is skipped.
     pub fn recent(&self, limit: usize) -> Vec<AuditEntry> {
         let Ok(text) = std::fs::read_to_string(&self.file) else {
             return Vec::new();

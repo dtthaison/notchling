@@ -1,5 +1,3 @@
-//! The engine's checks (Swift `MachinesSetupEngineTests`, batching, states, facts).
-
 use super::engine_check::split_markers;
 use super::registry::SdWorkerSettings;
 use super::runner::CommandResult;
@@ -92,7 +90,6 @@ fn a_marker_with_another_nonce_or_a_repeated_index_is_just_text() {
     );
     assert_eq!(w.state("m1", "b"), Some(CheckState::Pass("5|mine".into())));
 
-    // a probe that prints the real nonce for an index already answered can't end another's output
     let n = "00112233aabbccdd";
     let out = format!("one\n@@{n} 0 0@@\n@@{n} 0 9@@\ntwo\n@@{n} 1 0@@\n");
     let got = split_markers(&out, n, 2);

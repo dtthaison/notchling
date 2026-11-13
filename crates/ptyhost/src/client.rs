@@ -1,6 +1,3 @@
-//! A client of the host socket (`HostClient.swift`): blocking requests with a timeout, and a reader
-//! thread for replies, events and terminal output. `--status` uses it, and so will the daemon.
-
 use crate::host::HostedInfo;
 use crate::wire::{self, Frame, FrameReader, SessionId};
 use crate::HostError;
@@ -38,7 +35,6 @@ pub struct HostClient {
 }
 
 impl HostClient {
-    /// Connects; `timeout` bounds each write (a host that stopped reading).
     pub fn connect(path: &Path, timeout: Duration) -> Result<HostClient, HostError> {
         let stream = UnixStream::connect(path).map_err(|_| HostError::ConnectFailed)?;
         crate::server::set_no_sigpipe(&stream);
@@ -58,12 +54,10 @@ impl HostClient {
         !self.shared.closed.load(Ordering::SeqCst)
     }
 
-    /// `exit` and `spawned` events, on the reader thread.
     pub fn on_event(&self, handler: impl Fn(&Map<String, Value>) + Send + Sync + 'static) {
         *lock(&self.shared.on_event) = Some(Arc::new(handler));
     }
 
-    /// Called once when the connection ends (the host stopped or crashed).
     pub fn on_closed(&self, handler: impl FnOnce() + Send + 'static) {
         if self.shared.closed.load(Ordering::SeqCst) {
             handler();
@@ -84,7 +78,6 @@ impl HostClient {
         writer.write_all(bytes).map_err(|e| HostError::socket(&e))
     }
 
-    /// A request and its answer's `data`. A refusal is [`HostError::Refused`] with the host's text.
     pub fn request(
         &self,
         op: &str,
@@ -125,8 +118,6 @@ impl HostClient {
         })
     }
 
-    // Typed calls
-
     pub fn sessions(&self) -> Result<Vec<HostedInfo>, HostError> {
         let reply = self.request("list", Map::new(), Duration::from_secs(5))?;
         Ok(reply
@@ -140,7 +131,6 @@ impl HostClient {
         crate::ops::info_from(value)
     }
 
-    /// Sends the session's output to `handler` (the scrollback first), until [`HostClient::detach`].
     pub fn attach(
         &self,
         session: SessionId,
@@ -160,7 +150,6 @@ impl HostClient {
             .map(|_| ())
     }
 
-    /// Types into the session.
     pub fn write(&self, session: SessionId, bytes: &[u8]) -> Result<(), HostError> {
         self.send(&wire::encode(&Frame::Data {
             session,
@@ -216,7 +205,6 @@ fn dispatch(shared: &Shared, frame: Frame) {
     }
 }
 
-/// Once: every waiting request fails with `Closed`, and `on_closed` runs.
 fn finish(shared: &Shared) {
     if shared.closed.swap(true, Ordering::SeqCst) {
         return;

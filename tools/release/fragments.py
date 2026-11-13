@@ -27,15 +27,12 @@ KINDS = ("fix", "feature", "breaking", "internal")
 CHANGES_DIR = "changes"
 NO_CHANGELOG_LABEL = "no-changelog"
 
-# Paths whose change is something a user could notice, so the PR needs a fragment.
 APP_CODE = (
     re.compile(r"^legacy/macos/Sources/"),
     re.compile(r"^apps/flutter/lib/"),
     re.compile(r"^crates/([^/]+/)+src/"),
 )
 
-# kind -> (CHANGELOG section, bullet prefix). `internal` is not in the log or the notes: it exists so a PR
-# that touches app code with nothing to tell users can still say so.
 SECTIONS = {
     "feature": ("Added", ""),
     "breaking": ("Changed", "**Breaking:** "),
@@ -56,7 +53,6 @@ class Fragment(NamedTuple):
 
 
 def parse(name: str, content: str) -> Fragment:
-    """A fragment's kind and its one paragraph, or a FragmentError that names the file."""
     lines = [line.rstrip() for line in content.replace("\r\n", "\n").split("\n")]
     if not lines or lines[0] != "---":
         raise FragmentError(f"{name}: must start with a line of ---, then 'kind: ...'")
@@ -95,9 +91,6 @@ def is_fragment_name(name: str) -> bool:
 
 
 def load(changes_dir, skip: Iterable[str] = (), only: Optional[Iterable[str]] = None) -> List[Fragment]:
-    """The fragments in the folder, by file name. A missing folder has none. `skip` names are left out and
-    `only` (when given) names all that is wanted; a file left out is not even parsed, so a broken one that
-    does not matter cannot stop the run."""
     d = Path(changes_dir)
     if not d.is_dir():
         return []
@@ -111,7 +104,6 @@ def load(changes_dir, skip: Iterable[str] = (), only: Optional[Iterable[str]] = 
 
 
 def sections(frags: Sequence[Fragment]):
-    """[(heading, [bullet, ...])] in CHANGELOG order, user-facing kinds only."""
     out = {}
     for f in frags:
         if f.kind in SECTIONS:
@@ -136,7 +128,6 @@ def git(repo, *args) -> str:
 
 
 def tree_prefix(repo, changes_dir) -> str:
-    """The changes folder as a path inside the repo ('' for the root), however --changes-dir was spelled."""
     d = Path(changes_dir)
     if d.is_absolute():
         try:
@@ -147,8 +138,6 @@ def tree_prefix(repo, changes_dir) -> str:
 
 
 def names_at(repo, rev, changes_dir) -> Set[str]:
-    """File names of the fragments in the changes folder of the tree at `rev` (README and other files left
-    out). A folder that does not exist there has none; a `rev` git cannot find is an error."""
     prefix = tree_prefix(repo, changes_dir)
     out = git(repo, "ls-tree", "-r", "--name-only", "-z", rev, "--", prefix or ".")
     lead = prefix + "/" if prefix else ""
@@ -211,7 +200,6 @@ def fold_text(text: str, version: str, date: str, frags: Sequence[Fragment]) -> 
     end = next((i for i in range(start + 1, len(lines))
                 if lines[i].startswith("## [") or re.match(r"^\[[^\]]+\]: ", lines[i])), len(lines))
 
-    # Text already under [Unreleased] (written by hand) is kept and merged with the fragments.
     preamble, merged, current = [], {}, None
     for line in lines[start + 1:end]:
         if line.startswith("### "):
@@ -226,7 +214,6 @@ def fold_text(text: str, version: str, date: str, frags: Sequence[Fragment]) -> 
         while body and not body[-1].strip():
             body.pop()
         body.extend(bullets)
-    # Hand-written sections keep their order; sections only the fragments have follow in CHANGELOG order.
     ordered = list(merged)
 
     block = [f"## [{version}] - {date}", ""]

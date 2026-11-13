@@ -1,8 +1,3 @@
-//! The one request the bridge makes: a blocking HTTPS GET of a Cloudflare Access team's signing
-//! keys (`AccessKeySet.liveFetch`). TLS through rustls with the OS's root certificates, 5 s each
-//! for the name lookup, the connect (every address together) and each read or write, 1 MB at most. It runs on the handshaking phone's thread, never another's,
-//! and only for a request that carries Cloudflare's headers while internet access is on.
-
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
 use std::sync::Arc;
@@ -11,7 +6,6 @@ use std::time::Duration;
 const LIMIT: usize = 1024 * 1024;
 const TIMEOUT: Duration = Duration::from_secs(5);
 
-/// The live [`super::jwt::Fetch`].
 pub fn live() -> super::jwt::Fetch {
     Arc::new(|url: &str| get(url))
 }
@@ -60,7 +54,6 @@ fn get(url: &str) -> Result<Vec<u8>, String> {
         match tls.read(&mut chunk) {
             Ok(0) => break,
             Ok(n) => body.extend_from_slice(&chunk[..n]),
-            // A server that closes without close_notify still sent the whole answer.
             Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
             Err(e) => return Err(e.to_string()),
         }
@@ -71,7 +64,6 @@ fn get(url: &str) -> Result<Vec<u8>, String> {
     parse_response(&body)
 }
 
-/// The first of `addrs` that answers, all of them together within `within`.
 fn connect_within(addrs: &[SocketAddr], within: Duration) -> Result<TcpStream, String> {
     let deadline = std::time::Instant::now() + within;
     let mut last = "no address".to_string();
@@ -88,8 +80,6 @@ fn connect_within(addrs: &[SocketAddr], within: Duration) -> Result<TcpStream, S
     Err(last)
 }
 
-/// The addresses `lookup` finds, or an error once `within` has passed. The system resolver has no
-/// timeout of its own, so it runs on a thread of its own, left to finish alone if it hangs.
 fn resolve_within(
     within: Duration,
     lookup: impl FnOnce() -> Result<Vec<SocketAddr>, String> + Send + 'static,
@@ -105,7 +95,6 @@ fn resolve_within(
         .map_err(|_| "the name lookup took too long".to_string())?
 }
 
-/// The body of a `200` answer (plain or chunked); an error for anything else.
 pub fn parse_response(data: &[u8]) -> Result<Vec<u8>, String> {
     let end = data
         .windows(4)

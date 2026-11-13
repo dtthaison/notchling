@@ -1,16 +1,7 @@
-//! The page windows the app holds, as plain bookkeeping (the windows themselves are `web`'s,
-//! macOS only). A page window is held from the moment it opens until the person closes it, and
-//! holding it is what keeps its web view alive: letting go of a window the person only minimized
-//! would lose the page they are reading, and keeping one they closed would leave the page
-//! running (its scripts and media) with no window to show it.
-
-/// Whether a window the person has not closed: on screen, or minimized to the Dock (which AppKit
-/// reports as not visible).
 pub fn counts_as_open(visible: bool, miniaturized: bool) -> bool {
     visible || miniaturized
 }
 
-/// The held windows, each with the number AppKit gave it.
 #[derive(Debug)]
 pub struct PageSet<W> {
     items: Vec<(u64, W)>,
@@ -35,15 +26,12 @@ impl<W> PageSet<W> {
         self.items.push((id, window));
     }
 
-    /// Lets go of the window with this number (the person closed it). True when it was held.
     pub fn forget(&mut self, id: u64) -> bool {
         let before = self.items.len();
         self.items.retain(|(held, _)| *held != id);
         self.items.len() != before
     }
 
-    /// Lets go of every window `open` says is gone, where a new one is about to open: a close
-    /// whose notice was missed does not pile up.
     pub fn retain_open(&mut self, open: impl Fn(&W) -> bool) {
         self.items.retain(|(_, window)| open(window));
     }

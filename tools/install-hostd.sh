@@ -1,18 +1,4 @@
 #!/bin/bash
-# Installs the session host (agent-console-hostd) as a LaunchAgent and brings it up to date WITHOUT ending sessions.
-#
-#   install-hostd.sh "/Applications/Notchling.app"
-#
-# - writes ~/Library/LaunchAgents/local.agentconsole.hostd.plist (RunAtLoad + KeepAlive) pointing at the helper
-#   inside the app bundle (Contents/Helpers/agent-console-hostd);
-# - first install: loads the agent, which starts the host;
-# - already loaded: asks the running host how many sessions it has. None running: restart it onto the new helper.
-#   Some running: leave the old host alone and say so; the new helper takes over by itself at the next idle moment
-#   (the host watches its own binary and exits, to be restarted by launchd, once nothing is running);
-# - already loaded from ANOTHER helper path (it used to be inside Agent Console.app): with nothing running the job is
-#   reloaded onto the new path; with sessions running it is left alone and tools/migrate-and-install.sh is named.
-#
-# Overridable for tests: LAUNCHCTL, HOSTD_HELPER, PLIST_DIR, HOSTD_SOCKET.
 set -euo pipefail
 
 APP="${1:?usage: install-hostd.sh <path to Notchling.app>}"

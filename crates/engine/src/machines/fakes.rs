@@ -1,6 +1,3 @@
-//! Fakes for the machines tests (Swift `MachineSetupFakes`). Nothing here starts a process or opens
-//! a socket; every secret is an obviously fake value.
-
 use super::github::{allows, GitHubHttp, HttpAnswer};
 use super::masks::Masks;
 use super::registry::{Machine, MachineAbilities, MachineOs, MachineRepo, SdWorkerSettings};
@@ -19,7 +16,6 @@ pub fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-/// A vault of fixed values.
 #[derive(Clone, Default)]
 pub struct FakeSecrets {
     pub values: BTreeMap<String, String>,
@@ -51,9 +47,6 @@ impl SecretSource for FakeSecrets {
     }
 }
 
-/// Answers by path plus query (`/user/repos?page=2`), 404 for anything not listed, and records
-/// every request with its bearer, including the ones the real client would refuse (those get
-/// status 0). With a delay it also counts the most requests in flight at once.
 #[derive(Default)]
 pub struct PathHttp {
     answers: BTreeMap<String, HttpAnswer>,
@@ -71,7 +64,6 @@ impl PathHttp {
         }
     }
 
-    /// Every request waits `delay` and is answered 404.
     pub fn slow(delay: Duration) -> PathHttp {
         PathHttp {
             delay: Some(delay),
@@ -79,7 +71,6 @@ impl PathHttp {
         }
     }
 
-    /// (url, bearer) of every request.
     pub fn requests(&self) -> Vec<(String, String)> {
         lock(&self.seen).clone()
     }
@@ -113,7 +104,6 @@ impl GitHubHttp for PathHttp {
     }
 }
 
-/// Collects the chunks a Fix logs, with their pipe.
 #[derive(Default)]
 pub struct LogBox {
     chunks: Mutex<Vec<(Channel, String)>>,
@@ -130,7 +120,6 @@ impl LogBox {
     }
 }
 
-/// Records what a Fix asked this Mac to open.
 #[derive(Default)]
 pub struct RecordingOpener {
     pub pages: Mutex<Vec<String>>,
@@ -212,7 +201,6 @@ impl TestMachines {
     }
 }
 
-/// Builds the contexts a step is called with.
 pub struct Ctx {
     pub machine: Machine,
     pub all: Option<Vec<Machine>>,
@@ -262,7 +250,6 @@ impl Ctx {
         self
     }
 
-    /// Hides `value` as `[secret:<name>]` the way the engine's masks do.
     pub fn hiding(mut self, name: &str, value: &str) -> Ctx {
         self.masks.hide(name, value);
         self
@@ -286,7 +273,6 @@ impl Ctx {
         }
     }
 
-    /// A Fix's context; `admin` is its admin password, which the Fix's masks hide as well.
     pub fn fix(&self, admin: Option<&str>) -> (FixContext, Arc<LogBox>) {
         let log = Arc::new(LogBox::default());
         let ctx = FixContext {
@@ -299,7 +285,6 @@ impl Ctx {
     }
 }
 
-/// Panics (the test fails) when an 8-character piece of `value` shows in `text`.
 pub fn assert_no_fragment(value: &str, text: &str) {
     let chars: Vec<char> = value.chars().collect();
     for i in 0..=(chars.len() - 8) {
@@ -311,7 +296,6 @@ pub fn assert_no_fragment(value: &str, text: &str) {
     }
 }
 
-/// A 108-character token like a Claude OAuth token (fake).
 pub fn long_token() -> String {
     let alphabet: Vec<char> = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789-_"
         .chars()
@@ -322,7 +306,6 @@ pub fn long_token() -> String {
     format!("sk-ant-oat01-{body}")
 }
 
-/// A folder removed when it goes out of scope.
 pub struct TempDir(pub PathBuf);
 
 impl TempDir {
@@ -361,8 +344,6 @@ impl Drop for TempDir {
     }
 }
 
-/// The output of `xcrun simctl` the Xcode probe reads: three iPhones and an iPad under iOS, an
-/// Apple TV under tvOS.
 pub const SIMCTL_OK: &str = r#"Xcode 26.1
 @@runtimes
 iOS 26.5 (26.5 - 23F77) - com.apple.CoreSimulator.SimRuntime.iOS-26-5

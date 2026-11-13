@@ -1,6 +1,3 @@
-//! Ported from `MachinesMorningTests.swift`: the actions that write to GitHub through `gh`, and
-//! the registration checks every action makes first.
-
 use std::sync::Arc;
 
 use super::actions::{MergeFunction, MorningActions};
@@ -9,8 +6,6 @@ use super::merge::MergeOutcome;
 use super::morning::{MorningItem, MorningKind};
 use super::runner::CommandResult;
 use super::tests_actions::{actions, item, item_of, m1, plan, silent, REPO};
-
-// gh actions
 
 #[test]
 fn send_back_labels_and_prefix() {
@@ -141,8 +136,6 @@ fn unknown_machine_is_an_error_not_a_crash() {
     assert!(a.running().is_empty());
 }
 
-/// An issue number from a machine's status that is not a positive integer would read as an option
-/// to `gh` (`-5`); no action writes with it.
 #[test]
 fn an_issue_number_that_is_not_positive_never_reaches_gh() {
     for n in [0, -1, -5] {
@@ -178,7 +171,6 @@ fn an_issue_number_that_is_not_positive_never_reaches_gh() {
     }
 }
 
-/// A card for a repo this machine is not registered for gets no issue write at all.
 #[test]
 fn every_action_checks_the_repo_against_the_machines_registered_repos() {
     let foreign = |kind| item_of(kind, "evil/other", 7);
@@ -234,7 +226,6 @@ fn every_action_checks_the_repo_against_the_machines_registered_repos() {
     assert!(runner.calls().is_empty());
 }
 
-/// A repo name that tries to carry another `gh` flag is just an unregistered repo.
 #[test]
 fn a_repo_that_carries_a_flag_is_not_registered() {
     let runner = silent();

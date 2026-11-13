@@ -70,7 +70,6 @@ class DecideTests(unittest.TestCase):
         self.assertEqual(MAINTAINERS, frozenset({"dtthaison"}))
         self.assertTrue(approved_head([rev("TrietKun", "APPROVED", H)], H, frozenset({"TrietKun"})))
 
-    # I5: a dismissed review is still that maintainer's latest word.
     def test_decide_dismissed_changes_request_does_not_revive_older_approval(self):
         self.assertFalse(decide(R, [rev("dtthaison", "APPROVED", H, t=1),
                                     rev("dtthaison", "CHANGES_REQUESTED", H, t=2),
@@ -124,8 +123,6 @@ class NeedsMaintainerTests(unittest.TestCase):
 
 
 def commit_exact(repo, files):
-    """Commit paths that differ only by case, through plumbing: a case-insensitive disk (macOS)
-    can't hold both in a working tree."""
     git(repo, "config", "core.ignorecase", "false")
     for path, text in files.items():
         blob = subprocess.run(["git", "-C", str(repo), "hash-object", "-w", "--stdin"], input=text.encode(),
@@ -136,7 +133,6 @@ def commit_exact(repo, files):
 
 
 class CaseCollisionTests(unittest.TestCase):
-    """I2: on a Mac a path that differs only by case (or normalization) is another file's path."""
 
     def test_file_beside_a_file_of_another_case(self):
         self.assertEqual(case_collisions(["legacy/macos/Tests/NotchlingTests/chattests.swift"],

@@ -1,23 +1,13 @@
-//! Finding a session's transcript file, for Chat and the notch alike (`TranscriptReader.path(for:)`):
-//! the job's own file followed past `/clear`, else Claude Code's project folder for its working
-//! directory, else any project folder. A terminal session has no `linkScanPath`, so it always takes
-//! the project-folder search.
-
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use notchling_engine::sessions::Agent;
 use notchling_engine::transcript::locate::{find_transcript, successor};
 
-/// A row without a transcript yet isn't searched for again sooner than this (ms): the search looks
-/// in every project folder.
 pub const MISS_RETRY: i64 = 30_000;
 
-/// Finds transcripts, remembering which rows had none so a poll doesn't walk every project folder
-/// for them each time.
 #[derive(Clone, Debug, Default)]
 pub struct Locator {
-    /// A fixture root: a relative path in a job's state belongs to it.
     base: Option<PathBuf>,
     missed: HashMap<String, i64>,
 }
@@ -30,8 +20,6 @@ impl Locator {
         }
     }
 
-    /// The row's transcript under `projects` (`<claude dir>/projects`); `None` for a command job,
-    /// which has none, and for a row whose file isn't there (yet). `now_ms` is the clock.
     pub fn find(&mut self, agent: &Agent, projects: &Path, now_ms: i64) -> Option<PathBuf> {
         if agent.command.is_some() {
             return None;
@@ -52,8 +40,6 @@ impl Locator {
         {
             return None;
         }
-        // A session that entered a worktree mid-run has its file moved to the worktree's project
-        // folder while the job's state still names the old place: look for that file by name.
         let moved = agent
             .transcript_path
             .as_deref()
@@ -70,13 +56,11 @@ impl Locator {
         found.map(PathBuf::from)
     }
 
-    /// Forgets the misses of rows that are gone.
     pub fn retain(&mut self, agents: &[Agent]) {
         self.missed
             .retain(|id, _| agents.iter().any(|a| &a.id == id));
     }
 
-    /// Whether the row's last search found nothing and is still waiting out [`MISS_RETRY`].
     pub fn has_missed(&self, id: &str) -> bool {
         self.missed.contains_key(id)
     }
@@ -151,7 +135,6 @@ mod tests {
         assert_eq!(locator.find(&row, &projects, 1_000), None);
         assert!(locator.has_missed("late"));
 
-        // The file appears, but the row is not searched for again yet.
         let file = projects.join("-work-app/late.jsonl");
         std::fs::write(&file, "{}\n").unwrap();
         assert_eq!(locator.find(&row, &projects, 1_000 + MISS_RETRY - 1), None);

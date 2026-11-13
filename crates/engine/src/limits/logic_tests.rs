@@ -1,5 +1,3 @@
-//! Port of `LimitLogicTests` and the logic half of `ProviderLimitsTests`.
-
 use super::logic::*;
 use super::report::{Bar, BarKind, Group, UsageReport};
 use super::usage::UsageWindow;

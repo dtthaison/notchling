@@ -1,6 +1,3 @@
-//! The limits on what the Antigravity ops take and give: the 1 MiB line, the message cap, the
-//! summaries copy shared for a moment, a new session's folder, and acting turned off under them.
-
 use super::*;
 
 #[test]
@@ -17,8 +14,6 @@ fn the_session_list_shares_one_copy_of_the_database_for_a_few_seconds() {
     let copy = rig.copies.join("summaries.db");
     assert!(copy.is_file(), "the copy is made in the daemon's folder");
     let made = std::fs::metadata(&copy).unwrap().modified().unwrap();
-    // A row Antigravity writes now is not seen until the copy is remade; asking again (the list,
-    // the index and a folder lookup all do) does not copy the database and its WAL again.
     let db = Connection::open(rig.root.join(summaries::DB_NAME)).unwrap();
     db.execute(
         "INSERT INTO conversation_summaries SELECT 'later', title, preview, workspace_uris, status, \
@@ -39,7 +34,6 @@ fn the_session_list_shares_one_copy_of_the_database_for_a_few_seconds() {
 
 #[test]
 fn a_long_conversation_comes_back_as_its_newest_items_and_says_so() {
-    // A session of 1,500 exchanges of 1 KB each: 3 MB of conversation, over the 1 MiB line.
     let responder: notchling_engine::tools::acp::fake::Responder =
         Arc::new(|m: &Value, p: &FakeHandle| {
             let reply =
@@ -88,7 +82,6 @@ fn a_long_conversation_comes_back_as_its_newest_items_and_says_so() {
         matches!(&last.kind, notchling_engine::transcript::model::ItemKind::Assistant { text } if text.starts_with("answer 1499")),
         "the newest item is kept"
     );
-    // A short one says it was not cut.
     let short = rig_with(true, FakeSpawner::replaying(RECORDING), Some("/fake/agy"));
     short.loaded();
     let read = short.call(CONVERSATION, json!({"id": ROW})).unwrap();
@@ -100,8 +93,6 @@ fn a_long_conversation_comes_back_as_its_newest_items_and_says_so() {
 fn a_permission_with_a_huge_edit_goes_out_trimmed_in_its_events_and_lists() {
     let rig = rig(true);
     let process = rig.loaded();
-    // About 900 KB of new text: it passes the 1 MiB line the agent's output is read in, and is far
-    // over what a card, an event or `prompts.list` may carry.
     let new: String = (0..15_000)
         .map(|i| format!("line {i} {}\n", "z".repeat(50)))
         .collect();
@@ -126,10 +117,8 @@ fn a_permission_with_a_huge_edit_goes_out_trimmed_in_its_events_and_lists() {
     let listed = rig.ops.prompts();
     assert_eq!(listed.len(), 1);
     assert!(listed[0].to_string().len() < limit);
-    // The state read carries the same trimmed card.
     let state = rig.call(STATE, json!({"id": ROW})).unwrap();
     assert!(state["permission"].to_string().len() < limit);
-    // It can still be answered by its ids.
     let answer = rig
         .call(
             PERMISSION,
@@ -154,12 +143,10 @@ fn a_message_over_the_cap_is_refused_before_anything_starts() {
         assert!(message.contains("KB"), "{message}");
     }
     assert!(rig.spawner.calls().is_empty(), "no agy was started");
-    // At the cap it goes.
     let fits = "x".repeat(MAX_PROMPT_BYTES);
     rig.call(SEND, json!({"id": ROW, "text": fits})).unwrap();
 }
 
-/// An agent that starts a session `fresh-1` and ends every turn at once.
 fn new_session_responder() -> notchling_engine::tools::acp::fake::Responder {
     Arc::new(|m: &Value, p: &FakeHandle| {
         let reply =
@@ -187,7 +174,6 @@ fn a_new_session_never_starts_in_the_root_or_the_home_folder() {
         assert_eq!(code, ErrorCode::BadRequest, "{folder}");
         assert!(message.contains("root or the home"), "{message}");
     }
-    // A link to the home is the home.
     #[cfg(unix)]
     {
         let link = rig.folder.join("home-link");
@@ -200,7 +186,6 @@ fn a_new_session_never_starts_in_the_root_or_the_home_folder() {
         assert!(message.contains("root or the home"), "{message}");
     }
     assert!(rig.spawner.calls().is_empty());
-    // A folder inside the home is fine.
     let inside = home.join("project");
     std::fs::create_dir_all(&inside).unwrap();
     rig.call(
@@ -213,8 +198,6 @@ fn a_new_session_never_starts_in_the_root_or_the_home_folder() {
 
 #[test]
 fn a_draft_that_loses_the_race_with_acting_off_spawns_nothing_more() {
-    // `session/new` is answered, and acting goes off as the reply is made; the first message must
-    // not reopen the session it would be sent to.
     let setup = setup(true, &[], json!([]));
     let acting = setup.ops.acting_switch();
     let flip = acting.clone();
@@ -281,7 +264,6 @@ fn turning_acting_off_closes_every_session_and_cancels_what_waited() {
         assert!(Instant::now() < end, "no permission came");
         std::thread::sleep(Duration::from_millis(5));
     }
-    // prompts.list shows it beside the hook's.
     let listed = setup
         .ops
         .call(&app(), ops::PROMPTS_LIST, &json!({}))

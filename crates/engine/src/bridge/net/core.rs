@@ -1,7 +1,3 @@
-//! `BridgeCore` for the transport: the bridge folder's stores, the router and hub over them, and
-//! the tunnel gate. The router (E5a) answers every frame, `hello` and `pair` included; the stores
-//! are its [`Devices`](crate::bridge::backend::Devices), pairing codes, rate limiter and audit log.
-
 use super::access::{AccessConfigStore, TunnelGate};
 use super::audit::{AuditEntry, AuditLog};
 use super::devices::{DeviceStore, PairedDevice, StoreError};
@@ -13,15 +9,11 @@ use crate::bridge::{BridgeBackend, Connection, ConnectionIo, Hub, Router, Router
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-/// What the router needs beyond the bridge folder.
 #[derive(Clone)]
 pub struct CoreParts {
     pub backend: Arc<dyn BridgeBackend>,
-    /// `session.new` opens only folders inside it.
     pub home: PathBuf,
-    /// Where phone photos are saved.
     pub images_dir: PathBuf,
-    /// Fetches Cloudflare Access's keys.
     pub fetch: Fetch,
     pub now: Clock,
 }
@@ -41,8 +33,6 @@ pub struct Core {
 }
 
 impl Core {
-    /// Over the bridge folder (`AgentConsole/bridge`). Reads its files; writes only when a phone
-    /// pairs, is seen or is revoked, or an op is audited.
     pub fn new(bridge_dir: &Path, parts: CoreParts) -> Core {
         let now = parts.now;
         let limiter = Arc::new(AuthRateLimiter::new());
@@ -100,7 +90,6 @@ impl Core {
         (self.now)()
     }
 
-    /// A client got through the upgrade (and, for the tunnel, the Access check).
     pub fn connect(
         &self,
         address: &str,
@@ -113,24 +102,19 @@ impl Core {
         self.hub.connect(address, is_tunnel, io)
     }
 
-    /// One text frame. Blocks (a `pair` waits for the person at the computer).
     pub fn handle(&self, connection: &Arc<Connection>, text: &str) {
         self.router.handle(connection, text);
     }
 
-    /// The connection is gone.
     pub fn closed(&self, connection: &Arc<Connection>) {
         self.router.closed(connection);
     }
 
-    /// Bridge-off has begun: from now on nothing under the bridge folder is written, whatever was
-    /// already on its way (a `hello`, a `pair` approved just before, a revoke).
     pub fn halt(&self) {
         self.devices.halt();
         self.audit.halt();
     }
 
-    /// The 300 ms push: what changed goes to every subscriber.
     pub fn tick(&self) {
         self.router.sweep_uploads();
         self.hub.tick(self.backend.as_ref());
@@ -140,12 +124,10 @@ impl Core {
         self.hub.all().len()
     }
 
-    /// When a client last got in through the tunnel (`None`: not since the bridge started).
     pub fn last_tunnel_connection(&self) -> Option<i64> {
         *lock(&self.last_tunnel)
     }
 
-    /// Removes the device and drops its live connections. Its token stops working at once.
     pub fn revoke(&self, device_id: &str) -> Result<Option<PairedDevice>, StoreError> {
         let Some(removed) = self.devices.revoke(device_id)? else {
             return Ok(None);

@@ -1,22 +1,3 @@
-//! `notchling secrets [words]`, `notchling secret <a,b> -- <command…>` and `notchling
-//! secret-request <name> [--kind --url --note --how --expires YYYY-MM-DD --reason]`: the Swift
-//! app's `--secrets`, `--secret` and `--secret-request`, run by agents. Each also takes
-//! `--socket <path>` (before `--` for `secret`).
-//!
-//! None of them touches the Keychain or a vault file: they ask the daemon's vault service, which
-//! answers only while the `vault` switch is on. Output and exit codes are the Swift command's:
-//!
-//! - `secrets [--json]`: the entries that fit, best first (0); none saved or none fits (1). With
-//!   `--json`, one JSON value on stdout ([`find_json`]), the same exit codes; errors stay text on
-//!   stderr.
-//! - `secret`: the command's own exit code; the user denied it (3); anything else (2). One
-//!   argument after `--` runs through `/bin/sh -c`. Output comes back with values hidden.
-//! - `secret-request`: `Saved.`, the entry and how to use it (0); the user cancelled (1);
-//!   anything else (2).
-//!
-//! One difference from the Swift text: it names `notchling secret`/`secret-request` where the
-//! Swift text says `Notchling --secret`/`--secret-request`.
-
 use crate::layout::Layout;
 use notchling_engine::vault::list::describe;
 use notchling_engine::vault::{expiry, runner, Kind, VaultEntry, VaultRequest};
@@ -27,13 +8,11 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::time::Duration;
 
-/// How long `secret` and `secret-request` wait for the daemon: past its own waits for the user.
 const USE_TIMEOUT: Duration = Duration::from_secs(300 + 15);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(540 + 15);
 
 pub const REQUEST_USAGE: &str = "Usage: notchling secret-request <name> [--kind token|login] [--url <url>] [--note <what for>] [--how <steps to get or renew it>] [--expires YYYY-MM-DD] [--reason <why now>]";
 
-/// The three commands' usage, for a `secret` that can't run.
 pub fn usage() -> String {
     format!(
         "Usage: notchling secret <name>[,<name>…] -- <command> [args…]   (one argument runs through sh -c)\n       notchling secrets [url | host | words]\n       {}",
@@ -41,7 +20,6 @@ pub fn usage() -> String {
     )
 }
 
-/// `secret`'s arguments.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct UseArgs {
     pub names: Vec<String>,
@@ -78,8 +56,6 @@ pub fn parse_use(args: &[String]) -> Result<UseArgs, String> {
     })
 }
 
-/// `secret-request`'s arguments: the request and the socket. `--note` and `--how` keep their
-/// newlines.
 pub fn parse_request(args: &[String]) -> Result<(VaultRequest, Option<PathBuf>), String> {
     let Some(name) = args.first().filter(|a| !a.starts_with("--")) else {
         return Err(REQUEST_USAGE.to_string());
@@ -133,7 +109,6 @@ pub fn parse_request(args: &[String]) -> Result<(VaultRequest, Option<PathBuf>),
     Ok((request, socket))
 }
 
-/// `secrets`' words, socket and `--json`.
 pub fn parse_find(args: &[String]) -> (String, Option<PathBuf>, bool) {
     let mut words = Vec::new();
     let mut socket = None;
@@ -151,7 +126,6 @@ pub fn parse_find(args: &[String]) -> (String, Option<PathBuf>, bool) {
     (words.join(" "), socket, json)
 }
 
-/// The command as the approval shows it: one argument as it is, several quoted for a shell.
 pub fn shown(command: &[String]) -> String {
     if let [one] = command {
         return one.clone();
@@ -177,7 +151,6 @@ fn entries(reply: &Value, key: &str) -> Vec<VaultEntry> {
         .unwrap_or_default()
 }
 
-/// What `secrets` prints for the daemon's `vault.find` reply: (exit code, stdout).
 pub fn find_report(reply: &Value, query: &str, today: i64) -> (i32, String) {
     let saved: Vec<String> = reply
         .get("saved")
@@ -201,11 +174,6 @@ pub fn find_report(reply: &Value, query: &str, today: i64) -> (i32, String) {
     (0, text.join("\n"))
 }
 
-/// What `secrets --json` prints for the daemon's `vault.find` reply: (exit code, the JSON value).
-/// `{"query", "saved": [names of every secret], "entries": [the ones that fit, best first]}`; an
-/// entry is the list's part of a secret (`name`, `kind`, `url`, `note`, `howTo`, `expires`, `ask`,
-/// `secretVar`, `userVar`, `updated`) and never a value: the reply is read through [`VaultEntry`],
-/// which has no field for one. The exit code is `find_report`'s.
 pub fn find_json(reply: &Value, query: &str) -> (i32, Value) {
     let saved: Vec<String> = reply
         .get("saved")
@@ -224,7 +192,6 @@ pub fn find_json(reply: &Value, query: &str) -> (i32, Value) {
     )
 }
 
-/// What `secret-request` prints for a saved entry.
 pub fn saved_report(entry: &VaultEntry, today: i64) -> String {
     let vars: Vec<String> = entry
         .all_variables()
@@ -247,7 +214,6 @@ fn today() -> i64 {
     expiry::today_local(now)
 }
 
-/// One call to the vault service; the error is the text to print and the exit code.
 fn ask(
     socket: Option<&std::path::Path>,
     op: &str,
@@ -282,7 +248,6 @@ fn ask(
     })
 }
 
-/// `notchling secrets [words]`.
 pub fn secrets(args: &[String]) -> i32 {
     let (query, socket, json) = parse_find(args);
     let reply = ask(
@@ -313,7 +278,6 @@ pub fn secrets(args: &[String]) -> i32 {
     }
 }
 
-/// `notchling secret <a,b> -- <command…>`.
 pub fn secret(args: &[String]) -> i32 {
     let parsed = match parse_use(args) {
         Ok(p) => p,
@@ -352,7 +316,6 @@ pub fn secret(args: &[String]) -> i32 {
     runner::run(&parsed.command, &env, &hide, &mut out, &mut err)
 }
 
-/// `notchling secret-request <name> [...]`.
 pub fn secret_request(args: &[String]) -> i32 {
     let (request, socket) = match parse_request(args) {
         Ok(p) => p,

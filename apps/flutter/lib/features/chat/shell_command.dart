@@ -1,12 +1,6 @@
-/// A reply starting with "!" runs as a shell command in the session, as in Claude Code's prompt. Commands are often
-/// copied from Claude's answer in a terminal, which wraps long lines and indents each continuation; pasted as is,
-/// the shell would run the pieces separately. Same rules as the Mac's `ShellCommand` (Sources/Notchling/Agents).
 abstract final class ShellCommand {
-  /// Sending trims leading spaces, so "  !ls" runs too.
   static bool isCommand(String text) => text.trimLeft().startsWith('!');
 
-  /// The command as it should run, still starting with "!". Text that is not a command comes back as is.
-  /// Running it twice changes nothing.
   static String normalize(String text) {
     if (!isCommand(text)) return text;
     String body = text.trimLeft().substring(1);

@@ -1,7 +1,3 @@
-//! The vault while a Keychain read waits (on macOS it can wait on the user's prompt for as long
-//! as the prompt stays up): turning the vault off answers at once, and a use that was reading
-//! answers "off", never the values.
-
 use crate::acting_ops_tests::{app, FakeRoom};
 use crate::switches::{SwitchOps, Switches};
 use crate::vault_ops::VaultOps;
@@ -15,7 +11,6 @@ use std::time::Duration;
 
 const TOKEN: &str = "fake-token-value-0003";
 
-/// An item whose reads wait for the test while `armed`.
 #[derive(Clone)]
 struct GatedItem {
     data: Arc<Mutex<Option<Vec<u8>>>>,
@@ -97,7 +92,6 @@ fn turning_the_vault_off_never_waits_for_a_keychain_read_and_the_use_answers_off
             &json!({"entry": {"name": "gh", "kind": "token"}, "value": {"secret": TOKEN}}),
         )
         .unwrap();
-    // Off and on again: the saved value is no longer in memory, so the use reads the item.
     set_vault(&switch_ops, false);
     set_vault(&switch_ops, true);
     item.armed.store(true, Ordering::SeqCst);
@@ -132,7 +126,6 @@ fn turning_the_vault_off_never_waits_for_a_keychain_read_and_the_use_answers_off
     let e = used.expect_err("the vault went off during the read: no values");
     assert_eq!(e.code, ErrorCode::Forbidden, "{}", e.message);
     assert!(!format!("{e:?}").contains(TOKEN));
-    // What the read got was not kept: on again, the next use reads the item again.
     item.armed.store(false, Ordering::SeqCst);
     set_vault(&switch_ops, true);
     let reads = *item.reads.lock().unwrap();

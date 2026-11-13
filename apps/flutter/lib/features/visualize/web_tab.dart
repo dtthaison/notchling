@@ -10,13 +10,11 @@ import '../../core/net/bridge_client.dart';
 import '../../l10n/app_localizations.dart';
 import '../connection/connection.dart';
 
-/// A picture of the session's dev server (v1 is a snapshot, not an interactive page).
 class WebTab extends ConsumerStatefulWidget {
   const WebTab({super.key, required this.sessionId, this.initialUrl, this.candidates = const <String>[]});
   final String sessionId;
   final String? initialUrl;
 
-  /// Page addresses the Mac found listening, newest first: chips under the field.
   final List<String> candidates;
 
   @override
@@ -55,7 +53,6 @@ class _WebTabState extends ConsumerState<WebTab> {
       final Uint8List jpeg = await client.webSnapshot(widget.sessionId, url: url.isEmpty ? null : url, width: 600);
       if (mounted) setState(() => _image = jpeg);
     } on BridgeException catch (error) {
-      // The Mac says which server is down ("localhost:3040 không chạy trên Mac"): show that, not a generic line.
       if (mounted) {
         setState(() {
           _failed = true;

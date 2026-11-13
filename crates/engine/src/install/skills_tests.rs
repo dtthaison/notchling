@@ -10,7 +10,6 @@ struct Rig {
     roots: ToolRoots,
 }
 
-/// All three tools installed (their own folders exist), nothing in them.
 fn rig() -> Rig {
     let dir = Scratch::new("skills");
     let roots = ToolRoots {
@@ -76,9 +75,7 @@ fn skills_are_written_to_each_tool_that_is_there_and_nowhere_else() {
             .contains(text));
         assert!(dir.join(MARK).is_file());
     }
-    // Pages is Claude Code's only.
     assert!(!folder(&rig, SkillTool::Codex, "notchling-pages").exists());
-    // The mark is private, the skill is for the tool to read.
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -108,7 +105,6 @@ fn a_tool_that_is_not_installed_is_skipped_and_its_folder_is_not_made() {
         .contains("not installed"));
     apply_skills(&rig.roots, &specs(), &everything(Want::Install));
     assert!(!rig.roots.codex.exists());
-    // Removing from it is simply nothing to do.
     let gone = plan_skills(&rig.roots, &specs(), &everything(Want::Remove));
     assert!(gone
         .iter()
@@ -143,7 +139,6 @@ fn unchanged_text_is_left_and_changed_text_is_updated() {
 #[test]
 fn a_folder_we_did_not_make_is_never_written_over_or_removed() {
     let rig = rig();
-    // The user's own, and the Swift app's (its SKILL.md, no mark).
     let mine = folder(&rig, SkillTool::Claude, "notchling-vault");
     fs::create_dir_all(&mine).unwrap();
     fs::write(mine.join("SKILL.md"), "my own notes").unwrap();
@@ -203,7 +198,6 @@ fn a_link_where_the_folder_should_be_is_refused_and_its_target_untouched() {
         assert!(vault.plan.reason.as_deref().unwrap().contains("link"));
         assert_eq!(fs::read_dir(&victim).unwrap().count(), 1);
     }
-    // A skills folder that is itself a link is fine: the user keeps their skills elsewhere.
     let rig = self::rig();
     let elsewhere = rig.dir.path("shared-skills");
     fs::create_dir(&elsewhere).unwrap();
@@ -222,14 +216,11 @@ fn removing_deletes_what_we_wrote_and_nothing_the_user_added() {
     assert!(results
         .iter()
         .all(|r| r.error.is_none() && r.plan.action == Action::Remove));
-    // The user's file keeps the folder; every other folder is gone.
     assert!(vault.join("notes.md").is_file());
     assert!(!vault.join("SKILL.md").exists() && !vault.join(MARK).exists());
     assert!(!folder(&rig, SkillTool::Codex, "notchling-vault").exists());
     assert!(!folder(&rig, SkillTool::Claude, "notchling-pages").exists());
-    // The skills folder itself and the tool's own folder stay.
     assert!(rig.roots.claude.join("skills").is_dir());
-    // Again: nothing there.
     let again = plan_skills(&rig.roots, &specs(), &everything(Want::Remove));
     assert!(again
         .iter()

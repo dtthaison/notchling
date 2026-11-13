@@ -1,6 +1,3 @@
-//! Ported from `MachinesMergeTests.swift` (second half): the guards added in fix round 1, the
-//! outcome flags, retry and undo, against a scripted runner that starts nothing.
-
 use super::fakes_jobs::{bad, machine, ok, repo, RuleRunner};
 use super::merge::MergeOutcome;
 use super::runner::CommandResult;
@@ -9,8 +6,6 @@ use super::tests_merge::{
 };
 
 const AHEAD: &str = "refs/remotes/origin/main..refs/heads/main";
-
-// Guards added in fix round 1
 
 #[test]
 fn branch_switched_during_failed_check_blocks_reset() {
@@ -92,7 +87,6 @@ fn commit_added_during_check_blocks_push() {
     assert!(!any_line(&runner, |l| l.contains(" push ") || l.starts_with("gh ")));
 }
 
-/// I3: the check built a tree with an edit in it; what would be pushed is a different tree.
 #[test]
 fn local_changes_made_during_the_check_block_the_push_and_keep_the_merge_local() {
     let runner = happy(
@@ -129,7 +123,6 @@ fn local_changes_made_during_the_check_block_the_push_and_keep_the_merge_local()
         || l.contains(" reset ")));
 }
 
-/// An edit made during a failed check does not stop the reset: `--keep` leaves the edit alone.
 #[test]
 fn a_failed_check_still_puts_main_back_when_the_tree_got_dirty_meanwhile() {
     let runner = happy(
@@ -184,8 +177,6 @@ fn failed_diff_is_reported_and_labels_nothing() {
     assert_eq!(runner.lines().last(), Some(&t("merge --abort")));
 }
 
-/// The note on the issue comes from the machine's branch name and the file names git listed, and
-/// goes to `gh` as one argument after `--body`.
 #[test]
 fn a_conflict_note_is_one_argument() {
     let runner = happy(
@@ -207,16 +198,13 @@ fn a_conflict_note_is_one_argument() {
     assert!(comment[7].contains("a; touch x, --help"));
 }
 
-// Outcome flags (C17, C18)
-
 #[test]
 fn outcome_flags_decide_which_buttons_show() {
-    // (merged, checked, pushed) -> (can_retry_push, can_undo)
     let table = [
-        (false, false, false, false, false), // nothing merged
-        (true, false, false, false, true),   // merged locally, never checked: undo only
-        (true, true, false, true, true),     // checked, push failed: both
-        (true, true, true, false, false),    // pushed
+        (false, false, false, false, false),
+        (true, false, false, false, true),
+        (true, true, false, true, true),
+        (true, true, true, false, false),
         (false, true, false, false, false),
     ];
     for (merged, checked, pushed, retry, undo) in table {
@@ -239,9 +227,6 @@ fn outcome_flags_decide_which_buttons_show() {
     }
 }
 
-// Retry
-
-/// A target where the failed push left exactly one merge of this branch on top of origin/main.
 fn retry_runner(extra: Vec<(&'static str, CommandResult)>) -> RuleRunner {
     let mut rules = extra;
     rules.extend([
@@ -333,9 +318,6 @@ fn retry_push_refuses_an_issue_number_that_is_not_positive() {
     assert!(!any_line(&runner, |l| l.contains(" push ") || l.starts_with("gh ")));
 }
 
-// Undo (C18)
-
-/// A target whose main holds exactly this item's merge on top of origin.
 fn undo_runner(extra: Vec<(&'static str, CommandResult)>) -> RuleRunner {
     let mut rules = extra;
     rules.extend([

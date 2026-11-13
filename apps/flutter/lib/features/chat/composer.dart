@@ -12,9 +12,6 @@ import '../../app/widgets/motion.dart';
 import 'shell_command.dart';
 import 'slash_commands.dart';
 
-/// The input box, as the Mac's composer: a card with a hairline, accent while focused. A draft starting with `!` is a
-/// shell command (pink border, header, what will run); one starting with `/` lists matching slash commands above it.
-/// A view-only session locks it and explains why; a failed send shows the error with Thử lại.
 class Composer extends StatefulWidget {
   const Composer({
     super.key,
@@ -42,15 +39,12 @@ class Composer extends StatefulWidget {
   final SendState send;
   final bool viewOnly;
 
-  /// Set instead of the view-only sentence when the screen is a subagent transcript.
   final String? readOnlyReason;
 
-  /// What the Mac says about taking this view-only session over; null when it did not say.
   final TakeoverInfo? takeover;
   final TakeoverProgress takeoverProgress;
   final VoidCallback? onTakeover;
 
-  /// Dictation: the state to show, the mic tap, and the actions of the problem row.
   final VoiceState voice;
   final VoidCallback? onMic;
   final VoidCallback? onOpenSettings;
@@ -60,11 +54,9 @@ class Composer extends StatefulWidget {
   final VoidCallback onRetry;
   final VoidCallback onDismissError;
 
-  /// The slash commands of this session, and the folder a shell command runs in (for its header).
   final List<SlashCommand> commands;
   final String? folder;
 
-  /// Opens the photo picker; the button shows only when this is set.
   final VoidCallback? onAttach;
 
   @override
@@ -74,7 +66,6 @@ class Composer extends StatefulWidget {
 class _ComposerState extends State<Composer> {
   FocusNode? _own;
 
-  /// The commands shown last, kept so the list can fade out after the slash is gone.
   List<SlashCommand> _lastSuggestions = const <SlashCommand>[];
   FocusNode get _focus => widget.focusNode ?? (_own ??= FocusNode());
 
@@ -221,7 +212,6 @@ class _ComposerState extends State<Composer> {
             level: 2,
             fill: fill,
             radius: BorderRadius.circular(Radii.composer),
-            // Focus: a 2 px ring outside the shape in the accent (pink in shell mode); at rest only the lit edge.
             ring: shell
                 ? kit.shell.withValues(alpha: 0.7)
                 : (focused ? kit.accent.withValues(alpha: 0.55) : null),
@@ -385,7 +375,6 @@ class _ComposerState extends State<Composer> {
   }
 }
 
-/// The send button: a 44 dp accent disc with an up arrow; pink in shell mode; faint when there is nothing to send.
 class SendDisc extends StatelessWidget {
   const SendDisc({
     super.key,
@@ -458,7 +447,6 @@ class SendDisc extends StatelessWidget {
   }
 }
 
-/// Matching commands above the field: name (mono, accent) and what it does. Tap fills the field.
 class _SlashList extends StatelessWidget {
   const _SlashList({required this.commands, required this.onPick});
   final List<SlashCommand> commands;
@@ -573,8 +561,6 @@ class _LockedRow extends StatelessWidget {
   }
 }
 
-/// Replaces the dead-end "view only" sentence on a session the Mac could take over; when it cannot, the
-/// Mac's own reason is shown instead.
 class _TakeoverRow extends StatelessWidget {
   const _TakeoverRow({
     required this.info,
@@ -631,7 +617,6 @@ class _TakeoverRow extends StatelessWidget {
   }
 }
 
-/// Why dictation did not give text, with the way out (open Settings for a denied microphone).
 class _VoiceNotice extends StatelessWidget {
   const _VoiceNotice({
     required this.voice,

@@ -1,7 +1,3 @@
-//! `catalog.get` over fakes: a fake accounts store (in-memory Keychain, scripted HTTP), a temp
-//! codex home and cache file, and a spawner the test runs by hand. Nothing here reaches a real
-//! login, the network or `~/.claude`, `~/.codex` or `~/.gemini`.
-
 use crate::accounts_ops_tests::{profile, world, World, ID1, ID2};
 use crate::acting_ops_tests::{app, FakeRoom};
 use crate::catalog_ops::{CatalogService, Spawner};
@@ -26,7 +22,6 @@ const CODEX_CACHE: &str = r#"{"models":[
 
 type Job = Box<dyn FnOnce() + Send>;
 
-/// Holds what the service would have run on a thread, until the test runs it.
 #[derive(Clone, Default)]
 struct Jobs(Arc<Mutex<Vec<Job>>>);
 
@@ -56,9 +51,7 @@ struct Rig {
     room: Arc<FakeRoom>,
     jobs: Jobs,
     service: Arc<CatalogService>,
-    /// The service's clock, in seconds.
     clock: Arc<Mutex<f64>>,
-    /// What the service logged.
     logs: Arc<Mutex<Vec<String>>>,
 }
 
@@ -67,8 +60,6 @@ fn live_login(expires_at: Option<u64>) -> String {
     format!(r#"{{"claudeAiOauth":{{"accessToken":"test-access-1"{expiry}}}}}"#)
 }
 
-/// A service over the fake accounts, `on` or off, whose main login is `login`. The model list
-/// endpoint answers nothing until a test scripts it.
 fn rig(tag: &str, on: bool, login: &str) -> Rig {
     let chain = Arc::new(MemoryKeychain::new());
     let http = Arc::new(ScriptedHttp::new());
@@ -120,8 +111,6 @@ fn rig(tag: &str, on: bool, login: &str) -> Rig {
     }
 }
 
-/// A service over a temp folder, with no accounts and no network: the built-in data, `overrides`
-/// as the user's `catalog.json` and `live` as Claude's cached list. The folder must outlive it.
 pub(crate) fn seeded(
     tag: &str,
     live: &[LiveModel],
@@ -184,7 +173,6 @@ fn catalog_get_is_agent_tier_and_read_only() {
 #[test]
 fn catalog_get_answers_each_tool_from_its_source() {
     let r = rig("sources", true, &live_login(None));
-    // Claude's list is a day-fresh cached one, so nothing is fetched.
     r.cache().put(
         Tool::Claude,
         NOW - 100.0,
@@ -222,7 +210,6 @@ fn catalog_get_answers_each_tool_from_its_source() {
     assert_eq!(agy["models"], json!([]));
     assert_eq!(agy["fetchedAt"], Value::Null);
 
-    // Codex re-reads its cache when the file changes.
     r.tmp.write(
         "codex/models_cache.json",
         r#"{"models":[{"slug":"gpt-other","visibility":"list"}]}"#,
@@ -243,12 +230,10 @@ fn an_unknown_tool_is_invalid() {
 fn a_due_claude_list_is_fetched_once_with_the_live_token_and_never_renewed() {
     let r = rig("due", true, &live_login(None));
     r.http.answer(MODELS_URL, 200, MODELS_LIST);
-    // Nothing cached: the call answers from the data file at once and queues one fetch.
     let before = r.get("claude").unwrap();
     assert_eq!(before["fetchedAt"], Value::Null);
     assert!(!ids(&before).contains(&"claude-fable-5-3".to_string()));
     assert_eq!(r.jobs.waiting(), 1);
-    // A second call while it is queued or running starts nothing.
     r.get("claude").unwrap();
     assert_eq!(r.jobs.waiting(), 1);
     assert!(r.model_requests().is_empty(), "off the caller's thread");
@@ -264,7 +249,6 @@ fn a_due_claude_list_is_fetched_once_with_the_live_token_and_never_renewed() {
     assert_eq!(r.cache().get(Tool::Claude).unwrap().0, NOW);
     assert_eq!(r.room.named("catalog.changed"), [json!({"tool": "claude"})]);
 
-    // Within a day: the list is served from the cache and nothing more is asked.
     let after = r.get("claude").unwrap();
     assert!(ids(&after).contains(&"claude-fable-5-3".to_string()));
     assert_eq!(after["fetchedAt"], NOW);
@@ -275,8 +259,6 @@ fn a_due_claude_list_is_fetched_once_with_the_live_token_and_never_renewed() {
 #[test]
 fn an_expired_live_login_asks_for_nothing_and_a_failed_fetch_keeps_the_old_list() {
     let r = rig("expired", true, &live_login(Some(1_000)));
-    // Another saved account has an expired slot, and the token endpoint would renew it: the
-    // list fetch must never reach for it, whichever account is main.
     r.chain.put(
         SAVED_SERVICE,
         ID2,
@@ -303,7 +285,6 @@ fn an_expired_live_login_asks_for_nothing_and_a_failed_fetch_keeps_the_old_list(
     );
     assert!(r.cache().get(Tool::Claude).is_none());
 
-    // A fetch that fails leaves the cached list as it was.
     let r = rig("failed", true, &live_login(None));
     let old = [LiveModel {
         id: "claude-opus-5-5".into(),
@@ -316,14 +297,12 @@ fn an_expired_live_login_asks_for_nothing_and_a_failed_fetch_keeps_the_old_list(
     let cached = r.cache().get(Tool::Claude).unwrap();
     assert_eq!((cached.0, cached.1), (NOW - 200_000.0, old.to_vec()));
     assert!(r.room.named("catalog.changed").is_empty());
-    // And the next call does not hammer: a try that failed is not repeated for a while.
     r.get("claude").unwrap();
     assert_eq!(r.jobs.waiting(), 0);
 }
 
 #[test]
 fn nothing_is_fetched_while_the_accounts_switch_is_off() {
-    // The main login is known (the switch was on once), then the switch goes off.
     let r = rig("off", true, &live_login(None));
     r.http.answer(MODELS_URL, 200, MODELS_LIST);
     r.world.flag.set(false);
@@ -332,7 +311,6 @@ fn nothing_is_fetched_while_the_accounts_switch_is_off() {
     assert_eq!(r.jobs.waiting(), 0);
     r.jobs.run();
     assert_eq!(r.http.seen().len(), seen_before, "no request while off");
-    // Not even a store of fakes that panic is touched.
     let w = world(
         "off-panic",
         false,
@@ -360,7 +338,6 @@ impl Rig {
         *self.clock.lock().unwrap() = now;
     }
 
-    /// One `catalog.get` for Claude, running the fetch it starts.
     fn try_claude(&self) {
         self.get("claude").unwrap();
         self.jobs.run();
@@ -389,11 +366,9 @@ fn a_refused_login_is_not_asked_again_for_a_day_and_a_failure_for_15_minutes() {
     r.http.answer(MODELS_URL, 403, "");
     r.try_claude();
     assert_eq!(r.model_requests().len(), 1);
-    // An hour later, still refused: nothing is asked.
     r.at(NOW + 3_600.0);
     r.try_claude();
     assert_eq!(r.model_requests().len(), 1);
-    // A day later it is asked again; a 5xx then holds off only 15 minutes.
     r.at(NOW + 86_400.0 + 1.0);
     r.http.answer(MODELS_URL, 503, "");
     r.try_claude();
@@ -428,11 +403,9 @@ fn a_new_live_token_ends_a_refusal() {
     r.http.answer(MODELS_URL, 403, "");
     r.try_claude();
     assert_eq!(r.model_requests().len(), 1);
-    // The same token an hour later: nothing is sent.
     r.at(NOW + 3_600.0);
     r.try_claude();
     assert_eq!(r.model_requests().len(), 1);
-    // Claude Code's login now holds another token: it is sent at the next try.
     r.chain.put(
         LIVE_SERVICE,
         "me",
@@ -447,7 +420,6 @@ fn a_new_live_token_ends_a_refusal() {
     assert_eq!(r.cache().get(Tool::Claude).unwrap().0, NOW + 7_200.0);
 }
 
-/// Claude Code's main config with its own model list (the shape seen live).
 const CLAUDE_CODE_CONFIG: &str = r#"{"oauthAccount": {"emailAddress": "one@example.com"},
   "additionalModelOptionsCache": [
     {"value": "claude-fable-5-3[1m]", "label": "Fable", "description": "Fable 5.3 · Most capable"}]}"#;
@@ -458,7 +430,6 @@ fn claude_code_s_own_list_stands_in_until_anthropic_s_is_read() {
     r.tmp.write("claude-code/.claude.json", CLAUDE_CODE_CONFIG);
     let config = r.tmp.path("claude-code/.claude.json");
     let before = std::fs::read(&config).unwrap();
-    // The fetch fails: Claude Code's list is what shows, and what may start.
     r.http.answer(MODELS_URL, 401, "");
     let reply = r.get("claude").unwrap();
     r.jobs.run();
@@ -475,14 +446,12 @@ fn claude_code_s_own_list_stands_in_until_anthropic_s_is_read() {
     assert!(r.service.is_allowed(Tool::Claude, "claude-fable-5-3[1m]"));
     assert_eq!(std::fs::read(&config).unwrap(), before, "never written");
 
-    // Once Anthropic's list is read, it comes first.
     r.at(NOW + 2.0 * 86_400.0);
     r.http.answer(MODELS_URL, 200, MODELS_LIST);
     r.try_claude();
     let reply = r.get("claude").unwrap();
     assert_eq!(reply["fetchedAt"], NOW + 2.0 * 86_400.0);
 
-    // With no token at all, Claude Code's list shows too.
     let r = rig("fallback-expired", true, &live_login(Some(1_000)));
     r.tmp.write("claude-code/.claude.json", CLAUDE_CODE_CONFIG);
     r.try_claude();
@@ -514,10 +483,8 @@ fn agy_options_seen_are_cached_and_announced() {
         [json!({"tool": "antigravity"})]
     );
 
-    // The same options again change nothing, so they announce nothing.
     r.service.record_agy_options(&options);
     assert_eq!(r.room.named("catalog.changed").len(), 1);
-    // A list with no Model option is not a list: the last one stays.
     r.service.record_agy_options(&[]);
     assert_eq!(ids(&r.get("antigravity").unwrap()), ["m1", "m2"]);
 }

@@ -1,8 +1,3 @@
-// Golden images of the chat kit: a user bubble, a Claude card and the composer, light and dark.
-// Flutter's test font draws every glyph as a box, so the images match on any machine.
-// Changing a golden PNG is a protected change: it needs the maintainer.
-// Update: flutter test --update-goldens test/goldens
-
 import 'package:agent_console/app/theme/tokens.dart';
 import 'package:agent_console/core/protocol/models.dart';
 import 'package:agent_console/features/chat/chat_notifier.dart';

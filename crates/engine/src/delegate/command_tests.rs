@@ -60,7 +60,6 @@ fn a_codex_job_prints_the_header_the_session_and_the_reply() {
         ["Session: 019e-s1", "", "Looks fine."]
     );
     assert_eq!(ran.err, "");
-    // The folder defaults to the current one; read-only, so no --write.
     let spec = rig.codex.specs().remove(0);
     assert_eq!(spec.cwd, rig.folder.to_string_lossy());
     assert!(spec
@@ -292,11 +291,8 @@ fn a_timeout_longer_than_the_run_does_not_cut_it_short() {
     assert!(began.elapsed() < Duration::from_secs(5));
 }
 
-// MARK: The record a job leaves for Chat
-
 use crate::delegate::record::{self, End};
 
-/// `delegate` as called from an agent session `parent-1`, recording into the rig's folder.
 fn delegate_recorded(rig: &Rig, args: &[&str]) -> (Ran, std::path::PathBuf) {
     let dir = rig.root.join("data/delegations");
     let (mut out, mut err) = (Vec::new(), Vec::new());
@@ -420,7 +416,6 @@ fn a_trusted_folder_is_added_to_agy_and_the_command_says_so_on_stderr() {
     assert!(std::fs::read_to_string(&settings)
         .unwrap()
         .contains(&*canonical.to_string_lossy()));
-    // Nothing to say the second time.
     let mut again = Vec::new();
     trust_folder(&rig.folder.to_string_lossy(), &rig.deps, &mut again);
     assert!(again.is_empty());

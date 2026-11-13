@@ -1,5 +1,3 @@
-//! What happens to a session's permission when it ends, and how many `agy` processes are open.
-
 use super::*;
 
 #[test]
@@ -49,15 +47,12 @@ fn only_so_many_processes_are_open_at_once() {
         "{refused:?}"
     );
     assert_eq!(rig.spawner.spawned().len(), 2, "nothing was started for it");
-    // A new session needs a process too.
     assert!(matches!(
         r.start("/work", Duration::from_secs(1)),
         Err(RunError::Refused(_))
     ));
     assert_eq!(rig.spawner.spawned().len(), 2);
-    // An open session is not a new process.
     r.open("a", "/work", false).unwrap();
-    // Closing one makes room.
     r.close("a");
     r.open("c", "/work", false).unwrap();
     assert_eq!(rig.spawner.spawned().len(), 3);

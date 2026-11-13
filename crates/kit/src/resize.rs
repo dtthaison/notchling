@@ -1,17 +1,6 @@
-//! Where a resizable window's edges and corners are, as pure geometry (the cursor overlay in
-//! `ui::resize_edges` draws from it).
-//!
-//! macOS resizes a window when the mouse goes down on its border, a few points inside the frame.
-//! GPUI sets the arrow cursor after every draw, which hides AppKit's resize cursor there, so the
-//! kit lays invisible zones over the border that ask for the matching resize cursor and handle no
-//! mouse events (the drag stays AppKit's).
-
-/// Thickness of an edge zone, in points: the width of macOS' resize border.
 pub const EDGE: f32 = 4.0;
-/// Side of a corner zone, in points. Corners win over the edges they sit on.
 pub const CORNER: f32 = 10.0;
 
-/// One zone of the border.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Zone {
     Left,
@@ -24,16 +13,11 @@ pub enum Zone {
     BottomRight,
 }
 
-/// Which way the zone's resize cursor points.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Axis {
-    /// Left and right edges.
     Horizontal,
-    /// Top and bottom edges.
     Vertical,
-    /// Top left and bottom right corners (NW-SE).
     NorthWestSouthEast,
-    /// Top right and bottom left corners (NE-SW).
     NorthEastSouthWest,
 }
 
@@ -62,10 +46,6 @@ impl Zone {
         matches!(self, Zone::Top | Zone::TopLeft | Zone::TopRight)
     }
 
-    /// The zone's rectangle `(x, y, width, height)` in a window of `width` by `height`, or `None`
-    /// when `top_resizes` is false and the zone is on the top border (a titled window's top
-    /// border is its title bar, above the content, so the content has no top zones and its side
-    /// zones run to the top).
     pub fn frame(self, width: f32, height: f32, top_resizes: bool) -> Option<(f32, f32, f32, f32)> {
         if self.on_top() && !top_resizes {
             return None;
@@ -86,7 +66,6 @@ impl Zone {
     }
 }
 
-/// The zone the point `(x, y)` falls in, in a window of `width` by `height`, if any.
 pub fn zone_at(x: f32, y: f32, width: f32, height: f32, top_resizes: bool) -> Option<Zone> {
     Zone::ALL.into_iter().find(|zone| {
         zone.frame(width, height, top_resizes)
@@ -120,10 +99,8 @@ mod tests {
         assert_eq!(zone_at(EDGE, 200.0, W, H, true), None);
         assert_eq!(zone_at(400.0, EDGE, W, H, true), None);
         assert_eq!(zone_at(W / 2.0, H / 2.0, W, H, true), None);
-        // past the corner square along an edge is the edge, not the corner
         assert_eq!(zone_at(CORNER, 1.0, W, H, true), Some(Zone::Top));
         assert_eq!(zone_at(1.0, CORNER, W, H, true), Some(Zone::Left));
-        // a point inside the corner square but off both edges is still the corner
         assert_eq!(zone_at(8.0, 8.0, W, H, true), Some(Zone::TopLeft));
     }
 

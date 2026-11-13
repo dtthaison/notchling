@@ -1,6 +1,3 @@
-//! `--render kit-gallery` end to end: needs a window server, so it is ignored by default. Run it
-//! with `cargo test -p notchling-app -- --ignored` on a Mac with a display.
-
 #![cfg(target_os = "macos")]
 
 use std::collections::HashSet;
@@ -34,7 +31,6 @@ fn renders_kit_gallery_to_a_png_that_is_not_blank() {
     let info = reader.next_frame(&mut pixels).expect("PNG pixels");
     let spec = views::spec("kit-gallery").expect("the view exists");
 
-    // At least the window's size in points (the capture is at the display's scale, often 2x).
     assert!(
         info.width as f32 >= spec.size.0 && info.height as f32 >= spec.size.1,
         "{}x{} is smaller than the {}x{} window",
@@ -44,7 +40,6 @@ fn renders_kit_gallery_to_a_png_that_is_not_blank() {
         spec.size.1
     );
 
-    // Not blank: many distinct colors (surfaces, text, the orange accent, the gradients).
     let bytes_per_pixel = info.line_size / info.width as usize;
     let distinct: HashSet<&[u8]> = pixels[..info.line_size * info.height as usize]
         .chunks_exact(bytes_per_pixel)

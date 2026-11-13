@@ -1,56 +1,39 @@
-//! The Swift app's UserDefaults keys, enumerated from `legacy/macos/Sources` (every `forKey:` and
-//! `@AppStorage`, the keys held in constants, and the `migrateFromAwake` list).
-
 use serde_json::{json, Value};
 
-/// How a value is stored.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
     Bool,
     Int,
     Double,
     String,
-    /// An array of strings.
     StringList,
-    /// A dictionary (`[String: Double]` and so on).
     Dict,
-    /// Foundation `Data` holding JSON (`JSONEncoder` output). Exports carry it as base64 text; the
-    /// migration decodes it to the JSON value.
     Json,
-    /// Not read anywhere in the code; kept as given.
     Any,
 }
 
-/// What a missing key reads as.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Fallback {
-    /// Unset reads as nothing.
     None,
     Bool(bool),
     Int(i64),
     Double(f64),
     Str(&'static str),
-    /// An empty list or dictionary, by [`Kind`].
     Empty,
 }
 
-/// One setting.
 #[derive(Clone, Copy, Debug)]
 pub struct KeySpec {
     pub name: &'static str,
     pub kind: Kind,
     pub default: Fallback,
-    /// Allowed strings, when the key is an enum; empty means any.
     pub allowed: &'static [&'static str],
-    /// True when `AppDelegate.migrateFromAwake` copies it from the old `local.awake.menubar` domain.
     pub from_awake: bool,
     pub doc: &'static str,
-    /// For an integer key, the inclusive range a read stays inside (the stored value is kept as written).
     pub range: Option<(i64, i64)>,
 }
 
 impl KeySpec {
-    /// The value an unset key reads as.
     pub fn default_value(&self) -> Option<Value> {
         match (self.default, self.kind) {
             (Fallback::None, _) => None,
@@ -65,8 +48,6 @@ impl KeySpec {
 }
 
 impl KeySpec {
-    /// `value` as a read returns it: an integer key with a range is clamped into it, the way Swift's
-    /// `LimitWatcher.switchAt` reads `limitSwitchAt`. Anything else comes back as it is.
     pub fn normalize(&self, value: Value) -> Value {
         let Some((low, high)) = self.range else {
             return value;
@@ -80,8 +61,6 @@ impl KeySpec {
         }
     }
 
-    /// True when `value` is exactly what this key stores: the right JSON type and, for an enum, one of
-    /// the allowed strings.
     pub fn accepts(&self, value: &Value) -> bool {
         match self.kind {
             Kind::Bool => value.is_boolean(),
@@ -119,7 +98,6 @@ const fn key(
 }
 
 impl KeySpec {
-    /// Reads of this integer key stay in `low..=high`.
     const fn ranged(mut self, low: i64, high: i64) -> KeySpec {
         self.range = Some((low, high));
         self
@@ -147,10 +125,7 @@ const fn choice(
 use Fallback as D;
 use Kind as K;
 
-/// Every key the Swift app reads or writes (36). The spec's "30" was an estimate before the
-/// enumeration; the code has 24 migrated keys, `migratedFromAwake` and 11 more.
 pub const KEYS: &[KeySpec] = &[
-    // Migrated from the old Awake domain (the `migrateFromAwake` list, in its order).
     choice("mode", "off", &["off", "on", "whileWorking"], true, "Keep Mac Awake: off, always on, or while an agent works"),
     key("active", K::Bool, D::Bool(false), true, "Awake v1's on/off flag; read only when `mode` is unset, so the migration folds it into `mode`"),
     key("keepDisplayOn", K::Bool, D::Bool(false), true, "Keep the display on too, not only the system"),
@@ -175,7 +150,6 @@ pub const KEYS: &[KeySpec] = &[
     choice("codexLimitMode", "notify", &["off", "notify", "notifyAndSwitch"], true, "Codex limit watching"),
     choice("antigravityLimitMode", "notify", &["off", "notify", "notifyAndSwitch"], true, "Antigravity limit watching"),
     key("codexNetwork", K::Bool, D::Bool(true), true, "Open the network in Codex turns (Allow Network in Codex Turns)"),
-    // Not migrated.
     key("migratedFromAwake", K::Bool, D::Bool(false), false, "The Awake migration already ran"),
     key("chatClosedSessions", K::Dict, D::Empty, false, "Sessions closed in Chat: row id to time (seconds)"),
     key("chatUsedSessions", K::Dict, D::Empty, false, "Codex and Antigravity sessions used in Chat: row id to time (seconds)"),
@@ -191,12 +165,10 @@ pub const KEYS: &[KeySpec] = &[
     key("debugAccessCertsFile", K::String, D::None, false, "Debug builds: a file of Cloudflare Access certs (`-debugAccessCertsFile`)"),
 ];
 
-/// The spec of a key, by name.
 pub fn spec(name: &str) -> Option<&'static KeySpec> {
     KEYS.iter().find(|k| k.name == name)
 }
 
-/// The keys `migrateFromAwake` copies, in the Swift list's order.
 pub fn awake_keys() -> impl Iterator<Item = &'static KeySpec> {
     KEYS.iter().filter(|k| k.from_awake)
 }

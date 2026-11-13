@@ -1,7 +1,3 @@
-//! Ports of `TerminalScreenTests` and `TerminalKeysTests`: the screen against bytes recorded from
-//! `claude attach` on 2.1.318 (30×100): the session, then "/plugin" typed, Enter (the plugin menu),
-//! Down, Esc.
-
 mod common;
 
 use common::notchling_fixture;
@@ -98,7 +94,6 @@ fn answers_cursor_position_but_not_device_attributes() {
     );
 }
 
-/// A reply must not be typed into an open question: it would become the answer.
 #[test]
 fn sees_an_open_question() {
     let mut asking = TerminalScreen::new(50, 200);
@@ -122,8 +117,6 @@ fn resize_keeps_rows_in_place() {
     );
 }
 
-// The parts of the emulator the recordings don't reach, each pinned to the Swift code it ports.
-
 #[test]
 fn alternate_screen_restores_the_main_one_and_its_cursor() {
     let mut s = TerminalScreen::new(3, 10);
@@ -145,7 +138,7 @@ fn alternate_screen_restores_the_main_one_and_its_cursor() {
 fn scroll_region_insert_and_delete_lines() {
     let mut s = TerminalScreen::new(4, 4);
     s.feed(b"a\r\nb\r\nc\r\nd");
-    s.feed(b"\x1b[2;3r"); // rows 2..3, and the cursor goes home
+    s.feed(b"\x1b[2;3r");
     assert_eq!(s.cursor(), (0, 0));
     s.feed(b"\x1b[3;1H\n");
     assert_eq!(
@@ -223,7 +216,7 @@ fn split_utf8_and_zwj_sequences() {
         "a joiner glues the next character on"
     );
     assert_eq!(s.cells()[0][0].width, 2);
-    s.feed(&[0xE6, b'x']); // a broken sequence is dropped, the byte after it still prints
+    s.feed(&[0xE6, b'x']);
     assert_eq!(s.lines()[0], "👨\u{200D}👩x");
 }
 

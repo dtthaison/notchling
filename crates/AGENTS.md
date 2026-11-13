@@ -15,6 +15,8 @@ The Cargo workspace in `crates/` is Notchling now: a GPUI app (`notchling-app`) 
 | `kit` (`notchling-kit`) | Design kit: tokens (every system), GPUI widgets and `KitGallery` (macOS) | library | app |
 | `app` (`notchling-app`) | The GPUI app, and the Machines window | `notchling-app`, `notchling-machines` | nothing |
 
+The code has no comments, so each crate's `AGENTS.md` (`app`, `engine`, `notchlingd`, `kit`, `local-api`, `platform`, `ptyhost`) holds what a change could break without knowing it, by file. The wire shapes of the daemon's ops are in [docs/local-api-ops.md](../docs/local-api-ops.md).
+
 GPUI 0.2.2 (with `runtime_shaders`: no Metal Toolchain here) is a dependency of `kit` and `app` only under `[target.'cfg(target_os = "macos")'.dependencies]` (`LINT-GPUI-MACOS-ONLY`); everything else builds and is tested on macOS, Linux and Windows, and off macOS `notchling-app` says it isn't supported and exits 0. `[patch.crates-io]` swaps in `vendor/gpui/` (one fix, `vendor/gpui/NOTCHLING.md`). Rust 1.99.1 is pinned; `deny.toml` allows only permissive licenses (decision 0008). `app` and `kit` deny `unwrap`/`expect` outside tests. Files stay under 1,000 lines, 600 with a warning (`LINT-FILE-SIZE`): tests go in `<module>_tests.rs` or `tests_<area>.rs`.
 
 ## Build, run, test

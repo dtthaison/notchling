@@ -1,9 +1,3 @@
-//! Replace key runs only from its own click (Swift `MachinesSafetyTests`
-//! `testNoPathRunsReplaceKeyWithoutItsOwnClick`): every other way into the engine (the refreshes,
-//! the Add sheet's check, a renewed vault value, Set up all and the Deploy key's own Fix) reaches
-//! the Deploy key step and never deletes a key on GitHub or makes a new one. Nothing starts ssh or
-//! `gh`: a scripted runner answers the batched checks.
-
 use super::catalog;
 use super::engine::{Deps, SetupEngine};
 use super::engine_plan::{AdminAnswer, PlanKind};
@@ -25,8 +19,6 @@ fn reachable_text(m: &Machine) -> &'static str {
     }
 }
 
-/// Answers Reachable with the machine's facts and every other probe and call with an empty
-/// success, recording each.
 fn reachable_runner(m: &Machine) -> Arc<ScriptedRunner> {
     let runner = ScriptedRunner::new();
     let text = reachable_text(m);

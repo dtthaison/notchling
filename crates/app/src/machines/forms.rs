@@ -1,8 +1,3 @@
-//! The Add machine and sd worker job sheets as typed state (Swift `AddMachineSheet`, `JobSheet`):
-//! which field has the focus, the text in each, and what the sheet's buttons may do. The checks
-//! are the engine's (`machines::forms`); typing goes through the notch's `type_key`, so no control
-//! character ever gets in.
-
 use notchling_engine::machines::forms::{
     job_problems, machine_problems, JobDraft, JobRepoDraft, KIND_CHOICES,
 };
@@ -10,7 +5,6 @@ use notchling_engine::machines::forms::{
 use super::pieces::DraftCheck;
 use crate::notch::answer::{type_key, Typed};
 
-/// A field of the Add sheet.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AddField {
     Name,
@@ -48,20 +42,17 @@ impl AddField {
 
 pub const ADD_INTRO: &str = "Name it (m1), give its Tailscale name or address, and the user the worker runs as. Check only reads from the machine.";
 
-/// The Add machine sheet.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct AddForm {
     pub name: String,
     pub host: String,
     pub user: String,
     pub focus: Option<AddField>,
-    /// The last Check, for the fields as they were then.
     pub check: Option<DraftCheck>,
     pub checking: bool,
     pub error: Option<String>,
 }
 
-/// Printable text only: a paste can't carry a control character into a field.
 fn printable(text: &str) -> String {
     text.chars().filter(|c| !c.is_control()).collect()
 }
@@ -94,8 +85,6 @@ impl AddForm {
         vec![self.name.clone(), self.host.clone(), self.user.clone()]
     }
 
-    /// A key in the focused field. A change drops the last Check and error, since they were for
-    /// other details; Tab moves on; Return is the caller's (Check, or Add once checked).
     pub fn type_key(&mut self, key: &str, key_char: Option<&str>, modified: bool) -> Typed {
         if key == "tab" {
             self.focus = Some(self.focus.map_or(AddField::Name, AddField::next));
@@ -123,7 +112,6 @@ impl AddForm {
         self.error = None;
     }
 
-    /// The problems shown under the fields: none while nothing is typed yet.
     pub fn problems(&self, existing: &[String]) -> Vec<String> {
         if self.name.is_empty() && self.host.is_empty() && self.user.is_empty() {
             return Vec::new();
@@ -142,7 +130,6 @@ impl AddForm {
         self.form_ok(existing) && !self.checking && can_add
     }
 
-    /// Add: only after a Check found the machine reachable, for these same details.
     pub fn can_add(&self, existing: &[String], can_add: bool) -> bool {
         self.check
             .as_ref()
@@ -152,7 +139,6 @@ impl AddForm {
             && !self.checking
     }
 
-    /// A Check came back; kept only when the fields are still what it was made for.
     pub fn checked(&mut self, check: DraftCheck) {
         self.checking = false;
         if check.inputs == self.inputs() {
@@ -161,7 +147,6 @@ impl AddForm {
     }
 }
 
-/// A field of one repository row of the job sheet.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RepoField {
     Github,
@@ -201,7 +186,6 @@ impl RepoField {
     }
 }
 
-/// A field of the job sheet.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum JobField {
     Repo(usize, RepoField),
@@ -211,7 +195,6 @@ pub enum JobField {
 pub const HEALTH_PLACEHOLDER: &str = "https://example.com/health (optional)";
 pub const ALL_REPOS_NOTE: &str = "Token scope then accepts other private repos. The token still needs Issues read/write only and no code access.";
 
-/// The sd worker job sheet.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct JobForm {
     pub draft: JobDraft,
@@ -263,7 +246,6 @@ impl JobForm {
         }
     }
 
-    /// Every field in sheet order, for Tab.
     fn fields(&self) -> Vec<JobField> {
         let mut out = Vec::new();
         for i in 0..self.draft.repos.len() {
@@ -340,7 +322,6 @@ impl JobForm {
         self.draft.token_all_repos = !self.draft.token_all_repos;
     }
 
-    /// The first three problems, shown under the fields.
     pub fn problems(&self) -> Vec<String> {
         job_problems(&self.draft).into_iter().take(3).collect()
     }
@@ -392,11 +373,9 @@ mod tests {
         f.checking = true;
         f.checked(check);
         assert!(f.can_add(&existing, true));
-        // a change drops the check
         f.type_key("backspace", None, false);
         assert_eq!(f.check, None);
         assert!(!f.can_add(&existing, true));
-        // a check for other details is dropped
         let stale = DraftCheck {
             reachable: true,
             inputs: vec!["x".into(), "y".into(), "z".into()],
@@ -443,7 +422,6 @@ mod tests {
         assert!(!f.has_kind("ios"));
         f.toggle_all_repos();
         assert!(f.draft.token_all_repos);
-        // Tab from the last repo field reaches Health, then wraps
         f.focus = Some(JobField::Repo(0, RepoField::VerifySkill));
         f.type_key("tab", None, false);
         assert_eq!(f.focus, Some(JobField::Health));

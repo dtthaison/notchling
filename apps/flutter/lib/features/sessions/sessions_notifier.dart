@@ -25,8 +25,6 @@ class SessionsState {
   }
 }
 
-/// Sessions grouped the way the list shows them, in the order Cần input, Đang chạy, Xong, Đã thoát.
-/// `query` filters by name, project and subagent text; newest activity first inside a group.
 Map<SessionState, List<Session>> groupSessions(List<Session> sessions, {String query = ''}) {
   final String needle = query.trim().toLowerCase();
   bool matches(Session s) =>
@@ -51,7 +49,6 @@ Map<SessionState, List<Session>> groupSessions(List<Session> sessions, {String q
 
 final NotifierProvider<SessionsNotifier, SessionsState> sessionsProvider = NotifierProvider<SessionsNotifier, SessionsState>(SessionsNotifier.new);
 
-/// The live session list: loaded when the link comes up, then kept current by the Mac's pushes.
 class SessionsNotifier extends Notifier<SessionsState> {
   @override
   SessionsState build() {
@@ -85,7 +82,6 @@ class SessionsNotifier extends Notifier<SessionsState> {
     }
   }
 
-  /// Pull to refresh, and the retry button.
   Future<void> refresh() async {
     final BridgeClient? client = ref.read(bridgeClientProvider);
     if (client == null) return;
@@ -97,8 +93,6 @@ class SessionsNotifier extends Notifier<SessionsState> {
 final NotifierProvider<SelectedSessionRefNotifier, SessionRef?> selectedSessionProvider =
     NotifierProvider<SelectedSessionRefNotifier, SessionRef?>(SelectedSessionRefNotifier.new);
 
-/// The picked session and the computer it is on. Picking one makes its computer the one in use, so Chat and
-/// Visualize show it; ops on it go to that computer's client and no other (decision 0012).
 class SelectedSessionRefNotifier extends Notifier<SessionRef?> {
   @override
   SessionRef? build() => null;
@@ -115,8 +109,6 @@ class SelectedSessionRefNotifier extends Notifier<SessionRef?> {
 final NotifierProvider<SelectedSessionNotifier, String?> selectedSessionIdProvider =
     NotifierProvider<SelectedSessionNotifier, String?>(SelectedSessionNotifier.new);
 
-/// The picked session's bare id, for the Chat and Visualize tabs, which talk to the computer in use. Null while
-/// the pick is on another computer, so a bare id never reaches the wrong one. Sends go to exactly this id.
 class SelectedSessionNotifier extends Notifier<String?> {
   @override
   String? build() {
@@ -125,7 +117,6 @@ class SelectedSessionNotifier extends Notifier<String?> {
     return picked != null && picked.host == host ? picked.id : null;
   }
 
-  /// Picks [id] on the computer in use.
   void select(String? id) => ref
       .read(selectedSessionProvider.notifier)
       .select(id == null ? null : SessionRef(ref.read(macsProvider).active?.id ?? '', id));

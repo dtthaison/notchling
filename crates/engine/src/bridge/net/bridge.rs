@@ -1,12 +1,3 @@
-//! `BridgeController`: the switch and what the app asks of the bridge.
-//!
-//! Off is the start state. While off the bridge binds no port and writes nothing under the data
-//! folder; it reads `devices.json` and `access.json` only when asked for them. On loads the Swift
-//! app's identity (never making one), opens the stores and binds both ports; a busy port is an
-//! error, never a reason to pick another, since phones and the QR rely on the port.
-//!
-//! The replies are the shapes the desktop app's pairing panel reads (`crates/app/src/phone/wire.rs`).
-
 use super::access::AccessConfig;
 use super::address::LocalAddresses;
 use super::core::{Core, CoreParts};
@@ -23,28 +14,21 @@ use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
-/// How often the hub pushes what changed (Swift `BridgeHub`'s timer).
 pub const TICK: Duration = Duration::from_millis(300);
 
 #[derive(Clone, Debug)]
 pub struct BridgeConfig {
-    /// `AgentConsole` (the bridge's files are in its `bridge/`).
     pub data_dir: PathBuf,
     pub lan: SocketAddr,
     pub tunnel: SocketAddr,
-    /// The computer's name in the QR.
     pub name: String,
-    /// The `.local` name offered after the addresses.
     pub local_host: Option<String>,
     pub limits: Limits,
-    /// `session.new` opens only folders inside it.
     pub home: PathBuf,
-    /// Where phone photos are saved (`~/Library/Caches/AgentConsole/phone-images` on the Mac).
     pub images_dir: PathBuf,
 }
 
 impl BridgeConfig {
-    /// The defaults: every interface on 47821, loopback on 47822.
     pub fn new(data_dir: PathBuf, home: PathBuf, images_dir: PathBuf) -> BridgeConfig {
         let host = host_name();
         BridgeConfig {
@@ -68,7 +52,6 @@ impl BridgeConfig {
         }
     }
 
-    /// The same folders on other ports (0: any free one, for tests).
     pub fn with_ports(mut self, lan: u16, tunnel: u16) -> BridgeConfig {
         self.lan.set_port(lan);
         self.tunnel.set_port(tunnel);
@@ -80,7 +63,6 @@ impl BridgeConfig {
     }
 }
 
-/// Dual-stack where the OS makes `::` take IPv4 too; Windows' `::` is IPv6 only.
 fn default_lan_ip() -> IpAddr {
     if cfg!(windows) {
         IpAddr::V4(Ipv4Addr::UNSPECIFIED)
@@ -133,7 +115,6 @@ pub struct Bridge {
 }
 
 impl Bridge {
-    /// Off.
     pub fn new(
         config: BridgeConfig,
         backend: Arc<dyn BridgeBackend>,
@@ -157,7 +138,6 @@ impl Bridge {
         matches!(*self.lock(), State::On(_))
     }
 
-    /// The running stores, for the router (`None` while off).
     pub fn core(&self) -> Option<Arc<Core>> {
         match &*self.lock() {
             State::On(running) => Some(running.core.clone()),
@@ -165,15 +145,12 @@ impl Bridge {
         }
     }
 
-    /// The first step of bridge-off, before anything is refused or stopped: from here on nothing
-    /// in flight writes under the bridge folder ([`Core::halt`]).
     pub fn halt(&self) {
         if let Some(core) = self.core() {
             core.halt();
         }
     }
 
-    /// The bound (LAN, tunnel) ports while on.
     pub fn ports(&self) -> Option<(u16, u16)> {
         match &*self.lock() {
             State::On(r) => Some((r.lan.port(), r.tunnel.port())),
@@ -181,7 +158,6 @@ impl Bridge {
         }
     }
 
-    /// `bridge.set {on}`: the status after.
     pub fn set(&self, on: bool) -> Value {
         let mut state = self.lock();
         match (on, &*state) {
@@ -226,7 +202,6 @@ impl Bridge {
         };
         let lan = match bind(self.config.lan, Kind::Lan(tls.clone())) {
             Ok(l) => l,
-            // No IPv6 here: every IPv4 interface instead.
             Err(_) if self.config.lan.ip() == IpAddr::V6(Ipv6Addr::UNSPECIFIED) => bind(
                 SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), self.config.lan.port()),
                 Kind::Lan(tls),
@@ -257,7 +232,6 @@ impl Bridge {
         })
     }
 
-    /// `bridge.status`: `{state, port, fingerprint, tunnelPort, connections, error}`.
     pub fn status(&self) -> Value {
         match &*self.lock() {
             State::Off => json!({"state": "off", "port": null, "fingerprint": null}),
@@ -274,8 +248,6 @@ impl Bridge {
         }
     }
 
-    /// `bridge.pair.begin`: a new one-time code and the QR text, `{code, payload, expires_at, hosts}`.
-    /// Only while on, since the QR names the running port and certificate.
     pub fn pair_begin(&self) -> Result<Value, String> {
         let state = self.lock();
         let State::On(running) = &*state else {
@@ -303,8 +275,6 @@ impl Bridge {
         )
     }
 
-    /// `bridge.devices`: `{devices: [{id, name, platform, paired_at, last_seen}]}`, times in ms. While
-    /// off this reads `devices.json` and writes nothing.
     pub fn devices(&self) -> Result<Value, String> {
         let list = match self.core() {
             Some(core) => core.devices.devices(),
@@ -314,15 +284,12 @@ impl Bridge {
         Ok(json!({"devices": list.iter().map(device_json).collect::<Vec<_>>()}))
     }
 
-    /// `bridge.revoke {device}`: only while on (off writes nothing). `{revoked: bool}`.
     pub fn revoke(&self, device: &str) -> Result<Value, String> {
         let core = self.core().ok_or("the bridge is off")?;
         let removed = core.revoke(device).map_err(|e| e.to_string())?;
         Ok(json!({"revoked": removed.is_some()}))
     }
 
-    /// `bridge.tunnel.status`: `{enabled, configured, connected, last_connection, listening, hostname}`.
-    /// Never the client secret.
     pub fn tunnel_status(&self) -> Value {
         let (config, last, listening) = match &*self.lock() {
             State::On(r) => (

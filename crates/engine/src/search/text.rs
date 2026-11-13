@@ -1,10 +1,6 @@
-//! What text a transcript line contributes to the index.
-
 use serde_json::{Map, Value};
 
-/// Lines longer than this are skipped, like the transcript reader does (they hold base64 images).
 pub const MAX_LINE_BYTES: usize = 100_000;
-/// One message contributes at most this many characters, so a pasted log can't crowd out the rest.
 pub const MAX_MESSAGE_CHARS: usize = 6_000;
 
 const CLAUDE_MARKERS: [&[u8]; 4] = [
@@ -20,7 +16,6 @@ pub enum SessionRole {
     Assistant,
 }
 
-/// A transcript line as far as search is concerned.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TranscriptLine {
     Message {
@@ -32,7 +27,6 @@ pub enum TranscriptLine {
     AiTitle(String),
 }
 
-/// A byte search that doesn't parse: most lines of a transcript are tool output and fail it.
 fn contains(haystack: &[u8], needle: &[u8]) -> bool {
     match needle.first() {
         None => true,
@@ -47,13 +41,10 @@ fn str_of<'a>(obj: &'a Map<String, Value>, key: &str) -> Option<&'a str> {
     obj.get(key).and_then(Value::as_str)
 }
 
-/// The elements as objects, or `None` when the value is not an array of only objects (Swift's
-/// `as? [[String: Any]]`).
 fn object_array(value: Option<&Value>) -> Option<Vec<&Map<String, Value>>> {
     value?.as_array()?.iter().map(Value::as_object).collect()
 }
 
-/// The `text` of every part whose `type` is `kind`, joined with newlines.
 fn part_text(parts: &[&Map<String, Value>], kind: &str) -> String {
     parts
         .iter()
@@ -63,9 +54,6 @@ fn part_text(parts: &[&Map<String, Value>], kind: &str) -> String {
         .join("\n")
 }
 
-/// A Claude Code transcript line: what you typed and what Claude said (text only, no thinking or
-/// tool calls), and the titles. Meta lines, sidechains and the slash-command and system text Claude
-/// Code stores as user lines are left out.
 pub fn claude_line(line: &[u8]) -> Option<TranscriptLine> {
     if line.len() > MAX_LINE_BYTES || !CLAUDE_MARKERS.iter().any(|m| contains(line, m)) {
         return None;
@@ -110,8 +98,6 @@ pub fn claude_line(line: &[u8]) -> Option<TranscriptLine> {
     })
 }
 
-/// A Codex rollout line: `response_item` messages, leaving out the developer prompt and the
-/// environment and AGENTS.md text Codex injects as user messages.
 pub fn codex_line(line: &[u8]) -> Option<TranscriptLine> {
     if line.len() > MAX_LINE_BYTES || !contains(line, br#""message""#) {
         return None;
@@ -148,7 +134,6 @@ pub fn codex_line(line: &[u8]) -> Option<TranscriptLine> {
     }
 }
 
-/// What the user typed in a Codex message; `None` for the context Codex injects.
 fn codex_user_text(parts: &[&Map<String, Value>]) -> Option<String> {
     let text = part_text(parts, "input_text");
     let text = text.trim();
@@ -158,17 +143,15 @@ fn codex_user_text(parts: &[&Map<String, Value>]) -> Option<String> {
     Some(text.to_string())
 }
 
-/// Trimmed and capped (in characters); `None` for text that isn't something the conversation said.
 pub fn clean(text: &str, role: SessionRole) -> Option<String> {
     let t = text.trim();
     if t.is_empty() {
         return None;
     }
-    if role == SessionRole::User {
-        // Slash commands, their output, caveats, system reminders and hook text are wrapped in tags.
-        if t.starts_with('<') || t.starts_with("Caveat:") || t.starts_with("[Request interrupted") {
-            return None;
-        }
+    if role == SessionRole::User
+        && (t.starts_with('<') || t.starts_with("Caveat:") || t.starts_with("[Request interrupted"))
+    {
+        return None;
     }
     Some(t.chars().take(MAX_MESSAGE_CHARS).collect())
 }
@@ -180,7 +163,6 @@ fn is_newline(c: char) -> bool {
     )
 }
 
-/// The first non-empty line of a prompt, at most 80 characters (79 and an ellipsis when longer).
 pub fn first_line_title(text: &str) -> String {
     let line = text
         .split(is_newline)

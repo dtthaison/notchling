@@ -1,11 +1,3 @@
-//! The questions and permissions hooks hold open, waiting on the app (the Swift `HookBridge`'s
-//! `requests/` folder, in memory). A hook's `hook.request` opens one and waits on its channel;
-//! `session.permission` or `session.answer` resolves it, and the hook prints the decision.
-//!
-//! A decision is the Swift app's response shape: `{"action": "allow", "always"?: bool}`,
-//! `{"action": "deny", "message"?: text}`, `{"action": "answer", "answers": {question: answer}}`,
-//! or `{"action": "pass", "reason": text}`, which prints nothing.
-
 use notchling_engine::reply::question::PendingQuestion;
 use notchling_engine::tools::agy::config::clip;
 use notchling_engine::transcript::snapshot;
@@ -14,7 +6,6 @@ use std::collections::BTreeMap;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Mutex;
 
-/// What a prompt asks.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
     Question,
@@ -29,8 +20,6 @@ impl Kind {
         }
     }
 
-    /// A PreToolUse hook is the AskUserQuestion one; in auto mode the question also arrives as a
-    /// permission request for AskUserQuestion once that passes.
     pub fn of(event: &Value) -> Kind {
         let name = event.get("hook_event_name").and_then(Value::as_str);
         let tool = event.get("tool_name").and_then(Value::as_str);
@@ -42,19 +31,14 @@ impl Kind {
     }
 }
 
-/// One held prompt.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Prompt {
     pub id: String,
-    /// Claude Code's session id (the transcript's name), from the hook event.
     pub session_id: String,
     pub kind: Kind,
-    /// The hook's whole event, as Claude Code sent it.
     pub event: Value,
-    /// A question's items, read from its tool input.
     pub question: Option<PendingQuestion>,
     pub created_ms: i64,
-    /// The hook process, so a hook Claude Code gave up on is noticed.
     pub hook_pid: Option<u32>,
 }
 
@@ -81,7 +65,6 @@ impl Prompt {
         }
     }
 
-    /// `prompt.pending`'s data, and a `prompts.list` row.
     pub fn to_json(&self) -> Value {
         let input = self.event.get("tool_input").cloned().unwrap_or(json!({}));
         json!({
@@ -99,7 +82,6 @@ impl Prompt {
         })
     }
 
-    /// One line about it (`HookRequest.summary`): the first question, or what the tool touches.
     pub fn summary(&self) -> String {
         if let Some(q) = &self.question {
             return q
@@ -116,8 +98,6 @@ fn str_at<'a>(v: &'a Value, key: &str) -> &'a str {
     v.get(key).and_then(Value::as_str).unwrap_or("")
 }
 
-/// A question as JSON: `{"items": [{header, question, options, details, multiSelect}]}`, the same
-/// shape `session.answer` takes back.
 pub fn question_json(q: &PendingQuestion) -> Value {
     let items: Vec<Value> = q
         .items
@@ -130,8 +110,6 @@ pub fn question_json(q: &PendingQuestion) -> Value {
     json!({ "items": items })
 }
 
-/// `HookRequest.describe`: the command, path, URL, pattern or description, else every field as
-/// `key: value` lines (nested values as JSON with sorted keys), at most 300 characters.
 fn describe(input: Option<&Map<String, Value>>) -> String {
     let Some(input) = input else {
         return String::new();
@@ -160,7 +138,6 @@ fn describe(input: Option<&Map<String, Value>>) -> String {
     lines.join("\n").chars().take(300).collect()
 }
 
-/// JSON text with object keys sorted, whatever order the map keeps.
 fn sorted(value: &Value) -> String {
     match value {
         Value::Object(map) => {
@@ -192,7 +169,6 @@ struct Inner {
     closed: bool,
 }
 
-/// The held prompts, oldest first.
 #[derive(Default)]
 pub struct PromptStore {
     inner: Mutex<Inner>,
@@ -203,7 +179,6 @@ impl PromptStore {
         self.inner.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    /// Holds a prompt for `event`; its decision arrives on the receiver. `None` once closed.
     pub fn open(
         &self,
         event: Value,
@@ -228,15 +203,12 @@ impl PromptStore {
         Some((prompt, rx))
     }
 
-    /// Hands `decision` to the hook waiting on `id`; the prompt, or `None` when it's no longer held.
     pub fn resolve(&self, id: &str, decision: Value) -> Option<Prompt> {
         let held = self.inner().held.remove(id)?;
-        // The hook may have given up a moment ago; the prompt is gone either way.
         let _ = held.tx.send(decision);
         Some(held.prompt)
     }
 
-    /// The waiting hook gives up on `id`; `None` when it was resolved meanwhile.
     pub fn forget(&self, id: &str) -> Option<Prompt> {
         self.inner().held.remove(id).map(|h| h.prompt)
     }
@@ -245,7 +217,6 @@ impl PromptStore {
         self.inner().held.get(id).map(|h| h.prompt.clone())
     }
 
-    /// The oldest prompt of `kind` held for Claude Code session `session_id`.
     pub fn for_session(&self, session_id: &str, kind: Kind) -> Option<Prompt> {
         let inner = self.inner();
         let mut found: Vec<&Prompt> = inner
@@ -269,7 +240,6 @@ impl PromptStore {
         all
     }
 
-    /// The daemon is stopping: every held prompt passes, and no new one is held.
     pub fn close(&self) -> Vec<Prompt> {
         let mut inner = self.inner();
         inner.closed = true;
@@ -278,7 +248,6 @@ impl PromptStore {
         pass_all(held, "the daemon is stopping")
     }
 
-    /// Acting was turned off: every held prompt passes; new ones may still be held later.
     pub fn drain(&self) -> Vec<Prompt> {
         let held = std::mem::take(&mut self.inner().held);
         pass_all(held, "acting is off")
@@ -297,17 +266,11 @@ fn pass_all(held: BTreeMap<String, Held>, reason: &str) -> Vec<Prompt> {
     all
 }
 
-/// What one `prompts.list` row may weigh, and what all of them may: the reply is one line of the
-/// local API (1 MiB), and a list that doesn't fit would fail whole, hiding every prompt.
 const ROW_BYTES: usize = 128 * 1024;
 const LIST_BYTES: usize = 768 * 1024;
-/// What a trimmed row keeps of its text, and of its diff.
 const TEXT_CHARS: usize = 4000;
 const DIFF_LINES: usize = 400;
 
-/// Keeps a `prompts.list` reply within the local API's line: a row over [`ROW_BYTES`] loses the
-/// heavy parts of its tool input and diff (and says `"trimmed": true`), and one that is still too
-/// big, or no longer fits the reply, is left out instead of failing the call.
 pub fn fit_list(rows: Vec<Value>) -> Vec<Value> {
     let weight = |row: &Value| row.to_string().len();
     let mut used = 0;
@@ -330,8 +293,6 @@ fn trim_row(row: &mut Value) {
     let Some(map) = row.as_object_mut() else {
         return;
     };
-    // A Write's whole file is the tool input, and a diff is a card's biggest part: a card needs
-    // neither whole.
     if let Some(input) = map.get_mut("input") {
         match input {
             Value::String(text) => *text = clip(text, TEXT_CHARS),
@@ -350,7 +311,6 @@ fn trim_row(row: &mut Value) {
     map.insert("trimmed".into(), Value::Bool(true));
 }
 
-/// A pass decision with its reason.
 pub fn pass(reason: &str) -> Value {
     json!({"action": "pass", "reason": reason})
 }
@@ -448,7 +408,6 @@ mod tests {
 
     #[test]
     fn an_oversized_row_is_trimmed_and_the_list_stays_under_the_line() {
-        // A Write of a 900 KB file, and a 5 MB diff that already got through somehow.
         let huge = json!({"file_path": "/a", "content": "x".repeat(900_000)});
         let mut diff = row("agy", json!("input"));
         diff["diff"] = json!((0..50_000)

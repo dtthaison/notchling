@@ -3,15 +3,10 @@ import 'package:flutter/material.dart';
 import '../../core/protocol/models.dart';
 import '../../l10n/app_localizations.dart';
 
-/// How the user answered the takeover confirmation.
 enum TakeoverChoice { cancel, resume, stopAndResume }
 
-/// Whether the Mac says this view-only session can be taken over (at once, or after stopping the original).
 bool canTakeOver(Session session) => session.control == SessionControl.viewOnly && (session.takeover?.available == true || session.takeover?.stoppable == true);
 
-/// The confirmation dialogs. A session whose original is gone is resumed after one confirmation. One that still
-/// runs on the Mac (Claude desktop, VS Code) is stopped first, which asks to confirm the stop; and if it is in the
-/// middle of a turn, a second, explicit confirmation, because the turn is cut off.
 Future<TakeoverChoice> confirmTakeover(BuildContext context, Session session) async {
   final AppL10n l10n = AppL10n.of(context);
   final TakeoverInfo? info = session.takeover;

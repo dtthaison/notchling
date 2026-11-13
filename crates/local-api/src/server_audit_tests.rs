@@ -1,5 +1,3 @@
-//! Milestone 3's additions to the server: every app-tier call is audited with its outcome, the
-//! daemon can ask whether the app is attached, and a client can lengthen its wait for one call.
 #![cfg(unix)]
 
 use crate::client::{Client, ConnectOptions};
@@ -138,7 +136,6 @@ fn the_daemon_knows_when_the_app_is_attached() {
     let me = std::env::current_exe().unwrap();
     let run = start(Allowlist::new([me]));
     assert!(!run.handle.app_attached());
-    // The app's own binary saying hello as the hook or the command line is no one to answer.
     let _hook = connect(&run, ClientKind::Hook);
     let _cli = connect(&run, ClientKind::Cli);
     assert!(!run.handle.app_attached());
@@ -150,7 +147,6 @@ fn the_daemon_knows_when_the_app_is_attached() {
         std::thread::sleep(Duration::from_millis(20));
     }
     assert!(!run.handle.app_attached());
-    // A client the allowlist doesn't name is never the app, whatever it says it is.
     let agent_run = start(Allowlist::empty());
     let _posing = connect(&agent_run, ClientKind::App);
     assert!(!agent_run.handle.app_attached());
@@ -161,7 +157,6 @@ fn the_daemon_knows_when_the_app_follows_a_topic() {
     let me = std::env::current_exe().unwrap();
     let run = start(Allowlist::new([me]));
     assert!(!run.handle.app_following("bridge"));
-    // Attached is not following: the app said hello and nothing more.
     let mut app = connect(&run, ClientKind::App);
     assert!(run.handle.app_attached());
     assert!(!run.handle.app_following("bridge"));
@@ -176,7 +171,6 @@ fn the_daemon_knows_when_the_app_follows_a_topic() {
         std::thread::sleep(Duration::from_millis(20));
     }
     assert!(!run.handle.app_following("bridge"), "gone with its client");
-    // A client the allowlist doesn't name is refused the app's topic, so it never counts.
     let agent_run = start(Allowlist::empty());
     let mut posing = connect(&agent_run, ClientKind::App);
     assert!(posing.subscribe(&["bridge"]).is_err());

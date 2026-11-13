@@ -1,5 +1,3 @@
-//! Port of `BridgeRouterTests` (the router, the hub and the wire format).
-
 use super::backend::Devices;
 use super::model::*;
 use super::router::{validated_folder, MAX_TEXT_CHARACTERS};
@@ -11,8 +9,6 @@ use std::sync::Arc;
 fn codes(io: &RecordingIo) -> Option<String> {
     error_code(&io.last_json()).map(String::from)
 }
-
-// MARK: Auth gating
 
 #[test]
 fn nothing_is_served_before_hello() {
@@ -169,8 +165,6 @@ fn a_revoked_device_is_disconnected_and_its_token_refused() {
     assert_eq!(error_code(&again_io.json(0)), Some("unauthorized"));
 }
 
-// MARK: Reads
-
 #[test]
 fn sessions_list_encodes_subagents_and_pending() {
     let rig = Rig::new();
@@ -304,8 +298,6 @@ fn web_snapshot_rejects_remote_urls_and_sends_json_then_binary() {
     let announce: Value = serde_json::from_str(&texts[texts.len() - 2]).expect("json");
     assert_eq!(announce["data"]["binary"], true);
 }
-
-// MARK: Writes
 
 #[test]
 fn a_message_to_a_view_only_session_never_reaches_the_backend() {
@@ -616,7 +608,6 @@ fn a_model_id_from_the_list_starts_that_model() {
     let (connection, io, _) = rig.login("test-phone");
     let cwd = project.to_string_lossy().into_owned();
 
-    // `modelId` wins over `model` when both are sent.
     rig.send(
         &connection,
         &format!(
@@ -656,7 +647,6 @@ fn an_unknown_model_id_is_invalid() {
         r#""""#,
         "7",
     ] {
-        // A good short name beside a bad id must not start anything either.
         rig.send(
             &connection,
             &format!(

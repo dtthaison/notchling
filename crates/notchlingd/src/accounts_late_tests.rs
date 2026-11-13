@@ -1,6 +1,3 @@
-//! Accounts ops held up by the Keychain answer within the client's 5 s and hand their result over
-//! later, through `accounts.result` and the `accounts.done` event. Every value is a fake one.
-
 use crate::accounts_ops_tests::{profile, slot, world, ID1, ID2};
 use crate::acting_ops_tests::app;
 use crate::op_group::OpGroup;
@@ -14,7 +11,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
-/// A Keychain that waits, as on a macOS prompt, while closed.
 pub(crate) struct Gate {
     inner: Arc<MemoryKeychain>,
     closed: Mutex<bool>,
@@ -91,7 +87,6 @@ fn a_switch_stuck_on_the_keychain_answers_working_then_hands_its_result_over() {
     assert!(began.elapsed() < Duration::from_secs(3), "the call waited");
     assert_eq!(got["state"], "working");
     let ticket = got["ticket"].clone();
-    // The list doesn't wait behind it either.
     let list = w.ops.call(&app(), ops::ACCOUNTS_LIST, &json!({})).unwrap();
     assert_eq!(list["on"], true);
 
@@ -110,7 +105,6 @@ fn a_switch_stuck_on_the_keychain_answers_working_then_hands_its_result_over() {
     assert_eq!(done[0]["result"]["active"], ID2);
     let printed = format!("{result} {done:?}");
     assert!(!printed.contains("test-access"), "{printed}");
-    // Read once.
     let e = w
         .ops
         .call(&app(), ops::ACCOUNTS_RESULT, &json!({"ticket": ticket}))
@@ -172,8 +166,6 @@ fn a_sync_stuck_on_the_keychain_answers_the_list_as_last_read() {
     assert_eq!(w.room.named("accounts.changed").len(), 1);
 }
 
-/// The live item's write lands, then the app turns accounts off and `~/.claude.json` changes under
-/// the switch, so the config write fails and the Keychain must be put back with the switch off.
 struct OffAfterLiveWrite {
     inner: Arc<MemoryKeychain>,
     flag: Mutex<Option<Arc<crate::switches::SwitchFlag>>>,

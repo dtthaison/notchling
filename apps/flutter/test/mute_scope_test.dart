@@ -1,6 +1,3 @@
-// A mute belongs to one session on one computer: muting `s1` on B leaves `s1` on A loud (decision 0012). It is kept
-// under the same storage scope as the chat cache and the archive, so a mute made before the phone followed several
-// computers stays with the computer it was made for.
 import 'dart:convert';
 
 import 'package:agent_console/app/alerts.dart';
@@ -20,14 +17,12 @@ import 'support/alert_harness.dart';
 import 'support/harness.dart';
 import 'support/two_computers.dart';
 
-/// A phone that already follows both computers: [scopes] is what the first run of the update saved.
 MemorySecretStore stored({required MacProfile active, Map<String, String>? scopes, List<String> muted = const <String>[]}) => MemorySecretStore()
   ..values['macs.v1'] = encodeProfiles(<MacProfile>[macA, macB])
   ..values['macs.active'] = active.id
   ..values['macs.scopes'] = jsonEncode(scopes ?? <String, String>{macA.id: '', macB.id: macB.id})
   ..values['prefs.muted'] = jsonEncode(muted);
 
-/// A reply arrives in `s1` on the computer in use.
 void reply(ProviderContainer container) {
   pushSessions(container, <Session>[alertSession('s1', reply: 'm1')]);
   pushSessions(container, <Session>[alertSession('s1', reply: 'm2')]);
@@ -73,7 +68,6 @@ void main() {
       reply(onA);
       expect(onA.read(inAppAlertProvider), isNull, reason: 'the old mute is A’s');
 
-      // The same phone, with B in use.
       final (container: ProviderContainer onB, service: _) = await watchedComputers(active: macB, secrets: stored(active: macB, muted: <String>['s1']));
       reply(onB);
       expect(onB.read(inAppAlertProvider)?.session, const SessionRef('bbbbbbbbbbbbbbbb', 's1'), reason: 'B never had it');
@@ -107,7 +101,6 @@ void main() {
     expect(find.byIcon(Icons.notifications_off_outlined), findsOneWidget);
     expect(container.read(alertPrefsProvider).muted, <String>{'bbbbbbbbbbbbbbbb/s1'});
 
-    // A's s1 is another session: not muted.
     container.read(selectedSessionProvider.notifier).select(const SessionRef('aaaaaaaaaaaaaaaa', 's1'));
     await tester.runAsync(() => until(() => container.read(sessionsProvider).byId('s1') != null));
     await tester.pump(const Duration(milliseconds: 100));

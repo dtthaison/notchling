@@ -1,21 +1,12 @@
-//! Banners, pure (part U7): a limit switch that moved a session's account (`AccountBanner`, for an
-//! hour after it happened), a failed action, and Notchling's own notices (`NoticeBanner`, the
-//! fallback when macOS refuses notifications, gone after 12 s). Each can be dismissed.
-
 use notchling_kit::{Icon, Ink};
 
-/// A notice slides away after this long (ms).
 pub const NOTICE_MS: i64 = 12_000;
-/// A limit switch shows in the sessions it moved for this long (ms).
 pub const LIMIT_SWITCH_MS: i64 = 3_600_000;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
-    /// The account in use reached its limit and Notchling moved to another.
     LimitSwitch,
-    /// An action that failed; stays until dismissed.
     Error,
-    /// Something Notchling says, briefly.
     Notice,
 }
 
@@ -24,14 +15,11 @@ pub struct Banner {
     pub kind: Kind,
     pub title: Option<String>,
     pub text: String,
-    /// When it was raised, ms since the epoch.
     pub at_ms: i64,
-    /// For a lane's switch, the lane's name; the main login's is "".
     pub lane: Option<String>,
 }
 
 impl Banner {
-    /// A switch on the main login (`LimitWatcher`'s announcement, word for word).
     pub fn switched(from: &str, to: &str, used_percent: f64, at_ms: i64) -> Banner {
         Banner {
             kind: Kind::LimitSwitch,
@@ -45,7 +33,6 @@ impl Banner {
         }
     }
 
-    /// A switch in a lane.
     pub fn lane_switched(lane: &str, from: &str, to: &str, at_ms: i64) -> Banner {
         Banner {
             kind: Kind::LimitSwitch,
@@ -79,8 +66,6 @@ impl Banner {
         }
     }
 
-    /// Reads an announcement back into a banner (`noteLimitSwitch`): `None` for anything that
-    /// isn't a limit switch.
     pub fn from_announcement(text: &str, at_ms: i64) -> Option<Banner> {
         let lane = if let Some(rest) = text.strip_prefix("The ") {
             rest.split_once(" lane switched from ")?.0.to_owned()
@@ -114,7 +99,6 @@ impl Banner {
         }
     }
 
-    /// Whether it has had its time.
     pub fn expired(&self, now_ms: i64) -> bool {
         let life = match self.kind {
             Kind::Notice => NOTICE_MS,
@@ -125,15 +109,12 @@ impl Banner {
     }
 }
 
-/// The banners on show, newest first.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Banners {
     list: Vec<Banner>,
 }
 
 impl Banners {
-    /// Shows a banner; the same text again moves to the top instead of doubling, and a newer limit
-    /// switch for the same lane replaces the older one.
     pub fn push(&mut self, banner: Banner) {
         self.list
             .retain(|b| b.text != banner.text && !(banner.lane.is_some() && b.lane == banner.lane));
@@ -146,15 +127,12 @@ impl Banners {
         }
     }
 
-    /// Drops the expired ones; true when any went.
     pub fn prune(&mut self, now_ms: i64) -> bool {
         let before = self.list.len();
         self.list.retain(|b| !b.expired(now_ms));
         before != self.list.len()
     }
 
-    /// What a session shows: its lane's switch (`lane` is `None` for the main login), and errors and
-    /// notices for everyone.
     pub fn for_lane(&self, lane: Option<&str>) -> Vec<&Banner> {
         let lane = lane.unwrap_or("");
         self.list
@@ -209,7 +187,6 @@ mod tests {
         assert_eq!(b.all()[0].at_ms, 1, "the same text moves to the top");
         b.push(Banner::switched("b", "e", 20.0, 2));
         assert_eq!(b.all().len(), 3, "a newer switch replaces the main login's");
-        // A session in the night lane sees its own switch and the error, not the main login's.
         let night: Vec<&str> = b
             .for_lane(Some("night"))
             .iter()

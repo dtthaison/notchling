@@ -1,21 +1,14 @@
-//! `notchling-machines`' command line: nothing (the window, off), `--live` (ssh and `gh` run),
-//! `--vault` (the Secret Vault's values are read), `--data-root <dir>` (a fixture root instead of
-//! the real folders), `--render <view> --out <file.png>`, `--version`, `--help`.
-
 use std::path::PathBuf;
 
 use super::renders;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Command {
-    /// The Machines window. A fixture root never runs a process or opens the vault, whatever
-    /// the flags say.
     Run {
         data_root: Option<PathBuf>,
         live: bool,
         vault: bool,
     },
-    /// Open `view` off to the side, write it to `out` as a PNG, exit (part U10).
     Render {
         view: String,
         out: PathBuf,
@@ -25,7 +18,6 @@ pub enum Command {
     Help,
 }
 
-/// Parses the arguments after the program name.
 pub fn parse<I>(args: I) -> Result<Command, String>
 where
     I: IntoIterator<Item = String>,
@@ -95,7 +87,6 @@ fn value(
     }
 }
 
-/// `notchling-machines <version>`.
 pub fn version_line() -> String {
     format!("notchling-machines {}", env!("CARGO_PKG_VERSION"))
 }

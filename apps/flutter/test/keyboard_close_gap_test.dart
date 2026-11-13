@@ -34,7 +34,6 @@ void main() {
       ),
     );
     await tester.pumpWidget(host(page));
-    // Open, then let it settle: the room is made in the real layout.
     for (double v = 0; v <= 300; v += 30) {
       insets.value = v;
       await tester.pump(const Duration(milliseconds: 8));
@@ -42,8 +41,6 @@ void main() {
     await tester.pump(const Duration(milliseconds: 200));
     expect(lift.settled.value, 300);
 
-    // Close: from the second frame on, the list's content bottom (room, then transform) must follow the keyboard
-    // and no top band may open, i.e. the translation of the list is never positive.
     double worstBand = 0;
     for (double v = 270; v >= 0; v -= 30) {
       insets.value = v;

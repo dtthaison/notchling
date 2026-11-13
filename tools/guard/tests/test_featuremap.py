@@ -1,5 +1,3 @@
-"""GUARD-FEATURE-MAP: every crates/*/src/ folder is named in docs/feature-map.md."""
-
 import os
 import subprocess
 import sys
@@ -39,7 +37,6 @@ class FeatureMapTests(unittest.TestCase):
         self.assertEqual(len(featuremap.check(repo_with(text, "crates/engine/src/reply/plan.rs"))), 1)
 
     def test_nested_short_path_is_not_a_crate_folder(self):
-        """`chat/src/view/` names no crate folder; the `(?<![\\w/])` keeps it from matching `src/view/`."""
         row = "| App | `crates/app/`; `chat/src/view/` | t | auto | U1 |\n"
         self.assertEqual(len(featuremap.check(repo_with(row, "crates/app/src/view/mod.rs"))), 1)
 

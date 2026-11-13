@@ -6,8 +6,6 @@ import '../../app/widgets/kit.dart';
 import '../../core/protocol/models.dart';
 import '../../l10n/app_localizations.dart';
 
-/// The question or permission the Mac is waiting on, above the composer. Permissions have Cho phép /
-/// Từ chối; questions list their options as buttons. Multi-select questions are answered on the Mac.
 class PendingCard extends StatefulWidget {
   const PendingCard({
     super.key,
@@ -21,7 +19,6 @@ class PendingCard extends StatefulWidget {
   final String? error;
   final void Function({required bool allow}) onAllow;
 
-  /// One 1-based option number per question, sent once the last question is answered.
   final void Function(List<int> choices) onChoose;
 
   @override

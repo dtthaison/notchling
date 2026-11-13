@@ -30,7 +30,6 @@ import 'widgets/glass_nav.dart';
 import 'widgets/kit.dart';
 import 'widgets/motion.dart';
 
-/// Root: pair first, then the three tabs (or three panels from 840 dp, like the Mac).
 class AppRoot extends ConsumerStatefulWidget {
   const AppRoot({super.key});
 
@@ -52,10 +51,8 @@ class _AppRootState extends ConsumerState<AppRoot> with WidgetsBindingObserver {
     super.dispose();
   }
 
-  /// The first time a Mac is connected on Android: offer to keep the connection alive in the background.
   Future<void> _askKeepAliveOnce() async {
     if (!Platform.isAndroid || !mounted) return;
-    // Let the stored choice load first.
     for (int i = 0; i < 20 && !ref.read(alertPrefsProvider).loaded; i++) {
       await Future<void>.delayed(const Duration(milliseconds: 100));
     }
@@ -124,8 +121,6 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     _bind(ref.read(bridgeClientProvider));
   }
 
-  /// `{"event":"open"}` from the Mac ("Open Agent Console" in Notchling): show the Session tab, but only
-  /// when the app is in front.
   void _bind(BridgeClient? client) {
     unawaited(_events?.cancel());
     _events = client?.events.listen((BridgeEvent event) {
@@ -159,8 +154,6 @@ class _HomeShellState extends ConsumerState<HomeShell> {
         MediaQuery.sizeOf(context).width >= Metric.threePanelBreakpoint;
     final Kit kit = Kit.of(context);
 
-    // Read the padding from inside the Scaffold body: out here it is only the status bar, and the content would sit
-    // under the glass app bar (the Visualize sub-tab selector was hidden that way).
     Widget inset(Widget child, {bool bottom = false}) {
       return Builder(
         builder: (BuildContext inner) {
@@ -179,15 +172,9 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     }
 
     return Scaffold(
-      // The keyboard must not resize the whole page each frame of its animation (all three tabs would relayout);
-      // the chat composer alone follows the inset (KeyboardInset) and the tab bar steps aside while it is up.
       resizeToAvoidBottomInset: false,
-      // The bars are frosted glass over the content: the lists scroll under them (their padding comes from the
-      // Scaffold's MediaQuery), so nothing needs an opaque strip behind it.
       extendBody: !wide,
       extendBodyBehindAppBar: true,
-      // The Chat tab with a session open has its own header (with the Macs button): a second bar above it would eat a
-      // quarter of the screen.
       appBar: hideBar
           ? null
           : AppBar(
@@ -309,7 +296,6 @@ class _HomeShellState extends ConsumerState<HomeShell> {
                                 )
                               : inset(const ChatScreen()),
                         ),
-                        // Only built while shown, so the Phone stream and viz loads stop when you leave.
                         if (tab == 2)
                           inset(const VisualizeScreen(), bottom: true)
                         else
@@ -342,7 +328,6 @@ class _HomeShellState extends ConsumerState<HomeShell> {
   }
 }
 
-/// Đang kết nối / Mất kết nối, thử lại sau Ns / Đã kết nối.
 class ConnectionBanner extends ConsumerStatefulWidget {
   const ConnectionBanner({super.key});
 
@@ -359,7 +344,6 @@ class _ConnectionBannerState extends ConsumerState<ConnectionBanner> {
   @override
   void initState() {
     super.initState();
-    // Only the retry countdown needs a once-a-second redraw; a connected, idle app asks for no frames.
     _tick = Timer.periodic(const Duration(seconds: 1), (Timer _) {
       if (mounted &&
           ref.read(connectionStatusProvider).phase == LinkPhase.disconnected) {
@@ -418,7 +402,6 @@ class _ConnectionBannerState extends ConsumerState<ConnectionBanner> {
         }
       case LinkPhase.connected:
         final bool viaInternet = status.route == RouteKind.tunnel;
-        // The home network is the normal case and fades after two seconds; the internet route stays visible.
         if (_showConnected || viaInternet) {
           final String route = viaInternet
               ? l10n.routeInternet
@@ -467,8 +450,6 @@ class _ConnectionBannerState extends ConsumerState<ConnectionBanner> {
   }
 }
 
-/// The tab bar. Hidden only on wide layouts. It stays laid out while the keyboard is up (the keyboard covers
-/// it), so nothing on the page moves when the keyboard starts to slide.
 class _BottomNav extends ConsumerWidget {
   const _BottomNav();
 
@@ -479,7 +460,6 @@ class _BottomNav extends ConsumerWidget {
     }
     return GlassNav(
       selected: ref.watch(activeTabProvider),
-      // Chat is the tab whose list moves under the bar with the keyboard: no blur there.
       solid: ref.watch(activeTabProvider) == 1,
       inboxCount: ref.watch(inboxOpenCountProvider),
       onSelect: (int i) => ref.read(activeTabProvider.notifier).show(i),
@@ -487,26 +467,12 @@ class _BottomNav extends ConsumerWidget {
   }
 }
 
-/// Shared between [KeyboardLift] and the list inside it: how much of the keyboard's height the list has already
-/// made room for in its real layout. It changes once per keyboard opening or closing, not per frame.
 class KeyboardLiftController {
   final ValueNotifier<double> settled = ValueNotifier<double>(0);
 
   void dispose() => settled.dispose();
 }
 
-/// The chat's message list with the composer under it, rising with the keyboard.
-///
-/// While the keyboard slides (a new inset about every 8 ms), the list keeps its size and nothing is laid out
-/// again: the composer is moved up with a paint-only transform and the list content moves with it, clipped to the
-/// list's own area. Once the inset has stopped changing, the room is made in the list's real layout in one step
-/// (bottom padding equal to the keyboard's height) and the transform on the list drops to zero in the same frame,
-/// so nothing visibly changes at that moment. Closing does the same in reverse. Resizing the list on every step
-/// made the list lay out its visible messages every frame, which showed as a stutter (the Sessions search field,
-/// which never moves, stayed smooth).
-///
-/// The same widgets at every inset, so the composer keeps the focus that opened the keyboard. A transform keeps
-/// hit testing correct. [composer] should include anything that rises with it (a pending-prompt card).
 class KeyboardLift extends StatefulWidget {
   const KeyboardLift({
     super.key,
@@ -523,7 +489,6 @@ class KeyboardLift extends StatefulWidget {
 }
 
 class _KeyboardLiftState extends State<KeyboardLift> {
-  /// How long the inset must hold still before the list's layout is updated.
   static const Duration settleAfter = Duration(milliseconds: 90);
 
   double _below = 0;
@@ -560,7 +525,6 @@ class _KeyboardLiftState extends State<KeyboardLift> {
     final double below =
         MediaQuery.sizeOf(context).height -
         box.localToGlobal(Offset(0, box.size.height)).dy;
-    // Measured only while the keyboard is down: with it up the page is covered, not moved, so it stays right.
     if (MediaQuery.viewInsetsOf(context).bottom == 0 &&
         (below - _below).abs() > 0.5) {
       setState(() => _below = below);
@@ -570,10 +534,6 @@ class _KeyboardLiftState extends State<KeyboardLift> {
   @override
   Widget build(BuildContext context) {
     final double inset = MediaQuery.viewInsetsOf(context).bottom;
-    // The composer rests above the space the tab bar and the gesture bar take: its own safe-area padding (this
-    // MediaQuery's bottom padding, which stays while the tab bar is merely covered) plus whatever lies below this box.
-    // The card must end up on the keyboard, so that space is not lifted twice: the band between card and keyboard
-    // was that padding.
     final double reserved = _below + MediaQuery.paddingOf(context).bottom;
     final double lift = math.max(0, inset - reserved);
     if (inset == 0) {
@@ -584,14 +544,10 @@ class _KeyboardLiftState extends State<KeyboardLift> {
       _lastLift = lift;
       _settle?.cancel();
       if (closing && lift > 0) {
-        // Closing: the list's extra room goes at once and the transform alone carries the content down with the
-        // keyboard. Keeping the room while the transform moved the list down left an empty band (the window colour)
-        // at the top of the list for the whole animation, about half the screen.
         WidgetsBinding.instance.addPostFrameCallback((Duration _) {
           if (_lastLift > 0 && widget.controller.settled.value != 0) widget.controller.settled.value = 0;
         });
       } else if (lift == 0) {
-        // Closed: drop the list's extra room right away; the transform it replaces is already at zero.
         WidgetsBinding.instance.addPostFrameCallback((Duration _) {
           if (_lastLift == 0) widget.controller.settled.value = 0;
         });
@@ -620,9 +576,6 @@ class _KeyboardLiftState extends State<KeyboardLift> {
   }
 }
 
-/// One tab of the stack. A hidden tab stays mounted (scroll position, drafts) but is cut off from MediaQuery
-/// changes: while the keyboard animates, every frame brings new view insets, and without this the hidden Sessions
-/// tab rebuilt and re-laid out its search field on each one (about 6 ms of every frame, measured on a Redmi).
 class _TabSlot extends StatefulWidget {
   const _TabSlot({required this.active, required this.child});
   final bool active;
@@ -639,7 +592,6 @@ class _TabSlotState extends State<_TabSlot> {
   Widget build(BuildContext context) {
     final MediaQueryData live = MediaQuery.of(context);
     if (widget.active) _frozen = live;
-    // TickerMode off for a hidden tab: its animations (the breathing dots) stop instead of keeping frames going.
     return TickerMode(
       enabled: widget.active,
       child: MediaQuery(
@@ -650,8 +602,6 @@ class _TabSlotState extends State<_TabSlot> {
   }
 }
 
-/// A short fade when the tab changes, so switching tabs reads as one gesture. Opacity only (a layer property): the
-/// tabs themselves do not rebuild. Reduce Motion skips it.
 class _TabFade extends StatefulWidget {
   const _TabFade({required this.index, required this.child});
   final int index;

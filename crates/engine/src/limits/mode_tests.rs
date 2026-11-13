@@ -1,5 +1,3 @@
-//! The four values and where they are kept.
-
 use super::mode::*;
 use crate::sessions::testutil::TempDir;
 use crate::store;
@@ -66,7 +64,6 @@ fn choices_survive_a_restart_and_a_bad_file_is_never_written_over() {
     assert_eq!(again.mode(&CLAUDE), LimitMode::Off);
     assert_eq!(again.switch_at(), 85);
 
-    // A stored mode that isn't one reads as the default.
     store::put_doc(
         &data,
         LIMITS_DOC,

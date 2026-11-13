@@ -22,7 +22,6 @@ import 'session_row.dart';
 import 'takeover_row_button.dart';
 import 'sessions_notifier.dart';
 
-/// Which sessions have their subagent rows open. Remembered while the app runs.
 final NotifierProvider<ExpandedSessionsNotifier, Set<String>>
 expandedSessionsProvider =
     NotifierProvider<ExpandedSessionsNotifier, Set<String>>(
@@ -41,7 +40,6 @@ class ExpandedSessionsNotifier extends Notifier<Set<String>> {
 class SessionsScreen extends ConsumerStatefulWidget {
   const SessionsScreen({super.key, this.onOpenChat});
 
-  /// Called after a session is picked; on a phone it switches to the Chat tab.
   final VoidCallback? onOpenChat;
 
   @override
@@ -56,8 +54,6 @@ class _SessionsScreenState extends ConsumerState<SessionsScreen> {
   Widget build(BuildContext context) {
     final MacsState macs = ref.watch(macsProvider);
     final String active = macs.active?.id ?? '';
-    // One computer: the list is the computer in use's, with bare ids, as before. Several: every computer's,
-    // with host-qualified ids. Either way what the phone keeps (pick, open rows, archive) is per computer.
     final bool perComputer = macs.macs.length > 1;
     final List<ComputerSessions> all = perComputer ? ref.watch(allComputersSessionsProvider) : const <ComputerSessions>[];
     final Map<String, int> archive = ref.watch(archivedSessionsProvider);
@@ -75,7 +71,6 @@ class _SessionsScreenState extends ConsumerState<SessionsScreen> {
                 SessionRef(c.computer.id, id).qualified,
           }
         : hiddenSessionIdsIn(archive, sessions.sessions, macs.scopeOf(active));
-    // Open rows are kept by qualified id; one computer's list wants its own, bare.
     final Set<String> expanded = <String>{
       for (final String key in ref.watch(expandedSessionsProvider))
         if (perComputer || active.isEmpty)
@@ -129,7 +124,6 @@ class _SessionsScreenState extends ConsumerState<SessionsScreen> {
   }
 }
 
-/// The list without any provider: loading, error, empty, no match, or the groups. Previews and tests drive it directly.
 class SessionsView extends StatelessWidget {
   const SessionsView({
     super.key,
@@ -151,8 +145,6 @@ class SessionsView extends StatelessWidget {
     this.now,
   });
 
-  /// The paired computers. With two or more, each gets a heading with its own sessions under it, and every
-  /// session id here is host-qualified ([SessionRef.qualified]). With one, the list looks as it always did.
   final List<ComputerHeading> computers;
   final SessionsState state;
   final Set<String> expanded;
@@ -266,8 +258,6 @@ class SessionsView extends StatelessWidget {
       ],
     );
 
-    // One scrolling list for every state: the search field and chips are its first item, so they scroll away with
-    // the rows (nothing slides under a pinned bar) and the field keeps its focus while the list below it changes.
     final double stateHeight = math.max(
       320,
       MediaQuery.sizeOf(context).height * 0.5,
@@ -319,7 +309,6 @@ class SessionsView extends StatelessWidget {
         if (!perComputer)
           ...rows(groups)
         else
-          // Several computers: a heading per computer, then its own groups. Ids here are host-qualified.
           for (final ComputerHeading computer in computers) ...<Widget>[
             ComputerHeader(
               computer: computer,
@@ -350,7 +339,6 @@ class SessionsView extends StatelessWidget {
     );
   }
 
-  /// The state groups and their rows. [nextIndex] numbers the rows for the entrance cascade.
   List<Widget> _rows(BuildContext context, Map<SessionState, List<Session>> groups, DateTime clock, int Function() nextIndex) {
       return <Widget>[
         for (final MapEntry<SessionState, List<Session>> group
@@ -360,7 +348,6 @@ class SessionsView extends StatelessWidget {
             FlipOnMove(
               key: ValueKey<String>('row-${session.id}'),
               child: Entrance(
-                // The first screenful cascades in, 40 ms apart; later rows (scrolled to, searched) come at once.
                 delay: Duration(milliseconds: 40 * math.min(nextIndex(), 9)),
                 rise: 12,
                 child: SessionSwipeRow(
@@ -392,7 +379,6 @@ class SessionsView extends StatelessWidget {
       ];
   }
 
-  /// Long-press: what the swipes do, as a menu (swipes are not discoverable).
   Future<void> _showMenu(BuildContext context, Session session) {
     final AppL10n l10n = AppL10n.of(context);
     final Kit kit = Kit.of(context);
@@ -446,6 +432,5 @@ class SessionsView extends StatelessWidget {
   }
 }
 
-/// Tapping a notification or an `open` event: show the Session tab.
 void showSessionsTab(WidgetRef ref) =>
     ref.read(activeTabProvider.notifier).show(0);

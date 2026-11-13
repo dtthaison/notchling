@@ -1,8 +1,3 @@
-//! Steps 12 and 15-18 of the sd worker job: plugins, worker.json, service, setup check, running
-//! (Swift `SDWorkerSteps`). The worker.json step is [`super::worker_json`], the service step
-//! [`super::steps_sd_service`], the setup check [`super::steps_sd_check`]; this file has the
-//! plugins step, the Running switch and the version rule.
-
 use super::registry::{Machine, SdWorkerSettings};
 use super::shell;
 use super::step::{
@@ -18,11 +13,8 @@ pub const SD_PLUGIN: &str = "sd@system-design";
 pub const SUPERPOWERS_PLUGIN: &str = "superpowers@claude-plugins-official";
 pub const UNREADABLE_VERSION: &str = "(unreadable version)";
 
-/// The first sd with `worker setup --create-labels` and a read-only `--check`. The sd on this Mac
-/// must be this or newer.
 pub const MIN_SD: &str = "1.19.3";
 
-/// The most a message shows of what a machine said.
 const TEXT_CAP: usize = 300;
 
 pub const PLUGINS_PROBE: &str =
@@ -31,7 +23,6 @@ echo; echo @@sd\n\
 d=\"$HOME/.local/share/agents/system-design/plugin/scripts/sd.py\"\n\
 [ -f \"$d\" ] && printf 'sd=%s\\n' \"$d\"";
 
-/// The steps of the sd worker job: plugins, worker.json, service, setup check, running.
 pub fn all(m: &Machine, job: &SdWorkerSettings, all: &[Machine]) -> Vec<SetupStep> {
     let linux = m.is_linux();
     let machine = m.name.clone();
@@ -43,7 +34,6 @@ pub fn all(m: &Machine, job: &SdWorkerSettings, all: &[Machine]) -> Vec<SetupSte
         super::steps_sd_check::check_probe(job),
         StepFix::Run(super::steps_sd_check::create_labels_plan(job)),
     );
-    // an sd older than 1.19.3 runs `--check` and makes labels: never run it, say what to update
     check_step.hold_when = Some(std::sync::Arc::new(move |d: &Detected| {
         let version = d.sd_version.as_deref()?;
         (!is_at_least(version, MIN_SD))
@@ -60,12 +50,7 @@ pub fn all(m: &Machine, job: &SdWorkerSettings, all: &[Machine]) -> Vec<SetupSte
         ),
         super::worker_json::step(m, job, all),
         super::steps_sd_service::step(linux),
-        // The check is read-only (sd 1.19.3: it reports missing labels and creates none). Its Fix,
-        // on a click, is the one thing that writes: it creates the missing issue labels, and the
-        // engine checks again after it.
         check_step,
-        // Its state is the switch's own probe: only a reachable machine is needed to read it.
-        // Turning it ON waits for every step before it; turning it OFF waits for none.
         SetupStep::new(
             StepId::RUNNING,
             "Running",
@@ -79,15 +64,10 @@ pub fn all(m: &Machine, job: &SdWorkerSettings, all: &[Machine]) -> Vec<SetupSte
     ]
 }
 
-// MARK: Text a machine sent
-
-/// Machine text for a message: masked first (`mask` is the context's), then cut, so a cut can't
-/// leave a piece of a vault value.
 pub(super) fn cut_300(s: &str, mask: &dyn Fn(&str) -> String) -> String {
     mask(s).chars().take(TEXT_CAP).collect()
 }
 
-/// The first non-empty line of what a machine said, masked and then cut to 300 characters.
 pub(super) fn first_line_300(s: &str, mask: &dyn Fn(&str) -> String) -> String {
     first_line_raw(&mask(s))
 }
@@ -102,10 +82,6 @@ fn first_line_raw(masked: &str) -> String {
         .collect()
 }
 
-// MARK: Versions
-
-/// Whether the dotted number `version` is `minimum` or newer, compared number by number
-/// (1.19.10 > 1.19.3). Anything that isn't dotted numbers is older.
 pub fn is_at_least(version: &str, minimum: &str) -> bool {
     fn parts(s: &str) -> Option<Vec<i64>> {
         s.split('.').map(|p| p.parse::<i64>().ok()).collect()
@@ -129,8 +105,6 @@ fn is_safe_version(v: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '+' || c == '-')
 }
 
-/// The user-scope version of each plugin on the machine. A version that isn't plain is
-/// `(unreadable version)`.
 fn machine_versions(json: &str) -> BTreeMap<&'static str, String> {
     let mut found = BTreeMap::new();
     let Ok(root) = serde_json::from_str::<Value>(json.trim()) else {
@@ -158,8 +132,6 @@ fn machine_versions(json: &str) -> BTreeMap<&'static str, String> {
     found
 }
 
-// MARK: Plugins installed
-
 fn plugins_check(out: &RemoteOutput, ctx: &StepContext) -> CheckResult {
     let lines: Vec<&str> = out.text.split('\n').collect();
     let marker = lines.iter().position(|l| *l == "@@sd");
@@ -181,17 +153,12 @@ fn plugins_check(out: &RemoteOutput, ctx: &StepContext) -> CheckResult {
             .detected(detected);
     };
     let here = machine_versions(&json);
-    // reported whether or not the step passes: the setup check holds back on it (an older sd's
-    // --check makes labels)
     if let Some(v) = here.get(SD_PLUGIN) {
         if v != UNREADABLE_VERSION {
             detected.sd_version = Some(v.clone());
         }
     }
     let mut wrong: Vec<String> = Vec::new();
-    // sd must match this Mac exactly (the worker and the Mac speak one protocol). superpowers only
-    // has to be as new: a newer one on the machine is not a reason to push this Mac's older copy
-    // over it.
     for (name, id, mac, exact) in [
         ("superpowers", SUPERPOWERS_PLUGIN, superpowers, false),
         ("sd", SD_PLUGIN, sd, true),
@@ -225,7 +192,6 @@ fn plugins_check(out: &RemoteOutput, ctx: &StepContext) -> CheckResult {
     CheckResult::pass(format!("superpowers {sp}, sd {sdv}")).detected(detected)
 }
 
-/// The script that puts this Mac's sd on the machine: the archive arrives on stdin.
 pub fn plugins_script(marketplace: &str) -> String {
     format!(
         "set -e; d=\"$HOME/.local/share/agents/system-design\"\n\
@@ -250,7 +216,6 @@ fn plugins_display() -> String {
     )
 }
 
-/// A folder under the Fix's scratch folder that goes when the Fix is done.
 struct ScratchDir(std::path::PathBuf);
 
 impl Drop for ScratchDir {
@@ -284,8 +249,6 @@ fn install_plugins(ctx: &FixContext) -> FixOutcome {
     }
     let dir = ScratchDir(dir);
     let archive = dir.0.join("sd-plugin.tgz").to_string_lossy().into_owned();
-    // COPYFILE_DISABLE keeps macOS tar from adding `._*` metadata entries that GNU tar would
-    // unpack as files.
     let tar = run::local_env(
         ctx,
         vec![
@@ -319,9 +282,6 @@ fn install_plugins(ctx: &FixContext) -> FixOutcome {
     }
 }
 
-// MARK: Running
-
-/// The Running step's probe: whether the worker's service is enabled and active.
 pub(super) fn running_probe(linux: bool) -> String {
     if linux {
         "systemctl is-enabled sd-worker.service; systemctl is-active sd-worker.service".into()
@@ -344,7 +304,6 @@ fn running_check(out: &RemoteOutput, linux: bool) -> CheckResult {
             CheckResult::fail("off")
         };
     }
-    // macOS: loaded, and not disabled. A label `print-disabled` doesn't list is enabled.
     if lines.first() == Some(&"loaded") && !super::steps_sd_service::label_disabled(&lines) {
         CheckResult::pass("on")
     } else {
@@ -352,21 +311,16 @@ fn running_check(out: &RemoteOutput, linux: bool) -> CheckResult {
     }
 }
 
-/// What the Running switch runs on the machine: enable and start, or disable and stop, the
-/// worker's own service only. The engine sends it through the admin path on Linux (the step's
-/// `StepFix::Toggle { needs_admin }`) and through the worker's own script path on macOS.
 pub fn toggle_script(linux: bool, on: bool) -> String {
     match (linux, on) {
         (true, true) => "systemctl enable --now sd-worker.service".into(),
         (true, false) => "systemctl disable --now sd-worker.service".into(),
-        // already loaded is fine: bootstrap only when the label isn't loaded
         (false, true) => concat!(
             r#"launchctl enable "gui/$(id -u)/com.sd.worker" || exit 1; "#,
             r#"launchctl print "gui/$(id -u)/com.sd.worker" >/dev/null 2>&1 || "#,
             r#"launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.sd.worker.plist""#
         )
         .into(),
-        // not loaded is fine: bootout only when it is loaded
         (false, false) => concat!(
             r#"if launchctl print "gui/$(id -u)/com.sd.worker" >/dev/null 2>&1; then "#,
             r#"launchctl bootout "gui/$(id -u)/com.sd.worker" || exit 1; fi; "#,

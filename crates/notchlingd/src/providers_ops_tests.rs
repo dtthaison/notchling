@@ -1,6 +1,3 @@
-//! The provider ops over fakes in a temp folder: no Keychain, no process, no network, no real
-//! `~/.codex`, `~/.gemini` or Claude Desktop folder. The off tests fail if any fake is called.
-
 use crate::acting_ops_tests::FakeRoom;
 use crate::layout::Layout;
 use crate::providers_ops::*;
@@ -20,7 +17,6 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 const NOW_FUTURE: f64 = 4_000_000_000.0;
-/// Text that must never appear in a reply or an event: pieces of the made-up logins.
 const SECRETS: [&str; 3] = ["REFRESH-SECRET", "eyJhbGciOiJSUzI1NiJ9", "Bearer"];
 
 fn b64url(data: &[u8]) -> String {
@@ -42,7 +38,6 @@ fn jwt(claims: &Value) -> String {
     )
 }
 
-/// A made-up Codex `auth.json`.
 pub(crate) fn codex_login(email: &str, user: &str, ws: &str) -> Vec<u8> {
     let id = jwt(&json!({"email": email, "sub": "x",
         "https://api.openai.com/auth": {"chatgpt_account_id": ws, "chatgpt_user_id": user}}));
@@ -141,7 +136,6 @@ impl Rig {
         self.ops.call(op, &args)
     }
 
-    /// Nothing outside the rig's own temp folder was touched.
     fn assert_untouched(&self) {
         assert!(
             self.keychain.calls().is_empty(),
@@ -238,14 +232,12 @@ fn every_op_but_the_list_is_forbidden_while_accounts_are_off_and_nothing_runs() 
 #[test]
 fn the_list_while_off_shows_the_saved_names_and_reads_no_login() {
     let rig = Rig::new("listoff", false, FakeProcs::new(), FakeApps::new());
-    // The daemon's own list from an earlier run with accounts on.
     std::fs::create_dir_all(rig.root.join("state")).unwrap();
     std::fs::write(
         rig.root.join("state/codex.json"),
         r#"{"version":1,"accounts":[{"id":"u1:w1","email":"a@example.com","plan":"Plus"}]}"#,
     )
     .unwrap();
-    // The providers are made after the file, as the daemon makes them at start.
     let ops2 = {
         let mut registry = ProviderRegistry::new();
         registry.register(Arc::new(CodexStore::new(
@@ -305,7 +297,6 @@ fn the_list_while_on_reads_the_live_logins_and_says_who_is_active() {
         rig.keychain.get("Notchling Codex", "u1:w1").is_some(),
         "the live login was saved"
     );
-    // sync: false reads nothing.
     let before = rig.keychain.calls().len();
     rig.call(ops::PROVIDERS_LIST, json!({"sync": false}))
         .unwrap();
@@ -334,7 +325,6 @@ fn a_switch_that_would_interrupt_work_asks_first_and_runs_only_when_confirmed() 
         !rig.apps.events().iter().any(|e| e.starts_with("quit")),
         "nothing quit before the answer"
     );
-    // Confirmed, but the saved copy isn't a login: the switch fails cleanly, in fixed words.
     let err = rig
         .call(
             ops::PROVIDERS_SWITCH,
@@ -380,7 +370,6 @@ fn a_confirmed_switch_replies_and_announces() {
 }
 
 mod base64_for_tests {
-    /// Standard base64 with padding, for the saved copy the store reads back.
     pub fn encode(data: &[u8]) -> String {
         const T: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
         let mut out = String::new();

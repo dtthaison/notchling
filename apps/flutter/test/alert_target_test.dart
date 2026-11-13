@@ -1,5 +1,3 @@
-// An alert belongs to the computer that raised it: a tap on its banner or notification opens that computer's
-// session even when the user switched computers after the alert (decision 0012).
 import 'package:agent_console/app/alerts.dart';
 import 'package:agent_console/app/message_alerts.dart';
 import 'package:agent_console/app/nav_state.dart';

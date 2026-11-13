@@ -1,20 +1,8 @@
-//! The wire format between a client and the session host, over a Unix socket (`HostWire.swift`).
-//!
-//! A frame is `[length: u32 big-endian][type: u8][payload]`, where length counts the type byte and the
-//! payload. Type 1 is a JSON object. Type 2 is terminal data: a 16-byte session id followed by the
-//! bytes (output going to the client, or input going to the pty).
-//!
-//! JSON requests: `{"id":Int,"op":String, ...}`. Replies: `{"id":Int,"ok":true,"data":{...}}` or
-//! `{"id":Int,"ok":false,"error":String}`. Events: `{"event":"exit","sessionId":String,"status":Int}`
-//! and `{"event":"spawned","sessionId":String}`.
-
 use serde_json::{Map, Value};
 use std::fmt;
 
-/// The largest payload a frame may carry.
 pub const MAX_PAYLOAD: usize = 16 * 1024 * 1024;
 
-/// A session's id: a UUID, written the way Swift's `uuidString` writes it (upper case, dashed).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct SessionId([u8; 16]);
 
@@ -27,7 +15,6 @@ impl SessionId {
         self.0
     }
 
-    /// A random (version 4) id.
     pub fn random() -> SessionId {
         let mut bytes = random_bytes();
         bytes[6] = (bytes[6] & 0x0F) | 0x40;
@@ -35,7 +22,6 @@ impl SessionId {
         SessionId(bytes)
     }
 
-    /// `8-4-4-4-12` hex digits, either case, as `UUID(uuidString:)` takes them.
     pub fn parse(text: &str) -> Option<SessionId> {
         let groups: Vec<&str> = text.split('-').collect();
         let lengths: Vec<usize> = groups.iter().map(|g| g.len()).collect();
@@ -63,8 +49,6 @@ impl fmt::Display for SessionId {
     }
 }
 
-/// Sixteen bytes from the system's random source; on a system without `/dev/urandom` (not one the host
-/// runs on), from the standard library's randomly seeded hasher.
 fn random_bytes() -> [u8; 16] {
     use std::io::Read;
     let mut bytes = [0u8; 16];
@@ -88,15 +72,12 @@ fn random_bytes() -> [u8; 16] {
     bytes
 }
 
-/// One frame.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Frame {
     Json(Map<String, Value>),
     Data { session: SessionId, bytes: Vec<u8> },
 }
 
-/// `value` with every object's keys in sorted order. The workspace builds serde_json with
-/// `preserve_order` (through GPUI), so a Map keeps insertion order unless it is rebuilt sorted.
 pub fn sorted(value: &Value) -> Value {
     match value {
         Value::Object(object) => {
@@ -115,14 +96,12 @@ pub fn sorted(value: &Value) -> Value {
     }
 }
 
-/// The bytes for `frame`. JSON keys are sorted, as Swift's `.sortedKeys` writes them.
 pub fn encode(frame: &Frame) -> Vec<u8> {
     let mut payload = Vec::new();
     match frame {
         Frame::Json(object) => {
             payload.push(1);
             let value = sorted(&Value::Object(object.clone()));
-            // A Value always serializes; "{}" is the Swift fallback all the same.
             let text = serde_json::to_vec(&value).unwrap_or_else(|_| b"{}".to_vec());
             payload.extend_from_slice(&text);
         }
@@ -138,20 +117,16 @@ pub fn encode(frame: &Frame) -> Vec<u8> {
     out
 }
 
-/// A JSON frame.
 pub fn json(object: Map<String, Value>) -> Vec<u8> {
     encode(&Frame::Json(object))
 }
 
-/// Why a stream of frames ended.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ReadFailure {
     TooLarge,
     Malformed,
 }
 
-/// Collects bytes from a socket and yields whole frames. A frame that is too big or malformed ends the
-/// stream: nothing more is read.
 #[derive(Debug, Default)]
 pub struct FrameReader {
     buffer: Vec<u8>,
@@ -225,7 +200,6 @@ impl FrameReader {
     }
 }
 
-/// A JSON number as an integer, as Swift's `HostJSON.int` reads one (a fraction is cut off).
 pub fn int(value: Option<&Value>) -> Option<i64> {
     let value = value?;
     value

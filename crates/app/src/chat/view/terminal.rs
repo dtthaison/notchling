@@ -1,9 +1,3 @@
-//! The terminal in the Details Panel's place: the header's Terminal button opens it on a login
-//! shell in the selected session's folder. Tabs along its top (+ opens another, × ends one), Expand
-//! gives it the conversation's room as well, Minimize puts it back, and Close hides it with its
-//! shells still running. Each shell is the engine's `Pty` with a `TerminalScreen` fed from it by a
-//! thread of its own; the view redraws when the screen changed. The pure part is `chat::terminal`.
-
 use std::cell::Cell;
 use std::path::Path;
 use std::rc::Rc;
@@ -35,43 +29,29 @@ use crate::chat::terminal::{
 };
 use crate::mac::gate;
 
-/// Set, a render draws the panel over a sample screen (`expanded` for the wide one).
 pub const RENDER_ENV: &str = "NOTCHLING_RENDER_TERMINAL";
 
-/// What the render's screen shows: a prompt in the colors a shell theme uses, and a command's output.
 const SAMPLE: &[u8] = b"\x1b[38;5;141mnotchling\x1b[0m \x1b[90mgit:(\x1b[31mmain\x1b[90m)\x1b[0m \x1b[32m\xe2\x9d\xaf\x1b[0m ls\r\nCargo.toml  \x1b[1;34mcrates\x1b[0m  \x1b[1;34mdocs\x1b[0m  README.md\r\n\x1b[38;5;141mnotchling\x1b[0m \x1b[90mgit:(\x1b[31mmain\x1b[90m)\x1b[0m \x1b[32m\xe2\x9d\xaf\x1b[0m ";
 
-/// The panel's width beside the conversation, before the window narrows it.
 const WIDTH: f32 = 480.0;
-/// The tab row's height, as the page panel's header.
 const HEADER: f32 = 36.0;
-/// The space around the grid.
 const PAD_X: f32 = 8.0;
 const PAD_Y: f32 = 6.0;
 
-/// One tab's shell. Dropping it hangs the shell up; its reader thread then ends and the last
-/// handle on the pty ends the child.
 pub struct Shell {
     screen: Arc<Mutex<TerminalScreen>>,
     pty: Arc<Pty>,
     stop: Arc<AtomicBool>,
     ended: Arc<AtomicBool>,
     dirty: Arc<AtomicBool>,
-    /// The folder, short (`~/go/src/app`) and as its last part for the tab.
     folder: String,
     name: String,
-    /// The rows and columns drawn last, so a change of size resizes the pty once.
     grid: Rc<Cell<(u16, u16)>>,
     focus: FocusHandle,
-    /// Text picked with the mouse, for ⌘C; a key typed into the shell clears it.
     selection: Rc<Cell<Option<Selection>>>,
-    /// A drag that started on the grid is going on.
     dragging: Rc<Cell<bool>>,
-    /// The grid's top left in the window, from the last paint, to turn mouse points into cells.
     origin: Rc<Cell<Point<Pixels>>>,
-    /// How many rows the view is scrolled back into the scrollback; typing goes back to 0.
     back: Rc<Cell<usize>>,
-    /// Wheel movement not yet a whole row, in points.
     wheel: Rc<Cell<f32>>,
 }
 
@@ -82,26 +62,21 @@ impl Drop for Shell {
     }
 }
 
-/// The terminal's state in the Chat window.
 #[derive(Default)]
 pub struct State {
     pub tabs: Tabs<Shell>,
     pub open: bool,
     pub expanded: bool,
-    /// The redraw loop, running while any shell is.
     ticking: bool,
-    /// The active tab takes the keyboard at the next draw (set where no window is at hand).
     pub focus_next: bool,
 }
 
 impl State {
-    /// Whether the panel takes the Details Panel's place (a page panel wins over it).
     pub fn shown(&self) -> bool {
         self.open && !self.tabs.is_empty()
     }
 }
 
-/// The user's login shell in `cwd`, read by a thread of its own.
 fn start(cwd: &str, home: &Path, cx: &mut Context<ChatView>) -> Result<Shell, String> {
     let program = std::env::var("SHELL")
         .ok()
@@ -196,13 +171,11 @@ fn start_program(
 }
 
 impl ChatView {
-    /// `--render`'s bench: opens the render's panel and starts the timer that redraws it.
     pub(crate) fn bench_terminal_start(&mut self, cx: &mut Context<Self>) {
         self.render_terminal(false, cx);
         self.tick_terminals(cx);
     }
 
-    /// `--render`'s bench: one more line on the active tab, marked changed as the pty reader does.
     pub(crate) fn bench_terminal_feed(&mut self) {
         let Some(shell) = self.terminal.tabs.active() else {
             return;
@@ -215,7 +188,6 @@ impl ChatView {
         shell.dirty.store(true, Ordering::Relaxed);
     }
 
-    /// The render's panel: two tabs on `/bin/cat`, which prints nothing, over the sample screen.
     pub(super) fn render_terminal(&mut self, expanded: bool, cx: &mut Context<Self>) {
         let home = self.root.home.clone();
         let cwd = home.to_string_lossy().into_owned();
@@ -233,9 +205,6 @@ impl ChatView {
         self.terminal.expanded = expanded;
     }
 
-    /// A menu command (`/mcp`, `/plugin`…) for a background job: a tab on `claude attach <job>`,
-    /// with the job's lane, that types the command once the session has drawn. The menu is then
-    /// the user's, with the keyboard, as in Claude Code's own terminal; closing the tab detaches.
     pub(super) fn open_menu_command(
         &mut self,
         job: &str,
@@ -280,8 +249,6 @@ impl ChatView {
         Ok(())
     }
 
-    /// A background shell's output in a terminal tab: `tail -f` on the file Claude Code writes,
-    /// from its first line and live while the command runs. Closing the tab stops only the tail.
     pub(super) fn open_shell_output(&mut self, name: &str, path: &str, cx: &mut Context<Self>) {
         let home = self.root.home.clone();
         let cwd = self
@@ -312,9 +279,6 @@ impl ChatView {
         cx.notify();
     }
 
-    /// Run on a code block whose command asks for input: a tab on the user's login shell
-    /// (`zsh -ilc`, so their PATH and aliases are there) running `command` in the session's folder.
-    /// The user types the secret or password there; it never goes into the conversation.
     pub(super) fn open_command_terminal(&mut self, command: &str, cx: &mut Context<Self>) {
         let home = self.root.home.clone();
         let cwd = self
@@ -341,14 +305,12 @@ impl ChatView {
         cx.notify();
     }
 
-    /// The keyboard to the active tab, when a call without a window asked for it.
     pub(super) fn take_terminal_focus(&mut self, window: &mut Window) {
         if std::mem::take(&mut self.terminal.focus_next) {
             self.focus_terminal(window);
         }
     }
 
-    /// The header's Terminal button: shows the panel (opening a first shell), or hides it.
     pub(super) fn toggle_terminal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.terminal.shown() {
             self.terminal.open = false;
@@ -362,7 +324,6 @@ impl ChatView {
         if self.page.is_open() {
             self.close_page(cx);
         }
-        // They share the Details Panel's place.
         if self.simulator.shown() {
             self.toggle_simulator(cx);
         }
@@ -370,7 +331,6 @@ impl ChatView {
         cx.notify();
     }
 
-    /// + : another shell, in the selected session's folder.
     pub(super) fn add_terminal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let cwd = self
             .selected_session()
@@ -407,7 +367,6 @@ impl ChatView {
         }
     }
 
-    /// Whether the keyboard is in a terminal, so the window's own keys (Esc stops a turn) keep out.
     pub(super) fn terminal_has_keys(&self, window: &Window) -> bool {
         self.terminal.shown()
             && self
@@ -417,7 +376,6 @@ impl ChatView {
                 .is_some_and(|s| s.focus.is_focused(window))
     }
 
-    /// Redraws while the shells write, 30 times a second at most; stops once none is left.
     fn tick_terminals(&mut self, cx: &mut Context<Self>) {
         if self.terminal.ticking || self.terminal.tabs.is_empty() {
             return;
@@ -434,7 +392,6 @@ impl ChatView {
                         changed |= shell.dirty.swap(false, Ordering::Relaxed);
                     }
                     if changed {
-                        // The panel is drawn by the root: the cached parts have no news.
                         view.redraw_chrome(cx);
                     }
                     let more = !view.terminal.tabs.is_empty();
@@ -465,7 +422,6 @@ fn tool(
             PartState::Rest,
             a,
         )
-        // Square, as the Chat header's buttons.
         .flex_shrink_0()
         .size(px(HEADER_BUTTON))
         .px(px(0.0)),
@@ -475,7 +431,6 @@ fn tool(
     .flex_shrink_0()
 }
 
-/// The tab row: each tab's name and folder with its ×, then +, then Expand or Minimize and Close.
 fn header(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Div {
     let active = view.terminal.tabs.active_index();
     let mut tabs = div()
@@ -486,13 +441,8 @@ fn header(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Div {
         .items_center()
         .gap(px(4.0));
     for (i, (title, shell)) in view.terminal.tabs.iter().enumerate() {
-        // A tab is its name only, at most 120 pt wide. Its × sits over the end of the name, on a
-        // patch of the tab's own fill so the name runs under it: always on the active tab, on the
-        // others while the pointer is over them.
         let group = SharedString::from(format!("term-tab-{i}"));
         let is_active = i == active;
-        // No tooltip of its own: one inside the tab's tooltip made the two take turns while the
-        // pointer rested on the ×, redrawing each time, and the cursor flickered.
         let button = icon_button(
             gpui::ElementId::Name(format!("term-close-{i}").into()),
             Icon::Close,
@@ -510,7 +460,6 @@ fn header(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Div {
             cx.stop_propagation();
             this.close_terminal(i, window, cx);
         }));
-        // Rounded as the tab: GPUI clips children to the tab's rectangle, not its corners.
         let patch = div()
             .h_full()
             .rounded_r(px(6.0))
@@ -532,7 +481,6 @@ fn header(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Div {
             .bottom_0()
             .right_0()
             .rounded_r(px(6.0))
-            // Under an inactive tab's half fill, the panel's own color, so the name stays hidden.
             .when(!is_active, |c| {
                 c.fill(Ink::Window, a)
                     .invisible()
@@ -612,8 +560,6 @@ fn header(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Div {
         .child(hide)
 }
 
-/// The active shell's screen: rows of styled runs, the cursor over them, and a canvas that sizes
-/// the pty to the room it has.
 fn screen(shell: &Shell, a: Appearance, window: &Window, chat: WeakEntity<ChatView>) -> AnyElement {
     let fg = Ink::Text.color(a);
     let bg = Ink::Window.color(a);
@@ -696,7 +642,6 @@ fn screen(shell: &Shell, a: Appearance, window: &Window, chat: WeakEntity<ChatVi
         |bounds, _, _| bounds,
         move |_, bounds, window, _| {
             origin.set(bounds.origin + Point::new(px(PAD_X), px(PAD_Y)));
-            // A drag goes on outside the grid too, so these listen to the whole window.
             {
                 let (origin, dragging, picked, size) = (
                     origin.clone(),
@@ -774,7 +719,6 @@ fn screen(shell: &Shell, a: Appearance, window: &Window, chat: WeakEntity<ChatVi
             let cols = cells.first().map_or(0, Vec::len);
             let (row, col) = boundary_at(f32::from(at.x), f32::from(at.y), cells.len(), cols);
             let line = cells.get(row).map(Vec::as_slice).unwrap_or(&[]);
-            // A second click takes the word under it, a third the whole line.
             let (from, to) = match event.click_count {
                 1 => (col, col),
                 2 => {
@@ -806,7 +750,6 @@ fn screen(shell: &Shell, a: Appearance, window: &Window, chat: WeakEntity<ChatVi
         let chat = chat.clone();
         move |event: &ScrollWheelEvent, _: &mut Window, cx: &mut gpui::App| {
             let screen = screen.lock().unwrap_or_else(|e| e.into_inner());
-            // A full-screen program (an editor, `less`) has no scrollback of its own here.
             if screen.alt_screen() {
                 return;
             }
@@ -847,7 +790,6 @@ fn screen(shell: &Shell, a: Appearance, window: &Window, chat: WeakEntity<ChatVi
                 (s.app_cursor_keys(), s.bracketed_paste())
             };
             let out = if m.platform {
-                // ⌘C copies the selection, ⌘V pastes; the other ⌘ keys stay the window's and the menu's.
                 match keys.key.as_str() {
                     "c" => {
                         if let Some(s) = picked.get().filter(|s| !s.is_empty()) {
@@ -898,7 +840,6 @@ fn screen(shell: &Shell, a: Appearance, window: &Window, chat: WeakEntity<ChatVi
         .into_any_element()
 }
 
-/// `user@host`, as a shell prompt shows it, for a tab's tip.
 fn who() -> &'static str {
     static WHO: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     WHO.get_or_init(|| {
@@ -909,7 +850,6 @@ fn who() -> &'static str {
     })
 }
 
-/// The rows on show: the live screen, or older rows when scrolled back.
 fn on_show(screen: &TerminalScreen, back: &Cell<usize>) -> Vec<Vec<TermCell>> {
     if back.get() == 0 {
         return screen.cells().to_vec();
@@ -918,7 +858,6 @@ fn on_show(screen: &TerminalScreen, back: &Cell<usize>) -> Vec<Vec<TermCell>> {
     shown_rows(screen.scrollback().iter(), screen.cells(), back.get())
 }
 
-/// The panel while it shows: beside the conversation, or across it when expanded.
 pub fn render(
     view: &ChatView,
     a: Appearance,
@@ -962,7 +901,6 @@ pub fn render(
     )
 }
 
-/// The header's Terminal button, raised while the panel shows.
 pub fn button(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> impl IntoElement {
     let kind = if view.terminal.shown() {
         ButtonKind::Secondary

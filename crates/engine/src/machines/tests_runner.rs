@@ -1,18 +1,9 @@
-//! The real `ProcessRunner` with harmless local commands only, and the scripted fake (Swift
-//! `MachinesRunnerTests`): the environment a check runs in, what a timeout leaves behind, stdin, the
-//! output cap. Nothing here starts ssh, `gh`, `git` or `sudo`.
-//!
-//! Not ported: the lost-exit-status case (std reaps its child itself, so there is no way to lose
-//! it), and the runner-without-stdin-support case (the trait has one `run`, so a runner cannot
-//! drop a stdin).
-
 use super::fakes::{lock, TempDir};
 use super::process::{ProcessRunner, CUT_NOTICE, OUTPUT_CAP};
 use super::runner::{argv, Call, Channel, CommandResult, Refusing, Runner, ScriptedRunner};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-/// Whether the process is running. A zombie (ended, waiting to be reaped) is not.
 fn is_running(pid: i32) -> bool {
     let out = std::process::Command::new("/bin/ps")
         .args(["-o", "stat=", "-p", &pid.to_string()])
@@ -22,7 +13,6 @@ fn is_running(pid: i32) -> bool {
     !stat.is_empty() && !stat.starts_with('Z')
 }
 
-/// The pids of `pids` still running after they had up to `secs` to go.
 fn still_running(pids: &[i32], secs: u64) -> Vec<i32> {
     let end = Instant::now() + Duration::from_secs(secs);
     let mut alive: Vec<i32> = pids.iter().copied().filter(|p| is_running(*p)).collect();
@@ -33,8 +23,6 @@ fn still_running(pids: &[i32], secs: u64) -> Vec<i32> {
     alive
 }
 
-/// What a test script wrote about its own processes. The tests find their children by these pids and
-/// never by a process name, which another test run on the same machine can share.
 #[derive(Default, Debug)]
 struct Spawned {
     shell: Option<i32>,
@@ -59,7 +47,6 @@ impl Spawned {
     }
 }
 
-/// `shell <pid>` and `child <pid> [<process group>]` lines, as the scripts below write them.
 fn spawned(file: &std::path::Path) -> Spawned {
     let mut found = Spawned::default();
     let text = std::fs::read_to_string(file).unwrap_or_default();
@@ -79,8 +66,6 @@ fn spawned(file: &std::path::Path) -> Spawned {
     found
 }
 
-/// Writes the shell's pid, then starts two sleeps in the background and writes each one's pid and
-/// process group.
 fn two_sleeps(file: &std::path::Path, prefix: &str) -> String {
     let f = format!("'{}'", file.display());
     let note = r#"echo "child $! $(ps -o pgid= -p $! | tr -d ' ')""#;
@@ -138,7 +123,6 @@ fn timeout_kills_the_whole_process_group() {
         "the run waited for the sleeps to end"
     );
     assert_eq!(seen.children.len(), 2, "both sleeps started");
-    // the sleeps are in the group the runner made for the shell, so a kill of the group reaches them
     assert!(seen.shell.is_some());
     assert!(
         seen.children.iter().all(|c| c.1 == seen.shell),
@@ -167,8 +151,6 @@ fn timeout_kills_a_group_that_ignores_term() {
         seen.children.iter().all(|c| c.1 == seen.shell),
         "a sleep is outside the shell's group: {seen:?}"
     );
-    // SIGTERM is ignored by the shell and (inherited) by its sleeps: only the kill that follows
-    // ends them
     let left = still_running(&seen.all(), 5);
     seen.kill_all();
     assert!(
@@ -195,8 +177,6 @@ fn an_orphan_holding_the_pipe_does_not_hold_the_result() {
     assert!(start.elapsed() < Duration::from_secs(8));
 }
 
-// MARK: stdin, streaming, the cap, orphans of a normal exit
-
 #[test]
 fn stdin_reaches_the_command() {
     let call = Call::secs(argv(&["/bin/cat"]), 5).stdin(b"line one\nline two".to_vec());
@@ -216,7 +196,6 @@ fn a_child_that_exits_without_reading_stdin_does_not_hang() {
 
 #[test]
 fn a_full_stdout_pipe_does_not_block_the_stdin_write() {
-    // cat echoes 4 MiB back while we are still writing it; the output is capped at 2 MiB
     let call = Call::secs(argv(&["/bin/cat"]), 20).stdin(vec![b'a'; 4 * 1024 * 1024]);
     let r = ProcessRunner.run(&call);
     assert_eq!(r.code, 0);
@@ -256,7 +235,6 @@ fn output_streams_while_the_command_runs() {
 
 #[test]
 fn a_multi_byte_character_split_across_reads_is_not_broken() {
-    // "é" is two bytes; the shell writes the first byte, waits, then the second
     let (call, chunks) = collecting(sh(r"printf '\303'; sleep 0.5; printf '\251'", 10));
     let r = ProcessRunner.run(&call);
     assert_eq!(r.out, "\u{e9}");
@@ -326,8 +304,6 @@ fn a_stdin_value_is_not_in_argv_environment_or_result() {
         "Call's Debug shows only the stdin's length"
     );
 }
-
-// MARK: the fakes
 
 #[test]
 fn the_scripted_runner_answers_the_first_matching_rule_and_records_every_call() {

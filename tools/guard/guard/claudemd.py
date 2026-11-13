@@ -1,7 +1,3 @@
-"""GUARD-CLAUDE-MD: agent instructions live in AGENTS.md, so the only tracked CLAUDE*.md is the root
-CLAUDE.md, and it holds exactly `@AGENTS.md` and a newline. A second CLAUDE.md anywhere (or a
-`CLAUDE.local.md`, or a different case) would be one more instruction source nobody reviews."""
-
 from __future__ import annotations
 
 import fnmatch

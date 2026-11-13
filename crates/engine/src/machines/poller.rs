@@ -1,11 +1,3 @@
-//! Asking every worker machine for `worker status --json` (Swift `MachinePoller` and
-//! `MachineHealth`).
-//!
-//! The caller runs [`MachinePoller::refresh`] on a timer ([`INTERVAL_SECS`]) and keeps the answers
-//! for the Machines view. Nothing here starts a thread of its own beyond the round's parallel ssh
-//! calls, and it never watches the Mac's sleep: the caller stops its timer on sleep and, on wake,
-//! calls `refresh(true)` once and starts the timer again.
-
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex, MutexGuard};
 
@@ -14,15 +6,12 @@ use super::runner::{Call, CommandResult, Runner};
 use super::shell;
 use super::status::{NeedsYouEntry, WorkerStatus};
 
-/// The seconds between two polls.
 pub const INTERVAL_SECS: u64 = 60;
 const COMMAND_TIMEOUT_SECS: u64 = 30;
 
-/// What the last poll of a machine returned: a status, or the error that stopped it.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct LastReport {
     pub status: Option<WorkerStatus>,
-    /// Seconds since 1970.
     pub at: Option<f64>,
     pub error: Option<String>,
 }
@@ -44,13 +33,11 @@ impl LastReport {
         }
     }
 
-    /// The poll got a status back and reported no error.
     pub fn succeeded(&self) -> bool {
         self.status.is_some() && self.error.is_none()
     }
 }
 
-/// The health words the Machines view shows. Pure: the poller supplies the reports.
 pub mod health {
     use super::{LastReport, WorkerStatus};
 
@@ -59,13 +46,6 @@ pub mod health {
     pub const RESTARTED: &str = "restarted, waiting for unlock";
     pub const PAUSED: &str = "production busy, paused";
 
-    /// One word for a machine.
-    /// - `file_vault`: whether the machine is a FileVault Mac, which stops at the unlock screen
-    ///   after a reboot. A VPS never gets `restarted, waiting for unlock`.
-    /// - `last`: the poll just made.
-    /// - `previous`: the report before it that held a status (the poller keeps the last good one,
-    ///   so a run of failed polls still sees what the machine was doing before it went quiet).
-    /// - `_now`: unused today; kept so a rule that depends on report age needs no signature change.
     pub fn word(
         file_vault: bool,
         last: &LastReport,
@@ -102,8 +82,6 @@ pub mod health {
         OFFLINE
     }
 
-    /// "GitHub token on m1 expires in 14 days" once the token has 14 days or fewer; `None` before
-    /// that or when the worker does not know the expiry.
     pub fn token_warning(status: &WorkerStatus) -> Option<String> {
         let days = status.token_expires_in_days.filter(|d| *d <= 14)?;
         let name = if status.machine.is_empty() {
@@ -119,7 +97,6 @@ pub mod health {
     }
 }
 
-/// The notification for the questions that were already waiting when polling began.
 pub fn waiting_text(count: usize) -> String {
     if count == 1 {
         "1 question is waiting".into()
@@ -138,10 +115,8 @@ struct State {
     reports: BTreeMap<String, LastReport>,
     previous: BTreeMap<String, LastReport>,
     announced: BTreeSet<String>,
-    /// Machines with a good poll behind them.
     baselined: BTreeSet<String>,
     refreshing: bool,
-    /// A refresh asked for while one was running, to run when that one ends (the wake after a sleep).
     refresh_queued: bool,
 }
 
@@ -158,7 +133,6 @@ fn lock(m: &Mutex<State>) -> MutexGuard<'_, State> {
     m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-/// Gives `refreshing` back even if a poll panics.
 struct Refreshing<'a>(&'a Mutex<State>);
 
 impl Drop for Refreshing<'_> {
@@ -168,7 +142,6 @@ impl Drop for Refreshing<'_> {
 }
 
 impl MachinePoller {
-    /// `clock` gives the seconds since 1970 stamped on each report.
     pub fn new(
         runner: Arc<dyn Runner>,
         machines: impl Fn() -> Vec<Machine> + Send + Sync + 'static,
@@ -184,8 +157,6 @@ impl MachinePoller {
         }
     }
 
-    /// Fires once per (machine, repo, issue) the first time it shows in a status, until the
-    /// poller is dropped. An item that leaves and comes back does not fire again.
     pub fn on_new_needs_you(
         mut self,
         f: impl Fn(&Machine, &NeedsYouEntry) + Send + Sync + 'static,
@@ -194,10 +165,6 @@ impl MachinePoller {
         self
     }
 
-    /// Fires once for the first good poll of each machine (all machines of one round together)
-    /// with the number of questions that were already waiting, instead of announcing them one by
-    /// one: Notchling relaunches on every install, and each launch would else ring once per open
-    /// question. Not called for none.
     pub fn on_questions_waiting(
         mut self,
         f: impl Fn(usize) + Send + Sync + 'static,
@@ -206,7 +173,6 @@ impl MachinePoller {
         self
     }
 
-    /// The latest poll of each machine by name: a status, or the error that stopped it.
     pub fn reports(&self) -> BTreeMap<String, LastReport> {
         lock(&self.state).reports.clone()
     }
@@ -215,9 +181,6 @@ impl MachinePoller {
         lock(&self.state).reports.get(machine).cloned()
     }
 
-    /// The report before the latest one that held a status. A failed poll leaves it as it was, so
-    /// a run of failures still shows what the machine was doing before it went quiet (see
-    /// [`health::word`]).
     pub fn previous(&self) -> BTreeMap<String, LastReport> {
         lock(&self.state).previous.clone()
     }
@@ -226,10 +189,6 @@ impl MachinePoller {
         lock(&self.state).previous.get(machine).cloned()
     }
 
-    /// Polls every machine at once. A poll that is still running makes this a no-op, unless
-    /// `queue_if_busy`: then one more poll runs when it ends. The wake from sleep asks that way,
-    /// because the poll in flight at sleep may be stuck on a connection that died, and its answer
-    /// is a stale "unreachable". Blocks until the polls it ran are done.
     pub fn refresh(&self, queue_if_busy: bool) {
         {
             let mut s = lock(&self.state);
@@ -251,9 +210,6 @@ impl MachinePoller {
         }
     }
 
-    /// One round, without the busy check: ask every machine that has an sd worker job and an sd
-    /// path (a machine without either has nothing to ask: `python3 '' worker status` would only
-    /// fail), keep the answers, and fire the callbacks.
     pub fn poll_once(&self) {
         let list: Vec<Machine> = (self.machines)()
             .into_iter()
@@ -265,7 +221,6 @@ impl MachinePoller {
                 .map(|m| {
                     let runner = &self.runner;
                     scope.spawn(move || {
-                        // `shell::path` lets a `~/…` path expand for the worker user
                         let script = format!(
                             "{} {} worker status --json",
                             shell::path(m.python()),
@@ -322,7 +277,6 @@ impl MachinePoller {
                 }
             }
         }
-        // the callbacks run outside the lock: they may ask for the reports
         if let Some(f) = &self.on_new_needs_you {
             for (m, e) in &announce {
                 f(m, e);
@@ -348,7 +302,6 @@ fn report_from(result: &CommandResult, now: f64) -> LastReport {
         },
         124 => LastReport::failed("timed out", now),
         127 => {
-            // 127 is also what the shell on the machine says for a missing python or `sd.py`
             let text = result.err.trim();
             if text == "/usr/bin/ssh not found" {
                 return LastReport::failed("ssh not found", now);

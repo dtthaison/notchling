@@ -1,18 +1,13 @@
-//! `index.html` in the library: a plain list of everything, regenerated after each save, so the
-//! saved pages open from disk whatever account is active.
-
 use super::clock;
 use super::content::escape;
 use super::library::{PageLibrary, PagesError};
 use crate::search::PageEntry;
 
-/// Writes the list page for `list`.
 pub(crate) fn write(lib: &PageLibrary, list: &[PageEntry]) -> Result<(), PagesError> {
     notchling_platform::files::write_private_no_follow(&lib.index_path(), html(list).as_bytes())?;
     Ok(())
 }
 
-/// The list page's text, newest first.
 pub fn html(list: &[PageEntry]) -> String {
     let mut sorted: Vec<&PageEntry> = list.iter().collect();
     sorted.sort_by(|a, b| {
@@ -58,7 +53,6 @@ th,td{{text-align:left;padding:6px 12px 6px 0;border-bottom:1px solid #8884;vert
     )
 }
 
-/// Percent-encodes everything but the characters a URL path allows unescaped.
 fn percent_encode(s: &str) -> String {
     let mut out = String::new();
     for b in s.bytes() {

@@ -1,9 +1,6 @@
-//! Ports of `GitInfoTests`, plus recorded git output and the commands `read` runs.
-
 use super::*;
 use crate::control::launcher::{FakeLauncher, LaunchOutput};
 
-// Port of GitInfoTests.testStatus.
 #[test]
 fn status() {
     let text = "## feat/data-connectors...origin/feat/data-connectors [ahead 2, behind 1]\n M src/app.ts\nA  src/new.ts\n D old.ts\nR  a/before.ts -> a/after.ts\n?? notes.md\nUU conflict.ts";
@@ -30,7 +27,6 @@ fn status() {
     );
 }
 
-// Port of GitInfoTests.testBranchWithoutUpstream.
 #[test]
 fn branch_without_upstream() {
     assert_eq!(parse_status("## main\n").branch.as_deref(), Some("main"));
@@ -47,7 +43,6 @@ fn branch_without_upstream() {
     );
 }
 
-// Port of GitInfoTests.testNumstat.
 #[test]
 fn numstat() {
     let mut info =
@@ -64,7 +59,6 @@ fn numstat() {
     assert_eq!(info.changes[2].added, None);
 }
 
-// Port of GitInfoTests.testBranches.
 #[test]
 fn branches() {
     let text = [
@@ -110,8 +104,6 @@ fn status_letters() {
     assert_eq!(letters("MM"), "M");
 }
 
-// Output recorded from `git status --porcelain=v1 --branch --untracked-files=all` on a real
-// checkout, `git diff --numstat HEAD` and `git log -1`, kept as strings.
 const STATUS: &str = "## worktree-agent-a1b6a...origin/phase7-m3 [ahead 3]\n M crates/engine/src/lib.rs\n?? crates/engine/src/control/mod.rs\n?? crates/engine/src/control/plan.rs\n";
 const NUMSTAT: &str = "1\t0\tcrates/engine/src/lib.rs\n";
 const LOG: &str =
@@ -198,7 +190,6 @@ fn not_a_working_copy_is_none() {
     fake.push_output(Ok(LaunchOutput::failed(128, "fatal: not a git repository")));
     assert_eq!(read("/tmp/x", &fake), None);
     assert_eq!(read("", &fake), None);
-    // Warnings on stderr never reach the parser.
     let noisy = FakeLauncher::new();
     noisy.push_output(Ok(LaunchOutput {
         code: 0,

@@ -1,6 +1,3 @@
-//! The conversation reader finds the open AskUserQuestion, as the notch's snapshot reader does, so
-//! Chat reads a transcript once per load.
-
 use notchling_engine::transcript::conversation::Parser;
 use notchling_engine::transcript::snapshot::{PendingQuestion, QuestionItem};
 
@@ -56,7 +53,6 @@ fn the_last_question_wins() {
         pending(&lines, Parser::new()),
         Some(expected("q2", "Second?"))
     );
-    // An answer to the first doesn't close the second.
     let lines = [
         ask("q1", "First?", ""),
         ask("q2", "Second?", ""),

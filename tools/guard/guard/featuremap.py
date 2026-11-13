@@ -1,8 +1,3 @@
-"""GUARD-FEATURE-MAP: every folder under `crates/*/src/` is named in docs/feature-map.md, so an agent
-looking for where a feature lives, which tests cover it and whether it may merge on its own finds it
-there. A folder counts as named when the map has its full path (`crates/app/src/notch/`) anywhere, or
-`src/notch/` in a table row that also names its crate (`crates/app/`)."""
-
 from __future__ import annotations
 
 import re
@@ -25,7 +20,6 @@ def _tracked(repo: Path) -> List[str]:
 
 
 def folders(tracked: List[str]) -> List[str]:
-    """`crates/<crate>/src/<folder>/` for each folder that holds a tracked file, sorted."""
     found: Set[str] = set()
     for path in tracked:
         parts = path.split("/")
@@ -35,7 +29,6 @@ def folders(tracked: List[str]) -> List[str]:
 
 
 def named(text: str) -> Set[str]:
-    """Every `crates/<crate>/src/<folder>/` the map names, in full or as `src/<folder>/` in its crate's row."""
     out = {f"crates/{c}/src/{d}/" for c, d in FULL.findall(text)}
     for line in text.splitlines():
         if not line.lstrip().startswith("|"):

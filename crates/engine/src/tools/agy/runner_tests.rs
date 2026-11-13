@@ -27,7 +27,6 @@ impl Events {
             .collect()
     }
 
-    /// Waits for a change matching `pred`; panics after ten seconds.
     fn wait(&self, what: &str, pred: impl Fn(&Change) -> bool) -> Change {
         let end = Instant::now() + Duration::from_secs(10);
         loop {
@@ -128,7 +127,6 @@ fn opening_a_session_initializes_without_fs_or_terminal_and_loads_the_history() 
         "the load result lists Model, Thinking Level, Mode"
     );
     assert_eq!(r.folder(SESSION).as_deref(), Some("/work"));
-    // A second open of an open session starts no second process.
     r.open(SESSION, "/work", false).unwrap();
     assert_eq!(rig.spawner.spawned().len(), 1);
 }
@@ -157,13 +155,11 @@ fn a_prompt_runs_a_turn_holds_the_permission_and_never_approves_it_itself() {
         p.options.iter().map(|o| o.id.as_str()).collect::<Vec<_>>(),
         ["allow", "deny"]
     );
-    // Nothing answered it: no response written, the turn is still open.
     std::thread::sleep(Duration::from_millis(100));
     assert!(process.written().iter().all(|m| m.get("method").is_some()));
     assert!(r.is_working(SESSION));
     assert_eq!(r.permission(SESSION).unwrap().rpc_text(), "1");
 
-    // Wrong id, wrong option: refused, and the permission still waits.
     assert!(matches!(
         r.answer(SESSION, "2", Some("allow")),
         Err(RunError::Refused(_))
@@ -223,7 +219,6 @@ fn a_prompt_runs_a_turn_holds_the_permission_and_never_approves_it_itself() {
         sent["params"]["prompt"][0],
         json!({"type": "text", "text": "Change the text in hello.txt"})
     );
-    // The next turn may go.
     assert!(r.prompt(SESSION, "next", "/work").is_ok());
 }
 
@@ -251,7 +246,6 @@ fn stopping_answers_a_waiting_permission_as_cancelled_then_cancels_the_turn() {
         ),
         1
     );
-    // Cancel on an idle session does nothing.
     let idle = rig_with(FakeSpawner::replaying(RECORDING), Some("/fake/agy"));
     let p = loaded(&idle);
     let before = p.written().len();
@@ -330,7 +324,6 @@ fn a_process_that_dies_mid_turn_ends_the_turn_with_its_error_and_the_session_reo
     ));
     assert!(!rig.runner.is_open(SESSION));
     assert!(!rig.runner.is_working(SESSION));
-    // Another session is not touched, and this one comes back with a fresh process.
     assert!(rig.runner.prompt(SESSION, "again", "/work").is_ok());
     assert_eq!(rig.spawner.spawned().len(), 2);
 }
@@ -355,7 +348,6 @@ fn a_failed_load_ends_waiting_sends_and_is_retried_by_a_new_send() {
     assert_eq!(r.load_error("x").as_deref(), Some("no such conversation"));
     assert!(!r.is_working("x"), "the send that waited is over");
     assert!(rig.spawner.spawned()[0].killed(), "the process is closed");
-    // Sending again retries at once, with a new process.
     r.prompt("x", "hello again", "/work").unwrap();
     assert_eq!(rig.spawner.spawned().len(), 2);
 }
@@ -382,7 +374,6 @@ fn a_new_session_gets_its_id_from_session_new() {
     assert_eq!(rig.runner.config("made-1")[0].current_name(), "Model One");
     let new = &rig.spawner.spawned()[0].requests("session/new")[0];
     assert_eq!(new["params"], json!({"cwd": "/work", "mcpServers": []}));
-    // It takes a prompt without another process.
     rig.runner.prompt("made-1", "hi", "/work").unwrap();
     assert_eq!(rig.spawner.spawned().len(), 1);
 }
@@ -446,7 +437,6 @@ fn options_are_checked_against_the_sessions_own_list_and_applied_from_the_reply(
     ok(&process, &sent[0], json!({}));
     rig.events.wait("Options", |c| *c == Change::Options);
     assert_eq!(r.config(SESSION)[0].current, other.value);
-    // A refusal from the agent is reported, and the value stays.
     let before = r.config(SESSION);
     r.set_option(SESSION, &first.id, &first.current).unwrap();
     let again = process.requests("session/set_config_option");
@@ -465,7 +455,6 @@ fn an_idle_process_is_closed_after_ten_minutes_but_not_while_working_or_asking()
     rig.clock.fetch_add(599, Ordering::SeqCst);
     r.reap();
     assert!(r.is_open(SESSION), "not yet");
-    // Looking at it (counted as use) starts the ten minutes again; peeking does not.
     r.conversation(SESSION);
     rig.clock.fetch_add(300, Ordering::SeqCst);
     r.peek_conversation(SESSION);
@@ -475,7 +464,6 @@ fn an_idle_process_is_closed_after_ten_minutes_but_not_while_working_or_asking()
     assert!(process.killed());
     rig.events.wait("Closed", |c| *c == Change::Closed);
 
-    // A session with a permission waiting is kept however long it sits.
     r.prompt(SESSION, "edit", "/work").unwrap();
     rig.events.wait("a permission", |c| {
         matches!(c, Change::PermissionPending(_))
@@ -527,7 +515,6 @@ fn a_second_permission_cancels_the_first_instead_of_leaving_it_hanging() {
         .unwrap();
     assert_eq!(first["result"]["outcome"]["outcome"], "cancelled");
     assert_eq!(rig.runner.permission(SESSION).unwrap().rpc_text(), "b");
-    // An integer id is answered as an integer.
     process.push(&json!({"jsonrpc":"2.0","method":"session/request_permission","id":7,
         "params":{"toolCall":{"toolCallId":"d","name":"x","title":"x"},"options":[{"optionId":"deny","name":"Deny","kind":"reject_once"}]}}));
     rig.events.wait(
@@ -554,7 +541,6 @@ fn ask(process: &FakeHandle, id: &str) {
     );
 }
 
-/// Where in `events` the change `pred` picks first came, and that it came.
 fn index_of(events: &[Change], pred: impl Fn(&Change) -> bool) -> usize {
     events
         .iter()

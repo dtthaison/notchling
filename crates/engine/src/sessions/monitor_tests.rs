@@ -1,11 +1,9 @@
-//! `Monitor::poll` over temp-dir trees. Nothing reads the real `~/.claude`.
-
 use super::agent::{Agent, AgentGroup, AgentTarget};
 use super::lanes::Roots;
 use super::monitor::{Monitor, Probes};
 use super::testutil::TempDir;
 
-const NOW: i64 = 1_793_700_000_000; // 2026-11-03
+const NOW: i64 = 1_793_700_000_000;
 
 fn alive(_: u32) -> bool {
     true
@@ -188,7 +186,6 @@ fn an_ended_session_becomes_exited_and_stays() {
     let mut monitor = Monitor::default();
     let first = poll(&mut monitor, &w.roots, &[]);
     assert_eq!(first[0].group, AgentGroup::Working);
-    // The process died: its file is still there but the pid is gone.
     let second = poll(&mut monitor, &w.roots, &[100]);
     assert_eq!(second.len(), 1);
     assert_eq!(
@@ -243,7 +240,6 @@ fn missing_folders_give_an_empty_list() {
     let _ = (alive(1), no_host(1));
 }
 
-// The default liveness probe: `kill(pid, 0) == 0 || errno == EPERM`, as AgentMonitor.isAlive.
 #[cfg(unix)]
 mod default_probe {
     use super::Probes;
@@ -266,7 +262,6 @@ mod default_probe {
 
     #[test]
     fn pid_zero_and_pids_beyond_the_pid_range_are_dead() {
-        // kill(0, 0) and kill(-n, 0) would probe process groups, not a process.
         let alive = Probes::from_proc().is_alive;
         assert!(!alive(0));
         assert!(!alive(u32::MAX));

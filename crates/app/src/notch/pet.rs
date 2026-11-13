@@ -1,32 +1,15 @@
-//! The pet, pure: Claude's ✻ rolling round the outside of the camera housing while sessions work or
-//! wait (`PetView` with its `Walk`, as the Swift app first had it). Its path is computed from the
-//! black shape's size, never from the clock: the clock only says how far along the path to move,
-//! and [`Walk`] keeps that place between frames so it carries on rather than jumping. While
-//! sessions need you it tows a badge with their number a rope's length behind; at each end it
-//! rests and the badge swings round the outside to trail it the other way.
-//!
-//! Coordinates are the shape's own: x from its left edge (flares included), y down from the top
-//! of the screen.
-
 use std::f64::consts::PI;
 
 use super::layout::{Size, FLARE};
 
-/// The pet's radius.
 pub const RADIUS: f64 = 8.0;
-/// The path's highest point, just below the top of the screen.
 pub const TOP: f64 = 10.0;
-/// How far behind the pet the badge trails, along the path.
 pub const ROPE: f64 = 21.0;
-/// Points per second: faster while a session needs you.
 pub const SPEED: f64 = 36.0;
 pub const SPEED_NEEDS: f64 = 60.0;
-/// How long it rests at each end while it turns round, in seconds.
 pub const REST: f64 = 0.7;
-/// A stalled frame moves it at most this long's worth.
 pub const MAX_STEP: f64 = 0.1;
 
-/// A point in the shape's coordinates.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Point {
     pub x: f64,
@@ -39,8 +22,6 @@ impl Point {
     }
 }
 
-/// The outline of the camera pushed out by the pet's radius: down the left edge, round the
-/// bottom-left corner, along underneath, round the bottom-right corner and up the right edge.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Track {
     left: f64,
@@ -75,14 +56,12 @@ impl Track {
         2.0 * self.side + 2.0 * self.arc + self.floor
     }
 
-    /// The point `d` along the path.
     pub fn point(&self, d: f64) -> Point {
         let r = CORNER + self.out;
         let (side, arc, floor) = (self.side, self.arc, self.floor);
         if d < side {
             Point::new(self.left - self.out, TOP + d)
         } else if d < side + arc {
-            // 180° to 90°; y points down.
             let a = PI - (d - side) / r;
             Point::new(
                 self.left + CORNER + a.cos() * r,
@@ -94,7 +73,6 @@ impl Track {
                 self.bottom + self.out,
             )
         } else if d < side + 2.0 * arc + floor {
-            // 90° to 0°.
             let a = PI / 2.0 - (d - side - arc - floor) / r;
             Point::new(
                 self.right - CORNER + a.cos() * r,
@@ -108,7 +86,6 @@ impl Track {
         }
     }
 
-    /// The unit vector pointing away from the camera at `d`.
     pub fn outward(&self, d: f64) -> Point {
         let (a, b) = (self.point(d - 1.0), self.point(d + 1.0));
         let (tx, ty) = (b.x - a.x, b.y - a.y);
@@ -116,20 +93,17 @@ impl Track {
         Point::new(-ty / len, tx / len)
     }
 
-    /// The pet ping-pongs between a rope's length from each end, so the badge always has room.
     fn bounds(&self) -> (f64, f64) {
         (ROPE, (self.length() - ROPE).max(ROPE))
     }
 }
 
-/// Turning round at an end: how far through, and which way the badge trailed before.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Turn {
     pub progress: f64,
     pub from: f64,
 }
 
-/// Where the pet is along the path and which way it heads.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Motion {
     pub d: f64,
@@ -147,17 +121,13 @@ impl Default for Motion {
     }
 }
 
-/// Keeps the pet's place between frames.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Walk {
     pub motion: Motion,
-    /// The clock at the last step, in seconds; `None` while it isn't rolling.
     last: Option<f64>,
 }
 
 impl Walk {
-    /// Moves the pet on to time `t` (seconds) along the path for `shape`. It moves only while
-    /// `rolling`, and the first rolling frame only notes the time, so it never leaps.
     pub fn step(&mut self, t: f64, rolling: bool, needs: bool, shape: Size) -> Motion {
         let track = Track::new(shape);
         let (lo, hi) = track.bounds();
@@ -201,13 +171,10 @@ fn advance(m: &mut Motion, dt: f64, speed: f64, lo: f64, hi: f64) {
     }
 }
 
-/// How far the pet has spun, as a wheel of its radius rolling `d`.
 pub fn spin(m: &Motion) -> f64 {
     m.d / RADIUS
 }
 
-/// Where the badge is: a rope's length behind the pet along the path. While turning it swings round
-/// the outside of the pet (away from the camera) from the old trailing side to the new one.
 pub fn badge(m: &Motion, shape: Size) -> Point {
     let track = Track::new(shape);
     let Some(turn) = m.turn else {
@@ -238,7 +205,6 @@ pub fn badge(m: &Motion, shape: Size) -> Point {
 mod tests {
     use super::*;
 
-    /// The collapsed shape of a 14" MacBook Pro: 185 + 2 × 8 by 32.
     const SHAPE: Size = Size::new(201.0, 32.0);
 
     fn close(a: Point, b: Point) -> bool {
@@ -248,15 +214,12 @@ mod tests {
     #[test]
     fn the_path_is_the_outline_pushed_out() {
         let t = Track::new(SHAPE);
-        // Side 32 - 10 - 10 = 12; arc π/2 × 20; floor 201 - 16 - 20 = 165.
         let arc = PI / 2.0 * 20.0;
         assert!((t.length() - (2.0 * 12.0 + 2.0 * arc + 165.0)).abs() < 1e-9);
         assert!(close(t.point(0.0), Point::new(8.0 - 10.0, TOP)));
-        // Along the floor it runs 10 below the shape.
         let mid = t.point(12.0 + arc + 82.5);
         assert!(close(mid, Point::new(8.0 + 10.0 + 82.5, 42.0)));
         assert!((mid.x - SHAPE.w / 2.0).abs() < 1e-9, "the floor's middle");
-        // It ends at the top of the right edge, mirroring the start.
         let end = t.point(t.length());
         assert!(close(end, Point::new(SHAPE.w - 8.0 + 10.0, TOP)));
     }
@@ -266,15 +229,12 @@ mod tests {
         let small = Track::new(SHAPE);
         let wide = Track::new(Size::new(301.0, 32.0));
         assert!((wide.length() - small.length() - 100.0).abs() < 1e-9);
-        // The clock says how far; the shape says where. Two walks over the same frames move the
-        // same distance on both shapes, and land on different points.
         let (mut a, mut b) = (Walk::default(), Walk::default());
         for t in [10.0, 10.05, 10.1, 10.15] {
             a.step(t, true, false, SHAPE);
             b.step(t, true, false, Size::new(301.0, 32.0));
         }
         assert_eq!(a.motion.d, b.motion.d);
-        // Near the small shape's right end, the wide one is still along its floor.
         let d = small.length() - 5.0;
         assert!(!close(small.point(d), wide.point(d)));
     }
@@ -297,10 +257,8 @@ mod tests {
         assert_eq!(start.d, ROPE, "the first frame only notes the time");
         let next = walk.step(0.05, true, false, SHAPE);
         assert!((next.d - (ROPE + SPEED * 0.05)).abs() < 1e-9);
-        // A stalled frame moves one frame's worth at most.
         let stalled = walk.step(5.0, true, false, SHAPE);
         assert!((stalled.d - next.d - SPEED * MAX_STEP).abs() < 1e-9);
-        // Stopped, it stays; started again, it carries on from there.
         let held = walk.step(9.0, false, false, SHAPE);
         assert_eq!(held.d, stalled.d);
         let again = walk.step(20.0, true, false, SHAPE);
@@ -325,7 +283,6 @@ mod tests {
         let m = walk.motion;
         assert_eq!((m.d, m.heading), (hi, -1.0));
         assert_eq!(m.turn.map(|tn| tn.from), Some(1.0));
-        // Resting: it stays put until the turn is done.
         for _ in 0..13 {
             t += 0.05;
             let held = walk.step(t, true, false, SHAPE);
@@ -357,7 +314,6 @@ mod tests {
         assert!(close(badge(&m, SHAPE), t.point(100.0 - ROPE)));
         let back = Motion { heading: -1.0, ..m };
         assert!(close(badge(&back, SHAPE), t.point(100.0 + ROPE)));
-        // Halfway through a turn on the floor it hangs below the pet, away from the camera.
         let turning = Motion {
             d: 100.0,
             heading: -1.0,
@@ -369,7 +325,6 @@ mod tests {
         let pet = t.point(100.0);
         let mid = badge(&turning, SHAPE);
         assert!(mid.y > pet.y + 10.0, "{mid:?} vs {pet:?}");
-        // At the start and end of the turn it sits where it trailed and where it will.
         let start = Motion {
             turn: Some(Turn {
                 progress: 0.0,
@@ -390,8 +345,6 @@ mod tests {
         assert!((b.x - want.x).abs() < 1e-6 && (b.y - want.y).abs() < 1e-6);
     }
 
-    /// The canvas gives the pet [`PET_REACH`] past the collapsed shape on each side and below;
-    /// wherever it is along the path, resting or turning, it and its badge stay inside that.
     #[test]
     fn reach_stays_within_the_canvas_margin() {
         use super::super::layout::PET_REACH;

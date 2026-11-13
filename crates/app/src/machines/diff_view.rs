@@ -1,6 +1,3 @@
-//! The diff sheet of a ready branch (Swift `MachineDiffView`): the text as `git diff` printed
-//! it, colored by line, fetched from the machine once the sheet opens.
-
 use gpui::{div, prelude::*, px, Context, Div};
 use notchling_kit::metric::{RADIUS_CARD, SPINNER_SMALL};
 use notchling_kit::part::{ButtonKind, PartState};
@@ -10,7 +7,6 @@ use notchling_kit::{Appearance, Ink, TypeRole};
 use super::view::MachinesView;
 
 impl MachinesView {
-    /// The diff sheet of a ready branch: the text as `git diff` printed it, colored by line.
     pub(super) fn diff_overlay(&self, a: Appearance, cx: &mut Context<Self>) -> Option<Div> {
         const LIMIT: usize = 2000;
         let diff = self.model.diff.as_ref()?;
@@ -88,7 +84,6 @@ impl MachinesView {
             div()
                 .absolute()
                 .size_full()
-                // The backdrop takes every click and hover: no card button under it is live.
                 .occlude()
                 .flex()
                 .items_center()

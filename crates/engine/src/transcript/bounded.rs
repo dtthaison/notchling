@@ -1,22 +1,11 @@
-//! A conversation that fits a message: the newest items that weigh under a byte budget, for a
-//! reply that travels as one line of the local API (1 MiB). A long session read whole would
-//! exceed it, and the call would fail for good.
-
 use super::model::{ChatItem, Conversation, DiffLine, ItemKind, ToolCall};
 
-/// What one item may weigh before its long strings are cut.
 const ITEM_BYTES: usize = 64 * 1024;
-/// What is kept of a long string in a cut item, in characters.
 const TEXT_CHARS: usize = 8 * 1024;
-/// What is kept of a tool call's output, and of its diff.
 const OUTPUT_CHARS: usize = 16 * 1024;
 const DIFF_LINES: usize = 200;
 
 impl Conversation {
-    /// The conversation with only its newest items, within about `max_bytes` as JSON, and how
-    /// many older items were left out. An item that alone is long has its long strings cut (its
-    /// tool output, its diff), so the newest item always stays. Everything that is not an item
-    /// (tasks, facts, shells) is kept whole.
     pub fn bounded(mut self, max_bytes: usize) -> (Conversation, usize) {
         let items = std::mem::take(&mut self.items);
         let total = items.len();

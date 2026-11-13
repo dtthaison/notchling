@@ -1,11 +1,3 @@
-//! The executor's terminal on E3a's real pty: [`LiveTerminal`] is a [`Pty`] over
-//! [`crate::terminal::Terminal`], [`AskDialog`] the [`ScreenCheck`] over its question reader, and
-//! [`play_script`] plays session control's hidden-pty scripts (Trust Folder) into any [`Pty`].
-//!
-//! The commands are what `ReplySender` ran: `claude attach <job>` at 50×200 with
-//! `TERM=xterm-256color`, `NO_COLOR` dropped, and `CLAUDE_CONFIG_DIR` set for a lane's job (and
-//! removed for the main login's, so a lane's can't leak in).
-
 use super::exec::{Pty, ScreenCheck};
 use super::keys::timing;
 use crate::control::{PtyScript, CONFIG_DIR_VAR};
@@ -13,13 +5,10 @@ use crate::terminal::{ask_dialog, PtyCommand, PtyError, Terminal};
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-/// How long [`Pty::screen`] reads for what is already waiting.
 const DRAIN: Duration = Duration::from_millis(20);
-/// A script's prompt wait: rounds of a 0.5 s quiet within 2 s (`ReplySender.trustFolder`).
 const PROMPT_QUIET: Duration = Duration::from_millis(500);
 const PROMPT_ROUND: Duration = Duration::from_secs(2);
 
-/// A child on a pty with the screen it draws, ended (SIGTERM, then SIGKILL) when dropped.
 pub struct LiveTerminal {
     terminal: Option<Terminal>,
     started: Instant,
@@ -71,7 +60,6 @@ impl Pty for LiveTerminal {
         }
     }
 
-    /// Keeps reading into the screen while it waits, so a busy program never blocks on a full pty.
     fn sleep(&mut self, duration: Duration) {
         let end = Instant::now() + duration;
         if let Some(t) = self.terminal.as_mut() {
@@ -90,7 +78,6 @@ impl Pty for LiveTerminal {
     }
 }
 
-/// The screen checks of E3a's AskUserQuestion reader (`AskDialog.shows`, `isReview`).
 #[derive(Clone, Copy, Debug, Default)]
 pub struct AskDialog;
 
@@ -103,7 +90,6 @@ impl ScreenCheck for AskDialog {
     }
 }
 
-/// Sets `CLAUDE_CONFIG_DIR` for a lane, or removes it for the main login.
 fn config_dir(command: &mut PtyCommand, dir: Option<&str>) {
     match dir {
         Some(dir) => command.env(CONFIG_DIR_VAR, dir),
@@ -111,7 +97,6 @@ fn config_dir(command: &mut PtyCommand, dir: Option<&str>) {
     };
 }
 
-/// `claude attach <job>` as `ReplySender.attached` ran it.
 pub fn attach_command(claude: &Path, job: &str, dir: Option<&str>) -> PtyCommand {
     let mut command = PtyCommand::new(claude);
     command
@@ -124,8 +109,6 @@ pub fn attach_command(claude: &Path, job: &str, dir: Option<&str>) -> PtyCommand
     command
 }
 
-/// The pty command for a script: `claude` in argv[0] is `claude`, the plan's environment changes
-/// applied over this process's, `NO_COLOR` dropped whatever the plan says.
 pub fn script_command(script: &PtyScript, claude: &Path) -> PtyCommand {
     let argv = &script.command.argv;
     let program = match argv.first().map(String::as_str) {
@@ -149,9 +132,6 @@ pub fn script_command(script: &PtyScript, claude: &Path) -> PtyCommand {
     command
 }
 
-/// Plays `script`: waits for a line holding its prompt (rounds of a 0.5 s quiet within 2 s, up to
-/// its timeout), then each key with its pause and wait. False, with nothing typed, when the prompt
-/// never showed.
 pub fn play_script(script: &PtyScript, pty: &mut dyn Pty) -> bool {
     let asking = |pty: &mut dyn Pty| pty.screen().iter().any(|l| l.contains(&script.wait_for));
     let deadline = pty
@@ -162,7 +142,6 @@ pub fn play_script(script: &PtyScript, pty: &mut dyn Pty) -> bool {
             return false;
         }
         if !pty.wait_quiet(PROMPT_QUIET, PROMPT_ROUND) {
-            // Nothing arrived this round; don't spin on a silent program.
             pty.sleep(Duration::from_millis(100));
         }
     }
@@ -232,7 +211,6 @@ mod tests {
         assert_eq!(env_of(&command, "NO_COLOR"), None);
     }
 
-    /// A screen that changes after a number of reads, and a clock the waits move.
     struct Scripted {
         screens: Vec<Vec<String>>,
         reads: usize,
@@ -283,7 +261,6 @@ mod tests {
         assert!(play_script(&script, &mut pty));
         let keys: Vec<&str> = pty.writes.iter().map(|(_, k)| k.as_str()).collect();
         assert_eq!(keys, ["\u{1b}[B", "\r", "\u{03}", "\u{03}"]);
-        // 0.3 s between Down and Enter, as ReplySender paused.
         assert_eq!(pty.writes[1].0 - pty.writes[0].0, 300);
     }
 

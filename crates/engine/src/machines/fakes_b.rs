@@ -1,7 +1,3 @@
-//! Test-only helpers for the repo and sd steps (Swift `MachineSetupFakes` in part). Nothing here
-//! starts a process: the runner is a [`ScriptedRunner`], the hosts are `*.test`, every value is
-//! obviously fake.
-
 use super::github::NoGitHub;
 use super::masks::Masks;
 use super::registry::{Machine, MachineAbilities, MachineOs, MachineRepo, SdWorkerSettings};
@@ -18,7 +14,6 @@ use std::sync::Arc;
 
 pub const REPO: &str = "dtthaison/lingeva-mono";
 
-/// A 108-character token like a Claude OAuth token (obviously fake).
 pub fn long_token() -> String {
     let alphabet: Vec<char> = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789-_"
         .chars()
@@ -29,7 +24,6 @@ pub fn long_token() -> String {
     format!("sk-ant-oat01-{body}")
 }
 
-/// A scratch folder under the system temp dir, removed on drop.
 pub struct TempDir(PathBuf);
 
 impl TempDir {
@@ -82,7 +76,6 @@ fn machine(name: &str, user: &str, home: &str, os: MachineOs, python: &str, kind
     m
 }
 
-/// A Mac that serves the iOS kind of the test repo.
 pub fn mac(name: &str) -> Machine {
     machine(
         name,
@@ -94,7 +87,6 @@ pub fn mac(name: &str) -> Machine {
     )
 }
 
-/// A Linux server that serves the backend kind of the test repo.
 pub fn linux(name: &str) -> Machine {
     machine(
         name,
@@ -106,7 +98,6 @@ pub fn linux(name: &str) -> Machine {
     )
 }
 
-/// Everything a step or a Fix runs against: a scripted runner, a scratch folder, the machine.
 pub struct Rig {
     pub runner: Arc<ScriptedRunner>,
     pub tmp: TempDir,
@@ -140,7 +131,6 @@ impl Rig {
         self
     }
 
-    /// Hides `value` as `[secret:<name>]` in every text.
     pub fn hiding(mut self, name: &str, value: &str) -> Rig {
         self.masks.hide(name, value);
         self
@@ -175,7 +165,6 @@ impl Rig {
         }
     }
 
-    /// The calls the runner saw, as argv.
     pub fn argvs(&self) -> Vec<Vec<String>> {
         self.runner.calls().into_iter().map(|c| c.argv).collect()
     }
@@ -185,13 +174,10 @@ impl Rig {
     }
 }
 
-/// The script as the machine's shell sees it: ssh's argument is the script wrapped in one more
-/// layer of quotes.
 pub fn unquoted(arg: &str) -> String {
     arg.replace("'\\''", "'")
 }
 
-/// The last argument of an argv (an ssh call's script).
 pub fn last(argv: &[String]) -> &str {
     argv.last().map(String::as_str).unwrap_or("")
 }
@@ -204,7 +190,6 @@ pub fn find(steps: &[SetupStep], id: &StepId) -> SetupStep {
         .clone()
 }
 
-/// A remote probe's script and parse.
 pub fn remote(step: &SetupStep) -> (String, RemoteParse) {
     match &step.probe {
         Probe::Remote { script, parse } => (script.clone(), parse.clone()),
@@ -227,12 +212,10 @@ pub fn result(code: i32, out: &str, err: &str) -> CommandResult {
     CommandResult::new(code, out, err)
 }
 
-/// Whether the last argument of a call contains `needle` (a script sent to a machine).
 pub fn script_has(needle: &'static str) -> impl Fn(&[String]) -> bool + Send + Sync + 'static {
     move |a: &[String]| a.last().is_some_and(|s| s.contains(needle))
 }
 
-/// Panics when an 8-character piece of `value` shows in `text`.
 pub fn assert_no_fragment(value: &str, text: &str) {
     let chars: Vec<char> = value.chars().collect();
     for i in 0..=(chars.len() - 8) {
@@ -244,13 +227,9 @@ pub fn assert_no_fragment(value: &str, text: &str) {
     }
 }
 
-// MARK: repo test data
-
-/// An ed25519 key body (obviously fake) and others.
 pub const BODY: &str = "AAAAC3NzaC1lZDI1NTE5AAAAIMachineKeyForTestsOnly0123456789abcdefg";
 pub const OTHER_BODY: &str = "AAAAC3NzaC1lZDI1NTE5AAAAIOtherKeyThatIsNotGitHubs0123456789abcdef";
 pub const NEW_BODY: &str = "AAAAC3NzaC1lZDI1NTE5AAAAINewKeyForReplaceTestsOnly0123456789abcdefgh";
-/// GitHub's published ed25519 host key.
 pub const GITHUB_HOST_BODY: &str =
     "AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl";
 
@@ -262,7 +241,6 @@ pub const READ_ONLY_MSG: &str = "ERROR: The key you are authenticating with has 
 
 pub const WELCOME: &str = "Hi dtthaison/lingeva-mono! You've successfully authenticated, but GitHub does not provide shell access.";
 
-/// `gh api --paginate repos/<REPO>/keys` for one key.
 pub fn gh_keys(key: &str, read_only: Option<bool>) -> String {
     let flag = read_only
         .map(|r| format!(",\"read_only\":{r}"))
@@ -274,11 +252,8 @@ pub fn is_list(a: &[String]) -> bool {
     a.iter().any(|s| s == &format!("repos/{REPO}/keys"))
 }
 
-// MARK: sd test data
-
 use super::step::InstalledPlugin;
 
-/// sd's own worker templates, as the Swift tests keep them.
 pub fn templates_fixture() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../legacy/macos/Tests/NotchlingTests/Fixtures/worker-templates")
@@ -290,7 +265,6 @@ pub fn fixture_file(name: &str) -> PathBuf {
         .join(name)
 }
 
-/// A fake sd folder under `tmp` with the five templates copied in; its path.
 pub fn sd_folder(tmp: &TempDir, name: &str) -> String {
     let dir = tmp.path().join(name).join("templates/worker");
     std::fs::create_dir_all(&dir).expect("templates folder");
@@ -308,7 +282,6 @@ pub fn plugin(version: &str, path: &str) -> InstalledPlugin {
     }
 }
 
-/// This Mac with sd `sd_version` installed at `sd_path` and superpowers 7.0.0.
 pub fn mac_facts(sd_version: &str, sd_path: &str) -> MacFacts {
     let mut f = MacFacts::default();
     f.plugins

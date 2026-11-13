@@ -1,22 +1,10 @@
-//! The daemon's own list of saved accounts (the Swift app kept these in UserDefaults, which the
-//! daemon doesn't touch). Names only: an id, an email and a plan. The logins themselves are in the
-//! Keychain. Each list is a document in `<data>/notchling.db` (`crate::docfile`, decision 0014):
-//! `accounts/codex` and `accounts/antigravity` (the files `<data>/daemon/accounts/codex.json` and
-//! `antigravity.json` they used to be), and `accounts/ids` (Claude Desktop's accounts it has
-//! cookies for, once `ids.json`). The old file moves in once, on the first change; a read takes
-//! the document, else the old file, and writes nothing. A change is one transaction.
-
 use crate::docfile::DocFile;
 use serde_json::{json, Value};
 
-/// The document of Codex's saved accounts.
 pub const CODEX_DOC: &str = "accounts/codex";
-/// The document of Antigravity's saved accounts.
 pub const ANTIGRAVITY_DOC: &str = "accounts/antigravity";
-/// The document of the Claude Desktop account ids.
 pub const IDS_DOC: &str = "accounts/ids";
 
-/// A saved account as the daemon lists it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Saved {
     pub id: String,
@@ -24,7 +12,6 @@ pub struct Saved {
     pub plan: Option<String>,
 }
 
-/// The accounts in `file`; empty when there are none or it isn't ours.
 pub fn read_accounts(file: &DocFile) -> Vec<Saved> {
     let Some(root) = read_json(file) else {
         return vec![];
@@ -45,7 +32,6 @@ pub fn read_accounts(file: &DocFile) -> Vec<Saved> {
         .unwrap_or_default()
 }
 
-/// Writes the list; false when it couldn't be written.
 pub fn write_accounts(file: &DocFile, accounts: &[Saved]) -> bool {
     let list: Vec<Value> = accounts
         .iter()
@@ -54,7 +40,6 @@ pub fn write_accounts(file: &DocFile, accounts: &[Saved]) -> bool {
     write_json(file, "accounts", &json!({"version": 1, "accounts": list}))
 }
 
-/// The ids in `file` (Claude Desktop's accounts it has cookies for).
 pub fn read_ids(file: &DocFile) -> Vec<String> {
     read_json(file)
         .and_then(|root| {
@@ -75,7 +60,6 @@ fn read_json(file: &DocFile) -> Option<Value> {
     serde_json::from_str(&file.read().ok()??).ok()
 }
 
-/// An object with `key` as a list: what an old file has to be to move in.
 fn ours(text: &str, key: &str) -> bool {
     serde_json::from_str::<Value>(text).is_ok_and(|v| v.get(key).is_some_and(Value::is_array))
 }

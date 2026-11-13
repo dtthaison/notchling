@@ -1,8 +1,3 @@
-//! Chat's account parts (part U5): the header's limit meters and account button, the account menu
-//! under it (this session's account, the targets it can move to, Move All Sessions To, Add
-//! Account…, Codex Accounts…), and the Accounts and Vault sheets' openers. Moving a session is
-//! Milestone 3's `session.move` (acting); the accounts side goes through the app's shared store.
-
 use std::path::Path;
 use std::time::Duration;
 
@@ -23,11 +18,8 @@ use crate::chat::data::Tool;
 use crate::mac::gate;
 use crate::switches::Switch;
 
-/// How often Chat reads the accounts store for the header, while the window is open.
 pub(super) const POLL: Duration = Duration::from_secs(10);
 
-/// Whether `codex` is on the PATH or in its usual places. It reads the disk, so Chat asks with the
-/// accounts poll, not on each render.
 pub(super) fn codex_installed(home: &Path) -> bool {
     notchling_engine::tools::codex::plan::find_binary(
         home,
@@ -38,7 +30,6 @@ pub(super) fn codex_installed(home: &Path) -> bool {
 }
 
 impl ChatView {
-    /// Reads the accounts store again off the UI thread (the header's meters and menu).
     pub(super) fn poll_accounts(&self, cx: &mut Context<Self>) {
         if !self.accounts.is_live() {
             return;
@@ -48,8 +39,6 @@ impl ChatView {
             cx.background_executor()
                 .spawn(async move { store.refresh(&switches) })
                 .await;
-            // The meters and the menu are outside the conversation, which needn't draw again; the
-            // Sidebar does only when a row's account changed.
             this.update(cx, |view, cx| {
                 view.redraw_chrome(cx);
                 let rows = view.row_accounts();
@@ -63,7 +52,6 @@ impl ChatView {
         .detach();
     }
 
-    /// The account each sidebar row names, from the accounts store now.
     pub(super) fn row_accounts(&self) -> Vec<Option<(String, bool)>> {
         let snapshot = self.accounts.snapshot();
         self.sessions
@@ -75,7 +63,6 @@ impl ChatView {
             .collect()
     }
 
-    /// The menu for the selected Claude Code session, if it has an account to show.
     pub(super) fn menu(&self) -> Option<AccountMenu> {
         let session = self.selected_session()?;
         if session.tool != Tool::Claude {
@@ -105,8 +92,6 @@ impl ChatView {
         cx.notify();
     }
 
-    /// Moves the selected session to a target: a lane's folder, the main login's `~/.claude`, or a
-    /// lane made first for a saved account (`lanes.create`), then `session.move`.
     fn move_to(&mut self, target: Target, cx: &mut Context<Self>) {
         self.account_menu = false;
         let Some(id) = self.selected.clone() else {
@@ -147,7 +132,6 @@ impl ChatView {
         cx.notify();
     }
 
-    /// Move All Sessions To a target: the Accounts sheet shows the plan and asks.
     fn move_all_to(&mut self, target: Target, cx: &mut Context<Self>) {
         self.account_menu = false;
         let account = match move_all_account(&target) {
@@ -187,7 +171,6 @@ impl ChatView {
     }
 }
 
-/// The account button under the title: the email with the lane, or the Codex login.
 pub(super) fn account_control(
     view: &ChatView,
     a: Appearance,
@@ -201,9 +184,6 @@ pub(super) fn account_control(
     } else {
         ButtonKind::Ghost
     };
-    // The email shrinks to "…" in a narrow header rather than spilling over what's beside it.
-    // The chevron is placed over the text's own padding (see `marked_line`): wrapping the text in a
-    // row would measure it narrow.
     let b = button_with(
         "account-button",
         div()
@@ -240,7 +220,6 @@ pub(super) fn menu_item(
     checked: bool,
     a: Appearance,
 ) -> Stateful<Div> {
-    // Like a macOS menu: the row under the pointer fills with the accent and its text turns white.
     let group = SharedString::from(format!("{id}-hot"));
     let on = Ink::OnAccent.color(a);
     let row = div()
@@ -261,7 +240,6 @@ pub(super) fn menu_item(
     )
 }
 
-/// The fixed slot before a title, with a tick that turns white with its row.
 fn svg_tick(checked: bool, group: SharedString, a: Appearance) -> Div {
     let size = TypeRole::Label.spec().size;
     let slot = div().w(px(14.0)).flex_shrink_0();
@@ -281,7 +259,6 @@ fn svg_tick(checked: bool, group: SharedString, a: Appearance) -> Div {
     }
 }
 
-/// An item the `accounts` switch holds off: faint, no click, the reason on hover.
 pub(super) fn held_item(
     id: SharedString,
     title: &str,
@@ -306,7 +283,6 @@ fn menu_row(
         .flex()
         .items_center()
         .gap(px(8.0))
-        // A fixed slot, so the titles line up whether or not one is ticked.
         .child(
             div()
                 .w(px(14.0))
@@ -316,7 +292,6 @@ fn menu_row(
         .child(label(title, TypeRole::Label, ink, a))
 }
 
-/// The account menu under the header's button, over a click-away layer.
 pub(super) fn render_menu(
     view: &ChatView,
     a: Appearance,
@@ -334,7 +309,6 @@ pub(super) fn render_menu(
         .gap(px(2.0))
         .shadow_lg();
     let mut move_all = Vec::new();
-    // Move All and a lane made for a saved account ask the daemon's accounts side.
     let accounts = view.switches.switches().control(Switch::Accounts);
     for (i, entry) in menu.entries.iter().enumerate() {
         match entry {
@@ -439,7 +413,6 @@ pub(super) fn render_menu(
             .child(
                 div()
                     .absolute()
-                    // Over the row under the reply box, right-aligned above its account button.
                     .bottom(px(MENU_BOTTOM))
                     .right(px(menu_right(view)))
                     .occlude()
@@ -449,12 +422,8 @@ pub(super) fn render_menu(
     )
 }
 
-/// How far the account menu's bottom edge sits above the window's: over the row under the reply
-/// box that holds the account button.
 const MENU_BOTTOM: f32 = 48.0;
 
-/// How far the account menu's right edge sits from the window's: past the Details Panel when it
-/// shows (or the page panel in its place), the side padding and the limit ring beside the button.
 fn menu_right(view: &ChatView) -> f32 {
     let details = if view.page.is_open() {
         view.page.shown_width()

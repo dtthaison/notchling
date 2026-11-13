@@ -1,16 +1,3 @@
-//! Plan → confirm → run (the entry points of Swift `SetupEngine`'s Fixes, made stricter).
-//!
-//! Nothing changes a machine unless its exact commands were shown first:
-//!
-//! 1. [`SetupEngine::plan`] builds what an action would run and keeps it under a fresh random
-//!    [`PlanId`]. It runs nothing. The window shows [`ShownPlan::steps`]' displays.
-//! 2. [`SetupEngine::confirm`] takes that id (once: a second confirm of the same id fails) and the
-//!    admin answer, and gives a [`Confirmed`]: not `Clone`, fields private, made nowhere else.
-//! 3. [`SetupEngine::run`] consumes it, builds the plan again from the machine as it is now, and
-//!    runs only when every display is the one shown; else it says the step needs a look.
-//!
-//! Every Fix, Replace key, the Running switch, Send again and Update N machines go this way.
-
 use super::engine::{lock, SetupEngine};
 
 use super::registry::{AdminAccess, Machine};
@@ -20,43 +7,32 @@ use super::step::{FixOutcome, SetupStep, StepFix, StepId};
 use super::usage::SecretUsage;
 use crate::accounts::Secret;
 
-/// A plan the engine showed. 64 random bits: not a counter a caller could guess.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct PlanId(pub u64);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PlanKind {
-    /// One step's Set up.
     Fix(StepId),
-    /// The Deploy key's Replace key.
     Replace(StepId),
     SetUpAll,
-    /// The Running switch, to on (`true`) or off.
     Running(bool),
     SendAgain(SecretUsage),
-    /// Update N machines with a renewed vault value.
     Update(String),
 }
 
-/// What an action needs before it may run with admin rights.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AdminNeed {
     None,
-    /// Through sudo: the admin password, for this one step.
     Password,
-    /// As root over ssh: the user's confirmation, behind a warning.
     RootConfirm,
-    /// Never on this machine (Linux, the worker as admin).
     Refused(String),
 }
 
-/// One step of a shown plan: what it will run.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ApprovedStep {
     pub id: StepId,
     pub title: String,
     pub display: String,
-    /// Waiting for an earlier step (Set up all).
     pub waiting: bool,
     pub needs_admin: bool,
 }
@@ -64,7 +40,6 @@ pub struct ApprovedStep {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ShownPlan {
     pub id: PlanId,
-    /// Empty for Update, which spans machines.
     pub machine: String,
     pub kind: PlanKind,
     pub title: String,
@@ -73,7 +48,6 @@ pub struct ShownPlan {
 }
 
 impl ShownPlan {
-    /// Every command it shows, as the sheet prints them.
     pub fn display(&self) -> String {
         self.steps
             .iter()
@@ -88,11 +62,9 @@ pub(super) struct ShownRecord {
     at: f64,
 }
 
-/// How long a shown plan may wait for its confirmation.
 pub const PLAN_LIFETIME: f64 = 30.0 * 60.0;
 const MAX_SHOWN: usize = 64;
 
-/// The admin answer to a plan or to one step of Set up all.
 pub enum AdminAnswer {
     None,
     Password(Secret),
@@ -108,8 +80,6 @@ impl AdminAnswer {
     }
 }
 
-/// A shown plan the user confirmed. Only [`SetupEngine::confirm`] makes one and [`SetupEngine::run`]
-/// takes it by value, so one confirmation runs once.
 pub struct Confirmed {
     plan: ShownPlan,
     admin: AdminAnswer,
@@ -133,9 +103,6 @@ fn random_id() -> Option<u64> {
 }
 
 impl SetupEngine {
-    // MARK: plan → confirm → run
-
-    /// What `kind` on `machine` would run, kept for [`SetupEngine::confirm`]. Runs nothing.
     pub fn plan(&self, machine: &str, kind: PlanKind) -> Result<ShownPlan, String> {
         let mut plan = self.build(machine, &kind)?;
         let id = random_id().ok_or("no randomness for the plan id")?;
@@ -164,12 +131,10 @@ impl SetupEngine {
         Ok(plan)
     }
 
-    /// Forgets a shown plan (the sheet was cancelled).
     pub fn cancel(&self, id: PlanId) {
         lock(&self.state).shown.remove(&id.0);
     }
 
-    /// The user confirmed the plan `id` was shown as; `admin` answers its [`AdminNeed`].
     pub fn confirm(&self, id: PlanId, admin: AdminAnswer) -> Result<Confirmed, String> {
         let record = lock(&self.state)
             .shown
@@ -195,12 +160,10 @@ impl SetupEngine {
         Ok(Confirmed { plan, admin })
     }
 
-    /// Runs a confirmed plan. Set up all's admin steps are refused; use [`SetupEngine::run_with`].
     pub fn run(&self, c: Confirmed) -> FixOutcome {
         self.run_with(c, &|_| AdminAnswer::None)
     }
 
-    /// Runs a confirmed plan; `ask_admin` answers each admin step of Set up all at its turn.
     pub fn run_with(
         &self,
         c: Confirmed,
@@ -210,7 +173,6 @@ impl SetupEngine {
         if plan.kind == PlanKind::SetUpAll {
             return self.set_up_all(&plan.machine, &plan.steps, ask_admin);
         }
-        // the plan as it is now: a refresh may have learned another home or python since it showed
         match self.build(&plan.machine, &plan.kind) {
             Ok(now) if now.steps == plan.steps && now.admin == plan.admin => {}
             _ => return fail(format!("{} needs a look; Set up again", plan.title)),
@@ -266,7 +228,6 @@ impl SetupEngine {
             .ok_or(format!("{} has no step {}", m.name, id.raw()))
     }
 
-    /// The plan of `kind` as it is now, with no id yet.
     fn build(&self, machine: &str, kind: &PlanKind) -> Result<ShownPlan, String> {
         let shown =
             |m: &Machine, title: String, steps: Vec<ApprovedStep>, admin: AdminNeed| ShownPlan {
@@ -407,7 +368,6 @@ impl SetupEngine {
         }
     }
 
-    /// The delivery of `usage`, shown as its step's own Fix commands.
     fn delivery_step(&self, usage: &SecretUsage, title: String) -> Result<ApprovedStep, String> {
         let m = self
             .machine(&usage.machine)

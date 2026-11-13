@@ -1,8 +1,3 @@
-//! The inspector: tasks, facts, subagents and background shells of the selected session, the Swift
-//! Details panel's rows (a status icon first, small text) with a chevron on each section that folds
-//! it. Which sections are folded is kept per window (`Folds`), so it outlives the panel being hidden
-//! and the session changing; the Swift panel has no folding, so every section starts open.
-
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
@@ -27,13 +22,9 @@ use notchling_engine::transcript::model::Conversation;
 use notchling_engine::transcript::subagents::Subagent;
 
 pub(super) const WIDTH: f32 = 260.0;
-/// A row's mark sits in a box this wide, so the text lines up whatever the mark.
 const MARK_BOX: f32 = 14.0;
-/// One line of a row's text. The icon box is this tall too, so the icon sits centred on the first
-/// line; left to GPUI's default (about 1.6 times the 11 pt type) the text sat lower than the icon.
 const ROW_LINE: f32 = 16.0;
 
-/// Which sections each window has folded, and whether its subagent list shows every finished one.
 #[derive(Default)]
 struct Folds {
     folded: HashMap<WindowId, HashSet<&'static str>>,
@@ -55,9 +46,6 @@ fn toggle_folded(cx: &mut App, window: WindowId, section: &'static str) {
     }
 }
 
-/// What the Details Panel shows from the chat: the inspector's rows, the session's folder as
-/// shown (`~/…`) and as a path, and the agent id of each subagent row (what a click opens). The
-/// fold state stays in its global; a fold click redraws the part through `redraw_details`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct DetailsModel {
     pub i: Inspector,
@@ -65,8 +53,6 @@ pub struct DetailsModel {
     pub agent_ids: Vec<String>,
 }
 
-/// The model from its inputs: the conversation shown, its subagents, which pids write a shell's
-/// output file and the session's folder.
 fn model_of(
     conversation: &Conversation,
     subagents: &[Subagent],
@@ -80,7 +66,6 @@ fn model_of(
     }
 }
 
-/// What the Details Panel shows now.
 pub(super) fn model(view: &ChatView, _: &App) -> DetailsModel {
     let folder = view.selected_session().map(|s| {
         let full = s.agent.cwd.clone();
@@ -94,7 +79,6 @@ pub(super) fn model(view: &ChatView, _: &App) -> DetailsModel {
     )
 }
 
-/// The inspector panel, for the selected session.
 pub fn render(m: &DetailsModel, a: Appearance, cx: &mut Context<ChatView>) -> AnyElement {
     Panel {
         i: m.i.clone(),
@@ -109,12 +93,9 @@ pub fn render(m: &DetailsModel, a: Appearance, cx: &mut Context<ChatView>) -> An
 #[derive(IntoElement)]
 struct Panel {
     i: Inspector,
-    /// The session's folder as shown (`~/…`), and as a path.
     folder: Option<(String, String)>,
     a: Appearance,
-    /// For a row's actions (Output, opening a subagent).
     chat: WeakEntity<ChatView>,
-    /// The agent id of each subagent row, oldest first (what a click opens).
     agent_ids: Vec<String>,
 }
 
@@ -229,15 +210,11 @@ impl RenderOnce for Panel {
             .border_color(hsla(Ink::Hairline.color(a)))
             .flex()
             .flex_col()
-            // The header runs over the panel too, so the panel starts under it, level with the
-            // conversation.
             .child(scrollable(column))
             .part_inside("Details Panel", Corner::TopTrailing, a, cx)
     }
 }
 
-/// A section: its header (a chevron and the title, which folds it on a click) over its content, named
-/// for the ? button with the Swift panel's name (`part`). The title keeps its count when folded.
 fn section(
     (window, chat): (WindowId, &WeakEntity<ChatView>),
     key: &'static str,
@@ -264,7 +241,6 @@ fn section(
         .child(label(title, TypeRole::Section, Ink::TextFaint, a))
         .on_click(move |_, window, cx| {
             toggle_folded(cx, window.window_handle().window_id(), key);
-            // The fold is read by the Details Panel alone: draw it, not the whole window.
             chat.update(cx, |v, cx| v.redraw_details(cx)).ok();
         });
     div()
@@ -280,7 +256,6 @@ fn empty(text: &str, a: Appearance) -> Div {
     label(text, TypeRole::Meta, Ink::TextMuted, a)
 }
 
-/// The mini spinner on a running row (Swift `controlSize(.mini)`).
 fn spinner(key: &str, a: Appearance) -> impl IntoElement {
     kit_spinner(
         SharedString::from(format!("inspector-spin-{key}")),
@@ -290,7 +265,6 @@ fn spinner(key: &str, a: Appearance) -> impl IntoElement {
     )
 }
 
-/// The mark box that leads a row.
 fn mark_box(mark: Mark, key: &str, a: Appearance) -> Div {
     let holder = div()
         .w(px(MARK_BOX))
@@ -305,7 +279,6 @@ fn mark_box(mark: Mark, key: &str, a: Appearance) -> Div {
     }
 }
 
-/// The Swift fact row: a 10 pt faint icon in a 14 pt box, then the text in the meta type.
 fn fact_row(shape: Icon, text: &str, a: Appearance) -> Div {
     div()
         .flex()
@@ -329,7 +302,6 @@ fn fact_row(shape: Icon, text: &str, a: Appearance) -> Div {
         )
 }
 
-/// The session's folder: a fact row that reveals it in Finder.
 fn folder_row(shown: &str, full: &str, a: Appearance) -> Div {
     let full = full.to_owned();
     div().child(
@@ -379,8 +351,6 @@ fn task_row(index: usize, task: &TaskRow, a: Appearance) -> Div {
         )
 }
 
-/// A subagent: a click opens its transcript in place of the conversation. The row has the
-/// pointing hand and the kit's hover wash, like a step in the conversation.
 fn subagent_row(
     index: usize,
     s: &SubagentRow,
@@ -391,7 +361,6 @@ fn subagent_row(
     let (chat, agent) = (chat.clone(), ids.get(index).cloned());
     div()
         .id(SharedString::from(format!("subagent-{index}")))
-        // The wash reaches past the text a little, so it doesn't hug the letters.
         .mx(px(-4.0))
         .px(px(4.0))
         .py(px(2.0))
@@ -407,7 +376,6 @@ fn subagent_row(
         .flex()
         .items_start()
         .gap(px(7.0))
-        // The tool's logo, not a status mark: the detail line says Running, Done or Failed.
         .child(
             div()
                 .w(px(MARK_BOX))
@@ -431,7 +399,6 @@ fn subagent_row(
                 .child(
                     label(&s.detail, TypeRole::Meta, Ink::TextFaint, a).line_height(px(ROW_LINE)),
                 )
-                // What a running one does now, one line, cut with an ellipsis.
                 .children(s.doing.as_ref().map(|doing| {
                     label(doing, TypeRole::Meta, Ink::TextMuted, a)
                         .line_height(px(ROW_LINE))
@@ -451,8 +418,6 @@ fn shell_row(index: usize, s: &ShellRow, a: Appearance, chat: &WeakEntity<ChatVi
                 .elide(),
         );
     }
-    // A command can run to pages (a whole prompt passed to a tool): one line of title and two of
-    // command, cut with an ellipsis; Output shows the rest.
     div()
         .flex()
         .items_start()
@@ -480,7 +445,6 @@ fn shell_row(index: usize, s: &ShellRow, a: Appearance, chat: &WeakEntity<ChatVi
         )
 }
 
-/// Output: the command's output in a terminal tab, live while it runs.
 fn output_link(
     index: usize,
     s: &ShellRow,
@@ -498,7 +462,6 @@ fn output_link(
         })
 }
 
-/// "Show N more" / "Show less" under the subagents: a small accent row.
 fn fold_row(window: WindowId, key: &'static str, text: &str, expand: bool, a: Appearance) -> Div {
     div().child(
         div()
@@ -543,7 +506,6 @@ mod tests {
     fn the_details_model_is_equal_for_the_same_inputs() {
         let c = with_task("Port");
         let a = model_of(&c, &[], &no_writers, folder());
-        // Another conversation value with the same content (a reload that changed nothing).
         let b = model_of(&with_task("Port"), &[], &no_writers, folder());
         assert_eq!(a, b);
         assert_ne!(a, model_of(&c, &[], &no_writers, None), "the folder line");

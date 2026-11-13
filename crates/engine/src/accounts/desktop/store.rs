@@ -1,14 +1,3 @@
-//! Switches the Claude desktop app between accounts, separate from Claude Code but off the same
-//! accounts list (matched by account UUID) (`ClaudeDesktopStore`, `ClaudeDesktopProvider`). The
-//! desktop app reads its login at launch, so a switch quits and reopens it.
-//!
-//! Like Antigravity, Notchling captures the whole cookie store while an account is active and
-//! restores it to switch ([`super::files`]). An account can only be switched to after it has been
-//! signed in to in the desktop app at least once, since that is the only way its cookies come to
-//! exist. The cookie store is only replaced or removed while Desktop is not running: a switch
-//! quits it first and refuses if it is still up. Our copies are `<store_dir>/<uuid>.cookies`
-//! (0600), the daemon's own folder, never the Swift app's.
-
 use super::files;
 use crate::accounts::procs::Apps;
 use crate::providers::{
@@ -21,14 +10,12 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 pub const BUNDLE_ID: &str = "com.anthropic.claudefordesktop";
 
-/// A Claude Code account, as far as Desktop needs to know: `<account uuid>:<org uuid>` and a name.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ClaudeName {
     pub id: String,
     pub email: String,
 }
 
-/// The Claude Code accounts Desktop's rows are matched against (E8a's account list).
 pub type ClaudeAccounts = Arc<dyn Fn() -> Vec<ClaudeName> + Send + Sync>;
 
 #[derive(Clone)]
@@ -39,22 +26,16 @@ pub struct DesktopDeps {
 
 #[derive(Clone, Debug)]
 pub struct DesktopPaths {
-    /// `~/Library/Application Support/Claude`.
     pub claude_dir: PathBuf,
-    /// Our copies of each account's cookie store.
     pub store_dir: PathBuf,
-    /// Where the Claude app would be installed (`/Applications`), for `is_available`.
     pub apps_dir: PathBuf,
 }
 
 #[derive(Default)]
 struct Inner {
-    /// The account UUID the desktop app is on now.
     active: Option<String>,
-    /// Account UUIDs Notchling has saved a desktop session (cookies) for.
     saved: BTreeSet<String>,
     busy: bool,
-    /// Desktop was reopened signed out; the next account signed in there gets captured.
     adding: bool,
     before_add: Option<String>,
 }
@@ -70,13 +51,11 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-/// The part of an account id before the colon: the account UUID.
 fn uuid_of(account_id: &str) -> &str {
     account_id.split(':').next().unwrap_or(account_id)
 }
 
 impl DesktopStore {
-    /// Reads which sessions are saved from our own folder; touches nothing else.
     pub fn new(deps: DesktopDeps, paths: DesktopPaths) -> DesktopStore {
         let saved = std::fs::read_dir(&paths.store_dir)
             .map(|dir| {
@@ -112,7 +91,6 @@ impl DesktopStore {
         files::valid_uuid(uuid) && files::capture(&self.paths.claude_dir, &self.mine(uuid))
     }
 
-    /// Quits Desktop; true if it was running. Refuses if it is still up.
     fn quit(&self) -> Result<bool, AccountError> {
         self.deps.apps.quit(BUNDLE_ID).map_err(|_| {
             AccountError::new(
@@ -121,7 +99,6 @@ impl DesktopStore {
         })
     }
 
-    /// The cookie store is only replaced while nothing has it open.
     fn require_closed(&self) -> Result<(), AccountError> {
         if self.is_running() {
             return Err(AccountError::new(
@@ -196,7 +173,6 @@ impl AccountProvider for DesktopStore {
         !lock(&self.inner).saved.is_empty() || self.paths.apps_dir.join("Claude.app").exists()
     }
 
-    /// Only accounts actually in Desktop: the active one, or ones Notchling has captured.
     fn state(&self) -> ProviderState {
         let inner = lock(&self.inner);
         let accounts = (self.deps.claude_accounts)()
@@ -227,7 +203,6 @@ impl AccountProvider for DesktopStore {
         }
     }
 
-    /// Reads the current desktop account and saves its cookie store under that UUID.
     fn sync(&self, _force: bool) {
         let _op = lock(&self.op);
         let Some(uuid) = files::active_account(&self.paths.claude_dir) else {
@@ -242,7 +217,6 @@ impl AccountProvider for DesktopStore {
         inner.active = Some(uuid);
     }
 
-    /// Points the desktop app at a saved account: quit it, restore that account's cookies, reopen.
     fn switch_to(&self, id: &str) -> Result<(), AccountError> {
         let _op = lock(&self.op);
         lock(&self.inner).busy = true;
@@ -251,8 +225,6 @@ impl AccountProvider for DesktopStore {
         result
     }
 
-    /// Saves the current account, then reopens Claude Desktop signed out so you can sign in to
-    /// another account. That account's session is captured as soon as it appears.
     fn begin_add(&self) -> Result<AddStarted, AccountError> {
         let _op = lock(&self.op);
         lock(&self.inner).busy = true;
@@ -277,8 +249,6 @@ impl AccountProvider for DesktopStore {
         AddProgress::Done
     }
 
-    /// Stops waiting and, if nobody signed in, puts the previous account back.
-    /// Stops waiting without putting the previous login back (that would write Desktop's files).
     fn abandon_add(&self) -> Option<String> {
         let mut inner = lock(&self.inner);
         inner.adding = false;
@@ -300,7 +270,6 @@ impl AccountProvider for DesktopStore {
         }
     }
 
-    /// Forgets our saved session. Desktop stays signed in if it is the one in use.
     fn remove(&self, id: &str) {
         let _op = lock(&self.op);
         if files::valid_uuid(id) {

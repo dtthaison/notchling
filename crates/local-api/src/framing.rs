@@ -1,29 +1,19 @@
-//! Lines on a stream: UTF-8 JSON, `\n` ended, at most [`MAX_LINE`] bytes. A longer line closes the
-//! connection, so a client can't make the daemon hold an unbounded buffer.
-
 use serde_json::Value;
 use std::io::{self, Read, Write};
 use std::time::Instant;
 
-/// The longest line either side accepts, not counting its `\n`: 1 MiB.
 pub const MAX_LINE: usize = 1 << 20;
 
 const CHUNK: usize = 64 * 1024;
 
-/// Why no line came.
 #[derive(Debug)]
 pub enum FrameError {
-    /// The line passed the cap before its `\n`.
     TooLong,
-    /// The stream ended in the middle of a line.
     PartialAtEof,
-    /// A read failed. A read timeout (`WouldBlock` or `TimedOut`) keeps what was read so far, so the
-    /// caller may check its deadlines and call again.
     Io(io::Error),
 }
 
 impl FrameError {
-    /// A read timeout: no data yet, try again.
     pub fn is_timeout(&self) -> bool {
         matches!(self, FrameError::Io(e) if matches!(e.kind(), io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut))
     }
@@ -39,14 +29,11 @@ impl std::fmt::Display for FrameError {
     }
 }
 
-/// Splits a stream into lines, keeping a partial line across read timeouts.
 pub struct LineReader<R> {
     inner: R,
     buf: Vec<u8>,
-    /// Bytes of `buf` already searched for `\n`.
     scanned: usize,
     max: usize,
-    /// When the line now in `buf` got its first byte.
     started: Option<Instant>,
 }
 
@@ -55,7 +42,6 @@ impl<R: Read> LineReader<R> {
         LineReader::with_max(inner, MAX_LINE)
     }
 
-    /// A reader with another cap, for tests.
     pub fn with_max(inner: R, max: usize) -> LineReader<R> {
         LineReader {
             inner,
@@ -66,7 +52,6 @@ impl<R: Read> LineReader<R> {
         }
     }
 
-    /// The next line without its `\n`; `None` at a clean end of stream.
     pub fn next_line(&mut self) -> Result<Option<Vec<u8>>, FrameError> {
         loop {
             if let Some(pos) = self.buf[self.scanned..].iter().position(|b| *b == b'\n') {
@@ -100,7 +85,6 @@ impl<R: Read> LineReader<R> {
         }
     }
 
-    /// When the unfinished line now buffered began; `None` when nothing is buffered.
     pub fn partial_since(&self) -> Option<Instant> {
         self.started
     }
@@ -110,7 +94,6 @@ impl<R: Read> LineReader<R> {
     }
 }
 
-/// The line for `value`, `\n` included, or `None` when it would pass the cap.
 pub fn encode_line(value: &Value) -> Option<Vec<u8>> {
     let mut bytes = serde_json::to_vec(value).ok()?;
     if bytes.len() > MAX_LINE {
@@ -120,7 +103,6 @@ pub fn encode_line(value: &Value) -> Option<Vec<u8>> {
     Some(bytes)
 }
 
-/// Writes one line.
 pub fn write_line(out: &mut impl Write, value: &Value) -> io::Result<()> {
     let bytes = encode_line(value)
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "line over the size cap"))?;
@@ -134,8 +116,6 @@ mod tests {
     use serde_json::json;
     use std::collections::VecDeque;
 
-    /// A reader that hands out the given pieces one per read, with a timeout between them when the
-    /// piece is `None`.
     struct Pieces(VecDeque<Option<Vec<u8>>>);
 
     impl Read for Pieces {
@@ -199,7 +179,6 @@ mod tests {
 
     #[test]
     fn an_endless_line_stops_at_the_cap_without_reading_on() {
-        // A reader that never ends: the cap must stop it, not the end of the stream.
         let endless = std::io::repeat(b'x');
         let mut r = LineReader::new(endless);
         assert!(matches!(r.next_line(), Err(FrameError::TooLong)));
@@ -228,7 +207,6 @@ mod tests {
 
     #[test]
     fn garbage_bytes_still_frame_as_a_line() {
-        // Framing only splits; the JSON check is the server's (a bad_request reply).
         let mut r = LineReader::new(&b"\xff\x00garbage\n"[..]);
         assert_eq!(r.next_line().unwrap().unwrap(), b"\xff\x00garbage");
     }

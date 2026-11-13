@@ -1,5 +1,3 @@
-//! Web snapshots: the pure parts of the Swift `WebSnapshotter` and `WebURLResolver` hand-off.
-
 use super::snapshot::*;
 use super::wire::BridgeFailure;
 use crate::viz::url::Url;

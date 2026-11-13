@@ -1,6 +1,3 @@
-//! How the real handle delivers a pty's output to its listeners (`PTYSession.drain`): a client that
-//! stops reading must not hold up the others, and a late listener sees the scrollback and the live
-//! bytes in order. `/bin/sh` in a scratch folder; every child is ended when its guard drops.
 #![cfg(unix)]
 
 mod common;
@@ -13,7 +10,6 @@ use std::sync::mpsc::channel;
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
-/// Ends the child when the test does, even by a failed assertion.
 struct Session(Arc<PtyHandle>);
 
 impl Drop for Session {
@@ -41,7 +37,6 @@ fn text(bytes: &Bytes) -> String {
     String::from_utf8_lossy(&bytes.lock().expect("lock")).into_owned()
 }
 
-/// A listener that keeps what it is given.
 fn collector() -> (Listener, Bytes) {
     let got: Bytes = Arc::default();
     let sink = got.clone();
@@ -51,7 +46,6 @@ fn collector() -> (Listener, Bytes) {
     (listener, got)
 }
 
-/// A client whose socket buffer is full: the first call blocks until [`Stuck::release`].
 struct Stuck {
     listener: Listener,
     got: Bytes,
@@ -99,8 +93,6 @@ fn a_client_that_stops_reading_does_not_hold_up_another() {
     session.0.write(b"go\n");
     wait_until(|| text(&got).contains("three"));
 
-    // Letting go of the stuck client must not wait for its blocked write either (its connection
-    // closing is how a dead client is dropped).
     let handle = session.0.clone();
     let (done, finished) = channel();
     std::thread::spawn(move || {

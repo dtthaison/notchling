@@ -1,38 +1,25 @@
-//! The JPEG a chat picture reaches the phone as (the `jpeg` half of ConsoleCore's `ChatImages`,
-//! which used ImageIO). The bytes themselves come from `transcript::chat::images`.
-
 use image::{
     codecs::jpeg::JpegEncoder, imageops::FilterType, DynamicImage, ImageDecoder, ImageReader,
     Limits, RgbImage,
 };
 use std::io::Cursor;
 
-/// Pictures are encoded at this quality.
 const QUALITY: u8 = 80;
-/// The longest side asked for is kept between these.
 const MIN_SIDE: u32 = 16;
 const MAX_SIDE: u32 = 1600;
-/// A picture claiming more pixels than this is refused before it is decoded.
 const MAX_PIXELS: u64 = 100_000_000;
-/// Memory the decoder may allocate.
 const MAX_ALLOC: u64 = 512 * 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ImagingError {
-    /// Not a picture, or one that is damaged or too big.
     Unreadable,
-    /// A format this computer cannot turn into a JPEG (HEIC).
     Unsupported(String),
 }
 
-/// Turns the bytes of any picture into a JPEG for the phone.
 pub trait Imaging: Send + Sync {
-    /// At most `max_width` pixels on the longer side (16 to 1600), never enlarged, flattened onto
-    /// white because a JPEG has no transparency.
     fn jpeg(&self, data: &[u8], max_width: i64) -> Result<Vec<u8>, ImagingError>;
 }
 
-/// PNG, JPEG, GIF and WebP through the `image` crate.
 pub struct ImageCrate;
 
 impl Imaging for ImageCrate {
@@ -71,7 +58,6 @@ impl Imaging for ImageCrate {
     }
 }
 
-/// The picture over white: each channel `c * a + 255 * (1 - a)`.
 fn flatten(picture: &DynamicImage) -> RgbImage {
     let rgba = picture.to_rgba8();
     let mut flat = RgbImage::new(rgba.width(), rgba.height());

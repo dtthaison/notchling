@@ -1,10 +1,3 @@
-//! The Allow/Deny prompt over GPUI (part U6, macOS): the card for a phone that gave the right
-//! pairing code. It is its own small floating window (`mac::shell` opens it the moment the daemon
-//! asks and closes it when the answer is in), so it shows whether or not the Phone panel is open,
-//! the way the Swift app's alert did. Esc denies; Return does not allow, so a key pressed in
-//! another app a moment before the window appeared can't let a phone in. Every call to the daemon
-//! runs on the background executor. A render has a fixed prompt and no daemon behind it.
-
 use std::sync::Arc;
 
 use gpui::{div, prelude::*, px, AnyView, Context, FocusHandle, Focusable, Render, Window};
@@ -20,17 +13,13 @@ use super::pairing::PairingFeed;
 pub struct PairPromptView {
     feed: Arc<PairingFeed>,
     bridge: Arc<Bridge>,
-    /// A render's prompt; the feed's own otherwise.
     fixed: Option<Prompt>,
-    /// An answer is on its way: the buttons wait for it.
     busy: bool,
-    /// The last answer the daemon didn't take, until the next click.
     note: Option<String>,
     focus: FocusHandle,
 }
 
 impl PairPromptView {
-    /// The live prompt over the feed's queue.
     pub fn live(feed: Arc<PairingFeed>, bridge: Arc<Bridge>, cx: &mut Context<Self>) -> Self {
         PairPromptView {
             feed,
@@ -42,7 +31,6 @@ impl PairPromptView {
         }
     }
 
-    /// A render's: `prompt` as given, with nothing behind it.
     pub fn fixed(prompt: Prompt, cx: &mut Context<Self>) -> Self {
         PairPromptView {
             feed: Arc::new(PairingFeed::none()),
@@ -58,7 +46,6 @@ impl PairPromptView {
         self.fixed.clone().or_else(|| self.feed.prompt(now_ms()))
     }
 
-    /// Sends the person's answer, then reads the bridge again (an allowed phone is a new device).
     fn answer(&mut self, request: String, allow: bool, cx: &mut Context<Self>) {
         if self.busy || !self.feed.is_live() {
             return;
@@ -180,7 +167,6 @@ impl Render for PairPromptView {
     }
 }
 
-/// `--render phone-pair-request`: a made-up phone asking, a second one waiting behind it.
 pub fn build_render(name: &str, cx: &mut gpui::App) -> Option<AnyView> {
     if name != super::renders::PAIR_REQUEST {
         return None;

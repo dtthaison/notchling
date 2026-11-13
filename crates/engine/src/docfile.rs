@@ -1,29 +1,11 @@
-//! A file Notchling alone used to rewrite whole, now a document in `notchling.db`
-//! (`crate::store`, decision 0014): the saved accounts lists and the daemon's vault list.
-//!
-//! A [`DocFile`] is the document's name plus the file it used to be. Reads take the document and,
-//! while the old file hasn't moved in, that file's text; they never make a database and never
-//! move anything, so a read-only caller (a list read while a switch is off, a render over a
-//! checked-in fixture folder) writes nothing. A change moves the old file in first, once (a row
-//! already there wins; a link, an unreadable file or one `valid` rejects stays where it is), then
-//! changes the row in one transaction, so two writers never lose each other's change.
-
 use crate::store;
 use std::path::{Path, PathBuf};
 
-/// One document and the file it used to be.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DocFile {
-    /// Notchling's data folder, where `notchling.db` is.
     pub data_dir: PathBuf,
-    /// The document's name in the database.
     pub name: &'static str,
-    /// The file it was before the database: read while the document is missing, moved in on the
-    /// first change.
     pub old_file: PathBuf,
-    /// An old file that can't be read, or isn't valid, makes every change fail: it is the
-    /// source, and nothing is written over it (the vault list's rule). Off, a change goes ahead
-    /// and the bad file is ignored from then on, since the document is read first.
     pub strict: bool,
 }
 
@@ -37,15 +19,11 @@ impl DocFile {
         }
     }
 
-    /// The same, refusing to write while the old file can't be read.
     pub fn strict(mut self) -> DocFile {
         self.strict = true;
         self
     }
 
-    /// The text: the document, else the old file's (a link is refused, not followed). `Ok(None)`
-    /// when there is neither; `Err` for a database that can't be opened or an old file that can't
-    /// be read. Makes nothing.
     pub fn read(&self) -> Result<Option<String>, String> {
         if let Some(text) = store::doc(&self.data_dir, self.name)? {
             return Ok(Some(text));
@@ -61,16 +39,10 @@ impl DocFile {
         }
     }
 
-    /// Moves the old file in (see the module doc). Best effort: a database failure shows again in
-    /// the change that follows.
     pub fn import(&self, valid: impl Fn(&str) -> bool) {
         let _ = store::import_file(&self.data_dir, self.name, &self.old_file, valid);
     }
 
-    /// Reads the document and writes what `change` makes of it, in one transaction. The old file
-    /// is moved in first (`valid` decides whether it is a file of ours). `change` gets `None` when
-    /// there is no document; returning `None` removes it, an error writes nothing. Returns what
-    /// was written.
     pub fn update(
         &self,
         valid: impl Fn(&str) -> bool,
@@ -85,14 +57,12 @@ impl DocFile {
         })
     }
 
-    /// Replaces the document (a change that doesn't look at what was there).
     pub fn put(&self, valid: impl Fn(&str) -> bool, text: &str) -> Result<(), String> {
         self.update(valid, |_| Ok(Some(text.to_owned())))
             .map(|_| ())
     }
 }
 
-/// What [`DocFile::update`] fails with while a strict old file is still there.
 pub const UNREADABLE: &str = "the old file can't be read, so it was left as it is";
 
 #[cfg(test)]
@@ -134,7 +104,6 @@ mod tests {
         .unwrap();
         assert!(!old.exists(), "moved in");
         assert_eq!(file.read().unwrap().as_deref(), Some(r#"{"a":2}"#));
-        // a file that comes back later is neither read nor imported over the row
         tmp.write("data/thing.json", r#"{"a":3}"#);
         assert_eq!(file.read().unwrap().as_deref(), Some(r#"{"a":2}"#));
     }

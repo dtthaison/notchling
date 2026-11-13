@@ -1,5 +1,3 @@
-//! Layer 1: the palette. Only `ink` reads it; views never do (spec: docs/chat-kit.md, Palette).
-
 use crate::color::Color;
 
 pub(crate) const NIGHT0: Color = Color::hex(0x0F0E0D);
@@ -25,14 +23,11 @@ pub(crate) const ORANGE700: Color = Color::hex(0xB4540E);
 pub(crate) const LIME500: Color = Color::hex(0x7DCB2C);
 pub(crate) const BLUE400: Color = Color::hex(0x6EB0FF);
 pub(crate) const BLUE600: Color = Color::hex(0x2C78D4);
-/// Shell mode, as Claude Code's terminal marks a "!" command.
 pub(crate) const PINK400: Color = Color::hex(0xFF7AB8);
 pub(crate) const PINK600: Color = Color::hex(0xC2307A);
-/// A secret past its last day.
 pub(crate) const RED_LIGHT: Color = Color::hex(0xC4281C);
 pub(crate) const RED_DARK: Color = Color::hex(0xFF6B5E);
 
-/// Avatar gradients: warm and cool pairs that read on both surfaces.
 pub(crate) const AVATARS: [(Color, Color); 8] = [
     (Color::hex(0xF7873B), Color::hex(0xE0533A)),
     (Color::hex(0x7DCB2C), Color::hex(0x2E9E5B)),

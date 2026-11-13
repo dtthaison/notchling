@@ -1,7 +1,3 @@
-//! The morning cards (Swift `ReadyCard`, `NeedsYouCard`, `StuckCard`, `MachineDiffView`): what
-//! the overnight workers left for you, with Merge, Diff, Send back, Close, the answer field and
-//! its options, Retry and Drop. Every action runs through the model's actions, from a click.
-
 use gpui::{div, prelude::*, px, Context, Div, SharedString, Stateful};
 use notchling_engine::machines::merge::MergeOutcome;
 use notchling_engine::machines::morning::{MorningItem, MorningKind};
@@ -21,7 +17,6 @@ fn state(busy: bool) -> PartState {
 }
 
 impl MachinesView {
-    /// The repo, title, machine and branch at the top of a morning card.
     fn item_title(item: &MorningItem, branch: Option<&str>, a: Appearance) -> Div {
         let line: Vec<&str> = [Some(item.machine.as_str()), branch]
             .into_iter()
@@ -42,7 +37,6 @@ impl MachinesView {
             .child(label(&line.join(" · "), TypeRole::Meta, Ink::TextFaint, a))
     }
 
-    /// The spinner line while an action runs, its error, and the line for one that worked.
     fn action_status(&self, item: &MorningItem, a: Appearance) -> Div {
         let actions = &self.model.parts.actions;
         let mut column = div().flex().flex_col().gap(px(4.0));
@@ -71,7 +65,6 @@ impl MachinesView {
         column
     }
 
-    /// A one-line text field of a card; a click makes it the one that types.
     fn note_field(
         &self,
         item_id: &str,
@@ -95,7 +88,6 @@ impl MachinesView {
             }))
     }
 
-    /// Return in a note field, or its Send/Answer button: the trimmed text goes to the worker.
     pub(super) fn send_note(&mut self, item_id: &str, cx: &mut Context<Self>) {
         let text = self
             .notes
@@ -204,8 +196,6 @@ impl MachinesView {
                     }))
                 }),
             );
-        // Retry push only for a merge whose check passed; a merge on main without that proof can
-        // only be undone.
         if outcome.as_ref().is_some_and(MergeOutcome::can_retry_push) {
             buttons = buttons.child(
                 button(
@@ -479,7 +469,6 @@ impl MachinesView {
     }
 }
 
-/// fetched · merged · checked · pushed · closed, each ticked when it happened.
 fn checklist(outcome: &MergeOutcome, a: Appearance) -> Div {
     let steps = [
         ("fetched", outcome.fetched),

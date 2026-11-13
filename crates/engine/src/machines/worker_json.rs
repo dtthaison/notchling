@@ -1,7 +1,3 @@
-//! The "worker.json written" step and the part of the machine's `worker.json` that Notchling owns
-//! (Swift `WorkerJSON`, `SDWorkerSteps` worker.json part). Every other key stays as the machine
-//! has it.
-
 use super::registry::{Machine, SdWorkerSettings};
 use super::runner::CommandResult;
 use super::shell;
@@ -12,10 +8,8 @@ use super::step::{
 use super::steps_sd::first_line_300;
 use serde_json::{json, Map, Value};
 
-/// The most a probe reads.
 pub const READ_CAP: usize = 262_144;
 
-/// What sd accepts for `machine`: `^[a-z0-9][a-z0-9-]*$`.
 fn is_valid_machine_name(name: &str) -> bool {
     let mut c = name.chars();
     c.next()
@@ -23,9 +17,6 @@ fn is_valid_machine_name(name: &str) -> bool {
         && c.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
 }
 
-/// The keys Notchling writes for `machine`: its name, the token and Claude login files, the
-/// expiry and health URL, and each served repo with the machine that runs each kind (from every
-/// machine whose job serves the repo). `Err` says why it can't be built yet.
 pub fn owned(
     machine: &Machine,
     job: &SdWorkerSettings,
@@ -56,7 +47,6 @@ pub fn owned(
     if !job.python.starts_with('/') || !job.sd_path.starts_with('/') {
         return Err("python or sd.py is not an absolute path yet".into());
     }
-    // this machine is `machine` as passed in, not the saved copy in `all`
     let mut others: Vec<(&str, Option<&SdWorkerSettings>)> = all
         .iter()
         .filter(|m| m.name != machine.name)
@@ -119,7 +109,6 @@ pub fn owned(
     Ok(out)
 }
 
-/// The object in `text`, or `None` for nothing or anything that is not a JSON object.
 pub fn parse(text: &str) -> Option<Map<String, Value>> {
     if text.is_empty() {
         return None;
@@ -130,9 +119,6 @@ pub fn parse(text: &str) -> Option<Map<String, Value>> {
     }
 }
 
-/// The remote file with the owned keys laid over it: sorted, pretty, a final newline. A repo the
-/// machine already lists keeps the keys Notchling doesn't own (`writer_model`); a repo that is no
-/// longer served goes.
 pub fn merged(remote: Option<&str>, owned: &Map<String, Value>) -> Vec<u8> {
     let mut object = remote.and_then(parse).unwrap_or_default();
     let remote_repos: Vec<Value> = match object.get("repos") {
@@ -168,8 +154,6 @@ pub fn merged(remote: Option<&str>, owned: &Map<String, Value>) -> Vec<u8> {
     super::registry::pretty_sorted(Value::Object(object))
 }
 
-/// The owned keys whose value on the machine differs, sorted. A key that is missing equals null.
-/// A repo is compared on the keys Notchling owns only.
 pub fn differences(remote: Option<&str>, owned: &Map<String, Value>) -> Vec<String> {
     let object = remote.and_then(parse).unwrap_or_default();
     let mut keys: Vec<&String> = owned.keys().collect();
@@ -207,11 +191,8 @@ fn repos_match(remote: Option<&Value>, owned: Option<&Value>) -> bool {
     })
 }
 
-// MARK: the step
-
 const PROBE: &str = r#"head -c 262144 "$HOME/.config/sd/worker.json" 2>/dev/null"#;
 
-/// The Fix's read keeps stderr, so a real failure has a reason; a missing file prints nothing.
 const READ: &str = r#"[ -f "$HOME/.config/sd/worker.json" ] || exit 0; head -c 262144 "$HOME/.config/sd/worker.json""#;
 
 pub(super) fn step(machine: &Machine, job: &SdWorkerSettings, all: &[Machine]) -> SetupStep {
@@ -282,9 +263,6 @@ fn write(ctx: &FixContext) -> FixOutcome {
         Err(why) => return FixOutcome::fail(why),
     };
     let read = run::script(ctx, READ, None, 60);
-    // Missing means nothing on stdout, nothing on stderr and exit 0 or 1. Any stderr (Permission
-    // denied, an I/O error) is a real read error, and the Fix must not overwrite a file it
-    // couldn't read.
     let missing = read.out.is_empty() && read.err.is_empty() && (read.code == 0 || read.code == 1);
     if !(missing || (read.code == 0 && read.err.is_empty())) {
         let said = why(&read, ctx);

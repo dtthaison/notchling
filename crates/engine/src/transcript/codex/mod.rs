@@ -1,10 +1,3 @@
-//! Codex CLI sessions read as Chat conversations. Codex 0.166 writes each session (a "thread") to
-//! `~/.codex/sessions/YYYY/MM/DD/rollout-<time>-<id>.jsonl`. Lines are `{timestamp, ordinal, type,
-//! payload}`: `session_meta` first (id, cwd, originator), `response_item` for what the model saw and
-//! said (messages, reasoning, tool calls and their outputs), `event_msg` for turn events
-//! (`task_started`, `task_complete`, `token_count`, `turn_aborted`), `turn_context` with the turn's
-//! model and effort.
-
 mod calls;
 mod stamped;
 
@@ -23,7 +16,6 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use stamped::{Stamp, Stamped};
 
-/// A session's id and folder from its first line, and its title from the first thing you typed.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Meta {
     pub id: String,
@@ -31,7 +23,6 @@ pub struct Meta {
     pub title: Option<String>,
 }
 
-/// What you typed, leaving out what Codex adds as user messages (`<environment_context>`, AGENTS.md).
 pub fn user_text(payload: &Value) -> Option<String> {
     let parts: Vec<&str> = payload
         .get("content")
@@ -52,7 +43,6 @@ pub fn user_text(payload: &Value) -> Option<String> {
     }
 }
 
-/// The first line of a message, cut to 80 characters.
 pub fn title(text: &str) -> String {
     let line = text
         .split(['\n', '\r'])
@@ -70,9 +60,6 @@ fn meta_cache() -> &'static Mutex<HashMap<String, Meta>> {
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-/// The session's id and folder from its first line, and its title from the first thing you typed
-/// (read once; the head of a session doesn't change). Until it has a title, read again only when
-/// the file changed.
 pub fn meta(path: &str) -> Option<Meta> {
     if let Some(hit) = meta_cache()
         .lock()
@@ -89,7 +76,6 @@ pub fn meta(path: &str) -> Option<Meta> {
 }
 
 fn read_meta(path: &str) -> Option<Meta> {
-    // The developer prompt and tool list come first and run to a few hundred KB.
     let mut head = Vec::new();
     File::open(path)
         .ok()?
@@ -136,8 +122,6 @@ fn read_meta(path: &str) -> Option<Meta> {
     Some(found)
 }
 
-/// The last turn started and hasn't ended, from the file's tail; read again only when the file
-/// changed.
 pub fn turn_open(path: &str) -> bool {
     static OPEN: Stamped<bool> = Stamped::new();
     match Stamp::of(Path::new(path)) {
@@ -181,7 +165,6 @@ pub struct Parser {
     facts: SessionFacts,
     turn_start: Option<Timestamp>,
     model: Option<String>,
-    /// Tool calls waiting for their output, by call id: where they sit in `items`.
     open_calls: HashMap<String, (usize, usize)>,
     files: BTreeSet<String>,
     fallback_ids: u64,
@@ -311,7 +294,6 @@ impl Parser {
         if call.kind == ToolKind::Shell {
             self.facts.commands += 1;
         }
-        // An edit's input is the files its patch touches, one per line.
         if call.kind == ToolKind::Edit {
             self.files.extend(
                 call.input
@@ -444,20 +426,16 @@ impl LineParser for Parser {
 
 fn cursors() -> &'static Cursors<Parser, Arc<Conversation>> {
     static CURSORS: OnceLock<Cursors<Parser, Arc<Conversation>>> = OnceLock::new();
-    // Image tool results are megabytes of base64 Chat doesn't draw; they mustn't push the prompt out.
     CURSORS.get_or_init(|| {
         Cursors::new(CHAT_TAIL_BYTES, 30, |p: &Parser| Arc::new(p.conversation()))
             .long_lines_free(64_000_000)
     })
 }
 
-/// A Codex session file as Chat's conversation, read incrementally like a Claude transcript. An
-/// unchanged file gives the same `Arc` as the last call.
 pub fn read_shared(path: &str) -> Arc<Conversation> {
     cursors().read(path).unwrap_or_default()
 }
 
-/// [`read_shared`] as an owned copy.
 pub fn read(path: &str) -> Conversation {
     (*read_shared(path)).clone()
 }

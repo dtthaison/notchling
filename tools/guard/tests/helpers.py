@@ -1,5 +1,3 @@
-"""Real temporary git repositories for the guard tests. No network, no `gh`."""
-
 from __future__ import annotations
 
 import os

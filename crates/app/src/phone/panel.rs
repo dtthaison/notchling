@@ -1,20 +1,12 @@
-//! What the Phone panel shows, pure (part U6, the Swift `PhonePanel`): the bridge switch, the
-//! pairing code and QR, the paired phones with Revoke, and the tunnel's status, each control with
-//! the reason it is disabled when it is. Drawn from a [`Snapshot`] and the clock; the GPUI view
-//! (`view`, macOS) only lays it out.
-
 use super::bridge::{Snapshot, DETACHED_MESSAGE, OFF_MESSAGE};
 use super::qr::Qr;
 use super::wire::{BridgeState, Device, Pairing, Tunnel, TunnelState};
 use crate::acting::Control;
 use crate::chat::format::age;
 
-/// Where cloudflared points, shown under the tunnel (the Swift app shows the same line).
 pub const TUNNEL_ORIGIN: &str = "cloudflared → http://127.0.0.1:47822";
-/// The switch's explanation.
 pub const SWITCH_NOTE: &str = "Off by default. Accepts this Mac, the private LAN and Tailscale over TLS with a pinned fingerprint.";
 
-/// The dot beside the bridge's state.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Dot {
     Off,
@@ -34,19 +26,16 @@ pub struct Switch {
     pub control: Control,
 }
 
-/// The pairing section.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Pair {
-    /// No code on show: the Pair a Phone button.
-    Idle { button: Control },
+    Idle {
+        button: Control,
+    },
     Showing {
-        /// The code as a grid, or why it can't be drawn.
         qr: Result<Qr, String>,
         code: String,
-        /// "Expires in 4:32", or "Expired".
         expires: String,
         expired: bool,
-        /// Where the phone can reach this Mac, one per line.
         hosts: Vec<String>,
         new_code: Control,
     },
@@ -56,17 +45,14 @@ pub enum Pair {
 pub struct DeviceRow {
     pub id: String,
     pub name: String,
-    /// "ios · paired 3d ago · last seen 5m ago".
     pub detail: String,
     pub revoke: Control,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Devices {
-    /// "Paired phones (2)".
     pub title: String,
     pub rows: Vec<DeviceRow>,
-    /// Shown instead of rows when there are none.
     pub empty: Option<&'static str>,
 }
 
@@ -74,7 +60,6 @@ pub struct Devices {
 pub struct TunnelBlock {
     pub status: String,
     pub dot: Dot,
-    /// "Last connection 4m ago", while there was one.
     pub detail: Option<String>,
 }
 
@@ -85,12 +70,10 @@ pub struct Panel {
     pub pair: Pair,
     pub devices: Devices,
     pub tunnel: TunnelBlock,
-    /// The certificate's SHA-256 fingerprint, once the daemon has it.
     pub fingerprint: Option<String>,
     pub error: Option<String>,
 }
 
-/// Why a control that needs the bridge is off, or `None` while it is live.
 pub fn gate(s: &Snapshot) -> Control {
     let reason = if !s.attached {
         Some(DETACHED_MESSAGE)
@@ -120,7 +103,6 @@ fn status_line(s: &Snapshot) -> StatusLine {
     StatusLine { word, dot }
 }
 
-/// "5m ago", "just now"; "unknown" without a time.
 fn ago(now_ms: i64, then_ms: Option<i64>) -> String {
     match then_ms.map(|t| age(now_ms, t)) {
         Some(a) if a == "now" => "just now".to_owned(),
@@ -234,7 +216,6 @@ impl Panel {
         }
     }
 
-    /// Whether the clock matters to what's drawn: a code counts down.
     pub fn ticking(&self) -> bool {
         matches!(&self.pair, Pair::Showing { expired: false, .. })
     }
@@ -385,7 +366,6 @@ mod tests {
             matches!(&p.pair, Pair::Showing { expires, expired: true, .. } if expires == "Expired")
         );
         assert!(!p.ticking());
-        // The seconds are zero-padded.
         s.pairing = Some(code(61));
         let Pair::Showing { expires, .. } = Panel::new(&s, NOW).pair else {
             panic!("expected a code");

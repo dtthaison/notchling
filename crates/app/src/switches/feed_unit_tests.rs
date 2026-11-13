@@ -1,5 +1,3 @@
-//! The switch feed's unit tests: its state, without a daemon.
-
 use super::*;
 
 fn event(name: &str, data: Value) -> Event {
@@ -50,7 +48,6 @@ fn pending_vault_items_come_and_go_by_id_and_off_drops_them() {
     assert!(s.state().approvals.is_empty());
     s.apply(&event(topics::VAULT_CHANGED, json!({"names": ["github"]})));
     assert_eq!(s.state().changes.vault, 1);
-    // The vault switch going off ends the form still open.
     s.apply(&event(
         topics::SWITCH_CHANGED,
         json!({"switch": "vault", "on": false}),
@@ -69,8 +66,6 @@ fn the_areas_count_their_events_and_the_accounts_switch_moves_all_three() {
         topics::PROVIDERS_CHANGED,
         json!({"provider": "codex"}),
     ));
-    // The daemon publishes one of these for every providers.list, the app's own included: not a
-    // reason to read again.
     s.apply(&event(
         topics::PROVIDERS_CHANGED,
         json!({"provider": null, "reason": "sync"}),
@@ -96,7 +91,6 @@ fn the_areas_count_their_events_and_the_accounts_switch_moves_all_three() {
     ));
     let c = s.state().changes;
     assert_eq!((c.accounts, c.providers, c.limits), (3, 2, 3));
-    // The same again changes nothing.
     s.apply(&event(
         topics::SWITCH_CHANGED,
         json!({"switch": "accounts", "on": false}),
@@ -176,11 +170,9 @@ fn the_pending_list_read_on_connect_replaces_what_was_held_and_events_still_dedu
         assert_eq!(st.approvals[0]["names"], json!(["github"]));
         assert_eq!(st.changes.vault, before + 1);
     }
-    // An event for one already listed after the read adds nothing; a resolved one goes.
     s.apply(&event(topics::VAULT_APPROVAL_PENDING, json!({"id": "a3"})));
     s.apply(&event(topics::VAULT_APPROVAL_RESOLVED, json!({"id": "a2"})));
     assert_eq!(ids(&s.state().approvals), ["a3"]);
-    // A reply this app can't read changes nothing.
     s.load_pending(&json!("odd"));
     assert_eq!(ids(&s.state().approvals), ["a3"]);
 }
@@ -200,7 +192,6 @@ fn an_accounts_event_with_a_moves_end_is_kept_for_the_view() {
         assert_eq!((st.changes.moves, st.changes.accounts), (1, 2));
         assert_eq!(st.last_move, Some(end));
     }
-    // The daemon's late answer: `accounts.done` for a Move All carries its result or its error.
     let result = json!({"moved": [], "errors": {"job-9": "Couldn't move it: stop failed"}});
     s.apply(&event(
         topics::ACCOUNTS_DONE,
@@ -216,7 +207,6 @@ fn an_accounts_event_with_a_moves_end_is_kept_for_the_view() {
         s.state_move(),
         Some(json!({"moved": [], "errors": {"accounts": "Acting is off."}}))
     );
-    // Another op's late answer only says the accounts moved.
     s.apply(&event(
         topics::ACCOUNTS_DONE,
         json!({"ticket": 6, "op": "accounts.switch", "ok": true, "result": {"moved": []}}),

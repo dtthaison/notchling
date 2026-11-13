@@ -1,5 +1,3 @@
-//! The panel model's rules: grouping, selection, heights, texts, hints and keys.
-
 use super::*;
 use notchling_engine::search::SessionTool;
 
@@ -110,11 +108,9 @@ fn the_selection_stays_on_the_same_row_when_it_is_still_there() {
     m.move_by(2);
     let kept = m.current().unwrap().id();
     assert_eq!(kept, "session:claude:s0");
-    // A new answer with one page fewer: the same session row is now second.
     m.apply(results(1, 2), Some(&kept));
     assert_eq!(m.selected, 1);
     assert_eq!(m.current().unwrap().id(), kept);
-    // Gone: back to the top.
     m.apply(results(1, 0), Some(&kept));
     assert_eq!(m.selected, 0);
 }
@@ -211,7 +207,6 @@ fn the_hints_name_what_return_and_copy_do_for_the_row() {
             ("esc", "Close")
         ]
     );
-    // A page with no link has nothing to copy.
     let mut m = SearchModel::new();
     m.apply(only_pages(vec![page("p", "")]), None);
     assert_eq!(m.hints(), vec![("↩", "Open"), ("esc", "Close")]);
@@ -229,7 +224,6 @@ fn arrows_return_and_escape_do_what_the_swift_panel_does() {
         m.press(&Press::plain("enter", Some("\r"))),
         Outcome::Open(m.items()[0].clone())
     );
-    // Esc clears words first, then closes and gives focus back.
     m.query = "bri".into();
     assert_eq!(m.press(&Press::plain("escape", None)), Outcome::Cleared);
     assert_eq!(m.query, "");
@@ -237,7 +231,6 @@ fn arrows_return_and_escape_do_what_the_swift_panel_does() {
         m.press(&Press::plain("escape", None)),
         Outcome::Hide { returning: true }
     );
-    // Return with nothing selected does nothing.
     let mut empty = SearchModel::new();
     assert_eq!(empty.press(&Press::plain("enter", None)), Outcome::Ignored);
 }
@@ -267,7 +260,6 @@ fn command_keys_copy_and_close_and_never_type() {
     );
     assert_eq!(m.press(&Press::command("v")), Outcome::Ignored);
     assert_eq!(m.query, "");
-    // ⌘C on a page without a link, or with no row: nothing.
     let mut m = SearchModel::new();
     assert_eq!(m.press(&Press::command("c")), Outcome::Ignored);
     m.apply(only_pages(vec![page("p", "")]), None);
@@ -290,7 +282,6 @@ fn plain_keys_type_into_the_query() {
         empty.press(&Press::plain("backspace", None)),
         Outcome::Ignored
     );
-    // A Control chord is not typing; Option types its character.
     let mut m = SearchModel::new();
     let mut ctrl = Press::plain("a", Some("a"));
     ctrl.control = true;

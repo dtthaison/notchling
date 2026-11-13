@@ -1,6 +1,3 @@
-//! Ported from `MachinesStatusTests.swift`: the lenient status decoder, the health words and the
-//! token warning.
-
 use super::poller::{health, LastReport};
 use super::status::{parse_status_date, Job, NeedsYouEntry, ReadyEntry, StuckEntry, WorkerStatus};
 
@@ -61,8 +58,6 @@ fn busy(current: bool, ready: usize, needs_you: usize) -> WorkerStatus {
     ];
     s
 }
-
-// decoding
 
 #[test]
 fn decodes_full_status() {
@@ -241,7 +236,6 @@ fn paused_fixture() {
     );
 }
 
-/// A machine's status is untrusted text: a hostile one decodes to plain strings and nothing else.
 #[test]
 fn hostile_values_stay_plain_data() {
     let s = status(
@@ -254,8 +248,6 @@ fn hostile_values_stay_plain_data() {
     assert_eq!(e.worktree, "$(touch /tmp/x)");
     assert_eq!(e.evidence_dir, "../../etc");
 }
-
-// health
 
 #[test]
 fn health_online() {
@@ -275,7 +267,6 @@ fn health_offline_no_jobs() {
         "offline"
     );
     assert_eq!(health::word(true, &failed(), None, NOW), "offline");
-    // never reached, nothing known before it
     assert_eq!(
         health::word(true, &failed(), Some(&failed()), NOW),
         "offline"
@@ -314,7 +305,6 @@ fn health_restarted_when_booted_at_moves_while_working() {
         health::word(false, &ok(after.clone()), Some(&ok(before.clone())), NOW),
         "online"
     );
-    // same boot, an idle worker, or nothing to compare with: online
     assert_eq!(
         health::word(true, &ok(before.clone()), Some(&ok(before.clone())), NOW),
         "online"
@@ -352,8 +342,6 @@ fn a_failed_poll_is_not_online_even_with_a_status_attached() {
     };
     assert_eq!(health::word(false, &both, None, NOW), "offline");
 }
-
-// token warning
 
 #[test]
 fn token_warning_at_14_not_at_15() {

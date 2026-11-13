@@ -1,10 +1,6 @@
-//! Scratch folders for tests. Under `/tmp` on Unix, since a socket path must stay short (104 bytes
-//! on macOS) and the macOS temp dir is long. Nothing here touches the real data folder.
-
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 
-/// A fresh folder, mode 0700 on Unix, removed on drop.
 pub struct TempDir(PathBuf);
 
 impl TempDir {

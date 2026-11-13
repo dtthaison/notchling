@@ -1,6 +1,3 @@
-//! Split values against the in-memory Keychains: realistic sizes, the Swift one-item format, a
-//! damaged part, and parts left over from a longer value.
-
 use super::*;
 use crate::accounts::fake::MemoryKeychain;
 use crate::accounts::generic_password::FakeKeychain;
@@ -9,7 +6,6 @@ use std::sync::Arc;
 
 const CODEX: &str = "Notchling Codex";
 
-/// An obviously fake value of `len` bytes that looks like a base64 login copy.
 fn fake_value(len: usize) -> String {
     let pattern = "FAKE-not-a-token-0123456789abcdefABCDEF+/";
     pattern.chars().cycle().take(len).collect()
@@ -125,7 +121,6 @@ fn items_other_tools_read_are_never_split() {
         assert_eq!(kc.get(service, account), None);
         assert_eq!(kc.get(service, &part_name(account, 0)), None);
     }
-    // A header-looking value in another tool's item is that tool's text, not parts to join.
     let odd = format!("{HEADER}1:{}", "0".repeat(64));
     let kc = FakeKeychain::new().with("gemini", "antigravity", &odd);
     assert_eq!(
@@ -155,7 +150,6 @@ fn every_line_written_stays_under_the_cap() {
         .all(|args| !args.join(" ").contains("FAKE")));
     keys.delete("Notchling Accounts", "a1:o1").unwrap();
     assert!(chain.names().is_empty());
-    // Claude Code's own item keeps refusing.
     assert_eq!(
         keys.write("Claude Code-credentials", "me", &value),
         Err(KeychainError::TooLong)

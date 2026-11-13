@@ -1,9 +1,3 @@
-//! Step 14: which repositories the issues token reaches and when it expires (Swift `TokenScope`).
-//! The probe runs on this Mac and the token never leaves the app: it is read from the vault,
-//! compared in memory with the other machines' tokens and sent only in the Authorization header of
-//! requests to `https://api.github.com` (through [`super::step::StepContext::http`]). No result,
-//! row or message holds it.
-
 use super::github::HttpAnswer;
 use super::registry::SdWorkerSettings;
 use super::step::{
@@ -19,14 +13,8 @@ use crate::vault::expiry::{self, Status};
 use std::collections::{BTreeMap, BTreeSet};
 
 const REFUSED: &str = "GitHub refused the token: expired or revoked";
-/// Names shown in a message before `…`.
 const NAMED_REPOS: usize = 3;
 
-/// Issues access on each served repo, nothing on any other private repo (unless the job allows all
-/// repos), no Contents access, a value no other machine uses, and an expiry that has not passed.
-///
-/// The Fix opens GitHub's token page and the vault form through the context's
-/// [`super::step::Opener`]; tests pass a recording one and never open anything.
 pub fn step(m: &super::registry::Machine, job: &SdWorkerSettings) -> SetupStep {
     let repos: Vec<String> = job.repos.iter().map(|r| r.github.clone()).collect();
     let all_repos = job.token_all_repos == Some(true);
@@ -41,7 +29,6 @@ pub fn step(m: &super::registry::Machine, job: &SdWorkerSettings) -> SetupStep {
     );
     let (secret, machine) = (job.issues_secret.clone(), m.name.clone());
     let fix = FixPlan::new(display, false, move |ctx| {
-        // A new token is the one clean fix for a shared, mis-scoped or expired one.
         token_creation::start(
             &*ctx.step.opener,
             &secret,
@@ -50,8 +37,6 @@ pub fn step(m: &super::registry::Machine, job: &SdWorkerSettings) -> SetupStep {
             all_repos,
             ctx.step.now,
         );
-        // Only the page opens here (the form is the vault's own). The step is not done until a check passes, so this
-        // is not ok: Set up all stops at it (and the window shows the line as guidance).
         FixOutcome::fail(format!("Opened GitHub's token page. Fix the token, save it in the Secret Vault as {secret}, then Check again."))
     });
     let job = job.clone();
@@ -65,13 +50,9 @@ pub fn step(m: &super::registry::Machine, job: &SdWorkerSettings) -> SetupStep {
     )
 }
 
-/// The day (`YYYY-MM-DD`) in a `github-authentication-token-expiration` header such as
-/// `2027-02-01 12:00:00 +0700`: its first 10 characters when they are a real day.
 pub fn expiry_day(header: &str) -> Option<String> {
     expiry::parse(&header.chars().take(10).collect::<String>())
 }
-
-// MARK: the check
 
 enum Outcome {
     Ok(String),
@@ -113,7 +94,6 @@ fn check(ctx: &StepContext, job: &SdWorkerSettings) -> CheckResult {
         return CheckResult::cant_tell("the served repos are not all owner/name");
     }
 
-    // Every private repo of the served owners that is not served, from the user's own gh.
     let listing = private_listing(&served, &*ctx.runner);
 
     let issues_reqs = requests(&served, "/issues", Some("per_page=1"));
@@ -122,8 +102,6 @@ fn check(ctx: &StepContext, job: &SdWorkerSettings) -> CheckResult {
         Ok(l) => requests(&l.others, "", None),
         Err(_) => Vec::new(),
     };
-    // The token's own list of private repos, before the other probes so that at most 4 requests
-    // run at once.
     let view = token_view(&token, &*ctx.http);
     let urls: Vec<String> = issues_reqs
         .iter()
@@ -133,7 +111,6 @@ fn check(ctx: &StepContext, job: &SdWorkerSettings) -> CheckResult {
         .collect();
     let answers = fetch_all(&urls, &token, &*ctx.http);
 
-    // A 401 anywhere means nothing else it said can be trusted.
     if view.refused || answers.values().any(|a| a.status == 401) {
         return CheckResult::fail(REFUSED);
     }
@@ -231,18 +208,12 @@ fn issues_outcome(reqs: &[Req], answers: &Answers) -> Outcome {
     if unknown {
         return Outcome::Unknown("couldn't read the issues of every served repo".into());
     }
-    // the check reads; a write would change GitHub. sd's labels row proves the write once the
-    // labels exist.
     Outcome::Ok(format!(
         "can read issues of {} (a write is not tried here)",
         plural(reqs.len(), "repo")
     ))
 }
 
-/// Two independent views of "no other private repo": a probe of each repo gh lists, and the
-/// token's own list. Either one seeing an unserved repo is a fail; a doubt in either (and no fail)
-/// is can't tell. When the job allows all repositories, seeing other repos is accepted and so is
-/// any doubt about them: the outcome is ok and says how many were seen.
 fn denied_outcome(
     listing: &Result<Listing, String>,
     reqs: &[Req],
@@ -279,9 +250,6 @@ fn denied_outcome(
                     shown(&visible)
                 ));
             }
-            // gh must list the served repos (they are private): if it doesn't, it is looking at
-            // the wrong account or cannot see private repos, and an empty "others" list would
-            // prove nothing.
             if !l.served_missing.is_empty() {
                 unknowns.push(format!(
                     "gh doesn't list {} among the private repos it can see",
@@ -305,7 +273,6 @@ fn denied_outcome(
         }
     }
 
-    // The token's own list: a fine-grained token lists only the repos it can reach.
     let served_keys: BTreeSet<String> = served.iter().map(|s| s.to_lowercase()).collect();
     let mut extra: Vec<String> = view
         .names
@@ -331,8 +298,6 @@ fn denied_outcome(
     } else if let Some(doubt) = &view.incomplete {
         unknowns.push(doubt.clone());
     } else if !not_shown.is_empty() {
-        // The served repos are private and the issues probe reaches them, so a whole list that
-        // leaves one out is not the whole truth: it proves nothing about the others either.
         unknowns.push(format!(
             "the token's list of private repos doesn't show {}",
             not_shown
@@ -361,7 +326,6 @@ fn denied_outcome(
     ))
 }
 
-/// At most [`NAMED_REPOS`] names, then `…` when there are more.
 fn shown(names: &[String]) -> String {
     let head = names
         .iter()
@@ -383,7 +347,6 @@ fn contents_outcome(reqs: &[Req], answers: &Answers) -> Outcome {
             unknown = true;
             continue;
         };
-        // 409 is GitHub's answer for an empty repo the token can read.
         if a.status == 200 || a.status == 409 {
             readable.push(req.name.as_str());
         } else if !is_denial(a) {
@@ -399,8 +362,6 @@ fn contents_outcome(reqs: &[Req], answers: &Answers) -> Outcome {
     Outcome::Ok("no Contents access".into())
 }
 
-/// Compares in memory with every other machine's token. Neither value is printed, stored or
-/// hashed.
 fn distinct_outcome(token: &str, secret_name: &str, ctx: &StepContext) -> Outcome {
     let mut failures = Vec::new();
     let mine = token.trim();
@@ -429,7 +390,6 @@ fn distinct_outcome(token: &str, secret_name: &str, ctx: &StepContext) -> Outcom
 
 fn expiry_outcome(header: Option<&str>, day: Option<&str>, now: f64) -> Outcome {
     let Some(day) = day else {
-        // A header that is there but unreadable is not "no expiry".
         return if header.is_none() {
             Outcome::Ok("GitHub reported no expiry".into())
         } else {

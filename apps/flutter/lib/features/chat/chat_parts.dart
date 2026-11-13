@@ -11,7 +11,6 @@ import 'code_highlight.dart';
 import 'markdown_text.dart';
 import 'send_now.dart';
 
-/// What the conversation list draws: one message, or a run of consecutive tool messages folded into one group.
 sealed class ChatEntry {
   const ChatEntry();
   String get id;
@@ -43,7 +42,6 @@ class ToolGroupEntry extends ChatEntry {
   ];
 }
 
-/// Oldest to newest, tool runs folded.
 List<ChatEntry> groupEntries(List<ChatMessage> messages) {
   final List<ChatEntry> entries = <ChatEntry>[];
   final List<ChatMessage> run = <ChatMessage>[];
@@ -64,7 +62,6 @@ List<ChatEntry> groupEntries(List<ChatMessage> messages) {
   return entries;
 }
 
-/// You: an accent-wash bubble on the right, 75% of the column at most.
 class UserBubble extends StatelessWidget {
   const UserBubble({super.key, required this.message, required this.sessionId});
   final ChatMessage message;
@@ -115,7 +112,6 @@ class UserBubble extends StatelessWidget {
   }
 }
 
-/// Claude: a card with the mark above the text.
 class AssistantCard extends StatelessWidget {
   const AssistantCard({
     super.key,
@@ -154,7 +150,6 @@ class AssistantCard extends StatelessWidget {
   }
 }
 
-/// A `!` command you sent: shell wash, mono, the `!` in the shell color; its output below.
 class ShellBubble extends StatefulWidget {
   const ShellBubble({super.key, required this.message});
   final ChatMessage message;
@@ -241,7 +236,6 @@ class _ShellBubbleState extends State<ShellBubble> {
   }
 }
 
-/// One notice that the conversation was compacted: hairlines, an icon, the title and the summary line.
 class CompactionNotice extends StatelessWidget {
   const CompactionNotice({super.key, required this.message});
   final ChatMessage message;
@@ -290,7 +284,6 @@ class CompactionNotice extends StatelessWidget {
   }
 }
 
-/// A run of tool calls as one raised capsule ("7 tool steps"); tap to open the steps, tap a step for its output or diff.
 class ToolGroupView extends StatefulWidget {
   const ToolGroupView({
     super.key,
@@ -496,7 +489,6 @@ class _StepRowState extends State<_StepRow> {
   }
 }
 
-/// An Edit or Write: the path, then the changed lines with a gutter, added on green and removed on red, highlighted.
 class DiffView extends StatelessWidget {
   const DiffView({super.key, required this.lines, this.path});
   final List<DiffLine> lines;
@@ -609,7 +601,6 @@ class DiffView extends StatelessWidget {
   }
 }
 
-/// The reply you just sent, until the Mac's transcript has it.
 class PendingBubble extends StatelessWidget {
   const PendingBubble({
     super.key,
@@ -679,18 +670,14 @@ class PendingBubble extends StatelessWidget {
   }
 }
 
-/// A day or time marker is not needed on a phone; spacing carries the rhythm.
 EdgeInsets entryGap(ChatEntry entry, ChatEntry? newer) => EdgeInsets.only(
   bottom: entry is ToolGroupEntry && newer is ToolGroupEntry
       ? Space.xs
       : Space.md,
 );
 
-/// Reduce Motion aware fade for new entries is handled by the list; kept here so previews can import one place.
 bool reducedMotion(BuildContext context) => reduceMotion(context);
 
-/// Under the newest message while the session runs: three dots that rise in turn, and what it is doing. One controller,
-/// stopped when the tab is hidden; with Reduce Motion the dots stay level.
 class WorkingIndicator extends StatefulWidget {
   const WorkingIndicator({super.key, this.activity});
   final String? activity;
@@ -772,6 +759,5 @@ class _WorkingIndicatorState extends State<WorkingIndicator> with SingleTickerPr
     );
   }
 
-  /// 0 at rest, 1 at the top of the hop: a smooth bump over the first third of the cycle.
   static double _bump(double t) => t < 0.33 ? Curves.easeInOut.transform(1 - (t / 0.33 - 1).abs()) : 0;
 }

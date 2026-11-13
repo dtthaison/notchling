@@ -1,7 +1,3 @@
-//! Port of `CostTrackerTests` and the tracker half of `CostSourcesTests`, over transcripts in a
-//! temp folder. Nothing reads a real transcript folder; the zone is UTC so days don't depend on
-//! the machine.
-
 use super::cache::{old_cache_file, Cache, CACHE_DOC, CURRENT};
 use super::service::CostService;
 use super::summary::{day_key, Window};
@@ -14,7 +10,6 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-/// 2027-01-15 08:00:00 UTC.
 const NOW: f64 = 1_800_000_000.0;
 const DAY: f64 = 86_400.0;
 
@@ -26,7 +21,6 @@ fn utc(_: f64) -> i64 {
     0
 }
 
-/// An assistant line costing `dollars` at Opus 5.5 prices ($20 per million output tokens).
 fn usage_line(id: &str, dollars: f64, at: f64) -> String {
     let tokens = (dollars / 20.0 * 1_000_000.0) as u64;
     format!(
@@ -108,7 +102,6 @@ fn a_message_copied_to_another_transcript_counts_once() {
         &usage_line("m1", 20.0, NOW),
     );
     t.refresh(NOW);
-    // Claude Code copies messages into the new transcript when it compacts or resumes.
     append(
         &tmp,
         "projects/-tmp-demo/resumed.jsonl",
@@ -176,7 +169,6 @@ fn a_rewritten_shorter_file_is_read_again_without_double_counting() {
         &(usage_line("m1", 20.0, NOW) + &usage_line("m2", 10.0, NOW)),
     );
     t.refresh(NOW);
-    // Shorter than what was read, so it is read from the start; m1 and m2 are already counted.
     std::fs::write(&path, usage_line("m3", 1.0, NOW)).unwrap();
     t.refresh(NOW);
     near(month(&t.ranged(NOW), Window::All), 31.0);
@@ -209,7 +201,6 @@ fn the_cache_is_saved_and_a_new_tracker_reads_it() {
     let mut again = claude_tracker(&tmp);
     again.refresh(NOW + 10.0);
     near(again.ranged(NOW).overall[&Window::Days(30)].today, 20.0);
-    // The cache has the message counted, so a copy of it elsewhere is still not counted twice.
     append(
         &tmp,
         "projects/-tmp-demo/c.jsonl",
@@ -247,7 +238,6 @@ fn the_old_cache_file_moves_in_once_and_a_stale_one_is_read_from_scratch() {
     let mut first = claude_tracker(&tmp);
     first.refresh(NOW);
     first.save_now(NOW);
-    // Put what it saved back where the old file was.
     let saved = store::doc(&data, CACHE_DOC).unwrap().unwrap();
     store::update_doc(&data, CACHE_DOC, |_| Ok(None)).unwrap();
     let old = tmp.write("data/daemon/cost-cache.json", &saved);
@@ -256,7 +246,6 @@ fn the_old_cache_file_moves_in_once_and_a_stale_one_is_read_from_scratch() {
     assert!(!loaded.files.is_empty(), "and its offsets came with it");
     assert_eq!(store::doc(&data, CACHE_DOC).unwrap().unwrap(), saved);
 
-    // A file of another version isn't moved in; the next save removes it.
     let tmp = TempDir::new("cost-import-stale");
     let data = tmp.path("data");
     append(&tmp, "projects/-p/a.jsonl", &usage_line("m1", 20.0, NOW));
@@ -306,7 +295,6 @@ fn windows_cover_the_last_7_and_30_days_and_everything() {
 #[test]
 fn the_cli_account_comes_from_the_switch_log() {
     let tmp = TempDir::new("cost-log");
-    // Foundation dates count from 2001-01-01.
     let reference = NOW - 978_307_200.0;
     std::fs::write(
         tmp.path("account-log.json"),
@@ -397,8 +385,6 @@ fn per_model_token_totals_and_projects() {
         "the message's cwd names the project"
     );
     let detail = &s.model_detail;
-    // The synthetic message is skipped; the unpriced model keeps its tokens at $0, after the priced
-    // one, and is listed.
     assert_eq!(detail.len(), 2, "{detail:?}");
     assert_eq!(detail[1].name, "Unknown 1");
     assert_eq!((detail[1].cost, detail[1].output), (0.0, 99.0));
@@ -485,8 +471,6 @@ fn codex_and_antigravity_channels() {
     t.refresh(NOW);
     let r = t.ranged(NOW);
     let all = &r.overall[&Window::All];
-    // Two requests of gpt-5.1: (20000 in, 100 out) and (5000 in, 20000 cached, 200 out); the
-    // repeat is dropped.
     let codex = all
         .channels
         .iter()
@@ -494,7 +478,6 @@ fn codex_and_antigravity_channels() {
         .expect("codex");
     near(codex.cost, 0.026 + 0.01075);
     assert_eq!(all.channel_tokens["Codex"], 20_100.0 + 25_200.0);
-    // Gemini 4 Argon has no price: tokens only.
     let agy = all
         .channels
         .iter()
@@ -535,7 +518,6 @@ fn appended_codex_lines_keep_the_model_and_skip_a_repeat() {
         .find(|c| c.name == "Codex")
         .map(|c| c.cost)
         .expect("codex");
-    // Only `next` is new, priced as gpt-5.1 from the turn_context read in the first pass.
     near(codex, 0.026 + 0.01075 + 0.0125);
 }
 
@@ -616,7 +598,6 @@ fn the_service_answers_at_once_and_scans_on_a_thread() {
         std::thread::sleep(std::time::Duration::from_millis(10));
     };
     near(done.summary(Window::All).expect("all").month, 20.0);
-    // A new line is seen by the next scan, and a request within 20 s starts none.
     append(&tmp, "projects/-p/a.jsonl", &usage_line("m2", 5.0, NOW));
     service.request(NOW + 5.0);
     std::thread::sleep(std::time::Duration::from_millis(100));
@@ -632,7 +613,6 @@ fn the_service_answers_at_once_and_scans_on_a_thread() {
     assert!(!service.snapshot().scanning);
 }
 
-/// An assistant line for any model with the given usage object.
 fn model_line(id: &str, model: &str, usage: &str, at: f64) -> String {
     format!(
         r#"{{"type":"assistant","timestamp":"{}","message":{{"id":"{id}","model":"{model}","usage":{usage}}}}}"#,
@@ -658,7 +638,6 @@ fn an_unpriced_claude_model_counts_tokens_and_is_listed() {
     assert_eq!(s.model_detail.len(), 1, "its tokens are counted");
     near(s.model_detail[0].output, 1000.0);
     assert_eq!(s.channel_tokens[CLAUDE_CODE], 1000.0);
-    // A priced model alone lists nothing.
     let tmp = TempDir::new("cost-priced");
     append(&tmp, "projects/-p/a.jsonl", &usage_line("m1", 1.0, NOW));
     let mut t = claude_tracker(&tmp);
@@ -683,7 +662,6 @@ fn a_newer_family_model_is_priced_as_borrowed() {
     t.refresh(NOW);
     let r = t.ranged(NOW);
     let s = &r.overall[&Window::All];
-    // Fable 5.2: $40 per million output tokens.
     near(s.month, 40.0);
     assert_eq!(s.borrowed, ["claude-fable-5-3"]);
     assert!(s.unpriced.is_empty());
@@ -707,7 +685,6 @@ fn a_changed_price_reprices_days_already_counted() {
     first.save_now(NOW);
     near(month(&first.ranged(NOW), Window::All), 4.0 + 20.0);
 
-    // Opus 5.5's input price fixed to $8 in an override file.
     let file = tmp.write(
         "catalog.json",
         r#"{"claude": {"prices": [{"match": "opus-5-5", "input": 8.0, "output": 20.0, "cache_read": 0.2}]}}"#,
@@ -725,13 +702,11 @@ fn a_changed_price_reprices_days_already_counted() {
     second.refresh(NOW + 1.0);
     near(month(&second.ranged(NOW), Window::All), 8.0 + 20.0);
 
-    // Back on the built-in prices it is repriced again, and nothing is counted twice.
     let mut third = claude_tracker(&tmp);
     third.refresh(NOW + 2.0);
     near(month(&third.ranged(NOW), Window::All), 4.0 + 20.0);
 }
 
-/// A Claude Code tracker over `tmp`'s transcripts and cache, pricing with `catalog`.
 fn tracker_with(tmp: &TempDir, catalog: Catalog) -> Tracker {
     Tracker::new(
         vec![Root {
@@ -745,12 +720,10 @@ fn tracker_with(tmp: &TempDir, catalog: Catalog) -> Tracker {
     .with_zone(utc)
 }
 
-/// A catalog with the override file `body` laid over the built-in one.
 fn overridden(tmp: &TempDir, body: &str) -> Catalog {
     Catalog::load(&tmp.write("catalog.json", body))
 }
 
-/// $20 counted forty days ago in a transcript that is then deleted, and $2 today in one that stays.
 fn old_day_gone(tmp: &TempDir) {
     let old = append(
         tmp,
@@ -790,8 +763,6 @@ fn a_price_added_for_a_model_used_nowhere_keeps_days_whose_transcripts_are_gone(
 fn a_changed_price_reprices_a_day_whose_transcript_is_gone_from_its_tokens() {
     let tmp = TempDir::new("cost-reprice-gone");
     old_day_gone(&tmp);
-    // Opus 5.5's output price doubled: today's request is read again, the old day is priced
-    // again from the tokens the cache kept.
     let doubled = overridden(
         &tmp,
         r#"{"claude": {"prices": [{"match": "opus-5-5", "input": 4.0, "output": 40.0, "cache_read": 0.2}]}}"#,
@@ -802,7 +773,6 @@ fn a_changed_price_reprices_a_day_whose_transcript_is_gone_from_its_tokens() {
     let r = t.ranged(NOW);
     near(month(&r, Window::All), 44.0);
     near(r.overall[&Window::All].today, 4.0);
-    // Back on the built-in price, every day is as it was.
     let mut back = claude_tracker(&tmp);
     back.refresh(NOW + 3.0);
     near(month(&back.ranged(NOW), Window::All), 22.0);
@@ -875,10 +845,7 @@ fn a_borrowed_model_named_current_later_is_priced_again() {
     let mut first = claude_tracker(&tmp);
     first.refresh(NOW);
     first.save_now(NOW);
-    // Priced as Fable 5.2, $40 per million output tokens.
     near(month(&first.ranged(NOW), Window::All), 40.0);
-    // A data file that names Fable 5.3 current with no price of its own: the family's, $50. The
-    // price entries are the same, so their fingerprint is too.
     let named = Catalog::built_in().with_current("claude-fable-5-3");
     assert_eq!(named.prices_hash(), Catalog::built_in().prices_hash());
     let mut t = tracker_with(&tmp, named);

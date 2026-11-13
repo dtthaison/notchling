@@ -1,36 +1,14 @@
-//! Generic passwords in the login Keychain, through `/usr/bin/security` the way Claude Code does
-//! it (`Keychain` in `Accounts.swift`). Items it creates trust that tool, so reading them causes no
-//! prompt, and an ad hoc signed app that changes on every build wouldn't keep its own access
-//! anyway. Account logins never go through the Security framework; the vault's item does, and is
-//! not here.
-//!
-//! A value goes in as hex on `security -i`'s standard input, so it never shows in the process
-//! list. `security -i` reads lines into a 4 KB buffer, so a longer command can't go that way. The
-//! Swift app then put the hex on the command line, where `ps` shows it; this port refuses such a
-//! value instead ([`KeychainError::TooLong`], the same rule as Claude Code's logins in
-//! [`super::keychain`]): a login never goes on a command line. The stores' own saved copies go
-//! through [`super::chunked`], which splits a long value over several items.
-//!
-//! Everything sits behind [`Keychain`] so no test touches a real item. The process itself is
-//! launched by [`super::keychain::SystemSecurity`], which Claude Code's logins use too (see the
-//! module docs of [`super`] for why there are two faces over it).
-
 pub use super::keychain::KeychainError;
 use super::keychain::{add_line, SecurityRunner, SystemSecurity};
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-/// The login Keychain's generic passwords.
 pub trait Keychain: Send + Sync {
-    /// The value, trimmed; `None` when there is no such item or it is empty.
     fn read(&self, service: &str, account: &str) -> Option<String>;
-    /// Adds the item or updates it in place (`-U`). A value too long for `security -i`'s line is
-    /// refused ([`KeychainError::TooLong`]), never put on the command line.
     fn write(&self, service: &str, account: &str, value: &str) -> Result<(), KeychainError>;
     fn delete(&self, service: &str, account: &str);
 }
 
-/// What to run to write one item: `security -i` with the command on stdin.
 #[derive(Clone, PartialEq, Eq)]
 pub struct WritePlan {
     pub args: Vec<String>,
@@ -50,8 +28,6 @@ pub fn hex(value: &str) -> String {
     super::keychain::hex(value.as_bytes())
 }
 
-/// The command that writes `value`: always through `security -i`'s stdin, as hex. Refused for a
-/// service or account that couldn't be quoted safely, and for a value whose line wouldn't fit.
 pub fn plan_write(service: &str, account: &str, value: &str) -> Result<WritePlan, KeychainError> {
     let line = add_line(service, account, value)?;
     Ok(WritePlan {
@@ -60,12 +36,9 @@ pub fn plan_write(service: &str, account: &str, value: &str) -> Result<WritePlan
     })
 }
 
-/// `/usr/bin/security`, through [`SystemSecurity`] (the one place that launches it; macOS only,
-/// elsewhere nothing is read or written).
 pub struct SecurityTool;
 
 impl SecurityTool {
-    /// Runs `security`; the exit code and what it printed. Standard error is dropped.
     fn run(args: &[String], input: Option<&str>) -> Option<(i32, String)> {
         let out = SystemSecurity.run(args, input.map(str::as_bytes)).ok()?;
         Some((
@@ -102,8 +75,6 @@ impl Keychain for SecurityTool {
     }
 }
 
-/// An in-memory Keychain that counts every call, for tests. [`FakeKeychain::calls`] staying 0 is
-/// how a switched-off daemon is shown not to touch the Keychain.
 #[derive(Default)]
 pub struct FakeKeychain {
     items: Mutex<HashMap<(String, String), String>>,
@@ -121,13 +92,10 @@ impl FakeKeychain {
         self
     }
 
-    /// Puts an item the way another tool would, past the line-length rule (Antigravity writes its
-    /// own item through the Security framework, so it can be longer than `security -i` takes).
     pub fn set_as_other_tool(&self, service: &str, account: &str, value: &str) {
         lock(&self.items).insert((service.into(), account.into()), value.into());
     }
 
-    /// Writes fail from now on.
     pub fn fail_writes(&self) {
         *lock(&self.fail_writes) = true;
     }
@@ -138,7 +106,6 @@ impl FakeKeychain {
             .cloned()
     }
 
-    /// Every call so far, as `read service/account`, `write …`, `delete …`.
     pub fn calls(&self) -> Vec<String> {
         lock(&self.calls).clone()
     }
@@ -156,7 +123,6 @@ impl Keychain for FakeKeychain {
 
     fn write(&self, service: &str, account: &str, value: &str) -> Result<(), KeychainError> {
         lock(&self.calls).push(format!("write {service}/{account}"));
-        // The real one's refusals: a name it can't quote, a value too long for its line.
         plan_write(service, account, value)?;
         if *lock(&self.fail_writes) {
             return Err(KeychainError::Refused(1));
@@ -203,7 +169,6 @@ mod tests {
             Err(KeychainError::TooLong)
         );
         assert_eq!(fake.get("gemini", "antigravity"), None);
-        // The longest that fits still goes in on stdin.
         let fits = "x".repeat(1900);
         assert_eq!(
             plan_write("gemini", "antigravity", &fits).unwrap().args,

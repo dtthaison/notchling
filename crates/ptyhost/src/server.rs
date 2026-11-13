@@ -1,6 +1,3 @@
-//! [`SessionHost`] on a Unix socket (`HostServer.swift`). Only the user who runs the host may connect
-//! (the peer's uid is checked on every connection); the socket's folder is 0700 and the socket 0600.
-
 use crate::client::HostClient;
 use crate::host::{HostEvent, SessionHost};
 use crate::wire::{self, int, Frame, FrameReader, SessionId};
@@ -18,10 +15,8 @@ use std::time::Duration;
 
 pub const PROTOCOL_VERSION: i64 = 1;
 
-/// Who may connect, by the peer's uid.
 pub type Authorize = Arc<dyn Fn(u32) -> bool + Send + Sync>;
 
-/// Only this user.
 pub fn same_user() -> Authorize {
     // SAFETY: getuid has no preconditions.
     let me = unsafe { libc::getuid() };
@@ -68,7 +63,6 @@ impl HostServer {
 
     pub fn start(&self) -> Result<(), HostError> {
         let path = &self.socket_path;
-        // sun_path holds 104 bytes on macOS and 108 on Linux, the closing NUL included.
         let limit = if cfg!(target_os = "macos") { 104 } else { 108 };
         if path.as_os_str().len() + 1 > limit {
             return Err(HostError::PathTooLong);
@@ -78,7 +72,6 @@ impl HostServer {
         std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))
             .map_err(|e| HostError::socket(&e))?;
 
-        // A leftover socket file from a host that died: remove it, unless something still answers on it.
         if path.exists() || path.symlink_metadata().is_ok() {
             if let Ok(existing) = HostClient::connect(path, Duration::from_millis(500)) {
                 existing.close();
@@ -98,7 +91,6 @@ impl HostServer {
         Ok(())
     }
 
-    /// Stops listening, closes every connection and removes the socket.
     pub fn stop(&self) {
         if !self.running.swap(false, Ordering::SeqCst) {
             return;
@@ -150,7 +142,6 @@ impl HostServer {
     }
 }
 
-/// Polls so `stop` is noticed within a fifth of a second; the listener closes when this returns.
 fn accept_loop(server: &Weak<HostServer>, listener: &UnixListener) {
     loop {
         let Some(server) = server.upgrade() else {
@@ -181,7 +172,6 @@ fn accept_loop(server: &Weak<HostServer>, listener: &UnixListener) {
     }
 }
 
-/// A write to a client that has gone must fail with EPIPE, not end the host with SIGPIPE.
 pub(crate) fn set_no_sigpipe(stream: &UnixStream) {
     #[cfg(target_os = "macos")]
     {
@@ -197,7 +187,6 @@ pub(crate) fn set_no_sigpipe(stream: &UnixStream) {
             );
         }
     }
-    // Linux has no socket option for it; Rust programs ignore SIGPIPE from the start.
     #[cfg(not(target_os = "macos"))]
     let _ = stream;
 }
@@ -253,11 +242,9 @@ fn broadcast(connections: &Mutex<HashMap<u64, Arc<Connection>>>, event: HostEven
 
 type OnClose = Box<dyn FnOnce() + Send>;
 
-/// One connected client.
 struct Connection {
     host: Arc<SessionHost>,
     writer: Mutex<UnixStream>,
-    /// Session id → listener token on that session.
     listeners: Mutex<HashMap<SessionId, u64>>,
     closed: AtomicBool,
     on_close: Mutex<Option<OnClose>>,
@@ -345,7 +332,6 @@ impl Connection {
     }
 }
 
-/// What `ops` needs from a connection.
 pub(crate) trait Attachments {
     fn host(&self) -> &Arc<SessionHost>;
     fn attach(&self, session: SessionId) -> Result<(), HostError>;
@@ -369,7 +355,6 @@ impl Attachments for Arc<Connection> {
         if let Some(existing) = existing {
             handle.remove_listener(existing);
         }
-        // The listener replays the scrollback first, then live output, as binary frames.
         let weak = Arc::downgrade(self);
         let token = handle.add_listener(Arc::new(move |bytes: &[u8]| {
             if let Some(connection) = weak.upgrade() {
@@ -398,7 +383,6 @@ impl Attachments for Arc<Connection> {
     }
 }
 
-/// A JSON object, for building replies.
 pub(crate) fn object(value: Value) -> Map<String, Value> {
     match value {
         Value::Object(map) => map,

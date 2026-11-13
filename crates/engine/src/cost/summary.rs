@@ -1,6 +1,3 @@
-//! The summaries over the cache (`CostTracker.summarize`): per window (7 days, 30 days, all time),
-//! for every account together or for one alone.
-
 use super::cache::{cell_parts, price_key, tool_of, Cache};
 use crate::catalog::{Catalog, Tool};
 use crate::pages::clock::civil_at;
@@ -8,7 +5,6 @@ use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 
-/// The three ranges the Token Cost view can show.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Window {
     Days(u32),
@@ -18,7 +14,6 @@ pub enum Window {
 impl Window {
     pub const ALL: [Window; 3] = [Window::Days(7), Window::Days(30), Window::All];
 
-    /// "7", "30" or "all" (a JSON number 7 or 30 reads the same).
     pub fn parse(text: &str) -> Option<Window> {
         match text {
             "7" => Some(Window::Days(7)),
@@ -54,7 +49,6 @@ pub struct AccountCost {
     pub cost: f64,
 }
 
-/// One model's share of the cost and its token totals over the window.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ModelStat {
     pub name: String,
@@ -68,40 +62,27 @@ pub struct ModelStat {
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Summary {
-    /// The last 7 or 30 days (30 for all time), oldest first.
     pub days: Vec<DayCost>,
     pub today: f64,
     pub week: f64,
-    /// The window's total.
     pub month: f64,
-    /// Most expensive first.
     pub models: Vec<NameCost>,
     pub model_detail: Vec<ModelStat>,
     pub projects: Vec<NameCost>,
-    /// By account id; "" is cost from before accounts were tracked.
     pub accounts: Vec<AccountCost>,
-    /// By channel (Claude Code, Desktop, Codex, Antigravity CLI).
     pub channels: Vec<NameCost>,
-    /// All tokens (input, output, cache) per channel, so a channel whose models have no known
-    /// price (cost 0) still shows what it used.
     pub channel_tokens: BTreeMap<String, f64>,
-    /// Model ids counted in the window with no price: their tokens are in, their dollars are not.
-    /// Sorted, once each. Absent from an older daemon's reply, which the app still reads.
     #[serde(default)]
     pub unpriced: Vec<String>,
-    /// Model ids in the window priced as another, older model's (they are newer than any the
-    /// catalog knows). Sorted, once each.
     #[serde(default)]
     pub borrowed: Vec<String>,
 }
 
-/// "yyyy-MM-dd" for a day number (days since 1970-01-01 in the zone the days are counted in).
 pub fn day_key(day: i64) -> String {
     let c = civil_at(day as f64 * 86_400.0, 0);
     format!("{:04}-{:02}-{:02}", c.year, c.month, c.day)
 }
 
-/// "account\tname", the key of the cost tables.
 pub fn key(account: &str, name: &str) -> String {
     format!("{account}\t{name}")
 }
@@ -122,17 +103,13 @@ fn by_value_then_name(a: &(String, f64), b: &(String, f64)) -> Ordering {
 
 type DayTable<V> = BTreeMap<String, BTreeMap<String, V>>;
 
-/// The cache's cells summed the ways the summaries read them, keyed "account\tname" per day.
 #[derive(Clone, Debug, Default)]
 pub struct Tables {
     pub models: DayTable<f64>,
     pub projects: DayTable<f64>,
     pub channels: DayTable<f64>,
-    /// Per model: input, output, cache read and cache write (both kinds) tokens.
     pub tokens: DayTable<[f64; 4]>,
-    /// Per channel: all tokens, for channels whose cost is 0 (no known price).
     pub channel_tokens: DayTable<f64>,
-    /// Per day, "account\tmodel" of the models counted with no price.
     pub unpriced: BTreeMap<String, BTreeSet<String>>,
 }
 
@@ -175,7 +152,6 @@ impl Tables {
     }
 }
 
-/// Every account that has cost, for the per-account summaries.
 pub fn owners(cache: &Tables) -> BTreeSet<String> {
     cache
         .models
@@ -184,9 +160,6 @@ pub fn owners(cache: &Tables) -> BTreeSet<String> {
         .collect()
 }
 
-/// Totals over `window`, for one account or all of them, as of `today` (a day number). `today` and
-/// `week` stay the same across windows; `month` is the window's total and the bars and breakdowns
-/// cover the window. `catalog` says which of the models counted had their price borrowed.
 pub fn summarize(
     cache: &Tables,
     account: Option<&str>,
@@ -268,7 +241,6 @@ pub fn summarize(
             }
         }
     }
-    // A channel with no priced model has cost 0 but tokens, and still belongs in the list.
     let mut channels: Vec<_> = channel_cost
         .into_iter()
         .filter(|(name, v)| *v >= 0.01 || channel_tokens.get(name).copied().unwrap_or(0.0) > 0.0)
@@ -284,7 +256,6 @@ pub fn summarize(
     s.channels = named(channels);
     s.channel_tokens = channel_tokens;
 
-    // Model detail: cost share plus token totals, keyed by the model id.
     let mut cost_by_model: BTreeMap<String, f64> = BTreeMap::new();
     let mut tokens_by_model: BTreeMap<String, [f64; 4]> = BTreeMap::new();
     for day in &window_days {
@@ -304,7 +275,6 @@ pub fn summarize(
     }
     let token_sum =
         |model: &str| -> f64 { tokens_by_model.get(model).map_or(0.0, |t| t.iter().sum()) };
-    // A model with no known price has cost 0 but tokens: list it by its tokens.
     let mut detail: Vec<_> = cost_by_model
         .iter()
         .filter(|(m, v)| **v >= 0.01 || (**v == 0.0 && token_sum(m) > 0.0))

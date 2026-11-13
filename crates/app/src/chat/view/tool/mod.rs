@@ -1,13 +1,3 @@
-//! Chat's one interface to a session's tool (decision 0015). The reply box, its pickers, the
-//! account button and the Limit Ring are drawn once, for every tool, from what a [`ChatTool`]
-//! answers; each tool is one file here that maps its own API onto those answers. Nothing else in
-//! Chat's views asks which tool a row is: [`of`] is the only place that turns a [`Tool`] into
-//! behavior, so a new tool is a new file and a new arm there, and the compiler names every part
-//! it still has to answer.
-//!
-//! Where a tool can't do something it still answers: a refusal with the reason, a disabled menu
-//! with a tooltip. A part is never just missing for one tool (`docs/chat-composer-parity.md`).
-
 use gpui::{App, Context};
 
 use super::limit_ring::Shown;
@@ -20,27 +10,20 @@ mod antigravity;
 mod claude;
 mod codex;
 
-/// The account button's words: the login the session uses, and what a click does.
 pub(super) struct AccountButton {
     pub text: String,
     pub tip: String,
 }
 
-/// What Chat's shared parts ask of a session's tool.
 pub(super) trait ChatTool: Sync {
-    /// The reply box's empty text for a session that has started.
     fn placeholder(&self) -> &'static str;
 
-    /// Why the reply box takes nothing from this session now, beyond acting being off.
     fn refusal(&self, view: &ChatView, session: &Session) -> Option<&'static str>;
 
-    /// Whether a turn runs that the `tools` topic doesn't report (Claude Code's own state).
     fn working(&self, _session: &Session) -> bool {
         false
     }
 
-    /// Text the tool handles in Chat's own way rather than as a message (Claude Code's menu
-    /// commands, which open in a terminal tab). True when it was handled.
     fn intercept(
         &self,
         _view: &mut ChatView,
@@ -51,37 +34,27 @@ pub(super) trait ChatTool: Sync {
         false
     }
 
-    /// The request that sends `text` to the session.
     fn send(&self, view: &ChatView, session: &Session, text: &str) -> Request;
 
-    /// Whether the daemon may answer a send with "queued" or "starting" (the outbox).
     fn queues(&self) -> bool {
         false
     }
 
-    /// The request that ends the session's turn.
     fn stop(&self, id: &str) -> Request;
 
-    /// The pickers under the box (`chat::pickers`): Model, Effort and any other choice.
     fn menus(&self, view: &ChatView, session: &Session, cx: &App) -> Vec<Menu>;
 
-    /// Called as one of its menus opens, to read what the menu lists.
     fn menu_opening(&self, _view: &mut ChatView) {}
 
-    /// A pick in one of its menus.
     fn pick(&self, view: &mut ChatView, menu: &str, value: &str, cx: &mut Context<ChatView>);
 
-    /// The account button, or `None` while the login isn't known.
     fn account(&self, view: &ChatView) -> Option<AccountButton>;
 
-    /// A click on the account button.
     fn account_click(&self, view: &mut ChatView, cx: &mut Context<ChatView>);
 
-    /// The Limit Ring's limits, or `None` when the account's aren't known.
     fn limits(&self, view: &ChatView, session: &Session) -> Option<Shown>;
 }
 
-/// The tool behind a session: the one place a [`Tool`] becomes behavior.
 pub(super) fn of(tool: Tool) -> &'static dyn ChatTool {
     match tool {
         Tool::Claude => &claude::Claude,
@@ -90,7 +63,6 @@ pub(super) fn of(tool: Tool) -> &'static dyn ChatTool {
     }
 }
 
-/// The active login's email for an account provider (`accounts::model`'s ids).
 fn active_email(view: &ChatView, provider: &str) -> Option<String> {
     let s = view.accounts.snapshot();
     let p = s.providers.providers.iter().find(|p| p.id == provider)?;

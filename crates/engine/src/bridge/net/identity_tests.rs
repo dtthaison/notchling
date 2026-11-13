@@ -4,8 +4,6 @@ use std::path::PathBuf;
 
 pub(crate) const PASSPHRASE: &str = "pass-0123456789abcdefghijklmnopqrstu";
 
-/// A bridge folder laid out as the Swift app leaves it (`identity.p12`, `identity.pass`,
-/// `cert.pem`, no `key.pem`), with a fresh EC P-256 certificate. Returns the certificate's DER.
 pub(crate) fn make_swift_identity(bridge: &Path) -> Vec<u8> {
     std::fs::create_dir_all(bridge).unwrap();
     let key = rcgen::KeyPair::generate().unwrap();
@@ -110,8 +108,6 @@ fn a_wrong_passphrase_is_unreadable() {
     ));
 }
 
-/// The real thing: a PKCS#12 made by `/usr/bin/openssl` with the Swift app's exact commands
-/// (`BridgeIdentity.generate`), in a temp folder.
 #[cfg(target_os = "macos")]
 #[test]
 fn an_identity_made_by_the_swift_apps_openssl_commands_loads() {
@@ -180,11 +176,9 @@ fn an_identity_made_by_the_swift_apps_openssl_commands_loads() {
     let identity = BridgeIdentity::load(&b).unwrap();
     let pem = CertificateDer::from_pem_file(&cert).unwrap();
     assert_eq!(identity.fingerprint, sha256_hex(pem.as_ref()));
-    // LibreSSL makes an X.509 v1 certificate; it is still served, and its fingerprint is the pin.
     assert_eq!(served_fingerprint(&identity), identity.fingerprint);
 }
 
-/// A TLS handshake in memory against `identity`; the SHA-256 of the certificate the client got.
 fn served_fingerprint(identity: &BridgeIdentity) -> String {
     use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
     use rustls::pki_types::{ServerName, UnixTime};
@@ -203,8 +197,6 @@ fn served_fingerprint(identity: &BridgeIdentity) -> String {
             *self.0.lock().unwrap() = cert.to_vec();
             Ok(ServerCertVerified::assertion())
         }
-        // webpki can't read a v1 certificate's key, so this test client takes the signature on
-        // trust; what it checks is which certificate was served.
         fn verify_tls12_signature(
             &self,
             _: &[u8],

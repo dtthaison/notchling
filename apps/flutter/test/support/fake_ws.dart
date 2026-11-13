@@ -4,7 +4,6 @@ import 'dart:typed_data';
 
 import 'package:agent_console/core/net/ws_transport.dart';
 
-/// A WebSocket the test drives by hand: [incoming] feeds the client, [sent] records what it wrote.
 class FakeWs implements WsConnection {
   FakeWs({this.onSend});
 
@@ -39,7 +38,6 @@ class FakeWs implements WsConnection {
     incoming.add(builder.toBytes());
   }
 
-  /// Drops the connection as a network failure would.
   Future<void> drop() => incoming.close();
 
   @override
@@ -49,7 +47,6 @@ class FakeWs implements WsConnection {
   }
 }
 
-/// Answers hello (and anything in [auto]) at once, like a happy Mac.
 FakeWs happyMac({Map<String, Map<String, Object?>> auto = const <String, Map<String, Object?>>{}}) {
   return FakeWs(onSend: (FakeWs socket, Map<String, Object?> message) {
     final String op = message['op']! as String;

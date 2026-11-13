@@ -1,8 +1,3 @@
-//! What the search panel and the pages window ask the daemon (Milestone 5, Task 3's ops), over
-//! the same [`Transport`] the actions use. Every call blocks, so the caller makes it off the UI
-//! thread. A render or a fixture root has no transport at all ([`Library::fixed`]) and answers
-//! from what it was given, whatever the query.
-
 use std::sync::Mutex;
 
 use notchling_local_api::{ClientError, SOCKET_NAME};
@@ -12,17 +7,14 @@ use crate::acting::{self, Acting};
 use crate::actions::{Socket, Transport};
 use crate::chat::data::DataRoot;
 
-/// What the panel says while there is no daemon to ask.
 pub const DETACHED_MESSAGE: &str =
     "Notchling's daemon isn't attached, so there is nothing to search";
 
 pub struct Library {
     transport: Option<Box<dyn Transport>>,
-    /// A render's answers.
     fixed: Mutex<Results>,
 }
 
-/// A failure's line: detached for a daemon that is gone, the daemon's own message for a refusal.
 fn message(e: &ClientError) -> String {
     if acting::after_error(e) == Some(Acting::Detached) {
         return DETACHED_MESSAGE.to_owned();
@@ -34,7 +26,6 @@ fn message(e: &ClientError) -> String {
 }
 
 impl Library {
-    /// Over a transport.
     pub fn over(transport: Box<dyn Transport>) -> Library {
         Library {
             transport: Some(transport),
@@ -42,7 +33,6 @@ impl Library {
         }
     }
 
-    /// No daemon behind it: every search answers `results` and the pages list is its pages.
     pub fn fixed(results: Results) -> Library {
         Library {
             transport: None,
@@ -50,8 +40,6 @@ impl Library {
         }
     }
 
-    /// The running app's: the daemon's socket in the data folder, or nothing for a fixture root,
-    /// which never touches a daemon.
     pub fn for_run(root: Option<&DataRoot>) -> Library {
         match root.filter(|r| r.fixture.is_none()) {
             Some(root) => Library::over(Box::new(Socket {
@@ -62,7 +50,6 @@ impl Library {
         }
     }
 
-    /// Whether there is a daemon to ask at all.
     pub fn is_live(&self) -> bool {
         self.transport.is_some()
     }
@@ -80,7 +67,6 @@ impl Library {
         }
     }
 
-    /// Pages and sessions for `text` (`search.query`), at most `limit` of each. Blocking.
     pub fn search(&self, text: &str, limit: usize) -> Result<Results, String> {
         if self.transport.is_none() {
             return Ok(self.fixed_results());
@@ -89,7 +75,6 @@ impl Library {
             .map(|v| parse_results(&v))
     }
 
-    /// Every saved page (`pages.list`). Blocking.
     pub fn pages(&self) -> Result<PageList, String> {
         if self.transport.is_none() {
             return Ok(PageList {

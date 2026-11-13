@@ -1,13 +1,9 @@
-//! `vault.pending`: an app that connects (or reconnects) while agents wait sees their approvals
-//! and forms, as the events it missed carried them.
-
 use super::tests::{agent, app, err, pending_use, seed, setup};
 use super::*;
 use crate::vault_caller::Processes;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 
-/// Every process works in `/w/app` and runs under `zsh`, under `claude`, under launchd.
 pub(super) struct FakeProcesses;
 
 impl Processes for FakeProcesses {
@@ -34,7 +30,6 @@ fn the_approval_says_what_the_daemon_checked_about_the_caller() {
     let s = setup("verified", true);
     seed(&s, true);
     let (user, event) = pending_use(&s);
-    // What the caller claims stays as it was; beside it, what the kernel says.
     assert_eq!(event["folder"], "/w/app");
     assert_eq!(
         event["verified"],

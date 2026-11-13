@@ -1,6 +1,3 @@
-//! What `NotchModel::drawn` says changed: a poll that changes nothing on screen compares equal, so
-//! the notch needn't draw again; an age that ticks over, a new line and a peek compare unequal.
-
 use super::*;
 use notchling_engine::sessions::AgentTarget;
 use notchling_engine::transcript::snapshot::{ChatLine, LineKind};
@@ -62,10 +59,8 @@ fn the_notch_redraws_when_an_age_changes() {
     poll(&mut model, vec![agent("a", 0)], HashMap::new());
     model.now_ms = 30_000;
     let before = model.drawn();
-    // Still "now": the clock moved, what the rows say didn't.
     model.now_ms = 45_000;
     assert_eq!(model.drawn(), before);
-    // Past the minute the row says "1m".
     model.now_ms = 61_000;
     assert_ne!(model.drawn(), before);
 }

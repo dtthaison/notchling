@@ -1,6 +1,3 @@
-//! Ports of `HostdTests`: framing, the host core over a fake spawner, the state file and the update
-//! policy. The socket tests are in `socket.rs`.
-
 mod common;
 
 use common::*;
@@ -13,8 +10,6 @@ use std::sync::Arc;
 fn object(value: Value) -> Map<String, Value> {
     value.as_object().expect("an object").clone()
 }
-
-// Framing
 
 #[test]
 fn frames_round_trip_and_survive_being_split_anywhere() {
@@ -70,7 +65,6 @@ fn oversized_and_malformed_frames_end_the_stream() {
     );
 }
 
-/// The header is a big-endian length that counts the type byte, then the type: what Swift writes.
 #[test]
 fn the_bytes_are_the_swift_layout() {
     let id = SessionId::parse("00112233-4455-6677-8899-AABBCCDDEEFF").expect("parses");
@@ -105,8 +99,6 @@ fn session_ids_print_as_swift_uuid_strings() {
     assert_ne!(random, SessionId::random());
     assert_eq!(random.bytes()[6] >> 4, 4, "version 4");
 }
-
-// Host core
 
 #[test]
 fn spawn_and_resume_use_the_same_arguments_as_the_app() {
@@ -195,15 +187,15 @@ fn recorded_sessions_with_dead_processes_are_resumed_at_start() {
     std::fs::create_dir_all(&work).expect("work");
     let state = Arc::new(StateStore::new(scratch.path("state.json")));
     state.upsert(record("a", &work, Some("session-a"), 111));
-    state.upsert(record("b", &work, Some("session-b"), 222)); // still alive
-    state.upsert(record("c", &work, None, 333)); // no session id
+    state.upsert(record("b", &work, Some("session-b"), 222));
+    state.upsert(record("c", &work, None, 333));
     state.upsert(record(
         "d",
         Path::new("/definitely/not/here"),
         Some("session-d"),
         444,
     ));
-    state.upsert(record("e", &work, Some("session-e"), 0)); // migration record
+    state.upsert(record("e", &work, Some("session-e"), 0));
     let spawner = FakeSpawner::new();
     let options = notchling_ptyhost::host::HostOptions {
         is_alive: Arc::new(|pid| pid == 222),
@@ -275,7 +267,6 @@ fn migration_records_are_resumed_by_the_next_host() {
     );
     assert_eq!(second.resume_recorded(), 1);
     assert_eq!(spawner.spawns()[0].arguments, ["--resume", "migrated"]);
-    // The first store still holds what it last wrote; the file now holds the resumed session only.
     assert_eq!(state.records().len(), 1);
 }
 
@@ -291,7 +282,6 @@ fn state_file_is_private() {
     assert_eq!(mode(&scratch.path("sub")), 0o700);
 }
 
-/// The file is the Swift host's: same keys, ISO 8601 dates, so either host reads the other's.
 #[test]
 fn the_state_file_reads_what_swift_wrote() {
     let scratch = Scratch::new();
@@ -340,8 +330,6 @@ fn the_state_file_reads_what_swift_wrote() {
         "unreadable: starting empty"
     );
 }
-
-// Update policy
 
 #[test]
 fn an_updated_helper_restarts_only_when_nothing_is_running() {

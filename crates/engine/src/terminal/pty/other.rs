@@ -1,10 +1,7 @@
-//! Systems without a pty port yet (Windows, the BSDs): every call is [`PtyError::Unsupported`].
-
 use super::{PtyCommand, PtyError, ReadOutcome, Signal};
 use std::convert::Infallible;
 use std::time::Duration;
 
-/// Never made: [`Pty::spawn`] always fails here.
 #[derive(Debug)]
 pub struct Pty {
     never: Infallible,

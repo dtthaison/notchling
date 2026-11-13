@@ -1,7 +1,3 @@
-//! The watchers' sources over the real stores, on fakes: an in-memory Keychain, scripted HTTP, a
-//! fake provider and a fake launcher. Off, nothing is called (the fakes that stand for a login
-//! panic); on, each account's usage is read with its own token and nothing is renewed.
-
 use super::*;
 use crate::accounts_ops_tests::{profile, slot, world, ID1, ID2};
 use crate::acting_ops_tests::{sessions, setup_in, PROMPT};
@@ -36,7 +32,6 @@ fn claude_off_reads_no_login_and_switches_nothing() {
         source.switch_lane("two", ID2),
         Err(ACCOUNTS_OFF.to_string())
     );
-    // Listing reads the daemon's own file only.
     assert!(source.accounts().is_empty());
     assert!(!w.d.0.join("data/daemon/accounts.json").exists());
 }
@@ -92,7 +87,6 @@ fn claude_on_reads_each_accounts_usage_with_its_own_token_and_renews_nothing() {
     );
     assert!(!http.seen().iter().any(|(url, _)| url == TOKEN_URL));
 
-    // Read this round: the next sync asks again only once they're due.
     let before = http.seen().len();
     source.sync_usage();
     let again: Vec<_> = http.seen()[before..]
@@ -102,7 +96,6 @@ fn claude_on_reads_each_accounts_usage_with_its_own_token_and_renews_nothing() {
         .collect();
     assert!(again.is_empty(), "{again:?}");
 
-    // Off again: nothing more is read.
     w.flag.set(false);
     let before = http.seen().len();
     source.sync_usage();
@@ -147,7 +140,6 @@ fn claude_forced_sync_reads_every_account_again_and_keeps_why_a_read_failed() {
     assert_eq!(source.usage_error(ID1), None);
     assert_eq!(source.usage_error(ID2), None);
 
-    // Not due: nothing asked. Forced: both asked again, one refused.
     source.sync_usage();
     assert_eq!(usage_requests(&http), 2);
     http.answer(USAGE_URL, 401, "{}");
@@ -156,25 +148,21 @@ fn claude_forced_sync_reads_every_account_again_and_keeps_why_a_read_failed() {
     assert_eq!(usage_requests(&http), 4);
     let (e1, e2) = (source.usage_error(ID1), source.usage_error(ID2));
     assert!(e1.is_some() != e2.is_some(), "{e1:?} {e2:?}");
-    // The failed one keeps its last good read for the watcher, and no token was renewed.
     assert!(source.usage(ID1).is_some() && source.usage(ID2).is_some());
     assert!(!http.seen().iter().any(|(url, _)| url == TOKEN_URL));
 
-    // The next read that works clears the reason.
     http.answer(USAGE_URL, 200, USAGE);
     http.answer(USAGE_URL, 200, USAGE);
     source.sync_usage_now();
     assert_eq!(source.usage_error(ID1), None);
     assert_eq!(source.usage_error(ID2), None);
 
-    // Off: a forced sync asks nothing either.
     w.flag.set(false);
     let before = http.seen().len();
     source.sync_usage_now();
     assert_eq!(http.seen().len(), before);
 }
 
-/// A provider that counts what it was asked.
 #[derive(Default)]
 struct CountingProvider {
     syncs: AtomicUsize,
@@ -315,6 +303,5 @@ fn a_nudge_respawns_the_job_then_types_the_reply_once() {
     assert_eq!(attached.len(), 1);
     assert_eq!(attached[0].0, "abcd1234");
     assert!(s.writes.lock().unwrap().concat().contains("go on"));
-    // Done: it may be nudged again.
     assert!(jobs.nudge("abcd1234", "go on"));
 }

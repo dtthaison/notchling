@@ -1,5 +1,3 @@
-"""`guard rules`: every rule in docs/rules.md has a check that fails on its own bad example."""
-
 import os
 import re
 import subprocess
@@ -25,7 +23,6 @@ TABLE = """# Rules
 
 
 def docs_with(ids):
-    """A rules.md holding exactly these ids."""
     d = Path(tempfile.mkdtemp(prefix="rules-test-"))
     rows = "\n".join(f"| {i} | a rule | a reason | python3 -m guard {i.lower()} |" for i in ids)
     path = d / "rules.md"
@@ -120,7 +117,6 @@ class DocsTests(unittest.TestCase):
 
 
 class CoverageTests(unittest.TestCase):
-    """The registry names every id the guard emits, and none it doesn't."""
 
     def test_lint_rules(self):
         self.assertEqual({i for i in rules.REGISTRY if i.startswith("LINT-")}, {r.id for r in lint.RULES})

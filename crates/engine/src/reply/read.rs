@@ -1,31 +1,16 @@
-//! `ReplySender.readQuestion`: the AskUserQuestion a background job shows on its screen, read in one
-//! attach. A job writes the question into its transcript only once it's answered, and its state's
-//! summary ("answer: Which? (A · B)") lacks later questions and breaks on brackets, so this is how
-//! Chat gets the whole question without the prompt hook.
-//!
-//! The dialog shows one question at a time. Right steps through the question tabs (moving answers
-//! nothing), each page is read once it changes, then Left as many times puts the dialog back on its
-//! first question. Nothing else is typed: no digit, Enter, Tab, Esc or Ctrl+C.
-
 use super::exec::{Failure, Pty};
 use super::keys::{timing::*, LEFT, RIGHT};
 use crate::terminal::ask_dialog::{self, Page};
 use crate::transcript::snapshot::{PendingQuestion, QuestionItem};
 use std::time::Duration;
 
-/// How long a Right has to show the next question.
 pub const NEXT_PAGE_MS: u64 = 2_500;
-/// How long the Lefts have to bring the first question back.
 pub const BACK_MS: u64 = 2_500;
 
 fn ms(n: u64) -> Duration {
     Duration::from_millis(n)
 }
 
-/// Reads the question on `pty`'s screen. `None` when no question dialog is open (a permission, the
-/// review screen, the prompt) or a page didn't show in time; `id` names the question
-/// (`screen:<job>:<questions joined by |>`, as the Swift app's, so the same question keeps one id
-/// across reads).
 pub fn read_question(pty: &mut dyn Pty, job: &str) -> Result<Option<PendingQuestion>, Failure> {
     if !pty.wait_quiet(ms(ATTACH_QUIET_MS), ms(ATTACH_TIMEOUT_MS)) {
         return Err(Failure::Timeout);
@@ -69,7 +54,6 @@ fn write(pty: &mut dyn Pty, keys: &str) -> Result<(), Failure> {
         .map_err(|e| Failure::Pty(e.to_string()))
 }
 
-/// Reads until a question page other than `before` shows, for at most [`NEXT_PAGE_MS`].
 fn next_page(pty: &mut dyn Pty, before: &str) -> Option<Page> {
     let mut found = None;
     wait(pty, NEXT_PAGE_MS, |lines| {
@@ -92,7 +76,6 @@ fn wait(pty: &mut dyn Pty, timeout_ms: u64, mut done: impl FnMut(&[String]) -> b
     }
 }
 
-/// The pages as one question; a page's header is its tab's title when the dialog has tabs.
 pub fn question_from(job: &str, pages: &[Page]) -> PendingQuestion {
     let tabs = pages.first().map(|p| p.tabs.clone()).unwrap_or_default();
     let items: Vec<QuestionItem> = pages
@@ -117,7 +100,6 @@ pub fn question_from(job: &str, pages: &[Page]) -> PendingQuestion {
 mod tests {
     use super::*;
 
-    /// A terminal that shows `pages[at]`; Right and Left move `at` (clamped), like the dialog's tabs.
     struct Tabs {
         pages: Vec<Vec<String>>,
         at: usize,
@@ -234,7 +216,6 @@ mod tests {
     #[test]
     fn a_tab_that_never_moves_reads_nothing_and_goes_back() {
         let tabs = "←  ☐ Color  ☐ Fruit  ✔ Submit  →";
-        // Right does nothing here: the second page never shows.
         let mut pty = Tabs::new(vec![page(Some(tabs), "Favourite color?", &["Red", "Blue"])]);
         assert_eq!(read_question(&mut pty, "j").unwrap(), None);
         assert_eq!(pty.writes, [RIGHT, LEFT]);

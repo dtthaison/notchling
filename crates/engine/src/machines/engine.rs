@@ -1,13 +1,3 @@
-//! Runs the checks (Swift `SetupEngine`, the check half; the Fix half is [`super::engine_fix`]).
-//!
-//! - A **check** is read-only. [`SetupEngine::refresh`] batches a machine's remote probes into one
-//!   ssh per phase (the cheap ones with 60 s, then the slow ones whose needs passed with 180 s);
-//!   local probes run up to four at a time. A step whose need isn't passing says `waits for <title>`.
-//! - Slow probes run on open, Check or a Fix (`include_slow`), and on their own every 10 minutes.
-//! - **Secrets.** Every string that leaves the engine (a result, a log line, a Fix's message) goes
-//!   through the machine's masks: its vault values as `[secret:<name>]`, the admin password as
-//!   `[admin password]`. The password lives in one Fix's context; no field of the engine holds it.
-
 use super::engine_plan::ShownRecord;
 use super::github::GitHubHttp;
 use super::masks::Masks;
@@ -31,21 +21,17 @@ pub type Deliver = Arc<dyn Fn(&SecretUsage, &FixContext) -> FixOutcome + Send + 
 pub type ToggleScript = Arc<dyn Fn(bool, bool) -> String + Send + Sync>;
 pub type OffersReplace = Arc<dyn Fn(Option<&CheckResult>) -> bool + Send + Sync>;
 
-/// What the engine builds steps and deliveries from; [`super::catalog::standard`] is the real one.
 #[derive(Clone)]
 pub struct Catalog {
     pub steps: StepList,
     pub usages: UsageList,
     pub deliver: Deliver,
-    /// `(linux, on)` → the Running switch's script.
     pub toggle_script: ToggleScript,
     pub offers_replace: OffersReplace,
 }
 
-/// Where the machines come from and go to.
 pub trait MachineStore: Send + Sync {
     fn machines(&self) -> Vec<Machine>;
-    /// `false`: not saved (the file can't be read and is never written over).
     fn save(&self, machines: &[Machine]) -> bool;
 }
 
@@ -58,7 +44,6 @@ impl MachineStore for RegistryFiles {
     }
 }
 
-/// Everything outside the engine, as parameters.
 #[derive(Clone)]
 pub struct Deps {
     pub runner: Arc<dyn Runner>,
@@ -67,14 +52,9 @@ pub struct Deps {
     pub opener: Arc<dyn Opener>,
     pub store: Arc<dyn MachineStore>,
     pub mac: Arc<dyn Fn() -> MacFacts + Send + Sync>,
-    /// Seconds since 1970.
     pub clock: Arc<dyn Fn() -> f64 + Send + Sync>,
-    /// A private folder for files a Fix hands `gh`.
     pub scratch: PathBuf,
-    /// The data folder whose `notchling.db` keeps the pending offers; `None` keeps them in memory
-    /// only.
     pub offers_data: Option<PathBuf>,
-    /// `audit.jsonl`: one line per Fix that ran (time, machine, step, outcome; never its output).
     pub audit: Option<PathBuf>,
 }
 
@@ -83,7 +63,6 @@ pub const CHEAP_TIMEOUT: u64 = 60;
 pub const SLOW_TIMEOUT: u64 = 180;
 pub const SLOW_EVERY: f64 = 10.0 * 60.0;
 pub(super) const LOCAL_PARALLEL: usize = 4;
-/// The most a probe's output may be (the `head -c` in the batch wrapper).
 pub const PROBE_CAP: usize = 65536;
 pub(super) const CONNECT_ERRORS: [&str; 4] = [
     "Could not resolve hostname",
@@ -107,12 +86,10 @@ pub(super) struct State {
     pub refresh_started: BTreeMap<String, u64>,
     pub fixes_ended: BTreeMap<String, u64>,
     pub step_published: BTreeMap<String, BTreeMap<StepId, u64>>,
-    /// Plans shown and not yet confirmed, by id.
     pub shown: BTreeMap<u64, ShownRecord>,
     pub revision: u64,
 }
 
-/// Runs the checks and the Fixes. Shared between threads; every method takes `&self`.
 pub struct SetupEngine {
     pub(super) deps: Deps,
     pub(super) catalog: Catalog,
@@ -140,7 +117,6 @@ pub(super) fn lock(m: &Mutex<State>) -> MutexGuard<'_, State> {
     m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-/// `m` with the detected facts merged in. A path from a machine counts only when it is safe.
 pub fn applying(d: &Detected, m: &Machine) -> Machine {
     let mut m = m.clone();
     if let Some(os) = d.os {
@@ -191,7 +167,6 @@ impl SetupEngine {
         engine
     }
 
-    /// Called after anything shown changed (results, the log, a Fix starting or ending).
     pub fn set_on_change(&self, f: Option<Arc<dyn Fn() + Send + Sync>>) {
         *self.on_change.lock().unwrap_or_else(|e| e.into_inner()) = f;
     }
@@ -207,8 +182,6 @@ impl SetupEngine {
             f();
         }
     }
-
-    // MARK: what the window reads
 
     pub fn revision(&self) -> u64 {
         lock(&self.state).revision
@@ -230,15 +203,12 @@ impl SetupEngine {
             .cloned()
             .unwrap_or_default()
     }
-    /// Secret name → the machines' files waiting for its renewed value.
     pub fn update_offers(&self) -> BTreeMap<String, Vec<SecretUsage>> {
         lock(&self.state).offers.clone()
     }
     pub fn save_refused(&self) -> bool {
         lock(&self.state).save_refused
     }
-
-    // MARK: machines and steps
 
     pub(super) fn current_machines(&self) -> Vec<Machine> {
         let list = self.deps.store.machines();
@@ -250,7 +220,6 @@ impl SetupEngine {
         self.current_machines().into_iter().find(|m| m.name == name)
     }
 
-    /// `machine` with the facts the checks learned laid over it.
     pub fn overlaid(&self, m: &Machine) -> Machine {
         with_facts(&lock(&self.state), m)
     }
@@ -264,7 +233,6 @@ impl SetupEngine {
         (self.catalog.steps)(m, &self.current_machines())
     }
 
-    /// The vault values of the machine's usages, each hiding as `[secret:<name>]`.
     pub(super) fn masks(&self, m: &Machine, admin_password: Option<&str>) -> Masks {
         let mut names: BTreeSet<String> = (self.catalog.usages)(&self.current_machines())
             .into_iter()
@@ -299,9 +267,6 @@ impl SetupEngine {
         }
     }
 
-    // MARK: checks
-
-    /// Checks only, never a Fix. `names` `None` means every machine.
     pub fn refresh(&self, names: Option<&[String]>, include_slow: bool) {
         let targets: Vec<Machine> = self
             .current_machines()
@@ -365,7 +330,6 @@ impl SetupEngine {
             let known: BTreeSet<StepId> = self.step_list(m).into_iter().map(|s| s.id).collect();
             let mk = masks.get(&m.name).cloned().unwrap_or_default();
             let mut s = lock(&self.state);
-            // dropped whole: the machine was removed meanwhile, or a Fix ended since this began
             if !registry.contains(&m.name)
                 || s.fixes_ended.get(&m.name).copied().unwrap_or(0) != fixes
             {
@@ -415,7 +379,6 @@ impl SetupEngine {
         self.changed();
     }
 
-    /// For the Add sheet: the machine steps of a draft, nothing saved.
     pub fn check_draft(&self, draft: &Machine) -> BTreeMap<StepId, CheckResult> {
         let mut m = draft.clone();
         m.jobs.clear();
@@ -427,9 +390,6 @@ impl SetupEngine {
             .collect()
     }
 
-    /// Writes the facts the checks learned into the registry, when they changed anything. The
-    /// load, the change and the save are one step under the registry's write lock, so an edit the
-    /// window saves meanwhile is neither lost nor saved over.
     fn save_facts(&self, names: &BTreeSet<String>) {
         let expiries = self.save_facts_locked(names);
         for (secret, day) in expiries {
@@ -437,7 +397,6 @@ impl SetupEngine {
         }
     }
 
-    /// The registry part of [`SetupEngine::save_facts`]; the token expiries for the vault.
     fn save_facts_locked(&self, names: &BTreeSet<String>) -> Vec<(String, String)> {
         let _writing = super::registry::write_lock();
         let mut list = self.deps.store.machines();

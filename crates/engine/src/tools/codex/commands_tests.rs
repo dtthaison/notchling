@@ -55,7 +55,6 @@ fn every_command_goes_where_chat_sends_it() {
 fn the_terminal_runs_codex_on_the_session() {
     assert_eq!(script("abc"), "codex resume abc");
     assert_eq!(script(""), "codex");
-    // An id that is not one never reaches a shell line.
     assert_eq!(script("abc; rm -rf ~"), "codex");
 }
 
@@ -88,12 +87,10 @@ fn a_prompts_description_is_its_front_matter_or_first_line() {
     );
     assert_eq!(prompt_description(""), None);
     assert_eq!(prompt_description("---\n---\n"), None);
-    // Front matter without a description falls to the next line, as the Swift app does.
     assert_eq!(
         prompt_description("---\nname: x\n---\nBody"),
         Some("name: x".into())
     );
-    // Only the front matter is searched for the key.
     assert_eq!(
         prompt_description("---\nname: x\n---\ndescription: later"),
         Some("name: x".into())
@@ -128,7 +125,6 @@ fn saved_prompts_follow_codexs_own_commands_sorted() {
             ("prompts:empty", "your saved prompt")
         ]
     );
-    // No prompts folder is just Codex's own.
     assert_eq!(available(&home.join("missing")).len(), 42);
     let _ = std::fs::remove_dir_all(&home);
 }

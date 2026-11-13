@@ -1,10 +1,6 @@
-//! The command line of `notchling delegate` (Swift `Delegate.Tool`, `Options`, `parse`): which tool,
-//! its model and effort, the folder it works in, where generated media is copied, and the limits.
-
 use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
 
-/// The other tool a job is handed to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Tool {
     Codex,
@@ -12,7 +8,6 @@ pub enum Tool {
 }
 
 impl Tool {
-    /// `codex`, `agy` or `antigravity`, in any case.
     pub fn from_name(name: &str) -> Option<Tool> {
         match name.to_lowercase().as_str() {
             "codex" => Some(Tool::Codex),
@@ -21,7 +16,6 @@ impl Tool {
         }
     }
 
-    /// The word on the command line and in `--json`.
     pub fn raw(self) -> &'static str {
         match self {
             Tool::Codex => "codex",
@@ -37,32 +31,23 @@ impl Tool {
     }
 }
 
-/// One job.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Options {
     pub tool: Tool,
     pub prompt: String,
     pub model: Option<String>,
     pub effort: Option<String>,
-    /// The folder the tool works in (its workspace).
     pub folder: String,
-    /// Where generated images and videos are copied; `None` leaves them where the tool saved them.
     pub out: Option<String>,
-    /// Lets the tool change files in `folder` (Codex workspace-write, agy accept-edits). Off, it
-    /// only reads.
     pub write: bool,
-    /// Continue this session instead of starting one.
     pub session: Option<String>,
     pub timeout: Duration,
 }
 
-/// The default timeout, in seconds.
 pub const DEFAULT_TIMEOUT_SECS: u64 = 1800;
 
-/// The longest timeout taken (ten years): a larger number is a typo, and `Duration` has limits.
 const MAX_TIMEOUT_SECS: f64 = 315_360_000.0;
 
-/// Parsed options and whether `--json` was given.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Parsed {
     pub options: Options,
@@ -88,13 +73,9 @@ fn fail<T>(message: impl Into<String>) -> Result<T, ParseError> {
 
 pub const USAGE: &str = "Usage: notchling delegate <codex|agy> [--model <m>] [--effort <e>] [--folder <dir>] [--out <dir>]\n                         [--write] [--session <id>] [--timeout <seconds>] [--json] -- <prompt>\n       notchling delegate-models [codex|agy]";
 
-/// Nested delegations stop here, so two agents can't keep handing a job back and forth.
 pub const MAX_DEPTH: u32 = 2;
 pub const DEPTH_VARIABLE: &str = "NOTCHLING_DELEGATE_DEPTH";
 
-/// The depth this run is at, from the variable's value: a count that is not a number is 0. `Err`
-/// is the refusal's text once the limit is reached; `Ok` is the depth to give the tool's own
-/// processes (this one plus one).
 pub fn enter_depth(raw: Option<&str>) -> Result<u32, String> {
     let depth = raw.and_then(|v| v.trim().parse::<u32>().ok()).unwrap_or(0);
     if depth >= MAX_DEPTH {
@@ -105,8 +86,6 @@ pub fn enter_depth(raw: Option<&str>) -> Result<u32, String> {
     Ok(depth + 1)
 }
 
-/// `args` are what follows `delegate`. `cwd` is the folder relative paths are read against and
-/// `home` what `~` stands for.
 pub fn parse(args: &[String], cwd: &Path, home: Option<&Path>) -> Result<Parsed, ParseError> {
     let Some(tool) = args.first().and_then(|a| Tool::from_name(a)) else {
         return fail(format!("Name the tool first: codex or agy.\n{USAGE}"));
@@ -170,8 +149,6 @@ pub fn parse(args: &[String], cwd: &Path, home: Option<&Path>) -> Result<Parsed,
     Ok(Parsed { options, json })
 }
 
-/// `path` as an absolute, tidied path: `~` is home, a relative path is read against `cwd`, and `.`
-/// and `..` are folded away (no symlink is looked at). An empty `path` is `cwd` itself.
 pub fn absolute(path: &str, cwd: &Path, home: Option<&Path>) -> String {
     let expanded: PathBuf = match (path, home) {
         ("~", Some(h)) => h.to_path_buf(),

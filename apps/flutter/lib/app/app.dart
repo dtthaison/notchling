@@ -20,7 +20,6 @@ class AgentConsoleApp extends ConsumerWidget {
       debugShowCheckedModeBanner: false,
       theme: buildTheme(Brightness.light),
       themeMode: mode,
-      // Changing the theme crossfades every colour (Kit.lerp) instead of flipping.
       themeAnimationDuration: const Duration(milliseconds: 380),
       themeAnimationCurve: Curves.easeOutCubic,
       darkTheme: buildTheme(Brightness.dark),
@@ -31,7 +30,6 @@ class AgentConsoleApp extends ConsumerWidget {
         GlobalCupertinoLocalizations.delegate,
       ],
       supportedLocales: AppL10n.supportedLocales,
-      // Vietnamese is the default; English only when the device asks for it.
       localeResolutionCallback: (Locale? locale, Iterable<Locale> supported) =>
           locale?.languageCode == 'en'
           ? const Locale('en')

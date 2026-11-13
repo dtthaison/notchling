@@ -7,12 +7,8 @@ import 'package:path_provider/path_provider.dart';
 import '../features/voice/prompt_builder.dart';
 import '../features/voice/speech_engine.dart';
 
-/// Debug builds only (see main.dart): when `<temp>/voice_bench/` holds .wav files, transcribes each with the
-/// real engine and writes timings to `<temp>/voice_bench_results.txt` and the log (tag VOICEBENCH). Not shipped UI.
 Future<void> runVoiceBenchIfRequested() async {
   if (!kDebugMode && !const bool.fromEnvironment('VOICE_BENCH')) return;
-  // Release builds cannot be written through run-as, so the app's external files folder is checked too
-  // (adb push to /sdcard/Android/data/<id>/files/voice_bench).
   final Directory? external = await getExternalStorageDirectory();
   final List<Directory> candidates = <Directory>[Directory('${Directory.systemTemp.path}/voice_bench'), if (external != null) Directory('${external.path}/voice_bench')];
   final Directory? dir = candidates.where((Directory d) => d.existsSync()).firstOrNull;
@@ -63,7 +59,6 @@ Future<void> runVoiceBenchIfRequested() async {
 double _wavSeconds(File file) {
   final Uint8List bytes = file.readAsBytesSync();
   final ByteData view = ByteData.sublistView(bytes);
-  // Walk the chunks: "fmt " gives the byte rate, "data" the length.
   int byteRate = 32000;
   int offset = 12;
   while (offset + 8 <= bytes.length) {

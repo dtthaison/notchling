@@ -1,6 +1,3 @@
-//! Ported from `MachinesMergeTests.swift`: conflicts, the check, the push, the happy path's exact
-//! order and the check's shell, against a scripted runner that starts nothing.
-
 use std::collections::BTreeMap;
 
 use super::fakes_jobs::{bad, bad_code, ok};
@@ -8,8 +5,6 @@ use super::merge::{MergeOutcome, MergePlan};
 use super::tests_merge::{any_line, entry, happy, merge, plan, t, MERGED, PRE, SHA, TARGET};
 
 const REF: &str = "refs/machines/m1/7";
-
-// Conflict, check, push
 
 #[test]
 fn conflict_aborts_and_labels_needs_you() {
@@ -81,8 +76,6 @@ fn merge_failure_without_conflict_labels_nothing() {
     assert!(!any_line(&runner, |l| l.starts_with("gh ")));
 }
 
-/// `merge --abort` says "no merge in progress" when the merge never started; that must not hide
-/// the real error.
 #[test]
 fn a_merge_that_never_started_reports_its_own_error_and_does_not_abort() {
     let runner = happy(
@@ -164,7 +157,6 @@ fn check_failure_resets_and_keeps_ready() {
     );
     assert!(!any_line(&runner, |l| l.contains("ORIG_HEAD") || l.contains("--hard")));
     assert!(!any_line(&runner, |l| l.contains(" push ") || l.starts_with("gh ")));
-    // the check ran in the target, with a long timeout
     let recs = runner.recs();
     let check = recs
         .iter()
@@ -174,8 +166,6 @@ fn check_failure_resets_and_keeps_ready() {
     assert_eq!(check.timeout.as_secs(), 1800);
 }
 
-/// C17: the check failed and putting main back failed too. The merge is still on main, and no
-/// button may push it.
 #[test]
 fn failed_check_whose_reset_fails_is_a_hard_error_with_no_retry() {
     let runner = happy(
@@ -215,8 +205,6 @@ fn push_failure_keeps_issue_open() {
     assert!(o.error.as_deref().is_some_and(|e| e.contains("rejected")));
     assert!(!any_line(&runner, |l| l.starts_with("gh ") || l.contains(" reset ")));
 }
-
-// Happy path
 
 #[test]
 fn happy_path_order() {
@@ -265,7 +253,6 @@ fn happy_path_order() {
     );
 }
 
-/// C16: every ref git is asked about is spelled in full, and no fetch asks for tags.
 #[test]
 fn no_ref_is_a_short_name_and_every_fetch_says_no_tags() {
     let runner = happy(vec![], None);
@@ -345,7 +332,6 @@ fn git_calls_use_full_paths_and_timeouts() {
     }
 }
 
-/// C13: git and gh come from the one lookup the rest of the Machines code uses.
 #[test]
 fn git_and_gh_come_from_the_tool_lookup() {
     let here = MergePlan::from_process(std::path::Path::new("/data/merge"));
@@ -363,8 +349,6 @@ fn git_and_gh_come_from_the_tool_lookup() {
         }
     }
 }
-
-// The check's shell (C19)
 
 #[test]
 fn check_runs_in_the_login_shell_with_tool_directories_first_on_path() {
@@ -388,7 +372,6 @@ fn check_runs_in_the_login_shell_with_tool_directories_first_on_path() {
         recs[i].cwd.as_deref().and_then(|p| p.to_str()),
         Some(TARGET)
     );
-    // the only other command with an environment is the fetch from the machine (BatchMode ssh)
     let fetch_at = recs
         .iter()
         .position(|r| {

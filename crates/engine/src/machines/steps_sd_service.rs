@@ -1,7 +1,3 @@
-//! The "Service installed" step (Swift `SDWorkerSteps` service part): the sd worker's units on
-//! Linux (admin, written through root) and its LaunchAgent on macOS (the worker user writes it).
-//! Nothing here enables or starts anything: that is the Running switch.
-
 use super::service_files::{
     render, templates, ServiceFile, LINUX_NAMES, PLIST_NAME, PLIST_PATH, UNIT_DIRECTORY,
 };
@@ -15,8 +11,6 @@ use crate::lanes::quote;
 use sha2::{Digest, Sha256};
 use std::path::Path;
 
-/// After the plist is written: the label stays disabled (launchd keeps that across logins) until
-/// Running turns on.
 pub const MAC_DISABLE_SCRIPT: &str = r#"launchctl disable "gui/$(id -u)/com.sd.worker""#;
 const MAC_LABEL: &str = "com.sd.worker";
 
@@ -31,8 +25,6 @@ pub(super) fn step(linux: bool) -> SetupStep {
     )
 }
 
-/// The `launchctl print-disabled` line for the label says disabled (`disabled`, or `true` on
-/// older macOS).
 pub(super) fn label_disabled(lines: &[&str]) -> bool {
     lines.iter().any(|l| {
         l.contains(r#""com.sd.worker" =>"#) && (l.ends_with("disabled") || l.ends_with("true"))
@@ -64,8 +56,6 @@ fn probe(linux: bool) -> String {
             )
         })
         .collect();
-    // On a Mac, then whether the label is loaded and disabled: a plist that is neither would
-    // start at login.
     if !linux {
         parts.push(running_probe(false));
     }
@@ -76,7 +66,6 @@ fn hex(text: &str) -> String {
     format!("{:x}", Sha256::digest(text.as_bytes()))
 }
 
-/// The files this Mac's sd templates give for `ctx.machine`.
 fn rendered(ctx: &StepContext) -> Result<Vec<ServiceFile>, String> {
     let machine = &ctx.machine;
     let job = machine.sd_worker().ok_or("no sd worker job")?;
@@ -122,8 +111,6 @@ fn check(out: &RemoteOutput, ctx: &StepContext) -> CheckResult {
         }
     }
     if differ.is_empty() && missing.is_empty() && files.len() == 1 && files[0].name == PLIST_NAME {
-        // line 0 is the digest; then `loaded`/`notloaded` and the print-disabled line. Running on
-        // (loaded, enabled) is fine.
         let rest: Vec<&str> = lines
             .iter()
             .skip(1)
@@ -150,13 +137,10 @@ fn check(out: &RemoteOutput, ctx: &StepContext) -> CheckResult {
     CheckResult::fail(parts.join("; "))
 }
 
-/// The admin script that writes the units: each file's bytes as base64, then `daemon-reload`. It
-/// enables and starts nothing, and it reads no stdin.
 pub fn install_script(files: &[ServiceFile]) -> String {
     use base64::Engine;
     let mut lines = vec!["set -e".to_string(), "umask 022".to_string()];
     for file in files {
-        // a temp file, then a move, on its own line so `set -e` stops on a failed decode
         lines.push(format!(
             "printf '%s' '{}' | base64 -d > {}.new",
             base64::engine::general_purpose::STANDARD.encode(file.content.as_bytes()),
@@ -206,14 +190,6 @@ fn install(ctx: &FixContext) -> FixOutcome {
             ))
         };
     }
-    // The plist has RunAtLoad, so launchd would start it at the next login. Disable the label
-    // first (launchd keeps that without a plist or a loaded job), so a failure leaves no plist
-    // behind. This never loads it: no bootstrap, no enable.
-    //
-    // One state skips that: Running is on (the label is loaded and enabled, the Running check's
-    // own test). The plist is then rewritten under the running job and the label stays enabled, or
-    // this Fix would turn Running off. A state that can't be read counts as not running: the
-    // label is disabled.
     let state = run::script(ctx, &running_probe(false), None, 60);
     let state_lines: Vec<&str> = state
         .out

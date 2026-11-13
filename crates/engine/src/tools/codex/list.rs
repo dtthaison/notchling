@@ -1,12 +1,8 @@
-//! Codex sessions as sidebar rows: the rollout files under `<codex home>/sessions/YYYY/MM/DD/`,
-//! newest first, read through the engine's `codex::meta` (id, folder, title) and `turn_open`.
-
 use std::path::{Path, PathBuf};
 
 use crate::sessions::{Agent, AgentGroup, AgentTarget};
 use crate::transcript::codex;
 
-/// Days since 1970-01-01 for a civil date (Howard Hinnant's algorithm), to filter the date folders.
 pub fn days_from_civil(year: i64, month: u32, day: u32) -> i64 {
     let y = if month <= 2 { year - 1 } else { year };
     let era = if y >= 0 { y } else { y - 399 } / 400;
@@ -37,8 +33,6 @@ fn numbered_dirs(dir: &Path, digits: usize) -> Vec<(u32, PathBuf)> {
     out
 }
 
-/// The rollout files, newest first, at most `limit`. `within_days` keeps only the date folders
-/// that many days old or newer (`None` keeps every folder, for a fixture). `.zst` files are skipped.
 pub fn rollouts(
     sessions_dir: &Path,
     within_days: Option<i64>,
@@ -79,8 +73,6 @@ pub fn rollouts(
     out
 }
 
-/// The rollout of session `id`: the file `rollout-<time>-<id>.jsonl`, newest day first. `id` must
-/// be a plain session id (letters, digits, `-`), so it can't name a path.
 pub fn find_rollout(sessions_dir: &Path, id: &str) -> Option<PathBuf> {
     if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
         return None;
@@ -94,7 +86,6 @@ pub fn find_rollout(sessions_dir: &Path, id: &str) -> Option<PathBuf> {
                 };
                 for entry in entries.flatten() {
                     let name = entry.file_name();
-                    // `rollout-` + a 19-character time (`2026-11-08T09-00-00`) + `-` + the id.
                     let rest = name
                         .to_string_lossy()
                         .strip_prefix("rollout-")
@@ -112,14 +103,10 @@ pub fn find_rollout(sessions_dir: &Path, id: &str) -> Option<PathBuf> {
     None
 }
 
-/// The first eight characters of an id, for a row with no title. Characters, not bytes: an id from
-/// a file can hold anything, and cutting inside a multi-byte character panics.
 fn short_id(id: &str) -> String {
     id.chars().take(8).collect()
 }
 
-/// A rollout as a sidebar row: `codex:<id>`, titled by the first thing typed, Working while its last
-/// turn is open, else Idle. `None` when the file has no session line yet.
 pub fn session(path: &Path) -> Option<Agent> {
     let text = path.to_string_lossy();
     let meta = codex::meta(&text)?;
@@ -170,7 +157,6 @@ mod tests {
     static COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
     impl Tmp {
-        /// Its own folder per test, since the tests run at the same time.
         fn new() -> Tmp {
             let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             let dir =
@@ -231,10 +217,8 @@ mod tests {
         let b = tmp.file("2026/11/08/rollout-2026-11-08T09-00-00-bbb-222.jsonl");
         assert_eq!(find_rollout(&tmp.0, "aaa-111"), Some(a));
         assert_eq!(find_rollout(&tmp.0, "bbb-222"), Some(b));
-        // Only the whole id after the time matches, not the end of one.
         assert_eq!(find_rollout(&tmp.0, "111"), None);
         assert_eq!(find_rollout(&tmp.0, "nope"), None);
-        // Nothing that could name a path.
         for bad in ["", "../x", "a/b", "*", "aaa-111.jsonl"] {
             assert_eq!(find_rollout(&tmp.0, bad), None, "{bad:?}");
         }
@@ -242,7 +226,6 @@ mod tests {
 
     #[test]
     fn an_untitled_rollout_with_a_multibyte_id_is_named_without_panicking() {
-        // Byte 8 of this id falls inside a two-byte character: `&id[..8]` panics there.
         let id = "abcdefgéèà-tail";
         assert!(!id.is_char_boundary(8));
         let tmp = Tmp::new();

@@ -1,5 +1,3 @@
-//! `ProviderRegistryTests` and the state tests of `ProviderTests.swift`, on a fake provider.
-
 use super::*;
 use std::sync::Mutex;
 

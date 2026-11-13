@@ -1,6 +1,3 @@
-//! Providers that take a while: a switch or an add that outlasts its reply, and a sync stuck on
-//! a Keychain prompt, which holds one thread however often the app asks.
-
 use crate::acting_ops_tests::FakeRoom;
 use crate::providers_ops::ProvidersOps;
 use crate::switches::{SwitchFlag, ACCOUNTS, ACCOUNTS_OFF};
@@ -14,7 +11,6 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
-/// A provider whose sync waits while the gate is closed, and counts the syncs begun.
 #[derive(Default)]
 struct Stuck {
     closed: Mutex<bool>,
@@ -95,14 +91,12 @@ fn a_stuck_sync_is_not_started_again_by_every_list_or_refresh() {
 
     *stuck.closed.lock().unwrap() = false;
     stuck.opened.notify_all();
-    // Once it ends, the next list syncs again.
     wait_until(|| {
         ops.call(ops::PROVIDERS_LIST, &json!({})).unwrap();
         stuck.begun.load(Ordering::SeqCst) >= 2
     });
 }
 
-/// A provider whose switch takes a while, to see the reply give up and the event follow.
 struct Slow {
     done: Arc<Mutex<bool>>,
 }
@@ -184,7 +178,6 @@ fn a_slow_switch_answers_switching_and_ends_as_an_event_and_one_runs_at_a_time()
     let end = wait_event(&room, |e| e["reason"] == "switch" && e["state"] == "done");
     assert_eq!(end["provider"], "slow");
     assert!(*done.lock().unwrap());
-    // The slot is free again.
     let again = ops.call(ops::PROVIDERS_SWITCH, &args).unwrap();
     assert!(again["state"] == "switching" || again["state"] == "switched");
 }

@@ -7,7 +7,6 @@ fn plan(text: &str, wanted: &Wanted) -> HookPlan {
     plan_hooks(text, wanted).unwrap()
 }
 
-/// The data with our hook entries taken out the plain way (groups left empty go too).
 fn without_ours(mut v: Value) -> Value {
     let Some(hooks) = v.get_mut("hooks").and_then(Value::as_object_mut) else {
         return v;
@@ -79,13 +78,11 @@ fn installing_adds_the_five_entries_to_a_users_file_and_changes_nothing_else() {
     );
     let v = value(&out.text);
     assert_eq!(without_ours(v.clone()), value(USER_HOOKS));
-    // The user's own hooks are where they were, in the same order.
     assert_eq!(
         v["hooks"]["PreToolUse"][0],
         value(USER_HOOKS)["hooks"]["PreToolUse"][0]
     );
     assert_eq!(v["hooks"]["Stop"], value(USER_HOOKS)["hooks"]["Stop"]);
-    // And the rest of the file is byte for byte what it was: taking ours out gives it back.
     let back = plan(&out.text, &remove_all());
     assert!(back.changed);
     assert_eq!(back.text, USER_HOOKS);
@@ -148,7 +145,6 @@ fn removing_takes_exactly_ours_out_of_every_fixture() {
         assert_eq!(back.changes.len(), 5, "{name}");
         assert!(ours(&value(&back.text), "PreToolUse").is_empty(), "{name}");
         match name {
-            // Comments may sit where an entry went; an empty `hooks` is not worth keeping.
             "odd" | "empty-hooks" => assert_eq!(
                 without_ours(value(&back.text)),
                 without_ours(value(text)),
@@ -173,7 +169,6 @@ fn the_swift_apps_entries_are_reported_and_never_touched() {
         .iter()
         .all(|f| f.command.ends_with("Notchling' --hook")));
 
-    // Removing ours finds nothing to do, and the file is not rewritten.
     let nothing = plan(SWIFT_INSTALLED, &remove_all());
     assert!(!nothing.changed);
     assert_eq!(nothing.text, SWIFT_INSTALLED);
@@ -186,7 +181,6 @@ fn the_swift_apps_entries_are_reported_and_never_touched() {
         5
     );
 
-    // Installing adds ours beside theirs; theirs stay, in place.
     let out = plan(SWIFT_INSTALLED, &install_all());
     let v = value(&out.text);
     assert_eq!(without_ours(v.clone()), value(SWIFT_INSTALLED));
@@ -194,7 +188,6 @@ fn the_swift_apps_entries_are_reported_and_never_touched() {
     let now = detect(&out.text).unwrap();
     assert_eq!(now.iter().filter(|f| f.origin == Origin::Swift).count(), 5);
     assert_eq!(now.iter().filter(|f| f.managed).count(), 5);
-    // Taking ours out again leaves the Swift app's file as it was.
     assert_eq!(plan(&out.text, &remove_all()).text, SWIFT_INSTALLED);
 }
 
@@ -213,7 +206,6 @@ fn prompt_hooks_and_page_hooks_are_chosen_apart() {
     assert_eq!(ours(&v, "PreToolUse").len(), 2);
     assert_eq!(ours(&v, "PostToolUseFailure").len(), 1);
 
-    // Removing the page hooks leaves the prompt hooks, in the same event.
     let only_prompt = plan(&both.text, &wanted(Want::Leave, Want::Remove));
     let v = value(&only_prompt.text);
     assert_eq!(
@@ -258,7 +250,6 @@ fn a_stale_entry_is_replaced_and_a_second_copy_is_removed() {
         ours(&v, "PreToolUse"),
         vec![("AskUserQuestion".into(), CMD.into(), 300)]
     );
-    // The user's own group is untouched.
     assert_eq!(v["hooks"]["PermissionRequest"][0]["matcher"], "Bash");
     assert!(!out.text.contains(old));
 }
@@ -292,7 +283,6 @@ fn an_entry_that_shares_a_group_leaves_the_users_hook_and_the_groups_other_keys(
     assert_eq!(groups[0]["note"], "keep me");
     assert_eq!(groups[0]["hooks"].as_array().unwrap().len(), 1);
     assert_eq!(groups[0]["hooks"][0]["async"], true);
-    // A group with a key of its own is kept even when it has no hook left.
     assert_eq!(groups[1]["extra"], 1);
     assert_eq!(groups[1]["hooks"], json!([]));
 }
@@ -367,7 +357,6 @@ fn a_wrapper_around_our_program_in_our_slot_is_the_users_and_is_never_removed() 
         assert!(!plan(&text, &remove_all()).changed, "{command}");
         let out = plan(&text, &install_all());
         let v = value(&out.text);
-        // Theirs stays where it was; ours goes in beside it, not over it.
         assert_eq!(
             v["hooks"]["PermissionRequest"][0],
             value(&text)["hooks"]["PermissionRequest"][0]
@@ -395,7 +384,6 @@ fn an_empty_file_becomes_an_object_with_our_entries_and_a_missing_one_is_the_sam
 
 #[test]
 fn odd_formatting_is_kept() {
-    // Comments, a byte-order mark and trailing commas survive.
     let with_bom = format!("\u{feff}{ODD}");
     let out = plan(&with_bom, &install_all());
     assert!(out.text.starts_with('\u{feff}'));
@@ -429,7 +417,6 @@ fn odd_formatting_is_kept() {
         assert!(back.text.contains(kept), "{kept}\n{}", back.text);
     }
 
-    // Tabs and CRLF.
     let tabs: String = NO_HOOKS.replace("  ", "\t");
     let out = plan(&tabs, &install_all());
     assert!(
@@ -444,7 +431,6 @@ fn odd_formatting_is_kept() {
     assert!(!out.text.replace("\r\n", "").contains('\n'));
     assert_eq!(plan(&out.text, &remove_all()).text, crlf);
 
-    // One line, no final newline.
     let out = plan(COMPACT, &install_all());
     assert!(!out.text.ends_with('\n'));
     assert_eq!(value(&out.text)["env"], json!({"A": "1"}));
@@ -464,7 +450,6 @@ fn unknown_keys_and_odd_values_survive_every_change() {
     );
     assert_eq!(v["hooks"]["SessionStart"][0]["hooks"][0]["async"], true);
 
-    // Numbers keep their spelling: the text outside the entries is untouched.
     let out = plan(USER_HOOKS, &install_all());
     for kept in [
         "\"RATIO\": 1.50",
@@ -497,7 +482,6 @@ fn a_file_that_is_not_safe_to_edit_is_refused_and_the_message_holds_none_of_it()
         for wanted in [install_all(), remove_all()] {
             let err = match plan_hooks(text, &wanted) {
                 Err(e) => e,
-                // A file we need not edit may still read: only the ones that need an edit fail.
                 Ok(p) => {
                     assert!(!p.changed, "{text}");
                     continue;
@@ -505,7 +489,6 @@ fn a_file_that_is_not_safe_to_edit_is_refused_and_the_message_holds_none_of_it()
             };
             assert!(!err.0.contains(secret), "{err}");
         }
-        // Installing always needs an edit, so it must be refused.
         assert!(plan_hooks(text, &install_all()).is_err(), "{text}");
         assert!(
             detect(text).is_err() || text.contains("\"hooks\""),
@@ -516,8 +499,6 @@ fn a_file_that_is_not_safe_to_edit_is_refused_and_the_message_holds_none_of_it()
 
 #[test]
 fn every_start_and_every_choice_ends_where_it_should() {
-    // The edit is checked against the same change made to the data inside `plan_hooks`; this
-    // runs it over every combination and checks the ends too.
     let choices = [Want::Leave, Want::Install, Want::Remove];
     for (name, text) in EVERY_FIXTURE {
         let starts = [

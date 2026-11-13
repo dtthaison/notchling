@@ -1,5 +1,3 @@
-//! Ports of `HostdTests`' socket half, over a temp socket: a fake spawner for the contract, and real
-//! `/bin/cat` and `/bin/sh` sessions for the pty path. Never the real `hostd.sock`.
 #![cfg(unix)]
 
 mod common;
@@ -101,7 +99,6 @@ fn a_second_host_on_the_same_socket_refuses_to_start() {
     let (other, _) = make_host(&scratch, FakeSpawner::new(), never_alive, nothing_found);
     let second = HostServer::new(other, &running.path, Arc::new(owner));
     assert!(matches!(second.start(), Err(HostError::AlreadyRunning)));
-    // And the first still answers.
     connect(&running.path)
         .request("hello", Map::new(), TIMEOUT)
         .expect("still serving");
@@ -159,7 +156,6 @@ fn spawn_list_write_attach_resize_and_terminate_over_the_socket() {
     assert!(info.running);
     assert_eq!(client.sessions().expect("listed").len(), 1);
 
-    // Output reaches an attached listener: the scrollback first, then live bytes.
     spawner.handle(0).emit("before attach ");
     let received: Arc<Mutex<String>> = Arc::default();
     let sink = received.clone();
@@ -173,7 +169,6 @@ fn spawn_list_write_attach_resize_and_terminate_over_the_socket() {
     spawner.handle(0).emit("after");
     wait_until(|| received.lock().expect("lock").as_str() == "before attach after");
 
-    // Input goes the other way.
     client.write(info.id, b"hello\r").expect("sent");
     wait_until(|| spawner.handle(0).written().contains(&b"hello\r".to_vec()));
     client
@@ -225,7 +220,7 @@ fn an_app_that_restarts_finds_the_running_sessions_again() {
     first
         .request("spawn", params(json!({"cwd": "/tmp"})), TIMEOUT)
         .expect("spawned");
-    first.close(); // the app quit
+    first.close();
 
     let second = connect(&running.path);
     let found: Vec<_> = second
@@ -236,7 +231,6 @@ fn an_app_that_restarts_finds_the_running_sessions_again() {
         .collect();
     assert_eq!(found.len(), 1);
     assert_eq!(found[0].pid, spawner.handle(0).root_pid());
-    // And it can type into it.
     second.write(found[0].id, b"still here").expect("sent");
     wait_until(|| {
         spawner
@@ -298,8 +292,6 @@ fn losing_the_host_closes_the_client() {
     ));
 }
 
-// The real pty path: /bin/cat and /bin/sh through PtySpawner.
-
 fn real_server(scratch: &Scratch) -> Running {
     let state = Arc::new(StateStore::new(scratch.path("state.json")));
     let host = SessionHost::new(
@@ -350,7 +342,6 @@ fn a_cat_session_over_the_socket() {
         })
         .expect("attached");
     client.write(info.id, b"hello host\n").expect("sent");
-    // The tty echoes the line, then cat prints it back.
     wait_until(|| {
         String::from_utf8_lossy(&received.lock().expect("lock"))
             .matches("hello host")
@@ -368,7 +359,6 @@ fn a_cat_session_over_the_socket() {
     assert_eq!(running.host.running_count(), 0);
 }
 
-/// The child gets the host's environment without NO_COLOR, and a resize reaches it.
 #[test]
 fn a_shell_session_sees_its_size_and_no_no_color() {
     let scratch = Scratch::new();

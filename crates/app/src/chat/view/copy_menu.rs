@@ -1,8 +1,3 @@
-//! The menu a right click on text opens, at the pointer: Copy. It works on what is selected in the
-//! conversation or the file panel (the click doesn't change the selection, so a selection can be
-//! made first and copied after), and shows faint, doing nothing, when nothing is. The reply box
-//! has no menu of its own yet.
-
 use gpui::{prelude::*, px, Context, Div, Pixels, Point, SharedString};
 use notchling_kit::labels::Corner;
 use notchling_kit::ui::{card, KitPart};
@@ -13,7 +8,6 @@ use super::row_menu::popup;
 use super::ChatView;
 use crate::acting::Control;
 
-/// An open Copy menu: where the click was, in the window, and whether text was selected then.
 #[derive(Clone, Debug, PartialEq)]
 pub struct CopyMenu {
     pub at: Point<Pixels>,
@@ -22,13 +16,10 @@ pub struct CopyMenu {
 
 const WIDTH: f32 = 120.0;
 
-/// Whether a selection from `anchor` to `focus` holds anything: both ends are set and differ. A
-/// click leaves them equal, and nothing is selected.
 pub fn selects<T: PartialEq>(anchor: Option<&T>, focus: Option<&T>) -> bool {
     matches!((anchor, focus), (Some(a), Some(f)) if a != f)
 }
 
-/// The open menu over a click-away layer, or nothing.
 pub(super) fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Option<Div> {
     let menu = view.copy_menu.as_ref()?;
     let id = SharedString::from("copy-menu-copy");
@@ -69,8 +60,6 @@ pub(super) fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>)
 }
 
 impl ChatView {
-    /// Opens the menu at `at` on a right click on text; `enabled` is whether a selection was there.
-    /// Nothing opens under a sheet or another menu.
     pub(super) fn open_copy_menu(
         &mut self,
         at: Point<Pixels>,
@@ -88,8 +77,6 @@ impl ChatView {
         cx.notify();
     }
 
-    /// The Copy menu is open (the file panel's selection listener asks, with no app handle to the
-    /// chat's fields).
     pub(super) fn copy_menu_open(&self) -> bool {
         self.copy_menu.is_some()
     }

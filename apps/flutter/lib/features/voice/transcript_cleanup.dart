@@ -1,5 +1,3 @@
-/// Cleans what Whisper returns before it reaches the composer: hallucinated boilerplate, runs of repeated
-/// characters, words and phrases, stray CJK and bracket tags.
 String cleanTranscript(String raw) {
   String text = raw;
   text = text.replaceAll(RegExp(r'\[[^\]]*\]'), ' ');
@@ -28,10 +26,7 @@ String stripBoilerplate(String text) {
   return result;
 }
 
-/// "OVVVV" -> "OV"; "đúng đúng đúng đúng" -> "đúng"; "chạy test chạy test chạy test" -> "chạy test".
-/// A word said twice stays twice (people do say "bug bug"); three or more times in a row is a loop.
 String collapseRepeats(String text) {
-  // Four or more of the same character in a row.
   final String result = text.replaceAllMapped(RegExp(r'(\S)\1{3,}'), (Match m) => m.group(1)!);
   final List<String> words = result.split(RegExp(r'\s+')).where((String w) => w.isNotEmpty).toList();
   bool changed = true;

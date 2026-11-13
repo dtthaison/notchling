@@ -1,33 +1,20 @@
-//! Streaming line reads that never hold a line over a cap. A transcript's picture results are one line
-//! of 0.5 to 2 MB of base64 each; a reader that has no use for them reads past with a newline scan,
-//! keeps the first few KB (enough to tell what the line was) and goes on, so memory stays at one block
-//! and one line of at most the cap, whatever the file holds.
-
 use std::fs::File;
 use std::io::{self, Read, Seek, SeekFrom};
 
-/// How much of a line over the cap is kept for [`Line::Oversized`].
 pub const HEAD_BYTES: usize = 4096;
 const BLOCK: usize = 1 << 20;
 
-/// One complete line of a scan, without its newline.
 pub enum Line<'a> {
-    /// A line no longer than the cap.
     Whole(&'a [u8]),
-    /// A line over the cap: its first [`HEAD_BYTES`] and its full length.
     Oversized { head: &'a [u8], len: u64 },
 }
 
-/// What a scan read.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Scanned {
-    /// Bytes from `start` through the last newline: where the next read begins, past a half line.
     pub span: u64,
-    /// Bytes of the lines that were handed over whole (with their newlines).
     pub parsed: u64,
 }
 
-/// The line being put together across blocks.
 struct Pending {
     max_line: usize,
     line: Vec<u8>,
@@ -56,10 +43,6 @@ impl Pending {
     }
 }
 
-/// Hands every complete line in `start..end` to `each`, in order, and says how far it got. Empty lines
-/// are left out. `skip_first_line`: `start` may be mid-line, so everything up to the first newline is
-/// dropped. A last line with no newline yet is not handed over (its writer is still adding to it).
-/// Lines longer than `max_line` bytes arrive as [`Line::Oversized`] with only their head.
 pub fn scan_lines(
     path: &str,
     start: u64,
@@ -101,9 +84,7 @@ pub fn scan_lines(
             if skipping {
                 skipping = false;
             } else if pending.len == 0 && segment.is_empty() {
-                // An empty line.
             } else if pending.len == 0 && segment.len() <= max_line {
-                // The whole line is in this block: no copy.
                 scanned.parsed += segment.len() as u64 + 1;
                 each(Line::Whole(segment));
             } else {

@@ -90,7 +90,6 @@ fn a_symlink_is_never_followed_out_of_the_folder() {
     fs::write(outside.join("private.png"), "secret").unwrap();
     let images = root.join("images");
     fs::create_dir_all(images.join("s1")).unwrap();
-    // A file that points out, and a session folder that points out.
     symlink(
         outside.join("private.png"),
         images.join("s1").join("link.png"),
@@ -105,7 +104,6 @@ fn a_symlink_is_never_followed_out_of_the_folder() {
         "a folder that is a symlink"
     );
 
-    // Copying refuses a link even when handed one.
     let out = root.join("out");
     let err = copy_to(&[images.join("s1").join("link.png")], &out).unwrap_err();
     assert_eq!(err.kind(), io::ErrorKind::InvalidInput);

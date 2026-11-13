@@ -1,6 +1,3 @@
-//! The M3 ops called directly, with a fake room and a fake terminal: the switch, the tiers, what
-//! is typed, and the held prompts.
-
 use crate::acting::{Acting, ACTING_OFF};
 use crate::acting_ops::{ActingOps, Attacher, Room, ACTING_OPS};
 use notchling_engine::control::Launcher;
@@ -18,7 +15,6 @@ use std::time::Duration;
 pub(crate) struct FakeRoom {
     pub events: Mutex<Vec<(String, Value)>>,
     pub app: AtomicBool,
-    /// The topics an attached app follows.
     pub following: Mutex<Vec<String>>,
 }
 
@@ -48,7 +44,6 @@ impl FakeRoom {
     }
 }
 
-/// A terminal that shows `screen` and keeps what is written.
 struct FakePty {
     screen: Vec<String>,
     writes: Arc<Mutex<Vec<String>>>,
@@ -78,7 +73,6 @@ impl Pty for FakePty {
     }
 }
 
-/// Each attach: the job and its config folder.
 type Attaches = Arc<Mutex<Vec<(String, Option<String>)>>>;
 
 #[derive(Default)]
@@ -139,14 +133,12 @@ pub(crate) struct Setup {
 
 pub(crate) fn setup(on: bool, screen: &[&str], list: Value) -> Setup {
     let roots = Roots {
-        // Read-only: its `sessions/4242.json` is the Claude Code process behind [`hook`].
         main_dir: fixture_claude(),
         lanes_file: PathBuf::from("/nonexistent/lanes.json"),
     };
     setup_in(on, screen, list, roots, None)
 }
 
-/// With `launcher`, session control runs through it, and its pauses take no time.
 pub(crate) fn setup_in(
     on: bool,
     screen: &[&str],
@@ -161,7 +153,6 @@ pub(crate) fn setup_in(
         ..FakeAttacher::default()
     };
     let (attached, writes) = (attacher.attached.clone(), attacher.writes.clone());
-    // This process's parent is the fixture's Claude Code (pid 4242), so it may be the hook.
     let me = std::process::id();
     let mut ops = ActingOps::new(
         Arc::new(Acting::in_memory(on)),
@@ -194,7 +185,6 @@ pub(crate) fn caller(client: ClientKind) -> Caller {
     }
 }
 
-/// A pid no process has: a hook Claude Code gave up on.
 pub(crate) const GONE: u32 = 99_999_999;
 
 fn fixture_claude() -> PathBuf {
@@ -348,8 +338,6 @@ fn a_second_esc_while_stopping_is_not_sent() {
         .call(&app(), ops::SESSION_INTERRUPT, &json!({"id": "job-a"}))
         .unwrap();
     assert_eq!(first, json!({"sent": true}));
-    // Still working a moment later (Claude Code hasn't stopped yet): a second Esc on an idle
-    // prompt would open rewind, so it isn't sent.
     let second = s
         .ops
         .call(&app(), ops::SESSION_INTERRUPT, &json!({"id": "job-a"}))
@@ -357,7 +345,6 @@ fn a_second_esc_while_stopping_is_not_sent() {
     assert_eq!(second, json!({"sent": false, "stopping": true}));
     assert_eq!(*s.writes.lock().unwrap(), vec!["\x1b".to_string()]);
     assert_eq!(s.attached.lock().unwrap().len(), 1);
-    // Many at once: one Esc.
     let s = Arc::new(setup(true, PROMPT, sessions()));
     let threads: Vec<_> = (0..8)
         .map(|_| {
@@ -413,7 +400,6 @@ fn a_take_back_reads_the_queue_from_the_transcript() {
         Some(&path)
     )]);
     let s = setup(true, PROMPT, list);
-    // No popAll is logged (nothing really typed), so nothing was taken: Up's text is cleared.
     let out = s
         .ops
         .call(&app(), ops::SESSION_TAKE_BACK, &json!({"id": "job-a"}))
@@ -480,7 +466,6 @@ fn a_question_off_the_screen_waits_for_the_switch_and_the_app() {
 
 #[test]
 fn an_answer_with_no_held_prompt_is_typed_page_by_page() {
-    // The dialog shows a question the plan doesn't know: only Left is pressed, never a digit.
     let s = setup(true, &["Q: Something?", "Enter to select"], sessions());
     let question = json!({"items": [{"question": "Where?", "options": ["Home", "Away"], "multiSelect": false}]});
     let (c, _) = code(s.ops.call(
@@ -511,8 +496,6 @@ fn prompts_list_trims_an_oversized_prompt_instead_of_failing() {
             "tool_name": "Write", "cwd": "/w",
             "tool_input": {"file_path": file, "content": fill.repeat(900_000)}})
     };
-    // Two Writes of a 900 KB file (the hook line cap is 1 MiB) and an ordinary prompt: together
-    // they would not fit one reply.
     let (big, _rx1) = s
         .ops
         .prompts()

@@ -8,7 +8,6 @@ use std::net::TcpStream;
 use std::path::Path;
 use std::time::SystemTime;
 
-/// Two ports nobody is listening on now (bound, read, closed).
 pub(crate) fn free_ports() -> (u16, u16) {
     let a = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let b = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -19,7 +18,6 @@ pub(crate) fn free_ports() -> (u16, u16) {
 }
 
 pub(crate) fn test_config(data_dir: PathBuf, lan: u16, tunnel: u16) -> BridgeConfig {
-    // Home and the photo folder sit beside the data folder, in the test's own temp folder.
     let parent = data_dir.parent().unwrap_or(&data_dir).to_path_buf();
     let mut config = BridgeConfig::new(data_dir, parent.join("home"), parent.join("phone-images"))
         .with_ports(lan, tunnel);
@@ -38,7 +36,6 @@ fn bridge(data_dir: PathBuf, lan: u16, tunnel: u16) -> Bridge {
     )
 }
 
-/// Every file and folder under `dir` with its size and modified time.
 pub(crate) fn snapshot(dir: &Path) -> Vec<(PathBuf, u64, Option<SystemTime>)> {
     let mut out = Vec::new();
     let mut stack = vec![dir.to_path_buf()];
@@ -115,7 +112,6 @@ fn nothing_under_the_data_folder_is_written_while_off() {
     bridge.set(false);
     assert_eq!(snapshot(&data), before);
 
-    // A folder without the Swift app's identity: on fails, says why, and makes nothing.
     let empty = TempDir::new("bridge-empty");
     let data = empty.path("AgentConsole");
     let bridge = super::tests::bridge(data.clone(), lan, tunnel);

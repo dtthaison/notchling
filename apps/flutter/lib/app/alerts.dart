@@ -12,12 +12,8 @@ import '../features/macs/session_ref.dart';
 import '../features/sessions/sessions_notifier.dart';
 import 'providers.dart';
 
-/// What changed in a session that is worth a notification.
 enum AlertKind { needsInput, finished, message }
 
-/// Alerts between two session lists, once per change: a session that has just gone to "Cần input", or from
-/// running to done. [announced] remembers what each session was last announced as, so repeated lists carrying
-/// the same state, or a state that flips back and forth between two polls, do not raise the same alert twice.
 Map<String, AlertKind> alertsBetween(List<Session> before, List<Session> after, Map<String, AlertKind> announced) {
   final Map<String, SessionState> was = <String, SessionState>{for (final Session s in before) s.id: s.state};
   final Map<String, AlertKind> result = <String, AlertKind>{};
@@ -32,7 +28,6 @@ Map<String, AlertKind> alertsBetween(List<Session> before, List<Session> after, 
     }
     if (kind != null && announced[s.id] != kind) result[s.id] = kind;
   }
-  // A session that moved on (running again, say) may be announced again for its next change.
   for (final Session s in after) {
     final AlertKind? last = announced[s.id];
     if (last == AlertKind.needsInput && s.state != SessionState.needsInput) announced.remove(s.id);
@@ -42,22 +37,15 @@ Map<String, AlertKind> alertsBetween(List<Session> before, List<Session> after, 
   return result;
 }
 
-/// The user's choices about background behaviour and which sessions are muted, kept in the secure store.
 class AlertPrefs {
   const AlertPrefs({this.keepAlive, this.muted = const <String>{}, this.loaded = false});
 
-  /// Null until the user has answered the first-run question.
   final bool? keepAlive;
   final Set<String> muted;
   final bool loaded;
 
-  /// What is muted is kept by [storageKey], like the chat cache and the archive: a bare id belongs to the computer
-  /// that kept the empty scope (the one a phone had before it followed several), `<scope>/<id>` to any other. So
-  /// muting `s1` on one computer leaves `s1` on another heard.
-  /// Whether [sessionId] on the computer whose storage scope is [scope] is muted.
   bool isMuted(String scope, String sessionId) => muted.contains(storageKey(scope, sessionId));
 
-  /// The ids (as that computer gave them) muted on the computer whose storage scope is [scope].
   Set<String> mutedIn(String scope) => scope.isEmpty
       ? <String>{for (final String key in muted) if (SessionRef.parse(key) == null) key}
       : <String>{for (final String key in muted) if (key.startsWith('$scope/')) key.substring(scope.length + 1)};
@@ -80,8 +68,6 @@ class AlertPrefsNotifier extends Notifier<AlertPrefs> {
     return const AlertPrefs();
   }
 
-  /// Forgets the mutes of the computer whose storage scope is [scope], when that computer is removed. Waits for
-  /// the saved mutes to load first, so they can't come back over the change.
   Future<void> removeScope(String scope) async {
     await _loading;
     if (!ref.mounted) return;
@@ -109,8 +95,6 @@ class AlertPrefsNotifier extends Notifier<AlertPrefs> {
     await _store.write(_keepAliveKey, on ? 'on' : 'off');
   }
 
-  /// Mutes or unmutes [sessionId] on the computer whose storage scope is [scope] (the empty scope by default,
-  /// which is a phone that follows one computer).
   Future<void> setMuted(String sessionId, {required bool muted, String scope = ''}) async {
     final Set<String> next = <String>{...state.muted};
     final String key = storageKey(scope, sessionId);
@@ -120,8 +104,6 @@ class AlertPrefsNotifier extends Notifier<AlertPrefs> {
   }
 }
 
-/// The Android foreground service that keeps the app, and so the Mac connection, alive in the background.
-/// The service is native (MainActivity / KeepAliveService); this only starts, updates and stops it.
 abstract class BackgroundKeeper {
   Future<void> start(String text);
   Future<void> stop();
@@ -134,8 +116,7 @@ class AndroidBackgroundKeeper implements BackgroundKeeper {
   Future<void> start(String text) async {
     try {
       await _channel.invokeMethod<void>('start', <String, Object?>{'text': text});
-    } on PlatformException {
-      // The service could not start (notifications blocked, say); the app just works as before.
+    } on PlatformException catch (_) {
     }
   }
 
@@ -143,8 +124,7 @@ class AndroidBackgroundKeeper implements BackgroundKeeper {
   Future<void> stop() async {
     try {
       await _channel.invokeMethod<void>('stop');
-    } on PlatformException {
-      // Already stopped.
+    } on PlatformException catch (_) {
     }
   }
 }
@@ -158,7 +138,6 @@ class NoBackgroundKeeper implements BackgroundKeeper {
 
 final Provider<BackgroundKeeper> keepAliveProvider = Provider<BackgroundKeeper>((Ref ref) => Platform.isAndroid ? AndroidBackgroundKeeper() : NoBackgroundKeeper());
 
-/// Keeps the foreground service in step with the setting, the active Mac and the number of sessions.
 final Provider<void> keepAliveControllerProvider = Provider<void>((Ref ref) {
   final bool on = ref.watch(alertPrefsProvider.select((AlertPrefs p) => p.keepAlive == true));
   final bool hasMac = ref.watch(macsProvider.select((MacsState s) => s.active != null));

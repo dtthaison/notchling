@@ -1,23 +1,14 @@
-//! The Codex and Antigravity ops as the app sends them: the shapes from the daemon's `codex_ops`
-//! and `agy_ops` module docs, built here so they are tested and the socket only carries them.
-//! Row ids are Chat's: `codex:<session>`, `agy:<session>`; a draft (`codex-new:<uuid>`,
-//! `agy-new:<uuid>`) sends `draft_folder` instead and the reply names the real row.
-
 use notchling_engine::transcript::model::Conversation;
 use notchling_local_api::ops;
 use serde_json::{json, Value};
 
 use crate::acting::Request;
 
-/// A Codex row's id starts with this (`CodexSessions.agentID`).
 pub const CODEX_PREFIX: &str = "codex:";
-/// An Antigravity row's id starts with this.
 pub const AGY_PREFIX: &str = "agy:";
-/// Drafts: a new session not started yet, keyed by a uuid.
 pub const CODEX_DRAFT_PREFIX: &str = "codex-new:";
 pub const AGY_DRAFT_PREFIX: &str = "agy-new:";
 
-/// Which tool a row belongs to, by its id.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RowTool {
     Claude,
@@ -45,12 +36,10 @@ impl RowTool {
     }
 }
 
-/// Whether a row is a draft: its first message starts the session.
 pub fn is_draft(row_id: &str) -> bool {
     row_id.starts_with(CODEX_DRAFT_PREFIX) || row_id.starts_with(AGY_DRAFT_PREFIX)
 }
 
-/// A Codex session's model and effort for its next turns; `None` is Codex's own default.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Pick {
     pub model: Option<String>,
@@ -67,7 +56,6 @@ fn with_pick(mut args: Value, pick: &Pick) -> Value {
     args
 }
 
-/// `codex.send` to a session; while its turn runs the daemon queues the message.
 pub fn codex_send(id: &str, text: &str, pick: &Pick) -> Request {
     Request {
         op: ops::CODEX_SEND,
@@ -75,8 +63,6 @@ pub fn codex_send(id: &str, text: &str, pick: &Pick) -> Request {
     }
 }
 
-/// `codex.send` that starts a new session in `folder` from the draft row `draft`: the daemon
-/// echoes the draft in the event that names the session when that takes over its 4.5 s.
 pub fn codex_send_draft(draft: &str, folder: &str, text: &str, pick: &Pick) -> Request {
     Request {
         op: ops::CODEX_SEND,
@@ -101,7 +87,6 @@ pub fn codex_delete(id: &str) -> Request {
     }
 }
 
-/// `agy.open`: starts the session's `agy acp` and loads it (acting).
 pub fn agy_open(id: &str) -> Request {
     Request {
         op: ops::AGY_OPEN,
@@ -137,7 +122,6 @@ pub fn agy_set_option(id: &str, option: &str, value: &str) -> Request {
     }
 }
 
-/// Answers a permission with one of Antigravity's own options; `None` cancels it.
 pub fn agy_permission(id: &str, rpc_id: &str, option_id: Option<&str>) -> Request {
     let mut args = json!({ "id": id, "rpc_id": rpc_id });
     if let Some(option) = option_id {
@@ -149,8 +133,6 @@ pub fn agy_permission(id: &str, rpc_id: &str, option_id: Option<&str>) -> Reques
     }
 }
 
-/// `agy.conversation`, a read (sent through `Actions::read`): `peek` doesn't count as use, for
-/// a list read every few seconds.
 pub fn agy_conversation(id: &str, peek: bool) -> Request {
     Request {
         op: ops::AGY_CONVERSATION,
@@ -158,7 +140,6 @@ pub fn agy_conversation(id: &str, peek: bool) -> Request {
     }
 }
 
-/// `agy.state`, a read.
 pub fn agy_state(id: &str) -> Request {
     Request {
         op: ops::AGY_STATE,
@@ -166,7 +147,6 @@ pub fn agy_state(id: &str) -> Request {
     }
 }
 
-/// What `agy.conversation` answers.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct AgyConversation {
     pub open: bool,
@@ -174,22 +154,16 @@ pub struct AgyConversation {
     pub working: bool,
     pub load_error: Option<String>,
     pub conversation: Conversation,
-    /// The daemon sent only the newest items of a long session (it answers in one 1 MiB line).
     pub truncated: bool,
-    /// Another `agy` holds the session (a delegation): what to say; it is read only here.
     pub elsewhere: Option<String>,
 }
 
 impl AgyConversation {
-    /// Whether another `agy` (a delegation) holds the session and is mid-turn: the daemon reads
-    /// that from Antigravity's log. The live set only tracks this daemon's own turns, so without
-    /// this the session would look idle. It is not a turn Stop can reach.
     pub fn held_working(&self) -> bool {
         self.elsewhere.is_some() && self.working
     }
 }
 
-/// Reads an `agy.conversation` reply; `None` when it isn't one.
 pub fn parse_conversation(reply: &Value) -> Option<AgyConversation> {
     let open = reply.get("open")?.as_bool()?;
     let conversation = match reply.get("conversation") {
@@ -222,19 +196,14 @@ pub fn parse_conversation(reply: &Value) -> Option<AgyConversation> {
     })
 }
 
-/// The row id a `codex.send` or `agy.send` reply names: a draft's first message gives the real
-/// session's row.
 pub fn sent_row(reply: &Value) -> Option<String> {
     reply.get("id")?.as_str().map(str::to_owned)
 }
 
-/// What a `codex.send` reply says about the message: started a turn, or waits behind one (how
-/// many are ahead of it, counting it).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Sent {
     Started,
     Queued(usize),
-    /// A new session Codex hasn't named yet: the real row comes in an event naming the draft.
     Starting,
 }
 
@@ -340,7 +309,6 @@ mod tests {
         };
         assert!(held(true).held_working());
         assert!(!held(false).held_working(), "the delegation answered");
-        // A turn this daemon runs is the runners' to report, and Stop's.
         let own = parse_conversation(&json!({"open": true, "working": true,
             "conversation": {"items": []}}))
         .unwrap();
@@ -362,7 +330,6 @@ mod tests {
             Some("A delegation is running this session. Read only here until it ends.")
         );
         assert!(!c.truncated, "an older daemon never says");
-        // A newer daemon's extra fields are read, and a long session says it was cut.
         let cut = parse_conversation(&json!({"open": true, "truncated": true, "omitted": 40,
             "conversation": {"items": []}}))
         .unwrap();

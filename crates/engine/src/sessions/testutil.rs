@@ -1,11 +1,8 @@
-//! Temp-dir helpers for tests. Nothing here reads the real `~/.claude`.
-
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 
 static COUNTER: AtomicU32 = AtomicU32::new(0);
 
-/// A fresh folder under the system temp dir, removed on drop.
 pub struct TempDir(PathBuf);
 
 impl TempDir {
@@ -25,7 +22,6 @@ impl TempDir {
         self.0.join(rel)
     }
 
-    /// Writes a file, making its folders.
     pub fn write(&self, rel: &str, text: &str) -> PathBuf {
         let path = self.path(rel);
         if let Some(parent) = path.parent() {

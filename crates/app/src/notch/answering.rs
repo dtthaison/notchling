@@ -1,9 +1,3 @@
-//! The notch's answering cards over GPUI (part U2): "Claude asks" with a tab per question, options
-//! picked by click (toggled for multi select), a text box for something else and Submit; and
-//! "Permission needed" with Allow, Always allow and Deny. Both send through the daemon
-//! (`session.answer`, `session.permission`) and are disabled, with the reason on hover, while
-//! acting isn't on. Their drawn heights are the model's `card_height`.
-
 use gpui::{div, prelude::*, px, Context, Div, SharedString, Stateful};
 use notchling_engine::transcript::snapshot::PendingQuestion;
 use notchling_kit::metric::{CONTROL, OPTION_BADGE, RADIUS_MD, RADIUS_SM};
@@ -22,28 +16,22 @@ use crate::mac::gate;
 pub(super) const HEADER: f32 = 22.0;
 pub(super) const GAP: f32 = 8.0;
 const TAB_ROW: f32 = 24.0;
-/// The kit's option row: 10 padding around the title over its detail, or the 22 badge.
 const OPTION_PADDING: f32 = 20.0;
-/// Roughly how many characters of a 13 pt line fit across a card in the panel width.
 const CHARS_PER_LINE: usize = 52;
 const MONO_CHARS_PER_LINE: usize = 48;
-/// The permission summary shows at most this many lines (`lineLimit(10)`).
 const SUMMARY_LINES: usize = 10;
 
 fn wrapped_lines(chars: usize, per_line: usize) -> f32 {
     (chars / per_line + 1) as f32
 }
 
-/// The kit's option row always draws its detail line, empty or not.
 fn option_height() -> f32 {
     let text = line(TypeRole::Heading) + 2.0 + line(TypeRole::Meta);
     text.max(OPTION_BADGE) + OPTION_PADDING
 }
 
-/// And of the 11 pt status line.
 const META_CHARS_PER_LINE: usize = 62;
 
-/// The line under the controls (why they're off, the send error, or "Sending…"), wrapped.
 pub(super) fn status_height(status: Option<&str>) -> f32 {
     match status {
         Some(t) => {
@@ -53,7 +41,6 @@ pub(super) fn status_height(status: Option<&str>) -> f32 {
     }
 }
 
-/// The question card's drawn height for the tab on show.
 pub fn question_height(q: &PendingQuestion, tab: usize, status: Option<&str>) -> f32 {
     let Some(item) = q.items.get(tab).or_else(|| q.items.first()) else {
         return 0.0;
@@ -89,7 +76,6 @@ pub fn question_height(q: &PendingQuestion, tab: usize, status: Option<&str>) ->
         + status_height(status)
 }
 
-/// The permission card's drawn height.
 pub fn permission_height(r: &HookRequest, status: Option<&str>) -> f32 {
     let lines = wrapped_lines(r.summary.chars().count(), MONO_CHARS_PER_LINE)
         + r.summary.matches('\n').count() as f32;
@@ -105,7 +91,6 @@ pub fn permission_height(r: &HookRequest, status: Option<&str>) -> f32 {
         + status_height(status)
 }
 
-/// A card's header: icon and title in an ink, a step count, the session's name when it peeks.
 fn header(icon: Icon, title: &str, ink: Ink, step: Option<String>, agent: Option<&str>) -> Div {
     div()
         .h(px(HEADER))
@@ -120,7 +105,6 @@ fn header(icon: Icon, title: &str, ink: Ink, step: Option<String>, agent: Option
 }
 
 impl NotchView {
-    /// What the line under a card says, if anything.
     pub(super) fn card_status(&self, gate: Control) -> Option<Div> {
         let ink = if self.send_error.is_some() {
             Ink::Needs
@@ -131,7 +115,6 @@ impl NotchView {
             .map(|t| text(sentence(t), TypeRole::Meta, ink))
     }
 
-    /// The status line's words, if it shows.
     pub(super) fn status_text(&self, gate: Control) -> Option<&str> {
         if let Some(error) = &self.send_error {
             return Some(error);
@@ -142,9 +125,6 @@ impl NotchView {
         gate.tooltip
     }
 
-    /// Sends an answer or a decision; on success the prompt it answered (`key`, from
-    /// `NotchModel::answer_key` or the prompt's own id, taken when the button was pressed) hides,
-    /// and no other: the session may have a newer prompt by the time the reply comes back.
     pub(super) fn send_for(
         &mut self,
         key: Option<String>,
@@ -170,7 +150,6 @@ impl NotchView {
                     Ok(_) => {
                         if let Some(key) = &key {
                             view.model.mark_answered_key(key);
-                            // Chat shows the same prompts: it must not keep offering this one.
                             if let Some(sessions) = &shared {
                                 sessions.mark_answered(key);
                             }
@@ -187,8 +166,6 @@ impl NotchView {
         cx.notify();
     }
 
-    /// "Claude asks": tabs across the questions, the one on show with its options, a text box and
-    /// Submit.
     pub(super) fn question_card(
         &self,
         id: &str,
@@ -261,8 +238,6 @@ impl NotchView {
             .children(self.card_status(gate))
     }
 
-    /// One pill per question; a tick on the answered ones. Moving between tabs answers nothing,
-    /// so the tabs work whatever acting is.
     fn question_tabs(&self, q: &PendingQuestion, cx: &mut Context<Self>) -> Div {
         div()
             .h(px(TAB_ROW))
@@ -298,7 +273,6 @@ impl NotchView {
             }))
     }
 
-    /// "Type something else…": a one-line box; Return takes it as this question's answer.
     fn answer_box(&self, id: &str, q: &PendingQuestion, cx: &mut Context<Self>) -> Stateful<Div> {
         let gate = self.gate();
         let tab = self.draft.tab;
@@ -343,7 +317,6 @@ impl NotchView {
         })
     }
 
-    /// Next (multi select) and Submit, live once every question has an answer.
     fn submit_row(&self, id: &str, q: &PendingQuestion, cx: &mut Context<Self>) -> Div {
         let gate = self.gate();
         let ready = Control {
@@ -395,8 +368,6 @@ impl NotchView {
             .child(submit)
     }
 
-    /// "Permission needed": the tool and what it would run, then Allow, Always allow and Deny.
-    /// Antigravity's permissions carry their own options and take the card in `agy_card`.
     pub(super) fn permission_card(
         &self,
         r: &HookRequest,
@@ -425,7 +396,6 @@ impl NotchView {
             .into_iter()
             .enumerate()
             .map(|(i, (decision, title, detail))| {
-                // While one goes out, the one picked is lit and the rest are off.
                 let (state, picked) = match sending {
                     None => (gate::state(gate), false),
                     Some(_) if chosen == Some(decision) => (PartState::Selected, true),
@@ -441,7 +411,6 @@ impl NotchView {
                     A,
                 )
                 .line_height(px(line(TypeRole::Heading)));
-                // The decision goes to the prompt by its own id, and hides that prompt only.
                 let prompt = r.id.clone();
                 let sent = Sending::Decision {
                     decision,
@@ -482,7 +451,6 @@ impl NotchView {
     }
 }
 
-/// A small rounded mark, for the pet's badge.
 pub fn badge(count: usize) -> Div {
     div()
         .min_w(px(15.0))

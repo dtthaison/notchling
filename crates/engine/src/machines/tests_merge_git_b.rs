@@ -1,10 +1,5 @@
-//! Ported from `MachinesMergeGitTests.swift` (second half): origin moved, a quit during the check,
-//! the undo guards and the smaller fixes, against real git in a temp folder (see `tests_merge_git.rs`).
-
 use super::fakes_jobs::lock;
 use super::tests_merge_git::{entry, sh, Fx, GIT};
-
-// I4: a way out when origin moved, or after a quit
 
 fn push_from_another_clone(fx: &Fx, marker: &str) -> String {
     let root = &fx.root;
@@ -38,12 +33,10 @@ fn push_rejected_because_origin_moved_then_undo_and_merge_again() {
     assert_ne!(fx.origin_main(), before, "someone else's push is on origin");
     let theirs = fx.origin_main();
 
-    // retrying the push cannot work while origin has moved
     let again = fx.retry(&e);
     assert!(!again.pushed);
     assert_eq!(fx.origin_main(), theirs);
 
-    // main goes back to where it was, then the merge runs again on top of the new origin
     let undone = fx.undo(&e);
     assert_eq!(undone.error, None);
     assert_eq!(fx.mac_main(), before);
@@ -56,7 +49,6 @@ fn push_rejected_because_origin_moved_then_undo_and_merge_again() {
     assert_eq!(fx.git(&fx.origin(), "rev-parse refs/heads/main^2"), commit);
 }
 
-/// Notchling quit during the check: main holds this item's unchecked merge and the outcome is gone.
 #[test]
 fn main_ahead_by_this_items_merge_is_reported_and_can_be_undone() {
     let fx = Fx::new();
@@ -130,9 +122,6 @@ fn unpushed_commits_of_the_users_own_are_not_merged_onto_or_pushed() {
     assert_eq!(fx.mac_main(), mine);
 }
 
-// Undo guards
-
-/// Makes main hold a local merge of `branch`, returns the merge commit.
 fn local_merge(fx: &Fx, branch: &str, issue: i64) -> String {
     let (mac, machine) = (fx.mac(), fx.machine_path());
     fx.git(
@@ -153,12 +142,10 @@ fn undo_refuses_when_the_merge_is_not_this_items_or_there_is_more_on_top() {
     let eight = fx.worker_branch("sd/issue-8", "g.txt", "g\n", None);
     let e7 = entry(7, "sd/issue-7", &seven);
 
-    // HEAD is another branch's merge
     let merge_of_eight = local_merge(&fx, "sd/issue-8", 8);
     assert!(fx.undo(&e7).error.is_some());
     assert_eq!(fx.mac_main(), merge_of_eight);
 
-    // this item's merge sits under a commit of the user's
     let e8 = entry(8, "sd/issue-8", &eight);
     fx.write(&fx.mac(), "mine.txt", "mine\n");
     fx.git(&fx.mac(), "add -A");
@@ -227,9 +214,6 @@ fn undo_goes_back_to_the_first_parent_and_keeps_origin_untouched() {
     fx.assert_nothing_reached_origin(&before);
 }
 
-// Smaller fixes
-
-/// The tip is merged by its sha, so nothing that rewrites the private ref after the check matters.
 #[test]
 fn merge_uses_the_verified_commit_even_if_the_ref_is_rewritten_meanwhile() {
     let fx = Fx::new();
@@ -256,8 +240,6 @@ fn merge_uses_the_verified_commit_even_if_the_ref_is_rewritten_meanwhile() {
     );
 }
 
-/// `merge --abort` says nothing is in progress when the merge never started; the merge's own
-/// error must show.
 #[test]
 fn a_merge_that_never_starts_reports_its_own_error() {
     let fx = Fx::new();
@@ -314,8 +296,6 @@ fn a_real_conflict_still_aborts_and_names_the_files() {
     assert_eq!(gh, vec![vec!["issue", "comment"], vec!["issue", "edit"]]);
 }
 
-// Branch names
-
 #[test]
 fn branch_names_git_would_read_as_options_or_cannot_be_refs_are_refused() {
     let fx = Fx::new();
@@ -347,8 +327,6 @@ fn branch_names_git_would_read_as_options_or_cannot_be_refs_are_refused() {
     assert_eq!(fx.origin_main(), before);
     assert_eq!(fx.mac_main(), before);
 }
-
-// I1: a failed check
 
 #[test]
 fn failed_check_whose_reset_fails_is_a_hard_error_with_no_retry() {
@@ -399,8 +377,6 @@ fn failed_check_puts_main_back() {
     fx.assert_nothing_reached_origin(&before);
 }
 
-// I3: an edit during the check
-
 #[test]
 fn edit_during_the_check_blocks_the_push_and_keeps_the_merge_local() {
     let fx = Fx::new();
@@ -422,7 +398,6 @@ fn edit_during_the_check_blocks_the_push_and_keeps_the_merge_local() {
     fx.assert_nothing_reached_origin(&before);
     assert_eq!(fx.git(&fx.mac(), "status --porcelain"), "M f.txt");
 
-    // undo waits for the user's edit to go; it never discards it
     let refused = fx.undo(&e);
     assert!(
         refused

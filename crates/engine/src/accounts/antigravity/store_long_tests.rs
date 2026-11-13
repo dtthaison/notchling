@@ -1,6 +1,3 @@
-//! Antigravity logins too long for one Keychain line, and the rule that a switch or an add never
-//! changes Antigravity's login unless the one it replaces is saved and could be put back.
-
 use super::login::{encode_keyring, fake_login};
 use super::store::{LIVE_ACCOUNT, LIVE_SERVICE, SERVICE};
 use super::store_tests::Rig;
@@ -8,7 +5,6 @@ use crate::accounts::chunked::{self, part_name, Plain};
 use crate::accounts::procs::FakeApps;
 use crate::providers::AccountProvider;
 
-/// A made-up login the size of a real one: a long access token (filler, not a token).
 fn big_login(sub: &str, email: &str) -> String {
     let filler: String = "FAKE-access-".chars().cycle().take(2_400).collect();
     fake_login(sub, email, &filler)
@@ -100,7 +96,6 @@ fn an_add_abandoned_when_accounts_turn_off_writes_nothing_and_says_where_it_left
     assert!(note.contains("sign-in screen"), "{note}");
     assert_eq!(rig.keychain.calls().len(), calls, "no Keychain call");
     assert!(!rig.store.state().adding);
-    // Nothing is left to put back later either.
     rig.store.cancel_add();
     assert_eq!(rig.keychain.calls().len(), calls);
 }

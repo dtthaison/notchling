@@ -1,8 +1,3 @@
-//! A conversation built from Agent Client Protocol `session/update` payloads (`params.update`), as
-//! Antigravity CLI's `agy acp` sends them: the whole history once on `session/load`, then live while a
-//! turn runs. Text arrives in chunks, merged while the same kind keeps coming; tool calls arrive as a
-//! `tool_call` and then `tool_call_update`s with the same id. Pure, so it is tested with a recording.
-
 use super::model::*;
 use super::util::{int_of, json_sorted, str_of};
 use serde_json::{Map, Value};
@@ -11,16 +6,12 @@ use serde_json::{Map, Value};
 pub struct Transcript {
     items: Vec<ChatItem>,
     tasks: Vec<TaskEntry>,
-    /// Antigravity's own title for the conversation (`session_info_update`).
     title: Option<String>,
     pub model: Option<String>,
     facts: SessionFacts,
-    /// When the running turn began; None between turns.
     turn_start: Option<Timestamp>,
-    /// The kind of the last text or tool update, so chunks of one message join up.
     last_kind: Option<String>,
     counter: u64,
-    /// A `usage_update` came in this turn, so the context size is known and the turn's totals only add up.
     reported_context: bool,
 }
 
@@ -45,9 +36,6 @@ impl Transcript {
         self.turn_start
     }
 
-    // MARK: Updates
-
-    /// Applies one `session/update` payload (`params.update`).
     pub fn apply(&mut self, update: &Value, at: Option<Timestamp>) {
         let Some(kind) = str_of(update, "sessionUpdate") else {
             return;
@@ -58,7 +46,6 @@ impl Transcript {
                 if text.is_empty() {
                     return;
                 }
-                // Gemini reports an approval-mode change as a message of its own; the mode shows in the picker.
                 if kind == "agent_message_chunk" && text.starts_with("[MODE_UPDATE]") {
                     return;
                 }
@@ -132,7 +119,6 @@ impl Transcript {
                 }
             }
             "usage_update" => {
-                // Gemini: tokens in the context now (`used`) and the model's window (`size`).
                 let used = int(update.get("used"));
                 if used > 0 {
                     self.facts.context_tokens = used as u64;
@@ -143,13 +129,11 @@ impl Transcript {
         }
     }
 
-    /// You sent a prompt: the next user text starts a new message even if the last one was yours too.
     pub fn begin_turn(&mut self, at: Timestamp) {
         self.turn_start = Some(at);
         self.last_kind = None;
     }
 
-    /// The prompt's answer arrived (`stopReason`, `usage`).
     pub fn end_turn(&mut self, stop_reason: Option<&str>, usage: Option<&Value>, at: Timestamp) {
         let seconds = self.turn_start.map_or(0.0, |s| at - s);
         self.turn_start = None;
@@ -173,7 +157,6 @@ impl Transcript {
         self.append(ItemKind::TurnEnd { seconds, model }, date);
         self.facts.turns += 1;
         if let Some(usage) = usage.filter(|u| u.is_object()) {
-            // Gemini's input count already includes its cached tokens; Antigravity's doesn't.
             let cached = if self.reported_context {
                 0
             } else {
@@ -183,7 +166,6 @@ impl Transcript {
             let output = count(usage.get("outputTokens"));
             self.facts.input_tokens = self.facts.input_tokens.saturating_add(input);
             self.facts.output_tokens = self.facts.output_tokens.saturating_add(output);
-            // A slash command Gemini handled itself reports zeros; the context didn't change.
             let context = input.saturating_add(output);
             if !self.reported_context && context > 0 {
                 self.facts.context_tokens = context;
@@ -192,7 +174,6 @@ impl Transcript {
         self.reported_context = false;
     }
 
-    /// A turn that never answered (the process died, or the request failed).
     pub fn fail_turn(&mut self, message: &str, at: Timestamp) {
         self.turn_start = None;
         self.last_kind = None;
@@ -224,8 +205,6 @@ impl Transcript {
         }
         c
     }
-
-    // MARK: Helpers
 
     fn append(&mut self, kind: ItemKind, at: Option<Timestamp>) {
         self.counter += 1;
@@ -273,7 +252,6 @@ fn chunk_item(kind: &str, text: String) -> ItemKind {
     }
 }
 
-/// The text of a content block (`text`, or a resource link's name in brackets).
 pub fn text(content: Option<&Value>) -> String {
     let Some(c) = content.filter(|c| c.is_object()) else {
         return String::new();
@@ -293,7 +271,6 @@ fn int(v: Option<&Value>) -> i64 {
     v.and_then(int_of).unwrap_or(0)
 }
 
-/// A token count: a negative or missing number is zero.
 fn count(v: Option<&Value>) -> u64 {
     int(v).max(0) as u64
 }
@@ -326,7 +303,6 @@ fn paths(u: &Value) -> Vec<String> {
     out
 }
 
-/// One ACP tool call as Chat's `ToolCall`; an update carries only what changed, so it merges into `old`.
 pub fn tool_call(u: &Value, old: Option<&ToolCall>) -> ToolCall {
     let acp_kind = str_of(u, "kind");
     let content: &[Value] = u
@@ -426,7 +402,6 @@ pub fn tool_call(u: &Value, old: Option<&ToolCall>) -> ToolCall {
     call
 }
 
-/// The command, path or query a tool call was given, from Antigravity's argument names.
 fn raw_input(raw: &Map<String, Value>) -> Option<String> {
     for key in [
         "CommandLine",
@@ -462,8 +437,6 @@ fn raw_input(raw: &Map<String, Value>) -> Option<String> {
     Some(json.chars().take(400).collect())
 }
 
-/// Old and new text as diff lines: what both share at the start and end is trimmed to three context
-/// lines, the middle shows as removed then added.
 pub fn diff(old: Option<&str>, new: &str) -> Vec<DiffLine> {
     fn lines(s: &str) -> Vec<&str> {
         let mut l: Vec<&str> = s.split('\n').collect();

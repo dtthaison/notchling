@@ -1,5 +1,3 @@
-//! Fakes and scratch folders for the delegate tests. No test runs `codex`, `agy` or `claude`.
-
 use super::deps::Deps;
 use super::options::{Options, Tool};
 use crate::tools::acp::fake::FakeSpawner as AcpFake;
@@ -12,7 +10,6 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-/// A fresh empty folder under the temp dir.
 pub fn scratch(tag: &str) -> PathBuf {
     static N: AtomicUsize = AtomicUsize::new(0);
     let dir = std::env::temp_dir().join(format!(
@@ -29,7 +26,6 @@ pub struct Rig {
     pub deps: Deps,
     pub codex: Arc<CodexFake>,
     pub agy: Arc<AcpFake>,
-    /// The folder the tool works in, which exists.
     pub folder: PathBuf,
     pub root: PathBuf,
 }
@@ -64,7 +60,6 @@ impl Drop for Rig {
     }
 }
 
-/// Deps over fakes and a scratch folder; both tools "installed" at fake paths.
 pub fn rig(agy: AcpFake) -> Rig {
     let root = scratch("rig");
     let folder = root.join("work");
@@ -98,8 +93,6 @@ pub fn rig(agy: AcpFake) -> Rig {
     }
 }
 
-/// A Codex "binary" that is really `/bin/sh -c <script>`: the real process machinery, a script
-/// instead of the tool.
 pub struct ShScript {
     pub script: String,
 }
@@ -110,7 +103,6 @@ impl ToolSpawner for ShScript {
             program: PathBuf::from("/bin/sh"),
             args: vec!["-c".into(), self.script.clone()],
             cwd: spec.cwd.clone(),
-            // The rig's PATH is a fake; a script needs the real tools.
             env: spec
                 .env
                 .iter()

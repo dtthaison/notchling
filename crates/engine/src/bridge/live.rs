@@ -1,16 +1,3 @@
-//! The backend the daemon runs the bridge on (Swift `LiveBridgeBackend` with `PhoneModel` and
-//! `ForeignSessionSource`): sessions with what Notchling knows about them (activity, facts, the
-//! newest reply), chats read from the transcripts, Codex and Antigravity rows beside Claude Code's.
-//!
-//! What it reads comes from [`Sources`] (the daemon's session list, hostd terminals, held prompts,
-//! limits, runners). What it does goes through [`Acting`], which the daemon implements on its
-//! acting ops, so the acting switch applies: while it's off, nothing is typed, answered, started or
-//! taken over. [`ActingOff`] is that state on its own.
-//!
-//! The phone extras (E15) are [`Extras`]: viz specs, chat pictures, web snapshots and the
-//! device-window stream. Capture (a page, a window) is behind traits whose default answers
-//! "not supported on this computer".
-
 use super::backend::BridgeBackend;
 use super::connection::{lock, Connection};
 use super::extras::{wire_image, Extras};
@@ -25,69 +12,48 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-/// Sessions quiet longer than this aren't enriched (their transcripts aren't read on every push).
 const ENRICH_WITHIN_MS: f64 = 6.0 * 3_600_000.0;
 
-/// What the runners know right now about the listed Codex and Antigravity rows.
 #[derive(Debug, Clone, Default)]
 pub struct ForeignLive {
-    /// Codex session ids (not row ids) with a turn running.
     pub codex_running: HashSet<String>,
-    /// Antigravity session ids with a turn running.
     pub agy_working: HashSet<String>,
-    /// Waiting permissions, by row id.
     pub permissions: HashMap<String, AcpPermission>,
-    /// Open Antigravity conversations, by row id.
     pub conversations: HashMap<String, Conversation>,
 }
 
-/// What the bridge reads from the daemon. Every call is cheap or cached by the implementation; the
-/// session list is asked for on every 300 ms tick.
 pub trait Sources: Send + Sync {
-    /// Claude Code sessions with their held prompts, plus owned terminals that aren't a session yet
-    /// (`PhoneModel.bridgeSessions`, ids `pty:<uuid>`). Not enriched.
     fn claude_sessions(&self) -> Vec<Session>;
-    /// Whether a view-only session can be taken over (`Takeover.state`).
     fn takeover_state(&self, _session: &Session) -> Option<TakeoverState> {
         None
     }
-    /// The active account's limits, for the chat header.
     fn limits(&self) -> Vec<Limit> {
         Vec::new()
     }
-    /// Chat's Codex and Antigravity rows.
     fn foreign_rows(&self) -> Vec<ForeignRow> {
         Vec::new()
     }
-    /// Rows closed in Chat: row id to when, in seconds (`chatClosedSessions`).
     fn closed_rows(&self) -> HashMap<String, f64> {
         HashMap::new()
     }
     fn foreign_live(&self, _rows: &[ForeignRow]) -> ForeignLive {
         ForeignLive::default()
     }
-    /// The slash commands a session can run (Claude Code's for its folder, Antigravity's own).
     fn commands(&self, _session: &Session) -> Vec<Command> {
         Vec::new()
     }
-    /// The Claude models a new session may start on now (the catalog's current ones).
     fn models(&self) -> Vec<ModelChoice> {
         Vec::new()
     }
-    /// Whether a session may start on this model id, by the catalog's own check.
     fn model_allowed(&self, _id: &str) -> bool {
         false
     }
-    /// A Claude model's context window as the catalog has it (the one Chat's Context Meter
-    /// shows), or `None` when it doesn't know one.
     fn context_window(&self, _model: &str) -> Option<u64> {
         None
     }
-    /// `~/.claude/projects`, for the recent folders.
     fn projects_dir(&self) -> Option<PathBuf> {
         None
     }
-    /// Asks the person at the computer to approve a phone. No approver means no.
     fn request_approval(&self, _device_name: &str, _platform: &str, _address: &str) -> bool {
         false
     }
@@ -104,10 +70,7 @@ pub trait Sources: Send + Sync {
     fn now_ms(&self) -> f64;
 }
 
-/// What the bridge does to sessions. The daemon's implementation runs its acting ops, which refuse
-/// while acting is off. Messages to Codex and Antigravity rows come here too (`session.tool`).
 pub trait Acting: Send + Sync {
-    /// The acting switch now; the calls below still refuse on their own while it's off.
     fn is_on(&self) -> bool {
         true
     }
@@ -119,7 +82,6 @@ pub trait Acting: Send + Sync {
         response: &PromptResponse,
     ) -> Result<(), BridgeFailure>;
     fn new_session(&self, cwd: &Path, model: Option<&str>) -> Result<(), BridgeFailure>;
-    /// A new session on a model id the catalog allows (`session.new`'s `modelId`).
     fn new_session_with_model(&self, _cwd: &Path, _model_id: &str) -> Result<(), BridgeFailure> {
         Err(BridgeFailure::invalid(
             "Backend này không chọn được model theo id.",
@@ -132,11 +94,9 @@ pub trait Acting: Send + Sync {
     ) -> Result<TakeoverOutcome, BridgeFailure>;
 }
 
-/// What every acting call answers while acting is off.
 pub const ACTING_OFF: &str =
     "Máy này chưa bật quyền điều khiển session: ứng dụng Notchling cũ vẫn giữ chúng.";
 
-/// Acting switched off: every call is refused and nothing happens.
 pub struct ActingOff;
 
 fn off<T>() -> Result<T, BridgeFailure> {
@@ -170,13 +130,11 @@ impl Acting for ActingOff {
 pub struct LiveBackend<S: Sources, A: Acting> {
     pub sources: S,
     pub acting: A,
-    /// When each Antigravity permission was first seen, so its `created` stays put between pushes.
     prompt_seen: Mutex<HashMap<String, f64>>,
     pub(super) extras: Extras,
 }
 
 impl<S: Sources, A: Acting> LiveBackend<S, A> {
-    /// With [`Extras::real`]: the real viz engine and picture encoder, no page or window capture.
     pub fn new(sources: S, acting: A) -> LiveBackend<S, A> {
         LiveBackend {
             sources,
@@ -186,7 +144,6 @@ impl<S: Sources, A: Acting> LiveBackend<S, A> {
         }
     }
 
-    /// Replaces the extras (the daemon's capture, a test's fakes).
     pub fn with_extras(mut self, extras: Extras) -> LiveBackend<S, A> {
         self.extras = extras;
         self
@@ -450,12 +407,6 @@ impl<S: Sources, A: Acting> BridgeBackend for LiveBackend<S, A> {
     }
 }
 
-/// What Notchling knows about a Claude Code session, for the list and the chat header
-/// (`LiveBridgeBackend.enrich`): what it's doing while it runs, its newest reply, the context in
-/// use and the account's limits. Only sessions active in the last six hours; the readers keep a
-/// cursor per transcript, so a repeat call reads only what was appended. `window` is the
-/// catalog's context window for a model ([`Sources::context_window`]), so the phone shows the
-/// window Chat does.
 pub fn enrich(
     session: &mut Session,
     limits: &[Limit],
@@ -503,7 +454,6 @@ pub fn enrich(
     });
 }
 
-/// A transcript chat message on the wire; its id is the Swift app's (`stableUUID` of its seed).
 pub fn chat_message(message: &chat::ChatMessage) -> ChatMessage {
     let steps: Vec<wire::ToolStep> = message
         .steps
@@ -538,8 +488,6 @@ pub fn chat_message(message: &chat::ChatMessage) -> ChatMessage {
     }
 }
 
-/// Recent distinct project folders: the known sessions' folders first, newest first, then folders
-/// recovered from the names in `~/.claude/projects`, newest first (Swift `RecentProjects.list`).
 pub fn recent_projects(
     sessions: &[Session],
     projects_dir: Option<&Path>,
@@ -584,8 +532,6 @@ pub fn recent_projects(
     result
 }
 
-/// `-Users-me-my-app` is `/Users/me/my-app` or `/Users/me/my/app`: dash-separated parts are joined
-/// into one folder name wherever that folder exists.
 pub fn decode_project_dir(name: &str, exists: &dyn Fn(&str) -> bool) -> Option<String> {
     let parts: Vec<&str> = name.strip_prefix('-')?.split('-').collect();
     fn search(

@@ -1,7 +1,3 @@
-//! Ports of `AskDialogTests`: a question read off a background job's terminal. The two key tests
-//! (`testKeysForAReadQuestion`, `testMultiSelectTicksThenTabsOn`) test `ReplySender`'s key planner,
-//! which is E3b's reply planner, not the screen reader.
-
 mod common;
 
 use common::notchling_fixture;
@@ -26,7 +22,6 @@ fn owned(lines: &[&str]) -> Vec<String> {
     lines.iter().map(|s| s.to_string()).collect()
 }
 
-/// The first page of a real two-question dialog (Claude Code 2.1.318).
 #[test]
 fn reads_the_recorded_dialog() {
     let page = ask_dialog::page(&fixture_lines()).expect("a page");
@@ -38,8 +33,6 @@ fn reads_the_recorded_dialog() {
     assert!(!page.on_review);
 }
 
-/// A single-question dialog read from a live job (2.1.319): no tab row, the header is a chip over the
-/// question, and the question has brackets in it.
 #[test]
 fn reads_the_recorded_single_question_dialog() {
     let rule = rule();
@@ -143,8 +136,6 @@ fn single_question_wraps_and_has_no_tabs() {
     assert!(page.tabs.is_empty());
 }
 
-/// A multi-select page read from a live job (2.1.319): the checkbox follows the number, "Type
-/// something" has one too, and a Next row follows the list.
 #[test]
 fn checkboxes_mean_multi_select() {
     let rule = rule();
@@ -196,7 +187,6 @@ fn the_review_screen_is_not_a_question() {
     assert!(page.options.is_empty());
 }
 
-/// A permission dialog is numbered and ends in "Esc to cancel" too, but it isn't an AskUserQuestion.
 #[test]
 fn permission_dialog_is_not_a_question() {
     let rule = rule();
@@ -229,7 +219,6 @@ fn shows_matches_the_dialogs_question_only() {
     let rule = rule();
     let lines = fixture_lines();
     assert!(ask_dialog::shows("Favourite color?", &lines));
-    // The recorded prompt line above the dialog names this question too; that is not the dialog asking it.
     assert!(lines.join(" ").contains("Favourite fruit?"));
     assert!(!ask_dialog::shows("Favourite fruit?", &lines));
     let wrapped = owned(&[
@@ -252,7 +241,6 @@ fn shows_matches_the_dialogs_question_only() {
     ));
 }
 
-/// The chip over a single question is at most 40 characters; a longer first row is the question.
 #[test]
 fn a_long_first_row_is_not_a_chip() {
     let rule = rule();

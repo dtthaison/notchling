@@ -1,21 +1,12 @@
-//! The command list over the reply box: typing "/" in a Claude Code session lists its commands
-//! (Claude Code's own, yours, the project's and enabled plugins', from `control::slash`), narrowed
-//! as you type. Up and Down move, Tab or Return puts the command in the box, Esc hides the list
-//! until the text changes. Pure; `view::slash_menu` draws it.
-
 use notchling_engine::control::slash::{matches, SlashCommand};
 
-/// Rows the list shows at most.
 pub const ROWS: usize = 8;
 
-/// What is typed after the slash while the box holds only a command being typed ("/", "/com"),
-/// or `None` once there is a space, a second line or no slash in front.
 pub fn query(text: &str) -> Option<&str> {
     let rest = text.strip_prefix('/')?;
     (!rest.contains(char::is_whitespace)).then_some(rest)
 }
 
-/// The list's state: the row picked, and the text Esc hid it at.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SlashMenu {
     pub selected: usize,
@@ -23,7 +14,6 @@ pub struct SlashMenu {
 }
 
 impl SlashMenu {
-    /// The rows for `text`, or none when the list is hidden or nothing matches.
     pub fn rows(&self, text: &str, commands: &[SlashCommand]) -> Vec<SlashCommand> {
         if self.hidden_at.as_deref() == Some(text) {
             return Vec::new();
@@ -34,7 +24,6 @@ impl SlashMenu {
         }
     }
 
-    /// Up (-1) or Down (+1), wrapping round `count` rows.
     pub fn step(&mut self, by: i32, count: usize) {
         if count == 0 {
             self.selected = 0;
@@ -45,7 +34,6 @@ impl SlashMenu {
         self.selected = at as usize;
     }
 
-    /// The text changed: back to the first row, and Esc's hiding ends.
     pub fn typed(&mut self, text: &str) {
         self.selected = 0;
         if self.hidden_at.as_deref() != Some(text) {
@@ -54,7 +42,6 @@ impl SlashMenu {
     }
 }
 
-/// The box's text once `command` is picked: "/name ", the space ready for its arguments.
 pub fn picked(command: &SlashCommand) -> String {
     format!("/{} ", command.name)
 }

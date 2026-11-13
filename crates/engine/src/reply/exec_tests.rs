@@ -1,5 +1,3 @@
-//! The executor against a fake terminal: what it writes, when, and where it stops.
-
 use super::exec::{execute, Failure, Markers, NoQueueLog, Outcome, Pty, QueueLog, ScreenCheck};
 use super::keys;
 use super::plan;
@@ -15,8 +13,6 @@ enum Ev {
 
 type React = Box<dyn FnMut(&str, &mut Vec<String>)>;
 
-/// A terminal whose screen is a list of lines, changed by `react` on each write. Time moves only
-/// when the executor waits or sleeps.
 struct Fake {
     clock: u64,
     events: Vec<Ev>,
@@ -125,7 +121,6 @@ fn nothing_is_typed_into_an_open_dialog() {
 
 #[test]
 fn a_dialog_that_opens_mid_type_gets_no_text_and_no_enter() {
-    // The permission dialog draws right after the clear keys go in.
     let mut pty = Fake::new(PROMPT).reacting(|keys, screen| {
         if keys == keys::clear_input() {
             *screen = lines(PERMISSION);
@@ -160,7 +155,7 @@ fn a_write_that_fails_stops_the_plan() {
 #[test]
 fn an_interrupt_is_one_esc_even_on_a_busy_screen() {
     let mut pty = Fake::new(&["✻ Thinking… (esc to interrupt)"]);
-    pty.draws = false; // a busy screen never goes quiet: the settle lets it go ahead
+    pty.draws = false;
     let out = execute(
         &plan::interrupt(true).unwrap(),
         &mut pty,
@@ -172,7 +167,6 @@ fn an_interrupt_is_one_esc_even_on_a_busy_screen() {
     assert_eq!(pty.events[0], Ev::Wait(500, 2_200));
 }
 
-/// A queue log that sees the `popAll` on its `after`-th look after the mark.
 struct Log {
     marked: bool,
     looks: usize,
@@ -242,12 +236,10 @@ fn a_take_back_with_nothing_popped_only_clears_what_up_brought_back() {
         pty.writes(),
         vec![keys::clear_input(), "\x1b[A".into(), keys::clear_input()]
     );
-    // It looked for three seconds, then still detached.
     assert_eq!(log.looks, 10);
     assert_eq!(pty.events.last(), Some(&Ev::Wait(400, 3_000)));
 }
 
-/// AskDialog's part, faked: a page line `Q: <question>`, the review screen `Review your answers`.
 struct Pages;
 
 impl ScreenCheck for Pages {
@@ -280,7 +272,6 @@ fn two() -> PendingQuestion {
     }
 }
 
-/// The dialog of `two()`: Tab leaves Pets, a digit leaves Where, `1` submits the review.
 fn dialog(start: &str) -> Fake {
     let mut fake = Fake::new(&[]);
     fake.screen = page(start);
@@ -320,7 +311,6 @@ fn an_answer_walks_back_to_the_first_question() {
 
 #[test]
 fn an_answer_stops_when_the_page_is_another_question() {
-    // Tab moves to a question Chat doesn't know: nothing more is typed.
     let mut pty = dialog("Pets?").reacting(|keys, screen| {
         if keys == "\t" {
             *screen = page("Something else?");
@@ -338,7 +328,6 @@ fn an_answer_to_a_dialog_that_moved_on_types_nothing() {
     let plan = plan::answer(&[Choice::Options(vec![1]), Choice::Option(2)], &two());
     let out = execute(&plan, &mut pty, &Pages, &mut NoQueueLog);
     assert_eq!(out, Err(Failure::QuestionMismatch));
-    // Left as many times as there are questions plus one, never a digit.
     assert_eq!(pty.writes(), lines(&[keys::LEFT, keys::LEFT, keys::LEFT]));
 }
 
@@ -367,7 +356,6 @@ fn failures_say_what_the_swift_app_says() {
     );
 }
 
-/// A permission dialog as `claude attach` draws it (made up from the known layout; no recording).
 fn bash_dialog(always: bool) -> Vec<String> {
     let rule = "─".repeat(120);
     let mut rows = vec![
@@ -397,7 +385,6 @@ fn rm_build() -> plan::Expected {
     }
 }
 
-/// The dialog closes on any digit it offers; any other key leaves it as it is.
 fn permission_pty(always: bool) -> Fake {
     let options = if always { 3 } else { 2 };
     let mut fake = Fake::new(&[]);
@@ -489,7 +476,6 @@ fn no_permission_on_screen_types_nothing() {
         "  4. Chat about this",
         "Enter to select · Tab/Arrow keys to navigate · Esc to cancel",
     ]);
-    // The prompt, an AskUserQuestion, and a dialog with no rule over it (a layout not known).
     for screen in [lines(PROMPT), question, lines(PERMISSION)] {
         let mut pty = Fake::new(&[]);
         pty.screen = screen.clone();
@@ -506,7 +492,6 @@ fn no_permission_on_screen_types_nothing() {
 
 #[test]
 fn a_permission_that_stays_open_after_its_digit_says_so() {
-    // The digit goes in and the screen doesn't change: no second key, no Enter, no Esc.
     let mut pty = Fake::new(&[]);
     pty.screen = bash_dialog(true);
     let out = execute(
@@ -540,7 +525,6 @@ fn a_new_request_in_place_of_the_answered_one_counts_as_gone() {
 
 #[test]
 fn the_permission_plan_has_no_key_of_its_own() {
-    // The digit is read off the screen; no Enter, Esc or text is ever planned.
     let p = plan::permission(plan::Decision::Deny, &rm_build());
     assert!(p.writes().is_empty());
     assert!(!p

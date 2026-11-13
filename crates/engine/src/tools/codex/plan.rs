@@ -1,39 +1,24 @@
-//! What a Codex turn runs: the argv, the folder, the environment and how the exit is judged
-//! (`CodexRunner.arguments`, `run` and the termination handler). Pure: nothing here starts a process.
-
 use std::path::{Path, PathBuf};
 
-/// The sandbox a Chat turn runs in: exec can't ask for approval, so the session's folder is
-/// writable and the rest of the disk isn't.
 pub const WORKSPACE_WRITE: &str = "workspace-write";
 
-/// The longest prompt one turn takes. It travels as one argument, and a single argument over
-/// 128 KB is refused by Linux's `execve`.
 pub const MAX_PROMPT_BYTES: usize = 100 * 1024;
 
-/// The model and effort picked for a session's next turns; `None` keeps Codex's default
-/// (`CodexPick`).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Pick {
     pub model: Option<String>,
     pub effort: Option<String>,
 }
 
-/// One turn: a new session in `folder` when `session` is `None`, else the next turn of `session`.
 pub struct Turn<'a> {
     pub prompt: &'a str,
     pub session: Option<&'a str>,
     pub folder: &'a str,
     pub pick: &'a Pick,
-    /// "Allow Network in Codex Turns" (the `codexNetwork` setting, on unless turned off).
     pub network: bool,
-    /// The `CODEX_HOME` the turn runs with: the folder the daemon reads sessions from, so the turn
-    /// writes its rollout where it is looked for and never into whatever home the environment names.
     pub codex_home: Option<&'a Path>,
 }
 
-/// A process to start: the program, its arguments and folder, and the environment changes
-/// (`Some` sets a variable, `None` removes it).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TurnSpec {
     pub program: PathBuf,
@@ -42,17 +27,12 @@ pub struct TurnSpec {
     pub env: Vec<(String, Option<String>)>,
 }
 
-/// How a process ended. `signaled` is an uncaught signal (a stop on purpose).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ExitInfo {
     pub code: Option<i32>,
     pub signaled: bool,
 }
 
-/// `codex exec` arguments. `network` only matters in the workspace-write sandbox (read-only has no
-/// such table); Codex 0.166 reads it as `[sandbox_workspace_write] network_access`. The session id
-/// and prompt stay last. A prompt that starts with `-` follows a `--`, so it is a prompt and not a
-/// flag (the Swift app passed it bare).
 pub fn arguments(
     prompt: &str,
     session: Option<&str>,
@@ -71,7 +51,6 @@ pub fn arguments(
         common.push("-c".into());
         common.push("sandbox_workspace_write.network_access=true".into());
     }
-    // A picked model or effort holds from this turn on; Codex keeps its own default otherwise.
     if let Some(model) = &pick.model {
         common.push("-m".into());
         common.push(model.clone());
@@ -99,8 +78,6 @@ pub fn arguments(
     args
 }
 
-/// The process for `turn`. `path` is the PATH the tools Codex runs are found in (an app opened from
-/// Finder has only the system one); `NO_COLOR` is dropped, as for `claude`.
 pub fn turn_spec(codex: &Path, turn: &Turn<'_>, path: Option<&str>) -> TurnSpec {
     let mut env = vec![("NO_COLOR".to_string(), None)];
     if let Some(path) = path {
@@ -127,9 +104,6 @@ pub fn turn_spec(codex: &Path, turn: &Turn<'_>, path: Option<&str>) -> TurnSpec 
     }
 }
 
-/// The message for a turn that did not end well, or `None` for one that did. Stopped on purpose
-/// (SIGINT, or Codex's own exit code 130 for it) isn't a failure. `last_error` is what the turn
-/// printed last that looked like an error.
 pub fn failure_of(exit: &ExitInfo, last_error: &str) -> Option<String> {
     if exit.signaled || exit.code == Some(0) || exit.code == Some(130) {
         return None;
@@ -143,8 +117,6 @@ pub fn failure_of(exit: &ExitInfo, last_error: &str) -> Option<String> {
     })
 }
 
-/// A session id as Codex writes it (a UUID). A caller's id becomes an argument and is matched
-/// against file names, so it is held to letters, digits and `-`, and never starts with `-`.
 pub fn valid_session_id(id: &str) -> bool {
     !id.is_empty()
         && id.len() <= 64
@@ -152,7 +124,6 @@ pub fn valid_session_id(id: &str) -> bool {
         && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
 }
 
-/// A model slug (`gpt-6.1-sol`): letters, digits, `.`, `_`, `-`, starting with a letter or digit.
 pub fn valid_model(model: &str) -> bool {
     !model.is_empty()
         && model.len() <= 64
@@ -162,7 +133,6 @@ pub fn valid_model(model: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
 }
 
-/// An effort level (`low`, `xhigh`): it sits inside quotes in a `-c` value, so nothing else.
 pub fn valid_effort(effort: &str) -> bool {
     !effort.is_empty()
         && effort.len() <= 24
@@ -171,10 +141,8 @@ pub fn valid_effort(effort: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-'))
 }
 
-/// The folders tools Codex runs usually live in, added to a PATH that lacks them.
 const TOOL_DIRS: [&str; 3] = ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"];
 
-/// `current` with the usual tool folders (and `~/.local/bin`) appended when absent.
 pub fn augmented_path(current: &str, home: &Path) -> String {
     let local = home
         .join(".local")
@@ -194,8 +162,6 @@ pub fn augmented_path(current: &str, home: &Path) -> String {
     parts.join(":")
 }
 
-/// The `codex` command: the usual install places (Swift's order), then the PATH's absolute
-/// entries. The Swift app also asked a login shell; a daemon launches no shell for this.
 pub fn find_binary(home: &Path, path: &str, is_file: impl Fn(&Path) -> bool) -> Option<PathBuf> {
     let usual = [
         home.join(".local").join("bin").join("codex"),
@@ -213,9 +179,6 @@ pub fn find_binary(home: &Path, path: &str, is_file: impl Fn(&Path) -> bool) -> 
         .find(|candidate| is_file(candidate))
 }
 
-/// The `codex` command over a fixture root: only `<root>/.local/bin/codex`. A developer's own
-/// Codex in `/opt/homebrew/bin` or on the PATH is never run against a fixture, where it would
-/// act on whatever login the environment names.
 pub fn find_fixture_binary(root: &Path, is_file: impl Fn(&Path) -> bool) -> Option<PathBuf> {
     Some(root.join(".local").join("bin").join("codex")).filter(|c| is_file(c))
 }

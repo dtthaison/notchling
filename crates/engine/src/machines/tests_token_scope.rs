@@ -1,6 +1,3 @@
-//! Token scope (Swift `MachinesTokenScopeTests`): the check on a fake GitHub and a scripted `gh`.
-//! No network, no real token.
-
 use super::fakes::*;
 use super::github::{GitHubHttp, HttpAnswer};
 use super::registry::{Machine, SdWorkerSettings};
@@ -31,7 +28,6 @@ pub(super) fn others(n: usize) -> Vec<String> {
     (1..=n).map(|i| format!("dtthaison/private-{i}")).collect()
 }
 
-/// gh lists the served repo too, as the real command would.
 pub(super) fn runner_listing(listing: Option<Vec<String>>) -> Arc<ScriptedRunner> {
     let r = Arc::new(ScriptedRunner::new());
     let names = listing.unwrap_or_else(|| {
@@ -50,7 +46,6 @@ pub(super) fn runner() -> Arc<ScriptedRunner> {
     runner_listing(None)
 }
 
-/// What GET /user/repos answers: a page of repos, with an optional Link header.
 pub(super) fn view_answer(names: &[String], status: u16, link: Option<&str>) -> HttpAnswer {
     let json = format!(
         "[{}]",
@@ -72,7 +67,6 @@ pub(super) fn raw_view(body: &str) -> HttpAnswer {
     HttpAnswer::new(200, &[], body)
 }
 
-/// The token's own view lists only the served repo unless a test says otherwise.
 pub(super) fn table(
     issues: u16,
     commits: u16,
@@ -177,8 +171,6 @@ fn a_good_token_passes() {
     assert_eq!(result.detected.token_expires.as_deref(), Some("2027-02-01"));
 }
 
-/// The check reads; it does not try a write. The row says so, so a pass is not read as "can write
-/// issues".
 #[test]
 fn the_issues_row_states_that_write_is_not_tried_here() {
     let result = check(&ctx(good_http(), &runner()));
@@ -224,8 +216,6 @@ fn a_few_visible_repos_are_all_named() {
         CheckState::Fail("can see 1 other private repo (dtthaison/private-2)".into())
     );
 }
-
-// MARK: all repositories, by choice
 
 #[test]
 fn a_strict_job_still_fails_when_the_token_reaches_other_repos() {
@@ -275,7 +265,6 @@ fn an_all_repos_job_accepts_other_repos_by_choice() {
 
 #[test]
 fn an_all_repos_job_ignores_doubts_about_the_other_repos() {
-    // gh fails and the token's list errors: both only concern the other repos
     let r = Arc::new(ScriptedRunner::new());
     r.on(
         |a| a.iter().any(|x| x == "repo") && a.iter().any(|x| x == "list"),
@@ -408,7 +397,6 @@ fn an_expired_or_revoked_token_fails() {
     let refused = CheckState::Fail("GitHub refused the token: expired or revoked".into());
     let revoked = check(&ctx(http(401, 403, 404, Some(DEFAULT_HEADER)), &runner()));
     assert_eq!(revoked.state, refused);
-    // A 401 on any request counts, not only on the first.
     let late = check(&ctx(http(200, 403, 401, Some(DEFAULT_HEADER)), &runner()));
     assert_eq!(late.state, refused);
     let past = check(&ctx(
@@ -450,7 +438,6 @@ fn a_server_error_or_rate_limit_cant_tell_and_never_counts_as_denied() {
     let unreachable = check(&ctx(http(200, 403, 0, Some(DEFAULT_HEADER)), &runner()));
     assert!(matches!(unreachable.state, CheckState::CantTell(_)));
 
-    // A rate-limited 403 is not a denial.
     let mut a = table(200, 403, 404, Some(DEFAULT_HEADER), None);
     for name in others(30) {
         a.insert(

@@ -1,6 +1,3 @@
-//! The Claude Code watcher against a fake store: it records the switches it is asked for and
-//! never touches a login.
-
 use super::claude::{Announce, ClaudeWatcher, NUDGE};
 use super::mode::{LimitConfig, LimitMode, CLAUDE};
 use super::sources::{AccountInfo, ClaudeSource, LaneInfo, StoppedJob, StoppedJobs};
@@ -215,7 +212,6 @@ fn notify_and_switch_moves_to_the_account_with_room_and_says_so_once() {
         ["Switched from me@x.com to other@x.com (10% used) because of the usage limit."],
         "the switch is said, not the climb"
     );
-    // The old account is the active one no more; another switch waits half an hour.
     r.store.set_usage("other", usage(97.0, 10.0, NOW + 60.0));
     r.store.set_usage("me", usage(5.0, 5.0, NOW + 60.0));
     r.watcher.check(NOW + 60.0);
@@ -309,8 +305,6 @@ fn a_failed_switch_is_said_and_retried_without_the_half_hour_wait() {
 fn the_account_left_behind_stays_blocked_until_its_reset() {
     let mut r = rig(two_accounts(96.0), LimitMode::NotifyAndSwitch);
     r.watcher.check(NOW);
-    // "other" is active now and hits the line after the half hour; "me" is blocked until RESET,
-    // which has passed by then.
     let later = NOW + 31.0 * 60.0 + 3600.0;
     r.store.set_usage("other", usage(97.0, 10.0, later));
     r.store.set_usage("me", usage(2.0, 2.0, later));
@@ -421,9 +415,8 @@ fn stopped(job: &str, config_dir: Option<&str>, id: &str, at: f64) -> StoppedJob
 
 #[test]
 fn a_job_stopped_on_the_limit_triggers_a_switch_and_is_nudged_once_after_it() {
-    // The account is under the switch point; the fresh stop alone is the reason.
     let mut r = rig(two_accounts(50.0), LimitMode::NotifyAndSwitch);
-    r.watcher.check(NOW - 100.0); // the active account is first seen at NOW - 100
+    r.watcher.check(NOW - 100.0);
     r.jobs
         .stopped
         .lock()

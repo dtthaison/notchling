@@ -12,11 +12,9 @@ import '../../core/pairing/pairing_payload.dart';
 import '../../l10n/app_localizations.dart';
 import 'pairing_controller.dart';
 
-/// Pair with a Mac: scan its QR, or type or paste the same data (simulators have no camera).
 class PairingScreen extends ConsumerStatefulWidget {
   const PairingScreen({super.key, this.canCancel = false});
 
-  /// Shown when a Mac is already paired and this screen adds another.
   final bool canCancel;
 
   @override
@@ -37,8 +35,6 @@ class _PairingScreenState extends ConsumerState<PairingScreen> {
     if (kDebugMode) unawaited(_loadPrefill());
   }
 
-  /// Debug builds only: a pairing JSON dropped in the app's temp folder fills the paste field, for
-  /// simulators and emulators where typing hex through the system keyboard is unreliable.
   Future<void> _loadPrefill() async {
     final File file = File('${Directory.systemTemp.path}/pairing_prefill.json');
     if (!file.existsSync()) return;

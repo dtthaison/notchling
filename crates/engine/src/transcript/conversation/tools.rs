@@ -1,5 +1,3 @@
-//! Claude Code tool calls as Chat steps: titles, inputs, results, diffs and task bookkeeping.
-
 use crate::transcript::model::*;
 use crate::transcript::text::{last_path_component, prefix_chars};
 use crate::transcript::util::{int_of, str_of};
@@ -17,7 +15,6 @@ fn file_in(input: &Map<String, Value>, key: &str) -> String {
     last_path_component(&str_in(input, key)).to_string()
 }
 
-/// The host of a URL, or None when it isn't a URL with a scheme.
 fn url_host(url: &str) -> Option<String> {
     let rest = url.split_once("://")?.1;
     let authority = rest.split(['/', '?', '#']).next()?;
@@ -30,7 +27,6 @@ fn url_host(url: &str) -> Option<String> {
     }
 }
 
-/// A tool call as Chat shows it.
 pub fn make_call(id: &str, name: &str, input: &Map<String, Value>) -> ToolCall {
     let s = |k: &str| str_in(input, k);
     let call =
@@ -160,7 +156,6 @@ pub fn make_call(id: &str, name: &str, input: &Map<String, Value>) -> ToolCall {
     }
 }
 
-/// A tool result's text: a string, or the text blocks of a list ("[Image]" for pictures).
 pub fn result_text(content: Option<&Value>) -> String {
     match content {
         Some(Value::String(s)) => s.clone(),
@@ -177,7 +172,6 @@ pub fn result_text(content: Option<&Value>) -> String {
     }
 }
 
-/// Shell output from stdout/stderr when there is one, clipped to what a card can show.
 pub fn clip(text: &str, result: Option<&Value>) -> Option<String> {
     let mut out = text.to_string();
     if let Some(stdout) = result.and_then(|r| str_of(r, "stdout")) {
@@ -206,7 +200,6 @@ pub fn clip(text: &str, result: Option<&Value>) -> Option<String> {
     Some(out)
 }
 
-/// The lines of a `structuredPatch` (up to 12 hunks of 120 lines), numbered.
 pub fn diff_lines(patch: &[Value]) -> Vec<DiffLine> {
     let mut out = Vec::new();
     for hunk in patch.iter().take(12) {
@@ -258,7 +251,6 @@ pub fn diff_lines(patch: &[Value]) -> Vec<DiffLine> {
     out
 }
 
-/// The first 60 lines of written content as added lines.
 pub fn written_lines(content: &str) -> Vec<DiffLine> {
     content
         .split('\n')
@@ -272,7 +264,6 @@ pub fn written_lines(content: &str) -> Vec<DiffLine> {
         .collect()
 }
 
-/// TaskCreate and TaskUpdate results change the task list.
 pub fn apply_task_result(name: &str, result: Option<&Value>, c: &mut Conversation) {
     let Some(result) = result else { return };
     if name == "TaskCreate" {
@@ -307,8 +298,6 @@ pub fn apply_task_result(name: &str, result: Option<&Value>, c: &mut Conversatio
     }
 }
 
-/// Foundation's pretty-printed JSON: sorted keys, two-space indent, `"key" : value`, slashes
-/// unescaped, and an empty container as its brackets around a blank line.
 pub fn pretty(input: &Map<String, Value>) -> String {
     let mut out = String::new();
     write_value(&Value::Object(input.clone()), 0, &mut out);

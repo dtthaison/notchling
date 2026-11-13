@@ -1,6 +1,3 @@
-//! Ports of the transcript cases of CodexSessionsTests: Codex rollout files read as conversations.
-//! (The runner arguments, model list, slash commands and session choice tests belong to other parts.)
-
 mod common;
 
 use common::*;

@@ -1,9 +1,3 @@
-"""The `maintainer-gate` decision: does this pull request need the maintainer, and has he approved it?
-
-A PR needs the maintainer when it touches a path outside the auto-merge zone, uses a capability
-(processes, ptys, network, Keychain, file writes, protected types) or weakens a test. It then
-passes only with a maintainer's approval on the PR's current head; a later push needs a new one."""
-
 from __future__ import annotations
 
 import json
@@ -39,14 +33,10 @@ def needs_maintainer(changes: List[Change], zones: Zones) -> List[str]:
 
 
 def added_paths(changes: List[Change]) -> List[str]:
-    """Names the PR brings into the tree: new files and the new end of a rename."""
     return [c.path for c in changes if c.status in ("A", "R")]
 
 
 def case_collisions(added: Iterable[str], tree: Iterable[str]) -> List[str]:
-    """A new path, or a folder on its way, whose name equals another's once case and Unicode
-    normalization are ignored. A Mac checkout keeps only one of the two; the other's content
-    lands in the first one's place. `tree` is every path of both trees."""
     names: Dict[str, Set[Tuple[str, bool]]] = {}
     for path in tree:
         parts = path.split("/")
@@ -62,7 +52,7 @@ def case_collisions(added: Iterable[str], tree: Iterable[str]) -> List[str]:
     out: List[str] = []
     for path in added:
         parts = path.split("/")
-        for i in range(1, len(parts) + 1):  # the shallowest folder first, the file last
+        for i in range(1, len(parts) + 1):
             other = clash("/".join(parts[:i]))
             if other:
                 out.append(f"CASE-COLLISION: {path} vs {other}")
@@ -84,14 +74,12 @@ def collision_reasons(repo: Path, base: str, head: str, changes: List[Change]) -
 
 
 def _show(repo: Path, sha: str, path: Path) -> Optional[str]:
-    """The file's text at a commit, or None when the commit has no such file."""
     r = subprocess.run(["git", "-C", str(repo), "show", f"{sha}:{path.as_posix()}"],
                        capture_output=True)
     return r.stdout.decode("utf-8", errors="replace") if r.returncode == 0 else None
 
 
 def _entries(text: Optional[str]) -> Counter:
-    """The baseline's entries as a multiset; no file is an empty baseline. Raises ValueError on a bad file."""
     if text is None:
         return Counter()
     try:
@@ -104,8 +92,6 @@ def _entries(text: Optional[str]) -> Counter:
 
 
 def baseline_reasons(repo: Path, base: str, head: str) -> List[str]:
-    """GUARD-BASELINE: the lint baseline may only shrink. Compares it at `head` with `base`
-    as multisets, so a second copy of an entry counts as growth too."""
     path = lint.BASELINE
     try:
         after = _entries(_show(repo, head, path))
@@ -114,7 +100,7 @@ def baseline_reasons(repo: Path, base: str, head: str) -> List[str]:
     try:
         before = _entries(_show(repo, base, path))
     except ValueError:
-        before = Counter()  # an unreadable base counts as empty, so every entry reads as new
+        before = Counter()
     added = sorted((after - before).elements())
     if not added:
         return []
@@ -124,8 +110,6 @@ def baseline_reasons(repo: Path, base: str, head: str) -> List[str]:
 
 
 def approved_head(reviews: List[Dict], head_sha: str, maintainers: frozenset) -> bool:
-    """Each maintainer's latest review decides: approved on this head. A dismissed review is
-    still their latest word, so dismissing a change request can't bring an older approval back."""
     latest: Dict[str, Dict] = {}
     for r in sorted(reviews, key=lambda r: r.get("submitted_at") or ""):
         login = (r.get("user") or {}).get("login")
@@ -152,7 +136,6 @@ def decide(reasons: List[str], reviews: List[Dict], head_sha: str) -> Decision:
 
 
 def post_status(head_sha: str, decision: Decision, target_url: Optional[str] = None) -> None:
-    """Only the workflow calls this (it has GH_TOKEN and GH_REPO); tests never reach `gh`."""
     args = ["gh", "api", "--method", "POST", f"repos/{{owner}}/{{repo}}/statuses/{head_sha}",
             "-f", f"state={'success' if decision.passed else 'failure'}",
             "-f", f"context={STATUS_CONTEXT}", "-f", f"description={decision.summary}"]

@@ -1,12 +1,3 @@
-//! The usage-limit ring under the reply box and its hover card, pure: which limits a session's
-//! account has, the arc and its ink, the card's rows, the reset time as the card words it, and
-//! when the card is open. The GPUI parts are `view::limit_ring`; nothing here reads a login.
-//!
-//! The ring shows the 5-hour limit as an arc from 12 o'clock, clockwise, in the kit's blue
-//! (`Ink::Working`) and turns to the warning and expired inks at the thresholds the header's
-//! meters use (70 and 90, `Fill`). The card lists every limit the account's data has: the 5-hour
-//! one, the weekly one, then the others in the order the data gives them.
-
 use notchling_engine::limits::report::{BarKind, UsageReport};
 use notchling_engine::pages::clock::civil_at;
 use notchling_kit::Ink;
@@ -14,7 +5,6 @@ use notchling_kit::Ink;
 use crate::accounts::limits::{Fill, Zone};
 use crate::accounts::wire::Window;
 
-/// Which kind of window a limit is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
     Session,
@@ -22,7 +12,6 @@ pub enum Kind {
     Other,
 }
 
-/// One limit of the account in use, as the data has it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Limit {
     pub name: String,
@@ -31,8 +20,6 @@ pub struct Limit {
     pub resets_at: Option<f64>,
 }
 
-/// Claude Code's windows for the account in use (`limits.status`): "5-hour", "weekly", then the
-/// others by their own names. The header's meters take the same two by the same prefixes.
 pub fn claude_limits(windows: &[Window]) -> Vec<Limit> {
     windows
         .iter()
@@ -55,7 +42,6 @@ pub fn claude_limits(windows: &[Window]) -> Vec<Limit> {
         .collect()
 }
 
-/// A Codex login's bars: the group named "Codex", else the first (as the header's meters pick).
 pub fn codex_limits(report: &UsageReport) -> Vec<Limit> {
     report
         .groups
@@ -80,10 +66,6 @@ pub fn codex_limits(report: &UsageReport) -> Vec<Limit> {
         .unwrap_or_default()
 }
 
-/// An Antigravity login's bars, every group's, the group of the session's `model` first (its
-/// 5-hour bar, then its weekly one), so the ring follows the model in use. Antigravity's groups are
-/// named for models ("Gemini 4 Argon", "Gemini", "Claude/GPT"): the longest name the model starts
-/// with, else one whose `/` parts the model names, else the first group.
 pub fn antigravity_limits(report: &UsageReport, model: Option<&str>) -> Vec<Limit> {
     let model = model.unwrap_or("").to_ascii_lowercase();
     let starts = report
@@ -117,7 +99,6 @@ pub fn antigravity_limits(report: &UsageReport, model: Option<&str>) -> Vec<Limi
             let group = &report.groups[i];
             let name = group.name.clone().unwrap_or_default();
             let mut bars: Vec<_> = group.bars.iter().collect();
-            // The 5-hour bar first, so the ring takes it when the group has one.
             bars.sort_by_key(|b| b.kind != BarKind::Session);
             bars.into_iter()
                 .map(|b| {
@@ -138,7 +119,6 @@ pub fn antigravity_limits(report: &UsageReport, model: Option<&str>) -> Vec<Limi
         .collect()
 }
 
-/// The arc for one limit (Antigravity's ring: the first of [`antigravity_limits`]).
 pub fn arc_of(limit: &Limit) -> Arc {
     let percent = clamp(limit.percent);
     Arc {
@@ -147,16 +127,12 @@ pub fn arc_of(limit: &Limit) -> Arc {
     }
 }
 
-/// The ring's arc: how much of the 5-hour limit is used, and how it is inked.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Arc {
-    /// 0 to 1.
     pub fraction: f32,
     pub fill: Fill,
 }
 
-/// The ring for a set of limits: its 5-hour one. With none, no ring (unknown limits hide it
-/// rather than showing another window's number as the 5-hour one).
 pub fn arc(limits: &[Limit]) -> Option<Arc> {
     let session = limits.iter().find(|l| l.kind == Kind::Session)?;
     let percent = clamp(session.percent);
@@ -166,7 +142,6 @@ pub fn arc(limits: &[Limit]) -> Option<Arc> {
     })
 }
 
-/// The ink of the arc and the card's bars: blue until 70, the warning ink to 90, then expired.
 pub fn ink(fill: Fill) -> Ink {
     match fill {
         Fill::Fine => Ink::Working,
@@ -183,24 +158,17 @@ fn clamp(percent: f64) -> f64 {
     }
 }
 
-/// One row of the card.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Row {
-    /// "5-hour limit", "Weekly · all models", or the limit's own name.
     pub label: String,
-    /// "Resets Tue 1:30 AM", "Resetting", or nothing without a reset time.
     pub resets: Option<String>,
-    /// "71%".
     pub percent_text: String,
-    /// 0 to 1.
     pub fraction: f32,
     pub fill: Fill,
 }
 
-/// The card: its title and a row per limit.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Card {
-    /// "Your usage limits · Team", or without the plan when the data has none.
     pub title: String,
     pub rows: Vec<Row>,
 }
@@ -220,8 +188,6 @@ fn row_label(limit: &Limit) -> String {
     }
 }
 
-/// The card for `limits`, the 5-hour one first, then the weekly one, then the rest in the order
-/// the data gives them. `None` without any limit.
 pub fn card(limits: &[Limit], plan: Option<&str>, now: f64, zone: Zone) -> Option<Card> {
     if limits.is_empty() {
         return None;
@@ -252,12 +218,10 @@ pub fn card(limits: &[Limit], plan: Option<&str>, now: f64, zone: Zone) -> Optio
 
 const WEEKDAYS: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
-/// "Tue 1:30 AM": the weekday, then the time in 12-hour form, in the zone.
 pub fn reset_clock(resets_at: f64, zone: Zone) -> String {
     let offset = (zone.0)(resets_at);
     let c = civil_at(resets_at, offset);
     let days = (resets_at.floor() as i64 + offset).div_euclid(86_400);
-    // 1970-01-01 was a Thursday.
     let weekday = (days + 4).rem_euclid(7) as usize;
     let (hour, suffix) = match c.hour {
         0 => (12, "AM"),
@@ -268,7 +232,6 @@ pub fn reset_clock(resets_at: f64, zone: Zone) -> String {
     format!("{} {}:{:02} {}", WEEKDAYS[weekday], hour, c.minute, suffix)
 }
 
-/// What the row says about the reset: "Resets Tue 1:30 AM", or "Resetting" once it has passed.
 pub fn reset_label(resets_at: f64, now: f64, zone: Zone) -> String {
     if resets_at <= now {
         "Resetting".to_owned()
@@ -277,43 +240,30 @@ pub fn reset_label(resets_at: f64, now: f64, zone: Zone) -> String {
     }
 }
 
-/// The arc's end for a fraction of a full turn from 12 o'clock, clockwise, on a circle of radius
-/// `r` at (`cx`, `cy`), y down. A full turn can't be one arc (start and end are the same point),
-/// so the view draws that as two halves.
 pub fn arc_end(fraction: f32, cx: f32, cy: f32, r: f32) -> (f32, f32) {
     let angle = fraction.clamp(0.0, 1.0) * std::f32::consts::TAU;
     (cx + r * angle.sin(), cy - r * angle.cos())
 }
 
-/// How long the pointer rests on the ring before the card opens, so passing over it opens nothing.
 pub const OPEN_MS: u64 = 1500;
 
-/// How long the card stays after the pointer leaves, so it can cross the gap to the card.
 pub const GRACE_MS: u64 = 250;
 
-/// What the view waits for after a move, then asks about with the epoch it was given.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Wait {
-    /// Wait [`OPEN_MS`], then [`Hover::open_if_still`].
     Open(u64),
-    /// Wait [`GRACE_MS`], then [`Hover::close_if_still`].
     Close(u64),
 }
 
-/// Where the pointer is, and so whether the card shows. The ring and the card each report entering
-/// and leaving. Entering the ring asks the view to wait [`OPEN_MS`] before the card opens; once
-/// open, a leave with the pointer in neither asks it to wait [`GRACE_MS`] before it closes.
 #[derive(Debug, Default)]
 pub struct Hover {
     ring: bool,
     card: bool,
-    /// The card is open (it stays open during the grace after a leave).
     shown: bool,
     epoch: u64,
 }
 
 impl Hover {
-    /// Whether the card shows, with `forced` a render's switch.
     pub fn open(&self, forced: bool) -> bool {
         forced || self.shown
     }
@@ -322,13 +272,11 @@ impl Hover {
         !self.ring && !self.card
     }
 
-    /// The pointer entered or left the ring.
     pub fn ring(&mut self, inside: bool) -> Option<Wait> {
         self.ring = inside;
         self.moved()
     }
 
-    /// The pointer entered or left the card (only drawn while open).
     pub fn card(&mut self, inside: bool) -> Option<Wait> {
         self.card = inside;
         self.moved()
@@ -337,20 +285,16 @@ impl Hover {
     fn moved(&mut self) -> Option<Wait> {
         self.epoch += 1;
         if !self.shown {
-            // A leave before the wait ran out cancels the open through the new epoch.
             return self.ring.then_some(Wait::Open(self.epoch));
         }
         self.away().then_some(Wait::Close(self.epoch))
     }
 
-    /// A click on the ring: opens the card now, or closes it when it is open. Either way a wait
-    /// already running is cancelled through the new epoch.
     pub fn click(&mut self) {
         self.epoch += 1;
         self.shown = !self.shown;
     }
 
-    /// The open wait ran: opens the card if the pointer stayed on the ring. Returns whether it did.
     pub fn open_if_still(&mut self, epoch: u64) -> bool {
         let open = self.epoch == epoch && self.ring && !self.shown;
         if open {
@@ -359,7 +303,6 @@ impl Hover {
         open
     }
 
-    /// The grace ran: closes the card if nothing happened since `epoch`. Returns whether it did.
     pub fn close_if_still(&mut self, epoch: u64) -> bool {
         let close = self.epoch == epoch && self.away() && self.shown;
         if close {
@@ -460,7 +403,6 @@ mod tests {
 
     #[test]
     fn the_card_orders_five_hour_weekly_then_the_rest_and_words_the_plan() {
-        // 1_800_000_000 is Fri 2027-01-15 08:00:00 UTC.
         let limits = vec![
             limit("Sonnet", Kind::Other, 3.4, None),
             limit("weekly", Kind::Week, 56.0, Some(NOW + 86_400.0)),
@@ -499,7 +441,7 @@ mod tests {
 
     #[test]
     fn the_reset_reads_weekday_then_a_twelve_hour_clock() {
-        let midnight = 1_800_000_000.0 - 8.0 * 3600.0; // Fri 00:00 UTC
+        let midnight = 1_800_000_000.0 - 8.0 * 3600.0;
         assert_eq!(reset_clock(midnight, Zone::UTC), "Fri 12:00 AM");
         assert_eq!(
             reset_clock(midnight + 90.0 * 60.0, Zone::UTC),
@@ -513,7 +455,6 @@ mod tests {
             reset_clock(midnight + 23.0 * 3600.0 + 5.0 * 60.0, Zone::UTC),
             "Fri 11:05 PM"
         );
-        // A zone shifts the weekday too.
         let ahead = Zone(|_| 2 * 3600);
         assert_eq!(reset_clock(midnight + 23.0 * 3600.0, ahead), "Sat 1:00 AM");
         assert_eq!(reset_label(NOW - 1.0, NOW, Zone::UTC), "Resetting");
@@ -533,7 +474,6 @@ mod tests {
         assert!(near(arc_end(0.75, 10.0, 10.0, 5.0), (5.0, 10.0)));
     }
 
-    /// Rests on the ring until the card opens.
     fn opened() -> Hover {
         let mut h = Hover::default();
         let Some(Wait::Open(epoch)) = h.ring(true) else {
@@ -553,7 +493,6 @@ mod tests {
         assert!(h.open_if_still(epoch));
         assert!(h.open(false));
 
-        // Passing over the ring: the leave cancels the open.
         let mut h = Hover::default();
         let Some(Wait::Open(epoch)) = h.ring(true) else {
             panic!();
@@ -580,7 +519,6 @@ mod tests {
         assert!(h.open(false));
         h.click();
         assert!(!h.open(false), "a second click closes it");
-        // Opened by a click, it still closes after the grace once the pointer leaves.
         h.click();
         let Some(Wait::Close(epoch)) = h.ring(false) else {
             panic!("away from both waits to close");
@@ -596,7 +534,6 @@ mod tests {
             panic!("away from both waits to close");
         };
         assert!(h.open(false), "still open during the grace");
-        // The pointer crosses into the card before the grace ends.
         assert_eq!(h.card(true), None);
         assert!(!h.close_if_still(epoch), "a later move cancels the close");
         assert!(h.open(false));
@@ -642,12 +579,10 @@ mod tests {
                 .map(|l| l.name)
                 .collect()
         };
-        // The longest group name the model starts with: Argon, not Gemini.
         let argon = names(Some("Gemini 4 Argon (Medium)"));
         assert_eq!(argon[0], "Gemini 4 Argon · weekly limit");
         assert_eq!(argon.len(), 5, "every group is in the card");
         assert_eq!(names(Some("Gemini 3 Flash"))[0], "Gemini · 5-hour limit");
-        // A model named by a part of a group's name; its 5-hour bar comes first.
         assert_eq!(
             names(Some("Claude Sonnet 4.6 (Thinking)"))[0],
             "Claude/GPT · 5-hour limit"

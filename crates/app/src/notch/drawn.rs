@@ -1,15 +1,9 @@
-//! What the notch draws, to tell whether a poll changed it: [`NotchModel::drawn`] and [`Drawn`].
-//! A file of its own because `model.rs` is near its size limit.
-
 use super::layout::{NotchState, NotchWidth, Size};
 use super::model::{ago, NotchModel};
 use super::requests::HookRequest;
 use notchling_engine::sessions::{Agent, AgentGroup};
 use notchling_engine::transcript::snapshot::Snapshot;
 
-/// Everything the notch draws from the model, to compare two polls: the view draws again only
-/// when this differs. The ages are the strings the rows show (`ago`), so a clock that moved but
-/// left every row's age as it was draws nothing.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Drawn {
     agents: Vec<Agent>,
@@ -28,7 +22,6 @@ pub struct Drawn {
 }
 
 impl NotchModel {
-    /// What the notch would draw now.
     pub fn drawn(&self) -> Drawn {
         let mut snapshots: Vec<_> = self
             .snapshots

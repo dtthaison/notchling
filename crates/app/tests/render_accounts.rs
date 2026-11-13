@@ -1,8 +1,3 @@
-//! `--render accounts-window|accounts-window-off|accounts-window-codex|limit-bars|cost|vault-sheet|
-//! vault-form|vault-approval|vault-request` end to end over made-up data: needs a window server,
-//! so it is ignored by default. Run it with `cargo test -p notchling-app -- --ignored` on a Mac
-//! with a display.
-
 #![cfg(target_os = "macos")]
 
 use std::collections::HashSet;

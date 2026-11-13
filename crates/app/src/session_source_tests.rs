@@ -11,7 +11,6 @@ fn quick() -> Backoff {
     }
 }
 
-/// A row; only the socket tests (Unix) build rows.
 #[cfg(unix)]
 fn agent(id: &str) -> Agent {
     Agent {
@@ -39,7 +38,6 @@ fn ids(view: &View) -> Vec<String> {
     view.agents.iter().flatten().map(|a| a.id.clone()).collect()
 }
 
-/// Polls the source until `ok` says the view is what is wanted, or panics after 10 s.
 fn wait_for(source: &SessionSource, what: &str, ok: impl Fn(&View) -> bool) -> View {
     let end = Instant::now() + Duration::from_secs(10);
     loop {
@@ -63,7 +61,6 @@ fn real_root(data_dir: &Path) -> DataRoot {
     }
 }
 
-/// A starter that counts its calls and finds nothing to start.
 fn failing_starter(calls: &Arc<AtomicUsize>) -> Starter {
     let calls = calls.clone();
     Arc::new(move |_| {
@@ -89,9 +86,7 @@ fn the_catalog_is_read_when_asked_and_at_least_hourly() {
     assert!(!catalog_due(last, last, false));
     assert!(!catalog_due(last, last + Duration::from_secs(3599), false));
     assert!(catalog_due(last, last + Duration::from_secs(3600), false));
-    // A model menu opening asks at once.
     assert!(catalog_due(last, last, true));
-    // A clock that went backwards isn't due.
     assert!(!catalog_due(last + Duration::from_secs(5), last, false));
 }
 
@@ -118,7 +113,6 @@ fn the_real_root_names_the_socket_in_its_data_folder_and_the_binary_beside_the_a
     assert_eq!(config.socket, Path::new("/data").join(SOCKET_NAME));
     assert!(config.start.is_some());
     assert_eq!(config.backoff, Backoff::default());
-    // No executable path: still connects, never starts anything.
     assert!(config_for(&root, None)
         .expect("a configuration")
         .start
@@ -151,7 +145,6 @@ fn with_no_socket_it_falls_back_says_so_and_starts_the_daemon_only_once() {
     });
     let view = wait_for(&source, "the fallback", View::daemon_down);
     assert!(view.agents.is_none(), "files are read instead");
-    // Several retries pass; the daemon was asked for once.
     std::thread::sleep(Duration::from_millis(400));
     assert!(source.view().daemon_down());
     assert_eq!(calls.load(Ordering::SeqCst), 1);
@@ -174,7 +167,6 @@ fn without_a_starter_nothing_is_started_and_the_source_still_retries() {
 #[test]
 fn the_ui_side_never_waits_on_the_socket() {
     let scratch = Scratch::new("ss-fast");
-    // A starter that takes long, like a daemon that is slow to come up.
     let slow: Starter = Arc::new(|_| {
         std::thread::sleep(Duration::from_millis(800));
         Err(ClientError::Timeout)
@@ -204,7 +196,6 @@ mod over_a_socket {
 
     type Running = (ServerHandle, JoinHandle<std::io::Result<()>>);
 
-    /// The daemon's two session ops over a list the test sets.
     struct Fake {
         list: Arc<Mutex<Value>>,
     }
@@ -248,7 +239,6 @@ mod over_a_socket {
         thread.join().expect("server thread").expect("server ended");
     }
 
-    /// The server here is this test binary, not a `notchling`, so the server check is off.
     fn config(socket: &Path, start: Option<Starter>) -> SourceConfig {
         SourceConfig {
             socket: socket.to_path_buf(),
@@ -273,7 +263,6 @@ mod over_a_socket {
         let view = wait_for(&source, "the untrusted note", |v| v.link == Link::Untrusted);
         assert!(view.agents.is_none(), "files are read instead");
         assert_eq!(view.note(), Some(DAEMON_UNTRUSTED_NOTE));
-        // Nothing was started over it, and it heard no hello.
         assert_eq!(calls.load(Ordering::SeqCst), 0);
         assert_eq!(running.0.status().clients, Default::default());
         stop(running);
@@ -298,11 +287,9 @@ mod over_a_socket {
         stop(running);
     }
 
-    /// The two ops plus `catalog.get`, over a model list the test sets, on the `tools` topic too.
     struct CatalogFake {
         list: Value,
         models: Arc<Mutex<Value>>,
-        /// How many `catalog.get` calls came in.
         gets: Arc<AtomicUsize>,
     }
 
@@ -380,8 +367,6 @@ mod over_a_socket {
             assert!(Instant::now() < end, "waited for the changed catalog");
             std::thread::sleep(Duration::from_millis(10));
         }
-        // A model menu opening asks again (the daemon fetches only when asked): the list the daemon
-        // now serves is read, and it moves the catalog generation, not the rows'.
         let asked_at = gets.load(Ordering::SeqCst);
         let rows = source.generation();
         *models.lock().unwrap_or_else(|e| e.into_inner()) =
@@ -395,7 +380,6 @@ mod over_a_socket {
         assert!(gets.load(Ordering::SeqCst) > asked_at);
         assert!(source.catalog_generation() > catalog_before);
         assert_eq!(source.generation(), rows, "the conversation isn't reloaded");
-        // A tool Chat doesn't read has nothing.
         assert!(source.catalog(Tool::Codex).is_empty());
         stop(running);
     }
@@ -438,7 +422,6 @@ mod over_a_socket {
         assert_eq!(ids(&view), ["from-the-new-daemon"]);
         assert_eq!(calls.load(Ordering::SeqCst), 1);
 
-        // It goes away again: the app does not start another one behind the user's back.
         let running = started.lock().unwrap_or_else(|e| e.into_inner()).take();
         stop(running.expect("the started daemon"));
         wait_for(&source, "the fallback", View::daemon_down);

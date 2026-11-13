@@ -1,13 +1,8 @@
-//! What changed between two loads of a conversation, by item (decision 0018, point 2). The loader
-//! computes it off the main thread; the main thread only checks that the change starts from the
-//! conversation on show.
-
 use std::ops::Range;
 use std::sync::Arc;
 
 use notchling_engine::transcript::model::Conversation;
 
-/// Items `old` in the previous conversation became items `new` in this one.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Splice {
     pub old: Range<usize>,
@@ -16,22 +11,13 @@ pub struct Splice {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Change {
-    /// Same `Arc`, or equal: nothing the column shows changed.
     Same,
-    /// Splices in old-item order, none overlapping; `other` says a field besides `items` changed
-    /// (tasks, facts, queued, activity, turn start or tokens, finished agents, shells, the pending
-    /// question).
     Items { splices: Vec<Splice>, other: bool },
-    /// The ids don't line up (another session, a fresh cursor renumbered them): start over.
     Reset,
 }
 
-/// More changed items than this in one load and the change is not worth describing.
 pub const RESET_ABOVE: usize = 64;
 
-/// What `new` changed from `old`. Items are matched by id: the engine numbers them by line, keeps the
-/// newest few hundred, and so only ever trims the front, grows the end or edits an item in place (a
-/// tools group gaining a step); anything else resets.
 pub fn diff(old: &Arc<Conversation>, new: &Arc<Conversation>) -> Change {
     if Arc::ptr_eq(old, new) {
         return Change::Same;
@@ -55,7 +41,6 @@ pub fn diff(old: &Arc<Conversation>, new: &Arc<Conversation>) -> Change {
     }
     let m = (a.len() - k).min(b.len());
     let mut changed = 0;
-    // Where the last changed pair ended, so a neighbour joins it.
     let mut open: Option<usize> = None;
     for i in 0..m {
         let (x, y) = (&a[k + i], &b[i]);
@@ -104,7 +89,6 @@ fn finish(splices: Vec<Splice>, other: bool) -> Change {
     }
 }
 
-/// A field besides the items differs.
 fn other_changed(old: &Conversation, new: &Conversation) -> bool {
     old.tasks != new.tasks
         || old.facts != new.facts

@@ -1,16 +1,10 @@
-//! `ReplySender.poppedAll`: whether a session's transcript logged a `popAll` of a message since a
-//! moment. Claude Code 2.1.318 writes one `queue-operation` line per message Up takes back out of
-//! the queue, which is the only sure sign a take-back worked.
-
 use crate::sessions::iso::parse_iso_ms;
 use serde_json::Value;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 
-/// How much of the transcript's end is read.
 pub const TAIL_BYTES: u64 = 65_536;
 
-/// Milliseconds since the epoch, now.
 pub fn now_ms() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -18,7 +12,6 @@ pub fn now_ms() -> i64 {
         .unwrap_or(0)
 }
 
-/// Whether `tail` (transcript lines) has a `popAll` of exactly `text` stamped at or after `since_ms`.
 pub fn popped_all(tail: &str, text: &str, since_ms: i64) -> bool {
     tail.lines()
         .rev()
@@ -35,7 +28,6 @@ pub fn popped_all(tail: &str, text: &str, since_ms: i64) -> bool {
         })
 }
 
-/// [`popped_all`] over the last [`TAIL_BYTES`] of the file; false when it can't be read.
 pub fn popped_all_in_file(path: &Path, text: &str, since_ms: i64) -> bool {
     let Ok(mut file) = std::fs::File::open(path) else {
         return false;
@@ -58,7 +50,6 @@ pub fn popped_all_in_file(path: &Path, text: &str, since_ms: i64) -> bool {
 mod tests {
     use super::*;
 
-    // QueuedMessageTests.testPopAllTakesTheQueueBack, line for line.
     const LINES: [&str; 4] = [
         r#"{"type":"queue-operation","operation":"enqueue","timestamp":"2026-11-05T09:58:08.490Z","content":"Then say ONE"}"#,
         r#"{"type":"queue-operation","operation":"enqueue","timestamp":"2026-11-05T09:58:11.666Z","content":"And TWO"}"#,

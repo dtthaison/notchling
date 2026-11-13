@@ -1,9 +1,3 @@
-//! The Phone panel over GPUI (part U6, macOS): a card with the bridge switch, the pairing QR and
-//! code, the paired phones and the tunnel. Opened from the Phone button in Chat's header
-//! (`chat::view::phone`), drawn over the window like a popover. Every call to the daemon runs on
-//! the background executor; a control the bridge doesn't allow is drawn disabled with its reason
-//! on hover (`mac::gate`). A render has a fixed snapshot and clock and never calls anything.
-
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -24,26 +18,18 @@ use super::renders::{shown, snapshot, NOW_MS};
 use crate::acting::Control;
 use crate::mac::gate;
 
-/// The panel's width; its height is the window's.
 pub const WIDTH: f32 = 400.0;
-/// How big the QR is drawn, at most.
 const QR_SIZE: f32 = 150.0;
-/// How often the panel asks the daemon while it is open.
 const REFRESH_EVERY: u32 = 2;
 
 pub struct PhonePanelView {
     bridge: Arc<Bridge>,
-    /// A render's clock; the live one otherwise.
     fixed_now: Option<i64>,
-    /// A call is out: the controls wait for it.
     busy: bool,
-    /// The last thing a click failed at, until the next click.
     note: Option<String>,
 }
 
 impl PhonePanelView {
-    /// The live panel over the app's bridge: reads it now, then every couple of seconds while it
-    /// is on screen (dropping the view ends the loop).
     pub fn live(bridge: Arc<Bridge>, cx: &mut Context<Self>) -> PhonePanelView {
         let view = PhonePanelView {
             bridge,
@@ -57,7 +43,6 @@ impl PhonePanelView {
             loop {
                 cx.background_executor().timer(Duration::from_secs(1)).await;
                 ticks = ticks.wrapping_add(1);
-                // The countdown moves every second; the daemon is asked every few.
                 let asking = this.update(cx, |view, cx| {
                     cx.notify();
                     ticks
@@ -79,7 +64,6 @@ impl PhonePanelView {
         view
     }
 
-    /// A render's: a fixed snapshot at a fixed time, with nothing behind it.
     pub fn fixed(bridge: Arc<Bridge>) -> PhonePanelView {
         PhonePanelView {
             bridge,
@@ -104,7 +88,6 @@ impl PhonePanelView {
         .detach();
     }
 
-    /// Runs `job` off the UI thread, then reads the daemon again; an error is shown as the note.
     fn run(
         &mut self,
         job: impl FnOnce(&Bridge) -> Result<(), String> + Send + 'static,
@@ -174,7 +157,6 @@ fn section_title(text: &str, a: Appearance) -> Div {
     label(text, TypeRole::Section, Ink::TextFaint, a)
 }
 
-/// A switch: a capsule with its knob at the end it's set to; dim and plain-cursored while disabled.
 pub(crate) fn switch(id: &'static str, on: bool, enabled: bool, a: Appearance) -> Stateful<Div> {
     let knob = div().size(px(14.0)).rounded_full().bg(gpui::white());
     let base = div()
@@ -195,10 +177,8 @@ pub(crate) fn switch(id: &'static str, on: bool, enabled: bool, a: Appearance) -
     }
 }
 
-/// The code as bars on a white card with its quiet zone.
 fn qr_view(qr: &Qr) -> Div {
     let modules = qr.width() + 2 * QUIET_ZONE;
-    // Whole points per module, so neighbouring bars never leave a seam.
     let cell = (QR_SIZE / modules as f32).floor().max(2.0);
     let mut grid = div()
         .relative()
@@ -495,7 +475,6 @@ impl Render for PhonePanelView {
     }
 }
 
-/// `--render phone-panel[-off|-unpaired|-tunnel|-detached]`, over made-up data; nothing is called.
 pub fn build_render(name: &str, cx: &mut gpui::App) -> Option<AnyView> {
     let which = shown(name)?;
     let bridge = Arc::new(Bridge::fixed(snapshot(which)));

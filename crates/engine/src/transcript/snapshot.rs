@@ -1,6 +1,3 @@
-//! What the notch shows about one agent, read from its transcript tail: the last messages, the tools
-//! since the last text, the current activity and the last question asked.
-
 use super::subagents;
 use super::tail::{Cursors, LineParser, LONG_LINE_SCAN, MAX_LINE_BYTES, TAIL_BYTES};
 use super::tally::{describe, ToolTally};
@@ -17,8 +14,6 @@ pub enum LineKind {
     Tools,
 }
 
-/// One entry of the conversation, as the terminal shows it: a prompt, Claude's text, or a one-line
-/// summary of the tools it ran in between ("Read 2 files, ran 1 shell command").
 #[derive(Debug, Clone, PartialEq)]
 pub struct ChatLine {
     pub id: usize,
@@ -31,12 +26,10 @@ pub struct QuestionItem {
     pub header: String,
     pub question: String,
     pub options: Vec<String>,
-    /// What each option means, as Claude wrote it; empty when unknown.
     pub details: Vec<String>,
     pub multi_select: bool,
 }
 
-/// A question the agent asked with AskUserQuestion that hasn't been answered yet.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PendingQuestion {
     pub tool_use_id: String,
@@ -44,7 +37,6 @@ pub struct PendingQuestion {
 }
 
 impl PendingQuestion {
-    /// Answering from the notch covers single-choice questions; multi-select needs the terminal.
     pub fn answerable(&self) -> bool {
         !self.items.is_empty() && !self.items.iter().any(|i| i.multi_select)
     }
@@ -56,7 +48,6 @@ pub struct Snapshot {
     pub last_prompt: Option<String>,
     pub activity: Option<String>,
     pub question: Option<PendingQuestion>,
-    /// Subagents that wrote to their transcripts in the last minute and a half.
     pub subagents_active: usize,
 }
 
@@ -70,7 +61,6 @@ impl Snapshot {
     }
 }
 
-/// The AskUserQuestion input as a pending question.
 pub fn question(id: &str, input: &Map<String, Value>) -> Option<PendingQuestion> {
     let questions = input.get("questions")?.as_array()?;
     let items = questions
@@ -107,14 +97,11 @@ pub fn question(id: &str, input: &Map<String, Value>) -> Option<PendingQuestion>
 }
 
 const KEPT_MESSAGES: usize = 120;
-/// A message is shown as its last 3000 characters, so longer runs are cut down while kept.
 const KEPT_BYTES: usize = 16_000;
 
-/// Turns transcript lines into the snapshot, one line at a time, so a cursor can keep it between reads.
 #[derive(Default)]
 pub struct SnapshotParser {
     messages: Vec<(LineKind, String)>,
-    /// Tool calls since the last piece of text, summed up when the next text arrives.
     tools: ToolTally,
     activity: Option<String>,
     last_prompt: Option<String>,
@@ -124,7 +111,6 @@ pub struct SnapshotParser {
 
 impl LineParser for SnapshotParser {
     fn consume(&mut self, line: &[u8]) {
-        // Screenshots and long tool output: nothing the chat shows, and slow to decode.
         if line.len() > MAX_LINE_BYTES {
             return;
         }
@@ -172,7 +158,6 @@ impl LineParser for SnapshotParser {
             }
         }
         let text = collapse_pastes(&text).trim().to_string();
-        // Skip injected wrappers like <command-name>, <system-reminder> and interrupt markers.
         if text.is_empty() || text.starts_with('<') || text.starts_with("[Request interrupted") {
             return;
         }
@@ -238,8 +223,6 @@ impl SnapshotParser {
         }
     }
 
-    /// The snapshot as of the lines read so far. Tools still pending show as the last line, but stay
-    /// open so the next lines can add to them.
     pub fn snapshot(&self) -> Snapshot {
         let mut shown = self.messages.clone();
         if let Some(summary) = self.tools.summary() {
@@ -278,23 +261,18 @@ impl SnapshotParser {
 
 fn cursors() -> &'static Cursors<SnapshotParser, Snapshot> {
     static CURSORS: OnceLock<Cursors<SnapshotParser, Snapshot>> = OnceLock::new();
-    // The last 2 MB of lines it reads: pictures (over its own 100 KB cap) don't use the window.
     CURSORS.get_or_init(|| {
         Cursors::new(TAIL_BYTES, 300, SnapshotParser::snapshot)
             .skipping_lines_over(MAX_LINE_BYTES, LONG_LINE_SCAN)
     })
 }
 
-/// The snapshot of a transcript. The first call parses the last 2 MB of lines (pictures don't count); later calls parse only the lines
-/// appended since. Subagents run on while the session's own transcript stays still, so their count
-/// is taken fresh each call.
 pub fn read(path: &str) -> Snapshot {
     let mut snapshot = cursors().read(path).unwrap_or_default();
     snapshot.subagents_active = subagents::active_count(path, now_secs());
     snapshot
 }
 
-/// The last `limit` lines of the snapshot.
 pub fn lines(path: &str, limit: usize) -> Vec<ChatLine> {
     let all = read(path).lines;
     let start = all.len().saturating_sub(limit);

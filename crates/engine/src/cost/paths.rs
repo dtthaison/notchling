@@ -1,10 +1,6 @@
-//! Path and byte helpers of the tracker: the directory walk, the names a transcript is known
-//! by and the FNV-1a hash of the dedupe keys.
-
 use super::tracker::MAX_DEPTH;
 use std::path::{Path, PathBuf};
 
-/// Files under `dir` (symlinks are not followed, except `dir` itself) with their sizes.
 pub(super) fn walk(dir: &Path, depth: usize, out: &mut Vec<(PathBuf, u64)>) {
     if depth > MAX_DEPTH {
         return;
@@ -26,16 +22,11 @@ pub(super) fn walk(dir: &Path, depth: usize, out: &mut Vec<(PathBuf, u64)>) {
     }
 }
 
-/// What names a transcript apart from the folder it is reached through (a symlinked temp folder
-/// reads as `/private/var` or `/var`, and the same file must count once): the last four parts of
-/// the path. Codex's file name has the session id in it; Antigravity's is
-/// `<conversation>/.system_generated/logs/transcript.jsonl`.
 pub(super) fn file_id(path: &str) -> String {
     let parts: Vec<&str> = path.split('/').filter(|p| !p.is_empty()).collect();
     parts[parts.len().saturating_sub(4)..].join("/")
 }
 
-/// The project folder name is the cwd with "/" turned into "-"; its last part is close enough.
 pub(super) fn project_name(path: &Path, root: &Path) -> String {
     let first = path
         .strip_prefix(root)
@@ -56,7 +47,6 @@ pub(super) fn is_uuid(part: &str) -> bool {
             .all(|(g, n)| g.len() == n && g.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')))
 }
 
-/// The account id ("accountUuid:orgUuid") in a Desktop transcript's path, if any.
 pub(super) fn account_in_path(path: &Path) -> Option<String> {
     let parts: Vec<String> = path
         .components()
@@ -86,7 +76,6 @@ pub(super) fn contains(haystack: &[u8], needle: &[u8]) -> bool {
     false
 }
 
-/// FNV-1a, stable across launches.
 pub fn hash(text: &str) -> u64 {
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
     for byte in text.bytes() {

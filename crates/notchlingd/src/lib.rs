@@ -1,34 +1,3 @@
-//! E16: `notchling`, the engine service and its command line (decision 0004).
-//!
-//! - `notchling daemon` serves the local API ([`daemon`]): the session list and its changes.
-//! - `notchling status`, `notchling sessions [--json]` are clients ([`clients`]).
-//! - `notchling service install|uninstall|print [--dir]` writes the per-OS service file
-//!   ([`service`]) and prints the command that loads it; it never runs that command.
-//!
-//! - `notchling pages [words]` and `notchling page <link|id|words>` look up saved Artifact pages
-//!   ([`pages_cli`]); the daemon serves `search.query`, `pages.list` and `pages.find` ([`pages_ops`]).
-//!
-//! - `notchling delegate <codex|agy> … -- <prompt>` and `notchling delegate-models` hand a job to
-//!   another tool ([`delegate_cli`] over `notchling_engine::delegate`). They need no daemon and are
-//!   not behind `acting`.
-//!
-//! - The daemon serves `install.plan`, `install.apply` and `install.remove` ([`install_ops`] over
-//!   `notchling_engine::install`): the hook entries in `settings.json` and the `notchling-*` skills,
-//!   behind the `install` switch, which is off.
-//!
-//! - `notchling hook [--socket <path>]` is Claude Code's hook ([`hook`]): it asks the daemon about a
-//!   permission or question and prints the answer; anything else, or any trouble, passes.
-//!
-//! Milestone 3 adds the acting ops ([`acting_ops`], session control in [`control_ops`], the real
-//! terminal and launcher in [`attach`]), switched off by [`acting`] until the maintainer hands
-//! sessions over. Later milestones add `secret`, `delegate` and `page`.
-//!
-//! Milestone 6 adds three more switches, all off at every start ([`switches`]: `accounts`, `vault`,
-//! `install`), served as op groups ([`op_group`]): Claude Code's accounts and lanes
-//! ([`accounts_ops`]), the other providers ([`providers_ops`]) and the limit watchers
-//! ([`limits_ops`]) behind `accounts`, and the Secret Vault ([`vault_ops`]) behind `vault`, with
-//! its command line, `notchling secrets`, `secret` and `secret-request` ([`vault_cli`]).
-
 mod accounts_late;
 pub mod accounts_ops;
 mod accounts_signin;
@@ -126,10 +95,8 @@ use layout::Layout;
 use notchling_platform::paths::{process_env, Os};
 use std::path::Path;
 
-/// The log file's name in the data folder, for the service.
 pub const LOG_NAME: &str = "notchlingd.log";
 
-/// Runs a parsed command; the exit code.
 pub fn run(command: Command) -> i32 {
     match command {
         Command::Version => {
@@ -171,7 +138,6 @@ pub fn run(command: Command) -> i32 {
         Command::Secret { args } => vault_cli::secret(&args),
         Command::SecretRequest { args } => vault_cli::secret_request(&args),
         Command::Service { action, dir } => run_service(action, dir.as_deref()),
-        // Quiet and 0 whatever happens: a hook's exit 2 would block the tool in Claude Code.
         Command::Hook { socket } => match Layout::from_env(socket.as_deref()) {
             Some(l) => hook::run(&l),
             None => 0,
@@ -199,7 +165,6 @@ fn run_daemon(socket: Option<&Path>) -> i32 {
     ) {
         Ok(()) => 0,
         Err(e @ daemon::DaemonError::AlreadyRunning(_)) => {
-            // Not a failure, so a service manager doesn't restart it in a loop.
             eprintln!("notchling: {e}");
             0
         }

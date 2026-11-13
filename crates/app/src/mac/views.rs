@@ -1,5 +1,3 @@
-//! Building a named view (`crate::views`) as a GPUI entity, for `--render`.
-
 use std::path::Path;
 use std::sync::Arc;
 
@@ -15,8 +13,6 @@ use crate::accounts::wire::Lane;
 use crate::chat::data::DataRoot;
 use crate::chat::view::ChatView;
 
-/// The view for a name from `crate::views::NAMES`, or `None` for a name it doesn't know (or for
-/// `chat` without a data root).
 pub fn build(
     name: &str,
     data_root: Option<&Path>,
@@ -34,7 +30,6 @@ pub fn build(
         "shell" => Some(cx.new(|cx| ShellView::new(appearance, window, cx)).into()),
         "chat" => {
             let root = DataRoot::for_render(data_root);
-            // Made-up accounts, so the sidebar rows and the header have an account to name.
             cx.set_global(AppAccounts(Arc::new(Accounts::fixed(chat_accounts(&root)))));
             Some(cx.new(|cx| ChatView::new(root, window, cx)).into())
         }
@@ -55,8 +50,6 @@ pub fn build(
     }
 }
 
-/// The accounts a Chat render shows: the Accounts render's made-up ones, with the lanes the root's
-/// `lanes.json` names (so a session in a fixture lane shows its lane's account).
 fn chat_accounts(root: &DataRoot) -> Snapshot {
     let mut snapshot = renders::snapshot(Shown::Claude);
     let lanes = notchling_engine::sessions::lanes::read_lanes(&root.data_dir.join("lanes.json"));

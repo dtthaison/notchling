@@ -1,6 +1,3 @@
-"""LINT-FILE-SIZE and LINT-FILE-SIZE-WARN leave the two generated protocol files alone, by exact path:
-nobody reviews or splits what tools/protocol/gen.py writes. A mark inside a file is no bypass."""
-
 import unittest
 
 from guard import lint

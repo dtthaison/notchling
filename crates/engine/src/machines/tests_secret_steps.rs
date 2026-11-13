@@ -1,6 +1,3 @@
-//! The two secret steps, token creation, renames and the vault source (Swift
-//! `MachinesSecretsTests`, second half).
-
 use super::fakes::*;
 use super::runner::ScriptedRunner;
 use super::shell;
@@ -13,8 +10,6 @@ use super::token_creation;
 use crate::vault::{expiry, Kind, VaultEntry, VaultValue};
 use std::sync::Arc;
 
-// MARK: Steps
-
 #[test]
 fn claude_login_fix_opens_the_form_when_the_vault_lacks_the_token() {
     let runner = Arc::new(ScriptedRunner::new());
@@ -26,7 +21,6 @@ fn claude_login_fix_opens_the_form_when_the_vault_lacks_the_token() {
     let (fix, _) = ctx.fix(None);
     let outcome = (plan.run)(&fix);
     assert!(!outcome.ok);
-    // the app opens no form: the line and the sheet send the user to the Secret Vault
     assert_eq!(
         outcome.message,
         "Add claude-worker in the Secret Vault, then Set up again to send it."
@@ -142,8 +136,6 @@ fn send_again_shows_the_placeholder_and_never_a_value() {
     assert!(raw.contains("printf %s '[secret:m1-github-issues]' | "));
 }
 
-// MARK: Token creation
-
 fn percent_decode(text: &str) -> String {
     let bytes = text.as_bytes();
     let mut out = Vec::new();
@@ -199,7 +191,6 @@ fn token_page_url() {
     );
 }
 
-/// A machine or secret name can't add a parameter or end the query.
 #[test]
 fn token_page_url_encodes_what_the_names_hold() {
     let url = token_creation::page_url("a&issues=admin#x", "m 1", &repos(&["o/n"]));
@@ -269,8 +260,6 @@ fn start_opens_the_page_and_the_form() {
     assert_eq!(opener.forms()[0].name, "m1-github-issues");
 }
 
-// MARK: Renames
-
 fn entry(name: &str, kind: Kind) -> VaultEntry {
     VaultEntry::new(name, kind)
 }
@@ -308,7 +297,6 @@ fn legacy_renames() {
         ]
     );
     assert!(pending_renames(&[]).is_empty());
-    // names match without regard to case
     let upper = vec![entry("SD-Claude", Kind::Token)];
     assert_eq!(pending_renames(&upper).len(), 1);
 }
@@ -342,8 +330,6 @@ fn renamed_entry_keeps_everything_else() {
     assert_eq!(renamed.ask, Some(true));
     assert_eq!(renamed.updated, old.updated);
 }
-
-// MARK: Vault as a source
 
 #[test]
 fn vault_secret_source_asks_its_injected_index_and_store() {

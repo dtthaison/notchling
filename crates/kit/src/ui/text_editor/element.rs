@@ -1,10 +1,3 @@
-//! Laying the editor's text out and painting it. The text is shaped with GPUI's text system, one
-//! [`WrappedLine`] per paragraph (what `shape_text` gives for a `\n`-split text), wrapped at the
-//! box's width; a [`Layout`] flattens that into rows, which is what the caret, the selection, the
-//! mouse and the input method need: an index's point and a point's index across wrapped lines.
-//! The element's height is the row count clamped to the editor's line limits (measured by taffy
-//! at the width it gets), and the text scrolls inside it.
-
 use std::ops::Range;
 
 use gpui::{
@@ -19,32 +12,23 @@ use super::TextEditor;
 use crate::ui::{hsla, window_appearance};
 use crate::Ink;
 
-/// The caret's width.
 const CARET: f32 = 1.5;
-/// A selected newline shows as this much past the row's end.
 const NEWLINE_MARK: f32 = 5.0;
 
-/// One visual row: a paragraph, or the part of one between two wraps.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Row {
     pub paragraph: usize,
-    /// UTF-8 indices into the whole text; `end` is before the newline, or at a wrap.
     pub start: usize,
     pub end: usize,
-    /// The row's top, in content coordinates (before scrolling).
     pub y: Pixels,
 }
 
-/// The shaped text and where everything is, kept from the last layout.
 #[derive(Clone)]
 pub struct Layout {
-    /// One per paragraph.
     pub lines: Vec<WrappedLine>,
-    /// Each paragraph's start index.
     pub paragraphs: Vec<usize>,
     pub rows: Vec<Row>,
     pub line_height: Pixels,
-    /// The element's bounds in the window.
     pub bounds: Bounds<Pixels>,
     pub scroll_top: Pixels,
 }
@@ -54,13 +38,10 @@ impl Layout {
         self.line_height * self.rows.len() as f32
     }
 
-    /// How far the text can scroll: its height past the box's.
     pub fn max_scroll(&self) -> Pixels {
         (self.content_height() - self.bounds.size.height).max(px(0.0))
     }
 
-    /// The row holding `index`: at a wrap, the row before it (the caret shows at its end, which
-    /// is where GPUI puts the index too).
     pub fn row_at(&self, index: usize) -> Row {
         self.rows
             .iter()
@@ -75,8 +56,6 @@ impl Layout {
             })
     }
 
-    /// `index`'s x on a row: zero at the row's start (a wrapped row's start is the previous row's
-    /// end to GPUI), else from the paragraph's layout.
     fn x_on_row(&self, row: &Row, index: usize) -> Pixels {
         if index <= row.start {
             return px(0.0);
@@ -90,14 +69,11 @@ impl Layout {
             .unwrap_or(px(0.0))
     }
 
-    /// Where `index` is, in content coordinates: its x and its row's top.
     pub fn position_for_index(&self, index: usize) -> Point<Pixels> {
         let row = self.row_at(index);
         point(self.x_on_row(&row, index), row.y)
     }
 
-    /// The index nearest a point in content coordinates; outside the text it is the nearest
-    /// row's nearest end.
     pub fn index_for_point(&self, p: Point<Pixels>) -> usize {
         let Some(last) = self.rows.last() else {
             return 0;
@@ -123,8 +99,6 @@ impl Layout {
         }
     }
 
-    /// The selection's quads: one per row it touches, in content coordinates. A row the selection
-    /// runs past shows its newline as a short mark.
     pub fn selection_quads(&self, selection: &Range<usize>) -> Vec<Bounds<Pixels>> {
         let mut quads = Vec::new();
         for row in &self.rows {
@@ -151,7 +125,6 @@ impl Layout {
     }
 }
 
-/// Shapes `text` for a width, one run (the marked range underlined).
 fn shape(
     window: &Window,
     text: &SharedString,
@@ -188,7 +161,6 @@ fn shape(
         .unwrap_or_default()
 }
 
-/// Rows from the shaped paragraphs: each wrap boundary's glyph index ends one.
 fn rows(lines: &[WrappedLine], paragraphs: &[usize], line_height: Pixels) -> Vec<Row> {
     let mut rows = Vec::new();
     let mut y = px(0.0);
@@ -223,23 +195,19 @@ fn rows(lines: &[WrappedLine], paragraphs: &[usize], line_height: Pixels) -> Vec
     rows
 }
 
-/// Each paragraph's start: 0, then after each newline.
 fn paragraph_starts(text: &str) -> Vec<usize> {
     std::iter::once(0)
         .chain(text.match_indices('\n').map(|(i, _)| i + 1))
         .collect()
 }
 
-/// What the element reads from the editor to shape it.
 struct Shown {
     text: SharedString,
-    /// The placeholder is shown: the model is empty.
     placeholder: bool,
     marked: Option<Range<usize>>,
     max_lines: usize,
 }
 
-/// The editor's text as an element; see the module notes.
 pub(super) struct TextElement {
     editor: Entity<TextEditor>,
 }
@@ -269,7 +237,6 @@ impl TextElement {
         }
     }
 
-    /// The placeholder is faint; the text takes the color the view set.
     fn color(window: &Window, placeholder: bool) -> Hsla {
         if placeholder {
             hsla(Ink::TextFaint.color(window_appearance(window)))
@@ -278,8 +245,6 @@ impl TextElement {
         }
     }
 
-    /// Mouse down, move and up for the next frame: a click places or extends, a drag selects
-    /// (anywhere in the window once it started), and the button up ends it.
     fn listen_mouse(&self, hitbox: Hitbox, window: &mut Window) {
         let editor = self.editor.clone();
         window.on_mouse_event(move |event: &MouseDownEvent, phase, window, cx| {
@@ -325,7 +290,6 @@ impl Element for TextElement {
         None
     }
 
-    /// The width it is given; the height of its rows at that width, between the line limits.
     fn request_layout(
         &mut self,
         _: Option<&GlobalElementId>,
@@ -372,8 +336,6 @@ impl Element for TextElement {
         (id, ())
     }
 
-    /// Shapes at the final width, lays the rows out, scrolls the caret into view when asked, and
-    /// hands the layout to the editor for the mouse and the input method.
     fn prepaint(
         &mut self,
         _: Option<&GlobalElementId>,
@@ -533,7 +495,6 @@ mod tests {
 
     #[test]
     fn a_wrap_belongs_to_the_row_before_it_and_a_newline_to_the_row_after() {
-        // "aaaa bbbb" wrapped after the space, then a second paragraph.
         let l = layout(&[(0, 0, 5), (0, 5, 9), (1, 10, 13)]);
         assert_eq!(l.row_at(0).start, 0);
         assert_eq!(l.row_at(5).y, px(0.0), "at the wrap: the first row's end");
@@ -548,8 +509,6 @@ mod tests {
     #[test]
     fn selection_quads_cover_each_row_touched_and_mark_a_selected_newline() {
         let l = layout(&[(0, 0, 5), (0, 5, 9), (1, 10, 13)]);
-        // Without shaped lines every x is 0, so only the newline mark has width: the quads show
-        // which rows a selection reaches.
         assert!(l.selection_quads(&(0..0)).is_empty());
         let across = l.selection_quads(&(7..12));
         assert_eq!(

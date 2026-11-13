@@ -1,22 +1,13 @@
-//! The command line: nothing (run the app), `--render <view> --out <file.png>`, `--version`, `--help`;
-//! `--data-root <dir>` reads sessions from a fixture root instead of the real folders.
-
 use std::path::PathBuf;
 
 use crate::views;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Command {
-    /// The menu bar app, over the real folders or a fixture root.
     Run {
         data_root: Option<PathBuf>,
-        /// Open Chat at launch, for when the menu bar item is hidden (a full menu bar on a Mac
-        /// with a notch hides the items that don't fit).
         open_chat: bool,
     },
-    /// Open `view` off to the side, write it to `out` as a PNG, exit (part U10). A view that reads
-    /// sessions reads `data_root`, else `NOTCHLING_DATA_ROOT`, else the crate's fixture: never the
-    /// real home.
     Render {
         view: String,
         out: PathBuf,
@@ -26,7 +17,6 @@ pub enum Command {
     Help,
 }
 
-/// Parses the arguments after the program name.
 pub fn parse<I>(args: I) -> Result<Command, String>
 where
     I: IntoIterator<Item = String>,
@@ -92,7 +82,6 @@ fn value(
     }
 }
 
-/// `notchling-app <version>`.
 pub fn version_line() -> String {
     format!("notchling-app {}", env!("CARGO_PKG_VERSION"))
 }

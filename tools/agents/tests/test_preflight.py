@@ -1,6 +1,3 @@
-"""Preflight: may the worker start this issue? Timeline JSON in the shapes the API returns, served by a
-fake HTTP server on 127.0.0.1. No GitHub, no `gh`."""
-
 from __future__ import annotations
 
 import hashlib
@@ -43,25 +40,21 @@ def commented(at):
 
 
 def renamed(actor, at, old="Old title", new="New title"):
-    """The REST timeline's title-change event; there is no `edited` event."""
     return {"event": "renamed", "created_at": at, "rename": {"from": old, "to": new},
             "actor": {"login": actor, "type": "User"}, "commit_id": None, "commit_url": None}
 
 
 def graphql_edits(*edited_at, more=False, last=None):
-    """`Issue.lastEditedAt` (null when never edited, covers title and body) and the body's edit log."""
     return {"data": {"repository": {"issue": {"lastEditedAt": last, "userContentEdits": {
         "nodes": [{"editedAt": t, "deletedAt": None} for t in edited_at],
         "pageInfo": {"hasNextPage": more}}}}}}
 
 
 def digest(title, body):
-    """What the contract says: SHA-256 of the title's UTF-8 bytes, one LF, the body's UTF-8 bytes."""
     return hashlib.sha256((title + "\n" + body).encode("utf-8")).hexdigest()
 
 
 class FakeGitHub:
-    """Routes are {(method, path): (status, body)}; a path may be a callable taking the query dict."""
 
     def __init__(self, routes):
         self.requests = []
@@ -114,7 +107,6 @@ def routes_for(iss=None, timeline=None, edits=None, graphql_status=200, timeline
     edits = graphql_edits() if edits is None else edits
     r = {("GET", "/repos/o/r/issues/5"): (issue_status, iss),
          ("POST", "/graphql"): (graphql_status, edits)}
-    # Two pages of 100 at most; the fake serves by page number.
     pages = [timeline[i:i + 100] for i in range(0, len(timeline), 100)] or [[]]
     for n, page in enumerate(pages, start=1):
         r[("GET", "/repos/o/r/issues/5/timeline?per_page=100&page=%d" % n)] = (timeline_status, page)

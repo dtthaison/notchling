@@ -16,7 +16,6 @@ impl Collect {
         self.0.lock().unwrap().clone()
     }
 
-    /// Waits until `n` events are in.
     fn wait_for(&self, n: usize) -> Vec<TurnEvent> {
         let until = Instant::now() + Duration::from_secs(10);
         while Instant::now() < until {
@@ -313,7 +312,6 @@ fn only_so_many_turns_run_at_once() {
         runs.send(request("go", Some("extra"))),
         Err(SendError::TooMany)
     );
-    // A message for a session that is running still queues: it takes no slot.
     assert!(matches!(
         runs.send(request("more", Some("s0"))),
         Ok(Sent::Queued { .. })
@@ -409,8 +407,6 @@ fn nothing_is_sent_or_queued_while_starting_is_off() {
 
 #[test]
 fn a_turn_that_started_as_starting_went_off_is_interrupted() {
-    // The switch goes off after the check and before the process is registered: `stop_all` found
-    // nothing to stop, so the start itself must notice.
     let (runs, spawner, sink) = setup();
     let on = switch(&runs);
     spawner.push(FakeRun::held(&[]));
@@ -429,8 +425,6 @@ fn a_message_that_restarts_as_the_switch_goes_off_is_interrupted() {
     spawner.push(FakeRun::held(&[]));
     runs.send(request("first", Some("abc"))).expect("sends");
     runs.send(request("second", Some("abc"))).expect("queues");
-    // The restart's spawn flips the switch, as `set_acting(false)` can between `finish` and the
-    // registration of the new process.
     spawner.on_spawn(Box::new(move || on.store(false, Ordering::SeqCst)));
     spawner.processes()[0].release();
     sink.wait_for(5);
@@ -440,7 +434,6 @@ fn a_message_that_restarts_as_the_switch_goes_off_is_interrupted() {
 
 #[test]
 fn a_message_queued_while_a_turn_is_starting_runs_in_its_folder() {
-    // The turn is reserved but not registered yet: the folder is the starting request's.
     let (runs, spawner, sink) = setup();
     spawner.push(FakeRun::held(&[]));
     spawner.push(FakeRun::ok(&[]));

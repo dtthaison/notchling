@@ -1,7 +1,3 @@
-//! Ports of ConsoleCore's ChatTranscriptTests and ChatRichTests: the phone's message view of a
-//! transcript. (Pictures are in `transcript_chat_images.rs`; the page cache and message UUIDs are
-//! not part of this port.)
-
 mod common;
 
 use common::*;
@@ -148,8 +144,6 @@ fn lines_over_100kb_are_skipped() {
 
 #[test]
 fn a_line_is_judged_by_its_size_without_the_base64_pictures() {
-    // A screenshot makes a line big only because of its base64; ChatTranscript cuts that out first, so
-    // the message with the picture is still shown.
     let scratch = Scratch::new("chat-image");
     let picture = "A".repeat(150_000);
     let with_picture = format!(
@@ -189,7 +183,6 @@ fn a_line_still_big_after_the_pictures_are_cut_is_skipped() {
 
 #[test]
 fn a_window_that_starts_inside_a_long_line_reads_that_line_whole() {
-    // Swift backs up to where the line starts instead of dropping it (a long line: a screenshot, say).
     let scratch = Scratch::new("chat-window");
     let long = assistant_line(&"x".repeat(5_000), "long");
     let path = write_lines(
@@ -201,7 +194,6 @@ fn a_window_that_starts_inside_a_long_line_reads_that_line_whole() {
         ],
         "window.jsonl",
     );
-    // Starts 1500 bytes before the end: inside the long line.
     let lines = chat::read_window(&path, 1_500).expect("window");
     assert_eq!(lines.len(), 2, "the long line and the last one");
     assert_eq!(lines[0].text, long);
@@ -256,7 +248,6 @@ fn only_the_tail_is_read_and_the_cut_line_is_dropped() {
         result.malformed_lines, 0,
         "a half line at the cut is not reported as malformed"
     );
-    // Adjacent user lines merge into one message.
     assert!(result
         .messages
         .last()
@@ -280,8 +271,6 @@ fn message_ids_are_stable_across_reads() {
     let unique: std::collections::HashSet<&String> = first.iter().collect();
     assert_eq!(unique.len(), first.len());
 }
-
-// MARK: rich messages
 
 fn assistant(id: &str, blocks: &str) -> String {
     format!(

@@ -1,15 +1,6 @@
-//! The daemon's session rows ([`Agent`], what the notch and Chat list) as the phone's sessions
-//! ([`Session`]), for [`super::live::Sources::claude_sessions`].
-//!
-//! The Swift phone list came from ConsoleCore's own `SessionCatalog`; the daemon has one list, the
-//! engine's, so the phone reads it too. A row's id is Claude Code's session id (the transcript's
-//! name), as the Swift bridge's was and as held prompts name it; a row with no transcript keeps
-//! its row id. Only a background conversation takes messages (`job`); the rest are view only.
-
 use super::model::{Control, Session, SessionState};
 use crate::sessions::{Agent, AgentGroup, AgentTarget};
 
-/// One row as the phone sees it.
 pub fn session(agent: &Agent) -> Session {
     let id = agent.session_id().unwrap_or_else(|| agent.id.clone());
     let control = match &agent.target {
@@ -45,8 +36,6 @@ pub fn session(agent: &Agent) -> Session {
     session
 }
 
-/// Every row, in the list's order; `claude -p` rows are left out (they can't be replied to and the
-/// hook ignores them).
 pub fn sessions(agents: &[Agent]) -> Vec<Session> {
     agents.iter().filter(|a| !a.headless).map(session).collect()
 }

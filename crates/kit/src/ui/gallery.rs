@@ -1,6 +1,3 @@
-//! Every part in every state, for review in light and dark. Rendered by `notchling-app --render
-//! kit-gallery` (U10), never shown in the app.
-
 use gpui::{div, prelude::*, px, Context, Div, Entity, Render, SharedString, Subscription, Window};
 
 use super::icons::{icon, spinner};
@@ -15,16 +12,13 @@ use crate::metric::{RADIUS_MD, SPINNER_MINI, SPINNER_SMALL, TOOL_ICON};
 use crate::part::{ButtonKind, PartState};
 use crate::{Appearance, Icon, Ink, Status, TypeRole};
 
-/// The gallery view. `appearance: None` follows the window (the system); `Some` forces one.
 pub struct KitGallery {
     appearance: Option<Appearance>,
-    /// The text editor in its states: placeholder, caret, selection, marked text, disabled.
     editors: Vec<Entity<TextEditor>>,
     _appearance_changes: Subscription,
 }
 
 impl KitGallery {
-    /// Builds the gallery and redraws it when the system appearance changes.
     pub fn new(
         appearance: Option<Appearance>,
         window: &mut Window,
@@ -41,14 +35,11 @@ impl KitGallery {
         }
     }
 
-    /// The forced appearance, or the window's.
     pub fn appearance(&self, window: &Window) -> Appearance {
         self.appearance.unwrap_or_else(|| window_appearance(window))
     }
 }
 
-/// The editor as a render would never catch it live: the caret and selection drawn without focus
-/// (`preview`), a composition marked by hand.
 fn editors(cx: &mut Context<KitGallery>) -> Vec<Entity<TextEditor>> {
     vec![
         cx.new(|cx| TextEditor::new("Reply…", 8, cx).preview()),
@@ -103,8 +94,6 @@ fn text_editors(editors: &[Entity<TextEditor>], a: Appearance) -> Div {
         }))
 }
 
-/// A list taller than its box, so the overlay scroll bar has something to do. A render pins the bar
-/// on (`NOTCHLING_RENDER_SCROLLBARS=1`); in a window it shows while this scrolls.
 fn scroll_demo(a: Appearance) -> Div {
     div()
         .w(px(260.0))
@@ -132,7 +121,6 @@ fn scroll_demo(a: Appearance) -> Div {
         ))
 }
 
-/// Every icon at the row size in its ink, and the spinner at both sizes.
 fn icon_grid(a: Appearance) -> Div {
     div()
         .w(px(440.0))
@@ -225,7 +213,6 @@ fn rows(a: Appearance) -> Div {
             true,
             a,
         ))
-        // The sidebar's: the tool icon, the account (a lane's has a branch), no account.
         .children(
             [
                 (ToolMark::Claude, Some(("me@example.com", false))),

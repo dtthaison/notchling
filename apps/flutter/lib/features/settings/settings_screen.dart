@@ -10,8 +10,6 @@ import '../../l10n/app_localizations.dart';
 import '../macs/macs_screen.dart';
 import 'app_settings.dart';
 
-/// Theme (System, Dark, Light), notification sounds, and the way to the paired Macs. The theme applies at once,
-/// with the colours crossfading (MaterialApp animates between the two themes).
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
 
@@ -80,7 +78,6 @@ class SettingsScreen extends ConsumerWidget {
   }
 }
 
-/// Three choices in one pill with a thumb that slides to the chosen one.
 class ThemeChoice extends StatelessWidget {
   const ThemeChoice({super.key, required this.mode, required this.onChanged});
   final ThemeMode mode;

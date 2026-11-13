@@ -1,10 +1,3 @@
-//! The New Session sheet, pure (part U8, `NewSessionSheet.swift`): an account column (every Claude
-//! Code account: the main login, each lane and each saved account, which gets a lane first; then
-//! each Codex and Antigravity account), a folder column, then Start. Claude Code asks the daemon
-//! for `session.new`; a folder it hasn't trusted is refused, and the Trust Folder pop-up then
-//! offers `folder.trust` and starts again. Codex and Antigravity switch login first when the
-//! account isn't the one in use, then open a draft row whose first message starts the session.
-
 use std::collections::BTreeSet;
 use std::path::Path;
 
@@ -17,10 +10,8 @@ use crate::acting::{self, Acting, Control, Request};
 use crate::chat::data::{Session, Tool};
 use crate::tools::requests::{AGY_DRAFT_PREFIX, CODEX_DRAFT_PREFIX};
 
-/// The most folders the column lists (`chatProjectFolders` keeps 30).
 pub const MAX_FOLDERS: usize = 30;
 
-/// One account to start on.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AccountChoice {
     pub title: String,
@@ -29,7 +20,6 @@ pub struct AccountChoice {
     pub pick: Pick,
 }
 
-/// The tool an account is listed under.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Section {
     Claude,
@@ -47,15 +37,10 @@ impl Section {
     }
 }
 
-/// What starting on an account takes.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Pick {
-    /// Claude Code in this config folder (`None`: the main login).
     Claude(Option<String>),
-    /// A saved Claude Code account no folder holds yet: a lane is made for it first.
     ClaudeSaved(String),
-    /// Codex or Antigravity (`provider`) on `account`; `switch` when it isn't the login in use,
-    /// since each has one login.
     Tool {
         provider: String,
         account: String,
@@ -63,15 +48,12 @@ pub enum Pick {
     },
 }
 
-/// What Start asks of the view once picked.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Plan {
-    /// `session.new`.
     Request(Request),
-    /// A lane for `account`, then `session.new` there ([`NewSession::lane_made`]).
-    Lane { account: String },
-    /// Switch `provider` to `account` first when `switch`, then a draft row in `folder`: its
-    /// first message starts the session.
+    Lane {
+        account: String,
+    },
     Draft {
         provider: String,
         account: String,
@@ -80,28 +62,17 @@ pub enum Plan {
     },
 }
 
-/// Where the sheet is.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Stage {
     Choosing,
-    /// `session.new` is out.
     Starting,
-    /// Claude Code refused the folder: the Trust Folder pop-up shows.
     Untrusted,
-    /// `folder.trust` is out.
     Trusting,
     Failed(String),
-    /// The switch to another Codex or Antigravity login needs a yes first (Antigravity restarts):
-    /// Start then says `button` and confirms.
-    Confirm {
-        message: String,
-        button: String,
-    },
-    /// Started; the sheet closes.
+    Confirm { message: String, button: String },
     Started,
 }
 
-/// The sheet's state.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NewSession {
     pub accounts: Vec<AccountChoice>,
@@ -109,13 +80,9 @@ pub struct NewSession {
     pub account: Option<usize>,
     pub folder: Option<usize>,
     pub stage: Stage,
-    /// For "~" in the folder lines.
     pub home: String,
 }
 
-/// Every account to start on: Claude Code's (`targets`: the main login, each lane, each saved
-/// account; with none known, the main login and the lanes sessions run in), then each Codex and
-/// Antigravity account that can be used (`providers`), the one in use first.
 pub fn accounts(
     targets: &[Target],
     agents: &[Agent],
@@ -179,7 +146,6 @@ pub fn accounts(
             };
             list.push(tool(&acc.email, detail, &acc.id, !in_use));
         }
-        // Signed in with a login it doesn't keep (a ChatGPT or Google account): that one.
         if usable.is_empty() {
             if let Some(title) = &p.unlisted_active_title {
                 list.push(tool(title, "In use".to_owned(), "", false));
@@ -189,8 +155,6 @@ pub fn accounts(
     list
 }
 
-/// The folders to offer: the ones picked before (`chatProjectFolders`, newest first), then where
-/// sessions run, newest first; each once, at most [`MAX_FOLDERS`].
 pub fn folders(saved: &[String], agents: &[Agent]) -> Vec<String> {
     let mut by_age: Vec<&Agent> = agents.iter().filter(|a| !a.cwd.is_empty()).collect();
     by_age.sort_by_key(|a| std::cmp::Reverse(a.since_ms));
@@ -212,8 +176,6 @@ fn last_part(path: &str) -> &str {
         .unwrap_or(path)
 }
 
-/// A new Codex or Antigravity row in `folder`, listed until its first message starts the session
-/// (`codex-new:<n>`, `agy-new:<n>`). `None` for any other provider.
 pub fn draft_session(provider: &str, folder: &str, now_ms: i64) -> Option<Session> {
     let (prefix, tool, host) = match provider {
         CODEX => (CODEX_DRAFT_PREFIX, Tool::Codex, "Codex"),
@@ -249,8 +211,6 @@ pub fn draft_session(provider: &str, folder: &str, now_ms: i64) -> Option<Sessio
     })
 }
 
-/// A folder's name in the list: its own, or with its parent when another folder shares it
-/// (`ChatModel.folderTitle`).
 pub fn folder_title(path: &str, among: &[String]) -> String {
     let name = last_part(path);
     let shared = among
@@ -262,7 +222,6 @@ pub fn folder_title(path: &str, among: &[String]) -> String {
     }
 }
 
-/// The folder's parent, with the home folder as "~".
 pub fn parent_line(path: &str, home: &str) -> String {
     let parent = Path::new(path)
         .parent()
@@ -275,7 +234,6 @@ pub fn parent_line(path: &str, home: &str) -> String {
 }
 
 impl NewSession {
-    /// The first account and the newest folder picked (`pickDefaults`).
     pub fn new(accounts: Vec<AccountChoice>, folders: Vec<String>, home: &str) -> NewSession {
         NewSession {
             account: (!accounts.is_empty()).then_some(0),
@@ -301,7 +259,6 @@ impl NewSession {
         }
     }
 
-    /// A folder chosen in the open panel goes to the top of the list.
     pub fn add_folder(&mut self, path: &str) {
         self.folders.retain(|f| f != path);
         self.folders.insert(0, path.to_owned());
@@ -310,7 +267,6 @@ impl NewSession {
         self.reset();
     }
 
-    /// Another pick clears a refusal, as `.onChange` did.
     fn reset(&mut self) {
         if matches!(
             self.stage,
@@ -331,7 +287,6 @@ impl NewSession {
         matches!(self.stage, Stage::Starting | Stage::Trusting)
     }
 
-    /// Start: an account and a folder, nothing out, and acting on.
     pub fn start_control(&self, acting: Acting) -> Control {
         let gate = acting.control();
         if !gate.enabled {
@@ -344,7 +299,6 @@ impl NewSession {
         }
     }
 
-    /// `session.new` for a Claude Code choice in a folder it already has, marking it out.
     pub fn start(&mut self) -> Option<Request> {
         let (account, folder) = self.chosen()?;
         let Pick::Claude(dir) = &account.pick else {
@@ -355,7 +309,6 @@ impl NewSession {
         Some(request)
     }
 
-    /// What Start does for the choice, marking it out.
     pub fn plan(&mut self) -> Option<Plan> {
         let (account, folder) = self.chosen()?;
         let plan = match account.pick.clone() {
@@ -376,7 +329,6 @@ impl NewSession {
         Some(plan)
     }
 
-    /// The lane made for a saved account: the choice now starts there (`session.new`).
     pub fn lane_made(&mut self, result: Result<String, String>) -> Option<Request> {
         match result {
             Ok(path) => {
@@ -393,8 +345,6 @@ impl NewSession {
         }
     }
 
-    /// The answer to switching Codex or Antigravity before a draft: done, or a yes to ask for.
-    /// True when the draft can be made.
     pub fn switched(&mut self, result: Result<Outcome, String>) -> bool {
         match result {
             Ok(Outcome::Done { .. }) => {
@@ -414,12 +364,10 @@ impl NewSession {
         }
     }
 
-    /// Whether Start now confirms a switch.
     pub fn confirming(&self) -> bool {
         matches!(self.stage, Stage::Confirm { .. })
     }
 
-    /// The daemon's answer to `session.new`.
     pub fn started(&mut self, result: Result<(), String>) {
         self.stage = match result {
             Ok(()) => Stage::Started,
@@ -428,7 +376,6 @@ impl NewSession {
         };
     }
 
-    /// The pop-up's Trust Folder and Start: `folder.trust`, marking it out.
     pub fn trust(&mut self) -> Option<Request> {
         if self.stage != Stage::Untrusted {
             return None;
@@ -442,8 +389,6 @@ impl NewSession {
         Some(request)
     }
 
-    /// The daemon's answer to `folder.trust`: trusted, it starts again (the caller sends the
-    /// returned `session.new`).
     pub fn trusted(&mut self, result: Result<(), String>) -> Option<Request> {
         match result {
             Ok(()) => self.start(),
@@ -454,14 +399,12 @@ impl NewSession {
         }
     }
 
-    /// The pop-up's Cancel.
     pub fn cancel_trust(&mut self) {
         if self.stage == Stage::Untrusted {
             self.stage = Stage::Choosing;
         }
     }
 
-    /// The footer's line: what Start will do, or what went wrong.
     pub fn footer(&self) -> String {
         match &self.stage {
             Stage::Failed(message) | Stage::Confirm { message, .. } => message.clone(),
@@ -480,7 +423,6 @@ impl NewSession {
         }
     }
 
-    /// The folder the Trust Folder pop-up names, while it asks and while it trusts.
     pub fn untrusted_folder(&self) -> Option<&str> {
         matches!(self.stage, Stage::Untrusted | Stage::Trusting)
             .then(|| self.chosen().map(|(_, f)| f))
@@ -488,7 +430,6 @@ impl NewSession {
     }
 }
 
-/// The Trust Folder pop-up's words.
 pub const TRUST_TITLE: &str = "Trust This Folder?";
 pub fn trust_text(folder: &str) -> String {
     format!(

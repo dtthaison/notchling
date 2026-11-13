@@ -1,30 +1,15 @@
-//! Answers to an AskUserQuestion, as keys for its terminal page or as the answers a hook releases
-//! it with (`ReplySender.keys`, `pageKeys`, `answerKeys`, `hookAnswers`).
-//!
-//! The terminal shows one question at a time. A digit picks a single-select option and moves on;
-//! on a multi-select page digits tick options and Tab moves on. The number after the last option is
-//! "Type something": that number, the text, Enter. Several questions (or any multi-select) end on a
-//! review screen, where `1` submits.
-
 use super::keys::{ENTER, SUBMIT, TAB};
 pub use crate::transcript::snapshot::{PendingQuestion, QuestionItem};
 use serde_json::Value;
 use std::collections::BTreeMap;
 
-/// One question's answer.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Choice {
-    /// A single-select option, 1-based.
     Option(usize),
-    /// Typed on the "Type something" row.
     Text(String),
-    /// Multi-select options, 1-based.
     Options(Vec<usize>),
 }
 
-/// Free text as it is typed: newlines become spaces (Enter would submit), and other control
-/// characters are dropped, since this text is typed as keys, not pasted (an Esc would cancel the
-/// dialog, a `\r` would submit half of it).
 pub fn typed_text(text: &str) -> String {
     text.replace("\r\n", " ")
         .replace('\n', " ")
@@ -33,8 +18,6 @@ pub fn typed_text(text: &str) -> String {
         .collect()
 }
 
-/// `ReplySender.keys(for:in:)`: one question's keys, one chunk per key press. The multi-select walk
-/// here (Tab count+1 times, then Enter) is the older one the host terminals still use.
 pub fn keys_for(choice: &Choice, item: &QuestionItem) -> Vec<String> {
     match choice {
         Choice::Option(n) => vec![n.to_string()],
@@ -52,8 +35,6 @@ pub fn keys_for(choice: &Choice, item: &QuestionItem) -> Vec<String> {
     }
 }
 
-/// `ReplySender.pageKeys`: the keys that answer one page of a background job's dialog (2.1.319).
-/// On a multi-select page digits tick and one Tab moves on.
 pub fn page_keys(choice: &Choice, item: &QuestionItem) -> Vec<String> {
     match choice {
         Choice::Options(numbers) => {
@@ -65,12 +46,10 @@ pub fn page_keys(choice: &Choice, item: &QuestionItem) -> Vec<String> {
     }
 }
 
-/// Whether the dialog ends on the review screen: several questions, or any multi-select.
 pub fn has_review(question: &PendingQuestion) -> bool {
     question.items.len() > 1 || question.items.iter().any(|i| i.multi_select)
 }
 
-/// `ReplySender.answerKeys`: every key of an answer typed blind (host terminals, the phone).
 pub fn answer_keys(choices: &[Choice], question: &PendingQuestion) -> Vec<String> {
     let mut keys: Vec<String> = question
         .items
@@ -84,9 +63,6 @@ pub fn answer_keys(choices: &[Choice], question: &PendingQuestion) -> Vec<String
     keys
 }
 
-/// `ReplySender.hookAnswers`: the answers a hook-held question is released with, keyed by question
-/// text. Multi-select labels are joined with ", " (Claude Code does the same). An option out of
-/// range is skipped, and a question left with nothing is left out.
 pub fn hook_answers(choices: &[Choice], question: &PendingQuestion) -> BTreeMap<String, String> {
     let mut answers = BTreeMap::new();
     for (item, choice) in question.items.iter().zip(choices) {
@@ -106,9 +82,6 @@ pub fn hook_answers(choices: &[Choice], question: &PendingQuestion) -> BTreeMap<
     answers
 }
 
-/// Reads the local API's `answers` (`[[int] | string]`, one per question, options 1-based) against
-/// the question's items: a string is typed text, a list on a multi-select page ticks those options,
-/// and a list of one on a single-select page picks it.
 pub fn choices_from_json(answers: &Value, items: &[QuestionItem]) -> Result<Vec<Choice>, String> {
     let list = answers
         .as_array()
@@ -187,7 +160,6 @@ mod tests {
         keys.iter().map(|k| k.to_string()).collect()
     }
 
-    // HostReplyTests, key for key.
     #[test]
     fn answer_keys_for_a_single_select_question() {
         assert_eq!(
@@ -238,7 +210,6 @@ mod tests {
         assert!(hook_answers(&[Choice::Option(0)], &q(vec![single()])).is_empty());
     }
 
-    // AskDialogTests.testKeysForAReadQuestion and testMultiSelectTicksThenTabsOn.
     #[test]
     fn keys_for_a_read_question() {
         let mut item = single();

@@ -1,7 +1,3 @@
-//! The ops a logged-in client can ask for (the rest of Swift `BridgeRouter`). Request fields are
-//! read as leniently as the Swift app read them: a field of the wrong type counts as absent, so a
-//! default applies where there is one.
-
 use super::backend::AuditEntry;
 use super::connection::Connection;
 use super::model::{
@@ -39,13 +35,11 @@ fn busy_sending() -> BridgeFailure {
     BridgeFailure::busy("Đang gửi tin trước đó vào session này.")
 }
 
-/// `http(s)://localhost` or `http(s)://127.0.0.1`, any port and path (`WebURLResolver.localURL`).
 pub fn local_url(text: &str) -> Option<&str> {
     let rest = text
         .strip_prefix("http://")
         .or_else(|| text.strip_prefix("https://"))?;
     let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
-    // The host is what follows any user info.
     let host_port = authority.rsplit('@').next().unwrap_or_default();
     let (host, port) = match host_port.split_once(':') {
         Some((host, port)) => (host, Some(port)),
@@ -64,7 +58,6 @@ impl Router {
             .ok_or_else(|| BridgeFailure::not_found("Không có session này."))
     }
 
-    /// Runs `send` while no other send to the same session from this connection is running.
     fn exclusive<T>(
         &self,
         connection: &Connection,
@@ -99,7 +92,6 @@ impl Router {
         Ok(answer)
     }
 
-    /// The JSON answer first, then an `IMG1` binary frame; the returned `{sent}` is the second answer.
     pub(crate) fn chat_image(
         &self,
         body: &Body,
@@ -168,7 +160,6 @@ impl Router {
                 .ok_or_else(|| BridgeFailure::not_found("Session này chưa có URL web."))?,
         };
         let jpeg = self.backend.web_snapshot(&url, width)?;
-        // The JSON answer goes first, so the client knows a binary frame follows.
         let announce = json!({"binary": true, "bytes": jpeg.len(), "format": "jpeg", "url": url});
         connection.send_text(wire::ok(id, announce));
         connection.send_binary(wire::frame::snapshot(wire::request_number(id), &jpeg));
@@ -197,8 +188,6 @@ impl Router {
         Ok(json!({"sent": true}))
     }
 
-    /// One Esc interrupts the running turn, then Claude Code runs the queued message by itself.
-    /// Only terminals the computer owns.
     pub(crate) fn session_send_now(
         &self,
         body: &Body,
@@ -227,8 +216,6 @@ impl Router {
         body: &Body,
         connection: &Arc<Connection>,
     ) -> Result<Value, BridgeFailure> {
-        // The photo only ever reaches the session as an acting call: while acting is off, none of
-        // it is taken in.
         if !self.backend.acting_on() {
             return Err(BridgeFailure::invalid(super::live::ACTING_OFF));
         }
@@ -294,8 +281,6 @@ impl Router {
                 .save(&upload.data, ext, self.now_ms())
                 .map_err(|_| BridgeFailure::internal("Mac không lưu được ảnh."))?;
             let message = ImageStore::message(&upload.caption, &file.to_string_lossy());
-            // The path reaches the session only through the backend, which refuses while acting is
-            // off; a photo nobody was told about is not kept.
             let sent = self.backend.send_message(&message, &target);
             if sent.is_err() {
                 let _ = std::fs::remove_file(&file);
@@ -357,8 +342,6 @@ impl Router {
         connection: &Arc<Connection>,
     ) -> Result<Value, BridgeFailure> {
         let cwd = require(body, "cwd")?;
-        // `modelId` (from the `models` of sessions.list) wins over the old short `model`; the
-        // backend's own check decides, so no second list can disagree with the start.
         let model_id = match body.get("modelId") {
             None | Some(Value::Null) => None,
             Some(Value::String(id)) if self.backend.model_allowed(id) => Some(id.as_str()),
@@ -379,7 +362,6 @@ impl Router {
         Ok(json!({"started": true}))
     }
 
-    /// Only view-only sessions; the backend checks again that the original is gone or stoppable.
     pub(crate) fn session_takeover(
         &self,
         body: &Body,
@@ -445,8 +427,6 @@ impl Router {
         if let Some(id) = session_id {
             let subagent = string(body, "subagentId");
             let current = self.backend.chat_messages(id, subagent).unwrap_or_default();
-            // Everything after the phone's newest message is news and gets pushed, so a reply that
-            // came while the phone looked elsewhere isn't lost. Unknown or absent: all is known.
             let known_up_to = string(body, "lastMessageId")
                 .and_then(|last| current.iter().position(|m| m.id == last))
                 .map_or(current.len(), |i| i + 1);
@@ -497,8 +477,6 @@ fn upload_failure(error: UploadError) -> BridgeFailure {
     }
 }
 
-/// `choice`: a 1-based option number or its label (an array for several questions); `text`: a
-/// free answer to a single question.
 pub fn answers(body: &Body, questions: &[PromptQuestion]) -> Result<Vec<String>, BridgeFailure> {
     if let Some(text) = string(body, "text") {
         if questions.len() != 1 || text.is_empty() || text.chars().count() > 500 {

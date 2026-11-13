@@ -1,25 +1,16 @@
-//! Codex and Antigravity rows closed in Chat (`chatClosedSessions`: row id to when, in seconds, the
-//! Swift app's key). Closing only takes the row off the sidebar: the session stays in Codex's or
-//! Antigravity's own files, and the row comes back once the session is used again. Claude Code
-//! sessions aren't closed this way; they leave the sidebar when they exit.
-
 use std::collections::HashMap;
 
 use serde_json::{Map, Value};
 
 use super::data::{Session, Tool};
 
-/// The setting's key.
 pub const KEY: &str = "chatClosedSessions";
-/// How long a closed row is remembered, in seconds (the rows themselves go after 14 days).
 const KEEP_S: f64 = 30.0 * 24.0 * 3600.0;
 
-/// Whether `tool`'s rows can be closed.
 pub fn closable(tool: Tool) -> bool {
     matches!(tool, Tool::Codex | Tool::Antigravity)
 }
 
-/// Whether `session` was closed after it was last used.
 pub fn is_closed(session: &Session, closed: &HashMap<String, f64>) -> bool {
     closable(session.tool)
         && closed
@@ -27,7 +18,6 @@ pub fn is_closed(session: &Session, closed: &HashMap<String, f64>) -> bool {
             .is_some_and(|at| session.agent.since_ms as f64 / 1000.0 <= *at)
 }
 
-/// Closes `ids` at `now_s`, forgetting closes older than a month.
 pub fn close(closed: &mut HashMap<String, f64>, ids: &[String], now_s: f64) {
     closed.retain(|_, at| now_s - *at < KEEP_S);
     for id in ids {
@@ -35,7 +25,6 @@ pub fn close(closed: &mut HashMap<String, f64>, ids: &[String], now_s: f64) {
     }
 }
 
-/// The ids of every `tool` row in `sessions`, for Close All.
 pub fn ids_of(sessions: &[Session], tool: Tool) -> Vec<String> {
     sessions
         .iter()
@@ -44,7 +33,6 @@ pub fn ids_of(sessions: &[Session], tool: Tool) -> Vec<String> {
         .collect()
 }
 
-/// The setting's value read back (anything that isn't a number is skipped).
 pub fn from_value(value: Option<&Value>) -> HashMap<String, f64> {
     value
         .and_then(Value::as_object)

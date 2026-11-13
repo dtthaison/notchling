@@ -1,6 +1,3 @@
-"""Push wrapper: branch rules, the App JWT, the narrowed installation token, a real push to a local bare
-repo, and the promise that the token is in no argv and no file. A fake HTTP server stands in for GitHub."""
-
 from __future__ import annotations
 
 import base64
@@ -22,7 +19,6 @@ import push_wrapper
 from tests.test_preflight import FakeGitHub
 
 TOKEN = "ghs_SECRETINSTALLATIONTOKEN0123456789"
-# The wrapper looks for openssl (and git) only in these folders, so the tests need it there too.
 HAVE_OPENSSL = any(os.access(os.path.join(d, "openssl"), os.X_OK) for d in push_wrapper.TOOL_DIRS)
 GIT_ENV = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.com",
            "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.com",
@@ -42,7 +38,6 @@ _KEY = []
 
 
 def throwaway_key():
-    """A throwaway RSA key from `openssl genrsa`, made once per run (it takes a second)."""
     if not _KEY:
         _KEY.append(subprocess.run(["openssl", "genrsa", "2048"], check=True, capture_output=True,
                                    stdin=subprocess.DEVNULL).stdout)
@@ -50,7 +45,6 @@ def throwaway_key():
 
 
 class Recording(push_wrapper.Runner):
-    """The real runner, remembering every call so a test can read the argv and env."""
 
     def __init__(self):
         self.calls = []
@@ -84,7 +78,7 @@ class Base(unittest.TestCase):
         (self.wt / "a.txt").write_text("two\n")
         git(self.wt, "commit", "-q", "-am", "work")
         self.sha = git(self.wt, "rev-parse", "HEAD")
-        self.body = b"What changed and why.\n"  # the PR body, as sd pipes it on stdin
+        self.body = b"What changed and why.\n"
 
     def start(self, routes=None):
         r = {("GET", "/repos/o/r/installation"): (200, {"id": 77}),
@@ -95,7 +89,6 @@ class Base(unittest.TestCase):
              ("DELETE", "/installation/token"): (204, None)}
         r.update(routes or {})
         self.srv = FakeGitHub(r)
-        # The shared fake answers GET and POST only; the wrapper also revokes its token with a DELETE.
         self.srv.server.RequestHandlerClass.do_DELETE = lambda h: h._serve("DELETE")
         self.addCleanup(self.srv.close)
         self.cfg = push_wrapper.Config(app_id="12345", key_path=str(self.key), repo="o/r",
@@ -133,8 +126,6 @@ AGENTS_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 class RunnerHygiene(unittest.TestCase):
     def test_children_never_inherit_stdin(self):
-        """A child that reads stdin (`cat`, a git filter or fsmonitor) must see end-of-file at once, even
-        when the wrapper's own stdin is a pipe that stays open."""
         code = ("import push_wrapper, sys\n"
                 "r = push_wrapper.Runner()(['/bin/cat'])\n"
                 "sys.exit(0 if r.returncode == 0 and r.stdout == b'' else 3)\n")
@@ -308,11 +299,10 @@ class SuccessPath(Base):
         self.assertEqual(env["GIT_TERMINAL_PROMPT"], "0")
         self.assertEqual(env["GIT_CONFIG_GLOBAL"], os.devnull)
         env = push_wrapper.git_env(TOKEN, str(self.bare), "/scratch")
-        self.assertNotIn("GIT_CONFIG_COUNT", env)  # a local path takes no header
+        self.assertNotIn("GIT_CONFIG_COUNT", env)
 
     def test_the_scratch_dir_is_removed_even_when_the_push_fails(self):
         self.start()
-        # Make the remote refuse by pre-creating a diverged branch of the same name.
         other = self.root / "other"
         subprocess.run(["git", "clone", "-q", str(self.bare), str(other)], check=True, env=GIT_ENV,
                        capture_output=True, stdin=subprocess.DEVNULL)
@@ -421,19 +411,16 @@ class ApiErrors(Base):
         self.start({("POST", "/repos/o/r/pulls"): (403, {"message": "no"})})
         res = self.go()
         self.assertEqual(res.code, 2)
-        self.assertIn("pushed", res.message)  # the branch is up; only the PR is missing
+        self.assertIn("pushed", res.message)
 
 
 ZWJ = "\u200d"
-# A reader's approximation of what GitHub treats as a closing reference (not the wrapper's own regex).
 GITHUB_CLOSES = re.compile(r"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\b[\s:]*(?:[\w.-]+/[\w.-]+)?#\d+"
                            r"|\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\b[\s:]*https://github\.com/\S+",
                            re.I)
 
 
 class PrText(Base):
-    """The body (and title) are the agent's words in a PR the maintainers' notifications and issue links
-    will act on: they must not ping people or close issues the agent was not given."""
 
     def clean(self, text, repo="o/r", issue=5):
         return push_wrapper.neutralize_text(text, repo, issue)
@@ -473,7 +460,7 @@ class PrText(Base):
         pr = json.loads([r for r in self.srv.requests if r["path"] == "/repos/o/r/pulls"][0]["body"])
         self.assertNotIn("@maintainer", pr["body"])
         self.assertIn("@%smaintainer" % ZWJ, pr["body"])
-        self.assertIn("Closes #5", pr["body"])  # its own issue
+        self.assertIn("Closes #5", pr["body"])
         self.assertIsNone(GITHUB_CLOSES.search(pr["body"].replace("Closes #5", "")), pr["body"])
         self.assertIsNone(GITHUB_CLOSES.search(pr["title"]), pr["title"])
         self.assertNotIn("@bob", pr["title"])
@@ -481,7 +468,6 @@ class PrText(Base):
 
 
 class Revocation(Base):
-    """The installation token is good for an hour; once the wrapper is done with it, it is revoked."""
 
     def revokes(self):
         return [r for r in self.srv.requests if (r["method"], r["path"]) == ("DELETE", "/installation/token")]
@@ -532,7 +518,6 @@ class Revocation(Base):
 
 
 class Rejections(Base):
-    """A push the remote refuses is a refusal (exit 1) that says why; only trouble reaching it is an error."""
 
     def hook(self, script):
         hook = self.bare / "hooks" / "pre-receive"
@@ -581,8 +566,6 @@ class Rejections(Base):
 
 
 class WorkflowFiles(Base):
-    """The App has no `workflows` permission, so GitHub refuses any push that touches .github/workflows/.
-    The wrapper says so itself, before it mints a token."""
 
     def commit_file(self, rel, text="on: push\n"):
         path = self.wt / rel
@@ -642,7 +625,7 @@ class WorkflowFiles(Base):
         self.start()
         self.commit_file(".github/workflows/ci.yml")
         git(self.wt, "branch", "-q", "-D", "main")
-        res = self.go()  # the local bare remote has no such rule, so this goes through
+        res = self.go()
         self.assertEqual(res.code, 0, res)
 
 
@@ -650,8 +633,6 @@ TESTING = {"NOTCHLING_PUSH_WRAPPER_TESTING": "1"}
 
 
 class CallerEnvironment(Base):
-    """What the caller (sd through sudo, or anyone) controls besides the arguments: PATH, the working
-    directory, environment variables. None of it may choose which git or openssl runs."""
 
     def planted_tools(self):
         evil = self.root / "evil-bin"
@@ -731,7 +712,6 @@ class CallerEnvironment(Base):
         self.assertEqual(out, {"PATH": push_wrapper.SAFE_PATH, "LANG": "C", "HTTPS_PROXY": "http://proxy:3128"})
 
     def test_the_documented_invocation_runs_isolated(self):
-        """`python3 -I push_wrapper.py ...` as the sudoers line has it: the caller's PYTHONPATH is ignored."""
         lib = self.root / "pylib"
         lib.mkdir()
         marker = self.root / "shadowed-json-ran"
@@ -792,7 +772,6 @@ class ConfigRules(Base):
 
 
 class EndpointRules(Base):
-    """api_url and remote_url are where the App's JWT and token go. Only GitHub's, unless a test says so."""
 
     def write(self, **over):
         data = {"app_id": 12345, "key_path": str(self.key), "repo": "o/r"}
@@ -840,7 +819,6 @@ class EndpointRules(Base):
 
 
 class HostileWorktree(Base):
-    """The worktree belongs to the agent. Nothing in its git config or attributes may run as the wrapper."""
 
     def test_config_and_attributes_do_not_execute(self):
         self.start()
@@ -859,7 +837,6 @@ class HostileWorktree(Base):
         hook.parent.mkdir(exist_ok=True)
         hook.write_text("#!/bin/sh\necho hook >> %s\n" % marker)
         hook.chmod(0o755)
-        # Make every file look modified by stat so a naive `git status` has to run the clean filter.
         os.utime(self.wt / "a.txt", (1, 1))
         naive = subprocess.run(["git", "-C", str(self.wt), "status", "--porcelain"], capture_output=True,
                                env=GIT_ENV, stdin=subprocess.DEVNULL)
@@ -873,8 +850,6 @@ class HostileWorktree(Base):
 
 
 class UntrustedFiles(Base):
-    """What the wrapper reads by a path the agent can influence: the index of its worktree and the
-    object store of its repository. And what it will not put in a pull request."""
 
     def make_plain_file(self, content=b"data"):
         p = self.root / "plain"
@@ -934,7 +909,7 @@ class UntrustedFiles(Base):
         self.start()
         index = self.wt / ".git" / "index"
         index.unlink()
-        index.symlink_to("/dev/zero")  # a plain copyfile of this would fill the disk
+        index.symlink_to("/dev/zero")
         self.assertRefused(self.go(), "index")
 
     def test_nested_alternates_are_refused(self):
@@ -989,7 +964,6 @@ class Cli(Base):
         return code, out.getvalue(), err.getvalue()
 
     def cfg_path(self, **over):
-        """A config pointing at the fake GitHub and the local bare remote, mode 0600."""
         data = {"app_id": 12345, "key_path": str(self.key), "repo": "o/r", "api_url": self.srv.url,
                 "remote_url": str(self.bare)}
         data.update(over)
@@ -1016,8 +990,6 @@ class Cli(Base):
         self.assertIn("piped words", json.loads(pr["body"])["body"])
 
     def test_no_option_names_a_body_path(self):
-        """The App key is a file this user can read; a `--body-file` that follows a link to it would post it.
-        So there is no such option: the parser refuses it (exit 2) before anything is read or sent."""
         self.start()
         link = self.root / "body.md"
         link.symlink_to(self.key)

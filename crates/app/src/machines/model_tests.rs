@@ -1,6 +1,3 @@
-//! The window's model over a world in memory: a registry that saves to a list, a vault of names,
-//! and the engine's `Refusing` or `ScriptedRunner`, so no test starts ssh, `gh` or `sudo`.
-
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
@@ -137,7 +134,6 @@ pub(super) fn world_with(
     world_with_secrets(machines, runner, scripted, Arc::new(NoSecrets))
 }
 
-/// A world whose engine reads its vault values from `secrets`.
 pub(super) fn world_with_secrets(
     machines: Vec<Machine>,
     runner: Arc<dyn Runner>,
@@ -191,7 +187,6 @@ pub(super) fn world_with_secrets(
     }
 }
 
-/// A world whose runner refuses everything (the tool before handover).
 pub(super) fn off_world(machines: Vec<Machine>) -> World {
     world_with(
         machines,
@@ -200,7 +195,6 @@ pub(super) fn off_world(machines: Vec<Machine>) -> World {
     )
 }
 
-/// A world whose runner records every call and answers each with an empty success.
 pub(super) fn scripted_world(machines: Vec<Machine>) -> World {
     let scripted = Arc::new(ScriptedRunner::new());
     world_with(machines, scripted.clone(), scripted)
@@ -218,11 +212,9 @@ fn an_off_tool_blocks_every_control_that_runs_something_and_says_why() {
     let mut model = off_world(vec![mac("m1")]).model;
     assert!(!model.can_act());
     assert_eq!(model.off_reason(), Some(OFF));
-    // Add machine… is blocked by the tool being off, with the same reason
     assert!(model.can_add());
     assert_eq!(model.add_block().as_deref(), Some(OFF));
 
-    // handed over: everything is live
     model.parts.off = None;
     assert!(model.can_act());
     assert_eq!(model.off_reason(), None);
@@ -352,13 +344,11 @@ fn set_up_shows_the_steps_exact_commands_and_runs_nothing_until_confirmed() {
     assert_eq!(prompt.intro(), "These commands run on worker@m1.test:");
     assert!(w.runner.calls().is_empty(), "showing a plan runs nothing");
 
-    // Cancel: the plan is forgotten, so a confirm of it would fail; nothing ran
     w.model.cancel_sheet();
     assert!(w.model.sheet.is_none());
     assert!(w.model.confirm().is_none());
     assert!(w.runner.calls().is_empty());
 
-    // Run: without Reachable ✓ the engine refuses, and the card gets the line
     w.model.request_set_up(&StepId::BASE_TOOLS, "m1");
     let run = w.model.confirm().expect("a confirmed run");
     assert_eq!(run.machine, "m1");
@@ -392,7 +382,6 @@ fn the_running_switch_waits_for_the_steps_before_it() {
     w.model.request_toggle("m1", true);
     assert!(w.model.sheet.is_none());
     assert!(w.model.outcomes["m1"].text.starts_with("waits for "));
-    // off never waits: its plan shows (a launchd switch as the worker: no admin on a Mac)
     w.model.request_toggle("m1", false);
     let prompt = fix_sheet(&w.model);
     assert_eq!(prompt.plan.kind, PlanKind::Running(false));
@@ -410,10 +399,8 @@ fn an_admin_step_needs_the_password_for_the_one_run() {
     assert_eq!(prompt.plan.admin, AdminNeed::Password);
     assert!(prompt.needs_password() && !prompt.can_run(false) && prompt.can_run(true));
     assert!(prompt.text().starts_with("as admin:"));
-    // confirm without a password is refused and recorded
     assert!(w.model.confirm().is_none());
     assert_eq!(w.model.outcomes["m1"].text, "needs the admin password");
-    // with one, the run is handed back; the password is in the answer and nowhere in the model
     w.model.request_set_up(&StepId::STAYS_AWAKE, "m1");
     w.model.password_field().unwrap().push_str("hunter2");
     let run = w.model.confirm().expect("a run");
@@ -536,7 +523,6 @@ fn set_up_all_asks_for_an_admin_step_through_the_sheet() {
         needs_admin: true,
     };
     let asked = std::thread::spawn(move || asks.ask("m1", &step));
-    // the tick picks the ask up once it is there
     let mut shown = false;
     for _ in 0..200 {
         if w.model.tick() {
@@ -560,7 +546,6 @@ fn set_up_all_asks_for_an_admin_step_through_the_sheet() {
     assert!(matches!(answer, AdminAnswer::Password(p) if p.expose() == "pw"));
     assert!(w.model.sheet.is_none());
 
-    // a cancel answers None
     let asks = w.model.asks.clone();
     let step = ApprovedStep {
         id: StepId::STAYS_AWAKE,

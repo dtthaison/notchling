@@ -1,8 +1,3 @@
-//! Swift `SecretVaultTests`, ported: names and variables, `find`, the environment, notes, how-to,
-//! expiry, request prefill and its changes, and the skill text (reminders and Renew are in
-//! `tests_reminders.rs`). "Today" is a day number, so nothing depends on the clock or the time
-//! zone.
-
 use super::entry::*;
 use super::expiry::{self, Status};
 use super::list::{self, describe, environment, find, problem};
@@ -163,7 +158,6 @@ fn urls_add_a_variable_and_a_label() {
         ..VaultEntry::new("npm", Kind::Token)
     };
     assert_eq!(list::label(&npm), "npm (registry.npmjs.org)");
-    // Lists saved before URLs existed still load.
     let old = br#"[{"name":"a","kind":"token","note":"","userVar":"","secretVar":"A_TOKEN","updated":"2026-11-05T00:00:00Z"}]"#;
     assert_eq!(list::decode(old)[0].url_var(), None);
 }
@@ -296,7 +290,6 @@ fn expiry_day_conversion() {
     assert_eq!(expiry::day_text(day("2026-12-06")), "2026-12-06");
     assert_eq!(expiry::day_text(day("2028-02-29")), "2028-02-29");
     assert_eq!(expiry::day_text(0), "1970-01-01");
-    // A local time near midnight UTC is still a day number.
     let noon = day("2026-12-06") as f64 * 86_400.0 + 43_200.0;
     assert!((expiry::today_local(noon) - day("2026-12-06")).abs() <= 1);
 }
@@ -333,7 +326,6 @@ fn edit_prefill_merges_passed_fields_over_saved_ones() {
         (Some("https://x.io"), "n", Some("h"))
     );
     assert_eq!(all.expires.as_deref(), Some("2027-03-04"));
-    // Identity, kind and variables never change, and a bad date is ignored.
     assert_eq!(
         (all.name.as_str(), all.secret_var.as_str()),
         ("gh", "GH_TOKEN")

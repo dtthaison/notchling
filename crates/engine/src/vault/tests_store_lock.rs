@@ -1,7 +1,3 @@
-//! The store while a Keychain read waits (on macOS it can wait on the user's prompt for as long
-//! as the prompt stays up): forgetting never waits for it, and a read that started before a
-//! forget doesn't put the values back in memory.
-
 use super::entry::{Kind, VaultEntry};
 use super::store::{KeychainError, VaultKeychain, VaultStore};
 use std::path::PathBuf;
@@ -9,14 +5,11 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-/// An item whose reads each wait until the test lets them go.
 #[derive(Clone)]
 pub(crate) struct GatedItem {
     pub data: Arc<Mutex<Option<Vec<u8>>>>,
     pub reads: Arc<Mutex<u32>>,
-    /// Told when a read starts.
     entered: Arc<Mutex<Sender<()>>>,
-    /// A read waits for one message here.
     release: Arc<Mutex<Receiver<()>>>,
 }
 
@@ -98,7 +91,6 @@ fn forget_never_waits_for_a_keychain_read_and_the_read_doesnt_refill_the_cache()
     assert!(forgot.is_ok(), "forget waited for the Keychain read");
     let got = reader.join().unwrap().unwrap();
     assert_eq!(got.map(|v| v.secret).as_deref(), Some("fake-npm-0001"));
-    // The read began before the forget: nothing it read stays in memory.
     gate.release.send(()).unwrap();
     store.value(&entry).unwrap();
     assert_eq!(*item.reads.lock().unwrap(), 2, "the next use reads again");

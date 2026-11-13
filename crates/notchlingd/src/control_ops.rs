@@ -1,34 +1,3 @@
-//! Session control (E11) as daemon ops: `engine::control`'s planners, run through the daemon's
-//! [`notchling_engine::control::Launcher`]. App tier and behind the acting switch like every acting
-//! op ([`crate::acting_ops`] checks both before these run).
-//!
-//! | Op | Args | Reply |
-//! | --- | --- | --- |
-//! | `session.stop` | `{id}` | `{"stopped": true}` |
-//! | `session.remove` | `{id}` | `{"removed": true}` |
-//! | `session.new` | `{folder, config_dir?, flags?: ["--model", <an allowed model>]}` | `{"jobId": "6ce4c19c" or null}` |
-//! | `folder.trust` | `{folder, config_dir?}` | `{"trusted": true}` |
-//! | `session.move` | `{id, to_config_dir}` | `{"jobId": ...}` |
-//! | `session.command` | `{id, command}` | `{"sent": true}` |
-//!
-//! `config_dir` and `to_config_dir` name a lane by its folder (a `lanes.json` entry), or the main
-//! login by `~/.claude` (or `null`, or left out); any other folder is refused. `session.new`
-//! refused by Claude Code for an untrusted folder fails with Claude Code's words ("Workspace not
-//! trusted"); `folder.trust` then a second `session.new` is the way on. `session.command` types a
-//! slash command like a reply; one that opens a menu (`/plugin`, `/mcp`…) needs a visible terminal,
-//! so it is refused here.
-//!
-//! What a caller may change is narrow, since whoever holds the app tier for a moment shouldn't be
-//! able to widen what a session may do:
-//!
-//! - `flags` is nothing, or exactly `--model <id>` with a model the catalog allows: the built-in
-//!   ones plus what the tool lists live (`Catalog::is_allowed`, which sees through a `[1m]` or a
-//!   date suffix). The user's `catalog.json` renames and prices models but never adds one.
-//!   Anything else is refused, naming the allowed ids.
-//! - `folder.trust` takes an absolute path to a folder that exists, isn't `/` or the home folder,
-//!   and that `session.new` was refused as untrusted within the last [`TRUST_WINDOW`] (compared
-//!   canonical). It trusts only what the user just tried to start a session in.
-
 use crate::acting_ops::{bad, text_arg, ActingOps, NoLog};
 use crate::catalog_ops::CatalogService;
 use notchling_engine::catalog::Tool;
@@ -45,7 +14,6 @@ use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-/// How long after `session.new` was refused a folder may be trusted.
 pub const TRUST_WINDOW: Duration = Duration::from_secs(10 * 60);
 
 fn failed(e: ControlError) -> ApiError {
@@ -57,7 +25,6 @@ fn refused(e: PlanError) -> ApiError {
 }
 
 impl ActingOps {
-    /// Runs one control op; the switch and the tier were checked already.
     pub(crate) fn control(&self, op: &str, args: &Value) -> Result<Value, ApiError> {
         match op {
             ops::SESSION_STOP => {
@@ -104,7 +71,6 @@ impl ActingOps {
         self.run_raw(plan).map_err(failed)
     }
 
-    /// Runs a control plan through the daemon's launcher (Move All's stops and resumes too).
     pub(crate) fn run_raw(&self, plan: &Plan) -> Result<Option<String>, ControlError> {
         let pause = |ms: u64| (self.pause)(ms);
         execute(plan, self.launcher.as_ref(), &pause).map(|report| report.job_id)
@@ -114,8 +80,6 @@ impl ActingOps {
         self.refused.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    /// Before `claude` runs in a lane: the lane skips Claude Code's first-run screens (see
-    /// `LaneStore::finish_onboarding`). Best effort; a lane it can't fix still gets its try.
     fn onboard_lane(&self, dir: Option<&str>) {
         let Some(lane) = dir.and_then(|d| lane_at_path(&self.roots, d)) else {
             return;
@@ -149,7 +113,6 @@ impl ActingOps {
             Ok(job) => Ok(json!({"jobId": job})),
             Err(e) => {
                 if matches!(e, ControlError::Untrusted(_)) {
-                    // What `folder.trust` may then trust, for a while.
                     if let Ok(real) = std::fs::canonicalize(folder) {
                         let mut refusals = self.refusals();
                         refusals.retain(|_, at| at.elapsed() < TRUST_WINDOW);
@@ -161,7 +124,6 @@ impl ActingOps {
         }
     }
 
-    /// The canonical folder `folder.trust` may trust: see the module's rules.
     fn trustable(&self, folder: &str) -> Result<PathBuf, ApiError> {
         let path = Path::new(folder);
         if !path.is_absolute() {
@@ -206,8 +168,6 @@ impl ActingOps {
         Ok(json!({"sent": true}))
     }
 
-    /// A lane's folder as `lanes.json` spells it, or `None` for the main login (named by its folder,
-    /// `null`, or left out). Anything else is refused: a command must not run in a stray folder.
     fn config_dir_arg(&self, args: &Value, key: &str) -> Result<Option<String>, ApiError> {
         let path = match args.get(key) {
             None | Some(Value::Null) => return Ok(None),
@@ -230,7 +190,6 @@ impl ActingOps {
     }
 }
 
-/// `flags`: nothing, or `["--model", <a model the catalog allows>]`.
 fn flags_arg(args: &Value, catalog: &CatalogService) -> Result<Vec<String>, ApiError> {
     let list = match args.get("flags") {
         None | Some(Value::Null) => return Ok(Vec::new()),

@@ -1,35 +1,3 @@
-//! E8: account logins. Claude Code's ([`claude`], E8a): saved logins, the live login, switching
-//! and the browser sign-in; lanes (other config folders on other accounts) are [`crate::lanes`].
-//! The other providers (E8b) are Codex ([`codex`]), Antigravity ([`antigravity`]) and Claude
-//! Desktop ([`desktop`]), listed and switched through [`crate::providers`].
-//!
-//! Every outside effect sits behind a trait so tests never touch a real login:
-//!
-//! - the Keychain, through `/usr/bin/security` with the value as hex on stdin (never the Security
-//!   framework: an ad hoc signed build would lose access to its own items on every rebuild). There
-//!   are two faces over the one process runner, because the two halves need different shapes:
-//!   - [`keychain::SecurityRunner`] runs `security` itself (the real one is
-//!     [`keychain::SystemSecurity`], the one place that launches it). Claude Code's logins use
-//!     [`keychain::Keys`] over it: typed errors, values as [`Secret`], a write read back, and a
-//!     value too long for `security -i`'s line refused rather than put on argv.
-//!   - [`generic_password::Keychain`] is the plain read/write/delete the E8b stores use, with the
-//!     item shapes the Swift app wrote (Codex's base64 copies, Antigravity's go-keyring value). Its
-//!     real form, [`generic_password::SecurityTool`], runs through [`keychain::SystemSecurity`] too.
-//!   - Either way a value too long for one `security -i` line is split over several items when the
-//!     item is Notchling's own saved copy ([`chunked`] has the format), and refused when another
-//!     tool reads the item; it never goes on argv.
-//! - processes and apps are [`procs::Procs`] and [`procs::Apps`];
-//! - the network is [`http::HttpClient`] (Claude's profile and token endpoints) and
-//!   [`crate::providers::HttpClient`] (the other providers' limits);
-//! - the files are paths given by the caller, never found from the environment here.
-//!
-//! The rules from the Swift notes hold whatever the sources are: a token that is in use (the main
-//! login's, a lane's, Codex's or Antigravity's live one) is never renewed, since refresh tokens
-//! rotate; an account is live in one place; a switch replaces only `claudeAiOauth` in `Claude
-//! Code-credentials` and only `oauthAccount` in `~/.claude.json`. No token reaches an error, a log
-//! or a `Debug` print: tokens travel as [`Secret`], and login objects as [`Login`]. Built and
-//! switched off: the daemon calls into these only while its `accounts` switch is on.
-
 pub mod antigravity;
 pub mod book;
 pub mod chunked;
@@ -47,8 +15,6 @@ pub mod procs;
 use serde_json::{Map, Value};
 use std::fmt;
 
-/// A token or other credential. Its `Debug` and `Display` say `[secret]`, so a stray `{:?}` in a
-/// log or an error can't print it; [`Secret::expose`] is the one way to read it.
 #[derive(Clone, PartialEq, Eq)]
 pub struct Secret(String);
 
@@ -57,7 +23,6 @@ impl Secret {
         Secret(value.into())
     }
 
-    /// The value, for the one place that sends it (a request header, the Keychain's stdin).
     pub fn expose(&self) -> &str {
         &self.0
     }
@@ -79,8 +44,6 @@ impl fmt::Display for Secret {
     }
 }
 
-/// A JSON object holding tokens (a `claudeAiOauth` login, a saved slot, a Keychain item's whole
-/// value). Its `Debug` names only the keys.
 #[derive(Clone, Default, PartialEq)]
 pub struct Login(pub Map<String, Value>);
 
@@ -93,7 +56,6 @@ impl Login {
         self.0.get(key).and_then(Value::as_str)
     }
 
-    /// A nested object (`claudeAiOauth`, `oauthAccount`).
     pub fn object(&self, key: &str) -> Option<Login> {
         match self.0.get(key) {
             Some(Value::Object(map)) => Some(Login(map.clone())),

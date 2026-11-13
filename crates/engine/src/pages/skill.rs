@@ -1,13 +1,5 @@
-//! The text of the `notchling-pages` skill (Swift `PageSkill`): how an agent finds and reads the
-//! Artifact pages the library keeps, with `notchling page` and `notchling pages`.
-//!
-//! Only the text; `install` writes it into Claude Code's skills folder (the Artifact tool is
-//! Claude Code's, so Codex and Antigravity get no copy).
-
-/// The skill's name and its folder name.
 pub const NAME: &str = "notchling-pages";
 
-/// The skill, with `{binary}` (the path of the `notchling` program) to fill in.
 pub const TEMPLATE: &str = r#"---
 name: notchling-pages
 description: Use to find or read an Artifact page published earlier on this Mac — from a claude.ai/artifact/… or claude.ai/code/artifact/… link, a bare artifact id (like KVBHDXYvY8f1b1AZG6PbAR), or words from its title or project — and whenever an Artifact read returns 404 or the page belongs to another Claude account. Notchling keeps a local copy of every publish.
@@ -40,7 +32,6 @@ claude.ai lets only the account that published a page ("Published by") publish t
 - Publishing without `url` makes a new artifact with a new link, owned by the active account; the old link keeps the old version.
 "#;
 
-/// The skill for the `notchling` program at `binary`.
 pub fn content(binary: &str) -> String {
     TEMPLATE.replace("{binary}", binary)
 }

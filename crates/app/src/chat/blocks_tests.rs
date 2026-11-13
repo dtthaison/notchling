@@ -1,5 +1,3 @@
-//! `plain_blocks`: each row's selectable texts, in draw order, from the model alone.
-
 use std::path::Path;
 
 use notchling_engine::transcript::model::ToolKind;
@@ -79,7 +77,6 @@ fn a_user_row_is_its_words_without_image_paths() {
 #[test]
 fn a_picture_only_message_has_no_block() {
     assert!(blocks_of(&user("'/tmp/x y.png'"), "u1", &[], false).is_empty());
-    // Words that aren't a picture are still drawn, even when they're all there is.
     assert_eq!(blocks_of(&user("hi"), "u1", &[], false), vec!["hi"]);
 }
 
@@ -137,7 +134,6 @@ fn markdown_parts_give_blocks_in_draw_order() {
             "4"
         ]
     );
-    // A reply row takes its blocks from the parsed message it is given.
     let is_file = |_: &Path| false;
     let shown = Shown {
         is_open: &none_open,
@@ -183,7 +179,6 @@ fn a_closed_group_has_no_blocks_and_an_open_step_has_input_then_output() {
         step("s2", ToolKind::Shell, "pwd", Some(("/x", 0))),
     ]);
     assert!(blocks_of(&tools, "g1", &["s1"], false).is_empty());
-    // The group open, no step: only the chip and the step lines, none selectable.
     assert!(blocks_of(&tools, "g1", &["g1"], false).is_empty());
     assert_eq!(
         blocks_of(&tools, "g1", &["g1", "s1"], false),
@@ -193,10 +188,8 @@ fn a_closed_group_has_no_blocks_and_an_open_step_has_input_then_output() {
         blocks_of(&tools, "g1", &["g1", "s1", "s2"], false),
         ["ls", "a\nb", "pwd", "/x"]
     );
-    // A Read's input is its path, in the title: only its output is a block.
     let read = Row::Tools(vec![step("r1", ToolKind::Read, "/x/a.rs", Some(("fn", 0)))]);
     assert_eq!(blocks_of(&read, "g2", &["g2", "r1"], false), ["fn"]);
-    // A step with a diff shows lines that aren't selectable.
     let mut edit = step("e1", ToolKind::Edit, "/x/a.rs", None);
     edit.diff = vec![notchling_engine::transcript::model::DiffLine {
         kind: notchling_engine::transcript::model::DiffKind::Add,
@@ -209,7 +202,6 @@ fn a_closed_group_has_no_blocks_and_an_open_step_has_input_then_output() {
 #[test]
 fn the_live_group_counts_as_open() {
     let tools = Row::Tools(vec![step("s1", ToolKind::Shell, "ls", Some(("a", 0)))]);
-    // Open by being live, but a step's detail still opens on its own click.
     assert!(blocks_of(&tools, "g1", &[], true).is_empty());
     assert_eq!(blocks_of(&tools, "g1", &["s1"], true), ["ls", "a"]);
 }

@@ -1,8 +1,3 @@
-//! Antigravity CLI behind Chat's parts: the daemon's `agy acp` takes a message (`agy.send`) one
-//! turn at a time, Stop is `agy.cancel`, the pickers are its own config options (Model, Thinking
-//! Level, Mode), and the account and limits are the active Antigravity login's, the session
-//! model's group first.
-
 use gpui::{App, Context};
 
 use super::{active_email, AccountButton, ChatTool};
@@ -24,7 +19,6 @@ impl ChatTool for Antigravity {
     }
 
     fn refusal(&self, view: &ChatView, session: &Session) -> Option<&'static str> {
-        // Another `agy` holds it: a reply through a second one would stop that one's work.
         if let Some(note) = view.tools.agy.as_ref().and_then(|a| a.elsewhere.as_deref()) {
             return Some(elsewhere_note(note));
         }
@@ -69,8 +63,6 @@ impl ChatTool for Antigravity {
         view.open_accounts_sheet(Some(ANTIGRAVITY), cx);
     }
 
-    /// Every group of the active login, the session model's first; the ring is that group's
-    /// first bar.
     fn limits(&self, view: &ChatView, _session: &Session) -> Option<Shown> {
         let s = view.accounts.snapshot();
         let agy = s.providers.providers.iter().find(|p| p.id == ANTIGRAVITY)?;
@@ -96,8 +88,6 @@ impl ChatTool for Antigravity {
     }
 }
 
-/// The reply box's tooltip for a session another `agy` holds: the daemon's words, as one of the
-/// two it says (a tooltip is static text).
 fn elsewhere_note(note: &str) -> &'static str {
     use notchling_engine::tools::agy::elsewhere::{DELEGATION_NOTE, OTHER_NOTE};
     if note == DELEGATION_NOTE {

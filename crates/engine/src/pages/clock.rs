@@ -1,9 +1,3 @@
-//! Local dates without a date crate: the list page and `describe` show local times, as Swift's
-//! formatters do.
-
-/// Seconds the local time zone is ahead of UTC at `ts` (seconds since 1970). Zero where the system
-/// can't say, and on Windows (not built yet).
-// `tm_gmtoff` is an `i64` on 64-bit systems and an `i32` on 32-bit ones.
 #[cfg(unix)]
 #[allow(clippy::useless_conversion)]
 pub fn local_offset_secs(ts: f64) -> i64 {
@@ -24,7 +18,6 @@ pub fn local_offset_secs(_ts: f64) -> i64 {
     0
 }
 
-/// A civil date and time of day.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Civil {
     pub year: i64,
@@ -35,7 +28,6 @@ pub struct Civil {
     pub second: u32,
 }
 
-/// Days since 1970-01-01 to a civil date (Howard Hinnant's algorithm).
 fn civil_from_days(days: i64) -> (i64, u32, u32) {
     let z = days + 719_468;
     let era = z.div_euclid(146_097);
@@ -49,7 +41,6 @@ fn civil_from_days(days: i64) -> (i64, u32, u32) {
     (year, month, day)
 }
 
-/// The civil time of `ts` shifted by `offset_secs`.
 pub fn civil_at(ts: f64, offset_secs: i64) -> Civil {
     let secs = ts.floor() as i64 + offset_secs;
     let (year, month, day) = civil_from_days(secs.div_euclid(86_400));
@@ -64,17 +55,14 @@ pub fn civil_at(ts: f64, offset_secs: i64) -> Civil {
     }
 }
 
-/// `2026-11-08 15:04:05` in the local zone.
 pub fn local_text(ts: f64) -> String {
     text(civil_at(ts, local_offset_secs(ts)), true)
 }
 
-/// `2026-11-08 15:04` in the local zone.
 pub fn local_text_minutes(ts: f64) -> String {
     text(civil_at(ts, local_offset_secs(ts)), false)
 }
 
-/// The date and time as `yyyy-MM-dd HH:mm[:ss]`.
 pub fn text(c: Civil, seconds: bool) -> String {
     let base = format!(
         "{:04}-{:02}-{:02} {:02}:{:02}",
@@ -87,7 +75,6 @@ pub fn text(c: Civil, seconds: bool) -> String {
     }
 }
 
-/// Days since 1970-01-01 of a civil date, for comparing folder names like `2026/11/08` with a time.
 pub fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
     let y = if month <= 2 { year - 1 } else { year };
     let era = y.div_euclid(400);
@@ -104,7 +91,6 @@ mod tests {
 
     #[test]
     fn civil_dates_round_trip() {
-        // 2026-11-08 15:04:05 UTC
         let ts = 20_765.0 * 86_400.0 + 15.0 * 3600.0 + 4.0 * 60.0 + 5.0;
         let c = civil_at(ts, 0);
         assert_eq!(text(c, true), "2026-11-08 15:04:05");
@@ -120,9 +106,7 @@ mod tests {
                 second: 0
             }
         );
-        // A zone ahead of UTC moves the date over midnight.
         assert_eq!(text(civil_at(86_399.0, 3600), false), "1970-01-02 00:59");
-        // Before 1970.
         assert_eq!(text(civil_at(-1.0, 0), true), "1969-12-31 23:59:59");
     }
 }

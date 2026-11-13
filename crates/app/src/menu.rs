@@ -1,8 +1,3 @@
-//! The menu bar item's menu, as data. Kept short like the Swift app's: the account in use, Open
-//! Chat, Keep Mac Awake, Settings… and Quit. Everything else is in Chat. Each entry is a stub until
-//! its part lands (accounts E8, keep awake E12, Settings U8).
-
-/// Keep Mac Awake (`AwakeMode` in the Swift app).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum AwakeMode {
     #[default]
@@ -23,41 +18,32 @@ impl AwakeMode {
     }
 }
 
-/// What the menu shows.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct MenuState {
-    /// The Claude Code account in use, by email.
     pub account: Option<String>,
     pub awake: AwakeMode,
     pub keep_display_on: bool,
 }
 
-/// What an entry does when picked.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Command {
-    /// The account row: manage accounts (in Chat).
     Accounts,
     OpenChat,
     SetAwake(AwakeMode),
     ToggleDisplay,
     Settings,
-    /// Notchling > About.
     About,
-    /// Notchling > Welcome: the first-run view again.
     Welcome,
     Quit,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Entry {
-    /// A section title, not clickable.
     Header(String),
-    /// A line of information, not clickable.
     Disabled(String),
     Action {
         title: String,
         command: Command,
-        /// A ⌘ key equivalent.
         key: Option<char>,
         checked: bool,
     },
@@ -77,7 +63,6 @@ fn action(title: &str, command: Command, key: Option<char>, checked: bool) -> En
     }
 }
 
-/// The menu for a state, top to bottom.
 pub fn tray_menu(state: &MenuState) -> Vec<Entry> {
     let account = match &state.account {
         Some(email) => action(email, Command::Accounts, None, false),
@@ -123,7 +108,6 @@ pub fn tray_menu(state: &MenuState) -> Vec<Entry> {
     ]
 }
 
-/// The menu bar icon: a cup, filled while the Mac is kept awake.
 pub fn tray_symbol(state: &MenuState) -> &'static str {
     if state.awake == AwakeMode::Off {
         "cup.and.saucer"

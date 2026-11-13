@@ -1,7 +1,3 @@
-//! Photos from the phone (Swift `PhoneUpload`, `PhoneUploads`, `PhoneImageStore`): a picture goes up
-//! in pieces, because a bridge message is capped at 256 KB, and is saved to a private file whose
-//! path is then typed into the session, the way a dragged-in image reaches `claude`.
-
 use super::connection::lock;
 use std::collections::HashMap;
 use std::fs;
@@ -10,12 +6,9 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 
-/// The largest photo, and the largest piece of one.
 pub const MAX_BYTES: usize = 6 * 1024 * 1024;
 pub const MAX_CHUNK_BYTES: usize = 160 * 1024;
-/// What `session.image.begin` tells the phone to send per piece.
 pub const CHUNK_BYTES: usize = 96 * 1024;
-/// An upload not finished after this long is dropped.
 pub const EXPIRES_AFTER_MS: f64 = 120_000.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -37,7 +30,6 @@ pub struct Upload {
     pub next_sequence: i64,
 }
 
-/// Uploads in progress, one per connection. A new `begin` replaces the old one.
 #[derive(Default)]
 pub struct Uploads {
     uploads: Mutex<HashMap<String, Upload>>,
@@ -74,20 +66,14 @@ impl Uploads {
         id
     }
 
-    /// Frees every upload older than [`EXPIRES_AFTER_MS`]. The hub's tick runs it, so a phone that
-    /// went quiet mid-photo doesn't keep its pieces in memory until its next call.
     pub fn sweep(&self, now_ms: f64) {
         lock(&self.uploads).retain(|_, u| now_ms - u.started_ms < EXPIRES_AFTER_MS);
     }
 
-    /// Uploads in progress.
     pub fn pending(&self) -> usize {
         lock(&self.uploads).len()
     }
 
-    /// Appends the next piece: in order, at most [`MAX_CHUNK_BYTES`], never past the size. An upload
-    /// older than [`EXPIRES_AFTER_MS`] is freed and counts as unknown, so a phone cannot keep a
-    /// half-photo alive by trickling pieces in.
     pub fn append(
         &self,
         id: &str,
@@ -127,14 +113,11 @@ impl Uploads {
         Ok(upload)
     }
 
-    /// Drops a closed connection's upload.
     pub fn drop_connection(&self, connection_id: u64) {
         lock(&self.uploads).retain(|_, u| u.connection_id != connection_id);
     }
 }
 
-/// A UUID-shaped id that no other call in this process gives (not a secret: an upload is bound to
-/// its connection, and a photo's file sits in a private folder).
 fn unique_id(seed: &str) -> String {
     let salt = format!(
         "{seed}|{}|{:?}",
@@ -144,7 +127,6 @@ fn unique_id(seed: &str) -> String {
     super::foreign::stable_uuid(&salt)
 }
 
-/// Where photos are kept: private to the user, pruned after a day.
 #[derive(Debug, Clone)]
 pub struct ImageStore {
     pub directory: PathBuf,
@@ -159,7 +141,6 @@ impl ImageStore {
         }
     }
 
-    /// The file extension for the bytes, by magic number; None for anything `claude` doesn't read.
     pub fn detect(data: &[u8]) -> Option<&'static str> {
         let b = &data[..data.len().min(12)];
         if b.starts_with(&[0xFF, 0xD8, 0xFF]) {
@@ -175,10 +156,6 @@ impl ImageStore {
         }
     }
 
-    /// Saves the photo as `phone-<8 hex>.<ext>`, mode 0600 in a 0700 folder, after pruning old ones.
-    ///
-    /// The name is made here, never taken from the phone, and `ext` must be 1 to 8 letters or digits,
-    /// so the file cannot land outside the folder. A name that is taken is not overwritten.
     pub fn save(&self, data: &[u8], ext: &str, now_ms: f64) -> std::io::Result<PathBuf> {
         let plain = (1..=8).contains(&ext.len()) && ext.bytes().all(|b| b.is_ascii_alphanumeric());
         if !plain {
@@ -224,7 +201,6 @@ impl ImageStore {
         }
     }
 
-    /// What reaches `claude`: the caption, then the path (quoted when it has spaces or quotes).
     pub fn message(caption: &str, path: &str) -> String {
         let quoted = if path.contains([' ', '\'', '"']) {
             format!("\"{path}\"")
@@ -240,7 +216,6 @@ impl ImageStore {
     }
 }
 
-/// The mode applies only to a folder made here, so one that was already there is set to 0700 too.
 #[cfg(unix)]
 fn create_private_dir(dir: &Path) -> std::io::Result<()> {
     use std::os::unix::fs::{DirBuilderExt, PermissionsExt};

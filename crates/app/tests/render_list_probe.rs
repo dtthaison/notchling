@@ -1,9 +1,3 @@
-//! The list probe (`--render chat-list-probe`, Task 2.1 of the Chat state split): GPUI's `list`
-//! over 300 made-up rows, checked for what the conversation needs. Needs a window server and an
-//! awake display, so it is ignored by default; run it in a release build under `caffeinate`:
-//! `caffeinate -d -u cargo test --release -p notchling-app --test render_list_probe -- --ignored --nocapture`.
-//! Writes nothing but the capture it is asked for, under the temp folder.
-
 #![cfg(target_os = "macos")]
 
 use std::process::Command;
@@ -17,7 +11,6 @@ fn the_list_does_what_the_conversation_needs() {
     let output = Command::new(env!("CARGO_BIN_EXE_notchling-app"))
         .args(["--render", "chat-list-probe", "--out"])
         .arg(&out)
-        // Keeps the view up (and tells the probe to run its checks); the probe exits by itself.
         .env("NOTCHLING_RENDER_BENCH", "120")
         .output()
         .expect("run notchling-app");
@@ -40,8 +33,6 @@ fn the_list_does_what_the_conversation_needs() {
     }
 }
 
-/// Gate G7 (Task 6.2): the kit's scroll bar over the list sits at the end of its track while the
-/// list follows its end, and not once the list is scrolled up.
 #[test]
 #[ignore = "opens a window; a Mac with a display"]
 fn the_bar_sits_at_the_end_of_its_track_while_the_list_follows() {

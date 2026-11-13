@@ -1,10 +1,3 @@
-//! The model catalog: which models each tool offers, their efforts, context windows and prices,
-//! as data (`data/catalog.json`) instead of tables spread over the code.
-//!
-//! The data file says what is allowed. A user's override file (`Catalog::load`) can fix a price, a
-//! window or a name, but never adds a model to the allowlist: only the built-in lists and what the
-//! tool itself reports live can.
-
 use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 
@@ -19,10 +12,8 @@ pub mod live_cache;
 
 const BUILT_IN: &str = include_str!("../../data/catalog.json");
 
-/// The one Claude model with no effort levels.
 const NO_EFFORT: &str = "claude-haiku-4-5";
 
-/// A tool whose models the catalog knows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Tool {
@@ -56,8 +47,6 @@ impl Tool {
     }
 }
 
-/// Dollars per million tokens. Cache writes are not listed: they are 1.25x input for five minutes
-/// and 2x for an hour.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Price {
@@ -65,13 +54,11 @@ pub struct Price {
     pub output: f64,
     #[serde(alias = "cache_read")]
     pub cache_read: f64,
-    /// The dearer tier a long prompt costs (Haiku 5.5's).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub over: Option<Over>,
 }
 
 impl Price {
-    /// Every rate a finite number, none below 0 (a free model is 0, never negative).
     fn sane(&self) -> bool {
         let ok = |x: f64| x.is_finite() && x >= 0.0;
         ok(self.input)
@@ -83,7 +70,6 @@ impl Price {
     }
 }
 
-/// The prices once a prompt (input, cache read and cache write) is over `tokens`.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Over {
@@ -94,7 +80,6 @@ pub struct Over {
     pub cache_read: f64,
 }
 
-/// Whether a model is one the pickers lead with.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Tier {
@@ -102,7 +87,6 @@ pub enum Tier {
     Older,
 }
 
-/// One model as the tool itself lists it. Every field but the id may be missing.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct LiveModel {
@@ -113,7 +97,6 @@ pub struct LiveModel {
     pub default_effort: Option<String>,
 }
 
-/// A model with everything the catalog knows about it.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelInfo {
@@ -124,15 +107,11 @@ pub struct ModelInfo {
     pub efforts: Vec<String>,
     pub default_effort: Option<String>,
     pub price: Option<Price>,
-    /// The price and window are those of the newest known model of its family, since this one is
-    /// newer than any the catalog has heard of.
     pub borrowed: bool,
-    /// The known model it borrows from (`claude-fable-5-2` for a live Fable 5.3), when `borrowed`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub borrowed_from: Option<String>,
 }
 
-/// A price and what it is for: a Claude id prefix (`match`) or a whole Codex/Antigravity id (`id`).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 struct PriceEntry {
     #[serde(rename = "match", alias = "id")]
@@ -156,8 +135,6 @@ pub struct Catalog {
     tools: [ToolData; 3],
 }
 
-/// "claude-opus-5-5[1m]", "claude-haiku-4-5-20251001" and "gpt-5.1-2026-01-01" are
-/// "claude-opus-5-5", "claude-haiku-4-5" and "gpt-5.1".
 pub fn model_key(model: &str) -> String {
     let id = model.split('[').next().unwrap_or(model);
     let b = id.as_bytes();
@@ -179,9 +156,6 @@ pub fn model_key(model: &str) -> String {
     id.to_string()
 }
 
-/// `[a-z][a-z0-9.-]*` with an optional `[1m]` at the end: what a Claude model id looks like when
-/// it is typed into a command line. `model_key` drops everything from the first `[`, so without
-/// this `claude-opus-5-5[1m] --flag` would pass for `claude-opus-5-5`.
 pub(crate) fn startable_shape(id: &str) -> bool {
     let name = id.strip_suffix("[1m]").unwrap_or(id);
     let mut chars = name.chars();
@@ -189,8 +163,6 @@ pub(crate) fn startable_shape(id: &str) -> bool {
         && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '.' || c == '-')
 }
 
-/// "claude-fable-5-2" is family "fable", version [5, 2]. Ids that don't start `claude-<name>` have
-/// no family.
 fn family_version(id: &str) -> Option<(String, Vec<u64>)> {
     let mut parts = id.strip_prefix("claude-")?.split('-');
     let family = parts
@@ -203,8 +175,6 @@ fn family_version(id: &str) -> Option<(String, Vec<u64>)> {
     Some((family.to_string(), version))
 }
 
-/// Whether every segment of a Claude id after its family is a number (`claude-opus-5-6`, not
-/// `claude-opus-6-preview`): only such an id can be its family's current model.
 fn plain_release(id: &str) -> bool {
     let rest: Vec<&str> = id
         .strip_prefix("claude-")
@@ -213,22 +183,15 @@ fn plain_release(id: &str) -> bool {
     !rest.is_empty() && rest.iter().all(|p| p.parse::<u64>().is_ok())
 }
 
-/// Anthropic's list names its models "Claude Opus 5.5"; Notchling calls them "Opus 5.5" in Chat
-/// and on the phone alike.
 fn plain_name(name: &str) -> String {
     name.strip_prefix("Claude ").unwrap_or(name).to_string()
 }
 
-/// The entries of a Claude live list that can be models: a non-empty id in the shape one is
-/// started with. A live list comes from a file on disk too (the cache, Claude Code's config), so
-/// nothing else in it reaches the allowlist.
 fn claude_usable(live: &[LiveModel]) -> impl Iterator<Item = &LiveModel> {
     live.iter()
         .filter(|l| !l.id.is_empty() && startable_shape(&l.id))
 }
 
-/// The newest plain release (`plain_release`) of `ids` in `family`: a variant such as
-/// `claude-opus-6-preview` is no family's newest, so it neither displaces nor holds back a release.
 fn newest_known<'a>(
     ids: impl Iterator<Item = &'a String>,
     family: &str,
@@ -246,7 +209,6 @@ fn newest_known<'a>(
 }
 
 impl Catalog {
-    /// What ships in the app.
     pub fn built_in() -> Catalog {
         let mut catalog = Catalog::default();
         if let Ok(root) = serde_json::from_str::<Value>(BUILT_IN) {
@@ -256,8 +218,6 @@ impl Catalog {
         catalog
     }
 
-    /// The built-in catalog with the user's override file laid over its prices, windows and names.
-    /// A missing or unreadable file, or a part of it that doesn't parse, changes nothing.
     pub fn load(override_file: &Path) -> Catalog {
         let mut catalog = Catalog::built_in();
         let root = std::fs::read_to_string(override_file)
@@ -270,8 +230,6 @@ impl Catalog {
         catalog
     }
 
-    /// Reads `root` entry by entry, so one bad entry costs only itself. The model lists and efforts
-    /// come only from the built-in file.
     fn apply(&mut self, root: &Value, built_in: bool) {
         let Some(root) = root.as_object() else {
             return;
@@ -291,8 +249,6 @@ impl Catalog {
                     continue;
                 };
                 entry.key = entry.key.trim().to_lowercase();
-                // Claude's prices match the id without `claude-`, so a full id names the same
-                // model as the bare one (the windows and names take full ids).
                 if tool == Tool::Claude {
                     if let Some(bare) = entry.key.strip_prefix("claude-") {
                         entry.key = bare.to_string();
@@ -343,9 +299,6 @@ impl Catalog {
         }
     }
 
-    /// Claude's prices match by prefix and the first match wins, so the longest prefix goes first
-    /// (an override's new entry would otherwise land behind the bare family's). Stable, so equal
-    /// lengths keep the file's order.
     fn finish(&mut self) {
         self.tools[Tool::Claude.index()]
             .prices
@@ -356,15 +309,12 @@ impl Catalog {
         self.current.iter().chain(&self.older)
     }
 
-    /// For a Claude id newer than every known id of its family, the newest known one: the catalog
-    /// prices and sizes it as that one, so cost and the picker agree.
     fn borrow_source(&self, key: &str) -> Option<&str> {
         let (family, version) = family_version(key)?;
         let (known, known_version) = newest_known(self.known(), &family)?;
         (version > known_version).then_some(known)
     }
 
-    /// Dollars per million tokens, or `None` for a model with no price (shown as unpriced, never $0).
     pub fn price(&self, tool: Tool, model: &str) -> Option<Price> {
         let key = model_key(model).to_lowercase();
         if tool == Tool::Claude {
@@ -374,14 +324,9 @@ impl Catalog {
         prices.iter().find(|p| p.key == key).map(|p| p.price)
     }
 
-    /// A Claude id's price and whether it is another model's. An id newer than every known one
-    /// takes the newest known id's price, unless an entry made for it (not a family's general one,
-    /// which the known id matches too) says otherwise.
     fn claude_price(&self, key: &str) -> (Option<Price>, bool) {
         let prices = &self.tools[Tool::Claude.index()].prices;
         let bare = |id: &str| id.strip_prefix("claude-").unwrap_or(id).to_string();
-        // An entry is for an id when it is the id or a leading run of its `-` segments, so
-        // `fable-5-1` is not for `fable-5-10`.
         let find = |id: &str| {
             let id = bare(id);
             prices
@@ -398,7 +343,6 @@ impl Catalog {
         }
     }
 
-    /// True when `price` (and `context_window`) for this Claude id are another model's.
     pub fn price_borrowed(&self, tool: Tool, model: &str) -> bool {
         tool == Tool::Claude && self.claude_price(&model_key(model).to_lowercase()).1
     }
@@ -414,10 +358,6 @@ impl Catalog {
         windows.get(source).copied()
     }
 
-    /// Every model id a session may be started with. Claude's are the built-in lists plus what the
-    /// tool lists live (bare and as listed, as a `[1m]` id is the bare model); the other tools' are
-    /// only what they list. Check membership with `is_allowed`, which sees through a `[1m]` or a
-    /// date suffix.
     pub fn allowed(&self, tool: Tool, live: &[LiveModel]) -> Vec<String> {
         let mut out: Vec<String> = Vec::new();
         let mut add = |id: String| {
@@ -439,10 +379,6 @@ impl Catalog {
         out
     }
 
-    /// Whether `id` may start a session. A Claude id must have the shape of a model id (see
-    /// `startable_shape`: lowercase ASCII, an optional `[1m]` and nothing else, since the id goes
-    /// to the tool's command line) and, bare (no `[1m]`, no date), be one of `allowed`, whose ids
-    /// are compared bare too. Another tool's id must be one of `allowed` exactly.
     pub fn is_allowed(&self, tool: Tool, live: &[LiveModel], id: &str) -> bool {
         if tool != Tool::Claude {
             return self.allowed(tool, live).iter().any(|a| a == id);
@@ -456,7 +392,6 @@ impl Catalog {
             .any(|a| a == id || model_key(a) == bare)
     }
 
-    /// The models to offer, current ones first.
     pub fn models(&self, tool: Tool, live: &[LiveModel]) -> Vec<ModelInfo> {
         if tool == Tool::Claude {
             return self.claude_models(live);
@@ -478,7 +413,6 @@ impl Catalog {
             .collect()
     }
 
-    /// The override's name, else the tool's own, else one made from the id.
     fn name(&self, tool: Tool, id: &str, live: &LiveModel) -> String {
         self.tools[tool.index()]
             .names
@@ -501,9 +435,6 @@ impl Catalog {
             if current.contains(&id) || older.contains(&id) {
                 continue;
             }
-            // A model newer than all its family's known ones takes the family's place in current;
-            // the model it displaces becomes the newest of the older ones. Only a plain release
-            // does: `claude-opus-6-preview` is listed with the older ones.
             let place = family_version(&id)
                 .filter(|_| plain_release(&id))
                 .filter(|(family, version)| {
@@ -559,19 +490,12 @@ impl Catalog {
             .collect()
     }
 
-    /// The catalog with `id` among the current Claude models, as a later data file may have it
-    /// (tests: the built-in lists can't be changed otherwise).
     #[cfg(test)]
     pub(crate) fn with_current(mut self, id: &str) -> Catalog {
         self.current.push(id.to_string());
         self
     }
 
-    /// A fingerprint of every price entry after the override is merged. Only a version 2 cost
-    /// cache, which was counted at the prices with this fingerprint, is checked against it: the
-    /// cost cache now keeps each model's own price (`Catalog::price`, borrowing included), which is
-    /// what says whether a model must be priced again. Windows, names and the model lists are not
-    /// in it.
     pub fn prices_hash(&self) -> String {
         let lists: Vec<&Vec<PriceEntry>> = self.tools.iter().map(|t| &t.prices).collect();
         let canonical = serde_json::to_string(&lists).unwrap_or_default();

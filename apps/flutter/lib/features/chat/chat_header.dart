@@ -6,24 +6,18 @@ import '../../core/protocol/models.dart';
 import '../../l10n/app_localizations.dart';
 import '../sessions/status_style.dart';
 
-/// "148.8k" / "1.2M".
 String compactTokens(int tokens) {
   if (tokens >= 1000000) return '${(tokens / 1000000).toStringAsFixed(1)}M';
   if (tokens >= 1000) return '${(tokens / 1000).toStringAsFixed(1)}k';
   return '$tokens';
 }
 
-/// The Mac's chat header on a phone, in two lines that never grow past them: the avatar with its status badge, the
-/// name, the project and control, and the bell and Macs buttons; then ONE line of facts (status, context percentage
-/// with a small bar, the account's 5h and week limits). The facts line scrolls sideways when it does not fit; it never
-/// wraps, so no single item is left alone on a second line. The full numbers are in each fact's tooltip (tap or hold).
 class ChatHeaderView extends StatelessWidget {
   const ChatHeaderView({super.key, required this.session, required this.muted, required this.onToggleMute, this.onOpenMacs});
   final Session session;
   final bool muted;
   final VoidCallback onToggleMute;
 
-  /// The laptop button (paired Macs); the generic app bar is gone on this tab, so its action lives here.
   final VoidCallback? onOpenMacs;
 
   @override
@@ -110,7 +104,6 @@ class ChatHeaderView extends StatelessWidget {
     );
   }
 
-  /// "Ngữ cảnh 58%" with a bar; the tokens over the window are in the tooltip. Without a known window the tokens show.
   Widget _contextFact(AppL10n l10n, SessionFacts facts, {required bool short}) {
     final double? fraction = facts.contextFraction;
     final String full = facts.contextWindow != null

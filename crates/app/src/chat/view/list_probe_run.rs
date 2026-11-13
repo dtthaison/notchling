@@ -1,11 +1,3 @@
-//! The probe's checks (Task 2.1 of the Chat state split), one step per frame: change something in
-//! the list, notify, wait for the child view to paint, read what the rows recorded. Prints
-//! `list-probe: {"g1": …, …}` and exits 0 (a check that can't draw exits 1).
-//!
-//! G1 follow, G2 anchor, G3 cost, G4 resize, G5 at the bottom, G6 spinners, G7 the kit's bar
-//! (Task 6.2); each is an object with
-//! `pass` and the numbers behind it.
-
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
@@ -15,13 +7,9 @@ use serde_json::{json, Value};
 
 use super::list_probe::{ListProbe, ProbeList, LAST, NARROW, ROWS, WORDS_PER_LINE};
 
-/// How far a row may move, or the last row sit from the viewport's bottom, and still count as
-/// where it was (points).
 const TOLERANCE: f32 = 1.0;
-/// The most a frame may wait for the child to paint before the probe gives up.
 const FRAME_WAIT: Duration = Duration::from_secs(3);
 
-/// Starts the checks once the window has drawn a few frames.
 pub fn start(list: Entity<ProbeList>, cx: &mut Context<ListProbe>) {
     cx.spawn(async move |this, cx| {
         cx.background_executor()
@@ -46,20 +34,17 @@ pub fn start(list: Entity<ProbeList>, cx: &mut Context<ListProbe>) {
     .detach();
 }
 
-/// What the latest frame painted.
 struct Snap {
     viewport: Bounds<Pixels>,
     rows: HashMap<usize, Bounds<Pixels>>,
 }
 
 impl Snap {
-    /// How far row `ix`'s top is below the viewport's top; `None` if it wasn't painted.
     fn top_of(&self, ix: usize) -> Option<f32> {
         let b = self.rows.get(&ix)?;
         Some(f32::from(b.top() - self.viewport.top()))
     }
 
-    /// The first row with any of it in the viewport.
     fn first_visible(&self) -> Option<usize> {
         let edge = self.viewport.top() + px(0.5);
         self.rows
@@ -69,7 +54,6 @@ impl Snap {
             .min()
     }
 
-    /// How far the last row's painted bottom is from the viewport's bottom.
     fn last_gap(&self) -> f32 {
         self.rows.get(&LAST).map_or(f32::INFINITY, |b| {
             f32::from(b.bottom() - self.viewport.bottom()).abs()
@@ -92,7 +76,6 @@ impl Script {
             .map_err(|e| e.to_string())
     }
 
-    /// Notifies the list's view and waits until it has painted, `n` times.
     async fn tick(&self, n: usize) -> Step {
         for _ in 0..n {
             let before = self.with(|p, cx| {
@@ -120,7 +103,6 @@ impl Script {
         })
     }
 
-    /// Replaces row `ix` by a row `lines` lines taller, as a change in a message would.
     fn grow(&self, ix: usize, lines: usize) -> Step {
         self.with(|p, _| {
             p.words[ix] += lines * WORDS_PER_LINE;
@@ -128,7 +110,6 @@ impl Script {
         })
     }
 
-    /// Back to the end, following.
     async fn to_end(&self) -> Step {
         self.with(|p, _| {
             p.state.scroll_to(ListOffset {
@@ -157,7 +138,6 @@ impl Script {
         )
     }
 
-    /// G1: while following, the last row grows ten times; its bottom stays on the viewport's.
     async fn g1(&self) -> Step<Value> {
         let (mut painted, mut api, mut api_missing) = (0f32, 0f32, 0);
         let mut last_seen = json!(null);
@@ -186,13 +166,9 @@ impl Script {
         }))
     }
 
-    /// G2: scrolled up, a splice above the first visible row and a remeasure of that row itself
-    /// keep its top where it was; a bare splice of it does not.
     async fn g2(&self) -> Step<Value> {
         self.with(|p, _| p.state.scroll_by(px(-3000.0)))?;
         self.tick(3).await?;
-        // Rows never drawn have no height, so a jump from the end can only land inside the rows
-        // measured so far: note where, then walk up in wheel-sized steps to rows nobody has seen.
         let landed = self.snap()?.first_visible();
         for _ in 0..60 {
             if self.snap()?.first_visible().is_some_and(|ix| ix <= 240) {
@@ -201,7 +177,6 @@ impl Script {
             self.with(|p, _| p.state.scroll_by(px(-400.0)))?;
             self.tick(1).await?;
         }
-        // Part way into a row, so that a splice that resets the offset shows.
         self.with(|p, _| p.state.scroll_by(px(37.0)))?;
         self.tick(3).await?;
         let s = self.snap()?;
@@ -241,9 +216,6 @@ impl Script {
         }))
     }
 
-    /// G3: sixty frames of ±40 pt; the rows the list asks for per frame against the rows on
-    /// screen, with the rows laid out only in prepaint (the probe's default) and again in
-    /// `request_layout` (the list's default sizing).
     async fn g3(&self) -> Step<Value> {
         let auto = self.scrub().await?;
         self.with(|p, _| p.infer = true)?;
@@ -261,7 +233,6 @@ impl Script {
         }))
     }
 
-    /// Sixty frames scrolling 40 pt up and down: (rows asked for, rows on screen) per frame.
     async fn scrub(&self) -> Step<(f32, f32)> {
         let calls = self.with(|p, _| p.frame.calls.get())?;
         let mut visible = 0usize;
@@ -275,7 +246,6 @@ impl Script {
         Ok((calls as f32 / 60.0, visible as f32 / 60.0))
     }
 
-    /// G5: the scroll bar's offset to the middle and then to the end lands at the end.
     async fn g5(&self) -> Step<Value> {
         let max = self.with(|p, _| f32::from(p.state.max_offset_for_scrollbar().height))?;
         self.with(|p, _| {
@@ -299,7 +269,6 @@ impl Script {
         }))
     }
 
-    /// G4: the column 600 → 480 pt wide; G1 and G2 hold again and every visible row has a height.
     async fn g4(&self, height_before: f32) -> Step<Value> {
         self.cx
             .update(|cx| {
@@ -332,8 +301,6 @@ impl Script {
         }))
     }
 
-    /// G6: after a splice that makes the list lay its rows out twice, the spinner slots recorded
-    /// for the frame are the spinners on screen (one).
     async fn g6(&self) -> Step<Value> {
         self.to_end().await?;
         self.tick(2).await?;
@@ -357,8 +324,6 @@ impl Script {
 }
 
 impl Script {
-    /// G7: the kit's bar over the list: while the list follows its end, the thumb's bottom is at
-    /// the track's bottom; scrolled up it is not, and it is back at the bottom after the way down.
     async fn g7(&self) -> Step<Value> {
         self.to_end().await?;
         self.tick(2).await?;
@@ -366,12 +331,9 @@ impl Script {
         let gap =
             |t: Option<ThumbAt>| t.map_or(f32::INFINITY, |t| (t.track_bottom - t.bottom).abs());
         let end_gap = gap(following);
-        // Grow the last row while following: the thumb stays at the end.
         self.grow(LAST, 1)?;
         self.tick(2).await?;
         let grown_gap = gap(self.with(|p, _| p.thumb.get())?);
-        // Up from the end. A list at its end counts as scrolled to the end of its content, a
-        // viewport past the last scroll position, so the first step has to be longer than that.
         self.with(|p, _| p.state.scroll_by(px(-1500.0)))?;
         self.tick(3).await?;
         let up = self.with(|p, _| p.thumb.get())?;

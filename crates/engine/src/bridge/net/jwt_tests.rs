@@ -11,7 +11,6 @@ pub(crate) const TEAM: &str = "team-test.cloudflareaccess.com";
 pub(crate) const AUDIENCE: &str = "aud-tag-1234";
 pub(crate) const START: i64 = 1_800_000_000_000;
 
-/// A throwaway RSA key standing in for a Cloudflare Access signing key (made for these tests).
 pub(crate) struct TestKey {
     pub kid: String,
     pair: RsaKeyPair,
@@ -34,7 +33,6 @@ impl TestKey {
         }
     }
 
-    /// n and e, read out of the public key's SEQUENCE { INTEGER, INTEGER }.
     fn integers(&self) -> (Vec<u8>, Vec<u8>) {
         let der = self.pair.public().as_ref();
         let mut at = 1;
@@ -54,7 +52,7 @@ impl TestKey {
         length(&mut at);
         let mut out = Vec::new();
         for _ in 0..2 {
-            at += 1; // INTEGER
+            at += 1;
             let len = length(&mut at);
             let raw = &der[at..at + len];
             at += len;
@@ -131,7 +129,6 @@ pub(crate) fn good_claims(now_ms: i64) -> Value {
     claims(now_ms, None, None, 600.0, None, 0.0)
 }
 
-/// A clock the test moves.
 #[derive(Clone)]
 pub(crate) struct TestClock(Arc<AtomicI64>);
 
@@ -151,7 +148,6 @@ impl TestClock {
     }
 }
 
-/// Serves the given bodies in turn (the last one again and again) and logs the URLs asked for.
 pub(crate) struct FetchLog {
     responses: Mutex<Vec<Result<Vec<u8>, String>>>,
     pub urls: Mutex<Vec<String>>,
@@ -164,7 +160,6 @@ impl FetchLog {
             urls: Mutex::new(Vec::new()),
         })
     }
-    /// Every fetch from now on fails.
     pub fn go_down(&self) {
         *self.responses.lock().unwrap() = vec![Err("down".into())];
     }

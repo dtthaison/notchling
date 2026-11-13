@@ -1,10 +1,3 @@
-//! The permission dialog read off a whole attach screen. NOT live recordings: the screens in
-//! `fixtures/permission-made-up/` were written from Claude Code's known layout (a full-width rule,
-//! the tool's title, the command, "Do you want to proceed?", numbered options; older builds in a
-//! box), since no job blocked on a permission has been recorded yet (docs/recording.md,
-//! `dialog-permission`). The recorded AskUserQuestion and idle screens check that neither reads as
-//! a permission.
-
 mod common;
 
 use common::notchling_fixture;
@@ -18,7 +11,6 @@ fn screen_of(bytes: &[u8]) -> TerminalScreen {
     screen
 }
 
-/// A made-up screen, drawn by the emulator as `claude attach` output would be.
 fn made_up(name: &str) -> TerminalScreen {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures/permission-made-up")
@@ -62,7 +54,6 @@ fn a_bash_dialog() {
         "rm -rf build && cargo build --release --workspace"
     )));
     assert!(d.asks(&expected("Bash", "rm -rf build && cargo build …")));
-    // The command higher up, in Claude's own tool line, isn't what's asked about.
     assert!(!d.asks(&expected("Bash", "rm -rf build && cargo test")));
 }
 
@@ -88,7 +79,6 @@ fn an_edit_has_no_always_option() {
     assert_eq!(d.option_for(Decision::Allow).map(|o| o.number), Some(1));
     assert_eq!(d.option_for(Decision::Always), None);
     assert_eq!(d.option_for(Decision::Deny).map(|o| o.number), Some(3));
-    // The job's state names the whole path; the dialog its file.
     assert!(d.asks(&expected("Edit", "/Users/me/work/api/src/main.rs")));
     assert!(!d.asks(&expected("Edit", "/Users/me/work/api/src/lib.rs")));
     assert!(!d.asks(&expected("Bash", "src/main.rs")));

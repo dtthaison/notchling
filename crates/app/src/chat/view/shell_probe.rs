@@ -1,8 +1,3 @@
-//! Which background shells still run: a process has the shell's output file open for writing
-//! (`shells::parse_writers` over `lsof -F pca`). `lsof` takes too long for a frame, so it runs off
-//! the main thread every few seconds while the Details Panel shows, only for shells that have no
-//! notification yet, and the panel reads the answers kept here.
-
 use std::collections::HashMap;
 use std::process::{Command, Stdio};
 
@@ -12,29 +7,23 @@ use notchling_engine::transcript::shells::parse_writers;
 use super::now_ms;
 use super::ChatView;
 
-/// How often the shells are asked about.
 const EVERY_MS: i64 = 3000;
 const LSOF: &str = "/usr/sbin/lsof";
 
 #[derive(Default)]
 pub struct Probe {
-    /// Output path → the processes writing it, from the last look.
     writers: HashMap<String, Vec<i32>>,
     last_ms: i64,
     busy: bool,
 }
 
 impl Probe {
-    /// The processes writing `path`. A shell not looked at yet counts as running (one pid 0, never
-    /// signalled), so a new one doesn't show as ended for the first few seconds.
     pub fn writers(&self, path: &str) -> Vec<i32> {
         self.writers.get(path).cloned().unwrap_or_else(|| vec![0])
     }
 }
 
-/// The writers of one file; none when `lsof` can't run or finds none.
 fn look(path: &str) -> Vec<i32> {
-    // -w drops its warnings. Not -b: it skips the stat a file name needs, so lsof finds nothing.
     Command::new(LSOF)
         .args(["-w", "-F", "pca", "--", path])
         .stdin(Stdio::null())
@@ -44,7 +33,6 @@ fn look(path: &str) -> Vec<i32> {
         .unwrap_or_default()
 }
 
-/// From `ChatView::tick`: asks again about the selected session's unfinished shells when it's time.
 pub fn tick(view: &mut ChatView, cx: &mut Context<ChatView>) {
     if view.details_hidden || view.shell_probe.busy {
         return;

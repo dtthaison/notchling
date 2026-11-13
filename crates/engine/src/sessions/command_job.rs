@@ -1,11 +1,5 @@
-//! Template "exec" jobs: a shell command (sd autopilot's lane scripts), not a conversation. Claude Code
-//! keeps no transcript for one, so Chat shows the command and, when it sends its output to a file
-//! (`> run.log 2>&1`), the end of that file.
-
 use std::io::{Read, Seek, SeekFrom};
 
-/// The command without its long `env PATH=… HOME=…` prefix, which is the same for every job:
-/// `env` followed by one or more `NAME=value` words and a space becomes `env … `.
 pub fn readable(command: &str) -> String {
     let chars: Vec<char> = command.chars().collect();
     let mut out = String::new();
@@ -24,26 +18,21 @@ pub fn readable(command: &str) -> String {
     out
 }
 
-/// Matches `( [A-Z_][A-Z0-9_]*=value)+ ` from `at`, with backtracking; returns the index after the
-/// trailing space. `count` is how many assignments are already matched.
 fn env_prefix_end(c: &[char], at: usize, count: usize) -> Option<usize> {
     if let Some(end) = assignment_end(c, at) {
         if let Some(found) = env_prefix_end(c, end, count + 1) {
             return Some(found);
         }
-        // Stop here: the assignment just matched is the last, and a space must follow.
         if c.get(end) == Some(&' ') {
             return Some(end + 1);
         }
     }
-    // Without a further assignment, the previous one was the last and `at` is just past it.
     if count > 0 && c.get(at) == Some(&' ') {
         return Some(at + 1);
     }
     None
 }
 
-/// ` NAME=value` at `at`: the index after the value (single-quoted, double-quoted or a bare word).
 fn assignment_end(c: &[char], at: usize) -> Option<usize> {
     if c.get(at) != Some(&' ') {
         return None;
@@ -67,8 +56,6 @@ fn assignment_end(c: &[char], at: usize) -> Option<usize> {
         if c.get(i) == Some(&quote) {
             if let Some(close) = c[i + 1..].iter().position(|ch| *ch == quote) {
                 let end = i + 1 + close + 1;
-                // A quoted value must be followed by a space or the end to be a whole word;
-                // otherwise the bare-word reading below applies.
                 if c.get(end).is_none_or(|ch| ch.is_whitespace()) {
                     return Some(end);
                 }
@@ -81,8 +68,6 @@ fn assignment_end(c: &[char], at: usize) -> Option<usize> {
     Some(i)
 }
 
-/// The file the command's output goes to: the target of its last `>` or `>>` (not `2>`, not `>&`).
-/// A relative path is read against `cwd`; `~/` against `home`. `/dev/null` is no file.
 pub fn output_path(command: &str, cwd: &str, home: &str) -> Option<String> {
     let c: Vec<char> = command.chars().collect();
     let mut last: Option<String> = None;
@@ -118,7 +103,6 @@ fn is_delim(ch: char) -> bool {
     ch.is_whitespace() || matches!(ch, ';' | '&' | '|')
 }
 
-/// `1?>>?\s*target` at `at`; the target (unquoted) and the index after it.
 fn redirect_at(c: &[char], at: usize) -> Option<(String, usize)> {
     let mut i = at;
     if c.get(i) == Some(&'1') {
@@ -154,7 +138,6 @@ fn redirect_at(c: &[char], at: usize) -> Option<(String, usize)> {
     (i > start).then(|| (c[start..i].iter().collect(), i))
 }
 
-/// The last `max_lines` lines of the file, read from its last 64 KB.
 pub fn tail(path: &str, max_lines: usize) -> Option<String> {
     let mut file = std::fs::File::open(path).ok()?;
     let size = file.seek(SeekFrom::End(0)).ok()?;
@@ -165,7 +148,7 @@ pub fn tail(path: &str, max_lines: usize) -> Option<String> {
     let text = String::from_utf8_lossy(&data);
     let mut lines: Vec<&str> = text.split('\n').collect();
     if start > 0 && !lines.is_empty() {
-        lines.remove(0); // a partial line
+        lines.remove(0);
     }
     while lines.last().is_some_and(|l| l.is_empty()) {
         lines.pop();
@@ -179,7 +162,6 @@ mod tests {
     use super::super::testutil::TempDir;
     use super::*;
 
-    // CommandJobTests.testOutputPath
     #[test]
     fn output_path_finds_the_redirect() {
         let sd = "cd /p && env HOME=/h PATH=/a:/b /venv/python3 /x/sd.py autopilot > /repo/.git/run.log 2>&1";
@@ -213,7 +195,6 @@ mod tests {
         assert_eq!(at("run 2> err.log"), None);
     }
 
-    // CommandJobTests.testReadable
     #[test]
     fn readable_shortens_the_env_prefix() {
         assert_eq!(
@@ -225,7 +206,6 @@ mod tests {
         assert_eq!(readable("env run"), "env run");
     }
 
-    // CommandJobTests.testTail
     #[test]
     fn tail_keeps_the_last_lines() {
         let tmp = TempDir::new("tail");

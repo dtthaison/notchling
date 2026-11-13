@@ -1,7 +1,3 @@
-//! Reading one transcript for the index, with the work bounded whatever the file is: a 2 GB file
-//! costs one head and one tail read, a line of 200 MB is never held, and a file deleted while the
-//! scan runs is simply gone.
-
 use super::{HEAD_BYTES, TAIL_BYTES, WHOLE_FILE_BYTES};
 use crate::search::{
     claude_line, codex_line, IndexedSession, SessionMeta, SessionTextBuilder, SessionTool,
@@ -13,23 +9,14 @@ use crate::transcript::tail::{tail_start_with, LONG_LINE_SCAN};
 use std::fs::File;
 use std::io::Read;
 
-/// What reading a file gave.
 pub(super) enum Read1 {
-    /// Opening or reading failed (deleted mid-scan, unreadable): try again at the next refresh.
     Gone,
-    /// It read, but holds no text worth searching: skip it until it changes.
     Empty,
     Built(Box<IndexedSession>),
 }
 
-/// The bytes to index: the whole file when it is small, else its start and the newest `TAIL_BYTES` of
-/// its lines, joined at line boundaries (the start is cut in the middle of a line, so the partial line
-/// is dropped). Lines over the cap (base64 pictures) take no room in that tail, so a few of them can't
-/// push the conversation before them out, and they are never held. Never more than
-/// `HEAD_BYTES + TAIL_BYTES` or `WHOLE_FILE_BYTES`, even when the file grows meanwhile.
 pub(super) fn contents(path: &str) -> Option<Vec<u8>> {
     let mut file = File::open(path).ok()?;
-    // The size of the file we hold open, not the one a listing saw earlier.
     let size = file.metadata().ok()?.len();
     if size <= WHOLE_FILE_BYTES {
         let mut data = Vec::new();
@@ -47,7 +34,6 @@ pub(super) fn contents(path: &str) -> Option<Vec<u8>> {
         head.clear();
     }
     let start = tail_start_with(path, size, TAIL_BYTES, LONG_LINE_SCAN, MAX_LINE_BYTES).ok()?;
-    // The newest lines may reach back into the head's: it keeps only what comes before them.
     head.truncate(usize::try_from(start).unwrap_or(usize::MAX));
     scan_lines(path, start, size, false, MAX_LINE_BYTES, |line| {
         if let Line::Whole(line) = line {
@@ -59,13 +45,11 @@ pub(super) fn contents(path: &str) -> Option<Vec<u8>> {
     Some(head)
 }
 
-/// Lines no longer than the transcript reader's cap; the long ones (base64 images) are skipped.
 fn lines(data: &[u8]) -> impl Iterator<Item = &[u8]> {
     data.split(|&b| b == b'\n')
         .filter(|l| !l.is_empty() && l.len() <= MAX_LINE_BYTES)
 }
 
-/// Indexes one file.
 pub(super) fn read(candidate: &SessionMeta, tool: SessionTool) -> Read1 {
     let Some(data) = contents(&candidate.path) else {
         return Read1::Gone;

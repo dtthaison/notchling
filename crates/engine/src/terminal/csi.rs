@@ -1,9 +1,5 @@
-//! Control sequences (`ESC [ … final`) for [`TerminalScreen`]: cursor moves, erases, scroll regions,
-//! modes and colors. Numbers are clamped rather than trusted, since a program can send any digits.
-
 use super::screen::{TermColor, TermStyle, TerminalScreen};
 
-/// The parameters of one sequence: `None` where a field was empty or not a number.
 type Numbers = Vec<Option<i64>>;
 
 fn numbers(raw: &[u8]) -> Numbers {
@@ -32,7 +28,6 @@ fn to_i64(v: usize) -> i64 {
     i64::try_from(v).unwrap_or(i64::MAX)
 }
 
-/// `n` as a count no bigger than `limit`.
 fn count(n: i64, limit: usize) -> usize {
     usize::try_from(n).unwrap_or(usize::MAX).min(limit)
 }
@@ -54,8 +49,6 @@ impl TerminalScreen {
             }
             return;
         }
-        // Device-attribute queries (CSI c, CSI > c, CSI > q) go unanswered, as in a plain pty: answered,
-        // Claude Code 2.1.318 dropped its colors and its line layout, and the answer landed in its input box.
         if prefix.is_some() {
             return;
         }
@@ -173,7 +166,6 @@ impl TerminalScreen {
                 }
                 self.erase_line(1);
             }
-            // 3 also clears the scrollback (`clear` sends 2 and 3).
             3 => {
                 self.scrollback.clear();
                 self.cells = vec![self.blank_row(); self.rows];
@@ -231,7 +223,6 @@ impl TerminalScreen {
             numbers.iter().map(|v| v.unwrap_or(0)).collect()
         };
         let mut i = 0;
-        // 38/48 then 5;n or 2;r;g;b. Anything else gives no color (and clears it, as in Swift).
         let color = |i: &mut usize| -> Option<TermColor> {
             if *i + 1 >= values.len() {
                 return None;

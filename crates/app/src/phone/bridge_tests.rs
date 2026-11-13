@@ -1,5 +1,3 @@
-//! The bridge's tests, over a fake transport.
-
 use super::*;
 use crate::switches::restart::{Area, RestartNotice};
 use notchling_local_api::{ApiError, ErrorCode};
@@ -10,7 +8,6 @@ use std::sync::Arc;
 type Calls = Arc<Mutex<Vec<(String, Value)>>>;
 type Script = Box<dyn Fn(&str, &Value) -> Result<Value, ClientError> + Send + Sync>;
 
-/// Answers each op from a script and records every call.
 struct Fake {
     calls: Calls,
     answer: Script,
@@ -24,7 +21,6 @@ impl Transport for Fake {
     }
 }
 
-/// Remembers the user's choice in memory.
 struct Memory(Arc<Mutex<bool>>);
 
 impl Choice for Memory {
@@ -58,7 +54,6 @@ fn gone() -> ClientError {
     ClientError::NotRunning(io::Error::from(io::ErrorKind::NotFound))
 }
 
-/// A daemon with the bridge in the given state and two phones.
 fn daemon(state: &'static str) -> impl Fn(&str, &Value) -> Result<Value, ClientError> {
     move |op, _| {
         Ok(match op {
@@ -106,17 +101,14 @@ fn a_remembered_choice_never_turns_the_bridge_on_it_only_offers_the_notice() {
     });
     let notice = Arc::new(RestartNotice::default());
     let bridge = bridge.with_restart(notice.clone());
-    // The user never chose: nothing is offered.
     bridge.refresh();
     assert_eq!(notice.state().offer(), []);
-    // The file says on, the daemon says off: still nothing is sent, the notice offers it.
     *lock(&chosen) = true;
     bridge.refresh();
     bridge.refresh();
     assert_eq!(bridge.snapshot().state, BridgeState::Off);
     assert!(!ops_of(&calls).contains(&"bridge.set".to_owned()));
     assert_eq!(notice.state().offer(), [Area::Bridge]);
-    // Only the user's own switch turns it on, and the notice goes.
     assert_eq!(bridge.choose(true), Ok(()));
     assert_eq!(notice.state().offer(), []);
 }
@@ -133,7 +125,6 @@ fn off_reaches_the_daemon_even_when_the_choice_cant_be_kept() {
     assert_eq!(ops_of(&calls), ["bridge.set"]);
 }
 
-/// A choice that can't be kept.
 struct Broken;
 
 impl Choice for Broken {

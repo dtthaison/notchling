@@ -1,71 +1,44 @@
-//! The processes and apps the providers start and stop, behind traits so no test runs one:
-//!
-//! - [`Procs`]: read a command's output (`ps`, `pgrep`, `lsof`), run one with every stream sent to
-//!   /dev/null (`codex app-server daemon restart`: a daemon that keeps a pipe open would make a
-//!   read wait forever), start `codex login` with its output in a file, find a tool's binary.
-//! - [`Apps`]: is an app running, quit it and wait, open it again.
-//!
-//! The real ones are [`SystemProcs`] and [`SystemApps`]; the fakes record every call.
-
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-/// A long-lived child whose output goes to a file (`codex login`).
 pub trait LoginChild: Send {
-    /// What it has printed so far.
     fn output(&mut self) -> String;
-    /// Its exit code once it has ended (-1 when a signal ended it).
     fn exit_code(&mut self) -> Option<i32>;
     fn kill(&mut self);
 }
 
-/// What to start for a sign-in.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LoginSpawn {
     pub program: PathBuf,
     pub args: Vec<String>,
-    /// Added to the daemon's own environment.
     pub env: Vec<(String, String)>,
-    /// Where its standard output and error go (created 0600).
     pub log: PathBuf,
 }
 
 pub trait Procs: Send + Sync {
-    /// Standard output of a command that finishes within `timeout`; `None` when it can't start or
-    /// runs out of time. Standard input and error are /dev/null.
     fn capture(&self, program: &str, args: &[&str], timeout: Duration) -> Option<String>;
-    /// Runs a command with all three streams on /dev/null and waits up to `timeout`, then ends it.
     fn run_null(&self, program: &Path, args: &[&str], timeout: Duration) -> Result<(), String>;
     fn spawn_login(&self, spawn: &LoginSpawn) -> Result<Box<dyn LoginChild>, String>;
-    /// The tool's command: the usual install places, else the login shell's PATH.
     fn find_binary(&self, name: &str) -> Option<PathBuf>;
 }
 
-/// The apps on this computer.
 pub trait Apps: Send + Sync {
     fn is_running(&self, bundle_id: &str) -> bool;
-    /// Quits the app and waits for it: `Ok(true)` if it was running and is gone, `Ok(false)` if it
-    /// wasn't running, `Err` if it is still running after the wait.
     fn quit(&self, bundle_id: &str) -> Result<bool, DidNotQuit>;
     fn open(&self, bundle_id: &str);
 }
 
-/// An app was asked to quit and was still running after the wait.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DidNotQuit;
 
-/// How long an app is given to quit (`quitApp`).
 pub const QUIT_WAIT: Duration = Duration::from_secs(15);
 
-/// Real processes. `home` is the user's home folder, where the tools' install places are.
 pub struct SystemProcs {
     pub home: PathBuf,
 }
 
-/// Real apps (macOS: the process table says what runs and when an app is gone,
-/// `NSRunningApplication` asks it to quit, `open -b` opens it).
 pub struct SystemApps;
 
 mod real {
@@ -119,7 +92,6 @@ mod real {
                 .stderr(Stdio::null())
                 .spawn()
                 .map_err(|_| "couldn't start it".to_string())?;
-            // Past the timeout the command is ended, as the Swift `runQuietly` did.
             let _ = wait_or_kill(&mut child, timeout);
             Ok(())
         }
@@ -241,7 +213,6 @@ mod real {
     }
 }
 
-/// What a [`FakeProcs`] was asked.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ProcCall {
     Capture(String),
@@ -250,8 +221,6 @@ pub enum ProcCall {
     FindBinary(String),
 }
 
-/// Answers `capture` from a table keyed by `"<program> <args…>"`, records every call, and finds
-/// binaries from a table.
 #[derive(Default)]
 pub struct FakeProcs {
     captures: Mutex<HashMap<String, String>>,
@@ -261,7 +230,6 @@ pub struct FakeProcs {
     run_null_fails: Mutex<bool>,
 }
 
-/// What a fake sign-in has printed and how it ended; a test changes it while the flow waits.
 #[derive(Default)]
 pub struct FakeLoginState {
     pub output: String,
@@ -288,7 +256,6 @@ impl FakeProcs {
         *lock(&self.run_null_fails) = true;
     }
 
-    /// The state of the sign-in the next `spawn_login` returns.
     pub fn login_state(&self) -> Arc<Mutex<FakeLoginState>> {
         lock(&self.login)
             .get_or_insert_with(|| Arc::new(Mutex::new(FakeLoginState::default())))
@@ -355,7 +322,6 @@ impl Procs for FakeProcs {
 
 type QuitHook = Box<dyn Fn(&str) + Send>;
 
-/// Which bundle ids are running; quitting removes one unless it is stubborn.
 #[derive(Default)]
 pub struct FakeApps {
     running: Mutex<HashSet<String>>,
@@ -374,19 +340,15 @@ impl FakeApps {
         self
     }
 
-    /// This app never quits.
     pub fn stubborn(self, bundle_id: &str) -> FakeApps {
         lock(&self.stubborn).insert(bundle_id.to_string());
         self
     }
 
-    /// Runs when an app is asked to quit, before it is gone: a test reads the files then to show
-    /// nothing was written first.
     pub fn when_quitting(&self, f: impl Fn(&str) + Send + 'static) {
         *lock(&self.on_quit) = Some(Box::new(f));
     }
 
-    /// `is_running`, `quit <id>` and `open <id>` calls, in order.
     pub fn events(&self) -> Vec<String> {
         lock(&self.events).clone()
     }

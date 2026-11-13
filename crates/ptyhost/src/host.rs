@@ -1,7 +1,3 @@
-//! The sessions the host owns (`SessionHost.swift`): starts them, remembers them, finds the Claude
-//! session behind each, brings dead ones back after a restart, and hands out the pty for attaching.
-//! No sockets here; `server` puts this on one.
-
 use crate::state::{HostRecord, StateStore};
 use crate::wire::SessionId;
 use crate::HostError;
@@ -10,13 +6,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
-/// Gets output: the scrollback first (one chunk), then live bytes.
 pub type Listener = Arc<dyn Fn(&[u8]) + Send + Sync>;
-/// Runs once when the session's process ends.
 pub type ExitHandler = Box<dyn FnOnce() + Send>;
 
-/// A pty the host can show and type into (`TerminalHandle`): the real one is
-/// [`crate::pty_handle::PtyHandle`]; tests pass a fake.
 pub trait Handle: Send + Sync {
     fn id(&self) -> SessionId;
     fn cwd(&self) -> &Path;
@@ -24,19 +16,14 @@ pub trait Handle: Send + Sync {
     fn started_at_ms(&self) -> i64;
     fn root_pid(&self) -> i32;
     fn is_running(&self) -> bool;
-    /// Runs `handler` when the process ends, or now if it already has.
     fn on_exit(&self, handler: ExitHandler);
-    /// The listener gets everything already on screen first (one chunk), then live output.
     fn add_listener(&self, listener: Listener) -> u64;
     fn remove_listener(&self, token: u64);
-    /// Queued: a pty that isn't reading never blocks the caller.
     fn write(&self, bytes: &[u8]);
     fn resize(&self, columns: u16, rows: u16);
-    /// Asks the process to end (SIGTERM, then SIGKILL after a moment).
     fn terminate(&self);
 }
 
-/// How the host starts a process on a pty.
 pub trait Spawner: Send + Sync {
     fn spawn(
         &self,
@@ -45,11 +32,9 @@ pub trait Spawner: Send + Sync {
         cwd: &Path,
         model: Option<&str>,
     ) -> Result<Arc<dyn Handle>, HostError>;
-    /// The `claude` executable.
     fn claude_executable(&self) -> Result<PathBuf, HostError>;
 }
 
-/// A session as `list` reports it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HostedInfo {
     pub id: SessionId,
@@ -67,18 +52,15 @@ pub enum HostEvent {
     Spawned { id: SessionId },
 }
 
-/// What the host asks the system, and how hard it looks for a new session's Claude id.
 #[derive(Clone)]
 pub struct HostOptions {
     pub is_alive: Arc<dyn Fn(i32) -> bool + Send + Sync>,
-    /// The Claude session a pty's process became, from its root pid.
     pub discover_session_id: Arc<dyn Fn(i32) -> Option<String> + Send + Sync>,
     pub discovery_interval: Duration,
     pub discovery_attempts: usize,
 }
 
 impl Default for HostOptions {
-    /// The live process check, no discovery, and the Swift host's 1 s × 600 schedule.
     fn default() -> Self {
         HostOptions {
             is_alive: Arc::new(crate::system::is_process_alive),
@@ -122,7 +104,6 @@ impl SessionHost {
         })
     }
 
-    /// Where `spawned` and `exit` events go (the server broadcasts them).
     pub fn set_on_event(&self, sink: impl Fn(HostEvent) + Send + Sync + 'static) {
         *self.on_event.lock().unwrap_or_else(|p| p.into_inner()) = Some(Arc::new(sink));
     }
@@ -142,8 +123,6 @@ impl SessionHost {
         self.sessions.lock().unwrap_or_else(|p| p.into_inner())
     }
 
-    // Starting
-
     pub fn spawn_claude(&self, cwd: &Path, model: Option<&str>) -> Result<HostedInfo, HostError> {
         let arguments: Vec<String> = model
             .map(|m| vec!["--model".to_string(), m.to_string()])
@@ -158,7 +137,6 @@ impl SessionHost {
         self.start(&claude, &arguments, cwd, None, Some(session_id), true)
     }
 
-    /// Any command on a pty (tests, the demo terminal). Not recorded: it cannot be resumed.
     pub fn spawn_command(
         &self,
         executable: &Path,
@@ -210,8 +188,6 @@ impl SessionHost {
         Ok(self.info(handle.as_ref()))
     }
 
-    /// The session file appears once Claude is past its startup prompts; remember its id so the
-    /// session can be resumed.
     fn watch_for_claude_session(&self, handle: Arc<dyn Handle>, record: HostRecord) {
         let this = self.this.clone();
         let discover = self.options.discover_session_id.clone();
@@ -237,7 +213,6 @@ impl SessionHost {
     }
 
     fn exited(&self, id: SessionId) {
-        // The process ended by itself (or was ended on purpose): there is nothing to bring back.
         self.state.remove(&id.to_string());
         {
             let mut sessions = self.lock();
@@ -246,8 +221,6 @@ impl SessionHost {
         }
         self.emit(HostEvent::Exited { id, status: 0 });
     }
-
-    // Asking
 
     fn info(&self, handle: &dyn Handle) -> HostedInfo {
         let claude = self.lock().claude_ids.get(&handle.id()).cloned();
@@ -285,11 +258,6 @@ impl SessionHost {
         handle.terminate();
     }
 
-    // After a restart
-
-    /// Brings back recorded sessions whose process is gone: `claude --resume <id>` in the same
-    /// folder. Records without a known Claude session id, or whose folder is gone, are dropped.
-    /// Returns how many were resumed.
     pub fn resume_recorded(&self) -> usize {
         if !self.state.settings().resume_on_start {
             return 0;
@@ -320,14 +288,11 @@ impl SessionHost {
         resumed
     }
 
-    /// Writes a record for a session that is running outside the host right now, to be resumed when
-    /// the host starts (the migration of sessions that live inside an old Agent Console).
     pub fn record_for_resume(&self, claude_session_id: &str, cwd: &str, model: Option<&str>) {
         record_for_resume(&self.state, claude_session_id, cwd, model);
     }
 }
 
-/// `--record-resume`: the same record, without a host.
 pub fn record_for_resume(
     state: &StateStore,
     claude_session_id: &str,

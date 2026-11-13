@@ -1,20 +1,11 @@
-//! Answering a permission dialog no hook holds, against a fake terminal: a Write's dialog (which
-//! has no "don't ask again"), a dialog that draws after the attach settled, one that never draws,
-//! another request in its place, and a path shown shorter than the card's. Made-up screens from
-//! Claude Code's known layout, as in `exec_tests` (no recording of the dialog exists yet).
-
 use super::exec::{execute, Failure, Markers, NoQueueLog, Outcome, Pty};
 use super::plan::{self, Decision, Expected};
 use std::time::Duration;
 
-/// A terminal whose screen is chosen by the clock: time moves only when the executor waits or
-/// sleeps, and a digit that the dialog offers closes it.
 struct Timed {
     clock: u64,
     writes: Vec<String>,
-    /// The screen from each moment on (the last one whose time has come).
     screens: Vec<(u64, Vec<String>)>,
-    /// How many options the dialog has: a digit up to it answers.
     options: usize,
     answered: bool,
 }
@@ -75,7 +66,6 @@ fn rule() -> String {
     "─".repeat(120)
 }
 
-/// A new file's dialog: its own "allow all edits" in place of "don't ask again".
 fn write_dialog(shown_path: &str) -> Vec<String> {
     let rule = rule();
     lines(&[
@@ -117,7 +107,6 @@ fn play(decision: Decision, expect: &Expected, pty: &mut Timed) -> Result<Outcom
 
 #[test]
 fn always_on_a_files_dialog_is_refused_with_nothing_typed_and_allow_goes_through() {
-    // The pair of calls the audit showed: a refusal, then an answer that worked.
     let screen = write_dialog("memory/notes.md");
     let mut pty = Timed::new(vec![(0, screen.clone())], 3);
     assert_eq!(
@@ -135,8 +124,6 @@ fn always_on_a_files_dialog_is_refused_with_nothing_typed_and_allow_goes_through
 
 #[test]
 fn a_dialog_that_draws_after_the_attach_settled_is_still_answered() {
-    // The attach is quiet for 500 ms and the dialog is not on the screen yet (the session was
-    // repainting for the attach's size): reading once failed an answer that the next try made.
     let mut pty = Timed::new(
         vec![(0, idle()), (1_400, write_dialog("memory/notes.md"))],
         3,
@@ -156,13 +143,11 @@ fn a_dialog_that_never_draws_ends_the_wait_with_nothing_typed() {
         Err(Failure::NotPermission)
     );
     assert!(pty.writes.is_empty());
-    // Bounded: the attach's quiet, then a few seconds of looking, then it gives up.
     assert!(pty.clock < 6_000, "waited {} ms", pty.clock);
 }
 
 #[test]
 fn the_other_request_on_screen_is_a_mismatch_even_after_a_wait() {
-    // Two Writes in a row: the terminal asks about the second while the card names the first.
     let other = Expected {
         tool: "Write".into(),
         summary: "/Users/me/work/app/memory/glass-kit.md".into(),
@@ -177,8 +162,6 @@ fn the_other_request_on_screen_is_a_mismatch_even_after_a_wait() {
 
 #[test]
 fn a_path_shown_shorter_than_the_cards_is_the_same_request() {
-    // The card has the whole path from the job's state; the dialog may show it from the folder,
-    // cut in the middle, or from the home folder.
     for shown in [
         "memory/notes.md",
         "…/app/memory/notes.md",

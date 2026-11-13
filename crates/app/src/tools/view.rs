@@ -1,8 +1,3 @@
-//! The tools' parts over GPUI (macOS), shared by Chat and the notch: the Antigravity permission
-//! card with Antigravity's own options, the Codex model picker and the Antigravity options
-//! picker as pop-up cards, and the `--render` views. Each takes the view's own click handler, so
-//! the same card answers through `NotchView` in the notch and `ChatView` in Chat. Kit tokens only.
-
 use std::sync::Arc;
 
 use gpui::{div, prelude::*, px, AnyView, App, Context, Div, Render, SharedString, Window};
@@ -25,10 +20,8 @@ use crate::mac::gate;
 use crate::sheets::second_opinion_view::SecondOpinionView;
 use crate::sheets::view::Acts;
 
-/// The card's own title.
 pub const PERMISSION_TITLE: &str = "Permission needed";
 
-/// What an option does, under its name (Antigravity gives only the names).
 pub fn option_detail(kind: &str) -> &'static str {
     match kind {
         "allow_once" => "This time only",
@@ -39,7 +32,6 @@ pub fn option_detail(kind: &str) -> &'static str {
     }
 }
 
-/// One line of the preview: the diff's sign and ink, or plain mono text.
 fn preview_line(text: &str, kind: DiffKind, a: Appearance) -> Div {
     let (sign, ink) = match kind {
         DiffKind::Add => ("+ ", Ink::Done),
@@ -51,9 +43,6 @@ fn preview_line(text: &str, kind: DiffKind, a: Appearance) -> Div {
         .line_clamp(2)
 }
 
-/// "Permission needed": what Antigravity would do (the edit's diff, else the command) and its
-/// own options, each answering with its id through `answer`. Disabled, with the reason on hover,
-/// while `gate` is off. The caller adds its status line.
 pub fn agy_card<V: 'static>(
     agy: &AgyPermission,
     agent: Option<&str>,
@@ -133,7 +122,6 @@ pub fn agy_card<V: 'static>(
         .children(options)
 }
 
-/// What the Codex picker was asked.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PickerAction {
     Model(String),
@@ -150,8 +138,6 @@ pub(crate) fn pop_up(a: Appearance) -> Div {
         .gap(px(4.0))
 }
 
-/// A clickable row of a pop-up: the title in the small Meta type, a faint detail under it, and a
-/// check at the right end when selected. Tight padding, as a compact menu.
 pub(crate) fn pick_row(
     id: impl Into<SharedString>,
     title: &str,
@@ -186,7 +172,6 @@ pub(crate) fn pick_row(
         ))
 }
 
-/// A small pill for one choice in a row of them.
 fn pill(
     id: impl Into<SharedString>,
     title: &str,
@@ -198,12 +183,9 @@ fn pill(
     } else {
         ButtonKind::Ghost
     };
-    // 8 pt a side (the 4 pt grid) instead of the button's 12, so a row of four efforts fits
     button(id.into(), title, kind, PartState::Rest, a).px(px(8.0))
 }
 
-/// The Codex model picker (`CodexModelPicker`): Codex's models, each with its efforts, and
-/// Codex Default. Picks go to `act`; nothing is sent until the next turn.
 pub fn codex_picker_card<V: 'static>(
     picker: &CodexPicker,
     a: Appearance,
@@ -264,8 +246,6 @@ pub fn codex_picker_card<V: 'static>(
         .child(label(CODEX_NOTE, TypeRole::Meta, Ink::TextFaint, a).px(px(8.0)))
 }
 
-/// The Antigravity options picker (`ACPOptionsPicker`): each option the session offers with its
-/// values; a pick calls `set(option id, value)`, which sends `agy.set_option`.
 pub fn agy_options_card<V: 'static>(
     options: &[ConfigOption],
     gate: Control,
@@ -304,8 +284,6 @@ pub fn agy_options_card<V: 'static>(
     .child(label(AGY_NOTE, TypeRole::Meta, Ink::TextFaint, a).px(px(8.0)))
 }
 
-/// `--render codex-model-picker`: the picker alone, over the fixture's models cache. A click
-/// changes only what is drawn.
 pub struct CodexPickerRender {
     pub picker: CodexPicker,
 }
@@ -335,8 +313,6 @@ impl Render for CodexPickerRender {
     }
 }
 
-/// `--render agy-permission-card|codex-model-picker|second-opinion-sheet`, over fixtures; nothing
-/// is ever sent.
 pub fn build_render(name: &str, cx: &mut App) -> Option<AnyView> {
     Some(match renders::shown(name)? {
         Shown::AgyPermission => {

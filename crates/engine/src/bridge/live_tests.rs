@@ -1,7 +1,3 @@
-//! The live backend: `LiveBridgeBackend.enrich`, Codex and Antigravity rows next to Claude Code's,
-//! acting routed through [`Acting`] (and refused while it's off), and the recent folders
-//! (`RecentProjects.decode`, from `BridgeRouterTests`).
-
 use super::backend::BridgeBackend;
 use super::foreign::{self, AcpPermission, ForeignRow, PermissionOption};
 use super::live::*;
@@ -67,7 +63,6 @@ fn no_window(_: &str) -> Option<u64> {
 #[test]
 fn the_phones_context_window_is_the_catalogs() {
     let dir = TempDir::new("bridge-enrich-window");
-    // An override gives Opus 5.5 another window; the phone shows the catalog's, as Chat does.
     let catalog = Catalog::load(&dir.write(
         "catalog.json",
         r#"{"claude": {"windows": {"claude-opus-5-5": 1000000}}}"#,
@@ -90,7 +85,6 @@ fn the_phones_context_window_is_the_catalogs() {
         .find(|s| s.id == "s1")
         .expect("the session");
     assert_eq!(session.facts.expect("facts").context_window, want);
-    // A model the catalog has no window for shows none.
     let none = Catalog::default();
     let mut other = claude(Some(transcript(&dir)), SessionState::Running);
     enrich(&mut other, &[], NOW_MS, &|m| {
@@ -295,7 +289,6 @@ fn sessions_list_claude_and_antigravity_rows_with_their_prompts() {
         Some("Building")
     );
 
-    // The prompt keeps the time it was first seen.
     *backend.sources.clock.lock().expect("clock") = NOW_MS + 5000.0;
     assert_eq!(
         backend.pending_prompt(&prompt.id).map(|p| p.created_ms),
@@ -311,7 +304,6 @@ fn sessions_list_claude_and_antigravity_rows_with_their_prompts() {
         "another rpc id is gone"
     );
 
-    // B2 is idle, so its reply is whole; the tail of a working one is held back.
     let chat = backend.chat_messages("agy:B2", None).expect("chat");
     assert_eq!(chat.len(), 2);
     assert_eq!(chat[0].id, foreign::stable_uuid("agy:B2|u"));
@@ -405,7 +397,6 @@ fn with_acting_off_the_router_refuses_and_nothing_is_audited() {
     );
     assert_eq!(io.last_json()["error"]["message"], ACTING_OFF);
     assert!(audit.recent().is_empty());
-    // Reads still work.
     router.handle(&connection, r#"{"id":7,"op":"sessions.list"}"#);
     assert_eq!(
         io.last_json()["data"]["sessions"].as_array().map(Vec::len),

@@ -16,7 +16,6 @@ enum VizTab {
   const VizTab(this.title);
   final String title;
 
-  /// The tabs the phone shows. Phone capture was dropped, so that tab is gone (an old Mac may still suggest it).
   static List<VizTab> get shown => <VizTab>[for (final VizTab tab in values) if (tab != phone) tab];
 
   static VizTab? byName(String? name) {
@@ -27,7 +26,6 @@ enum VizTab {
   }
 }
 
-/// The tab the user chose for each session; sessions without a choice follow the Mac's suggestion.
 final NotifierProvider<VizTabChoiceNotifier, Map<String, VizTab>> vizTabChoiceProvider =
     NotifierProvider<VizTabChoiceNotifier, Map<String, VizTab>>(VizTabChoiceNotifier.new);
 
@@ -38,8 +36,6 @@ class VizTabChoiceNotifier extends Notifier<Map<String, VizTab>> {
   void choose(String sessionId, VizTab tab) => state = <String, VizTab>{...state, sessionId: tab};
 }
 
-/// viz.get for a session: the suggested tab, the web URL and the flow, diagram and chart specs.
-/// It reloads when the session's activity moves; the previous value stays on screen meanwhile.
 final vizProvider = FutureProvider.family<Json, String>((Ref ref, String sessionId) async {
   final BridgeClient? client = ref.watch(bridgeClientProvider);
   ref.watch(connectedCountProvider);
@@ -48,7 +44,6 @@ final vizProvider = FutureProvider.family<Json, String>((Ref ref, String session
   return client.vizGet(sessionId);
 });
 
-/// The entity diagram costs a folder scan on the Mac, so it is asked for only when that tab opens.
 final vizEntityProvider = FutureProvider.family<Json, String>((Ref ref, String sessionId) async {
   final BridgeClient? client = ref.watch(bridgeClientProvider);
   if (client == null) throw const BridgeException('disconnected', 'Chưa kết nối tới Mac.');

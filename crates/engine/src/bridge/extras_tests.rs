@@ -1,6 +1,3 @@
-//! The phone extras through the router and the live backend: `viz.get`, `chat.image`, `web.snapshot`
-//! and pictures in `chat.get`, all over a real transcript on disk and fakes for what draws.
-
 use super::extras::Extras;
 use super::images::ImageCrate;
 use super::live::{ActingOff, LiveBackend, Sources};
@@ -53,7 +50,6 @@ struct World {
     router: Router,
     connection: Arc<Connection>,
     io: Arc<RecordingIo>,
-    /// Kept alive for the folder; the file-marker tests (unix paths) also write into it.
     #[cfg_attr(not(unix), allow(dead_code))]
     dir: TempDir,
     shots: Arc<Shots>,
@@ -82,7 +78,6 @@ fn assistant_line(text: &str) -> String {
     )
 }
 
-/// A router over the live backend with one session whose transcript is `lines`.
 fn world(lines: &[String]) -> World {
     let dir = TempDir::new("extras");
     std::fs::create_dir_all(dir.path("home/app")).expect("home");
@@ -147,7 +142,6 @@ impl World {
         self.io.last_json()
     }
 
-    /// The ids of the pictures `chat.get` lists.
     fn picture_ids(&self) -> Vec<String> {
         let reply = self.ask(json!({"id":2,"op":"chat.get","sessionId":"s1"}));
         assert!(is_ok(&reply), "{reply}");
@@ -160,8 +154,6 @@ impl World {
             .collect()
     }
 }
-
-// MARK: Visualize
 
 #[test]
 fn viz_get_answers_the_three_specs_and_the_suggested_tab() {
@@ -193,8 +185,6 @@ fn viz_get_for_an_unknown_session_is_not_found() {
     let reply = world.ask(json!({"id":3,"op":"viz.get","sessionId":"nope"}));
     assert_eq!(error_code(&reply), Some("not_found"));
 }
-
-// MARK: Chat pictures
 
 #[test]
 fn chat_get_describes_a_picture_and_never_carries_its_bytes() {
@@ -277,7 +267,6 @@ fn chat_image_for_an_unknown_or_foreign_session_is_not_found() {
 #[test]
 fn a_file_marker_outside_home_and_tmp_is_not_served() {
     let outside = TempDir::new("outside-secret");
-    // The temp folder may itself sit under /tmp: only assert when it does not.
     let under_tmp =
         outside.root().starts_with("/tmp") || outside.root().starts_with("/private/tmp");
     if under_tmp {
@@ -296,7 +285,6 @@ fn a_file_marker_outside_home_and_tmp_is_not_served() {
 #[cfg(unix)]
 #[test]
 fn a_file_marker_in_home_is_served_as_a_jpeg() {
-    // The world's home exists only once it is built, so write the picture and then the transcript.
     let probe = world(&[assistant_line("x")]);
     let file = probe.dir.path("home/app/shot.png");
     std::fs::write(&file, png_bytes(30, 30)).expect("file");
@@ -311,8 +299,6 @@ fn a_file_marker_in_home_is_served_as_a_jpeg() {
         &[0xFF, 0xD8]
     );
 }
-
-// MARK: Web snapshots
 
 #[test]
 fn web_snapshot_with_a_url_shoots_it_at_a_phone_shaped_size() {
@@ -350,8 +336,6 @@ fn web_snapshot_without_any_page_is_not_found() {
     let reply = world.ask(json!({"id":4,"op":"web.snapshot","sessionId":"s1"}));
     assert_eq!(error_code(&reply), Some("not_found"));
 }
-
-// MARK: Screen stream
 
 #[test]
 fn subscribing_to_the_phone_stream_here_says_it_is_unsupported() {

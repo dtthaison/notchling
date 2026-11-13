@@ -1,7 +1,3 @@
-//! The platform's side of the editor: `NSTextInputClient` through GPUI's [`EntityInputHandler`]
-//! (typed and composed text, the input method's marked range and candidate window position), in
-//! UTF-16 units, and the mouse (place, drag, double and triple click).
-
 use std::ops::Range;
 
 use gpui::{
@@ -13,7 +9,6 @@ use super::{Drag, TextEditor};
 use crate::text_edit::Unit;
 
 impl TextEditor {
-    /// The text index under a window point, from the last layout.
     pub(super) fn index_at(&self, position: Point<Pixels>) -> Option<usize> {
         let layout = self.layout.as_ref()?;
         let local = point(
@@ -66,8 +61,6 @@ impl TextEditor {
         self.touched(false, cx);
     }
 
-    /// Dragging extends from what the first click picked, by the same unit, and scrolls the box
-    /// along with the caret.
     pub(super) fn mouse_move(&mut self, event: &MouseMoveEvent, cx: &mut Context<Self>) {
         let Some(drag) = &self.drag else {
             return;
@@ -133,7 +126,6 @@ impl EntityInputHandler for TextEditor {
         cx.notify();
     }
 
-    /// Typed text, a committed composition, or a held key's accent (`insertText`).
     fn replace_text_in_range(
         &mut self,
         range_utf16: Option<Range<usize>>,
@@ -154,7 +146,6 @@ impl EntityInputHandler for TextEditor {
         self.touched(true, cx);
     }
 
-    /// The composition so far (`setMarkedText`), underlined until it is committed.
     fn replace_and_mark_text_in_range(
         &mut self,
         range_utf16: Option<Range<usize>>,
@@ -172,8 +163,6 @@ impl EntityInputHandler for TextEditor {
         self.touched(true, cx);
     }
 
-    /// Where a range is on screen: the input method puts its candidate window under it. A range
-    /// across rows reports its first row to the right edge.
     fn bounds_for_range(
         &mut self,
         range_utf16: Range<usize>,

@@ -1,25 +1,15 @@
-//! The real [`Runner`] (Swift `ProcessRunner`): a command in a process group of its own, both pipes
-//! read on threads so a full pipe never stops it, stdin written on a thread of its own. A timeout
-//! signals the whole group (SIGTERM, then SIGKILL after two seconds), and what the command left
-//! running is ended when it exits. Each pipe keeps its last 2 MiB; a cut start says so with
-//! [`CUT_NOTICE`].
-
 use super::runner::{Call, Channel, CommandResult, Runner, NOT_FOUND, TIMED_OUT};
 use std::io::{Read, Write};
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-/// The most output kept from one pipe; what came before is cut.
 pub const OUTPUT_CAP: usize = 2 * 1024 * 1024;
-/// The first line of a pipe's text when its start was cut.
 pub const CUT_NOTICE: &str = "[earlier output cut]\n";
-/// The code when the exit status could not be read.
 pub const LOST_STATUS: i32 = 125;
 const TERM_GRACE: Duration = Duration::from_secs(2);
 const DRAIN_GRACE: Duration = Duration::from_secs(3);
 
-/// Runs real processes.
 pub struct ProcessRunner;
 
 #[derive(Default)]
@@ -48,7 +38,6 @@ impl Sink {
         if !cut {
             return String::from_utf8_lossy(tail).into_owned();
         }
-        // the cut may fall inside a character: start at the next one
         let start = tail
             .iter()
             .position(|b| b & 0xC0 != 0x80)
@@ -57,7 +46,6 @@ impl Sink {
     }
 }
 
-/// How many bytes at the end of `bytes` begin a UTF-8 character that isn't complete yet.
 pub fn incomplete_tail(bytes: &[u8]) -> usize {
     let mut back = 0;
     for &byte in bytes.iter().rev().take(3) {
@@ -91,7 +79,6 @@ fn fail(message: String) -> CommandResult {
     }
 }
 
-/// Signals the group: SIGTERM, then SIGKILL after the grace.
 #[cfg(unix)]
 fn end_group(pgid: u32) {
     let pgid = pgid as libc::pid_t;
@@ -155,7 +142,6 @@ impl Runner for ProcessRunner {
         let finished = Arc::new(std::sync::atomic::AtomicBool::new(false));
         if let (Some(data), Some(mut pipe)) = (call.stdin.clone(), child.stdin.take()) {
             std::thread::spawn(move || {
-                // a child that never reads (or has gone) ends the write with EPIPE
                 let _ = pipe.write_all(&data);
             });
         }
@@ -231,7 +217,6 @@ impl Runner for ProcessRunner {
                 Err(_) => break,
             }
         }
-        // what the command left running must not outlive it
         end_group(pid);
         let drain = Instant::now() + DRAIN_GRACE;
         for rx in readers {
@@ -262,7 +247,6 @@ impl Runner for ProcessRunner {
     }
 }
 
-/// A normal exit gives its code; death by a signal gives the signal number.
 fn exit_code(status: std::process::ExitStatus) -> i32 {
     if let Some(code) = status.code() {
         return code;

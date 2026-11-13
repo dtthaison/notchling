@@ -1,13 +1,3 @@
-//! The account side of lanes (`AccountStore`'s lane extension) and of Move All.
-//!
-//! - Opening a lane hands a saved account's login to the lane's own Keychain item; the account
-//!   must not be the main login's or another lane's.
-//! - Switching a lane first copies its login back to the old account's saved slot (Claude Code may
-//!   have renewed it there, retiring the old refresh token), after checking with the profile
-//!   endpoint that it still belongs to that account, then sets the new one.
-//! - Closing a lane gives its login back the same way, removes the lane's item and its folder.
-//! - Move All closes the lane holding the target account, then switches the main login to it.
-
 use super::profile::{access_token, account_id_from_profile, is_expired, valid_id};
 use super::{err, AccountError, ClaudeAccount, ClaudeAccounts, State};
 use crate::accounts::Login;
@@ -15,19 +5,14 @@ use crate::control::MoveAllPlan;
 use crate::lanes::{new_name, service_for, Lane};
 use crate::sessions::Agent;
 
-/// What Move All's account work did.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct MoveAllAccounts {
-    /// The lane closed to free the account.
     pub closed_lane: Option<String>,
-    /// The account the main login switched to.
     pub switched_to: Option<String>,
-    /// Why a step failed; the steps after a failed close still run (the switch then refuses).
     pub errors: Vec<String>,
 }
 
 impl ClaudeAccounts {
-    /// The lanes in `lanes.json` (a file read only).
     pub fn lanes(&self) -> Vec<Lane> {
         self.env.lanes.all()
     }
@@ -36,7 +21,6 @@ impl ClaudeAccounts {
         u64::try_from(self.now() / 1000).unwrap_or(0)
     }
 
-    /// Starts a lane on a saved account, or returns the one it is already in.
     pub fn open_lane(&self, id: &str) -> Result<Lane, AccountError> {
         if !valid_id(id) {
             return Err(err("That isn't an account id."));
@@ -80,8 +64,6 @@ impl ClaudeAccounts {
         Ok(lane)
     }
 
-    /// Moves a lane to another account. Sessions in the lane carry on with the new login on their
-    /// next request.
     pub fn switch_lane(&self, name: &str, id: &str) -> Result<Lane, AccountError> {
         if !valid_id(id) {
             return Err(err("That isn't an account id."));
@@ -115,7 +97,6 @@ impl ClaudeAccounts {
                     "Couldn't write the lane's login to the Keychain: {e}"
                 ))
             })?;
-        // The profile only names the account in `/status`; the login is what counts.
         let _ = self.env.lanes.set_profile(&lanes[i], &profile);
         lanes[i].account_id = id.to_string();
         lanes[i].email = account.email;
@@ -124,9 +105,6 @@ impl ClaudeAccounts {
         Ok(lanes[i].clone())
     }
 
-    /// Ends a lane: its login goes back to the saved account, the lane's Keychain item and folder
-    /// are removed. False when there was no such lane. A login that can't be read back stops it,
-    /// since removing the item would lose a renewed login.
     pub fn close_lane(&self, name: &str) -> Result<bool, AccountError> {
         let _state = self.lock();
         let mut lanes = self.env.lanes.all();
@@ -136,14 +114,12 @@ impl ClaudeAccounts {
         self.return_login(&lanes[i])?;
         self.lane_login_is_saved(&lanes[i])?;
         self.env.lanes.remove_login(&self.env.keys, &lanes[i])?;
-        // A folder that can't be removed stays; the lane is closed either way.
         let _ = self.env.lanes.remove_folder(&lanes[i], self.now_secs());
         lanes.remove(i);
         self.env.lanes.save(&lanes)?;
         Ok(true)
     }
 
-    /// Move All's account work: close the lane holding the account, then switch the main login.
     pub fn move_all_accounts(&self, plan: &MoveAllPlan) -> MoveAllAccounts {
         let mut done = MoveAllAccounts::default();
         if let Some(name) = &plan.close_lane {
@@ -166,8 +142,6 @@ impl ClaudeAccounts {
         done
     }
 
-    /// The Move All plan for putting every session on `target` (`None`: the main login's own
-    /// account), with the main login read fresh.
     pub fn move_all_plan(
         &self,
         agents: &[Agent],
@@ -182,8 +156,6 @@ impl ClaudeAccounts {
         ))
     }
 
-    /// A saved login fit to hand to a lane, renewed first when it has expired (it isn't live
-    /// anywhere yet).
     fn login_for_lane(
         &self,
         state: &mut State,
@@ -210,8 +182,6 @@ impl ClaudeAccounts {
             })
     }
 
-    /// Ok when the lane holds no login, or its `claudeAiOauth` is what the lane's account's saved
-    /// slot holds: only then may the lane's item be replaced or removed.
     fn lane_login_is_saved(&self, lane: &Lane) -> Result<(), AccountError> {
         let Some(oauth) = self.env.lanes.login(&self.env.keys, lane)? else {
             return Ok(());
@@ -228,10 +198,6 @@ impl ClaudeAccounts {
         )))
     }
 
-    /// Copies a lane's login back to its account's saved slot. A login the profile endpoint says
-    /// belongs to another account never goes back; one that can't be checked (expired, no answer)
-    /// goes back as the Swift app did, since only Notchling writes a lane's item and Claude Code
-    /// renews it in place for the same account. True when the slot changed.
     pub(super) fn return_login(&self, lane: &Lane) -> Result<bool, AccountError> {
         let Some(oauth) = self.env.lanes.login(&self.env.keys, lane)? else {
             return Ok(false);

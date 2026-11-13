@@ -1,6 +1,3 @@
-//! Port of the watcher half of `ProviderLimitsTests`, against a fake provider that only records
-//! the switch it is asked for.
-
 use super::claude::Announce;
 use super::mode::{LimitConfig, LimitMode, ANTIGRAVITY, CODEX};
 use super::provider::{ProviderLimitWatcher, Setup};
@@ -92,9 +89,7 @@ struct Rig {
 
 fn rig(fake: Arc<Fake>, setup: Setup, mode: LimitMode, idle: bool) -> Rig {
     let config = Arc::new(LimitConfig::in_memory());
-    if config.set_mode(&setup.provider, mode).is_err() {
-        // A mode the provider doesn't allow stays unset: the default reads.
-    }
+    config.set_mode(&setup.provider, mode).ok();
     let said = Arc::new(Mutex::new(Vec::new()));
     let sink = said.clone();
     let announce: Announce = Arc::new(move |t: &str| sink.lock().unwrap().push(t.to_string()));
@@ -220,7 +215,6 @@ fn notify_and_switch_asks_the_provider_to_switch_when_idle() {
         "{}",
         said_now[0]
     );
-    // Half an hour must pass before another.
     r.fake
         .reports
         .lock()

@@ -1,34 +1,16 @@
-//! Writing the `notchling-*` skills into the skills folders of Claude Code, Codex and Antigravity
-//! CLI, and taking them out.
-//!
-//! - **The tool must be there.** A skill is no reason to create `~/.codex` for someone without
-//!   Codex: when a tool's own folder is missing it is skipped.
-//! - **Only folders we made are ours.** A folder is ours when it holds the [`MARK`] file we write
-//!   into it. One without the mark (the user's own, or the one the Swift app wrote) is never
-//!   written over or removed, and is reported. A link where the folder should be is refused too.
-//! - **Removing deletes exactly the two files we wrote** (`SKILL.md` and the mark) and then the
-//!   folder if it is empty; anything else the user put there stays, and so does the folder.
-//! - **The text is an input.** Each skill is a [`SkillSpec`] with a function from the tool to
-//!   its text, so the vault's text can come from where it is made.
-
 use super::hooks::Want;
 use crate::delegate::skill::SkillTool;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// The file that says a skill folder is ours.
 pub const MARK: &str = ".notchling-skill";
 const MARK_TEXT: &str = "Written by Notchling. Notchling updates and removes this skill; delete this file to keep the folder as it is.\n";
 const SKILL_FILE: &str = "SKILL.md";
 
-/// Each tool's own folder; its skills go in `<folder>/skills/<name>`.
 #[derive(Clone, Debug)]
 pub struct ToolRoots {
-    /// `~/.claude` (or `CLAUDE_CONFIG_DIR`).
     pub claude: PathBuf,
-    /// `~/.codex` (or `CODEX_HOME`).
     pub codex: PathBuf,
-    /// `~/.gemini/config`.
     pub antigravity: PathBuf,
 }
 
@@ -50,25 +32,19 @@ pub fn tool_name(tool: SkillTool) -> &'static str {
     }
 }
 
-/// A skill: its folder name, which tools get it, and its text for each.
 pub struct SkillSpec {
     pub name: String,
     pub tools: Vec<SkillTool>,
     pub text: Box<dyn Fn(SkillTool) -> String + Send + Sync>,
 }
 
-/// What happens (or would) to one skill in one tool.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Action {
-    /// The folder is made and written.
     Write,
-    /// Our folder holds other text; it is rewritten.
     Update,
     Unchanged,
     Remove,
-    /// Nothing there to remove.
     Absent,
-    /// Left alone, for the reason given.
     Skip,
 }
 
@@ -94,7 +70,6 @@ pub struct SkillPlan {
     pub reason: Option<String>,
 }
 
-/// Whose a skill folder is.
 enum Owner {
     Free,
     Ours,
@@ -163,7 +138,6 @@ fn plan_one(roots: &ToolRoots, spec: &SkillSpec, tool: SkillTool, want: Want) ->
     }
 }
 
-/// What `want` does to each skill, in each tool it is for. Reads only.
 pub fn plan_skills(
     roots: &ToolRoots,
     specs: &[SkillSpec],
@@ -184,15 +158,12 @@ pub fn plan_skills(
     out
 }
 
-/// What was done to one skill.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SkillResult {
     pub plan: SkillPlan,
-    /// An error, when the action could not be carried out.
     pub error: Option<String>,
 }
 
-/// Carries out [`plan_skills`]; one skill failing does not stop the others.
 pub fn apply_skills(
     roots: &ToolRoots,
     specs: &[SkillSpec],
@@ -217,7 +188,6 @@ pub fn apply_skills(
 fn write_skill(dir: &Path, text: &str) -> Result<(), String> {
     let say = |what: &str, e: std::io::Error| format!("{what}: {e}");
     fs::create_dir_all(dir).map_err(|e| say("the folder", e))?;
-    // The mark first: a folder we started is ours even if the next write fails.
     notchling_platform::files::write_private_no_follow(&dir.join(MARK), MARK_TEXT.as_bytes())
         .map_err(|e| format!("the mark: {e}"))?;
     let file = dir.join(SKILL_FILE);
@@ -227,7 +197,6 @@ fn write_skill(dir: &Path, text: &str) -> Result<(), String> {
     write_text(&file, text).map_err(|e| say("SKILL.md", e))
 }
 
-/// An atomic write of a world-readable text file (a skill is read by the tool, not secret).
 fn write_text(path: &Path, text: &str) -> std::io::Result<()> {
     use std::io::Write;
     let temp = path.with_file_name(format!(".SKILL.md.notchling-{}.tmp", std::process::id()));
@@ -254,7 +223,6 @@ fn remove_skill(dir: &Path) -> Result<(), String> {
             Err(_) => {}
         }
     }
-    // Only an empty folder goes; the user's own files in it stay.
     let _ = fs::remove_dir(dir);
     Ok(())
 }

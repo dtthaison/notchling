@@ -1,35 +1,4 @@
 #!/usr/bin/env python3
-"""The push wrapper: takes an agent's finished branch, pushes it as the GitHub App and opens the PR.
-
-    push_wrapper.py --worktree PATH --issue N --title TEXT [--agent-model ID] [--config FILE] < body
-
-The pull request body is read from stdin; no body path is ever opened.
-
-Run by sd as the wrapper user, never by the agent. The agent's OS user has no GitHub credential; the App's
-key lives in a file only the wrapper user can read. What this script promises:
-
-- It pushes only `refs/heads/agent/<issue>-<slug>` (lowercase slug, the issue number matching), as one
-  explicit `<sha>:<ref>` refspec: never a force, a tag, a delete or a glob. A branch that exists with other
-  history is rejected by the remote, not overwritten (exit 1, with the remote's reason).
-- The installation token is narrowed to this one repository (`contents` and `pull_requests` write; GitHub
-  makes it good for an hour, and the wrapper revokes it when done), lives in memory, and reaches git only
-  through GIT_CONFIG_* environment variables. It is in no argument list and no file.
-- The worktree belongs to the agent, so nothing in its git config, hooks or attributes may run as the
-  wrapper. The only git commands run there are `rev-parse` and `symbolic-ref`, which execute nothing. The
-  clean check and the push run in a scratch repository of ours that borrows the agent's objects through
-  `objects/info/alternates`; an agent repository with alternates of its own is refused, and the one file
-  read from it by path (the index) is opened without following links.
-- The caller picks the arguments, the environment and the working directory, and none of them chooses what
-  runs: git and openssl come from fixed folders by absolute path, every command runs in the scratch
-  folder with a minimal environment, `--config` must name a file only this user can write, and the App's
-  JWT and token go to GitHub's own URLs.
-- Nothing from the agent reaches the pull request raw: a body with a private key or the token is refused;
-  @mentions and closing keywords for other issues are broken with a zero-width joiner; a branch that
-  changes `.github/workflows/` is refused (the App has no `workflows` permission).
-
-Exit codes: 0 done (prints the PR URL), 1 refused (including a push the remote rejects), 2 error. Config
-(JSON, default `.config/notchling/push-wrapper.json` in this account's home): app_id, key_path, repo, and
-for tests api_url and remote_url, which must otherwise be GitHub's."""
 
 from __future__ import annotations
 
@@ -62,7 +31,6 @@ BODY_MAX = 60000
 INDEX_MAX = 512 * 1024 * 1024
 PRIVATE_KEY_MARK = "PRIVATE KEY-----"
 WORKFLOWS_DIR = ".github/workflows/"
-# The agent repository's idea of the base branch, tried in order (see workflow_changes).
 BASE_REFS = ("refs/remotes/origin/HEAD", "refs/remotes/origin/main", "refs/remotes/origin/master",
              "refs/heads/main", "refs/heads/master")
 ZWJ = "\u200d"
@@ -78,28 +46,23 @@ FAILURE_MAX = 600
 GIT_TIMEOUT = 300
 PERMISSIONS = {"contents": "write", "pull_requests": "write"}
 CONFIG_MAX = 64 * 1024
-DEFAULT_CONFIG = os.path.join(".config", "notchling", "push-wrapper.json")  # under the account's home
-# The only places git and openssl are looked for, in this order. Never the caller's PATH: sudo's
-# environment, a '.' or an empty entry could otherwise put the agent's own program first.
+DEFAULT_CONFIG = os.path.join(".config", "notchling", "push-wrapper.json")
 TOOL_DIRS = ("/usr/bin", "/bin", "/usr/local/bin", "/opt/homebrew/bin")
 SAFE_PATH = ":".join(TOOL_DIRS)
-# The one thing taken from the caller's environment: where the proxy is, if the worker needs one.
 PROXY_ENV = ("HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy", "NO_PROXY", "no_proxy")
-# Lets a test point api_url and remote_url at a local fake. The script scrubs its environment on start,
-# so it cannot be set from outside a running process.
 TESTING_VAR = "NOTCHLING_PUSH_WRAPPER_TESTING"
 
 
 class Refused(Exception):
-    """The request breaks a rule. Nothing was sent anywhere."""
+    pass
 
 
 class Failed(Exception):
-    """Something outside our control went wrong (GitHub, git, openssl)."""
+    pass
 
 
 class ToolMissing(Failed):
-    """git or openssl is not in any of TOOL_DIRS. An error of the machine, never read as a refusal."""
+    pass
 
 
 class Result(NamedTuple):
@@ -119,17 +82,14 @@ class Request(NamedTuple):
     worktree: str
     issue: int
     title: str
-    body: bytes  # as read from stdin; validate_body checks it
+    body: bytes
     agent_model: Optional[str] = None
 
 
 class Runner:
-    """Runs a command and returns the CompletedProcess. A seam: tests wrap it to read every argv."""
 
     def __call__(self, argv: List[str], env: Optional[Mapping[str, str]] = None,
                  input: Optional[bytes] = None, cwd: Optional[str] = None) -> "subprocess.CompletedProcess[bytes]":
-        # A child that reads stdin (a git filter, fsmonitor or hook) must not wait on ours: with no input
-        # it gets /dev/null, never the wrapper's own stdin.
         extra = {"stdin": subprocess.DEVNULL} if input is None else {}
         try:
             return subprocess.run(argv, env=None if env is None else dict(env), input=input, cwd=cwd,
@@ -139,7 +99,6 @@ class Runner:
 
 
 def in_dir(runner: Runner, cwd: str) -> Runner:
-    """The same runner, but every command starts in `cwd` (our scratch folder, never the caller's)."""
     def run(argv: List[str], env: Optional[Mapping[str, str]] = None, input: Optional[bytes] = None,
             cwd_: Optional[str] = None) -> "subprocess.CompletedProcess[bytes]":
         return runner(argv, env=env, input=input, cwd=cwd_ or cwd)
@@ -147,7 +106,6 @@ def in_dir(runner: Runner, cwd: str) -> Runner:
 
 
 def find_tool(name: str) -> str:
-    """The absolute path of `name` in TOOL_DIRS, or Failed. Never a search of the caller's PATH."""
     for d in TOOL_DIRS:
         path = os.path.join(d, name)
         if os.path.isfile(path) and os.access(path, os.X_OK):
@@ -156,15 +114,10 @@ def find_tool(name: str) -> str:
 
 
 def scrub_environment(environ: Mapping[str, str]) -> dict:
-    """What the script keeps of the environment it was started with: a fixed PATH, LANG=C and the proxy
-    settings. Everything else (PYTHON*, GIT_*, SSL_CERT_*, OPENSSL_*, LD_*, this script's own test switch)
-    is dropped before anything runs."""
     out = {k: environ[k] for k in PROXY_ENV if k in environ}
     out.update({"PATH": SAFE_PATH, "LANG": "C"})
     return out
 
-
-# --- rules -------------------------------------------------------------------------------------------
 
 def validate_branch(branch: str, issue: int) -> str:
     m = BRANCH_RE.fullmatch(branch or "")
@@ -174,7 +127,6 @@ def validate_branch(branch: str, issue: int) -> str:
 
 
 def validate_ref(ref: str) -> str:
-    """The one place a ref is let through: refs/heads/agent/<n>-<slug>, nothing else."""
     prefix = "refs/heads/"
     m = BRANCH_RE.fullmatch(ref[len(prefix):]) if ref.startswith(prefix) else None
     if not m or len(m.group(2)) > SLUG_MAX:
@@ -201,8 +153,6 @@ def validate_model(model: Optional[str]) -> Optional[str]:
 
 
 def read_stdin_body(stream: BinaryIO) -> bytes:
-    """The PR body arrives on stdin, never by a path. A path would be opened with this user's rights, and
-    the file at it can be swapped for a link to the App key; a pipe is read as the caller's data."""
     try:
         if stream.isatty():
             raise Refused("pipe the pull request body on stdin")
@@ -226,15 +176,11 @@ def validate_body(raw: bytes) -> str:
 
 
 def holds_secret(text: str, token: str) -> bool:
-    """True if `text` carries the installation token, bare or as git's Basic header value."""
     basic = base64.b64encode(("x-access-token:" + token).encode()).decode()
     return bool(token) and (token in text or basic in text)
 
 
 def open_regular(path: str, what: str, limit: int) -> Tuple[int, os.stat_result]:
-    """Open `path` read-only as a plain file or refuse: not a symlink (O_NOFOLLOW), not a pipe or device
-    (O_NONBLOCK so opening one cannot hang; fstat says what it is), no other hard link to it, within
-    `limit` bytes. Returns the descriptor, which the caller closes, and its stat."""
     flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | getattr(os, "O_CLOEXEC", 0)
     try:
         fd = os.open(path, flags)
@@ -255,7 +201,6 @@ def open_regular(path: str, what: str, limit: int) -> Tuple[int, os.stat_result]
 
 
 def copy_regular(src: str, dst: str, what: str, limit: int) -> None:
-    """Copy a plain file (see open_regular), counting bytes as they come so a file that grows is cut off."""
     fd, _ = open_regular(src, what, limit)
     try:
         total = 0
@@ -275,9 +220,6 @@ def copy_regular(src: str, dst: str, what: str, limit: int) -> None:
 
 
 def check_object_store(common: str) -> str:
-    """The agent's objects folder, if it stands alone. Git follows `objects/info/alternates` (and
-    http-alternates) from any object store it opens, so an agent repository could point our scratch
-    repository at any folder on the machine. Such a repository is refused: use a full clone."""
     objects = os.path.join(common, "objects")
     if os.path.islink(objects) or not os.path.isdir(objects):
         raise Refused("the worktree's repository has no plain objects folder")
@@ -289,7 +231,6 @@ def check_object_store(common: str) -> str:
 
 
 def check_key(path: str) -> None:
-    """The App key must be a regular file, ours, and unreadable by anyone else."""
     try:
         st = os.lstat(path)
     except OSError:
@@ -301,8 +242,6 @@ def check_key(path: str) -> None:
     if st.st_uid != os.geteuid():
         raise Refused("the App key file is not owned by the user running the wrapper")
 
-
-# --- JWT and tokens ----------------------------------------------------------------------------------
 
 def _b64url(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
@@ -334,11 +273,7 @@ def installation_token(api: Api, repo: str, jwt: str) -> str:
     return token
 
 
-# --- git ---------------------------------------------------------------------------------------------
-
 def git_env(token: Optional[str], remote_url: str, scratch: str, global_config: str = os.devnull) -> dict:
-    """A bare-bones environment for git. The token, if any, goes in as a per-URL extraHeader through
-    GIT_CONFIG_*, so it is never in an argument list or a config file."""
     env = {k: os.environ[k] for k in PROXY_ENV if k in os.environ}
     env.update({"PATH": SAFE_PATH, "HOME": scratch, "LANG": "C", "LC_ALL": "C", "GIT_TERMINAL_PROMPT": "0",
                 "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": global_config, "GIT_ASKPASS": "true"})
@@ -352,7 +287,6 @@ def git_env(token: Optional[str], remote_url: str, scratch: str, global_config: 
 
 
 def _tidy(line: str, secret: str) -> str:
-    """One line of git's stderr as safe text: no colour codes or control characters, no token."""
     line = ANSI_RE.sub("", line)
     line = "".join(c for c in line if unicodedata.category(c) not in ("Cc", "Cf", "Zl", "Zp")).strip()
     if secret:
@@ -362,10 +296,6 @@ def _tidy(line: str, secret: str) -> str:
 
 
 def push_failure(stderr: bytes, secret: str = "") -> Tuple[bool, str]:
-    """(rejected, text) from a failed git command's stderr. A rejection is the remote saying no to this
-    push (`! [rejected]` or `! [remote rejected]`: a hook, a ruleset, a missing permission, a branch that
-    exists with other history). Retrying cannot help, so it is a refusal; the reason is the remote's own
-    `remote:` lines plus the rejected line. Any other failure keeps only its last line."""
     lines = [l for l in (_tidy(l, secret) for l in stderr.decode("utf-8", "replace").splitlines()) if l]
     marks = [l for l in lines if REJECT_RE.match(l)]
     if not marks:
@@ -386,11 +316,6 @@ def _git(runner: Runner, args: List[str], env: Mapping[str, str], what: str, sec
 
 
 def workflow_changes(runner: Runner, safe: List[str], env: Mapping[str, str], sgit: str, sha: str) -> List[str]:
-    """Paths under .github/workflows/ that this branch changes against its base, found from the agent
-    repository's own copy of the base branch. The App has no `workflows` permission, so GitHub refuses
-    such a push; saying so here spares a token and an unreadable rejection. It is a courtesy, not the
-    guard (an agent can re-point its own base ref; GitHub still refuses), so a base that cannot be found
-    or compared means "no opinion", and the remote decides."""
     base_sha = ""
     for ref in BASE_REFS:
         try:
@@ -414,18 +339,14 @@ def workflow_changes(runner: Runner, safe: List[str], env: Mapping[str, str], sg
 
 
 def inspect_worktree(runner: Runner, worktree: str, issue: int, scratch: str) -> tuple:
-    """Returns (branch, sha, scratch_git_dir) after checking the branch and that the tree is clean."""
     wt = os.path.realpath(worktree)
     if not os.path.isdir(wt) or not os.path.exists(os.path.join(wt, ".git")):
         raise Refused("the worktree is not a git worktree")
-    # git honours safe.directory only from global or system config, never from -c, and the agent's
-    # directories belong to another user. So the scratch dir carries a global config that allows them.
     allow = os.path.join(scratch, "gitconfig")
     with open(allow, "w") as f:
         f.write("[safe]\n\tdirectory = *\n")
     env = git_env(None, "", scratch, global_config=allow)
     safe = ["-c", "core.fsmonitor=false", "-C", wt]
-    # rev-parse and symbolic-ref only read refs and the repository layout; they run no configured command.
     try:
         git_dir = _git(runner, safe + ["rev-parse", "--path-format=absolute", "--absolute-git-dir"],
                        env, "reading the worktree").decode().strip()
@@ -466,8 +387,6 @@ def inspect_worktree(runner: Runner, worktree: str, issue: int, scratch: str) ->
                       % shown)
     return branch, sha, sgit
 
-
-# --- the whole job -----------------------------------------------------------------------------------
 
 def push_and_open_pr(req: Request, cfg: Config, runner: Optional[Runner] = None,
                      clock: Callable[[], float] = time.time, tmp_root: Optional[str] = None) -> Result:
@@ -516,8 +435,6 @@ def push_and_open_pr(req: Request, cfg: Config, runner: Optional[Runner] = None,
 
 
 def revoke_token(api: Api, token: str) -> None:
-    """Best effort: the token dies at once instead of in an hour. Whatever goes wrong here, the job's
-    result is already decided, so nothing is raised."""
     try:
         api.request("DELETE", "/installation/token", token=token)
     except Exception:  # noqa: BLE001  (a failed revoke must never change or mask the result)
@@ -529,10 +446,6 @@ def _scrub(text: str, token: str) -> str:
 
 
 def neutralize_text(text: str, repo: str, issue: int) -> str:
-    """The agent's words, made inert: `@name` gets a zero-width joiner after the @ (no ping), and a
-    closing keyword (close, fix or resolve, in any of GitHub's forms) before an issue reference gets one
-    inside the keyword (no issue closes on merge). A reference to this PR's own issue is left alone, and
-    the wrapper's own `Refs #<issue>` line is added after, so it is not touched."""
     own_repo = repo.lower()
 
     def closing(m: "re.Match[str]") -> str:
@@ -558,7 +471,6 @@ def open_pr(api: Api, repo: str, token: str, branch: str, base: str, title: str,
     except ApiError as e:
         if e.status != 422:
             raise
-        # Usually "a pull request already exists" for this branch (a second push after a fix).
         owner = repo.split("/")[0]
         found = api.request("GET", "/repos/%s/pulls?head=%s&state=open&per_page=1"
                             % (repo, urllib.parse.quote("%s:%s" % (owner, branch), safe="")), token=token)
@@ -572,8 +484,6 @@ def open_pr(api: Api, repo: str, token: str, branch: str, base: str, title: str,
 
 
 def default_config_path() -> str:
-    """The config lives under the home folder of the account running the wrapper, taken from the account
-    database. Not $HOME (sudo may leave the caller's) and not an environment variable."""
     try:
         home = pwd.getpwuid(os.geteuid()).pw_dir
     except KeyError:
@@ -586,9 +496,6 @@ def config_path(arg: Optional[str]) -> str:
 
 
 def read_config_file(path: str) -> Any:
-    """The config as JSON, if the file is one only this user can change: a plain file (no link), owned by
-    the user running the wrapper, with no write bit for group or others. The caller picks the path with
-    --config, so without these checks it could hand us a file of its own that names its own endpoints."""
     if not os.path.lexists(path):
         raise Failed("the config file %s does not exist" % path)
     fd, st = open_regular(path, "the config file", CONFIG_MAX)
@@ -608,8 +515,6 @@ def read_config_file(path: str) -> Any:
 
 
 def check_endpoints(api_url: str, remote_url: str, repo: str, env: Optional[Mapping[str, str]]) -> None:
-    """The App's JWT and installation token are sent to api_url and git's header to remote_url, so both are
-    GitHub's, exactly, unless a test says otherwise."""
     if env is not None and env.get(TESTING_VAR) == "1":
         return
     if api_url != API_URL:

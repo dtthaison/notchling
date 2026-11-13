@@ -1,6 +1,3 @@
-//! Finding a session's transcript file: Claude Code's project folder naming, a background job that
-//! moved into a worktree, and the new file a `/clear` starts.
-
 use super::model::Timestamp;
 use super::util::{file_times, modified_secs};
 use std::collections::HashMap;
@@ -10,17 +7,12 @@ use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 use std::time::SystemTime;
 
-/// Claude Code's folder name for a working directory: every character other than an ASCII letter or
-/// digit becomes "-" ("/Users/me/.claude" becomes "-Users-me--claude").
 pub fn project_folder(cwd: &str) -> String {
     cwd.chars()
         .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
         .collect()
 }
 
-/// `<projects dir>/<project folder>/<session id>.jsonl`, found directly from the working directory
-/// (also under the `/private` prefix macOS's `/tmp`, `/var` and `/etc` links carry), else by looking
-/// in every project folder.
 pub fn find_transcript(projects_dir: &str, session_id: &str, cwd: &str) -> Option<String> {
     let file = format!("{session_id}.jsonl");
     let mut cwds = vec![cwd.to_string()];
@@ -50,11 +42,6 @@ pub fn find_transcript(projects_dir: &str, session_id: &str, cwd: &str) -> Optio
         .map(|p| p.to_string_lossy().into_owned())
 }
 
-/// A background job's transcript. A session that enters a git worktree goes on in that worktree's
-/// project folder, while `state.json` keeps naming the file in the folder it started in, which Claude
-/// Code has moved away. So the worktree's folder (in the same projects folder, which is the lane's for
-/// a lane job) is tried too, and the newer of the two files wins. With neither on disk it returns
-/// `link_scan_path` as before. `modified` reads a file's modification time.
 pub fn job_transcript(
     link_scan_path: Option<&str>,
     session_id: Option<&str>,
@@ -89,7 +76,6 @@ pub fn job_transcript(
     Some(best.map_or_else(|| link.to_string(), |b| b.0))
 }
 
-/// `job_transcript` reading real modification times.
 pub fn job_transcript_on_disk(
     link_scan_path: Option<&str>,
     session_id: Option<&str>,
@@ -105,13 +91,6 @@ fn successor_cache() -> &'static Mutex<SuccessorCache> {
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-/// The transcript a background job moved to after /clear. Clearing starts a new file, but the job's
-/// state keeps naming the old one until its next link scan; the new file starts with the job's name
-/// and a SessionStart:clear hook. Follows several clears in a row.
-///
-/// The search lists the whole project folder and reads every file's dates, and it runs for every agent
-/// on every refresh, so its answer is kept until the folder's modification date changes. Appending to
-/// a transcript leaves that date alone; creating a file (a new transcript after /clear) moves it.
 pub fn successor(path: &str, name: &str) -> Option<String> {
     let dir = Path::new(path).parent()?.to_string_lossy().into_owned();
     let Some(dir_modified) = std::fs::metadata(&dir).ok().and_then(|m| m.modified().ok()) else {
@@ -136,10 +115,6 @@ pub fn successor(path: &str, name: &str) -> Option<String> {
     result
 }
 
-/// The transcript a `/clear` left: the file of the same job (its name near the top) that was
-/// created last before `path`, when `path` itself was started by a clear. `None` for a transcript
-/// no clear started. The new file names nothing of the old one, so the folder is searched; cached
-/// like [`successor`] until the folder's modification date changes.
 pub fn predecessor(path: &str, name: &str) -> Option<String> {
     let dir = Path::new(path).parent()?.to_string_lossy().into_owned();
     let Some(dir_modified) = std::fs::metadata(&dir).ok().and_then(|m| m.modified().ok()) else {
@@ -185,7 +160,6 @@ fn search_predecessor(path: &str, name: &str) -> Option<String> {
         .filter_map(|p| file_times(&p).map(|(_, c)| (c, p)))
         .filter(|(c, _)| *c < created)
         .collect();
-    // Newest first: the file the clear ended is the last one started before it.
     candidates.sort_by(|a, b| b.0.total_cmp(&a.0).then_with(|| b.1.cmp(&a.1)));
     candidates
         .into_iter()
@@ -233,7 +207,6 @@ fn search_successor(path: &str, name: &str) -> Option<String> {
         let Ok(entries) = std::fs::read_dir(&dir) else {
             break;
         };
-        // Oldest first, so a chain of clears is followed in order.
         let mut candidates: Vec<(Timestamp, String)> = entries
             .flatten()
             .map(|e| e.path())

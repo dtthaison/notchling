@@ -8,9 +8,6 @@ import '../theme/tokens.dart';
 import 'kit.dart';
 import 'motion.dart';
 
-/// The frosted tab bar: three tabs, one pill that slides to the selected one with a spring-like curve, the icon
-/// morphing from outline to filled with a small pop, the label getting heavier. Pure: the app wraps it with the
-/// selected tab provider; previews and tests drive it directly.
 class GlassNav extends StatelessWidget {
   const GlassNav({super.key, required this.selected, required this.onSelect, this.solid = false, this.inboxCount = 0});
   final bool solid;
@@ -42,7 +39,6 @@ class GlassNav extends StatelessWidget {
               const double pill = 64;
               return Stack(
                 children: <Widget>[
-                  // One pill that slides between the tabs with a spring-like curve.
                   AnimatedPositioned(
                     duration: motionDuration(
                       context,

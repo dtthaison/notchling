@@ -1,12 +1,8 @@
-//! What Chat's transcript reads cost in parsed bytes: the bench's `parsed_bytes` counter is only
-//! worth anything if an unchanged file adds nothing and an append adds only its own line.
-
 use notchling_engine::transcript::conversation::Parser;
 use notchling_engine::transcript::tail::{Cursors, CHAT_TAIL_BYTES};
 
 use crate::testutil::Scratch;
 
-/// Three lines of `crates/app/fixtures/chat`'s transcripts.
 const THREE_LINES: &str = concat!(
     r#"{"type":"user","timestamp":"2026-11-08T08:02:00.000Z","gitBranch":"m1-chat","message":{"role":"user","content":"Port the search panel."}}"#,
     "\n",

@@ -1,9 +1,3 @@
-//! What a `/clear` would otherwise lose from Chat. Clearing a background job starts a new transcript
-//! that names nothing of the old one: until its first reply it has no model line, and the subagents
-//! the old conversation started live beside the old file. So a cleared session takes its model and
-//! effort from the transcript the clear ended (`locate::predecessor`), and lists that transcript's
-//! subagents that are still running.
-
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -12,10 +6,8 @@ use notchling_engine::transcript::locate::predecessor;
 use notchling_engine::transcript::model::{Conversation, Timestamp};
 use notchling_engine::transcript::subagents::{self, Status, Subagent};
 
-/// How many clears in a row are walked back for a model.
 const MAX_BACK: usize = 4;
 
-/// The model and effort the session last ran with before its clears, newest first.
 fn earlier_model(path: &str, name: &str) -> Option<(String, Option<String>)> {
     let mut current = path.to_string();
     for _ in 0..MAX_BACK {
@@ -36,9 +28,6 @@ fn carried_cache() -> &'static Mutex<Carried> {
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-/// `read` with the model (and effort) of the transcript the clear ended, when `read` has none yet.
-/// The same `read` and carried model give the same `Arc` back, so an unchanged conversation still
-/// reads as unchanged to the list that compares them.
 pub fn with_model(path: &str, name: &str, read: Arc<Conversation>) -> Arc<Conversation> {
     if read.facts.model.is_some() {
         return read;
@@ -65,8 +54,6 @@ pub fn with_model(path: &str, name: &str, read: Arc<Conversation>) -> Arc<Conver
     result
 }
 
-/// The subagents of the transcript the clear ended that are still running, for the cleared one's
-/// list. Finished ones stay with the conversation they belonged to.
 pub fn running_before(path: &str, name: &str, now: Timestamp) -> Vec<Subagent> {
     let Some(before) = predecessor(path, name) else {
         return Vec::new();
@@ -117,7 +104,6 @@ mod tests {
         assert_eq!(read.facts.model, None, "the new transcript names no model");
         let shown = with_model(&path, "worker", read.clone());
         assert_eq!(shown.facts.model.as_deref(), Some("claude-opus-5-5"));
-        // Unchanged input, same Arc out.
         assert!(Arc::ptr_eq(&shown, &with_model(&path, "worker", read)));
     }
 

@@ -1,17 +1,11 @@
-//! Walking a [`Plan`] through a [`Launcher`], and reading what `claude --bg` printed.
-
 use super::launcher::{LaunchError, Launcher};
 use super::plan::{Expect, Plan, RunStep, Step};
 use std::time::Duration;
 
-/// Why a plan stopped.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ControlError {
-    /// `claude --bg` refused a folder Claude Code has not trusted yet; Trust Folder fixes it.
     Untrusted(String),
-    /// The trust prompt never appeared or the pty could not be played.
     TrustFailed,
-    /// A step failed: what it printed, or why it did not run.
     Failed(String),
 }
 
@@ -30,22 +24,16 @@ impl std::fmt::Display for ControlError {
 
 impl std::error::Error for ControlError {}
 
-/// What a plan did.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Report {
-    /// The new job's short id, when a step expected one.
     pub job_id: Option<String>,
-    /// Messages of steps that failed without stopping the plan (`required: false`).
     pub ignored_failures: Vec<String>,
 }
 
-/// `claude --bg` refuses a folder Claude Code has not trusted yet ("Workspace not trusted").
 pub fn is_untrusted(message: &str) -> bool {
     message.contains("not trusted")
 }
 
-/// The new job's short id from `claude --bg` output: "backgrounded · 6ce4c19c · name (idle — …)", or
-/// since 2.1.318 "backgrounded · 6220cc2b (idle — …)", maybe after a note line.
 pub fn job_id_in_launch_output(text: &str) -> Option<String> {
     for line in text.split('\n').filter(|l| !l.is_empty()) {
         let parts: Vec<&str> = line.split(" · ").collect();
@@ -61,9 +49,6 @@ pub fn job_id_in_launch_output(text: &str) -> Option<String> {
     None
 }
 
-/// Runs every step in order. `pause` waits for the given milliseconds (a test passes a recorder; the
-/// daemon passes a sleep). A required step that fails ends the plan, unless it is `keep_going`: then
-/// the rest still run and its error is the plan's at the end. Other failures are noted and skipped.
 pub fn execute(
     plan: &Plan,
     launcher: &dyn Launcher,

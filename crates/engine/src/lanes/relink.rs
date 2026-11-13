@@ -1,22 +1,12 @@
-//! `LaneStore.relink`: points a lane's shared entries at `~/.claude` again. Claude Code saves some
-//! files by writing a new file and renaming it over the old one, which replaces a link with a
-//! plain file. The newer of the two copies wins: when the lane's plain file is newer it moves into
-//! `~/.claude` and the main one is kept as `<name>.lane-backup`; anything else in the way (a
-//! folder, an older file) is set aside as `<name>.lane-old-<time>` in the lane, never deleted.
-
 use super::{Lane, SHARED};
 use std::fs;
 use std::path::Path;
 use std::time::SystemTime;
 
-/// What one relink did, entry by entry (for tests and the log).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Relinked {
-    /// Links made (or remade).
     pub linked: Vec<String>,
-    /// The lane's newer file moved into `~/.claude`, the main one kept as `.lane-backup`.
     pub took_lane_copy: Vec<String>,
-    /// Set aside in the lane as `.lane-old-<time>`.
     pub set_aside: Vec<String>,
 }
 
@@ -36,7 +26,6 @@ fn make_link(_target: &Path, _link: &Path) -> bool {
     false
 }
 
-/// Relinks every [`SHARED`] entry of `lane` to `main_dir`. `now_secs` names set-aside copies.
 pub fn relink(lane: &Lane, main_dir: &Path, now_secs: u64) -> Relinked {
     let dir = Path::new(&lane.path);
     let mut done = Relinked::default();

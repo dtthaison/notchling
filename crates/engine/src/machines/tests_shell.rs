@@ -1,6 +1,3 @@
-//! The ssh script and admin argv, the remote path helpers and the stat parser (Swift
-//! `MachinesRemoteShellTests`). Pure strings: no ssh starts.
-
 use super::registry::{Machine, MachineOs};
 use super::shell::*;
 use crate::lanes::quote;
@@ -34,8 +31,6 @@ fn argv_quotes_each_remote_word() {
     assert_eq!(argv.last().unwrap(), "'ls' '/tmp/a b' 'it'\\''s'");
 }
 
-/// The sudo binary and the PATH of the script it runs are fixed: nothing the worker account owns
-/// decides either. A shell file, a `~/.local/bin/sudo` or a planted `pmset` is never reached.
 fn assert_nothing_of_the_workers_own(argv: &[String]) {
     let text = argv.join("\n");
     let prelude = prelude();
@@ -105,7 +100,6 @@ fn admin_as_root_over_ssh_has_no_sudo_and_a_fixed_environment() {
     assert_nothing_of_the_workers_own(&argv);
 }
 
-/// A script with quotes, `$(...)` and newlines stays one argument of `/bin/sh -c`.
 #[test]
 fn a_hostile_script_stays_inside_one_quoted_word() {
     let script = "echo 'a'; $(id) `id`\nrm -rf ~";

@@ -1,7 +1,3 @@
-//! The flows around the account rows, pure: each provider's add panel in its phases (the Swift
-//! `SignInPanel` and the pages' add panels), the Remove alert with each provider's words, and the
-//! Move All alert (`MoveAll.swift`).
-
 use crate::acting::Control;
 use crate::switches::{Switch, Switches};
 
@@ -9,35 +5,27 @@ use super::model::{ANTIGRAVITY, CLAUDE_CODE, CLAUDE_DESKTOP, CODEX};
 use super::store::Snapshot;
 use super::wire::{MovePlan, MoveResult};
 
-/// The add panel under a provider's list.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AddPanel {
-    /// Nothing under way: a line of help and the Add Account button.
     Idle {
         note: &'static str,
         add: Control,
     },
-    /// A sign-in is open in the browser or the other app.
     Waiting {
         line: &'static str,
         note: &'static str,
-        /// The sign-in page, for Open Again / Open Page and Copy Link.
         url: Option<String>,
-        /// Whether Copy Link shows (Claude Code's browser flow).
         copy_link: bool,
     },
     Saving,
-    /// A Claude Code sign-in ended well.
     Added {
         line: String,
     },
-    /// A Claude Code sign-in failed; Try Again and Cancel.
     Failed {
         message: String,
     },
 }
 
-/// The idle line per provider.
 fn idle_note(provider: &str) -> &'static str {
     match provider {
         CLAUDE_CODE => "Sign in to another Claude account to switch to it from here.",
@@ -50,7 +38,6 @@ fn idle_note(provider: &str) -> &'static str {
     }
 }
 
-/// The waiting lines per provider.
 fn waiting_lines(provider: &str) -> (&'static str, &'static str) {
     match provider {
         CLAUDE_CODE => (
@@ -73,7 +60,6 @@ fn waiting_lines(provider: &str) -> (&'static str, &'static str) {
     }
 }
 
-/// The panel for `provider` from the snapshot. `busy` is a click on its way.
 pub fn add_panel(provider: &str, s: &Snapshot, switches: &Switches, busy: bool) -> AddPanel {
     let control = switches.control(Switch::Accounts);
     let idle = |disabled: bool| AddPanel::Idle {
@@ -130,7 +116,6 @@ pub fn add_panel(provider: &str, s: &Snapshot, switches: &Switches, busy: bool) 
     }
 }
 
-/// An alert over the window.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Alert {
     pub title: String,
@@ -139,7 +124,6 @@ pub struct Alert {
     pub destructive: bool,
 }
 
-/// The Remove alert's words for `provider`, given whether `email` is the account in use.
 pub fn remove_alert(provider: &str, email: &str, in_use: bool) -> Alert {
     let (title, message) = match (provider, in_use) {
         (CLAUDE_DESKTOP, _) => (
@@ -178,10 +162,6 @@ pub fn remove_alert(provider: &str, email: &str, in_use: bool) -> Alert {
     }
 }
 
-/// The Move All alert for a dry run's plan: `email` is the target's.
-/// The hosts a sign-in page may be on, mirroring the engine's: Claude Code's authorize page
-/// (`claude.com`, `AUTHORIZE_URL`) and its success page (`platform.claude.com`), claude.ai, Codex's
-/// (`auth.openai.com`, `SIGN_IN_PREFIX`) and Google's for Antigravity.
 pub const SIGN_IN_HOSTS: [&str; 5] = [
     "claude.com",
     "claude.ai",
@@ -190,12 +170,9 @@ pub const SIGN_IN_HOSTS: [&str; 5] = [
     "accounts.google.com",
 ];
 
-/// Said instead of opening a link that isn't one of those pages.
 pub const NOT_A_SIGN_IN_PAGE: &str =
     "Notchling didn't open that link: it isn't a sign-in page it knows. Use Copy Link to look at it.";
 
-/// Whether the daemon's sign-in link may be opened in the browser: `https://`, no user or port,
-/// and exactly one of [`SIGN_IN_HOSTS`].
 pub fn sign_in_page(url: &str) -> bool {
     let Some(rest) = url.strip_prefix("https://") else {
         return false;
@@ -204,11 +181,9 @@ pub fn sign_in_page(url: &str) -> bool {
     SIGN_IN_HOSTS.contains(&host)
 }
 
-/// The line a Move All leaves in the window: how many moved, and each one that didn't, with why.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Banner {
     pub text: String,
-    /// Something didn't move: drawn in the warning color.
     pub warning: bool,
 }
 

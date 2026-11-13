@@ -1,34 +1,3 @@
-//! Milestone 6's provider ops (E8b): the accounts of Codex, Antigravity and Claude Desktop over
-//! [`notchling_engine::providers`]. App tier (audit-logged by the server like every app-tier op) and
-//! behind the `accounts` switch, which is off at every start.
-//!
-//! While the switch is off every op answers `forbidden` with [`ACCOUNTS_OFF`], and nothing runs: no
-//! Keychain, no process, no network, no file write, no read of a login. The one exception is
-//! `providers.list`, which lists the saved account names from the daemon's own files (the plan:
-//! "listing saved account names from the daemon's own files still works"); it says `accounts_on:
-//! false`, names no active account, and does not even ask whether an app is installed.
-//!
-//! | Op | Args | Reply |
-//! | --- | --- | --- |
-//! | `providers.list` | `{sync?: bool}` (default true) | `{"accounts_on", "providers": [{id, title, capabilities, available, state: {accounts: [{id, email, plan, needs_login, switchable}], active_id, busy, adding, sign_in_url, unlisted_active_title}}], "syncing"?: true}` |
-//! | `providers.usage` | `{provider, refresh?: bool}` | `{"provider", "reports": {<account id>: {fetched, groups: [{name, bars: [{label, kind, percent, resets_at}]}]}}, "refreshing"?: true}` |
-//! | `providers.switch` | `{provider, id, confirm?: bool}` | `{"state": "switched", provider, id}`, `{"state": "needs_confirmation", confirmation: {title, message, button}}` (pass `confirm: true` after asking), or `{"state": "switching"}` when it takes over 4.5 s; code `failed` with the reason otherwise |
-//! | `providers.add.begin` | `{provider, confirm?: bool}` | `{"state": "waiting", provider, sign_in_url?}`, `needs_confirmation` as above, or `{"state": "starting"}` |
-//! | `providers.add.cancel` | `{provider}` | `{"cancelled": true}`, or `{"state": "cancelling"}` |
-//! | `providers.remove` | `{provider, id}` | `{"removed": true}`: forgets the saved login; the account stays signed in if it is the one in use |
-//!
-//! `provider` is `codex`, `antigravity` or `claudeDesktop`. Events on topic `providers` (app tier):
-//! `providers.changed {provider, reason: "sync" | "usage" | "switch" | "add" | "remove", state?,
-//! id?, error?, sign_in_url?}`. An add flow's progress (`started`, `waiting` with the sign-in page
-//! once Codex prints it, then `done`, `cancelled` or `failed`) arrives as `reason: "add"` events; a
-//! switch or refresh that outlasts its reply ends as one too. No token, cookie or login is in a
-//! reply or an event; a failure's text is fixed words.
-//!
-//! One switch or add flow per provider at a time. A flow that waits for the user stops being
-//! polled the moment the switch turns off and is abandoned (`AccountProvider::abandon_add`: Codex's
-//! `codex login` stopped and its scratch home removed; nothing written or restored, the event's
-//! `note` says where a provider was left), and is cancelled when the daemon stops while it is on.
-
 use crate::acting_ops::{bad, text_arg, Room};
 use crate::op_group::OpGroup;
 use notchling_engine::providers::{
@@ -54,14 +23,10 @@ pub const PROVIDERS_OPS: [&str; 6] = [
     ops::PROVIDERS_USAGE,
 ];
 
-/// The topics these ops publish on.
 pub const TOPICS: [&str; 1] = [topics::PROVIDERS];
 
-/// How long a reply waits for a switch, a refresh or an add to start (the call is given up at 5 s).
 const REPLY_WAIT: Duration = Duration::from_millis(4_500);
-/// How often an add flow looks for the user's sign-in.
 const POLL_EVERY: Duration = Duration::from_secs(2);
-/// How long an add flow may wait for the user.
 const ADD_LIMIT: Duration = Duration::from_secs(15 * 60);
 
 struct Shared {
@@ -72,21 +37,13 @@ struct Shared {
     poll_ms: AtomicU64,
     add_limit_ms: AtomicU64,
     closing: AtomicBool,
-    /// Providers with a switch or an add flow under way.
     busy: Mutex<HashSet<String>>,
-    /// Providers whose add flow is waiting for the user.
     adding: Mutex<HashSet<String>>,
-    /// Providers with a sync (a list's or a usage refresh's) on a thread now: one each at most, so
-    /// a sync stuck on a Keychain prompt doesn't gather a thread per call behind it.
     syncing: Mutex<HashSet<String>>,
-    /// Wakes a waiting add flow early: the switch went off or the daemon is stopping.
     wake: Condvar,
 }
 
 impl Shared {
-    /// Waits up to `wait`, or until the switch is off or the daemon stopping. Checked under the
-    /// lock [`Shared::wake_all`] notifies under, so a change made before the wait began still
-    /// ends it.
     fn nap(&self, wait: Duration) {
         let adding = lock(&self.adding);
         let _ = self.wake.wait_timeout_while(adding, wait, |_| {
@@ -104,15 +61,12 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-/// A provider's sync claimed until dropped (also when a thread that would have run it never
-/// started, since the closure holding it is dropped then).
 struct SyncClaim {
     shared: Arc<Shared>,
     key: String,
 }
 
 impl SyncClaim {
-    /// `None` when that provider's sync is already going.
     fn take(shared: &Arc<Shared>, provider: &str) -> Option<SyncClaim> {
         lock(&shared.syncing)
             .insert(provider.to_string())
@@ -129,7 +83,6 @@ impl Drop for SyncClaim {
     }
 }
 
-/// Holds a provider's busy slot until dropped.
 struct Slot {
     shared: Arc<Shared>,
     key: String,
@@ -165,8 +118,6 @@ impl ProvidersOps {
             syncing: Mutex::new(HashSet::new()),
             wake: Condvar::new(),
         });
-        // Off: a flow waiting for the user stops at once and touches nothing more (it doesn't
-        // cancel the provider's own flow either, which could write a login back).
         let weak = Arc::downgrade(&sh);
         accounts.subscribe(move |on| {
             if let (false, Some(sh)) = (on, weak.upgrade()) {
@@ -176,14 +127,12 @@ impl ProvidersOps {
         ProvidersOps { sh }
     }
 
-    /// How long a reply waits before it says the job is still going (tests shorten it).
     pub fn set_reply_wait(&self, wait: Duration) {
         self.sh
             .reply_wait_ms
             .store(wait.as_millis() as u64, Ordering::SeqCst);
     }
 
-    /// How often an add flow polls, and how long it may wait (tests shorten both).
     pub fn set_add_timing(&self, poll: Duration, limit: Duration) {
         self.sh
             .poll_ms
@@ -197,8 +146,6 @@ impl ProvidersOps {
         PROVIDERS_OPS.contains(&op).then_some(OpSpec::APP)
     }
 
-    /// The daemon is stopping: an add flow still waiting for the user is cancelled (while the
-    /// switch is on), and the polling threads end.
     pub fn close(&self) {
         self.sh.closing.store(true, Ordering::SeqCst);
         self.sh.wake_all();
@@ -231,8 +178,6 @@ impl ProvidersOps {
         }
     }
 
-    // MARK: Helpers
-
     fn wait(&self) -> Duration {
         Duration::from_millis(self.sh.reply_wait_ms.load(Ordering::SeqCst))
     }
@@ -257,8 +202,6 @@ impl ProvidersOps {
         args.get(key).and_then(Value::as_bool).unwrap_or(default)
     }
 
-    /// Runs `work` on a thread of its own and waits for it up to the reply wait; `None` when it is
-    /// still going (it publishes its own end as an event).
     fn deferred<T: Send + 'static>(&self, work: impl FnOnce() -> T + Send + 'static) -> Option<T> {
         let (tx, rx) = channel();
         let spawned = std::thread::Builder::new()
@@ -270,7 +213,6 @@ impl ProvidersOps {
         rx.recv_timeout(self.wait()).ok()
     }
 
-    /// Takes the provider's switch-or-add slot; code `failed` when something else holds it.
     fn take_slot(&self, provider: &str) -> Result<Slot, ApiError> {
         if !lock(&self.sh.busy).insert(provider.to_string()) {
             return Err(ApiError::new(
@@ -288,8 +230,6 @@ impl ProvidersOps {
         sh.room
             .publish(topics::PROVIDERS, topics::PROVIDERS_CHANGED, &data);
     }
-
-    // MARK: Reads
 
     fn state_json(state: &ProviderState, masked: bool) -> Value {
         json!({
@@ -315,7 +255,6 @@ impl ProvidersOps {
         })
     }
 
-    /// The saved names, with nothing read from a login, an app or a process.
     fn list_off(&self) -> Value {
         json!({
             "accounts_on": false,
@@ -328,8 +267,6 @@ impl ProvidersOps {
     fn list_on(&self, args: &Value) -> Value {
         let sync = Self::flag(args, "sync", true);
         let sh = self.sh.clone();
-        // Each provider's sync is claimed before the thread starts; one already syncing is left
-        // to the thread that has it, and with every one taken no thread starts at all.
         let claimed: Vec<Option<SyncClaim>> = sh
             .registry
             .providers()
@@ -406,8 +343,6 @@ impl ProvidersOps {
         }
         Ok(reply)
     }
-
-    // MARK: Changes
 
     fn switch(&self, args: &Value) -> Result<Value, ApiError> {
         let p = self.provider(args)?;

@@ -1,10 +1,3 @@
-//! The search panel over GPUI (part U3, macOS): a search box, then the results grouped Pages and
-//! Sessions, then a footer with the key hints. Every key goes through `SearchModel::press`; a
-//! change of the query asks the daemon on the background executor once the keys stop for a moment
-//! (`pacer`: one call out at a time, the newest query wins). Return on a page opens the
-//! Artifacts window on it; on a session, Chat on it.
-//! A render has fixed results and never calls anything or moves its window.
-
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -26,9 +19,7 @@ use super::panel;
 use super::renders::{model, results, shown};
 use super::rows::{hairline, page_row, secret_row, section_header, session_row};
 
-/// How often the window is put back where it belongs (GPUI moves it after opening).
 const PLACE_EVERY: Duration = Duration::from_millis(100);
-/// How long after an answer that said `indexing` the same query is asked again.
 const INDEXING_RETRY: Duration = Duration::from_millis(700);
 
 pub struct SearchPanelView {
@@ -36,14 +27,10 @@ pub struct SearchPanelView {
     library: Arc<Library>,
     focus: FocusHandle,
     scroll: ScrollHandle,
-    /// When to ask, and whether an answer is still wanted.
     pacer: Pacer,
-    /// A render's: fixed results, nothing called, the window left alone.
     fixed: bool,
     ns_window: Option<Retained<NSWindow>>,
-    /// Where the panel hangs from (AppKit coordinates).
     top: (f64, f64),
-    /// It became key once: a later deactivation is a click elsewhere, which closes it.
     seen_active: bool,
     _activation: Option<Subscription>,
 }
@@ -53,8 +40,6 @@ fn now_ms() -> i64 {
 }
 
 impl SearchPanelView {
-    /// The live panel: searches at once (the newest pages and sessions), closes itself when the
-    /// window stops being key, and keeps its window placed.
     pub fn live(
         library: Arc<Library>,
         ns_window: Option<Retained<NSWindow>>,
@@ -66,7 +51,6 @@ impl SearchPanelView {
             if window.is_window_active() {
                 this.seen_active = true;
             } else if this.seen_active {
-                // Clicked elsewhere: that click already chose where focus goes.
                 panel::close(cx, window, false);
             }
         });
@@ -93,7 +77,6 @@ impl SearchPanelView {
         view
     }
 
-    /// A render's: `model` as given, nothing behind it.
     pub fn fixed(model: SearchModel, library: Arc<Library>, cx: &mut Context<Self>) -> Self {
         SearchPanelView {
             model,
@@ -115,8 +98,6 @@ impl SearchPanelView {
         }
     }
 
-    /// Asks the daemon for the query as it is now, once `after` has passed without another key
-    /// press (zero: at once). At most one call is out; see [`Pacer`].
     fn search(&mut self, after: Duration, cx: &mut Context<Self>) {
         if self.fixed {
             return;
@@ -136,23 +117,18 @@ impl SearchPanelView {
         cx.notify();
     }
 
-    /// The wait after key press `generation` is over.
     fn settled(&mut self, generation: u64, cx: &mut Context<Self>) {
         if let Settled::Ask(generation) = self.pacer.settled(generation) {
             self.ask(generation, cx);
         }
     }
 
-    /// The call itself; its answer lands unless the query moved on, and a newer query waiting
-    /// for it goes out next.
     fn ask(&mut self, generation: u64, cx: &mut Context<Self>) {
         let (library, text, limit) = (
             self.library.clone(),
             self.model.query.clone(),
             self.model.limit(),
         );
-        // The vault's list (names, sites, notes, variable names; never a value) is the app's own.
-        // Read again with each query, since nothing else keeps it fresh while the sheet is closed.
         let vault = cx
             .try_global::<crate::mac::shell::AppVault>()
             .map(|v| v.0.clone());
@@ -187,7 +163,6 @@ impl SearchPanelView {
                     }
                     view.scroll_to_selected();
                     if again {
-                        // The daemon is reading the index: the same query may find more soon.
                         view.search_later(generation, cx);
                     }
                 }
@@ -201,7 +176,6 @@ impl SearchPanelView {
         .detach();
     }
 
-    /// Searches again after a moment, unless the query moved on meanwhile.
     fn search_later(&self, generation: u64, cx: &mut Context<Self>) {
         cx.spawn(async move |this, cx| {
             cx.background_executor().timer(INDEXING_RETRY).await;
@@ -215,7 +189,6 @@ impl SearchPanelView {
         .detach();
     }
 
-    /// The list's children are headers and rows; the selected row's index among them.
     fn scroll_to_selected(&self) {
         let selected = self.model.selected;
         let headers = (0..=selected)
@@ -252,8 +225,6 @@ impl SearchPanelView {
         cx.notify();
     }
 
-    /// Opens the row: a page in the Artifacts window, a session in Chat. The panel closes first
-    /// and doesn't give focus back, since the window opened takes it.
     fn open(&mut self, item: Item, window: &mut Window, cx: &mut Context<Self>) {
         if self.fixed {
             return;
@@ -304,7 +275,6 @@ impl SearchPanelView {
                         .font_weight(FontWeight::NORMAL)
                         .elide(),
                     )
-                    // The caret, after the text (the field takes every key while the panel is up).
                     .child(
                         div()
                             .w(px(1.5))
@@ -315,7 +285,6 @@ impl SearchPanelView {
             )
     }
 
-    /// The clock the ages are read against: a render's is fixed, like its data.
     fn now_secs(&self) -> f64 {
         if self.fixed {
             super::renders::NOW_SECS
@@ -455,7 +424,6 @@ impl Render for SearchPanelView {
     }
 }
 
-/// `--render search-panel[-results]`, over made-up results; nothing is called.
 pub fn build_render(name: &str, cx: &mut gpui::App) -> Option<AnyView> {
     let which = shown(name)?;
     let library = Arc::new(Library::fixed(results(which)));

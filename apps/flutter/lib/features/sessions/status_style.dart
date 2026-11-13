@@ -12,7 +12,6 @@ import '../../core/protocol/models.dart';
 import '../../l10n/app_localizations.dart';
 
 extension SessionStateStyle on SessionState {
-  /// Needs Input orange, Working blue, Done lime; an ended session is faint.
   Color color(Kit kit) => switch (this) {
     SessionState.needsInput => kit.needs,
     SessionState.running => kit.working,
@@ -20,7 +19,6 @@ extension SessionStateStyle on SessionState {
     SessionState.exited => kit.textFaint,
   };
 
-  /// Words in the status color where it reads (blue and lime on the kit surfaces; orange is the accent-text tone).
   Color labelColor(Kit kit) => switch (this) {
     SessionState.needsInput => kit.accentText,
     SessionState.running => kit.working,
@@ -43,8 +41,6 @@ extension SessionStateStyle on SessionState {
   };
 }
 
-/// 8 px status dot. "Đang chạy" breathes between 0.45 and 1 opacity over 1.6 s, the one loop in the app;
-/// with Reduce Motion it stays still.
 class StatusDot extends StatefulWidget {
   const StatusDot({
     super.key,
@@ -54,7 +50,6 @@ class StatusDot extends StatefulWidget {
   });
   final SessionState state;
 
-  /// 8 in lists; 14 as the badge on an avatar, with a ring in the window color around it.
   final double size;
   final bool ring;
 
@@ -62,19 +57,13 @@ class StatusDot extends StatefulWidget {
   State<StatusDot> createState() => _StatusDotState();
 }
 
-/// One shared clock for every breathing dot: all of them change in the same frame, so any number of running
-/// sessions costs the same few frames per second. It runs only while some dot is visible (its tab is shown)
-/// and the app is in the foreground, and it skips ticks while the keyboard is sliding.
 class BreathClock extends ChangeNotifier with WidgetsBindingObserver {
   BreathClock._();
   static final BreathClock instance = BreathClock._();
 
-  /// One breath is 1.6 s in 8 steps of 200 ms (5 frames a second at most, 0 when nothing is breathing).
   static const Duration step = Duration(milliseconds: 200);
   static const int steps = 8;
 
-  /// With no touch for this long the dots stop breathing and hold still, so an untouched screen draws no frames.
-  /// The next touch wakes them.
   static const Duration idleAfter = Duration(seconds: 20);
 
   Timer? _timer;
@@ -86,7 +75,6 @@ class BreathClock extends ChangeNotifier with WidgetsBindingObserver {
 
   int get phase => _phase;
 
-  /// 1.0 -> 0.45 -> 1.0, eased.
   double get alpha {
     final double t =
         (_phase <= steps / 2 ? _phase : steps - _phase) / (steps / 2);
@@ -128,7 +116,6 @@ class BreathClock extends ChangeNotifier with WidgetsBindingObserver {
     if (run && _timer == null) {
       _timer = Timer.periodic(step, (Timer _) {
         if (now().difference(_lastTouch) > idleAfter) {
-          // Untouched for a while: rest on a full dot (one last frame) and stop the timer.
           _timer?.cancel();
           _timer = null;
           if (_phase != 0) {
@@ -169,11 +156,9 @@ class _StatusDotState extends State<StatusDot> {
   }
 
   void _sync() {
-    // A hidden tab has TickerMode off: its dots hold still and do not ask for frames.
     final bool breathe =
         (widget.state == SessionState.running || widget.state == SessionState.needsInput) &&
         !reduceMotion(context) &&
-        // Still while the keyboard moves the page: one less thing to repaint per frame.
         MediaQuery.viewInsetsOf(context).bottom == 0 &&
         TickerMode.valuesOf(context).enabled;
     if (breathe && !_listening) {
@@ -208,8 +193,6 @@ class _StatusDotState extends State<StatusDot> {
     final Kit kit = Kit.of(context);
     final bool needs = widget.state == SessionState.needsInput;
     final double breath = _listening ? BreathClock.instance.alpha : 1;
-    // Working breathes (opacity). Needs Input does not blink: it bounces once when it appears, then a faint ring
-    // swells and fades slowly around it.
     final double alpha = needs ? 1 : breath;
     final double ring = needs && _listening ? (1 - breath) * 0.9 : 0;
     Widget dot = TweenAnimationBuilder<Color?>(
@@ -229,7 +212,6 @@ class _StatusDotState extends State<StatusDot> {
       ),
     );
     if (needs && !reduceMotion(context)) {
-      // Keyed by the state, so it plays each time a session turns to Needs Input.
       dot = TweenAnimationBuilder<double>(
         key: const ValueKey<String>('needs-bounce'),
         tween: Tween<double>(begin: 0.3, end: 1),
@@ -243,7 +225,6 @@ class _StatusDotState extends State<StatusDot> {
   }
 }
 
-/// The state as icon and word, crossfading to the new one when the state changes.
 class StatePill extends StatelessWidget {
   const StatePill({super.key, required this.state});
   final SessionState state;

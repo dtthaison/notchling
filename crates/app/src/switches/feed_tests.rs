@@ -1,8 +1,3 @@
-//! The switch feed end to end over an in-process local-api server that plays the daemon: it
-//! answers `settings.switches` and `settings.set_switch`, publishes `settings.switch` and the
-//! vault's pending events, and records what the app sent. Nothing touches a real daemon, the data
-//! folder or a Keychain.
-
 use super::*;
 use crate::switches::restart::{turn_back_on, Area, RestartNotice, TurnOn};
 use crate::testutil::Scratch;
@@ -15,7 +10,6 @@ use std::thread::JoinHandle;
 type Running = (ServerHandle, JoinHandle<std::io::Result<()>>);
 type Calls = Arc<Mutex<Vec<(String, Value)>>>;
 
-/// The daemon's end: the switches in memory (off at start), the five topics.
 struct Daemon {
     calls: Calls,
     on: Mutex<Switches>,
@@ -40,7 +34,6 @@ impl Handler for Daemon {
             ops::SETTINGS_SWITCHES => Ok(json!({
                 "accounts": on.accounts, "vault": on.vault, "install": on.install
             })),
-            // One approval waits from before the app (re)connected.
             ops::VAULT_PENDING => Ok(json!({
                 "approvals": [{"id": "ap-early", "names": ["github"], "command": "gh api /user"}],
                 "requests": []
@@ -80,7 +73,6 @@ fn serve(socket: &Path, calls: &Calls) -> Running {
     .expect("serve")
 }
 
-/// One call as the app would make it, without the trusted-server check (this binary serves).
 struct Direct {
     socket: std::path::PathBuf,
 }
@@ -95,7 +87,6 @@ impl Transport for Direct {
     }
 }
 
-/// The user's choices, in memory.
 struct Chosen(Mutex<Vec<Switch>>);
 
 impl SwitchChoice for Chosen {
@@ -150,7 +141,6 @@ fn a_remembered_choice_sends_nothing_and_only_the_confirmed_notice_turns_them_on
     let socket = scratch.path().join(SOCKET_NAME);
     let calls: Calls = Arc::default();
     let daemon = serve(&socket, &calls);
-    // The file says all three on; the daemon (like every daemon start) says all off.
     let notice = Arc::new(RestartNotice::default());
     let feed = start_with(&socket, Switch::ALL.to_vec(), notice.clone());
     wait_until("the follow", || {
@@ -162,7 +152,6 @@ fn a_remembered_choice_sends_nothing_and_only_the_confirmed_notice_turns_them_on
         ["settings.switches", "vault.pending"],
         "no switch is turned on"
     );
-    // What waited from before the connection is there, as if its event had come.
     let waiting = feed.approvals();
     assert_eq!(waiting.len(), 1);
     assert_eq!(waiting[0]["id"], "ap-early");
@@ -170,7 +159,6 @@ fn a_remembered_choice_sends_nothing_and_only_the_confirmed_notice_turns_them_on
     assert!(s.attached && !s.vault && !s.accounts && !s.install, "{s:?}");
     let confirm = notice.state().confirm().unwrap();
     assert_eq!(confirm.areas, [Area::Accounts, Area::Vault, Area::Install]);
-    // The person clicks Turn Back On, then confirms: exactly those go out.
     let failed = turn_back_on(&confirm.areas, &FeedOnly(&feed));
     assert!(failed.is_empty(), "{failed:?}");
     let sets: Vec<Value> = calls
@@ -193,7 +181,6 @@ fn a_remembered_choice_sends_nothing_and_only_the_confirmed_notice_turns_them_on
     let _ = daemon.1.join();
 }
 
-/// Turns on only the feed's switches.
 struct FeedOnly<'a>(&'a SwitchFeed);
 
 impl TurnOn for FeedOnly<'_> {
@@ -226,7 +213,6 @@ fn the_app_reads_the_switches_and_follows_the_events() {
     );
     let sent: Vec<String> = calls.lock().unwrap().iter().map(|c| c.0.clone()).collect();
     assert_eq!(sent, ["settings.switches", "vault.pending"]);
-    // The approval that waited from before the connection, answered elsewhere: it goes.
     wait_until("the early approval", || feed.approvals().len() == 1);
     daemon.0.publish(
         "vault",
@@ -235,7 +221,6 @@ fn the_app_reads_the_switches_and_follows_the_events() {
     );
     wait_until("early resolved", || feed.approvals().is_empty());
 
-    // The maintainer turns accounts on elsewhere: the event reaches the app.
     daemon.0.publish(
         "settings",
         "settings.switch",
@@ -244,7 +229,6 @@ fn the_app_reads_the_switches_and_follows_the_events() {
     wait_until("accounts on", || feed.switches().accounts);
     assert!(feed.control_of(Switch::Accounts).enabled);
 
-    // An agent waits to use a secret: the app sees it until it is resolved.
     daemon.0.publish(
         "vault",
         "vault.approval.pending",
@@ -259,7 +243,6 @@ fn the_app_reads_the_switches_and_follows_the_events() {
     );
     wait_until("resolved", || feed.approvals().is_empty());
 
-    // The user flips install on from the app: kept and sent.
     let after = feed.choose(Switch::Install, true).unwrap();
     assert!(after.install);
     assert!(feed.chosen(Switch::Install));

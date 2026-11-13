@@ -1,7 +1,3 @@
-//! What the phone bridge says about models on the daemon: the list the phone shows (the catalog's
-//! current Claude models) and `session.new`'s `modelId`, started as the catalog's own id with the
-//! catalog's own check. Nothing is started: the launcher is `FakeLauncher`.
-
 use crate::acting_ops::ActingOps;
 use crate::acting_ops_tests::{setup_in, PROMPT};
 use crate::bridge_backend::{Approvals, DaemonActing, DaemonSources};
@@ -75,7 +71,6 @@ fn the_phone_is_offered_the_current_claude_models_only() {
             .collect::<Vec<_>>(),
         current
     );
-    // A model the tool lists now is offered; an older one is not.
     assert!(offered.iter().any(|m| m.id == "claude-fable-5-3"));
     assert!(catalog.iter().any(|m| m.tier != Tier::Current));
     assert!(!offered.iter().any(|m| m.id == "claude-opus-4-6"));
@@ -110,7 +105,6 @@ fn the_phones_context_window_is_the_catalogs() {
     let (ops, _fake, _tmp) = ops(&[live("claude-opus-5-6"), window], "models-window");
     let (s, _tmp) = sources(&ops);
     let catalog = ops.catalog().catalog();
-    // The data file's, and the family's for a newer Opus the live list reports.
     for model in ["claude-opus-5-5", "claude-opus-5-5[1m]", "claude-opus-5-6"] {
         assert_eq!(
             s.context_window(model),
@@ -119,7 +113,6 @@ fn the_phones_context_window_is_the_catalogs() {
         );
         assert_eq!(s.context_window(model), Some(400_000), "{model}");
     }
-    // The catalog has none for these; the live list's own is used, else none.
     assert_eq!(
         catalog.context_window(Tool::Claude, "claude-sonnet-6"),
         None
@@ -150,7 +143,6 @@ fn a_model_id_starts_a_session_on_exactly_that_model() {
         ]
     );
 
-    // The daemon's own check still refuses an id the catalog doesn't list.
     let refused = acting
         .new_session_with_model(Path::new("/w/api"), "claude-evil-1")
         .unwrap_err();

@@ -1,17 +1,9 @@
-//! The text and binary frames on the wire (ConsoleCore's `BridgeWire` and `PhoneFrame`).
-//!
-//! Text frames are JSON written the way the Swift bridge writes them: keys sorted, slashes not
-//! escaped, and a whole number written without a fraction (`1793541465000`, not `1793541465000.0`),
-//! because the generated types keep times as `f64` and phones read them as numbers either way.
-
 use notchling_protocol::generated::ErrorCode;
 use serde::Serialize;
 use serde_json::{Map, Value};
 
-/// `version` in the `hello` and `pair` answers.
 pub const VERSION: i64 = 1;
 
-/// A refused request: its code and a message for the person (Vietnamese, as the Swift app's).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BridgeFailure {
     pub code: ErrorCode,
@@ -63,7 +55,6 @@ impl std::fmt::Display for BridgeFailure {
 
 impl std::error::Error for BridgeFailure {}
 
-/// The code as it travels (`not_found`, `view_only`...).
 pub fn code_name(code: ErrorCode) -> &'static str {
     match code {
         ErrorCode::Unauthorized => "unauthorized",
@@ -72,13 +63,10 @@ pub fn code_name(code: ErrorCode) -> &'static str {
         ErrorCode::Invalid => "invalid",
         ErrorCode::Busy => "busy",
         ErrorCode::NotReachable => "not_reachable",
-        // The Mac never sends a code it doesn't know.
         ErrorCode::Internal | ErrorCode::Unknown => "internal",
     }
 }
 
-/// `{"id", "ok": true, "data"}`. `id` is the request's, echoed whatever JSON it was; absent when the
-/// request had none.
 pub fn ok(id: Option<&Value>, data: Value) -> String {
     let mut object = Map::new();
     object.insert("ok".into(), Value::Bool(true));
@@ -89,7 +77,6 @@ pub fn ok(id: Option<&Value>, data: Value) -> String {
     text(&Value::Object(object))
 }
 
-/// `{"id", "ok": false, "error": {"code", "message"}}`.
 pub fn error(id: Option<&Value>, failure: &BridgeFailure) -> String {
     let mut detail = Map::new();
     detail.insert("code".into(), Value::from(code_name(failure.code)));
@@ -103,23 +90,19 @@ pub fn error(id: Option<&Value>, failure: &BridgeFailure) -> String {
     text(&Value::Object(object))
 }
 
-/// `{"event": name, ...fields}`.
 pub fn event(name: &str, mut fields: Map<String, Value>) -> String {
     fields.insert("event".into(), Value::from(name));
     text(&Value::Object(fields))
 }
 
-/// Any serializable value as JSON (`null` if it can't be, which the generated types never are).
 pub fn object<T: Serialize>(value: &T) -> Value {
     serde_json::to_value(value).unwrap_or(Value::Null)
 }
 
-/// The request id as a binary frame's number: an integer id, truncated to 32 bits; 0 otherwise.
 pub fn request_number(id: Option<&Value>) -> u32 {
     id.and_then(Value::as_i64).map(|n| n as u32).unwrap_or(0)
 }
 
-/// JSON text with sorted keys and whole floats written as integers.
 pub fn text(value: &Value) -> String {
     let mut out = String::new();
     write(value, &mut out);
@@ -164,7 +147,6 @@ fn write(value: &Value, out: &mut String) {
     }
 }
 
-/// Binary frames: 4 bytes of magic, a big-endian `u32`, then the JPEG.
 pub mod frame {
     fn build(magic: &[u8; 4], number: u32, jpeg: &[u8]) -> Vec<u8> {
         let mut data = Vec::with_capacity(8 + jpeg.len());
@@ -174,17 +156,14 @@ pub mod frame {
         data
     }
 
-    /// `PHN1`: a frame of the Mac's device window, by sequence.
     pub fn phone(sequence: u32, jpeg: &[u8]) -> Vec<u8> {
         build(b"PHN1", sequence, jpeg)
     }
 
-    /// `IMG1`: the answer to `chat.image`, by request id.
     pub fn image(request_id: u32, jpeg: &[u8]) -> Vec<u8> {
         build(b"IMG1", request_id, jpeg)
     }
 
-    /// `WEB1`: the answer to `web.snapshot`, by request id.
     pub fn snapshot(request_id: u32, jpeg: &[u8]) -> Vec<u8> {
         build(b"WEB1", request_id, jpeg)
     }

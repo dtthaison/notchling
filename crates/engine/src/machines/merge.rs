@@ -1,21 +1,3 @@
-//! Merging a machine's ready branch into `main` from the MacBook (Swift `MergePlan`). This file is
-//! the types, the target and the merge itself; [`super::merge_ops`] holds the retry, the undo and
-//! the shared checks.
-//!
-//! The one thing it must never do is merge or break `main` without you: it works only in a `main`
-//! worktree that is clean, pushes nothing but `main` to `origin` and only after the repo's check
-//! passed, and never forces anything.
-//!
-//! Everything it asks git is spelled with full refnames (`refs/heads/main`,
-//! `refs/remotes/origin/main`, `refs/machines/...`): a short name resolves to a tag first, and a
-//! machine must never be able to plant a tag that stands in for `main`. Nothing it fetches from a
-//! machine brings tags (`--no-tags`).
-//!
-//! What a machine reported (branch, commit, worktree, issue) never becomes part of a command
-//! unchecked: the branch passes [`MergePlan::branch_error`], the worktree
-//! [`shell::is_safe_machine_path`], the issue must be a positive integer, and the commit is only
-//! used once it equals what git itself printed for the fetched ref.
-
 use std::collections::BTreeMap;
 use std::path::Path;
 
@@ -24,17 +6,12 @@ use super::runner::{argv, Call, CommandResult, Runner};
 use super::shell;
 use super::status::ReadyEntry;
 
-/// A fetch can take a while over ssh.
 pub(super) const FETCH_TIMEOUT: u64 = 300;
-/// Every other git call.
 pub(super) const GIT_TIMEOUT: u64 = 60;
-/// The repo's check (build, tests).
 pub(super) const CHECK_TIMEOUT: u64 = 1800;
 pub(super) const LOCAL_MAIN: &str = "refs/heads/main";
 pub(super) const ORIGIN_MAIN: &str = "refs/remotes/origin/main";
-/// Commits on `main` that origin does not have.
 pub(super) const UNPUSHED: &str = "refs/remotes/origin/main..refs/heads/main";
-/// Fetches `main` from origin into its remote-tracking ref, and nothing else (no tags).
 pub(super) const FETCH_ORIGIN: [&str; 4] = [
     "fetch",
     "--no-tags",
@@ -42,17 +19,12 @@ pub(super) const FETCH_ORIGIN: [&str; 4] = [
     "+refs/heads/main:refs/remotes/origin/main",
 ];
 
-/// Where a merge into `main` happens on this Mac.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum MergeTarget {
-    /// A worktree that already has `main` checked out.
     Existing(String),
-    /// Notchling's own worktree for the repo under the plan's `merge_root`, created with
-    /// `git worktree add <path> main` the first time.
     Own(String),
 }
 
-/// What a merge got through, step by step.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct MergeOutcome {
     pub fetched: bool,
@@ -73,25 +45,18 @@ impl MergeOutcome {
         }
     }
 
-    /// The merge was checked and sits on main, and only the push is left.
     pub fn can_retry_push(&self) -> bool {
         self.merged && self.checked && !self.pushed
     }
 
-    /// The merge sits on main and has not reached origin; undoing it lets the item be merged again.
     pub fn can_undo(&self) -> bool {
         self.merged && !self.pushed
     }
 }
 
-/// The Mac this runs on: the home the check's tools are found under, the folder the app's own
-/// worktrees go in, the environment the check's shell is chosen from, and where `git` and `gh`
-/// live. Tests build one of their own.
 #[derive(Clone, Debug)]
 pub struct MergePlan {
     pub home: String,
-    /// `<data>/daemon/machines/merge`: the app's own `main` worktrees, one folder per repo. Under
-    /// the data root, so a fixture root never reaches the real Library folder.
     pub merge_root: String,
     pub environment: BTreeMap<String, String>,
     pub git: String,
@@ -99,7 +64,6 @@ pub struct MergePlan {
 }
 
 impl MergePlan {
-    /// This process's home, environment and tools; the own worktrees under `merge_root`.
     pub fn from_process(merge_root: &Path) -> MergePlan {
         MergePlan {
             home: std::env::var("HOME").unwrap_or_else(|_| "/var/empty".into()),
@@ -110,8 +74,6 @@ impl MergePlan {
         }
     }
 
-    /// The worktree that has `main` checked out, from `git worktree list --porcelain`; with none,
-    /// Notchling's own folder for the repo.
     pub fn target(&self, repo: &MachineRepo, worktree_list: &str) -> MergeTarget {
         for block in worktree_list.split("\n\n") {
             let mut path: Option<&str> = None;
@@ -153,8 +115,6 @@ impl MergePlan {
         Call::secs(v, GIT_TIMEOUT)
     }
 
-    /// The folder to merge in, with its parent made. Notchling's own worktree is added the first
-    /// time.
     pub(super) fn resolve_target(
         &self,
         repo: &MachineRepo,
@@ -205,8 +165,6 @@ impl MergePlan {
         }
     }
 
-    /// Merges the machine's ready branch into `main` here, checks it, pushes `main` and closes
-    /// the issue. Stops at the first step that fails; the outcome says how far it got.
     pub fn merge(
         &self,
         e: &ReadyEntry,
@@ -242,13 +200,11 @@ impl MergePlan {
         let issue = e.issue.to_string();
         let reference = format!("refs/machines/{}/{}", machine.name, e.issue);
 
-        // The branch name goes into a refspec: git must read it as one plain branch.
         if let Some(why) = self.git_refuses_branch(&e.branch, &path, runner) {
             o.error = Some(why);
             return o;
         }
 
-        // 1. Main must be clean, or nothing else runs.
         let status = git(&["status", "--porcelain"]);
         if status.code != 0 {
             o.error = Some(format!("git status failed in {path}: {}", tail(&status)));
@@ -259,8 +215,6 @@ impl MergePlan {
             return o;
         }
 
-        // 2. Local main catches up with origin, and must not be ahead of it: the push below would
-        //    send those commits too, although nobody asked for that.
         let fetch_origin = fetch(&FETCH_ORIGIN);
         if fetch_origin.code != 0 {
             o.error = Some(format!("fetch origin main failed: {}", tail(&fetch_origin)));
@@ -283,8 +237,6 @@ impl MergePlan {
             return o;
         };
         if count > 0 {
-            // An earlier try of this very item (Notchling quit during its check, say) leaves
-            // exactly its merge. It was never proven by a check, so it is for Undo, not a push.
             let alone = git(&["rev-list", "--first-parent", "--count", UNPUSHED]);
             if alone.code == 0 && trimmed(&alone) == "1" {
                 if let Some(mine) = self.own_merge(e, LOCAL_MAIN, &git) {
@@ -303,10 +255,6 @@ impl MergePlan {
             return o;
         }
 
-        // 3. The machine's branch comes into a private ref, without its tags. The `+` lets a
-        //    branch the machine rewrote replace the ref left by an earlier try; the ref is
-        //    Notchling's own and nothing is pushed from it. BatchMode, so an ssh prompt or a dead
-        //    host ends the fetch in seconds, not at its timeout.
         let refspec = format!("+refs/heads/{}:{reference}", e.branch);
         let fetch_branch = runner.run(
             &self
@@ -327,15 +275,12 @@ impl MergePlan {
         }
         o.fetched = true;
 
-        // 4. The branch must be the commit that was shown as ready.
         let tip = git(&["rev-parse", &reference]);
         if tip.code != 0 || e.commit.is_empty() || trimmed(&tip) != e.commit {
             o.error = Some("branch moved on the machine; refresh".into());
             return o;
         }
 
-        // 5. The merge commit, of the verified sha itself: nothing that rewrites the private ref
-        //    meanwhile can change what is merged. `pre` is where a failed check puts main back.
         let pre_head = git(&["rev-parse", "HEAD"]);
         let pre = trimmed(&pre_head);
         if pre_head.code != 0 || pre.is_empty() {
@@ -345,8 +290,6 @@ impl MergePlan {
         let message = format!("Merge {} ({}#{})", e.branch, repo.github, e.issue);
         let merge = git(&["merge", "--no-ff", "-m", &message, &e.commit]);
         if merge.code != 0 {
-            // A merge that never started (unrelated histories, a file it would overwrite) has
-            // nothing to abort, and its own error is the one to show.
             let started = git(&["rev-parse", "-q", "--verify", "MERGE_HEAD"]);
             if started.code != 0 {
                 o.error = Some(format!("merge failed: {}", tail(&merge)));
@@ -420,7 +363,6 @@ impl MergePlan {
             o.error = Some(format!("git rev-parse HEAD failed: {}", tail(&head)));
             return o;
         }
-        // The branch was already in main: no merge commit, nothing to check or push.
         if sha == pre {
             o.error = Some(format!("{} is already in main; nothing to merge", e.branch));
             return o;
@@ -428,10 +370,6 @@ impl MergePlan {
         o.merged = true;
         o.commit = Some(sha.clone());
 
-        // 6. The repo's check, in the target (the user's own main checkout when they have one; the
-        //    merge is theirs to approve), in the user's login shell so the tools the repo needs
-        //    are on its PATH. It runs a long time, so main is re-verified before anything acts on
-        //    the result.
         let (check_argv, check_env) = self.check_invocation(&repo.check_command);
         let mut check_call = Call::secs(check_argv, CHECK_TIMEOUT).cwd(path.clone().into());
         check_call.env = check_env;
@@ -441,14 +379,12 @@ impl MergePlan {
                 o.error = Some(changed);
                 return o;
             }
-            // `--keep` never discards an edit made during the check.
             let reset = git(&["reset", "--keep", &pre]);
             if reset.code == 0 {
                 o.error = Some(format!("check failed: {}", tail(&check)));
                 o.merged = false;
                 o.commit = None;
             } else {
-                // The merge is still on main and its check failed: nothing here may offer to push it.
                 o.error = Some(format!(
                     "check failed and main could not be put back; fix it by hand in {path} (check: {}; reset: {})",
                     tail(&check),
@@ -457,8 +393,6 @@ impl MergePlan {
             }
             return o;
         }
-        // The check ran on what was in the folder, so the merge counts as checked only if that
-        // was the commit that is about to be pushed.
         if let Some(changed) = self.change_after_check(&sha, &path, runner, true) {
             o.error = Some(changed);
             return o;
@@ -469,14 +403,10 @@ impl MergePlan {
     }
 }
 
-/// An issue number a command may carry: a positive integer (a negative one would read as an
-/// option).
 pub(super) fn refused_issue(issue: i64) -> Option<String> {
     (issue <= 0).then(|| format!("\"{issue}\" is not an issue number"))
 }
 
-/// The ssh URL `git` fetches a machine's worktree from. The path is the machine's word: it must be
-/// absolute (else it would join the host) and plain (see [`shell::is_safe_machine_path`]).
 pub(super) fn worktree_url(machine: &Machine, path: &str) -> Result<String, String> {
     let url = shell::git_url(machine, path).ok_or_else(|| shell::not_absolute(path))?;
     if !shell::is_safe_machine_path(path) {
@@ -492,7 +422,6 @@ pub(super) fn trimmed(r: &CommandResult) -> String {
     r.out.trim().to_string()
 }
 
-/// The end of what a command printed, enough to see why it failed.
 pub(super) fn tail(r: &CommandResult) -> String {
     if r.code == 124 {
         return "timed out".into();

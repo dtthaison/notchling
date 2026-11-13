@@ -1,39 +1,22 @@
-//! `LimitLogic`: the decisions, as pure functions so they can be checked without any login. They
-//! decide when a real account switch happens, so they are tested here and never by switching.
-//!
-//! Times are seconds since 1970 (`f64`), passed in as `now`; nothing here reads a clock.
-
 use super::report::{Bar, BarKind, UsageReport};
 use super::usage::UsageWindow;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 
-/// The switch point stays in this range (`limitSwitchAt`).
 pub const SWITCH_RANGE: (i64, i64) = (80, 99);
 pub const DEFAULT_SWITCH_AT: i64 = 95;
-/// An account must have limits fetched this recently, and both under [`ROOM_BELOW`], to be switched
-/// to.
 pub const FRESH_FOR: f64 = 10.0 * 60.0;
-/// How old the limits of an account already in use (main login or a lane) may be and still count.
-/// Looser than [`FRESH_FOR`] on purpose: a switch target must be current before sessions move onto
-/// it, while the account in use is refreshed every 5 minutes and skipped whenever Claude Code's
-/// token is expired, so it needs a few missed rounds of slack before its warnings stop.
 pub const IN_USE_FRESH_FOR: f64 = 15.0 * 60.0;
 pub const ROOM_BELOW: f64 = 80.0;
-/// At most one automatic switch per this long.
 pub const SWITCH_GAP: f64 = 30.0 * 60.0;
-/// With no window over the line, the account we left stays blocked this long.
 pub const DEFAULT_BLOCK: f64 = 5.0 * 3600.0;
 
-/// One window's notification state: the highest level already announced, and the window it
-/// belongs to.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Mark {
     pub level: u32,
     pub resets_at: Option<f64>,
 }
 
-/// Which level (90 or 100) a reading has reached.
 pub fn level(percent: f64) -> u32 {
     if percent >= 100.0 {
         100
@@ -44,9 +27,6 @@ pub fn level(percent: f64) -> u32 {
     }
 }
 
-/// Announces each level once per window. The mark falls back when usage drops or the window
-/// resets, so the next climb is announced again. `skip90`: the account is about to be switched at
-/// 90, so a separate warning would only repeat it.
 pub fn step(mark: Mark, percent: f64, resets_at: Option<f64>, skip90: bool) -> (Mark, Option<u32>) {
     let mut m = mark;
     if let (Some(a), Some(b)) = (m.resets_at, resets_at) {
@@ -66,7 +46,6 @@ pub fn step(mark: Mark, percent: f64, resets_at: Option<f64>, skip90: bool) -> (
     (m, if now == 90 && skip90 { None } else { Some(now) })
 }
 
-/// A saved account as a switch target.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Candidate {
     pub id: String,
@@ -87,8 +66,6 @@ impl Candidate {
         }
     }
 
-    /// From a report: `session` is the highest short or unknown window, `week` the highest weekly
-    /// one. No report is an account with nothing known, fetched never.
     pub fn from_report(
         id: &str,
         report: Option<&UsageReport>,
@@ -125,9 +102,6 @@ fn room_used(c: &Candidate) -> f64 {
     c.session.unwrap_or(0.0).max(c.week.unwrap_or(0.0))
 }
 
-/// The saved account with the most room: fresh data, both windows under 80%, not the one in use,
-/// and not one we left that hasn't reset yet. Lowest max(session, week) wins; ties go to the first
-/// listed.
 pub fn pick_target<'a>(
     all: &'a [Candidate],
     active_id: Option<&str>,
@@ -154,13 +128,10 @@ pub fn pick_target<'a>(
         })
 }
 
-/// At most one automatic switch per half hour.
 pub fn may_switch(last_switch: Option<f64>, now: f64) -> bool {
     last_switch.is_none_or(|last| now - last >= SWITCH_GAP)
 }
 
-/// When the account we leave becomes usable again: the latest reset among its windows at or over
-/// `at`; five hours from now when none has one.
 pub fn blocked_until(
     session: Option<&UsageWindow>,
     week: Option<&UsageWindow>,
@@ -180,12 +151,8 @@ pub fn blocked_until(
         .unwrap_or(now + DEFAULT_BLOCK)
 }
 
-/// A window with the name a message reads it by.
 pub type Named = (String, UsageWindow);
 
-/// The bars a watcher follows. Codex: its main group ("Codex": the 5h and week bars), not Code
-/// Review or a model-specific extra. Antigravity (`primary_group` `None`): every group, since each
-/// is a pool of its own.
 pub fn watched_bars<'a>(
     report: &'a UsageReport,
     primary_group: Option<&str>,
@@ -206,8 +173,6 @@ pub fn watched_bars<'a>(
         .collect()
 }
 
-/// The windows to announce and switch on, named the way a message reads them ("5-hour", "weekly",
-/// or "Gemini 3 Pro weekly" when the group matters).
 pub fn watched_windows(report: &UsageReport, primary_group: Option<&str>) -> Vec<Named> {
     watched_bars(report, primary_group)
         .into_iter()
@@ -230,7 +195,6 @@ pub fn watched_windows(report: &UsageReport, primary_group: Option<&str>) -> Vec
         .collect()
 }
 
-/// What fired: the level, the window's name and the window.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Fired {
     pub level: u32,
@@ -238,8 +202,6 @@ pub struct Fired {
     pub window: UsageWindow,
 }
 
-/// Steps every window's mark and returns the highest level that fired now (the later window wins a
-/// tie). Claude's watcher and the provider watchers both announce through this.
 pub fn announcement(
     marks: &mut HashMap<String, Mark>,
     key_prefix: &str,
@@ -271,16 +233,12 @@ pub fn announcement(
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SwitchDecision {
-    /// Nothing pushes toward a switch, or one happened too recently.
     Stay,
-    /// A saved account has room, but the provider is working and a switch would interrupt it.
     Busy,
     NoRoom,
     SwitchTo(String),
 }
 
-/// Whether the account in use should be switched, and to which. `can_switch_now` runs only once a
-/// target exists (it may be a process listing).
 #[allow(clippy::too_many_arguments)]
 pub fn decide_switch(
     windows: &[Named],
@@ -306,15 +264,10 @@ pub fn decide_switch(
     }
 }
 
-/// Codex: a switch only runs while nothing would be interrupted: no CLI or Chat turn (`codex`
-/// processes), no ChatGPT app to quit. The managed app server alone doesn't count; it restarts
-/// quietly.
 pub fn codex_idle_for_auto_switch(app_running: bool, sessions: usize) -> bool {
     !app_running && sessions == 0
 }
 
-/// The pool a lane picks its next account from: the account the main login holds is live there,
-/// so it can't be taken.
 pub fn lane_pool(mut pool: Vec<Candidate>, main_active: Option<&str>) -> Vec<Candidate> {
     for c in &mut pool {
         if Some(c.id.as_str()) == main_active {

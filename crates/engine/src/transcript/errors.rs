@@ -1,13 +1,9 @@
-//! Reading what a transcript's end says: a usage-limit error, a reply cut by sleep, a tool call that
-//! was answered somewhere else. Each reads only the last few hundred KB.
-
 use super::model::Timestamp;
 use super::tail::{read_lines, MAX_LINE_BYTES};
 use super::util::{date_field, json_sorted, parse_object, str_of};
 use serde_json::Value;
 use std::collections::HashSet;
 
-/// A usage-limit error ending a transcript: the entry's id and time, and what it said.
 #[derive(Debug, Clone, PartialEq)]
 pub struct LimitHit {
     pub id: String,
@@ -23,10 +19,6 @@ fn user_or_assistant(line: &str) -> Option<Value> {
     matches!(str_of(&obj, "type"), Some("user" | "assistant")).then_some(obj)
 }
 
-/// The transcript's last message when it is the account's usage-limit error ("You've hit your session
-/// limit - resets 7pm"), so nothing has happened since; None otherwise. The provider's own throttle
-/// ("API Error: Request rejected (429) ... cooling down") is a different `error` and text, and doesn't
-/// count.
 pub fn limit_hit_in_file(path: &str) -> Option<LimitHit> {
     let lines = read_lines(path, 200_000).ok()?;
     for line in lines.iter().rev() {
@@ -61,8 +53,6 @@ pub fn limit_hit_in_file(path: &str) -> Option<LimitHit> {
     None
 }
 
-/// The id of the transcript's last message when it is the error Claude Code writes after the Mac slept
-/// mid-reply, so nothing has happened since; None otherwise.
 pub fn sleep_cut_in_file(path: &str) -> Option<String> {
     let lines = read_lines(path, 200_000).ok()?;
     for line in lines.iter().rev() {
@@ -80,8 +70,6 @@ pub fn sleep_cut_in_file(path: &str) -> Option<String> {
     None
 }
 
-/// True once the transcript holds a result for the latest call of `tool` with this input, meaning it
-/// was answered somewhere else (the terminal) while a hook still held it open.
 pub fn tool_finished(tool: &str, input: &Value, path: &str) -> bool {
     let wanted = json_sorted(input, false);
     let Ok(lines) = read_lines(path, 500_000) else {

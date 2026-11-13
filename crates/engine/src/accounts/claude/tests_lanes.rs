@@ -10,7 +10,6 @@ fn lane_item(w: &World, lane: &crate::lanes::Lane) -> Value {
     serde_json::from_str(&w.chain.get(&service, "me").unwrap_or_default()).unwrap_or(Value::Null)
 }
 
-/// Main on account 1; accounts 2 and 3 saved.
 fn world(tag: &str) -> World {
     let w = World::new(tag);
     w.signed_in(1, 1);
@@ -41,9 +40,7 @@ fn a_lane_gets_the_saved_login_in_its_own_item() {
         "{config}"
     );
     assert_eq!(w.store.lanes(), vec![lane.clone()]);
-    // Asking again returns the same lane.
     assert_eq!(w.store.open_lane(&id(2)).unwrap(), lane);
-    // The main login's account can't have a lane.
     let e = w.store.open_lane(&id(1)).unwrap_err();
     assert_eq!(
         e.0,
@@ -73,7 +70,6 @@ fn an_expired_saved_login_is_renewed_before_a_lane_gets_it_and_a_refused_one_sto
 fn switching_a_lane_gives_the_renewed_login_back_first() {
     let w = world("lane-switch");
     let lane = w.store.open_lane(&id(2)).unwrap();
-    // Claude Code in the lane renewed the login there.
     let service = service_for(&lane.path).unwrap();
     w.chain.put(
         &service,
@@ -112,7 +108,6 @@ fn a_lane_login_that_the_profile_says_is_another_account_never_goes_back() {
         &json!({"claudeAiOauth": oauth(2, 2, LATER)}).to_string(),
     );
     w.answers_profile(3);
-    // And the lane keeps it: closing would lose it (tests_safe.rs).
     assert!(w.store.close_lane(&lane.name).is_err());
     assert_eq!(
         w.saved_item(2)["claudeAiOauth"]["refreshToken"],
@@ -153,7 +148,6 @@ fn closing_a_lane_returns_its_login_and_removes_its_item_and_folder() {
         &json!({"claudeAiOauth": oauth(2, 3, NOW - 1)}).to_string(),
     );
     assert!(w.store.close_lane(&lane.name).unwrap());
-    // Expired, so it couldn't be checked: it still goes back, as the Swift app did.
     assert_eq!(
         w.saved_item(2)["claudeAiOauth"]["refreshToken"],
         "test-refresh-2-3"

@@ -1,6 +1,3 @@
-//! Picks the Visualize tab worth opening first from what the session's folder contains
-//! (ConsoleCore's `VisualizeSuggester`), and reads the checked-out branch without a process.
-
 use serde_json::Value;
 use std::path::Path;
 
@@ -15,7 +12,6 @@ pub enum VizTab {
 }
 
 impl VizTab {
-    /// The name on the wire (`suggested`).
     pub fn as_str(self) -> &'static str {
         match self {
             VizTab::Phone => "phone",
@@ -28,7 +24,6 @@ impl VizTab {
     }
 }
 
-/// What the transcript says, beyond the folder.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct VizSignals {
     pub has_recent_mermaid: bool,
@@ -93,8 +88,6 @@ fn has_web_framework(package_json: &Path) -> bool {
     })
 }
 
-/// Drift keeps tables in files named *tables.dart or under a `tables` folder. Looks at no more than
-/// 400 entries of `lib`, hidden ones left out, in name order.
 fn contains_drift_tables(root: &Path) -> bool {
     let mut visited = 0;
     drift_in(&root.join("lib"), &mut visited)
@@ -129,8 +122,6 @@ fn drift_in(folder: &Path, visited: &mut usize) -> bool {
     false
 }
 
-/// The checked-out branch of `cwd`, read from .git/HEAD (no git process). A detached head gives its
-/// first seven characters; a worktree or submodule (`.git` is a file) gives None.
 pub fn git_branch(cwd: &str) -> Option<String> {
     let mut directory = Path::new(cwd).to_path_buf();
     for _ in 0..6 {

@@ -1,23 +1,3 @@
-//! `notchling hook`: Claude Code runs it as a hook. It reads the hook's JSON on stdin and answers
-//! one of two ways, as the Swift `HookBridge` did:
-//!
-//! - an Artifact tool event (`PreToolUse`, `PostToolUse`, `PostToolUseFailure`) is answered here,
-//!   from the local pages library, with no daemon or app needed ([`crate::hook_pages`]);
-//! - a permission or AskUserQuestion event is asked of the daemon (`hook.request`) and the answer
-//!   printed as the Swift `HookBridge` does ([`crate::hook_output`]).
-//!
-//! It must never hang Claude Code, so everything that isn't an answer is a pass (no output,
-//! exit 0), and at once where it can be:
-//!
-//! - not an Artifact, permission or AskUserQuestion event;
-//! - a `claude -p` session (entrypoint `sdk-cli`): nobody watches it;
-//! - no daemon on the socket, or any socket error;
-//! - the daemon says pass: acting is off, no app is attached, or the deadline came;
-//! - its own deadline ([`HOOK_WAIT`] plus a little, or [`crate::hook_pages::DEADLINE`] for an
-//!   Artifact event), whatever the daemon or the disk does.
-//!
-//! Only the app's Install Hook writes it into `~/.claude/settings.json` (E13).
-
 use crate::acting_ops::HOOK_WAIT;
 use crate::hook_output::{is_prompt_event, output};
 use crate::hook_pages::{self, PagesEnv};
@@ -29,32 +9,23 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-/// Saying hello may take this long; a daemon that doesn't answer it is a pass.
 pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
-/// The reply may come this long after the daemon's own wait ends.
 pub const REPLY_SLACK: Duration = Duration::from_secs(5);
-/// How far up the process tree a session file is looked for (`isHeadlessSession`).
 pub const ANCESTORS: usize = 6;
-/// More stdin than any hook event: read no further.
 const MAX_INPUT: u64 = 16 * 1024 * 1024;
 
-/// Where the hook looks and how long it waits.
 #[derive(Clone, Debug)]
 pub struct HookOptions {
     pub socket: PathBuf,
-    /// Read as `~/.claude`: its `sessions/<pid>.json` say whether a session is headless.
     pub claude_dir: PathBuf,
-    /// Its parent processes, nearest first: one of them is the Claude Code session.
     pub ancestors: Vec<u32>,
     pub wait: Duration,
     pub slack: Duration,
     pub connect_timeout: Duration,
-    /// Check that a Notchling daemon serves the socket (off only for tests serving from themselves).
     pub check_server: bool,
 }
 
 impl HookOptions {
-    /// For this process.
     pub fn for_process(socket: PathBuf, claude_dir: PathBuf) -> HookOptions {
         HookOptions {
             socket,
@@ -68,7 +39,6 @@ impl HookOptions {
     }
 }
 
-/// The hook's stdout for `input`, or `None` to pass. A prompt event is asked of the daemon.
 pub fn decide(input: &[u8], options: &HookOptions) -> Option<Value> {
     let event: Value = serde_json::from_slice(input).ok()?;
     decide_event(&event, options)
@@ -91,7 +61,6 @@ fn decide_event(event: &Value, options: &HookOptions) -> Option<Value> {
     )
     .ok()?;
     client.set_timeout(options.wait + options.slack);
-    // No pid: the daemon reads who this is from the socket.
     let args = json!({
         "event": event,
         "waitMs": options.wait.as_millis() as u64,
@@ -100,9 +69,6 @@ fn decide_event(event: &Value, options: &HookOptions) -> Option<Value> {
     output(&response, event)
 }
 
-/// The hook's stdout for `input` as the real process runs it: an Artifact event is answered from
-/// the pages library at once ([`crate::hook_pages`], no daemon involved), anything else goes to
-/// [`decide`]. `None` passes.
 fn answer(input: &[u8], layout: &Layout) -> Option<Value> {
     let event: Value = serde_json::from_slice(input).ok()?;
     if pages::hook::handles(&event) {
@@ -112,7 +78,6 @@ fn answer(input: &[u8], layout: &Layout) -> Option<Value> {
     decide_event(&event, &options)
 }
 
-/// `notchling hook`: reads stdin, prints the answer (or nothing), always exits 0.
 pub fn run(layout: &Layout) -> i32 {
     let mut input = Vec::new();
     if std::io::stdin()
@@ -132,8 +97,6 @@ pub fn run(layout: &Layout) -> i32 {
     0
 }
 
-/// `isHeadlessSession`: the nearest ancestor with a `sessions/<pid>.json` decides; `sdk-cli` is a
-/// `claude -p` run.
 pub fn headless(sessions: &Path, ancestors: &[u32]) -> bool {
     for pid in ancestors {
         let path = sessions.join(format!("{pid}.json"));
@@ -146,7 +109,6 @@ pub fn headless(sessions: &Path, ancestors: &[u32]) -> bool {
     false
 }
 
-/// `start` and its parents, nearest first, at most `depth`, stopping at pid 1.
 pub fn ancestors(start: Option<u32>, depth: usize) -> Vec<u32> {
     let mut list = Vec::new();
     let mut pid = start;
@@ -171,7 +133,6 @@ fn parent_pid_of_self() -> Option<u32> {
     None
 }
 
-/// A process's parent, from the kernel.
 #[cfg(target_os = "macos")]
 pub fn parent_pid(pid: u32) -> Option<u32> {
     let pid = libc::c_int::try_from(pid).ok()?;
@@ -191,7 +152,6 @@ pub fn parent_pid(pid: u32) -> Option<u32> {
     (n == size).then_some(info.pbi_ppid)
 }
 
-/// A process's parent, from `/proc/<pid>/stat` (its fourth field, after the name in brackets).
 #[cfg(target_os = "linux")]
 pub fn parent_pid(pid: u32) -> Option<u32> {
     let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;

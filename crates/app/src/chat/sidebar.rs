@@ -1,5 +1,3 @@
-//! The sidebar's sections and rows, from the sessions the engine lists.
-
 use notchling_engine::search::SessionTool;
 use notchling_engine::sessions::AgentGroup;
 use notchling_kit::Status;
@@ -14,31 +12,19 @@ use crate::search::wire::SessionRef;
 pub struct SidebarRow {
     pub id: String,
     pub name: String,
-    /// The status line under the name: what it needs, or its label.
     pub status_line: String,
     pub age: String,
     pub status: Status,
     pub tool: Tool,
-    /// The Claude Code lane folder the session was found in; `None` on the main login.
     pub config_dir: Option<String>,
 }
 
-/// The account a row names under the session's name.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RowAccount {
-    /// The email.
     pub text: String,
-    /// The session runs in a lane, not on the main login (the icon says which).
     pub lane: bool,
 }
 
-/// The account a session runs on, for its row (the Swift `ChatModel.account(for:)`):
-/// - Claude Code: the lane whose folder the session was found in, else the main login's account.
-///   A folder no lane names is not guessed at, and nobody signed in on the main login says nothing.
-/// - Codex and Antigravity: the provider's active account, which the Swift app leaves blank (they
-///   have one login each, so it is the account any session of theirs runs on).
-///
-/// Only what the accounts store already holds, so it is `None` until the daemon has answered.
 pub fn row_account(tool: Tool, config_dir: Option<&str>, s: &Snapshot) -> Option<RowAccount> {
     let named = |email: &str, lane: bool| {
         (!email.is_empty()).then(|| RowAccount {
@@ -78,7 +64,6 @@ pub struct Section {
     pub rows: Vec<SidebarRow>,
 }
 
-/// The kit's status for a group.
 pub fn status_of(group: AgentGroup) -> Status {
     match group {
         AgentGroup::NeedsInput => Status::Needs,
@@ -112,9 +97,6 @@ fn row(session: &Session, now_ms: i64) -> SidebarRow {
     }
 }
 
-/// The sidebar row a search hit opens (`SessionRef` from the search panel): a Codex row is keyed
-/// `codex:<session id>`, an Antigravity row `agy:<session id>`; a Claude Code row by Claude Code's
-/// own session id, else by its transcript's file stem.
 pub fn row_for(sessions: &[Session], target: &SessionRef) -> Option<String> {
     let id = target.session_id.as_str();
     let found = match target.tool {
@@ -139,8 +121,6 @@ pub fn row_for(sessions: &[Session], target: &SessionRef) -> Option<String> {
     found.map(|s| s.agent.id.clone())
 }
 
-/// The sidebar row of the background job New Session just started (`session.new`'s `jobId`, the
-/// short id `claude --bg` printed), once the list has it.
 pub fn row_for_job(sessions: &[Session], job: &str) -> Option<String> {
     sessions
         .iter()
@@ -151,9 +131,6 @@ pub fn row_for_job(sessions: &[Session], job: &str) -> Option<String> {
         .map(|s| s.agent.id.clone())
 }
 
-/// A job New Session started, waited for until the sidebar lists it. A new job takes a few loads
-/// to show (its host writes its state after it starts), so it waits longer than a search hit,
-/// then gives up: a row found much later must not take the selection from whatever is open.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PendingJob {
     pub job: String,
@@ -170,7 +147,6 @@ impl PendingJob {
         }
     }
 
-    /// A load finished, listing `sessions`.
     pub fn after_load(&self, sessions: &[Session], now_ms: i64) -> Pending {
         match row_for_job(sessions, &self.job) {
             Some(id) => Pending::Found(id),
@@ -180,10 +156,6 @@ impl PendingJob {
     }
 }
 
-/// A conversation the search panel asked Chat to show that the sidebar doesn't list yet. It waits
-/// for the loads that follow, and gives up after a couple of them or a few seconds: a session
-/// that never turns up (it was deleted, or is older than the sidebar reaches) must not be
-/// selected whenever it finally does, long after anyone asked.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PendingSession {
     pub target: SessionRef,
@@ -191,21 +163,15 @@ pub struct PendingSession {
     expires_ms: i64,
 }
 
-/// What a load made of a [`PendingSession`].
 #[derive(Debug, PartialEq, Eq)]
 pub enum Pending {
-    /// The row to select.
     Found(String),
-    /// Not listed yet; keep waiting.
     Waiting,
-    /// Not listed, and no longer worth waiting for.
     GaveUp,
 }
 
 impl PendingSession {
-    /// How many loads it waits through. The first may have begun before the ask, so it is two.
     pub const LOADS: u8 = 2;
-    /// And how long, whatever the loads.
     pub const WAIT_MS: i64 = 5_000;
 
     pub fn new(target: SessionRef, now_ms: i64) -> PendingSession {
@@ -216,7 +182,6 @@ impl PendingSession {
         }
     }
 
-    /// A load finished, listing `sessions`.
     pub fn after_load(&mut self, sessions: &[Session], now_ms: i64) -> Pending {
         if let Some(id) = row_for(sessions, &self.target) {
             return Pending::Found(id);
@@ -230,10 +195,6 @@ impl PendingSession {
     }
 }
 
-/// Needs input, Working, Done, in that order; a group with no sessions has no section. The rows
-/// keep the engine's order (newest first within a group). A Claude Code session that has exited
-/// (its process or job is gone) isn't listed: the maintainer asked on 2026-11-10 that Done hold
-/// only sessions still there; search still finds an exited one.
 pub fn sections(sessions: &[Session], now_ms: i64) -> Vec<Section> {
     [
         AgentGroup::NeedsInput,
@@ -255,21 +216,15 @@ pub fn sections(sessions: &[Session], now_ms: i64) -> Vec<Section> {
     .collect()
 }
 
-/// What the Sidebar draws: everything its draw function reads, so a part can draw only when it
-/// changes. Equal for two states that differ only in what no row shows (a draft, a menu).
 #[derive(Clone, Debug, PartialEq)]
 pub struct SidebarModel {
     pub sections: Vec<Section>,
-    /// Each row's account, in row order across the sections.
     pub accounts: Vec<Option<RowAccount>>,
     pub selected: Option<String>,
     pub daemon_note: Option<&'static str>,
     pub unread: usize,
 }
 
-/// The Sidebar's model: its sections (ages and statuses as strings, so a tick that changes none
-/// changes nothing), each row's account from the accounts store, the selection and the footer's
-/// note about the daemon.
 pub fn sidebar_model(
     sessions: &[Session],
     now_ms: i64,
@@ -292,9 +247,6 @@ pub fn sidebar_model(
     }
 }
 
-/// The session id a row's Copy Session ID puts on the clipboard: the tool's own id (Claude Code's
-/// session UUID is the row id; Codex and Antigravity rows carry a `codex:` or `agy:` prefix). A
-/// draft that hasn't started has none.
 pub fn copyable_id(row_id: &str) -> Option<&str> {
     if row_id.starts_with("codex-new:") || row_id.starts_with("agy-new:") {
         return None;
@@ -372,7 +324,6 @@ pub(crate) mod tests {
         assert_eq!(sections.len(), 1);
         assert_eq!(sections[0].rows.len(), 1);
         assert_eq!(sections[0].rows[0].status_line, "Idle");
-        // Only exited ones: no Done section at all.
         let mut only = session("x", AgentGroup::Completed, None, Tool::Claude);
         only.agent.label = "Exited".into();
         assert!(super::sections(&[only], 1_000_000_000_000).is_empty());
@@ -467,7 +418,6 @@ pub(crate) mod tests {
             account(Tool::Claude, Some("/lanes/night"), &s),
             Some(("ops@example.com".into(), true))
         );
-        // A lane that has no email yet is told by its name.
         assert_eq!(
             account(Tool::Claude, Some("/lanes/bare"), &s),
             Some(("bare".into(), true))
@@ -531,7 +481,6 @@ pub(crate) mod tests {
         }
     }
 
-    /// New Session closed and left the old session open: the started job was never selected.
     #[test]
     fn a_started_job_is_selected_once_the_sidebar_lists_it() {
         let pending = PendingJob::new("6ce4c19c", 1_000);
@@ -546,7 +495,6 @@ pub(crate) mod tests {
             pending.after_load(&[other.clone(), started], 3_000),
             Pending::Found("be50d36a-4348-4ba6-ab58-96959399a893".into())
         );
-        // A Codex row with the same text is not it, and a job that never shows is let go.
         let codex = session("6ce4c19c", AgentGroup::Completed, None, Tool::Codex);
         assert_eq!(pending.after_load(&[codex], 2_000), Pending::Waiting);
         assert_eq!(
@@ -625,7 +573,6 @@ pub(crate) mod tests {
     fn a_session_that_never_turns_up_is_given_up_on_after_a_couple_of_loads() {
         let mut pending = PendingSession::new(codex_target("x"), 1_000);
         let other = vec![session("codex:y", AgentGroup::Completed, None, Tool::Codex)];
-        // The first load may have started before the ask; the second is the next one.
         assert_eq!(pending.after_load(&other, 1_050), Pending::Waiting);
         assert_eq!(pending.after_load(&other, 1_200), Pending::GaveUp);
     }
@@ -637,7 +584,6 @@ pub(crate) mod tests {
             pending.after_load(&[], 1_000 + PendingSession::WAIT_MS),
             Pending::GaveUp
         );
-        // It found nothing, so a later load listing it does not matter: the caller dropped it.
     }
 
     fn model(sessions: &[Session], selected: Option<&str>, snapshot: &Snapshot) -> SidebarModel {
@@ -653,9 +599,6 @@ pub(crate) mod tests {
 
     #[test]
     fn the_model_is_equal_when_nothing_shown_changed() {
-        // The model takes only what the Sidebar draws: the same inputs, whatever else the window
-        // holds (a draft, an open menu), give an equal model, and a later clock that rounds to the
-        // same age too.
         let (sessions, snapshot) = (two(), accounts());
         let before = model(&sessions, Some("a"), &snapshot);
         assert_eq!(before, model(&sessions, Some("a"), &snapshot));

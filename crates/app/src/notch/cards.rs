@@ -1,23 +1,16 @@
-//! The notch's smaller parts over GPUI: text in a role, the host tag, the conversation's lines and
-//! what a session waits on. The answering cards are `answering`.
-
 use gpui::{div, prelude::*, px, Div, SharedString};
 use notchling_engine::transcript::snapshot::{ChatLine, LineKind};
 use notchling_kit::metric::{RADIUS_MD, RADIUS_SM};
 use notchling_kit::ui::{hsla, icon, KitStyled};
 use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 
-/// The notch is dark in both appearances: it continues the camera housing.
 pub const A: Appearance = Appearance::Dark;
-/// Every line of text is this many times its font size tall.
 pub const LINE: f32 = 1.3;
 
-/// A role's line height in points.
 pub fn line(role: TypeRole) -> f32 {
     role.spec().size * LINE
 }
 
-/// Text in a type role and an ink.
 pub fn text(content: impl Into<SharedString>, role: TypeRole, ink: Ink) -> Div {
     div()
         .kit_type(role)
@@ -26,7 +19,6 @@ pub fn text(content: impl Into<SharedString>, role: TypeRole, ink: Ink) -> Div {
         .child(role.display(&content.into()))
 }
 
-/// Where a session runs, in a small chip.
 pub fn tag(host: &str) -> Div {
     text(host.to_owned(), TypeRole::Meta, Ink::TextMuted)
         .flex_shrink_0()
@@ -36,8 +28,6 @@ pub fn tag(host: &str) -> Div {
         .fill(Ink::Raised, A)
 }
 
-/// One conversation entry, laid out like Claude Code's terminal: "❯" prompts on a shaded bar,
-/// Claude's text after a "⏺", and dim tool summaries indented beneath it.
 pub fn bubble(entry: &ChatLine) -> Div {
     let (mark, mark_ink, ink) = match entry.kind {
         LineKind::User => ("❯", Ink::TextMuted, Ink::Text),
@@ -65,7 +55,6 @@ pub fn bubble(entry: &ChatLine) -> Div {
     }
 }
 
-/// "Waiting on you": what a session needs, when no card says it.
 pub fn needs_box(needs: &str) -> Div {
     div()
         .flex()

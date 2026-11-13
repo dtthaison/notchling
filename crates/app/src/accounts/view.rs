@@ -1,9 +1,3 @@
-//! The Accounts window and Chat's Accounts sheet over GPUI (macOS): Accounts | Token Cost, a tab
-//! per provider, the rows, the add panel and the alerts. Every call to the daemon runs on the
-//! background executor through the store; a control the `accounts` switch doesn't allow is drawn
-//! disabled with the daemon's off message on hover. A render has a fixed snapshot and switches and
-//! never calls anything.
-
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
@@ -28,29 +22,22 @@ use crate::sheets::view::Dismiss;
 use crate::switches::feed::{Changes, SwitchFeed};
 use crate::switches::Switches;
 
-/// How often the window asks the daemon while it is open.
 const REFRESH_EVERY: Duration = Duration::from_secs(5);
 
-/// What an alert's confirm does.
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Pending {
     RemoveClaude(String),
     RemoveProvider(String, String),
-    /// The daemon asked to confirm a switch: send it again with `confirm: true`.
     SwitchProvider(String, String),
     AddProvider(String),
-    /// Move every session to an account (`None` is the main login's).
     MoveAll(Option<String>),
 }
 
-/// What a background job ended with.
 enum Done {
     Nothing,
     Alert(Alert, Pending),
     Open(String),
-    /// A Claude Code sign-in began: open its page and poll for its end.
     SignIn(String),
-    /// How a Move All went, kept under the rows until the next action.
     Banner(Option<Banner>),
 }
 
@@ -60,17 +47,13 @@ pub struct AccountsView {
     pub(super) tab: Tab,
     provider: String,
     busy: bool,
-    /// The row whose ⋯ menu is open.
     menu_open: Option<String>,
     alert: Option<(Alert, Pending)>,
     note: Option<String>,
-    /// How the last Move All went (or that it's still going).
     banner: Option<Banner>,
     pub(super) range: Range,
     pub(super) account: String,
-    /// In Chat's sheet: a Done button, and Dismiss on it.
     pub(super) in_sheet: bool,
-    /// A render's clock and switches; the live ones otherwise.
     fixed: Option<(f64, Switches)>,
     seen: Changes,
 }
@@ -85,8 +68,6 @@ fn now_secs() -> f64 {
 }
 
 impl AccountsView {
-    /// The live view: reads the daemon now, then every few seconds and whenever the feed says the
-    /// accounts, providers or limits moved (dropping the view ends the loop).
     pub fn live(
         store: Arc<Accounts>,
         feed: Arc<SwitchFeed>,
@@ -139,7 +120,6 @@ impl AccountsView {
         view
     }
 
-    /// A render's: `store` and `feed` as given, on `provider`'s tab, at a fixed clock.
     pub fn fixed(
         store: Arc<Accounts>,
         feed: Arc<SwitchFeed>,
@@ -165,12 +145,10 @@ impl AccountsView {
         }
     }
 
-    /// A render's: the ⋯ menu of the row `key` (`<provider>-<id>`) open.
     pub fn open_menu(&mut self, key: &str) {
         self.menu_open = Some(key.to_owned());
     }
 
-    /// Opens on a provider's tab (Chat's Codex Accounts…).
     pub fn show_provider(&mut self, provider: &str, cx: &mut Context<Self>) {
         self.tab = Tab::Accounts;
         self.provider = provider.to_owned();
@@ -192,8 +170,6 @@ impl AccountsView {
         self.refresh_with(false, cx);
     }
 
-    /// The Refresh button's: every provider's limits read afresh for every account, not only
-    /// those due ([`Accounts::refresh_all`]).
     pub(super) fn refresh_all(&self, cx: &mut Context<Self>) {
         self.refresh_with(true, cx);
     }
@@ -219,7 +195,6 @@ impl AccountsView {
         .detach();
     }
 
-    /// Runs `job` off the UI thread, then reads the daemon again; an error is shown as the note.
     fn run(
         &mut self,
         job: impl FnOnce(&Accounts, &Switches) -> Result<Done, String> + Send + 'static,
@@ -248,7 +223,6 @@ impl AccountsView {
                 match result {
                     Ok(Done::Nothing) => view.alert = None,
                     Ok(Done::Alert(alert, pending)) => view.alert = Some((alert, pending)),
-                    // Only a known sign-in page opens: the link comes from the daemon.
                     Ok(Done::Open(url)) if sign_in_page(&url) => {
                         view.alert = None;
                         cx.open_url(&url);
@@ -437,8 +411,6 @@ impl AccountsView {
         }
     }
 
-    /// A daemon that answered a Move All before it ended said how it went in an event: replace
-    /// the "still moving" line with it.
     fn move_ended(&mut self, cx: &mut Context<Self>) {
         let Some(end) = self.feed.last_move() else {
             return;
@@ -449,8 +421,6 @@ impl AccountsView {
         }
     }
 
-    /// Move All Sessions To `target` (an account id; `None` is the main login's): the dry run's
-    /// plan is shown first, and the move goes out on its confirm.
     pub fn move_all(&mut self, target: Option<String>, email: String, cx: &mut Context<Self>) {
         self.run(
             move |s, sw| {
@@ -572,7 +542,6 @@ impl Render for AccountsView {
                 Rc::new(|this, yes, cx| this.alert_answered(yes, cx));
             alert_overlay(alert, self.busy, a, cx, on)
         });
-        // In Chat's sheet the window's border isn't this view's.
         let edges = (!self.in_sheet).then(|| resize_edges(window, TopBorder::InContent));
         div()
             .id(SharedString::from("accounts-view"))

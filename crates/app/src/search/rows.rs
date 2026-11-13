@@ -1,7 +1,3 @@
-//! The pieces the search panel's list is made of: the section headers and the page and session
-//! rows. Pure drawing over a row's data; the panel view (`view.rs`) lays them out and handles
-//! the keys and the mouse.
-
 use gpui::{div, prelude::*, px, Div, FontWeight, HighlightStyle, SharedString, StyledText};
 use notchling_engine::search::{age_text, SessionTool};
 use notchling_kit::metric::{RADIUS_MD, RADIUS_SM};
@@ -21,7 +17,6 @@ pub(super) fn hairline(a: Appearance) -> Div {
         .fill(Ink::Hairline, a)
 }
 
-/// The 30-point square a row's icon sits in.
 fn icon_box(selected: bool, a: Appearance) -> Div {
     div()
         .size(px(30.0))
@@ -40,7 +35,6 @@ fn icon_box(selected: bool, a: Appearance) -> Div {
         )
 }
 
-/// A tool's mark: its installed app's icon, else the kit's own.
 fn tool_mark(tool: SessionTool, selected: bool, a: Appearance) -> Div {
     match tool {
         SessionTool::Claude => icon_box(selected, a).child(tool_icon(ToolMark::Claude, 20.0, a)),
@@ -62,7 +56,6 @@ pub(super) fn section_header(section: Section, a: Appearance) -> Div {
         .child(label(section.title(), TypeRole::Section, Ink::TextFaint, a))
 }
 
-/// A row's frame: the selection wash when selected.
 fn row_frame(height: f32, selected: bool, a: Appearance) -> Div {
     div()
         .h(px(height))
@@ -110,7 +103,6 @@ pub(super) fn page_row(page: &Page, selected: bool, now_secs: f64, a: Appearance
         ))
 }
 
-/// A Secret Vault entry: its name over what it's for (the site, then the note's first line).
 pub(super) fn secret_row(
     entry: &notchling_engine::vault::VaultEntry,
     selected: bool,
@@ -144,7 +136,6 @@ pub(super) fn secret_row(
         )
 }
 
-/// The snippet with the query's words bold, else the folder.
 fn session_detail(session: &SessionRow, home: &std::path::Path, a: Appearance) -> Div {
     let line = div()
         .kit_type(TypeRole::Meta)

@@ -8,7 +8,6 @@ fn a_new_session_is_named_by_thread_started() {
             thread_id: "019a5c3e-12ab".into()
         }
     );
-    // No id, or an empty one, names nothing.
     assert_eq!(parse_line(r#"{"type":"thread.started"}"#), Event::Other);
     assert_eq!(
         parse_line(r#"{"type":"thread.started","thread_id":""}"#),

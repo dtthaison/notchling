@@ -1,12 +1,3 @@
-//! What the daemon's `tools` topic says about Codex and Antigravity sessions right now, kept by
-//! the session source and read by Chat and the notch: a Codex turn running (`codex.turn`), a
-//! message waiting behind it, an Antigravity session the daemon holds open and whether its turn
-//! runs (`session.changed`), and the row the daemon describes for a session the files don't list
-//! yet (one started this run) or no longer should (one deleted).
-//!
-//! The files stay the source of the rows themselves; this lays the live state over them
-//! ([`ToolLive::overlay`]), the way `NotchForeign.merge` did over Chat's listing.
-
 use std::collections::{BTreeMap, BTreeSet};
 
 use notchling_engine::sessions::{Agent, AgentGroup};
@@ -15,37 +6,23 @@ use serde_json::Value;
 
 use super::requests::{RowTool, AGY_PREFIX};
 
-/// The live state, from the events so far.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ToolLive {
-    /// Rows the daemon described, by row id: the row as it is now, or `None` once it is gone.
     pub rows: BTreeMap<String, Option<Agent>>,
-    /// Codex sessions with a turn running.
     pub codex_running: BTreeSet<String>,
-    /// How many messages wait behind each Codex session's running turn.
     pub codex_waiting: BTreeMap<String, usize>,
-    /// Antigravity sessions the daemon holds open, and those with a turn running.
     pub agy_open: BTreeSet<String>,
     pub agy_working: BTreeSet<String>,
-    /// Counts each change to an Antigravity session's conversation, so a reader knows to ask for
-    /// it again.
     pub agy_changes: BTreeMap<String, u64>,
-    /// The last failure of a session's turn, cleared when its next turn starts.
     pub errors: BTreeMap<String, String>,
-    /// Draft rows (`codex-new:<uuid>`) whose session Codex named after the daemon had replied
-    /// `starting`: the draft, and the real row it became.
     pub named: BTreeMap<String, String>,
-    /// Draft rows whose session never started, and why.
     pub unstarted: BTreeMap<String, String>,
-    /// Counts every event taken, so a poll can tell something moved.
     pub generation: u64,
 }
 
-/// What became of a draft row whose session was still starting when the daemon replied.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Follow {
     Waiting,
-    /// Codex named the session: this is its row.
     Named(String),
     NotStarted(String),
 }
@@ -55,13 +32,10 @@ fn text<'a>(v: &'a Value, key: &str) -> Option<&'a str> {
 }
 
 impl ToolLive {
-    /// Takes one event. True when it was one of the `tools` topic's.
     pub fn apply(&mut self, event: &Event) -> bool {
         let data = &event.data;
         match event.event.as_str() {
             topics::CODEX_TURN => {
-                // A new session the daemon could not name within its reply: the draft row it
-                // was sent from, and what became of it.
                 if let Some(draft) = text(data, "draft") {
                     match (text(data, "state"), text(data, "id")) {
                         (Some("named"), Some(id)) => {
@@ -132,7 +106,6 @@ impl ToolLive {
 
     fn agy_changed(&mut self, id: &str, change: Option<&str>, error: Option<&str>) {
         match change {
-            // Another `agy` let go of it (`released`): opened again, it loads all of it.
             Some("closed") | Some("released") => {
                 self.agy_open.remove(id);
                 self.agy_working.remove(id);
@@ -142,7 +115,6 @@ impl ToolLive {
                 self.agy_working.insert(id.to_owned());
                 self.errors.remove(id);
             }
-            // Another `agy` (a delegation) holds it and wrote more: read it again, open nothing.
             Some("elsewhere") => {}
             Some("turn_ended") => {
                 self.agy_open.insert(id.to_owned());
@@ -159,7 +131,6 @@ impl ToolLive {
         *self.agy_changes.entry(id.to_owned()).or_default() += 1;
     }
 
-    /// What became of a draft whose first message the daemon answered `starting`.
     pub fn follow(&self, draft: &str) -> Follow {
         if let Some(row) = self.named.get(draft) {
             Follow::Named(row.clone())
@@ -170,25 +141,18 @@ impl ToolLive {
         }
     }
 
-    /// Whether a row's turn runs, by the runners' word.
     pub fn is_working(&self, id: &str) -> bool {
         self.codex_running.contains(id) || self.agy_working.contains(id)
     }
 
-    /// Whether the daemon holds an Antigravity session open (its conversation can be read).
     pub fn is_open(&self, id: &str) -> bool {
         self.agy_open.contains(id)
     }
 
-    /// How many messages wait behind a Codex session's turn.
     pub fn waiting(&self, id: &str) -> usize {
         self.codex_waiting.get(id).copied().unwrap_or(0)
     }
 
-    /// Lays the live state over rows read from the files: a session the daemon says is gone is
-    /// dropped; an Antigravity row the daemon describes takes its name and state (the summaries
-    /// copy lags behind); one the files don't list yet is added; and a running turn makes its row
-    /// Working whatever the files say. Claude Code rows are left alone.
     pub fn overlay(&self, rows: &mut Vec<Agent>) {
         rows.retain(|a| {
             RowTool::of(&a.id) == RowTool::Claude || !matches!(self.rows.get(&a.id), Some(None))
@@ -197,8 +161,6 @@ impl ToolLive {
             if RowTool::of(&agent.id) == RowTool::Agy {
                 if let Some(Some(live)) = self.rows.get(&agent.id) {
                     let transcript = agent.transcript_path.take();
-                    // The daemon's row carries its event's time; when the session was last used
-                    // is the file's (a closed row would reopen on every event otherwise).
                     let since = agent.since_ms;
                     *agent = live.clone();
                     agent.transcript_path = transcript;
@@ -281,7 +243,6 @@ mod tests {
         ));
         assert!(!live.is_working("codex:s1"));
         assert_eq!(live.errors["codex:s1"], "exit 1");
-        // The next queued turn starts: one fewer waits, and the error is gone.
         live.apply(&event(
             "codex.turn",
             json!({"id": "codex:s1", "state": "started"}),
@@ -293,7 +254,6 @@ mod tests {
             json!({"id": "codex:s1", "state": "started"}),
         ));
         assert_eq!(live.waiting("codex:s1"), 0);
-        // A turn that never got a session (a failed draft) changes nothing but the count.
         let before = live.clone();
         live.apply(&event(
             "codex.turn",
@@ -322,7 +282,6 @@ mod tests {
         ));
         assert_eq!(live.unstarted["codex-new:u2"], "no codex");
         assert_eq!(live.named.len(), 1);
-        // A failure with no error text still says something.
         live.apply(&event(
             "codex.turn",
             json!({"id": null, "state": "not_started", "draft": "codex-new:u3"}),
@@ -438,8 +397,6 @@ mod tests {
 
     #[test]
     fn a_live_antigravity_row_keeps_when_it_was_last_used() {
-        // The daemon stamps its row with the time of its event; opening or reading a session
-        // isn't using it, so a closed row stays closed.
         let mut live = ToolLive::default();
         let stamped = Agent {
             since_ms: 9_000_000,

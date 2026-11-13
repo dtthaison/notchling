@@ -1,10 +1,3 @@
-//! One Codex turn for a delegated job (Swift `CodexDelegate`): `codex exec --json`, read-only
-//! sandbox unless `--write` (then workspace-write, the folder only, with the network when
-//! "Allow Network in Codex Turns" is on).
-//!
-//! Read: `thread.started` names the session, the last non-empty `agent_message` is the reply,
-//! `turn.completed` has the token usage, `error` and `turn.failed` say what went wrong.
-
 use super::deps::Deps;
 use super::media;
 use super::options::{Options, Tool, DEPTH_VARIABLE};
@@ -24,7 +17,6 @@ pub const NO_BINARY: &str = "Couldn't find the codex command. Install the Codex 
 const READ_ONLY: &str = "read-only";
 const TICK: Duration = Duration::from_millis(50);
 
-/// What `codex exec --json` printed that the run uses.
 #[derive(Default)]
 struct Seen {
     session: Option<String>,
@@ -82,16 +74,12 @@ fn read_event(line: &str, seen: &mut Seen, deps: &Deps, options: &Options) {
     }
 }
 
-/// Where the watcher has got in stopping the process.
 enum Stage {
     Running,
     Interrupted(Instant),
     Terminated(Instant),
 }
 
-/// Stops the process when the time is up or a stop is asked for: SIGINT first, SIGTERM if it is
-/// still running `terminate_after` later, SIGKILL if it still is `terminate_after` after that, so
-/// `--timeout` holds for a turn that traps both signals. Ends when `finished` is dropped.
 fn watch(
     process: Arc<dyn ToolProcess>,
     deps: &Deps,
@@ -152,7 +140,6 @@ pub fn run(options: &Options, deps: &Deps) -> Outcome {
         o.error = Some(format!("{session} isn't a Codex session id."));
         return o;
     }
-    // One argument over 128 KB is refused by Linux's execve; macOS takes more.
     if !cfg!(target_os = "macos") && options.prompt.len() > MAX_PROMPT_BYTES {
         o.error = Some(format!(
             "The prompt is over {} KB; put the long part in a file and tell Codex to read it.",

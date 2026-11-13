@@ -1,8 +1,3 @@
-//! The real [`Host`]: runs the delegate command as a child process (this program's own
-//! executable, so Stop is a signal and the Codex and Antigravity engines stay the command's one
-//! copy), reads its output and reports it when it ends. Stop is SIGTERM, then SIGKILL eight
-//! seconds later if it is still there; `stop_within`, for the app quitting, waits for that itself.
-
 use super::second_opinion_store::{Host, Job};
 use std::io::Read;
 use std::path::PathBuf;
@@ -10,13 +5,10 @@ use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-/// How long a stopped command gets before it is killed.
 const KILL_AFTER: Duration = Duration::from_secs(8);
 
 pub struct ProcessHost {
-    /// The program to run (`notchling`).
     pub program: PathBuf,
-    /// Arguments that come before the delegate command's own (none for the real one).
     pub prefix: Vec<String>,
     pub kill_after: Duration,
 }
@@ -40,7 +32,6 @@ fn lock(child: &Mutex<Child>) -> std::sync::MutexGuard<'_, Child> {
     child.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-/// Sends SIGTERM to a child that has not been reaped (the caller holds the lock that reaps it).
 fn ask_to_end(child: &mut Child) {
     #[cfg(unix)]
     {
@@ -77,8 +68,6 @@ impl Job for Running {
         });
     }
 
-    /// The same stop without the helper thread, which would die with the app before it killed
-    /// anything: wait here, up to `grace`, then kill and reap.
     fn stop_within(&self, grace: Duration) {
         let deadline = Instant::now() + grace;
         let mut asked = false;
@@ -129,7 +118,6 @@ impl Host for ProcessHost {
                 }
                 data
             });
-            // Polled, so a stop can take the lock while this waits.
             loop {
                 let status = lock(&waiting).try_wait();
                 if !matches!(status, Ok(None)) {
@@ -152,7 +140,6 @@ mod tests {
     use super::*;
     use std::sync::mpsc::channel;
 
-    /// `/bin/sh -c <script> sh <args…>`: the script stands in for `notchling`.
     fn host(script: &str) -> ProcessHost {
         ProcessHost {
             program: PathBuf::from("/bin/sh"),
@@ -194,12 +181,10 @@ mod tests {
             job.terminate();
             let out = rx.recv_timeout(Duration::from_secs(10)).unwrap();
             assert_eq!(out, "", "{script}");
-            // Late, and harmless once it has ended.
             job.terminate();
         }
     }
 
-    /// Whether a process with this pid still exists (a reaped child does not).
     fn alive(pid: i32) -> bool {
         // SAFETY: signal 0 only checks that the process exists.
         unsafe { libc::kill(pid, 0) == 0 }
@@ -207,18 +192,15 @@ mod tests {
 
     #[test]
     fn stop_within_returns_only_once_the_command_is_gone() {
-        // The second ignores SIGTERM, so it has to be killed when the grace runs out.
         for (trap, kill_needed) in [("", false), ("trap '' TERM; ", true)] {
             let pid_file = std::env::temp_dir().join(format!(
                 "nl-stop-within-{}-{}",
                 std::process::id(),
                 kill_needed
             ));
-            // The pid is written after the trap is set, so a stop never beats it.
             let script = format!("{trap}echo $$ > '{}'; exec sleep 30", pid_file.display());
             let (tx, rx) = channel();
             let mut slow = host(&script);
-            // A kill left to the helper thread would come far too late for this test.
             slow.kill_after = Duration::from_secs(60);
             let job = slow
                 .launch(
@@ -245,7 +227,6 @@ mod tests {
             }
             assert!(took < Duration::from_secs(3), "{script}: {took:?}");
             assert_eq!(rx.recv_timeout(Duration::from_secs(10)).unwrap(), "");
-            // Late, and harmless once it has ended.
             job.stop_within(Duration::from_millis(400));
             let _ = std::fs::remove_file(&pid_file);
         }

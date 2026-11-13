@@ -1,5 +1,3 @@
-//! Shared by the install tests: scratch folders and the fixtures.
-
 use super::hooks::{Want, Wanted};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -12,10 +10,8 @@ pub const ODD: &str = include_str!("fixtures/odd.jsonc");
 pub const COMPACT: &str = include_str!("fixtures/compact.json");
 pub const UNKNOWN_KEYS: &str = include_str!("fixtures/unknown-keys.json");
 
-/// The command the tests install.
 pub const CMD: &str = "'/opt/notchling/bin/notchling' hook";
 
-/// A fresh empty folder under the temp dir, removed when dropped.
 pub struct Scratch(pub PathBuf);
 
 impl Scratch {
@@ -35,7 +31,6 @@ impl Scratch {
         self.0.join(name)
     }
 
-    /// The names in the folder, sorted.
     pub fn names(&self) -> Vec<String> {
         let mut names: Vec<String> = std::fs::read_dir(&self.0)
             .expect("read folder")
@@ -68,7 +63,6 @@ pub fn remove_all() -> Wanted {
     wanted(Want::Remove, Want::Remove)
 }
 
-/// Everything but the user's JSON rules out: parses `text` as the data it holds.
 pub fn value(text: &str) -> serde_json::Value {
     let node = super::jsonc::parse(text).expect("valid settings text");
     super::jsonc::to_value(&node, text)

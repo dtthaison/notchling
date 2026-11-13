@@ -1,18 +1,11 @@
-//! Reading the tail of a transcript as whole lines, and cutting the pictures' base64 out of a line
-//! before its size is judged (ConsoleCore's `readWindow` and `ChatImages.stripBase64`).
-
 use super::SourceLine;
 use std::borrow::Cow;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 
-/// How far back a line that straddles the window's start is searched for: past this it stays cut.
 const MAX_BACK_UP: usize = 64 * 1024 * 1024;
 const BACK_UP_CHUNK: u64 = 1 << 20;
 
-/// The last `bytes` of the file as whole lines with their offsets; empty lines are left out. A window
-/// that begins inside a line backs up to where that line starts, so a long line (a screenshot, say) is
-/// read whole instead of being dropped. None when the file can't be read.
 pub fn read_window(path: &str, bytes: u64) -> Option<Vec<SourceLine>> {
     read_window_from(&mut File::open(path).ok()?, bytes)
 }
@@ -23,12 +16,10 @@ pub(super) fn read_window_from<R: Read + Seek>(
 ) -> Option<Vec<SourceLine>> {
     let size = file.seek(SeekFrom::End(0)).ok()?;
     let start = size.saturating_sub(bytes);
-    // Read one byte earlier to learn whether `start` is the beginning of a line.
     let from = start.saturating_sub(1);
     file.seek(SeekFrom::Start(from)).ok()?;
     let mut data = Vec::new();
     file.read_to_end(&mut data).ok()?;
-    // The file can shrink between the size and the read.
     if data.is_empty() {
         return Some(Vec::new());
     }
@@ -62,8 +53,6 @@ pub(super) fn read_window_from<R: Read + Seek>(
     Some(lines)
 }
 
-/// Where the line that contains byte `start` begins, and its bytes before `start`. Reads backwards in
-/// chunks; None when no line start is found within [`MAX_BACK_UP`] or the file can't be read.
 fn back_up_to_line_start<R: Read + Seek>(file: &mut R, start: u64) -> Option<(u64, Vec<u8>)> {
     let mut cursor = start;
     let mut prefix: Vec<u8> = Vec::new();
@@ -97,8 +86,6 @@ fn back_up_to_line_start<R: Read + Seek>(file: &mut R, start: u64) -> Option<(u6
     None
 }
 
-/// A line with a picture in it is the usual reason a line is big. The base64 is cut out before the JSON
-/// is read (the `data` string becomes empty), so the size limit judges the rest of the line.
 pub fn strip_base64(line: &str) -> Cow<'_, str> {
     super::images::strip_base64_blocks(line).0
 }
@@ -110,7 +97,6 @@ mod tests {
 
     #[test]
     fn a_file_that_shrank_between_the_size_and_the_read_gives_no_lines() {
-        // Reports 10 000 bytes at the end, then reads nothing.
         struct Shrunk;
         impl Read for Shrunk {
             fn read(&mut self, _: &mut [u8]) -> std::io::Result<usize> {
@@ -160,7 +146,6 @@ mod tests {
     #[test]
     fn strip_base64_leaves_other_lines_alone() {
         assert!(matches!(strip_base64(r#"{"a":1}"#), Cow::Borrowed(_)));
-        // The marker without a media type and data string is not a picture block.
         let odd = r#"{"type":"base64","media_type":"image/png","other":"x"}"#;
         assert_eq!(strip_base64(odd), odd);
         let truncated = r#"{"type":"base64","media_type":"image/pn"#;

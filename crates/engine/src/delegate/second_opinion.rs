@@ -1,8 +1,3 @@
-//! A second opinion asked from Chat: the prompt built from a change or a message, the arguments for
-//! `notchling delegate`, and the reading of its `--json` answer (Swift `SecondOpinionPrompt`,
-//! `SecondOpinionResult`, `SecondOpinion`, `SecondOpinionModels`). Pure: no process and no view.
-//! The store that runs and keeps them is [`super::second_opinion_store`].
-
 use super::agy_pick;
 use super::options::Tool;
 use crate::tools::codex::models::Model;
@@ -10,16 +5,12 @@ use crate::transcript::model::{DiffKind, DiffLine};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-/// What a second opinion is about.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Subject {
-    /// An Edit or Write step: the file and its diff.
     Change { path: String, diff: Vec<DiffLine> },
-    /// An assistant message.
     Message(String),
 }
 
-/// What goes into the prompt, so a pasted log or a huge diff can't make it unreasonably long.
 pub const BODY_LIMIT: usize = 24_000;
 
 pub fn build_prompt(subject: &Subject, folder: &str) -> String {
@@ -54,7 +45,6 @@ pub fn build_prompt(subject: &Subject, folder: &str) -> String {
     }
 }
 
-/// The diff as unified text: `+`, `-` or a space in front of each line, hunk headers as they are.
 pub fn unified(lines: &[DiffLine]) -> String {
     lines
         .iter()
@@ -68,7 +58,6 @@ pub fn unified(lines: &[DiffLine]) -> String {
         .join("\n")
 }
 
-/// `text` cut to [`BODY_LIMIT`] characters, saying how many were left out.
 pub fn clip(text: &str) -> String {
     let count = text.chars().count();
     if count <= BODY_LIMIT {
@@ -81,7 +70,6 @@ pub fn clip(text: &str) -> String {
     )
 }
 
-/// A short name for what was reviewed, shown on the card.
 pub fn title(subject: &Subject) -> String {
     match subject {
         Subject::Change { path, .. } => {
@@ -96,7 +84,6 @@ pub fn title(subject: &Subject) -> String {
     }
 }
 
-/// What `notchling delegate … --json` prints, read back.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Answer {
     pub ok: bool,
@@ -111,8 +98,6 @@ pub struct Answer {
 }
 
 impl Answer {
-    /// The last JSON object in `output` (the command prints one line; anything before it is
-    /// noise).
     pub fn parse(output: &str) -> Option<Answer> {
         output.lines().rev().find_map(|line| {
             let text = line.trim();
@@ -146,34 +131,26 @@ pub enum Status {
     Cancelled,
 }
 
-/// One second opinion: asked, running or finished. Kept per Chat session and across launches.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SecondOpinion {
     pub id: String,
-    /// The Chat row id the opinion was asked in.
     pub session: String,
-    /// The message item or tool call the card sits under.
     pub anchor: String,
-    /// What was reviewed ("Reply", a file name).
     pub subject: String,
-    /// `Tool::raw()`.
     pub tool: String,
     pub model: Option<String>,
     pub effort: Option<String>,
     pub folder: String,
-    /// Seconds since the epoch.
     pub started: f64,
     pub status: Status,
     pub reply: String,
     pub error: Option<String>,
-    /// The tool's own session, which Chat lists with the others.
     pub delegated_session: Option<String>,
     pub seconds: f64,
     pub tokens: Option<u64>,
 }
 
-/// The default timeout of a second opinion, in seconds.
 pub const TIMEOUT_SECS: u64 = 900;
 
 impl SecondOpinion {
@@ -181,8 +158,6 @@ impl SecondOpinion {
         Tool::from_name(&self.tool).unwrap_or(Tool::Codex)
     }
 
-    /// The arguments for `notchling` (after the program name): read-only (no `--write`), the
-    /// prompt from a file so a long diff isn't an argument.
     pub fn arguments(
         tool: Tool,
         model: Option<&str>,
@@ -209,7 +184,6 @@ impl SecondOpinion {
         args
     }
 
-    /// Applies a finished run's output.
     pub fn finish(&mut self, answer: Option<&Answer>, output: &str, cancelled: bool) {
         if cancelled {
             self.status = Status::Cancelled;
@@ -252,7 +226,6 @@ impl SecondOpinion {
     }
 }
 
-/// One model a tool offers, for the popover.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ModelOption {
     pub model: String,
@@ -260,7 +233,6 @@ pub struct ModelOption {
     pub efforts: Vec<String>,
 }
 
-/// Codex's cached list.
 pub fn codex_options(models: &[Model]) -> Vec<ModelOption> {
     models
         .iter()
@@ -272,7 +244,6 @@ pub fn codex_options(models: &[Model]) -> Vec<ModelOption> {
         .collect()
 }
 
-/// `agy models` output.
 pub fn agy_options(listing: &str) -> Vec<ModelOption> {
     agy_pick::models(listing)
         .into_iter()

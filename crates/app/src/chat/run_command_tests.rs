@@ -109,7 +109,6 @@ fn a_console_block_keeps_the_prompted_lines_and_skips_the_output() {
         run("console", text).as_deref(),
         Some("cargo test && git status")
     );
-    // A continuation after a prompted line is part of it, not output.
     let text = "$ cargo test \\\n  --locked\nok";
     assert_eq!(run("console", text).as_deref(), Some("cargo test --locked"));
 }
@@ -119,7 +118,6 @@ fn an_untagged_block_needs_every_line_to_be_prompted_or_a_command() {
     assert_eq!(run("", "! ls -la\n$ pwd").as_deref(), Some("ls -la && pwd"));
     assert_eq!(run("text", "git status").as_deref(), Some("git status"));
     assert_eq!(run("code", "git status").as_deref(), Some("git status"));
-    // Some lines prompted, one not: output mixed in, so not a command block.
     assert_eq!(run("", "$ cargo test\nrunning 3 tests"), None);
 }
 
@@ -215,11 +213,8 @@ fn the_message_starts_shell_mode() {
 #[test]
 fn run_shows_only_where_the_reply_box_takes_a_bang() {
     assert!(available(Tool::Claude, true, false));
-    // Read-only, an exited session, acting off.
     assert!(!available(Tool::Claude, false, false));
-    // A subagent's transcript is only read.
     assert!(!available(Tool::Claude, true, true));
-    // `!` is Claude Code's shell mode: Codex and Antigravity have none.
     assert!(!available(Tool::Codex, true, false));
     assert!(!available(Tool::Antigravity, true, false));
 }
@@ -267,7 +262,6 @@ fn a_tty_or_a_login_shell_needs_a_terminal() {
     ] {
         assert_eq!(how(text), RunHow::Terminal, "{text}");
     }
-    // A program started with no arguments opens a session of its own.
     for text in ["claude", "codex", "python3", "node"] {
         assert_eq!(how(text), RunHow::Terminal, "{text}");
         assert_eq!(command("bash", text).as_deref(), Some(text));
@@ -308,7 +302,6 @@ fn more_untagged_command_words() {
     ] {
         assert_eq!(command("", text).as_deref(), Some(text), "{text}");
     }
-    // A shell's name starts prose as easily as a command.
     for text in ["bash is the default shell", "sh", "bash", "zsh -l"] {
         assert_eq!(command("", text), None, "{text}");
     }

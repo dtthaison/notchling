@@ -1,6 +1,3 @@
-//! The main window: how it opens (size, hidden title bar, traffic lights over the sidebar's top) and
-//! the empty shell view shown where no data root is known. Chat's own view is `crate::chat::view`.
-
 use std::cell::Cell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -21,12 +18,9 @@ use notchling_kit::{Appearance, Ink, TypeRole};
 
 use crate::window_frame::{Frame, KEY};
 
-/// How long after the last move or resize the frame is written.
 const SAVE_AFTER: Duration = Duration::from_millis(400);
 
-/// The empty shell: the kit's surfaces in their places, no data.
 pub struct ShellView {
-    /// Forced by `--render shell-*`; `None` follows the system.
     appearance: Option<Appearance>,
     _appearance_changes: Subscription,
 }
@@ -48,8 +42,6 @@ impl ShellView {
     }
 }
 
-/// The shell's sidebar: the surfaces in their places, with the ? button live so the part names
-/// still toggle here (there is nothing named in the shell itself).
 fn sidebar(a: Appearance, cx: &App) -> impl IntoElement {
     div()
         .w(px(SIDEBAR_WIDTH))
@@ -60,7 +52,6 @@ fn sidebar(a: Appearance, cx: &App) -> impl IntoElement {
         .border_color(hsla(Ink::Hairline.color(a)))
         .flex()
         .flex_col()
-        // The traffic lights sit here; nothing else does.
         .child(div().h(px(TITLE_BAR)).flex_shrink_0())
         .child(div().px(px(SIDE_PADDING)).pb(px(8.0)).child(label(
             "Sessions",
@@ -130,8 +121,6 @@ impl Render for ShellView {
     }
 }
 
-/// Where the window opens: the saved frame on its screen when that screen is here (pulled onto it
-/// if it no longer fits), else 1040 × 720 in the middle of the main screen.
 fn placement(saved: Option<Frame>, cx: &App) -> (Option<DisplayId>, WindowBounds) {
     let default = || {
         let bounds = Bounds::centered(None, size(px(WINDOW_DEFAULT.0), px(WINDOW_DEFAULT.1)), cx);
@@ -161,7 +150,6 @@ fn placement(saved: Option<Frame>, cx: &App) -> (Option<DisplayId>, WindowBounds
     (Some(display.id()), bounds)
 }
 
-/// The window's frame now, on its screen.
 fn frame_of(window: &Window, cx: &App) -> Frame {
     let display = window
         .display(cx)
@@ -193,9 +181,6 @@ fn save_frame(settings: &Path, frame: &Frame) {
     }
 }
 
-/// Opens the main window with `build`'s root view: where it was last (`settings`, the app's
-/// `settings.json`, keeps its screen and frame), else 1040 × 720; at least 720 × 460, title bar
-/// hidden with the traffic lights over the sidebar's top. `None` when GPUI can't open a window.
 pub fn open_main_window<V: Render>(
     cx: &mut App,
     settings: Option<PathBuf>,
@@ -221,7 +206,6 @@ pub fn open_main_window<V: Render>(
     cx.open_window(options, |window, cx| {
         cx.new(|cx| {
             if let Some(path) = settings {
-                // Written once the window has stopped moving, not at every step of a drag.
                 let moves = Rc::new(Cell::new(0u64));
                 cx.observe_window_bounds(window, move |_, window, cx| {
                     let frame = frame_of(window, cx);

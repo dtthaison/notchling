@@ -1,23 +1,15 @@
-//! The Token Cost page, pure (the Swift `CostPage`): three tiles, a range, the last days as bars,
-//! and the breakdowns by account, channel, model and project, over `cost.summary`'s reply. Costs
-//! are dollars at API list prices; nothing here reads a transcript.
-
 use notchling_engine::cost::prices::display_name;
 use notchling_engine::cost::summary::Summary;
 use notchling_engine::vault::expiry::day_number;
 
 use super::wire::CostReply;
 
-/// The footer under the page, the Swift app's words.
 pub const FOOTER: &str = "What your tokens would cost at API prices, from Claude Code, Claude Desktop, Codex and Antigravity CLI transcripts. A model without a known list price shows its tokens and no cost. Your plan isn't billed this way. Each message is counted once, so totals are lower than Claude Code's /stats, which counts a message again every time a conversation is compacted or resumed. Desktop only appears when you run Claude Code agents in it (normal Desktop chat has no local token record). Before Tracking is cost from before Notchling followed which account was in use.";
 
-/// What the page says before the first scan finished.
 pub const READING: &str = "Reading transcripts…";
 
-/// The filter's first option.
 pub const ALL_ACCOUNTS: &str = "All Accounts";
 
-/// A By Model row's value for a model with no price, before its token count.
 pub const NO_PRICE: &str = "No Price";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -46,7 +38,6 @@ impl Range {
         }
     }
 
-    /// The third tile's title.
     pub fn label(self) -> &'static str {
         match self {
             Range::Days7 => "7 Days",
@@ -56,7 +47,6 @@ impl Range {
     }
 }
 
-/// `$12.34`, `$123` from a hundred, `$1.2k` from a thousand (`CostChartView.dollars`).
 pub fn dollars(x: f64) -> String {
     if x >= 1000.0 {
         format!("${:.1}k", x / 1000.0)
@@ -67,7 +57,6 @@ pub fn dollars(x: f64) -> String {
     }
 }
 
-/// `390.7k`, `212.4m`, `54.7b` tokens.
 pub fn tokens(n: f64) -> String {
     if n >= 1e9 {
         format!("{:.1}b", n / 1e9)
@@ -88,14 +77,10 @@ pub struct Tile {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct DayBar {
-    /// The weekday's letter.
     pub letter: &'static str,
     pub cost: f64,
-    /// Of the tallest bar, 0 to 1.
     pub fraction: f64,
-    /// "2026-11-08 · $1.50".
     pub tooltip: String,
-    /// The last day is drawn in the accent.
     pub last: bool,
 }
 
@@ -114,7 +99,6 @@ pub struct Breakdown {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct CostView {
-    /// The filter's options: `("", "All Accounts")`, then each account with its name.
     pub accounts: Vec<(String, String)>,
     pub account: String,
     pub tiles: [Tile; 3],
@@ -123,18 +107,14 @@ pub struct CostView {
     pub bars_title: &'static str,
     pub bars: Vec<DayBar>,
     pub sections: Vec<Breakdown>,
-    /// The line under the tiles naming the models with no price, which the totals leave out.
     pub unpriced: Option<String>,
     pub footer: &'static str,
 }
 
-/// The names of the summary's models with no price, as the By Model rows show them.
 fn unpriced_names(summary: &Summary) -> Vec<String> {
     summary.unpriced.iter().map(|id| display_name(id)).collect()
 }
 
-/// "No price yet for Nova 1 and gpt-6.1-sol, so the totals leave them out.", or `None` when
-/// every model has a price.
 fn unpriced_line(summary: &Summary) -> Option<String> {
     let names = unpriced_names(summary);
     let (last, rest) = names.split_last()?;
@@ -178,8 +158,6 @@ fn bars(summary: &Summary, range: Range) -> Vec<DayBar> {
         .collect()
 }
 
-/// The name of a cost account for the filter: its email when a store knows it, else the Swift
-/// app's stand-ins.
 pub fn account_name(id: &str, email_of: &dyn Fn(&str) -> Option<String>) -> String {
     match id {
         "" => "Before Tracking".to_owned(),
@@ -238,13 +216,11 @@ fn breakdowns(
                 .iter()
                 .take(8)
                 .map(|m| BreakRow {
-                    // A model with no price has no share of the dollars to show.
                     name: if unpriced.contains(&m.name) {
                         m.name.clone()
                     } else {
                         format!("{} ({:.1}%)", m.name, m.percent)
                     },
-                    // Its dollars are left out, not $0: say so, with what it used.
                     value: if unpriced.contains(&m.name) {
                         let all = m.input + m.output + m.cache_read + m.cache_write;
                         format!("{NO_PRICE} · {} tokens", tokens(all))
@@ -280,8 +256,6 @@ fn breakdowns(
     sections
 }
 
-/// The page over the daemon's reply (`None` before one), for `range` and the account filter
-/// (`""` is every account). `email_of` names a cost account from the stores.
 pub fn cost_view(
     reply: Option<&CostReply>,
     range: Range,
@@ -450,7 +424,6 @@ mod tests {
                 ("u1:o1".to_owned(), "me@example.com".to_owned())
             ]
         );
-        // One account: no By Account section; the 7-day range titles follow.
         let one = cost_view(Some(&r), Range::Days7, "u1:o1", &names);
         assert!(one
             .sections
@@ -460,7 +433,6 @@ mod tests {
             (one.bars_title, one.tiles[2].title),
             ("Last 7 Days", "7 Days")
         );
-        // Nothing yet: reading.
         let none = cost_view(None, Range::All, "", &names);
         assert!(none.reading && none.bars.is_empty());
         assert_eq!(none.tiles[0].value, "$0.00");

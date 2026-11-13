@@ -1,10 +1,3 @@
-//! The vault approval card over GPUI (macOS): Always Allow / Deny / Allow Once, who asked, the
-//! folder and the command. One window per approval (`mac::vault_prompts`), and the view is bound to
-//! that approval for its life: it never reads the feed for another one. Allow arms
-//! [`super::approval::ARMING_MS`] after the window appears or becomes key; every button's id names
-//! the approval; the prompt resolves only once the daemon took the answer. Esc denies; Return does
-//! nothing. A render has a fixed approval and no daemon.
-
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -26,7 +19,6 @@ use crate::mac::gate;
 use crate::switches::feed::SwitchFeed;
 use crate::switches::Switch;
 
-/// Milliseconds on a clock that only goes forward.
 pub fn now_ms() -> i64 {
     static START: OnceLock<Instant> = OnceLock::new();
     START.get_or_init(Instant::now).elapsed().as_millis() as i64
@@ -36,14 +28,12 @@ pub struct VaultApprovalView {
     feed: Arc<SwitchFeed>,
     vault: Arc<Vault>,
     model: ApprovalModel,
-    /// A render's: drawn armed, never sends.
     fixed: bool,
     focus: FocusHandle,
     _activation: Option<Subscription>,
 }
 
 impl VaultApprovalView {
-    /// The live card for `approval`, in `window`. It arms when the window becomes key.
     pub fn live(
         approval: &Approval,
         feed: Arc<SwitchFeed>,
@@ -87,12 +77,10 @@ impl VaultApprovalView {
         }
     }
 
-    /// The approval this window answers.
     pub fn id(&self) -> &str {
         &self.model.prompt.id
     }
 
-    /// Whether the daemon took an answer, so the window can go.
     pub fn resolved(&self) -> bool {
         self.model.resolved
     }
@@ -105,7 +93,6 @@ impl VaultApprovalView {
         }
     }
 
-    /// Draws again when the Allow buttons arm, so they show live.
     fn redraw_when_armed(&self, cx: &mut Context<Self>) {
         let Some(at) = self.model.arms_at() else {
             return;
@@ -120,7 +107,6 @@ impl VaultApprovalView {
         .detach();
     }
 
-    /// A click: sent only while that button is live; resolved only once the daemon takes it.
     fn answer(&mut self, decision: Decision, cx: &mut Context<Self>) {
         if self.fixed || !self.vault.is_live() {
             return;

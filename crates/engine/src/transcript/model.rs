@@ -1,15 +1,11 @@
-//! The conversation model every reader produces: what Chat shows for a session.
-
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
 use super::snapshot::PendingQuestion;
 
-/// Seconds since the Unix epoch.
 pub type Timestamp = f64;
 
-/// One step of a session as Chat shows it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ChatItem {
     pub id: String,
@@ -20,33 +16,13 @@ pub struct ChatItem {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data", rename_all = "snake_case")]
 pub enum ItemKind {
-    User {
-        text: String,
-        images: usize,
-    },
-    Assistant {
-        text: String,
-    },
-    /// Claude Code keeps only how long it thought; the text is usually redacted.
-    Thinking {
-        seconds: f64,
-        text: String,
-    },
+    User { text: String, images: usize },
+    Assistant { text: String },
+    Thinking { seconds: f64, text: String },
     Tools(Vec<ToolCall>),
-    /// End of a turn: how long it took and with which model.
-    TurnEnd {
-        seconds: f64,
-        model: Option<String>,
-    },
-    /// `symbol` is an SF Symbol name the Swift app drew; a Rust view maps it to its own icon.
-    Notice {
-        text: String,
-        symbol: String,
-    },
-    /// What a slash command printed, such as /cost or /context.
-    CommandOutput {
-        text: String,
-    },
+    TurnEnd { seconds: f64, model: Option<String> },
+    Notice { text: String, symbol: String },
+    CommandOutput { text: String },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -71,7 +47,6 @@ pub struct ToolCall {
     pub name: String,
     pub kind: ToolKind,
     pub title: String,
-    /// The command, path, query or input, as plain text.
     pub input: String,
     pub output: Option<String>,
     pub is_error: bool,
@@ -131,7 +106,6 @@ pub enum TaskStatus {
 }
 
 impl TaskStatus {
-    /// Claude Code's wire names: `pending`, `in_progress`, `completed`.
     pub fn parse(word: &str) -> Option<TaskStatus> {
         match word {
             "pending" => Some(TaskStatus::Pending),
@@ -149,67 +123,47 @@ pub struct TaskEntry {
     pub status: TaskStatus,
 }
 
-/// The receipt for a session: where it runs and what it did.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SessionFacts {
     pub branch: Option<String>,
     pub model: Option<String>,
-    /// The reasoning effort the latest turn ran at, when the transcript says (None is the default).
     pub effort: Option<String>,
     pub input_tokens: u64,
     pub output_tokens: u64,
-    /// The part of `input_tokens` read from the prompt cache (Claude's `cache_read_input_tokens`,
-    /// Codex's `cached_input_tokens`).
     pub cached_tokens: u64,
-    /// What the model holds after the latest reply: its last request's input and output.
     pub context_tokens: u64,
     pub turns: u64,
     pub files: Vec<String>,
     pub commands: u64,
 }
 
-/// A Bash call Claude Code ran with `run_in_background`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BackgroundShell {
     pub id: String,
     pub command: String,
-    /// The Bash call's description, when it gave one.
     pub title: String,
     pub output_path: String,
     pub started: Option<Timestamp>,
 }
 
-/// Serializable, since the daemon's `agy.conversation` carries one to the app: a field a newer
-/// daemon adds decodes as its default on an older reader.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Conversation {
     pub items: Vec<ChatItem>,
     pub tasks: Vec<TaskEntry>,
     pub facts: SessionFacts,
-    /// What it's doing right now: the tool still waiting for a result.
     pub activity: Option<String>,
-    /// When your latest prompt was sent.
     pub turn_start: Option<Timestamp>,
-    /// Tokens written since (Claude Code's "47s · down 2.3k tokens" while it works).
     pub turn_tokens: u64,
-    /// Your messages typed while it worked, waiting for the turn to end.
     pub queued: Vec<String>,
-    /// How subagents ended, by agent id (a background agent's task notification) or by the Agent
-    /// call's tool use id (a foreground agent's result).
     pub finished_agents: HashMap<String, String>,
-    /// Bash calls run in the background, oldest first.
     pub shells: Vec<BackgroundShell>,
-    /// The AskUserQuestion the session asked last and nothing has answered yet. Only the Claude Code
-    /// reader fills it; left out of the JSON while there is none, so `agy.conversation` answers are
-    /// as they were.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pending_question: Option<PendingQuestion>,
 }
 
 impl Conversation {
-    /// The text of your last few messages.
     pub fn last_user_texts(&self) -> Vec<String> {
         let start = self.items.len().saturating_sub(8);
         self.items[start..]
@@ -295,7 +249,6 @@ mod tests {
         assert_eq!(json["tasks"][0]["status"], "in_progress");
         let back: Conversation = serde_json::from_value(json).unwrap();
         assert_eq!(back, conversation);
-        // A reader older than the writer: unknown fields are skipped, missing ones default.
         let partial: Conversation =
             serde_json::from_value(serde_json::json!({"items": [], "later": 1})).unwrap();
         assert_eq!(partial, Conversation::default());

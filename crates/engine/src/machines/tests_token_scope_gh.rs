@@ -1,5 +1,3 @@
-//! Token scope: gh's listing, the client and the Fix (Swift `MachinesTokenScopeTests`, end).
-
 use super::fakes::*;
 use super::github::{allows, GitHubHttp, HttpAnswer, LiveGitHub};
 use super::step::{CheckState, StepFix};
@@ -11,9 +9,6 @@ use super::token_scope::step;
 use crate::accounts::Secret;
 use std::sync::Arc;
 
-// MARK: gh's listing must be trustworthy
-
-/// The second mistake must never pass because gh saw too little.
 #[test]
 fn an_empty_gh_listing_cant_tell_even_when_the_others_answer_200() {
     for listing in [vec![], vec!["dtthaison/some-other".to_string()]] {
@@ -49,8 +44,6 @@ fn a_listing_with_only_the_served_repos_passes() {
 
 #[test]
 fn a_listing_that_may_be_cut_or_has_odd_lines_cant_tell() {
-    // Every one of the 999 probes is answered 404 (denied), so only the 1000-name cap can make
-    // this can't tell.
     let mut full = vec![REPO.to_string()];
     full.extend((1..=999).map(|i| format!("dtthaison/p-{i}")));
     let wide = good_http();
@@ -62,7 +55,6 @@ fn a_listing_that_may_be_cut_or_has_odd_lines_cant_tell() {
         .count();
     assert_eq!(probes, 999);
     assert!(cant_tell_text(&cut).contains("cut"), "{:?}", cut.state);
-    // Nine hundred and ninety-nine lines are not cut.
     let mut shorter = full.clone();
     shorter.pop();
     let not_cut = check(&ctx(good_http(), &runner_listing(Some(shorter))));
@@ -77,7 +69,6 @@ fn a_listing_that_may_be_cut_or_has_odd_lines_cant_tell() {
     );
 }
 
-/// A name gh prints that could climb out of the request path is never a request.
 #[test]
 fn a_hostile_name_in_the_listing_never_becomes_a_request() {
     let list = vec![
@@ -142,8 +133,6 @@ fn the_same_token_with_stray_whitespace_is_still_the_same() {
     );
 }
 
-// MARK: the client
-
 #[test]
 fn the_live_client_refuses_any_other_host_without_sending_anything() {
     for url in [
@@ -159,8 +148,6 @@ fn the_live_client_refuses_any_other_host_without_sending_anything() {
     }
 }
 
-// MARK: the Fix
-
 #[test]
 fn the_fix_opens_the_token_flow_for_the_machines_secret() {
     let machine = m1();
@@ -175,7 +162,6 @@ fn the_fix_opens_the_token_flow_for_the_machines_secret() {
         "{}",
         plan.display
     );
-    // The worker takes jobs, changes labels and comments, so the token needs Issues read and write.
     assert!(
         plan.display.contains("Issues: read and write"),
         "{}",
@@ -186,8 +172,6 @@ fn the_fix_opens_the_token_flow_for_the_machines_secret() {
     let c = ctx(good_http(), &runner());
     let (fix, _) = c.fix(None);
     let outcome = (plan.run)(&fix);
-    // it only opens the page and the form: the step is not done until a check passes, so Set up
-    // all stops here
     assert!(!outcome.ok);
     assert!(
         outcome

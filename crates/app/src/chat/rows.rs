@@ -1,6 +1,3 @@
-//! The conversation as rows to draw: the engine's items, plus the queued messages as bubbles at the
-//! end. Pure, so the mapping is tested on every system.
-
 use notchling_engine::transcript::model::{
     ChatItem, Conversation, DiffLine, ItemKind, ToolCall, ToolKind,
 };
@@ -8,13 +5,10 @@ use notchling_kit::Icon;
 
 use super::format::{duration, model_name};
 
-/// How many lines of a tool's output a row shows before "… +N lines".
 pub const OUTPUT_LINES: usize = 12;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Row {
-    /// Your message; `queued` while it isn't in the transcript yet (waiting for the turn to end,
-    /// or, `sending`, still being typed into the session).
     User {
         text: String,
         images: usize,
@@ -25,13 +19,10 @@ pub enum Row {
         text: String,
     },
     Thinking {
-        /// "Thought for 4s", or "Thought briefly" under a second.
         title: String,
         text: String,
     },
-    /// A run of tool calls between two messages; `chat::steps` folds it to one chip.
     Tools(Vec<ToolRow>),
-    /// "Worked for 48s · Opus 5.5".
     TurnEnd {
         text: String,
     },
@@ -44,22 +35,18 @@ pub enum Row {
     },
 }
 
-/// A tool's output, cut to [`OUTPUT_LINES`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Output {
     pub text: String,
-    /// Lines left out.
     pub more: usize,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ToolRow {
-    /// The call's id: what a click expands (`ChatView::expanded`) and a second opinion's anchor.
     pub id: String,
     pub kind: ToolKind,
     pub icon: Icon,
     pub title: String,
-    /// The command, path, query or input.
     pub input: String,
     pub output: Option<Output>,
     pub diff: Vec<DiffLine>,
@@ -69,7 +56,6 @@ pub struct ToolRow {
     pub finished: bool,
 }
 
-/// The icon for a tool's kind.
 pub fn tool_icon(kind: ToolKind) -> Icon {
     match kind {
         ToolKind::Shell => Icon::Terminal,
@@ -86,7 +72,6 @@ pub fn tool_icon(kind: ToolKind) -> Icon {
     }
 }
 
-/// The kit icon for a notice's SF Symbol name (the Swift app's), by what the symbol means.
 pub fn notice_icon(symbol: &str) -> Icon {
     if symbol.contains("exclamation") || symbol.contains("stop") || symbol.contains("xmark") {
         Icon::Needs
@@ -97,12 +82,8 @@ pub fn notice_icon(symbol: &str) -> Icon {
     }
 }
 
-/// Tab stops in drawn text. GPUI shapes a raw tab as one odd glyph, so a Read's `   N<tab>` prefix
-/// and a Go file's indentation would not line up: the view models hand over spaces.
 const TAB_WIDTH: usize = 4;
 
-/// `text` with every tab replaced by the spaces up to the next stop of [`TAB_WIDTH`] columns, the
-/// column starting over on each line.
 pub fn expand_tabs(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut column = 0;
@@ -126,18 +107,12 @@ pub fn expand_tabs(text: &str) -> String {
     out
 }
 
-/// A line of a `cat -n` listing as its number and its code: spaces, digits, a tab, the code. The
-/// last line may be the number alone, its tab trimmed off with the rest of the output's end.
 fn numbered(line: &str) -> Option<(&str, &str)> {
     let (number, code) = line.split_once('\t').unwrap_or((line, ""));
     let number = number.trim_start_matches(' ');
     (!number.is_empty() && number.bytes().all(|b| b.is_ascii_digit())).then_some((number, code))
 }
 
-/// A Read's output as a gutter: every line is a number and code, as `cat -n` prints them, with at
-/// least one tab so plain numbers aren't taken for a listing. The numbers are right-aligned to the
-/// widest and two spaces come before the code, so the code lines up even though the engine
-/// trimmed the first line's leading spaces. `None` for any other output.
 fn listing(text: &str) -> Option<String> {
     let lines: Vec<(&str, &str)> = text.lines().map(numbered).collect::<Option<_>>()?;
     if !text.contains('\t') {
@@ -154,8 +129,6 @@ fn listing(text: &str) -> Option<String> {
     Some(drawn.join("\n"))
 }
 
-/// The first [`OUTPUT_LINES`] lines, and how many follow. A numbered listing gets a gutter, any
-/// other output its tabs as spaces.
 pub fn cut_output(text: &str) -> Output {
     let ended = text.trim_end_matches(['\n', '\r']);
     let expanded = listing(ended).unwrap_or_else(|| expand_tabs(ended));
@@ -204,7 +177,6 @@ fn tool_row(call: &ToolCall) -> ToolRow {
     }
 }
 
-/// One item as the row it draws as.
 pub fn row_of(item: &ChatItem) -> Row {
     match &item.kind {
         ItemKind::User { text, images } => Row::User {
@@ -239,7 +211,6 @@ pub fn row_of(item: &ChatItem) -> Row {
     }
 }
 
-/// Every item as a row, then the queued messages as your bubbles marked queued.
 pub fn rows(conversation: &Conversation) -> Vec<Row> {
     let mut out: Vec<Row> = conversation.items.iter().map(row_of).collect();
     out.extend(conversation.queued.iter().map(|text| Row::User {
@@ -251,7 +222,6 @@ pub fn rows(conversation: &Conversation) -> Vec<Row> {
     out
 }
 
-/// `rows`, then the messages sent from this Chat that the transcript doesn't hold yet.
 pub fn with_outgoing(mut rows: Vec<Row>, outgoing: &[String]) -> Vec<Row> {
     rows.extend(outgoing.iter().map(|text| Row::User {
         text: text.clone(),
@@ -421,8 +391,6 @@ mod tests {
         assert_eq!(cut_output("one\n\n").text, "one");
     }
 
-    /// What the engine hands over for a Read: Claude Code's `cat -n` lines (a number right-aligned
-    /// to six and a tab), trimmed as a whole, so the first line has lost its leading spaces.
     const READ_OUTPUT: &str = "1\timport Foundation\n     2\t\n     3\tenum SessionSearch {\n     4\t    static func rank() {\n    10\t}\n   123\t\tlet tabbed = 1";
 
     #[test]
@@ -434,9 +402,7 @@ mod tests {
         assert_eq!(lines[1], "  2");
         assert_eq!(lines[3], "  4      static func rank() {");
         assert_eq!(lines[4], " 10  }");
-        // A tab in the code counts from the code's own column.
         assert_eq!(lines[5], "123      let tabbed = 1");
-        // The code starts in the same column on every line, the trimmed first one included.
         let code_column = |line: &str, code: &str| line.find(code).unwrap();
         assert_eq!(
             code_column(lines[0], "import"),
@@ -447,16 +413,13 @@ mod tests {
 
     #[test]
     fn a_listing_whose_last_line_lost_its_tab_still_lines_up() {
-        // `trim` also ate the tab of a final empty line.
         let out = cut_output("1\tfn main() {\n     2\t}\n     3");
         assert_eq!(out.text, "1  fn main() {\n2  }\n3");
     }
 
     #[test]
     fn output_that_is_not_a_numbered_listing_only_loses_its_tabs() {
-        // Numbers alone are not a listing: there has to be a tab after one.
         assert_eq!(cut_output("1\n2\n10").text, "1\n2\n10");
-        // One line that isn't numbered makes the rest plain output too.
         assert_eq!(cut_output("1\ta\nplain\n2\tb").text, "1   a\nplain\n2   b");
         assert_eq!(cut_output("a\tb\nc").text, "a   b\nc");
     }
@@ -468,7 +431,6 @@ mod tests {
         assert_eq!(expand_tabs("abcd\te"), "abcd    e");
         assert_eq!(expand_tabs("\t"), "    ");
         assert_eq!(expand_tabs("no tabs"), "no tabs");
-        // The column starts over on every line, and wide characters count once.
         assert_eq!(expand_tabs("ab\tc\nd\te"), "ab  c\nd   e");
         assert_eq!(expand_tabs("é\tx"), "é   x");
     }
@@ -536,7 +498,6 @@ mod tests {
         assert_eq!(tool_icon(ToolKind::Ask), Icon::Question);
         assert_eq!(tool_icon(ToolKind::Read), Icon::File);
         assert_eq!(tool_icon(ToolKind::Web), Icon::Web);
-        // The Swift app's symbols: pencil, doc.badge.plus, sparkles, puzzlepiece.extension.
         assert_eq!(tool_icon(ToolKind::Write), Icon::Write);
         assert_eq!(tool_icon(ToolKind::Skill), Icon::Skill);
         assert_eq!(tool_icon(ToolKind::Other), Icon::Plugin);

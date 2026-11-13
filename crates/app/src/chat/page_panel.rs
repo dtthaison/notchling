@@ -1,21 +1,12 @@
-//! What a link clicked in a conversation opens, and the page panel's pure rules (the Swift
-//! `ChatModel.open` and `SidePanel`). An Artifact link (`claude.ai/artifact/<id>` or
-//! `claude.ai/code/artifact/<uuid>`) opens in the panel beside the chat: the saved local copy when
-//! the library has one, else the live claude.ai page. Any other link goes to the browser, as before.
-//! The GPUI panel (`view::page_panel`) and the web view (`pages::web`) only do what this decides.
-
 use std::path::PathBuf;
 
 use crate::pages::dates;
 use crate::search::wire::Page;
 
-/// The panel's width when it first opens, the least it can be, and the room it always leaves the
-/// conversation (the Swift `SidePanel`: 520, at least 320, the window less 380).
 pub const DEFAULT_WIDTH: f32 = 520.0;
 pub const MIN_WIDTH: f32 = 320.0;
 pub const LEAVES: f32 = 380.0;
 
-/// An Artifact link as it was clicked: its id, and whether it was the `code/artifact/<uuid>` form.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ArtifactLink {
     pub id: String,
@@ -23,28 +14,19 @@ pub struct ArtifactLink {
 }
 
 impl ArtifactLink {
-    /// The page on claude.ai, rebuilt from the id so nothing else the link held (a query, a
-    /// fragment, another host's spelling) is loaded.
     pub fn live_url(&self) -> String {
         let code = if self.code { "code/" } else { "" };
         format!("https://claude.ai/{code}artifact/{}", self.id)
     }
 }
 
-/// What a click opens.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Opens {
-    /// A saved page: its local copy in the panel.
     Saved(Box<Page>),
-    /// An Artifact the library doesn't have: the live page in the panel.
     Live(ArtifactLink),
-    /// A file on this Mac the panel shows (`chat::file_panel`): Markdown, text, code, a picture.
     File(PathBuf),
-    /// A folder on this Mac: Finder.
     Folder(PathBuf),
-    /// A file the panel can't show (a PDF, a video, a binary): its own app.
     System(PathBuf),
-    /// Anything else: the browser, as every link did before.
     Browser,
 }
 
@@ -52,9 +34,6 @@ fn is_id_char(c: char) -> bool {
     c.is_ascii_alphanumeric() || c == '-' || c == '_'
 }
 
-/// The Artifact a URL links to: `http(s)://claude.ai/artifact/<id>` or
-/// `http(s)://claude.ai/code/artifact/<id>` (also on `www.claude.ai`), the id running to the end or
-/// to a `/`, `?` or `#`. `None` for any other URL.
 pub fn artifact_link(url: &str) -> Option<ArtifactLink> {
     let url = url.trim();
     let lower = url.to_ascii_lowercase();
@@ -82,8 +61,6 @@ pub fn artifact_link(url: &str) -> Option<ArtifactLink> {
 
 const BASE58: &[u8] = b"123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 
-/// A short link id as the UUID it stands for: the 22-character id is the UUID in base58 (the Swift
-/// `OwnerPublish.uuid(fromShortID:)`). `None` when it isn't base58 or doesn't fit in 128 bits.
 pub fn uuid_from_short(id: &str) -> Option<String> {
     if id.is_empty() || id.len() > 22 {
         return None;
@@ -104,7 +81,6 @@ pub fn uuid_from_short(id: &str) -> Option<String> {
     ))
 }
 
-/// The id as a lowercase UUID: a UUID as it is, a short id decoded.
 fn as_uuid(id: &str) -> Option<String> {
     let is_uuid = id.len() == 36
         && id.char_indices().all(|(i, c)| match i {
@@ -118,8 +94,6 @@ fn as_uuid(id: &str) -> Option<String> {
     }
 }
 
-/// Whether two link ids name the same Artifact: the same text, or the same UUID once a short id is
-/// decoded (a page saved from one link form, clicked in the other).
 pub fn same_artifact(a: &str, b: &str) -> bool {
     if a.is_empty() || b.is_empty() {
         return false;
@@ -127,8 +101,6 @@ pub fn same_artifact(a: &str, b: &str) -> bool {
     a == b || as_uuid(a).is_some_and(|u| Some(u) == as_uuid(b))
 }
 
-/// What a click on `url` opens, given the library's pages. A saved page needs a local copy to
-/// show; when several match, the newest.
 pub fn decide(url: &str, pages: &[Page]) -> Opens {
     let Some(link) = artifact_link(url) else {
         return Opens::Browser;
@@ -143,7 +115,6 @@ pub fn decide(url: &str, pages: &[Page]) -> Opens {
     }
 }
 
-/// The line under the panel's title.
 pub fn subtitle(opens: &Opens) -> String {
     match opens {
         Opens::Saved(page) if page.updated_secs > 0.0 => {
@@ -155,16 +126,11 @@ pub fn subtitle(opens: &Opens) -> String {
     }
 }
 
-/// The hosts a live page may load, in any frame: claude.ai itself, the host its Artifacts render
-/// in, and the bot check claude.ai can put in front of a page. https only.
 fn live_host(host: &str) -> bool {
     let under = |domain: &str| host == domain || host.ends_with(&format!(".{domain}"));
     under("claude.ai") || under("claudeusercontent.com") || host == "challenges.cloudflare.com"
 }
 
-/// Whether a live page's navigation (the page or any frame in it) stays on claude.ai: an `about:`
-/// page (blank, a frame's own document), a `blob:` of an allowed page, or https to an allowed host
-/// with no user name in front of it. Everything else is refused.
 pub fn live_allows(url: &str) -> bool {
     let lower = url.trim().to_ascii_lowercase();
     if lower.starts_with("about:") {
@@ -185,32 +151,23 @@ pub fn live_allows(url: &str) -> bool {
     !host.is_empty() && live_host(host)
 }
 
-/// What is open over Chat, as far as the page panel cares. The web view is a native view above
-/// everything GPUI draws, so it hides while something GPUI draws would sit under it.
 #[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
 pub struct Covers {
-    /// A sheet, centred in the window.
     pub sheet: bool,
-    /// The phone popover, at the header's right end.
     pub phone: bool,
     pub inbox: bool,
-    /// The part names, drawn over every part.
     pub parts: bool,
 }
 
-/// Whether the page hides. Menus and pickers that open in the conversation column don't count:
-/// they sit beside the panel, so the page stays in view while one is up.
 pub fn page_covered(covers: Covers) -> bool {
     covers.sheet || covers.phone || covers.inbox || covers.parts
 }
 
-/// Whether a link a live page wanted to open in a new window may go to the browser: http or https.
 pub fn opens_in_browser(url: &str) -> bool {
     let lower = url.trim().to_ascii_lowercase();
     lower.starts_with("https://") || lower.starts_with("http://")
 }
 
-/// A rectangle in points.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Frame {
     pub x: f64,
@@ -219,10 +176,6 @@ pub struct Frame {
     pub height: f64,
 }
 
-/// The web view's frame in its parent view, from the panel's bounds in the window (GPUI's: points,
-/// from the top left). Each edge is put on a whole device pixel at `scale` (the window's backing
-/// scale), so the page doesn't blur or leave a hairline gap. AppKit's views count from the bottom
-/// left unless flipped, so for a parent `parent_height` tall that isn't, y is turned over.
 pub fn appkit_frame(bounds: Frame, parent_height: f64, flipped: bool, scale: f64) -> Frame {
     let scale = if scale > 0.0 { scale } else { 1.0 };
     let snap = |v: f64| (v * scale).round() / scale;
@@ -241,15 +194,11 @@ pub fn appkit_frame(bounds: Frame, parent_height: f64, flipped: bool, scale: f64
     }
 }
 
-/// The panel's width shown: what was asked for, at least [`MIN_WIDTH`], and never so wide that the
-/// conversation, in `available` points shared with it, gets less than [`LEAVES`].
 pub fn panel_width(wanted: f32, available: f32) -> f32 {
     let most = (available - LEAVES).max(MIN_WIDTH);
     wanted.clamp(MIN_WIDTH, most)
 }
 
-/// The width while its edge is dragged: the panel runs from the pointer to the right edge of the
-/// area it shares with the conversation.
 pub fn dragged_width(pointer_x: f32, area_left: f32, area_right: f32) -> f32 {
     panel_width(area_right - pointer_x, area_right - area_left)
 }
@@ -260,11 +209,7 @@ mod tests {
 
     #[test]
     fn only_what_is_drawn_over_the_panel_hides_its_page() {
-        // The + menu, the pickers and the account menu open in the conversation column, beside
-        // the panel: the page stays.
         assert!(!page_covered(Covers::default()));
-        // A sheet in the middle of the window, the phone popover at the top right and the part
-        // names over everything are drawn where the page is.
         for covers in [
             Covers {
                 sheet: true,
@@ -310,7 +255,6 @@ mod tests {
         .unwrap();
         assert_eq!(code.id, "95b3a80d-bd70-429a-b800-d1089310408a");
         assert!(code.code);
-        // Case in the scheme and host, www, a trailing slash or query, plain http.
         for url in [
             "HTTPS://Claude.AI/artifact/abc123/",
             "https://www.claude.ai/artifact/abc123?x=1",
@@ -323,7 +267,6 @@ mod tests {
                 "{url}"
             );
         }
-        // The rebuilt live URL keeps only the id and the form.
         assert_eq!(
             artifact_link("http://www.claude.ai/artifact/abc123?evil=1")
                 .unwrap()
@@ -372,7 +315,6 @@ mod tests {
             uuid_from_short("YcVfxkQb6JRzqk5kF2tNLv").as_deref(),
             Some("ffffffff-ffff-ffff-ffff-ffffffffffff")
         );
-        // Not base58 (0, O, I, l), too big, too long, empty.
         assert_eq!(uuid_from_short("0VBHDXYvY8f1b1AZG6PbAR"), None);
         assert_eq!(uuid_from_short("zzzzzzzzzzzzzzzzzzzzzz"), None);
         assert_eq!(uuid_from_short("KVBHDXYvY8f1b1AZG6PbARx"), None);
@@ -397,7 +339,6 @@ mod tests {
             page("KVBHDXYvY8f1b1AZG6PbAR", "/pages/b/index.html", 20.0),
             page("Hs8fJ2kLm3nP4qR5tU6vW7", "", 30.0),
         ];
-        // The newest copy of the page, by either link form.
         for url in [
             "https://claude.ai/artifact/KVBHDXYvY8f1b1AZG6PbAR",
             "https://claude.ai/code/artifact/95b3a80d-bd70-429a-b800-d1089310408a",
@@ -407,7 +348,6 @@ mod tests {
                 other => panic!("{url}: {other:?}"),
             }
         }
-        // Listed without a copy, or not listed: the live page.
         assert_eq!(
             decide("https://claude.ai/artifact/Hs8fJ2kLm3nP4qR5tU6vW7", &pages),
             Opens::Live(ArtifactLink {
@@ -419,7 +359,6 @@ mod tests {
             decide("https://claude.ai/artifact/Zx1cV2bN3mA4sD5fG6hJ7k", &[]),
             Opens::Live(_)
         ));
-        // Not an Artifact: the browser.
         assert_eq!(decide("https://example.com/x", &pages), Opens::Browser);
         assert_eq!(decide("https://claude.ai/new", &pages), Opens::Browser);
     }
@@ -488,7 +427,6 @@ mod tests {
             width: 520.0,
             height: 595.0,
         };
-        // An unflipped parent 700 tall: the panel's bottom edge is the parent's bottom.
         assert_eq!(
             appkit_frame(panel, 700.0, false, 2.0),
             Frame {
@@ -498,10 +436,7 @@ mod tests {
                 height: 595.0
             }
         );
-        // A flipped parent keeps GPUI's y.
         assert_eq!(appkit_frame(panel, 700.0, true, 2.0).y, 105.0);
-        // Half points stay on a Retina screen and round on a 1x one, edges first, so the width
-        // follows the edges rather than being rounded on its own.
         let odd = Frame {
             x: 10.25,
             y: 20.5,
@@ -526,7 +461,6 @@ mod tests {
                 height: 50.0
             }
         );
-        // No size, or a scale that isn't one, never makes a negative or a NaN frame.
         let none = Frame {
             x: 5.0,
             y: 5.0,
@@ -542,9 +476,7 @@ mod tests {
         assert_eq!(panel_width(DEFAULT_WIDTH, 1200.0), 520.0);
         assert_eq!(panel_width(1000.0, 1200.0), 820.0);
         assert_eq!(panel_width(100.0, 1200.0), MIN_WIDTH);
-        // A narrow window: the panel keeps its least width.
         assert_eq!(panel_width(520.0, 500.0), MIN_WIDTH);
-        // Dragging the edge: the panel runs from the pointer to the area's right edge.
         assert_eq!(dragged_width(600.0, 260.0, 1260.0), 620.0);
         assert_eq!(dragged_width(300.0, 260.0, 1260.0), 1000.0 - LEAVES);
         assert_eq!(dragged_width(1250.0, 260.0, 1260.0), MIN_WIDTH);

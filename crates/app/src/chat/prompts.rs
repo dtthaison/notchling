@@ -1,19 +1,3 @@
-//! The question or permission a Claude Code session waits on, as Chat shows it above the reply
-//! box (pure). The same sources as the notch (`NotchModel::card`), best first: a prompt the hook
-//! holds (the daemon's `prompts`, else the Swift hook's `requests/` files), then the question in
-//! the transcript's tail, then the summary in a background job's state ("answer: Which target?
-//! (A · B)"). A permission wins over a question, as in the notch.
-//!
-//! A permission read from the job's state summary ("approve Bash: ls -la") has no hook prompt to
-//! decide; its answer goes to the job's terminal instead ([`permission_request`]): the daemon reads
-//! the dialog off the screen and types the option's digit only when the dialog asks about the tool
-//! and command the card showed.
-//!
-//! A background job writes its question into the transcript only once it's answered, and the
-//! state's summary lacks later questions and breaks on brackets ("Side by side (Recommended)"). So
-//! while a job waits on an answer Chat asks the daemon to read the question off its screen
-//! (`session.question`, once per summary: [`screen_read_key`]), and that read wins over the summary.
-
 use std::collections::{HashMap, HashSet};
 
 use notchling_engine::sessions::{Agent, AgentGroup, AgentTarget};
@@ -25,7 +9,6 @@ use crate::chat::data::Tool;
 use crate::notch::model::question_from_needs;
 use crate::notch::requests::{HookRequest, RequestKind};
 
-/// What a session waits on.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Prompt {
     Question(PendingQuestion),
@@ -33,9 +16,6 @@ pub enum Prompt {
 }
 
 impl Prompt {
-    /// What an answer is recorded by (`NotchModel::answer_key`): the hook prompt's id, else the
-    /// question's tool use id. Taken when the answer is sent, since the prompt can change before
-    /// the reply comes back.
     pub fn key(&self) -> String {
         match self {
             Prompt::Question(q) => question_key(q),
@@ -43,7 +23,6 @@ impl Prompt {
         }
     }
 
-    /// The part's name, as `.part_at` and the ? button show it.
     pub fn part(&self) -> &'static str {
         match self {
             Prompt::Question(_) => "Question Card",
@@ -52,12 +31,8 @@ impl Prompt {
     }
 }
 
-/// The id prefix of a permission read from a job's state summary.
 pub const NEEDS_PREFIX: &str = "needs:";
 
-/// What a Permission card's button sends: a hook-held prompt is decided by its own id; one read
-/// from a job's state is answered in the job's terminal, by the row and with what the card showed,
-/// so the daemon types nothing into a dialog that asks about something else.
 pub fn permission_request(r: &HookRequest, decision: Decision) -> Request {
     if r.id.starts_with(NEEDS_PREFIX) {
         Request::permission_on_screen(&r.session_id, decision, &r.tool_name, &r.summary)
@@ -66,23 +41,14 @@ pub fn permission_request(r: &HookRequest, decision: Decision) -> Request {
     }
 }
 
-/// The tools whose terminal dialog has no "don't ask again": a file edit offers "Yes, allow all
-/// edits during this session" instead, which is no answer to "Always allow this" (a wider one), so
-/// the card doesn't offer that button for them.
 const NO_ALWAYS: [&str; 4] = ["Write", "Edit", "MultiEdit", "NotebookEdit"];
 
-/// A background job waiting on a permission has no prompt in the daemon, only a summary in its
-/// state: "approve Bash: ls -la". The tool and what it would run, as a card shows them. The tool
-/// is the first word, with or without the colon after it. Always allow is offered unless the
-/// tool's dialog has no such option ([`NO_ALWAYS`]); for any other the daemon still refuses it,
-/// with nothing typed, when the dialog has none.
 pub fn permission_from_needs(agent: &Agent) -> Option<HookRequest> {
     if agent.group != AgentGroup::NeedsInput || !matches!(agent.target, AgentTarget::Job(_)) {
         return None;
     }
     let needs = agent.detail.as_deref()?;
     let body = needs.strip_prefix("approve ")?.trim();
-    // A tool's name is one word: "Write /a/b.md" and "Write: /a/b.md" both name the tool Write.
     let end = body
         .find(|c: char| c.is_whitespace() || c == ':')
         .unwrap_or(body.len());
@@ -102,7 +68,6 @@ pub fn permission_from_needs(agent: &Agent) -> Option<HookRequest> {
     })
 }
 
-/// A question's answer key: its hook prompt's id, else its tool use id.
 pub fn question_key(q: &PendingQuestion) -> String {
     q.tool_use_id
         .strip_prefix("hook:")
@@ -110,30 +75,22 @@ pub fn question_key(q: &PendingQuestion) -> String {
         .to_owned()
 }
 
-/// The path a file preview asks about, and the one allowed just before it.
 pub const PREVIEW_PATH: &str =
     "/Users/me/work/notchling/.claude/projects/-Users-me-work-notchling/memory/glass-kit-feature-state.md";
 pub const PREVIEW_BEFORE: &str =
     "/Users/me/work/notchling/.claude/projects/-Users-me-work-notchling/memory/autopilot-needs-claude-on-path.md";
 
-/// What a render forces (`NOTCHLING_RENDER_PROMPT`), since no hook holds a prompt in a picture.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Preview {
     Question,
     Permission,
-    /// A Write of a file with a long path, read from a job's state like a real one.
     PermissionFile,
-    /// The same, its Allow on its way.
     PermissionSending,
-    /// The same, its last answer refused.
     PermissionFailed,
-    /// The same, right after the one before it was allowed.
     PermissionNext,
 }
 
 impl Preview {
-    /// `question`, `permission`, `permission-file`, `permission-sending`, `permission-failed` or
-    /// `permission-next`; anything else shows nothing.
     pub fn parse(value: &str) -> Option<Preview> {
         match value {
             "question" => Some(Preview::Question),
@@ -147,9 +104,6 @@ impl Preview {
     }
 }
 
-/// The oldest prompt a hook holds for `agent` (it has waited longest; the next shows once that
-/// one is answered). The daemon's list when it is followed, else the Swift hook's files. An
-/// Antigravity permission (`agy`) isn't Claude's and has its own card.
 fn held(
     agent: &Agent,
     prompts: Option<&[Value]>,
@@ -173,8 +127,6 @@ fn held(
     }
 }
 
-/// The prompt Chat shows for a row, or `None`. `answered` is what the windows already answered
-/// (`session_source::View::answered`).
 pub fn prompt_for(
     agent: &Agent,
     tool: Tool,
@@ -208,8 +160,6 @@ pub fn prompt_for(
         .map(|r| Prompt::Permission(Box::new(r)))
 }
 
-/// What a screen read of `agent`'s question is for: a background Claude job waiting on an answer,
-/// keyed by its row and state summary, so the screen is read once per question, not per draw.
 pub fn screen_read_key(agent: &Agent, tool: Tool) -> Option<String> {
     if tool != Tool::Claude
         || agent.command.is_some()
@@ -224,7 +174,6 @@ pub fn screen_read_key(agent: &Agent, tool: Tool) -> Option<String> {
         .then(|| format!("{}|{needs}", agent.id))
 }
 
-/// `session.question`'s reply as a question: `None` when no question showed.
 pub fn screen_question(reply: &Value) -> Option<PendingQuestion> {
     let items = crate::notch::requests::question_items(reply);
     let id = reply.get("id").and_then(Value::as_str)?;
@@ -234,7 +183,6 @@ pub fn screen_question(reply: &Value) -> Option<PendingQuestion> {
     })
 }
 
-/// The made-up prompt a render draws.
 pub fn preview_prompt(preview: Preview) -> Prompt {
     use notchling_engine::transcript::snapshot::QuestionItem;
     match preview {
@@ -291,16 +239,12 @@ pub fn preview_prompt(preview: Preview) -> Prompt {
     }
 }
 
-/// The marker of the daemon's dialog refusal (`engine::reply::exec::Failure::Dialog`).
 const DIALOG: &str = "The session is asking you something";
 
-/// Whether a failed send was refused because the session has a question or permission open.
 pub fn is_dialog(message: &str) -> bool {
     message.contains(DIALOG)
 }
 
-/// What the status line under the reply box says about a failed send. The daemon's dialog refusal
-/// points at the terminal; with a card showing above the box, the answer is there.
 pub fn error_text(message: &str, card_shown: bool) -> String {
     if card_shown && is_dialog(message) {
         message.replace("Answer it in the terminal", "Answer it above")
@@ -399,7 +343,6 @@ mod tests {
         let mut working = agent.clone();
         working.group = AgentGroup::Working;
         assert_eq!(screen_read_key(&working, Tool::Claude), None);
-        // The read wins over the summary, and keeps its brackets.
         let reply = json!({"id": "screen:job1:How?", "items": [{"header": "", "question": "How?",
             "options": ["Side by side (Recommended)", "Full"], "details": ["", ""], "multiSelect": false}]});
         let read = screen_question(&reply).expect("a question");
@@ -488,7 +431,6 @@ mod tests {
             r.can_always_allow,
             "the daemon refuses it if the dialog has none"
         );
-        // Answered in the job's terminal, by the row, with what the card showed.
         assert_eq!(
             permission_request(&r, Decision::Deny),
             Request::permission_on_screen("job1", Decision::Deny, "Bash", "ls -la && pwd")
@@ -498,12 +440,10 @@ mod tests {
             json!({"id": "job1", "decision": "allow",
                    "expect": {"tool": "Bash", "summary": "ls -la && pwd"}})
         );
-        // The card is hidden by its key once answered, and shows again for another request.
         let answered: HashSet<String> = [shown.key()].into();
         assert_eq!(pick(&agent, Some(&[]), None, &answered), None);
         let next = job("job1", "sess-1", Some("approve Bash: cargo test"));
         assert!(pick(&next, Some(&[]), None, &answered).is_some());
-        // A hook's prompt for the same session is the real one, decided by its own id.
         let held = vec![permission_prompt("p1", "sess-1", 1)];
         let Some(Prompt::Permission(hook)) = pick(&agent, Some(&held), None, &HashSet::new())
         else {
@@ -513,11 +453,9 @@ mod tests {
             permission_request(&hook, Decision::Always),
             Request::permission("p1", Decision::Always)
         );
-        // Not for a session that isn't waiting.
         let mut idle = agent.clone();
         idle.group = AgentGroup::Working;
         assert_eq!(pick(&idle, Some(&[]), None, &HashSet::new()), None);
-        // A tool with no summary still shows.
         let bare = job("job2", "s2", Some("approve Edit"));
         assert!(pick(&bare, Some(&[]), None, &HashSet::new()).is_some());
     }
@@ -531,7 +469,6 @@ mod tests {
         let transcript = q("toolu_1", "Q?");
         let answered: HashSet<String> = ["toolu_1".to_owned()].into();
         assert_eq!(pick(&agent, None, Some(&transcript), &answered), None);
-        // A hook question is hidden by the prompt's id, not the `hook:` name.
         let prompts = vec![question_prompt("q1", "sess-1")];
         let answered: HashSet<String> = ["q1".to_owned()].into();
         assert_eq!(pick(&agent, Some(&prompts), None, &answered), None);
@@ -568,7 +505,6 @@ mod tests {
             ),
             None
         );
-        // An Antigravity permission has its own card.
         let agy = json!({"id": "agy-perm:agy:s:1", "sessionId": "agy:s", "tool": "agy",
             "kind": "permission", "rpcId": "1", "options": [{"id": "a", "name": "Allow"}]});
         let row = job("agy:s", "s", None);

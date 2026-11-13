@@ -1,5 +1,3 @@
-//! Ports of `SessionSearchTests` and `PageLookupTests` from the Swift app, plus the Unicode rulings.
-
 use super::*;
 
 const NOW: f64 = 1_800_000_000.0;
@@ -19,8 +17,6 @@ fn msg(role: SessionRole, text: &str, cwd: Option<&str>) -> Option<TranscriptLin
         cwd: cwd.map(str::to_string),
     })
 }
-
-// MARK: Extraction (testClaudeUserAndAssistantText ... testCodexMessages)
 
 #[test]
 fn claude_user_and_assistant_text() {
@@ -89,7 +85,6 @@ fn claude_titles() {
         claude(r#"{"type":"ai-title","aiTitle":"Piaz Switch","sessionId":"s"}"#),
         Some(TranscriptLine::AiTitle("Piaz Switch".into()))
     );
-    // An empty title is no title.
     assert_eq!(claude(r#"{"type":"ai-title","aiTitle":""}"#), None);
 }
 
@@ -117,19 +112,15 @@ fn malformed_lines_are_skipped() {
         codex(r#"{"type":"response_item","payload":"message"}"#),
         None
     );
-    // The byte pre-filter is on compact JSON, like the Swift app's: spaced JSON is not indexed.
     assert_eq!(
         claude(r#"{"type": "user", "message": {"role": "user", "content": "hi"}}"#),
         None
     );
-    // A content array with a non-object part is not text.
     assert_eq!(
         claude(r#"{"type":"user","message":{"role":"user","content":["hi"]}}"#),
         None
     );
 }
-
-// MARK: Builder (testBuilderTitleAndCap)
 
 #[test]
 fn builder_title_and_cap() {
@@ -170,7 +161,6 @@ fn builder_title_and_cap() {
 fn builder_defaults_and_first_prompt() {
     let mut b = SessionTextBuilder::new();
     assert_eq!(b.title(), "Session");
-    // An assistant message first does not become the first prompt; the first cwd wins.
     b.add(TranscriptLine::Message {
         role: SessionRole::Assistant,
         text: "hi".into(),
@@ -189,7 +179,6 @@ fn builder_defaults_and_first_prompt() {
 #[test]
 fn builder_one_huge_message_keeps_its_tail() {
     let mut b = SessionTextBuilder::new();
-    // clean() caps a message at 6,000 characters, but the builder takes lines as given.
     let long = format!("{}END", "y".repeat(50_000));
     b.add(TranscriptLine::Message {
         role: SessionRole::User,
@@ -221,7 +210,6 @@ fn clean_trims_and_caps() {
         clean("[Request interrupted by user]", SessionRole::User),
         None
     );
-    // Only a user message is filtered on its first character.
     assert_eq!(
         clean("<b>bold</b>", SessionRole::Assistant).as_deref(),
         Some("<b>bold</b>")
@@ -241,8 +229,6 @@ fn codex_id_from_file_name() {
     );
     assert_eq!(codex_id("short.jsonl"), "short");
 }
-
-// MARK: Matching
 
 fn session(id: &str, title: &str, folder: &str, text: &str, age: f64) -> IndexedSession {
     session_tool(id, title, folder, text, age, SessionTool::Claude)
@@ -322,7 +308,6 @@ fn title_outranks_body_and_newer_breaks_ties() {
 
 #[test]
 fn equal_scores_fall_back_to_modified_then_input_order() {
-    // Older than the recency window: both score the same, so the newer wins, then input order.
     let a = s("a", "T", "match", 86400.0 * 40.0);
     let b = s("b", "T", "match", 86400.0 * 40.0);
     let c = s("c", "T", "match", 86400.0 * 39.0);
@@ -347,11 +332,9 @@ fn phrase_outranks_scattered_words() {
 
 #[test]
 fn score_values_are_pinned() {
-    // title (30) + all words in title (20) + body hits 3 + 1*2, no folder match, age 0 => +10.
     let x = session("a", "token", "/x", "token", 0.0);
     let hits = rank(&w(&["token"]), &[x], NOW, 30);
     assert_eq!(hits[0].score, 30.0 + 20.0 + 5.0 + 10.0);
-    // Body hits are counted up to five, non-overlapping.
     let y = session("b", "t", "/x", "aaaaaaaaaa", 86400.0 * 30.0);
     assert_eq!(rank(&w(&["aa"]), &[y], NOW, 30)[0].score, 3.0 + 5.0 * 2.0);
 }
@@ -374,8 +357,6 @@ fn latest_has_no_snippet() {
         1
     );
 }
-
-// MARK: Snippet
 
 #[test]
 fn snippet_around_match() {
@@ -429,7 +410,6 @@ fn snippet_prefers_the_phrase_and_is_none_without_a_text_match() {
 
 #[test]
 fn snippet_when_lowercasing_changes_the_length_shows_lowercased_text() {
-    // U+0130 lowercases to two scalars, so byte offsets no longer line up with the original.
     let x = s("a", "T", "İstanbul needle", 3600.0);
     assert_eq!(
         snippet(&x, &w(&["needle"]), 56).as_deref(),
@@ -443,8 +423,6 @@ fn collapse_whitespace() {
     assert_eq!(collapse(""), "");
     assert_eq!(collapse("a\u{a0}b"), "a b");
 }
-
-// MARK: Highlights, words, age
 
 #[test]
 fn highlights_mark_every_occurrence() {
@@ -464,20 +442,15 @@ fn highlights_are_byte_ranges_on_char_boundaries() {
 }
 
 #[test]
-// The list of one range is the answer being checked.
 #[allow(clippy::single_range_in_vec_init)]
 fn highlights_are_disjoint_when_words_overlap() {
-    // "b" sits inside "bridge", and "c" twice inside "cache": the ranges merge, so a drawing layer
-    // that assumes disjoint runs never sees one inside another.
     let text = "the bridge\u{2019}s state";
     let ranges = highlights(text, &w(&["bridge", "b"]));
     assert_eq!(ranges, [4..10]);
     let text = "cache\u{2014}stale";
     let ranges = highlights(text, &w(&["cache", "c"]));
     assert_eq!(ranges, [0..5]);
-    // Adjacent ranges join as well.
     assert_eq!(highlights("abc", &w(&["ab", "c"])), [0..3]);
-    // Disjoint ones stay apart, in order.
     assert_eq!(highlights("a b a", &w(&["a"])), [0..1, 4..5]);
 }
 
@@ -505,8 +478,6 @@ fn age() {
     assert_eq!(age_text(NOW + 100.0, NOW), "now");
 }
 
-// MARK: Tool keys and meta
-
 #[test]
 fn tool_keys_round_trip() {
     for tool in [
@@ -529,14 +500,11 @@ fn meta_json_uses_the_swift_cache_keys() {
     let back: Result<SessionMeta, _> = serde_json::from_value(json);
     assert_eq!(back.ok(), Some(m.clone()));
     assert_eq!(m.tool(), SessionTool::Codex);
-    // A cache written before `size` existed still loads; an unknown tool reads as Claude Code.
     let old = r#"{"key":"k","toolKey":"zzz","sessionID":"s","title":"t","folder":"f","path":"","modified":5.0}"#;
     let m: Option<SessionMeta> = serde_json::from_str(old).ok();
     assert_eq!(m.as_ref().map(|m| m.size), Some(0));
     assert_eq!(m.map(|m| m.tool()), Some(SessionTool::Claude));
 }
-
-// MARK: Unicode rulings (the Swift code uses lowercased() and byte search; no diacritic folding)
 
 #[test]
 fn ruling_case_folding_covers_vietnamese() {
@@ -552,7 +520,6 @@ fn ruling_case_folding_covers_vietnamese() {
 
 #[test]
 fn ruling_no_diacritic_folding() {
-    // `sua` does not find `sửa`, as in Swift (it never calls localizedStandardContains or folding).
     let x = s("a", "sửa lỗi", "đã sửa lỗi đăng nhập", 3600.0);
     assert!(rank(&words("sua loi"), std::slice::from_ref(&x), NOW, 30).is_empty());
     assert_eq!(rank(&words("sửa lỗi"), &[x], NOW, 30).len(), 1);
@@ -560,8 +527,6 @@ fn ruling_no_diacritic_folding() {
 
 #[test]
 fn ruling_no_normalization_between_nfc_and_nfd() {
-    // Swift matches the body bytewise, so a decomposed query misses a precomposed text. (Swift's
-    // title and folder match is canonical-equivalence aware through Foundation; the port is not.)
     let x = s("a", "t", "caf\u{e9}", 3600.0);
     assert!(rank(&words("cafe\u{301}"), std::slice::from_ref(&x), NOW, 30).is_empty());
     assert_eq!(rank(&words("caf\u{e9}"), &[x], NOW, 30).len(), 1);
@@ -569,7 +534,6 @@ fn ruling_no_normalization_between_nfc_and_nfd() {
 
 #[test]
 fn ruling_lowercasing_is_per_scalar_without_final_sigma() {
-    // Rust's str::to_lowercase maps a word-final Σ to ς; Swift's lowercased() always gives σ.
     assert_eq!(lowercase("ΟΔΟΣ"), "οδοσ");
     assert_eq!(lowercase("ĐÀ"), "đà");
 }
@@ -586,7 +550,6 @@ fn ruling_empty_words_are_ignored() {
 
 #[test]
 fn ruling_caps_count_scalars_not_grapheme_clusters() {
-    // 6,001 scalars of "e" + combining acute is 3,001 Swift Characters but is cut at 6,000 scalars.
     let text = "e\u{301}".repeat(3_001);
     assert_eq!(
         clean(&text, SessionRole::Assistant).map(|t| t.chars().count()),

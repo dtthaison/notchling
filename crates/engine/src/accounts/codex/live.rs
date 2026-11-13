@@ -1,7 +1,3 @@
-//! The live login: `<CODEX_HOME>/auth.json`, shared by the Codex CLI, its managed app server and
-//! the ChatGPT app. Written while holding Codex's own `auth.lock`, so a write can't land in the
-//! middle of Codex renewing the file.
-
 use crate::providers::AccountError;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -10,13 +6,8 @@ pub fn auth_path(home: &Path) -> PathBuf {
     home.join("auth.json")
 }
 
-/// How long a write waits for Codex to let go of `auth.lock`.
 pub const LOCK_WAIT: Duration = Duration::from_secs(10);
 
-/// Writes `auth.json` (0600, the same atomic rename the Swift app's `PrivateFile` makes; a link at
-/// `auth.json` is followed, so the user's dotfile setup keeps working) while holding an exclusive
-/// lock on `auth.lock`. The folder is made if it is missing. If the lock isn't free within `wait`
-/// nothing is written.
 pub fn write_live(home: &Path, login: &[u8], wait: Duration) -> Result<(), AccountError> {
     let failed = || AccountError::new("Couldn't write the Codex login.");
     std::fs::create_dir_all(home).map_err(|_| failed())?;
@@ -25,8 +16,6 @@ pub fn write_live(home: &Path, login: &[u8], wait: Duration) -> Result<(), Accou
     notchling_platform::files::write_private(&auth_path(home), login).map_err(|_| failed())
 }
 
-/// An exclusive `flock` on a file, released when dropped. On systems without `flock` it holds
-/// nothing and always succeeds.
 struct Lock {
     #[cfg(unix)]
     file: std::fs::File,
@@ -116,7 +105,6 @@ mod tests {
         let err = write_live(&home, b"new", Duration::from_millis(150)).unwrap_err();
         assert!(err.message().contains("using its login"));
         assert_eq!(std::fs::read(auth_path(&home)).unwrap(), b"old");
-        // Released a moment later: the write goes through.
         let release = std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(100));
             drop(held);

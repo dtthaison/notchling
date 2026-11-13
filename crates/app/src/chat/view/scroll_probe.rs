@@ -1,12 +1,3 @@
-//! The bench's trajectory recorder for the conversation's list: while it is on (`enable`, called
-//! by the bench's scroll modes, never by the app) every painted row notes where it is and a canvas
-//! after the list closes the frame, so `chat::scroll_trace` can say what each draw showed against
-//! what the wheel asked for. With it off the rows draw exactly as they do in the app: one
-//! `enabled()` check per row, no canvas.
-//!
-//! What it reads is what painted (the rows' bounds), never the list's own bookkeeping, which
-//! doesn't know where a row is while the list follows its end (`bounds_for_item` is `None` then).
-
 use std::cell::RefCell;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
@@ -20,43 +11,29 @@ static ENABLED: AtomicBool = AtomicBool::new(false);
 #[derive(Default)]
 struct Trace {
     started: Option<Instant>,
-    /// The window's frame counter now.
     window_frames: Option<fn() -> u64>,
-    /// How far the bench has scrolled so far.
     injected: f64,
-    /// Each wheel step: when (ms) and the running total after it.
     steps: Vec<(f64, f64)>,
-    /// The rows painted since the last frame closed.
     rows: Vec<(String, f32)>,
     frames: Vec<Frame>,
-    /// The viewport of the latest frame.
     viewport: f32,
-    /// Every window draw the frame driver timed.
     draws: Vec<Draw>,
-    /// Time spent building row elements in the draw going on.
     build: Duration,
-    /// When the draw going on began, and the thread's CPU time then.
     draw: Option<(Instant, f64)>,
-    /// The thread's CPU time when the conversation's prepaint ended in the draw going on.
     prepaint_cpu: Option<f64>,
-    /// The thread's CPU time when the last timed draw ended.
     last_end_cpu: f64,
-    /// The row and list-change counters at the last draw, for what each draw added.
     last_rows: u64,
     last_changes: u64,
 }
 
 thread_local! {
-    // Painting and the bench both run on the main thread.
     static TRACE: RefCell<Trace> = RefCell::new(Trace::default());
 }
 
-/// Whether the recorder is on.
 pub(in crate::chat) fn enabled() -> bool {
     ENABLED.load(Ordering::Relaxed)
 }
 
-/// Starts a recording: `window_frames` reads the window's frame counter.
 pub fn enable(window_frames: fn() -> u64) {
     TRACE.with(|t| {
         *t.borrow_mut() = Trace {
@@ -69,7 +46,6 @@ pub fn enable(window_frames: fn() -> u64) {
     ENABLED.store(true, Ordering::Relaxed);
 }
 
-/// The bench injected a wheel step of `dy` points (positive moves the content down).
 pub fn injected(dy: f32) {
     if !enabled() {
         return;
@@ -85,16 +61,13 @@ pub fn injected(dy: f32) {
     });
 }
 
-/// What a recording holds.
 pub struct Recording {
     pub frames: Vec<Frame>,
-    /// Each wheel step: when (ms) and the running total after it.
     pub steps: Vec<(f64, f64)>,
     pub viewport: f32,
     pub draws: Vec<Draw>,
 }
 
-/// Stops recording and hands over what was recorded.
 pub fn finish() -> Recording {
     ENABLED.store(false, Ordering::Relaxed);
     TRACE.with(|t| {
@@ -108,13 +81,10 @@ pub fn finish() -> Recording {
     })
 }
 
-/// A row's element took `took` to build (the list's `render_item`).
 pub(super) fn built(took: Duration) {
     TRACE.with(|t| t.borrow_mut().build += took);
 }
 
-/// The calling thread's CPU time so far, in milliseconds: what a draw cost the main thread itself,
-/// whatever else the Mac was running.
 fn thread_cpu_ms() -> f64 {
     #[repr(C)]
     struct Timespec {
@@ -124,7 +94,6 @@ fn thread_cpu_ms() -> f64 {
     extern "C" {
         fn clock_gettime(clock: u32, out: *mut Timespec) -> i32;
     }
-    // CLOCK_THREAD_CPUTIME_ID on macOS.
     const THREAD_CPUTIME: u32 = 16;
     let mut now = Timespec { sec: 0, nsec: 0 };
     if unsafe { clock_gettime(THREAD_CPUTIME, &mut now) } != 0 {
@@ -133,8 +102,6 @@ fn thread_cpu_ms() -> f64 {
     now.sec as f64 * 1000.0 + now.nsec as f64 / 1_000_000.0
 }
 
-/// A window draw begins (the root view's render, the first thing in it): the clock for the draw
-/// the conversation's frame canvas closes.
 pub fn draw_started() {
     if !enabled() {
         return;
@@ -147,7 +114,6 @@ pub fn draw_started() {
     });
 }
 
-/// A canvas filling its row that notes where the row painted (a row's key).
 pub(super) fn row_canvas(key: SharedString) -> impl IntoElement {
     canvas(
         |bounds, _, _| bounds,
@@ -165,12 +131,9 @@ pub(super) fn row_canvas(key: SharedString) -> impl IntoElement {
     .size_full()
 }
 
-/// A canvas filling the list's column, after the list: it closes the frame the rows noted.
-/// `counters` are the running counts of rows built and list changes (`pane`).
 pub(super) fn frame_canvas(state: ListState, counters: fn() -> (u64, u64)) -> impl IntoElement {
     canvas(
         |bounds, _, _| {
-            // The list before it has laid out its rows by now: what the draw cost so far.
             let cpu = thread_cpu_ms();
             TRACE.with(|t| t.borrow_mut().prepaint_cpu = Some(cpu));
             bounds
@@ -184,7 +147,6 @@ pub(super) fn frame_canvas(state: ListState, counters: fn() -> (u64, u64)) -> im
             TRACE.with(|t| {
                 let t = &mut *t.borrow_mut();
                 t.viewport = f32::from(bounds.size.height);
-                // The draw this frame closes: from the root's render to here.
                 if let (Some((began, began_cpu)), Some(origin)) = (t.draw.take(), t.started) {
                     t.draws.push(Draw {
                         at_ms: began.saturating_duration_since(origin).as_secs_f64() * 1000.0,

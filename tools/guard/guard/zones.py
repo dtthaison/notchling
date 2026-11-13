@@ -1,5 +1,3 @@
-"""The auto-merge zone: the named safe areas where an agent's change may merge on its own."""
-
 from __future__ import annotations
 
 import json
@@ -13,13 +11,10 @@ from guard.changes import Change
 
 
 def fold(text: str) -> str:
-    """What a case-insensitive, normalization-insensitive disk (macOS) sees: the same name."""
     return unicodedata.normalize("NFC", unicodedata.normalize("NFC", text).casefold())
 
 
 def glob_regex(glob: str) -> Pattern[str]:
-    """`**` crosses folders, `*` and `?` don't. `**/` also matches no folder at all, as in
-    .gitignore: `**/AGENTS.md` is the root file too, and `a/**/b` is `a/b` as well."""
     out, i = "", 0
     while i < len(glob):
         if glob.startswith("**/", i):
@@ -60,7 +55,6 @@ class Zones:
         return self._match(self.new_files_only, path)
 
     def casefolded(self) -> "Zones":
-        """The same zones read the way a case-insensitive disk reads them."""
         return Zones(tuple(fold(g) for g in self.auto), tuple(fold(g) for g in self.new_files_only))
 
 
@@ -70,8 +64,6 @@ def load(path: Path) -> Zones:
 
 
 def protected_paths(changes: List[Change], zones: Zones) -> List[str]:
-    """Every touched path outside the zone. A rename needs both ends inside; a new-files-only
-    path (tests, fixtures) is inside only when it's added."""
     out: List[str] = []
     for c in changes:
         ends = [c.path] + ([c.old_path] if c.old_path else [])
@@ -83,8 +75,6 @@ def protected_paths(changes: List[Change], zones: Zones) -> List[str]:
 
 
 def case_shadowed(changes: List[Change], zones: Zones) -> List[str]:
-    """Touched paths that look safe as spelled but land in a protected spot on a Mac, where
-    `docs/Decisions/x.md` is `docs/decisions/x.md`: protected once zones and paths are folded."""
     real = set(protected_paths(changes, zones))
     folded = []
     for c in changes:

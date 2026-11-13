@@ -1,9 +1,3 @@
-//! The Accounts window, pure (part U5, the Swift `AccountsWindow`): a tab per provider (Claude
-//! Code, Claude Desktop, Codex, Antigravity), each a list of the shared account row (avatar, email,
-//! subtitle, In Use or Switch, a ⋯ menu, and a content slot for limits or cost) over an add panel.
-//! Drawn from the store's [`Snapshot`] and the [`Switches`]; every control that needs the
-//! `accounts` switch carries the daemon's off message while it is off, and the lists still show.
-
 use crate::acting::Control;
 use crate::switches::{Switch, Switches};
 
@@ -13,16 +7,13 @@ use super::store::Snapshot;
 use super::wire::Provider;
 use notchling_engine::limits::report::UsageReport;
 
-/// The Claude Code tab's id; the others are the daemon's provider ids.
 pub const CLAUDE_CODE: &str = "claudeCode";
 pub const CLAUDE_DESKTOP: &str = "claudeDesktop";
 pub const CODEX: &str = "codex";
 pub const ANTIGRAVITY: &str = "antigravity";
 
-/// The tabs in the Swift window's order, each present when the daemon lists its provider.
 pub const TAB_ORDER: [&str; 4] = [CLAUDE_CODE, CLAUDE_DESKTOP, CODEX, ANTIGRAVITY];
 
-/// The window's top tabs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Tab {
     Accounts,
@@ -40,10 +31,8 @@ impl Tab {
     }
 }
 
-/// What the refresh button says on hover.
 pub const REFRESH_TIP: &str = "Refresh accounts, limits and cost";
 
-/// A provider tab.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProviderTab {
     pub id: String,
@@ -60,7 +49,6 @@ pub fn title_of(id: &str) -> &'static str {
     }
 }
 
-/// The provider tabs: Claude Code, then the daemon's providers in the fixed order.
 pub fn tabs(s: &Snapshot) -> Vec<ProviderTab> {
     TAB_ORDER
         .iter()
@@ -72,7 +60,6 @@ pub fn tabs(s: &Snapshot) -> Vec<ProviderTab> {
         .collect()
 }
 
-/// What a row's ⋯ menu item does.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RowAction {
     Remove,
@@ -82,56 +69,41 @@ pub enum RowAction {
 pub struct MenuItem {
     pub title: &'static str,
     pub action: RowAction,
-    /// Off with the `accounts` switch (or while busy), like Switch: the daemon would refuse it.
     pub control: Control,
 }
 
-/// The row's content slot.
 #[derive(Clone, Debug, PartialEq)]
 pub enum RowContent {
     None,
-    /// A line of text; `warning` draws it in the needs color.
-    Text {
-        text: String,
-        warning: bool,
-    },
+    Text { text: String, warning: bool },
     Limits(Vec<LimitGroup>),
 }
 
-/// The shared account row.
 #[derive(Clone, Debug, PartialEq)]
 pub struct AccountRow {
     pub id: String,
     pub provider: String,
     pub email: String,
-    /// The plan, with the lane for an account live in one.
     pub subtitle: String,
     pub in_use: bool,
-    /// The Switch button, when the row has one (never for the account in use).
     pub switch: Option<Control>,
     pub menu: Vec<MenuItem>,
     pub content: RowContent,
-    /// "Today $1.50 · 7 days $9.00 · 30 days $31.00", when the account has cost.
     pub cost: Option<String>,
 }
 
-/// One provider's page.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Page {
     pub provider: String,
     pub title: &'static str,
-    /// Shown instead of rows when there are none.
     pub empty: Option<&'static str>,
     pub rows: Vec<AccountRow>,
-    /// The account in use when it isn't a saved one.
     pub note: Option<String>,
     pub add: AddPanel,
-    /// Why nothing here can switch or add, while that's so.
     pub off: Option<&'static str>,
     pub error: Option<String>,
 }
 
-/// Disabled while `busy` too, with no reason to show (the click is on its way).
 fn gate(switches: &Switches, busy: bool) -> Control {
     let control = switches.control(Switch::Accounts);
     if busy && control.enabled {
@@ -144,7 +116,6 @@ fn gate(switches: &Switches, busy: bool) -> Control {
     }
 }
 
-/// The dollars line under a row, when its account has cost this month.
 fn cost_line(s: &Snapshot, account: &str) -> Option<String> {
     let summary = s.cost.as_ref()?.by_account.get(account)?;
     (summary.month > 0.0).then(|| {
@@ -177,8 +148,6 @@ fn claude_page(s: &Snapshot, switches: &Switches, busy: bool, now: f64, zone: Zo
                 }
                 subtitle.push_str(&format!("{lane} lane"));
             }
-            // Each account shows its own read (`limits.usage`); the account in use shows the
-            // watcher's windows instead when they were checked after that read.
             let report = s.claude_usage.reports.get(&a.id);
             let watched_is_newer = report.is_none_or(|r| checked.is_some_and(|at| at > r.fetched));
             let content = if a.needs_login {
@@ -248,7 +217,6 @@ fn claude_page(s: &Snapshot, switches: &Switches, busy: bool, now: f64, zone: Zo
     }
 }
 
-/// The subtitle a provider shows when the account has no plan.
 fn default_plan(provider: &str) -> &'static str {
     match provider {
         CODEX => "ChatGPT",
@@ -266,7 +234,6 @@ fn empty_text(provider: &str) -> &'static str {
     }
 }
 
-/// The limits read for the Claude Code account whose UUID is `uuid` (its id is `<uuid>:<org>`).
 fn desktop_limits<'a>(s: &'a Snapshot, uuid: &str) -> Option<&'a UsageReport> {
     s.claude
         .accounts
@@ -289,8 +256,6 @@ fn provider_page(
         .iter()
         .map(|a| {
             let in_use = p.active_id.as_deref() == Some(a.id.as_str());
-            // Claude Desktop signs in to the same accounts as Claude Code, so a Desktop row shows
-            // the limits read for the Claude Code account with its UUID (`<uuid>:<org>`).
             let report = reports.and_then(|r| r.get(&a.id)).or_else(|| {
                 (p.id == CLAUDE_DESKTOP)
                     .then(|| desktop_limits(s, &a.id))
@@ -359,7 +324,6 @@ fn provider_page(
     }
 }
 
-/// The page for `provider` (a tab id). An unknown or unlisted provider shows an empty page.
 pub fn page(
     provider: &str,
     s: &Snapshot,
@@ -386,7 +350,6 @@ pub fn page(
     }
 }
 
-/// The initial drawn in a row's avatar.
 pub fn initial(email: &str) -> String {
     email
         .chars()

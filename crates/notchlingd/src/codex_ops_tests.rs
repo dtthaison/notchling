@@ -1,6 +1,3 @@
-//! The Codex ops with a scripted tool and a fake launcher: nothing here runs `codex`, reads the
-//! real `~/.codex` or touches the real Notchling folder. Rollouts are written into a temp folder.
-
 use super::*;
 use crate::acting_ops_tests::{code, FakeRoom};
 use notchling_engine::control::{FakeLauncher, LaunchOutput};
@@ -35,7 +32,6 @@ fn setup(tag: &str, on: bool) -> Setup {
     for sub in ["home/work", "home/codex/sessions/2026/11/08", "data"] {
         std::fs::create_dir_all(dir.join(sub)).expect("dirs");
     }
-    // A rollout for SESSION that records the folder it ran in.
     let work = std::fs::canonicalize(dir.join("home/work")).expect("work");
     let rollout = format!(
         "{{\"timestamp\":\"2026-11-08T09:00:00.000Z\",\"type\":\"session_meta\",\"payload\":{{\"id\":\"{SESSION}\",\"cwd\":\"{}\"}}}}\n",
@@ -93,7 +89,6 @@ impl Setup {
             .into_owned()
     }
 
-    /// Waits until `n` events named `name` were published.
     fn wait_named(&self, name: &str, n: usize) -> Vec<Value> {
         let until = Instant::now() + Duration::from_secs(10);
         while Instant::now() < until {
@@ -503,7 +498,6 @@ fn over_a_fixture_root_a_codex_elsewhere_on_the_machine_is_not_run() {
         fixture,
     };
     let own = root.join(".local/bin/codex");
-    // The machine has /opt/homebrew/bin/codex (and the PATH names it): a real install, not the root's.
     let found = locate(
         &setup(true),
         "/opt/homebrew/bin",
@@ -512,7 +506,6 @@ fn over_a_fixture_root_a_codex_elsewhere_on_the_machine_is_not_run() {
     assert_eq!(found, None);
     let found = locate(&setup(true), "/usr/bin", only(own.clone()));
     assert_eq!(found.map(|(codex, _)| codex), Some(own));
-    // Over the real folders the usual places still count.
     let found = locate(
         &setup(false),
         "",
@@ -540,7 +533,6 @@ fn a_delete_that_fails_says_what_codex_said() {
         code(got),
         (ErrorCode::Failed, "codex delete exited with code 3.".into())
     );
-    // A session with no rollout isn't deleted at all.
     let before = s.launcher.calls().len();
     bad_request(s.call(ops::CODEX_DELETE, json!({"id": "codex:nosuch"})));
     assert_eq!(s.launcher.calls().len(), before);
@@ -575,7 +567,6 @@ fn the_daemon_routes_the_codex_ops_and_offers_the_tools_topic() {
     );
     for op in CODEX_OPS {
         assert_eq!(daemon.spec(op), Some(OpSpec::APP), "{op}");
-        // Reaches the Codex ops, which refuse while acting is off.
         assert_eq!(
             code(daemon.call(&app(), op, &json!({}))),
             (ErrorCode::Forbidden, ACTING_OFF.to_string())

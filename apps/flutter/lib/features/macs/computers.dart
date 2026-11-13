@@ -11,8 +11,6 @@ import '../sessions/sessions_notifier.dart';
 import 'macs_notifier.dart';
 import 'session_ref.dart';
 
-/// One paired computer's sessions, with bare ids. The computer in use shares [sessionsProvider], which Chat reads
-/// and the subscription sync keeps; any other one is subscribed to its session list only.
 final computerSessionsProvider = NotifierProvider.family<ComputerSessionsNotifier, SessionsState, String>(ComputerSessionsNotifier.new);
 
 class ComputerSessionsNotifier extends Notifier<SessionsState> {
@@ -38,12 +36,10 @@ class ComputerSessionsNotifier extends Notifier<SessionsState> {
     return const SessionsState();
   }
 
-  /// Remembered by the client and sent again after each reconnect.
   Future<void> _subscribe(BridgeClient client) async {
     try {
       await client.subscribe(const SubscriptionSpec(sessions: true));
-    } on BridgeException {
-      // The list is still loaded on connect; pushes resume with the next reconnect.
+    } on BridgeException catch (_) {
     }
   }
 
@@ -65,20 +61,16 @@ class ComputerSessionsNotifier extends Notifier<SessionsState> {
   }
 }
 
-/// A computer as the session list shows it: its heading, and its sessions with host-qualified ids.
 class ComputerSessions {
   const ComputerSessions({required this.computer, required this.scope, required this.status, required this.state});
   final MacProfile computer;
 
-  /// Its storage scope, for the archive (`MacsState.scopeOf`).
   final String scope;
   final ConnectionStatus status;
 
-  /// Session ids here are `<host>/<id>` ([SessionRef.qualified]).
   final SessionsState state;
 }
 
-/// Every paired computer, in pairing order, each with its own sessions.
 final Provider<List<ComputerSessions>> allComputersSessionsProvider = Provider<List<ComputerSessions>>((Ref ref) {
   final MacsState macs = ref.watch(macsProvider);
   return <ComputerSessions>[
@@ -92,8 +84,6 @@ final Provider<List<ComputerSessions>> allComputersSessionsProvider = Provider<L
   ];
 });
 
-/// Every computer's sessions as one list (qualified ids): ready once any computer answered, an error only when
-/// all of them failed.
 SessionsState mergeComputerSessions(List<ComputerSessions> computers) {
   final List<SessionsState> states = <SessionsState>[for (final ComputerSessions c in computers) c.state];
   final List<Session> sessions = <Session>[for (final SessionsState s in states) ...s.sessions];
@@ -110,15 +100,12 @@ SessionsState qualifySessions(SessionsState state, String host) => SessionsState
       sessions: <Session>[for (final Session s in state.sessions) withSessionId(s, SessionRef(host, s.id).qualified)],
     );
 
-/// The client an op on [sessionId] goes to: the picked session's own computer when this is the picked session,
-/// else the computer in use. Never another computer that happens to have a session with the same id.
 BridgeClient? clientForSession(Ref ref, String sessionId) {
   final SessionRef? picked = ref.read(selectedSessionProvider);
   if (picked != null && picked.id == sessionId && picked.host.isNotEmpty) return ref.read(computerClientProvider(picked.host));
   return ref.read(bridgeClientProvider);
 }
 
-/// The chat cache of the computer in use: its session ids carry that computer's storage scope.
 final Provider<ChatCache> scopedChatCacheProvider = Provider<ChatCache>((Ref ref) {
   final String? active = ref.watch(macsProvider.select((MacsState s) => s.active?.id));
   final String scope = active == null ? '' : ref.watch(macsProvider.select((MacsState s) => s.scopeOf(active)));

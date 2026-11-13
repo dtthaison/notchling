@@ -1,38 +1,21 @@
-//! Which tier a peer gets, from its executable path (decision 0007).
-//!
-//! The app tier needs an executable path in the allowlist: the installed app bundle's binary, or for
-//! dev a path in `NOTCHLING_APP_TIER_PATHS`, read once at daemon start and only by a daemon that
-//! runs from a cargo target folder (an installed one ignores it, and `ensure_daemon` never passes
-//! it on). Everything else, a copy of the app elsewhere included, is the agent tier.
-//!
-//! Both sides are compared canonical (symlinks resolved). The kernel already reports the file a
-//! process really runs (`proc_pidpath` on macOS, `/proc/<pid>/exe` on Linux), so a peer started
-//! through a symlink to the app is the app's own binary and counts as it. The allowlist is
-//! canonicalized once, at load: a symlink in it names the file it pointed at then, and retargeting
-//! the link later grants nothing. A path that doesn't exist at load is dropped.
-
 use crate::peer::PeerInfo;
 use crate::wire::Tier;
 use std::collections::BTreeSet;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
-/// The environment variable a dev daemon reads its extra app-tier paths from (OS path-list syntax).
 pub const APP_TIER_PATHS_ENV: &str = "NOTCHLING_APP_TIER_PATHS";
 
-/// The executables that get the app tier.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Allowlist {
     paths: BTreeSet<PathBuf>,
 }
 
 impl Allowlist {
-    /// Nobody gets the app tier.
     pub fn empty() -> Allowlist {
         Allowlist::default()
     }
 
-    /// The canonical form of each path that exists.
     pub fn new<I, P>(paths: I) -> Allowlist
     where
         I: IntoIterator<Item = P>,
@@ -45,9 +28,6 @@ impl Allowlist {
         Allowlist { paths }
     }
 
-    /// The daemon's list: the installed app's binaries, plus `NOTCHLING_APP_TIER_PATHS`'s (read
-    /// now) only when the daemon itself, `own_exe`, runs from a cargo target folder: a dev build.
-    /// An installed daemon ignores the variable, so whoever starts it can't name its own tier.
     pub fn for_daemon(
         installed: &[PathBuf],
         env_value: Option<&OsStr>,
@@ -61,7 +41,6 @@ impl Allowlist {
         Allowlist::new(all)
     }
 
-    /// The tier for a peer whose executable is `exe`; an unknown path is the agent tier.
     pub fn tier_of(&self, exe: Option<&Path>) -> Tier {
         let Some(exe) = exe else {
             return Tier::Agent;
@@ -72,9 +51,6 @@ impl Allowlist {
         }
     }
 
-    /// The tier for a connection whose peer was `at_accept` when it connected and `at_hello` when
-    /// it said hello: the app tier only when both are the same process still running the same
-    /// listed file (see the exec race in [`crate::peer`]).
     pub fn tier_for(&self, at_accept: &PeerInfo, at_hello: Option<&PeerInfo>) -> Tier {
         match at_hello {
             Some(now) if at_accept.same_process(now) => self.tier_of(now.exe.as_deref()),
@@ -87,8 +63,6 @@ impl Allowlist {
     }
 }
 
-/// Where the installed desktop app's binary sits, per OS. Only these and the dev variable count.
-/// `Notchling Next.app` is the Rust app installed beside the Swift one until the Swift app retires.
 pub fn installed_app_paths() -> Vec<PathBuf> {
     if cfg!(target_os = "macos") {
         [
@@ -139,7 +113,6 @@ mod tests {
         };
         let at_accept = peer(10, &app, 1);
         assert_eq!(list.tier_for(&at_accept, Some(&at_accept)), Tier::App);
-        // The hello came from another process (the fork), or the same pid after an exec.
         assert_eq!(
             list.tier_for(&at_accept, Some(&peer(11, &app, 1))),
             Tier::Agent
@@ -148,13 +121,11 @@ mod tests {
             list.tier_for(&at_accept, Some(&peer(10, &app, 2))),
             Tier::Agent
         );
-        // The process exec'd into the app after accept: the files differ.
         let other = exe(&dir, "other");
         assert_eq!(
             list.tier_for(&peer(10, &other, 1), Some(&peer(10, &app, 1))),
             Tier::Agent
         );
-        // No second read at all.
         assert_eq!(list.tier_for(&at_accept, None), Tier::Agent);
     }
 
@@ -185,9 +156,7 @@ mod tests {
         let app = exe(&dir, "app");
         let link = dir.path().join("link");
         symlink(&app, &link).unwrap();
-        // The peer path through a link resolves to the app.
         assert_eq!(Allowlist::new([&app]).tier_of(Some(&link)), Tier::App);
-        // A link in the list names its target at load.
         assert_eq!(Allowlist::new([&link]).tier_of(Some(&app)), Tier::App);
     }
 
@@ -256,10 +225,8 @@ mod tests {
             assert_eq!(list.tier_of(Some(&evil)), Tier::Agent, "{release:?}");
             assert_eq!(list.paths().count(), 0);
         }
-        // A daemon that can't name its own file is not a dev build either.
         let list = Allowlist::for_daemon(&[], Some(&joined), None);
         assert_eq!(list.tier_of(Some(&evil)), Tier::Agent);
-        // The installed app's own path is listed whatever the variable says.
         let app = exe(&dir, "app");
         let release = dir.path().join("usr/local/bin/notchling");
         let list = Allowlist::for_daemon(std::slice::from_ref(&app), Some(&joined), Some(&release));

@@ -1,27 +1,3 @@
-//! A page in a `wry` web view (part U4, macOS; the Phase 1 spike's S2, which showed wry builds into
-//! a plain `NSView` and doesn't fight GPUI's run loop), in one of two places: a window of its own
-//! ([`PageWindow`], a titled, closable, resizable `NSWindow` of ours whose content view the web view
-//! fills), or Chat's page panel ([`PanelWeb`], a child of the Chat window's content view laid over
-//! the panel GPUI draws, its frame set from the panel's bounds each frame). Both are built through
-//! the raw window handle, with no `tao`, from the same builder.
-//!
-//! A local copy is the copy and nothing else. It loads with `loadFileURL(_:allowingReadAccessTo:)`
-//! on its own folder, so what it can read is that folder and no more, and a link it holds to
-//! somewhere else is refused (`local::stays_local`): leaving for the browser means opening
-//! another app (a capability change, `CAP-PROCESS`, for the maintainer). A `target=_blank`
-//! window is denied.
-//!
-//! The panel can also show a live claude.ai page, for an Artifact the library has no copy of (the
-//! maintainer asked for it on 2026-11-10 and approved the network use with it). It keeps to
-//! claude.ai in every frame (`chat::page_panel::live_allows`), hands a link it wants to open in a
-//! new window to its owner for the browser, and keeps its sign-in in a website data store of its
-//! own that lasts between launches ([`LIVE_STORE`]; macOS 14 and later, the default store before).
-//!
-//! Dropping a [`PageWindow`] closes its window and stops its page. The person closing the window
-//! is told to the owner by a callback (`NSWindowWillCloseNotification`), so the page doesn't go
-//! on running, with no window, until the next page opens. Dropping a [`PanelWeb`] stops its page
-//! and takes it out of the Chat window.
-
 use std::cell::Cell;
 use std::ptr::NonNull;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -49,20 +25,14 @@ use super::local::{stays_local, PageSource};
 use super::set::counts_as_open;
 use crate::chat::page_panel::{appkit_frame, live_allows, opens_in_browser, Frame};
 
-/// The website data store a live claude.ai page keeps its sign-in in: the panel's own, kept between
-/// launches, apart from the store local copies load in. A fixed id names it.
 pub const LIVE_STORE: [u8; 16] = *b"notchling-claude";
 
-/// The window's size when it opens, and the least it can be.
 const SIZE: (f64, f64) = (960.0, 720.0);
 const MIN_SIZE: (f64, f64) = (480.0, 360.0);
-/// Each page window opens a step down and right of the one before.
 const STEP: f64 = 28.0;
 
-/// Numbers the page windows, so a close notice names the window it is about.
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 
-/// A page window's content view, as the raw handle wry builds into.
 struct ViewHandle(Retained<NSView>);
 
 impl HasWindowHandle for ViewHandle {
@@ -74,19 +44,14 @@ impl HasWindowHandle for ViewHandle {
     }
 }
 
-/// An open page window; dropping it closes the window and stops the page.
 pub struct PageWindow {
     window: Retained<NSWindow>,
     id: u64,
-    /// The close notice's registration; taken out in `drop` so our own close tells no one.
     closing: Option<Retained<ProtocolObject<dyn NSObjectProtocol>>>,
     view: WebView,
 }
 
 impl PageWindow {
-    /// Opens `source` in a new window titled `title`, the `nth` one down and right of the first.
-    /// `on_close` is called, later and on the main thread, with [`PageWindow::id`] when the person
-    /// closes the window (not when this value is dropped).
     pub fn open(
         title: &str,
         source: &PageSource,
@@ -123,7 +88,6 @@ impl PageWindow {
         let content = window
             .contentView()
             .ok_or("the page window has no content view")?;
-        // Weak: the web view outlives its drop (see `drop`), and must not keep the window with it.
         let titled = Weak::from_retained(&window);
         let view = local_builder(source)
             .with_document_title_changed_handler(move |t| {
@@ -156,12 +120,10 @@ impl PageWindow {
         })
     }
 
-    /// The number a close notice carries.
     pub fn id(&self) -> u64 {
         self.id
     }
 
-    /// Whether the person has not closed it: it is on screen or minimized to the Dock.
     pub fn is_open(&self) -> bool {
         counts_as_open(self.window.isVisible(), self.window.isMiniaturized())
     }
@@ -179,8 +141,6 @@ impl Drop for PageWindow {
     }
 }
 
-/// A local copy's web view, before it is built: it may go only where the copy is
-/// ([`stays_local`]), opens no window, and is given the copy's HTML when it has no file.
 fn local_builder<'a>(source: &PageSource) -> WebViewBuilder<'a> {
     let folder = match source {
         PageSource::File { folder, .. } => Some(folder.clone()),
@@ -195,7 +155,6 @@ fn local_builder<'a>(source: &PageSource) -> WebViewBuilder<'a> {
     }
 }
 
-/// Loads a copy given as a file, with read access to its folder only.
 fn load_local(view: &WebView, source: &PageSource) {
     if let PageSource::File { file, folder } = source {
         let url = NSURL::fileURLWithPath(&NSString::from_str(&file.to_string_lossy()));
@@ -213,8 +172,6 @@ fn load_local(view: &WebView, source: &PageSource) {
     }
 }
 
-/// wry keeps a dropped web view alive on purpose (releasing it crashes), so the page would run on,
-/// scripts and media included, with nowhere to show. Sends it to a blank page.
 fn retire(view: &WebView) {
     let web = view.webview();
     // SAFETY: plain WKWebView calls on the main thread, where web views are made and dropped.
@@ -224,36 +181,23 @@ fn retire(view: &WebView) {
     }
 }
 
-/// What Chat's page panel shows.
 pub enum PanelPage<'a> {
-    /// A saved page's local copy, under the same rules as a page window.
     Local(&'a PageSource),
-    /// The live page at this claude.ai URL.
     Live(&'a str),
 }
 
-/// What the panel's page tells its owner. Called on the main thread, possibly while the app is
-/// mid-update, so the owner acts a moment later rather than inside the call.
 pub struct PanelHooks {
-    /// The page's title changed.
     pub title: Box<dyn Fn(String)>,
-    /// A live page asked to open this http(s) link in a new window: it goes to the browser.
     pub leave: Box<dyn Fn(String)>,
 }
 
-/// A web view over Chat's page panel: a child of the Chat window's content view, above GPUI's own
-/// view, laid on the panel by [`PanelWeb::place`]. Hidden until first placed.
 pub struct PanelWeb {
     view: WebView,
-    /// GPUI's own view, which takes key events back when the person clicks outside the page.
     gpui: Weak<NSView>,
-    /// The frame last set and whether it showed, so a frame that changed nothing touches nothing.
     placed: Cell<Option<(Frame, bool)>>,
 }
 
 impl PanelWeb {
-    /// Makes the web view in `window` (the Chat window, through GPUI's raw handle: GPUI's own view,
-    /// whose superview is the content view) and starts loading `page`.
     pub fn open(
         window: &impl HasWindowHandle,
         page: PanelPage<'_>,
@@ -293,7 +237,6 @@ impl PanelWeb {
                     title(t);
                 }
             })
-            // Laid out and shown by `place`; it never takes the app's focus on its own.
             .with_bounds(Rect {
                 position: LogicalPosition::new(0.0, 0.0).into(),
                 size: LogicalSize::new(1.0, 1.0).into(),
@@ -312,8 +255,6 @@ impl PanelWeb {
         })
     }
 
-    /// Lays the web view over `bounds` (the panel's page area in the window, GPUI's points from
-    /// the top left) at the window's backing `scale`, shown or hidden.
     pub fn place(&self, bounds: Frame, visible: bool, scale: f64) {
         let web = self.view.webview();
         // SAFETY: AppKit view calls on the main thread, which is where GPUI paints.
@@ -338,9 +279,6 @@ impl PanelWeb {
         web.setHidden(!visible);
     }
 
-    /// Hands the keyboard back to GPUI's view. A click on the page makes the web view the window's
-    /// first responder, and a click on GPUI's view never takes it back by itself (the view doesn't
-    /// accept first responder on a click), so without this the reply box gets no keys.
     pub fn take_keys_back(&self) {
         let Some(gpui) = self.gpui.load() else {
             return;
@@ -359,12 +297,10 @@ impl PanelWeb {
         }
     }
 
-    /// Loads the page again.
     pub fn reload(&self) {
         let _ = self.view.reload();
     }
 
-    /// Hides it where it is (an overlay is up, or the panel wasn't drawn).
     pub fn hide(&self) {
         if let Some((frame, true)) = self.placed.get() {
             self.placed.set(Some((frame, false)));
@@ -376,7 +312,6 @@ impl PanelWeb {
 impl Drop for PanelWeb {
     fn drop(&mut self) {
         retire(&self.view);
-        // wry takes it out of the window as it drops; hidden first, nothing shows in between.
         self.view.webview().setHidden(true);
     }
 }

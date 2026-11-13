@@ -1,6 +1,3 @@
-//! The hook's ops called directly, with the fake room of [`crate::acting_ops_tests`]: who may ask,
-//! the held prompts, how they're answered and every way they pass.
-
 use crate::acting_ops_tests::{app, caller, code, sessions, setup, Setup, GONE, PROMPT};
 use notchling_local_api::{ops, Caller, ClientKind, ErrorCode};
 use serde_json::{json, Value};
@@ -48,7 +45,6 @@ fn only_the_hook_may_ask_and_it_passes_unless_someone_can_answer() {
     assert!(off.room.named("prompt.pending").is_empty());
 }
 
-/// Runs a hook request on its own thread and waits for its prompt to be pending.
 fn held(s: &Arc<Setup>, event: Value, wait_ms: u64) -> (std::thread::JoinHandle<Value>, String) {
     let ops = s.clone();
     let args = json!({"event": event, "pid": std::process::id(), "waitMs": wait_ms});
@@ -87,7 +83,6 @@ fn the_apps_permission_decision_reaches_the_hook() {
     let resolved = s.room.named("prompt.resolved");
     assert_eq!(resolved[0]["by"], "app");
     assert_eq!(resolved[0]["outcome"], "always");
-    // Once only.
     assert!(s
         .ops
         .call(
@@ -122,7 +117,6 @@ fn a_held_question_is_read_by_row_and_answered_by_prompt_id_only() {
         ErrorCode::BadRequest,
         "a question isn't allowed, it's answered"
     );
-    // A row id never reaches a held prompt: only its id does (no question given, nothing typed).
     assert_eq!(
         code(s.ops.call(
             &app(),
@@ -207,13 +201,11 @@ fn a_hook_claude_code_gave_up_on_is_let_go() {
 fn a_hook_is_its_process_never_its_word() {
     let s = setup(true, PROMPT, sessions());
     let ask = json!({"event": fixture("permission-request.json"), "pid": 4243, "waitMs": 50});
-    // No peer pid, or one no Claude Code session started (whatever `pid` says): refused.
     for pid in [None, Some(1), Some(31_337)] {
         let posing = Caller { pid, ..hook() };
         let (c, m) = code(s.ops.call(&posing, ops::HOOK_REQUEST, &ask));
         assert_eq!(c, ErrorCode::Forbidden, "{pid:?}: {m}");
     }
-    // The right process, but the event names a session its Claude Code isn't.
     let mut other = fixture("permission-request.json");
     other["session_id"] = json!("someone-else");
     let (c, _) = code(
@@ -222,7 +214,6 @@ fn a_hook_is_its_process_never_its_word() {
     );
     assert_eq!(c, ErrorCode::Forbidden);
     assert!(s.room.named("prompt.pending").is_empty());
-    // The real one is held under its own pid.
     let out = s.ops.call(&hook(), ops::HOOK_REQUEST, &ask).unwrap();
     assert_eq!(out["reason"], "timeout");
     let pending = s.room.named("prompt.pending");

@@ -1,7 +1,3 @@
-//! The Accounts window's header (Accounts | Token Cost, refresh, Done in a sheet) and its Token
-//! Cost tab over GPUI (macOS), with the small lookups the rows share and the Claude Code sign-in's
-//! poll.
-
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -22,9 +18,6 @@ use crate::mac::gate;
 use crate::sheets::view::Dismiss;
 
 impl AccountsView {
-    /// While a Claude Code sign-in waits, asks the daemon for its end every few seconds. Started
-    /// once the sign-in has begun, never twice (the store holds the claim); however it ends, a
-    /// sign-in left waiting is given up so the row doesn't hang.
     pub(super) fn poll_add(&self, cx: &mut Context<Self>) {
         if !self.store.claim_add_poll() {
             return;
@@ -106,7 +99,6 @@ impl AccountsView {
             .fill(Ink::Card, a)
             .border_b(px(1.0))
             .border_color(hsla(Ink::Hairline.color(a)))
-            // Balances Refresh and Done on the right, so the tabs stay centred.
             .child(div().flex_1())
             .child(segmented(
                 "accounts-tab",
@@ -150,7 +142,6 @@ impl AccountsView {
     }
 }
 
-/// A row's email and whether it is the account in use.
 pub(super) fn row_identity(s: &Snapshot, provider: &str, id: &str) -> (String, bool) {
     if provider == CLAUDE_CODE {
         let email = s
@@ -189,7 +180,6 @@ pub(super) fn sign_in_url(s: &Snapshot, provider: &str) -> Option<String> {
         .and_then(|p| p.sign_in_url.clone())
 }
 
-/// Every account id the stores know, with its email, for the cost filter's names.
 pub(super) fn email_index(s: &Snapshot) -> std::collections::HashMap<String, String> {
     let mut map = std::collections::HashMap::new();
     for a in &s.claude.accounts {

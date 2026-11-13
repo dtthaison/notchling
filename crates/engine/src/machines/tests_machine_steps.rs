@@ -1,6 +1,3 @@
-//! Steps 1-6 and 8 of the catalog (Swift `MachinesMachineStepsTests`): each probe's parse, and each
-//! Fix on a scripted runner. No ssh starts.
-
 use super::fakes::*;
 use super::registry::{DockerState, Machine, MachineOs};
 use super::runner::{CommandResult, ScriptedRunner};
@@ -76,8 +73,6 @@ pub(super) fn failing_runner(code: i32, out: &str, err: &str) -> Arc<ScriptedRun
     runner
 }
 
-// MARK: Reachable
-
 #[test]
 fn reachable_parses_os_arch_home_version_disk_and_docker() {
     let out = "os=Darwin\narch=arm64\nuid=501\nuser=sondoan\nhome=/Users/sondoan\nversion=26.1\ndisk_kb=125829120\ndocker=rootless\n";
@@ -112,7 +107,6 @@ fn reachable_parses_linux_and_keeps_what_other_steps_found() {
 
 #[test]
 fn reachable_keys_each_value_by_its_name_not_its_position() {
-    // a line missing and a banner in front: nothing shifts
     let out = "Welcome to the machine\nos=Linux\nhome=/home/agent\narch=aarch64\nversion=Debian 12\ndocker=stopped\n";
     let r = parse(StepId::REACHABLE, out, 0, &linux());
     assert_eq!(r.state, CheckState::Pass("Debian 12, aarch64".into()));
@@ -197,8 +191,6 @@ fn reachable_probe_is_read_only_and_prints_every_key() {
     assert!(how.contains("ACL"));
 }
 
-// MARK: Worker user
-
 #[test]
 fn worker_user_fails_for_root() {
     let root = check(StepId::WORKER_USER, "0\n");
@@ -214,7 +206,6 @@ fn worker_user_fails_for_root() {
     assert!(how_to(&step(StepId::WORKER_USER, &mac())).contains("agent"));
 }
 
-/// A Linux worker that can use sudo is a failure, by group or by `sudo -n -l`.
 #[test]
 fn worker_user_fails_on_linux_when_the_worker_can_use_sudo() {
     let linux = linux();
@@ -240,7 +231,6 @@ fn worker_user_fails_on_linux_when_the_worker_can_use_sudo() {
         &linux,
     );
     assert_eq!(clean.state, pass);
-    // a group that only contains the word is not the group
     let near = parse(
         StepId::WORKER_USER,
         "1001\nos=Linux\ngroups=agent sudoku administrators\nsudo_l=1\n",
@@ -248,7 +238,6 @@ fn worker_user_fails_on_linux_when_the_worker_can_use_sudo() {
         &linux,
     );
     assert_eq!(near.state, pass);
-    // no sudo answer at all (sudo missing) is not a sudoer
     let none = parse(
         StepId::WORKER_USER,
         "1001\nos=Linux\ngroups=agent\n",
@@ -258,7 +247,6 @@ fn worker_user_fails_on_linux_when_the_worker_can_use_sudo() {
     assert_eq!(none.state, pass);
 }
 
-/// On a Mac the user's own login account is in `admin` and is the admin; the sudo test is Linux's.
 #[test]
 fn worker_user_on_a_mac_may_be_in_the_admin_group() {
     let r = check(
@@ -281,8 +269,6 @@ fn worker_user_probe_asks_the_groups_and_sudo_on_linux_only() {
     assert!(how_to(&s).contains("sudo"));
 }
 
-/// `sudo -n -l` can write a line to the sudo auth log. The poller refreshes every 60 s, so the probe
-/// that holds it is in the slow set (on click and about every 10 minutes), never in the cheap batch.
 #[test]
 fn the_sudo_check_runs_only_in_the_slow_set_never_on_every_refresh() {
     use super::step::Cadence;
@@ -305,7 +291,6 @@ fn the_sudo_check_runs_only_in_the_slow_set_never_on_every_refresh() {
     assert_eq!(step(StepId::WORKER_USER, &linux()).cadence, Cadence::Slow);
 }
 
-/// Root's id wins over the sudo test.
 #[test]
 fn worker_user_root_still_fails_first() {
     let r = parse(
@@ -319,8 +304,6 @@ fn worker_user_root_still_fails_first() {
     };
     assert!(text.contains("root"), "{text}");
 }
-
-// MARK: Stays awake
 
 #[test]
 fn stays_awake_needs_sleep_disksleep_zero_and_autorestart_one() {
@@ -408,7 +391,6 @@ fn a_failed_fix_shows_the_last_stderr_line_not_stdout() {
 #[test]
 fn the_password_is_replaced_before_the_message_is_cut() {
     let password = format!("pw-{}", "k".repeat(40));
-    // the password would straddle character 200 of the line
     let line = format!("{} {password}", "a".repeat(180));
     let runner = failing_runner(1, "", &format!("{line}\n"));
     let ctx = Ctx::mac().runner(&runner);
@@ -437,8 +419,6 @@ fn a_failed_fix_message_never_holds_the_admin_password() {
     assert!(!outcome.ok);
     assert!(!outcome.message.contains("pw-1234"), "{}", outcome.message);
 }
-
-// MARK: FileVault
 
 #[test]
 fn file_vault_on_and_off() {

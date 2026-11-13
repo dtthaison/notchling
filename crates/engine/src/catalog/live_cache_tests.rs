@@ -28,7 +28,6 @@ fn the_cache_round_trips_and_is_private() {
     let (at, models) = cache.get(Tool::Antigravity).unwrap();
     assert_eq!((at, models), (2000.0, vec![model("gemini-x")]));
     assert_eq!(cache.get(Tool::Codex), None);
-    // A second put for one tool leaves the other's entry.
     cache.put(Tool::Claude, 3000.0, &[model("claude-c")]);
     assert_eq!(cache.get(Tool::Claude).unwrap().1, vec![model("claude-c")]);
     assert_eq!(cache.get(Tool::Antigravity).unwrap().0, 2000.0);
@@ -62,12 +61,10 @@ fn a_missing_or_broken_cache_reads_as_none() {
         let path = tmp.write(name, body);
         assert_eq!(LiveCache::new(path).get(Tool::Claude), None, "{name}");
     }
-    // A put over a broken file starts it again.
     let path = tmp.write("fix.json", "<html>");
     let cache = LiveCache::new(path);
     cache.put(Tool::Claude, 5.0, &[model("claude-a")]);
     assert_eq!(cache.get(Tool::Claude).unwrap().0, 5.0);
-    // A put into a folder that doesn't exist yet makes it.
     let deep = LiveCache::new(tmp.path("a/b/cache.json"));
     deep.put(Tool::Claude, 1.0, &[]);
     assert_eq!(deep.get(Tool::Claude), Some((1.0, vec![])));
@@ -79,7 +76,6 @@ fn refresh_is_due_after_a_day() {
     assert!(!refresh_due(Some(100.0), 100.0));
     assert!(!refresh_due(Some(100.0), 100.0 + 86_400.0));
     assert!(refresh_due(Some(100.0), 100.0 + 86_400.5));
-    // A clock that went backwards doesn't leave a list fresh forever.
     assert!(refresh_due(Some(100_000.0), 10.0));
 }
 
@@ -92,7 +88,6 @@ fn puts_from_two_threads_lose_nothing() {
         .map(|tool| {
             let path = path.clone();
             std::thread::spawn(move || {
-                // Each thread has its own cache over the one file, as the daemon's callers do.
                 let cache = LiveCache::new(path);
                 for i in 0..200 {
                     cache.put(tool, f64::from(i), &[model(&format!("{tool:?}-{i}"))]);

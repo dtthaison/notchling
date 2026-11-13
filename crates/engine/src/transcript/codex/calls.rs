@@ -1,10 +1,7 @@
-//! Codex tool calls as Chat steps: shell commands, patches, anything else by name.
-
 use crate::transcript::model::*;
 use crate::transcript::text::last_path_component;
 use serde_json::{Map, Value};
 
-/// A Codex tool call as a Chat step.
 pub fn call(id: &str, name: &str, raw: &str, action: Option<&Value>) -> ToolCall {
     let args: Option<Map<String, Value>> =
         serde_json::from_str::<Value>(raw)
@@ -32,7 +29,6 @@ pub fn call(id: &str, name: &str, raw: &str, action: Option<&Value>) -> ToolCall
                     .and_then(Value::as_array)
                     .and_then(|a| a.iter().map(Value::as_str).collect());
                 if let Some(parts) = parts {
-                    // ["bash", "-lc", "the command"]: the script is what matters.
                     command = Some(if parts.len() == 3 && parts[1] == "-lc" {
                         parts[2].to_string()
                     } else {
@@ -92,7 +88,6 @@ pub fn call(id: &str, name: &str, raw: &str, action: Option<&Value>) -> ToolCall
     }
 }
 
-/// The files an `apply_patch` touches (`*** Update File: path`, Add, Delete).
 pub fn patch_files(patch: &str) -> Vec<String> {
     patch
         .split(['\n', '\r'])
@@ -144,7 +139,6 @@ pub fn diff(patch: &str) -> Vec<DiffLine> {
         .collect()
 }
 
-/// A tool output as text. Exec output can be JSON `{"output": "...", "metadata": {...}}`.
 pub fn output_text(value: &Value) -> String {
     match value {
         Value::String(s) => {
@@ -170,7 +164,6 @@ pub fn output_text(value: &Value) -> String {
     }
 }
 
-/// The exit code a shell output reports ("Process exited with code 1", "exit code: 2"), if any.
 pub fn exit_code(output: &str) -> Option<u64> {
     for (i, _) in output.char_indices() {
         let rest = &output[i..];

@@ -1,9 +1,3 @@
-//! The `notchling-machines` binary: its command line end to end, and `--render` of every machines
-//! view over the checked-in fixture. The renders need a window server, so they are ignored by
-//! default: `cargo test -p notchling-app --test render_machines -- --ignored` on a Mac with a
-//! display. Nothing here names the real home: a render reads `fixtures/machines`, and the
-//! command line tests never open the window.
-
 use std::process::Command;
 
 fn machines() -> Command {
@@ -34,7 +28,6 @@ fn version_help_and_a_bad_argument() {
     assert_eq!(out.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&out.stderr).contains("unknown argument"));
 
-    // a render never takes the live switches
     let out = machines()
         .args(["--render", "machines", "--out", "/tmp/x.png", "--live"])
         .output()

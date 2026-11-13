@@ -1,6 +1,3 @@
-"""Version rules: the next tag from tags and fragments, and the version written into a built bundle.
-Temp dirs and temp bundles only; the real tags and Info.plist are never read."""
-
 from __future__ import annotations
 
 import io
@@ -44,7 +41,6 @@ class Env(unittest.TestCase):
                        capture_output=True)
 
     def tag_repo(self, tags, released):
-        """The tags as real git tags on a commit that holds only the `released` fragments (by index)."""
         if not (self.root / ".git").exists():
             self.git("init", "-q", "-b", "main")
         self.git("rm", "-r", "-q", "--cached", "--ignore-unmatch", "--", "changes")
@@ -55,7 +51,6 @@ class Env(unittest.TestCase):
             self.git("tag", "-f", t)
 
     def next(self, channel, tags, *extra, fragments=(), released=()):
-        """`released`: indexes of `fragments` that were already in the last Stable tag's tree."""
         for i, kind in enumerate(fragments):
             (self.changes / f"f{i}.md").write_text(frag(kind))
         tags_file = self.root / "tags.txt"
@@ -103,10 +98,8 @@ class NextBetaTests(Env):
         self.assertEqual(self.next("beta", ["v1.4.0", "v1.4.1-beta.7"])[1], "v1.4.1-beta.8")
 
     def test_betas_of_another_target_do_not_count(self):
-        # A feature landed after the patch betas: a new minor line starts at beta.1.
         tags = ["v1.4.0", "v1.4.1-beta.1", "v1.4.1-beta.2"]
         self.assertEqual(self.next("beta", tags, fragments=["feature"])[1], "v1.5.0-beta.1")
-        # and it carries on from its own betas.
         tags += ["v1.5.0-beta.1"]
         self.assertEqual(self.next("beta", tags, fragments=["feature"])[1], "v1.5.0-beta.2")
 
@@ -132,7 +125,6 @@ class NextBetaTests(Env):
         code, out, err = self.next("beta", [])
         self.assertEqual((code, out), (1, ""))
         self.assertIn("Info.plist", err)
-        # but a stable tag makes the plist irrelevant
         self.assertEqual(self.next("beta", ["v1.0.0"])[0], 0)
 
     def test_missing_plist_fails_when_needed(self):
@@ -170,14 +162,12 @@ class BreakingTests(Env):
                          "v1.5.0-beta.1")
 
     def test_refused_on_further_betas_until_the_major_line_has_one(self):
-        # A breaking change must not ride a patch Beta in without the maintainer.
         code, _, err = self.next("beta", ["v1.4.0", "v1.4.1-beta.1"], "--from-tag", "v1.4.1-beta.1",
                                  fragments=["breaking"])
         self.assertEqual(code, 1)
         self.assertIn("--allow-breaking", err)
 
     def test_betas_on_the_major_line_need_no_flag(self):
-        # The flag only starts the new major line; once a Beta of it exists the line just goes on.
         tags = ["v1.4.0", "v2.0.0-beta.1"]
         self.assertEqual(self.next("beta", tags, fragments=["breaking", "fix"])[1:], ("v2.0.0-beta.2", ""))
         tags += ["v2.0.0-beta.2"]
@@ -192,7 +182,6 @@ class BreakingTests(Env):
         self.assertIn("--allow-breaking", err)
 
     def test_the_major_line_is_counted_from_the_last_stable(self):
-        # v2.0.0 is out, so v2.0.0-beta.1 is old news and v3 is the next major line.
         tags = ["v2.0.0-beta.1", "v2.0.0"]
         code, out, err = self.next("beta", tags, fragments=["breaking"])
         self.assertEqual((code, out), (1, ""))
@@ -200,7 +189,6 @@ class BreakingTests(Env):
         self.assertEqual(self.next("beta", tags, "--allow-breaking", fragments=["breaking"])[1], "v3.0.0-beta.1")
 
     def test_breaking_already_in_the_last_stable_does_not_count_again(self):
-        # The fold PR has not merged yet, so the fragment is still in changes/.
         code, out, err = self.next("beta", ["v2.0.0"], fragments=["breaking"], released=[0])
         self.assertEqual((code, out, err), (0, "v2.0.1-beta.1", ""))
 
@@ -260,7 +248,6 @@ class StableTests(Env):
         self.assertEqual(self.next("stable", ["v1.4.0"], "--from-tag", "v1.4.1-beta.1")[0], 1)
 
     def test_never_refuses_because_of_fragment_kinds(self):
-        # Clicking Promote is the maintainer's approval; the Beta already shipped what the fragments say.
         tags = ["v1.4.0", "v1.4.1-beta.1"]
         self.assertEqual(self.next("stable", tags, "--from-tag", "v1.4.1-beta.1", fragments=["breaking"]),
                          (0, "v1.4.1", ""))
@@ -280,10 +267,8 @@ class StableTests(Env):
 
 
 class NewFragmentsTests(Env):
-    """Only fragments that were not in the last Stable tag's tree say what the next Beta is."""
 
     def test_released_feature_fragment_does_not_bump_the_minor_again(self):
-        # v1.4.0 shipped with the fragment; the fold PR has not merged, so it is still in changes/.
         code, out, err = self.next("beta", ["v1.4.0"], fragments=["feature"], released=[0])
         self.assertEqual((code, out, err), (0, "v1.4.1-beta.1", ""))
 
@@ -299,19 +284,16 @@ class NewFragmentsTests(Env):
         self.assertEqual(self.next("beta", ["v1.4.0"], fragments=["feature", "fix"])[1], "v1.5.0-beta.1")
 
     def test_without_any_stable_tag_every_fragment_counts_and_git_is_not_asked(self):
-        # The folder is not a git repo here: there is no Stable tag to list.
         self.assertEqual(self.next("beta", [], fragments=["feature"])[1:], ("v1.3.0-beta.1", ""))
         code, out, err = self.next("beta", [], fragments=["breaking"])
         self.assertEqual((code, out), (1, ""))
         self.assertIn("--allow-breaking", err)
 
     def test_the_last_stable_not_the_newest_tag_is_the_reference(self):
-        # A Beta tag after the Stable carries newer fragments; they still count against the Stable.
         tags = ["v1.4.0", "v1.5.0-beta.1"]
         self.assertEqual(self.next("beta", tags, fragments=["feature"])[1], "v1.5.0-beta.2")
 
     def test_a_tag_the_repo_cannot_list_fails_instead_of_counting_everything(self):
-        # Counting every fragment would invent a breaking change or a minor bump.
         with tempfile.TemporaryDirectory() as d:
             env = dict(os.environ, GIT_CONFIG_GLOBAL="/dev/null", GIT_CONFIG_SYSTEM="/dev/null")
             subprocess.run(["git", "init", "-q", "-b", "main", d], env=env, check=True, capture_output=True)
@@ -334,17 +316,14 @@ class NewFragmentsTests(Env):
 
 
 class FloorTests(Env):
-    """A Beta's build number is above every Beta above the last Stable, whatever the fragments say."""
 
     def above(self, tags, new):
-        """Build numbers of the Betas newer than the last Stable must all sit below `new`."""
         parsed = [v for v in map(version.parse_tag, tags) if v]
         last = max(v for v in parsed if v[3] is None)
         for b in (v for v in parsed if v[3] is not None and v[:3] > last[:3]):
             self.assertGreater(version.build_number(version.parse_tag(new)), version.build_number(b), (new, b))
 
     def test_promoting_an_older_beta_while_a_newer_line_exists(self):
-        # v1.2.1 goes Stable while v1.3.0-beta.1 is out: the fragments now say v1.2.2, the floor says v1.3.0.
         tags = ["v1.2.0", "v1.2.1-beta.1", "v1.3.0-beta.1", "v1.2.1"]
         for fragments in ((), ("fix",), ("internal",)):
             with self.subTest(fragments):
@@ -379,7 +358,6 @@ class FloorTests(Env):
         self.assertEqual(self.next("beta", tags)[1], "v1.4.1-beta.1")
 
     def test_without_a_stable_tag_the_plist_version_is_the_floor_base(self):
-        # plist says 1.2.0: v1.2.1-beta.1 and v1.3.0-beta.1 are above it.
         self.assertEqual(self.next("beta", ["v1.2.1-beta.1", "v1.3.0-beta.1"])[1], "v1.3.0-beta.2")
         self.assertEqual(self.next("beta", ["v1.1.0-beta.3"])[1], "v1.2.1-beta.1")
 
@@ -435,8 +413,6 @@ class GitTagsTests(unittest.TestCase):
 
 
     def test_fragments_in_the_last_stable_tags_tree_do_not_count_again(self):
-        # No --tags-file and no --changes-dir: tags, the tree at the Stable tag and the folder all come from
-        # the repo, the way the Beta workflow runs it.
         with tempfile.TemporaryDirectory() as d:
             env = dict(os.environ, GIT_CONFIG_GLOBAL="/dev/null", GIT_CONFIG_SYSTEM="/dev/null")
             git = ["git", "-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false"]
@@ -452,7 +428,7 @@ class GitTagsTests(unittest.TestCase):
             put("old.md", "feature")
             g("add", "-A")
             g("commit", "-q", "-m", "shipped")
-            g("tag", "-a", "-m", "stable", "v1.4.0")  # an annotated tag, as a release makes
+            g("tag", "-a", "-m", "stable", "v1.4.0")
             put("fix.md", "fix")
             g("add", "-A")
             g("commit", "-q", "-m", "after")
@@ -489,7 +465,6 @@ class BuildNumberTests(unittest.TestCase):
                     version.build_number(v)
 
     def test_above_the_legacy_counter(self):
-        # The legacy release.sh counter is a small integer (3 today); Sparkle needs the new one above it.
         self.assertGreater(version.build_number((1, 2, 0, None)), 3)
 
 
@@ -569,7 +544,7 @@ class PlistTests(unittest.TestCase):
         code, _, err = run_cli(["plist", str(self.app.parent / "Nope.app"), "v1.4.1"])
         self.assertEqual(code, 1)
         self.assertTrue(err)
-        code, _, _ = run_cli(["plist", str(self.app), "v1.4.1"])  # Contents/Info.plist not written yet
+        code, _, _ = run_cli(["plist", str(self.app), "v1.4.1"])
         self.assertEqual(code, 1)
 
     def test_garbage_plist(self):
@@ -577,7 +552,6 @@ class PlistTests(unittest.TestCase):
         self.assertEqual(run_cli(["plist", str(self.app), "v1.4.1"])[0], 1)
 
     def test_does_not_touch_the_source_plist_path_given_as_a_non_bundle(self):
-        # A path without Contents/Info.plist (e.g. the source Info.plist's directory) is refused.
         src = Path(self._tmp.name) / "src"
         src.mkdir()
         (src / "Info.plist").write_bytes(plistlib.dumps(self.original))

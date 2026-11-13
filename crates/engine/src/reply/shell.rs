@@ -1,15 +1,7 @@
-//! `ShellCommand.normalize`: a reply starting with `!` runs as a shell command in the session.
-//! Commands are often copied from Claude's answer in a terminal, which wraps long lines and indents
-//! each continuation by two spaces; pasted as they are, the shell runs the pieces as separate,
-//! broken commands. This puts such a command back together before it is sent.
-
-/// Sending trims leading spaces, so "  !ls" runs too.
 pub fn is_command(text: &str) -> bool {
     text.trim_start().starts_with('!')
 }
 
-/// The command as it should run, still starting with `!`. Text that isn't a command comes back as
-/// it is. Running it twice changes nothing.
 pub fn normalize(text: &str) -> String {
     if !is_command(text) {
         return text.to_string();
@@ -20,7 +12,6 @@ pub fn normalize(text: &str) -> String {
         .split('\n')
         .filter(|l| !trim_spaces(l).starts_with("```"))
         .collect();
-    // A heredoc's lines are data: indentation there is content, not a terminal's wrapping.
     let join_wrapped = !body.contains("<<");
 
     let mut result = String::new();
@@ -33,12 +24,12 @@ pub fn normalize(text: &str) -> String {
         if join_wrapped && continues && !result.ends_with('\\') {
             let rest = raw.trim_start();
             if result.ends_with(char::is_whitespace) {
-                result.push_str(rest); // wrapped at a space, which stayed on the line
+                result.push_str(rest);
             } else if ends_with_separator(&result) {
-                result.push(' '); // a script's indented body: keep the words apart
+                result.push(' ');
                 result.push_str(rest);
             } else {
-                result.push_str(rest); // wrapped in the middle of a word or path
+                result.push_str(rest);
             }
         } else {
             result.push('\n');
@@ -52,12 +43,10 @@ pub fn normalize(text: &str) -> String {
     format!("!{}", tidy.join("\n").trim())
 }
 
-/// `CharacterSet.whitespaces`: spaces and tabs, not newlines.
 fn trim_spaces(line: &str) -> &str {
     line.trim_matches(|c: char| c.is_whitespace() && c != '\n' && c != '\r')
 }
 
-/// Typography that macOS or a web page puts in place of what the shell needs.
 fn plain_characters(s: &str) -> String {
     let mut out = s.to_string();
     for (from, to) in [
@@ -78,7 +67,6 @@ fn plain_characters(s: &str) -> String {
     out
 }
 
-/// A pasted shell prompt ("$ git status", "% ls") isn't part of the command.
 fn without_prompt(line: &str) -> &str {
     ["$ ", "% "]
         .iter()
@@ -86,8 +74,6 @@ fn without_prompt(line: &str) -> &str {
         .unwrap_or(line)
 }
 
-/// Ends with a keyword or operator after which an indented line is the script's next part, not the
-/// rest of a wrapped word.
 fn ends_with_separator(text: &str) -> bool {
     text.split_whitespace()
         .last()
@@ -98,7 +84,6 @@ fn ends_with_separator(text: &str) -> bool {
 mod tests {
     use super::*;
 
-    // ShellCommandNormalizeTests, case for case.
     fn n(s: &str) -> String {
         normalize(s)
     }

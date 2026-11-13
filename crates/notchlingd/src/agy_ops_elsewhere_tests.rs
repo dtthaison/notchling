@@ -1,6 +1,3 @@
-//! A session another `agy` holds (a delegation): the daemon starts none of its own, reads the log,
-//! refuses to send, and lets go once the other one does.
-
 use super::*;
 use notchling_engine::tools::agy::elsewhere::{Holder, DELEGATION_NOTE};
 use std::sync::atomic::AtomicBool;
@@ -10,7 +7,6 @@ const DELEGATION: Holder = Holder {
     delegation: true,
 };
 
-/// The rig with the recorded session held by a delegation until `held` turns false, and a log.
 fn held_rig() -> (Rig, Arc<AtomicBool>, PathBuf) {
     let rig = rig(true);
     let held = Arc::new(AtomicBool::new(true));

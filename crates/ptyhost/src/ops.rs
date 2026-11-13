@@ -1,7 +1,3 @@
-//! The requests a client may make (`HostConnection.perform` in Swift): `hello`, `status`, `list`,
-//! `spawn` (kind `claude` or `command`), `resume`, `resize`, `attach`, `detach`, `terminate` (with
-//! `confirm: true`), `settings.get` and `settings.set`.
-
 use crate::host::HostedInfo;
 use crate::server::{object, Attachments, PROTOCOL_VERSION};
 use crate::state::HostSettings;
@@ -120,7 +116,6 @@ pub(crate) fn perform(
     }
 }
 
-/// A session as the wire carries it; `startedAt` is milliseconds since the epoch.
 pub fn info_json(info: &HostedInfo) -> Value {
     let mut out = json!({
         "id": info.id.to_string(),
@@ -140,7 +135,6 @@ pub fn info_json(info: &HostedInfo) -> Value {
     out
 }
 
-/// The other way: `HostClient.info(from:)`.
 pub fn info_from(value: &Value) -> Option<HostedInfo> {
     let object = value.as_object()?;
     Some(HostedInfo {

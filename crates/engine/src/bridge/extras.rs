@@ -1,7 +1,3 @@
-//! The phone extras of the live backend (E15): Visualize, chat pictures, web snapshots and the
-//! device-window stream, with the services each needs. Everything that touches the screen or a
-//! web view is behind a trait whose default is "not supported on this computer".
-
 use super::foreign;
 use super::images::{ImageCrate, Imaging, ImagingError};
 use super::live::{Acting, LiveBackend, Sources};
@@ -20,7 +16,6 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-/// Messages kept for a picture lookup: what Chat keeps (`defaultLimit * 2`).
 const PICTURE_LOOKUP_MESSAGES: usize = chat::DEFAULT_LIMIT * 2;
 
 pub struct Extras {
@@ -28,13 +23,10 @@ pub struct Extras {
     pub snapshots: WebSnapshots,
     pub streamer: Box<dyn Streamer>,
     pub imaging: Box<dyn Imaging>,
-    /// Pictures a chat names are shown from here and `/tmp` only.
     pub home: PathBuf,
 }
 
 impl Extras {
-    /// The real viz engine (git through [`RealLauncher`]) and picture encoder; page and window
-    /// capture are [`Unsupported`] and [`UnsupportedStreamer`] until a platform provides them.
     pub fn real(home: PathBuf) -> Extras {
         let launcher: Arc<dyn Launcher> = Arc::new(RealLauncher::new(&home));
         let viz = VizEngine::new(
@@ -52,7 +44,6 @@ impl Extras {
     }
 }
 
-/// A chat picture as the wire has it: a description, never the bytes.
 pub fn wire_image(image: &ImageRef) -> wire::Image {
     wire::Image {
         id: image.id.clone(),
@@ -69,8 +60,6 @@ pub fn wire_image(image: &ImageRef) -> wire::Image {
 }
 
 impl<S: Sources, A: Acting> LiveBackend<S, A> {
-    /// `chat.image`: the JPEG of a picture this session's chat has shown, at most `max_width` wide.
-    /// A phone can only name pictures the chat listed, never an arbitrary file.
     pub(super) fn picture(
         &self,
         session_id: &str,
@@ -102,8 +91,6 @@ impl<S: Sources, A: Acting> LiveBackend<S, A> {
             })
     }
 
-    /// `viz.get`: the flow, diagram and chart specs (and entity when asked), the tab to open first
-    /// and the local web page. Codex and Antigravity sessions have no Visualize tabs yet.
     pub(super) fn viz_bundle(
         &self,
         session_id: &str,

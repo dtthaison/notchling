@@ -1,13 +1,3 @@
-//! The real [`HttpClient`]: one blocking HTTPS request over rustls (ring), no redirects, 4 MB at
-//! most, the whole exchange within the request's timeout.
-//!
-//! - [`Trust::System`]: the operating system's root certificates, a plain host name on port 443.
-//! - [`Trust::LoopbackSelfSigned`]: Antigravity's language server, which serves a self-signed
-//!   certificate. Any certificate is accepted, but only for `https://127.0.0.1:<port>`; any other
-//!   host is refused before a socket opens.
-//!
-//! Errors say what failed in a few fixed words; none holds a header, a body or a token.
-
 use super::http::{HttpClient, HttpRequest, HttpResponse, Trust};
 use std::io::{Read, Write};
 use std::net::{Ipv4Addr, SocketAddr, TcpStream, ToSocketAddrs};
@@ -16,7 +6,6 @@ use std::time::{Duration, Instant};
 
 const MAX_BODY: usize = 4 * 1024 * 1024;
 
-/// The client the daemon uses.
 pub struct TlsHttp;
 
 impl HttpClient for TlsHttp {
@@ -54,7 +43,6 @@ impl HttpClient for TlsHttp {
             match tls.read(&mut chunk) {
                 Ok(0) => break,
                 Ok(n) => data.extend_from_slice(&chunk[..n]),
-                // A server that closes without close_notify still sent the whole answer.
                 Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
                 Err(_) => return Err("the answer couldn't be read".into()),
             }
@@ -134,7 +122,6 @@ fn build_request(request: &HttpRequest, target: &Target) -> Vec<u8> {
         target.host_header()
     );
     for (name, value) in &request.headers {
-        // A value with a line break would add a header of its own.
         if name.contains([':', '\r', '\n']) || value.contains(['\r', '\n']) {
             continue;
         }
@@ -171,9 +158,6 @@ fn client_config(trust: Trust) -> Result<rustls::ClientConfig, String> {
     })
 }
 
-/// Accepts the server's certificate without checking who signed it. Only built for a connection
-/// to 127.0.0.1 ([`Target::parse`] refuses everything else), where the peer is a process on this
-/// computer; the handshake signatures are still verified.
 #[derive(Debug)]
 struct AnyCertificate(Arc<rustls::crypto::CryptoProvider>);
 
@@ -222,8 +206,6 @@ impl rustls::client::danger::ServerCertVerifier for AnyCertificate {
     }
 }
 
-/// The addresses of `host`, or an error once `within` has passed. The system resolver has no
-/// timeout of its own, so it runs on a thread of its own, left to finish alone if it hangs.
 fn resolve_within(host: String, port: u16, within: Duration) -> Result<Vec<SocketAddr>, String> {
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::Builder::new()
@@ -254,7 +236,6 @@ fn connect_within(addrs: &[SocketAddr], within: Duration) -> Result<TcpStream, S
     Err("couldn't connect".into())
 }
 
-/// Status and body of an HTTP/1.1 answer (plain or chunked).
 pub fn parse_response(data: &[u8]) -> Result<HttpResponse, String> {
     let end = data
         .windows(4)
@@ -368,8 +349,6 @@ mod tests {
         assert!(!text.contains("Injected"), "{text}");
     }
 
-    /// A TLS server on the loopback address with a throwaway self-signed certificate: the client
-    /// completes the handshake, sends its header and body, and reads a chunked 200.
     #[test]
     fn talks_to_a_self_signed_loopback_server() {
         let key = rcgen::KeyPair::generate().unwrap();

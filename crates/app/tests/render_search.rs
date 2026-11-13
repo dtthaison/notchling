@@ -1,7 +1,3 @@
-//! `--render search-panel|search-panel-results|pages-window` end to end over made-up data: needs a
-//! window server, so it is ignored by default. Run it with
-//! `cargo test -p notchling-app -- --ignored` on a Mac with a display.
-
 #![cfg(target_os = "macos")]
 
 use std::collections::HashSet;

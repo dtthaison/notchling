@@ -1,7 +1,3 @@
-//! Ported from `MachinesPollerTests.swift`: the poller's rounds, reports, `previous`, the
-//! announcements and the refresh that is asked for while one runs. The Swift timer tests and the
-//! `ProcessRunner` tests are not here: the caller owns the timer, and `process.rs` has its own tests.
-
 use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
 
@@ -40,7 +36,6 @@ fn poller(runner: &Arc<AnswerRunner>, machines: Vec<Machine>) -> (MachinePoller,
     (poller_over(runner.clone(), &list), list)
 }
 
-/// The same answer each time, changed by the test between rounds.
 fn shared(initial: &str) -> (Arc<Mutex<String>>, Arc<AnswerRunner>) {
     let text = Arc::new(Mutex::new(initial.to_string()));
     let t = text.clone();
@@ -49,8 +44,6 @@ fn shared(initial: &str) -> (Arc<Mutex<String>>, Arc<AnswerRunner>) {
         Arc::new(AnswerRunner::new(move |_| ok(&lock(&t).clone()))),
     )
 }
-
-// SSH (the strings the poller sends)
 
 #[test]
 fn ssh_argv_quotes_remote() {
@@ -66,7 +59,6 @@ fn ssh_argv_quotes_remote() {
             "--json",
         ],
     );
-    // `--` ends the options, so a host written as `-oProxyCommand=…` is a destination, never an option
     assert_eq!(
         argv[..7],
         [
@@ -80,7 +72,6 @@ fn ssh_argv_quotes_remote() {
         ]
     );
     assert_eq!(argv.len(), 8);
-    // one remote argument, in which the path with a space and the quote stay single words
     assert_eq!(
         argv[7],
         "'python3' '/opt/my sd/sd.py' 'it'\\''s' 'worker' 'status' '--json'"
@@ -95,7 +86,6 @@ fn git_url() {
     );
 }
 
-/// Without the leading slash the path would be read as part of the host (`ssh://u@h.evil.com/x`).
 #[test]
 fn git_url_refuses_a_path_that_is_not_absolute() {
     for path in [
@@ -109,8 +99,6 @@ fn git_url_refuses_a_path_that_is_not_absolute() {
         assert_eq!(shell::git_url(&machine("vps"), path), None, "{path}");
     }
 }
-
-// refresh
 
 #[test]
 fn refresh_runs_status_command_on_every_machine() {
@@ -183,7 +171,6 @@ fn status_command_expands_a_tilde_path() {
     }
     let (p, _) = poller(&runner, vec![m.clone()]);
     p.refresh(false);
-    // the script is `'python3' "$HOME"/'sd/sd.py' worker status --json`, quoted once more for `sh -c`
     let call = runner.calls().remove(0);
     assert_eq!(
         call,
@@ -192,7 +179,6 @@ fn status_command_expands_a_tilde_path() {
     assert!(call.last().is_some_and(|s| s.contains("\"$HOME\"/")));
 }
 
-/// A python or sd path the machine reported is quoted, never a command of its own.
 #[test]
 fn a_hostile_sd_path_stays_one_quoted_word() {
     let runner = Arc::new(AnswerRunner::quiet());
@@ -320,8 +306,6 @@ fn machine_removed_from_registry_is_dropped() {
     assert!(p.previous_of("b").is_none());
 }
 
-// previous
-
 #[test]
 fn previous_holds_the_report_before_the_last_one() {
     let (text, runner) = shared(&status_json("a", &[], Some("2026-11-05T01:00:00Z")));
@@ -354,15 +338,15 @@ fn failed_refresh_keeps_the_old_previous_and_never_stores_an_error_there() {
         }
     }));
     let (p, _) = poller(&runner, vec![machine("a")]);
-    p.refresh(false); // good
+    p.refresh(false);
     *lock(&fail) = true;
-    p.refresh(false); // first failure: the good report becomes previous
+    p.refresh(false);
     assert_eq!(p.report("a").and_then(|r| r.error).as_deref(), Some("down"));
     let needs =
         |r: Option<super::poller::LastReport>| r.and_then(|r| r.status).map(|s| s.needs_you.len());
     assert_eq!(needs(p.previous_of("a")), Some(1));
     assert_eq!(p.previous_of("a").and_then(|r| r.error), None);
-    p.refresh(false); // second failure: previous must stay the good report
+    p.refresh(false);
     assert_eq!(needs(p.previous_of("a")), Some(1));
     assert_eq!(p.previous_of("a").and_then(|r| r.error), None);
     assert_eq!(p.report("a").and_then(|r| r.error).as_deref(), Some("down"));
@@ -376,8 +360,6 @@ fn first_failure_leaves_no_previous() {
     p.refresh(false);
     assert!(p.previous_of("a").is_none());
 }
-
-// on_new_needs_you (the first good poll of a machine only takes stock: see "first poll")
 
 type Fired = Arc<Mutex<Vec<String>>>;
 
@@ -448,9 +430,6 @@ fn failed_poll_fires_nothing() {
     assert!(lock(&summaries).is_empty());
 }
 
-// first poll
-
-/// Notchling relaunches on every install; the questions already waiting must not each ring.
 #[test]
 fn the_first_good_poll_of_a_machine_gives_one_summary_and_no_single_announcements() {
     let (text, runner) = shared(&status_json(
@@ -513,7 +492,6 @@ fn no_questions_means_no_summary() {
     assert!(lock(&summaries).is_empty());
 }
 
-/// A machine that was away on the first round gets its own first poll when it shows up.
 #[test]
 fn a_machine_that_answers_later_has_its_own_first_poll() {
     let up = Arc::new(Mutex::new(false));
@@ -539,8 +517,6 @@ fn the_summary_words() {
     assert_eq!(waiting_text(4), "4 questions are waiting");
 }
 
-// refresh while one runs
-
 #[test]
 fn a_poll_that_was_running_at_sleep_does_not_swallow_the_wake_refresh() {
     let runner = Arc::new(HoldingRunner::new(&status_json("a", &[], None)));
@@ -550,9 +526,9 @@ fn a_poll_that_was_running_at_sleep_does_not_swallow_the_wake_refresh() {
         let in_flight = scope.spawn(|| p.refresh(false));
         runner.wait_for_first_call();
 
-        p.refresh(false); // an ordinary tick while one runs is still a no-op
+        p.refresh(false);
         assert_eq!(runner.calls(), 1);
-        p.refresh(true); // the wake: it must be remembered, not dropped
+        p.refresh(true);
         assert_eq!(
             runner.calls(),
             1,

@@ -1,12 +1,8 @@
-//! Port of `WebURLCandidateTests` and `VisualizeSuggesterTests`.
-
 use super::suggest::{git_branch, suggest, VizSignals, VizTab};
 use super::url::Url;
 use super::web_url;
 use crate::sessions::testutil::TempDir;
 use std::path::Path;
-
-// MARK: URL precedence
 
 fn home_with(launch: Option<&str>) -> TempDir {
     let home = TempDir::new("viz-home");
@@ -33,12 +29,10 @@ fn url_precedence_is_transcript_then_project_launch_then_home_launch() {
         let urls: Vec<String> = urls.iter().map(|s| s.to_string()).collect();
         web_url::resolve(&urls, cwd, home, &nothing_listens)
     };
-    // 1) home launch.json, preferring the dev config that mentions the folder
     assert_eq!(
         resolve(&[], &path, home.root()).as_deref(),
         Some("http://localhost:5001")
     );
-    // 2) the project's own launch.json wins over the home one
     project.write(
         ".claude/launch.json",
         r#"{"configurations":[{"name":"web","port":6000}]}"#,
@@ -47,7 +41,6 @@ fn url_precedence_is_transcript_then_project_launch_then_home_launch() {
         resolve(&[], &path, home.root()).as_deref(),
         Some("http://localhost:6000")
     );
-    // 3) a URL in the transcript wins over both, and the newest one wins
     assert_eq!(
         resolve(
             &["http://localhost:3000", "http://127.0.0.1:3001/x"],
@@ -57,7 +50,6 @@ fn url_precedence_is_transcript_then_project_launch_then_home_launch() {
         .as_deref(),
         Some("http://127.0.0.1:3001/x")
     );
-    // non-local URLs never count
     let bare = home_with(None);
     assert_eq!(
         resolve(&["https://example.com"], "/nowhere", bare.root()),
@@ -152,8 +144,6 @@ fn urls_parse_the_way_the_web_tab_needs() {
     assert!(Url::parse_local("http://localhost@evil.com:3000").is_none());
     assert!(Url::parse_local("ftp://localhost").is_none());
 }
-
-// MARK: Suggester
 
 pub(super) fn folder(files: &[(&str, &str)], directories: &[&str]) -> TempDir {
     let root = TempDir::new("viz-folder");

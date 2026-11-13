@@ -1,7 +1,3 @@
-//! Tests of the sd worker job's plugins and worker.json steps (Swift `MachinesSDWorkerStepsTests`,
-//! first part). No ssh starts: runners are scripted, and the archive `tar` would make is written by
-//! the scripted runner itself.
-
 use super::fakes_b::*;
 use super::mac_facts;
 use super::registry::Machine;
@@ -78,8 +74,6 @@ pub(super) fn text(r: &CheckResult) -> &str {
     r.state.text()
 }
 
-// MARK: MacFacts and plugins
-
 #[test]
 fn mac_facts_reads_versions_and_paths() {
     let tmp = TempDir::new("facts");
@@ -111,7 +105,6 @@ fn mac_facts_reads_versions_and_paths() {
             "/Users/x/.claude/plugins/cache/system-design/sd/1.19.2"
         )
     );
-    // the user-scope entry, not the project one listed first
     assert_eq!(
         facts.plugins["superpowers@claude-plugins-official"].version,
         "7.0.0"
@@ -128,7 +121,6 @@ fn mac_facts_with_nothing_installed_is_empty() {
     let facts = mac_facts::load(&tmp.path().join("nowhere"));
     assert!(facts.plugins.is_empty());
     assert!(facts.marketplace_json.is_empty());
-    // text that isn't the files' shape gives nothing, too
     assert!(mac_facts::installed_plugins("not json").is_empty());
     assert!(mac_facts::installed_plugins(
         r#"{"plugins":{"a":[{"scope":"project","version":"1","installPath":"/x"}]}}"#
@@ -186,15 +178,12 @@ fn a_newer_superpowers_passes_but_an_older_or_unreadable_one_fails_and_sd_stays_
     assert!(
         matches!(&unreadable.state, CheckState::Fail(w) if w.contains("superpowers") && w.contains("7.0.0 on this Mac"))
     );
-    // sd is never "newer is fine": a newer sd here still fails.
     assert_eq!(
         c("1.19.3", "7.0.0").state,
         CheckState::Fail("sd 1.19.3 here, 1.19.2 on this Mac".into())
     );
 }
 
-/// An sd older than 1.19.3 on the machine would run `--check` of that version, which creates
-/// labels. Plugins installed reports the machine's sd version; the setup check holds back on it.
 #[test]
 fn plugins_reports_the_machines_sd_version() {
     let ok = check(&StepId::PLUGINS, &plugins_out("1.19.2", "7.0.0"));
@@ -286,7 +275,6 @@ fn plugin_versions_from_the_machine_never_reach_a_script() {
     );
     assert!(!format!("{r:?}").contains("touch /tmp/x"));
 
-    // the Fix takes only this Mac's facts: its display and scripts hold nothing from the machine
     let rig = Rig::new(linux("vps-sing-1")).with_mac(default_mac());
     let p = fix(&StepId::PLUGINS, &rig.machine);
     assert!(!p.display.contains("touch /tmp/x"));
@@ -296,7 +284,6 @@ fn plugin_versions_from_the_machine_never_reach_a_script() {
     }
 }
 
-/// A runner that answers `/usr/bin/tar` by writing the archive it was asked for.
 pub(super) fn tar_rig(rig: &Rig) {
     rig.runner.on_call(
         |a| a[0] == "/usr/bin/tar",
@@ -343,13 +330,10 @@ fn plugins_fix_ships_this_macs_sd() {
     let text = last(&ssh.argv);
     assert!(text.contains("claude plugin install sd@system-design"));
     assert!(text.contains("claude plugin install superpowers@claude-plugins-official"));
-    // the old folder is set aside, not deleted, before the new one goes in; a failed move puts it back
     assert!(!text.contains(r#"rm -rf "$d"; "#));
     assert!(text.contains(r#"mv "$d" "$d.old""#));
     assert!(text.contains(r#"mv "$d.old" "$d""#));
-    // the marketplace text is quoted, not spliced: a bare apostrophe never shows
     assert!(!text.contains("it's"));
-    // the temp archive is gone
     let archive = &tar.argv[tar.argv.iter().position(|a| a == "-czf").unwrap() + 1];
     assert!(!std::path::Path::new(archive).exists());
 }

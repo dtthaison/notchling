@@ -1,7 +1,3 @@
-//! What the Artifacts window shows, pure (the Swift `PagesModel`): every saved page, the ones the
-//! search leaves, the selected one, and what each key does in the list. The GPUI view (`view`,
-//! macOS) only lays it out and asks the daemon for the list.
-
 use notchling_engine::search::{find_pages, PageEntry};
 
 use super::dates;
@@ -9,16 +5,11 @@ use crate::notch::answer::{type_key, Typed};
 use crate::search::model::Press;
 use crate::search::wire::{Page, PageList};
 
-/// What a key press asks the view to do.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Outcome {
-    /// The selection moved.
     Moved,
-    /// Return: open the selected page in its own window.
     Open(Box<Page>),
-    /// The search changed.
     Typed,
-    /// Esc with words typed: the search was cleared.
     Cleared,
     Ignored,
 }
@@ -26,12 +17,9 @@ pub enum Outcome {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct PagesModel {
     pages: Vec<Page>,
-    /// Those `pages` as the engine's entries, for `find_pages`; kept in step with `pages`.
     entries: Vec<PageEntry>,
-    /// The daemon's list stopped short of every page (a reply is one line).
     pub truncated: bool,
     pub search: String,
-    /// The selected page's key ([`Page::key`]).
     pub selection: Option<String>,
 }
 
@@ -40,8 +28,6 @@ impl PagesModel {
         PagesModel::default()
     }
 
-    /// Takes the library's list. The selection stays on its page when it is still listed, else
-    /// goes to the first page shown.
     pub fn set_pages(&mut self, pages: Vec<Page>) {
         self.set_list(PageList {
             pages,
@@ -49,7 +35,6 @@ impl PagesModel {
         });
     }
 
-    /// [`PagesModel::set_pages`] with the daemon's note of a list cut short.
     pub fn set_list(&mut self, list: PageList) {
         self.entries = list.pages.iter().map(Page::entry).collect();
         self.pages = list.pages;
@@ -67,8 +52,6 @@ impl PagesModel {
         &self.pages
     }
 
-    /// The pages the search leaves: every word in the title, project, account or link, or the
-    /// page a pasted link or id names; every page without words.
     pub fn shown(&self) -> Vec<&Page> {
         let found = find_pages(&self.search, &self.entries);
         found
@@ -82,13 +65,11 @@ impl PagesModel {
             .collect()
     }
 
-    /// The selected page, listed or not.
     pub fn selected(&self) -> Option<&Page> {
         let key = self.selection.as_deref()?;
         self.pages.iter().find(|p| p.key() == key)
     }
 
-    /// Selects a page by key; a page the search hides clears the search first, so it shows.
     pub fn select(&mut self, key: &str) {
         if !self.shown().iter().any(|p| p.key() == key) {
             self.search.clear();
@@ -96,7 +77,6 @@ impl PagesModel {
         self.selection = Some(key.to_owned());
     }
 
-    /// "1 artifact", "12 artifacts", and a word when the list was cut short.
     pub fn count_text(&self) -> String {
         let n = self.shown().len();
         let mut text = if n == 1 {
@@ -110,7 +90,6 @@ impl PagesModel {
         text
     }
 
-    /// What the right side says without a selected page.
     pub fn empty_text(&self) -> &'static str {
         if self.pages.is_empty() {
             "Artifacts you publish from now on appear here."
@@ -119,7 +98,6 @@ impl PagesModel {
         }
     }
 
-    /// A row's second line: "project · Nov 8".
     pub fn row_detail(page: &Page) -> String {
         [page.project.as_str(), &dates::short(page.updated_secs)]
             .into_iter()
@@ -128,7 +106,6 @@ impl PagesModel {
             .join(" · ")
     }
 
-    /// The detail's subtitle: "account · project · Nov 8, 2026 14:05".
     pub fn subtitle(page: &Page) -> String {
         [
             page.account.as_str(),
@@ -141,7 +118,6 @@ impl PagesModel {
         .join(" · ")
     }
 
-    /// Moves the selection through the pages shown; from a hidden selection, to the first shown.
     fn move_by(&mut self, by: i32) -> Outcome {
         let shown: Vec<String> = self.shown().iter().map(|p| p.key().to_owned()).collect();
         if shown.is_empty() {
@@ -159,8 +135,6 @@ impl PagesModel {
         Outcome::Moved
     }
 
-    /// Arrows move through the pages shown, Return opens the selected page, Esc clears the
-    /// search, and anything else types into it.
     pub fn press(&mut self, press: &Press) -> Outcome {
         match press.key.as_str() {
             "down" => return self.move_by(1),
@@ -244,7 +218,6 @@ mod tests {
         m.select("b-2");
         m.set_pages(three());
         assert_eq!(m.selection.as_deref(), Some("b-2"), "a reload keeps it");
-        // Its page gone: the first shown.
         m.set_pages(vec![three()[2].clone()]);
         assert_eq!(m.selection.as_deref(), Some("c-3"));
         assert_eq!(m.count_text(), "1 artifact");
@@ -293,7 +266,6 @@ mod tests {
         m.select("c-3");
         assert_eq!(m.search, "");
         assert_eq!(m.selected().map(|p| p.title.as_str()), Some("Kit audit"));
-        // The selected page is read from every page, hidden or not.
         m.search = "bridge".into();
         assert_eq!(m.selected().map(|p| p.key()), Some("c-3"));
     }
@@ -339,7 +311,6 @@ mod tests {
         assert_eq!(m.press(&Press::plain("i", Some("i"))), Outcome::Typed);
         assert_eq!(m.search, "ki");
         assert_eq!(m.shown().len(), 1);
-        // Arrows move within the pages shown: from a hidden selection, to the first shown.
         assert_eq!(m.press(&Press::plain("down", None)), Outcome::Moved);
         assert_eq!(m.selection.as_deref(), Some("c-3"));
         assert_eq!(m.press(&Press::plain("escape", None)), Outcome::Cleared);

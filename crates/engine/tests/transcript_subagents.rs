@@ -1,5 +1,3 @@
-//! Ports of SubagentsTests and BackgroundShellsTests, plus ConsoleCore's SubagentReader.
-
 mod common;
 
 use common::*;
@@ -10,7 +8,6 @@ use notchling_engine::transcript::subagents::{self, Status, Subagent};
 use notchling_engine::transcript::util::now_secs;
 use std::collections::HashMap;
 
-/// A session transcript with two subagents beside it, in the shape Claude Code 2.1.318 writes them.
 fn setup() -> (Scratch, String) {
     let scratch = Scratch::new("subagents");
     let agent = |id: &str, meta: &str, lines: &[&str]| {
@@ -196,8 +193,6 @@ fn console_reader_lists_running_first() {
     assert!(subagents::console_list("sess", None, now_secs(), 600.0).is_empty());
 }
 
-// MARK: background shells
-
 #[test]
 fn launch_reads_id_and_path() {
     let text = "Command running in background with ID: bj5rd6y90. Output is being written to: /private/tmp/claude-501/-Users-x/38b0/tasks/bj5rd6y90.output. You will be notified when it completes.";
@@ -215,8 +210,6 @@ fn launch_ignores_ordinary_output() {
     assert!(shells::launch("Command running in background with ID: abc.").is_none());
 }
 
-/// Real `lsof -F pca` output for a background `sleep` loop: zsh and sleep write; a reader and Claude
-/// Code itself must never be stopped.
 #[test]
 fn writers_skip_readers_and_claude() {
     let text = "p4010\nczsh\nf1\naw\nf2\naw\np4011\ncsleep\nf1\naw\np500\ncclaude\nf9\naw\np600\nctail\nf3\nar\n";

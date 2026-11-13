@@ -1,6 +1,3 @@
-//! `cost.summary` over temp folders: transcripts are fixtures, the cache the daemon's own file,
-//! and no real `~/.claude`, `~/.codex` or Swift-app file is read.
-
 use crate::cost_ops::{self, CostSetup};
 use crate::layout::Layout;
 use crate::limits_ops::*;
@@ -23,7 +20,6 @@ fn opus_line(id: &str, dollars: f64) -> String {
     let tokens = (dollars / 20.0 * 1_000_000.0) as u64;
     format!(
         r#"{{"type":"assistant","timestamp":"{}","message":{{"id":"{id}","model":"claude-opus-5-5","usage":{{"output_tokens":{tokens}}}}}}}"#,
-        // Today, whenever the test runs: the daemon's clock is fixed at NOW below.
         "2027-01-15T08:00:00Z"
     ) + "\n"
 }
@@ -141,7 +137,6 @@ fn the_cost_cache_is_the_daemons_own_document_and_never_the_swift_apps() {
             "Antigravity CLI"
         ]
     );
-    // Every root is under the fixture root.
     for r in &setup.roots {
         assert!(r.dir.starts_with(tmp.root()), "{}", r.dir.display());
     }
@@ -179,7 +174,6 @@ fn the_reply_lists_unpriced_and_borrowed_models() {
     let reply = ops.call(COST_SUMMARY, &json!({"range": "all"})).unwrap();
     assert_eq!(reply["summary"]["unpriced"], json!(["claude-new-9"]));
     assert_eq!(reply["summary"]["borrowed"], json!(["claude-fable-5-3"]));
-    // 5 for Opus 5.5 and 40 for a million Fable 5.2 output tokens.
     let month = reply["summary"]["month"].as_f64().unwrap();
     assert!((month - 45.0).abs() < 1e-6, "{reply}");
 }
@@ -207,7 +201,6 @@ fn cost_prices_from_the_daemons_one_catalog_with_the_file_beside_the_socket_laid
         crate::accounts_ops::AccountsOps::for_daemon(&layout, flag.clone(), room.clone());
     let catalog = CatalogService::for_daemon(&layout, (accounts.store(), flag), room);
     let from_layout = CostSetup::from_layout(&layout, catalog.shared_catalog());
-    // Transcripts in the temp folder, no cache.
     let setup = CostSetup {
         roots: vec![Root {
             dir: tmp.path("claude/projects"),

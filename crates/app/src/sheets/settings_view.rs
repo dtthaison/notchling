@@ -1,8 +1,3 @@
-//! The Settings sheet and the banners over GPUI (parts U8 and U7, macOS). Settings writes Notchling's
-//! own `settings.json` (never Claude Code's); the daemon's switches go to the daemon, through the
-//! same calls the restart notice's Turn Back On makes. A render has no store and no daemon: its rows
-//! show the defaults and a click changes only what is drawn.
-
 use std::path::Path;
 
 use gpui::{
@@ -24,22 +19,17 @@ use crate::mac::shell::{AppAccounts, AppActions, AppBridge, AppSwitchFeed};
 use crate::switches::restart::{Area, LiveTurnOn};
 use crate::switches::Switch;
 
-/// The Settings sheet.
 pub struct SettingsView {
     store: Option<Settings>,
-    /// What's drawn: the store's values, or a render's own.
     values: Map<String, Value>,
     acts: Acts,
-    /// A write that failed, shown at the bottom.
     error: Option<String>,
-    /// A daemon switch being changed: its row draws busy, and no second click goes out.
     busy: Option<Area>,
 }
 
 impl EventEmitter<Dismiss> for SettingsView {}
 
 impl SettingsView {
-    /// Over the store in `data_dir`, or none (a render, a fixture root).
     pub fn new(data_dir: Option<&Path>, acts: Acts) -> SettingsView {
         let store = data_dir.and_then(|d| Settings::open(&d.join("settings.json")).ok());
         let values = store
@@ -55,7 +45,6 @@ impl SettingsView {
         }
     }
 
-    /// The daemon's switches as the app's feeds last heard them (no call here).
     fn daemon(&self, cx: &Context<Self>) -> Daemon {
         let mut daemon = Daemon::detached();
         daemon.acting = self.acts.acting();
@@ -74,7 +63,6 @@ impl SettingsView {
         daemon
     }
 
-    /// Turns a daemon switch on or off, off the main thread.
     fn set_switch(&mut self, area: Area, on: bool, cx: &mut Context<Self>) {
         if self.busy.is_some() {
             return;
@@ -123,7 +111,6 @@ impl SettingsView {
             }
         }
         self.error = None;
-        // A limit row is acted on by the daemon, which keeps its own copy.
         if let Some(accounts) = cx.try_global::<AppAccounts>().map(|g| g.0.clone()) {
             let (key, sent) = (key.to_owned(), value.clone());
             cx.background_executor()
@@ -204,7 +191,6 @@ impl SettingsView {
                         ))
                     }
                     Some(on) => div().opacity(0.5).child(switch(id("daemon"), on, a)),
-                    // No daemon answered: nothing to change.
                     None => div().opacity(0.4).child(switch(id("daemon"), false, a)),
                 }
             }
@@ -220,7 +206,6 @@ impl SettingsView {
     }
 }
 
-/// A switch: a capsule with its knob at the end it's set to.
 fn switch(id: SharedString, on: bool, a: Appearance) -> Stateful<Div> {
     div()
         .id(id)
@@ -323,7 +308,6 @@ impl Render for SettingsView {
     }
 }
 
-/// The banners on show, each with Dismiss.
 pub struct BannersView {
     pub banners: Banners,
 }
@@ -360,7 +344,6 @@ impl Render for BannersView {
                 .fill(fill, a)
                 .border(px(1.0))
                 .border_color(hsla(Ink::Hairline.color(a)))
-                // One width for every icon, so the text starts at the same place in each banner.
                 .child(
                     icon(b.icon(), TypeRole::Label.spec().size, b.ink(), a)
                         .w(px(16.0))

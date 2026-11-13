@@ -1,13 +1,9 @@
-//! Layer 2: colors by meaning (`KitInk`), resolved for light or dark.
-
 use crate::appearance::Appearance;
 use crate::color::Color;
 use crate::palette as p;
 
-/// A session's status, as the kit colors it (`AgentGroup` in the Swift app).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Status {
-    /// Waiting on the user: a question, a permission.
     Needs,
     Working,
     Done,
@@ -16,7 +12,6 @@ pub enum Status {
 impl Status {
     pub const ALL: [Status; 3] = [Status::Needs, Status::Working, Status::Done];
 
-    /// The word shown beside the icon; status is never color alone.
     pub fn word(self) -> &'static str {
         match self {
             Status::Needs => "Needs input",
@@ -26,52 +21,31 @@ impl Status {
     }
 }
 
-/// What a color is for. Views name the meaning; `color` picks the shade for the appearance.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Ink {
-    /// Conversation background.
     Window,
-    /// Sidebar background.
     Sidebar,
-    /// Claude's messages, cards, the composer.
     Card,
-    /// Hover, chips, code.
     Raised,
-    /// The selected session.
     Selection,
-    /// Borders and dividers.
     Hairline,
-    /// Body text.
     Text,
-    /// Secondary lines.
     TextMuted,
-    /// Hints and ages.
     TextFaint,
-    /// Send, primary buttons, focus.
     Accent,
-    /// Orange words.
     AccentText,
-    /// Text on an accent fill: dark, because white fails on orange.
     OnAccent,
-    /// Your messages.
     AccentWash,
     Needs,
     Working,
     Done,
     Shadow,
-    /// A `!` shell command: composer border and header, the run button.
     Shell,
-    /// The composer in shell mode, sent shell commands.
     ShellWash,
-    /// The icon on the run button.
     OnShell,
-    /// Part labels (the ? button): blue, a guide over the UI, not part of it.
     Guide,
-    /// Text on a part label.
     OnGuide,
-    /// A secret past its last day.
     Expired,
-    /// The terminal sheet is dark in both appearances: Claude Code picks colors for a dark terminal.
     Terminal,
     TerminalText,
 }
@@ -105,7 +79,6 @@ impl Ink {
         Ink::TerminalText,
     ];
 
-    /// The token's name as the spec writes it.
     pub fn name(self) -> &'static str {
         match self {
             Ink::Window => "window",
@@ -136,7 +109,6 @@ impl Ink {
         }
     }
 
-    /// The color for the appearance (spec: Meaning table, light / dark).
     pub fn color(self, appearance: Appearance) -> Color {
         let light = appearance == Appearance::Light;
         let pick = |l: Color, d: Color| if light { l } else { d };
@@ -169,7 +141,6 @@ impl Ink {
         }
     }
 
-    /// The ink for a status.
     pub fn status(status: Status) -> Ink {
         match status {
             Status::Needs => Ink::Needs,
@@ -179,20 +150,16 @@ impl Ink {
     }
 }
 
-/// The top of Claude's mark: a gradient from orange300 down to the accent.
 pub fn claude_mark_top() -> Color {
     p::ORANGE300
 }
 
-/// A session keeps its colors: a gradient pair picked from its name by FNV-1a, the same hash and the
-/// same bucket the Swift app uses, so a session looks the same in both apps.
 pub fn avatar(name: &str) -> (Color, Color) {
     let mut hash: u64 = 1_469_598_103_934_665_603;
     for byte in name.bytes() {
         hash ^= u64::from(byte);
         hash = hash.wrapping_mul(1_099_511_628_211);
     }
-    // The low bits of FNV-1a spread poorly over a few buckets; use the high ones.
     let index = (hash >> 40) % p::AVATARS.len() as u64;
     p::AVATARS[index as usize]
 }
@@ -229,7 +196,6 @@ mod tests {
         assert_eq!(hex(Ink::Accent, Dark), "#F7873B");
         assert_eq!(hex(Ink::AccentText, Light), "#B4540E");
         assert_eq!(hex(Ink::AccentText, Dark), "#FFB47E");
-        // Dark text on the orange fill: white fails on orange.
         assert_eq!(hex(Ink::OnAccent, Light), "#1F1B17");
         assert_eq!(hex(Ink::OnAccent, Dark), "#0F0E0D");
     }
@@ -286,7 +252,6 @@ mod tests {
 
     #[test]
     fn avatar_buckets_match_the_swift_hash() {
-        // Computed with the Swift app's FNV-1a and `hash >> 40 % 8`.
         assert_eq!(avatar("design system"), p::AVATARS[0]);
         assert_eq!(avatar("wifi"), p::AVATARS[4]);
         assert_eq!(avatar(""), p::AVATARS[7]);

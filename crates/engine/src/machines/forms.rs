@@ -1,8 +1,3 @@
-//! The window's pure pieces (Swift `MachineCards`): what the Add and Job forms refuse before
-//! anything reaches ssh, and the sentences of the cards and banners. Name, host and user later
-//! become a vault name, an ssh argument and a login, so each is held to a short alphabet instead of
-//! being quoted.
-
 use super::registry::{DockerState, MachineAbilities, MachineOs, MachineRepo, SdWorkerSettings};
 use super::shell::is_safe_machine_path;
 use super::step::CheckResult;
@@ -15,7 +10,6 @@ pub const USER_PROBLEM: &str = "User: lowercase letters, digits, hyphens and und
 pub const DATED_PROBLEM: &str =
     "A machine name can't end in -<8 digits>; that's how replaced keys are titled";
 
-/// The Add form's problems in the order name, host, user; empty when it may be used.
 pub fn machine_problems(name: &str, host: &str, user: &str, existing: &[String]) -> Vec<String> {
     let mut out = Vec::new();
     if !is_name(name) {
@@ -34,8 +28,6 @@ pub fn machine_problems(name: &str, host: &str, user: &str, existing: &[String])
     out
 }
 
-/// A replaced deploy key is titled `agents-<machine>-<8 digits>`: a machine name ending that way
-/// would collide with it.
 pub fn ends_in_replaced_key_date(name: &str) -> bool {
     let b = name.as_bytes();
     b.len() > 9 && b[b.len() - 9] == b'-' && b[b.len() - 8..].iter().all(u8::is_ascii_digit)
@@ -54,7 +46,6 @@ fn is_name(s: &str) -> bool {
         && s.chars().all(|c| lower_or_digit(c) || c == '-')
 }
 
-/// `^[A-Za-z0-9][A-Za-z0-9.-]*$`, or an IPv6 address.
 fn is_host(s: &str) -> bool {
     let Some(first) = s.chars().next() else {
         return false;
@@ -74,7 +65,6 @@ fn is_host(s: &str) -> bool {
         && s.parse::<std::net::Ipv6Addr>().is_ok()
 }
 
-/// `^[a-z_][a-z0-9_-]*$`
 fn is_user(s: &str) -> bool {
     let Some(first) = s.chars().next() else {
         return false;
@@ -84,7 +74,6 @@ fn is_user(s: &str) -> bool {
         && s.chars().all(|c| lower_or_digit(c) || c == '_' || c == '-')
 }
 
-/// `macOS 26.1 · arm64 · Xcode 26.1 · 2 simulators · Docker rootless · 120 GB free`.
 pub fn abilities_line(a: Option<&MachineAbilities>, os: Option<MachineOs>) -> String {
     let mut parts = Vec::new();
     let version = a
@@ -138,8 +127,6 @@ pub fn update_offer_title(count: usize) -> String {
     )
 }
 
-/// `claude-worker → ~/.config/agents/claude.env · mode 600, 41 bytes · expires in 12 days`.
-/// `facts` is the check of the step that delivers it (mode and size only).
 pub fn secret_row(
     usage: &SecretUsage,
     entry: Option<&VaultEntry>,
@@ -179,7 +166,6 @@ pub fn migrated_note(backup: &str) -> String {
     format!("machines.json was upgraded to the new format. The old file is kept at {backup}.")
 }
 
-/// `None` when no secret is still under an old name with a free new one.
 pub fn rename_note(old_names: &[String]) -> Option<String> {
     let (last, rest) = old_names.split_last()?;
     let list = if rest.is_empty() {
@@ -193,25 +179,21 @@ pub fn rename_note(old_names: &[String]) -> Option<String> {
     ))
 }
 
-/// One repository of the job sheet, as typed.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct JobRepoDraft {
     pub github: String,
     pub local_path: String,
     pub check_command: String,
-    /// Empty means the default, `~/src/<name>`.
     pub machine_path: String,
     pub verify_skill: String,
 }
 
-/// The job sheet's fields as text, before they are checked.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct JobDraft {
     pub machine: String,
     pub repos: Vec<JobRepoDraft>,
     pub kinds: Vec<String>,
     pub health_url: String,
-    /// Shown, never edited: Token scope sets it.
     pub token_expires: Option<String>,
     pub token_all_repos: bool,
     pub is_new: bool,
@@ -255,8 +237,6 @@ impl JobDraft {
     }
 }
 
-/// The job sheet's problems. A repo name, a machine path or a skill path reaches scripts, so each
-/// is held to plain characters.
 pub fn job_problems(d: &JobDraft) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     let mut add = |s: String| {
@@ -299,8 +279,6 @@ pub fn job_problems(d: &JobDraft) -> Vec<String> {
     out
 }
 
-/// The settings the draft makes. An edited job keeps its python, sd path, token expiry and vault
-/// name.
 pub fn job_settings(d: &JobDraft, base: Option<&SdWorkerSettings>) -> SdWorkerSettings {
     let repos = d
         .repos
@@ -334,7 +312,6 @@ pub fn job_settings(d: &JobDraft, base: Option<&SdWorkerSettings>) -> SdWorkerSe
     s
 }
 
-/// `owner/name`, GitHub's alphabet.
 pub fn is_repo(s: &str) -> bool {
     let parts: Vec<&str> = s.split('/').collect();
     parts.len() == 2

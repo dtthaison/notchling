@@ -1,11 +1,3 @@
-//! Measures what the file watcher costs while nothing is asked of it: starts `Watcher::start` on
-//! some folders, read only, and prints the process's CPU time over a while.
-//!
-//! cargo run --release -p notchling-platform --example watch_cpu -- [seconds] [folder...]
-//!
-//! With no folders it watches the ones Chat watches on this Mac: `~/.claude` and every lane's
-//! jobs, sessions and projects, and `~/.codex/sessions`. It never writes into them.
-
 #[cfg(target_os = "macos")]
 fn main() {
     use notchling_platform::watch::{WatchConfig, Watcher};

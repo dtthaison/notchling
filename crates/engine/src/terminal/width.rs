@@ -1,11 +1,5 @@
-//! Character widths, as `TerminalScreen.swift` decides them: a short table of wide ranges (CJK,
-//! Hangul, fullwidth forms, the common emoji blocks) and the combining characters that join the cell
-//! before them. Deliberately the Swift table, not a full East Asian Width table, so both emulators
-//! lay out Claude Code's screen the same.
-
 use unicode_properties::{GeneralCategory, UnicodeGeneralCategory};
 
-/// Marks and format characters (joiners), variation selectors and skin-tone modifiers.
 pub fn is_combining(c: char) -> bool {
     match c.general_category() {
         GeneralCategory::NonspacingMark
@@ -16,7 +10,6 @@ pub fn is_combining(c: char) -> bool {
     }
 }
 
-/// Takes two cells.
 pub fn is_wide(c: char) -> bool {
     matches!(
         u32::from(c),

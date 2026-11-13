@@ -1,21 +1,3 @@
-//! Spinners drawn and turned by Core Animation. A working session's spinner used to cost a frame
-//! of the whole window ten times a second (3.8 ms each: GPUI draws the root and presents the whole
-//! window). Here each slot the kit records (`notchling_kit::ui::SpinSlot`) is a `CAShapeLayer`
-//! ring (Lucide's `loader-circle` arc, same size, stroke and ink) with a repeating rotation the
-//! render server turns by itself: the app draws no frame to spin it.
-//!
-//! The layers are sublayers of the window view's own layer (GPUI's `CAMetalLayer`), above what
-//! GPUI draws. [`CaSpinners::sync`] runs each time the window draws and only keeps the layers in
-//! step with the slots (add, move, remove, in a transaction with actions off, keyed by the slot's
-//! stable key so a layer that only moved keeps its running animation). Each ring sits in a
-//! container layer clipped to the slot's clip rect, since a mask on the ring would turn with it.
-//! Anything GPUI draws over the window (a sheet, a menu) would be under the layers: the kit's
-//! layer takes the slots back (`SpinGate`) while one is open, and this sink then holds none.
-//!
-//! Coordinates: the slots are in window points, origin top-left. The window view is not flipped, so
-//! a layer's y runs up: [`layer_y`] converts. The AppKit calls are main thread only, which every
-//! GPUI draw is; the layers are removed when the sink is dropped (the window's layer goes).
-
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ffi::{c_void, CStr};
@@ -35,7 +17,6 @@ use super::native_spin_geometry::{
     arc, container_frame, placed, ring_centre, turn_to, Frame, Placed, BOX, RADIUS, STROKE,
 };
 
-// An opaque Core Graphics type, so `msg_send!` checks its pointer encoding.
 #[repr(C)]
 struct CGColor {
     _private: [u8; 0],
@@ -86,7 +67,6 @@ fn new_layer(name: &CStr) -> Option<Retained<AnyObject>> {
     unsafe { msg_send![cls, new] }
 }
 
-/// A transaction with implicit animations off, so a layer that moves or changes ink doesn't glide.
 fn without_actions<T>(f: impl FnOnce() -> T) -> T {
     let transaction = class(c"CATransaction");
     if let Some(t) = transaction {
@@ -106,11 +86,9 @@ fn without_actions<T>(f: impl FnOnce() -> T) -> T {
     out
 }
 
-/// One spinner: the container (clipped, placed) and the ring turning inside it.
 struct Entry {
     container: Retained<AnyObject>,
     ring: Retained<AnyObject>,
-    /// The ring's size and ink when its path and colour were made.
     made: Option<(f32, Color)>,
 }
 
@@ -121,7 +99,6 @@ impl Entry {
         // SAFETY: plain property setters and `addSublayer:` on layers we own.
         unsafe {
             let _: () = msg_send![&*container, setMasksToBounds: Bool::YES];
-            // Above anything else a sublayer of the view's layer could be.
             let _: () = msg_send![&*container, setZPosition: 1000.0f64];
             let _: () = msg_send![&*container, addSublayer: &*ring];
             let no_color: *mut CGColor = std::ptr::null_mut();
@@ -138,8 +115,6 @@ impl Entry {
         Some(entry)
     }
 
-    /// The repeating rotation, begun so every ring is at the same angle at any moment (the
-    /// phase is the kit's clock, as the GPUI spinners share).
     fn start_turning(&self, flipped: bool) {
         let Some(cls) = class(c"CABasicAnimation") else {
             return;
@@ -163,7 +138,6 @@ impl Entry {
         }
     }
 
-    /// Places and styles the layers for `p`. The animation is left alone.
     fn apply(&mut self, p: &Placed, frame: Frame) {
         let size = f64::from(p.ring.w);
         // SAFETY: property setters on layers we own; the path and colour are created here and
@@ -205,20 +179,17 @@ impl Entry {
 
 struct State {
     view: Option<Retained<NSView>>,
-    /// The window view's layer, the layers' parent.
     host: Option<Retained<AnyObject>>,
     entries: HashMap<u64, Entry>,
     last: HashMap<u64, Placed>,
     frame: Option<Frame>,
 }
 
-/// The slots of a window as Core Animation layers.
 pub struct CaSpinners {
     state: RefCell<State>,
 }
 
 thread_local! {
-    /// The sink made last, for `--render`'s self-check (`probe`).
     static LATEST: RefCell<Weak<CaSpinners>> = const { RefCell::new(Weak::new()) };
 }
 
@@ -237,7 +208,6 @@ impl CaSpinners {
         sinks
     }
 
-    /// Finds the window's view and its layer, once.
     fn attach(state: &mut State, window: &gpui::Window) -> bool {
         if state.host.is_some() {
             return true;
@@ -272,8 +242,6 @@ impl CaSpinners {
         })
     }
 
-    /// What the layers say now, for `--render`'s check: each ring's place in the window (points,
-    /// top-left origin) and its presentation layer's rotation, which the render server advances.
     pub fn probe(&self) -> Vec<Probe> {
         let state = self.state.borrow();
         let Some(frame) = state.frame else {
@@ -322,24 +290,19 @@ impl CaSpinners {
         out
     }
 
-    /// The number of rings alive.
     pub fn count(&self) -> usize {
         self.state.borrow().entries.len()
     }
 }
 
-/// One ring as the layers hold it.
 #[derive(Clone, Copy, Debug)]
 pub struct Probe {
     pub key: u64,
-    /// The ring's centre in window points, origin top-left.
     pub x: f64,
     pub y: f64,
-    /// `transform.rotation.z` of the presentation layer, radians (`None` before it is shown).
     pub rotation: Option<f64>,
 }
 
-/// The most recent sink's rings, from the thread that made it.
 pub fn probe() -> Vec<Probe> {
     LATEST.with(|latest| {
         latest
@@ -362,7 +325,6 @@ impl SpinSink for CaSpinners {
         let Some(frame) = Self::frame_of(&state, window) else {
             return;
         };
-        // A resize or a scale change moves every layer, so every one is placed again.
         if state.frame != Some(frame) {
             state.last.clear();
             state.frame = Some(frame);

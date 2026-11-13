@@ -1,29 +1,20 @@
-//! What the host remembers about the sessions it owns, so it can bring them back after it was stopped
-//! (a reboot, a crash, an update): `hostd-state.json`, 0600, written whole after each change, in the
-//! same shape the Swift host writes (`HostState.swift`), so either host reads the other's file.
-
 use notchling_engine::sessions::iso::parse_iso_ms;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-/// One session the host owns.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HostRecord {
     pub id: String,
     pub cwd: String,
     pub model: Option<String>,
-    /// Known once Claude has written its session file; without it a dead session cannot be resumed.
     pub claude_session_id: Option<String>,
-    /// The pid of the pty's process when recorded; 0 for a record written by the migration.
     pub pid: i32,
-    /// Whole seconds are kept: the file's dates have none smaller.
     pub started_at_ms: i64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct HostSettings {
-    /// Resume recorded sessions whose process is gone when the host starts. On by default.
     pub resume_on_start: bool,
 }
 
@@ -35,7 +26,6 @@ impl Default for HostSettings {
     }
 }
 
-/// The file's shape, keys in the order Swift's `.sortedKeys` writes them.
 #[derive(Serialize, Deserialize, Default)]
 struct FileRecord {
     #[serde(
@@ -77,7 +67,6 @@ fn default_settings() -> FileSettings {
     }
 }
 
-/// The state file, held in memory and written whole after each change.
 #[derive(Debug)]
 pub struct StateStore {
     path: PathBuf,
@@ -85,7 +74,6 @@ pub struct StateStore {
 }
 
 impl StateStore {
-    /// Reads `path`; a missing or unreadable file starts empty.
     pub fn new(path: impl AsRef<Path>) -> StateStore {
         let path = path.as_ref().to_path_buf();
         let parsed = std::fs::read(&path)
@@ -173,7 +161,6 @@ fn to_file(record: &HostRecord) -> FileRecord {
     }
 }
 
-/// Writes through a temp file and a rename, the file 0600 in a 0700 folder.
 fn write_private(path: &Path, file: &StateFile) -> std::io::Result<()> {
     let bytes = serde_json::to_vec_pretty(file).map_err(std::io::Error::other)?;
     let dir = path.parent().unwrap_or(Path::new("."));
@@ -200,7 +187,6 @@ fn write_private(path: &Path, file: &StateFile) -> std::io::Result<()> {
     std::fs::rename(&temporary, path)
 }
 
-/// `2026-11-08T10:00:00Z` for milliseconds since the epoch, as Swift's `.iso8601` writes it.
 pub fn iso_seconds(ms: i64) -> String {
     let seconds = ms.div_euclid(1000);
     let days = seconds.div_euclid(86_400);
@@ -214,7 +200,6 @@ pub fn iso_seconds(ms: i64) -> String {
     )
 }
 
-/// Howard Hinnant's days-to-date.
 fn civil_from_days(days: i64) -> (i64, i64, i64) {
     let z = days + 719_468;
     let era = z.div_euclid(146_097);
@@ -228,17 +213,13 @@ fn civil_from_days(days: i64) -> (i64, i64, i64) {
     (year, month, day)
 }
 
-/// What to do about the host binary when a new one has been installed next to the running one.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum UpdateAction {
     Nothing,
-    /// Restart the host now: nothing is running, so nothing is lost.
     RestartNow,
-    /// Leave the old host running; the new binary takes over at the next idle moment.
     DeferUntilIdle,
 }
 
-/// `HostdUpdatePolicy.decide`.
 pub fn decide(binary_changed: bool, running_sessions: usize) -> UpdateAction {
     if !binary_changed {
         UpdateAction::Nothing

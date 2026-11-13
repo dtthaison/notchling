@@ -1,7 +1,3 @@
-//! The working copy a session runs in, for the inspector: branch, how far it is from its upstream,
-//! the last commit and what changed (`GitInfo`). Parsing is pure; [`plan_git_status`] and [`read`]
-//! run git through a [`Launcher`] with `--no-optional-locks`, so the session's own git never waits.
-
 use super::launcher::Launcher;
 use super::plan::Command;
 use crate::sessions::lanes::standardize;
@@ -11,14 +7,12 @@ use std::time::Duration;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Change {
-    /// "M" modified, "A" added, "D" deleted, "R" renamed, "?" untracked, "U" conflicted.
     pub status: String,
     pub path: String,
     pub added: Option<u64>,
     pub removed: Option<u64>,
 }
 
-/// A local branch, or a remote branch that has no local copy.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Branch {
     pub name: String,
@@ -26,11 +20,9 @@ pub struct Branch {
     pub is_current: bool,
     pub ahead: u64,
     pub behind: u64,
-    /// The branch's upstream is gone from the remote.
     pub gone: bool,
     pub has_upstream: bool,
     pub age: String,
-    /// Folder of another working copy that has this branch checked out.
     pub worktree: Option<String>,
 }
 
@@ -46,10 +38,8 @@ pub struct GitInfo {
     pub branches: Vec<Branch>,
 }
 
-/// The `for-each-ref` format `parse_branches` reads.
 pub const BRANCH_FORMAT: &str = "%(HEAD)%09%(refname)%09%(upstream:short)%09%(upstream:track)%09%(committerdate:relative)%09%(worktreepath)";
 
-/// "ahead 2, behind 1" counts, into `(ahead, behind)`.
 fn counts(text: &str) -> (u64, u64) {
     let (mut ahead, mut behind) = (0, 0);
     for part in text.split(", ") {
@@ -69,8 +59,6 @@ fn counts(text: &str) -> (u64, u64) {
     (ahead, behind)
 }
 
-/// `git for-each-ref` output in [`BRANCH_FORMAT`], newest commit first. Local branches all show; a
-/// remote branch shows only when no local branch has its name.
 pub fn parse_branches(text: &str, folder: &str) -> Vec<Branch> {
     let (mut local, mut remote): (Vec<Branch>, Vec<Branch>) = (Vec::new(), Vec::new());
     for line in text.split('\n').filter(|l| !l.is_empty()) {
@@ -124,7 +112,6 @@ pub fn parse_branches(text: &str, folder: &str) -> Vec<Branch> {
     all
 }
 
-/// `git status --porcelain=v1 --branch` output.
 pub fn parse_status(text: &str) -> GitInfo {
     let mut info = GitInfo::default();
     for line in text.split('\n').filter(|l| !l.is_empty()) {
@@ -152,7 +139,6 @@ pub fn parse_status(text: &str) -> GitInfo {
     info
 }
 
-/// "main...origin/main [ahead 2, behind 1]", "HEAD (no branch)", "No commits yet on main".
 fn parse_branch(text: &str, info: &mut GitInfo) {
     if let Some(name) = text.strip_prefix("No commits yet on ") {
         info.branch = Some(name.to_string());
@@ -192,7 +178,6 @@ fn status_letter(xy: &str) -> &'static str {
 }
 
 impl GitInfo {
-    /// `git diff --numstat HEAD` output: added and removed lines per path ("-" for binary files).
     pub fn apply_numstat(&mut self, text: &str) {
         let mut counts: HashMap<String, (Option<u64>, Option<u64>)> = HashMap::new();
         for line in text.split('\n') {
@@ -213,7 +198,6 @@ impl GitInfo {
         }
     }
 
-    /// The last commit from `git log -1 --format=%h %s%x09%cr`.
     pub fn apply_log(&mut self, text: &str) {
         let trimmed = text.trim();
         let mut cols = trimmed.split('\t');
@@ -222,7 +206,6 @@ impl GitInfo {
     }
 }
 
-/// A rename reads "dir/{old => new}/file" or "old => new": the new path.
 fn renamed_path(path: &str) -> String {
     let Some(arrow) = path.find(" => ") else {
         return path.to_string();
@@ -254,8 +237,6 @@ fn git(folder: &str, args: &[&str]) -> Command {
     Command::new(&argv)
 }
 
-/// The four commands `GitInfo.read` runs, in its order: status, numstat, log, branches. Never takes
-/// the index lock.
 pub fn plan_git_status(folder: &str) -> Vec<Command> {
     let format = format!("--format={BRANCH_FORMAT}");
     vec![
@@ -283,7 +264,6 @@ pub fn plan_git_status(folder: &str) -> Vec<Command> {
     ]
 }
 
-/// Reads the folder's working copy; `None` when it is not one (or git is not there).
 pub fn read(folder: &str, launcher: &dyn Launcher) -> Option<GitInfo> {
     if folder.is_empty() {
         return None;

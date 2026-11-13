@@ -1,7 +1,3 @@
-//! The daemon's wiring over a fixture root: every area built off, the limit watchers fed by the
-//! real stores (whose Keychain and network are refused under a fixture root), and the vault's
-//! skill offered to the install ops. Nothing here reaches the real home folder.
-
 use super::*;
 use crate::acting_ops_tests::FakeRoom;
 use crate::switches::{ACCOUNTS, VAULT};
@@ -47,7 +43,6 @@ fn every_switch_starts_off_and_every_watcher_is_fed() {
     for provider in status["providers"].as_array().unwrap() {
         assert_eq!(provider["registered"], true, "{provider}");
     }
-    // Off: a round runs nothing.
     assert!(!w.limits.tick_at(1_800_000_000.0));
 }
 
@@ -68,7 +63,6 @@ fn with_accounts_on_a_round_runs_over_the_fixture_stores_and_reaches_no_login() 
     assert!(w.limits.tick_at(1_800_000_000.0));
     let status = w.limits.call("limits.status", &json!({})).unwrap();
     assert_eq!(status["watching"], true);
-    // No login under a fixture root: nobody is active, and nothing was switched.
     for provider in status["providers"].as_array().unwrap() {
         assert_eq!(provider["active"], Value::Null, "{provider}");
         assert_eq!(provider["last_switch"], Value::Null, "{provider}");
@@ -103,7 +97,6 @@ fn the_server_serves_every_area_and_the_vault_skill_is_offered_to_install() {
         assert!(ops.topics().contains(&topic), "{topic}");
         assert_eq!(ops.topic_tier(topic), Tier::App, "{topic}");
     }
-    // The vault is off, so the skill lists no names, and nothing reads vault.json.
     assert_eq!(w.switches.vault.name(), VAULT);
     let plan = ops
         .call(

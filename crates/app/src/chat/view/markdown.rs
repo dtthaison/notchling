@@ -1,7 +1,3 @@
-//! A reply's Markdown drawn with the kit (`MarkdownView` in the Swift app): `chat::markdown`'s
-//! blocks, each paragraph's spans as one styled text, links clickable (`page_panel::follow_link`:
-//! an Artifact opens beside the chat, anything else in the browser).
-
 use std::cell::Cell;
 
 use gpui::{
@@ -22,33 +18,24 @@ use crate::chat::markdown_cache::{spans_text, Inline, Item, Part};
 use crate::chat::run_command::{self, RunHow};
 use crate::mac::gate;
 
-/// Body lines get a little air, as the Swift app's `lineSpacing(3)`.
 const BODY_LINE: f32 = 20.0;
-/// A linked image's width under its paragraph; its height follows its shape.
 const IMAGE_WIDTH: f32 = 360.0;
 
-/// Where a text drawn here is selectable: a conversation row (its texts are numbered in the order
-/// they are drawn, which is `chat::blocks::plain_blocks`' order), or the file panel (texts keyed by
-/// name, selected in draw order: `select`).
 pub enum Sel<'a> {
     Row {
         row: &'a SharedString,
-        /// The block number the next selectable text takes.
         next: &'a Cell<u16>,
         state: &'a SelState,
-        /// Code blocks that are a shell command offer Run (the session takes a `!` message).
         run: bool,
     },
     File,
 }
 
 impl Sel<'_> {
-    /// Whether a code block that is a shell command shows Run.
     fn runs(&self) -> bool {
         matches!(self, Sel::Row { run: true, .. })
     }
 
-    /// The row's key (its item's id for a row of items), which names its groups and buttons.
     pub fn id(&self) -> &str {
         match self {
             Sel::Row { row, .. } => row,
@@ -57,8 +44,6 @@ impl Sel<'_> {
     }
 }
 
-/// `child` (a text laid out as `layout`, of `text`) made selectable the way `sel` says; `key` is
-/// the file panel's name for it.
 fn selectable(
     sel: &Sel,
     key: String,
@@ -80,10 +65,6 @@ fn selectable(
     }
 }
 
-/// The spans (`markdown_cache`: parsed, paths linked) as one text element: bold, italics, code
-/// (the mono face on a raised wash), strikethrough, links (accent, underlined, clickable).
-/// `weight` is the text's own weight (a heading's), `ink` its color. `key` makes the element's id
-/// unique in the window.
 fn inline(
     key: &str,
     sel: &Sel,
@@ -128,11 +109,7 @@ fn inline(
     let pressed = link_at.clone();
     let (down_key, up_key) = (key.to_owned(), key.to_owned());
     let id = SharedString::from(format!("md-{key}"));
-    // The pointing hand over links comes from the clickable text; the click itself is ours, on
-    // listeners that are there every frame (`LinkPress`).
     let text = InteractiveText::new(id, styled).on_click(hand, |_, _, _| {});
-    // No id of its own: its listeners need none, and every id is state GPUI carries from frame
-    // to frame for the whole conversation.
     let linked = div()
         .on_mouse_down(MouseButton::Left, move |event, _, _| {
             PRESS.with(|p| p.borrow_mut().down(&down_key, pressed(event.position)));
@@ -154,7 +131,6 @@ fn inline(
     )
 }
 
-/// An image file's width and height, read once from the first bytes of the file.
 pub(super) fn image_shape(path: &str) -> Option<(u32, u32)> {
     if let Some(known) = SHAPES.with(|s| s.borrow().get(path).copied()) {
         return known;
@@ -174,10 +150,8 @@ pub(super) fn image_shape(path: &str) -> Option<(u32, u32)> {
 }
 
 thread_local! {
-    /// Image shapes read so far, by path.
     static SHAPES: std::cell::RefCell<std::collections::HashMap<String, Option<(u32, u32)>>> =
         Default::default();
-    /// The link press under way; one pointer, so one press at a time.
     static PRESS: std::cell::RefCell<LinkPress> = std::cell::RefCell::new(LinkPress::default());
 }
 
@@ -212,8 +186,6 @@ fn run(span: &Span, weight: FontWeight, ink: Ink, a: Appearance) -> TextRun {
     }
 }
 
-/// A small ghost button on a code box: an icon and a word, 4 apart, in the ghost button's text
-/// ink (the Swift app's `CopyButton`).
 fn box_button(id: String, glyph: Icon, word: &str, a: Appearance) -> gpui::Stateful<Div> {
     let content = div()
         .flex()
@@ -230,15 +202,12 @@ fn box_button(id: String, glyph: Icon, word: &str, a: Appearance) -> gpui::State
     )
 }
 
-/// Copies `text`; the small ghost button on code boxes.
 pub fn copy_button(key: &str, text: &str, a: Appearance) -> impl IntoElement {
     let text = text.to_owned();
     box_button(format!("copy-{key}"), Icon::Copy, "Copy", a)
         .on_click(move |_, _, cx| cx.write_to_clipboard(ClipboardItem::new_string(text.clone())))
 }
 
-/// Runs `command`, before Copy on a code block that is one: a `!` message to the session, or, when
-/// it asks for input, Chat's terminal (`run_command::how`).
 fn run_button(key: &str, command: String, a: Appearance, cx: &App) -> impl IntoElement {
     let how = run_command::how(&command);
     let button = box_button(format!("run-{key}"), Icon::Terminal, "Run", a)
@@ -252,8 +221,6 @@ fn run_button(key: &str, command: String, a: Appearance, cx: &App) -> impl IntoE
     button.part("Run Button", a, cx)
 }
 
-/// Monospaced text in a box with a title row (`MonoBox`): "Command", "Output", or a code block's
-/// language. `error` tints it red.
 pub fn mono_box(key: &str, sel: &Sel, title: &str, text: &str, error: bool, a: Appearance) -> Div {
     let title_ink = if error { Ink::Expired } else { Ink::TextMuted };
     let (fill, edge) = if error {
@@ -292,7 +259,6 @@ pub fn mono_box(key: &str, sel: &Sel, title: &str, text: &str, error: bool, a: A
         )
 }
 
-/// Text in its parent's style, selectable as `sel` says (`key` names it in the file panel).
 pub fn plain(key: &str, sel: &Sel, text: &str, a: Appearance) -> AnyElement {
     let styled = StyledText::new(SharedString::from(text.to_owned()));
     let layout = styled.layout().clone();
@@ -343,11 +309,8 @@ fn paragraph(key: &str, sel: &Sel, text: &Inline, ink: Ink, a: Appearance) -> Di
         .children(text.images.iter().map(|path| image(key, path, a)))
 }
 
-/// A linked image on this Mac, drawn under its paragraph (Codex's generated images); a click
-/// opens it beside the chat, as its link does.
 fn image(key: &str, path: &str, a: Appearance) -> impl IntoElement {
     let to = path.to_owned();
-    // GPUI sizes an image's box from its pixels, not its width: the height comes from its shape.
     let (w, h) = image_shape(path).unwrap_or((4, 3));
     div()
         .id(SharedString::from(format!("md-img-{key}-{path}")))
@@ -535,9 +498,6 @@ fn table(
     table
 }
 
-/// The message as blocks, 10 pt apart. `key` makes the ids unique (the item's id); `message` is
-/// the text prepared by `ChatView`'s `markdown_cache`, its paths read against the folders the
-/// text names, then the session's (or the file's own) folder.
 pub fn render(key: &str, sel: &Sel, message: &[Part], a: Appearance, cx: &App) -> Div {
     let mut column = div().w_full().flex().flex_col().gap(px(10.0));
     for (i, part) in message.iter().enumerate() {

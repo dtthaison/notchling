@@ -1,6 +1,3 @@
-//! Ported from `MachinesMorningTests.swift` (second half): the morning actions, diff and
-//! screenshots, with hostile values from a machine. Nothing here starts `gh`, `git`, ssh or scp.
-
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -116,7 +113,6 @@ pub(super) fn temp_cache(label: &str) -> PathBuf {
     ))
 }
 
-/// Actions over `machines` with every merge function passing unless a test says otherwise.
 pub(super) fn actions_over(
     runner: &Arc<AnswerRunner>,
     machines: Vec<Machine>,
@@ -137,8 +133,6 @@ pub(super) fn silent() -> Arc<AnswerRunner> {
     Arc::new(AnswerRunner::silent())
 }
 
-// merge, outcomes
-
 #[test]
 fn stale_outcome_of_another_commit_shows_nothing() {
     let a = actions(&silent()).with_merge(merge_fn(MergeOutcome {
@@ -156,7 +150,6 @@ fn stale_outcome_of_another_commit_shows_nothing() {
         "the outcome of this commit shows (checklist and Retry push)"
     );
 
-    // the worker returns the branch with a new commit under the same item id
     let mut entry = ready(7);
     entry.commit = "def".into();
     let returned = ready_item(entry);
@@ -207,7 +200,6 @@ fn one_action_per_item() {
     assert_eq!(a.outcomes().get(&it.id), Some(&passed()));
     assert_eq!(a.last_error(&it.id), None);
 
-    // a different item is not blocked, and the first can run again once it has finished
     assert!(a.merge(&item(MorningKind::Ready, 8)));
     assert!(a.merge(&it));
     assert_eq!(counter.value(), 3);
@@ -277,7 +269,6 @@ fn merge_with_a_push_that_failed_offers_a_retry() {
     );
 }
 
-/// C17: a merge whose check did not pass is never pushed by a retry, whatever the window shows.
 #[test]
 fn retry_push_refuses_a_merge_that_was_never_checked() {
     let calls = Arc::new(Counter::default());
@@ -311,7 +302,6 @@ fn retry_push_refuses_a_merge_that_was_never_checked() {
         assert!(a.last_error(&it.id).is_some());
         assert!(!a.is_running(&it.id));
     }
-    // and with nothing merged at all
     let c = calls.clone();
     let b = actions(&silent()).with_retry_push(Arc::new(move |_, _, _, _| {
         c.bump();
@@ -320,8 +310,6 @@ fn retry_push_refuses_a_merge_that_was_never_checked() {
     b.retry_push(&item(MorningKind::Ready, 7));
     assert_eq!(calls.value(), 0);
 }
-
-// undo merge
 
 #[test]
 fn undo_merge_forgets_the_outcome_and_leaves_a_note() {
@@ -359,7 +347,6 @@ fn undo_merge_forgets_the_outcome_and_leaves_a_note() {
     assert!(a.note(&it.id).is_some());
     assert!(!a.is_running(&it.id));
 
-    // a new action clears the note; an item that left loses it
     a.merge(&it);
     assert_eq!(a.note(&it.id), None);
     a.undo_merge(&it);

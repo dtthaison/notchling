@@ -1,5 +1,3 @@
-//! Counts tool calls the way the terminal collapses them: "Read 2 files, searched for 1 pattern".
-
 use super::text::{last_path_component, prefix_chars};
 use serde_json::{Map, Value};
 use std::collections::{HashMap, HashSet};
@@ -11,7 +9,6 @@ pub struct ToolTally {
     files: HashMap<String, HashSet<String>>,
 }
 
-/// The last word of an `mcp__server__tool` name.
 fn short_tool(tool: &str) -> String {
     tool.rsplit('_')
         .find(|p| !p.is_empty())
@@ -19,7 +16,6 @@ fn short_tool(tool: &str) -> String {
         .to_string()
 }
 
-/// The terminal counts a shell command that only searches or reads as a search or a read.
 fn bash_kind(command: &str) -> &'static str {
     let words: Vec<&str> = command
         .split(['&', '|', ';', '\n'])
@@ -122,7 +118,6 @@ impl ToolTally {
     }
 }
 
-/// A short "what it's doing now" line, like "Editing main.swift".
 pub fn describe(tool: &str, input: &Map<String, Value>) -> String {
     let file = |key: &str| {
         last_path_component(input.get(key).and_then(Value::as_str).unwrap_or("")).to_string()

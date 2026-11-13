@@ -1,33 +1,20 @@
-//! The iOS Simulator panel's pure part: the simulators from `simctl list devices available -j`
-//! (booted, and the ones the menu can boot), the runtimes and device types a new one can have,
-//! the `simctl` commands the panel runs, the zoom and the phone's frame around the screen, the
-//! keys Simulator takes for Home and Rotate, strokes drawn into a screenshot (Annotate), and the
-//! names of the files it saves (Simulator's own: "Simulator Screenshot - iPhone 17 - 2026-11-10 at
-//! 17.10.05.png"). The panel itself is `chat::view::simulator`.
-
 use std::path::Path;
 
 use notchling_engine::control::Command;
 use notchling_engine::pages::clock::Civil;
 use serde_json::Value;
 
-/// `xcrun`, which finds `simctl` in the selected Xcode.
 pub const XCRUN: &str = "/usr/bin/xcrun";
 
-/// How many shut-down simulators the menu offers to boot.
 pub const MENU_AVAILABLE: usize = 8;
 
-/// One simulator.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Device {
     pub udid: String,
     pub name: String,
-    /// "iOS 26.5".
     pub runtime: String,
     pub booted: bool,
-    /// `lastUsedAt` as simctl writes it (ISO 8601, so it sorts as text); empty when never used.
     pub last_used: String,
-    /// The device type's id (`…SimDeviceType.iPhone-17`).
     pub kind: String,
 }
 
@@ -36,7 +23,6 @@ impl Device {
         self.kind.contains("iPad")
     }
 
-    /// The points one pixel of its screenshot is: 2 on an iPad, 3 on a phone.
     pub fn scale(&self) -> f32 {
         if self.ipad() {
             2.0
@@ -46,8 +32,6 @@ impl Device {
     }
 }
 
-/// The simulators in a `simctl list devices … -j` answer, by name; nothing for an answer that
-/// isn't one.
 pub fn devices(json: &str) -> Vec<Device> {
     let Ok(v) = serde_json::from_str::<Value>(json) else {
         return Vec::new();
@@ -79,8 +63,6 @@ pub fn devices(json: &str) -> Vec<Device> {
     devices
 }
 
-/// The menu's two sections: the booted simulators, and the shut-down ones it can boot (phones and
-/// iPads, most recently used first, [`MENU_AVAILABLE`] at most).
 pub fn menu(all: &[Device]) -> (Vec<Device>, Vec<Device>) {
     let booted = all.iter().filter(|d| d.booted).cloned().collect();
     let mut available: Vec<Device> = all
@@ -93,7 +75,6 @@ pub fn menu(all: &[Device]) -> (Vec<Device>, Vec<Device>) {
     (booted, available)
 }
 
-/// `com.apple.CoreSimulator.SimRuntime.iOS-26-5` as "iOS 26.5"; an id of another shape as itself.
 pub fn runtime_name(id: &str) -> String {
     let Some(tail) = id.rsplit('.').next().filter(|t| t.contains('-')) else {
         return id.to_owned();
@@ -107,17 +88,13 @@ pub fn runtime_name(id: &str) -> String {
     format!("{platform} {}", version.join("."))
 }
 
-/// A runtime a new simulator can have, with the phones and iPads it runs.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Runtime {
     pub id: String,
-    /// "iOS 26.5".
     pub name: String,
-    /// (name, id), as Apple lists them.
     pub types: Vec<(String, String)>,
 }
 
-/// The iOS runtimes in `simctl list runtimes available -j`, newest first.
 pub fn runtimes(json: &str) -> Vec<Runtime> {
     let Ok(v) = serde_json::from_str::<Value>(json) else {
         return Vec::new();
@@ -177,7 +154,6 @@ pub fn shutdown_command(udid: &str) -> Command {
     simctl(&["shutdown", udid])
 }
 
-/// Photos and videos into the device's library.
 pub fn add_media_command(udid: &str, paths: &[impl AsRef<Path>]) -> Command {
     let paths: Vec<String> = paths
         .iter()
@@ -188,18 +164,15 @@ pub fn add_media_command(udid: &str, paths: &[impl AsRef<Path>]) -> Command {
     simctl(&args)
 }
 
-/// A new simulator; its output is the new udid.
 pub fn create_command(name: &str, kind: &str, runtime: &str) -> Command {
     simctl(&["create", name, kind, runtime])
 }
 
-/// One frame of `udid`'s screen, as JPEG (smaller and quicker for the live view) or PNG.
 pub fn screenshot_command(udid: &str, path: &Path, jpeg: bool) -> Command {
     let kind = if jpeg { "--type=jpeg" } else { "--type=png" };
     simctl(&["io", udid, "screenshot", kind, &path.to_string_lossy()])
 }
 
-/// A recording of `udid`'s screen to `path`, until it gets SIGINT.
 pub fn record_args(udid: &str, path: &Path) -> Vec<String> {
     [
         "simctl",
@@ -215,17 +188,12 @@ pub fn record_args(udid: &str, path: &Path) -> Vec<String> {
     .collect()
 }
 
-/// What Simulator does on a key of its own, since `simctl` can't press Home or turn the device.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SimKey {
-    /// ⇧⌘H.
     Home,
-    /// ⌘→: Rotate Right.
     Rotate,
 }
 
-/// The AppleScript that brings the device's Simulator window forward and presses `key` there.
-/// Simulator names its windows "<device> – <runtime>"; a name's quotes and backslashes are escaped.
 pub fn key_script(device: &str, key: SimKey) -> String {
     let name: String = device
         .chars()
@@ -248,21 +216,15 @@ pub fn key_script(device: &str, key: SimKey) -> String {
     )
 }
 
-/// How big the screen is drawn.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Zoom {
-    /// As big as the panel lets it.
     Fit,
-    /// A share of the device's own size in points (1 = actual size).
     Times(f32),
 }
 
-/// The zoom steps − and + go through.
 pub const STEPS: [f32; 9] = [0.25, 0.33, 0.5, 0.67, 0.75, 1.0, 1.25, 1.5, 2.0];
 
 impl Zoom {
-    /// The screen's size in the panel: `pixels` is the screenshot's, `scale` its points per pixel,
-    /// `room` the space the phone has (its frame included, `frame` points a side).
     pub fn size(self, pixels: (f32, f32), scale: f32, room: (f32, f32), frame: f32) -> (f32, f32) {
         let points = (pixels.0 / scale, pixels.1 / scale);
         let times = match self {
@@ -272,7 +234,6 @@ impl Zoom {
         (points.0 * times, points.1 * times)
     }
 
-    /// The next step bigger (`up`) or smaller, from what it shows now.
     pub fn step(
         self,
         up: bool,
@@ -300,7 +261,6 @@ fn fit_times(points: (f32, f32), room: (f32, f32), frame: f32) -> f32 {
     w.min(h).max(0.05)
 }
 
-/// The phone's frame for a screen `width` wide: the bezel's thickness and the screen's corner.
 pub fn frame_for(width: f32, ipad: bool) -> (f32, f32) {
     if ipad {
         ((width * 0.035).clamp(6.0, 22.0), width * 0.03)
@@ -309,8 +269,6 @@ pub fn frame_for(width: f32, ipad: bool) -> (f32, f32) {
     }
 }
 
-/// Burns `strokes` (each a line through points, as shares 0–1 of the image's width and height)
-/// into a BGRA image `width` × `height`, `thick` pixels wide, in `color` (B, G, R).
 pub fn burn(
     bgra: &mut [u8],
     width: usize,
@@ -357,14 +315,12 @@ pub fn burn(
     }
 }
 
-/// What a file the panel saves holds.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Saved {
     Screenshot,
     Recording,
 }
 
-/// The file's name, as Simulator names its own: the device's name with no `/` or `:` in it.
 pub fn saved_name(kind: Saved, device: &str, at: Civil) -> String {
     let (what, ext) = match kind {
         Saved::Screenshot => ("Screenshot", "png"),
@@ -456,7 +412,6 @@ mod tests {
         let all = devices(LIST);
         let phone = &all[1];
         let ipad = &all[3];
-        // The screenshot has the Dynamic Island in it already: only the scale differs.
         assert!(!phone.ipad() && phone.scale() == 3.0);
         assert!(ipad.ipad() && ipad.scale() == 2.0);
     }
@@ -566,7 +521,6 @@ mod tests {
 
     #[test]
     fn fit_fills_the_room_and_steps_go_from_what_shows() {
-        // A 1206 × 2622 phone is 402 × 874 points.
         let px = (1206.0, 2622.0);
         let (w, h) = Zoom::Fit.size(px, 3.0, (420.0, 1000.0), 10.0);
         assert!(
@@ -579,7 +533,6 @@ mod tests {
             Zoom::Times(1.0).size(px, 3.0, (10.0, 10.0), 0.0),
             (402.0, 874.0)
         );
-        // From a fit of about 0.995: + is 1.25 (1 is what shows), − is 0.75.
         let fit = Zoom::Fit;
         assert_eq!(
             fit.step(true, px, 3.0, (420.0, 1000.0), 10.0),
@@ -629,11 +582,9 @@ mod tests {
         assert_eq!(at(0, 4), [1, 2, 3, 255]);
         assert_eq!(at(10, 0), [0, 0, 0, 0], "far from the line");
         assert_eq!(at(10, 9), [0, 0, 0, 0]);
-        // One tap is a dot.
         let mut dot = vec![0u8; w * h * 4];
         burn(&mut dot, w, h, &[vec![(0.5, 0.5)]], 4.0, (9, 9, 9));
         assert_eq!(dot[(5 * w + 10) * 4], 9);
-        // Off the image draws nothing and doesn't panic.
         let mut off = vec![0u8; w * h * 4];
         burn(
             &mut off,

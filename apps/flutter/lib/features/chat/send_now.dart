@@ -10,8 +10,6 @@ import '../../l10n/app_localizations.dart';
 import '../connection/connection.dart';
 import '../sessions/sessions_notifier.dart';
 
-/// False once a Mac has answered `session.sendNow` with "no such op" (an older Notchling): the action is hidden
-/// from then on instead of failing on every queued message.
 class SendNowSupport extends Notifier<bool> {
   @override
   bool build() => true;
@@ -21,8 +19,6 @@ class SendNowSupport extends Notifier<bool> {
 
 final NotifierProvider<SendNowSupport, bool> sendNowSupportProvider = NotifierProvider<SendNowSupport, bool>(SendNowSupport.new);
 
-/// The "Gửi ngay" action under a queued bubble: confirms, asks the Mac to interrupt the running turn, and shows a
-/// spinner until the transcript turns the bubble into a normal one (the widget is then gone).
 class SendNowAction extends ConsumerStatefulWidget {
   const SendNowAction({super.key, required this.sessionId});
   final String sessionId;
@@ -53,7 +49,6 @@ class _SendNowActionState extends ConsumerState<SendNowAction> {
     final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
     try {
       await client.sessionSendNow(widget.sessionId);
-      // Stays busy: the queued bubble is replaced by the transcript within a second or two.
       unawaited(Future<void>.delayed(const Duration(seconds: 8), () {
         if (mounted) setState(() => _busy = false);
       }));

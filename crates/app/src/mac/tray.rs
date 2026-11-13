@@ -1,6 +1,3 @@
-//! The menu bar item (`NSStatusItem`) and its menu, built from `crate::menu`'s entries. Picking an
-//! entry calls back with its `Command`; the shell decides what it means.
-
 use std::cell::RefCell;
 
 use objc2::rc::Retained;
@@ -14,7 +11,6 @@ use objc2_foundation::{ns_string, NSString};
 
 use crate::menu::{tray_menu, tray_symbol, Command, Entry, MenuState};
 
-/// What the target holds: the commands by menu item tag, and whom to tell.
 pub struct TargetIvars {
     commands: RefCell<Vec<Command>>,
     on_command: Box<dyn Fn(Command)>,
@@ -29,7 +25,6 @@ define_class!(
     pub struct MenuTarget;
 
     impl MenuTarget {
-        /// Every action item points here; its tag says which command it is.
         #[unsafe(method(fire:))]
         fn fire(&self, sender: &NSMenuItem) {
             let command = usize::try_from(sender.tag())
@@ -53,7 +48,6 @@ impl MenuTarget {
     }
 }
 
-/// The installed item. Dropping it removes the item from the menu bar.
 pub struct Tray {
     item: Retained<NSStatusItem>,
     target: Retained<MenuTarget>,
@@ -61,7 +55,6 @@ pub struct Tray {
 }
 
 impl Tray {
-    /// Puts the item in the menu bar with the menu for `state`.
     pub fn install(
         mtm: MainThreadMarker,
         state: &MenuState,
@@ -77,7 +70,6 @@ impl Tray {
         tray
     }
 
-    /// Rebuilds the menu and the icon for a new state (a mode picked, an account switched).
     pub fn update(&self, state: &MenuState) {
         if let Some(button) = self.item.button(self.mtm) {
             let image = NSImage::imageWithSystemSymbolName_accessibilityDescription(

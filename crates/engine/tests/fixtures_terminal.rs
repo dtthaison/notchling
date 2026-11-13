@@ -1,16 +1,7 @@
-//! The recorded terminal bytes, replayed into the Rust screen (E3). The named assertions of
-//! `TerminalScreenTests` and `AskDialogTests` are in `terminal_screen.rs` and `terminal_ask_dialog.rs`;
-//! here every recording, old or new, is replayed whole. A recording from `tools/record-reply-fixtures.sh`
-//! carries the screen the Swift emulator ended on (`screenAtEnd`) and the resizes it made, so the Rust
-//! screen has to end on the same lines. New recordings are covered here without a change.
-
 use notchling_engine::terminal::{ask_dialog, dialog_open, TerminalScreen};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// The size a recording starts at: the older ones are Chat's terminal (30×100) for the plugin phases and
-/// `ReplySender`'s attach (50×200) for the question; the recorder's own default is 50×200 too, and one
-/// with no resize step ends at the size it started.
 fn start_size(path: &Path, meta: Option<&serde_json::Value>) -> (usize, usize) {
     if let Some(meta) = meta {
         let resized = meta["steps"].as_array().is_some_and(|steps| {
@@ -45,7 +36,6 @@ fn meta_of(path: &Path) -> Option<serde_json::Value> {
     Some(serde_json::from_str(&text).expect("a recorder description is JSON"))
 }
 
-/// Replays a recording, resizing where the recorder resized, the way it fed its own screen.
 fn replay(path: &Path, bytes: &[u8], chunk: usize) -> TerminalScreen {
     let meta = meta_of(path);
     let (rows, cols) = start_size(path, meta.as_ref());
@@ -92,8 +82,6 @@ fn every_recording_replays_to_a_drawn_screen() {
     }
 }
 
-/// Bytes arrive from a pty in whatever pieces the kernel hands over: a sequence or a character cut in
-/// two must draw the same screen as the whole.
 #[test]
 fn every_recording_draws_the_same_however_it_is_split() {
     for path in recordings() {
@@ -111,7 +99,6 @@ fn every_recording_draws_the_same_however_it_is_split() {
     }
 }
 
-/// A recorder description says what the Swift screen showed at the end; the Rust screen agrees.
 #[test]
 fn recorder_recordings_end_on_the_swift_screen() {
     for path in recordings() {
@@ -184,14 +171,12 @@ fn every_recording_is_non_empty_terminal_output() {
     }
 }
 
-/// A recording made by the recorder has a `.json` beside it saying where each phase starts; it has to
-/// agree with the bytes, since the replay harness slices by those offsets.
 #[test]
 fn recorder_descriptions_match_their_bytes() {
     for path in recordings() {
         let described = path.with_extension("json");
         if !described.exists() {
-            continue; // the older recordings (plugin-*, question-open) predate the recorder
+            continue;
         }
         let bytes = fs::read(&path).expect("readable recording");
         let text = fs::read_to_string(&described)

@@ -1,21 +1,11 @@
-//! Codex and Antigravity CLI sessions on the phone (Swift `ForeignSessions`, the pure part): Chat's
-//! rows and conversations mapped onto the bridge's sessions and chat messages. Their ids are
-//! Chat's row ids (`codex:<id>`, `agy:<id>`), `control` is `job`, and `tool` says which tool.
-//!
-//! Message ids are hashed from the session and item ids, so an item keeps its id between reads (the
-//! hub pushes a message once, by id), and they equal the Swift app's for the same item.
-
 use super::model::*;
 use crate::transcript::model::{Conversation, DiffKind, ItemKind, ToolCall, ToolKind};
 use notchling_protocol::generated as wire;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 
-/// Rows older than this aren't listed.
 pub const MAX_AGE_MS: f64 = 7.0 * 86_400_000.0;
-/// At most this many rows of each tool.
 pub const PER_TOOL: usize = 30;
-/// An Antigravity permission's request id: `agy-perm:<row id>:<rpc id>`.
 pub const PROMPT_PREFIX: &str = "agy-perm:";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -32,7 +22,6 @@ impl Tool {
         }
     }
 
-    /// `tool` on the wire.
     pub fn name(self) -> &'static str {
         match self {
             Tool::Codex => "codex",
@@ -41,27 +30,21 @@ impl Tool {
     }
 }
 
-/// A Codex or Antigravity row as Chat lists it (Swift `Agent` with a `.codex`/`.antigravity` target).
 #[derive(Debug, Clone, PartialEq)]
 pub struct ForeignRow {
-    /// `codex:<id>` or `agy:<id>`.
     pub id: String,
     pub name: String,
     pub project: String,
     pub cwd: String,
-    /// When it was last used, in milliseconds since the epoch.
     pub since_ms: f64,
-    /// The row's own group says working (a Codex rollout whose turn is still open).
     pub working: bool,
     pub transcript_path: Option<String>,
 }
 
-/// One answer an Antigravity permission offers.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PermissionOption {
     pub id: String,
     pub name: String,
-    /// `allow_once`, `allow_always`, `reject_once`, `reject_always`.
     pub kind: String,
 }
 
@@ -71,16 +54,13 @@ impl PermissionOption {
     }
 }
 
-/// Antigravity's `session/request_permission`, waiting.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AcpPermission {
-    /// The JSON-RPC id, as text.
     pub rpc_id: String,
     pub call: ToolCall,
     pub options: Vec<PermissionOption>,
 }
 
-/// `codex:abc` gives `(Codex, "abc")`; None for a Claude Code session id.
 pub fn parse(row_id: &str) -> Option<(Tool, String)> {
     [Tool::Codex, Tool::Agy].into_iter().find_map(|tool| {
         let id = row_id.strip_prefix(tool.id_prefix())?;
@@ -88,8 +68,6 @@ pub fn parse(row_id: &str) -> Option<(Tool, String)> {
     })
 }
 
-/// Rows worth showing: not closed in Chat (`closed`: row id to when, in seconds; a row comes back
-/// once used after that), used within `max_age_ms`, newest first, at most `per_tool` of each.
 pub fn visible(
     rows: &[ForeignRow],
     closed: &HashMap<String, f64>,
@@ -124,8 +102,6 @@ pub fn visible(
     out
 }
 
-/// A row as a bridge session. `working` is the runners' live answer, which beats the row's own;
-/// a waiting permission makes it need input.
 pub fn session(row: &ForeignRow, working: bool, pending: Option<PendingPrompt>) -> Option<Session> {
     let (tool, _) = parse(&row.id)?;
     let state = if pending.is_some() {
@@ -135,7 +111,6 @@ pub fn session(row: &ForeignRow, working: bool, pending: Option<PendingPrompt>) 
     } else {
         SessionState::Done
     };
-    // The phone treats `job` as a session it can type into; sends are routed by `tool`.
     let mut session = Session::new(
         &row.id,
         &row.name,
@@ -152,7 +127,6 @@ pub fn session(row: &ForeignRow, working: bool, pending: Option<PendingPrompt>) 
     Some(session)
 }
 
-/// The newest assistant text and the context size, for the list and the chat header.
 pub fn enrich(session: &mut Session, conversation: &Conversation) {
     let last_reply = conversation
         .items
@@ -182,8 +156,6 @@ pub fn enrich(session: &mut Session, conversation: &Conversation) {
     }
 }
 
-/// A conversation as chat messages. `hold_tail` drops a last item that may still grow (a streaming
-/// reply, a tool row gaining calls), so it goes out whole once the turn ends.
 pub fn messages(
     conversation: &Conversation,
     session_id: &str,
@@ -239,8 +211,6 @@ pub fn messages(
     out
 }
 
-/// One call as a chat step: output capped at 6,000 characters, at most 120 diff rows, hunk headers
-/// dropped, and the first absolute path of a read or edit as its path.
 pub fn step(call: &ToolCall) -> wire::ToolStep {
     let diff: Vec<String> = call
         .diff
@@ -280,7 +250,6 @@ pub fn step(call: &ToolCall) -> wire::ToolStep {
     }
 }
 
-/// "Ran 2 shell commands, edited 1 file", as the Claude Code chat words it.
 pub fn tool_summary(calls: &[ToolCall]) -> String {
     let mut order: Vec<ToolKind> = Vec::new();
     let mut counts: Vec<usize> = Vec::new();
@@ -321,8 +290,6 @@ pub fn tool_summary(calls: &[ToolCall]) -> String {
     }
 }
 
-/// Antigravity's permission as the bridge's: the phone gets Allow and Deny, which answer with the
-/// permission's own one-time options (Always Allow and the like stay on the computer).
 pub fn prompt(permission: &AcpPermission, row_id: &str, created_ms: f64) -> PendingPrompt {
     let call = &permission.call;
     let source = if call.input.is_empty() {
@@ -347,8 +314,6 @@ pub fn prompt(permission: &AcpPermission, row_id: &str, created_ms: f64) -> Pend
     }
 }
 
-/// `(row id, rpc id)` from an id made by [`prompt`]. The row id is `agy:<uuid>`, so the rpc id
-/// starts after the second colon and may hold colons of its own.
 pub fn parse_prompt(id: &str) -> Option<(String, String)> {
     let rest = id.strip_prefix(PROMPT_PREFIX)?;
     let mut pieces = rest.splitn(3, ':');
@@ -356,7 +321,6 @@ pub fn parse_prompt(id: &str) -> Option<(String, String)> {
     (!rpc.is_empty()).then(|| (format!("{tool}:{row}"), rpc.to_string()))
 }
 
-/// The option that answers `response`; None means cancel the turn (no option of that kind).
 pub fn option(response: &PromptResponse, permission: &AcpPermission) -> Option<String> {
     let find = |kind: &str, allows: bool| {
         permission
@@ -373,7 +337,6 @@ pub fn option(response: &PromptResponse, permission: &AcpPermission) -> Option<S
     }
 }
 
-/// The first 16 bytes of SHA-256 of `seed` as an uppercase UUID string (Swift `stableUUID`).
 pub fn stable_uuid(seed: &str) -> String {
     let digest = Sha256::digest(seed.as_bytes());
     let hex: String = digest[..16].iter().map(|b| format!("{b:02X}")).collect();

@@ -1,13 +1,3 @@
-//! The usage-limit ring at the right end of the reply box's footer, and the card that opens over it
-//! while the pointer is on the ring or the card (part "Limit Ring" and "Limit Popover"). The ring
-//! is a 16 pt arc of the 5-hour limit in a 28 pt ghost button; the card lists every limit the
-//! session's account has, with "See all →" opening the Accounts sheet on that account. The rules
-//! (which limits, the arc and its ink, the rows, the reset words, the grace delay) are
-//! `chat::limit_ring`; this draws them. Claude Code's limits are the account in use's, the same
-//! windows as the header's meters (a session in a lane has none yet); Codex's are its active
-//! login's first group; Antigravity's are every group of its active login, the session model's
-//! group first, and its ring is that group's first bar. Unknown limits draw nothing.
-
 use std::time::Duration;
 
 use gpui::{
@@ -24,18 +14,13 @@ use super::ChatView;
 use crate::accounts::limits::Zone;
 use crate::chat::limit_ring::{self as rules, Arc, Hover, Limit, Wait, GRACE_MS, OPEN_MS};
 
-/// Set to `1`, a render draws the card open, since nothing hovers in a picture.
 pub const LIMITS_ENV: &str = "NOTCHLING_RENDER_LIMITS";
 
-/// The ring's drawing size and stroke, in points.
 const RING: f32 = 16.0;
 const STROKE: f32 = 2.5;
-/// The card's width, and the gap between it and the ring (part of the card's hover area, so the
-/// pointer crosses it without leaving).
 const CARD_WIDTH: f32 = 340.0;
 const CARD_GAP: f32 = 6.0;
 
-/// What Chat keeps for the ring: where the pointer is, and a render's switch.
 #[derive(Default)]
 pub struct State {
     hover: Hover,
@@ -43,12 +28,10 @@ pub struct State {
 }
 
 impl State {
-    /// Whether the card is up over the reply box.
     pub fn card_open(&self) -> bool {
         self.hover.open(self.preview)
     }
 
-    /// The render constructor's: the card drawn open (`NOTCHLING_RENDER_LIMITS=1`).
     pub fn preview(on: bool) -> State {
         State {
             preview: on,
@@ -64,7 +47,6 @@ fn now_secs() -> f64 {
         .unwrap_or(0.0)
 }
 
-/// The selected session's limits and where "See all" goes.
 pub(super) struct Shown {
     pub limits: Vec<Limit>,
     pub arc: Option<Arc>,
@@ -117,8 +99,6 @@ impl ChatView {
     }
 }
 
-/// Paints the arc: a faint full circle, then the used part from 12 o'clock clockwise with round
-/// ends (GPUI's path strokes have butt caps, so the ends are small discs).
 fn paint_ring(
     bounds: Bounds<Pixels>,
     arc: Arc,
@@ -184,7 +164,6 @@ fn ring_mark(arc: Arc, a: Appearance) -> impl IntoElement {
     .size(px(RING))
 }
 
-/// One limit: its name with the reset and percent at the right, and a thin bar under it.
 fn row(r: &rules::Row, a: Appearance) -> Div {
     let ink = rules::ink(r.fill);
     let mut right = div().flex().items_center().gap(px(8.0)).flex_shrink_0();
@@ -255,7 +234,6 @@ fn popover(
                 .child(see_all),
         )
         .children(card.rows.iter().map(|r| row(r, a)));
-    // The transparent gap under the card belongs to it, so the pointer can cross from the ring.
     div()
         .id("limit-popover")
         .absolute()
@@ -268,8 +246,6 @@ fn popover(
         .part_at("Limit Popover", Corner::TopTrailing, a, cx)
 }
 
-/// The ring for the footer, with its card while the pointer is over either; nothing when the
-/// session has no 5-hour limit to show.
 pub(super) fn ring(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Option<Div> {
     let shown = shown(view)?;
     let arc = shown.arc?;
@@ -296,7 +272,6 @@ pub(super) fn ring(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -
     .px(px(0.0))
     .rounded(px(RADIUS_SM))
     .on_hover(cx.listener(|this, inside: &bool, _, cx| this.limit_hover(true, *inside, cx)))
-    // A click opens the card at once (or closes it), without the hover's wait.
     .on_click(cx.listener(|this, _, _, cx| {
         this.limit_ring.hover.click();
         cx.notify();

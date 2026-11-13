@@ -1,5 +1,3 @@
-//! The listing: `AgentMonitor.poll` without the process lookups.
-
 use super::agent::{Agent, AgentGroup, AgentTarget};
 use super::jobs::{agent_from_job, agent_from_session, rank, read_jobs, read_sessions, Rank};
 use super::lanes::{config_dirs, Roots};
@@ -7,18 +5,12 @@ use crate::transcript::util::modified_secs;
 use serde_json::Value;
 use std::collections::HashMap;
 
-/// What the engine can't learn from files.
 pub struct Probes<'a> {
-    /// Whether a process id is alive (a `sessions/<pid>.json` of a dead process is skipped).
     pub is_alive: &'a dyn Fn(u32) -> bool,
-    /// The app hosting a terminal session's process ("Terminal", "iTerm"), `None` when unknown.
     pub host_app: &'a dyn Fn(u32) -> Option<String>,
 }
 
 impl Probes<'static> {
-    /// The default without the app's help: on Unix liveness is `kill(pid, 0)`, as `AgentMonitor.isAlive`
-    /// does (a process that exists but isn't ours answers `EPERM`, still alive); elsewhere every pid is
-    /// assumed alive, so a stale file shows until the app adds a real probe. No host app.
     pub fn from_proc() -> Self {
         Probes {
             is_alive: &pid_alive,
@@ -29,7 +21,6 @@ impl Probes<'static> {
 
 #[cfg(unix)]
 fn pid_alive(pid: u32) -> bool {
-    // 0 and anything past `pid_t` would make `kill` probe a process group, not a process.
     let Ok(pid) = libc::pid_t::try_from(pid) else {
         return false;
     };
@@ -52,10 +43,7 @@ fn no_host(_: u32) -> Option<String> {
     None
 }
 
-/// Remembers what earlier polls saw: a terminal session that ended shows as "Exited" with a resume
-/// target, and each session's lane is kept so an ended one resumes where it ran.
 pub struct Monitor {
-    /// Completed rows older than this (milliseconds) are hidden. Default 24 hours.
     pub completed_window_ms: i64,
     last_live: HashMap<String, Agent>,
     exited: HashMap<String, Agent>,
@@ -74,14 +62,11 @@ impl Default for Monitor {
 }
 
 impl Monitor {
-    /// Reads every config folder (the main one, then each lane's) and returns the rows: needs input,
-    /// then working, then completed, newest first within each. `now_ms` is the clock.
     pub fn poll(&mut self, roots: &Roots, probes: &Probes, now_ms: i64) -> Vec<Agent> {
         let mut result: Vec<Agent> = Vec::new();
         let mut live: HashMap<String, Agent> = HashMap::new();
         let mut lanes: HashMap<String, String> = HashMap::new();
         let mut main_ids: Vec<String> = Vec::new();
-        // One row per conversation: a moved session's stopped copy in the folder it left is hidden.
         let mut job_rank: HashMap<String, Rank> = HashMap::new();
 
         for config in config_dirs(roots) {
@@ -126,7 +111,6 @@ impl Monitor {
                 if job_id.is_some_and(|id| jobs.contains_key(id)) {
                     continue;
                 }
-                // A terminal session that handed its work to a background job is shown as that job.
                 let parked = s.get("parkedJobId").and_then(Value::as_str);
                 if parked.is_some_and(|id| jobs.contains_key(id)) {
                     continue;
@@ -144,7 +128,6 @@ impl Monitor {
         }
 
         self.lane_of_session.extend(lanes.clone());
-        // Moved back to the main login: forget the lane it left.
         for id in main_ids {
             if !lanes.contains_key(&id) {
                 self.lane_of_session.remove(&id);
@@ -193,7 +176,6 @@ impl Monitor {
         result
     }
 
-    /// The lane folder a session was last seen in, `None` for the main login or an unseen session.
     pub fn config_dir_for_session(&self, id: &str) -> Option<String> {
         self.lane_of_session.get(id).cloned()
     }

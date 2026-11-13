@@ -1,7 +1,6 @@
 use super::claude_code::*;
 use crate::sessions::testutil::TempDir;
 
-/// The shape seen in a real `~/.claude.json`, with other keys around it.
 const CONFIG: &str = r#"{
   "numStartups": 3,
   "oauthAccount": {"emailAddress": "someone@example.com"},

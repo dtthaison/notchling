@@ -1,9 +1,3 @@
-//! The browser sign-in behind `accounts.add.begin/finish`: a listener on 127.0.0.1 that the
-//! sign-in page sends its code back to (`AccountLogin.swift`), with the engine's
-//! [`SignIn`] for the pure parts. One sign-in at a time; it listens for [`SIGN_IN_FOR`], and stops
-//! at once when it is cancelled or the `accounts` switch goes off. The code is exchanged and the
-//! login saved only while the switch is on.
-
 use crate::acting_ops::{bad, Room};
 use crate::switches::SwitchFlag;
 use notchling_engine::accounts::claude::signin::{reply, Callback, SignIn};
@@ -16,9 +10,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
-/// How long a sign-in waits for the browser.
 pub const SIGN_IN_FOR: Duration = Duration::from_secs(10 * 60);
-/// The most of a request to the listener that is read.
 const REQUEST_LIMIT: usize = 16 * 1024;
 
 struct Job {
@@ -38,7 +30,6 @@ impl Job {
     }
 }
 
-/// What a finished sign-in calls (the ops publish the new list).
 pub type Added = Arc<dyn Fn() + Send + Sync>;
 
 #[derive(Default)]
@@ -48,8 +39,6 @@ pub struct SignIns {
 }
 
 impl SignIns {
-    /// Starts listening and returns `{login, url}`: the sign-in's id and the page to open. A
-    /// sign-in already going is cancelled.
     pub fn begin(
         &self,
         store: Arc<ClaudeAccounts>,
@@ -91,8 +80,6 @@ impl SignIns {
         Ok(json!({"login": login, "url": url}))
     }
 
-    /// `{login, state: "waiting" | "added" | "failed" | "cancelled", account?, error?}`, waiting up
-    /// to `wait` for the end. With `cancel`, the sign-in stops first.
     pub fn finish(&self, login: &str, cancel: bool, wait: Duration) -> Result<Value, ApiError> {
         let job = self
             .current
@@ -116,7 +103,6 @@ impl SignIns {
             .unwrap_or_else(|| json!({"login": login, "state": "waiting"})))
     }
 
-    /// Stops every sign-in (a new one, or the switch going off).
     pub fn cancel_all(&self) {
         if let Some(job) = self
             .current
@@ -129,7 +115,6 @@ impl SignIns {
     }
 }
 
-/// Listens until a code comes, the time is up, or it is stopped; the outcome without `login`.
 fn listen(
     listener: &TcpListener,
     sign_in: &SignIn,
@@ -177,8 +162,6 @@ fn listen(
     }
 }
 
-/// Reads one request and answers it: the code for our callback (redirected to the success page),
-/// `None` for anything else (404).
 fn answer(mut stream: TcpStream, sign_in: &SignIn) -> Option<notchling_engine::accounts::Secret> {
     let _ = stream.set_nonblocking(false);
     let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));

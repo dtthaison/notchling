@@ -1,18 +1,10 @@
-//! Runs a command with a secret's variables in its environment (Swift `SecretRunner`), streaming its
-//! stdout and stderr through a [`Redactor`] each. One argument runs through `/bin/sh -c`, so the
-//! caller can quote it and let that shell expand the variables; more run through `/usr/bin/env`.
-//! The command reads this process's stdin. The exit code is the command's, or 128 plus the signal
-//! that ended it.
-
 use super::redact::Redactor;
 use std::collections::BTreeMap;
 use std::io::{Read, Write};
 use std::process::{Command, Stdio};
 
-/// The code when the command couldn't start (as a shell's "command not found").
 pub const COULD_NOT_RUN: i32 = 127;
 
-/// What the command is run with.
 pub fn command_for(args: &[String]) -> Option<Command> {
     match args {
         [] => None,
@@ -29,8 +21,6 @@ pub fn command_for(args: &[String]) -> Option<Command> {
     }
 }
 
-/// Runs `args` with `extra` added to this process's environment, writing its output to `out` and
-/// `err` with every value in `hide` replaced by its mask.
 pub fn run(
     args: &[String],
     extra: &BTreeMap<String, String>,
@@ -50,7 +40,6 @@ pub fn run(
     let mut child = match command.spawn() {
         Ok(child) => child,
         Err(e) => {
-            // The command's own text only: the environment (the values) is never in this error.
             let _ = writeln!(err, "Couldn't run {}: {e}", args[0]);
             return COULD_NOT_RUN;
         }
@@ -70,7 +59,6 @@ pub fn run(
     }
 }
 
-/// Copies one pipe through its own redactor until it closes.
 fn pump(mut from: impl Read, hide: &BTreeMap<String, String>, to: &mut (dyn Write + Send)) {
     let mut redactor = Redactor::new(hide);
     let mut buf = vec![0u8; 64 * 1024];
@@ -83,7 +71,6 @@ fn pump(mut from: impl Read, hide: &BTreeMap<String, String>, to: &mut (dyn Writ
             Err(_) => break,
         };
         let ready = redactor.feed(&buf[..n]);
-        // A reader that went away (a closed pipe) still lets the command run to its end.
         if writable && (to.write_all(&ready).is_err() || to.flush().is_err()) {
             writable = false;
         }

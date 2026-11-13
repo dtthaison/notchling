@@ -1,6 +1,3 @@
-//! `AppURL`: `agentconsole://open[?phones=1]`, how anything asks the app to come to the front, and
-//! with `phones=1` to tell every connected phone to open too.
-
 pub const SCHEME: &str = "agentconsole";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -8,7 +5,6 @@ pub enum Action {
     Open { phones: bool },
 }
 
-/// `None` for anything that is not a known action. Unknown parameters are ignored.
 pub fn parse(url: &str) -> Option<Action> {
     let (scheme, rest) = url.split_once("://")?;
     if !scheme.eq_ignore_ascii_case(SCHEME) {

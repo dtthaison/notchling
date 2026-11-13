@@ -1,8 +1,3 @@
-//! The Settings sheet's Notch switches as the notch reads them: whether it shows at all
-//! (`hideNotch`), its width, the pet (`showPet`), the last reply in a peek (`showLastReply`) and
-//! answering prompts from it (`answerFromNotch`). Read from the settings store on every poll, so a
-//! change in Settings reaches the notch within one poll; a key never set reads as its default.
-
 use std::path::Path;
 
 use notchling_engine::settings::Settings;
@@ -12,18 +7,14 @@ use crate::acting::Control;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct NotchPrefs {
-    /// "Show agents in the notch": off orders the panel out.
     pub shown: bool,
     pub width: NotchWidth,
-    /// "Animate pet": off hides the pet, as the Swift app did.
     pub show_pet: bool,
     pub show_last_reply: bool,
-    /// "Answer prompts from the notch": off disables a card's options.
     pub answer: bool,
 }
 
 impl Default for NotchPrefs {
-    /// The keys' defaults.
     fn default() -> Self {
         NotchPrefs {
             shown: true,
@@ -36,7 +27,6 @@ impl Default for NotchPrefs {
 }
 
 impl NotchPrefs {
-    /// From a store; each key falls back to its default.
     pub fn from_settings(s: &Settings) -> NotchPrefs {
         let d = NotchPrefs::default();
         NotchPrefs {
@@ -51,14 +41,12 @@ impl NotchPrefs {
         }
     }
 
-    /// From the store in `data_dir`; `None` when it can't be read, so the notch keeps what it has.
     pub fn read(data_dir: &Path) -> Option<NotchPrefs> {
         Settings::open(&data_dir.join("settings.json"))
             .ok()
             .map(|s| NotchPrefs::from_settings(&s))
     }
 
-    /// A card's options: off in Settings beats whatever acting says.
     pub fn answer_gate(&self, acting: Control) -> Control {
         if self.answer {
             acting
@@ -71,7 +59,6 @@ impl NotchPrefs {
     }
 }
 
-/// Why a card's options are disabled while answering from the notch is off.
 pub const ANSWER_OFF: &str = "Answering from the notch is off in Settings.";
 
 #[cfg(test)]

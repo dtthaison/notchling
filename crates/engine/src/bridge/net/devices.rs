@@ -1,12 +1,3 @@
-//! `DeviceStore`: paired phones in `bridge/devices.json` (0600), in the Swift app's format, so a
-//! phone paired with either app connects to both. Only SHA-256 hashes of device tokens are kept.
-//!
-//! The file is what Swift's `JSONEncoder` writes with `.prettyPrinted, .sortedKeys` and `.iso8601`
-//! dates: two-space indents, `"key" : value`, `/` escaped as `\/`, whole-second UTC dates, and
-//! `lastSeen` left out until a phone has been seen. Every change re-reads the file under a lock
-//! (`.devices.json.lock`) and writes it atomically, so another writer's change isn't lost. A file
-//! that can't be read is never written over.
-
 use super::crypto::{constant_time_eq, hex_bytes, random_token, sha256, sha256_hex, uuid_v4};
 use super::files::{iso8601, parse_iso8601, write_private, FileLock};
 use serde_json::Value;
@@ -14,10 +5,8 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-/// The file's name in the bridge folder.
 pub const FILE_NAME: &str = "devices.json";
 
-/// How often `touch` writes `lastSeen` to disk per device, at most.
 pub const TOUCH_WRITE_MS: i64 = 60_000;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -25,20 +14,16 @@ pub struct PairedDevice {
     pub id: String,
     pub name: String,
     pub platform: String,
-    /// SHA-256 of the device token, hex. The token itself is never stored.
     pub token_hash: String,
-    /// Milliseconds since the epoch (whole seconds on disk).
     pub paired_at: i64,
     pub last_seen: Option<i64>,
 }
 
 #[derive(Debug)]
 pub enum StoreError {
-    /// The file is there but isn't the format: left alone.
     Unreadable(String),
     Io(std::io::Error),
     Random,
-    /// The bridge is going off ([`DeviceStore::halt`]): nothing more is written.
     Stopped,
 }
 
@@ -57,7 +42,6 @@ impl std::fmt::Display for StoreError {
 
 impl std::error::Error for StoreError {}
 
-/// Reads `file` without writing or locking anything: an absent file is no devices.
 pub fn read_devices(file: &Path) -> Result<Vec<PairedDevice>, StoreError> {
     let data = match std::fs::read(file) {
         Ok(d) => d,
@@ -67,7 +51,6 @@ pub fn read_devices(file: &Path) -> Result<Vec<PairedDevice>, StoreError> {
     decode(&data).map_err(StoreError::Unreadable)
 }
 
-/// Parses the Swift format: all or nothing, as Swift's decoder.
 pub fn decode(data: &[u8]) -> Result<Vec<PairedDevice>, String> {
     let value: Value = serde_json::from_slice(data).map_err(|e| e.to_string())?;
     let list = value.as_array().ok_or("not a list")?;
@@ -96,7 +79,6 @@ fn device_from(v: &Value) -> Result<PairedDevice, String> {
     })
 }
 
-/// The Swift format, byte for byte what Swift writes for the same records.
 pub fn encode(devices: &[PairedDevice]) -> Vec<u8> {
     if devices.is_empty() {
         return b"[\n\n]".to_vec();
@@ -119,7 +101,6 @@ pub fn encode(devices: &[PairedDevice]) -> Vec<u8> {
     format!("[\n{}\n]", objects.join(",\n")).into_bytes()
 }
 
-/// A JSON string as Foundation writes it: `/` escaped too.
 fn swift_string(text: &str) -> String {
     serde_json::to_string(text)
         .unwrap_or_else(|_| "\"\"".into())
@@ -128,22 +109,18 @@ fn swift_string(text: &str) -> String {
 
 struct State {
     devices: Vec<PairedDevice>,
-    /// The file's (modified, length) when last read, to notice another writer.
     seen: Option<(std::time::SystemTime, u64)>,
     readable: Result<(), String>,
     last_touch_write: HashMap<String, i64>,
-    /// Set by [`DeviceStore::halt`]; checked under this lock right before a write.
     halted: bool,
 }
 
-/// The store over one `devices.json`.
 pub struct DeviceStore {
     file: PathBuf,
     state: Mutex<State>,
 }
 
 impl DeviceStore {
-    /// Reads the file (writing nothing).
     pub fn open(file: PathBuf) -> DeviceStore {
         let store = DeviceStore {
             file,
@@ -159,8 +136,6 @@ impl DeviceStore {
         store
     }
 
-    /// No more writes, from now on: the bridge is going off. A write already past its check has
-    /// finished when this returns, since both hold the store's lock.
     pub fn halt(&self) {
         self.lock().halted = true;
     }
@@ -175,7 +150,6 @@ impl DeviceStore {
         state.devices.clone()
     }
 
-    /// Creates the device and returns its token. This is the only time the token exists in the clear.
     pub fn register(
         &self,
         name: &str,
@@ -199,7 +173,6 @@ impl DeviceStore {
         Ok((device, token))
     }
 
-    /// Checks every stored hash, so the time taken does not depend on which device matched.
     pub fn authenticate(&self, token: &str) -> Option<PairedDevice> {
         let candidate = sha256(token.as_bytes());
         let mut state = self.lock();
@@ -225,7 +198,6 @@ impl DeviceStore {
         Ok(removed)
     }
 
-    /// `lastSeen` now: in memory always, on disk at most once a minute per device.
     pub fn touch(&self, id: &str, now_ms: i64) -> Result<(), StoreError> {
         let write = {
             let mut state = self.lock();
@@ -257,7 +229,6 @@ impl DeviceStore {
         })
     }
 
-    /// Re-reads the file under its lock, applies `edit`, and writes when `edit` says it changed.
     fn change(&self, edit: impl FnOnce(&mut Vec<PairedDevice>) -> bool) -> Result<(), StoreError> {
         if self.lock().halted {
             return Err(StoreError::Stopped);
@@ -272,7 +243,6 @@ impl DeviceStore {
         if let Err(why) = &state.readable {
             return Err(StoreError::Unreadable(why.clone()));
         }
-        // `refresh` kept what `touch` holds only in memory, so a write of the others keeps it too.
         let mut list = state.devices.clone();
         if !edit(&mut list) {
             return Ok(());
@@ -283,7 +253,6 @@ impl DeviceStore {
         Ok(())
     }
 
-    /// Reads the file again when it changed since the last read, keeping in-memory `lastSeen`.
     fn refresh(&self, state: &mut State) {
         let now = stamp(&self.file);
         if now.is_some() && now == state.seen {

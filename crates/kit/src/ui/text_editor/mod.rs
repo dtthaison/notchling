@@ -1,16 +1,3 @@
-//! A text editor over GPUI's platform input handler, for the reply box and any field that needs a
-//! caret. Typing arrives through `NSTextInputClient` (`replace_text_in_range`), so input methods
-//! compose with marked text (Vietnamese Telex, Japanese), drawn underlined, and the candidate
-//! window sits under the composed word (`bounds_for_range`). Click places the caret, drag selects,
-//! a double click picks a word and a triple one a line; the keys are a Mac text view's: ⌥ and ⌘
-//! with the arrows and deletes, ⌘A, ⌘C/⌘X/⌘V (plain text), ⌘Z and ⌘⇧Z. The text wraps at the
-//! box's width; the box grows from one line to `max_lines`, then scrolls, keeping the caret in
-//! view. Return submits and Shift or Option Return adds a line ([`crate::text_edit::return_key`]).
-//! Esc, Tab and keys it doesn't know pass on to the views around it.
-//!
-//! The model is [`TextEdit`]; this file is the entity (focus, keys, events, the caret's blink),
-//! `element` lays the text out and paints it, `input` is the input handler and the mouse.
-
 mod element;
 mod input;
 
@@ -25,20 +12,14 @@ use gpui::{
 use crate::text_edit::{return_key, ReturnKey, TextEdit, Unit};
 use element::{Layout, TextElement};
 
-/// What the editor tells its owner.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TextEditorEvent {
-    /// The text is different.
     Changed,
-    /// Return (or ⌘ or Ctrl Return): the owner takes the text.
     Submit,
 }
 
-/// The caret blinks at this pace while the editor is focused, after a beat with it on.
 const BLINK: Duration = Duration::from_millis(500);
 
-/// A mouse drag in progress: what the first click picked (a point, a word or a line), which the
-/// selection always keeps.
 struct Drag {
     anchor: Range<usize>,
     by: Unit,
@@ -49,24 +30,16 @@ pub struct TextEditor {
     focus: FocusHandle,
     placeholder: SharedString,
     enabled: bool,
-    /// The box grows to this many lines, then scrolls; `0` for no limit.
     max_lines: usize,
-    /// Return with Shift or Option adds a line. A one-line field submits on any Return.
     multiline: bool,
-    /// Draws the caret and selection without focus and without blinking, for a gallery render.
     preview: bool,
-    /// The last layout, for the mouse, the input method and vertical moves.
     layout: Option<Layout>,
     scroll_top: Pixels,
-    /// Bring the caret into view at the next layout (after an edit or a move, not a wheel scroll).
     reveal_caret: bool,
-    /// The x the caret keeps while moving up and down through rows of different lengths.
     goal_x: Option<Pixels>,
     drag: Option<Drag>,
     caret_on: bool,
-    /// Something just happened: the caret stays on through the next blink.
     hold_caret: bool,
-    /// Whether the last render saw the editor focused (the blink loop has no window).
     focused: bool,
 }
 
@@ -79,7 +52,6 @@ impl Focusable for TextEditor {
 }
 
 impl TextEditor {
-    /// An empty, enabled editor that grows to `max_lines` (0 for no limit).
     pub fn new(placeholder: &str, max_lines: usize, cx: &mut Context<Self>) -> TextEditor {
         cx.spawn(async move |this, cx| loop {
             cx.background_executor().timer(BLINK).await;
@@ -107,14 +79,12 @@ impl TextEditor {
         }
     }
 
-    /// A one-line field: Return always submits, and nothing wraps or grows.
     pub fn single_line(mut self) -> TextEditor {
         self.multiline = false;
         self.max_lines = 1;
         self
     }
 
-    /// For a render: the caret and selection show without focus, steady.
     pub fn preview(mut self) -> TextEditor {
         self.preview = true;
         self
@@ -128,12 +98,10 @@ impl TextEditor {
         self.edit.is_empty()
     }
 
-    /// The model, for what the editor shows (selection, marked text).
     pub fn edit(&self) -> &TextEdit {
         &self.edit
     }
 
-    /// Another text (another session's draft): the caret at its end, no history, no event.
     pub fn set_text(&mut self, text: &str, cx: &mut Context<Self>) {
         if self.edit.text() == text {
             return;
@@ -150,7 +118,6 @@ impl TextEditor {
         }
     }
 
-    /// Off: no focus, no keys, no caret, dimmed. The text stays.
     pub fn set_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
         if self.enabled != enabled {
             self.enabled = enabled;
@@ -163,13 +130,11 @@ impl TextEditor {
         self.enabled
     }
 
-    /// Selects from `anchor` to `head` (for a render, or an owner placing the caret).
     pub fn select(&mut self, anchor: usize, head: usize, cx: &mut Context<Self>) {
         self.edit.set_selection(anchor, head);
         self.touched(false, cx);
     }
 
-    /// Marks `range` as composing (for a render: the input method does this live).
     pub fn mark(&mut self, range: Range<usize>, cx: &mut Context<Self>) {
         let range = self.edit.snap(range.start)..self.edit.snap(range.end);
         let (text, utf16) = (
@@ -183,7 +148,6 @@ impl TextEditor {
         cx.notify();
     }
 
-    /// Inserts `text` at the caret as if pasted: its own undo step.
     pub fn insert(&mut self, text: &str, cx: &mut Context<Self>) {
         if text.is_empty() {
             return;
@@ -192,8 +156,6 @@ impl TextEditor {
         self.touched(true, cx);
     }
 
-    /// An edit made on a copy of the model (`edit().clone()`, then the owner's pure function):
-    /// takes it as the text, telling the owner when the text differs.
     pub fn set_edit(&mut self, edit: TextEdit, cx: &mut Context<Self>) {
         let changed = edit.text() != self.edit.text();
         self.edit = edit;
@@ -210,12 +172,10 @@ impl TextEditor {
         self.enabled && self.focus.is_focused(window)
     }
 
-    /// The selected text, or `None` when nothing is selected: what a Copy takes.
     pub fn selected_text(&self) -> Option<String> {
         (!self.edit.selection().is_empty()).then(|| self.edit.selected_text().to_owned())
     }
 
-    /// After anything the user did: the caret shows and comes into view; `changed` tells the owner.
     fn touched(&mut self, changed: bool, cx: &mut Context<Self>) {
         self.reveal_caret = true;
         self.caret_on = true;
@@ -241,7 +201,6 @@ impl TextEditor {
         cx.notify();
     }
 
-    /// ⌘ reaches the line, ⌥ the word, else one character.
     fn unit(m: &Modifiers) -> Unit {
         if m.platform {
             Unit::Line
@@ -319,7 +278,6 @@ impl TextEditor {
                     self.edit.undo();
                 }
             }
-            // Esc, Tab, typed characters (they come through the input handler) and the rest go on.
             _ => return,
         }
         if !vertical {
@@ -329,8 +287,6 @@ impl TextEditor {
         cx.stop_propagation();
     }
 
-    /// Up or Down: the caret keeps its x through rows of different lengths; past the first or
-    /// last row it goes to the text's start or end, as a Mac text view's does.
     fn vertical(&mut self, direction: i32, extend: bool) {
         let Some(layout) = &self.layout else {
             return self.edit.move_left(Unit::Document, extend);
@@ -352,8 +308,6 @@ impl TextEditor {
         }
     }
 
-    /// ⌘← and ⌘→: the edge of the wrapped row the caret is on (the paragraph's, without a
-    /// layout).
     fn row_edge(&mut self, end: bool, extend: bool) {
         let target = match &self.layout {
             Some(layout) => {
@@ -380,8 +334,6 @@ impl TextEditor {
         }
     }
 
-    /// The wheel scrolls the text once it is taller than the box; before that the event goes on
-    /// to whatever scrolls behind.
     fn wheel(&mut self, event: &ScrollWheelEvent, _: &mut Window, cx: &mut Context<Self>) {
         let Some(layout) = &self.layout else {
             return;

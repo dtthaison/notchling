@@ -1,7 +1,3 @@
-//! The windows for first run and About (part U11, macOS): one of each, opened from the
-//! Notchling menu and brought forward when already open; the first-run window also opens by itself,
-//! once. Each is a titled window, so it counts toward the Dock icon (`mac::shell::note_titled`).
-
 use std::sync::Arc;
 
 use gpui::{
@@ -20,15 +16,12 @@ use super::view::{live_about, AboutEnv, AboutView, FirstRunEnv, FirstRunView};
 use crate::chat::data::DataRoot;
 use crate::mac::shell::note_titled;
 
-/// What the windows need to know about the running app. Not set in a render.
 pub struct WelcomeSetup {
-    /// The folders the app runs over; a fixture root never starts a process or asks a daemon.
     pub root: Option<DataRoot>,
 }
 
 impl Global for WelcomeSetup {}
 
-/// Which window.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Which {
     FirstRun,
@@ -51,7 +44,6 @@ fn is_open<V: 'static>(cx: &App, handle: Option<WindowHandle<V>>) -> bool {
     handle.is_some_and(|h| cx.windows().iter().any(|w| w.window_id() == h.window_id()))
 }
 
-/// Opens a titled window of `size` over `build`, and counts it toward the Dock icon.
 fn open_titled<V: Render>(
     cx: &mut App,
     title: &str,
@@ -83,7 +75,6 @@ fn open_titled<V: Render>(
     }
 }
 
-/// Opens (or brings forward) one of the windows.
 pub fn open(cx: &mut App, which: Which) {
     match which {
         Which::FirstRun => open_first_run(cx),
@@ -91,7 +82,6 @@ pub fn open(cx: &mut App, which: Which) {
     }
 }
 
-/// Brings `handle` forward when its window is open.
 fn raise<V: 'static>(cx: &mut App, handle: Option<WindowHandle<V>>) -> bool {
     if !is_open(cx, handle) {
         return false;
@@ -137,8 +127,6 @@ fn open_first_run(cx: &mut App) {
     }
     let setup = root(cx);
     let live = setup.as_ref().filter(|r| r.fixture.is_none()).cloned();
-    // The daemon and the process list are asked off the UI thread, then the window opens with what
-    // they said.
     let asked = live.clone();
     cx.spawn(async move |cx| {
         let model = cx
@@ -164,9 +152,6 @@ fn open_first_run(cx: &mut App) {
     .detach();
 }
 
-/// Opens the first-run window the first time the app runs over the real folders, and marks it
-/// shown (a flag in the app's own settings), so it comes by itself once. A fixture root never
-/// opens it.
 pub fn open_first_run_once(cx: &mut App) {
     let Some(root) = root(cx).filter(|r| r.fixture.is_none()) else {
         return;
@@ -177,8 +162,6 @@ pub fn open_first_run_once(cx: &mut App) {
     if flags.get(FIRST_RUN_KEY) {
         return;
     }
-    // Marked before it opens: shown once, even if the app is quit with the window up. When the
-    // file can't be written the window doesn't open every launch either.
     if let Err(e) = flags.set(FIRST_RUN_KEY, true) {
         eprintln!("first run: not shown, the flag can't be kept ({e})");
         return;

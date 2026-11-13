@@ -8,10 +8,8 @@ fn scratch(tag: &str) -> PathBuf {
     dir
 }
 
-// 2026-11-08 00:00:00 UTC.
 const NOW: f64 = 1_794_182_400.0;
 
-/// A database like Antigravity's: WAL mode, with the rows still in the WAL (no checkpoint).
 fn antigravity_db(root: &Path) -> Connection {
     let db = Connection::open(root.join(DB_NAME)).unwrap();
     db.pragma_update(None, "journal_mode", "WAL").unwrap();
@@ -24,7 +22,6 @@ fn antigravity_db(root: &Path) -> Connection {
     db
 }
 
-/// One row of the table, column by column.
 #[allow(clippy::too_many_arguments)]
 fn insert(
     db: &Connection,
@@ -122,7 +119,6 @@ fn it_reads_recent_top_level_rows_from_a_copy_with_its_wal() {
     assert!(foreign.working);
     assert_eq!(foreign.since_ms, found[1].modified * 1000.0);
 
-    // Antigravity's own files were only copied from, never changed or opened by us.
     drop(db);
     let _ = std::fs::remove_dir_all(&root);
     let _ = std::fs::remove_dir_all(&copies);
@@ -160,7 +156,6 @@ fn the_copy_is_made_fresh_each_time_and_a_missing_database_is_empty() {
         2,
         "the second read copies again"
     );
-    // A file that isn't a database gives nothing and doesn't panic.
     let junk = scratch("junk-root");
     std::fs::write(junk.join(DB_NAME), b"not a database at all").unwrap();
     assert!(rows(&junk, &copies, NOW).is_empty());
@@ -195,10 +190,8 @@ fn a_young_copy_is_read_again_not_made_again_and_an_old_one_is_remade() {
         1,
         "within the reuse time the copy is not made again"
     );
-    // The reuse time is about the copy's age: no reuse (what `rows` does) remakes it.
     assert_eq!(rows_cached(&root, &copies, NOW, Duration::ZERO).len(), 2);
     assert_eq!(rows(&root, &copies, NOW).len(), 2);
-    // And a different copy folder is its own copy.
     let other = scratch("reuse-other");
     assert_eq!(rows_cached(&root, &other, NOW, minute).len(), 2);
     for d in [&root, &copies, &other] {
@@ -227,7 +220,6 @@ fn calls_at_the_same_time_do_not_break_each_other() {
         .map(|n| {
             let (root, copies) = (root.clone(), copies.clone());
             std::thread::spawn(move || {
-                // Half remake the copy each time, half share it.
                 let reuse = if n % 2 == 0 {
                     Duration::ZERO
                 } else {

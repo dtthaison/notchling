@@ -1,19 +1,3 @@
-//! Publishing to an Artifact link that another saved account owns, with that account's saved
-//! login, so Claude Code can update the page without switching accounts. claude.ai lets only the
-//! owner publish to a link (a personal account can't share edit access at all).
-//!
-//! Ported from the Swift app's `OwnerPublish`. It handles a plain single-file HTML publish (with
-//! `edits` too) and sends the file as written; anything else (supporting files, capabilities, a
-//! contract, Markdown) is left to Claude Code.
-//!
-//! Nothing here touches the network or the Keychain. The API is an [`HttpClient`] and the logins
-//! come from a [`TokenSource`]; the real token source ([`UnavailableTokens`]) answers
-//! `Unavailable("accounts arrive in M6")`, so until accounts exist in the engine [`run`] returns
-//! `None` and the normal publish goes ahead. Two rules hold whatever the sources are:
-//! - the only token asked for, and the only one sent, is the page's owner's;
-//! - a page that changed on claude.ai since the last publish from this Mac is never overwritten
-//!   without `force: true`.
-
 use super::content::page_title;
 use super::library::PageLibrary;
 use super::record::{read_bounded, RecordContext};
@@ -21,24 +5,15 @@ use crate::search::artifact_id_in;
 use serde_json::{json, Map, Value};
 use std::path::Path;
 
-/// The artifact API's host (the one Claude Code's Artifact tool uses).
 pub const API_HOST: &str = "https://api.anthropic.com";
-/// The whole publish's time, under the PreToolUse hook's 60 s timeout with room to start and save.
 pub const BUDGET_SECS: f64 = 50.0;
-/// Not worth starting the POST with less than this left.
 pub const MINIMUM_POST_SECS: f64 = 8.0;
-/// The most the read of the page's live version may take.
 pub const PERM_TIMEOUT_SECS: f64 = 20.0;
 
-/// What a publish came to.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Outcome {
-    /// Published; the text tells Claude what happened. The call is denied with it ("Done, not an
-    /// error"), so Claude Code doesn't publish again.
     Done(String),
-    /// Tried and failed; the real publish runs, with this as context.
     Failed(String),
-    /// Stopped on purpose; the publish doesn't run, and the text says why.
     Refused(String),
 }
 
@@ -48,20 +23,16 @@ pub enum Method {
     Post,
 }
 
-/// One call to the artifact API.
 #[derive(Clone, Debug, PartialEq)]
 pub struct HttpRequest {
     pub method: Method,
-    /// Path and query on [`API_HOST`].
     pub path: String,
-    /// The owner's OAuth token, sent as a bearer.
     pub token: String,
     pub body: Option<Value>,
     pub timeout_secs: f64,
 }
 
 impl HttpRequest {
-    /// The headers every call carries (the ones Claude Code's own Artifact tool sends).
     pub fn headers(&self) -> Vec<(&'static str, String)> {
         let mut headers = vec![
             ("Authorization", format!("Bearer {}", self.token)),
@@ -79,8 +50,6 @@ impl HttpRequest {
     }
 }
 
-/// An answer. Status 0 means none came (a timeout or a refused connection); `body` then holds
-/// the reason.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HttpResponse {
     pub status: u16,
@@ -95,7 +64,6 @@ impl HttpResponse {
         }
     }
 
-    /// `": <first 300 characters>"` for a failure that said something, else empty.
     fn message(&self) -> String {
         let text: String = self.body.chars().take(300).collect();
         let text = text.trim();
@@ -107,35 +75,27 @@ impl HttpResponse {
     }
 }
 
-/// The network. A real client waits up to `timeout_secs`; tests use a fake.
 pub trait HttpClient {
     fn send(&self, request: &HttpRequest) -> HttpResponse;
 }
 
-/// A saved account's login for the artifact API.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OwnerToken {
-    /// The account the token belongs to. [`run`] refuses a token for any other.
     pub email: String,
     pub token: String,
-    /// The organization the page lives in (`?org=`).
     pub org: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TokenError {
-    /// There is no source of logins yet, or it can't be read.
     Unavailable(String),
-    /// No saved login for that account.
     NoAccount,
 }
 
-/// Saved OAuth tokens by account. Never renews one: refresh tokens rotate.
 pub trait TokenSource {
     fn token_for(&self, email: &str) -> Result<OwnerToken, TokenError>;
 }
 
-/// The real source until accounts arrive (M6).
 pub struct UnavailableTokens;
 
 impl TokenSource for UnavailableTokens {
@@ -144,19 +104,15 @@ impl TokenSource for UnavailableTokens {
     }
 }
 
-/// Seconds, for the publish's time budget.
 pub trait Clock {
     fn now(&self) -> f64;
 }
 
-/// What [`run`] needs from outside.
 pub struct OwnerEnv<'a> {
     pub tokens: &'a dyn TokenSource,
     pub http: &'a dyn HttpClient,
     pub clock: &'a dyn Clock,
-    /// The account Claude Code is signed in as here ("" when unknown), for the message.
     pub active_email: &'a str,
-    /// For the local copy that follows a publish.
     pub record: RecordContext<'a>,
 }
 
@@ -171,10 +127,6 @@ const UNSUPPORTED: [&str; 8] = [
     "contract",
 ];
 
-/// Publishes the `PreToolUse(Artifact)` event's file as the page's owner when the page belongs to
-/// another saved account. `None` when none of that applies (a different action, an unsaved page,
-/// the owner unknown or without a login here, a publish shape we don't handle): the normal
-/// publish runs.
 pub fn run(lib: &PageLibrary, event: &Value, env: &OwnerEnv<'_>) -> Option<Outcome> {
     let empty = Map::new();
     let input = event
@@ -201,7 +153,6 @@ pub fn run(lib: &PageLibrary, event: &Value, env: &OwnerEnv<'_>) -> Option<Outco
         .into_iter()
         .find(|e| e.artifact_id() == Some(id.as_str()))
         .filter(|e| !e.account.is_empty())?;
-    // Only the owner's token is asked for.
     let owner = env.tokens.token_for(&page.account).ok()?;
     if !owner.email.eq_ignore_ascii_case(&page.account) {
         return Some(Outcome::Failed(format!(
@@ -224,7 +175,6 @@ pub fn run(lib: &PageLibrary, event: &Value, env: &OwnerEnv<'_>) -> Option<Outco
         .map(|a| a.iter().collect())
         .unwrap_or_default();
     for edit in &edits {
-        // Claude Code reports a bad edit itself; leave it to that.
         let old = edit.get("old_str")?.as_str()?;
         let new = edit.get("new_str")?.as_str()?;
         if old.is_empty() || text.matches(old).count() != 1 {
@@ -234,8 +184,6 @@ pub fn run(lib: &PageLibrary, event: &Value, env: &OwnerEnv<'_>) -> Option<Outco
     }
 
     let slug = uuid_from_short_id(&id);
-    // Both calls share one budget inside the hook's 60 s, so Claude Code never kills the hook
-    // mid-publish.
     let deadline = env.clock.now() + BUDGET_SECS;
     let perm = env.http.send(&HttpRequest {
         method: Method::Get,
@@ -256,8 +204,6 @@ pub fn run(lib: &PageLibrary, event: &Value, env: &OwnerEnv<'_>) -> Option<Outco
             perm.message()
         )));
     };
-    // Like Claude Code's own guard: don't overwrite a version published elsewhere (another Mac,
-    // or a save from the page itself) that this file wasn't built on, unless the publish says force.
     let force = input.get("force").and_then(Value::as_bool) == Some(true);
     if let Some(refusal) = stale_refusal(&page.url, &page.version, &live, force) {
         return Some(Outcome::Refused(refusal));
@@ -300,7 +246,6 @@ pub fn run(lib: &PageLibrary, event: &Value, env: &OwnerEnv<'_>) -> Option<Outco
         let _ = std::fs::write(&source, &text);
     }
 
-    // Keep the local copy current, as a normal publish would.
     let mut saved = event.clone();
     saved["hook_event_name"] = json!("PostToolUse");
     saved["tool_response"] = json!(format!(
@@ -334,9 +279,6 @@ pub fn run(lib: &PageLibrary, event: &Value, env: &OwnerEnv<'_>) -> Option<Outco
     )))
 }
 
-/// The refusal text when the live version isn't the one last published from this Mac and the
-/// publish doesn't say `force`; `None` when it may go ahead (no version on record, same version,
-/// or forced).
 pub fn stale_refusal(url: &str, recorded: &str, live: &str, force: bool) -> Option<String> {
     if recorded.is_empty() || live == recorded || force {
         return None;
@@ -348,7 +290,6 @@ version. Ask the user whether to overwrite it; if so, publish again with force: 
     ))
 }
 
-/// The body of `POST /api/frame/deploy/direct`.
 pub fn publish_body(
     slug: &str,
     base_version: &str,
@@ -389,8 +330,6 @@ fn percent_encode(s: &str) -> String {
 
 const ALPHABET: &[u8; 58] = b"123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 
-/// A 22-character link id is the artifact's UUID in base58, which is what the API takes. Anything
-/// that isn't base58 comes back unchanged.
 pub fn uuid_from_short_id(id: &str) -> String {
     let mut bytes = [0u8; 16];
     for ch in id.bytes() {
@@ -415,8 +354,6 @@ pub fn uuid_from_short_id(id: &str) -> String {
     )
 }
 
-/// The 22-character link id of a UUID (`None` for anything that isn't a UUID): the inverse of
-/// [`uuid_from_short_id`].
 pub fn short_id_from_uuid(uuid: &str) -> Option<String> {
     let hex: String = uuid.chars().filter(|c| *c != '-').collect();
     if hex.len() != 32 || uuid.len() != 36 || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
@@ -426,7 +363,6 @@ pub fn short_id_from_uuid(uuid: &str) -> Option<String> {
     for i in 0..16 {
         bytes.push(u8::from_str_radix(&hex[2 * i..2 * i + 2], 16).ok()?);
     }
-    // Repeated division of the big number by 58, least significant digit first.
     let mut digits: Vec<u8> = Vec::new();
     let mut number = bytes;
     while number.iter().any(|&b| b != 0) {

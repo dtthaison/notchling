@@ -1,21 +1,4 @@
 #!/usr/bin/env python3
-"""Generates the Rust (serde) and Dart types of `agentconsole.v1` from its JSON Schema.
-
-    python3 tools/protocol/gen.py            writes crates/protocol/src/generated.rs and
-                                             apps/flutter/lib/core/protocol/generated.dart
-    python3 tools/protocol/gen.py --check    changes nothing; exit 1 when a committed file differs
-
-The schema subset it reads (anything else is an error, never silently skipped):
-  * `$defs` entries that are an object (`properties`, `required`), a string `enum`, a bare `$ref` (an alias),
-    or a `oneOf` of `$ref`s (a union: documentation only, no type is written for it) or of scalars (any value);
-  * properties of type string, integer, number, boolean, array (`items`), `$ref`, an inline object with
-    `properties` (a struct named after its parent and property), or anything else (any value);
-  * `const` (a required field whose value is fixed), `default` (an optional field with a value when absent),
-    and descriptions, which become doc comments.
-A required field is a plain value; an optional field with a `default` is a plain value that falls back to
-it; any other optional field is `Option` (Rust) or nullable (Dart) and is left out when absent.
-
-Output is deterministic and already formatted the way `cargo fmt` writes it. Python 3.9, standard library only."""
 
 from __future__ import annotations
 
@@ -49,12 +32,11 @@ DART_KEYWORDS = {
 }
 SCALARS = ("string", "integer", "number", "boolean")
 
-# A type is ("string",) ("integer",) ("number",) ("boolean",) ("any",) ("array", T) or ("ref", name).
 Type = Tuple[Any, ...]
 
 
 class SchemaError(ValueError):
-    """The schema uses something the generator does not write."""
+    pass
 
 
 class Field:
@@ -77,7 +59,6 @@ class Struct:
 
 
 class Model:
-    """The schema read into the pieces both writers need, in schema order."""
 
     def __init__(self, schema: Dict[str, Any]):
         defs = schema.get("$defs")
@@ -87,8 +68,8 @@ class Model:
         self.kind: Dict[str, str] = {}
         for name, definition in defs.items():
             self.kind[name] = self._classify(name, definition)
-        self.items: List[Tuple[str, Any]] = []  # ("enum", (name, doc, values)) ("struct", Struct) ("alias", (name, doc, target))
-        self.exported: List[str] = []  # struct and alias names the registries list
+        self.items: List[Tuple[str, Any]] = []
+        self.exported: List[str] = []
         for name, definition in defs.items():
             kind = self.kind[name]
             doc = _doc(definition)
@@ -108,8 +89,6 @@ class Model:
                     raise SchemaError(f"{name}: an alias of {target}, which is not a type")
                 self.items.append(("alias", (name, doc, target)))
                 self.exported.append(name)
-
-    # -- reading the schema -------------------------------------------------------------------
 
     def _classify(self, name: str, definition: Dict[str, Any]) -> str:
         _keywords(definition, name)
@@ -222,10 +201,6 @@ def _docs(doc: str, indent: str) -> List[str]:
     return [f"{indent}/// {line}".rstrip() for line in doc.splitlines()] if doc else []
 
 
-# =============================================================================================
-# Rust
-# =============================================================================================
-
 def _rust_type(t: Type) -> str:
     kind = t[0]
     return {"string": "String", "integer": "i64", "number": "f64", "boolean": "bool", "any": "Value"}.get(kind) or (
@@ -233,7 +208,6 @@ def _rust_type(t: Type) -> str:
 
 
 def _rust_literal(t: Type, value: Any, where: str) -> Optional[str]:
-    """The Rust expression for a default, or None when `#[serde(default)]` already gives it."""
     kind = t[0]
     if kind == "string" and isinstance(value, str):
         return None if value == "" else json.dumps(value) + ".to_string()"
@@ -359,10 +333,6 @@ def render_rust(schema: Dict[str, Any]) -> str:
     return RUST_HEAD + rust_types(schema) + "\n" + RUST_ROUND + "\n" + rust_registry(schema)
 
 
-# =============================================================================================
-# Dart
-# =============================================================================================
-
 def _dart_type(t: Type) -> str:
     kind = t[0]
     return {"string": "String", "integer": "int", "number": "double", "boolean": "bool", "any": "Object?"}.get(kind) or (
@@ -385,7 +355,6 @@ def _dart_reader(model: Model, t: Type) -> str:
 
 
 def _dart_reader_inner(model: Model, t: Type) -> str:
-    """A reader for use inside a list: lambdas name their parameter `e`."""
     kind = t[0]
     if kind == "ref":
         if model.is_enum(t[1]):
@@ -405,7 +374,6 @@ def _dart_field_reader(model: Model, t: Type) -> str:
 
 
 def _dart_writer(model: Model, t: Type, expr: str, optional: bool) -> str:
-    """The JSON value of `expr`; `optional` fields are promoted with `!` only where a call needs it."""
     bang = "!" if optional else ""
     kind = t[0]
     if kind == "ref":
@@ -420,7 +388,6 @@ def _dart_writer(model: Model, t: Type, expr: str, optional: bool) -> str:
 
 
 def _plain(model: Model, t: Type) -> bool:
-    """Already JSON as it is: scalars, any, and lists of those."""
     if t[0] == "ref":
         return False
     if t[0] == "array":
@@ -475,7 +442,7 @@ def _dart_struct(model: Model, struct: Struct) -> List[str]:
             default = _dart_default(f.type, f.default, struct.name + "." + f.wire)
             out.append(f"    {f.wire}: _maybe(json, '{f.wire}', {reader}) ?? {default},")
         elif f.type == ("any",):
-            out.append(f"    {f.wire}: json['{f.wire}'],")  # _maybe<T> cannot hold a nullable T
+            out.append(f"    {f.wire}: json['{f.wire}'],")
         else:
             out.append(f"    {f.wire}: _maybe(json, '{f.wire}', {reader}),")
     out.append("  );")
@@ -616,10 +583,6 @@ def render_dart(schema: Dict[str, Any]) -> str:
     return DART_HEAD + dart_types(schema) + "\n" + dart_registry(schema)
 
 
-# =============================================================================================
-# Command line
-# =============================================================================================
-
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(description="Generate the Rust and Dart types of agentconsole.v1 from its schema.")
     parser.add_argument("--check", action="store_true", help="write nothing; exit 1 when a generated file differs")
@@ -630,7 +593,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     try:
         schema = json.loads(args.schema.read_text(encoding="utf-8"))
         outputs = [(args.rust, render_rust(schema)), (args.dart, render_dart(schema))]
-    except (OSError, ValueError) as error:  # SchemaError is a ValueError, and so is bad JSON
+    except (OSError, ValueError) as error:
         print(f"{RULE}: {args.schema}: {error}", file=sys.stderr)
         return 1
     if args.check:

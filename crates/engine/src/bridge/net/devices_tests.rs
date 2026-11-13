@@ -1,8 +1,6 @@
 use super::*;
 use crate::sessions::testutil::TempDir;
 
-/// A `devices.json` as the Swift app writes it (`JSONEncoder`, `.prettyPrinted, .sortedKeys`,
-/// `.iso8601`), with the tokens below.
 const SWIFT: &str = include_str!("testdata/devices.swift.json");
 const IPHONE_TOKEN: &str = "Xq3v9yR2mT7pL0wK5sJ8nB4cF6hD1gA_zE-uY2iO3pQ";
 const PIXEL_TOKEN: &str = "Pk7nW2qR9sT4vX6yZ1aB3cD5eF8gH0jK-mN_oP2rS4t";

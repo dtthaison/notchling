@@ -1,10 +1,3 @@
-//! `TunnelAccess`: the Cloudflare tunnel and Access settings (`bridge/access.json`, 0600), the gate
-//! that tells a tunnel client from a local one at the WebSocket upgrade, and the pairing QR's text.
-//!
-//! Tunnel traffic reaches the computer from loopback (cloudflared), so Cloudflare's headers are the
-//! only way to tell it apart from a local client. The client secret lives only in that file and is
-//! never logged or returned by a status.
-
 use super::jwt::{AccessJwtVerifier, Clock};
 use super::limiter::{AuthRateLimiter, Verdict};
 use serde::{Deserialize, Serialize};
@@ -12,7 +5,6 @@ use serde_json::{json, Map, Value};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-/// The file's name in the bridge folder.
 pub const FILE_NAME: &str = "access.json";
 pub const DEFAULT_HOSTNAME: &str = "console.trietkun.shop";
 pub const DEFAULT_TEAM_DOMAIN: &str = "bold-dew-100f.cloudflareaccess.com";
@@ -42,7 +34,6 @@ impl Default for AccessConfig {
 }
 
 impl AccessConfig {
-    /// Everything the computer needs to verify tunnel clients and the phone needs to reach it.
     pub fn is_complete(&self) -> bool {
         [
             &self.hostname,
@@ -55,7 +46,6 @@ impl AccessConfig {
         .all(|f| !f.trim().is_empty())
     }
 
-    /// Whether the pairing QR carries a tunnel block.
     pub fn offers_tunnel(&self) -> bool {
         self.enabled && self.is_complete()
     }
@@ -70,7 +60,6 @@ impl AccessConfig {
         })
     }
 
-    /// Reads `file` without writing anything: absent or unreadable is the defaults.
     pub fn read(file: &Path) -> AccessConfig {
         std::fs::read(file)
             .ok()
@@ -79,7 +68,6 @@ impl AccessConfig {
     }
 }
 
-/// `access.json`, cached.
 pub struct AccessConfigStore {
     file: PathBuf,
     cached: Mutex<AccessConfig>,
@@ -95,7 +83,6 @@ impl AccessConfigStore {
         self.lock().clone()
     }
 
-    /// Applies `change` and writes the file when it changed (sorted keys, pretty, as Swift).
     pub fn update(&self, change: impl FnOnce(&mut AccessConfig)) -> std::io::Result<()> {
         let mut cached = self.lock();
         let mut next = cached.clone();
@@ -116,7 +103,6 @@ impl AccessConfigStore {
     }
 }
 
-/// Headers as (name, value) pairs, names compared ignoring case.
 pub type Headers = [(String, String)];
 
 pub fn header<'a>(name: &str, headers: &'a Headers) -> Option<&'a str> {
@@ -126,28 +112,23 @@ pub fn header<'a>(name: &str, headers: &'a Headers) -> Option<&'a str> {
         .map(|(_, v)| v.trim())
 }
 
-/// A request that carries Cloudflare's marks came through the tunnel.
 pub fn is_tunnel_origin(headers: &Headers) -> bool {
     header("Cf-Connecting-Ip", headers).is_some() || header("Cf-Ray", headers).is_some()
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Decision {
-    /// No Cloudflare headers: LAN or loopback.
     Local,
-    /// Came through the tunnel with a valid Access token; the real client's address.
     Tunnel(String),
     Reject(String),
 }
 
-/// A refusal, with the HTTP status to answer it with.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Refusal {
     pub status: u16,
     pub reason: String,
 }
 
-/// Used when a tunnel request has no `Cf-Connecting-Ip`.
 pub const UNKNOWN_CLIENT: &str = "cf-unknown";
 
 pub struct TunnelGate {
@@ -182,7 +163,6 @@ impl TunnelGate {
         }
     }
 
-    /// The checks for a request that carries Cloudflare headers.
     pub fn evaluate_tunnel(&self, headers: &Headers) -> Result<String, Refusal> {
         let refuse = |status: u16, reason: String| Err(Refusal { status, reason });
         let settings = (self.config)();
@@ -213,8 +193,6 @@ impl TunnelGate {
     }
 }
 
-/// The text inside the pairing QR. `v` stays 1 and every v1 field is kept, so an app that predates
-/// the tunnel still parses it and ignores `tunnel`.
 pub fn pairing_payload(
     name: &str,
     port: u16,

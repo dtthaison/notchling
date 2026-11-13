@@ -1,8 +1,3 @@
-//! `notchling hook` as Claude Code runs it: the built binary, the fixture event on stdin, its stdout
-//! and exit code. With no daemon it passes in under 200 ms; against a real daemon over a copy of the
-//! notch fixture (a temp data root, a fake `HOME`) it passes while acting is off, which is the
-//! default, and every acting op is refused with the plan's message. No real folder is read and
-//! every daemon started here is stopped, even when an assert fails.
 #![cfg(unix)]
 
 use notchling_local_api::{ops, Client, ClientError, ClientKind, ErrorCode};
@@ -36,7 +31,6 @@ fn event(name: &str) -> Vec<u8> {
     .unwrap()
 }
 
-/// Runs `notchling hook <args>` with `stdin`, its data root and HOME in `dir`.
 fn hook(dir: &Path, args: &[&str], stdin: &[u8]) -> (Output, Duration) {
     let started = Instant::now();
     let mut child = Command::new(env!("CARGO_BIN_EXE_notchling"))
@@ -131,7 +125,6 @@ fn a_real_daemon_with_acting_off_lets_the_hook_pass_and_refuses_every_acting_op(
         &root,
     );
     let socket = root.join("notchling/notchlingd.sock");
-    // This test binary gets the app tier through the dev variable (the daemon is a cargo build).
     let me = std::env::current_exe().unwrap();
     let _daemon = Daemon(
         Command::new(env!("CARGO_BIN_EXE_notchling"))
@@ -160,11 +153,9 @@ fn a_real_daemon_with_acting_off_lets_the_hook_pass_and_refuses_every_acting_op(
         app.call(ops::SETTINGS_GET_ACTING, json!({})).unwrap(),
         json!({"acting": false})
     );
-    // The app reads the switch from `daemon.status` (`app::acting::from_status`).
     let status = app.call(ops::DAEMON_STATUS, json!({})).unwrap();
     assert_eq!(status["acting"], json!(false), "{status}");
 
-    // An app is attached, so only the switch makes the hook pass.
     let (out, _) = hook(&dir.0, &[], &event("permission-request.json"));
     assert!(passed(&out), "{out:?}");
     let (out, _) = hook(&dir.0, &[], &event("ask-user-question.json"));
@@ -197,16 +188,13 @@ fn a_real_daemon_with_acting_off_lets_the_hook_pass_and_refuses_every_acting_op(
             other => panic!("{op}: {other:?}"),
         }
     }
-    // Each refusal is on the record.
     let audit = std::fs::read_to_string(root.join("notchling/audit.jsonl")).unwrap();
     assert!(audit.contains("\"op\":\"session.reply\""), "{audit}");
     assert!(audit.contains("\"op\":\"codex.send\""), "{audit}");
     assert!(audit.contains("\"result\":\"forbidden\""), "{audit}");
-    // Nothing turned it on: the settings file was never written.
     assert!(!root.join("notchling/notchlingd-settings.json").exists());
 }
 
-/// Starts a daemon over `root` with this test binary in the app tier, and waits for its socket.
 fn start_daemon(dir: &Path, root: &Path) -> Daemon {
     let socket = root.join("notchling/notchlingd.sock");
     let me = std::env::current_exe().unwrap();
@@ -242,7 +230,6 @@ fn a_settings_file_that_says_on_is_ignored_at_every_start() {
         &Path::new(env!("CARGO_MANIFEST_DIR")).join("../app/fixtures/notch"),
         &root,
     );
-    // What an agent that can write files would do, before the daemon (re)starts.
     let file = root.join("notchling/notchlingd-settings.json");
     std::fs::write(&file, br#"{"acting": true}"#).unwrap();
     let socket = root.join("notchling/notchlingd.sock");
@@ -254,7 +241,6 @@ fn a_settings_file_that_says_on_is_ignored_at_every_start() {
             json!({"acting": false}),
             "run {run}: the file says on, the daemon starts off"
         );
-        // Only the app turns it on, for this run.
         assert_eq!(
             app.call(ops::SETTINGS_SET_ACTING, json!({"on": true}))
                 .unwrap(),
@@ -270,6 +256,5 @@ fn a_settings_file_that_says_on_is_ignored_at_every_start() {
         2,
         "{audit}"
     );
-    // The daemon keeps no record of its own: the file is as the agent left it.
     assert_eq!(std::fs::read(&file).unwrap(), br#"{"acting": true}"#);
 }

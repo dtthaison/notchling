@@ -1,5 +1,3 @@
-//! The inspector beside the conversation: tasks, the session's facts, subagents, background shells.
-
 use notchling_engine::transcript::codex;
 use notchling_engine::transcript::conversation;
 use notchling_engine::transcript::model::{Conversation, TaskStatus};
@@ -19,7 +17,6 @@ pub struct TaskRow {
     pub icon: Icon,
 }
 
-/// The status mark that leads a row: a spinner while it runs, else an icon in an ink.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mark {
     Spinner,
@@ -29,15 +26,12 @@ pub enum Mark {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SubagentRow {
     pub description: String,
-    /// The Swift line: "Running · sonnet high · Explore" (the usual general-purpose type is left out).
     pub detail: String,
     pub status: Status,
     pub status_word: String,
     pub running: bool,
     pub mark: Mark,
-    /// The tool that runs it, whose logo leads the row (the status is in `detail`).
     pub tool: ToolMark,
-    /// What a running subagent is doing now, from its own transcript ("Running cargo test…").
     pub doing: Option<String>,
 }
 
@@ -49,14 +43,12 @@ pub struct ShellRow {
     pub status_word: String,
     pub running: bool,
     pub mark: Mark,
-    /// The file Claude Code writes the command's output to (Output opens it).
     pub output_path: String,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Inspector {
     pub tasks: Vec<TaskRow>,
-    /// Label and value, in display order.
     pub facts: Vec<(&'static str, String)>,
     pub subagents: Vec<SubagentRow>,
     pub shells: Vec<ShellRow>,
@@ -75,7 +67,6 @@ fn task_row(subject: &str, status: TaskStatus) -> TaskRow {
     }
 }
 
-/// The session's tasks as rows, in list order.
 pub fn task_rows(conversation: &Conversation) -> Vec<TaskRow> {
     conversation
         .tasks
@@ -84,17 +75,14 @@ pub fn task_rows(conversation: &Conversation) -> Vec<TaskRow> {
         .collect()
 }
 
-/// What the pinned Tasks bar says: done of all, the task under way, how far along.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TaskSummary {
     pub done: usize,
     pub total: usize,
-    /// The first task in progress ("Now: …").
     pub current: Option<String>,
 }
 
 impl TaskSummary {
-    /// `None` for no tasks: the bar isn't drawn.
     pub fn of(tasks: &[TaskRow]) -> Option<TaskSummary> {
         if tasks.is_empty() {
             return None;
@@ -109,12 +97,10 @@ impl TaskSummary {
         })
     }
 
-    /// "Tasks 1/3" (the Swift bar's heading; the Details section writes "Tasks · 1/3").
     pub fn title(&self) -> String {
         format!("Tasks {}/{}", self.done, self.total)
     }
 
-    /// The progress bar's fill, 0 to 1.
     pub fn fraction(&self) -> f32 {
         self.done as f32 / self.total as f32
     }
@@ -151,8 +137,6 @@ pub fn subagent_row(agent: &Subagent) -> SubagentRow {
         .join(" ");
     let kind = (agent.agent_type != "general-purpose" && !agent.agent_type.is_empty())
         .then_some(agent.agent_type.as_str());
-    // A job handed to Codex or Antigravity names the tool before its model ("Running · Codex ·
-    // gpt-5.5 high"); a Claude Code subagent says its model, then its type.
     let handed_over = agent.origin != SubagentOrigin::Claude;
     let parts = if handed_over {
         [
@@ -167,8 +151,6 @@ pub fn subagent_row(agent: &Subagent) -> SubagentRow {
             kind,
         ]
     };
-    // Its own transcript, read incrementally and cached: what it does now and how much context
-    // it holds. Antigravity's log is read whole when opened; too much for every redraw.
     let read = (!agent.path.is_empty())
         .then(|| match agent.origin {
             SubagentOrigin::Claude => Some(conversation::read_subagent_shared(&agent.path)),
@@ -176,7 +158,6 @@ pub fn subagent_row(agent: &Subagent) -> SubagentRow {
             SubagentOrigin::Antigravity => None,
         })
         .flatten();
-    // Context as a bare number ("232.3k").
     let context = read
         .as_ref()
         .map(|c| c.facts.context_tokens)
@@ -206,8 +187,6 @@ pub fn subagent_row(agent: &Subagent) -> SubagentRow {
     }
 }
 
-/// "71.1k in · 650 out", then on its own line "68.2k cached (96%)": the cache share is of the
-/// input; left out with no cache reads.
 pub fn token_line(input: u64, output: u64, cached: u64) -> String {
     let mut line = format!("{} in · {} out", tokens(input), tokens(output));
     if cached > 0 && input > 0 {
@@ -217,38 +196,25 @@ pub fn token_line(input: u64, output: u64, cached: u64) -> String {
     line
 }
 
-/// How many subagents show while the list is folded to the latest finished ones.
 pub const FINISHED_SHOWN: usize = 3;
 
-/// The row under a subagent list that changes it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Fold {
-    /// Nothing to expand or fold back.
     None,
-    /// "Show N more".
     More(usize),
-    /// "Show less".
     Less,
 }
 
-/// What the Subagents section lists.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Listing {
-    /// Indices into the subagents, in the order shown (newest first).
     pub rows: Vec<usize>,
-    /// How many are left out.
     pub hidden: usize,
     pub fold: Fold,
 }
 
-/// Which subagents to list. `running` says, for each one oldest first, whether it still runs.
-/// While any run, those are listed, then "Show N more" for the finished ones; `expanded` adds
-/// them after the running ones. With none running, the `FINISHED_SHOWN` most recent finished
-/// ones, then "Show N more"; `expanded` lists them all, then "Show less".
 pub fn list_subagents(running: &[bool], expanded: bool) -> Listing {
     let newest_first = (0..running.len()).rev();
     if running.iter().any(|r| *r) {
-        // The running ones lead; the finished ones wait behind "Show N more", never out of reach.
         let mut rows: Vec<usize> = newest_first.clone().filter(|i| running[*i]).collect();
         let finished: Vec<usize> = newest_first.filter(|i| !running[*i]).collect();
         if finished.is_empty() {
@@ -295,8 +261,6 @@ pub fn list_subagents(running: &[bool], expanded: bool) -> Listing {
     }
 }
 
-/// A section title with its count the way the Swift panel writes it: "Subagents · 2 running", or
-/// "Subagents · 7" when none run, and the bare name when there are none.
 pub fn counted_title(name: &str, running: usize, total: usize) -> String {
     if total == 0 {
         name.to_owned()
@@ -308,7 +272,6 @@ pub fn counted_title(name: &str, running: usize, total: usize) -> String {
 }
 
 impl Inspector {
-    /// "Tasks · 1/3" (done of all), as Swift writes it.
     pub fn tasks_title(&self) -> String {
         if self.tasks.is_empty() {
             return "Tasks".to_owned();
@@ -331,14 +294,12 @@ impl Inspector {
         counted_title("Shells", running, self.shells.len())
     }
 
-    /// The listing of subagents (oldest first in `subagents`).
     pub fn subagent_listing(&self, expanded: bool) -> Listing {
         let running: Vec<bool> = self.subagents.iter().map(|s| s.running).collect();
         list_subagents(&running, expanded)
     }
 }
 
-/// Facts as the inspector lists them: only what the transcript says.
 pub fn facts(conversation: &Conversation) -> Vec<(&'static str, String)> {
     let f = &conversation.facts;
     let mut out: Vec<(&'static str, String)> = Vec::new();
@@ -363,13 +324,9 @@ pub fn facts(conversation: &Conversation) -> Vec<(&'static str, String)> {
     if f.commands > 0 {
         out.push(("Commands", f.commands.to_string()));
     }
-    // The files the session touched aren't listed: long paths, and the Git section says what changed.
     out
 }
 
-/// The inspector for a conversation. Shells are read-only here: running means a process still has
-/// the output file open, which only the live app can ask (`writers`); a reader passes none, so a
-/// shell with no notification shows as ended.
 pub fn inspector(
     conversation: &Conversation,
     subagents: &[Subagent],
@@ -421,10 +378,8 @@ pub fn inspector(
     }
 }
 
-/// Shells newest first, the running ones on top.
 fn running_first(mut rows: Vec<ShellRow>) -> Vec<ShellRow> {
     rows.reverse();
-    // Stable: each group keeps newest first.
     rows.sort_by_key(|row| !row.running);
     rows
 }
@@ -437,8 +392,6 @@ fn capitalized(word: &str) -> String {
     }
 }
 
-/// The icon on a fact row, the Swift panel's (folder, branch, cpu, turns, terminal, tokens); the
-/// effort and the files, which Swift has no row for, get the gauge and the file.
 pub fn fact_icon(label: &str) -> Icon {
     match label {
         "Folder" => Icon::Folder,
@@ -452,8 +405,6 @@ pub fn fact_icon(label: &str) -> Icon {
     }
 }
 
-/// What a fact row says beside its icon: the Swift panel writes "2 turns" and "3 commands", where
-/// the facts carry the bare number.
 pub fn fact_text(label: &str, value: &str) -> String {
     let plural = |word: &str| {
         if value == "1" {
@@ -470,7 +421,6 @@ pub fn fact_text(label: &str, value: &str) -> String {
     }
 }
 
-/// No process can be asked about: nothing writes.
 pub fn no_writers(_: &str) -> Vec<i32> {
     Vec::new()
 }
@@ -539,7 +489,6 @@ mod tests {
                 ("Commands", "3".to_owned()),
             ]
         );
-        // Newest first.
         assert_eq!(i.shells[1].title, "Run tests");
         assert_eq!(
             (i.shells[1].status, i.shells[1].status_word.as_str()),
@@ -674,7 +623,6 @@ mod tests {
         let doing = i.subagents[0].doing.as_deref().expect("a running one says");
         assert!(doing.contains("Run the tests"), "{doing}");
         assert_eq!(i.subagents[1].doing, None, "a finished one doesn't");
-        // Both end with the context they hold, as a bare number, and lead with Claude's logo.
         assert_eq!(i.subagents[0].detail, "Running · 232.3k");
         assert_eq!(i.subagents[1].detail, "Done · 232.3k");
         assert_eq!(i.subagents[0].tool, ToolMark::Claude);
@@ -757,7 +705,6 @@ mod tests {
         }
         let writers = |path: &str| if path == "/live" { vec![1] } else { Vec::new() };
         let i = inspector(&c, &[], &writers);
-        // The running one on top, then the rest newest first.
         assert!(i.shells[0].running && i.shells[0].mark == Mark::Spinner);
         assert_eq!(i.shells[1].mark, Mark::Icon(Icon::Done, Ink::Done));
         let order: Vec<&str> = i.shells.iter().map(|s| s.command.as_str()).collect();
@@ -781,17 +728,14 @@ mod tests {
         );
     }
 
-    // Oldest first, as the subagents come: `true` is a running one.
     #[test]
     fn while_any_run_those_show_and_the_finished_ones_open_from_show_more() {
         let l = list_subagents(&[false, true, false, true, false], false);
         assert_eq!(l.rows, [3, 1], "newest first");
         assert_eq!((l.hidden, l.fold), (3, Fold::More(3)));
-        // Opened: the running ones still first, then every finished one, newest first.
         let open = list_subagents(&[false, true, false, true, false], true);
         assert_eq!(open.rows, [3, 1, 4, 2, 0]);
         assert_eq!((open.hidden, open.fold), (0, Fold::Less));
-        // All running: nothing to open.
         let all = list_subagents(&[true, true], false);
         assert_eq!((all.rows, all.fold), (vec![1, 0], Fold::None));
     }

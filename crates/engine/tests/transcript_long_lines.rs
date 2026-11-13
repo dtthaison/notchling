@@ -1,7 +1,3 @@
-//! Chat's transcript window is a budget of parsed bytes, not of file bytes: base64 images (a Read of
-//! a .jpg writes one line of 0.5 to 1.8 MB) must not push the conversation before them out of the
-//! read. A session with 50 turns, three huge image results, then 5 more turns shows all 55 prompts.
-
 mod common;
 
 use common::*;
@@ -26,14 +22,12 @@ fn answer(n: usize) -> String {
     )
 }
 
-/// An assistant line that reads a picture.
 fn read_call(id: &str) -> String {
     format!(
         r#"{{"type":"assistant","timestamp":"2026-11-08T08:30:00.000Z","message":{{"id":"msg_{id}","role":"assistant","model":"claude-opus-5-5","content":[{{"type":"tool_use","id":"{id}","name":"Read","input":{{"file_path":"/tmp/{id}.jpg"}}}}]}}}}"#
     )
 }
 
-/// What Read writes for a picture: the id first, then megabytes of base64, then the rest of the line.
 fn image_result(id: &str, bytes: usize) -> String {
     let data = "A".repeat(bytes);
     format!(
@@ -41,7 +35,6 @@ fn image_result(id: &str, bytes: usize) -> String {
     )
 }
 
-/// `before` small turns, one Read call per image with its huge result, then `after` small turns.
 fn session(before: usize, images: usize, bytes: usize, after: usize) -> String {
     let mut lines = Vec::new();
     for n in 0..before {
@@ -122,7 +115,6 @@ fn an_append_after_the_images_is_read_on_top_of_what_was_read() {
     let second = conversation::read_shared(&path);
     assert_eq!(prompts(&second), expected(0..56));
 
-    // Another image result, bigger than the whole window, then a prompt.
     let id = "toolu_late";
     scratch.append(
         "s.jsonl",
@@ -137,7 +129,6 @@ fn an_append_after_the_images_is_read_on_top_of_what_was_read() {
     assert_eq!(prompts(&third), expected(0..57));
 }
 
-/// Counts the lines it is given, and the bytes.
 #[derive(Default)]
 struct Count {
     lines: Vec<usize>,
@@ -167,7 +158,6 @@ fn only_the_lines_that_fit_are_parsed_however_many_images_sit_between() {
 #[test]
 fn the_look_back_stops_at_the_scan_limit() {
     let scratch = Scratch::new("longlines-cap");
-    // 50 turns, 4.5 MB of images, 5 turns. A 3 MB scan reaches only into the images.
     let path = s(&scratch.write("s.jsonl", &session(50, 3, IMAGE_BYTES, 5)));
     let capped = Cursors::new(4_000_000, 4, |p: &Parser| Arc::new(p.conversation()))
         .skipping_lines_over(400_000, 3_000_000);
@@ -178,7 +168,6 @@ fn the_look_back_stops_at_the_scan_limit() {
         "it reads from the line it reached"
     );
 
-    // A file of nothing but images and a few lines at its end: the scan gives up at the limit.
     let mut text = String::new();
     for i in 0..70 {
         text.push_str(&image_result(&format!("toolu_{i}"), 1_000_000));
@@ -235,7 +224,6 @@ fn a_transcript_without_pictures_reads_the_same_either_way() {
 fn the_notch_keeps_the_last_prompt_behind_a_run_of_pictures() {
     use notchling_engine::transcript::snapshot;
     let scratch = Scratch::new("longlines-notch");
-    // The last prompt, then the agent reads four pictures: the last 2 MB of the file is all base64.
     let mut text = session(5, 0, 0, 0);
     text.push_str(&format!("{}\n", prompt(5)));
     for i in 0..4 {
@@ -257,7 +245,6 @@ fn a_request_blob_repeating_a_result_does_not_finish_a_step() {
     let scratch = Scratch::new("longlines-blob");
     let id = "toolu_blob";
     let data = "A".repeat(600_000);
-    // Claude Code logs what it sent to the API too, tool results and all; that isn't the result.
     let blob = format!(
         r#"{{"type":"api-request-blob","sessionId":"s","hash":"h","message":{{"role":"user","content":[{{"tool_use_id":"{id}","type":"tool_result","content":[{{"type":"image","source":{{"type":"base64","data":"{data}"}}}}]}}]}}}}"#
     );

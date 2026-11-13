@@ -1,7 +1,3 @@
-//! The kit's parts as GPUI elements. Each takes an [`Appearance`] and, where it has states, a
-//! `state`: `PartState::Rest` makes it live (hover and press from the mouse, the pointing hand);
-//! any other state is forced, which is how the gallery shows every state at once.
-
 use gpui::{
     div, linear_color_stop, linear_gradient, prelude::*, px, Div, ElementId, FontWeight, Stateful,
     StyleRefinement,
@@ -20,7 +16,6 @@ use crate::part::{
 };
 use crate::{Appearance, Icon, Ink, Status, TypeRole};
 
-/// Text in a type role and an ink. Section headers come out uppercase.
 pub fn label(text: &str, role: TypeRole, ink: Ink, appearance: Appearance) -> Div {
     div()
         .kit_type(role)
@@ -28,7 +23,6 @@ pub fn label(text: &str, role: TypeRole, ink: Ink, appearance: Appearance) -> Di
         .child(role.display(text))
 }
 
-/// A card: fill, hairline, radius.
 pub fn card(appearance: Appearance) -> Div {
     div()
         .rounded(px(RADIUS_CARD))
@@ -37,10 +31,6 @@ pub fn card(appearance: Appearance) -> Div {
         .border_color(hsla(Ink::Hairline.color(appearance)))
 }
 
-/// A hover or press look as a style. GPUI 0.2.2 puts a state's text style in place of the
-/// element's whole one, not over it, so setting the text color alone dropped the font size and a
-/// button's words grew while hovered or pressed; `role` (the type the element's own text is in)
-/// goes along with the color.
 fn state_style(style: StyleRefinement, look: &Look, role: Option<TypeRole>) -> StyleRefinement {
     let style = match role {
         Some(role) => style.kit_type(role),
@@ -49,9 +39,6 @@ fn state_style(style: StyleRefinement, look: &Look, role: Option<TypeRole>) -> S
     style.look(look)
 }
 
-/// Live hover and press looks on an element at rest; a forced state draws only itself. The pointing
-/// hand shows over anything clickable that isn't disabled (LINT-POINTER-CURSOR's rule, kept here).
-/// `role` is the type of text the element holds itself, which its states must keep.
 fn interactive(
     element: Stateful<Div>,
     state: PartState,
@@ -69,7 +56,6 @@ fn interactive(
     }
 }
 
-/// Spec: Button. Height 28, padding 12, radius sm, label type.
 pub fn button(
     id: impl Into<ElementId>,
     title: &str,
@@ -80,7 +66,6 @@ pub fn button(
     button_with(id, title.to_owned(), kind, state, appearance)
 }
 
-/// A button around any element (a drawn mark such as [`phone_mark`]) instead of a title.
 pub fn button_with(
     id: impl Into<ElementId>,
     content: impl IntoElement,
@@ -108,7 +93,6 @@ pub fn button_with(
     )
 }
 
-/// A button that holds an icon of `points` in its kind's text color: close, back, add.
 pub fn icon_button(
     id: impl Into<ElementId>,
     glyph: Icon,
@@ -121,8 +105,6 @@ pub fn icon_button(
     button_with(id, icon_in(glyph, points, color), kind, state, appearance)
 }
 
-/// Spec: Avatar. Initials on the session's own gradient, with an optional status badge ringed in
-/// the surface it sits on.
 pub fn avatar(
     name: &str,
     size: f32,
@@ -166,7 +148,6 @@ pub fn avatar(
     element
 }
 
-/// Claude's mark: a sparkle on an orange disc.
 pub fn claude_mark(size: f32, appearance: Appearance) -> Div {
     div()
         .flex_shrink_0()
@@ -186,8 +167,6 @@ pub fn claude_mark(size: f32, appearance: Appearance) -> Div {
         .child(Icon::Claude.glyph())
 }
 
-/// A phone, drawn (`Icon::Phone`, SF `iphone`): a rounded outline `size` tall and a dot for the
-/// home button, in an ink. The text glyphs for a phone come out thin or tiny in the system font.
 pub fn phone_mark(size: f32, ink: Ink, appearance: Appearance) -> Div {
     let color = hsla(ink.color(appearance));
     let stroke = (size / 9.0).max(1.0);
@@ -211,7 +190,6 @@ pub fn phone_mark(size: f32, ink: Ink, appearance: Appearance) -> Div {
         )
 }
 
-/// Spec: Session row. Avatar 30 with a status badge, name, status line, age. Height 52, radius md.
 #[allow(clippy::too_many_arguments)]
 pub fn session_row(
     id: impl Into<ElementId>,
@@ -230,7 +208,6 @@ pub fn session_row(
         .min_w(px(0.0))
         .gap(px(2.0))
         .overflow_hidden()
-        // One line each, clipped with an ellipsis, so every row keeps the same height.
         .child(label(name, TypeRole::Heading, Ink::Text, appearance).elide())
         .child(label(status_line, TypeRole::Meta, Ink::TextMuted, appearance).elide());
     session_row_shell(
@@ -246,10 +223,6 @@ pub fn session_row(
     )
 }
 
-/// `text` with `mark` in a margin `indent` wide, cut with an ellipsis. The mark is placed over the
-/// text's own box, not laid out beside it: `elide` needs the text to be a direct child of the
-/// lines column, which gives it a definite width. Wrapped in another box (a row, or a column of
-/// its own) the text is measured narrow and shows only its first word.
 fn marked_line(mark: impl IntoElement, indent: f32, text: Div) -> Div {
     text.relative()
         .pl(px(indent))
@@ -266,7 +239,6 @@ fn marked_line(mark: impl IntoElement, indent: f32, text: Div) -> Div {
         .elide()
 }
 
-/// Which tool runs a session, for [`tool_icon`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ToolMark {
     Claude,
@@ -275,7 +247,6 @@ pub enum ToolMark {
 }
 
 impl ToolMark {
-    /// The tool's name, for a tooltip or a label.
     pub fn name(self) -> &'static str {
         match self {
             ToolMark::Claude => "Claude Code",
@@ -284,8 +255,6 @@ impl ToolMark {
         }
     }
 
-    /// The installed apps whose icon stands for the tool, the first found wins (the CLIs have no
-    /// icon of their own): the Swift `SessionTool.bundleIDs`.
     pub fn bundle_ids(self) -> &'static [&'static str] {
         match self {
             ToolMark::Claude => &["com.anthropic.claudefordesktop"],
@@ -294,7 +263,6 @@ impl ToolMark {
         }
     }
 
-    /// The Swift `SessionTool.symbol`: what it draws when the tool's app isn't installed.
     fn icon(self) -> Icon {
         match self {
             ToolMark::Claude => Icon::Claude,
@@ -304,12 +272,7 @@ impl ToolMark {
     }
 }
 
-/// Spec: Tool icon (the Swift `ToolIcon`), `size` square: the tool's installed app icon, else
-/// Claude's mark, else the tool's symbol at three quarters of the box in muted ink, as the Swift
-/// app draws it with no app icon to hand.
-/// The OpenAI and Google marks are brand artwork and aren't copied here.
 pub fn tool_icon(tool: ToolMark, size: f32, appearance: Appearance) -> Div {
-    // The installed app's own icon when the app has handed it over (`tool_images`).
     if let Some(image) = tool_image(tool) {
         return div()
             .flex_shrink_0()
@@ -328,8 +291,6 @@ pub fn tool_icon(tool: ToolMark, size: f32, appearance: Appearance) -> Div {
     }
 }
 
-/// Spec: a session row's account line: a 9 pt person (the main login) or branch (a lane) and the
-/// email, meta type in faint ink, clipped with an ellipsis.
 pub fn account_line(text: &str, lane: bool, appearance: Appearance) -> Div {
     marked_line(
         icon(
@@ -343,10 +304,6 @@ pub fn account_line(text: &str, lane: bool, appearance: Appearance) -> Div {
     )
 }
 
-/// Spec: Session row, the sidebar's: three lines, who (the tool icon and the name), on which
-/// account, doing what; the status line is accent text while the session needs you. `tool` and
-/// `account` are built by the caller (`tool_icon`, `account_line`) so it can name them as parts.
-/// Fixed at [`SESSION_ROW_ACCOUNT`], with or without an account line.
 #[allow(clippy::too_many_arguments)]
 pub fn session_row_marked(
     id: impl Into<ElementId>,
@@ -397,8 +354,6 @@ pub fn session_row_marked(
     )
 }
 
-/// What the two session rows share: the frame, the lines column, the age. No avatar: the group
-/// a row is in and its status line say how it is.
 #[allow(clippy::too_many_arguments)]
 fn session_row_shell(
     id: impl Into<ElementId>,
@@ -432,7 +387,6 @@ fn session_row_shell(
     )
 }
 
-/// Spec: Option, a question's answer. Number badge (the terminal's digit), title, detail.
 pub fn option_row(
     id: impl Into<ElementId>,
     number: usize,
@@ -487,7 +441,6 @@ pub fn option_row(
     )
 }
 
-/// Spec: Status pill. Capsule, status color at 16%, status-colored icon and word, never color alone.
 pub fn status_pill(status: Status, text: &str, appearance: Appearance) -> Div {
     let color = Ink::status(status).color(appearance);
     let text_color = if status == Status::Needs {
@@ -508,8 +461,6 @@ pub fn status_pill(status: Status, text: &str, appearance: Appearance) -> Div {
         .child(div().kit_type(TypeRole::Label).child(text.to_owned()))
 }
 
-/// Spec: Field. A plain field with the kit's fill and focus border; shows the placeholder faint
-/// while empty. Typing arrives with U1.
 pub fn field(text: &str, placeholder: &str, focused: bool, appearance: Appearance) -> Div {
     let empty = text.is_empty();
     div()
@@ -530,7 +481,6 @@ mod press_tests {
 
     #[test]
     fn a_pressed_button_keeps_its_text_size() {
-        // GPUI 0.2.2 swaps the whole text style for a state's, so the size must come along.
         let look = button_look(ButtonKind::Ghost, PartState::Pressed, Appearance::Dark);
         let style = state_style(StyleRefinement::default(), &look, Some(TypeRole::Label));
         let text = style.text.expect("a text style");

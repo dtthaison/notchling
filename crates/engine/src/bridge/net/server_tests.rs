@@ -16,7 +16,6 @@ use rustls::{DigitallySignedStruct, SignatureScheme};
 use std::io::{Read, Write};
 
 pub(crate) const SWIFT_DEVICES: &str = include_str!("testdata/devices.swift.json");
-/// The token of the iPhone in the Swift-format `devices.json`.
 pub(crate) const IPHONE_TOKEN: &str = "Xq3v9yR2mT7pL0wK5sJ8nB4cF6hD1gA_zE-uY2iO3pQ";
 pub(crate) const PIXEL_TOKEN: &str = "Pk7nW2qR9sT4vX6yZ1aB3cD5eF8gH0jK-mN_oP2rS4t";
 
@@ -24,8 +23,6 @@ pub(crate) fn now_clock() -> TestClock {
     TestClock::new(crate::bridge::net::files::now_ms())
 }
 
-/// A bridge folder as the Swift app leaves it: its identity, its `devices.json` with two paired
-/// phones, and internet access on with a test team.
 pub(crate) fn swift_folder(dir: &TempDir) -> PathBuf {
     let bridge = dir.path("AgentConsole/bridge");
     make_swift_identity(&bridge);
@@ -98,7 +95,6 @@ impl Rig {
         self.key.token(&good_claims(self.clock.now()))
     }
 
-    /// A tunnel client through the upgrade.
     fn tunnel_client(&self, ip: &str) -> TcpStream {
         let mut s = TcpStream::connect(("127.0.0.1", self.tunnel.port())).unwrap();
         s.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
@@ -154,7 +150,6 @@ fn read_head(s: &mut impl Read) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-/// One server frame (never masked).
 fn read_frame(s: &mut impl Read) -> (u8, Vec<u8>) {
     let mut head = [0u8; 2];
     s.read_exact(&mut head).unwrap();
@@ -191,7 +186,6 @@ fn close_code(s: &mut impl Read) -> u16 {
     }
 }
 
-/// True when the server has closed the socket (EOF or reset), within the read timeout.
 fn closed(s: &mut TcpStream) -> bool {
     let mut buf = [0u8; 1024];
     loop {
@@ -216,7 +210,6 @@ fn a_tunnel_phone_says_hello_and_reaches_the_router() {
     assert_eq!(rig.core.connections(), 1);
 }
 
-/// A `ping` op; its answer.
 fn ping(s: &mut TcpStream, id: u32) -> serde_json::Value {
     s.write_all(&masked(
         frame::TEXT,
@@ -259,7 +252,7 @@ fn a_tls_client_that_never_handshakes_is_dropped() {
     dribble
         .set_read_timeout(Some(Duration::from_secs(5)))
         .unwrap();
-    dribble.write_all(&[0x16, 0x03]).unwrap(); // the start of a ClientHello, never finished
+    dribble.write_all(&[0x16, 0x03]).unwrap();
     let started = Instant::now();
     let mut phone = tls_phone(&rig, &rig.fingerprint).unwrap();
     assert_eq!(
@@ -297,11 +290,11 @@ fn a_broken_frame_closes_with_1002() {
     let rig = Rig::new();
     let mut phone = rig.tunnel_client("203.0.113.13");
     rig.hello(&mut phone, IPHONE_TOKEN);
-    phone.write_all(&[0x81, 0x02, b'h', b'i']).unwrap(); // not masked
+    phone.write_all(&[0x81, 0x02, b'h', b'i']).unwrap();
     assert_eq!(close_code(&mut phone), 1002);
     assert!(closed(&mut phone));
     let mut garbled = rig.tunnel_client("203.0.113.14");
-    garbled.write_all(&[0xC1, 0x80, 0, 0, 0, 0]).unwrap(); // a reserved bit, before hello
+    garbled.write_all(&[0xC1, 0x80, 0, 0, 0, 0]).unwrap();
     assert_eq!(close_code(&mut garbled), 1002);
 }
 
@@ -344,7 +337,6 @@ fn a_plain_request_to_the_tunnel_port_is_403() {
     assert!(read_head(&mut s).starts_with("HTTP/1.1 403"));
 }
 
-/// Pins the bridge's certificate by its SHA-256, as the phone does with the QR's `fp`.
 #[derive(Debug)]
 pub(crate) struct Pinned(pub String);
 
@@ -391,7 +383,6 @@ impl ServerCertVerifier for Pinned {
 pub(crate) type Phone =
     tungstenite::WebSocket<rustls::StreamOwned<rustls::ClientConnection, TcpStream>>;
 
-/// A phone on the LAN port: TLS pinned to `fingerprint`, then the WebSocket upgrade (tungstenite).
 pub(crate) fn tls_phone_at(port: u16, fingerprint: &str) -> Result<Phone, String> {
     use tungstenite::client::IntoClientRequest;
     let conn = client_tls(fingerprint);
@@ -408,7 +399,6 @@ pub(crate) fn tls_phone_at(port: u16, fingerprint: &str) -> Result<Phone, String
         .map_err(|e| e.to_string())
 }
 
-/// A phone's TLS session, pinned to `fingerprint`, before any byte has gone.
 fn client_tls(fingerprint: &str) -> rustls::ClientConnection {
     let config = rustls::ClientConfig::builder_with_provider(Arc::new(
         rustls::crypto::ring::default_provider(),
@@ -488,7 +478,6 @@ fn stopping_closes_the_port_and_every_phone() {
     assert_eq!(core.connections(), 0, "the router heard it close");
 }
 
-/// True while the server keeps the socket open (a short read times out rather than ending).
 fn still_open(s: &mut TcpStream) -> bool {
     s.set_read_timeout(Some(Duration::from_millis(200)))
         .unwrap();
@@ -557,7 +546,6 @@ fn a_fifth_unauthenticated_socket_from_one_address_is_refused() {
         },
         Arc::new(FakeBackend::default()),
     );
-    // A phone that said hello doesn't count.
     let mut phone = tls_phone(&rig, &rig.fingerprint).unwrap();
     assert_eq!(ws_hello(&mut phone, PIXEL_TOKEN)["ok"], true);
     let connect = || TcpStream::connect(("127.0.0.1", rig.lan.port())).unwrap();
@@ -647,7 +635,6 @@ fn a_pair_waiting_for_approval_outlasts_the_auth_deadline_and_then_may_idle() {
 
 #[test]
 fn a_frame_larger_than_the_tls_buffer_reaches_a_tls_phone() {
-    // rustls takes at most 64 KB of plaintext before its records are written out.
     let rig = Rig::new();
     let mut phone = tls_phone(&rig, &rig.fingerprint).unwrap();
     assert_eq!(ws_hello(&mut phone, PIXEL_TOKEN)["ok"], true);
@@ -696,7 +683,6 @@ fn a_phone_that_reads_slowly_holds_up_no_one_and_bridge_off_is_prompt() {
     };
     let big = "x".repeat(200 * 1024);
     let mut slowest = Duration::ZERO;
-    // Spaced, so the writer is stuck in a write by the time the queue fills.
     for _ in 0..120 {
         let started = Instant::now();
         connection.send_text(big.clone());

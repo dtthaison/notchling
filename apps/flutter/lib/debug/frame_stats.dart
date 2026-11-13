@@ -3,8 +3,6 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/scheduler.dart';
 
-/// Profiling aid, off unless the app is built with `--dart-define=FRAME_STATS=true`: logs build and raster
-/// times of the frames drawn in each 2 s window (tag FRAMESTATS), so scenarios can be compared before and after.
 void installFrameStats() {
   if (!const bool.fromEnvironment('FRAME_STATS')) return;
   final List<FrameTiming> window = <FrameTiming>[];

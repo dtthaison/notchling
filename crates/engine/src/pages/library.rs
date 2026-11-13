@@ -1,5 +1,3 @@
-//! The library on disk: `pages.json`, the page folders, finding and describing.
-
 use super::clock;
 use super::lock::{self, DirLock};
 use crate::search::{find_pages, PageEntry};
@@ -8,13 +6,9 @@ use std::fmt;
 use std::io;
 use std::path::{Path, PathBuf};
 
-/// Why a library write didn't happen.
 #[derive(Debug)]
 pub enum PagesError {
-    /// The library was opened read-only: the daemon reads the Swift app's folder, it doesn't
-    /// write it (decision 0011: one owner per resource).
     ReadOnly,
-    /// Another writer held `.lock` for the whole wait.
     Busy,
     Io(io::Error),
 }
@@ -43,15 +37,12 @@ impl From<notchling_platform::Error> for PagesError {
     }
 }
 
-/// A folder of saved pages. Open it read-only to look, writable to record.
 #[derive(Clone, Debug)]
 pub struct PageLibrary {
     dir: PathBuf,
     writable: bool,
 }
 
-/// Whether `part` is one plain path component: no separator, no `.` or `..`, no NUL. A folder or
-/// file name read from `pages.json` is data, so it is checked before it becomes a path.
 pub fn safe_component(part: &str) -> bool {
     !part.is_empty()
         && part != "."
@@ -60,7 +51,6 @@ pub fn safe_component(part: &str) -> bool {
         && !part.contains(':')
 }
 
-/// A published path inside a page's folder: relative, with no empty, `.` or `..` part.
 pub fn safe_relative(path: &str) -> Option<Vec<&str>> {
     if path.starts_with('/') || path.contains(['\\', '\0']) {
         return None;
@@ -74,7 +64,6 @@ pub fn safe_relative(path: &str) -> Option<Vec<&str>> {
 }
 
 impl PageLibrary {
-    /// Looks only. Every write answers [`PagesError::ReadOnly`].
     pub fn read_only(dir: impl Into<PathBuf>) -> Self {
         PageLibrary {
             dir: dir.into(),
@@ -82,7 +71,6 @@ impl PageLibrary {
         }
     }
 
-    /// May record and remove. For a folder this process owns, or a test's.
     pub fn writable(dir: impl Into<PathBuf>) -> Self {
         PageLibrary {
             dir: dir.into(),
@@ -106,8 +94,6 @@ impl PageLibrary {
         self.dir.join("index.html")
     }
 
-    /// Every saved page, newest first. A missing or unreadable list is empty; an entry without
-    /// `folder` and `file` is skipped.
     pub fn entries(&self) -> Vec<PageEntry> {
         let mut list = self.read_list();
         list.sort_by(|a, b| {
@@ -118,7 +104,6 @@ impl PageLibrary {
         list
     }
 
-    /// The list as stored (file order).
     pub(crate) fn read_list(&self) -> Vec<PageEntry> {
         let Ok(data) = std::fs::read(self.list_path()) else {
             return Vec::new();
@@ -137,7 +122,6 @@ impl PageLibrary {
             .unwrap_or_default()
     }
 
-    /// When `pages.json` last changed (seconds since 1970), for callers that poll.
     pub fn list_modified(&self) -> Option<f64> {
         let modified = std::fs::metadata(self.list_path()).ok()?.modified().ok()?;
         modified
@@ -146,13 +130,10 @@ impl PageLibrary {
             .map(|d| d.as_secs_f64())
     }
 
-    /// The page with this link or id, else the pages whose text holds every word of the query.
     pub fn find(&self, query: &str) -> Vec<PageEntry> {
         find_in(query, &self.entries())
     }
 
-    /// The page's file on disk, `None` when its stored folder or file name isn't a plain name (a
-    /// hand-edited `pages.json` must not point a reader outside the library).
     pub fn local_path(&self, entry: &PageEntry) -> Option<PathBuf> {
         if !safe_component(&entry.folder) || !safe_component(&entry.file) {
             return None;
@@ -160,7 +141,6 @@ impl PageLibrary {
         Some(self.dir.join(&entry.folder).join(&entry.file))
     }
 
-    /// Plain lines an agent can act on: where the copy is, and who can republish it.
     pub fn describe(&self, entry: &PageEntry) -> String {
         let date = clock::local_text(entry.updated);
         let mut lines = vec![
@@ -203,8 +183,6 @@ impl PageLibrary {
         lines.join("\n")
     }
 
-    /// The files in the page's folder besides the page itself, sorted, as paths relative to it.
-    /// Hidden files and links are left out.
     pub fn supporting_files(&self, entry: &PageEntry) -> Vec<String> {
         const MAX_FILES: usize = 1000;
         let Some(main) = self.local_path(entry) else {
@@ -236,7 +214,6 @@ impl PageLibrary {
         out
     }
 
-    /// Runs `body` holding the library's write lock. Fails closed: read-only, or busy.
     pub(crate) fn with_lock<T>(
         &self,
         body: impl FnOnce() -> Result<T, PagesError>,
@@ -249,7 +226,6 @@ impl PageLibrary {
         body()
     }
 
-    /// Writes `pages.json` and the list page. Called with the lock held.
     pub(crate) fn save_list(&self, list: &[PageEntry]) -> Result<(), PagesError> {
         let value = serde_json::json!({ "pages": list });
         let data = serde_json::to_vec(&value).map_err(io::Error::other)?;
@@ -257,7 +233,6 @@ impl PageLibrary {
         super::listpage::write(self, list)
     }
 
-    /// Forgets a page and deletes its local folder. Never touches the page on claude.ai.
     pub fn remove(&self, folder: &str) -> Result<(), PagesError> {
         self.with_lock(|| {
             let list: Vec<PageEntry> = self
@@ -273,7 +248,6 @@ impl PageLibrary {
     }
 }
 
-/// [`PageLibrary::find`] over a list already read (the search panel searches on every key).
 pub fn find_in(query: &str, all: &[PageEntry]) -> Vec<PageEntry> {
     find_pages(query, all).into_iter().cloned().collect()
 }

@@ -1,21 +1,12 @@
-//! `WebSocketWire`, the HTTP half: the request head, bounded in size and time, the answers, the
-//! accept key, and which upgrades each port takes.
-//!
-//! A client that sends too much, or too slowly, is answered with a real HTTP status and dropped;
-//! nothing is left hanging.
-
 use super::access::{is_tunnel_origin, TunnelGate};
 use super::crypto::{base64, base64_decode};
 use ring::digest;
 
 pub const MAX_HEAD_BYTES: usize = 16 * 1024;
-/// How long a client has to finish its TLS handshake and request head, in milliseconds.
 pub const HEAD_TIMEOUT_MS: i64 = 5000;
 pub const SUBPROTOCOL: &str = "agentconsole.v1";
-/// The tunnel origin's one path.
 pub const TUNNEL_PATH: &str = "/v1";
 
-/// A parsed HTTP/1.1 request head.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HttpHead {
     pub method: String,
@@ -35,7 +26,6 @@ impl HttpHead {
             .map(|(_, v)| v.as_str())
     }
 
-    /// Comma-separated tokens of every header called `name`, lowercased.
     pub fn tokens(&self, name: &str) -> Vec<String> {
         self.headers
             .iter()
@@ -54,7 +44,6 @@ pub enum HeadParse {
     Failure(u16, String),
 }
 
-/// Collects bytes until the blank line that ends an HTTP head.
 pub struct HeadReader {
     started_ms: i64,
     buffer: Vec<u8>,
@@ -125,7 +114,6 @@ fn parse_head(text: &str) -> Result<HttpHead, (u16, &'static str)> {
     })
 }
 
-/// An HTTP/1.1 answer that closes the connection.
 pub fn response(status: u16, body: &str, headers: &[(&str, &str)]) -> Vec<u8> {
     let reason = match status {
         101 => "Switching Protocols",
@@ -153,7 +141,6 @@ pub fn response(status: u16, body: &str, headers: &[(&str, &str)]) -> Vec<u8> {
 
 const GUID: &str = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
-/// The `Sec-WebSocket-Accept` for a key.
 pub fn accept_value(key: &str) -> String {
     let hash = digest::digest(
         &digest::SHA1_FOR_LEGACY_USE_ONLY,
@@ -162,17 +149,14 @@ pub fn accept_value(key: &str) -> String {
     base64(hash.as_ref())
 }
 
-/// A `Sec-WebSocket-Key` is 16 random bytes in base64.
 pub fn is_valid_key(key: &str) -> bool {
     key.len() == 24
         && !key.contains(['-', '_'])
         && base64_decode(key).is_some_and(|b| b.len() == 16)
 }
 
-/// What to do with an upgrade request.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Upgrade {
-    /// Write `response`, then frames; `tunnel` holds the real client's address for a tunnel client.
     Accept {
         response: Vec<u8>,
         tunnel: Option<String>,
@@ -210,7 +194,6 @@ fn accept(key: &str, tunnel: Option<String>) -> Upgrade {
     }
 }
 
-/// The WebSocket checks both ports share; the key when they pass.
 fn websocket_checks(head: &HttpHead) -> Result<String, Upgrade> {
     if head.method != "GET" {
         return Err(refuse(400, "GET only", &[]));
@@ -257,8 +240,6 @@ fn gate_refusal(status: u16) -> Upgrade {
     )
 }
 
-/// The tunnel origin (loopback, for cloudflared): Cloudflare's marks, `/v1`, and a valid Access
-/// token. Anything without Cloudflare's headers is somebody else.
 pub fn tunnel_upgrade(head: &HttpHead, gate: &TunnelGate) -> Upgrade {
     if !is_tunnel_origin(&head.headers) {
         return refuse(403, "this port is for the tunnel only", &[]);
@@ -279,9 +260,6 @@ pub fn tunnel_upgrade(head: &HttpHead, gate: &TunnelGate) -> Upgrade {
     }
 }
 
-/// The LAN port (TLS): the subprotocol is what a phone identifies itself by, as the Swift
-/// listener's handshake handler did, so the path isn't checked. A request with Cloudflare's marks
-/// goes through the same Access check as the tunnel.
 pub fn lan_upgrade(head: &HttpHead, gate: &TunnelGate) -> Upgrade {
     let key = match websocket_checks(head) {
         Ok(key) => key,

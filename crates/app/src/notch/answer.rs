@@ -1,24 +1,15 @@
-//! Answering a question from the notch, pure: one tab per question, a pick per tab (an option for
-//! single select, a set for multi select, or typed text), and the answers `session.answer` takes
-//! once every tab has one. The Swift card walked the questions in order (`choices`, Back); here
-//! the tabs let you go back to any of them, and the Claude Code terminal's review step is the
-//! Submit button.
-
 use notchling_engine::transcript::snapshot::PendingQuestion;
 
 use crate::acting::Answer;
 
-/// What one question has so far.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 enum Pick {
     #[default]
     None,
-    /// 1-based, in the order the options are listed.
     Options(Vec<usize>),
     Text(String),
 }
 
-/// A tab's title and state.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Tab {
     pub title: String,
@@ -26,14 +17,11 @@ pub struct Tab {
     pub selected: bool,
 }
 
-/// The answers being put together for one question.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct QuestionDraft {
     tool_use_id: String,
-    /// The tab on show.
     pub tab: usize,
     picks: Vec<Pick>,
-    /// What's typed in each tab's text box.
     typed: Vec<String>,
 }
 
@@ -47,7 +35,6 @@ impl QuestionDraft {
         }
     }
 
-    /// Starts over when the question on show is another one.
     pub fn follow(&mut self, q: &PendingQuestion) {
         if self.tool_use_id != q.tool_use_id || self.picks.len() != q.items.len() {
             *self = QuestionDraft::new(q);
@@ -58,7 +45,6 @@ impl QuestionDraft {
         self.tool_use_id == q.tool_use_id
     }
 
-    /// Each question's tab: its header, else "Question n".
     pub fn tabs(&self, q: &PendingQuestion) -> Vec<Tab> {
         q.items
             .iter()
@@ -89,12 +75,10 @@ impl QuestionDraft {
         }
     }
 
-    /// Whether an option (1-based) is picked in a tab.
     pub fn is_picked(&self, tab: usize, option: usize) -> bool {
         matches!(self.picks.get(tab), Some(Pick::Options(p)) if p.contains(&option))
     }
 
-    /// The text a tab was answered with.
     pub fn text_answer(&self, tab: usize) -> Option<&str> {
         match self.picks.get(tab) {
             Some(Pick::Text(t)) => Some(t),
@@ -102,9 +86,6 @@ impl QuestionDraft {
         }
     }
 
-    /// Picks an option (1-based) in the tab on show. Single select takes it and moves to the next
-    /// question still unanswered; multi select toggles it and stays. Returns the answers when this
-    /// pick finishes a lone single-select question, which is sent at once as the Swift card did.
     pub fn choose(&mut self, q: &PendingQuestion, option: usize) -> Option<Vec<Answer>> {
         let item = q.items.get(self.tab)?;
         if option == 0 || option > item.options.len() {
@@ -132,7 +113,6 @@ impl QuestionDraft {
         None
     }
 
-    /// The tab's text box.
     pub fn typed(&self, tab: usize) -> &str {
         self.typed.get(tab).map(String::as_str).unwrap_or("")
     }
@@ -141,8 +121,6 @@ impl QuestionDraft {
         self.typed.get_mut(self.tab)
     }
 
-    /// Takes the typed text as the tab's answer and moves on; empty text is ignored. Like a
-    /// single pick, it sends a lone question at once.
     pub fn submit_text(&mut self, q: &PendingQuestion) -> Option<Vec<Answer>> {
         let text = self.typed.get(self.tab)?.trim().to_owned();
         if text.is_empty() || self.tab >= q.items.len() {
@@ -157,12 +135,10 @@ impl QuestionDraft {
         None
     }
 
-    /// Multi select's Next: on to the next question still unanswered.
     pub fn next(&mut self) {
         self.advance();
     }
 
-    /// The next unanswered tab after this one, wrapping; stays when all are answered.
     fn advance(&mut self) {
         let n = self.picks.len();
         if let Some(next) = (1..=n)
@@ -173,12 +149,10 @@ impl QuestionDraft {
         }
     }
 
-    /// Every question has an answer.
     pub fn complete(&self) -> bool {
         !self.picks.is_empty() && (0..self.picks.len()).all(|t| self.answered(t))
     }
 
-    /// The answers in question order, once complete.
     pub fn answers(&self, q: &PendingQuestion) -> Option<Vec<Answer>> {
         if !self.is_for(q) || !self.complete() {
             return None;
@@ -193,25 +167,18 @@ impl QuestionDraft {
             .collect()
     }
 
-    /// Whether the card needs a Submit button: more than one question, or a multi-select one
-    /// (a lone single-select question is sent by its pick).
     pub fn needs_submit(q: &PendingQuestion) -> bool {
         q.items.len() > 1 || q.items.iter().any(|i| i.multi_select)
     }
 }
 
-/// What a key press did to a text box.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Typed {
     Changed,
-    /// Return: take the text.
     Submit,
     Ignored,
 }
 
-/// One key press into a one-line text box: Return submits, Backspace deletes a character, and a
-/// printable character is added. With ⌘ or Ctrl held nothing is typed. Control characters never
-/// get in, so the text can't carry an Esc or the end of a bracketed paste.
 pub fn type_key(text: &mut String, key: &str, key_char: Option<&str>, modified: bool) -> Typed {
     match key {
         "enter" => Typed::Submit,
@@ -337,7 +304,6 @@ mod tests {
                 Answer::Options(vec![1]),
             ])
         );
-        // Changing an answer later is allowed.
         d.select_tab(2);
         d.choose(&q, 2);
         assert_eq!(d.answers(&q).unwrap()[2], Answer::Options(vec![2]));

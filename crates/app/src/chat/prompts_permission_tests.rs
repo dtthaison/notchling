@@ -1,8 +1,3 @@
-//! The permission card read from a job's state (`approve <tool>: <what>`): what it offers, how its
-//! words are split, and how a refusal that the permission is gone is told apart. A card for a file
-//! edit offered "Always allow this", which the terminal's dialog for one never has ("Yes, allow all
-//! edits during this session" is its only longer answer), so that button could only be refused.
-
 use notchling_engine::sessions::{Agent, AgentGroup, AgentTarget};
 
 use super::prompt_flow::{already_answered, is_gone};
@@ -36,8 +31,6 @@ fn a_file_edit_is_not_offered_always_since_its_dialog_has_no_such_option() {
             .expect("a card");
         assert!(!r.can_always_allow, "{tool}");
     }
-    // A command's dialog has "Yes, and don't ask again for …"; the daemon still refuses it, with
-    // nothing typed, when this one doesn't.
     for needs in [
         "approve Bash: ls -la",
         "approve WebFetch: https://example.com",
@@ -73,7 +66,6 @@ fn the_tool_is_the_first_word_with_or_without_a_colon() {
 #[test]
 fn a_refusal_that_the_permission_is_gone_means_it_was_answered_elsewhere() {
     use notchling_engine::reply::exec::Failure;
-    // What the daemon says when the terminal shows no such dialog: the card goes, with a note.
     assert!(is_gone(&Failure::NotPermission.to_string()));
     assert!(!is_gone(&Failure::PermissionMismatch.to_string()));
     assert!(!is_gone(&Failure::NoAlways.to_string()));

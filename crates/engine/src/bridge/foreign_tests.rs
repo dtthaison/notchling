@@ -1,5 +1,3 @@
-//! Port of `ForeignSessionsTests`: Codex and Antigravity rows on the bridge's session and chat shapes.
-
 use super::foreign::*;
 use super::model::*;
 use crate::transcript::model::{
@@ -71,7 +69,6 @@ fn session_mapping() {
     assert_eq!(idle.tool, "agy");
     assert_eq!(idle.state, SessionState::Done);
     assert!(session(&row("not-foreign", SINCE), false, None).is_none());
-    // The wire: `tool` is additive, and Claude Code sessions say so too.
     assert_eq!(running.to_wire().tool, "codex");
     let claude = Session::new("c", "n", "/", Control::ViewOnly, SessionState::Done);
     assert_eq!(claude.to_wire().tool, "claude");
@@ -113,7 +110,6 @@ fn a_permission_makes_it_need_input() {
     assert_eq!(waiting.state, SessionState::NeedsInput);
     assert_eq!(waiting.pending, Some(prompt));
     assert_eq!(parse_prompt("something-else"), None);
-    // A string rpc id may hold colons.
     assert_eq!(
         parse_prompt("agy-perm:agy:S1:a:b").map(|p| p.1),
         Some("a:b".to_string())
@@ -165,8 +161,8 @@ fn visible_hides_closed_old_and_excess() {
     let reopened = row("codex:c", now - 30_000.0);
     let old = row("agy:old", now - 9.0 * 86_400_000.0);
     let shut = HashMap::from([
-        ("codex:b".to_string(), closed.since_ms / 1000.0 + 1.0), // closed after its last use: hidden
-        ("codex:c".to_string(), reopened.since_ms / 1000.0 - 100.0), // used again since: back
+        ("codex:b".to_string(), closed.since_ms / 1000.0 + 1.0),
+        ("codex:c".to_string(), reopened.since_ms / 1000.0 - 100.0),
     ]);
     let list = visible(
         &[closed, old, fresh, reopened],
@@ -263,7 +259,6 @@ fn messages_from_a_conversation() {
         list[2].time, SINCE,
         "an item with no date takes the one before it"
     );
-    // Same ids on a second read, and different ids for another session.
     let again = messages(&conversation, "codex:s", SINCE, false);
     assert_eq!(
         list.iter().map(|m| &m.id).collect::<Vec<_>>(),
@@ -341,7 +336,6 @@ fn enrich_takes_the_last_reply_and_context() {
 
 #[test]
 fn stable_uuid_matches_the_swift_app() {
-    // SHA-256("codex:s|u1"), first 16 bytes, as Swift's `UUID(uuid:).uuidString` prints them.
     let id = stable_uuid("codex:s|u1");
     assert_eq!(id.len(), 36);
     assert_eq!(id, id.to_uppercase());

@@ -1,6 +1,3 @@
-//! Ported from `MachinesMorningTests.swift` (first half): building the morning list, reading `gh`'s
-//! issues and worker comments, and fetching issues. The actions are in `tests_actions.rs`.
-
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::fakes_jobs::{ok, AnswerRunner};
@@ -43,8 +40,6 @@ fn reports(status: WorkerStatus) -> BTreeMap<String, LastReport> {
 fn issues(list: Vec<GhIssue>) -> BTreeMap<String, Vec<GhIssue>> {
     BTreeMap::from([(REPO.to_string(), list)])
 }
-
-// build
 
 #[test]
 fn build_orders_ready_needs_stuck() {
@@ -117,8 +112,6 @@ fn build_lists_machines_in_name_order_within_a_group() {
     assert_eq!(ids, ["m1/acme/app#3", "m2/acme/app#3"]);
 }
 
-// GhIssue and worker comments
-
 #[test]
 fn gh_issue_decodes_gh_output() {
     let json = r#"
@@ -148,17 +141,14 @@ fn gh_issue_decodes_gh_output() {
 
 #[test]
 fn gh_issue_with_odd_parts_keeps_what_it_can_read() {
-    // a label that is not an object is skipped; a missing title is empty
     let list = GhIssue::decode_list(
         r#"[{"number":1,"labels":[5,{"name":"a"},{"name":3}],"comments":[]}]"#,
     );
     assert_eq!(list[0].labels, ["a"]);
     assert_eq!(list[0].title, "");
-    // one comment that is not an object drops the comments, not the issue
     let list = GhIssue::decode_list(r#"[{"number":1,"title":"t","comments":[7,{"body":"x"}]}]"#);
     assert_eq!(list.len(), 1);
     assert!(list[0].comments.is_empty());
-    // an element with no number empties the whole list
     assert!(GhIssue::decode_list(r#"[{"number":1},{"title":"no number"}]"#).is_empty());
     assert!(GhIssue::decode_list(r#"{"number":1}"#).is_empty());
 }
@@ -241,8 +231,6 @@ fn build_attaches_the_comment() {
     assert_eq!(items[0].comment.as_deref(), Some("Which one?"));
 }
 
-// fetch
-
 #[test]
 fn fetch_issues_asks_every_label_for_every_repo() {
     let runner = AnswerRunner::new(|argv| {
@@ -296,16 +284,13 @@ fn fetch_names_the_repos_whose_gh_call_failed_and_keeps_their_old_issues() {
         m[REPO].iter().map(|i| i.title.clone()).collect()
     };
     assert_eq!(titles(&merged(&old, &fetched, &failed)), ["Old", "Two"]);
-    // a repo that fetched fine takes the new issues
     assert_eq!(titles(&merged(&old, &fetched, &BTreeSet::new())), ["New"]);
-    // nothing known before: what the fetch got is better than nothing
     assert_eq!(
         titles(&merged(&BTreeMap::new(), &fetched, &failed)),
         ["New"]
     );
 }
 
-/// The repo goes after `-R`: only `owner/name` in plain characters reaches `gh`.
 #[test]
 fn a_repo_name_that_is_not_owner_slash_name_never_reaches_gh() {
     for good in ["acme/app", "a-b/c_d.e", "A1/b2"] {

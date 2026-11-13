@@ -69,7 +69,6 @@ fn a_message_prompt_is_trimmed_and_a_long_one_is_clipped() {
     let clipped = build_prompt(&Subject::Message(long), "/w");
     assert!(clipped.contains("(50 more characters left out)"));
     assert_eq!(title(&Subject::Message("x".into())), "Reply");
-    // Counted in characters, not bytes.
     assert_eq!(clip(&"é".repeat(BODY_LIMIT)).chars().count(), BODY_LIMIT);
 }
 
@@ -114,7 +113,6 @@ fn the_arguments_are_read_only_and_skip_unset_choices() {
             "high"
         ]
     );
-    // The command accepts them.
     let parsed = parse(&b[1..], Path::new("/"), None).unwrap();
     assert_eq!(parsed.options.tool, Tool::Agy);
     assert_eq!(parsed.options.prompt, "from file");

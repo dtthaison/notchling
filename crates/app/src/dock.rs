@@ -1,17 +1,9 @@
-//! Dock presence (`DockPresence` in the Swift app): the app lives in the menu bar, with no Dock
-//! icon and not in ⌘Tab. While one of its titled windows is open it becomes a regular app, so you
-//! can switch away and back, and gets a small main menu. When the last one closes it goes back.
-
-/// `NSApplication.ActivationPolicy`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Policy {
-    /// Dock icon, ⌘Tab, a main menu.
     Regular,
-    /// Menu bar only.
     Accessory,
 }
 
-/// The policy for the number of titled windows open (the notch panel and alerts don't count).
 pub fn policy_for(titled_windows: usize) -> Policy {
     if titled_windows > 0 {
         Policy::Regular
@@ -20,7 +12,6 @@ pub fn policy_for(titled_windows: usize) -> Policy {
     }
 }
 
-/// An item of the main menu.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MainItem {
     Settings,
@@ -53,7 +44,6 @@ impl MainItem {
         }
     }
 
-    /// The key binding, in GPUI's keystroke form.
     pub fn key(self) -> Option<&'static str> {
         match self {
             MainItem::Settings => Some("cmd-,"),
@@ -71,15 +61,12 @@ impl MainItem {
     }
 }
 
-/// One menu of the main menu bar.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MainMenu {
     pub name: &'static str,
     pub items: Vec<MainItem>,
 }
 
-/// The main menu while a window is open: Quit, the edit commands and the window commands. No
-/// Hide: it would hide the notch too.
 pub fn main_menu() -> Vec<MainMenu> {
     vec![
         MainMenu {

@@ -1,5 +1,3 @@
-"""The small JSON Schema validator the protocol tests use: the subset the schema is written in."""
-
 from __future__ import annotations
 
 import unittest

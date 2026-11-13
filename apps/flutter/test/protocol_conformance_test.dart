@@ -1,6 +1,3 @@
-// Every fixture in protocol/fixtures/ (captured from the Mac's real encoders, or written from what this app
-// sends) parses with the generated wire types and, where the app reads it, with models.dart too. That pins
-// the hand-written models and the generated types to one wire. The app keeps using models.dart.
 import 'dart:convert';
 import 'dart:io';
 
@@ -17,7 +14,6 @@ Json asMap(Object? value) => (value! as Map<Object?, Object?>).cast<String, Obje
 List<Object?> asList(Object? value) => value! as List<Object?>;
 Json readJson(File file) => asMap(jsonDecode(file.readAsStringSync()));
 
-/// Fixture file name -> the definition it is an example of ("ChatGetResponse.before.json" -> "ChatGetResponse").
 List<(String file, String name, Json json)> fixtures() {
   final List<File> files = fixturesDir.listSync().whereType<File>().where((File f) => f.path.endsWith('.json')).toList()
     ..sort((File a, File b) => a.path.compareTo(b.path));
@@ -27,7 +23,6 @@ List<(String file, String name, Json json)> fixtures() {
   ];
 }
 
-/// Every property name with a default in the schema, and that default.
 Map<String, Object?> schemaDefaults(Object? node, [Map<String, Object?>? into]) {
   final Map<String, Object?> found = into ?? <String, Object?>{};
   if (node is Map<Object?, Object?>) {
@@ -49,7 +44,6 @@ Map<String, Object?> schemaDefaults(Object? node, [Map<String, Object?>? into]) 
   return found;
 }
 
-/// Everything in [input] is in [output]; what [output] adds is a default the schema names. Numbers compare by value.
 void compare(Object? input, Object? output, Map<String, Object?> defaults, String path, List<String> problems) {
   if (input is Map<Object?, Object?> && output is Map<Object?, Object?>) {
     input.forEach((Object? key, Object? value) {
@@ -96,7 +90,6 @@ void main() {
       final List<String> problems = <String>[];
       compare(json, output, defaults, r'$', problems);
       expect(problems, isEmpty, reason: file);
-      // Defaults are filled in once: writing the result back changes nothing.
       expect(jsonEncode(roundtrip(output)), jsonEncode(output), reason: '$file: a second round trip differs');
     }
   });

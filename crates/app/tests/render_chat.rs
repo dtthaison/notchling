@@ -1,7 +1,3 @@
-//! `--render chat` over the checked-in fixture (`fixtures/chat`, named through
-//! `NOTCHLING_DATA_ROOT` like the notch's) end to end: needs a window server, so it is ignored by
-//! default. Run it with `cargo test -p notchling-app -- --ignored` on a Mac.
-
 #![cfg(target_os = "macos")]
 
 use std::collections::HashSet;
@@ -19,7 +15,6 @@ fn renders_chat_over_the_fixture_root() {
     let output = Command::new(env!("CARGO_BIN_EXE_notchling-app"))
         .args(["--render", "chat", "--out"])
         .arg(&out)
-        // Never the real ~/.claude: the fixture, named explicitly.
         .env("NOTCHLING_DATA_ROOT", &root)
         .output()
         .expect("run notchling-app");

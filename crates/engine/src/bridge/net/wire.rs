@@ -1,28 +1,12 @@
-//! The byte stream under one connection: plain TCP (the tunnel origin) or TLS (the LAN port).
-//!
-//! One thread reads, another writes. For TLS the socket read happens without the lock, and only
-//! feeding the bytes to rustls, reading plaintext and writing records take it, so a reader blocked
-//! on a quiet phone never holds up a write. The TLS handshake runs inside the first reads.
-//!
-//! A TLS read returns after every socket read: when the bytes held no plaintext yet (a handshake,
-//! or a record still arriving) it fails with `Interrupted`, so the caller checks its own deadline
-//! before reading again, and a client sending a byte at a time can't outlast it.
-//!
-//! [`Wire::shutdown`] never waits: it closes the socket, which wakes a write blocked on a phone
-//! that stopped reading, and sends TLS's `close_notify` only when no write holds the session.
-
 use std::io::{self, Read, Write};
 use std::net::{Shutdown, TcpStream};
 use std::sync::{Mutex, TryLockError};
 use std::time::Duration;
 
 pub(crate) trait Wire: Send + Sync {
-    /// Plaintext bytes; 0 at the end. One reader at a time. `Interrupted`: bytes came but no
-    /// plaintext yet, so call again.
     fn read(&self, buf: &mut [u8]) -> io::Result<usize>;
     fn write_all(&self, data: &[u8]) -> io::Result<()>;
     fn set_read_timeout(&self, timeout: Option<Duration>) -> io::Result<()>;
-    /// Ends both directions; a blocked read or write returns. Never waits.
     fn shutdown(&self);
 }
 
@@ -57,7 +41,6 @@ impl Wire for PlainWire {
 
 struct TlsState {
     conn: rustls::ServerConnection,
-    /// Received TLS bytes rustls hasn't taken yet.
     pending: Vec<u8>,
 }
 
@@ -77,7 +60,6 @@ impl TlsWire {
         }
     }
 
-    /// Writes every TLS record rustls has ready.
     fn flush(&self, state: &mut TlsState) -> io::Result<()> {
         while state.conn.wants_write() {
             state.conn.write_tls(&mut &self.socket)?;
@@ -85,7 +67,6 @@ impl TlsWire {
         Ok(())
     }
 
-    /// Plaintext from what has arrived, without reading the socket; `None` when there is none yet.
     fn plaintext(&self, buf: &mut [u8]) -> io::Result<Option<usize>> {
         let mut state = lock(&self.state);
         loop {
@@ -95,7 +76,6 @@ impl TlsWire {
                 Err(e) => return Err(e),
             }
             if state.pending.is_empty() {
-                // The handshake's answers go out before the next socket read.
                 self.flush(&mut state)?;
                 return Ok(None);
             }
@@ -103,7 +83,6 @@ impl TlsWire {
             let taken = conn.read_tls(&mut &pending[..])?;
             pending.drain(..taken);
             let processed = state.conn.process_new_packets();
-            // An alert rustls queued for a bad handshake goes out before the error.
             let _ = self.flush(&mut state);
             if let Err(e) = processed {
                 return Err(io::Error::new(io::ErrorKind::InvalidData, e));
@@ -135,8 +114,6 @@ impl Wire for TlsWire {
         }
     }
 
-    /// rustls takes at most its buffer limit (64 KB) of plaintext before its records are written,
-    /// so a large frame goes in pieces.
     fn write_all(&self, data: &[u8]) -> io::Result<()> {
         let mut state = lock(&self.state);
         let mut rest = data;
@@ -159,11 +136,9 @@ impl Wire for TlsWire {
         let state = match self.state.try_lock() {
             Ok(state) => Some(state),
             Err(TryLockError::Poisoned(e)) => Some(e.into_inner()),
-            // A write holds it, maybe blocked on a phone that stopped reading: no goodbye then.
             Err(TryLockError::WouldBlock) => None,
         };
         if let Some(mut state) = state {
-            // Only what fits now: the socket goes non-blocking, and it closes next anyway.
             state.conn.send_close_notify();
             if self.socket.set_nonblocking(true).is_ok() {
                 let _ = self.flush(&mut state);

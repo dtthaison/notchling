@@ -1,5 +1,3 @@
-//! The window's pure pieces (Swift `MachinesWindowTests`, the forms and texts).
-
 use super::forms::*;
 use super::registry::{DockerState, MachineAbilities, MachineOs, MachineRepo, SdWorkerSettings};
 use super::step::CheckResult;

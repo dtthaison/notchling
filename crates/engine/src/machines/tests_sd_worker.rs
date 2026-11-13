@@ -1,5 +1,3 @@
-//! The worker.json step and the sd step order (Swift `MachinesSDWorkerStepsTests`).
-
 use super::fakes_b::*;
 use super::registry::Machine;
 use super::runner::CommandResult;
@@ -8,8 +6,6 @@ use super::steps_sd::{is_at_least, MIN_SD};
 use super::tests_sd::*;
 use super::worker_json;
 use serde_json::{json, Value};
-
-// MARK: worker.json
 
 fn owned_of(m: &Machine, all: &[Machine]) -> Result<serde_json::Map<String, Value>, String> {
     worker_json::owned(m, m.sd_worker().unwrap(), all)
@@ -95,7 +91,6 @@ fn worker_json_merged_is_sorted_and_pretty() {
         text.contains("~/.config/agents/claude.env"),
         "slashes stay unescaped"
     );
-    // a missing key equals null, so the two null keys are not differences
     assert_eq!(
         worker_json::differences(None, &owned),
         ["claude_env", "machine", "repos", "token_file"]
@@ -201,7 +196,6 @@ fn worker_json_probe_and_fix() {
         CheckState::Fail("not valid JSON".into())
     );
 
-    // the Fix reads the file, merges, and writes the merged bytes on stdin (mode 600)
     let rig = Rig::new(vps.clone());
     rig.runner.on(
         script_has("head -c 262144"),
@@ -237,7 +231,6 @@ fn worker_json_fix_writes_a_new_file_when_the_machine_has_none() {
 
 #[test]
 fn a_read_error_is_never_treated_as_a_missing_file() {
-    // exit 1 with nothing on stdout, but a reason on stderr: the file exists and can't be read
     for (code, err) in [
         (
             1,

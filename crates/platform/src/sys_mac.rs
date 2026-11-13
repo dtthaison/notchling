@@ -1,6 +1,3 @@
-//! The macOS system calls this crate makes by hand: a few CoreFoundation and IOKit functions.
-//! No Objective-C is needed for power assertions or sleep and wake notices.
-
 use std::ffi::{c_char, c_void, CString};
 
 pub type CFTypeRef = *const c_void;
@@ -9,7 +6,6 @@ pub type CFRunLoopRef = *mut c_void;
 
 pub const CF_STRING_ENCODING_UTF8: u32 = 0x0800_0100;
 pub const IO_RETURN_SUCCESS: i32 = 0;
-/// `kIOPMAssertionLevelOn`.
 pub const ASSERTION_LEVEL_ON: u32 = 255;
 
 pub type PowerCallback = extern "C" fn(*mut c_void, u32, u32, *mut c_void);
@@ -53,11 +49,9 @@ extern "C" {
     pub fn IOServiceClose(connection: u32) -> i32;
 }
 
-/// An owned CoreFoundation string, released on drop.
 pub struct CfString(CFStringRef);
 
 impl CfString {
-    /// `None` when the text has an interior NUL or CoreFoundation can't make the string.
     pub fn new(text: &str) -> Option<CfString> {
         let c = CString::new(text).ok()?;
         // SAFETY: `c` is a valid NUL-terminated string for the call; a null result is handled.
@@ -79,19 +73,13 @@ impl Drop for CfString {
     }
 }
 
-/// libproc's `PROC_ALL_PIDS`; the `libc` crate doesn't name it.
 const PROC_ALL_PIDS: u32 = 1;
 
-/// Every process and the file it runs, from the kernel's process table (`proc_listpids`,
-/// `proc_pidpath`). Unlike the system's running-application list, which a process without a main
-/// run loop never hears updates to, this is read fresh on every call. `None` when the table can't
-/// be listed; a process whose path can't be read (it ended since the listing) is left out.
 pub fn process_paths() -> Option<Vec<(i32, String)>> {
     const PID: usize = std::mem::size_of::<libc::pid_t>();
     // SAFETY: a null buffer of size 0 asks only for the size of the list in bytes.
     let size = unsafe { libc::proc_listpids(PROC_ALL_PIDS, 0, std::ptr::null_mut(), 0) };
     let count = usize::try_from(size).ok().filter(|n| *n > 0)? / PID;
-    // Room for processes that start between the two calls.
     let mut pids: Vec<libc::pid_t> = vec![0; count + 64];
     let bytes = libc::c_int::try_from(pids.len() * PID).ok()?;
     // SAFETY: `pids` is writable for `bytes` bytes.

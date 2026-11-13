@@ -1,27 +1,9 @@
-//! Other apps, by bundle id: is one running, and quit it. Account switches use it (Codex's ChatGPT
-//! app, Antigravity, Claude Desktop read their login at launch, so a switch quits them first), and
-//! a login is never written while the app runs, so "running" has to be right.
-//!
-//! macOS reads the kernel's process table, not `NSRunningApplication`: the daemon has no main run
-//! loop, so the system's running-application list goes stale there (a quit app still listed, a
-//! launched one missing). The bundle id becomes the file its copies run (LaunchServices, a static
-//! lookup) and the processes running one of them are the app (`app_procs`). Asking an app to quit
-//! still uses `NSRunningApplication::terminate`, the polite quit the Dock's Quit sends; only the
-//! waiting and the answer to "running?" come from the process table. When the table can't be read
-//! the app counts as running: the caller then waits or refuses, never writes a login.
-//! Elsewhere nothing is running as far as this crate can tell, and [`quit_and_wait`] has nothing
-//! to do. Opening an app again is `open -b <bundle id>`, which the caller runs.
-
 use std::time::{Duration, Instant};
 
-/// Whether an app with this bundle id is running.
 pub fn is_running(bundle_id: &str) -> bool {
     imp::is_running(bundle_id)
 }
 
-/// Asks every running copy of the app to quit and waits up to `wait` for them all to be gone.
-/// `Ok(true)` when some were running and all quit, `Ok(false)` when none ran, and an error when one
-/// was still running at the deadline.
 pub fn quit_and_wait(bundle_id: &str, wait: Duration) -> Result<bool, &'static str> {
     if !imp::is_running(bundle_id) {
         return Ok(false);
@@ -49,8 +31,6 @@ mod imp {
         running_pids(bundle_id).is_none_or(|pids| !pids.is_empty())
     }
 
-    /// Asks every running copy to quit: the ones the system lists for the bundle id, and the ones
-    /// the process table shows (which the list may be missing). Each is asked once.
     pub fn request_quit(bundle_id: &str) {
         let id = NSString::from_str(bundle_id);
         let listed = NSRunningApplication::runningApplicationsWithBundleIdentifier(&id);
@@ -70,8 +50,6 @@ mod imp {
         }
     }
 
-    /// The pids running the app, `None` when the process table can't be read. An app with no
-    /// installed copy has no executable to find, so nothing runs it.
     fn running_pids(bundle_id: &str) -> Option<Vec<i32>> {
         let executables = executables(bundle_id);
         if executables.is_empty() {
@@ -80,9 +58,6 @@ mod imp {
         Some(app_pids(&process_paths()?, &executables))
     }
 
-    /// The executable of every installed copy of the app, as written and with symlinks resolved
-    /// (the kernel reports the resolved path). LaunchServices answers from its own database, so
-    /// this needs no run loop.
     fn executables(bundle_id: &str) -> Vec<String> {
         let id = NSString::from_str(bundle_id);
         let copies = NSWorkspace::sharedWorkspace().URLsForApplicationsWithBundleIdentifier(&id);
@@ -106,8 +81,6 @@ mod imp {
         found
     }
 
-    /// The file a bundle runs (`CFBundleExecutable` under `Contents/MacOS`); `None` when the
-    /// folder isn't a bundle or its executable is missing.
     pub(super) fn bundle_executable(bundle_path: &str) -> Option<String> {
         let bundle = NSBundle::bundleWithPath(&NSString::from_str(bundle_path))?;
         Some(bundle.executableURL()?.path()?.to_string())
@@ -141,7 +114,6 @@ mod tests {
         use crate::files::testdir::TempDir;
         use crate::sys_mac::process_paths;
 
-        /// A bundle in a temp folder: an Info.plist naming the executable, and the file itself.
         fn fake_bundle(root: &std::path::Path, folder: &str, exe: &str) -> std::path::PathBuf {
             let bundle = root.join(folder);
             std::fs::create_dir_all(bundle.join("Contents/MacOS")).unwrap();

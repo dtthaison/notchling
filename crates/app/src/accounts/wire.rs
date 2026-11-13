@@ -1,8 +1,3 @@
-//! Milestone 6's account, provider, limit and cost ops as the app sends and reads them. The shapes
-//! are `notchlingd`'s module docs (`accounts_ops`, `providers_ops`, `limits_ops`, `cost_ops`);
-//! the readers take them tolerantly, so a field that is missing is left out and never fails the
-//! whole read. No token, cookie or value is ever in a reply, so nothing here could show one.
-
 use std::collections::BTreeMap;
 
 use notchling_engine::cost::summary::Summary;
@@ -10,7 +5,6 @@ use notchling_engine::limits::report::UsageReport;
 use notchling_local_api::ops;
 use serde_json::{json, Value};
 
-/// One op and its arguments.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Call {
     pub op: &'static str,
@@ -22,7 +16,6 @@ impl Call {
         Call { op, args }
     }
 
-    /// `sync` reads the live login first (only with the switch on).
     pub fn accounts_list(sync: bool) -> Call {
         Call::new(ops::ACCOUNTS_LIST, json!({ "sync": sync }))
     }
@@ -47,7 +40,6 @@ impl Call {
         Call::new(ops::ACCOUNTS_REMOVE, json!({ "id": id }))
     }
 
-    /// `target` is an account id; `None` is the main login's account.
     pub fn accounts_move_all(target: Option<&str>, dry_run: bool) -> Call {
         Call::new(
             ops::ACCOUNTS_MOVE_ALL,
@@ -55,7 +47,6 @@ impl Call {
         )
     }
 
-    /// The result of an accounts op that answered `{state: "working", ticket}`.
     pub fn accounts_result(ticket: u64) -> Call {
         Call::new(ops::ACCOUNTS_RESULT, json!({ "ticket": ticket }))
     }
@@ -64,7 +55,6 @@ impl Call {
         Call::new(ops::LANES_LIST, json!({}))
     }
 
-    /// Makes a lane for a saved account (`lanes.create {account}`).
     pub fn lanes_create(account: &str) -> Call {
         Call::new(ops::LANES_CREATE, json!({ "account": account }))
     }
@@ -107,9 +97,6 @@ impl Call {
         )
     }
 
-    /// The Settings sheet's limit rows, for the daemon that acts on them (`limits.set_mode`):
-    /// `limitMode`, `codexLimitMode` and `antigravityLimitMode` set a provider's mode,
-    /// `limitSwitchAt` the switch point. Anything else is none.
     pub fn limits_setting(key: &str, value: &Value) -> Option<Call> {
         let provider = match key {
             "limitMode" => "claude",
@@ -131,7 +118,6 @@ impl Call {
         ))
     }
 
-    /// The keys [`Call::limits_setting`] knows.
     pub const LIMIT_KEYS: [&'static str; 4] = [
         "limitMode",
         "codexLimitMode",
@@ -143,12 +129,10 @@ impl Call {
         Call::new("limits.status", json!({}))
     }
 
-    /// Every saved Claude Code account's limits; `refresh` reads them all now, not just those due.
     pub fn limits_usage(refresh: bool) -> Call {
         Call::new("limits.usage", json!({ "refresh": refresh }))
     }
 
-    /// `range` is "7", "30" or "all".
     pub fn cost_summary(range: &str) -> Call {
         Call::new("cost.summary", json!({ "range": range }))
     }
@@ -172,22 +156,18 @@ fn list(v: &Value, key: &str) -> Vec<Value> {
         .unwrap_or_default()
 }
 
-/// A saved Claude Code account (`accounts.list`).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ClaudeAccount {
     pub id: String,
     pub email: String,
     pub plan: Option<String>,
     pub needs_login: bool,
-    /// The lane it is live in, if any.
     pub lane: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ClaudeList {
-    /// The `accounts` switch, as the reply says.
     pub on: bool,
-    /// The main login's account id.
     pub active: Option<String>,
     pub accounts: Vec<ClaudeAccount>,
 }
@@ -211,7 +191,6 @@ pub fn parse_claude_list(v: &Value) -> ClaudeList {
     }
 }
 
-/// A lane (`lanes.list`).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Lane {
     pub name: String,
@@ -234,7 +213,6 @@ pub fn parse_lanes(v: &Value) -> Vec<Lane> {
         .collect()
 }
 
-/// An account of another provider (`providers.list`).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ProviderAccount {
     pub id: String,
@@ -246,7 +224,6 @@ pub struct ProviderAccount {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Provider {
-    /// `codex`, `antigravity` or `claudeDesktop`.
     pub id: String,
     pub title: String,
     pub capabilities: Vec<String>,
@@ -256,7 +233,6 @@ pub struct Provider {
     pub busy: bool,
     pub adding: bool,
     pub sign_in_url: Option<String>,
-    /// The account in use when it isn't a saved one ("Google Account", a ChatGPT login).
     pub unlisted_active_title: Option<String>,
 }
 
@@ -316,7 +292,6 @@ pub fn parse_providers(v: &Value) -> ProviderList {
     }
 }
 
-/// The limit reports of one provider's accounts (`providers.usage`), by account id.
 pub fn parse_usage(v: &Value) -> BTreeMap<String, UsageReport> {
     v.get("reports")
         .and_then(Value::as_object)
@@ -332,12 +307,10 @@ pub fn parse_usage(v: &Value) -> BTreeMap<String, UsageReport> {
         .unwrap_or_default()
 }
 
-/// Whether a `providers.usage` or `limits.usage` reply says a read is still going in the daemon.
 pub fn still_refreshing(v: &Value) -> bool {
     flag(v, "refreshing")
 }
 
-/// `limits.usage`'s reply: each saved Claude Code account's last limits, or why it has none.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ClaudeUsage {
     pub reports: BTreeMap<String, UsageReport>,
@@ -359,7 +332,6 @@ pub fn parse_claude_usage(v: &Value) -> ClaudeUsage {
     }
 }
 
-/// A limit window the watcher last saw (`limits.status`).
 #[derive(Clone, Debug, PartialEq)]
 pub struct Window {
     pub name: String,
@@ -369,7 +341,6 @@ pub struct Window {
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct LimitProvider {
-    /// `claude`, `codex` or `antigravity`.
     pub id: String,
     pub label: String,
     pub mode: String,
@@ -423,11 +394,9 @@ pub fn parse_limits(v: &Value) -> LimitsStatus {
     }
 }
 
-/// `cost.summary`'s reply.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CostReply {
     pub range: String,
-    /// `None` before the first scan finished.
     pub scanned: Option<f64>,
     pub scanning: bool,
     pub summary: Summary,
@@ -461,15 +430,12 @@ pub fn parse_cost(v: &Value) -> CostReply {
     }
 }
 
-/// How a provider switch or add ended (`providers.switch`, `providers.add.begin`).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Outcome {
-    /// `switched`, `waiting` (the sign-in page, if any), `switching`, `starting`.
     Done {
         state: String,
         sign_in_url: Option<String>,
     },
-    /// Ask the user, then call again with `confirm: true`.
     NeedsConfirmation {
         title: String,
         message: String,
@@ -493,19 +459,15 @@ pub fn parse_outcome(v: &Value) -> Outcome {
     }
 }
 
-/// A Claude Code sign-in's progress (`accounts.add.begin`, `accounts.add.finish`).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AddProgress {
     pub login: String,
-    /// `waiting`, `added`, `failed` or `cancelled`.
     pub state: String,
     pub url: Option<String>,
     pub email: Option<String>,
     pub error: Option<String>,
 }
 
-/// The ticket of an accounts op still running in the daemon (`{state: "working", ticket}`): its
-/// result comes from `accounts.result`.
 pub fn working_ticket(v: &Value) -> Option<u64> {
     (text(v, "state").as_deref() == Some("working"))
         .then(|| v.get("ticket").and_then(Value::as_u64))
@@ -522,14 +484,11 @@ pub fn parse_add(v: &Value) -> Option<AddProgress> {
     })
 }
 
-/// A Move All dry run's plan (`accounts.move_all {dryRun: true}`).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct MovePlan {
-    /// Background sessions in lanes that stop and resume.
     pub jobs: usize,
     pub close_lane: Option<String>,
     pub switch_main: bool,
-    /// Terminal sessions in the closed lane that are signed out.
     pub signed_out: Vec<String>,
 }
 
@@ -552,24 +511,17 @@ pub fn parse_move_plan(v: &Value) -> MovePlan {
     }
 }
 
-/// How a Move All went (`accounts.move_all`'s reply, or the event a daemon publishes when the move
-/// outlasts the reply). Read tolerantly: a reply that only says the move is under way is pending.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct MoveResult {
-    /// The sessions that moved.
     pub moved: Vec<String>,
-    /// What didn't, by session id (or `accounts` for the login side), with why.
     pub errors: Vec<(String, String)>,
     pub closed_lane: Option<String>,
     pub switched_to: Option<String>,
-    /// The daemon answered before the move ended; the result comes as an event.
     pub pending: bool,
-    /// The reply had `moved` or `errors`: it says how a move ended.
     has_fields: bool,
 }
 
 impl MoveResult {
-    /// Whether this says how a move ended (it has `moved` or `errors`).
     pub fn is_result(&self) -> bool {
         !self.pending && self.has_fields
     }
@@ -591,7 +543,6 @@ pub fn parse_move_result(v: &Value) -> MoveResult {
                 .collect()
         })
         .unwrap_or_default();
-    // Sessions first, then the login side (`accounts`), which reads as the summary of the rest.
     errors.sort_by_key(|(k, _)| k == "accounts");
     let has = v.get("moved").is_some() || v.get("errors").is_some();
     MoveResult {

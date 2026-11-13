@@ -37,7 +37,6 @@ const MacProfile macB = MacProfile(
   token: 'tok-b',
 );
 
-/// Two paired computers, both with a session called `s1`. Each socket answers only its own computer's host.
 ({ProviderContainer container, FakeWs a, FakeWs b}) twoComputers({MemorySecretStore? secrets}) {
   final FakeWs a = macWithSessions(<Map<String, Object?>>[sessionJson('s1'), sessionJson('only-a')]);
   final FakeWs b = macWithSessions(<Map<String, Object?>>[sessionJson('s1', state: 'needsInput')]);
@@ -101,7 +100,6 @@ void main() {
       expect(all[0].state.sessions.map((Session s) => s.id), <String>['aaaaaaaaaaaaaaaa/s1', 'aaaaaaaaaaaaaaaa/only-a']);
       expect(all[1].state.sessions.map((Session s) => s.id), <String>['bbbbbbbbbbbbbbbb/s1']);
       expect(all[1].state.sessions.single.state, SessionState.needsInput, reason: "B's s1 is B's, not A's");
-      // The computer that isn't in use still pushes its list: it is subscribed to sessions only.
       expect(ops(b, 'subscribe').last, containsPair('sessions', true));
       expect(ops(b, 'subscribe').last.containsKey('sessionId'), isFalse);
     });

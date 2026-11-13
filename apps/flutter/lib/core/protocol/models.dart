@@ -14,7 +14,6 @@ enum SessionState {
   };
 }
 
-/// How the Mac can reach a session: its own pty, a background job, or not at all.
 enum SessionControl {
   console,
   job,
@@ -81,7 +80,6 @@ class PromptQuestion {
   final bool multiSelect;
 }
 
-/// A question or permission a hook on the Mac is waiting on.
 class PendingPrompt {
   const PendingPrompt({
     required this.requestId,
@@ -190,7 +188,6 @@ class InboxItem {
   }
 }
 
-/// The Mac's answer to "can you take this session over": [reason] says why not.
 class TakeoverInfo {
   const TakeoverInfo({
     required this.available,
@@ -206,18 +203,14 @@ class TakeoverInfo {
     busy: json['busy'] == true,
   );
 
-  /// Can be resumed right now.
   final bool available;
   final String? reason;
 
-  /// The original is still running but the Mac can stop it and then resume.
   final bool stoppable;
 
-  /// The original is in the middle of a turn, which stopping interrupts.
   final bool busy;
 }
 
-/// A cheap marker of Claude's newest reply, to announce it without reading the chat.
 class LastMessage {
   const LastMessage({required this.id, required this.text});
   factory LastMessage.fromJson(Json json) => LastMessage(id: json.str('id'), text: json.strOrNull('text') ?? '');
@@ -225,7 +218,6 @@ class LastMessage {
   final String text;
 }
 
-/// One limit of the account a session runs on, as a percentage used ("5h", "Week").
 class LimitMeter {
   const LimitMeter({required this.label, required this.percent, this.resetsAt});
 
@@ -242,7 +234,6 @@ class LimitMeter {
   final DateTime? resetsAt;
 }
 
-/// What the chat header shows: the context in use, the model's window (null when unknown), and the limits.
 class SessionFacts {
   const SessionFacts({
     this.contextTokens,
@@ -269,7 +260,6 @@ class SessionFacts {
   final String? model;
   final List<LimitMeter> limits;
 
-  /// 0..1, or null when the window is unknown.
   double? get contextFraction =>
       contextTokens == null || contextWindow == null || contextWindow == 0
       ? null
@@ -331,16 +321,12 @@ class Session {
   final List<Subagent> subagents;
   final PendingPrompt? pending;
 
-  /// For view-only sessions: whether the Mac can take the session over, and why not. Null from older Macs.
   final TakeoverInfo? takeover;
 
-  /// What the session is doing right now ("Editing main.swift"). Null from older Macs.
   final String? activity;
 
-  /// Context size and the account's limits, for the chat header. Null from older Macs.
   final SessionFacts? facts;
 
-  /// Claude's newest reply (id and first lines); a new id means a new reply. Null from older Macs.
   final LastMessage? lastMessage;
 
   int get runningSubagents => subagents.where((Subagent s) => s.running).length;
@@ -359,7 +345,6 @@ enum ChatRole {
   };
 }
 
-/// A picture shown in a message. Only this description travels with the chat; the bytes are fetched on demand.
 class ChatImage {
   const ChatImage({
     required this.id,
@@ -391,7 +376,6 @@ class ChatImage {
   final int? height;
   final int bytes;
 
-  /// Width over height when both are known, so the placeholder has the picture's shape before it loads.
   double? get aspect =>
       width != null && height != null && height! > 0 ? width! / height! : null;
 }
@@ -446,16 +430,12 @@ class ChatMessage {
   final DateTime time;
   final String? toolSummary;
 
-  /// Sent while the agent was working and not yet taken by it ("đang chờ").
   final bool queued;
 
   final List<ChatImage> images;
 
-  /// A normal message, a `!` shell command (text is the command, [output] what it printed), or the notice that the
-  /// conversation was compacted (text is the summary line).
   final ChatKind kind;
 
-  /// For a tools message: the calls of one step, with their input summary, output and diff when there is one.
   final List<ToolStep> steps;
   final String? output;
 }
@@ -472,7 +452,6 @@ enum ChatKind {
   };
 }
 
-/// One line of a diff: context, added or removed.
 enum DiffKind { context, added, removed }
 
 class DiffLine {
@@ -481,7 +460,6 @@ class DiffLine {
   final String text;
 }
 
-/// One tool call inside a step: its name, a one-line summary, what it printed, and for Edit/Write the diff.
 class ToolStep {
   const ToolStep({
     required this.name,
@@ -510,7 +488,6 @@ class ToolStep {
         : const <DiffLine>[],
   );
 
-  /// Diff rows are one string each: "+added", "-removed", " context".
   Json toJson() => <String, Object?>{
     'name': name,
     'summary': summary,

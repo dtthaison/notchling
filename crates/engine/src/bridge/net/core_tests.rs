@@ -1,6 +1,3 @@
-//! The router (E5a) on the transport's own stores: `hello`, `pair`, the lockout and revoke, with
-//! the device store, codes, limiter and audit log writing the Swift app's files in a temp folder.
-
 use super::*;
 use crate::bridge::model::{Control, Session, SessionState};
 use crate::bridge::net::jwt::tests::{TestClock, START};
@@ -11,7 +8,6 @@ pub(crate) fn no_fetch() -> Fetch {
     Arc::new(|_: &str| Err("no network in tests".to_string()))
 }
 
-/// The router's parts over a fake backend, for a core in `bridge_dir`.
 pub(crate) fn parts(backend: Arc<FakeBackend>, home: &Path, clock: Clock) -> CoreParts {
     CoreParts {
         backend,
@@ -268,7 +264,6 @@ fn once_halted_a_hello_pair_or_revoke_in_flight_writes_nothing() {
     let devices = rig.core.devices.file().to_path_buf();
     let before = std::fs::read(&devices).unwrap();
     let code_text = rig.core.codes.issue(START).unwrap().code;
-    // Bridge-off has begun: what was already on its way must not write.
     rig.core.halt();
     let (hello, _) = rig.connect("192.168.1.20");
     rig.core.handle(
