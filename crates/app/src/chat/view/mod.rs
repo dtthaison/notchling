@@ -1,4 +1,6 @@
 mod accounts;
+mod changes;
+mod changes_panel;
 mod composer;
 mod conversation;
 mod conversation_list;
@@ -271,6 +273,10 @@ impl ChatView {
     pub(super) fn toggle_details(&mut self, cx: &mut Context<Self>) {
         if self.page.is_open() {
             self.close_page(cx);
+            return;
+        }
+        if self.repo.changes_shown {
+            self.close_changes(cx);
             return;
         }
         self.details_hidden = !self.details_hidden;

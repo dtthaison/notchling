@@ -74,6 +74,8 @@ mod cost_ops_tests;
 #[cfg(test)]
 mod daemon_tests;
 #[cfg(test)]
+mod git_ops_branch_tests;
+#[cfg(test)]
 mod git_ops_tests;
 #[cfg(test)]
 mod held_ops_tests;

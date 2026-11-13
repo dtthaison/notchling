@@ -99,6 +99,9 @@ pub mod ops {
 
     pub const GIT_STATUS: &str = "git.status";
     pub const GIT_DIFF: &str = "git.diff";
+    pub const GIT_BRANCH_DIFF_STAT: &str = "git.branch_diff_stat";
+    pub const GIT_BRANCH_DIFF_FILE: &str = "git.branch_diff_file";
+    pub const GIT_BRANCHES: &str = "git.branches";
 
     pub const ACTIVITY_LIST: &str = "activity.list";
 }

@@ -178,6 +178,10 @@ impl Gate {
         self.inflight = false;
     }
 
+    pub fn reset(&mut self) {
+        self.last_ms = None;
+    }
+
     pub fn inflight(&self) -> bool {
         self.inflight
     }
@@ -248,6 +252,19 @@ pub struct DiffText {
     pub untracked: bool,
 }
 
+pub const CHUNK_LINES: usize = 80;
+
+pub fn chunks(diff: &DiffText) -> Vec<(Ink, String)> {
+    let mut out: Vec<(Ink, String)> = Vec::new();
+    for (kind, text) in &diff.runs {
+        let lines: Vec<&str> = text.split('\n').collect();
+        for chunk in lines.chunks(CHUNK_LINES) {
+            out.push((kind.ink(), chunk.join("\n")));
+        }
+    }
+    out
+}
+
 pub fn parse_diff(reply: &Value) -> Option<DiffText> {
     let text = reply["text"].as_str()?;
     Some(DiffText {
@@ -271,8 +288,6 @@ pub fn preview_model() -> Arc<GitModel> {
             file("crates/app/src/chat/inspector.rs", "M", Some(14), Some(9)),
             file("crates/app/src/chat/git.rs", "A", Some(212), Some(0)),
             file("crates/engine/src/old_helper.rs", "D", Some(0), Some(48)),
-            file("docs/local-api-ops.md", "M", Some(31), Some(2)),
-            file("notes.md", "?", None, None),
         ],
         truncated: false,
     })

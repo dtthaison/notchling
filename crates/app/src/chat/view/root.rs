@@ -137,6 +137,7 @@ impl Render for ChatView {
                             .flex()
                             .when(!terminal_expanded, |row| row.child(column))
                             .children(page_panel::render(self, a, window, cx))
+                            .children(changes::render(self, a, window, cx))
                             .children(terminal::render(self, a, window, cx))
                             .children(
                                 (!self.terminal.shown())

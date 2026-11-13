@@ -8,8 +8,8 @@ use std::time::Duration;
 
 pub const MAX_DIFF_LINES: usize = 400;
 pub const MAX_DIFF_BYTES: usize = 128 * 1024;
-const MAX_UNTRACKED_BYTES: u64 = 2 * 1024 * 1024;
-const MAX_LIST_BYTES: usize = 4 * 1024 * 1024;
+pub(super) const MAX_UNTRACKED_BYTES: u64 = 2 * 1024 * 1024;
+pub(super) const MAX_LIST_BYTES: usize = 4 * 1024 * 1024;
 const TIMEOUT: Duration = Duration::from_secs(3);
 
 const ALWAYS_CLEARED: [&str; 12] = [
@@ -43,7 +43,7 @@ pub struct Diff {
     pub untracked: bool,
 }
 
-fn command(cwd: &str, drivers: &[String], args: &[&str]) -> Command {
+pub(super) fn command(cwd: &str, drivers: &[String], args: &[&str]) -> Command {
     let mut argv: Vec<String> = [
         "--no-optional-locks",
         "-c",
@@ -90,11 +90,11 @@ fn launch_failure(error: LaunchError) -> Failure {
     }
 }
 
-fn run(launcher: &dyn Launcher, command: &Command) -> Result<LaunchOutput, Failure> {
+pub(super) fn run(launcher: &dyn Launcher, command: &Command) -> Result<LaunchOutput, Failure> {
     launcher.run(command, TIMEOUT).map_err(launch_failure)
 }
 
-fn run_capped(
+pub(super) fn run_capped(
     launcher: &dyn Launcher,
     command: &Command,
     max_bytes: usize,
@@ -119,7 +119,7 @@ fn driver_names(config: &str) -> Vec<String> {
     names
 }
 
-fn drivers(cwd: &str, launcher: &dyn Launcher) -> Result<Vec<String>, Failure> {
+pub(super) fn drivers(cwd: &str, launcher: &dyn Launcher) -> Result<Vec<String>, Failure> {
     let out = run(
         launcher,
         &command(cwd, &[], &["config", "-z", "--get-regexp", "^filter\\."]),
@@ -136,7 +136,7 @@ fn drivers(cwd: &str, launcher: &dyn Launcher) -> Result<Vec<String>, Failure> {
     Ok(names)
 }
 
-fn refusal(launcher: &dyn Launcher, cwd: &str, out: &LaunchOutput) -> Failure {
+pub(super) fn refusal(launcher: &dyn Launcher, cwd: &str, out: &LaunchOutput) -> Failure {
     if out.code == 128 {
         let probe = command(cwd, &[], &["rev-parse", "--is-inside-work-tree"]);
         if let Ok(inside) = run(launcher, &probe) {
@@ -167,7 +167,7 @@ pub fn cap(text: &str, max_lines: usize, max_bytes: usize) -> (String, bool) {
     (text.to_owned(), false)
 }
 
-fn whole_records(text: &str, cut: bool) -> &str {
+pub(super) fn whole_records(text: &str, cut: bool) -> &str {
     if !cut {
         return text;
     }
@@ -177,7 +177,7 @@ fn whole_records(text: &str, cut: bool) -> &str {
     }
 }
 
-const STATUS_ARGS: [&str; 6] = [
+pub(super) const STATUS_ARGS: [&str; 6] = [
     "status",
     "--porcelain=v2",
     "--branch",
@@ -253,65 +253,81 @@ pub fn read_diff(cwd: &str, path: &str, launcher: &dyn Launcher) -> Result<Diff,
     let Some(entry) = status.changes.iter().find(|c| c.path == path) else {
         return Err(Failure::Refused("not a changed file".to_owned()));
     };
-    let untracked = entry.status == "?";
-    let mut diff = Diff {
-        path: path.clone(),
-        untracked,
-        ..Diff::default()
-    };
-    let (out, cut) = if untracked {
-        let too_big = std::fs::symlink_metadata(Path::new(&root).join(&path))
-            .map(|m| m.len() > MAX_UNTRACKED_BYTES)
-            .unwrap_or(false);
-        if too_big {
-            diff.truncated = true;
-            return Ok(diff);
-        }
-        run_capped(
-            launcher,
-            &command(
-                &root,
-                &drivers,
-                &[
-                    "diff",
-                    "--no-index",
-                    "--no-color",
-                    "--no-ext-diff",
-                    "--no-textconv",
-                    "--",
-                    "/dev/null",
-                    &path,
-                ],
-            ),
-            MAX_DIFF_BYTES + 1,
-        )?
-    } else {
-        let base = if status.initial { "--cached" } else { "HEAD" };
-        run_capped(
-            launcher,
-            &command(
-                &root,
-                &drivers,
-                &[
-                    "diff",
-                    "--no-color",
-                    "--no-ext-diff",
-                    "--no-textconv",
-                    "--ignore-submodules=all",
-                    base,
-                    "--",
-                    &spec,
-                ],
-            ),
-            MAX_DIFF_BYTES + 1,
-        )?
-    };
-    let ok = out.code == 0 || (untracked && out.code == 1);
-    if !ok {
+    if entry.status == "?" {
+        return untracked_diff(launcher, &root, &drivers, &path);
+    }
+    let base = if status.initial { "--cached" } else { "HEAD" };
+    let (out, cut) = run_capped(
+        launcher,
+        &command(
+            &root,
+            &drivers,
+            &[
+                "diff",
+                "--no-color",
+                "--no-ext-diff",
+                "--no-textconv",
+                "--ignore-submodules=all",
+                base,
+                "--",
+                &spec,
+            ],
+        ),
+        MAX_DIFF_BYTES + 1,
+    )?;
+    if out.code != 0 {
         return Err(refusal(launcher, &root, &out));
     }
-    let (text, truncated) = cap(&out.output, MAX_DIFF_LINES, MAX_DIFF_BYTES);
-    diff.text = text;
-    diff.truncated = truncated || cut;
-    Ok(diff)
+    Ok(patch(path, &out.output, cut, false))
+}
+
+pub(super) fn patch(path: String, output: &str, cut: bool, untracked: bool) -> Diff {
+    let (text, truncated) = cap(output, MAX_DIFF_LINES, MAX_DIFF_BYTES);
+    Diff {
+        path,
+        text,
+        truncated: truncated || cut,
+        untracked,
+    }
+}
+
+pub(super) fn untracked_diff(
+    launcher: &dyn Launcher,
+    root: &str,
+    drivers: &[String],
+    path: &str,
+) -> Result<Diff, Failure> {
+    let too_big = std::fs::symlink_metadata(Path::new(root).join(path))
+        .map(|m| m.len() > MAX_UNTRACKED_BYTES)
+        .unwrap_or(false);
+    if too_big {
+        return Ok(Diff {
+            path: path.to_owned(),
+            truncated: true,
+            untracked: true,
+            ..Diff::default()
+        });
+    }
+    let (out, cut) = run_capped(
+        launcher,
+        &command(
+            root,
+            drivers,
+            &[
+                "diff",
+                "--no-index",
+                "--no-color",
+                "--no-ext-diff",
+                "--no-textconv",
+                "--",
+                "/dev/null",
+                path,
+            ],
+        ),
+        MAX_DIFF_BYTES + 1,
+    )?;
+    if out.code != 0 && out.code != 1 {
+        return Err(refusal(launcher, root, &out));
+    }
+    Ok(patch(path.to_owned(), &out.output, cut, true))
 }

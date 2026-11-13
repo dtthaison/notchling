@@ -3,6 +3,8 @@ pub mod bench_fixture;
 pub mod blocks;
 #[cfg(test)]
 mod blocks_tests;
+pub mod branch;
+pub mod branch_rows;
 pub mod claude_picker;
 pub mod cleared;
 pub mod closed;
