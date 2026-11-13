@@ -3,6 +3,26 @@
 Status: design, waiting for the maintainer's approval. Date: 2026-11-13.
 Supersedes the "Nothing is replicated" rule of [0012](../../decisions/0012-remote-computers.md) (Proposed); 0012's identity, pairing, host-qualified ids, cursors and revocation stay.
 
+## Scope: v1 first (approved by the maintainer, 2026-11-13)
+
+The design below is the target (v2). After review the maintainer chose to build v1 first, which meets the goals without automatic election or realtime replication, and keeps v2's interfaces (epochs, sagas, outbox, ports) so v2 adds to it rather than replacing it.
+
+| | v1 (build now) | v2 (later) |
+| --- | --- | --- |
+| Home of main sessions | One always-on node chosen by the maintainer (m1, a Mac, so macOS projects keep identical `/Users/...` paths). The laptop is a client and a Worker. | The laptop as preferred Primary |
+| Failover | Manual **Promote** of a Standby from the phone (or the app); no automatic failback. Promote first tries `claude stop` on the old home. | Majority lease, election, automatic failback |
+| Fencing | Every node has a term; the `PreToolUse` hook denies tool calls on a node whose term isn't current (suspend-aware clock) | Same, plus the lease |
+| Replication | Snapshots at turn ends (Stop hook) and on a timer to the Standby: a commit built with a private index pushed to a bare mirror, SQLite through its backup API, transcripts copied whole at quiet points | Realtime chunked replication |
+| Logins | Workers: Claude Code `setup-token` (`CLAUDE_CODE_OAUTH_TOKEN`), Codex and Antigravity as each tool supports headless; rotating refresh tokens stay on the node where each login lives. Notchling renews nothing in use (today's rule). | Notchling as single refresher (option a), if the tools and terms allow |
+| Secrets | The leader attaches named secrets to a job at dispatch; each node has an allowlist; **Always ask** goes to the inbox | Any secret by name |
+| Vault | Stays on the home node and the Mac (Keychain); delivered per job as before. A Linux home needs the file-backed store (review issue 4). | Replicated vault with phone unlock |
+| Network | Tailscale (WireGuard mesh) required between nodes, pinned mTLS on top | Same |
+| Platforms | macOS and Linux nodes; Windows as a Worker only | All three |
+| Notifications | The inbox (step 0) in the app and the phone; phone push decided before Promote ships | Same |
+| Must exist first | A cross-host `claude --resume` proof at identical paths; `claude --bg` and attach proven on Linux; node tier and headless switch policy; `notchling.db` split into cluster and node-local state; version handshake | Deterministic simulator before any lease code |
+
+v1 order: 0 inbox; 1 node join over Tailscale, node tier, version handshake, cluster view, run a session or job on a picked Worker; 2 per-job secret grants and Worker logins; 3 Standby snapshots and planned move of the home; 4 Promote and fencing; 5 phone push.
+
 ## Intent
 
 The maintainer works on a laptop and owns other machines (a Mac mini "m1", Linux VPSes such as "vps-sing-1", possibly Windows PCs). Today Machines only sets those up for the overnight sd worker. The maintainer wants every machine added to Notchling to become part of the one Notchling they use:
