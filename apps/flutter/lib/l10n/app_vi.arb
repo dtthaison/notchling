@@ -27,6 +27,7 @@
       }
     }
   },
+  "inboxDeclined": "Mac không nhận câu trả lời này. Thử lại trên Mac.",
   "inboxExpired": "Đã hết hạn",
   "inboxWithdrawn": "Đã rút lại",
   "inboxOpenCount": "{count} chưa xử lý",

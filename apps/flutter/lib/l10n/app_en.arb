@@ -27,6 +27,7 @@
       }
     }
   },
+  "inboxDeclined": "The Mac didn't take that answer. Try again on the Mac.",
   "inboxExpired": "Expired",
   "inboxWithdrawn": "Withdrawn",
   "inboxOpenCount": "{count} open",

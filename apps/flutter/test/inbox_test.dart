@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:agent_console/app/widgets/common.dart';
 import 'package:agent_console/app/widgets/glass_nav.dart';
 import 'package:agent_console/core/protocol/generated.dart' as wire;
 import 'package:agent_console/core/protocol/models.dart';
@@ -94,6 +95,7 @@ void main() {
       List<Map<String, Object?>> items = const <Map<String, Object?>>[],
       bool oldMac = false,
       Map<String, Object?> Function(Map<String, Object?> request)? answer,
+      String? failAnswer,
     }) {
       return FakeWs(onSend: (FakeWs s, Map<String, Object?> m) {
         switch (m['op']) {
@@ -110,6 +112,10 @@ void main() {
               s.reply(m['id']!, data: <String, Object?>{'items': items, 'unread': items.length});
             }
           case 'inbox.answer':
+            if (failAnswer != null) {
+              s.fail(m['id']!, 'invalid', failAnswer);
+              return;
+            }
             s.reply(m['id']!, data: answer == null ? <String, Object?>{'answered': true, 'state': 'answered', 'answer': m['action']} : answer(m));
         }
       });
@@ -240,6 +246,60 @@ void main() {
       await tester.tap(find.text('Cancel'));
       await tester.runAsync(() => until(() => socket.sent.any((Map<String, Object?> m) => m['op'] == 'inbox.answer')));
       expect(socket.sent.lastWhere((Map<String, Object?> m) => m['op'] == 'inbox.answer')['action'], 'cancel');
+    });
+
+    Future<void> show(WidgetTester tester, ProviderContainer container) async {
+      await tester.pumpWidget(UncontrolledProviderScope(container: container, child: host(const Scaffold(body: InboxScreen()), locale: const Locale('en'), screen: true)));
+      await tester.pump();
+    }
+
+    testWidgets('an answer the Mac did not take leaves the item open with a short message', (WidgetTester tester) async {
+      final FakeWs socket = mac(
+        items: <Map<String, Object?>>[item('a')],
+        answer: (Map<String, Object?> m) => <String, Object?>{'answered': false, 'state': 'open'},
+      );
+      final ProviderContainer container = await open(tester, socket);
+      await show(tester, container);
+      await tester.tap(find.text('Allow Once'));
+      await tester.runAsync(() => until(() => socket.sent.any((Map<String, Object?> m) => m['op'] == 'inbox.answer')));
+      await tester.runAsync(() => until(() => container.read(inboxProvider).busy.isEmpty));
+      await tester.pump();
+      expect(container.read(inboxProvider).openCount, 1);
+      expect(find.textContaining("didn't take"), findsOneWidget);
+      expect(find.text('Allow Once'), findsOneWidget);
+    });
+
+    testWidgets('an error from the Mac, such as acting being off, is shown on the item', (WidgetTester tester) async {
+      const String off = 'Máy này chưa bật quyền điều khiển session.';
+      final FakeWs socket = mac(items: <Map<String, Object?>>[item('a')], failAnswer: off);
+      final ProviderContainer container = await open(tester, socket);
+      await show(tester, container);
+      await tester.tap(find.text('Deny'));
+      await tester.runAsync(() => until(() => container.read(inboxProvider).errors.containsKey('a')));
+      await tester.pump();
+      expect(find.text(off), findsOneWidget);
+      expect(container.read(inboxProvider).openCount, 1);
+      expect(find.text('Allow Once'), findsOneWidget);
+    });
+
+    testWidgets('a reload keeps the items on screen', (WidgetTester tester) async {
+      final ProviderContainer container = await open(tester, mac(items: <Map<String, Object?>>[item('a')]));
+      late InboxState during;
+      await tester.runAsync(() async {
+        container.invalidate(inboxProvider);
+        during = container.read(inboxProvider);
+        await Future<void>.delayed(const Duration(milliseconds: 150));
+      });
+      expect(during.phase, InboxPhase.ready);
+      expect(during.items.single.id, 'a');
+    });
+
+    testWidgets('only the first open item has the orange primary button', (WidgetTester tester) async {
+      final ProviderContainer container = await open(tester, mac(items: <Map<String, Object?>>[item('a'), item('b', createdMs: 1793541465001)]));
+      await show(tester, container);
+      expect(find.byType(PrimaryButton), findsOneWidget);
+      expect(find.text('Allow Once'), findsNWidgets(2));
+      expect(find.byType(SecondaryButton), findsNWidgets(5));
     });
 
     testWidgets('an empty inbox says so', (WidgetTester tester) async {

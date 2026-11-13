@@ -52,6 +52,10 @@ class AppL10nVi extends AppL10n {
   }
 
   @override
+  String get inboxDeclined =>
+      'Mac không nhận câu trả lời này. Thử lại trên Mac.';
+
+  @override
   String get inboxExpired => 'Đã hết hạn';
 
   @override

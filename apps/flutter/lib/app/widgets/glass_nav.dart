@@ -178,7 +178,7 @@ Widget _withBadge(BuildContext context, int count, Widget icon) {
             ),
             child: Text(
               count > 99 ? '99+' : '$count',
-              style: kit.label.copyWith(fontSize: 10, color: kit.onAccent),
+              style: kit.meta.copyWith(color: kit.onAccent, fontWeight: FontWeight.w700),
             ),
           ),
         ),

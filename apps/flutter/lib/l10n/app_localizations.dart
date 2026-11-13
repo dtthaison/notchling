@@ -175,6 +175,12 @@ abstract class AppL10n {
   /// **'Bạn đã trả lời: {action}'**
   String inboxAnsweredHere(String action);
 
+  /// No description provided for @inboxDeclined.
+  ///
+  /// In vi, this message translates to:
+  /// **'Mac không nhận câu trả lời này. Thử lại trên Mac.'**
+  String get inboxDeclined;
+
   /// No description provided for @inboxExpired.
   ///
   /// In vi, this message translates to:

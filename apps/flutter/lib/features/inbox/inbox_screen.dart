@@ -41,7 +41,13 @@ class InboxScreen extends ConsumerWidget {
             for (final InboxItem item in needsYou)
               Padding(
                 padding: const EdgeInsets.only(bottom: Space.md),
-                child: InboxCard(item: item, busy: state.busy.contains(item.id), error: state.errors[item.id]),
+                child: InboxCard(
+                  item: item,
+                  busy: state.busy.contains(item.id),
+                  error: state.errors[item.id],
+                  declined: state.declined.contains(item.id),
+                  lead: item.id == needsYou.first.id,
+                ),
               ),
           ],
           if (done.isNotEmpty) ...<Widget>[
@@ -61,11 +67,13 @@ class InboxScreen extends ConsumerWidget {
 }
 
 class InboxCard extends ConsumerWidget {
-  const InboxCard({super.key, required this.item, required this.busy, this.error});
+  const InboxCard({super.key, required this.item, required this.busy, this.error, this.declined = false, this.lead = false});
 
   final InboxItem item;
   final bool busy;
   final String? error;
+  final bool declined;
+  final bool lead;
 
   String _result(AppL10n l10n) {
     switch (item.state) {
@@ -110,6 +118,10 @@ class InboxCard extends ConsumerWidget {
               )
             else
               Text(_result(l10n), style: kit.bodySm),
+            if (declined) ...<Widget>[
+              const SizedBox(height: Space.sm),
+              Text(l10n.inboxDeclined, style: kit.bodySm),
+            ],
             if (error != null) ...<Widget>[
               const SizedBox(height: Space.sm),
               Text(error!, style: kit.bodySm.copyWith(color: kit.danger)),
@@ -125,7 +137,7 @@ class InboxCard extends ConsumerWidget {
       return SecondaryButton(label: l10n.inboxOpenOnMac, icon: Icons.laptop_mac, onPressed: null);
     }
     final VoidCallback? press = busy ? null : () => unawaited(ref.read(inboxProvider.notifier).answer(item, action.id));
-    return action.primary
+    return action.primary && lead
         ? PrimaryButton(label: action.label, semanticLabel: '${action.label}, ${item.title}', onPressed: press)
         : SecondaryButton(label: action.label, semanticLabel: '${action.label}, ${item.title}', onPressed: press);
   }

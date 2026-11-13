@@ -112,6 +112,8 @@ pub struct FakeState {
     pub session_calls: usize,
     pub inbox: Vec<Item>,
     pub inbox_answers: Vec<(String, ActionId)>,
+    pub inbox_answer_calls: usize,
+    pub acting_off: bool,
 }
 
 #[derive(Default)]
@@ -232,11 +234,15 @@ impl BridgeBackend for FakeBackend {
         })
     }
     fn stop_phone(&self, _: &Arc<Connection>) {}
+    fn acting_on(&self) -> bool {
+        self.with(|s| !s.acting_off)
+    }
     fn inbox_items(&self) -> Vec<Item> {
         self.with(|s| s.inbox.clone())
     }
     fn inbox_answer(&self, item_id: &str, action: ActionId) -> Result<InboxOutcome, BridgeFailure> {
         self.with(|s| {
+            s.inbox_answer_calls += 1;
             let item = s
                 .inbox
                 .iter_mut()

@@ -4,7 +4,7 @@
 
 use super::backend::AuditEntry;
 use super::connection::Connection;
-use super::inbox::{action_from, answer_json, wire_item};
+use super::inbox::{action_from, answer_json, name_of, wire_item};
 use super::model::{
     Control, PendingPrompt, PhoneOptions, PromptKind, PromptQuestion, PromptResponse, Session,
     ALREADY_CONTROLLABLE,
@@ -462,8 +462,10 @@ impl Router {
         }
         if body.get("inbox").and_then(Value::as_bool) == Some(true) {
             let mut sub = connection.subscription();
+            if !sub.wants_inbox {
+                sub.known_inbox.clear();
+            }
             sub.wants_inbox = true;
-            sub.known_inbox.clear();
         }
         if let Some(options) = phone {
             self.backend.start_phone(connection, &options)?;
@@ -487,6 +489,9 @@ impl Router {
         body: &Body,
         connection: &Arc<Connection>,
     ) -> Result<Value, BridgeFailure> {
+        if !self.backend.acting_on() {
+            return Err(BridgeFailure::invalid(super::live::ACTING_OFF));
+        }
         let item_id = require(body, "itemId")?;
         let action = action_from(require(body, "action")?)
             .ok_or_else(|| BridgeFailure::invalid("Hành động không hợp lệ."))?;
@@ -495,7 +500,8 @@ impl Router {
         }
         let outcome = self.backend.inbox_answer(item_id, action)?;
         if outcome.answered {
-            self.audit(connection, "inbox.answer", None, None);
+            let op = format!("inbox.answer:{}", name_of(&action));
+            self.audit(connection, &op, None, None);
         }
         Ok(answer_json(&outcome))
     }

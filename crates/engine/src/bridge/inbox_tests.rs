@@ -58,7 +58,11 @@ fn phone_answers_an_open_item() {
         rig.backend.with(|s| s.inbox_answers.clone()),
         [("a".to_string(), ActionId::AllowOnce)]
     );
-    assert!(rig.audit.recent().iter().any(|e| e.op == "inbox.answer"));
+    assert!(rig
+        .audit
+        .recent()
+        .iter()
+        .any(|e| e.op == "inbox.answer:allow_once"));
 }
 
 #[test]
@@ -220,4 +224,81 @@ fn the_wire_item_leaves_out_what_the_phone_never_uses() {
     assert_eq!(wire["answeredBy"], json!("mac"));
     assert_eq!(wire["kind"], json!("secret_request"));
     assert_eq!(wire["createdMs"], json!(item.created_ms));
+}
+
+#[test]
+fn inbox_answer_refused_while_acting_is_off() {
+    let rig = Rig::new();
+    rig.backend.with(|s| {
+        s.inbox = vec![inbox_item("a", Kind::SecretApproval)];
+        s.acting_off = true;
+    });
+    let (connection, io, _) = rig.login("test-phone");
+    for action in ["allow_once", "deny"] {
+        rig.send(
+            &connection,
+            &format!(r#"{{"id":6,"op":"inbox.answer","itemId":"a","action":"{action}"}}"#),
+        );
+        let reply = io.last_json();
+        assert_eq!(error_code(&reply), Some("invalid"));
+        assert_eq!(reply["error"]["message"], json!(super::live::ACTING_OFF));
+    }
+    assert_eq!(rig.backend.with(|s| s.inbox_answer_calls), 0);
+    assert!(rig
+        .audit
+        .recent()
+        .iter()
+        .all(|e| !e.op.starts_with("inbox")));
+    rig.send(&connection, r#"{"id":7,"op":"inbox.list"}"#);
+    assert!(is_ok(&io.last_json()));
+}
+
+#[test]
+fn a_second_inbox_subscribe_pushes_nothing_new_and_removals_still_arrive() {
+    let rig = Rig::new();
+    rig.backend.with(|s| {
+        s.inbox = vec![
+            inbox_item("a", Kind::SecretApproval),
+            inbox_item("b", Kind::Notice),
+        ];
+    });
+    let (connection, io, _) = rig.login("test-phone");
+    rig.send(&connection, r#"{"id":2,"op":"subscribe","inbox":true}"#);
+    rig.hub.tick(rig.backend.as_ref());
+    let mark = io.texts().len();
+
+    rig.send(&connection, r#"{"id":3,"op":"subscribe","inbox":true}"#);
+    let mark = mark + 1;
+    rig.hub.tick(rig.backend.as_ref());
+    assert_eq!(io.texts().len(), mark, "nothing new after a resubscribe");
+
+    rig.backend.with(|s| s.inbox.remove(0));
+    rig.send(
+        &connection,
+        r#"{"id":4,"op":"subscribe","inbox":true,"sessions":true}"#,
+    );
+    let mark = io.texts().len();
+    rig.hub.tick(rig.backend.as_ref());
+    let removed: Vec<_> = events(&io, mark)
+        .into_iter()
+        .filter(|e| e["event"] == json!("inbox"))
+        .collect();
+    assert_eq!(removed, [json!({"event": "inbox", "removed": "a"})]);
+}
+
+#[test]
+fn the_audit_records_which_action_the_phone_took() {
+    let rig = Rig::new();
+    rig.backend
+        .with(|s| s.inbox = vec![inbox_item("a", Kind::SecretApproval)]);
+    let (connection, _io, _) = rig.login("test-phone");
+    rig.send(
+        &connection,
+        r#"{"id":6,"op":"inbox.answer","itemId":"a","action":"allow_always"}"#,
+    );
+    assert!(rig
+        .audit
+        .recent()
+        .iter()
+        .any(|e| e.op == "inbox.answer:allow_always"));
 }

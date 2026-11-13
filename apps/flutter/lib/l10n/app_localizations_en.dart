@@ -52,6 +52,10 @@ class AppL10nEn extends AppL10n {
   }
 
   @override
+  String get inboxDeclined =>
+      'The Mac didn\'t take that answer. Try again on the Mac.';
+
+  @override
   String get inboxExpired => 'Expired';
 
   @override

@@ -75,6 +75,11 @@ Off by default. **Let phones connect** in the Phone panel turns it on.
   pictures of web pages the Mac renders. Those pages can only be `localhost` or `127.0.0.1`, and are
   loaded with no stored cookies.
 - The phone can send messages, answers, images and new sessions to the Mac.
+- A paired phone that asks for the inbox gets each item's title and detail. For a vault item that is
+  the secret's name, the command that wants it (cut to 120 characters) and its folder. The phone can
+  answer those items, so it can release a secret with Allow Once or Always Allow, but only while the
+  bridge and **acting** are both on, and the vault switch still has to be on too. It never opens the
+  form that takes a secret's value.
 - Every remote change is logged on the Mac (`bridge/remote-log.jsonl`), with the length of any text
   sent, never the text itself.
 

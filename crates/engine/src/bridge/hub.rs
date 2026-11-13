@@ -95,6 +95,7 @@ impl Hub {
                     (item.id.clone(), wire::text(&wire), wire)
                 })
                 .collect();
+            let present: HashSet<&str> = current.iter().map(|(id, _, _)| id.as_str()).collect();
             for connection in subscribers.iter().filter(|c| c.wants_inbox()) {
                 let mut out = Vec::new();
                 {
@@ -110,7 +111,7 @@ impl Hub {
                     let mut gone: Vec<String> = sub
                         .known_inbox
                         .keys()
-                        .filter(|id| !current.iter().any(|(now, _, _)| now == *id))
+                        .filter(|id| !present.contains(id.as_str()))
                         .cloned()
                         .collect();
                     gone.sort();

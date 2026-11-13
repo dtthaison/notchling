@@ -157,7 +157,7 @@ impl Sources for DaemonSources {
         self.inbox
             .decide(item_id, action, PHONE_ANSWERED_BY)
             .map_err(|e| match e.code {
-                ErrorCode::Failed => BridgeFailure::not_found(e.message),
+                ErrorCode::Failed => BridgeFailure::not_found("Không có mục này trong hộp thư."),
                 ErrorCode::Internal => BridgeFailure::internal(e.message),
                 _ => BridgeFailure::invalid(e.message),
             })

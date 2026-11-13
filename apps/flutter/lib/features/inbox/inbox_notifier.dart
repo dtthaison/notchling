@@ -14,12 +14,14 @@ class InboxState {
     this.items = const <InboxItem>[],
     this.busy = const <String>{},
     this.errors = const <String, String>{},
+    this.declined = const <String>{},
   });
 
   final InboxPhase phase;
   final List<InboxItem> items;
   final Set<String> busy;
   final Map<String, String> errors;
+  final Set<String> declined;
 
   List<InboxItem> get needsYou => _newestFirst(items.where((InboxItem i) => i.isOpen));
   List<InboxItem> get done => _newestFirst(items.where((InboxItem i) => !i.isOpen));
@@ -33,11 +35,13 @@ class InboxState {
     List<InboxItem>? items,
     Set<String>? busy,
     Map<String, String>? errors,
+    Set<String>? declined,
   }) => InboxState(
     phase: phase ?? this.phase,
     items: items ?? this.items,
     busy: busy ?? this.busy,
     errors: errors ?? this.errors,
+    declined: declined ?? this.declined,
   );
 }
 
@@ -46,18 +50,29 @@ final NotifierProvider<InboxNotifier, InboxState> inboxProvider = NotifierProvid
 final Provider<int> inboxOpenCountProvider = Provider<int>((Ref ref) => ref.watch(inboxProvider).openCount);
 
 class InboxNotifier extends Notifier<InboxState> {
+  List<InboxItem> _kept = const <InboxItem>[];
+  BridgeClient? _keptFor;
+
   @override
   InboxState build() {
     final BridgeClient? client = ref.watch(bridgeClientProvider);
     ref.watch(connectedCountProvider);
     if (client == null) return const InboxState();
+    final List<InboxItem> kept = identical(client, _keptFor) ? _kept : const <InboxItem>[];
+    _keptFor = client;
 
     final StreamSubscription<BridgeEvent> events = client.events.listen((BridgeEvent event) {
       if (event is InboxEvent) _apply(event);
     });
     ref.onDispose(events.cancel);
     if (client.isConnected) unawaited(_load(client));
-    return const InboxState();
+    return InboxState(phase: kept.isEmpty ? InboxPhase.loading : InboxPhase.ready, items: kept);
+  }
+
+  @override
+  set state(InboxState value) {
+    _kept = value.items;
+    super.state = value;
   }
 
   void _apply(InboxEvent event) {
@@ -102,10 +117,18 @@ class InboxNotifier extends Notifier<InboxState> {
     state = state.copyWith(
       busy: <String>{...state.busy, item.id},
       errors: <String, String>{...state.errors}..remove(item.id),
+      declined: <String>{...state.declined}..remove(item.id),
     );
     try {
       final InboxAnswer result = await client.inboxAnswer(item.id, action);
       if (!ref.mounted) return;
+      if (!result.answered && result.state == 'open') {
+        state = state.copyWith(
+          busy: <String>{...state.busy}..remove(item.id),
+          declined: <String>{...state.declined, item.id},
+        );
+        return;
+      }
       final InboxItem closed = result.answered
           ? item.closed(state: 'answered', answer: action, answeredBy: 'phone')
           : item.closed(state: result.state, answer: result.answer, answeredBy: result.state == 'answered' ? 'mac' : null);

@@ -15,6 +15,7 @@ SCHEMA_FILE = ROOT / "protocol/agentconsole.v1.schema.json"
 FIXTURES = ROOT / "protocol/fixtures"
 ROUTER = ROOT / "legacy/macos/Sources/ConsoleCore/Bridge/BridgeRouter.swift"
 RUST_ROUTER = ROOT / "crates/engine/src/bridge/router.rs"
+RUST_HUB = ROOT / "crates/engine/src/bridge/hub.rs"
 HUB = ROOT / "legacy/macos/Sources/ConsoleCore/Bridge/BridgeHub.swift"
 
 SCHEMA = json.loads(SCHEMA_FILE.read_text(encoding="utf-8"))
@@ -140,6 +141,7 @@ class RouterCoverageTests(unittest.TestCase):
     def test_every_event_the_hub_sends_is_in_the_schema(self):
         text = HUB.read_text(encoding="utf-8") + ROUTER.read_text(encoding="utf-8")
         events = set(re.findall(r'BridgeWire\.event\("([a-z]+)"', text))
+        events |= set(re.findall(r'wire::event\("([a-z]+)"', RUST_HUB.read_text(encoding="utf-8")))
         in_schema = {DEFS[r["$ref"].split("/")[-1]]["properties"]["event"]["const"] for r in DEFS["Event"]["oneOf"]}
         self.assertGreaterEqual(len(events), 4)
         self.assertEqual(sorted(events - in_schema), [])
