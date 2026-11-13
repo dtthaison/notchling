@@ -6,7 +6,7 @@ use gpui::{
     RenderImage, SharedString, Stateful, Window,
 };
 use notchling_kit::labels::Corner;
-use notchling_kit::metric::{MENU_RADIUS, MENU_ROW_X, MENU_ROW_Y, SIDEBAR_WIDTH};
+use notchling_kit::metric::{MENU_RADIUS, MENU_ROW_X, MENU_ROW_Y};
 use notchling_kit::part::{ButtonKind, PartState};
 use notchling_kit::ui::{
     button, hsla, icon, icon_button, label, menu_panel, menu_rule, KitPart, KitStyled, MenuItem,
@@ -725,11 +725,7 @@ pub fn render(
     if !view.simulator.shown() || view.page.is_open() {
         return None;
     }
-    let sidebar = if view.sidebar_hidden {
-        0.0
-    } else {
-        SIDEBAR_WIDTH
-    };
+    let sidebar = view.sidebar_width();
     let available = f32::from(window.viewport_size().width) - sidebar;
     Some(
         div()

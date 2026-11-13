@@ -347,7 +347,7 @@ fn menu_right(view: &ChatView) -> f32 {
     } else if view.details_hidden {
         0.0
     } else {
-        super::inspector::WIDTH
+        view.details_width()
     };
     details + SIDE_PADDING + 28.0
 }

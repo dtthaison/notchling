@@ -25,7 +25,7 @@ use crate::chat::paging::Counts;
 use crate::chat::shell_list::Listing;
 use notchling_engine::transcript::model::Conversation;
 
-pub(super) const WIDTH: f32 = 260.0;
+pub(super) const WIDTH: f32 = crate::chat::panels::DETAILS_DEFAULT;
 pub(super) const MARK_BOX: f32 = 14.0;
 pub(super) const ROW_LINE: f32 = 16.0;
 
@@ -213,9 +213,7 @@ impl RenderOnce for Panel {
         }
 
         div()
-            .w(px(WIDTH))
-            .h_full()
-            .flex_shrink_0()
+            .size_full()
             .fill(Ink::Sidebar, a)
             .border_l(px(1.0))
             .border_color(hsla(Ink::Hairline.color(a)))

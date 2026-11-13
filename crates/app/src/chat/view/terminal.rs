@@ -13,7 +13,6 @@ use gpui::{
 use notchling_engine::terminal::pty::Signal;
 use notchling_engine::terminal::{Pty, PtyCommand, ReadOutcome, TermCell, TerminalScreen};
 use notchling_kit::labels::Corner;
-use notchling_kit::metric::SIDEBAR_WIDTH;
 use notchling_kit::part::{ButtonKind, PartState};
 use notchling_kit::ui::{hsla, icon, icon_button, label, KitPart, KitStyled, MONO_FONT};
 use notchling_kit::{Appearance, Icon, IconSize, Ink, TypeRole};
@@ -869,11 +868,7 @@ pub fn render(
     }
     let shell = view.terminal.tabs.active()?;
     let expanded = view.terminal.expanded;
-    let sidebar = if view.sidebar_hidden {
-        0.0
-    } else {
-        SIDEBAR_WIDTH
-    };
+    let sidebar = view.sidebar_width();
     let available = f32::from(window.viewport_size().width) - sidebar;
     let panel = div()
         .h_full()
