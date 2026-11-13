@@ -8,6 +8,7 @@ Approach A (a Fluent source) was chosen by the maintainer on 2026-11-13; this do
 - [Intent](#intent)
 - [Goals, non-goals, anti-goals](#goals)
 - [Decided by the maintainer](#decided-by-the-maintainer)
+- [Calls settled after review](#calls-settled-after-review)
 - [What is there today](#what-is-there-today)
 - [Approaches considered](#approaches-considered)
 - [Constraints](#constraints)
@@ -28,7 +29,7 @@ Approach A (a Fluent source) was chosen by the maintainer on 2026-11-13; this do
 
 ## Intent
 
-Notchling is going open source, and people who don't read English will use it. The structure for other languages has to exist before they arrive, so that a translation is text files and nothing else: copy the English files, translate them, run one command, open a pull request. Once it merges to `main`, the app built from GitHub speaks that language.
+Notchling is going open source, and people who don't read English will use it. The structure for other languages has to exist before they arrive, so that a translation is text files and nothing else: copy the English files, translate them, run one command, open a pull request. Once it merges, the app built from GitHub speaks that language.
 
 Today the product's words have no home. The Mac app holds about 2,000 English literals in `crates/app` and `crates/kit`. The phone keeps two hand-written ARB files with Vietnamese as the template. The daemon writes Vietnamese text that the phone shows. A word both apps show is written twice.
 
@@ -63,7 +64,7 @@ These count as failures even if everything works:
 - Text the app matches against (a daemon marker, a dialog on Claude Code's screen, git's output) goes through translation and stops matching in another language.
 - A log line, an audit line or a stored row holds translated text.
 - A generated file that differs from its source passes CI.
-- The Mac and the phone show different words for the same thing because two files say it.
+- A text is written twice within one app, or shared between the apps where they don't show exactly the same text.
 - A language makes the app slower, or a draw allocate.
 
 ## Decided by the maintainer
@@ -79,6 +80,18 @@ Approach A, 2026-11-13:
 - The phone becomes English only: its Vietnamese is dropped and English becomes the source.
 - Migration area by area, one pull request each: Settings, then Chat, the notch, the other windows. A lint stops new hard-coded text in an area that has moved.
 
+## Calls settled after review
+
+A builder read the first version of this design; the coordinator settled these on 2026-11-14. Each is worked into the sections it touches.
+
+1. **Phone scope** (coordinator's call). Every user-visible phone string becomes a message, including the hard-coded Dart literals outside `lib/l10n/` (`core/net/bridge_client.dart`, `features/chat/photo_send.dart`, `chat_notifier.dart`, `features/sessions/new_session_sheet.dart`, `features/visualize/viz_providers.dart`, `app/notifications.dart`). `BridgeException` carries a code and the UI maps the code to its own message. Notifications and other code without a `BuildContext` use a context-free lookup: the current locale's `AppL10n`, held once at app start and on a locale change. The dictation prompt and cleanup text (`features/voice/prompt_builder.dart`, `transcript_cleanup.dart`) are not UI: they stay Vietnamese for now, pending open question 3.
+2. **Base and order** (coordinator's call). The rebuild merges into `agent-run-oss`, not `main`; every L-step targets `agent-run-oss`, through the integration branch `merge/settings-batch` first. Branches in flight merge first. An area's literal migration (L3 on) starts only after the branches touching that area have merged, and `areas.json` arms the lint for an area in the same pull request that moves it. L0 to L2 (the crate, the generator, the guards, the phone switch) come before the Settings search registry and the log event-kind registry are built, so both are written with messages from the start; their plans depend on L1.
+3. **Shared versus per-app wording** (coordinator's call). A message goes in `shared.ftl` only when both apps show exactly the same text, case included. The Mac keeps Title Case for menus and buttons; the phone keeps its casing; where they differ they are two keys, one in `mac/` and one in `phone/`. Anti-goal 5 reads accordingly. English rendering stays pixel-identical.
+4. **Outputs follow file location** (coordinator's call). `shared.ftl` (and `consent.ftl`) go to both outputs; `mac/**` only to Rust; `phone/**` only to ARB. Mac-only content (settings titles and search words, log event kinds, the Mac's units and dates) lives in `mac/` files, not `shared.ftl`, which stays small: session states, inbox kinds and actions, anything both apps show. The generator does no usage scanning.
+5. **`choose`** (coordinator's call) lives in the `notchling-locale` crate; every entry point calls it once at start: `notchling-app`'s shell, `notchling-machines`, `--render` and the benches, all honoring `NOTCHLING_LOCALE`.
+6. **Inbox** (coordinator's call). All five kinds (secret approval, secret request, limit notice, action failed, notice) get a `code` and `facts` in L6, so titles and action labels translate. Any free-text detail from the daemon stays English and is shown as detail.
+7. **Splitting sentences** (coordinator's call). Splitting a sentence into separate messages is accepted where a part is styled or clickable; a new line is a separate message; literal braces on the Mac are escaped by the generator. Each case is decided in its migration pull request.
+
 ## What is there today
 
 | Where | What | Size |
@@ -86,10 +99,11 @@ Approach A, 2026-11-13:
 | `crates/app/src`, `crates/kit/src` | English literals in models (`Row.title: &'static str`, `AWAKE_MODES`) and views (`"Reply…"`), sentences built with `format!`, plurals made by hand (`pages/model.rs::count_text`: "1 artifact" or "{n} artifacts", then `" · not all shown"` appended; `vault/approval.rs`: "line"/"lines"; `switches/restart.rs`: "is off"/"are off") | about 2,000 literals (a rough count of capitalized ones, part names included): chat 790, accounts 180, sheets 150, machines 100, tools 90, vault 85 |
 | `apps/flutter/lib/l10n/` | `app_vi.arb` (the template) and `app_en.arb`, 199 keys each, 21 with placeholders, no plural ("{count} subagents running" says "1 subagents"); `app_localizations*.dart` written by `flutter gen-l10n` and committed | `app_localizations.dart` is 1,326 lines, in the lint baseline |
 | `apps/flutter/lib/app/app.dart` | `localeResolutionCallback` picks `en` for an English device, `vi` for any other | |
+| `apps/flutter/lib/` outside `l10n/` | hard-coded Vietnamese: `BridgeException('disconnected', 'Chưa kết nối tới Mac.')` and other messages in `core/net/bridge_client.dart`, repeated in `photo_send.dart`, `new_session_sheet.dart`, `viz_providers.dart`, `chat_notifier.dart`; notification titles and bodies in `app/notifications.dart` | `BridgeException` already carries a code |
 | `apps/flutter/test/` | the harness defaults to `Locale('vi')`; 14 test files assert Vietnamese text | about 95 lines |
 | `crates/engine/src/bridge/`, `viz/engine.rs`, `control/takeover.rs`, `crates/notchlingd/src/bridge_backend.rs`, `crates/ptyhost/` | Vietnamese text the daemon sends: the bridge's `error.message` (`protocol/README.md`: "in Vietnamese; do not parse it"), Visualize's empty states, takeover reasons, ptyhost errors | about 110 lines |
 | `crates/notchlingd/src/vault_inbox.rs` | the daemon writes each inbox item's title and action labels in English ("Allow {names} for {command}", "Allow Once", "Always Allow", "Deny", "Open Form"), stores them in `notchling.db` and sends them to the app and the phone. The item already carries its `kind` and each action's `id` | |
-| `apps/flutter/lib/features/voice/` | dictation: Whisper runs with language `vi` and a Vietnamese prompt | the language you speak, not the UI's |
+| `apps/flutter/lib/features/voice/` | dictation: Whisper runs with language `vi`; `prompt_builder.dart` and `transcript_cleanup.dart` hold Vietnamese prompt and cleanup text | the language you speak, not the UI's |
 | `crates/app/src/chat/prompt_flow.rs`, `prompts.rs`, the screen reads | text matched against the daemon's refusals and Claude Code's dialogs; git runs under `LC_ALL=C` | must never be translated |
 | `.part("Send Button")` | part names the ? button shows; agents grep them | must never be translated |
 
@@ -196,8 +210,9 @@ Fluent, restricted to what Rust, ARB, xcstrings and Android `strings.xml` can al
 | Attributes (`.title`, `.tooltip`) | no | Not in ARB or Android; use two keys |
 | Functions other than `NUMBER`; `DATETIME` | no | Dates are messages with variables (below) |
 | String literals `{"…"}` | yes, for `{`, `}`, a space at either end and hidden characters as `\uXXXX` | Fluent's only escape; keeps every character visible |
-| Text across several lines | no | Each target escapes newlines differently and editors change indentation; a paragraph is two messages |
+| Text across several lines | no | Each target escapes newlines differently and editors change indentation; a new line is a new message (call 7) |
 | A space at the start or end of a value | no, unless written `{" "}` | Fluent trims them; writing them out says they are meant |
+| `{` `}` as text in `mac/` | yes, written `{"{"}` and `{"}"}` (Fluent's own escape); the generator emits a plain brace in Rust (call 7) | Rust tables have no format syntax to collide with |
 | `{` `}` as text in `shared.ftl`, `consent.ftl` and `phone/` | no | ARB would need ICU's quoting, which breaks apostrophes |
 | `#` note, `##` group, `###` file comments | yes | Notes for translators; copied to every output |
 | Tabs, CRLF, a byte order mark, parse errors | no | One form, so diffs and the parser stay simple |
@@ -224,11 +239,14 @@ category  = "zero" | "one" | "two" | "few" | "many"
 locales/
   languages.json            the languages that ship (protected)
   en/                        the source
-    shared.ftl               both apps: brand terms, language-name, common words, session states,
-                             inbox kinds and results, log event kinds, settings' titles and search words, units and time
+    shared.ftl               both apps, only text both show exactly alike: brand terms, language-name,
+                             session states, inbox kinds and results
     consent.ftl              both apps: every word that grants or refuses something (protected)
     mac/
-      settings.ftl  chat.ftl  notch.ftl  accounts.ftl  vault.ftl  …   one file per area
+      settings.ftl           the Settings sheet and the search registry's titles, lines and search words
+      logs.ftl               log event kinds, for the log viewer
+      units.ftl              ages, durations, dates, compact numbers, the list separator
+      chat.ftl  notch.ftl  accounts.ftl  vault.ftl  kit.ftl  …           one file per area
     phone/
       sessions.ftl  chat.ftl  inbox.ftl  pairing.ftl  …              one file per feature folder
   de/                        a translation: the same files, any subset of their messages
@@ -236,15 +254,16 @@ locales/
 
 - Why split further: the Mac alone has about 2,000 messages; one `mac.ftl` would be a 3,000-line file that every pull request touches. An area file is what one migration step adds, what one translator can finish in a sitting, and where a key is found from its name.
 - `consent.ftl` is a file of its own so its zone can differ: it holds the buttons and titles of every prompt that allows, denies, approves, pairs, signs in, trusts a folder, installs the hook or turns a switch back on, and the line that says what is being allowed ("Allow { $names } for { $command }"). Settings rows are not consent.
-- The Mac app reads `shared.ftl`, `consent.ftl` and `mac/`; the phone reads `shared.ftl`, `consent.ftl` and `phone/`.
+- Outputs follow file location (call 4): `shared.ftl` and `consent.ftl` go to both apps, `mac/**` only to the Rust tables, `phone/**` only to the ARB files (and, once on, to the iOS and Android files, which are the phone's). The generator never scans code for which keys are used.
+- `shared.ftl` stays small. A message goes there only when both apps show exactly the same text, case included (call 3). The Mac's menus and buttons are Title Case and the phone keeps its own casing; where the words or the casing differ, they are two keys, one in `mac/<area>.ftl` and one in `phone/<feature>.ftl`.
 - `languages.json`: `{"source": "en", "ship": ["en"]}`. A folder not listed is checked and reported but not built into either app.
 - Each language's `shared.ftl` defines `language-name`, its own name as its speakers write it ("Deutsch"), for the Language row.
 
 Key rules, enforced by `gen.py`:
 
 1. Lowercase ASCII words joined by `-`, each word starting with a letter: `settings-act-on-sessions`. At most 64 characters.
-2. A key starts with its file's name: `mac/settings.ftl` holds `settings-…`, `phone/pairing.ftl` holds `pairing-…`, `consent.ftl` holds `consent-…`. `shared.ftl` uses its own namespaces, which no area file may use: `app-`, `common-`, `language-`, `state-`, `session-`, `item-` (inbox items), `event-` (log event kinds), `setting-` (settings' titles and search words), `time-`, `unit-`.
-3. A key is unique within a language across all its files, so a word the two apps share can only live in `shared.ftl`.
+2. A key starts with its file's name: `mac/settings.ftl` holds `settings-…`, `phone/pairing.ftl` holds `pairing-…`, `consent.ftl` holds `consent-…`. `shared.ftl` uses its own namespaces, which no area file may use: `language-`, `state-`, `session-`, `item-` (inbox items).
+3. A key is unique within a language across all its files. Within one app a text is written once; between the apps it is shared only where identical (call 3).
 4. When an English message's meaning or variables change, it gets a new key. A typo fix keeps the key. Old keys are then reported in translations, and `gen.py --prune` removes them. This is Mozilla's Fluent rule, and it keeps translations from silently going stale.
 
 Names per platform, from one key:
@@ -287,6 +306,8 @@ Errors name a rule id, a file and a line, as `GUARD-PROTOCOL-GEN` does. Code: `t
 
 ### Outputs
 
+Each output takes its messages by file location (call 4): Rust gets `shared.ftl`, `consent.ftl` and `mac/**`; ARB, xcstrings and Android get `shared.ftl`, `consent.ftl` and `phone/**`.
+
 - **Rust**, `crates/locale/src/generated.rs`, one file: an id per message, a module per key namespace with a function per message, and one static table per shipped language. English's table is complete; another's holds `None` where a message is missing.
 - **ARB**, `apps/flutter/lib/l10n/app_<lang>.arb` for each shipped language, the phone's messages only. Each is complete: a missing message is filled from its parent (`pt` for `pt-BR`) and then English at generation, so Flutter's behavior doesn't depend on its own fallback. Notes become `description`, number variables `int` with `"format": "decimalPattern"`. `flutter gen-l10n` then writes `app_localizations*.dart` as today.
 - **iOS**, `Localizable.xcstrings` (off): one catalog, `sourceLanguage` `en`, each language under `localizations`, notes as `comment`, `extractionState` `manual`. A message with one variable that selects uses `variations.plural`; with more variables, the `%#@count@` substitution form.
@@ -307,7 +328,7 @@ Errors name a rule id, a file and a line, as `GUARD-PROTOCOL-GEN` does. Code: `t
 
 ### One plural message, in every output
 
-The source, `locales/en/shared.ftl`:
+The source, `locales/en/shared.ftl` (shared because, in this example, both apps show exactly this text):
 
 ```ftl
 ## Counts
@@ -383,7 +404,7 @@ Android, `values/strings.xml`:
 
 ### Where it lives
 
-A new library crate, `crates/locale` (package `notchling-locale`): the runtime (`lib.rs`, `choose.rs`, `format.rs`, `fmt.rs`, `pseudo.rs`) and the generated `generated.rs`. No GPUI and no platform code, so it builds and tests everywhere. `app` and `kit` depend on it; the engine, the daemon, the hook and the command line never do. The kit owns almost no words (the ? button's tooltip); they go in `mac/kit.ftl`.
+A new library crate, `crates/locale` (package `notchling-locale`): the runtime (`lib.rs`, `choose.rs`, `format.rs`, `fmt.rs`, `pseudo.rs`) and the generated `generated.rs`. No GPUI and no platform code, so it builds and tests everywhere: `choose` is pure and takes the system's languages as an argument. `app` and `kit` depend on it; the engine, the daemon, the hook and the command line never do. The kit owns almost no words (the ? button's tooltip); they go in `mac/kit.ftl`.
 
 ### How views call it
 
@@ -394,7 +415,7 @@ t::settings::act_on_sessions()            // &'static str
 t::settings::ACT_ON_SESSIONS               // Text: .get() and .english(), for const tables
 t::session::subagents_running(n)           // String; n is any integer type
 t::chat::moved_to(&folder)                 // String; a string variable is &str
-t::lookup("event-hook-permission")        // Option<Text>, for registries keyed by data
+t::lookup("logs-event-hook-permission")   // Option<Text>, for registries keyed by data
 t::fmt::count(1234)                        // "1,234"
 t::fmt::decimal(12.3, 1)                   // "12.3"
 t::fmt::list(&names)                       // "a, b"
@@ -428,14 +449,14 @@ Model types don't change: a title that was `&'static str` stays one.
 
 ### Choosing the language
 
-`t::choose` runs once, in `mac/shell.rs::run` before any window opens, next to `history::apply`. The first that names a shipped language wins:
+`t::choose` lives in `notchling-locale` (call 5). Every entry point calls it once at start, before any window: `notchling-app`'s shell (`mac/shell.rs::run`, next to `history::apply`), `notchling-machines`, `--render`, and the benches (which run through `--render`). All of them honor `NOTCHLING_LOCALE`. The daemon, the hook and the command line never call it. An entry point that forgot to would show English, the default. The first that names a shipped language wins:
 
 1. `NOTCHLING_LOCALE` in the environment (development, tests, renders; `en-XA` is the pseudo-language below).
 2. The Settings Language choice, when it isn't System: a new `language` key in `settings/keys.rs`, read with the store at start. The row exists only once two languages ship.
 3. macOS's preferred languages in order (`platform::locale::preferred()`, from `NSLocale.preferredLanguages`): each tag exactly, then language and script, then language alone. `de-AT` gets `de`. This list already honors the per-app language a person sets in System Settings > General > Language & Region > Applications, which macOS offers for an app once its bundle declares two localizations (`CFBundleLocalizations`, step L7).
 4. English.
 
-A render or a test is English unless `NOTCHLING_LOCALE` says otherwise, whatever the Mac's languages, as a render never reads `~/.claude`. A change in the Settings row applies at the next launch, with a Relaunch button; macOS's per-app language behaves the same.
+A render or a test is English unless `NOTCHLING_LOCALE` says otherwise, whatever the Mac's languages, as a render never reads `~/.claude`: `--render` passes `choose` no system languages. A change in the Settings row applies at the next launch, with a Relaunch button; macOS's per-app language behaves the same.
 
 `platform::locale` is new in the `platform` crate: `preferred()` (macOS through `objc2-foundation`, already in `Cargo.lock`; Linux from `LANGUAGE`, `LC_ALL`, `LC_MESSAGES`, `LANG`; Windows `Unsupported`, so English) and `region()`. The parsing is pure and tested on every system.
 
@@ -448,9 +469,10 @@ Per message: the chosen language, then its parent if it ships (`pt-BR`, then `pt
 - `NUMBER` and `t::fmt::count` use `icu_decimal` with a formatter built once (`OnceLock`), in the chosen language with the Mac's region: `en` with region `DE` formats as `en-DE` does, "1.234", which is what macOS does with its Region setting. The custom separators macOS also allows are not read.
 - Plural categories come from `icu_plurals`, rules built once.
 - A number that isn't a quantity (a year, a day of the month, a version, an id) is passed as a string, so it is never grouped.
-- Compact numbers and units are messages: `unit-thousands = { $value }k` with `$value` from `t::fmt::decimal(12.3, 1)`, so a translator controls both the unit and the decimal separator. `chat/format.rs::tokens`, `age` and `duration` move to messages such as `time-age-minutes = { NUMBER($n) }m`.
-- Dates are messages: `time-date-short = { $month } { $day }`, `time-date-long = { $month } { $day }, { $year } { $time }`, and `time-month-1` to `time-month-12`. `pages/dates.rs` keeps its arithmetic and formats through them. Full CLDR dates (`icu_datetime`, a few hundred KB of data) wait until the app reads the time zone.
-- Lists join with `common-list-separator` (", "), as the code does today. ICU4X's list formatter can replace it if a language needs "a, b and c".
+- These are the Mac's, so they live in `mac/units.ftl` (call 4); the phone formats its own through Flutter's `intl`.
+- Compact numbers and units are messages: `units-thousands = { $value }k` with `$value` from `t::fmt::decimal(12.3, 1)`, so a translator controls both the unit and the decimal separator. `chat/format.rs::tokens`, `age` and `duration` move to messages such as `units-age-minutes = { NUMBER($n) }m`.
+- Dates are messages: `units-date-short = { $month } { $day }`, `units-date-long = { $month } { $day }, { $year } { $time }`, and `units-month-1` to `units-month-12`. `pages/dates.rs` keeps its arithmetic and formats through them. Full CLDR dates (`icu_datetime`, a few hundred KB of data) wait until the app reads the time zone.
+- Lists join with `units-list-separator` (", "), as the code does today. ICU4X's list formatter can replace it if a language needs "a, b and c".
 
 ### Cost per draw
 
@@ -477,36 +499,39 @@ Every shipped language formats every message with sample numbers (0, 1, 2, 3, 5,
 | Wire and protocol strings | Two sides of different versions and languages | Codes and ids go over the wire; free text there is English and never parsed |
 | Part names (`.part("Send Button")`) | They name code an agent greps | `LINT-LOCALE-LITERAL` exempts them; the ? overlay may show the translated title beside them later |
 | Text matched against another program (`prompt_flow.rs::NOT_PERMISSION`, the dialog markers, Claude Code's screen) | Translating it would break the match | Stays a constant in code, listed in the lint baseline, which only shrinks |
+| The phone's dictation prompt and cleanup text (`features/voice/prompt_builder.dart`, `transcript_cleanup.dart`) | They steer Whisper and its cleanup in the language spoken, not the UI's (call 1) | Stay Vietnamese in code, in the lint baseline, until open question 3 is answered |
 | Other tools' output | The app parses it | Child processes keep their locale (`LC_ALL=C` for git) |
 | Brand names | They are names | `-brand-*` terms, defined once in English |
 
 ### Daemon text and the wire
 
 - Step L2 makes the daemon's text English: the bridge's error messages, Visualize's empty states, takeover reasons, ptyhost's errors. `protocol/README.md` and the schema's description of `error.message` then say English. The phone shows its own words for `error.code` and the Mac's message as a detail. A localized empty state or reason, when a second language ships, comes as an additive optional code beside the text.
-- Inbox items: the app and the phone already know each action's `id`, so `Allow Once` becomes `consent-allow-once` in both without a protocol change. A title needs the facts it was made from: an additive optional `facts` on the item (`{"names": [...], "command": "..."}` for a secret approval), rendered through `consent-secret-approval = Allow { $names } for { $command }` in `consent.ftl`. An older daemon without `facts` shows its English title as today. The stored row keeps the English text for logs and older clients.
+- Inbox items: the app and the phone already know each action's `id`, so `Allow Once` becomes `consent-allow-once` in both without a protocol change. A title needs the facts it was made from. In L6 all five kinds (secret approval, secret request, limit notice, action failed, notice) get an additive optional `code` and `facts` on the item (call 6): `{"names": [...], "command": "..."}` for a secret approval, rendered through `consent-secret-approval = Allow { $names } for { $command }` in `consent.ftl`; the other kinds' facts are what their titles are made from today (each kind's shape is left to the builder). Their titles go in `shared.ftl` under `item-` when both apps show them alike, else in each app's files. Free text the daemon has no code for (an error's message, a notice's body) stays English and shows as the item's detail, under the translated title. An older daemon without `code` shows its English title as today. The stored row keeps the English text for logs and older clients.
 
 ## The registries that are coming
 
-Both are on other branches; both name words by key from the start.
+Both are planned on other branches and both are Mac-only, so their words live in `mac/` files (call 4). Both are built after L1, so they name words by key from the start (call 2).
 
-**Settings search.** Each setting's entry holds message constants, never text:
+**Settings search.** Each setting's entry holds message constants, never text. The title is the same message the Settings row shows, so the row and the search result can't drift apart:
 
 ```rust
-Entry { key: "hideNotch", title: t::setting::HIDE_NOTCH, about: t::setting::HIDE_NOTCH_ABOUT, words: t::setting::HIDE_NOTCH_WORDS }
+Entry { key: "hideNotch", title: t::settings::HIDE_NOTCH, about: t::settings::HIDE_NOTCH_ABOUT, words: t::settings::HIDE_NOTCH_WORDS }
 ```
+
+In `locales/en/mac/settings.ftl`:
 
 ```ftl
 ## Settings: a title, one line about it, and search words, per setting.
 
-setting-hide-notch = Show agents in the notch
-setting-hide-notch-about = Sessions appear in the camera notch while agents work.
+settings-hide-notch = Show agents in the notch
+settings-hide-notch-about = Sessions appear in the camera notch while agents work.
 # Search words, separated by commas. Add words people in your language would type. English words are always searched too.
-setting-hide-notch-words = notch, menu bar, camera, hide
+settings-hide-notch-words = notch, menu bar, camera, hide
 ```
 
-Search matches the query against the title, the line and the words in the chosen language, and against the English words (`Text::english()`), so "notch" finds the setting in any language. Choice labels follow the same pattern: `setting-keep-awake-while-working = While Agents Work`.
+Search matches the query against the title, the line and the words in the chosen language, and against the English words (`Text::english()`), so "notch" finds the setting in any language. Choice labels follow the same pattern: `settings-keep-awake-while-working = While Agents Work`.
 
-**Log event kinds.** A log line stores the kind (`hook.permission`), never words. The viewer shows `event-hook-permission` and `event-hook-permission-about` through `t::lookup`, since kinds are data. A test walks every kind in the registry and fails on one with no words; a kind from a newer daemon shows its id.
+**Log event kinds.** A log line stores the kind (`hook.permission`), never words. The viewer shows `logs-event-hook-permission` and `logs-event-hook-permission-about`, from `locales/en/mac/logs.ftl`, through `t::lookup`, since kinds are data. A test walks every kind in the registry and fails on one with no words; a kind from a newer daemon shows its id.
 
 ## The phone
 
@@ -514,15 +539,19 @@ Step L2, in two pull requests.
 
 **L2a, the app:**
 
-1. `locales/en/phone/<feature>.ftl` written from today's `app_en.arb` by a one-off script in the pull request (not kept). Keys get their feature's prefix (`pairTitle` becomes `pairing-title`, so `l10n.pairingTitle`); words both apps use move to `shared.ftl` and `consent.ftl`. Where the Mac and the phone used different English for the same thing, the pull request lists each word it unifies.
+1. `locales/en/phone/<feature>.ftl` written from today's `app_en.arb` by a one-off script in the pull request (not kept). Keys get their feature's prefix (`pairTitle` becomes `pairing-title`, so `l10n.pairingTitle`). A text moves to `shared.ftl` or `consent.ftl` only where the Mac shows exactly the same text, case included; where the two apps' English differs, it stays two keys and neither app's words change (call 3).
 2. Dart call sites renamed mechanically, in `lib/features/` and `lib/app/`.
-3. `app_vi.arb` and `app_localizations_vi.dart` deleted. `gen.py` writes `app_en.arb`; `flutter gen-l10n` rewrites `app_localizations*.dart`.
-4. `l10n.yaml`: `template-arb-file: app_en.arb`. `use-escaping` stays off, since the subset keeps braces out of phone text.
-5. `app.dart` drops `localeResolutionCallback`; Flutter picks the first supported locale, English.
-6. Tests: the harness defaults to `Locale('en')` and the 14 files that assert Vietnamese assert English. These are existing tests (`WEAK-TEST-EDIT`), so the maintainer approves them. The kit goldens already render English and should not change; if one does, the maintainer decides.
-7. Plurals fix English on the way: "1 subagents running" becomes "1 subagent running".
-8. `apps/flutter/AGENTS.md`, rule 3 becomes: "Text wraps and grows (German is about 30% longer than English); targets are at least 48 dp. Words go in `locales/en/` (`shared.ftl`, `consent.ftl`, `phone/`); run `python3 tools/locale/gen.py`; never edit `lib/l10n/` by hand (`GUARD-LOCALE-GEN`)."
-9. Dictation keeps Whisper's Vietnamese: it is the language you speak, not the app's (open question 3).
+3. Every user-visible literal outside `lib/l10n/` becomes a message too (call 1): the Vietnamese and English strings in `core/net/bridge_client.dart`, `features/chat/photo_send.dart`, `chat_notifier.dart`, `features/sessions/new_session_sheet.dart`, `features/visualize/viz_providers.dart` and `app/notifications.dart`.
+   - `BridgeException` already carries a `code` (`view_only`, `unauthorized`, `not_found`, ...). The client's own codes (`disconnected` and the rest) lose their Vietnamese message; the UI maps every code to its own message (`bridge-error-disconnected`), and a daemon code it doesn't know shows the daemon's English message as a detail under a general one. `lib/core/net/` is outside the auto zone, so this part waits for the maintainer.
+   - Code with no `BuildContext` (notifications, providers, notifiers) uses a context-free lookup: `lookupAppL10n(locale)`, which `flutter gen-l10n` already writes, through one holder (`lib/app/l10n_holder.dart` or similar) set at start from the platform's locales and again on `didChangeLocales`. Today that is always English; it matters from the second language on.
+   - The dictation prompt and cleanup text (`features/voice/prompt_builder.dart`, `transcript_cleanup.dart`) stay Vietnamese and go in the lint's baseline (item 10).
+4. `app_vi.arb` and `app_localizations_vi.dart` deleted. `gen.py` writes `app_en.arb`; `flutter gen-l10n` rewrites `app_localizations*.dart`.
+5. `l10n.yaml`: `template-arb-file: app_en.arb`. `use-escaping` stays off, since the subset keeps braces out of phone text.
+6. `app.dart` drops `localeResolutionCallback`; Flutter picks the first supported locale, English.
+7. Tests: the harness defaults to `Locale('en')` and the 14 files that assert Vietnamese assert English. These are existing tests (`WEAK-TEST-EDIT`), so the maintainer approves them. The kit goldens already render English and should not change; if one does, the maintainer decides.
+8. Plurals: the English forms stay as they render today (call 3). Where today's English is wrong ("1 subagents running"), fixing it is a separate, listed change (see "Longer text", rule 6).
+9. `apps/flutter/AGENTS.md`, rule 3 becomes: "Text wraps and grows (German is about 30% longer than English); targets are at least 48 dp. Words go in `locales/en/` (`shared.ftl`, `consent.ftl`, `phone/`); run `python3 tools/locale/gen.py`; never edit `lib/l10n/` by hand (`GUARD-LOCALE-GEN`)."
+10. Dictation keeps Whisper's Vietnamese, its prompt and its cleanup text: it is the language you speak, not the app's (open question 3). `LINT-LOCALE-LITERAL` covers all of `lib/` once L2a lands, with those two files in its baseline.
 
 **L2b, the daemon's words:** the Vietnamese text in `crates/engine/src/bridge/`, `viz/engine.rs`, `control/takeover.rs`, `crates/notchlingd/src/bridge_backend.rs` and `crates/ptyhost/` becomes English, with the tests that assert it and the protocol's description (regenerated by `tools/protocol/gen.py`).
 
@@ -535,7 +564,7 @@ New rows in `docs/rules.md`, each with a probe in `tools/guard/guard/rules.py` t
 | GUARD-LOCALE-GEN | The files in `crates/locale/src/generated.rs` and `apps/flutter/lib/l10n/*.arb` are exactly what `tools/locale/gen.py` writes from `locales/` | A hand-edited or stale file lets the apps show words no source holds | `python3 tools/locale/gen.py --check` |
 | GUARD-LOCALE-SUBSET | Every `.ftl` stays in the subset, and keys, variables, file names and language tags follow their rules | A construct one target can't express breaks that app, maybe only later | `python3 tools/locale/gen.py --check` |
 | GUARD-LOCALE-MATCH | A translation has no key English lacks, the same variables with the same types, and nothing English doesn't have: no link, address or markup, no value over three times English's length plus 20 characters | A translation must not be able to break the app, carry a link, or say more than English | `python3 tools/locale/gen.py --check` |
-| LINT-LOCALE-LITERAL | In an area that has moved, no Rust or Dart literal looks like user-facing text: a word of two letters or more with a space, or a capital first letter. Exempt: tests, part names (`.part`, `.part_at`, `.part_inside`, `.window_region`), element ids, log lines; what remains (text matched against other programs) sits in the baseline | Moved areas stay moved | `python3 -m guard lint` |
+| LINT-LOCALE-LITERAL | In an area that has moved, no Rust or Dart literal looks like user-facing text: a word of two letters or more with a space, or a capital first letter. The phone is one area, all of `apps/flutter/lib/`, moved in L2a. Exempt: tests, part names (`.part`, `.part_at`, `.part_inside`, `.window_region`), element ids, log lines; what remains (text matched against other programs, the phone's dictation prompt and cleanup text) sits in the baseline | Moved areas stay moved | `python3 -m guard lint` |
 | LINT-LOCALE-CONSENT | A warning: an English message outside `consent.ftl` that starts with Allow, Deny, Always Allow, Approve, Pair, Trust, Install or Sign In | Consent words belong where the maintainer reviews them | `python3 -m guard lint --warnings` |
 
 Changed: `LINT-FILE-SIZE` exempts the generated locale files (above). Which areas have moved is `tools/locale/areas.json`, a list of areas with their code folders and a `moved` flag; it is protected, so an area can't quietly move back.
@@ -587,7 +616,7 @@ A section for `CONTRIBUTING.md` (protected, step L1), with style notes in `docs/
 >
 > The maintainer reviews a new language's first pull request and every change to `consent.ftl`, the words that allow or refuse something. Other changes to a language that ships follow the usual flow.
 
-`docs/translating.md` covers: English's Title Case for menus is an English rule (follow your platform's style for your language); write whole sentences in each variant; spaces and punctuation belong in the message (French "Note :"); never split a message to style part of it; how to preview with `NOTCHLING_LOCALE=<tag>` and `NOTCHLING_LOCALE_MARK_FALLBACK=1`; and the meaning-changes-key rule for people editing English.
+`docs/translating.md` covers: English's Title Case for menus is an English rule (follow your platform's style for your language); write whole sentences in each variant; spaces and punctuation belong in the message (French "Note :"); a message split because a part is styled or clickable says in its note which messages it is shown with, so translate them together; how to preview with `NOTCHLING_LOCALE=<tag>` and `NOTCHLING_LOCALE_MARK_FALLBACK=1`; and the meaning-changes-key rule for people editing English.
 
 ## Longer text, and right to left
 
@@ -597,8 +626,8 @@ German runs about 30% longer than English, and short labels much more ("Off" to 
 2. Buttons and segmented choices hug their content. A Settings choice row that doesn't fit becomes a popup menu.
 3. Menus already hug up to `MENU_MAX_WIDTH`; a note or detail that may wrap goes in `menu_panel_wide`.
 4. The notch's shapes have fixed sizes (`notch::layout::canvas_size`): text in the notch always elides.
-5. A sentence is one message with variables, never pieces joined in code: word order differs. No code changes the case of translated text.
-6. Each migration step renders its area's views with `NOTCHLING_LOCALE=en-XA`; the pull request shows them. Renders in English are pixel-identical before and after the step, except where a plural fixed an English form, which the pull request lists.
+5. A sentence is one message with variables, not pieces joined in code: word order differs. The exception (call 7): a sentence may be split where a part is styled or clickable ("Read the [guide] first"), decided per case in the migration pull request; each part's translator note names the messages it is shown with. A new line is a new message, never a `\n` inside one. No code changes the case of translated text.
+6. Each migration step renders its area's views with `NOTCHLING_LOCALE=en-XA`; the pull request shows them. Renders in English are pixel-identical before and after the step (call 3). A designer's proposal, not part of the call: where today's English plural is wrong ("1 subagents running"), the fix may ride along only as a listed exception in that pull request, with the before and after render; if the maintainer prefers, each fix is its own pull request after the step.
 7. The phone already wraps and grows; new phone layout tests also run at the harness's `textScale: 1.3`.
 
 Right to left (Arabic, Hebrew, Persian, Urdu) is not in this design. It would take: mirrored layout (GPUI 0.2.2 has no layout direction; the kit's `Corner` already says leading and trailing, a start), bidirectional caret movement and selection in the kit's text input and Chat's selection, mirrored icons (chevrons, arrows), isolation marks around variables at run time (a path inside Arabic text), and Flutter's `EdgeInsetsDirectional` where the phone uses `left`/`right`. Nothing here blocks it: the format and the generator carry right-to-left text unchanged.
@@ -607,16 +636,23 @@ Right to left (Arabic, Hebrew, Persian, Urdu) is not in this design. It would ta
 
 Named L0 to L8, so they don't collide with the project's Phase 5 and Phase 6. Each ships on its own and leaves the app working.
 
+Order (call 2):
+
+- Every step targets `agent-run-oss`, where the rebuild merges, through the integration branch `merge/settings-batch` first; none targets `main`.
+- The branches in flight merge first. An area's migration (L3 to L6) starts only after the branches touching that area have merged, so no pull request rewrites literals another branch is still changing.
+- `tools/locale/areas.json` marks an area moved, arming `LINT-LOCALE-LITERAL` there, in the same pull request that moves it.
+- L0 to L2 come before the Settings search registry and the log event-kind registry are built, so both are written with messages from their first line.
+
 | Step | What | Tests | Zone |
 | --- | --- | --- | --- |
 | L0 | This design accepted; decision record 0019 | none | protected (`docs/decisions/`) |
-| L1 | The foundation: `locales/en/` (`shared.ftl` with brand terms, `language-name`, common words; `consent.ftl`), `languages.json`; `tools/locale/` (parser, checks, Rust and ARB writers, the iOS and Android writers off, report, `--new`, `--prune`); `crates/locale` (tables, choice, fallback, plurals, numbers, `fmt`, pseudo-language); `platform::locale`; `mac/shell.rs` chooses at start; guard rules and probes, zones, CODEOWNERS, `LINT-FILE-SIZE` exemption, CI step; `crates/locale/AGENTS.md`, notes in `tools/AGENTS.md` and `crates/AGENTS.md`, a feature-map row, `docs/translating.md`, the CONTRIBUTING section. The app looks the same | generator tests with golden outputs and every refusal; crate tests incl. `fluent-bundle` conformance; `cargo deny check`; guard probes | protected |
-| L2a | The phone to English and generated ARB (above) | the changed phone tests, `flutter analyze`, `gen-l10n` freshness | protected (existing tests, `lib/app/`, `lib/l10n/` until this step adds it to the zone, `zones.json`, `AGENTS.md`) |
+| L1 | The foundation: `locales/en/` (`shared.ftl` with brand terms, `language-name` and the few texts both apps show alike; `consent.ftl`), `languages.json`; `tools/locale/` (parser, checks, Rust and ARB writers, the iOS and Android writers off, report, `--new`, `--prune`); `crates/locale` (tables, `choose`, fallback, plurals, numbers, `fmt`, pseudo-language); `platform::locale`; every entry point calls `choose` at start (`mac/shell.rs`, `notchling-machines`, `--render`); guard rules and probes, zones, CODEOWNERS, `LINT-FILE-SIZE` exemption, CI step; `crates/locale/AGENTS.md`, notes in `tools/AGENTS.md` and `crates/AGENTS.md`, a feature-map row, `docs/translating.md`, the CONTRIBUTING section. The app looks the same | generator tests with golden outputs and every refusal; crate tests incl. `fluent-bundle` conformance; `cargo deny check`; guard probes | protected |
+| L2a | The phone to English and generated ARB, every visible literal included, `BridgeException` codes mapped in the UI, the context-free lookup (above) | the changed phone tests, `flutter analyze`, `gen-l10n` freshness | protected (existing tests, `lib/app/`, `lib/core/net/`, `lib/l10n/` until this step adds it to the zone, `zones.json`, `areas.json`, `AGENTS.md`) |
 | L2b | The daemon's text to English; the protocol's description | the changed engine and bridge tests; `tools/protocol/gen.py --check` | protected |
-| L3 | Settings: `mac/settings.ftl`; Settings uses the `setting-*` words the search registry will use; the area moves | English renders pixel-identical; en-XA renders in the PR; `bench_chat.rs` | auto for the words and code; `areas.json` once |
+| L3 | Settings: `mac/settings.ftl`; Settings uses the `settings-*` words the search registry uses; the area moves | English renders pixel-identical; en-XA renders in the PR; `bench_chat.rs` | auto for the words and code; `areas.json` once |
 | L4 | Chat, in a few pull requests by part (Sidebar, conversation, reply box, Details Panel, sheets) | as L3, plus `bench_scroll.rs` and the render checks (`render_blocks.rs`, `render_copy.rs`) | as L3 |
 | L5 | The notch | as L3 | as L3 |
-| L6 | The other windows: accounts, vault, phone pairing, pages, search, welcome, Machines, tools, menus, Dock and tray, the kit's words; the inbox's `facts` and action labels; the log viewer's event kinds | as L3; inbox `facts` round trip in engine, local API and protocol tests | as L3; engine, local API and protocol parts protected |
+| L6 | The other windows: accounts, vault, phone pairing, pages, search, welcome, Machines, tools, menus, Dock and tray, the kit's words; the inbox's `code` and `facts` for all five kinds, and its action labels; the log viewer's event kinds (`mac/logs.ftl`) | as L3; inbox `facts` round trip in engine, local API and protocol tests | as L3; engine, local API and protocol parts protected |
 | L7 | When a second language arrives: the Settings Language row, `CFBundleLocalizations` from `languages.json` in `tools/bundle-next.sh` (so macOS offers the per-app language and localizes its own panels), a font and casing pass for that language's script, then its translation | renders in that language; the Language row's model | protected (`tools/`); the translation per the zone table |
 | L8 | Later: iOS and Android outputs turned on with a native phone app; right to left | per target | protected |
 
@@ -626,10 +662,11 @@ Named L0 to L8, so they don't collide with the project's Phase 5 and Phase 6. Ea
 - The generated Rust's exact layout (ids as `u16`, table types, `Num`'s conversions with saturation from `u64`), and Rust keywords as function names.
 - The ICU4X calls and the binary-size cost of their compiled data, measured on a release build; over 1 MB added needs the maintainer's word.
 - `LINT-LOCALE-LITERAL`'s heuristics for Rust and Dart, with good and bad examples, and each moved area's baseline.
-- The phone's key renames and the list of unified words.
+- The phone's key renames, and which phone texts are exactly the Mac's (those alone go to `shared.ftl`).
+- Which sentences split because a part is styled or clickable, per migration pull request.
 - `flutter gen-l10n`'s handling of `#` inside a plural branch and of an apostrophe, pinned by a phone test.
 - The xcstrings substitution form for a plural message with several variables, checked in Xcode when iOS is turned on.
-- The shape of the inbox's `facts` for each kind.
+- The `code` values and the shape of the inbox's `facts` for each of the five kinds.
 - `platform::locale` on Linux; Windows stays `Unsupported` until a Windows build needs it.
 - Font fallback and line height renders per script, when a language with that script arrives.
 
