@@ -1,8 +1,11 @@
 use gpui::{div, prelude::*, px, Context, Div};
 use notchling_kit::labels::Corner;
-use notchling_kit::metric::SIDE_PADDING;
+use notchling_kit::metric::{SIDE_PADDING, SPACE};
 use notchling_kit::part::{ButtonKind, PartState};
-use notchling_kit::ui::{button_with, hsla, icon_button, label, phone_mark, KitPart, KitStyled};
+use notchling_kit::ui::{
+    button_with, hsla, icon_button, label, parts_button, parts_on, parts_tip, phone_mark,
+    toggle_parts, KitPart, KitStyled,
+};
 use notchling_kit::{Appearance, Icon, IconSize, Ink, TypeRole};
 
 use super::phone::{BUTTON_TIP_OFF, BUTTON_TIP_ON};
@@ -96,6 +99,69 @@ fn details_button(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) ->
     .part_at("Details Button", Corner::BottomTrailing, a, cx)
 }
 
+pub(super) fn parts_toggle(a: Appearance, cx: &mut Context<ChatView>) -> impl IntoElement {
+    let on = parts_on(cx);
+    gate::tip_text(parts_button("parts", a, cx), parts_tip(on).into(), a)
+        .on_click(|_, _, cx| {
+            toggle_parts(cx);
+        })
+        .part_at("Parts Button", Corner::BottomTrailing, a, cx)
+}
+
+fn header_parts_toggle(
+    view: &ChatView,
+    a: Appearance,
+    cx: &mut Context<ChatView>,
+) -> Option<impl IntoElement> {
+    (!super::details_shown(view)).then(|| parts_toggle(a, cx))
+}
+
+fn inbox_button(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> impl IntoElement {
+    let unread = view.inbox.unread();
+    let kind = if view.inbox_panel.is_some() {
+        ButtonKind::Secondary
+    } else {
+        ButtonKind::Ghost
+    };
+    let button = gate::tip_text(
+        icon_button(
+            "inbox",
+            Icon::Bell,
+            IconSize::Button.points(),
+            kind,
+            PartState::Rest,
+            a,
+        )
+        .size(px(HEADER_BUTTON))
+        .px(px(0.0)),
+        "Notifications that need you".into(),
+        a,
+    )
+    .on_click(cx.listener(|this, _, _, cx| this.toggle_inbox(cx)))
+    .part_at("Inbox Button", Corner::BottomTrailing, a, cx);
+    let badge = (unread > 0).then(|| {
+        let text = if unread > 9 {
+            "9+".to_owned()
+        } else {
+            unread.to_string()
+        };
+        div()
+            .absolute()
+            .top(px(0.0))
+            .right(px(0.0))
+            .min_w(px(SPACE[3]))
+            .h(px(SPACE[3]))
+            .px(px(SPACE[0] / 2.0))
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded(px(SPACE[3]))
+            .fill(Ink::Accent, a)
+            .child(label(&text, TypeRole::Meta, Ink::OnAccent, a))
+    });
+    div().relative().child(button).children(badge)
+}
+
 pub fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Div {
     let bar = div()
         .h(px(HEADER_ROW))
@@ -114,6 +180,8 @@ pub fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Div
             .child(super::terminal::button(view, a, cx))
             .child(super::simulator::button_in_header(view, a, cx))
             .child(phone_button(view, a, cx))
+            .children(header_parts_toggle(view, a, cx))
+            .child(inbox_button(view, a, cx))
             .window_region_badge(a, cx)
             .part_at("Header", Corner::Bottom, a, cx);
     };
@@ -134,6 +202,8 @@ pub fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Div
     .child(super::terminal::button(view, a, cx))
     .child(super::simulator::button_in_header(view, a, cx))
     .child(phone_button(view, a, cx))
+    .children(header_parts_toggle(view, a, cx))
+    .child(inbox_button(view, a, cx))
     .window_region_badge(a, cx)
     .part_at("Header", Corner::Bottom, a, cx)
 }

@@ -97,6 +97,13 @@ pub const ROW_MENU_ENV: &str = "NOTCHLING_RENDER_ROW_MENU";
 pub const COPY_MENU_ENV: &str = "NOTCHLING_RENDER_COPY_MENU";
 pub const ACCOUNT_MENU_ENV: &str = "NOTCHLING_RENDER_ACCOUNT_MENU";
 pub const PAGE_ENV: &str = page_panel::PAGE_ENV;
+pub(super) fn details_shown(view: &ChatView) -> bool {
+    !view.page.is_open()
+        && !view.terminal.shown()
+        && !view.simulator.shown()
+        && !view.details_hidden
+}
+
 pub const INBOX_ENV: &str = "NOTCHLING_RENDER_INBOX";
 pub const SENDING_ENV: &str = "NOTCHLING_RENDER_SENDING";
 

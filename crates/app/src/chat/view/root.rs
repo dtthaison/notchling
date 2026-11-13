@@ -1,5 +1,9 @@
+use super::render_map::WindowRegion;
 use super::*;
 use crate::mac::dock::Copy as CopyAction;
+use gpui::Div;
+use notchling_kit::ui::hsla;
+use notchling_kit::Appearance;
 
 impl Render for ChatView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -142,13 +146,7 @@ impl Render for ChatView {
                                     .then(|| simulator::render(self, a, window, cx))
                                     .flatten(),
                             )
-                            .children(
-                                (!self.page.is_open()
-                                    && !self.terminal.shown()
-                                    && !self.simulator.shown()
-                                    && !self.details_hidden)
-                                    .then(|| self.parts.details(a, cx)),
-                            ),
+                            .children(details_shown(self).then(|| details_column(self, a, cx))),
                         cx,
                     )),
             )
@@ -164,4 +162,30 @@ impl Render for ChatView {
             .child(resize_edges(window, TopBorder::InContent))
             .child(self.chrome.clone())
     }
+}
+
+fn details_column(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Div {
+    div()
+        .w(px(inspector::WIDTH))
+        .h_full()
+        .flex_shrink_0()
+        .flex()
+        .flex_col()
+        .child(view.parts.details(a, cx))
+        .child(
+            div()
+                .min_h(px(sidebar::FOOTER_HEIGHT))
+                .flex_shrink_0()
+                .px(px(12.0))
+                .py(px(6.0))
+                .flex()
+                .items_center()
+                .justify_end()
+                .fill(Ink::Sidebar, a)
+                .border_l(px(1.0))
+                .border_color(hsla(Ink::Hairline.color(a)))
+                .child(header::parts_toggle(a, cx))
+                .window_region(a, cx)
+                .part_at("Details Footer", Corner::TopLeading, a, cx),
+        )
 }

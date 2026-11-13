@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
 use gpui::{div, prelude::*, px, Context, Div, Entity};
-use notchling_kit::metric::{SPACE, TITLE_BAR};
+use notchling_kit::metric::{SIDE_PADDING, SPACE};
 
-use super::sidebar::FOOTER_HEIGHT;
+use super::sidebar::HEADER_ROW;
 use super::ChatView;
 use crate::inbox::feed::InboxFeed;
 use crate::inbox::renders::{model, NOW_MS};
@@ -41,7 +41,7 @@ impl ChatView {
         let generation = self.inbox.generation();
         if generation != self.seen_inbox {
             self.seen_inbox = generation;
-            self.redraw_sidebar(cx);
+            self.redraw_chrome(cx);
         }
     }
 
@@ -69,13 +69,13 @@ pub fn render(panel: Option<&Entity<InboxPanelView>>, cx: &mut Context<ChatView>
             .child(
                 div()
                     .absolute()
-                    .left(px(SPACE[1]))
-                    .top(px(TITLE_BAR))
-                    .bottom(px(FOOTER_HEIGHT + SPACE[0]))
+                    .right(px(SIDE_PADDING))
+                    .top(px(HEADER_ROW + SPACE[0]))
+                    .bottom(px(SPACE[2]))
                     .w(px(WIDTH))
                     .flex()
                     .flex_col()
-                    .justify_end()
+                    .justify_start()
                     .child(
                         div()
                             .occlude()

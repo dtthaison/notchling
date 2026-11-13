@@ -223,13 +223,12 @@ impl Parts {
     }
 
     pub fn details(&self, a: Appearance, cx: &Context<ChatView>) -> AnyElement {
-        let width = gpui::px(inspector::WIDTH);
         framed(
             Region::Details,
             Place::Bottom(DETAILS_BADGE_BOTTOM),
             self.details.clone().into(),
             &self.details.read(cx).spins,
-            StyleRefinement::default().w(width).h_full().flex_shrink_0(),
+            StyleRefinement::default().w_full().flex_1().min_h_0(),
             a,
             cx,
         )
