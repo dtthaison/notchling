@@ -8,7 +8,6 @@ use crate::chat::git::DiffText;
 use crate::chat::page_panel::Opens;
 
 const PAD: f32 = 16.0;
-const CHUNK_LINES: usize = 80;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Ready {
@@ -23,15 +22,8 @@ pub enum DiffBody {
 }
 
 pub fn ready(diff: &DiffText) -> Ready {
-    let mut chunks: Vec<(Ink, String)> = Vec::new();
-    for (kind, text) in &diff.runs {
-        let lines: Vec<&str> = text.split('\n').collect();
-        for chunk in lines.chunks(CHUNK_LINES) {
-            chunks.push((kind.ink(), chunk.join("\n")));
-        }
-    }
     Ready {
-        chunks,
+        chunks: crate::chat::git::chunks(diff),
         truncated: diff.truncated,
     }
 }

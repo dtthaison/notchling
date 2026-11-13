@@ -230,10 +230,10 @@ fn added_and_removed_lines_use_the_done_and_expired_inks() {
 }
 
 #[test]
-fn the_preview_has_every_status_and_a_diff_with_both_kinds() {
+fn the_preview_has_a_changed_an_added_and_a_removed_file_and_a_diff_with_both_kinds() {
     let m = preview_model();
     let letters: Vec<&str> = m.files.iter().map(|f| f.status.as_str()).collect();
-    assert_eq!(letters, ["M", "A", "D", "M", "?"]);
+    assert_eq!(letters, ["M", "A", "D"]);
     assert!(m.files.iter().any(|f| f.path == PREVIEW_PATH));
     let kinds: Vec<DiffKind> = preview_diff().runs.iter().map(|r| r.0).collect();
     assert!(kinds.contains(&DiffKind::Added) && kinds.contains(&DiffKind::Removed));

@@ -342,7 +342,7 @@ pub(super) fn render_menu(
 const MENU_BOTTOM: f32 = 48.0;
 
 fn menu_right(view: &ChatView) -> f32 {
-    let details = if view.page.is_open() {
+    let details = if view.page.is_open() || view.changes_visible() {
         view.page.shown_width()
     } else if view.details_hidden {
         0.0

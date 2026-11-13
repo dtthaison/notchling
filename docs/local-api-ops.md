@@ -288,7 +288,7 @@ account), and writes only the daemon's own cache.
 
 ## `git_ops.rs`
 
-What Chat's Details Panel shows of a session's folder: `git.status` and `git.diff`, over
+What Chat's Details Panel and Changes panel show of a session's folder: `git.status`, `git.diff` and the three branch ops, over
 `notchling_engine::git` and the engine's `control::Launcher`. App tier, read only, no switch:
 the app never runs a process, so the daemon runs `git` for it (decision 0004). Every call is
 refused (`forbidden`) unless `cwd` is absolute, has no `..`, and (after symlinks) is a known
@@ -299,7 +299,7 @@ checked. A `path` is refused if it is empty, absolute, has a `..` or a NUL, goes
 that leaves the repository, or is not exactly one of the current changed files (no `.`, no
 directory, not a file that is clean).
 
-Both ops are `OpSpec::APP_QUIET`: a success is not written to `audit.jsonl` (the app asks every
+All five ops are `OpSpec::APP_QUIET`: a success is not written to `audit.jsonl` (the app asks every
 5 s, which would fill the log and rotate out the refusals and the vault's entries); a refusal or
 failure still is.
 
@@ -307,12 +307,40 @@ failure still is.
 | --- | --- | --- | --- |
 | `git.status` | app | `{cwd}` | `{repo: false}` when `cwd` is in no repository; else `{repo: true, branch, head, detached, initial, upstream, ahead, behind, changes: [{path, status, from, added, removed}], truncated}` |
 | `git.diff` | app | `{cwd, path}` | `{path, text, truncated, untracked}` |
+| `git.branch_diff_stat` | app | `{cwd, base?}` | `{repo: false}` when `cwd` is in no repository; else `{repo: true, includes_uncommitted: true, branch, head, detached, base, merge_base, files: [{path, status, from, added, removed, uncommitted}], added, removed, file_count, uncommitted_files, truncated}` |
+| `git.branch_diff_file` | app | `{cwd, base, path, from?}` | `{path, text, truncated, untracked}` |
+| `git.branches` | app | `{cwd}` | `{repo: false}`, or `{repo: true, current, default, remote_default, local: [name], truncated}` |
 
 - `status` is one of `M`, `A`, `D`, `R`, `U` (unmerged) or `?` (untracked). `path` is relative to the
   repository's root, as `git` prints it, not to `cwd`; `from` is a rename's old path. `added` and
   `removed` are `null` for an untracked or binary file. `branch` is `null` while `detached`
   (then `head` is the short commit); `upstream`, `ahead` and `behind` are only set with an upstream.
   `initial` is a repository with no commit yet.
+- `git.branch_diff_stat` compares the working tree with the merge base of `base` and `HEAD`, so it
+  covers the branch's commits (`merge-base..HEAD`) plus uncommitted work: staged and unstaged
+  changes to tracked files and untracked files (`includes_uncommitted` is always `true`; each file's
+  `uncommitted` says whether it differs from `HEAD` or is untracked, and `uncommitted_files` counts
+  them). `base` is optional: without it the base is `origin/HEAD`'s target, else `main`, else
+  `master`, the first that shares history with `HEAD`; `base` and `merge_base` (7 characters) are
+  `null`, with no files, for a repository with no commit or none of those. A given `base` must be a
+  plain branch name (letters, digits and `._/+@-`, no leading `-`, no `..`, at most 200 characters)
+  or the call is `forbidden`; one that is not a branch or has no common history is `failed` (`no
+  such branch`, `no common history with that branch`). `status` is `M`, `A`, `D`, `R`, `U` or `?`
+  (untracked); `from` is a rename's old path; `added` and `removed` are `null` for a binary file or
+  an untracked one over 2 MB (untracked files are counted by reading them, at most 8 MB in all).
+  Files are sorted by path, cut at 2,000 (`truncated`); `added`, `removed`, `file_count` and
+  `uncommitted_files` count every file, cut or not. Renames are found (`-M`), so a renamed file is
+  one `R` row.
+- `git.branch_diff_file` is that file's patch against the merge base, with the `git.diff` limits
+  (400 lines or 128 KB, `truncated`; an untracked file's patch is the whole file as added lines). A
+  rename needs `from` (the row's old path) to show as a rename; without it the file shows as new.
+  `base` is required and checked as above; `path` and `from` follow `git.diff`'s rules, and a
+  `path` with no change against the base (and not untracked) is `forbidden` (`not a changed
+  file`).
+- `git.branches` lists the local branches (newest commit first, at most 200, `truncated`), the one
+  checked out (`current`), `remote_default` (`origin/HEAD`'s target, only if it resolves) and
+  `default`, the base the stat uses without a `base` (`remote_default`, else `main`, else
+  `master`, only among the local branches).
 - `changes` is cut at 500 files and `truncated` says so. `diff.text` is cut at 400 lines or
   128 KB (a single line is cut on a character boundary), and an untracked file over 2 MB gives
   an empty `text` with `truncated: true`. An untracked file's diff is the whole file as added
@@ -331,7 +359,9 @@ failure still is.
   driver `git config -z --get-regexp '^filter\.'` names (a read that runs nothing), `-c
   filter.<name>.clean=`, `smudge=`, `process=` and `required=false`. Then `status
   --porcelain=v2 --branch -z --untracked-files=all --ignore-submodules=all`, then `diff
-  --numstat -z HEAD` (or `--cached` with no commit); a diff is `diff --no-color --no-ext-diff
+  --numstat -z HEAD` (or `--cached` with no commit); the branch ops add `merge-base`, `symbolic-ref
+  --quiet --short refs/remotes/origin/HEAD`, `for-each-ref`, `rev-parse --verify` and `diff
+  --name-status|--numstat -z -M <merge base> --`, all of them reads; a diff is `diff --no-color --no-ext-diff
   --no-textconv --ignore-submodules=all HEAD -- :(literal)<path>`. Each command has a 3 s
   timeout, `LC_ALL=C`, `GIT_TERMINAL_PROMPT=0`, `GIT_PAGER=cat`, and every other `GIT_*`
   variable of the daemon's environment is cleared. The launcher stops a command that writes

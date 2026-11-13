@@ -9,6 +9,6 @@ pub const VIEWS: [ViewSpec; 2] = [
     ViewSpec {
         name: "chat-git",
         size: (1240.0, 780.0),
-        about: "Chat over the fixture with made-up git data in the Details Panel (NOTCHLING_RENDER_GIT_DIFF=1 opens a file's diff in the file panel)",
+        about: "Chat over the fixture with made-up git data in the Details Panel (NOTCHLING_RENDER_GIT_DIFF=1 opens a file's diff in the file panel, NOTCHLING_RENDER_CHANGES=1|expanded|menu opens the Changes panel)",
     },
 ];

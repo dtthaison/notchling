@@ -137,6 +137,10 @@ impl State {
     pub fn shown_width(&self) -> f32 {
         self.drawn_width.get()
     }
+
+    pub(super) fn set_shown_width(&self, width: f32) {
+        self.drawn_width.set(width);
+    }
 }
 
 fn shown(opens: Opens) -> Shown {
@@ -343,6 +347,18 @@ impl ChatView {
         );
         cx.notify();
     }
+}
+
+pub(super) fn resize_edge() -> gpui::Stateful<gpui::Div> {
+    div()
+        .id("page-panel-edge")
+        .absolute()
+        .top_0()
+        .bottom_0()
+        .left(px(-8.0))
+        .w(px(9.0))
+        .cursor(CursorStyle::ResizeLeftRight)
+        .on_drag(PanelEdge, |_, _, _, cx| cx.new(|_| EmptyView))
 }
 
 pub fn follows_edge<E: InteractiveElement>(element: E, cx: &mut Context<ChatView>) -> E {
@@ -622,16 +638,6 @@ pub fn render(
         (None, None) => web_page(view, shown, a),
     };
 
-    let edge = div()
-        .id("page-panel-edge")
-        .absolute()
-        .top_0()
-        .bottom_0()
-        .left(px(-8.0))
-        .w(px(9.0))
-        .cursor(CursorStyle::ResizeLeftRight)
-        .on_drag(PanelEdge, |_, _, _, cx| cx.new(|_| EmptyView));
-
     Some(
         div()
             .relative()
@@ -646,7 +652,7 @@ pub fn render(
             .child(header)
             .child(div().h(px(1.0)).flex_shrink_0().fill(Ink::Hairline, a))
             .child(page)
-            .child(edge)
+            .child(resize_edge())
             .window_region(a, cx)
             .part_at(
                 if is_file { "File Panel" } else { "Page Panel" },

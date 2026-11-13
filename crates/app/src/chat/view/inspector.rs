@@ -16,6 +16,7 @@ use notchling_kit::{Appearance, Icon, Ink, Status, TypeRole};
 
 use super::paged_rows::{more_row, subagent_row, More};
 use super::{repo_section, ChatView};
+use crate::chat::branch::Summary;
 use crate::chat::format::short_path;
 use crate::chat::git::GitModel;
 use crate::chat::inspector::{
@@ -54,6 +55,7 @@ pub struct DetailsModel {
     pub i: Inspector,
     pub folder: Option<(String, String)>,
     pub git: Option<Arc<GitModel>>,
+    pub changes: Option<Summary>,
 }
 
 fn model_of(
@@ -69,6 +71,7 @@ fn model_of(
         i: inspector_listed(conversation, subagents, subagent_counts, shells, writers),
         folder,
         git,
+        changes: None,
     }
 }
 
@@ -77,7 +80,7 @@ pub(super) fn model(view: &ChatView, _: &App) -> DetailsModel {
         let full = s.agent.cwd.clone();
         (short_path(&full, &view.root.home), full)
     });
-    model_of(
+    let mut model = model_of(
         &view.conversation,
         &view.subagent_rows,
         view.subagent_counts,
@@ -85,7 +88,9 @@ pub(super) fn model(view: &ChatView, _: &App) -> DetailsModel {
         &|p: &str| view.shell_probe.writers(p),
         folder,
         view.git_for_details(),
-    )
+    );
+    model.changes = view.changes_summary();
+    model
 }
 
 pub fn render(m: &DetailsModel, a: Appearance, cx: &mut Context<ChatView>) -> AnyElement {
@@ -95,6 +100,7 @@ pub fn render(m: &DetailsModel, a: Appearance, cx: &mut Context<ChatView>) -> An
         a,
         chat: cx.entity().downgrade(),
         git: m.git.clone(),
+        changes: m.changes.clone(),
     }
     .into_any_element()
 }
@@ -106,6 +112,7 @@ struct Panel {
     a: Appearance,
     chat: WeakEntity<ChatView>,
     git: Option<Arc<GitModel>>,
+    changes: Option<Summary>,
 }
 
 impl RenderOnce for Panel {
@@ -194,7 +201,7 @@ impl RenderOnce for Panel {
                 "Git",
                 "Git Changes",
                 git.title(),
-                repo_section::content(git, &self.chat, a),
+                repo_section::content(git, self.changes.as_ref(), &self.chat, a),
             ));
         }
         let mut column = div()

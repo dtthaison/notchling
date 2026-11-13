@@ -20,6 +20,23 @@ pub fn clean_path(path: &str) -> Result<String, &'static str> {
     Ok(path.to_owned())
 }
 
+pub fn clean_ref(name: &str) -> Result<&str, &'static str> {
+    if name.is_empty() {
+        return Err("branch is empty");
+    }
+    if name.len() > 200 {
+        return Err("branch is too long");
+    }
+    if name.starts_with(['-', '/']) || name.ends_with(['/', '.']) || name.contains("..") {
+        return Err("not a branch name");
+    }
+    let plain = |c: char| c.is_ascii_alphanumeric() || "._/+@-".contains(c);
+    if !name.chars().all(plain) {
+        return Err("not a branch name");
+    }
+    Ok(name)
+}
+
 pub fn allowed_folder(cwd: &Path, known: &[PathBuf]) -> Option<PathBuf> {
     if !cwd.is_absolute() || cwd.components().any(|c| c == Component::ParentDir) {
         return None;

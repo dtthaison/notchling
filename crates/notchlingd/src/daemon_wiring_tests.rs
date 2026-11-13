@@ -92,6 +92,9 @@ fn the_server_serves_every_area_and_the_vault_skill_is_offered_to_install() {
         ops::INSTALL_PLAN,
         ops::GIT_STATUS,
         ops::GIT_DIFF,
+        ops::GIT_BRANCH_DIFF_STAT,
+        ops::GIT_BRANCH_DIFF_FILE,
+        ops::GIT_BRANCHES,
     ] {
         assert!(ops.spec(op).is_some(), "{op}");
     }
@@ -101,6 +104,13 @@ fn the_server_serves_every_area_and_the_vault_skill_is_offered_to_install() {
     }
     assert_eq!(ops.spec(ops::GIT_STATUS), Some(OpSpec::APP_QUIET));
     assert_eq!(ops.spec(ops::GIT_DIFF), Some(OpSpec::APP_QUIET));
+    for op in [
+        ops::GIT_BRANCH_DIFF_STAT,
+        ops::GIT_BRANCH_DIFF_FILE,
+        ops::GIT_BRANCHES,
+    ] {
+        assert_eq!(ops.spec(op), Some(OpSpec::APP_QUIET), "{op}");
+    }
     assert_eq!(w.switches.vault.name(), VAULT);
     let plan = ops
         .call(

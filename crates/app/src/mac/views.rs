@@ -39,6 +39,9 @@ pub fn build(
                         let diff =
                             std::env::var_os("NOTCHLING_RENDER_GIT_DIFF").is_some_and(|v| v == "1");
                         view.preview_git(diff, cx);
+                        if let Ok(how) = std::env::var("NOTCHLING_RENDER_CHANGES") {
+                            view.preview_changes(&how, cx);
+                        }
                     }
                     view
                 })
