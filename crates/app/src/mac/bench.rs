@@ -34,6 +34,7 @@ pub enum Mode {
     Terminal,
     Reload,
     Menu,
+    Sending,
     Trace(Scenario),
 }
 
@@ -49,6 +50,7 @@ impl Mode {
             "terminal" => Mode::Terminal,
             "reload" => Mode::Reload,
             "menu" => Mode::Menu,
+            "sending" => Mode::Sending,
             _ => return Scenario::parse(name).map(Mode::Trace),
         })
     }
@@ -64,13 +66,14 @@ impl Mode {
             Mode::Terminal => "terminal",
             Mode::Reload => "reload",
             Mode::Menu => "menu",
+            Mode::Sending => "sending",
             Mode::Trace(scenario) => scenario.name(),
         }
     }
 
     fn rate(self) -> Option<u32> {
         match self {
-            Mode::Idle | Mode::ScrollFade => None,
+            Mode::Idle | Mode::ScrollFade | Mode::Sending => None,
             Mode::Scroll | Mode::Trace(_) => Some(60),
             Mode::Hover | Mode::Select | Mode::Terminal => Some(30),
             Mode::Typing => Some(10),
@@ -126,7 +129,7 @@ fn step(mode: Mode, n: u64, target: &mut Target, cx: &mut AsyncApp) {
     let middle = bench_point(target.size);
     let (top, span) = lane(target.size);
     match mode {
-        Mode::Idle | Mode::ScrollFade => {}
+        Mode::Idle | Mode::ScrollFade | Mode::Sending => {}
         Mode::Scroll => {
             let dy = if (n / WHEEL_RUN).is_multiple_of(2) {
                 WHEEL_STEP
@@ -201,6 +204,16 @@ async fn prepare(mode: Mode, target: &mut Target, cx: &mut AsyncApp) {
             }
         }
         Mode::Terminal => target.chat(cx, |chat, cx| chat.bench_terminal_start(cx)),
+        Mode::Sending => {
+            let until = Instant::now() + Duration::from_secs(5);
+            let mut sending = false;
+            while !sending && Instant::now() < until {
+                target.chat(cx, |chat, cx| sending = chat.bench_sending(cx));
+                if !sending {
+                    cx.background_executor().timer(FORCED_EVERY).await;
+                }
+            }
+        }
         _ => {}
     }
     cx.background_executor().timer(WARM_UP).await;
@@ -376,6 +389,7 @@ mod tests {
             Mode::Terminal,
             Mode::Reload,
             Mode::Menu,
+            Mode::Sending,
         ]
         .into_iter()
         .chain(Scenario::ALL.map(Mode::Trace));

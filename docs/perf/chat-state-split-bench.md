@@ -416,3 +416,30 @@ that gets no display-link frames draws almost nothing, with either spinner). Und
 test's lower bound was 8 and failed once at 6, so it is 5 to 16, and each part may draw twice. Every
 bench test that failed in the full run passed alone. The count test is the evidence that matters:
 the GPUI spinner asks for about 100 draws in 10 s, the native one at most the clock's 10 or 11.
+
+## The sending spinner
+
+While a message is on its way (`tools.sending`, an idle session with an empty reply box), the send
+button shows a spinner. It was a GPUI spinner view of the root, so its ten steps a second drew the
+whole window: header, Tasks bar, panels and reply box. It is now a slot of the root's spinner host
+(`send-spin` in `ROOT_SPINNERS`), painted by Core Animation like the Activity Line's, or by the
+`SpinLayer` while an overlay covers the window. The slot is painted outside the disabled button, so
+the button's 0.4 opacity is in its color instead (`composer::sending_spinner`).
+
+`bench_sending_requests_few_frames` (mode `sending`: the bench selects an idle session and holds
+`tools.sending`, 10 s, release, the window's own frames, 2026-11-13). Before is the same mode on the
+commit before the change:
+
+| | frames | root draws | conversation / sidebar / details | native rings | cpu ms |
+| --- | --- | --- | --- | --- | --- |
+| GPUI spinner (before) | 101 | 101 | 1 / 1 / 1 | 0 | 219 |
+| Core Animation spinner (after, 3 runs) | 0 to 1 | 0 to 1 | 0 to 1 | 1 | 52 to 72 |
+
+An idle session has no Activity Line, so no clock draws either: nothing asks for a frame. Every other
+mode's counts are unchanged (the full `bench_chat` run before and after: `typing` 98 and 98 root
+draws, `terminal` 290 and 290, `idle` with a working session 10 and 10).
+
+Pixels: `--render chat` with `NOTCHLING_RENDER_SENDING=1`, dark and light, before and after, differ
+only inside the spinner's box (its turn), and the ring's darkest pixel matches the faded GPUI one
+(87,83,79 against 87,83,78 dark; 195,193,189 against 196,193,189 light). Under the + menu and the
+model picker (the layer paints it) the same holds.

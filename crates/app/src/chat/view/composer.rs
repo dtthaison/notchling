@@ -4,10 +4,10 @@ use gpui::{
 };
 use notchling_kit::labels::Corner;
 use notchling_kit::metric::{CONTROL, RADIUS_COMPOSER, RADIUS_SM, SIDE_PADDING, SPINNER_MINI};
-use notchling_kit::part::{ButtonKind, PartState};
+use notchling_kit::part::{button_look, ButtonKind, PartState};
 use notchling_kit::typescale::sentence;
 use notchling_kit::ui::{
-    button_with, card as kit_card, hsla, icon, label, spinner as kit_spinner, KitPart, KitStyled,
+    button_with, card as kit_card, hsla, icon, label, spinner_in, KitPart, KitStyled,
 };
 use notchling_kit::{Appearance, Icon, IconSize, Ink, TypeRole};
 
@@ -399,6 +399,12 @@ impl ChatView {
     }
 }
 
+fn sending_spinner(a: Appearance) -> Div {
+    let ink = Ink::TextMuted.color(a);
+    let faded = button_look(ButtonKind::Ghost, PartState::Disabled, a).opacity;
+    spinner_in("send-spin", SPINNER_MINI, ink.with_alpha(ink.a * faded))
+}
+
 fn action_button(
     action: Action,
     enabled: bool,
@@ -425,7 +431,7 @@ fn action_button(
         ),
         Action::Sending => (
             "sending",
-            kit_spinner("send-spin", SPINNER_MINI, Ink::TextMuted, a).into_any_element(),
+            sending_spinner(a).into_any_element(),
             PartState::Disabled,
             "Send Button",
         ),

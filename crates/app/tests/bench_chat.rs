@@ -255,6 +255,24 @@ fn bench_idle_working_requests_few_frames() {
 
 #[test]
 #[ignore = "opens a window; a Mac with a display"]
+fn bench_sending_requests_few_frames() {
+    let root = TempRoot::new(TURNS);
+    let result = run("sending", 10, &root, |_| {});
+    assert_eq!(result["mode"], "sending");
+    let rings = count(&result, "native_rings");
+    assert!(rings >= 1, "the sending spinner isn't native: {result}");
+    let roots = count(&result, "root");
+    assert!(
+        roots <= 16,
+        "at most the clock's redraws, not a spinner's ten: {result}"
+    );
+    for part in ["conversation", "sidebar", "details"] {
+        assert!(count(&result, part) <= 2, "{part}: {result}");
+    }
+}
+
+#[test]
+#[ignore = "opens a window; a Mac with a display"]
 fn bench_terminal_draws_no_part() {
     let result = bench_for("terminal", 3);
     assert_eq!(count(&result, "conversation"), 0, "{result}");
