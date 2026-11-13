@@ -56,7 +56,18 @@ class ConversationList extends StatelessWidget {
     final List<ChatEntry> newestFirst = entries.reversed.toList(
       growable: false,
     );
+    // Every row is keyed and found again by key: in this reversed list a new message, or the working line coming and
+    // going, lands at index 0 and shifts every row, and without the lookup each visible message was built from
+    // scratch (state, parsed markdown and all) on every step of a running session.
+    final int offset = working ? 1 : 0;
+    final Map<String, int> positions = <String, int>{
+      if (working) 'working': 0,
+      for (int i = 0; i < waiting.length; i++) 'pending:${waiting[i].id}': offset + i,
+      for (int i = 0; i < newestFirst.length; i++) 'entry:${newestFirst[i].id}': offset + waiting.length + i,
+      if (hasMore) 'older': offset + waiting.length + newestFirst.length,
+    };
     return ListView.builder(
+      findChildIndexCallback: (Key key) => key is ValueKey<String> ? positions[key.value] : null,
       controller: controller,
       reverse: true,
       padding: EdgeInsets.fromLTRB(
@@ -68,12 +79,17 @@ class ConversationList extends StatelessWidget {
       itemCount: (working ? 1 : 0) + waiting.length + newestFirst.length + (hasMore ? 1 : 0),
       itemBuilder: (BuildContext context, int rawPosition) {
         if (working && rawPosition == 0) {
-          return Padding(padding: const EdgeInsets.only(bottom: Space.md), child: WorkingIndicator(activity: activity));
+          return Padding(
+            key: const ValueKey<String>('working'),
+            padding: const EdgeInsets.only(bottom: Space.md),
+            child: WorkingIndicator(activity: activity),
+          );
         }
         final int position = rawPosition - (working ? 1 : 0);
         if (position < waiting.length) {
           final PendingSend entry = waiting[position];
           return Padding(
+            key: ValueKey<String>('pending:${entry.id}'),
             padding: const EdgeInsets.only(bottom: Space.md),
             child: PendingBubble(
               key: ValueKey<String>(entry.id),
@@ -88,6 +104,7 @@ class ConversationList extends StatelessWidget {
         final int index = position - waiting.length;
         if (index == newestFirst.length) {
           return Padding(
+            key: const ValueKey<String>('older'),
             padding: const EdgeInsets.only(bottom: Space.md),
             child: Center(
               child: loadingOlder
@@ -106,6 +123,7 @@ class ConversationList extends StatelessWidget {
         final ChatEntry entry = newestFirst[index];
         final ChatEntry? newer = index > 0 ? newestFirst[index - 1] : null;
         return Padding(
+          key: ValueKey<String>('entry:${entry.id}'),
           padding: entryGap(entry, newer),
           child: RepaintBoundary(
             child: ChatEntryView(

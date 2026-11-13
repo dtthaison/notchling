@@ -175,6 +175,39 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
+    testWidgets('a new message or the working line keeps the rows already shown (same state, no rebuild from scratch)', (WidgetTester tester) async {
+      ChatMessage message(String id, String text) =>
+          ChatMessage(id: id, role: ChatRole.assistant, text: text, time: DateTime(2026, 11, 13));
+      Widget list(List<ChatMessage> messages, {bool working = false}) => host(
+            SizedBox(
+              height: 1200,
+              child: ConversationList(
+                sessionId: 's1',
+                entries: groupEntries(messages),
+                pending: const <PendingSend>[],
+                hasMore: false,
+                loadingOlder: false,
+                onLoadOlder: () {},
+                onRetry: (String _) {},
+                onDiscard: (String _) {},
+                working: working,
+              ),
+            ),
+          );
+      final List<ChatMessage> first = <ChatMessage>[message('a', 'Câu **một**'), message('b', 'Câu **hai**')];
+      await tester.pumpWidget(list(first));
+      await tester.pump(const Duration(milliseconds: 400));
+      State<StatefulWidget> stateOf(String text) =>
+          tester.state(find.ancestor(of: find.textContaining(text, findRichText: true), matching: find.byType(MarkdownText)).first);
+      final State<StatefulWidget> before = stateOf('một');
+
+      await tester.pumpWidget(list(<ChatMessage>[...first, message('c', 'Câu ba')], working: true));
+      await tester.pump(const Duration(milliseconds: 400));
+
+      expect(identical(stateOf('một'), before), isTrue);
+      expect(tester.takeException(), isNull);
+    });
+
     testWidgets('a tool group is closed until tapped', (WidgetTester tester) async {
       final ToolGroupEntry group = groupEntries(previewConversation()).whereType<ToolGroupEntry>().first;
       await tester.pumpWidget(host(ToolGroupView(entry: group)));
