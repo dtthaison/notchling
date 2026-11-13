@@ -42,7 +42,7 @@ impl ChatView {
     pub(super) fn preview_inbox(&mut self, cx: &mut Context<Self>) {
         let feed = Arc::new(InboxFeed::fixed(model()));
         self.inbox = feed.clone();
-        self.inbox_panel = Some(cx.new(|_| InboxPanelView::fixed(feed, NOW_MS)));
+        self.inbox_panel = Some(cx.new(|_| InboxPanelView::fixed(feed, NOW_MS, false)));
     }
 }
 

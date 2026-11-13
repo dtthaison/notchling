@@ -101,7 +101,6 @@ pub enum Icon {
     Unsure,
     /// The Secret Vault (SF `key`).
     Key,
-    /// The inbox (SF `bell`).
     Bell,
     /// Handing sessions over to Notchling (SF `arrow.left.arrow.right`).
     Handover,

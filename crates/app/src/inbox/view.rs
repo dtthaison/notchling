@@ -59,11 +59,11 @@ impl InboxPanelView {
         view
     }
 
-    pub fn fixed(feed: Arc<InboxFeed>, now_ms: i64) -> InboxPanelView {
+    pub fn fixed(feed: Arc<InboxFeed>, now_ms: i64, done_open: bool) -> InboxPanelView {
         InboxPanelView {
             feed,
             fixed_now: Some(now_ms),
-            done_open: true,
+            done_open,
             sent_seen: HashSet::new(),
             busy: HashSet::new(),
             note: None,
@@ -77,6 +77,7 @@ impl InboxPanelView {
             cx.notify();
         }
         if changed {
+            self.note = None;
             self.send_seen(cx);
         }
     }
@@ -94,13 +95,20 @@ impl InboxPanelView {
         }
         self.sent_seen.extend(ids.iter().cloned());
         let feed = self.feed.clone();
-        cx.spawn(async move |_, cx| {
+        cx.spawn(async move |this, cx| {
+            let sent_ids = ids.clone();
             let sent = cx
                 .background_executor()
-                .spawn(async move { feed.seen(&ids) })
+                .spawn(async move { feed.seen(&sent_ids) })
                 .await;
             if let Err(e) = sent {
                 eprintln!("inbox: marking rows seen wasn't sent ({e})");
+                this.update(cx, |view, _| {
+                    for id in &ids {
+                        view.sent_seen.remove(id);
+                    }
+                })
+                .ok();
             }
         })
         .detach();
@@ -273,6 +281,7 @@ impl Render for InboxPanelView {
         let mut list = div()
             .id("inbox-list")
             .min_h(px(0.0))
+            .pb(px(SPACE[1]))
             .overflow_y_scroll()
             .flex()
             .flex_col();
@@ -338,10 +347,8 @@ impl Render for InboxRender {
 }
 
 pub fn build_render(name: &str, cx: &mut gpui::App) -> Option<AnyView> {
-    if !shown(name) {
-        return None;
-    }
+    let done_open = shown(name)?;
     let feed = Arc::new(InboxFeed::fixed(model()));
-    let panel = cx.new(|_| InboxPanelView::fixed(feed, NOW_MS));
+    let panel = cx.new(|_| InboxPanelView::fixed(feed, NOW_MS, done_open));
     Some(cx.new(|_| InboxRender { panel }).into())
 }

@@ -48,17 +48,20 @@ fn take_raised() -> Vec<String> {
 }
 
 fn bring_forward(cx: &mut App, open: &Open, tickets: &[String]) {
-    let mut any = false;
+    let waiting = tickets
+        .iter()
+        .any(|t| open.approvals.contains_key(t) || open.requests.contains_key(t));
+    if !waiting {
+        return;
+    }
+    cx.activate(true);
     for ticket in tickets {
         if let Some(handle) = open.approvals.get(ticket) {
-            any |= handle.update(cx, |_, w, _| w.activate_window()).is_ok();
+            handle.update(cx, |_, w, _| w.activate_window()).ok();
         }
         if let Some(handle) = open.requests.get(ticket) {
-            any |= handle.update(cx, |_, w, _| w.activate_window()).is_ok();
+            handle.update(cx, |_, w, _| w.activate_window()).ok();
         }
-    }
-    if any {
-        cx.activate(true);
     }
 }
 

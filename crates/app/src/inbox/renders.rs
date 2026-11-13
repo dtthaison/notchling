@@ -6,14 +6,25 @@ use crate::views::ViewSpec;
 
 pub const NOW_MS: i64 = 1_794_096_000_000;
 
-pub const VIEWS: [ViewSpec; 1] = [ViewSpec {
-    name: "inbox-panel",
-    size: (WIDTH + 32.0, 680.0),
-    about: "the Inbox panel: three things that need you, two done (made-up data)",
-}];
+pub const VIEWS: [ViewSpec; 2] = [
+    ViewSpec {
+        name: "inbox-panel",
+        size: (WIDTH + 32.0, 460.0),
+        about: "the Inbox panel: three things that need you, Done folded (made-up data)",
+    },
+    ViewSpec {
+        name: "inbox-panel-done",
+        size: (WIDTH + 32.0, 680.0),
+        about: "the Inbox panel with Done open: two rows closed (made-up data)",
+    },
+];
 
-pub fn shown(name: &str) -> bool {
-    name == "inbox-panel"
+pub fn shown(name: &str) -> Option<bool> {
+    match name {
+        "inbox-panel" => Some(false),
+        "inbox-panel-done" => Some(true),
+        _ => None,
+    }
 }
 
 struct Fixture {
