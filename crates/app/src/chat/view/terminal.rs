@@ -312,6 +312,35 @@ impl ChatView {
         cx.notify();
     }
 
+    /// Run on a code block whose command asks for input: a tab on the user's login shell
+    /// (`zsh -ilc`, so their PATH and aliases are there) running `command` in the session's folder.
+    /// The user types the secret or password there; it never goes into the conversation.
+    pub(super) fn open_command_terminal(&mut self, command: &str, cx: &mut Context<Self>) {
+        let home = self.root.home.clone();
+        let cwd = self
+            .selected_session()
+            .map(|s| s.agent.cwd.clone())
+            .unwrap_or_default();
+        match start_program("/bin/zsh", &["-ilc", command], &[], &cwd, &home, cx) {
+            Ok(mut shell) => {
+                shell.name = command.trim().to_owned();
+                if self.page.is_open() {
+                    self.close_page(cx);
+                }
+                if self.simulator.shown() {
+                    self.toggle_simulator(cx);
+                }
+                self.terminal.tabs.add(shell);
+                self.terminal.open = true;
+                self.terminal.focus_next = true;
+                self.tools.error = None;
+                self.tick_terminals(cx);
+            }
+            Err(message) => self.tools.error = Some(message),
+        }
+        cx.notify();
+    }
+
     /// The keyboard to the active tab, when a call without a window asked for it.
     pub(super) fn take_terminal_focus(&mut self, window: &mut Window) {
         if std::mem::take(&mut self.terminal.focus_next) {

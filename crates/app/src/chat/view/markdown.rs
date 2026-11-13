@@ -5,18 +5,22 @@
 use std::cell::Cell;
 
 use gpui::{
-    div, font, img, prelude::*, px, AnyElement, ClipboardItem, Div, FontStyle, FontWeight,
+    div, font, img, prelude::*, px, AnyElement, App, ClipboardItem, Div, FontStyle, FontWeight,
     InteractiveText, MouseButton, ObjectFit, SharedString, StrikethroughStyle, StyledText,
     TextLayout, TextRun, UnderlineStyle,
 };
 use notchling_kit::metric::RADIUS_MD;
 use notchling_kit::part::{ButtonKind, PartState};
-use notchling_kit::ui::{button_with, hsla, icon, label, KitStyled, MONO_FONT, SYSTEM_FONT};
+use notchling_kit::ui::{
+    button_with, hsla, icon, label, KitPart, KitStyled, MONO_FONT, SYSTEM_FONT,
+};
 use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 
 use super::row_select::{self, SelState};
 use crate::chat::markdown::{LinkPress, Span};
 use crate::chat::markdown_cache::{spans_text, Inline, Item, Part};
+use crate::chat::run_command::{self, RunHow};
+use crate::mac::gate;
 
 /// Body lines get a little air, as the Swift app's `lineSpacing(3)`.
 const BODY_LINE: f32 = 20.0;
@@ -32,11 +36,18 @@ pub enum Sel<'a> {
         /// The block number the next selectable text takes.
         next: &'a Cell<u16>,
         state: &'a SelState,
+        /// Code blocks that are a shell command offer Run (the session takes a `!` message).
+        run: bool,
     },
     File,
 }
 
 impl Sel<'_> {
+    /// Whether a code block that is a shell command shows Run.
+    fn runs(&self) -> bool {
+        matches!(self, Sel::Row { run: true, .. })
+    }
+
     /// The row's key (its item's id for a row of items), which names its groups and buttons.
     pub fn id(&self) -> &str {
         match self {
@@ -57,7 +68,9 @@ fn selectable(
     a: Appearance,
 ) -> AnyElement {
     match sel {
-        Sel::Row { row, next, state } => {
+        Sel::Row {
+            row, next, state, ..
+        } => {
             let block = next.get();
             next.set(block.saturating_add(1));
             row_select::selectable((*row).clone(), block, text, layout, child, a, state)
@@ -199,25 +212,44 @@ fn run(span: &Span, weight: FontWeight, ink: Ink, a: Appearance) -> TextRun {
     }
 }
 
-/// Copies `text`; the small ghost button on code boxes.
-pub fn copy_button(key: &str, text: &str, a: Appearance) -> impl IntoElement {
-    let text = text.to_owned();
-    // The Swift app's `CopyButton`: the copy icon (10 pt) and the word, 4 apart, in the ghost
-    // button's text ink.
+/// A small ghost button on a code box: an icon and a word, 4 apart, in the ghost button's text
+/// ink (the Swift app's `CopyButton`).
+fn box_button(id: String, glyph: Icon, word: &str, a: Appearance) -> gpui::Stateful<Div> {
     let content = div()
         .flex()
         .items_center()
         .gap(px(4.0))
-        .child(icon(Icon::Copy, 10.0, Ink::Text, a))
-        .child("Copy");
+        .child(icon(glyph, 10.0, Ink::Text, a))
+        .child(word.to_owned());
     button_with(
-        SharedString::from(format!("copy-{key}")),
+        SharedString::from(id),
         content,
         ButtonKind::Ghost,
         PartState::Rest,
         a,
     )
-    .on_click(move |_, _, cx| cx.write_to_clipboard(ClipboardItem::new_string(text.clone())))
+}
+
+/// Copies `text`; the small ghost button on code boxes.
+pub fn copy_button(key: &str, text: &str, a: Appearance) -> impl IntoElement {
+    let text = text.to_owned();
+    box_button(format!("copy-{key}"), Icon::Copy, "Copy", a)
+        .on_click(move |_, _, cx| cx.write_to_clipboard(ClipboardItem::new_string(text.clone())))
+}
+
+/// Runs `command`, before Copy on a code block that is one: a `!` message to the session, or, when
+/// it asks for input, Chat's terminal (`run_command::how`).
+fn run_button(key: &str, command: String, a: Appearance, cx: &App) -> impl IntoElement {
+    let how = run_command::how(&command);
+    let button = box_button(format!("run-{key}"), Icon::Terminal, "Run", a)
+        .on_click(move |_, window, cx| super::page_panel::run_in_chat(&command, how, window, cx));
+    let button = match how {
+        RunHow::Terminal => {
+            gate::tip_text(button, "Runs in a terminal (it asks for input)".into(), a)
+        }
+        RunHow::Send => button,
+    };
+    button.part("Run Button", a, cx)
 }
 
 /// Monospaced text in a box with a title row (`MonoBox`): "Command", "Output", or a code block's
@@ -391,12 +423,16 @@ fn quote(key: &str, sel: &Sel, text: &Inline, a: Appearance) -> Div {
         )
 }
 
-fn code(key: &str, sel: &Sel, language: &str, text: &str, a: Appearance) -> Div {
+fn code(key: &str, sel: &Sel, language: &str, text: &str, a: Appearance, cx: &App) -> Div {
     let title = if language.is_empty() {
         "code"
     } else {
         language
     };
+    let run = sel
+        .runs()
+        .then(|| run_command::command(language, text))
+        .flatten();
     div()
         .w_full()
         .rounded(px(RADIUS_MD))
@@ -417,6 +453,7 @@ fn code(key: &str, sel: &Sel, language: &str, text: &str, a: Appearance) -> Div 
                 .border_color(hsla(Ink::Hairline.color(a)))
                 .child(label(title, TypeRole::Meta, Ink::TextMuted, a))
                 .child(div().flex_1())
+                .children(run.map(|command| run_button(key, command, a, cx)))
                 .child(copy_button(key, text, a)),
         )
         .child(
@@ -501,7 +538,7 @@ fn table(
 /// The message as blocks, 10 pt apart. `key` makes the ids unique (the item's id); `message` is
 /// the text prepared by `ChatView`'s `markdown_cache`, its paths read against the folders the
 /// text names, then the session's (or the file's own) folder.
-pub fn render(key: &str, sel: &Sel, message: &[Part], a: Appearance) -> Div {
+pub fn render(key: &str, sel: &Sel, message: &[Part], a: Appearance, cx: &App) -> Div {
     let mut column = div().w_full().flex().flex_col().gap(px(10.0));
     for (i, part) in message.iter().enumerate() {
         let k = format!("{key}-{i}");
@@ -510,7 +547,7 @@ pub fn render(key: &str, sel: &Sel, message: &[Part], a: Appearance) -> Div {
             Part::Paragraph(text) => paragraph(&k, sel, text, Ink::Text, a),
             Part::List(items) => list(&k, sel, items, a),
             Part::Quote(text) => quote(&k, sel, text, a),
-            Part::Code { language, text } => code(&k, sel, language, text, a),
+            Part::Code { language, text } => code(&k, sel, language, text, a, cx),
             Part::Table { header, rows } => table(&k, sel, header, rows, a),
             Part::Rule => div().h(px(1.0)).my(px(4.0)).fill(Ink::Hairline, a),
         });

@@ -80,6 +80,9 @@ const TICK: Duration = Duration::from_millis(500);
 
 /// Set to `1`, a render draws every step group, step and thought open.
 pub const EXPAND_ENV: &str = "NOTCHLING_RENDER_EXPAND";
+/// Set to `1`, a render offers Run on shell code blocks, as a session that takes replies does
+/// (a fixture root has no daemon, so acting is detached there).
+pub const RUN_ENV: &str = "NOTCHLING_RENDER_RUN";
 /// Set to `1`, a render draws the part names, as the ? button shows them.
 pub const PARTS_ENV: &str = "NOTCHLING_RENDER_PARTS";
 /// Set to `1`, a render draws the "Latest" pill, as if the conversation were scrolled up.
@@ -274,6 +277,7 @@ impl ChatView {
             v.s.expand_all = switch(EXPAND_ENV);
             v.s.latest_preview = switch(LATEST_ENV);
             v.s.actions_preview = switch(ACTIONS_ENV);
+            v.s.run_preview = switch(RUN_ENV);
         });
         view.tasks_open_preview = switch(TASKS_OPEN_ENV);
         view.drop_preview = switch(DROP_ENV);
