@@ -4,8 +4,8 @@ use notchling_engine::inbox::{self, ActionId, AnswerError, Book, Change, Item, S
 use notchling_local_api::{ops, topics, ApiError, Caller, ErrorCode, OpSpec, Tier};
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
-use std::sync::mpsc::{channel, RecvTimeoutError, Sender};
+use std::path::{Path, PathBuf};
+use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread::JoinHandle;
 use std::time::Duration;
@@ -19,12 +19,27 @@ pub trait Responder: Send + Sync {
 
 type Clock = Arc<dyn Fn() -> i64 + Send + Sync>;
 
+enum Msg {
+    Changes(Vec<Change>),
+    Flush(Sender<()>),
+}
+
 struct Inner {
     book: Book,
     responders: HashMap<String, Arc<dyn Responder>>,
+    writes: Option<Sender<Msg>>,
 }
 
 impl Inner {
+    fn send(&self, changes: Vec<Change>) {
+        if changes.is_empty() {
+            return;
+        }
+        if let Some(writes) = &self.writes {
+            let _ = writes.send(Msg::Changes(changes));
+        }
+    }
+
     fn forget(&mut self, changes: &[Change]) {
         for change in changes {
             match change {
@@ -41,12 +56,44 @@ impl Inner {
 }
 
 pub struct InboxOps {
-    data_dir: PathBuf,
-    room: Arc<dyn Room>,
     clock: Clock,
     inner: Mutex<Inner>,
     stop: Mutex<Option<Sender<()>>>,
     thread: Mutex<Option<JoinHandle<()>>>,
+    writer: Mutex<Option<JoinHandle<()>>>,
+}
+
+fn write_loop(reads: Receiver<Msg>, data_dir: PathBuf, room: Arc<dyn Room>) {
+    while let Ok(msg) = reads.recv() {
+        match msg {
+            Msg::Changes(changes) => {
+                for change in &changes {
+                    persist(&data_dir, change);
+                    publish(room.as_ref(), change);
+                }
+            }
+            Msg::Flush(ack) => {
+                let _ = ack.send(());
+            }
+        }
+    }
+}
+
+fn persist(data_dir: &Path, change: &Change) {
+    if let Err(why) = inbox::save(data_dir, change) {
+        eprintln!("notchling: saving the inbox failed ({why})");
+    }
+}
+
+fn publish(room: &dyn Room, change: &Change) {
+    match change {
+        Change::Raised(item) | Change::Updated(item) => {
+            room.publish(topics::INBOX, topics::INBOX_CHANGED, &json!({"item": item}));
+        }
+        Change::Removed(id) => {
+            room.publish(topics::INBOX, topics::INBOX_REMOVED, &json!({"id": id}));
+        }
+    }
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -76,31 +123,36 @@ impl InboxOps {
             eprintln!("notchling: reading the inbox failed ({why}); starting it empty");
             Book::new()
         });
-        let ops = InboxOps {
-            data_dir,
-            room,
-            clock,
-            inner: Mutex::new(Inner {
-                book,
-                responders: HashMap::new(),
-            }),
-            stop: Mutex::new(None),
-            thread: Mutex::new(None),
-        };
-        let withdrawn: Vec<Change> = lock(&ops.inner)
-            .book
+        let (writes, reads) = channel::<Msg>();
+        let writer = std::thread::Builder::new()
+            .name("notchling-inbox-writes".into())
+            .spawn(move || write_loop(reads, data_dir, room))
+            .ok();
+        let withdrawn: Vec<Change> = book
             .items()
             .into_iter()
             .filter(|item| item.state == State::Withdrawn && item.closed_ms == Some(now))
             .map(Change::Updated)
             .collect();
-        ops.persist(&withdrawn);
+        let inner = Inner {
+            book,
+            responders: HashMap::new(),
+            writes: Some(writes),
+        };
+        inner.send(withdrawn);
+        let ops = InboxOps {
+            clock,
+            inner: Mutex::new(inner),
+            stop: Mutex::new(None),
+            thread: Mutex::new(None),
+            writer: Mutex::new(writer),
+        };
         Arc::new(ops)
     }
 
     pub fn raise(&self, item: Item, responder: Option<Arc<dyn Responder>>) -> String {
         let id = item.id.clone();
-        let changes = {
+        {
             let mut inner = lock(&self.inner);
             let changes = inner.book.raise(item);
             let open = changes.iter().any(|change| match change {
@@ -113,47 +165,37 @@ impl InboxOps {
                 inner.responders.insert(id.clone(), responder);
             }
             inner.forget(&changes);
-            self.persist(&changes);
-            changes
-        };
-        self.publish(&changes);
+            inner.send(changes);
+        }
         id
     }
 
     pub fn resolve(&self, id: &str, state: State, answer: Option<ActionId>) {
         let now = (self.clock)();
-        let changes: Vec<Change> = {
-            let mut inner = lock(&self.inner);
-            let changes: Vec<Change> = inner
-                .book
-                .resolve(id, state, answer, now)
-                .into_iter()
-                .collect();
-            inner.responders.remove(id);
-            self.persist(&changes);
-            changes
-        };
-        self.publish(&changes);
+        let mut inner = lock(&self.inner);
+        let changes: Vec<Change> = inner
+            .book
+            .resolve(id, state, answer, now)
+            .into_iter()
+            .collect();
+        inner.responders.remove(id);
+        inner.send(changes);
     }
 
     pub fn tick(&self, now_ms: i64) {
-        let changes = {
-            let mut inner = lock(&self.inner);
-            let mut changes = inner.book.expire(now_ms);
-            let before: Vec<String> = inner.book.items().into_iter().map(|i| i.id).collect();
-            inner.book.prune(now_ms);
-            let after: HashSet<String> = inner.book.items().into_iter().map(|i| i.id).collect();
-            changes.extend(
-                before
-                    .into_iter()
-                    .filter(|id| !after.contains(id))
-                    .map(Change::Removed),
-            );
-            inner.forget(&changes);
-            self.persist(&changes);
-            changes
-        };
-        self.publish(&changes);
+        let mut inner = lock(&self.inner);
+        let mut changes = inner.book.expire(now_ms);
+        let before: Vec<String> = inner.book.items().into_iter().map(|i| i.id).collect();
+        inner.book.prune(now_ms);
+        let after: HashSet<String> = inner.book.items().into_iter().map(|i| i.id).collect();
+        changes.extend(
+            before
+                .into_iter()
+                .filter(|id| !after.contains(id))
+                .map(Change::Removed),
+        );
+        inner.forget(&changes);
+        inner.send(changes);
     }
 
     pub fn spawn_loop(self: &Arc<Self>) {
@@ -178,6 +220,17 @@ impl InboxOps {
             .ok();
     }
 
+    pub fn flush(&self) {
+        let (ack_tx, ack_rx) = channel::<()>();
+        let sent = match &lock(&self.inner).writes {
+            Some(writes) => writes.send(Msg::Flush(ack_tx)).is_ok(),
+            None => false,
+        };
+        if sent {
+            let _ = ack_rx.recv();
+        }
+    }
+
     pub fn close(&self) {
         let stop = lock(&self.stop).take();
         drop(stop);
@@ -185,28 +238,11 @@ impl InboxOps {
         if let Some(handle) = thread {
             let _ = handle.join();
         }
-    }
-
-    fn persist(&self, changes: &[Change]) {
-        for change in changes {
-            if let Err(why) = inbox::save(&self.data_dir, change) {
-                eprintln!("notchling: saving the inbox failed ({why})");
-            }
-        }
-    }
-
-    fn publish(&self, changes: &[Change]) {
-        for change in changes {
-            match change {
-                Change::Raised(item) | Change::Updated(item) => {
-                    self.room
-                        .publish(topics::INBOX, topics::INBOX_CHANGED, &json!({"item": item}));
-                }
-                Change::Removed(id) => {
-                    self.room
-                        .publish(topics::INBOX, topics::INBOX_REMOVED, &json!({"id": id}));
-                }
-            }
+        let writes = lock(&self.inner).writes.take();
+        drop(writes);
+        let writer = lock(&self.writer).take();
+        if let Some(handle) = writer {
+            let _ = handle.join();
         }
     }
 
@@ -223,14 +259,10 @@ impl InboxOps {
             .iter()
             .filter_map(|id| id.as_str().map(str::to_string))
             .collect();
-        let (changes, unread) = {
-            let mut inner = lock(&self.inner);
-            let changes = inner.book.mark_seen(&ids);
-            self.persist(&changes);
-            (changes, inner.book.unread())
-        };
-        self.publish(&changes);
-        Ok(json!({"unread": unread}))
+        let mut inner = lock(&self.inner);
+        let changes = inner.book.mark_seen(&ids);
+        inner.send(changes);
+        Ok(json!({"unread": inner.book.unread()}))
     }
 
     fn answer(&self, args: &Value) -> Result<Value, ApiError> {
@@ -246,7 +278,7 @@ impl InboxOps {
             let mut inner = lock(&self.inner);
             match inner.book.answer(id, action, ANSWERED_BY, now) {
                 Ok(change) => {
-                    self.persist(std::slice::from_ref(&change));
+                    inner.send(vec![change.clone()]);
                     (change, inner.responders.remove(id))
                 }
                 Err(AnswerError::NotOpen(state)) => {
@@ -268,7 +300,6 @@ impl InboxOps {
                 }
             }
         };
-        self.publish(std::slice::from_ref(&change));
         if let (Change::Updated(item), Some(responder)) = (&change, responder) {
             responder.answered(item, action);
         }

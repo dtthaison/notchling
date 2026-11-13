@@ -152,6 +152,7 @@ fn answer_calls_responder_once() {
         *calls.0.lock().unwrap(),
         vec![("a".to_string(), ActionId::Allow)]
     );
+    r.ops.flush();
     assert_eq!(
         changed(&r.room).last().unwrap()["item"]["state"],
         "answered"
@@ -201,6 +202,7 @@ fn answer_with_a_bad_item_or_action_is_an_error() {
 fn raise_publishes_changed() {
     let r = rig();
     r.ops.raise(item("a"), None);
+    r.ops.flush();
     let events = r.room.events.lock().unwrap().clone();
     assert_eq!(events.len(), 1);
     assert_eq!(events[0].0, "inbox.changed");
@@ -216,10 +218,12 @@ fn a_cap_victim_is_published_in_order() {
         i.created_ms = NOW + n as i64;
         r.ops.raise(i, None);
     }
+    r.ops.flush();
     let before = r.room.events.lock().unwrap().len();
     let mut extra = item("extra");
     extra.created_ms = NOW + 10_000;
     r.ops.raise(extra, None);
+    r.ops.flush();
     let events = r.room.events.lock().unwrap().clone();
     let tail = &events[before..];
     assert_eq!(tail.len(), 2);
@@ -235,6 +239,7 @@ fn resolve_closes_without_the_responder() {
     let calls = Arc::new(Calls::default());
     r.ops.raise(item("a"), Some(calls.clone()));
     r.ops.resolve("a", State::Answered, Some(ActionId::Allow));
+    r.ops.flush();
     let events = changed(&r.room);
     assert_eq!(events.last().unwrap()["item"]["state"], "answered");
     assert_eq!(events.last().unwrap()["item"]["answer"], "allow");
@@ -251,8 +256,10 @@ fn tick_expires_and_publishes() {
     i.expires_ms = Some(NOW + 1_000);
     r.ops.raise(i, Some(calls.clone()));
     r.ops.tick(NOW + 999);
+    r.ops.flush();
     assert_eq!(changed(&r.room).len(), 1);
     r.ops.tick(NOW + 1_000);
+    r.ops.flush();
     let events = changed(&r.room);
     assert_eq!(events.len(), 2);
     assert_eq!(events[1]["item"]["state"], "expired");
@@ -268,11 +275,14 @@ fn tick_prunes_old_closed_items_and_publishes_removed() {
     r.ops.raise(item("a"), None);
     r.ops.resolve("a", State::Answered, Some(ActionId::Allow));
     r.ops.tick(NOW + inbox::DONE_KEEP_MS);
+    r.ops.flush();
     assert!(r.room.named("inbox.removed").is_empty());
     r.ops.tick(NOW + inbox::DONE_KEEP_MS + 1);
+    r.ops.flush();
     assert_eq!(r.room.named("inbox.removed"), vec![json!({"id": "a"})]);
     let out = r.ops.call(&app(), ops::INBOX_LIST, &json!({})).unwrap();
     assert_eq!(out["items"], json!([]));
+    r.ops.flush();
     let stored = inbox::load(&r.dir, NOW + inbox::DONE_KEEP_MS + 2).unwrap();
     assert!(stored.items().is_empty());
 }
@@ -287,6 +297,7 @@ fn seen_marks_items_and_returns_unread() {
         .call(&app(), ops::INBOX_SEEN, &json!({"ids": ["a", "zzz"]}))
         .unwrap();
     assert_eq!(out["unread"], 1);
+    r.ops.flush();
     let events = changed(&r.room);
     assert_eq!(events.last().unwrap()["item"]["id"], "a");
     assert_eq!(events.last().unwrap()["item"]["seen"], true);
@@ -302,6 +313,7 @@ fn changes_are_persisted() {
     let r = rig();
     r.ops.raise(item("a"), None);
     answer(&r.ops, "a", "allow");
+    r.ops.flush();
     let items = inbox::load(&r.dir, NOW + 5).unwrap().items();
     assert_eq!(items.len(), 1);
     assert_eq!(items[0].state, State::Answered);
@@ -312,6 +324,7 @@ fn changes_are_persisted() {
 fn a_restart_withdraws_open_items_and_saves_that() {
     let r = rig();
     r.ops.raise(item("a"), None);
+    r.ops.flush();
     let later = NOW + 5_000;
     let reopened = InboxOps::with_clock(
         r.dir.clone(),
@@ -322,6 +335,7 @@ fn a_restart_withdraws_open_items_and_saves_that() {
     assert_eq!(out["items"][0]["state"], "withdrawn");
     assert_eq!(out["unread"], 0);
     let aged = later + inbox::DONE_KEEP_MS + 100;
+    reopened.flush();
     let mut stored = inbox::load(&r.dir, aged).unwrap();
     assert_eq!(stored.items()[0].state, State::Withdrawn);
     assert_eq!(stored.items()[0].closed_ms, Some(later));
@@ -337,9 +351,11 @@ fn a_failing_save_never_fails_an_op_or_skips_the_publish() {
     let ops = InboxOps::with_clock(tmp.path("file/inside"), room.clone(), Arc::new(|| NOW));
     let calls = Arc::new(Calls::default());
     ops.raise(item("a"), Some(calls.clone()));
+    ops.flush();
     assert_eq!(changed(&room).len(), 1);
     let out = answer(&ops, "a", "allow");
     assert_eq!(out["answered"], true);
+    ops.flush();
     assert_eq!(changed(&room).len(), 2);
     assert_eq!(calls.0.lock().unwrap().len(), 1);
 }
@@ -358,4 +374,124 @@ fn the_loop_ticks_until_closed() {
     }
     r.ops.close();
     assert_eq!(changed(&r.room).last().unwrap()["item"]["state"], "expired");
+}
+
+struct GatedRoom {
+    gate: Mutex<Option<std::sync::mpsc::Receiver<()>>>,
+    events: Mutex<Vec<Value>>,
+}
+
+impl crate::acting_ops::Room for GatedRoom {
+    fn publish(&self, _topic: &str, event: &str, data: &Value) {
+        let gate = self.gate.lock().unwrap().take();
+        if let Some(gate) = gate {
+            let _ = gate.recv();
+        }
+        if event == "inbox.changed" {
+            self.events.lock().unwrap().push(data["item"].clone());
+        }
+    }
+    fn can_answer(&self) -> bool {
+        true
+    }
+    fn can_follow(&self, _topic: &str) -> bool {
+        true
+    }
+}
+
+#[test]
+fn a_slow_publish_blocks_no_op_and_events_keep_book_order() {
+    let tmp = TempDir::new("inbox-ops-gated");
+    let (release, gate) = std::sync::mpsc::channel::<()>();
+    let room = Arc::new(GatedRoom {
+        gate: Mutex::new(Some(gate)),
+        events: Mutex::new(Vec::new()),
+    });
+    let ops = InboxOps::with_clock(tmp.path("data"), room.clone(), Arc::new(|| NOW));
+    ops.raise(item("a"), None);
+    let seen = ops
+        .call(&app(), ops::INBOX_SEEN, &json!({"ids": ["a"]}))
+        .unwrap();
+    assert_eq!(seen["unread"], 0);
+    assert_eq!(answer(&ops, "a", "allow")["answered"], true);
+    assert!(room.events.lock().unwrap().is_empty());
+    release.send(()).unwrap();
+    ops.flush();
+    let events = room.events.lock().unwrap().clone();
+    let shape: Vec<(Value, Value)> = events
+        .iter()
+        .map(|i| (i["state"].clone(), i["seen"].clone()))
+        .collect();
+    assert_eq!(
+        shape,
+        vec![
+            (json!("open"), json!(false)),
+            (json!("open"), json!(true)),
+            (json!("answered"), json!(true)),
+        ]
+    );
+}
+
+#[test]
+fn racing_calls_publish_in_book_order() {
+    let r = rig();
+    for n in 0..40 {
+        let id = format!("race{n}");
+        r.ops.raise(item(&id), None);
+        let seeing = {
+            let ops = r.ops.clone();
+            let id = id.clone();
+            std::thread::spawn(move || {
+                ops.call(&app(), ops::INBOX_SEEN, &json!({"ids": [id]}))
+                    .unwrap();
+            })
+        };
+        let answering = {
+            let ops = r.ops.clone();
+            let id = id.clone();
+            std::thread::spawn(move || {
+                answer(&ops, &id, "allow");
+            })
+        };
+        seeing.join().unwrap();
+        answering.join().unwrap();
+    }
+    r.ops.flush();
+    let listed = r.ops.call(&app(), ops::INBOX_LIST, &json!({})).unwrap();
+    let events = changed(&r.room);
+    for item in listed["items"].as_array().unwrap() {
+        let last = events
+            .iter()
+            .rev()
+            .find(|e| e["item"]["id"] == item["id"])
+            .unwrap();
+        assert_eq!(&last["item"], item, "{}", item["id"]);
+    }
+}
+
+#[test]
+fn close_drains_the_queue_and_ends_the_writer() {
+    let r = rig();
+    r.ops.raise(item("a"), None);
+    r.ops.close();
+    assert_eq!(changed(&r.room).len(), 1);
+    assert_eq!(inbox::load(&r.dir, NOW + 1).unwrap().items().len(), 1);
+    assert_eq!(Arc::strong_count(&r.room), 1);
+    r.ops.close();
+    r.ops.flush();
+}
+
+#[test]
+fn dropping_without_close_still_ends_the_writer() {
+    let tmp = TempDir::new("inbox-ops-drop");
+    let room = Arc::new(FakeRoom::default());
+    let ops = InboxOps::with_clock(tmp.path("data"), room.clone(), Arc::new(|| NOW));
+    ops.raise(item("a"), None);
+    drop(ops);
+    let until = Instant::now() + Duration::from_secs(5);
+    while Arc::strong_count(&room) > 1 && Instant::now() < until {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(Arc::strong_count(&room), 1);
+    assert_eq!(changed(&room).len(), 1);
 }
