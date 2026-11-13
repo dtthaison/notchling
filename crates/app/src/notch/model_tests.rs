@@ -47,6 +47,7 @@ fn permission(session: &str) -> HookRequest {
         kind: RequestKind::Permission,
         tool_name: "Bash".into(),
         summary: "rm -rf build".into(),
+        description: String::new(),
         can_always_allow: true,
         agy: None,
     }

@@ -6,6 +6,7 @@ use serde_json::Value;
 
 use crate::acting::{Decision, Request};
 use crate::chat::data::Tool;
+use crate::chat::permission_text::{PREVIEW_COMMAND, PREVIEW_DESCRIPTION};
 use crate::notch::model::question_from_needs;
 use crate::notch::requests::{HookRequest, RequestKind};
 
@@ -63,6 +64,7 @@ pub fn permission_from_needs(agent: &Agent) -> Option<HookRequest> {
         kind: RequestKind::Permission,
         tool_name: tool.to_owned(),
         summary: summary.to_owned(),
+        description: String::new(),
         can_always_allow: !NO_ALWAYS.contains(&tool),
         agy: None,
     })
@@ -84,6 +86,7 @@ pub const PREVIEW_BEFORE: &str =
 pub enum Preview {
     Question,
     Permission,
+    PermissionExpanded,
     PermissionFile,
     PermissionSending,
     PermissionFailed,
@@ -95,6 +98,7 @@ impl Preview {
         match value {
             "question" => Some(Preview::Question),
             "permission" => Some(Preview::Permission),
+            "permission-expanded" => Some(Preview::PermissionExpanded),
             "permission-file" => Some(Preview::PermissionFile),
             "permission-sending" => Some(Preview::PermissionSending),
             "permission-failed" => Some(Preview::PermissionFailed),
@@ -223,19 +227,23 @@ pub fn preview_prompt(preview: Preview) -> Prompt {
             kind: RequestKind::Permission,
             tool_name: "Write".into(),
             summary: PREVIEW_PATH.into(),
+            description: String::new(),
             can_always_allow: true,
             agy: None,
         })),
-        Preview::Permission => Prompt::Permission(Box::new(HookRequest {
-            id: "preview".into(),
-            session_id: "preview".into(),
-            created: 0.0,
-            kind: RequestKind::Permission,
-            tool_name: "Bash".into(),
-            summary: "sqlx migrate run --database-url postgres://localhost/api_dev".into(),
-            can_always_allow: true,
-            agy: None,
-        })),
+        Preview::Permission | Preview::PermissionExpanded => {
+            Prompt::Permission(Box::new(HookRequest {
+                id: "preview".into(),
+                session_id: "preview".into(),
+                created: 0.0,
+                kind: RequestKind::Permission,
+                tool_name: "Bash".into(),
+                summary: PREVIEW_COMMAND.into(),
+                description: PREVIEW_DESCRIPTION.into(),
+                can_always_allow: true,
+                agy: None,
+            }))
+        }
     }
 }
 

@@ -37,6 +37,10 @@ pub const MENU_GAP: f32 = 6.0;
 pub const MENU_RULE_Y: f32 = 2.0;
 pub const MENU_RADIUS: f32 = RADIUS_CARD;
 
+pub const CODE_PAD_X: f32 = MENU_ROW_X;
+pub const CODE_PAD_Y: f32 = 6.0;
+pub const CODE_LINE: f32 = 1.35;
+
 pub const SPACE: [f32; 6] = [4.0, 8.0, 12.0, 16.0, 20.0, 24.0];
 
 pub fn space(steps: usize) -> f32 {

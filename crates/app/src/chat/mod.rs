@@ -38,6 +38,7 @@ pub mod paging;
 #[cfg(test)]
 mod parse_cost_tests;
 pub mod paths;
+pub mod permission_text;
 pub mod pickers;
 pub mod prompt_flow;
 pub mod prompts;

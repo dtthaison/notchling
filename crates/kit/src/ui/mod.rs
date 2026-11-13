@@ -1,3 +1,4 @@
+mod code_block;
 mod gallery;
 mod icons;
 mod menu;
@@ -11,6 +12,7 @@ mod text_editor;
 mod tool_images;
 mod widgets;
 
+pub use code_block::{code_block, code_line, code_size};
 pub use gallery::KitGallery;
 pub use icons::{icon, icon_in, spinner, spinner_in, KitAssets};
 pub use menu::{
