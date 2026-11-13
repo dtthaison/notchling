@@ -1,7 +1,8 @@
 use std::path::Path;
 
 use notchling_engine::settings::Settings;
-use notchling_engine::transcript::tail::{set_chat_tail_bytes, CHAT_TAIL_BYTES};
+use notchling_engine::transcript::tail::{chat_tail_bytes, set_chat_tail_bytes, CHAT_TAIL_BYTES};
+use serde_json::Value;
 
 pub const KEY: &str = "chatHistory";
 
@@ -30,14 +31,29 @@ pub fn from_settings(settings: &Settings) -> u64 {
         .unwrap_or(CHAT_TAIL_BYTES)
 }
 
-pub fn read(data_dir: &Path) -> u64 {
+pub fn read(data_dir: &Path) -> Option<u64> {
     Settings::open(&data_dir.join("settings.json"))
         .ok()
-        .map_or(CHAT_TAIL_BYTES, |s| from_settings(&s))
+        .map(|s| from_settings(&s))
 }
 
 pub fn apply(data_dir: &Path) {
-    set_chat_tail_bytes(read(data_dir));
+    if let Some(bytes) = read(data_dir) {
+        set_chat_tail_bytes(bytes);
+    }
+}
+
+pub fn chosen(key: &str, value: &Value) -> Option<u64> {
+    (key == KEY).then_some(value)?.as_str().and_then(bytes)
+}
+
+pub fn on_change(key: &str, value: &Value) -> bool {
+    let Some(bytes) = chosen(key, value) else {
+        return false;
+    };
+    let changed = chat_tail_bytes() != bytes;
+    set_chat_tail_bytes(bytes);
+    changed
 }
 
 #[cfg(test)]

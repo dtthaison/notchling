@@ -185,23 +185,25 @@ pub fn inspector(
     subagents: &[SubagentRow],
     writers: &dyn Fn(&str) -> Vec<i32>,
 ) -> Inspector {
-    inspector_listed(conversation, subagents, None, writers)
+    let counts = Counts {
+        total: subagents.len(),
+        running: subagents.iter().filter(|s| s.running).count(),
+        hidden: 0,
+    };
+    inspector_listed(conversation, subagents, counts, None, writers)
 }
 
 pub fn inspector_listed(
     conversation: &Conversation,
     subagents: &[SubagentRow],
+    subagent_counts: Counts,
     shells: Option<&Listing>,
     writers: &dyn Fn(&str) -> Vec<i32>,
 ) -> Inspector {
     Inspector {
         tasks: task_rows(conversation),
         facts: facts(conversation),
-        subagent_counts: Counts {
-            total: subagents.len(),
-            running: subagents.iter().filter(|s| s.running).count(),
-            hidden: 0,
-        },
+        subagent_counts,
         subagents: subagents.to_vec(),
         shell_counts: shells.map_or_else(
             || Counts {

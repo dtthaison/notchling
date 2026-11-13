@@ -4,7 +4,9 @@ mod queue;
 mod tools;
 mod user;
 
-pub use glance::{context_tokens as subagent_context_tokens, recent as recent_subagent};
+pub use glance::{
+    context_tokens as subagent_context_tokens, peek as peek_subagent, recent as recent_subagent,
+};
 pub use parser::Parser;
 use parser::MAX_LINE;
 pub use tools::{diff_lines, make_call, pretty, result_text};

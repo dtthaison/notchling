@@ -18,6 +18,7 @@ use crate::chat::format::short_path;
 use crate::chat::inspector::{
     fact_icon, fact_text, inspector_listed, Inspector, Mark, ShellRow, SubagentRow, TaskRow,
 };
+use crate::chat::paging::Counts;
 use crate::chat::shell_list::Listing;
 use notchling_engine::transcript::model::Conversation;
 
@@ -54,12 +55,13 @@ pub struct DetailsModel {
 fn model_of(
     conversation: &Conversation,
     subagents: &[SubagentRow],
+    subagent_counts: Counts,
     shells: Option<&Listing>,
     writers: &dyn Fn(&str) -> Vec<i32>,
     folder: Option<(String, String)>,
 ) -> DetailsModel {
     DetailsModel {
-        i: inspector_listed(conversation, subagents, shells, writers),
+        i: inspector_listed(conversation, subagents, subagent_counts, shells, writers),
         folder,
     }
 }
@@ -69,15 +71,14 @@ pub(super) fn model(view: &ChatView, _: &App) -> DetailsModel {
         let full = s.agent.cwd.clone();
         (short_path(&full, &view.root.home), full)
     });
-    let mut model = model_of(
+    model_of(
         &view.conversation,
         &view.subagent_rows,
+        view.subagent_counts,
         Some(&view.shells),
         &|p: &str| view.shell_probe.writers(p),
         folder,
-    );
-    model.i.subagent_counts = view.subagent_counts;
-    model
+    )
 }
 
 pub fn render(m: &DetailsModel, a: Appearance, cx: &mut Context<ChatView>) -> AnyElement {
@@ -499,29 +500,53 @@ mod tests {
     #[test]
     fn the_details_model_is_equal_for_the_same_inputs() {
         let c = with_task("Port");
-        let a = model_of(&c, &[], None, &no_writers, folder());
-        let b = model_of(&with_task("Port"), &[], None, &no_writers, folder());
+        let a = model_of(&c, &[], Counts::default(), None, &no_writers, folder());
+        let b = model_of(
+            &with_task("Port"),
+            &[],
+            Counts::default(),
+            None,
+            &no_writers,
+            folder(),
+        );
         assert_eq!(a, b);
         assert_ne!(
             a,
-            model_of(&c, &[], None, &no_writers, None),
+            model_of(&c, &[], Counts::default(), None, &no_writers, None),
             "the folder line"
         );
     }
 
     #[test]
     fn a_new_task_changes_the_details_model() {
-        let before = model_of(&with_task("Port"), &[], None, &no_writers, folder());
+        let before = model_of(
+            &with_task("Port"),
+            &[],
+            Counts::default(),
+            None,
+            &no_writers,
+            folder(),
+        );
         let mut more = with_task("Port");
         more.tasks.push(TaskEntry {
             id: "2".into(),
             subject: "Test".into(),
             status: TaskStatus::Pending,
         });
-        assert_ne!(before, model_of(&more, &[], None, &no_writers, folder()));
         assert_ne!(
             before,
-            model_of(&with_task("Port it"), &[], None, &no_writers, folder())
+            model_of(&more, &[], Counts::default(), None, &no_writers, folder())
+        );
+        assert_ne!(
+            before,
+            model_of(
+                &with_task("Port it"),
+                &[],
+                Counts::default(),
+                None,
+                &no_writers,
+                folder()
+            )
         );
     }
 
@@ -537,10 +562,11 @@ mod tests {
             }],
             ..Conversation::default()
         };
-        let idle = model_of(&c, &[], None, &no_writers, None);
+        let idle = model_of(&c, &[], Counts::default(), None, &no_writers, None);
         let writing = model_of(
             &c,
             &[],
+            Counts::default(),
             None,
             &|p: &str| {
                 if p == "/tmp/b1.output" {

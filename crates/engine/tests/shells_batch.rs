@@ -80,3 +80,28 @@ fn what_lsof_says_when_nothing_is_open_is_every_path_empty() {
     let got = parse_writers_by_name("", &wanted(&["/tmp/a/b1.output"]));
     assert!(got["/tmp/a/b1.output"].is_empty());
 }
+
+#[test]
+fn a_call_for_one_path_gives_every_writer_it_lists_to_that_path() {
+    let escaped = "p4010\ncsleep\nf1\naw\nn/tmp/a/my\\x20job.output\n\
+                   p4011\ncsleep\nf4\nau\nn/private/var/elsewhere/renamed\n\
+                   p4012\nctail\nf3\nar\nn/tmp/a/my\\x20job.output\n\
+                   p500\ncclaude\nf9\naw\nn/tmp/a/my\\x20job.output\n";
+    let got = parse_writers_by_name(escaped, &wanted(&["/tmp/a/my job.output"]));
+    assert_eq!(
+        got["/tmp/a/my job.output"],
+        [4010, 4011],
+        "lsof only lists the file it was asked for, whatever it calls it; readers and claude still don't count"
+    );
+}
+
+#[test]
+fn with_two_paths_an_escaped_name_is_still_not_guessed() {
+    let text = "p4010\ncsleep\nf1\naw\nn/tmp/a/my\\x20job.output\n";
+    let got = parse_writers_by_name(
+        text,
+        &wanted(&["/tmp/a/my job.output", "/tmp/other/b2.output"]),
+    );
+    assert!(got["/tmp/a/my job.output"].is_empty());
+    assert!(got["/tmp/other/b2.output"].is_empty());
+}

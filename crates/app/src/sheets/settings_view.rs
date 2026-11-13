@@ -27,7 +27,14 @@ pub struct SettingsView {
     busy: Option<Area>,
 }
 
+pub struct SettingChanged {
+    pub key: String,
+    pub value: Value,
+}
+
 impl EventEmitter<Dismiss> for SettingsView {}
+
+impl EventEmitter<SettingChanged> for SettingsView {}
 
 impl SettingsView {
     pub fn new(data_dir: Option<&Path>, acts: Acts) -> SettingsView {
@@ -121,7 +128,11 @@ impl SettingsView {
                 })
                 .detach();
         }
-        self.values.insert(key.to_owned(), value);
+        self.values.insert(key.to_owned(), value.clone());
+        cx.emit(SettingChanged {
+            key: key.to_owned(),
+            value,
+        });
         cx.notify();
     }
 

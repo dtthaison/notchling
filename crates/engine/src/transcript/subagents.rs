@@ -1,3 +1,4 @@
+use super::glance::Peeked;
 use super::model::{Conversation, Timestamp};
 use super::util::{file_times, modified_secs};
 use serde::Deserialize;
@@ -211,18 +212,10 @@ pub fn read_shared(path: &str) -> std::sync::Arc<Conversation> {
     super::conversation::read_subagent_shared(path)
 }
 
-pub fn context_tokens(origin: Origin, path: &str) -> Option<u64> {
+pub fn peek(origin: Origin, path: &str, with_recent: bool) -> Option<Peeked> {
     match origin {
-        Origin::Claude => super::conversation::subagent_context_tokens(path),
-        Origin::Codex => super::codex::context_tokens(path),
-        Origin::Antigravity => None,
-    }
-}
-
-pub fn recent(origin: Origin, path: &str) -> Option<Conversation> {
-    match origin {
-        Origin::Claude => super::conversation::recent_subagent(path),
-        Origin::Codex => super::codex::recent(path),
+        Origin::Claude => super::conversation::peek_subagent(path, with_recent),
+        Origin::Codex => super::codex::peek(path, with_recent),
         Origin::Antigravity => None,
     }
 }

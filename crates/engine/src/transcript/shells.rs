@@ -119,7 +119,11 @@ pub fn parse_writers_by_name(
                 if !writing || NOT_WRITERS.contains(&command.as_str()) {
                     continue;
                 }
-                if let Some(path) = which(value, wanted) {
+                let path = match wanted {
+                    [(only, _)] => Some(only.clone()),
+                    _ => which(value, wanted),
+                };
+                if let Some(path) = path {
                     let pids = found.entry(path).or_default();
                     if !pids.contains(&pid) {
                         pids.push(pid);

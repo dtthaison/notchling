@@ -6,7 +6,7 @@ use notchling_engine::transcript::shells::parse_writers_by_name;
 
 use super::now_ms;
 use super::ChatView;
-use crate::chat::shell_list::{lsof_calls, probe_paths};
+use crate::chat::shell_list::{lsof_calls, probe_paths, PROBE_CHUNK};
 
 const EVERY_MS: i64 = 3000;
 const LSOF: &str = "/usr/sbin/lsof";
@@ -22,6 +22,10 @@ impl Probe {
     pub fn writers(&self, path: &str) -> Vec<i32> {
         self.writers.get(path).cloned().unwrap_or_else(|| vec![0])
     }
+
+    pub fn writing(&self, path: &str) -> Option<bool> {
+        self.writers.get(path).map(|pids| !pids.is_empty())
+    }
 }
 
 fn names_of(path: &str) -> (String, Vec<String>) {
@@ -33,30 +37,34 @@ fn names_of(path: &str) -> (String, Vec<String>) {
 }
 
 fn look(paths: &[String]) -> HashMap<String, Vec<i32>> {
-    let wanted: Vec<(String, Vec<String>)> = paths.iter().map(|p| names_of(p)).collect();
-    let mut found: HashMap<String, Vec<i32>> = HashMap::new();
-    for args in lsof_calls(paths) {
-        let text = Command::new(LSOF)
+    let mut found = HashMap::new();
+    for (chunk, args) in paths.chunks(PROBE_CHUNK).zip(lsof_calls(paths)) {
+        let Ok(out) = Command::new(LSOF)
             .args(&args)
             .stdin(Stdio::null())
             .stderr(Stdio::null())
             .output()
-            .map(|out| String::from_utf8_lossy(&out.stdout).into_owned())
-            .unwrap_or_default();
-        for (path, pids) in parse_writers_by_name(&text, &wanted) {
-            if args.contains(&path) {
-                found.insert(path, pids);
-            }
-        }
+        else {
+            continue;
+        };
+        let wanted: Vec<(String, Vec<String>)> = chunk.iter().map(|p| names_of(p)).collect();
+        found.extend(parse_writers_by_name(
+            &String::from_utf8_lossy(&out.stdout),
+            &wanted,
+        ));
     }
     found
 }
 
 impl ChatView {
     pub(super) fn refresh_shells(&mut self, more: usize) {
-        self.shells = self
-            .shell_page
-            .show(self.selected.as_deref(), &self.conversation, more);
+        let probe = &self.shell_probe;
+        self.shells = self.shell_page.show(
+            self.selected.as_deref(),
+            &self.conversation,
+            more,
+            &|path| probe.writing(path),
+        );
     }
 
     pub(super) fn load_more_shells(&mut self, cx: &mut Context<Self>) {
@@ -74,7 +82,9 @@ pub fn tick(view: &mut ChatView, cx: &mut Context<ChatView>) {
     if now.saturating_sub(view.shell_probe.last_ms) < EVERY_MS {
         return;
     }
-    let paths = probe_paths(&view.conversation, &view.shells);
+    let paths = probe_paths(&view.conversation, &view.shells, &|path| {
+        view.shell_probe.writing(path)
+    });
     if paths.is_empty() {
         return;
     }
@@ -95,7 +105,9 @@ pub fn tick(view: &mut ChatView, cx: &mut Context<ChatView>) {
                     changed = true;
                 }
             }
-            if changed {
+            let before = view.shells.clone();
+            view.refresh_shells(0);
+            if changed || view.shells != before {
                 cx.notify();
             }
         });
@@ -111,7 +123,11 @@ mod tests {
     fn a_shell_not_looked_at_yet_counts_as_running() {
         let mut probe = Probe::default();
         assert_eq!(probe.writers("/tmp/a.output"), vec![0]);
+        assert_eq!(probe.writing("/tmp/a.output"), None);
         probe.writers.insert("/tmp/a.output".into(), Vec::new());
         assert!(probe.writers("/tmp/a.output").is_empty());
+        assert_eq!(probe.writing("/tmp/a.output"), Some(false));
+        probe.writers.insert("/tmp/a.output".into(), vec![42]);
+        assert_eq!(probe.writing("/tmp/a.output"), Some(true));
     }
 }

@@ -1,5 +1,5 @@
 use super::parser::{Parser, MAX_LINE};
-use crate::transcript::glance::{has, has_step, widen};
+use crate::transcript::glance::{has, has_step, peek as peek_with, widen, Peeked, TailParser};
 use crate::transcript::model::Conversation;
 use crate::transcript::util::{count_of, parse_object, str_of};
 use serde_json::Value;
@@ -37,14 +37,22 @@ pub fn context_tokens(path: &str) -> Option<u64> {
     .flatten()
 }
 
+fn tail(lines: &[&[u8]]) -> Conversation {
+    let mut parser = Parser::for_subagent();
+    for line in lines {
+        parser.consume(line);
+    }
+    parser.conversation()
+}
+
 pub fn recent(path: &str) -> Option<Conversation> {
     widen(path, |window| {
-        let mut parser = Parser::for_subagent();
-        for line in window.lines() {
-            parser.consume(line);
-        }
-        let conversation = parser.conversation();
+        let conversation = tail(&window.lines());
         let done = has_step(&conversation);
         (conversation, done)
     })
+}
+
+pub fn peek(path: &str, with_recent: bool) -> Option<Peeked> {
+    peek_with(path, held, with_recent.then_some(tail as TailParser))
 }

@@ -93,7 +93,6 @@ impl Loader {
         live: &ToolLive,
         now_ms: i64,
     ) -> Loaded {
-        super::history::apply(&self.root.data_dir);
         let listed = self.root.sessions_from(
             &mut self.monitor,
             &mut self.locator,

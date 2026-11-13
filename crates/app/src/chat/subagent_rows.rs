@@ -112,13 +112,11 @@ pub struct Disk;
 
 impl Peek for Disk {
     fn read(&self, agent: &Subagent) -> Facts {
-        let (origin, path) = (agent.origin, agent.path.as_str());
+        let peeked = subagents::peek(agent.origin, &agent.path, agent.is_running());
         Facts {
-            context: subagents::context_tokens(origin, path),
-            doing: agent
-                .is_running()
-                .then(|| subagents::recent(origin, path))
-                .flatten()
+            context: peeked.as_ref().and_then(|p| p.context),
+            doing: peeked
+                .and_then(|p| p.recent)
                 .map(|c| super::activity::doing(&c)),
         }
     }

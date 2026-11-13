@@ -41,7 +41,7 @@ fn the_key_allows_exactly_the_choices_the_sheet_offers() {
 #[test]
 fn nothing_saved_reads_the_default() {
     let s = Scratch::new("history-empty");
-    assert_eq!(read(s.path()), CHAT_TAIL_BYTES);
+    assert_eq!(read(s.path()), Some(CHAT_TAIL_BYTES));
 }
 
 #[test]
@@ -50,7 +50,7 @@ fn a_saved_choice_reads_back_as_bytes() {
     let mut settings = settings_in(&s);
     for (value, want) in [("2mb", 2_000_000), ("16mb", 16_000_000), ("8mb", 8_000_000)] {
         settings.set(KEY, json!(value)).expect("set");
-        assert_eq!(read(s.path()), want);
+        assert_eq!(read(s.path()), Some(want));
     }
 }
 
@@ -62,5 +62,20 @@ fn a_value_that_is_not_a_choice_reads_the_default() {
     settings
         .set_unchecked(KEY, json!("1gb"))
         .expect("write it anyway");
-    assert_eq!(read(s.path()), CHAT_TAIL_BYTES);
+    assert_eq!(read(s.path()), Some(CHAT_TAIL_BYTES));
+}
+
+#[test]
+fn a_store_that_cannot_be_read_says_so_instead_of_giving_the_default() {
+    let s = Scratch::new("history-broken");
+    std::fs::write(s.path().join("notchling.db"), "this is not a database").expect("write");
+    assert_eq!(read(s.path()), None);
+}
+
+#[test]
+fn only_a_choice_for_this_key_is_a_change() {
+    assert_eq!(chosen(KEY, &json!("8mb")), Some(8_000_000));
+    assert_eq!(chosen(KEY, &json!("1gb")), None);
+    assert_eq!(chosen(KEY, &json!(8)), None);
+    assert_eq!(chosen("chatUsedSessions", &json!("8mb")), None);
 }

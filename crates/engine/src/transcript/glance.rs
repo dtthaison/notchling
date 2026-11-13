@@ -69,6 +69,38 @@ pub fn widen<T>(path: &str, mut look: impl FnMut(&Window) -> (T, bool)) -> Optio
     found
 }
 
+pub struct Peeked {
+    pub context: Option<u64>,
+    pub recent: Option<Conversation>,
+}
+
+pub type TailParser = fn(&[&[u8]]) -> Conversation;
+
+pub fn peek(
+    path: &str,
+    held: fn(&[u8]) -> Option<u64>,
+    recent: Option<TailParser>,
+) -> Option<Peeked> {
+    let mut peeked = Peeked {
+        context: None,
+        recent: None,
+    };
+    let mut stepped = recent.is_none();
+    widen(path, |window| {
+        let lines = window.lines();
+        if peeked.context.is_none() {
+            peeked.context = lines.iter().rev().find_map(|line| held(line));
+        }
+        if let (Some(parse), false) = (recent, stepped) {
+            let conversation = parse(&lines);
+            stepped = has_step(&conversation);
+            peeked.recent = Some(conversation);
+        }
+        ((), peeked.context.is_some() && stepped)
+    })?;
+    Some(peeked)
+}
+
 pub fn has(line: &[u8], needle: &[u8]) -> bool {
     line.windows(needle.len()).any(|w| w == needle)
 }

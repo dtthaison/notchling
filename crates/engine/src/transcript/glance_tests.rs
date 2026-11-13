@@ -240,3 +240,60 @@ fn a_rollout_with_no_token_count_has_no_context_and_still_has_a_tail() {
     let recent = codex::recent(&path).expect("read");
     assert!(has_step(&recent));
 }
+
+fn kinds(c: &Conversation) -> Vec<String> {
+    c.items.iter().map(|i| format!("{:?}", i.kind)).collect()
+}
+
+#[test]
+fn one_pass_gives_the_number_and_the_tail_the_two_passes_gave() {
+    let dir = Dir::new();
+    let mut lines = filler(3000, 200);
+    lines.push(assistant(1, 231_000, 300, "looking"));
+    lines.push(tool_call(2, "cargo test"));
+    let path = dir.file("l.jsonl", &lines);
+    let both = conversation::peek_subagent(&path, true).expect("read");
+    assert_eq!(both.context, conversation::subagent_context_tokens(&path));
+    let alone = conversation::recent_subagent(&path).expect("read");
+    assert_eq!(kinds(&both.recent.expect("a tail")), kinds(&alone));
+    let number_only = conversation::peek_subagent(&path, false).expect("read");
+    assert_eq!(number_only.context, both.context);
+    assert!(number_only.recent.is_none(), "no tail unless asked for");
+}
+
+#[test]
+fn a_number_far_back_widens_the_window_and_keeps_the_tail_of_the_first_one() {
+    let dir = Dir::new();
+    let mut lines = vec![assistant(1, 50_000, 10, "early")];
+    lines.extend(filler(1200, 200));
+    lines.push(user(2, "go on"));
+    let path = dir.file("m.jsonl", &lines);
+    let both = conversation::peek_subagent(&path, true).expect("read");
+    assert_eq!(both.context, Some(50_020), "the wide window found it");
+    let alone = conversation::recent_subagent(&path).expect("read");
+    let tail = both.recent.expect("a tail");
+    assert_eq!(kinds(&tail), kinds(&alone), "the small window had a step");
+    assert!(has_step(&tail));
+}
+
+#[test]
+fn a_rollout_reads_both_in_one_pass_too() {
+    let dir = Dir::new();
+    let mut lines: Vec<String> = (0..3000).map(rollout_line).collect();
+    lines.push(token_count(40_000, 250));
+    lines.push(rollout_line(9999));
+    let path = dir.file("one-pass.jsonl", &lines);
+    let both = codex::peek(&path, true).expect("read");
+    assert_eq!(both.context, Some(40_250));
+    assert_eq!(
+        kinds(&both.recent.expect("a tail")),
+        kinds(&codex::recent(&path).expect("read"))
+    );
+    assert!(codex::peek(&path, false).expect("read").recent.is_none());
+}
+
+#[test]
+fn a_file_that_is_not_there_has_neither() {
+    assert!(conversation::peek_subagent("/nonexistent/x.jsonl", true).is_none());
+    assert!(codex::peek("/nonexistent/x.jsonl", true).is_none());
+}

@@ -252,3 +252,21 @@ fn a_running_one_that_finishes_while_shown_stays_shown() {
     assert_eq!(ids(&second), want(&[&all[2]]));
     assert_eq!(second.subagent_counts.running, 0);
 }
+
+#[test]
+fn a_running_subagent_is_read_once_for_its_number_and_its_doing_line() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let mut world = World::new();
+    let id = world.add(true);
+    let mut loader = loader(&world);
+
+    let (first, bytes) = load(&mut loader);
+    assert_eq!(ids(&first), want(&[&id]));
+    let row = &first.subagent_rows[0];
+    assert!(row.detail.ends_with('k'), "its number: {}", row.detail);
+    assert_eq!(row.doing.as_deref(), Some("Writing…"));
+    assert!(
+        bytes > 0 && bytes <= FIRST + SMALL,
+        "one small tail serves both, not two: {bytes}"
+    );
+}

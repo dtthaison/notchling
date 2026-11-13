@@ -36,6 +36,10 @@ pub struct Page {
 }
 
 impl Page {
+    pub fn begun(&self, session: Option<&str>) -> bool {
+        self.started && self.session.as_deref() == session
+    }
+
     pub fn show<T: Item>(&mut self, session: Option<&str>, items: &[T], more: usize) -> Shown {
         if self.session.as_deref() != session {
             *self = Page {
