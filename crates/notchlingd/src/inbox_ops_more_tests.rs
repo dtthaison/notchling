@@ -22,6 +22,21 @@ fn the_inbox_answers_only_the_app_itself() {
 }
 
 #[test]
+fn only_the_mac_or_a_phone_may_allow_a_secret() {
+    let r = rig();
+    r.ops.raise(item("a"), Some(Arc::new(Calls::default())));
+    r.ops.raise(item("b"), Some(Arc::new(Calls::default())));
+    let e = r.ops.decide("a", ActionId::Allow, "agent").unwrap_err();
+    assert_eq!(e.code, ErrorCode::Forbidden);
+    assert_eq!(r.ops.items()[1].state, State::Open);
+    let denied = r.ops.decide("a", ActionId::Deny, "agent").unwrap();
+    assert!(denied.answered);
+    let allowed = r.ops.decide("b", ActionId::Allow, "phone").unwrap();
+    assert!(allowed.answered);
+    assert_eq!(allowed.answer, Some(ActionId::Allow));
+}
+
+#[test]
 fn the_saved_book_loads_at_start_not_before() {
     let r = rig();
     r.ops.raise(item("a"), None);

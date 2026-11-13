@@ -66,34 +66,85 @@ fn phone_answers_an_open_item() {
 }
 
 #[test]
-fn the_phone_cannot_allow_a_secret() {
+fn the_phone_may_allow_a_secret() {
     let rig = Rig::new();
-    rig.backend
-        .with(|s| s.inbox = vec![inbox_item("a", Kind::SecretApproval)]);
+    rig.backend.with(|s| {
+        s.inbox = vec![
+            inbox_item("a", Kind::SecretApproval),
+            inbox_item("b", Kind::SecretApproval),
+        ];
+    });
     let (connection, io, _) = rig.login("test-phone");
-    for action in ["allow_once", "allow_always", "allow"] {
+    for (item, action) in [("a", "allow_once"), ("b", "allow_always")] {
         rig.send(
             &connection,
-            &format!(r#"{{"id":6,"op":"inbox.answer","itemId":"a","action":"{action}"}}"#),
+            &format!(r#"{{"id":6,"op":"inbox.answer","itemId":"{item}","action":"{action}"}}"#),
         );
-        let reply = io.last_json();
-        assert_eq!(error_code(&reply), Some("invalid"), "{action}");
         assert_eq!(
-            reply["error"]["message"],
-            json!(super::router_ops::ALLOW_ON_MAC)
+            data(&io.last_json()),
+            json!({"answered": true, "state": "answered", "answer": action})
         );
     }
-    assert_eq!(rig.backend.with(|s| s.inbox_answer_calls), 0);
-    assert!(rig
-        .audit
-        .recent()
-        .iter()
-        .all(|e| !e.op.starts_with("inbox")));
+    assert_eq!(
+        rig.backend.with(|s| s.inbox_answers.clone()),
+        [
+            ("a".to_string(), ActionId::AllowOnce),
+            ("b".to_string(), ActionId::AllowAlways)
+        ]
+    );
+    let ops: Vec<String> = rig.audit.recent().iter().map(|e| e.op.clone()).collect();
+    assert!(ops.contains(&"inbox.answer:allow_once".to_string()));
+    assert!(ops.contains(&"inbox.answer:allow_always".to_string()));
+}
+
+#[test]
+fn every_refused_phone_answer_is_audited_with_its_reason() {
+    let rig = Rig::new();
+    rig.backend.with(|s| {
+        s.inbox = vec![
+            inbox_item("a", Kind::SecretApproval),
+            inbox_item("r", Kind::SecretRequest),
+            inbox_item("t", Kind::SecretApproval),
+        ];
+        s.inbox[2].state = State::Answered;
+        s.inbox[2].answer = Some(ActionId::Deny);
+    });
+    let (connection, _io, _) = rig.login("test-phone");
+    let refused = [
+        (
+            r#"{"id":1,"op":"inbox.answer","itemId":"r","action":"open"}"#,
+            "open",
+        ),
+        (
+            r#"{"id":2,"op":"inbox.answer","itemId":"a","action":"nope"}"#,
+            "invalid",
+        ),
+        (
+            r#"{"id":3,"op":"inbox.answer","itemId":"zzz","action":"deny"}"#,
+            "not_found",
+        ),
+        (
+            r#"{"id":4,"op":"inbox.answer","itemId":"t","action":"allow_once"}"#,
+            "not_taken",
+        ),
+    ];
+    for (body, reason) in refused {
+        rig.send(&connection, body);
+        let last = rig.audit.recent().first().map(|e| e.op.clone());
+        assert_eq!(
+            last,
+            Some(format!("inbox.answer:refused:{reason}")),
+            "{body}"
+        );
+    }
+    rig.backend.with(|s| s.acting_off = true);
     rig.send(
         &connection,
-        r#"{"id":7,"op":"inbox.answer","itemId":"a","action":"deny"}"#,
+        r#"{"id":5,"op":"inbox.answer","itemId":"a","action":"allow_once"}"#,
     );
-    assert_eq!(data(&io.last_json())["answer"], json!("deny"));
+    let last = rig.audit.recent().first().map(|e| e.op.clone());
+    assert_eq!(last.as_deref(), Some("inbox.answer:refused:acting_off"));
+    assert!(rig.audit.recent().iter().all(|e| e.session.is_none()));
 }
 
 #[test]
@@ -299,7 +350,8 @@ fn inbox_answer_refused_while_acting_is_off() {
         .audit
         .recent()
         .iter()
-        .all(|e| !e.op.starts_with("inbox")));
+        .filter(|e| e.op.starts_with("inbox"))
+        .all(|e| e.op == "inbox.answer:refused:acting_off"));
     rig.send(&connection, r#"{"id":7,"op":"inbox.list"}"#);
     assert!(is_ok(&io.last_json()));
 }

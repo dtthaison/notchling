@@ -1,6 +1,6 @@
 {
   "data": {
-    "answer": "deny",
+    "answer": "allow_once",
     "answered": true,
     "state": "answered"
   },

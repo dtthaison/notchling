@@ -88,6 +88,7 @@ pub mod live;
 pub mod model;
 pub mod net;
 pub mod router;
+mod router_inbox;
 mod router_ops;
 pub mod snapshot;
 pub mod stream;

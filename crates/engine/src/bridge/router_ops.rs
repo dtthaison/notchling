@@ -4,7 +4,6 @@
 
 use super::backend::AuditEntry;
 use super::connection::Connection;
-use super::inbox::{action_from, answer_json, name_of, wire_item};
 use super::model::{
     Control, PendingPrompt, PhoneOptions, PromptKind, PromptQuestion, PromptResponse, Session,
     ALREADY_CONTROLLABLE,
@@ -12,7 +11,6 @@ use super::model::{
 use super::router::{validated_folder, Router, MAX_TEXT_CHARACTERS, MODELS};
 use super::uploads::{ImageStore, UploadError, CHUNK_BYTES, MAX_BYTES};
 use super::wire::{self, BridgeFailure};
-use crate::inbox::{ActionId, Kind, State};
 use base64::Engine;
 use serde_json::{json, Map, Value};
 use std::sync::Arc;
@@ -27,13 +25,11 @@ fn int(body: &Body, key: &str) -> Option<i64> {
     body.get(key).and_then(Value::as_i64)
 }
 
-fn require<'a>(body: &'a Body, key: &str) -> Result<&'a str, BridgeFailure> {
+pub(super) fn require<'a>(body: &'a Body, key: &str) -> Result<&'a str, BridgeFailure> {
     string(body, key)
         .filter(|v| !v.is_empty())
         .ok_or_else(|| BridgeFailure::invalid(format!("Thiếu \"{key}\".")))
 }
-
-pub(crate) const ALLOW_ON_MAC: &str = "Cho phép secret trên Mac.";
 
 fn view_only() -> BridgeFailure {
     BridgeFailure::view_only("Session mở ngoài Console — chỉ xem.")
@@ -476,48 +472,6 @@ impl Router {
         Ok(json!({"subscribed": true}))
     }
 
-    pub(crate) fn inbox_list(&self) -> Value {
-        let items = self.backend.inbox_items();
-        let unread = items
-            .iter()
-            .filter(|item| item.state == State::Open && !item.seen)
-            .count();
-        let wire: Vec<_> = items.iter().map(wire_item).collect();
-        json!({"items": wire::object(&wire), "unread": unread})
-    }
-
-    pub(crate) fn inbox_answer(
-        &self,
-        body: &Body,
-        connection: &Arc<Connection>,
-    ) -> Result<Value, BridgeFailure> {
-        if !self.backend.acting_on() {
-            return Err(BridgeFailure::invalid(super::live::ACTING_OFF));
-        }
-        let item_id = require(body, "itemId")?;
-        let action = action_from(require(body, "action")?)
-            .ok_or_else(|| BridgeFailure::invalid("Hành động không hợp lệ."))?;
-        if action == ActionId::Open {
-            return Err(BridgeFailure::invalid("Mở form trên Mac."));
-        }
-        if allows(action) && self.is_secret_approval(item_id) {
-            return Err(BridgeFailure::invalid(ALLOW_ON_MAC));
-        }
-        let outcome = self.backend.inbox_answer(item_id, action)?;
-        if outcome.answered {
-            let op = format!("inbox.answer:{}", name_of(&action));
-            self.audit(connection, &op, None, None);
-        }
-        Ok(answer_json(&outcome))
-    }
-
-    fn is_secret_approval(&self, item_id: &str) -> bool {
-        self.backend
-            .inbox_items()
-            .iter()
-            .any(|item| item.id == item_id && item.kind == Kind::SecretApproval)
-    }
-
     pub(crate) fn unsubscribe(&self, connection: &Arc<Connection>) {
         let streaming = {
             let mut sub = connection.subscription();
@@ -532,13 +486,6 @@ impl Router {
             self.backend.stop_phone(connection);
         }
     }
-}
-
-fn allows(action: ActionId) -> bool {
-    matches!(
-        action,
-        ActionId::Allow | ActionId::AllowOnce | ActionId::AllowAlways
-    )
 }
 
 fn upload_failure(error: UploadError) -> BridgeFailure {

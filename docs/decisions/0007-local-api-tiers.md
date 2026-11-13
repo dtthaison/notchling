@@ -51,6 +51,15 @@ The Milestone 3 review found that the daemon read its `acting` switch from `notc
 - The app keeps the user's choice in its own settings (`actingOn`) and sends `settings.set_acting` again whenever the daemon says off after a (re)connect. That record is a file too, so it is only as strong as the app tier itself; it moves the decision to the app, which is the process the tier trusts, and the Phase 6 signing follow-up above is what makes that trust hold.
 - The same goes for identity: the hook's process is read from the socket's peer credentials, never from its arguments, and it must descend from the Claude Code process whose `sessions/<pid>.json` names the event's session.
 
+## Note, 2026-11-13: a paired phone may allow a secret
+
+The maintainer decided that a paired phone, with the bridge, acting and vault switches on, may answer vault approvals through the inbox, Allow included (this reverses the inbox plan's ruling R32, which let only the Mac allow).
+
+- The phone's `inbox.answer` goes through the bridge to `InboxOps::decide` with `answered_by` `phone`. The gates stay: the bridge on, acting on, the vault switch on (a wait it drained takes no answer), the first answer wins, and the producer's responder must take the answer. The phone never opens the form that takes a secret's value.
+- Who may allow is decided in `InboxOps::decide`, under the inbox lock: an allow on a `secret_approval` is taken from `mac` or `phone` and refused from anyone else.
+- Every phone `inbox.answer` is audited in `bridge/remote-log.jsonl`: one that is taken as `inbox.answer:<action>`, a refused one as `inbox.answer:refused:<reason>`.
+- **Known risk, accepted by the maintainer.** The paired-devices list (`devices.json`) is a file an agent with a shell can write, so a forged device could answer. It is the same class of risk as the Ask First flag in `notchling.db`: files at rest are not a tier boundary (the note above). Pairing needs an anchor an agent can't write before this is closed.
+
 ## Date
 
 2026-11-07

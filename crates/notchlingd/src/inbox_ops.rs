@@ -1,7 +1,7 @@
 use crate::acting_ops::{now_ms, Room};
 use crate::op_group::OpGroup;
 use notchling_engine::bridge::inbox::InboxOutcome;
-use notchling_engine::inbox::{self, ActionId, Book, Change, Item, State};
+use notchling_engine::inbox::{self, ActionId, Book, Change, Item, Kind, State};
 use notchling_local_api::{ops, topics, ApiError, Caller, ClientKind, ErrorCode, OpSpec, Tier};
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
@@ -14,6 +14,7 @@ use std::time::Duration;
 
 const TICK: Duration = Duration::from_secs(1);
 const ANSWERED_BY: &str = "mac";
+const MAY_ALLOW: [&str; 2] = ["mac", "phone"];
 
 pub trait Responder: Send + Sync {
     fn answered(&self, item: &Item, action: ActionId) -> bool;
@@ -313,6 +314,12 @@ impl InboxOps {
         if !current.actions.iter().any(|offered| offered.id == action) {
             return Err(bad("The item doesn't offer that action."));
         }
+        if allows_secret(&current, action) && !MAY_ALLOW.contains(&by) {
+            return Err(ApiError::new(
+                ErrorCode::Forbidden,
+                "Only the Mac or a paired phone may allow a secret.",
+            ));
+        }
         if let Some(responder) = inner.responders.get(id).cloned() {
             if !responder.answered(&current, action) {
                 return Ok(refused(&current));
@@ -347,6 +354,14 @@ impl InboxOps {
             "answer": answer_json(outcome.answer),
         }))
     }
+}
+
+fn allows_secret(item: &Item, action: ActionId) -> bool {
+    item.kind == Kind::SecretApproval
+        && matches!(
+            action,
+            ActionId::Allow | ActionId::AllowOnce | ActionId::AllowAlways
+        )
 }
 
 fn refused(item: &Item) -> InboxOutcome {

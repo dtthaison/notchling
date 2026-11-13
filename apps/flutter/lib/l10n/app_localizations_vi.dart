@@ -42,9 +42,6 @@ class AppL10nVi extends AppL10n {
   String get inboxOpenOnMac => 'Mở trên Mac';
 
   @override
-  String get inboxAllowOnMac => 'Cho phép trên Mac';
-
-  @override
   String inboxAnsweredOnMac(String action) {
     return 'Đã trả lời trên Mac: $action';
   }

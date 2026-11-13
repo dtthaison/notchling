@@ -163,12 +163,6 @@ abstract class AppL10n {
   /// **'Mở trên Mac'**
   String get inboxOpenOnMac;
 
-  /// No description provided for @inboxAllowOnMac.
-  ///
-  /// In vi, this message translates to:
-  /// **'Cho phép trên Mac'**
-  String get inboxAllowOnMac;
-
   /// No description provided for @inboxAnsweredOnMac.
   ///
   /// In vi, this message translates to:
