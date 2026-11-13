@@ -30,6 +30,11 @@ pub fn watch(cx: &mut App, feed: Arc<SwitchFeed>, data_dir: PathBuf) {
     .detach();
 }
 
+pub fn app_wide(key: &str, value: &Value, cx: &mut App) {
+    super::appearance::on_change(key, value, cx);
+    super::shell::on_search_setting(cx, key, value);
+}
+
 pub fn apply(cx: &mut App, changes: &[(String, Value)]) {
     for (key, value) in changes {
         match chat_window(cx) {
@@ -43,6 +48,7 @@ pub fn apply(cx: &mut App, changes: &[(String, Value)]) {
             }
             None => {
                 crate::chat::history::on_change(key, value);
+                app_wide(key, value, cx);
             }
         }
     }

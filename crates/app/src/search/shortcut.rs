@@ -235,6 +235,18 @@ pub fn from_settings(settings: &Settings) -> Setting {
         .unwrap_or(Setting::DEFAULT)
 }
 
+pub fn changed_to(key: &str, value: &Value, active: Setting) -> Option<Setting> {
+    (key == KEY).then_some(())?;
+    Some(Setting::from_value(value)).filter(|wanted| *wanted != active)
+}
+
+pub fn refusal(error: &str, before: Setting) -> String {
+    match before {
+        Setting::On(old) => format!("{error} {} stays.", old.label()),
+        Setting::Off => error.to_owned(),
+    }
+}
+
 pub fn read(data_dir: &Path) -> Setting {
     Settings::open(&data_dir.join("settings.json"))
         .map(|s| from_settings(&s))

@@ -30,8 +30,8 @@ pub const VIEWS: [ViewSpec; 8] = [
     },
     ViewSpec {
         name: "settings",
-        size: (620.0, 1360.0),
-        about: "the Settings sheet's General page with acting shown read-only (defaults) and the Chat section",
+        size: (620.0, 1660.0),
+        about: "the Settings sheet's General page with acting shown read-only (defaults), the Search section and the Chat section",
     },
     ViewSpec {
         name: "settings-agents",

@@ -182,6 +182,22 @@ pub fn sections(read: &dyn Fn(&str) -> Option<Value>, daemon: &Daemon) -> Vec<Se
             footer: None,
         },
         Section {
+            title: "Search",
+            rows: vec![Row {
+                key: shortcut::KEY,
+                title: "Search Shortcut",
+                field: Field::Shortcut(
+                    value(read, shortcut::KEY)
+                        .map(|v| shortcut::Setting::from_value(&v))
+                        .unwrap_or(shortcut::Setting::DEFAULT),
+                ),
+            }],
+            footer: Some(
+                "Opens Search from any app, so no other app can use this key. Inside \
+                 Notchling, ⌘⇧P always opens Search.",
+            ),
+        },
+        Section {
             title: "Daemon",
             rows: DAEMON_ROWS
                 .iter()
@@ -258,22 +274,6 @@ pub fn sections(read: &dyn Fn(&str) -> Option<Value>, daemon: &Daemon) -> Vec<Se
             footer: Some(
                 "Chat shows the newest part of a long session. More shows earlier turns and uses \
                  more memory. It applies the next time a session loads.",
-            ),
-        },
-        Section {
-            title: "Search",
-            rows: vec![Row {
-                key: shortcut::KEY,
-                title: "Search Shortcut",
-                field: Field::Shortcut(
-                    value(read, shortcut::KEY)
-                        .map(|v| shortcut::Setting::from_value(&v))
-                        .unwrap_or(shortcut::Setting::DEFAULT),
-                ),
-            }],
-            footer: Some(
-                "Opens Search from any app, so no other app can use this key. Inside \
-                 Notchling, ⌘⇧P always opens Search.",
             ),
         },
     ]
@@ -390,7 +390,7 @@ mod tests {
     }
 
     #[test]
-    fn the_daemons_switches_follow_general_with_what_it_said() {
+    fn the_daemons_switches_follow_the_app_wide_sections_with_what_it_said() {
         let daemon = Daemon {
             acting: Acting::On,
             bridge: Some(false),
@@ -398,7 +398,7 @@ mod tests {
             vault: None,
             install: Some(false),
         };
-        let first = sections(&|_| None, &daemon).remove(1);
+        let first = sections(&|_| None, &daemon).remove(2);
         assert_eq!(first.title, "Daemon");
         let fields: Vec<Field> = first.rows.iter().map(|r| r.field.clone()).collect();
         assert_eq!(
@@ -427,7 +427,7 @@ mod tests {
             ]
         );
         assert_eq!(change(&first.rows[0], ""), None, "not a settings key");
-        let off = sections(&|_| None, &with(Acting::Off)).remove(1);
+        let off = sections(&|_| None, &with(Acting::Off)).remove(2);
         assert_eq!(
             off.rows[0].field,
             Field::Daemon {
@@ -435,7 +435,7 @@ mod tests {
                 on: Some(false)
             }
         );
-        let none = sections(&|_| None, &Daemon::detached()).remove(1);
+        let none = sections(&|_| None, &Daemon::detached()).remove(2);
         assert!(none
             .rows
             .iter()
@@ -460,7 +460,7 @@ mod tests {
     }
 
     #[test]
-    fn the_chat_and_search_sections_are_last_and_nothing_before_them_moves() {
+    fn the_app_wide_sections_come_first_and_chat_is_last() {
         let titles: Vec<&str> = sections(&|_| None, &with(Acting::Off))
             .iter()
             .map(|s| s.title)
@@ -469,14 +469,14 @@ mod tests {
             titles,
             [
                 "General",
+                "Search",
                 "Daemon",
                 "Keep Mac Awake",
                 "Notch",
                 "Claude Code",
                 "When the Account in Use Nears Its Limit",
                 "Codex",
-                "Chat",
-                "Search"
+                "Chat"
             ]
         );
         let rows = rows_of(&|_| None, Acting::Off);

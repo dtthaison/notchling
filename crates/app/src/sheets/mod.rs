@@ -13,8 +13,6 @@ pub mod renders;
 pub mod second_opinion_view;
 pub mod settings;
 #[cfg(target_os = "macos")]
-pub mod settings_activity_view;
-#[cfg(target_os = "macos")]
 pub mod settings_hooks_view;
 #[cfg(target_os = "macos")]
 pub mod settings_view;

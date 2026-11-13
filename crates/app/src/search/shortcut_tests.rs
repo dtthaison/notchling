@@ -157,3 +157,42 @@ fn inside_notchling_the_key_stays_command_shift_p() {
     assert_eq!(IN_WINDOW_LABEL, "⌘⇧P");
     assert_eq!(label_of("cmd+shift+p").as_deref(), Some("⇧⌘P"));
 }
+
+#[test]
+fn a_change_made_elsewhere_applies_only_for_this_key_and_only_when_it_differs() {
+    let on = Setting::DEFAULT;
+    assert_eq!(changed_to("chatHistory", &json!("off"), on), None);
+    assert_eq!(
+        changed_to(KEY, &json!("ctrl+alt+p"), on),
+        None,
+        "already active"
+    );
+    assert_eq!(
+        changed_to(KEY, &json!("alt+space"), on).map(|s| s.label()),
+        Some("⌥Space".to_owned())
+    );
+    assert_eq!(changed_to(KEY, &json!("off"), on), Some(Setting::Off));
+    assert_eq!(changed_to(KEY, &json!("off"), Setting::Off), None);
+    assert_eq!(
+        changed_to(KEY, &json!("ctrl+alt+p"), Setting::Off),
+        Some(Setting::DEFAULT),
+        "a key that failed at start is tried again"
+    );
+    assert_eq!(
+        changed_to(KEY, &json!("garbage"), Setting::Off),
+        Some(Setting::DEFAULT),
+        "an unreadable value means what the next start would use"
+    );
+}
+
+#[test]
+fn a_refusal_says_which_key_stays() {
+    assert_eq!(
+        refusal("Another app holds it.", Setting::DEFAULT),
+        "Another app holds it. ⌃⌥P stays."
+    );
+    assert_eq!(
+        refusal("Another app holds it.", Setting::Off),
+        "Another app holds it."
+    );
+}

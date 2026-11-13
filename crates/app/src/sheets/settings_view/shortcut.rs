@@ -7,7 +7,7 @@ use serde_json::json;
 
 use super::SettingsView;
 use crate::mac::shell;
-use crate::search::shortcut::{Mods, Setting, Shortcut, KEY};
+use crate::search::shortcut::{refusal, Mods, Setting, Shortcut, KEY};
 
 const RECORDING: &str = "Press a shortcut…";
 
@@ -117,11 +117,7 @@ impl SettingsView {
             }
         }
         if let Err(e) = shell::set_search_shortcut(cx, setting) {
-            let kept = match before {
-                Setting::On(old) => format!(" {} stays.", old.label()),
-                Setting::Off => String::new(),
-            };
-            self.shortcut.note = Some((format!("{e}{kept}"), true));
+            self.shortcut.note = Some((refusal(&e, before), true));
             cx.notify();
             return;
         }

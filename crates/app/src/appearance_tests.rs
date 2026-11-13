@@ -60,3 +60,21 @@ fn a_forced_choice_wins_over_the_system_and_system_does_not() {
     assert_eq!(chosen("chatHistory", &json!("dark")), None);
     assert_eq!(chosen(KEY, &json!("sepia")), None);
 }
+
+#[test]
+fn a_change_made_elsewhere_applies_only_for_this_key_and_only_when_it_differs() {
+    assert_eq!(
+        changed_from(KEY, &json!("dark"), Preference::System),
+        Some(Preference::Dark)
+    );
+    assert_eq!(changed_from(KEY, &json!("dark"), Preference::Dark), None);
+    assert_eq!(
+        changed_from(KEY, &json!("system"), Preference::Light),
+        Some(Preference::System)
+    );
+    assert_eq!(changed_from(KEY, &json!("sepia"), Preference::System), None);
+    assert_eq!(
+        changed_from("chatHistory", &json!("dark"), Preference::System),
+        None
+    );
+}

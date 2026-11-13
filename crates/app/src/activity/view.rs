@@ -1,11 +1,10 @@
 use std::sync::Arc;
 
 use gpui::{
-    div, prelude::*, px, AnyView, Context, Div, Entity, EventEmitter, Render, SharedString,
-    Subscription, Window,
+    div, prelude::*, px, AnyView, Context, Div, Entity, Render, SharedString, Subscription, Window,
 };
 use notchling_engine::pages::clock::local_offset_secs;
-use notchling_kit::metric::{RADIUS_CARD, RADIUS_SM, SIDE_PADDING};
+use notchling_kit::metric::{RADIUS_SM, SIDE_PADDING};
 use notchling_kit::part::{ButtonKind, PartState};
 use notchling_kit::ui::{
     button, card, hsla, icon, label, scrollable, window_appearance, KitStyled, TextEditor,
@@ -16,9 +15,12 @@ use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 use super::model::{time_label, ActivityModel, Entry, Kind};
 use super::renders::{model as fixture, shown, NOW_MS, UTC};
 use super::wire;
+use crate::acting::Acting;
 use crate::actions::Actions;
 use crate::phone::bridge::now_ms;
-use crate::sheets::view::{sheet_header, Dismiss};
+use crate::sheets::agents::Page;
+use crate::sheets::settings_view::SettingsView;
+use crate::sheets::view::Acts;
 
 pub const SHOWN: usize = 300;
 
@@ -31,8 +33,6 @@ pub struct ActivityView {
     fixed: Option<(i64, i64)>,
     _search_events: Subscription,
 }
-
-impl EventEmitter<Dismiss> for ActivityView {}
 
 impl ActivityView {
     pub fn live(actions: Arc<Actions>, cx: &mut Context<Self>) -> ActivityView {
@@ -72,7 +72,7 @@ impl ActivityView {
         }
     }
 
-    fn refresh(&mut self, cx: &mut Context<Self>) {
+    pub fn refresh(&mut self, cx: &mut Context<Self>) {
         let Some(actions) = self.actions.clone() else {
             return;
         };
@@ -293,21 +293,6 @@ impl Render for ActivityView {
                 b
             }
         };
-        let done = button(
-            "activity-done",
-            "Done",
-            ButtonKind::Primary,
-            PartState::Rest,
-            a,
-        )
-        .on_click(cx.listener(|_, _, _, cx| cx.emit(Dismiss)));
-        let end = div()
-            .id("activity-actions")
-            .flex()
-            .items_center()
-            .gap(px(8.0))
-            .child(refresh)
-            .child(done);
         let list = div()
             .id("activity-list")
             .flex_1()
@@ -320,19 +305,22 @@ impl Render for ActivityView {
             .size_full()
             .flex()
             .flex_col()
-            .rounded(px(RADIUS_CARD))
-            .overflow_hidden()
-            .fill(Ink::Window, a)
-            .child(sheet_header(Icon::Clock, "Activity", end, a))
             .child(
                 div()
                     .px(px(SIDE_PADDING))
-                    .pt(px(SIDE_PADDING))
+                    .pt(px(14.0))
                     .pb(px(10.0))
                     .flex()
                     .flex_col()
                     .gap(px(8.0))
-                    .child(self.search_box(a))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(8.0))
+                            .child(self.search_box(a).flex_1())
+                            .child(refresh),
+                    )
                     .child(self.chips(a, cx)),
             )
             .child(scrollable(list))
@@ -341,8 +329,17 @@ impl Render for ActivityView {
 
 pub fn build_render(name: &str, cx: &mut gpui::App) -> Option<AnyView> {
     let which = shown(name)?;
+    let acts = Acts {
+        actions: Arc::new(Actions::fixed(Acting::Off)),
+        sessions: None,
+    };
+    let activity = cx.new(|cx| ActivityView::fixed(fixture(which), NOW_MS, UTC, cx));
     Some(
-        cx.new(|cx| ActivityView::fixed(fixture(which), NOW_MS, UTC, cx))
-            .into(),
+        cx.new(|_| {
+            SettingsView::new(None, acts)
+                .with_page(Page::Activity)
+                .with_activity(activity)
+        })
+        .into(),
     )
 }

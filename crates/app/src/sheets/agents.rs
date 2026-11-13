@@ -2,15 +2,17 @@
 pub enum Page {
     General,
     Agents,
+    Activity,
 }
 
 impl Page {
-    pub const ALL: [Page; 2] = [Page::General, Page::Agents];
+    pub const ALL: [Page; 3] = [Page::General, Page::Agents, Page::Activity];
 
     pub fn title(self) -> &'static str {
         match self {
             Page::General => "General",
             Page::Agents => "Agents",
+            Page::Activity => "Activity",
         }
     }
 }

@@ -35,8 +35,12 @@ pub fn chosen(key: &str, value: &Value) -> Option<Preference> {
         .and_then(Preference::parse)
 }
 
+pub fn changed_from(key: &str, value: &Value, current: Preference) -> Option<Preference> {
+    chosen(key, value).filter(|p| *p != current)
+}
+
 pub fn changed_to(key: &str, value: &Value) -> Option<Preference> {
-    chosen(key, value).filter(|p| *p != preference())
+    changed_from(key, value, preference())
 }
 
 #[cfg(test)]

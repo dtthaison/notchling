@@ -253,6 +253,26 @@ pub fn set_search_shortcut(cx: &mut App, setting: Setting) -> Result<(), String>
     Ok(())
 }
 
+pub fn on_search_setting(cx: &mut App, key: &str, value: &serde_json::Value) {
+    let before = active_search(cx);
+    let Some(wanted) = shortcut::changed_to(key, value, before) else {
+        return;
+    };
+    let outcome = match wanted {
+        Setting::On(chosen) => match chosen.problem() {
+            Some(problem) => Err(problem.to_owned()),
+            None => set_search_shortcut(cx, wanted),
+        },
+        Setting::Off => set_search_shortcut(cx, wanted),
+    };
+    if let Err(e) = outcome {
+        eprintln!("search shortcut {}: {e}", wanted.label());
+        if cx.has_global::<Shell>() {
+            cx.global_mut::<Shell>().search_failure = Some(shortcut::refusal(&e, before));
+        }
+    }
+}
+
 pub fn active_search(cx: &App) -> Setting {
     cx.try_global::<Shell>()
         .map(|s| s.search)

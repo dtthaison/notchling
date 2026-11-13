@@ -16,12 +16,11 @@ use crate::accounts::menu::targets;
 use crate::accounts::view::AccountsView;
 use crate::acting::Acting;
 use crate::actions::Actions;
-use crate::activity::view::ActivityView;
 use crate::chat::data::Tool;
 use crate::mac::shell::{AppActions, AppVault};
 use crate::sheets::new_session::{accounts, draft_session, folders, NewSession};
 use crate::sheets::second_opinion_view::SecondOpinionView;
-use crate::sheets::settings_view::{OpenActivity, SettingChanged, SettingsView};
+use crate::sheets::settings_view::{SettingChanged, SettingsView};
 use crate::sheets::view::{AccountsHandle, Acts, Dismiss, NewSessionView, StartDraft, StartedJob};
 use crate::tools::second_opinion::SecondOpinionSheet;
 use crate::vault::store::Vault;
@@ -194,6 +193,7 @@ impl ChatView {
     }
 
     pub fn applied_setting(&mut self, key: &str, value: &Value, cx: &mut Context<Self>) {
+        crate::mac::settings_live::app_wide(key, value, cx);
         if crate::chat::history::on_change(key, value) {
             self.reload_now(cx);
         }
@@ -222,17 +222,7 @@ impl ChatView {
             this.applied_setting(&e.key, &e.value, cx);
         })
         .detach();
-        cx.subscribe(&entity, |this, _, _: &OpenActivity, cx| {
-            this.open_activity(cx)
-        })
-        .detach();
         entity.update(cx, |view, cx| view.ask_hooks(hooks, cx));
-        self.show(entity, cx);
-    }
-
-    fn open_activity(&mut self, cx: &mut Context<Self>) {
-        let actions = self.acts(cx).actions;
-        let entity = cx.new(|cx| ActivityView::live(actions, cx));
         self.show(entity, cx);
     }
 }
