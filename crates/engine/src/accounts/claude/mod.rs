@@ -11,6 +11,7 @@ use crate::accounts::http::{HttpClient, HttpRequest, PROFILE_URL};
 use crate::accounts::json_splice::set_top_level;
 use crate::accounts::keychain::Keys;
 use crate::accounts::{Login, Secret};
+use crate::cost::account_log;
 use crate::docfile::DocFile;
 use crate::lanes::LaneStore;
 use profile::{
@@ -82,6 +83,7 @@ pub struct ClaudeEnv {
 #[derive(Default)]
 struct State {
     active: Option<String>,
+    logged: Option<String>,
     known: HashMap<[u8; 32], String>,
 }
 
@@ -137,6 +139,19 @@ impl ClaudeAccounts {
 
     fn now(&self) -> i64 {
         (self.env.now_ms)()
+    }
+
+    fn note_active(&self, state: &mut State) {
+        let Some(active) = state.active.clone() else {
+            return;
+        };
+        if state.logged.as_deref() == Some(active.as_str()) {
+            return;
+        }
+        let file = account_log::path(&self.env.data_dir);
+        if account_log::record(&file, &active, self.now()).is_ok() {
+            state.logged = Some(active);
+        }
     }
 
     fn list_doc(&self) -> DocFile {
@@ -197,6 +212,7 @@ impl ClaudeAccounts {
             self.live_is_saved(&state)?;
             self.activate(id)?;
             state.active = Some(id.to_string());
+            self.note_active(&mut state);
         }
         if let Some(entry) = list.iter_mut().find(|a| a.id == id) {
             entry.needs_login = false;
@@ -297,6 +313,7 @@ impl ClaudeAccounts {
         };
         state.known.insert(key, id.clone());
         state.active = Some(id.clone());
+        self.note_active(state);
         let account = match profile {
             Some(p) => Some(oauth_account_from_profile(&p)),
             None => config
@@ -429,6 +446,8 @@ fn upsert(list: &mut Vec<ClaudeAccount>, account: ClaudeAccount) {
 mod tests;
 #[cfg(test)]
 mod tests_lanes;
+#[cfg(test)]
+mod tests_log;
 #[cfg(test)]
 mod tests_safe;
 #[cfg(test)]
