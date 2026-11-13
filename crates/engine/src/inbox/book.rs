@@ -1,7 +1,9 @@
 use super::model::{ActionId, Item, Kind, State};
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 
 pub const MAX_OPEN: usize = 200;
+pub const MAX_DONE: usize = 300;
 pub const DONE_KEEP_MS: i64 = 7 * 86_400_000;
 pub const TITLE_MAX: usize = 120;
 pub const DETAIL_MAX: usize = 400;
@@ -25,7 +27,7 @@ pub struct Book {
     items: Vec<Item>,
 }
 
-fn cut(text: String, max: usize) -> String {
+pub(super) fn cut(text: String, max: usize) -> String {
     if text.chars().count() <= max {
         return text;
     }
@@ -161,9 +163,26 @@ impl Book {
     }
 
     pub fn prune(&mut self, now_ms: i64) {
-        self.items.retain(|item| {
-            item.state == State::Open
-                || now_ms - item.closed_ms.unwrap_or(item.created_ms) <= DONE_KEEP_MS
+        let closed_at = |item: &Item| item.closed_ms.unwrap_or(item.created_ms);
+        self.items
+            .retain(|item| item.state == State::Open || now_ms - closed_at(item) <= DONE_KEEP_MS);
+        let mut closed: Vec<(i64, usize)> = self
+            .items
+            .iter()
+            .enumerate()
+            .filter(|(_, item)| item.state != State::Open)
+            .map(|(index, item)| (closed_at(item), index))
+            .collect();
+        if closed.len() <= MAX_DONE {
+            return;
+        }
+        closed.sort_by(|a, b| b.cmp(a));
+        let gone: HashSet<usize> = closed[MAX_DONE..].iter().map(|(_, index)| *index).collect();
+        let mut index = 0;
+        self.items.retain(|_| {
+            let keep = !gone.contains(&index);
+            index += 1;
+            keep
         });
     }
 

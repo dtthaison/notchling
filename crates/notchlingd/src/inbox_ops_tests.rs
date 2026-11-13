@@ -340,11 +340,12 @@ fn a_restart_withdraws_open_items_and_saves_that() {
         Arc::new(FakeRoom::default()),
         Arc::new(move || later),
     );
+    reopened.start();
     let out = reopened.call(&app(), ops::INBOX_LIST, &json!({})).unwrap();
     assert_eq!(out["items"][0]["state"], "withdrawn");
     assert_eq!(out["unread"], 0);
     let aged = later + inbox::DONE_KEEP_MS + 100;
-    reopened.flush();
+    reopened.close();
     let mut stored = inbox::load(&r.dir, aged).unwrap();
     assert_eq!(stored.items()[0].state, State::Withdrawn);
     assert_eq!(stored.items()[0].closed_ms, Some(later));

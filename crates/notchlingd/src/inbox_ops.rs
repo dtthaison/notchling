@@ -2,10 +2,11 @@ use crate::acting_ops::{now_ms, Room};
 use crate::op_group::OpGroup;
 use notchling_engine::bridge::inbox::InboxOutcome;
 use notchling_engine::inbox::{self, ActionId, Book, Change, Item, State};
-use notchling_local_api::{ops, topics, ApiError, Caller, ErrorCode, OpSpec, Tier};
+use notchling_local_api::{ops, topics, ApiError, Caller, ClientKind, ErrorCode, OpSpec, Tier};
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread::JoinHandle;
@@ -58,6 +59,8 @@ impl Inner {
 
 pub struct InboxOps {
     clock: Clock,
+    data_dir: PathBuf,
+    loaded: AtomicBool,
     inner: Mutex<Inner>,
     stop: Mutex<Option<Sender<()>>>,
     thread: Mutex<Option<JoinHandle<()>>>,
@@ -119,36 +122,58 @@ impl InboxOps {
     }
 
     pub fn with_clock(data_dir: PathBuf, room: Arc<dyn Room>, clock: Clock) -> Arc<InboxOps> {
-        let now = clock();
-        let book = inbox::load(&data_dir, now).unwrap_or_else(|why| {
-            eprintln!("notchling: reading the inbox failed ({why}); starting it empty");
-            Book::new()
-        });
         let (writes, reads) = channel::<Msg>();
+        let folder = data_dir.clone();
         let writer = std::thread::Builder::new()
             .name("notchling-inbox-writes".into())
-            .spawn(move || write_loop(reads, data_dir, room))
+            .spawn(move || write_loop(reads, folder, room))
             .ok();
-        let withdrawn: Vec<Change> = book
-            .items()
-            .into_iter()
-            .filter(|item| item.state == State::Withdrawn && item.closed_ms == Some(now))
-            .map(Change::Updated)
-            .collect();
         let inner = Inner {
-            book,
+            book: Book::new(),
             responders: HashMap::new(),
             writes: Some(writes),
         };
-        inner.send(withdrawn);
         let ops = InboxOps {
             clock,
+            data_dir,
+            loaded: AtomicBool::new(false),
             inner: Mutex::new(inner),
             stop: Mutex::new(None),
             thread: Mutex::new(None),
             writer: Mutex::new(writer),
         };
         Arc::new(ops)
+    }
+
+    pub fn start(self: &Arc<Self>) {
+        self.load_saved();
+        self.spawn_loop();
+    }
+
+    fn load_saved(&self) {
+        if self.loaded.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        let now = (self.clock)();
+        let saved = inbox::load(&self.data_dir, now).unwrap_or_else(|why| {
+            eprintln!("notchling: reading the inbox failed ({why}); starting it empty");
+            Book::new()
+        });
+        let mut inner = lock(&self.inner);
+        let held = inner.book.items();
+        let fresh: Vec<Item> = saved
+            .items()
+            .into_iter()
+            .filter(|item| !held.iter().any(|h| h.id == item.id))
+            .collect();
+        let withdrawn: Vec<Change> = fresh
+            .iter()
+            .filter(|item| item.state == State::Withdrawn && item.closed_ms == Some(now))
+            .cloned()
+            .map(Change::Updated)
+            .collect();
+        inner.book = Book::from_items(fresh.into_iter().chain(held).collect());
+        inner.send(withdrawn);
     }
 
     pub fn raise(&self, item: Item, responder: Option<Arc<dyn Responder>>) -> String {
@@ -338,7 +363,7 @@ impl OpGroup for InboxOps {
     }
 
     fn call(&self, caller: &Caller, op: &str, args: &Value) -> Result<Value, ApiError> {
-        if caller.tier != Tier::App {
+        if caller.tier != Tier::App || caller.client != ClientKind::App {
             return Err(ApiError::new(
                 ErrorCode::Forbidden,
                 "The inbox is the app's.",

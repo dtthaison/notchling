@@ -309,3 +309,26 @@ fn raise_of_a_closed_id_changes_nothing() {
     assert!(book.raise(again).is_empty());
     assert_eq!(book.items(), before);
 }
+
+#[test]
+fn prune_keeps_only_the_newest_closed_items() {
+    let mut book = Book::new();
+    let extra = 5;
+    for n in 0..(MAX_DONE + extra) {
+        let id = format!("d{n}");
+        book.raise(item(&id, Kind::Notice, 0, &[ActionId::Done]));
+        let at = i64::try_from(n).unwrap() + 1;
+        book.answer(&id, ActionId::Done, "app", at).unwrap();
+    }
+    book.raise(item("open", Kind::Notice, 0, &[ActionId::Done]));
+    book.prune(MAX_DONE as i64 + 100);
+    let items = book.items();
+    assert_eq!(items.len(), MAX_DONE + 1);
+    let ids: Vec<&str> = items.iter().map(|item| item.id.as_str()).collect();
+    assert!(ids.contains(&"open"));
+    for n in 0..extra {
+        assert!(!ids.contains(&format!("d{n}").as_str()), "d{n}");
+    }
+    assert!(ids.contains(&format!("d{}", MAX_DONE + extra - 1).as_str()));
+    assert!(ids.contains(&format!("d{extra}").as_str()));
+}

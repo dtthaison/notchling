@@ -1,4 +1,5 @@
-use super::{Book, Change, Item, State};
+use super::book::cut;
+use super::{Book, Change, Item, State, DETAIL_MAX, TITLE_MAX};
 use crate::store;
 use rusqlite::{params, TransactionBehavior};
 use std::path::Path;
@@ -19,6 +20,8 @@ pub fn load(data_dir: &Path, now_ms: i64) -> Result<Book, String> {
         let Ok(mut item) = serde_json::from_str::<Item>(&text) else {
             continue;
         };
+        item.title = cut(item.title, TITLE_MAX);
+        item.detail = cut(item.detail, DETAIL_MAX);
         if item.state == State::Open {
             item.state = State::Withdrawn;
             item.closed_ms = Some(now_ms);

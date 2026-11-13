@@ -29,7 +29,10 @@ pub fn notify_new(
         if !wants_you(item) || !notified.insert(item.id.clone()) {
             continue;
         }
-        let _ = notifier.notify(&Notification::new(item.title.clone(), item.detail.clone()));
+        let notification = Notification::new(item.title.clone(), item.detail.clone());
+        if let Err(e) = notifier.notify(&notification) {
+            eprintln!("inbox: the system notification wasn't shown ({e})");
+        }
     }
 }
 
@@ -42,7 +45,9 @@ impl Detached {
             .name("notchling-inbox-banner".into())
             .spawn(move || {
                 for notification in receiver {
-                    let _ = inner.notify(&notification);
+                    if let Err(e) = inner.notify(&notification) {
+                        eprintln!("inbox: the system notification wasn't shown ({e})");
+                    }
                 }
             });
         Detached(spawned.ok().map(|_| sender))

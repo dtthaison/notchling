@@ -116,3 +116,18 @@ fn a_row_that_cannot_be_read_is_skipped() {
         .unwrap();
     assert_eq!(ids(&load(&dir, 1).unwrap()), vec!["a".to_string()]);
 }
+
+#[test]
+fn load_cuts_long_text() {
+    let tmp = TempDir::new("inbox-cut");
+    let dir = tmp.path("data");
+    let mut long = item("a", 1, State::Expired);
+    long.title = "t".repeat(TITLE_MAX + 50);
+    long.detail = "d".repeat(DETAIL_MAX + 50);
+    save(&dir, &Change::Raised(long)).unwrap();
+    let loaded = load(&dir, 2).unwrap().items();
+    assert_eq!(loaded[0].title.chars().count(), TITLE_MAX);
+    assert!(loaded[0].title.ends_with('…'));
+    assert_eq!(loaded[0].detail.chars().count(), DETAIL_MAX);
+    assert!(loaded[0].detail.ends_with('…'));
+}

@@ -467,7 +467,7 @@ impl Wired {
     /// The server answers: the limits loop starts (a flag check per tick while `accounts` is off).
     pub fn start(&self) {
         self.limits.spawn_loop();
-        self.inbox.spawn_loop();
+        self.inbox.start();
     }
 
     /// The daemon stops: held hooks pass, turns and waits end, the bridge's ports close.
