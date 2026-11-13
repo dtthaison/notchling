@@ -1,4 +1,8 @@
-use gpui::{div, prelude::*, px, AnyElement, CursorStyle, Window};
+use gpui::{div, prelude::*, px, AnyElement, CursorStyle, Div, Stateful, Window};
+
+use crate::metric::{PANEL_EDGE_BEFORE, PANEL_EDGE_HIT, PANEL_EDGE_LINE};
+use crate::ui::hsla;
+use crate::{Appearance, Ink};
 
 use crate::resize::{Axis, Zone};
 
@@ -42,4 +46,27 @@ pub fn resize_edges(window: &Window, top: TopBorder) -> AnyElement {
         .size_full()
         .children(zones)
         .into_any_element()
+}
+
+pub fn panel_edge(id: &'static str, x: f32, active: bool, a: Appearance) -> Stateful<Div> {
+    let line = hsla(Ink::Accent.color(a));
+    div()
+        .id(id)
+        .group(id)
+        .absolute()
+        .top(px(0.0))
+        .bottom(px(0.0))
+        .left(px(x - PANEL_EDGE_BEFORE))
+        .w(px(PANEL_EDGE_HIT))
+        .flex()
+        .cursor(cursor(Axis::Horizontal))
+        .child(
+            div()
+                .h_full()
+                .ml(px(PANEL_EDGE_BEFORE - PANEL_EDGE_LINE / 2.0))
+                .w(px(PANEL_EDGE_LINE))
+                .opacity(0.7)
+                .when(active, move |d| d.bg(line))
+                .group_hover(id, move |s| s.bg(line)),
+        )
 }

@@ -1,4 +1,4 @@
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::Duration;
@@ -7,7 +7,6 @@ use gpui::{
     div, point, prelude::*, px, size, App, Bounds, Context, DisplayId, Render, Subscription,
     TitlebarOptions, Window, WindowBounds, WindowHandle, WindowKind, WindowOptions,
 };
-use notchling_engine::settings::Settings;
 use notchling_kit::metric::{SIDEBAR_WIDTH, SIDE_PADDING, TITLE_BAR, WINDOW_DEFAULT, WINDOW_MIN};
 use notchling_kit::part::{ButtonKind, PartState};
 use notchling_kit::ui::{
@@ -16,7 +15,7 @@ use notchling_kit::ui::{
 };
 use notchling_kit::{Appearance, Ink, TypeRole};
 
-use crate::window_frame::{Frame, KEY};
+use crate::window_frame::{place, save, Frame, Screen};
 
 const SAVE_AFTER: Duration = Duration::from_millis(400);
 
@@ -122,32 +121,33 @@ impl Render for ShellView {
 }
 
 fn placement(saved: Option<Frame>, cx: &App) -> (Option<DisplayId>, WindowBounds) {
-    let default = || {
+    let displays = cx.displays();
+    let screens: Vec<Screen> = displays
+        .iter()
+        .map(|d| Screen {
+            id: d.uuid().map(|u| u.to_string()).unwrap_or_default(),
+            size: (
+                f32::from(d.bounds().size.width),
+                f32::from(d.bounds().size.height),
+            ),
+        })
+        .collect();
+    let main = cx
+        .primary_display()
+        .and_then(|p| displays.iter().position(|d| d.id() == p.id()))
+        .unwrap_or(0);
+    let Some(placed) = place(saved.as_ref(), &screens, main, WINDOW_DEFAULT, WINDOW_MIN) else {
         let bounds = Bounds::centered(None, size(px(WINDOW_DEFAULT.0), px(WINDOW_DEFAULT.1)), cx);
-        (None, WindowBounds::Windowed(bounds))
+        return (None, WindowBounds::Windowed(bounds));
     };
-    let Some(saved) = saved else {
-        return default();
-    };
-    let Some(display) = cx
-        .displays()
-        .into_iter()
-        .find(|d| d.uuid().is_ok_and(|u| u.to_string() == saved.display))
-    else {
-        return default();
-    };
-    let screen = display.bounds().size;
-    let (x, y, w, h) = saved.fit(
-        (f32::from(screen.width), f32::from(screen.height)),
-        WINDOW_MIN,
-    );
+    let (x, y, w, h) = placed.rect;
     let bounds = Bounds::new(point(px(x), px(y)), size(px(w), px(h)));
-    let bounds = if saved.maximized {
+    let bounds = if placed.maximized {
         WindowBounds::Maximized(bounds)
     } else {
         WindowBounds::Windowed(bounds)
     };
-    (Some(display.id()), bounds)
+    (Some(displays[placed.screen].id()), bounds)
 }
 
 fn frame_of(window: &Window, cx: &App) -> Frame {
@@ -171,13 +171,8 @@ fn frame_of(window: &Window, cx: &App) -> Frame {
 }
 
 fn save_frame(settings: &Path, frame: &Frame) {
-    match Settings::open(settings) {
-        Ok(mut store) => {
-            if let Err(e) = store.set(KEY, frame.to_value()) {
-                eprintln!("save the window's frame: {e}");
-            }
-        }
-        Err(e) => eprintln!("save the window's frame: {e}"),
+    if let Err(e) = save(settings, frame) {
+        eprintln!("save the window's frame: {e}");
     }
 }
 
@@ -186,10 +181,7 @@ pub fn open_main_window<V: Render>(
     settings: Option<PathBuf>,
     build: impl FnOnce(&mut Window, &mut Context<V>) -> V,
 ) -> Option<WindowHandle<V>> {
-    let saved = settings
-        .as_deref()
-        .and_then(|p| Settings::open(p).ok())
-        .and_then(|s| Frame::from_value(s.get(KEY).as_ref()));
+    let saved = settings.as_deref().and_then(crate::window_frame::load);
     let (display_id, bounds) = placement(saved, cx);
     let options = WindowOptions {
         window_bounds: Some(bounds),
@@ -203,28 +195,65 @@ pub fn open_main_window<V: Render>(
         kind: WindowKind::Normal,
         ..Default::default()
     };
-    cx.open_window(options, |window, cx| {
-        cx.new(|cx| {
-            if let Some(path) = settings {
-                let moves = Rc::new(Cell::new(0u64));
-                cx.observe_window_bounds(window, move |_, window, cx| {
-                    let frame = frame_of(window, cx);
-                    let n = moves.get() + 1;
-                    moves.set(n);
-                    let (moves, path) = (moves.clone(), path.clone());
-                    cx.spawn(async move |_, cx| {
-                        cx.background_executor().timer(SAVE_AFTER).await;
-                        if moves.get() == n {
-                            save_frame(&path, &frame);
-                        }
-                    })
-                    .detach();
-                })
-                .detach();
-            }
-            build(window, cx)
+    let pending: Rc<RefCell<Option<Frame>>> = Rc::default();
+    let handle = cx
+        .open_window(options, |window, cx| {
+            cx.new(|cx| {
+                if let Some(path) = settings.clone() {
+                    watch_frame(window, cx, path, pending.clone());
+                }
+                build(window, cx)
+            })
         })
+        .map_err(|e| eprintln!("open window: {e}"))
+        .ok()?;
+    if let Some(path) = settings {
+        let on_quit = (path, pending);
+        cx.on_app_quit(move |_| {
+            flush(&on_quit.0, &on_quit.1);
+            async {}
+        })
+        .detach();
+    }
+    Some(handle)
+}
+
+fn flush(path: &Path, pending: &RefCell<Option<Frame>>) {
+    let frame = pending.borrow_mut().take();
+    if let Some(frame) = frame {
+        save_frame(path, &frame);
+    }
+}
+
+fn watch_frame<V: 'static>(
+    window: &mut Window,
+    cx: &mut Context<V>,
+    path: PathBuf,
+    pending: Rc<RefCell<Option<Frame>>>,
+) {
+    let moves = Rc::new(Cell::new(0u64));
+    let (observed_path, observed) = (path.clone(), pending.clone());
+    cx.observe_window_bounds(window, move |_, window, cx| {
+        *observed.borrow_mut() = Some(frame_of(window, cx));
+        let n = moves.get() + 1;
+        moves.set(n);
+        let (moves, path, pending) = (moves.clone(), observed_path.clone(), observed.clone());
+        cx.spawn(async move |_, cx| {
+            cx.background_executor().timer(SAVE_AFTER).await;
+            if moves.get() == n {
+                let frame = pending.borrow_mut().take();
+                if let Some(frame) = frame {
+                    cx.background_executor()
+                        .spawn(async move { save_frame(&path, &frame) })
+                        .await;
+                }
+            }
+        })
+        .detach();
     })
-    .map_err(|e| eprintln!("open window: {e}"))
-    .ok()
+    .detach();
+    window.on_window_should_close(cx, move |_, _| {
+        flush(&path, &pending);
+        true
+    });
 }
