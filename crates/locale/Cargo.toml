@@ -14,3 +14,8 @@ icu_decimal = "=2.4.0"
 icu_locale_core = "=2.4.0"
 icu_plurals = "=2.4.0"
 icu_provider = { version = "=2.4.0", features = ["sync"] }
+
+[dev-dependencies]
+fluent-bundle = "=0.16.0"
+fluent-syntax = "=0.12.0"
+unic-langid = "=0.9.6"
