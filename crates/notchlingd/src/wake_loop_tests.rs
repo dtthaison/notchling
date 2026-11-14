@@ -30,6 +30,7 @@ fn job(id: &str, group: AgentGroup) -> Agent {
         config_dir: None,
         command: None,
         resume_session_id: None,
+        at_prompt: false,
     }
 }
 

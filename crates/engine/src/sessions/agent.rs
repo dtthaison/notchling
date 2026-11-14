@@ -35,11 +35,25 @@ pub struct Agent {
     pub config_dir: Option<String>,
     pub command: Option<String>,
     pub resume_session_id: Option<String>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub at_prompt: bool,
+}
+
+fn is_false(flag: &bool) -> bool {
+    !*flag
 }
 
 impl Agent {
     pub fn can_reply(&self) -> bool {
         matches!(self.target, AgentTarget::Job(_)) && self.command.is_none()
+    }
+
+    pub fn turn_running(&self) -> bool {
+        self.group == AgentGroup::Working && !self.at_prompt
+    }
+
+    pub fn takes_held_text(&self) -> bool {
+        self.can_reply() && (self.group == AgentGroup::Completed || self.at_prompt)
     }
 
     pub fn session_id(&self) -> Option<String> {
@@ -75,6 +89,7 @@ pub(crate) fn sample(target: AgentTarget, transcript: Option<&str>) -> Agent {
         config_dir: None,
         command: None,
         resume_session_id: None,
+        at_prompt: false,
     }
 }
 

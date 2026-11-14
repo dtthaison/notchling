@@ -1,4 +1,4 @@
-use crate::sessions::{Agent, AgentGroup};
+use crate::sessions::Agent;
 use std::collections::BTreeMap;
 
 pub const START_GRACE_MS: i64 = 20_000;
@@ -20,10 +20,13 @@ impl Held {
     pub fn route(&mut self, id: &str, text: &str, working: bool, now_ms: i64) -> Route {
         if working || self.texts.contains_key(id) || self.starting(id, now_ms) {
             let held = self.texts.entry(id.to_owned()).or_default();
-            if !held.is_empty() {
+            if held.is_empty() {
+                held.push_str(text);
+            } else {
+                held.truncate(held.trim_end().len());
                 held.push_str(JOIN);
+                held.push_str(text.trim_start_matches(['\n', '\r']));
             }
-            held.push_str(text);
             return Route::Hold(held.clone());
         }
         self.sent_at.insert(id.to_owned(), now_ms);
@@ -36,7 +39,7 @@ impl Held {
 
     pub fn ready(&mut self, rows: &[Agent], now_ms: i64) -> Vec<(String, String)> {
         for row in rows {
-            if row.group == AgentGroup::Working {
+            if row.turn_running() {
                 self.sent_at.remove(&row.id);
             }
         }
@@ -44,7 +47,7 @@ impl Held {
             .retain(|_, at| now_ms.saturating_sub(*at) < START_GRACE_MS);
         let free: Vec<String> = rows
             .iter()
-            .filter(|row| row.group == AgentGroup::Completed && row.can_reply())
+            .filter(|row| row.takes_held_text())
             .filter(|row| self.texts.contains_key(&row.id) && !self.sent_at.contains_key(&row.id))
             .map(|row| row.id.clone())
             .collect();

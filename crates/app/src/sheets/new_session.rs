@@ -220,6 +220,7 @@ pub fn draft_session(provider: &str, folder: &str, now_ms: i64) -> Option<Sessio
         config_dir: None,
         command: None,
         resume_session_id: None,
+        at_prompt: false,
     };
     Some(Session {
         agent,
@@ -475,6 +476,7 @@ mod tests {
             config_dir: lane.map(str::to_owned),
             command: None,
             resume_session_id: None,
+            at_prompt: false,
         }
     }
 

@@ -305,6 +305,7 @@ mod tests {
             config_dir: None,
             command: None,
             resume_session_id: None,
+            at_prompt: false,
         };
         live.apply(&notchling_local_api::Event {
             event: "session.changed".into(),

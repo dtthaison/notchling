@@ -320,6 +320,7 @@ mod tests {
             config_dir: None,
             command: None,
             resume_session_id: None,
+            at_prompt: false,
         };
         let mut live = ToolLive::default();
         live.apply(&notchling_local_api::Event {

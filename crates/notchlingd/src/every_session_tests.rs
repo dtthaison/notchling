@@ -151,6 +151,7 @@ pub(crate) fn claude_agent() -> Agent {
         config_dir: None,
         command: None,
         resume_session_id: None,
+        at_prompt: false,
     }
 }
 
