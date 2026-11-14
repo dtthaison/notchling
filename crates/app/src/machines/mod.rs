@@ -30,10 +30,13 @@ pub mod renders;
 pub mod runs;
 #[cfg(target_os = "macos")]
 pub mod sheets_view;
-#[cfg(target_os = "macos")]
 pub mod versions_feed;
 #[cfg(test)]
 mod versions_feed_tests;
+pub mod versions_model;
+#[cfg(test)]
+mod versions_model_tests;
+#[cfg(target_os = "macos")]
 pub mod view;
 #[cfg(target_os = "macos")]
 pub mod window;

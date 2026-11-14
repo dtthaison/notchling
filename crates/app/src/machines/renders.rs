@@ -1,8 +1,10 @@
-use notchling_engine::machines::step::StepId;
+use notchling_engine::machines::step::{CheckResult, StepId};
+use notchling_engine::versions::parse_probe;
 
 use super::data::Setup;
 use super::forms::{AddForm, JobForm};
 use super::model::{MachinesModel, Sheet, Tab};
+use super::versions_feed::MacVersionsError;
 use crate::views::ViewSpec;
 use notchling_engine::machines::forms::JobDraft;
 
@@ -11,11 +13,13 @@ pub const MACHINES_FIX: &str = "machines-fix";
 pub const MACHINES_ADD: &str = "machines-add";
 pub const MACHINES_JOBS: &str = "machines-jobs";
 pub const MACHINES_JOB_SHEET: &str = "machines-job-sheet";
+pub const MACHINES_VERSIONS: &str = "machines-versions";
+pub const MACHINES_VERSIONS_NO_DAEMON: &str = "machines-versions-no-daemon";
 
 pub const WINDOW_SIZE: (f32, f32) = (900.0, 780.0);
 pub const WINDOW_MIN: (f32, f32) = (680.0, 460.0);
 
-pub const VIEWS: [ViewSpec; 5] = [
+pub const VIEWS: [ViewSpec; 7] = [
     ViewSpec {
         name: MACHINES,
         size: WINDOW_SIZE,
@@ -41,6 +45,16 @@ pub const VIEWS: [ViewSpec; 5] = [
         size: WINDOW_SIZE,
         about: "the sd worker job sheet over the Jobs tab, editing the first machine's job",
     },
+    ViewSpec {
+        name: MACHINES_VERSIONS,
+        size: WINDOW_SIZE,
+        about: "each machine's Tool Versions rows against the Mac's, one behind, one Homebrew, one not installed",
+    },
+    ViewSpec {
+        name: MACHINES_VERSIONS_NO_DAEMON,
+        size: WINDOW_SIZE,
+        about: "the same rows with no daemon: the Notchling isn't running banner and no marks",
+    },
 ];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -50,6 +64,8 @@ pub enum Shown {
     Add,
     Jobs,
     JobSheet,
+    Versions,
+    VersionsNoDaemon,
 }
 
 pub fn shown(name: &str) -> Option<Shown> {
@@ -59,6 +75,8 @@ pub fn shown(name: &str) -> Option<Shown> {
         MACHINES_ADD => Shown::Add,
         MACHINES_JOBS => Shown::Jobs,
         MACHINES_JOB_SHEET => Shown::JobSheet,
+        MACHINES_VERSIONS => Shown::Versions,
+        MACHINES_VERSIONS_NO_DAEMON => Shown::VersionsNoDaemon,
         _ => return None,
     })
 }
@@ -66,6 +84,7 @@ pub fn shown(name: &str) -> Option<Shown> {
 pub fn model(which: Shown) -> MachinesModel {
     let mut model = MachinesModel::new(Setup::for_render(None).parts());
     model.engine().refresh(None, true);
+    model.ask_mac_versions();
     match which {
         Shown::Machines => {}
         Shown::Fix => model.request_set_up(&StepId::STAYS_AWAKE, "m1"),
@@ -73,6 +92,11 @@ pub fn model(which: Shown) -> MachinesModel {
             model.open_sheet(Sheet::Add(AddForm::new()));
         }
         Shown::Jobs => model.tab = Tab::Jobs,
+        Shown::Versions => seed_versions(&model),
+        Shown::VersionsNoDaemon => {
+            seed_versions(&model);
+            model.set_mac_versions(Err(MacVersionsError::NotRunning));
+        }
         Shown::JobSheet => {
             model.tab = Tab::Jobs;
             if let Some(m) = model.machine("m1") {
@@ -81,6 +105,24 @@ pub fn model(which: Shown) -> MachinesModel {
         }
     }
     model
+}
+
+fn seed_versions(model: &MachinesModel) {
+    let probes = [
+        (
+            "m1",
+            "claude.path=/home/w/.local/bin/claude\nclaude.link=/home/w/.local/share/claude/versions/2.1.323\nclaude.version=2.1.323 (Claude Code)\ncodex.path=/opt/homebrew/bin/codex\ncodex.link=../Cellar/codex/0.166.0/bin/codex\ncodex.version=codex-cli 0.166.0\nagy.path=\n",
+        ),
+        (
+            "vps-sing-1",
+            "claude.path=/home/w/.local/bin/claude\nclaude.link=/home/w/.local/share/claude/versions/2.1.324\nclaude.version=2.1.324 (Claude Code)\ncodex.path=\nagy.path=\n",
+        ),
+    ];
+    for (name, text) in probes {
+        let mut result = CheckResult::pass("tools found");
+        result.detected.tools = Some(parse_probe(text, 1));
+        model.engine().show(name, StepId::TOOL_VERSIONS, result);
+    }
 }
 
 #[cfg(test)]

@@ -1,16 +1,18 @@
 use std::rc::Rc;
 
-use gpui::{div, prelude::*, px, Context, Div, SharedString};
+use gpui::{div, prelude::*, px, App, Context, Div, SharedString};
 use notchling_engine::machines::forms::abilities_line;
 use notchling_engine::machines::registry::{AdminAccess, Machine};
-use notchling_engine::machines::step::{CheckResult, SetupStep, StepFix};
+use notchling_engine::machines::step::{CheckResult, SetupStep, StepFix, StepId};
 use notchling_engine::machines::steps_repo::offers_replace;
+use notchling_engine::versions::Mark;
 use notchling_kit::metric::RADIUS_SM;
 use notchling_kit::part::{ButtonKind, PartState};
-use notchling_kit::ui::{button, card, icon, label, KitStyled};
+use notchling_kit::ui::{button, card, icon, label, KitPart, KitStyled};
 use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 
 use super::pieces::{LogTail, Tone};
+use super::versions_model::VersionRow;
 use super::view::{
     busy_line, marked, mono_box, state_icon, state_mark, text_line, Confirming, MachinesView,
     CARD_PADDING,
@@ -288,7 +290,12 @@ impl MachinesView {
                 )
                 .children(self.step_action(machine, step, result, busy, a, cx)),
         );
-        if let Some(result) = result {
+        let versions = (step.id == StepId::TOOL_VERSIONS)
+            .then(|| self.model.version_rows(&machine.name))
+            .flatten();
+        if let Some(rows) = versions {
+            column = column.child(self.version_rows(rows, a, cx));
+        } else if let Some(result) = result {
             for row in &result.rows {
                 column = column.child(
                     div()
@@ -324,6 +331,35 @@ impl MachinesView {
             }
         }
         column
+    }
+
+    fn version_rows(&self, rows: Vec<VersionRow>, a: Appearance, cx: &App) -> Div {
+        let mut column = div().flex().flex_col().gap(px(4.0));
+        for row in rows {
+            let (mark, ink) = match row.mark {
+                Mark::Same => (Icon::Check, Ink::Done),
+                Mark::Behind | Mark::Ahead => (Icon::Warning, Ink::AccentText),
+                Mark::Held | Mark::CantPin | Mark::NotInstalled | Mark::Unknown => {
+                    (Icon::Close, Ink::TextMuted)
+                }
+            };
+            column = column.child(
+                div()
+                    .pl(px(26.0))
+                    .flex()
+                    .gap(px(6.0))
+                    .child(icon(mark, TypeRole::Meta.spec().size, ink, a))
+                    .child(label(row.tool.title(), TypeRole::Meta, Ink::Text, a).flex_shrink_0())
+                    .child(
+                        label(&row.text, TypeRole::Meta, Ink::TextMuted, a)
+                            .flex_1()
+                            .min_w(px(0.0))
+                            .line_clamp(2),
+                    )
+                    .child(label(row.mark_text, TypeRole::Meta, ink, a).flex_shrink_0()),
+            );
+        }
+        column.part("Tool Versions", a, cx)
     }
 
     fn step_action(
