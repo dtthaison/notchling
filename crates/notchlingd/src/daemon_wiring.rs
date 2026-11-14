@@ -8,6 +8,7 @@ use crate::awake_loop::{power_for, AwakeLoop};
 use crate::bridge_backend::APPROVAL_WAIT;
 use crate::bridge_ops::{BridgeOps, BridgeSetup};
 use crate::catalog_ops::CatalogService;
+use crate::cluster_wiring::ClusterParts;
 use crate::codex_ops::CodexOps;
 use crate::daemon::{FirstScan, FIRST_LIST_WAIT};
 use crate::every_session::{EverySession, CLAUDE};
@@ -314,6 +315,7 @@ pub struct Wired {
     pub settings: Arc<SettingsOps>,
     pub versions: Arc<VersionsOps>,
     pub awake: Arc<AwakeLoop>,
+    pub cluster: ClusterParts,
 }
 
 impl Wired {
@@ -491,6 +493,13 @@ impl Wired {
             }),
             Version::parse(env!("CARGO_PKG_VERSION")).unwrap_or_else(Version::zero),
         );
+        let cluster = ClusterParts::build(
+            layout,
+            room.clone(),
+            switches.cluster.clone(),
+            versions.clone(),
+            inbox.clone(),
+        );
         Wired {
             acting,
             codex,
@@ -508,6 +517,7 @@ impl Wired {
             settings,
             versions,
             awake,
+            cluster,
         }
     }
 
@@ -552,6 +562,7 @@ impl Wired {
             .with_group(self.vault.clone())
             .with_group(self.settings.clone())
             .with_group(self.versions.clone())
+            .with_group(self.cluster.ops.clone())
             .with_group(Arc::new(git))
             .with_group(Arc::new(ActivityOps::for_daemon(layout)))
             .with_first_scan(first_scan, first_wait)
@@ -580,6 +591,7 @@ impl Wired {
         self.bridge.close();
         self.limits.close();
         self.settings.close();
+        self.cluster.close();
         self.inbox.close();
         self.versions.close();
     }

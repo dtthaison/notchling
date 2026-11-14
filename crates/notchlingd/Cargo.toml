@@ -13,6 +13,7 @@ path = "src/main.rs"
 
 [dependencies]
 serde_json = "1"
+notchling-cluster-net = { path = "../cluster-net" }
 notchling-engine = { path = "../engine" }
 notchling-local-api = { path = "../local-api" }
 notchling-platform = { path = "../platform" }

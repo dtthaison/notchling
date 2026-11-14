@@ -3877,6 +3877,7 @@ name = "notchling-notchlingd"
 version = "0.1.0"
 dependencies = [
  "libc",
+ "notchling-cluster-net",
  "notchling-engine",
  "notchling-local-api",
  "notchling-platform",

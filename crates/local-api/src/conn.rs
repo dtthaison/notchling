@@ -223,6 +223,13 @@ impl Session {
                 return false;
             }
         };
+        if hello.client == ClientKind::Node {
+            self.reply(
+                id,
+                Err(ApiError::bad_request("cluster nodes never use this socket")),
+            );
+            return false;
+        }
         if hello.api != API_VERSION {
             let message = format!(
                 "api {} is not served; this daemon speaks {API_VERSION}",

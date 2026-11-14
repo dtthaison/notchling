@@ -231,6 +231,19 @@ fn a_wrong_api_version_is_refused() {
 }
 
 #[test]
+fn a_hello_claiming_to_be_a_node_is_refused() {
+    let run = start();
+    let (mut s, mut r) = raw(&run.socket);
+    send(
+        &mut s,
+        r#"{"id":1,"op":"hello","args":{"client":"node","version":"0.1.0","api":1}}"#,
+    );
+    let v = reply(&mut r);
+    assert_eq!(v["err"]["code"], "bad_request", "{v}");
+    assert!(closed(&mut s));
+}
+
+#[test]
 fn garbage_after_hello_is_a_bad_request_and_the_connection_stays() {
     let run = start();
     let (mut s, mut r) = raw(&run.socket);

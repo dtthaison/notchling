@@ -107,6 +107,11 @@ impl Layout {
             .unwrap_or_else(|| PathBuf::from("."))
     }
 
+    pub fn cluster_dir(&self) -> PathBuf {
+        self.data_dir
+            .join(notchling_engine::cluster::persist::CLUSTER_DIR)
+    }
+
     pub fn audit_path(&self) -> PathBuf {
         self.state_dir().join(AUDIT_NAME)
     }

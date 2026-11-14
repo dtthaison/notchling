@@ -15,6 +15,14 @@ pub mod bridge_ops;
 pub mod catalog_ops;
 pub mod cli;
 pub mod clients;
+pub mod cluster_cli;
+mod cluster_driver;
+pub mod cluster_join;
+pub mod cluster_node;
+pub mod cluster_ops;
+pub mod cluster_switches;
+pub mod cluster_versions;
+pub mod cluster_wiring;
 pub mod codex_ops;
 pub mod control_ops;
 pub mod cost_ops;
@@ -78,6 +86,8 @@ mod awake_loop_tests;
 mod bridge_models_tests;
 #[cfg(test)]
 mod catalog_ops_tests;
+#[cfg(test)]
+mod cluster_testkit;
 #[cfg(test)]
 mod control_ops_tests;
 #[cfg(test)]
@@ -174,6 +184,7 @@ pub fn run(command: Command) -> i32 {
         Command::Secret { args } => vault_cli::secret(&args),
         Command::SecretRequest { args } => vault_cli::secret_request(&args),
         Command::Settings { args } => settings_cli::run(&args),
+        Command::Cluster { args } => cluster_cli::run(&args),
         Command::Service { action, dir } => run_service(action, dir.as_deref()),
         Command::Hook { socket } => match Layout::from_env(socket.as_deref()) {
             Some(l) => hook::run(&l),

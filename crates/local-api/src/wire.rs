@@ -107,6 +107,13 @@ pub mod ops {
 
     pub const VERSIONS_GET: &str = "versions.get";
     pub const VERSIONS_WORKERS: &str = "versions.workers";
+
+    pub const CLUSTER_STATUS: &str = "cluster.status";
+    pub const CLUSTER_CREATE: &str = "cluster.create";
+    pub const CLUSTER_JOIN_TOKEN: &str = "cluster.join.token";
+    pub const CLUSTER_JOIN: &str = "cluster.join";
+    pub const CLUSTER_MEMBER_SET: &str = "cluster.member.set";
+    pub const CLUSTER_REMOVE: &str = "cluster.remove";
 }
 
 pub mod topics {
@@ -149,6 +156,10 @@ pub mod topics {
 
     pub const VERSIONS: &str = "versions";
     pub const VERSIONS_CHANGED: &str = "versions.changed";
+
+    pub const CLUSTER: &str = "cluster";
+    pub const CLUSTER_CHANGED: &str = "cluster.changed";
+    pub const CLUSTER_REFUSED: &str = "cluster.refused";
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -157,6 +168,7 @@ pub enum ClientKind {
     App,
     Cli,
     Hook,
+    Node,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
