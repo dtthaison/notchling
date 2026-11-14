@@ -32,10 +32,19 @@ pub struct LogStart {
 }
 
 impl LogStart {
+    pub fn close(&self, wait: Duration) {
+        self.bus.close(wait);
+        let writer = self
+            .audit
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .head_writer();
+        writer.finish(wait);
+    }
+
     pub fn checker(&self, warnings: Arc<dyn Warnings>, publish: Publish) -> Arc<Checker> {
         let checker = Checker::new(
             AuditDir::new(self.audit_root.clone()),
-            self.keys.clone(),
             self.audit.clone(),
             self.bus.clone(),
             publish,
@@ -133,6 +142,15 @@ fn first_events(
 }
 
 pub fn start(layout: &Layout, version: &str, publish: Publish) -> LogStart {
+    start_with(layout, version, publish, layout.key_store())
+}
+
+pub fn start_with(
+    layout: &Layout,
+    version: &str,
+    publish: Publish,
+    keys: Arc<dyn KeyStore>,
+) -> LogStart {
     let mut failed: Vec<SinkName> = Vec::new();
     let _ = notchling_platform::files::ensure_private_dir(&layout.state_dir().join("daemon"));
     let dir = AuditDir::new(layout.audit_dir());
@@ -159,7 +177,6 @@ pub fn start(layout: &Layout, version: &str, publish: Publish) -> LogStart {
         std::process::id(),
         db.max_seq() + 1,
     );
-    let keys = layout.key_store();
     let info = StartInfo {
         daemon: Version::new(version),
         macos: macos_version(),

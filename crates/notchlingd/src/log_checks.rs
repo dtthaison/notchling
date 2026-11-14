@@ -2,7 +2,7 @@ use crate::inbox_ops::InboxOps;
 use crate::log_activity::Publish;
 use crate::log_audit::{AuditSink, SealState};
 use notchling_engine::inbox::{Action, ActionId, Item, Kind, Source, State as ItemState};
-use notchling_engine::logs::{AuditDir, KeyStore};
+use notchling_engine::logs::AuditDir;
 use notchling_events::audit_check::{self, CheckInput, CheckOutcome};
 use notchling_events::audit_line::{read_head, seal_of, signed_part};
 use notchling_events::kinds::security_log::{AuditChecked, CheckResult as Logged};
@@ -16,6 +16,7 @@ use std::time::{Duration, Instant};
 
 pub const HOURLY: Duration = Duration::from_secs(3600);
 const SEALING_WAIT: Duration = Duration::from_secs(5);
+const LATE_KEY_POLL: Duration = Duration::from_secs(1);
 
 pub trait Warnings: Send + Sync {
     fn raise(&self, id: &str, title: &str, detail: &str);
@@ -62,7 +63,6 @@ struct State {
 
 pub struct Checker {
     dir: AuditDir,
-    keys: Arc<dyn KeyStore>,
     audit: Arc<Mutex<AuditSink>>,
     emit: Arc<dyn Emit>,
     publish: Publish,
@@ -157,7 +157,6 @@ fn warning_text(
 impl Checker {
     pub fn new(
         dir: AuditDir,
-        keys: Arc<dyn KeyStore>,
         audit: Arc<Mutex<AuditSink>>,
         emit: Arc<dyn Emit>,
         publish: Publish,
@@ -166,7 +165,6 @@ impl Checker {
     ) -> Arc<Checker> {
         Arc::new(Checker {
             dir,
-            keys,
             audit,
             emit,
             publish,
@@ -195,9 +193,9 @@ impl Checker {
     }
 
     pub fn run(&self, full: bool) -> Report {
-        let (key, sealing) = {
+        let (key, sealing, checkpoint) = {
             let audit = lock(&self.audit);
-            (audit.key, audit.sealing())
+            (audit.key, audit.sealing(), audit.checkpoint())
         };
         let all = self.months();
         let from_n = if full {
@@ -209,7 +207,6 @@ impl Checker {
             Some(from) => since(all.clone(), from),
             None => all.clone(),
         };
-        let checkpoint = self.keys.read_head();
         let anchor = checkpoint
             .as_ref()
             .and_then(|c| c.prune_anchor.as_deref())
@@ -382,7 +379,21 @@ impl Checker {
                         return;
                     }
                 }
-                checker.run(true);
+                if checker.run(true).sealing != "sealed" {
+                    let waiting = Instant::now();
+                    while waiting.elapsed() < HOURLY {
+                        if !matches!(
+                            rx.recv_timeout(LATE_KEY_POLL),
+                            Err(RecvTimeoutError::Timeout)
+                        ) {
+                            return;
+                        }
+                        if lock(&checker.audit).sealing() == SealState::Sealed {
+                            checker.run(true);
+                            break;
+                        }
+                    }
+                }
                 loop {
                     match rx.recv_timeout(HOURLY) {
                         Err(RecvTimeoutError::Timeout) => {

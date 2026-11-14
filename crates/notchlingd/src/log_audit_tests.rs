@@ -125,6 +125,10 @@ impl Rig {
     }
 }
 
+pub(crate) fn settled(sink: &AuditSink) {
+    assert!(sink.head_writer().finish(Duration::from_secs(5)));
+}
+
 pub(crate) fn called(ts: i64) -> Event {
     Event::new(
         &OpCalled {
@@ -376,6 +380,7 @@ fn checkpoint_written_after_always_batch_and_every_five_minutes() {
     let mut sink = rig.sink();
     sink.write(&[rig.stamp(refused(T0))], &[None]);
     sink.flush(true).unwrap();
+    settled(&sink);
     let first = rig
         .keys
         .read_head()
@@ -384,22 +389,27 @@ fn checkpoint_written_after_always_batch_and_every_five_minutes() {
     rig.clock.store(T0 + 1_000, Ordering::SeqCst);
     sink.write(&[rig.stamp(refused(T0 + 1_000))], &[None]);
     sink.flush(true).unwrap();
+    settled(&sink);
     assert_eq!(rig.keys.read_head().unwrap().n, 3, "at most every 10 s");
     rig.clock.store(T0 + 11_000, Ordering::SeqCst);
     sink.write(&[rig.stamp(refused(T0 + 11_000))], &[None]);
     sink.flush(true).unwrap();
+    settled(&sink);
     assert_eq!(rig.keys.read_head().unwrap().n, 5);
     rig.clock.store(T0 + 12_000, Ordering::SeqCst);
     sink.write(&[rig.stamp(called(T0 + 12_000))], &[None]);
     sink.flush(false).unwrap();
+    settled(&sink);
     assert_eq!(
         rig.keys.read_head().unwrap().n,
         5,
         "a toggle batch writes none"
     );
     sink.tick(T0 + 12_000 + 60_000);
+    settled(&sink);
     assert_eq!(rig.keys.read_head().unwrap().n, 5);
     sink.tick(T0 + 12_000 + 301_000);
+    settled(&sink);
     assert_eq!(rig.keys.read_head().unwrap().n, 6);
 }
 
@@ -431,7 +441,8 @@ fn start_new_chain_writes_sealed_chain_started_with_previous_head() {
     let mut sink = rig.sink();
     sink.write(&[rig.stamp(called(T0 + 1))], &[None]);
     assert_eq!(sink.sealing(), SealState::Unsealed(UnsealedWhy::KeyMissing));
-    let n = sink.start_new_chain(ChainReason::User).unwrap();
+    let key = rig.keys.create_key().unwrap();
+    let n = sink.start_new_chain(ChainReason::User, key).unwrap();
     assert_eq!(sink.sealing(), SealState::Sealed);
     let lines = rig.lines();
     let line = &lines[n as usize - 1];
@@ -442,6 +453,7 @@ fn start_new_chain_writes_sealed_chain_started_with_previous_head() {
     assert!(line["f"]["previous_head_n"].is_u64());
     let key = rig.keys.key().unwrap();
     assert_eq!(rig.check(Some(&key)), CheckResult::Intact);
+    settled(&sink);
     assert_eq!(rig.keys.read_head().unwrap().n, n);
 }
 

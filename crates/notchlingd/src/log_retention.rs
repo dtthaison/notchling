@@ -6,11 +6,13 @@ use notchling_events::kinds::security_log::AuditPruned;
 use notchling_events::spec::Outcome;
 use notchling_events::{Count, Event, List, Seal, Time};
 use std::io;
+use std::time::Duration;
 
 pub const DAY_MS: i64 = 86_400_000;
 pub const CAP_BYTES: u64 = 500 * 1024 * 1024;
 pub const USER_DELETE_AGE_DAYS: i64 = 30;
 pub const RETENTION_EVERY_MS: i64 = 3_600_000;
+const ANCHOR_WAIT: Duration = Duration::from_secs(1);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum KeepAudit {
@@ -81,6 +83,9 @@ pub fn deletable(month: u32, now_ms: i64) -> bool {
 impl AuditSink {
     pub fn prune(&mut self, month: u32, reason: PruneReason) -> Result<u64, PruneError> {
         let now = self.now_ms();
+        if !self.loaded {
+            return Err(PruneError::Io(io::ErrorKind::WouldBlock));
+        }
         if month >= self.month.max(month_of(now)) {
             return Err(PruneError::Current);
         }
@@ -126,6 +131,10 @@ impl AuditSink {
         self.carried.prune_anchor = Some(last_seal.as_str().to_owned());
         self.write_checkpoint_now(now)
             .map_err(|e| PruneError::Io(e.kind()))?;
+        let writer = self.head_writer();
+        if !writer.finish(ANCHOR_WAIT) || writer.failed() {
+            return Err(PruneError::Io(io::ErrorKind::TimedOut));
+        }
         self.dir
             .remove(month)
             .map_err(|e| PruneError::Io(e.kind()))?;

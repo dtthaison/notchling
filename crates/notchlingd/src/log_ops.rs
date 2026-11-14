@@ -67,11 +67,24 @@ impl LogOps {
                 "starting a new chain needs confirm: true",
             ));
         }
+        let keys = {
+            let mut audit = self.audit.lock().unwrap_or_else(PoisonError::into_inner);
+            if !audit.loaded() {
+                return Err(ApiError::new(
+                    ErrorCode::Failed,
+                    "the audit key hasn't been read yet",
+                ));
+            }
+            audit.keys()
+        };
+        let key = keys
+            .create_key()
+            .map_err(|_| ApiError::new(ErrorCode::Failed, "a new audit key can't be made"))?;
         let n = self
             .audit
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .start_new_chain(ChainReason::User)
+            .start_new_chain(ChainReason::User, key)
             .map_err(|_| ApiError::new(ErrorCode::Failed, "a new audit key can't be made"))?;
         self.checker.run(true);
         Ok(json!({"chain_started_n": n}))

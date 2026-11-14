@@ -51,7 +51,6 @@ pub(crate) fn wire(rig: Rig) -> Wired {
     let clock = rig.clock.clone();
     let checker = Checker::new(
         rig.dir(),
-        rig.keys.clone(),
         audit.clone(),
         events.clone(),
         publish,
@@ -102,7 +101,7 @@ fn file_ahead_of_checkpoint_is_intact() {
     let wired = wire(rig("checks-ahead"));
     wired.write(vec![refused(T0)]);
     wired.audit.lock().unwrap().flush(true).unwrap();
-    let head = KeyStore::read_head(&*wired.rig.keys).unwrap();
+    let head = wired.audit.lock().unwrap().checkpoint().unwrap();
     wired.write(vec![refused(T0 + 20_000), called(T0 + 20_001)]);
     let report = wired.checker.run(true);
     assert_eq!(report.result, "intact");
@@ -152,11 +151,12 @@ fn item_resolves_when_intact_again() {
     wired.write(vec![called(T0 + 1)]);
     wired.checker.run(true);
     let id = wired.warnings.raised.lock().unwrap()[0].0.clone();
+    let key = wired.rig.keys.create_key().unwrap();
     wired
         .audit
         .lock()
         .unwrap()
-        .start_new_chain(ChainReason::User)
+        .start_new_chain(ChainReason::User, key)
         .unwrap();
     let report = wired.checker.run(true);
     assert_eq!(report.result, "intact");
