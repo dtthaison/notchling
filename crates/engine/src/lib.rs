@@ -1,5 +1,6 @@
 pub mod accounts;
 pub mod activity;
+pub mod awake;
 pub mod bridge;
 pub mod catalog;
 pub mod control;
