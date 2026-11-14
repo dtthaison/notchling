@@ -104,6 +104,9 @@ pub mod ops {
     pub const GIT_BRANCHES: &str = "git.branches";
 
     pub const ACTIVITY_LIST: &str = "activity.list";
+    pub const LOG_VERIFY: &str = "log.verify";
+    pub const LOG_CHAIN_START: &str = "log.chain.start";
+    pub const LOG_AUDIT_DELETE: &str = "log.audit.delete";
 }
 
 pub mod topics {

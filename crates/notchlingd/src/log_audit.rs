@@ -522,3 +522,31 @@ impl Sink for AuditSink {
         }
     }
 }
+
+pub struct SharedAudit(pub Arc<std::sync::Mutex<AuditSink>>);
+
+impl SharedAudit {
+    fn sink(&self) -> std::sync::MutexGuard<'_, AuditSink> {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+}
+
+impl Sink for SharedAudit {
+    fn sinks(&self) -> Sinks {
+        Sinks::AUDIT
+    }
+
+    fn write(&mut self, batch: &[Stamped], audit_n: &[Option<u64>]) -> SinkResult {
+        self.sink().write(batch, audit_n)
+    }
+
+    fn flush(&mut self, full: bool) -> io::Result<()> {
+        self.sink().flush(full)
+    }
+
+    fn tick(&mut self, now_ms: i64) -> Ticked {
+        self.sink().tick(now_ms)
+    }
+}

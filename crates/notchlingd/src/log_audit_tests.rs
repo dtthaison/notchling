@@ -21,17 +21,17 @@ use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-const T0: i64 = 1_800_000_000_000;
-const KEY: [u8; 32] = [9; 32];
+pub(crate) const T0: i64 = 1_800_000_000_000;
+pub(crate) const KEY: [u8; 32] = [9; 32];
 
-struct Rig {
-    tmp: TempDir,
-    keys: Arc<MemoryKeyStore>,
-    clock: Arc<AtomicI64>,
-    env: EnvMaker,
+pub(crate) struct Rig {
+    pub(crate) tmp: TempDir,
+    pub(crate) keys: Arc<MemoryKeyStore>,
+    pub(crate) clock: Arc<AtomicI64>,
+    pub(crate) env: EnvMaker,
 }
 
-fn rig(tag: &str) -> Rig {
+pub(crate) fn rig(tag: &str) -> Rig {
     Rig {
         tmp: TempDir::new(tag),
         keys: Arc::new(MemoryKeyStore::new()),
@@ -46,13 +46,13 @@ fn rig(tag: &str) -> Rig {
 }
 
 impl Rig {
-    fn dir(&self) -> AuditDir {
+    pub(crate) fn dir(&self) -> AuditDir {
         let dir = AuditDir::new(self.tmp.path("audit"));
         dir.ensure().unwrap();
         dir
     }
 
-    fn info(&self, key_wait: Duration) -> StartInfo {
+    pub(crate) fn info(&self, key_wait: Duration) -> StartInfo {
         let clock = self.clock.clone();
         StartInfo {
             daemon: Version::new("0.1.0"),
@@ -64,11 +64,11 @@ impl Rig {
         }
     }
 
-    fn sink(&self) -> AuditSink {
+    pub(crate) fn sink(&self) -> AuditSink {
         self.sink_with(Duration::from_secs(2), Vec::new())
     }
 
-    fn sink_with(&self, key_wait: Duration, legacy: Vec<LegacyFile>) -> AuditSink {
+    pub(crate) fn sink_with(&self, key_wait: Duration, legacy: Vec<LegacyFile>) -> AuditSink {
         AuditSink::new(
             self.dir(),
             self.keys.clone(),
@@ -78,7 +78,7 @@ impl Rig {
         )
     }
 
-    fn stamp(&self, event: Event) -> Stamped {
+    pub(crate) fn stamp(&self, event: Event) -> Stamped {
         Stamped {
             env: self.env.make(None, None),
             event,
@@ -86,7 +86,7 @@ impl Rig {
         }
     }
 
-    fn lines(&self) -> Vec<Value> {
+    pub(crate) fn lines(&self) -> Vec<Value> {
         let dir = self.dir();
         let mut out = Vec::new();
         for month in dir.months().unwrap() {
@@ -97,14 +97,14 @@ impl Rig {
         out
     }
 
-    fn kinds(&self) -> Vec<String> {
+    pub(crate) fn kinds(&self) -> Vec<String> {
         self.lines()
             .iter()
             .map(|l| l["kind"].as_str().unwrap().to_owned())
             .collect()
     }
 
-    fn check(&self, key: Option<&[u8; 32]>) -> CheckResult {
+    pub(crate) fn check(&self, key: Option<&[u8; 32]>) -> CheckResult {
         let dir = self.dir();
         let texts: Vec<(u32, String)> = dir
             .months()
@@ -125,7 +125,7 @@ impl Rig {
     }
 }
 
-fn called(ts: i64) -> Event {
+pub(crate) fn called(ts: i64) -> Event {
     Event::new(
         &OpCalled {
             op: Op::named("session.reply"),
@@ -139,7 +139,7 @@ fn called(ts: i64) -> Event {
     )
 }
 
-fn refused(ts: i64) -> Event {
+pub(crate) fn refused(ts: i64) -> Event {
     Event::new(
         &ApiRefused {
             op: Op::named("session.reply"),
@@ -214,7 +214,7 @@ fn legacy_move_counts_as_first_run() {
     assert!(chain["prev"].is_null());
 }
 
-fn with_history(rig: &Rig) {
+pub(crate) fn with_history(rig: &Rig) {
     let key = KEY;
     let env = rig.env.make(None, None);
     let (line, _) = sealed_line(

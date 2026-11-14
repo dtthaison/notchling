@@ -41,8 +41,11 @@ const OWN_QUIET: [&str; 6] = [
     ops::ACTIVITY_LIST,
 ];
 
-const NEVER_QUIET: [&str; 73] = [
+const NEVER_QUIET: [&str; 76] = [
     ops::HELLO,
+    ops::LOG_VERIFY,
+    ops::LOG_CHAIN_START,
+    ops::LOG_AUDIT_DELETE,
     ops::DAEMON_STATUS,
     ops::SESSIONS_LIST,
     ops::EVENTS_SUBSCRIBE,

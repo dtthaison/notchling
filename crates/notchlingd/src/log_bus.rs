@@ -94,6 +94,7 @@ pub struct BusConfig {
     pub batch_max: usize,
     pub commit_wait: Duration,
     pub env: EnvMaker,
+    pub on_health: Option<Arc<dyn Fn(bool) + Send + Sync>>,
     pub clock: Arc<dyn Fn() -> i64 + Send + Sync>,
 }
 
@@ -112,6 +113,7 @@ impl BusConfig {
                 std::process::id(),
                 1,
             ),
+            on_health: None,
             clock: Arc::new(wall_ms),
         }
     }
@@ -160,6 +162,7 @@ struct Refusal {
 
 #[derive(Default)]
 struct Lost {
+    failing: bool,
     events: u64,
     refusals: Vec<Refusal>,
 }
@@ -460,12 +463,27 @@ impl LogBus {
                 }));
             }
         }
-        if !any_loss && !broken.iter().any(|b| *b) {
+        if any_loss || broken.iter().any(|b| *b) {
+            if !lost.failing {
+                lost.failing = true;
+                self.health(false);
+            }
+        } else {
             self.report_recovery(lost);
         }
     }
 
+    fn health(&self, ok: bool) {
+        if let Some(report) = &self.cfg.on_health {
+            report(ok);
+        }
+    }
+
     fn report_recovery(&self, lost: &mut Lost) {
+        if lost.failing {
+            lost.failing = false;
+            self.health(true);
+        }
         let now = (self.cfg.clock)();
         for refusal in lost.refusals.drain(..) {
             let event = Event::new(

@@ -35,7 +35,9 @@ pub mod limits_usage;
 pub mod log_activity;
 pub mod log_audit;
 pub mod log_bus;
+pub mod log_checks;
 pub mod log_fold;
+pub mod log_ops;
 pub mod log_queue;
 pub mod log_rotate;
 pub mod op_group;
@@ -105,9 +107,13 @@ mod limits_ops_tests;
 #[cfg(test)]
 mod log_activity_tests;
 #[cfg(test)]
-mod log_audit_tests;
+pub(crate) mod log_audit_tests;
 #[cfg(test)]
 mod log_bus_tests;
+#[cfg(test)]
+pub(crate) mod log_checks_tests;
+#[cfg(test)]
+mod log_ops_tests;
 #[cfg(test)]
 mod pages_ops_tests;
 #[cfg(test)]
