@@ -1,3 +1,4 @@
+use notchling_locale as t;
 use std::cell::Cell;
 
 use gpui::{
@@ -204,18 +205,16 @@ fn box_button(id: String, glyph: Icon, word: &str, a: Appearance) -> gpui::State
 
 pub fn copy_button(key: &str, text: &str, a: Appearance) -> impl IntoElement {
     let text = text.to_owned();
-    box_button(format!("copy-{key}"), Icon::Copy, "Copy", a)
+    box_button(format!("copy-{key}"), Icon::Copy, t::chat::copy(), a)
         .on_click(move |_, _, cx| cx.write_to_clipboard(ClipboardItem::new_string(text.clone())))
 }
 
 fn run_button(key: &str, command: String, a: Appearance, cx: &App) -> impl IntoElement {
     let how = run_command::how(&command);
-    let button = box_button(format!("run-{key}"), Icon::Terminal, "Run", a)
+    let button = box_button(format!("run-{key}"), Icon::Terminal, t::chat::run(), a)
         .on_click(move |_, window, cx| super::page_panel::run_in_chat(&command, how, window, cx));
     let button = match how {
-        RunHow::Terminal => {
-            gate::tip_text(button, "Runs in a terminal (it asks for input)".into(), a)
-        }
+        RunHow::Terminal => gate::tip_text(button, t::chat::run_tip().into(), a),
         RunHow::Send => button,
     };
     button.part("Run Button", a, cx)
@@ -388,7 +387,7 @@ fn quote(key: &str, sel: &Sel, text: &Inline, a: Appearance) -> Div {
 
 fn code(key: &str, sel: &Sel, language: &str, text: &str, a: Appearance, cx: &App) -> Div {
     let title = if language.is_empty() {
-        "code"
+        t::chat::code()
     } else {
         language
     };

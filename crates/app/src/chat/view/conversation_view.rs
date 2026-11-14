@@ -1,3 +1,4 @@
+use notchling_locale as t;
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::rc::Rc;
@@ -382,12 +383,12 @@ impl ChatView {
         let empty_note = empty.then(|| match session.map(|s| s.tool) {
             Some(Tool::Antigravity) if !self.tools.agy.as_ref().is_some_and(|c| c.open) => {
                 match self.acting_in(cx) {
-                    Acting::On => "Loading from Antigravity…",
-                    _ => "Antigravity sessions load through the daemon while acting is on.",
+                    Acting::On => t::chat::agy_loading(),
+                    _ => t::chat::agy_through_daemon(),
                 }
             }
-            _ if self.open_subagent.is_some() => "No transcript yet for this subagent",
-            _ => "No transcript yet for this session",
+            _ if self.open_subagent.is_some() => t::chat::no_transcript_subagent(),
+            _ => t::chat::no_transcript(),
         });
         ConversationInput {
             shown,

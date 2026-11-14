@@ -4,6 +4,7 @@ use notchling_kit::metric::SIDE_PADDING;
 use notchling_kit::part::{ButtonKind, PartState};
 use notchling_kit::ui::{button_with, hsla, icon, label, KitPart, KitStyled};
 use notchling_kit::{Appearance, Icon, Ink, TypeRole};
+use notchling_locale as t;
 
 use super::ChatView;
 use crate::chat::subagent_view::header_text;
@@ -18,7 +19,7 @@ pub fn header(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Opt
             .items_center()
             .gap(px(4.0))
             .child(icon(Icon::ChevronLeft, 10.0, Ink::Text, a))
-            .child(label("Back", TypeRole::Label, Ink::Text, a)),
+            .child(label(t::chat::back(), TypeRole::Label, Ink::Text, a)),
         ButtonKind::Ghost,
         PartState::Rest,
         a,

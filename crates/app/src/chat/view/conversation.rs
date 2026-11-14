@@ -1,3 +1,4 @@
+use notchling_locale as t;
 use std::cell::Cell;
 
 use gpui::{
@@ -44,14 +45,14 @@ pub(super) fn activity_row(
         crate::mac::gate::tip_text(
             button(
                 "activity-retry",
-                "Retry",
+                t::chat::retry(),
                 ButtonKind::Secondary,
                 PartState::Rest,
                 a,
             )
             .h(px(22.0))
             .px(px(10.0)),
-            "Nothing came back: stop this turn and send the message again".into(),
+            t::chat::retry_tip().into(),
             a,
         )
         .flex_shrink_0()
@@ -62,7 +63,12 @@ pub(super) fn activity_row(
             .id("activity-output")
             .flex_shrink_0()
             .cursor_pointer()
-            .child(label("Show Output", TypeRole::Meta, Ink::AccentText, a))
+            .child(label(
+                t::chat::show_output(),
+                TypeRole::Meta,
+                Ink::AccentText,
+                a,
+            ))
             .on_click(cx.listener(move |this, _, _, cx| {
                 this.open_shell_output(&name, &path, cx);
             }))
@@ -84,10 +90,16 @@ pub(super) fn activity_row(
             label(&format!("({stats})"), TypeRole::Meta, Ink::TextFaint, a).flex_shrink_0()
         }))
         .children(activity.shells.as_ref().map(|shells| {
-            label(&format!("· {shells}"), TypeRole::Meta, Ink::TextFaint, a).flex_shrink_0()
+            label(
+                &t::chat::activity_shells(shells),
+                TypeRole::Meta,
+                Ink::TextFaint,
+                a,
+            )
+            .flex_shrink_0()
         }))
         .when(stalled, |row| {
-            row.child(label("· No reply yet", TypeRole::Meta, Ink::Needs, a).flex_shrink_0())
+            row.child(label(t::chat::no_reply_yet(), TypeRole::Meta, Ink::Needs, a).flex_shrink_0())
         })
         .children(open_output)
         .children(retry);
@@ -108,7 +120,7 @@ pub(super) fn latest_pill(
         .items_center()
         .gap(px(6.0))
         .child(icon(Icon::ArrowDown, 11.0, Ink::Text, a))
-        .child(label("Latest", TypeRole::Label, Ink::Text, a));
+        .child(label(t::chat::latest(), TypeRole::Label, Ink::Text, a));
     let pill = button_with("latest", content, ButtonKind::Secondary, PartState::Rest, a)
         .shadow(vec![BoxShadow {
             color: hsla(Ink::Shadow.color(a)),
@@ -140,12 +152,12 @@ fn user_row(
     cx: &App,
 ) -> Div {
     let id = sel.id();
-    let name = match (queued, sending) {
-        (_, true) => "Sending Bubble",
-        (true, false) => "Queued Bubble",
-        (false, false) => "Your Message",
+    let name = crate::chat::markers::bubble_part(queued, sending);
+    let note = if sending {
+        t::chat::sending_note()
+    } else {
+        t::chat::queued_note()
     };
-    let note = if sending { "Sending…" } else { "Queued" };
     let (words, pictures) = split;
     let status = queued.then(|| {
         div()
@@ -196,7 +208,7 @@ fn user_row(
         })
         .when(images > 0, |d| {
             d.child(label(
-                &format!("{images} image{}", if images == 1 { "" } else { "s" }),
+                &t::chat::images(images),
                 TypeRole::Meta,
                 Ink::TextFaint,
                 a,
@@ -304,7 +316,7 @@ fn row_element(
             .child(markdown::mono_box(
                 &format!("{id}-cmd"),
                 sel,
-                "Output",
+                t::chat::output(),
                 text,
                 false,
                 a,
@@ -425,7 +437,9 @@ pub(super) fn empty_column(
         .gap(px(ROW_GAP))
         .child(row_select::listener(s.sel.clone(), cx.entity().downgrade()));
     Some(match state {
-        Empty::Loading => column.child(label("Loading…", TypeRole::Meta, Ink::TextMuted, a)),
+        Empty::Loading => {
+            column.child(label(t::chat::loading(), TypeRole::Meta, Ink::TextMuted, a))
+        }
         Empty::Blank => column,
         Empty::NoSessions => column.child(
             div()
@@ -436,12 +450,15 @@ pub(super) fn empty_column(
                 .justify_center()
                 .gap(px(8.0))
                 .child(claude_mark(40.0, a))
-                .child(label("No sessions yet", TypeRole::Heading, Ink::Text, a)),
+                .child(label(
+                    t::chat::no_sessions_yet(),
+                    TypeRole::Heading,
+                    Ink::Text,
+                    a,
+                )),
         ),
         Empty::Note => column.child(label(
-            input
-                .empty_note
-                .unwrap_or("No transcript yet for this session"),
+            input.empty_note.unwrap_or(t::chat::no_transcript()),
             TypeRole::Meta,
             Ink::TextMuted,
             a,

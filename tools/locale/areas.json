@@ -75,7 +75,7 @@
         "crates/app/src/chat/view/list_probe_run.rs",
         "crates/app/src/chat/view/tool/**"
       ],
-      "moved": false
+      "moved": true
     },
     {
       "name": "chat-reply-box",

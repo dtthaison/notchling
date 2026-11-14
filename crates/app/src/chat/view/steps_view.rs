@@ -1,3 +1,4 @@
+use notchling_locale as t;
 use std::path::Path;
 
 use gpui::{div, prelude::*, px, Context, Div, FontWeight, SharedString, Stateful};
@@ -113,7 +114,7 @@ fn diff_view(step: &ToolRow, a: Appearance, cx: &mut Context<ConversationView>) 
                 .child(
                     button(
                         SharedString::from(format!("reveal-{}", step.id)),
-                        "Show in Finder",
+                        t::chat::show_in_finder(),
                         ButtonKind::Ghost,
                         PartState::Rest,
                         a,
@@ -154,7 +155,11 @@ fn step_detail(
                 ));
             }
             if let Some(text) = steps::output_text(step) {
-                let title = if step.is_error { "Error" } else { "Output" };
+                let title = if step.is_error {
+                    t::chat::error()
+                } else {
+                    t::chat::output()
+                };
                 detail = detail.child(markdown::mono_box(
                     &format!("{}-out", step.id),
                     sel,
@@ -224,7 +229,7 @@ fn step_row(
                 .id(SharedString::from(format!("step-open-{}", step.id)))
                 .flex_shrink_0()
                 .cursor_pointer()
-                .child(label("Open", TypeRole::Label, Ink::AccentText, a))
+                .child(label(t::chat::open(), TypeRole::Label, Ink::AccentText, a))
                 .on_click(cx.listener(move |this, _, _, cx| {
                     cx.stop_propagation();
                     this.act(|chat, cx| chat.open_subagent(&agent_id, cx), cx);

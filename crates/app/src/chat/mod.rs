@@ -12,6 +12,8 @@ pub mod cleared;
 pub mod closed;
 pub mod codex_list;
 pub mod composer;
+#[cfg(test)]
+mod conversation_words_tests;
 pub mod data;
 pub mod delegated;
 pub mod drafts;

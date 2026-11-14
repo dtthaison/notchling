@@ -1,4 +1,5 @@
 use notchling_engine::pages::clock::{civil_at, days_from_civil, local_offset_secs};
+use notchling_locale as t;
 
 pub const COPIED_MS: i64 = 1500;
 
@@ -46,31 +47,42 @@ pub fn copied_shows(copied_at_ms: i64, now_ms: i64) -> bool {
     (0..COPIED_MS).contains(&(now_ms - copied_at_ms))
 }
 
-const MONTHS: [&str; 12] = [
-    "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+const MONTHS: [t::Text; 12] = [
+    t::units::MONTH_JAN,
+    t::units::MONTH_FEB,
+    t::units::MONTH_MAR,
+    t::units::MONTH_APR,
+    t::units::MONTH_MAY,
+    t::units::MONTH_JUN,
+    t::units::MONTH_JUL,
+    t::units::MONTH_AUG,
+    t::units::MONTH_SEP,
+    t::units::MONTH_OCT,
+    t::units::MONTH_NOV,
+    t::units::MONTH_DEC,
 ];
-const MONTHS_LONG: [&str; 12] = [
-    "January",
-    "February",
-    "March",
-    "April",
-    "May",
-    "June",
-    "July",
-    "August",
-    "September",
-    "October",
-    "November",
-    "December",
+const MONTHS_LONG: [t::Text; 12] = [
+    t::units::MONTH_LONG_JAN,
+    t::units::MONTH_LONG_FEB,
+    t::units::MONTH_LONG_MAR,
+    t::units::MONTH_LONG_APR,
+    t::units::MONTH_LONG_MAY,
+    t::units::MONTH_LONG_JUN,
+    t::units::MONTH_LONG_JUL,
+    t::units::MONTH_LONG_AUG,
+    t::units::MONTH_LONG_SEP,
+    t::units::MONTH_LONG_OCT,
+    t::units::MONTH_LONG_NOV,
+    t::units::MONTH_LONG_DEC,
 ];
-const WEEKDAYS: [&str; 7] = [
-    "Sunday",
-    "Monday",
-    "Tuesday",
-    "Wednesday",
-    "Thursday",
-    "Friday",
-    "Saturday",
+const WEEKDAYS: [t::Text; 7] = [
+    t::units::WEEKDAY_LONG_SUNDAY,
+    t::units::WEEKDAY_LONG_MONDAY,
+    t::units::WEEKDAY_LONG_TUESDAY,
+    t::units::WEEKDAY_LONG_WEDNESDAY,
+    t::units::WEEKDAY_LONG_THURSDAY,
+    t::units::WEEKDAY_LONG_FRIDAY,
+    t::units::WEEKDAY_LONG_SATURDAY,
 ];
 
 fn clock_text(hour: u32, minute: u32) -> String {
@@ -78,56 +90,52 @@ fn clock_text(hour: u32, minute: u32) -> String {
         0 => 12,
         h => h,
     };
-    let ampm = if hour < 12 { "AM" } else { "PM" };
-    format!("{h}:{minute:02} {ampm}")
+    let suffix = if hour < 12 {
+        t::units::AM
+    } else {
+        t::units::PM
+    };
+    t::units::clock(h, &format!("{minute:02}"), suffix.get())
 }
 
 fn local_day(ts: f64, offset: i64) -> i64 {
     (ts.floor() as i64 + offset).div_euclid(86_400)
 }
 
-fn plural(n: i64, unit: &str) -> String {
-    if n == 1 {
-        format!("1 {unit} ago")
-    } else {
-        format!("{n} {unit}s ago")
-    }
-}
-
 pub fn relative_time(now: f64, at: f64, offset: i64) -> String {
     let seconds = (now - at).floor() as i64;
     if seconds < 60 {
-        return "just now".to_owned();
+        return t::units::just_now().to_owned();
     }
     if seconds < 3600 {
-        return plural(seconds / 60, "minute");
+        return t::units::minutes_ago(seconds / 60);
     }
     let days_ago = local_day(now, offset) - local_day(at, offset);
     if days_ago <= 0 {
-        return plural(seconds / 3600, "hour");
+        return t::units::hours_ago(seconds / 3600);
     }
     let then = civil_at(at, offset);
     if days_ago == 1 {
-        return format!("Yesterday {}", clock_text(then.hour, then.minute));
+        return t::units::yesterday(&clock_text(then.hour, then.minute));
     }
-    let month = MONTHS[(then.month as usize - 1) % 12];
+    let month = MONTHS[(then.month as usize - 1) % 12].get();
     if civil_at(now, offset).year == then.year {
-        format!("{month} {}", then.day)
+        t::units::date_short(month, &then.day.to_string())
     } else {
-        format!("{month} {}, {}", then.day, then.year)
+        t::units::date_year(month, &then.day.to_string(), &then.year.to_string())
     }
 }
 
 pub fn full_time(at: f64, offset: i64) -> String {
     let c = civil_at(at, offset);
     let day = days_from_civil(c.year, i64::from(c.month), i64::from(c.day));
-    let weekday = WEEKDAYS[(day + 4).rem_euclid(7) as usize];
-    format!(
-        "{weekday}, {} {}, {} at {}",
-        MONTHS_LONG[(c.month as usize - 1) % 12],
-        c.day,
-        c.year,
-        clock_text(c.hour, c.minute)
+    let weekday = WEEKDAYS[(day + 4).rem_euclid(7) as usize].get();
+    t::units::date_full(
+        weekday,
+        MONTHS_LONG[(c.month as usize - 1) % 12].get(),
+        &c.day.to_string(),
+        &c.year.to_string(),
+        &clock_text(c.hour, c.minute),
     )
 }
 

@@ -1,23 +1,24 @@
 use notchling_engine::transcript::model::ToolKind;
 use notchling_kit::Icon;
+use notchling_locale as t;
 
 use super::rows::ToolRow;
 
 pub const CHIP_ICONS: usize = 4;
 
-fn words(kind: ToolKind) -> (&'static str, &'static str, &'static str) {
+fn phrase(kind: ToolKind, n: usize) -> String {
     match kind {
-        ToolKind::Shell => ("ran", "command", "commands"),
-        ToolKind::Read => ("read", "file", "files"),
-        ToolKind::Edit => ("edited", "file", "files"),
-        ToolKind::Write => ("wrote", "file", "files"),
-        ToolKind::Search => ("searched", "time", "times"),
-        ToolKind::Web => ("browsed", "page", "pages"),
-        ToolKind::Agent => ("ran", "agent", "agents"),
-        ToolKind::Task => ("updated", "task", "tasks"),
-        ToolKind::Ask => ("asked", "question", "questions"),
-        ToolKind::Skill => ("used", "skill", "skills"),
-        ToolKind::Other => ("used", "tool", "tools"),
+        ToolKind::Shell => t::chat::steps_ran_commands(n),
+        ToolKind::Read => t::chat::steps_read_files(n),
+        ToolKind::Edit => t::chat::steps_edited_files(n),
+        ToolKind::Write => t::chat::steps_wrote_files(n),
+        ToolKind::Search => t::chat::steps_searched_times(n),
+        ToolKind::Web => t::chat::steps_browsed_pages(n),
+        ToolKind::Agent => t::chat::steps_ran_agents(n),
+        ToolKind::Task => t::chat::steps_updated_tasks(n),
+        ToolKind::Ask => t::chat::steps_asked_questions(n),
+        ToolKind::Skill => t::chat::steps_used_skills(n),
+        ToolKind::Other => t::chat::steps_used_tools(n),
     }
 }
 
@@ -47,21 +48,19 @@ pub fn summary(steps: &[ToolRow]) -> String {
             return step.title.clone();
         }
     }
-    let text = order
+    let parts = order
         .iter()
         .enumerate()
         .map(|(at, kind)| {
-            let (verb, one, many) = words(*kind);
             let n = if files[at].is_empty() {
                 counts[at]
             } else {
                 files[at].len()
             };
-            format!("{verb} {n} {}", if n == 1 { one } else { many })
+            phrase(*kind, n)
         })
-        .collect::<Vec<_>>()
-        .join(", ");
-    notchling_kit::sentence(&text)
+        .collect::<Vec<_>>();
+    notchling_kit::sentence(&t::fmt::list(&parts))
 }
 
 pub fn failed(steps: &[ToolRow]) -> usize {
@@ -71,7 +70,7 @@ pub fn failed(steps: &[ToolRow]) -> usize {
 pub fn failed_text(steps: &[ToolRow]) -> Option<String> {
     match failed(steps) {
         0 => None,
-        n => Some(format!("{n} failed")),
+        n => Some(t::chat::steps_failed(n)),
     }
 }
 
@@ -109,9 +108,9 @@ pub fn detail(step: &ToolRow) -> Detail {
     let has_output = step.output.is_some();
     let input_title = (!step.input.is_empty() && step.kind != ToolKind::Read).then(|| {
         if step.kind == ToolKind::Shell {
-            "Command"
+            t::chat::step_command()
         } else {
-            "Input"
+            t::chat::step_input()
         }
     });
     if !has_output && input_title.is_none() {
@@ -139,7 +138,11 @@ pub fn output_text(step: &ToolRow) -> Option<String> {
             has_output: true, ..
         } => step.output.as_ref().map(|output| {
             if output.more > 0 {
-                format!("{}\n… +{} lines", output.text, output.more)
+                format!(
+                    "{}\n{}",
+                    output.text,
+                    t::chat::output_more(&output.more.to_string())
+                )
             } else {
                 output.text.clone()
             }

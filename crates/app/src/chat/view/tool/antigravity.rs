@@ -1,4 +1,5 @@
 use gpui::{App, Context};
+use notchling_locale as t;
 
 use super::{active_email, AccountButton, ChatTool};
 use crate::accounts::model::ANTIGRAVITY;
@@ -15,7 +16,7 @@ pub(super) struct Antigravity;
 
 impl ChatTool for Antigravity {
     fn placeholder(&self) -> &'static str {
-        "Message Antigravity…"
+        t::chat::message_antigravity_placeholder()
     }
 
     fn refusal(&self, view: &ChatView, session: &Session) -> Option<&'static str> {
@@ -55,7 +56,7 @@ impl ChatTool for Antigravity {
     fn account(&self, view: &ChatView) -> Option<AccountButton> {
         Some(AccountButton {
             text: active_email(view, ANTIGRAVITY)?,
-            tip: "The Antigravity account. Click to switch or add one.".to_owned(),
+            tip: t::chat::antigravity_account_tip().to_owned(),
         })
     }
 
