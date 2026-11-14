@@ -3,6 +3,7 @@ mod field_macros;
 #[macro_use]
 mod kind_macros;
 
+pub mod doc;
 pub mod emit;
 pub mod envelope;
 pub mod event;
