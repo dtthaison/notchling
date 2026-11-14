@@ -16,6 +16,7 @@ use serde_json::{Map, Value};
 use super::agents::{Page, Tool};
 use super::agents_view::agents_page;
 use super::banner::Banners;
+use super::client_model::{self, ClientPart};
 use super::hook_rows::HooksShown;
 use super::settings::{change, sections, Daemon, Field, Row};
 use super::view::{sheet_header, Acts, Dismiss};
@@ -33,6 +34,7 @@ pub struct SettingsView {
     error: Option<String>,
     busy: Option<Area>,
     hooks: HooksShown,
+    client: Option<ClientPart>,
     page: Page,
     tool: Tool,
     activity: Option<Entity<ActivityView>>,
@@ -62,6 +64,7 @@ impl SettingsView {
             error: None,
             busy: None,
             hooks: HooksShown::Checking,
+            client: None,
             page: Page::General,
             tool: Tool::ClaudeCode,
             activity: None,
@@ -81,6 +84,11 @@ impl SettingsView {
         self
     }
 
+    pub fn with_client(mut self, client: ClientPart) -> SettingsView {
+        self.client = Some(client);
+        self
+    }
+
     pub fn with_page(mut self, page: Page) -> SettingsView {
         self.page = page;
         self
@@ -93,6 +101,9 @@ impl SettingsView {
 
     fn show_page(&mut self, page: Page, cx: &mut Context<Self>) {
         self.page = page;
+        if page == Page::Agents {
+            self.ask_client(cx);
+        }
         if page == Page::Activity {
             match &self.activity {
                 Some(view) => view.update(cx, |view, cx| view.refresh(cx)),
@@ -103,6 +114,25 @@ impl SettingsView {
             }
         }
         cx.notify();
+    }
+
+    pub fn ask_client(&mut self, cx: &mut Context<Self>) {
+        let actions = self.acts.actions.clone();
+        let home = std::env::var("HOME").unwrap_or_default();
+        cx.spawn(async move |this, cx| {
+            let part = cx
+                .background_executor()
+                .spawn(async move {
+                    client_model::load(&actions, notchling_engine::versions::Tool::Claude, &home)
+                })
+                .await;
+            this.update(cx, |view, cx| {
+                view.client = Some(part);
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
     }
 
     pub fn ask_hooks(&mut self, hooks: Arc<Hooks>, cx: &mut Context<Self>) {
@@ -407,7 +437,13 @@ impl Render for SettingsView {
             );
         }
         if self.page == Page::Agents {
-            list = list.child(agents_page(self.tool, &self.hooks, a, cx));
+            list = list.child(agents_page(
+                self.tool,
+                &self.hooks,
+                self.client.as_ref(),
+                a,
+                cx,
+            ));
         }
         let body = if self.page == Page::Activity {
             div()

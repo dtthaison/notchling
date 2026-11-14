@@ -1,18 +1,20 @@
 use serde_json::{json, Value};
 
 use super::agents::Page;
+use super::client_model::{client_part, ClientPart};
 use super::hook_rows::HooksShown;
 use crate::acting::Acting;
 use crate::notch::source::{fixture_clock, DataRoot, Source};
 use crate::views::ViewSpec;
 use crate::welcome::facts::HookFacts;
+use notchling_engine::versions::Tool;
 
 use super::banner::{Banner, Banners};
 use super::new_session::{accounts, folders, NewSession};
 use crate::accounts::menu::targets;
 use crate::accounts::renders::{snapshot, Shown as AccountsShown};
 
-pub const VIEWS: [ViewSpec; 8] = [
+pub const VIEWS: [ViewSpec; 9] = [
     ViewSpec {
         name: "banner",
         size: (620.0, 260.0),
@@ -53,6 +55,11 @@ pub const VIEWS: [ViewSpec; 8] = [
         size: (620.0, 760.0),
         about: "the Agents page's Hooks with no daemon attached: the five explained, none checked",
     },
+    ViewSpec {
+        name: "settings-agents-client",
+        size: (620.0, 900.0),
+        about: "the Agents page's Client part: the Mac's Claude Code and two workers, one the same and one behind (fixture reply)",
+    },
 ];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -65,6 +72,7 @@ pub enum Shown {
     SettingsAgentsPartial,
     SettingsAgentsEmpty,
     SettingsAgentsDetached,
+    SettingsAgentsClient,
 }
 
 pub fn shown(name: &str) -> Option<Shown> {
@@ -77,6 +85,7 @@ pub fn shown(name: &str) -> Option<Shown> {
         "settings-agents-partial" => Shown::SettingsAgentsPartial,
         "settings-agents-empty" => Shown::SettingsAgentsEmpty,
         "settings-agents-detached" => Shown::SettingsAgentsDetached,
+        "settings-agents-client" => Shown::SettingsAgentsClient,
         _ => return None,
     })
 }
@@ -90,7 +99,8 @@ pub fn acting(shown: Shown) -> Acting {
         | Shown::SettingsAgents
         | Shown::SettingsAgentsPartial
         | Shown::SettingsAgentsEmpty
-        | Shown::SettingsAgentsDetached => Acting::Off,
+        | Shown::SettingsAgentsDetached
+        | Shown::SettingsAgentsClient => Acting::Off,
     }
 }
 
@@ -99,7 +109,8 @@ pub fn page(shown: Shown) -> Page {
         Shown::SettingsAgents
         | Shown::SettingsAgentsPartial
         | Shown::SettingsAgentsEmpty
-        | Shown::SettingsAgentsDetached => Page::Agents,
+        | Shown::SettingsAgentsDetached
+        | Shown::SettingsAgentsClient => Page::Agents,
         _ => Page::General,
     }
 }
@@ -133,6 +144,30 @@ pub fn hooks(shown: Shown) -> HooksShown {
             "hooks": {"state": "present", "refused": null, "changes": [], "notes": [],
                       "present": present}}});
     HooksShown::from_plan(HookFacts::parse(&reply).ok_or_else(|| "no plan".to_owned()))
+}
+
+pub fn client(shown: Shown) -> Option<ClientPart> {
+    match shown {
+        Shown::SettingsAgentsDetached => Some(ClientPart::not_running()),
+        Shown::SettingsAgents
+        | Shown::SettingsAgentsPartial
+        | Shown::SettingsAgentsEmpty
+        | Shown::SettingsAgentsClient => {
+            let get = json!({"tools": [
+                {"tool": "claude", "installed": {"version": "2.1.324", "sha256": null},
+                 "method": "native", "path": "/Users/me/.local/bin/claude"},
+            ]});
+            let workers = json!({"workers": {
+                "m1": {"tools": {"claude": {"state": "installed", "version": "2.1.324",
+                    "method": "native", "path": "/home/w/.local/bin/claude"}}, "atMs": 1},
+                "vps-sing-1": {"tools": {"claude": {"state": "installed", "version": "2.1.320",
+                    "method": "native", "path": "/home/w/.local/bin/claude"}}, "atMs": 1},
+                "ub-3": {"tools": {"claude": {"state": "notInstalled"}}, "atMs": 1},
+            }});
+            Some(client_part(Tool::Claude, &get, &workers, "/Users/me"))
+        }
+        _ => None,
+    }
 }
 
 pub fn new_session(shown: Shown) -> NewSession {
@@ -205,5 +240,10 @@ mod tests {
         assert_eq!(hooks(Shown::SettingsAgentsDetached), HooksShown::Detached);
         assert_eq!(page(Shown::Settings), Page::General);
         assert_eq!(page(Shown::SettingsAgents), Page::Agents);
+        assert_eq!(
+            client(Shown::SettingsAgentsClient).unwrap().workers.len(),
+            3
+        );
+        assert_eq!(client(Shown::Settings), None);
     }
 }

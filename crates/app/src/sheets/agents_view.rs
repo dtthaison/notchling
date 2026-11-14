@@ -3,6 +3,8 @@ use notchling_kit::ui::{label, tool_icon, KitPart, ToolMark};
 use notchling_kit::{Appearance, Ink, TypeRole};
 
 use super::agents::{Section, Tool};
+use super::client_model::ClientPart;
+use super::client_view::client_section;
 use super::hook_rows::HooksShown;
 use super::settings_hooks_view::hooks_section;
 
@@ -21,10 +23,17 @@ fn header(tool: Tool, a: Appearance) -> Div {
         .child(label(tool.title(), TypeRole::Heading, Ink::Text, a))
 }
 
-pub fn agents_page(tool: Tool, hooks: &HooksShown, a: Appearance, cx: &App) -> Div {
+pub fn agents_page(
+    tool: Tool,
+    hooks: &HooksShown,
+    client: Option<&ClientPart>,
+    a: Appearance,
+    cx: &App,
+) -> Div {
     let mut page = div().flex().flex_col().gap(px(14.0)).child(header(tool, a));
     for section in tool.sections() {
         page = page.child(match section {
+            Section::Client => client_section(client, a, cx),
             Section::Hooks => hooks_section(hooks, a, cx),
         });
     }
