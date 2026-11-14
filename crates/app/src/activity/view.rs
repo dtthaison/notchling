@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
 use gpui::{
-    div, prelude::*, px, AnyView, Context, Div, Entity, Render, SharedString, Subscription, Window,
+    div, prelude::*, px, AnyView, Context, Div, Entity, Render, SharedString, Stateful,
+    Subscription, Window,
 };
 use notchling_engine::pages::clock::local_offset_secs;
 use notchling_kit::metric::{RADIUS_SM, SIDE_PADDING};
@@ -12,7 +13,7 @@ use notchling_kit::ui::{
 };
 use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 
-use super::model::{time_label, ActivityModel, Entry, Kind};
+use super::model::{time_label, ActivityModel, Check, Entry, Kind, SPOOLED_NOTE};
 use super::renders::{model as fixture, shown, NOW_MS, UTC};
 use super::wire;
 use crate::acting::Acting;
@@ -95,6 +96,90 @@ impl ActivityView {
         cx.notify();
     }
 
+    fn verify(&mut self, seq: u64, n: u64, cx: &mut Context<Self>) {
+        let Some(actions) = self.actions.clone() else {
+            return;
+        };
+        if !self.model.begin_check(seq) {
+            return;
+        }
+        let request = wire::verify_request(n);
+        cx.spawn(async move |this, cx| {
+            let reply = cx
+                .background_executor()
+                .spawn(async move { actions.read(&request) })
+                .await;
+            this.update(cx, |view, cx| {
+                view.model.finish_check(seq, reply);
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+        cx.notify();
+    }
+
+    fn details(&self, e: &Entry, a: Appearance, cx: &mut Context<Self>) -> Div {
+        let mut lines: Vec<String> = Vec::new();
+        if let Some(event) = &e.event {
+            lines.push(format!("Event: {event}"));
+        }
+        if let Some(outcome) = &e.outcome {
+            lines.push(format!("Outcome: {outcome}"));
+        }
+        let mut block = div()
+            .ml(px(BADGE_COLUMN + 23.0))
+            .mt(px(6.0))
+            .flex()
+            .flex_col()
+            .gap(px(4.0))
+            .children(
+                lines
+                    .iter()
+                    .map(|line| label(line, TypeRole::Meta, Ink::TextMuted, a)),
+            );
+        let (Some(seq), Some(n)) = (e.seq, e.audit_n) else {
+            return block;
+        };
+        let check = self.model.checks.get(&seq);
+        let running = check == Some(&Check::Running);
+        let state = if running || self.actions.is_none() {
+            PartState::Disabled
+        } else {
+            PartState::Rest
+        };
+        let b = button(
+            SharedString::from(format!("activity-check-{seq}")),
+            if running {
+                "Checking\u{2026}"
+            } else {
+                "Check Against the Audit Log"
+            },
+            ButtonKind::Secondary,
+            state,
+            a,
+        );
+        let b = if state == PartState::Rest {
+            b.on_click(cx.listener(move |this, _, _, cx| this.verify(seq, n, cx)))
+        } else {
+            b
+        };
+        let said = match check {
+            Some(Check::Done(done)) => Some((done.text().to_owned(), Ink::TextMuted)),
+            Some(Check::Failed(message)) => Some((message.clone(), Ink::Needs)),
+            _ => None,
+        };
+        block = block.child(
+            div()
+                .flex()
+                .items_center()
+                .gap(px(8.0))
+                .child(b)
+                .children(said.map(|(text, ink)| label(&text, TypeRole::Meta, ink, a))),
+        );
+        block
+    }
+
     fn clock(&self) -> (i64, i64) {
         self.fixed.unwrap_or_else(|| {
             let now = now_ms();
@@ -164,7 +249,14 @@ impl ActivityView {
             )
     }
 
-    fn entry(&self, e: &Entry, first: bool, clock: (i64, i64), a: Appearance) -> Div {
+    fn entry(
+        &self,
+        e: &Entry,
+        first: bool,
+        clock: (i64, i64),
+        a: Appearance,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
         let ink = match e.kind {
             Kind::Refused => Ink::Needs,
             Kind::Failed => Ink::Expired,
@@ -181,16 +273,12 @@ impl ActivityView {
                 .fill(Ink::Raised, a)
                 .child(label(e.kind.label(), TypeRole::Label, ink, a)),
         );
-        div()
-            .px(px(14.0))
-            .py(px(8.0))
+        let open = e.seq.is_some() && self.model.open == e.seq;
+        let seq = e.seq;
+        let head = div()
             .flex()
             .items_start()
             .gap(px(10.0))
-            .when(!first, |r| {
-                r.border_t(px(1.0))
-                    .border_color(hsla(Ink::Hairline.color(a)))
-            })
             .child(
                 div()
                     .flex_shrink_0()
@@ -207,7 +295,11 @@ impl ActivityView {
                     .flex()
                     .flex_col()
                     .gap(px(2.0))
-                    .child(label(&e.op, TypeRole::Body, Ink::Text, a).w_full().elide())
+                    .child(
+                        label(e.heading(), TypeRole::Body, Ink::Text, a)
+                            .w_full()
+                            .elide(),
+                    )
                     .child(
                         label(
                             &e.line(),
@@ -217,6 +309,10 @@ impl ActivityView {
                         )
                         .w_full()
                         .elide(),
+                    )
+                    .children(
+                        e.spooled
+                            .then(|| label(SPOOLED_NOTE, TypeRole::Meta, Ink::TextFaint, a)),
                     ),
             )
             .child(div().flex_shrink_0().child(label(
@@ -224,10 +320,32 @@ impl ActivityView {
                 TypeRole::Meta,
                 Ink::TextFaint,
                 a,
+            )));
+        div()
+            .id(SharedString::from(format!(
+                "activity-row-{}",
+                e.seq.unwrap_or_default()
             )))
+            .px(px(14.0))
+            .py(px(8.0))
+            .when(!first, |r| {
+                r.border_t(px(1.0))
+                    .border_color(hsla(Ink::Hairline.color(a)))
+            })
+            .when(seq.is_some(), |row| {
+                row.cursor_pointer()
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        if let Some(seq) = seq {
+                            this.model.toggle_open(seq);
+                            cx.notify();
+                        }
+                    }))
+            })
+            .child(head)
+            .when(open, |row| row.child(self.details(e, a, cx)))
     }
 
-    fn list(&self, a: Appearance) -> Div {
+    fn list(&self, a: Appearance, cx: &mut Context<Self>) -> Div {
         let clock = self.clock();
         let visible = self.model.visible();
         let mut body = div().flex().flex_col().gap(px(8.0));
@@ -250,7 +368,7 @@ impl ActivityView {
                     .iter()
                     .take(SHOWN)
                     .enumerate()
-                    .map(|(i, e)| self.entry(e, i == 0, clock, a)),
+                    .map(|(i, e)| self.entry(e, i == 0, clock, a, cx)),
             ),
         );
         let note = match (visible.len() > shown, self.model.truncated) {
@@ -300,7 +418,7 @@ impl Render for ActivityView {
             .overflow_y_scroll()
             .px(px(SIDE_PADDING))
             .pb(px(SIDE_PADDING))
-            .child(self.list(a));
+            .child(self.list(a, cx));
         div()
             .size_full()
             .flex()

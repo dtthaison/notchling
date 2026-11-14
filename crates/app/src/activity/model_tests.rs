@@ -1,7 +1,7 @@
 use serde_json::{json, Value};
 
-use super::model::{time_label, ActivityModel, Entry, Kind, Load};
-use super::renders::{model, Shown, NOW_MS, UTC};
+use super::model::{time_label, ActivityModel, Check, Entry, Kind, LineCheck, Load, SPOOLED_NOTE};
+use super::renders::{model, Shown, NOW_MS, OPEN_SEQ, UTC};
 use super::wire;
 
 fn reply(rows: Value) -> Value {
@@ -158,4 +158,112 @@ fn times_read_as_a_clock_today_and_a_date_before() {
         time_label(NOW_MS, NOW_MS, 3 * 3600),
         time_label(NOW_MS, NOW_MS, 0)
     );
+}
+
+fn sealed_row() -> Value {
+    json!({
+        "time_ms": 5_000, "source": "audit", "kind": "acted", "op": "session.reply",
+        "who": "app", "result": "ok", "event": "session.reply", "group": "agents",
+        "title": "Replies Sent", "outcome": "ok", "refs": {}, "seq": 7, "audit_n": 41,
+        "spooled": false
+    })
+}
+
+fn line(sealed: bool, seal_ok: bool) -> Value {
+    json!({"line": {"n": 41, "sealed": sealed, "seal_ok": seal_ok, "kind": "session.reply",
+        "outcome": "ok", "ts": 5_000, "f": {}}})
+}
+
+#[test]
+fn parses_new_fields_when_present() {
+    let e = Entry::parse(&sealed_row()).unwrap();
+    assert_eq!(e.event.as_deref(), Some("session.reply"));
+    assert_eq!(e.title.as_deref(), Some("Replies Sent"));
+    assert_eq!(e.outcome.as_deref(), Some("ok"));
+    assert_eq!((e.seq, e.audit_n, e.spooled), (Some(7), Some(41), false));
+}
+
+#[test]
+fn old_reply_still_parses() {
+    let e = Entry::parse(&row(1, "acted", "session.reply", "ok")).unwrap();
+    assert_eq!((&e.event, &e.title, &e.outcome), (&None, &None, &None));
+    assert_eq!((e.seq, e.audit_n, e.spooled), (None, None, false));
+    assert_eq!(e.heading(), "session.reply");
+}
+
+#[test]
+fn title_wins_over_op_label() {
+    let e = Entry::parse(&sealed_row()).unwrap();
+    assert_eq!(e.heading(), "Replies Sent");
+    let mut m = ActivityModel::loaded(vec![e]);
+    m.search = "replies sent".into();
+    assert_eq!(m.visible().len(), 1);
+}
+
+#[test]
+fn spooled_row_says_so() {
+    let mut value = sealed_row();
+    value["spooled"] = json!(true);
+    let e = Entry::parse(&value).unwrap();
+    assert!(e.spooled);
+    assert_eq!(
+        SPOOLED_NOTE,
+        "Recorded by the app while the daemon was down"
+    );
+}
+
+#[test]
+fn audit_check_compares_fields() {
+    let e = Entry::parse(&sealed_row()).unwrap();
+    assert_eq!(e.compare(&line(true, true)), Some(LineCheck::Matches));
+    assert_eq!(LineCheck::Matches.text(), "Matches the sealed entry");
+    assert_eq!(e.compare(&line(true, false)), Some(LineCheck::Differs));
+    assert_eq!(e.compare(&line(false, false)), Some(LineCheck::Unsealed));
+    let mut other = line(true, true);
+    other["line"]["outcome"] = json!("failed");
+    assert_eq!(e.compare(&other), Some(LineCheck::Differs));
+    assert_eq!(LineCheck::Differs.text(), "Doesn't match the sealed entry");
+    let mut later = line(true, true);
+    later["line"]["ts"] = json!(6_000);
+    assert_eq!(e.compare(&later), Some(LineCheck::Differs));
+    assert_eq!(e.compare(&json!({})), None);
+}
+
+#[test]
+fn a_check_runs_once_and_lands_on_its_row() {
+    let mut m = ActivityModel::loaded(vec![Entry::parse(&sealed_row()).unwrap()]);
+    assert!(m.begin_check(7));
+    assert!(!m.begin_check(7));
+    m.finish_check(7, Ok(line(true, true)));
+    assert_eq!(m.checks[&7], Check::Done(LineCheck::Matches));
+    assert!(m.begin_check(7));
+    m.finish_check(7, Err("the daemon isn't running".into()));
+    assert_eq!(
+        m.checks[&7],
+        Check::Failed("the daemon isn't running".into())
+    );
+    m.toggle_open(7);
+    assert_eq!(m.open, Some(7));
+    m.toggle_open(7);
+    assert_eq!(m.open, None);
+}
+
+#[test]
+fn the_open_render_has_a_sealed_row_open_with_its_check_done() {
+    let m = model(Shown::Open);
+    assert_eq!(m.open, Some(OPEN_SEQ));
+    assert_eq!(m.checks[&OPEN_SEQ], Check::Done(LineCheck::Matches));
+    assert!(m
+        .entries
+        .iter()
+        .any(|e| e.seq == Some(OPEN_SEQ) && e.audit_n.is_some()));
+    assert!(m.entries.iter().any(|e| e.spooled));
+    assert!(m.entries.iter().any(|e| e.title.is_some()));
+}
+
+#[test]
+fn the_verify_request_asks_for_one_line() {
+    let r = wire::verify_request(41);
+    assert_eq!(r.op, "log.verify");
+    assert_eq!(r.args, json!({"n": 41}));
 }

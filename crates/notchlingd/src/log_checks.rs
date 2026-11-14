@@ -350,11 +350,17 @@ impl Checker {
                 }
                 _ => false,
             };
-            let f = serde_json::from_str::<Value>(line)
-                .ok()
-                .and_then(|v| v.get("f").cloned())
-                .unwrap_or(Value::Null);
-            return Some(json!({"n": n, "sealed": sealed, "seal_ok": seal_ok, "f": f}));
+            let whole = serde_json::from_str::<Value>(line).unwrap_or(Value::Null);
+            let pick = |key: &str| whole.get(key).cloned().unwrap_or(Value::Null);
+            return Some(json!({
+                "n": n,
+                "sealed": sealed,
+                "seal_ok": seal_ok,
+                "kind": pick("kind"),
+                "outcome": pick("outcome"),
+                "ts": pick("ts"),
+                "f": pick("f"),
+            }));
         }
         None
     }
