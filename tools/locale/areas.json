@@ -15,9 +15,12 @@
         "crates/app/src/sheets/settings_hooks_view.rs",
         "crates/app/src/sheets/hook_rows.rs",
         "crates/app/src/sheets/agents*.rs",
+        "crates/app/src/sheets/client_*.rs",
+        "crates/app/src/sheets/capabilities*.rs",
+        "crates/app/src/appearance.rs",
         "crates/app/src/activity/**"
       ],
-      "moved": false
+      "moved": true
     },
     {
       "name": "chat-sidebar",

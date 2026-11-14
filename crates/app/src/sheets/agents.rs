@@ -20,9 +20,9 @@ impl Page {
 
     pub fn id(self) -> &'static str {
         match self {
-            Page::General => "General",
-            Page::Agents => "Agents",
-            Page::Activity => "Activity",
+            Page::General => "general",
+            Page::Agents => "agents",
+            Page::Activity => "activity",
         }
     }
 }

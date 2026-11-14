@@ -146,7 +146,7 @@ fn pages_and_hooks_use_messages() {
     assert_eq!(Tool::ClaudeCode.title(), "Claude Code");
     assert_eq!(
         Page::ALL.map(Page::id),
-        ["General", "Agents", "Activity"],
+        ["general", "agents", "activity"],
         "an element id never changes with the language"
     );
     let installed = HookState::Installed.word();
