@@ -45,7 +45,51 @@ fn every_fact() -> Vec<Fact> {
     facts.push(Fact::LoadFailed {
         doc: "versions/references",
     });
+    facts.push(Fact::Drift {
+        tool: Tool::Codex,
+        machine: "vps; rm -rf ~".into(),
+        expected: v("0.166.0"),
+        found: v("0.167.0"),
+    });
+    facts.push(Fact::SelfUpdate {
+        tool: Tool::Claude,
+        machine: "vps".into(),
+        action: "off".into(),
+        ok: false,
+        detail: "Didn't change ~/.claude/settings.json: changed_since_plan".into(),
+    });
     facts
+}
+
+#[test]
+fn drift_and_self_update_words() {
+    let drift = Fact::Drift {
+        tool: Tool::Codex,
+        machine: "vps".into(),
+        expected: v("0.166.0"),
+        found: v("0.167.0"),
+    };
+    assert_eq!(
+        drift.audit_words(),
+        (
+            "versions.drift",
+            "vps codex 0.167.0 expected 0.166.0".to_string()
+        )
+    );
+    let update = Fact::SelfUpdate {
+        tool: Tool::Agy,
+        machine: "vps".into(),
+        action: "on".into(),
+        ok: true,
+        detail: "Self-update on in ~/x".into(),
+    };
+    assert_eq!(
+        update.audit_words(),
+        (
+            "versions.self_update",
+            "vps antigravity on ok self-update_on_in___x".to_string()
+        )
+    );
 }
 
 #[test]

@@ -42,6 +42,19 @@ pub enum Fact {
     LoadFailed {
         doc: &'static str,
     },
+    Drift {
+        tool: Tool,
+        machine: String,
+        expected: Version,
+        found: Version,
+    },
+    SelfUpdate {
+        tool: Tool,
+        machine: String,
+        action: String,
+        ok: bool,
+        detail: String,
+    },
     Checked {
         tool: Tool,
         version: Version,
@@ -94,6 +107,38 @@ impl Fact {
                 ),
             ),
             Fact::LoadFailed { doc } => ("versions.load_failed", plain(doc)),
+            Fact::Drift {
+                tool,
+                machine,
+                expected,
+                found,
+            } => (
+                "versions.drift",
+                format!(
+                    "{} {} {} expected {}",
+                    plain(machine),
+                    tool.name(),
+                    plain(found.as_str()),
+                    plain(expected.as_str())
+                ),
+            ),
+            Fact::SelfUpdate {
+                tool,
+                machine,
+                action,
+                ok,
+                detail,
+            } => (
+                "versions.self_update",
+                format!(
+                    "{} {} {} {} {}",
+                    plain(machine),
+                    tool.name(),
+                    plain(action),
+                    if *ok { "ok" } else { "failed" },
+                    plain(detail)
+                ),
+            ),
             Fact::Checked {
                 tool,
                 version,

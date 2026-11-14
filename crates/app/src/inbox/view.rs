@@ -122,6 +122,10 @@ impl InboxPanelView {
             Some(Target::Settings { page, .. }) if page == "agents" => {
                 cx.defer(crate::mac::shell::open_chat_settings_agents);
             }
+            Some(Target::Machines(_)) => {
+                self.note = Some("Open Machines from the menu bar.".to_string());
+                cx.notify();
+            }
             Some(Target::Settings { .. }) | None => {}
         }
     }

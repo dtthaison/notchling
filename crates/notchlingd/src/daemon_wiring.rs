@@ -493,6 +493,7 @@ impl Wired {
         );
         versions.checks().set_enabled(!layout.fixture);
         versions.checks().set_inbox(inbox.clone());
+        versions.drifts().set_inbox(inbox.clone());
         versions.set_install_switch(switches.install.clone());
         Wired {
             acting,

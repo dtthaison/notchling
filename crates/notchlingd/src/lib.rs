@@ -57,6 +57,7 @@ pub mod vault_cli;
 pub mod vault_ops;
 pub mod vault_wait;
 pub mod versions_check;
+pub mod versions_drift;
 pub mod versions_ops;
 pub mod versions_update;
 
@@ -126,6 +127,8 @@ mod quiet_ops_tests;
 mod vault_ops_lock_tests;
 #[cfg(test)]
 mod versions_check_tests;
+#[cfg(test)]
+mod versions_drift_tests;
 #[cfg(test)]
 mod versions_inbox_tests;
 #[cfg(test)]

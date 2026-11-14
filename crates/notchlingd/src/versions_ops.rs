@@ -2,6 +2,7 @@ use crate::acting_ops::Room;
 use crate::op_group::OpGroup;
 use crate::switches::SwitchFlag;
 use crate::versions_check::{Checks, Parts};
+use crate::versions_drift::Drifts;
 use crate::versions_update::Updates;
 use notchling_engine::control::launcher::{LaunchOutput, Launcher};
 use notchling_engine::control::plan::Command;
@@ -27,6 +28,7 @@ pub const WORKERS_DOC: &str = versions_facts::DOC;
 pub const SEEN_DOC: &str = "versions/seen";
 pub const RESCAN_EVERY: Duration = Duration::from_secs(600);
 pub const SOAK_EVERY: Duration = Duration::from_secs(600);
+pub const DRIFT_EVERY: Duration = Duration::from_secs(60);
 pub const AGY_ASK_EVERY_MS: i64 = 600_000;
 pub const AGY_TIMEOUT: Duration = Duration::from_secs(5);
 const SEEN_KEEP: usize = 400;
@@ -72,6 +74,7 @@ pub struct VersionsOps {
     clock: Clock,
     own: Version,
     checks: Arc<Checks>,
+    drifts: Arc<Drifts>,
     updates: Arc<Updates>,
     rescan_wanted: Arc<AtomicBool>,
     exe: Mutex<Option<PathBuf>>,
@@ -149,6 +152,11 @@ impl VersionsOps {
             recorder.clone(),
             clock.clone(),
         );
+        let drifts = Arc::new(Drifts::new(
+            data_dir.clone(),
+            recorder.clone(),
+            clock.clone(),
+        ));
         let rescan_wanted = Arc::new(AtomicBool::new(false));
         let updates = Arc::new(Updates::new(
             launcher.clone(),
@@ -165,6 +173,7 @@ impl VersionsOps {
             clock,
             own,
             checks,
+            drifts,
             updates,
             rescan_wanted,
             exe: Mutex::new(std::env::current_exe().ok()),
@@ -190,6 +199,27 @@ impl VersionsOps {
 
     pub fn checks(&self) -> &Arc<Checks> {
         &self.checks
+    }
+
+    pub fn drifts(&self) -> &Arc<Drifts> {
+        &self.drifts
+    }
+
+    pub fn drift_pass(&self) {
+        let found = self.snapshot();
+        let book = self.checks.book();
+        let reference: BTreeMap<Tool, Version> = found
+            .iter()
+            .filter_map(|(tool, installed)| {
+                let version = installed.version.as_ref()?;
+                let sha = &installed.identity.as_ref()?.sha256;
+                if !book.usable(*tool, version, sha) {
+                    return None;
+                }
+                Some((*tool, book.reference(*tool)?.version.clone()))
+            })
+            .collect();
+        self.drifts.pass(&reference);
     }
 
     pub fn soak_pass(&self) {
@@ -234,6 +264,7 @@ impl VersionsOps {
         self.announce(before, &found);
         self.note_seen(&found);
         self.auto_check(&found);
+        self.drift_pass();
     }
 
     fn auto_check(&self, found: &BTreeMap<Tool, Installed>) {
@@ -540,6 +571,7 @@ impl VersionsOps {
         self.rescan();
         let mut last = Instant::now();
         let mut soaked = Instant::now() - SOAK_EVERY;
+        let mut drifted = Instant::now();
         let mut watched = watch_paths(&self.roots);
         let mut watcher = Watcher::start(watched.clone(), WatchConfig::default()).ok();
         while !self.stop.load(Ordering::SeqCst) {
@@ -555,6 +587,10 @@ impl VersionsOps {
                 break;
             }
             self.retry_due_checks();
+            if drifted.elapsed() >= DRIFT_EVERY {
+                drifted = Instant::now();
+                self.drift_pass();
+            }
             if soaked.elapsed() >= SOAK_EVERY {
                 soaked = Instant::now();
                 self.checks.soak_pass();

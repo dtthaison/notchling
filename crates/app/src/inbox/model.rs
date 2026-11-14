@@ -179,6 +179,7 @@ pub enum Target {
     Approval(String),
     Request(String),
     Settings { page: String, tool: Option<String> },
+    Machines(String),
 }
 
 pub fn target(open: &Value) -> Option<Target> {
@@ -187,6 +188,9 @@ pub fn target(open: &Value) -> Option<Target> {
     }
     if let Some(ticket) = open.get("vault_request").and_then(Value::as_str) {
         return Some(Target::Request(ticket.to_owned()));
+    }
+    if let Some(machine) = open.get("machines").and_then(Value::as_str) {
+        return Some(Target::Machines(machine.to_owned()));
     }
     let page = open.get("settings").and_then(Value::as_str)?;
     Some(Target::Settings {

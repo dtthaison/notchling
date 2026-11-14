@@ -74,6 +74,7 @@ struct Rig {
     world: World,
     files: Files,
     writes: Arc<Mutex<Vec<(String, String)>>>,
+    data: super::fakes::TempDir,
 }
 
 fn batch_nonce(script: &str) -> Option<String> {
@@ -164,6 +165,8 @@ fn rig_with(tools: WorkerTools, files: &[(&str, FileState)]) -> Rig {
         list
     });
     setup.machines = vec![machine()];
+    let data = super::fakes::TempDir::new("selfupdate-data");
+    setup.offers_data = Some(data.path().to_path_buf());
     let (f, e) = (files.clone(), extras.clone());
     setup.runner.on_call(
         |argv| {
@@ -222,6 +225,7 @@ fn rig_with(tools: WorkerTools, files: &[(&str, FileState)]) -> Rig {
         world,
         files,
         writes,
+        data,
     }
 }
 
@@ -635,4 +639,36 @@ fn the_step_id_names_its_tool() {
         Some(Tool::Codex)
     );
     assert_eq!(sid("claude-login").self_update_tool(), None);
+}
+
+#[test]
+fn each_fix_is_logged_without_file_content() {
+    let r = rig(&[
+        (CLAUDE, FileState::Text(settings())),
+        (CODEX, FileState::Text("x = 1\n".into())),
+    ]);
+    r.world.refresh("m1", true);
+    assert!(run_fix(&r, Tool::Claude).ok);
+    let back = r.world.click(
+        "m1",
+        PlanKind::Replace(claude_id()),
+        super::engine_plan::AdminAnswer::None,
+    );
+    assert!(back.ok, "{}", back.message);
+    let log = crate::versions::selfupdate_log::unrecorded(r.data.path());
+    assert_eq!(log.len(), 2);
+    assert_eq!(log[0].action, "off");
+    assert_eq!(log[1].action, "on");
+    assert!(log
+        .iter()
+        .all(|e| e.ok && e.tool == Tool::Claude && e.machine == "m1"));
+    assert!(
+        log[0].detail.contains("~/.claude/settings.json"),
+        "{}",
+        log[0].detail
+    );
+    for e in &log {
+        assert!(!e.detail.contains(TOKEN));
+        assert!(!e.detail.contains("DISABLE_AUTOUPDATER"), "{}", e.detail);
+    }
 }

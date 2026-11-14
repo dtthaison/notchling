@@ -10,6 +10,7 @@ pub enum Kind {
     Notice,
     SettingChange,
     VersionCheckFailed,
+    VersionDrift,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
