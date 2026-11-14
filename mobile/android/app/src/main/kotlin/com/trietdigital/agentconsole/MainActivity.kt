@@ -8,6 +8,7 @@ import android.media.AudioManager
 import android.media.MediaPlayer
 import android.os.Build
 import android.view.Display
+import android.view.View
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -79,6 +80,19 @@ class MainActivity : FlutterActivity() {
     override fun onResume() {
         super.onResume()
         requestHighestRefreshRate()
+        dropImeFrameSync()
+    }
+
+    /// Flutter's text input plugin follows the keyboard animation frame by frame (a WindowInsetsAnimation callback
+    /// that defers the insets), and while it does the app is held to about 30 frames a second. The chat doesn't move
+    /// with the keyboard frame by frame anyway: it slides on its own once it knows the keyboard's height. Without the
+    /// callback that height arrives at the start of the animation, in one step, and the app keeps its full rate.
+    private fun dropImeFrameSync() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
+        val flutterView = findViewById<View>(FlutterActivity.FLUTTER_VIEW_ID) ?: return
+        flutterView.setWindowInsetsAnimationCallback(null)
+        flutterView.setOnApplyWindowInsetsListener(null)
+        flutterView.requestApplyInsets()
     }
 
     /// Phones default to 60 Hz for apps that do not ask; this picks the fastest mode at the current resolution.
