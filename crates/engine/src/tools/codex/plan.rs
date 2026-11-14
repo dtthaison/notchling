@@ -4,6 +4,8 @@ pub const WORKSPACE_WRITE: &str = "workspace-write";
 
 pub const MAX_PROMPT_BYTES: usize = 100 * 1024;
 
+pub const FLAGS_USED: &[&str] = &["--json", "--skip-git-repo-check", "-c", "-m", "-C"];
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Pick {
     pub model: Option<String>,

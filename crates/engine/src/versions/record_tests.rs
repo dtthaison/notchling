@@ -32,6 +32,9 @@ fn every_fact() -> Vec<Fact> {
             cause,
         });
     }
+    facts.push(Fact::LoadFailed {
+        doc: "versions/references",
+    });
     facts
 }
 

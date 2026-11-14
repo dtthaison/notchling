@@ -1,3 +1,4 @@
+pub mod check;
 mod identity;
 pub mod mac;
 pub mod mark;
@@ -5,9 +6,12 @@ mod method;
 pub mod mismatch;
 mod parse;
 pub mod record;
+pub mod reference;
 mod version;
 pub mod worker;
 
+#[cfg(test)]
+mod check_tests;
 #[cfg(test)]
 mod identity_tests;
 #[cfg(test)]
@@ -20,6 +24,8 @@ mod mismatch_tests;
 mod parse_tests;
 #[cfg(test)]
 mod record_tests;
+#[cfg(test)]
+mod reference_tests;
 #[cfg(test)]
 mod version_tests;
 #[cfg(test)]

@@ -38,6 +38,9 @@ pub enum Fact {
         method: Method,
         cause: Cause,
     },
+    LoadFailed {
+        doc: &'static str,
+    },
 }
 
 fn plain(text: &str) -> String {
@@ -80,6 +83,7 @@ impl Fact {
                     cause.word()
                 ),
             ),
+            Fact::LoadFailed { doc } => ("versions.load_failed", plain(doc)),
         }
     }
 }
