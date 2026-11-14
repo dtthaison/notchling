@@ -127,18 +127,18 @@ class _ComposerState extends State<Composer> {
                     const SizedBox(width: Space.sm),
                     Expanded(
                       child: Text(
-                        l10n.sendFailed,
+                        l10n.chatSendError,
                         style: kit.bodySm.copyWith(color: kit.danger),
                       ),
                     ),
                     TextButton(
                       onPressed: widget.onRetry,
-                      child: Text(l10n.retry),
+                      child: Text(l10n.appRetry),
                     ),
                     IconButton(
                       onPressed: widget.onDismissError,
                       icon: const Icon(Icons.close, size: 18),
-                      tooltip: l10n.close,
+                      tooltip: l10n.appClose,
                     ),
                   ],
                 ),
@@ -158,7 +158,7 @@ class _ComposerState extends State<Composer> {
                 onTakeover: widget.onTakeover,
               )
             else if (locked)
-              _LockedRow(text: widget.readOnlyReason ?? l10n.viewOnlyReason)
+              _LockedRow(text: widget.readOnlyReason ?? l10n.chatViewOnlyReason)
             else
               ValueListenableBuilder<TextEditingValue>(
                 valueListenable: widget.controller,
@@ -245,7 +245,7 @@ class _ComposerState extends State<Composer> {
                           Icon(Icons.terminal, size: 16, color: kit.shell),
                           const SizedBox(width: Space.sm),
                           Text(
-                            l10n.shellHeader,
+                            l10n.chatShellHeader,
                             style: kit.label.copyWith(color: kit.shell),
                           ),
                         ],
@@ -259,7 +259,7 @@ class _ComposerState extends State<Composer> {
                         0,
                       ),
                       child: Text(
-                        l10n.shellRunsIn(widget.folder ?? '~'),
+                        l10n.chatShellRunsIn(widget.folder ?? '~'),
                         style: kit.meta,
                       ),
                     ),
@@ -285,7 +285,7 @@ class _ComposerState extends State<Composer> {
                     TextSpan(
                       children: <InlineSpan>[
                         TextSpan(
-                          text: '${l10n.shellWillRun}  ',
+                          text: '${l10n.chatShellWillRun}  ',
                           style: kit.meta,
                         ),
                         TextSpan(
@@ -308,7 +308,7 @@ class _ComposerState extends State<Composer> {
                 style: shell ? kit.mono.copyWith(fontSize: 14.5) : kit.body,
                 cursorColor: shell ? kit.shell : kit.accent,
                 decoration: InputDecoration(
-                  hintText: l10n.composerHint,
+                  hintText: l10n.chatComposerHint,
                   filled: false,
                   border: InputBorder.none,
                   enabledBorder: InputBorder.none,
@@ -327,7 +327,7 @@ class _ComposerState extends State<Composer> {
                   if (widget.onAttach != null)
                     IconButton(
                       onPressed: sending ? null : widget.onAttach,
-                      tooltip: l10n.attachPhoto,
+                      tooltip: l10n.chatAttachPhoto,
                       constraints: const BoxConstraints(
                         minWidth: Metric.minTarget,
                         minHeight: Metric.minTarget,
@@ -343,7 +343,7 @@ class _ComposerState extends State<Composer> {
                   Padding(
                     padding: const EdgeInsets.all(2),
                     child: SendDisc(
-                      label: sending ? l10n.sending : l10n.send,
+                      label: sending ? l10n.chatSendBusy : l10n.chatSend,
                       shell: shell,
                       enabled: !sending && !empty,
                       onPressed: widget.onSend,
@@ -363,7 +363,7 @@ class _ComposerState extends State<Composer> {
                   ),
                   child: SizedBox(
                     width: double.infinity,
-                    child: Text(l10n.shellHint, style: kit.meta),
+                    child: Text(l10n.chatShellHint, style: kit.meta),
                   ),
                 ),
               ),
@@ -473,7 +473,7 @@ class _SlashList extends StatelessWidget {
                 Space.md,
                 Space.xs,
               ),
-              child: Text(l10n.slashHeader, style: kit.section),
+              child: Text(l10n.chatSlashHeader, style: kit.section),
             ),
             for (final (int index, SlashCommand command) in commands.indexed)
               Entrance(
@@ -575,7 +575,7 @@ class _TakeoverRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final AppL10n l10n = AppL10n.of(context);
     if (!info.available && !info.stoppable) {
-      return _LockedRow(text: info.reason ?? l10n.viewOnlyReason);
+      return _LockedRow(text: info.reason ?? l10n.chatViewOnlyReason);
     }
     final bool running = progress is TakeoverRunning;
     final TakeoverProgress current = progress;
@@ -596,7 +596,7 @@ class _TakeoverRow extends StatelessWidget {
                 const SizedBox(width: Space.sm),
                 Expanded(
                   child: Text(
-                    l10n.takeoverFailed(current.message),
+                    l10n.appTakeoverFailed(current.message),
                     style: Kit.of(
                       context,
                     ).bodySm.copyWith(color: Kit.of(context).danger),
@@ -605,10 +605,10 @@ class _TakeoverRow extends StatelessWidget {
               ],
             ),
           ),
-        _LockedRow(text: l10n.takeoverHint),
+        _LockedRow(text: l10n.chatTakeoverHint),
         const SizedBox(height: Space.sm),
         PrimaryButton(
-          label: running ? l10n.takeoverRunning : l10n.takeover,
+          label: running ? l10n.chatTakeoverRunning : l10n.appTakeover,
           icon: running ? null : Icons.login,
           onPressed: running ? null : onTakeover,
         ),
@@ -675,7 +675,7 @@ class _VoiceNotice extends StatelessWidget {
             IconButton(
               onPressed: onDismiss,
               icon: const Icon(Icons.close, size: 18),
-              tooltip: l10n.close,
+              tooltip: l10n.appClose,
             ),
           ],
         ),

@@ -40,7 +40,7 @@ Future<void> runTakeover(
     ref.read(activeTabProvider.notifier).show(1);
   } on BridgeException catch (error) {
     messenger.showSnackBar(
-      SnackBar(content: Text(l10n.takeoverFailed(error.message))),
+      SnackBar(content: Text(l10n.appTakeoverFailed(error.message))),
     );
   }
 }
@@ -71,7 +71,7 @@ class _TakeoverRowButtonState extends ConsumerState<TakeoverRowButton> {
     return Semantics(
       button: true,
       enabled: !_working,
-      label: '${l10n.takeover}, ${widget.session.name}',
+      label: '${l10n.appTakeover}, ${widget.session.name}',
       excludeSemantics: true,
       onTap: _working ? null : () => unawaited(_run()),
       child: GestureDetector(
@@ -100,7 +100,7 @@ class _TakeoverRowButtonState extends ConsumerState<TakeoverRowButton> {
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
                   : Text(
-                      l10n.takeover,
+                      l10n.appTakeover,
                       style: Kit.of(
                         context,
                       ).labelSm.copyWith(color: Kit.of(context).text),

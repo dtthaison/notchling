@@ -9,519 +9,223 @@ class AppL10nEn extends AppL10n {
   AppL10nEn([String locale = 'en']) : super(locale);
 
   @override
+  String get appCancel => 'Cancel';
+
+  @override
+  String get appClose => 'Close';
+
+  @override
+  String get appConnected => 'Connected';
+
+  @override
+  String appConnectedVia(String route) {
+    return 'Connected · $route';
+  }
+
+  @override
+  String get appConnecting => 'Connecting';
+
+  @override
+  String appConnectionLostRetry(int seconds) {
+    final intl.NumberFormat secondsNumberFormat =
+        intl.NumberFormat.decimalPattern(localeName);
+    final String secondsString = secondsNumberFormat.format(seconds);
+
+    return 'Connection lost, retrying in ${secondsString}s';
+  }
+
+  @override
+  String get appConnectionRevoked => 'The Mac revoked this device. Pair again.';
+
+  @override
+  String appInboxOpenCount(int count) {
+    final intl.NumberFormat countNumberFormat =
+        intl.NumberFormat.decimalPattern(localeName);
+    final String countString = countNumberFormat.format(count);
+
+    return '$countString open';
+  }
+
+  @override
+  String get appKeepAliveBody =>
+      'To get notified when a session needs input or finishes, the app has to run in the background. Android shows a small \"Agent Console is watching\" notification. You can turn it off under Paired Macs.';
+
+  @override
+  String get appKeepAliveEnable => 'Turn on';
+
+  @override
+  String get appKeepAliveTitle => 'Keep the connection in the background?';
+
+  @override
+  String get appLoadFailed => 'Couldn\'t load data. Please try again.';
+
+  @override
   String get appName => 'Agent Console';
 
   @override
-  String get tabSessions => 'Sessions';
+  String get appNoRouteToMac =>
+      'Can\'t reach the Mac. Turn on Internet access on the Mac or join the same Wi-Fi.';
 
   @override
-  String get tabChat => 'Chat';
+  String get appNotNow => 'Not now';
 
   @override
-  String get tabVisualize => 'Visualize';
+  String get appOpenMacs => 'Paired Macs';
 
   @override
-  String get tabInbox => 'Inbox';
+  String get appPullToRefresh => 'Pull to refresh';
 
   @override
-  String get inboxNeedsYou => 'Needs You';
+  String get appRetry => 'Retry';
 
   @override
-  String get inboxDone => 'Done';
+  String get appRetryNow => 'Retry now';
 
   @override
-  String get inboxEmptyTitle => 'Nothing Needs You';
+  String get appRouteHome => 'Home Wi-Fi';
 
   @override
-  String get inboxEmptyBody => 'Requests from your Mac show up here.';
+  String get appRouteInternet => 'Internet';
 
   @override
-  String get inboxUnsupported => 'Notchling on this Mac has no inbox yet.';
+  String get appSettingsTitle => 'Settings';
 
   @override
-  String get inboxOpenOnMac => 'Open on Mac';
+  String get appTabChat => 'Chat';
 
   @override
-  String inboxAnsweredOnMac(String action) {
-    return 'Answered on the Mac: $action';
+  String get appTabInbox => 'Inbox';
+
+  @override
+  String get appTabSessions => 'Sessions';
+
+  @override
+  String get appTabVisualize => 'Visualize';
+
+  @override
+  String get appTakeover => 'Take over';
+
+  @override
+  String appTakeoverFailed(String reason) {
+    return 'Could not take over: $reason';
   }
 
   @override
-  String inboxAnsweredHere(String action) {
-    return 'You answered: $action';
-  }
+  String get appViewOnly => 'View only';
 
   @override
-  String get inboxDeclined =>
-      'The Mac didn\'t take that answer. Try again on the Mac.';
+  String get chatActivityIdle => 'Idle';
 
   @override
-  String get inboxExpired => 'Expired';
+  String get chatAnswerFailed => 'Couldn\'t send the answer. Please try again.';
 
   @override
-  String get inboxWithdrawn => 'Withdrawn';
+  String get chatAnswerOnMac => 'Answer on the Mac';
 
   @override
-  String inboxOpenCount(int count) {
-    return '$count open';
-  }
+  String get chatAttachPhoto => 'Attach a photo';
 
   @override
-  String get connecting => 'Connecting';
+  String get chatCompactionTitle => 'Conversation compacted';
 
   @override
-  String connectionLostRetry(int seconds) {
-    return 'Connection lost, retrying in ${seconds}s';
-  }
+  String get chatComposerHint => 'Message this session';
 
   @override
-  String get connected => 'Connected';
+  String get chatContext => 'Context';
 
   @override
-  String get retryNow => 'Retry now';
+  String get chatControlConsole => 'Console';
 
   @override
-  String get retry => 'Retry';
+  String get chatControlJob => 'Background job';
 
   @override
-  String get cancel => 'Cancel';
+  String get chatCopied => 'Copied';
 
   @override
-  String get close => 'Close';
-
-  @override
-  String get stateNeedsInput => 'Needs Input';
-
-  @override
-  String get stateRunning => 'Working';
-
-  @override
-  String get stateDone => 'Done';
-
-  @override
-  String get stateExited => 'Ended';
-
-  @override
-  String get sessionsEmptyTitle => 'No sessions yet';
-
-  @override
-  String get sessionsEmptyBody =>
-      'Claude Code sessions on your Mac show up here.';
-
-  @override
-  String get searchHint => 'Search sessions';
-
-  @override
-  String searchNoMatch(String query) {
-    return 'No sessions match “$query”.';
-  }
-
-  @override
-  String get loadFailed => 'Couldn\'t load data. Please try again.';
-
-  @override
-  String get newSession => 'New session';
-
-  @override
-  String get newSessionFolder => 'Folder';
-
-  @override
-  String get newSessionModel => 'Model';
-
-  @override
-  String get modelDefault => 'Default';
-
-  @override
-  String get newSessionNoProjects => 'No recent folders on the Mac.';
-
-  @override
-  String get newSessionConfirmTitle => 'Start a new session?';
-
-  @override
-  String newSessionConfirmBody(String folder) {
-    return 'Claude will run in $folder on the Mac.';
-  }
-
-  @override
-  String get newSessionOpen => 'Start';
-
-  @override
-  String get newSessionStarted => 'The Mac started a new session.';
-
-  @override
-  String get newSessionFailed =>
-      'Couldn\'t start a new session. Please try again.';
-
-  @override
-  String runningSubagents(int count) {
-    return '$count subagents running';
-  }
-
-  @override
-  String subagentsShow(int count) {
-    return 'Show $count subagents';
-  }
-
-  @override
-  String subagentsHide(int count) {
-    return 'Hide $count subagents';
-  }
-
-  @override
-  String get justNow => 'Just now';
-
-  @override
-  String minutesShort(int n) {
-    return '$n min';
-  }
-
-  @override
-  String hoursShort(int n) {
-    return '$n h';
-  }
-
-  @override
-  String daysShort(int n) {
-    return '$n d';
-  }
-
-  @override
-  String get viewOnly => 'View only';
-
-  @override
-  String get viewOnlyReason => 'Opened outside Console, view only';
-
-  @override
-  String get controlConsole => 'Console';
-
-  @override
-  String get controlJob => 'Background job';
-
-  @override
-  String get chatSelectSession => 'Select a session to see its chat.';
+  String get chatCopyCode => 'Copy';
 
   @override
   String get chatEmpty => 'No messages yet.';
 
   @override
+  String get chatLimitFiveHours => '5h';
+
+  @override
+  String get chatLimitWeek => 'Week';
+
+  @override
   String get chatLoadOlder => 'Load older messages';
+
+  @override
+  String get chatMultiSelectOnMac =>
+      'This question allows several answers. Answer it on the Mac.';
+
+  @override
+  String get chatMuteSession => 'Mute notifications for this session';
 
   @override
   String get chatNewMessages => 'New messages';
 
   @override
-  String get composerHint => 'Message this session';
+  String get chatNewMessagesBelow => 'New messages';
 
   @override
-  String get send => 'Send';
-
-  @override
-  String get sending => 'Sending';
-
-  @override
-  String get sendFailed => 'Couldn\'t send the message. Please try again.';
-
-  @override
-  String pendingPermission(String tool) {
+  String chatPendingPermission(String tool) {
     return 'Permission needed: $tool';
   }
 
   @override
-  String get pendingQuestion => 'Question from Claude';
+  String get chatPendingQuestion => 'Question from Claude';
 
   @override
-  String get allow => 'Allow';
+  String get chatPhotoCamera => 'Take a photo';
 
   @override
-  String get deny => 'Deny';
+  String get chatPhotoCaptionHint => 'Add a caption (optional)';
 
   @override
-  String get answerOnMac => 'Answer on the Mac';
+  String get chatPhotoGallery => 'Choose from library';
 
   @override
-  String get multiSelectOnMac =>
-      'This question allows several answers. Answer it on the Mac.';
+  String get chatPhotoPickFailed => 'Could not open the camera or library.';
 
   @override
-  String get answerFailed => 'Couldn\'t send the answer. Please try again.';
+  String get chatPhotoSent => 'Photo sent';
 
   @override
-  String get toolsExpand => 'Expand';
+  String get chatPhotoTitle => 'Send a photo';
 
   @override
-  String get toolsCollapse => 'Collapse';
+  String get chatPictureClose => 'Close picture';
 
   @override
-  String get pairTitle => 'Pair with a Mac';
+  String get chatPictureFailed => 'Could not load the picture';
 
   @override
-  String get pairIntro =>
-      'On the Mac, open Agent Console, choose Phone, then Pair a phone.';
-
-  @override
-  String get pairScan => 'Scan QR';
-
-  @override
-  String get pairManual => 'Enter manually';
-
-  @override
-  String get pairPasteJson => 'Paste the QR content (JSON)';
-
-  @override
-  String get pairHost => 'Mac address (IP or .local name)';
-
-  @override
-  String get pairPort => 'Port';
-
-  @override
-  String get pairFingerprint => 'Certificate fingerprint (SHA-256)';
-
-  @override
-  String get pairCode => 'Pairing code (8 characters)';
-
-  @override
-  String get pairDeviceName => 'Device name';
-
-  @override
-  String get pairConnect => 'Pair';
-
-  @override
-  String get pairWaiting => 'Waiting for the Mac to allow…';
-
-  @override
-  String get pairFailed => 'Couldn\'t pair. Please try again.';
-
-  @override
-  String get pairInvalid => 'The pairing code isn\'t valid.';
-
-  @override
-  String get pairFingerprintMismatch =>
-      'The Mac\'s certificate doesn\'t match the pinned fingerprint. Connection refused.';
-
-  @override
-  String get pairDenied => 'The Mac refused this device, or the code expired.';
-
-  @override
-  String get pairUnreachable =>
-      'Couldn\'t reach the Mac. Check the network and address.';
-
-  @override
-  String get pairCameraDenied => 'Camera access is off. Use manual entry.';
-
-  @override
-  String get macsTitle => 'Paired Macs';
-
-  @override
-  String get macsAdd => 'Add a Mac';
-
-  @override
-  String get macsActive => 'In use';
-
-  @override
-  String get macsUse => 'Use this Mac';
-
-  @override
-  String get macsRemove => 'Remove Mac';
-
-  @override
-  String get computerOffline => 'Not connected';
-
-  @override
-  String get computerRevoked => 'Revoked';
-
-  @override
-  String get computerNoSessions => 'No sessions';
-
-  @override
-  String macsRemoveConfirm(String name) {
-    return 'Remove “$name” from this phone?';
-  }
-
-  @override
-  String get vizSuggested => 'Suggested';
-
-  @override
-  String get vizPhoneNoPermission =>
-      'The Mac hasn\'t granted Screen Recording to Agent Console.';
-
-  @override
-  String get vizPhoneNoWindow => 'No device window is showing on the Mac.';
-
-  @override
-  String get vizPhoneStarting => 'Waiting for frames from the Mac…';
-
-  @override
-  String vizPhoneError(String message) {
-    return 'Couldn\'t show the device: $message';
-  }
-
-  @override
-  String get vizWebUrl => 'Page address (localhost on the Mac)';
-
-  @override
-  String get vizWebRefresh => 'Capture again';
-
-  @override
-  String get vizWebNoUrl =>
-      'This session has no web address yet. Enter one above.';
-
-  @override
-  String get vizWebHint =>
-      'Start the dev server on the Mac and refresh, or pick another address below.';
-
-  @override
-  String get vizWebCandidates => 'Running on the Mac';
-
-  @override
-  String get vizWebFailed => 'Couldn\'t capture the page. Please try again.';
-
-  @override
-  String get vizLoadFailed =>
-      'Couldn\'t load the visualization. Please try again.';
-
-  @override
-  String get vizSelectSession => 'Select a session to see its visualization.';
-
-  @override
-  String get vizBundleMissing =>
-      'The viz bundle is missing. Run tool/sync_viz.sh and rebuild.';
-
-  @override
-  String get notifNeedsInputTitle => 'Session needs input';
-
-  @override
-  String notifNeedsInputBody(String name) {
-    return '$name is waiting.';
-  }
-
-  @override
-  String get pullToRefresh => 'Pull to refresh';
-
-  @override
-  String get connectionRevoked => 'The Mac revoked this device. Pair again.';
-
-  @override
-  String get openMacs => 'Paired Macs';
-
-  @override
-  String get routeHome => 'Home Wi-Fi';
-
-  @override
-  String get routeInternet => 'Internet';
-
-  @override
-  String connectedVia(String route) {
-    return 'Connected · $route';
-  }
-
-  @override
-  String get noRouteToMac =>
-      'Can\'t reach the Mac. Turn on Internet access on the Mac or join the same Wi-Fi.';
-
-  @override
-  String get takeover => 'Take over';
-
-  @override
-  String get takeoverHint =>
-      'Opened outside Console, view only. Take it over to message it from your phone.';
-
-  @override
-  String get takeoverTitle => 'Take over this session?';
-
-  @override
-  String get takeoverBody =>
-      'The Mac will reopen this session in Console\'s Terminal (claude --resume). The original must be closed. If Claude asks anything, answer on the Mac.';
-
-  @override
-  String get takeoverRunning => 'Taking over…';
-
-  @override
-  String takeoverFailed(String reason) {
-    return 'Could not take over: $reason';
-  }
-
-  @override
-  String get micStart => 'Dictate';
-
-  @override
-  String get micStop => 'Stop and transcribe';
-
-  @override
-  String get micCancel => 'Cancel transcription';
-
-  @override
-  String get transcribing => 'Transcribing…';
-
-  @override
-  String get voicePermissionDenied => 'Microphone access is off.';
-
-  @override
-  String get voiceOpenSettings => 'Open settings';
-
-  @override
-  String get voiceNoSpeech =>
-      'No speech heard. Try speaking closer to the mic.';
-
-  @override
-  String get voiceTooLong => 'Stopped at 60 seconds.';
-
-  @override
-  String get voiceEngineError => 'Transcription failed. Try again.';
-
-  @override
-  String get voiceRecorderError => 'Could not record.';
-
-  @override
-  String get keepAliveTitle => 'Keep the connection in the background?';
-
-  @override
-  String get keepAliveBody =>
-      'To get notified when a session needs input or finishes, the app has to run in the background. Android shows a small \"Agent Console is watching\" notification. You can turn it off under Paired Macs.';
-
-  @override
-  String get keepAliveEnable => 'Turn on';
-
-  @override
-  String get notNow => 'Not now';
-
-  @override
-  String get keepAliveSetting => 'Keep connection in the background';
-
-  @override
-  String get keepAliveHint =>
-      'Get notifications while the app is in the background. Shows a small permanent notification.';
-
-  @override
-  String get muteSession => 'Mute notifications for this session';
-
-  @override
-  String get unmuteSession => 'Unmute this session';
-
-  @override
-  String get takeoverStopBody =>
-      'Stop the session on the Mac (Claude desktop / VS Code) and reopen it in Console so you can message it from the phone?';
-
-  @override
-  String get takeoverStopConfirm => 'Stop and take over';
-
-  @override
-  String get takeoverBusyTitle => 'Session is running';
-
-  @override
-  String get takeoverBusyBody =>
-      'The session is running; the current turn will be cut off.';
-
-  @override
-  String get takeoverBusyConfirm => 'Stop anyway';
+  String get chatPictureOpen => 'Open picture';
 
   @override
   String get chatQueued => 'waiting';
 
   @override
-  String get chatSendNow => 'Send now';
+  String get chatSelectSession => 'Select a session to see its chat.';
 
   @override
-  String get chatSendNowTitle => 'Interrupt the running turn to send now?';
+  String get chatSend => 'Send';
+
+  @override
+  String get chatSendBusy => 'Sending';
+
+  @override
+  String get chatSendError => 'Couldn\'t send the message. Please try again.';
+
+  @override
+  String get chatSendFailed => 'Not sent';
+
+  @override
+  String get chatSendNow => 'Send now';
 
   @override
   String get chatSendNowBody =>
@@ -531,134 +235,375 @@ class AppL10nEn extends AppL10n {
   String get chatSendNowFailed => 'Could not interrupt';
 
   @override
+  String get chatSendNowTitle => 'Interrupt the running turn to send now?';
+
+  @override
   String get chatSending => 'sending';
 
   @override
-  String get chatSendFailed => 'Not sent';
+  String get chatShellHeader => 'Shell command';
+
+  @override
+  String get chatShellHint =>
+      'Send runs it like ! in the terminal · delete the ! to send a message instead';
+
+  @override
+  String chatShellRunsIn(String folder) {
+    return 'runs in $folder · Claude sees the output';
+  }
+
+  @override
+  String get chatShellWillRun => 'Will run';
+
+  @override
+  String get chatShowOutput => 'Show output';
+
+  @override
+  String get chatSlashHeader => 'Commands';
+
+  @override
+  String get chatTakeoverBody =>
+      'The Mac will reopen this session in Console\'s Terminal (claude --resume). The original must be closed. If Claude asks anything, answer on the Mac.';
+
+  @override
+  String get chatTakeoverBusyBody =>
+      'The session is running; the current turn will be cut off.';
+
+  @override
+  String get chatTakeoverBusyTitle => 'Session is running';
+
+  @override
+  String get chatTakeoverHint =>
+      'Opened outside Console, view only. Take it over to message it from your phone.';
+
+  @override
+  String get chatTakeoverRunning => 'Taking over…';
+
+  @override
+  String get chatTakeoverStopBody =>
+      'Stop the session on the Mac (Claude desktop / VS Code) and reopen it in Console so you can message it from the phone?';
+
+  @override
+  String get chatTakeoverTitle => 'Take over this session?';
+
+  @override
+  String get chatToolStepOne => '1 tool step';
+
+  @override
+  String chatToolStepsCount(int count) {
+    final intl.NumberFormat countNumberFormat =
+        intl.NumberFormat.decimalPattern(localeName);
+    final String countString = countNumberFormat.format(count);
+
+    return '$countString tool steps';
+  }
+
+  @override
+  String get chatToolsCollapse => 'Collapse';
+
+  @override
+  String get chatToolsExpand => 'Expand';
+
+  @override
+  String get chatUnmuteSession => 'Unmute this session';
 
   @override
   String get chatUpdating => 'Updating';
 
   @override
-  String get pictureFailed => 'Could not load the picture';
+  String get chatViewOnlyChip => 'View only';
 
   @override
-  String get pictureClose => 'Close picture';
+  String get chatViewOnlyReason => 'Opened outside Console, view only';
 
   @override
-  String get pictureOpen => 'Open picture';
+  String get consentAllow => 'Allow';
 
   @override
-  String get allProjects => 'All projects';
+  String get consentDeny => 'Deny';
 
   @override
-  String get archive => 'Archive';
+  String get consentPair => 'Pair';
 
   @override
-  String archivedToast(String name) {
+  String get consentStopAndTakeOver => 'Stop and take over';
+
+  @override
+  String get consentStopAnyway => 'Stop anyway';
+
+  @override
+  String inboxAnsweredHere(String action) {
+    return 'You answered: $action';
+  }
+
+  @override
+  String inboxAnsweredOnMac(String action) {
+    return 'Answered on the Mac: $action';
+  }
+
+  @override
+  String get inboxDeclined =>
+      'The Mac didn\'t take that answer. Try again on the Mac.';
+
+  @override
+  String get inboxDone => 'Done';
+
+  @override
+  String get inboxEmptyBody => 'Requests from your Mac show up here.';
+
+  @override
+  String get inboxEmptyTitle => 'Nothing Needs You';
+
+  @override
+  String get inboxNeedsYou => 'Needs You';
+
+  @override
+  String get inboxOpenOnMac => 'Open on Mac';
+
+  @override
+  String get inboxUnsupported => 'Notchling on this Mac has no inbox yet.';
+
+  @override
+  String get itemExpired => 'Expired';
+
+  @override
+  String get itemWithdrawn => 'Withdrawn';
+
+  @override
+  String get languageName => 'English';
+
+  @override
+  String get macsActive => 'In use';
+
+  @override
+  String get macsAdd => 'Add a Mac';
+
+  @override
+  String get macsComputerOffline => 'Not connected';
+
+  @override
+  String get macsComputerRevoked => 'Revoked';
+
+  @override
+  String get macsKeepAliveHint =>
+      'Get notifications while the app is in the background. Shows a small permanent notification.';
+
+  @override
+  String get macsKeepAliveSetting => 'Keep connection in the background';
+
+  @override
+  String get macsRemove => 'Remove Mac';
+
+  @override
+  String macsRemoveConfirm(String name) {
+    return 'Remove “$name” from this phone?';
+  }
+
+  @override
+  String get macsTitle => 'Paired Macs';
+
+  @override
+  String get macsUse => 'Use this Mac';
+
+  @override
+  String notificationsNeedsInputBody(String name) {
+    return '$name is waiting.';
+  }
+
+  @override
+  String get notificationsNeedsInputTitle => 'Session needs input';
+
+  @override
+  String get pairingCameraDenied => 'Camera access is off. Use manual entry.';
+
+  @override
+  String get pairingCode => 'Pairing code (8 characters)';
+
+  @override
+  String get pairingDenied =>
+      'The Mac refused this device, or the code expired.';
+
+  @override
+  String get pairingDeviceName => 'Device name';
+
+  @override
+  String get pairingFailed => 'Couldn\'t pair. Please try again.';
+
+  @override
+  String get pairingFingerprint => 'Certificate fingerprint (SHA-256)';
+
+  @override
+  String get pairingFingerprintMismatch =>
+      'The Mac\'s certificate doesn\'t match the pinned fingerprint. Connection refused.';
+
+  @override
+  String get pairingHost => 'Mac address (IP or .local name)';
+
+  @override
+  String get pairingIntro =>
+      'On the Mac, open Agent Console, choose Phone, then Pair a phone.';
+
+  @override
+  String get pairingInvalid => 'The pairing code isn\'t valid.';
+
+  @override
+  String get pairingManual => 'Enter manually';
+
+  @override
+  String get pairingPasteJson => 'Paste the QR content (JSON)';
+
+  @override
+  String get pairingPort => 'Port';
+
+  @override
+  String get pairingScan => 'Scan QR';
+
+  @override
+  String get pairingTitle => 'Pair with a Mac';
+
+  @override
+  String get pairingUnreachable =>
+      'Couldn\'t reach the Mac. Check the network and address.';
+
+  @override
+  String get pairingWaiting => 'Waiting for the Mac to allow…';
+
+  @override
+  String get sessionsAllProjects => 'All projects';
+
+  @override
+  String get sessionsArchive => 'Archive';
+
+  @override
+  String sessionsArchivedToast(String name) {
     return 'Archived $name';
   }
 
   @override
-  String get undo => 'Undo';
+  String get sessionsComputerNoSessions => 'No sessions';
+
+  @override
+  String sessionsDaysShort(int n) {
+    final intl.NumberFormat nNumberFormat = intl.NumberFormat.decimalPattern(
+      localeName,
+    );
+    final String nString = nNumberFormat.format(n);
+
+    return '$nString d';
+  }
+
+  @override
+  String get sessionsEmptyBody =>
+      'Claude Code sessions on your Mac show up here.';
+
+  @override
+  String get sessionsEmptyTitle => 'No sessions yet';
 
   @override
   String get sessionsFilteredEmpty => 'No sessions in this project.';
 
   @override
-  String get chatContext => 'Context';
+  String sessionsHoursShort(int n) {
+    final intl.NumberFormat nNumberFormat = intl.NumberFormat.decimalPattern(
+      localeName,
+    );
+    final String nString = nNumberFormat.format(n);
 
-  @override
-  String get limit5h => '5h';
-
-  @override
-  String get limitWeek => 'Week';
-
-  @override
-  String get shellHeader => 'Shell command';
-
-  @override
-  String shellRunsIn(String folder) {
-    return 'runs in $folder · Claude sees the output';
+    return '$nString h';
   }
 
   @override
-  String get shellHint =>
-      'Send runs it like ! in the terminal · delete the ! to send a message instead';
+  String get sessionsJustNow => 'Just now';
 
   @override
-  String get shellWillRun => 'Will run';
+  String sessionsMinutesShort(int n) {
+    final intl.NumberFormat nNumberFormat = intl.NumberFormat.decimalPattern(
+      localeName,
+    );
+    final String nString = nNumberFormat.format(n);
 
-  @override
-  String get slashHeader => 'Commands';
-
-  @override
-  String toolStepsCount(int count) {
-    return '$count tool steps';
+    return '$nString min';
   }
 
   @override
-  String get toolStepOne => '1 tool step';
+  String get sessionsModelDefault => 'Default';
 
   @override
-  String get compactionTitle => 'Conversation compacted';
+  String get sessionsNewSession => 'New session';
 
   @override
-  String get showOutput => 'Show output';
+  String sessionsNewSessionConfirmBody(String folder) {
+    return 'Claude will run in $folder on the Mac.';
+  }
 
   @override
-  String get copyCode => 'Copy';
+  String get sessionsNewSessionConfirmTitle => 'Start a new session?';
 
   @override
-  String get copied => 'Copied';
+  String get sessionsNewSessionFailed =>
+      'Couldn\'t start a new session. Please try again.';
 
   @override
-  String get takeoverShort => 'Take over';
+  String get sessionsNewSessionFolder => 'Folder';
 
   @override
-  String get activityIdle => 'Idle';
+  String get sessionsNewSessionModel => 'Model';
 
   @override
-  String get viewOnlyChip => 'View only';
+  String get sessionsNewSessionNoProjects => 'No recent folders on the Mac.';
 
   @override
-  String get newMessagesBelow => 'New messages';
+  String get sessionsNewSessionOpen => 'Start';
 
   @override
-  String get attachPhoto => 'Attach a photo';
+  String get sessionsNewSessionStarted => 'The Mac started a new session.';
 
   @override
-  String get photoCamera => 'Take a photo';
+  String sessionsRunningSubagents(int count) {
+    final intl.NumberFormat countNumberFormat =
+        intl.NumberFormat.decimalPattern(localeName);
+    final String countString = countNumberFormat.format(count);
+
+    return '$countString subagents running';
+  }
 
   @override
-  String get photoGallery => 'Choose from library';
+  String get sessionsSearchHint => 'Search sessions';
 
   @override
-  String get photoPickFailed => 'Could not open the camera or library.';
+  String sessionsSearchNoMatch(String query) {
+    return 'No sessions match “$query”.';
+  }
 
   @override
-  String get photoSent => 'Photo sent';
+  String get sessionsStateExited => 'Ended';
 
   @override
-  String get photoTitle => 'Send a photo';
+  String get sessionsStateNeedsInput => 'Needs Input';
 
   @override
-  String get photoCaptionHint => 'Add a caption (optional)';
+  String sessionsSubagentsHide(int count) {
+    final intl.NumberFormat countNumberFormat =
+        intl.NumberFormat.decimalPattern(localeName);
+    final String countString = countNumberFormat.format(count);
+
+    return 'Hide $countString subagents';
+  }
 
   @override
-  String get settingsTitle => 'Settings';
+  String sessionsSubagentsShow(int count) {
+    final intl.NumberFormat countNumberFormat =
+        intl.NumberFormat.decimalPattern(localeName);
+    final String countString = countNumberFormat.format(count);
+
+    return 'Show $countString subagents';
+  }
 
   @override
-  String get settingsTheme => 'Appearance';
+  String get sessionsTakeoverShort => 'Take over';
 
   @override
-  String get themeSystem => 'System';
-
-  @override
-  String get themeDark => 'Dark';
-
-  @override
-  String get themeLight => 'Light';
+  String get sessionsUndo => 'Undo';
 
   @override
   String get settingsNotifications => 'Notifications';
@@ -669,4 +614,105 @@ class AppL10nEn extends AppL10n {
   @override
   String get settingsSoundHint =>
       'A soft sound for new messages and sessions that need you while the app is open.';
+
+  @override
+  String get settingsTheme => 'Appearance';
+
+  @override
+  String get settingsThemeDark => 'Dark';
+
+  @override
+  String get settingsThemeLight => 'Light';
+
+  @override
+  String get settingsThemeSystem => 'System';
+
+  @override
+  String get stateDone => 'Done';
+
+  @override
+  String get stateRunning => 'Working';
+
+  @override
+  String get visualizeBundleMissing =>
+      'The viz bundle is missing. Run tool/sync_viz.sh and rebuild.';
+
+  @override
+  String get visualizeLoadFailed =>
+      'Couldn\'t load the visualization. Please try again.';
+
+  @override
+  String visualizePhoneError(String message) {
+    return 'Couldn\'t show the device: $message';
+  }
+
+  @override
+  String get visualizePhoneNoPermission =>
+      'The Mac hasn\'t granted Screen Recording to Agent Console.';
+
+  @override
+  String get visualizePhoneNoWindow =>
+      'No device window is showing on the Mac.';
+
+  @override
+  String get visualizePhoneStarting => 'Waiting for frames from the Mac…';
+
+  @override
+  String get visualizeSelectSession =>
+      'Select a session to see its visualization.';
+
+  @override
+  String get visualizeSuggested => 'Suggested';
+
+  @override
+  String get visualizeWebCandidates => 'Running on the Mac';
+
+  @override
+  String get visualizeWebFailed =>
+      'Couldn\'t capture the page. Please try again.';
+
+  @override
+  String get visualizeWebHint =>
+      'Start the dev server on the Mac and refresh, or pick another address below.';
+
+  @override
+  String get visualizeWebNoUrl =>
+      'This session has no web address yet. Enter one above.';
+
+  @override
+  String get visualizeWebRefresh => 'Capture again';
+
+  @override
+  String get visualizeWebUrl => 'Page address (localhost on the Mac)';
+
+  @override
+  String get voiceEngineError => 'Transcription failed. Try again.';
+
+  @override
+  String get voiceMicCancel => 'Cancel transcription';
+
+  @override
+  String get voiceMicStart => 'Dictate';
+
+  @override
+  String get voiceMicStop => 'Stop and transcribe';
+
+  @override
+  String get voiceNoSpeech =>
+      'No speech heard. Try speaking closer to the mic.';
+
+  @override
+  String get voiceOpenSettings => 'Open settings';
+
+  @override
+  String get voicePermissionDenied => 'Microphone access is off.';
+
+  @override
+  String get voiceRecorderError => 'Could not record.';
+
+  @override
+  String get voiceTooLong => 'Stopped at 60 seconds.';
+
+  @override
+  String get voiceTranscribing => 'Transcribing…';
 }

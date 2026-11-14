@@ -30,8 +30,8 @@ class MacsScreen extends ConsumerWidget {
             if (Platform.isAndroid) ...<Widget>[
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
-                title: Text(l10n.keepAliveSetting, style: Kit.of(context).bodyMd),
-                subtitle: Text(l10n.keepAliveHint, style: Kit.of(context).bodySm.copyWith(color: Kit.of(context).textMuted)),
+                title: Text(l10n.macsKeepAliveSetting, style: Kit.of(context).bodyMd),
+                subtitle: Text(l10n.macsKeepAliveHint, style: Kit.of(context).bodySm.copyWith(color: Kit.of(context).textMuted)),
                 value: ref.watch(alertPrefsProvider.select((AlertPrefs p) => p.keepAlive == true)),
                 onChanged: (bool on) => unawaited(ref.read(alertPrefsProvider.notifier).setKeepAlive(on: on)),
               ),
@@ -83,7 +83,7 @@ class MacsScreen extends ConsumerWidget {
         title: Text(l10n.macsRemove),
         content: Text(l10n.macsRemoveConfirm(mac.name)),
         actions: <Widget>[
-          TextButton(onPressed: () => Navigator.pop(context, false), child: Text(l10n.cancel)),
+          TextButton(onPressed: () => Navigator.pop(context, false), child: Text(l10n.appCancel)),
           TextButton(onPressed: () => Navigator.pop(context, true), child: Text(l10n.macsRemove)),
         ],
       ),

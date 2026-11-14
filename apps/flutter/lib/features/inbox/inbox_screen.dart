@@ -81,9 +81,9 @@ class InboxCard extends ConsumerWidget {
         final String action = item.answerLabel() ?? item.answer ?? '';
         return item.answeredBy == 'phone' ? l10n.inboxAnsweredHere(action) : l10n.inboxAnsweredOnMac(action);
       case 'expired':
-        return l10n.inboxExpired;
+        return l10n.itemExpired;
       default:
-        return l10n.inboxWithdrawn;
+        return l10n.itemWithdrawn;
     }
   }
 

@@ -21,10 +21,10 @@ class GlassNav extends StatelessWidget {
     final Kit kit = Kit.of(context);
     final List<(IconData, IconData, String)> items =
         <(IconData, IconData, String)>[
-          (Icons.view_list_outlined, Icons.view_list, l10n.tabSessions),
-          (Icons.chat_bubble_outline, Icons.chat_bubble, l10n.tabChat),
-          (Icons.insights_outlined, Icons.insights, l10n.tabVisualize),
-          (Icons.inbox_outlined, Icons.inbox, l10n.tabInbox),
+          (Icons.view_list_outlined, Icons.view_list, l10n.appTabSessions),
+          (Icons.chat_bubble_outline, Icons.chat_bubble, l10n.appTabChat),
+          (Icons.insights_outlined, Icons.insights, l10n.appTabVisualize),
+          (Icons.inbox_outlined, Icons.inbox, l10n.appTabInbox),
         ];
     return GlassBar(
       top: false,
@@ -157,7 +157,7 @@ Widget _withBadge(BuildContext context, int count, Widget icon) {
   if (count <= 0) return icon;
   final Kit kit = Kit.of(context);
   return Semantics(
-    label: AppL10n.of(context).inboxOpenCount(count),
+    label: AppL10n.of(context).appInboxOpenCount(count),
     child: Stack(
       clipBehavior: Clip.none,
       children: <Widget>[

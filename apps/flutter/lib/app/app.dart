@@ -16,7 +16,7 @@ class AgentConsoleApp extends ConsumerWidget {
       appSettingsProvider.select((AppSettings s) => s.themeMode),
     );
     return MaterialApp(
-      title: 'Agent Console',
+      onGenerateTitle: (BuildContext context) => AppL10n.of(context).appName,
       debugShowCheckedModeBanner: false,
       theme: buildTheme(Brightness.light),
       themeMode: mode,
@@ -30,10 +30,6 @@ class AgentConsoleApp extends ConsumerWidget {
         GlobalCupertinoLocalizations.delegate,
       ],
       supportedLocales: AppL10n.supportedLocales,
-      localeResolutionCallback: (Locale? locale, Iterable<Locale> supported) =>
-          locale?.languageCode == 'en'
-          ? const Locale('en')
-          : const Locale('vi'),
       home: const AppRoot(),
     );
   }

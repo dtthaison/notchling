@@ -22,7 +22,7 @@ class SettingsScreen extends ConsumerWidget {
       appBar: AppBar(
         toolbarHeight: 48,
         backgroundColor: kit.sidebar,
-        title: Text(l10n.settingsTitle, style: kit.heading),
+        title: Text(l10n.appSettingsTitle, style: kit.heading),
       ),
       body: SafeArea(
         child: ListView(
@@ -59,7 +59,7 @@ class SettingsScreen extends ConsumerWidget {
                 type: MaterialType.transparency,
                 child: ListTile(
                   leading: Icon(Icons.laptop_mac, color: kit.textMuted),
-                  title: Text(l10n.openMacs, style: kit.body),
+                  title: Text(l10n.appOpenMacs, style: kit.body),
                   trailing: Icon(Icons.chevron_right, color: kit.textMuted),
                   onTap: () => unawaited(
                     Navigator.of(context).push(
@@ -89,9 +89,9 @@ class ThemeChoice extends StatelessWidget {
     final Kit kit = Kit.of(context);
     final List<(ThemeMode, String, IconData)> items =
         <(ThemeMode, String, IconData)>[
-          (ThemeMode.system, l10n.themeSystem, Icons.brightness_auto_outlined),
-          (ThemeMode.dark, l10n.themeDark, Icons.dark_mode_outlined),
-          (ThemeMode.light, l10n.themeLight, Icons.light_mode_outlined),
+          (ThemeMode.system, l10n.settingsThemeSystem, Icons.brightness_auto_outlined),
+          (ThemeMode.dark, l10n.settingsThemeDark, Icons.dark_mode_outlined),
+          (ThemeMode.light, l10n.settingsThemeLight, Icons.light_mode_outlined),
         ];
     final int selected = items.indexWhere(
       ((ThemeMode, String, IconData) i) => i.$1 == mode,

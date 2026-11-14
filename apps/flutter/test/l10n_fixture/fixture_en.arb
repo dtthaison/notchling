@@ -1,0 +1,31 @@
+{
+  "@@locale": "en",
+  "apostrophe": "Couldn't load \"it\" · it's “fine”",
+  "plural": "{count, plural, one{{count} session isn't running} other{{count} sessions aren't running}}",
+  "@plural": {
+    "placeholders": {
+      "count": {
+        "type": "int",
+        "format": "decimalPattern"
+      }
+    }
+  },
+  "hash": "{count, plural, one{# session ({count})} other{# sessions ({count})}}",
+  "@hash": {
+    "placeholders": {
+      "count": {
+        "type": "int",
+        "format": "decimalPattern"
+      }
+    }
+  },
+  "number": "{count} open",
+  "@number": {
+    "placeholders": {
+      "count": {
+        "type": "int",
+        "format": "decimalPattern"
+      }
+    }
+  }
+}

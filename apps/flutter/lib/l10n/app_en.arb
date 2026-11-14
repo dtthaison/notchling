@@ -1,26 +1,439 @@
 {
   "@@locale": "en",
+  "appCancel": "Cancel",
+  "@appCancel": {
+    "description": "Shown in the Chat screen and the Paired Macs screen and the Sessions tab."
+  },
+  "appClose": "Close",
+  "@appClose": {
+    "description": "Shown in the Chat screen and pairing with a Mac."
+  },
+  "appConnected": "Connected",
+  "@appConnected": {
+    "description": "Shown in the app shell and the Paired Macs screen."
+  },
+  "appConnectedVia": "Connected · {route}",
+  "@appConnectedVia": {
+    "description": "Shown in the app shell. $route is Home Wi-Fi or Internet.",
+    "placeholders": {
+      "route": {
+        "type": "String"
+      }
+    }
+  },
+  "appConnecting": "Connecting",
+  "@appConnecting": {
+    "description": "Shown in the app shell and the Paired Macs screen."
+  },
+  "appConnectionLostRetry": "Connection lost, retrying in {seconds}s",
+  "@appConnectionLostRetry": {
+    "description": "Shown in the app shell. $seconds is the wait before the next try, in seconds.",
+    "placeholders": {
+      "seconds": {
+        "type": "int",
+        "format": "decimalPattern"
+      }
+    }
+  },
+  "appConnectionRevoked": "The Mac revoked this device. Pair again.",
+  "@appConnectionRevoked": {
+    "description": "Shown in the app shell."
+  },
+  "appInboxOpenCount": "{count} open",
+  "@appInboxOpenCount": {
+    "description": "Shown in the app shell. $count is how many requests are open.",
+    "placeholders": {
+      "count": {
+        "type": "int",
+        "format": "decimalPattern"
+      }
+    }
+  },
+  "appKeepAliveBody": "To get notified when a session needs input or finishes, the app has to run in the background. Android shows a small \"Agent Console is watching\" notification. You can turn it off under Paired Macs.",
+  "@appKeepAliveBody": {
+    "description": "Shown in the app shell."
+  },
+  "appKeepAliveEnable": "Turn on",
+  "@appKeepAliveEnable": {
+    "description": "Shown in the app shell."
+  },
+  "appKeepAliveTitle": "Keep the connection in the background?",
+  "@appKeepAliveTitle": {
+    "description": "Shown in the app shell."
+  },
+  "appLoadFailed": "Couldn't load data. Please try again.",
+  "@appLoadFailed": {
+    "description": "Shown in the Chat screen and the Sessions tab."
+  },
   "appName": "Agent Console",
-  "tabSessions": "Sessions",
-  "tabChat": "Chat",
-  "tabVisualize": "Visualize",
-  "tabInbox": "Inbox",
-  "inboxNeedsYou": "Needs You",
-  "inboxDone": "Done",
-  "inboxEmptyTitle": "Nothing Needs You",
-  "inboxEmptyBody": "Requests from your Mac show up here.",
-  "inboxUnsupported": "Notchling on this Mac has no inbox yet.",
-  "inboxOpenOnMac": "Open on Mac",
-  "inboxAnsweredOnMac": "Answered on the Mac: {action}",
-  "@inboxAnsweredOnMac": {
+  "@appName": {
+    "description": "Shown in the app shell."
+  },
+  "appNoRouteToMac": "Can't reach the Mac. Turn on Internet access on the Mac or join the same Wi-Fi.",
+  "@appNoRouteToMac": {
+    "description": "Shown in the app shell."
+  },
+  "appNotNow": "Not now",
+  "@appNotNow": {
+    "description": "Shown in the app shell."
+  },
+  "appOpenMacs": "Paired Macs",
+  "@appOpenMacs": {
+    "description": "Shown in the app shell and the Chat screen and Settings."
+  },
+  "appPullToRefresh": "Pull to refresh",
+  "@appPullToRefresh": {
+    "description": "Not shown yet."
+  },
+  "appRetry": "Retry",
+  "@appRetry": {
+    "description": "Shown in the app shell and the Chat screen."
+  },
+  "appRetryNow": "Retry now",
+  "@appRetryNow": {
+    "description": "Shown in the app shell."
+  },
+  "appRouteHome": "Home Wi-Fi",
+  "@appRouteHome": {
+    "description": "Shown in the app shell."
+  },
+  "appRouteInternet": "Internet",
+  "@appRouteInternet": {
+    "description": "Shown in the app shell."
+  },
+  "appSettingsTitle": "Settings",
+  "@appSettingsTitle": {
+    "description": "Shown in the app shell and Settings."
+  },
+  "appTabChat": "Chat",
+  "@appTabChat": {
+    "description": "Shown in the app shell."
+  },
+  "appTabInbox": "Inbox",
+  "@appTabInbox": {
+    "description": "Shown in the app shell."
+  },
+  "appTabSessions": "Sessions",
+  "@appTabSessions": {
+    "description": "Shown in the app shell."
+  },
+  "appTabVisualize": "Visualize",
+  "@appTabVisualize": {
+    "description": "Shown in the app shell."
+  },
+  "appTakeover": "Take over",
+  "@appTakeover": {
+    "description": "Shown in the Chat screen and the Sessions tab."
+  },
+  "appTakeoverFailed": "Could not take over: {reason}",
+  "@appTakeoverFailed": {
+    "description": "Shown in the Chat screen and the Sessions tab. $reason is the reason.",
+    "placeholders": {
+      "reason": {
+        "type": "String"
+      }
+    }
+  },
+  "appViewOnly": "View only",
+  "@appViewOnly": {
+    "description": "Shown in the Chat screen and the Sessions tab."
+  },
+  "chatActivityIdle": "Idle",
+  "@chatActivityIdle": {
+    "description": "Not shown yet."
+  },
+  "chatAnswerFailed": "Couldn't send the answer. Please try again.",
+  "@chatAnswerFailed": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatAnswerOnMac": "Answer on the Mac",
+  "@chatAnswerOnMac": {
+    "description": "Not shown yet."
+  },
+  "chatAttachPhoto": "Attach a photo",
+  "@chatAttachPhoto": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatCompactionTitle": "Conversation compacted",
+  "@chatCompactionTitle": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatComposerHint": "Message this session",
+  "@chatComposerHint": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatContext": "Context",
+  "@chatContext": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatControlConsole": "Console",
+  "@chatControlConsole": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatControlJob": "Background job",
+  "@chatControlJob": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatCopied": "Copied",
+  "@chatCopied": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatCopyCode": "Copy",
+  "@chatCopyCode": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatEmpty": "No messages yet.",
+  "@chatEmpty": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatLimitFiveHours": "5h",
+  "@chatLimitFiveHours": {
+    "description": "Not shown yet."
+  },
+  "chatLimitWeek": "Week",
+  "@chatLimitWeek": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatLoadOlder": "Load older messages",
+  "@chatLoadOlder": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatMultiSelectOnMac": "This question allows several answers. Answer it on the Mac.",
+  "@chatMultiSelectOnMac": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatMuteSession": "Mute notifications for this session",
+  "@chatMuteSession": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatNewMessages": "New messages",
+  "@chatNewMessages": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatNewMessagesBelow": "New messages",
+  "@chatNewMessagesBelow": {
+    "description": "Not shown yet."
+  },
+  "chatPendingPermission": "Permission needed: {tool}",
+  "@chatPendingPermission": {
+    "description": "Shown in the Chat screen. $tool is the tool Claude wants to use.",
+    "placeholders": {
+      "tool": {
+        "type": "String"
+      }
+    }
+  },
+  "chatPendingQuestion": "Question from Claude",
+  "@chatPendingQuestion": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatPhotoCamera": "Take a photo",
+  "@chatPhotoCamera": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatPhotoCaptionHint": "Add a caption (optional)",
+  "@chatPhotoCaptionHint": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatPhotoGallery": "Choose from library",
+  "@chatPhotoGallery": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatPhotoPickFailed": "Could not open the camera or library.",
+  "@chatPhotoPickFailed": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatPhotoSent": "Photo sent",
+  "@chatPhotoSent": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatPhotoTitle": "Send a photo",
+  "@chatPhotoTitle": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatPictureClose": "Close picture",
+  "@chatPictureClose": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatPictureFailed": "Could not load the picture",
+  "@chatPictureFailed": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatPictureOpen": "Open picture",
+  "@chatPictureOpen": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatQueued": "waiting",
+  "@chatQueued": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatSelectSession": "Select a session to see its chat.",
+  "@chatSelectSession": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatSend": "Send",
+  "@chatSend": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatSendBusy": "Sending",
+  "@chatSendBusy": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatSendError": "Couldn't send the message. Please try again.",
+  "@chatSendError": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatSendFailed": "Not sent",
+  "@chatSendFailed": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatSendNow": "Send now",
+  "@chatSendNow": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatSendNowBody": "Claude stops the current turn and runs this waiting message right away.",
+  "@chatSendNowBody": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatSendNowFailed": "Could not interrupt",
+  "@chatSendNowFailed": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatSendNowTitle": "Interrupt the running turn to send now?",
+  "@chatSendNowTitle": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatSending": "sending",
+  "@chatSending": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatShellHeader": "Shell command",
+  "@chatShellHeader": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatShellHint": "Send runs it like ! in the terminal · delete the ! to send a message instead",
+  "@chatShellHint": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatShellRunsIn": "runs in {folder} · Claude sees the output",
+  "@chatShellRunsIn": {
+    "description": "Shown in the Chat screen. $folder is the folder path.",
+    "placeholders": {
+      "folder": {
+        "type": "String"
+      }
+    }
+  },
+  "chatShellWillRun": "Will run",
+  "@chatShellWillRun": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatShowOutput": "Show output",
+  "@chatShowOutput": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatSlashHeader": "Commands",
+  "@chatSlashHeader": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatTakeoverBody": "The Mac will reopen this session in Console's Terminal (claude --resume). The original must be closed. If Claude asks anything, answer on the Mac.",
+  "@chatTakeoverBody": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatTakeoverBusyBody": "The session is running; the current turn will be cut off.",
+  "@chatTakeoverBusyBody": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatTakeoverBusyTitle": "Session is running",
+  "@chatTakeoverBusyTitle": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatTakeoverHint": "Opened outside Console, view only. Take it over to message it from your phone.",
+  "@chatTakeoverHint": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatTakeoverRunning": "Taking over…",
+  "@chatTakeoverRunning": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatTakeoverStopBody": "Stop the session on the Mac (Claude desktop / VS Code) and reopen it in Console so you can message it from the phone?",
+  "@chatTakeoverStopBody": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatTakeoverTitle": "Take over this session?",
+  "@chatTakeoverTitle": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatToolStepOne": "1 tool step",
+  "@chatToolStepOne": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatToolStepsCount": "{count} tool steps",
+  "@chatToolStepsCount": {
+    "description": "Shown in the Chat screen. $count is the number of tool steps.",
+    "placeholders": {
+      "count": {
+        "type": "int",
+        "format": "decimalPattern"
+      }
+    }
+  },
+  "chatToolsCollapse": "Collapse",
+  "@chatToolsCollapse": {
+    "description": "Not shown yet."
+  },
+  "chatToolsExpand": "Expand",
+  "@chatToolsExpand": {
+    "description": "Not shown yet."
+  },
+  "chatUnmuteSession": "Unmute this session",
+  "@chatUnmuteSession": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatUpdating": "Updating",
+  "@chatUpdating": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatViewOnlyChip": "View only",
+  "@chatViewOnlyChip": {
+    "description": "Not shown yet."
+  },
+  "chatViewOnlyReason": "Opened outside Console, view only",
+  "@chatViewOnlyReason": {
+    "description": "Shown in the Chat screen."
+  },
+  "consentAllow": "Allow",
+  "@consentAllow": {
+    "description": "Shown in the Chat screen."
+  },
+  "consentDeny": "Deny",
+  "@consentDeny": {
+    "description": "Shown in the Chat screen."
+  },
+  "consentPair": "Pair",
+  "@consentPair": {
+    "description": "Shown in pairing with a Mac."
+  },
+  "consentStopAndTakeOver": "Stop and take over",
+  "@consentStopAndTakeOver": {
+    "description": "Shown in the Chat screen."
+  },
+  "consentStopAnyway": "Stop anyway",
+  "@consentStopAnyway": {
+    "description": "Shown in the Chat screen."
+  },
+  "inboxAnsweredHere": "You answered: {action}",
+  "@inboxAnsweredHere": {
+    "description": "Shown in the Inbox. $action is the choice you made, such as Allow.",
     "placeholders": {
       "action": {
         "type": "String"
       }
     }
   },
-  "inboxAnsweredHere": "You answered: {action}",
-  "@inboxAnsweredHere": {
+  "inboxAnsweredOnMac": "Answered on the Mac: {action}",
+  "@inboxAnsweredOnMac": {
+    "description": "Shown in the Inbox. $action is the choice made on the Mac, such as Allow.",
     "placeholders": {
       "action": {
         "type": "String"
@@ -28,322 +441,477 @@
     }
   },
   "inboxDeclined": "The Mac didn't take that answer. Try again on the Mac.",
-  "inboxExpired": "Expired",
-  "inboxWithdrawn": "Withdrawn",
-  "inboxOpenCount": "{count} open",
-  "@inboxOpenCount": {
+  "@inboxDeclined": {
+    "description": "Shown in the Inbox."
+  },
+  "inboxDone": "Done",
+  "@inboxDone": {
+    "description": "Shown in the Inbox."
+  },
+  "inboxEmptyBody": "Requests from your Mac show up here.",
+  "@inboxEmptyBody": {
+    "description": "Shown in the Inbox."
+  },
+  "inboxEmptyTitle": "Nothing Needs You",
+  "@inboxEmptyTitle": {
+    "description": "Shown in the Inbox."
+  },
+  "inboxNeedsYou": "Needs You",
+  "@inboxNeedsYou": {
+    "description": "Shown in the Inbox."
+  },
+  "inboxOpenOnMac": "Open on Mac",
+  "@inboxOpenOnMac": {
+    "description": "Shown in the Inbox."
+  },
+  "inboxUnsupported": "Notchling on this Mac has no inbox yet.",
+  "@inboxUnsupported": {
+    "description": "Shown in the Inbox."
+  },
+  "itemExpired": "Expired",
+  "@itemExpired": {
+    "description": "The result of an inbox item nobody answered in time. Shown in the Inbox."
+  },
+  "itemWithdrawn": "Withdrawn",
+  "@itemWithdrawn": {
+    "description": "The result of an inbox item taken back. Shown in the Inbox."
+  },
+  "languageName": "English",
+  "@languageName": {
+    "description": "The language's own name, as its speakers write it. It is the label of this language in the Language row."
+  },
+  "macsActive": "In use",
+  "@macsActive": {
+    "description": "Shown in the Paired Macs screen."
+  },
+  "macsAdd": "Add a Mac",
+  "@macsAdd": {
+    "description": "Shown in the Paired Macs screen."
+  },
+  "macsComputerOffline": "Not connected",
+  "@macsComputerOffline": {
+    "description": "Shown in the Paired Macs screen."
+  },
+  "macsComputerRevoked": "Revoked",
+  "@macsComputerRevoked": {
+    "description": "Shown in the Paired Macs screen."
+  },
+  "macsKeepAliveHint": "Get notifications while the app is in the background. Shows a small permanent notification.",
+  "@macsKeepAliveHint": {
+    "description": "Shown in the Paired Macs screen."
+  },
+  "macsKeepAliveSetting": "Keep connection in the background",
+  "@macsKeepAliveSetting": {
+    "description": "Shown in the Paired Macs screen."
+  },
+  "macsRemove": "Remove Mac",
+  "@macsRemove": {
+    "description": "Shown in the Paired Macs screen."
+  },
+  "macsRemoveConfirm": "Remove “{name}” from this phone?",
+  "@macsRemoveConfirm": {
+    "description": "Shown in the Paired Macs screen. $name is the Mac's name.",
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "macsTitle": "Paired Macs",
+  "@macsTitle": {
+    "description": "Shown in the Paired Macs screen."
+  },
+  "macsUse": "Use this Mac",
+  "@macsUse": {
+    "description": "Shown in the Paired Macs screen."
+  },
+  "notificationsNeedsInputBody": "{name} is waiting.",
+  "@notificationsNeedsInputBody": {
+    "description": "Not shown yet. $name is the session name.",
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "notificationsNeedsInputTitle": "Session needs input",
+  "@notificationsNeedsInputTitle": {
+    "description": "Not shown yet."
+  },
+  "pairingCameraDenied": "Camera access is off. Use manual entry.",
+  "@pairingCameraDenied": {
+    "description": "Shown in pairing with a Mac."
+  },
+  "pairingCode": "Pairing code (8 characters)",
+  "@pairingCode": {
+    "description": "Shown in pairing with a Mac."
+  },
+  "pairingDenied": "The Mac refused this device, or the code expired.",
+  "@pairingDenied": {
+    "description": "Shown in pairing with a Mac."
+  },
+  "pairingDeviceName": "Device name",
+  "@pairingDeviceName": {
+    "description": "Not shown yet."
+  },
+  "pairingFailed": "Couldn't pair. Please try again.",
+  "@pairingFailed": {
+    "description": "Not shown yet."
+  },
+  "pairingFingerprint": "Certificate fingerprint (SHA-256)",
+  "@pairingFingerprint": {
+    "description": "Shown in pairing with a Mac."
+  },
+  "pairingFingerprintMismatch": "The Mac's certificate doesn't match the pinned fingerprint. Connection refused.",
+  "@pairingFingerprintMismatch": {
+    "description": "Shown in pairing with a Mac."
+  },
+  "pairingHost": "Mac address (IP or .local name)",
+  "@pairingHost": {
+    "description": "Shown in pairing with a Mac."
+  },
+  "pairingIntro": "On the Mac, open Agent Console, choose Phone, then Pair a phone.",
+  "@pairingIntro": {
+    "description": "Shown in pairing with a Mac."
+  },
+  "pairingInvalid": "The pairing code isn't valid.",
+  "@pairingInvalid": {
+    "description": "Shown in pairing with a Mac."
+  },
+  "pairingManual": "Enter manually",
+  "@pairingManual": {
+    "description": "Shown in pairing with a Mac."
+  },
+  "pairingPasteJson": "Paste the QR content (JSON)",
+  "@pairingPasteJson": {
+    "description": "Shown in pairing with a Mac."
+  },
+  "pairingPort": "Port",
+  "@pairingPort": {
+    "description": "Shown in pairing with a Mac."
+  },
+  "pairingScan": "Scan QR",
+  "@pairingScan": {
+    "description": "Shown in pairing with a Mac."
+  },
+  "pairingTitle": "Pair with a Mac",
+  "@pairingTitle": {
+    "description": "Shown in pairing with a Mac."
+  },
+  "pairingUnreachable": "Couldn't reach the Mac. Check the network and address.",
+  "@pairingUnreachable": {
+    "description": "Shown in pairing with a Mac."
+  },
+  "pairingWaiting": "Waiting for the Mac to allow…",
+  "@pairingWaiting": {
+    "description": "Shown in pairing with a Mac."
+  },
+  "sessionsAllProjects": "All projects",
+  "@sessionsAllProjects": {
+    "description": "Shown in the Sessions tab."
+  },
+  "sessionsArchive": "Archive",
+  "@sessionsArchive": {
+    "description": "Shown in the Sessions tab."
+  },
+  "sessionsArchivedToast": "Archived {name}",
+  "@sessionsArchivedToast": {
+    "description": "Shown in the Sessions tab. $name is the session name.",
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "sessionsComputerNoSessions": "No sessions",
+  "@sessionsComputerNoSessions": {
+    "description": "Shown in the Sessions tab."
+  },
+  "sessionsDaysShort": "{n} d",
+  "@sessionsDaysShort": {
+    "description": "Shown in the Sessions tab. $n is days.",
+    "placeholders": {
+      "n": {
+        "type": "int",
+        "format": "decimalPattern"
+      }
+    }
+  },
+  "sessionsEmptyBody": "Claude Code sessions on your Mac show up here.",
+  "@sessionsEmptyBody": {
+    "description": "Shown in the Sessions tab."
+  },
+  "sessionsEmptyTitle": "No sessions yet",
+  "@sessionsEmptyTitle": {
+    "description": "Shown in the Sessions tab."
+  },
+  "sessionsFilteredEmpty": "No sessions in this project.",
+  "@sessionsFilteredEmpty": {
+    "description": "Shown in the Sessions tab."
+  },
+  "sessionsHoursShort": "{n} h",
+  "@sessionsHoursShort": {
+    "description": "Shown in the Sessions tab. $n is hours.",
+    "placeholders": {
+      "n": {
+        "type": "int",
+        "format": "decimalPattern"
+      }
+    }
+  },
+  "sessionsJustNow": "Just now",
+  "@sessionsJustNow": {
+    "description": "Shown in the Sessions tab."
+  },
+  "sessionsMinutesShort": "{n} min",
+  "@sessionsMinutesShort": {
+    "description": "Shown in the Sessions tab. $n is minutes.",
+    "placeholders": {
+      "n": {
+        "type": "int",
+        "format": "decimalPattern"
+      }
+    }
+  },
+  "sessionsModelDefault": "Default",
+  "@sessionsModelDefault": {
+    "description": "Shown in the Sessions tab."
+  },
+  "sessionsNewSession": "New session",
+  "@sessionsNewSession": {
+    "description": "Shown in the Sessions tab."
+  },
+  "sessionsNewSessionConfirmBody": "Claude will run in {folder} on the Mac.",
+  "@sessionsNewSessionConfirmBody": {
+    "description": "Shown in the Sessions tab. $folder is the folder path.",
+    "placeholders": {
+      "folder": {
+        "type": "String"
+      }
+    }
+  },
+  "sessionsNewSessionConfirmTitle": "Start a new session?",
+  "@sessionsNewSessionConfirmTitle": {
+    "description": "Shown in the Sessions tab."
+  },
+  "sessionsNewSessionFailed": "Couldn't start a new session. Please try again.",
+  "@sessionsNewSessionFailed": {
+    "description": "Shown in the Sessions tab."
+  },
+  "sessionsNewSessionFolder": "Folder",
+  "@sessionsNewSessionFolder": {
+    "description": "Shown in the Sessions tab."
+  },
+  "sessionsNewSessionModel": "Model",
+  "@sessionsNewSessionModel": {
+    "description": "Shown in the Sessions tab."
+  },
+  "sessionsNewSessionNoProjects": "No recent folders on the Mac.",
+  "@sessionsNewSessionNoProjects": {
+    "description": "Shown in the Sessions tab."
+  },
+  "sessionsNewSessionOpen": "Start",
+  "@sessionsNewSessionOpen": {
+    "description": "Shown in the Sessions tab."
+  },
+  "sessionsNewSessionStarted": "The Mac started a new session.",
+  "@sessionsNewSessionStarted": {
+    "description": "Shown in the Sessions tab."
+  },
+  "sessionsRunningSubagents": "{count} subagents running",
+  "@sessionsRunningSubagents": {
+    "description": "Shown in the Sessions tab. $count is the number of subagents.",
     "placeholders": {
       "count": {
-        "type": "int"
+        "type": "int",
+        "format": "decimalPattern"
       }
     }
   },
-  "connecting": "Connecting",
-  "connectionLostRetry": "Connection lost, retrying in {seconds}s",
-  "@connectionLostRetry": {
-    "placeholders": {
-      "seconds": {
-        "type": "int"
-      }
-    }
+  "sessionsSearchHint": "Search sessions",
+  "@sessionsSearchHint": {
+    "description": "Shown in the Sessions tab."
   },
-  "connected": "Connected",
-  "retryNow": "Retry now",
-  "retry": "Retry",
-  "cancel": "Cancel",
-  "close": "Close",
-  "stateNeedsInput": "Needs Input",
-  "stateRunning": "Working",
-  "stateDone": "Done",
-  "stateExited": "Ended",
-  "sessionsEmptyTitle": "No sessions yet",
-  "sessionsEmptyBody": "Claude Code sessions on your Mac show up here.",
-  "searchHint": "Search sessions",
-  "searchNoMatch": "No sessions match “{query}”.",
-  "@searchNoMatch": {
+  "sessionsSearchNoMatch": "No sessions match “{query}”.",
+  "@sessionsSearchNoMatch": {
+    "description": "Shown in the Sessions tab. $query is what you typed.",
     "placeholders": {
       "query": {
         "type": "String"
       }
     }
   },
-  "loadFailed": "Couldn't load data. Please try again.",
-  "newSession": "New session",
-  "newSessionFolder": "Folder",
-  "newSessionModel": "Model",
-  "modelDefault": "Default",
-  "newSessionNoProjects": "No recent folders on the Mac.",
-  "newSessionConfirmTitle": "Start a new session?",
-  "newSessionConfirmBody": "Claude will run in {folder} on the Mac.",
-  "@newSessionConfirmBody": {
-    "placeholders": {
-      "folder": {
-        "type": "String"
-      }
-    }
+  "sessionsStateExited": "Ended",
+  "@sessionsStateExited": {
+    "description": "Shown in the Sessions tab."
   },
-  "newSessionOpen": "Start",
-  "newSessionStarted": "The Mac started a new session.",
-  "newSessionFailed": "Couldn't start a new session. Please try again.",
-  "runningSubagents": "{count} subagents running",
-  "@runningSubagents": {
+  "sessionsStateNeedsInput": "Needs Input",
+  "@sessionsStateNeedsInput": {
+    "description": "Shown in the Sessions tab."
+  },
+  "sessionsSubagentsHide": "Hide {count} subagents",
+  "@sessionsSubagentsHide": {
+    "description": "Shown in the Sessions tab. $count is the number of subagents.",
     "placeholders": {
       "count": {
-        "type": "int"
+        "type": "int",
+        "format": "decimalPattern"
       }
     }
   },
-  "subagentsShow": "Show {count} subagents",
-  "@subagentsShow": {
+  "sessionsSubagentsShow": "Show {count} subagents",
+  "@sessionsSubagentsShow": {
+    "description": "Shown in the Sessions tab. $count is the number of subagents.",
     "placeholders": {
       "count": {
-        "type": "int"
+        "type": "int",
+        "format": "decimalPattern"
       }
     }
   },
-  "subagentsHide": "Hide {count} subagents",
-  "@subagentsHide": {
-    "placeholders": {
-      "count": {
-        "type": "int"
-      }
-    }
+  "sessionsTakeoverShort": "Take over",
+  "@sessionsTakeoverShort": {
+    "description": "Shown in the Sessions tab."
   },
-  "justNow": "Just now",
-  "minutesShort": "{n} min",
-  "@minutesShort": {
-    "placeholders": {
-      "n": {
-        "type": "int"
-      }
-    }
+  "sessionsUndo": "Undo",
+  "@sessionsUndo": {
+    "description": "Shown in the Sessions tab."
   },
-  "hoursShort": "{n} h",
-  "@hoursShort": {
-    "placeholders": {
-      "n": {
-        "type": "int"
-      }
-    }
+  "settingsNotifications": "Notifications",
+  "@settingsNotifications": {
+    "description": "Shown in Settings."
   },
-  "daysShort": "{n} d",
-  "@daysShort": {
-    "placeholders": {
-      "n": {
-        "type": "int"
-      }
-    }
+  "settingsSound": "Notification sounds",
+  "@settingsSound": {
+    "description": "Shown in Settings."
   },
-  "viewOnly": "View only",
-  "viewOnlyReason": "Opened outside Console, view only",
-  "controlConsole": "Console",
-  "controlJob": "Background job",
-  "chatSelectSession": "Select a session to see its chat.",
-  "chatEmpty": "No messages yet.",
-  "chatLoadOlder": "Load older messages",
-  "chatNewMessages": "New messages",
-  "composerHint": "Message this session",
-  "send": "Send",
-  "sending": "Sending",
-  "sendFailed": "Couldn't send the message. Please try again.",
-  "pendingPermission": "Permission needed: {tool}",
-  "@pendingPermission": {
-    "placeholders": {
-      "tool": {
-        "type": "String"
-      }
-    }
+  "settingsSoundHint": "A soft sound for new messages and sessions that need you while the app is open.",
+  "@settingsSoundHint": {
+    "description": "Shown in Settings."
   },
-  "pendingQuestion": "Question from Claude",
-  "allow": "Allow",
-  "deny": "Deny",
-  "answerOnMac": "Answer on the Mac",
-  "multiSelectOnMac": "This question allows several answers. Answer it on the Mac.",
-  "answerFailed": "Couldn't send the answer. Please try again.",
-  "toolsExpand": "Expand",
-  "toolsCollapse": "Collapse",
-  "pairTitle": "Pair with a Mac",
-  "pairIntro": "On the Mac, open Agent Console, choose Phone, then Pair a phone.",
-  "pairScan": "Scan QR",
-  "pairManual": "Enter manually",
-  "pairPasteJson": "Paste the QR content (JSON)",
-  "pairHost": "Mac address (IP or .local name)",
-  "pairPort": "Port",
-  "pairFingerprint": "Certificate fingerprint (SHA-256)",
-  "pairCode": "Pairing code (8 characters)",
-  "pairDeviceName": "Device name",
-  "pairConnect": "Pair",
-  "pairWaiting": "Waiting for the Mac to allow…",
-  "pairFailed": "Couldn't pair. Please try again.",
-  "pairInvalid": "The pairing code isn't valid.",
-  "pairFingerprintMismatch": "The Mac's certificate doesn't match the pinned fingerprint. Connection refused.",
-  "pairDenied": "The Mac refused this device, or the code expired.",
-  "pairUnreachable": "Couldn't reach the Mac. Check the network and address.",
-  "pairCameraDenied": "Camera access is off. Use manual entry.",
-  "macsTitle": "Paired Macs",
-  "macsAdd": "Add a Mac",
-  "macsActive": "In use",
-  "macsUse": "Use this Mac",
-  "macsRemove": "Remove Mac",
-  "computerOffline": "Not connected",
-  "computerRevoked": "Revoked",
-  "computerNoSessions": "No sessions",
-  "macsRemoveConfirm": "Remove “{name}” from this phone?",
-  "@macsRemoveConfirm": {
-    "placeholders": {
-      "name": {
-        "type": "String"
-      }
-    }
+  "settingsTheme": "Appearance",
+  "@settingsTheme": {
+    "description": "Shown in Settings."
   },
-  "vizSuggested": "Suggested",
-  "vizPhoneNoPermission": "The Mac hasn't granted Screen Recording to Agent Console.",
-  "vizPhoneNoWindow": "No device window is showing on the Mac.",
-  "vizPhoneStarting": "Waiting for frames from the Mac…",
-  "vizPhoneError": "Couldn't show the device: {message}",
-  "@vizPhoneError": {
+  "settingsThemeDark": "Dark",
+  "@settingsThemeDark": {
+    "description": "Shown in Settings."
+  },
+  "settingsThemeLight": "Light",
+  "@settingsThemeLight": {
+    "description": "Shown in Settings."
+  },
+  "settingsThemeSystem": "System",
+  "@settingsThemeSystem": {
+    "description": "Shown in Settings."
+  },
+  "stateDone": "Done",
+  "@stateDone": {
+    "description": "A session that finished its turn. Shown in the Sessions tab."
+  },
+  "stateRunning": "Working",
+  "@stateRunning": {
+    "description": "A session that is working on a turn. Shown in the Chat screen and the Sessions tab."
+  },
+  "visualizeBundleMissing": "The viz bundle is missing. Run tool/sync_viz.sh and rebuild.",
+  "@visualizeBundleMissing": {
+    "description": "Shown in the Visualize tab."
+  },
+  "visualizeLoadFailed": "Couldn't load the visualization. Please try again.",
+  "@visualizeLoadFailed": {
+    "description": "Shown in the Visualize tab."
+  },
+  "visualizePhoneError": "Couldn't show the device: {message}",
+  "@visualizePhoneError": {
+    "description": "Not shown yet. $message is the reason.",
     "placeholders": {
       "message": {
         "type": "String"
       }
     }
   },
-  "vizWebUrl": "Page address (localhost on the Mac)",
-  "vizWebRefresh": "Capture again",
-  "vizWebNoUrl": "This session has no web address yet. Enter one above.",
-  "vizWebHint": "Start the dev server on the Mac and refresh, or pick another address below.",
-  "vizWebCandidates": "Running on the Mac",
-  "vizWebFailed": "Couldn't capture the page. Please try again.",
-  "vizLoadFailed": "Couldn't load the visualization. Please try again.",
-  "vizSelectSession": "Select a session to see its visualization.",
-  "vizBundleMissing": "The viz bundle is missing. Run tool/sync_viz.sh and rebuild.",
-  "notifNeedsInputTitle": "Session needs input",
-  "notifNeedsInputBody": "{name} is waiting.",
-  "@notifNeedsInputBody": {
-    "placeholders": {
-      "name": {
-        "type": "String"
-      }
-    }
+  "visualizePhoneNoPermission": "The Mac hasn't granted Screen Recording to Agent Console.",
+  "@visualizePhoneNoPermission": {
+    "description": "Not shown yet."
   },
-  "pullToRefresh": "Pull to refresh",
-  "connectionRevoked": "The Mac revoked this device. Pair again.",
-  "openMacs": "Paired Macs",
-  "routeHome": "Home Wi-Fi",
-  "routeInternet": "Internet",
-  "connectedVia": "Connected · {route}",
-  "@connectedVia": {
-    "placeholders": {
-      "route": {
-        "type": "String"
-      }
-    }
+  "visualizePhoneNoWindow": "No device window is showing on the Mac.",
+  "@visualizePhoneNoWindow": {
+    "description": "Not shown yet."
   },
-  "noRouteToMac": "Can't reach the Mac. Turn on Internet access on the Mac or join the same Wi-Fi.",
-  "takeover": "Take over",
-  "takeoverHint": "Opened outside Console, view only. Take it over to message it from your phone.",
-  "takeoverTitle": "Take over this session?",
-  "takeoverBody": "The Mac will reopen this session in Console's Terminal (claude --resume). The original must be closed. If Claude asks anything, answer on the Mac.",
-  "takeoverRunning": "Taking over…",
-  "takeoverFailed": "Could not take over: {reason}",
-  "@takeoverFailed": {
-    "placeholders": {
-      "reason": {
-        "type": "String"
-      }
-    }
+  "visualizePhoneStarting": "Waiting for frames from the Mac…",
+  "@visualizePhoneStarting": {
+    "description": "Not shown yet."
   },
-  "micStart": "Dictate",
-  "micStop": "Stop and transcribe",
-  "micCancel": "Cancel transcription",
-  "transcribing": "Transcribing…",
-  "voicePermissionDenied": "Microphone access is off.",
-  "voiceOpenSettings": "Open settings",
-  "voiceNoSpeech": "No speech heard. Try speaking closer to the mic.",
-  "voiceTooLong": "Stopped at 60 seconds.",
+  "visualizeSelectSession": "Select a session to see its visualization.",
+  "@visualizeSelectSession": {
+    "description": "Shown in the Visualize tab."
+  },
+  "visualizeSuggested": "Suggested",
+  "@visualizeSuggested": {
+    "description": "Shown in the Visualize tab."
+  },
+  "visualizeWebCandidates": "Running on the Mac",
+  "@visualizeWebCandidates": {
+    "description": "Not shown yet."
+  },
+  "visualizeWebFailed": "Couldn't capture the page. Please try again.",
+  "@visualizeWebFailed": {
+    "description": "Shown in the Visualize tab."
+  },
+  "visualizeWebHint": "Start the dev server on the Mac and refresh, or pick another address below.",
+  "@visualizeWebHint": {
+    "description": "Shown in the Visualize tab."
+  },
+  "visualizeWebNoUrl": "This session has no web address yet. Enter one above.",
+  "@visualizeWebNoUrl": {
+    "description": "Shown in the Visualize tab."
+  },
+  "visualizeWebRefresh": "Capture again",
+  "@visualizeWebRefresh": {
+    "description": "Shown in the Visualize tab."
+  },
+  "visualizeWebUrl": "Page address (localhost on the Mac)",
+  "@visualizeWebUrl": {
+    "description": "Shown in the Visualize tab."
+  },
   "voiceEngineError": "Transcription failed. Try again.",
+  "@voiceEngineError": {
+    "description": "Shown in dictation."
+  },
+  "voiceMicCancel": "Cancel transcription",
+  "@voiceMicCancel": {
+    "description": "Shown in dictation."
+  },
+  "voiceMicStart": "Dictate",
+  "@voiceMicStart": {
+    "description": "Shown in dictation."
+  },
+  "voiceMicStop": "Stop and transcribe",
+  "@voiceMicStop": {
+    "description": "Shown in dictation."
+  },
+  "voiceNoSpeech": "No speech heard. Try speaking closer to the mic.",
+  "@voiceNoSpeech": {
+    "description": "Shown in dictation."
+  },
+  "voiceOpenSettings": "Open settings",
+  "@voiceOpenSettings": {
+    "description": "Shown in dictation."
+  },
+  "voicePermissionDenied": "Microphone access is off.",
+  "@voicePermissionDenied": {
+    "description": "Shown in dictation."
+  },
   "voiceRecorderError": "Could not record.",
-  "keepAliveTitle": "Keep the connection in the background?",
-  "keepAliveBody": "To get notified when a session needs input or finishes, the app has to run in the background. Android shows a small \"Agent Console is watching\" notification. You can turn it off under Paired Macs.",
-  "keepAliveEnable": "Turn on",
-  "notNow": "Not now",
-  "keepAliveSetting": "Keep connection in the background",
-  "keepAliveHint": "Get notifications while the app is in the background. Shows a small permanent notification.",
-  "muteSession": "Mute notifications for this session",
-  "unmuteSession": "Unmute this session",
-  "takeoverStopBody": "Stop the session on the Mac (Claude desktop / VS Code) and reopen it in Console so you can message it from the phone?",
-  "takeoverStopConfirm": "Stop and take over",
-  "takeoverBusyTitle": "Session is running",
-  "takeoverBusyBody": "The session is running; the current turn will be cut off.",
-  "takeoverBusyConfirm": "Stop anyway",
-  "chatQueued": "waiting",
-  "chatSendNow": "Send now",
-  "chatSendNowTitle": "Interrupt the running turn to send now?",
-  "chatSendNowBody": "Claude stops the current turn and runs this waiting message right away.",
-  "chatSendNowFailed": "Could not interrupt",
-  "chatSending": "sending",
-  "chatSendFailed": "Not sent",
-  "chatUpdating": "Updating",
-  "pictureFailed": "Could not load the picture",
-  "pictureClose": "Close picture",
-  "pictureOpen": "Open picture",
-  "allProjects": "All projects",
-  "archive": "Archive",
-  "archivedToast": "Archived {name}",
-  "@archivedToast": {
-    "placeholders": {
-      "name": {
-        "type": "String"
-      }
-    }
+  "@voiceRecorderError": {
+    "description": "Shown in dictation."
   },
-  "undo": "Undo",
-  "sessionsFilteredEmpty": "No sessions in this project.",
-  "chatContext": "Context",
-  "limit5h": "5h",
-  "limitWeek": "Week",
-  "shellHeader": "Shell command",
-  "shellRunsIn": "runs in {folder} · Claude sees the output",
-  "@shellRunsIn": {
-    "placeholders": {
-      "folder": {
-        "type": "String"
-      }
-    }
+  "voiceTooLong": "Stopped at 60 seconds.",
+  "@voiceTooLong": {
+    "description": "Shown in dictation."
   },
-  "shellHint": "Send runs it like ! in the terminal · delete the ! to send a message instead",
-  "shellWillRun": "Will run",
-  "slashHeader": "Commands",
-  "toolStepsCount": "{count} tool steps",
-  "@toolStepsCount": {
-    "placeholders": {
-      "count": {
-        "type": "int"
-      }
-    }
-  },
-  "toolStepOne": "1 tool step",
-  "compactionTitle": "Conversation compacted",
-  "showOutput": "Show output",
-  "copyCode": "Copy",
-  "copied": "Copied",
-  "takeoverShort": "Take over",
-  "activityIdle": "Idle",
-  "viewOnlyChip": "View only",
-  "newMessagesBelow": "New messages",
-  "attachPhoto": "Attach a photo",
-  "photoCamera": "Take a photo",
-  "photoGallery": "Choose from library",
-  "photoPickFailed": "Could not open the camera or library.",
-  "photoSent": "Photo sent",
-  "photoTitle": "Send a photo",
-  "photoCaptionHint": "Add a caption (optional)",
-  "settingsTitle": "Settings",
-  "settingsTheme": "Appearance",
-  "themeSystem": "System",
-  "themeDark": "Dark",
-  "themeLight": "Light",
-  "settingsNotifications": "Notifications",
-  "settingsSound": "Notification sounds",
-  "settingsSoundHint": "A soft sound for new messages and sessions that need you while the app is open."
+  "voiceTranscribing": "Transcribing…",
+  "@voiceTranscribing": {
+    "description": "Shown in dictation."
+  }
 }

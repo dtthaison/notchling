@@ -17,7 +17,7 @@ class VisualizeScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final AppL10n l10n = AppL10n.of(context);
     final String? id = ref.watch(selectedSessionIdProvider);
-    if (id == null) return StateMessage(icon: Icons.insights, title: l10n.vizSelectSession);
+    if (id == null) return StateMessage(icon: Icons.insights, title: l10n.visualizeSelectSession);
 
     final AsyncValue<Json> viz = ref.watch(vizProvider(id));
     VizTab? suggested = VizTab.byName(viz.value?.strOrNull('suggested'));
@@ -60,7 +60,7 @@ class _TabBar extends StatelessWidget {
           Semantics(
             button: true,
             selected: tab == selected,
-            label: tab == suggested ? '${tab.title}, ${l10n.vizSuggested}' : tab.title,
+            label: tab == suggested ? '${tab.title}, ${l10n.visualizeSuggested}' : tab.title,
             excludeSemantics: true,
             onTap: () => onSelect(tab),
             child: InkWell(
@@ -101,7 +101,7 @@ class _SpecBody extends StatelessWidget {
       final Object? spec = data[tab.name];
       if (spec is Map<String, Object?>) return VizWebView(spec: spec);
     }
-    if (viz.hasError && data == null) return ErrorState(message: l10n.vizLoadFailed, onRetry: onRetry);
+    if (viz.hasError && data == null) return ErrorState(message: l10n.visualizeLoadFailed, onRetry: onRetry);
     return const SkeletonRows();
   }
 }
@@ -116,7 +116,7 @@ class _EntityBody extends ConsumerWidget {
     final AsyncValue<Json> entity = ref.watch(vizEntityProvider(sessionId));
     final Object? spec = entity.value?['entity'];
     if (spec is Map<String, Object?>) return VizWebView(spec: spec);
-    if (entity.hasError) return ErrorState(message: l10n.vizLoadFailed, onRetry: () => ref.invalidate(vizEntityProvider(sessionId)));
+    if (entity.hasError) return ErrorState(message: l10n.visualizeLoadFailed, onRetry: () => ref.invalidate(vizEntityProvider(sessionId)));
     return const SkeletonRows();
   }
 }

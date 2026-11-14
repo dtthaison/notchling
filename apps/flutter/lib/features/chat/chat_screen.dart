@@ -324,7 +324,7 @@ class _SessionChatState extends ConsumerState<_SessionChat> {
     }
     if (chat.phase == LoadPhase.error && chat.messages.isEmpty) {
       return ErrorState(
-        message: l10n.loadFailed,
+        message: l10n.appLoadFailed,
         onRetry: () => unawaited(
           ref.read(chatProvider(widget.sessionId).notifier).reload(),
         ),

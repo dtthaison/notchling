@@ -39,7 +39,7 @@ class _SendNowActionState extends ConsumerState<SendNowAction> {
         title: Text(l10n.chatSendNowTitle),
         content: Text(l10n.chatSendNowBody),
         actions: <Widget>[
-          TextButton(onPressed: () => Navigator.pop(context, false), child: Text(l10n.cancel)),
+          TextButton(onPressed: () => Navigator.pop(context, false), child: Text(l10n.appCancel)),
           TextButton(onPressed: () => Navigator.pop(context, true), child: Text(l10n.chatSendNow)),
         ],
       ),

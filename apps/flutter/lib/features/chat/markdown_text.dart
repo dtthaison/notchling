@@ -530,7 +530,7 @@ class _CodeBlockState extends State<CodeBlock> {
                       ),
                     ),
                     label: Text(
-                      _copied ? l10n.copied : l10n.copyCode,
+                      _copied ? l10n.chatCopied : l10n.chatCopyCode,
                       style: kit.meta.copyWith(
                         color: _copied ? kit.done : null,
                       ),

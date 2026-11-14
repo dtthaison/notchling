@@ -61,16 +61,16 @@ class _AppRootState extends ConsumerState<AppRoot> with WidgetsBindingObserver {
     final bool? on = await showDialog<bool>(
       context: context,
       builder: (BuildContext context) => AlertDialog(
-        title: Text(l10n.keepAliveTitle),
-        content: Text(l10n.keepAliveBody),
+        title: Text(l10n.appKeepAliveTitle),
+        content: Text(l10n.appKeepAliveBody),
         actions: <Widget>[
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: Text(l10n.notNow),
+            child: Text(l10n.appNotNow),
           ),
           TextButton(
             onPressed: () => Navigator.pop(context, true),
-            child: Text(l10n.keepAliveEnable),
+            child: Text(l10n.appKeepAliveEnable),
           ),
         ],
       ),
@@ -191,7 +191,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
               actions: <Widget>[
                 if (wide)
                   IconButton(
-                    tooltip: l10n.tabInbox,
+                    tooltip: l10n.appTabInbox,
                     icon: Badge(
                       isLabelVisible: ref.watch(inboxOpenCountProvider) > 0,
                       label: Text('${ref.watch(inboxOpenCountProvider)}'),
@@ -205,7 +205,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
                       Navigator.of(context).push(
                         MaterialPageRoute<void>(
                           builder: (BuildContext context) => Scaffold(
-                            appBar: AppBar(title: Text(l10n.tabInbox)),
+                            appBar: AppBar(title: Text(l10n.appTabInbox)),
                             body: const InboxScreen(),
                           ),
                         ),
@@ -213,7 +213,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
                     ),
                   ),
                 IconButton(
-                  tooltip: l10n.openMacs,
+                  tooltip: l10n.appOpenMacs,
                   icon: const Icon(Icons.laptop_mac),
                   constraints: const BoxConstraints(
                     minWidth: Metric.minTarget,
@@ -228,7 +228,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
                   ),
                 ),
                 IconButton(
-                  tooltip: l10n.settingsTitle,
+                  tooltip: l10n.appSettingsTitle,
                   icon: const Icon(Icons.settings_outlined),
                   constraints: const BoxConstraints(
                     minWidth: Metric.minTarget,
@@ -380,10 +380,10 @@ class _ConnectionBannerState extends ConsumerState<ConnectionBanner> {
     VoidCallback? retry;
     switch (status.phase) {
       case LinkPhase.connecting:
-        text = l10n.connecting;
+        text = l10n.appConnecting;
       case LinkPhase.disconnected:
         if (status.revoked) {
-          text = l10n.connectionRevoked;
+          text = l10n.appConnectionRevoked;
           color = Kit.of(context).danger;
           icon = Icons.link_off;
         } else {
@@ -394,8 +394,8 @@ class _ConnectionBannerState extends ConsumerState<ConnectionBanner> {
                     .inSeconds
                     .clamp(0, 999);
           text = status.error != null
-              ? l10n.noRouteToMac
-              : l10n.connectionLostRetry(seconds);
+              ? l10n.appNoRouteToMac
+              : l10n.appConnectionLostRetry(seconds);
           color = Kit.of(context).danger;
           icon = Icons.wifi_off;
           retry = () => ref.read(bridgeClientProvider)?.retryNow();
@@ -404,11 +404,11 @@ class _ConnectionBannerState extends ConsumerState<ConnectionBanner> {
         final bool viaInternet = status.route == RouteKind.tunnel;
         if (_showConnected || viaInternet) {
           final String route = viaInternet
-              ? l10n.routeInternet
-              : l10n.routeHome;
+              ? l10n.appRouteInternet
+              : l10n.appRouteHome;
           text = status.route == null
-              ? l10n.connected
-              : l10n.connectedVia(route);
+              ? l10n.appConnected
+              : l10n.appConnectedVia(route);
           color = viaInternet ? Kit.of(context).needs : Kit.of(context).working;
           icon = viaInternet ? Icons.public : Icons.check;
         }
@@ -442,7 +442,7 @@ class _ConnectionBannerState extends ConsumerState<ConnectionBanner> {
               ),
             ),
             if (retry != null)
-              TextButton(onPressed: retry, child: Text(l10n.retryNow)),
+              TextButton(onPressed: retry, child: Text(l10n.appRetryNow)),
           ],
         ),
       ),

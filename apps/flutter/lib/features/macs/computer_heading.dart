@@ -41,10 +41,10 @@ class ComputerHeader extends StatelessWidget {
 }
 
 String linkWord(AppL10n l10n, ConnectionStatus status) => switch (status.phase) {
-      LinkPhase.connected => l10n.connected,
-      LinkPhase.connecting => l10n.connecting,
-      LinkPhase.disconnected when status.revoked => l10n.computerRevoked,
-      LinkPhase.disconnected => l10n.computerOffline,
+      LinkPhase.connected => l10n.appConnected,
+      LinkPhase.connecting => l10n.appConnecting,
+      LinkPhase.disconnected when status.revoked => l10n.macsComputerRevoked,
+      LinkPhase.disconnected => l10n.macsComputerOffline,
     };
 
 class ComputerLinkLabel extends StatelessWidget {

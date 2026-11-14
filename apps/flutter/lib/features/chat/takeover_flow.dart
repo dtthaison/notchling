@@ -15,11 +15,11 @@ Future<TakeoverChoice> confirmTakeover(BuildContext context, Session session) as
   final bool? first = await showDialog<bool>(
     context: context,
     builder: (BuildContext context) => AlertDialog(
-      title: Text(l10n.takeoverTitle),
-      content: Text(stop ? l10n.takeoverStopBody : l10n.takeoverBody),
+      title: Text(l10n.chatTakeoverTitle),
+      content: Text(stop ? l10n.chatTakeoverStopBody : l10n.chatTakeoverBody),
       actions: <Widget>[
-        TextButton(onPressed: () => Navigator.pop(context, false), child: Text(l10n.cancel)),
-        TextButton(onPressed: () => Navigator.pop(context, true), child: Text(stop ? l10n.takeoverStopConfirm : l10n.takeover)),
+        TextButton(onPressed: () => Navigator.pop(context, false), child: Text(l10n.appCancel)),
+        TextButton(onPressed: () => Navigator.pop(context, true), child: Text(stop ? l10n.consentStopAndTakeOver : l10n.appTakeover)),
       ],
     ),
   );
@@ -29,11 +29,11 @@ Future<TakeoverChoice> confirmTakeover(BuildContext context, Session session) as
     final bool? second = await showDialog<bool>(
       context: context,
       builder: (BuildContext context) => AlertDialog(
-        title: Text(l10n.takeoverBusyTitle),
-        content: Text(l10n.takeoverBusyBody),
+        title: Text(l10n.chatTakeoverBusyTitle),
+        content: Text(l10n.chatTakeoverBusyBody),
         actions: <Widget>[
-          TextButton(onPressed: () => Navigator.pop(context, false), child: Text(l10n.cancel)),
-          TextButton(onPressed: () => Navigator.pop(context, true), child: Text(l10n.takeoverBusyConfirm)),
+          TextButton(onPressed: () => Navigator.pop(context, false), child: Text(l10n.appCancel)),
+          TextButton(onPressed: () => Navigator.pop(context, true), child: Text(l10n.consentStopAnyway)),
         ],
       ),
     );

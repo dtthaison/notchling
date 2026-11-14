@@ -25,9 +25,9 @@ class ChatHeaderView extends StatelessWidget {
     final AppL10n l10n = AppL10n.of(context);
     final Kit kit = Kit.of(context);
     final String control = switch (session.control) {
-      SessionControl.console => l10n.controlConsole,
-      SessionControl.job => l10n.controlJob,
-      SessionControl.viewOnly => l10n.viewOnly,
+      SessionControl.console => l10n.chatControlConsole,
+      SessionControl.job => l10n.chatControlJob,
+      SessionControl.viewOnly => l10n.appViewOnly,
     };
     final bool large = MediaQuery.textScalerOf(context).scale(10) > 11.5;
     final SessionFacts? facts = session.facts;
@@ -71,7 +71,7 @@ class ChatHeaderView extends StatelessWidget {
                   ),
                 ),
                 IconButton(
-                  tooltip: muted ? l10n.unmuteSession : l10n.muteSession,
+                  tooltip: muted ? l10n.chatUnmuteSession : l10n.chatMuteSession,
                   constraints: const BoxConstraints(minWidth: 44, minHeight: Metric.minTarget),
                   padding: EdgeInsets.zero,
                   icon: Icon(muted ? Icons.notifications_off_outlined : Icons.notifications_none, size: 22, color: muted ? kit.accentText : kit.textMuted),
@@ -79,7 +79,7 @@ class ChatHeaderView extends StatelessWidget {
                 ),
                 if (onOpenMacs != null)
                   IconButton(
-                    tooltip: l10n.openMacs,
+                    tooltip: l10n.appOpenMacs,
                     constraints: const BoxConstraints(minWidth: 44, minHeight: Metric.minTarget),
                     padding: EdgeInsets.zero,
                     icon: Icon(Icons.laptop_mac, size: 22, color: kit.textMuted),
@@ -125,7 +125,7 @@ class ChatHeaderView extends StatelessWidget {
   Widget _limitFact(AppL10n l10n, LimitMeter limit) {
     final String label = switch (limit.label.toLowerCase()) {
       '5h' => '5h',
-      'week' => l10n.limitWeek,
+      'week' => l10n.chatLimitWeek,
       _ => limit.label,
     };
     return Tooltip(

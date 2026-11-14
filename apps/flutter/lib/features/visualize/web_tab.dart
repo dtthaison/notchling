@@ -73,17 +73,17 @@ class _WebTabState extends ConsumerState<WebTab> {
       content = const SkeletonRows(count: 4);
     } else if (_failed && image == null) {
       content = Column(mainAxisAlignment: MainAxisAlignment.center, children: <Widget>[
-        ErrorState(message: _reason ?? l10n.vizWebFailed, onRetry: () => unawaited(_capture())),
+        ErrorState(message: _reason ?? l10n.visualizeWebFailed, onRetry: () => unawaited(_capture())),
         if (_reason != null)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: Space.xl),
-            child: Text(l10n.vizWebHint, textAlign: TextAlign.center, style: Kit.of(context).meta),
+            child: Text(l10n.visualizeWebHint, textAlign: TextAlign.center, style: Kit.of(context).meta),
           ),
       ]);
     } else if (image != null) {
       content = InteractiveViewer(maxScale: 4, child: Center(child: Image.memory(image, gaplessPlayback: true)));
     } else {
-      content = StateMessage(icon: Icons.public, title: l10n.vizWebNoUrl);
+      content = StateMessage(icon: Icons.public, title: l10n.visualizeWebNoUrl);
     }
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: <Widget>[
       Padding(
@@ -95,19 +95,19 @@ class _WebTabState extends ConsumerState<WebTab> {
               keyboardType: TextInputType.url,
               autocorrect: false,
               style: Kit.of(context).codeSm.copyWith(color: Kit.of(context).text),
-              decoration: InputDecoration(hintText: 'http://localhost:3000', labelText: l10n.vizWebUrl),
+              decoration: InputDecoration(hintText: 'http://localhost:3000', labelText: l10n.visualizeWebUrl),
               onSubmitted: (_) => unawaited(_capture()),
             ),
           ),
           const SizedBox(width: Space.sm),
           Semantics(
             button: true,
-            label: l10n.vizWebRefresh,
+            label: l10n.visualizeWebRefresh,
             excludeSemantics: true,
             child: IconButton(
               onPressed: _loading ? null : () => unawaited(_capture()),
               icon: const Icon(Icons.refresh),
-              tooltip: l10n.vizWebRefresh,
+              tooltip: l10n.visualizeWebRefresh,
               constraints: const BoxConstraints(minWidth: Metric.minTarget, minHeight: Metric.minTarget),
             ),
           ),

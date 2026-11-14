@@ -52,7 +52,7 @@ class _SkeletonRowsState extends State<SkeletonRows>
       ),
     );
     return Semantics(
-      label: AppL10n.of(context).connecting,
+      label: AppL10n.of(context).appConnecting,
       child: ExcludeSemantics(
         child: AnimatedBuilder(
           animation: _sweep,
@@ -192,7 +192,7 @@ class ErrorState extends StatelessWidget {
       title: message,
       isError: true,
       action: SecondaryButton(
-        label: AppL10n.of(context).retry,
+        label: AppL10n.of(context).appRetry,
         onPressed: onRetry,
       ),
     );
