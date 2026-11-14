@@ -99,3 +99,60 @@ fn the_daemons_answer_is_used_as_it_is() {
     assert_eq!(found[0].path, PathBuf::from("/s/c.jsonl"));
     assert_eq!(found[0].started, 12.5);
 }
+
+struct Answers(Arc<AtomicUsize>);
+
+impl Line for Answers {
+    fn call(&mut self, op: &str, _args: Value) -> Result<Value, ClientError> {
+        assert_eq!(op, OP);
+        self.0.fetch_add(1, Ordering::SeqCst);
+        Ok(json!({"children": []}))
+    }
+}
+
+fn kept(opened: &Arc<AtomicUsize>, calls: &Arc<AtomicUsize>) -> DaemonChildren {
+    let (opened, calls) = (opened.clone(), calls.clone());
+    DaemonChildren::new(Box::new(Kept::new(Box::new(move || {
+        opened.fetch_add(1, Ordering::SeqCst);
+        Ok(Box::new(Answers(calls.clone())) as Box<dyn Line>)
+    }))))
+}
+
+#[test]
+fn a_walk_asks_the_daemon_over_one_connection_and_closes_it_when_done() {
+    let (opened, calls) = (Arc::default(), Arc::default());
+    let source = kept(&opened, &calls);
+    for _ in 0..50 {
+        source.children(PARENT, Path::new("/nowhere/x.jsonl"));
+    }
+    assert_eq!(opened.load(Ordering::SeqCst), 1);
+    assert_eq!(calls.load(Ordering::SeqCst), 50);
+    source.done();
+    source.children(PARENT, Path::new("/nowhere/x.jsonl"));
+    assert_eq!(
+        opened.load(Ordering::SeqCst),
+        2,
+        "a new walk connects again"
+    );
+}
+
+struct Breaks;
+
+impl Line for Breaks {
+    fn call(&mut self, _op: &str, _args: Value) -> Result<Value, ClientError> {
+        Err(ClientError::Closed)
+    }
+}
+
+#[test]
+fn a_connection_that_failed_is_not_used_again() {
+    let opened = Arc::new(AtomicUsize::new(0));
+    let counter = opened.clone();
+    let kept = Kept::new(Box::new(move || {
+        counter.fetch_add(1, Ordering::SeqCst);
+        Ok(Box::new(Breaks) as Box<dyn Line>)
+    }));
+    assert!(kept.call(OP, json!({})).is_err());
+    assert!(kept.call(OP, json!({})).is_err());
+    assert_eq!(opened.load(Ordering::SeqCst), 2);
+}

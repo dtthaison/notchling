@@ -376,7 +376,7 @@ impl ChatView {
             keys: copy::Keys::new(cx),
             accounts_polled_ms: 0,
             codex_installed: accounts::codex_installed(&root.home),
-            loader: Some(Loader::new(root.clone())),
+            loader: Some(Loader::new(root.clone()).quick_on_switch()),
             root,
             sessions: Vec::new(),
             new_drafts: Vec::new(),

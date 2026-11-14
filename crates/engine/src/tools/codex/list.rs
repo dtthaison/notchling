@@ -1,4 +1,6 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
 
 use crate::sessions::{Agent, AgentGroup, AgentTarget};
 use crate::transcript::codex::{self, Lineage};
@@ -73,10 +75,32 @@ pub fn rollouts(
     out
 }
 
+type Found = HashMap<(PathBuf, String), PathBuf>;
+
+fn found_rollouts() -> &'static Mutex<Found> {
+    static FOUND: OnceLock<Mutex<Found>> = OnceLock::new();
+    FOUND.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
 pub fn find_rollout(sessions_dir: &Path, id: &str) -> Option<PathBuf> {
     if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
         return None;
     }
+    let key = (sessions_dir.to_path_buf(), id.to_string());
+    let lock = || found_rollouts().lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(hit) = lock().get(&key).filter(|p| p.is_file()) {
+        return Some(hit.clone());
+    }
+    let found = search_rollout(sessions_dir, id)?;
+    let mut known = lock();
+    if known.len() >= 5_000 {
+        known.clear();
+    }
+    known.insert(key, found.clone());
+    Some(found)
+}
+
+fn search_rollout(sessions_dir: &Path, id: &str) -> Option<PathBuf> {
     let wanted = format!("{id}.jsonl");
     for (_, year) in numbered_dirs(sessions_dir, 4) {
         for (_, month) in numbered_dirs(&year, 2) {

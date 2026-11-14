@@ -3,9 +3,10 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use notchling_engine::tools::codex::children::{ChildSource, DayFolders, Head};
+use notchling_local_api::{Client, ClientError, ClientKind, ConnectOptions};
 use serde_json::{json, Value};
 
-use crate::actions::Transport;
+use crate::actions::{call_timeout, Transport};
 
 pub const OP: &str = "codex.children";
 pub const SKIP_AFTER_FAILURE: Duration = Duration::from_secs(30);
@@ -55,7 +56,71 @@ fn head(row: &Value) -> Option<Head> {
     })
 }
 
+pub trait Line: Send {
+    fn call(&mut self, op: &str, args: Value) -> Result<Value, ClientError>;
+}
+
+impl Line for Client {
+    fn call(&mut self, op: &str, args: Value) -> Result<Value, ClientError> {
+        Client::call(self, op, args)
+    }
+}
+
+pub type Open = Box<dyn Fn() -> Result<Box<dyn Line>, ClientError> + Send + Sync>;
+
+pub struct Kept {
+    open: Open,
+    line: Mutex<Option<Box<dyn Line>>>,
+}
+
+impl Kept {
+    pub fn new(open: Open) -> Kept {
+        Kept {
+            open,
+            line: Mutex::new(None),
+        }
+    }
+
+    pub fn socket(socket: PathBuf, version: String) -> Kept {
+        Kept::new(Box::new(move || {
+            let options = ConnectOptions {
+                timeout: call_timeout(OP),
+                ..ConnectOptions::default()
+            };
+            Client::connect_with(&socket, ClientKind::App, &version, &options)
+                .map(|client| Box::new(client) as Box<dyn Line>)
+        }))
+    }
+
+    fn slot(&self) -> std::sync::MutexGuard<'_, Option<Box<dyn Line>>> {
+        self.line.lock().unwrap_or_else(|e| e.into_inner())
+    }
+}
+
+impl Transport for Kept {
+    fn call(&self, op: &str, args: Value) -> Result<Value, ClientError> {
+        let taken = self.slot().take();
+        let mut line = match taken {
+            Some(line) => line,
+            None => (self.open)()?,
+        };
+        let reply = line.call(op, args);
+        if reply.is_ok() {
+            *self.slot() = Some(line);
+        }
+        reply
+    }
+
+    fn close(&self) {
+        self.slot().take();
+    }
+}
+
 impl ChildSource for DaemonChildren {
+    fn done(&self) {
+        self.transport.close();
+    }
+
     fn children(&self, parent_thread: &str, parent_path: &Path) -> Vec<Head> {
         if !self.skipping() {
             match self.transport.call(OP, json!({ "thread": parent_thread })) {

@@ -1,8 +1,9 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::atomic::Ordering;
+use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use rusqlite::{params, Connection, OpenFlags};
@@ -10,6 +11,7 @@ use serde_json::Value;
 
 use super::list::days_from_civil;
 use crate::transcript::codex::lineage_of_payload;
+use crate::transcript::tail::RAW_BYTES;
 use crate::transcript::util::{date_field, parse_object, str_of};
 
 pub const HEAD_BYTES: u64 = 65_536;
@@ -35,6 +37,7 @@ pub fn head(path: &Path) -> Option<Head> {
     let mut line = Vec::new();
     let mut reader = BufReader::new(File::open(path).ok()?.take(HEAD_BYTES));
     reader.read_until(b'\n', &mut line).ok()?;
+    RAW_BYTES.fetch_add(line.len() as u64, Ordering::Relaxed);
     if line.last() != Some(&b'\n') && line.len() as u64 >= HEAD_BYTES {
         return None;
     }
@@ -283,6 +286,8 @@ pub fn day_folders(sessions: &Path, now_ms: i64, days: u32) -> Vec<PathBuf> {
 
 pub trait ChildSource: Send + Sync {
     fn children(&self, parent_thread: &str, parent_path: &Path) -> Vec<Head>;
+
+    fn done(&self) {}
 }
 
 impl ChildSource for Index {
@@ -292,6 +297,26 @@ impl ChildSource for Index {
 }
 
 pub struct DayFolders;
+
+const KNOWN_HEADS: usize = 20_000;
+
+fn known_heads() -> &'static Mutex<HashMap<PathBuf, Head>> {
+    static HEADS: OnceLock<Mutex<HashMap<PathBuf, Head>>> = OnceLock::new();
+    HEADS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+pub fn known_head(path: &Path) -> Option<Head> {
+    if let Some(hit) = lock(known_heads()).get(path) {
+        return Some(hit.clone());
+    }
+    let read = head(path)?;
+    let mut heads = lock(known_heads());
+    if heads.len() >= KNOWN_HEADS {
+        heads.clear();
+    }
+    heads.insert(path.to_path_buf(), read.clone());
+    Some(read)
+}
 
 fn day_of(path: &Path) -> Option<(PathBuf, i64)> {
     let day = path.parent()?;
@@ -317,7 +342,7 @@ impl ChildSource for DayFolders {
             .into_iter()
             .map(|d| day_folder(&sessions, d))
             .flat_map(|folder| rollout_files(&folder))
-            .filter_map(|file| head(&file))
+            .filter_map(|file| known_head(&file))
             .filter(|h| h.parent.as_deref() == Some(parent_thread))
             .collect();
         found.sort_by(|a, b| a.started.total_cmp(&b.started).then(a.path.cmp(&b.path)));
