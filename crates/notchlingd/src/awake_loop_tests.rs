@@ -19,7 +19,7 @@ fn agent(group: AgentGroup) -> Agent {
         label: "x".into(),
         detail: None,
         since_ms: 0,
-        target: AgentTarget::Process(7),
+        target: AgentTarget::Job("job-7".into()),
         suggested_reply: None,
         transcript_path: None,
         host: String::new(),

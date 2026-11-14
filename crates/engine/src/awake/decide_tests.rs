@@ -6,7 +6,7 @@ use crate::settings::Settings;
 use serde_json::json;
 
 fn agent(group: AgentGroup) -> Agent {
-    let mut a = sample(AgentTarget::Process(7), None);
+    let mut a = sample(AgentTarget::Job("job-7".into()), None);
     a.group = group;
     a
 }
