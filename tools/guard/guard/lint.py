@@ -112,6 +112,59 @@ def _file_size(limit: int) -> Check:
     return check
 
 
+KINDS_DIR = "crates/events/src/kinds/"
+KINDS_TEXT = [re.compile(p) for p in (r"\bString\b", r"\bstr\b", r"\bValue\b", r"Vec<u8>")]
+LOG_FIELD_IMPL = re.compile(r"^\s*impl\b.*\bLogField\b\s+for\b")
+FIELD_FILE = re.compile(r"crates/events/src/field[^/]*\.rs\Z")
+
+
+def _log_no_text(path: str, lines: List[str], repo: Path) -> Found:
+    if not path.endswith(".rs"):
+        return []
+    in_kinds = path.startswith(KINDS_DIR)
+    field_file = FIELD_FILE.match(path) is not None
+    out = []
+    for i, l in enumerate(lines):
+        code = strip_code(path, l)
+        if in_kinds and any(r.search(code) for r in KINDS_TEXT):
+            out.append((i + 1, l.strip()))
+        elif not field_file and LOG_FIELD_IMPL.search(code):
+            out.append((i + 1, l.strip()))
+    return out
+
+
+LOG_OUTPUT_FILES = tuple(f"crates/notchlingd/src/{n}.rs" for n in (
+    "clients", "pages_cli", "vault_cli", "delegate_cli", "settings_cli", "service", "lib", "main")) + (
+    "crates/app/src/mac/render.rs", "crates/app/src/mac/bench.rs", "crates/app/src/chat/view/list_probe_run.rs")
+LOG_WRITER_EXCLUDE = EXCLUDE + ("crates/events/**", "**/*_tests.rs", "**/tests_*.rs", "**/tests.rs",
+                                "**/testutil.rs", "**/test_support.rs") + LOG_OUTPUT_FILES
+LOG_PRINT = [re.compile(p) for p in (r"(?<![\w:])e?print(ln)?!", r"(?<![\w:])(?:tracing|log)::\w+!",
+                                     r"^\s*use\s+(?:tracing|log)::")]
+TEST_MOD_OPEN = re.compile(r"^\s*(?:pub(?:\([a-z]+\))?\s+)?mod\s+\w+\s*\{")
+
+
+def _test_module_start(lines: List[str]) -> int:
+    for i, l in enumerate(lines):
+        if l.strip() != "#[cfg(test)]":
+            continue
+        for nxt in lines[i + 1:i + 4]:
+            if not nxt.strip() or nxt.strip().startswith("#["):
+                continue
+            if TEST_MOD_OPEN.match(nxt):
+                return i
+            break
+    return len(lines)
+
+
+def _log_one_writer(path: str, lines: List[str], repo: Path) -> Found:
+    out = []
+    for i, l in enumerate(lines[:_test_module_start(lines)]):
+        code = strip_code(path, l)
+        if any(r.search(code) for r in LOG_PRINT):
+            out.append((i + 1, l.strip()))
+    return out
+
+
 RULES: List[Rule] = [
     Rule("LINT-CORE-NO-NOTCHLING", "ConsoleCore must stay free of Notchling types (it's shared with hostd)",
          ("legacy/macos/Sources/ConsoleCore/**",), _code_matches(r"^\s*(@testable\s+)?import\s+Notchling\b"),
@@ -152,6 +205,15 @@ RULES: List[Rule] = [
     Rule("LINT-FILE-SIZE-WARN", "Files over 600 lines should be split",
          ("legacy/macos/Sources/**", "crates/**", "apps/flutter/lib/**"), _file_size(600),
          ("legacy/macos/Sources/Notchling/A.swift", "x\n" * 601), ("legacy/macos/Sources/Notchling/A.swift", "x\n" * 600), warn=True),
+    Rule("LINT-LOG-NO-TEXT", "Log kinds hold no free text",
+         ("crates/events/src/kinds/**", "crates/**"), _log_no_text,
+         ("crates/events/src/kinds/x.rs", "fields { note: String }\n"),
+         ("crates/events/src/kinds/x.rs", "fields { n: Count }\n")),
+    Rule("LINT-LOG-ONE-WRITER", "Only the log writes logs",
+         ("crates/*/src/**",), _log_one_writer,
+         ("crates/app/src/x.rs", 'eprintln!("x");\n'),
+         ("crates/app/src/x.rs", 'diag!(Level::Warn, "x");\n'),
+         exclude=LOG_WRITER_EXCLUDE),
 ]
 
 
