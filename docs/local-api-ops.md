@@ -158,8 +158,8 @@ Additive: an older daemon answers it as an unknown op, and the app then shows th
 
 The daemon holds the assertion only while an app is attached (`awake_loop.rs`), so the reply is `null` with no
 app, and for the first tick (2 s at most) after one attaches. Each change of the hold is an event on topic
-`settings`, app tier: `awake.changed {holding}` (taken, swapped between `system` and `display`, let go), sent only
-when the hold changes and never for a refused one. `engine::awake::state_json` and `holding_in` are the one
+`settings` (which agent-tier clients may follow too, like the other settings events): `awake.changed {holding}`
+(taken, swapped between `system` and `display`, let go), sent only when the hold changes and never for a refused one. `engine::awake::state_json` and `holding_in` are the one
 form of the reply and the event.
 
 `wake_loop.rs` (continue agents after sleep, setting `continueAfterSleep`) has no op: it types into a cut-off
