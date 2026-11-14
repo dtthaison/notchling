@@ -25,3 +25,5 @@ pub mod requests;
 pub mod source;
 #[cfg(target_os = "macos")]
 pub mod view;
+#[cfg(test)]
+mod words_tests;

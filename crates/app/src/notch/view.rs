@@ -11,6 +11,7 @@ use notchling_kit::part::{ButtonKind, PartState};
 use notchling_kit::scrollbar::GUTTER;
 use notchling_kit::ui::{hsla, icon_button, scrollable, status_pill, KitPart, KitStyled};
 use notchling_kit::{Color, Icon, IconSize, Ink, TypeRole};
+use notchling_locale as t;
 use objc2::rc::Retained;
 use objc2_app_kit::NSWindow;
 
@@ -20,8 +21,8 @@ use super::answering::{permission_height, question_height};
 use super::cards::{bubble, needs_box, tag, text, A};
 use super::layout::{Geometry, NotchState, FLARE, TAB_BAR};
 use super::model::{
-    ago, empty_text, last_paragraph, one_line, short_host, status, tab_title, Card, NotchModel,
-    TABS,
+    ago, empty_text, last_paragraph, one_line, short_host, status, tab_id, tab_title, Card,
+    NotchModel, TABS,
 };
 use super::perch::{AxFrame, Perch, PetMode};
 use super::pet::Walk;
@@ -299,7 +300,7 @@ impl NotchView {
                 let selected = m.tab == group;
                 let color = Ink::status(status(group));
                 div()
-                    .id(SharedString::from(format!("tab-{}", tab_title(group))))
+                    .id(SharedString::from(format!("tab-{}", tab_id(group))))
                     .flex_1()
                     .h(px(26.0))
                     .rounded_full()
@@ -346,11 +347,7 @@ impl NotchView {
             .child(status_pill(group_status, group_status.word(), A).flex_shrink_0())
             .child(
                 text(
-                    format!(
-                        "{} · {}",
-                        short_host(&agent.host),
-                        ago(agent.since_ms, m.now_ms)
-                    ),
+                    t::notch::row_host(short_host(&agent.host), &ago(agent.since_ms, m.now_ms)),
                     TypeRole::Meta,
                     Ink::TextFaint,
                 )
@@ -365,7 +362,7 @@ impl NotchView {
         } else {
             if let Some(prompt) = snapshot.and_then(|s| s.last_prompt.as_deref()) {
                 lines.push(text(
-                    format!("You: {}", one_line(prompt)),
+                    t::notch::you(&one_line(prompt)),
                     TypeRole::Meta,
                     Ink::TextMuted,
                 ));
@@ -439,7 +436,7 @@ impl NotchView {
                                     .elide(),
                             )
                             .child(tag(&agent.host))
-                            .child(text("Open ›", TypeRole::Meta, Ink::TextMuted)),
+                            .child(text(t::notch::open(), TypeRole::Meta, Ink::TextMuted)),
                     )
                     .children(text_line.map(|t| text(t, TypeRole::Body, Ink::Text).line_clamp(3)))
                     .on_click(cx.listener(move |this, _, _, cx| {
@@ -481,7 +478,11 @@ impl NotchView {
                 .flex_col()
                 .gap(px(10.0))
                 .when(lines.is_empty(), |c| {
-                    c.child(text("No messages yet", TypeRole::Meta, Ink::TextMuted))
+                    c.child(text(
+                        t::notch::no_messages(),
+                        TypeRole::Meta,
+                        Ink::TextMuted,
+                    ))
                 })
                 .children(lines.iter().map(bubble))
                 .children(needs),
@@ -489,9 +490,9 @@ impl NotchView {
         .tracking(&self.scroll);
         let footer = card.unwrap_or_else(|| {
             let note = if agent.label == "Exited" {
-                "This session has exited."
+                t::notch::exited()
             } else {
-                "Read only here. Reply where the session runs."
+                t::notch::read_only()
             };
             text(note, TypeRole::Meta, Ink::TextMuted)
         });
@@ -512,11 +513,10 @@ impl NotchView {
 
     fn header(&self, agent: &Agent, cx: &mut Context<Self>) -> Div {
         let group_status = status(agent.group);
-        let sub = format!(
-            "{} · {} · {}",
-            agent.label,
-            agent.host,
-            ago(agent.since_ms, self.model.now_ms)
+        let sub = t::notch::detail_sub(
+            &agent.label,
+            &agent.host,
+            &ago(agent.since_ms, self.model.now_ms),
         );
         div()
             .flex_shrink_0()

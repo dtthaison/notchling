@@ -4,8 +4,9 @@ use notchling_kit::metric::{CONTROL, OPTION_BADGE, RADIUS_MD, RADIUS_SM};
 use notchling_kit::part::{ButtonKind, PartState};
 use notchling_kit::ui::{button, field, hsla, icon as kit_icon, option_row, KitStyled};
 use notchling_kit::{sentence, Icon, Ink, TypeRole};
+use notchling_locale as t;
 
-use super::answer::{type_key, QuestionDraft, Typed};
+use super::answer::{permission_choices, type_key, QuestionDraft, Typed};
 use super::cards::{line, text, A};
 use super::requests::HookRequest;
 use super::view::NotchView;
@@ -178,7 +179,7 @@ impl NotchView {
         let Some(item) = q.items.get(tab) else {
             return div();
         };
-        let step = (q.items.len() > 1).then(|| format!("{} of {}", tab + 1, q.items.len()));
+        let step = (q.items.len() > 1).then(|| t::notch::question_step(tab + 1, q.items.len()));
         let tabs = (q.items.len() > 1).then(|| self.question_tabs(q, cx));
         let options = item
             .options
@@ -216,7 +217,7 @@ impl NotchView {
             .collect::<Vec<_>>();
         let hint = item
             .multi_select
-            .then(|| text("Pick any that apply", TypeRole::Meta, Ink::TextMuted));
+            .then(|| text(t::notch::pick_any(), TypeRole::Meta, Ink::TextMuted));
         let submit = QuestionDraft::needs_submit(q).then(|| self.submit_row(id, q, cx));
         div()
             .flex()
@@ -224,7 +225,7 @@ impl NotchView {
             .gap(px(GAP))
             .child(header(
                 Icon::Question,
-                "Claude asks",
+                t::notch::claude_asks(),
                 Ink::Working,
                 step,
                 agent,
@@ -285,7 +286,7 @@ impl NotchView {
         let (session, question) = (id.to_owned(), q.clone());
         let element = div()
             .id(SharedString::from(format!("answer-box-{tab}")))
-            .child(field(&shown, "Type something else…", focused, A).w_full())
+            .child(field(&shown, t::notch::type_else(), focused, A).w_full())
             .when(!gate.enabled, |b| b.opacity(0.4));
         gate::tip(element, gate, A).when(gate.enabled, |b| {
             b.track_focus(&self.focus)
@@ -327,7 +328,7 @@ impl NotchView {
         let next = (multi && q.items.len() > 1).then(|| {
             button(
                 "question-next",
-                "Next",
+                t::notch::next(),
                 ButtonKind::Secondary,
                 PartState::Rest,
                 A,
@@ -340,7 +341,7 @@ impl NotchView {
         let (session, question) = (id.to_owned(), q.clone());
         let submit = button(
             "question-submit",
-            "Submit",
+            t::notch::submit(),
             ButtonKind::Primary,
             gate::state(ready),
             A,
@@ -378,15 +379,7 @@ impl NotchView {
             return self.agy_permission_card(r, agy, agent, cx);
         }
         let gate = self.gate();
-        let mut choices = vec![(Decision::Allow, "Allow", "This time only")];
-        if r.can_always_allow {
-            choices.push((
-                Decision::Always,
-                "Always allow this",
-                "Don't ask again for this",
-            ));
-        }
-        choices.push((Decision::Deny, "Deny", "Claude tries something else"));
+        let choices = permission_choices(r.can_always_allow);
         let sending = self.sending;
         let chosen = match sending {
             Some(Sending::Decision { decision, .. }) => Some(decision),
@@ -429,13 +422,13 @@ impl NotchView {
             .gap(px(GAP))
             .child(header(
                 Icon::Permission,
-                "Permission needed",
+                t::consent::notch_permission_needed(),
                 Ink::AccentText,
                 None,
                 agent,
             ))
             .child(text(
-                format!("Claude wants to use {}", r.tool_name),
+                t::consent::notch_wants_to_use(&r.tool_name),
                 TypeRole::Heading,
                 Ink::Text,
             ))

@@ -3,6 +3,7 @@ use std::collections::{HashMap, HashSet};
 use notchling_engine::sessions::{Agent, AgentGroup, AgentTarget};
 use notchling_engine::transcript::snapshot::{PendingQuestion, QuestionItem, Snapshot};
 use notchling_kit::Status;
+use notchling_locale as t;
 
 use super::layout::{
     collapsed_size, detail_size, list_size, peek_size, permission_height, question_height,
@@ -175,13 +176,13 @@ impl NotchModel {
 
     pub fn status_line(&self, agent: &Agent) -> String {
         if let Some(r) = self.permission(&agent.id) {
-            return format!("Wants to use {}: {}", r.tool_name, r.summary);
+            return t::notch::wants_to_use(&r.tool_name, &r.summary);
         }
         if let Some(first) = self
             .question(&agent.id)
             .and_then(|q| q.items.into_iter().next())
         {
-            return format!("Asks: {}", first.question);
+            return t::notch::asks(&first.question);
         }
         let snapshot = self.snapshot(&agent.id);
         if agent.group == AgentGroup::NeedsInput {
@@ -194,7 +195,7 @@ impl NotchModel {
         snapshot
             .and_then(|s| s.activity.clone())
             .or_else(|| agent.detail.clone())
-            .unwrap_or_else(|| "Thinking…".to_owned())
+            .unwrap_or_else(|| t::notch::thinking().to_owned())
     }
 
     pub fn row_height(&self, agent: &Agent) -> f64 {
@@ -364,7 +365,7 @@ impl NotchModel {
                 .is_some_and(|r| !self.answered.contains(&r.id));
             if held && agent.group != AgentGroup::NeedsInput {
                 agent.group = AgentGroup::NeedsInput;
-                agent.label = "Needs input".into();
+                agent.label = t::notch::needs_input().into();
             }
         }
         self.agents.sort_by_key(|a| a.group);
@@ -412,28 +413,36 @@ pub fn status(group: AgentGroup) -> Status {
 
 pub fn tab_title(group: AgentGroup) -> &'static str {
     match group {
-        AgentGroup::NeedsInput => "Input",
-        AgentGroup::Working => "Working",
-        AgentGroup::Completed => "Done",
+        AgentGroup::NeedsInput => t::notch::tab_input(),
+        AgentGroup::Working => t::notch::tab_working(),
+        AgentGroup::Completed => t::notch::tab_done(),
+    }
+}
+
+pub fn tab_id(group: AgentGroup) -> &'static str {
+    match group {
+        AgentGroup::NeedsInput => "input",
+        AgentGroup::Working => "working",
+        AgentGroup::Completed => "done",
     }
 }
 
 pub fn empty_text(model: &NotchModel) -> String {
     if model.agents.is_empty() {
-        "No Claude agents running".to_owned()
+        t::notch::empty_no_agents().to_owned()
     } else {
-        let title = match model.tab {
-            AgentGroup::NeedsInput => "needs input",
-            AgentGroup::Working => "working",
-            AgentGroup::Completed => "completed",
-        };
-        format!("Nothing {title}")
+        match model.tab {
+            AgentGroup::NeedsInput => t::notch::empty_input(),
+            AgentGroup::Working => t::notch::empty_working(),
+            AgentGroup::Completed => t::notch::empty_completed(),
+        }
+        .to_owned()
     }
 }
 
 pub fn short_host(host: &str) -> &str {
     match host {
-        "Background" => "bg",
+        "Background" => t::notch::host_background(),
         "claude -p" => "-p",
         other => other,
     }
@@ -442,10 +451,10 @@ pub fn short_host(host: &str) -> &str {
 pub fn ago(since_ms: i64, now_ms: i64) -> String {
     let s = ((now_ms - since_ms) / 1000).max(0);
     match s {
-        0..=59 => "now".to_owned(),
-        60..=3599 => format!("{}m", s / 60),
-        3600..=86_399 => format!("{}h", s / 3600),
-        _ => format!("{}d", s / 86_400),
+        0..=59 => t::notch::age_now().to_owned(),
+        60..=3599 => t::notch::age_minutes(s / 60),
+        3600..=86_399 => t::notch::age_hours(s / 3600),
+        _ => t::notch::age_days(s / 86_400),
     }
 }
 
