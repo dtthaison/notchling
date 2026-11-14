@@ -11,6 +11,7 @@ pub struct MacTool {
     pub method: Method,
     pub reference: Option<Version>,
     pub usable: bool,
+    pub installed_failed: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -25,6 +26,8 @@ impl MacSide {
             .filter_map(|(tool, t)| {
                 let version = if t.usable {
                     t.reference.clone()
+                } else if t.reference.is_some() || t.installed_failed {
+                    None
                 } else {
                     t.installed.clone()
                 };
@@ -104,6 +107,14 @@ pub fn mac_side(reply: &Value) -> Result<MacSide, MacVersionsError> {
             .unwrap_or(Method::Unknown);
         let reference = version_of(row.get("reference").and_then(|r| r.get("version")));
         let usable = row.get("usable").and_then(Value::as_bool) == Some(true);
+        let installed_failed = installed.as_ref().is_some_and(|i| {
+            row.get("failed")
+                .and_then(Value::as_array)
+                .is_some_and(|list| {
+                    list.iter()
+                        .any(|f| version_of(f.get("version")).as_ref() == Some(i))
+                })
+        });
         tools.insert(
             tool,
             MacTool {
@@ -111,6 +122,7 @@ pub fn mac_side(reply: &Value) -> Result<MacSide, MacVersionsError> {
                 method,
                 reference,
                 usable,
+                installed_failed,
             },
         );
     }
@@ -127,6 +139,7 @@ pub fn fixed_mac() -> MacSide {
             method: Method::Native,
             reference: None,
             usable: false,
+            installed_failed: false,
         },
     );
     tools.insert(
@@ -136,6 +149,7 @@ pub fn fixed_mac() -> MacSide {
             method: Method::Npm,
             reference: None,
             usable: false,
+            installed_failed: false,
         },
     );
     MacSide { tools }

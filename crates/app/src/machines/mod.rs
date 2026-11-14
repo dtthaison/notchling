@@ -35,6 +35,8 @@ pub mod versions_feed;
 mod versions_feed_tests;
 pub mod versions_model;
 #[cfg(test)]
+mod versions_model_ref_tests;
+#[cfg(test)]
 mod versions_model_tests;
 #[cfg(target_os = "macos")]
 pub mod view;
