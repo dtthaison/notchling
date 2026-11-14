@@ -3,6 +3,7 @@ pub mod id;
 pub mod jobs;
 pub mod join;
 pub mod members;
+pub mod persist;
 pub mod policy;
 pub mod state;
 pub mod versions;

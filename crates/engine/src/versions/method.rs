@@ -54,10 +54,10 @@ fn of_one(tool: Tool, path: &str) -> Method {
 }
 
 pub fn can_pin(tool: Tool, method: Method) -> bool {
-    match (tool, method) {
-        (Tool::Claude, Method::Native | Method::Npm) => true,
-        (Tool::Codex, Method::Standalone | Method::Npm) => true,
-        (Tool::Notchling, Method::Release) => true,
-        _ => false,
-    }
+    matches!(
+        (tool, method),
+        (Tool::Claude, Method::Native | Method::Npm)
+            | (Tool::Codex, Method::Standalone | Method::Npm)
+            | (Tool::Notchling, Method::Release)
+    )
 }

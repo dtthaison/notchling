@@ -19,18 +19,26 @@ pub fn exists(data_dir: &Path) -> bool {
 }
 
 pub fn open(data_dir: &Path) -> Result<Connection, String> {
-    if !data_dir.is_dir() {
-        notchling_platform::files::ensure_private_dir(data_dir).map_err(|e| e.to_string())?;
+    open_db(&db_path(data_dir), &migrate)
+}
+
+pub fn open_db(
+    path: &Path,
+    migrate: &dyn Fn(&Connection) -> Result<(), String>,
+) -> Result<Connection, String> {
+    if let Some(parent) = path.parent() {
+        if !parent.is_dir() {
+            notchling_platform::files::ensure_private_dir(parent).map_err(|e| e.to_string())?;
+        }
     }
-    let path = db_path(data_dir);
-    refuse_link(&path)?;
+    refuse_link(path)?;
     let fresh = !path.exists();
     let flags = OpenFlags::SQLITE_OPEN_READ_WRITE
         | OpenFlags::SQLITE_OPEN_CREATE
         | OpenFlags::SQLITE_OPEN_NO_MUTEX;
-    let db = Connection::open_with_flags(&path, flags).map_err(|e| e.to_string())?;
+    let db = Connection::open_with_flags(path, flags).map_err(|e| e.to_string())?;
     if fresh {
-        private(&path)?;
+        private(path)?;
     }
     db.busy_timeout(BUSY).map_err(|e| e.to_string())?;
     retry_busy(|| db.pragma_update(None, "journal_mode", "WAL"))?;

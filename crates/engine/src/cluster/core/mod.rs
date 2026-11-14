@@ -1,5 +1,7 @@
 mod control;
+mod dispatch;
 mod forward;
+mod join;
 mod link;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -467,3 +469,7 @@ impl NodeCore {
 
 #[cfg(test)]
 mod core_tests;
+#[cfg(test)]
+mod core_tests_dispatch;
+#[cfg(test)]
+mod core_tests_terms;
