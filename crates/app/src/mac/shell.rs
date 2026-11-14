@@ -102,7 +102,10 @@ pub fn run(data_root: Option<PathBuf>, open_chat_now: bool) -> i32 {
         dock::register(cx);
         dock::apply(policy_for(0));
         dock::set_main_menu(cx, policy_for(0));
-        let state = MenuState::default();
+        let state = root
+            .as_ref()
+            .map(|r| crate::keep_awake::read(&r.data_dir))
+            .unwrap_or_default();
         let tray = MainThreadMarker::new().map(|mtm| {
             let async_cx = cx.to_async();
             Tray::install(
@@ -313,17 +316,33 @@ fn handle(command: Command, cx: &mut App) {
         }
         Command::About => welcome_window::open(cx, Which::About),
         Command::Welcome => welcome_window::open(cx, Which::FirstRun),
-        Command::SetAwake(mode) => {
-            let shell = cx.global_mut::<Shell>();
-            shell.state.awake = mode;
-            refresh_tray(shell);
-        }
-        Command::ToggleDisplay => {
-            let shell = cx.global_mut::<Shell>();
-            shell.state.keep_display_on = !shell.state.keep_display_on;
-            refresh_tray(shell);
-        }
+        Command::SetAwake(_) | Command::ToggleDisplay => change_awake(command, cx),
         Command::Quit => cx.quit(),
+    }
+}
+
+fn change_awake(command: Command, cx: &mut App) {
+    let shell = cx.global::<Shell>();
+    let Some((key, value)) = crate::keep_awake::wanted(command, &shell.state) else {
+        return;
+    };
+    if let Some(root) = shell.root.as_ref().filter(|r| r.fixture.is_none()) {
+        if let Err(e) = crate::keep_awake::write(&root.data_dir, key, &value) {
+            eprintln!("keep awake: {key} wasn't saved ({e})");
+            return;
+        }
+    }
+    super::settings_live::apply(cx, &[(key.to_owned(), value)]);
+}
+
+pub fn on_awake_setting(cx: &mut App, key: &str, value: &serde_json::Value) {
+    if !cx.has_global::<Shell>() {
+        return;
+    }
+    let shell = cx.global_mut::<Shell>();
+    if let Some(next) = crate::keep_awake::with(&shell.state, key, value) {
+        shell.state = next;
+        refresh_tray(shell);
     }
 }
 

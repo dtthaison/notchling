@@ -4,6 +4,7 @@ use crate::acting_ops::{ActingOps, Room};
 use crate::activity_ops::ActivityOps;
 use crate::agy_ops::AgyOps;
 use crate::attach::{ClaudeAttacher, LiveLauncher};
+use crate::awake_loop::{power_for, AwakeLoop};
 use crate::bridge_backend::APPROVAL_WAIT;
 use crate::bridge_ops::{BridgeOps, BridgeSetup};
 use crate::catalog_ops::CatalogService;
@@ -26,6 +27,7 @@ use crate::vault_ops::VaultOps;
 use crate::versions_ops::{AuditRecorder, VersionsOps};
 use notchling_engine::accounts::codex::login::idle_for_auto_switch;
 use notchling_engine::accounts::desktop::ClaudeName;
+use notchling_engine::awake::Power;
 use notchling_engine::control::launcher::claude_path;
 use notchling_engine::control::session::home_of;
 use notchling_engine::control::RealLauncher;
@@ -261,6 +263,7 @@ pub struct Wired {
     pub install: Arc<InstallOps>,
     pub settings: Arc<SettingsOps>,
     pub versions: Arc<VersionsOps>,
+    pub awake: Arc<AwakeLoop>,
 }
 
 impl Wired {
@@ -269,6 +272,16 @@ impl Wired {
         sessions: Arc<Mutex<Value>>,
         room: Arc<dyn Room>,
         bridge_ports: (u16, u16),
+    ) -> Wired {
+        Wired::build_with_power(layout, sessions, room, bridge_ports, power_for(layout))
+    }
+
+    pub fn build_with_power(
+        layout: &Layout,
+        sessions: Arc<Mutex<Value>>,
+        room: Arc<dyn Room>,
+        bridge_ports: (u16, u16),
+        power: Box<dyn Power>,
     ) -> Wired {
         let acting_switch = Arc::new(Acting::off());
         let claude = claude_path(Path::new(&home_of(&layout.roots())));
@@ -296,7 +309,7 @@ impl Wired {
         let inbox = InboxOps::new(layout.data_dir.clone(), room.clone());
         let bridge = Arc::new(BridgeOps::new(
             bridge_setup(layout, bridge_ports),
-            sessions,
+            sessions.clone(),
             acting.clone(),
             room.clone(),
             inbox.clone(),
@@ -307,6 +320,13 @@ impl Wired {
             room.clone(),
         ));
         acting.attach_agy(agy.clone());
+        let awake = Arc::new(AwakeLoop::for_daemon(
+            layout,
+            sessions,
+            codex.clone(),
+            agy.clone(),
+            power,
+        ));
 
         let switches = Arc::new(Switches::off());
         let on = switches.accounts.clone();
@@ -433,6 +453,7 @@ impl Wired {
             install: Arc::new(install),
             settings,
             versions,
+            awake,
         }
     }
 
@@ -486,6 +507,7 @@ impl Wired {
         self.inbox.spawn_loop();
         self.acting.spawn_held_loop();
         self.versions.start();
+        self.awake.spawn_loop();
     }
 
     pub fn load(&self) {
@@ -493,6 +515,7 @@ impl Wired {
     }
 
     pub fn close(&self) {
+        self.awake.close();
         self.acting.stop_held_loop();
         self.acting.close();
         self.codex.close();
