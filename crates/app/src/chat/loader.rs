@@ -12,13 +12,12 @@ use notchling_engine::transcript::snapshot::PendingQuestion;
 use notchling_engine::transcript::subagents::{self, Origin, Subagent};
 use notchling_local_api::SOCKET_NAME;
 
-use super::codex_children::DaemonChildren;
+use super::codex_children::{DaemonChildren, Kept};
 use super::data::{DataRoot, Session, Tool};
 use super::inspector::SubagentRow;
 use super::log::{self, Change};
 use super::paging::{Counts, Tree};
 use super::subagent_rows::{decorate, Disk, SubagentRows};
-use crate::actions::Socket;
 use crate::notch::requests::{self, HookRequest};
 use crate::tools::foreign::AgyList;
 use crate::tools::live::ToolLive;
@@ -38,6 +37,7 @@ pub struct Loaded {
     pub question: Option<PendingQuestion>,
     pub requests: HashMap<String, HookRequest>,
     pub now_ms: i64,
+    pub partial: bool,
 }
 
 pub struct Loader {
@@ -46,6 +46,7 @@ pub struct Loader {
     locator: Locator,
     agy: AgyList,
     pub files_prompts: bool,
+    quick_switch: bool,
     pub subagent_path: Option<String>,
     pub subagent_origin: Origin,
     pub more_subagents: usize,
@@ -53,6 +54,7 @@ pub struct Loader {
     pub more_under: HashMap<String, usize>,
     tree: Tree,
     registry: Arc<Registry>,
+    children: Arc<dyn ChildSource>,
     peeked: SubagentRows,
     agy_log: Option<AgyLog>,
     last: Option<(String, Arc<Conversation>)>,
@@ -63,14 +65,20 @@ impl Loader {
         let source: Arc<dyn ChildSource> = if root.fixture.is_some() {
             Arc::new(DayFolders)
         } else {
-            Arc::new(DaemonChildren::new(Box::new(Socket {
-                socket: root.data_dir.join(SOCKET_NAME),
-                version: env!("CARGO_PKG_VERSION").to_string(),
-            })))
+            Arc::new(DaemonChildren::new(Box::new(Kept::socket(
+                root.data_dir.join(SOCKET_NAME),
+                env!("CARGO_PKG_VERSION").to_string(),
+            ))))
         };
-        let registry = Arc::new(Registry::with_sources(source));
+        Loader::with_children(root, source)
+    }
+
+    pub fn with_children(root: DataRoot, source: Arc<dyn ChildSource>) -> Loader {
+        let registry = Arc::new(Registry::with_sources(source.clone()));
         Loader {
             registry: registry.clone(),
+            children: source,
+            quick_switch: false,
             monitor: root.new_monitor(),
             locator: root.new_locator(),
             agy: root.new_agy_list(),
@@ -86,6 +94,11 @@ impl Loader {
             last: None,
             root,
         }
+    }
+
+    pub fn quick_on_switch(mut self) -> Loader {
+        self.quick_switch = true;
+        self
     }
 
     #[cfg(test)]
@@ -147,27 +160,14 @@ impl Loader {
         };
         let delegations = self.root.delegations();
         let delegated = super::delegated::hidden(&delegations);
-        let (conversation, subagents) = match session {
-            Some(session) => {
-                let conversation = self.root.conversation_shared(session);
-                let subagents = self.root.subagents_in(
-                    &self.registry,
-                    session,
-                    &conversation,
-                    now_ms as f64 / 1000.0,
-                );
-                (conversation, subagents)
-            }
-            None => (Arc::default(), Vec::new()),
+        let switched = self.last.as_ref().map(|(id, _)| id) != selected.as_ref();
+        let partial = self.quick_switch && switched && session.is_some();
+        let conversation = session.map_or_else(Arc::default, |s| self.root.conversation_shared(s));
+        let (subagents, subagent_rows, subagent_counts) = if partial {
+            (Vec::new(), Vec::new(), Counts::default())
+        } else {
+            self.subagents_of(session, &selected, &conversation, now_ms)
         };
-        let mut more = std::mem::take(&mut self.more_under);
-        more.insert(String::new(), std::mem::take(&mut self.more_subagents));
-        let shown = self
-            .tree
-            .show(selected.as_deref(), &subagents, &self.open_groups, &more);
-        let indexes: Vec<usize> = shown.entries.iter().map(|e| e.index).collect();
-        let mut subagent_rows = self.peeked.rows(&subagents, &indexes);
-        decorate(&mut subagent_rows, &shown);
         let question = session
             .filter(|s| s.tool == Tool::Claude && s.agent.command.is_none())
             .and_then(|_| conversation.pending_question.clone());
@@ -196,13 +196,42 @@ impl Loader {
             change,
             subagents,
             subagent_rows,
-            subagent_counts: shown.counts,
+            subagent_counts,
             delegated,
             subagent,
             question,
             requests,
             now_ms,
+            partial,
         }
+    }
+
+    fn subagents_of(
+        &mut self,
+        session: Option<&Session>,
+        selected: &Option<String>,
+        conversation: &Conversation,
+        now_ms: i64,
+    ) -> (Vec<Subagent>, Vec<SubagentRow>, Counts) {
+        let subagents = session.map_or_else(Vec::new, |session| {
+            let listed = self.root.subagents_in(
+                &self.registry,
+                session,
+                conversation,
+                now_ms as f64 / 1000.0,
+            );
+            self.children.done();
+            listed
+        });
+        let mut more = std::mem::take(&mut self.more_under);
+        more.insert(String::new(), std::mem::take(&mut self.more_subagents));
+        let shown = self
+            .tree
+            .show(selected.as_deref(), &subagents, &self.open_groups, &more);
+        let indexes: Vec<usize> = shown.entries.iter().map(|e| e.index).collect();
+        let mut rows = self.peeked.rows(&subagents, &indexes);
+        decorate(&mut rows, &shown);
+        (subagents, rows, shown.counts)
     }
 }
 

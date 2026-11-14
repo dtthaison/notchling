@@ -13,6 +13,8 @@ use crate::switches::restart::{Area, RestartNotice, Said};
 
 pub trait Transport: Send + Sync {
     fn call(&self, op: &str, args: Value) -> Result<Value, ClientError>;
+
+    fn close(&self) {}
 }
 
 pub struct Socket {
