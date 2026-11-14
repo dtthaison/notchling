@@ -95,6 +95,9 @@ mod tests {
             updated: 2.0,
             status: Status::Running,
             origin: Default::default(),
+            session: String::new(),
+            parent: String::new(),
+            depth: 1,
         }
     }
 

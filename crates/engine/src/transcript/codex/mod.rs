@@ -1,9 +1,12 @@
 mod calls;
+mod ending;
 pub mod fork;
 mod glance;
 mod lineage;
 mod stamped;
 
+#[cfg(test)]
+mod ending_tests;
 #[cfg(test)]
 mod fork_tests;
 #[cfg(test)]
@@ -12,8 +15,9 @@ mod lineage_tests;
 pub(crate) mod testutil;
 
 pub use calls::{call, diff, exit_code, output_text, patch_files};
+pub use ending::{ending, Ending};
 pub use glance::{context_tokens, peek, recent};
-pub use lineage::{lineage, Lineage};
+pub use lineage::{lineage, of_payload as lineage_of_payload, Lineage};
 
 use super::model::*;
 use super::tail::{Cursors, LineParser};

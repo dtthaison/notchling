@@ -1,11 +1,21 @@
+use super::subagents::Subagents;
 use super::{Capability, Provider, Support, Tool};
 
+pub mod subagents;
 pub mod support;
+
+#[cfg(test)]
+mod subagents_tests;
 
 pub struct AntigravityProvider;
 
 impl AntigravityProvider {
-    pub const WIRED: &'static [Capability] = &[];
+    pub const WIRED: &'static [Capability] = &[
+        Capability::SubagentList,
+        Capability::SubagentStatus,
+        Capability::SubagentGlance,
+        Capability::SubagentOpen,
+    ];
 }
 
 impl Provider for AntigravityProvider {
@@ -19,5 +29,9 @@ impl Provider for AntigravityProvider {
 
     fn wired(&self) -> &'static [Capability] {
         AntigravityProvider::WIRED
+    }
+
+    fn subagents(&self) -> &dyn Subagents {
+        &subagents::AntigravitySubagents
     }
 }

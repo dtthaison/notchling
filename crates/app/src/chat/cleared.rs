@@ -3,8 +3,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use notchling_engine::transcript::conversation;
 use notchling_engine::transcript::locate::predecessor;
-use notchling_engine::transcript::model::{Conversation, Timestamp};
-use notchling_engine::transcript::subagents::{self, Status, Subagent};
+use notchling_engine::transcript::model::Conversation;
 
 const MAX_BACK: usize = 4;
 
@@ -54,16 +53,7 @@ pub fn with_model(path: &str, name: &str, read: Arc<Conversation>) -> Arc<Conver
     result
 }
 
-pub fn running_before(path: &str, name: &str, now: Timestamp) -> Vec<Subagent> {
-    let Some(before) = predecessor(path, name) else {
-        return Vec::new();
-    };
-    let read = conversation::read_shared(&before);
-    subagents::list(&before, &read.finished_agents, now)
-        .into_iter()
-        .filter(|a| a.status == Status::Running)
-        .collect()
-}
+pub use notchling_engine::transcript::subagents::running_before;
 
 #[cfg(test)]
 mod tests {

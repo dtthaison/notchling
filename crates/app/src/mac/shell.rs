@@ -404,11 +404,11 @@ fn open_chat(cx: &mut App) {
     update_dock(cx);
 }
 
-pub fn open_chat_session(cx: &mut App, target: SessionRef) {
+pub fn open_chat_session(cx: &mut App, target: SessionRef, child: Option<String>) {
     open_chat(cx);
     if let Some(handle) = chat_window(cx) {
         handle
-            .update(cx, |view, _, cx| view.show_session(target, cx))
+            .update(cx, |view, _, cx| view.show_session(target, child, cx))
             .ok();
     }
 }

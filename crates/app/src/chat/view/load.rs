@@ -15,7 +15,13 @@ impl ChatView {
         }
     }
 
-    pub fn show_session(&mut self, target: SessionRef, cx: &mut Context<Self>) {
+    pub fn show_session(
+        &mut self,
+        target: SessionRef,
+        child: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
+        self.pending_child = child.as_deref().map(PendingChild::new);
         match row_for(&self.sessions, &target) {
             Some(id) => {
                 self.pending_session = None;
@@ -41,6 +47,8 @@ impl ChatView {
         let (claude, live) = (view.agents, view.tools);
         loader.files_prompts = view.prompts.is_none();
         loader.more_subagents = std::mem::take(&mut self.more_subagents);
+        loader.open_groups = self.open_groups.clone();
+        loader.more_under = std::mem::take(&mut self.more_under);
         loader.subagent_path = self.open_subagent.as_ref().map(|o| o.agent.path.clone());
         loader.subagent_origin = self
             .open_subagent
@@ -172,6 +180,7 @@ impl ChatView {
             self.subagents = loaded.subagents;
             self.subagent_rows = loaded.subagent_rows;
             self.subagent_counts = loaded.subagent_counts;
+            self.open_pending_child(cx);
             self.refresh_shells(0);
             if let Some(open) = self.open_subagent.as_mut() {
                 open.apply_shared(&self.subagents, loaded.subagent);
@@ -219,6 +228,8 @@ impl ChatView {
         self.subagent_rows.clear();
         self.subagent_counts = Default::default();
         self.more_subagents = 0;
+        self.open_groups.clear();
+        self.more_under.clear();
         self.shells = Default::default();
         self.open_subagent = None;
         self.prompt.transcript = None;

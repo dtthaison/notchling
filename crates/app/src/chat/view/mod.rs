@@ -48,7 +48,7 @@ mod terminal;
 mod tool;
 mod tools;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::Receiver;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -68,6 +68,7 @@ use crate::chat::activity::{self, Activity};
 use crate::chat::data::{DataRoot, Loaded, Loader, Session, Tool};
 use crate::chat::log::Change;
 use crate::chat::message_meta;
+use crate::chat::pending_child::PendingChild;
 use crate::chat::reload::{watch_config, ReloadGate};
 use crate::chat::sidebar::{row_for, Pending, PendingJob, PendingSession};
 use crate::inbox::feed::InboxFeed;
@@ -124,6 +125,8 @@ pub struct ChatView {
     subagent_rows: Vec<crate::chat::inspector::SubagentRow>,
     subagent_counts: crate::chat::paging::Counts,
     more_subagents: usize,
+    open_groups: HashSet<String>,
+    more_under: HashMap<String, usize>,
     shells: crate::chat::shell_list::Listing,
     shell_page: crate::chat::shell_list::ShellPage,
     open_subagent: Option<crate::chat::subagent_view::Open>,
@@ -155,6 +158,7 @@ pub struct ChatView {
     inbox_panel: Option<Entity<InboxPanelView>>,
     seen_inbox: u64,
     pending_session: Option<PendingSession>,
+    pending_child: Option<PendingChild>,
     pending_job: Option<PendingJob>,
     closed: std::collections::HashMap<String, f64>,
     tasks_seen: std::collections::HashMap<String, crate::chat::tasks_bar::Seen>,
@@ -382,6 +386,8 @@ impl ChatView {
             subagent_rows: Vec::new(),
             subagent_counts: Default::default(),
             more_subagents: 0,
+            open_groups: HashSet::new(),
+            more_under: HashMap::new(),
             shells: Default::default(),
             shell_page: Default::default(),
             open_subagent: None,
@@ -426,6 +432,7 @@ impl ChatView {
             inbox_panel: None,
             seen_inbox: 0,
             pending_session: None,
+            pending_child: None,
             pending_job: None,
             closed: std::collections::HashMap::new(),
             used: std::collections::HashMap::new(),

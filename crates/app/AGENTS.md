@@ -4,6 +4,8 @@
 
 The code carries no comments (see [AGENTS.md](../../AGENTS.md)). What a change could break without knowing it, by file:
 
+- `chat/codex_children.rs::DaemonChildren`: Asks the daemon's `codex.children`; after a failure it skips the daemon for 30 s and falls back to `DayFolders` (two day folders), so a missing daemon costs one failed call, not one per load.
+- `chat/paging.rs::Tree`: Rows come from the registry in depth-first order with `parent`; a group's `Page` is made when it is first opened and kept until the session changes. A new field a row shows goes in `SubagentRow`, never read from `ChatView` in a draw.
 - `chat/activity.rs::stalled_prompt`: A request Claude Code sent on a connection that died while the Mac slept waits with no error; sending the prompt again starts a fresh one (Retry after `STALL_S`).
 - `chat/activity.rs::working`: A session whose state is not working shows no live line whatever a stale transcript says, and a turn that ended while the session still works means a background command.
 - `chat/claude_picker.rs::Choice`: A model or effort pick is an ordinary reply (`/model <full id>`, `/effort <level>`) with an argument, so the engine types it in; the bare command would open a terminal (`slash::route`).

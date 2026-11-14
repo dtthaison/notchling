@@ -6,6 +6,7 @@ use notchling_kit::ui::{button_with, hsla, icon, label, KitPart, KitStyled};
 use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 
 use super::ChatView;
+use crate::chat::pending_child::Step;
 use crate::chat::subagent_view::header_text;
 
 pub fn header(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Option<Div> {
@@ -63,6 +64,32 @@ impl ChatView {
 
     pub(super) fn load_more_subagents(&mut self, cx: &mut Context<Self>) {
         self.more_subagents += 1;
+        self.reload_now(cx);
+    }
+
+    pub(super) fn open_pending_child(&mut self, cx: &mut Context<Self>) {
+        let Some(pending) = self.pending_child.as_mut() else {
+            return;
+        };
+        match pending.after_load(&self.subagents) {
+            Step::Open(id) => {
+                self.pending_child = None;
+                self.open_subagent(&id, cx);
+            }
+            Step::Waiting => {}
+            Step::GaveUp => self.pending_child = None,
+        }
+    }
+
+    pub(super) fn toggle_group(&mut self, id: &str, cx: &mut Context<Self>) {
+        if !self.open_groups.remove(id) {
+            self.open_groups.insert(id.to_owned());
+        }
+        self.reload_now(cx);
+    }
+
+    pub(super) fn load_more_under(&mut self, id: &str, cx: &mut Context<Self>) {
+        *self.more_under.entry(id.to_owned()).or_default() += 1;
         self.reload_now(cx);
     }
 

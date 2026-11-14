@@ -1,16 +1,16 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::SystemTime;
 
+use notchling_engine::contract::{Registry, Tool};
 use notchling_engine::transcript::model::Conversation;
-use notchling_engine::transcript::subagents::{
-    self, Origin as SubagentOrigin, Status as SubagentStatus, Subagent,
-};
+use notchling_engine::transcript::subagents::{Status as SubagentStatus, Subagent, Via};
 use notchling_kit::ui::ToolMark;
 use notchling_kit::{Icon, Ink, Status};
 
 use super::format::tokens;
 use super::inspector::{Mark, SubagentRow};
-use super::paging::Item;
+use super::paging::{Item, TreeShown};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Facts {
@@ -54,7 +54,7 @@ pub fn subagent_row(agent: &Subagent, read: Option<&Facts>) -> SubagentRow {
         .join(" ");
     let kind = (agent.agent_type != "general-purpose" && !agent.agent_type.is_empty())
         .then_some(agent.agent_type.as_str());
-    let handed_over = agent.origin != SubagentOrigin::Claude;
+    let handed_over = agent.origin.via == Via::Delegated;
     let parts = if handed_over {
         [
             Some(word),
@@ -83,14 +83,31 @@ pub fn subagent_row(agent: &Subagent, read: Option<&Facts>) -> SubagentRow {
         status_word: word.to_owned(),
         running: agent.is_running(),
         mark,
-        tool: match agent.origin {
-            SubagentOrigin::Claude => ToolMark::Claude,
-            SubagentOrigin::Codex => ToolMark::Codex,
-            SubagentOrigin::Antigravity => ToolMark::Antigravity,
+        tool: match agent.origin.tool {
+            Tool::Claude => ToolMark::Claude,
+            Tool::Codex => ToolMark::Codex,
+            Tool::Antigravity => ToolMark::Antigravity,
         },
         doing: read
             .filter(|_| agent.is_running())
             .and_then(|f| f.doing.clone()),
+        depth: agent.depth.max(1),
+        children: 0,
+        open: false,
+        more_after: Vec::new(),
+    }
+}
+
+pub fn decorate(rows: &mut [SubagentRow], shown: &TreeShown) {
+    for (row, entry) in rows.iter_mut().zip(&shown.entries) {
+        row.depth = entry.depth;
+        row.children = entry.children;
+        row.open = entry.open;
+    }
+    for more in &shown.more {
+        if let Some(row) = rows.get_mut(more.after) {
+            row.more_after.push((more.group.clone(), more.next));
+        }
     }
 }
 
@@ -108,15 +125,21 @@ pub trait Peek {
     fn read(&self, agent: &Subagent) -> Facts;
 }
 
-pub struct Disk;
+pub struct Disk(pub Arc<Registry>);
+
+impl Default for Disk {
+    fn default() -> Self {
+        Disk(Arc::new(Registry::standard()))
+    }
+}
 
 impl Peek for Disk {
     fn read(&self, agent: &Subagent) -> Facts {
-        let peeked = subagents::peek(agent.origin, &agent.path, agent.is_running());
+        let glance = self.0.glance(agent);
         Facts {
-            context: peeked.as_ref().and_then(|p| p.context),
-            doing: peeked
-                .and_then(|p| p.recent)
+            context: glance.as_ref().and_then(|g| g.tokens),
+            doing: glance
+                .and_then(|g| g.recent)
                 .map(|c| super::activity::doing(&c)),
         }
     }
@@ -149,7 +172,7 @@ pub struct SubagentRows<P: Peek = Disk> {
 
 impl Default for SubagentRows<Disk> {
     fn default() -> Self {
-        SubagentRows::new(Disk)
+        SubagentRows::new(Disk::default())
     }
 }
 
@@ -176,7 +199,7 @@ impl<P: Peek> SubagentRows<P> {
     }
 
     fn facts(&mut self, agent: &Subagent) -> Option<Facts> {
-        if agent.path.is_empty() || agent.origin == SubagentOrigin::Antigravity {
+        if agent.path.is_empty() {
             return None;
         }
         let stamp = stamp_of(&agent.path)?;

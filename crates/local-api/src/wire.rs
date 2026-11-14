@@ -30,6 +30,7 @@ pub mod ops {
     pub const CODEX_SEND: &str = "codex.send";
     pub const CODEX_STOP: &str = "codex.stop";
     pub const CODEX_DELETE: &str = "codex.delete";
+    pub const CODEX_CHILDREN: &str = "codex.children";
 
     pub const AGY_SESSIONS: &str = "agy.sessions";
     pub const AGY_STATE: &str = "agy.state";

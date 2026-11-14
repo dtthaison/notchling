@@ -19,15 +19,13 @@ pub fn support(c: Capability) -> Support {
             Support::native("Tokens in the log; the window is the catalog's")
         }
         Capability::SubagentList => {
-            Support::gap("phase 1: summaries rows by parent_conversation_id")
+            Support::native("Summaries rows whose parent_conversation_id is the session")
         }
         Capability::SubagentStatus => {
-            Support::gap("phase 1: summaries status and killed, send_message")
+            Support::native("Summaries status and killed, send_message, the parent's [Message]")
         }
-        Capability::SubagentGlance => {
-            Support::gap("phase 1: the child log's tokens and newest step")
-        }
-        Capability::SubagentOpen => Support::gap("phase 1: the child's log"),
+        Capability::SubagentGlance => Support::native("The child log's tokens and newest step"),
+        Capability::SubagentOpen => Support::native("The child's log"),
         Capability::SubagentStop => Support::not_applicable(
             "The Agent Manager's kill is inside agy; Notchling can't reach it",
         ),

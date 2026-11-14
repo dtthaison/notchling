@@ -3,8 +3,17 @@ use super::claude::ClaudeProvider;
 use super::codex::CodexProvider;
 use super::{Capability, Kind, Provider, Support, Tool};
 
+fn codex() -> &'static CodexProvider {
+    static ONE: std::sync::LazyLock<CodexProvider> = std::sync::LazyLock::new(|| {
+        CodexProvider::new(std::sync::Arc::new(
+            crate::tools::codex::children::DayFolders,
+        ))
+    });
+    &ONE
+}
+
 fn all() -> [&'static dyn Provider; 3] {
-    [&ClaudeProvider, &CodexProvider, &AntigravityProvider]
+    [&ClaudeProvider, codex(), &AntigravityProvider]
 }
 
 #[test]
@@ -85,7 +94,7 @@ fn the_design_gaps_are_the_setup_and_version_rows() {
         Capability::VersionDetect,
         Capability::VersionUpdate,
     ];
-    assert_eq!(design(&CodexProvider), other);
+    assert_eq!(design(codex()), other);
     assert_eq!(design(&AntigravityProvider), other);
 }
 

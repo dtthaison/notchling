@@ -9,6 +9,9 @@ use crate::layout::Layout;
 use crate::limits_ops_tests::TempDir;
 use notchling_engine::bridge::backend::BridgeBackend;
 use notchling_engine::bridge::live::{ActingOff, LiveBackend};
+use notchling_engine::contract::flows::delegate_jobs;
+use notchling_engine::delegate::options::{Options, Tool as DelegateTool};
+use notchling_engine::delegate::record::{self, Delegation};
 use notchling_engine::sessions::{Agent, AgentGroup, AgentTarget};
 use notchling_engine::tools::agy::summaries::DB_NAME;
 use notchling_local_api::{ops, Caller, ClientKind, ErrorCode, Handler, Tier};
@@ -345,4 +348,37 @@ fn an_unknown_tools_value_is_refused() {
         let e = ops.call(&cli(), ops::SESSIONS_LIST, &args).unwrap_err();
         assert_eq!(e.code, ErrorCode::BadRequest, "{args}");
     }
+}
+
+fn handed_over(fixture: &Fixture, tool: DelegateTool, session: &str) {
+    let options = Options {
+        tool,
+        prompt: "A job".into(),
+        model: None,
+        effort: None,
+        folder: "/work".into(),
+        out: None,
+        write: false,
+        session: Some(session.into()),
+        timeout: Duration::from_secs(30),
+    };
+    let mut record = Delegation::new("a-claude-session", "/work", &options, 1.0, 1);
+    record.session = Some(session.into());
+    record::write(&delegate_jobs::folder(&fixture.layout.data_dir), &record).unwrap();
+}
+
+#[test]
+fn a_delegated_job_is_not_listed_for_the_phone() {
+    let fixture = Fixture::new("every-job");
+    fixture.codex(CODEX_ID, None, "The parent");
+    fixture.codex(CODEX_CHILD_ID, None, "A job's session");
+    fixture.antigravity(AGY_ID, "Its job", "IDLE", 30);
+    assert_eq!(every(&fixture).rows(now_ms()).len(), 3);
+    handed_over(&fixture, DelegateTool::Codex, CODEX_CHILD_ID);
+    handed_over(&fixture, DelegateTool::Agy, AGY_ID);
+    let every = every(&fixture);
+    let listed: Vec<String> = every.rows(now_ms()).into_iter().map(|r| r.id).collect();
+    assert_eq!(listed, vec![format!("codex:{CODEX_ID}")]);
+    let agents: Vec<String> = every.agents(now_ms()).into_iter().map(|a| a.id).collect();
+    assert_eq!(agents, listed);
 }

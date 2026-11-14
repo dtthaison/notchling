@@ -35,7 +35,7 @@ fn named(value: Option<&Value>, key: &str) -> Option<String> {
         .map(String::from)
 }
 
-pub(super) fn of_payload(payload: &Value) -> Option<Lineage> {
+pub fn of_payload(payload: &Value) -> Option<Lineage> {
     let subagent = payload.get("source").and_then(|s| s.get("subagent"));
     let spawn = subagent.and_then(|s| s.get("thread_spawn"));
     let parent =

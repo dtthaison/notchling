@@ -2,6 +2,7 @@ use crate::agy_ops::AgyOps;
 use crate::layout::Layout;
 use notchling_engine::bridge::foreign::{self, ForeignRow, Tool};
 use notchling_engine::bridge::live::ForeignLive;
+use notchling_engine::contract::flows::delegate_jobs;
 use notchling_engine::sessions::{Agent, AgentGroup, AgentTarget};
 use notchling_engine::tools::agy::summaries::{self, Row};
 use notchling_engine::tools::codex::list as codex_list;
@@ -28,6 +29,7 @@ pub struct EverySession {
     within_days: Option<i64>,
     agy_root: PathBuf,
     agy_copy_dir: PathBuf,
+    data_dir: PathBuf,
     cached: Mutex<Option<(i64, Vec<Agent>)>>,
     agy: OnceLock<Arc<AgyOps>>,
 }
@@ -39,6 +41,7 @@ impl EverySession {
             within_days: (!layout.fixture).then_some(CODEX_DAYS),
             agy_root: layout.antigravity_dir(),
             agy_copy_dir: layout.antigravity_copy_dir(),
+            data_dir: layout.data_dir.clone(),
             cached: Mutex::new(None),
             agy: OnceLock::new(),
         }
@@ -50,6 +53,7 @@ impl EverySession {
             within_days: None,
             agy_root: PathBuf::new(),
             agy_copy_dir: PathBuf::new(),
+            data_dir: PathBuf::new(),
             cached: Mutex::new(None),
             agy: OnceLock::new(),
         }
@@ -114,6 +118,8 @@ impl EverySession {
     fn read(&self, now_ms: i64) -> Vec<Agent> {
         let mut rows = self.codex(now_ms);
         rows.extend(self.antigravity(now_ms));
+        let hidden = delegate_jobs::hidden(&delegate_jobs::read(&self.data_dir));
+        rows.retain(|agent| !hidden.contains(&agent.id));
         rows
     }
 

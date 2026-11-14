@@ -4,6 +4,7 @@ use std::rc::Rc;
 use super::*;
 use crate::chat::inspector::{inspector, no_writers};
 use crate::testutil::Scratch;
+use notchling_engine::transcript::subagents::Origin;
 
 #[derive(Clone, Default)]
 struct Recorder {
@@ -41,6 +42,9 @@ fn world(s: &Scratch, total: usize, running: &[usize]) -> Vec<Subagent> {
                     SubagentStatus::Completed
                 },
                 origin: Default::default(),
+                session: String::new(),
+                parent: String::new(),
+                depth: 1,
             }
         })
         .collect()
@@ -131,16 +135,16 @@ fn a_finished_one_that_runs_again_with_the_same_file_is_read_for_its_doing_line(
 }
 
 #[test]
-fn a_row_without_a_file_or_from_antigravity_is_never_read() {
+fn a_row_without_a_file_is_never_read_and_an_antigravity_child_is() {
     let s = Scratch::new("rows-none");
     let mut agents = world(&s, 3, &[]);
     agents[0].path.clear();
-    agents[1].origin = SubagentOrigin::Antigravity;
+    agents[1].origin = Origin::native(Tool::Antigravity);
     agents[2].path = s.path().join("gone.jsonl").to_string_lossy().into_owned();
     let recorder = Recorder::default();
     let mut rows = SubagentRows::new(recorder.clone());
     let got = rows_of(&mut rows, &agents, &[0, 1, 2]);
-    assert!(taken(&recorder).is_empty());
+    assert_eq!(taken(&recorder), ["a1"]);
     assert_eq!(got[0].detail, "Done · sonnet high · Explore");
     assert_eq!(got[2].detail, "Done · sonnet high · Explore");
 }
@@ -174,4 +178,20 @@ fn what_a_row_remembers_goes_when_its_agent_does() {
     assert_eq!(rows.kept.len(), 3);
     rows_of(&mut rows, &agents[..1], &[0]);
     assert_eq!(rows.kept.len(), 1);
+}
+
+#[test]
+fn a_native_codex_child_is_not_handed_over() {
+    let s = Scratch::new("rows-native-codex");
+    let mut agents = world(&s, 2, &[]);
+    agents[0].origin = Origin::native(Tool::Codex);
+    agents[0].agent_type = "worker".into();
+    agents[1].origin = Origin::delegated(Tool::Codex);
+    agents[1].agent_type = "Codex".into();
+    let mut rows = SubagentRows::new(Recorder::default());
+    let got = rows_of(&mut rows, &agents, &[0, 1]);
+    assert_eq!(got[0].tool, ToolMark::Codex);
+    assert_eq!(got[0].detail, "Done · sonnet high · worker · 232.3k");
+    assert_eq!(got[1].tool, ToolMark::Codex);
+    assert_eq!(got[1].detail, "Done · Codex · sonnet high · 232.3k");
 }

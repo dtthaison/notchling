@@ -1,0 +1,2 @@
+{"type":"user","isSidechain":true,"agentId":"done1","timestamp":"2026-11-13T09:00:01.000Z","message":{"role":"user","content":"Fix"}}
+{"type":"assistant","isSidechain":true,"agentId":"done1","timestamp":"2026-11-13T09:00:02.000Z","message":{"id":"m-done1","role":"assistant","model":"claude-sonnet-5-5","content":[{"type":"text","text":"Looking."}],"usage":{"input_tokens":1200,"output_tokens":30,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}

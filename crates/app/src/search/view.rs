@@ -233,7 +233,9 @@ impl SearchPanelView {
         match item {
             Item::Page(page) => crate::pages::window::open(cx, Some(page.key().to_owned())),
             Item::Secret(entry) => crate::mac::shell::open_chat_secret(cx, &entry.name),
-            Item::Session(session) => crate::mac::shell::open_chat_session(cx, session.reference()),
+            Item::Session(session) => {
+                crate::mac::shell::open_chat_session(cx, session.reference(), session.child())
+            }
         }
     }
 }

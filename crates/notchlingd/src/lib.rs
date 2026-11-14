@@ -18,6 +18,7 @@ pub mod bridge_ops;
 pub mod catalog_ops;
 pub mod cli;
 pub mod clients;
+pub mod codex_children;
 pub mod codex_ops;
 pub mod control_ops;
 pub mod cost_ops;
@@ -99,6 +100,8 @@ mod awake_loop_tests;
 mod bridge_models_tests;
 #[cfg(test)]
 mod catalog_ops_tests;
+#[cfg(test)]
+mod codex_children_tests;
 #[cfg(test)]
 mod control_ops_tests;
 #[cfg(test)]

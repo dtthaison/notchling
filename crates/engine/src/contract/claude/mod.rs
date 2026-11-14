@@ -1,11 +1,18 @@
+use super::subagents::Subagents;
 use super::{Capability, Provider, Support, Tool};
 
+pub mod subagents;
 pub mod support;
 
 pub struct ClaudeProvider;
 
 impl ClaudeProvider {
-    pub const WIRED: &'static [Capability] = &[];
+    pub const WIRED: &'static [Capability] = &[
+        Capability::SubagentList,
+        Capability::SubagentStatus,
+        Capability::SubagentGlance,
+        Capability::SubagentOpen,
+    ];
 }
 
 impl Provider for ClaudeProvider {
@@ -19,5 +26,9 @@ impl Provider for ClaudeProvider {
 
     fn wired(&self) -> &'static [Capability] {
         ClaudeProvider::WIRED
+    }
+
+    fn subagents(&self) -> &dyn Subagents {
+        &subagents::ClaudeSubagents
     }
 }

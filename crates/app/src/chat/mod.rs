@@ -10,6 +10,7 @@ mod children_tests;
 pub mod claude_picker;
 pub mod cleared;
 pub mod closed;
+pub mod codex_children;
 pub mod codex_list;
 pub mod composer;
 pub mod data;
@@ -46,6 +47,7 @@ pub mod panels;
 #[cfg(test)]
 mod parse_cost_tests;
 pub mod paths;
+pub mod pending_child;
 pub mod pickers;
 pub mod prompt_flow;
 pub mod prompts;
@@ -71,6 +73,8 @@ pub mod subagent_rows;
 pub mod subagent_view;
 pub mod tasks_bar;
 pub mod terminal;
+#[cfg(test)]
+mod tree_tests;
 pub mod used;
 #[cfg(target_os = "macos")]
 pub mod view;
