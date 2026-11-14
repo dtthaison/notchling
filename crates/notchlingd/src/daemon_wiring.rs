@@ -25,6 +25,7 @@ use crate::quiet_ops;
 use crate::settings_ops::{SettingsOps, SwitchStates};
 use crate::switches::{SwitchFlag, SwitchOps, Switches};
 use crate::vault_ops::VaultOps;
+use crate::wake_loop::{wakes_for, WakeLoop, Wakes};
 use notchling_engine::accounts::codex::login::idle_for_auto_switch;
 use notchling_engine::accounts::desktop::ClaudeName;
 use notchling_engine::awake::Power;
@@ -261,6 +262,7 @@ pub struct Wired {
     pub install: Arc<InstallOps>,
     pub settings: Arc<SettingsOps>,
     pub awake: Arc<AwakeLoop>,
+    pub wake: Arc<WakeLoop>,
 }
 
 impl Wired {
@@ -279,6 +281,18 @@ impl Wired {
         room: Arc<dyn Room>,
         bridge_ports: (u16, u16),
         power: Box<dyn Power>,
+    ) -> Wired {
+        let wakes = wakes_for(layout);
+        Wired::build_with_hardware(layout, sessions, room, bridge_ports, power, wakes)
+    }
+
+    pub fn build_with_hardware(
+        layout: &Layout,
+        sessions: Arc<Mutex<Value>>,
+        room: Arc<dyn Room>,
+        bridge_ports: (u16, u16),
+        power: Box<dyn Power>,
+        wakes: Box<dyn Wakes>,
     ) -> Wired {
         let acting_switch = Arc::new(Acting::off());
         let claude = claude_path(Path::new(&home_of(&layout.roots())));
@@ -319,11 +333,18 @@ impl Wired {
         acting.attach_agy(agy.clone());
         let awake = Arc::new(AwakeLoop::for_daemon(
             layout,
-            sessions,
+            sessions.clone(),
             codex.clone(),
             agy.clone(),
             room.clone(),
             power,
+        ));
+        let wake = Arc::new(WakeLoop::for_daemon(
+            layout,
+            sessions,
+            acting.clone(),
+            room.clone(),
+            wakes,
         ));
 
         let switches = Arc::new(Switches::off());
@@ -433,6 +454,7 @@ impl Wired {
             install: Arc::new(install),
             settings,
             awake,
+            wake,
         }
     }
 
@@ -486,6 +508,7 @@ impl Wired {
         self.inbox.spawn_loop();
         self.acting.spawn_held_loop();
         self.awake.spawn_loop();
+        self.wake.spawn_loop();
     }
 
     pub fn load(&self) {
@@ -493,6 +516,7 @@ impl Wired {
     }
 
     pub fn close(&self) {
+        self.wake.close();
         self.awake.close();
         self.acting.stop_held_loop();
         self.acting.close();

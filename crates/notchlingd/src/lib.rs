@@ -54,6 +54,7 @@ pub mod vault_caller;
 pub mod vault_cli;
 pub mod vault_ops;
 pub mod vault_wait;
+pub mod wake_loop;
 
 #[cfg(test)]
 mod accounts_late_tests;
@@ -115,6 +116,8 @@ mod providers_sync_tests;
 mod quiet_ops_tests;
 #[cfg(test)]
 mod vault_ops_lock_tests;
+#[cfg(test)]
+mod wake_loop_tests;
 
 use cli::{Command, ServiceAction};
 use layout::Layout;
