@@ -8,6 +8,8 @@ pub mod envelope;
 pub mod event;
 pub mod field;
 pub mod field_ref;
+pub mod kinds;
+pub mod registry;
 pub mod spec;
 pub mod value;
 
@@ -26,5 +28,7 @@ mod test_kinds;
 mod emit_tests;
 #[cfg(test)]
 mod field_tests;
+#[cfg(test)]
+mod registry_tests;
 #[cfg(test)]
 mod value_tests;

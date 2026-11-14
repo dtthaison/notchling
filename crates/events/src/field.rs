@@ -386,6 +386,10 @@ impl KindName {
         KindName(spec.name)
     }
 
+    pub fn parse(text: &str) -> Option<KindName> {
+        crate::registry::find(text).map(KindName::of)
+    }
+
     pub fn as_str(&self) -> &'static str {
         self.0
     }
