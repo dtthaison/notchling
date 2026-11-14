@@ -40,6 +40,8 @@ pub struct SessionMeta {
     pub modified: f64,
     #[serde(default)]
     pub size: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent: Option<String>,
 }
 
 impl SessionMeta {

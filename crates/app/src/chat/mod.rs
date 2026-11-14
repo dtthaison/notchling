@@ -5,6 +5,8 @@ pub mod blocks;
 mod blocks_tests;
 pub mod branch;
 pub mod branch_rows;
+#[cfg(test)]
+mod children_tests;
 pub mod claude_picker;
 pub mod cleared;
 pub mod closed;

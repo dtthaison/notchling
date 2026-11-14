@@ -7,7 +7,7 @@ use crate::transcript::codex as codex_transcript;
 use crate::transcript::scan::{scan_lines, Line};
 use crate::transcript::tail::{tail_start_with, LONG_LINE_SCAN};
 use std::fs::File;
-use std::io::Read;
+use std::io::{Read, Seek, SeekFrom};
 
 pub(super) enum Read1 {
     Gone,
@@ -15,10 +15,12 @@ pub(super) enum Read1 {
     Built(Box<IndexedSession>),
 }
 
-pub(super) fn contents(path: &str) -> Option<Vec<u8>> {
+pub(super) fn contents(path: &str, from: u64) -> Option<Vec<u8>> {
     let mut file = File::open(path).ok()?;
     let size = file.metadata().ok()?.len();
-    if size <= WHOLE_FILE_BYTES {
+    let from = from.min(size);
+    file.seek(SeekFrom::Start(from)).ok()?;
+    if size - from <= WHOLE_FILE_BYTES {
         let mut data = Vec::new();
         (&mut file)
             .take(WHOLE_FILE_BYTES)
@@ -33,8 +35,10 @@ pub(super) fn contents(path: &str) -> Option<Vec<u8>> {
     } else {
         head.clear();
     }
-    let start = tail_start_with(path, size, TAIL_BYTES, LONG_LINE_SCAN, MAX_LINE_BYTES).ok()?;
-    head.truncate(usize::try_from(start).unwrap_or(usize::MAX));
+    let start = tail_start_with(path, size, TAIL_BYTES, LONG_LINE_SCAN, MAX_LINE_BYTES)
+        .ok()?
+        .max(from);
+    head.truncate(usize::try_from(start - from).unwrap_or(usize::MAX));
     scan_lines(path, start, size, false, MAX_LINE_BYTES, |line| {
         if let Line::Whole(line) = line {
             head.extend_from_slice(line);
@@ -51,7 +55,11 @@ fn lines(data: &[u8]) -> impl Iterator<Item = &[u8]> {
 }
 
 pub(super) fn read(candidate: &SessionMeta, tool: SessionTool) -> Read1 {
-    let Some(data) = contents(&candidate.path) else {
+    let from = match tool {
+        SessionTool::Codex => codex_transcript::fork::own_start(&candidate.path),
+        _ => 0,
+    };
+    let Some(data) = contents(&candidate.path, from) else {
         return Read1::Gone;
     };
     let mut builder = SessionTextBuilder::new();
@@ -69,6 +77,12 @@ pub(super) fn read(candidate: &SessionMeta, tool: SessionTool) -> Read1 {
             let Some(info) = codex_transcript::meta(&candidate.path) else {
                 return Read1::Empty;
             };
+            if let Some(lineage) = codex_transcript::lineage(&candidate.path) {
+                if lineage.parent.is_empty() {
+                    return Read1::Empty;
+                }
+                meta.parent = Some(format!("codex:{}", lineage.parent));
+            }
             meta.folder.clone_from(&info.cwd);
             codex_meta = Some(info);
             for line in lines(&data) {
@@ -121,7 +135,7 @@ mod tests {
         }
         let path = dir.write("a.jsonl", &text);
         assert!(text.len() as u64 > WHOLE_FILE_BYTES);
-        let data = contents(&path.to_string_lossy()).expect("contents");
+        let data = contents(&path.to_string_lossy(), 0).expect("contents");
         let want: Vec<String> = ["head", "mid", "late", "tail"]
             .iter()
             .flat_map(|p| (0..3).map(move |i| format!("{p}-{i}")))
@@ -137,7 +151,7 @@ mod tests {
         let text: String = (0..count).map(|i| format!("{i:05}{line}\n")).collect();
         let path = dir.write("a.jsonl", &text);
         assert!(text.len() as u64 > WHOLE_FILE_BYTES + TAIL_BYTES);
-        let data = contents(&path.to_string_lossy()).expect("contents");
+        let data = contents(&path.to_string_lossy(), 0).expect("contents");
         assert!(data.len() as u64 <= HEAD_BYTES + TAIL_BYTES + 1_000);
         let lines = lines_of(&data);
         assert!(lines[0].starts_with("00000"));

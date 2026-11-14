@@ -226,6 +226,7 @@ impl SessionIndex {
                     config_dir: None,
                     modified: row.modified,
                     size: 0,
+                    parent: None,
                 };
                 live.insert(meta.key.clone());
                 if existing.get(meta.key.as_str()) == Some(&&meta) {
@@ -270,5 +271,9 @@ fn merge_into(sessions: &mut Vec<IndexedSession>, batch: Vec<IndexedSession>) {
     sessions.extend(batch);
 }
 
+#[cfg(test)]
+mod children_tests;
+#[cfg(test)]
+mod fork_tests;
 #[cfg(test)]
 mod tests;

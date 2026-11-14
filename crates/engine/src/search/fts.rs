@@ -6,7 +6,7 @@ use rusqlite::{params, Connection, OpenFlags};
 
 use super::{IndexedSession, SessionMeta, RECENT_SECS};
 
-const SCHEMA: i64 = 1;
+const SCHEMA: i64 = 2;
 
 const WEIGHTS: (f64, f64, f64) = (10.0, 4.0, 1.0);
 
@@ -89,10 +89,11 @@ impl SearchDb {
                      modified REAL NOT NULL,
                      meta TEXT NOT NULL);
                  CREATE VIRTUAL TABLE fts USING fts5(
-                     title, folder, body, tokenize = 'unicode61 remove_diacritics 2');
-                 PRAGMA user_version = 1;",
+                     title, folder, body, tokenize = 'unicode61 remove_diacritics 2');",
             )
             .map_err(|e| e.to_string())?;
+            db.pragma_update(None, "user_version", SCHEMA)
+                .map_err(|e| e.to_string())?;
         }
         Ok(SearchDb { db: Mutex::new(db) })
     }
@@ -233,6 +234,7 @@ mod tests {
                 config_dir: None,
                 modified: NOW - age,
                 size: 0,
+                parent: None,
             },
             text.into(),
         )
@@ -338,5 +340,26 @@ mod tests {
         let db = SearchDb::open(&path).unwrap();
         db.put(&[session("a", "t", "/w", "x", 0.0)]).unwrap();
         assert_eq!(db.sessions().len(), 1);
+    }
+
+    #[test]
+    fn an_index_from_before_children_were_filed_under_a_parent_is_rebuilt() {
+        let tmp = TempDir::new("fts-before-parent");
+        let path = tmp.path("search.db");
+        {
+            let db = SearchDb::open(&path).unwrap();
+            db.put(&[session("a", "t", "/w", "x", 0.0)]).unwrap();
+            assert_eq!(db.sessions().len(), 1);
+            db.lock().pragma_update(None, "user_version", 1).unwrap();
+        }
+        assert!(SearchDb::open(&path).unwrap().sessions().is_empty());
+        assert_eq!(
+            SearchDb::open(&path)
+                .unwrap()
+                .lock()
+                .pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
+                .unwrap(),
+            SCHEMA
+        );
     }
 }

@@ -297,3 +297,42 @@ fn a_file_that_is_not_there_has_neither() {
     assert!(conversation::peek_subagent("/nonexistent/x.jsonl", true).is_none());
     assert!(codex::peek("/nonexistent/x.jsonl", true).is_none());
 }
+
+#[test]
+fn a_window_never_starts_before_its_floor() {
+    let dir = Dir::new();
+    let path = dir.file(
+        "floor.jsonl",
+        &["aaaa".to_string(), "bbbb".to_string(), "cccc".to_string()],
+    );
+    let all = Window::read_from(&path, 1_000, 5).expect("read");
+    assert!(
+        all.whole(),
+        "the floor is the start of a line, nothing is cut"
+    );
+    assert_eq!(all.lines(), [b"bbbb".as_slice(), b"cccc".as_slice()]);
+    let unfloored = Window::read(&path, 1_000).expect("read");
+    assert_eq!(unfloored.lines().len(), 3);
+    let narrow = Window::read_from(&path, 7, 5).expect("read");
+    assert!(!narrow.whole());
+    assert_eq!(narrow.lines(), [b"cccc".as_slice()]);
+    let past = Window::read_from(&path, 1_000, 99).expect("read");
+    assert!(past.lines().is_empty());
+}
+
+#[test]
+fn a_floored_search_does_not_widen_into_what_is_before_it() {
+    let dir = Dir::new();
+    let mut lines: Vec<String> = (0..3000).map(rollout_line).collect();
+    lines.push(token_count(40_000, 250));
+    lines.extend((0..3000).map(rollout_line));
+    let path = dir.file("floored.jsonl", &lines);
+    let floor = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+    let mut looked = Vec::new();
+    let found: Option<()> = widen_from(&path, floor, |window| {
+        looked.push(window.len());
+        ((), false)
+    });
+    assert!(found.is_some());
+    assert_eq!(looked, [0], "nothing to look at, and it stops at the floor");
+}

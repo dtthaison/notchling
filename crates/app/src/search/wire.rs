@@ -79,14 +79,18 @@ pub struct SessionRow {
     pub snippet: Option<String>,
     pub highlights: Vec<(usize, usize)>,
     pub updated_secs: f64,
+    pub parent: Option<String>,
 }
 
 impl SessionRow {
     pub fn reference(&self) -> SessionRef {
-        SessionRef {
-            tool: self.tool,
-            session_id: self.session_id.clone(),
-        }
+        self.parent
+            .as_deref()
+            .and_then(SessionRef::parse)
+            .unwrap_or_else(|| SessionRef {
+                tool: self.tool,
+                session_id: self.session_id.clone(),
+            })
     }
 }
 
@@ -273,6 +277,7 @@ pub fn parse_session(v: &Value) -> Option<SessionRow> {
         snippet: text(v, &["snippet"]),
         highlights: pairs(field(v, &["highlights"])),
         updated_secs: secs(v, &["modified", "updated"]),
+        parent: text(v, &["parent"]),
     })
 }
 

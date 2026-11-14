@@ -70,6 +70,7 @@ pub(super) fn claude(roots: &[ClaudeRoot], now: f64) -> Vec<Candidate> {
                             config_dir: root.config_dir.clone(),
                             modified,
                             size,
+                            parent: None,
                         },
                         tool: SessionTool::Claude,
                     },
@@ -136,6 +137,7 @@ pub(super) fn codex(sessions: &Path, now: f64) -> Vec<Candidate> {
                             config_dir: None,
                             modified,
                             size,
+                            parent: None,
                         },
                         tool: SessionTool::Codex,
                     });

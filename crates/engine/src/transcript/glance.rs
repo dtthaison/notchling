@@ -16,16 +16,20 @@ pub struct Window {
 
 impl Window {
     pub fn read(path: &str, len: u64) -> io::Result<Window> {
+        Window::read_from(path, len, 0)
+    }
+
+    pub fn read_from(path: &str, len: u64, floor: u64) -> io::Result<Window> {
         let mut file = File::open(path)?;
         let size = file.seek(SeekFrom::End(0))?;
-        let start = size.saturating_sub(len);
+        let start = size.saturating_sub(len).max(floor).min(size);
         file.seek(SeekFrom::Start(start))?;
         let mut bytes = Vec::with_capacity((size - start) as usize);
         file.take(size - start).read_to_end(&mut bytes)?;
         PARSED_BYTES.fetch_add(bytes.len() as u64, Ordering::Relaxed);
         Ok(Window {
             bytes,
-            whole: start == 0,
+            whole: start == floor.min(size),
         })
     }
 
@@ -56,10 +60,18 @@ impl Window {
     }
 }
 
-pub fn widen<T>(path: &str, mut look: impl FnMut(&Window) -> (T, bool)) -> Option<T> {
+pub fn widen<T>(path: &str, look: impl FnMut(&Window) -> (T, bool)) -> Option<T> {
+    widen_from(path, 0, look)
+}
+
+pub fn widen_from<T>(
+    path: &str,
+    floor: u64,
+    mut look: impl FnMut(&Window) -> (T, bool),
+) -> Option<T> {
     let mut found = None;
     for len in WINDOWS {
-        let window = Window::read(path, len).ok()?;
+        let window = Window::read_from(path, len, floor).ok()?;
         let (value, done) = look(&window);
         found = Some(value);
         if done || window.whole() {
@@ -81,12 +93,21 @@ pub fn peek(
     held: fn(&[u8]) -> Option<u64>,
     recent: Option<TailParser>,
 ) -> Option<Peeked> {
+    peek_from(path, 0, held, recent)
+}
+
+pub fn peek_from(
+    path: &str,
+    floor: u64,
+    held: fn(&[u8]) -> Option<u64>,
+    recent: Option<TailParser>,
+) -> Option<Peeked> {
     let mut peeked = Peeked {
         context: None,
         recent: None,
     };
     let mut stepped = recent.is_none();
-    widen(path, |window| {
+    widen_from(path, floor, |window| {
         let lines = window.lines();
         if peeked.context.is_none() {
             peeked.context = lines.iter().rev().find_map(|line| held(line));

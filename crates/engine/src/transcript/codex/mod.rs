@@ -1,9 +1,19 @@
 mod calls;
+pub mod fork;
 mod glance;
+mod lineage;
 mod stamped;
+
+#[cfg(test)]
+mod fork_tests;
+#[cfg(test)]
+mod lineage_tests;
+#[cfg(test)]
+pub(crate) mod testutil;
 
 pub use calls::{call, diff, exit_code, output_text, patch_files};
 pub use glance::{context_tokens, peek, recent};
+pub use lineage::{lineage, Lineage};
 
 use super::model::*;
 use super::tail::{Cursors, LineParser};
@@ -84,8 +94,12 @@ fn read_meta(path: &str) -> Option<Meta> {
         .take(3_000_000)
         .read_to_end(&mut head)
         .ok()?;
+    let own = fork::own_start(path);
     let mut found: Option<Meta> = None;
+    let mut at = 0u64;
     for line in head.split(|&b| b == b'\n') {
+        let line_at = at;
+        at += line.len() as u64 + 1;
         let Some(map) = parse_object(line) else {
             continue;
         };
@@ -95,15 +109,18 @@ fn read_meta(path: &str) -> Option<Meta> {
         };
         let kind = str_of(&obj, "type");
         if kind == Some("session_meta") {
-            if let Some(id) = str_of(payload, "id") {
-                found = Some(Meta {
-                    id: id.to_string(),
-                    cwd: str_of(payload, "cwd").unwrap_or("").to_string(),
-                    title: None,
-                });
+            if found.is_none() {
+                if let Some(id) = str_of(payload, "id") {
+                    found = Some(Meta {
+                        id: id.to_string(),
+                        cwd: str_of(payload, "cwd").unwrap_or("").to_string(),
+                        title: None,
+                    });
+                }
             }
         } else if let Some(m) = found.as_mut() {
-            if kind == Some("response_item")
+            if line_at >= own
+                && kind == Some("response_item")
                 && str_of(payload, "type") == Some("message")
                 && str_of(payload, "role") == Some("user")
             {
@@ -139,10 +156,8 @@ fn read_turn_open(path: &str) -> bool {
     let Ok(size) = file.seek(SeekFrom::End(0)) else {
         return false;
     };
-    if file
-        .seek(SeekFrom::Start(size.saturating_sub(262_144)))
-        .is_err()
-    {
+    let from = size.saturating_sub(262_144).max(fork::own_start(path));
+    if from >= size || file.seek(SeekFrom::Start(from)).is_err() {
         return false;
     }
     let mut tail = Vec::new();
@@ -429,7 +444,9 @@ impl LineParser for Parser {
 fn cursors() -> &'static Cursors<Parser, Arc<Conversation>> {
     static CURSORS: OnceLock<Cursors<Parser, Arc<Conversation>>> = OnceLock::new();
     CURSORS.get_or_init(|| {
-        Cursors::chat(30, |p: &Parser| Arc::new(p.conversation())).long_lines_free(64_000_000)
+        Cursors::chat(30, |p: &Parser| Arc::new(p.conversation()))
+            .long_lines_free(64_000_000)
+            .floor(fork::own_start)
     })
 }
 

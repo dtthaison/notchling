@@ -247,6 +247,7 @@ pub fn session_json(hit: &SessionHit, query_words: &[String]) -> Value {
         "folder": hit.meta.folder,
         "path": hit.meta.path,
         "config_dir": hit.meta.config_dir,
+        "parent": hit.meta.parent,
         "modified": hit.meta.modified,
         "snippet": hit.snippet,
         "highlights": marks,
