@@ -3,13 +3,12 @@ use notchling_kit::metric::RADIUS_SM;
 use notchling_kit::part::{ButtonKind, PartState};
 use notchling_kit::ui::{button, label, KitStyled};
 use notchling_kit::{Appearance, Ink, TypeRole};
+use notchling_locale as t;
 use serde_json::json;
 
 use super::SettingsView;
 use crate::mac::shell;
 use crate::search::shortcut::{refusal, Mods, Setting, Shortcut, KEY};
-
-const RECORDING: &str = "Press a shortcut…";
 
 #[derive(Default)]
 pub(super) struct ShortcutState {
@@ -25,9 +24,12 @@ impl SettingsView {
         cx: &mut Context<Self>,
     ) -> Div {
         let (title, kind) = match (self.shortcut.recording.is_some(), setting) {
-            (true, _) => (RECORDING.to_owned(), ButtonKind::Primary),
+            (true, _) => (
+                t::settings::shortcut_recording().to_owned(),
+                ButtonKind::Primary,
+            ),
             (false, Setting::On(key)) => (key.label(), ButtonKind::Secondary),
-            (false, Setting::Off) => ("Record".to_owned(), ButtonKind::Ghost),
+            (false, Setting::Off) => (t::settings::shortcut_record().to_owned(), ButtonKind::Ghost),
         };
         let off_kind = if setting == Setting::Off {
             ButtonKind::Secondary
@@ -46,8 +48,14 @@ impl SettingsView {
                     .on_mouse_down_out(cx.listener(|this, _, _, cx| this.stop_recording(cx))),
             )
             .child(
-                button("setting-shortcut-off", "Off", off_kind, PartState::Rest, a)
-                    .on_click(cx.listener(|this, _, _, cx| this.set_shortcut(Setting::Off, cx))),
+                button(
+                    "setting-shortcut-off",
+                    t::settings::shortcut_off(),
+                    off_kind,
+                    PartState::Rest,
+                    a,
+                )
+                .on_click(cx.listener(|this, _, _, cx| this.set_shortcut(Setting::Off, cx))),
             )
     }
 
@@ -97,10 +105,7 @@ impl SettingsView {
         match Shortcut::from_keystroke(key, mods) {
             Some(shortcut) => self.set_shortcut(Setting::On(shortcut), cx),
             None => {
-                self.shortcut.note = Some((
-                    "Use a letter, a number or Space with Control, Option or Command.".to_owned(),
-                    true,
-                ));
+                self.shortcut.note = Some((t::settings::shortcut_needs_key().to_owned(), true));
                 cx.notify();
             }
         }
