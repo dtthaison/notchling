@@ -16,8 +16,8 @@ use super::codex_children::DaemonChildren;
 use super::data::{DataRoot, Session, Tool};
 use super::inspector::SubagentRow;
 use super::log::{self, Change};
-use super::paging::{Counts, Page};
-use super::subagent_rows::SubagentRows;
+use super::paging::{Counts, Tree};
+use super::subagent_rows::{decorate, Disk, SubagentRows};
 use crate::actions::Socket;
 use crate::notch::requests::{self, HookRequest};
 use crate::tools::foreign::AgyList;
@@ -49,7 +49,9 @@ pub struct Loader {
     pub subagent_path: Option<String>,
     pub subagent_origin: Origin,
     pub more_subagents: usize,
-    page: Page,
+    pub open_groups: HashSet<String>,
+    pub more_under: HashMap<String, usize>,
+    tree: Tree,
     registry: Arc<Registry>,
     peeked: SubagentRows,
     agy_log: Option<AgyLog>,
@@ -66,8 +68,9 @@ impl Loader {
                 version: env!("CARGO_PKG_VERSION").to_string(),
             })))
         };
+        let registry = Arc::new(Registry::with_sources(source));
         Loader {
-            registry: Arc::new(Registry::with_sources(source)),
+            registry: registry.clone(),
             monitor: root.new_monitor(),
             locator: root.new_locator(),
             agy: root.new_agy_list(),
@@ -75,8 +78,10 @@ impl Loader {
             subagent_path: None,
             subagent_origin: Origin::default(),
             more_subagents: 0,
-            page: Page::default(),
-            peeked: SubagentRows::default(),
+            open_groups: HashSet::new(),
+            more_under: HashMap::new(),
+            tree: Tree::default(),
+            peeked: SubagentRows::new(Disk(registry.clone())),
             agy_log: None,
             last: None,
             root,
@@ -155,12 +160,14 @@ impl Loader {
             }
             None => (Arc::default(), Vec::new()),
         };
-        let shown = self.page.show(
-            selected.as_deref(),
-            &subagents,
-            std::mem::take(&mut self.more_subagents),
-        );
-        let subagent_rows = self.peeked.rows(&subagents, &shown.indexes);
+        let mut more = std::mem::take(&mut self.more_under);
+        more.insert(String::new(), std::mem::take(&mut self.more_subagents));
+        let shown = self
+            .tree
+            .show(selected.as_deref(), &subagents, &self.open_groups, &more);
+        let indexes: Vec<usize> = shown.entries.iter().map(|e| e.index).collect();
+        let mut subagent_rows = self.peeked.rows(&subagents, &indexes);
+        decorate(&mut subagent_rows, &shown);
         let question = session
             .filter(|s| s.tool == Tool::Claude && s.agent.command.is_none())
             .and_then(|_| conversation.pending_question.clone());

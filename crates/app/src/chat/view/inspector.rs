@@ -14,7 +14,7 @@ use notchling_kit::ui::{
 };
 use notchling_kit::{Appearance, Icon, Ink, Status, TypeRole};
 
-use super::paged_rows::{more_row, subagent_row, More};
+use super::paged_rows::{group_more_row, more_row, subagent_row, More};
 use super::{repo_section, ChatView};
 use crate::chat::branch::Summary;
 use crate::chat::format::short_path;
@@ -155,7 +155,10 @@ impl RenderOnce for Panel {
         } else {
             let mut list = div().flex().flex_col().gap(px(6.0));
             for s in &i.subagents {
-                list = list.child(subagent_row(s, a, &self.chat));
+                list = list.child(subagent_row(s, a, &self.chat, cx));
+                for (group, next) in &s.more_after {
+                    list = list.child(group_more_row(group, *next, s.depth, &self.chat, a));
+                }
             }
             let next = i.subagent_counts.next_page();
             if next > 0 {

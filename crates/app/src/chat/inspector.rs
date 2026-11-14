@@ -31,6 +31,10 @@ pub struct SubagentRow {
     pub mark: Mark,
     pub tool: ToolMark,
     pub doing: Option<String>,
+    pub depth: u8,
+    pub children: usize,
+    pub open: bool,
+    pub more_after: Vec<(String, usize)>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -357,6 +361,10 @@ mod tests {
                 mark: Mark::Icon(Icon::Done, Ink::Done),
                 tool: ToolMark::Claude,
                 doing: None,
+                depth: 1,
+                children: 0,
+                open: false,
+                more_after: Vec::new(),
             }
         );
         assert_eq!(i.subagents_title(), "Subagents · 1");

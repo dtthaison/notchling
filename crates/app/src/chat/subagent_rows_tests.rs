@@ -135,7 +135,7 @@ fn a_finished_one_that_runs_again_with_the_same_file_is_read_for_its_doing_line(
 }
 
 #[test]
-fn a_row_without_a_file_or_from_antigravity_is_never_read() {
+fn a_row_without_a_file_is_never_read_and_an_antigravity_child_is() {
     let s = Scratch::new("rows-none");
     let mut agents = world(&s, 3, &[]);
     agents[0].path.clear();
@@ -144,7 +144,7 @@ fn a_row_without_a_file_or_from_antigravity_is_never_read() {
     let recorder = Recorder::default();
     let mut rows = SubagentRows::new(recorder.clone());
     let got = rows_of(&mut rows, &agents, &[0, 1, 2]);
-    assert!(taken(&recorder).is_empty());
+    assert_eq!(taken(&recorder), ["a1"]);
     assert_eq!(got[0].detail, "Done · sonnet high · Explore");
     assert_eq!(got[2].detail, "Done · sonnet high · Explore");
 }

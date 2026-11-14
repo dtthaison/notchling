@@ -66,6 +66,18 @@ impl ChatView {
         self.reload_now(cx);
     }
 
+    pub(super) fn toggle_group(&mut self, id: &str, cx: &mut Context<Self>) {
+        if !self.open_groups.remove(id) {
+            self.open_groups.insert(id.to_owned());
+        }
+        self.reload_now(cx);
+    }
+
+    pub(super) fn load_more_under(&mut self, id: &str, cx: &mut Context<Self>) {
+        *self.more_under.entry(id.to_owned()).or_default() += 1;
+        self.reload_now(cx);
+    }
+
     pub(super) fn close_subagent(&mut self, cx: &mut Context<Self>) {
         if self.open_subagent.take().is_some() {
             self.scroll_to_end_now(cx);

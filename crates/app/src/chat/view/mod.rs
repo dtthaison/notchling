@@ -48,7 +48,7 @@ mod terminal;
 mod tool;
 mod tools;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::Receiver;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -124,6 +124,8 @@ pub struct ChatView {
     subagent_rows: Vec<crate::chat::inspector::SubagentRow>,
     subagent_counts: crate::chat::paging::Counts,
     more_subagents: usize,
+    open_groups: HashSet<String>,
+    more_under: HashMap<String, usize>,
     shells: crate::chat::shell_list::Listing,
     shell_page: crate::chat::shell_list::ShellPage,
     open_subagent: Option<crate::chat::subagent_view::Open>,
@@ -382,6 +384,8 @@ impl ChatView {
             subagent_rows: Vec::new(),
             subagent_counts: Default::default(),
             more_subagents: 0,
+            open_groups: HashSet::new(),
+            more_under: HashMap::new(),
             shells: Default::default(),
             shell_page: Default::default(),
             open_subagent: None,

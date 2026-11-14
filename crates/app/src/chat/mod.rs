@@ -72,6 +72,8 @@ pub mod subagent_rows;
 pub mod subagent_view;
 pub mod tasks_bar;
 pub mod terminal;
+#[cfg(test)]
+mod tree_tests;
 pub mod used;
 #[cfg(target_os = "macos")]
 pub mod view;
