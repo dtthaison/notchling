@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -6,7 +5,7 @@ use std::sync::Arc;
 use notchling_engine::delegate::record::{self, Delegation};
 use notchling_engine::sessions::{Agent, Monitor, Probes, Roots};
 use notchling_engine::transcript::model::Conversation;
-use notchling_engine::transcript::subagents::{self, Subagent};
+use notchling_engine::transcript::subagents::Subagent;
 use notchling_engine::transcript::{codex, conversation};
 use notchling_platform::paths;
 
@@ -290,14 +289,12 @@ impl DataRoot {
         match (&session.transcript, session.tool) {
             (Some(path), Tool::Claude) => {
                 let path = path.to_string_lossy();
-                let mut list = subagents::list(&path, &conversation.finished_agents, now_secs);
-                let mut ids: HashSet<String> = list.iter().map(|a| a.id.clone()).collect();
-                for agent in super::cleared::subagents_before(&path, &session.agent.name, now_secs)
-                {
-                    if ids.insert(agent.id.clone()) {
-                        list.push(agent);
-                    }
-                }
+                let mut list = super::cleared::subagents(
+                    &path,
+                    &session.agent.name,
+                    &conversation.finished_agents,
+                    now_secs,
+                );
                 if !delegations.is_empty() {
                     let parents = super::delegated::parent_ids(&path, &session.agent.name);
                     let sessions = self.codex_dir.join("sessions");

@@ -5,13 +5,13 @@ use crate::transcript::model::*;
 use crate::transcript::scan::HEAD_BYTES;
 use crate::transcript::shells;
 use crate::transcript::snapshot::{self, PendingQuestion};
-use crate::transcript::subagents::notification_statuses;
+use crate::transcript::subagents::{notification_statuses, result_end};
 use crate::transcript::tail::LineParser;
 use crate::transcript::util::{count_of, date_field, parse_object, str_of};
 use serde_json::{Map, Value};
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-pub(super) const MAX_LINE: usize = 400_000;
+pub(crate) const MAX_LINE: usize = 400_000;
 const KEEP_ITEMS: usize = 500;
 const TRIM_AT: usize = 1000;
 
@@ -433,15 +433,11 @@ impl Parser {
             self.last_question_answered = true;
         }
         let is_error = block.get("is_error").and_then(Value::as_bool) == Some(true);
-        if let (Some(id), Some(agent)) = (tool_use_id, result.and_then(|r| str_of(r, "agentId"))) {
-            if result.and_then(|r| str_of(r, "status")) != Some("async_launched") {
-                let ended = if is_error { "failed" } else { "completed" };
+        if let Some((ids, ended)) = result_end(tool_use_id, is_error, result) {
+            for id in ids {
                 self.c
                     .finished_agents
                     .insert(id.to_string(), ended.to_string());
-                self.c
-                    .finished_agents
-                    .insert(agent.to_string(), ended.to_string());
             }
         }
         let Some(&(item, index)) = tool_use_id.and_then(|id| self.call_index.get(id)) else {

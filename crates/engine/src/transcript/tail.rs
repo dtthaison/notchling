@@ -15,6 +15,8 @@ type Floor = Box<dyn Fn(&str) -> u64 + Send + Sync>;
 
 pub static PARSED_BYTES: AtomicU64 = AtomicU64::new(0);
 
+pub static RAW_BYTES: AtomicU64 = AtomicU64::new(0);
+
 static CHAT_TAIL: AtomicU64 = AtomicU64::new(CHAT_TAIL_BYTES);
 
 pub fn chat_tail_bytes() -> u64 {
