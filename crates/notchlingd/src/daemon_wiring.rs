@@ -492,6 +492,7 @@ impl Wired {
             Version::parse(env!("CARGO_PKG_VERSION")).unwrap_or_else(Version::zero),
         );
         versions.checks().set_enabled(!layout.fixture);
+        versions.checks().set_inbox(inbox.clone());
         Wired {
             acting,
             codex,

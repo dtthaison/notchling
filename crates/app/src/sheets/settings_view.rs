@@ -99,6 +99,10 @@ impl SettingsView {
         self
     }
 
+    pub fn show_agents(&mut self, cx: &mut Context<Self>) {
+        self.show_page(Page::Agents, cx);
+    }
+
     fn show_page(&mut self, page: Page, cx: &mut Context<Self>) {
         self.page = page;
         if page == Page::Agents {

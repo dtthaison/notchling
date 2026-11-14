@@ -416,6 +416,15 @@ pub fn open_chat_settings(cx: &mut App) {
     }
 }
 
+pub fn open_chat_settings_agents(cx: &mut App) {
+    open_chat(cx);
+    if let Some(handle) = chat_window(cx) {
+        handle
+            .update(cx, |view, _, cx| view.show_settings_agents(cx))
+            .ok();
+    }
+}
+
 pub fn open_chat_secret(cx: &mut App, name: &str) {
     open_chat(cx);
     if let Some(handle) = chat_window(cx) {

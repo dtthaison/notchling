@@ -1,11 +1,14 @@
 use crate::acting_ops::Room;
+use crate::inbox_ops::InboxOps;
 use crate::versions_ops::Clock;
 use notchling_engine::control::launcher::Launcher;
 use notchling_engine::control::plan::Command;
+use notchling_engine::inbox::{Action, ActionId, Item, Kind, Source, State};
 use notchling_engine::transcript::strict::Skips;
 use notchling_engine::transcript::strict::{
     claude_lines, codex_lines, strict_claude, strict_codex,
 };
+use notchling_engine::vault::random_id;
 use notchling_engine::versions::check::{self, CheckPart, CheckResult, CheckTier, Outcome, Output};
 use notchling_engine::versions::mac::Installed;
 use notchling_engine::versions::record::{Fact, Recorder};
@@ -203,6 +206,8 @@ pub struct Checks {
     clock: Clock,
     book: Mutex<Book>,
     soaks: Mutex<Soaks>,
+    inbox: Mutex<Option<Arc<InboxOps>>>,
+    notices: Mutex<BTreeMap<Tool, (String, Version)>>,
     running: Mutex<BTreeSet<Tool>>,
     retry: Mutex<BTreeMap<Tool, i64>>,
     last: Mutex<BTreeMap<Tool, Value>>,
@@ -229,12 +234,18 @@ impl Checks {
             clock,
             book: Mutex::new(book),
             soaks: Mutex::new(Soaks::load(&data_for_soak)),
+            inbox: Mutex::new(None),
+            notices: Mutex::new(BTreeMap::new()),
             running: Mutex::new(BTreeSet::new()),
             retry: Mutex::new(BTreeMap::new()),
             last: Mutex::new(BTreeMap::new()),
             threads: Mutex::new(Vec::new()),
             enabled: AtomicBool::new(false),
         })
+    }
+
+    pub fn set_inbox(&self, inbox: Arc<InboxOps>) {
+        *lock(&self.inbox) = Some(inbox);
     }
 
     pub fn set_enabled(&self, on: bool) {
@@ -331,12 +342,90 @@ impl Checks {
         } else {
             lock(&self.retry).remove(&tool);
         }
-        {
+        let held = {
             let mut book = lock(&self.book);
+            let held = book.reference(tool).map(|r| r.version.clone());
             book.apply(tool, &version, &sha, &outcome, now);
             let _ = reference::save(&self.data, &book);
-        }
+            held
+        };
         self.finish(tool, &version, &outcome, now, true);
+        self.notify(tool, &version, &outcome, held.as_ref(), now);
+    }
+
+    fn notify(
+        &self,
+        tool: Tool,
+        version: &Version,
+        outcome: &Outcome,
+        held: Option<&Version>,
+        now: i64,
+    ) {
+        match outcome.result {
+            CheckResult::Failed => {
+                self.withdraw(tool);
+                let Some(inbox) = lock(&self.inbox).clone() else {
+                    return;
+                };
+                let Some(id) = random_id("version-check:") else {
+                    return;
+                };
+                let mut detail = outcome.why.clone().unwrap_or_default();
+                if let Some(held) = held {
+                    if !detail.is_empty() {
+                        detail.push(' ');
+                    }
+                    detail.push_str(&format!("Workers stay on {held}."));
+                }
+                inbox.raise(
+                    Item {
+                        id: id.clone(),
+                        kind: Kind::VersionCheckFailed,
+                        title: format!("{} {} Didn't Pass", tool.title(), version),
+                        detail,
+                        source: Source::default(),
+                        created_ms: now,
+                        expires_ms: None,
+                        actions: vec![Action {
+                            id: ActionId::Open,
+                            label: "Open Settings".to_string(),
+                            primary: true,
+                        }],
+                        state: State::Open,
+                        answer: None,
+                        answered_by: None,
+                        seen: false,
+                        open: Some(json!({ "settings": "agents", "tool": tool.name() })),
+                        closed_ms: None,
+                    },
+                    None,
+                );
+                lock(&self.notices).insert(tool, (id, version.clone()));
+            }
+            CheckResult::Passed | CheckResult::PartlyChecked => self.withdraw(tool),
+            CheckResult::CantTell => {}
+        }
+    }
+
+    fn withdraw(&self, tool: Tool) {
+        let held = lock(&self.notices).remove(&tool);
+        let inbox = lock(&self.inbox).clone();
+        if let (Some((id, _)), Some(inbox)) = (held, inbox) {
+            inbox.resolve(&id, State::Withdrawn, None, None);
+        }
+    }
+
+    pub fn moved_on(&self, found: &BTreeMap<Tool, Installed>) {
+        let stale: Vec<Tool> = lock(&self.notices)
+            .iter()
+            .filter(|(tool, (_, version))| {
+                found.get(tool).and_then(|i| i.version.as_ref()) != Some(version)
+            })
+            .map(|(tool, _)| *tool)
+            .collect();
+        for tool in stale {
+            self.withdraw(tool);
+        }
     }
 
     fn finish(&self, tool: Tool, version: &Version, outcome: &Outcome, now: i64, record: bool) {

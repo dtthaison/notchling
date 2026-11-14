@@ -208,6 +208,7 @@ impl VersionsOps {
     }
 
     fn auto_check(&self, found: &BTreeMap<Tool, Installed>) {
+        self.checks.moved_on(found);
         for (tool, installed) in found {
             if self.checks.wanted(*tool, installed) {
                 self.checks.request(*tool, installed, false);

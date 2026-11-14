@@ -126,6 +126,8 @@ mod vault_ops_lock_tests;
 #[cfg(test)]
 mod versions_check_tests;
 #[cfg(test)]
+mod versions_inbox_tests;
+#[cfg(test)]
 mod versions_ops_tests;
 #[cfg(test)]
 mod versions_soak_tests;
