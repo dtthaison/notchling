@@ -117,6 +117,8 @@ mod tests_sd_service;
 #[cfg(test)]
 mod tests_sd_service_b;
 #[cfg(test)]
+mod tests_sd_service_versions;
+#[cfg(test)]
 mod tests_sd_worker;
 #[cfg(test)]
 mod tests_secret_steps;

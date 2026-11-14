@@ -1,5 +1,6 @@
 use super::shell;
 use super::steps_sd::MIN_SD;
+use crate::versions::knob::{AGY_KNOB_VERIFIED, AGY_VAR, CLAUDE_VAR};
 use std::collections::BTreeMap;
 use std::path::Path;
 
@@ -19,6 +20,14 @@ pub const LINUX_NAMES: [&str; 4] = [
 pub const PLIST_NAME: &str = "com.sd.worker.plist";
 pub const UNIT_DIRECTORY: &str = "/etc/systemd/system";
 pub const PLIST_PATH: &str = "~/Library/LaunchAgents/com.sd.worker.plist";
+
+pub fn service_vars(agy_verified: bool) -> Vec<(&'static str, &'static str)> {
+    let mut vars = vec![(CLAUDE_VAR, "1")];
+    if agy_verified {
+        vars.push((AGY_VAR, "true"));
+    }
+    vars
+}
 
 pub fn templates(dir: &Path) -> Option<BTreeMap<String, String>> {
     let mut found = BTreeMap::new();
@@ -54,6 +63,7 @@ pub fn render(
     } else {
         vec![PLIST_NAME]
     };
+    let vars = service_vars(AGY_KNOB_VERIFIED);
     let mut files = Vec::new();
     for name in names {
         let template = templates
@@ -72,13 +82,13 @@ pub fn render(
             .replace("@PYTHON3@", python)
             .replace("@HOME@", home);
         if linux {
-            text = set_lines(&text, user, &shell::service_path(home));
+            text = set_lines(&text, user, &shell::service_path(home), &vars);
             if name.ends_with(".service") && !text.split('\n').any(|l| l == format!("User={user}"))
             {
                 return Err(format!("{name} has no User= line to set"));
             }
         } else {
-            text = plist(&text, &shell::service_path(home))
+            text = plist(&text, &shell::service_path(home), &vars)
                 .ok_or_else(|| format!("{name} is not a plist this Notchling can fill in"))?;
         }
         if let Some(left) = leftover_placeholder(&text) {
@@ -121,19 +131,25 @@ fn leftover_placeholder(text: &str) -> Option<&str> {
     None
 }
 
-fn set_lines(text: &str, user: &str, path: &str) -> String {
-    text.split('\n')
-        .map(|line| {
-            if line == "User=agent" {
-                format!("User={user}")
-            } else if line.starts_with("Environment=PATH=") {
-                format!("Environment=PATH={path}")
-            } else {
-                line.to_string()
+fn set_lines(text: &str, user: &str, path: &str, vars: &[(&str, &str)]) -> String {
+    let have: Vec<&str> = text.split('\n').collect();
+    let mut out: Vec<String> = Vec::new();
+    for line in &have {
+        if *line == "User=agent" {
+            out.push(format!("User={user}"));
+        } else if line.starts_with("Environment=PATH=") {
+            out.push(format!("Environment=PATH={path}"));
+            for (name, value) in vars {
+                let own = format!("Environment={name}=");
+                if !have.iter().any(|l| l.starts_with(&own)) {
+                    out.push(format!("{own}{value}"));
+                }
             }
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
+        } else {
+            out.push((*line).to_string());
+        }
+    }
+    out.join("\n")
 }
 
 fn without_comments(text: &str) -> String {
@@ -150,12 +166,21 @@ fn without_comments(text: &str) -> String {
     out
 }
 
-fn plist(text: &str, path: &str) -> Option<String> {
+fn plist(text: &str, path: &str, vars: &[(&str, &str)]) -> Option<String> {
     let mut text = without_comments(text);
     let key = text.find("<key>PATH</key>")? + "<key>PATH</key>".len();
     let open = key + text[key..].find("<string>")? + "<string>".len();
     let close = open + text[open..].find("</string>")?;
     text.replace_range(open..close, path);
+    let mut at = open + path.len() + "</string>".len();
+    for (name, value) in vars {
+        if text.contains(&format!("<key>{name}</key>")) {
+            continue;
+        }
+        let pair = format!("\n\t\t<key>{name}</key>\n\t\t<string>{value}</string>");
+        text.insert_str(at, &pair);
+        at += pair.len();
+    }
     well_formed(&text).then_some(text)
 }
 

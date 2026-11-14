@@ -2,6 +2,7 @@ use super::service_files::{
     render, templates, ServiceFile, LINUX_NAMES, PLIST_NAME, PLIST_PATH, UNIT_DIRECTORY,
 };
 use super::shell;
+use super::status::WorkerStatus;
 use super::step::{
     run, Cadence, CheckResult, FixContext, FixOutcome, FixPlan, Probe, RemoteOutput, SetupStep,
     StepContext, StepFix, StepId,
@@ -60,6 +61,10 @@ fn probe(linux: bool) -> String {
         parts.push(running_probe(false));
     }
     parts.join("; ")
+}
+
+pub fn may_restart(status: Option<&WorkerStatus>) -> bool {
+    status.is_some_and(|s| s.current.is_none())
 }
 
 fn hex(text: &str) -> String {
