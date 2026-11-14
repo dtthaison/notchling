@@ -13,7 +13,7 @@ pub(crate) mod testutil;
 
 pub use calls::{call, diff, exit_code, output_text, patch_files};
 pub use glance::{context_tokens, peek, recent};
-pub use lineage::{lineage, Lineage};
+pub use lineage::{lineage, of_payload as lineage_of_payload, Lineage};
 
 use super::model::*;
 use super::tail::{Cursors, LineParser};
