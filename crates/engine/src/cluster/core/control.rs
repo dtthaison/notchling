@@ -143,6 +143,7 @@ impl NodeCore {
                         me,
                         local: id,
                         answered: false,
+                        since: self.boot_ms,
                     });
                     self.dial(out);
                     return;

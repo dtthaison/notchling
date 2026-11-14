@@ -283,6 +283,55 @@ fn a_join_token_is_one_time() {
         .members
         .contains_key(&w2));
     assert!(hub.seen.iter().any(|(_, e)| matches!(e, Effect::Publish { name, data, .. } if name == "cluster.refused" && data["reason"] == "bad token")));
+    assert!(
+        hub.seen.iter().any(|(n, e)| n == "w2"
+            && matches!(e, Effect::Answer { result: Err(err), .. } if err.code == "refused" && err.message == "bad token")),
+        "a refused joiner's caller hears it at once"
+    );
+}
+
+#[test]
+fn a_join_nobody_answers_ends_with_an_error() {
+    let (mut hub, m5, _) = pair();
+    let w3 = hub.add("w3", "linux", false);
+    let token = JoinToken {
+        cluster: "c1".to_string(),
+        home: m5.clone(),
+        fingerprint: fp("m5"),
+        addrs: vec![],
+        port: 1,
+        secret: "never".to_string(),
+    };
+    hub.local(
+        &w3,
+        LocalCmd::JoinWith {
+            token,
+            me: member("w3", "linux", false),
+        },
+    );
+    let early = hub.tick(&w3, super::JOIN_ANSWER_MS - 1);
+    assert!(!early.iter().any(|e| matches!(e, Effect::Answer { .. })));
+    let late = hub.tick(&w3, 1);
+    assert!(late.iter().any(
+        |e| matches!(e, Effect::Answer { result: Err(err), .. } if err.code == "unreachable")
+    ));
+    let again = hub.local(
+        &w3,
+        LocalCmd::JoinWith {
+            token: JoinToken {
+                cluster: "c1".to_string(),
+                home: m5.clone(),
+                fingerprint: fp("m5"),
+                addrs: vec![],
+                port: 1,
+                secret: "next".to_string(),
+            },
+            me: member("w3", "linux", false),
+        },
+    );
+    assert!(!again
+        .iter()
+        .any(|e| matches!(e, Effect::Answer { result: Err(err), .. } if err.code == "exists")));
 }
 
 #[test]

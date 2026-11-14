@@ -19,6 +19,7 @@ use super::wire::{Msg, Origin, OriginTier, WireError};
 pub const PING_MS: u64 = 5_000;
 pub const OFFLINE_MS: u64 = 20_000;
 pub const CALL_MS: u64 = 30_000;
+pub const JOIN_ANSWER_MS: u64 = 15_000;
 pub const DIAL_BACKOFF_MS: (u64, u64) = (1_000, 60_000);
 pub const DEDUPE_MS: u64 = 300_000;
 
@@ -203,6 +204,7 @@ struct Joining {
     me: Member,
     local: u64,
     answered: bool,
+    since: u64,
 }
 
 pub struct NodeCore {
