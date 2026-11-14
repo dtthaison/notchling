@@ -73,7 +73,10 @@ pub mod vault_caller;
 pub mod vault_cli;
 pub mod vault_ops;
 pub mod vault_wait;
+pub mod versions_check;
+pub mod versions_drift;
 pub mod versions_ops;
+pub mod versions_update;
 pub mod wake_loop;
 
 #[cfg(test)]
@@ -165,7 +168,17 @@ mod session_of_tests;
 #[cfg(test)]
 mod vault_ops_lock_tests;
 #[cfg(test)]
+mod versions_check_tests;
+#[cfg(test)]
+mod versions_drift_tests;
+#[cfg(test)]
+mod versions_inbox_tests;
+#[cfg(test)]
 mod versions_ops_tests;
+#[cfg(test)]
+mod versions_soak_tests;
+#[cfg(test)]
+mod versions_update_tests;
 #[cfg(test)]
 mod wake_loop_tests;
 

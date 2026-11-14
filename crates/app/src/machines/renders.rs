@@ -1,10 +1,10 @@
-use notchling_engine::machines::step::{CheckResult, StepId};
-use notchling_engine::versions::parse_probe;
+use notchling_engine::machines::step::{CheckResult, StepId, SubRow};
+use notchling_engine::versions::{parse_probe, Method, Tool, Version};
 
 use super::data::Setup;
 use super::forms::{AddForm, JobForm};
 use super::model::{MachinesModel, Sheet, Tab};
-use super::versions_feed::MacVersionsError;
+use super::versions_feed::{MacSide, MacTool, MacVersionsError};
 use crate::views::ViewSpec;
 use notchling_engine::machines::forms::JobDraft;
 
@@ -15,11 +15,13 @@ pub const MACHINES_JOBS: &str = "machines-jobs";
 pub const MACHINES_JOB_SHEET: &str = "machines-job-sheet";
 pub const MACHINES_VERSIONS: &str = "machines-versions";
 pub const MACHINES_VERSIONS_NO_DAEMON: &str = "machines-versions-no-daemon";
+pub const MACHINES_SELFUPDATE: &str = "machines-selfupdate";
+pub const MACHINES_DRIFT: &str = "machines-drift";
 
 pub const WINDOW_SIZE: (f32, f32) = (900.0, 780.0);
 pub const WINDOW_MIN: (f32, f32) = (680.0, 460.0);
 
-pub const VIEWS: [ViewSpec; 7] = [
+pub const VIEWS: [ViewSpec; 9] = [
     ViewSpec {
         name: MACHINES,
         size: WINDOW_SIZE,
@@ -55,6 +57,16 @@ pub const VIEWS: [ViewSpec; 7] = [
         size: WINDOW_SIZE,
         about: "the same rows with no daemon: the Notchling isn't running banner and no marks",
     },
+    ViewSpec {
+        name: MACHINES_SELFUPDATE,
+        size: WINDOW_SIZE,
+        about: "the Self-Update Off steps: Claude Code off in its settings file, Codex on and unreadable places flagged",
+    },
+    ViewSpec {
+        name: MACHINES_DRIFT,
+        size: WINDOW_SIZE,
+        about: "Tool Versions with drift: one worker ahead of the Mac and one behind, each row naming both versions",
+    },
 ];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -66,6 +78,8 @@ pub enum Shown {
     JobSheet,
     Versions,
     VersionsNoDaemon,
+    SelfUpdate,
+    Drift,
 }
 
 pub fn shown(name: &str) -> Option<Shown> {
@@ -77,6 +91,8 @@ pub fn shown(name: &str) -> Option<Shown> {
         MACHINES_JOB_SHEET => Shown::JobSheet,
         MACHINES_VERSIONS => Shown::Versions,
         MACHINES_VERSIONS_NO_DAEMON => Shown::VersionsNoDaemon,
+        MACHINES_SELFUPDATE => Shown::SelfUpdate,
+        MACHINES_DRIFT => Shown::Drift,
         _ => return None,
     })
 }
@@ -96,6 +112,14 @@ pub fn model(which: Shown) -> MachinesModel {
         Shown::VersionsNoDaemon => {
             seed_versions(&model);
             model.set_mac_versions(Err(MacVersionsError::NotRunning));
+        }
+        Shown::SelfUpdate => {
+            seed_versions(&model);
+            seed_selfupdate(&model);
+        }
+        Shown::Drift => {
+            seed_versions(&model);
+            model.set_mac_versions(Ok(drift_mac()));
         }
         Shown::JobSheet => {
             model.tab = Tab::Jobs;
@@ -123,6 +147,55 @@ fn seed_versions(model: &MachinesModel) {
         result.detected.tools = Some(parse_probe(text, 1));
         model.engine().show(name, StepId::TOOL_VERSIONS, result);
     }
+}
+
+fn drift_mac() -> MacSide {
+    let tool = |version: &str, method: Method| MacTool {
+        installed: Version::parse(version),
+        method,
+        reference: Version::parse(version),
+        usable: true,
+        installed_failed: false,
+    };
+    MacSide {
+        tools: [
+            (Tool::Claude, tool("2.1.320", Method::Native)),
+            (Tool::Codex, tool("0.165.0", Method::Brew)),
+        ]
+        .into(),
+    }
+}
+
+fn seed_selfupdate(model: &MachinesModel) {
+    let claude = CheckResult::pass("Self-update is off for Claude Code").rows(vec![
+        SubRow::new("~/.claude/settings.json", true, "Self-update is off"),
+        SubRow::new(
+            "CLAUDE_CODE_PACKAGE_MANAGER_AUTO_UPDATE",
+            true,
+            "off in the login shell",
+        ),
+    ]);
+    let codex =
+        CheckResult::fail("Can't read ~/.codex/config.toml: too_big").rows(vec![SubRow::new(
+            "Can't read ~/.codex/config.toml",
+            false,
+            "too_big",
+        )]);
+    model
+        .engine()
+        .show("m1", StepId::self_update(Tool::Claude), claude);
+    model
+        .engine()
+        .show("m1", StepId::self_update(Tool::Codex), codex);
+    let on =
+        CheckResult::fail("Self-update is on in ~/.claude/settings.json").rows(vec![SubRow::new(
+            "~/.claude/settings.json",
+            false,
+            "Will add: \"env\": { \"DISABLE_AUTOUPDATER\": \"1\" }",
+        )]);
+    model
+        .engine()
+        .show("vps-sing-1", StepId::self_update(Tool::Claude), on);
 }
 
 #[cfg(test)]

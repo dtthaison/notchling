@@ -19,6 +19,7 @@ fn mac(entries: &[(Tool, &str, Method)]) -> Result<MacSide, MacVersionsError> {
                 method: *method,
                 reference: None,
                 usable: false,
+                installed_failed: false,
             },
         );
     }

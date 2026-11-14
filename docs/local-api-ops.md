@@ -722,6 +722,9 @@ agy's version.
 | --- | --- | --- | --- |
 | `versions.get` | agent | `{tool?}` | `{tools: [{tool, installed, method, path, problems, running, reference, usable, failed, check}]}` |
 | `versions.workers` | app (quiet) | `{}` | `{workers: {<machine>: {tools: {<tool>: ToolState}, atMs}}}` |
+| `versions.check` | app | `{tool}` | `{started, running}` at once; the result comes as `versions.checked` |
+| `versions.latest` | app (quiet) | `{tool}` | `{latest, at}` or `{latest: null, at, error: "couldn't reach <host>"}` |
+| `versions.update_local` | app, `install` switch | `{tool, to?}` | `{started, running}` at once; the result comes as `versions.updated` |
 
 - `tool` is `claude`, `codex`, `antigravity` or `notchling`; the name `agy` is read as `antigravity`
   and answered as `antigravity`. Without `tool` there is one row per tool, in that order.
@@ -730,15 +733,49 @@ agy's version.
   launcher resolves to. `method` is `native`, `standalone`, `npm`, `brew`, `apt`, `release` or
   `unknown` (`null` when not installed). `problems` holds `{kind: "two_installs", other: <method>}` and
   `{kind: "cant_tell"}`. Notchling's own row is the daemon's version and its own executable.
-- `running`, `reference`, `usable`, `failed` and `check` are empty in phase 1 (`[]`, `null`, `false`,
-  `[]`, `null`); phase 2 fills them. The shape is final, so a client reads it once.
+- `running` is `[]` until phase 4. `reference` is `null` or `{version, sha256, result, partly, at,
+  unchecked}` (`result` is `partly` for every check built so far, `partly` is `result == partly`);
+  `usable` is true only when the installed version and binary (SHA-256) are the ones the reference
+  checked; `failed` is `[{version, part, at, why}]` (`part` is `version`, `doctor`, `exec_flags`,
+  `transcript` or `self_test`; `why` is fixed text the daemon writes, never tool output); `check` is
+  `null`, `{running: true}` or the last result as `versions.checked` carries it.
+- `versions.check {tool}` runs the smoke check: files and flags only (`<tool> --version`,
+  `claude doctor`, `codex exec --help`, then Notchling's readers in strict mode over the newest 20
+  transcripts or rollouts, each at most 4 MB; Notchling's own check is in process). It starts no session,
+  opens no pty, sends no turn and writes nothing under `~/.claude`, `~/.codex` or `~/.gemini`. A new
+  version or binary is checked by itself after a rescan; a failed version is checked again only by this
+  op. `{started: false, running: true}` when that tool's check is already running, `{started: false,
+  running: false}` when checks are off (a fixture root) or the tool has no known version. A check that
+  can't tell (a command didn't start or timed out) is tried once more after 2 minutes, then fails with
+  part `version`. Every result is `partly`: nothing in the check sees screens, dialogs or turns.
+- `versions.latest` reads the vendor's newest version with `curl --proto =https -fsSL --max-time 10` through
+  the launcher: Claude Code's `releases/latest` file, npm's `@openai/codex/latest` and Antigravity's manifest
+  for this Mac's platform. The answer is kept an hour (a failed read 5 minutes); `versions.get` rows carry
+  the kept one as `latest`. Notchling has none (its check stays in the app's update check). The error names
+  the host and nothing else.
+- `versions.update_local` runs the method's own update on the Mac: `claude update`, `npm install -g
+  <package>@latest`, `brew upgrade --cask <cask>`, Codex's installer, `agy update`. With the `install`
+  switch off it answers `forbidden` with the switch's off message and starts nothing. `to` is Go Back: only
+  the newest seen version below the installed one that hasn't failed, only where the method can install an
+  exact version (`claude install <v>`, `npm install -g <package>@<v>`, Codex's installer with
+  `--release <v>`); the same version is `goBack` in the `versions.get` row (`null` when there is none or the
+  method can't pin). A second update of one tool while it runs answers `{started: false, running: true}`.
+  `versions.updated {tool, from, to, ok}` follows, then a rescan checks the new version. The `versions.changed`
+  fact records the cause `user_update` (or `rollback` for Go Back) when the daemon ran the update.
+- `soak` is `null` or `{since, turns, unknown, line}`: every 10 minutes the daemon runs the strict pass over
+  transcripts written since the reference and keeps the highest count it has seen of turns and unknown
+  lines written by the reference's version (`line` is "Since 2.1.324: 14 turns read, nothing unknown").
+  A new reference starts a new soak. It is shown and gates nothing: it never changes a reference or a result.
 - `versions.workers` is what Machines saved in `notchling.db` (`versions/workers`), read back through the
   typed `WorkerTools`, so a field that isn't part of it never reaches a client. `ToolState` is
   `{state: "notInstalled"}` or `{state: "installed", version, method, path}`.
 - Topic `versions` (agent tier): `versions.changed {tool, installed}` when a rescan finds a different
-  version or binary. Rescans follow `platform::watch` on the install folders and run every 10 minutes.
+  version or binary; `versions.checked {tool, version, result, failedPart, why, unknownCount, unchecked,
+  at}` when a check finishes, `versions.updated {tool, from, to, ok}` when `versions.update_local` ends (`result` is `partly`, `failed` or `cant_tell`). Rescans follow
+  `platform::watch` on the install folders and run every 10 minutes.
 - A version seen for the first time in a data folder is a `tool.version_seen` event (the tool and the
-  version, never a path or free text). A change is not recorded yet: the registry has no kind for it.
+  version, never a path or free text). The other facts (a change, a check, a drift, a self-update, a failed
+  load) are not recorded yet: the registry has no kind for them.
 
 ## `codex_children.rs`
 

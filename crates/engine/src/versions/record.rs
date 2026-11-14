@@ -1,3 +1,4 @@
+use super::check::{CheckPart, CheckResult, CheckTier};
 use super::{Method, Tool, Version};
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
@@ -37,6 +38,31 @@ pub enum Fact {
         to: Option<Version>,
         method: Method,
         cause: Cause,
+    },
+    LoadFailed {
+        doc: &'static str,
+    },
+    Drift {
+        tool: Tool,
+        machine: String,
+        expected: Version,
+        found: Version,
+    },
+    SelfUpdate {
+        tool: Tool,
+        machine: String,
+        action: String,
+        ok: bool,
+        detail: String,
+    },
+    Checked {
+        tool: Tool,
+        version: Version,
+        tier: CheckTier,
+        result: CheckResult,
+        failed_part: Option<CheckPart>,
+        unknown_count: u32,
+        duration_ms: u64,
     },
 }
 
@@ -78,6 +104,60 @@ impl Fact {
                     word(from),
                     word(to),
                     cause.word()
+                ),
+            ),
+            Fact::LoadFailed { doc } => ("versions.load_failed", plain(doc)),
+            Fact::Drift {
+                tool,
+                machine,
+                expected,
+                found,
+            } => (
+                "versions.drift",
+                format!(
+                    "{} {} {} expected {}",
+                    plain(machine),
+                    tool.name(),
+                    plain(found.as_str()),
+                    plain(expected.as_str())
+                ),
+            ),
+            Fact::SelfUpdate {
+                tool,
+                machine,
+                action,
+                ok,
+                detail,
+            } => (
+                "versions.self_update",
+                format!(
+                    "{} {} {} {} {}",
+                    plain(machine),
+                    tool.name(),
+                    plain(action),
+                    if *ok { "ok" } else { "failed" },
+                    plain(detail)
+                ),
+            ),
+            Fact::Checked {
+                tool,
+                version,
+                tier,
+                result,
+                failed_part,
+                unknown_count,
+                duration_ms,
+            } => (
+                "versions.checked",
+                format!(
+                    "{} {} {} {} {} {} {}",
+                    tool.name(),
+                    plain(version.as_str()),
+                    tier.word(),
+                    result.word(),
+                    failed_part.map_or("none", |p| p.word()),
+                    unknown_count,
+                    duration_ms
                 ),
             ),
         }

@@ -1,15 +1,31 @@
+pub mod check;
+pub mod drift;
 mod identity;
+pub mod knob;
+pub mod latest;
 pub mod mac;
 pub mod mark;
 mod method;
 pub mod mismatch;
 mod parse;
 pub mod record;
+pub mod reference;
+pub mod selfupdate_log;
+pub mod soak;
+pub mod update;
 mod version;
 pub mod worker;
 
 #[cfg(test)]
+mod check_tests;
+#[cfg(test)]
+mod drift_tests;
+#[cfg(test)]
 mod identity_tests;
+#[cfg(test)]
+mod knob_tests;
+#[cfg(test)]
+mod latest_tests;
 #[cfg(test)]
 mod mac_tests;
 #[cfg(test)]
@@ -20,6 +36,14 @@ mod mismatch_tests;
 mod parse_tests;
 #[cfg(test)]
 mod record_tests;
+#[cfg(test)]
+mod reference_tests;
+#[cfg(test)]
+mod selfupdate_log_tests;
+#[cfg(test)]
+mod soak_tests;
+#[cfg(test)]
+mod update_tests;
 #[cfg(test)]
 mod version_tests;
 #[cfg(test)]

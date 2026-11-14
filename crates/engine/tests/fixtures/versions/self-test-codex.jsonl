@@ -1,0 +1,5 @@
+{"ordinal":0,"type":"session_meta","payload":{"id":"s1","cwd":"/tmp/demo","cli_version":"self-test"}}
+{"ordinal":1,"type":"event_msg","payload":{"type":"task_started"}}
+{"ordinal":2,"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Reply with OK"}]}}
+{"ordinal":3,"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"OK"}]}}
+{"ordinal":4,"type":"event_msg","payload":{"type":"task_complete"}}

@@ -101,6 +101,26 @@ Cloudflare Tunnel and Cloudflare Access that you set up.
   to the phone inside the pairing QR code.
 - The hostname and team fields start filled in with the maintainer's own. Replace them with yours.
 
+## Tool versions on this Mac
+
+Settings > Agents shows the newest version of each tool, so it can tell you when the Mac is behind.
+
+- **When:** when Settings > Agents opens, and on Check for Updates, at most once an hour for each tool
+  (a failed read is tried again after 5 minutes). Never in the background.
+- **What:** `curl` fetches one public file over https, with no cookie, no account, no login and no
+  identifier: `https://downloads.claude.ai/claude-code-releases/latest` (Claude Code),
+  `https://registry.npmjs.org/@openai/codex/latest` (Codex) and Antigravity's own release manifest, the
+  URL its installer reads (`https://antigravity-cli-auto-updater-974169037036.us-central1.run.app/manifests/<platform>.json`).
+  Your Mac's operating system and architecture choose the Antigravity file name. Notchling's own update
+  check is separate and unchanged.
+- **Why:** to show "Latest" next to the installed version, and to offer Update.
+- The Update and Go Back buttons run the tool's own update command on this Mac (`claude update`,
+  `npm install -g`, `brew upgrade --cask`, Codex's installer, `agy update`), only while **Install** is on,
+  and only after you click. The tool then talks to its vendor as it always does.
+- The check that follows an update runs the tool's `--version`, `claude doctor` or `codex exec --help` and
+  reads transcripts already on this Mac. It starts no session, sends no prompt and writes nothing to the
+  tools' folders.
+
 ## Machines
 
 Only when `machines.json` lists a machine:

@@ -1,13 +1,20 @@
 use crate::acting_ops::Room;
 use crate::late_emit::Events;
 use crate::op_group::OpGroup;
+use crate::switches::SwitchFlag;
+use crate::versions_check::{Checks, Parts};
+use crate::versions_drift::Drifts;
+use crate::versions_update::Updates;
 use notchling_engine::control::launcher::{LaunchOutput, Launcher};
 use notchling_engine::control::plan::Command;
 use notchling_engine::machines::versions_facts;
 use notchling_engine::store;
 use notchling_engine::versions::mac::{detect, watch_paths, Installed, Problem, Roots};
 use notchling_engine::versions::record::{Cause, Fact, Recorder};
-use notchling_engine::versions::{cli_output, IdentityCache, Method, Tool, Version, WorkerTools};
+use notchling_engine::versions::update::go_back_target;
+use notchling_engine::versions::{
+    can_pin, cli_output, IdentityCache, Method, Tool, Version, WorkerTools,
+};
 use notchling_events::kinds::agents::{ToolVersionSeen, VersionedTool};
 use notchling_events::spec::Outcome;
 use notchling_events::{field, Event};
@@ -24,6 +31,8 @@ use std::time::{Duration, Instant};
 pub const WORKERS_DOC: &str = versions_facts::DOC;
 pub const SEEN_DOC: &str = "versions/seen";
 pub const RESCAN_EVERY: Duration = Duration::from_secs(600);
+pub const SOAK_EVERY: Duration = Duration::from_secs(600);
+pub const DRIFT_EVERY: Duration = Duration::from_secs(60);
 pub const AGY_ASK_EVERY_MS: i64 = 600_000;
 pub const AGY_TIMEOUT: Duration = Duration::from_secs(5);
 const SEEN_KEEP: usize = 400;
@@ -83,6 +92,10 @@ pub struct VersionsOps {
     recorder: Arc<dyn Recorder>,
     clock: Clock,
     own: Version,
+    checks: Arc<Checks>,
+    drifts: Arc<Drifts>,
+    updates: Arc<Updates>,
+    rescan_wanted: Arc<AtomicBool>,
     exe: Mutex<Option<PathBuf>>,
     state: Mutex<State>,
     cache: Mutex<IdentityCache>,
@@ -102,7 +115,14 @@ fn installed_json(found: &Installed) -> Value {
     })
 }
 
-fn row(tool: Tool, found: Option<&Installed>) -> Value {
+fn row(tool: Tool, found: Option<&Installed>, checks: &Checks) -> Value {
+    let Parts {
+        reference,
+        usable,
+        failed,
+        check,
+        soak,
+    } = checks.parts(tool, found);
     let Some(found) = found else {
         return json!({
             "tool": tool.name(),
@@ -111,10 +131,11 @@ fn row(tool: Tool, found: Option<&Installed>) -> Value {
             "path": null,
             "problems": [],
             "running": [],
-            "reference": null,
+            "reference": reference,
             "usable": false,
-            "failed": [],
-            "check": null,
+            "failed": failed,
+            "check": check,
+            "soak": soak,
         });
     };
     json!({
@@ -124,10 +145,11 @@ fn row(tool: Tool, found: Option<&Installed>) -> Value {
         "path": found.path,
         "problems": found.problems,
         "running": [],
-        "reference": null,
-        "usable": false,
-        "failed": [],
-        "check": null,
+        "reference": reference,
+        "usable": usable,
+        "failed": failed,
+        "check": check,
+        "soak": soak,
     })
 }
 
@@ -141,6 +163,26 @@ impl VersionsOps {
         clock: Clock,
         own: Version,
     ) -> Arc<VersionsOps> {
+        let checks = Checks::new(
+            launcher.clone(),
+            roots.home.clone(),
+            data_dir.clone(),
+            room.clone(),
+            recorder.clone(),
+            clock.clone(),
+        );
+        let drifts = Arc::new(Drifts::new(
+            data_dir.clone(),
+            recorder.clone(),
+            clock.clone(),
+        ));
+        let rescan_wanted = Arc::new(AtomicBool::new(false));
+        let updates = Arc::new(Updates::new(
+            launcher.clone(),
+            room.clone(),
+            clock.clone(),
+            rescan_wanted.clone(),
+        ));
         Arc::new(VersionsOps {
             roots,
             data_dir,
@@ -149,6 +191,10 @@ impl VersionsOps {
             recorder,
             clock,
             own,
+            checks,
+            drifts,
+            updates,
+            rescan_wanted,
             exe: Mutex::new(std::env::current_exe().ok()),
             state: Mutex::new(State::default()),
             cache: Mutex::new(IdentityCache::new()),
@@ -156,6 +202,52 @@ impl VersionsOps {
             stop: Arc::new(AtomicBool::new(false)),
             thread: Mutex::new(None),
         })
+    }
+
+    pub fn updates(&self) -> &Arc<Updates> {
+        &self.updates
+    }
+
+    pub fn set_install_switch(&self, switch: Arc<SwitchFlag>) {
+        self.updates.set_switch(switch);
+    }
+
+    pub fn wait_updates(&self) {
+        self.updates.wait();
+    }
+
+    pub fn checks(&self) -> &Arc<Checks> {
+        &self.checks
+    }
+
+    pub fn drifts(&self) -> &Arc<Drifts> {
+        &self.drifts
+    }
+
+    pub fn drift_pass(&self) {
+        let found = self.snapshot();
+        let book = self.checks.book();
+        let reference: BTreeMap<Tool, Version> = found
+            .iter()
+            .filter_map(|(tool, installed)| {
+                let version = installed.version.as_ref()?;
+                let sha = &installed.identity.as_ref()?.sha256;
+                if !book.usable(*tool, version, sha) {
+                    return None;
+                }
+                Some((*tool, book.reference(*tool)?.version.clone()))
+            })
+            .collect();
+        self.drifts.pass(&reference);
+    }
+
+    pub fn soak_pass(&self) {
+        self.checks.soak_pass();
+    }
+
+    pub fn wait_checks(&self) {
+        self.updates.wait();
+        self.checks.wait();
     }
 
     pub fn set_exe(&self, exe: Option<PathBuf>) {
@@ -190,6 +282,46 @@ impl VersionsOps {
         let before = lock(&self.state).tools.replace(found.clone());
         self.announce(before, &found);
         self.note_seen(&found);
+        self.auto_check(&found);
+        self.drift_pass();
+    }
+
+    fn auto_check(&self, found: &BTreeMap<Tool, Installed>) {
+        self.checks.moved_on(found);
+        for (tool, installed) in found {
+            if self.checks.wanted(*tool, installed) {
+                self.checks.request(*tool, installed, false);
+            }
+        }
+    }
+
+    pub fn retry_due_checks(&self) {
+        let due = self.checks.due_retries();
+        if due.is_empty() {
+            return;
+        }
+        let found = self.snapshot();
+        for tool in due {
+            if let Some(installed) = found.get(&tool) {
+                self.checks.request(tool, installed, false);
+            }
+        }
+    }
+
+    fn check(&self, args: &Value) -> Result<Value, ApiError> {
+        let tool = Self::tool_arg(args)?;
+        if !self.checks.enabled() {
+            return Ok(json!({ "started": false, "running": false }));
+        }
+        let found = self.snapshot();
+        let Some(installed) = found.get(&tool).filter(|i| i.version.is_some()) else {
+            return Ok(json!({ "started": false, "running": false }));
+        };
+        if self.checks.is_running(tool) {
+            return Ok(json!({ "started": false, "running": true }));
+        }
+        let started = self.checks.request(tool, installed, true);
+        Ok(json!({ "started": started, "running": !started && self.checks.is_running(tool) }))
     }
 
     fn own_install(&self, cache: &mut IdentityCache) -> Option<Installed> {
@@ -274,7 +406,7 @@ impl VersionsOps {
                     from,
                     to,
                     method: new.or(old).map_or(Method::Unknown, |i| i.method),
-                    cause: Cause::Outside,
+                    cause: self.updates.take_cause(tool, (self.clock)()),
                 });
             }
         }
@@ -338,9 +470,86 @@ impl VersionsOps {
         let rows: Vec<Value> = Tool::ALL
             .into_iter()
             .filter(|t| only.is_none_or(|o| o == *t))
-            .map(|t| row(t, found.get(&t)))
+            .map(|t| {
+                let mut value = row(t, found.get(&t), &self.checks);
+                value["latest"] =
+                    json!(self.updates.known_latest(t).map(|v| v.as_str().to_string()));
+                value["updating"] = json!(self.updates.is_running(t));
+                value["goBack"] = json!(found
+                    .get(&t)
+                    .and_then(|i| self.go_back(t, i))
+                    .map(|v| v.as_str().to_string()));
+                value
+            })
             .collect();
         Ok(json!({ "tools": rows }))
+    }
+
+    fn seen_versions(&self, tool: Tool) -> Vec<Version> {
+        let list: Vec<String> = store::doc(&self.data_dir, SEEN_DOC)
+            .ok()
+            .flatten()
+            .and_then(|text| serde_json::from_str(&text).ok())
+            .unwrap_or_default();
+        let prefix = format!("{}:", tool.name());
+        list.iter()
+            .filter_map(|entry| entry.strip_prefix(&prefix))
+            .filter_map(Version::parse)
+            .collect()
+    }
+
+    fn go_back(&self, tool: Tool, installed: &Installed) -> Option<Version> {
+        if !can_pin(tool, installed.method) || tool == Tool::Notchling {
+            return None;
+        }
+        let current = installed.version.as_ref()?;
+        let failed: Vec<Version> = self
+            .checks
+            .book()
+            .failed_versions(tool)
+            .iter()
+            .filter_map(|(v, _)| Version::parse(v))
+            .collect();
+        go_back_target(&self.seen_versions(tool), current, &failed)
+    }
+
+    fn tool_arg(args: &Value) -> Result<Tool, ApiError> {
+        let name = args
+            .get("tool")
+            .and_then(Value::as_str)
+            .ok_or_else(|| ApiError::bad_request("tool is a name"))?;
+        Tool::from_name(name).ok_or_else(|| ApiError::bad_request("unknown tool"))
+    }
+
+    fn latest(&self, args: &Value) -> Result<Value, ApiError> {
+        let tool = Self::tool_arg(args)?;
+        Ok(self.updates.latest(tool))
+    }
+
+    fn update_local(&self, args: &Value) -> Result<Value, ApiError> {
+        self.updates.allowed()?;
+        let tool = Self::tool_arg(args)?;
+        let to = match args.get("to") {
+            None | Some(Value::Null) => None,
+            Some(Value::String(text)) => {
+                Some(Version::parse(text).ok_or_else(|| ApiError::bad_request("to is a version"))?)
+            }
+            Some(_) => return Err(ApiError::bad_request("to is a version")),
+        };
+        let found = self.snapshot();
+        let installed = found
+            .get(&tool)
+            .filter(|i| i.version.is_some())
+            .ok_or_else(|| ApiError::bad_request("that tool isn't installed here"))?;
+        let cause = if to.is_some() {
+            if to != self.go_back(tool, installed) {
+                return Err(ApiError::bad_request("that isn't a version to go back to"));
+            }
+            Cause::Rollback
+        } else {
+            Cause::UserUpdate
+        };
+        self.updates.start(tool, installed, to, cause)
     }
 
     fn workers(&self) -> Value {
@@ -374,23 +583,36 @@ impl VersionsOps {
         if let Some(handle) = handle {
             let _ = handle.join();
         }
+        self.checks.wait();
     }
 
     fn run(&self) {
         self.rescan();
         let mut last = Instant::now();
+        let mut soaked = Instant::now() - SOAK_EVERY;
+        let mut drifted = Instant::now();
         let mut watched = watch_paths(&self.roots);
         let mut watcher = Watcher::start(watched.clone(), WatchConfig::default()).ok();
         while !self.stop.load(Ordering::SeqCst) {
-            let changed = match &watcher {
+            let mut changed = match &watcher {
                 Some((_, rx)) => rx.recv_timeout(Duration::from_millis(200)).is_ok(),
                 None => {
                     std::thread::sleep(Duration::from_millis(200));
                     false
                 }
             };
+            changed |= self.rescan_wanted.swap(false, Ordering::SeqCst);
             if self.stop.load(Ordering::SeqCst) {
                 break;
+            }
+            self.retry_due_checks();
+            if drifted.elapsed() >= DRIFT_EVERY {
+                drifted = Instant::now();
+                self.drift_pass();
+            }
+            if soaked.elapsed() >= SOAK_EVERY {
+                soaked = Instant::now();
+                self.checks.soak_pass();
             }
             if !changed && last.elapsed() < RESCAN_EVERY {
                 continue;
@@ -412,6 +634,9 @@ impl OpGroup for VersionsOps {
         match op {
             ops::VERSIONS_GET => Some(OpSpec::AGENT),
             ops::VERSIONS_WORKERS => Some(OpSpec::APP),
+            ops::VERSIONS_CHECK => Some(OpSpec::APP),
+            ops::VERSIONS_LATEST => Some(OpSpec::APP),
+            ops::VERSIONS_UPDATE_LOCAL => Some(OpSpec::APP),
             _ => None,
         }
     }
@@ -420,6 +645,9 @@ impl OpGroup for VersionsOps {
         match op {
             ops::VERSIONS_GET => self.get(args),
             ops::VERSIONS_WORKERS => Ok(self.workers()),
+            ops::VERSIONS_CHECK => self.check(args),
+            ops::VERSIONS_LATEST => self.latest(args),
+            ops::VERSIONS_UPDATE_LOCAL => self.update_local(args),
             other => Err(ApiError::internal(format!("{other} has no handler"))),
         }
     }

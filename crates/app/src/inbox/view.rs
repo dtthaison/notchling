@@ -114,18 +114,25 @@ impl InboxPanelView {
         .detach();
     }
 
-    fn bring_up(&mut self, open: Option<&Value>) {
+    fn bring_up(&mut self, open: Option<&Value>, cx: &mut Context<Self>) {
         match open.and_then(target) {
             Some(Target::Approval(ticket)) | Some(Target::Request(ticket)) => {
                 crate::mac::vault_prompts::raise(&ticket);
             }
-            None => {}
+            Some(Target::Settings { page, .. }) if page == "agents" => {
+                cx.defer(crate::mac::shell::open_chat_settings_agents);
+            }
+            Some(Target::Machines(_)) => {
+                self.note = Some("Open Machines from the menu bar.".to_string());
+                cx.notify();
+            }
+            Some(Target::Settings { .. }) | None => {}
         }
     }
 
     fn act(&mut self, id: String, action: ActionId, open: Option<Value>, cx: &mut Context<Self>) {
         if is_local(action) {
-            self.bring_up(open.as_ref());
+            self.bring_up(open.as_ref(), cx);
             return;
         }
         if !self.busy.insert(id.clone()) {
@@ -221,7 +228,7 @@ impl InboxPanelView {
             body = body
                 .cursor_pointer()
                 .on_click(cx.listener(move |this, _, _, cx| {
-                    this.bring_up(open.as_ref());
+                    this.bring_up(open.as_ref(), cx);
                     cx.notify();
                 }));
         }

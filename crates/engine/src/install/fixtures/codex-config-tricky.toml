@@ -1,0 +1,13 @@
+# top comment
+notes = "a # not a comment, [features] nor a key = true"
+list = [
+  "check_for_update_on_startup = true",
+  "x"
+]
+text = """
+daemon_auto_start = true
+[features]
+"""
+
+[features]
+a = 1

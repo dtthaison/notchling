@@ -14,7 +14,7 @@ use super::step::{
 use crate::lanes::quote;
 use std::collections::{BTreeMap, BTreeSet};
 
-fn nonce() -> Option<String> {
+pub(super) fn nonce() -> Option<String> {
     use ring::rand::{SecureRandom, SystemRandom};
     let mut b = [0u8; 8];
     SystemRandom::new().fill(&mut b).ok()?;

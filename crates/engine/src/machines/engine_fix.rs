@@ -6,6 +6,7 @@ use super::runner::{Channel, OutputSink};
 use super::shell;
 use super::step::{run, FixContext, FixOutcome, SetupStep, StepFix, StepId};
 use crate::accounts::Secret;
+use crate::versions::{selfupdate_log, Tool};
 use std::sync::Arc;
 
 fn fail(m: impl Into<String>) -> FixOutcome {
@@ -135,6 +136,7 @@ impl SetupEngine {
         password: Option<Secret>,
         body: impl FnOnce(&FixContext) -> FixOutcome,
     ) -> FixOutcome {
+        let self_update = id.self_update_tool();
         {
             let mut s = lock(&self.state);
             if s.running.contains_key(&m.name) {
@@ -175,6 +177,9 @@ impl SetupEngine {
             *s.fixes_ended.entry(m.name.clone()).or_default() += 1;
         }
         self.audit(&m.name, title, raw.ok);
+        if let Some(tool) = self_update {
+            self.log_self_update(&m.name, tool, title, raw.ok, &message);
+        }
         self.changed();
         FixOutcome {
             ok: raw.ok,
@@ -405,6 +410,19 @@ pub(super) fn append(
 }
 
 impl SetupEngine {
+    fn log_self_update(&self, machine: &str, tool: Tool, title: &str, ok: bool, message: &str) {
+        let Some(data) = &self.deps.offers_data else {
+            return;
+        };
+        let action = if title.starts_with("Self-Update On") {
+            "on"
+        } else {
+            "off"
+        };
+        let at_ms = ((self.deps.clock)() * 1000.0) as i64;
+        let _ = selfupdate_log::append(data, at_ms, tool, machine, action, ok, message);
+    }
+
     fn audit(&self, machine: &str, title: &str, ok: bool) {
         let Some(path) = &self.deps.audit else {
             return;

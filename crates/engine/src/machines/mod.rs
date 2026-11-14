@@ -16,6 +16,7 @@ pub mod offers;
 pub mod poller;
 pub mod process;
 pub mod registry;
+pub mod remote_edit;
 pub mod repo_common;
 pub mod roots;
 pub mod runner;
@@ -31,6 +32,7 @@ pub mod steps_sd;
 pub mod steps_sd_check;
 pub mod steps_sd_service;
 pub mod steps_secret;
+pub mod steps_selfupdate;
 mod steps_versions;
 mod steps_xcode;
 pub mod token_creation;
@@ -87,6 +89,8 @@ mod tests_poller;
 #[cfg(test)]
 mod tests_registry;
 #[cfg(test)]
+mod tests_remote_edit;
+#[cfg(test)]
 mod tests_repo;
 #[cfg(test)]
 mod tests_repo_push;
@@ -113,11 +117,15 @@ mod tests_sd_service;
 #[cfg(test)]
 mod tests_sd_service_b;
 #[cfg(test)]
+mod tests_sd_service_versions;
+#[cfg(test)]
 mod tests_sd_worker;
 #[cfg(test)]
 mod tests_secret_steps;
 #[cfg(test)]
 mod tests_secrets;
+#[cfg(test)]
+mod tests_selfupdate;
 #[cfg(test)]
 mod tests_shell;
 #[cfg(test)]

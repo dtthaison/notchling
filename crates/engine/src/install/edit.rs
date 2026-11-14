@@ -1,4 +1,4 @@
-use super::jsonc::{self, next_significant, Kind, Node, ParseError};
+use super::jsonc::{self, next_significant, Kind, Member, Node, ParseError};
 use super::render::{string, Json};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -190,6 +190,21 @@ pub fn append(
         edits.push((at, at, item));
     }
     Ok(splice(text, edits))
+}
+
+pub fn set_member(text: &str, path: &[Seg], key: &str, value: &Json) -> Result<String, EditError> {
+    let root = jsonc::parse(text)?;
+    let target = locate(&root, path).ok_or(EditError::Path("no such place"))?;
+    let members = target.members().ok_or(EditError::Path("not an object"))?;
+    let found: Vec<&Member> = members.iter().filter(|m| m.key == key).collect();
+    match found.as_slice() {
+        [] => append(text, path, Some(key), value),
+        [one] => Ok(splice(
+            text,
+            vec![(one.value.start, one.value.end, value.compact())],
+        )),
+        _ => Err(EditError::Path("a repeated key")),
+    }
 }
 
 pub fn remove(text: &str, path: &[Seg], index: usize) -> Result<String, EditError> {
