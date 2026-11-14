@@ -1,6 +1,6 @@
 # Localization: one English source, every platform generated
 
-Status: design, waiting for the maintainer's approval. Date: 2026-11-13.
+Status: accepted by the maintainer on 2026-11-14 as [decision XXXX](../../decisions/XXXX-localization-fluent-source.md). Date: 2026-11-13.
 Approach A (a Fluent source) was chosen by the maintainer on 2026-11-13; this document turns it into a design. Once approved it becomes decision record 0022 (step L0 below; 0019 to 0021 are taken by other branches). Nothing is built yet.
 
 ## Contents

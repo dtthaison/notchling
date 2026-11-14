@@ -1,0 +1,255 @@
+{
+  "areas": [
+    {
+      "name": "phone",
+      "paths": [
+        "apps/flutter/lib/**"
+      ],
+      "moved": false
+    },
+    {
+      "name": "settings",
+      "paths": [
+        "crates/app/src/sheets/settings*.rs",
+        "crates/app/src/sheets/settings_view/**",
+        "crates/app/src/sheets/settings_hooks_view.rs",
+        "crates/app/src/sheets/hook_rows.rs",
+        "crates/app/src/sheets/agents*.rs",
+        "crates/app/src/activity/**"
+      ],
+      "moved": false
+    },
+    {
+      "name": "chat-sidebar",
+      "paths": [
+        "crates/app/src/chat/sidebar.rs",
+        "crates/app/src/chat/codex_list.rs",
+        "crates/app/src/chat/used.rs",
+        "crates/app/src/chat/closed.rs",
+        "crates/app/src/chat/cleared.rs",
+        "crates/app/src/chat/delegated.rs",
+        "crates/app/src/chat/lane_limits.rs",
+        "crates/app/src/chat/limit_ring.rs",
+        "crates/app/src/chat/format.rs",
+        "crates/app/src/chat/view/sidebar.rs",
+        "crates/app/src/chat/view/row_menu.rs",
+        "crates/app/src/chat/view/accounts.rs",
+        "crates/app/src/chat/view/inbox.rs",
+        "crates/app/src/chat/view/phone.rs",
+        "crates/app/src/chat/view/limit_ring.rs"
+      ],
+      "moved": false
+    },
+    {
+      "name": "chat-conversation",
+      "paths": [
+        "crates/app/src/chat/rows.rs",
+        "crates/app/src/chat/steps.rs",
+        "crates/app/src/chat/message_meta.rs",
+        "crates/app/src/chat/markdown.rs",
+        "crates/app/src/chat/markdown_cache.rs",
+        "crates/app/src/chat/blocks.rs",
+        "crates/app/src/chat/paths.rs",
+        "crates/app/src/chat/subagent_view.rs",
+        "crates/app/src/chat/selection.rs",
+        "crates/app/src/chat/log.rs",
+        "crates/app/src/chat/loader.rs",
+        "crates/app/src/chat/follow.rs",
+        "crates/app/src/chat/scroll_trace.rs",
+        "crates/app/src/chat/escape.rs",
+        "crates/app/src/chat/image_size.rs",
+        "crates/app/src/chat/view/conversation.rs",
+        "crates/app/src/chat/view/conversation_list.rs",
+        "crates/app/src/chat/view/conversation_view.rs",
+        "crates/app/src/chat/view/steps_view.rs",
+        "crates/app/src/chat/view/markdown.rs",
+        "crates/app/src/chat/view/message_actions.rs",
+        "crates/app/src/chat/view/copy.rs",
+        "crates/app/src/chat/view/copy_menu.rs",
+        "crates/app/src/chat/view/row_blocks.rs",
+        "crates/app/src/chat/view/row_select.rs",
+        "crates/app/src/chat/view/select.rs",
+        "crates/app/src/chat/view/subagent.rs",
+        "crates/app/src/chat/view/scroll_probe.rs",
+        "crates/app/src/chat/view/list_probe.rs",
+        "crates/app/src/chat/view/list_probe_run.rs",
+        "crates/app/src/chat/view/tool/**"
+      ],
+      "moved": false
+    },
+    {
+      "name": "chat-reply-box",
+      "paths": [
+        "crates/app/src/chat/composer.rs",
+        "crates/app/src/chat/prompts.rs",
+        "crates/app/src/chat/prompt_flow.rs",
+        "crates/app/src/chat/pickers.rs",
+        "crates/app/src/chat/claude_picker.rs",
+        "crates/app/src/chat/slash_menu.rs",
+        "crates/app/src/chat/drops.rs",
+        "crates/app/src/chat/outgoing.rs",
+        "crates/app/src/chat/drafts.rs",
+        "crates/app/src/chat/run_command.rs",
+        "crates/app/src/chat/activity.rs",
+        "crates/app/src/chat/tasks_bar.rs",
+        "crates/app/src/chat/view/composer.rs",
+        "crates/app/src/chat/view/prompts.rs",
+        "crates/app/src/chat/view/slash_menu.rs",
+        "crates/app/src/chat/view/drop.rs",
+        "crates/app/src/chat/view/tasks.rs",
+        "crates/app/src/chat/view/opinions.rs",
+        "crates/app/src/chat/view/tools.rs",
+        "crates/app/src/chat/view/native_spin.rs"
+      ],
+      "moved": false
+    },
+    {
+      "name": "chat-details",
+      "paths": [
+        "crates/app/src/chat/inspector.rs",
+        "crates/app/src/chat/paging.rs",
+        "crates/app/src/chat/subagent_rows.rs",
+        "crates/app/src/chat/shell_rows.rs",
+        "crates/app/src/chat/shell_list.rs",
+        "crates/app/src/chat/git.rs",
+        "crates/app/src/chat/branch.rs",
+        "crates/app/src/chat/branch_rows.rs",
+        "crates/app/src/chat/view/inspector.rs",
+        "crates/app/src/chat/view/paged_rows.rs",
+        "crates/app/src/chat/view/repo.rs",
+        "crates/app/src/chat/view/repo_section.rs",
+        "crates/app/src/chat/view/changes.rs",
+        "crates/app/src/chat/view/changes_panel.rs",
+        "crates/app/src/chat/view/diff_panel.rs",
+        "crates/app/src/chat/view/shell_probe.rs"
+      ],
+      "moved": false
+    },
+    {
+      "name": "chat-window",
+      "paths": [
+        "crates/app/src/chat/header.rs",
+        "crates/app/src/chat/panels.rs",
+        "crates/app/src/chat/page_panel.rs",
+        "crates/app/src/chat/file_panel.rs",
+        "crates/app/src/chat/simulator.rs",
+        "crates/app/src/chat/terminal.rs",
+        "crates/app/src/chat/data.rs",
+        "crates/app/src/chat/history.rs",
+        "crates/app/src/chat/reload.rs",
+        "crates/app/src/chat/mod.rs",
+        "crates/app/src/chat/view/header.rs",
+        "crates/app/src/chat/view/root.rs",
+        "crates/app/src/chat/view/mod.rs",
+        "crates/app/src/chat/view/load.rs",
+        "crates/app/src/chat/view/pane.rs",
+        "crates/app/src/chat/view/panels.rs",
+        "crates/app/src/chat/view/page_panel.rs",
+        "crates/app/src/chat/view/simulator/**",
+        "crates/app/src/chat/view/terminal.rs",
+        "crates/app/src/chat/view/sheets.rs",
+        "crates/app/src/chat/view/render_map.rs",
+        "crates/app/src/sheets/new_session.rs",
+        "crates/app/src/sheets/second_opinion_view.rs",
+        "crates/app/src/sheets/banner.rs",
+        "crates/app/src/sheets/view.rs",
+        "crates/app/src/sheets/mod.rs"
+      ],
+      "moved": false
+    },
+    {
+      "name": "notch",
+      "paths": [
+        "crates/app/src/notch/**"
+      ],
+      "moved": false
+    },
+    {
+      "name": "accounts",
+      "paths": [
+        "crates/app/src/accounts/**"
+      ],
+      "moved": false
+    },
+    {
+      "name": "vault",
+      "paths": [
+        "crates/app/src/vault/**"
+      ],
+      "moved": false
+    },
+    {
+      "name": "pages",
+      "paths": [
+        "crates/app/src/pages/**"
+      ],
+      "moved": false
+    },
+    {
+      "name": "search",
+      "paths": [
+        "crates/app/src/search/**"
+      ],
+      "moved": false
+    },
+    {
+      "name": "welcome",
+      "paths": [
+        "crates/app/src/welcome/**"
+      ],
+      "moved": false
+    },
+    {
+      "name": "machines",
+      "paths": [
+        "crates/app/src/machines/**"
+      ],
+      "moved": false
+    },
+    {
+      "name": "tools",
+      "paths": [
+        "crates/app/src/tools/**"
+      ],
+      "moved": false
+    },
+    {
+      "name": "switches",
+      "paths": [
+        "crates/app/src/switches/**"
+      ],
+      "moved": false
+    },
+    {
+      "name": "inbox",
+      "paths": [
+        "crates/app/src/inbox/**"
+      ],
+      "moved": false
+    },
+    {
+      "name": "phone-pairing",
+      "paths": [
+        "crates/app/src/phone/**"
+      ],
+      "moved": false
+    },
+    {
+      "name": "shell",
+      "paths": [
+        "crates/app/src/mac/**",
+        "crates/app/src/menu.rs",
+        "crates/app/src/dock.rs",
+        "crates/app/src/acting.rs"
+      ],
+      "moved": false
+    },
+    {
+      "name": "kit",
+      "paths": [
+        "crates/kit/src/**"
+      ],
+      "moved": false
+    }
+  ]
+}

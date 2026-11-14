@@ -28,7 +28,8 @@ This file is the start. Codex and Antigravity read AGENTS.md files themselves; C
 tools/bundle-next.sh      # build/next/Notchling.app: the Rust app, its daemon and terminal host (--install replaces /Applications/Notchling.app, never the Swift app: the maintainer only)
 swift test                # legacy/macos/Tests/NotchlingTests and legacy/macos/Tests/ConsoleCoreTests
 export PYTHONPATH=tools/guard
-tools/test-python.sh      # every Python suite (guard, agents, release, protocol) as CI runs them
+tools/test-python.sh      # every Python suite (guard, agents, release, protocol, locale) as CI runs them
+python3 tools/locale/gen.py           # check locales/ and write the generated words (--check, --report)
 python3 -m guard lint                 # architecture lint; fails only on new or changed lines
 python3 -m guard rules                # every rule in docs/rules.md has a check that fires
 python3 -m guard pins                 # workflow actions pinned and allowlisted
@@ -60,7 +61,7 @@ Details and the PR checklist: [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Style
 
-- User-facing text is short and plain. Menu titles use Title Case.
+- User-facing text is short and plain. Menu titles use Title Case. Translator notes go in `.ftl` files under `locales/`, never in code.
 - No comments in code, doc comments included: the docs and the AGENTS.md files (one per crate, `tools/` and `apps/flutter/`) are the source of truth for why code is the way it is; write it there. `python3 tools/strip_comments.py --check` lists any that slipped in. Match the surrounding code: `guard` early, no force-unwraps outside probes.
 - Replies are short; build rather than ask. Ask only when a decision is genuinely the user's: accounts, tokens, anything outward-facing.
 

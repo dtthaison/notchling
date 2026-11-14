@@ -18,7 +18,6 @@
   "LINT-DEFAULTS-MIGRATED|legacy/macos/Sources/Notchling/Phone/BridgeController.swift|if let path = UserDefaults.standard.string(forKey: \"debugAccessCertsFile\") {",
   "LINT-DEFAULTS-MIGRATED|legacy/macos/Sources/Notchling/Phone/ForeignSessions.swift|guard let data = UserDefaults.standard.data(forKey: \"codexPicks\"),",
   "LINT-DEFAULTS-MIGRATED|legacy/macos/Sources/Notchling/Phone/ForeignSessions.swift|let closed = UserDefaults.standard.dictionary(forKey: \"chatClosedSessions\") as? [String: Double] ?? [:]",
-  "LINT-FILE-SIZE|apps/flutter/lib/l10n/app_localizations.dart|over 1000 lines",
   "LINT-FILE-SIZE|legacy/macos/Sources/Notchling/Accounts/AccountsWindow.swift|over 1000 lines",
   "LINT-FILE-SIZE|legacy/macos/Sources/Notchling/Machines/MachinesWindow.swift|over 1000 lines",
   "LINT-KIT-TOKENS|legacy/macos/Sources/Notchling/Chat/Views/ChatAccountMenu.swift|.font(.system(size: 10, weight: .semibold))",

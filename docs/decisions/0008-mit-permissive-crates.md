@@ -31,6 +31,10 @@ The maintainer approved named license exceptions in `deny.toml` for exactly thes
 
 Two technical changes to `deny.toml` came with it, and neither widens what is allowed. `[graph] targets` narrows the check to the triples we build, a technical narrowing and not a policy change. And `[advisories] unmaintained = "all"` stays strict: the unmaintained crates that GPUI 0.2.2's tree brings (async-std, paste, rustybuzz, ttf-parser, the zbus family and a few more) are ignored one by one by their RUSTSEC id, each with its reason, so any other advisory, and any of our own direct dependencies going unmaintained, still fails. Vulnerability advisories stay errors.
 
+## Note, 2026-11-14: Unicode-3.0 is permissive
+
+ICU4X's `icu_plurals` and `icu_decimal` and their data crates (`icu_plurals_data`, `icu_decimal_data`, `icu_locale_fallback`, `fixed_decimal`) become direct runtime dependencies of `notchling-locale` ([XXXX](XXXX-localization-fluent-source.md)). Their license, Unicode-3.0, is a permissive license, already on `deny.toml`'s allow list, and ICU4X is already linked through `url` and `idna`. The user took them on 2026-11-14 over `intl_pluralrules` (older CLDR, last released in 2022). Nothing else widens: no new exception, no change to `deny.toml`.
+
 ## Date
 
 2026-11-07

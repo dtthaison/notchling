@@ -3,6 +3,7 @@ mod app_procs;
 pub mod apps;
 pub mod awake;
 pub mod files;
+pub mod locale;
 pub mod notify;
 pub mod paths;
 #[cfg(target_os = "macos")]

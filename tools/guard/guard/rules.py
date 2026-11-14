@@ -5,6 +5,7 @@ import io
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -55,7 +56,7 @@ def _lint_probe(rule_id: str) -> Callable[[], bool]:
     def probe() -> bool:
         path, text = lint.rule(rule_id).bad
         with _tmp() as root:
-            write(root, {path: text})
+            write(root, {path: text, **dict(lint.rule(rule_id).probe_files)})
             return any(v.rule == rule_id for v in lint.run(root, [path]))
     return probe
 
@@ -194,6 +195,52 @@ def _guard_protocol_gen() -> bool:
     return stale.returncode == 1 and "GUARD-PROTOCOL-GEN" in stale.stdout + stale.stderr
 
 
+def _locale_probe(rule: str, edit: Callable[[Path], None], expect_code: int) -> bool:
+    repo = PACKAGE_ROOT.parents[1]
+    gen = repo / "tools/locale/gen.py"
+    fixture = repo / "tools/locale/tests/fixtures/tree"
+    with _tmp() as root:
+        tree = root / "locales"
+        shutil.copytree(fixture, tree)
+        args = ["--locales", str(tree), "--rust", str(root / "generated.rs"), "--arb-dir", str(root / "l10n")]
+
+        def run(*extra: str) -> "subprocess.CompletedProcess[str]":
+            return subprocess.run([sys.executable, str(gen), *args, *extra], capture_output=True, text=True, timeout=120)
+
+        if run().returncode != 0 or run("--check").returncode != 0:
+            return False
+        edit(tree)
+        stale = run("--check")
+    return stale.returncode == expect_code and rule in stale.stdout + stale.stderr
+
+
+def _append(path: str, text: str) -> Callable[[Path], None]:
+    def edit(tree: Path) -> None:
+        target = tree / path
+        target.write_text(target.read_text(encoding="utf-8") + text, encoding="utf-8")
+    return edit
+
+
+def _guard_locale_gen() -> bool:
+    def edit(tree: Path) -> None:
+        target = tree / "en/shared.ftl"
+        target.write_text(target.read_text(encoding="utf-8").replace("language-name = English", "language-name = English probe"),
+                          encoding="utf-8")
+    return _locale_probe("GUARD-LOCALE-GEN", edit, 1)
+
+
+def _guard_locale_subset() -> bool:
+    return _locale_probe("GUARD-LOCALE-SUBSET", _append("en/shared.ftl", "\nprobe-key = { language-name }\n"), 1)
+
+
+def _guard_locale_match() -> bool:
+    def edit(tree: Path) -> None:
+        target = tree / "de/shared.ftl"
+        target.write_text(target.read_text(encoding="utf-8").replace("state-working = Arbeitet", "state-working = Arbeitet { $nope }"),
+                          encoding="utf-8")
+    return _locale_probe("GUARD-LOCALE-MATCH", edit, 1)
+
+
 Registry = Dict[str, Callable[[], bool]]
 REGISTRY: Registry = {}
 for _r in lint.RULES:
@@ -218,6 +265,9 @@ REGISTRY.update({
     "GUARD-FEATURE-MAP": _guard_feature_map,
     "GUARD-RULES": _guard_rules,
     "GUARD-PROTOCOL-GEN": _guard_protocol_gen,
+    "GUARD-LOCALE-GEN": _guard_locale_gen,
+    "GUARD-LOCALE-SUBSET": _guard_locale_subset,
+    "GUARD-LOCALE-MATCH": _guard_locale_match,
 })
 del _r, _id
 

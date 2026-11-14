@@ -16,6 +16,7 @@ path = "src/bin/machines.rs"
 [dependencies]
 notchling-engine = { path = "../engine" }
 notchling-kit = { path = "../kit" }
+notchling-locale = { path = "../locale" }
 notchling-local-api = { path = "../local-api" }
 notchling-platform = { path = "../platform" }
 qrcode = { version = "=0.14.1", default-features = false }

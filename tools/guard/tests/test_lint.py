@@ -35,7 +35,8 @@ def in_repo(repo, argv):
 class RuleTests(unittest.TestCase):
     def test_every_rule_fails_on_its_bad_example(self):
         for r in RULES:
-            self.assertTrue(r.check(r.bad[0], r.bad[1].splitlines(), FIXTURE_REPO), r.id)
+            repo = make_repo(dict(r.probe_files)) if r.probe_files else FIXTURE_REPO
+            self.assertTrue(r.check(r.bad[0], r.bad[1].splitlines(), repo), r.id)
 
     def test_every_rule_passes_its_good_example(self):
         for r in RULES:
