@@ -4,6 +4,7 @@ mod capability;
 pub mod claude;
 pub mod codex;
 pub mod conformance;
+pub mod matrix;
 mod provider;
 mod registry;
 mod support;
