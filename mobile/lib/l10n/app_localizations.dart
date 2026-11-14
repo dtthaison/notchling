@@ -985,6 +985,84 @@ abstract class AppL10n {
   /// **'Không tải được âm thanh. Chạm để thử lại'**
   String get audioFailed;
 
+  /// No description provided for @modelChip.
+  ///
+  /// In vi, this message translates to:
+  /// **'Mô hình'**
+  String get modelChip;
+
+  /// No description provided for @effortChip.
+  ///
+  /// In vi, this message translates to:
+  /// **'Mức suy luận'**
+  String get effortChip;
+
+  /// No description provided for @compactTooltip.
+  ///
+  /// In vi, this message translates to:
+  /// **'Thu gọn'**
+  String get compactTooltip;
+
+  /// No description provided for @compactTitle.
+  ///
+  /// In vi, this message translates to:
+  /// **'Thu gọn ngữ cảnh'**
+  String get compactTitle;
+
+  /// No description provided for @compactConfirm.
+  ///
+  /// In vi, this message translates to:
+  /// **'Thu gọn ngữ cảnh của session này? Claude sẽ tóm tắt cuộc trò chuyện để giải phóng chỗ. Không hoàn tác được.'**
+  String get compactConfirm;
+
+  /// No description provided for @modelSheetTitle.
+  ///
+  /// In vi, this message translates to:
+  /// **'Chọn mô hình'**
+  String get modelSheetTitle;
+
+  /// No description provided for @effortSheetTitle.
+  ///
+  /// In vi, this message translates to:
+  /// **'Chọn mức suy luận'**
+  String get effortSheetTitle;
+
+  /// No description provided for @modelOlder.
+  ///
+  /// In vi, this message translates to:
+  /// **'Mô hình cũ hơn'**
+  String get modelOlder;
+
+  /// No description provided for @effortLow.
+  ///
+  /// In vi, this message translates to:
+  /// **'Thấp'**
+  String get effortLow;
+
+  /// No description provided for @effortMedium.
+  ///
+  /// In vi, this message translates to:
+  /// **'Vừa'**
+  String get effortMedium;
+
+  /// No description provided for @effortHigh.
+  ///
+  /// In vi, this message translates to:
+  /// **'Cao'**
+  String get effortHigh;
+
+  /// No description provided for @effortXhigh.
+  ///
+  /// In vi, this message translates to:
+  /// **'Rất cao'**
+  String get effortXhigh;
+
+  /// No description provided for @effortMax.
+  ///
+  /// In vi, this message translates to:
+  /// **'Tối đa'**
+  String get effortMax;
+
   /// No description provided for @allProjects.
   ///
   /// In vi, this message translates to:

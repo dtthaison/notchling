@@ -170,6 +170,7 @@ class SessionFacts {
     this.contextWindow,
     this.model,
     this.limits = const <LimitMeter>[],
+    this.effort,
   });
 
   factory SessionFacts.fromJson(Json json) => SessionFacts(
@@ -180,6 +181,7 @@ class SessionFacts {
         ? (json['contextWindow']! as num).toInt()
         : null,
     model: json.strOrNull('model'),
+    effort: json.strOrNull('effort'),
     limits: json['limits'] is List<Object?>
         ? json.objects('limits').map(LimitMeter.fromJson).toList()
         : const <LimitMeter>[],
@@ -189,6 +191,9 @@ class SessionFacts {
   final int? contextWindow;
   final String? model;
   final List<LimitMeter> limits;
+
+  /// The effort level on the latest reply; null from older Macs or when the transcript does not say.
+  final String? effort;
 
   /// 0..1, or null when the window is unknown.
   double? get contextFraction =>
@@ -213,6 +218,7 @@ class Session {
     this.activity,
     this.facts,
     this.lastMessage,
+    this.tool = 'claude',
   });
 
   factory Session.fromJson(Json json) {
@@ -234,6 +240,7 @@ class Session {
           ? TakeoverInfo.fromJson(json.object('takeover'))
           : null,
       activity: json.strOrNull('activity'),
+      tool: json.strOrNull('tool') ?? 'claude',
       lastMessage: json['lastMessage'] is Map<Object?, Object?> ? LastMessage.fromJson(json.object('lastMessage')) : null,
       facts: json['facts'] is Map<Object?, Object?>
           ? SessionFacts.fromJson(json.object('facts'))
@@ -260,6 +267,9 @@ class Session {
 
   /// Context size and the account's limits, for the chat header. Null from older Macs.
   final SessionFacts? facts;
+
+  /// claude, codex or agy; claude from a Mac that does not say.
+  final String tool;
 
   /// Claude's newest reply (id and first lines); a new id means a new reply. Null from older Macs.
   final LastMessage? lastMessage;

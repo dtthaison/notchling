@@ -122,6 +122,74 @@ void main() {
       return controller;
     }
 
+    Future<List<String>> pumpControls(WidgetTester tester, {bool enabled = true, double scale = 1}) async {
+      final TextEditingController controller = TextEditingController();
+      addTearDown(controller.dispose);
+      final List<String> sent = <String>[];
+      await tester.pumpWidget(MediaQuery(
+        data: MediaQueryData(textScaler: TextScaler.linear(scale)),
+        child: host(Composer(
+          controller: controller,
+          send: const SendIdle(),
+          viewOnly: false,
+          onSend: () {},
+          onRetry: () {},
+          onDismissError: () {},
+          model: 'claude-opus-5-5',
+          effort: 'medium',
+          onSendText: enabled ? sent.add : null,
+          onAttach: () {},
+        )),
+      ));
+      return sent;
+    }
+
+    testWidgets('picking a model sends /model with the full id, and the chip shows its name', (WidgetTester tester) async {
+      final List<String> sent = await pumpControls(tester);
+      expect(find.text('Opus 5.5'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey<String>('model-chip')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey<String>('choice-claude-sonnet-5-5')));
+      await tester.pumpAndSettle();
+      expect(sent, <String>['/model claude-sonnet-5-5']);
+      expect(find.text('Sonnet 5.5'), findsOneWidget);
+    });
+
+    testWidgets('picking an effort sends /effort with the level', (WidgetTester tester) async {
+      final List<String> sent = await pumpControls(tester);
+      await tester.tap(find.byKey(const ValueKey<String>('effort-chip')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey<String>('choice-high')));
+      await tester.pumpAndSettle();
+      expect(sent, <String>['/effort high']);
+    });
+
+    testWidgets('compact asks first and sends /compact only after the confirm', (WidgetTester tester) async {
+      final List<String> sent = await pumpControls(tester);
+      await tester.tap(find.byKey(const ValueKey<String>('compact-button')));
+      await tester.pumpAndSettle();
+      expect(sent, isEmpty);
+      await tester.tap(find.text('Huỷ'));
+      await tester.pumpAndSettle();
+      expect(sent, isEmpty);
+      await tester.tap(find.byKey(const ValueKey<String>('compact-button')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Thu gọn').last);
+      await tester.pumpAndSettle();
+      expect(sent, <String>['/compact']);
+    });
+
+    testWidgets('the controls are hidden when the session cannot take them (codex, view-only)', (WidgetTester tester) async {
+      await pumpControls(tester, enabled: false);
+      expect(find.byKey(const ValueKey<String>('model-chip')), findsNothing);
+      expect(find.byKey(const ValueKey<String>('compact-button')), findsNothing);
+    });
+
+    testWidgets('a large text size does not overflow the toolbar', (WidgetTester tester) async {
+      await pumpControls(tester, scale: 1.3);
+      expect(tester.takeException(), isNull);
+    });
+
     testWidgets('a draft starting with ! shows shell mode: header, folder, hint', (WidgetTester tester) async {
       await pump(tester, '!ls -la');
       expect(find.text('Lệnh shell'), findsOneWidget);

@@ -503,6 +503,46 @@ class AppL10nEn extends AppL10n {
   String get audioFailed => 'Could not load the audio. Tap to retry';
 
   @override
+  String get modelChip => 'Model';
+
+  @override
+  String get effortChip => 'Effort';
+
+  @override
+  String get compactTooltip => 'Compact';
+
+  @override
+  String get compactTitle => 'Compact context';
+
+  @override
+  String get compactConfirm =>
+      'Compact this session\'s context? Claude summarises the conversation so far to free room. This cannot be undone.';
+
+  @override
+  String get modelSheetTitle => 'Choose a model';
+
+  @override
+  String get effortSheetTitle => 'Choose an effort level';
+
+  @override
+  String get modelOlder => 'More models';
+
+  @override
+  String get effortLow => 'Low';
+
+  @override
+  String get effortMedium => 'Medium';
+
+  @override
+  String get effortHigh => 'High';
+
+  @override
+  String get effortXhigh => 'Extra High';
+
+  @override
+  String get effortMax => 'Max';
+
+  @override
   String get allProjects => 'All projects';
 
   @override

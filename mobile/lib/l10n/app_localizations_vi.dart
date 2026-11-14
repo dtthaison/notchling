@@ -503,6 +503,46 @@ class AppL10nVi extends AppL10n {
   String get audioFailed => 'Không tải được âm thanh. Chạm để thử lại';
 
   @override
+  String get modelChip => 'Mô hình';
+
+  @override
+  String get effortChip => 'Mức suy luận';
+
+  @override
+  String get compactTooltip => 'Thu gọn';
+
+  @override
+  String get compactTitle => 'Thu gọn ngữ cảnh';
+
+  @override
+  String get compactConfirm =>
+      'Thu gọn ngữ cảnh của session này? Claude sẽ tóm tắt cuộc trò chuyện để giải phóng chỗ. Không hoàn tác được.';
+
+  @override
+  String get modelSheetTitle => 'Chọn mô hình';
+
+  @override
+  String get effortSheetTitle => 'Chọn mức suy luận';
+
+  @override
+  String get modelOlder => 'Mô hình cũ hơn';
+
+  @override
+  String get effortLow => 'Thấp';
+
+  @override
+  String get effortMedium => 'Vừa';
+
+  @override
+  String get effortHigh => 'Cao';
+
+  @override
+  String get effortXhigh => 'Rất cao';
+
+  @override
+  String get effortMax => 'Tối đa';
+
+  @override
   String get allProjects => 'Tất cả project';
 
   @override

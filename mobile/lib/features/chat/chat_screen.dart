@@ -252,6 +252,9 @@ class _SessionChatState extends ConsumerState<_SessionChat> {
                       final ({
                         bool? canMessage,
                         String? cwd,
+                        String? tool,
+                        String? model,
+                        String? effort,
                         bool? takeoverAvailable,
                         bool? takeoverStoppable,
                         bool? takeoverBusy,
@@ -262,6 +265,9 @@ class _SessionChatState extends ConsumerState<_SessionChat> {
                           return (
                             canMessage: session?.canMessage,
                             cwd: session?.cwd,
+                            tool: session?.tool,
+                            model: session?.facts?.model,
+                            effort: session?.facts?.effort,
                             takeoverAvailable: session?.takeover?.available,
                             takeoverStoppable: session?.takeover?.stoppable,
                             takeoverBusy: session?.takeover?.busy,
@@ -300,6 +306,11 @@ class _SessionChatState extends ConsumerState<_SessionChat> {
                             ref.read(voiceProvider.notifier).dismissProblem(),
                         commands: ref.watch(slashCommandsProvider(id)),
                         folder: view.cwd,
+                        onSendText: view.canMessage == true && (view.tool ?? 'claude') == 'claude'
+                            ? (String text) => unawaited(ref.read(chatProvider(id).notifier).send(text))
+                            : null,
+                        model: view.model,
+                        effort: view.effort,
                     onAttach: view.canMessage == true ? () => unawaited(pickAndSendPhoto(context, ref, id)) : null,
                         takeover: view.takeoverAvailable == null
                             ? null
