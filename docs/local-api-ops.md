@@ -237,6 +237,48 @@ file and the daemon's own cache, and the one thing it writes is that cache.
   optional `[1m]`), and the phone's `models` list and `modelId` (`bridge_backend`). A `/model`
   sent through `session.command` isn't checked against it yet.
 
+## `cluster_ops.rs`
+
+Cluster plan B ([plan](superpowers/plans/2026-11-13-cluster-v1-b-nodes.md)): this machine as a node of one
+cluster over pinned TLS 1.3 on port 47823 (Tailscale addresses only). The `cluster` switch is off at every
+start: no cluster port is bound and nothing is dialed until `settings.set_switch {"switch": "cluster", "on": true}`
+from the app in this run, or `cluster.join` (below), or a restart of a headless member (below).
+
+| Op | Tier | Args | Reply |
+| --- | --- | --- | --- |
+| `cluster.status` | agent | `{}` | `{cluster: {id, name, term, home, vault} \| null, me, members: [Member], link, listening, tailscale, error}` |
+| `cluster.create` | app | `{name}` | the new cluster's state; this node is its home (primary) and reference |
+| `cluster.join.token` | agent | `{}` | `{token: "nlj1.…"}`, one use, 10 minutes; a non-home member asks its home |
+| `cluster.join` | agent | `{token}` | `{state: "pending" \| "joined"}` |
+| `cluster.member.set` | app | `{node, canBeMaster?, client?, reference?, acceptsDelegation?, headless?, desired?}` | the member as stored |
+| `cluster.remove` | app | `{node}` | the member as stored, `state: "removed"` |
+
+- `Member` is `{id, name, role, canBeMaster, online, client, headless, reference, state, versions, load, desired,
+  acceptsDelegation}`; `role` is `home`, `standby` or `worker`, `state` `pending`, `active` or `removed`,
+  `load` `{cpu, memUsedMb, memTotalMb}` or `null`, `desired` `{acting, bridge, install}`.
+- `cluster.join` refuses `"this node is already in a cluster"`. With the switch off it turns the switch on
+  when the app asks, or an agent while no app is attached (a headless machine), recorded
+  as a `switch.changed` event (switch `cluster`, cause `user` or `cluster_join`); an agent's join while an app is
+  attached is refused with the off message. An agent's join while no app is attached is a headless join: the
+  joiner says so in its `Join`, the home records the member `headless` and the inbox item's detail says
+  "Headless".
+- At daemon start, a node whose `cluster.db` says it is an active, headless, non-client member of a cluster
+  whose home is another active member turns the `cluster` switch on by itself (no app is attached then) and
+  dials its home, recorded as a `switch.changed` event (cause `cluster_rejoin`) and a `cluster.step` event
+  (`rejoined`, with the home as `peer`), and published as `settings.switch {switch: "cluster", on: true}`.
+  A node in no cluster, the home itself, a member joined from the app, a client, or one with an app already
+  attached stays off. Its other switches still come only from the home's `Members`/`HelloOk`; `vault` and
+  `accounts` never follow. The home's app clears the mark with `cluster.member.set {node, headless: false}`.
+- A join on the home raises the inbox item `node-join:<node>:<ms>`, kind `node_join`, actions Add (`allow`)
+  and Deny; only `mac` or `phone` may allow it. Unanswered for 10 minutes it expires and the joiner is denied.
+- `notchling cluster join --token-stdin` reads the token from stdin only; a token among the arguments is
+  refused.
+- Topic `cluster` (agent tier): `cluster.changed` with the status body after a change other than load, and
+  `cluster.refused {from, op, reason}` (also a `cluster.step` event, `refused`).
+- Calls from other nodes run through the same ops as `ClientKind::Node` with the socket's checks, recorded
+  as a `cluster.step` event (`call`, the op and the origin node as `peer`). `node.switch.set {switch, on}` from the home sets `acting`,
+  `bridge` or `install` on a node with no app attached, recorded as a `switch.changed` event (cause `cluster_node`).
+
 ## `codex_ops.rs`
 
 Milestone 5's Codex ops (E6a): `codex.send`, `codex.stop` and `codex.delete` over the engine's

@@ -239,6 +239,7 @@ fn a_second_join_token_use_by_an_active_member_gets_its_answer_again() {
                 addrs: vec![],
                 port: 1,
                 versions: versions("linux"),
+                headless: false,
             },
         },
     );

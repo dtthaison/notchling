@@ -92,7 +92,7 @@ impl Hub {
                 Some(ClientKind::App) => counts.app += 1,
                 Some(ClientKind::Cli) => counts.cli += 1,
                 Some(ClientKind::Hook) => counts.hook += 1,
-                None => {}
+                Some(ClientKind::Node) | None => {}
             }
         }
         counts

@@ -58,6 +58,9 @@ pub enum Command {
     Settings {
         args: Vec<String>,
     },
+    Cluster {
+        args: Vec<String>,
+    },
     Version,
     Help,
 }
@@ -86,6 +89,9 @@ pub fn usage() -> &'static str {
      notchling settings get <key> [--json]  one setting\n  \
      notchling settings set <key> <value> [--json]\n  \
      \u{20}                                           change a setting; some wait for the user's approval in the Inbox\n  \
+     notchling cluster status [--json]     this machine's cluster and its members\n  \
+     notchling cluster token                a one-time token for another machine to join (needs Allow in the Inbox)\n  \
+     notchling cluster join --token-stdin   join the cluster whose token is on stdin\n  \
      notchling service install|uninstall|print [--dir <folder>]\n  \
      notchling hook [--socket <path>]            Claude Code's hook: asks the daemon, passes on any trouble\n  \
      notchling --version | --help\n\n\
@@ -138,6 +144,11 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Command, String> 
         }
         "settings" => {
             return Ok(Command::Settings {
+                args: args.collect(),
+            })
+        }
+        "cluster" => {
+            return Ok(Command::Cluster {
                 args: args.collect(),
             })
         }

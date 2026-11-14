@@ -1,5 +1,6 @@
 use super::choices::{CallerTier, SwitchName};
 use crate::field::{Count, Exe, Millis, Op, Version};
+use crate::field_ref::{Machine, Ref};
 use crate::spec::{AgentsRead, Durability, Group, Level, Lock, Proc};
 
 log_choice! {
@@ -27,6 +28,21 @@ log_choice! {
         DaemonStart = "daemon_start",
         FileSaidOnIgnored = "file_said_on_ignored",
         RestoreFailed = "restore_failed",
+        ClusterJoin = "cluster_join",
+        ClusterRejoin = "cluster_rejoin",
+        ClusterNode = "cluster_node",
+    }
+}
+
+log_choice! {
+    pub enum ClusterStep {
+        Refused = "refused",
+        Listen = "listen",
+        Wiped = "wiped",
+        Save = "save",
+        SteppedDown = "stepped_down",
+        Call = "call",
+        Rejoined = "rejoined",
     }
 }
 
@@ -109,7 +125,7 @@ kinds! {
     }
     SwitchChanged = "switch.changed", kv 1 {
         title: "Switches On and Off",
-        records: "One of the five switches went on or off, and what caused it.",
+        records: "One of the six switches went on or off, and what caused it.",
         why: "A switch decides what Notchling may do on your Mac. This shows who turned each one on or off, and when.",
         default: On,
         lock: Lock::Always("Switches decide what agents may do, so every change is recorded."),
@@ -195,6 +211,24 @@ kinds! {
         fields {
             cause: DetachCause,
             attached_ms: Millis,
+        }
+    }
+    ClusterStepTaken = "cluster.step", kv 1 {
+        title: "Cluster Steps",
+        records: "Something happened between this Mac and another machine in its cluster: a request refused, a call run for a member, a step down, a failed save or a failed listen.",
+        why: "Shows what other machines asked this Mac to do and what went wrong with the link. The call's arguments and any message text are never recorded.",
+        default: On,
+        lock: Lock::Always("What another machine runs on this Mac is part of the audit trail."),
+        sinks: AUDIT | ACTIVITY | DIAG,
+        durability: Durability::Push,
+        level: Level::Info,
+        emitters: &[Proc::Daemon],
+        agents_read: AgentsRead::No,
+        keep_days: 0,
+        fields {
+            step: ClusterStep,
+            peer: Option<Ref<Machine>>,
+            op: Option<Op>,
         }
     }
 }

@@ -19,6 +19,7 @@ use super::wire::{Msg, Origin, OriginTier, WireError};
 pub const PING_MS: u64 = 5_000;
 pub const OFFLINE_MS: u64 = 20_000;
 pub const CALL_MS: u64 = 30_000;
+pub const JOIN_ANSWER_MS: u64 = 15_000;
 pub const DIAL_BACKOFF_MS: (u64, u64) = (1_000, 60_000);
 pub const DEDUPE_MS: u64 = 300_000;
 
@@ -75,6 +76,7 @@ pub enum LocalCmd {
         client: Option<bool>,
         reference: Option<bool>,
         accepts_delegation: Option<bool>,
+        headless: Option<bool>,
         desired: Option<Desired>,
     },
     SetVersions {
@@ -144,6 +146,7 @@ pub enum Effect {
         arch: String,
         addr: Option<String>,
         can_be_master: bool,
+        headless: bool,
     },
     SteppedDown {
         term: Term,
@@ -203,6 +206,7 @@ struct Joining {
     me: Member,
     local: u64,
     answered: bool,
+    since: u64,
 }
 
 pub struct NodeCore {
@@ -315,6 +319,7 @@ impl NodeCore {
                     "canBeMaster": m.can_be_master,
                     "online": m.id == self.me || online.contains(&m.id),
                     "client": m.client,
+                    "headless": m.headless,
                     "reference": m.reference,
                     "state": member_state,
                     "versions": m.versions,
@@ -471,5 +476,7 @@ impl NodeCore {
 mod core_tests;
 #[cfg(test)]
 mod core_tests_dispatch;
+#[cfg(test)]
+mod core_tests_headless;
 #[cfg(test)]
 mod core_tests_terms;

@@ -75,6 +75,7 @@ log_choice! {
         Accounts = "accounts",
         Vault = "vault",
         Install = "install",
+        Cluster = "cluster",
     }
 }
 

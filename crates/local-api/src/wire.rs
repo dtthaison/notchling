@@ -116,6 +116,13 @@ pub mod ops {
     pub const VERSIONS_UPDATE_LOCAL: &str = "versions.update_local";
 
     pub const AWAKE_STATE: &str = "awake.state";
+
+    pub const CLUSTER_STATUS: &str = "cluster.status";
+    pub const CLUSTER_CREATE: &str = "cluster.create";
+    pub const CLUSTER_JOIN_TOKEN: &str = "cluster.join.token";
+    pub const CLUSTER_JOIN: &str = "cluster.join";
+    pub const CLUSTER_MEMBER_SET: &str = "cluster.member.set";
+    pub const CLUSTER_REMOVE: &str = "cluster.remove";
 }
 
 pub mod topics {
@@ -164,6 +171,10 @@ pub mod topics {
     pub const VERSIONS_CHANGED: &str = "versions.changed";
     pub const VERSIONS_CHECKED: &str = "versions.checked";
     pub const VERSIONS_UPDATED: &str = "versions.updated";
+
+    pub const CLUSTER: &str = "cluster";
+    pub const CLUSTER_CHANGED: &str = "cluster.changed";
+    pub const CLUSTER_REFUSED: &str = "cluster.refused";
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -172,6 +183,7 @@ pub enum ClientKind {
     App,
     Cli,
     Hook,
+    Node,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]

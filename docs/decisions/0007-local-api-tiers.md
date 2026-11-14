@@ -60,6 +60,15 @@ The maintainer decided that a paired phone, with the bridge, acting and vault sw
 - Every phone `inbox.answer` is audited in `bridge/remote-log.jsonl`: one that is taken as `inbox.answer:<action>`, a refused one as `inbox.answer:refused:<reason>`.
 - **Known risk, accepted by the maintainer.** The paired-devices list (`devices.json`) is a file an agent with a shell can write, so a forged device could answer. It is the same class of risk as the Ask First flag in `notchling.db`: files at rest are not a tier boundary (the note above). Pairing needs an anchor an agent can't write before this is closed.
 
+## Note, 2026-11-14: a headless cluster member rejoins its home at start
+
+The maintainer decided one exception to "off at every daemon start" for the `cluster` switch (decision XXXX-cluster-v1-nodes, its note of the same date): a node that is an active member of a cluster, recorded by its home as headless (it joined through an agent with no app attached) and not a client, turns `cluster` on at daemon start when no app is attached, and dials its home.
+
+- Why it's safe enough: dialing home grants nothing by itself. The peer must present the certificate pinned in `cluster.db`, and every other switch the cluster may set (`acting`, `bridge`, `install`) still comes only from the home's `Members`/`HelloOk`, applied as the app tier (`ClientKind::Node`) only while no app is attached, never from a local file. `vault` and `accounts` never follow the cluster.
+- "Never had an app attached" is the home's record of the join (`Member.headless`), replicated to the node, not a flag the node keeps for itself. The node's copy is still a file: an agent that flips it gains only a dial to the pinned home. A member joined from the app, or marked a client, stays off until the app turns the switch on, as before.
+- The start is audited `cluster_set:cluster:on`, with the home as `peer`, and published as `settings.switch`.
+- The risk this note accepts is the one the 2026-11-08 note names: `cluster.db` is a file at rest. An agent that rewrites the home's whole record and runs a node of its own there can pose as the home; the same agent can already do it through `cluster.join` while no app is attached. It closes when the pin has an anchor an agent can't write.
+
 ## Date
 
 2026-11-07

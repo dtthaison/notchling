@@ -10,6 +10,7 @@ use crate::awake_ops::AwakeOps;
 use crate::bridge_backend::APPROVAL_WAIT;
 use crate::bridge_ops::{BridgeOps, BridgeSetup};
 use crate::catalog_ops::CatalogService;
+use crate::cluster_wiring::ClusterParts;
 use crate::codex_children::CodexChildren;
 use crate::codex_ops::CodexOps;
 use crate::daemon::{FirstScan, FIRST_LIST_WAIT};
@@ -341,6 +342,7 @@ pub struct Wired {
     log: OnceLock<(Arc<Mutex<EventsDb>>, Arc<LogOps>)>,
     pub wake: Arc<WakeLoop>,
     pub codex_children: Arc<CodexChildren>,
+    pub cluster: ClusterParts,
 }
 
 impl Wired {
@@ -560,6 +562,14 @@ impl Wired {
         versions.checks().set_inbox(inbox.clone());
         versions.drifts().set_inbox(inbox.clone());
         versions.set_install_switch(switches.install.clone());
+        let cluster = ClusterParts::build(
+            layout,
+            room.clone(),
+            switches.cluster.clone(),
+            versions.clone(),
+            inbox.clone(),
+            events.clone(),
+        );
         Wired {
             acting,
             codex,
@@ -586,6 +596,7 @@ impl Wired {
                 layout.codex_dir().join("sessions"),
                 layout.codex_children_db(),
             )),
+            cluster,
         }
     }
 
@@ -647,6 +658,7 @@ impl Wired {
             .with_group(self.vault.clone())
             .with_group(self.settings.clone())
             .with_group(self.versions.clone())
+            .with_group(self.cluster.ops.clone())
             .with_group(Arc::new(git))
             .with_group(Arc::new(AwakeOps::new(self.awake.clone())))
             .with_group(self.codex_children.clone())
@@ -689,6 +701,7 @@ impl Wired {
         self.bridge.close();
         self.limits.close();
         self.settings.close();
+        self.cluster.close();
         self.inbox.close();
         self.versions.close();
     }

@@ -44,7 +44,7 @@ const OWN_QUIET: [&str; 7] = [
     ops::CODEX_CHILDREN,
 ];
 
-const NEVER_QUIET: [&str; 79] = [
+const NEVER_QUIET: [&str; 85] = [
     ops::HELLO,
     ops::LOG_VERIFY,
     ops::LOG_CHAIN_START,
@@ -124,6 +124,12 @@ const NEVER_QUIET: [&str; 79] = [
     ops::VERSIONS_GET,
     ops::VERSIONS_CHECK,
     ops::VERSIONS_UPDATE_LOCAL,
+    ops::CLUSTER_STATUS,
+    ops::CLUSTER_CREATE,
+    ops::CLUSTER_JOIN_TOKEN,
+    ops::CLUSTER_JOIN,
+    ops::CLUSTER_MEMBER_SET,
+    ops::CLUSTER_REMOVE,
 ];
 
 const NEVER_QUIET_LIMITS: [&str; 2] = ["limits.set_mode", "cost.summary"];

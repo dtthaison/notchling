@@ -324,9 +324,13 @@ impl InboxOps {
             return Err(bad("The item doesn't offer that action."));
         }
         if allows_secret(&current, action) && !MAY_ALLOW.contains(&by) {
+            let what = match current.kind {
+                Kind::NodeJoin => "a machine into the cluster",
+                _ => "a secret",
+            };
             return Err(ApiError::new(
                 ErrorCode::Forbidden,
-                "Only the Mac or a paired phone may allow a secret.",
+                format!("Only the Mac or a paired phone may allow {what}."),
             ));
         }
         if let Some(responder) = inner.responders.get(id).cloned() {
@@ -367,7 +371,7 @@ impl InboxOps {
 }
 
 fn allows_secret(item: &Item, action: ActionId) -> bool {
-    item.kind == Kind::SecretApproval
+    matches!(item.kind, Kind::SecretApproval | Kind::NodeJoin)
         && matches!(
             action,
             ActionId::Allow | ActionId::AllowOnce | ActionId::AllowAlways

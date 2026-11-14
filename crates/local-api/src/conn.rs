@@ -234,6 +234,13 @@ impl Session {
                 return false;
             }
         };
+        if hello.client == ClientKind::Node {
+            self.reply(
+                id,
+                Err(ApiError::bad_request("cluster nodes never use this socket")),
+            );
+            return false;
+        }
         if hello.api != API_VERSION {
             let message = format!(
                 "api {} is not served; this daemon speaks {API_VERSION}",
@@ -451,7 +458,7 @@ impl Session {
             Some(ClientKind::App) => Some(Via::App),
             Some(ClientKind::Cli) => Some(Via::Cli),
             Some(ClientKind::Hook) => Some(Via::Hook),
-            None => None,
+            Some(ClientKind::Node) | None => None,
         };
         let tier = match self.tier {
             Tier::App => ActorTier::App,

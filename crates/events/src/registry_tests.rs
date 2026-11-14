@@ -177,9 +177,9 @@ fn field_names_and_choices_are_well_formed() {
 }
 
 #[test]
-fn fifty_five_kinds() {
+fn fifty_six_kinds() {
     let kinds = all();
-    assert_eq!(kinds.len(), 55);
+    assert_eq!(kinds.len(), 56);
     let off: Vec<&str> = kinds
         .iter()
         .filter(|k| k.default == DefaultState::Off)

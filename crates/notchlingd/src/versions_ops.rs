@@ -250,6 +250,16 @@ impl VersionsOps {
         self.checks.wait();
     }
 
+    pub fn tool_versions(&self) -> BTreeMap<Tool, Version> {
+        let state = lock(&self.state);
+        state
+            .tools
+            .iter()
+            .flatten()
+            .filter_map(|(tool, installed)| Some((*tool, installed.version.clone()?)))
+            .collect()
+    }
+
     pub fn set_exe(&self, exe: Option<PathBuf>) {
         *lock(&self.exe) = exe;
     }

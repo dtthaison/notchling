@@ -18,7 +18,7 @@ use notchling_events::{Emit, Event, Millis};
 use notchling_local_api::lock::InstanceLock;
 use notchling_local_api::tier::installed_app_paths;
 use notchling_local_api::{
-    topics, Allowlist, Limits, Server, ServerConfig, ServerHandle, APP_TIER_PATHS_ENV,
+    topics, Allowlist, Handler, Limits, Server, ServerConfig, ServerHandle, APP_TIER_PATHS_ENV,
 };
 use notchling_platform::watch::{Batch, WatchConfig, Watcher};
 use serde_json::Value;
@@ -257,6 +257,13 @@ pub fn run(
         Arc::new(LogOps::new(logs.audit.clone(), checker.clone())),
     );
     let _check_schedule = checker.spawn_schedule();
+    let handler: Arc<dyn Handler> = Arc::new(wired.ops(
+        &layout,
+        sessions.clone(),
+        first_scan.clone(),
+        options.first_list_wait,
+    ));
+    wired.cluster.serve(&handler);
     let server = Server::bind(
         ServerConfig {
             socket: layout.socket.clone(),
@@ -265,12 +272,7 @@ pub fn run(
             version: env!("CARGO_PKG_VERSION").to_string(),
             limits: Limits::default(),
         },
-        Arc::new(wired.ops(
-            &layout,
-            sessions.clone(),
-            first_scan.clone(),
-            options.first_list_wait,
-        )),
+        handler.clone(),
     )
     .map_err(|e| match e.kind() {
         io::ErrorKind::AddrInUse => DaemonError::AlreadyRunning(layout.socket.clone()),

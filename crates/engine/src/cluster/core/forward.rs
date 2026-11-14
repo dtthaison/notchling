@@ -31,7 +31,18 @@ impl NodeCore {
                 addrs,
                 port,
                 versions,
-            } => self.on_join(from, secret, name, fingerprint, addrs, port, versions, out),
+                headless,
+            } => {
+                let joiner = super::join::Joiner {
+                    name,
+                    fingerprint,
+                    addrs,
+                    port,
+                    versions,
+                    headless,
+                };
+                self.on_join(from, secret, joiner, out)
+            }
             Msg::JoinPending { item } => self.on_join_pending(from, item, out),
             Msg::JoinOk {
                 cluster,

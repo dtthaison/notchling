@@ -1,6 +1,6 @@
 use serde_json::json;
 
-use super::{Dial, Effect, NodeCore, DIAL_BACKOFF_MS, OFFLINE_MS, PING_MS};
+use super::{Dial, Effect, NodeCore, DIAL_BACKOFF_MS, JOIN_ANSWER_MS, OFFLINE_MS, PING_MS};
 use crate::cluster::id::NodeId;
 use crate::cluster::members::{Member, MemberState, Term};
 use crate::cluster::state::Command;
@@ -31,6 +31,7 @@ impl NodeCore {
                     addrs: j.me.addrs.clone(),
                     port: j.me.port,
                     versions: self.versions.clone(),
+                    headless: j.me.headless,
                 };
                 self.send(peer, msg, out);
                 return;
@@ -221,6 +222,12 @@ impl NodeCore {
     ) {
         if let Some(j) = &self.joining {
             if from == j.token.home {
+                if !j.answered {
+                    out.push(Effect::Answer {
+                        local: j.local,
+                        result: Err(WireError::new("refused", reason.clone())),
+                    });
+                }
                 self.joining = None;
                 self.changed = true;
                 out.push(self.publish("cluster.refused", json!({"from": from, "reason": reason})));
@@ -308,8 +315,29 @@ impl NodeCore {
             }
         }
         self.expire_calls(out);
+        self.expire_join(out);
         self.prune_seen();
         self.dial(out);
+    }
+
+    fn expire_join(&mut self, out: &mut Vec<Effect>) {
+        let Some(j) = &self.joining else {
+            return;
+        };
+        if j.answered || self.boot_ms.saturating_sub(j.since) < JOIN_ANSWER_MS {
+            return;
+        }
+        let (local, home) = (j.local, j.token.home.clone());
+        self.joining = None;
+        self.changed = true;
+        out.push(Effect::Answer {
+            local,
+            result: Err(WireError::new(
+                "unreachable",
+                "the cluster's primary didn't answer",
+            )),
+        });
+        self.drop_link(&home, out);
     }
 
     pub(super) fn dial(&mut self, out: &mut Vec<Effect>) {

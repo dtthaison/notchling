@@ -2,8 +2,11 @@
 mod app_procs;
 pub mod apps;
 pub mod awake;
+pub mod clock;
 pub mod files;
+pub mod load;
 pub mod locale;
+pub mod net_if;
 pub mod notify;
 pub mod os_version;
 pub mod paths;

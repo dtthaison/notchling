@@ -4,16 +4,16 @@
     {"name":"exe","type":"exe","optional":true,"list":false,"choices":[]},
     {"name":"tier","type":"choice","optional":false,"list":false,"choices":["app","agent","other"]},
     {"name":"why","type":"choice","optional":false,"list":false,"choices":["forbidden","peer_changed","needs_approval","switch_off","not_descendant","audit_unwritable","other"]},
-    {"name":"switch","type":"choice","optional":true,"list":false,"choices":["acting","bridge","accounts","vault","install","other"]}
+    {"name":"switch","type":"choice","optional":true,"list":false,"choices":["acting","bridge","accounts","vault","install","cluster","other"]}
   ]},
   {"name":"api.unknown_peer","kv":1,"group":"security","lock":"always","sinks":["audit","activity","diagnostics"],"default":"on","durability":"push","emitters":["daemon"],"retired":false,"fields":[
     {"name":"why","type":"choice","optional":false,"list":false,"choices":["peer_unknown","other_user","other"]},
     {"name":"exe","type":"exe","optional":true,"list":false,"choices":[]}
   ]},
   {"name":"switch.changed","kv":1,"group":"security","lock":"always","sinks":["audit","activity","diagnostics"],"default":"on","durability":"push","emitters":["daemon"],"retired":false,"fields":[
-    {"name":"switch","type":"choice","optional":false,"list":false,"choices":["acting","bridge","accounts","vault","install","other"]},
+    {"name":"switch","type":"choice","optional":false,"list":false,"choices":["acting","bridge","accounts","vault","install","cluster","other"]},
     {"name":"on","type":"flag","optional":false,"list":false,"choices":[]},
-    {"name":"cause","type":"choice","optional":false,"list":false,"choices":["user","restored_at_launch","daemon_start","file_said_on_ignored","restore_failed","other"]}
+    {"name":"cause","type":"choice","optional":false,"list":false,"choices":["user","restored_at_launch","daemon_start","file_said_on_ignored","restore_failed","cluster_join","cluster_rejoin","cluster_node","other"]}
   ]},
   {"name":"daemon.started","kv":1,"group":"security","lock":"always","sinks":["audit","activity","diagnostics"],"default":"on","durability":"push","emitters":["daemon"],"retired":false,"fields":[
     {"name":"daemon","type":"version","optional":false,"list":false,"choices":[]},
@@ -34,6 +34,11 @@
   {"name":"app.detached","kv":1,"group":"security","lock":"always","sinks":["audit","activity"],"default":"on","durability":"push","emitters":["daemon"],"retired":false,"fields":[
     {"name":"cause","type":"choice","optional":false,"list":false,"choices":["quit","dropped","other"]},
     {"name":"attached_ms","type":"millis","optional":false,"list":false,"choices":[]}
+  ]},
+  {"name":"cluster.step","kv":1,"group":"security","lock":"always","sinks":["audit","activity","diagnostics"],"default":"on","durability":"push","emitters":["daemon"],"retired":false,"fields":[
+    {"name":"step","type":"choice","optional":false,"list":false,"choices":["refused","listen","wiped","save","stepped_down","call","rejoined","other"]},
+    {"name":"peer","type":"ref:machine","optional":true,"list":false,"choices":[]},
+    {"name":"op","type":"op","optional":true,"list":false,"choices":[]}
   ]},
   {"name":"audit.checked","kv":1,"group":"security","lock":"always","sinks":["audit","activity","diagnostics"],"default":"on","durability":"push","emitters":["daemon"],"retired":false,"fields":[
     {"name":"result","type":"choice","optional":false,"list":false,"choices":["intact","broken","gap","tail_missing","file_missing","unanchored","unsealed","resumed","other"]},

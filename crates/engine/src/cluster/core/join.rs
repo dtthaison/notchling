@@ -7,6 +7,15 @@ use crate::cluster::state::Command;
 use crate::cluster::versions::{compat, Compat, Purpose, Versions};
 use crate::cluster::wire::{Msg, WireError};
 
+pub(super) struct Joiner {
+    pub name: String,
+    pub fingerprint: String,
+    pub addrs: Vec<String>,
+    pub port: u16,
+    pub versions: Versions,
+    pub headless: bool,
+}
+
 fn refusal(code: &str, message: impl Into<String>) -> WireError {
     WireError::new(code, message)
 }
@@ -82,18 +91,21 @@ impl NodeCore {
         self.send(to, msg, out);
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub(super) fn on_join(
         &mut self,
         from: NodeId,
         secret: String,
-        name: String,
-        fingerprint: String,
-        addrs: Vec<String>,
-        port: u16,
-        versions: Versions,
+        joiner: Joiner,
         out: &mut Vec<Effect>,
     ) {
+        let Joiner {
+            name,
+            fingerprint,
+            addrs,
+            port,
+            versions,
+            headless,
+        } = joiner;
         if !self.is_home() {
             self.refuse(&from, "not the primary", true, out);
             return;
@@ -137,6 +149,7 @@ impl NodeCore {
             can_be_master: false,
             reference: false,
             accepts_delegation: false,
+            headless,
             state: MemberState::Pending,
             versions: Some(versions.clone()),
             desired: Desired::default(),
@@ -163,6 +176,7 @@ impl NodeCore {
             arch: versions.arch.clone(),
             addr: addrs.first().cloned(),
             can_be_master: can_be_master_default(&versions.os),
+            headless,
         });
         self.send(&from, Msg::JoinPending { item }, out);
     }

@@ -15,6 +15,7 @@ use std::time::Duration;
 pub const ACCOUNTS: &str = "accounts";
 pub const VAULT: &str = "vault";
 pub const INSTALL: &str = "install";
+pub const CLUSTER: &str = "cluster";
 
 pub const ACCOUNTS_OFF: &str =
     "accounts are off: the Swift app owns logins until the maintainer turns this on";
@@ -22,6 +23,8 @@ pub const VAULT_OFF: &str =
     "the vault is off: the Swift app owns it until the maintainer turns this on";
 pub const INSTALL_OFF: &str =
     "install is off: the Swift app owns hooks and skills until the maintainer turns this on";
+pub const CLUSTER_OFF: &str =
+    "the cluster is off: this Mac links to no other machine until the maintainer turns this on";
 
 type Listener = Arc<dyn Fn(bool) + Send + Sync>;
 type Listeners = Arc<Mutex<Vec<Listener>>>;
@@ -132,6 +135,7 @@ pub struct Switches {
     pub accounts: Arc<SwitchFlag>,
     pub vault: Arc<SwitchFlag>,
     pub install: Arc<SwitchFlag>,
+    pub cluster: Arc<SwitchFlag>,
 }
 
 impl Switches {
@@ -140,11 +144,12 @@ impl Switches {
             accounts: SwitchFlag::off(ACCOUNTS, ACCOUNTS_OFF),
             vault: SwitchFlag::off(VAULT, VAULT_OFF),
             install: SwitchFlag::off(INSTALL, INSTALL_OFF),
+            cluster: SwitchFlag::off(CLUSTER, CLUSTER_OFF),
         }
     }
 
-    pub fn all(&self) -> [&Arc<SwitchFlag>; 3] {
-        [&self.accounts, &self.vault, &self.install]
+    pub fn all(&self) -> [&Arc<SwitchFlag>; 4] {
+        [&self.accounts, &self.vault, &self.install, &self.cluster]
     }
 
     pub fn get(&self, name: &str) -> Option<&Arc<SwitchFlag>> {
@@ -182,7 +187,7 @@ impl SwitchOps {
     }
 
     fn set(&self, _caller: &Caller, args: &Value) -> Result<Value, ApiError> {
-        let usage = "settings.set_switch takes {\"switch\": \"accounts\"|\"vault\"|\"install\", \"on\": true|false}";
+        let usage = "settings.set_switch takes {\"switch\": \"accounts\"|\"vault\"|\"install\"|\"cluster\", \"on\": true|false}";
         let name = args
             .get("switch")
             .and_then(Value::as_str)
@@ -247,7 +252,7 @@ mod tests {
         let s = Switches::off();
         assert_eq!(
             s.to_json(),
-            json!({"accounts": false, "vault": false, "install": false})
+            json!({"accounts": false, "vault": false, "install": false, "cluster": false})
         );
         assert!(s.all().iter().all(|f| !f.is_on()));
         assert_eq!(s.accounts.check().unwrap_err().message, ACCOUNTS_OFF);
@@ -337,7 +342,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             read,
-            json!({"accounts": true, "vault": false, "install": false})
+            json!({"accounts": true, "vault": false, "install": false, "cluster": false})
         );
         for bad_args in [
             json!({"switch": "acting", "on": true}),

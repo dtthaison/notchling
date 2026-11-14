@@ -198,6 +198,7 @@ fn role_follows_home_and_can_be_master() {
             client: None,
             reference: None,
             accepts_delegation: None,
+            headless: None,
             desired: None,
         },
         40,

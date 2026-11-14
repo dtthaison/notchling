@@ -41,6 +41,7 @@ pub fn member(name: &str, os: &str, client: bool) -> Member {
         can_be_master: false,
         reference: false,
         accepts_delegation: false,
+        headless: false,
         state: MemberState::Active,
         versions: Some(versions(os)),
         desired: Desired::default(),

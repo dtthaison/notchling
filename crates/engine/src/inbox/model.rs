@@ -11,6 +11,7 @@ pub enum Kind {
     SettingChange,
     VersionCheckFailed,
     VersionDrift,
+    NodeJoin,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
