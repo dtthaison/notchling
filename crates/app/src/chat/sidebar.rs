@@ -224,7 +224,6 @@ pub struct SidebarModel {
     pub accounts: Vec<Option<RowAccount>>,
     pub selected: Option<String>,
     pub daemon_note: Option<&'static str>,
-    pub unread: usize,
 }
 
 pub fn sidebar_model(
@@ -245,7 +244,6 @@ pub fn sidebar_model(
         accounts,
         selected: selected.map(str::to_owned),
         daemon_note,
-        unread: 0,
     }
 }
 

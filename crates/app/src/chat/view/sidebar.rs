@@ -1,12 +1,12 @@
 use gpui::{div, prelude::*, px, AnyElement, App, Context, Div, ExternalPaths, SharedString};
 use notchling_kit::labels::Corner;
 use notchling_kit::metric::TITLE_BAR;
-use notchling_kit::metric::{SPACE, TOOL_ICON};
+use notchling_kit::metric::TOOL_ICON;
 use notchling_kit::part::{ButtonKind, PartState};
 use notchling_kit::scrollbar::GUTTER;
 use notchling_kit::ui::{
-    account_line, hsla, icon_button, label, parts_button, parts_on, parts_tip, scrollable,
-    session_row_marked, toggle_parts, tool_icon, KitPart, KitStyled, ToolMark,
+    account_line, hsla, icon_button, label, scrollable, session_row_marked, tool_icon, KitPart,
+    KitStyled, ToolMark,
 };
 use notchling_kit::{Appearance, Icon, IconSize, Ink, TypeRole};
 use notchling_locale as t;
@@ -35,45 +35,7 @@ fn footer_button(
 
 pub(super) const FOOTER_HEIGHT: f32 = 44.0;
 
-fn inbox_button(unread: usize, a: Appearance, cx: &Context<ChatView>) -> Div {
-    let button = footer_button("inbox", Icon::Bell, t::chat::inbox_tip(), a)
-        .part_at("Inbox Button", Corner::TopLeading, a, cx)
-        .on_click(cx.listener(|this, _, _, cx| this.toggle_inbox(cx)));
-    let badge = (unread > 0).then(|| {
-        let text = if unread > 9 {
-            "9+".to_owned()
-        } else {
-            unread.to_string()
-        };
-        div()
-            .absolute()
-            .top(px(0.0))
-            .right(px(0.0))
-            .min_w(px(SPACE[3]))
-            .h(px(SPACE[3]))
-            .px(px(SPACE[0] / 2.0))
-            .flex()
-            .items_center()
-            .justify_center()
-            .rounded(px(SPACE[3]))
-            .fill(Ink::Accent, a)
-            .child(label(&text, TypeRole::Meta, Ink::OnAccent, a))
-    });
-    div().relative().child(button).children(badge)
-}
-
-fn footer(
-    a: Appearance,
-    note: Option<&'static str>,
-    unread: usize,
-    cx: &mut Context<ChatView>,
-) -> Div {
-    let on = parts_on(cx);
-    let parts = gate::tip_text(parts_button("parts", a, cx), parts_tip(on).into(), a)
-        .on_click(|_, _, cx| {
-            toggle_parts(cx);
-        })
-        .part_at("Parts Button", Corner::TopLeading, a, cx);
+fn footer(a: Appearance, note: Option<&'static str>, cx: &mut Context<ChatView>) -> Div {
     div()
         .min_h(px(FOOTER_HEIGHT))
         .flex_shrink_0()
@@ -93,13 +55,11 @@ fn footer(
                 .part_at("Accounts Button", Corner::TopLeading, a, cx)
                 .on_click(cx.listener(|this, _, _, cx| this.open_accounts_sheet(None, cx))),
         )
-        .child(inbox_button(unread, a, cx))
         .child(
             footer_button("vault", Icon::Key, t::chat::vault_tip(), a)
                 .part_at("Vault Button", Corner::TopLeading, a, cx)
                 .on_click(cx.listener(|this, _, _, cx| this.open_vault_sheet(cx))),
         )
-        .child(parts)
         .children(note.map(|note| {
             let line = label(note, TypeRole::Meta, Ink::TextFaint, a);
             line.part_at("Daemon Note", Corner::TopLeading, a, cx)
@@ -177,16 +137,13 @@ fn mark_of(tool: Tool) -> ToolMark {
 }
 
 pub(super) fn model(view: &ChatView, _: &App) -> SidebarModel {
-    SidebarModel {
-        unread: view.inbox.unread(),
-        ..sidebar_model(
-            &view.sessions,
-            view.now_ms,
-            view.selected.as_deref(),
-            &view.accounts.snapshot(),
-            view.daemon_note,
-        )
-    }
+    sidebar_model(
+        &view.sessions,
+        view.now_ms,
+        view.selected.as_deref(),
+        &view.accounts.snapshot(),
+        view.daemon_note,
+    )
 }
 
 pub(super) fn render(m: &SidebarModel, a: Appearance, cx: &mut Context<ChatView>) -> AnyElement {
@@ -286,7 +243,7 @@ pub(super) fn render(m: &SidebarModel, a: Appearance, cx: &mut Context<ChatView>
         .flex_col()
         .child(div().h(px(TITLE_BAR)).flex_shrink_0())
         .child(scrollable(list))
-        .child(footer(a, m.daemon_note, m.unread, cx))
+        .child(footer(a, m.daemon_note, cx))
         .part_inside("Sidebar", Corner::Trailing, a, cx)
         .into_any_element()
 }
