@@ -269,6 +269,24 @@ void main() {
       expect(find.text('Không tải được ảnh'), findsNothing);
     });
 
+    testWidgets('the viewer swipes sideways to the next picture of the message', (WidgetTester tester) async {
+      final ChatPictureLoader loader = _ScriptedLoader(() => throw const BridgeException('timeout', 'x'));
+      const List<ChatImage> three = <ChatImage>[
+        ChatImage(id: 'p-0', mediaType: 'image/png', width: 40, height: 30, bytes: 10),
+        ChatImage(id: 'p-1', mediaType: 'image/png', width: 40, height: 30, bytes: 10),
+        ChatImage(id: 'p-2', mediaType: 'image/png', width: 40, height: 30, bytes: 10),
+      ];
+      await tester.pumpWidget(ProviderScope(
+        overrides: <Override>[chatPictureLoaderProvider.overrideWithValue(loader)],
+        child: host(const SizedBox(height: 560, child: PictureViewer(sessionId: 'c', images: three, initial: 1))),
+      ));
+      await tester.pump();
+      expect(find.text('2 / 3'), findsOneWidget);
+      await tester.fling(find.byType(PageView), const Offset(-400, 0), 1000);
+      await tester.pumpAndSettle();
+      expect(find.text('3 / 3'), findsOneWidget);
+    });
+
     testWidgets("a tool group shows its tools' pictures without being opened, and none without a session", (WidgetTester tester) async {
       final ChatPictureLoader loader = _ScriptedLoader(() => throw const BridgeException('timeout', 'x'));
       final ToolGroupEntry group = ToolGroupEntry(<ChatMessage>[
