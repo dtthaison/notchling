@@ -10,6 +10,8 @@ pub mod read;
 pub mod shell;
 
 #[cfg(test)]
+mod exec_box_tests;
+#[cfg(test)]
 mod exec_permission_tests;
 #[cfg(test)]
 mod exec_prompt_tests;

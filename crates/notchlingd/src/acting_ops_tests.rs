@@ -84,6 +84,7 @@ struct FakeAttacher {
     writes: Arc<Mutex<Vec<String>>>,
     deaf: Arc<AtomicBool>,
     starting: Arc<AtomicU64>,
+    human: Arc<Mutex<Vec<(u64, String)>>>,
 }
 
 impl Attacher for FakeAttacher {
@@ -101,6 +102,9 @@ impl Attacher for FakeAttacher {
             0 => {}
             ms => prompt = prompt.starting_for(ms),
         }
+        for (at, text) in self.human.lock().unwrap().iter() {
+            prompt = prompt.typing(*at, text);
+        }
         Ok(Box::new(FakePty {
             prompt,
             writes: self.writes.clone(),
@@ -108,6 +112,20 @@ impl Attacher for FakeAttacher {
     }
     fn screen_check(&self) -> &dyn ScreenCheck {
         &Markers
+    }
+}
+
+pub(crate) struct Trusting;
+
+impl crate::held_guard::Rest for Trusting {
+    fn fresh(
+        &self,
+        agent: &notchling_engine::sessions::Agent,
+    ) -> Option<notchling_engine::sessions::Agent> {
+        Some(agent.clone())
+    }
+    fn restarted(&self, _agent: &notchling_engine::sessions::Agent, _now_ms: i64) -> bool {
+        false
     }
 }
 
@@ -143,6 +161,7 @@ pub(crate) struct Setup {
     pub writes: Arc<Mutex<Vec<String>>>,
     pub deaf: Arc<AtomicBool>,
     pub starting: Arc<AtomicU64>,
+    pub human: Arc<Mutex<Vec<(u64, String)>>>,
 }
 
 pub(crate) fn setup(on: bool, screen: &[&str], list: Value) -> Setup {
@@ -168,6 +187,7 @@ pub(crate) fn setup_in(
     };
     let (attached, writes) = (attacher.attached.clone(), attacher.writes.clone());
     let (deaf, starting) = (attacher.deaf.clone(), attacher.starting.clone());
+    let human = attacher.human.clone();
     let me = std::process::id();
     let mut ops = ActingOps::new(
         Arc::new(Acting::in_memory(on)),
@@ -183,6 +203,7 @@ pub(crate) fn setup_in(
     if let Some(launcher) = launcher {
         ops = ops.with_launcher(launcher, Box::new(|_| {}));
     }
+    ops = ops.with_rest(Box::new(Trusting));
     Setup {
         ops,
         room,
@@ -190,6 +211,7 @@ pub(crate) fn setup_in(
         writes,
         deaf,
         starting,
+        human,
     }
 }
 

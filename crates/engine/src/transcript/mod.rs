@@ -9,6 +9,7 @@ pub mod finished;
 pub mod glance;
 pub mod locate;
 pub mod model;
+pub mod restart;
 pub mod scan;
 pub mod shells;
 pub mod snapshot;

@@ -2,6 +2,25 @@ use super::*;
 use crate::sessions::agent::sample;
 use crate::sessions::{AgentGroup, AgentTarget};
 
+fn calm_of(rows: &[Agent]) -> BTreeSet<String> {
+    rows.iter()
+        .filter(|row| row.takes_held_text())
+        .map(|row| row.id.clone())
+        .collect()
+}
+
+trait Settled {
+    fn settled(&mut self, rows: &[Agent], now_ms: i64) -> Vec<(String, String)>;
+}
+
+impl Settled for Held {
+    fn settled(&mut self, rows: &[Agent], now_ms: i64) -> Vec<(String, String)> {
+        let calm = calm_of(rows);
+        self.ready(rows, now_ms - SETTLE_MS, &calm);
+        self.ready(rows, now_ms, &calm)
+    }
+}
+
 fn row(id: &str, group: AgentGroup) -> Agent {
     let mut agent = sample(AgentTarget::Job("ab12".into()), None);
     agent.id = id.into();
@@ -54,10 +73,10 @@ fn the_held_message_goes_once_the_turn_ends() {
     held.route("a", "two", true, 1_000);
     held.route("a", "three", true, 1_500);
     assert!(held
-        .ready(&[row("a", AgentGroup::Working)], 2_000)
+        .settled(&[row("a", AgentGroup::Working)], 2_000)
         .is_empty());
     assert_eq!(
-        held.ready(&[row("a", AgentGroup::Completed)], 9_000),
+        held.settled(&[row("a", AgentGroup::Completed)], 9_000),
         vec![("a".to_string(), "two\n\nthree".to_string())]
     );
     assert_eq!(held.get("a"), None);
@@ -73,7 +92,7 @@ fn it_waits_while_the_session_asks_something() {
     let mut held = Held::default();
     held.route("a", "two", true, 0);
     assert!(held
-        .ready(&[row("a", AgentGroup::NeedsInput)], 1_000)
+        .settled(&[row("a", AgentGroup::NeedsInput)], 1_000)
         .is_empty());
     assert!(held.get("a").is_some());
 }
@@ -84,10 +103,10 @@ fn a_turn_too_quick_to_be_seen_working_still_lets_it_go_after_the_grace() {
     held.route("a", "one", false, 0);
     held.route("a", "two", false, 100);
     assert!(held
-        .ready(&[row("a", AgentGroup::Completed)], 1_000)
+        .settled(&[row("a", AgentGroup::Completed)], 1_000)
         .is_empty());
     assert_eq!(
-        held.ready(&[row("a", AgentGroup::Completed)], START_GRACE_MS),
+        held.settled(&[row("a", AgentGroup::Completed)], START_GRACE_MS),
         vec![("a".to_string(), "two".to_string())]
     );
 }
@@ -96,12 +115,12 @@ fn a_turn_too_quick_to_be_seen_working_still_lets_it_go_after_the_grace() {
 fn a_failed_send_goes_back_in_front_and_waits_before_trying_again() {
     let mut held = Held::default();
     held.route("a", "two", true, 0);
-    let out = held.ready(&[row("a", AgentGroup::Completed)], 1_000);
+    let out = held.settled(&[row("a", AgentGroup::Completed)], 1_000);
     held.route("a", "three", true, 1_100);
     held.put_back("a", &out[0].1, 1_200);
     assert_eq!(held.get("a"), Some("two\n\nthree"));
     assert!(held
-        .ready(&[row("a", AgentGroup::Completed)], 2_000)
+        .settled(&[row("a", AgentGroup::Completed)], 2_000)
         .is_empty());
 }
 
@@ -118,10 +137,10 @@ fn held_text_goes_when_the_turn_ended_though_background_tasks_keep_the_row_worki
     let mut held = Held::default();
     held.route("a", "two", true, 0);
     assert!(held
-        .ready(&[row("a", AgentGroup::Working)], 1_000)
+        .settled(&[row("a", AgentGroup::Working)], 1_000)
         .is_empty());
     assert_eq!(
-        held.ready(&[at_prompt("a", AgentGroup::Working)], 2_000),
+        held.settled(&[at_prompt("a", AgentGroup::Working)], 2_000),
         vec![("a".to_string(), "two".to_string())]
     );
 }
@@ -131,7 +150,7 @@ fn held_text_goes_to_a_session_that_ended_its_turn_asking_in_text() {
     let mut held = Held::default();
     held.route("a", "two", true, 0);
     assert_eq!(
-        held.ready(&[at_prompt("a", AgentGroup::NeedsInput)], 1_000),
+        held.settled(&[at_prompt("a", AgentGroup::NeedsInput)], 1_000),
         vec![("a".to_string(), "two".to_string())]
     );
 }
@@ -141,7 +160,7 @@ fn a_row_working_only_for_background_tasks_does_not_end_the_grace_after_a_send()
     let mut held = Held::default();
     assert_eq!(held.route("a", "one", false, 0), Route::Send);
     assert!(held
-        .ready(&[at_prompt("a", AgentGroup::Working)], 500)
+        .settled(&[at_prompt("a", AgentGroup::Working)], 500)
         .is_empty());
     assert_eq!(
         held.route("a", "two", false, 1_000),
@@ -149,7 +168,7 @@ fn a_row_working_only_for_background_tasks_does_not_end_the_grace_after_a_send()
         "the sent message has not started its turn yet"
     );
     assert!(held
-        .ready(&[row("a", AgentGroup::Working)], 1_500)
+        .settled(&[row("a", AgentGroup::Working)], 1_500)
         .is_empty());
     assert_eq!(
         held.route("a", "three", false, 2_000),
@@ -178,4 +197,69 @@ fn a_single_held_message_keeps_its_own_text() {
         held.route("a", "  fn x() {\n    1\n  }\n", true, 0),
         Route::Hold("  fn x() {\n    1\n  }\n".into())
     );
+}
+
+fn ids(names: &[&str]) -> BTreeSet<String> {
+    names.iter().map(|n| n.to_string()).collect()
+}
+
+#[test]
+fn held_text_goes_only_after_the_row_has_stood_calm_for_the_settle_time() {
+    let mut held = Held::default();
+    held.route("a", "two", true, 0);
+    let rows = [row("a", AgentGroup::Completed)];
+    assert!(held.ready(&rows, 1_000, &ids(&["a"])).is_empty());
+    assert!(held
+        .ready(&rows, 1_000 + SETTLE_MS - 1, &ids(&["a"]))
+        .is_empty());
+    assert_eq!(
+        held.ready(&rows, 1_000 + SETTLE_MS, &ids(&["a"])),
+        vec![("a".to_string(), "two".to_string())]
+    );
+}
+
+#[test]
+fn a_reading_that_is_not_calm_starts_the_settle_over() {
+    let mut held = Held::default();
+    held.route("a", "two", true, 0);
+    let rows = [row("a", AgentGroup::Completed)];
+    assert!(held.ready(&rows, 1_000, &ids(&["a"])).is_empty());
+    assert!(held.ready(&rows, 2_000, &ids(&[])).is_empty());
+    assert!(held.ready(&rows, 3_000, &ids(&["a"])).is_empty());
+    assert!(held
+        .ready(&rows, 3_000 + SETTLE_MS - 1, &ids(&["a"]))
+        .is_empty());
+    assert_eq!(held.ready(&rows, 3_000 + SETTLE_MS, &ids(&["a"])).len(), 1);
+}
+
+#[test]
+fn a_row_the_cache_still_calls_working_gets_nothing_though_a_fresh_reading_was_calm() {
+    let mut held = Held::default();
+    held.route("a", "two", true, 0);
+    let rows = [row("a", AgentGroup::Working)];
+    assert!(held.ready(&rows, 1_000, &ids(&["a"])).is_empty());
+    assert!(held.ready(&rows, 9_000, &ids(&["a"])).is_empty());
+    assert_eq!(held.get("a"), Some("two"));
+}
+
+#[test]
+fn a_put_back_text_must_settle_again() {
+    let mut held = Held::default();
+    held.route("a", "two", true, 0);
+    let rows = [row("a", AgentGroup::Completed)];
+    held.ready(&rows, 1_000, &ids(&["a"]));
+    let out = held.ready(&rows, 1_000 + SETTLE_MS, &ids(&["a"]));
+    held.put_back("a", &out[0].1, 5_000);
+    let later = 5_000 + START_GRACE_MS;
+    assert!(held.ready(&rows, later, &ids(&["a"])).is_empty());
+    assert_eq!(held.ready(&rows, later + SETTLE_MS, &ids(&["a"])).len(), 1);
+}
+
+#[test]
+fn only_ids_with_held_text_are_waiting() {
+    let mut held = Held::default();
+    assert!(held.waiting().is_empty());
+    held.route("b", "x", true, 0);
+    held.route("a", "y", true, 0);
+    assert_eq!(held.waiting(), ["a", "b"]);
 }

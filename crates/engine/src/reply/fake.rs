@@ -22,6 +22,9 @@ pub struct FakePrompt {
     stuck: bool,
     starting_ms: u64,
     notice: String,
+    noisy: bool,
+    fold_at: usize,
+    human: Vec<(u64, String)>,
     pub writes: Vec<String>,
     pub sent: Vec<String>,
 }
@@ -86,6 +89,21 @@ impl FakePrompt {
         self.clock < self.starting_ms
     }
 
+    pub fn noisy(mut self) -> FakePrompt {
+        self.noisy = true;
+        self
+    }
+
+    pub fn folding(mut self, chars: usize) -> FakePrompt {
+        self.fold_at = chars;
+        self
+    }
+
+    pub fn typing(mut self, at_ms: u64, text: &str) -> FakePrompt {
+        self.human.push((at_ms, text.to_string()));
+        self
+    }
+
     pub fn holding(mut self, text: &str) -> FakePrompt {
         self.text = text.to_string();
         self
@@ -104,6 +122,10 @@ impl FakePrompt {
         if self.text.is_empty() {
             return vec![format!("❯ {}", self.hint)];
         }
+        if self.fold_at > 0 && self.text.chars().count() > self.fold_at {
+            let lines = self.text.matches('\n').count() + 1;
+            return vec![format!("❯ [Pasted text #1 +{lines} lines]")];
+        }
         self.text
             .split('\n')
             .enumerate()
@@ -116,6 +138,16 @@ impl FakePrompt {
 
     fn pass(&mut self, ms: u64) {
         self.clock += ms;
+        let clock = self.clock;
+        let (due, later): (Vec<_>, Vec<_>) = std::mem::take(&mut self.human)
+            .into_iter()
+            .partition(|(at, _)| *at <= clock);
+        self.human = later;
+        if self.boxed && !self.starting() {
+            for (_, text) in due {
+                self.text.push_str(&text);
+            }
+        }
         if let Some((due, text)) = self.landing.take() {
             if self.clock < due {
                 self.landing = Some((due, text));
@@ -157,9 +189,14 @@ impl Pty for FakePrompt {
         Ok(())
     }
 
-    fn wait_quiet(&mut self, quiet: Duration, _timeout: Duration) -> bool {
-        self.pass(quiet.as_millis() as u64);
+    fn wait_quiet(&mut self, quiet: Duration, timeout: Duration) -> bool {
+        let spent = if self.noisy { timeout } else { quiet };
+        self.pass(spent.as_millis() as u64);
         true
+    }
+
+    fn wait_attached(&mut self, quiet: Duration, timeout: Duration, busy: Duration) -> bool {
+        super::exec::wait_attached(self, quiet, timeout, busy)
     }
 
     fn screen(&mut self) -> Vec<String> {
@@ -181,7 +218,10 @@ impl Pty for FakePrompt {
             return None;
         }
         let rows = self.rows();
-        let typed = self.text.rsplit('\n').next().unwrap_or("").chars().count();
+        let typed = match self.fold_at > 0 && self.text.chars().count() > self.fold_at {
+            true => rows[0].chars().count() - 2,
+            false => self.text.rsplit('\n').next().unwrap_or("").chars().count(),
+        };
         Some((self.before.len() + rows.len() - 1, 2 + typed))
     }
 

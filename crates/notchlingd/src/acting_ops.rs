@@ -3,6 +3,7 @@ use crate::acting_events::{attach_why, log_down, session_ref, who, why_of, PlayE
 use crate::agy_ops::AgyOps;
 use crate::catalog_ops::CatalogService;
 use crate::codex_ops::CodexOps;
+use crate::held_guard::{FromFiles, Guarded, Rest};
 use crate::hook_ops::Parents;
 use crate::late_emit::Events;
 use crate::prompts::{fit_list, question_json, Kind, Prompt, PromptStore};
@@ -18,12 +19,13 @@ use notchling_engine::reply::read::read_question;
 use notchling_engine::sessions::jobs::config_dir_for_job;
 use notchling_engine::sessions::{Agent, AgentGroup, AgentTarget, Roots};
 use notchling_events::kinds::agents::{AnswerKind, HeldThen, PromptKind};
-use notchling_events::kinds::choices::DoneOrFailed;
+use notchling_events::kinds::choices::{DoneOrFailed, FailWhy};
 use notchling_events::{Ref, Session};
 use notchling_local_api::{ops, topics, ApiError, Caller, ErrorCode, OpSpec, Tier};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -128,6 +130,7 @@ pub struct ActingOps {
     screen_file: Option<PathBuf>,
     reply_screen_file: Option<PathBuf>,
     pub(crate) held: crate::held_ops::HeldState,
+    pub(crate) rest: Box<dyn Rest>,
     pub(crate) events: Option<Events>,
 }
 
@@ -143,6 +146,7 @@ impl ActingOps {
             acting,
             prompts: PromptStore::default(),
             sessions,
+            rest: Box::new(FromFiles::new(roots.clone())),
             roots,
             room,
             attacher,
@@ -202,6 +206,12 @@ impl ActingOps {
     #[cfg(test)]
     pub(crate) fn age_refusals(&self, by: Duration) {
         age(&self.refused, by);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_rest(mut self, rest: Box<dyn Rest>) -> ActingOps {
+        self.rest = rest;
+        self
     }
 
     pub fn with_launcher(mut self, launcher: Arc<dyn Launcher>, pause: Pause) -> ActingOps {
@@ -319,12 +329,34 @@ impl ActingOps {
         self.play_locked(agent, plan, log, None)
     }
 
+    pub(crate) fn play_guarded(
+        &self,
+        agent: &Agent,
+        plan: &Plan,
+        log: &mut dyn QueueLog,
+        guard: &dyn Fn() -> bool,
+    ) -> Result<Outcome, PlayError> {
+        let _one = self.typing.lock().unwrap_or_else(|e| e.into_inner());
+        self.play_inner(agent, plan, log, None, Some(guard))
+    }
+
     fn play_locked(
         &self,
         agent: &Agent,
         plan: &Plan,
         log: &mut dyn QueueLog,
         keep: Option<&Expected>,
+    ) -> Result<Outcome, PlayError> {
+        self.play_inner(agent, plan, log, keep, None)
+    }
+
+    fn play_inner(
+        &self,
+        agent: &Agent,
+        plan: &Plan,
+        log: &mut dyn QueueLog,
+        keep: Option<&Expected>,
+        guard: Option<&dyn Fn() -> bool>,
     ) -> Result<Outcome, PlayError> {
         if plan.is_empty() {
             return Ok(Outcome::default());
@@ -334,16 +366,37 @@ impl ActingOps {
             _ => return Err(bad("this session takes no replies").into()),
         };
         let config_dir = config_dir_for_job(&self.roots, &job).or_else(|| agent.config_dir.clone());
-        let mut pty = self
+        let pty = self
             .attacher
             .attach(&job, config_dir.as_deref())
             .map_err(|err| PlayError {
                 why: attach_why(&err),
                 err,
+                kept: false,
             })?;
         let mut trail = Vec::new();
         let check = self.attacher.screen_check();
+        let refused = AtomicBool::new(false);
+        let mut pty: Box<dyn Pty + '_> = match guard {
+            Some(guard) => Box::new(Guarded {
+                inner: pty,
+                guard,
+                refused: &refused,
+                checked: false,
+            }),
+            None => pty,
+        };
         let played = execute_noting(plan, pty.as_mut(), check, log, &mut trail);
+        if refused.load(Ordering::SeqCst) {
+            return Err(PlayError {
+                why: FailWhy::NotIdle,
+                err: ApiError::new(
+                    ErrorCode::Failed,
+                    "The session started a new turn, so nothing was typed.",
+                ),
+                kept: false,
+            });
+        }
         if let (Err(failure), Some(expect), Some(file)) = (&played, keep, &self.screen_file) {
             if failure.is_permission_refusal() {
                 let head = [
@@ -362,6 +415,7 @@ impl ActingOps {
         }
         played.map_err(|f| PlayError {
             why: why_of(&f),
+            kept: f == Failure::Mixed,
             err: ApiError::new(ErrorCode::Failed, f.to_string()),
         })
     }

@@ -1,7 +1,7 @@
 use super::keys::{self, timing::*, ENTER, LEFT, SUBMIT};
 use super::plan::{Plan, Step, Until};
 use super::popall;
-use crate::terminal::input_box::{self, Input};
+use crate::terminal::input_box::{self, Fill, Input};
 use crate::terminal::permission_dialog::{self, Decision, PermissionDialog};
 use std::path::PathBuf;
 use std::time::Duration;
@@ -15,6 +15,38 @@ pub trait Pty {
     }
     fn sleep(&mut self, duration: Duration);
     fn now_ms(&self) -> u64;
+    fn wait_attached(&mut self, quiet: Duration, timeout: Duration, _busy: Duration) -> bool {
+        self.wait_quiet(quiet, timeout)
+    }
+}
+
+pub fn wait_attached(
+    pty: &mut dyn Pty,
+    quiet: Duration,
+    timeout: Duration,
+    busy: Duration,
+) -> bool {
+    let busy = u64::try_from(busy.as_millis()).unwrap_or(u64::MAX);
+    let deadline = pty.now_ms() + u64::try_from(timeout.as_millis()).unwrap_or(u64::MAX);
+    let mut drew = false;
+    loop {
+        let from = pty.now_ms();
+        let slice = busy.min(deadline.saturating_sub(from));
+        drew |= pty.wait_quiet(quiet, ms(slice));
+        let now = pty.now_ms();
+        if now.saturating_sub(from) < slice || now >= deadline {
+            return drew;
+        }
+        if drew && box_focused(pty) {
+            return true;
+        }
+    }
+}
+
+fn box_focused(pty: &mut dyn Pty) -> bool {
+    let lines = pty.screen();
+    let cursor = pty.cursor();
+    !input_box::starting(&lines, cursor) && input_box::focused(&lines, cursor)
 }
 
 pub trait ScreenCheck {
@@ -83,6 +115,7 @@ pub enum Failure {
     NotCleared,
     NotTaken,
     NotSent,
+    Mixed,
     QuestionGone,
     QuestionMismatch,
     NotPermission,
@@ -115,7 +148,7 @@ impl std::fmt::Display for Failure {
             ),
             Failure::NotCleared => write!(
                 f,
-                "The session's input box still holds text, so nothing was sent. Clear it in the terminal, then send again."
+                "The session's input box holds text that isn't from this message, so nothing was typed. Send again when it is empty."
             ),
             Failure::NotTaken => write!(
                 f,
@@ -124,6 +157,10 @@ impl std::fmt::Display for Failure {
             Failure::NotSent => write!(
                 f,
                 "The message is typed in the session's terminal but wasn't sent. Press Return there, or send it again."
+            ),
+            Failure::Mixed => write!(
+                f,
+                "Something else was typed in the session's input box while the message went in, so it wasn't sent. Check the terminal."
             ),
             Failure::QuestionGone => write!(f, "That question isn't open in the session any more."),
             Failure::QuestionMismatch => write!(
@@ -188,6 +225,10 @@ pub fn execute_noting(
         taken: false,
         pressed: None,
         pasted: String::new(),
+        intended: plan.steps.iter().find_map(|step| match step {
+            Step::Paste(text) => Some(keys::paste_safe(text)),
+            _ => None,
+        }),
         doing: "",
         began,
         said: String::new(),
@@ -252,6 +293,7 @@ struct Run<'a> {
     taken: bool,
     pressed: Option<PermissionDialog>,
     pasted: String,
+    intended: Option<String>,
     doing: &'static str,
     began: u64,
     said: String,
@@ -328,6 +370,24 @@ impl Run<'_> {
         }
     }
 
+    fn attach_wait(&mut self, quiet_ms: u64, timeout_ms: u64) -> bool {
+        self.pty
+            .wait_attached(ms(quiet_ms), ms(timeout_ms), ms(ATTACH_BUSY_MS))
+    }
+
+    fn require_free(&mut self) -> Result<(), Failure> {
+        let Some(text) = self.intended.clone() else {
+            return Ok(());
+        };
+        match self.shown() {
+            Shown::Input(input, _) => match input.fill(&text) {
+                Fill::Empty | Fill::Whole => Ok(()),
+                Fill::Part | Fill::Folded | Fill::Foreign => Err(Failure::NotCleared),
+            },
+            _ => Ok(()),
+        }
+    }
+
     fn await_prompt(&mut self, timeout_ms: u64) -> Result<(), Failure> {
         let start = self.pty.now_ms();
         let mut deadline = start + timeout_ms;
@@ -392,16 +452,26 @@ impl Run<'_> {
         let late = self.watch(timeout_ms, |shown| match shown {
             Shown::Dialog => Err(Failure::Dialog),
             Shown::Starting | Shown::Other => Ok(false),
-            Shown::Input(input, _) => {
-                let settled = input.holds(&text) && last.as_ref() == Some(input);
-                last = Some(input.clone());
-                Ok(settled)
-            }
+            Shown::Input(input, _) => match input.fill(&text) {
+                Fill::Foreign => Err(Failure::Mixed),
+                Fill::Whole | Fill::Folded => {
+                    let settled = last.as_ref() == Some(input);
+                    last = Some(input.clone());
+                    Ok(settled)
+                }
+                Fill::Empty | Fill::Part => {
+                    last = Some(input.clone());
+                    Ok(false)
+                }
+            },
         })?;
         match late {
             None => Ok(()),
-            Some(Shown::Input(input, _)) if input.holds(&text) => Err(Failure::NotSent),
-            Some(Shown::Input(..)) => Err(Failure::NotTaken),
+            Some(Shown::Input(input, _)) => match input.fill(&text) {
+                Fill::Empty => Err(Failure::NotTaken),
+                Fill::Foreign => Err(Failure::Mixed),
+                Fill::Part | Fill::Whole | Fill::Folded => Err(Failure::NotSent),
+            },
             Some(Shown::Starting) => Err(Failure::Timeout),
             Some(_) => Err(Failure::NoInput),
         }
@@ -412,14 +482,17 @@ impl Run<'_> {
         match self.shown() {
             Shown::Dialog => return Err(Failure::Dialog),
             Shown::Starting | Shown::Other => return Err(Failure::NoInput),
-            Shown::Input(input, _) if !input.holds(&text) => return Err(Failure::NotTaken),
-            Shown::Input(..) => {}
+            Shown::Input(input, _) => match input.fill(&text) {
+                Fill::Empty => return Err(Failure::NotTaken),
+                Fill::Whole | Fill::Folded => {}
+                Fill::Part | Fill::Foreign => return Err(Failure::Mixed),
+            },
         }
         self.write(ENTER)?;
         let mut let_go = false;
         let late = self.watch(timeout_ms, |shown| {
             let free = match shown {
-                Shown::Input(input, _) => !input.holds(&text),
+                Shown::Input(input, _) => !input.carries(&text),
                 Shown::Dialog | Shown::Starting | Shown::Other => true,
             };
             let settled = free && let_go;
@@ -440,7 +513,10 @@ impl Run<'_> {
                 timeout_ms,
                 required,
             } => {
-                let drew = self.pty.wait_quiet(ms(*quiet_ms), ms(*timeout_ms));
+                let drew = match required {
+                    true => self.attach_wait(*quiet_ms, *timeout_ms),
+                    false => self.pty.wait_quiet(ms(*quiet_ms), ms(*timeout_ms)),
+                };
                 if *required && !drew {
                     return Err(Failure::Timeout);
                 }
@@ -458,7 +534,10 @@ impl Run<'_> {
                     return Err(Failure::QuestionGone);
                 }
             }
-            Step::AwaitInput { timeout_ms } => self.await_prompt(*timeout_ms)?,
+            Step::AwaitInput { timeout_ms } => {
+                self.await_prompt(*timeout_ms)?;
+                self.require_free()?;
+            }
             Step::AwaitEmpty { timeout_ms } => self.await_empty(*timeout_ms)?,
             Step::Keys(keys) => self.write(keys)?,
             Step::Paste(text) => {

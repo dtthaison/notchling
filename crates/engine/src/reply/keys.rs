@@ -50,6 +50,7 @@ pub mod timing {
 
     pub const ATTACH_QUIET_MS: u64 = 500;
     pub const ATTACH_TIMEOUT_MS: u64 = 15_000;
+    pub const ATTACH_BUSY_MS: u64 = 2_000;
     pub const SETTLE_MS: u64 = 1_200;
     pub const SETTLE_SLACK_MS: u64 = 1_000;
 

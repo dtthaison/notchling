@@ -2,10 +2,11 @@ use crate::acting_events::{session_ref, PlayError};
 use crate::acting_ops::{ActingOps, NoLog};
 use notchling_engine::reply::held::{Held, Route};
 use notchling_engine::reply::plan;
-use notchling_engine::sessions::Agent;
+use notchling_engine::sessions::{Agent, AgentGroup};
 use notchling_events::kinds::agents::ReplyVia;
 use notchling_local_api::topics;
 use serde_json::{json, Value};
+use std::collections::BTreeSet;
 use std::sync::mpsc::{channel, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
@@ -40,7 +41,8 @@ impl ActingOps {
             self.play(agent, &plan::reply(text), &mut NoLog)?;
             return Ok(json!({"sent": true}));
         }
-        let route = lock(&self.held.held).route(&agent.id, text, agent.turn_running(), now_ms);
+        let working = agent.turn_running() || self.new_turn_since(agent, now_ms);
+        let route = lock(&self.held.held).route(&agent.id, text, working, now_ms);
         match route {
             Route::Hold(all) => {
                 self.publish_held(&agent.id, Some(&all));
@@ -60,18 +62,55 @@ impl ActingOps {
         lock(&self.held.held).get(id).map(String::from)
     }
 
+    fn new_turn_since(&self, agent: &Agent, now_ms: i64) -> bool {
+        if agent.group != AgentGroup::Working || !agent.at_prompt {
+            return false;
+        }
+        let fresh = self.rest.fresh(agent);
+        let row = fresh.as_ref().unwrap_or(agent);
+        row.turn_running() || self.rest.restarted(row, now_ms)
+    }
+
+    pub(crate) fn calm_now(&self, cached: &Agent, now_ms: i64) -> bool {
+        let Some(fresh) = self.rest.fresh(cached) else {
+            return false;
+        };
+        if !fresh.takes_held_text() {
+            return false;
+        }
+        let path = fresh
+            .transcript_path
+            .as_ref()
+            .or(cached.transcript_path.as_ref());
+        let row = Agent {
+            transcript_path: path.cloned(),
+            ..fresh
+        };
+        row.group != AgentGroup::Working || !self.rest.restarted(&row, now_ms)
+    }
+
     pub fn flush_held(&self, now_ms: i64) {
         if !self.acting.is_on() {
             return;
         }
         let rows = self.agents_now();
-        let ready = lock(&self.held.held).ready(&rows, now_ms);
+        let waiting = lock(&self.held.held).waiting();
+        let calm: BTreeSet<String> = waiting
+            .into_iter()
+            .filter(|id| {
+                rows.iter()
+                    .find(|row| &row.id == id)
+                    .is_some_and(|row| row.takes_held_text() && self.calm_now(row, now_ms))
+            })
+            .collect();
+        let ready = lock(&self.held.held).ready(&rows, now_ms, &calm);
         for (id, text) in ready {
             let Some(agent) = rows.iter().find(|a| a.id == id) else {
                 continue;
             };
             let chars = text.chars().count();
-            match self.play(agent, &plan::reply(&text), &mut NoLog) {
+            let guard = || self.calm_now(agent, now_ms);
+            match self.play_guarded(agent, &plan::reply(&text), &mut NoLog, &guard) {
                 Ok(_) => {
                     self.note_reply(session_ref(agent), ReplyVia::Held, chars, None, None, false);
                     let rest = self.held_text(&id);
@@ -87,7 +126,9 @@ impl ActingOps {
                         false,
                     );
                     let mut held = lock(&self.held.held);
-                    held.put_back(&id, &text, now_ms);
+                    if !failure.kept {
+                        held.put_back(&id, &text, now_ms);
+                    }
                     let all = held.get(&id).map(String::from);
                     drop(held);
                     self.publish_held(&id, all.as_deref());

@@ -27,6 +27,23 @@ fn squeezed(text: &str) -> String {
     text.chars().filter(|c| !c.is_whitespace()).collect()
 }
 
+fn letters(text: &str) -> String {
+    text.chars().filter(|c| c.is_alphanumeric()).collect()
+}
+
+fn folded(typed: &str) -> bool {
+    typed.starts_with("[Pastedtext#") && typed.ends_with(']') && typed.matches(']').count() == 1
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Fill {
+    Empty,
+    Part,
+    Whole,
+    Folded,
+    Foreign,
+}
+
 impl Input {
     pub fn shows(&self, text: &str) -> bool {
         let want = squeezed(text);
@@ -40,6 +57,41 @@ impl Input {
 
     pub fn holds(&self, text: &str) -> bool {
         !self.empty || self.shows(text)
+    }
+
+    pub fn carries(&self, text: &str) -> bool {
+        match self.fill(text) {
+            Fill::Whole | Fill::Folded => true,
+            Fill::Empty => false,
+            Fill::Part | Fill::Foreign => {
+                let shown: String = self.held.iter().map(|row| squeezed(row)).collect();
+                let want = letters(text);
+                !want.is_empty() && letters(&shown).contains(&want)
+            }
+        }
+    }
+
+    pub fn fill(&self, text: &str) -> Fill {
+        if self.empty && !self.shows(text) {
+            return Fill::Empty;
+        }
+        let shown: String = self.held.iter().map(|row| squeezed(row)).collect();
+        let typed: String = shown.chars().skip(1).collect();
+        if folded(&typed) || folded(&shown) {
+            return Fill::Folded;
+        }
+        let want = letters(text);
+        if want.is_empty() {
+            return Fill::Whole;
+        }
+        let have = letters(&shown);
+        if have == want {
+            Fill::Whole
+        } else if !have.is_empty() && want.starts_with(&have) {
+            Fill::Part
+        } else {
+            Fill::Foreign
+        }
     }
 }
 
@@ -152,6 +204,58 @@ mod tests {
         assert!(!read(&typed, None).unwrap().empty);
         let two = lines(&[RULE_LINE, "❯ ", "  x", RULE_LINE]);
         assert!(!read(&two, None).unwrap().empty);
+    }
+
+    fn box_of(rows: &[&str]) -> Input {
+        let mut screen = vec![RULE_LINE.to_string()];
+        screen.extend(rows.iter().map(|r| r.to_string()));
+        screen.push(RULE_LINE.to_string());
+        read(&screen, None).unwrap()
+    }
+
+    #[test]
+    fn what_the_box_holds_is_told_against_the_message_that_went_in() {
+        let text = "Fix the \"tests\" -- now! \u{1F44D}";
+        assert_eq!(box_of(&["❯"]).fill(text), Fill::Empty);
+        assert_eq!(
+            box_of(&["❯\u{a0}Fix the \"tests\" --", "  now!"]).fill(text),
+            Fill::Whole,
+            "wrapping, spacing, punctuation and emoji do not matter"
+        );
+        assert_eq!(box_of(&["❯ Fix the tests now"]).fill(text), Fill::Whole);
+        assert_eq!(box_of(&["❯ Fix the"]).fill(text), Fill::Part);
+        assert_eq!(
+            box_of(&["❯ Fix the tests now and more"]).fill(text),
+            Fill::Foreign
+        );
+        assert_eq!(box_of(&["❯ a draft of my own"]).fill(text), Fill::Foreign);
+        assert_eq!(box_of(&["❯ ?"]).fill(text), Fill::Foreign);
+        assert_eq!(
+            box_of(&["❯\u{a0}[Pasted text #7 +39 lines]"]).fill(text),
+            Fill::Folded
+        );
+        assert_eq!(
+            box_of(&["❯ [Pasted text #7 +39 lines] and mine"]).fill(text),
+            Fill::Foreign,
+            "words beside a folded paste are somebody else's"
+        );
+    }
+
+    #[test]
+    fn a_box_carries_the_message_even_with_more_typed_beside_it() {
+        let text = "Fix the tests";
+        assert!(box_of(&["❯ Fix the tests"]).carries(text));
+        assert!(box_of(&["❯ Fix the tests and my words"]).carries(text));
+        assert!(box_of(&["❯ my words Fix the tests"]).carries(text));
+        assert!(!box_of(&["❯ my words"]).carries(text));
+        assert!(!box_of(&["❯ Fix the"]).carries(text));
+        assert!(!box_of(&["❯"]).carries(text));
+    }
+
+    #[test]
+    fn a_message_of_no_letters_is_told_by_the_box_not_being_empty() {
+        assert_eq!(box_of(&["❯ \u{1F44D}"]).fill("\u{1F44D}"), Fill::Whole);
+        assert_eq!(box_of(&["❯"]).fill("\u{1F44D}"), Fill::Empty);
     }
 
     #[test]

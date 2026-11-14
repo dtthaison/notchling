@@ -35,6 +35,7 @@ pub mod daemon_wiring;
 pub mod delegate_cli;
 pub mod every_session;
 pub mod git_ops;
+mod held_guard;
 pub mod held_ops;
 pub mod hook;
 pub mod hook_ops;
@@ -132,6 +133,8 @@ mod git_ops_branch_tests;
 mod git_ops_tests;
 #[cfg(test)]
 mod held_ops_tests;
+#[cfg(test)]
+mod held_race_tests;
 #[cfg(test)]
 mod hook_ops_tests;
 #[cfg(test)]

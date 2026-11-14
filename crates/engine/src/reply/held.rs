@@ -1,7 +1,8 @@
 use crate::sessions::Agent;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 pub const START_GRACE_MS: i64 = 20_000;
+pub const SETTLE_MS: i64 = 3_000;
 pub const JOIN: &str = "\n\n";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -14,6 +15,7 @@ pub enum Route {
 pub struct Held {
     texts: BTreeMap<String, String>,
     sent_at: BTreeMap<String, i64>,
+    calm_since: BTreeMap<String, i64>,
 }
 
 impl Held {
@@ -37,7 +39,16 @@ impl Held {
         self.sent_at.remove(id);
     }
 
-    pub fn ready(&mut self, rows: &[Agent], now_ms: i64) -> Vec<(String, String)> {
+    pub fn waiting(&self) -> Vec<String> {
+        self.texts.keys().cloned().collect()
+    }
+
+    pub fn ready(
+        &mut self,
+        rows: &[Agent],
+        now_ms: i64,
+        calm: &BTreeSet<String>,
+    ) -> Vec<(String, String)> {
         for row in rows {
             if row.turn_running() {
                 self.sent_at.remove(&row.id);
@@ -45,15 +56,27 @@ impl Held {
         }
         self.sent_at
             .retain(|_, at| now_ms.saturating_sub(*at) < START_GRACE_MS);
+        let texts = &self.texts;
+        self.calm_since
+            .retain(|id, _| calm.contains(id) && texts.contains_key(id));
+        for id in calm.iter().filter(|id| texts.contains_key(*id)) {
+            self.calm_since.entry(id.clone()).or_insert(now_ms);
+        }
         let free: Vec<String> = rows
             .iter()
             .filter(|row| row.takes_held_text())
             .filter(|row| self.texts.contains_key(&row.id) && !self.sent_at.contains_key(&row.id))
+            .filter(|row| {
+                self.calm_since
+                    .get(&row.id)
+                    .is_some_and(|since| now_ms.saturating_sub(*since) >= SETTLE_MS)
+            })
             .map(|row| row.id.clone())
             .collect();
         free.into_iter()
             .filter_map(|id| {
                 let text = self.texts.remove(&id)?;
+                self.calm_since.remove(&id);
                 self.sent_at.insert(id.clone(), now_ms);
                 Some((id, text))
             })
@@ -62,6 +85,7 @@ impl Held {
 
     pub fn put_back(&mut self, id: &str, text: &str, now_ms: i64) {
         self.sent_at.insert(id.to_owned(), now_ms);
+        self.calm_since.remove(id);
         let held = self.texts.entry(id.to_owned()).or_default();
         *held = if held.is_empty() {
             text.to_owned()
