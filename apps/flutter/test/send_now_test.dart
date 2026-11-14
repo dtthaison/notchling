@@ -25,7 +25,11 @@ void main() {
           if (sendNowReply == 'ok') {
             s.reply(m['id']!, data: <String, Object?>{'sent': true});
           } else {
-            s.fail(m['id']!, 'invalid', 'Không có lệnh "session.sendNow".');
+            s.fail(
+              m['id']!,
+              'invalid',
+              sendNowReply == 'invalidEnglish' ? 'No such op "session.sendNow".' : 'Không có lệnh "session.sendNow".',
+            );
           }
       }
     });
@@ -70,6 +74,16 @@ void main() {
 
   testWidgets('an older Mac (unknown op) hides the action from then on', (WidgetTester tester) async {
     final (ProviderContainer, FakeWs) rig = await open(tester, sendNowReply: 'invalid');
+    await tester.tap(find.text('Gửi ngay'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.descendant(of: find.byType(AlertDialog), matching: find.text('Gửi ngay')));
+    await tester.runAsync(() => until(() => !rig.$1.read(sendNowSupportProvider)));
+    await tester.pumpAndSettle();
+    expect(find.text('Gửi ngay'), findsNothing);
+  });
+
+  testWidgets('a Mac answering in English (No such op) hides the action too', (WidgetTester tester) async {
+    final (ProviderContainer, FakeWs) rig = await open(tester, sendNowReply: 'invalidEnglish');
     await tester.tap(find.text('Gửi ngay'));
     await tester.pumpAndSettle();
     await tester.tap(find.descendant(of: find.byType(AlertDialog), matching: find.text('Gửi ngay')));
