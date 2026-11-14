@@ -30,6 +30,8 @@ Most of them come from the design, [revision 2](https://github.com/dtthaison/not
 | [XXXX](XXXX-localization-fluent-source.md) | One English source in Fluent, every platform's words generated from it | Accepted |
 | [XXXX](XXXX-one-typed-event-stream.md) | One typed event stream: kinds in a registry, fields from a closed list with no text, the daemon the only writer, a sealed Audit | Proposed |
 | [XXXX](XXXX-provider-capability-contract.md) | One capability contract for every tool: 39 capabilities in four states, two shrink-only files, a conformance suite and a generated matrix | Proposed |
+| [XXXX](XXXX-tool-versions-follow-the-mac.md) | Tool versions follow the Mac: workers run the Mac's checked versions, rolled out by one click | Proposed |
+| [XXXX](XXXX-sparkle-and-one-release-key.md) | Sparkle for the Rust app, and one EdDSA key for the appcast and the worker manifest; amends 0010 | Proposed |
 
 0001 was written before records had a Status section. Its status is Accepted.
 

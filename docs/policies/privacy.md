@@ -177,6 +177,13 @@ None of these exist yet. Each will change this page when it lands.
 - **Remote computers:** the desktop app and the phone will connect to other computers' Notchling the
   way the phone connects today, with the same pairing. Accounts, lanes and the vault never leave
   their computer.
+- **Tool versions** (see decision XXXX, tool versions follow the Mac). The Mac will read what the
+  latest version of each tool is, on demand and at most hourly, sending nothing that identifies you:
+  Claude Code's from `downloads.claude.ai`, Codex's from `registry.npmjs.org`, and Antigravity's from
+  the manifest host its own installer reads, from which it also fetches the binaries it caches. It
+  will read Notchling's release manifest from GitHub. Machines' workers will download their updates
+  from those same vendor hosts and from GitHub, over https, each checked against a checksum, beside
+  the installers Machines already lists.
 
 ## Keeping this page true
 

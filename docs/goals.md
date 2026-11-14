@@ -82,7 +82,9 @@ The app:
 - Renew the login a tool is using. Refresh tokens rotate, so renewing Claude Code's or Codex's live
   login would sign it out.
 - Change more of your config than its own part: only Notchling's hook entries in
-  `~/.claude/settings.json` (with a backup, your other hooks kept), only `claudeAiOauth` in the
+  `~/.claude/settings.json` (with a backup, your other hooks kept), on a worker set up in Machines,
+  only the one key per tool that turns its self-update off (with a backup, everything else kept),
+  only `claudeAiOauth` in the
   `Claude Code-credentials` Keychain item, only `oauthAccount` in `~/.claude.json`.
 - Answer a session's permission prompt for you. The prompt waits for your answer. When the app isn't
   there to ask you, the hook passes and Claude Code asks in its own terminal. The one exception is a
