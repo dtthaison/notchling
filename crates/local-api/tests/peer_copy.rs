@@ -80,7 +80,7 @@ fn a_copy_is_the_agent_tier_and_a_symlink_is_the_app() {
         ServerConfig {
             socket: socket.clone(),
             allowlist: Allowlist::new([&me]),
-            audit: None,
+            events: None,
             version: "0.1.0".into(),
             limits: Limits::default(),
         },

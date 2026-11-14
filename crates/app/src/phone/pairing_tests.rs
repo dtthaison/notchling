@@ -42,7 +42,7 @@ fn serve(socket: &Path, answers: &Answers) -> Running {
         ServerConfig {
             socket: socket.to_path_buf(),
             allowlist: Allowlist::new([std::env::current_exe().expect("this test binary")]),
-            audit: None,
+            events: None,
             version: "test".into(),
             limits: Limits::default(),
         },

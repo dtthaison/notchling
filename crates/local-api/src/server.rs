@@ -1,9 +1,10 @@
-use crate::audit::{AuditEntry, AuditLog};
 use crate::hub::Hub;
 use crate::lock::{lock_path_for, InstanceLock};
+use crate::presence::Presence;
 use crate::tier::Allowlist;
 use crate::transport::{self, Listener};
 use crate::wire::{ApiError, ClientKind, DaemonStatus, Tier};
+use notchling_events::{Emit, Event};
 use serde_json::{Map, Value};
 use std::io;
 use std::path::{Path, PathBuf};
@@ -42,6 +43,13 @@ impl OpSpec {
     };
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OpHome {
+    Kind,
+    Called,
+    Quiet,
+}
+
 #[derive(Clone, Debug)]
 pub struct Caller {
     pub tier: Tier,
@@ -55,6 +63,15 @@ pub trait Handler: Send + Sync + 'static {
     fn call(&self, caller: &Caller, op: &str, args: &Value) -> Result<Value, ApiError>;
     fn loud(&self, _op: &str, _args: &Value) -> bool {
         false
+    }
+    fn session_of(&self, _pid: u32) -> Option<String> {
+        None
+    }
+    fn home(&self, _op: &str) -> OpHome {
+        OpHome::Called
+    }
+    fn known_ops(&self) -> &[&'static str] {
+        &[]
     }
     fn call_with_extras(
         &self,
@@ -105,7 +122,7 @@ impl Default for Limits {
 pub struct ServerConfig {
     pub socket: PathBuf,
     pub allowlist: Allowlist,
-    pub audit: Option<AuditLog>,
+    pub events: Option<Arc<dyn Emit>>,
     pub version: String,
     pub limits: Limits,
 }
@@ -113,7 +130,8 @@ pub struct ServerConfig {
 pub(crate) struct Shared {
     pub(crate) handler: Arc<dyn Handler>,
     pub(crate) allowlist: Allowlist,
-    pub(crate) audit: Option<AuditLog>,
+    pub(crate) events: Option<Arc<dyn Emit>>,
+    pub(crate) presence: Presence,
     pub(crate) version: String,
     pub(crate) limits: Limits,
     pub(crate) hub: Hub,
@@ -151,21 +169,9 @@ impl Drop for Slot {
 }
 
 impl Shared {
-    pub(crate) fn audit(&self, op: &str, tier: Option<Tier>, peer: Option<&Path>, result: &str) {
-        self.audit_with(op, tier, peer, result, None);
-    }
-
-    pub(crate) fn audit_with(
-        &self,
-        op: &str,
-        tier: Option<Tier>,
-        peer: Option<&Path>,
-        result: &str,
-        reason: Option<String>,
-    ) {
-        if let Some(log) = &self.audit {
-            let entry = AuditEntry::now(op, tier, peer, result).with_reason(reason);
-            let _ = log.append(&entry);
+    pub(crate) fn emit(&self, event: Event) {
+        if let Some(events) = &self.events {
+            events.push(event);
         }
     }
 
@@ -259,7 +265,8 @@ impl Server {
         let shared = Arc::new(Shared {
             handler,
             allowlist: config.allowlist,
-            audit: config.audit,
+            events: config.events,
+            presence: Presence::new(),
             version: config.version,
             limits: config.limits,
             hub: Hub::default(),
@@ -302,7 +309,12 @@ impl Server {
     }
 
     fn accept_loop(&self) -> io::Result<()> {
+        let mut checked = Instant::now();
         while !self.shared.stopping() {
+            if checked.elapsed() >= Duration::from_secs(1) {
+                checked = Instant::now();
+                self.shared.detach_dropped_apps();
+            }
             match self.listener.accept() {
                 Ok((stream, _)) => {
                     let Some(slot) = Slot::take(&self.shared) else {

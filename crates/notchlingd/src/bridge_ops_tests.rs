@@ -281,7 +281,7 @@ fn a_pairing_is_asked_only_of_an_app_that_follows_the_bridge() {
         ServerConfig {
             socket: socket.clone(),
             allowlist: Allowlist::new([std::env::current_exe().unwrap()]),
-            audit: None,
+            events: None,
             version: "9.9.9".into(),
             limits: Limits::default(),
         },

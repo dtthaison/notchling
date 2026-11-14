@@ -1,12 +1,15 @@
-use crate::audit::audit_reason;
 use crate::framing::{encode_line, FrameError, LineReader};
 use crate::peer::{same_user, PeerInfo};
-use crate::server::{Caller, Shared, Slot};
+use crate::server::{Caller, OpHome, Shared, Slot};
 use crate::transport::{self, Stream};
 use crate::wire::{
     err_reply, ok_reply, ops, ApiError, ClientKind, ErrorCode, Hello, HelloReply, Request,
     Subscribe, Tier, API_VERSION,
 };
+use notchling_events::kinds::security::{PeerWhy, RefusedWhy};
+use notchling_events::scope::{self, Scope};
+use notchling_events::spec::Outcome;
+use notchling_events::{Actor, ActorTier, Exe, Ref, Via};
 use serde_json::{Map, Value};
 use std::io::Write;
 use std::net::Shutdown;
@@ -19,12 +22,12 @@ pub(crate) fn serve(stream: Stream, shared: Arc<Shared>, slot: Slot) {
     let peer = match transport::peer(&stream) {
         Ok(peer) => peer,
         Err(_) => {
-            shared.audit("connect", None, None, "peer_unknown");
+            shared.unknown_peer(PeerWhy::PeerUnknown, None);
             return;
         }
     };
     if !same_user(peer.uid, shared.my_uid) {
-        shared.audit("connect", None, peer.exe.as_deref(), "other_user");
+        shared.unknown_peer(PeerWhy::OtherUser, peer.exe.as_deref());
         return;
     }
     if slot.reserved && shared.allowlist.tier_of(peer.exe.as_deref()) != Tier::App {
@@ -62,6 +65,7 @@ pub(crate) fn serve(stream: Stream, shared: Arc<Shared>, slot: Slot) {
         reserved: slot.reserved,
         subscribed: false,
         last_request: Instant::now(),
+        agent_session: None,
     };
     let reader = match stream.try_clone() {
         Ok(read_half) => Some(LineReader::new(read_half)),
@@ -79,6 +83,11 @@ pub(crate) fn serve(stream: Stream, shared: Arc<Shared>, slot: Slot) {
 impl Drop for Session {
     fn drop(&mut self) {
         self.shared.hub.forget(self.id);
+        if self.kind.is_some() && self.tier == Tier::App {
+            self.shared
+                .presence
+                .on_close(self.at_accept.pid, Instant::now());
+        }
     }
 }
 
@@ -104,6 +113,7 @@ struct Session {
     reserved: bool,
     subscribed: bool,
     last_request: Instant,
+    agent_session: Option<String>,
 }
 
 impl Session {
@@ -197,6 +207,7 @@ impl Session {
             }
             return self.hello(id, &request.args);
         }
+        let _scope = scope::enter(self.scope());
         match request.op.as_str() {
             ops::HELLO => self.reply(id, Err(ApiError::bad_request("hello was already said"))),
             ops::DAEMON_STATUS => {
@@ -243,11 +254,31 @@ impl Session {
             self.tier != Tier::App && (listed(Some(&self.at_accept)) || listed(now.as_ref()));
         self.at_hello = now;
         if refused {
-            self.shared
-                .audit(ops::HELLO, Some(self.tier), self.peer(), "peer_changed");
+            self.shared.refused(
+                ops::HELLO,
+                Some(self.tier),
+                self.peer(),
+                RefusedWhy::PeerChanged,
+                None,
+            );
         }
         if self.reserved && self.tier != Tier::App {
             return false;
+        }
+        if self.tier == Tier::Agent {
+            let pid = self.at_hello.as_ref().map_or(self.at_accept.pid, |p| p.pid);
+            self.agent_session = self.shared.handler.session_of(pid);
+        }
+        if self.tier == Tier::App {
+            let attached = self.shared.presence.on_hello(
+                self.at_accept.pid,
+                &hello.version,
+                self.peer(),
+                Instant::now(),
+            );
+            if let Some(attached) = attached {
+                self.shared.push_event(&attached, Outcome::Info);
+            }
         }
         self.kind = Some(hello.client);
         self.shared.hub.hello(self.id, hello.client, self.tier);
@@ -281,8 +312,18 @@ impl Session {
             } else {
                 "forbidden"
             };
-            self.shared
-                .audit(ops::EVENTS_SUBSCRIBE, Some(self.tier), self.peer(), result);
+            let why = if result == "peer_changed" {
+                RefusedWhy::PeerChanged
+            } else {
+                RefusedWhy::Forbidden
+            };
+            self.shared.refused(
+                ops::EVENTS_SUBSCRIBE,
+                Some(self.tier),
+                self.peer(),
+                why,
+                None,
+            );
             return Err(ApiError::new(
                 ErrorCode::Forbidden,
                 "only the Notchling app may follow this topic",
@@ -313,24 +354,39 @@ impl Session {
             ));
         };
         if spec.tier == Tier::App && self.tier != Tier::App {
-            self.shared
-                .audit(op, Some(self.tier), self.peer(), "forbidden");
+            self.shared.refused(
+                op,
+                Some(self.tier),
+                self.peer(),
+                RefusedWhy::Forbidden,
+                None,
+            );
             return Err(ApiError::new(
                 ErrorCode::Forbidden,
                 "only the Notchling app may do this",
             ));
         }
         if spec.tier == Tier::App && !self.still_the_hello_process() {
-            self.shared
-                .audit(op, Some(self.tier), self.peer(), "peer_changed");
+            self.shared.refused(
+                op,
+                Some(self.tier),
+                self.peer(),
+                RefusedWhy::PeerChanged,
+                None,
+            );
             return Err(ApiError::new(
                 ErrorCode::Forbidden,
                 "this request didn't come from the process that said hello",
             ));
         }
         if spec.approval && !self.shared.hub.app_attached() {
-            self.shared
-                .audit(op, Some(self.tier), self.peer(), "needs_approval");
+            self.shared.refused(
+                op,
+                Some(self.tier),
+                self.peer(),
+                RefusedWhy::NeedsApproval,
+                None,
+            );
             return Err(ApiError::new(
                 ErrorCode::NeedsApproval,
                 "this needs approval in the Notchling app, and the app isn't attached",
@@ -342,18 +398,79 @@ impl Session {
             peer: self.peer().map(Path::to_path_buf),
             pid: transport::peer(&self.probe).ok().map(|p| p.pid),
         };
+        let started = Instant::now();
         let (result, more) = handler.call_with_extras(&caller, op, args);
         *extras = more;
-        let quiet = spec.quiet_ok && result.is_ok() && !handler.loud(op, args);
-        if spec.tier == Tier::App && !quiet {
-            let (outcome, reason) = match &result {
-                Ok(_) => ("ok", None),
-                Err(e) => (e.code.as_str(), audit_reason(op, &e.message)),
-            };
-            self.shared
-                .audit_with(op, Some(self.tier), self.peer(), outcome, reason);
+        if !scope::take_recorded() {
+            self.record_generic(op, args, &spec, &result, started);
         }
         result
+    }
+
+    fn record_generic(
+        &self,
+        op: &str,
+        args: &Value,
+        spec: &crate::server::OpSpec,
+        result: &Result<Value, ApiError>,
+        started: Instant,
+    ) {
+        let handler = &self.shared.handler;
+        match result {
+            Err(e) if e.code == ErrorCode::Forbidden => self.shared.refused(
+                op,
+                Some(self.tier),
+                self.peer(),
+                RefusedWhy::Forbidden,
+                None,
+            ),
+            Err(e) if e.code == ErrorCode::NeedsApproval => self.shared.refused(
+                op,
+                Some(self.tier),
+                self.peer(),
+                RefusedWhy::NeedsApproval,
+                None,
+            ),
+            Err(e) => self.shared.failed(op, e.code, started),
+            Ok(_) if spec.tier == Tier::App => {
+                let called = match handler.home(op) {
+                    OpHome::Called => true,
+                    OpHome::Quiet => handler.loud(op, args),
+                    OpHome::Kind => false,
+                };
+                if called {
+                    self.shared.called(op, self.tier, started);
+                }
+            }
+            Ok(_) => {}
+        }
+    }
+
+    fn scope(&self) -> Scope {
+        let via = match self.kind {
+            Some(ClientKind::App) => Some(Via::App),
+            Some(ClientKind::Cli) => Some(Via::Cli),
+            Some(ClientKind::Hook) => Some(Via::Hook),
+            None => None,
+        };
+        let tier = match self.tier {
+            Tier::App => ActorTier::App,
+            Tier::Agent => ActorTier::Agent,
+        };
+        let session = match self.tier {
+            Tier::Agent => self.agent_session.as_deref().map(Ref::new),
+            Tier::App => None,
+        };
+        Scope {
+            op_id: Some(notchling_events::ids::new_op_id()),
+            actor: Some(Actor {
+                tier,
+                via,
+                exe: self.peer().map(Exe::from_path),
+                device: None,
+                session,
+            }),
+        }
     }
 
     fn peer(&self) -> Option<&Path> {

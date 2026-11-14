@@ -236,7 +236,7 @@ pub fn run(
         ServerConfig {
             socket: layout.socket.clone(),
             allowlist,
-            audit: Some(AuditLog::new(layout.audit_path())),
+            events: None,
             version: env!("CARGO_PKG_VERSION").to_string(),
             limits: Limits::default(),
         },

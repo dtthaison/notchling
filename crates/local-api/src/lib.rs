@@ -5,6 +5,8 @@ pub mod framing;
 mod hub;
 pub mod lock;
 pub mod peer;
+mod presence;
+mod record;
 pub mod server;
 pub mod spawn;
 pub mod tier;
@@ -12,9 +14,13 @@ pub mod transport;
 pub mod wire;
 
 #[cfg(test)]
+mod presence_tests;
+#[cfg(test)]
 mod server_audit_reason_tests;
 #[cfg(test)]
 mod server_audit_tests;
+#[cfg(test)]
+mod server_events_tests;
 #[cfg(test)]
 mod server_tests;
 #[cfg(test)]
@@ -23,7 +29,7 @@ pub(crate) mod testutil;
 pub use audit::{AuditEntry, AuditLog};
 pub use client::{server_trusted, Client, ClientError, ConnectOptions, CALL_TIMEOUT};
 pub use framing::MAX_LINE;
-pub use server::{Caller, Handler, Limits, OpSpec, Server, ServerConfig, ServerHandle};
+pub use server::{Caller, Handler, Limits, OpHome, OpSpec, Server, ServerConfig, ServerHandle};
 pub use spawn::{ensure_daemon, ensure_daemon_with, spawn_allowed, SpawnOptions, Started};
 pub use tier::{Allowlist, APP_TIER_PATHS_ENV};
 pub use wire::{

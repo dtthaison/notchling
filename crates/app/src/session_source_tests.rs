@@ -224,7 +224,7 @@ mod over_a_socket {
             ServerConfig {
                 socket: socket.to_path_buf(),
                 allowlist: Allowlist::empty(),
-                audit: None,
+                events: None,
                 version: "test".into(),
                 limits: Limits::default(),
             },
@@ -331,7 +331,7 @@ mod over_a_socket {
             ServerConfig {
                 socket: socket.clone(),
                 allowlist: Allowlist::empty(),
-                audit: None,
+                events: None,
                 version: "test".into(),
                 limits: Limits::default(),
             },
