@@ -1,4 +1,9 @@
+mod db;
 mod normalize;
+mod row;
+
+pub use db::{DbError, EventsDb, Opened};
+pub use row::{ActivityRow, DbQuery};
 
 pub use normalize::KINDS;
 
@@ -169,5 +174,7 @@ pub fn list(files: &Files, query: &Query) -> Value {
     }
 }
 
+#[cfg(test)]
+mod db_tests;
 #[cfg(test)]
 mod tests;
