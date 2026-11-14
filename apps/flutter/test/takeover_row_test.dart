@@ -39,7 +39,7 @@ void main() {
     }
 
     testWidgets('an exited session: one confirmation to resume', (WidgetTester tester) async {
-      final TakeoverChoice? result = await run(tester, _view(takeover: <String, Object?>{'available': true}), <String>['Tiếp quản']);
+      final TakeoverChoice? result = await run(tester, _view(takeover: <String, Object?>{'available': true}), <String>['Take over']);
       expect(result, TakeoverChoice.resume);
     });
 
@@ -51,9 +51,9 @@ void main() {
       )));
       await tester.tap(find.text('go'));
       await tester.pumpAndSettle();
-      expect(find.textContaining('Dừng session trên Mac (Claude desktop / VS Code) và mở lại trong Console'), findsOneWidget);
-      expect(find.textContaining('lượt hiện tại sẽ bị dừng'), findsNothing);
-      await tester.tap(find.text('Dừng và tiếp quản'));
+      expect(find.textContaining('Stop the session on the Mac (Claude desktop / VS Code) and reopen it in Console'), findsOneWidget);
+      expect(find.textContaining('the current turn will be cut off'), findsNothing);
+      await tester.tap(find.text('Stop and take over'));
       await tester.pumpAndSettle();
       expect(result, TakeoverChoice.stopAndResume);
     });
@@ -66,23 +66,23 @@ void main() {
       )));
       await tester.tap(find.text('go'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Dừng và tiếp quản'));
+      await tester.tap(find.text('Stop and take over'));
       await tester.pumpAndSettle();
       expect(result, isNull, reason: 'not decided yet: the warning is showing');
-      expect(find.text('Session đang chạy — lượt hiện tại sẽ bị dừng giữa chừng.'), findsOneWidget);
-      await tester.tap(find.text('Vẫn dừng'));
+      expect(find.text('The session is running; the current turn will be cut off.'), findsOneWidget);
+      await tester.tap(find.text('Stop anyway'));
       await tester.pumpAndSettle();
       expect(result, TakeoverChoice.stopAndResume);
     });
 
     testWidgets('cancelling at the second confirmation stops nothing', (WidgetTester tester) async {
       final Session session = _view(state: 'running', takeover: <String, Object?>{'available': false, 'stoppable': true, 'busy': true});
-      final TakeoverChoice? result = await run(tester, session, <String>['Dừng và tiếp quản', 'Huỷ']);
+      final TakeoverChoice? result = await run(tester, session, <String>['Stop and take over', 'Cancel']);
       expect(result, TakeoverChoice.cancel);
     });
 
     testWidgets('cancelling the first one stops nothing either', (WidgetTester tester) async {
-      final TakeoverChoice? result = await run(tester, _view(takeover: <String, Object?>{'available': false, 'stoppable': true}), <String>['Huỷ']);
+      final TakeoverChoice? result = await run(tester, _view(takeover: <String, Object?>{'available': false, 'stoppable': true}), <String>['Cancel']);
       expect(result, TakeoverChoice.cancel);
     });
   });
@@ -91,8 +91,8 @@ void main() {
     testWidgets('sits at the end of the row with a target of at least 48 dp', (WidgetTester tester) async {
       final Session session = _view(takeover: <String, Object?>{'available': true});
       await tester.pumpWidget(ProviderScope(child: host(SessionRow(session: session, now: DateTime(2026, 11, 3), onTap: () {}, trailing: TakeoverRowButton(session: session)))));
-      expect(find.text('Tiếp quản'), findsOneWidget);
-      final Size size = tester.getSize(find.ancestor(of: find.text('Tiếp quản'), matching: find.byType(ConstrainedBox)).first);
+      expect(find.text('Take over'), findsOneWidget);
+      final Size size = tester.getSize(find.ancestor(of: find.text('Take over'), matching: find.byType(ConstrainedBox)).first);
       expect(size.height, greaterThanOrEqualTo(48));
     });
   });

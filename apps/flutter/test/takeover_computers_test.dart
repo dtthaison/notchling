@@ -23,9 +23,9 @@ void main() {
     await tester.runAsync(() => until(() => container.read(sessionsProvider).byId('s1') != null));
     await tester.pump(const Duration(milliseconds: 100));
 
-    await tester.tap(find.text('Tiếp quản'));
+    await tester.tap(find.text('Take over'));
     await tester.pumpAndSettle();
-    await tester.tap(find.descendant(of: find.byType(AlertDialog), matching: find.text('Tiếp quản')));
+    await tester.tap(find.descendant(of: find.byType(AlertDialog), matching: find.text('Take over')));
     await tester.pump();
     await tester.runAsync(() => until(() => b.sent.any((Map<String, Object?> m) => m['op'] == 'session.takeover')));
 

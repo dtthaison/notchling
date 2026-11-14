@@ -124,19 +124,19 @@ void main() {
 
     testWidgets('a draft starting with ! shows shell mode: header, folder, hint', (WidgetTester tester) async {
       await pump(tester, '!ls -la');
-      expect(find.text('Lệnh shell'), findsOneWidget);
+      expect(find.text('Shell command'), findsOneWidget);
       expect(find.textContaining('~/code/api'), findsOneWidget);
-      expect(find.textContaining('xoá !'), findsOneWidget);
+      expect(find.textContaining('delete the !'), findsOneWidget);
     });
 
     testWidgets('a wrapped command shows what will run', (WidgetTester tester) async {
       await pump(tester, '!echo one\n  two');
-      expect(find.textContaining('Sẽ chạy', findRichText: true), findsOneWidget);
+      expect(find.textContaining('Will run', findRichText: true), findsOneWidget);
     });
 
     testWidgets('a plain draft has no shell header', (WidgetTester tester) async {
       await pump(tester, 'hello');
-      expect(find.text('Lệnh shell'), findsNothing);
+      expect(find.text('Shell command'), findsNothing);
     });
 
     testWidgets('typing a slash lists commands; tapping one fills the field', (WidgetTester tester) async {
@@ -179,7 +179,7 @@ void main() {
       final ToolGroupEntry group = groupEntries(previewConversation()).whereType<ToolGroupEntry>().first;
       await tester.pumpWidget(host(ToolGroupView(entry: group)));
       expect(find.text('Glob'), findsNothing);
-      await tester.tap(find.text('4 bước công cụ'));
+      await tester.tap(find.text('4 tool steps'));
       await tester.pump();
       expect(find.text('Glob'), findsOneWidget);
     });
@@ -211,8 +211,8 @@ void main() {
 
     testWidgets('groups in the kit order, with the live activity line and the subagent tree', (WidgetTester tester) async {
       await tester.pumpWidget(view(SessionsState(phase: LoadPhase.ready, sessions: previewSessions())));
-      expect(find.text('CẦN BẠN'), findsOneWidget);
-      expect(find.text('ĐANG CHẠY'), findsOneWidget);
+      expect(find.text('NEEDS INPUT'), findsOneWidget);
+      expect(find.text('WORKING'), findsOneWidget);
       expect(find.textContaining('Editing PaymentService.swift', findRichText: true), findsOneWidget);
       expect(find.textContaining('Find every caller', findRichText: true), findsOneWidget);
       expect(find.textContaining('git push origin', findRichText: true), findsOneWidget, reason: 'what the needs-input session waits for');
@@ -230,9 +230,9 @@ void main() {
       await tester.pumpWidget(view(const SessionsState()));
       expect(find.byType(SkeletonRows), findsOneWidget);
       await tester.pumpWidget(view(const SessionsState(phase: LoadPhase.error)));
-      expect(find.text('Thử lại'), findsOneWidget);
+      expect(find.text('Retry'), findsOneWidget);
       await tester.pumpWidget(view(const SessionsState(phase: LoadPhase.ready)));
-      expect(find.text('Chưa có session nào'), findsOneWidget);
+      expect(find.text('No sessions yet'), findsOneWidget);
       await tester.pumpWidget(view(SessionsState(phase: LoadPhase.ready, sessions: previewSessions()), query: 'zzzz'));
       expect(find.textContaining('zzzz'), findsOneWidget);
     });
@@ -257,7 +257,7 @@ void meterTests() {
     double fill(WidgetTester tester) => tester.widget<Transform>(find.byKey(const ValueKey<String>('meter-fill'))).transform.entry(0, 0);
 
     testWidgets('the fill is drawn (it has height) and follows the value, with a colour per level', (WidgetTester tester) async {
-      Widget meter(double f) => host(KitMeter(label: 'Tuần', value: '${(f * 100).round()}%', fraction: f, width: 60));
+      Widget meter(double f) => host(KitMeter(label: 'Week', value: '${(f * 100).round()}%', fraction: f, width: 60));
       await tester.pumpWidget(meter(0.14));
       await tester.pumpAndSettle();
       expect(fill(tester), closeTo(0.14, 0.001));

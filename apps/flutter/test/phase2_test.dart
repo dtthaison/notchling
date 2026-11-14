@@ -117,14 +117,14 @@ void main() {
         },
       ), screen: true));
       await tester.enterText(find.byType(TextField), 'mô tả');
-      await tester.tap(find.bySemanticsLabel('Gửi'));
+      await tester.tap(find.bySemanticsLabel('Send'));
       await tester.pump();
       await tester.pump();
       expect(captions, <String>['mô tả']);
-      expect(find.text('Chỉ xem'), findsOneWidget);
+      expect(find.text('This session is view only.'), findsOneWidget);
       expect(find.byType(LinearProgressIndicator), findsNothing, reason: 'progress goes away after a failure');
       fail = false;
-      await tester.tap(find.bySemanticsLabel('Gửi'));
+      await tester.tap(find.bySemanticsLabel('Send'));
       await tester.pump();
       expect(captions.length, 2, reason: 'sending again is possible');
     });

@@ -65,7 +65,7 @@ FakeWs macWithSessions(List<Map<String, Object?>> sessions, {List<Map<String, Ob
   });
 }
 
-Widget host(Widget child, {Locale locale = const Locale('vi'), double textScale = 1, bool screen = false}) {
+Widget host(Widget child, {Locale locale = const Locale('en'), double textScale = 1, bool screen = false}) {
   return MaterialApp(
     theme: buildTheme(),
     locale: locale,

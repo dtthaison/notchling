@@ -253,14 +253,14 @@ void main() {
       ));
       await tester.pump();
       await tester.pump();
-      expect(find.text('Không tải được ảnh'), findsOneWidget);
+      expect(find.text('Could not load the picture'), findsOneWidget);
       expect(find.byType(Image), findsNothing);
       fail = false;
       await tester.tap(find.byType(PictureThumbnail));
       await tester.pump();
       await tester.pump();
       expect(find.byType(Image), findsOneWidget);
-      expect(find.text('Không tải được ảnh'), findsNothing);
+      expect(find.text('Could not load the picture'), findsNothing);
     });
   });
 }

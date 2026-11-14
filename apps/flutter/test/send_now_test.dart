@@ -46,19 +46,19 @@ void main() {
     return (container, socket);
   }
 
-  testWidgets('a queued bubble offers Gửi ngay; confirming sends session.sendNow', (WidgetTester tester) async {
+  testWidgets('a queued bubble offers Send now; confirming sends session.sendNow', (WidgetTester tester) async {
     final (ProviderContainer, FakeWs) rig = await open(tester);
-    expect(find.text('Gửi ngay'), findsOneWidget);
-    await tester.tap(find.text('Gửi ngay'));
+    expect(find.text('Send now'), findsOneWidget);
+    await tester.tap(find.text('Send now'));
     await tester.pumpAndSettle();
-    expect(find.text('Ngắt lượt đang chạy để gửi ngay?'), findsOneWidget);
-    await tester.tap(find.text('Hủy').evaluate().isNotEmpty ? find.text('Hủy') : find.byType(TextButton).first);
+    expect(find.text('Interrupt the running turn to send now?'), findsOneWidget);
+    await tester.tap(find.text('Cancel').evaluate().isNotEmpty ? find.text('Cancel') : find.byType(TextButton).first);
     await tester.pumpAndSettle();
     expect(rig.$2.sent.where((Map<String, Object?> m) => m['op'] == 'session.sendNow'), isEmpty, reason: 'cancel sends nothing');
 
-    await tester.tap(find.text('Gửi ngay'));
+    await tester.tap(find.text('Send now'));
     await tester.pumpAndSettle();
-    await tester.tap(find.descendant(of: find.byType(AlertDialog), matching: find.text('Gửi ngay')));
+    await tester.tap(find.descendant(of: find.byType(AlertDialog), matching: find.text('Send now')));
     await tester.runAsync(() => until(() => rig.$2.sent.any((Map<String, Object?> m) => m['op'] == 'session.sendNow')));
     await tester.pump();
     expect(find.byType(CircularProgressIndicator), findsOneWidget, reason: 'spinner while waiting for the transcript');
@@ -68,27 +68,27 @@ void main() {
 
   testWidgets('hidden on a view-only session', (WidgetTester tester) async {
     await open(tester, control: 'viewOnly');
-    expect(find.text('Gửi ngay'), findsNothing);
-    expect(find.text('đang chờ'), findsOneWidget);
+    expect(find.text('Send now'), findsNothing);
+    expect(find.text('waiting'), findsOneWidget);
   });
 
   testWidgets('an older Mac (unknown op) hides the action from then on', (WidgetTester tester) async {
     final (ProviderContainer, FakeWs) rig = await open(tester, sendNowReply: 'invalid');
-    await tester.tap(find.text('Gửi ngay'));
+    await tester.tap(find.text('Send now'));
     await tester.pumpAndSettle();
-    await tester.tap(find.descendant(of: find.byType(AlertDialog), matching: find.text('Gửi ngay')));
+    await tester.tap(find.descendant(of: find.byType(AlertDialog), matching: find.text('Send now')));
     await tester.runAsync(() => until(() => !rig.$1.read(sendNowSupportProvider)));
     await tester.pumpAndSettle();
-    expect(find.text('Gửi ngay'), findsNothing);
+    expect(find.text('Send now'), findsNothing);
   });
 
   testWidgets('a Mac answering in English (No such op) hides the action too', (WidgetTester tester) async {
     final (ProviderContainer, FakeWs) rig = await open(tester, sendNowReply: 'invalidEnglish');
-    await tester.tap(find.text('Gửi ngay'));
+    await tester.tap(find.text('Send now'));
     await tester.pumpAndSettle();
-    await tester.tap(find.descendant(of: find.byType(AlertDialog), matching: find.text('Gửi ngay')));
+    await tester.tap(find.descendant(of: find.byType(AlertDialog), matching: find.text('Send now')));
     await tester.runAsync(() => until(() => !rig.$1.read(sendNowSupportProvider)));
     await tester.pumpAndSettle();
-    expect(find.text('Gửi ngay'), findsNothing);
+    expect(find.text('Send now'), findsNothing);
   });
 }
