@@ -88,7 +88,6 @@ pub(crate) struct TlsConn {
     peer_fp: String,
     outbox: Outbox,
     closed: Arc<AtomicBool>,
-    stream: TcpStream,
 }
 
 impl Conn for TlsConn {
@@ -118,7 +117,6 @@ impl Conn for TlsConn {
 
     fn close(&self) {
         self.closed.store(true, Ordering::SeqCst);
-        let _ = self.stream.shutdown(Shutdown::Both);
     }
 }
 
@@ -231,7 +229,6 @@ pub(crate) fn start(
         peer_fp: open.peer_fp.clone(),
         outbox,
         closed: closed.clone(),
-        stream: open.stream.try_clone()?,
     });
     let conn: Arc<dyn Conn> = tls.clone();
     events.opened(conn.clone());
@@ -274,9 +271,7 @@ fn serve(
             events.line(peer, line);
         }
         plain.clear();
-        if closed.load(Ordering::SeqCst) {
-            break;
-        }
+        let closing = closed.load(Ordering::SeqCst);
         let mut wrote = false;
         while let Ok(line) = rx.try_recv() {
             if conn.writer().write_all(&line).is_err() {
@@ -287,7 +282,13 @@ fn serve(
         if (wrote || conn.wants_write()) && flush(&mut conn, &mut stream).is_err() {
             break;
         }
+        if closing {
+            break;
+        }
         if read_some(&mut conn, &mut stream, &mut plain).is_err() {
+            for line in reader.push(&plain).unwrap_or_default() {
+                events.line(peer, line);
+            }
             break;
         }
     }

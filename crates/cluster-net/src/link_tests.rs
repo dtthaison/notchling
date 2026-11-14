@@ -245,3 +245,44 @@ fn mem_transport_delivers_in_order_and_checks_pins() {
     assert_eq!(closed(&ea), b.fingerprint);
     assert!(conn.send(b"late\n".to_vec()).is_err());
 }
+
+#[test]
+fn a_line_sent_just_before_close_still_arrives() {
+    let (_s, ids) = ids(2);
+    let (a, b) = (&ids[0], &ids[1]);
+    let ta = TcpTls::new(a.clone(), pins(&[&b.fingerprint]), true);
+    let tb = TcpTls::new(b.clone(), pins(&[&a.fingerprint]), true);
+    let (rb, eb) = Rec::new();
+    let listener = tb.listen(0, rb).unwrap();
+    let (ra, ea) = Rec::new();
+    let conn = ta
+        .dial(&loopback(), listener.ports()[0], &b.fingerprint, ra)
+        .unwrap();
+    let served = opened(&eb);
+    opened(&ea);
+    served.send(b"refused\n".to_vec()).unwrap();
+    served.close();
+    assert!(!served.is_open());
+    assert!(served.send(b"late\n".to_vec()).is_err());
+    assert_eq!(line(&ea), (b.fingerprint.clone(), b"refused".to_vec()));
+    assert_eq!(closed(&ea), b.fingerprint);
+    drop(conn);
+
+    let net = MemNet::new();
+    let ma = MemTransport::on(&net, &a.fingerprint, pins(&[&b.fingerprint]));
+    let mb = MemTransport::on(&net, &b.fingerprint, pins(&[&a.fingerprint]));
+    let (rb, eb) = Rec::new();
+    let _listener = mb.listen(9, rb).unwrap();
+    let (ra, ea) = Rec::new();
+    let _conn = ma.dial(&mb.addrs(), 9, &b.fingerprint, ra).unwrap();
+    let served = opened(&eb);
+    opened(&ea);
+    for i in 0..20 {
+        served.send(format!("{i}\n").into_bytes()).unwrap();
+    }
+    served.close();
+    for i in 0..20 {
+        assert_eq!(line(&ea).1, format!("{i}").into_bytes());
+    }
+    assert_eq!(closed(&ea), b.fingerprint);
+}

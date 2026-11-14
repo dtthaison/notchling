@@ -4,7 +4,7 @@ use crate::pin::Admit;
 use crate::{Conn, Error, LinkEvents, Listener, Pins, Transport};
 use std::collections::BTreeMap;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
@@ -57,10 +57,20 @@ impl MemTransport {
 
 struct Pair {
     closed: AtomicBool,
+    closing: AtomicBool,
+    drained: AtomicUsize,
     slot: Mutex<Option<Admit>>,
 }
 
 impl Pair {
+    fn finish(&self) {
+        self.closing.store(true, Ordering::SeqCst);
+    }
+
+    fn is_closing(&self) -> bool {
+        self.closing.load(Ordering::SeqCst) || self.is_closed()
+    }
+
     fn close(&self) {
         self.closed.store(true, Ordering::SeqCst);
         self.slot.lock().unwrap_or_else(|e| e.into_inner()).take();
@@ -84,7 +94,7 @@ impl Conn for MemConn {
     }
 
     fn send(&self, line: Vec<u8>) -> Result<(), Error> {
-        if self.pair.is_closed() {
+        if self.pair.is_closing() {
             return Err(Error::Closed);
         }
         if self.outbox.push(line) {
@@ -100,11 +110,11 @@ impl Conn for MemConn {
     }
 
     fn is_open(&self) -> bool {
-        !self.pair.is_closed()
+        !self.pair.is_closing()
     }
 
     fn close(&self) {
-        self.pair.close();
+        self.pair.finish();
     }
 }
 
@@ -120,6 +130,7 @@ struct Leg {
 impl Leg {
     fn run(self) {
         let mut reader = LineReader::new(MAX_LINE);
+        let mut drained = false;
         while !self.pair.is_closed() {
             match self.rx.recv_timeout(Duration::from_millis(20)) {
                 Ok(bytes) => match reader.push(&bytes) {
@@ -133,6 +144,12 @@ impl Leg {
                     }
                     Err(_) => self.pair.close(),
                 },
+                Err(RecvTimeoutError::Timeout) if self.pair.is_closing() && !drained => {
+                    drained = true;
+                    if self.pair.drained.fetch_add(1, Ordering::SeqCst) + 1 == 2 {
+                        self.pair.close();
+                    }
+                }
                 Err(RecvTimeoutError::Timeout) => {}
                 Err(RecvTimeoutError::Disconnected) => self.pair.close(),
             }
@@ -175,6 +192,8 @@ impl Transport for MemTransport {
             .ok_or_else(|| Error::Tls("this node is not pinned".into()))?;
         let pair = Arc::new(Pair {
             closed: AtomicBool::new(false),
+            closing: AtomicBool::new(false),
+            drained: AtomicUsize::new(0),
             slot: Mutex::new(Some(slot)),
         });
         let (out_c, rx_c) = Outbox::new(OUTBOX);
