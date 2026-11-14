@@ -106,7 +106,9 @@ pub struct UnsupportedStreamer;
 
 impl Streamer for UnsupportedStreamer {
     fn start(&self, _: &Arc<Connection>, _: &PhoneOptions) -> Result<(), BridgeFailure> {
-        Err(BridgeFailure::invalid("The Mac can't stream its screen yet."))
+        Err(BridgeFailure::invalid(
+            "The Mac can't stream its screen yet.",
+        ))
     }
 
     fn stop(&self, _: &Arc<Connection>) {}

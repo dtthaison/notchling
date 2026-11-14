@@ -123,7 +123,9 @@ impl<S: Sources, A: Acting> LiveBackend<S, A> {
 
 fn not_in_transcript(error: ImageError) -> BridgeFailure {
     match error {
-        ImageError::NotAllowed => BridgeFailure::invalid("This image is outside the allowed folders."),
+        ImageError::NotAllowed => {
+            BridgeFailure::invalid("This image is outside the allowed folders.")
+        }
         ImageError::NotFound => BridgeFailure::not_found("Image not found in the transcript."),
         ImageError::TooLarge => BridgeFailure::invalid("This image is too large (over 20 MB)."),
     }

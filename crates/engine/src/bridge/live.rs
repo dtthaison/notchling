@@ -201,8 +201,8 @@ impl<S: Sources, A: Acting> LiveBackend<S, A> {
             .iter()
             .find(|r| r.id == row_id)
             .ok_or_else(|| BridgeFailure::not_found("No such session."))?;
-        let (tool, id) = foreign::parse(row_id)
-            .ok_or_else(|| BridgeFailure::not_found("No such session."))?;
+        let (tool, id) =
+            foreign::parse(row_id).ok_or_else(|| BridgeFailure::not_found("No such session."))?;
         let live = self.sources.foreign_live(std::slice::from_ref(row));
         let (conversation, running) = match tool {
             Tool::Codex => {

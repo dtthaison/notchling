@@ -223,7 +223,10 @@ impl Router {
         let bytes = int(body, "bytes")
             .filter(|b| *b > 0 && *b as usize <= MAX_BYTES)
             .ok_or_else(|| {
-                BridgeFailure::invalid(format!("The image must be under {} MB.", MAX_BYTES / 1_048_576))
+                BridgeFailure::invalid(format!(
+                    "The image must be under {} MB.",
+                    MAX_BYTES / 1_048_576
+                ))
             })?;
         let caption = string(body, "caption").unwrap_or_default();
         if caption.chars().count() > MAX_TEXT_CHARACTERS {
@@ -269,8 +272,9 @@ impl Router {
             .uploads
             .finish(upload_id, connection.id, self.now_ms())
             .map_err(upload_failure)?;
-        let ext = ImageStore::detect(&upload.data)
-            .ok_or_else(|| BridgeFailure::invalid("Only JPEG, PNG, GIF or WebP images are accepted."))?;
+        let ext = ImageStore::detect(&upload.data).ok_or_else(|| {
+            BridgeFailure::invalid("Only JPEG, PNG, GIF or WebP images are accepted.")
+        })?;
         let target = self.session(&upload.session_id)?;
         if target.control == Control::ViewOnly {
             return Err(view_only());
@@ -308,10 +312,9 @@ impl Router {
         connection: &Arc<Connection>,
     ) -> Result<Value, BridgeFailure> {
         let request_id = require(body, "requestId")?;
-        let prompt: PendingPrompt = self
-            .backend
-            .pending_prompt(request_id)
-            .ok_or_else(|| BridgeFailure::not_found("This question or permission is no longer open."))?;
+        let prompt: PendingPrompt = self.backend.pending_prompt(request_id).ok_or_else(|| {
+            BridgeFailure::not_found("This question or permission is no longer open.")
+        })?;
         let response = match &prompt.kind {
             PromptKind::Permission => match body.get("allow").and_then(Value::as_bool) {
                 Some(true) => PromptResponse::Allow,
@@ -370,9 +373,9 @@ impl Router {
         let id = require(body, "sessionId")?;
         let stop_original = match body.get("stopOriginal") {
             None => false,
-            Some(raw) => raw.as_bool().ok_or_else(|| {
-                BridgeFailure::invalid("\"stopOriginal\" must be true or false.")
-            })?,
+            Some(raw) => raw
+                .as_bool()
+                .ok_or_else(|| BridgeFailure::invalid("\"stopOriginal\" must be true or false."))?,
         };
         let target = self.session(id)?;
         if target.control != Control::ViewOnly {
@@ -489,7 +492,11 @@ pub fn answers(body: &Body, questions: &[PromptQuestion]) -> Result<Vec<String>,
     let raw: Vec<&Value> = match body.get("choice") {
         Some(Value::Array(list)) => list.iter().collect(),
         Some(single) => vec![single],
-        None => return Err(BridgeFailure::invalid("\"choice\" or \"text\" is required.")),
+        None => {
+            return Err(BridgeFailure::invalid(
+                "\"choice\" or \"text\" is required.",
+            ))
+        }
     };
     if raw.len() != questions.len() {
         return Err(BridgeFailure::invalid(format!(
@@ -505,7 +512,9 @@ pub fn answers(body: &Body, questions: &[PromptQuestion]) -> Result<Vec<String>,
                     .ok()
                     .filter(|n| (1..=question.options.len()).contains(n))
                     .map(|n| question.options[n - 1].clone())
-                    .ok_or_else(|| BridgeFailure::invalid(format!("There is no choice {number}.")));
+                    .ok_or_else(|| {
+                        BridgeFailure::invalid(format!("There is no choice {number}."))
+                    });
             }
             value
                 .as_str()

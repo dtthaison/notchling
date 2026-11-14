@@ -467,7 +467,10 @@ fn entity_asks_the_schema_reader_and_says_so_when_there_is_none() {
     let viz = engine();
     let none = viz.entity_spec("");
     assert_eq!(none.kind, wire::VizKind::Entity);
-    assert_eq!(none.empty.expect("empty").title, "The session has no folder yet");
+    assert_eq!(
+        none.empty.expect("empty").title,
+        "The session has no folder yet"
+    );
     let unsupported = viz.entity_spec("/p");
     assert!(unsupported.entity.is_none());
     assert!(unsupported

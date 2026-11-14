@@ -25,7 +25,9 @@ impl std::fmt::Display for TakeoverError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
             TakeoverError::Alive => ALIVE_REASON,
-            TakeoverError::NoTranscript => "No transcript to resume in ~/.claude/projects, so it can't be taken over.",
+            TakeoverError::NoTranscript => {
+                "No transcript to resume in ~/.claude/projects, so it can't be taken over."
+            }
             TakeoverError::Sdk => "The session runs with claude -p and can't be taken over.",
             TakeoverError::AlreadyControllable => "Notchling can already control this session.",
             TakeoverError::NoWorkingFolder => "The session's working folder is gone.",
