@@ -111,7 +111,7 @@ bridge's `remote-log.jsonl` and `account-log.json`, and answers normalized rows,
 An app-tier call is written to `audit.jsonl` unless its spec is `OpSpec::APP_QUIET` and it succeeded.
 These read-only polls are quiet: `bridge.status`, `bridge.devices`, `bridge.tunnel.status`,
 `accounts.list`, `lanes.list`, `providers.list`, `providers.usage`, `limits.status`, `limits.usage`,
-`git.status`, `git.diff`, `activity.list` and `versions.workers`. A call to `accounts.list` or `providers.list` with
+`git.status`, `git.diff`, `activity.list`, `codex.children` and `versions.workers`. A call to `accounts.list` or `providers.list` with
 `sync: true`, or to `providers.usage` or `limits.usage` with `refresh: true`, reads Keychain and the network,
 so it is logged. Failures and refusals of a quiet op are logged too. No op that acts, writes or touches the
 vault is quiet.
@@ -714,3 +714,13 @@ agy's version.
 - Facts go to `audit.jsonl` as fixed words (`versions.seen claude 2.1.324`,
   `versions.changed mac claude 2.1.323 to 2.1.324 outside`): a version seen for the first time in a data
   folder, and a change. Never a path or free text.
+
+## `codex_children.rs`
+
+The Codex child index: which rollouts are subagents of which thread. The daemon keeps `<data>/daemon/codex-children.db` (SQLite, one row per rollout: path, size, mtime, thread, parent, depth, nickname, role, start time) from a backfill of the newest 30 day folders and `platform::watch` on `<codex>/sessions`; a rollout whose size and time are unchanged is never read again, and a day's rows for files that are gone are swept when the day is read again. Deleting the file costs one backfill.
+
+| Op | Tier | Args | Reply |
+| --- | --- | --- | --- |
+| `codex.children` | app (quiet) | `{thread}` | `{children: [{path, thread, parent, depth, nickname, role, started}]}`, oldest first; an unknown or empty `thread`, or the index not open yet, answers `{children: []}` |
+
+Read only, no switch. With no daemon (a fixture root, a `--render`) the app reads the parent's day folder and the next one itself.

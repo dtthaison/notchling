@@ -100,6 +100,10 @@ impl Layout {
         self.data_dir.join("daemon").join("antigravity")
     }
 
+    pub fn codex_children_db(&self) -> PathBuf {
+        self.data_dir.join("daemon").join("codex-children.db")
+    }
+
     pub fn state_dir(&self) -> PathBuf {
         self.socket
             .parent()

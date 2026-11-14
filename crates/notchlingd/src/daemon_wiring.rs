@@ -8,6 +8,7 @@ use crate::awake_loop::{power_for, AwakeLoop};
 use crate::bridge_backend::APPROVAL_WAIT;
 use crate::bridge_ops::{BridgeOps, BridgeSetup};
 use crate::catalog_ops::CatalogService;
+use crate::codex_children::CodexChildren;
 use crate::codex_ops::CodexOps;
 use crate::daemon::{FirstScan, FIRST_LIST_WAIT};
 use crate::every_session::{EverySession, CLAUDE};
@@ -314,6 +315,7 @@ pub struct Wired {
     pub settings: Arc<SettingsOps>,
     pub versions: Arc<VersionsOps>,
     pub awake: Arc<AwakeLoop>,
+    pub codex_children: Arc<CodexChildren>,
 }
 
 impl Wired {
@@ -508,6 +510,10 @@ impl Wired {
             settings,
             versions,
             awake,
+            codex_children: Arc::new(CodexChildren::new(
+                layout.codex_dir().join("sessions"),
+                layout.codex_children_db(),
+            )),
         }
     }
 
@@ -553,6 +559,7 @@ impl Wired {
             .with_group(self.settings.clone())
             .with_group(self.versions.clone())
             .with_group(Arc::new(git))
+            .with_group(self.codex_children.clone())
             .with_group(Arc::new(ActivityOps::for_daemon(layout)))
             .with_first_scan(first_scan, first_wait)
     }
@@ -563,6 +570,7 @@ impl Wired {
         self.acting.spawn_held_loop();
         self.versions.start();
         self.awake.spawn_loop();
+        self.codex_children.start();
     }
 
     pub fn load(&self) {
@@ -570,6 +578,7 @@ impl Wired {
     }
 
     pub fn close(&self) {
+        self.codex_children.close();
         self.awake.close();
         self.acting.stop_held_loop();
         self.acting.close();
