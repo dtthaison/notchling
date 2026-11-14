@@ -31,6 +31,7 @@ impl NodeCore {
                     addrs: j.me.addrs.clone(),
                     port: j.me.port,
                     versions: self.versions.clone(),
+                    headless: j.me.headless,
                 };
                 self.send(peer, msg, out);
                 return;

@@ -177,6 +177,7 @@ fn a_worker_follows_what_the_home_stores_for_it() {
             client: None,
             reference: None,
             accepts_delegation: None,
+            headless: None,
             desired: Some(Desired {
                 acting: true,
                 bridge: false,

@@ -20,6 +20,8 @@ struct SetArgs {
     #[serde(default)]
     accepts_delegation: Option<bool>,
     #[serde(default)]
+    headless: Option<bool>,
+    #[serde(default)]
     desired: Option<Desired>,
 }
 
@@ -88,6 +90,7 @@ impl NodeCore {
                 client,
                 reference,
                 accepts_delegation,
+                headless,
                 desired,
             } => {
                 if self.is_home() {
@@ -98,6 +101,7 @@ impl NodeCore {
                             client,
                             reference,
                             accepts_delegation,
+                            headless,
                             desired,
                         },
                         out,
@@ -110,6 +114,7 @@ impl NodeCore {
                         "client": client,
                         "reference": reference,
                         "accepts_delegation": accepts_delegation,
+                        "headless": headless,
                         "desired": desired,
                     });
                     self.relay_to_home(id, "cluster.member.set", args, out);
@@ -281,6 +286,7 @@ impl NodeCore {
             client: a.client,
             reference: a.reference,
             accepts_delegation: a.accepts_delegation,
+            headless: a.headless,
             desired: a.desired,
         };
         self.apply(command, out)

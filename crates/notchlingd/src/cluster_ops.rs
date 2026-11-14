@@ -90,8 +90,8 @@ impl ClusterOps {
                 "this node is already in a cluster",
             ));
         }
+        let headless = caller.tier != Tier::App && !self.room.can_answer();
         if !self.link.is_on() {
-            let headless = !self.room.can_answer();
             if caller.tier != Tier::App && !headless {
                 return Err(self.link.refusal());
             }
@@ -108,17 +108,18 @@ impl ClusterOps {
             self.room
                 .publish(topics::SETTINGS, topics::SWITCH_CHANGED, &data);
         }
-        node.join(token)
+        node.join(token, headless)
     }
 
     fn member_set(&self, args: &Value) -> Result<Value, ApiError> {
-        let usage = "cluster.member.set takes {\"node\": id, \"canBeMaster\"?, \"client\"?, \"reference\"?, \"acceptsDelegation\"?, \"desired\"?}";
+        let usage = "cluster.member.set takes {\"node\": id, \"canBeMaster\"?, \"client\"?, \"reference\"?, \"acceptsDelegation\"?, \"headless\"?, \"desired\"?}";
         let known = [
             "node",
             "canBeMaster",
             "client",
             "reference",
             "acceptsDelegation",
+            "headless",
             "desired",
         ];
         let fields = args.as_object().ok_or_else(|| bad(usage))?;
@@ -141,6 +142,7 @@ impl ClusterOps {
             client: flag("client")?,
             reference: flag("reference")?,
             accepts_delegation: flag("acceptsDelegation")?,
+            headless: flag("headless")?,
             desired,
         })
     }

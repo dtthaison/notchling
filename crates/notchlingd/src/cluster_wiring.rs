@@ -1,7 +1,7 @@
 use crate::acting_ops::Room;
 use crate::cluster_join::{JoinAsker, JOIN_WAIT};
 use crate::cluster_node::{
-    ClusterNode, ClusterSetup, Hooks, JoinAsk, LocalCalls, NetSide, Probe, Submit, TICK,
+    audit, ClusterNode, ClusterSetup, Hooks, JoinAsk, LocalCalls, NetSide, Probe, Submit, TICK,
 };
 use crate::cluster_ops::{follow_switch, ClusterOps};
 use crate::cluster_switches::{HeadlessSwitches, LateHandler, NodeCalls, OpsPanel};
@@ -15,8 +15,10 @@ use notchling_engine::bridge::net::bridge::host_name;
 use notchling_engine::cluster::wire::{Origin, OriginTier};
 use notchling_engine::cluster::Desired;
 use notchling_local_api::spawn::in_cargo_target;
-use notchling_local_api::{ApiError, AuditLog, Caller, ClientKind, ErrorCode, Handler, Tier};
-use serde_json::Value;
+use notchling_local_api::{
+    topics, ApiError, AuditLog, Caller, ClientKind, ErrorCode, Handler, Tier,
+};
+use serde_json::{json, Value};
 use std::ffi::OsStr;
 use std::path::Path;
 use std::sync::Arc;
@@ -107,6 +109,31 @@ impl Hooks for ClusterHooks {
     }
 }
 
+pub fn rejoin_on_start(
+    link: &SwitchFlag,
+    node: &ClusterNode,
+    room: &dyn Room,
+    log: &AuditLog,
+) -> bool {
+    let Some(home) = node.rejoin_home() else {
+        return false;
+    };
+    if link.is_on() || room.can_answer() {
+        return false;
+    }
+    link.set(true);
+    audit(
+        log,
+        &format!("cluster_set:{}:on", link.name()),
+        Some(home.as_str()),
+        "ok",
+        Some("restart: a headless member rejoins its home".to_string()),
+    );
+    let data = json!({"switch": link.name(), "on": true});
+    room.publish(topics::SETTINGS, topics::SWITCH_CHANGED, &data);
+    true
+}
+
 pub struct ClusterParts {
     pub node: Result<Arc<ClusterNode>, String>,
     pub ops: Arc<ClusterOps>,
@@ -176,10 +203,11 @@ impl ClusterParts {
             switches,
         });
         let node = start_node(layout, room.clone(), (local, hooks), versions);
+        let audit = AuditLog::new(layout.audit_path());
         if let Ok(node) = &node {
             follow_switch(&link, node);
+            rejoin_on_start(&link, node, room.as_ref(), &audit);
         }
-        let audit = AuditLog::new(layout.audit_path());
         let ops = Arc::new(ClusterOps::new(node.clone(), link, room, audit));
         ClusterParts { node, ops, handler }
     }
@@ -198,3 +226,7 @@ impl ClusterParts {
 #[cfg(test)]
 #[path = "cluster_wiring_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "cluster_rejoin_tests.rs"]
+mod rejoin_tests;

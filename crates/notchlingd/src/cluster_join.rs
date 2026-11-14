@@ -38,6 +38,9 @@ pub fn join_item(id: &str, ask: &JoinAsk, created_ms: i64, wait: Duration) -> It
     if ask.can_be_master {
         detail.push("Can Be Master".to_string());
     }
+    if ask.headless {
+        detail.push("Headless".to_string());
+    }
     let lasts = i64::try_from(wait.as_millis()).unwrap_or(i64::MAX);
     Item {
         id: id.to_string(),

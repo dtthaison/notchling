@@ -68,6 +68,8 @@ pub enum Msg {
         addrs: Vec<String>,
         port: u16,
         versions: Versions,
+        #[serde(default)]
+        headless: bool,
     },
     JoinPending {
         item: String,

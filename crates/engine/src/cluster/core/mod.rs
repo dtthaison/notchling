@@ -76,6 +76,7 @@ pub enum LocalCmd {
         client: Option<bool>,
         reference: Option<bool>,
         accepts_delegation: Option<bool>,
+        headless: Option<bool>,
         desired: Option<Desired>,
     },
     SetVersions {
@@ -145,6 +146,7 @@ pub enum Effect {
         arch: String,
         addr: Option<String>,
         can_be_master: bool,
+        headless: bool,
     },
     SteppedDown {
         term: Term,
@@ -317,6 +319,7 @@ impl NodeCore {
                     "canBeMaster": m.can_be_master,
                     "online": m.id == self.me || online.contains(&m.id),
                     "client": m.client,
+                    "headless": m.headless,
                     "reference": m.reference,
                     "state": member_state,
                     "versions": m.versions,
@@ -473,5 +476,7 @@ impl NodeCore {
 mod core_tests;
 #[cfg(test)]
 mod core_tests_dispatch;
+#[cfg(test)]
+mod core_tests_headless;
 #[cfg(test)]
 mod core_tests_terms;

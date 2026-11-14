@@ -82,6 +82,7 @@ impl Transport for Counting {
 
 pub(crate) struct TestNode {
     pub node: Arc<ClusterNode>,
+    pub fp: String,
     pub room: Arc<FakeRoom>,
     pub calls: Arc<FakeCalls>,
     pub transport: Arc<Counting>,
@@ -116,6 +117,9 @@ pub(crate) struct Opts {
     pub cluster_dir: Option<PathBuf>,
     pub hooks: Option<Arc<dyn Hooks>>,
     pub local: Option<Arc<dyn LocalCalls>>,
+    pub fingerprint: Option<String>,
+    pub headless: bool,
+    pub room: Option<Arc<FakeRoom>>,
 }
 
 impl Opts {
@@ -128,20 +132,25 @@ impl Opts {
             cluster_dir: None,
             hooks: None,
             local: None,
+            fingerprint: None,
+            headless: false,
+            room: None,
         }
     }
 }
 
 pub(crate) fn node(net: &Arc<MemNet>, opts: Opts) -> TestNode {
     let dir = Dir::new(opts.name);
-    let fp = fingerprint(format!("{}-{}", opts.name, dir.path().display()).as_bytes());
+    let fp = opts.fingerprint.clone().unwrap_or_else(|| {
+        fingerprint(format!("{}-{}", opts.name, dir.path().display()).as_bytes())
+    });
     let pins = Pins::default();
     let transport = Arc::new(Counting {
         inner: MemTransport::on(net, &fp, pins.clone()),
         listens: AtomicUsize::new(0),
         dials: AtomicUsize::new(0),
     });
-    let room = Arc::new(FakeRoom::default());
+    let room = opts.room.clone().unwrap_or_default();
     let calls = Arc::new(FakeCalls::default());
     let mut versions = own();
     versions.os = opts.os.to_string();
@@ -163,7 +172,7 @@ pub(crate) fn node(net: &Arc<MemNet>, opts: Opts) -> TestNode {
         NetSide {
             transport: transport.clone(),
             pins,
-            fingerprint: fp,
+            fingerprint: fp.clone(),
         },
         room.clone(),
         opts.local.unwrap_or_else(|| calls.clone()),
@@ -173,6 +182,7 @@ pub(crate) fn node(net: &Arc<MemNet>, opts: Opts) -> TestNode {
     .unwrap();
     TestNode {
         node,
+        fp,
         room,
         calls,
         transport,
@@ -203,6 +213,7 @@ pub(crate) fn online(status: &Value, id: &NodeId) -> bool {
 }
 
 pub(crate) fn pair(net: &Arc<MemNet>, home: Opts, worker: Opts) -> (TestNode, TestNode) {
+    let headless = worker.headless;
     let a = node(net, home);
     let b = node(net, worker);
     a.node.set_link(true);
@@ -212,7 +223,7 @@ pub(crate) fn pair(net: &Arc<MemNet>, home: Opts, worker: Opts) -> (TestNode, Te
         .as_str()
         .unwrap()
         .to_string();
-    let joined = b.node.join(&token).unwrap();
+    let joined = b.node.join(&token, headless).unwrap();
     assert_eq!(joined["state"], "pending", "{joined}");
     a.node
         .local(notchling_engine::cluster::LocalCmd::Approve {

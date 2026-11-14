@@ -94,6 +94,8 @@ impl Driver {
                 None
             }
         };
+        *crate::cluster_node::lock(&shared.rejoin) =
+            state.as_ref().and_then(|s| s.rejoin_home(&me));
         let core = NodeCore::new(me.clone(), setup.versions.clone(), state, setup.client)
             .with_boot_id(boot_id.clone());
         Driver {
@@ -270,7 +272,7 @@ impl Driver {
             In::Local(cmd, answer) => self.local_cmd(cmd, answer),
             In::Create(name, answer) => self.create(name, answer),
             In::Token(answer) => self.token(answer),
-            In::Join(token, answer) => self.join(&token, answer),
+            In::Join(token, headless, answer) => self.join(&token, headless, answer),
             In::Core(input) => self.step(input),
             In::Link(on) => self.set_link(on),
             In::Stop => {}
@@ -313,7 +315,7 @@ impl Driver {
         }
     }
 
-    fn me_member(&self) -> Member {
+    fn me_member(&self, headless: bool) -> Member {
         Member {
             id: self.me.clone(),
             name: self.setup.name.clone(),
@@ -324,6 +326,7 @@ impl Driver {
             can_be_master: false,
             reference: false,
             accepts_delegation: false,
+            headless,
             state: MemberState::Active,
             versions: Some(self.setup.versions.clone()),
             desired: Desired::default(),
@@ -339,7 +342,7 @@ impl Driver {
                 return;
             }
         };
-        let mut me = self.me_member();
+        let mut me = self.me_member(false);
         me.reference = true;
         self.local_cmd(LocalCmd::Create { id, name, me }, Some(answer));
     }
@@ -391,7 +394,7 @@ impl Driver {
         });
     }
 
-    fn join(&mut self, token: &str, answer: Answer) {
+    fn join(&mut self, token: &str, headless: bool, answer: Answer) {
         let token = match decode_token(token) {
             Ok(token) => token,
             Err(e) => {
@@ -406,7 +409,7 @@ impl Driver {
             )));
             return;
         }
-        let me = self.me_member();
+        let me = self.me_member(headless);
         self.local_cmd(LocalCmd::JoinWith { token, me }, Some(answer));
     }
 
@@ -510,6 +513,7 @@ impl Driver {
                 arch,
                 addr,
                 can_be_master,
+                headless,
             } => {
                 let ask = JoinAsk {
                     item,
@@ -519,6 +523,7 @@ impl Driver {
                     arch,
                     addr,
                     can_be_master,
+                    headless,
                 };
                 let submit = Submit::new(self.tx.clone());
                 let hooks = self.hooks.clone();

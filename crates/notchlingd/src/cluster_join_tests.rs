@@ -75,7 +75,7 @@ fn join_with_token_raises_inbox_item_and_allow_adds_worker() {
     let net = MemNet::new();
     let h = home(&net, "jhome1", JOIN_WAIT);
     let w = joiner(&net, "jbox1", "linux");
-    let joined = w.node.join(&token(&h.node)).unwrap();
+    let joined = w.node.join(&token(&h.node), false).unwrap();
     assert_eq!(joined["state"], "pending", "{joined}");
     let item = asked(&h);
     assert_eq!(item.title, "Add jbox1 to the cluster");
@@ -96,7 +96,28 @@ fn join_with_token_raises_inbox_item_and_allow_adds_worker() {
     assert_eq!(m["role"], "worker");
     assert_eq!(m["canBeMaster"], false);
     assert_eq!(m["client"], false);
+    assert_eq!(m["headless"], false);
     assert_eq!(w.node.status()["cluster"]["id"], status["cluster"]["id"]);
+}
+
+#[test]
+fn a_headless_join_says_so_and_the_home_records_it() {
+    let net = MemNet::new();
+    let h = home(&net, "jhome9", JOIN_WAIT);
+    let w = joiner(&net, "jbox9", "linux");
+    w.node.join(&token(&h.node), true).unwrap();
+    let item = asked(&h);
+    assert!(item.detail.contains("Headless"), "{}", item.detail);
+    h.inbox.decide(&item.id, ActionId::Allow, "mac").unwrap();
+    eventually("the worker is active", || {
+        online(&h.node.node.status(), &w.id()) && online(&w.node.status(), &h.node.id())
+    });
+    let status = h.node.node.status();
+    let m = member(&status, &w.id()).unwrap();
+    assert_eq!(m["headless"], true);
+    assert_eq!(m["client"], false);
+    let mine = w.node.status();
+    assert_eq!(member(&mine, &w.id()).unwrap()["headless"], true);
 }
 
 #[test]
@@ -104,7 +125,7 @@ fn allowed_mac_joins_with_can_be_master_on() {
     let net = MemNet::new();
     let h = home(&net, "jhome2", JOIN_WAIT);
     let w = joiner(&net, "jmac2", "macos");
-    w.node.join(&token(&h.node)).unwrap();
+    w.node.join(&token(&h.node), false).unwrap();
     let item = asked(&h);
     assert!(item.detail.ends_with(" · Can Be Master"), "{}", item.detail);
     h.inbox.decide(&item.id, ActionId::Allow, "mac").unwrap();
@@ -121,7 +142,7 @@ fn deny_refuses_the_joiner() {
     let net = MemNet::new();
     let h = home(&net, "jhome3", JOIN_WAIT);
     let w = joiner(&net, "jbox3", "linux");
-    w.node.join(&token(&h.node)).unwrap();
+    w.node.join(&token(&h.node), false).unwrap();
     let item = asked(&h);
     h.inbox.decide(&item.id, ActionId::Deny, "mac").unwrap();
     eventually("the joiner has no cluster", || {
@@ -136,7 +157,7 @@ fn only_the_mac_or_a_phone_may_allow_a_join() {
     let net = MemNet::new();
     let h = home(&net, "jhome4", JOIN_WAIT);
     let w = joiner(&net, "jbox4", "linux");
-    w.node.join(&token(&h.node)).unwrap();
+    w.node.join(&token(&h.node), false).unwrap();
     let item = asked(&h);
     eventually("the joiner is pending at the home", || {
         member(&h.node.node.status(), &w.id()).is_some_and(|m| m["state"] == "pending")
@@ -157,12 +178,12 @@ fn token_is_one_time() {
     let h = home(&net, "jhome5", JOIN_WAIT);
     let once = token(&h.node);
     let a = joiner(&net, "jbox5a", "linux");
-    a.node.join(&once).unwrap();
+    a.node.join(&once, false).unwrap();
     asked(&h);
     let _open = token(&h.node);
     let b = joiner(&net, "jbox5b", "linux");
     let started = std::time::Instant::now();
-    let second = b.node.join(&once).unwrap_err();
+    let second = b.node.join(&once, false).unwrap_err();
     assert!(second.message.contains("bad token"), "{second:?}");
     assert!(
         started.elapsed() < Duration::from_secs(5),
@@ -178,7 +199,7 @@ fn join_token_from_client_node_is_minted_by_home() {
     let net = MemNet::new();
     let h = home(&net, "jhome6", JOIN_WAIT);
     let w = joiner(&net, "jbox6", "linux");
-    w.node.join(&token(&h.node)).unwrap();
+    w.node.join(&token(&h.node), false).unwrap();
     let item = asked(&h);
     h.inbox.decide(&item.id, ActionId::Allow, "mac").unwrap();
     eventually("active", || online(&w.node.status(), &h.node.id()));
@@ -192,7 +213,7 @@ fn join_token_from_client_node_is_minted_by_home() {
     let minted = token(&h.node);
     assert_eq!(decode_token(&minted).unwrap().home, h.node.id());
     let late = joiner(&net, "jbox6b", "linux");
-    late.node.join(&minted).unwrap();
+    late.node.join(&minted, false).unwrap();
     eventually("a second item", || joins(&h).len() == 2);
 }
 
@@ -201,7 +222,7 @@ fn an_unanswered_join_expires_and_is_denied() {
     let net = MemNet::new();
     let h = home(&net, "jhome7", Duration::from_millis(300));
     let w = joiner(&net, "jbox7", "linux");
-    w.node.join(&token(&h.node)).unwrap();
+    w.node.join(&token(&h.node), false).unwrap();
     let item = asked(&h);
     eventually("expired", || {
         joins(&h)
@@ -225,6 +246,7 @@ fn the_item_names_the_node_plainly() {
         arch: "x86_64".to_string(),
         addr: Some("100.64.0.9".to_string()),
         can_be_master: false,
+        headless: false,
     };
     let item = join_item("x", &ask, 1_000, Duration::from_secs(600));
     assert_eq!(item.title, "Add evil[31mname to the cluster");

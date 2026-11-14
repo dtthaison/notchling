@@ -59,6 +59,8 @@ pub enum Command {
         client: Option<bool>,
         reference: Option<bool>,
         accepts_delegation: Option<bool>,
+        #[serde(default)]
+        headless: Option<bool>,
         desired: Option<Desired>,
     },
     Versions {
@@ -136,6 +138,19 @@ impl Applied {
 }
 
 impl ClusterState {
+    pub fn rejoin_home(&self, me: &NodeId) -> Option<NodeId> {
+        if self.home == *me {
+            return None;
+        }
+        let mine = self.members.get(me)?;
+        let home = self.members.get(&self.home)?;
+        let rejoins = mine.state == MemberState::Active
+            && home.state == MemberState::Active
+            && mine.headless
+            && !mine.client;
+        rejoins.then(|| self.home.clone())
+    }
+
     pub fn job_by_key(&self, key: &str) -> Option<&Job> {
         self.jobs.values().find(|j| j.key == key)
     }
@@ -302,9 +317,13 @@ pub fn apply(
             client,
             reference,
             accepts_delegation,
+            headless,
             desired,
         } => {
             let m = active_mut(state, node)?;
+            if let Some(v) = headless {
+                m.headless = *v;
+            }
             if let Some(v) = can_be_master {
                 m.can_be_master = *v;
             }

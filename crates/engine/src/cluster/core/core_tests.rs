@@ -156,8 +156,18 @@ impl Hub {
         client: bool,
         can_be_master: bool,
     ) {
-        let (h, w) = (id(home), id(who));
-        let secret = format!("secret-{who}");
+        self.join_me(home, member(who, os, false), client, can_be_master);
+    }
+
+    pub(super) fn join_me(
+        &mut self,
+        home: &str,
+        me: crate::cluster::members::Member,
+        client: bool,
+        can_be_master: bool,
+    ) {
+        let (h, w) = (id(home), me.id.clone());
+        let secret = format!("secret-{}", me.name);
         self.local(
             &h,
             LocalCmd::IssueToken {
@@ -172,7 +182,6 @@ impl Hub {
             port: 47823,
             secret,
         };
-        let me = member(who, os, false);
         self.local(&w, LocalCmd::JoinWith { token, me });
         self.linked.push((h.clone(), w.clone()));
         self.run(&h, Input::Linked { peer: w.clone() });

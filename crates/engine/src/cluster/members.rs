@@ -43,6 +43,8 @@ pub struct Member {
     pub can_be_master: bool,
     pub reference: bool,
     pub accepts_delegation: bool,
+    #[serde(default)]
+    pub headless: bool,
     pub state: MemberState,
     pub versions: Option<Versions>,
     pub desired: Desired,

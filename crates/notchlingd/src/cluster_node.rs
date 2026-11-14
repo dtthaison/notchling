@@ -29,6 +29,7 @@ pub struct JoinAsk {
     pub arch: String,
     pub addr: Option<String>,
     pub can_be_master: bool,
+    pub headless: bool,
 }
 
 pub trait Hooks: Send + Sync {
@@ -78,7 +79,7 @@ pub(crate) enum In {
     Local(LocalCmd, Option<Answer>),
     Create(String, Answer),
     Token(Answer),
-    Join(String, Answer),
+    Join(String, bool, Answer),
     Core(Input),
     Link(bool),
     Stop,
@@ -120,6 +121,7 @@ impl LinkEvents for Events {
 #[derive(Default)]
 pub(crate) struct Shared {
     pub status: Mutex<Value>,
+    pub rejoin: Mutex<Option<NodeId>>,
 }
 
 pub(crate) fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -243,8 +245,12 @@ impl ClusterNode {
         self.wait(In::Token)
     }
 
-    pub fn join(&self, token: &str) -> Result<Value, ApiError> {
-        self.wait(|answer| In::Join(token.to_string(), answer))
+    pub fn join(&self, token: &str, headless: bool) -> Result<Value, ApiError> {
+        self.wait(|answer| In::Join(token.to_string(), headless, answer))
+    }
+
+    pub fn rejoin_home(&self) -> Option<NodeId> {
+        lock(&self.shared.rejoin).clone()
     }
 
     pub fn close(&self) {

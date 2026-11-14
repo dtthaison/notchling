@@ -106,7 +106,7 @@ fn a_join_with_a_bad_token_is_a_bad_request() {
     let net = MemNet::new();
     let n = node(&net, Opts::named("badtoken"));
     n.node.set_link(true);
-    let err = n.node.join("nlj1.garbage").unwrap_err();
+    let err = n.node.join("nlj1.garbage", false).unwrap_err();
     assert_eq!(err.code, notchling_local_api::ErrorCode::BadRequest);
 }
 
@@ -119,7 +119,7 @@ fn a_join_with_the_link_off_is_refused() {
         .unwrap()
         .to_string();
     let c = node(&net, Opts::named("late"));
-    let err = c.node.join(&token).unwrap_err();
+    let err = c.node.join(&token, false).unwrap_err();
     assert!(err.message.contains("links are off"), "{err:?}");
 }
 
