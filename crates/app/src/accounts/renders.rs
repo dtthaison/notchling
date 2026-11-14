@@ -349,6 +349,7 @@ pub fn snapshot(shown: Shown) -> Snapshot {
                 modes: vec![],
                 registered: on,
                 active: on.then(|| "me@example.com".to_owned()),
+                active_id: on.then(|| "a1".to_owned()),
                 windows: if on {
                     vec![
                         Window {

@@ -1,5 +1,5 @@
 use super::*;
-use crate::accounts::wire::{ClaudeAccount, ClaudeList, ClaudeUsage, Lane};
+use crate::accounts::wire::{ClaudeAccount, ClaudeList, ClaudeUsage, Lane, LimitProvider, Window};
 use crate::chat::limit_ring::arc;
 use notchling_engine::limits::report::{Bar, Group};
 
@@ -113,4 +113,82 @@ fn a_folder_no_lane_names_matches_no_account() {
     assert_eq!(limits_for(&snapshot(), "/elsewhere"), None);
     assert_eq!(limits_for(&snapshot(), "/lanes/main"), None);
     assert_eq!(limits_for(&snapshot(), ""), None);
+}
+
+fn watched(id: Option<&str>, session: f64) -> LimitProvider {
+    LimitProvider {
+        id: "claude".into(),
+        active_id: id.map(str::to_owned),
+        windows: vec![
+            Window {
+                name: "5-hour".into(),
+                percent: session,
+                resets_at: None,
+            },
+            Window {
+                name: "weekly".into(),
+                percent: 30.0,
+                resets_at: None,
+            },
+        ],
+        checked: Some(1_800_000_001.0),
+        ..LimitProvider::default()
+    }
+}
+
+#[test]
+fn the_in_use_ring_never_takes_numbers_the_watcher_read_for_another_account() {
+    let mut s = snapshot();
+    s.limits.providers = vec![watched(Some("loose"), 99.0)];
+    let l = active_limits(&s).unwrap();
+    assert_eq!(l.limits[0].kind, Kind::Session);
+    assert_eq!(l.limits[0].percent, 7.0, "main's own read, not loose's 99");
+    assert_eq!(l.plan.as_deref(), Some("Max"));
+    s.limits.providers = vec![watched(None, 99.0)];
+    assert_eq!(active_limits(&s).unwrap().limits[0].percent, 7.0);
+}
+
+#[test]
+fn the_in_use_ring_takes_the_watchers_numbers_for_the_account_in_use() {
+    let mut s = snapshot();
+    s.limits.providers = vec![watched(Some("main"), 64.0)];
+    let l = active_limits(&s).unwrap();
+    assert_eq!(l.limits[0].percent, 64.0);
+    assert_eq!(l.limits[1].kind, Kind::Week);
+    assert_eq!(l.plan.as_deref(), Some("Max"));
+}
+
+#[test]
+fn the_in_use_ring_is_empty_with_no_account_in_use_or_nothing_read() {
+    let mut s = snapshot();
+    s.limits.providers = vec![watched(Some("main"), 64.0)];
+    s.claude.active = None;
+    assert_eq!(active_limits(&s), None);
+    let mut s = snapshot();
+    s.claude_usage.reports.remove("main");
+    s.limits.providers = vec![watched(Some("loose"), 99.0)];
+    assert_eq!(active_limits(&s), None, "nothing of its own to show");
+}
+
+#[test]
+fn a_models_weekly_bar_in_a_report_is_its_own_row_not_a_second_all_models_one() {
+    let mut s = snapshot();
+    s.claude_usage.reports.insert(
+        "main".into(),
+        UsageReport {
+            groups: vec![Group {
+                name: None,
+                bars: vec![
+                    bar("5 hours", BarKind::Session, 7.0),
+                    bar("Week", BarKind::Week, 20.0),
+                    bar("Fable", BarKind::Week, 67.0),
+                ],
+            }],
+            fetched: 1_800_000_000.0,
+        },
+    );
+    let l = active_limits(&s).unwrap();
+    let kinds: Vec<_> = l.limits.iter().map(|l| l.kind).collect();
+    assert_eq!(kinds, [Kind::Session, Kind::Week, Kind::Other]);
+    assert_eq!(l.limits[2].name, "Fable");
 }

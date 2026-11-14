@@ -130,7 +130,7 @@ fn cost_line(s: &Snapshot, account: &str) -> Option<String> {
 
 fn claude_page(s: &Snapshot, switches: &Switches, busy: bool, now: f64, zone: Zone) -> Page {
     let on = switches.is_on(Switch::Accounts);
-    let watched = s.limits.providers.iter().find(|p| p.id == "claude");
+    let watched = s.limits.claude_for(s.claude.active.as_deref());
     let windows = watched
         .map(|p| limits::from_windows(&p.windows, now, zone))
         .unwrap_or_default();

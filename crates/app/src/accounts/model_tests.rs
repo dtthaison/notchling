@@ -153,6 +153,70 @@ fn every_claude_account_shows_its_own_limits_a_pending_read_or_why_it_failed() {
     ));
 }
 
+fn weekly_report(percent: f64, fetched: f64) -> notchling_engine::limits::report::UsageReport {
+    use notchling_engine::limits::report::{Bar, BarKind, Group, UsageReport};
+    UsageReport {
+        groups: vec![Group {
+            name: None,
+            bars: vec![Bar {
+                label: "Week".into(),
+                kind: BarKind::Week,
+                percent,
+                resets_at: None,
+            }],
+        }],
+        fetched,
+    }
+}
+
+fn watched_weekly(s: &mut Snapshot, of: Option<&str>, percent: f64, checked: f64) {
+    let p = &mut s.limits.providers[0];
+    p.active_id = of.map(str::to_owned);
+    p.windows = vec![crate::accounts::wire::Window {
+        name: "weekly".into(),
+        percent,
+        resets_at: None,
+    }];
+    p.checked = Some(checked);
+}
+
+fn in_use_percent(s: &Snapshot) -> Option<f64> {
+    let row = page(CLAUDE_CODE, s, &on(), false, NOW, Zone::UTC).rows[0].clone();
+    match row.content {
+        RowContent::Limits(groups) => Some(groups[0].lines[0].percent),
+        _ => None,
+    }
+}
+
+#[test]
+fn the_in_use_row_never_shows_numbers_the_watcher_read_for_another_account() {
+    let mut s = snapshot(Shown::Claude);
+    s.claude_usage
+        .reports
+        .insert("a1".into(), weekly_report(51.0, NOW));
+    watched_weekly(&mut s, Some("a4"), 100.0, NOW + 10.0);
+    assert_eq!(in_use_percent(&s), Some(51.0), "a4's numbers, a1 in use");
+    watched_weekly(&mut s, Some("a1"), 100.0, NOW + 10.0);
+    assert_eq!(in_use_percent(&s), Some(100.0), "its own, and newer");
+    watched_weekly(&mut s, None, 100.0, NOW + 10.0);
+    assert_eq!(in_use_percent(&s), Some(51.0), "numbers naming no account");
+}
+
+#[test]
+fn another_accounts_watched_numbers_are_no_stand_in_for_a_read_that_has_not_come() {
+    let mut s = snapshot(Shown::Claude);
+    s.claude_usage.reports.remove("a1");
+    watched_weekly(&mut s, Some("a4"), 100.0, NOW + 10.0);
+    let row = page(CLAUDE_CODE, &s, &on(), false, NOW, Zone::UTC).rows[0].clone();
+    assert_eq!(
+        row.content,
+        RowContent::Text {
+            text: "Checking limits…".into(),
+            warning: false
+        }
+    );
+}
+
 #[test]
 fn off_lists_the_names_and_every_control_says_why() {
     let s = snapshot(Shown::Off);

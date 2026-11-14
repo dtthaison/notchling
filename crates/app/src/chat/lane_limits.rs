@@ -1,7 +1,9 @@
 use notchling_engine::limits::report::{BarKind, UsageReport};
 
-use super::limit_ring::{Kind, Limit};
+use super::limit_ring::{claude_limits, Kind, Limit};
 use crate::accounts::store::Snapshot;
+
+const ALL_MODELS: &str = "Week";
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct LaneLimits {
@@ -33,8 +35,8 @@ fn report_limits(report: &UsageReport) -> Vec<Limit> {
             name: b.label.clone(),
             kind: match b.kind {
                 BarKind::Session => Kind::Session,
-                BarKind::Week => Kind::Week,
-                BarKind::Other => Kind::Other,
+                BarKind::Week if b.label == ALL_MODELS => Kind::Week,
+                BarKind::Week | BarKind::Other => Kind::Other,
             },
             percent: b.percent,
             resets_at: b.resets_at,
@@ -49,6 +51,29 @@ pub fn limits_for(s: &Snapshot, config_dir: &str) -> Option<LaneLimits> {
         limits,
         plan: plan.map(str::to_owned),
     })
+}
+
+pub fn active_limits(s: &Snapshot) -> Option<LaneLimits> {
+    let id = s.claude.active.as_deref()?;
+    let watched = s
+        .limits
+        .claude_for(Some(id))
+        .map(|p| claude_limits(&p.windows))
+        .filter(|l| !l.is_empty());
+    let limits = watched.or_else(|| {
+        s.claude_usage
+            .reports
+            .get(id)
+            .map(report_limits)
+            .filter(|l| !l.is_empty())
+    })?;
+    let plan = s
+        .claude
+        .accounts
+        .iter()
+        .find(|a| a.id == id)
+        .and_then(|a| a.plan.clone());
+    Some(LaneLimits { limits, plan })
 }
 
 #[cfg(test)]
