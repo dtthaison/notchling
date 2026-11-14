@@ -12,7 +12,10 @@ fn awake() -> (Awake, FakePower) {
 #[test]
 fn off_holds_nothing_and_asks_the_system_for_nothing() {
     let (mut awake, power) = awake();
-    assert_eq!(awake.apply(setting(Mode::Off, false), || true), Outcome::Unchanged);
+    assert_eq!(
+        awake.apply(setting(Mode::Off, false), || true),
+        Outcome::Unchanged
+    );
     assert_eq!(awake.holding(), None);
     assert!(power.events().is_empty());
 }

@@ -186,6 +186,10 @@ impl AgyOps {
         self.runner.reap();
     }
 
+    pub fn working_count(&self) -> usize {
+        self.runner.working().len()
+    }
+
     fn drain_pending(&self, by: &str) {
         let left = std::mem::take(&mut *lock(&self.shared.pending));
         for (id, data) in left {

@@ -1,7 +1,7 @@
 use super::*;
 use crate::sessions::agent::sample;
-use crate::sessions::{Agent, AgentGroup, AgentTarget};
 use crate::sessions::testutil::TempDir;
+use crate::sessions::{Agent, AgentGroup, AgentTarget};
 use crate::settings::Settings;
 use serde_json::json;
 
