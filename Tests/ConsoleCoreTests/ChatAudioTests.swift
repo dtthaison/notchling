@@ -137,6 +137,13 @@ final class ChatAudioTests: XCTestCase {
         }
     }
 
+    func testFactsCarryEffortOnlyWhenKnown() throws {
+        let with = String(decoding: try JSONEncoder().encode(FactsDTO(SessionFactsInfo(model: "m", effort: "xhigh"))), as: UTF8.self)
+        XCTAssertTrue(with.contains("\"effort\":\"xhigh\""))
+        let without = String(decoding: try JSONEncoder().encode(FactsDTO(SessionFactsInfo(model: "m"))), as: UTF8.self)
+        XCTAssertFalse(without.contains("effort"))
+    }
+
     func testMessagesWithoutAudioOmitTheField() {
         let message = ChatMessage(id: UUID(), role: .assistant, text: "hi", timestamp: Date())
         let json = String(decoding: (try? JSONEncoder().encode(ChatMessageDTO(message))) ?? Data(), as: UTF8.self)

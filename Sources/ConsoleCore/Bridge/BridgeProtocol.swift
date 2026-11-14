@@ -184,9 +184,12 @@ public struct FactsDTO: Codable, Equatable, Sendable {
     public let contextWindow: Int?
     public let model: String?
     public let limits: [LimitDTO]
+    /// Additive: absent when unknown, ignored by older phones.
+    public let effort: String?
 
     public init(_ facts: SessionFactsInfo) {
         contextTokens = facts.contextTokens; contextWindow = facts.contextWindow; model = facts.model
+        effort = facts.effort
         limits = facts.limits.map(LimitDTO.init)
     }
 }

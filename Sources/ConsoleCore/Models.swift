@@ -152,9 +152,12 @@ public struct SessionFactsInfo: Sendable, Equatable {
     public var contextWindow: Int?
     public var model: String?
     public var limits: [LimitInfo]
+    /// The reasoning effort on the latest reply ("high", "xhigh"...); nil when the transcript doesn't say.
+    public var effort: String?
 
-    public init(contextTokens: Int? = nil, contextWindow: Int? = nil, model: String? = nil, limits: [LimitInfo] = []) {
+    public init(contextTokens: Int? = nil, contextWindow: Int? = nil, model: String? = nil, limits: [LimitInfo] = [], effort: String? = nil) {
         self.contextTokens = contextTokens; self.contextWindow = contextWindow; self.model = model; self.limits = limits
+        self.effort = effort
     }
 }
 

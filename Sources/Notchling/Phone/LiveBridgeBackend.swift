@@ -48,7 +48,8 @@ final class LiveBridgeBackend: BridgeBackend, @unchecked Sendable {
             contextTokens: facts.contextTokens > 0 ? facts.contextTokens : nil,
             contextWindow: ChatFormat.contextWindow(model: facts.model),
             model: facts.model,
-            limits: limits)
+            limits: limits,
+            effort: facts.effort)
     }
 
     func commands(sessionId: String) async -> [CommandInfo] {
