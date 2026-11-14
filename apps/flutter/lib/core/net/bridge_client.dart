@@ -179,7 +179,7 @@ class BridgeClient {
     _wake?.complete();
     final WsConnection? connection = _connection;
     _connection = null;
-    _failPending(const BridgeException('disconnected', 'Đã ngắt kết nối.'));
+    _failPending(const BridgeException('disconnected', ''));
     await connection?.close();
     _setStatus(const ConnectionStatus(LinkPhase.disconnected));
   }
@@ -224,7 +224,7 @@ class BridgeClient {
         unawaited(_resubscribe());
         await _closed!.future;
         _connection = null;
-        _failPending(const BridgeException('disconnected', 'Mất kết nối.'));
+        _failPending(const BridgeException('disconnected', ''));
         if (_stopped) break;
         if (_reconnectNow) {
           _reconnectNow = false;
@@ -368,7 +368,7 @@ class BridgeClient {
 
   Future<Json> request(String op, [Json params = const <String, Object?>{}, Duration? timeout, int? idOverride]) async {
     final WsConnection? connection = _connection;
-    if (connection == null) throw const BridgeException('disconnected', 'Chưa kết nối tới Mac.');
+    if (connection == null) throw const BridgeException('disconnected', '');
     final int id = idOverride ?? _nextId++;
     final Completer<Json> completer = Completer<Json>();
     _pending[id] = completer;
@@ -378,7 +378,7 @@ class BridgeClient {
       response = await completer.future.timeout(timeout ?? requestTimeout);
     } on TimeoutException {
       _pending.remove(id);
-      throw BridgeException('timeout', 'Mac không trả lời $op.');
+      throw const BridgeException('timeout', '');
     }
     if (response['ok'] == true) {
       final Object? data = response['data'];
@@ -386,9 +386,9 @@ class BridgeClient {
     }
     final Object? error = response['error'];
     if (error is Map<Object?, Object?>) {
-      throw BridgeException('${error['code']}', '${error['message']}');
+      throw BridgeException('${error['code']}', '${error['message'] ?? ''}');
     }
-    throw const BridgeException('internal', 'Phản hồi không đúng định dạng.');
+    throw const BridgeException('internal', '');
   }
 
   Future<List<Session>> listSessions() async {
@@ -419,7 +419,7 @@ class BridgeClient {
           const Duration(seconds: 30), id);
       return await frame.future.timeout(const Duration(seconds: 20));
     } on TimeoutException {
-      throw const BridgeException('timeout', 'Mac không gửi ảnh.');
+      throw const BridgeException('timeout', '');
     } finally {
       _imageWaiters.remove(id);
     }
@@ -465,7 +465,7 @@ class BridgeClient {
           const Duration(seconds: 30), id);
       return await frame.future.timeout(const Duration(seconds: 15));
     } on TimeoutException {
-      throw const BridgeException('timeout', 'Mac không gửi ảnh trang.');
+      throw const BridgeException('timeout', '');
     } finally {
       _snapshotWaiters.remove(id);
     }
@@ -553,7 +553,7 @@ Future<({String token, String host, bool viaTunnel})> pairWithMac({
         final Object? decoded = jsonDecode(message);
         if (decoded is Map<String, Object?>) answer.complete(decoded);
       }, onDone: () {
-        if (!answer.isCompleted) answer.completeError(const BridgeException('disconnected', 'Mac đóng kết nối.'));
+        if (!answer.isCompleted) answer.completeError(const BridgeException('disconnected', ''));
       });
       connection.sendText(jsonEncode(<String, Object?>{
         'id': 1,
@@ -566,7 +566,7 @@ Future<({String token, String host, bool viaTunnel})> pairWithMac({
         return (token: response.object('data').str('token'), host: host, viaTunnel: route.kind == RouteKind.tunnel);
       }
       final Object? error = response['error'];
-      throw BridgeException(error is Map<Object?, Object?> ? '${error['code']}' : 'internal', error is Map<Object?, Object?> ? '${error['message']}' : '');
+      throw BridgeException(error is Map<Object?, Object?> ? '${error['code']}' : 'internal', error is Map<Object?, Object?> ? '${error['message'] ?? ''}' : '');
     } on FingerprintMismatch {
       rethrow;
     } on BridgeException {
@@ -577,5 +577,5 @@ Future<({String token, String host, bool viaTunnel})> pairWithMac({
       await connection?.close();
     }
   }
-  throw lastError ?? const BridgeException('disconnected', 'Không có địa chỉ nào để thử.');
+  throw lastError ?? const BridgeException('disconnected', '');
 }

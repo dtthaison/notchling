@@ -114,6 +114,42 @@ class AppL10nEn extends AppL10n {
   String get appViewOnly => 'View only';
 
   @override
+  String get bridgeErrorBusy => 'The Mac is busy. Try again.';
+
+  @override
+  String get bridgeErrorDisconnected => 'Not connected to the Mac.';
+
+  @override
+  String get bridgeErrorInternal => 'Something went wrong on the Mac.';
+
+  @override
+  String get bridgeErrorInvalid => 'The Mac didn\'t accept that request.';
+
+  @override
+  String get bridgeErrorNotFound => 'The Mac couldn\'t find that.';
+
+  @override
+  String get bridgeErrorNotReachable => 'The Mac couldn\'t reach it.';
+
+  @override
+  String get bridgeErrorTimeout => 'The Mac didn\'t answer in time.';
+
+  @override
+  String get bridgeErrorUnauthorized =>
+      'The Mac doesn\'t accept this phone. Pair again.';
+
+  @override
+  String get bridgeErrorUnknown => 'The Mac refused the request.';
+
+  @override
+  String get bridgeErrorViewOnly => 'This session is view only.';
+
+  @override
+  String bridgeErrorWithDetail(String error, String detail) {
+    return '$error $detail';
+  }
+
+  @override
   String get chatActivityIdle => 'Idle';
 
   @override

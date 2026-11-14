@@ -1,3 +1,4 @@
+import 'package:agent_console/core/net/bridge_client.dart';
 import 'package:agent_console/core/protocol/models.dart';
 import 'package:agent_console/features/chat/chat_notifier.dart';
 import 'package:agent_console/features/chat/composer.dart';
@@ -57,7 +58,7 @@ void main() {
       expect(await container.read(chatProvider('old').notifier).takeOver(), isNull);
       final TakeoverProgress progress = container.read(chatProvider('old')).takeover;
       expect(progress, isA<TakeoverFailed>());
-      expect((progress as TakeoverFailed).message, contains('Đóng session ở nơi đang mở'));
+      expect((progress as TakeoverFailed).error.message, contains('Đóng session ở nơi đang mở'));
       container.read(chatProvider('old').notifier).dismissTakeoverError();
       expect(container.read(chatProvider('old')).takeover, isA<TakeoverIdle>());
     });
@@ -109,7 +110,7 @@ void main() {
       await tester.tap(find.text('Đang tiếp quản…'));
       expect(taps, 0);
 
-      await pump(tester, info: const TakeoverInfo(available: true), progress: const TakeoverFailed('Thư mục làm việc của session không còn.'), onTakeover: () {});
+      await pump(tester, info: const TakeoverInfo(available: true), progress: TakeoverFailed(const BridgeException('invalid', 'Thư mục làm việc của session không còn.')), onTakeover: () {});
       expect(find.textContaining('Thư mục làm việc của session không còn.'), findsOneWidget);
     });
   });

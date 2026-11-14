@@ -40,13 +40,13 @@ final vizProvider = FutureProvider.family<Json, String>((Ref ref, String session
   final BridgeClient? client = ref.watch(bridgeClientProvider);
   ref.watch(connectedCountProvider);
   ref.watch(sessionsProvider.select((SessionsState s) => s.byId(sessionId)?.lastActivity.millisecondsSinceEpoch));
-  if (client == null) throw const BridgeException('disconnected', 'Chưa kết nối tới Mac.');
+  if (client == null) throw const BridgeException('disconnected', '');
   return client.vizGet(sessionId);
 });
 
 final vizEntityProvider = FutureProvider.family<Json, String>((Ref ref, String sessionId) async {
   final BridgeClient? client = ref.watch(bridgeClientProvider);
-  if (client == null) throw const BridgeException('disconnected', 'Chưa kết nối tới Mac.');
+  if (client == null) throw const BridgeException('disconnected', '');
   final Json data = await client.vizGet(sessionId, entity: true);
   return data;
 });

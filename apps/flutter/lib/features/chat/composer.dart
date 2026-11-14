@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../app/theme/tokens.dart';
 import '../../app/widgets/common.dart';
 import '../../l10n/app_localizations.dart';
+import '../connection/bridge_errors.dart';
 import '../../core/protocol/models.dart';
 import '../voice/mic_button.dart';
 import '../voice/voice_controller.dart';
@@ -596,7 +597,7 @@ class _TakeoverRow extends StatelessWidget {
                 const SizedBox(width: Space.sm),
                 Expanded(
                   child: Text(
-                    l10n.appTakeoverFailed(current.message),
+                    l10n.appTakeoverFailed(bridgeErrorLine(l10n, current.error)),
                     style: Kit.of(
                       context,
                     ).bodySm.copyWith(color: Kit.of(context).danger),

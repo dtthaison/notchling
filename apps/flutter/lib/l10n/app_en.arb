@@ -138,6 +138,58 @@
   "@appViewOnly": {
     "description": "Shown in the Chat screen and the Sessions tab."
   },
+  "bridgeErrorBusy": "The Mac is busy. Try again.",
+  "@bridgeErrorBusy": {
+    "description": "The Mac is busy with something else."
+  },
+  "bridgeErrorDisconnected": "Not connected to the Mac.",
+  "@bridgeErrorDisconnected": {
+    "description": "The phone is not connected to the Mac, or the link dropped while a request was waiting."
+  },
+  "bridgeErrorInternal": "Something went wrong on the Mac.",
+  "@bridgeErrorInternal": {
+    "description": "The Mac failed, or answered in a way the phone does not understand."
+  },
+  "bridgeErrorInvalid": "The Mac didn't accept that request.",
+  "@bridgeErrorInvalid": {
+    "description": "The Mac refused the request, or does not know it because it runs an older version."
+  },
+  "bridgeErrorNotFound": "The Mac couldn't find that.",
+  "@bridgeErrorNotFound": {
+    "description": "The Mac could not find what the phone asked for, such as a session or a folder."
+  },
+  "bridgeErrorNotReachable": "The Mac couldn't reach it.",
+  "@bridgeErrorNotReachable": {
+    "description": "The Mac could not reach what the phone asked for, such as a web page."
+  },
+  "bridgeErrorTimeout": "The Mac didn't answer in time.",
+  "@bridgeErrorTimeout": {
+    "description": "The Mac did not answer a request in time."
+  },
+  "bridgeErrorUnauthorized": "The Mac doesn't accept this phone. Pair again.",
+  "@bridgeErrorUnauthorized": {
+    "description": "The Mac no longer trusts this phone."
+  },
+  "bridgeErrorUnknown": "The Mac refused the request.",
+  "@bridgeErrorUnknown": {
+    "description": "An error code this version of the phone does not know."
+  },
+  "bridgeErrorViewOnly": "This session is view only.",
+  "@bridgeErrorViewOnly": {
+    "description": "The session was opened outside Console, so the phone can only read it."
+  },
+  "bridgeErrorWithDetail": "{error} {detail}",
+  "@bridgeErrorWithDetail": {
+    "description": "$error is one of the messages above. $detail is the Mac's own explanation, in English.",
+    "placeholders": {
+      "error": {
+        "type": "String"
+      },
+      "detail": {
+        "type": "String"
+      }
+    }
+  },
   "chatActivityIdle": "Idle",
   "@chatActivityIdle": {
     "description": "Not shown yet."

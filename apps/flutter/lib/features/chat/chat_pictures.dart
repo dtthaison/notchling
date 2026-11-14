@@ -41,7 +41,7 @@ class ChatPictureLoader {
     Uint8List? bytes = await _cache.loadImage(sessionId, image.id, width);
     if (bytes == null) {
       final BridgeClient? client = _client();
-      if (client == null || !client.isConnected) throw const BridgeException('disconnected', 'Chưa kết nối tới Mac.');
+      if (client == null || !client.isConnected) throw const BridgeException('disconnected', '');
       bytes = await client.chatImage(sessionId, image.id, maxWidth: width);
       unawaited(_cache.saveImage(sessionId, image.id, width, bytes));
     }

@@ -168,7 +168,7 @@ void main() {
       final ChatNotifier notifier = container.read(chatProvider('c').notifier);
       await notifier.send('again');
       await until(() => container.read(chatProvider('c')).pending.single.failed);
-      expect(container.read(chatProvider('c')).pending.single.reason, 'Mac bận');
+      expect(container.read(chatProvider('c')).pending.single.reason?.message, 'Mac bận');
       await notifier.retry(container.read(chatProvider('c')).pending.single.id);
       expect(attempts, 2);
       expect(container.read(chatProvider('c')).pending.single.failed, isFalse);

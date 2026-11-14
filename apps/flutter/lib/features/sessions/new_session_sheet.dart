@@ -11,7 +11,7 @@ import '../connection/connection.dart';
 
 final FutureProvider<List<String>> recentProjectsProvider = FutureProvider.autoDispose<List<String>>((Ref ref) async {
   final BridgeClient? client = ref.watch(bridgeClientProvider);
-  if (client == null) throw const BridgeException('disconnected', 'Chưa kết nối tới Mac.');
+  if (client == null) throw const BridgeException('disconnected', '');
   return client.projectsRecent();
 });
 

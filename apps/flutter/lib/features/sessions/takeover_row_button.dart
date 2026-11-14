@@ -8,6 +8,7 @@ import '../../app/theme/tokens.dart';
 import '../../core/net/bridge_client.dart';
 import '../../core/protocol/models.dart';
 import '../../l10n/app_localizations.dart';
+import '../connection/bridge_errors.dart';
 import '../chat/takeover_flow.dart';
 import '../connection/connection.dart';
 import '../macs/session_ref.dart';
@@ -40,7 +41,7 @@ Future<void> runTakeover(
     ref.read(activeTabProvider.notifier).show(1);
   } on BridgeException catch (error) {
     messenger.showSnackBar(
-      SnackBar(content: Text(l10n.appTakeoverFailed(error.message))),
+      SnackBar(content: Text(l10n.appTakeoverFailed(bridgeErrorLine(l10n, error)))),
     );
   }
 }

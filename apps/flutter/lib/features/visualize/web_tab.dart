@@ -8,6 +8,7 @@ import '../../app/theme/tokens.dart';
 import '../../app/widgets/common.dart';
 import '../../core/net/bridge_client.dart';
 import '../../l10n/app_localizations.dart';
+import '../connection/bridge_errors.dart';
 import '../connection/connection.dart';
 
 class WebTab extends ConsumerStatefulWidget {
@@ -26,7 +27,7 @@ class _WebTabState extends ConsumerState<WebTab> {
   Uint8List? _image;
   bool _loading = false;
   bool _failed = false;
-  String? _reason;
+  BridgeException? _reason;
 
   @override
   void initState() {
@@ -56,7 +57,7 @@ class _WebTabState extends ConsumerState<WebTab> {
       if (mounted) {
         setState(() {
           _failed = true;
-          _reason = error.code == 'not_reachable' || error.code == 'invalid' || error.code == 'not_found' ? error.message : null;
+          _reason = error.code == 'not_reachable' || error.code == 'invalid' || error.code == 'not_found' ? error : null;
         });
       }
     } finally {
@@ -73,7 +74,7 @@ class _WebTabState extends ConsumerState<WebTab> {
       content = const SkeletonRows(count: 4);
     } else if (_failed && image == null) {
       content = Column(mainAxisAlignment: MainAxisAlignment.center, children: <Widget>[
-        ErrorState(message: _reason ?? l10n.visualizeWebFailed, onRetry: () => unawaited(_capture())),
+        ErrorState(message: _reason == null ? l10n.visualizeWebFailed : bridgeErrorLine(l10n, _reason!), onRetry: () => unawaited(_capture())),
         if (_reason != null)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: Space.xl),

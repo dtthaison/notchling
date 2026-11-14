@@ -267,6 +267,72 @@ abstract class AppL10n {
   /// **'View only'**
   String get appViewOnly;
 
+  /// The Mac is busy with something else.
+  ///
+  /// In en, this message translates to:
+  /// **'The Mac is busy. Try again.'**
+  String get bridgeErrorBusy;
+
+  /// The phone is not connected to the Mac, or the link dropped while a request was waiting.
+  ///
+  /// In en, this message translates to:
+  /// **'Not connected to the Mac.'**
+  String get bridgeErrorDisconnected;
+
+  /// The Mac failed, or answered in a way the phone does not understand.
+  ///
+  /// In en, this message translates to:
+  /// **'Something went wrong on the Mac.'**
+  String get bridgeErrorInternal;
+
+  /// The Mac refused the request, or does not know it because it runs an older version.
+  ///
+  /// In en, this message translates to:
+  /// **'The Mac didn\'t accept that request.'**
+  String get bridgeErrorInvalid;
+
+  /// The Mac could not find what the phone asked for, such as a session or a folder.
+  ///
+  /// In en, this message translates to:
+  /// **'The Mac couldn\'t find that.'**
+  String get bridgeErrorNotFound;
+
+  /// The Mac could not reach what the phone asked for, such as a web page.
+  ///
+  /// In en, this message translates to:
+  /// **'The Mac couldn\'t reach it.'**
+  String get bridgeErrorNotReachable;
+
+  /// The Mac did not answer a request in time.
+  ///
+  /// In en, this message translates to:
+  /// **'The Mac didn\'t answer in time.'**
+  String get bridgeErrorTimeout;
+
+  /// The Mac no longer trusts this phone.
+  ///
+  /// In en, this message translates to:
+  /// **'The Mac doesn\'t accept this phone. Pair again.'**
+  String get bridgeErrorUnauthorized;
+
+  /// An error code this version of the phone does not know.
+  ///
+  /// In en, this message translates to:
+  /// **'The Mac refused the request.'**
+  String get bridgeErrorUnknown;
+
+  /// The session was opened outside Console, so the phone can only read it.
+  ///
+  /// In en, this message translates to:
+  /// **'This session is view only.'**
+  String get bridgeErrorViewOnly;
+
+  /// $error is one of the messages above. $detail is the Mac's own explanation, in English.
+  ///
+  /// In en, this message translates to:
+  /// **'{error} {detail}'**
+  String bridgeErrorWithDetail(String error, String detail);
+
   /// Not shown yet.
   ///
   /// In en, this message translates to:

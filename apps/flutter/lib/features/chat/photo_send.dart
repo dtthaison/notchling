@@ -9,6 +9,7 @@ import '../../app/theme/tokens.dart';
 import '../../app/widgets/common.dart';
 import '../../core/net/bridge_client.dart';
 import '../../l10n/app_localizations.dart';
+import '../connection/bridge_errors.dart';
 import '../connection/connection.dart';
 
 enum PhotoOrigin { camera, gallery }
@@ -77,7 +78,7 @@ Future<void> pickAndSendPhoto(BuildContext context, WidgetRef ref, String sessio
             bytes: bytes!,
             send: (String caption, void Function(double) onProgress) async {
               final BridgeClient? client = ref.read(bridgeClientProvider);
-              if (client == null || !client.isConnected) throw const BridgeException('disconnected', 'Chưa kết nối tới Mac.');
+              if (client == null || !client.isConnected) throw const BridgeException('disconnected', '');
               await client.sessionImage(sessionId, bytes!, caption: caption, onProgress: onProgress);
             },
           ),
@@ -99,7 +100,7 @@ class PhotoPreview extends StatefulWidget {
 class _PhotoPreviewState extends State<PhotoPreview> {
   final TextEditingController _caption = TextEditingController();
   double? _progress;
-  String? _error;
+  BridgeException? _error;
 
   @override
   void dispose() {
@@ -122,7 +123,7 @@ class _PhotoPreviewState extends State<PhotoPreview> {
       if (mounted) {
         setState(() {
           _progress = null;
-          _error = error.message;
+          _error = error;
         });
       }
     }
@@ -154,7 +155,7 @@ class _PhotoPreviewState extends State<PhotoPreview> {
               if (_error != null)
                 Padding(
                   padding: const EdgeInsets.only(bottom: Space.sm),
-                  child: Text(_error!, style: kit.meta.copyWith(color: kit.danger)),
+                  child: Text(bridgeErrorLine(l10n, _error!), style: kit.meta.copyWith(color: kit.danger)),
                 ),
               TextField(
                 controller: _caption,

@@ -13,14 +13,14 @@ class InboxState {
     this.phase = InboxPhase.loading,
     this.items = const <InboxItem>[],
     this.busy = const <String>{},
-    this.errors = const <String, String>{},
+    this.errors = const <String, BridgeException>{},
     this.declined = const <String>{},
   });
 
   final InboxPhase phase;
   final List<InboxItem> items;
   final Set<String> busy;
-  final Map<String, String> errors;
+  final Map<String, BridgeException> errors;
   final Set<String> declined;
 
   List<InboxItem> get needsYou => _newestFirst(items.where((InboxItem i) => i.isOpen));
@@ -34,7 +34,7 @@ class InboxState {
     InboxPhase? phase,
     List<InboxItem>? items,
     Set<String>? busy,
-    Map<String, String>? errors,
+    Map<String, BridgeException>? errors,
     Set<String>? declined,
   }) => InboxState(
     phase: phase ?? this.phase,
@@ -116,7 +116,7 @@ class InboxNotifier extends Notifier<InboxState> {
     if (client == null || state.busy.contains(item.id)) return;
     state = state.copyWith(
       busy: <String>{...state.busy, item.id},
-      errors: <String, String>{...state.errors}..remove(item.id),
+      errors: <String, BridgeException>{...state.errors}..remove(item.id),
       declined: <String>{...state.declined}..remove(item.id),
     );
     try {
@@ -137,7 +137,7 @@ class InboxNotifier extends Notifier<InboxState> {
       if (!ref.mounted) return;
       state = state.copyWith(
         busy: <String>{...state.busy}..remove(item.id),
-        errors: <String, String>{...state.errors, item.id: error.message},
+        errors: <String, BridgeException>{...state.errors, item.id: error},
       );
     }
   }

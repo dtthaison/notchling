@@ -266,7 +266,7 @@ void main() {
       container.read(selectedSessionIdProvider.notifier).select('s1');
       container.read(phoneWantedProvider.notifier).set(true);
       await until(() => container.read(phoneErrorProvider) != null);
-      expect(container.read(phoneErrorProvider), contains('quyền'));
+      expect(container.read(phoneErrorProvider)?.message, contains('quyền'));
     });
   });
 

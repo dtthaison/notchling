@@ -6,6 +6,8 @@ import '../../app/widgets/kit.dart';
 import '../../app/widgets/motion.dart';
 import '../../core/protocol/models.dart';
 import '../../l10n/app_localizations.dart';
+import '../../core/net/bridge_client.dart';
+import '../connection/bridge_errors.dart';
 import 'chat_pictures.dart';
 import 'code_highlight.dart';
 import 'markdown_text.dart';
@@ -612,7 +614,7 @@ class PendingBubble extends StatelessWidget {
   });
   final String text;
   final bool failed;
-  final String? reason;
+  final BridgeException? reason;
   final VoidCallback onRetry;
   final VoidCallback onDiscard;
 
@@ -649,7 +651,7 @@ class PendingBubble extends StatelessWidget {
                     children: <Widget>[
                       Flexible(
                         child: Text(
-                          reason ?? l10n.chatSendFailed,
+                          reason == null ? l10n.chatSendFailed : bridgeErrorLine(l10n, reason!),
                           style: kit.meta.copyWith(color: kit.danger),
                         ),
                       ),
