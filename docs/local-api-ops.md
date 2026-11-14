@@ -111,7 +111,7 @@ bridge's `remote-log.jsonl` and `account-log.json`, and answers normalized rows,
 An app-tier call is written to `audit.jsonl` unless its spec is `OpSpec::APP_QUIET` and it succeeded.
 These read-only polls are quiet: `bridge.status`, `bridge.devices`, `bridge.tunnel.status`,
 `accounts.list`, `lanes.list`, `providers.list`, `providers.usage`, `limits.status`, `limits.usage`,
-`git.status`, `git.diff` and `activity.list`. A call to `accounts.list` or `providers.list` with
+`git.status`, `git.diff`, `activity.list` and `versions.workers`. A call to `accounts.list` or `providers.list` with
 `sync: true`, or to `providers.usage` or `limits.usage` with `refresh: true`, reads Keychain and the network,
 so it is logged. Failures and refusals of a quiet op are logged too. No op that acts, writes or touches the
 vault is quiet.
@@ -669,3 +669,33 @@ missed.
 Errors carry names and fixed texts only: never a value, never a parse error that could quote
 one. Agent-tier calls are written to the audit log here (op, tier, peer, outcome and the
 names used); the server logs every app-tier call.
+
+## `versions_ops.rs`
+
+Version sync, phase 1 ([design](superpowers/specs/2026-11-13-version-sync-design.md)): what the Mac has
+installed, read from files. The daemon starts no tool to read a version; the one exception is
+`agy --version`, run at most every 10 minutes (and never from a `versions.get`), because no file names
+agy's version.
+
+| Op | Tier | Args | Reply |
+| --- | --- | --- | --- |
+| `versions.get` | agent | `{tool?}` | `{tools: [{tool, installed, method, path, problems, running, reference, usable, failed, check}]}` |
+| `versions.workers` | app (quiet) | `{}` | `{workers: {<machine>: {tools: {<tool>: ToolState}, atMs}}}` |
+
+- `tool` is `claude`, `codex`, `antigravity` or `notchling`; the name `agy` is read as `antigravity`
+  and answered as `antigravity`. Without `tool` there is one row per tool, in that order.
+- `installed` is `null` when the tool isn't found, else `{version, sha256}`: `version` is `null` when
+  it can't be told (agy before its first answer, a damaged `package.json`), `sha256` is the binary the
+  launcher resolves to. `method` is `native`, `standalone`, `npm`, `brew`, `apt`, `release` or
+  `unknown` (`null` when not installed). `problems` holds `{kind: "two_installs", other: <method>}` and
+  `{kind: "cant_tell"}`. Notchling's own row is the daemon's version and its own executable.
+- `running`, `reference`, `usable`, `failed` and `check` are empty in phase 1 (`[]`, `null`, `false`,
+  `[]`, `null`); phase 2 fills them. The shape is final, so a client reads it once.
+- `versions.workers` is what Machines saved in `notchling.db` (`versions/workers`), read back through the
+  typed `WorkerTools`, so a field that isn't part of it never reaches a client. `ToolState` is
+  `{state: "notInstalled"}` or `{state: "installed", version, method, path}`.
+- Topic `versions` (agent tier): `versions.changed {tool, installed}` when a rescan finds a different
+  version or binary. Rescans follow `platform::watch` on the install folders and run every 10 minutes.
+- Facts go to `audit.jsonl` as fixed words (`versions.seen claude 2.1.324`,
+  `versions.changed mac claude 2.1.323 to 2.1.324 outside`): a version seen for the first time in a data
+  folder, and a change. Never a path or free text.

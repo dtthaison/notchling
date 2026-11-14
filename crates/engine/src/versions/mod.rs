@@ -4,6 +4,7 @@ pub mod mark;
 mod method;
 pub mod mismatch;
 mod parse;
+pub mod record;
 mod version;
 pub mod worker;
 
@@ -17,6 +18,8 @@ mod method_tests;
 mod mismatch_tests;
 #[cfg(test)]
 mod parse_tests;
+#[cfg(test)]
+mod record_tests;
 #[cfg(test)]
 mod version_tests;
 #[cfg(test)]

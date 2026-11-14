@@ -35,6 +35,10 @@ impl Version {
         Some(Version(s.to_string()))
     }
 
+    pub fn zero() -> Version {
+        Version("0.0.0".to_string())
+    }
+
     pub fn as_str(&self) -> &str {
         &self.0
     }

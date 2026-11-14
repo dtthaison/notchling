@@ -23,6 +23,7 @@ use crate::quiet_ops;
 use crate::settings_ops::{SettingsOps, SwitchStates};
 use crate::switches::{SwitchFlag, SwitchOps, Switches};
 use crate::vault_ops::VaultOps;
+use crate::versions_ops::{AuditRecorder, VersionsOps};
 use notchling_engine::accounts::codex::login::idle_for_auto_switch;
 use notchling_engine::accounts::desktop::ClaudeName;
 use notchling_engine::control::launcher::claude_path;
@@ -32,6 +33,8 @@ use notchling_engine::delegate::skill::SkillTool;
 use notchling_engine::git::SandboxedLauncher;
 use notchling_engine::install::skills::SkillSpec;
 use notchling_engine::vault::skill as vault_skill;
+use notchling_engine::versions::mac::Roots as VersionRoots;
+use notchling_engine::versions::Version;
 use notchling_local_api::{ops, topics, ApiError, AuditLog, Caller, Handler, OpSpec, Tier};
 use serde_json::{Map, Value};
 use std::path::{Path, PathBuf};
@@ -257,6 +260,7 @@ pub struct Wired {
     pub vault: Arc<VaultOps>,
     pub install: Arc<InstallOps>,
     pub settings: Arc<SettingsOps>,
+    pub versions: Arc<VersionsOps>,
 }
 
 impl Wired {
@@ -396,6 +400,24 @@ impl Wired {
                 .with_limits(limits.config().clone())
                 .with_inbox(inbox.clone()),
         );
+        let versions = VersionsOps::new(
+            if layout.fixture {
+                VersionRoots::inside(&layout.home())
+            } else {
+                VersionRoots::for_home(&layout.home())
+            },
+            layout.data_dir.clone(),
+            room.clone(),
+            Arc::new(RealLauncher::with_claude(claude.clone())),
+            Arc::new(AuditRecorder::new(AuditLog::new(layout.audit_path()))),
+            Arc::new(|| {
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_millis() as i64)
+                    .unwrap_or(0)
+            }),
+            Version::parse(env!("CARGO_PKG_VERSION")).unwrap_or_else(Version::zero),
+        );
         Wired {
             acting,
             codex,
@@ -410,6 +432,7 @@ impl Wired {
             vault,
             install: Arc::new(install),
             settings,
+            versions,
         }
     }
 
@@ -452,6 +475,7 @@ impl Wired {
             .with_group(self.inbox.clone())
             .with_group(self.vault.clone())
             .with_group(self.settings.clone())
+            .with_group(self.versions.clone())
             .with_group(Arc::new(git))
             .with_group(Arc::new(ActivityOps::for_daemon(layout)))
             .with_first_scan(first_scan, first_wait)
@@ -461,6 +485,7 @@ impl Wired {
         self.limits.spawn_loop();
         self.inbox.spawn_loop();
         self.acting.spawn_held_loop();
+        self.versions.start();
     }
 
     pub fn load(&self) {
@@ -478,6 +503,7 @@ impl Wired {
         self.limits.close();
         self.settings.close();
         self.inbox.close();
+        self.versions.close();
     }
 
     pub fn accounts_switch(&self) -> &Arc<SwitchFlag> {
