@@ -1,4 +1,6 @@
-use crate::field::{choice_or_other, ErrorCode, Exe, Hex, List, Op, Percent, Seal, Tool, Version, ERROR_CODES};
+use crate::field::{
+    choice_or_other, ErrorCode, Exe, Hex, List, Op, Percent, Seal, Tool, Version, ERROR_CODES,
+};
 use crate::field::{Count, FieldValue, LogField};
 use crate::field_ref::{hash_ref, Ref, Salt, Session};
 use std::path::Path;
@@ -30,8 +32,14 @@ fn ref_drops_control_characters_and_cuts_at_256() {
 
 #[test]
 fn exe_keeps_file_name_and_charset_only() {
-    assert_eq!(Exe::from_path(Path::new("/usr/local/bin/gh")).as_str(), "gh");
-    assert_eq!(Exe::from_path(Path::new("/tmp/a b/evil;rm")).as_str(), "unknown");
+    assert_eq!(
+        Exe::from_path(Path::new("/usr/local/bin/gh")).as_str(),
+        "gh"
+    );
+    assert_eq!(
+        Exe::from_path(Path::new("/tmp/a b/evil;rm")).as_str(),
+        "unknown"
+    );
     assert_eq!(Exe::named("a b").as_str(), "unknown");
     assert_eq!(Exe::named(&"x".repeat(65)).as_str(), "unknown");
     assert_eq!(Exe::named(&"x".repeat(64)).as_str().len(), 64);
@@ -42,14 +50,23 @@ fn version_tool_hex_seal_validate() {
     assert_eq!(Version::new("2.1.322").as_str(), "2.1.322");
     assert_eq!(Version::new("1 2").as_str(), "unknown");
     assert_eq!(Version::new(&"1".repeat(33)).as_str(), "unknown");
-    assert_eq!(Tool::new("mcp__github__create_issue").as_str(), "mcp__github__create_issue");
+    assert_eq!(
+        Tool::new("mcp__github__create_issue").as_str(),
+        "mcp__github__create_issue"
+    );
     assert_eq!(Tool::new("a b").as_str(), "unknown");
     assert!(Hex::new("ABCD1234").is_none());
     assert!(Hex::new("abcd123").is_none());
-    assert_eq!(Hex::new("abcd1234").map(|h| h.as_str().to_string()), Some("abcd1234".to_string()));
+    assert_eq!(
+        Hex::new("abcd1234").map(|h| h.as_str().to_string()),
+        Some("abcd1234".to_string())
+    );
     let seal = Seal::from_bytes([0; 32]);
     assert_eq!(seal.as_str().len(), 44);
-    assert_eq!(Seal::parse(seal.as_str()).map(|s| s.as_str().to_string()), Some(seal.as_str().to_string()));
+    assert_eq!(
+        Seal::parse(seal.as_str()).map(|s| s.as_str().to_string()),
+        Some(seal.as_str().to_string())
+    );
     assert!(Seal::parse("short").is_none());
 }
 
@@ -81,5 +98,8 @@ fn hash_ref_is_stable_and_salted() {
     assert_ne!(a, hash_ref(&Salt([1; 32]), "folder", "abc"));
     let id = Salt([7; 32]).id();
     assert_eq!(id.as_str().len(), 8);
-    assert!(id.as_str().chars().all(|c| matches!(c, '0'..='9' | 'a'..='f')));
+    assert!(id
+        .as_str()
+        .chars()
+        .all(|c| matches!(c, '0'..='9' | 'a'..='f')));
 }

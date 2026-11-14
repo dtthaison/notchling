@@ -377,3 +377,26 @@ impl<T: LogField> LogField for List<T> {
         FieldValue::List(self.0.iter().map(LogField::value).collect())
     }
 }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct KindName(&'static str);
+
+impl KindName {
+    pub fn of(spec: &'static crate::spec::KindSpec) -> KindName {
+        KindName(spec.name)
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        self.0
+    }
+}
+
+impl sealed::Sealed for KindName {}
+
+impl LogField for KindName {
+    const DESC: FieldDesc = FieldDesc::scalar("kind");
+
+    fn value(&self) -> FieldValue {
+        FieldValue::Name(self.0)
+    }
+}

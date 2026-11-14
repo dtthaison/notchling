@@ -12,7 +12,7 @@ pub trait RefKind {
 macro_rules! ref_kinds {
     ($($ty:ident = $name:literal $(, $hashed:ident)?;)+) => {
         $(
-            #[derive(Clone, Copy, Debug)]
+            #[derive(Clone, Copy, Debug, PartialEq, Eq)]
             pub struct $ty;
 
             impl RefKind for $ty {
