@@ -9,6 +9,7 @@ use crate::bridge_ops::{BridgeOps, BridgeSetup};
 use crate::catalog_ops::CatalogService;
 use crate::codex_ops::CodexOps;
 use crate::daemon::{FirstScan, FIRST_LIST_WAIT};
+use crate::every_session::{EverySession, CLAUDE};
 use crate::git_ops::{live_folders, GitOps};
 use crate::inbox_ops::InboxOps;
 use crate::install_ops::{InstallOps, InstallSetup};
@@ -45,6 +46,7 @@ pub struct Ops {
     codex: Option<Arc<CodexOps>>,
     agy: Option<Arc<AgyOps>>,
     pages: Option<Arc<PagesOps>>,
+    every: Option<Arc<EverySession>>,
     groups: Vec<Arc<dyn OpGroup>>,
     topic_list: Vec<&'static str>,
     first: Arc<FirstScan>,
@@ -60,6 +62,7 @@ impl Ops {
             codex: None,
             agy: None,
             pages: None,
+            every: None,
             groups: Vec::new(),
             topic_list: vec![topics::SESSIONS],
             first: FirstScan::open(),
@@ -124,6 +127,11 @@ impl Ops {
         self
     }
 
+    pub fn with_every(mut self, every: Arc<EverySession>) -> Ops {
+        self.every = Some(every);
+        self
+    }
+
     pub fn with_first_scan(mut self, first: Arc<FirstScan>, wait: Duration) -> Ops {
         self.first = first;
         self.first_wait = wait;
@@ -131,16 +139,54 @@ impl Ops {
     }
 }
 
+fn every_tool(args: &Value) -> Result<bool, ApiError> {
+    match args.get("tools") {
+        None | Some(Value::Null) => Ok(false),
+        Some(Value::String(tools)) if tools == "claude" => Ok(false),
+        Some(Value::String(tools)) if tools == "all" => Ok(true),
+        Some(_) => Err(ApiError::bad_request(
+            "sessions.list takes {\"tools\": \"all\" | \"claude\"}",
+        )),
+    }
+}
+
+fn tagged(list: Value, tool: &str) -> Vec<Value> {
+    let Value::Array(rows) = list else {
+        return Vec::new();
+    };
+    rows.into_iter()
+        .map(|mut row| {
+            row["tool"] = Value::String(tool.to_string());
+            row
+        })
+        .collect()
+}
+
 impl Ops {
-    fn sessions_list(&self) -> (Value, bool) {
+    fn sessions_list(&self, args: &Value) -> Result<(Value, bool), ApiError> {
+        let every = every_tool(args)?;
         let landed = self.first.wait(self.first_wait);
         let list = self
             .sessions
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .clone();
-        (list, landed)
+        if !every {
+            return Ok((list, landed));
+        }
+        let mut rows = tagged(list, CLAUDE);
+        if let Some(other) = &self.every {
+            rows.extend(other.values(now_ms()));
+        }
+        Ok((Value::Array(rows), landed))
     }
+}
+
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
 }
 
 impl Handler for Ops {
@@ -153,7 +199,10 @@ impl Handler for Ops {
         if op != ops::SESSIONS_LIST {
             return (self.call(caller, op, args), Map::new());
         }
-        let (list, landed) = self.sessions_list();
+        let (list, landed) = match self.sessions_list(args) {
+            Ok(answer) => answer,
+            Err(e) => return (Err(e), Map::new()),
+        };
         let mut extras = Map::new();
         if !landed {
             extras.insert("partial".into(), Value::Bool(true));
@@ -198,7 +247,7 @@ impl Handler for Ops {
             return group.call(caller, op, args);
         }
         match (op, &self.acting) {
-            (ops::SESSIONS_LIST, _) => Ok(self.sessions_list().0),
+            (ops::SESSIONS_LIST, _) => self.sessions_list(args).map(|(list, _)| list),
             (op, Some(acting)) => acting.call(caller, op, args),
             (op, None) => Err(ApiError::internal(format!("{op} has no handler"))),
         }
@@ -248,6 +297,7 @@ pub struct Wired {
     pub codex: Arc<CodexOps>,
     pub bridge: Arc<BridgeOps>,
     pub agy: Arc<AgyOps>,
+    pub every: Arc<EverySession>,
     pub switches: Arc<Switches>,
     pub accounts: Arc<AccountsOps>,
     pub providers: Arc<ProvidersOps>,
@@ -290,12 +340,14 @@ impl Wired {
         ));
         acting.attach_codex(codex.clone());
         let inbox = InboxOps::new(layout.data_dir.clone(), room.clone());
+        let every = Arc::new(EverySession::new(layout));
         let bridge = Arc::new(BridgeOps::new(
             bridge_setup(layout, bridge_ports),
             sessions,
             acting.clone(),
             room.clone(),
             inbox.clone(),
+            every.clone(),
         ));
         let agy = Arc::new(AgyOps::for_daemon(
             layout,
@@ -401,6 +453,7 @@ impl Wired {
             codex,
             bridge,
             agy,
+            every,
             switches,
             accounts,
             providers,
@@ -437,6 +490,7 @@ impl Wired {
             .with_bridge(self.bridge.clone())
             .with_codex(self.codex.clone())
             .with_agy(self.agy.clone())
+            .with_every(self.every.clone())
             .with_pages(Arc::new(
                 PagesOps::new(PagesSetup::from_layout(layout)).with_titles(self.agy.titles()),
             ))

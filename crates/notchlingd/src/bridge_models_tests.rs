@@ -2,6 +2,7 @@ use crate::acting_ops::ActingOps;
 use crate::acting_ops_tests::{setup_in, PROMPT};
 use crate::bridge_backend::{Approvals, DaemonActing, DaemonSources};
 use crate::catalog_ops_tests::seeded;
+use crate::every_session::EverySession;
 use crate::inbox_ops::InboxOps;
 use crate::limits_ops_tests::TempDir;
 use notchling_engine::bridge::live::{Acting as _, Sources as _};
@@ -47,6 +48,7 @@ fn sources(ops: &Arc<ActingOps>) -> (DaemonSources, TempDir) {
             tmp.path("inbox"),
             Arc::new(crate::acting_ops_tests::FakeRoom::default()),
         ),
+        every: Arc::new(EverySession::none()),
         projects_dir: PathBuf::from("/nonexistent/projects"),
     };
     (sources, tmp)
