@@ -1,5 +1,6 @@
 use crate::acting_ops::Room;
 use crate::op_group::OpGroup;
+use crate::versions_check::Checks;
 use notchling_engine::control::launcher::{LaunchOutput, Launcher};
 use notchling_engine::control::plan::Command;
 use notchling_engine::machines::versions_facts;
@@ -64,6 +65,7 @@ pub struct VersionsOps {
     recorder: Arc<dyn Recorder>,
     clock: Clock,
     own: Version,
+    checks: Arc<Checks>,
     exe: Mutex<Option<PathBuf>>,
     state: Mutex<State>,
     cache: Mutex<IdentityCache>,
@@ -83,7 +85,8 @@ fn installed_json(found: &Installed) -> Value {
     })
 }
 
-fn row(tool: Tool, found: Option<&Installed>) -> Value {
+fn row(tool: Tool, found: Option<&Installed>, checks: &Checks) -> Value {
+    let (reference, usable, failed, check) = checks.parts(tool, found);
     let Some(found) = found else {
         return json!({
             "tool": tool.name(),
@@ -92,10 +95,10 @@ fn row(tool: Tool, found: Option<&Installed>) -> Value {
             "path": null,
             "problems": [],
             "running": [],
-            "reference": null,
+            "reference": reference,
             "usable": false,
-            "failed": [],
-            "check": null,
+            "failed": failed,
+            "check": check,
         });
     };
     json!({
@@ -105,10 +108,10 @@ fn row(tool: Tool, found: Option<&Installed>) -> Value {
         "path": found.path,
         "problems": found.problems,
         "running": [],
-        "reference": null,
-        "usable": false,
-        "failed": [],
-        "check": null,
+        "reference": reference,
+        "usable": usable,
+        "failed": failed,
+        "check": check,
     })
 }
 
@@ -122,6 +125,14 @@ impl VersionsOps {
         clock: Clock,
         own: Version,
     ) -> Arc<VersionsOps> {
+        let checks = Checks::new(
+            launcher.clone(),
+            roots.home.clone(),
+            data_dir.clone(),
+            room.clone(),
+            recorder.clone(),
+            clock.clone(),
+        );
         Arc::new(VersionsOps {
             roots,
             data_dir,
@@ -130,6 +141,7 @@ impl VersionsOps {
             recorder,
             clock,
             own,
+            checks,
             exe: Mutex::new(std::env::current_exe().ok()),
             state: Mutex::new(State::default()),
             cache: Mutex::new(IdentityCache::new()),
@@ -137,6 +149,14 @@ impl VersionsOps {
             stop: Arc::new(AtomicBool::new(false)),
             thread: Mutex::new(None),
         })
+    }
+
+    pub fn checks(&self) -> &Arc<Checks> {
+        &self.checks
+    }
+
+    pub fn wait_checks(&self) {
+        self.checks.wait();
     }
 
     pub fn set_exe(&self, exe: Option<PathBuf>) {
@@ -171,6 +191,48 @@ impl VersionsOps {
         let before = lock(&self.state).tools.replace(found.clone());
         self.announce(before, &found);
         self.note_seen(&found);
+        self.auto_check(&found);
+    }
+
+    fn auto_check(&self, found: &BTreeMap<Tool, Installed>) {
+        for (tool, installed) in found {
+            if self.checks.wanted(*tool, installed) {
+                self.checks.request(*tool, installed, false);
+            }
+        }
+    }
+
+    pub fn retry_due_checks(&self) {
+        let due = self.checks.due_retries();
+        if due.is_empty() {
+            return;
+        }
+        let found = self.snapshot();
+        for tool in due {
+            if let Some(installed) = found.get(&tool) {
+                self.checks.request(tool, installed, false);
+            }
+        }
+    }
+
+    fn check(&self, args: &Value) -> Result<Value, ApiError> {
+        let name = args
+            .get("tool")
+            .and_then(Value::as_str)
+            .ok_or_else(|| ApiError::bad_request("tool is a name"))?;
+        let tool = Tool::from_name(name).ok_or_else(|| ApiError::bad_request("unknown tool"))?;
+        if !self.checks.enabled() {
+            return Ok(json!({ "started": false, "running": false }));
+        }
+        let found = self.snapshot();
+        let Some(installed) = found.get(&tool).filter(|i| i.version.is_some()) else {
+            return Ok(json!({ "started": false, "running": false }));
+        };
+        if self.checks.is_running(tool) {
+            return Ok(json!({ "started": false, "running": true }));
+        }
+        let started = self.checks.request(tool, installed, true);
+        Ok(json!({ "started": started, "running": !started && self.checks.is_running(tool) }))
     }
 
     fn own_install(&self, cache: &mut IdentityCache) -> Option<Installed> {
@@ -319,7 +381,7 @@ impl VersionsOps {
         let rows: Vec<Value> = Tool::ALL
             .into_iter()
             .filter(|t| only.is_none_or(|o| o == *t))
-            .map(|t| row(t, found.get(&t)))
+            .map(|t| row(t, found.get(&t), &self.checks))
             .collect();
         Ok(json!({ "tools": rows }))
     }
@@ -355,6 +417,7 @@ impl VersionsOps {
         if let Some(handle) = handle {
             let _ = handle.join();
         }
+        self.checks.wait();
     }
 
     fn run(&self) {
@@ -373,6 +436,7 @@ impl VersionsOps {
             if self.stop.load(Ordering::SeqCst) {
                 break;
             }
+            self.retry_due_checks();
             if !changed && last.elapsed() < RESCAN_EVERY {
                 continue;
             }
@@ -393,6 +457,7 @@ impl OpGroup for VersionsOps {
         match op {
             ops::VERSIONS_GET => Some(OpSpec::AGENT),
             ops::VERSIONS_WORKERS => Some(OpSpec::APP),
+            ops::VERSIONS_CHECK => Some(OpSpec::APP),
             _ => None,
         }
     }
@@ -401,6 +466,7 @@ impl OpGroup for VersionsOps {
         match op {
             ops::VERSIONS_GET => self.get(args),
             ops::VERSIONS_WORKERS => Ok(self.workers()),
+            ops::VERSIONS_CHECK => self.check(args),
             other => Err(ApiError::internal(format!("{other} has no handler"))),
         }
     }

@@ -56,6 +56,7 @@ pub mod vault_caller;
 pub mod vault_cli;
 pub mod vault_ops;
 pub mod vault_wait;
+pub mod versions_check;
 pub mod versions_ops;
 
 #[cfg(test)]
@@ -122,6 +123,8 @@ mod providers_sync_tests;
 mod quiet_ops_tests;
 #[cfg(test)]
 mod vault_ops_lock_tests;
+#[cfg(test)]
+mod versions_check_tests;
 #[cfg(test)]
 mod versions_ops_tests;
 

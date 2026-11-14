@@ -491,6 +491,7 @@ impl Wired {
             }),
             Version::parse(env!("CARGO_PKG_VERSION")).unwrap_or_else(Version::zero),
         );
+        versions.checks().set_enabled(!layout.fixture);
         Wired {
             acting,
             codex,
@@ -531,6 +532,13 @@ impl Wired {
             )))),
             folders,
         );
+        let listed = sessions.clone();
+        self.versions.checks().set_self_test(Arc::new(move || {
+            listed
+                .lock()
+                .map(|v| v.is_array() || v.is_object() || v.is_null())
+                .unwrap_or(false)
+        }));
         Ops::with_acting(sessions, self.acting.clone())
             .with_bridge(self.bridge.clone())
             .with_codex(self.codex.clone())

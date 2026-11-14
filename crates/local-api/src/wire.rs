@@ -107,6 +107,7 @@ pub mod ops {
 
     pub const VERSIONS_GET: &str = "versions.get";
     pub const VERSIONS_WORKERS: &str = "versions.workers";
+    pub const VERSIONS_CHECK: &str = "versions.check";
 }
 
 pub mod topics {
@@ -149,6 +150,7 @@ pub mod topics {
 
     pub const VERSIONS: &str = "versions";
     pub const VERSIONS_CHANGED: &str = "versions.changed";
+    pub const VERSIONS_CHECKED: &str = "versions.checked";
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]

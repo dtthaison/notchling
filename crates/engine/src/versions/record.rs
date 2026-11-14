@@ -1,3 +1,4 @@
+use super::check::{CheckPart, CheckResult, CheckTier};
 use super::{Method, Tool, Version};
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
@@ -40,6 +41,15 @@ pub enum Fact {
     },
     LoadFailed {
         doc: &'static str,
+    },
+    Checked {
+        tool: Tool,
+        version: Version,
+        tier: CheckTier,
+        result: CheckResult,
+        failed_part: Option<CheckPart>,
+        unknown_count: u32,
+        duration_ms: u64,
     },
 }
 
@@ -84,6 +94,27 @@ impl Fact {
                 ),
             ),
             Fact::LoadFailed { doc } => ("versions.load_failed", plain(doc)),
+            Fact::Checked {
+                tool,
+                version,
+                tier,
+                result,
+                failed_part,
+                unknown_count,
+                duration_ms,
+            } => (
+                "versions.checked",
+                format!(
+                    "{} {} {} {} {} {} {}",
+                    tool.name(),
+                    plain(version.as_str()),
+                    tier.word(),
+                    result.word(),
+                    failed_part.map_or("none", |p| p.word()),
+                    unknown_count,
+                    duration_ms
+                ),
+            ),
         }
     }
 }
