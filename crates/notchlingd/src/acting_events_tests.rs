@@ -112,6 +112,15 @@ fn a_reply_while_acting_is_off_is_recorded_as_acting_off() {
 }
 
 #[test]
+fn a_reply_to_a_session_that_does_not_exist_never_records_the_id_it_was_given() {
+    let (s, sink) = watched(false, PROMPT);
+    reply(&s, "made-up-id-9d2e", "hi").unwrap_err();
+    let sent = of(&sink, "session.reply");
+    assert_eq!(text(&sent[0], "session").as_deref(), Some("unknown"));
+    assert!(!format!("{:?}", sink.events()).contains("made-up-id-9d2e"));
+}
+
+#[test]
 fn agent_reply_commits_first_and_fails_closed() {
     let (s, sink) = watched(true, PROMPT);
     sink.fail_commits(true);

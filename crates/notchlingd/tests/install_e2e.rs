@@ -1,5 +1,7 @@
 #![cfg(unix)]
 
+mod common;
+
 use notchling_local_api::{ops, Client, ClientKind, Tier};
 use serde_json::json;
 use std::path::{Path, PathBuf};
@@ -134,7 +136,18 @@ fn a_real_daemon_plans_but_with_the_switch_off_writes_nothing() {
         settings
     );
 
-    let audit = std::fs::read_to_string(root.join("notchling/audit.jsonl")).unwrap();
-    assert!(audit.contains("\"op\":\"install.apply\""), "{audit}");
-    assert!(audit.contains("\"op\":\"install.plan\""), "{audit}");
+    let lines = common::audit::wait_until(&root, |all| {
+        all.iter().any(|l| l["kind"] == "daemon.started")
+    });
+    assert!(
+        !lines.iter().any(|l| l["kind"] == "install.hook"),
+        "a switch that is off changes nothing, so nothing is recorded as a change"
+    );
+    assert!(
+        !lines.iter().any(|l| l["kind"] == "api.refused"
+            && l["f"]["op"]
+                .as_str()
+                .is_some_and(|op| op.starts_with("install."))),
+        "an app asking while the switch is off is told so, not refused"
+    );
 }

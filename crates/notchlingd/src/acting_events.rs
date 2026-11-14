@@ -227,21 +227,14 @@ impl ActingOps {
     }
 
     pub(crate) fn note_acting_off(&self, args: &Value, via: ReplyVia) {
-        let Some(id) = args.get("id").and_then(Value::as_str) else {
-            return;
-        };
+        let session = self
+            .agent(args)
+            .map_or_else(|_| Ref::<Session>::new("unknown"), |a| session_ref(&a));
         let chars = args
             .get("text")
             .and_then(Value::as_str)
             .map_or(0, |t| t.chars().count());
-        self.note_reply(
-            Ref::new(id),
-            via,
-            chars,
-            Some(FailWhy::ActingOff),
-            None,
-            false,
-        );
+        self.note_reply(session, via, chars, Some(FailWhy::ActingOff), None, false);
     }
 
     pub(crate) fn note_held(&self, session: Ref<Session>, then: HeldThen) {
