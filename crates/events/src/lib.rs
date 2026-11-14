@@ -9,8 +9,11 @@ pub mod envelope;
 pub mod event;
 pub mod field;
 pub mod field_ref;
+pub mod ids;
 pub mod kinds;
 pub mod registry;
+pub mod salt;
+pub mod scope;
 pub mod spec;
 pub mod value;
 
@@ -31,5 +34,9 @@ mod emit_tests;
 mod field_tests;
 #[cfg(test)]
 mod registry_tests;
+#[cfg(test)]
+mod salt_tests;
+#[cfg(test)]
+mod scope_tests;
 #[cfg(test)]
 mod value_tests;
