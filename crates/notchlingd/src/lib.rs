@@ -26,6 +26,7 @@ pub mod hook_ops;
 pub mod hook_output;
 pub mod hook_pages;
 pub mod host_id;
+mod inbox_events;
 pub mod inbox_ops;
 pub mod install_ops;
 pub mod late_emit;
@@ -101,6 +102,8 @@ mod hook_ops_tests;
 mod hook_pages_tests;
 #[cfg(test)]
 mod hook_tests;
+#[cfg(test)]
+mod inbox_ops_events_tests;
 #[cfg(test)]
 mod inbox_ops_more_tests;
 #[cfg(test)]

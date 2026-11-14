@@ -5,6 +5,7 @@ use super::devices::{read_devices, PairedDevice};
 use super::identity::BridgeIdentity;
 use super::jwt::{Clock, Fetch};
 use super::server::{Kind, Limits, Listener};
+use crate::bridge::backend::Audit;
 use crate::bridge::BridgeBackend;
 use serde_json::{json, Value};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
@@ -111,6 +112,7 @@ pub struct Bridge {
     backend: Arc<dyn BridgeBackend>,
     fetch: Fetch,
     now: Clock,
+    audit: Option<Arc<dyn Audit>>,
     state: Mutex<State>,
 }
 
@@ -126,8 +128,14 @@ impl Bridge {
             backend,
             fetch,
             now,
+            audit: None,
             state: Mutex::new(State::Off),
         }
+    }
+
+    pub fn with_audit(mut self, audit: Arc<dyn Audit>) -> Bridge {
+        self.audit = Some(audit);
+        self
     }
 
     pub fn config(&self) -> &BridgeConfig {
@@ -185,16 +193,17 @@ impl Bridge {
         let bridge_dir = self.config.bridge_dir();
         let identity = BridgeIdentity::load(&bridge_dir).map_err(|e| e.to_string())?;
         let tls = identity.server_config().map_err(|e| e.to_string())?;
-        let core = Arc::new(Core::new(
-            &bridge_dir,
-            CoreParts {
-                backend: self.backend.clone(),
-                home: self.config.home.clone(),
-                images_dir: self.config.images_dir.clone(),
-                fetch: self.fetch.clone(),
-                now: self.now.clone(),
-            },
-        ));
+        let parts = CoreParts {
+            backend: self.backend.clone(),
+            home: self.config.home.clone(),
+            images_dir: self.config.images_dir.clone(),
+            fetch: self.fetch.clone(),
+            now: self.now.clone(),
+        };
+        let core = Arc::new(match &self.audit {
+            Some(audit) => Core::with_audit(&bridge_dir, parts, audit.clone()),
+            None => Core::new(&bridge_dir, parts),
+        });
         let limits = self.config.limits;
         let bind = |addr: SocketAddr, kind: Kind| {
             Listener::start(addr, kind, core.clone(), limits)

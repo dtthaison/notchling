@@ -211,6 +211,7 @@ impl Router {
                 let data = json!({"token": token, "deviceId": device.id, "version": wire::VERSION});
                 self.audit.append(AuditEntry {
                     device: device.name.clone(),
+                    device_id: device.id.clone(),
                     op: "pair".into(),
                     address: connection.audit_address(),
                     ..AuditEntry::default()
@@ -291,6 +292,7 @@ impl Router {
     ) {
         self.audit.append(AuditEntry {
             device: connection.device_name(),
+            device_id: connection.device_id(),
             op: op.into(),
             session: session.map(String::from),
             length,

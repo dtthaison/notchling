@@ -1,6 +1,7 @@
 pub mod agents;
 pub mod backend;
 pub mod connection;
+pub mod events_audit;
 pub mod extras;
 pub mod foreign;
 pub mod hub;

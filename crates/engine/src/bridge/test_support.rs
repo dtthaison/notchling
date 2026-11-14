@@ -105,6 +105,7 @@ pub struct FakeState {
     pub inbox: Vec<Item>,
     pub inbox_answers: Vec<(String, ActionId)>,
     pub inbox_answer_calls: usize,
+    pub inbox_answer_devices: Vec<Option<String>>,
     pub acting_off: bool,
 }
 
@@ -235,6 +236,12 @@ impl BridgeBackend for FakeBackend {
     fn inbox_answer(&self, item_id: &str, action: ActionId) -> Result<InboxOutcome, BridgeFailure> {
         self.with(|s| {
             s.inbox_answer_calls += 1;
+            s.inbox_answer_devices.push(
+                notchling_events::scope::current()
+                    .actor
+                    .and_then(|a| a.device)
+                    .map(|d| d.as_str().to_owned()),
+            );
             let item = s
                 .inbox
                 .iter_mut()

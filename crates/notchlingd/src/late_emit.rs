@@ -65,6 +65,10 @@ impl Events {
         Events::new(emit, Arc::new(cell))
     }
 
+    pub fn emit(&self) -> Arc<dyn Emit> {
+        self.emit.clone()
+    }
+
     pub fn salt(&self) -> Salt {
         self.salt.get().copied().unwrap_or(Salt([0; 32]))
     }

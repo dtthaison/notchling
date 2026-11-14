@@ -312,14 +312,18 @@ impl Wired {
             &claude,
         ));
         acting.attach_codex(codex.clone());
-        let inbox = InboxOps::new(layout.data_dir.clone(), room.clone());
-        let bridge = Arc::new(BridgeOps::new(
-            bridge_setup(layout, bridge_ports),
-            sessions,
-            acting.clone(),
-            room.clone(),
-            inbox.clone(),
-        ));
+        let inbox =
+            InboxOps::new(layout.data_dir.clone(), room.clone()).with_events(events.clone());
+        let bridge = Arc::new(
+            BridgeOps::new(
+                bridge_setup(layout, bridge_ports),
+                sessions,
+                acting.clone(),
+                room.clone(),
+                inbox.clone(),
+            )
+            .with_events(events.clone()),
+        );
         let agy = Arc::new(AgyOps::for_daemon(
             layout,
             acting.acting_switch(),

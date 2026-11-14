@@ -381,6 +381,7 @@ impl Router {
         let outcome = self.backend.take_over(&target, stop_original)?;
         self.audit_entry(AuditEntry {
             device: connection.device_name(),
+            device_id: connection.device_id(),
             op: "takeover".into(),
             session: Some(id.to_string()),
             address: connection.audit_address(),

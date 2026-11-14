@@ -397,3 +397,26 @@ fn the_phones_short_names_still_map() {
     );
     assert_eq!(model_id("opus", &live).as_deref(), Some("claude-opus-5-5"));
 }
+
+#[test]
+fn bridge_set_pushes_switch_changed_with_its_cause() {
+    use crate::event_assert::{of, text};
+    use crate::late_emit::Events;
+    use notchling_events::{MemorySink, Salt};
+    let dir = scratch("switch-events");
+    let (ops, _) = bridge_ops(&dir.0, 0, 0);
+    let sink = Arc::new(MemorySink::new());
+    let ops = ops.with_events(Events::fixed(sink.clone(), Salt([1; 32])));
+    ops.call(ops::BRIDGE_SET, &json!({"on": false})).unwrap();
+    ops.call(ops::BRIDGE_SET, &json!({"on": false, "restored": true}))
+        .unwrap();
+    let changed = of(&sink, "switch.changed");
+    assert_eq!(changed.len(), 2);
+    assert_eq!(text(&changed[0], "switch").as_deref(), Some("bridge"));
+    assert_eq!(text(&changed[0], "on").as_deref(), Some("false"));
+    assert_eq!(text(&changed[0], "cause").as_deref(), Some("user"));
+    assert_eq!(
+        text(&changed[1], "cause").as_deref(),
+        Some("restored_at_launch")
+    );
+}

@@ -405,3 +405,21 @@ fn the_audit_records_which_action_the_phone_took() {
         .iter()
         .any(|e| e.op == "inbox.answer:deny"));
 }
+
+#[test]
+fn the_answer_runs_as_the_phone_that_sent_it() {
+    let rig = Rig::new();
+    rig.backend
+        .with(|s| s.inbox = vec![inbox_item("a", Kind::SecretApproval)]);
+    let (connection, _io, _) = rig.login("test-phone");
+    let device = connection.device().unwrap().id;
+    rig.send(
+        &connection,
+        r#"{"id":6,"op":"inbox.answer","itemId":"a","action":"deny"}"#,
+    );
+    assert_eq!(
+        rig.backend.with(|s| s.inbox_answer_devices.clone()),
+        [Some(device)]
+    );
+    assert!(notchling_events::scope::current().actor.is_none());
+}
