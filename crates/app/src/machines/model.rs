@@ -25,7 +25,10 @@ pub use super::model_sheet::AdminPassword;
 use super::pieces::{DraftCheck, FixLine, FixPrompt, MachineChip, RunningSwitch, SecretRow};
 pub use super::runs::{AdminAsks, PendingAdmin, Run, RunDone};
 use super::versions_feed::{MacSide, MacVersions, MacVersionsError};
-use super::versions_model::{banner as versions_banner, rows as versions_rows, VersionRow};
+use super::versions_model::{
+    banner as versions_banner, drift_lines, rows as versions_rows, VersionRow,
+};
+use notchling_engine::versions::Tool;
 
 pub trait Registry: Send + Sync {
     fn load(&self) -> RegistryState;
@@ -216,6 +219,18 @@ impl MachinesModel {
         let none = Err(MacVersionsError::NotRunning);
         let mac = self.mac.as_ref().unwrap_or(&none);
         Some(versions_rows(mac, &tools, &[]))
+    }
+
+    pub fn drift_lines(&self, machine: &str) -> Vec<(Tool, String)> {
+        let results = self.parts.engine.results(machine);
+        let Some(tools) = results
+            .get(&StepId::TOOL_VERSIONS)
+            .and_then(|r| r.detected.tools.as_ref())
+        else {
+            return Vec::new();
+        };
+        let none = Err(MacVersionsError::NotRunning);
+        drift_lines(self.mac.as_ref().unwrap_or(&none), tools)
     }
 
     pub fn versions_banner(&self) -> Option<&'static str> {

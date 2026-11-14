@@ -5,14 +5,16 @@ use notchling_engine::machines::forms::abilities_line;
 use notchling_engine::machines::registry::{AdminAccess, Machine};
 use notchling_engine::machines::step::{CheckResult, SetupStep, StepFix, StepId};
 use notchling_engine::machines::steps_repo::offers_replace;
-use notchling_engine::versions::Mark;
+use notchling_engine::versions::{Mark, Tool};
 use notchling_kit::metric::RADIUS_SM;
 use notchling_kit::part::{ButtonKind, PartState};
 use notchling_kit::ui::{button, card, icon, label, KitPart, KitStyled};
 use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 
 use super::pieces::{LogTail, Tone};
-use super::versions_model::VersionRow;
+use super::versions_model::{
+    place_rows, remove_note, replace_label, replace_tip, PlaceFlag, VersionRow,
+};
 use super::view::{
     busy_line, marked, mono_box, state_icon, state_mark, text_line, Confirming, MachinesView,
     CARD_PADDING,
@@ -294,7 +296,30 @@ impl MachinesView {
             .then(|| self.model.version_rows(&machine.name))
             .flatten();
         if let Some(rows) = versions {
-            column = column.child(self.version_rows(rows, a, cx));
+            let drift = self.model.drift_lines(&machine.name);
+            column = column.child(self.version_rows(rows, drift, a, cx));
+        } else if let (Some(result), true) = (result, step.id.self_update_tool().is_some()) {
+            for row in place_rows(result) {
+                let (mark, ink) = match row.flag {
+                    PlaceFlag::Off => (Icon::Check, Ink::Done),
+                    PlaceFlag::On => (Icon::Close, Ink::Expired),
+                    PlaceFlag::CantRead => (Icon::Warning, Ink::AccentText),
+                };
+                column = column.child(
+                    div()
+                        .pl(px(26.0))
+                        .flex()
+                        .gap(px(6.0))
+                        .child(icon(mark, TypeRole::Meta.spec().size, ink, a))
+                        .child(label(&row.name, TypeRole::Meta, Ink::Text, a))
+                        .child(
+                            label(&row.detail, TypeRole::Meta, Ink::TextMuted, a)
+                                .flex_1()
+                                .min_w(px(0.0))
+                                .line_clamp(2),
+                        ),
+                );
+            }
         } else if let Some(result) = result {
             for row in &result.rows {
                 column = column.child(
@@ -333,7 +358,13 @@ impl MachinesView {
         column
     }
 
-    fn version_rows(&self, rows: Vec<VersionRow>, a: Appearance, cx: &App) -> Div {
+    fn version_rows(
+        &self,
+        rows: Vec<VersionRow>,
+        drift: Vec<(Tool, String)>,
+        a: Appearance,
+        cx: &App,
+    ) -> Div {
         let mut column = div().flex().flex_col().gap(px(4.0));
         for row in rows {
             let (mark, ink) = match row.mark {
@@ -358,6 +389,14 @@ impl MachinesView {
                     )
                     .child(label(row.mark_text, TypeRole::Meta, ink, a).flex_shrink_0()),
             );
+            if let Some((_, line)) = drift.iter().find(|(tool, _)| *tool == row.tool) {
+                column = column.child(div().pl(px(26.0 + 22.0)).child(label(
+                    line,
+                    TypeRole::Meta,
+                    Ink::AccentText,
+                    a,
+                )));
+            }
         }
         column.part("Tool Versions", a, cx)
     }
@@ -380,7 +419,7 @@ impl MachinesView {
             let (n, i) = (name.clone(), id.clone());
             let replace = button(
                 SharedString::from(format!("replace-{}-{}", machine.name, step.id.raw())),
-                "Replace key…",
+                replace_label(&step.id),
                 ButtonKind::Ghost,
                 acting_state(busy, off),
                 a,
@@ -394,10 +433,7 @@ impl MachinesView {
             });
             actions.push(gate::tip_text(
                 replace,
-                off.unwrap_or(
-                    "Makes a new read-only deploy key, proves it works, then removes the old one",
-                )
-                .into(),
+                off.unwrap_or(replace_tip(&step.id)).into(),
                 a,
             ));
         }
@@ -564,7 +600,15 @@ impl MachinesView {
         let alert = match &confirming {
             Confirming::Remove(name) => Alert {
                 title: format!("Remove {name} from Notchling?"),
-                message: "The machine itself is not changed.".into(),
+                message: remove_note(
+                    &self
+                        .model
+                        .engine()
+                        .self_update_undo_plan(name)
+                        .into_iter()
+                        .map(|(_, title, _)| title)
+                        .collect::<Vec<_>>(),
+                ),
                 button: "Remove".into(),
                 destructive: true,
             },

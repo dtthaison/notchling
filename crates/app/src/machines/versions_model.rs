@@ -1,3 +1,4 @@
+use notchling_engine::machines::step::{CheckResult, StepId};
 use notchling_engine::versions::{mark, Mark, Method, Tool, ToolState, Version, WorkerTools};
 
 use super::versions_feed::{MacSide, MacVersionsError};
@@ -83,6 +84,103 @@ pub fn rows(
             mark: mark_of,
             mark_text: mark_text(mark_of, method),
         });
+    }
+    out
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PlaceFlag {
+    Off,
+    On,
+    CantRead,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PlaceRow {
+    pub name: String,
+    pub detail: String,
+    pub flag: PlaceFlag,
+}
+
+pub fn place_rows(result: &CheckResult) -> Vec<PlaceRow> {
+    result
+        .rows
+        .iter()
+        .map(|row| PlaceRow {
+            name: row.name.clone(),
+            detail: row.detail.clone(),
+            flag: if row.ok {
+                PlaceFlag::Off
+            } else if row.name.starts_with("Can't read ") {
+                PlaceFlag::CantRead
+            } else {
+                PlaceFlag::On
+            },
+        })
+        .collect()
+}
+
+pub fn replace_label(id: &StepId) -> &'static str {
+    if id.self_update_tool().is_some() {
+        "Self-Update On…"
+    } else {
+        "Replace key…"
+    }
+}
+
+pub fn remove_note(titles: &[String]) -> String {
+    const PLAIN: &str = "The machine itself is not changed.";
+    if titles.is_empty() {
+        return PLAIN.to_owned();
+    }
+    let tools: Vec<&str> = titles
+        .iter()
+        .map(|t| t.strip_prefix("Self-Update On: ").unwrap_or(t))
+        .collect();
+    format!(
+        "{PLAIN} Self-update is still off there for {}; use Self-Update On… on its card first to take that back.",
+        tools.join(", ")
+    )
+}
+
+pub fn replace_tip(id: &StepId) -> &'static str {
+    if id.self_update_tool().is_some() {
+        "Takes back only what Notchling set; a value you set yourself stays"
+    } else {
+        "Makes a new read-only deploy key, proves it works, then removes the old one"
+    }
+}
+
+pub fn drift_lines(
+    mac: &Result<MacSide, MacVersionsError>,
+    worker: &WorkerTools,
+) -> Vec<(Tool, String)> {
+    let Ok(side) = mac else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for tool in Tool::ALL {
+        let Some(ToolState::Installed {
+            version: Some(found),
+            ..
+        }) = worker.tools.get(&tool)
+        else {
+            continue;
+        };
+        let Some(mac_tool) = side.tools.get(&tool).filter(|t| t.usable) else {
+            continue;
+        };
+        let Some(expected) = &mac_tool.reference else {
+            continue;
+        };
+        if found == expected {
+            continue;
+        }
+        let mut line = format!("Drifted: {found}, the Mac {expected}");
+        if found > expected {
+            line.push_str(". Moved down only by its own click");
+        }
+        out.push((tool, line));
     }
     out
 }
