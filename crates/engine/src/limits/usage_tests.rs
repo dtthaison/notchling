@@ -100,3 +100,45 @@ fn stopping_windows_are_session_week_and_unknown_account_wide() {
         "a model's weekly limit doesn't stop the account"
     );
 }
+
+const FABLE: &str = include_str!("../../tests/fixtures/limits/usage-fable.json");
+
+#[test]
+fn a_fixed_weekly_key_for_a_newer_model_is_a_per_model_window() {
+    let json: serde_json::Value = serde_json::from_str(FABLE).unwrap();
+    let usage = parse_usage(&json, 5.0);
+    let models: Vec<_> = usage
+        .models
+        .iter()
+        .map(|m| (m.name.as_str(), m.window.percent))
+        .collect();
+    assert_eq!(models, [("Opus", 12.0), ("Sonnet", 3.0), ("Fable", 67.0)]);
+    assert!(usage.models[2].window.resets_at.is_some());
+    assert_eq!(usage.session.map(|w| w.percent), Some(23.0));
+    assert_eq!(usage.week.map(|w| w.percent), Some(41.0));
+}
+
+#[test]
+fn a_per_model_window_never_stops_or_switches_an_account() {
+    let json: serde_json::Value = serde_json::from_str(FABLE).unwrap();
+    let usage = parse_usage(&json, 5.0);
+    let percents: Vec<_> = usage.stopping_windows().iter().map(|w| w.percent).collect();
+    assert_eq!(percents, [23.0, 41.0], "Fable at 67 is display only");
+    assert!(usage.other.is_empty());
+}
+
+#[test]
+fn weekly_keys_without_a_reading_are_skipped_and_a_scoped_limit_merges_by_name() {
+    let usage = parse_usage(
+        &json!({
+            "seven_day_cowork": null,
+            "seven_day_oauth_apps": {"resets_at": "2026-11-18T09:00:00+00:00"},
+            "seven_day_fable": {"utilization": 20.0},
+            "limits": [{"kind": "x", "percent": 55.0, "scope": {"model": {"display_name": "Fable"}}}],
+        }),
+        0.0,
+    );
+    assert_eq!(usage.models.len(), 1);
+    assert_eq!(usage.models[0].name, "Fable");
+    assert_eq!(usage.models[0].window.percent, 55.0);
+}

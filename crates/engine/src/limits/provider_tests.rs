@@ -291,5 +291,6 @@ fn the_view_for_limits_status_keeps_the_switch() {
     let seen = r.watcher.observed();
     assert_eq!(seen.last_switch, Some(NOW));
     assert_eq!(seen.active_email.as_deref(), Some("me@x.com"));
+    assert_eq!(seen.active_id.as_deref(), Some("me"));
     assert_eq!(seen.windows.len(), 2);
 }
