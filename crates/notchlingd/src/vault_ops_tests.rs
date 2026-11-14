@@ -2,7 +2,8 @@ use super::*;
 use crate::switches::VAULT;
 use notchling_engine::vault::list::VaultIndex;
 use notchling_engine::vault::KeychainError;
-use notchling_local_api::{AuditLog, ClientKind};
+use notchling_events::{MemorySink, Salt};
+use notchling_local_api::ClientKind;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
@@ -61,6 +62,7 @@ pub(super) struct Setup {
     pub(super) room: Arc<FakeRoom>,
     pub(super) item: FakeItem,
     pub(super) switch: Arc<SwitchFlag>,
+    pub(super) sink: Arc<MemorySink>,
     dir: std::path::PathBuf,
 }
 
@@ -77,7 +79,7 @@ impl Setup {
             .unwrap_or_default()
     }
     fn audit(&self) -> String {
-        std::fs::read_to_string(self.dir.join("audit.jsonl")).unwrap_or_default()
+        format!("{:?}", self.sink.events())
     }
     fn outside(&self) -> String {
         let events = format!("{:?}", self.room.events.lock().unwrap());
@@ -109,8 +111,9 @@ pub(super) fn setup_with(
         request_wait: Duration::from_secs(10),
         slice: Duration::from_millis(10),
     });
+    let sink = Arc::new(MemorySink::new());
     let mut ops = VaultOps::new(switch.clone(), store, room.clone())
-        .with_audit(AuditLog::new(dir.join("audit.jsonl")))
+        .with_events(Events::fixed(sink.clone(), Salt([1; 32])))
         .with_timing(timing)
         .with_processes(Arc::new(super::pending_tests::FakeProcesses));
     if let Some(inbox) = inbox {
@@ -121,6 +124,7 @@ pub(super) fn setup_with(
         room,
         item,
         switch,
+        sink,
         dir,
     }
 }
@@ -211,7 +215,7 @@ fn while_off_every_op_says_so_and_nothing_is_read_or_written() {
     );
     assert!(!s.dir.join("daemon/vault.json").exists());
     assert!(s.room.events.lock().unwrap().is_empty());
-    assert!(s.audit().contains("\"result\":\"off\""));
+    assert!(s.sink.events().is_empty(), "an off vault records no use");
 }
 
 #[test]
@@ -291,11 +295,13 @@ fn use_hands_over_the_env_and_what_to_hide() {
     assert_eq!(reply["env"]["REG_USERNAME"], "fake-user");
     assert_eq!(reply["env"]["REG_PASSWORD"], PASSWORD);
     assert_eq!(reply["hide"][TOKEN], "[secret:gh]");
-    assert!(
-        s.audit().contains("\"result\":\"ok:gh,reg\""),
-        "{}",
-        s.audit()
+    let used = crate::event_assert::of(&s.sink, "vault.secret_used");
+    assert_eq!(used.len(), 1);
+    assert_eq!(
+        crate::event_assert::text(&used[0], "result").as_deref(),
+        Some("given")
     );
+    assert!(s.audit().contains("gh") && s.audit().contains("reg"));
     assert!(!s.outside().contains(TOKEN) && !s.outside().contains(PASSWORD));
 }
 
@@ -335,7 +341,10 @@ fn ask_first_with_no_app_is_denied_without_reading_a_value() {
     assert!(e.message.contains("isn't open"), "{}", e.message);
     assert_eq!(*s.item.reads.lock().unwrap(), reads, "no value read");
     assert!(s.room.pending(topics::VAULT_APPROVAL_PENDING).is_none());
-    assert!(s.audit().contains("\"result\":\"denied:gh\""));
+    assert_eq!(
+        crate::event_assert::results(&s.sink, "vault.secret_used"),
+        ["no_app"]
+    );
 }
 
 pub(super) fn pending_use(s: &Setup) -> (std::thread::JoinHandle<Result<Value, ApiError>>, Value) {
@@ -434,7 +443,10 @@ fn deny_and_always() {
         (e.code, e.message.as_str()),
         (ErrorCode::NeedsApproval, "The user didn't allow it.")
     );
-    assert!(s.audit().contains("\"result\":\"denied:gh\""));
+    assert_eq!(
+        crate::event_assert::results(&s.sink, "vault.secret_used"),
+        ["denied"]
+    );
 
     let (user, event) = pending_use(&s);
     s.ops

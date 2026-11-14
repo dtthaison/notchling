@@ -1,19 +1,22 @@
+use self::vault_events::{Trail, LOG_DOWN};
 use crate::acting_ops::Room;
 use crate::inbox_ops::InboxOps;
+use crate::late_emit::Events;
 use crate::layout::Layout;
 use crate::op_group::OpGroup;
 pub use crate::switches::{SwitchFlag, VAULT_OFF};
 use crate::vault_args::{entry_from, entry_json, text, value_from, Decision};
 use crate::vault_caller::{Processes, SystemProcesses};
-use crate::vault_wait::{OffHook, Refused, Waiters};
+use crate::vault_wait::{Answered, OffHook, Refused, Waiters};
+use notchling_engine::inbox::State;
 use notchling_engine::vault::list::{self, label};
 use notchling_engine::vault::{
     now_iso, system_keychain, valid_name, Kind, PrefillChanges, Unsupported, VaultEntry,
     VaultKeychain, VaultRequest, VaultStore,
 };
-use notchling_local_api::{
-    ops, topics, ApiError, AuditEntry, AuditLog, Caller, ClientKind, ErrorCode, OpSpec, Tier,
-};
+use notchling_events::kinds::choices::Answerer;
+use notchling_events::kinds::secrets::{Approval, EntryAction, RequestResult, SecretResult};
+use notchling_local_api::{ops, topics, ApiError, Caller, ClientKind, ErrorCode, OpSpec, Tier};
 use serde_json::{json, Map, Value};
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -62,9 +65,9 @@ pub struct VaultOps {
     switch: Arc<SwitchFlag>,
     store: Arc<VaultStore>,
     room: Arc<dyn Room>,
-    audit: Option<AuditLog>,
-    approvals: Arc<Waiters<Decision>>,
-    requests: Arc<Waiters<Option<VaultEntry>>>,
+    events: Option<Events>,
+    approvals: Arc<Waiters<Answered<Decision>>>,
+    requests: Arc<Waiters<Answered<Option<VaultEntry>>>>,
     timing: VaultTiming,
     processes: Arc<dyn Processes>,
     inbox: Option<Arc<InboxOps>>,
@@ -84,7 +87,7 @@ impl VaultOps {
             switch,
             store: Arc::new(store),
             room,
-            audit: None,
+            events: None,
             approvals: Arc::new(Waiters::new("vault-approval-", MAX_APPROVALS)),
             requests: Arc::new(Waiters::new("vault-request-", MAX_REQUESTS)),
             timing: VaultTiming::default(),
@@ -113,6 +116,7 @@ impl VaultOps {
         switch: Arc<SwitchFlag>,
         room: Arc<dyn Room>,
         inbox: Arc<InboxOps>,
+        events: Events,
     ) -> VaultOps {
         let keychain: Box<dyn VaultKeychain> = if layout.fixture {
             Box::new(Unsupported(
@@ -126,7 +130,7 @@ impl VaultOps {
             VaultStore::new(layout.vault_index(), keychain),
             room,
         )
-        .with_audit(AuditLog::new(layout.audit_path()))
+        .with_events(events)
         .with_inbox(inbox)
     }
 
@@ -135,8 +139,8 @@ impl VaultOps {
         self
     }
 
-    pub fn with_audit(mut self, audit: AuditLog) -> VaultOps {
-        self.audit = Some(audit);
+    pub fn with_events(mut self, events: Events) -> VaultOps {
+        self.events = Some(events);
         self
     }
 
@@ -175,10 +179,9 @@ impl VaultOps {
     pub fn call(&self, caller: &Caller, op: &str, args: &Value) -> Result<Value, ApiError> {
         if !self.switch.is_on() {
             self.off_hook().run();
-            self.audit_agent(caller, op, "off");
             return Err(self.switch.refusal());
         }
-        let result = match op {
+        match op {
             ops::VAULT_FIND => self.find(args),
             ops::VAULT_USE => self.use_secrets(caller, args),
             ops::VAULT_REQUEST => self.request(args),
@@ -189,30 +192,12 @@ impl VaultOps {
             ops::VAULT_REQUEST_CANCEL => self.cancel(caller, args),
             ops::VAULT_PENDING => Ok(self.pending()),
             _ => Err(ApiError::internal(format!("{op} has no handler"))),
-        };
-        if op != ops::VAULT_USE {
-            let outcome = match &result {
-                Ok(_) => "ok",
-                Err(e) => e.code.as_str(),
-            };
-            self.audit_agent(caller, op, outcome);
         }
-        result
     }
 
     pub fn close(&self) {
         self.approvals.drain();
         self.requests.drain();
-    }
-
-    fn audit_agent(&self, caller: &Caller, op: &str, outcome: &str) {
-        if caller.tier != Tier::Agent {
-            return;
-        }
-        if let Some(log) = &self.audit {
-            let entry = AuditEntry::now(op, Some(caller.tier), caller.peer.as_deref(), outcome);
-            let _ = log.append(&entry);
-        }
     }
 
     fn entries(&self) -> Result<Vec<VaultEntry>, ApiError> {
@@ -238,25 +223,40 @@ impl VaultOps {
     }
 
     fn use_secrets(&self, caller: &Caller, args: &Value) -> Result<Value, ApiError> {
-        let result = self.use_inner(caller, args);
-        let outcome = match &result {
-            Ok((_, names)) => format!("ok:{}", names.join(",")),
-            Err((e, names)) if e.code == ErrorCode::NeedsApproval => {
-                format!("denied:{}", names.join(","))
+        let mut trail = Trail::new(
+            text(args, "folder", MAX_SHORT)
+                .ok()
+                .flatten()
+                .unwrap_or_default(),
+            text(args, "command", MAX_COMMAND)
+                .ok()
+                .flatten()
+                .unwrap_or_default(),
+        );
+        match self.use_inner(caller, args, &mut trail) {
+            Ok(reply) => {
+                if self.note_used(&trail, SecretResult::Given, true) {
+                    Ok(reply)
+                } else {
+                    Err(failed(LOG_DOWN))
+                }
             }
-            Err((e, _)) => e.code.as_str().to_string(),
-        };
-        self.audit_agent(caller, ops::VAULT_USE, &outcome);
-        result.map(|(v, _)| v).map_err(|(e, _)| e)
+            Err((e, result)) => {
+                if !trail.names.is_empty() {
+                    self.note_used(&trail, result, false);
+                }
+                Err(e)
+            }
+        }
     }
 
-    #[allow(clippy::type_complexity)]
     fn use_inner(
         &self,
         caller: &Caller,
         args: &Value,
-    ) -> Result<(Value, Vec<String>), (ApiError, Vec<String>)> {
-        let none = |e: ApiError| (e, Vec::new());
+        trail: &mut Trail,
+    ) -> Result<Value, (ApiError, SecretResult)> {
+        let none = |e: ApiError| (e, SecretResult::Failed);
         let bad = || ApiError::bad_request("vault.use takes {names: [name, …], folder, command}");
         let names: Vec<String> = match args.get("names").and_then(Value::as_array) {
             Some(list) if !list.is_empty() && list.len() <= MAX_NAMES => list
@@ -299,18 +299,29 @@ impl VaultOps {
                 }
             }
         }
-        let used: Vec<String> = picked.iter().map(|e| e.name.clone()).collect();
-        let fail = |e: ApiError| (e, used.clone());
+        trail.names = picked.iter().map(|e| e.name.clone()).collect();
+        let fail = |e: ApiError| (e, SecretResult::Failed);
         let asking: Vec<VaultEntry> = picked.iter().filter(|e| e.asks()).cloned().collect();
         if !asking.is_empty() {
-            let decision = self
+            let asked = self
                 .approve(caller, &asking, &command, &folder)
-                .map_err(fail)?;
+                .map_err(|r| (r.err, r.result))?;
+            trail.approval = Approval::Asked;
+            trail.by = Some(asked.by);
+            trail.device = asked.device.clone();
+            trail.waited_ms = Some(asked.waited_ms);
             if !self.switch.is_on() {
-                return Err(fail(self.switch.refusal()));
+                return Err((self.switch.refusal(), SecretResult::Cancelled));
             }
-            match decision {
-                Decision::Deny => return Err(fail(said_no("The user didn't allow it."))),
+            match asked.decision {
+                Decision::Deny => {
+                    let why = match asked.state {
+                        State::Answered => SecretResult::Denied,
+                        State::Expired => SecretResult::Expired,
+                        _ => SecretResult::Cancelled,
+                    };
+                    return Err((said_no("The user didn't allow it."), why));
+                }
                 Decision::Once => {}
                 Decision::Always => {
                     let ids: BTreeSet<String> = asking.iter().map(VaultEntry::id).collect();
@@ -319,6 +330,9 @@ impl VaultOps {
                         .map_err(|e| fail(failed(e.to_string())))?;
                     let names: Vec<&str> = asking.iter().map(|e| e.name.as_str()).collect();
                     self.publish_changed(&names, false);
+                    for name in &names {
+                        self.note_entry(name, EntryAction::AskFirstOff);
+                    }
                 }
             }
         }
@@ -336,10 +350,10 @@ impl VaultOps {
             }
         }
         if !self.switch.is_on() {
-            return Err(fail(self.switch.refusal()));
+            return Err((self.switch.refusal(), SecretResult::Cancelled));
         }
         let (env, hide) = list::environment(&pairs);
-        Ok((json!({"env": env, "hide": hide}), used))
+        Ok(json!({"env": env, "hide": hide}))
     }
 
     fn save(&self, caller: &Caller, args: &Value) -> Result<Value, ApiError> {
@@ -367,9 +381,11 @@ impl VaultOps {
             names.push(old.name.as_str());
         }
         self.publish_changed(&names, saved.value_changed);
-        let answered = request
-            .as_deref()
-            .is_some_and(|id| self.requests.answer(id, Some(saved.entry.clone())));
+        self.note_saved(old.as_ref(), &saved);
+        let answered = request.as_deref().is_some_and(|id| {
+            self.requests
+                .answer(id, Answered::by_mac(Some(saved.entry.clone())))
+        });
         Ok(json!({"entry": entry_json(&saved.entry), "answered": answered}))
     }
 
@@ -382,8 +398,27 @@ impl VaultOps {
             .map_err(|e| failed(e.to_string()))?;
         if removed {
             self.publish_changed(&[name.as_str()], true);
+            self.note_entry(&name, EntryAction::Removed);
         }
         Ok(json!({"removed": removed}))
+    }
+
+    fn note_saved(&self, old: Option<&VaultEntry>, saved: &notchling_engine::vault::Saved) {
+        let flag_only = old.is_some_and(|old| {
+            let mut same = old.clone();
+            same.ask = saved.entry.ask;
+            same.updated = saved.entry.updated.clone();
+            same == saved.entry && !saved.value_changed && old.asks() != saved.entry.asks()
+        });
+        let action = match (flag_only, saved.entry.asks()) {
+            (true, true) => EntryAction::AskFirstOn,
+            (true, false) => EntryAction::AskFirstOff,
+            _ => EntryAction::Saved,
+        };
+        self.note_entry(&saved.entry.name, action);
+        if let Some(old) = old.filter(|o| o.id() != saved.entry.id()) {
+            self.note_entry(&old.name, EntryAction::Removed);
+        }
     }
 
     fn publish_changed(&self, names: &[&str], value_changed: bool) {
@@ -399,7 +434,12 @@ impl VaultOps {
 mod asks;
 #[path = "vault_inbox.rs"]
 mod inbox;
+#[path = "vault_events.rs"]
+mod vault_events;
 
+#[cfg(test)]
+#[path = "vault_ops_events_tests.rs"]
+mod events_tests;
 #[cfg(test)]
 #[path = "vault_ops_pending_tests.rs"]
 mod pending_tests;

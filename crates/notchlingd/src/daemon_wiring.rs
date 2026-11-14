@@ -396,6 +396,7 @@ impl Wired {
             switches.vault.clone(),
             room.clone(),
             inbox.clone(),
+            events.clone(),
         ));
         let binary = std::env::current_exe().and_then(std::fs::canonicalize).ok();
         let mut install = InstallOps::new(
