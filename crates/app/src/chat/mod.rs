@@ -84,6 +84,8 @@ pub mod subagent_rows;
 pub mod subagent_view;
 pub mod tasks_bar;
 pub mod terminal;
+pub mod terminal_paint;
+pub mod terminal_sample;
 #[cfg(test)]
 mod tree_tests;
 pub mod used;

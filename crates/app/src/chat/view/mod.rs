@@ -233,7 +233,7 @@ impl ChatView {
         view.slash_preview = std::env::var(SLASH_ENV).ok();
         view.load_closed();
         if let Ok(how) = std::env::var(TERMINAL_ENV) {
-            view.render_terminal(how == "expanded", cx);
+            view.render_terminal(&how, cx);
         }
         if let Ok(how) = std::env::var(SIMULATOR_ENV) {
             view.render_simulator(&how, cx);

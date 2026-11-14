@@ -24,14 +24,14 @@ use super::ChatView;
 use crate::chat::format::short_path;
 use crate::chat::page_panel::panel_width;
 use crate::chat::terminal::{
-    boundary_at, bytes, grid, paste, rgb as cell_rgb, runs, selected_text, shown_rows, word_at,
+    boundary_at, bytes, grid, paste, rgb as cell_rgb, selected_text, shown_rows, word_at,
     Selection, Tabs, CELL, LINE,
 };
+use crate::chat::terminal_paint as paint;
+use crate::chat::terminal_sample::sample;
 use crate::mac::gate;
 
 pub const RENDER_ENV: &str = "NOTCHLING_RENDER_TERMINAL";
-
-const SAMPLE: &[u8] = b"\x1b[38;5;141mnotchling\x1b[0m \x1b[90mgit:(\x1b[31mmain\x1b[90m)\x1b[0m \x1b[32m\xe2\x9d\xaf\x1b[0m ls\r\nCargo.toml  \x1b[1;34mcrates\x1b[0m  \x1b[1;34mdocs\x1b[0m  README.md\r\n\x1b[38;5;141mnotchling\x1b[0m \x1b[90mgit:(\x1b[31mmain\x1b[90m)\x1b[0m \x1b[32m\xe2\x9d\xaf\x1b[0m ";
 
 const WIDTH: f32 = 480.0;
 const HEADER: f32 = 36.0;
@@ -69,6 +69,7 @@ pub struct State {
     pub expanded: bool,
     ticking: bool,
     pub focus_next: bool,
+    pub looks_focused: bool,
 }
 
 impl State {
@@ -175,7 +176,7 @@ fn start_program(
 
 impl ChatView {
     pub(crate) fn bench_terminal_start(&mut self, cx: &mut Context<Self>) {
-        self.render_terminal(false, cx);
+        self.render_terminal("", cx);
         self.tick_terminals(cx);
     }
 
@@ -191,7 +192,8 @@ impl ChatView {
         shell.dirty.store(true, Ordering::Relaxed);
     }
 
-    pub(super) fn render_terminal(&mut self, expanded: bool, cx: &mut Context<Self>) {
+    pub(super) fn render_terminal(&mut self, how: &str, cx: &mut Context<Self>) {
+        let sample = sample(how);
         let home = self.root.home.clone();
         let cwd = home.to_string_lossy().into_owned();
         for _ in 0..2 {
@@ -200,12 +202,13 @@ impl ChatView {
                     .screen
                     .lock()
                     .unwrap_or_else(|e| e.into_inner())
-                    .feed(SAMPLE);
+                    .feed(&sample.bytes);
                 self.terminal.tabs.add(shell);
             }
         }
         self.terminal.open = true;
-        self.terminal.expanded = expanded;
+        self.terminal.expanded = sample.expanded;
+        self.terminal.looks_focused = sample.focus;
     }
 
     pub(super) fn open_menu_command(
@@ -559,7 +562,13 @@ fn header(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Div {
         .child(hide)
 }
 
-fn screen(shell: &Shell, a: Appearance, window: &Window, chat: WeakEntity<ChatView>) -> AnyElement {
+fn screen(
+    shell: &Shell,
+    looks_focused: bool,
+    a: Appearance,
+    window: &Window,
+    chat: WeakEntity<ChatView>,
+) -> AnyElement {
     let fg = Ink::Text.color(a);
     let bg = Ink::Window.color(a);
     let (cells, cursor, cursor_on, ended) = {
@@ -573,12 +582,13 @@ fn screen(shell: &Shell, a: Appearance, window: &Window, chat: WeakEntity<ChatVi
     };
     let rows = cells.iter().map(|row| {
         div()
+            .relative()
             .h(px(LINE))
-            .flex()
             .flex_shrink_0()
             .whitespace_nowrap()
             .overflow_hidden()
-            .children(runs(row).into_iter().map(|(text, style)| {
+            .children(paint::spans(row).into_iter().map(|span| {
+                let style = span.style;
                 let (mut f, mut b) = (
                     style
                         .fg
@@ -592,14 +602,18 @@ fn screen(shell: &Shell, a: Appearance, window: &Window, chat: WeakEntity<ChatVi
                     f = back;
                 }
                 div()
-                    .flex_shrink_0()
+                    .absolute()
+                    .top_0()
+                    .left(px(span.col as f32 * CELL))
+                    .w(px(span.cells as f32 * CELL))
+                    .h(px(LINE))
                     .text_color(f)
                     .when_some(b, |d, b| d.bg(b))
                     .when(style.bold, |d| d.font_weight(gpui::FontWeight::BOLD))
                     .when(style.italic, |d| d.italic())
                     .when(style.underline, |d| d.underline())
                     .when(style.dim, |d| d.opacity(0.6))
-                    .child(text)
+                    .child(span.text)
             }))
     });
     let selection = shell.selection.get().filter(|s| !s.is_empty());
@@ -616,20 +630,30 @@ fn screen(shell: &Shell, a: Appearance, window: &Window, chat: WeakEntity<ChatVi
             })
         })
     });
-    let focused = shell.focus.is_focused(window);
-    let caret = (cursor_on && !ended && shell.back.get() == 0).then(|| {
-        let block = div()
-            .absolute()
-            .left(px(PAD_X + cursor.1 as f32 * CELL))
-            .top(px(PAD_Y + cursor.0 as f32 * LINE))
-            .w(px(CELL))
-            .h(px(LINE));
-        if focused {
-            block.bg(hsla(Ink::Working.color(a))).opacity(0.85)
-        } else {
-            block.border_1().border_color(hsla(Ink::Working.color(a)))
-        }
-    });
+    let focused = looks_focused || shell.focus.is_focused(window);
+    let caret = (cursor_on && !ended && shell.back.get() == 0)
+        .then(|| paint::caret(&cells, cursor, focused))
+        .flatten()
+        .map(|c| {
+            let ink = hsla(Ink::Working.color(a));
+            let block = div()
+                .absolute()
+                .left(px(PAD_X + c.col as f32 * CELL))
+                .top(px(PAD_Y + cursor.0 as f32 * LINE))
+                .w(px(c.cells as f32 * CELL))
+                .h(px(LINE))
+                .whitespace_nowrap();
+            if c.filled {
+                block
+                    .bg(ink)
+                    .text_color(hsla(Ink::OnGuide.color(a)))
+                    .when(c.style.bold, |d| d.font_weight(gpui::FontWeight::BOLD))
+                    .when(c.style.italic, |d| d.italic())
+                    .child(c.text)
+            } else {
+                block.border_1().border_color(ink)
+            }
+        });
     let (pty, screen, size) = (shell.pty.clone(), shell.screen.clone(), shell.grid.clone());
     let (origin, dragging, picked) = (
         shell.origin.clone(),
@@ -883,7 +907,13 @@ pub fn render(
         .fill(Ink::Window, a)
         .child(header(view, a, cx))
         .child(div().h(px(1.0)).flex_shrink_0().fill(Ink::Hairline, a))
-        .child(screen(shell, a, window, cx.entity().downgrade()));
+        .child(screen(
+            shell,
+            view.terminal.looks_focused,
+            a,
+            window,
+            cx.entity().downgrade(),
+        ));
     let panel = if expanded {
         panel.flex_1()
     } else {
