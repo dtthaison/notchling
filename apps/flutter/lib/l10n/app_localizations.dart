@@ -609,11 +609,107 @@ abstract class AppL10n {
   /// **'Show output'**
   String get chatShowOutput;
 
+  /// What the /clear command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names.
+  ///
+  /// In en, this message translates to:
+  /// **'Clear the conversation and start fresh'**
+  String get chatSlashClear;
+
+  /// What the /compact command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names.
+  ///
+  /// In en, this message translates to:
+  /// **'Summarise the conversation to free up context'**
+  String get chatSlashCompact;
+
+  /// What the /context command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names.
+  ///
+  /// In en, this message translates to:
+  /// **'Show how much context is used'**
+  String get chatSlashContext;
+
+  /// What the /cost command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names.
+  ///
+  /// In en, this message translates to:
+  /// **'Show the cost of this session'**
+  String get chatSlashCost;
+
+  /// What the /effort command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names.
+  ///
+  /// In en, this message translates to:
+  /// **'Change the effort level'**
+  String get chatSlashEffort;
+
   /// Shown in the Chat screen.
   ///
   /// In en, this message translates to:
   /// **'Commands'**
   String get chatSlashHeader;
+
+  /// What the /help command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names.
+  ///
+  /// In en, this message translates to:
+  /// **'Show help'**
+  String get chatSlashHelp;
+
+  /// What the /init command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names.
+  ///
+  /// In en, this message translates to:
+  /// **'Write a CLAUDE.md for this project'**
+  String get chatSlashInit;
+
+  /// What the /memory command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit memory files'**
+  String get chatSlashMemory;
+
+  /// What the /model command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names.
+  ///
+  /// In en, this message translates to:
+  /// **'Change the model'**
+  String get chatSlashModel;
+
+  /// What the /rename command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names.
+  ///
+  /// In en, this message translates to:
+  /// **'Rename this session'**
+  String get chatSlashRename;
+
+  /// What the /review command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names.
+  ///
+  /// In en, this message translates to:
+  /// **'Review a pull request'**
+  String get chatSlashReview;
+
+  /// What the /rewind command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names.
+  ///
+  /// In en, this message translates to:
+  /// **'Go back to an earlier point'**
+  String get chatSlashRewind;
+
+  /// What the /security-review command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names.
+  ///
+  /// In en, this message translates to:
+  /// **'Security review of pending changes'**
+  String get chatSlashSecurityReview;
+
+  /// What the /status command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names.
+  ///
+  /// In en, this message translates to:
+  /// **'Show version, model and account'**
+  String get chatSlashStatus;
+
+  /// What the /todos command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names.
+  ///
+  /// In en, this message translates to:
+  /// **'Show the current task list'**
+  String get chatSlashTodos;
+
+  /// What the /usage command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names.
+  ///
+  /// In en, this message translates to:
+  /// **'Show plan usage limits'**
+  String get chatSlashUsage;
 
   /// Shown in the Chat screen.
   ///
@@ -818,6 +914,12 @@ abstract class AppL10n {
   /// In en, this message translates to:
   /// **'Add a Mac'**
   String get macsAdd;
+
+  /// Read aloud by a screen reader for the heading of one Mac in the session list. $name is the Mac's name, $link says whether it is connected, $count is how many sessions it has.
+  ///
+  /// In en, this message translates to:
+  /// **'{name}, {link}, {count} session'**
+  String macsComputerHeadingLabel(String name, String link, int count);
 
   /// Shown in the Paired Macs screen.
   ///
@@ -1077,6 +1179,12 @@ abstract class AppL10n {
   /// **'No sessions in this project.'**
   String get sessionsFilteredEmpty;
 
+  /// Read aloud by a screen reader for the heading of a group in the session list. $state is the group's name, $count is how many sessions it holds.
+  ///
+  /// In en, this message translates to:
+  /// **'{state}, {count} session'**
+  String sessionsGroupLabel(String state, int count);
+
   /// Shown in the Sessions tab. $n is hours.
   ///
   /// In en, this message translates to:
@@ -1311,6 +1419,42 @@ abstract class AppL10n {
   /// **'Suggested'**
   String get visualizeSuggested;
 
+  /// A tab of the Visualize screen: a chart.
+  ///
+  /// In en, this message translates to:
+  /// **'Chart'**
+  String get visualizeTabChart;
+
+  /// A tab of the Visualize screen: a diagram.
+  ///
+  /// In en, this message translates to:
+  /// **'Diagram'**
+  String get visualizeTabDiagram;
+
+  /// A tab of the Visualize screen: an entity diagram.
+  ///
+  /// In en, this message translates to:
+  /// **'Entity'**
+  String get visualizeTabEntity;
+
+  /// A tab of the Visualize screen: a flow chart.
+  ///
+  /// In en, this message translates to:
+  /// **'Flow'**
+  String get visualizeTabFlow;
+
+  /// A tab of the Visualize screen: the Mac's device window.
+  ///
+  /// In en, this message translates to:
+  /// **'Phone'**
+  String get visualizeTabPhone;
+
+  /// A tab of the Visualize screen: a web page captured on the Mac.
+  ///
+  /// In en, this message translates to:
+  /// **'Web'**
+  String get visualizeTabWeb;
+
   /// Not shown yet.
   ///
   /// In en, this message translates to:
@@ -1370,6 +1514,12 @@ abstract class AppL10n {
   /// In en, this message translates to:
   /// **'Stop and transcribe'**
   String get voiceMicStop;
+
+  /// Shown under the reply box when dictation cannot start because the model file was not bundled.
+  ///
+  /// In en, this message translates to:
+  /// **'The speech model is missing from this app.'**
+  String get voiceModelMissing;
 
   /// Shown in dictation.
   ///

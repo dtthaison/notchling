@@ -98,3 +98,6 @@ sessions-filtered-empty = No sessions in this project.
 
 # Shown in the Sessions tab.
 sessions-takeover-short = Take over
+
+# Read aloud by a screen reader for the heading of a group in the session list. $state is the group's name, $count is how many sessions it holds.
+sessions-group-label = { $state }, { NUMBER($count) } session

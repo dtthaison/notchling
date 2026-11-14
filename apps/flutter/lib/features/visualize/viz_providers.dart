@@ -2,19 +2,26 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/net/bridge_client.dart';
 import '../../core/protocol/json.dart';
+import '../../l10n/app_localizations.dart';
 import '../connection/connection.dart';
 import '../sessions/sessions_notifier.dart';
 
 enum VizTab {
-  phone('Phone'),
-  web('Web'),
-  flow('Flow'),
-  diagram('Diagram'),
-  entity('Entity'),
-  chart('Chart');
+  phone,
+  web,
+  flow,
+  diagram,
+  entity,
+  chart;
 
-  const VizTab(this.title);
-  final String title;
+  String title(AppL10n l10n) => switch (this) {
+    VizTab.phone => l10n.visualizeTabPhone,
+    VizTab.web => l10n.visualizeTabWeb,
+    VizTab.flow => l10n.visualizeTabFlow,
+    VizTab.diagram => l10n.visualizeTabDiagram,
+    VizTab.entity => l10n.visualizeTabEntity,
+    VizTab.chart => l10n.visualizeTabChart,
+  };
 
   static List<VizTab> get shown => <VizTab>[for (final VizTab tab in values) if (tab != phone) tab];
 

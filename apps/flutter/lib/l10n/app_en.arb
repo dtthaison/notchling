@@ -384,9 +384,73 @@
   "@chatShowOutput": {
     "description": "Shown in the Chat screen."
   },
+  "chatSlashClear": "Clear the conversation and start fresh",
+  "@chatSlashClear": {
+    "description": "What the /clear command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names."
+  },
+  "chatSlashCompact": "Summarise the conversation to free up context",
+  "@chatSlashCompact": {
+    "description": "What the /compact command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names."
+  },
+  "chatSlashContext": "Show how much context is used",
+  "@chatSlashContext": {
+    "description": "What the /context command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names."
+  },
+  "chatSlashCost": "Show the cost of this session",
+  "@chatSlashCost": {
+    "description": "What the /cost command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names."
+  },
+  "chatSlashEffort": "Change the effort level",
+  "@chatSlashEffort": {
+    "description": "What the /effort command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names."
+  },
   "chatSlashHeader": "Commands",
   "@chatSlashHeader": {
     "description": "Shown in the Chat screen."
+  },
+  "chatSlashHelp": "Show help",
+  "@chatSlashHelp": {
+    "description": "What the /help command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names."
+  },
+  "chatSlashInit": "Write a CLAUDE.md for this project",
+  "@chatSlashInit": {
+    "description": "What the /init command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names."
+  },
+  "chatSlashMemory": "Edit memory files",
+  "@chatSlashMemory": {
+    "description": "What the /memory command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names."
+  },
+  "chatSlashModel": "Change the model",
+  "@chatSlashModel": {
+    "description": "What the /model command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names."
+  },
+  "chatSlashRename": "Rename this session",
+  "@chatSlashRename": {
+    "description": "What the /rename command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names."
+  },
+  "chatSlashReview": "Review a pull request",
+  "@chatSlashReview": {
+    "description": "What the /review command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names."
+  },
+  "chatSlashRewind": "Go back to an earlier point",
+  "@chatSlashRewind": {
+    "description": "What the /rewind command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names."
+  },
+  "chatSlashSecurityReview": "Security review of pending changes",
+  "@chatSlashSecurityReview": {
+    "description": "What the /security-review command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names."
+  },
+  "chatSlashStatus": "Show version, model and account",
+  "@chatSlashStatus": {
+    "description": "What the /status command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names."
+  },
+  "chatSlashTodos": "Show the current task list",
+  "@chatSlashTodos": {
+    "description": "What the /todos command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names."
+  },
+  "chatSlashUsage": "Show plan usage limits",
+  "@chatSlashUsage": {
+    "description": "What the /usage command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names."
   },
   "chatTakeoverBody": "The Mac will reopen this session in Console's Terminal (claude --resume). The original must be closed. If Claude asks anything, answer on the Mac.",
   "@chatTakeoverBody": {
@@ -539,6 +603,22 @@
   "macsAdd": "Add a Mac",
   "@macsAdd": {
     "description": "Shown in the Paired Macs screen."
+  },
+  "macsComputerHeadingLabel": "{name}, {link}, {count} session",
+  "@macsComputerHeadingLabel": {
+    "description": "Read aloud by a screen reader for the heading of one Mac in the session list. $name is the Mac's name, $link says whether it is connected, $count is how many sessions it has.",
+    "placeholders": {
+      "name": {
+        "type": "String"
+      },
+      "link": {
+        "type": "String"
+      },
+      "count": {
+        "type": "int",
+        "format": "decimalPattern"
+      }
+    }
   },
   "macsComputerOffline": "Not connected",
   "@macsComputerOffline": {
@@ -738,6 +818,19 @@
   "sessionsFilteredEmpty": "No sessions in this project.",
   "@sessionsFilteredEmpty": {
     "description": "Shown in the Sessions tab."
+  },
+  "sessionsGroupLabel": "{state}, {count} session",
+  "@sessionsGroupLabel": {
+    "description": "Read aloud by a screen reader for the heading of a group in the session list. $state is the group's name, $count is how many sessions it holds.",
+    "placeholders": {
+      "state": {
+        "type": "String"
+      },
+      "count": {
+        "type": "int",
+        "format": "decimalPattern"
+      }
+    }
   },
   "sessionsHoursShort": "{n} h",
   "@sessionsHoursShort": {
@@ -940,6 +1033,30 @@
   "@visualizeSuggested": {
     "description": "Shown in the Visualize tab."
   },
+  "visualizeTabChart": "Chart",
+  "@visualizeTabChart": {
+    "description": "A tab of the Visualize screen: a chart."
+  },
+  "visualizeTabDiagram": "Diagram",
+  "@visualizeTabDiagram": {
+    "description": "A tab of the Visualize screen: a diagram."
+  },
+  "visualizeTabEntity": "Entity",
+  "@visualizeTabEntity": {
+    "description": "A tab of the Visualize screen: an entity diagram."
+  },
+  "visualizeTabFlow": "Flow",
+  "@visualizeTabFlow": {
+    "description": "A tab of the Visualize screen: a flow chart."
+  },
+  "visualizeTabPhone": "Phone",
+  "@visualizeTabPhone": {
+    "description": "A tab of the Visualize screen: the Mac's device window."
+  },
+  "visualizeTabWeb": "Web",
+  "@visualizeTabWeb": {
+    "description": "A tab of the Visualize screen: a web page captured on the Mac."
+  },
   "visualizeWebCandidates": "Running on the Mac",
   "@visualizeWebCandidates": {
     "description": "Not shown yet."
@@ -979,6 +1096,10 @@
   "voiceMicStop": "Stop and transcribe",
   "@voiceMicStop": {
     "description": "Shown in dictation."
+  },
+  "voiceModelMissing": "The speech model is missing from this app.",
+  "@voiceModelMissing": {
+    "description": "Shown under the reply box when dictation cannot start because the model file was not bundled."
   },
   "voiceNoSpeech": "No speech heard. Try speaking closer to the mic.",
   "@voiceNoSpeech": {

@@ -295,7 +295,56 @@ class AppL10nEn extends AppL10n {
   String get chatShowOutput => 'Show output';
 
   @override
+  String get chatSlashClear => 'Clear the conversation and start fresh';
+
+  @override
+  String get chatSlashCompact =>
+      'Summarise the conversation to free up context';
+
+  @override
+  String get chatSlashContext => 'Show how much context is used';
+
+  @override
+  String get chatSlashCost => 'Show the cost of this session';
+
+  @override
+  String get chatSlashEffort => 'Change the effort level';
+
+  @override
   String get chatSlashHeader => 'Commands';
+
+  @override
+  String get chatSlashHelp => 'Show help';
+
+  @override
+  String get chatSlashInit => 'Write a CLAUDE.md for this project';
+
+  @override
+  String get chatSlashMemory => 'Edit memory files';
+
+  @override
+  String get chatSlashModel => 'Change the model';
+
+  @override
+  String get chatSlashRename => 'Rename this session';
+
+  @override
+  String get chatSlashReview => 'Review a pull request';
+
+  @override
+  String get chatSlashRewind => 'Go back to an earlier point';
+
+  @override
+  String get chatSlashSecurityReview => 'Security review of pending changes';
+
+  @override
+  String get chatSlashStatus => 'Show version, model and account';
+
+  @override
+  String get chatSlashTodos => 'Show the current task list';
+
+  @override
+  String get chatSlashUsage => 'Show plan usage limits';
 
   @override
   String get chatTakeoverBody =>
@@ -413,6 +462,15 @@ class AppL10nEn extends AppL10n {
 
   @override
   String get macsAdd => 'Add a Mac';
+
+  @override
+  String macsComputerHeadingLabel(String name, String link, int count) {
+    final intl.NumberFormat countNumberFormat =
+        intl.NumberFormat.decimalPattern(localeName);
+    final String countString = countNumberFormat.format(count);
+
+    return '$name, $link, $countString session';
+  }
 
   @override
   String get macsComputerOffline => 'Not connected';
@@ -573,6 +631,15 @@ class AppL10nEn extends AppL10n {
 
   @override
   String get sessionsFilteredEmpty => 'No sessions in this project.';
+
+  @override
+  String sessionsGroupLabel(String state, int count) {
+    final intl.NumberFormat countNumberFormat =
+        intl.NumberFormat.decimalPattern(localeName);
+    final String countString = countNumberFormat.format(count);
+
+    return '$state, $countString session';
+  }
 
   @override
   String sessionsHoursShort(int n) {
@@ -737,6 +804,24 @@ class AppL10nEn extends AppL10n {
   String get visualizeSuggested => 'Suggested';
 
   @override
+  String get visualizeTabChart => 'Chart';
+
+  @override
+  String get visualizeTabDiagram => 'Diagram';
+
+  @override
+  String get visualizeTabEntity => 'Entity';
+
+  @override
+  String get visualizeTabFlow => 'Flow';
+
+  @override
+  String get visualizeTabPhone => 'Phone';
+
+  @override
+  String get visualizeTabWeb => 'Web';
+
+  @override
   String get visualizeWebCandidates => 'Running on the Mac';
 
   @override
@@ -768,6 +853,9 @@ class AppL10nEn extends AppL10n {
 
   @override
   String get voiceMicStop => 'Stop and transcribe';
+
+  @override
+  String get voiceModelMissing => 'The speech model is missing from this app.';
 
   @override
   String get voiceNoSpeech =>

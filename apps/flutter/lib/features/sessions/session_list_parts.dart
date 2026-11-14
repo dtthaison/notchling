@@ -163,7 +163,7 @@ class SessionGroupHeader extends StatelessWidget {
     final Kit kit = Kit.of(context);
     return Semantics(
       header: true,
-      label: '${state.label(l10n)}, $count session',
+      label: l10n.sessionsGroupLabel(state.label(l10n), count),
       excludeSemantics: true,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(

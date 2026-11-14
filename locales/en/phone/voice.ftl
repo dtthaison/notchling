@@ -29,3 +29,6 @@ voice-engine-error = Transcription failed. Try again.
 
 # Shown in dictation.
 voice-recorder-error = Could not record.
+
+# Shown under the reply box when dictation cannot start because the model file was not bundled.
+voice-model-missing = The speech model is missing from this app.

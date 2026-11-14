@@ -10,7 +10,7 @@ import 'voice_recorder.dart';
 
 const Duration maxDictation = Duration(seconds: 60);
 
-enum VoiceProblem { permissionDenied, noSpeech, engineError, recorderError }
+enum VoiceProblem { permissionDenied, noSpeech, engineError, modelMissing, recorderError }
 
 sealed class VoiceState {
   const VoiceState();
@@ -121,7 +121,7 @@ class VoiceController extends Notifier<VoiceState> {
       _transcripts.add(text);
       return text;
     } on SpeechEngineException catch (error) {
-      return _fail(generation, VoiceFailed(VoiceProblem.engineError, error.message));
+      return _fail(generation, VoiceFailed(error.modelMissing ? VoiceProblem.modelMissing : VoiceProblem.engineError, error.message));
     } on Object catch (error) {
       return _fail(generation, VoiceFailed(VoiceProblem.recorderError, '$error'));
     }

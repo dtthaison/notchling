@@ -79,7 +79,7 @@ class NotificationService {
     );
     await _plugin.show(
       id: 1,
-      title: 'Agent Console',
+      title: l10n.appName,
       body: l10n.notificationsSummaryBody,
       notificationDetails: NotificationDetails(
         android: AndroidNotificationDetails('messages_v2', l10n.notificationsChannelMessages, groupKey: _group, setAsGroupSummary: true, onlyAlertOnce: true, playSound: false, importance: Importance.low, priority: Priority.low),

@@ -20,9 +20,10 @@ class ComputerHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final Kit kit = Kit.of(context);
+    final AppL10n l10n = AppL10n.of(context);
     return Semantics(
       header: true,
-      label: '${computer.name}, ${linkWord(AppL10n.of(context), computer.status)}, $count session',
+      label: l10n.macsComputerHeadingLabel(computer.name, linkWord(l10n, computer.status), count),
       excludeSemantics: true,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(Space.lg, Space.xl, Space.lg, 0),

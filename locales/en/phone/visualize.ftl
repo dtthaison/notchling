@@ -42,3 +42,21 @@ visualize-select-session = Select a session to see its visualization.
 
 # Shown in the Visualize tab.
 visualize-bundle-missing = The viz bundle is missing. Run tool/sync_viz.sh and rebuild.
+
+# A tab of the Visualize screen: the Mac's device window.
+visualize-tab-phone = Phone
+
+# A tab of the Visualize screen: a web page captured on the Mac.
+visualize-tab-web = Web
+
+# A tab of the Visualize screen: a flow chart.
+visualize-tab-flow = Flow
+
+# A tab of the Visualize screen: a diagram.
+visualize-tab-diagram = Diagram
+
+# A tab of the Visualize screen: an entity diagram.
+visualize-tab-entity = Entity
+
+# A tab of the Visualize screen: a chart.
+visualize-tab-chart = Chart

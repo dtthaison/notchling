@@ -188,3 +188,51 @@ chat-photo-title = Send a photo
 
 # Shown in the Chat screen.
 chat-photo-caption-hint = Add a caption (optional)
+
+# What the /clear command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names.
+chat-slash-clear = Clear the conversation and start fresh
+
+# What the /compact command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names.
+chat-slash-compact = Summarise the conversation to free up context
+
+# What the /context command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names.
+chat-slash-context = Show how much context is used
+
+# What the /cost command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names.
+chat-slash-cost = Show the cost of this session
+
+# What the /usage command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names.
+chat-slash-usage = Show plan usage limits
+
+# What the /model command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names.
+chat-slash-model = Change the model
+
+# What the /effort command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names.
+chat-slash-effort = Change the effort level
+
+# What the /review command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names.
+chat-slash-review = Review a pull request
+
+# What the /security-review command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names.
+chat-slash-security-review = Security review of pending changes
+
+# What the /init command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names.
+chat-slash-init = Write a CLAUDE.md for this project
+
+# What the /memory command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names.
+chat-slash-memory = Edit memory files
+
+# What the /rewind command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names.
+chat-slash-rewind = Go back to an earlier point
+
+# What the /rename command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names.
+chat-slash-rename = Rename this session
+
+# What the /status command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names.
+chat-slash-status = Show version, model and account
+
+# What the /todos command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names.
+chat-slash-todos = Show the current task list
+
+# What the /help command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names.
+chat-slash-help = Show help

@@ -637,6 +637,7 @@ class _VoiceNotice extends StatelessWidget {
         l10n.voicePermissionDenied,
       VoiceFailed(problem: VoiceProblem.noSpeech) => l10n.voiceNoSpeech,
       VoiceFailed(problem: VoiceProblem.engineError) => l10n.voiceEngineError,
+      VoiceFailed(problem: VoiceProblem.modelMissing) => l10n.voiceModelMissing,
       VoiceFailed(problem: VoiceProblem.recorderError) =>
         l10n.voiceRecorderError,
       VoiceIdle(stoppedAtLimit: true) => l10n.voiceTooLong,

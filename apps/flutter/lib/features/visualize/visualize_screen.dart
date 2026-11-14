@@ -60,7 +60,7 @@ class _TabBar extends StatelessWidget {
           Semantics(
             button: true,
             selected: tab == selected,
-            label: tab == suggested ? '${tab.title}, ${l10n.visualizeSuggested}' : tab.title,
+            label: tab == suggested ? '${tab.title(l10n)}, ${l10n.visualizeSuggested}' : tab.title(l10n),
             excludeSemantics: true,
             onTap: () => onSelect(tab),
             child: InkWell(
@@ -73,7 +73,7 @@ class _TabBar extends StatelessWidget {
                 alignment: Alignment.center,
                 decoration: BoxDecoration(color: tab == selected ? Kit.of(context).card : Colors.transparent, borderRadius: BorderRadius.circular(Radii.sm)),
                 child: Row(mainAxisSize: MainAxisSize.min, children: <Widget>[
-                  Text(tab.title, style: Kit.of(context).labelSm.copyWith(color: tab == selected ? Kit.of(context).accent : Kit.of(context).textMuted, fontSize: 13)),
+                  Text(tab.title(l10n), style: Kit.of(context).labelSm.copyWith(color: tab == selected ? Kit.of(context).accent : Kit.of(context).textMuted, fontSize: 13)),
                   if (tab == suggested) ...<Widget>[
                     const SizedBox(width: 4),
                     Container(width: 5, height: 5, decoration: BoxDecoration(color: Kit.of(context).textMuted, shape: BoxShape.circle)),
