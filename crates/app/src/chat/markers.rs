@@ -43,3 +43,7 @@ pub const FACT_BRANCH: &str = "Branch";
 pub const FACT_TURNS: &str = "Turns";
 pub const FACT_TOKENS: &str = "Tokens";
 pub const FACT_COMMANDS: &str = "Commands";
+
+pub const TOOL_CLAUDE_CODE: &str = "Claude Code";
+pub const TOOL_CODEX: &str = "Codex";
+pub const TOOL_ANTIGRAVITY: &str = "Antigravity";

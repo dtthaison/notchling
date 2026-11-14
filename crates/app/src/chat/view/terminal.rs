@@ -1,3 +1,4 @@
+use notchling_locale as t;
 use std::cell::Cell;
 use std::path::Path;
 use std::rc::Rc;
@@ -107,7 +108,10 @@ fn start_program(
     for (key, value) in env {
         command.env(key, value);
     }
-    let pty = Arc::new(Pty::spawn(&command).map_err(|e| format!("Couldn't start {program}: {e}"))?);
+    let pty = Arc::new(
+        Pty::spawn(&command)
+            .map_err(|e| t::chat::terminal_start_failed(program, &e.to_string()))?,
+    );
     let screen = Arc::new(Mutex::new(TerminalScreen::new(
         usize::from(rows),
         usize::from(cols),
@@ -520,12 +524,12 @@ fn header(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Div {
         );
         tabs = tabs.child(tab);
     }
-    let add = tool("term-add", Icon::Plus, "New Terminal", a)
+    let add = tool("term-add", Icon::Plus, t::chat::terminal_new(), a)
         .on_click(cx.listener(|this, _, window, cx| this.add_terminal(window, cx)));
     let (size_icon, size_tip) = if view.terminal.expanded {
-        (Icon::Shrink, "Minimize: back beside the conversation")
+        (Icon::Shrink, t::chat::terminal_minimize())
     } else {
-        (Icon::Expand, "Expand: over the conversation too")
+        (Icon::Expand, t::chat::terminal_expand())
     };
     let size =
         tool("term-size", size_icon, size_tip, a).on_click(cx.listener(|this, _, window, cx| {
@@ -533,17 +537,13 @@ fn header(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Div {
             this.focus_terminal(window);
             cx.notify();
         }));
-    let hide = tool(
-        "term-hide",
-        Icon::Close,
-        "Close the terminal (its shells keep running)",
-        a,
-    )
-    .on_click(cx.listener(|this, _, _, cx| {
-        this.terminal.open = false;
-        this.terminal.expanded = false;
-        cx.notify();
-    }));
+    let hide = tool("term-hide", Icon::Close, t::chat::terminal_close(), a).on_click(cx.listener(
+        |this, _, _, cx| {
+            this.terminal.open = false;
+            this.terminal.expanded = false;
+            cx.notify();
+        },
+    ));
     div()
         .h(px(HEADER))
         .flex_shrink_0()
@@ -832,7 +832,12 @@ fn screen(shell: &Shell, a: Appearance, window: &Window, chat: WeakEntity<ChatVi
             div()
                 .pt(px(LINE / 2.0))
                 .font_family(notchling_kit::ui::SYSTEM_FONT)
-                .child(label("Process ended", TypeRole::Meta, Ink::TextFaint, a))
+                .child(label(
+                    t::chat::terminal_ended(),
+                    TypeRole::Meta,
+                    Ink::TextFaint,
+                    a,
+                ))
         }))
         .children(caret)
         .child(fit)
@@ -913,7 +918,7 @@ pub fn button(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> imp
         )
         .size(px(super::sidebar::HEADER_BUTTON))
         .px(px(0.0)),
-        "Terminal: a shell in this session's folder".into(),
+        t::chat::terminal_button_tip().into(),
         a,
     )
     .on_click(cx.listener(|this, _, window, cx| this.toggle_terminal(window, cx)))

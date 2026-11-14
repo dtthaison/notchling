@@ -1,3 +1,4 @@
+use notchling_locale as t;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -10,6 +11,7 @@ use notchling_engine::transcript::{codex, conversation};
 use notchling_platform::paths;
 
 use super::codex_list;
+use super::markers;
 use crate::notch::source::{
     DataRoot as NotchRoot, Source, ANTIGRAVITY_DIR, APP_DIR, DATA_ROOT_ENV,
 };
@@ -37,9 +39,17 @@ impl Tool {
 
     pub fn name(self) -> &'static str {
         match self {
-            Tool::Claude => "Claude Code",
-            Tool::Codex => "Codex",
-            Tool::Antigravity => "Antigravity",
+            Tool::Claude => markers::TOOL_CLAUDE_CODE,
+            Tool::Codex => markers::TOOL_CODEX,
+            Tool::Antigravity => markers::TOOL_ANTIGRAVITY,
+        }
+    }
+
+    pub fn title(self) -> &'static str {
+        match self {
+            Tool::Claude => t::chat::tool_claude_code(),
+            Tool::Codex => t::chat::tool_codex(),
+            Tool::Antigravity => t::chat::tool_antigravity(),
         }
     }
 }

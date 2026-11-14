@@ -394,3 +394,156 @@ chat-changes-file-count = { $count ->
 }
 # $files is the file count line and $count the files not yet committed.
 chat-changes-uncommitted = { $files } · { $count } uncommitted
+
+## Window
+
+chat-window-hide-details = Hide the session details
+chat-window-show-details = Show the session details: branch, model, tokens, tasks, files changed
+chat-window-no-session = No session selected
+# The tools' names as the header and the sheets write them.
+chat-tool-claude-code = { -brand-claude-code }
+chat-tool-codex = { -brand-codex }
+chat-tool-antigravity = { -brand-antigravity }
+# $tool is the tool's name and $host the machine the session runs on.
+chat-header-host = { $tool } · { $host }
+# $model is the name of the model whose context window is used.
+chat-window-model-note = Window as { $model } until { -brand-notchling } knows this model
+
+## File and page panels
+
+chat-panel-file-gone = This file is gone.
+chat-panel-file-unreadable = This file can't be read.
+# $folder is the folder the file is in.
+chat-panel-file-cut-subtitle = { $folder } · first 1 MB shown
+chat-panel-saved-copy = Saved copy
+# $date is the day the page was saved, such as Nov 9.
+chat-panel-saved-copy-date = Saved copy · { $date }
+chat-panel-live = Live on claude.ai
+chat-panel-artifact = Artifact
+chat-panel-no-pages-folder = There is no pages folder here.
+chat-panel-not-a-page = Not a page.
+chat-panel-opening-live = Opening the page on claude.ai…
+chat-panel-opening-page = Opening the page…
+chat-panel-opening-saved = Opening the saved copy…
+chat-panel-file-empty = This file is empty.
+chat-panel-picture-unshown = Can't show this picture.
+chat-panel-file-unshown = Can't show this file here.
+chat-panel-open-default = Open in Default App
+chat-panel-file-cut = Only the first 1 MB is shown. Open it in its app to read the rest.
+chat-panel-reload = Reload the page
+chat-panel-open-browser = Open in Browser
+chat-panel-show-in-finder = Show in Finder
+chat-panel-close = Close
+chat-panel-back-to-details = Back to Details
+
+## Terminal panel
+
+# $n is the terminal's number.
+chat-terminal-tab = Terminal { $n }
+chat-terminal-new = New Terminal
+chat-terminal-minimize = Minimize: back beside the conversation
+chat-terminal-expand = Expand: over the conversation too
+chat-terminal-close = Close the terminal (its shells keep running)
+chat-terminal-ended = Process ended
+chat-terminal-button-tip = Terminal: a shell in this session's folder
+# $program is the shell that did not start and $error the reason.
+chat-terminal-start-failed = Couldn't start { $program }: { $error }
+
+## Simulator panel
+
+chat-sim-name = Simulator
+chat-sim-zoom-out = Zoom Out
+chat-sim-zoom-fit = Fit to the Panel
+chat-sim-zoom-actual = Actual Size
+chat-sim-zoom-in = Zoom In
+chat-sim-booted = Booted
+chat-sim-none = None
+chat-sim-available = Available (will boot)
+chat-sim-shut-down = Shut Down
+# $device is the simulator's name.
+chat-sim-shut-down-device = Shut Down { $device }
+chat-sim-add = Add Simulator…
+chat-sim-add-media = Add Photos or Videos…
+chat-sim-open = Open in Simulator
+chat-sim-detach = Detach Simulator
+chat-sim-new = New Simulator
+chat-sim-cancel = Cancel
+chat-sim-create = Create and Boot
+chat-sim-looking = Looking for a simulator…
+chat-sim-waiting = Waiting for the screen…
+chat-sim-none-running = No simulator is running
+chat-sim-choose = Choose a Simulator
+chat-sim-clear = Clear
+chat-sim-add-to-reply = Add to Reply
+chat-sim-home = Home
+chat-sim-rotate = Rotate
+chat-sim-shot-tip = Save a screenshot to the Desktop
+chat-sim-stop-recording-tip = Stop recording and save the video to the Desktop
+chat-sim-record-tip = Record the screen to a video on the Desktop
+chat-sim-annotate-tip = Annotate: draw on the screen and add it to the reply
+chat-sim-button-tip = iOS Simulator: its screen, live
+# $error is the reason, given by the system.
+chat-sim-list-failed = Couldn't list simulators: { $error }
+# $device is the simulator's name.
+chat-sim-booting = Booting { $device }…
+chat-sim-boot-failed = Couldn't boot it: { $error }
+chat-sim-shutting-down = Shutting down { $device }…
+chat-sim-shut-down-failed = Couldn't shut it down: { $error }
+chat-sim-reading-runtimes = Reading the runtimes…
+chat-sim-no-runtime = No iOS runtime is installed (Xcode > Settings > Components)
+# $name is the name given to the new simulator.
+chat-sim-making = Making { $name }…
+chat-sim-make-failed = Couldn't make it: { $error }
+chat-sim-adding-photos = Adding to { $device }'s Photos…
+chat-sim-added-one = Added to Photos
+# $count is how many files were added.
+chat-sim-added-many = Added { $count } to Photos
+chat-sim-add-failed = Couldn't add them: { $error }
+# $file is the name of the file that was saved.
+chat-sim-saved = Saved { $file }
+chat-sim-screenshot-failed = Couldn't take the screenshot: { $error }
+chat-sim-recording = Recording…
+chat-sim-record-failed = Couldn't record: { $error }
+chat-sim-saving-recording = Saving the recording…
+chat-sim-recording-unfinished = The recording didn't finish
+chat-sim-annotate-note = Draw on the screen, then Add to Reply
+chat-sim-annotation-added = Added to the reply
+chat-sim-save-failed = Couldn't save it: { $error }
+
+## Sheets: New Session
+
+chat-sheet-new-session = New Session
+chat-sheet-account = Account
+chat-sheet-folder = Folder
+chat-sheet-choose-folder = Choose Folder…
+chat-sheet-choose = Choose
+chat-sheet-start = Start Session
+chat-sheet-trust-start = Trust Folder and Start
+chat-sheet-cancel = Cancel
+chat-sheet-no-accounts-lane = No accounts to make a lane with
+chat-sheet-no-accounts-switch = No accounts to switch
+chat-sheet-main-login = Main login
+chat-sheet-lane = Lane
+chat-sheet-opens-lane = Opens a lane
+chat-sheet-in-use = In use
+# $tool is the tool whose account it switches.
+chat-sheet-switches = Switches { $tool }
+# $host is the tool's name.
+chat-sheet-draft-name = New { $host } Session
+chat-sheet-draft-label = New
+chat-sheet-untrusted = { -brand-claude-code } hasn't trusted this folder yet.
+chat-sheet-starting = Starting…
+chat-sheet-trusting = Trusting the folder…
+# $account is the account's name, $detail what it does and $folder the folder's name.
+chat-sheet-chosen = { $account } ({ $detail }) in { $folder }
+chat-sheet-pick = Pick an account and a folder.
+chat-sheet-trust-title = Trust This Folder?
+# $folder is the folder that is not trusted yet.
+chat-sheet-trust-text = { -brand-claude-code } hasn't trusted { $folder } yet. Trust Folder and Start accepts { -brand-claude-code }'s “Do you trust this folder?” prompt for it, as running claude there would, then starts the session.
+
+## Sheets: Second Opinion
+
+chat-sheet-default = Default
+chat-sheet-run = Run
+chat-sheet-close = Close
+chat-sheet-prompt = Prompt

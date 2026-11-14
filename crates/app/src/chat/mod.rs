@@ -85,3 +85,5 @@ pub mod terminal;
 pub mod used;
 #[cfg(target_os = "macos")]
 pub mod view;
+#[cfg(test)]
+mod window_words_tests;

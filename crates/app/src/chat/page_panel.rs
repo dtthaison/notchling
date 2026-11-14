@@ -1,3 +1,4 @@
+use notchling_locale as t;
 use std::path::PathBuf;
 
 use crate::pages::dates;
@@ -120,10 +121,10 @@ pub fn decide(url: &str, pages: &[Page]) -> Opens {
 pub fn subtitle(opens: &Opens) -> String {
     match opens {
         Opens::Saved(page) if page.updated_secs > 0.0 => {
-            format!("Saved copy · {}", dates::short(page.updated_secs))
+            t::chat::panel_saved_copy_date(&dates::short(page.updated_secs))
         }
-        Opens::Saved(_) => "Saved copy".to_owned(),
-        Opens::Live(_) => "Live on claude.ai".to_owned(),
+        Opens::Saved(_) => t::chat::panel_saved_copy().to_owned(),
+        Opens::Live(_) => t::chat::panel_live().to_owned(),
         Opens::File(_)
         | Opens::Html(_)
         | Opens::Diff(_)

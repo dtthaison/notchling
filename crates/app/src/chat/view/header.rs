@@ -4,6 +4,7 @@ use notchling_kit::metric::SIDE_PADDING;
 use notchling_kit::part::{ButtonKind, PartState};
 use notchling_kit::ui::{button_with, hsla, icon_button, label, phone_mark, KitPart, KitStyled};
 use notchling_kit::{Appearance, Icon, IconSize, Ink, TypeRole};
+use notchling_locale as t;
 
 use super::phone::{button_tip_off, button_tip_on};
 use super::render_map::WindowRegion;
@@ -78,9 +79,9 @@ fn details_button(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) ->
         ButtonKind::Ghost
     };
     let tip = if shown {
-        "Hide the session details"
+        t::chat::window_hide_details()
     } else {
-        "Show the session details: branch, model, tokens, tasks, files changed"
+        t::chat::window_show_details()
     };
     gate::tip_text(
         icon_button(
@@ -113,7 +114,15 @@ pub fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Div
         .when(view.sidebar_hidden, |bar| bar.pl(px(HIDDEN_HEADER_START)));
     let Some(session) = view.selected_session() else {
         return bar
-            .child(label("No session selected", TypeRole::Meta, Ink::TextMuted, a).flex_1())
+            .child(
+                label(
+                    t::chat::window_no_session(),
+                    TypeRole::Meta,
+                    Ink::TextMuted,
+                    a,
+                )
+                .flex_1(),
+            )
             .child(details_button(view, a, cx))
             .child(super::terminal::button(view, a, cx))
             .child(super::simulator::button_in_header(view, a, cx))

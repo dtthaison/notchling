@@ -155,7 +155,7 @@
         "crates/app/src/sheets/view.rs",
         "crates/app/src/sheets/mod.rs"
       ],
-      "moved": false
+      "moved": true
     },
     {
       "name": "notch",

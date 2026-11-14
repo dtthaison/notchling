@@ -1,3 +1,4 @@
+use notchling_locale as t;
 use std::collections::BTreeSet;
 use std::path::Path;
 
@@ -30,9 +31,9 @@ pub enum Section {
 impl Section {
     pub fn title(self) -> &'static str {
         match self {
-            Section::Claude => "Claude Code",
-            Section::Codex => "Codex",
-            Section::Antigravity => "Antigravity",
+            Section::Claude => t::chat::tool_claude_code(),
+            Section::Codex => t::chat::tool_codex(),
+            Section::Antigravity => t::chat::tool_antigravity(),
         }
     }
 }
@@ -97,24 +98,36 @@ pub fn accounts(
     let mut list: Vec<AccountChoice> = targets
         .iter()
         .map(|t| match &t.place {
-            Place::Main => claude(&t.title, "Main login", Pick::Claude(None)),
-            Place::Lane(path) => claude(&t.title, "Lane", Pick::Claude(Some(path.clone()))),
-            Place::Saved(account) => {
-                claude(&t.title, "Opens a lane", Pick::ClaudeSaved(account.clone()))
-            }
+            Place::Main => claude(&t.title, t::chat::sheet_main_login(), Pick::Claude(None)),
+            Place::Lane(path) => claude(
+                &t.title,
+                t::chat::sheet_lane(),
+                Pick::Claude(Some(path.clone())),
+            ),
+            Place::Saved(account) => claude(
+                &t.title,
+                t::chat::sheet_opens_lane(),
+                Pick::ClaudeSaved(account.clone()),
+            ),
         })
         .collect();
     if list.is_empty() {
-        list.push(claude("Claude Code", "Main login", Pick::Claude(None)));
+        list.push(claude(
+            t::chat::tool_claude_code(),
+            t::chat::sheet_main_login(),
+            Pick::Claude(None),
+        ));
         let lanes: BTreeSet<&str> = agents
             .iter()
             .filter_map(|a| a.config_dir.as_deref())
             .collect();
-        list.extend(
-            lanes
-                .into_iter()
-                .map(|dir| claude(last_part(dir), "Lane", Pick::Claude(Some(dir.to_owned())))),
-        );
+        list.extend(lanes.into_iter().map(|dir| {
+            claude(
+                last_part(dir),
+                t::chat::sheet_lane(),
+                Pick::Claude(Some(dir.to_owned())),
+            )
+        }));
     }
     for (id, section) in [(CODEX, Section::Codex), (ANTIGRAVITY, Section::Antigravity)] {
         let Some(p) = providers.iter().find(|p| p.id == id && p.available) else {
@@ -140,15 +153,15 @@ pub fn accounts(
         for acc in &usable {
             let in_use = Some(acc.id.as_str()) == active;
             let detail = if in_use {
-                "In use".to_owned()
+                t::chat::sheet_in_use().to_owned()
             } else {
-                format!("Switches {}", section.title())
+                t::chat::sheet_switches(section.title())
             };
             list.push(tool(&acc.email, detail, &acc.id, !in_use));
         }
         if usable.is_empty() {
             if let Some(title) = &p.unlisted_active_title {
-                list.push(tool(title, "In use".to_owned(), "", false));
+                list.push(tool(title, t::chat::sheet_in_use().to_owned(), "", false));
             }
         }
     }
@@ -178,18 +191,22 @@ fn last_part(path: &str) -> &str {
 
 pub fn draft_session(provider: &str, folder: &str, now_ms: i64) -> Option<Session> {
     let (prefix, tool, host) = match provider {
-        CODEX => (CODEX_DRAFT_PREFIX, Tool::Codex, "Codex"),
-        ANTIGRAVITY => (AGY_DRAFT_PREFIX, Tool::Antigravity, "Antigravity"),
+        CODEX => (CODEX_DRAFT_PREFIX, Tool::Codex, t::chat::tool_codex()),
+        ANTIGRAVITY => (
+            AGY_DRAFT_PREFIX,
+            Tool::Antigravity,
+            t::chat::tool_antigravity(),
+        ),
         _ => return None,
     };
     let project = last_part(folder).to_owned();
     let agent = Agent {
         id: format!("{prefix}{now_ms}"),
-        name: format!("New {host} Session"),
+        name: t::chat::sheet_draft_name(host),
         project,
         cwd: folder.to_owned(),
         group: AgentGroup::Completed,
-        label: "New".to_owned(),
+        label: t::chat::sheet_draft_label().to_owned(),
         detail: None,
         since_ms: now_ms,
         target: AgentTarget::Resume {
@@ -335,7 +352,7 @@ impl NewSession {
                 let i = self.account?;
                 let choice = self.accounts.get_mut(i)?;
                 choice.pick = Pick::Claude(Some(path));
-                choice.detail = "Lane".to_owned();
+                choice.detail = t::chat::sheet_lane().to_owned();
                 self.start()
             }
             Err(message) => {
@@ -408,17 +425,16 @@ impl NewSession {
     pub fn footer(&self) -> String {
         match &self.stage {
             Stage::Failed(message) | Stage::Confirm { message, .. } => message.clone(),
-            Stage::Untrusted => "Claude Code hasn't trusted this folder yet.".to_owned(),
-            Stage::Starting => "Starting…".to_owned(),
-            Stage::Trusting => "Trusting the folder…".to_owned(),
+            Stage::Untrusted => t::chat::sheet_untrusted().to_owned(),
+            Stage::Starting => t::chat::sheet_starting().to_owned(),
+            Stage::Trusting => t::chat::sheet_trusting().to_owned(),
             Stage::Choosing | Stage::Started => match self.chosen() {
-                Some((account, folder)) => format!(
-                    "{} ({}) in {}",
-                    account.title,
-                    account.detail,
-                    folder_title(folder, &self.folders)
+                Some((account, folder)) => t::chat::sheet_chosen(
+                    &account.title,
+                    &account.detail,
+                    &folder_title(folder, &self.folders),
                 ),
-                None => "Pick an account and a folder.".to_owned(),
+                None => t::chat::sheet_pick().to_owned(),
             },
         }
     }
@@ -430,13 +446,8 @@ impl NewSession {
     }
 }
 
-pub const TRUST_TITLE: &str = "Trust This Folder?";
 pub fn trust_text(folder: &str) -> String {
-    format!(
-        "Claude Code hasn't trusted {folder} yet. Trust Folder and Start accepts Claude Code's \
-         “Do you trust this folder?” prompt for it, as running claude there would, then starts \
-         the session."
-    )
+    t::chat::sheet_trust_text(folder)
 }
 
 #[cfg(test)]

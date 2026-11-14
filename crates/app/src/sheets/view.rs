@@ -1,3 +1,4 @@
+use notchling_locale as t;
 use std::sync::Arc;
 
 use gpui::{
@@ -16,9 +17,7 @@ use notchling_kit::ui::{
 };
 use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 
-use super::new_session::{
-    folder_title, parent_line, trust_text, NewSession, Plan, Section, Stage, TRUST_TITLE,
-};
+use super::new_session::{folder_title, parent_line, trust_text, NewSession, Plan, Section, Stage};
 use crate::accounts::store::Accounts;
 use crate::acting::{Acting, Control};
 use crate::actions::Actions;
@@ -243,7 +242,7 @@ impl NewSessionView {
     fn make_lane(&mut self, account: String, cx: &mut Context<Self>) {
         let Some(handle) = self.accounts.clone() else {
             self.model
-                .lane_made(Err("No accounts to make a lane with".into()));
+                .lane_made(Err(t::chat::sheet_no_accounts_lane().into()));
             return;
         };
         cx.spawn(async move |this, cx| {
@@ -283,7 +282,8 @@ impl NewSessionView {
         cx: &mut Context<Self>,
     ) {
         let Some(handle) = self.accounts.clone() else {
-            self.model.switched(Err("No accounts to switch".into()));
+            self.model
+                .switched(Err(t::chat::sheet_no_accounts_switch().into()));
             return;
         };
         let id = provider.clone();
@@ -322,7 +322,7 @@ impl NewSessionView {
             files: false,
             directories: true,
             multiple: false,
-            prompt: Some("Choose".into()),
+            prompt: Some(t::chat::sheet_choose().into()),
         });
         cx.spawn(async move |this, cx| {
             if let Ok(Ok(Some(paths))) = picked.await {
@@ -375,7 +375,7 @@ impl NewSessionView {
             .gap(px(4.0))
             .border_r(px(1.0))
             .border_color(hsla(Ink::Hairline.color(a)))
-            .child(column_title("Account", a))
+            .child(column_title(t::chat::sheet_account(), a))
             .children(rows)
     }
 
@@ -403,7 +403,12 @@ impl NewSessionView {
             .rounded(px(RADIUS_MD))
             .cursor_pointer()
             .hover(move |s| s.bg(hsla(Ink::Raised.color(a))))
-            .child(label("Choose Folder…", TypeRole::Label, Ink::AccentText, a))
+            .child(label(
+                t::chat::sheet_choose_folder(),
+                TypeRole::Label,
+                Ink::AccentText,
+                a,
+            ))
             .on_click(cx.listener(|this, _, _, cx| this.choose_folder(cx)));
         div()
             .id("folders")
@@ -418,7 +423,7 @@ impl NewSessionView {
             .flex()
             .flex_col()
             .gap(px(4.0))
-            .child(column_title("Folder", a))
+            .child(column_title(t::chat::sheet_folder(), a))
             .children(rows)
             .child(choose)
     }
@@ -437,7 +442,7 @@ impl NewSessionView {
         .line_clamp(2);
         let title = match &self.model.stage {
             Stage::Confirm { button, .. } => button.clone(),
-            _ => "Start Session".to_owned(),
+            _ => t::chat::sheet_start().to_owned(),
         };
         let start = button(
             "start-session",
@@ -478,7 +483,7 @@ impl NewSessionView {
         };
         let trust = button(
             "trust-folder",
-            "Trust Folder and Start",
+            t::chat::sheet_trust_start(),
             ButtonKind::Primary,
             gate::state(control),
             a,
@@ -488,7 +493,7 @@ impl NewSessionView {
         });
         let cancel = button(
             "trust-cancel",
-            "Cancel",
+            t::chat::sheet_cancel(),
             ButtonKind::Secondary,
             PartState::Rest,
             a,
@@ -527,7 +532,12 @@ impl NewSessionView {
                                     Ink::AccentText,
                                     a,
                                 ))
-                                .child(label(TRUST_TITLE, TypeRole::Heading, Ink::Text, a)),
+                                .child(label(
+                                    t::chat::sheet_trust_title(),
+                                    TypeRole::Heading,
+                                    Ink::Text,
+                                    a,
+                                )),
                         )
                         .child(label(
                             &trust_text(&folder),
@@ -555,7 +565,7 @@ impl Render for NewSessionView {
         let a = window_appearance(window);
         let cancel = button(
             "cancel",
-            "Cancel",
+            t::chat::sheet_cancel(),
             ButtonKind::Secondary,
             PartState::Rest,
             a,
@@ -569,7 +579,12 @@ impl Render for NewSessionView {
             .rounded(px(RADIUS_CARD))
             .overflow_hidden()
             .fill(Ink::Window, a)
-            .child(sheet_header(Icon::Sessions, "New Session", cancel, a))
+            .child(sheet_header(
+                Icon::Sessions,
+                t::chat::sheet_new_session(),
+                cancel,
+                a,
+            ))
             .child(
                 div()
                     .flex_1()
