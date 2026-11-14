@@ -1,3 +1,4 @@
+use crate::late_emit::Events;
 use crate::layout::Layout;
 use crate::op_group::OpGroup;
 use crate::switches::{SwitchFlag, INSTALL_OFF};
@@ -8,6 +9,10 @@ use notchling_engine::install::{
 use notchling_engine::pages::skill::content as pages_text;
 use notchling_engine::settings::skill as settings_skill;
 use notchling_engine::tools::codex::models;
+use notchling_events::kinds::choices::DoneOrFailed;
+use notchling_events::kinds::settings::{HookTarget, InstallAction, InstallHook};
+use notchling_events::spec::Outcome;
+use notchling_events::{scope, Event};
 use notchling_local_api::{ops, ApiError, Caller, ErrorCode, OpSpec};
 use notchling_platform::paths::Os;
 use serde_json::{json, Value};
@@ -112,6 +117,7 @@ pub struct InstallOps {
     switch: Arc<SwitchFlag>,
     clock: Box<dyn Fn() -> u64 + Send + Sync>,
     writing: Mutex<()>,
+    events: Option<Events>,
 }
 
 fn system_ms() -> u64 {
@@ -132,7 +138,36 @@ impl InstallOps {
             switch,
             clock: Box::new(system_ms),
             writing: Mutex::new(()),
+            events: None,
         }
+    }
+
+    pub fn with_events(mut self, events: Events) -> InstallOps {
+        self.events = Some(events);
+        self
+    }
+
+    fn note_hook(&self, direction: Direction, result: DoneOrFailed) {
+        let Some(events) = &self.events else {
+            return;
+        };
+        let action = match direction {
+            Direction::Install => InstallAction::Installed,
+            Direction::Remove => InstallAction::Removed,
+        };
+        events.push(Event::new(
+            &InstallHook {
+                target: HookTarget::Claude,
+                action,
+                result,
+            },
+            match result {
+                DoneOrFailed::Done => Outcome::Ok,
+                _ => Outcome::Failed,
+            },
+            crate::acting_ops::now_ms(),
+        ));
+        scope::mark_recorded();
     }
 
     pub fn with_skill(mut self, skill: SkillSpec) -> InstallOps {
@@ -274,10 +309,14 @@ impl InstallOps {
         if request.prompt != Want::Leave || request.pages != Want::Leave {
             match install::apply(&self.setup.settings, &wanted, (self.clock)()) {
                 Ok(done) => {
+                    self.note_hook(request.direction, DoneOrFailed::Done);
                     backup = done.backup.map(|p| p.to_string_lossy().into_owned());
                     plan.hooks = Ok(done.plan);
                 }
-                Err(e) => return Err(failed(e.to_string())),
+                Err(e) => {
+                    self.note_hook(request.direction, DoneOrFailed::Failed);
+                    return Err(failed(e.to_string()));
+                }
             }
         }
         let results = install::apply_skills(&self.setup.tools, &self.setup.skills, &request.skills);

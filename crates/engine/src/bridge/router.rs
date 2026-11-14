@@ -117,7 +117,8 @@ impl Router {
             return;
         }
 
-        match self.dispatch(&op, &body, connection) {
+        let phone = phone_scope(connection);
+        match phone.run(|| self.dispatch(&op, &body, connection)) {
             Ok(data) => connection.send_text(wire::ok(id, data)),
             Err(failure) => reply_error(connection, id, &failure),
         }
@@ -370,5 +371,21 @@ fn resolve(path: &Path) -> PathBuf {
             }
             _ => return plain,
         }
+    }
+}
+
+pub(crate) fn phone_scope(connection: &Connection) -> notchling_events::scope::Scope {
+    use notchling_events::envelope::{Actor, ActorTier, Via};
+    notchling_events::scope::Scope {
+        op_id: notchling_events::scope::current().op_id,
+        actor: Some(Actor {
+            tier: ActorTier::Phone,
+            via: Some(Via::Bridge),
+            exe: None,
+            device: Some(notchling_events::Ref::<notchling_events::Device>::new(
+                &connection.device_id(),
+            )),
+            session: None,
+        }),
     }
 }

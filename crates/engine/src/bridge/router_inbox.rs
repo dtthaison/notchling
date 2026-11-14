@@ -4,9 +4,6 @@ use super::router::Router;
 use super::router_ops::require;
 use super::wire::{self, BridgeFailure};
 use crate::inbox::{ActionId, State};
-use notchling_events::envelope::{Actor, ActorTier, Via};
-use notchling_events::scope::{self, Scope};
-use notchling_events::{Device, Ref};
 use serde_json::{json, Map, Value};
 use std::sync::Arc;
 
@@ -28,7 +25,7 @@ impl Router {
         body: &Map<String, Value>,
         connection: &Arc<Connection>,
     ) -> Result<Value, BridgeFailure> {
-        let decided = self.inbox_decide(body, connection);
+        let decided = self.inbox_decide(body);
         let op = match &decided {
             Ok((action, outcome)) if outcome.answered => {
                 format!("inbox.answer:{}", name_of(action))
@@ -42,11 +39,7 @@ impl Router {
             .map_err(|(_, failure)| failure)
     }
 
-    fn inbox_decide(
-        &self,
-        body: &Map<String, Value>,
-        connection: &Connection,
-    ) -> Result<(ActionId, InboxOutcome), Refusal> {
+    fn inbox_decide(&self, body: &Map<String, Value>) -> Result<(ActionId, InboxOutcome), Refusal> {
         if !self.backend.acting_on() {
             return Err((
                 "acting_off",
@@ -60,18 +53,9 @@ impl Router {
         if action == ActionId::Open {
             return Err(("open", BridgeFailure::invalid("Mở form trên Mac.")));
         }
-        let phone = Scope {
-            op_id: scope::current().op_id,
-            actor: Some(Actor {
-                tier: ActorTier::Phone,
-                via: Some(Via::Bridge),
-                exe: None,
-                device: Some(Ref::<Device>::new(&connection.device_id())),
-                session: None,
-            }),
-        };
-        let outcome = phone
-            .run(|| self.backend.inbox_answer(item_id, action))
+        let outcome = self
+            .backend
+            .inbox_answer(item_id, action)
             .map_err(|failure| (wire::code_name(failure.code), failure))?;
         Ok((action, outcome))
     }

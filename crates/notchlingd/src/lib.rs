@@ -2,6 +2,7 @@ mod accounts_late;
 pub mod accounts_ops;
 mod accounts_signin;
 pub mod acting;
+mod acting_events;
 pub mod acting_ops;
 pub mod activity_ops;
 pub mod agy_elsewhere;
@@ -73,6 +74,8 @@ mod accounts_ops_log_tests;
 #[cfg(test)]
 mod accounts_ops_tests;
 #[cfg(test)]
+mod acting_events_tests;
+#[cfg(test)]
 mod acting_ops_tests;
 #[cfg(test)]
 mod acting_permission_tests;
@@ -108,6 +111,8 @@ mod inbox_ops_events_tests;
 mod inbox_ops_more_tests;
 #[cfg(test)]
 mod inbox_ops_tests;
+#[cfg(test)]
+mod install_events_tests;
 #[cfg(test)]
 mod install_ops_tests;
 #[cfg(test)]

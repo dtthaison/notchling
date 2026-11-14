@@ -1,8 +1,10 @@
+use crate::acting_events::{session_ref, PlayError};
 use crate::acting_ops::{ActingOps, NoLog};
 use notchling_engine::reply::held::{Held, Route};
 use notchling_engine::reply::plan;
 use notchling_engine::sessions::{Agent, AgentGroup};
-use notchling_local_api::{topics, ApiError};
+use notchling_events::kinds::agents::ReplyVia;
+use notchling_local_api::topics;
 use serde_json::{json, Value};
 use std::sync::mpsc::{channel, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -33,7 +35,7 @@ impl ActingOps {
         agent: &Agent,
         text: &str,
         now_ms: i64,
-    ) -> Result<Value, ApiError> {
+    ) -> Result<Value, PlayError> {
         if !agent.can_reply() {
             self.play(agent, &plan::reply(text), &mut NoLog)?;
             return Ok(json!({"sent": true}));
@@ -69,12 +71,22 @@ impl ActingOps {
             let Some(agent) = rows.iter().find(|a| a.id == id) else {
                 continue;
             };
+            let chars = text.chars().count();
             match self.play(agent, &plan::reply(&text), &mut NoLog) {
                 Ok(_) => {
+                    self.note_reply(session_ref(agent), ReplyVia::Held, chars, None, None, false);
                     let rest = self.held_text(&id);
                     self.publish_held(&id, rest.as_deref());
                 }
-                Err(_) => {
+                Err(failure) => {
+                    self.note_reply(
+                        session_ref(agent),
+                        ReplyVia::Held,
+                        chars,
+                        Some(failure.why),
+                        None,
+                        false,
+                    );
                     let mut held = lock(&self.held.held);
                     held.put_back(&id, &text, now_ms);
                     let all = held.get(&id).map(String::from);
