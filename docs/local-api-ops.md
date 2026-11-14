@@ -327,6 +327,16 @@ account), and writes only the daemon's own cache.
 - The lists are cut to 50 rows, and `by_account` is left out if the reply would pass 700 KB
   (a line is at most 1 MiB).
 
+## `daemon_wiring.rs` and `every_session.rs`
+
+`sessions.list` is the one op `Ops` answers itself (agent tier, read only, no switch).
+
+| Op | Tier | Args | Reply |
+| --- | --- | --- | --- |
+| `sessions.list` | agent | `{tools?: "claude" \| "all"}` | a bare list of rows (`Agent`, camelCase). No argument, `{}` and `"claude"` give Claude Code's rows exactly as before. `"all"` adds Codex and Antigravity rows after them and puts `tool` (`claude`, `codex`, `antigravity`) on every row; any other `tools` is `bad_request`. `partial: true` beside `ok` still means the first read had not landed |
+
+Codex rows are the 30 newest top-level rollouts under `<codex>/sessions` of the last 14 days (every age under a fixture root), without child rollouts (a first `session_meta` with `parent_thread_id` or `thread_source: "subagent"`); ids `codex:<thread>`. Antigravity rows are the summaries copy's top-level conversations of the last 14 days; ids `agy:<conversation>`. Both are cached 2 s, read only and need neither the bridge switch nor an app. `notchling sessions` and the phone's bridge (`Sources::foreign_rows`) ask for them; the app's session source and every other client keep the default. The `sessions` topic's events still carry Claude Code's rows only. The phone keeps `agy` as `Session.tool` on the wire.
+
 ## `git_ops.rs`
 
 What Chat's Details Panel and Changes panel show of a session's folder: `git.status`, `git.diff` and the three branch ops, over
