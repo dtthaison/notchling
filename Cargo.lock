@@ -3726,6 +3726,7 @@ version = "0.1.0"
 dependencies = [
  "libc",
  "notchling-engine",
+ "notchling-events",
  "notchling-local-api",
  "notchling-platform",
  "p12",

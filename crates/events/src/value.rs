@@ -45,7 +45,7 @@ impl Fields {
         out.len()
     }
 
-    pub(crate) fn fit(&mut self, budget: usize) {
+    pub fn fit(&mut self, budget: usize) {
         if self.json_len() <= budget {
             return;
         }

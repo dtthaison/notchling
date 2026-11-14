@@ -32,6 +32,8 @@ pub mod layout;
 pub mod limits_ops;
 pub mod limits_sources;
 pub mod limits_usage;
+pub mod log_bus;
+pub mod log_queue;
 pub mod log_rotate;
 pub mod op_group;
 pub mod pages_cli;
@@ -97,6 +99,8 @@ mod install_ops_tests;
 mod limits_inbox_tests;
 #[cfg(test)]
 mod limits_ops_tests;
+#[cfg(test)]
+mod log_bus_tests;
 #[cfg(test)]
 mod pages_ops_tests;
 #[cfg(test)]
