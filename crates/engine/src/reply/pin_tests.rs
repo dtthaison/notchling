@@ -107,6 +107,12 @@ fn the_waits_on_the_input_box_are_notchlings_own() {
     assert_eq!((INPUT_WAIT_MS, CLEAR_WAIT_MS), (5_000, 3_000));
     assert_eq!((PASTE_WAIT_MS, SENT_WAIT_MS), (10_000, 8_000));
     assert_eq!(INPUT_POLL_MS, 100);
+    assert_eq!((BOOT_WAIT_MS, START_SETTLE_MS), (15_000, 500));
+    let longest = ATTACH_TIMEOUT_MS + BOOT_WAIT_MS + CLEAR_WAIT_MS + PASTE_WAIT_MS + SENT_WAIT_MS;
+    assert!(
+        longest + DETACH_TIMEOUT_MS < 60_000,
+        "a reply ends inside the app's wait for a session call"
+    );
 }
 
 #[test]

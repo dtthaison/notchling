@@ -1,5 +1,5 @@
-use super::exec::{execute, Failure, Markers, NoQueueLog, Outcome, Pty};
-use super::fake::{FakePrompt, RULE};
+use super::exec::{execute, execute_noting, Failure, Markers, NoQueueLog, Outcome, Pty};
+use super::fake::{FakePrompt, RULE, STARTING};
 use super::keys::{self, timing::*};
 use super::plan;
 
@@ -49,6 +49,58 @@ fn a_new_sessions_hint_in_the_box_is_not_taken_for_the_message() {
         .pasting_for(700);
     assert_eq!(send(&mut pty, WITH_PICTURES), Ok(Outcome { taken: false }));
     assert_eq!(pty.sent, [WITH_PICTURES]);
+}
+
+#[test]
+fn a_session_that_is_still_starting_gets_no_key_until_its_own_prompt_is_up() {
+    let mut pty = FakePrompt::idle().starting_for(2_000);
+    assert_eq!(send(&mut pty, "hi"), Ok(Outcome { taken: false }));
+    assert_eq!(pty.sent, ["hi"]);
+    assert_eq!(pty.writes, typed("hi"), "nothing was typed into the wait");
+}
+
+#[test]
+fn a_start_longer_than_the_wait_for_a_prompt_is_waited_out() {
+    let mut pty = FakePrompt::idle().starting_for(INPUT_WAIT_MS + 7_000);
+    assert_eq!(send(&mut pty, "hi"), Ok(Outcome { taken: false }));
+    assert_eq!(pty.sent, ["hi"]);
+    assert_eq!(pty.writes, typed("hi"));
+}
+
+#[test]
+fn a_short_wait_in_other_words_is_told_by_the_cursor_missing_from_its_box() {
+    let mut pty = FakePrompt::idle()
+        .starting_for(2_000)
+        .noting("  Loading the session");
+    assert_eq!(send(&mut pty, "hi"), Ok(Outcome { taken: false }));
+    assert_eq!(pty.sent, ["hi"]);
+    assert_eq!(pty.writes, typed("hi"));
+}
+
+#[test]
+fn a_prompt_that_came_up_late_is_typed_into_only_once_it_has_stood_still() {
+    let mut pty = FakePrompt::idle().starting_for(2_000);
+    let mut trail = Vec::new();
+    let out = execute_noting(
+        &plan::reply("hi"),
+        &mut pty,
+        &Markers,
+        &mut NoQueueLog,
+        &mut trail,
+    );
+    assert_eq!(out, Ok(Outcome { taken: false }));
+    let prompt = "input box, 1 row, empty, cursor at 1,2 in the box, under it: ? for shortcuts";
+    assert_eq!(
+        trail,
+        [
+            format!("+500ms await input: starting: {}", STARTING.trim()),
+            format!("+2000ms await input: {prompt}"),
+            format!("+{}ms await empty: {prompt}", 2_000 + START_SETTLE_MS + KEY_PAUSE_MS),
+            format!("+{}ms await paste: input box, 1 row, holding text, cursor at 1,4 in the box, under it: ? for shortcuts", 2_000 + START_SETTLE_MS + KEY_PAUSE_MS),
+            format!("+{}ms submit: input box, 1 row, holding text, cursor at 1,4 in the box, under it: ? for shortcuts", 2_000 + START_SETTLE_MS + KEY_PAUSE_MS + INPUT_POLL_MS),
+            format!("+{}ms submit: {prompt}", 2_000 + START_SETTLE_MS + KEY_PAUSE_MS + INPUT_POLL_MS),
+        ]
+    );
 }
 
 #[test]

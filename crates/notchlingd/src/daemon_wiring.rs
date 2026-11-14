@@ -392,6 +392,7 @@ impl Wired {
                 Box::new(|ms| std::thread::sleep(Duration::from_millis(ms))),
             )
             .with_screen_file(layout.state_dir().join("permission-screen.txt"))
+            .with_reply_screen_file(layout.state_dir().join("reply-screen.txt"))
             .with_events(events.clone()),
         );
         let codex = Arc::new(CodexOps::for_daemon(

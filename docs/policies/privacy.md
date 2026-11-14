@@ -208,6 +208,10 @@ Mac, and Settings > Activity reads the Activity store.
   written any more (an account switch is now an `account.switched` event with the account ids and why).
 - `logs/crash.log`: a panic's message and place (opened 0600; a message can quote what was on screen).
 - `permission-screen.txt`: the last permission screen the daemon could not read.
+- `reply-screen.txt`: the last reply the daemon could not type into a session (opened 0600): the job's id, why
+  it failed, the message's length, what each step saw and the terminal screen it ended on. The text in the
+  session's input box is masked, so neither the message nor a draft is written; the rest of the screen is as
+  the terminal showed it.
 
 ## What stays on the Mac
 

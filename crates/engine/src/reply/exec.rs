@@ -161,18 +161,37 @@ fn ms(n: u64) -> Duration {
     Duration::from_millis(n)
 }
 
+pub const TRAIL_MAX: usize = 60;
+const TRAIL_ROW: usize = 100;
+
 pub fn execute(
     plan: &Plan,
     pty: &mut dyn Pty,
     check: &dyn ScreenCheck,
     log: &mut dyn QueueLog,
 ) -> Result<Outcome, Failure> {
+    execute_noting(plan, pty, check, log, &mut Vec::new())
+}
+
+pub fn execute_noting(
+    plan: &Plan,
+    pty: &mut dyn Pty,
+    check: &dyn ScreenCheck,
+    log: &mut dyn QueueLog,
+    trail: &mut Vec<String>,
+) -> Result<Outcome, Failure> {
+    let began = pty.now_ms();
     let mut run = Run {
         pty,
         check,
         log,
         taken: false,
         pressed: None,
+        pasted: String::new(),
+        doing: "",
+        began,
+        said: String::new(),
+        trail,
     };
     for step in &plan.steps {
         if !run.step(step)? {
@@ -187,8 +206,43 @@ pub fn execute(
 
 enum Shown {
     Dialog,
+    Starting,
     Other,
-    Input(Input),
+    Input(Input, bool),
+}
+
+fn cut(row: &str) -> String {
+    row.trim().chars().take(TRAIL_ROW).collect()
+}
+
+fn seen(shown: &Shown, lines: &[String], cursor: Option<(usize, usize)>) -> String {
+    let last = || {
+        input_box::last_row(lines)
+            .map(|r| cut(r))
+            .unwrap_or_default()
+    };
+    let at = match cursor {
+        Some((row, col)) => format!("cursor at {row},{col}"),
+        None => "cursor hidden".to_string(),
+    };
+    match shown {
+        Shown::Dialog => "a dialog".to_string(),
+        Shown::Starting => format!("starting: {}", last()),
+        Shown::Other => format!("no input box, {at}, last row: {}", last()),
+        Shown::Input(input, focused) => {
+            let under = input_box::span(lines)
+                .and_then(|(_, bottom)| lines[bottom + 1..].iter().find(|l| !l.trim().is_empty()))
+                .map(|r| cut(r))
+                .unwrap_or_default();
+            format!(
+                "input box, {} {}, {}, {at}{}, under it: {under}",
+                input.held.len(),
+                if input.held.len() == 1 { "row" } else { "rows" },
+                if input.empty { "empty" } else { "holding text" },
+                if *focused { " in the box" } else { "" },
+            )
+        }
+    }
 }
 
 struct Run<'a> {
@@ -197,6 +251,11 @@ struct Run<'a> {
     log: &'a mut dyn QueueLog,
     taken: bool,
     pressed: Option<PermissionDialog>,
+    pasted: String,
+    doing: &'static str,
+    began: u64,
+    said: String,
+    trail: &'a mut Vec<String>,
 }
 
 impl Run<'_> {
@@ -220,15 +279,35 @@ impl Run<'_> {
         }
     }
 
+    fn note(&mut self, what: &str) {
+        let said = format!("{}: {what}", self.doing);
+        if said == self.said {
+            return;
+        }
+        if self.trail.len() >= TRAIL_MAX {
+            self.trail.remove(TRAIL_MAX / 2);
+        }
+        let at = self.pty.now_ms().saturating_sub(self.began);
+        self.trail.push(format!("+{at}ms {said}"));
+        self.said = said;
+    }
+
     fn shown(&mut self) -> Shown {
         let lines = self.pty.screen();
-        if self.check.dialog_open(&lines) {
-            return Shown::Dialog;
-        }
-        match input_box::read(&lines, self.pty.cursor()) {
-            Some(input) => Shown::Input(input),
-            None => Shown::Other,
-        }
+        let cursor = self.pty.cursor();
+        let shown = if input_box::starting(&lines, cursor) {
+            Shown::Starting
+        } else if self.check.dialog_open(&lines) {
+            Shown::Dialog
+        } else {
+            match input_box::read(&lines, cursor) {
+                Some(input) => Shown::Input(input, input_box::focused(&lines, cursor)),
+                None => Shown::Other,
+            }
+        };
+        let what = seen(&shown, &lines, cursor);
+        self.note(&what);
+        shown
     }
 
     fn watch(
@@ -249,49 +328,99 @@ impl Run<'_> {
         }
     }
 
-    fn await_input(&mut self, timeout_ms: u64, empty: bool) -> Result<(), Failure> {
+    fn await_prompt(&mut self, timeout_ms: u64) -> Result<(), Failure> {
+        let start = self.pty.now_ms();
+        let mut deadline = start + timeout_ms;
+        let mut since: Option<u64> = None;
+        let mut boxed: Option<u64> = None;
+        let mut first = true;
+        let mut grace = true;
+        loop {
+            let shown = self.shown();
+            let now = self.pty.now_ms();
+            match &shown {
+                Shown::Dialog => return Err(Failure::Dialog),
+                Shown::Starting => {
+                    (since, boxed) = (None, None);
+                    deadline = deadline.max(start + BOOT_WAIT_MS);
+                }
+                Shown::Other => since = None,
+                Shown::Input(_, focused) => {
+                    boxed = Some(now);
+                    if *focused {
+                        let from = *since.get_or_insert(now);
+                        if first || now - from >= START_SETTLE_MS {
+                            return Ok(());
+                        }
+                    }
+                }
+            }
+            first = false;
+            if now >= deadline {
+                let lately = boxed.is_some_and(|at| now - at <= 2 * INPUT_POLL_MS);
+                match shown {
+                    Shown::Input(..) => return Ok(()),
+                    Shown::Starting => return Err(Failure::Timeout),
+                    Shown::Other if lately && grace => {
+                        grace = false;
+                        deadline = now + 2 * INPUT_POLL_MS;
+                    }
+                    Shown::Dialog | Shown::Other => return Err(Failure::NoInput),
+                }
+            }
+            self.pty.sleep(ms(INPUT_POLL_MS));
+        }
+    }
+
+    fn await_empty(&mut self, timeout_ms: u64) -> Result<(), Failure> {
         let late = self.watch(timeout_ms, |shown| match shown {
             Shown::Dialog => Err(Failure::Dialog),
-            Shown::Other => Ok(false),
-            Shown::Input(input) => Ok(input.empty || !empty),
+            Shown::Starting | Shown::Other => Ok(false),
+            Shown::Input(input, _) => Ok(input.empty),
         })?;
         match late {
             None => Ok(()),
-            Some(Shown::Input(_)) => Err(Failure::NotCleared),
+            Some(Shown::Input(..)) => Err(Failure::NotCleared),
+            Some(Shown::Starting) => Err(Failure::Timeout),
             Some(_) => Err(Failure::NoInput),
         }
     }
 
     fn await_paste(&mut self, timeout_ms: u64) -> Result<(), Failure> {
+        let text = self.pasted.clone();
         let mut last: Option<Input> = None;
         let late = self.watch(timeout_ms, |shown| match shown {
             Shown::Dialog => Err(Failure::Dialog),
-            Shown::Other => Ok(false),
-            Shown::Input(input) => {
-                let settled = !input.empty && last.as_ref() == Some(input);
+            Shown::Starting | Shown::Other => Ok(false),
+            Shown::Input(input, _) => {
+                let settled = input.holds(&text) && last.as_ref() == Some(input);
                 last = Some(input.clone());
                 Ok(settled)
             }
         })?;
         match late {
             None => Ok(()),
-            Some(_) => Err(Failure::NotTaken),
+            Some(Shown::Input(input, _)) if input.holds(&text) => Err(Failure::NotSent),
+            Some(Shown::Input(..)) => Err(Failure::NotTaken),
+            Some(Shown::Starting) => Err(Failure::Timeout),
+            Some(_) => Err(Failure::NoInput),
         }
     }
 
     fn submit(&mut self, timeout_ms: u64) -> Result<(), Failure> {
+        let text = self.pasted.clone();
         match self.shown() {
             Shown::Dialog => return Err(Failure::Dialog),
-            Shown::Other => return Err(Failure::NoInput),
-            Shown::Input(input) if input.empty => return Err(Failure::NotTaken),
-            Shown::Input(_) => {}
+            Shown::Starting | Shown::Other => return Err(Failure::NoInput),
+            Shown::Input(input, _) if !input.holds(&text) => return Err(Failure::NotTaken),
+            Shown::Input(..) => {}
         }
         self.write(ENTER)?;
         let mut let_go = false;
         let late = self.watch(timeout_ms, |shown| {
             let free = match shown {
-                Shown::Input(input) => input.empty,
-                Shown::Dialog | Shown::Other => true,
+                Shown::Input(input, _) => !input.holds(&text),
+                Shown::Dialog | Shown::Starting | Shown::Other => true,
             };
             let settled = free && let_go;
             let_go = free;
@@ -304,6 +433,7 @@ impl Run<'_> {
     }
 
     fn step(&mut self, step: &Step) -> Result<bool, Failure> {
+        self.doing = step.name();
         match step {
             Step::WaitQuiet {
                 quiet_ms,
@@ -317,7 +447,8 @@ impl Run<'_> {
             }
             Step::RefuseDialog => {
                 let lines = self.pty.screen();
-                if self.check.dialog_open(&lines) {
+                let starting = input_box::starting(&lines, self.pty.cursor());
+                if !starting && self.check.dialog_open(&lines) {
                     return Err(Failure::Dialog);
                 }
             }
@@ -327,10 +458,13 @@ impl Run<'_> {
                     return Err(Failure::QuestionGone);
                 }
             }
-            Step::AwaitInput { timeout_ms } => self.await_input(*timeout_ms, false)?,
-            Step::AwaitEmpty { timeout_ms } => self.await_input(*timeout_ms, true)?,
+            Step::AwaitInput { timeout_ms } => self.await_prompt(*timeout_ms)?,
+            Step::AwaitEmpty { timeout_ms } => self.await_empty(*timeout_ms)?,
             Step::Keys(keys) => self.write(keys)?,
-            Step::Paste(text) => self.write(&keys::bracketed(text))?,
+            Step::Paste(text) => {
+                self.pasted = keys::paste_safe(text);
+                self.write(&keys::bracketed(text))?
+            }
             Step::AwaitPaste { timeout_ms } => self.await_paste(*timeout_ms)?,
             Step::Submit { timeout_ms } => self.submit(*timeout_ms)?,
             Step::Pause(n) => self.pty.sleep(ms(*n)),

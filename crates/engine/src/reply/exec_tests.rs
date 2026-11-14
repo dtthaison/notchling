@@ -6,7 +6,7 @@ use super::question::{Choice, PendingQuestion, QuestionItem};
 use std::time::Duration;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum Ev {
+pub(super) enum Ev {
     Wait(u64, u64),
     Sleep(u64),
     Write(String),
@@ -14,17 +14,18 @@ enum Ev {
 
 type React = Box<dyn FnMut(&str, &mut Vec<String>)>;
 
-struct Fake {
+pub(super) struct Fake {
     clock: u64,
-    events: Vec<Ev>,
+    pub(super) events: Vec<Ev>,
     screen: Vec<String>,
     react: React,
     draws: bool,
     broken: bool,
+    pub(super) blind: bool,
 }
 
 impl Fake {
-    fn new(screen: &[&str]) -> Fake {
+    pub(super) fn new(screen: &[&str]) -> Fake {
         Fake {
             clock: 0,
             events: Vec::new(),
@@ -32,15 +33,16 @@ impl Fake {
             react: Box::new(|_, _| {}),
             draws: true,
             broken: false,
+            blind: false,
         }
     }
 
-    fn reacting(mut self, react: impl FnMut(&str, &mut Vec<String>) + 'static) -> Fake {
+    pub(super) fn reacting(mut self, react: impl FnMut(&str, &mut Vec<String>) + 'static) -> Fake {
         self.react = Box::new(react);
         self
     }
 
-    fn writes(&self) -> Vec<String> {
+    pub(super) fn writes(&self) -> Vec<String> {
         self.events
             .iter()
             .filter_map(|e| match e {
@@ -70,6 +72,10 @@ impl Pty for Fake {
     fn screen(&mut self) -> Vec<String> {
         self.screen.clone()
     }
+    fn cursor(&mut self) -> Option<(usize, usize)> {
+        let (top, _) = crate::terminal::input_box::span(&self.screen).filter(|_| !self.blind)?;
+        Some((top + 1, self.screen[top + 1].chars().count()))
+    }
     fn sleep(&mut self, duration: Duration) {
         let ms = duration.as_millis() as u64;
         self.events.push(Ev::Sleep(ms));
@@ -80,11 +86,11 @@ impl Pty for Fake {
     }
 }
 
-fn lines(v: &[&str]) -> Vec<String> {
+pub(super) fn lines(v: &[&str]) -> Vec<String> {
     v.iter().map(|l| l.to_string()).collect()
 }
 
-const PROMPT: &[&str] = &[RULE, "❯ ", RULE, "  ? for shortcuts"];
+pub(super) const PROMPT: &[&str] = &[RULE, "❯ ", RULE, "  ? for shortcuts"];
 const PERMISSION: &[&str] = &[
     "Bash command",
     " Do you want to proceed?",
@@ -92,7 +98,7 @@ const PERMISSION: &[&str] = &[
     " 2. No",
 ];
 
-fn boxed(keys: &str, screen: &mut [String]) {
+pub(super) fn boxed(keys: &str, screen: &mut [String]) {
     if let Some(text) = keys
         .strip_prefix(keys::PASTE_START)
         .and_then(|t| t.strip_suffix(keys::PASTE_END))

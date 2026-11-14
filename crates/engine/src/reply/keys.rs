@@ -57,6 +57,8 @@ pub mod timing {
     pub const DETACH_TIMEOUT_MS: u64 = 3_000;
 
     pub const INPUT_WAIT_MS: u64 = 5_000;
+    pub const BOOT_WAIT_MS: u64 = 15_000;
+    pub const START_SETTLE_MS: u64 = 500;
     pub const CLEAR_WAIT_MS: u64 = 3_000;
     pub const PASTE_WAIT_MS: u64 = 10_000;
     pub const SENT_WAIT_MS: u64 = 8_000;
