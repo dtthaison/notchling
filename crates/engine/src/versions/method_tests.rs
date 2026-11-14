@@ -47,7 +47,10 @@ fn paths_map_to_methods() {
         ),
         Method::Release
     );
-    assert_eq!(m(Tool::Claude, "/usr/local/bin/claude", None), Method::Unknown);
+    assert_eq!(
+        m(Tool::Claude, "/usr/local/bin/claude", None),
+        Method::Unknown
+    );
 }
 
 #[test]
