@@ -83,6 +83,10 @@ pub struct SessionRow {
 }
 
 impl SessionRow {
+    pub fn child(&self) -> Option<String> {
+        self.parent.as_ref().map(|_| self.id.clone())
+    }
+
     pub fn reference(&self) -> SessionRef {
         self.parent
             .as_deref()

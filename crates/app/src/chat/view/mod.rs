@@ -68,6 +68,7 @@ use crate::chat::activity::{self, Activity};
 use crate::chat::data::{DataRoot, Loaded, Loader, Session, Tool};
 use crate::chat::log::Change;
 use crate::chat::message_meta;
+use crate::chat::pending_child::PendingChild;
 use crate::chat::reload::{watch_config, ReloadGate};
 use crate::chat::sidebar::{row_for, Pending, PendingJob, PendingSession};
 use crate::inbox::feed::InboxFeed;
@@ -157,6 +158,7 @@ pub struct ChatView {
     inbox_panel: Option<Entity<InboxPanelView>>,
     seen_inbox: u64,
     pending_session: Option<PendingSession>,
+    pending_child: Option<PendingChild>,
     pending_job: Option<PendingJob>,
     closed: std::collections::HashMap<String, f64>,
     tasks_seen: std::collections::HashMap<String, crate::chat::tasks_bar::Seen>,
@@ -430,6 +432,7 @@ impl ChatView {
             inbox_panel: None,
             seen_inbox: 0,
             pending_session: None,
+            pending_child: None,
             pending_job: None,
             closed: std::collections::HashMap::new(),
             used: std::collections::HashMap::new(),

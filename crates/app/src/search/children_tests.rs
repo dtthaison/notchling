@@ -60,3 +60,11 @@ fn a_child_and_its_parent_both_stay_in_the_results() {
     let ids: Vec<&str> = results.sessions.iter().map(|s| s.id.as_str()).collect();
     assert_eq!(ids, ["codex:0199c0de-child", "codex:0199a1b2-parent"]);
 }
+
+#[test]
+fn only_a_child_hit_names_a_row_to_select_after_opening() {
+    let child = parse_session(&hit(json!("codex:0199a1b2-parent"))).expect("a row");
+    assert_eq!(child.child().as_deref(), Some("codex:0199c0de-child"));
+    let plain = parse_session(&hit(json!(null))).expect("a row");
+    assert_eq!(plain.child(), None);
+}
