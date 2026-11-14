@@ -77,11 +77,15 @@ enum ChatFormat {
         return "\(n)"
     }
 
-    /// The model's context window in Claude Code, where it's known (Opus 5.5's /context says 400k).
-    /// Others give nil, and the header shows the count alone rather than guess a percentage.
+    /// The model's context window in Claude Code, where it's known. Every current model has 1M (Claude Code's
+    /// /context said "24.8k / 1m" for Opus 5.5 on 2026-11-14; it had said 400k earlier, which made the meter read 2.5x
+    /// too full); Haiku 4.5 has 200k. Others give nil, and the header shows the count alone rather than guess.
     static func contextWindow(model: String?) -> Int? {
         guard let model else { return nil }
-        if model.hasPrefix("claude-opus-5-5") { return 400_000 }
+        if model.hasPrefix("claude-haiku-4-5") { return 200_000 }
+        let million = ["claude-opus-5", "claude-sonnet-5", "claude-haiku-5", "claude-fable-5", "claude-mythos-5",
+                       "claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6", "claude-sonnet-4-6"]
+        if million.contains(where: { model.hasPrefix($0) }) { return 1_000_000 }
         return nil
     }
 
