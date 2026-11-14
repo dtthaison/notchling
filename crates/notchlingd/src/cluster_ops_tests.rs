@@ -31,7 +31,12 @@ fn wired(n: &TestNode, on: bool) -> Wired {
     if on {
         flag.set(true);
     }
-    let ops = ClusterOps::new(Ok(n.node.clone()), flag.clone(), n.room.clone(), n.log.clone());
+    let ops = ClusterOps::new(
+        Ok(n.node.clone()),
+        flag.clone(),
+        n.room.clone(),
+        n.log.clone(),
+    );
     Wired { ops, flag }
 }
 

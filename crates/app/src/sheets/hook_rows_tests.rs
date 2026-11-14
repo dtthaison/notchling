@@ -1,3 +1,4 @@
+use notchling_locale as t;
 use serde_json::{json, Value};
 
 use super::agents::HOOKS;
@@ -54,7 +55,7 @@ fn the_five_hooks_are_rows_with_their_text_and_command() {
     );
     assert_eq!(states(&shown), [HookState::Installed; 5]);
     for (line, hook) in shown.lines().iter().zip(HOOKS) {
-        assert_eq!(line.what, hook.what);
+        assert_eq!(line.what, hook.what.get());
         assert_eq!(
             line.command.as_deref(),
             Some("'/Users/someone/secret-folder/notchling' hook")
@@ -79,7 +80,7 @@ fn a_hook_that_is_not_in_the_file_says_so_and_has_no_command() {
     let lines = shown.lines();
     assert_eq!(lines.len(), 5);
     assert!(lines[0].command.is_none() && lines[2].command.is_some());
-    assert!(lines.iter().all(|l| l.what != OTHER));
+    assert!(lines.iter().all(|l| l.what != t::settings::hooks_other()));
     let none = self::shown(vec![]);
     assert_eq!(states(&none), [HookState::Missing; 5]);
 }
@@ -108,7 +109,7 @@ fn swift_and_unmanaged_entries_are_told_apart() {
     assert_eq!(lines[0].command, None);
     assert_eq!(lines[5].title, "PostToolUse · Artifact");
     assert_eq!(lines[6].title, "Stop · *");
-    assert_eq!(lines[6].what, OTHER);
+    assert_eq!(lines[6].what, t::settings::hooks_other());
 }
 
 #[test]
@@ -117,7 +118,7 @@ fn an_unknown_slot_still_gets_a_plain_line_and_a_cut_name() {
     let shown = shown(vec![entry("Stop", &long, "notchling", true)]);
     let line = shown.lines().remove(5);
     assert_eq!(line.title, format!("Stop · {}", "X".repeat(40)));
-    assert_eq!(line.what, OTHER);
+    assert_eq!(line.what, t::settings::hooks_other());
     let empty_matcher = shown_one(entry("PermissionRequest", "", "notchling", false));
     assert_eq!(empty_matcher.lines()[5].title, "PermissionRequest · *");
 }
@@ -227,5 +228,8 @@ fn a_refused_file_shows_one_category_and_none_of_its_text() {
 
 #[test]
 fn checking_is_one_plain_line() {
-    assert_eq!(HooksShown::Checking.status().as_deref(), Some(CHECKING));
+    assert_eq!(
+        HooksShown::Checking.status().as_deref(),
+        Some(t::settings::hooks_checking())
+    );
 }

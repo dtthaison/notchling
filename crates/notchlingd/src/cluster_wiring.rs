@@ -18,9 +18,7 @@ use notchling_engine::cluster::Desired;
 use notchling_events::kinds::security::{ClusterStep, SwitchCause};
 use notchling_events::spec::Outcome;
 use notchling_local_api::spawn::in_cargo_target;
-use notchling_local_api::{
-    topics, ApiError, Caller, ClientKind, ErrorCode, Handler, Tier,
-};
+use notchling_local_api::{topics, ApiError, Caller, ClientKind, ErrorCode, Handler, Tier};
 use serde_json::{json, Value};
 use std::ffi::OsStr;
 use std::path::Path;
@@ -194,11 +192,7 @@ impl ClusterParts {
         let log = ClusterLog::new(events);
         let handler = Arc::new(LateHandler::default());
         let panel = Arc::new(OpsPanel::new(handler.clone()));
-        let switches = Arc::new(HeadlessSwitches::new(
-            panel,
-            room.clone(),
-            log.clone(),
-        ));
+        let switches = Arc::new(HeadlessSwitches::new(panel, room.clone(), log.clone()));
         let local: Arc<dyn LocalCalls> = Arc::new(NodeCalls {
             inner: DaemonCalls::new(handler.clone(), room.clone()),
             switches: switches.clone(),

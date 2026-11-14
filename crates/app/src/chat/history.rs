@@ -6,11 +6,11 @@ use serde_json::Value;
 
 pub const KEY: &str = "chatHistory";
 
-pub const CHOICES: [(&str, &str); 4] = [
-    ("2mb", "2 MB"),
-    ("4mb", "4 MB"),
-    ("8mb", "8 MB"),
-    ("16mb", "16 MB"),
+pub const CHOICES: [(&str, notchling_locale::Text); 4] = [
+    ("2mb", notchling_locale::settings::CHAT_HISTORY_V2MB),
+    ("4mb", notchling_locale::settings::CHAT_HISTORY_V4MB),
+    ("8mb", notchling_locale::settings::CHAT_HISTORY_V8MB),
+    ("16mb", notchling_locale::settings::CHAT_HISTORY_V16MB),
 ];
 
 pub fn bytes(choice: &str) -> Option<u64> {

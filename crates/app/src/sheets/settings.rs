@@ -1,4 +1,5 @@
 use notchling_engine::settings::spec;
+use notchling_locale::{self as t, Text};
 use serde_json::{json, Value};
 
 use crate::acting::Acting;
@@ -68,12 +69,12 @@ impl Daemon {
     }
 }
 
-const DAEMON_ROWS: [(Area, &str); 5] = [
-    (Area::Acting, "Act on Sessions"),
-    (Area::Bridge, "Phone Bridge"),
-    (Area::Accounts, "Logins and Lanes"),
-    (Area::Vault, "Secret Vault"),
-    (Area::Install, "Install Hooks and Skills"),
+const DAEMON_ROWS: [(Area, Text); 5] = [
+    (Area::Acting, t::settings::ACT_ON_SESSIONS),
+    (Area::Bridge, t::settings::PHONE_BRIDGE),
+    (Area::Accounts, t::settings::LOGINS_AND_LANES),
+    (Area::Vault, t::settings::SECRET_VAULT),
+    (Area::Install, t::settings::INSTALL_HOOKS_AND_SKILLS),
 ];
 
 #[derive(Clone, Debug, PartialEq)]
@@ -90,17 +91,66 @@ pub struct Section {
     pub footer: Option<&'static str>,
 }
 
-const AWAKE_MODES: [(&str, &str); 3] = [
-    ("off", "Off"),
-    ("on", "On"),
-    ("whileWorking", "While Agents Work"),
+const AWAKE_MODES: [(&str, Text); 3] = [
+    ("off", t::settings::MODE_OFF),
+    ("on", t::settings::MODE_ON),
+    ("whileWorking", t::settings::MODE_WHILE_WORKING),
 ];
-const WIDTHS: [(&str, &str); 3] = [("small", "Small"), ("medium", "Medium"), ("large", "Large")];
-const LIMIT_MODES: [(&str, &str); 3] = [
-    ("off", "Off"),
-    ("notify", "Notify"),
-    ("notifyAndSwitch", "Notify and Switch"),
+const WIDTHS: [(&str, Text); 3] = [
+    ("small", t::settings::NOTCH_WIDTH_SMALL),
+    ("medium", t::settings::NOTCH_WIDTH_MEDIUM),
+    ("large", t::settings::NOTCH_WIDTH_LARGE),
 ];
+const CLAUDE_LIMIT_MODES: [(&str, Text); 3] = [
+    ("off", t::settings::LIMIT_MODE_OFF),
+    ("notify", t::settings::LIMIT_MODE_NOTIFY),
+    ("notifyAndSwitch", t::settings::LIMIT_MODE_NOTIFY_AND_SWITCH),
+];
+const CODEX_LIMIT_MODES: [(&str, Text); 3] = [
+    ("off", t::settings::CODEX_LIMIT_MODE_OFF),
+    ("notify", t::settings::CODEX_LIMIT_MODE_NOTIFY),
+    (
+        "notifyAndSwitch",
+        t::settings::CODEX_LIMIT_MODE_NOTIFY_AND_SWITCH,
+    ),
+];
+const ANTIGRAVITY_LIMIT_MODES: [(&str, Text); 3] = [
+    ("off", t::settings::ANTIGRAVITY_LIMIT_MODE_OFF),
+    ("notify", t::settings::ANTIGRAVITY_LIMIT_MODE_NOTIFY),
+    (
+        "notifyAndSwitch",
+        t::settings::ANTIGRAVITY_LIMIT_MODE_NOTIFY_AND_SWITCH,
+    ),
+];
+
+fn kebab(name: &str) -> String {
+    let mut out = String::new();
+    for (i, c) in name.chars().enumerate() {
+        if c.is_ascii_uppercase() {
+            if i > 0 {
+                out.push('-');
+            }
+            out.push(c.to_ascii_lowercase());
+        } else {
+            out.push(c);
+        }
+    }
+    out.split('-')
+        .map(|word| match word.chars().next() {
+            Some(c) if c.is_ascii_digit() => format!("v{word}"),
+            _ => word.to_owned(),
+        })
+        .collect::<Vec<_>>()
+        .join("-")
+}
+
+pub fn title_key(setting: &str) -> String {
+    format!("settings-{}", kebab(setting))
+}
+
+pub fn choice_key(setting: &str, value: &str) -> String {
+    format!("settings-{}-{}", kebab(setting), kebab(value))
+}
 
 fn value(read: &dyn Fn(&str) -> Option<Value>, key: &str) -> Option<Value> {
     read(key).or_else(|| spec(key).and_then(|s| s.default_value()))
@@ -121,7 +171,7 @@ fn choice(
     read: &dyn Fn(&str) -> Option<Value>,
     key: &'static str,
     title: &'static str,
-    options: &[(&'static str, &'static str)],
+    options: &[(&'static str, Text)],
 ) -> Row {
     let selected = value(read, key)
         .and_then(|v| v.as_str().map(str::to_owned))
@@ -130,14 +180,17 @@ fn choice(
         key,
         title,
         field: Field::Choice {
-            options: options.to_vec(),
+            options: options
+                .iter()
+                .map(|(value, label)| (*value, label.get()))
+                .collect(),
             selected,
         },
     }
 }
 
 pub fn sections(read: &dyn Fn(&str) -> Option<Value>, daemon: &Daemon) -> Vec<Section> {
-    let mut show_notch = toggle(read, "hideNotch", "Show agents in the notch");
+    let mut show_notch = toggle(read, "hideNotch", t::settings::hide_notch());
     if let Field::Toggle { on, inverted } = &mut show_notch.field {
         *on = !*on;
         *inverted = true;
@@ -149,9 +202,24 @@ pub fn sections(read: &dyn Fn(&str) -> Option<Value>, daemon: &Daemon) -> Vec<Se
                 == Some("notifyAndSwitch".into())
         });
     let mut limits = vec![
-        choice(read, "limitMode", "Claude Code", &LIMIT_MODES),
-        choice(read, "codexLimitMode", "Codex", &LIMIT_MODES),
-        choice(read, "antigravityLimitMode", "Antigravity", &LIMIT_MODES),
+        choice(
+            read,
+            "limitMode",
+            t::settings::limit_mode(),
+            &CLAUDE_LIMIT_MODES,
+        ),
+        choice(
+            read,
+            "codexLimitMode",
+            t::settings::codex_limit_mode(),
+            &CODEX_LIMIT_MODES,
+        ),
+        choice(
+            read,
+            "antigravityLimitMode",
+            t::settings::antigravity_limit_mode(),
+            &ANTIGRAVITY_LIMIT_MODES,
+        ),
     ];
     if switching {
         let (min, max) = spec("limitSwitchAt")
@@ -159,7 +227,7 @@ pub fn sections(read: &dyn Fn(&str) -> Option<Value>, daemon: &Daemon) -> Vec<Se
             .unwrap_or((80, 99));
         limits.push(Row {
             key: "limitSwitchAt",
-            title: "Switch at",
+            title: t::settings::limit_switch_at(),
             field: Field::Stepper {
                 value: value(read, "limitSwitchAt")
                     .and_then(|v| v.as_i64())
@@ -172,109 +240,94 @@ pub fn sections(read: &dyn Fn(&str) -> Option<Value>, daemon: &Daemon) -> Vec<Se
     }
     vec![
         Section {
-            title: "General",
+            title: t::settings::section_general(),
             rows: vec![choice(
                 read,
                 appearance::KEY,
-                "Appearance",
+                t::settings::appearance(),
                 &appearance::CHOICES,
             )],
             footer: None,
         },
         Section {
-            title: "Search",
+            title: t::settings::section_search(),
             rows: vec![Row {
                 key: shortcut::KEY,
-                title: "Search Shortcut",
+                title: t::settings::search_shortcut(),
                 field: Field::Shortcut(
                     value(read, shortcut::KEY)
                         .map(|v| shortcut::Setting::from_value(&v))
                         .unwrap_or(shortcut::Setting::DEFAULT),
                 ),
             }],
-            footer: Some(
-                "Opens Search from any app, so no other app can use this key. Inside \
-                 Notchling, ⌘⇧P always opens Search.",
-            ),
+            footer: Some(t::settings::footer_search()),
         },
         Section {
-            title: "Daemon",
+            title: t::settings::section_daemon(),
             rows: DAEMON_ROWS
                 .iter()
                 .map(|(area, title)| Row {
                     key: "",
-                    title,
+                    title: title.get(),
                     field: Field::Daemon {
                         area: *area,
                         on: daemon.on(*area),
                     },
                 })
                 .collect(),
-            footer: Some(
-                "Each is off whenever the daemon starts. After a restart a notice offers to turn \
-                 back on the ones you had on.",
-            ),
+            footer: Some(t::settings::footer_daemon()),
         },
         Section {
-            title: "Keep Mac Awake",
+            title: t::settings::section_keep_mac_awake(),
             rows: vec![
-                choice(read, "mode", "Keep awake", &AWAKE_MODES),
-                toggle(read, "keepDisplayOn", "Keep display on"),
-                toggle(read, "continueAfterSleep", "Continue agents after sleep"),
-            ],
-            footer: Some(
-                "Closing the lid still puts the Mac to sleep. When it wakes, background agents \
-                 whose reply was cut off by sleep are told to continue.",
-            ),
-        },
-        Section {
-            title: "Notch",
-            rows: vec![
-                show_notch,
-                choice(read, "notchWidth", "Width", &WIDTHS),
-                toggle(read, "showPet", "Animate pet"),
-                toggle(read, "showLastReply", "Show the last reply when peeking"),
+                choice(read, "mode", t::settings::mode(), &AWAKE_MODES),
+                toggle(read, "keepDisplayOn", t::settings::keep_display_on()),
                 toggle(
                     read,
-                    "replyFromNotch",
-                    "Reply to background agents from the notch",
+                    "continueAfterSleep",
+                    t::settings::continue_after_sleep(),
                 ),
             ],
-            footer: None,
+            footer: Some(t::settings::footer_keep_mac_awake()),
         },
         Section {
-            title: "Claude Code",
+            title: t::settings::section_notch(),
             rows: vec![
-                toggle(read, "answerFromNotch", "Answer prompts from the notch"),
-                toggle(read, "keepPages", "Keep local copies of artifacts"),
+                show_notch,
+                choice(read, "notchWidth", t::settings::notch_width(), &WIDTHS),
+                toggle(read, "showPet", t::settings::show_pet()),
+                toggle(read, "showLastReply", t::settings::show_last_reply()),
+                toggle(read, "replyFromNotch", t::settings::reply_from_notch()),
             ],
             footer: None,
         },
         Section {
-            title: "When the Account in Use Nears Its Limit",
-            rows: limits,
-            footer: Some(
-                "Notify tells you at 90% and 100% of a limit. Notify and Switch also moves to the \
-                 saved account with the most room.",
-            ),
-        },
-        Section {
-            title: "Codex",
-            rows: vec![toggle(read, "codexNetwork", "Allow network in Codex turns")],
+            title: t::settings::section_claude_code(),
+            rows: vec![
+                toggle(read, "answerFromNotch", t::settings::answer_from_notch()),
+                toggle(read, "keepPages", t::settings::keep_pages()),
+            ],
             footer: None,
         },
         Section {
-            title: "Chat",
+            title: t::settings::section_account_limit(),
+            rows: limits,
+            footer: Some(t::settings::footer_account_limit()),
+        },
+        Section {
+            title: t::settings::section_codex(),
+            rows: vec![toggle(read, "codexNetwork", t::settings::codex_network())],
+            footer: None,
+        },
+        Section {
+            title: t::settings::section_chat(),
             rows: vec![choice(
                 read,
                 history::KEY,
-                "Conversation history to load",
+                t::settings::chat_history(),
                 &history::CHOICES,
             )],
-            footer: Some(
-                "Chat shows the newest part of a long session. More shows earlier turns and uses \
-                 more memory. It applies the next time a session loads.",
-            ),
+            footer: Some(t::settings::footer_chat()),
         },
     ]
 }

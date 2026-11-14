@@ -1,6 +1,6 @@
 use serde_json::{json, Value};
 
-use super::model::{time_label, ActivityModel, Check, Entry, Kind, LineCheck, Load, SPOOLED_NOTE};
+use super::model::{time_label, ActivityModel, Check, Entry, Kind, LineCheck, Load};
 use super::renders::{model, Shown, NOW_MS, OPEN_SEQ, UTC};
 use super::wire;
 
@@ -207,7 +207,7 @@ fn spooled_row_says_so() {
     let e = Entry::parse(&value).unwrap();
     assert!(e.spooled);
     assert_eq!(
-        SPOOLED_NOTE,
+        notchling_locale::settings::activity_spooled(),
         "Recorded by the app while the daemon was down"
     );
 }

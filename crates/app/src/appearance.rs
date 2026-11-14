@@ -6,7 +6,11 @@ use serde_json::Value;
 
 pub const KEY: &str = "appearance";
 
-pub const CHOICES: [(&str, &str); 3] = [("system", "System"), ("light", "Light"), ("dark", "Dark")];
+pub const CHOICES: [(&str, notchling_locale::Text); 3] = [
+    ("system", notchling_locale::settings::APPEARANCE_SYSTEM),
+    ("light", notchling_locale::settings::APPEARANCE_LIGHT),
+    ("dark", notchling_locale::settings::APPEARANCE_DARK),
+];
 
 pub fn from_settings(settings: &Settings) -> Preference {
     settings

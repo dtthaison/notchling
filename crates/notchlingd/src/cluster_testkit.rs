@@ -2,9 +2,9 @@ use crate::acting_ops_tests::FakeRoom;
 use crate::cluster_node::{
     ClusterLog, ClusterNode, ClusterSetup, Hooks, LocalCalls, NetSide, NoHooks,
 };
+use crate::cluster_versions::own;
 use crate::event_assert::text;
 use crate::late_emit::Events;
-use crate::cluster_versions::own;
 use notchling_cluster_net::{
     fingerprint, Conn, Error, LinkEvents, Listener, MemNet, MemTransport, Pins, Transport,
 };

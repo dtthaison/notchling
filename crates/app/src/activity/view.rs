@@ -12,8 +12,9 @@ use notchling_kit::ui::{
     TextEditorEvent,
 };
 use notchling_kit::{Appearance, Icon, Ink, TypeRole};
+use notchling_locale as t;
 
-use super::model::{time_label, ActivityModel, Check, Entry, Kind, SPOOLED_NOTE};
+use super::model::{time_label, ActivityModel, Check, Entry, Kind};
 use super::renders::{model as fixture, shown, NOW_MS, UTC};
 use super::wire;
 use crate::acting::Acting;
@@ -57,7 +58,7 @@ impl ActivityView {
         cx: &mut Context<Self>,
     ) -> ActivityView {
         let search =
-            cx.new(|cx| TextEditor::new("Search Operation or Result", 1, cx).single_line());
+            cx.new(|cx| TextEditor::new(t::settings::activity_search(), 1, cx).single_line());
         let events = cx.subscribe(&search, |this, editor, event: &TextEditorEvent, cx| {
             if *event == TextEditorEvent::Changed {
                 this.model.search = editor.read(cx).text().to_owned();
@@ -122,10 +123,10 @@ impl ActivityView {
     fn details(&self, e: &Entry, a: Appearance, cx: &mut Context<Self>) -> Div {
         let mut lines: Vec<String> = Vec::new();
         if let Some(event) = &e.event {
-            lines.push(format!("Event: {event}"));
+            lines.push(t::settings::activity_detail_event(event));
         }
         if let Some(outcome) = &e.outcome {
-            lines.push(format!("Outcome: {outcome}"));
+            lines.push(t::settings::activity_detail_outcome(outcome));
         }
         let mut block = div()
             .ml(px(BADGE_COLUMN + 23.0))
@@ -151,9 +152,9 @@ impl ActivityView {
         let b = button(
             SharedString::from(format!("activity-check-{seq}")),
             if running {
-                "Checking\u{2026}"
+                t::settings::activity_check_running()
             } else {
-                "Check Against the Audit Log"
+                t::settings::activity_check_button()
             },
             ButtonKind::Secondary,
             state,
@@ -196,7 +197,7 @@ impl ActivityView {
                 let on = self.model.is_on(kind);
                 let count = self.model.count(kind);
                 let text = if count > 0 {
-                    format!("{} {count}", kind.label())
+                    t::settings::activity_chip(kind.label(), count)
                 } else {
                     kind.label().to_owned()
                 };
@@ -310,10 +311,14 @@ impl ActivityView {
                         .w_full()
                         .elide(),
                     )
-                    .children(
-                        e.spooled
-                            .then(|| label(SPOOLED_NOTE, TypeRole::Meta, Ink::TextFaint, a)),
-                    ),
+                    .children(e.spooled.then(|| {
+                        label(
+                            t::settings::activity_spooled(),
+                            TypeRole::Meta,
+                            Ink::TextFaint,
+                            a,
+                        )
+                    })),
             )
             .child(div().flex_shrink_0().child(label(
                 &time_label(clock.0, e.time_ms, clock.1),
@@ -372,11 +377,8 @@ impl ActivityView {
             ),
         );
         let note = match (visible.len() > shown, self.model.truncated) {
-            (true, _) => Some(format!(
-                "Showing the newest {shown} of {} rows",
-                visible.len()
-            )),
-            (false, true) => Some("The oldest rows are not shown".to_owned()),
+            (true, _) => Some(t::settings::activity_showing(shown, visible.len())),
+            (false, true) => Some(t::settings::activity_truncated().to_owned()),
             _ => None,
         };
         body.children(note.map(|n| label(&n, TypeRole::Meta, Ink::TextFaint, a)))
@@ -397,9 +399,9 @@ impl Render for ActivityView {
             let b = button(
                 "activity-refresh",
                 if loading {
-                    "Refreshing\u{2026}"
+                    t::settings::activity_refreshing()
                 } else {
-                    "Refresh"
+                    t::settings::activity_refresh()
                 },
                 ButtonKind::Secondary,
                 state,

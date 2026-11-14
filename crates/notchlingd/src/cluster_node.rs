@@ -1,12 +1,14 @@
 use crate::acting_ops::Room;
 use crate::cluster_driver::Driver;
+use crate::late_emit::Events as LogEvents;
 use notchling_cluster_net::{Conn, LinkEvents, Pins, Transport};
 use notchling_engine::cluster::core::{LocalCmd, CALL_MS};
 use notchling_engine::cluster::wire::{Origin, WireError};
 use notchling_engine::cluster::{Desired, Input, NodeId, Versions};
-use crate::late_emit::Events as LogEvents;
 use notchling_events::kinds::choices::SwitchName;
-use notchling_events::kinds::security::{ClusterStep, ClusterStepTaken, SwitchCause, SwitchChanged};
+use notchling_events::kinds::security::{
+    ClusterStep, ClusterStepTaken, SwitchCause, SwitchChanged,
+};
 use notchling_events::spec::Outcome;
 use notchling_events::{field_ref::Machine, Event, Op, Ref};
 use notchling_local_api::{ApiError, ErrorCode};

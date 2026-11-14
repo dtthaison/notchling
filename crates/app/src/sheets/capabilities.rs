@@ -1,9 +1,5 @@
 use notchling_engine::contract::{Capability, Kind, Registry, Tool};
-
-pub const TITLE: &str = "What Notchling Can Do";
-
-pub const FOOTER: &str =
-    "Anything not listed works natively for that tool. notchling providers prints every row.";
+use notchling_locale as t;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RowState {
@@ -15,9 +11,9 @@ pub enum RowState {
 impl RowState {
     pub fn word(self) -> &'static str {
         match self {
-            RowState::Fallback => "Notchling's own",
-            RowState::NotApplicable => "Not applicable",
-            RowState::Gap => "Not built yet",
+            RowState::Fallback => t::settings::capability_fallback(),
+            RowState::NotApplicable => t::settings::capability_not_applicable(),
+            RowState::Gap => t::settings::capability_gap(),
         }
     }
 }

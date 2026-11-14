@@ -1,9 +1,7 @@
 use notchling_engine::versions::Tool;
 use serde_json::{json, Value};
 
-use super::client_check::{
-    check_line, go_back, soak_line, update_button, INSTALL_FIRST, NOT_CHECKED,
-};
+use super::client_check::{check_line, go_back, soak_line, update_button};
 use super::client_model::{client_part_with, Extras};
 
 const AT: i64 = 1_700_000_000_000;
@@ -44,7 +42,10 @@ fn install_off_disables_update_with_a_note() {
     let newer = row("2.1.324", Some("2.1.325"), "native");
     let off = update_button(Tool::Claude, &newer, false).unwrap();
     assert!(!off.enabled);
-    assert_eq!(off.note.as_deref(), Some(INSTALL_FIRST));
+    assert_eq!(
+        off.note.as_deref(),
+        Some(notchling_locale::settings::client_install_first())
+    );
     let on = update_button(Tool::Claude, &newer, true).unwrap();
     assert!(on.enabled);
     assert_eq!(on.note, None);
@@ -53,7 +54,10 @@ fn install_off_disables_update_with_a_note() {
 #[test]
 fn check_line_says_partly_and_what_wasnt_checked() {
     let mut r = row("2.1.324", None, "native");
-    assert_eq!(check_line(Tool::Claude, &r, 0).text, NOT_CHECKED);
+    assert_eq!(
+        check_line(Tool::Claude, &r, 0).text,
+        notchling_locale::settings::client_not_checked()
+    );
     r["reference"] = json!({
         "version": "2.1.324", "sha256": "ab", "result": "partly", "partly": true,
         "at": AT, "unchecked": ["screens", "dialogs", "turns"],
@@ -75,7 +79,10 @@ fn check_line_says_partly_and_what_wasnt_checked() {
         "Partly checked 23:13 · version, doctor, transcripts"
     );
     r["usable"] = json!(false);
-    assert_eq!(check_line(Tool::Claude, &r, 0).text, NOT_CHECKED);
+    assert_eq!(
+        check_line(Tool::Claude, &r, 0).text,
+        notchling_locale::settings::client_not_checked()
+    );
 }
 
 #[test]

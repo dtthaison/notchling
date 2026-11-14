@@ -1,15 +1,9 @@
 use notchling_engine::install::summary;
+use notchling_locale::{self as t, Text};
 
 use super::agents::{info, HOOKS};
 use crate::welcome::facts::{HookFacts, PresentHook};
 use crate::welcome::hooks::DETACHED;
-
-pub const TITLE: &str = "Hooks";
-pub const FOOTER: &str =
-    "Read from Claude Code's settings.json when Settings opened. Install Hook in \
-                          Welcome adds or changes them.";
-pub const CHECKING: &str = "Checking Claude Code's settings";
-pub const OTHER: &str = "Runs Notchling's hook";
 
 const LONGEST: usize = 40;
 
@@ -25,10 +19,10 @@ pub enum HookState {
 impl HookState {
     pub fn word(self) -> Option<&'static str> {
         match self {
-            HookState::Installed => Some("Installed"),
-            HookState::Missing => Some("Not installed"),
-            HookState::Swift => Some("Swift app"),
-            HookState::NotManaged => Some("Not managed"),
+            HookState::Installed => Some(t::settings::hook_installed()),
+            HookState::Missing => Some(t::settings::hook_missing()),
+            HookState::Swift => Some(t::settings::hook_swift()),
+            HookState::NotManaged => Some(t::settings::hook_not_managed()),
             HookState::Unknown => None,
         }
     }
@@ -65,12 +59,10 @@ impl HooksShown {
 
     pub fn status(&self) -> Option<String> {
         match self {
-            HooksShown::Checking => Some(CHECKING.into()),
+            HooksShown::Checking => Some(t::settings::hooks_checking().into()),
             HooksShown::Detached => Some(DETACHED.into()),
             HooksShown::Failed(e) => Some(e.clone()),
-            HooksShown::Refused(why) => Some(format!(
-                "Claude Code's settings.json was left alone: it {why}."
-            )),
+            HooksShown::Refused(why) => Some((*why).to_owned()),
             HooksShown::Found(_) => None,
         }
     }
@@ -128,26 +120,26 @@ impl HooksShown {
 
 fn category(reason: Option<&str>) -> &'static str {
     let reason = reason.unwrap_or_default();
-    let table: [(&str, &str); 9] = [
-        ("valid JSON", "isn't valid JSON"),
-        ("JSON object", "isn't a JSON object"),
-        ("twice", "has a key written twice"),
-        ("not an object", "has hooks that aren't an object"),
-        ("not a list", "has a hook event that isn't a list"),
-        ("link", "is a link to a missing file"),
-        ("regular file", "isn't a regular file"),
-        ("too big", "is too big"),
-        ("read-only", "is read-only"),
+    let table: [(&str, Text); 9] = [
+        ("valid JSON", t::settings::HOOKS_REFUSED_INVALID_JSON),
+        ("JSON object", t::settings::HOOKS_REFUSED_NOT_OBJECT),
+        ("twice", t::settings::HOOKS_REFUSED_TWICE),
+        ("not an object", t::settings::HOOKS_REFUSED_HOOKS_NOT_OBJECT),
+        ("not a list", t::settings::HOOKS_REFUSED_EVENT_NOT_LIST),
+        ("link", t::settings::HOOKS_REFUSED_BROKEN_LINK),
+        ("regular file", t::settings::HOOKS_REFUSED_NOT_REGULAR),
+        ("too big", t::settings::HOOKS_REFUSED_TOO_BIG),
+        ("read-only", t::settings::HOOKS_REFUSED_READ_ONLY),
     ];
     for (needle, text) in table {
         if reason.contains(needle) {
-            return text;
+            return text.get();
         }
     }
     if reason.contains("UTF-8") {
-        "isn't UTF-8 text"
+        t::settings::hooks_refused_not_utf8()
     } else {
-        "can't be read"
+        t::settings::hooks_refused_unreadable()
     }
 }
 
@@ -165,6 +157,6 @@ fn slot_line(event: &str, matcher: &str, state: HookState, command: Option<Strin
         title: format!("{} · {}", cut(event), cut(matcher)),
         state,
         command,
-        what: info(event, matcher).map_or(OTHER, |h| h.what),
+        what: info(event, matcher).map_or(t::settings::hooks_other(), |h| h.what.get()),
     }
 }

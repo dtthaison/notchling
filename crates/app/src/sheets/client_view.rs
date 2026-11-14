@@ -5,13 +5,9 @@ use notchling_engine::versions::Mark;
 use notchling_kit::part::{ButtonKind, PartState};
 use notchling_kit::ui::{button, card, hsla, label, KitPart};
 use notchling_kit::{Appearance, Ink, TypeRole};
+use notchling_locale as t;
 
 use super::client_model::{ClientPart, WorkerLine};
-
-pub const TITLE: &str = "Client";
-pub const CHECKING: &str = "Looking…";
-pub const CHECK_AGAIN: &str = "Check Again";
-pub const CANCEL: &str = "Cancel";
 
 pub type Click = Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>;
 
@@ -105,7 +101,7 @@ fn client_rows(part: &ClientPart, handlers: &ClientHandlers, a: Appearance) -> D
                     .child(note_stack(latest, Ink::Text, update.note.as_deref(), a))
                     .child(action(
                         "client-update",
-                        "Update",
+                        t::settings::client_update(),
                         ButtonKind::Secondary,
                         update.enabled && !part.busy,
                         &handlers.update,
@@ -125,7 +121,7 @@ fn client_rows(part: &ClientPart, handlers: &ClientHandlers, a: Appearance) -> D
                 .child(note_stack(&check.text, ink, check.details.as_deref(), a))
                 .child(action(
                     "client-check",
-                    CHECK_AGAIN,
+                    t::settings::client_check_again(),
                     ButtonKind::Secondary,
                     !part.busy,
                     &handlers.check,
@@ -151,7 +147,7 @@ fn client_rows(part: &ClientPart, handlers: &ClientHandlers, a: Appearance) -> D
                 ))
                 .child(action(
                     "client-go-back-cancel",
-                    CANCEL,
+                    t::settings::client_cancel(),
                     ButtonKind::Ghost,
                     true,
                     &handlers.cancel_back,
@@ -181,17 +177,23 @@ pub fn client_section(
     a: Appearance,
     cx: &App,
 ) -> Div {
-    let rows = match part {
-        Some(part) => client_rows(part, handlers, a),
-        None => div().flex().flex_col().child(
-            row_shell(a, true).child(label(CHECKING, TypeRole::Body, Ink::Text, a).flex_1()),
-        ),
-    };
+    let rows =
+        match part {
+            Some(part) => client_rows(part, handlers, a),
+            None => div().flex().flex_col().child(row_shell(a, true).child(
+                label(t::settings::client_looking(), TypeRole::Body, Ink::Text, a).flex_1(),
+            )),
+        };
     div()
         .flex()
         .flex_col()
         .gap(px(6.0))
-        .child(label(TITLE, TypeRole::Section, Ink::TextFaint, a))
+        .child(label(
+            t::settings::client_title(),
+            TypeRole::Section,
+            Ink::TextFaint,
+            a,
+        ))
         .child(card(a).overflow_hidden().child(rows))
         .part("Client", a, cx)
 }

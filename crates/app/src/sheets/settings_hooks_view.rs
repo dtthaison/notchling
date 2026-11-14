@@ -2,9 +2,9 @@ use gpui::{div, prelude::*, px, App, Div};
 use notchling_kit::metric::RADIUS_SM;
 use notchling_kit::ui::{card, hsla, label, status_pill, KitPart, KitStyled};
 use notchling_kit::{sentence, Appearance, Ink, Status, TypeRole};
+use notchling_locale as t;
 
-use super::agents::PASS_NOTE;
-use super::hook_rows::{HookLine, HookState, HooksShown, FOOTER, TITLE};
+use super::hook_rows::{HookLine, HookState, HooksShown};
 
 fn tag(text: &str, a: Appearance) -> Div {
     div()
@@ -70,7 +70,12 @@ pub fn hooks_section(shown: &HooksShown, a: Appearance, cx: &App) -> Div {
         .flex()
         .flex_col()
         .gap(px(6.0))
-        .child(label(TITLE, TypeRole::Section, Ink::TextFaint, a))
+        .child(label(
+            t::settings::hooks(),
+            TypeRole::Section,
+            Ink::TextFaint,
+            a,
+        ))
         .children(
             shown
                 .status()
@@ -82,7 +87,17 @@ pub fn hooks_section(shown: &HooksShown, a: Appearance, cx: &App) -> Div {
                 .flex_col()
                 .children(lines.iter().enumerate().map(|(i, l)| row(l, i == 0, a))),
         )
-        .child(label(PASS_NOTE, TypeRole::Meta, Ink::TextFaint, a))
-        .child(label(FOOTER, TypeRole::Meta, Ink::TextFaint, a))
+        .child(label(
+            t::settings::hooks_pass_note(),
+            TypeRole::Meta,
+            Ink::TextFaint,
+            a,
+        ))
+        .child(label(
+            t::settings::hooks_footer(),
+            TypeRole::Meta,
+            Ink::TextFaint,
+            a,
+        ))
         .part("Agents Hooks", a, cx)
 }

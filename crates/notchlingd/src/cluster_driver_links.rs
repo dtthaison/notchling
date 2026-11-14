@@ -1,10 +1,10 @@
 use super::Driver;
 use crate::cluster_node::{Events, In};
-use notchling_events::kinds::security::ClusterStep;
-use notchling_events::spec::Outcome;
 use notchling_cluster_net::Conn;
 use notchling_engine::cluster::persist;
 use notchling_engine::cluster::{Input, NodeId};
+use notchling_events::kinds::security::ClusterStep;
+use notchling_events::spec::Outcome;
 use std::sync::Arc;
 
 impl Driver {

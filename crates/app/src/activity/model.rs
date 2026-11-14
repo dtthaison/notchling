@@ -1,4 +1,5 @@
 use notchling_engine::pages::clock::civil_at;
+use notchling_locale::{self as t, Text};
 use serde_json::Value;
 use std::collections::HashMap;
 
@@ -39,12 +40,12 @@ impl Kind {
 
     pub fn label(self) -> &'static str {
         match self {
-            Kind::Refused => "Refused",
-            Kind::Failed => "Failed",
-            Kind::Acted => "Acted",
-            Kind::Setting => "Setting",
-            Kind::Inbox => "Inbox",
-            Kind::AccountSwitch => "Account Switch",
+            Kind::Refused => t::settings::activity_kind_refused(),
+            Kind::Failed => t::settings::activity_kind_failed(),
+            Kind::Acted => t::settings::activity_kind_acted(),
+            Kind::Setting => t::settings::activity_kind_setting(),
+            Kind::Inbox => t::settings::activity_kind_inbox(),
+            Kind::AccountSwitch => t::settings::activity_kind_account_switch(),
         }
     }
 
@@ -80,9 +81,9 @@ pub enum LineCheck {
 impl LineCheck {
     pub fn text(self) -> &'static str {
         match self {
-            LineCheck::Matches => "Matches the sealed entry",
-            LineCheck::Differs => "Doesn't match the sealed entry",
-            LineCheck::Unsealed => "That entry isn't sealed",
+            LineCheck::Matches => t::settings::activity_check_matches(),
+            LineCheck::Differs => t::settings::activity_check_differs(),
+            LineCheck::Unsealed => t::settings::activity_check_unsealed(),
         }
     }
 }
@@ -93,8 +94,6 @@ pub enum Check {
     Done(LineCheck),
     Failed(String),
 }
-
-pub const SPOOLED_NOTE: &str = "Recorded by the app while the daemon was down";
 
 impl Entry {
     pub fn parse(value: &Value) -> Option<Entry> {
@@ -150,15 +149,13 @@ impl Entry {
 
     pub fn line(&self) -> String {
         let place = match self.source.as_str() {
-            "phone" => format!("{} (phone)", self.who),
+            "phone" => t::settings::activity_from_phone(&self.who),
             _ => self.who.clone(),
         };
-        let mut line = format!("{place} \u{b7} {}", self.result);
-        if let Some(detail) = &self.detail {
-            line.push_str(" \u{b7} ");
-            line.push_str(detail);
+        match &self.detail {
+            Some(detail) => t::settings::activity_line_detail(&place, &self.result, detail),
+            None => t::settings::activity_line(&place, &self.result),
         }
-        line
     }
 
     pub fn matches(&self, needle: &str) -> bool {
@@ -246,9 +243,9 @@ impl ActivityModel {
         let done = match (reply, entry) {
             (Ok(value), Some(entry)) => match entry.compare(&value) {
                 Some(check) => Check::Done(check),
-                None => Check::Failed("The daemon didn't send that entry".to_owned()),
+                None => Check::Failed(t::settings::activity_check_no_entry().to_owned()),
             },
-            (Ok(_), None) => Check::Failed("That row is no longer listed".to_owned()),
+            (Ok(_), None) => Check::Failed(t::settings::activity_check_gone().to_owned()),
             (Err(message), _) => Check::Failed(message),
         };
         self.checks.insert(seq, done);
@@ -282,19 +279,32 @@ impl ActivityModel {
 
     pub fn empty_text(&self) -> Option<String> {
         match &self.load {
-            Load::Loading if self.entries.is_empty() => Some("Loading\u{2026}".to_owned()),
+            Load::Loading if self.entries.is_empty() => {
+                Some(t::settings::activity_loading().to_owned())
+            }
             Load::Failed(message) => Some(message.clone()),
             _ if self.visible().is_empty() && self.entries.is_empty() => {
-                Some("No activity yet".to_owned())
+                Some(t::settings::activity_empty().to_owned())
             }
-            _ if self.visible().is_empty() => Some("Nothing matches".to_owned()),
+            _ if self.visible().is_empty() => Some(t::settings::activity_no_match().to_owned()),
             _ => None,
         }
     }
 }
 
-const MONTHS: [&str; 12] = [
-    "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+const MONTHS: [Text; 12] = [
+    t::settings::ACTIVITY_MONTH_JAN,
+    t::settings::ACTIVITY_MONTH_FEB,
+    t::settings::ACTIVITY_MONTH_MAR,
+    t::settings::ACTIVITY_MONTH_APR,
+    t::settings::ACTIVITY_MONTH_MAY,
+    t::settings::ACTIVITY_MONTH_JUN,
+    t::settings::ACTIVITY_MONTH_JUL,
+    t::settings::ACTIVITY_MONTH_AUG,
+    t::settings::ACTIVITY_MONTH_SEP,
+    t::settings::ACTIVITY_MONTH_OCT,
+    t::settings::ACTIVITY_MONTH_NOV,
+    t::settings::ACTIVITY_MONTH_DEC,
 ];
 
 pub fn time_label(now_ms: i64, at_ms: i64, offset_secs: i64) -> String {
@@ -307,18 +317,20 @@ pub fn time_label(now_ms: i64, at_ms: i64, offset_secs: i64) -> String {
         0 => 12,
         h => h,
     };
-    let clock = format!(
-        "{hour}:{:02} {}",
-        at.minute,
-        if at.hour < 12 { "AM" } else { "PM" }
-    );
+    let minute = format!("{:02}", at.minute);
+    let clock = if at.hour < 12 {
+        t::settings::activity_time_am(&hour.to_string(), &minute)
+    } else {
+        t::settings::activity_time_pm(&hour.to_string(), &minute)
+    };
     if (at.year, at.month, at.day) == (now.year, now.month, now.day) {
         return clock;
     }
-    let month = MONTHS[(at.month as usize - 1) % 12];
+    let month = MONTHS[(at.month as usize - 1) % 12].get();
+    let day = at.day.to_string();
     if at.year == now.year {
-        format!("{month} {}, {clock}", at.day)
+        t::settings::activity_time_date(month, &day, &clock)
     } else {
-        format!("{month} {}, {}, {clock}", at.day, at.year)
+        t::settings::activity_time_date_year(month, &day, &at.year.to_string(), &clock)
     }
 }

@@ -34,7 +34,7 @@ struct Kit {
     room: Arc<FakeRoom>,
     switches: Arc<HeadlessSwitches>,
     sink: Arc<notchling_events::MemorySink>,
-    dir: Dir,
+    _dir: Dir,
 }
 
 impl Kit {
@@ -54,7 +54,7 @@ fn kit(tag: &str) -> Kit {
         room,
         switches,
         sink,
-        dir,
+        _dir: dir,
     }
 }
 

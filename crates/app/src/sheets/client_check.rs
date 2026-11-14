@@ -1,12 +1,8 @@
 use notchling_engine::pages::clock::civil_at;
 use notchling_engine::versions::update::update_argv;
 use notchling_engine::versions::{Method, Tool, Version};
+use notchling_locale as t;
 use serde_json::Value;
-
-pub const INSTALL_FIRST: &str = "Turn on Install in Settings first";
-pub const NOT_CHECKED: &str = "Not checked yet";
-pub const CHECKING: &str = "Checking…";
-pub const CANT_TELL: &str = "Couldn't tell yet. Trying again in a couple of minutes.";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct UpdateButton {
@@ -89,7 +85,7 @@ pub fn update_button(tool: Tool, row: &Value, install_on: bool) -> Option<Update
     update_argv(tool, method, None).ok()?;
     Some(UpdateButton {
         enabled: install_on,
-        note: (!install_on).then(|| INSTALL_FIRST.to_owned()),
+        note: (!install_on).then(|| t::settings::client_install_first().to_owned()),
     })
 }
 
@@ -100,10 +96,10 @@ pub fn check_line(tool: Tool, row: &Value, offset_secs: i64) -> CheckLine {
         details: None,
     };
     if busy(row) {
-        return plain(CHECKING);
+        return plain(t::settings::client_checking());
     }
     let Some(installed) = installed_version(row) else {
-        return plain(NOT_CHECKED);
+        return plain(t::settings::client_not_checked());
     };
     let reference = row.get("reference").filter(|r| r.is_object());
     let held = reference.and_then(|r| version_of(r.get("version")));
@@ -160,9 +156,9 @@ pub fn check_line(tool: Tool, row: &Value, offset_secs: i64) -> CheckLine {
         .and_then(|c| c.get("result"))
         .and_then(Value::as_str);
     if last == Some("cant_tell") {
-        return plain(CANT_TELL);
+        return plain(t::settings::client_cant_tell());
     }
-    plain(NOT_CHECKED)
+    plain(t::settings::client_not_checked())
 }
 
 pub fn soak_line(row: &Value) -> Option<(String, bool)> {
