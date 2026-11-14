@@ -132,18 +132,27 @@ fn a_screen_with_no_input_box_gets_no_keys() {
 }
 
 #[test]
-fn a_draft_the_clear_keys_leave_gets_no_message_added() {
-    let mut pty = FakePrompt::idle().holding("a long draft").stuck();
+fn a_draft_in_the_box_is_never_typed_over() {
+    let mut pty = FakePrompt::idle().holding("a long draft");
     assert_eq!(send(&mut pty, "hi"), Err(Failure::NotCleared));
-    assert_eq!(pty.writes, [keys::clear_input()]);
+    assert!(pty.writes.is_empty(), "not a key, not even the clear");
     assert_eq!(pty.held(), Some("a long draft"));
 }
 
 #[test]
-fn a_stale_draft_is_cleared_before_the_message_goes_in() {
+fn a_stale_draft_on_the_screen_stops_the_message_too() {
     let mut pty = FakePrompt::new(&["⏺ ok", RULE, "❯ stale", "  draft", RULE]);
+    assert_eq!(send(&mut pty, "hi"), Err(Failure::NotCleared));
+    assert!(pty.writes.is_empty());
+    assert!(pty.sent.is_empty());
+}
+
+#[test]
+fn the_message_itself_left_in_the_box_by_an_earlier_try_is_cleared_and_sent_once() {
+    let mut pty = FakePrompt::idle().holding("hi");
     assert_eq!(send(&mut pty, "hi"), Ok(Outcome { taken: false }));
     assert_eq!(pty.sent, ["hi"]);
+    assert_eq!(pty.writes, typed("hi"));
 }
 
 #[test]
@@ -154,11 +163,15 @@ fn the_new_failures_say_what_happened_and_what_to_do() {
     );
     assert_eq!(
         Failure::NotCleared.to_string(),
-        "The session's input box still holds text, so nothing was sent. Clear it in the terminal, then send again."
+        "The session's input box holds text that isn't from this message, so nothing was typed. Send again when it is empty."
     );
     assert_eq!(
         Failure::NotTaken.to_string(),
         "The session's terminal didn't take the message, so it wasn't sent. Send it again."
+    );
+    assert_eq!(
+        Failure::Mixed.to_string(),
+        "Something else was typed in the session's input box while the message went in, so it wasn't sent. Check the terminal."
     );
     assert_eq!(
         Failure::NotSent.to_string(),

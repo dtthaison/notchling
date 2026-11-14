@@ -1,5 +1,5 @@
 use crate::acting_ops_tests::{app, sessions, setup, Setup, PROMPT};
-use notchling_engine::reply::held::START_GRACE_MS;
+use notchling_engine::reply::held::{BLOCKED_RETRY_MS, SETTLE_MS, START_GRACE_MS};
 use notchling_local_api::{ops, topics};
 use serde_json::{json, Value};
 use std::sync::atomic::Ordering;
@@ -29,6 +29,11 @@ fn at_prompt(s: &Setup, id: &str, group: &str) {
             row["atPrompt"] = json!(true);
         }
     }
+}
+
+fn settle(s: &Setup, at: i64) {
+    s.ops.flush_held(at);
+    s.ops.flush_held(at + SETTLE_MS);
 }
 
 fn typed(s: &Setup) -> String {
@@ -71,7 +76,7 @@ fn the_held_text_is_typed_once_when_the_turn_ends() {
     s.ops.flush_held(1_000);
     assert!(s.writes.lock().unwrap().is_empty(), "still working");
     finish(&s, "job-a");
-    s.ops.flush_held(2_000);
+    settle(&s, 2_000);
     let written = typed(&s);
     assert!(written.contains("two\n\nthree"), "{written}");
     assert_eq!(s.ops.held_text("job-a"), None);
@@ -81,7 +86,7 @@ fn the_held_text_is_typed_once_when_the_turn_ends() {
         &json!({"id": "job-a", "text": null})
     );
     let before = s.writes.lock().unwrap().len();
-    s.ops.flush_held(3_000 + START_GRACE_MS);
+    s.ops.flush_held(3_000 + SETTLE_MS + START_GRACE_MS);
     assert_eq!(s.writes.lock().unwrap().len(), before, "sent once");
 }
 
@@ -91,21 +96,25 @@ fn held_text_the_terminal_does_not_send_stays_held_and_goes_out_later() {
     reply(&s, "job-a", "two");
     finish(&s, "job-a");
     s.deaf.store(true, Ordering::SeqCst);
-    s.ops.flush_held(1_000);
+    settle(&s, 1_000);
+    let failed_at = 1_000 + SETTLE_MS;
+    assert!(typed(&s).contains("two"), "it was tried");
     assert_eq!(
         s.ops.held_text("job-a").as_deref(),
         Some("two"),
         "an Enter the terminal ignored sent nothing"
     );
-    assert_eq!(
-        s.room.named(topics::SESSION_HELD).last().unwrap(),
-        &json!({"id": "job-a", "text": "two"})
+    let shown = s.room.named(topics::SESSION_HELD).last().cloned().unwrap();
+    assert_eq!(shown["text"], json!("two"));
+    assert!(
+        shown["note"].as_str().unwrap().contains("wasn't sent"),
+        "the failure says what happened: {shown}"
     );
     s.deaf.store(false, Ordering::SeqCst);
     let tried = s.writes.lock().unwrap().len();
-    s.ops.flush_held(2_000);
+    s.ops.flush_held(failed_at + 1_000);
     assert_eq!(s.writes.lock().unwrap().len(), tried, "not again at once");
-    s.ops.flush_held(1_000 + START_GRACE_MS);
+    settle(&s, failed_at + BLOCKED_RETRY_MS);
     assert_eq!(s.ops.held_text("job-a"), None);
     assert_eq!(
         s.room.named(topics::SESSION_HELD).last().unwrap(),
@@ -132,7 +141,7 @@ fn nothing_is_flushed_while_acting_is_off() {
     assert!(s.writes.lock().unwrap().is_empty());
     assert_eq!(s.ops.held_text("job-a").as_deref(), Some("two"));
     s.ops.acting.set(true);
-    s.ops.flush_held(100_000);
+    settle(&s, 100_000);
     assert!(typed(&s).contains("two"));
 }
 
@@ -155,7 +164,7 @@ fn held_text_is_typed_once_the_turn_ends_though_the_row_still_says_working() {
     s.ops.flush_held(1_000);
     assert!(s.writes.lock().unwrap().is_empty(), "the turn is running");
     at_prompt(&s, "job-a", "working");
-    s.ops.flush_held(2_000);
+    settle(&s, 2_000);
     let written = typed(&s);
     assert!(written.contains("padding bottom\n\nhi"), "{written}");
     assert_eq!(s.ops.held_text("job-a"), None);
@@ -166,7 +175,7 @@ fn held_text_is_typed_into_a_session_that_ended_its_turn_asking_in_text() {
     let s = setup(true, SCREEN, sessions());
     reply(&s, "job-a", "two");
     at_prompt(&s, "job-a", "needsInput");
-    s.ops.flush_held(1_000);
+    settle(&s, 1_000);
     assert!(typed(&s).contains("two"));
     assert_eq!(s.ops.held_text("job-a"), None);
 }

@@ -21,6 +21,7 @@ pub mod ops {
     pub const FOLDER_TRUST: &str = "folder.trust";
     pub const SESSION_MOVE: &str = "session.move";
     pub const SESSION_COMMAND: &str = "session.command";
+    pub const SESSION_HELD_DISCARD: &str = "session.held.discard";
     pub const SETTINGS_SET_ACTING: &str = "settings.set_acting";
     pub const SETTINGS_GET_ACTING: &str = "settings.get_acting";
     pub const PROMPTS_LIST: &str = "prompts.list";

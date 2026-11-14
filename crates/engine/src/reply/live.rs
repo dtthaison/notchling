@@ -48,6 +48,10 @@ impl Pty for LiveTerminal {
         }
     }
 
+    fn wait_attached(&mut self, quiet: Duration, timeout: Duration, busy: Duration) -> bool {
+        super::exec::wait_attached(self, quiet, timeout, busy)
+    }
+
     fn screen(&mut self) -> Vec<String> {
         match self.terminal.as_mut() {
             Some(t) => {

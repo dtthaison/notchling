@@ -199,6 +199,8 @@ fn held_then_sent_records_reply_held_and_reply_via_held() {
         }
     }
     s.ops.flush_held(5_000);
+    s.ops
+        .flush_held(5_000 + notchling_engine::reply::held::SETTLE_MS);
     let sent = of(&sink, "session.reply");
     assert_eq!(sent.len(), 1);
     assert_eq!(text(&sent[0], "via").as_deref(), Some("held"));

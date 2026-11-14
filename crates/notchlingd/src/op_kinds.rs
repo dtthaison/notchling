@@ -26,6 +26,7 @@ pub const HOMES: &[(&str, Home)] = &[
     (ops::FOLDER_TRUST, Home::Kind("session.control")),
     (ops::SESSION_MOVE, Home::Kind("session.control")),
     (ops::SESSION_COMMAND, Home::Kind("session.control")),
+    (ops::SESSION_HELD_DISCARD, Home::Called),
     (ops::SETTINGS_SET_ACTING, Home::Kind("switch.changed")),
     (ops::SETTINGS_GET_ACTING, Home::Quiet),
     (ops::PROMPTS_LIST, Home::Quiet),

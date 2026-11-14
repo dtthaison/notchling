@@ -34,7 +34,7 @@ struct Built {
     session: Option<String>,
     agent: Option<String>,
     keys: Vec<SharedString>,
-    tail: Vec<(bool, String)>,
+    tail: Vec<(bool, String, Option<String>)>,
     live: Option<SharedString>,
     inset: bool,
 }
@@ -69,15 +69,16 @@ pub(super) fn keys_of(
     keys
 }
 
-fn tail_of(shown: &Conversation, held: Option<&str>, outgoing: &[String]) -> Vec<(bool, String)> {
-    let queued = shown
-        .queued
-        .iter()
-        .map(String::as_str)
-        .chain(held)
-        .map(|text| (false, text.to_owned()));
-    let sending = outgoing.iter().map(|text| (true, text.clone()));
-    queued.chain(sending).collect()
+fn tail_of(
+    shown: &Conversation,
+    held: Option<&str>,
+    note: Option<&str>,
+    outgoing: &[String],
+) -> Vec<(bool, String, Option<String>)> {
+    let queued = shown.queued.iter().map(|text| (false, text.clone(), None));
+    let held = held.map(|text| (false, text.to_owned(), note.map(String::from)));
+    let sending = outgoing.iter().map(|text| (true, text.clone(), None));
+    queued.chain(held).chain(sending).collect()
 }
 
 pub(super) fn row_at(input: &ConversationInput, i: usize) -> Option<Row> {
@@ -86,20 +87,27 @@ pub(super) fn row_at(input: &ConversationInput, i: usize) -> Option<Row> {
         return Some(row_of(item));
     }
     let k = i - shown.items.len();
-    let user = |text: &String, sending: bool| Row::User {
+    let user = |text: &String, sending: bool, note: Option<&String>| Row::User {
         text: text.clone(),
         images: 0,
         queued: true,
         sending,
+        note: note.cloned(),
     };
     let queued = queued_len(shown, input.held.as_deref());
     if k < shown.queued.len() {
-        return Some(user(&shown.queued[k], false));
+        return Some(user(&shown.queued[k], false, None));
     }
     if k < queued {
-        return input.held.as_ref().map(|text| user(text, false));
+        return input
+            .held
+            .as_ref()
+            .map(|text| user(text, false, input.held_note.as_ref()));
     }
-    input.outgoing.get(k - queued).map(|text| user(text, true))
+    input
+        .outgoing
+        .get(k - queued)
+        .map(|text| user(text, true, None))
 }
 
 pub(super) fn at_bottom(state: &ListState) -> bool {
@@ -197,7 +205,12 @@ impl ListRows {
     ) -> Synced {
         let held = input.held.as_deref();
         let keys = keys_of(&input.shown, held, &input.outgoing);
-        let tail = tail_of(&input.shown, held, &input.outgoing);
+        let tail = tail_of(
+            &input.shown,
+            held,
+            input.held_note.as_deref(),
+            &input.outgoing,
+        );
         let live = live_group_of(input).and_then(|i| keys.get(i).cloned());
         let session = input.session.as_ref().map(|s| s.id.clone());
         let agent = input.subagent.as_ref().map(|s| s.agent_id.clone());

@@ -34,6 +34,7 @@ fn input_for(session: &str, shown: Arc<Conversation>) -> ConversationInput {
         }),
         held_working: false,
         held: None,
+        held_note: None,
         outgoing: Vec::new(),
         loading: false,
         empty_note: None,
@@ -183,6 +184,7 @@ fn a_held_message_is_one_queued_row_between_the_queue_and_the_sending_ones() {
         images: 0,
         queued: true,
         sending,
+        note: None,
     };
     assert_eq!(row_at(&input, 3), Some(user("a", false)));
     assert_eq!(row_at(&input, 4), Some(user("b1\n\nb2", false)));
@@ -317,4 +319,38 @@ fn a_draw_with_nothing_new_leaves_a_reader_near_the_end_where_they_are() {
     assert!(!goes_to_end(false, false, true));
     assert!(goes_to_end(false, true, false));
     assert!(goes_to_end(true, true, true));
+}
+
+#[test]
+fn a_held_message_shows_the_state_the_daemon_gave_it_and_measures_its_row_again_when_it_changes() {
+    let mut rows = list();
+    let c0 = conv(0..3);
+    let mut waiting = input(c0.clone());
+    waiting.held = Some("two".into());
+    rows.sync(&waiting, None, false);
+    let before = rows.spliced().len();
+    let user = |note: Option<&str>| Row::User {
+        text: "two".into(),
+        images: 0,
+        queued: true,
+        sending: false,
+        note: note.map(String::from),
+    };
+    assert_eq!(row_at(&waiting, 3), Some(user(None)));
+    let note = "Waiting — the terminal box has other text";
+    waiting.held_note = Some(note.into());
+    assert_eq!(row_at(&waiting, 3), Some(user(Some(note))));
+    rows.sync(&waiting, None, false);
+    assert_eq!(rows.spliced().len(), before + 1, "its height may differ");
+    assert_eq!(rows.spliced().last(), Some(&(4..5, 1)));
+    rows.sync(&waiting, None, false);
+    assert_eq!(rows.spliced().len(), before + 1, "nothing changed");
+}
+
+#[test]
+fn a_state_with_no_held_text_is_never_shown() {
+    let c0 = conv(0..3);
+    let mut shown = input(c0);
+    shown.held_note = Some("Waiting".into());
+    assert_eq!(row_at(&shown, 3), None);
 }

@@ -58,6 +58,7 @@ fn input() -> ConversationInput {
         }),
         held_working: false,
         held: None,
+        held_note: None,
         outgoing: Vec::new(),
         loading: false,
         empty_note: None,

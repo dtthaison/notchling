@@ -70,8 +70,44 @@ fn a_turn_starting_before_the_job_file_says_so_is_not_called_over() {
     assert!(!a.at_prompt, "busy with nothing in flight is the turn");
     let other = row(&job("running", "idle", 2), Some(&live("busy")));
     assert!(!other.at_prompt);
-    let shell = row(&job("done", "idle", 2), Some(&live("shell")));
-    assert!(!shell.at_prompt);
+}
+
+#[test]
+fn a_session_idle_with_a_background_shell_running_is_at_its_prompt() {
+    let a = row(&job("done", "idle", 2), Some(&live("shell")));
+    assert_eq!(a.group, AgentGroup::Working);
+    assert!(a.at_prompt);
+    assert!(!a.turn_running());
+    assert!(a.takes_held_text());
+}
+
+#[test]
+fn the_maintainers_blocked_job_with_nine_tasks_and_a_shell_status_takes_replies() {
+    let job = json!({
+        "state": "blocked", "tempo": "blocked", "detail": "Choose 1, 2, or 3",
+        "needs": "Choose 1 (first only), 2 (second and third), or 3 (everything)",
+        "inFlight": {"tasks": 9, "queued": 1, "kinds": ["local_bash"], "drainableMonitors": 0},
+        "template": "bg", "name": "main",
+        "sessionId": "68fa48b7-ae0b-4b1f-82bf-ce4e4bdbc3d8", "daemonShort": "9f3883da",
+        "cwd": "/Users/me/app", "backend": "daemon", "updatedAt": "2026-11-14T15:22:08.361Z"
+    });
+    let live = json!({
+        "pid": 40878, "sessionId": "68fa48b7-ae0b-4b1f-82bf-ce4e4bdbc3d8", "kind": "bg",
+        "jobId": "9f3883da", "status": "shell", "statusUpdatedAt": 1_794_668_142_000.0,
+        "entrypoint": "cli", "version": "2.1.322"
+    });
+    let a = agent_from_job(&job, "9f3883da", Some(&live), &none);
+    assert_eq!(a.group, AgentGroup::Working);
+    assert!(a.at_prompt);
+    assert!(!a.turn_running());
+    assert!(a.takes_held_text());
+    assert!(a.can_reply());
+}
+
+#[test]
+fn a_job_with_no_live_session_is_not_at_its_prompt() {
+    let a = row(&job("done", "idle", 2), None);
+    assert!(!a.at_prompt);
 }
 
 #[test]

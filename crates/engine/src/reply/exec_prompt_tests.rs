@@ -153,7 +153,7 @@ fn text_that_keeps_changing_in_the_box_is_typed_but_not_sent() {
         n: 0,
     };
     let out = execute(&plan::reply("hi"), &mut flapping, &Markers, &mut NoQueueLog);
-    assert_eq!(out, Err(Failure::NotSent));
+    assert_eq!(out, Err(Failure::Mixed));
     assert_eq!(pty.writes().len(), 2, "no Enter");
 }
 

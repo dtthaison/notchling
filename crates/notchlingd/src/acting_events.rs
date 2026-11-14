@@ -21,6 +21,7 @@ pub(crate) const LOG_DOWN: &str = "the audit log can't be written";
 pub(crate) struct PlayError {
     pub(crate) err: ApiError,
     pub(crate) why: FailWhy,
+    pub(crate) typed: bool,
 }
 
 impl From<ApiError> for PlayError {
@@ -28,6 +29,7 @@ impl From<ApiError> for PlayError {
         PlayError {
             err,
             why: FailWhy::Other,
+            typed: false,
         }
     }
 }
@@ -52,7 +54,7 @@ pub(crate) fn why_of(failure: &Failure) -> FailWhy {
         Failure::NoInput => FailWhy::NoInput,
         Failure::NotCleared => FailWhy::NotCleared,
         Failure::NotTaken => FailWhy::NotTaken,
-        Failure::NotSent => FailWhy::NotSent,
+        Failure::NotSent | Failure::Mixed => FailWhy::NotSent,
     }
 }
 

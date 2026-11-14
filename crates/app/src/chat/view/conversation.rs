@@ -3,7 +3,7 @@ use std::cell::Cell;
 
 use gpui::{
     div, point, prelude::*, px, relative, AnyElement, App, BoxShadow, Context, Div, SharedString,
-    Stateful,
+    Stateful, WeakEntity,
 };
 use notchling_kit::labels::Corner;
 use notchling_kit::metric::SPINNER_MINI;
@@ -142,15 +142,44 @@ pub(super) fn latest_pill(
     )
 }
 
+struct Bubble<'a> {
+    queued: bool,
+    sending: bool,
+    note: Option<&'a str>,
+    chat: &'a WeakEntity<ChatView>,
+}
+
+fn discard_link(chat: &WeakEntity<ChatView>, a: Appearance) -> Stateful<Div> {
+    let chat = chat.clone();
+    div()
+        .id("held-discard")
+        .flex_shrink_0()
+        .cursor_pointer()
+        .child(label(
+            t::chat::held_discard(),
+            TypeRole::Meta,
+            Ink::AccentText,
+            a,
+        ))
+        .on_click(move |_, _, cx| {
+            chat.update(cx, |view, cx| view.discard_held(cx)).ok();
+        })
+}
+
 fn user_row(
     sel: &Sel,
     split: (String, Vec<std::path::PathBuf>),
     images: usize,
-    queued: bool,
-    sending: bool,
+    bubble: Bubble,
     a: Appearance,
     cx: &App,
 ) -> Div {
+    let Bubble {
+        queued,
+        sending,
+        note: waiting_note,
+        chat,
+    } = bubble;
     let id = sel.id();
     let name = crate::chat::markers::bubble_part(queued, sending);
     let note = if sending {
@@ -159,14 +188,27 @@ fn user_row(
         t::chat::queued_note()
     };
     let (words, pictures) = split;
-    let status = queued.then(|| {
-        div()
+    let status = queued.then(|| match waiting_note {
+        None => div()
             .h(px(super::message_actions::ROW_HEIGHT))
             .flex()
             .items_center()
             .gap(px(4.0))
             .child(icon(Icon::Clock, 13.0, Ink::TextFaint, a))
-            .child(label(note, TypeRole::Meta, Ink::TextFaint, a).px(px(4.0)))
+            .child(label(note, TypeRole::Meta, Ink::TextFaint, a).px(px(4.0))),
+        Some(state) => div()
+            .max_w(relative(0.75))
+            .min_h(px(super::message_actions::ROW_HEIGHT))
+            .flex()
+            .items_center()
+            .gap(px(4.0))
+            .child(icon(Icon::Clock, 13.0, Ink::TextFaint, a).flex_shrink_0())
+            .child(
+                label(state, TypeRole::Meta, Ink::TextFaint, a)
+                    .min_w(px(0.0))
+                    .px(px(4.0)),
+            )
+            .child(discard_link(chat, a)),
     });
     div()
         .w_full()
@@ -257,9 +299,16 @@ fn row_element(
             images,
             queued,
             sending,
+            note,
         } => {
             let split = crate::chat::drops::split_images(text, |p| s.markdown.borrow().is_file(p));
-            user_row(sel, split, *images, *queued, *sending, a, cx)
+            let bubble = Bubble {
+                queued: *queued,
+                sending: *sending,
+                note: note.as_deref(),
+                chat: &input.chat,
+            };
+            user_row(sel, split, *images, bubble, a, cx)
         }
         Row::Assistant { text } => {
             let folder = input.session.as_ref().map_or("", |s| s.cwd.as_str());
