@@ -27,6 +27,8 @@ Most of them come from the design, [revision 2](https://github.com/dtthaison/not
 | [0017](0017-rust-notes-load-by-default.md) | The Rust notes load by default; the Swift notes are read on demand | Proposed |
 | [0018](0018-chat-state-per-area.md) | Chat's state per screen area, the transcript as a log, selection on the model, the conversation as a list | Proposed |
 | [0020](0020-agents-change-settings-by-class.md) | Agents read every setting and change one by its class: free at once, ask through the Inbox, never the switches | Proposed |
+| [XXXX](XXXX-tool-versions-follow-the-mac.md) | Tool versions follow the Mac: workers run the Mac's checked versions, rolled out by one click | Proposed |
+| [XXXX](XXXX-sparkle-and-one-release-key.md) | Sparkle for the Rust app, and one EdDSA key for the appcast and the worker manifest; amends 0010 | Proposed |
 
 0001 was written before records had a Status section. Its status is Accepted.
 
