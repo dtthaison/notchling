@@ -1,3 +1,4 @@
+use notchling_locale as t;
 use std::sync::OnceLock;
 
 use notchling_engine::catalog::{model_key, Catalog, ModelInfo, Tier, Tool};
@@ -23,14 +24,6 @@ pub fn find<'a>(catalog: &'a [ModelInfo], id: &str) -> Option<&'a ModelInfo> {
         .iter()
         .find(|m| model_key(&m.id) == key)
 }
-
-pub const MODEL_PLACEHOLDER: &str = "Model";
-pub const EFFORT_PLACEHOLDER: &str = "Effort";
-pub const MODEL_TIP: &str =
-    "The model this session uses. Pick another to switch it (like /model in the terminal).";
-pub const EFFORT_TIP: &str = "How hard the model thinks. Pick another to switch it (like /effort in the terminal, which also makes it the default for new sessions).";
-pub const NO_EFFORTS: &str = "This model has no effort levels";
-pub const MORE_MODELS: &str = "More Models";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
@@ -58,7 +51,7 @@ pub struct Row {
 
 pub fn effort_title(level: &str) -> String {
     if level == "xhigh" {
-        return "Extra High".to_owned();
+        return t::chat::effort_extra_high().to_owned();
     }
     let mut chars = level.chars();
     match chars.next() {
@@ -73,10 +66,7 @@ fn title_of(model: &ModelInfo) -> String {
 
 fn borrowed_tip(model: &ModelInfo) -> String {
     match model.borrowed_from.as_deref().filter(|_| model.borrowed) {
-        Some(from) => format!(
-            "Priced as {} until Notchling knows this model",
-            model_name(from)
-        ),
+        Some(from) => t::chat::priced_as(&model_name(from)),
         None => String::new(),
     }
 }
@@ -124,21 +114,21 @@ pub fn efforts(current: Option<&str>, model: Option<&ModelInfo>) -> Vec<Row> {
 
 pub fn model_label(current: Option<&str>, catalog: &[ModelInfo]) -> String {
     current.map_or_else(
-        || MODEL_PLACEHOLDER.to_owned(),
+        || t::chat::model_placeholder().to_owned(),
         |id| find(catalog, id).map_or_else(|| model_name(id), title_of),
     )
 }
 
 pub fn effort_label(current: Option<&str>) -> String {
-    current.map_or_else(|| EFFORT_PLACEHOLDER.to_owned(), effort_title)
+    current.map_or_else(|| t::chat::effort_placeholder().to_owned(), effort_title)
 }
 
 pub fn model_text(id: &str) -> String {
-    format!("/model {id}")
+    super::markers::model_command(id)
 }
 
 pub fn effort_text(level: &str) -> String {
-    format!("/effort {level}")
+    super::markers::effort_command(level)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

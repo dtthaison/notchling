@@ -1,4 +1,7 @@
 use notchling_engine::transcript::model::{Conversation, ItemKind, ToolCall, ToolKind};
+use notchling_locale as t;
+
+use super::markers;
 
 pub const STOPPING_MS: i64 = 20_000;
 
@@ -10,54 +13,50 @@ pub struct Activity {
 }
 
 fn shells_text(n: usize) -> String {
-    if n == 1 {
-        "1 background command running".to_owned()
-    } else {
-        format!("{n} background commands running")
-    }
+    t::chat::shells_running(n)
 }
 
 pub fn work_stats(seconds: i64, tokens: u64) -> String {
     let s = seconds.max(0);
     let time = if s < 60 {
-        format!("{s}s")
+        t::units::duration_seconds(s)
     } else if s < 3600 {
-        format!("{}m {}s", s / 60, s % 60)
+        t::chat::stats_minutes(s / 60, s % 60)
     } else {
-        format!("{}h {}m", s / 3600, s % 3600 / 60)
+        t::units::duration_hours(s / 3600, s % 3600 / 60)
     };
     if tokens == 0 {
         return time;
     }
     let count = if tokens < 1000 {
-        tokens.to_string()
+        t::fmt::count(tokens)
     } else if tokens < 10_000 {
-        format!("{:.1}k", tokens as f64 / 1000.0)
+        t::units::thousands(&t::fmt::decimal(tokens as f64 / 1000.0, 1))
     } else {
-        format!("{}k", tokens / 1000)
+        t::units::thousands(&(tokens / 1000).to_string())
     };
-    format!("{time} · ↓ {count} tokens")
+    t::chat::stats_tokens(&time, &count)
 }
 
 fn present(call: &ToolCall) -> String {
-    const NOW: [(&str, &str); 8] = [
-        ("Ran ", "Running "),
-        ("Read ", "Reading "),
-        ("Edited ", "Editing "),
-        ("Wrote ", "Writing "),
-        ("Searched the web for ", "Searching the web for "),
-        ("Searched for ", "Searching for "),
-        ("Found files matching ", "Finding files matching "),
-        ("Used ", "Using "),
+    const NOW: [fn(&str) -> String; 8] = [
+        t::chat::doing_ran,
+        t::chat::doing_read,
+        t::chat::doing_edited,
+        t::chat::doing_wrote,
+        t::chat::doing_searched_web,
+        t::chat::doing_searched,
+        t::chat::doing_found,
+        t::chat::doing_used,
     ];
     let title = call.title.trim();
-    for (past, now) in NOW {
+    for (past, now) in markers::PAST_STEPS.into_iter().zip(NOW) {
         if let Some(rest) = title.strip_prefix(past) {
-            return format!("{now}{rest}");
+            return now(rest);
         }
     }
     if call.kind == ToolKind::Shell && title.is_empty() {
-        return "Running a command".to_owned();
+        return t::chat::doing_command().to_owned();
     }
     title.to_owned()
 }
@@ -66,10 +65,10 @@ pub fn doing(conversation: &Conversation) -> String {
     match newest_step(conversation).map(|(_, kind)| kind) {
         Some(ItemKind::Tools(calls)) => match calls.iter().rev().find(|call| !call.finished) {
             Some(call) => format!("{}…", present(call).trim_end_matches('…')),
-            None => "Thinking…".to_owned(),
+            None => t::chat::thinking().to_owned(),
         },
-        Some(ItemKind::Assistant { .. }) => "Writing…".to_owned(),
-        _ => "Thinking…".to_owned(),
+        Some(ItemKind::Assistant { .. }) => t::chat::writing().to_owned(),
+        _ => t::chat::thinking().to_owned(),
     }
 }
 

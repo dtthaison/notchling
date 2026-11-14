@@ -12,7 +12,6 @@ use crate::chat::markers;
 use crate::chat::pickers::{self, Menu, EFFORT};
 use crate::chat::terminal::{menu_route, MenuRoute};
 use crate::chat::view::limit_ring::Shown;
-use crate::chat::view::tools::{EXITED, READ_ONLY};
 use crate::chat::view::ChatView;
 use notchling_engine::sessions::AgentGroup;
 
@@ -25,9 +24,9 @@ impl ChatTool for Claude {
 
     fn refusal(&self, _view: &ChatView, session: &Session) -> Option<&'static str> {
         if session.agent.label == markers::EXITED {
-            Some(EXITED)
+            Some(t::chat::session_exited())
         } else if !session.agent.can_reply() {
-            Some(READ_ONLY)
+            Some(t::chat::read_only())
         } else {
             None
         }

@@ -187,3 +187,125 @@ chat-account-lane = { $label } · lane
 
 # A line after the activity text, such as the running shells. The dot is part of the message.
 chat-activity-shells = · { $shells }
+
+## Reply box
+
+chat-first-message-placeholder = Your first message starts the session
+# $count is how many messages wait to be sent when the turn ends.
+chat-messages-wait = { $count ->
+    [one] { $count } message waits for this turn to end.
+   *[other] { $count } messages wait for this turn to end.
+}
+chat-add-files = Add files or photos
+chat-add-folder = Add folder
+chat-slash-commands = Slash commands
+chat-read-only = Read only here. Reply where the session runs.
+chat-agy-busy = { -brand-antigravity } is still on the last turn. Send again when it ends.
+chat-session-exited = This session has exited.
+# $message is the reason, given by the tool.
+chat-change-failed = Couldn't change it: { $message }
+chat-drop-hint = Drop to add to your reply
+
+## Pickers
+
+chat-model-placeholder = Model
+chat-effort-placeholder = Effort
+chat-more-models = More Models
+chat-model-tip = The model this session uses. Pick another to switch it (like /model in the terminal).
+chat-effort-tip = How hard the model thinks. Pick another to switch it (like /effort in the terminal, which also makes it the default for new sessions).
+chat-no-efforts = This model has no effort levels
+chat-effort-extra-high = Extra High
+# $model is the name of the model whose price is used.
+chat-priced-as = Priced as { $model } until { -brand-notchling } knows this model
+chat-codex-model-tip = The model this { -brand-codex } session's next turns use. { -brand-codex } Default follows { -brand-codex }'s own setting.
+chat-codex-effort-tip = How hard the model reasons on this session's next turns.
+chat-default-model = Default Model
+chat-pick-model-first = Pick a model first.
+chat-agy-not-started = Your first message starts the session; then this can be picked here.
+chat-agy-opening = { -brand-antigravity } is still opening this session.
+# $name is the option's name, such as Model.
+chat-agy-option-tip = { $name } for this session's next turns.
+
+## Activity line
+
+# $count is how many background commands run.
+chat-shells-running = { $count ->
+    [one] { $count } background command running
+   *[other] { $count } background commands running
+}
+# $minutes and $seconds are whole numbers.
+chat-stats-minutes = { NUMBER($minutes) }m { NUMBER($seconds) }s
+# $time is how long the turn has run, such as 12s, and $count the tokens received, such as 1.2k.
+chat-stats-tokens = { $time } · ↓ { $count } tokens
+# What a step is doing now. $rest is the rest of the step's title, such as a file name.
+chat-doing-ran = Running { $rest }
+chat-doing-read = Reading { $rest }
+chat-doing-edited = Editing { $rest }
+chat-doing-wrote = Writing { $rest }
+chat-doing-searched-web = Searching the web for { $rest }
+chat-doing-searched = Searching for { $rest }
+chat-doing-found = Finding files matching { $rest }
+chat-doing-used = Using { $rest }
+chat-doing-command = Running a command
+chat-thinking = Thinking…
+chat-writing = Writing…
+
+## Questions and permissions
+
+chat-allowing = Allowing…
+chat-allowing-always = Allowing, and not asking again…
+chat-denying = Denying…
+chat-allowing-typing = Allowing… typing it into the session, a few seconds
+chat-allowing-always-typing = Allowing, and not asking again… a few seconds
+chat-denying-typing = Denying… typing it into the session, a few seconds
+chat-allowed = Allowed
+chat-allowed-always = Always allowed
+chat-denied = Denied
+# $verb is Allowed or Denied and $tool the tool's name, such as Bash.
+chat-decision-tool = { $verb }: { $tool }
+# $subject is the file or command the decision was about.
+chat-decision-tool-subject = { $verb }: { $tool } { $subject }
+chat-already-answered = Already answered in the terminal: { $tool }
+chat-already-answered-subject = Already answered in the terminal: { $tool } { $subject }
+# $said is the reason, without its final full stop.
+chat-may-have-reached = { $said }. It may still have reached the session: look before sending again.
+# Replaces "Answer it in the terminal" when the question card is already on screen.
+chat-answer-above = Answer it above
+chat-not-answered = Not answered
+# $step is the question's number and $total how many questions there are.
+chat-step-of = { NUMBER($step) } of { NUMBER($total) }
+chat-pick-any = Pick any that apply
+chat-claude-asks = { -brand-claude } asks
+chat-type-something-else = Type something else…
+chat-next = Next
+chat-submit = Submit
+chat-allow = Allow
+chat-allow-this-time = This time only
+chat-allow-always = Always allow this
+chat-allow-always-note = Don't ask again for this
+chat-deny = Deny
+chat-deny-note = { -brand-claude } tries something else
+chat-permission-needed = Permission needed
+# $tool is the tool's name, such as Bash.
+chat-wants-to-use = { -brand-claude } wants to use { $tool }
+
+## Second opinions
+
+chat-second-opinion-tip = Second Opinion: ask { -brand-codex } or { -brand-antigravity } to review this
+chat-no-store = Second opinions need the app's own data folder, not a fixture
+chat-second-opinion = Second Opinion
+# $name is the file the opinion is about.
+chat-second-opinion-of = Second Opinion: { $name }
+# $tool is the reviewing tool and $subject what it reviews.
+chat-opinion-running = { $tool } is reviewing { $subject }
+chat-opinion-done = { $tool } on { $subject }
+chat-opinion-failed = { $tool } couldn't review { $subject }
+chat-opinion-cancelled = { $tool } on { $subject }, cancelled
+chat-opinion-cancelled-early = Cancelled before it answered.
+
+## Tasks
+
+chat-tasks-hide = Hide the tasks until the list changes
+# $subject is the task being worked on.
+chat-tasks-now = Now: { $subject }
+chat-tasks-all-done = All done

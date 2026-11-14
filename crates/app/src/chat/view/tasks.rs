@@ -1,3 +1,4 @@
+use notchling_locale as t;
 use std::time::Duration;
 
 use gpui::{div, prelude::*, px, relative, Context, Div, FontWeight};
@@ -101,7 +102,7 @@ pub fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Opt
         )
         .w(px(20.0))
         .h(px(20.0)),
-        "Hide the tasks until the list changes".into(),
+        t::chat::tasks_hide().into(),
         a,
     )
     .on_click(cx.listener(|this, _, _, cx| {
@@ -121,7 +122,7 @@ pub fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Opt
         .child(label(&summary.title(), TypeRole::Heading, Ink::Text, a).flex_shrink_0())
         .child(match &summary.current {
             Some(subject) => label(
-                &format!("Now: {subject}"),
+                &t::chat::tasks_now(subject),
                 TypeRole::Meta,
                 Ink::TextMuted,
                 a,
@@ -129,7 +130,9 @@ pub fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Opt
             .flex_1()
             .min_w(px(0.0))
             .elide(),
-            None if summary.all_done() => label("All done", TypeRole::Meta, Ink::Done, a).flex_1(),
+            None if summary.all_done() => {
+                label(t::chat::tasks_all_done(), TypeRole::Meta, Ink::Done, a).flex_1()
+            }
             None => div().flex_1(),
         })
         .child(progress(summary.fraction(), a))

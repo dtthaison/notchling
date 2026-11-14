@@ -13,10 +13,11 @@ use notchling_kit::ui::{
     KitPart, KitStyled, MenuItem,
 };
 use notchling_kit::{Appearance, Icon, IconSize, Ink, TypeRole};
+use notchling_locale as t;
 
 use super::render_map::WindowRegion;
 use super::ChatView;
-use crate::chat::claude_picker::{self, Kind};
+use crate::chat::claude_picker::Kind;
 use crate::chat::composer::{action, add_menu, is_add_files, with_slash, Action, Add, AddItem};
 use crate::chat::pickers;
 use crate::chat::prompts::error_text;
@@ -41,9 +42,9 @@ fn inset(base: f32, edge: f32) -> f32 {
 
 fn placeholder(view: &ChatView) -> &'static str {
     match view.selected_session() {
-        Some(s) if is_draft(&s.agent.id) => "Your first message starts the session",
+        Some(s) if is_draft(&s.agent.id) => t::chat::first_message_placeholder(),
         Some(s) => super::tool::of(s.tool).placeholder(),
-        None => "Reply…",
+        None => t::chat::reply_placeholder(),
     }
 }
 
@@ -84,14 +85,7 @@ fn status(
         .map(|id| view.tools.live.waiting(id))
         .filter(|n| *n > 0)
     {
-        (
-            if n == 1 {
-                "1 message waits for this turn to end.".to_owned()
-            } else {
-                format!("{n} messages wait for this turn to end.")
-            },
-            Ink::TextMuted,
-        )
+        (t::chat::messages_wait(n), Ink::TextMuted)
     } else {
         (control.tooltip?.to_owned(), Ink::TextFaint)
     };
@@ -127,7 +121,7 @@ fn menu_row(
 }
 
 fn more_row(open: bool, cx: &mut Context<ChatView>, a: Appearance) -> Stateful<Div> {
-    MenuItem::new("model-more", claude_picker::MORE_MODELS)
+    MenuItem::new("model-more", t::chat::more_models())
         .chevron(if open {
             Icon::ChevronDown
         } else {

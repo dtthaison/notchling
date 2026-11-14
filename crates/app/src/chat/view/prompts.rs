@@ -1,3 +1,4 @@
+use notchling_locale as t;
 use std::collections::HashMap;
 
 use std::time::Duration;
@@ -285,7 +286,12 @@ fn failed(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Option<
                     .flex_col()
                     .flex_1()
                     .gap(px(2.0))
-                    .child(label("Not answered", TypeRole::Label, Ink::Needs, a))
+                    .child(label(
+                        t::chat::not_answered(),
+                        TypeRole::Label,
+                        Ink::Needs,
+                        a,
+                    ))
                     .child(label(message, TypeRole::Meta, Ink::Text, a)),
             )
             .part_at("Answer Error", Corner::TopTrailing, a, cx),
@@ -374,7 +380,7 @@ fn question(
     let Some(item) = q.items.get(tab) else {
         return div();
     };
-    let step = (q.items.len() > 1).then(|| format!("{} of {}", tab + 1, q.items.len()));
+    let step = (q.items.len() > 1).then(|| t::chat::step_of(tab + 1, q.items.len()));
     let tabs = (q.items.len() > 1).then(|| tabs(view, q, a, cx));
     let options = item
         .options
@@ -411,13 +417,19 @@ fn question(
         .collect::<Vec<_>>();
     let hint = item
         .multi_select
-        .then(|| label("Pick any that apply", TypeRole::Meta, Ink::TextMuted, a));
+        .then(|| label(t::chat::pick_any(), TypeRole::Meta, Ink::TextMuted, a));
     let submit = QuestionDraft::needs_submit(q).then(|| submit_row(view, row, q, gate, a, cx));
     div()
         .flex()
         .flex_col()
         .gap(px(8.0))
-        .child(header(Icon::Question, "Claude asks", Ink::Working, step, a))
+        .child(header(
+            Icon::Question,
+            t::chat::claude_asks(),
+            Ink::Working,
+            step,
+            a,
+        ))
         .children(tabs)
         .child(label(&item.question, TypeRole::Heading, Ink::Text, a))
         .children(hint)
@@ -488,7 +500,7 @@ fn answer_box(
     let (session, question) = (row.to_owned(), q.clone());
     let element = div()
         .id(SharedString::from(format!("prompt-answer-{tab}")))
-        .child(field(&shown, "Type something else…", focused, a).w_full())
+        .child(field(&shown, t::chat::type_something_else(), focused, a).w_full())
         .when(!gate.enabled, |b| b.opacity(0.4));
     gate::tip(element, gate, a).when(gate.enabled, |b| {
         b.track_focus(&view.prompt.focus)
@@ -542,7 +554,7 @@ fn submit_row(
     let next = (multi && q.items.len() > 1).then(|| {
         button(
             "prompt-next",
-            "Next",
+            t::chat::next(),
             ButtonKind::Secondary,
             PartState::Rest,
             a,
@@ -555,7 +567,7 @@ fn submit_row(
     let (session, question) = (row.to_owned(), q.clone());
     let submit = button(
         "prompt-submit",
-        "Submit",
+        t::chat::submit(),
         ButtonKind::Primary,
         gate::state(ready),
         a,
@@ -585,15 +597,19 @@ fn permission(
     a: Appearance,
     cx: &mut Context<ChatView>,
 ) -> Div {
-    let mut choices = vec![(Decision::Allow, "Allow", "This time only")];
+    let mut choices = vec![(
+        Decision::Allow,
+        t::chat::allow(),
+        t::chat::allow_this_time(),
+    )];
     if r.can_always_allow {
         choices.push((
             Decision::Always,
-            "Always allow this",
-            "Don't ask again for this",
+            t::chat::allow_always(),
+            t::chat::allow_always_note(),
         ));
     }
-    choices.push((Decision::Deny, "Deny", "Claude tries something else"));
+    choices.push((Decision::Deny, t::chat::deny(), t::chat::deny_note()));
     let on_screen = r.id.starts_with(NEEDS_PREFIX);
     let sending = view.prompt.sending;
     let chosen = match sending {
@@ -657,13 +673,13 @@ fn permission(
         .gap(px(8.0))
         .child(header(
             Icon::Permission,
-            "Permission needed",
+            t::chat::permission_needed(),
             Ink::AccentText,
             None,
             a,
         ))
         .child(label(
-            &format!("Claude wants to use {}", r.tool_name),
+            &t::chat::wants_to_use(&r.tool_name),
             TypeRole::Heading,
             Ink::Text,
             a,

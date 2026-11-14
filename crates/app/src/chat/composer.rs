@@ -1,4 +1,5 @@
 use notchling_kit::Icon;
+use notchling_locale as t;
 
 use crate::chat::data::Tool;
 
@@ -41,13 +42,13 @@ pub fn add_menu(tool: Tool) -> Vec<AddItem> {
     let mut items = vec![
         AddItem {
             add: Add::Files,
-            title: "Add files or photos",
+            title: t::chat::add_files(),
             icon: Icon::Paperclip,
             shortcut: Some("⌘U"),
         },
         AddItem {
             add: Add::Folder,
-            title: "Add folder",
+            title: t::chat::add_folder(),
             icon: Icon::Folder,
             shortcut: None,
         },
@@ -55,7 +56,7 @@ pub fn add_menu(tool: Tool) -> Vec<AddItem> {
     if tool != Tool::Codex {
         items.push(AddItem {
             add: Add::Slash,
-            title: "Slash commands",
+            title: t::chat::slash_commands(),
             icon: Icon::SlashBox,
             shortcut: None,
         });

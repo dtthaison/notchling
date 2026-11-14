@@ -1,9 +1,11 @@
+use notchling_locale as t;
 use std::collections::{HashMap, HashSet};
 
 use notchling_engine::sessions::{Agent, AgentGroup, AgentTarget};
 use notchling_engine::transcript::snapshot::PendingQuestion;
 use serde_json::Value;
 
+use super::markers::{self, DIALOG, NO_ALWAYS};
 use crate::acting::{Decision, Request};
 use crate::chat::data::Tool;
 use crate::notch::model::question_from_needs;
@@ -41,14 +43,12 @@ pub fn permission_request(r: &HookRequest, decision: Decision) -> Request {
     }
 }
 
-const NO_ALWAYS: [&str; 4] = ["Write", "Edit", "MultiEdit", "NotebookEdit"];
-
 pub fn permission_from_needs(agent: &Agent) -> Option<HookRequest> {
     if agent.group != AgentGroup::NeedsInput || !matches!(agent.target, AgentTarget::Job(_)) {
         return None;
     }
     let needs = agent.detail.as_deref()?;
-    let body = needs.strip_prefix("approve ")?.trim();
+    let body = needs.strip_prefix(markers::APPROVE)?.trim();
     let end = body
         .find(|c: char| c.is_whitespace() || c == ':')
         .unwrap_or(body.len());
@@ -239,15 +239,13 @@ pub fn preview_prompt(preview: Preview) -> Prompt {
     }
 }
 
-const DIALOG: &str = "The session is asking you something";
-
 pub fn is_dialog(message: &str) -> bool {
     message.contains(DIALOG)
 }
 
 pub fn error_text(message: &str, card_shown: bool) -> String {
     if card_shown && is_dialog(message) {
-        message.replace("Answer it in the terminal", "Answer it above")
+        message.replace(markers::ANSWER_IN_TERMINAL, t::chat::answer_above())
     } else {
         message.to_owned()
     }

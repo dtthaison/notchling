@@ -101,7 +101,7 @@
         "crates/app/src/chat/view/tools.rs",
         "crates/app/src/chat/view/native_spin.rs"
       ],
-      "moved": false
+      "moved": true
     },
     {
       "name": "chat-details",

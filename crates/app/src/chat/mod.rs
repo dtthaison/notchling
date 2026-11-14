@@ -60,6 +60,8 @@ mod prompts_permission_tests;
 mod question_parity_tests;
 pub mod reload;
 pub mod renders;
+#[cfg(test)]
+mod reply_words_tests;
 pub mod rows;
 pub mod run_command;
 #[cfg(test)]

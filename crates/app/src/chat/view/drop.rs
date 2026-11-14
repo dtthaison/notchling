@@ -1,3 +1,4 @@
+use notchling_locale as t;
 use std::path::{Path, PathBuf};
 
 use gpui::{div, prelude::*, px, Context, Div, ExternalPaths, Window};
@@ -10,7 +11,6 @@ use crate::chat::drops;
 
 pub const PREVIEW_ENV: &str = "NOTCHLING_RENDER_DROP";
 pub const GROUP: &str = "chat-column";
-pub const HINT: &str = "Drop to add to your reply";
 const INSET: f32 = 8.0;
 const EDGE: f32 = 1.5;
 
@@ -19,7 +19,7 @@ pub fn hint(preview: bool, a: Appearance) -> Div {
         .px(px(14.0))
         .py(px(8.0))
         .border_color(hsla(Ink::Accent.color(a).with_alpha(0.6)))
-        .child(label(HINT, TypeRole::Heading, Ink::Text, a));
+        .child(label(t::chat::drop_hint(), TypeRole::Heading, Ink::Text, a));
     div()
         .absolute()
         .inset_0()
@@ -97,7 +97,7 @@ mod tests {
 
     #[test]
     fn the_hint_is_one_plain_sentence() {
-        assert_eq!(HINT, "Drop to add to your reply");
-        assert!(HINT.lines().count() == 1);
+        assert_eq!(t::chat::drop_hint(), "Drop to add to your reply");
+        assert!(t::chat::drop_hint().lines().count() == 1);
     }
 }

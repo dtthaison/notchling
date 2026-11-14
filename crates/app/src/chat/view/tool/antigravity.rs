@@ -8,7 +8,6 @@ use crate::chat::data::Session;
 use crate::chat::limit_ring as rules;
 use crate::chat::pickers::{self, agy_option, Menu};
 use crate::chat::view::limit_ring::Shown;
-use crate::chat::view::tools::AGY_BUSY;
 use crate::chat::view::ChatView;
 use crate::tools::requests::{agy_cancel, agy_send, agy_send_draft, is_draft};
 
@@ -26,7 +25,7 @@ impl ChatTool for Antigravity {
         view.tools
             .live
             .is_working(&session.agent.id)
-            .then_some(AGY_BUSY)
+            .then_some(t::chat::agy_busy())
     }
 
     fn send(&self, _view: &ChatView, session: &Session, text: &str) -> Request {
