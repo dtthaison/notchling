@@ -28,8 +28,7 @@ This file is the start. Codex and Antigravity read AGENTS.md files themselves; C
 tools/bundle-next.sh      # build/next/Notchling.app: the Rust app, its daemon and terminal host (--install replaces /Applications/Notchling.app, never the Swift app: the maintainer only)
 swift test                # legacy/macos/Tests/NotchlingTests and legacy/macos/Tests/ConsoleCoreTests
 export PYTHONPATH=tools/guard
-tools/test-python.sh      # every Python suite (guard, agents, release, protocol, locale) as CI runs them
-python3 tools/locale/gen.py           # check locales/ and write the generated words (--check, --report)
+tools/test-python.sh      # every Python suite (guard, agents, release, protocol, locale) as CI runs them; tools/locale/gen.py checks locales/ and writes the words
 python3 -m guard lint                 # architecture lint; fails only on new or changed lines
 python3 -m guard rules                # every rule in docs/rules.md has a check that fires
 python3 -m guard pins                 # workflow actions pinned and allowlisted

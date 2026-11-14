@@ -71,9 +71,9 @@ mod acting_permission_tests;
 #[cfg(test)]
 mod activity_ops_tests;
 #[cfg(test)]
-mod awake_loop_tests;
-#[cfg(test)]
 mod agy_phone_tests;
+#[cfg(test)]
+mod awake_loop_tests;
 #[cfg(test)]
 mod bridge_models_tests;
 #[cfg(test)]
