@@ -1,4 +1,5 @@
 use gpui::{App, Context};
+use notchling_locale as t;
 
 use super::{AccountButton, ChatTool};
 use crate::accounts::model::CLAUDE_CODE;
@@ -7,10 +8,10 @@ use crate::chat::claude_picker::Kind;
 use crate::chat::data::Session;
 use crate::chat::lane_limits;
 use crate::chat::limit_ring as rules;
+use crate::chat::markers;
 use crate::chat::pickers::{self, Menu, EFFORT};
 use crate::chat::terminal::{menu_route, MenuRoute};
 use crate::chat::view::limit_ring::Shown;
-use crate::chat::view::tools::{EXITED, READ_ONLY};
 use crate::chat::view::ChatView;
 use notchling_engine::sessions::AgentGroup;
 
@@ -18,14 +19,14 @@ pub(super) struct Claude;
 
 impl ChatTool for Claude {
     fn placeholder(&self) -> &'static str {
-        "Reply…"
+        t::chat::reply_placeholder()
     }
 
     fn refusal(&self, _view: &ChatView, session: &Session) -> Option<&'static str> {
-        if session.agent.label == "Exited" {
-            Some(EXITED)
+        if session.agent.label == markers::EXITED {
+            Some(t::chat::session_exited())
         } else if !session.agent.can_reply() {
-            Some(READ_ONLY)
+            Some(t::chat::read_only())
         } else {
             None
         }
@@ -62,9 +63,10 @@ impl ChatTool for Claude {
                 }
             }
             MenuRoute::OwnTerminal => {
-                view.tools.error = Some(format!(
-                    "{} opens a menu: run it in this session's own terminal",
-                    text.split_whitespace().next().unwrap_or("This command")
+                view.tools.error = Some(t::chat::menu_opens(
+                    text.split_whitespace()
+                        .next()
+                        .unwrap_or(t::chat::this_command()),
                 ));
             }
         }
@@ -104,7 +106,7 @@ impl ChatTool for Claude {
     fn account(&self, view: &ChatView) -> Option<AccountButton> {
         let menu = view.menu()?;
         let text = match &menu.lane {
-            Some(_) => format!("{} · lane", menu.label),
+            Some(_) => t::chat::account_lane(&menu.label),
             None => menu.label.clone(),
         };
         Some(AccountButton {

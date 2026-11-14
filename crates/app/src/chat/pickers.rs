@@ -1,5 +1,6 @@
 use notchling_engine::catalog::ModelInfo;
 use notchling_engine::tools::agy::ConfigOption;
+use notchling_locale as t;
 
 use super::claude_picker;
 use crate::tools::codex_picker::{CodexPicker, DEFAULT_TITLE, NOTE as CODEX_NOTE, NO_MODELS};
@@ -82,13 +83,13 @@ fn claude_rows(rows: Vec<claude_picker::Row>) -> Vec<Row> {
 pub fn claude(model: Option<&str>, effort: Option<&str>, catalog: &[ModelInfo]) -> Vec<Menu> {
     let in_use = model.and_then(|id| claude_picker::find(catalog, id));
     let efforts = claude_picker::efforts(effort, in_use);
-    let no_levels = efforts.is_empty().then(|| claude_picker::NO_EFFORTS.into());
+    let no_levels = efforts.is_empty().then(|| t::chat::no_efforts().into());
     vec![
         Menu {
             id: MODEL.into(),
             glyph: Glyph::Model,
             label: claude_picker::model_label(model, catalog),
-            tip: claude_picker::MODEL_TIP.into(),
+            tip: t::chat::model_tip().into(),
             rows: claude_rows(claude_picker::models(model, catalog)),
             more: claude_rows(claude_picker::older_models(model, catalog)),
             note: None,
@@ -99,7 +100,7 @@ pub fn claude(model: Option<&str>, effort: Option<&str>, catalog: &[ModelInfo]) 
             id: EFFORT.into(),
             glyph: Glyph::Effort,
             label: claude_picker::effort_label(effort),
-            tip: claude_picker::EFFORT_TIP.into(),
+            tip: t::chat::effort_tip().into(),
             rows: claude_rows(efforts),
             more: Vec::new(),
             note: None,
@@ -108,10 +109,6 @@ pub fn claude(model: Option<&str>, effort: Option<&str>, catalog: &[ModelInfo]) 
         },
     ]
 }
-
-const CODEX_MODEL_TIP: &str =
-    "The model this Codex session's next turns use. Codex Default follows Codex's own setting.";
-const CODEX_EFFORT_TIP: &str = "How hard the model reasons on this session's next turns.";
 
 pub fn codex(picker: &CodexPicker) -> Vec<Menu> {
     let rows = picker.rows();
@@ -134,7 +131,7 @@ pub fn codex(picker: &CodexPicker) -> Vec<Menu> {
                 .running_model
                 .clone()
                 .or_else(|| picker.pick.model.clone())
-                .unwrap_or_else(|| "Default Model".to_owned())
+                .unwrap_or_else(|| t::chat::default_model().to_owned())
         },
         |m| m.name.clone(),
     );
@@ -172,13 +169,13 @@ pub fn codex(picker: &CodexPicker) -> Vec<Menu> {
                 .or_else(|| picker.running_effort.clone())
                 .map(|e| claude_picker::effort_title(&e))
         })
-        .unwrap_or_else(|| claude_picker::EFFORT_PLACEHOLDER.to_owned());
+        .unwrap_or_else(|| t::chat::effort_placeholder().to_owned());
     vec![
         Menu {
             id: MODEL.into(),
             glyph: Glyph::Model,
             label: model_label,
-            tip: CODEX_MODEL_TIP.into(),
+            tip: t::chat::codex_model_tip().into(),
             rows: if picker.models.is_empty() {
                 Vec::new()
             } else {
@@ -193,25 +190,21 @@ pub fn codex(picker: &CodexPicker) -> Vec<Menu> {
             id: EFFORT.into(),
             glyph: Glyph::Effort,
             label: effort_label,
-            tip: CODEX_EFFORT_TIP.into(),
+            tip: t::chat::codex_effort_tip().into(),
             enabled: !efforts.is_empty(),
             rows: efforts,
             more: Vec::new(),
             note: Some(CODEX_NOTE.into()),
-            empty: Some("Pick a model first.".into()),
+            empty: Some(t::chat::pick_model_first().into()),
         },
     ]
 }
 
-const AGY_NOT_STARTED: &str =
-    "Your first message starts the session; then this can be picked here.";
-const AGY_LOADING: &str = "Antigravity is still opening this session.";
-
 pub fn antigravity(options: &[ConfigOption], started: bool, loading: bool) -> Vec<Menu> {
     let why = if !started {
-        Some(AGY_NOT_STARTED)
+        Some(t::chat::agy_not_started())
     } else if loading || options.is_empty() {
-        Some(AGY_LOADING)
+        Some(t::chat::agy_opening())
     } else {
         None
     };
@@ -225,7 +218,7 @@ pub fn antigravity(options: &[ConfigOption], started: bool, loading: bool) -> Ve
             id,
             glyph,
             label: o.current_name().to_owned(),
-            tip: format!("{} for this session's next turns.", o.name),
+            tip: t::chat::agy_option_tip(&o.name),
             rows: o
                 .values
                 .iter()
@@ -255,8 +248,8 @@ pub fn antigravity(options: &[ConfigOption], started: bool, loading: bool) -> Ve
             enabled: false,
         };
         return vec![
-            off(MODEL, Glyph::Model, claude_picker::MODEL_PLACEHOLDER),
-            off(EFFORT, Glyph::Effort, claude_picker::EFFORT_PLACEHOLDER),
+            off(MODEL, Glyph::Model, t::chat::model_placeholder()),
+            off(EFFORT, Glyph::Effort, t::chat::effort_placeholder()),
         ];
     }
     let mut menus: Vec<Menu> = options.iter().map(menu).collect();
@@ -340,7 +333,7 @@ mod tests {
         assert!(menus[1].empty.is_none());
         let menus = claude(Some("claude-haiku-4-5"), None, &catalog);
         assert!(menus[1].rows.is_empty());
-        assert_eq!(menus[1].empty.as_deref(), Some(claude_picker::NO_EFFORTS));
+        assert_eq!(menus[1].empty.as_deref(), Some(t::chat::no_efforts()));
         assert_eq!(claude(None, None, &[])[0].rows.len(), 4);
     }
 
@@ -408,6 +401,6 @@ mod tests {
         assert_eq!(agy_option(EFFORT), "thought_level");
         let draft = antigravity(&options, false, false);
         assert!(draft.iter().all(|m| !m.enabled));
-        assert_eq!(draft[0].tip, AGY_NOT_STARTED);
+        assert_eq!(draft[0].tip, t::chat::agy_not_started());
     }
 }

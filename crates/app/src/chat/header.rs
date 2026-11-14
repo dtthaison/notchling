@@ -1,3 +1,4 @@
+use notchling_locale as t;
 use std::path::Path;
 
 use notchling_engine::catalog::ModelInfo;
@@ -24,10 +25,7 @@ pub struct Header {
 
 fn window_note(model: Option<&str>, catalog: &[ModelInfo]) -> Option<String> {
     let from = context_window_source(model, catalog)?;
-    Some(format!(
-        "Window as {} until Notchling knows this model",
-        model_name(&from)
-    ))
+    Some(t::chat::window_model_note(&model_name(&from)))
 }
 
 pub fn header(
@@ -37,11 +35,11 @@ pub fn header(
     catalog: &[ModelInfo],
 ) -> Header {
     let agent = &session.agent;
-    let tool = session.tool.name();
+    let tool = session.tool.title();
     let host = if agent.host.is_empty() {
         tool.to_owned()
     } else {
-        format!("{tool} · {}", agent.host)
+        t::chat::header_host(tool, &agent.host)
     };
     Header {
         title: agent.name.clone(),

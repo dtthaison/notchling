@@ -2,6 +2,7 @@ use gpui::{div, prelude::*, px, AnyElement, App, Div, SharedString, Stateful, We
 use notchling_kit::metric::{RADIUS_SM, TOOL_ICON};
 use notchling_kit::ui::{hsla, icon, label, tool_icon, KitPart, KitStyled};
 use notchling_kit::{Appearance, Icon, Ink, TypeRole};
+use notchling_locale as t;
 
 use super::inspector::{MARK_BOX, ROW_LINE};
 use super::ChatView;
@@ -83,7 +84,7 @@ pub(super) fn group_more_row(
         .id(SharedString::from(format!("group-more-{group}")))
         .cursor_pointer()
         .child(label(
-            &format!("Load {next} More"),
+            &t::chat::details_load_more(&next.to_string()),
             TypeRole::Meta,
             Ink::AccentText,
             a,

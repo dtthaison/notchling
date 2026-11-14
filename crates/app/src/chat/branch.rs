@@ -1,3 +1,4 @@
+use notchling_locale as t;
 use std::sync::Arc;
 
 use notchling_kit::Ink;
@@ -89,13 +90,10 @@ impl BranchModel {
     }
 
     pub fn counts_line(&self) -> String {
-        let files = match self.file_count {
-            1 => "1 file".to_owned(),
-            n => format!("{n} files"),
-        };
+        let files = t::chat::changes_file_count(self.file_count, &self.file_count.to_string());
         match self.uncommitted_files {
             0 => files,
-            n => format!("{files} \u{b7} {n} uncommitted"),
+            n => t::chat::changes_uncommitted(&files, &n.to_string()),
         }
     }
 }
@@ -103,11 +101,11 @@ impl BranchModel {
 pub fn branch_name(reply: &Value) -> String {
     match (reply["detached"].as_bool(), reply["branch"].as_str()) {
         (Some(true), _) => match reply["head"].as_str() {
-            Some(head) => format!("Detached at {head}"),
-            None => "Detached HEAD".to_owned(),
+            Some(head) => t::chat::git_detached_at(head),
+            None => t::chat::git_detached().to_owned(),
         },
         (_, Some(name)) => name.to_owned(),
-        _ => "No branch".to_owned(),
+        _ => t::chat::git_no_branch().to_owned(),
     }
 }
 

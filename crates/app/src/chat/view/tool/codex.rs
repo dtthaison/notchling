@@ -1,4 +1,5 @@
 use gpui::{App, Context};
+use notchling_locale as t;
 
 use super::{active_email, AccountButton, ChatTool};
 use crate::accounts::model::CODEX;
@@ -15,7 +16,7 @@ pub(super) struct Codex;
 
 impl ChatTool for Codex {
     fn placeholder(&self) -> &'static str {
-        "Message Codex…"
+        t::chat::message_codex_placeholder()
     }
 
     fn refusal(&self, _view: &ChatView, _session: &Session) -> Option<&'static str> {
@@ -71,7 +72,7 @@ impl ChatTool for Codex {
     fn account(&self, view: &ChatView) -> Option<AccountButton> {
         Some(AccountButton {
             text: active_email(view, CODEX)?,
-            tip: "The Codex account. Click to switch or add one.".to_owned(),
+            tip: t::chat::codex_account_tip().to_owned(),
         })
     }
 

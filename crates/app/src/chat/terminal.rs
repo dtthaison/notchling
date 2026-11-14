@@ -2,6 +2,7 @@ use notchling_engine::control::slash;
 use notchling_engine::sessions::AgentTarget;
 use notchling_engine::terminal::keys::{self, Press};
 use notchling_engine::terminal::{TermCell, TermColor, TermStyle};
+use notchling_locale as t;
 
 pub const FONT: f32 = 12.0;
 pub const LINE: f32 = 16.0;
@@ -241,7 +242,9 @@ impl<T> Tabs<T> {
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (String, &T)> {
-        self.tabs.iter().map(|(n, t)| (format!("Terminal {n}"), t))
+        self.tabs
+            .iter()
+            .map(|(n, t)| (t::chat::terminal_tab(&n.to_string()), t))
     }
 }
 

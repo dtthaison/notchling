@@ -2,6 +2,7 @@ use gpui::{prelude::*, Context, Div, Pixels, Point, SharedString};
 use notchling_kit::labels::Corner;
 use notchling_kit::ui::{menu_panel, KitPart};
 use notchling_kit::Appearance;
+use notchling_locale as t;
 
 use super::accounts::{held_item, menu_item};
 use super::row_menu::popup;
@@ -22,7 +23,7 @@ pub(super) fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>)
     let menu = view.copy_menu.as_ref()?;
     let id = SharedString::from("copy-menu-copy");
     let item = if menu.enabled {
-        menu_item(id, "Copy", a)
+        menu_item(id, t::chat::copy(), a)
             .on_click(cx.listener(|this, _, window, cx| {
                 this.close_copy_menu(cx);
                 this.copy_selection(window, cx);
@@ -31,10 +32,10 @@ pub(super) fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>)
     } else {
         held_item(
             id,
-            "Copy",
+            t::chat::copy(),
             Control {
                 enabled: false,
-                tooltip: Some("Select some text first."),
+                tooltip: Some(t::chat::select_first()),
             },
             a,
         )

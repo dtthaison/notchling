@@ -1,4 +1,5 @@
 use gpui::{App, Context};
+use notchling_locale as t;
 
 use super::{active_email, AccountButton, ChatTool};
 use crate::accounts::model::ANTIGRAVITY;
@@ -7,7 +8,6 @@ use crate::chat::data::Session;
 use crate::chat::limit_ring as rules;
 use crate::chat::pickers::{self, agy_option, Menu};
 use crate::chat::view::limit_ring::Shown;
-use crate::chat::view::tools::AGY_BUSY;
 use crate::chat::view::ChatView;
 use crate::tools::requests::{agy_cancel, agy_send, agy_send_draft, is_draft};
 
@@ -15,7 +15,7 @@ pub(super) struct Antigravity;
 
 impl ChatTool for Antigravity {
     fn placeholder(&self) -> &'static str {
-        "Message Antigravity…"
+        t::chat::message_antigravity_placeholder()
     }
 
     fn refusal(&self, view: &ChatView, session: &Session) -> Option<&'static str> {
@@ -25,7 +25,7 @@ impl ChatTool for Antigravity {
         view.tools
             .live
             .is_working(&session.agent.id)
-            .then_some(AGY_BUSY)
+            .then_some(t::chat::agy_busy())
     }
 
     fn send(&self, _view: &ChatView, session: &Session, text: &str) -> Request {
@@ -55,7 +55,7 @@ impl ChatTool for Antigravity {
     fn account(&self, view: &ChatView) -> Option<AccountButton> {
         Some(AccountButton {
             text: active_email(view, ANTIGRAVITY)?,
-            tip: "The Antigravity account. Click to switch or add one.".to_owned(),
+            tip: t::chat::antigravity_account_tip().to_owned(),
         })
     }
 

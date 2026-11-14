@@ -1,3 +1,4 @@
+use notchling_locale as t;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::SystemTime;
@@ -29,21 +30,25 @@ impl Facts {
 
 pub fn subagent_row(agent: &Subagent, read: Option<&Facts>) -> SubagentRow {
     let (status, word, mark) = match agent.status {
-        SubagentStatus::Running => (Status::Working, "Running", Mark::Spinner),
-        SubagentStatus::Completed => (Status::Done, "Done", Mark::Icon(Icon::Done, Ink::Done)),
+        SubagentStatus::Running => (Status::Working, t::chat::status_running(), Mark::Spinner),
+        SubagentStatus::Completed => (
+            Status::Done,
+            t::chat::done(),
+            Mark::Icon(Icon::Done, Ink::Done),
+        ),
         SubagentStatus::Failed => (
             Status::Needs,
-            "Failed",
+            t::chat::status_failed(),
             Mark::Icon(Icon::Failed, Ink::Expired),
         ),
         SubagentStatus::Stopped => (
             Status::Needs,
-            "Stopped",
+            t::chat::status_stopped(),
             Mark::Icon(Icon::Failed, Ink::TextFaint),
         ),
         SubagentStatus::Quiet => (
             Status::Done,
-            "Not running",
+            t::chat::status_not_running(),
             Mark::Icon(Icon::Clock, Ink::TextFaint),
         ),
     };

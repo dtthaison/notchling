@@ -1,3 +1,4 @@
+use notchling_locale as t;
 use std::sync::Arc;
 
 use gpui::Context;
@@ -229,7 +230,7 @@ impl ChatView {
                 .spawn(async move { acts.actions.read(&request) })
                 .await;
             let parsed: Result<DiffText, String> = result.and_then(|reply| {
-                git::parse_diff(&reply).ok_or_else(|| "The diff came back unreadable.".to_owned())
+                git::parse_diff(&reply).ok_or_else(|| t::chat::changes_unreadable().to_owned())
             });
             this.update(cx, |view, cx| {
                 view.repo.diff_inflight = false;

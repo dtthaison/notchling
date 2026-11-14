@@ -6,6 +6,7 @@ use notchling_kit::metric::{RADIUS_CARD, RADIUS_MD, SIDE_PADDING};
 use notchling_kit::part::{ButtonKind, PartState};
 use notchling_kit::ui::{button, hsla, label, scrollable, window_appearance, KitStyled};
 use notchling_kit::{Appearance, Icon, Ink, TypeRole};
+use notchling_locale as t;
 
 use super::view::{sheet_header, Acts, Dismiss};
 use crate::mac::gate;
@@ -62,7 +63,8 @@ impl SecondOpinionView {
         cx: &mut Context<Self>,
         pick: impl Fn(&mut SecondOpinionSheet, Option<&str>) + Clone + 'static,
     ) -> Div {
-        let mut choices: Vec<(Option<String>, String)> = vec![(None, "Default".to_owned())];
+        let mut choices: Vec<(Option<String>, String)> =
+            vec![(None, t::chat::sheet_default().to_owned())];
         choices.extend(items.iter().map(|(v, n)| (Some(v.clone()), n.clone())));
         div()
             .flex()
@@ -173,13 +175,19 @@ impl SecondOpinionView {
         let failed = matches!(self.model.stage, Stage::Failed(_));
         let cancel = button(
             "cancel",
-            "Cancel",
+            t::chat::sheet_cancel(),
             ButtonKind::Secondary,
             PartState::Rest,
             a,
         )
         .on_click(cx.listener(|_, _, _, cx| cx.emit(Dismiss)));
-        let run = button("run", "Run", ButtonKind::Primary, gate::state(control), a);
+        let run = button(
+            "run",
+            t::chat::sheet_run(),
+            ButtonKind::Primary,
+            gate::state(control),
+            a,
+        );
         let run = gate::tip(run, control, a).when(control.enabled, |b| {
             b.on_click(cx.listener(|this, _, _, cx| this.run(cx)))
         });
@@ -211,8 +219,14 @@ impl SecondOpinionView {
 impl Render for SecondOpinionView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let a = window_appearance(window);
-        let close = button("close", "Close", ButtonKind::Secondary, PartState::Rest, a)
-            .on_click(cx.listener(|_, _, _, cx| cx.emit(Dismiss)));
+        let close = button(
+            "close",
+            t::chat::sheet_close(),
+            ButtonKind::Secondary,
+            PartState::Rest,
+            a,
+        )
+        .on_click(cx.listener(|_, _, _, cx| cx.emit(Dismiss)));
         let models: Vec<(String, String)> = self
             .model
             .models()
@@ -243,7 +257,7 @@ impl Render for SecondOpinionView {
                 .gap(px(10.0))
                 .children(self.tool_row(a, cx))
                 .child(self.choice_row(
-                    "Model",
+                    t::chat::model_placeholder(),
                     "model",
                     self.model.model.as_deref(),
                     &models,
@@ -252,7 +266,7 @@ impl Render for SecondOpinionView {
                     |m, v| m.pick_model(v),
                 ))
                 .child(self.choice_row(
-                    "Effort",
+                    t::chat::effort_placeholder(),
                     "effort",
                     self.model.effort.as_deref(),
                     &efforts,
@@ -265,7 +279,12 @@ impl Render for SecondOpinionView {
                         .flex()
                         .items_center()
                         .gap(px(6.0))
-                        .child(label("Prompt", TypeRole::Section, Ink::TextFaint, a))
+                        .child(label(
+                            t::chat::sheet_prompt(),
+                            TypeRole::Section,
+                            Ink::TextFaint,
+                            a,
+                        ))
                         .child(label(
                             &format!("· {}", self.model.subject_title()),
                             TypeRole::Meta,
@@ -283,7 +302,12 @@ impl Render for SecondOpinionView {
             .rounded(px(RADIUS_CARD))
             .overflow_hidden()
             .fill(Ink::Window, a)
-            .child(sheet_header(Icon::Check, "Second Opinion", close, a))
+            .child(sheet_header(
+                Icon::Check,
+                t::chat::second_opinion(),
+                close,
+                a,
+            ))
             .child(
                 div()
                     .flex_1()

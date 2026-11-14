@@ -6,6 +6,7 @@ use notchling_kit::icon::svg_box;
 use notchling_kit::metric::RADIUS_SM;
 use notchling_kit::ui::{hsla, icon, icon_in, label, parts_on, KitPart};
 use notchling_kit::{Appearance, Icon, Ink, TypeRole};
+use notchling_locale as t;
 
 use super::conversation_view::{ConversationState, ConversationView};
 use super::now_ms;
@@ -65,7 +66,16 @@ fn copy_button(
             cx.notify();
         }),
     );
-    gate::tip_text(button, if copied { "Copied" } else { "Copy" }.into(), a)
+    gate::tip_text(
+        button,
+        if copied {
+            t::chat::copy_done()
+        } else {
+            t::chat::copy()
+        }
+        .into(),
+        a,
+    )
 }
 
 fn time_label(id: &str, at: f64, a: Appearance, cx: &Context<ConversationView>) -> Stateful<Div> {
@@ -83,7 +93,7 @@ fn delivered_mark(id: &str, a: Appearance) -> Stateful<Div> {
         .id(SharedString::from(format!("delivered-{id}")))
         .flex_shrink_0()
         .child(icon(Icon::Delivered, ICON, Ink::TextFaint, a));
-    gate::tip_text(mark, "Delivered".into(), a)
+    gate::tip_text(mark, t::chat::delivered().into(), a)
 }
 
 fn separator(a: Appearance) -> Div {

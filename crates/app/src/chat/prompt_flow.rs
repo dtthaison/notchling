@@ -1,4 +1,7 @@
 use notchling_kit::sentence;
+use notchling_locale as t;
+
+use super::markers::{CLOSED_CONNECTION, DIDNT_ANSWER, FILE_TOOLS, GONE};
 
 use crate::acting::Decision;
 
@@ -12,29 +15,25 @@ pub enum Sending {
 
 pub fn sending_text(sending: Sending) -> &'static str {
     match sending {
-        Sending::Answer => "Sending…",
+        Sending::Answer => t::chat::sending_note(),
         Sending::Decision {
             decision,
             on_screen: false,
         } => match decision {
-            Decision::Allow => "Allowing…",
-            Decision::Always => "Allowing, and not asking again…",
-            Decision::Deny => "Denying…",
+            Decision::Allow => t::chat::allowing(),
+            Decision::Always => t::chat::allowing_always(),
+            Decision::Deny => t::chat::denying(),
         },
         Sending::Decision {
             decision,
             on_screen: true,
         } => match decision {
-            Decision::Allow => "Allowing… typing it into the session, a few seconds",
-            Decision::Always => "Allowing, and not asking again… a few seconds",
-            Decision::Deny => "Denying… typing it into the session, a few seconds",
+            Decision::Allow => t::chat::allowing_typing(),
+            Decision::Always => t::chat::allowing_always_typing(),
+            Decision::Deny => t::chat::denying_typing(),
         },
     }
 }
-
-const FILE_TOOLS: [&str; 5] = ["Write", "Edit", "MultiEdit", "NotebookEdit", "Read"];
-
-const GONE: &str = "isn't showing that permission";
 
 const SUBJECT_CHARS: usize = 48;
 
@@ -64,15 +63,15 @@ fn subject(tool: &str, summary: &str) -> String {
 
 pub fn confirmation(tool: &str, summary: &str, decision: Decision) -> String {
     let verb = match decision {
-        Decision::Allow => "Allowed",
-        Decision::Always => "Always allowed",
-        Decision::Deny => "Denied",
+        Decision::Allow => t::chat::allowed(),
+        Decision::Always => t::chat::allowed_always(),
+        Decision::Deny => t::chat::denied(),
     };
     let subject = subject(tool, summary);
     if subject.is_empty() {
-        format!("{verb}: {}", tool.trim())
+        t::chat::decision_tool(verb, tool.trim())
     } else {
-        format!("{verb}: {} {subject}", tool.trim())
+        t::chat::decision_tool_subject(verb, tool.trim(), &subject)
     }
 }
 
@@ -117,12 +116,9 @@ pub fn is_gone(message: &str) -> bool {
 pub fn already_answered(tool: &str, summary: &str) -> String {
     let subject = subject(tool, summary);
     if subject.is_empty() {
-        format!("Already answered in the terminal: {}", tool.trim())
+        t::chat::already_answered(tool.trim())
     } else {
-        format!(
-            "Already answered in the terminal: {} {subject}",
-            tool.trim()
-        )
+        t::chat::already_answered_subject(tool.trim(), &subject)
     }
 }
 
@@ -131,11 +127,8 @@ pub fn failure_text(message: &str) -> String {
     if said.is_empty() {
         return said;
     }
-    if message.contains("didn't answer in time") || message.contains("closed the connection") {
-        return format!(
-            "{}. It may still have reached the session: look before sending again.",
-            said.trim_end_matches('.')
-        );
+    if message.contains(DIDNT_ANSWER) || message.contains(CLOSED_CONNECTION) {
+        return t::chat::may_have_reached(said.trim_end_matches('.'));
     }
     said
 }

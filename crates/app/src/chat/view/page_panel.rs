@@ -1,3 +1,4 @@
+use notchling_locale as t;
 use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -161,7 +162,7 @@ impl State {
 fn shown(opens: Opens) -> Shown {
     let (title, link) = match &opens {
         Opens::Saved(page) => (page.title.clone(), page.link.clone()),
-        Opens::Live(link) => ("Artifact".to_owned(), link.live_url()),
+        Opens::Live(link) => (t::chat::panel_artifact().to_owned(), link.live_url()),
         Opens::File(path) | Opens::Html(path) => (file_panel::title(path), String::new()),
         Opens::Diff(_) | Opens::Folder(_) | Opens::System(_) | Opens::Browser => {
             (String::new(), String::new())
@@ -348,13 +349,13 @@ impl ChatView {
                 let pages_dir = cx
                     .try_global::<AppPagesDir>()
                     .map(|d| d.0.clone())
-                    .ok_or("There is no pages folder here.")?;
+                    .ok_or(t::chat::panel_no_pages_folder())?;
                 let path = local::inside(&pages_dir, Path::new(&page.path))?;
                 let source = local::source_for(&path)?;
                 PanelWeb::open(window, PanelPage::Local(&source), hooks)
             }
             Opens::Live(link) => PanelWeb::open(window, PanelPage::Live(&link.live_url()), hooks),
-            _ => Err("Not a page.".to_owned()),
+            _ => Err(t::chat::panel_not_a_page().to_owned()),
         }
     }
 
@@ -398,9 +399,9 @@ pub fn follows_edge<E: InteractiveElement>(element: E, cx: &mut Context<ChatView
 fn web_page(view: &ChatView, shown: &Shown, a: Appearance) -> AnyElement {
     let note = match (&shown.error, &shown.opens) {
         (Some(error), _) => error.clone(),
-        (None, Opens::Live(_)) => "Opening the page on claude.ai…".to_owned(),
-        (None, _) if shown.html.is_some() => "Opening the page…".to_owned(),
-        (None, _) => "Opening the saved copy…".to_owned(),
+        (None, Opens::Live(_)) => t::chat::panel_opening_live().to_owned(),
+        (None, _) if shown.html.is_some() => t::chat::panel_opening_page().to_owned(),
+        (None, _) => t::chat::panel_opening_saved().to_owned(),
     };
     let ink = if shown.error.is_some() {
         Ink::Expired
@@ -473,7 +474,7 @@ fn file_body(
         Body::Text { text, cut: c } => {
             cut = *c;
             if text.is_empty() {
-                note("This file is empty.", Ink::TextMuted)
+                note(t::chat::panel_file_empty(), Ink::TextMuted)
             } else {
                 let lines: Vec<&str> = text.split_inclusive('\n').collect();
                 div()
@@ -514,7 +515,7 @@ fn file_body(
                     )
                     .into_any_element()
             }
-            None => note("Can't show this picture.", Ink::TextMuted),
+            None => note(t::chat::panel_picture_unshown(), Ink::TextMuted),
         },
         Body::Other => {
             let path = file.path.clone();
@@ -523,11 +524,11 @@ fn file_body(
                 .flex_col()
                 .items_start()
                 .gap(px(10.0))
-                .child(note("Can't show this file here.", Ink::TextMuted))
+                .child(note(t::chat::panel_file_unshown(), Ink::TextMuted))
                 .child(
                     button(
                         "file-panel-open-default",
-                        "Open in Default App",
+                        t::chat::panel_open_default(),
                         ButtonKind::Secondary,
                         PartState::Rest,
                         a,
@@ -554,7 +555,7 @@ fn file_body(
                 .child(content)
                 .when(cut, |d| {
                     d.child(label(
-                        "Only the first 1 MB is shown. Open it in its app to read the rest.",
+                        t::chat::panel_file_cut(),
                         TypeRole::Meta,
                         Ink::TextMuted,
                         a,
@@ -620,24 +621,38 @@ pub fn render(
     };
     let web_for_reload = view.page.web.clone();
     let refresh = (!is_file || html_page).then(|| {
-        tool("page-panel-refresh", Icon::Resume, "Reload the page").on_click(move |_, _, _| {
-            if let Some(web) = web_for_reload.borrow().as_ref() {
-                web.reload();
-            }
-        })
+        tool("page-panel-refresh", Icon::Resume, t::chat::panel_reload()).on_click(
+            move |_, _, _| {
+                if let Some(web) = web_for_reload.borrow().as_ref() {
+                    web.reload();
+                }
+            },
+        )
     });
     let browser = (!shown.link.is_empty()).then(|| {
         let link = shown.link.clone();
-        tool("page-panel-browser", Icon::Web, "Open in Browser")
-            .on_click(move |_, _, cx| cx.open_url(&link))
+        tool(
+            "page-panel-browser",
+            Icon::Web,
+            t::chat::panel_open_browser(),
+        )
+        .on_click(move |_, _, cx| cx.open_url(&link))
     });
     let reveal = file_path.clone().map(|path| {
-        tool("page-panel-reveal", Icon::Folder, "Show in Finder")
-            .on_click(move |_, _, cx| cx.reveal_path(&path))
+        tool(
+            "page-panel-reveal",
+            Icon::Folder,
+            t::chat::panel_show_in_finder(),
+        )
+        .on_click(move |_, _, cx| cx.reveal_path(&path))
     });
     let open_with = file_path.clone().map(|path| {
-        tool("page-panel-open", Icon::Expand, "Open in Default App")
-            .on_click(move |_, _, cx| cx.open_with_system(&path))
+        tool(
+            "page-panel-open",
+            Icon::Expand,
+            t::chat::panel_open_default(),
+        )
+        .on_click(move |_, _, cx| cx.open_with_system(&path))
     });
     let looks = shown
         .html
@@ -646,7 +661,11 @@ pub fn render(
     let back = tool(
         "page-panel-back",
         Icon::Close,
-        if is_file { "Close" } else { "Back to Details" },
+        if is_file {
+            t::chat::panel_close()
+        } else {
+            t::chat::panel_back_to_details()
+        },
     )
     .on_click(cx.listener(|this, _, _, cx| this.close_page(cx)));
     let header = div()

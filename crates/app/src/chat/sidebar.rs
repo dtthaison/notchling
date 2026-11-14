@@ -1,9 +1,11 @@
 use notchling_engine::search::SessionTool;
 use notchling_engine::sessions::AgentGroup;
 use notchling_kit::Status;
+use notchling_locale as t;
 
 use super::data::{Session, Tool};
 use super::format::age;
+use super::markers;
 use crate::accounts::model::{ANTIGRAVITY, CODEX};
 use crate::accounts::store::Snapshot;
 use crate::search::wire::SessionRef;
@@ -74,9 +76,9 @@ pub fn status_of(group: AgentGroup) -> Status {
 
 fn section_title(group: AgentGroup) -> &'static str {
     match group {
-        AgentGroup::NeedsInput => "Needs input",
-        AgentGroup::Working => "Working",
-        AgentGroup::Completed => "Done",
+        AgentGroup::NeedsInput => t::chat::needs_input(),
+        AgentGroup::Working => t::chat::working(),
+        AgentGroup::Completed => t::chat::done(),
     }
 }
 
@@ -259,7 +261,7 @@ pub fn copyable_id(row_id: &str) -> Option<&str> {
 }
 
 fn exited(s: &Session) -> bool {
-    s.tool == Tool::Claude && s.agent.label == "Exited"
+    s.tool == Tool::Claude && s.agent.label == markers::EXITED
 }
 
 #[cfg(test)]

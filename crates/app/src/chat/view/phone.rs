@@ -4,6 +4,7 @@ use gpui::{div, prelude::*, px, Context, Div, Entity};
 use notchling_kit::metric::SIDE_PADDING;
 use notchling_kit::ui::{hsla, KitStyled};
 use notchling_kit::{Appearance, Ink};
+use notchling_locale as t;
 
 use super::ChatView;
 use crate::acting::Control;
@@ -14,14 +15,19 @@ use crate::phone::view::{PhonePanelView, WIDTH};
 const HEIGHT: f32 = 600.0;
 const TOP: f32 = 60.0;
 
-pub const BUTTON_TIP_ON: Control = Control {
-    enabled: true,
-    tooltip: Some("Phone: the bridge is on. Pair or manage phones"),
-};
-pub const BUTTON_TIP_OFF: Control = Control {
-    enabled: true,
-    tooltip: Some("Phone: pair a phone with this Mac"),
-};
+pub fn button_tip_on() -> Control {
+    Control {
+        enabled: true,
+        tooltip: Some(t::chat::phone_tip_on()),
+    }
+}
+
+pub fn button_tip_off() -> Control {
+    Control {
+        enabled: true,
+        tooltip: Some(t::chat::phone_tip_off()),
+    }
+}
 
 pub fn app_bridge(cx: &Context<ChatView>) -> Arc<Bridge> {
     cx.try_global::<AppBridge>()

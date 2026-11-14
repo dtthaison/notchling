@@ -1,6 +1,7 @@
 use gpui::{div, prelude::*, px, AnyElement, SharedString, WeakEntity};
 use notchling_kit::ui::{label, KitStyled};
 use notchling_kit::{Appearance, Ink, TypeRole};
+use notchling_locale as t;
 
 use super::page_panel::{self, Shown};
 use super::ChatView;
@@ -89,13 +90,13 @@ pub fn name_of(path: &str) -> &str {
 pub fn subtitle_of(path: &str, diff: Option<&DiffText>) -> String {
     let folder = path.rsplit_once('/').map_or("", |(folder, _)| folder);
     let what = match diff {
-        Some(d) if d.untracked => "Untracked",
-        _ => "Changes",
+        Some(d) if d.untracked => t::chat::changes_untracked(),
+        _ => t::chat::changes_title(),
     };
     if folder.is_empty() {
         what.to_owned()
     } else {
-        format!("{folder} \u{b7} {what}")
+        t::chat::changes_subtitle(folder, what)
     }
 }
 
@@ -120,10 +121,10 @@ pub fn body(state: &DiffState, chat: WeakEntity<ChatView>, a: Appearance) -> Any
     let note = |text: &str, ink: Ink| label(text, TypeRole::Meta, ink, a).into_any_element();
     let mut cut = false;
     let content: AnyElement = match &state.body {
-        DiffBody::Loading => note("Reading the changes\u{2026}", Ink::TextMuted),
+        DiffBody::Loading => note(t::chat::changes_reading(), Ink::TextMuted),
         DiffBody::Failed(why) => note(why, Ink::Expired),
         DiffBody::Ready(diff) if diff.chunks.is_empty() => {
-            note("There are no changes to show.", Ink::TextMuted)
+            note(t::chat::changes_none_to_show(), Ink::TextMuted)
         }
         DiffBody::Ready(diff) => {
             cut = diff.truncated;
@@ -159,7 +160,7 @@ pub fn body(state: &DiffState, chat: WeakEntity<ChatView>, a: Appearance) -> Any
                 .child(content)
                 .when(cut, |d| {
                     d.child(label(
-                        "Only the first part of this diff is shown.",
+                        t::chat::changes_truncated(),
                         TypeRole::Meta,
                         Ink::TextMuted,
                         a,

@@ -13,14 +13,20 @@ pub mod closed;
 pub mod codex_children;
 pub mod codex_list;
 pub mod composer;
+#[cfg(test)]
+mod conversation_words_tests;
 pub mod data;
 pub mod delegated;
+#[cfg(test)]
+mod details_words_tests;
 pub mod drafts;
 pub mod drops;
 pub mod escape;
 pub mod file_panel;
 pub mod follow;
 pub mod format;
+#[cfg(test)]
+mod format_words_tests;
 pub mod git;
 pub mod header;
 pub mod history;
@@ -39,6 +45,7 @@ pub mod log;
 mod log_tests;
 pub mod markdown;
 pub mod markdown_cache;
+pub mod markers;
 pub mod message_meta;
 pub mod outgoing;
 pub mod page_panel;
@@ -57,6 +64,8 @@ mod prompts_permission_tests;
 mod question_parity_tests;
 pub mod reload;
 pub mod renders;
+#[cfg(test)]
+mod reply_words_tests;
 pub mod rows;
 pub mod run_command;
 #[cfg(test)]
@@ -66,6 +75,8 @@ pub mod selection;
 pub mod shell_list;
 pub mod shell_rows;
 pub mod sidebar;
+#[cfg(test)]
+mod sidebar_words_tests;
 pub mod simulator;
 pub mod slash_menu;
 pub mod steps;
@@ -78,3 +89,5 @@ mod tree_tests;
 pub mod used;
 #[cfg(target_os = "macos")]
 pub mod view;
+#[cfg(test)]
+mod window_words_tests;

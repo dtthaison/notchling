@@ -7,6 +7,7 @@ use notchling_engine::contract::Tool;
 use notchling_engine::delegate::record::Delegation;
 use notchling_engine::transcript::model::Timestamp;
 use notchling_engine::transcript::subagents::Subagent;
+use notchling_locale as t;
 
 pub use notchling_engine::contract::flows::delegate_jobs::{folder, hidden, parent_ids, read};
 
@@ -43,6 +44,18 @@ pub fn subagents(
 ) -> Vec<Subagent> {
     let parent = parent_of(parents.first().map_or("", String::as_str));
     delegate_jobs::select(records, parents, &parent, &roots(places), now, alive)
+        .into_iter()
+        .map(retitled)
+        .collect()
+}
+
+fn retitled(mut agent: Subagent) -> Subagent {
+    agent.agent_type = match agent.origin.tool {
+        Tool::Antigravity => t::chat::delegated_antigravity(),
+        _ => t::chat::delegated_codex(),
+    }
+    .to_owned();
+    agent
 }
 
 pub fn subagent(
@@ -52,7 +65,13 @@ pub fn subagent(
     alive: &dyn Fn(u32) -> bool,
 ) -> Subagent {
     let parent = parent_of(&record.parent_session);
-    delegate_jobs::subagent(record, &parent, &roots(places), now, alive)
+    retitled(delegate_jobs::subagent(
+        record,
+        &parent,
+        &roots(places),
+        now,
+        alive,
+    ))
 }
 
 #[cfg(test)]

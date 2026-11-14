@@ -1,3 +1,4 @@
+use notchling_locale as t;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
@@ -34,10 +35,6 @@ use notchling_kit::ui::{TextEditor, TextEditorEvent};
 
 const RETRY_AFTER_STOP_MS: u64 = 1_500;
 
-pub const READ_ONLY: &str = "Read only here. Reply where the session runs.";
-pub const AGY_BUSY: &str = "Antigravity is still on the last turn. Send again when it ends.";
-pub const EXITED: &str = "This session has exited.";
-
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Picker {
     pub menu: String,
@@ -72,7 +69,9 @@ pub struct ChatTools {
 
 impl ChatTools {
     pub fn new(cx: &mut Context<ChatView>) -> ChatTools {
-        let editor = cx.new(|cx| TextEditor::new("Reply…", super::composer::MAX_LINES, cx));
+        let editor = cx.new(|cx| {
+            TextEditor::new(t::chat::reply_placeholder(), super::composer::MAX_LINES, cx)
+        });
         let focus = editor.read(cx).focus_handle(cx);
         let events = cx.subscribe(
             &editor,
@@ -233,7 +232,7 @@ impl ChatView {
             };
         };
         match super::tool::of(session.tool).refusal(self, session) {
-            Some(AGY_BUSY) if !gate.enabled => gate,
+            Some(why) if why == t::chat::agy_busy() && !gate.enabled => gate,
             Some(why) => Control {
                 enabled: false,
                 tooltip: Some(why),
@@ -521,7 +520,7 @@ impl ChatView {
             agy_set_option(&id, option, value),
             |view, result, _| {
                 if let Err(message) = result {
-                    view.tools.error = Some(format!("Couldn't change it: {message}"));
+                    view.tools.error = Some(t::chat::change_failed(&message));
                 }
             },
             cx,

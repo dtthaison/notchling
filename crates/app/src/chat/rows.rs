@@ -2,6 +2,7 @@ use notchling_engine::transcript::model::{
     ChatItem, Conversation, DiffLine, ItemKind, ToolCall, ToolKind,
 };
 use notchling_kit::Icon;
+use notchling_locale as t;
 
 use super::format::{duration, model_name};
 
@@ -188,17 +189,17 @@ pub fn row_of(item: &ChatItem) -> Row {
         ItemKind::Assistant { text } => Row::Assistant { text: text.clone() },
         ItemKind::Thinking { seconds, text } => Row::Thinking {
             title: if *seconds >= 1.0 {
-                format!("Thought for {}", duration(*seconds))
+                t::chat::thought_for(&duration(*seconds))
             } else {
-                "Thought briefly".to_owned()
+                t::chat::thought_briefly().to_owned()
             },
             text: text.clone(),
         },
         ItemKind::Tools(calls) => Row::Tools(calls.iter().map(tool_row).collect()),
         ItemKind::TurnEnd { seconds, model } => Row::TurnEnd {
             text: match model {
-                Some(model) => format!("Worked for {} · {}", duration(*seconds), model_name(model)),
-                None => format!("Worked for {}", duration(*seconds)),
+                Some(model) => t::chat::worked_for_model(&duration(*seconds), &model_name(model)),
+                None => t::chat::worked_for(&duration(*seconds)),
             },
         },
         ItemKind::Notice { text, symbol } => Row::Notice {

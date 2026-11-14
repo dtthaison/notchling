@@ -1,3 +1,4 @@
+use notchling_locale as t;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
@@ -125,10 +126,10 @@ pub fn load(path: &Path) -> Loaded {
         body: Body::Missing(why.to_owned()),
     };
     if stamp.is_none() {
-        return missing("This file is gone.");
+        return missing(t::chat::panel_file_gone());
     }
     let Ok(file) = std::fs::File::open(path) else {
-        return missing("This file can't be read.");
+        return missing(t::chat::panel_file_unreadable());
     };
     let mut bytes = Vec::new();
     let limit = if pic(path).is_some() {
@@ -137,7 +138,7 @@ pub fn load(path: &Path) -> Loaded {
         MAX_TEXT as u64 + 1
     };
     if file.take(limit).read_to_end(&mut bytes).is_err() {
-        return missing("This file can't be read.");
+        return missing(t::chat::panel_file_unreadable());
     }
     let cut = pic(path).is_none() && bytes.len() > MAX_TEXT;
     let head_end = bytes.len().min(SNIFF);
@@ -172,7 +173,7 @@ pub fn subtitle(path: &Path, home: Option<&Path>, body: &Body) -> String {
     };
     match body {
         Body::Markdown { cut: true, .. } | Body::Text { cut: true, .. } => {
-            format!("{shown} · first 1 MB shown")
+            t::chat::panel_file_cut_subtitle(&shown)
         }
         _ => shown,
     }

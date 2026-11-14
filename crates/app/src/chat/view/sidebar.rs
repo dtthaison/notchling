@@ -9,6 +9,7 @@ use notchling_kit::ui::{
     session_row_marked, toggle_parts, tool_icon, KitPart, KitStyled, ToolMark,
 };
 use notchling_kit::{Appearance, Icon, IconSize, Ink, TypeRole};
+use notchling_locale as t;
 
 use super::ChatView;
 use crate::chat::data::Tool;
@@ -18,10 +19,8 @@ use crate::mac::gate;
 fn footer_button(
     id: &'static str,
     mark: Icon,
-    title: &str,
-    help: &str,
+    help: &'static str,
     a: Appearance,
-    cx: &Context<ChatView>,
 ) -> gpui::Stateful<Div> {
     let button = icon_button(
         id,
@@ -31,26 +30,15 @@ fn footer_button(
         PartState::Rest,
         a,
     );
-    gate::tip_text(button, help.to_owned().into(), a).part_at(
-        &format!("{title} Button"),
-        Corner::TopLeading,
-        a,
-        cx,
-    )
+    gate::tip_text(button, help.into(), a)
 }
 
 pub(super) const FOOTER_HEIGHT: f32 = 44.0;
 
 fn inbox_button(unread: usize, a: Appearance, cx: &Context<ChatView>) -> Div {
-    let button = footer_button(
-        "inbox",
-        Icon::Bell,
-        "Inbox",
-        "Notifications that need you",
-        a,
-        cx,
-    )
-    .on_click(cx.listener(|this, _, _, cx| this.toggle_inbox(cx)));
+    let button = footer_button("inbox", Icon::Bell, t::chat::inbox_tip(), a)
+        .part_at("Inbox Button", Corner::TopLeading, a, cx)
+        .on_click(cx.listener(|this, _, _, cx| this.toggle_inbox(cx)));
     let badge = (unread > 0).then(|| {
         let text = if unread > 9 {
             "9+".to_owned()
@@ -96,47 +84,25 @@ fn footer(
         .items_center()
         .gap(px(8.0))
         .child(
-            footer_button(
-                "settings",
-                Icon::Settings,
-                "Settings",
-                "Settings: accounts, token cost and the app (⌘,)",
-                a,
-                cx,
-            )
-            .on_click(cx.listener(|this, _, _, cx| this.open_settings(cx))),
+            footer_button("settings", Icon::Settings, t::chat::settings_tip(), a)
+                .part_at("Settings Button", Corner::TopLeading, a, cx)
+                .on_click(cx.listener(|this, _, _, cx| this.open_settings(cx))),
         )
         .child(
-            footer_button(
-                "accounts",
-                Icon::Account,
-                "Accounts",
-                "Accounts: add, switch and sign out",
-                a,
-                cx,
-            )
-            .on_click(cx.listener(|this, _, _, cx| this.open_accounts_sheet(None, cx))),
+            footer_button("accounts", Icon::Account, t::chat::accounts_tip(), a)
+                .part_at("Accounts Button", Corner::TopLeading, a, cx)
+                .on_click(cx.listener(|this, _, _, cx| this.open_accounts_sheet(None, cx))),
         )
         .child(inbox_button(unread, a, cx))
         .child(
-            footer_button(
-                "vault",
-                Icon::Key,
-                "Vault",
-                "Secret Vault: passwords and tokens agents can use without seeing them",
-                a,
-                cx,
-            )
-            .on_click(cx.listener(|this, _, _, cx| this.open_vault_sheet(cx))),
+            footer_button("vault", Icon::Key, t::chat::vault_tip(), a)
+                .part_at("Vault Button", Corner::TopLeading, a, cx)
+                .on_click(cx.listener(|this, _, _, cx| this.open_vault_sheet(cx))),
         )
         .child(parts)
         .children(note.map(|note| {
-            label(note, TypeRole::Meta, Ink::TextFaint, a).part_at(
-                "Daemon Note",
-                Corner::TopLeading,
-                a,
-                cx,
-            )
+            let line = label(note, TypeRole::Meta, Ink::TextFaint, a);
+            line.part_at("Daemon Note", Corner::TopLeading, a, cx)
         }))
 }
 
@@ -152,9 +118,9 @@ pub const HIDDEN_HEADER_START: f32 = TOGGLE_LEFT + TOGGLE_WIDTH + 4.0 + TOGGLE_W
 pub fn toggle_button(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Div {
     let hidden = view.sidebar_hidden;
     let tip = if hidden {
-        "Show Sidebar"
+        t::chat::show_sidebar()
     } else {
-        "Hide Sidebar"
+        t::chat::hide_sidebar()
     };
     let button = icon_button(
         "sidebar-toggle",
@@ -168,16 +134,12 @@ pub fn toggle_button(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>)
     .w(px(TOGGLE_WIDTH))
     .px(px(0.0))
     .on_click(cx.listener(|this, _, _, cx| this.toggle_sidebar(cx)));
+    let button = gate::tip_text(button, tip.into(), a);
     div()
         .absolute()
         .top(px(TOGGLE_TOP))
         .left(px(TOGGLE_LEFT))
-        .child(gate::tip_text(button, tip.into(), a).part_at(
-            "Sidebar Button",
-            Corner::Bottom,
-            a,
-            cx,
-        ))
+        .child(button.part_at("Sidebar Button", Corner::Bottom, a, cx))
 }
 
 pub fn new_session_button(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Div {
@@ -198,14 +160,12 @@ pub fn new_session_button(view: &ChatView, a: Appearance, cx: &mut Context<ChatV
     .w(px(TOGGLE_WIDTH))
     .px(px(0.0))
     .on_click(cx.listener(|this, _, _, cx| this.open_new_session(cx)));
-    div().absolute().top(px(TOGGLE_TOP)).left(px(left)).child(
-        gate::tip_text(button, "New Session".into(), a).part_at(
-            "New Session Button",
-            Corner::Bottom,
-            a,
-            cx,
-        ),
-    )
+    let button = gate::tip_text(button, t::chat::new_session().into(), a);
+    div()
+        .absolute()
+        .top(px(TOGGLE_TOP))
+        .left(px(left))
+        .child(button.part_at("New Session Button", Corner::Bottom, a, cx))
 }
 
 fn mark_of(tool: Tool) -> ToolMark {
@@ -242,7 +202,7 @@ pub(super) fn render(m: &SidebarModel, a: Appearance, cx: &mut Context<ChatView>
         .gap(px(4.0));
     if m.sections.is_empty() {
         list = list.child(div().px(px(8.0)).child(label(
-            "No sessions in the last day",
+            t::chat::no_sessions(),
             TypeRole::Meta,
             Ink::TextMuted,
             a,
@@ -250,6 +210,8 @@ pub(super) fn render(m: &SidebarModel, a: Appearance, cx: &mut Context<ChatView>
     }
     let mut accounts = m.accounts.iter();
     for section in &m.sections {
+        let heading = label(section.title, TypeRole::Section, Ink::TextFaint, a);
+        let heading = heading.part_at("Group Heading", Corner::Trailing, a, cx);
         list = list.child(
             div()
                 .px(px(8.0))
@@ -258,14 +220,7 @@ pub(super) fn render(m: &SidebarModel, a: Appearance, cx: &mut Context<ChatView>
                 .flex()
                 .items_center()
                 .justify_between()
-                .child(
-                    label(section.title, TypeRole::Section, Ink::TextFaint, a).part_at(
-                        "Group Heading",
-                        Corner::Trailing,
-                        a,
-                        cx,
-                    ),
-                )
+                .child(heading)
                 .child(
                     label(
                         &section.rows.len().to_string(),
@@ -291,12 +246,8 @@ pub(super) fn render(m: &SidebarModel, a: Appearance, cx: &mut Context<ChatView>
             )
             .part_at("Tool Icon", Corner::Leading, a, cx);
             let account = accounts.next().and_then(Option::as_ref).map(|acc| {
-                account_line(&acc.text, acc.lane, a).part_at(
-                    "Session Account",
-                    Corner::Trailing,
-                    a,
-                    cx,
-                )
+                let line = account_line(&acc.text, acc.lane, a);
+                line.part_at("Session Account", Corner::Trailing, a, cx)
             });
             let menu_id = row.id.clone();
             let drop_id = row.id.clone();
@@ -322,14 +273,8 @@ pub(super) fn render(m: &SidebarModel, a: Appearance, cx: &mut Context<ChatView>
                     cx.stop_propagation();
                 },
             ));
-            list = list.child(
-                super::row_menu::on_right_click(row_el, menu_id, cx).part_at(
-                    "Session Row",
-                    Corner::Trailing,
-                    a,
-                    cx,
-                ),
-            );
+            let row_el = super::row_menu::on_right_click(row_el, menu_id, cx);
+            list = list.child(row_el.part_at("Session Row", Corner::Trailing, a, cx));
         }
     }
     div()

@@ -7,6 +7,7 @@ use notchling_kit::metric::RADIUS_MD;
 use notchling_kit::part::{ButtonKind, PartState};
 use notchling_kit::ui::{button, card, hsla, icon_button, label, KitPart, KitStyled};
 use notchling_kit::{Appearance, Icon, Ink, TypeRole};
+use notchling_locale as t;
 
 use super::conversation_view::ConversationView;
 use super::ChatView;
@@ -14,9 +15,6 @@ use crate::acting::Control;
 use crate::mac::gate;
 use crate::mac::shell::AppOpinions;
 use crate::tools::second_opinion::tool_name;
-
-pub const TIP: &str = "Second Opinion: ask Codex or Antigravity to review this";
-pub const NO_STORE: &str = "Second opinions need the app's own data folder, not a fixture";
 
 pub fn store(cx: &App) -> Option<SecondOpinionStore> {
     cx.try_global::<AppOpinions>().and_then(|o| o.0.clone())
@@ -64,9 +62,9 @@ pub fn button_label(subject: &Subject, of: usize) -> String {
     match subject {
         Subject::Change { path, .. } if of > 1 => {
             let name = path.rsplit('/').next().unwrap_or(path);
-            format!("Second Opinion: {name}")
+            t::chat::second_opinion_of(name)
         }
-        _ => "Second Opinion".to_owned(),
+        _ => t::chat::second_opinion().to_owned(),
     }
 }
 
@@ -81,11 +79,11 @@ pub fn opinion_button(
     let control = match store(cx) {
         Some(_) => Control {
             enabled: true,
-            tooltip: Some(TIP),
+            tooltip: Some(t::chat::second_opinion_tip()),
         },
         None => Control {
             enabled: false,
-            tooltip: Some(NO_STORE),
+            tooltip: Some(t::chat::no_store()),
         },
     };
     let anchor = anchor.to_owned();
@@ -122,17 +120,17 @@ fn pick_line(run: &SecondOpinion) -> String {
 fn card_for(run: &SecondOpinion, a: Appearance, cx: &mut Context<ConversationView>) -> Div {
     let tool = tool_name(run.tool_value());
     let title = match run.status {
-        Status::Running => format!("{tool} is reviewing {}", run.subject),
-        Status::Done => format!("{tool} on {}", run.subject),
-        Status::Failed => format!("{tool} couldn't review {}", run.subject),
-        Status::Cancelled => format!("{tool} on {}, cancelled", run.subject),
+        Status::Running => t::chat::opinion_running(tool, &run.subject),
+        Status::Done => t::chat::opinion_done(tool, &run.subject),
+        Status::Failed => t::chat::opinion_failed(tool, &run.subject),
+        Status::Cancelled => t::chat::opinion_cancelled(tool, &run.subject),
     };
     let pick = pick_line(run);
     let id = run.id.clone();
     let action = if run.status == Status::Running {
         button(
             SharedString::from(format!("opinion-cancel-{}", run.id)),
-            "Cancel",
+            t::chat::cancel(),
             ButtonKind::Ghost,
             PartState::Rest,
             a,
@@ -202,7 +200,7 @@ fn card_for(run: &SecondOpinion, a: Appearance, cx: &mut Context<ConversationVie
                 run.reply.is_empty() && run.status == Status::Cancelled,
                 |b| {
                     b.child(label(
-                        "Cancelled before it answered.",
+                        t::chat::opinion_cancelled_early(),
                         TypeRole::Body,
                         Ink::TextMuted,
                         a,

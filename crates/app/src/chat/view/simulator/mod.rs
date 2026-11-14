@@ -1,3 +1,4 @@
+use notchling_locale as t;
 use std::cell::Cell;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Stdio};
@@ -263,7 +264,7 @@ impl ChatView {
                                 Err(e) => {
                                     v.simulator.all.clear();
                                     v.simulator.note =
-                                        Some(format!("Couldn't list simulators: {e}"));
+                                        Some(t::chat::sim_list_failed(&e.to_string()));
                                 }
                             }
                             v.simulator.listed = true;
@@ -392,11 +393,11 @@ impl ChatView {
         }
         let udid = device.udid.clone();
         self.simctl_step(
-            format!("Booting {}…", device.name),
+            t::chat::sim_booting(&device.name),
             boot_command(&udid),
             move |v, answer| match answer {
                 Ok(_) => v.simulator.active = Some(udid),
-                Err(e) => v.simulator.note = Some(format!("Couldn't boot it: {e}")),
+                Err(e) => v.simulator.note = Some(t::chat::sim_boot_failed(&e.to_string())),
             },
             cx,
         );
@@ -408,11 +409,11 @@ impl ChatView {
         };
         self.stop_recording(cx);
         self.simctl_step(
-            format!("Shutting down {}…", device.name),
+            t::chat::sim_shutting_down(&device.name),
             shutdown_command(&device.udid),
             move |v, answer| {
                 if let Err(e) = answer {
-                    v.simulator.note = Some(format!("Couldn't shut it down: {e}"));
+                    v.simulator.note = Some(t::chat::sim_shut_down_failed(&e.to_string()));
                 }
                 v.simulator.active = None;
             },
@@ -423,7 +424,7 @@ impl ChatView {
     fn begin_new_simulator(&mut self, cx: &mut Context<Self>) {
         self.simulator.menu_open = false;
         let home = self.root.home.clone();
-        self.simulator.busy = Some("Reading the runtimes…".into());
+        self.simulator.busy = Some(t::chat::sim_reading_runtimes().into());
         cx.spawn(async move |this, cx| {
             let answer = cx
                 .background_executor()
@@ -433,8 +434,7 @@ impl ChatView {
                 v.simulator.busy = None;
                 let list = answer.map(|json| runtimes(&json)).unwrap_or_default();
                 if list.iter().all(|r| r.types.is_empty()) {
-                    v.simulator.note =
-                        Some("No iOS runtime is installed (Xcode > Settings > Components)".into());
+                    v.simulator.note = Some(t::chat::sim_no_runtime().into());
                 } else {
                     let runtime = list.iter().position(|r| !r.types.is_empty()).unwrap_or(0);
                     v.simulator.adding = Some(NewSimulator {
@@ -463,7 +463,7 @@ impl ChatView {
         };
         let home = self.root.home.clone();
         let runtime_id = runtime.id.clone();
-        self.simulator.busy = Some(format!("Making {name}…"));
+        self.simulator.busy = Some(t::chat::sim_making(&name));
         cx.spawn(async move |this, cx| {
             let made = cx
                 .background_executor()
@@ -483,7 +483,7 @@ impl ChatView {
                 v.simulator.relist = true;
                 match made {
                     Ok(udid) => v.simulator.active = Some(udid),
-                    Err(e) => v.simulator.note = Some(format!("Couldn't make it: {e}")),
+                    Err(e) => v.simulator.note = Some(t::chat::sim_make_failed(&e.to_string())),
                 }
                 cx.notify();
             })
@@ -519,13 +519,13 @@ impl ChatView {
         }
         let n = paths.len();
         self.simctl_step(
-            format!("Adding to {}'s Photos…", device.name),
+            t::chat::sim_adding_photos(&device.name),
             add_media_command(&device.udid, &paths),
             move |v, answer| {
                 v.simulator.note = Some(match answer {
-                    Ok(_) if n == 1 => "Added to Photos".into(),
-                    Ok(_) => format!("Added {n} to Photos"),
-                    Err(e) => format!("Couldn't add them: {e}"),
+                    Ok(_) if n == 1 => t::chat::sim_added_one().into(),
+                    Ok(_) => t::chat::sim_added_many(&n.to_string()),
+                    Err(e) => t::chat::sim_add_failed(&e.to_string()),
                 });
             },
             cx,
@@ -614,8 +614,8 @@ impl ChatView {
                 .await;
             this.update(cx, |v, cx| {
                 v.simulator.note = Some(match done {
-                    Ok(_) => format!("Saved {}", file_name(&path)),
-                    Err(e) => format!("Couldn't take the screenshot: {e}"),
+                    Ok(_) => t::chat::sim_saved(&file_name(&path)),
+                    Err(e) => t::chat::sim_screenshot_failed(&e.to_string()),
                 });
                 cx.notify();
             })
@@ -647,9 +647,9 @@ impl ChatView {
         {
             Ok(child) => {
                 self.simulator.recording = Some(Recording { child, path });
-                self.simulator.note = Some("Recording…".into());
+                self.simulator.note = Some(t::chat::sim_recording().into());
             }
-            Err(e) => self.simulator.note = Some(format!("Couldn't record: {e}")),
+            Err(e) => self.simulator.note = Some(t::chat::sim_record_failed(&e.to_string())),
         }
         cx.notify();
     }
@@ -660,7 +660,7 @@ impl ChatView {
         };
         recording.stop();
         let path = recording.path.clone();
-        self.simulator.note = Some("Saving the recording…".into());
+        self.simulator.note = Some(t::chat::sim_saving_recording().into());
         cx.spawn(async move |this, cx| {
             let saved = cx
                 .background_executor()
@@ -677,9 +677,9 @@ impl ChatView {
             this.update(cx, |v, cx| {
                 if v.simulator.recording.is_none() {
                     v.simulator.note = Some(if saved && path.exists() {
-                        format!("Saved {}", file_name(&path))
+                        t::chat::sim_saved(&file_name(&path))
                     } else {
-                        "The recording didn't finish".into()
+                        t::chat::sim_recording_unfinished().into()
                     });
                     cx.notify();
                 }
@@ -718,7 +718,7 @@ impl ChatView {
             strokes: Vec::new(),
             drawing: false,
         });
-        self.simulator.note = Some("Draw on the screen, then Add to Reply".into());
+        self.simulator.note = Some(t::chat::sim_annotate_note().into());
         cx.notify();
     }
 
@@ -797,9 +797,9 @@ impl ChatView {
             Ok(()) => {
                 self.end_annotation(cx);
                 self.drop_paths(&[path], window, cx);
-                self.simulator.note = Some("Added to the reply".into());
+                self.simulator.note = Some(t::chat::sim_annotation_added().into());
             }
-            Err(e) => self.simulator.note = Some(format!("Couldn't save it: {e}")),
+            Err(e) => self.simulator.note = Some(t::chat::sim_save_failed(&e.to_string())),
         }
         cx.notify();
     }

@@ -9,6 +9,7 @@ use notchling_kit::metric::{CONTROL, METER_BAR, RADIUS_SM};
 use notchling_kit::part::{ButtonKind, PartState};
 use notchling_kit::ui::{button_with, card as kit_card, hsla, label, KitPart, KitStyled};
 use notchling_kit::{Appearance, Ink, TypeRole};
+use notchling_locale as t;
 
 use super::ChatView;
 use crate::accounts::limits::Zone;
@@ -209,7 +210,7 @@ fn popover(
 ) -> Stateful<Div> {
     let see_all = button_with(
         "limit-see-all",
-        label("See all →", TypeRole::Label, Ink::Text, a),
+        label(t::chat::limit_see_all(), TypeRole::Label, Ink::Text, a),
         ButtonKind::Ghost,
         PartState::Rest,
         a,

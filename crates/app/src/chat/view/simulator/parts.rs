@@ -1,3 +1,4 @@
+use notchling_locale as t;
 use std::sync::Arc;
 
 use gpui::{
@@ -51,7 +52,7 @@ fn header(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Div {
     let device = s.device();
     let name = device
         .map(|d| d.name.clone())
-        .unwrap_or_else(|| "Simulator".into());
+        .unwrap_or_else(|| t::chat::sim_name().into());
     let runtime = device.map(|d| d.runtime.clone()).unwrap_or_default();
     let who = div()
         .id("sim-device")
@@ -82,13 +83,21 @@ fn header(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Div {
     let has = s.frame.is_some() && device.is_some() && s.annotation.is_none();
     let fit = matches!(s.zoom(), Zoom::Fit);
     let actual = matches!(s.zoom(), Zoom::Times(t) if (t - 1.0).abs() < 0.001);
-    let out = tool("sim-zoom-out", Icon::ZoomOut, "Zoom Out", false, has, a).when(has, |b| {
+    let out = tool(
+        "sim-zoom-out",
+        Icon::ZoomOut,
+        t::chat::sim_zoom_out(),
+        false,
+        has,
+        a,
+    )
+    .when(has, |b| {
         b.on_click(cx.listener(|this, _, _, cx| this.step_zoom(false, cx)))
     });
     let fit_b = tool(
         "sim-zoom-fit",
         Icon::ZoomFit,
-        "Fit to the Panel",
+        t::chat::sim_zoom_fit(),
         fit,
         has,
         a,
@@ -113,13 +122,21 @@ fn header(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Div {
             a,
         )
         .px(px(8.0)),
-        "Actual Size".into(),
+        t::chat::sim_zoom_actual().into(),
         a,
     )
     .when(has, |b| {
         b.on_click(cx.listener(|this, _, _, cx| this.set_zoom(Zoom::Times(1.0), cx)))
     });
-    let zin = tool("sim-zoom-in", Icon::ZoomIn, "Zoom In", false, has, a).when(has, |b| {
+    let zin = tool(
+        "sim-zoom-in",
+        Icon::ZoomIn,
+        t::chat::sim_zoom_in(),
+        false,
+        has,
+        a,
+    )
+    .when(has, |b| {
         b.on_click(cx.listener(|this, _, _, cx| this.step_zoom(true, cx)))
     });
     div()
@@ -178,9 +195,9 @@ fn device_menu(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Op
     let (booted, available) = menu(&s.all);
     let shown = s.device().cloned();
     let has = shown.is_some();
-    let mut items = menu_panel(a).child(section("Booted", !booted.is_empty(), a));
+    let mut items = menu_panel(a).child(section(t::chat::sim_booted(), !booted.is_empty(), a));
     if booted.is_empty() {
-        items = items.child(menu_action("sim-none", "None", false, a));
+        items = items.child(menu_action("sim-none", t::chat::sim_none(), false, a));
     }
     for (i, d) in booted.iter().enumerate() {
         let ticked = shown.as_ref().is_some_and(|s| s.udid == d.udid);
@@ -189,33 +206,33 @@ fn device_menu(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Op
     if !available.is_empty() {
         items = items
             .child(menu_rule(a))
-            .child(section("Available (will boot)", false, a));
+            .child(section(t::chat::sim_available(), false, a));
         for (i, d) in available.iter().enumerate() {
             items = items.child(device_row(format!("sim-avail-{i}"), d, false, a, cx));
         }
     }
     let shut = shown
         .as_ref()
-        .map(|d| format!("Shut Down {}", d.name))
-        .unwrap_or_else(|| "Shut Down".into());
+        .map(|d| t::chat::sim_shut_down_device(&d.name))
+        .unwrap_or_else(|| t::chat::sim_shut_down().into());
     items = items
         .child(menu_rule(a))
         .child(
-            menu_action("sim-add", "Add Simulator…", true, a)
+            menu_action("sim-add", t::chat::sim_add(), true, a)
                 .on_click(cx.listener(|this, _, _, cx| this.begin_new_simulator(cx))),
         )
         .child(menu_rule(a))
         .child(
-            menu_action("sim-media", "Add Photos or Videos…", has, a).when(has, |r| {
+            menu_action("sim-media", t::chat::sim_add_media(), has, a).when(has, |r| {
                 r.on_click(cx.listener(|this, _, _, cx| this.pick_media(cx)))
             }),
         )
         .child(
-            menu_action("sim-open", "Open in Simulator", true, a)
+            menu_action("sim-open", t::chat::sim_open(), true, a)
                 .on_click(cx.listener(|this, _, _, cx| this.open_simulator_app(cx))),
         )
         .child(
-            menu_action("sim-detach", "Detach Simulator", true, a)
+            menu_action("sim-detach", t::chat::sim_detach(), true, a)
                 .on_click(cx.listener(|this, _, _, cx| this.close_simulator(cx))),
         )
         .child(menu_action("sim-shutdown", &shut, has, a).when(has, |r| {
@@ -314,7 +331,7 @@ fn new_simulator_form(form: &NewSimulator, a: Appearance, cx: &mut Context<ChatV
         .flex()
         .flex_col()
         .gap(px(10.0))
-        .child(label("New Simulator", TypeRole::Heading, Ink::Text, a))
+        .child(label(t::chat::sim_new(), TypeRole::Heading, Ink::Text, a))
         .child(runtimes)
         .child(
             div()
@@ -332,7 +349,7 @@ fn new_simulator_form(form: &NewSimulator, a: Appearance, cx: &mut Context<ChatV
                 .child(
                     button(
                         "sim-new-cancel",
-                        "Cancel",
+                        t::chat::sim_cancel(),
                         ButtonKind::Ghost,
                         PartState::Rest,
                         a,
@@ -345,7 +362,7 @@ fn new_simulator_form(form: &NewSimulator, a: Appearance, cx: &mut Context<ChatV
                 .child(
                     button(
                         "sim-new-create",
-                        "Create and Boot",
+                        t::chat::sim_create(),
                         ButtonKind::Primary,
                         if can {
                             PartState::Rest
@@ -547,9 +564,9 @@ fn area(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> AnyElemen
     }
     let (line, offer) = match (&busy, s.listed, device) {
         (Some(b), _, _) => (b.clone(), false),
-        (None, false, _) => ("Looking for a simulator…".to_owned(), false),
-        (None, true, Some(_)) => ("Waiting for the screen…".to_owned(), false),
-        (None, true, None) => ("No simulator is running".to_owned(), true),
+        (None, false, _) => (t::chat::sim_looking().to_owned(), false),
+        (None, true, Some(_)) => (t::chat::sim_waiting().to_owned(), false),
+        (None, true, None) => (t::chat::sim_none_running().to_owned(), true),
     };
     body.child(
         div()
@@ -566,7 +583,7 @@ fn area(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> AnyElemen
                 b.child(
                     button(
                         "sim-pick-empty",
-                        "Choose a Simulator",
+                        t::chat::sim_choose(),
                         ButtonKind::Secondary,
                         PartState::Rest,
                         a,
@@ -606,7 +623,7 @@ fn controls(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Div {
         bar.child(
             button(
                 "sim-ann-clear",
-                "Clear",
+                t::chat::sim_clear(),
                 ButtonKind::Ghost,
                 PartState::Rest,
                 a,
@@ -621,7 +638,7 @@ fn controls(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Div {
         .child(
             button(
                 "sim-ann-cancel",
-                "Cancel",
+                t::chat::sim_cancel(),
                 ButtonKind::Ghost,
                 PartState::Rest,
                 a,
@@ -631,7 +648,7 @@ fn controls(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Div {
         .child(
             button(
                 "sim-ann-add",
-                "Add to Reply",
+                t::chat::sim_add_to_reply(),
                 ButtonKind::Primary,
                 PartState::Rest,
                 a,
@@ -642,12 +659,20 @@ fn controls(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Div {
         let recording = s.recording.is_some();
         let framed = has && s.frame.is_some();
         bar.child(
-            tool("sim-home", Icon::Home, "Home", false, has, a).when(has, |b| {
+            tool("sim-home", Icon::Home, t::chat::sim_home(), false, has, a).when(has, |b| {
                 b.on_click(cx.listener(|this, _, _, cx| this.press_simulator_key(SimKey::Home, cx)))
             }),
         )
         .child(
-            tool("sim-rotate", Icon::Resume, "Rotate", false, has, a).when(has, |b| {
+            tool(
+                "sim-rotate",
+                Icon::Resume,
+                t::chat::sim_rotate(),
+                false,
+                has,
+                a,
+            )
+            .when(has, |b| {
                 b.on_click(
                     cx.listener(|this, _, _, cx| this.press_simulator_key(SimKey::Rotate, cx)),
                 )
@@ -658,7 +683,7 @@ fn controls(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Div {
             tool(
                 "sim-shot",
                 Icon::Camera,
-                "Save a screenshot to the Desktop",
+                t::chat::sim_shot_tip(),
                 false,
                 has,
                 a,
@@ -672,9 +697,9 @@ fn controls(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Div {
                 "sim-record",
                 if recording { Icon::Stop } else { Icon::Video },
                 if recording {
-                    "Stop recording and save the video to the Desktop"
+                    t::chat::sim_stop_recording_tip()
                 } else {
-                    "Record the screen to a video on the Desktop"
+                    t::chat::sim_record_tip()
                 },
                 recording,
                 has || recording,
@@ -689,7 +714,7 @@ fn controls(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Div {
             tool(
                 "sim-annotate",
                 Icon::Edit,
-                "Annotate: draw on the screen and add it to the reply",
+                t::chat::sim_annotate_tip(),
                 false,
                 framed,
                 a,
@@ -771,7 +796,7 @@ pub fn button_in_header(
         )
         .size(px(crate::chat::view::sidebar::HEADER_BUTTON))
         .px(px(0.0)),
-        SharedString::from("iOS Simulator: its screen, live"),
+        SharedString::from(t::chat::sim_button_tip()),
         a,
     )
     .on_click(cx.listener(|this, _, _, cx| this.toggle_simulator(cx)))
