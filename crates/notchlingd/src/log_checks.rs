@@ -215,13 +215,19 @@ impl Checker {
             .and_then(|c| c.prune_anchor.as_deref())
             .and_then(Seal::parse);
         let checkpoint_seal = checkpoint.as_ref().and_then(|c| Seal::parse(&c.seal));
+        let first_prev = months
+            .iter()
+            .find_map(|(_, text)| text.as_deref())
+            .and_then(|text| text.lines().next())
+            .and_then(read_head)
+            .and_then(|head| head.prev);
         let refs: Vec<(u32, Option<&str>)> =
             months.iter().map(|(m, t)| (*m, t.as_deref())).collect();
         let outcome = audit_check::check(&CheckInput {
             key: key.as_ref(),
             months: &refs,
             anchor: if from_n.is_some() {
-                None
+                first_prev.as_ref()
             } else {
                 anchor.as_ref()
             },

@@ -39,6 +39,7 @@ pub mod log_checks;
 pub mod log_fold;
 pub mod log_ops;
 pub mod log_queue;
+pub mod log_retention;
 pub mod log_rotate;
 pub mod op_group;
 pub mod pages_cli;
@@ -114,6 +115,8 @@ mod log_bus_tests;
 pub(crate) mod log_checks_tests;
 #[cfg(test)]
 mod log_ops_tests;
+#[cfg(test)]
+mod log_retention_tests;
 #[cfg(test)]
 mod pages_ops_tests;
 #[cfg(test)]

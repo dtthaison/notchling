@@ -183,10 +183,9 @@ pub fn check(input: &CheckInput) -> CheckOutcome {
                     }
                     (Some(prev), None) => {
                         if !seen_sealed_in_chain {
-                            if let Some(anchor) = input.anchor {
-                                if prev != anchor {
-                                    first(&mut found.unanchored, head.n);
-                                }
+                            match input.anchor {
+                                Some(anchor) if prev == anchor => {}
+                                _ => first(&mut found.unanchored, head.n),
                             }
                         }
                     }

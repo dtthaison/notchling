@@ -177,6 +177,22 @@ fn month_removed_with_anchor_is_intact() {
 }
 
 #[test]
+fn oldest_month_removed_without_an_anchor_is_unanchored() {
+    let c = chain(6);
+    let later = text(&c.lines[3..]);
+    let months = [(202611u32, Some(later.as_str()))];
+    let out = check(&CheckInput {
+        key: Some(&KEY),
+        months: &months,
+        anchor: None,
+        checkpoint: None,
+        from_n: None,
+    });
+    assert_eq!(out.result, CheckResult::Unanchored);
+    assert_eq!(out.first_bad_n, Some(4));
+}
+
+#[test]
 fn wrong_anchor_is_unanchored() {
     let c = chain(6);
     let later = text(&c.lines[3..]);

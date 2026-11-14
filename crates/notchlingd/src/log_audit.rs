@@ -1,6 +1,7 @@
 use crate::log_bus::{EnvMaker, Extra, Sink, SinkResult, Ticked};
 use crate::log_fold::{Fold, FoldAction};
 use crate::log_queue::Stamped;
+use crate::log_retention::{KeepAudit, CAP_BYTES, RETENTION_EVERY_MS};
 use notchling_engine::logs::{
     has_legacy, month_of, AuditDir, Checkpoint, KeyError, KeyRead, KeyStore, LegacyFile,
     UserDeleted,
@@ -53,6 +54,9 @@ pub struct AuditSink {
     pub(crate) last_seal_n: u64,
     pub(crate) month: u32,
     pub(crate) carried: Carried,
+    pub(crate) keep: KeepAudit,
+    pub(crate) cap_bytes: u64,
+    last_retention_ms: Option<i64>,
     key_rx: Option<Receiver<KeyRead>>,
     begun: Instant,
     fresh: bool,
@@ -150,6 +154,9 @@ impl AuditSink {
             last_seal_n,
             month,
             carried,
+            keep: KeepAudit::Year1,
+            cap_bytes: CAP_BYTES,
+            last_retention_ms: None,
             key_rx,
             begun: Instant::now(),
             fresh,
@@ -192,6 +199,14 @@ impl AuditSink {
 
     fn now(&self) -> i64 {
         (self.start.clock)()
+    }
+
+    pub(crate) fn now_ms(&self) -> i64 {
+        self.now()
+    }
+
+    pub(crate) fn write_checkpoint_now(&mut self, now: i64) -> io::Result<()> {
+        self.write_checkpoint(now)
     }
 
     fn poll_key(&mut self, wait: Duration) {
@@ -508,6 +523,14 @@ impl Sink for AuditSink {
                 stamped: due,
                 audit_n: n,
             });
+        }
+        if self.state != SealState::Starting
+            && self
+                .last_retention_ms
+                .is_none_or(|last| now_ms - last >= RETENTION_EVERY_MS)
+        {
+            self.last_retention_ms = Some(now_ms);
+            self.retention(now_ms);
         }
         if self.state == SealState::Sealed
             && self.n > self.cp_n

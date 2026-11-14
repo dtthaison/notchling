@@ -1,6 +1,8 @@
 use crate::log_audit::AuditSink;
 use crate::log_checks::Checker;
+use crate::log_retention::PruneError;
 use crate::op_group::OpGroup;
+use notchling_engine::logs::parse_month_name;
 use notchling_events::kinds::security_log::ChainReason;
 use notchling_local_api::{ops, ApiError, Caller, ErrorCode, OpSpec, Tier};
 use serde_json::{json, Value};
@@ -37,6 +39,28 @@ impl LogOps {
         Ok(self.checker.run(full).json())
     }
 
+    fn delete(&self, args: &Value) -> Result<Value, ApiError> {
+        let through = args
+            .get("through_month")
+            .and_then(Value::as_str)
+            .and_then(parse_month_name)
+            .ok_or_else(|| ApiError::bad_request("through_month must look like 2026-09"))?;
+        let (removed, pruned_n) = self
+            .audit
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .delete_through(through)
+            .map_err(|e| match e {
+                PruneError::Current => ApiError::bad_request("that month is too recent"),
+                PruneError::Missing => ApiError::bad_request("no such month"),
+                PruneError::Io(_) => {
+                    ApiError::new(ErrorCode::Failed, "the months can't be removed")
+                }
+            })?;
+        self.checker.run(true);
+        Ok(json!({"months_removed": removed, "audit_pruned_n": pruned_n}))
+    }
+
     fn chain_start(&self, args: &Value) -> Result<Value, ApiError> {
         if args.get("confirm") != Some(&json!(true)) {
             return Err(ApiError::bad_request(
@@ -58,7 +82,7 @@ impl OpGroup for LogOps {
     fn spec(&self, op: &str) -> Option<OpSpec> {
         match op {
             ops::LOG_VERIFY => Some(OpSpec::AGENT),
-            ops::LOG_CHAIN_START => Some(OpSpec::APP),
+            ops::LOG_CHAIN_START | ops::LOG_AUDIT_DELETE => Some(OpSpec::APP),
             _ => None,
         }
     }
@@ -67,6 +91,7 @@ impl OpGroup for LogOps {
         match op {
             ops::LOG_VERIFY => self.verify(caller, args),
             ops::LOG_CHAIN_START => self.chain_start(args),
+            ops::LOG_AUDIT_DELETE => self.delete(args),
             other => Err(ApiError::internal(format!("{other} has no handler"))),
         }
     }
