@@ -286,9 +286,33 @@ fn a_climb_is_said_once_and_sent_as_an_event() {
     assert_eq!(c["id"], json!("claude"));
     assert_eq!(c["registered"], json!(true));
     assert_eq!(c["active"], json!("me@x.com"));
+    assert_eq!(c["active_id"], json!("me"));
     assert_eq!(c["windows"][0]["name"], json!("5-hour"));
     assert_eq!(status["notices"].as_array().unwrap().len(), 1);
     assert_eq!(status["providers"][1]["registered"], json!(false));
+    assert_eq!(status["providers"][1]["active_id"], Value::Null);
+}
+
+#[test]
+fn switching_off_the_mode_empties_the_status_numbers_on_the_next_round() {
+    let (_tmp, flag, _room, ops) = rig();
+    let claude = Arc::new(Claude::default());
+    *claude.me.lock().unwrap() = 50.0;
+    ops.config().set_mode(&CLAUDE, LimitMode::Notify).unwrap();
+    ops.set_claude(claude.clone(), Arc::new(NoJobs));
+    flag.set(true);
+    ops.tick_at(NOW);
+    let status = ops.call(LIMITS_STATUS, &json!({})).unwrap();
+    assert_eq!(status["providers"][0]["active_id"], json!("me"));
+    assert_eq!(
+        status["providers"][0]["windows"].as_array().unwrap().len(),
+        2
+    );
+    ops.config().set_mode(&CLAUDE, LimitMode::Off).unwrap();
+    ops.tick_at(NOW + 10.0);
+    let status = ops.call(LIMITS_STATUS, &json!({})).unwrap();
+    assert_eq!(status["providers"][0]["active_id"], Value::Null);
+    assert_eq!(status["providers"][0]["windows"], json!([]));
 }
 
 #[test]

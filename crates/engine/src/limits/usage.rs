@@ -34,6 +34,8 @@ impl AccountUsage {
     }
 }
 
+const WEEKLY_MODEL: &str = "seven_day_";
+
 fn window_at(json: &Value, key: &str) -> Option<UsageWindow> {
     let w = json.get(key)?.as_object()?;
     let percent = w.get("utilization")?.as_f64()?;
@@ -59,6 +61,27 @@ pub fn parse_usage(json: &Value, fetched: f64) -> AccountUsage {
                 name: name.to_string(),
                 window,
             });
+        }
+    }
+    let mut other_models: Vec<&String> = json
+        .as_object()
+        .into_iter()
+        .flat_map(|m| m.keys())
+        .filter(|k| {
+            k.strip_prefix(WEEKLY_MODEL)
+                .is_some_and(|rest| !rest.is_empty())
+                && !matches!(k.as_str(), "seven_day_opus" | "seven_day_sonnet")
+        })
+        .collect();
+    other_models.sort();
+    for key in other_models {
+        if let Some(window) = window_at(json, key) {
+            let rest = key.strip_prefix(WEEKLY_MODEL).unwrap_or(key);
+            upsert(
+                &mut usage.models,
+                capitalized(&rest.replace('_', " ")),
+                window,
+            );
         }
     }
     if let Some(limits) = json.get("limits").and_then(Value::as_array) {

@@ -76,10 +76,12 @@ fn providers_usage_limits_and_cost_are_read() {
         &json!({"accounts_on": true, "watching": true, "switch_at": 90,
         "providers": [{"id": "claude", "label": "Claude Code", "mode": "notify",
         "modes": ["off", "notify"], "registered": true, "active": "me@example.com",
+        "active_id": "a1",
         "windows": [{"name": "5-hour", "percent": 41.0, "resets_at": 3.0}], "checked": 4.0}]}),
     );
     assert_eq!(limits.switch_at, 90);
     assert_eq!(limits.providers[0].windows[0].name, "5-hour");
+    assert_eq!(limits.providers[0].active_id.as_deref(), Some("a1"));
     let cost = parse_cost(&json!({"range": "7", "scanned": null, "scanning": true,
         "summary": {"days": [{"day": "2026-11-08", "cost": 1.5}], "today": 1.5, "week": 9.0,
                     "month": 31.0, "models": [], "model_detail": [], "projects": [],

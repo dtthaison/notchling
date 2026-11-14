@@ -128,22 +128,11 @@ impl ChatTool for Claude {
                 provider: CLAUDE_CODE,
             });
         }
-        let windows = &s
-            .limits
-            .providers
-            .iter()
-            .find(|p| p.id == "claude")?
-            .windows;
-        let limits = rules::claude_limits(windows);
+        let active = lane_limits::active_limits(&s)?;
         Some(Shown {
-            arc: rules::arc(&limits),
-            limits,
-            plan: s
-                .claude
-                .active
-                .as_ref()
-                .and_then(|id| s.claude.accounts.iter().find(|a| &a.id == id))
-                .and_then(|a| a.plan.clone()),
+            arc: rules::arc(&active.limits),
+            limits: active.limits,
+            plan: active.plan,
             provider: CLAUDE_CODE,
         })
     }

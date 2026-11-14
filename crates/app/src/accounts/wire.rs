@@ -347,6 +347,7 @@ pub struct LimitProvider {
     pub modes: Vec<String>,
     pub registered: bool,
     pub active: Option<String>,
+    pub active_id: Option<String>,
     pub windows: Vec<Window>,
     pub checked: Option<f64>,
 }
@@ -357,6 +358,15 @@ pub struct LimitsStatus {
     pub watching: bool,
     pub switch_at: i64,
     pub providers: Vec<LimitProvider>,
+}
+
+impl LimitsStatus {
+    pub fn claude_for(&self, active: Option<&str>) -> Option<&LimitProvider> {
+        let active = active?;
+        self.providers
+            .iter()
+            .find(|p| p.id == "claude" && p.active_id.as_deref() == Some(active))
+    }
 }
 
 pub fn parse_limits(v: &Value) -> LimitsStatus {
@@ -377,6 +387,7 @@ pub fn parse_limits(v: &Value) -> LimitsStatus {
                         .collect(),
                     registered: flag(p, "registered"),
                     active: text(p, "active"),
+                    active_id: text(p, "active_id"),
                     windows: list(p, "windows")
                         .iter()
                         .filter_map(|w| {

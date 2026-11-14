@@ -131,6 +131,7 @@ impl ProviderLimitWatcher {
         let group = self.setup.primary_group.as_deref();
         let windows = watched_windows(&report, group);
         self.observed = Observed {
+            active_id: Some(active.id.clone()),
             active_email: Some(active.email.clone()),
             windows: windows
                 .iter()

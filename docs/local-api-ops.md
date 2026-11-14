@@ -522,15 +522,20 @@ that reads or writes a login sits behind the traits in
 {"accounts_on": false, "watching": false, "switch_at": 95,
  "providers": [{"id": "claude", "label": "Claude Code", "mode": "notifyAndSwitch",
                 "modes": ["off", "notify", "notifyAndSwitch"], "default": "notifyAndSwitch",
-                "registered": false, "active": "me@example.com" | null,
+                "registered": false, "active": "me@example.com" | null, "active_id": "acct-id" | null,
                 "windows": [{"name": "5-hour", "percent": 41.0, "resets_at": 1794150245.0}],
                 "last_switch": 1794150245.0 | null, "checked": 1794150245.0 | null}],
  "notices": [{"at": 1794150245.0, "text": "me@example.com is at 91% of its 5-hour limit."}]}
 ```
 
 - `providers` are `claude`, `codex` and `antigravity`. `registered` says a store feeds that
-  watcher; `active`, `windows`, `last_switch` and `checked` are what its last check saw (`null`
-  or empty before one). `notices` are the last 20 things the watchers said, newest last.
+  watcher; `active`, `active_id`, `windows`, `last_switch` and `checked` are what its last check saw (`null`
+  or empty before one). `active_id` is the id of the account the numbers belong to (the same id as
+  `accounts.list`'s `active`); a client shows `windows` only while it equals the account it calls in
+  use, since a check runs every tick and an account can change in between. A Claude check that has
+  nothing to read (the mode is `off`, no account is in use, the account in use is not in the saved
+  list, or it just switched away) clears `active`, `active_id`, `windows` and `checked`;
+  `last_switch` stays. `notices` are the last 20 things the watchers said, newest last.
 - `limits.status` and `limits.set_mode` work while `accounts` is off: they read and write only
   the daemon's own memory and its own `daemon/limits` document in `<data>/notchling.db` (the modes and the switch
   point, under the Swift keys), never a login.

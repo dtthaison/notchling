@@ -406,6 +406,7 @@ impl LimitsOps {
                     "default": p.default.as_str(),
                     "registered": registered,
                     "active": seen.active_email,
+                    "active_id": seen.active_id,
                     "windows": seen.windows.iter().map(|(name, percent, resets_at)| {
                         json!({"name": name, "percent": percent, "resets_at": resets_at})
                     }).collect::<Vec<_>>(),

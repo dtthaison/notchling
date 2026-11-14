@@ -538,3 +538,70 @@ fn nobody_is_nudged_two_hours_after_the_switch() {
     r.watcher.check(NOW + 2.0 * 3600.0 + 1.0);
     assert!(r.jobs.nudges.lock().unwrap().is_empty());
 }
+
+#[test]
+fn the_last_check_names_the_account_it_looked_at() {
+    let mut r = rig(two_accounts(40.0), LimitMode::Notify);
+    r.watcher.check(NOW);
+    let seen = r.watcher.observed();
+    assert_eq!(seen.active_id.as_deref(), Some("me"));
+    assert_eq!(seen.active_email.as_deref(), Some("me@x.com"));
+    assert_eq!(seen.windows.len(), 2);
+    assert_eq!(seen.checked, Some(NOW));
+}
+
+#[test]
+fn an_in_use_account_missing_from_the_saved_list_leaves_no_numbers_behind() {
+    let mut r = rig(two_accounts(40.0), LimitMode::Notify);
+    r.watcher.check(NOW);
+    assert_eq!(r.watcher.observed().windows.len(), 2);
+    *r.store.active.lock().unwrap() = Some("ghost".into());
+    r.watcher.check(NOW + 3.0);
+    let seen = r.watcher.observed();
+    assert!(seen.windows.is_empty(), "{:?}", seen.windows);
+    assert_eq!(seen.active_id, None);
+    assert_eq!(seen.active_email, None);
+    assert_eq!(seen.checked, None);
+}
+
+#[test]
+fn no_account_in_use_leaves_no_numbers_behind() {
+    let mut r = rig(two_accounts(40.0), LimitMode::Notify);
+    r.watcher.check(NOW);
+    *r.store.active.lock().unwrap() = None;
+    r.watcher.check(NOW + 3.0);
+    assert!(r.watcher.observed().windows.is_empty());
+}
+
+#[test]
+fn turning_the_mode_off_clears_the_numbers_but_keeps_the_last_switch() {
+    let mut r = rig(two_accounts(96.0), LimitMode::NotifyAndSwitch);
+    r.watcher.check(NOW);
+    r.store.set_usage("other", usage(10.0, 10.0, NOW + 3.0));
+    r.watcher.check(NOW + 3.0);
+    assert!(!r.watcher.observed().windows.is_empty());
+    r.config.set_mode(&CLAUDE, LimitMode::Off).unwrap();
+    r.watcher.check(NOW + 6.0);
+    let seen = r.watcher.observed();
+    assert!(seen.windows.is_empty(), "{:?}", seen.windows);
+    assert_eq!(seen.active_id, None);
+    assert_eq!(seen.checked, None);
+    assert_eq!(seen.last_switch, Some(NOW), "the switch it made stays told");
+}
+
+#[test]
+fn right_after_a_switch_the_old_accounts_numbers_are_dropped() {
+    let mut r = rig(two_accounts(96.0), LimitMode::NotifyAndSwitch);
+    r.watcher.check(NOW);
+    assert_eq!(*r.store.switched.lock().unwrap(), ["other"]);
+    let seen = r.watcher.observed();
+    assert!(seen.windows.is_empty(), "{:?}", seen.windows);
+    assert_eq!(seen.active_id, None);
+    assert_eq!(seen.last_switch, Some(NOW));
+    r.store.set_usage("other", usage(20.0, 30.0, NOW + 3.0));
+    r.watcher.check(NOW + 3.0);
+    let seen = r.watcher.observed();
+    assert_eq!(seen.active_id.as_deref(), Some("other"));
+    assert_eq!(seen.windows[1].1, 30.0);
+    assert_eq!(seen.last_switch, Some(NOW));
+}

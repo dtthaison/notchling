@@ -21,6 +21,7 @@ pub type Announce = Arc<dyn Fn(&str) + Send + Sync>;
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Observed {
+    pub active_id: Option<String>,
     pub active_email: Option<String>,
     pub windows: Vec<(String, f64, Option<f64>)>,
     pub last_switch: Option<f64>,
@@ -106,6 +107,7 @@ impl ClaudeWatcher {
     pub fn check(&mut self, now: f64) {
         let mode = self.mode();
         if mode == LimitMode::Off {
+            self.observed = Observed::default();
             return;
         }
         let switch_at = self.config.switch_at();
@@ -116,6 +118,7 @@ impl ClaudeWatcher {
             .active_id()
             .and_then(|id| accounts.iter().find(|a| a.id == id).cloned())
         else {
+            self.observed = Observed::default();
             return;
         };
         if self.active_seen.as_ref().map(|s| s.0.as_str()) != Some(active.id.as_str()) {
@@ -139,6 +142,7 @@ impl ClaudeWatcher {
             windows.extend(u.other.iter().map(|o| (o.name.clone(), Some(o.window))));
         }
         self.observed = Observed {
+            active_id: Some(active.id.clone()),
             active_email: Some(active.email.clone()),
             windows: windows
                 .iter()
@@ -163,7 +167,10 @@ impl ClaudeWatcher {
 
         if mode == LimitMode::NotifyAndSwitch && reason {
             match self.try_switch(&active, usage.as_ref(), &accounts, now, switch_at) {
-                Outcome::Switched => return,
+                Outcome::Switched => {
+                    self.observed = Observed::default();
+                    return;
+                }
                 Outcome::Announced => {}
                 Outcome::Nothing => {
                     if let Some(text) = &fired {
