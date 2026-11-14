@@ -22,10 +22,7 @@ fn v6_is_tailscale(ip: &Ipv6Addr) -> bool {
 
 #[cfg(unix)]
 pub fn tailscale_addrs() -> Vec<IpAddr> {
-    let mut found: Vec<IpAddr> = interface_addrs()
-        .into_iter()
-        .filter(is_tailscale)
-        .collect();
+    let mut found: Vec<IpAddr> = interface_addrs().into_iter().filter(is_tailscale).collect();
     found.sort();
     found.dedup();
     found
@@ -63,9 +60,7 @@ unsafe fn sockaddr_ip(addr: *const libc::sockaddr) -> Option<IpAddr> {
     match i32::from(unsafe { (*addr).sa_family }) {
         libc::AF_INET => {
             let v4 = unsafe { &*(addr as *const libc::sockaddr_in) };
-            Some(IpAddr::V4(Ipv4Addr::from(u32::from_be(
-                v4.sin_addr.s_addr,
-            ))))
+            Some(IpAddr::V4(Ipv4Addr::from(u32::from_be(v4.sin_addr.s_addr))))
         }
         libc::AF_INET6 => {
             let v6 = unsafe { &*(addr as *const libc::sockaddr_in6) };

@@ -3796,6 +3796,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "notchling-cluster-net"
+version = "0.1.0"
+dependencies = [
+ "notchling-platform",
+ "rcgen",
+ "ring",
+ "rustls",
+ "rustls-pki-types",
+ "sha2 0.10.9",
+]
+
+[[package]]
 name = "notchling-engine"
 version = "0.1.0"
 dependencies = [

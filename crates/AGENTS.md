@@ -10,6 +10,7 @@ The Cargo workspace in `crates/` is Notchling now: a GPUI app (`notchling-app`) 
 | `locale` (`notchling-locale`) | The words the Mac app shows: tables from `locales/` (`src/generated.rs`, written by `python3 tools/locale/gen.py`, never by hand), the language choice, plurals and numbers from ICU4X, the pseudo-language `en-XA` ([its notes](locale/AGENTS.md)) | library | app |
 | `platform` (`notchling-platform`) | OS adapters behind `cfg`: data folders (`paths`), file watching (`watch`), keep awake, notifications, private writes (`files`), running apps (`apps`); a missing one returns `Error::Unsupported` | library | engine, local-api, notchlingd, app |
 | `engine` (`notchling-engine`) | Everything with no UI, half the code (below) | library | notchlingd, ptyhost, app |
+| `cluster-net` (`notchling-cluster-net`) | Node links for the cluster: the node certificate, TLS 1.3 pinned by fingerprint on both ends, Tailscale addresses only, the join window, an in-memory transport for tests | library | notchlingd |
 | `local-api` (`notchling-local-api`) | Daemon to client socket: framing, peer identity, tiers, audit log, `Client`, `ensure_daemon` (decision 0007) | library | notchlingd, app |
 | `events` (`notchling-events`) | The log's registry: the envelope, the closed list of field types (no text), every kind with its texts, a test sink; the golden and `docs/log-kinds.md` come from it (decision XXXX) | library | none yet; engine, local-api, notchlingd, ptyhost and app from Phase 2 |
 | `notchlingd` (`notchling-notchlingd`) | The daemon and the command line (decision 0004) | `notchling` | bundled beside the app |
@@ -17,7 +18,7 @@ The Cargo workspace in `crates/` is Notchling now: a GPUI app (`notchling-app`) 
 | `kit` (`notchling-kit`) | Design kit: tokens (every system), GPUI widgets and `KitGallery` (macOS) | library | app |
 | `app` (`notchling-app`) | The GPUI app, and the Machines window | `notchling-app`, `notchling-machines` | nothing |
 
-The code has no comments, so each crate's `AGENTS.md` (`app`, `engine`, `events`, `notchlingd`, `kit`, `local-api`, `locale`, `platform`, `ptyhost`) holds what a change could break without knowing it, by file. The wire shapes of the daemon's ops are in [docs/local-api-ops.md](../docs/local-api-ops.md).
+The code has no comments, so each crate's `AGENTS.md` (`app`, `cluster-net`, `engine`, `events`, `notchlingd`, `kit`, `local-api`, `locale`, `platform`, `ptyhost`) holds what a change could break without knowing it, by file. The wire shapes of the daemon's ops are in [docs/local-api-ops.md](../docs/local-api-ops.md).
 
 GPUI 0.2.2 (with `runtime_shaders`: no Metal Toolchain here) is a dependency of `kit` and `app` only under `[target.'cfg(target_os = "macos")'.dependencies]` (`LINT-GPUI-MACOS-ONLY`); everything else builds and is tested on macOS, Linux and Windows, and off macOS `notchling-app` says it isn't supported and exits 0. `[patch.crates-io]` swaps in `vendor/gpui/` (one fix, `vendor/gpui/NOTCHLING.md`). Rust 1.99.1 is pinned; `deny.toml` allows only permissive licenses (decision 0008). `app` and `kit` deny `unwrap`/`expect` outside tests. Files stay under 1,000 lines, 600 with a warning (`LINT-FILE-SIZE`): tests go in `<module>_tests.rs` or `tests_<area>.rs`.
 
