@@ -5,6 +5,7 @@ pub mod hooks;
 mod jsonc;
 mod render;
 pub mod skills;
+pub mod toml_edit;
 
 pub use command::{classify, hook_command, summary, Origin};
 pub use file::{apply, load, plan, Applied, FileError, FilePlan, State};
@@ -33,3 +34,5 @@ mod jsonc_tests;
 mod skills_tests;
 #[cfg(test)]
 mod testutil;
+#[cfg(test)]
+mod toml_edit_tests;

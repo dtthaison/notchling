@@ -1,0 +1,8 @@
+model = "gpt-5"
+
+[features]
+web_search_request = true
+unified_exec = false
+
+[tui]
+notifications = true
