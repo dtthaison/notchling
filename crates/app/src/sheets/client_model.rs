@@ -44,7 +44,7 @@ fn shown_path(path: &str, home: &str) -> String {
     path.to_owned()
 }
 
-fn row_of<'a>(get: &'a Value, tool: Tool) -> Option<&'a Value> {
+fn row_of(get: &Value, tool: Tool) -> Option<&Value> {
     get.get("tools")?
         .as_array()?
         .iter()

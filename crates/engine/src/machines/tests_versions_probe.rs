@@ -163,7 +163,7 @@ fn tool_versions_has_no_fix_and_is_not_in_set_up_all() {
     let s = step(&m);
     assert!(matches!(s.fix, StepFix::HowTo(_)));
     assert!(s.plan().is_none());
-    let world = Setup::new(|m, all| catalog::steps(m, all)).build();
+    let world = Setup::new(catalog::steps).build();
     assert!(world
         .engine
         .plan("m1", PlanKind::Fix(sid("tool-versions")))

@@ -5,7 +5,7 @@ use super::versions_facts::{prune, save, DOC};
 use crate::store;
 use crate::versions::{parse_probe, WorkerTools};
 use serde_json::Value;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 fn temp(tag: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("nl-vfacts-{tag}-{}", std::process::id()));
@@ -18,7 +18,7 @@ fn tools(text: &str) -> WorkerTools {
     parse_probe(text, 1)
 }
 
-fn saved(dir: &PathBuf) -> Value {
+fn saved(dir: &Path) -> Value {
     serde_json::from_str(&store::doc(dir, DOC).unwrap().unwrap()).unwrap()
 }
 
