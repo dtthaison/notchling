@@ -292,6 +292,12 @@ signal.
 | `codex.stop` | `{id}` | `{"stopped": bool}`: SIGINT to the running turn; false when none runs |
 | `codex.delete` | `{id}` | `{"deleted": true}`: stops the turn, drops what waits, runs `codex delete --force`; `{"deleted": false, "state": "deleting"}` when that takes over 4.5 s |
 
+`session.reply` answers `{"sent": true}` only after the session's input box took the text and let
+go of it. Anything else is `failed` with what happened, and nothing is reported sent: the terminal
+isn't at its prompt (nothing was typed), its input box kept an old draft, it never took the text,
+or the text is typed there but Enter didn't send it. Sending again is safe: a reply clears the box
+first.
+
 A reply to a Claude Code job that is working, or that got a message less than 20 s ago and
 hasn't shown work yet, is held by the daemon and not typed (`held_ops.rs`, engine `reply::held`).
 There is one held entry per session: every message sent meanwhile joins it, separated by a blank

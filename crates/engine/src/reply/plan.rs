@@ -12,8 +12,20 @@ pub enum Step {
     },
     RefuseDialog,
     RequireDialog,
+    AwaitInput {
+        timeout_ms: u64,
+    },
+    AwaitEmpty {
+        timeout_ms: u64,
+    },
     Keys(String),
     Paste(String),
+    AwaitPaste {
+        timeout_ms: u64,
+    },
+    Submit {
+        timeout_ms: u64,
+    },
     Pause(u64),
     WalkBackTo {
         question: String,
@@ -64,6 +76,7 @@ impl Plan {
             .filter_map(|s| match s {
                 Step::Keys(k) => Some(k.clone()),
                 Step::Paste(t) => Some(keys::bracketed(t)),
+                Step::Submit { .. } => Some(ENTER.to_string()),
                 Step::SubmitIfReview { .. } => Some(SUBMIT.to_string()),
                 _ => None,
             })
@@ -105,13 +118,22 @@ pub fn reply(text: &str) -> Plan {
         steps: vec![
             attach(None),
             Step::RefuseDialog,
+            Step::AwaitInput {
+                timeout_ms: INPUT_WAIT_MS,
+            },
             Step::Keys(keys::clear_input()),
             Step::Pause(KEY_PAUSE_MS),
             Step::RefuseDialog,
+            Step::AwaitEmpty {
+                timeout_ms: CLEAR_WAIT_MS,
+            },
             Step::Paste(text),
-            Step::Pause(KEY_PAUSE_MS),
-            Step::Keys(ENTER.into()),
-            Step::Pause(KEY_PAUSE_MS),
+            Step::AwaitPaste {
+                timeout_ms: PASTE_WAIT_MS,
+            },
+            Step::Submit {
+                timeout_ms: SENT_WAIT_MS,
+            },
         ],
         detach: detach(),
     }

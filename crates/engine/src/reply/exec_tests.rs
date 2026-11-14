@@ -1,4 +1,5 @@
 use super::exec::{execute, Failure, Markers, NoQueueLog, Outcome, Pty, QueueLog, ScreenCheck};
+use super::fake::RULE;
 use super::keys;
 use super::plan;
 use super::question::{Choice, PendingQuestion, QuestionItem};
@@ -83,7 +84,7 @@ fn lines(v: &[&str]) -> Vec<String> {
     v.iter().map(|l| l.to_string()).collect()
 }
 
-const PROMPT: &[&str] = &["> ", "  ? for shortcuts"];
+const PROMPT: &[&str] = &[RULE, "❯ ", RULE, "  ? for shortcuts"];
 const PERMISSION: &[&str] = &[
     "Bash command",
     " Do you want to proceed?",
@@ -91,9 +92,20 @@ const PERMISSION: &[&str] = &[
     " 2. No",
 ];
 
+fn boxed(keys: &str, screen: &mut [String]) {
+    if let Some(text) = keys
+        .strip_prefix(keys::PASTE_START)
+        .and_then(|t| t.strip_suffix(keys::PASTE_END))
+    {
+        screen[1] = format!("❯ {text}");
+    } else if keys == keys::ENTER {
+        screen[1] = "❯ ".to_string();
+    }
+}
+
 #[test]
 fn a_reply_goes_out_as_clear_paste_enter_with_the_pauses() {
-    let mut pty = Fake::new(PROMPT);
+    let mut pty = Fake::new(PROMPT).reacting(|keys, screen| boxed(keys, screen));
     let out = execute(&plan::reply("hi"), &mut pty, &Markers, &mut NoQueueLog);
     assert_eq!(out, Ok(Outcome { taken: false }));
     assert_eq!(
@@ -103,12 +115,39 @@ fn a_reply_goes_out_as_clear_paste_enter_with_the_pauses() {
             Ev::Write(keys::clear_input()),
             Ev::Sleep(150),
             Ev::Write("\x1b[200~hi\x1b[201~".into()),
-            Ev::Sleep(150),
+            Ev::Sleep(100),
             Ev::Write("\r".into()),
-            Ev::Sleep(150),
+            Ev::Sleep(100),
             Ev::Wait(400, 3_000),
         ]
     );
+}
+
+#[test]
+fn a_dialog_that_opens_after_the_paste_gets_no_enter() {
+    let mut pty = Fake::new(PROMPT).reacting(|keys, screen| {
+        if keys.starts_with(keys::PASTE_START) {
+            *screen = lines(PERMISSION);
+        }
+    });
+    let out = execute(&plan::reply("1"), &mut pty, &Markers, &mut NoQueueLog);
+    assert_eq!(out, Err(Failure::Dialog));
+    assert_eq!(
+        pty.writes(),
+        vec![keys::clear_input(), keys::bracketed("1")]
+    );
+}
+
+#[test]
+fn a_dialog_that_takes_the_boxs_place_after_enter_is_a_sent_message() {
+    let mut pty = Fake::new(PROMPT).reacting(|keys, screen| {
+        boxed(keys, screen);
+        if keys == keys::ENTER {
+            *screen = lines(PERMISSION);
+        }
+    });
+    let out = execute(&plan::reply("go"), &mut pty, &Markers, &mut NoQueueLog);
+    assert_eq!(out, Ok(Outcome { taken: false }));
 }
 
 #[test]

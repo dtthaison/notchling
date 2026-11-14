@@ -109,6 +109,52 @@ fn job_states_map_to_groups() {
 }
 
 #[test]
+fn a_new_job_waiting_for_its_first_prompt_is_idle() {
+    let new = job(
+        "working",
+        json!({
+            "tempo": "blocked",
+            "needs": "send a prompt to start",
+            "detail": "(idle — send a prompt to start)",
+            "template": "bg",
+            "firstTerminalAt": null
+        }),
+    );
+    let idle = json!({"status": "idle", "kind": "bg"});
+    for live in [Some(&idle), None] {
+        let a = agent_from_job(&new, "ab12cd34", live, &none);
+        assert_eq!((a.group, a.label.as_str()), (AgentGroup::Completed, "Idle"));
+        assert_eq!(a.detail.as_deref(), Some("(idle — send a prompt to start)"));
+        assert!(a.can_reply());
+    }
+    let busy = json!({"status": "busy"});
+    assert_eq!(
+        agent_from_job(&new, "ab12cd34", Some(&busy), &none).group,
+        AgentGroup::Working
+    );
+    let asking = json!({"status": "waiting"});
+    assert_eq!(
+        agent_from_job(&new, "ab12cd34", Some(&asking), &none).group,
+        AgentGroup::NeedsInput
+    );
+    let other = job(
+        "working",
+        json!({"tempo": "blocked", "needs": "answer: Which db? (a · b)"}),
+    );
+    assert_eq!(
+        agent_from_job(&other, "ab", Some(&idle), &none).group,
+        AgentGroup::NeedsInput,
+        "any other need still needs you"
+    );
+    let stopped = job("stopped", json!({"needs": "send a prompt to start"}));
+    assert_eq!(
+        agent_from_job(&stopped, "ab", None, &none).label,
+        "Stopped",
+        "a job that is not up keeps its own state"
+    );
+}
+
+#[test]
 fn needs_input_shows_needs_over_detail() {
     let j = job(
         "blocked",

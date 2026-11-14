@@ -103,7 +103,14 @@ fn wait(quiet_ms: u64, timeout_ms: u64, required: bool) -> Step {
 }
 
 #[test]
-fn a_reply_is_clear_paste_enter_with_their_pauses() {
+fn the_waits_on_the_input_box_are_notchlings_own() {
+    assert_eq!((INPUT_WAIT_MS, CLEAR_WAIT_MS), (5_000, 3_000));
+    assert_eq!((PASTE_WAIT_MS, SENT_WAIT_MS), (10_000, 8_000));
+    assert_eq!(INPUT_POLL_MS, 100);
+}
+
+#[test]
+fn a_reply_is_clear_paste_enter_each_checked_on_the_input_box() {
     let plan = plan::reply("hello\nthere");
     assert_eq!(
         plan,
@@ -111,13 +118,14 @@ fn a_reply_is_clear_paste_enter_with_their_pauses() {
             steps: vec![
                 wait(500, 15_000, true),
                 Step::RefuseDialog,
+                Step::AwaitInput { timeout_ms: 5_000 },
                 Step::Keys(keys::clear_input()),
                 Step::Pause(150),
                 Step::RefuseDialog,
+                Step::AwaitEmpty { timeout_ms: 3_000 },
                 Step::Paste("hello\nthere".into()),
-                Step::Pause(150),
-                Step::Keys("\r".into()),
-                Step::Pause(150),
+                Step::AwaitPaste { timeout_ms: 10_000 },
+                Step::Submit { timeout_ms: 8_000 },
             ],
             detach: vec![wait(400, 3_000, false)],
         }

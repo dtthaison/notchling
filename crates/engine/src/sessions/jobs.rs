@@ -46,6 +46,8 @@ pub fn config_dir_for_job(roots: &Roots, id: &str) -> Option<String> {
     job_dirs(roots, id).into_iter().next().flatten()
 }
 
+pub const FIRST_PROMPT: &str = "send a prompt to start";
+
 pub fn agent_from_job(
     job: &Value,
     short_id: &str,
@@ -56,8 +58,14 @@ pub fn agent_from_job(
     let tempo = str_field(job, "tempo");
     let status = live.and_then(|l| str_field(l, "status"));
 
+    let unprompted = str_field(job, "needs") == Some(FIRST_PROMPT)
+        && matches!(state, "working" | "running" | "")
+        && status != Some("waiting");
+
     let (group, label) = if matches!(status, Some("busy" | "shell")) {
         (AgentGroup::Working, "Working".to_string())
+    } else if unprompted {
+        (AgentGroup::Completed, "Idle".to_string())
     } else if state == "blocked" || tempo == Some("blocked") || status == Some("waiting") {
         (AgentGroup::NeedsInput, "Needs input".to_string())
     } else if status == Some("idle") {
