@@ -720,6 +720,10 @@ agy's version.
   running: false}` when checks are off (a fixture root) or the tool has no known version. A check that
   can't tell (a command didn't start or timed out) is tried once more after 2 minutes, then fails with
   part `version`. Every result is `partly`: nothing in the check sees screens, dialogs or turns.
+- `soak` is `null` or `{since, turns, unknown, line}`: every 10 minutes the daemon runs the strict pass over
+  transcripts written since the reference and keeps the highest count it has seen of turns and unknown
+  lines written by the reference's version (`line` is "Since 2.1.324: 14 turns read, nothing unknown").
+  A new reference starts a new soak. It is shown and gates nothing: it never changes a reference or a result.
 - `versions.workers` is what Machines saved in `notchling.db` (`versions/workers`), read back through the
   typed `WorkerTools`, so a field that isn't part of it never reaches a client. `ToolState` is
   `{state: "notInstalled"}` or `{state: "installed", version, method, path}`.

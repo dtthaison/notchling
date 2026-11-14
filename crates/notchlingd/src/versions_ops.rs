@@ -1,6 +1,6 @@
 use crate::acting_ops::Room;
 use crate::op_group::OpGroup;
-use crate::versions_check::Checks;
+use crate::versions_check::{Checks, Parts};
 use notchling_engine::control::launcher::{LaunchOutput, Launcher};
 use notchling_engine::control::plan::Command;
 use notchling_engine::machines::versions_facts;
@@ -21,6 +21,7 @@ use std::time::{Duration, Instant};
 pub const WORKERS_DOC: &str = versions_facts::DOC;
 pub const SEEN_DOC: &str = "versions/seen";
 pub const RESCAN_EVERY: Duration = Duration::from_secs(600);
+pub const SOAK_EVERY: Duration = Duration::from_secs(600);
 pub const AGY_ASK_EVERY_MS: i64 = 600_000;
 pub const AGY_TIMEOUT: Duration = Duration::from_secs(5);
 const SEEN_KEEP: usize = 400;
@@ -86,7 +87,13 @@ fn installed_json(found: &Installed) -> Value {
 }
 
 fn row(tool: Tool, found: Option<&Installed>, checks: &Checks) -> Value {
-    let (reference, usable, failed, check) = checks.parts(tool, found);
+    let Parts {
+        reference,
+        usable,
+        failed,
+        check,
+        soak,
+    } = checks.parts(tool, found);
     let Some(found) = found else {
         return json!({
             "tool": tool.name(),
@@ -99,6 +106,7 @@ fn row(tool: Tool, found: Option<&Installed>, checks: &Checks) -> Value {
             "usable": false,
             "failed": failed,
             "check": check,
+            "soak": soak,
         });
     };
     json!({
@@ -112,6 +120,7 @@ fn row(tool: Tool, found: Option<&Installed>, checks: &Checks) -> Value {
         "usable": usable,
         "failed": failed,
         "check": check,
+        "soak": soak,
     })
 }
 
@@ -153,6 +162,10 @@ impl VersionsOps {
 
     pub fn checks(&self) -> &Arc<Checks> {
         &self.checks
+    }
+
+    pub fn soak_pass(&self) {
+        self.checks.soak_pass();
     }
 
     pub fn wait_checks(&self) {
@@ -423,6 +436,7 @@ impl VersionsOps {
     fn run(&self) {
         self.rescan();
         let mut last = Instant::now();
+        let mut soaked = Instant::now() - SOAK_EVERY;
         let mut watched = watch_paths(&self.roots);
         let mut watcher = Watcher::start(watched.clone(), WatchConfig::default()).ok();
         while !self.stop.load(Ordering::SeqCst) {
@@ -437,6 +451,10 @@ impl VersionsOps {
                 break;
             }
             self.retry_due_checks();
+            if soaked.elapsed() >= SOAK_EVERY {
+                soaked = Instant::now();
+                self.checks.soak_pass();
+            }
             if !changed && last.elapsed() < RESCAN_EVERY {
                 continue;
             }

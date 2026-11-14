@@ -10,6 +10,7 @@ use notchling_engine::versions::check::{self, CheckPart, CheckResult, CheckTier,
 use notchling_engine::versions::mac::Installed;
 use notchling_engine::versions::record::{Fact, Recorder};
 use notchling_engine::versions::reference::{self, Book};
+use notchling_engine::versions::soak::Soaks;
 use notchling_engine::versions::{Tool, Version};
 use notchling_local_api::topics;
 use serde_json::{json, Value};
@@ -90,12 +91,23 @@ impl Checker {
     }
 
     fn strict(&self, tool: Tool) -> Skips {
+        self.strict_since(tool, None)
+    }
+
+    pub fn strict_since(&self, tool: Tool, since_ms: Option<i64>) -> Skips {
         let mut skips = Skips::default();
+        let recent = |(modified, _): &(SystemTime, PathBuf)| match since_ms {
+            None => true,
+            Some(ms) => modified
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .map(|d| d.as_millis() as i64 >= ms)
+                .unwrap_or(false),
+        };
         match tool {
             Tool::Claude => {
                 let root = self.home.join(".claude/projects");
-                for path in newest(&root, 2, |_| true) {
-                    skips.merge(&strict_claude(&path, TAIL_BYTES));
+                for (_, path) in newest(&root, 2, |_| true).iter().filter(|f| recent(f)) {
+                    skips.merge(&strict_claude(path, TAIL_BYTES));
                 }
             }
             Tool::Codex => {
@@ -105,8 +117,8 @@ impl Checker {
                         .and_then(|n| n.to_str())
                         .is_some_and(|n| n.starts_with("rollout-"))
                 };
-                for path in newest(&root, 4, rollout) {
-                    skips.merge(&strict_codex(&path, TAIL_BYTES));
+                for (_, path) in newest(&root, 4, rollout).iter().filter(|f| recent(f)) {
+                    skips.merge(&strict_codex(path, TAIL_BYTES));
                 }
             }
             Tool::Agy | Tool::Notchling => {}
@@ -126,7 +138,7 @@ fn cant_tell() -> Outcome {
     }
 }
 
-fn newest(root: &Path, depth: usize, keep: impl Fn(&Path) -> bool) -> Vec<PathBuf> {
+fn newest(root: &Path, depth: usize, keep: impl Fn(&Path) -> bool) -> Vec<(SystemTime, PathBuf)> {
     let mut found: Vec<(SystemTime, PathBuf)> = Vec::new();
     let mut seen = 0usize;
     let mut stack: Vec<(PathBuf, usize)> = vec![(root.to_path_buf(), 0)];
@@ -158,11 +170,16 @@ fn newest(root: &Path, depth: usize, keep: impl Fn(&Path) -> bool) -> Vec<PathBu
         }
     }
     found.sort_by(|a, b| b.0.cmp(&a.0));
+    found.truncate(NEWEST_FILES);
     found
-        .into_iter()
-        .take(NEWEST_FILES)
-        .map(|(_, p)| p)
-        .collect()
+}
+
+pub struct Parts {
+    pub reference: Value,
+    pub usable: bool,
+    pub failed: Value,
+    pub check: Value,
+    pub soak: Value,
 }
 
 pub fn outcome_json(tool: Tool, version: &Version, outcome: &Outcome, at: i64) -> Value {
@@ -185,6 +202,7 @@ pub struct Checks {
     recorder: Arc<dyn Recorder>,
     clock: Clock,
     book: Mutex<Book>,
+    soaks: Mutex<Soaks>,
     running: Mutex<BTreeSet<Tool>>,
     retry: Mutex<BTreeMap<Tool, i64>>,
     last: Mutex<BTreeMap<Tool, Value>>,
@@ -202,6 +220,7 @@ impl Checks {
         clock: Clock,
     ) -> Arc<Checks> {
         let book = reference::load(&data, recorder.as_ref());
+        let data_for_soak = data.clone();
         Arc::new(Checks {
             checker: Checker::new(launcher, home),
             data,
@@ -209,6 +228,7 @@ impl Checks {
             recorder,
             clock,
             book: Mutex::new(book),
+            soaks: Mutex::new(Soaks::load(&data_for_soak)),
             running: Mutex::new(BTreeSet::new()),
             retry: Mutex::new(BTreeMap::new()),
             last: Mutex::new(BTreeMap::new()),
@@ -337,7 +357,28 @@ impl Checks {
         }
     }
 
-    pub fn parts(&self, tool: Tool, installed: Option<&Installed>) -> (Value, bool, Value, Value) {
+    pub fn soak_pass(&self) {
+        if !self.enabled() {
+            return;
+        }
+        for tool in [Tool::Claude, Tool::Codex] {
+            let reference = lock(&self.book)
+                .reference(tool)
+                .map(|r| (r.version.clone(), r.at_ms));
+            let Some((version, at_ms)) = reference else {
+                lock(&self.soaks).follow(tool, None);
+                continue;
+            };
+            let skips = self.checker.strict_since(tool, Some(at_ms));
+            let mut soaks = lock(&self.soaks);
+            if let Some(soak) = soaks.follow(tool, Some(&version)) {
+                soak.observe(&skips);
+            }
+            let _ = soaks.save(&self.data);
+        }
+    }
+
+    pub fn parts(&self, tool: Tool, installed: Option<&Installed>) -> Parts {
         let book = lock(&self.book);
         let reference = book.reference(tool).map_or(Value::Null, |r| {
             json!({
@@ -371,6 +412,20 @@ impl Checks {
         } else {
             lock(&self.last).get(&tool).cloned().unwrap_or(Value::Null)
         };
-        (reference, usable, Value::Array(failed), check)
+        let soak = lock(&self.soaks).get(tool).map_or(Value::Null, |s| {
+            json!({
+                "since": s.since.as_str(),
+                "turns": s.turns,
+                "unknown": s.unknown,
+                "line": s.line(),
+            })
+        });
+        Parts {
+            reference,
+            usable,
+            failed: Value::Array(failed),
+            check,
+            soak,
+        }
     }
 }

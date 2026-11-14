@@ -13,13 +13,13 @@ use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-struct Rig {
-    tmp: TempDir,
-    ops: Arc<VersionsOps>,
-    room: Arc<FakeRoom>,
-    launcher: Arc<FakeLauncher>,
-    recorder: Arc<MemoryRecorder>,
-    now: Arc<AtomicI64>,
+pub(crate) struct Rig {
+    pub(crate) tmp: TempDir,
+    pub(crate) ops: Arc<VersionsOps>,
+    pub(crate) room: Arc<FakeRoom>,
+    pub(crate) launcher: Arc<FakeLauncher>,
+    pub(crate) recorder: Arc<MemoryRecorder>,
+    pub(crate) now: Arc<AtomicI64>,
 }
 
 fn app() -> Caller {
@@ -40,7 +40,7 @@ fn agent() -> Caller {
     }
 }
 
-fn rig(tag: &str) -> Rig {
+pub(crate) fn rig(tag: &str) -> Rig {
     let tmp = TempDir::new(tag);
     let room = Arc::new(FakeRoom::default());
     let launcher = Arc::new(FakeLauncher::new());
@@ -72,7 +72,7 @@ fn rig(tag: &str) -> Rig {
 }
 
 #[cfg(unix)]
-fn native_claude(rig: &Rig, version: &str, body: &str) {
+pub(crate) fn native_claude(rig: &Rig, version: &str, body: &str) {
     let target = rig
         .tmp
         .path(&format!("home/.local/share/claude/versions/{version}"));
@@ -95,18 +95,18 @@ fn codex_standalone(rig: &Rig, version: &str) {
         .write("home/.codex/packages/standalone/pkg/codex", "codex binary");
 }
 
-fn claude_transcripts(rig: &Rig) {
+pub(crate) fn claude_transcripts(rig: &Rig) {
     rig.tmp.write(
         "home/.claude/projects/proj/s1.jsonl",
         "{\"type\":\"user\",\"version\":\"2.1.324\",\"message\":{\"role\":\"user\",\"content\":\"hi\"}}\n{\"type\":\"system\",\"version\":\"2.1.324\",\"subtype\":\"turn_duration\",\"durationMs\":10}\n",
     );
 }
 
-fn out(text: &str) -> Result<LaunchOutput, LaunchError> {
+pub(crate) fn out(text: &str) -> Result<LaunchOutput, LaunchError> {
     Ok(LaunchOutput::ok(text))
 }
 
-fn get(rig: &Rig, tool: &str) -> Value {
+pub(crate) fn get(rig: &Rig, tool: &str) -> Value {
     let reply = rig
         .ops
         .call(&agent(), ops::VERSIONS_GET, &json!({ "tool": tool }))
@@ -114,13 +114,13 @@ fn get(rig: &Rig, tool: &str) -> Value {
     reply["tools"][0].clone()
 }
 
-fn check(rig: &Rig, tool: &str) -> Value {
+pub(crate) fn check(rig: &Rig, tool: &str) -> Value {
     rig.ops
         .call(&app(), ops::VERSIONS_CHECK, &json!({ "tool": tool }))
         .unwrap()
 }
 
-fn ready(rig: &Rig) {
+pub(crate) fn ready(rig: &Rig) {
     rig.ops.rescan();
     rig.ops.checks().set_enabled(true);
 }

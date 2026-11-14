@@ -7,6 +7,7 @@ pub mod mismatch;
 mod parse;
 pub mod record;
 pub mod reference;
+pub mod soak;
 mod version;
 pub mod worker;
 
@@ -26,6 +27,8 @@ mod parse_tests;
 mod record_tests;
 #[cfg(test)]
 mod reference_tests;
+#[cfg(test)]
+mod soak_tests;
 #[cfg(test)]
 mod version_tests;
 #[cfg(test)]

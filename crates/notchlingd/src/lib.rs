@@ -127,6 +127,8 @@ mod vault_ops_lock_tests;
 mod versions_check_tests;
 #[cfg(test)]
 mod versions_ops_tests;
+#[cfg(test)]
+mod versions_soak_tests;
 
 use cli::{Command, ServiceAction};
 use layout::Layout;
