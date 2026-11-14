@@ -82,8 +82,8 @@ Off by default. **Let phones connect** in the Phone panel turns it on.
   Mac or a phone, wins. It never opens the form that takes a secret's value. Pairing is a file on the
   Mac that an agent with a shell could write, so a forged device could answer too; the maintainer
   accepted that risk until pairing has an anchor an agent can't write.
-- Every remote change is logged on the Mac (`bridge/remote-log.jsonl`), with the length of any text
-  sent, never the text itself.
+- Every remote change is logged on the Mac as an event (Audit and Activity), with the device's id and the
+  length of any text sent, never the text itself.
 
 ## The internet tunnel (Cloudflare)
 
@@ -146,15 +146,24 @@ Links you click open in your browser.
 ## Logs on this Mac
 
 Notchling writes these files, in `~/Library/Application Support/Notchling` unless noted. None leaves the
-Mac, and Settings > Activity reads only the first four.
+Mac, and Settings > Activity reads the Activity store.
 
-- `audit.jsonl` (and `audit.jsonl.1`, rotated at 5 MB): the daemon's refusals and failures and what the app
-  asked it to do: time, operation, which program, result. For a failed call that types into a session it keeps
-  the error message, never the text typed. A vault use is logged with the names of the secrets, never a value.
+- `audit/YYYY-MM.jsonl`: the Audit log, written only by the daemon. Each line is a registered kind of event
+  (`docs/log-kinds.md` lists them all, with what each records and why) with fixed fields: choices, flags,
+  counts, sizes, times, names of ops and errors, ids. No field holds a message, a typed text, a free-text error,
+  a path in an error or a secret's value; a vault use records the secret's name. Each line is sealed with a
+  keyed hash over the previous line's seal; the key is a Keychain item (`dev.notchling.audit`) and so is the
+  newest seal, so an edited or cut line is found. If the key can't be read the lines are written unsealed and
+  the Inbox says so. A month's file is kept a year by default (90 days or 2 years are the other choices), the
+  folder is capped at 500 MB, and a month is pruned only after a seal that says where the chain went on.
+  `audit/legacy/` holds the old `audit.jsonl` files, moved, never rewritten.
+- `daemon/events.db`: the Activity store, the same events in a table, with rows that expire by kind.
 - `notchlingd.log` (and `.1`, rotated at 5 MB): the daemon's output.
-- `AgentConsole/bridge/remote-log.jsonl`: each remote change a paired phone made, with the phone's name, the
-  operation and the length of any text, never the text. It is not rotated.
-- `account-log.json`: when each account became the active one, by account id.
+- `AgentConsole/bridge/remote-log.jsonl`: written only when the daemon is down and a phone acts: the phone's
+  name, the operation and the length of any text, never the text. The daemon imports it when it starts. While
+  the daemon runs, a phone's changes are events with the device's id, not its name or address.
+- `account-log.json`: the old record of which account was active, read once into the Activity store and not
+  written any more (an account switch is now an `account.switched` event with the account ids and why).
 - `logs/crash.log`: a panic's message and place (opened 0600; a message can quote what was on screen).
 - `permission-screen.txt`: the last permission screen the daemon could not read.
 

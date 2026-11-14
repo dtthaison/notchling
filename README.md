@@ -152,14 +152,15 @@ Every log stays on your Mac. `Notchling` below is `~/Library/Application Support
 
 | File | What it holds | Size |
 | --- | --- | --- |
-| `Notchling/audit.jsonl` (and `.1`) | What the daemon refused or failed, and what the app asked it to do: time, operation, who, result. Never message text, and not the polls that succeed. | Rotates at 5 MB, one old copy |
+| `Notchling/audit/YYYY-MM.jsonl` | The Audit log: what agents, the app and phones did that matters (a secret used, a setting changed, a session replied to, an account switched), one sealed line each. A line is a kind of event and its fields, never message text, and not the polls that succeed. | One file a month, kept a year, 500 MB at most |
+| `Notchling/daemon/events.db` | The Activity store: the same events with their titles, for the Activity page. | Old rows expire by kind |
 | `Notchling/notchlingd.log` (and `.1`) | The daemon's own output: start, errors, a missing price. | Rotates at 5 MB, one old copy |
-| `AgentConsole/bridge/remote-log.jsonl` | What paired phones did: the device, the operation, the length of a message, never its text. | Grows |
-| `Notchling/account-log.json` | When each account became the active one. | Grows slowly |
+| `AgentConsole/bridge/remote-log.jsonl` | Only if the daemon was down when a phone acted: the device, the operation, never a message. The daemon reads it in when it starts. | Grows rarely |
+| `Notchling/account-log.json` | The old record of when each account became the active one. It is read once into the Activity store and no longer written. | Does not grow |
 | `Notchling/logs/crash.log` | A panic's message and place. It can quote what the app was showing. | Grows only on a crash |
 | `Notchling/permission-screen.txt` | The last permission prompt the daemon could not read. | One screen |
 
-**Settings > Activity** shows the first four together, newest first: refusals and failures stand out, and you can filter by kind and search. It reads the files when you open it or press Refresh.
+**Settings > Activity** shows the Activity store, newest first: refusals and failures stand out, and you can filter by kind and search. Open a row for its event and outcome, and **Check Against the Audit Log** compares it with its sealed line. Each Audit line is sealed with a key kept in your Keychain, so a line that was edited or cut shows as broken; this is tamper-evident, not tamper-proof.
 
 ## Uninstall
 

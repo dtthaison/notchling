@@ -1,4 +1,3 @@
-pub mod audit;
 pub mod client;
 mod conn;
 pub mod framing;
@@ -26,7 +25,6 @@ mod server_tests;
 #[cfg(test)]
 pub(crate) mod testutil;
 
-pub use audit::{AuditEntry, AuditLog};
 pub use client::{server_trusted, Client, ClientError, ConnectOptions, CALL_TIMEOUT};
 pub use framing::MAX_LINE;
 pub use server::{Caller, Handler, Limits, OpHome, OpSpec, Server, ServerConfig, ServerHandle};

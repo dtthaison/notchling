@@ -48,6 +48,8 @@ This touches [0004](0004-notchlingd-engine-service.md) (the daemon gains the log
 
 Proposed. The maintainer settles it by merging Phase 1, which brings the registry, and again by each later phase.
 
+Phase 2 (the bus, Audit and Activity): the daemon is the only writer of the Audit (`audit/YYYY-MM.jsonl`) and the Activity store (`daemon/events.db`); the server, the vault, settings, switches, inbox, phone bridge, acting, install and account areas record typed events; `audit.jsonl`, `remote-log.jsonl` and `account-log.json` stop being written (the first is moved to `audit/legacy/`, all three are imported once); `local-api/src/audit.rs` is gone. The Audit key is a Keychain item for the real data folder (`security_framework::passwords`, `crates/engine/src/logs/keys_mac.rs`, behind a trait with a file store and a fake) and a file under a fixture root. Not yet: Settings > Logs and the retention choice (Phase 3), Diagnostics and `op_id` in the hook and command line (Phase 4), the app's own events and spool (Phase 5).
+
 ## Date
 
 2026-11-14

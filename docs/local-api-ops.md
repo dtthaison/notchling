@@ -78,37 +78,40 @@ The hook is who its process is, never what it says: see [`crate::hook_ops`].
 ## `activity_ops.rs`
 
 What Settings > Activity shows: `activity.list`, over `notchling_engine::activity`. App tier, read only,
-no switch, `OpSpec::APP_QUIET` (a success is not written to `audit.jsonl`; the page asks only on open
-and on Refresh). It reads the last 2 MB of `audit.jsonl` and of `audit.jsonl.1`, the last 1 MB of the
-bridge's `remote-log.jsonl` and `account-log.json`, and answers normalized rows, newest first.
+no switch, `OpSpec::APP_QUIET` (a success is not recorded; the page asks only on open and on Refresh). It
+reads the Activity store (`daemon/events.db`), where the daemon wrote every event, and answers rows, newest
+first. The first start after the upgrade imports the old `audit.jsonl`, `remote-log.jsonl` and
+`account-log.json` once (rows marked `legacy`).
 
 | Op | Tier | Args | Reply |
 | --- | --- | --- | --- |
-| `activity.list` | app | `{kinds?, since?, limit?}` | `{rows: [{time_ms, source, kind, op, who, result, detail?}], truncated}` |
+| `activity.list` | app | `{kinds?, groups?, event_kinds?, session?, before_seq?, since?, limit?}` | `{rows: [{time_ms, source, kind, op, who, result, detail?, event, group, title, outcome, refs, seq, spooled, audit_n?, op_id?}], truncated}` |
+| `log.verify` | app | `{n?}` | the Audit's state; with `n`, also `{line: {n, sealed, seal_ok, kind, outcome, ts, f}}` for that line |
 
 - `kinds` is a list of `refused`, `failed`, `acted`, `setting`, `inbox` and `account_switch` (none or
-  empty means all; any other name is `bad_request`). `since` is a time in milliseconds: only rows after it.
-  `limit` is 200 by default and 1 to 1000.
-- `source` is `audit` (the daemon's audit), `phone` (`remote-log.jsonl`) or `account` (`account-log.json`).
-  `kind`: a refusal (`forbidden`, `needs_approval`, `peer_changed`, `peer_unknown`, `other_user`,
-  `file_said_on_ignored`, a vault `denied`) is `refused`; any other result that is not `ok`, `on` or `off`
-  is `failed`; a success is `setting` (`settings.*`), `inbox` (`inbox.answer`, `inbox.seen`,
-  `vault.approval.answer`, `vault.request.cancel`), `account_switch` (`accounts.switch`, `accounts.move_all`,
-  `lanes.switch`, `providers.switch`, and every row of `account-log.json`) or else `acted`. A phone's
-  `inbox.answer:refused:<reason>` is `refused`, its `inbox.answer:<action>` is `inbox`, anything else it did
-  is `acted`.
+  empty means all; any other name is `bad_request`). `groups` and `event_kinds` narrow to registry groups
+  and event kinds, `session` to one session's rows, `before_seq` pages back, `since` is a time in
+  milliseconds: only rows after it. `limit` is 200 by default and 1 to 1000.
+- `source` is `audit` (the event is also a sealed Audit line, `audit_n` is its number), `legacy` (imported
+  from the old files) or `activity` (the store only). `event` is the registry kind, `group` its group, `title`
+  its title, `outcome` one of the registry's outcomes, `refs` the session, folder, account and device ids the
+  event names, `seq` its place in the store and `spooled` is true for an event a client recorded while the
+  daemon was down (the column is there; the app's spool arrives in Phase 5). `kind`, `op`, `who` and `result` keep the shape Activity had before, so an old app still
+  reads them.
 - `who` is `app` for an app-tier row, else the peer's executable name (`curl`, `claude`, `unknown`), or the
-  phone's device name. `result` is the audit's result up to its first `:` (so a vault use shows `ok` or
-  `denied`, never the secret's name) or, for a phone, `ok`, the inbox action or `refused: <reason>`.
-  `detail` is a failed or refused call's error message when the audit kept one (cut to 120 characters),
-  or the first 8 characters of an account id.
-- Never in a row: message text, a phone's session id, address or message length, an inbox item id, a
-  secret's name or value. The reply stays under 900 KB: rows are dropped from the old end and
+  phone's name for a device id the app knows. `result` is the event's `result` or `action` field, else its
+  outcome. `detail` is the secret names of a vault use, a setting's key, a switch's name or an
+  `api.refused` reason: names only, cut to 120 characters.
+- `log.verify {n}` reads the one Audit line `n`, checks its seal and returns its `kind`, `outcome`, `ts` and
+  fields. The page's Check Against the Audit Log compares `event`, `outcome` and `time_ms` of the row with
+  them and needs `seal_ok`.
+- Never in a row: message text, a typed text, an address, a free-text error, an inbox item id or a secret's
+  value (a secret's name is shown). The reply stays under 900 KB: rows are dropped from the old end and
   `truncated` says so.
 
 ### Quiet ops
 
-An app-tier call is written to `audit.jsonl` unless its spec is `OpSpec::APP_QUIET` and it succeeded.
+An app-tier call is recorded as an event (Audit and Activity) unless its spec is `OpSpec::APP_QUIET` and it succeeded.
 These read-only polls are quiet: `bridge.status`, `bridge.devices`, `bridge.tunnel.status`,
 `accounts.list`, `lanes.list`, `providers.list`, `providers.usage`, `limits.status`, `limits.usage`,
 `git.status`, `git.diff` and `activity.list`. A call to `accounts.list` or `providers.list` with
@@ -218,7 +221,7 @@ file and the daemon's own cache, and the one thing it writes is that cache.
 ## `codex_ops.rs`
 
 Milestone 5's Codex ops (E6a): `codex.send`, `codex.stop` and `codex.delete` over the engine's
-[`CodexRuns`]. App tier, audit-logged by the server like every app-tier op, and refused with
+[`CodexRuns`]. App tier, recorded by the server like every app-tier op, and refused with
 [`ACTING_OFF`] while the `acting` switch is off: every one of them starts `codex` or sends it a
 signal.
 
@@ -340,9 +343,8 @@ checked. A `path` is refused if it is empty, absolute, has a `..` or a NUL, goes
 that leaves the repository, or is not exactly one of the current changed files (no `.`, no
 directory, not a file that is clean).
 
-All five ops are `OpSpec::APP_QUIET`: a success is not written to `audit.jsonl` (the app asks every
-5 s, which would fill the log and rotate out the refusals and the vault's entries); a refusal or
-failure still is.
+All five ops are `OpSpec::APP_QUIET`: a success is not recorded (the app asks every
+5 s, which would fill the log); a refusal or failure still is.
 
 | Op | Tier | Args | Reply |
 | --- | --- | --- | --- |
@@ -572,7 +574,7 @@ pages or 700 KB and say `"truncated": true`.
 ## `providers_ops.rs`
 
 Milestone 6's provider ops (E8b): the accounts of Codex, Antigravity and Claude Desktop over
-[`notchling_engine::providers`]. App tier (audit-logged by the server like every app-tier op) and
+[`notchling_engine::providers`]. App tier (recorded by the server like every app-tier op) and
 behind the `accounts` switch, which is off at every start.
 
 While the switch is off every op answers `forbidden` with [`ACCOUNTS_OFF`], and nothing runs: no
@@ -619,7 +621,7 @@ Agents read and change Notchling's settings ([decision 0020](decisions/0020-agen
 
 `Ask` is `{id, key, value, state, message}`, `state` one of `waiting`, `applying`, `applied`, `denied`, `expired`, `withdrawn` (the daemon stopped first) or `failed`. An ask raises an inbox item (`setting:<id>`, kind `setting_change`, actions `allow` and `deny`, expiring with the ask after [`ASK_WAIT`], 300 s) that the Mac or a paired phone answers; the first answer wins. Allow writes the value; Deny, no answer or a stop leave it as it was. The item's responder only marks the ask (it runs under the inbox lock); the ask thread in `settings_asks.rs` writes the value, closes expired asks and their items, and withdraws the asks still waiting at `close`. `wait` (0 to 60 s, default 0) holds the call until the ask ends; `settings.asked` polls it, and an ended ask is kept 10 minutes. An allowed ask is written even when nothing polls it any more. With no app following `inbox` an ask is refused at once with `needs_approval`; at most 8 wait at a time (`failed` beyond that).
 
-A write goes to `notchling.db` (the limit keys `limitMode`, `codexLimitMode`, `antigravityLimitMode` and `limitSwitchAt` first to the daemon's `LimitConfig`, as `limits.set_mode` does), then out on `settings` as `settings.changed {key, value, by: "agent" | "app", ask?: id}`, set or not. The app reads the key back from the store on that event, so an older event never undoes a newer write. The Settings sheet writes the store itself and applies its own change in place; it doesn't go through this op, so it isn't on the topic. Every `settings.set`, from either tier, is in the audit log as op `settings.set` with result `set`, `asked`, `allowed`, `denied`, `expired`, `withdrawn`, `failed`, `refused`, `bad_value`, `unknown_key`, `no_app` or `full`, and `reason` `<key>=<value as JSON>` (cut at 64 and 120 characters). Reads are not audited.
+A write goes to `notchling.db` (the limit keys `limitMode`, `codexLimitMode`, `antigravityLimitMode` and `limitSwitchAt` first to the daemon's `LimitConfig`, as `limits.set_mode` does), then out on `settings` as `settings.changed {key, value, by: "agent" | "app", ask?: id}`, set or not. The app reads the key back from the store on that event, so an older event never undoes a newer write. The Settings sheet writes the store itself and applies its own change in place; it doesn't go through this op, so it isn't on the topic. Every `settings.set` from the agent tier is a `settings.agent` event (committed to the Audit before the write) with result `set`, `asked`, `allowed`, `denied`, `expired`, `withdrawn`, `failed`, `refused`, `bad_value`, `unknown_key`, `no_app` or `full`, and the key (a hash for an unknown key), the value's length and its hash, never the value. Reads are not recorded.
 
 ## `vault_ops.rs`
 
@@ -667,5 +669,5 @@ app that (re)connects asks it after following `vault`, so nothing that waits for
 missed.
 
 Errors carry names and fixed texts only: never a value, never a parse error that could quote
-one. Agent-tier calls are written to the audit log here (op, tier, peer, outcome and the
-names used); the server logs every app-tier call.
+one. Agent-tier calls are recorded as events here (the op's kind, the peer's executable, the outcome and the
+names used); the server records every app-tier call that is not quiet.
