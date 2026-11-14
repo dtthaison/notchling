@@ -10,6 +10,7 @@ pub mod cli;
 pub mod crash_log;
 pub mod dock;
 pub mod inbox;
+pub mod keep_awake;
 #[cfg(target_os = "macos")]
 pub mod mac;
 pub mod machines;
