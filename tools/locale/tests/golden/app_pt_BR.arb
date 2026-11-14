@@ -1,0 +1,71 @@
+{
+  "@@locale": "pt_BR",
+  "consentAllowOnce": "Allow Once",
+  "@consentAllowOnce": {
+    "description": "Button that allows one use."
+  },
+  "consentDeny": "Deny",
+  "@consentDeny": {
+    "description": "Button that refuses."
+  },
+  "consentSecretApproval": "Allow {names} for {command}",
+  "@consentSecretApproval": {
+    "description": "Title of a secret approval. $names are the secrets, $command what runs.",
+    "placeholders": {
+      "names": {
+        "type": "String"
+      },
+      "command": {
+        "type": "String"
+      }
+    }
+  },
+  "itemNumberSign": "# of items: {count}",
+  "@itemNumberSign": {
+    "description": "A label with a number sign. $count is how many.",
+    "placeholders": {
+      "count": {
+        "type": "String"
+      }
+    }
+  },
+  "languageName": "Português (Brasil)",
+  "@languageName": {
+    "description": "The language's own name, as its speakers write it."
+  },
+  "pairingCantFind": "Can't find your Mac",
+  "@pairingCantFind": {
+    "description": "Shown when no Mac answers."
+  },
+  "pairingStep": "Step # of {total}",
+  "@pairingStep": {
+    "description": "Step counter. $total is the number of steps.",
+    "placeholders": {
+      "total": {
+        "type": "String"
+      }
+    }
+  },
+  "pairingTitle": "Pair with your Mac",
+  "@pairingTitle": {
+    "description": "Title of the pairing screen."
+  },
+  "sessionSubagentsRunning": "{count, plural, one{{count} subagent running} other{{count} subagents running}}",
+  "@sessionSubagentsRunning": {
+    "description": "Title of the Subagents section while some still run. $count is how many run.",
+    "placeholders": {
+      "count": {
+        "type": "int",
+        "format": "decimalPattern"
+      }
+    }
+  },
+  "stateNotRunning": "Notchling isn't running",
+  "@stateNotRunning": {
+    "description": "Shown when the app is not running."
+  },
+  "stateWorking": "A trabalhar",
+  "@stateWorking": {
+    "description": "Shown while a session works."
+  }
+}
