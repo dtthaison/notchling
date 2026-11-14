@@ -16,6 +16,7 @@ pub mod offers;
 pub mod poller;
 pub mod process;
 pub mod registry;
+pub mod remote_edit;
 pub mod repo_common;
 pub mod roots;
 pub mod runner;
@@ -86,6 +87,8 @@ mod tests_morning;
 mod tests_poller;
 #[cfg(test)]
 mod tests_registry;
+#[cfg(test)]
+mod tests_remote_edit;
 #[cfg(test)]
 mod tests_repo;
 #[cfg(test)]
