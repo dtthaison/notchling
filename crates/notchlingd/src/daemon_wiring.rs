@@ -5,6 +5,7 @@ use crate::activity_ops::ActivityOps;
 use crate::agy_ops::AgyOps;
 use crate::attach::{ClaudeAttacher, LiveLauncher};
 use crate::awake_loop::{power_for, AwakeLoop};
+use crate::awake_ops::AwakeOps;
 use crate::bridge_backend::APPROVAL_WAIT;
 use crate::bridge_ops::{BridgeOps, BridgeSetup};
 use crate::catalog_ops::CatalogService;
@@ -321,6 +322,7 @@ impl Wired {
             sessions,
             codex.clone(),
             agy.clone(),
+            room.clone(),
             power,
         ));
 
@@ -475,6 +477,7 @@ impl Wired {
             .with_group(self.settings.clone())
             .with_group(Arc::new(git))
             .with_group(Arc::new(ActivityOps::for_daemon(layout)))
+            .with_group(Arc::new(AwakeOps::new(self.awake.clone())))
             .with_first_scan(first_scan, first_wait)
     }
 

@@ -9,6 +9,7 @@ pub mod agy_ops;
 pub mod agy_sink;
 pub mod attach;
 pub mod awake_loop;
+pub mod awake_ops;
 pub mod bridge_backend;
 pub mod bridge_ops;
 pub mod catalog_ops;
@@ -66,6 +67,8 @@ mod acting_ops_tests;
 mod acting_permission_tests;
 #[cfg(test)]
 mod activity_ops_tests;
+#[cfg(test)]
+mod awake_follow_tests;
 #[cfg(test)]
 mod awake_loop_tests;
 #[cfg(test)]

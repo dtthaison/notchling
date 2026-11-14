@@ -37,6 +37,21 @@ pub enum Kind {
     Display,
 }
 
+impl Kind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Kind::System => "system",
+            Kind::Display => "display",
+        }
+    }
+
+    pub fn parse(text: &str) -> Option<Kind> {
+        [Kind::System, Kind::Display]
+            .into_iter()
+            .find(|k| k.as_str() == text)
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Work {
     pub codex_turns: usize,
