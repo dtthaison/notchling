@@ -20,6 +20,8 @@ pub mod escape;
 pub mod file_panel;
 pub mod follow;
 pub mod format;
+#[cfg(test)]
+mod format_words_tests;
 pub mod git;
 pub mod header;
 pub mod history;
@@ -38,6 +40,7 @@ pub mod log;
 mod log_tests;
 pub mod markdown;
 pub mod markdown_cache;
+pub mod markers;
 pub mod message_meta;
 pub mod outgoing;
 pub mod page_panel;
@@ -64,6 +67,8 @@ pub mod selection;
 pub mod shell_list;
 pub mod shell_rows;
 pub mod sidebar;
+#[cfg(test)]
+mod sidebar_words_tests;
 pub mod simulator;
 pub mod slash_menu;
 pub mod steps;

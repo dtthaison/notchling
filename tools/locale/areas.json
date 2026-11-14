@@ -38,7 +38,7 @@
         "crates/app/src/chat/view/phone.rs",
         "crates/app/src/chat/view/limit_ring.rs"
       ],
-      "moved": false
+      "moved": true
     },
     {
       "name": "chat-conversation",

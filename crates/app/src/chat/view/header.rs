@@ -5,7 +5,7 @@ use notchling_kit::part::{ButtonKind, PartState};
 use notchling_kit::ui::{button_with, hsla, icon_button, label, phone_mark, KitPart, KitStyled};
 use notchling_kit::{Appearance, Icon, IconSize, Ink, TypeRole};
 
-use super::phone::{BUTTON_TIP_OFF, BUTTON_TIP_ON};
+use super::phone::{button_tip_off, button_tip_on};
 use super::render_map::WindowRegion;
 use super::sidebar::{HEADER_BUTTON, HEADER_ROW, HIDDEN_HEADER_START};
 use super::ChatView;
@@ -31,7 +31,11 @@ fn phone_button(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> i
     } else {
         ButtonKind::Ghost
     };
-    let tip = if on { BUTTON_TIP_ON } else { BUTTON_TIP_OFF };
+    let tip = if on {
+        button_tip_on()
+    } else {
+        button_tip_off()
+    };
     let ink = if view.phone.is_some() {
         Ink::Text
     } else {

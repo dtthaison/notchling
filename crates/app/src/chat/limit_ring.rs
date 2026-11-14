@@ -1,7 +1,9 @@
 use notchling_engine::limits::report::{BarKind, UsageReport};
 use notchling_engine::pages::clock::civil_at;
 use notchling_kit::Ink;
+use notchling_locale as t;
 
+use super::markers;
 use crate::accounts::limits::{Fill, Zone};
 use crate::accounts::wire::Window;
 
@@ -46,7 +48,7 @@ pub fn codex_limits(report: &UsageReport) -> Vec<Limit> {
     report
         .groups
         .iter()
-        .find(|g| g.name.as_deref() == Some("Codex"))
+        .find(|g| g.name.as_deref() == Some(markers::CODEX_GROUP))
         .or_else(|| report.groups.first())
         .map(|g| {
             g.bars
@@ -103,12 +105,12 @@ pub fn antigravity_limits(report: &UsageReport, model: Option<&str>) -> Vec<Limi
             bars.into_iter()
                 .map(|b| {
                     let window = match b.kind {
-                        BarKind::Session => "5-hour limit".to_owned(),
-                        BarKind::Week => "weekly limit".to_owned(),
+                        BarKind::Session => t::chat::limit_five_hour().to_owned(),
+                        BarKind::Week => t::chat::limit_weekly_short().to_owned(),
                         BarKind::Other => b.label.clone(),
                     };
                     Limit {
-                        name: format!("{name} · {window}"),
+                        name: t::chat::limit_window(&name, &window),
                         kind: Kind::Other,
                         percent: b.percent,
                         resets_at: b.resets_at,
@@ -175,14 +177,14 @@ pub struct Card {
 
 fn row_label(limit: &Limit) -> String {
     match limit.kind {
-        Kind::Session => "5-hour limit".to_owned(),
-        Kind::Week => "Weekly · all models".to_owned(),
+        Kind::Session => t::chat::limit_five_hour().to_owned(),
+        Kind::Week => t::chat::limit_weekly().to_owned(),
         Kind::Other => {
             let lower = limit.name.to_ascii_lowercase();
             if lower.contains("limit") || lower.contains("week") {
                 limit.name.clone()
             } else {
-                format!("{} limit", limit.name)
+                t::chat::limit_named(&limit.name)
             }
         }
     }
@@ -210,13 +212,21 @@ pub fn card(limits: &[Limit], plan: Option<&str>, now: f64, zone: Zone) -> Optio
         })
         .collect();
     let title = match plan.map(str::trim).filter(|p| !p.is_empty()) {
-        Some(plan) => format!("Your usage limits · {plan}"),
-        None => "Your usage limits".to_owned(),
+        Some(plan) => t::chat::limits_title_plan(plan),
+        None => t::chat::limits_title().to_owned(),
     };
     Some(Card { title, rows })
 }
 
-const WEEKDAYS: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const WEEKDAYS: [t::Text; 7] = [
+    t::units::WEEKDAY_SUN,
+    t::units::WEEKDAY_MON,
+    t::units::WEEKDAY_TUE,
+    t::units::WEEKDAY_WED,
+    t::units::WEEKDAY_THU,
+    t::units::WEEKDAY_FRI,
+    t::units::WEEKDAY_SAT,
+];
 
 pub fn reset_clock(resets_at: f64, zone: Zone) -> String {
     let offset = (zone.0)(resets_at);
@@ -224,19 +234,24 @@ pub fn reset_clock(resets_at: f64, zone: Zone) -> String {
     let days = (resets_at.floor() as i64 + offset).div_euclid(86_400);
     let weekday = (days + 4).rem_euclid(7) as usize;
     let (hour, suffix) = match c.hour {
-        0 => (12, "AM"),
-        1..=11 => (c.hour, "AM"),
-        12 => (12, "PM"),
-        h => (h - 12, "PM"),
+        0 => (12, t::units::AM),
+        1..=11 => (c.hour, t::units::AM),
+        12 => (12, t::units::PM),
+        h => (h - 12, t::units::PM),
     };
-    format!("{} {}:{:02} {}", WEEKDAYS[weekday], hour, c.minute, suffix)
+    t::units::reset_clock(
+        WEEKDAYS[weekday].get(),
+        hour,
+        &format!("{:02}", c.minute),
+        suffix.get(),
+    )
 }
 
 pub fn reset_label(resets_at: f64, now: f64, zone: Zone) -> String {
     if resets_at <= now {
-        "Resetting".to_owned()
+        t::chat::limit_resetting().to_owned()
     } else {
-        format!("Resets {}", reset_clock(resets_at, zone))
+        t::chat::limit_resets(&reset_clock(resets_at, zone))
     }
 }
 

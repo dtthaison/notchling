@@ -8,6 +8,7 @@ use notchling_kit::ui::{
     button_with, icon, menu_note, menu_panel_wide, menu_rule, menu_section, KitStyled, MenuItem,
 };
 use notchling_kit::{Appearance, Icon, Ink};
+use notchling_locale as t;
 
 use super::ChatView;
 use crate::accounts::menu::{
@@ -122,7 +123,7 @@ impl ChatView {
                 .await;
             this.update(cx, |view, cx| {
                 if let Err(e) = result {
-                    view.tools.error = Some(format!("Couldn't move it: {e}"));
+                    view.tools.error = Some(t::chat::move_failed(&e.to_string()));
                 }
                 view.reload_now(cx);
                 cx.notify();
@@ -281,7 +282,7 @@ pub(super) fn render_menu(
                 items = items.child(menu_rule(a));
             }
             Entry::MoveAll => {
-                items = items.child(menu_section("Move All Sessions To", a));
+                items = items.child(menu_section(t::chat::move_all_to(), a));
                 for (t, target) in menu.targets.iter().enumerate() {
                     let target = target.clone();
                     if !accounts.enabled {
@@ -299,9 +300,9 @@ pub(super) fn render_menu(
             }
             Entry::AddAccount | Entry::CodexAccounts => {
                 let title = if *entry == Entry::AddAccount {
-                    "Add Account…"
+                    t::chat::add_account()
                 } else {
-                    "Codex Accounts…"
+                    t::chat::codex_accounts()
                 };
                 let (entry, menu_clone) = (entry.clone(), menu.clone());
                 items = items.child(menu_item(format!("account-entry-{i}"), title, a).on_click(

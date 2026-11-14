@@ -7,6 +7,7 @@ use notchling_engine::tools::codex::list::find_rollout;
 use notchling_engine::transcript::locate::predecessor;
 use notchling_engine::transcript::model::Timestamp;
 use notchling_engine::transcript::subagents::{Origin, Status, Subagent};
+use notchling_locale as t;
 
 const MAX_BACK: usize = 4;
 
@@ -66,8 +67,8 @@ pub fn subagent(
     alive: &dyn Fn(u32) -> bool,
 ) -> Subagent {
     let (origin, title) = match record.tool.as_str() {
-        "agy" => (Origin::Antigravity, "Antigravity CLI"),
-        _ => (Origin::Codex, "Codex"),
+        "agy" => (Origin::Antigravity, t::chat::delegated_antigravity()),
+        _ => (Origin::Codex, t::chat::delegated_codex()),
     };
     let path = record
         .session

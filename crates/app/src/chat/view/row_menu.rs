@@ -9,6 +9,7 @@ use notchling_kit::metric::MENU_RADIUS;
 use notchling_kit::metric::{MENU_ROW_X, MENU_ROW_Y};
 use notchling_kit::ui::{label, menu_note, menu_panel, menu_panel_wide, menu_rule};
 use notchling_kit::{Appearance, Ink, TypeRole};
+use notchling_locale as t;
 
 use super::accounts::{held_item, menu_item};
 use super::ChatView;
@@ -58,19 +59,21 @@ pub(super) fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>)
     }
     let mut items = menu_panel(a);
     items = match id {
-        Some(id) => items.child(menu_item("row-copy-id", "Copy Session ID", a).on_click(
-            cx.listener(move |this, _, _, cx| {
-                cx.write_to_clipboard(ClipboardItem::new_string(id.clone()));
-                this.row_menu = None;
-                cx.notify();
-            }),
-        )),
+        Some(id) => items.child(
+            menu_item("row-copy-id", t::chat::copy_session_id(), a).on_click(cx.listener(
+                move |this, _, _, cx| {
+                    cx.write_to_clipboard(ClipboardItem::new_string(id.clone()));
+                    this.row_menu = None;
+                    cx.notify();
+                },
+            )),
+        ),
         None => items.child(held_item(
             "row-copy-id",
-            "Copy Session ID",
+            t::chat::copy_session_id(),
             Control {
                 enabled: false,
-                tooltip: Some("This session hasn't started yet, so it has no id."),
+                tooltip: Some(t::chat::session_not_started()),
             },
             a,
         )),
@@ -78,12 +81,12 @@ pub(super) fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>)
     if let Some(tool) = tool.filter(|t| closed::closable(*t)) {
         let row = menu.row_id.clone();
         let all = match tool {
-            Tool::Codex => "Close All Codex Sessions",
-            _ => "Close All Antigravity Sessions",
+            Tool::Codex => t::chat::close_all_codex(),
+            _ => t::chat::close_all_antigravity(),
         };
         items = items
             .child(
-                menu_item("row-close", "Close Session", a).on_click(cx.listener(
+                menu_item("row-close", t::chat::close_session(), a).on_click(cx.listener(
                     move |this, _, _, cx| {
                         this.close_rows(vec![row.clone()], cx);
                     },
@@ -99,14 +102,16 @@ pub(super) fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>)
     if removable {
         let control = view.acting_control(cx);
         items = items.child(if control.enabled {
-            menu_item("row-remove", "Remove Session…", a).on_click(cx.listener(|this, _, _, cx| {
-                if let Some(menu) = this.row_menu.as_mut() {
-                    menu.confirm_remove = true;
-                }
-                cx.notify();
-            }))
+            menu_item("row-remove", t::chat::remove_session(), a).on_click(cx.listener(
+                |this, _, _, cx| {
+                    if let Some(menu) = this.row_menu.as_mut() {
+                        menu.confirm_remove = true;
+                    }
+                    cx.notify();
+                },
+            ))
         } else {
-            held_item("row-remove", "Remove Session…", control, a)
+            held_item("row-remove", t::chat::remove_session(), control, a)
         });
     }
     Some(layer(menu, items, cx))
@@ -121,27 +126,28 @@ fn confirm_card(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> D
         .unwrap_or_default();
     menu_panel_wide(a)
         .child(
-            label(&format!("Remove “{title}”?"), TypeRole::Meta, Ink::Text, a)
+            label(&t::chat::remove_title(&title), TypeRole::Meta, Ink::Text, a)
                 .px(px(MENU_ROW_X))
                 .py(px(MENU_ROW_Y)),
         )
-        .child(menu_note(
-            "Claude Code stops it and removes it from its list. This can't be undone.",
-            a,
-        ))
+        .child(menu_note(t::chat::remove_note(), a))
         .child(menu_rule(a))
         .child(
-            menu_item("row-remove-confirm", "Remove", a).on_click(cx.listener(|this, _, _, cx| {
-                if let Some(menu) = this.row_menu.take() {
-                    this.remove_row(menu.row_id, cx);
-                }
-            })),
+            menu_item("row-remove-confirm", t::chat::remove(), a).on_click(cx.listener(
+                |this, _, _, cx| {
+                    if let Some(menu) = this.row_menu.take() {
+                        this.remove_row(menu.row_id, cx);
+                    }
+                },
+            )),
         )
         .child(
-            menu_item("row-remove-cancel", "Cancel", a).on_click(cx.listener(|this, _, _, cx| {
-                this.row_menu = None;
-                cx.notify();
-            })),
+            menu_item("row-remove-cancel", t::chat::cancel(), a).on_click(cx.listener(
+                |this, _, _, cx| {
+                    this.row_menu = None;
+                    cx.notify();
+                },
+            )),
         )
 }
 
@@ -208,7 +214,7 @@ impl ChatView {
     fn save_used(&mut self) {
         if let Some(mut store) = self.settings_store() {
             if let Err(e) = store.set(used::KEY, closed::to_value(&self.used)) {
-                self.tools.error = Some(format!("Couldn't save the sessions used in Chat: {e}"));
+                self.tools.error = Some(t::chat::save_used_failed(&e.to_string()));
             }
         }
     }
@@ -223,7 +229,7 @@ impl ChatView {
     fn save_closed(&mut self) {
         if let Some(mut store) = self.settings_store() {
             if let Err(e) = store.set(closed::KEY, closed::to_value(&self.closed)) {
-                self.tools.error = Some(format!("Couldn't save the closed sessions: {e}"));
+                self.tools.error = Some(t::chat::save_closed_failed(&e.to_string()));
             }
         }
     }
