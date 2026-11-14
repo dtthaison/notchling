@@ -2,8 +2,8 @@ use gpui::{div, prelude::*, px, Div, SharedString, Stateful};
 
 use super::{card, hsla, icon, label, KitStyled};
 use crate::metric::{
-    MENU_MARK, MENU_MAX_WIDTH, MENU_MIN_WIDTH, MENU_PADDING, MENU_ROW_GAP, MENU_ROW_X, MENU_ROW_Y,
-    MENU_RULE_Y, RADIUS_SM,
+    MENU_GAP, MENU_MARK, MENU_MAX_WIDTH, MENU_MIN_WIDTH, MENU_PADDING, MENU_ROW_GAP, MENU_ROW_X,
+    MENU_ROW_Y, MENU_RULE_Y, RADIUS_SM,
 };
 use crate::{Appearance, Icon, Ink, TypeRole};
 
@@ -63,6 +63,7 @@ pub struct MenuItem {
     id: SharedString,
     title: SharedString,
     detail: Option<SharedString>,
+    inline: bool,
     leading: Option<Icon>,
     shortcut: Option<SharedString>,
     checked: Option<bool>,
@@ -76,6 +77,7 @@ impl MenuItem {
             id: id.into(),
             title: title.into(),
             detail: None,
+            inline: false,
             leading: None,
             shortcut: None,
             checked: None,
@@ -88,6 +90,11 @@ impl MenuItem {
         if !detail.is_empty() {
             self.detail = Some(detail.to_owned().into());
         }
+        self
+    }
+
+    pub fn inline(mut self) -> Self {
+        self.inline = true;
         self
     }
 
@@ -131,14 +138,35 @@ impl MenuItem {
         let leading = self
             .leading
             .map(|glyph| icon(glyph, crate::metric::MENU_ICON, Ink::TextMuted, a).flex_shrink_0());
-        let mut text = div().flex_1().min_w(px(0.0)).flex().flex_col().child(
-            label(&self.title, TypeRole::Meta, title_ink, a)
-                .whitespace_nowrap()
-                .elide(),
-        );
-        if let Some(detail) = &self.detail {
-            text = text.child(label(detail, TypeRole::Meta, detail_ink, a).line_clamp(2));
-        }
+        let title = label(&self.title, TypeRole::Meta, title_ink, a).whitespace_nowrap();
+        let text = match (&self.detail, self.inline) {
+            (Some(detail), true) => div()
+                .flex_1()
+                .min_w(px(0.0))
+                .flex()
+                .items_baseline()
+                .gap(px(MENU_GAP))
+                .child(title.flex_shrink_0())
+                .child(
+                    label(detail, TypeRole::Meta, detail_ink, a)
+                        .min_w(px(0.0))
+                        .whitespace_nowrap()
+                        .elide(),
+                ),
+            (Some(detail), false) => div()
+                .flex_1()
+                .min_w(px(0.0))
+                .flex()
+                .flex_col()
+                .child(title.elide())
+                .child(label(detail, TypeRole::Meta, detail_ink, a).line_clamp(2)),
+            (None, _) => div()
+                .flex_1()
+                .min_w(px(0.0))
+                .flex()
+                .flex_col()
+                .child(title.elide()),
+        };
         let end = match (self.chevron, self.checked) {
             (Some(glyph), _) => Some(div().w(px(MENU_MARK)).flex_shrink_0().child(icon(
                 glyph,

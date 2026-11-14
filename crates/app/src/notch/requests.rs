@@ -23,6 +23,7 @@ pub struct HookRequest {
     pub kind: RequestKind,
     pub tool_name: String,
     pub summary: String,
+    pub description: String,
     pub can_always_allow: bool,
     pub agy: Option<AgyPermission>,
 }
@@ -57,6 +58,11 @@ impl HookRequest {
         } else {
             (RequestKind::Permission, describe(input))
         };
+        let description = input
+            .get("description")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_owned();
         Some(HookRequest {
             id: id.to_owned(),
             session_id: session.to_owned(),
@@ -64,6 +70,7 @@ impl HookRequest {
             kind,
             tool_name: tool_name.to_owned(),
             summary,
+            description,
             can_always_allow,
             agy: None,
         })
@@ -125,6 +132,12 @@ impl HookRequest {
             created: p.get("createdMs").and_then(Value::as_f64).unwrap_or(0.0) / 1000.0,
             tool_name: text("toolName"),
             summary: text("summary"),
+            description: p
+                .get("input")
+                .and_then(|input| input.get("description"))
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_owned(),
             can_always_allow: p
                 .get("canAlwaysAllow")
                 .and_then(Value::as_bool)

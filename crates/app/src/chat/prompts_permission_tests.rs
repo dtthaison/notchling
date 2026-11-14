@@ -76,3 +76,41 @@ fn a_refusal_that_the_permission_is_gone_means_it_was_answered_elsewhere() {
         "Already answered in the terminal: Write notes.md"
     );
 }
+
+#[test]
+fn a_held_prompt_carries_the_bash_description_from_the_daemon() {
+    use crate::notch::requests::HookRequest;
+    use serde_json::json;
+    let with = HookRequest::from_prompt(&json!({
+        "id": "p1-a", "sessionId": "s", "kind": "permission", "toolName": "Bash",
+        "summary": "make handoff", "canAlwaysAllow": true,
+        "input": {"command": "make handoff", "description": "Commit the handoff doc"},
+    }))
+    .expect("a request");
+    assert_eq!(with.description, "Commit the handoff doc");
+    assert_eq!(with.summary, "make handoff");
+    let without = HookRequest::from_prompt(&json!({
+        "id": "p2-a", "sessionId": "s", "kind": "permission", "toolName": "Bash",
+        "summary": "ls", "input": {"command": "ls"},
+    }))
+    .expect("a request");
+    assert_eq!(without.description, "");
+    let old = HookRequest::from_prompt(&json!({
+        "id": "p3-a", "sessionId": "s", "kind": "permission", "toolName": "Bash", "summary": "ls",
+    }))
+    .expect("a request");
+    assert_eq!(old.description, "");
+}
+
+#[test]
+fn a_hook_file_carries_the_bash_description() {
+    use crate::notch::requests::HookRequest;
+    use serde_json::json;
+    let r = HookRequest::parse(&json!({
+        "id": "r1", "session_id": "s", "pid": 4, "hook_event_name": "PermissionRequest",
+        "tool_name": "Bash",
+        "tool_input": {"command": "ls", "description": "List the files"},
+    }))
+    .expect("a request");
+    assert_eq!(r.description, "List the files");
+}

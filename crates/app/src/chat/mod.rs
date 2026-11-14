@@ -55,6 +55,7 @@ pub mod panels;
 mod parse_cost_tests;
 pub mod paths;
 pub mod pending_child;
+pub mod permission_text;
 pub mod pickers;
 pub mod prompt_flow;
 pub mod prompts;

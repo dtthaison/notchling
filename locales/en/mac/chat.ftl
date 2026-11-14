@@ -288,6 +288,12 @@ chat-deny-note = { -brand-claude } tries something else
 chat-permission-needed = Permission needed
 # $tool is the tool's name, such as Bash.
 chat-wants-to-use = { -brand-claude } wants to use { $tool }
+# $description is what the command does, in Claude's words.
+chat-wants-to-run = { -brand-claude } wants to run: { $description }
+# $tool is the tool's name and $description what it does, in Claude's words.
+chat-wants-to-use-for = { -brand-claude } wants to use { $tool }: { $description }
+chat-show-all = Show all
+chat-show-less = Show less
 
 ## Second opinions
 

@@ -8,14 +8,17 @@ use gpui::{
 };
 use notchling_engine::transcript::snapshot::PendingQuestion;
 use notchling_kit::labels::Corner;
-use notchling_kit::metric::{CONTROL, RADIUS_COMPOSER, RADIUS_MD, SIDE_PADDING};
+use notchling_kit::metric::{CONTROL, MENU_GAP, RADIUS_COMPOSER, RADIUS_MD, SIDE_PADDING};
 use notchling_kit::part::{ButtonKind, PartState};
-use notchling_kit::ui::{button, field, hsla, icon, label, option_row, KitPart, KitStyled};
+use notchling_kit::ui::{
+    button, code_block, field, hsla, icon, label, option_row, KitPart, KitStyled, MenuItem,
+};
 use notchling_kit::{sentence, Appearance, Icon, Ink, TypeRole};
 
 use super::ChatView;
 use crate::acting::{Control, Decision, Request};
 use crate::chat::data::Tool;
+use crate::chat::permission_text;
 use crate::chat::prompt_flow::{
     confirmation, failure_text, file_name, is_gone, sending_text, Confirmed, Sending, Told,
     CONFIRM_MS,
@@ -31,8 +34,6 @@ use crate::phone::bridge::now_ms;
 
 const SCREEN_RETRY_MS: i64 = 3_000;
 
-const SUMMARY_LINES: usize = 12;
-
 pub struct State {
     pub shown: Option<Prompt>,
     pub files: HashMap<String, HookRequest>,
@@ -43,6 +44,7 @@ pub struct State {
     draft: QuestionDraft,
     sending: Option<Sending>,
     error: Option<String>,
+    command_open: Option<String>,
     confirmed: Option<(String, Confirmed)>,
     focus: FocusHandle,
     pub(super) preview: Option<Preview>,
@@ -60,6 +62,7 @@ impl State {
             draft: QuestionDraft::default(),
             sending: None,
             error: None,
+            command_open: None,
             confirmed: None,
             focus: cx.focus_handle(),
             preview,
@@ -75,6 +78,9 @@ impl State {
         self.preview = Some(preview);
         self.shown = Some(preview_prompt(preview));
         match preview {
+            Preview::PermissionExpanded => {
+                self.command_open = Some("preview".into());
+            }
             Preview::PermissionSending => {
                 self.sending = Some(Sending::Decision {
                     decision: Decision::Allow,
@@ -620,20 +626,17 @@ fn permission(
         .into_iter()
         .enumerate()
         .map(|(i, (decision, title, detail))| {
-            let (state, picked) = match sending {
-                None => (gate::state(gate), false),
-                Some(_) if chosen == Some(decision) => (PartState::Selected, true),
-                Some(_) => (PartState::Disabled, false),
+            let picked = chosen == Some(decision);
+            let held = match sending {
+                None => !gate.enabled,
+                Some(_) => !picked,
             };
-            let row = option_row(
-                SharedString::from(format!("prompt-permission-{i}")),
-                i + 1,
-                title,
-                detail,
-                picked,
-                state,
-                a,
-            );
+            let row = MenuItem::new(format!("prompt-permission-{i}"), title)
+                .detail(detail)
+                .inline()
+                .checked(picked)
+                .held(held)
+                .build(a);
             let (key, request) = (r.id.clone(), permission_request(r, decision));
             let (sent, said) = (
                 Sending::Decision {
@@ -642,7 +645,7 @@ fn permission(
                 },
                 Told::new(&r.tool_name, &r.summary, decision),
             );
-            gate::tip(row.w_auto(), gate, a).when(gate.enabled && sending.is_none(), |el| {
+            gate::tip(row, gate, a).when(gate.enabled && sending.is_none(), |el| {
                 el.on_click(cx.listener(move |this, _, _, cx| {
                     this.answer_prompt(key.clone(), request.clone(), sent, Some(said.clone()), cx);
                 }))
@@ -653,24 +656,41 @@ fn permission(
         div()
             .flex()
             .items_center()
-            .gap(px(8.0))
+            .gap(px(6.0))
             .child(icon(
                 Icon::File,
-                TypeRole::Title.spec().size,
+                TypeRole::Heading.spec().size,
                 Ink::AccentText,
                 a,
             ))
-            .child(label(name, TypeRole::Title, Ink::Text, a))
+            .child(label(name, TypeRole::Heading, Ink::Text, a))
     });
-    let path = label(&r.summary, TypeRole::Mono, Ink::Text, a)
-        .line_clamp(SUMMARY_LINES)
-        .p(px(8.0))
-        .rounded(px(RADIUS_MD))
-        .fill(Ink::Raised, a);
+    let open = view.prompt.command_open.as_deref() == Some(r.id.as_str());
+    let shape = permission_text::block(&r.summary, open);
+    let toggle = shape.max_lines.map(|_| {
+        let key = r.id.clone();
+        let words = if open {
+            t::chat::show_less()
+        } else {
+            t::chat::show_all()
+        };
+        label(words, TypeRole::Meta, Ink::TextMuted, a)
+            .id("prompt-command-toggle")
+            .cursor_pointer()
+            .hover(move |s| s.text_color(hsla(Ink::Text.color(a))))
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.prompt.command_open = match this.prompt.command_open {
+                    Some(_) => None,
+                    None => Some(key.clone()),
+                };
+                cx.notify();
+            }))
+    });
+    let description = permission_text::description_shown(&r.description, &r.summary);
     div()
         .flex()
         .flex_col()
-        .gap(px(8.0))
+        .gap(px(MENU_GAP))
         .child(header(
             Icon::Permission,
             t::chat::permission_needed(),
@@ -679,14 +699,15 @@ fn permission(
             a,
         ))
         .child(label(
-            &t::chat::wants_to_use(&r.tool_name),
+            &permission_text::headline(&r.tool_name, description),
             TypeRole::Heading,
             Ink::Text,
             a,
         ))
         .children(file)
-        .child(path)
+        .child(code_block(&r.summary, shape.max_lines, shape.fade, a))
+        .children(toggle.map(|t| div().flex().justify_end().child(t)))
         .children(failed(view, a, cx))
-        .children(options)
+        .child(div().flex().flex_col().children(options))
         .children(status(view, gate, a))
 }

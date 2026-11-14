@@ -327,6 +327,17 @@ mod tests {
     }
 
     #[test]
+    fn a_bash_description_goes_out_with_the_prompt() {
+        let store = PromptStore::default();
+        let mut event = fixture("permission-request.json");
+        event["tool_input"]["description"] = json!("Remove the build folder");
+        let (p, _rx) = store.open(event, None, 13).unwrap();
+        let json = p.to_json();
+        assert_eq!(json["input"]["description"], "Remove the build folder");
+        assert_eq!(json["summary"], "rm -rf build");
+    }
+
+    #[test]
     fn a_held_prompt_reads_its_kind_question_and_summary() {
         let store = PromptStore::default();
         let (q, _rx) = store
