@@ -10,6 +10,7 @@ pub mod cli;
 pub mod crash_log;
 pub mod dock;
 pub mod inbox;
+pub mod language;
 #[cfg(target_os = "macos")]
 pub mod mac;
 pub mod machines;

@@ -18,7 +18,10 @@ pub fn run_command(command: Command) -> i32 {
             live,
             vault,
         } => match Setup::for_run(data_root.as_deref(), live, vault) {
-            Some(setup) => run(setup),
+            Some(setup) => {
+                crate::language::start_for_run();
+                run(setup)
+            }
             None => {
                 eprintln!("notchling-machines: no home folder to read from");
                 1
@@ -28,7 +31,10 @@ pub fn run_command(command: Command) -> i32 {
             view,
             out,
             data_root,
-        } => crate::mac::render::run(&view, &out, data_root.as_deref()),
+        } => {
+            crate::language::start_for_render();
+            crate::mac::render::run(&view, &out, data_root.as_deref())
+        }
         Command::Version | Command::Help => 0,
     }
 }

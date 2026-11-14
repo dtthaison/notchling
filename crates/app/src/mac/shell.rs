@@ -79,6 +79,7 @@ const OPINION_STOP_GRACE: Duration = Duration::from_secs(2);
 const BRIDGE_POLL: Duration = Duration::from_secs(5);
 
 pub fn run(data_root: Option<PathBuf>, open_chat_now: bool) -> i32 {
+    crate::language::start_for_run();
     let data_root_is_real =
         data_root.is_none() && std::env::var_os("NOTCHLING_DATA_ROOT").is_none();
     let root = DataRoot::for_run(data_root.as_deref());

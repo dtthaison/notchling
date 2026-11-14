@@ -3780,6 +3780,7 @@ dependencies = [
  "notchling-engine",
  "notchling-kit",
  "notchling-local-api",
+ "notchling-locale",
  "notchling-platform",
  "objc2",
  "objc2-app-kit",

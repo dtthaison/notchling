@@ -87,6 +87,7 @@ impl Render for Root {
 }
 
 pub fn run(view: &str, out: &Path, data_root: Option<&Path>) -> i32 {
+    crate::language::start_for_render();
     let Some(spec) = crate::views::spec(view) else {
         eprintln!("unknown view {view}");
         return 2;
