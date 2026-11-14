@@ -8,6 +8,7 @@ import '../../app/theme/tokens.dart';
 import '../../core/net/bridge_client.dart';
 import '../../core/protocol/models.dart';
 import '../../l10n/app_localizations.dart';
+import '../connection/bridge_errors.dart';
 import '../chat/takeover_flow.dart';
 import '../connection/connection.dart';
 import '../macs/session_ref.dart';
@@ -40,7 +41,7 @@ Future<void> runTakeover(
     ref.read(activeTabProvider.notifier).show(1);
   } on BridgeException catch (error) {
     messenger.showSnackBar(
-      SnackBar(content: Text(l10n.takeoverFailed(error.message))),
+      SnackBar(content: Text(l10n.appTakeoverFailed(bridgeErrorLine(l10n, error)))),
     );
   }
 }
@@ -71,7 +72,7 @@ class _TakeoverRowButtonState extends ConsumerState<TakeoverRowButton> {
     return Semantics(
       button: true,
       enabled: !_working,
-      label: '${l10n.takeover}, ${widget.session.name}',
+      label: '${l10n.appTakeover}, ${widget.session.name}',
       excludeSemantics: true,
       onTap: _working ? null : () => unawaited(_run()),
       child: GestureDetector(
@@ -100,7 +101,7 @@ class _TakeoverRowButtonState extends ConsumerState<TakeoverRowButton> {
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
                   : Text(
-                      l10n.takeover,
+                      l10n.appTakeover,
                       style: Kit.of(
                         context,
                       ).labelSm.copyWith(color: Kit.of(context).text),

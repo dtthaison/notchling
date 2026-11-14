@@ -11,3 +11,11 @@
 
 # The language's own name, as its speakers write it. It is the label of this language in the Language row.
 language-name = English
+
+## Inbox items
+
+# The result of an inbox item nobody answered in time. Shown in the Inbox.
+item-expired = Expired
+
+# The result of an inbox item taken back. Shown in the Inbox.
+item-withdrawn = Withdrawn

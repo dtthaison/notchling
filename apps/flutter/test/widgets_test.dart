@@ -37,16 +37,16 @@ void main() {
       await tester.pumpWidget(host(SessionRow(session: _session(), now: _now, onTap: () {})));
       expect(find.text('Notching repo startup'), findsOneWidget);
       expect(find.text('truongbinhtriet'), findsOneWidget);
-      expect(find.text('3 phút'), findsOneWidget);
-      expect(find.bySemanticsLabel(RegExp('Đang chạy')), findsOneWidget);
-      expect(find.bySemanticsLabel(RegExp('Notching repo startup, truongbinhtriet, Đang chạy')), findsOneWidget);
+      expect(find.text('3 min'), findsOneWidget);
+      expect(find.bySemanticsLabel(RegExp('Working')), findsOneWidget);
+      expect(find.bySemanticsLabel(RegExp('Notching repo startup, truongbinhtriet, Working')), findsOneWidget);
     });
 
     testWidgets('the status is the badge and the group, not a pill that repeats the group; screen readers still hear it', (WidgetTester tester) async {
       await tester.pumpWidget(host(SessionRow(session: _session(state: SessionState.needsInput), now: _now, onTap: () {})));
       expect(find.byType(KitStatusPill), findsNothing);
       expect(find.byType(StatusDot), findsOneWidget);
-      expect(find.bySemanticsLabel(RegExp('Cần bạn')), findsOneWidget);
+      expect(find.bySemanticsLabel(RegExp('Needs Input')), findsOneWidget);
     });
 
     testWidgets('running subagents show as a count, and the arrow opens the tree', (WidgetTester tester) async {
@@ -58,7 +58,7 @@ void main() {
         onToggleExpand: () => toggled++,
       )));
       expect(find.text('2'), findsOneWidget, reason: 'the number of subagents');
-      await tester.tap(find.bySemanticsLabel(RegExp('Mở 2 subagent')));
+      await tester.tap(find.bySemanticsLabel(RegExp('Show 2 subagents')));
       expect(toggled, 1);
     });
 
@@ -80,7 +80,7 @@ void main() {
     testWidgets('the row is at least 56 dp and the subagent toggle at least 32 (a secondary target; the row is the main one)', (WidgetTester tester) async {
       await tester.pumpWidget(host(SessionRow(session: _session(subagents: <Subagent>[_agent()]), now: _now, onTap: () {}, onToggleExpand: () {})));
       expect(tester.getSize(find.byType(SessionRow)).height, greaterThanOrEqualTo(56));
-      expect(tester.getSize(find.bySemanticsLabel(RegExp('Mở 1 subagent'))).height, greaterThanOrEqualTo(32));
+      expect(tester.getSize(find.bySemanticsLabel(RegExp('Show 1 subagent'))).height, greaterThanOrEqualTo(32));
     });
 
     testWidgets('survives the largest text size without overflow', (WidgetTester tester) async {
@@ -98,7 +98,7 @@ void main() {
       expect(find.textContaining('general-purpose', findRichText: true), findsOneWidget);
       expect(find.textContaining('Spike voice model', findRichText: true), findsOneWidget);
       expect(find.text('sonnet'), findsOneWidget);
-      expect(find.text('Đang chạy'), findsOneWidget);
+      expect(find.text('Working'), findsOneWidget);
       expect(tester.widget<Text>(find.text('sonnet')).style?.fontFamily, 'GeistMono');
     });
 
@@ -128,11 +128,11 @@ void main() {
     testWidgets('idle: Send is disabled until there is text, then sends', (WidgetTester tester) async {
       int sends = 0;
       await pump(tester, onSend: () => sends++);
-      await tester.tap(find.bySemanticsLabel('Gửi'));
+      await tester.tap(find.bySemanticsLabel('Send'));
       expect(sends, 0);
       await tester.enterText(find.byType(TextField), 'chạy flutter test');
       await tester.pump();
-      await tester.tap(find.bySemanticsLabel('Gửi'));
+      await tester.tap(find.bySemanticsLabel('Send'));
       expect(sends, 1);
     });
 
@@ -141,29 +141,29 @@ void main() {
       await pump(tester, onSend: () => sends++);
       await tester.enterText(find.byType(TextField), '   \n ');
       await tester.pump();
-      await tester.tap(find.bySemanticsLabel('Gửi'));
+      await tester.tap(find.bySemanticsLabel('Send'));
       expect(sends, 0);
     });
 
-    testWidgets('sending: the field locks and the button says Đang gửi', (WidgetTester tester) async {
+    testWidgets('sending: the field locks and the button says Sending', (WidgetTester tester) async {
       await pump(tester, send: const SendSending());
-      expect(find.bySemanticsLabel('Đang gửi'), findsOneWidget);
+      expect(find.bySemanticsLabel('Sending'), findsOneWidget);
       expect(tester.widget<TextField>(find.byType(TextField)).enabled, isFalse);
     });
 
-    testWidgets('failed: the error shows with Thử lại, and Thử lại calls back', (WidgetTester tester) async {
+    testWidgets('failed: the error shows with Retry, and Retry calls back', (WidgetTester tester) async {
       int retries = 0;
       await pump(tester, send: const SendFailed(text: 'hi'), onRetry: () => retries++);
-      expect(find.text('Không thể gửi tin nhắn. Vui lòng thử lại.'), findsOneWidget);
-      await tester.tap(find.text('Thử lại'));
+      expect(find.text("Couldn't send the message. Please try again."), findsOneWidget);
+      await tester.tap(find.text('Retry'));
       expect(retries, 1);
     });
 
     testWidgets('view-only: no input, the explanation and no Send button', (WidgetTester tester) async {
       await pump(tester, viewOnly: true);
       expect(find.byType(TextField), findsNothing);
-      expect(find.text('Session mở ngoài Console — chỉ xem'), findsOneWidget);
-      expect(find.bySemanticsLabel('Gửi'), findsNothing);
+      expect(find.text('Opened outside Console, view only'), findsOneWidget);
+      expect(find.bySemanticsLabel('Send'), findsNothing);
     });
 
     testWidgets('a subagent transcript is read-only with its own sentence', (WidgetTester tester) async {
@@ -175,7 +175,7 @@ void main() {
     testWidgets('the mic is present and labelled; without a handler it is disabled', (WidgetTester tester) async {
       await pump(tester);
       expect(find.byIcon(Icons.mic_none), findsOneWidget);
-      expect(find.byTooltip('Nói để nhập'), findsOneWidget);
+      expect(find.byTooltip('Dictate'), findsOneWidget);
     });
   });
 
@@ -192,13 +192,13 @@ void main() {
           ],
         );
 
-    testWidgets('permission: the command and Cho phép / Từ chối', (WidgetTester tester) async {
+    testWidgets('permission: the command and Allow / Deny', (WidgetTester tester) async {
       final List<bool> answers = <bool>[];
       await tester.pumpWidget(host(PendingCard(prompt: permission, onAllow: ({required bool allow}) => answers.add(allow), onChoose: (List<int> c) {})));
       expect(find.text('rm -rf build'), findsOneWidget);
-      expect(find.text('Cần cấp quyền: Bash'), findsOneWidget);
-      await tester.tap(find.text('Cho phép'));
-      await tester.tap(find.text('Từ chối'));
+      expect(find.text('Permission needed: Bash'), findsOneWidget);
+      await tester.tap(find.text('Allow'));
+      await tester.tap(find.text('Deny'));
       expect(answers, <bool>[true, false]);
     });
 
@@ -223,13 +223,13 @@ void main() {
 
     testWidgets('multi-select is answered on the Mac: no option buttons', (WidgetTester tester) async {
       await tester.pumpWidget(host(PendingCard(prompt: question(multi: true), onAllow: ({required bool allow}) {}, onChoose: (List<int> c) {})));
-      expect(find.text('Câu hỏi này cho chọn nhiều đáp án. Trả lời trên Mac.'), findsOneWidget);
+      expect(find.text('This question allows several answers. Answer it on the Mac.'), findsOneWidget);
       expect(find.text('1  main'), findsNothing);
     });
 
     testWidgets('an answer error shows in the error color', (WidgetTester tester) async {
       await tester.pumpWidget(host(PendingCard(prompt: permission, error: 'x', onAllow: ({required bool allow}) {}, onChoose: (List<int> c) {})));
-      expect(find.text('Không thể gửi câu trả lời. Vui lòng thử lại.'), findsOneWidget);
+      expect(find.text("Couldn't send the answer. Please try again."), findsOneWidget);
     });
   });
 

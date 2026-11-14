@@ -58,8 +58,8 @@ class SessionRow extends StatelessWidget {
       session.project,
       session.state.label(l10n),
       ?activity,
-      if (running > 0) l10n.runningSubagents(running),
-      if (session.control == SessionControl.viewOnly) l10n.viewOnly,
+      if (running > 0) l10n.sessionsRunningSubagents(running),
+      if (session.control == SessionControl.viewOnly) l10n.appViewOnly,
       time,
     ].join(', ');
 
@@ -197,10 +197,10 @@ class SessionRow extends StatelessWidget {
                                       Semantics(
                                         button: true,
                                         label: expanded
-                                            ? l10n.subagentsHide(
+                                            ? l10n.sessionsSubagentsHide(
                                                 session.subagents.length,
                                               )
-                                            : l10n.subagentsShow(
+                                            : l10n.sessionsSubagentsShow(
                                                 session.subagents.length,
                                               ),
                                         excludeSemantics: true,

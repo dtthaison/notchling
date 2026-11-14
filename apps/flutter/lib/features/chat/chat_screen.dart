@@ -8,6 +8,8 @@ import '../../app/theme/tokens.dart';
 import '../../app/widgets/common.dart';
 import '../../core/protocol/models.dart';
 import '../../l10n/app_localizations.dart';
+import '../../core/net/bridge_client.dart';
+import '../connection/bridge_errors.dart';
 import '../sessions/sessions_notifier.dart';
 import '../../app/shell.dart' show KeyboardLift, KeyboardLiftController;
 import '../../app/alerts.dart';
@@ -207,7 +209,7 @@ class _SessionChatState extends ConsumerState<_SessionChat> {
                             (SessionsState s) => s.byId(id)?.pending,
                           ),
                         );
-                        final String? answerError = ref.watch(
+                        final BridgeException? answerError = ref.watch(
                           chatProvider(id).select((ChatState c) => c.answerError),
                         );
                         if (pending == null) {
@@ -218,7 +220,7 @@ class _SessionChatState extends ConsumerState<_SessionChat> {
                           rise: 16,
                           child: PendingCard(
                             prompt: pending,
-                            error: answerError,
+                            error: answerError == null ? null : bridgeErrorLine(l10n, answerError),
                             onAllow: ({required bool allow}) => unawaited(
                               ref.read(chatProvider(id).notifier).allow(pending, allow: allow),
                             ),
@@ -324,7 +326,7 @@ class _SessionChatState extends ConsumerState<_SessionChat> {
     }
     if (chat.phase == LoadPhase.error && chat.messages.isEmpty) {
       return ErrorState(
-        message: l10n.loadFailed,
+        message: l10n.appLoadFailed,
         onRetry: () => unawaited(
           ref.read(chatProvider(widget.sessionId).notifier).reload(),
         ),

@@ -2,10 +2,60 @@
 use crate::format::{Body, Table};
 use crate::Text;
 
+pub mod consent {
+    use crate::Text;
+
+    pub const ALLOW: Text = Text(0);
+
+    pub fn allow() -> &'static str {
+        ALLOW.get()
+    }
+
+    pub const DENY: Text = Text(1);
+
+    pub fn deny() -> &'static str {
+        DENY.get()
+    }
+
+    pub const PAIR: Text = Text(2);
+
+    pub fn pair() -> &'static str {
+        PAIR.get()
+    }
+
+    pub const STOP_AND_TAKE_OVER: Text = Text(3);
+
+    pub fn stop_and_take_over() -> &'static str {
+        STOP_AND_TAKE_OVER.get()
+    }
+
+    pub const STOP_ANYWAY: Text = Text(4);
+
+    pub fn stop_anyway() -> &'static str {
+        STOP_ANYWAY.get()
+    }
+}
+
+pub mod item {
+    use crate::Text;
+
+    pub const EXPIRED: Text = Text(5);
+
+    pub fn expired() -> &'static str {
+        EXPIRED.get()
+    }
+
+    pub const WITHDRAWN: Text = Text(6);
+
+    pub fn withdrawn() -> &'static str {
+        WITHDRAWN.get()
+    }
+}
+
 pub mod language {
     use crate::Text;
 
-    pub const NAME: Text = Text(0);
+    pub const NAME: Text = Text(7);
 
     pub fn name() -> &'static str {
         NAME.get()
@@ -15,21 +65,35 @@ pub mod language {
 pub mod units {
     use crate::Text;
 
-    pub const LIST_SEPARATOR: Text = Text(1);
+    pub const LIST_SEPARATOR: Text = Text(8);
 
     pub fn list_separator() -> &'static str {
         LIST_SEPARATOR.get()
     }
 }
 
-pub(crate) const COUNT: usize = 2;
+pub(crate) const COUNT: usize = 9;
 
 pub(crate) static KEYS: [(&str, Text); COUNT] = [
-    ("language-name", Text(0)),
-    ("units-list-separator", Text(1)),
+    ("consent-allow", Text(0)),
+    ("consent-deny", Text(1)),
+    ("consent-pair", Text(2)),
+    ("consent-stop-and-take-over", Text(3)),
+    ("consent-stop-anyway", Text(4)),
+    ("item-expired", Text(5)),
+    ("item-withdrawn", Text(6)),
+    ("language-name", Text(7)),
+    ("units-list-separator", Text(8)),
 ];
 
 pub(crate) static EN: [Body; COUNT] = [
+    Body::Plain("Allow"),
+    Body::Plain("Deny"),
+    Body::Plain("Pair"),
+    Body::Plain("Stop and take over"),
+    Body::Plain("Stop anyway"),
+    Body::Plain("Expired"),
+    Body::Plain("Withdrawn"),
     Body::Plain("English"),
     Body::Plain(", "),
 ];

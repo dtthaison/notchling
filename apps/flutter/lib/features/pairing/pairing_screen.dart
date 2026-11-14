@@ -100,20 +100,20 @@ class _PairingScreenState extends ConsumerState<PairingScreen> {
     return Scaffold(
       appBar: AppBar(
         backgroundColor: Kit.of(context).sidebar,
-        title: Text(l10n.pairTitle, style: Kit.of(context).titleMd),
-        leading: widget.canCancel ? IconButton(onPressed: () => Navigator.of(context).pop(), icon: const Icon(Icons.close), tooltip: l10n.close) : null,
+        title: Text(l10n.pairingTitle, style: Kit.of(context).titleMd),
+        leading: widget.canCancel ? IconButton(onPressed: () => Navigator.of(context).pop(), icon: const Icon(Icons.close), tooltip: l10n.appClose) : null,
         automaticallyImplyLeading: false,
       ),
       body: SafeArea(
         child: ListView(
           padding: const EdgeInsets.all(Space.lg),
           children: <Widget>[
-            Text(l10n.pairIntro, style: Kit.of(context).bodyMd.copyWith(color: Kit.of(context).textMuted)),
+            Text(l10n.pairingIntro, style: Kit.of(context).bodyMd.copyWith(color: Kit.of(context).textMuted)),
             const SizedBox(height: Space.lg),
             Row(children: <Widget>[
-              Expanded(child: _ModeButton(label: l10n.pairScan, icon: Icons.qr_code_scanner, selected: _scanning, onTap: () => setState(() => _scanning = true))),
+              Expanded(child: _ModeButton(label: l10n.pairingScan, icon: Icons.qr_code_scanner, selected: _scanning, onTap: () => setState(() => _scanning = true))),
               const SizedBox(width: Space.sm),
-              Expanded(child: _ModeButton(label: l10n.pairManual, icon: Icons.keyboard, selected: !_scanning, onTap: () => setState(() => _scanning = false))),
+              Expanded(child: _ModeButton(label: l10n.pairingManual, icon: Icons.keyboard, selected: !_scanning, onTap: () => setState(() => _scanning = false))),
             ]),
             const SizedBox(height: Space.lg),
             if (_scanning)
@@ -125,7 +125,7 @@ class _PairingScreenState extends ConsumerState<PairingScreen> {
                     onDetect: _onScan,
                     errorBuilder: (BuildContext context, MobileScannerException error) => StateMessage(
                       icon: Icons.no_photography,
-                      title: l10n.pairCameraDenied,
+                      title: l10n.pairingCameraDenied,
                       isError: true,
                     ),
                   ),
@@ -138,17 +138,17 @@ class _PairingScreenState extends ConsumerState<PairingScreen> {
               Row(children: <Widget>[
                 const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)),
                 const SizedBox(width: Space.md),
-                Expanded(child: Text(l10n.pairWaiting, style: Kit.of(context).bodyMd)),
+                Expanded(child: Text(l10n.pairingWaiting, style: Kit.of(context).bodyMd)),
               ])
             else if (ui.failure != null)
               Semantics(
                 liveRegion: true,
                 child: Text(
                   switch (ui.failure!) {
-                    PairingFailure.invalid => l10n.pairInvalid,
-                    PairingFailure.fingerprintMismatch => l10n.pairFingerprintMismatch,
-                    PairingFailure.denied => l10n.pairDenied,
-                    PairingFailure.unreachable => l10n.pairUnreachable,
+                    PairingFailure.invalid => l10n.pairingInvalid,
+                    PairingFailure.fingerprintMismatch => l10n.pairingFingerprintMismatch,
+                    PairingFailure.denied => l10n.pairingDenied,
+                    PairingFailure.unreachable => l10n.pairingUnreachable,
                   },
                   style: Kit.of(context).bodyMd.copyWith(color: Kit.of(context).danger),
                 ),
@@ -160,17 +160,17 @@ class _PairingScreenState extends ConsumerState<PairingScreen> {
   }
 
   List<Widget> _manualFields(AppL10n l10n, bool waiting) => <Widget>[
-        _Field(controller: _json, label: l10n.pairPasteJson, lines: 3, mono: true, enabled: !waiting),
+        _Field(controller: _json, label: l10n.pairingPasteJson, lines: 3, mono: true, enabled: !waiting),
         const SizedBox(height: Space.md),
-        _Field(controller: _host, label: l10n.pairHost, mono: true, enabled: !waiting, keyboard: TextInputType.url),
+        _Field(controller: _host, label: l10n.pairingHost, mono: true, enabled: !waiting, keyboard: TextInputType.url),
         const SizedBox(height: Space.md),
-        _Field(controller: _port, label: l10n.pairPort, mono: true, enabled: !waiting, keyboard: TextInputType.number),
+        _Field(controller: _port, label: l10n.pairingPort, mono: true, enabled: !waiting, keyboard: TextInputType.number),
         const SizedBox(height: Space.md),
-        _Field(controller: _fingerprint, label: l10n.pairFingerprint, mono: true, enabled: !waiting, lines: 2),
+        _Field(controller: _fingerprint, label: l10n.pairingFingerprint, mono: true, enabled: !waiting, lines: 2),
         const SizedBox(height: Space.md),
-        _Field(controller: _code, label: l10n.pairCode, mono: true, enabled: !waiting, caps: true),
+        _Field(controller: _code, label: l10n.pairingCode, mono: true, enabled: !waiting, caps: true),
         const SizedBox(height: Space.lg),
-        SizedBox(width: double.infinity, child: PrimaryButton(label: l10n.pairConnect, onPressed: waiting ? null : () => unawaited(_submitManual()))),
+        SizedBox(width: double.infinity, child: PrimaryButton(label: l10n.consentPair, onPressed: waiting ? null : () => unawaited(_submitManual()))),
       ];
 }
 

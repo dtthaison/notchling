@@ -35,7 +35,7 @@ void main() {
       _session('e', SessionState.exited),
     ];
 
-    test('orders groups Cần input, Đang chạy, Xong, Đã thoát and newest first inside a group', () {
+    test('orders groups Needs Input, Working, Done, Ended and newest first inside a group', () {
       final Map<SessionState, List<Session>> groups = groupSessions(sessions);
       expect(groups.keys.toList(), <SessionState>[SessionState.needsInput, SessionState.running, SessionState.done, SessionState.exited]);
       expect(groups[SessionState.running]!.map((Session s) => s.id), <String>['d', 'b']);
@@ -266,7 +266,7 @@ void main() {
       container.read(selectedSessionIdProvider.notifier).select('s1');
       container.read(phoneWantedProvider.notifier).set(true);
       await until(() => container.read(phoneErrorProvider) != null);
-      expect(container.read(phoneErrorProvider), contains('quyền'));
+      expect(container.read(phoneErrorProvider)?.message, contains('quyền'));
     });
   });
 

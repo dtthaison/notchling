@@ -50,7 +50,7 @@ class ComputerSessionsNotifier extends Notifier<SessionsState> {
       state = SessionsState(phase: LoadPhase.ready, sessions: sessions);
     } on BridgeException catch (error) {
       if (!ref.mounted) return;
-      state = SessionsState(phase: LoadPhase.error, sessions: state.sessions, error: error.message);
+      state = SessionsState(phase: LoadPhase.error, sessions: state.sessions, error: error);
     }
   }
 

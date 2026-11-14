@@ -33,6 +33,8 @@ jobs:
           mkdir -p assets/viz/vendor assets/viz/fonts assets/models
           touch assets/models/ggml-small-q5_1.bin
       - run: flutter pub get
+      - run: flutter gen-l10n
+      - run: git diff --exit-code -- lib/l10n
       - run: flutter analyze
 
   phone-test:

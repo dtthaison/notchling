@@ -11,7 +11,9 @@ import '../features/connection/connection.dart';
 import '../features/macs/macs_notifier.dart';
 import '../features/macs/session_ref.dart';
 import '../features/sessions/sessions_notifier.dart';
+import '../l10n/app_localizations.dart';
 import 'alerts.dart';
+import 'l10n_holder.dart';
 import 'message_alerts.dart';
 import 'nav_state.dart';
 import '../features/settings/app_settings.dart';
@@ -51,10 +53,13 @@ class NotificationService {
 
   Future<void> showAlert(AlertEvent event) async {
     if (!_ready) return;
+    final AppL10n l10n = L10nHolder.current;
     final bool needs = event.kind == AlertKind.needsInput;
     final AndroidNotificationDetails android = AndroidNotificationDetails(
       needs ? 'needs_you_v2' : (event.kind == AlertKind.finished ? 'finished_v2' : 'messages_v2'),
-      needs ? 'Session cần bạn' : (event.kind == AlertKind.finished ? 'Session xong' : 'Tin mới từ Claude'),
+      needs
+          ? l10n.notificationsChannelNeedsYou
+          : (event.kind == AlertKind.finished ? l10n.notificationsChannelFinished : l10n.notificationsChannelMessages),
       importance: needs ? Importance.high : Importance.defaultImportance,
       priority: needs ? Priority.high : Priority.defaultPriority,
       sound: event.kind == AlertKind.finished ? null : RawResourceAndroidNotificationSound(needs ? 'needs_you' : 'new_message'),
@@ -74,10 +79,10 @@ class NotificationService {
     );
     await _plugin.show(
       id: 1,
-      title: 'Agent Console',
-      body: 'Có cập nhật mới',
-      notificationDetails: const NotificationDetails(
-        android: AndroidNotificationDetails('messages_v2', 'Tin mới từ Claude', groupKey: _group, setAsGroupSummary: true, onlyAlertOnce: true, playSound: false, importance: Importance.low, priority: Priority.low),
+      title: l10n.appName,
+      body: l10n.notificationsSummaryBody,
+      notificationDetails: NotificationDetails(
+        android: AndroidNotificationDetails('messages_v2', l10n.notificationsChannelMessages, groupKey: _group, setAsGroupSummary: true, onlyAlertOnce: true, playSound: false, importance: Importance.low, priority: Priority.low),
         iOS: DarwinNotificationDetails(threadIdentifier: _group),
       ),
     );
@@ -142,8 +147,8 @@ final Provider<void> attentionWatcherProvider = Provider<void>((Ref ref) {
       sessions: next.sessions,
       stateAlerts: states,
       messages: replies,
-      needsBody: 'Cần bạn trả lời',
-      finishedBody: 'Đã xong',
+      needsBody: L10nHolder.current.notificationsNeedsBody,
+      finishedBody: L10nHolder.current.notificationsFinishedBody,
     );
     if (events.isEmpty) return;
     final AppLifecycleState lifecycle = ref.read(lifecycleProvider);

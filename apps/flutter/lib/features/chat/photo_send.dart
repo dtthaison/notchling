@@ -9,6 +9,7 @@ import '../../app/theme/tokens.dart';
 import '../../app/widgets/common.dart';
 import '../../core/net/bridge_client.dart';
 import '../../l10n/app_localizations.dart';
+import '../connection/bridge_errors.dart';
 import '../connection/connection.dart';
 
 enum PhotoOrigin { camera, gallery }
@@ -45,13 +46,13 @@ Future<void> pickAndSendPhoto(BuildContext context, WidgetRef ref, String sessio
         child: Column(mainAxisSize: MainAxisSize.min, children: <Widget>[
           ListTile(
             leading: Icon(Icons.photo_camera_outlined, color: kit.textMuted),
-            title: Text(l10n.photoCamera, style: kit.body),
+            title: Text(l10n.chatPhotoCamera, style: kit.body),
             minVerticalPadding: Space.md,
             onTap: () => Navigator.of(sheet).pop(PhotoOrigin.camera),
           ),
           ListTile(
             leading: Icon(Icons.photo_library_outlined, color: kit.textMuted),
-            title: Text(l10n.photoGallery, style: kit.body),
+            title: Text(l10n.chatPhotoGallery, style: kit.body),
             minVerticalPadding: Space.md,
             onTap: () => Navigator.of(sheet).pop(PhotoOrigin.gallery),
           ),
@@ -66,7 +67,7 @@ Future<void> pickAndSendPhoto(BuildContext context, WidgetRef ref, String sessio
     bytes = await ref.read(photoPickerProvider).pick(origin);
   } on Exception catch (error) {
     debugPrint('pickAndSendPhoto($sessionId, $origin): $error');
-    messenger.showSnackBar(SnackBar(content: Text(l10n.photoPickFailed)));
+    messenger.showSnackBar(SnackBar(content: Text(l10n.chatPhotoPickFailed)));
     return;
   }
   if (bytes == null || !context.mounted) return;
@@ -77,14 +78,14 @@ Future<void> pickAndSendPhoto(BuildContext context, WidgetRef ref, String sessio
             bytes: bytes!,
             send: (String caption, void Function(double) onProgress) async {
               final BridgeClient? client = ref.read(bridgeClientProvider);
-              if (client == null || !client.isConnected) throw const BridgeException('disconnected', 'Chưa kết nối tới Mac.');
+              if (client == null || !client.isConnected) throw const BridgeException('disconnected', '');
               await client.sessionImage(sessionId, bytes!, caption: caption, onProgress: onProgress);
             },
           ),
         ),
       ) ??
       false;
-  if (sent) messenger.showSnackBar(SnackBar(content: Text(l10n.photoSent)));
+  if (sent) messenger.showSnackBar(SnackBar(content: Text(l10n.chatPhotoSent)));
 }
 
 class PhotoPreview extends StatefulWidget {
@@ -99,7 +100,7 @@ class PhotoPreview extends StatefulWidget {
 class _PhotoPreviewState extends State<PhotoPreview> {
   final TextEditingController _caption = TextEditingController();
   double? _progress;
-  String? _error;
+  BridgeException? _error;
 
   @override
   void dispose() {
@@ -122,7 +123,7 @@ class _PhotoPreviewState extends State<PhotoPreview> {
       if (mounted) {
         setState(() {
           _progress = null;
-          _error = error.message;
+          _error = error;
         });
       }
     }
@@ -136,8 +137,8 @@ class _PhotoPreviewState extends State<PhotoPreview> {
     return Scaffold(
       appBar: AppBar(
         backgroundColor: kit.sidebar,
-        leading: IconButton(tooltip: l10n.close, icon: const Icon(Icons.close), onPressed: sending ? null : () => Navigator.of(context).pop(false)),
-        title: Text(l10n.photoTitle, style: kit.heading),
+        leading: IconButton(tooltip: l10n.appClose, icon: const Icon(Icons.close), onPressed: sending ? null : () => Navigator.of(context).pop(false)),
+        title: Text(l10n.chatPhotoTitle, style: kit.heading),
       ),
       body: SafeArea(
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: <Widget>[
@@ -154,7 +155,7 @@ class _PhotoPreviewState extends State<PhotoPreview> {
               if (_error != null)
                 Padding(
                   padding: const EdgeInsets.only(bottom: Space.sm),
-                  child: Text(_error!, style: kit.meta.copyWith(color: kit.danger)),
+                  child: Text(bridgeErrorLine(l10n, _error!), style: kit.meta.copyWith(color: kit.danger)),
                 ),
               TextField(
                 controller: _caption,
@@ -163,10 +164,10 @@ class _PhotoPreviewState extends State<PhotoPreview> {
                 maxLines: 4,
                 textInputAction: TextInputAction.newline,
                 style: kit.body,
-                decoration: InputDecoration(hintText: l10n.photoCaptionHint),
+                decoration: InputDecoration(hintText: l10n.chatPhotoCaptionHint),
               ),
               const SizedBox(height: Space.md),
-              PrimaryButton(label: sending ? l10n.sending : l10n.send, icon: sending ? null : Icons.arrow_upward, onPressed: sending ? null : () => unawaited(_send())),
+              PrimaryButton(label: sending ? l10n.chatSendBusy : l10n.chatSend, icon: sending ? null : Icons.arrow_upward, onPressed: sending ? null : () => unawaited(_send())),
             ]),
           ),
         ]),

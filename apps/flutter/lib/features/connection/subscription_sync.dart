@@ -15,13 +15,13 @@ class PhoneWantedNotifier extends Notifier<bool> {
   void set(bool wanted) => state = wanted;
 }
 
-final NotifierProvider<PhoneErrorNotifier, String?> phoneErrorProvider = NotifierProvider<PhoneErrorNotifier, String?>(PhoneErrorNotifier.new);
+final NotifierProvider<PhoneErrorNotifier, BridgeException?> phoneErrorProvider = NotifierProvider<PhoneErrorNotifier, BridgeException?>(PhoneErrorNotifier.new);
 
-class PhoneErrorNotifier extends Notifier<String?> {
+class PhoneErrorNotifier extends Notifier<BridgeException?> {
   @override
-  String? build() => null;
+  BridgeException? build() => null;
 
-  void set(String? message) => state = message;
+  void set(BridgeException? error) => state = error;
 }
 
 final Provider<void> subscriptionSyncProvider = Provider<void>((Ref ref) {
@@ -43,6 +43,6 @@ Future<void> _apply(Ref ref, BridgeClient client, SubscriptionSpec spec) async {
     await client.subscribe(spec);
     ref.read(phoneErrorProvider.notifier).set(null);
   } on BridgeException catch (error) {
-    if (spec.wantsPhone) ref.read(phoneErrorProvider.notifier).set(error.message);
+    if (spec.wantsPhone) ref.read(phoneErrorProvider.notifier).set(error);
   }
 }

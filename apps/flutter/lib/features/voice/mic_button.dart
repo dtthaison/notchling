@@ -19,7 +19,7 @@ class MicButton extends StatelessWidget {
     final VoiceState current = state;
     final bool recording = current is VoiceRecording;
     final bool transcribing = current is VoiceTranscribing;
-    final String label = recording ? l10n.micStop : (transcribing ? l10n.micCancel : l10n.micStart);
+    final String label = recording ? l10n.voiceMicStop : (transcribing ? l10n.voiceMicCancel : l10n.voiceMicStart);
     final bool still = reduceMotion(context);
     final double level = recording ? current.level : 0;
 
@@ -60,7 +60,7 @@ class MicButton extends StatelessWidget {
               if (transcribing)
                 Padding(
                   padding: const EdgeInsets.only(right: Space.sm),
-                  child: Text(l10n.transcribing, style: Kit.of(context).bodySm.copyWith(color: Kit.of(context).textMuted)),
+                  child: Text(l10n.voiceTranscribing, style: Kit.of(context).bodySm.copyWith(color: Kit.of(context).textMuted)),
                 ),
             ]),
           ),

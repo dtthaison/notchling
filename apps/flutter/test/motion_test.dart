@@ -59,11 +59,11 @@ void main() {
       await tester.pumpWidget(host(const StatePill(state: SessionState.running)));
       await tester.pumpWidget(host(const StatePill(state: SessionState.needsInput)));
       await tester.pump(const Duration(milliseconds: 80));
-      expect(find.text('Đang chạy'), findsOneWidget);
-      expect(find.text('Cần bạn'), findsOneWidget);
+      expect(find.text('Working'), findsOneWidget);
+      expect(find.text('Needs Input'), findsOneWidget);
       await tester.pumpAndSettle();
-      expect(find.text('Đang chạy'), findsNothing);
-      expect(find.text('Cần bạn'), findsOneWidget);
+      expect(find.text('Working'), findsNothing);
+      expect(find.text('Needs Input'), findsOneWidget);
     });
   });
 
@@ -90,16 +90,16 @@ void main() {
   });
 
   group('copy button', () {
-    testWidgets('shows a check and Đã chép after a copy, then goes back', (WidgetTester tester) async {
+    testWidgets('shows a check and Copied after a copy, then goes back', (WidgetTester tester) async {
       await tester.pumpWidget(host(const CodeBlock(code: 'print(1);', language: 'dart')));
-      expect(find.text('Chép'), findsOneWidget);
-      await tester.tap(find.text('Chép'));
+      expect(find.text('Copy'), findsOneWidget);
+      await tester.tap(find.text('Copy'));
       await tester.pump(const Duration(milliseconds: 200));
-      expect(find.text('Đã chép'), findsOneWidget);
+      expect(find.text('Copied'), findsOneWidget);
       expect(find.byIcon(Icons.check), findsOneWidget);
       await tester.pump(const Duration(milliseconds: 2000));
       await tester.pumpAndSettle();
-      expect(find.text('Chép'), findsOneWidget);
+      expect(find.text('Copy'), findsOneWidget);
     });
   });
 
@@ -108,7 +108,7 @@ void main() {
       final ToolGroupEntry group = groupEntries(previewConversation()).whereType<ToolGroupEntry>().first;
       await tester.pumpWidget(host(ToolGroupView(entry: group)));
       expect(find.text('Glob'), findsNothing);
-      await tester.tap(find.text('4 bước công cụ'));
+      await tester.tap(find.text('4 tool steps'));
       await tester.pump(const Duration(milliseconds: 120));
       expect(find.text('Glob'), findsOneWidget);
       await tester.pumpAndSettle();

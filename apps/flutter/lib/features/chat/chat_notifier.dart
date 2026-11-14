@@ -23,10 +23,9 @@ class SendSending extends SendState {
 }
 
 class SendFailed extends SendState {
-  const SendFailed({required this.text, this.viewOnly = false, this.message});
+  const SendFailed({required this.text, this.viewOnly = false});
   final String text;
   final bool viewOnly;
-  final String? message;
 }
 
 sealed class TakeoverProgress {
@@ -42,8 +41,8 @@ class TakeoverRunning extends TakeoverProgress {
 }
 
 class TakeoverFailed extends TakeoverProgress {
-  const TakeoverFailed(this.message);
-  final String message;
+  const TakeoverFailed(this.error);
+  final BridgeException error;
 }
 
 class PendingSend {
@@ -52,9 +51,9 @@ class PendingSend {
   final String text;
   final DateTime time;
   final bool failed;
-  final String? reason;
+  final BridgeException? reason;
 
-  PendingSend asFailed(String? why) => PendingSend(id: id, text: text, time: time, failed: true, reason: why);
+  PendingSend asFailed(BridgeException? why) => PendingSend(id: id, text: text, time: time, failed: true, reason: why);
 }
 
 class ChatState {
@@ -75,9 +74,9 @@ class ChatState {
   final List<ChatMessage> messages;
   final bool hasMore;
   final bool loadingOlder;
-  final String? error;
+  final BridgeException? error;
   final SendState send;
-  final String? answerError;
+  final BridgeException? answerError;
   final TakeoverProgress takeover;
   final List<PendingSend> pending;
 
@@ -88,9 +87,9 @@ class ChatState {
     List<ChatMessage>? messages,
     bool? hasMore,
     bool? loadingOlder,
-    String? error,
+    BridgeException? error,
     SendState? send,
-    String? answerError,
+    BridgeException? answerError,
     bool clearAnswerError = false,
     TakeoverProgress? takeover,
     List<PendingSend>? pending,
@@ -166,7 +165,7 @@ class ChatNotifier extends Notifier<ChatState> {
         state = state.copyWith(phase: LoadPhase.ready);
         return;
       }
-      state = state.copyWith(phase: LoadPhase.error, error: error.message);
+      state = state.copyWith(phase: LoadPhase.error, error: error);
     }
   }
 
@@ -279,12 +278,12 @@ class ChatNotifier extends Notifier<ChatState> {
       await client.sessionMessage(sessionId, entry.text);
     } on BridgeException catch (error) {
       if (!ref.mounted) return;
-      if (error.isViewOnly) state = state.copyWith(send: SendFailed(text: entry.text, viewOnly: true, message: error.message));
-      _markFailed(entry.id, error.message);
+      if (error.isViewOnly) state = state.copyWith(send: SendFailed(text: entry.text, viewOnly: true));
+      _markFailed(entry.id, error);
     }
   }
 
-  void _markFailed(String id, String? reason) {
+  void _markFailed(String id, BridgeException? reason) {
     if (!ref.mounted) return;
     state = state.copyWith(pending: <PendingSend>[for (final PendingSend p in state.pending) p.id == id ? p.asFailed(reason) : p]);
   }
@@ -303,7 +302,7 @@ class ChatNotifier extends Notifier<ChatState> {
     if (state.takeover is TakeoverRunning) return null;
     final BridgeClient? client = clientForSession(ref, sessionId);
     if (client == null) {
-      state = state.copyWith(takeover: const TakeoverFailed('Chưa kết nối tới Mac.'));
+      state = state.copyWith(takeover: const TakeoverFailed(BridgeException('disconnected', '')));
       return null;
     }
     state = state.copyWith(takeover: const TakeoverRunning());
@@ -314,7 +313,7 @@ class ChatNotifier extends Notifier<ChatState> {
       return newId;
     } on BridgeException catch (error) {
       if (!ref.mounted) return null;
-      state = state.copyWith(takeover: TakeoverFailed(error.message));
+      state = state.copyWith(takeover: TakeoverFailed(error));
       return null;
     }
   }
@@ -333,14 +332,14 @@ class ChatNotifier extends Notifier<ChatState> {
     state = state.copyWith(clearAnswerError: true);
     final BridgeClient? client = clientForSession(ref, sessionId);
     if (client == null) {
-      state = state.copyWith(answerError: 'Chưa kết nối tới Mac.');
+      state = state.copyWith(answerError: const BridgeException('disconnected', ''));
       return;
     }
     try {
       await action(client);
     } on BridgeException catch (error) {
       if (!ref.mounted) return;
-      state = state.copyWith(answerError: error.message);
+      state = state.copyWith(answerError: error);
     }
   }
 }

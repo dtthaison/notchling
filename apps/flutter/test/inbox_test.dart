@@ -291,7 +291,7 @@ void main() {
       await tester.tap(find.text('Deny'));
       await tester.runAsync(() => until(() => container.read(inboxProvider).errors.containsKey('a')));
       await tester.pump();
-      expect(find.text(off), findsOneWidget);
+      expect(find.text("The Mac didn't accept that request. $off"), findsOneWidget);
       expect(container.read(inboxProvider).openCount, 1);
       expect(find.text('Deny'), findsOneWidget);
     });

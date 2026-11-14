@@ -221,7 +221,7 @@ void main() {
     testWidgets('idle: tapping the mic calls back and the label says how to start', (WidgetTester tester) async {
       int taps = 0;
       await pump(tester, const VoiceIdle(), onMic: () => taps++);
-      expect(find.byTooltip('Nói để nhập'), findsOneWidget);
+      expect(find.byTooltip('Dictate'), findsOneWidget);
       await tester.tap(find.byType(MicButton));
       expect(taps, 1);
     });
@@ -230,16 +230,16 @@ void main() {
       int taps = 0;
       await pump(tester, const VoiceRecording(elapsed: Duration(seconds: 12), level: 0.5), onMic: () => taps++);
       expect(find.text('0:12'), findsOneWidget);
-      expect(find.byTooltip('Dừng và nhận dạng'), findsOneWidget);
+      expect(find.byTooltip('Stop and transcribe'), findsOneWidget);
       await tester.tap(find.byType(MicButton));
       expect(taps, 1);
     });
 
-    testWidgets('transcribing: says Đang nhận dạng… and a tap cancels', (WidgetTester tester) async {
+    testWidgets('transcribing: says Transcribing… and a tap cancels', (WidgetTester tester) async {
       int taps = 0;
       await pump(tester, const VoiceTranscribing(), onMic: () => taps++);
-      expect(find.text('Đang nhận dạng…'), findsOneWidget);
-      expect(find.byTooltip('Huỷ nhận dạng'), findsOneWidget);
+      expect(find.text('Transcribing…'), findsOneWidget);
+      expect(find.byTooltip('Cancel transcription'), findsOneWidget);
       await tester.tap(find.byType(MicButton));
       expect(taps, 1);
     });
@@ -259,22 +259,22 @@ void main() {
       expect(await haloWidth(0.1), await haloWidth(0.9));
     });
 
-    testWidgets('permission denied: the message offers Mở cài đặt', (WidgetTester tester) async {
+    testWidgets('permission denied: the message offers Open settings', (WidgetTester tester) async {
       int opened = 0;
       await pump(tester, const VoiceFailed(VoiceProblem.permissionDenied), onMic: () {}, onSettings: () => opened++);
-      expect(find.text('Chưa cho phép dùng micro.'), findsOneWidget);
-      await tester.tap(find.text('Mở cài đặt'));
+      expect(find.text('Microphone access is off.'), findsOneWidget);
+      await tester.tap(find.text('Open settings'));
       expect(opened, 1);
     });
 
     testWidgets('no speech, engine error and the 60 s hint each show their own text', (WidgetTester tester) async {
       await pump(tester, const VoiceFailed(VoiceProblem.noSpeech));
-      expect(find.textContaining('Không nghe thấy'), findsOneWidget);
+      expect(find.textContaining('No speech heard'), findsOneWidget);
       await pump(tester, const VoiceFailed(VoiceProblem.engineError));
-      expect(find.textContaining('Nhận dạng lỗi'), findsOneWidget);
+      expect(find.textContaining('Transcription failed'), findsOneWidget);
       await pump(tester, const VoiceIdle(stoppedAtLimit: true));
-      expect(find.text('Đã dừng ở 60 giây.'), findsOneWidget);
-      expect(find.text('Mở cài đặt'), findsNothing);
+      expect(find.text('Stopped at 60 seconds.'), findsOneWidget);
+      expect(find.text('Open settings'), findsNothing);
     });
   });
 }

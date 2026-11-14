@@ -108,9 +108,9 @@ class _SessionsScreenState extends ConsumerState<SessionsScreen> {
           ..hideCurrentSnackBar()
           ..showSnackBar(
             SnackBar(
-              content: Text(l10n.archivedToast(session.name)),
+              content: Text(l10n.sessionsArchivedToast(session.name)),
               action: SnackBarAction(
-                label: l10n.undo,
+                label: l10n.sessionsUndo,
                 onPressed: () => ref
                     .read(archivedSessionsProvider.notifier)
                     .restore(key),
@@ -199,7 +199,7 @@ class SessionsView extends StatelessWidget {
                   onChanged: onQuery,
                   style: kit.body,
                   decoration: InputDecoration(
-                    hintText: l10n.searchHint,
+                    hintText: l10n.sessionsSearchHint,
                     prefixIcon: Icon(
                       Icons.search,
                       size: 20,
@@ -212,12 +212,12 @@ class SessionsView extends StatelessWidget {
               const SizedBox(width: Space.sm),
               Semantics(
                 button: true,
-                label: l10n.newSession,
+                label: l10n.sessionsNewSession,
                 excludeSemantics: true,
                 child: IconButton(
                   onPressed: onNewSession,
                   icon: Icon(Icons.add, color: kit.onAccent),
-                  tooltip: l10n.newSession,
+                  tooltip: l10n.sessionsNewSession,
                   constraints: const BoxConstraints(
                     minWidth: Metric.minTarget,
                     minHeight: Metric.minTarget,
@@ -241,7 +241,7 @@ class SessionsView extends StatelessWidget {
               padding: const EdgeInsets.symmetric(horizontal: Space.lg),
               children: <Widget>[
                 ProjectChip(
-                  label: l10n.allProjects,
+                  label: l10n.sessionsAllProjects,
                   selected: project == null,
                   onTap: () => onProject(null),
                 ),
@@ -273,7 +273,7 @@ class SessionsView extends StatelessWidget {
       content = <Widget>[
         fill(
           ErrorState(
-            message: l10n.loadFailed,
+            message: l10n.appLoadFailed,
             onRetry: () => unawaited(onRefresh()),
           ),
         ),
@@ -286,7 +286,7 @@ class SessionsView extends StatelessWidget {
             title: l10n.sessionsEmptyTitle,
             body: l10n.sessionsEmptyBody,
             action: SecondaryButton(
-              label: l10n.newSession,
+              label: l10n.sessionsNewSession,
               icon: Icons.add,
               onPressed: onNewSession,
             ),
@@ -299,7 +299,7 @@ class SessionsView extends StatelessWidget {
           StateMessage(
             pet: 'look-2',
             title: query.isNotEmpty
-                ? l10n.searchNoMatch(query)
+                ? l10n.sessionsSearchNoMatch(query)
                 : l10n.sessionsFilteredEmpty,
           ),
         ),
@@ -318,7 +318,7 @@ class SessionsView extends StatelessWidget {
               final Map<SessionState, List<Session>> own when own.isEmpty => <Widget>[
                   Padding(
                     padding: const EdgeInsets.fromLTRB(Space.lg + Space.sm, Space.sm, Space.lg, 0),
-                    child: Text(l10n.computerNoSessions, style: kit.meta.copyWith(color: kit.textMuted)),
+                    child: Text(l10n.sessionsComputerNoSessions, style: kit.meta.copyWith(color: kit.textMuted)),
                   ),
                 ],
               final Map<SessionState, List<Session>> own => rows(own),
@@ -409,7 +409,7 @@ class SessionsView extends StatelessWidget {
             if (canTakeOver(session))
               ListTile(
                 leading: Icon(Icons.login, color: kit.textMuted),
-                title: Text(l10n.takeover, style: kit.body),
+                title: Text(l10n.appTakeover, style: kit.body),
                 minVerticalPadding: Space.md,
                 onTap: () {
                   Navigator.of(sheet).pop();
@@ -418,7 +418,7 @@ class SessionsView extends StatelessWidget {
               ),
             ListTile(
               leading: Icon(Icons.archive_outlined, color: kit.textMuted),
-              title: Text(l10n.archive, style: kit.body),
+              title: Text(l10n.sessionsArchive, style: kit.body),
               minVerticalPadding: Space.md,
               onTap: () {
                 Navigator.of(sheet).pop();

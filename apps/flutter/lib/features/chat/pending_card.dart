@@ -61,13 +61,13 @@ class _PendingCardState extends State<PendingCard> {
             runSpacing: Space.sm,
             children: <Widget>[
               PrimaryButton(
-                label: l10n.allow,
-                semanticLabel: '${l10n.allow} ${prompt.toolName}',
+                label: l10n.consentAllow,
+                semanticLabel: '${l10n.consentAllow} ${prompt.toolName}',
                 onPressed: () => widget.onAllow(allow: true),
               ),
               SecondaryButton(
-                label: l10n.deny,
-                semanticLabel: '${l10n.deny} ${prompt.toolName}',
+                label: l10n.consentDeny,
+                semanticLabel: '${l10n.consentDeny} ${prompt.toolName}',
                 onPressed: () => widget.onAllow(allow: false),
               ),
             ],
@@ -75,7 +75,7 @@ class _PendingCardState extends State<PendingCard> {
         );
     } else if (prompt.hasMultiSelect || prompt.questions.isEmpty) {
       body
-        ..add(Text(l10n.multiSelectOnMac, style: Kit.of(context).bodyMd))
+        ..add(Text(l10n.chatMultiSelectOnMac, style: Kit.of(context).bodyMd))
         ..add(const SizedBox(height: Space.sm))
         ..add(Text(prompt.summary, style: Kit.of(context).bodySm));
     } else {
@@ -109,8 +109,8 @@ class _PendingCardState extends State<PendingCard> {
     return Semantics(
       container: true,
       label: prompt.isPermission
-          ? l10n.pendingPermission(prompt.toolName)
-          : l10n.pendingQuestion,
+          ? l10n.chatPendingPermission(prompt.toolName)
+          : l10n.chatPendingQuestion,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(Space.md, Space.sm, Space.md, 0),
         child: Surface(
@@ -132,8 +132,8 @@ class _PendingCardState extends State<PendingCard> {
                 Expanded(
                   child: Text(
                     prompt.isPermission
-                        ? l10n.pendingPermission(prompt.toolName)
-                        : l10n.pendingQuestion,
+                        ? l10n.chatPendingPermission(prompt.toolName)
+                        : l10n.chatPendingQuestion,
                     style: Kit.of(
                       context,
                     ).label.copyWith(color: Kit.of(context).accentText),
@@ -146,7 +146,7 @@ class _PendingCardState extends State<PendingCard> {
             if (widget.error != null) ...<Widget>[
               const SizedBox(height: Space.sm),
               Text(
-                l10n.answerFailed,
+                l10n.chatAnswerFailed,
                 style: Kit.of(
                   context,
                 ).bodySm.copyWith(color: Kit.of(context).danger),

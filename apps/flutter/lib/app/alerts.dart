@@ -10,6 +10,7 @@ import '../core/protocol/models.dart';
 import '../features/macs/macs_notifier.dart';
 import '../features/macs/session_ref.dart';
 import '../features/sessions/sessions_notifier.dart';
+import 'l10n_holder.dart';
 import 'providers.dart';
 
 enum AlertKind { needsInput, finished, message }
@@ -144,7 +145,7 @@ final Provider<void> keepAliveControllerProvider = Provider<void>((Ref ref) {
   final int count = ref.watch(sessionsProvider.select((SessionsState s) => s.sessions.where((Session x) => x.state == SessionState.running || x.state == SessionState.needsInput).length));
   final BackgroundKeeper service = ref.read(keepAliveProvider);
   if (on && hasMac) {
-    unawaited(service.start(count == 0 ? 'Đang theo dõi' : 'Đang theo dõi · $count session'));
+    unawaited(service.start(count == 0 ? L10nHolder.current.notificationsWatching : L10nHolder.current.notificationsWatchingSessions(count)));
   } else {
     unawaited(service.stop());
   }

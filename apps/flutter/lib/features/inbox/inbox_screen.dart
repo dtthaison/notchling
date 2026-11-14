@@ -8,6 +8,8 @@ import '../../app/widgets/common.dart';
 import '../../app/widgets/kit.dart';
 import '../../core/protocol/models.dart';
 import '../../l10n/app_localizations.dart';
+import '../../core/net/bridge_client.dart';
+import '../connection/bridge_errors.dart';
 import 'inbox_notifier.dart';
 
 class InboxScreen extends ConsumerWidget {
@@ -71,7 +73,7 @@ class InboxCard extends ConsumerWidget {
 
   final InboxItem item;
   final bool busy;
-  final String? error;
+  final BridgeException? error;
   final bool declined;
   final bool lead;
 
@@ -81,9 +83,9 @@ class InboxCard extends ConsumerWidget {
         final String action = item.answerLabel() ?? item.answer ?? '';
         return item.answeredBy == 'phone' ? l10n.inboxAnsweredHere(action) : l10n.inboxAnsweredOnMac(action);
       case 'expired':
-        return l10n.inboxExpired;
+        return l10n.itemExpired;
       default:
-        return l10n.inboxWithdrawn;
+        return l10n.itemWithdrawn;
     }
   }
 
@@ -124,7 +126,7 @@ class InboxCard extends ConsumerWidget {
             ],
             if (error != null) ...<Widget>[
               const SizedBox(height: Space.sm),
-              Text(error!, style: kit.bodySm.copyWith(color: kit.danger)),
+              Text(bridgeErrorLine(l10n, error!), style: kit.bodySm.copyWith(color: kit.danger)),
             ],
           ],
         ),

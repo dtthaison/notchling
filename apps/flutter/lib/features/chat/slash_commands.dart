@@ -3,7 +3,9 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../app/l10n_holder.dart';
 import '../../core/net/bridge_client.dart';
+import '../../l10n/app_localizations.dart';
 import '../connection/connection.dart';
 
 class SlashCommand {
@@ -13,24 +15,26 @@ class SlashCommand {
   final String? argumentHint;
 }
 
-const List<SlashCommand> builtInSlashCommands = <SlashCommand>[
-  SlashCommand(name: 'clear', description: 'Clear the conversation and start fresh'),
-  SlashCommand(name: 'compact', description: 'Summarise the conversation to free up context'),
-  SlashCommand(name: 'context', description: 'Show how much context is used'),
-  SlashCommand(name: 'cost', description: 'Show the cost of this session'),
-  SlashCommand(name: 'usage', description: 'Show plan usage limits'),
-  SlashCommand(name: 'model', description: 'Change the model'),
-  SlashCommand(name: 'effort', description: 'Change the effort level'),
-  SlashCommand(name: 'review', description: 'Review a pull request'),
-  SlashCommand(name: 'security-review', description: 'Security review of pending changes'),
-  SlashCommand(name: 'init', description: 'Write a CLAUDE.md for this project'),
-  SlashCommand(name: 'memory', description: 'Edit memory files'),
-  SlashCommand(name: 'rewind', description: 'Go back to an earlier point'),
-  SlashCommand(name: 'rename', description: 'Rename this session'),
-  SlashCommand(name: 'status', description: 'Show version, model and account'),
-  SlashCommand(name: 'todos', description: 'Show the current task list'),
-  SlashCommand(name: 'help', description: 'Show help'),
+List<SlashCommand> builtInSlashCommandsFor(AppL10n l10n) => <SlashCommand>[
+  SlashCommand(name: 'clear', description: l10n.chatSlashClear),
+  SlashCommand(name: 'compact', description: l10n.chatSlashCompact),
+  SlashCommand(name: 'context', description: l10n.chatSlashContext),
+  SlashCommand(name: 'cost', description: l10n.chatSlashCost),
+  SlashCommand(name: 'usage', description: l10n.chatSlashUsage),
+  SlashCommand(name: 'model', description: l10n.chatSlashModel),
+  SlashCommand(name: 'effort', description: l10n.chatSlashEffort),
+  SlashCommand(name: 'review', description: l10n.chatSlashReview),
+  SlashCommand(name: 'security-review', description: l10n.chatSlashSecurityReview),
+  SlashCommand(name: 'init', description: l10n.chatSlashInit),
+  SlashCommand(name: 'memory', description: l10n.chatSlashMemory),
+  SlashCommand(name: 'rewind', description: l10n.chatSlashRewind),
+  SlashCommand(name: 'rename', description: l10n.chatSlashRename),
+  SlashCommand(name: 'status', description: l10n.chatSlashStatus),
+  SlashCommand(name: 'todos', description: l10n.chatSlashTodos),
+  SlashCommand(name: 'help', description: l10n.chatSlashHelp),
 ];
+
+final List<SlashCommand> builtInSlashCommands = builtInSlashCommandsFor(L10nHolder.current);
 
 final slashCommandsProvider = NotifierProvider.family<SlashCommandsNotifier, List<SlashCommand>, String>(SlashCommandsNotifier.new);
 

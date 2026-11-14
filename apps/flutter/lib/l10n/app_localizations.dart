@@ -6,7 +6,6 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:intl/intl.dart' as intl;
 
 import 'app_localizations_en.dart';
-import 'app_localizations_vi.dart';
 
 // ignore_for_file: type=lint
 
@@ -92,1204 +91,1471 @@ abstract class AppL10n {
       ];
 
   /// A list of this localizations delegate's supported locales.
-  static const List<Locale> supportedLocales = <Locale>[
-    Locale('en'),
-    Locale('vi'),
-  ];
+  static const List<Locale> supportedLocales = <Locale>[Locale('en')];
 
-  /// No description provided for @appName.
+  /// Shown in the Chat screen and the Paired Macs screen and the Sessions tab.
   ///
-  /// In vi, this message translates to:
+  /// In en, this message translates to:
+  /// **'Cancel'**
+  String get appCancel;
+
+  /// Shown in the Chat screen and pairing with a Mac.
+  ///
+  /// In en, this message translates to:
+  /// **'Close'**
+  String get appClose;
+
+  /// Shown in the app shell and the Paired Macs screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Connected'**
+  String get appConnected;
+
+  /// Shown in the app shell. $route is Home Wi-Fi or Internet.
+  ///
+  /// In en, this message translates to:
+  /// **'Connected · {route}'**
+  String appConnectedVia(String route);
+
+  /// Shown in the app shell and the Paired Macs screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Connecting'**
+  String get appConnecting;
+
+  /// Shown in the app shell. $seconds is the wait before the next try, in seconds.
+  ///
+  /// In en, this message translates to:
+  /// **'Connection lost, retrying in {seconds}s'**
+  String appConnectionLostRetry(int seconds);
+
+  /// Shown in the app shell.
+  ///
+  /// In en, this message translates to:
+  /// **'The Mac revoked this device. Pair again.'**
+  String get appConnectionRevoked;
+
+  /// Shown in the app shell. $count is how many requests are open.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} open'**
+  String appInboxOpenCount(int count);
+
+  /// Shown in the app shell.
+  ///
+  /// In en, this message translates to:
+  /// **'To get notified when a session needs input or finishes, the app has to run in the background. Android shows a small \"Agent Console is watching\" notification. You can turn it off under Paired Macs.'**
+  String get appKeepAliveBody;
+
+  /// Shown in the app shell.
+  ///
+  /// In en, this message translates to:
+  /// **'Turn on'**
+  String get appKeepAliveEnable;
+
+  /// Shown in the app shell.
+  ///
+  /// In en, this message translates to:
+  /// **'Keep the connection in the background?'**
+  String get appKeepAliveTitle;
+
+  /// Shown in the Chat screen and the Sessions tab.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t load data. Please try again.'**
+  String get appLoadFailed;
+
+  /// Shown in the app shell.
+  ///
+  /// In en, this message translates to:
   /// **'Agent Console'**
   String get appName;
 
-  /// No description provided for @tabSessions.
+  /// Shown in the app shell.
   ///
-  /// In vi, this message translates to:
-  /// **'Session'**
-  String get tabSessions;
+  /// In en, this message translates to:
+  /// **'Can\'t reach the Mac. Turn on Internet access on the Mac or join the same Wi-Fi.'**
+  String get appNoRouteToMac;
 
-  /// No description provided for @tabChat.
+  /// Shown in the app shell.
   ///
-  /// In vi, this message translates to:
-  /// **'Chat'**
-  String get tabChat;
+  /// In en, this message translates to:
+  /// **'Not now'**
+  String get appNotNow;
 
-  /// No description provided for @tabVisualize.
+  /// Shown in the app shell and the Chat screen and Settings.
   ///
-  /// In vi, this message translates to:
-  /// **'Visualize'**
-  String get tabVisualize;
+  /// In en, this message translates to:
+  /// **'Paired Macs'**
+  String get appOpenMacs;
 
-  /// No description provided for @tabInbox.
+  /// Not shown yet.
   ///
-  /// In vi, this message translates to:
-  /// **'Hộp thư'**
-  String get tabInbox;
+  /// In en, this message translates to:
+  /// **'Pull to refresh'**
+  String get appPullToRefresh;
 
-  /// No description provided for @inboxNeedsYou.
+  /// Shown in the app shell and the Chat screen.
   ///
-  /// In vi, this message translates to:
-  /// **'Cần bạn'**
-  String get inboxNeedsYou;
+  /// In en, this message translates to:
+  /// **'Retry'**
+  String get appRetry;
 
-  /// No description provided for @inboxDone.
+  /// Shown in the app shell.
   ///
-  /// In vi, this message translates to:
-  /// **'Xong'**
-  String get inboxDone;
+  /// In en, this message translates to:
+  /// **'Retry now'**
+  String get appRetryNow;
 
-  /// No description provided for @inboxEmptyTitle.
+  /// Shown in the app shell.
   ///
-  /// In vi, this message translates to:
-  /// **'Không có gì cần bạn'**
-  String get inboxEmptyTitle;
+  /// In en, this message translates to:
+  /// **'Home Wi-Fi'**
+  String get appRouteHome;
 
-  /// No description provided for @inboxEmptyBody.
+  /// Shown in the app shell.
   ///
-  /// In vi, this message translates to:
-  /// **'Yêu cầu từ Mac sẽ hiện ở đây.'**
-  String get inboxEmptyBody;
-
-  /// No description provided for @inboxUnsupported.
-  ///
-  /// In vi, this message translates to:
-  /// **'Notchling trên Mac này chưa có hộp thư.'**
-  String get inboxUnsupported;
-
-  /// No description provided for @inboxOpenOnMac.
-  ///
-  /// In vi, this message translates to:
-  /// **'Mở trên Mac'**
-  String get inboxOpenOnMac;
-
-  /// No description provided for @inboxAnsweredOnMac.
-  ///
-  /// In vi, this message translates to:
-  /// **'Đã trả lời trên Mac: {action}'**
-  String inboxAnsweredOnMac(String action);
-
-  /// No description provided for @inboxAnsweredHere.
-  ///
-  /// In vi, this message translates to:
-  /// **'Bạn đã trả lời: {action}'**
-  String inboxAnsweredHere(String action);
-
-  /// No description provided for @inboxDeclined.
-  ///
-  /// In vi, this message translates to:
-  /// **'Mac không nhận câu trả lời này. Thử lại trên Mac.'**
-  String get inboxDeclined;
-
-  /// No description provided for @inboxExpired.
-  ///
-  /// In vi, this message translates to:
-  /// **'Đã hết hạn'**
-  String get inboxExpired;
-
-  /// No description provided for @inboxWithdrawn.
-  ///
-  /// In vi, this message translates to:
-  /// **'Đã rút lại'**
-  String get inboxWithdrawn;
-
-  /// No description provided for @inboxOpenCount.
-  ///
-  /// In vi, this message translates to:
-  /// **'{count} chưa xử lý'**
-  String inboxOpenCount(int count);
-
-  /// No description provided for @connecting.
-  ///
-  /// In vi, this message translates to:
-  /// **'Đang kết nối'**
-  String get connecting;
-
-  /// No description provided for @connectionLostRetry.
-  ///
-  /// In vi, this message translates to:
-  /// **'Mất kết nối, thử lại sau {seconds}s'**
-  String connectionLostRetry(int seconds);
-
-  /// No description provided for @connected.
-  ///
-  /// In vi, this message translates to:
-  /// **'Đã kết nối'**
-  String get connected;
-
-  /// No description provided for @retryNow.
-  ///
-  /// In vi, this message translates to:
-  /// **'Thử lại'**
-  String get retryNow;
-
-  /// No description provided for @retry.
-  ///
-  /// In vi, this message translates to:
-  /// **'Thử lại'**
-  String get retry;
-
-  /// No description provided for @cancel.
-  ///
-  /// In vi, this message translates to:
-  /// **'Huỷ'**
-  String get cancel;
-
-  /// No description provided for @close.
-  ///
-  /// In vi, this message translates to:
-  /// **'Đóng'**
-  String get close;
-
-  /// No description provided for @stateNeedsInput.
-  ///
-  /// In vi, this message translates to:
-  /// **'Cần bạn'**
-  String get stateNeedsInput;
-
-  /// No description provided for @stateRunning.
-  ///
-  /// In vi, this message translates to:
-  /// **'Đang chạy'**
-  String get stateRunning;
-
-  /// No description provided for @stateDone.
-  ///
-  /// In vi, this message translates to:
-  /// **'Xong'**
-  String get stateDone;
-
-  /// No description provided for @stateExited.
-  ///
-  /// In vi, this message translates to:
-  /// **'Đã thoát'**
-  String get stateExited;
-
-  /// No description provided for @sessionsEmptyTitle.
-  ///
-  /// In vi, this message translates to:
-  /// **'Chưa có session nào'**
-  String get sessionsEmptyTitle;
-
-  /// No description provided for @sessionsEmptyBody.
-  ///
-  /// In vi, this message translates to:
-  /// **'Các session Claude Code trên Mac sẽ hiện ở đây.'**
-  String get sessionsEmptyBody;
-
-  /// No description provided for @searchHint.
-  ///
-  /// In vi, this message translates to:
-  /// **'Tìm session'**
-  String get searchHint;
-
-  /// No description provided for @searchNoMatch.
-  ///
-  /// In vi, this message translates to:
-  /// **'Không có session khớp “{query}”.'**
-  String searchNoMatch(String query);
-
-  /// No description provided for @loadFailed.
-  ///
-  /// In vi, this message translates to:
-  /// **'Không thể tải dữ liệu. Vui lòng thử lại.'**
-  String get loadFailed;
-
-  /// No description provided for @newSession.
-  ///
-  /// In vi, this message translates to:
-  /// **'Session mới'**
-  String get newSession;
-
-  /// No description provided for @newSessionFolder.
-  ///
-  /// In vi, this message translates to:
-  /// **'Thư mục'**
-  String get newSessionFolder;
-
-  /// No description provided for @newSessionModel.
-  ///
-  /// In vi, this message translates to:
-  /// **'Model'**
-  String get newSessionModel;
-
-  /// No description provided for @modelDefault.
-  ///
-  /// In vi, this message translates to:
-  /// **'Mặc định'**
-  String get modelDefault;
-
-  /// No description provided for @newSessionNoProjects.
-  ///
-  /// In vi, this message translates to:
-  /// **'Chưa có thư mục gần đây trên Mac.'**
-  String get newSessionNoProjects;
-
-  /// No description provided for @newSessionConfirmTitle.
-  ///
-  /// In vi, this message translates to:
-  /// **'Mở session mới?'**
-  String get newSessionConfirmTitle;
-
-  /// No description provided for @newSessionConfirmBody.
-  ///
-  /// In vi, this message translates to:
-  /// **'Claude sẽ chạy trong {folder} trên Mac.'**
-  String newSessionConfirmBody(String folder);
-
-  /// No description provided for @newSessionOpen.
-  ///
-  /// In vi, this message translates to:
-  /// **'Mở'**
-  String get newSessionOpen;
-
-  /// No description provided for @newSessionStarted.
-  ///
-  /// In vi, this message translates to:
-  /// **'Mac đã mở session mới.'**
-  String get newSessionStarted;
-
-  /// No description provided for @newSessionFailed.
-  ///
-  /// In vi, this message translates to:
-  /// **'Không thể mở session mới. Vui lòng thử lại.'**
-  String get newSessionFailed;
-
-  /// No description provided for @runningSubagents.
-  ///
-  /// In vi, this message translates to:
-  /// **'{count} subagent đang chạy'**
-  String runningSubagents(int count);
-
-  /// No description provided for @subagentsShow.
-  ///
-  /// In vi, this message translates to:
-  /// **'Mở {count} subagent'**
-  String subagentsShow(int count);
-
-  /// No description provided for @subagentsHide.
-  ///
-  /// In vi, this message translates to:
-  /// **'Thu gọn {count} subagent'**
-  String subagentsHide(int count);
-
-  /// No description provided for @justNow.
-  ///
-  /// In vi, this message translates to:
-  /// **'Vừa xong'**
-  String get justNow;
-
-  /// No description provided for @minutesShort.
-  ///
-  /// In vi, this message translates to:
-  /// **'{n} phút'**
-  String minutesShort(int n);
-
-  /// No description provided for @hoursShort.
-  ///
-  /// In vi, this message translates to:
-  /// **'{n} giờ'**
-  String hoursShort(int n);
-
-  /// No description provided for @daysShort.
-  ///
-  /// In vi, this message translates to:
-  /// **'{n} ngày'**
-  String daysShort(int n);
-
-  /// No description provided for @viewOnly.
-  ///
-  /// In vi, this message translates to:
-  /// **'Chỉ xem'**
-  String get viewOnly;
-
-  /// No description provided for @viewOnlyReason.
-  ///
-  /// In vi, this message translates to:
-  /// **'Session mở ngoài Console — chỉ xem'**
-  String get viewOnlyReason;
-
-  /// No description provided for @controlConsole.
-  ///
-  /// In vi, this message translates to:
-  /// **'Console'**
-  String get controlConsole;
-
-  /// No description provided for @controlJob.
-  ///
-  /// In vi, this message translates to:
-  /// **'Job nền'**
-  String get controlJob;
-
-  /// No description provided for @chatSelectSession.
-  ///
-  /// In vi, this message translates to:
-  /// **'Chọn một session để xem chat.'**
-  String get chatSelectSession;
-
-  /// No description provided for @chatEmpty.
-  ///
-  /// In vi, this message translates to:
-  /// **'Chưa có tin nhắn nào.'**
-  String get chatEmpty;
-
-  /// No description provided for @chatLoadOlder.
-  ///
-  /// In vi, this message translates to:
-  /// **'Tải tin cũ hơn'**
-  String get chatLoadOlder;
-
-  /// No description provided for @chatNewMessages.
-  ///
-  /// In vi, this message translates to:
-  /// **'Tin mới'**
-  String get chatNewMessages;
-
-  /// No description provided for @composerHint.
-  ///
-  /// In vi, this message translates to:
-  /// **'Nhắn cho session này'**
-  String get composerHint;
-
-  /// No description provided for @send.
-  ///
-  /// In vi, this message translates to:
-  /// **'Gửi'**
-  String get send;
-
-  /// No description provided for @sending.
-  ///
-  /// In vi, this message translates to:
-  /// **'Đang gửi'**
-  String get sending;
-
-  /// No description provided for @sendFailed.
-  ///
-  /// In vi, this message translates to:
-  /// **'Không thể gửi tin nhắn. Vui lòng thử lại.'**
-  String get sendFailed;
-
-  /// No description provided for @pendingPermission.
-  ///
-  /// In vi, this message translates to:
-  /// **'Cần cấp quyền: {tool}'**
-  String pendingPermission(String tool);
-
-  /// No description provided for @pendingQuestion.
-  ///
-  /// In vi, this message translates to:
-  /// **'Câu hỏi từ Claude'**
-  String get pendingQuestion;
-
-  /// No description provided for @allow.
-  ///
-  /// In vi, this message translates to:
-  /// **'Cho phép'**
-  String get allow;
-
-  /// No description provided for @deny.
-  ///
-  /// In vi, this message translates to:
-  /// **'Từ chối'**
-  String get deny;
-
-  /// No description provided for @answerOnMac.
-  ///
-  /// In vi, this message translates to:
-  /// **'Trả lời trên Mac'**
-  String get answerOnMac;
-
-  /// No description provided for @multiSelectOnMac.
-  ///
-  /// In vi, this message translates to:
-  /// **'Câu hỏi này cho chọn nhiều đáp án. Trả lời trên Mac.'**
-  String get multiSelectOnMac;
-
-  /// No description provided for @answerFailed.
-  ///
-  /// In vi, this message translates to:
-  /// **'Không thể gửi câu trả lời. Vui lòng thử lại.'**
-  String get answerFailed;
-
-  /// No description provided for @toolsExpand.
-  ///
-  /// In vi, this message translates to:
-  /// **'Mở rộng'**
-  String get toolsExpand;
-
-  /// No description provided for @toolsCollapse.
-  ///
-  /// In vi, this message translates to:
-  /// **'Thu gọn'**
-  String get toolsCollapse;
-
-  /// No description provided for @pairTitle.
-  ///
-  /// In vi, this message translates to:
-  /// **'Ghép đôi với Mac'**
-  String get pairTitle;
-
-  /// No description provided for @pairIntro.
-  ///
-  /// In vi, this message translates to:
-  /// **'Trên Mac, mở Agent Console, bấm Điện thoại rồi Ghép đôi điện thoại.'**
-  String get pairIntro;
-
-  /// No description provided for @pairScan.
-  ///
-  /// In vi, this message translates to:
-  /// **'Quét mã QR'**
-  String get pairScan;
-
-  /// No description provided for @pairManual.
-  ///
-  /// In vi, this message translates to:
-  /// **'Nhập thủ công'**
-  String get pairManual;
-
-  /// No description provided for @pairPasteJson.
-  ///
-  /// In vi, this message translates to:
-  /// **'Dán nội dung mã QR (JSON)'**
-  String get pairPasteJson;
-
-  /// No description provided for @pairHost.
-  ///
-  /// In vi, this message translates to:
-  /// **'Địa chỉ Mac (IP hoặc tên .local)'**
-  String get pairHost;
-
-  /// No description provided for @pairPort.
-  ///
-  /// In vi, this message translates to:
-  /// **'Cổng'**
-  String get pairPort;
-
-  /// No description provided for @pairFingerprint.
-  ///
-  /// In vi, this message translates to:
-  /// **'Vân tay chứng chỉ (SHA-256)'**
-  String get pairFingerprint;
-
-  /// No description provided for @pairCode.
-  ///
-  /// In vi, this message translates to:
-  /// **'Mã ghép đôi (8 ký tự)'**
-  String get pairCode;
-
-  /// No description provided for @pairDeviceName.
-  ///
-  /// In vi, this message translates to:
-  /// **'Tên thiết bị'**
-  String get pairDeviceName;
-
-  /// No description provided for @pairConnect.
-  ///
-  /// In vi, this message translates to:
-  /// **'Ghép đôi'**
-  String get pairConnect;
-
-  /// No description provided for @pairWaiting.
-  ///
-  /// In vi, this message translates to:
-  /// **'Chờ Mac cho phép…'**
-  String get pairWaiting;
-
-  /// No description provided for @pairFailed.
-  ///
-  /// In vi, this message translates to:
-  /// **'Không thể ghép đôi. Vui lòng thử lại.'**
-  String get pairFailed;
-
-  /// No description provided for @pairInvalid.
-  ///
-  /// In vi, this message translates to:
-  /// **'Mã ghép đôi không hợp lệ.'**
-  String get pairInvalid;
-
-  /// No description provided for @pairFingerprintMismatch.
-  ///
-  /// In vi, this message translates to:
-  /// **'Chứng chỉ của Mac không khớp vân tay đã ghim. Kết nối bị từ chối.'**
-  String get pairFingerprintMismatch;
-
-  /// No description provided for @pairDenied.
-  ///
-  /// In vi, this message translates to:
-  /// **'Mac đã từ chối thiết bị này hoặc mã đã hết hạn.'**
-  String get pairDenied;
-
-  /// No description provided for @pairUnreachable.
-  ///
-  /// In vi, this message translates to:
-  /// **'Không kết nối được tới Mac. Kiểm tra mạng và địa chỉ.'**
-  String get pairUnreachable;
-
-  /// No description provided for @pairCameraDenied.
-  ///
-  /// In vi, this message translates to:
-  /// **'Chưa có quyền dùng camera. Dùng nhập thủ công.'**
-  String get pairCameraDenied;
-
-  /// No description provided for @macsTitle.
-  ///
-  /// In vi, this message translates to:
-  /// **'Mac đã ghép'**
-  String get macsTitle;
-
-  /// No description provided for @macsAdd.
-  ///
-  /// In vi, this message translates to:
-  /// **'Thêm Mac'**
-  String get macsAdd;
-
-  /// No description provided for @macsActive.
-  ///
-  /// In vi, this message translates to:
-  /// **'Đang dùng'**
-  String get macsActive;
-
-  /// No description provided for @macsUse.
-  ///
-  /// In vi, this message translates to:
-  /// **'Dùng Mac này'**
-  String get macsUse;
-
-  /// No description provided for @macsRemove.
-  ///
-  /// In vi, this message translates to:
-  /// **'Gỡ Mac'**
-  String get macsRemove;
-
-  /// No description provided for @computerOffline.
-  ///
-  /// In vi, this message translates to:
-  /// **'Chưa kết nối'**
-  String get computerOffline;
-
-  /// No description provided for @computerRevoked.
-  ///
-  /// In vi, this message translates to:
-  /// **'Đã thu hồi'**
-  String get computerRevoked;
-
-  /// No description provided for @computerNoSessions.
-  ///
-  /// In vi, this message translates to:
-  /// **'Không có session'**
-  String get computerNoSessions;
-
-  /// No description provided for @macsRemoveConfirm.
-  ///
-  /// In vi, this message translates to:
-  /// **'Gỡ “{name}” khỏi điện thoại?'**
-  String macsRemoveConfirm(String name);
-
-  /// No description provided for @vizSuggested.
-  ///
-  /// In vi, this message translates to:
-  /// **'Gợi ý'**
-  String get vizSuggested;
-
-  /// No description provided for @vizPhoneNoPermission.
-  ///
-  /// In vi, this message translates to:
-  /// **'Mac chưa cấp quyền ghi màn hình cho Agent Console.'**
-  String get vizPhoneNoPermission;
-
-  /// No description provided for @vizPhoneNoWindow.
-  ///
-  /// In vi, this message translates to:
-  /// **'Mac chưa có cửa sổ máy ảo đang hiện.'**
-  String get vizPhoneNoWindow;
-
-  /// No description provided for @vizPhoneStarting.
-  ///
-  /// In vi, this message translates to:
-  /// **'Đang chờ hình từ Mac…'**
-  String get vizPhoneStarting;
-
-  /// No description provided for @vizPhoneError.
-  ///
-  /// In vi, this message translates to:
-  /// **'Không thể xem máy ảo: {message}'**
-  String vizPhoneError(String message);
-
-  /// No description provided for @vizWebUrl.
-  ///
-  /// In vi, this message translates to:
-  /// **'Địa chỉ trang (localhost trên Mac)'**
-  String get vizWebUrl;
-
-  /// No description provided for @vizWebRefresh.
-  ///
-  /// In vi, this message translates to:
-  /// **'Chụp lại'**
-  String get vizWebRefresh;
-
-  /// No description provided for @vizWebNoUrl.
-  ///
-  /// In vi, this message translates to:
-  /// **'Session này chưa có địa chỉ web. Nhập địa chỉ ở trên.'**
-  String get vizWebNoUrl;
-
-  /// No description provided for @vizWebHint.
-  ///
-  /// In vi, this message translates to:
-  /// **'Chạy dev server trên Mac rồi bấm làm mới, hoặc chọn địa chỉ khác bên dưới.'**
-  String get vizWebHint;
-
-  /// No description provided for @vizWebCandidates.
-  ///
-  /// In vi, this message translates to:
-  /// **'Đang chạy trên Mac'**
-  String get vizWebCandidates;
-
-  /// No description provided for @vizWebFailed.
-  ///
-  /// In vi, this message translates to:
-  /// **'Không thể chụp trang. Vui lòng thử lại.'**
-  String get vizWebFailed;
-
-  /// No description provided for @vizLoadFailed.
-  ///
-  /// In vi, this message translates to:
-  /// **'Không thể tải visualize. Vui lòng thử lại.'**
-  String get vizLoadFailed;
-
-  /// No description provided for @vizSelectSession.
-  ///
-  /// In vi, this message translates to:
-  /// **'Chọn một session để xem visualize.'**
-  String get vizSelectSession;
-
-  /// No description provided for @vizBundleMissing.
-  ///
-  /// In vi, this message translates to:
-  /// **'Thiếu bundle viz. Chạy tool/sync_viz.sh rồi build lại.'**
-  String get vizBundleMissing;
-
-  /// No description provided for @notifNeedsInputTitle.
-  ///
-  /// In vi, this message translates to:
-  /// **'Session cần bạn'**
-  String get notifNeedsInputTitle;
-
-  /// No description provided for @notifNeedsInputBody.
-  ///
-  /// In vi, this message translates to:
-  /// **'{name} đang chờ bạn.'**
-  String notifNeedsInputBody(String name);
-
-  /// No description provided for @pullToRefresh.
-  ///
-  /// In vi, this message translates to:
-  /// **'Kéo để tải lại'**
-  String get pullToRefresh;
-
-  /// No description provided for @connectionRevoked.
-  ///
-  /// In vi, this message translates to:
-  /// **'Mac đã thu hồi thiết bị này. Hãy ghép đôi lại.'**
-  String get connectionRevoked;
-
-  /// No description provided for @openMacs.
-  ///
-  /// In vi, this message translates to:
-  /// **'Mac đã ghép'**
-  String get openMacs;
-
-  /// No description provided for @routeHome.
-  ///
-  /// In vi, this message translates to:
-  /// **'Wi-Fi nhà'**
-  String get routeHome;
-
-  /// No description provided for @routeInternet.
-  ///
-  /// In vi, this message translates to:
+  /// In en, this message translates to:
   /// **'Internet'**
-  String get routeInternet;
+  String get appRouteInternet;
 
-  /// No description provided for @connectedVia.
+  /// Shown in the app shell and Settings.
   ///
-  /// In vi, this message translates to:
-  /// **'Đã kết nối · {route}'**
-  String connectedVia(String route);
+  /// In en, this message translates to:
+  /// **'Settings'**
+  String get appSettingsTitle;
 
-  /// No description provided for @noRouteToMac.
+  /// Shown in the app shell.
   ///
-  /// In vi, this message translates to:
-  /// **'Không tới được Mac. Bật Truy cập qua internet trên Mac hoặc vào cùng Wi-Fi.'**
-  String get noRouteToMac;
+  /// In en, this message translates to:
+  /// **'Chat'**
+  String get appTabChat;
 
-  /// No description provided for @takeover.
+  /// Shown in the app shell.
   ///
-  /// In vi, this message translates to:
-  /// **'Tiếp quản'**
-  String get takeover;
+  /// In en, this message translates to:
+  /// **'Inbox'**
+  String get appTabInbox;
 
-  /// No description provided for @takeoverHint.
+  /// Shown in the app shell.
   ///
-  /// In vi, this message translates to:
-  /// **'Session mở ngoài Console — chỉ xem. Có thể tiếp quản để nhắn từ điện thoại.'**
-  String get takeoverHint;
+  /// In en, this message translates to:
+  /// **'Sessions'**
+  String get appTabSessions;
 
-  /// No description provided for @takeoverTitle.
+  /// Shown in the app shell.
   ///
-  /// In vi, this message translates to:
-  /// **'Tiếp quản session này?'**
-  String get takeoverTitle;
+  /// In en, this message translates to:
+  /// **'Visualize'**
+  String get appTabVisualize;
 
-  /// No description provided for @takeoverBody.
+  /// Shown in the Chat screen and the Sessions tab.
   ///
-  /// In vi, this message translates to:
-  /// **'Mac sẽ mở lại session này trong Terminal của Console (claude --resume). Session gốc phải đã đóng. Nếu Claude hỏi gì, trả lời trên Mac.'**
-  String get takeoverBody;
+  /// In en, this message translates to:
+  /// **'Take over'**
+  String get appTakeover;
 
-  /// No description provided for @takeoverRunning.
+  /// Shown in the Chat screen and the Sessions tab. $reason is the reason.
   ///
-  /// In vi, this message translates to:
-  /// **'Đang tiếp quản…'**
-  String get takeoverRunning;
+  /// In en, this message translates to:
+  /// **'Could not take over: {reason}'**
+  String appTakeoverFailed(String reason);
 
-  /// No description provided for @takeoverFailed.
+  /// Shown in the Chat screen and the Sessions tab.
   ///
-  /// In vi, this message translates to:
-  /// **'Không tiếp quản được: {reason}'**
-  String takeoverFailed(String reason);
+  /// In en, this message translates to:
+  /// **'View only'**
+  String get appViewOnly;
 
-  /// No description provided for @micStart.
+  /// The Mac is busy with something else.
   ///
-  /// In vi, this message translates to:
-  /// **'Nói để nhập'**
-  String get micStart;
+  /// In en, this message translates to:
+  /// **'The Mac is busy. Try again.'**
+  String get bridgeErrorBusy;
 
-  /// No description provided for @micStop.
+  /// The phone is not connected to the Mac, or the link dropped while a request was waiting.
   ///
-  /// In vi, this message translates to:
-  /// **'Dừng và nhận dạng'**
-  String get micStop;
+  /// In en, this message translates to:
+  /// **'Not connected to the Mac.'**
+  String get bridgeErrorDisconnected;
 
-  /// No description provided for @micCancel.
+  /// The Mac failed, or answered in a way the phone does not understand.
   ///
-  /// In vi, this message translates to:
-  /// **'Huỷ nhận dạng'**
-  String get micCancel;
+  /// In en, this message translates to:
+  /// **'Something went wrong on the Mac.'**
+  String get bridgeErrorInternal;
 
-  /// No description provided for @transcribing.
+  /// The Mac refused the request, or does not know it because it runs an older version.
   ///
-  /// In vi, this message translates to:
-  /// **'Đang nhận dạng…'**
-  String get transcribing;
+  /// In en, this message translates to:
+  /// **'The Mac didn\'t accept that request.'**
+  String get bridgeErrorInvalid;
 
-  /// No description provided for @voicePermissionDenied.
+  /// The Mac could not find what the phone asked for, such as a session or a folder.
   ///
-  /// In vi, this message translates to:
-  /// **'Chưa cho phép dùng micro.'**
-  String get voicePermissionDenied;
+  /// In en, this message translates to:
+  /// **'The Mac couldn\'t find that.'**
+  String get bridgeErrorNotFound;
 
-  /// No description provided for @voiceOpenSettings.
+  /// The Mac could not reach what the phone asked for, such as a web page.
   ///
-  /// In vi, this message translates to:
-  /// **'Mở cài đặt'**
-  String get voiceOpenSettings;
+  /// In en, this message translates to:
+  /// **'The Mac couldn\'t reach it.'**
+  String get bridgeErrorNotReachable;
 
-  /// No description provided for @voiceNoSpeech.
+  /// The Mac did not answer a request in time.
   ///
-  /// In vi, this message translates to:
-  /// **'Không nghe thấy tiếng nói. Thử nói gần micro hơn.'**
-  String get voiceNoSpeech;
+  /// In en, this message translates to:
+  /// **'The Mac didn\'t answer in time.'**
+  String get bridgeErrorTimeout;
 
-  /// No description provided for @voiceTooLong.
+  /// The Mac no longer trusts this phone.
   ///
-  /// In vi, this message translates to:
-  /// **'Đã dừng ở 60 giây.'**
-  String get voiceTooLong;
+  /// In en, this message translates to:
+  /// **'The Mac doesn\'t accept this phone. Pair again.'**
+  String get bridgeErrorUnauthorized;
 
-  /// No description provided for @voiceEngineError.
+  /// An error code this version of the phone does not know.
   ///
-  /// In vi, this message translates to:
-  /// **'Nhận dạng lỗi. Thử lại.'**
-  String get voiceEngineError;
+  /// In en, this message translates to:
+  /// **'The Mac refused the request.'**
+  String get bridgeErrorUnknown;
 
-  /// No description provided for @voiceRecorderError.
+  /// The session was opened outside Console, so the phone can only read it.
   ///
-  /// In vi, this message translates to:
-  /// **'Không ghi âm được.'**
-  String get voiceRecorderError;
+  /// In en, this message translates to:
+  /// **'This session is view only.'**
+  String get bridgeErrorViewOnly;
 
-  /// No description provided for @keepAliveTitle.
+  /// $error is one of the messages above. $detail is the Mac's own explanation, in English.
   ///
-  /// In vi, this message translates to:
-  /// **'Giữ kết nối nền?'**
-  String get keepAliveTitle;
+  /// In en, this message translates to:
+  /// **'{error} {detail}'**
+  String bridgeErrorWithDetail(String error, String detail);
 
-  /// No description provided for @keepAliveBody.
+  /// Not shown yet.
   ///
-  /// In vi, this message translates to:
-  /// **'Để nhận thông báo khi session cần bạn hoặc xong, app cần chạy nền. Android sẽ hiện một thông báo nhỏ \"Đang theo dõi\". Tắt được trong Mac đã ghép.'**
-  String get keepAliveBody;
+  /// In en, this message translates to:
+  /// **'Idle'**
+  String get chatActivityIdle;
 
-  /// No description provided for @keepAliveEnable.
+  /// Shown in the Chat screen.
   ///
-  /// In vi, this message translates to:
-  /// **'Bật'**
-  String get keepAliveEnable;
+  /// In en, this message translates to:
+  /// **'Couldn\'t send the answer. Please try again.'**
+  String get chatAnswerFailed;
 
-  /// No description provided for @notNow.
+  /// Not shown yet.
   ///
-  /// In vi, this message translates to:
-  /// **'Để sau'**
-  String get notNow;
+  /// In en, this message translates to:
+  /// **'Answer on the Mac'**
+  String get chatAnswerOnMac;
 
-  /// No description provided for @keepAliveSetting.
+  /// Shown in the Chat screen.
   ///
-  /// In vi, this message translates to:
-  /// **'Giữ kết nối nền'**
-  String get keepAliveSetting;
+  /// In en, this message translates to:
+  /// **'Attach a photo'**
+  String get chatAttachPhoto;
 
-  /// No description provided for @keepAliveHint.
+  /// Shown in the Chat screen.
   ///
-  /// In vi, this message translates to:
-  /// **'Nhận thông báo khi app ở nền. Hiện một thông báo nhỏ cố định.'**
-  String get keepAliveHint;
+  /// In en, this message translates to:
+  /// **'Conversation compacted'**
+  String get chatCompactionTitle;
 
-  /// No description provided for @muteSession.
+  /// Shown in the Chat screen.
   ///
-  /// In vi, this message translates to:
-  /// **'Tắt thông báo session này'**
-  String get muteSession;
+  /// In en, this message translates to:
+  /// **'Message this session'**
+  String get chatComposerHint;
 
-  /// No description provided for @unmuteSession.
+  /// Shown in the Chat screen.
   ///
-  /// In vi, this message translates to:
-  /// **'Bật lại thông báo session này'**
-  String get unmuteSession;
-
-  /// No description provided for @takeoverStopBody.
-  ///
-  /// In vi, this message translates to:
-  /// **'Dừng session trên Mac (Claude desktop / VS Code) và mở lại trong Console để nhắn từ điện thoại?'**
-  String get takeoverStopBody;
-
-  /// No description provided for @takeoverStopConfirm.
-  ///
-  /// In vi, this message translates to:
-  /// **'Dừng và tiếp quản'**
-  String get takeoverStopConfirm;
-
-  /// No description provided for @takeoverBusyTitle.
-  ///
-  /// In vi, this message translates to:
-  /// **'Session đang chạy'**
-  String get takeoverBusyTitle;
-
-  /// No description provided for @takeoverBusyBody.
-  ///
-  /// In vi, this message translates to:
-  /// **'Session đang chạy — lượt hiện tại sẽ bị dừng giữa chừng.'**
-  String get takeoverBusyBody;
-
-  /// No description provided for @takeoverBusyConfirm.
-  ///
-  /// In vi, this message translates to:
-  /// **'Vẫn dừng'**
-  String get takeoverBusyConfirm;
-
-  /// No description provided for @chatQueued.
-  ///
-  /// In vi, this message translates to:
-  /// **'đang chờ'**
-  String get chatQueued;
-
-  /// No description provided for @chatSendNow.
-  ///
-  /// In vi, this message translates to:
-  /// **'Gửi ngay'**
-  String get chatSendNow;
-
-  /// No description provided for @chatSendNowTitle.
-  ///
-  /// In vi, this message translates to:
-  /// **'Ngắt lượt đang chạy để gửi ngay?'**
-  String get chatSendNowTitle;
-
-  /// No description provided for @chatSendNowBody.
-  ///
-  /// In vi, this message translates to:
-  /// **'Claude sẽ dừng lượt hiện tại và chạy tin đang chờ này ngay.'**
-  String get chatSendNowBody;
-
-  /// No description provided for @chatSendNowFailed.
-  ///
-  /// In vi, this message translates to:
-  /// **'Chưa ngắt được'**
-  String get chatSendNowFailed;
-
-  /// No description provided for @chatSending.
-  ///
-  /// In vi, this message translates to:
-  /// **'đang gửi'**
-  String get chatSending;
-
-  /// No description provided for @chatSendFailed.
-  ///
-  /// In vi, this message translates to:
-  /// **'Chưa gửi được'**
-  String get chatSendFailed;
-
-  /// No description provided for @chatUpdating.
-  ///
-  /// In vi, this message translates to:
-  /// **'Đang cập nhật'**
-  String get chatUpdating;
-
-  /// No description provided for @pictureFailed.
-  ///
-  /// In vi, this message translates to:
-  /// **'Không tải được ảnh'**
-  String get pictureFailed;
-
-  /// No description provided for @pictureClose.
-  ///
-  /// In vi, this message translates to:
-  /// **'Đóng ảnh'**
-  String get pictureClose;
-
-  /// No description provided for @pictureOpen.
-  ///
-  /// In vi, this message translates to:
-  /// **'Mở ảnh'**
-  String get pictureOpen;
-
-  /// No description provided for @allProjects.
-  ///
-  /// In vi, this message translates to:
-  /// **'Tất cả project'**
-  String get allProjects;
-
-  /// No description provided for @archive.
-  ///
-  /// In vi, this message translates to:
-  /// **'Lưu trữ'**
-  String get archive;
-
-  /// No description provided for @archivedToast.
-  ///
-  /// In vi, this message translates to:
-  /// **'Đã lưu trữ {name}'**
-  String archivedToast(String name);
-
-  /// No description provided for @undo.
-  ///
-  /// In vi, this message translates to:
-  /// **'Hoàn tác'**
-  String get undo;
-
-  /// No description provided for @sessionsFilteredEmpty.
-  ///
-  /// In vi, this message translates to:
-  /// **'Không có session trong project này.'**
-  String get sessionsFilteredEmpty;
-
-  /// No description provided for @chatContext.
-  ///
-  /// In vi, this message translates to:
-  /// **'Ngữ cảnh'**
+  /// In en, this message translates to:
+  /// **'Context'**
   String get chatContext;
 
-  /// No description provided for @limit5h.
+  /// Shown in the Chat screen.
   ///
-  /// In vi, this message translates to:
-  /// **'5 giờ'**
-  String get limit5h;
+  /// In en, this message translates to:
+  /// **'Console'**
+  String get chatControlConsole;
 
-  /// No description provided for @limitWeek.
+  /// Shown in the Chat screen.
   ///
-  /// In vi, this message translates to:
-  /// **'Tuần'**
-  String get limitWeek;
+  /// In en, this message translates to:
+  /// **'Background job'**
+  String get chatControlJob;
 
-  /// No description provided for @shellHeader.
+  /// Shown in the Chat screen.
   ///
-  /// In vi, this message translates to:
-  /// **'Lệnh shell'**
-  String get shellHeader;
+  /// In en, this message translates to:
+  /// **'Copied'**
+  String get chatCopied;
 
-  /// No description provided for @shellRunsIn.
+  /// Shown in the Chat screen.
   ///
-  /// In vi, this message translates to:
-  /// **'chạy trong {folder} · Claude thấy kết quả'**
-  String shellRunsIn(String folder);
+  /// In en, this message translates to:
+  /// **'Copy'**
+  String get chatCopyCode;
 
-  /// No description provided for @shellHint.
+  /// Shown in the Chat screen.
   ///
-  /// In vi, this message translates to:
-  /// **'Gửi sẽ chạy như ! trong terminal · xoá ! để gửi tin nhắn thường'**
-  String get shellHint;
+  /// In en, this message translates to:
+  /// **'No messages yet.'**
+  String get chatEmpty;
 
-  /// No description provided for @shellWillRun.
+  /// Not shown yet.
   ///
-  /// In vi, this message translates to:
-  /// **'Sẽ chạy'**
-  String get shellWillRun;
+  /// In en, this message translates to:
+  /// **'5h'**
+  String get chatLimitFiveHours;
 
-  /// No description provided for @slashHeader.
+  /// Shown in the Chat screen.
   ///
-  /// In vi, this message translates to:
-  /// **'Lệnh'**
-  String get slashHeader;
+  /// In en, this message translates to:
+  /// **'Week'**
+  String get chatLimitWeek;
 
-  /// No description provided for @toolStepsCount.
+  /// Shown in the Chat screen.
   ///
-  /// In vi, this message translates to:
-  /// **'{count} bước công cụ'**
-  String toolStepsCount(int count);
+  /// In en, this message translates to:
+  /// **'Load older messages'**
+  String get chatLoadOlder;
 
-  /// No description provided for @toolStepOne.
+  /// Shown in the Chat screen.
   ///
-  /// In vi, this message translates to:
-  /// **'1 bước công cụ'**
-  String get toolStepOne;
+  /// In en, this message translates to:
+  /// **'This question allows several answers. Answer it on the Mac.'**
+  String get chatMultiSelectOnMac;
 
-  /// No description provided for @compactionTitle.
+  /// Shown in the Chat screen.
   ///
-  /// In vi, this message translates to:
-  /// **'Đã nén cuộc trò chuyện'**
-  String get compactionTitle;
+  /// In en, this message translates to:
+  /// **'Mute notifications for this session'**
+  String get chatMuteSession;
 
-  /// No description provided for @showOutput.
+  /// Shown in the Chat screen.
   ///
-  /// In vi, this message translates to:
-  /// **'Xem kết quả'**
-  String get showOutput;
+  /// In en, this message translates to:
+  /// **'New messages'**
+  String get chatNewMessages;
 
-  /// No description provided for @copyCode.
+  /// Not shown yet.
   ///
-  /// In vi, this message translates to:
-  /// **'Chép'**
-  String get copyCode;
+  /// In en, this message translates to:
+  /// **'New messages'**
+  String get chatNewMessagesBelow;
 
-  /// No description provided for @copied.
+  /// Shown in the Chat screen. $tool is the tool Claude wants to use.
   ///
-  /// In vi, this message translates to:
-  /// **'Đã chép'**
-  String get copied;
+  /// In en, this message translates to:
+  /// **'Permission needed: {tool}'**
+  String chatPendingPermission(String tool);
 
-  /// No description provided for @takeoverShort.
+  /// Shown in the Chat screen.
   ///
-  /// In vi, this message translates to:
-  /// **'Tiếp quản'**
-  String get takeoverShort;
+  /// In en, this message translates to:
+  /// **'Question from Claude'**
+  String get chatPendingQuestion;
 
-  /// No description provided for @activityIdle.
+  /// Shown in the Chat screen.
   ///
-  /// In vi, this message translates to:
-  /// **'Không có hoạt động'**
-  String get activityIdle;
+  /// In en, this message translates to:
+  /// **'Take a photo'**
+  String get chatPhotoCamera;
 
-  /// No description provided for @viewOnlyChip.
+  /// Shown in the Chat screen.
   ///
-  /// In vi, this message translates to:
-  /// **'Chỉ xem'**
-  String get viewOnlyChip;
+  /// In en, this message translates to:
+  /// **'Add a caption (optional)'**
+  String get chatPhotoCaptionHint;
 
-  /// No description provided for @newMessagesBelow.
+  /// Shown in the Chat screen.
   ///
-  /// In vi, this message translates to:
-  /// **'Tin mới'**
-  String get newMessagesBelow;
+  /// In en, this message translates to:
+  /// **'Choose from library'**
+  String get chatPhotoGallery;
 
-  /// No description provided for @attachPhoto.
+  /// Shown in the Chat screen.
   ///
-  /// In vi, this message translates to:
-  /// **'Đính kèm ảnh'**
-  String get attachPhoto;
+  /// In en, this message translates to:
+  /// **'Could not open the camera or library.'**
+  String get chatPhotoPickFailed;
 
-  /// No description provided for @photoCamera.
+  /// Shown in the Chat screen.
   ///
-  /// In vi, this message translates to:
-  /// **'Chụp ảnh'**
-  String get photoCamera;
+  /// In en, this message translates to:
+  /// **'Photo sent'**
+  String get chatPhotoSent;
 
-  /// No description provided for @photoGallery.
+  /// Shown in the Chat screen.
   ///
-  /// In vi, this message translates to:
-  /// **'Chọn từ thư viện'**
-  String get photoGallery;
+  /// In en, this message translates to:
+  /// **'Send a photo'**
+  String get chatPhotoTitle;
 
-  /// No description provided for @photoPickFailed.
+  /// Shown in the Chat screen.
   ///
-  /// In vi, this message translates to:
-  /// **'Không mở được camera hoặc thư viện.'**
-  String get photoPickFailed;
+  /// In en, this message translates to:
+  /// **'Close picture'**
+  String get chatPictureClose;
 
-  /// No description provided for @photoSent.
+  /// Shown in the Chat screen.
   ///
-  /// In vi, this message translates to:
-  /// **'Đã gửi ảnh'**
-  String get photoSent;
+  /// In en, this message translates to:
+  /// **'Could not load the picture'**
+  String get chatPictureFailed;
 
-  /// No description provided for @photoTitle.
+  /// Shown in the Chat screen.
   ///
-  /// In vi, this message translates to:
-  /// **'Gửi ảnh'**
-  String get photoTitle;
+  /// In en, this message translates to:
+  /// **'Open picture'**
+  String get chatPictureOpen;
 
-  /// No description provided for @photoCaptionHint.
+  /// Shown in the Chat screen.
   ///
-  /// In vi, this message translates to:
-  /// **'Thêm chú thích (tuỳ chọn)'**
-  String get photoCaptionHint;
+  /// In en, this message translates to:
+  /// **'waiting'**
+  String get chatQueued;
 
-  /// No description provided for @settingsTitle.
+  /// Shown in the Chat screen.
   ///
-  /// In vi, this message translates to:
-  /// **'Cài đặt'**
-  String get settingsTitle;
+  /// In en, this message translates to:
+  /// **'Select a session to see its chat.'**
+  String get chatSelectSession;
 
-  /// No description provided for @settingsTheme.
+  /// Shown in the Chat screen.
   ///
-  /// In vi, this message translates to:
-  /// **'Giao diện'**
-  String get settingsTheme;
+  /// In en, this message translates to:
+  /// **'Send'**
+  String get chatSend;
 
-  /// No description provided for @themeSystem.
+  /// Shown in the Chat screen.
   ///
-  /// In vi, this message translates to:
-  /// **'Hệ thống'**
-  String get themeSystem;
+  /// In en, this message translates to:
+  /// **'Sending'**
+  String get chatSendBusy;
 
-  /// No description provided for @themeDark.
+  /// Shown in the Chat screen.
   ///
-  /// In vi, this message translates to:
-  /// **'Tối'**
-  String get themeDark;
+  /// In en, this message translates to:
+  /// **'Couldn\'t send the message. Please try again.'**
+  String get chatSendError;
 
-  /// No description provided for @themeLight.
+  /// Shown in the Chat screen.
   ///
-  /// In vi, this message translates to:
-  /// **'Sáng'**
-  String get themeLight;
+  /// In en, this message translates to:
+  /// **'Not sent'**
+  String get chatSendFailed;
 
-  /// No description provided for @settingsNotifications.
+  /// Shown in the Chat screen.
   ///
-  /// In vi, this message translates to:
-  /// **'Thông báo'**
+  /// In en, this message translates to:
+  /// **'Send now'**
+  String get chatSendNow;
+
+  /// Shown in the Chat screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Claude stops the current turn and runs this waiting message right away.'**
+  String get chatSendNowBody;
+
+  /// Shown in the Chat screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not interrupt'**
+  String get chatSendNowFailed;
+
+  /// Shown in the Chat screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Interrupt the running turn to send now?'**
+  String get chatSendNowTitle;
+
+  /// Shown in the Chat screen.
+  ///
+  /// In en, this message translates to:
+  /// **'sending'**
+  String get chatSending;
+
+  /// Shown in the Chat screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Shell command'**
+  String get chatShellHeader;
+
+  /// Shown in the Chat screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Send runs it like ! in the terminal · delete the ! to send a message instead'**
+  String get chatShellHint;
+
+  /// Shown in the Chat screen. $folder is the folder path.
+  ///
+  /// In en, this message translates to:
+  /// **'runs in {folder} · Claude sees the output'**
+  String chatShellRunsIn(String folder);
+
+  /// Shown in the Chat screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Will run'**
+  String get chatShellWillRun;
+
+  /// Shown in the Chat screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Show output'**
+  String get chatShowOutput;
+
+  /// What the /clear command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names.
+  ///
+  /// In en, this message translates to:
+  /// **'Clear the conversation and start fresh'**
+  String get chatSlashClear;
+
+  /// What the /compact command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names.
+  ///
+  /// In en, this message translates to:
+  /// **'Summarise the conversation to free up context'**
+  String get chatSlashCompact;
+
+  /// What the /context command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names.
+  ///
+  /// In en, this message translates to:
+  /// **'Show how much context is used'**
+  String get chatSlashContext;
+
+  /// What the /cost command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names.
+  ///
+  /// In en, this message translates to:
+  /// **'Show the cost of this session'**
+  String get chatSlashCost;
+
+  /// What the /effort command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names.
+  ///
+  /// In en, this message translates to:
+  /// **'Change the effort level'**
+  String get chatSlashEffort;
+
+  /// Shown in the Chat screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Commands'**
+  String get chatSlashHeader;
+
+  /// What the /help command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names.
+  ///
+  /// In en, this message translates to:
+  /// **'Show help'**
+  String get chatSlashHelp;
+
+  /// What the /init command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names.
+  ///
+  /// In en, this message translates to:
+  /// **'Write a CLAUDE.md for this project'**
+  String get chatSlashInit;
+
+  /// What the /memory command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit memory files'**
+  String get chatSlashMemory;
+
+  /// What the /model command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names.
+  ///
+  /// In en, this message translates to:
+  /// **'Change the model'**
+  String get chatSlashModel;
+
+  /// What the /rename command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names.
+  ///
+  /// In en, this message translates to:
+  /// **'Rename this session'**
+  String get chatSlashRename;
+
+  /// What the /review command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names.
+  ///
+  /// In en, this message translates to:
+  /// **'Review a pull request'**
+  String get chatSlashReview;
+
+  /// What the /rewind command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names.
+  ///
+  /// In en, this message translates to:
+  /// **'Go back to an earlier point'**
+  String get chatSlashRewind;
+
+  /// What the /security-review command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names.
+  ///
+  /// In en, this message translates to:
+  /// **'Security review of pending changes'**
+  String get chatSlashSecurityReview;
+
+  /// What the /status command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names.
+  ///
+  /// In en, this message translates to:
+  /// **'Show version, model and account'**
+  String get chatSlashStatus;
+
+  /// What the /todos command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names.
+  ///
+  /// In en, this message translates to:
+  /// **'Show the current task list'**
+  String get chatSlashTodos;
+
+  /// What the /usage command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names.
+  ///
+  /// In en, this message translates to:
+  /// **'Show plan usage limits'**
+  String get chatSlashUsage;
+
+  /// Shown in the Chat screen.
+  ///
+  /// In en, this message translates to:
+  /// **'The Mac will reopen this session in Console\'s Terminal (claude --resume). The original must be closed. If Claude asks anything, answer on the Mac.'**
+  String get chatTakeoverBody;
+
+  /// Shown in the Chat screen.
+  ///
+  /// In en, this message translates to:
+  /// **'The session is running; the current turn will be cut off.'**
+  String get chatTakeoverBusyBody;
+
+  /// Shown in the Chat screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Session is running'**
+  String get chatTakeoverBusyTitle;
+
+  /// Shown in the Chat screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Opened outside Console, view only. Take it over to message it from your phone.'**
+  String get chatTakeoverHint;
+
+  /// Shown in the Chat screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Taking over…'**
+  String get chatTakeoverRunning;
+
+  /// Shown in the Chat screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Stop the session on the Mac (Claude desktop / VS Code) and reopen it in Console so you can message it from the phone?'**
+  String get chatTakeoverStopBody;
+
+  /// Shown in the Chat screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Take over this session?'**
+  String get chatTakeoverTitle;
+
+  /// Shown in the Chat screen.
+  ///
+  /// In en, this message translates to:
+  /// **'1 tool step'**
+  String get chatToolStepOne;
+
+  /// Shown in the Chat screen. $count is the number of tool steps.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, one{{count} tool step} other{{count} tool steps}}'**
+  String chatToolStepsCount(int count);
+
+  /// Not shown yet.
+  ///
+  /// In en, this message translates to:
+  /// **'Collapse'**
+  String get chatToolsCollapse;
+
+  /// Not shown yet.
+  ///
+  /// In en, this message translates to:
+  /// **'Expand'**
+  String get chatToolsExpand;
+
+  /// Shown in the Chat screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Unmute this session'**
+  String get chatUnmuteSession;
+
+  /// Shown in the Chat screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Updating'**
+  String get chatUpdating;
+
+  /// Not shown yet.
+  ///
+  /// In en, this message translates to:
+  /// **'View only'**
+  String get chatViewOnlyChip;
+
+  /// Shown in the Chat screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Opened outside Console, view only'**
+  String get chatViewOnlyReason;
+
+  /// Shown in the Chat screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Allow'**
+  String get consentAllow;
+
+  /// Shown in the Chat screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Deny'**
+  String get consentDeny;
+
+  /// Shown in pairing with a Mac.
+  ///
+  /// In en, this message translates to:
+  /// **'Pair'**
+  String get consentPair;
+
+  /// Shown in the Chat screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Stop and take over'**
+  String get consentStopAndTakeOver;
+
+  /// Shown in the Chat screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Stop anyway'**
+  String get consentStopAnyway;
+
+  /// Shown in the Inbox. $action is the choice you made, such as Allow.
+  ///
+  /// In en, this message translates to:
+  /// **'You answered: {action}'**
+  String inboxAnsweredHere(String action);
+
+  /// Shown in the Inbox. $action is the choice made on the Mac, such as Allow.
+  ///
+  /// In en, this message translates to:
+  /// **'Answered on the Mac: {action}'**
+  String inboxAnsweredOnMac(String action);
+
+  /// Shown in the Inbox.
+  ///
+  /// In en, this message translates to:
+  /// **'The Mac didn\'t take that answer. Try again on the Mac.'**
+  String get inboxDeclined;
+
+  /// Shown in the Inbox.
+  ///
+  /// In en, this message translates to:
+  /// **'Done'**
+  String get inboxDone;
+
+  /// Shown in the Inbox.
+  ///
+  /// In en, this message translates to:
+  /// **'Requests from your Mac show up here.'**
+  String get inboxEmptyBody;
+
+  /// Shown in the Inbox.
+  ///
+  /// In en, this message translates to:
+  /// **'Nothing Needs You'**
+  String get inboxEmptyTitle;
+
+  /// Shown in the Inbox.
+  ///
+  /// In en, this message translates to:
+  /// **'Needs You'**
+  String get inboxNeedsYou;
+
+  /// Shown in the Inbox.
+  ///
+  /// In en, this message translates to:
+  /// **'Open on Mac'**
+  String get inboxOpenOnMac;
+
+  /// Shown in the Inbox.
+  ///
+  /// In en, this message translates to:
+  /// **'Notchling on this Mac has no inbox yet.'**
+  String get inboxUnsupported;
+
+  /// The result of an inbox item nobody answered in time. Shown in the Inbox.
+  ///
+  /// In en, this message translates to:
+  /// **'Expired'**
+  String get itemExpired;
+
+  /// The result of an inbox item taken back. Shown in the Inbox.
+  ///
+  /// In en, this message translates to:
+  /// **'Withdrawn'**
+  String get itemWithdrawn;
+
+  /// The language's own name, as its speakers write it. It is the label of this language in the Language row.
+  ///
+  /// In en, this message translates to:
+  /// **'English'**
+  String get languageName;
+
+  /// Shown in the Paired Macs screen.
+  ///
+  /// In en, this message translates to:
+  /// **'In use'**
+  String get macsActive;
+
+  /// Shown in the Paired Macs screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Add a Mac'**
+  String get macsAdd;
+
+  /// Read aloud by a screen reader for the heading of one Mac in the session list. $name is the Mac's name, $link says whether it is connected, $count is how many sessions it has.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, one{{name}, {link}, {count} session} other{{name}, {link}, {count} sessions}}'**
+  String macsComputerHeadingLabel(int count, String name, String link);
+
+  /// Shown in the Paired Macs screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Not connected'**
+  String get macsComputerOffline;
+
+  /// Shown in the Paired Macs screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Revoked'**
+  String get macsComputerRevoked;
+
+  /// Shown in the Paired Macs screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Get notifications while the app is in the background. Shows a small permanent notification.'**
+  String get macsKeepAliveHint;
+
+  /// Shown in the Paired Macs screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Keep connection in the background'**
+  String get macsKeepAliveSetting;
+
+  /// Shown in the Paired Macs screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove Mac'**
+  String get macsRemove;
+
+  /// Shown in the Paired Macs screen. $name is the Mac's name.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove “{name}” from this phone?'**
+  String macsRemoveConfirm(String name);
+
+  /// Shown in the Paired Macs screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Paired Macs'**
+  String get macsTitle;
+
+  /// Shown in the Paired Macs screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Use this Mac'**
+  String get macsUse;
+
+  /// The name of the Android notification channel for sessions that finished.
+  ///
+  /// In en, this message translates to:
+  /// **'Finished sessions'**
+  String get notificationsChannelFinished;
+
+  /// The name of the Android notification channel for new messages from Claude.
+  ///
+  /// In en, this message translates to:
+  /// **'New messages from Claude'**
+  String get notificationsChannelMessages;
+
+  /// The name of the Android notification channel for sessions that need an answer. Shown in the system's notification settings.
+  ///
+  /// In en, this message translates to:
+  /// **'Sessions that need you'**
+  String get notificationsChannelNeedsYou;
+
+  /// The text of a notification when a session finished.
+  ///
+  /// In en, this message translates to:
+  /// **'Done'**
+  String get notificationsFinishedBody;
+
+  /// The text of a notification when Claude waits for an answer and has no question to show.
+  ///
+  /// In en, this message translates to:
+  /// **'Needs your answer'**
+  String get notificationsNeedsBody;
+
+  /// Not shown yet. $name is the session name.
+  ///
+  /// In en, this message translates to:
+  /// **'{name} is waiting.'**
+  String notificationsNeedsInputBody(String name);
+
+  /// Not shown yet.
+  ///
+  /// In en, this message translates to:
+  /// **'Session needs input'**
+  String get notificationsNeedsInputTitle;
+
+  /// The text of the grouped notification that stands for several new ones.
+  ///
+  /// In en, this message translates to:
+  /// **'Something new'**
+  String get notificationsSummaryBody;
+
+  /// The line of the permanent notification while the app watches and no session is working.
+  ///
+  /// In en, this message translates to:
+  /// **'Watching'**
+  String get notificationsWatching;
+
+  /// The line of the permanent notification while the app watches sessions that work or wait. $count is the number of those sessions.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, one{Watching · {count} session} other{Watching · {count} sessions}}'**
+  String notificationsWatchingSessions(int count);
+
+  /// Shown in pairing with a Mac.
+  ///
+  /// In en, this message translates to:
+  /// **'Camera access is off. Use manual entry.'**
+  String get pairingCameraDenied;
+
+  /// Shown in pairing with a Mac.
+  ///
+  /// In en, this message translates to:
+  /// **'Pairing code (8 characters)'**
+  String get pairingCode;
+
+  /// Shown in pairing with a Mac.
+  ///
+  /// In en, this message translates to:
+  /// **'The Mac refused this device, or the code expired.'**
+  String get pairingDenied;
+
+  /// Not shown yet.
+  ///
+  /// In en, this message translates to:
+  /// **'Device name'**
+  String get pairingDeviceName;
+
+  /// Not shown yet.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t pair. Please try again.'**
+  String get pairingFailed;
+
+  /// Shown in pairing with a Mac.
+  ///
+  /// In en, this message translates to:
+  /// **'Certificate fingerprint (SHA-256)'**
+  String get pairingFingerprint;
+
+  /// Shown in pairing with a Mac.
+  ///
+  /// In en, this message translates to:
+  /// **'The Mac\'s certificate doesn\'t match the pinned fingerprint. Connection refused.'**
+  String get pairingFingerprintMismatch;
+
+  /// Shown in pairing with a Mac.
+  ///
+  /// In en, this message translates to:
+  /// **'Mac address (IP or .local name)'**
+  String get pairingHost;
+
+  /// Shown in pairing with a Mac.
+  ///
+  /// In en, this message translates to:
+  /// **'On the Mac, open Agent Console, choose Phone, then Pair a phone.'**
+  String get pairingIntro;
+
+  /// Shown in pairing with a Mac.
+  ///
+  /// In en, this message translates to:
+  /// **'The pairing code isn\'t valid.'**
+  String get pairingInvalid;
+
+  /// Shown in pairing with a Mac.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter manually'**
+  String get pairingManual;
+
+  /// Shown in pairing with a Mac.
+  ///
+  /// In en, this message translates to:
+  /// **'Paste the QR content (JSON)'**
+  String get pairingPasteJson;
+
+  /// Shown in pairing with a Mac.
+  ///
+  /// In en, this message translates to:
+  /// **'Port'**
+  String get pairingPort;
+
+  /// Shown in pairing with a Mac.
+  ///
+  /// In en, this message translates to:
+  /// **'Scan QR'**
+  String get pairingScan;
+
+  /// Shown in pairing with a Mac.
+  ///
+  /// In en, this message translates to:
+  /// **'Pair with a Mac'**
+  String get pairingTitle;
+
+  /// Shown in pairing with a Mac.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t reach the Mac. Check the network and address.'**
+  String get pairingUnreachable;
+
+  /// Shown in pairing with a Mac.
+  ///
+  /// In en, this message translates to:
+  /// **'Waiting for the Mac to allow…'**
+  String get pairingWaiting;
+
+  /// Shown in the Sessions tab.
+  ///
+  /// In en, this message translates to:
+  /// **'All projects'**
+  String get sessionsAllProjects;
+
+  /// Shown in the Sessions tab.
+  ///
+  /// In en, this message translates to:
+  /// **'Archive'**
+  String get sessionsArchive;
+
+  /// Shown in the Sessions tab. $name is the session name.
+  ///
+  /// In en, this message translates to:
+  /// **'Archived {name}'**
+  String sessionsArchivedToast(String name);
+
+  /// Shown in the Sessions tab.
+  ///
+  /// In en, this message translates to:
+  /// **'No sessions'**
+  String get sessionsComputerNoSessions;
+
+  /// Shown in the Sessions tab. $n is days.
+  ///
+  /// In en, this message translates to:
+  /// **'{n} d'**
+  String sessionsDaysShort(int n);
+
+  /// Shown in the Sessions tab.
+  ///
+  /// In en, this message translates to:
+  /// **'Claude Code sessions on your Mac show up here.'**
+  String get sessionsEmptyBody;
+
+  /// Shown in the Sessions tab.
+  ///
+  /// In en, this message translates to:
+  /// **'No sessions yet'**
+  String get sessionsEmptyTitle;
+
+  /// Shown in the Sessions tab.
+  ///
+  /// In en, this message translates to:
+  /// **'No sessions in this project.'**
+  String get sessionsFilteredEmpty;
+
+  /// Read aloud by a screen reader for the heading of a group in the session list. $state is the group's name, $count is how many sessions it holds.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, one{{state}, {count} session} other{{state}, {count} sessions}}'**
+  String sessionsGroupLabel(int count, String state);
+
+  /// Shown in the Sessions tab. $n is hours.
+  ///
+  /// In en, this message translates to:
+  /// **'{n} h'**
+  String sessionsHoursShort(int n);
+
+  /// Shown in the Sessions tab.
+  ///
+  /// In en, this message translates to:
+  /// **'Just now'**
+  String get sessionsJustNow;
+
+  /// Shown in the Sessions tab. $n is minutes.
+  ///
+  /// In en, this message translates to:
+  /// **'{n} min'**
+  String sessionsMinutesShort(int n);
+
+  /// Shown in the Sessions tab.
+  ///
+  /// In en, this message translates to:
+  /// **'Default'**
+  String get sessionsModelDefault;
+
+  /// Shown in the Sessions tab.
+  ///
+  /// In en, this message translates to:
+  /// **'New session'**
+  String get sessionsNewSession;
+
+  /// Shown in the Sessions tab. $folder is the folder path.
+  ///
+  /// In en, this message translates to:
+  /// **'Claude will run in {folder} on the Mac.'**
+  String sessionsNewSessionConfirmBody(String folder);
+
+  /// Shown in the Sessions tab.
+  ///
+  /// In en, this message translates to:
+  /// **'Start a new session?'**
+  String get sessionsNewSessionConfirmTitle;
+
+  /// Shown in the Sessions tab.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t start a new session. Please try again.'**
+  String get sessionsNewSessionFailed;
+
+  /// Shown in the Sessions tab.
+  ///
+  /// In en, this message translates to:
+  /// **'Folder'**
+  String get sessionsNewSessionFolder;
+
+  /// Shown in the Sessions tab.
+  ///
+  /// In en, this message translates to:
+  /// **'Model'**
+  String get sessionsNewSessionModel;
+
+  /// Shown in the Sessions tab.
+  ///
+  /// In en, this message translates to:
+  /// **'No recent folders on the Mac.'**
+  String get sessionsNewSessionNoProjects;
+
+  /// Shown in the Sessions tab.
+  ///
+  /// In en, this message translates to:
+  /// **'Start'**
+  String get sessionsNewSessionOpen;
+
+  /// Shown in the Sessions tab.
+  ///
+  /// In en, this message translates to:
+  /// **'The Mac started a new session.'**
+  String get sessionsNewSessionStarted;
+
+  /// Shown in the Sessions tab. $count is the number of subagents.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, one{{count} subagent running} other{{count} subagents running}}'**
+  String sessionsRunningSubagents(int count);
+
+  /// Shown in the Sessions tab.
+  ///
+  /// In en, this message translates to:
+  /// **'Search sessions'**
+  String get sessionsSearchHint;
+
+  /// Shown in the Sessions tab. $query is what you typed.
+  ///
+  /// In en, this message translates to:
+  /// **'No sessions match “{query}”.'**
+  String sessionsSearchNoMatch(String query);
+
+  /// A session that finished its turn. Shown in the Sessions tab.
+  ///
+  /// In en, this message translates to:
+  /// **'Done'**
+  String get sessionsStateDone;
+
+  /// Shown in the Sessions tab.
+  ///
+  /// In en, this message translates to:
+  /// **'Ended'**
+  String get sessionsStateExited;
+
+  /// Shown in the Sessions tab.
+  ///
+  /// In en, this message translates to:
+  /// **'Needs Input'**
+  String get sessionsStateNeedsInput;
+
+  /// A session that is working on a turn. Shown in the Chat screen and the Sessions tab.
+  ///
+  /// In en, this message translates to:
+  /// **'Working'**
+  String get sessionsStateRunning;
+
+  /// Shown in the Sessions tab. $count is the number of subagents.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, one{Hide {count} subagent} other{Hide {count} subagents}}'**
+  String sessionsSubagentsHide(int count);
+
+  /// Shown in the Sessions tab. $count is the number of subagents.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, one{Show {count} subagent} other{Show {count} subagents}}'**
+  String sessionsSubagentsShow(int count);
+
+  /// Shown in the Sessions tab.
+  ///
+  /// In en, this message translates to:
+  /// **'Take over'**
+  String get sessionsTakeoverShort;
+
+  /// Shown in the Sessions tab.
+  ///
+  /// In en, this message translates to:
+  /// **'Undo'**
+  String get sessionsUndo;
+
+  /// Shown in Settings.
+  ///
+  /// In en, this message translates to:
+  /// **'Notifications'**
   String get settingsNotifications;
 
-  /// No description provided for @settingsSound.
+  /// Shown in Settings.
   ///
-  /// In vi, this message translates to:
-  /// **'Âm thanh thông báo'**
+  /// In en, this message translates to:
+  /// **'Notification sounds'**
   String get settingsSound;
 
-  /// No description provided for @settingsSoundHint.
+  /// Shown in Settings.
   ///
-  /// In vi, this message translates to:
-  /// **'Phát tiếng nhẹ khi có tin mới hoặc session cần bạn trong lúc đang mở app.'**
+  /// In en, this message translates to:
+  /// **'A soft sound for new messages and sessions that need you while the app is open.'**
   String get settingsSoundHint;
+
+  /// Shown in Settings.
+  ///
+  /// In en, this message translates to:
+  /// **'Appearance'**
+  String get settingsTheme;
+
+  /// Shown in Settings.
+  ///
+  /// In en, this message translates to:
+  /// **'Dark'**
+  String get settingsThemeDark;
+
+  /// Shown in Settings.
+  ///
+  /// In en, this message translates to:
+  /// **'Light'**
+  String get settingsThemeLight;
+
+  /// Shown in Settings.
+  ///
+  /// In en, this message translates to:
+  /// **'System'**
+  String get settingsThemeSystem;
+
+  /// Shown in the Visualize tab.
+  ///
+  /// In en, this message translates to:
+  /// **'The viz bundle is missing. Run tool/sync_viz.sh and rebuild.'**
+  String get visualizeBundleMissing;
+
+  /// Shown in the Visualize tab.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t load the visualization. Please try again.'**
+  String get visualizeLoadFailed;
+
+  /// Not shown yet. $message is the reason.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t show the device: {message}'**
+  String visualizePhoneError(String message);
+
+  /// Not shown yet.
+  ///
+  /// In en, this message translates to:
+  /// **'The Mac hasn\'t granted Screen Recording to Agent Console.'**
+  String get visualizePhoneNoPermission;
+
+  /// Not shown yet.
+  ///
+  /// In en, this message translates to:
+  /// **'No device window is showing on the Mac.'**
+  String get visualizePhoneNoWindow;
+
+  /// Not shown yet.
+  ///
+  /// In en, this message translates to:
+  /// **'Waiting for frames from the Mac…'**
+  String get visualizePhoneStarting;
+
+  /// Shown in the Visualize tab.
+  ///
+  /// In en, this message translates to:
+  /// **'Select a session to see its visualization.'**
+  String get visualizeSelectSession;
+
+  /// Shown in the Visualize tab.
+  ///
+  /// In en, this message translates to:
+  /// **'Suggested'**
+  String get visualizeSuggested;
+
+  /// A tab of the Visualize screen: a chart.
+  ///
+  /// In en, this message translates to:
+  /// **'Chart'**
+  String get visualizeTabChart;
+
+  /// A tab of the Visualize screen: a diagram.
+  ///
+  /// In en, this message translates to:
+  /// **'Diagram'**
+  String get visualizeTabDiagram;
+
+  /// A tab of the Visualize screen: an entity diagram.
+  ///
+  /// In en, this message translates to:
+  /// **'Entity'**
+  String get visualizeTabEntity;
+
+  /// A tab of the Visualize screen: a flow chart.
+  ///
+  /// In en, this message translates to:
+  /// **'Flow'**
+  String get visualizeTabFlow;
+
+  /// A tab of the Visualize screen: the Mac's device window.
+  ///
+  /// In en, this message translates to:
+  /// **'Phone'**
+  String get visualizeTabPhone;
+
+  /// A tab of the Visualize screen: a web page captured on the Mac.
+  ///
+  /// In en, this message translates to:
+  /// **'Web'**
+  String get visualizeTabWeb;
+
+  /// Not shown yet.
+  ///
+  /// In en, this message translates to:
+  /// **'Running on the Mac'**
+  String get visualizeWebCandidates;
+
+  /// Shown in the Visualize tab.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t capture the page. Please try again.'**
+  String get visualizeWebFailed;
+
+  /// Shown in the Visualize tab.
+  ///
+  /// In en, this message translates to:
+  /// **'Start the dev server on the Mac and refresh, or pick another address below.'**
+  String get visualizeWebHint;
+
+  /// Shown in the Visualize tab.
+  ///
+  /// In en, this message translates to:
+  /// **'This session has no web address yet. Enter one above.'**
+  String get visualizeWebNoUrl;
+
+  /// Shown in the Visualize tab.
+  ///
+  /// In en, this message translates to:
+  /// **'Capture again'**
+  String get visualizeWebRefresh;
+
+  /// Shown in the Visualize tab.
+  ///
+  /// In en, this message translates to:
+  /// **'Page address (localhost on the Mac)'**
+  String get visualizeWebUrl;
+
+  /// Shown in dictation.
+  ///
+  /// In en, this message translates to:
+  /// **'Transcription failed. Try again.'**
+  String get voiceEngineError;
+
+  /// Shown in dictation.
+  ///
+  /// In en, this message translates to:
+  /// **'Cancel transcription'**
+  String get voiceMicCancel;
+
+  /// Shown in dictation.
+  ///
+  /// In en, this message translates to:
+  /// **'Dictate'**
+  String get voiceMicStart;
+
+  /// Shown in dictation.
+  ///
+  /// In en, this message translates to:
+  /// **'Stop and transcribe'**
+  String get voiceMicStop;
+
+  /// Shown under the reply box when dictation cannot start because the model file was not bundled.
+  ///
+  /// In en, this message translates to:
+  /// **'The speech model is missing from this app.'**
+  String get voiceModelMissing;
+
+  /// Shown in dictation.
+  ///
+  /// In en, this message translates to:
+  /// **'No speech heard. Try speaking closer to the mic.'**
+  String get voiceNoSpeech;
+
+  /// Shown in dictation.
+  ///
+  /// In en, this message translates to:
+  /// **'Open settings'**
+  String get voiceOpenSettings;
+
+  /// Shown in dictation.
+  ///
+  /// In en, this message translates to:
+  /// **'Microphone access is off.'**
+  String get voicePermissionDenied;
+
+  /// Shown in dictation.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not record.'**
+  String get voiceRecorderError;
+
+  /// Shown in dictation.
+  ///
+  /// In en, this message translates to:
+  /// **'Stopped at 60 seconds.'**
+  String get voiceTooLong;
+
+  /// Shown in dictation.
+  ///
+  /// In en, this message translates to:
+  /// **'Transcribing…'**
+  String get voiceTranscribing;
 }
 
 class _AppL10nDelegate extends LocalizationsDelegate<AppL10n> {
@@ -1302,7 +1568,7 @@ class _AppL10nDelegate extends LocalizationsDelegate<AppL10n> {
 
   @override
   bool isSupported(Locale locale) =>
-      <String>['en', 'vi'].contains(locale.languageCode);
+      <String>['en'].contains(locale.languageCode);
 
   @override
   bool shouldReload(_AppL10nDelegate old) => false;
@@ -1313,8 +1579,6 @@ AppL10n lookupAppL10n(Locale locale) {
   switch (locale.languageCode) {
     case 'en':
       return AppL10nEn();
-    case 'vi':
-      return AppL10nVi();
   }
 
   throw FlutterError(

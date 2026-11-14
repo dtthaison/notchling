@@ -262,10 +262,10 @@ void main() {
     testWidgets('says Internet while the link runs through the tunnel, and keeps saying it', (WidgetTester tester) async {
       await show(tester, const ConnectionStatus(LinkPhase.connected, route: RouteKind.tunnel));
       await tester.pump(const Duration(seconds: 3));
-      expect(find.text('Đã kết nối · Internet'), findsOneWidget);
+      expect(find.text('Connected · Internet'), findsOneWidget);
     });
 
-    testWidgets('on the home network it shows Wi-Fi nhà briefly, then goes quiet', (WidgetTester tester) async {
+    testWidgets('on the home network it shows Home Wi-Fi briefly, then goes quiet', (WidgetTester tester) async {
       await show(tester, const ConnectionStatus(LinkPhase.connecting));
       await tester.pumpWidget(ProviderScope(
         overrides: <Override>[connectionStatusProvider.overrideWith(() => _FixedStatus(const ConnectionStatus(LinkPhase.connected, route: RouteKind.lan)))],
@@ -274,18 +274,18 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(seconds: 3));
       expect(find.textContaining('Internet'), findsNothing);
-      expect(find.text('Đã kết nối · Wi-Fi nhà'), findsNothing, reason: 'hidden after two seconds');
+      expect(find.text('Connected · Home Wi-Fi'), findsNothing, reason: 'hidden after two seconds');
     });
 
     testWidgets('when no route works it explains what to do', (WidgetTester tester) async {
       await show(tester, ConnectionStatus(LinkPhase.disconnected, error: const SocketException('down'), retryAt: DateTime.now().add(const Duration(seconds: 5))));
-      expect(find.text('Không tới được Mac. Bật Truy cập qua internet trên Mac hoặc vào cùng Wi-Fi.'), findsOneWidget);
-      expect(find.text('Thử lại'), findsOneWidget);
+      expect(find.text("Can't reach the Mac. Turn on Internet access on the Mac or join the same Wi-Fi."), findsOneWidget);
+      expect(find.text('Retry now'), findsOneWidget);
     });
 
     testWidgets('a plain drop keeps the retry countdown message', (WidgetTester tester) async {
       await show(tester, ConnectionStatus(LinkPhase.disconnected, retryAt: DateTime.now().add(const Duration(seconds: 5))));
-      expect(find.textContaining('Mất kết nối'), findsOneWidget);
+      expect(find.textContaining('Connection lost'), findsOneWidget);
     });
   });
 }

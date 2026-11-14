@@ -6,6 +6,8 @@ import '../../app/widgets/kit.dart';
 import '../../app/widgets/motion.dart';
 import '../../core/protocol/models.dart';
 import '../../l10n/app_localizations.dart';
+import '../../core/net/bridge_client.dart';
+import '../connection/bridge_errors.dart';
 import 'chat_pictures.dart';
 import 'code_highlight.dart';
 import 'markdown_text.dart';
@@ -225,7 +227,7 @@ class _ShellBubbleState extends State<ShellBubble> {
                 if (long && !_all)
                   TextButton(
                     onPressed: () => setState(() => _all = true),
-                    child: Text('${l10n.showOutput} (${output.length})'),
+                    child: Text('${l10n.chatShowOutput} (${output.length})'),
                   ),
               ],
             ],
@@ -246,7 +248,7 @@ class CompactionNotice extends StatelessWidget {
     final AppL10n l10n = AppL10n.of(context);
     return Semantics(
       container: true,
-      label: '${l10n.compactionTitle}. ${message.text}',
+      label: '${l10n.chatCompactionTitle}. ${message.text}',
       child: Column(
         children: <Widget>[
           Row(
@@ -260,7 +262,7 @@ class CompactionNotice extends StatelessWidget {
                     Icon(Icons.unfold_less, size: 14, color: kit.textMuted),
                     const SizedBox(width: 6),
                     Text(
-                      l10n.compactionTitle,
+                      l10n.chatCompactionTitle,
                       style: kit.label.copyWith(color: kit.textMuted),
                     ),
                   ],
@@ -306,8 +308,8 @@ class _ToolGroupViewState extends State<ToolGroupView> {
     final AppL10n l10n = AppL10n.of(context);
     final List<ToolStep> steps = widget.entry.steps;
     final String title = steps.length == 1
-        ? l10n.toolStepOne
-        : l10n.toolStepsCount(steps.length);
+        ? l10n.chatToolStepOne
+        : l10n.chatToolStepsCount(steps.length);
     final ToolStep last = steps.last;
     final bool edits = steps.any((ToolStep s) => s.isEdit);
     return Column(
@@ -612,7 +614,7 @@ class PendingBubble extends StatelessWidget {
   });
   final String text;
   final bool failed;
-  final String? reason;
+  final BridgeException? reason;
   final VoidCallback onRetry;
   final VoidCallback onDiscard;
 
@@ -649,14 +651,14 @@ class PendingBubble extends StatelessWidget {
                     children: <Widget>[
                       Flexible(
                         child: Text(
-                          reason ?? l10n.chatSendFailed,
+                          reason == null ? l10n.chatSendFailed : bridgeErrorLine(l10n, reason!),
                           style: kit.meta.copyWith(color: kit.danger),
                         ),
                       ),
-                      TextButton(onPressed: onRetry, child: Text(l10n.retry)),
+                      TextButton(onPressed: onRetry, child: Text(l10n.appRetry)),
                       IconButton(
                         onPressed: onDiscard,
-                        tooltip: l10n.close,
+                        tooltip: l10n.appClose,
                         icon: Icon(Icons.close, size: 18, color: kit.textMuted),
                       ),
                     ],
@@ -712,7 +714,7 @@ class _WorkingIndicatorState extends State<WorkingIndicator> with SingleTickerPr
     final AppL10n l10n = AppL10n.of(context);
     return Semantics(
       liveRegion: true,
-      label: widget.activity ?? l10n.stateRunning,
+      label: widget.activity ?? l10n.sessionsStateRunning,
       excludeSemantics: true,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(Space.sm, 0, Space.sm, 0),
@@ -745,7 +747,7 @@ class _WorkingIndicatorState extends State<WorkingIndicator> with SingleTickerPr
               child: AnimatedSwitcher(
                 duration: motionDuration(context),
                 child: Text(
-                  widget.activity ?? l10n.stateRunning,
+                  widget.activity ?? l10n.sessionsStateRunning,
                   key: ValueKey<String?>(widget.activity),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,

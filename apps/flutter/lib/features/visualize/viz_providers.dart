@@ -2,19 +2,26 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/net/bridge_client.dart';
 import '../../core/protocol/json.dart';
+import '../../l10n/app_localizations.dart';
 import '../connection/connection.dart';
 import '../sessions/sessions_notifier.dart';
 
 enum VizTab {
-  phone('Phone'),
-  web('Web'),
-  flow('Flow'),
-  diagram('Diagram'),
-  entity('Entity'),
-  chart('Chart');
+  phone,
+  web,
+  flow,
+  diagram,
+  entity,
+  chart;
 
-  const VizTab(this.title);
-  final String title;
+  String title(AppL10n l10n) => switch (this) {
+    VizTab.phone => l10n.visualizeTabPhone,
+    VizTab.web => l10n.visualizeTabWeb,
+    VizTab.flow => l10n.visualizeTabFlow,
+    VizTab.diagram => l10n.visualizeTabDiagram,
+    VizTab.entity => l10n.visualizeTabEntity,
+    VizTab.chart => l10n.visualizeTabChart,
+  };
 
   static List<VizTab> get shown => <VizTab>[for (final VizTab tab in values) if (tab != phone) tab];
 
@@ -40,13 +47,13 @@ final vizProvider = FutureProvider.family<Json, String>((Ref ref, String session
   final BridgeClient? client = ref.watch(bridgeClientProvider);
   ref.watch(connectedCountProvider);
   ref.watch(sessionsProvider.select((SessionsState s) => s.byId(sessionId)?.lastActivity.millisecondsSinceEpoch));
-  if (client == null) throw const BridgeException('disconnected', 'Chưa kết nối tới Mac.');
+  if (client == null) throw const BridgeException('disconnected', '');
   return client.vizGet(sessionId);
 });
 
 final vizEntityProvider = FutureProvider.family<Json, String>((Ref ref, String sessionId) async {
   final BridgeClient? client = ref.watch(bridgeClientProvider);
-  if (client == null) throw const BridgeException('disconnected', 'Chưa kết nối tới Mac.');
+  if (client == null) throw const BridgeException('disconnected', '');
   final Json data = await client.vizGet(sessionId, entity: true);
   return data;
 });

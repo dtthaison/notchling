@@ -58,8 +58,8 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Mac A'), findsOneWidget);
       expect(find.text('Linux B'), findsOneWidget);
-      expect(find.text('Đã kết nối'), findsOneWidget);
-      expect(find.text('Chưa kết nối'), findsOneWidget);
+      expect(find.text('Connected'), findsOneWidget);
+      expect(find.text('Not connected'), findsOneWidget);
       final double a = tester.getTopLeft(find.text('Mac A')).dy;
       final double onA = tester.getTopLeft(find.text('Session on A')).dy;
       final double b = tester.getTopLeft(find.text('Linux B')).dy;
@@ -89,7 +89,7 @@ void main() {
       await tester.pumpWidget(view(two, list: <Session>[sessions.first]));
       await tester.pumpAndSettle();
       expect(find.text('Linux B'), findsOneWidget);
-      expect(find.text('Không có session'), findsOneWidget);
+      expect(find.text('No sessions'), findsOneWidget);
     });
 
     testWidgets('with one computer there is no heading: the list looks as it always did', (WidgetTester tester) async {

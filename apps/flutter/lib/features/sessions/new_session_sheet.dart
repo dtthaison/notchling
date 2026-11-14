@@ -11,7 +11,7 @@ import '../connection/connection.dart';
 
 final FutureProvider<List<String>> recentProjectsProvider = FutureProvider.autoDispose<List<String>>((Ref ref) async {
   final BridgeClient? client = ref.watch(bridgeClientProvider);
-  if (client == null) throw const BridgeException('disconnected', 'Chưa kết nối tới Mac.');
+  if (client == null) throw const BridgeException('disconnected', '');
   return client.projectsRecent();
 });
 
@@ -48,11 +48,11 @@ class _NewSessionSheetState extends ConsumerState<_NewSessionSheet> {
     final bool? confirmed = await showDialog<bool>(
       context: context,
       builder: (BuildContext context) => AlertDialog(
-        title: Text(l10n.newSessionConfirmTitle),
-        content: Text(l10n.newSessionConfirmBody(folder.split('/').last)),
+        title: Text(l10n.sessionsNewSessionConfirmTitle),
+        content: Text(l10n.sessionsNewSessionConfirmBody(folder.split('/').last)),
         actions: <Widget>[
-          TextButton(onPressed: () => Navigator.pop(context, false), child: Text(l10n.cancel)),
-          TextButton(onPressed: () => Navigator.pop(context, true), child: Text(l10n.newSessionOpen)),
+          TextButton(onPressed: () => Navigator.pop(context, false), child: Text(l10n.appCancel)),
+          TextButton(onPressed: () => Navigator.pop(context, true), child: Text(l10n.sessionsNewSessionOpen)),
         ],
       ),
     );
@@ -61,10 +61,10 @@ class _NewSessionSheetState extends ConsumerState<_NewSessionSheet> {
     try {
       await ref.read(bridgeClientProvider)!.sessionNew(folder, model: _model == 'default' ? null : _model);
       navigator.pop();
-      messenger.showSnackBar(SnackBar(content: Text(l10n.newSessionStarted)));
+      messenger.showSnackBar(SnackBar(content: Text(l10n.sessionsNewSessionStarted)));
     } on BridgeException {
       if (mounted) setState(() => _starting = false);
-      messenger.showSnackBar(SnackBar(content: Text(l10n.newSessionFailed)));
+      messenger.showSnackBar(SnackBar(content: Text(l10n.sessionsNewSessionFailed)));
     }
   }
 
@@ -78,15 +78,15 @@ class _NewSessionSheetState extends ConsumerState<_NewSessionSheet> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          Padding(padding: const EdgeInsets.symmetric(horizontal: Space.lg), child: Text(l10n.newSession, style: Kit.of(context).titleMd)),
+          Padding(padding: const EdgeInsets.symmetric(horizontal: Space.lg), child: Text(l10n.sessionsNewSession, style: Kit.of(context).titleMd)),
           const SizedBox(height: Space.md),
-          Padding(padding: const EdgeInsets.symmetric(horizontal: Space.lg), child: PanelTitle(l10n.newSessionFolder)),
+          Padding(padding: const EdgeInsets.symmetric(horizontal: Space.lg), child: PanelTitle(l10n.sessionsNewSessionFolder)),
           Flexible(
             child: projects.when(
               loading: () => const SkeletonRows(count: 4),
-              error: (Object error, StackTrace stack) => ErrorState(message: l10n.loadFailed, onRetry: () => ref.invalidate(recentProjectsProvider)),
+              error: (Object error, StackTrace stack) => ErrorState(message: l10n.appLoadFailed, onRetry: () => ref.invalidate(recentProjectsProvider)),
               data: (List<String> folders) => folders.isEmpty
-                  ? Padding(padding: const EdgeInsets.all(Space.lg), child: Text(l10n.newSessionNoProjects, style: Kit.of(context).bodyMd))
+                  ? Padding(padding: const EdgeInsets.all(Space.lg), child: Text(l10n.sessionsNewSessionNoProjects, style: Kit.of(context).bodyMd))
                   : ListView(
                       shrinkWrap: true,
                       children: <Widget>[
@@ -117,13 +117,13 @@ class _NewSessionSheetState extends ConsumerState<_NewSessionSheet> {
                     ),
             ),
           ),
-          Padding(padding: const EdgeInsets.fromLTRB(Space.lg, Space.md, Space.lg, 0), child: PanelTitle(l10n.newSessionModel)),
+          Padding(padding: const EdgeInsets.fromLTRB(Space.lg, Space.md, Space.lg, 0), child: PanelTitle(l10n.sessionsNewSessionModel)),
           Padding(
             padding: const EdgeInsets.all(Space.lg),
             child: Wrap(spacing: Space.sm, runSpacing: Space.sm, children: <Widget>[
               for (final String model in newSessionModels)
                 ChoiceChip(
-                  label: Text(model == 'default' ? l10n.modelDefault : model),
+                  label: Text(model == 'default' ? l10n.sessionsModelDefault : model),
                   selected: _model == model,
                   onSelected: (_) => setState(() => _model = model),
                   showCheckmark: false,
@@ -139,7 +139,7 @@ class _NewSessionSheetState extends ConsumerState<_NewSessionSheet> {
             padding: const EdgeInsets.fromLTRB(Space.lg, 0, Space.lg, Space.lg),
             child: SizedBox(
               width: double.infinity,
-              child: PrimaryButton(label: l10n.newSessionOpen, onPressed: _folder == null || _starting ? null : () => unawaited(_start())),
+              child: PrimaryButton(label: l10n.sessionsNewSessionOpen, onPressed: _folder == null || _starting ? null : () => unawaited(_start())),
             ),
           ),
         ],

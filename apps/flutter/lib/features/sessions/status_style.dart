@@ -34,10 +34,10 @@ extension SessionStateStyle on SessionState {
   };
 
   String label(AppL10n l10n) => switch (this) {
-    SessionState.needsInput => l10n.stateNeedsInput,
-    SessionState.running => l10n.stateRunning,
-    SessionState.done => l10n.stateDone,
-    SessionState.exited => l10n.stateExited,
+    SessionState.needsInput => l10n.sessionsStateNeedsInput,
+    SessionState.running => l10n.sessionsStateRunning,
+    SessionState.done => l10n.sessionsStateDone,
+    SessionState.exited => l10n.sessionsStateExited,
   };
 }
 
@@ -252,8 +252,8 @@ class StatePill extends StatelessWidget {
 
 String relativeTime(AppL10n l10n, DateTime since, DateTime now) {
   final int seconds = now.difference(since).inSeconds;
-  if (seconds < 60) return l10n.justNow;
-  if (seconds < 3600) return l10n.minutesShort(seconds ~/ 60);
-  if (seconds < 86400) return l10n.hoursShort(seconds ~/ 3600);
-  return l10n.daysShort(seconds ~/ 86400);
+  if (seconds < 60) return l10n.sessionsJustNow;
+  if (seconds < 3600) return l10n.sessionsMinutesShort(seconds ~/ 60);
+  if (seconds < 86400) return l10n.sessionsHoursShort(seconds ~/ 3600);
+  return l10n.sessionsDaysShort(seconds ~/ 86400);
 }

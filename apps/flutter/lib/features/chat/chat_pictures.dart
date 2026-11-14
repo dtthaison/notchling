@@ -41,7 +41,7 @@ class ChatPictureLoader {
     Uint8List? bytes = await _cache.loadImage(sessionId, image.id, width);
     if (bytes == null) {
       final BridgeClient? client = _client();
-      if (client == null || !client.isConnected) throw const BridgeException('disconnected', 'Chưa kết nối tới Mac.');
+      if (client == null || !client.isConnected) throw const BridgeException('disconnected', '');
       bytes = await client.chatImage(sessionId, image.id, maxWidth: width);
       unawaited(_cache.saveImage(sessionId, image.id, width, bytes));
     }
@@ -143,13 +143,13 @@ class _PictureThumbnailState extends ConsumerState<PictureThumbnail> {
           child: Column(mainAxisSize: MainAxisSize.min, children: <Widget>[
             Icon(Icons.broken_image_outlined, size: 20, color: Kit.of(context).textMuted),
             const SizedBox(height: 2),
-            Text(l10n.pictureFailed, style: Kit.of(context).labelSm, textAlign: TextAlign.center),
+            Text(l10n.chatPictureFailed, style: Kit.of(context).labelSm, textAlign: TextAlign.center),
           ]),
         ),
     };
     return Semantics(
       button: true,
-      label: l10n.pictureOpen,
+      label: l10n.chatPictureOpen,
       child: InkWell(
         borderRadius: BorderRadius.circular(Radii.md),
         onTap: switch (_phase) {
@@ -213,7 +213,7 @@ class _PictureViewerState extends ConsumerState<PictureViewer> {
       backgroundColor: Kit.dark.sidebar,
       appBar: AppBar(
         backgroundColor: Kit.dark.sidebar,
-        leading: IconButton(tooltip: l10n.pictureClose, icon: const Icon(Icons.close), onPressed: () => Navigator.of(context).pop()),
+        leading: IconButton(tooltip: l10n.chatPictureClose, icon: const Icon(Icons.close), onPressed: () => Navigator.of(context).pop()),
         bottom: _sharp ? null : const PreferredSize(preferredSize: Size.fromHeight(2), child: LinearProgressIndicator(minHeight: 2)),
       ),
       body: InteractiveViewer(

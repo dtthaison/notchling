@@ -100,14 +100,14 @@ class SessionSwipeRow extends StatelessWidget {
         color: kit.accent,
         foreground: kit.onAccent,
         icon: Icons.login,
-        label: l10n.takeoverShort,
+        label: l10n.sessionsTakeoverShort,
         alignment: Alignment.centerLeft,
       ),
       secondaryBackground: _SwipeBackground(
         color: kit.raised,
         foreground: kit.text,
         icon: Icons.archive_outlined,
-        label: l10n.archive,
+        label: l10n.sessionsArchive,
         alignment: Alignment.centerRight,
       ),
       child: ColoredBox(color: kit.window, child: child),
@@ -163,7 +163,7 @@ class SessionGroupHeader extends StatelessWidget {
     final Kit kit = Kit.of(context);
     return Semantics(
       header: true,
-      label: '${state.label(l10n)}, $count session',
+      label: l10n.sessionsGroupLabel(count, state.label(l10n)),
       excludeSemantics: true,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(

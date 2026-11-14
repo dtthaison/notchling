@@ -14,7 +14,7 @@ class SessionsState {
   const SessionsState({this.phase = LoadPhase.loading, this.sessions = const <Session>[], this.error});
   final LoadPhase phase;
   final List<Session> sessions;
-  final String? error;
+  final BridgeException? error;
 
   Session? byId(String? id) {
     if (id == null) return null;
@@ -78,7 +78,7 @@ class SessionsNotifier extends Notifier<SessionsState> {
       state = SessionsState(phase: LoadPhase.ready, sessions: sessions);
     } on BridgeException catch (error) {
       if (!ref.mounted) return;
-      state = SessionsState(phase: LoadPhase.error, sessions: state.sessions, error: error.message);
+      state = SessionsState(phase: LoadPhase.error, sessions: state.sessions, error: error);
     }
   }
 

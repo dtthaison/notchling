@@ -6,7 +6,7 @@ Agent Console on the phone: the same product as Notchling's Chat window, talking
 
 - The look is `DESIGN.md`, taken from the Mac's Chat kit. Read colors and text styles from `Kit.of(context)`; never write a hex, font name or radius in a screen. Build surfaces with `Surface`, bars with `GlassBar`.
 - Status is an icon and a word, never color alone. Orange is for the one primary action of a screen.
-- Text wraps and grows (Vietnamese is longer than English); targets are at least 48 dp. Strings go in `lib/l10n/*.arb`, both `vi` and `en`.
+- Text wraps and grows (German is about 30% longer than English); targets are at least 48 dp. Words go in `locales/en/` (`shared.ftl`, `consent.ftl`, `phone/`); run `python3 tools/locale/gen.py`; never edit `lib/l10n/` by hand (`GUARD-LOCALE-GEN`). A word reaches the screen through a message, never a string literal (`LINT-LOCALE-LITERAL`).
 - `agentconsole.v1` (`lib/core/protocol/`) is shared with the Mac's bridge. Don't change it casually: add optional fields and ops that older Macs and phones ignore, never rename or remove one. Its spec is the repository's `protocol/` folder: read `protocol/README.md`, and change the JSON Schema (`protocol/agentconsole.v1.schema.json`) first. `lib/core/protocol/generated.dart` comes from the schema by `python3 tools/protocol/gen.py`, run from the repository root; never edit it by hand (`GUARD-PROTOCOL-GEN`). The app still reads the wire with the hand-written `models.dart`, and `test/protocol_conformance_test.dart` parses every fixture in `protocol/fixtures/` with both. The `add-protocol-field` skill has the steps. Pairing (`lib/features/pairing/`, `lib/core/pairing/`) and networking (`lib/core/net/`) need the maintainer.
 - Existing tests and golden images (`test/goldens/*.png`) change only with the maintainer. Add new tests freely.
 
@@ -16,6 +16,7 @@ Agent Console on the phone: the same product as Notchling's Chat window, talking
 cd apps/flutter
 mkdir -p assets/viz/vendor assets/viz/fonts assets/models   # git-ignored assets; tests only need the paths
 touch assets/models/ggml-small-q5_1.bin                     # (tool/sync_viz.sh, tool/fetch_model.sh for a real build)
+flutter gen-l10n && git diff --exit-code -- lib/l10n         # the ARB files are generated; CI checks they are current
 flutter analyze
 flutter test                                                # includes the goldens
 flutter test --update-goldens test/goldens                  # only for a look change the maintainer asked for
@@ -25,6 +26,11 @@ flutter test --update-goldens test/goldens                  # only for a look ch
 
 The code carries no comments (see [AGENTS.md](../../AGENTS.md)). What a change could break without knowing it, by file:
 
+- `lib/app/l10n_holder.dart::L10nHolder`: Code with no `BuildContext` (notification titles, channel names, the foreground service line, the built-in slash command list) reads its words from `L10nHolder.current`, which starts as English and follows the system's locales through a `WidgetsBindingObserver`; it never throws and never shows a key. A text shown in a widget uses `AppL10n.of(context)`.
+- `lib/features/connection/bridge_errors.dart`: The phone shows its own words for every `BridgeException` code and the Mac's `message` only as detail (never for `disconnected`, `timeout`, `view_only` or `unauthorized`), because an older Mac sends Vietnamese and a newer one English. The client raises its own errors with an empty message; state classes hold the exception, not a text.
+- `lib/features/chat/send_now_markers.dart`: A Mac that lacks `session.sendNow` refuses with `invalid` and a message that says `lệnh` (older daemon) or `No such op` (newer one); the check keeps both words, and they are the only Vietnamese left in the phone besides dictation.
+- `lib/features/voice/prompt_builder.dart and transcript_cleanup.dart`: Dictation stays Vietnamese (Whisper's language is `vi`), whatever language the app shows: the initial prompt and the phrases it removes are Vietnamese on purpose, and they are baselined for `LINT-LOCALE-LITERAL`.
+- `test/l10n_fixture/`: gen-l10n output for a fixture ARB that holds a plural, an apostrophe and a `#` in a plural branch; `l10n_format_test.dart` pins what `flutter gen-l10n` does with the ICU text `tools/locale/emit_arb.py` writes. Regenerate it in a scratch project with `flutter gen-l10n` when the generator changes.
 - `lib/app/alerts.dart::mutes and lib/features/sessions/archive_store.dart`: Mutes, archive and chat cache all key by storageKey (bare id under the empty scope, otherwise scope/id), and a delete for a scope must wait for the stored data to load or it comes back.
 - `lib/app/notifications.dart::channels`: Android fixes a notification channel's sound when it is created, so the channels carry a version in their ids; change the id when the sound changes.
 - `lib/app/shell.dart::KeyboardLift`: While the keyboard slides the list is never resized per frame: the composer moves by a paint-only transform and the list gets its real bottom padding once the inset holds still; closing drops the padding first.

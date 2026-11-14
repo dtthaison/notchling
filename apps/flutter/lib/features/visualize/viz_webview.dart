@@ -67,7 +67,7 @@ class _VizWebViewState extends State<VizWebView> {
   @override
   Widget build(BuildContext context) {
     if (_bundlePresent == false) {
-      return StateMessage(icon: Icons.extension_off, title: AppL10n.of(context).vizBundleMissing, isError: true);
+      return StateMessage(icon: Icons.extension_off, title: AppL10n.of(context).visualizeBundleMissing, isError: true);
     }
     return WebViewWidget(controller: _controller);
   }

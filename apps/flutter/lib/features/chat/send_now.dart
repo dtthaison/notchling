@@ -7,6 +7,7 @@ import '../../app/theme/tokens.dart';
 import '../../core/net/bridge_client.dart';
 import '../../core/protocol/models.dart';
 import '../../l10n/app_localizations.dart';
+import '../connection/bridge_errors.dart';
 import '../connection/connection.dart';
 import '../sessions/sessions_notifier.dart';
 import 'send_now_markers.dart';
@@ -39,7 +40,7 @@ class _SendNowActionState extends ConsumerState<SendNowAction> {
         title: Text(l10n.chatSendNowTitle),
         content: Text(l10n.chatSendNowBody),
         actions: <Widget>[
-          TextButton(onPressed: () => Navigator.pop(context, false), child: Text(l10n.cancel)),
+          TextButton(onPressed: () => Navigator.pop(context, false), child: Text(l10n.appCancel)),
           TextButton(onPressed: () => Navigator.pop(context, true), child: Text(l10n.chatSendNow)),
         ],
       ),
@@ -55,7 +56,7 @@ class _SendNowActionState extends ConsumerState<SendNowAction> {
       }));
     } on BridgeException catch (error) {
       if (isNoSuchOp(error)) ref.read(sendNowSupportProvider.notifier).markUnsupported();
-      messenger.showSnackBar(SnackBar(content: Text('${l10n.chatSendNowFailed}: ${error.message}')));
+      messenger.showSnackBar(SnackBar(content: Text('${l10n.chatSendNowFailed}: ${bridgeErrorLine(l10n, error)}')));
       if (mounted) setState(() => _busy = false);
     }
   }

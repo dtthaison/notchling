@@ -168,7 +168,7 @@ void main() {
       final ChatNotifier notifier = container.read(chatProvider('c').notifier);
       await notifier.send('again');
       await until(() => container.read(chatProvider('c')).pending.single.failed);
-      expect(container.read(chatProvider('c')).pending.single.reason, 'Mac bận');
+      expect(container.read(chatProvider('c')).pending.single.reason?.message, 'Mac bận');
       await notifier.retry(container.read(chatProvider('c')).pending.single.id);
       expect(attempts, 2);
       expect(container.read(chatProvider('c')).pending.single.failed, isFalse);
@@ -253,14 +253,14 @@ void main() {
       ));
       await tester.pump();
       await tester.pump();
-      expect(find.text('Không tải được ảnh'), findsOneWidget);
+      expect(find.text('Could not load the picture'), findsOneWidget);
       expect(find.byType(Image), findsNothing);
       fail = false;
       await tester.tap(find.byType(PictureThumbnail));
       await tester.pump();
       await tester.pump();
       expect(find.byType(Image), findsOneWidget);
-      expect(find.text('Không tải được ảnh'), findsNothing);
+      expect(find.text('Could not load the picture'), findsNothing);
     });
   });
 }

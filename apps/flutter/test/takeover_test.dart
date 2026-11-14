@@ -1,3 +1,4 @@
+import 'package:agent_console/core/net/bridge_client.dart';
 import 'package:agent_console/core/protocol/models.dart';
 import 'package:agent_console/features/chat/chat_notifier.dart';
 import 'package:agent_console/features/chat/composer.dart';
@@ -57,7 +58,7 @@ void main() {
       expect(await container.read(chatProvider('old').notifier).takeOver(), isNull);
       final TakeoverProgress progress = container.read(chatProvider('old')).takeover;
       expect(progress, isA<TakeoverFailed>());
-      expect((progress as TakeoverFailed).message, contains('Đóng session ở nơi đang mở'));
+      expect((progress as TakeoverFailed).error.message, contains('Đóng session ở nơi đang mở'));
       container.read(chatProvider('old').notifier).dismissTakeoverError();
       expect(container.read(chatProvider('old')).takeover, isA<TakeoverIdle>());
     });
@@ -80,36 +81,36 @@ void main() {
       )));
     }
 
-    testWidgets('eligible: the dead-end sentence is replaced by a Tiếp quản button that calls back', (WidgetTester tester) async {
+    testWidgets('eligible: the dead-end sentence is replaced by a Take over button that calls back', (WidgetTester tester) async {
       int taps = 0;
       await pump(tester, info: const TakeoverInfo(available: true), onTakeover: () => taps++);
-      expect(find.text('Tiếp quản'), findsOneWidget);
-      expect(find.textContaining('chỉ xem'), findsOneWidget);
-      await tester.tap(find.text('Tiếp quản'));
+      expect(find.text('Take over'), findsOneWidget);
+      expect(find.textContaining('view only'), findsOneWidget);
+      await tester.tap(find.text('Take over'));
       expect(taps, 1);
-      expect(tester.getSize(find.ancestor(of: find.text('Tiếp quản'), matching: find.byType(Container)).first).height, greaterThanOrEqualTo(48));
+      expect(tester.getSize(find.ancestor(of: find.text('Take over'), matching: find.byType(Container)).first).height, greaterThanOrEqualTo(48));
     });
 
     testWidgets('not eligible: shows the Mac\'s reason and no button', (WidgetTester tester) async {
       await pump(tester, info: const TakeoverInfo(available: false, reason: 'Đóng session ở nơi đang mở (Claude desktop / VS Code) rồi tiếp quản'));
       expect(find.textContaining('Đóng session ở nơi đang mở'), findsOneWidget);
-      expect(find.text('Tiếp quản'), findsNothing);
+      expect(find.text('Take over'), findsNothing);
     });
 
     testWidgets('an older Mac without the field keeps the plain view-only sentence', (WidgetTester tester) async {
       await pump(tester);
-      expect(find.textContaining('chỉ xem'), findsOneWidget);
-      expect(find.text('Tiếp quản'), findsNothing);
+      expect(find.textContaining('view only'), findsOneWidget);
+      expect(find.text('Take over'), findsNothing);
     });
 
     testWidgets('running disables the button; a failure shows its reason', (WidgetTester tester) async {
       int taps = 0;
       await pump(tester, info: const TakeoverInfo(available: true), progress: const TakeoverRunning(), onTakeover: () => taps++);
-      expect(find.text('Đang tiếp quản…'), findsOneWidget);
-      await tester.tap(find.text('Đang tiếp quản…'));
+      expect(find.text('Taking over…'), findsOneWidget);
+      await tester.tap(find.text('Taking over…'));
       expect(taps, 0);
 
-      await pump(tester, info: const TakeoverInfo(available: true), progress: const TakeoverFailed('Thư mục làm việc của session không còn.'), onTakeover: () {});
+      await pump(tester, info: const TakeoverInfo(available: true), progress: TakeoverFailed(const BridgeException('invalid', 'Thư mục làm việc của session không còn.')), onTakeover: () {});
       expect(find.textContaining('Thư mục làm việc của session không còn.'), findsOneWidget);
     });
   });
