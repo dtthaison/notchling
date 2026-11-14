@@ -149,6 +149,20 @@ Notchling works on your actual Claude Code, Claude Desktop, Codex and Antigravit
 
 The lint checks these where it can; [docs/rules.md](docs/rules.md) lists each rule and its check.
 
+### Translating Notchling
+
+Notchling's words live in `locales/`. English (`locales/en/`) is the source; every other folder is a translation. [docs/translating.md](docs/translating.md) has the style notes.
+
+1. Copy `locales/en/` to `locales/<tag>/`, where the tag names your language: `de`, `fr`, `pt-BR`, `zh-Hans`. Or run `python3 tools/locale/gen.py --new de`.
+2. Translate the text after each `=`. Keep the key on the left and every `{ $name }` (you may move it). Lines starting with `#` say where a text appears; leave them.
+3. For a number, keep the `{ $count -> ... }` block and give the forms your language needs: `zero`, `one`, `two`, `few`, `many`, `other`. Keep `*[other]`.
+4. Don't translate product names (`{ -brand-notchling }`), commands or file names. Delete a message you don't translate; it shows in English.
+5. Run `python3 tools/locale/gen.py` (Python 3.9 or later, nothing to install). It checks your files, writes the app files that come from them, and prints how much is translated. Fix what it reports.
+6. For a new language, add its tag to `draft` in `locales/languages.json` (`--new` does it). The maintainer moves it to `ship` when it is ready.
+7. Commit everything with `git commit -s` and open a pull request.
+
+The maintainer reviews a new language's first pull request and every change to `consent.ftl`, the words that allow or refuse something. Other changes to a language that ships follow the usual flow.
+
 ## Pull requests
 
 - Keep each one to a single change, and say in the description what you ran and looked at.
