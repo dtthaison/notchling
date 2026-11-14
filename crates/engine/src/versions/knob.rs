@@ -91,12 +91,16 @@ impl Place {
     }
 
     pub fn fits(&self, knob: Knob) -> bool {
-        match (knob, self) {
-            (Knob::ClaudeDisableAutoupdater, Place::ConfigDir(_) | Place::LaneConfigDir(_)) => true,
-            (Knob::CodexUpdateCheck | Knob::CodexDaemonAutoStart, Place::CodexHome(_)) => true,
-            (Knob::AgyEnv, Place::ServiceFile(_)) => true,
-            _ => false,
-        }
+        matches!(
+            (knob, self),
+            (
+                Knob::ClaudeDisableAutoupdater,
+                Place::ConfigDir(_) | Place::LaneConfigDir(_)
+            ) | (
+                Knob::CodexUpdateCheck | Knob::CodexDaemonAutoStart,
+                Place::CodexHome(_)
+            ) | (Knob::AgyEnv, Place::ServiceFile(_))
+        )
     }
 }
 
@@ -327,7 +331,7 @@ fn claude_on(text: &str) -> Result<String, String> {
     Ok(new)
 }
 
-fn shown_off(knob: Knob, place: &Place) -> String {
+pub fn shown_off(knob: Knob, place: &Place) -> String {
     let base = place.base();
     match knob {
         Knob::ClaudeDisableAutoupdater => {
@@ -339,7 +343,7 @@ fn shown_off(knob: Knob, place: &Place) -> String {
     }
 }
 
-fn shown_on(knob: Knob, place: &Place) -> String {
+pub fn shown_on(knob: Knob, place: &Place) -> String {
     let base = place.base();
     match knob {
         Knob::ClaudeDisableAutoupdater => format!("{base}: remove \"{CLAUDE_VAR}\": \"1\""),

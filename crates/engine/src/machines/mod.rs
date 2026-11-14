@@ -32,6 +32,7 @@ pub mod steps_sd;
 pub mod steps_sd_check;
 pub mod steps_sd_service;
 pub mod steps_secret;
+pub mod steps_selfupdate;
 mod steps_versions;
 mod steps_xcode;
 pub mod token_creation;
@@ -121,6 +122,8 @@ mod tests_sd_worker;
 mod tests_secret_steps;
 #[cfg(test)]
 mod tests_secrets;
+#[cfg(test)]
+mod tests_selfupdate;
 #[cfg(test)]
 mod tests_shell;
 #[cfg(test)]

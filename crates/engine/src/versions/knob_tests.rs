@@ -196,7 +196,7 @@ fn codex_check_is_top_level() {
 
 #[test]
 fn codex_daemon_knob_only_when_verified() {
-    assert!(!CODEX_DAEMON_KNOB_VERIFIED);
+    const { assert!(!CODEX_DAEMON_KNOB_VERIFIED) };
     assert!(!Knob::CodexDaemonAutoStart.verified());
     assert_eq!(
         plan_off(Knob::CodexDaemonAutoStart, &codex(), ""),
@@ -210,7 +210,7 @@ fn codex_daemon_knob_only_when_verified() {
 
 #[test]
 fn agy_knob_only_when_verified() {
-    assert!(!AGY_KNOB_VERIFIED);
+    const { assert!(!AGY_KNOB_VERIFIED) };
     assert!(!Knob::AgyEnv.verified());
     let service = Place::ServiceFile("/home/w/.config/systemd/user/sd.service".to_string());
     assert_eq!(

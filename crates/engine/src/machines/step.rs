@@ -5,7 +5,7 @@ use super::runner::{Call, Channel, CommandResult, OutputSink, Runner};
 use super::shell;
 use crate::accounts::Secret;
 use crate::vault::{VaultEntry, VaultRequest};
-use crate::versions::WorkerTools;
+use crate::versions::{Tool, WorkerTools};
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -32,6 +32,13 @@ impl StepId {
     pub const SERVICE: StepId = StepId(Cow::Borrowed("service"));
     pub const SD_CHECK: StepId = StepId(Cow::Borrowed("sd-check"));
     pub const RUNNING: StepId = StepId(Cow::Borrowed("running"));
+
+    pub fn self_update(tool: Tool) -> StepId {
+        StepId(Cow::Owned(format!("self-update:{}", tool.name())))
+    }
+    pub fn self_update_tool(&self) -> Option<Tool> {
+        Tool::from_name(self.0.strip_prefix("self-update:")?)
+    }
 
     pub fn deploy_key(github: &str) -> StepId {
         StepId(Cow::Owned(format!("deploy-key:{github}")))
@@ -283,6 +290,9 @@ impl SetupStep {
     }
 
     pub fn replace_title(&self) -> String {
+        if self.id.self_update_tool().is_some() {
+            return self.title.replace("Self-Update Off", "Self-Update On");
+        }
         self.title.replace("Deploy key", "Replace key")
     }
 

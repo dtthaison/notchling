@@ -242,7 +242,12 @@ impl SetupEngine {
     }
 
     pub(super) fn step_list(&self, m: &Machine) -> Vec<SetupStep> {
-        (self.catalog.steps)(m, &self.current_machines())
+        let list = (self.catalog.steps)(m, &self.current_machines());
+        let tools = lock(&self.state)
+            .facts
+            .get(&m.name)
+            .and_then(|d| d.tools.clone());
+        super::steps_selfupdate::only_installed(list, tools.as_ref())
     }
 
     pub(super) fn masks(&self, m: &Machine, admin_password: Option<&str>) -> Masks {

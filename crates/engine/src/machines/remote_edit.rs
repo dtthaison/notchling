@@ -37,11 +37,24 @@ impl Read {
 
 const HASH: &str = "h() { if [ \"$(uname)\" = Darwin ]; then shasum -a 256 \"$1\" | cut -d' ' -f1; else sha256sum \"$1\" | cut -d' ' -f1; fi; }";
 
-pub fn read_script_max(path: &str, nonce: &str, max: usize) -> String {
-    let f = shell::path(path);
+pub fn read_script_expr(path_word: &str, nonce: &str, max: usize) -> String {
     format!(
-        "{HASH}\nf={f}\nif [ ! -e \"$f\" ]; then echo missing=1; exit 0; fi\nif [ ! -f \"$f\" ] || [ ! -r \"$f\" ]; then echo unreadable=1; exit 0; fi\nsize=$(wc -c < \"$f\" | tr -d ' ')\necho size=$size\necho sha256=$(h \"$f\")\nif [ \"$size\" -le {max} ]; then echo '@@begin {nonce}'; cat \"$f\"; echo; echo '@@end {nonce}'; fi"
+        "{HASH}\nf={path_word}\necho path=$f\nif [ ! -e \"$f\" ]; then echo missing=1; exit 0; fi\nif [ ! -f \"$f\" ] || [ ! -r \"$f\" ]; then echo unreadable=1; exit 0; fi\nsize=$(wc -c < \"$f\" | tr -d ' ')\necho size=$size\necho sha256=$(h \"$f\")\nif [ \"$size\" -le {max} ]; then echo '@@begin {nonce}'; cat \"$f\"; echo; echo '@@end {nonce}'; fi"
     )
+}
+
+pub fn read_script_max(path: &str, nonce: &str, max: usize) -> String {
+    read_script_expr(&shell::path(path), nonce, max)
+}
+
+pub fn resolved_path(text: &str) -> Option<String> {
+    let head = text.split("@@begin ").next().unwrap_or(text);
+    let path = head
+        .lines()
+        .take(16)
+        .find_map(|l| l.strip_prefix("path="))?
+        .trim();
+    shell::is_safe_machine_path(path).then(|| path.to_string())
 }
 
 pub fn read_script(path: &str, nonce: &str) -> String {
