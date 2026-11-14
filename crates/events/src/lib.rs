@@ -3,6 +3,8 @@ mod field_macros;
 #[macro_use]
 mod kind_macros;
 
+pub mod audit_check;
+pub mod audit_line;
 pub mod doc;
 pub mod emit;
 pub mod envelope;
@@ -28,6 +30,10 @@ pub use value::Fields;
 #[cfg(test)]
 mod test_kinds;
 
+#[cfg(test)]
+mod audit_check_tests;
+#[cfg(test)]
+mod audit_line_tests;
 #[cfg(test)]
 mod emit_tests;
 #[cfg(test)]
