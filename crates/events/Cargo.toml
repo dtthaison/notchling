@@ -1,0 +1,17 @@
+[package]
+name = "notchling-events"
+description = "Notchling log events: the registry, the envelope and the closed list of field types"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+# A hashed ref and a salt's id are the first 8 hex of a SHA-256, as the engine's stable ids.
+sha2 = "0.10"
+# A Seal is a 32-byte keyed hash written as 44 base64 characters.
+base64 = "0.22"
+
+[dev-dependencies]
+# Tests parse what the hand-written JSON writers produce, to prove it is valid.
+serde_json = "1"
