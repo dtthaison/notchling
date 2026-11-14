@@ -1,5 +1,7 @@
 use std::path::Path;
+use std::rc::Rc;
 use std::sync::Arc;
+use std::time::Duration;
 
 use gpui::{
     div, prelude::*, px, Context, Div, Entity, EventEmitter, Render, SharedString, Stateful, Window,
@@ -17,6 +19,7 @@ use super::agents::{Page, Tool};
 use super::agents_view::agents_page;
 use super::banner::Banners;
 use super::client_model::{self, ClientPart};
+use super::client_view::ClientHandlers;
 use super::hook_rows::HooksShown;
 use super::settings::{change, sections, Daemon, Field, Row};
 use super::view::{sheet_header, Acts, Dismiss};
@@ -35,6 +38,8 @@ pub struct SettingsView {
     busy: Option<Area>,
     hooks: HooksShown,
     client: Option<ClientPart>,
+    watching: bool,
+    confirming_back: bool,
     page: Page,
     tool: Tool,
     activity: Option<Entity<ActivityView>>,
@@ -65,6 +70,8 @@ impl SettingsView {
             busy: None,
             hooks: HooksShown::Checking,
             client: None,
+            watching: false,
+            confirming_back: false,
             page: Page::General,
             tool: Tool::ClaudeCode,
             activity: None,
@@ -137,6 +144,110 @@ impl SettingsView {
             .ok();
         })
         .detach();
+    }
+
+    fn run_version_op(&mut self, op: &'static str, args: Value, cx: &mut Context<Self>) {
+        let actions = self.acts.actions.clone();
+        self.error = None;
+        self.confirming_back = false;
+        if let Some(part) = &mut self.client {
+            part.busy = true;
+        }
+        cx.notify();
+        cx.spawn(async move |this, cx| {
+            let sent = cx
+                .background_executor()
+                .spawn(async move { actions.read(&crate::acting::Request { op, args }) })
+                .await;
+            this.update(cx, |view, cx| {
+                if let Err(e) = sent {
+                    view.error = Some(e);
+                }
+                view.watch_client(cx);
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    fn watch_client(&mut self, cx: &mut Context<Self>) {
+        if self.watching {
+            return;
+        }
+        self.watching = true;
+        let actions = self.acts.actions.clone();
+        let home = std::env::var("HOME").unwrap_or_default();
+        cx.spawn(async move |this, cx| {
+            for _ in 0..300 {
+                let (actions, home) = (actions.clone(), home.clone());
+                let part = cx
+                    .background_executor()
+                    .spawn(async move {
+                        client_model::load(
+                            &actions,
+                            notchling_engine::versions::Tool::Claude,
+                            &home,
+                        )
+                    })
+                    .await;
+                let busy = part.busy;
+                let alive = this
+                    .update(cx, |view, cx| {
+                        view.client = Some(part);
+                        cx.notify();
+                    })
+                    .is_ok();
+                if !alive || !busy {
+                    break;
+                }
+                cx.background_executor().timer(Duration::from_secs(2)).await;
+            }
+            this.update(cx, |view, _| view.watching = false).ok();
+        })
+        .detach();
+    }
+
+    fn client_handlers(&self, cx: &mut Context<Self>) -> ClientHandlers {
+        let tool = notchling_engine::versions::Tool::Claude.name();
+        let go_back = self
+            .client
+            .as_ref()
+            .and_then(|c| c.go_back.as_ref())
+            .map(|g| g.to.clone());
+        ClientHandlers {
+            check: Rc::new(cx.listener(move |this, _, _, cx| {
+                this.run_version_op(
+                    notchling_local_api::ops::VERSIONS_CHECK,
+                    serde_json::json!({ "tool": tool }),
+                    cx,
+                );
+            })),
+            update: Rc::new(cx.listener(move |this, _, _, cx| {
+                this.run_version_op(
+                    notchling_local_api::ops::VERSIONS_UPDATE_LOCAL,
+                    serde_json::json!({ "tool": tool }),
+                    cx,
+                );
+            })),
+            ask_back: Rc::new(cx.listener(|this, _, _, cx| {
+                this.confirming_back = true;
+                cx.notify();
+            })),
+            confirm_back: Rc::new(cx.listener(move |this, _, _, cx| {
+                if let Some(to) = go_back.clone() {
+                    this.run_version_op(
+                        notchling_local_api::ops::VERSIONS_UPDATE_LOCAL,
+                        serde_json::json!({ "tool": tool, "to": to }),
+                        cx,
+                    );
+                }
+            })),
+            cancel_back: Rc::new(cx.listener(|this, _, _, cx| {
+                this.confirming_back = false;
+                cx.notify();
+            })),
+            confirming: self.confirming_back,
+        }
     }
 
     pub fn ask_hooks(&mut self, hooks: Arc<Hooks>, cx: &mut Context<Self>) {
@@ -441,10 +552,12 @@ impl Render for SettingsView {
             );
         }
         if self.page == Page::Agents {
+            let handlers = self.client_handlers(cx);
             list = list.child(agents_page(
                 self.tool,
                 &self.hooks,
                 self.client.as_ref(),
+                &handlers,
                 a,
                 cx,
             ));

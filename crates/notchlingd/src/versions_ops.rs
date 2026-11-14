@@ -424,6 +424,7 @@ impl VersionsOps {
                 let mut value = row(t, found.get(&t), &self.checks);
                 value["latest"] =
                     json!(self.updates.known_latest(t).map(|v| v.as_str().to_string()));
+                value["updating"] = json!(self.updates.is_running(t));
                 value["goBack"] = json!(found
                     .get(&t)
                     .and_then(|i| self.go_back(t, i))

@@ -6,6 +6,13 @@ use crate::acting::Request;
 use crate::actions::Actions;
 use crate::machines::versions_feed::mac_side;
 use crate::machines::versions_model::mark_text;
+use crate::switches::{Switch, Switches};
+use notchling_engine::pages::clock::local_offset_secs;
+
+pub use super::client_check::Extras;
+use super::client_check::{
+    check_line, go_back, latest_line, soak_line, update_button, CheckLine, GoBack, UpdateButton,
+};
 
 pub const NOT_RUNNING: &str = "Notchling isn't running";
 pub const NOT_FOUND: &str = "Not found";
@@ -22,6 +29,12 @@ pub struct WorkerLine {
 pub struct ClientPart {
     pub found: String,
     pub workers: Vec<WorkerLine>,
+    pub latest: Option<String>,
+    pub update: Option<UpdateButton>,
+    pub check: Option<CheckLine>,
+    pub soak: Option<(String, bool)>,
+    pub go_back: Option<GoBack>,
+    pub busy: bool,
 }
 
 impl ClientPart {
@@ -29,6 +42,12 @@ impl ClientPart {
         ClientPart {
             found: NOT_RUNNING.to_owned(),
             workers: Vec::new(),
+            latest: None,
+            update: None,
+            check: None,
+            soak: None,
+            go_back: None,
+            busy: false,
         }
     }
 }
@@ -119,13 +138,30 @@ fn worker_lines(tool: Tool, get: &Value, workers: &Value) -> Vec<WorkerLine> {
 }
 
 pub fn client_part(tool: Tool, get: &Value, workers: &Value, home: &str) -> ClientPart {
+    client_part_with(tool, get, workers, home, Extras::default())
+}
+
+pub fn client_part_with(
+    tool: Tool,
+    get: &Value,
+    workers: &Value,
+    home: &str,
+    extras: Extras,
+) -> ClientPart {
     if get.get("tools").and_then(Value::as_array).is_none() {
         return ClientPart::not_running();
     }
-    let found = row_of(get, tool).map_or(NOT_FOUND.to_owned(), |row| found_line(row, home));
+    let row = row_of(get, tool);
+    let found = row.map_or(NOT_FOUND.to_owned(), |row| found_line(row, home));
     ClientPart {
         found,
         workers: worker_lines(tool, get, workers),
+        latest: row.and_then(latest_line),
+        update: row.and_then(|r| update_button(tool, r, extras.install_on)),
+        check: row.map(|r| check_line(tool, r, extras.offset_secs)),
+        soak: row.and_then(soak_line),
+        go_back: row.and_then(|r| go_back(tool, r)),
+        busy: row.is_some_and(super::client_check::busy),
     }
 }
 
@@ -134,7 +170,7 @@ pub fn load(actions: &Actions, tool: Tool, home: &str) -> ClientPart {
         op: ops::VERSIONS_GET,
         args: json!({}),
     });
-    let Ok(get) = get else {
+    let Ok(mut get) = get else {
         return ClientPart::not_running();
     };
     let workers = actions
@@ -143,5 +179,35 @@ pub fn load(actions: &Actions, tool: Tool, home: &str) -> ClientPart {
             args: json!({}),
         })
         .unwrap_or(Value::Null);
-    client_part(tool, &get, &workers, home)
+    let latest = actions.read(&Request {
+        op: ops::VERSIONS_LATEST,
+        args: json!({"tool": tool.name()}),
+    });
+    if let (Ok(latest), Some(rows)) = (latest, get.get_mut("tools").and_then(Value::as_array_mut)) {
+        for row in rows.iter_mut() {
+            if row.get("tool").and_then(Value::as_str) == Some(tool.name()) {
+                row["latest"] = latest.get("latest").cloned().unwrap_or(Value::Null);
+            }
+        }
+    }
+    let install_on = actions
+        .read(&Request {
+            op: ops::SETTINGS_SWITCHES,
+            args: json!({}),
+        })
+        .map(|reply| Switches::from_reply(&reply).is_on(Switch::Install))
+        .unwrap_or(false);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0.0, |d| d.as_secs_f64());
+    client_part_with(
+        tool,
+        &get,
+        &workers,
+        home,
+        Extras {
+            install_on,
+            offset_secs: local_offset_secs(now),
+        },
+    )
 }

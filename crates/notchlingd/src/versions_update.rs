@@ -78,6 +78,10 @@ impl Updates {
         }
     }
 
+    pub fn is_running(&self, tool: Tool) -> bool {
+        lock(&self.running).contains(&tool)
+    }
+
     pub fn known_latest(&self, tool: Tool) -> Option<Version> {
         lock(&self.cache).get(&tool).and_then(|c| c.latest.clone())
     }
