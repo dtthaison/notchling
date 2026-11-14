@@ -1,3 +1,4 @@
+use notchling_locale as t;
 use std::sync::Arc;
 
 use gpui::{div, prelude::*, px, AnyElement, AnyView, Context, StyleRefinement, Window};
@@ -92,7 +93,7 @@ impl ChatView {
                 .spawn(async move { acts.actions.read(&request) })
                 .await;
             let slot = match result.and_then(|reply| {
-                git::parse_diff(&reply).ok_or_else(|| "The diff came back unreadable.".to_owned())
+                git::parse_diff(&reply).ok_or_else(|| t::chat::changes_unreadable().to_owned())
             }) {
                 Ok(diff) => Slot::from_diff(&diff),
                 Err(why) => Slot::Failed(why),

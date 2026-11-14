@@ -123,7 +123,7 @@
         "crates/app/src/chat/view/diff_panel.rs",
         "crates/app/src/chat/view/shell_probe.rs"
       ],
-      "moved": false
+      "moved": true
     },
     {
       "name": "chat-window",

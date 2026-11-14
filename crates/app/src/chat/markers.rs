@@ -37,3 +37,9 @@ pub fn bubble_part(queued: bool, sending: bool) -> &'static str {
         (false, false) => "Your Message",
     }
 }
+
+pub const FACT_FOLDER: &str = "Folder";
+pub const FACT_BRANCH: &str = "Branch";
+pub const FACT_TURNS: &str = "Turns";
+pub const FACT_TOKENS: &str = "Tokens";
+pub const FACT_COMMANDS: &str = "Commands";

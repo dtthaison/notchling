@@ -1,3 +1,4 @@
+use notchling_locale as t;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
@@ -41,7 +42,8 @@ pub struct ChangesPanel {
 
 impl ChangesPanel {
     pub fn new(chat: WeakEntity<ChatView>, cx: &mut Context<Self>) -> ChangesPanel {
-        let editor = cx.new(|cx| TextEditor::new("Filter files", 1, cx).single_line());
+        let editor = cx
+            .new(|cx| TextEditor::new(t::chat::changes_filter_placeholder(), 1, cx).single_line());
         let events = cx.subscribe(&editor, |this, editor, event: &TextEditorEvent, cx| {
             if matches!(event, TextEditorEvent::Changed) {
                 let text = editor.read(cx).text().to_owned();
@@ -260,7 +262,7 @@ fn file_row(
                     PartState::Rest,
                     a,
                 ),
-                "Open in File Panel".into(),
+                t::chat::changes_open_in_panel().into(),
                 a,
             )
             .flex_shrink_0()
@@ -334,7 +336,12 @@ impl ChangesPanel {
                         .child(icon(Icon::ChevronDown, 9.0, Ink::TextMuted, a)),
                 );
         } else {
-            title = title.child(label("Changes", TypeRole::Label, Ink::Text, a));
+            title = title.child(label(
+                t::chat::changes_title(),
+                TypeRole::Label,
+                Ink::Text,
+                a,
+            ));
         }
         let badge = model.filter(|m| m.is_large()).map(|_| {
             div()
@@ -345,7 +352,12 @@ impl ChangesPanel {
                 .items_center()
                 .rounded_full()
                 .bg(hsla(Ink::Needs.color(a).with_alpha(0.16)))
-                .child(label("Large diff", TypeRole::Label, Ink::AccentText, a))
+                .child(label(
+                    t::chat::changes_large(),
+                    TypeRole::Label,
+                    Ink::AccentText,
+                    a,
+                ))
         });
         let close = gate::tip_text(
             icon_button(
@@ -356,7 +368,7 @@ impl ChangesPanel {
                 PartState::Rest,
                 a,
             ),
-            "Close".into(),
+            t::chat::changes_close().into(),
             a,
         )
         .flex_shrink_0()
@@ -407,13 +419,13 @@ impl ChangesPanel {
             .overflow_y_scroll()
             .flex()
             .flex_col()
-            .child(menu_section("Compare Against", a));
+            .child(menu_section(t::chat::changes_compare_against(), a));
         match &self.branches {
-            None => items = items.child(menu_note("Reading the branches\u{2026}", a)),
+            None => items = items.child(menu_note(t::chat::changes_reading_branches(), a)),
             Some(list) => {
                 let choices = list.choices();
                 if choices.is_empty() {
-                    items = items.child(menu_note("There are no other branches.", a));
+                    items = items.child(menu_note(t::chat::changes_no_branches(), a));
                 }
                 for (i, name) in choices.into_iter().enumerate() {
                     let pick = name.clone();
@@ -460,7 +472,7 @@ impl Render for ChangesPanel {
         let Some(model) = model else {
             return column
                 .child(div().p(px(PAD)).child(label(
-                    "Nothing to compare.",
+                    t::chat::changes_nothing(),
                     TypeRole::Meta,
                     Ink::TextMuted,
                     a,
@@ -478,9 +490,9 @@ impl Render for ChangesPanel {
         column = column.child(div().h(px(1.0)).flex_shrink_0().fill(Ink::Hairline, a));
         if self.rows.is_empty() {
             let text = if model.files.is_empty() {
-                "No changes against the base."
+                t::chat::changes_no_changes_base()
             } else {
-                "No files match."
+                t::chat::changes_no_match()
             };
             column = column.child(div().p(px(PAD)).child(label(
                 text,

@@ -1,8 +1,10 @@
 use notchling_engine::transcript::model::{Conversation, TaskStatus};
 use notchling_kit::ui::ToolMark;
 use notchling_kit::{Icon, Ink, Status};
+use notchling_locale as t;
 
 use super::format::tokens;
+use super::markers;
 use super::paging::Counts;
 use super::shell_list::Listing;
 use super::shell_rows::shell_rows;
@@ -98,7 +100,7 @@ impl TaskSummary {
     }
 
     pub fn title(&self) -> String {
-        format!("Tasks {}/{}", self.done, self.total)
+        t::chat::details_tasks_progress(self.done, self.total)
     }
 
     pub fn fraction(&self) -> f32 {
@@ -111,10 +113,14 @@ impl TaskSummary {
 }
 
 pub fn token_line(input: u64, output: u64, cached: u64) -> String {
-    let mut line = format!("{} in · {} out", tokens(input), tokens(output));
+    let mut line = t::chat::details_tokens(&tokens(input), &tokens(output));
     if cached > 0 && input > 0 {
         let share = (cached as f64 / input as f64 * 100.0).round().min(100.0);
-        line.push_str(&format!("\n{} cached ({share}%)", tokens(cached)));
+        line.push('\n');
+        line.push_str(&t::chat::details_cached(
+            &tokens(cached),
+            &share.to_string(),
+        ));
     }
     line
 }
@@ -123,33 +129,33 @@ pub fn counted_title(name: &str, running: usize, total: usize) -> String {
     if total == 0 {
         name.to_owned()
     } else if running > 0 {
-        format!("{name} · {running} running")
+        t::chat::details_running(name, &running.to_string())
     } else {
-        format!("{name} · {total}")
+        t::chat::details_total(name, &total.to_string())
     }
 }
 
 impl Inspector {
     pub fn tasks_title(&self) -> String {
         if self.tasks.is_empty() {
-            return "Tasks".to_owned();
+            return t::chat::details_tasks().to_owned();
         }
         let done = self
             .tasks
             .iter()
             .filter(|t| t.status == Status::Done)
             .count();
-        format!("Tasks · {done}/{}", self.tasks.len())
+        t::chat::details_tasks_counted(done, self.tasks.len())
     }
 
     pub fn subagents_title(&self) -> String {
         let counts = self.subagent_counts;
-        counted_title("Subagents", counts.running, counts.total)
+        counted_title(t::chat::details_subagents(), counts.running, counts.total)
     }
 
     pub fn shells_title(&self) -> String {
         let running = self.shells.iter().filter(|s| s.running).count();
-        counted_title("Shells", running, self.shell_counts.total)
+        counted_title(t::chat::details_shells(), running, self.shell_counts.total)
     }
 }
 
@@ -157,19 +163,19 @@ pub fn facts(conversation: &Conversation) -> Vec<(&'static str, String)> {
     let f = &conversation.facts;
     let mut out: Vec<(&'static str, String)> = Vec::new();
     if let Some(branch) = &f.branch {
-        out.push(("Branch", branch.clone()));
+        out.push((markers::FACT_BRANCH, branch.clone()));
     }
     if f.turns > 0 {
-        out.push(("Turns", f.turns.to_string()));
+        out.push((markers::FACT_TURNS, f.turns.to_string()));
     }
     if f.input_tokens + f.output_tokens > 0 {
         out.push((
-            "Tokens",
+            markers::FACT_TOKENS,
             token_line(f.input_tokens, f.output_tokens, f.cached_tokens),
         ));
     }
     if f.commands > 0 {
-        out.push(("Commands", f.commands.to_string()));
+        out.push((markers::FACT_COMMANDS, f.commands.to_string()));
     }
     out
 }
@@ -216,26 +222,20 @@ pub fn inspector_listed(
 
 pub fn fact_icon(label: &str) -> Icon {
     match label {
-        "Folder" => Icon::Folder,
-        "Branch" => Icon::Branch,
-        "Turns" => Icon::Turns,
-        "Tokens" => Icon::Tokens,
-        "Commands" => Icon::Terminal,
+        markers::FACT_FOLDER => Icon::Folder,
+        markers::FACT_BRANCH => Icon::Branch,
+        markers::FACT_TURNS => Icon::Turns,
+        markers::FACT_TOKENS => Icon::Tokens,
+        markers::FACT_COMMANDS => Icon::Terminal,
         _ => Icon::File,
     }
 }
 
 pub fn fact_text(label: &str, value: &str) -> String {
-    let plural = |word: &str| {
-        if value == "1" {
-            format!("1 {word}")
-        } else {
-            format!("{value} {word}s")
-        }
-    };
-    match label {
-        "Turns" => plural("turn"),
-        "Commands" => plural("command"),
+    let count = value.parse::<i64>();
+    match (label, count) {
+        (markers::FACT_TURNS, Ok(n)) => t::chat::details_turns(n, value),
+        (markers::FACT_COMMANDS, Ok(n)) => t::chat::details_commands(n, value),
         _ => value.to_owned(),
     }
 }

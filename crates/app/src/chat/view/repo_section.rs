@@ -2,6 +2,7 @@ use gpui::{div, prelude::*, px, Div, SharedString, Stateful, WeakEntity};
 use notchling_kit::metric::RADIUS_SM;
 use notchling_kit::ui::{hsla, icon, label, KitStyled};
 use notchling_kit::{Appearance, Icon, Ink, TypeRole};
+use notchling_locale as t;
 
 use super::inspector::{empty, fact_row, MARK_BOX, ROW_LINE};
 use super::ChatView;
@@ -27,9 +28,9 @@ pub fn content(
     }
     if m.files.is_empty() {
         let text = if changes.is_some_and(|c| c.files > 0) {
-            "No uncommitted changes"
+            t::chat::git_no_uncommitted()
         } else {
-            "No changes"
+            t::chat::git_no_changes()
         };
         column = column.child(empty(text, a));
     }
@@ -86,7 +87,7 @@ fn changes_row(summary: &Summary, chat: &WeakEntity<ChatView>, a: Appearance) ->
         )
         .child(
             label(
-                &format!("vs {}", summary.base),
+                &t::chat::git_vs_base(&summary.base),
                 TypeRole::Meta,
                 Ink::TextFaint,
                 a,

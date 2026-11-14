@@ -1,3 +1,4 @@
+use notchling_locale as t;
 use std::sync::Arc;
 
 use notchling_kit::Ink;
@@ -53,7 +54,7 @@ pub struct GitModel {
 
 impl GitModel {
     pub fn title(&self) -> String {
-        counted_title("Git", 0, self.files.len())
+        counted_title(t::chat::details_git(), 0, self.files.len())
     }
 
     pub fn hidden(&self) -> usize {
@@ -65,18 +66,18 @@ impl GitModel {
         let plus = if self.truncated { "+" } else { "" };
         match (hidden, self.truncated) {
             (0, false) => None,
-            (0, true) => Some("More files not shown".to_owned()),
-            _ => Some(format!("{hidden}{plus} more files not shown")),
+            (0, true) => Some(t::chat::git_more_not_shown().to_owned()),
+            _ => Some(t::chat::git_hidden(&format!("{hidden}{plus}"))),
         }
     }
 }
 
 pub fn tracking(upstream: &str, ahead: u64, behind: u64) -> String {
     match (ahead, behind) {
-        (0, 0) => format!("{upstream} \u{b7} up to date"),
-        (a, 0) => format!("{upstream} \u{b7} {a} ahead"),
-        (0, b) => format!("{upstream} \u{b7} {b} behind"),
-        (a, b) => format!("{upstream} \u{b7} {a} ahead, {b} behind"),
+        (0, 0) => t::chat::git_up_to_date(upstream),
+        (a, 0) => t::chat::git_ahead(upstream, &a.to_string()),
+        (0, b) => t::chat::git_behind(upstream, &b.to_string()),
+        (a, b) => t::chat::git_ahead_behind(upstream, &a.to_string(), &b.to_string()),
     }
 }
 
@@ -86,11 +87,11 @@ pub fn parse_status(reply: &Value) -> Option<GitModel> {
     }
     let branch = match (reply["detached"].as_bool(), reply["branch"].as_str()) {
         (Some(true), _) => match reply["head"].as_str() {
-            Some(head) => format!("Detached at {head}"),
-            None => "Detached HEAD".to_owned(),
+            Some(head) => t::chat::git_detached_at(head),
+            None => t::chat::git_detached().to_owned(),
         },
         (_, Some(name)) => name.to_owned(),
-        _ => "No branch".to_owned(),
+        _ => t::chat::git_no_branch().to_owned(),
     };
     let tracking = reply["upstream"].as_str().map(|upstream| {
         tracking(

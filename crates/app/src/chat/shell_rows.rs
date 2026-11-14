@@ -1,3 +1,4 @@
+use notchling_locale as t;
 use std::collections::HashSet;
 
 use notchling_engine::transcript::model::Conversation;
@@ -24,7 +25,11 @@ pub fn shell_rows(
             .map(|shell| {
                 let state = shells::state(shell, &conversation.finished_agents, writers);
                 let (status, word, mark) = match state {
-                    ShellState::Running => (Status::Working, "Running".to_owned(), Mark::Spinner),
+                    ShellState::Running => (
+                        Status::Working,
+                        t::chat::status_running().to_owned(),
+                        Mark::Spinner,
+                    ),
                     ShellState::Ended(how) => {
                         let ok = how == "completed";
                         (

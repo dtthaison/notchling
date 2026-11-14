@@ -1,3 +1,4 @@
+use notchling_locale as t;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::Arc;
@@ -122,7 +123,7 @@ impl RenderOnce for Panel {
         let id = window.window_handle().window_id();
         let i = &self.i;
         let tasks = if i.tasks.is_empty() {
-            empty("No tasks", a)
+            empty(t::chat::details_no_tasks(), a)
         } else {
             let done = i.tasks.iter().filter(|t| t.status == Status::Done).count();
             div()
@@ -144,14 +145,14 @@ impl RenderOnce for Panel {
                     .map(|(name, value)| fact_row(fact_icon(name), &fact_text(name, value), a)),
             );
             if rows.is_empty() {
-                empty("Nothing read yet", a)
+                empty(t::chat::details_nothing_read(), a)
             } else {
                 div().flex().flex_col().gap(px(6.0)).children(rows)
             }
         };
 
         let subagents = if i.subagents.is_empty() {
-            empty("None started", a)
+            empty(t::chat::details_none_started(), a)
         } else {
             let mut list = div().flex().flex_col().gap(px(6.0));
             for s in &i.subagents {
@@ -161,7 +162,7 @@ impl RenderOnce for Panel {
             if next > 0 {
                 list = list.child(more_row(
                     More::Subagents,
-                    &format!("Load {next} More"),
+                    &t::chat::details_load_more(&next.to_string()),
                     &self.chat,
                     a,
                 ));
@@ -170,7 +171,7 @@ impl RenderOnce for Panel {
         };
 
         let shells = if i.shells.is_empty() {
-            empty("None running", a)
+            empty(t::chat::details_none_running(), a)
         } else {
             let mut list = div().flex().flex_col().gap(px(6.0)).children(
                 i.shells
@@ -182,7 +183,7 @@ impl RenderOnce for Panel {
             if next > 0 {
                 list = list.child(more_row(
                     More::Shells,
-                    &format!("Load {next} More"),
+                    &t::chat::details_load_more(&next.to_string()),
                     &self.chat,
                     a,
                 ));
@@ -192,7 +193,12 @@ impl RenderOnce for Panel {
 
         let mut sections = vec![
             ("Tasks", "Task Panel", i.tasks_title(), tasks),
-            ("Facts", "Session Facts", "Session".to_owned(), facts),
+            (
+                "Facts",
+                "Session Facts",
+                t::chat::details_session().to_owned(),
+                facts,
+            ),
             ("Subagents", "Subagents", i.subagents_title(), subagents),
             ("Shells", "Background Shells", i.shells_title(), shells),
         ];
@@ -414,7 +420,9 @@ fn output_link(
     div()
         .id(SharedString::from(format!("shell-output-{index}")))
         .cursor_pointer()
-        .child(label("Output", TypeRole::Meta, Ink::AccentText, a).line_height(px(ROW_LINE)))
+        .child(
+            label(t::chat::output(), TypeRole::Meta, Ink::AccentText, a).line_height(px(ROW_LINE)),
+        )
         .on_click(move |_, _, cx| {
             chat.update(cx, |this, cx| this.open_shell_output(&name, &path, cx))
                 .ok();

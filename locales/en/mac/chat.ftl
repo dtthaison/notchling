@@ -309,3 +309,88 @@ chat-tasks-hide = Hide the tasks until the list changes
 # $subject is the task being worked on.
 chat-tasks-now = Now: { $subject }
 chat-tasks-all-done = All done
+
+## Details Panel
+
+# The Details Panel's section titles.
+chat-details-tasks = Tasks
+chat-details-session = Session
+chat-details-subagents = Subagents
+chat-details-shells = Shells
+chat-details-git = Git
+# $done is how many tasks are finished and $total how many there are.
+chat-details-tasks-progress = Tasks { NUMBER($done) }/{ NUMBER($total) }
+chat-details-tasks-counted = Tasks · { NUMBER($done) }/{ NUMBER($total) }
+# A section title with a count. $name is the section's title and $count a whole number written already.
+chat-details-running = { $name } · { $count } running
+chat-details-total = { $name } · { $count }
+chat-details-no-tasks = No tasks
+chat-details-nothing-read = Nothing read yet
+chat-details-none-started = None started
+chat-details-none-running = None running
+# $count is how many more rows the button loads.
+chat-details-load-more = Load { $count } More
+# $input and $output are token counts such as 15.4k.
+chat-details-tokens = { $input } in · { $output } out
+# $tokens is a token count such as 3.1k and $share the percent of the input that was cached.
+chat-details-cached = { $tokens } cached ({ $share }%)
+# $count picks the form; $text is the same number written plainly.
+chat-details-turns = { $count ->
+    [one] { $text } turn
+   *[other] { $text } turns
+}
+chat-details-commands = { $count ->
+    [one] { $text } command
+   *[other] { $text } commands
+}
+chat-status-running = Running
+chat-status-failed = Failed
+chat-status-stopped = Stopped
+chat-status-not-running = Not running
+
+## Details Panel, Git
+
+chat-git-detached-at = Detached at { $head }
+chat-git-detached = Detached HEAD
+chat-git-no-branch = No branch
+chat-git-more-not-shown = More files not shown
+# $count is the number of files cut off, with a plus when git cut its own list.
+chat-git-hidden = { $count } more files not shown
+# $upstream is the branch being followed.
+chat-git-up-to-date = { $upstream } · up to date
+# $ahead and $behind are commit counts written already.
+chat-git-ahead = { $upstream } · { $ahead } ahead
+chat-git-behind = { $upstream } · { $behind } behind
+chat-git-ahead-behind = { $upstream } · { $ahead } ahead, { $behind } behind
+chat-git-no-uncommitted = No uncommitted changes
+chat-git-no-changes = No changes
+# $base is the branch the changes are measured against.
+chat-git-vs-base = vs { $base }
+
+## Details Panel, Changes
+
+chat-changes-title = Changes
+chat-changes-untracked = Untracked
+# $folder is the file's folder and $what says Changes or Untracked.
+chat-changes-subtitle = { $folder } · { $what }
+chat-changes-large = Large diff
+chat-changes-close = Close
+chat-changes-open-in-panel = Open in File Panel
+chat-changes-filter-placeholder = Filter files
+chat-changes-compare-against = Compare Against
+chat-changes-reading-branches = Reading the branches…
+chat-changes-no-branches = There are no other branches.
+chat-changes-nothing = Nothing to compare.
+chat-changes-no-changes-base = No changes against the base.
+chat-changes-no-match = No files match.
+chat-changes-reading = Reading the changes…
+chat-changes-none-to-show = There are no changes to show.
+chat-changes-truncated = Only the first part of this diff is shown.
+chat-changes-unreadable = The diff came back unreadable.
+# $count picks the form; $text is the same number written plainly.
+chat-changes-file-count = { $count ->
+    [one] { $text } file
+   *[other] { $text } files
+}
+# $files is the file count line and $count the files not yet committed.
+chat-changes-uncommitted = { $files } · { $count } uncommitted

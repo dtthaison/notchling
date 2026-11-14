@@ -1,3 +1,4 @@
+use notchling_locale as t;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -45,14 +46,14 @@ pub fn rows(files: &[ChangedFile], shown: &[usize], open: &HashMap<String, Slot>
         match open.get(&file.path) {
             None => {}
             Some(Slot::Loading) => out.push(Row::Note(
-                "Reading the changes\u{2026}".to_owned(),
+                t::chat::changes_reading().to_owned(),
                 Ink::TextMuted,
             )),
             Some(Slot::Failed(why)) => out.push(Row::Note(why.clone(), Ink::Expired)),
             Some(Slot::Ready { chunks, truncated }) => {
                 if chunks.is_empty() {
                     out.push(Row::Note(
-                        "There are no changes to show.".to_owned(),
+                        t::chat::changes_none_to_show().to_owned(),
                         Ink::TextMuted,
                     ));
                 }
@@ -61,7 +62,7 @@ pub fn rows(files: &[ChangedFile], shown: &[usize], open: &HashMap<String, Slot>
                 }
                 if *truncated {
                     out.push(Row::Note(
-                        "Only the first part of this diff is shown.".to_owned(),
+                        t::chat::changes_truncated().to_owned(),
                         Ink::TextMuted,
                     ));
                 }

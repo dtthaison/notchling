@@ -16,6 +16,8 @@ pub mod composer;
 mod conversation_words_tests;
 pub mod data;
 pub mod delegated;
+#[cfg(test)]
+mod details_words_tests;
 pub mod drafts;
 pub mod drops;
 pub mod escape;
