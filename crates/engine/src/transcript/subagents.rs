@@ -175,6 +175,17 @@ pub fn list(
     out
 }
 
+pub fn running_before(path: &str, name: &str, now: Timestamp) -> Vec<Subagent> {
+    let Some(before) = super::locate::predecessor(path, name) else {
+        return Vec::new();
+    };
+    let read = super::conversation::read_shared(&before);
+    list(&before, &read.finished_agents, now)
+        .into_iter()
+        .filter(|a| a.status == Status::Running)
+        .collect()
+}
+
 pub fn status_of(agent: &Subagent, finished: &HashMap<String, String>, now: Timestamp) -> Status {
     let word = finished.get(agent.own_id()).or_else(|| {
         if agent.background {

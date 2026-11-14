@@ -27,10 +27,6 @@
   "codex setup.hooks",
   "codex setup.rules",
   "codex signal.subagent_finished",
-  "codex subagent.glance",
-  "codex subagent.list",
-  "codex subagent.open",
-  "codex subagent.status",
   "codex turn.take_back",
   "codex version.detect",
   "codex version.update"

@@ -1,11 +1,32 @@
-use super::{Capability, Provider, Support, Tool};
+use std::sync::Arc;
 
+use super::subagents::Subagents;
+use super::{Capability, Provider, Support, Tool};
+use crate::tools::codex::children::ChildSource;
+
+pub mod subagents;
 pub mod support;
 
-pub struct CodexProvider;
+#[cfg(test)]
+mod subagents_tests;
+
+pub struct CodexProvider {
+    subagents: subagents::CodexSubagents,
+}
 
 impl CodexProvider {
-    pub const WIRED: &'static [Capability] = &[];
+    pub fn new(source: Arc<dyn ChildSource>) -> CodexProvider {
+        CodexProvider {
+            subagents: subagents::CodexSubagents::new(source),
+        }
+    }
+
+    pub const WIRED: &'static [Capability] = &[
+        Capability::SubagentList,
+        Capability::SubagentStatus,
+        Capability::SubagentGlance,
+        Capability::SubagentOpen,
+    ];
 }
 
 impl Provider for CodexProvider {
@@ -19,5 +40,9 @@ impl Provider for CodexProvider {
 
     fn wired(&self) -> &'static [Capability] {
         CodexProvider::WIRED
+    }
+
+    fn subagents(&self) -> &dyn Subagents {
+        &self.subagents
     }
 }

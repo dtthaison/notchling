@@ -10,6 +10,7 @@ mod children_tests;
 pub mod claude_picker;
 pub mod cleared;
 pub mod closed;
+pub mod codex_children;
 pub mod codex_list;
 pub mod composer;
 pub mod data;

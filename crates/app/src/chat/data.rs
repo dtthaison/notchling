@@ -2,10 +2,12 @@ use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use notchling_engine::delegate::record::{self, Delegation};
+use notchling_engine::contract::subagents::{Roots as SubagentRoots, SessionRef};
+use notchling_engine::contract::{Registry, Tool as ContractTool};
+use notchling_engine::delegate::record::Delegation;
 use notchling_engine::sessions::{Agent, Monitor, Probes, Roots};
 use notchling_engine::transcript::model::Conversation;
-use notchling_engine::transcript::subagents::{self, Subagent};
+use notchling_engine::transcript::subagents::Subagent;
 use notchling_engine::transcript::{codex, conversation};
 use notchling_platform::paths;
 
@@ -279,42 +281,45 @@ impl DataRoot {
         super::delegated::read(&self.data_dir)
     }
 
+    pub fn subagent_roots(&self) -> SubagentRoots {
+        SubagentRoots {
+            codex_sessions: self.codex_dir.join("sessions"),
+            antigravity: self.antigravity_dir.clone(),
+            antigravity_copy: self.app_dir().join("antigravity"),
+            delegations: super::delegated::folder(&self.data_dir),
+        }
+    }
+
     pub fn subagents(
         &self,
         session: &Session,
         conversation: &Conversation,
-        delegations: &[Delegation],
+        _delegations: &[Delegation],
         now_secs: f64,
     ) -> Vec<Subagent> {
-        match (&session.transcript, session.tool) {
-            (Some(path), Tool::Claude) => {
-                let path = path.to_string_lossy();
-                let mut list = subagents::list(&path, &conversation.finished_agents, now_secs);
-                for agent in super::cleared::running_before(&path, &session.agent.name, now_secs) {
-                    if !list.iter().any(|a| a.id == agent.id) {
-                        list.push(agent);
-                    }
-                }
-                if !delegations.is_empty() {
-                    let parents = super::delegated::parent_ids(&path, &session.agent.name);
-                    let sessions = self.codex_dir.join("sessions");
-                    let places = super::delegated::Places {
-                        codex_sessions: &sessions,
-                        antigravity: &self.antigravity_dir,
-                    };
-                    list.extend(super::delegated::subagents(
-                        delegations,
-                        &parents,
-                        &places,
-                        now_secs,
-                        &record::pid_alive,
-                    ));
-                }
-                list.sort_by(|a, b| a.started.total_cmp(&b.started));
-                list
-            }
-            _ => Vec::new(),
-        }
+        self.subagents_in(&Registry::standard(), session, conversation, now_secs)
+    }
+
+    pub fn subagents_in(
+        &self,
+        registry: &Registry,
+        session: &Session,
+        conversation: &Conversation,
+        now_secs: f64,
+    ) -> Vec<Subagent> {
+        let top = SessionRef {
+            id: session.agent.id.clone(),
+            tool: match session.tool {
+                Tool::Claude => ContractTool::Claude,
+                Tool::Codex => ContractTool::Codex,
+                Tool::Antigravity => ContractTool::Antigravity,
+            },
+            transcript: session.transcript.clone(),
+            name: session.agent.name.clone(),
+            finished: Arc::new(conversation.finished_agents.clone()),
+            session: session.agent.id.clone(),
+        };
+        registry.subagents(&top, &self.subagent_roots(), now_secs)
     }
 }
 

@@ -2,6 +2,9 @@ use super::*;
 use crate::testutil::Scratch;
 use notchling_engine::contract::Tool as Kind;
 use notchling_engine::delegate::options::{Options, Tool};
+use notchling_engine::delegate::record::{self, End};
+use notchling_engine::transcript::subagents::{Origin, Status};
+use std::path::PathBuf;
 use std::time::Duration;
 
 fn job(tool: Tool, parent: &str, session: Option<&str>, started: f64, pid: u32) -> Delegation {

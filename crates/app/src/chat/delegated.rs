@@ -1,49 +1,37 @@
-use std::collections::HashSet;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use std::sync::Arc;
 
+use notchling_engine::contract::flows::delegate_jobs;
+use notchling_engine::contract::subagents::{Roots, SessionRef};
 use notchling_engine::contract::Tool;
-use notchling_engine::delegate::record::{self, Delegation, End, State};
-use notchling_engine::tools::agy::elsewhere;
-use notchling_engine::tools::codex::list::find_rollout;
-use notchling_engine::transcript::locate::predecessor;
+use notchling_engine::delegate::record::Delegation;
 use notchling_engine::transcript::model::Timestamp;
-use notchling_engine::transcript::subagents::{Origin, Status, Subagent};
+use notchling_engine::transcript::subagents::Subagent;
 
-const MAX_BACK: usize = 4;
-
-pub fn folder(data_dir: &Path) -> PathBuf {
-    data_dir.join(record::FOLDER)
-}
-
-pub fn read(data_dir: &Path) -> Vec<Delegation> {
-    record::read_all(&folder(data_dir))
-}
-
-pub fn hidden(records: &[Delegation]) -> HashSet<String> {
-    record::hidden_rows(records).into_iter().collect()
-}
-
-pub fn parent_ids(path: &str, name: &str) -> Vec<String> {
-    let stem = |p: &str| {
-        Path::new(p)
-            .file_stem()
-            .map(|s| s.to_string_lossy().into_owned())
-    };
-    let mut ids: Vec<String> = stem(path).into_iter().collect();
-    let mut current = path.to_string();
-    for _ in 0..MAX_BACK {
-        let Some(before) = predecessor(&current, name) else {
-            break;
-        };
-        ids.extend(stem(&before));
-        current = before;
-    }
-    ids
-}
+pub use notchling_engine::contract::flows::delegate_jobs::{folder, hidden, parent_ids, read};
 
 pub struct Places<'a> {
     pub codex_sessions: &'a Path,
     pub antigravity: &'a Path,
+}
+
+fn roots(places: &Places<'_>) -> Roots {
+    Roots {
+        codex_sessions: places.codex_sessions.to_path_buf(),
+        antigravity: places.antigravity.to_path_buf(),
+        ..Roots::default()
+    }
+}
+
+fn parent_of(session: &str) -> SessionRef {
+    SessionRef {
+        id: session.to_owned(),
+        tool: Tool::Claude,
+        transcript: None,
+        name: String::new(),
+        finished: Arc::default(),
+        session: session.to_owned(),
+    }
 }
 
 pub fn subagents(
@@ -53,11 +41,8 @@ pub fn subagents(
     now: Timestamp,
     alive: &dyn Fn(u32) -> bool,
 ) -> Vec<Subagent> {
-    records
-        .iter()
-        .filter(|r| parents.contains(&r.parent_session))
-        .map(|r| subagent(r, places, now, alive))
-        .collect()
+    let parent = parent_of(parents.first().map_or("", String::as_str));
+    delegate_jobs::select(records, parents, &parent, &roots(places), now, alive)
 }
 
 pub fn subagent(
@@ -66,45 +51,8 @@ pub fn subagent(
     now: Timestamp,
     alive: &dyn Fn(u32) -> bool,
 ) -> Subagent {
-    let (origin, title) = match record.tool.as_str() {
-        "agy" => (Origin::delegated(Tool::Antigravity), "Antigravity CLI"),
-        _ => (Origin::delegated(Tool::Codex), "Codex"),
-    };
-    let path = record
-        .session
-        .as_deref()
-        .and_then(|session| match origin.tool {
-            Tool::Antigravity => {
-                let log = elsewhere::log_path(places.antigravity, session);
-                log.is_file().then_some(log)
-            }
-            _ => find_rollout(places.codex_sessions, session),
-        })
-        .map(|p| p.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    let status = match record.state(now, alive) {
-        State::Running => Status::Running,
-        State::Ended(End::Ok) => Status::Completed,
-        State::Ended(End::Failed) => Status::Failed,
-        State::Ended(End::Stopped) => Status::Stopped,
-    };
-    Subagent {
-        id: format!("job:{}", record.id()),
-        path,
-        description: record.description.clone(),
-        agent_type: title.to_string(),
-        model: record.model.clone(),
-        effort: record.effort.clone(),
-        background: false,
-        tool_use_id: None,
-        started: record.started,
-        updated: record.ended.unwrap_or(now),
-        status,
-        origin,
-        session: record.parent_session.clone(),
-        parent: record.parent_session.clone(),
-        depth: 1,
-    }
+    let parent = parent_of(&record.parent_session);
+    delegate_jobs::subagent(record, &parent, &roots(places), now, alive)
 }
 
 #[cfg(test)]

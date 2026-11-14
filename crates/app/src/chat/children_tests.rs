@@ -50,3 +50,25 @@ fn the_parent_keeps_its_own_title_and_folder() {
     assert_eq!(parent.agent.name, "Plan the zebrafish migration");
     assert_eq!(parent.agent.cwd, "/work/app");
 }
+
+#[test]
+fn a_codex_session_lists_its_children_as_subagents_of_the_tree() {
+    let scratch = root_with_children();
+    let mut loader = super::data::Loader::new(DataRoot::fixture(scratch.path()));
+    let loaded = loader.load(Some(PARENT), now_ms());
+    assert_eq!(loaded.selected.as_deref(), Some(PARENT));
+    let mut ids: Vec<&str> = loaded.subagents.iter().map(|a| a.id.as_str()).collect();
+    ids.sort_unstable();
+    assert_eq!(
+        ids,
+        [
+            "codex:01a1d5da-0000-7000-8000-00000000000b",
+            "codex:01a1d5da-0000-7000-8000-00000000000c",
+            "codex:01a1d5da-0000-7000-8000-00000000000d",
+        ]
+    );
+    assert!(loaded
+        .subagents
+        .iter()
+        .all(|a| a.depth == 1 && a.parent == PARENT && a.session == PARENT));
+}

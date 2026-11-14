@@ -22,15 +22,14 @@ pub fn support(c: Capability) -> Support {
             Support::native("File watch on the rollout, --json for its own runs")
         }
         Capability::ConversationContext => Support::native("model_context_window in the rollout"),
-        Capability::SubagentList => Support::gap("phase 1: child rollouts by parent_thread_id"),
-        Capability::SubagentStatus => {
-            Support::gap("phase 1: the child's task_complete or turn_aborted")
+        Capability::SubagentList => {
+            Support::native("child rollouts whose first session_meta names the parent")
         }
-        Capability::SubagentGlance => Support::gap_meanwhile(
-            "phase 1: the child's token_count and newest call",
-            Flow::DelegateJobs,
-        ),
-        Capability::SubagentOpen => Support::gap("phase 1: the rollout from the child's own turn"),
+        Capability::SubagentStatus => {
+            Support::native("the child's task_complete, error or turn_aborted")
+        }
+        Capability::SubagentGlance => Support::native("the child's token_count and newest call"),
+        Capability::SubagentOpen => Support::native("the rollout from the child's own turn"),
         Capability::SubagentStop => {
             Support::not_applicable("Only the model's interrupt_agent stops a Codex subagent")
         }

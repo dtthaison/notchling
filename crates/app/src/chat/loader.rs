@@ -2,19 +2,23 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::Arc;
 
-use notchling_engine::contract::Tool as SubTool;
+use notchling_engine::contract::{Registry, Tool as SubTool};
 use notchling_engine::sessions::{Agent, Monitor};
 use notchling_engine::tools::agy::elsewhere;
+use notchling_engine::tools::codex::children::{ChildSource, DayFolders};
 use notchling_engine::transcript::codex;
 use notchling_engine::transcript::model::Conversation;
 use notchling_engine::transcript::snapshot::PendingQuestion;
 use notchling_engine::transcript::subagents::{self, Origin, Subagent};
+use notchling_local_api::SOCKET_NAME;
 
+use super::codex_children::DaemonChildren;
 use super::data::{DataRoot, Session, Tool};
 use super::inspector::SubagentRow;
 use super::log::{self, Change};
 use super::paging::{Counts, Page};
 use super::subagent_rows::SubagentRows;
+use crate::actions::Socket;
 use crate::notch::requests::{self, HookRequest};
 use crate::tools::foreign::AgyList;
 use crate::tools::live::ToolLive;
@@ -46,6 +50,7 @@ pub struct Loader {
     pub subagent_origin: Origin,
     pub more_subagents: usize,
     page: Page,
+    registry: Arc<Registry>,
     peeked: SubagentRows,
     agy_log: Option<AgyLog>,
     last: Option<(String, Arc<Conversation>)>,
@@ -53,7 +58,16 @@ pub struct Loader {
 
 impl Loader {
     pub fn new(root: DataRoot) -> Loader {
+        let source: Arc<dyn ChildSource> = if root.fixture.is_some() {
+            Arc::new(DayFolders)
+        } else {
+            Arc::new(DaemonChildren::new(Box::new(Socket {
+                socket: root.data_dir.join(SOCKET_NAME),
+                version: env!("CARGO_PKG_VERSION").to_string(),
+            })))
+        };
         Loader {
+            registry: Arc::new(Registry::with_sources(source)),
             monitor: root.new_monitor(),
             locator: root.new_locator(),
             agy: root.new_agy_list(),
@@ -131,10 +145,10 @@ impl Loader {
         let (conversation, subagents) = match session {
             Some(session) => {
                 let conversation = self.root.conversation_shared(session);
-                let subagents = self.root.subagents(
+                let subagents = self.root.subagents_in(
+                    &self.registry,
                     session,
                     &conversation,
-                    &delegations,
                     now_ms as f64 / 1000.0,
                 );
                 (conversation, subagents)
