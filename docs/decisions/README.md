@@ -27,6 +27,7 @@ Most of them come from the design, [revision 2](https://github.com/dtthaison/not
 | [0017](0017-rust-notes-load-by-default.md) | The Rust notes load by default; the Swift notes are read on demand | Proposed |
 | [0018](0018-chat-state-per-area.md) | Chat's state per screen area, the transcript as a log, selection on the model, the conversation as a list | Proposed |
 | [0020](0020-agents-change-settings-by-class.md) | Agents read every setting and change one by its class: free at once, ask through the Inbox, never the switches | Proposed |
+| [XXXX](XXXX-provider-capability-contract.md) | One capability contract for every tool: 39 capabilities in four states, two shrink-only files, a conformance suite and a generated matrix | Proposed |
 
 0001 was written before records had a Status section. Its status is Accepted.
 
