@@ -1,6 +1,7 @@
 use std::path::Path;
 
 use notchling_engine::catalog::ModelInfo;
+use notchling_locale as t;
 
 use super::claude_picker;
 
@@ -10,24 +11,24 @@ pub fn age(now_ms: i64, since_ms: i64) -> String {
     }
     let s = (now_ms - since_ms).max(0) / 1000;
     if s < 60 {
-        "now".to_owned()
+        t::units::age_now().to_owned()
     } else if s < 3600 {
-        format!("{}m", s / 60)
+        t::units::age_minutes(s / 60)
     } else if s < 86_400 {
-        format!("{}h", s / 3600)
+        t::units::age_hours(s / 3600)
     } else {
-        format!("{}d", s / 86_400)
+        t::units::age_days(s / 86_400)
     }
 }
 
 pub fn duration(seconds: f64) -> String {
     let s = seconds.round().max(0.0) as i64;
     if s < 60 {
-        format!("{}s", s.max(1))
+        t::units::duration_seconds(s.max(1))
     } else if s < 3600 {
-        format!("{}m {:02}s", s / 60, s % 60)
+        t::units::duration_minutes(s / 60, &format!("{:02}", s % 60))
     } else {
-        format!("{}h {}m", s / 3600, s % 3600 / 60)
+        t::units::duration_hours(s / 3600, s % 3600 / 60)
     }
 }
 
@@ -55,19 +56,23 @@ pub fn model_name(id: &str) -> String {
 }
 
 pub fn tokens(n: u64) -> String {
-    fn short(v: f64, unit: &str) -> String {
-        let mut s = format!("{v:.1}");
-        if s.ends_with(".0") {
-            s.truncate(s.len() - 2);
-        }
-        s + unit
+    fn short(v: f64, unit: fn(&str) -> String) -> String {
+        let s = format!("{v:.1}");
+        let value = match s.strip_suffix(".0") {
+            Some(whole) => match whole.parse::<i64>() {
+                Ok(n) if n < 1000 => t::fmt::count(n),
+                _ => whole.to_owned(),
+            },
+            None => t::fmt::decimal(s.parse().unwrap_or(0.0), 1),
+        };
+        unit(&value)
     }
     if n >= 1_000_000 {
-        short(n as f64 / 1_000_000.0, "M")
+        short(n as f64 / 1_000_000.0, t::units::millions)
     } else if n >= 1000 {
-        short(n as f64 / 1000.0, "k")
+        short(n as f64 / 1000.0, t::units::thousands)
     } else {
-        n.to_string()
+        t::fmt::count(n)
     }
 }
 
