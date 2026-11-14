@@ -1,6 +1,7 @@
 use crate::acting::{Acting, ACTING_OFF};
 use crate::acting_ops::{broad_folder, text_arg, Room};
 use crate::agy_elsewhere::Elsewhere;
+use crate::agy_phone::{LogReads, PhoneRead};
 use crate::agy_sink::{lock, now_secs, row_id, DaemonSink, Shared, Started};
 use crate::catalog_ops::CatalogService;
 use crate::layout::Layout;
@@ -30,7 +31,7 @@ pub const PERMISSION: &str = ops::AGY_PERMISSION;
 pub const PERMISSION_PENDING: &str = topics::AGY_PERMISSION_PENDING;
 pub const PERMISSION_RESOLVED: &str = topics::AGY_PERMISSION_RESOLVED;
 
-const CONVERSATION_BYTES: usize = 512 * 1024;
+pub(crate) const CONVERSATION_BYTES: usize = 512 * 1024;
 
 pub const ACTING_OPS: [&str; 5] = [OPEN, SEND, CANCEL, SET_OPTION, PERMISSION];
 
@@ -52,6 +53,7 @@ pub struct AgyOps {
     runner: Runner,
     setup: AgySetup,
     elsewhere: Arc<Elsewhere>,
+    logs: LogReads,
 }
 
 fn bad(message: impl Into<String>) -> ApiError {
@@ -100,9 +102,34 @@ impl AgyOps {
             acting,
             shared,
             runner,
+            logs: LogReads::new(setup.root.clone()),
             setup,
             elsewhere,
         }
+    }
+
+    pub fn phone_read(&self, session: &str, row_working: bool) -> PhoneRead {
+        if self.runner.is_open(session) && !self.runner.is_loading(session) {
+            if let Some(open) = self.runner.peek_conversation(session) {
+                let working = self.runner.is_working(session);
+                return PhoneRead::bounded(open, working, CONVERSATION_BYTES);
+            }
+        }
+        if let Some(holder) = self.elsewhere.watched(session) {
+            let (held, working) = self.elsewhere.conversation(session, &holder);
+            return PhoneRead::bounded(held, working, CONVERSATION_BYTES);
+        }
+        let log = self.logs.get(session, CONVERSATION_BYTES);
+        PhoneRead {
+            conversation: log.0.clone(),
+            working: row_working,
+            omitted: log.1,
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn log_reads(&self) -> usize {
+        self.logs.reads()
     }
 
     pub fn attach_catalog(&self, catalog: Arc<CatalogService>) {

@@ -118,7 +118,14 @@ fn bridge_ops(dir: &Path, lan: u16, tunnel: u16) -> (BridgeOps, Arc<FakeRoom>) {
     let acting = acting_ops(false, sessions.clone(), room.clone());
     let inbox = InboxOps::new(dir.join("data"), room.clone());
     (
-        BridgeOps::new(setup, sessions, acting, room.clone(), inbox),
+        BridgeOps::new(
+            setup,
+            sessions,
+            acting,
+            room.clone(),
+            inbox,
+            Arc::new(EverySession::none()),
+        ),
         room,
     )
 }
@@ -275,6 +282,7 @@ fn a_pairing_is_asked_only_of_an_app_that_follows_the_bridge() {
         acting.clone(),
         room.clone(),
         InboxOps::new(dir.0.join("data"), room.clone()),
+        Arc::new(EverySession::none()),
     ));
     let handler = crate::daemon::Ops::with_acting(sessions, acting).with_bridge(bridge.clone());
     let server = Server::bind(

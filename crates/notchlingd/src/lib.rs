@@ -6,6 +6,7 @@ pub mod acting_ops;
 pub mod activity_ops;
 pub mod agy_elsewhere;
 pub mod agy_ops;
+pub mod agy_phone;
 pub mod agy_sink;
 pub mod attach;
 pub mod awake_loop;
@@ -20,6 +21,7 @@ pub mod cost_ops;
 pub mod daemon;
 pub mod daemon_wiring;
 pub mod delegate_cli;
+pub mod every_session;
 pub mod git_ops;
 pub mod held_ops;
 pub mod hook;
@@ -71,6 +73,8 @@ mod activity_ops_tests;
 #[cfg(test)]
 mod awake_loop_tests;
 #[cfg(test)]
+mod agy_phone_tests;
+#[cfg(test)]
 mod bridge_models_tests;
 #[cfg(test)]
 mod catalog_ops_tests;
@@ -80,6 +84,8 @@ mod control_ops_tests;
 mod cost_ops_tests;
 #[cfg(test)]
 mod daemon_tests;
+#[cfg(test)]
+mod every_session_tests;
 #[cfg(test)]
 mod git_ops_branch_tests;
 #[cfg(test)]

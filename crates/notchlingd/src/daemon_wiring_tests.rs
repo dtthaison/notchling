@@ -123,3 +123,39 @@ fn the_server_serves_every_area_and_the_vault_skill_is_offered_to_install() {
     assert!(w.vault.skill_names().is_empty());
     w.close();
 }
+
+#[test]
+fn the_wired_daemon_lists_every_tool_on_request_and_claude_code_by_default() {
+    let (_root, layout, w) = wired("every");
+    let fixture = crate::every_session_tests::Fixture {
+        dir: crate::limits_ops_tests::TempDir::new("wiring-every"),
+        layout: layout.clone(),
+    };
+    fixture.codex(
+        crate::every_session_tests::CODEX_ID,
+        None,
+        "Fix the codex bug",
+    );
+    let ops = w.ops(
+        &layout,
+        Arc::new(Mutex::new(json!([]))),
+        FirstScan::open(),
+        Duration::ZERO,
+    );
+    let all = ops
+        .call(&app(), ops::SESSIONS_LIST, &json!({"tools": "all"}))
+        .unwrap();
+    let ids: Vec<&str> = all
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|r| r["id"].as_str())
+        .collect();
+    assert_eq!(
+        ids,
+        vec![format!("codex:{}", crate::every_session_tests::CODEX_ID)]
+    );
+    let default = ops.call(&app(), ops::SESSIONS_LIST, &Value::Null).unwrap();
+    assert_eq!(default, json!([]));
+    w.close();
+}

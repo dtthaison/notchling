@@ -1,5 +1,6 @@
 use notchling_engine::sessions::{Agent, AgentGroup};
 use notchling_local_api::{Client, ClientError, ClientKind, DaemonStatus};
+use serde_json::Value;
 use std::path::Path;
 
 pub const NOT_RUNNING: i32 = 3;
@@ -81,34 +82,37 @@ pub fn status(socket: &Path, json: bool) -> i32 {
     }
 }
 
+pub fn list_every_tool(client: &mut Client) -> Result<Value, ClientError> {
+    client.call(
+        notchling_local_api::ops::SESSIONS_LIST,
+        serde_json::json!({"tools": "all"}),
+    )
+}
+
 pub fn sessions(socket: &Path, json: bool) -> i32 {
     let mut client = match connect(socket) {
         Ok(c) => c,
         Err(e) => return fail(e),
     };
+    let list = match list_every_tool(&mut client) {
+        Ok(list) => list,
+        Err(e) => return fail(e),
+    };
     if json {
-        return match client.call(
-            notchling_local_api::ops::SESSIONS_LIST,
-            serde_json::json!({}),
-        ) {
-            Ok(v) => {
-                println!(
-                    "{}",
-                    serde_json::to_string_pretty(&v).unwrap_or_else(|_| v.to_string())
-                );
-                0
-            }
-            Err(e) => fail(e),
-        };
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&list).unwrap_or_else(|_| list.to_string())
+        );
+        return 0;
     }
-    match client.sessions::<Agent>() {
+    match serde_json::from_value::<Vec<Agent>>(list) {
         Ok(agents) => {
             for line in session_lines(&agents) {
                 println!("{line}");
             }
             0
         }
-        Err(e) => fail(e),
+        Err(e) => fail(ClientError::Protocol(e.to_string())),
     }
 }
 
@@ -117,6 +121,61 @@ mod tests {
     use super::*;
     use notchling_engine::sessions::AgentTarget;
     use notchling_local_api::wire::ClientCounts;
+
+    #[cfg(unix)]
+    #[test]
+    fn sessions_asks_for_every_tool() {
+        use notchling_local_api::{
+            ops, Allowlist, ApiError, Caller, ConnectOptions, Handler, Limits, OpSpec, Server,
+            ServerConfig,
+        };
+        use serde_json::json;
+        use std::sync::{Arc, Mutex};
+
+        struct Recorder(Arc<Mutex<Vec<Value>>>);
+
+        impl Handler for Recorder {
+            fn spec(&self, op: &str) -> Option<OpSpec> {
+                (op == ops::SESSIONS_LIST).then_some(OpSpec::AGENT)
+            }
+
+            fn call(&self, _: &Caller, _: &str, args: &Value) -> Result<Value, ApiError> {
+                self.0
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .push(args.clone());
+                Ok(json!([]))
+            }
+        }
+
+        let folder = std::path::PathBuf::from(format!("/tmp/nl-cs-{}", std::process::id()));
+        std::fs::create_dir_all(&folder).unwrap();
+        let socket = folder.join("s.sock");
+        let asked = Arc::new(Mutex::new(Vec::new()));
+        let server = Server::bind(
+            ServerConfig {
+                socket: socket.clone(),
+                allowlist: Allowlist::new([std::env::current_exe().unwrap()]),
+                audit: None,
+                version: "9.9.9".into(),
+                limits: Limits::default(),
+            },
+            Arc::new(Recorder(asked.clone())),
+        )
+        .unwrap();
+        let (handle, thread) = server.spawn().unwrap();
+        let options = ConnectOptions {
+            check_server: false,
+            ..ConnectOptions::default()
+        };
+        let mut client = Client::connect_with(&socket, ClientKind::Cli, "0.1.0", &options).unwrap();
+        let listed = list_every_tool(&mut client).unwrap();
+        handle.shutdown();
+        let _ = thread.join();
+        let _ = std::fs::remove_dir_all(&folder);
+        assert_eq!(listed, json!([]));
+        assert_eq!(*asked.lock().unwrap(), vec![json!({"tools": "all"})]);
+    }
 
     #[test]
     fn the_status_line() {
