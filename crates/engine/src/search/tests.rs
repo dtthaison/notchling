@@ -253,6 +253,7 @@ fn session_tool(
             config_dir: None,
             modified: NOW - age,
             size: 0,
+            parent: None,
         },
         text.to_string(),
     )

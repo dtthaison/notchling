@@ -27,6 +27,7 @@ fn session(id: &str, snippet: Option<&str>) -> SessionRow {
         snippet: snippet.map(str::to_owned),
         highlights: Vec::new(),
         updated_secs: 1_800_000_000.0,
+        parent: None,
     }
 }
 

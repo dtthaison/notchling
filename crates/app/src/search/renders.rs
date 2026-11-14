@@ -67,6 +67,7 @@ fn session(
         snippet: snippet.map(|(s, _)| s.to_owned()),
         highlights: snippet.map(|(_, h)| h.to_vec()).unwrap_or_default(),
         updated_secs: NOW_SECS - age_secs,
+        parent: None,
     }
 }
 

@@ -295,6 +295,57 @@ fn search_returns_pages_and_sessions_grouped() {
     );
 }
 
+fn codex_fixture(name: &str) -> String {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../engine/tests/fixtures/codex-children/sessions/2026/11/13");
+    let file = std::fs::read_dir(dir)
+        .unwrap()
+        .flatten()
+        .find(|e| {
+            e.file_name()
+                .to_string_lossy()
+                .ends_with(&format!("{name}.jsonl"))
+        })
+        .unwrap();
+    std::fs::read_to_string(file.path()).unwrap()
+}
+
+#[test]
+fn a_codex_child_is_a_hit_that_names_its_parent() {
+    let dir = Dir::new("children");
+    let day = notchling_engine::pages::clock::civil_at(now(), 0);
+    let place = |thread: &str, stamp: &str| {
+        let name =
+            format!("rollout-2026-11-13T{stamp}-01a1d5da-0000-7000-8000-00000000000{thread}.jsonl");
+        let path = dir.write(
+            &format!(
+                "codex/sessions/{:04}/{:02}/{:02}/{name}",
+                day.year, day.month, day.day
+            ),
+            &codex_fixture(&format!("00000000000{thread}")),
+        );
+        age(&path, 60.0);
+    };
+    place("a", "09-00-00");
+    place("b", "09-00-20");
+    let ops_ = PagesOps::new(setup(&dir));
+    let reply = call(&ops_, ops::SEARCH_QUERY, json!({"text": "tusks"}));
+    let sessions = reply["sessions"].as_array().unwrap();
+    assert_eq!(sessions.len(), 1, "{sessions:?}");
+    assert_eq!(
+        sessions[0]["key"],
+        "codex:01a1d5da-0000-7000-8000-00000000000b"
+    );
+    assert_eq!(
+        sessions[0]["parent"],
+        "codex:01a1d5da-0000-7000-8000-00000000000a"
+    );
+    let reply = call(&ops_, ops::SEARCH_QUERY, json!({"text": "zebrafish"}));
+    let sessions = reply["sessions"].as_array().unwrap();
+    assert_eq!(sessions.len(), 1, "{sessions:?}");
+    assert_eq!(sessions[0]["parent"], Value::Null);
+}
+
 #[test]
 fn bad_search_arguments_are_refused() {
     let dir = Dir::new("badargs");

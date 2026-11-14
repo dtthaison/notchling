@@ -541,12 +541,17 @@ Reads always work, whatever the `acting` switch says; nothing here acts or write
 ```json
 {"key": "claude:ab12", "tool": "claude" | "codex" | "agy", "session_id": "ab12",
  "title": "Token cache work", "folder": "/w/app", "path": "/.../ab12.jsonl",
- "config_dir": "/Users/me/.claude-lanes/work" | null, "modified": 1794150245.0,
+ "config_dir": "/Users/me/.claude-lanes/work" | null, "parent": null | "codex:0199a1b2",
+ "modified": 1794150245.0,
  "snippet": "...the stale token cache..." | null, "highlights": [[4, 9]], "score": 61.5}
 ```
 
 - `key` is Chat's row id (`claude:<id>`, `codex:<id>`, `agy:<id>`); Return on a session opens it
   with that.
+- `parent` is `null` for a session. A Codex subagent's rollout is a hit of its own (its own task
+  and words, none of the parent's history it was forked from) with `parent` set to the row id
+  of the session that spawned it; it is not a Chat row, so a client opens `parent` instead. A
+  subagent whose rollout does not name its parent is not indexed.
 - `path` is `""` for Antigravity (found by title). `config_dir` is the lane's folder, `null` for
   `~/.claude`.
 - `snippet` is a cut of the text around the match, `null` when only the title or folder

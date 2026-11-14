@@ -323,6 +323,7 @@ fn a_file_that_vanishes_or_cannot_be_read_does_not_stop_the_scan() {
         config_dir: None,
         modified: 0.0,
         size: 10,
+        parent: None,
     };
     assert!(matches!(
         read::read(&meta, SessionTool::Claude),

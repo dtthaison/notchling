@@ -136,7 +136,10 @@ fn count(needle: &str, haystack: &str, cap: usize) -> usize {
 }
 
 pub fn latest(sessions: &[IndexedSession], limit: usize) -> Vec<SessionHit> {
-    let mut sorted: Vec<&IndexedSession> = sessions.iter().collect();
+    let mut sorted: Vec<&IndexedSession> = sessions
+        .iter()
+        .filter(|s| s.meta.parent.is_none())
+        .collect();
     sorted.sort_by(|a, b| {
         b.meta
             .modified

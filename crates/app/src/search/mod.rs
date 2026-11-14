@@ -12,3 +12,6 @@ pub mod shortcut;
 #[cfg(target_os = "macos")]
 pub mod view;
 pub mod wire;
+
+#[cfg(test)]
+mod children_tests;
