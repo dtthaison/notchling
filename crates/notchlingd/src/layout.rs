@@ -111,6 +111,22 @@ impl Layout {
         self.state_dir().join(AUDIT_NAME)
     }
 
+    pub fn audit_dir(&self) -> PathBuf {
+        self.state_dir().join("audit")
+    }
+
+    pub fn events_db_path(&self) -> PathBuf {
+        self.state_dir().join("daemon").join("events.db")
+    }
+
+    pub fn salt_path(&self) -> PathBuf {
+        self.state_dir().join("daemon").join("log-salt")
+    }
+
+    pub fn host_id_path(&self) -> PathBuf {
+        self.state_dir().join("daemon").join("host-id")
+    }
+
     pub fn remote_log_path(&self) -> PathBuf {
         self.data_dir
             .parent()
