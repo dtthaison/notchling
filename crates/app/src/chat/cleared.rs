@@ -1,10 +1,10 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use notchling_engine::transcript::conversation;
 use notchling_engine::transcript::locate::predecessor;
 use notchling_engine::transcript::model::{Conversation, Timestamp};
-use notchling_engine::transcript::subagents::{self, Status, Subagent};
+use notchling_engine::transcript::subagents::{self, Subagent};
 
 const MAX_BACK: usize = 4;
 
@@ -54,15 +54,31 @@ pub fn with_model(path: &str, name: &str, read: Arc<Conversation>) -> Arc<Conver
     result
 }
 
-pub fn running_before(path: &str, name: &str, now: Timestamp) -> Vec<Subagent> {
-    let Some(before) = predecessor(path, name) else {
-        return Vec::new();
-    };
-    let read = conversation::read_shared(&before);
-    subagents::list(&before, &read.finished_agents, now)
-        .into_iter()
-        .filter(|a| a.status == Status::Running)
-        .collect()
+pub fn chain(path: &str, name: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut current = path.to_string();
+    for _ in 0..MAX_BACK {
+        let Some(before) = predecessor(&current, name) else {
+            break;
+        };
+        out.push(before.clone());
+        current = before;
+    }
+    out
+}
+
+pub fn subagents_before(path: &str, name: &str, now: Timestamp) -> Vec<Subagent> {
+    let mut seen = HashSet::new();
+    let mut out = Vec::new();
+    for before in chain(path, name) {
+        let read = conversation::read_shared(&before);
+        for agent in subagents::list(&before, &read.finished_agents, now) {
+            if seen.insert(agent.id.clone()) {
+                out.push(agent);
+            }
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -132,7 +148,7 @@ mod tests {
     }
 
     #[test]
-    fn running_subagents_of_the_cleared_transcript_carry_over() {
+    fn subagents_of_the_cleared_transcript_carry_over() {
         let s = Scratch::new("cleared-subagents");
         s.write("p/old.jsonl", &named("worker"));
         s.write("p/old/subagents/agent-a1.jsonl", "{}\n");
@@ -146,7 +162,7 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs_f64();
-        let carried = running_before(&new.to_string_lossy(), "worker", now);
+        let carried = subagents_before(&new.to_string_lossy(), "worker", now);
         assert_eq!(carried.len(), 1);
         assert_eq!(carried[0].description, "Port it");
     }

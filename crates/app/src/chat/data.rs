@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -290,8 +291,10 @@ impl DataRoot {
             (Some(path), Tool::Claude) => {
                 let path = path.to_string_lossy();
                 let mut list = subagents::list(&path, &conversation.finished_agents, now_secs);
-                for agent in super::cleared::running_before(&path, &session.agent.name, now_secs) {
-                    if !list.iter().any(|a| a.id == agent.id) {
+                let mut ids: HashSet<String> = list.iter().map(|a| a.id.clone()).collect();
+                for agent in super::cleared::subagents_before(&path, &session.agent.name, now_secs)
+                {
+                    if ids.insert(agent.id.clone()) {
                         list.push(agent);
                     }
                 }

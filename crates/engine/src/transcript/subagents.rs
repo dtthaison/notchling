@@ -8,6 +8,7 @@ use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 use std::sync::{Mutex, OnceLock};
+use std::time::SystemTime;
 
 pub const QUIET_AFTER: f64 = 600.0;
 pub const ACTIVE_WINDOW: f64 = 90.0;
@@ -121,7 +122,9 @@ pub fn list(
             origin: Origin::Claude,
         };
         agent.status = status_of(&agent, finished, now);
-        if agent.status != Status::Completed && agent.status != Status::Failed && handed_back(&file)
+        if agent.status != Status::Completed
+            && agent.status != Status::Failed
+            && handed_back_stamped(&file)
         {
             agent.status = Status::Completed;
         }
@@ -146,6 +149,38 @@ pub fn status_of(agent: &Subagent, finished: &HashMap<String, String>, now: Time
         _ if now - agent.updated < QUIET_AFTER => Status::Running,
         _ => Status::Quiet,
     }
+}
+
+type HandedBack = HashMap<String, (u64, Option<SystemTime>, bool)>;
+
+fn handed_back_cache() -> &'static Mutex<HandedBack> {
+    static CACHE: OnceLock<Mutex<HandedBack>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn handed_back_stamped(path: &str) -> bool {
+    let Ok(meta) = std::fs::metadata(path) else {
+        return false;
+    };
+    let stamp = (meta.len(), meta.modified().ok());
+    if let Some((len, modified, answer)) = handed_back_cache()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(path)
+    {
+        if (*len, *modified) == stamp {
+            return *answer;
+        }
+    }
+    let answer = handed_back(path);
+    let mut cache = handed_back_cache()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    if cache.len() > 5000 {
+        cache.clear();
+    }
+    cache.insert(path.to_string(), (stamp.0, stamp.1, answer));
+    answer
 }
 
 pub fn handed_back(path: &str) -> bool {

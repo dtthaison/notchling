@@ -1,14 +1,12 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
+use super::cleared::chain;
 use notchling_engine::delegate::record::{self, Delegation, End, State};
 use notchling_engine::tools::agy::elsewhere;
 use notchling_engine::tools::codex::list::find_rollout;
-use notchling_engine::transcript::locate::predecessor;
 use notchling_engine::transcript::model::Timestamp;
 use notchling_engine::transcript::subagents::{Origin, Status, Subagent};
-
-const MAX_BACK: usize = 4;
 
 pub fn folder(data_dir: &Path) -> PathBuf {
     data_dir.join(record::FOLDER)
@@ -23,21 +21,14 @@ pub fn hidden(records: &[Delegation]) -> HashSet<String> {
 }
 
 pub fn parent_ids(path: &str, name: &str) -> Vec<String> {
-    let stem = |p: &str| {
-        Path::new(p)
-            .file_stem()
-            .map(|s| s.to_string_lossy().into_owned())
-    };
-    let mut ids: Vec<String> = stem(path).into_iter().collect();
-    let mut current = path.to_string();
-    for _ in 0..MAX_BACK {
-        let Some(before) = predecessor(&current, name) else {
-            break;
-        };
-        ids.extend(stem(&before));
-        current = before;
-    }
-    ids
+    std::iter::once(path.to_string())
+        .chain(chain(path, name))
+        .filter_map(|p| {
+            Path::new(&p)
+                .file_stem()
+                .map(|s| s.to_string_lossy().into_owned())
+        })
+        .collect()
 }
 
 pub struct Places<'a> {
