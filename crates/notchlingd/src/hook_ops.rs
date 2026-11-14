@@ -17,14 +17,18 @@ impl ActingOps {
         self
     }
 
+    fn session_folders(&self) -> Vec<std::path::PathBuf> {
+        config_dirs(&self.roots)
+            .into_iter()
+            .map(|c| c.dir.join("sessions"))
+            .collect()
+    }
+
     fn started_by_session(&self, pid: u32, session_id: &str) -> bool {
         if session_id.is_empty() {
             return false;
         }
-        let folders: Vec<std::path::PathBuf> = config_dirs(&self.roots)
-            .into_iter()
-            .map(|c| c.dir.join("sessions"))
-            .collect();
+        let folders = self.session_folders();
         let mut next = (self.parent_of)(pid);
         for _ in 0..LINEAGE_DEPTH {
             let Some(p) = next.filter(|p| *p > 1) else {
@@ -39,6 +43,22 @@ impl ActingOps {
             next = (self.parent_of)(p);
         }
         false
+    }
+
+    pub(crate) fn session_of(&self, pid: u32) -> Option<String> {
+        let folders = self.session_folders();
+        let mut next = (self.parent_of)(pid);
+        for _ in 0..LINEAGE_DEPTH {
+            let p = next.filter(|p| *p > 1)?;
+            if let Some(id) = folders
+                .iter()
+                .find_map(|f| session_id_in(&f.join(format!("{p}.json"))))
+            {
+                return Some(id);
+            }
+            next = (self.parent_of)(p);
+        }
+        None
     }
 
     pub(crate) fn hook_request(&self, caller: &Caller, args: &Value) -> Result<Value, ApiError> {
@@ -107,11 +127,20 @@ impl ActingOps {
     }
 }
 
-fn session_file_holds(path: &std::path::Path, session_id: &str) -> bool {
+fn session_id_in(path: &std::path::Path) -> Option<String> {
     std::fs::read(path)
         .ok()
         .and_then(|data| serde_json::from_slice::<Value>(&data).ok())
-        .is_some_and(|s| s.get("sessionId").and_then(Value::as_str) == Some(session_id))
+        .and_then(|s| {
+            s.get("sessionId")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        })
+        .filter(|id| !id.is_empty())
+}
+
+fn session_file_holds(path: &std::path::Path, session_id: &str) -> bool {
+    session_id_in(path).as_deref() == Some(session_id)
 }
 
 #[cfg(unix)]

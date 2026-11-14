@@ -4,7 +4,7 @@ use crate::log_retention::PruneError;
 use crate::op_group::OpGroup;
 use notchling_engine::logs::parse_month_name;
 use notchling_events::kinds::security_log::ChainReason;
-use notchling_local_api::{ops, ApiError, Caller, ErrorCode, OpSpec, Tier};
+use notchling_local_api::{ops, topics, ApiError, Caller, ErrorCode, OpSpec, Tier};
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex, PoisonError};
 
@@ -79,6 +79,14 @@ impl LogOps {
 }
 
 impl OpGroup for LogOps {
+    fn topics(&self) -> &[&'static str] {
+        &[topics::LOG]
+    }
+
+    fn topic_tier(&self, topic: &str) -> Option<Tier> {
+        (topic == topics::LOG).then_some(Tier::App)
+    }
+
     fn spec(&self, op: &str) -> Option<OpSpec> {
         match op {
             ops::LOG_VERIFY => Some(OpSpec::AGENT),

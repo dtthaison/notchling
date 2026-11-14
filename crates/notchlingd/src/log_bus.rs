@@ -540,7 +540,9 @@ impl LogBus {
     }
 
     fn run(self: Arc<Self>, mut sinks: Vec<Box<dyn Sink>>) {
-        let mut last_tick = Instant::now();
+        let mut last_tick = Instant::now()
+            .checked_sub(Duration::from_secs(1))
+            .unwrap_or_else(Instant::now);
         let mut dirty = false;
         let mut lost = Lost::default();
         let mut reported = Reported::default();

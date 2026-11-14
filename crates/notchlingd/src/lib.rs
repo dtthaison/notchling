@@ -25,8 +25,10 @@ pub mod hook;
 pub mod hook_ops;
 pub mod hook_output;
 pub mod hook_pages;
+pub mod host_id;
 pub mod inbox_ops;
 pub mod install_ops;
+pub mod late_emit;
 pub mod late_reply;
 pub mod layout;
 pub mod limits_ops;
@@ -41,7 +43,9 @@ pub mod log_ops;
 pub mod log_queue;
 pub mod log_retention;
 pub mod log_rotate;
+pub mod log_start;
 pub mod op_group;
+pub mod op_kinds;
 pub mod pages_cli;
 pub mod pages_ops;
 pub mod prompts;
@@ -126,7 +130,7 @@ mod providers_ops_tests;
 #[cfg(test)]
 mod providers_sync_tests;
 #[cfg(test)]
-mod quiet_ops_tests;
+mod session_of_tests;
 #[cfg(test)]
 mod vault_ops_lock_tests;
 
