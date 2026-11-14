@@ -37,6 +37,19 @@
   "@pairingCantFind": {
     "description": "Shown when no Mac answers."
   },
+  "pairingFiles": "{count, plural, one{{name} shared {count} file, 100% done} other{{name} shared {count} files, 100% done}}",
+  "@pairingFiles": {
+    "description": "Files a device shared. $count is how many, $name the device.",
+    "placeholders": {
+      "count": {
+        "type": "int",
+        "format": "decimalPattern"
+      },
+      "name": {
+        "type": "String"
+      }
+    }
+  },
   "pairingStep": "Step # of {total}",
   "@pairingStep": {
     "description": "Step counter. $total is the number of steps.",

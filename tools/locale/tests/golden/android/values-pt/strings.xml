@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The language's own name, as its speakers write it. -->
+    <string name="language_name">Português</string>
+    <!-- Shown while a session works. -->
+    <string name="state_working">A trabalhar</string>
+</resources>
