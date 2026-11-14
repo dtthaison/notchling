@@ -49,6 +49,10 @@ pub(crate) fn why_of(failure: &Failure) -> FailWhy {
         Failure::PermissionMismatch => FailWhy::PermissionMismatch,
         Failure::NoAlways => FailWhy::NoAlways,
         Failure::PermissionStillOpen => FailWhy::PermissionStillOpen,
+        Failure::NoInput => FailWhy::NoInput,
+        Failure::NotCleared => FailWhy::NotCleared,
+        Failure::NotTaken => FailWhy::NotTaken,
+        Failure::NotSent => FailWhy::NotSent,
     }
 }
 

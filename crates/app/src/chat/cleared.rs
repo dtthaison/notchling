@@ -4,8 +4,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use notchling_engine::transcript::conversation;
 use notchling_engine::transcript::locate::predecessor;
 use notchling_engine::transcript::model::Conversation;
-
-const MAX_BACK: usize = 4;
+use notchling_engine::transcript::subagents::MAX_BACK;
 
 fn earlier_model(path: &str, name: &str) -> Option<(String, Option<String>)> {
     let mut current = path.to_string();
@@ -53,12 +52,14 @@ pub fn with_model(path: &str, name: &str, read: Arc<Conversation>) -> Arc<Conver
     result
 }
 
-pub use notchling_engine::transcript::subagents::running_before;
+pub use notchling_engine::transcript::subagents::chain;
+pub use notchling_engine::transcript::subagents::list_across_clears as subagents;
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::testutil::Scratch;
+    use notchling_engine::transcript::subagents::{Status, Subagent};
     use std::time::Duration;
 
     fn tick() {
@@ -121,24 +122,101 @@ mod tests {
         assert_eq!(with_model(&lone, "worker", read).facts.model, None);
     }
 
+    fn now() -> f64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs_f64()
+    }
+
+    fn agent(s: &Scratch, folder: &str, id: &str, description: &str, tail: &str) {
+        s.write(
+            &format!("{folder}/subagents/agent-{id}.jsonl"),
+            &format!("{{}}\n{tail}"),
+        );
+        s.write(
+            &format!("{folder}/subagents/agent-{id}.meta.json"),
+            &format!(r#"{{"description":"{description}","requestShape":"background"}}"#),
+        );
+    }
+
+    fn notified(id: &str) -> String {
+        format!(
+            r#"{{"type":"queue-operation","operation":"enqueue","content":"<task-notification>\n<task-id>{id}</task-id>\n<status>completed</status>\n</task-notification>"}}"#
+        ) + "\n"
+    }
+
+    fn status_of(list: &[Subagent], id: &str) -> Status {
+        list.iter().find(|a| a.id == id).expect("listed").status
+    }
+
     #[test]
-    fn running_subagents_of_the_cleared_transcript_carry_over() {
+    fn every_subagent_of_the_cleared_transcript_carries_over_not_only_the_running_ones() {
         let s = Scratch::new("cleared-subagents");
         s.write("p/old.jsonl", &named("worker"));
-        s.write("p/old/subagents/agent-a1.jsonl", "{}\n");
-        s.write(
-            "p/old/subagents/agent-a1.meta.json",
-            r#"{"description":"Port it","requestShape":"background"}"#,
+        agent(&s, "p/old", "run", "Still going", "");
+        agent(
+            &s,
+            "p/old",
+            "done",
+            "Port it",
+            "Report delivered to your caller\n",
         );
         tick();
         let new = s.write("p/new.jsonl", &cleared("worker"));
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs_f64();
-        let carried = running_before(&new.to_string_lossy(), "worker", now);
-        assert_eq!(carried.len(), 1);
-        assert_eq!(carried[0].description, "Port it");
+        let carried = subagents(&new.to_string_lossy(), "worker", &HashMap::new(), now());
+        let mut ids: Vec<&str> = carried.iter().map(|a| a.id.as_str()).collect();
+        ids.sort_unstable();
+        assert_eq!(ids, ["done", "run"]);
+        assert_eq!(status_of(&carried, "done"), Status::Completed);
+        assert_eq!(status_of(&carried, "run"), Status::Running);
+    }
+
+    #[test]
+    fn a_completion_noted_in_a_later_transcript_ends_an_earlier_subagent() {
+        let s = Scratch::new("cleared-finished");
+        s.write("p/a.jsonl", &(named("worker") + &notified("viaold")));
+        agent(&s, "p/a", "viaold", "Noted in its own transcript", "");
+        agent(&s, "p/a", "viacurrent", "Noted after the clears", "");
+        agent(&s, "p/a", "open", "Not noted", "");
+        tick();
+        s.write("p/b.jsonl", &cleared("worker"));
+        agent(&s, "p/b", "viamiddle", "Noted after the first clear", "");
+        tick();
+        let current = s.write("p/c.jsonl", &cleared("worker"));
+        let mut finished = HashMap::new();
+        finished.insert("viacurrent".to_string(), "completed".to_string());
+        finished.insert("viamiddle".to_string(), "failed".to_string());
+        let list = subagents(&current.to_string_lossy(), "worker", &finished, now());
+        assert_eq!(status_of(&list, "viaold"), Status::Completed);
+        assert_eq!(status_of(&list, "viacurrent"), Status::Completed);
+        assert_eq!(status_of(&list, "viamiddle"), Status::Failed);
+        assert_eq!(status_of(&list, "open"), Status::Running);
+    }
+
+    #[test]
+    fn a_subagent_continued_in_the_new_folder_keeps_the_description_of_the_old_one() {
+        let s = Scratch::new("cleared-continued-agent");
+        s.write("p/old.jsonl", &named("worker"));
+        agent(&s, "p/old", "go", "Port it", "");
+        tick();
+        let new = s.write("p/new.jsonl", &cleared("worker"));
+        let continued = s.write("p/new/subagents/agent-go.jsonl", "{}\n");
+        let list = subagents(&new.to_string_lossy(), "worker", &HashMap::new(), now());
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].path, continued.to_string_lossy());
+        assert_eq!(list[0].description, "Port it");
+        assert!(list[0].background);
+    }
+
+    #[test]
+    fn without_a_clear_the_list_is_the_transcripts_own() {
+        let s = Scratch::new("cleared-none");
+        let lone = s.write("p/lone.jsonl", &named("worker"));
+        agent(&s, "p/lone", "mine", "Mine", "");
+        let list = subagents(&lone.to_string_lossy(), "worker", &HashMap::new(), now());
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].description, "Mine");
     }
 }
 

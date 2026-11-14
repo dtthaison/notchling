@@ -1,5 +1,6 @@
 use super::glance::Peeked;
 use super::model::{Conversation, Timestamp};
+use super::tail::RAW_BYTES;
 use super::util::{file_times, modified_secs};
 use crate::contract::Tool;
 use serde::Deserialize;
@@ -8,8 +9,11 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
+use std::sync::atomic::Ordering;
 use std::sync::{Mutex, OnceLock};
+use std::time::SystemTime;
 
+pub const MAX_BACK: usize = 4;
 pub const QUIET_AFTER: f64 = 600.0;
 pub const ACTIVE_WINDOW: f64 = 90.0;
 
@@ -125,65 +129,126 @@ pub fn list(
     finished: &HashMap<String, String>,
     now: Timestamp,
 ) -> Vec<Subagent> {
-    let dir = folder(transcript_path);
-    let Ok(entries) = std::fs::read_dir(&dir) else {
-        return Vec::new();
-    };
-    let session = Path::new(transcript_path)
-        .file_stem()
-        .map(|s| s.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    let mut out = Vec::new();
-    for entry in entries.flatten() {
-        let name = entry.file_name().to_string_lossy().into_owned();
-        if !(name.starts_with("agent-") && name.ends_with(".jsonl")) {
+    list_chain(&[transcript_path], finished, now)
+}
+
+fn apply_meta(agent: &mut Subagent, meta: &Value) {
+    agent.description = opt_str(meta, "description").unwrap_or_else(|| "Subagent".into());
+    agent.agent_type = opt_str(meta, "agentType").unwrap_or_else(|| "general-purpose".into());
+    agent.model = opt_str(meta, "model");
+    agent.effort = opt_str(meta, "effort");
+    agent.background = opt_str(meta, "requestShape").as_deref() == Some("background");
+    agent.tool_use_id = opt_str(meta, "toolUseId");
+}
+
+pub fn list_chain<S: AsRef<str>>(
+    newest_first: &[S],
+    finished: &HashMap<String, String>,
+    now: Timestamp,
+) -> Vec<Subagent> {
+    let mut out: Vec<Subagent> = Vec::new();
+    let mut at: HashMap<String, usize> = HashMap::new();
+    let mut with_meta: Vec<bool> = Vec::new();
+    for transcript in newest_first {
+        let dir = folder(transcript.as_ref());
+        let Ok(entries) = std::fs::read_dir(&dir) else {
             continue;
-        }
-        let id = name["agent-".len()..name.len() - ".jsonl".len()].to_string();
-        let file = Path::new(&dir).join(&name).to_string_lossy().into_owned();
-        let (updated, started) = file_times(&file).unwrap_or((0.0, 0.0));
-        let meta = read_meta(
-            &Path::new(&dir)
-                .join(format!("agent-{id}.meta.json"))
-                .to_string_lossy(),
-        );
-        let mut agent = Subagent {
-            id: format!("claude:{id}"),
-            path: file.clone(),
-            description: opt_str(&meta, "description").unwrap_or_else(|| "Subagent".into()),
-            agent_type: opt_str(&meta, "agentType").unwrap_or_else(|| "general-purpose".into()),
-            model: opt_str(&meta, "model"),
-            effort: opt_str(&meta, "effort"),
-            background: opt_str(&meta, "requestShape").as_deref() == Some("background"),
-            tool_use_id: opt_str(&meta, "toolUseId"),
-            started,
-            updated,
-            status: Status::Quiet,
-            origin: Origin::native(Tool::Claude),
-            session: session.clone(),
-            parent: session.clone(),
-            depth: 1,
         };
-        agent.status = status_of(&agent, finished, now);
-        if agent.status != Status::Completed && agent.status != Status::Failed && handed_back(&file)
+        let session = Path::new(transcript.as_ref())
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if !(name.starts_with("agent-") && name.ends_with(".jsonl")) {
+                continue;
+            }
+            let id = name["agent-".len()..name.len() - ".jsonl".len()].to_string();
+            let meta = read_meta(
+                &Path::new(&dir)
+                    .join(format!("agent-{id}.meta.json"))
+                    .to_string_lossy(),
+            );
+            if let Some(&known) = at.get(&id) {
+                if !with_meta[known] && !meta.is_null() {
+                    apply_meta(&mut out[known], &meta);
+                    with_meta[known] = true;
+                }
+                continue;
+            }
+            let file = Path::new(&dir).join(&name).to_string_lossy().into_owned();
+            let (updated, started) = file_times(&file).unwrap_or((0.0, 0.0));
+            let mut agent = Subagent {
+                id: format!("claude:{id}"),
+                path: file,
+                description: String::new(),
+                agent_type: String::new(),
+                model: None,
+                effort: None,
+                background: false,
+                tool_use_id: None,
+                started,
+                updated,
+                status: Status::Quiet,
+                origin: Origin::native(Tool::Claude),
+                session: session.clone(),
+                parent: session.clone(),
+                depth: 1,
+            };
+            apply_meta(&mut agent, &meta);
+            at.insert(id, out.len());
+            with_meta.push(!meta.is_null());
+            out.push(agent);
+        }
+    }
+    for agent in &mut out {
+        agent.status = status_of(agent, finished, now);
+        if agent.status != Status::Completed
+            && agent.status != Status::Failed
+            && handed_back_stamped(&agent.path)
         {
             agent.status = Status::Completed;
         }
-        out.push(agent);
     }
     out.sort_by(|a, b| a.started.total_cmp(&b.started));
     out
 }
 
-pub fn running_before(path: &str, name: &str, now: Timestamp) -> Vec<Subagent> {
-    let Some(before) = super::locate::predecessor(path, name) else {
-        return Vec::new();
-    };
-    let read = super::conversation::read_shared(&before);
-    list(&before, &read.finished_agents, now)
-        .into_iter()
-        .filter(|a| a.status == Status::Running)
-        .collect()
+pub fn chain(path: &str, name: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut current = path.to_string();
+    for _ in 0..MAX_BACK {
+        let Some(before) = super::locate::predecessor(&current, name) else {
+            break;
+        };
+        out.push(before.clone());
+        current = before;
+    }
+    out
+}
+
+pub fn list_across_clears(
+    path: &str,
+    name: &str,
+    finished: &HashMap<String, String>,
+    now: Timestamp,
+) -> Vec<Subagent> {
+    let before = chain(path, name);
+    if before.is_empty() {
+        return list(path, finished, now);
+    }
+    let mut merged: HashMap<String, String> = HashMap::new();
+    for earlier in before.iter().rev() {
+        merged.extend(
+            super::finished::read(earlier)
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone())),
+        );
+    }
+    merged.extend(finished.iter().map(|(k, v)| (k.clone(), v.clone())));
+    let mut paths = vec![path.to_string()];
+    paths.extend(before);
+    list_chain(&paths, &merged, now)
 }
 
 pub fn status_of(agent: &Subagent, finished: &HashMap<String, String>, now: Timestamp) -> Status {
@@ -203,6 +268,38 @@ pub fn status_of(agent: &Subagent, finished: &HashMap<String, String>, now: Time
     }
 }
 
+type HandedBack = HashMap<String, (u64, Option<SystemTime>, bool)>;
+
+fn handed_back_cache() -> &'static Mutex<HandedBack> {
+    static CACHE: OnceLock<Mutex<HandedBack>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn handed_back_stamped(path: &str) -> bool {
+    let Ok(meta) = std::fs::metadata(path) else {
+        return false;
+    };
+    let stamp = (meta.len(), meta.modified().ok());
+    if let Some((len, modified, answer)) = handed_back_cache()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(path)
+    {
+        if (*len, *modified) == stamp {
+            return *answer;
+        }
+    }
+    let answer = handed_back(path);
+    let mut cache = handed_back_cache()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    if cache.len() > 5000 {
+        cache.clear();
+    }
+    cache.insert(path.to_string(), (stamp.0, stamp.1, answer));
+    answer
+}
+
 pub fn handed_back(path: &str) -> bool {
     let Ok(mut file) = File::open(path) else {
         return false;
@@ -220,6 +317,7 @@ pub fn handed_back(path: &str) -> bool {
     if file.read_to_end(&mut tail).is_err() {
         return false;
     }
+    RAW_BYTES.fetch_add(tail.len() as u64, Ordering::Relaxed);
     let needle = b"Report delivered to your caller";
     tail.windows(needle.len()).any(|w| w == needle)
 }
@@ -242,6 +340,20 @@ fn tag(name: &str, text: &str) -> Option<String> {
     let a = text.find(&open)? + open.len();
     let b = a + text[a..].find(&format!("</{name}>"))?;
     Some(text[a..b].trim().to_string())
+}
+
+pub fn result_end<'a>(
+    tool_use_id: Option<&'a str>,
+    is_error: bool,
+    result: Option<&'a Value>,
+) -> Option<([&'a str; 2], &'static str)> {
+    let tool = tool_use_id?;
+    let result = result?;
+    let agent = result.get("agentId").and_then(Value::as_str)?;
+    if result.get("status").and_then(Value::as_str) == Some("async_launched") {
+        return None;
+    }
+    Some(([tool, agent], if is_error { "failed" } else { "completed" }))
 }
 
 pub fn notification_statuses(text: &str) -> Vec<(String, String)> {

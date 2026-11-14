@@ -20,13 +20,12 @@ impl Subagents for ClaudeSubagents {
         if parent.id != parent.session {
             return Ok(Vec::new());
         }
-        let mut list = subagents::list(&path, &parent.finished, now);
-        for agent in subagents::running_before(&path, &parent.name, now) {
-            if !list.iter().any(|a| a.id == agent.id) {
-                list.push(agent);
-            }
-        }
-        Ok(list)
+        Ok(subagents::list_across_clears(
+            &path,
+            &parent.name,
+            &parent.finished,
+            now,
+        ))
     }
 
     fn glance(&self, s: &Subagent) -> Result<Glance, Unsupported> {

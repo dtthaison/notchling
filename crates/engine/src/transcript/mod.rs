@@ -5,6 +5,7 @@ pub mod codex;
 pub mod continued;
 pub mod conversation;
 pub mod errors;
+pub mod finished;
 pub mod glance;
 pub mod locate;
 pub mod model;

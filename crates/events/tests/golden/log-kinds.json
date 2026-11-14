@@ -118,7 +118,7 @@
     {"name":"chars","type":"count","optional":false,"list":false,"choices":[]},
     {"name":"images","type":"count","optional":false,"list":false,"choices":[]},
     {"name":"result","type":"choice","optional":false,"list":false,"choices":["sent","failed","other"]},
-    {"name":"why","type":"choice","optional":true,"list":false,"choices":["pty","timeout","dialog_open","question_gone","question_mismatch","not_permission","permission_mismatch","no_always","permission_still_open","acting_off","no_terminal","not_idle","attach_failed","io_not_found","io_permission_denied","io_other","sqlite_busy","sqlite_corrupt","keychain","network","other"]},
+    {"name":"why","type":"choice","optional":true,"list":false,"choices":["pty","timeout","dialog_open","question_gone","question_mismatch","not_permission","permission_mismatch","no_always","permission_still_open","no_input","not_cleared","not_taken","not_sent","acting_off","no_terminal","not_idle","attach_failed","io_not_found","io_permission_denied","io_other","sqlite_busy","sqlite_corrupt","keychain","network","other"]},
     {"name":"waited_ms","type":"millis","optional":true,"list":false,"choices":[]}
   ]},
   {"name":"session.reply_held","kv":1,"group":"agents","lock":"toggle","sinks":["activity","diagnostics"],"default":"on","durability":"push","emitters":["daemon"],"retired":false,"fields":[
@@ -318,7 +318,7 @@
   {"name":"op.failed","kv":1,"group":"diagnostics","lock":"toggle","sinks":["activity","diagnostics"],"default":"on","durability":"push","emitters":["daemon","app"],"retired":false,"fields":[
     {"name":"op","type":"op","optional":false,"list":false,"choices":[]},
     {"name":"code","type":"error_code","optional":false,"list":false,"choices":["bad_request","unknown_op","forbidden","needs_approval","internal","unimplemented","failed"]},
-    {"name":"why","type":"choice","optional":false,"list":false,"choices":["pty","timeout","dialog_open","question_gone","question_mismatch","not_permission","permission_mismatch","no_always","permission_still_open","acting_off","no_terminal","not_idle","attach_failed","io_not_found","io_permission_denied","io_other","sqlite_busy","sqlite_corrupt","keychain","network","other"]},
+    {"name":"why","type":"choice","optional":false,"list":false,"choices":["pty","timeout","dialog_open","question_gone","question_mismatch","not_permission","permission_mismatch","no_always","permission_still_open","no_input","not_cleared","not_taken","not_sent","acting_off","no_terminal","not_idle","attach_failed","io_not_found","io_permission_denied","io_other","sqlite_busy","sqlite_corrupt","keychain","network","other"]},
     {"name":"duration_ms","type":"millis","optional":false,"list":false,"choices":[]}
   ]},
   {"name":"daemon.unreachable","kv":1,"group":"diagnostics","lock":"toggle","sinks":["activity","diagnostics"],"default":"on","durability":"push","emitters":["app"],"retired":false,"fields":[

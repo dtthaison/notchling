@@ -1,5 +1,5 @@
 use super::model::Timestamp;
-use super::util::{file_times, modified_secs};
+use super::util::{file_times, modified_secs, now_secs};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::Read;
@@ -91,12 +91,24 @@ fn successor_cache() -> &'static Mutex<SuccessorCache> {
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-pub fn successor(path: &str, name: &str) -> Option<String> {
-    let dir = Path::new(path).parent()?.to_string_lossy().into_owned();
-    let Some(dir_modified) = std::fs::metadata(&dir).ok().and_then(|m| m.modified().ok()) else {
-        return search_successor(path, name);
+const HEAD_WINDOW: usize = 16_384;
+const HEAD_PENDING_FOR: f64 = 60.0;
+
+struct Search {
+    found: Option<String>,
+    settled: bool,
+}
+
+enum Head {
+    Clear,
+    Not,
+    Pending,
+}
+
+fn remembered(key: String, dir: &str, search: impl FnOnce() -> Search) -> Option<String> {
+    let Some(dir_modified) = std::fs::metadata(dir).ok().and_then(|m| m.modified().ok()) else {
+        return search().found;
     };
-    let key = format!("{path}\n{name}");
     if let Some((stamp, result)) = successor_cache()
         .lock()
         .unwrap_or_else(|e| e.into_inner())
@@ -106,52 +118,55 @@ pub fn successor(path: &str, name: &str) -> Option<String> {
             return result.clone();
         }
     }
-    let result = search_successor(path, name);
-    let mut cache = successor_cache().lock().unwrap_or_else(|e| e.into_inner());
-    if cache.len() > 500 {
-        cache.clear();
+    let result = search();
+    if result.settled {
+        let mut cache = successor_cache().lock().unwrap_or_else(|e| e.into_inner());
+        if cache.len() > 500 {
+            cache.clear();
+        }
+        cache.insert(key, (dir_modified, result.found.clone()));
     }
-    cache.insert(key, (dir_modified, result.clone()));
-    result
+    result.found
+}
+
+pub fn successor(path: &str, name: &str) -> Option<String> {
+    let dir = Path::new(path).parent()?.to_string_lossy().into_owned();
+    remembered(format!("{path}\n{name}"), &dir, || {
+        search_successor(path, name)
+    })
 }
 
 pub fn predecessor(path: &str, name: &str) -> Option<String> {
     let dir = Path::new(path).parent()?.to_string_lossy().into_owned();
-    let Some(dir_modified) = std::fs::metadata(&dir).ok().and_then(|m| m.modified().ok()) else {
-        return search_predecessor(path, name);
-    };
-    let key = format!("before\n{path}\n{name}");
-    if let Some((stamp, result)) = successor_cache()
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .get(&key)
-    {
-        if *stamp == dir_modified {
-            return result.clone();
-        }
-    }
-    let result = search_predecessor(path, name);
-    let mut cache = successor_cache().lock().unwrap_or_else(|e| e.into_inner());
-    if cache.len() > 500 {
-        cache.clear();
-    }
-    cache.insert(key, (dir_modified, result.clone()));
-    result
+    remembered(format!("before\n{path}\n{name}"), &dir, || {
+        search_predecessor(path, name)
+    })
 }
 
-fn search_predecessor(path: &str, name: &str) -> Option<String> {
+fn search_predecessor(path: &str, name: &str) -> Search {
+    let none = |settled| Search {
+        found: None,
+        settled,
+    };
     if name.is_empty() {
-        return None;
+        return none(true);
     }
-    let quoted = serde_json::to_string(name).ok()?;
+    let Ok(quoted) = serde_json::to_string(name) else {
+        return none(true);
+    };
     let marker = format!("\"agentName\":{quoted}");
-    if !head_contains_clear(Path::new(path), &marker) {
-        return None;
+    match head_state(Path::new(path), &marker) {
+        Head::Clear => {}
+        Head::Not => return none(true),
+        Head::Pending => return none(false),
     }
-    let (_, created) = file_times(path)?;
-    let dir = Path::new(path).parent()?;
-    let mut candidates: Vec<(Timestamp, String)> = std::fs::read_dir(dir)
-        .ok()?
+    let Some((_, created)) = file_times(path) else {
+        return none(true);
+    };
+    let Some(Ok(entries)) = Path::new(path).parent().map(std::fs::read_dir) else {
+        return none(true);
+    };
+    let mut candidates: Vec<(Timestamp, String)> = entries
         .flatten()
         .map(|e| e.path())
         .filter(|p| p.extension().is_some_and(|x| x == "jsonl"))
@@ -161,45 +176,64 @@ fn search_predecessor(path: &str, name: &str) -> Option<String> {
         .filter(|(c, _)| *c < created)
         .collect();
     candidates.sort_by(|a, b| b.0.total_cmp(&a.0).then_with(|| b.1.cmp(&a.1)));
-    candidates
-        .into_iter()
-        .map(|c| c.1)
-        .find(|p| head_contains(Path::new(p), &marker))
+    Search {
+        found: candidates
+            .into_iter()
+            .map(|c| c.1)
+            .find(|p| head_contains(Path::new(p), &marker)),
+        settled: true,
+    }
+}
+
+fn head_of(path: &Path) -> Option<(String, bool)> {
+    let file = File::open(path).ok()?;
+    let mut head = Vec::new();
+    file.take(HEAD_WINDOW as u64).read_to_end(&mut head).ok()?;
+    let full = head.len() >= HEAD_WINDOW;
+    Some((String::from_utf8_lossy(&head).into_owned(), full))
 }
 
 fn head_contains(path: &Path, marker: &str) -> bool {
-    let Ok(file) = File::open(path) else {
-        return false;
-    };
-    let mut head = Vec::new();
-    if file.take(16_384).read_to_end(&mut head).is_err() {
-        return false;
-    }
-    String::from_utf8_lossy(&head).contains(marker)
+    head_of(path).is_some_and(|(head, _)| head.contains(marker))
 }
 
-fn head_contains_clear(path: &Path, marker: &str) -> bool {
-    let Ok(file) = File::open(path) else {
-        return false;
+fn head_state(path: &Path, marker: &str) -> Head {
+    let Some((head, full)) = head_of(path) else {
+        return Head::Not;
     };
-    let mut head = Vec::new();
-    if file.take(16_384).read_to_end(&mut head).is_err() {
-        return false;
+    if head.contains(marker) && head.contains("SessionStart:clear") {
+        Head::Clear
+    } else if full || !young(path) {
+        Head::Not
+    } else {
+        Head::Pending
     }
-    let head = String::from_utf8_lossy(&head);
-    head.contains(marker) && head.contains("SessionStart:clear")
 }
 
-fn search_successor(path: &str, name: &str) -> Option<String> {
+fn young(path: &Path) -> bool {
+    file_times(&path.to_string_lossy())
+        .is_some_and(|(_, created)| now_secs() - created < HEAD_PENDING_FOR)
+}
+
+fn search_successor(path: &str, name: &str) -> Search {
+    let none = Search {
+        found: None,
+        settled: true,
+    };
     if name.is_empty() {
-        return None;
+        return none;
     }
-    let quoted = serde_json::to_string(name).ok()?;
+    let Ok(quoted) = serde_json::to_string(name) else {
+        return none;
+    };
     let marker = format!("\"agentName\":{quoted}");
-    let dir = Path::new(path).parent()?.to_path_buf();
+    let Some(dir) = Path::new(path).parent().map(Path::to_path_buf) else {
+        return none;
+    };
 
     let mut current = path.to_string();
     let mut found = None;
+    let mut settled = true;
     for _ in 0..4 {
         let Some(since) = modified_secs(&current).map(|m| m - 10.0) else {
             break;
@@ -217,13 +251,20 @@ fn search_successor(path: &str, name: &str) -> Option<String> {
             .filter(|(created, _)| *created > since)
             .collect();
         candidates.sort_by(|a, b| a.0.total_cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
-        let next = candidates
-            .into_iter()
-            .map(|c| c.1)
-            .find(|p| head_contains_clear(Path::new(p), &marker));
+        let mut next = None;
+        for (_, candidate) in candidates {
+            match head_state(Path::new(&candidate), &marker) {
+                Head::Clear => {
+                    next = Some(candidate);
+                    break;
+                }
+                Head::Pending => settled = false,
+                Head::Not => {}
+            }
+        }
         let Some(next) = next else { break };
         found = Some(next.clone());
         current = next;
     }
-    found
+    Search { found, settled }
 }
