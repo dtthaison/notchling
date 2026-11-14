@@ -10,6 +10,8 @@ pub mod tracker;
 #[cfg(test)]
 mod account_log_tests;
 #[cfg(test)]
+mod fork_tests;
+#[cfg(test)]
 mod sources_tests;
 #[cfg(test)]
 mod tracker_tests;

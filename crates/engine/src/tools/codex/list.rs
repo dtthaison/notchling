@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::sessions::{Agent, AgentGroup, AgentTarget};
-use crate::transcript::codex;
+use crate::transcript::codex::{self, Lineage};
 
 pub fn days_from_civil(year: i64, month: u32, day: u32) -> i64 {
     let y = if month <= 2 { year - 1 } else { year };
@@ -107,9 +107,8 @@ fn short_id(id: &str) -> String {
     id.chars().take(8).collect()
 }
 
-pub fn session(path: &Path) -> Option<Agent> {
+fn row(path: &Path, meta: codex::Meta) -> Agent {
     let text = path.to_string_lossy();
-    let meta = codex::meta(&text)?;
     let working = codex::turn_open(&text);
     let since_ms = std::fs::metadata(path)
         .ok()
@@ -118,7 +117,7 @@ pub fn session(path: &Path) -> Option<Agent> {
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0);
     let cwd = meta.cwd.clone();
-    Some(Agent {
+    Agent {
         id: format!("codex:{}", meta.id),
         name: meta
             .title
@@ -145,7 +144,21 @@ pub fn session(path: &Path) -> Option<Agent> {
         config_dir: None,
         command: None,
         resume_session_id: None,
-    })
+    }
+}
+
+pub fn session(path: &Path) -> Option<Agent> {
+    let text = path.to_string_lossy();
+    if codex::lineage(&text).is_some() {
+        return None;
+    }
+    Some(row(path, codex::meta(&text)?))
+}
+
+pub fn child(path: &Path) -> Option<(Agent, Lineage)> {
+    let text = path.to_string_lossy();
+    let lineage = codex::lineage(&text)?;
+    Some((row(path, codex::meta(&text)?), lineage))
 }
 
 #[cfg(test)]

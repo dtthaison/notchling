@@ -1,5 +1,8 @@
+use super::fork::own_start;
 use super::Parser;
-use crate::transcript::glance::{has, has_step, peek as peek_with, widen, Peeked, TailParser};
+use crate::transcript::glance::{
+    has, has_step, peek_from as peek_with, widen_from, Peeked, TailParser,
+};
 use crate::transcript::model::Conversation;
 use crate::transcript::util::{count_of, parse_object, str_of};
 use serde_json::Value;
@@ -23,7 +26,7 @@ fn held(line: &[u8]) -> Option<u64> {
 }
 
 pub fn context_tokens(path: &str) -> Option<u64> {
-    widen(path, |window| {
+    widen_from(path, own_start(path), |window| {
         let found = window.lines().into_iter().rev().find_map(held);
         (found, found.is_some())
     })
@@ -39,7 +42,7 @@ fn tail(lines: &[&[u8]]) -> Conversation {
 }
 
 pub fn recent(path: &str) -> Option<Conversation> {
-    widen(path, |window| {
+    widen_from(path, own_start(path), |window| {
         let conversation = tail(&window.lines());
         let done = has_step(&conversation);
         (conversation, done)
@@ -47,5 +50,10 @@ pub fn recent(path: &str) -> Option<Conversation> {
 }
 
 pub fn peek(path: &str, with_recent: bool) -> Option<Peeked> {
-    peek_with(path, held, with_recent.then_some(tail as TailParser))
+    peek_with(
+        path,
+        own_start(path),
+        held,
+        with_recent.then_some(tail as TailParser),
+    )
 }

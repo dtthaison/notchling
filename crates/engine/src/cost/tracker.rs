@@ -7,6 +7,7 @@ use super::prices;
 use super::summary::{day_key, owners, summarize, Summary, Tables, Window};
 use crate::catalog::{Catalog, Price, Tool};
 use crate::pages::clock::local_offset_secs;
+use crate::transcript::codex::fork as codex_fork;
 use crate::transcript::util::parse_date;
 use serde_json::Value;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -392,6 +393,13 @@ impl Tracker {
             account: account_in_path(path),
             file_id: &file_id,
         };
+        if root.channel == CODEX {
+            let own = codex_fork::own_start(&text);
+            if own > mark.offset {
+                self.read(path, 0, Some(1), &ctx, &mut reading);
+                mark.offset = own;
+            }
+        }
         mark.offset = self.read(path, mark.offset, None, &ctx, &mut reading);
         mark.size = size;
         mark.model = reading.model;

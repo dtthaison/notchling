@@ -11,6 +11,8 @@ pub const CHAT_TAIL_BYTES: u64 = 4_000_000;
 pub const MAX_LINE_BYTES: usize = 100_000;
 pub const LONG_LINE_SCAN: u64 = 64_000_000;
 
+type Floor = Box<dyn Fn(&str) -> u64 + Send + Sync>;
+
 pub static PARSED_BYTES: AtomicU64 = AtomicU64::new(0);
 
 static CHAT_TAIL: AtomicU64 = AtomicU64::new(CHAT_TAIL_BYTES);
@@ -141,6 +143,7 @@ struct Cursor<P, O> {
     output: O,
     used: u64,
     budget: u64,
+    floor: u64,
 }
 
 struct State<P, O> {
@@ -154,6 +157,7 @@ pub struct Cursors<P: LineParser, O: Clone> {
     limit: usize,
     long_line_scan: u64,
     line_cap: Option<usize>,
+    floor: Option<Floor>,
     render: Box<dyn Fn(&P) -> O + Send + Sync>,
     state: Mutex<State<P, O>>,
     parsed: AtomicU64,
@@ -181,6 +185,7 @@ impl<P: LineParser, O: Clone> Cursors<P, O> {
             limit,
             long_line_scan: 0,
             line_cap: None,
+            floor: None,
             render: Box::new(render),
             state: Mutex::new(State {
                 cursors: HashMap::new(),
@@ -215,6 +220,11 @@ impl<P: LineParser, O: Clone> Cursors<P, O> {
 
     pub fn long_lines_free(mut self, scan_limit: u64) -> Self {
         self.long_line_scan = scan_limit;
+        self
+    }
+
+    pub fn floor(mut self, floor: impl Fn(&str) -> u64 + Send + Sync + 'static) -> Self {
+        self.floor = Some(Box::new(floor));
         self
     }
 
@@ -259,6 +269,7 @@ impl<P: LineParser, O: Clone> Cursors<P, O> {
         let size = meta.len();
         let inode = inode_of(&meta);
         let budget = self.budget();
+        let floor = self.floor.as_ref().map_or(0, |f| f(path));
 
         let mut guard = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let state = &mut *guard;
@@ -268,6 +279,7 @@ impl<P: LineParser, O: Clone> Cursors<P, O> {
         let reusable = match state.cursors.get(path) {
             Some(c)
                 if c.budget == budget
+                    && c.floor == floor
                     && c.inode == inode
                     && c.offset <= size
                     && (size - c.offset <= budget
@@ -317,6 +329,11 @@ impl<P: LineParser, O: Clone> Cursors<P, O> {
                 (start, start > 0)
             }
         };
+        let (start, cut) = if start < floor {
+            (floor, false)
+        } else {
+            (start, cut)
+        };
         let mut parser = P::default();
         let consumed = self.feed(&mut parser, path, start, size, cut).ok()?;
         let output = (self.render)(&parser);
@@ -341,6 +358,7 @@ impl<P: LineParser, O: Clone> Cursors<P, O> {
                 output: output.clone(),
                 used: clock,
                 budget,
+                floor,
             },
         );
         Some(output)
@@ -403,6 +421,69 @@ mod tests {
         assert_eq!(plain.read(&p).expect("read"), vec!["answer"]);
         let free = Cursors::new(15, 4, |c: &Collect| c.0.clone()).long_lines_free(u64::MAX);
         assert_eq!(free.read(&p).expect("read"), vec!["prompt", "answer"]);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[derive(Default)]
+    struct Lines(Vec<String>);
+
+    impl LineParser for Lines {
+        fn consume(&mut self, line: &[u8]) {
+            self.0.push(String::from_utf8_lossy(line).into_owned());
+        }
+    }
+
+    #[test]
+    fn a_floor_keeps_a_read_from_starting_before_it() {
+        let dir = std::env::temp_dir().join(format!("tail-floor-{}", std::process::id()));
+        fs::create_dir_all(&dir).expect("dir");
+        let path = dir.join("a.jsonl");
+        fs::write(&path, "aa\nbb\ncc\ndd\n").expect("write");
+        let p = path.to_string_lossy().into_owned();
+        let floored = Cursors::new(1_000, 4, |c: &Lines| c.0.clone()).floor(|_| 6);
+        assert_eq!(floored.read(&p).expect("read"), vec!["cc", "dd"]);
+        let small = Cursors::new(5, 4, |c: &Lines| c.0.clone()).floor(|_| 3);
+        assert_eq!(
+            small.read(&p).expect("read"),
+            vec!["dd"],
+            "a window already past the floor is left alone"
+        );
+        let past = Cursors::new(1_000, 4, |c: &Lines| c.0.clone()).floor(|_| 12);
+        assert_eq!(past.read(&p).expect("read"), Vec::<String>::new());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_cursor_made_under_another_floor_is_made_again() {
+        use std::sync::atomic::AtomicU64;
+        use std::sync::Arc;
+        let dir = std::env::temp_dir().join(format!("tail-floor-moves-{}", std::process::id()));
+        fs::create_dir_all(&dir).expect("dir");
+        let path = dir.join("a.jsonl");
+        fs::write(&path, "aa\nbb\ncc\n").expect("write");
+        let p = path.to_string_lossy().into_owned();
+        let floor = Arc::new(AtomicU64::new(3));
+        let seen = Arc::clone(&floor);
+        let cursors = Cursors::new(1_000, 4, |c: &Lines| c.0.clone())
+            .floor(move |_| seen.load(Ordering::SeqCst));
+        assert_eq!(cursors.read(&p).expect("read"), vec!["bb", "cc"]);
+        let mut file = fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .expect("open");
+        std::io::Write::write_all(&mut file, b"dd\n").expect("append");
+        assert_eq!(
+            cursors.read(&p).expect("read"),
+            vec!["bb", "cc", "dd"],
+            "the same floor reads on from where it stopped"
+        );
+        floor.store(6, Ordering::SeqCst);
+        std::io::Write::write_all(&mut file, b"ee\n").expect("append");
+        assert_eq!(
+            cursors.read(&p).expect("read"),
+            vec!["cc", "dd", "ee"],
+            "a new floor starts the read again"
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 }
