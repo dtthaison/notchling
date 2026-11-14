@@ -1,5 +1,5 @@
 use crate::acting_ops_tests::{app, sessions, setup, Setup, PROMPT};
-use notchling_engine::reply::held::{SETTLE_MS, START_GRACE_MS};
+use notchling_engine::reply::held::{BLOCKED_RETRY_MS, SETTLE_MS, START_GRACE_MS};
 use notchling_local_api::{ops, topics};
 use serde_json::{json, Value};
 use std::sync::atomic::Ordering;
@@ -104,15 +104,17 @@ fn held_text_the_terminal_does_not_send_stays_held_and_goes_out_later() {
         Some("two"),
         "an Enter the terminal ignored sent nothing"
     );
-    assert_eq!(
-        s.room.named(topics::SESSION_HELD).last().unwrap(),
-        &json!({"id": "job-a", "text": "two"})
+    let shown = s.room.named(topics::SESSION_HELD).last().cloned().unwrap();
+    assert_eq!(shown["text"], json!("two"));
+    assert!(
+        shown["note"].as_str().unwrap().contains("wasn't sent"),
+        "the failure says what happened: {shown}"
     );
     s.deaf.store(false, Ordering::SeqCst);
     let tried = s.writes.lock().unwrap().len();
     s.ops.flush_held(failed_at + 1_000);
     assert_eq!(s.writes.lock().unwrap().len(), tried, "not again at once");
-    settle(&s, failed_at + START_GRACE_MS);
+    settle(&s, failed_at + BLOCKED_RETRY_MS);
     assert_eq!(s.ops.held_text("job-a"), None);
     assert_eq!(
         s.room.named(topics::SESSION_HELD).last().unwrap(),

@@ -15,6 +15,7 @@ pub enum Row {
         images: usize,
         queued: bool,
         sending: bool,
+        note: Option<String>,
     },
     Assistant {
         text: String,
@@ -185,6 +186,7 @@ pub fn row_of(item: &ChatItem) -> Row {
             images: *images,
             queued: false,
             sending: false,
+            note: None,
         },
         ItemKind::Assistant { text } => Row::Assistant { text: text.clone() },
         ItemKind::Thinking { seconds, text } => Row::Thinking {
@@ -219,6 +221,7 @@ pub fn rows(conversation: &Conversation) -> Vec<Row> {
         images: 0,
         queued: true,
         sending: false,
+        note: None,
     }));
     out
 }
@@ -229,6 +232,7 @@ pub fn with_held(mut rows: Vec<Row>, held: Option<&str>) -> Vec<Row> {
         images: 0,
         queued: true,
         sending: false,
+        note: None,
     }));
     rows
 }
@@ -239,6 +243,7 @@ pub fn with_outgoing(mut rows: Vec<Row>, outgoing: &[String]) -> Vec<Row> {
         images: 0,
         queued: true,
         sending: true,
+        note: None,
     }));
     rows
 }
@@ -298,7 +303,8 @@ mod tests {
                 text: "Fix it".into(),
                 images: 0,
                 queued: false,
-                sending: false
+                sending: false,
+                note: None,
             }
         );
         assert_eq!(
@@ -341,7 +347,8 @@ mod tests {
                 text: "And bump the version".into(),
                 images: 0,
                 queued: true,
-                sending: false
+                sending: false,
+                note: None,
             }
         );
     }
@@ -360,7 +367,8 @@ mod tests {
                 text: "Fix the build".into(),
                 images: 0,
                 queued: true,
-                sending: true
+                sending: true,
+                note: None,
             }
         );
     }

@@ -104,6 +104,7 @@ pub const ACCOUNT_MENU_ENV: &str = "NOTCHLING_RENDER_ACCOUNT_MENU";
 pub const PAGE_ENV: &str = page_panel::PAGE_ENV;
 pub const INBOX_ENV: &str = "NOTCHLING_RENDER_INBOX";
 pub const SENDING_ENV: &str = "NOTCHLING_RENDER_SENDING";
+pub const HELD_ENV: &str = "NOTCHLING_RENDER_HELD";
 
 fn switch(name: &str) -> bool {
     std::env::var_os(name).is_some_and(|v| v == "1")
@@ -146,6 +147,7 @@ pub struct ChatView {
     chrome: Entity<pane::Chrome>,
     tasks_open_preview: bool,
     drop_preview: bool,
+    held_preview: Option<(String, Option<String>)>,
     overlay_open: bool,
     page_covered: bool,
     activity_drawn: std::cell::Cell<Option<i64>>,
@@ -227,6 +229,9 @@ impl ChatView {
             view.prompt.apply_preview(preview);
         }
         view.tools.sending = switch(SENDING_ENV);
+        view.held_preview = std::env::var(HELD_ENV)
+            .ok()
+            .and_then(|how| crate::chat::renders::held_preview(&how));
         view.sidebar_hidden = switch(SIDEBAR_HIDDEN_ENV);
         view.details_hidden = switch(DETAILS_HIDDEN_ENV);
         view.force_panel_widths();
@@ -409,6 +414,7 @@ impl ChatView {
             chrome: cx.new(|_| pane::Chrome),
             tasks_open_preview: false,
             drop_preview: false,
+            held_preview: None,
             sidebar_hidden: false,
             details_hidden: false,
             panels: Default::default(),

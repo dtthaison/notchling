@@ -133,6 +133,7 @@ pub(super) struct ConversationInput {
     pub session: Option<SessionShown>,
     pub held_working: bool,
     pub held: Option<String>,
+    pub held_note: Option<String>,
     pub outgoing: Vec<String>,
     pub loading: bool,
     pub empty_note: Option<&'static str>,
@@ -150,6 +151,7 @@ impl PartialEq for ConversationInput {
             && self.session == other.session
             && self.held_working == other.held_working
             && self.held == other.held
+            && self.held_note == other.held_note
             && self.outgoing == other.outgoing
             && self.loading == other.loading
             && self.empty_note == other.empty_note
@@ -376,6 +378,7 @@ impl ChatView {
         } else {
             self.held_text()
         };
+        let held_note = held.as_ref().and_then(|_| self.held_note());
         let empty = shown.items.is_empty()
             && shown.queued.is_empty()
             && held.is_none()
@@ -401,6 +404,7 @@ impl ChatView {
             }),
             held_working: self.selected_held_working(),
             held,
+            held_note,
             outgoing,
             loading: self.loading,
             empty_note,

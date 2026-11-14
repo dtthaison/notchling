@@ -44,7 +44,7 @@ const OWN_QUIET: [&str; 7] = [
     ops::CODEX_CHILDREN,
 ];
 
-const NEVER_QUIET: [&str; 85] = [
+const NEVER_QUIET: [&str; 86] = [
     ops::HELLO,
     ops::LOG_VERIFY,
     ops::LOG_CHAIN_START,
@@ -63,6 +63,7 @@ const NEVER_QUIET: [&str; 85] = [
     ops::FOLDER_TRUST,
     ops::SESSION_MOVE,
     ops::SESSION_COMMAND,
+    ops::SESSION_HELD_DISCARD,
     ops::SETTINGS_SET_ACTING,
     ops::SETTINGS_GET_ACTING,
     ops::PROMPTS_LIST,

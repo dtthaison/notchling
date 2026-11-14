@@ -82,6 +82,8 @@ chat-no-reply-yet = · No reply yet
 chat-latest = Latest
 chat-sending-note = Sending…
 chat-queued-note = Queued
+# The link on a message that waits for a session and could not be typed yet: it forgets the message.
+chat-held-discard = Discard
 # $count is the number of pictures sent with a message.
 chat-images = { $count ->
     [one] { $count } image

@@ -3,7 +3,14 @@ use std::collections::{BTreeMap, BTreeSet};
 
 pub const START_GRACE_MS: i64 = 20_000;
 pub const SETTLE_MS: i64 = 3_000;
+pub const BLOCKED_RETRY_MS: i64 = 30_000;
 pub const JOIN: &str = "\n\n";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Tried {
+    pub len: usize,
+    pub at: i64,
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Route {
@@ -16,6 +23,10 @@ pub struct Held {
     texts: BTreeMap<String, String>,
     sent_at: BTreeMap<String, i64>,
     calm_since: BTreeMap<String, i64>,
+    tried: BTreeMap<String, Tried>,
+    notes: BTreeMap<String, String>,
+    flying: BTreeMap<String, i64>,
+    discarded: BTreeSet<String>,
 }
 
 impl Held {
@@ -78,6 +89,7 @@ impl Held {
                 let text = self.texts.remove(&id)?;
                 self.calm_since.remove(&id);
                 self.sent_at.insert(id.clone(), now_ms);
+                self.flying.insert(id.clone(), now_ms);
                 Some((id, text))
             })
             .collect()
@@ -94,6 +106,72 @@ impl Held {
         };
     }
 
+    pub fn failed(
+        &mut self,
+        id: &str,
+        text: &str,
+        now_ms: i64,
+        typed: bool,
+        note: Option<&str>,
+    ) -> bool {
+        let began = self.flying.remove(id).unwrap_or(now_ms);
+        if self.discarded.remove(id) {
+            return false;
+        }
+        self.put_back(id, text, now_ms);
+        if note.is_some() {
+            self.sent_at
+                .insert(id.to_owned(), now_ms + (BLOCKED_RETRY_MS - START_GRACE_MS));
+        }
+        if typed {
+            self.tried.insert(
+                id.to_owned(),
+                Tried {
+                    len: text.len(),
+                    at: began,
+                },
+            );
+        }
+        match note {
+            Some(note) => self.notes.insert(id.to_owned(), note.to_owned()),
+            None => self.notes.remove(id),
+        };
+        true
+    }
+
+    pub fn forget_tried(&mut self, id: &str) {
+        self.tried.remove(id);
+        self.notes.remove(id);
+    }
+
+    pub fn settled_ok(&mut self, id: &str) {
+        self.flying.remove(id);
+        self.discarded.remove(id);
+        self.tried.remove(id);
+        self.notes.remove(id);
+    }
+
+    pub fn tried(&self, id: &str) -> Option<Tried> {
+        self.tried.get(id).copied()
+    }
+
+    pub fn note(&self, id: &str) -> Option<&str> {
+        self.notes.get(id).map(String::as_str)
+    }
+
+    pub fn discard(&mut self, id: &str) -> bool {
+        let was_held = self.texts.remove(id).is_some();
+        let in_flight = self.flying.contains_key(id);
+        if in_flight {
+            self.discarded.insert(id.to_owned());
+        }
+        self.sent_at.remove(id);
+        self.calm_since.remove(id);
+        self.tried.remove(id);
+        self.notes.remove(id);
+        was_held || in_flight
+    }
+
     pub fn get(&self, id: &str) -> Option<&str> {
         self.texts.get(id).map(String::as_str)
     }
@@ -107,6 +185,12 @@ impl Held {
             .get(id)
             .is_some_and(|at| now_ms.saturating_sub(*at) < START_GRACE_MS)
     }
+}
+
+pub fn after_tried(text: &str, tried: Tried) -> &str {
+    text.get(tried.len..)
+        .unwrap_or("")
+        .trim_start_matches(['\n', '\r'])
 }
 
 #[cfg(test)]

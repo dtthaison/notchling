@@ -263,3 +263,112 @@ fn only_ids_with_held_text_are_waiting() {
     held.route("a", "y", true, 0);
     assert_eq!(held.waiting(), ["a", "b"]);
 }
+
+const BOX: &str = "Waiting — the terminal box has other text";
+
+fn flushed(held: &mut Held, rows: &[Agent], now_ms: i64) -> String {
+    let out = held.settled(rows, now_ms);
+    assert_eq!(out.len(), 1, "it was released");
+    out[0].1.clone()
+}
+
+#[test]
+fn a_failed_flush_keeps_its_text_and_says_why_and_tries_again_later_than_a_plain_retry() {
+    let mut held = Held::default();
+    held.route("a", "two", true, 0);
+    let rows = [row("a", AgentGroup::Completed)];
+    let text = flushed(&mut held, &rows, 1_000);
+    assert!(held.failed("a", &text, 5_000, false, Some(BOX)));
+    assert_eq!(held.get("a"), Some("two"));
+    assert_eq!(held.note("a"), Some(BOX));
+    assert_eq!(held.tried("a"), None, "nothing of it was typed");
+    let plain = 5_000 + START_GRACE_MS + SETTLE_MS;
+    assert!(held.settled(&rows, plain).is_empty(), "not yet");
+    let later = 5_000 + BLOCKED_RETRY_MS;
+    let calm = calm_of(&rows);
+    assert!(held.ready(&rows, later - 1, &calm).is_empty());
+    assert_eq!(held.ready(&rows, later, &calm).len(), 1);
+}
+
+#[test]
+fn a_text_that_went_into_the_box_remembers_how_much_and_when_even_through_a_later_refusal() {
+    let mut held = Held::default();
+    held.route("a", "two", true, 0);
+    let rows = [row("a", AgentGroup::Completed)];
+    let text = flushed(&mut held, &rows, 1_000);
+    held.failed("a", &text, 5_000, true, Some("Typed along with other text"));
+    assert_eq!(held.tried("a"), Some(Tried { len: 3, at: 1_000 }));
+    held.route("a", "three", true, 6_000);
+    assert_eq!(held.get("a"), Some("two\n\nthree"));
+    let text = flushed(&mut held, &rows, 5_000 + BLOCKED_RETRY_MS + SETTLE_MS);
+    assert_eq!(text, "two\n\nthree");
+    held.failed("a", &text, 50_000, false, Some(BOX));
+    assert_eq!(
+        held.tried("a"),
+        Some(Tried { len: 3, at: 1_000 }),
+        "a refusal before typing changes nothing about what was tried"
+    );
+    assert_eq!(held.note("a"), Some(BOX));
+    let tried = held.tried("a").unwrap();
+    assert_eq!(after_tried(held.get("a").unwrap(), tried), "three");
+}
+
+#[test]
+fn what_was_tried_is_cut_off_the_front_with_its_blank_line() {
+    let tried = Tried { len: 3, at: 0 };
+    assert_eq!(after_tried("two\n\nthree", tried), "three");
+    assert_eq!(after_tried("two", tried), "");
+    assert_eq!(after_tried("tw", tried), "");
+}
+
+#[test]
+fn a_flush_that_went_in_clears_the_note_and_what_was_tried() {
+    let mut held = Held::default();
+    held.route("a", "two", true, 0);
+    let rows = [row("a", AgentGroup::Completed)];
+    let text = flushed(&mut held, &rows, 1_000);
+    held.failed("a", &text, 5_000, true, Some("Typed along with other text"));
+    let text = flushed(&mut held, &rows, 5_000 + BLOCKED_RETRY_MS + SETTLE_MS);
+    held.settled_ok("a");
+    assert_eq!(text, "two");
+    assert_eq!(held.tried("a"), None);
+    assert_eq!(held.note("a"), None);
+}
+
+#[test]
+fn a_discard_forgets_the_text_its_note_and_what_was_tried() {
+    let mut held = Held::default();
+    held.route("a", "two", true, 0);
+    let rows = [row("a", AgentGroup::Completed)];
+    let text = flushed(&mut held, &rows, 1_000);
+    held.failed("a", &text, 5_000, true, Some("Typed along with other text"));
+    assert!(held.discard("a"));
+    assert_eq!(held.get("a"), None);
+    assert_eq!(held.note("a"), None);
+    assert_eq!(held.tried("a"), None);
+    assert!(!held.discard("a"), "nothing left to discard");
+}
+
+#[test]
+fn a_discard_while_the_flush_is_typing_means_a_failure_is_not_put_back() {
+    let mut held = Held::default();
+    held.route("a", "two", true, 0);
+    let rows = [row("a", AgentGroup::Completed)];
+    let text = flushed(&mut held, &rows, 1_000);
+    assert!(held.discard("a"), "it is in flight, the user sees it held");
+    assert!(!held.failed("a", &text, 5_000, true, Some(BOX)));
+    assert_eq!(held.get("a"), None);
+    assert_eq!(held.tried("a"), None);
+}
+
+#[test]
+fn the_text_a_person_sends_while_one_is_blocked_joins_it_and_the_note_stays() {
+    let mut held = Held::default();
+    held.route("a", "two", true, 0);
+    let rows = [row("a", AgentGroup::Completed)];
+    let text = flushed(&mut held, &rows, 1_000);
+    held.failed("a", &text, 5_000, false, Some(BOX));
+    held.route("a", "three", false, 6_000);
+    assert_eq!(held.get("a"), Some("two\n\nthree"));
+    assert_eq!(held.note("a"), Some(BOX));
+}

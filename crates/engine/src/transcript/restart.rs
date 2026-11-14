@@ -12,7 +12,7 @@ pub enum Tail {
     Unknown,
 }
 
-fn flag(obj: &Value, key: &str) -> bool {
+pub(super) fn flag(obj: &Value, key: &str) -> bool {
     obj.get(key).and_then(Value::as_bool) == Some(true)
 }
 
@@ -29,7 +29,7 @@ fn first_text(obj: &Value) -> String {
     }
 }
 
-fn carries_result(obj: &Value) -> bool {
+pub(super) fn carries_result(obj: &Value) -> bool {
     obj.pointer("/message/content")
         .and_then(Value::as_array)
         .is_some_and(|blocks| {

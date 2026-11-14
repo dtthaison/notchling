@@ -11,6 +11,7 @@ pub mod locate;
 pub mod model;
 pub mod restart;
 pub mod scan;
+pub mod sent;
 pub mod shells;
 pub mod snapshot;
 pub mod strict;

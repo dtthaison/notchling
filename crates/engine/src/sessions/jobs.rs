@@ -126,7 +126,7 @@ pub fn agent_from_job(
 
 fn turn_is_over(job: &Value, state: &str, status: Option<&str>) -> bool {
     match status {
-        Some("idle") => true,
+        Some("idle" | "shell") => true,
         Some("busy") => matches!(state, "done" | "blocked") && tasks_in_flight(job) > 0,
         _ => false,
     }

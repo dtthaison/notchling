@@ -33,7 +33,7 @@ pub const HOOK_WAIT: Duration = Duration::from_secs(290);
 
 pub const STOPPING_FOR: Duration = Duration::from_secs(20);
 
-pub const ACTING_OPS: [&str; 11] = [
+pub const ACTING_OPS: [&str; 12] = [
     ops::SESSION_REPLY,
     ops::SESSION_ANSWER,
     ops::SESSION_PERMISSION,
@@ -45,6 +45,7 @@ pub const ACTING_OPS: [&str; 11] = [
     ops::FOLDER_TRUST,
     ops::SESSION_MOVE,
     ops::SESSION_COMMAND,
+    ops::SESSION_HELD_DISCARD,
 ];
 
 pub const CONTROL_OPS: [&str; 6] = [
@@ -266,6 +267,7 @@ impl ActingOps {
             ops::SESSION_QUESTION => self.question(caller, args),
             ops::HOOK_REQUEST => self.hook_request(caller, args),
             ops::SESSION_REPLY => self.reply(caller, args),
+            ops::SESSION_HELD_DISCARD => self.held_discard(args),
             ops::SESSION_PERMISSION => self.permission(caller, args),
             ops::SESSION_ANSWER => self.answer(caller, args),
             ops::SESSION_INTERRUPT | ops::SESSION_TAKE_BACK => self.controlled(caller, op, args),
@@ -372,16 +374,18 @@ impl ActingOps {
             .map_err(|err| PlayError {
                 why: attach_why(&err),
                 err,
-                kept: false,
+                typed: false,
             })?;
         let mut trail = Vec::new();
         let check = self.attacher.screen_check();
         let refused = AtomicBool::new(false);
+        let typed = AtomicBool::new(false);
         let mut pty: Box<dyn Pty + '_> = match guard {
             Some(guard) => Box::new(Guarded {
                 inner: pty,
                 guard,
                 refused: &refused,
+                typed: &typed,
                 checked: false,
             }),
             None => pty,
@@ -394,7 +398,7 @@ impl ActingOps {
                     ErrorCode::Failed,
                     "The session started a new turn, so nothing was typed.",
                 ),
-                kept: false,
+                typed: false,
             });
         }
         if let (Err(failure), Some(expect), Some(file)) = (&played, keep, &self.screen_file) {
@@ -415,7 +419,7 @@ impl ActingOps {
         }
         played.map_err(|f| PlayError {
             why: why_of(&f),
-            kept: f == Failure::Mixed,
+            typed: typed.load(Ordering::SeqCst),
             err: ApiError::new(ErrorCode::Failed, f.to_string()),
         })
     }

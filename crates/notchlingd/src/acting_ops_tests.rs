@@ -79,7 +79,7 @@ type Attaches = Arc<Mutex<Vec<(String, Option<String>)>>>;
 
 #[derive(Default)]
 struct FakeAttacher {
-    screen: Vec<String>,
+    screen: Arc<Mutex<Vec<String>>>,
     attached: Attaches,
     writes: Arc<Mutex<Vec<String>>>,
     deaf: Arc<AtomicBool>,
@@ -93,7 +93,8 @@ impl Attacher for FakeAttacher {
             .lock()
             .unwrap()
             .push((job.to_string(), config_dir.map(String::from)));
-        let lines: Vec<&str> = self.screen.iter().map(String::as_str).collect();
+        let screen = self.screen.lock().unwrap().clone();
+        let lines: Vec<&str> = screen.iter().map(String::as_str).collect();
         let mut prompt = FakePrompt::new(&lines);
         if self.deaf.load(Ordering::SeqCst) {
             prompt = prompt.deaf();
@@ -126,6 +127,14 @@ impl crate::held_guard::Rest for Trusting {
     }
     fn restarted(&self, _agent: &notchling_engine::sessions::Agent, _now_ms: i64) -> bool {
         false
+    }
+    fn delivered(
+        &self,
+        _agent: &notchling_engine::sessions::Agent,
+        _text: &str,
+        _since_ms: i64,
+    ) -> Option<bool> {
+        Some(false)
     }
 }
 
@@ -162,6 +171,7 @@ pub(crate) struct Setup {
     pub deaf: Arc<AtomicBool>,
     pub starting: Arc<AtomicU64>,
     pub human: Arc<Mutex<Vec<(u64, String)>>>,
+    pub screen: Arc<Mutex<Vec<String>>>,
 }
 
 pub(crate) fn setup(on: bool, screen: &[&str], list: Value) -> Setup {
@@ -182,9 +192,10 @@ pub(crate) fn setup_in(
     let room = Arc::new(FakeRoom::default());
     room.app.store(true, Ordering::SeqCst);
     let attacher = FakeAttacher {
-        screen: screen.iter().map(|s| s.to_string()).collect(),
+        screen: Arc::new(Mutex::new(screen.iter().map(|s| s.to_string()).collect())),
         ..FakeAttacher::default()
     };
+    let shown = attacher.screen.clone();
     let (attached, writes) = (attacher.attached.clone(), attacher.writes.clone());
     let (deaf, starting) = (attacher.deaf.clone(), attacher.starting.clone());
     let human = attacher.human.clone();
@@ -212,6 +223,7 @@ pub(crate) fn setup_in(
         deaf,
         starting,
         human,
+        screen: shown,
     }
 }
 

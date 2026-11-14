@@ -1,7 +1,6 @@
 use crate::acting_ops_tests::{app, row, setup, setup_in, Setup, PROMPT};
 use crate::held_guard::{FromFiles, Rest};
 use notchling_engine::reply::held::{SETTLE_MS, START_GRACE_MS};
-use notchling_engine::reply::keys::timing::{ATTACH_QUIET_MS, KEY_PAUSE_MS};
 use notchling_engine::sessions::{Agent, Roots};
 use notchling_local_api::ops;
 use serde_json::{json, Value};
@@ -12,10 +11,10 @@ use std::sync::Arc;
 const JOB: &str = "be50d36a";
 const ID: &str = "fee7356b-b891-4f6f-b4e7-35f7093b251c";
 
-struct Dir(PathBuf);
+pub(crate) struct Dir(PathBuf);
 
 impl Dir {
-    fn new(tag: &str) -> Dir {
+    pub(crate) fn new(tag: &str) -> Dir {
         let dir = std::env::temp_dir().join(format!("nl-held-race-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("claude/jobs").join(JOB)).unwrap();
@@ -23,22 +22,22 @@ impl Dir {
         Dir(dir)
     }
 
-    fn path(&self, rel: &str) -> PathBuf {
+    pub(crate) fn path(&self, rel: &str) -> PathBuf {
         self.0.join(rel)
     }
 
-    fn write(&self, rel: &str, text: &str) {
+    pub(crate) fn write(&self, rel: &str, text: &str) {
         std::fs::write(self.path(rel), text).unwrap();
     }
 
-    fn roots(&self) -> Roots {
+    pub(crate) fn roots(&self) -> Roots {
         Roots {
             main_dir: self.path("claude"),
             lanes_file: self.path("none/lanes.json"),
         }
     }
 
-    fn transcript(&self) -> String {
+    pub(crate) fn transcript(&self) -> String {
         self.path("transcript.jsonl").to_string_lossy().into_owned()
     }
 }
@@ -49,25 +48,25 @@ impl Drop for Dir {
     }
 }
 
-fn assistant(text: &str) -> String {
+pub(crate) fn assistant(text: &str) -> String {
     json!({"type": "assistant", "timestamp": "2026-11-14T22:54:49.559Z",
         "message": {"role": "assistant", "content": [{"type": "text", "text": text}]}})
     .to_string()
 }
 
-fn turn_end() -> String {
+pub(crate) fn turn_end() -> String {
     json!({"type": "system", "subtype": "turn_duration", "durationMs": 20000,
         "timestamp": "2026-11-14T22:54:49.593Z"})
     .to_string()
 }
 
-fn prompt_line(text: &str) -> String {
+pub(crate) fn prompt_line(text: &str) -> String {
     json!({"type": "user", "timestamp": "2026-11-14T22:57:14.889Z",
         "message": {"role": "user", "content": text}})
     .to_string()
 }
 
-fn job_file(dir: &Dir, state: &str, tasks: u64, detail: &str) {
+pub(crate) fn job_file(dir: &Dir, state: &str, tasks: u64, detail: &str) {
     let job = json!({
         "state": state, "tempo": "blocked", "detail": detail, "needs": "Do you want it?",
         "inFlight": {"tasks": tasks, "queued": 0, "kinds": ["local_bash"], "drainableMonitors": 0},
@@ -78,17 +77,17 @@ fn job_file(dir: &Dir, state: &str, tasks: u64, detail: &str) {
     dir.write(&format!("claude/jobs/{JOB}/state.json"), &job.to_string());
 }
 
-fn live_file(dir: &Dir, status: &str) {
+pub(crate) fn live_file(dir: &Dir, status: &str) {
     let live = json!({"pid": std::process::id(), "sessionId": ID, "jobId": JOB,
         "status": status, "statusUpdatedAt": 1_794_697_000_000.0});
     dir.write("claude/sessions/1.json", &live.to_string());
 }
 
-fn lines(dir: &Dir, lines: &[String]) {
+pub(crate) fn lines(dir: &Dir, lines: &[String]) {
     dir.write("transcript.jsonl", &format!("{}\n", lines.join("\n")));
 }
 
-fn cached(dir: &Dir, group: &str, at_prompt: bool) -> Value {
+pub(crate) fn cached(dir: &Dir, group: &str, at_prompt: bool) -> Value {
     let mut r = row(ID, json!({"job": JOB}), group, Some(&dir.transcript()));
     r["atPrompt"] = json!(at_prompt);
     r
@@ -103,6 +102,7 @@ fn from_files(s: Setup, roots: Roots) -> Setup {
         deaf,
         starting,
         human,
+        screen,
     } = s;
     Setup {
         ops: ops.with_rest(Box::new(FromFiles::new(roots))),
@@ -112,26 +112,27 @@ fn from_files(s: Setup, roots: Roots) -> Setup {
         deaf,
         starting,
         human,
+        screen,
     }
 }
 
-fn session(dir: &Dir, group: &str, at_prompt: bool) -> Setup {
+pub(crate) fn session(dir: &Dir, group: &str, at_prompt: bool) -> Setup {
     let list = json!([cached(dir, group, at_prompt)]);
     let s = setup_in(true, PROMPT, list, dir.roots(), None);
     from_files(s, dir.roots())
 }
 
-fn set_row(s: &Setup, dir: &Dir, group: &str, at_prompt: bool) {
+pub(crate) fn set_row(s: &Setup, dir: &Dir, group: &str, at_prompt: bool) {
     *s.ops.sessions.lock().unwrap() = json!([cached(dir, group, at_prompt)]);
 }
 
-fn say(s: &Setup, text: &str) -> Value {
+pub(crate) fn say(s: &Setup, text: &str) -> Value {
     s.ops
         .call(&app(), ops::SESSION_REPLY, &json!({"id": ID, "text": text}))
         .unwrap()
 }
 
-fn typed(s: &Setup) -> String {
+pub(crate) fn typed(s: &Setup) -> String {
     s.writes.lock().unwrap().concat()
 }
 
@@ -257,6 +258,9 @@ impl Rest for Counting {
         self.asked.fetch_add(1, Ordering::SeqCst);
         self.calls.fetch_add(1, Ordering::SeqCst) == self.trip_at
     }
+    fn delivered(&self, _agent: &Agent, _text: &str, _since_ms: i64) -> Option<bool> {
+        Some(false)
+    }
 }
 
 fn with_rest(s: Setup, rest: Counting) -> Setup {
@@ -268,6 +272,7 @@ fn with_rest(s: Setup, rest: Counting) -> Setup {
         deaf,
         starting,
         human,
+        screen,
     } = s;
     Setup {
         ops: ops.with_rest(Box::new(rest)),
@@ -277,6 +282,7 @@ fn with_rest(s: Setup, rest: Counting) -> Setup {
         deaf,
         starting,
         human,
+        screen,
     }
 }
 
@@ -373,70 +379,86 @@ fn a_direct_reply_to_a_session_at_its_prompt_with_tasks_running_is_typed_at_once
     assert_eq!(asked.load(Ordering::SeqCst), 1);
 }
 
-const DRAFT: &[&str] = &[
-    "────────────────────────────────────────",
-    "❯ my own draft",
-    "────────────────────────────────────────",
-    "  ? for shortcuts",
-];
+fn row_from_files(dir: &Dir) -> Value {
+    let agent = notchling_engine::sessions::fresh::job_row(
+        &dir.roots(),
+        &notchling_engine::sessions::Probes::from_proc(),
+        JOB,
+    )
+    .expect("the job's row");
+    let mut row = serde_json::to_value(agent).unwrap();
+    row["id"] = json!(ID);
+    row["transcriptPath"] = json!(dir.transcript());
+    row
+}
 
-fn at_rest(s: &Setup) {
-    let mut list = s.ops.sessions.lock().unwrap();
-    for r in list.as_array_mut().unwrap() {
-        if r["id"] == json!("job-a") {
-            r["group"] = json!("completed");
-        }
+fn question_turn_over(dir: &Dir) {
+    lines(
+        dir,
+        &[
+            prompt_line("go"),
+            assistant("Choose 1, 2, or 3"),
+            turn_end(),
+        ],
+    );
+}
+
+#[test]
+fn a_reply_to_a_blocked_job_idle_with_a_background_shell_is_typed_at_once() {
+    let dir = Dir::new("shell-direct");
+    question_turn_over(&dir);
+    job_file(&dir, "blocked", 9, "Choose 1, 2, or 3");
+    live_file(&dir, "shell");
+    let list = json!([row_from_files(&dir)]);
+    let s = from_files(setup_in(true, PROMPT, list, dir.roots(), None), dir.roots());
+    assert_eq!(say(&s, "2"), json!({"sent": true}));
+    assert!(typed(&s).contains('2'));
+    assert_eq!(s.ops.held_text(ID), None);
+}
+
+#[test]
+fn a_reply_held_while_the_turn_ran_goes_in_when_the_session_is_idle_with_a_background_shell() {
+    let dir = Dir::new("shell-held");
+    lines(&dir, &[prompt_line("go"), assistant("working")]);
+    job_file(&dir, "working", 9, "working");
+    live_file(&dir, "busy");
+    let list = json!([row_from_files(&dir)]);
+    let s = from_files(setup_in(true, PROMPT, list, dir.roots(), None), dir.roots());
+    assert_eq!(say(&s, "2")["state"], json!("queued"));
+    s.ops.flush_held(1_000);
+    s.ops.flush_held(1_000 + SETTLE_MS);
+    assert!(typed(&s).is_empty(), "the turn is running");
+
+    question_turn_over(&dir);
+    job_file(&dir, "blocked", 9, "Choose 1, 2, or 3");
+    live_file(&dir, "shell");
+    *s.ops.sessions.lock().unwrap() = json!([row_from_files(&dir)]);
+    s.ops.flush_held(20_000);
+    s.ops.flush_held(20_000 + SETTLE_MS);
+    assert!(typed(&s).contains('2'));
+    assert_eq!(s.ops.held_text(ID), None);
+}
+
+#[test]
+fn a_new_turn_the_job_file_has_not_caught_up_with_is_still_waited_out_under_a_shell_status() {
+    let dir = Dir::new("shell-new-turn");
+    lines(
+        &dir,
+        &[
+            prompt_line("go"),
+            assistant("Choose 1, 2, or 3"),
+            turn_end(),
+            prompt_line("2"),
+        ],
+    );
+    job_file(&dir, "blocked", 9, "Choose 1, 2, or 3");
+    live_file(&dir, "shell");
+    let list = json!([row_from_files(&dir)]);
+    let s = from_files(setup_in(true, PROMPT, list, dir.roots(), None), dir.roots());
+    assert_eq!(say(&s, "3")["state"], json!("queued"));
+    for tick in 1..=30 {
+        s.ops.flush_held(tick * 1_000);
     }
-}
-
-#[test]
-fn a_flush_never_types_over_a_draft_in_the_terminals_box_and_tries_again_later() {
-    let s = setup(true, DRAFT, crate::acting_ops_tests::sessions());
-    say_job_a(&s, "two");
-    at_rest(&s);
-    s.ops.flush_held(1_000);
-    s.ops.flush_held(1_000 + SETTLE_MS);
-    assert_eq!(s.attached.lock().unwrap().len(), 1);
-    assert!(typed(&s).is_empty(), "not even the clear keys");
-    assert_eq!(s.ops.held_text("job-a").as_deref(), Some("two"));
-    let later = 1_000 + SETTLE_MS + START_GRACE_MS;
-    s.ops.flush_held(later);
-    s.ops.flush_held(later + SETTLE_MS);
-    assert_eq!(
-        s.attached.lock().unwrap().len(),
-        2,
-        "tried again, not at once"
-    );
     assert!(typed(&s).is_empty());
-    assert_eq!(s.ops.held_text("job-a").as_deref(), Some("two"));
-}
-
-#[test]
-fn text_a_person_types_beside_the_flush_is_never_sent_with_it_and_the_flush_is_not_repeated() {
-    let s = setup(true, PROMPT, crate::acting_ops_tests::sessions());
-    s.human
-        .lock()
-        .unwrap()
-        .push((ATTACH_QUIET_MS + KEY_PAUSE_MS + 10, "x".to_string()));
-    say_job_a(&s, "two");
-    at_rest(&s);
-    s.ops.flush_held(1_000);
-    s.ops.flush_held(1_000 + SETTLE_MS);
-    let written = s.writes.lock().unwrap().clone();
-    assert_eq!(
-        written.len(),
-        2,
-        "the clear and the paste, no Enter: {written:?}"
-    );
-    assert!(written[1].contains("two"));
-    assert_eq!(
-        s.ops.held_text("job-a"),
-        None,
-        "it may be in their box: not kept"
-    );
-    s.human.lock().unwrap().clear();
-    let later = 1_000 + SETTLE_MS + START_GRACE_MS * 3;
-    s.ops.flush_held(later);
-    s.ops.flush_held(later + SETTLE_MS);
-    assert_eq!(s.writes.lock().unwrap().len(), 2, "nothing was typed again");
+    assert_eq!(s.ops.held_text(ID).as_deref(), Some("3"));
 }

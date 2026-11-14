@@ -252,7 +252,38 @@ impl ChatView {
         if session.tool != Tool::Claude {
             return None;
         }
-        self.tools.live.held.get(&session.agent.id).cloned()
+        let shown = self.tools.live.held.get(&session.agent.id).cloned();
+        shown.or_else(|| self.held_preview.as_ref().map(|(text, _)| text.clone()))
+    }
+
+    pub(super) fn held_note(&self) -> Option<String> {
+        let session = self.selected_session()?;
+        let shown = self.tools.live.held_note.get(&session.agent.id).cloned();
+        shown.or_else(|| {
+            self.held_preview
+                .as_ref()
+                .and_then(|(_, note)| note.clone())
+        })
+    }
+
+    pub(super) fn discard_held(&mut self, cx: &mut Context<Self>) {
+        if self.tools.sending {
+            return;
+        }
+        let Some(id) = self.selected_session().map(|s| s.agent.id.clone()) else {
+            return;
+        };
+        self.spawn_send(
+            Request::held_discard(&id),
+            move |view, result, _| match result {
+                Ok(_) => {
+                    view.tools.live.held.remove(&id);
+                    view.tools.live.held_note.remove(&id);
+                }
+                Err(message) => view.tools.error = Some(message),
+            },
+            cx,
+        );
     }
 
     pub(super) fn selected_held_working(&self) -> bool {

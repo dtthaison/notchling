@@ -48,6 +48,7 @@ hook's request. Built and switched off: while [`Acting`] is off every acting op 
 | Op | Tier | Args | Reply |
 | --- | --- | --- | --- |
 | `session.reply` | app | `{id, text}` | `{"sent": true}`, or `{"sent": true, "state": "queued", "waiting": 1, "held": <text>}` when the session is working or just got a message (below) |
+| `session.held.discard` | app | `{id}` | `{"discarded": true}` when a held text was forgotten (and `session.held` says `text: null`), `{"discarded": false}` when none was held |
 | `session.answer` | app | `{id, answers: [[n...] or "text"], question?: {items}}` | `{"answered": "hook" or "terminal", "promptId"?}` |
 | `session.permission` | app | `{id, decision: "allow"/"deny"/"always", message?}` | `{"decided": decision, "promptId"}` |
 | `session.permission` (no hook) | app | `{id: <row id>, decision, expect: {tool, summary}}` | `{"decided": decision, "answered": "terminal"}` |
@@ -305,8 +306,13 @@ hasn't shown work yet, is held by the daemon and not typed (`held_ops.rs`, engin
 There is one held entry per session: every message sent meanwhile joins it, separated by a blank
 line, and the reply carries the whole held text (`held`). When the row is `completed` and can take
 replies, the daemon types the held text as one message (a 1 s tick, only while `acting` is on).
-Each change is an event on topic `tools`: `session.held {id, text}`, with `text: null` when
-nothing is held any more. The held text lives in the daemon's memory only, so a daemon restart
+Each change is an event on topic `tools`: `session.held {id, text, note?}`, with `text: null` when
+nothing is held any more. A held text is never dropped by a failure: when typing it failed or was
+refused, it stays held and the event carries a short `note` ("Waiting — the terminal box has other
+text", or what went wrong); a client shows it beside the held text, and `session.held.discard`
+forgets the text. The daemon tries again no sooner than 30 s later. A text that may already be in
+the session's box is typed again only when the transcript shows it was not sent meanwhile; when
+the transcript cannot say, it stays held with the note and only the user decides. The held text lives in the daemon's memory only, so a daemon restart
 drops it; it is never in Claude Code's own queue.
 
 `id` is a row id (`codex:<session>`). `draft_folder` starts a new session in that folder and

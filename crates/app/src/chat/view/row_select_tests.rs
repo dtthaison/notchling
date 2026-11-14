@@ -135,12 +135,14 @@ fn queued_rows_have_distinct_keys() {
         images: 0,
         queued: true,
         sending: false,
+        note: None,
     };
     let sending = Row::User {
         text: "going".into(),
         images: 0,
         queued: true,
         sending: true,
+        note: None,
     };
     let keys = [
         key_of(&items, 0, &queued),
