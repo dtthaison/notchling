@@ -35,6 +35,8 @@ says what agents may do.
 - The accounts those tools use: saving them, switching, limits and cost.
 - Tools agents use alongside a session: the Secret Vault, local copies of Artifacts, handing a job to
   another tool, and Machines, which sets up the computers that run the overnight worker.
+- Setting up the agent tools themselves: the hooks, skills and rules Notchling adds to each, and
+  which model each kind of work gets ([decision 0019](decisions/0019-agent-instructions-per-tool.md)).
 
 An idea outside this list starts as a feature request. The maintainer decides.
 
@@ -81,11 +83,16 @@ The app:
   Machines.
 - Renew the login a tool is using. Refresh tokens rotate, so renewing Claude Code's or Codex's live
   login would sign it out.
-- Change more of your config than its own part: only Notchling's hook entries in
-  `~/.claude/settings.json` (with a backup, your other hooks kept), on a worker set up in Machines,
-  only the one key per tool that turns its self-update off (with a backup, everything else kept),
-  only `claudeAiOauth` in the
-  `Claude Code-credentials` Keychain item, only `oauthAccount` in `~/.claude.json`.
+- Change more of your config than its own part: in `~/.claude/settings.json` only Notchling's hook
+  entries, and the `agent` key only while you have Plan-Only Main Chat on (with a backup, your other
+  hooks and keys kept); on a worker set up in Machines, only the one key per tool that turns its
+  self-update off (with a backup, everything else kept); only `claudeAiOauth` in the
+  `Claude Code-credentials` Keychain item; only `oauthAccount` in `~/.claude.json`.
+- Write anything into an agent tool's folders but its own instructions: the `notchling-*` files and
+  Antigravity's `notchling` plugin that [decision 0019](decisions/0019-agent-instructions-per-tool.md)
+  lists, and `~/.codex/AGENTS.md` only when you have none. It never changes or removes a file it
+  didn't write, or one you edited unless you choose Use Notchling's (your copy is kept as a backup),
+  and when you have your own rules for the same purpose it writes none.
 - Answer a session's permission prompt for you. The prompt waits for your answer. When the app isn't
   there to ask you, the hook passes and Claude Code asks in its own terminal. The one exception is a
   job one agent hands to another with `--delegate --write`: the other tool may then edit files in the

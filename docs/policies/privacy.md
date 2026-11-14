@@ -16,6 +16,8 @@ page in the same pull request.
 - The phone bridge and the internet tunnel are off until you turn them on.
 - The tools Notchling starts for you (Claude Code, Codex, Antigravity CLI, `ssh`, `gh`) send what they
   always send.
+- The skills and rules Notchling adds to Claude Code, Codex and Antigravity go to those tools'
+  providers in each session's prompt. The vault skill names your saved secrets, never their values.
 
 ## Claude accounts (Anthropic)
 
@@ -149,6 +151,26 @@ Only when `machines.json` lists a machine:
 - **The vault.** `Notchling --secret … -- <command>` runs a command an agent chose with the secret in
   its environment. Where that command sends it is up to the command; Ask First is for entries you
   want to approve each time.
+
+## Instructions in agent tools
+
+Notchling writes its skills and rules into Claude Code's, Codex's and Antigravity's folders on this
+computer ([decision 0019](../decisions/0019-agent-instructions-per-tool.md)) and sends them nowhere
+itself. Each tool puts them into a session's prompt (a rule in every session, a skill when a task
+calls for it), so their text goes to that tool's provider with your prompts, as your own instructions
+do. Today these are the vault, pages and delegate skills; the delegation and model-choice rules and
+Settings > Agents, which shows every text and turns each off per tool, come with that decision's
+phases.
+
+- **The vault skill** lists your saved secrets' names, and the host each one is for, in its
+  description, never their values. Those names reach the provider of each tool where the skill is
+  installed.
+- The other texts hold the path of Notchling's command and model names: no login, account or
+  content of your files.
+- **Your own rules.** To tell whether you have your own model or delegation rules, Notchling reads
+  the names of the files in those folders and the headings of `~/.codex/AGENTS.md` and
+  `~/.gemini/GEMINI.md`. Settings shows such a file's text when you open it; it goes into no file,
+  log or message Notchling writes.
 
 ## Web views
 
