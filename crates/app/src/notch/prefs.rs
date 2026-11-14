@@ -1,6 +1,7 @@
 use std::path::Path;
 
 use notchling_engine::settings::Settings;
+use notchling_locale as t;
 
 use super::layout::NotchWidth;
 use crate::acting::Control;
@@ -53,13 +54,11 @@ impl NotchPrefs {
         } else {
             Control {
                 enabled: false,
-                tooltip: Some(ANSWER_OFF),
+                tooltip: Some(t::notch::answer_off()),
             }
         }
     }
 }
-
-pub const ANSWER_OFF: &str = "Answering from the notch is off in Settings.";
 
 #[cfg(test)]
 mod tests {
@@ -125,7 +124,7 @@ mod tests {
             off.answer_gate(on),
             Control {
                 enabled: false,
-                tooltip: Some(ANSWER_OFF)
+                tooltip: Some(t::notch::answer_off())
             }
         );
     }

@@ -4,6 +4,7 @@ use gpui::{div, prelude::*, px, AnyView, App, Div};
 use notchling_kit::metric::{RADIUS_SM, SIDE_PADDING};
 use notchling_kit::ui::{hsla, KitStyled};
 use notchling_kit::{Ink, TypeRole};
+use notchling_locale as t;
 
 use super::cards::{text, A};
 use super::perch::AxFrame;
@@ -69,7 +70,7 @@ impl NotchView {
                     .px(px(SIDE_PADDING))
                     .flex()
                     .items_center()
-                    .child(text("Notchling", TypeRole::Label, Ink::Text)),
+                    .child(text(t::notch::backdrop_title(), TypeRole::Label, Ink::Text)),
             )
             .child(
                 div()
@@ -112,11 +113,15 @@ pub fn stand_in_window(frame: AxFrame) -> Div {
                 .child(light(Ink::Accent))
                 .child(light(Ink::Done))
                 .child(div().w(px(70.0)))
-                .child(text("Terminal", TypeRole::Label, Ink::TextMuted)),
+                .child(text(
+                    t::notch::backdrop_terminal(),
+                    TypeRole::Label,
+                    Ink::TextMuted,
+                )),
         )
-        .child(
-            div()
-                .px(px(12.0))
-                .child(text("~/work/notchling $", TypeRole::Mono, Ink::TextMuted)),
-        )
+        .child(div().px(px(12.0)).child(text(
+            t::notch::backdrop_prompt(),
+            TypeRole::Mono,
+            Ink::TextMuted,
+        )))
 }

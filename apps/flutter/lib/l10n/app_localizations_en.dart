@@ -414,6 +414,32 @@ class AppL10nEn extends AppL10n {
   String get consentDeny => 'Deny';
 
   @override
+  String get consentNotchAllow => 'Allow';
+
+  @override
+  String get consentNotchAllowDetail => 'This time only';
+
+  @override
+  String get consentNotchAlways => 'Always allow this';
+
+  @override
+  String get consentNotchAlwaysDetail => 'Don\'t ask again for this';
+
+  @override
+  String get consentNotchDeny => 'Deny';
+
+  @override
+  String get consentNotchDenyDetail => 'Claude tries something else';
+
+  @override
+  String get consentNotchPermissionNeeded => 'Permission needed';
+
+  @override
+  String consentNotchWantsToUse(String tool) {
+    return 'Claude wants to use $tool';
+  }
+
+  @override
   String get consentPair => 'Pair';
 
   @override

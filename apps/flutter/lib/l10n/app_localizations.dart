@@ -813,6 +813,54 @@ abstract class AppL10n {
   /// **'Deny'**
   String get consentDeny;
 
+  /// Option of the notch's permission card: allow this one time. The line under it is the next message.
+  ///
+  /// In en, this message translates to:
+  /// **'Allow'**
+  String get consentNotchAllow;
+
+  /// Line under the Allow option of the notch's permission card.
+  ///
+  /// In en, this message translates to:
+  /// **'This time only'**
+  String get consentNotchAllowDetail;
+
+  /// Option of the notch's permission card: allow and stop asking for the same thing. The line under it is the next message.
+  ///
+  /// In en, this message translates to:
+  /// **'Always allow this'**
+  String get consentNotchAlways;
+
+  /// Line under the Always allow option of the notch's permission card.
+  ///
+  /// In en, this message translates to:
+  /// **'Don\'t ask again for this'**
+  String get consentNotchAlwaysDetail;
+
+  /// Option of the notch's permission card: refuse. The line under it is the next message.
+  ///
+  /// In en, this message translates to:
+  /// **'Deny'**
+  String get consentNotchDeny;
+
+  /// Line under the Deny option of the notch's permission card.
+  ///
+  /// In en, this message translates to:
+  /// **'Claude tries something else'**
+  String get consentNotchDenyDetail;
+
+  /// Title of the card in the notch that asks to allow a tool.
+  ///
+  /// In en, this message translates to:
+  /// **'Permission needed'**
+  String get consentNotchPermissionNeeded;
+
+  /// Line of the card in the notch that says what is asked. $tool is the tool Claude wants to use.
+  ///
+  /// In en, this message translates to:
+  /// **'Claude wants to use {tool}'**
+  String consentNotchWantsToUse(String tool);
+
   /// Shown in pairing with a Mac.
   ///
   /// In en, this message translates to:

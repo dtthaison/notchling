@@ -1,6 +1,28 @@
 use notchling_engine::transcript::snapshot::PendingQuestion;
+use notchling_locale as t;
 
-use crate::acting::Answer;
+use crate::acting::{Answer, Decision};
+
+pub fn permission_choices(can_always_allow: bool) -> Vec<(Decision, &'static str, &'static str)> {
+    let mut choices = vec![(
+        Decision::Allow,
+        t::consent::notch_allow(),
+        t::consent::notch_allow_detail(),
+    )];
+    if can_always_allow {
+        choices.push((
+            Decision::Always,
+            t::consent::notch_always(),
+            t::consent::notch_always_detail(),
+        ));
+    }
+    choices.push((
+        Decision::Deny,
+        t::consent::notch_deny(),
+        t::consent::notch_deny_detail(),
+    ));
+    choices
+}
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 enum Pick {
@@ -51,7 +73,7 @@ impl QuestionDraft {
             .enumerate()
             .map(|(i, item)| Tab {
                 title: if item.header.trim().is_empty() {
-                    format!("Question {}", i + 1)
+                    t::notch::question_tab(i + 1)
                 } else {
                     item.header.clone()
                 },

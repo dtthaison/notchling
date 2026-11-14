@@ -526,6 +526,43 @@
   "@consentDeny": {
     "description": "Shown in the Chat screen."
   },
+  "consentNotchAllow": "Allow",
+  "@consentNotchAllow": {
+    "description": "Option of the notch's permission card: allow this one time. The line under it is the next message."
+  },
+  "consentNotchAllowDetail": "This time only",
+  "@consentNotchAllowDetail": {
+    "description": "Line under the Allow option of the notch's permission card."
+  },
+  "consentNotchAlways": "Always allow this",
+  "@consentNotchAlways": {
+    "description": "Option of the notch's permission card: allow and stop asking for the same thing. The line under it is the next message."
+  },
+  "consentNotchAlwaysDetail": "Don't ask again for this",
+  "@consentNotchAlwaysDetail": {
+    "description": "Line under the Always allow option of the notch's permission card."
+  },
+  "consentNotchDeny": "Deny",
+  "@consentNotchDeny": {
+    "description": "Option of the notch's permission card: refuse. The line under it is the next message."
+  },
+  "consentNotchDenyDetail": "Claude tries something else",
+  "@consentNotchDenyDetail": {
+    "description": "Line under the Deny option of the notch's permission card."
+  },
+  "consentNotchPermissionNeeded": "Permission needed",
+  "@consentNotchPermissionNeeded": {
+    "description": "Title of the card in the notch that asks to allow a tool."
+  },
+  "consentNotchWantsToUse": "Claude wants to use {tool}",
+  "@consentNotchWantsToUse": {
+    "description": "Line of the card in the notch that says what is asked. $tool is the tool Claude wants to use.",
+    "placeholders": {
+      "tool": {
+        "type": "String"
+      }
+    }
+  },
   "consentPair": "Pair",
   "@consentPair": {
     "description": "Shown in pairing with a Mac."
