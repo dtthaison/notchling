@@ -2,6 +2,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use notchling_engine::awake::holding_in;
 use notchling_local_api::{
     ops, topics, Client, ClientError, ClientKind, ConnectOptions, Event, SOCKET_NAME,
 };
@@ -94,6 +95,8 @@ struct State {
     notices: Vec<Notice>,
     last_move: Option<Value>,
     settings: Vec<String>,
+    held: bool,
+    held_shown: bool,
 }
 
 struct Shared {
@@ -138,9 +141,22 @@ impl Shared {
         s.changes.vault += 1;
     }
 
+    fn take_hold(&self) -> Option<bool> {
+        let mut s = self.state();
+        (s.held != s.held_shown).then(|| {
+            s.held_shown = s.held;
+            s.held
+        })
+    }
+
     fn apply(&self, event: &Event) {
         let mut s = self.state();
         match event.event.as_str() {
+            topics::AWAKE_CHANGED => {
+                if let Some(holding) = holding_in(&event.data) {
+                    s.held = holding.is_some();
+                }
+            }
             topics::SWITCH_CHANGED => {
                 let before = s.switches;
                 if let Some(switch) = event
@@ -236,6 +252,7 @@ impl Shared {
     fn lost(&self) {
         let mut s = self.state();
         s.following = false;
+        s.held = false;
         s.switches = Switches::detached();
         s.approvals.clear();
         s.requests.clear();
@@ -330,6 +347,10 @@ impl SwitchFeed {
         self.shared.state().changes
     }
 
+    pub fn take_hold(&self) -> Option<bool> {
+        self.shared.take_hold()
+    }
+
     pub fn approvals(&self) -> Vec<Value> {
         self.shared.state().approvals.clone()
     }
@@ -415,7 +436,7 @@ fn run(config: &FeedConfig, shared: &Shared, choice: &dyn SwitchChoice) {
     let mut failures = 0u32;
     while !shared.stopped() {
         match connect(config) {
-            Ok((client, switches, pending)) => {
+            Ok((client, switches, pending, held)) => {
                 failures = 0;
                 if let Some(pending) = pending {
                     shared.load_pending(&pending);
@@ -429,6 +450,7 @@ fn run(config: &FeedConfig, shared: &Shared, choice: &dyn SwitchChoice) {
                 {
                     let mut s = shared.state();
                     s.following = true;
+                    s.held = held;
                     s.switches = switches;
                     s.changes.accounts += 1;
                     s.changes.providers += 1;
@@ -445,7 +467,9 @@ fn run(config: &FeedConfig, shared: &Shared, choice: &dyn SwitchChoice) {
     }
 }
 
-fn connect(config: &FeedConfig) -> Result<(Client, Switches, Option<Value>), ClientError> {
+type Connected = (Client, Switches, Option<Value>, bool);
+
+fn connect(config: &FeedConfig) -> Result<Connected, ClientError> {
     let options = ConnectOptions {
         check_server: config.check_server,
         ..ConnectOptions::default()
@@ -468,7 +492,12 @@ fn connect(config: &FeedConfig) -> Result<(Client, Switches, Option<Value>), Cli
         Err(ClientError::Api(_)) => None,
         Err(e) => return Err(e),
     };
-    Ok((client, switches, pending))
+    let held = match client.call(ops::AWAKE_STATE, json!({})) {
+        Ok(reply) => holding_in(&reply).flatten().is_some(),
+        Err(ClientError::Api(_)) => false,
+        Err(e) => return Err(e),
+    };
+    Ok((client, switches, pending, held))
 }
 
 fn follow(mut client: Client, shared: &Shared) {
@@ -495,6 +524,14 @@ fn sleep(total: Duration, shared: &Shared) {
 #[cfg(test)]
 #[path = "feed_unit_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "feed_hold_tests.rs"]
+mod hold_tests;
+
+#[cfg(all(test, unix))]
+#[path = "feed_hold_live_tests.rs"]
+mod hold_live_tests;
 
 #[cfg(all(test, unix))]
 #[path = "feed_tests.rs"]

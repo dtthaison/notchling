@@ -23,6 +23,7 @@ pub struct MenuState {
     pub account: Option<String>,
     pub awake: AwakeMode,
     pub keep_display_on: bool,
+    pub holding: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -109,10 +110,10 @@ pub fn tray_menu(state: &MenuState) -> Vec<Entry> {
 }
 
 pub fn tray_symbol(state: &MenuState) -> &'static str {
-    if state.awake == AwakeMode::Off {
-        "cup.and.saucer"
-    } else {
+    if state.holding {
         "cup.and.saucer.fill"
+    } else {
+        "cup.and.saucer"
     }
 }
 
@@ -204,10 +205,15 @@ mod tests {
             .collect();
         assert_eq!(keys, [Some('o'), Some(','), Some('q')]);
         assert_eq!(tray_symbol(&MenuState::default()), "cup.and.saucer");
-        let on = MenuState {
+        let chosen = MenuState {
             awake: AwakeMode::On,
             ..MenuState::default()
         };
-        assert_eq!(tray_symbol(&on), "cup.and.saucer.fill");
+        assert_eq!(tray_symbol(&chosen), "cup.and.saucer");
+        let held = MenuState {
+            holding: true,
+            ..chosen
+        };
+        assert_eq!(tray_symbol(&held), "cup.and.saucer.fill");
     }
 }

@@ -67,6 +67,13 @@ pub fn with(state: &MenuState, key: &str, value: &Value) -> Option<MenuState> {
     (next != *state).then_some(next)
 }
 
+pub fn holding(state: &MenuState, held: bool) -> Option<MenuState> {
+    (state.holding != held).then(|| MenuState {
+        holding: held,
+        ..state.clone()
+    })
+}
+
 pub fn write(data_dir: &Path, key: &str, value: &Value) -> Result<(), String> {
     let mut store = Settings::open(&data_dir.join("settings.json")).map_err(|e| e.to_string())?;
     store.set(key, value.clone()).map_err(|e| e.to_string())
@@ -75,3 +82,7 @@ pub fn write(data_dir: &Path, key: &str, value: &Value) -> Result<(), String> {
 #[cfg(test)]
 #[path = "keep_awake_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "keep_awake_hold_tests.rs"]
+mod hold_tests;

@@ -14,6 +14,14 @@ const TICK: Duration = Duration::from_millis(200);
 pub fn watch(cx: &mut App, feed: Arc<SwitchFeed>, data_dir: PathBuf) {
     cx.spawn(async move |cx| loop {
         cx.background_executor().timer(TICK).await;
+        if let Some(held) = feed.take_hold() {
+            if cx
+                .update(|cx| super::shell::on_awake_hold(cx, held))
+                .is_err()
+            {
+                return;
+            }
+        }
         let keys = feed.take_settings();
         if keys.is_empty() {
             continue;
