@@ -8,6 +8,8 @@ use super::steps::{detail, failed_text, output_text, summary, Detail};
 const DAY: f64 = 86_400.0;
 const NOW: f64 = 20_766.0 * DAY + 23.0 * 3600.0 + 10.0 * 60.0;
 
+type Kind = (ToolKind, fn(usize) -> String, [&'static str; 2]);
+
 fn step(id: &str, kind: ToolKind, input: &str) -> ToolRow {
     ToolRow {
         id: id.into(),
@@ -168,7 +170,7 @@ fn every_month_and_weekday_reads_as_it_did() {
 
 #[test]
 fn a_tool_summary_is_one_message_per_kind() {
-    let kinds: [(ToolKind, fn(usize) -> String, [&str; 2]); 11] = [
+    let kinds: [Kind; 11] = [
         (
             ToolKind::Shell,
             t::chat::steps_ran_commands,
