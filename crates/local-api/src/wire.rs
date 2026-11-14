@@ -110,6 +110,8 @@ pub mod ops {
 
     pub const VERSIONS_GET: &str = "versions.get";
     pub const VERSIONS_WORKERS: &str = "versions.workers";
+
+    pub const AWAKE_STATE: &str = "awake.state";
 }
 
 pub mod topics {
@@ -122,6 +124,7 @@ pub mod topics {
     pub const ACTING_CHANGED: &str = "settings.acting";
     pub const SWITCH_CHANGED: &str = "settings.switch";
     pub const SETTINGS_CHANGED: &str = "settings.changed";
+    pub const AWAKE_CHANGED: &str = "awake.changed";
     pub const ACCOUNTS: &str = "accounts";
     pub const ACCOUNTS_CHANGED: &str = "accounts.changed";
     pub const ACCOUNTS_ADD_ENDED: &str = "accounts.add.ended";

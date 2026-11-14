@@ -346,6 +346,17 @@ pub fn on_awake_setting(cx: &mut App, key: &str, value: &serde_json::Value) {
     }
 }
 
+pub fn on_awake_hold(cx: &mut App, held: bool) {
+    if !cx.has_global::<Shell>() {
+        return;
+    }
+    let shell = cx.global_mut::<Shell>();
+    if let Some(next) = crate::keep_awake::holding(&shell.state, held) {
+        shell.state = next;
+        refresh_tray(shell);
+    }
+}
+
 fn refresh_tray(shell: &Shell) {
     if let Some(tray) = &shell.tray {
         tray.update(&shell.state);

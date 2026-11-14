@@ -261,10 +261,12 @@ fn the_daemon_starts_the_loop_with_its_own_settings_and_lets_go_when_it_closes()
         .set("mode", json!("on"))
         .unwrap();
     let power = FakePower::new();
+    let room = crate::acting_ops_tests::FakeRoom::default();
+    room.app.store(true, Ordering::SeqCst);
     let wired = crate::daemon_wiring::Wired::build_with_power(
         &layout,
         Arc::new(Mutex::new(json!([]))),
-        Arc::new(crate::acting_ops_tests::FakeRoom::default()),
+        Arc::new(room),
         (0, 0),
         Box::new(power.clone()),
     );

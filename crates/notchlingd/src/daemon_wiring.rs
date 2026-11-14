@@ -6,6 +6,7 @@ use crate::activity_ops::ActivityOps;
 use crate::agy_ops::AgyOps;
 use crate::attach::{ClaudeAttacher, LiveLauncher};
 use crate::awake_loop::{power_for, AwakeLoop};
+use crate::awake_ops::AwakeOps;
 use crate::bridge_backend::APPROVAL_WAIT;
 use crate::bridge_ops::{BridgeOps, BridgeSetup};
 use crate::catalog_ops::CatalogService;
@@ -30,6 +31,7 @@ use crate::settings_ops::{SettingsOps, SwitchStates};
 use crate::switches::{SwitchFlag, SwitchOps, Switches};
 use crate::vault_ops::VaultOps;
 use crate::versions_ops::{AuditRecorder, VersionsOps};
+use crate::wake_loop::{wakes_for, WakeLoop, Wakes};
 use notchling_engine::accounts::codex::login::idle_for_auto_switch;
 use notchling_engine::accounts::desktop::ClaudeName;
 use notchling_engine::activity::EventsDb;
@@ -336,6 +338,7 @@ pub struct Wired {
     pub salt: LateSalt,
     history: Arc<DbSwitches>,
     log: OnceLock<(Arc<Mutex<EventsDb>>, Arc<LogOps>)>,
+    pub wake: Arc<WakeLoop>,
 }
 
 impl Wired {
@@ -354,6 +357,18 @@ impl Wired {
         room: Arc<dyn Room>,
         bridge_ports: (u16, u16),
         power: Box<dyn Power>,
+    ) -> Wired {
+        let wakes = wakes_for(layout);
+        Wired::build_with_hardware(layout, sessions, room, bridge_ports, power, wakes)
+    }
+
+    pub fn build_with_hardware(
+        layout: &Layout,
+        sessions: Arc<Mutex<Value>>,
+        room: Arc<dyn Room>,
+        bridge_ports: (u16, u16),
+        power: Box<dyn Power>,
+        wakes: Box<dyn Wakes>,
     ) -> Wired {
         let late = LateEmit::new();
         let salt: LateSalt = Arc::new(OnceLock::new());
@@ -404,12 +419,20 @@ impl Wired {
         acting.attach_agy(agy.clone());
         let awake = Arc::new(AwakeLoop::for_daemon(
             layout,
-            sessions,
+            sessions.clone(),
             codex.clone(),
             agy.clone(),
+            room.clone(),
             power,
         ));
         every.attach_agy(agy.clone());
+        let wake = Arc::new(WakeLoop::for_daemon(
+            layout,
+            sessions,
+            acting.clone(),
+            room.clone(),
+            wakes,
+        ));
 
         let switches = Arc::new(Switches::off());
         let on = switches.accounts.clone();
@@ -552,6 +575,7 @@ impl Wired {
             salt,
             history,
             log: OnceLock::new(),
+            wake,
         }
     }
 
@@ -607,6 +631,7 @@ impl Wired {
             .with_group(self.settings.clone())
             .with_group(self.versions.clone())
             .with_group(Arc::new(git))
+            .with_group(Arc::new(AwakeOps::new(self.awake.clone())))
             .with_first_scan(first_scan, first_wait);
         match self.log.get() {
             Some((db, log)) => ops
@@ -625,6 +650,7 @@ impl Wired {
         self.acting.spawn_held_loop();
         self.versions.start();
         self.awake.spawn_loop();
+        self.wake.spawn_loop();
     }
 
     pub fn load(&self) {
@@ -632,6 +658,7 @@ impl Wired {
     }
 
     pub fn close(&self) {
+        self.wake.close();
         self.awake.close();
         self.acting.stop_held_loop();
         self.acting.close();

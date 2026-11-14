@@ -12,6 +12,7 @@ pub mod agy_phone;
 pub mod agy_sink;
 pub mod attach;
 pub mod awake_loop;
+pub mod awake_ops;
 pub mod bridge_backend;
 pub mod bridge_ops;
 pub mod catalog_ops;
@@ -72,6 +73,7 @@ pub mod vault_cli;
 pub mod vault_ops;
 pub mod vault_wait;
 pub mod versions_ops;
+pub mod wake_loop;
 
 #[cfg(test)]
 mod accounts_late_tests;
@@ -89,6 +91,8 @@ mod acting_permission_tests;
 mod activity_ops_tests;
 #[cfg(test)]
 mod agy_phone_tests;
+#[cfg(test)]
+mod awake_follow_tests;
 #[cfg(test)]
 mod awake_loop_tests;
 #[cfg(test)]
@@ -159,6 +163,8 @@ mod session_of_tests;
 mod vault_ops_lock_tests;
 #[cfg(test)]
 mod versions_ops_tests;
+#[cfg(test)]
+mod wake_loop_tests;
 
 use cli::{Command, ServiceAction};
 use layout::Layout;

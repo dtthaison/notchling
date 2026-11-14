@@ -1,4 +1,5 @@
 use crate::sessions::{Agent, AgentGroup, AgentTarget};
+use crate::settings::Settings;
 use std::collections::HashSet;
 
 pub const PROMPT: &str =
@@ -27,6 +28,10 @@ impl WakeResumer {
 
     pub fn did_wake(&mut self, now_ms: i64) {
         self.woke_at_ms = Some(now_ms);
+    }
+
+    pub fn waiting(&self) -> bool {
+        self.woke_at_ms.is_some()
     }
 
     pub fn finished(&mut self, agent_id: &str) {
@@ -76,6 +81,12 @@ impl WakeResumer {
     }
 }
 
+pub const KEY: &str = "continueAfterSleep";
+
+pub fn enabled(settings: &Settings) -> bool {
+    settings.get_bool(KEY).unwrap_or(true)
+}
+
 pub fn sleep_cut(agent: &Agent) -> Option<String> {
     crate::transcript::errors::sleep_cut_in_file(agent.transcript_path.as_deref()?)
 }
@@ -83,3 +94,7 @@ pub fn sleep_cut(agent: &Agent) -> Option<String> {
 #[cfg(test)]
 #[path = "wake_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "wake_setting_tests.rs"]
+mod setting_tests;

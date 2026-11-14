@@ -112,7 +112,7 @@ first. The first start after the upgrade imports the old `audit.jsonl`, `remote-
 ### Quiet ops
 
 An app-tier call is recorded as an event (Audit and Activity) unless its spec is `OpSpec::APP_QUIET` and it succeeded.
-These read-only polls are quiet: `bridge.status`, `bridge.devices`, `bridge.tunnel.status`,
+These read-only polls are quiet: `awake.state`, `bridge.status`, `bridge.devices`, `bridge.tunnel.status`,
 `accounts.list`, `lanes.list`, `providers.list`, `providers.usage`, `limits.status`, `limits.usage`,
 `git.status`, `git.diff`, `activity.list` and `versions.workers`. A call to `accounts.list` or `providers.list` with
 `sync: true`, or to `providers.usage` or `limits.usage` with `refresh: true`, reads Keychain and the network,
@@ -148,6 +148,25 @@ Events ([`crate::agy_sink`]): `session.changed {id, session, row, change, error?
 shares one answered state with Chat. A pending permission is a `prompts.list` row too. Its id is
 `agy-perm:<row id>:<rpc id>`. Nothing is answered by the daemon on its own; turning acting off
 closes every session, which cancels what was waiting.
+
+## `awake_ops.rs`
+
+What the menu bar cup shows: whether the daemon holds the Mac's power assertion now. App tier, read only,
+no switch, `OpSpec::APP_QUIET` (a success is not written to `audit.jsonl`; the app asks once on each connect).
+Additive: an older daemon answers it as an unknown op, and the app then shows the cup empty.
+
+| Op | Tier | Args | Reply |
+| --- | --- | --- | --- |
+| `awake.state` | app | `{}` | `{holding: "system" \| "display" \| null}` |
+
+The daemon holds the assertion only while an app is attached (`awake_loop.rs`), so the reply is `null` with no
+app, and for the first tick (2 s at most) after one attaches. Each change of the hold is an event on topic
+`settings` (which agent-tier clients may follow too, like the other settings events): `awake.changed {holding}`
+(taken, swapped between `system` and `display`, let go), sent only when the hold changes and never for a refused one. `engine::awake::state_json` and `holding_in` are the one
+form of the reply and the event.
+
+`wake_loop.rs` (continue agents after sleep, setting `continueAfterSleep`) has no op: it types into a cut-off
+job through the same path as `session.reply` and so only while `acting` is on and an app is attached.
 
 ## `bridge_ops.rs`
 

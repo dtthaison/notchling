@@ -99,6 +99,7 @@ pub const HOMES: &[(&str, Home)] = &[
     (ops::ACTIVITY_LIST, Home::Quiet),
     (ops::VERSIONS_GET, Home::Called),
     (ops::VERSIONS_WORKERS, Home::Quiet),
+    (ops::AWAKE_STATE, Home::Quiet),
     (ops::LOG_VERIFY, Home::Quiet),
     (ops::LOG_CHAIN_START, Home::Kind("audit.chain_started")),
     (ops::LOG_AUDIT_DELETE, Home::Kind("audit.pruned")),

@@ -1,11 +1,13 @@
+use crate::acting_ops::Room;
 use crate::agy_ops::AgyOps;
 use crate::codex_ops::CodexOps;
 use crate::layout::Layout;
 use notchling_engine::awake::{
-    self, Awake, FakePower, Kind, Outcome, Power, RealPower, Setting, Work,
+    self, state_json, Awake, FakePower, Kind, Outcome, Power, RealPower, Setting, Work,
 };
 use notchling_engine::sessions::Agent;
 use notchling_engine::settings::Settings;
+use notchling_local_api::topics;
 use serde_json::Value;
 use std::path::PathBuf;
 use std::sync::mpsc::{channel, RecvTimeoutError, Sender};
@@ -28,6 +30,8 @@ pub struct Sources {
 pub struct AwakeLoop {
     state: Mutex<Awake>,
     sources: Sources,
+    attached: Box<dyn Fn() -> bool + Send + Sync>,
+    announce: Box<dyn Fn(Option<Kind>) + Send + Sync>,
     tick: Duration,
     stop: Mutex<Option<Sender<()>>>,
     thread: Mutex<Option<JoinHandle<()>>>,
@@ -73,6 +77,8 @@ impl AwakeLoop {
         AwakeLoop {
             state: Mutex::new(Awake::new(power)),
             sources,
+            attached: Box::new(|| true),
+            announce: Box::new(|_| {}),
             tick: TICK_EVERY,
             stop: Mutex::new(None),
             thread: Mutex::new(None),
@@ -84,8 +90,10 @@ impl AwakeLoop {
         sessions: Arc<Mutex<Value>>,
         codex: Arc<CodexOps>,
         agy: Arc<AgyOps>,
+        room: Arc<dyn Room>,
         power: Box<dyn Power>,
     ) -> AwakeLoop {
+        let asked = room.clone();
         AwakeLoop::new(
             Sources {
                 setting: Box::new(store_setting(layout.data_dir.join("settings.json"))),
@@ -97,10 +105,28 @@ impl AwakeLoop {
             },
             power,
         )
+        .with_attached(Box::new(move || asked.can_answer()))
+        .with_announce(Box::new(move |holding| {
+            room.publish(
+                topics::SETTINGS,
+                topics::AWAKE_CHANGED,
+                &state_json(holding),
+            )
+        }))
     }
 
     pub fn with_tick(mut self, tick: Duration) -> AwakeLoop {
         self.tick = tick;
+        self
+    }
+
+    pub fn with_attached(mut self, attached: Box<dyn Fn() -> bool + Send + Sync>) -> AwakeLoop {
+        self.attached = attached;
+        self
+    }
+
+    pub fn with_announce(mut self, announce: Box<dyn Fn(Option<Kind>) + Send + Sync>) -> AwakeLoop {
+        self.announce = announce;
         self
     }
 
@@ -109,13 +135,22 @@ impl AwakeLoop {
     }
 
     pub fn tick_once(&self) -> Outcome {
-        let Some(setting) = (self.sources.setting)() else {
-            return Outcome::Unchanged;
+        let outcome = if (self.attached)() {
+            let Some(setting) = (self.sources.setting)() else {
+                return Outcome::Unchanged;
+            };
+            lock(&self.state).apply(setting, || {
+                awake::busy(&(self.sources.agents)(), &(self.sources.work)())
+            })
+        } else {
+            lock(&self.state).release()
         };
-        let outcome = lock(&self.state).apply(setting, || {
-            awake::busy(&(self.sources.agents)(), &(self.sources.work)())
-        });
         say(&outcome);
+        match &outcome {
+            Outcome::Held(kind) => (self.announce)(Some(*kind)),
+            Outcome::Released => (self.announce)(None),
+            Outcome::Unchanged | Outcome::Failed(_) => {}
+        }
         outcome
     }
 
