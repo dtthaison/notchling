@@ -14,38 +14,7 @@ const BUILT_IN: &str = include_str!("../../data/catalog.json");
 
 const NO_EFFORT: &str = "claude-haiku-4-5";
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Tool {
-    Claude,
-    Codex,
-    Antigravity,
-}
-
-impl Tool {
-    const ALL: [Tool; 3] = [Tool::Claude, Tool::Codex, Tool::Antigravity];
-
-    pub fn parse(name: &str) -> Option<Tool> {
-        match name {
-            "claude" => Some(Tool::Claude),
-            "codex" => Some(Tool::Codex),
-            "antigravity" => Some(Tool::Antigravity),
-            _ => None,
-        }
-    }
-
-    pub fn name(self) -> &'static str {
-        match self {
-            Tool::Claude => "claude",
-            Tool::Codex => "codex",
-            Tool::Antigravity => "antigravity",
-        }
-    }
-
-    fn index(self) -> usize {
-        self as usize
-    }
-}
+pub use crate::contract::Tool;
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
