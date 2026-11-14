@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 
 use super::baseline::{entries, FOUNDING, GAPS, UNWIRED};
-use super::{Capability, Kind, Provider, Registry, Tool};
+use super::{Capability, Kind, Registry, Tool};
 
 fn listed(text: &str) -> BTreeSet<String> {
     entries(text).unwrap().into_iter().collect()
