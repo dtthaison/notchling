@@ -60,7 +60,7 @@ Checked against the tree on 2026-11-12. When you add, move or delete a file, upd
 | Notch views and pet | `Notch/NotchView.swift`, `Notch/NotchRows.swift`, `Notch/NotchPeek.swift`, `Notch/NotchDetail.swift`, `Notch/NotchCardParts.swift`, `Notch/TabPerch.swift`, `Notch/Pet/` | none; check with the `render-notch-view` skill | auto | U2 |
 | Notch model, controller and cards | `Notch/NotchModel.swift`, `Notch/NotchController.swift`, `Notch/NotchForeign.swift`, `Notch/QuestionCard.swift`, `Notch/PermissionCard.swift`, `Notch/AgyPermissionCard.swift`, `Notch/PetLayer.swift` | `NotchForeignTests` | protected | U2 |
 | Design kit | `DesignKit/ChatKit.swift`, `DesignKit/PointerCursors.swift` | `PointerCursorsTests` | auto | U0 |
-| App shell, keep awake and system | `App/main.swift`, `App/AppDelegate.swift`, `App/AwakeController.swift`, `App/DockPresence.swift`, `App/PrivateFile.swift`, `App/TestRun.swift`, `System/FileEvents.swift`; Rust (E14): `crates/engine/src/settings/` | `ReviewFixTests` (`PrivateFile`) | protected | E12, E14 (`migrateFromAwake`), E16 (`main.swift` modes), U0, U11 |
+| App shell, keep awake and system | `App/main.swift`, `App/AppDelegate.swift`, `App/AwakeController.swift`, `App/DockPresence.swift`, `App/PrivateFile.swift`, `App/TestRun.swift`, `System/FileEvents.swift`; Rust (E12): `crates/engine/src/awake/`, `crates/notchlingd/src/awake_loop.rs`, `crates/app/src/keep_awake.rs`, `crates/platform/src/awake.rs`; Rust (E14): `crates/engine/src/settings/` | `ReviewFixTests` (`PrivateFile`); Rust: `awake/decide_tests.rs`, `awake/hold_tests.rs`, `notchlingd/src/awake_loop_tests.rs`, `app/src/keep_awake_tests.rs` | protected | E12, E14 (`migrateFromAwake`), E16 (`main.swift` modes), U0, U11 |
 
 ## Mac app: phone bridge
 
