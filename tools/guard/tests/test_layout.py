@@ -26,6 +26,7 @@ HISTORY = (
     "tools/guard/tests/test_layout.py",
 )
 OWN_FOLDERS = (SWIFT_NEW + "/", PHONE_NEW + "/")
+ZONE_MOVED_SINCE = ("apps/flutter/lib/l10n/",)
 
 OLD_SWIFT = re.compile(r"(?<![\w/])(?:Sources/(?:Notchling|ConsoleCore|hostd|AGENTS\.md)|Tests/(?:NotchlingTests|ConsoleCoreTests))")
 OLD_PHONE = re.compile(r"(?:^|[^/\w])mobile/")
@@ -59,7 +60,11 @@ def new_path(old: str) -> str:
 
 
 def survivors(before: Dict[str, List[bool]], have) -> List[Tuple[str, str, List[bool]]]:
-    return [(old, new_path(old), flags) for old, flags in before.items() if new_path(old) in have]
+    return [
+        (old, new_path(old), flags)
+        for old, flags in before.items()
+        if new_path(old) in have and not new_path(old).startswith(ZONE_MOVED_SINCE)
+    ]
 
 
 def zone_diffs(before: Dict[str, List[bool]], zones: Zones, have) -> List[str]:
