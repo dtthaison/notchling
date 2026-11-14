@@ -114,7 +114,11 @@ fn parsed() -> u64 {
 }
 
 fn ids(loaded: &Loaded) -> Vec<String> {
-    loaded.subagent_rows.iter().map(|r| r.id.clone()).collect()
+    loaded
+        .subagent_rows
+        .iter()
+        .map(|r| r.id.trim_start_matches("claude:").to_owned())
+        .collect()
 }
 
 fn want(ids: &[&String]) -> Vec<String> {

@@ -4,6 +4,8 @@
 
 The code carries no comments (see [AGENTS.md](../../AGENTS.md)). What a change could break without knowing it, by file:
 
+- `src/codex_children.rs`: Owns the Codex child index (`daemon/codex-children.db`): a 30-day backfill in the background at the first start, `platform::watch` batches after that, and a sweep of the rows of files that are gone; `codex.children` answers from it and is `APP_QUIET` (the Details Panel asks every few seconds).
+- `src/every_session.rs`: The phone's list leaves out Codex children (`is_child`) and the rows of delegated jobs (`delegate_jobs::hidden`), as Chat's Sidebar does.
 - `src/accounts_late.rs`: Accounts ops that can outlast the client's 5 s call answer `{state: "working", ticket, op}`; the result is kept for `accounts.result` and also sent as `accounts.done`, so a reconnected client never loses it.
 - `src/accounts_late_tests.rs::config write failure`: If the live Keychain write lands and then `~/.claude.json` fails, the switch must put the Keychain item back; a switch is never left half done.
 - `src/accounts_signin.rs`: One browser sign-in at a time on a 127.0.0.1 listener; it stops at once when cancelled or `accounts` goes off, and the code is exchanged and the login saved only while the switch is on.

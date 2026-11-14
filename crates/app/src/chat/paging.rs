@@ -197,7 +197,7 @@ impl Tree {
             children: children.len(),
             open,
         });
-        if !open || depth >= u8::MAX {
+        if !open || depth == u8::MAX {
             return;
         }
         let items: Vec<&Subagent> = children.iter().map(|&i| &walk.rows[i]).collect();

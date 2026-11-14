@@ -6,7 +6,7 @@ use notchling_kit::ui::{button_with, hsla, icon, label, KitPart, KitStyled};
 use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 
 use super::ChatView;
-use crate::chat::pending_child::{PendingChild, Step};
+use crate::chat::pending_child::Step;
 use crate::chat::subagent_view::header_text;
 
 pub fn header(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Option<Div> {
