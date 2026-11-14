@@ -1,4 +1,5 @@
 mod identity;
+pub mod knob;
 pub mod mac;
 pub mod mark;
 mod method;
@@ -10,6 +11,8 @@ pub mod worker;
 
 #[cfg(test)]
 mod identity_tests;
+#[cfg(test)]
+mod knob_tests;
 #[cfg(test)]
 mod mac_tests;
 #[cfg(test)]

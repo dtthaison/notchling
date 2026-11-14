@@ -1,9 +1,9 @@
 pub mod command;
-mod edit;
+pub(crate) mod edit;
 pub mod file;
 pub mod hooks;
-mod jsonc;
-mod render;
+pub(crate) mod jsonc;
+pub(crate) mod render;
 pub mod skills;
 pub mod toml_edit;
 
