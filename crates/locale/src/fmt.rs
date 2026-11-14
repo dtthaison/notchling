@@ -1,13 +1,14 @@
 use crate::format::Numbers;
 use crate::numbers::Icu;
+use crate::state::current;
 use crate::{units, Num};
 
 pub fn count(n: impl Into<Num>) -> String {
-    crate::format::numbers().int(n.into().0)
+    current().numbers().int(n.into().0)
 }
 
 pub fn decimal(value: f64, digits: u8) -> String {
-    decimal_with(crate::format::numbers(), value, digits)
+    decimal_with(current().numbers(), value, digits)
 }
 
 pub(crate) fn decimal_with(icu: &Icu, value: f64, digits: u8) -> String {

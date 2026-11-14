@@ -1,17 +1,12 @@
-use std::sync::OnceLock;
-
 use crate::generated::{EN, KEYS, TABLES};
-use crate::numbers::Icu;
+use crate::{pseudo, state};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Text(pub(crate) u16);
 
 impl Text {
     pub fn get(self) -> &'static str {
-        match EN.get(self.0 as usize) {
-            Some(Body::Plain(text)) => text,
-            _ => "",
-        }
+        state::current().get(self)
     }
 
     pub fn english(self) -> &'static str {
@@ -103,10 +98,20 @@ pub(crate) trait Numbers {
     fn category(&self, n: i64) -> Cat;
 }
 
+#[cfg(test)]
 pub(crate) fn format_body(body: &Body, args: &[Arg<'_>], numbers: &dyn Numbers) -> String {
+    format_with(body, args, numbers, false)
+}
+
+pub(crate) fn format_with(
+    body: &Body,
+    args: &[Arg<'_>],
+    numbers: &dyn Numbers,
+    accent: bool,
+) -> String {
     match body {
         Body::Plain(text) => (*text).to_string(),
-        Body::Parts(parts) => render_parts(parts, args, numbers),
+        Body::Parts(parts) => render_parts(parts, args, numbers, accent),
         Body::Plural(selector, variants) => {
             let n = match args.get(*selector as usize) {
                 Some(Arg::Num(n)) => n.0,
@@ -119,17 +124,18 @@ pub(crate) fn format_body(body: &Body, args: &[Arg<'_>], numbers: &dyn Numbers) 
                 .or_else(|| variants.iter().find(|(c, _)| *c == Cat::Other))
                 .or_else(|| variants.first());
             match chosen {
-                Some((_, parts)) => render_parts(parts, args, numbers),
+                Some((_, parts)) => render_parts(parts, args, numbers, accent),
                 None => String::new(),
             }
         }
     }
 }
 
-fn render_parts(parts: &[Part], args: &[Arg<'_>], numbers: &dyn Numbers) -> String {
+fn render_parts(parts: &[Part], args: &[Arg<'_>], numbers: &dyn Numbers, accent: bool) -> String {
     let mut out = String::new();
     for part in parts {
         match part {
+            Part::Lit(text) if accent => out.push_str(&pseudo::accent(text)),
             Part::Lit(text) => out.push_str(text),
             Part::Str(i) => match args.get(*i as usize) {
                 Some(Arg::Str(text)) => out.push_str(text),
@@ -146,16 +152,8 @@ fn render_parts(parts: &[Part], args: &[Arg<'_>], numbers: &dyn Numbers) -> Stri
     out
 }
 
-pub(crate) fn numbers() -> &'static Icu {
-    static ENGLISH: OnceLock<Icu> = OnceLock::new();
-    ENGLISH.get_or_init(|| Icu::new("en", None))
-}
-
 pub fn format(text: Text, args: &[Arg<'_>]) -> String {
-    match EN.get(text.0 as usize) {
-        Some(body) => format_body(body, args, numbers()),
-        None => String::new(),
-    }
+    state::current().format(text, args)
 }
 
 pub fn lookup(key: &str) -> Option<Text> {
