@@ -72,7 +72,7 @@ fn only_web_schemes_may_be_followed() {
 fn the_not_running_message_names_host_and_port() {
     assert_eq!(
         not_running_message(&local("http://localhost:3000/x")),
-        "localhost:3000 không chạy trên Mac (không trả lời trong 1 giây)."
+        "localhost:3000 isn't running on the Mac (no answer in 1 second)."
     );
     assert!(not_running_message(&local("http://localhost/")).contains("localhost:80 "));
 }

@@ -284,9 +284,24 @@ fn takeover_prompts_follow_the_state() {
     assert_eq!(stoppable.confirm, "Stop Original and Take Over");
     assert!(stoppable.destructive);
     let blocked =
-        prompt_for(Some(&TakeoverState::Unavailable("lý do".into())), "x").expect("prompt");
-    assert_eq!(blocked.message, "lý do");
+        prompt_for(Some(&TakeoverState::Unavailable("a reason".into())), "x").expect("prompt");
+    assert_eq!(blocked.message, "a reason");
     assert_eq!(blocked.confirm, "OK");
     assert_eq!(prompt_for(None, "x"), None);
     assert!(busy_prompt().destructive);
+}
+
+#[test]
+fn reasons_are_english() {
+    for error in [
+        TakeoverError::Alive,
+        TakeoverError::NoTranscript,
+        TakeoverError::Sdk,
+        TakeoverError::AlreadyControllable,
+        TakeoverError::NoWorkingFolder,
+    ] {
+        let text = error.to_string();
+        assert!(!text.is_empty());
+        assert!(text.is_ascii(), "{text}");
+    }
 }

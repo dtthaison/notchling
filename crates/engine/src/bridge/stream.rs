@@ -81,12 +81,12 @@ pub fn choose_window(
         .or_else(|| pick(windows, &[]))
         .ok_or_else(|| {
             BridgeFailure::not_found(
-                "Không thấy cửa sổ máy ảo (DeviceHub, Simulator hoặc Android Emulator).",
+                "No simulator window found (DeviceHub, Simulator or Android Emulator).",
             )
         })?;
     if !chosen.is_on_screen {
         return Err(BridgeFailure::not_found(
-            "Cửa sổ máy ảo đang ẩn — mở DeviceHub để xem.",
+            "The simulator window is hidden. Open DeviceHub to see it.",
         ));
     }
     Ok(chosen)
@@ -106,7 +106,9 @@ pub struct UnsupportedStreamer;
 
 impl Streamer for UnsupportedStreamer {
     fn start(&self, _: &Arc<Connection>, _: &PhoneOptions) -> Result<(), BridgeFailure> {
-        Err(BridgeFailure::invalid("Máy này chưa phát được màn hình."))
+        Err(BridgeFailure::invalid(
+            "The Mac can't stream its screen yet.",
+        ))
     }
 
     fn stop(&self, _: &Arc<Connection>) {}
@@ -150,14 +152,14 @@ impl<C: ScreenCapture> Streamer for WindowStreamer<C> {
     ) -> Result<(), BridgeFailure> {
         if !self.capture.permitted() {
             return Err(BridgeFailure::internal(
-                "Notchling chưa có quyền Ghi màn hình (System Settings › Quyền riêng tư & Bảo mật › Ghi màn hình).",
+                "Notchling doesn't have Screen Recording permission (System Settings › Privacy & Security › Screen Recording).",
             ));
         }
         self.stop(connection);
         let windows = self
             .capture
             .device_windows()
-            .map_err(|why| BridgeFailure::internal(format!("Không liệt kê được cửa sổ: {why}")))?;
+            .map_err(|why| BridgeFailure::internal(format!("Can't list windows: {why}")))?;
         let window = choose_window(&windows, options.device_window_id)?;
         let plan = StreamPlan::new(window, options);
         let target = Arc::clone(connection);
@@ -169,7 +171,7 @@ impl<C: ScreenCapture> Streamer for WindowStreamer<C> {
                     target.offer_phone_frame(jpeg);
                 }),
             )
-            .map_err(|why| BridgeFailure::internal(format!("Không quay được cửa sổ: {why}")))?;
+            .map_err(|why| BridgeFailure::internal(format!("Can't capture the window: {why}")))?;
         lock(&self.streams).insert(connection.id, handle);
         Ok(())
     }

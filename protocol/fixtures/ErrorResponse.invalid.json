@@ -1,7 +1,7 @@
 {
   "error": {
     "code": "invalid",
-    "message": "Không có lệnh \"nope\"."
+    "message": "No such op \"nope\"."
   },
   "id": 9,
   "ok": false

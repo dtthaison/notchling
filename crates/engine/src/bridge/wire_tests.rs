@@ -40,7 +40,7 @@ fn subscribe_sends_sessions_now_and_clamps_phone_options() {
 fn a_phone_subscribe_error_is_reported_and_the_session_must_exist() {
     let rig = Rig::new();
     rig.backend
-        .with(|s| s.phone_error = Some(BridgeFailure::internal("Chưa có quyền ghi màn hình")));
+        .with(|s| s.phone_error = Some(BridgeFailure::internal("No screen recording permission")));
     let (connection, io, _) = rig.login("test-phone");
     rig.send(
         &connection,
@@ -59,12 +59,12 @@ fn response_encoding_shape_and_id_echo() {
     let ok: Value =
         serde_json::from_str(&wire::ok(Some(&json!("abc")), json!({"n": 1}))).expect("json");
     assert_eq!(ok, json!({"id": "abc", "ok": true, "data": {"n": 1}}));
-    let failure = BridgeFailure::view_only("chỉ xem");
+    let failure = BridgeFailure::view_only("view only");
     let refused: Value =
         serde_json::from_str(&wire::error(Some(&json!(9)), &failure)).expect("json");
     assert_eq!(
         refused,
-        json!({"id": 9, "ok": false, "error": {"code": "view_only", "message": "chỉ xem"}})
+        json!({"id": 9, "ok": false, "error": {"code": "view_only", "message": "view only"}})
     );
     assert_eq!(
         wire::ok(Some(&json!(1)), json!({"b": 2, "a": 1})),

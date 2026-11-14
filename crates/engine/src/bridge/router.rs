@@ -92,7 +92,7 @@ impl Router {
             reply_error(
                 connection,
                 None,
-                &BridgeFailure::invalid("Tin nhắn không phải JSON hợp lệ."),
+                &BridgeFailure::invalid("The message is not valid JSON."),
             );
             if !authenticated {
                 self.fail(connection);
@@ -109,7 +109,7 @@ impl Router {
                     reply_error(
                         connection,
                         id,
-                        &BridgeFailure::unauthorized("Cần đăng nhập (hello) trước."),
+                        &BridgeFailure::unauthorized("Sign in (hello) first."),
                     );
                     self.fail(connection);
                 }
@@ -148,7 +148,7 @@ impl Router {
             reply_error(
                 connection,
                 id,
-                &BridgeFailure::unauthorized("Token không đúng hoặc đã bị thu hồi."),
+                &BridgeFailure::unauthorized("The token is wrong or was revoked."),
             );
             self.fail(connection);
             return;
@@ -171,7 +171,7 @@ impl Router {
             reply_error(
                 connection,
                 id,
-                &BridgeFailure::unauthorized("Mã ghép đôi sai hoặc đã hết hạn."),
+                &BridgeFailure::unauthorized("The pairing code is wrong or expired."),
             );
             self.fail(connection);
             return;
@@ -188,7 +188,7 @@ impl Router {
             reply_error(
                 connection,
                 id,
-                &BridgeFailure::invalid("Thiếu tên thiết bị."),
+                &BridgeFailure::invalid("The device name is missing."),
             );
             self.fail(connection);
             return;
@@ -200,7 +200,7 @@ impl Router {
             reply_error(
                 connection,
                 id,
-                &BridgeFailure::unauthorized("Mac đã từ chối thiết bị này."),
+                &BridgeFailure::unauthorized("The Mac refused this device."),
             );
             connection.close();
             return;
@@ -222,7 +222,7 @@ impl Router {
                 reply_error(
                     connection,
                     id,
-                    &BridgeFailure::internal("Không lưu được thiết bị."),
+                    &BridgeFailure::internal("Can't save the device."),
                 );
                 connection.close();
             }
@@ -278,7 +278,7 @@ impl Router {
                 self.unsubscribe(connection);
                 Ok(json!({"subscribed": false}))
             }
-            _ => Err(BridgeFailure::invalid(format!("Không có lệnh \"{op}\"."))),
+            _ => Err(BridgeFailure::invalid(format!("No such op \"{op}\"."))),
         }
     }
 
@@ -323,17 +323,17 @@ pub(crate) fn reply_error(connection: &Connection, id: Option<&Value>, failure: 
 
 pub fn validated_folder(path: &str, home: &Path) -> Result<PathBuf, BridgeFailure> {
     if !path.starts_with('/') {
-        return Err(BridgeFailure::invalid("cwd phải là đường dẫn tuyệt đối."));
+        return Err(BridgeFailure::invalid("cwd must be an absolute path."));
     }
     let resolved = resolve(Path::new(path));
     let home = resolve(home);
     if !resolved.starts_with(&home) {
         return Err(BridgeFailure::invalid(
-            "Chỉ mở được thư mục trong thư mục home của Mac.",
+            "Only folders inside the Mac's home folder can be opened.",
         ));
     }
     if !resolved.is_dir() {
-        return Err(BridgeFailure::not_found("Thư mục không tồn tại."));
+        return Err(BridgeFailure::not_found("The folder doesn't exist."));
     }
     Ok(resolved)
 }

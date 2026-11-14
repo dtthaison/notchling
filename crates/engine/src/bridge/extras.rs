@@ -67,12 +67,12 @@ impl<S: Sources, A: Acting> LiveBackend<S, A> {
         max_width: i64,
     ) -> Result<Vec<u8>, BridgeFailure> {
         if foreign::parse(session_id).is_some() {
-            return Err(BridgeFailure::not_found("Không thấy ảnh này."));
+            return Err(BridgeFailure::not_found("Image not found."));
         }
         let session = self.find(session_id)?;
         let path = session
             .transcript_path
-            .ok_or_else(|| BridgeFailure::not_found("Chưa tìm thấy transcript."))?;
+            .ok_or_else(|| BridgeFailure::not_found("Transcript not found yet."))?;
         let shown = chat::read_in(&path, true, PICTURE_LOOKUP_MESSAGES, &self.extras.home);
         let picture = shown
             .messages
@@ -86,7 +86,7 @@ impl<S: Sources, A: Acting> LiveBackend<S, A> {
             .imaging
             .jpeg(&bytes, max_width)
             .map_err(|error| match error {
-                ImagingError::Unreadable => BridgeFailure::not_found("Không đọc được ảnh."),
+                ImagingError::Unreadable => BridgeFailure::not_found("Can't read the image."),
                 ImagingError::Unsupported(why) => BridgeFailure::invalid(why),
             })
     }
@@ -98,7 +98,7 @@ impl<S: Sources, A: Acting> LiveBackend<S, A> {
     ) -> Result<BridgeViz, BridgeFailure> {
         if foreign::parse(session_id).is_some() {
             return Err(BridgeFailure::invalid(
-                "Codex và Antigravity chưa có tab hình.",
+                "Codex and Antigravity have no Images tab yet.",
             ));
         }
         let session = self.find(session_id)?;
@@ -123,8 +123,10 @@ impl<S: Sources, A: Acting> LiveBackend<S, A> {
 
 fn not_in_transcript(error: ImageError) -> BridgeFailure {
     match error {
-        ImageError::NotAllowed => BridgeFailure::invalid("Ảnh này nằm ngoài các thư mục cho phép."),
-        ImageError::NotFound => BridgeFailure::not_found("Không thấy ảnh này trong transcript."),
-        ImageError::TooLarge => BridgeFailure::invalid("Ảnh này quá lớn (trên 20 MB)."),
+        ImageError::NotAllowed => {
+            BridgeFailure::invalid("This image is outside the allowed folders.")
+        }
+        ImageError::NotFound => BridgeFailure::not_found("Image not found in the transcript."),
+        ImageError::TooLarge => BridgeFailure::invalid("This image is too large (over 20 MB)."),
     }
 }

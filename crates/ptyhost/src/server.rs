@@ -345,7 +345,7 @@ impl Attachments for Arc<Connection> {
 
     fn attach(&self, session: SessionId) -> Result<(), HostError> {
         let Some(handle) = self.host.session(session) else {
-            return Err(HostError::Refused("Không có session này.".to_string()));
+            return Err(HostError::Refused("No such session.".to_string()));
         };
         let existing = self
             .listeners

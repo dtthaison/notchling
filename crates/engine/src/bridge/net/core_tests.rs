@@ -98,7 +98,7 @@ fn nothing_is_served_before_hello() {
         .handle(&connection, r#"{"id":7,"op":"sessions.list"}"#);
     assert_eq!(
         io.texts()[0],
-        r#"{"error":{"code":"unauthorized","message":"Cần đăng nhập (hello) trước."},"id":7,"ok":false}"#
+        r#"{"error":{"code":"unauthorized","message":"Sign in (hello) first."},"id":7,"ok":false}"#
     );
     assert!(io.is_closed());
     assert_eq!(rig.backend.with(|s| s.session_calls), 0, "nothing was read");

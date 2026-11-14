@@ -1,7 +1,7 @@
 {
   "error": {
     "code": "invalid",
-    "message": "Tin nhắn không phải JSON hợp lệ."
+    "message": "The message is not valid JSON."
   },
   "ok": false
 }

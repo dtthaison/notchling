@@ -7,7 +7,7 @@ use serde_json::{json, Map, Value};
 use std::path::Path;
 
 fn missing(key: &str) -> HostError {
-    HostError::Refused(format!("Thiếu \"{key}\"."))
+    HostError::Refused(format!("Missing \"{key}\"."))
 }
 
 fn string<'a>(message: &'a Map<String, Value>, key: &str) -> Option<&'a str> {
@@ -62,14 +62,16 @@ pub(crate) fn perform(
                         .unwrap_or_default();
                     host.spawn_command(Path::new(executable), &arguments, cwd)?
                 }
-                _ => return Err(HostError::Refused("kind không hợp lệ.".to_string())),
+                _ => return Err(HostError::Refused("kind is not valid.".to_string())),
             };
             Ok(object(info_json(&info)))
         }
         "resume" => {
             let (Some(session), Some(cwd)) = (string(message, "sessionId"), string(message, "cwd"))
             else {
-                return Err(HostError::Refused("Thiếu sessionId hoặc cwd.".to_string()));
+                return Err(HostError::Refused(
+                    "sessionId or cwd is missing.".to_string(),
+                ));
             };
             Ok(object(info_json(&host.resume(session, Path::new(cwd))?)))
         }
@@ -95,7 +97,7 @@ pub(crate) fn perform(
             let id = session_of(message, "session")?;
             if message.get("confirm").and_then(Value::as_bool) != Some(true) {
                 return Err(HostError::Refused(
-                    "Cần confirm: true để dừng session.".to_string(),
+                    "confirm: true is required to stop a session.".to_string(),
                 ));
             }
             host.terminate(id);
@@ -112,7 +114,7 @@ pub(crate) fn perform(
             host.state.set_settings(settings);
             Ok(object(json!({ "resumeOnStart": settings.resume_on_start })))
         }
-        _ => Err(HostError::Refused(format!("Không có lệnh \"{op}\"."))),
+        _ => Err(HostError::Refused(format!("No such op \"{op}\"."))),
     }
 }
 

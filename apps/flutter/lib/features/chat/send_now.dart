@@ -9,6 +9,7 @@ import '../../core/protocol/models.dart';
 import '../../l10n/app_localizations.dart';
 import '../connection/connection.dart';
 import '../sessions/sessions_notifier.dart';
+import 'send_now_markers.dart';
 
 class SendNowSupport extends Notifier<bool> {
   @override
@@ -53,7 +54,7 @@ class _SendNowActionState extends ConsumerState<SendNowAction> {
         if (mounted) setState(() => _busy = false);
       }));
     } on BridgeException catch (error) {
-      if (error.isInvalid && error.message.contains('lệnh')) ref.read(sendNowSupportProvider.notifier).markUnsupported();
+      if (isNoSuchOp(error)) ref.read(sendNowSupportProvider.notifier).markUnsupported();
       messenger.showSnackBar(SnackBar(content: Text('${l10n.chatSendNowFailed}: ${error.message}')));
       if (mounted) setState(() => _busy = false);
     }

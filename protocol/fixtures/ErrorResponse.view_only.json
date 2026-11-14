@@ -1,7 +1,7 @@
 {
   "error": {
     "code": "view_only",
-    "message": "Session mở ngoài Console — chỉ xem."
+    "message": "This session is open outside Notchling: view only."
   },
   "id": 10,
   "ok": false

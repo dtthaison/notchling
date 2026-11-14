@@ -1,7 +1,7 @@
 {
   "error": {
     "code": "busy",
-    "message": "Vừa ngắt xong, đợi một chút."
+    "message": "Just interrupted, wait a moment."
   },
   "id": 11,
   "ok": false

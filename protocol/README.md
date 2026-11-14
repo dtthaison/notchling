@@ -74,7 +74,7 @@ WebSocket binary frames, always 4 bytes of magic, a big-endian `uint32`, then a 
 
 ## Errors
 
-`error.code` is one of `unauthorized`, `not_found`, `view_only`, `invalid`, `busy`, `not_reachable`, `internal`. `message` is text for the person, in Vietnamese; do not parse it. A code the receiver doesn't know is read as an unknown error, not a crash (the generated types have an `unknown` case).
+`error.code` is one of `unauthorized`, `not_found`, `view_only`, `invalid`, `busy`, `not_reachable`, `internal`. `message` is text for the person, in English; do not parse it. A code the receiver doesn't know is read as an unknown error, not a crash (the generated types have an `unknown` case).
 
 ## Rules for changing it
 

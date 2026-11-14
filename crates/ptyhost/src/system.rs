@@ -176,7 +176,9 @@ pub fn resolve_claude(home: &Path) -> Result<PathBuf, HostError> {
         .into_iter()
         .find(|p| is_executable(p))
         .ok_or_else(|| {
-            HostError::Refused("Không tìm thấy lệnh claude (~/.local/bin/claude).".to_string())
+            HostError::Refused(
+                "The claude command was not found (~/.local/bin/claude).".to_string(),
+            )
         })
 }
 

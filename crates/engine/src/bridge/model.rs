@@ -8,9 +8,9 @@ pub use wire::{
 };
 
 pub const ALIVE_REASON: &str =
-    "Đóng session ở nơi đang mở (Claude desktop / VS Code) rồi tiếp quản";
+    "Close the session where it is open (Claude desktop / VS Code), then take it over";
 
-pub const ALREADY_CONTROLLABLE: &str = "Console đã điều khiển được session này.";
+pub const ALREADY_CONTROLLABLE: &str = "Notchling can already control this session.";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Control {
@@ -223,7 +223,7 @@ impl ChatPage {
             let index = all
                 .iter()
                 .position(|m| m.id == before)
-                .ok_or_else(|| BridgeFailure::not_found("Không thấy tin \"before\"."))?;
+                .ok_or_else(|| BridgeFailure::not_found("Message \"before\" not found."))?;
             return Ok(newest(&all[..index], false));
         }
         if let Some(after) = after {

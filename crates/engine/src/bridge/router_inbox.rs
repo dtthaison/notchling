@@ -49,9 +49,9 @@ impl Router {
         let invalid = |failure| ("invalid", failure);
         let item_id = require(body, "itemId").map_err(invalid)?;
         let action = action_from(require(body, "action").map_err(invalid)?)
-            .ok_or_else(|| invalid(BridgeFailure::invalid("Hành động không hợp lệ.")))?;
+            .ok_or_else(|| invalid(BridgeFailure::invalid("The action is not valid.")))?;
         if action == ActionId::Open {
-            return Err(("open", BridgeFailure::invalid("Mở form trên Mac.")));
+            return Err(("open", BridgeFailure::invalid("Open the form on the Mac.")));
         }
         let outcome = self
             .backend

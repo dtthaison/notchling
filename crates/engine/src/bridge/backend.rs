@@ -36,7 +36,7 @@ pub trait BridgeBackend: Send + Sync {
         _image_id: &str,
         _max_width: i64,
     ) -> Result<Vec<u8>, BridgeFailure> {
-        Err(BridgeFailure::not_found("Không thấy ảnh này."))
+        Err(BridgeFailure::not_found("Image not found."))
     }
 
     fn commands(&self, _session_id: &str) -> Vec<Command> {
@@ -55,7 +55,7 @@ pub trait BridgeBackend: Send + Sync {
 
     fn send_now(&self, _session: &Session) -> Result<(), BridgeFailure> {
         Err(BridgeFailure::invalid(
-            "Backend này không ngắt được lượt đang chạy.",
+            "This backend can't interrupt a running turn.",
         ))
     }
 
@@ -79,7 +79,7 @@ pub trait BridgeBackend: Send + Sync {
 
     fn new_session_with_model(&self, _cwd: &Path, _model_id: &str) -> Result<(), BridgeFailure> {
         Err(BridgeFailure::invalid(
-            "Backend này không chọn được model theo id.",
+            "This backend can't pick a model by id.",
         ))
     }
 
@@ -110,7 +110,7 @@ pub trait BridgeBackend: Send + Sync {
         _item_id: &str,
         _action: ActionId,
     ) -> Result<InboxOutcome, BridgeFailure> {
-        Err(BridgeFailure::not_found("Không có hộp thư này."))
+        Err(BridgeFailure::not_found("No such inbox item."))
     }
 }
 

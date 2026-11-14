@@ -117,7 +117,7 @@ impl PtyHandle {
             command.env(key, value);
         }
         let pty = Pty::spawn(&command)
-            .map_err(|error| HostError::Refused(format!("Không chạy được claude: {error}")))?;
+            .map_err(|error| HostError::Refused(format!("Can't run claude: {error}")))?;
         let pty = Arc::new(pty);
         let shared = Arc::new(Shared {
             delivery: Mutex::new(Delivery::default()),
@@ -304,7 +304,9 @@ impl Spawner for PtySpawner {
 
     fn claude_executable(&self) -> Result<PathBuf, HostError> {
         let home = self.home.as_deref().ok_or_else(|| {
-            HostError::Refused("Không tìm thấy lệnh claude (~/.local/bin/claude).".to_string())
+            HostError::Refused(
+                "The claude command was not found (~/.local/bin/claude).".to_string(),
+            )
         })?;
         system::resolve_claude(home)
     }

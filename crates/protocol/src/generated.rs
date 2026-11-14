@@ -1290,7 +1290,7 @@ pub struct ErrorResponse {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ErrorResponseError {
     pub code: ErrorCode,
-    /// Text for the person; the Mac writes Vietnamese.
+    /// Text for the person, in English. Never parse it.
     pub message: String,
 }
 

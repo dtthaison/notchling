@@ -2531,7 +2531,7 @@
             },
             "message": {
               "type": "string",
-              "description": "Text for the person; the Mac writes Vietnamese."
+              "description": "Text for the person, in English. Never parse it."
             }
           },
           "required": [
