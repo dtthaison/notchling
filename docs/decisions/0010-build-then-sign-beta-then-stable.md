@@ -33,3 +33,7 @@ Accepted. Stable by one click is the maintainer's decision *(decided)*. Building
 ## Date
 
 2026-11-07
+
+## 2026-11-14 note
+
+The Rust app now updates with Sparkle and one EdDSA key shared with the worker manifest, instead of the separate ed25519 manifest planned above. See [XXXX](XXXX-sparkle-and-one-release-key.md) (proposed).
