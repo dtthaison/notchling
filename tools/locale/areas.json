@@ -162,7 +162,7 @@
       "paths": [
         "crates/app/src/notch/**"
       ],
-      "moved": false
+      "moved": true
     },
     {
       "name": "accounts",
