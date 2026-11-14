@@ -1,7 +1,10 @@
 use super::*;
 use crate::accounts::fake::{MemoryKeychain, ScriptedHttp};
 use crate::accounts::http::PROFILE_URL;
+use crate::cost::account_log::{self, AccountSwitches};
 use crate::sessions::testutil::TempDir;
+use notchling_events::field::FieldValue;
+use notchling_events::{Event, MemorySink};
 use serde_json::Value;
 use std::sync::atomic::{AtomicI64, Ordering};
 
@@ -14,6 +17,43 @@ pub struct World {
     pub http: Arc<ScriptedHttp>,
     pub clock: Arc<AtomicI64>,
     pub store: ClaudeAccounts,
+    pub sink: Arc<MemorySink>,
+}
+
+pub struct SinkHistory(pub Arc<MemorySink>);
+
+impl AccountSwitches for SinkHistory {
+    fn switches(&self) -> Vec<account_log::Entry> {
+        switched(&self.0)
+            .iter()
+            .filter_map(|e| {
+                Some(account_log::Entry {
+                    at: e.ts as f64 / 1000.0,
+                    id: text(e, "to")?,
+                })
+            })
+            .collect()
+    }
+}
+
+pub fn text(event: &Event, field: &str) -> Option<String> {
+    match event.fields.get(field)? {
+        FieldValue::Name(name) => Some((*name).to_owned()),
+        FieldValue::Ref { id, .. } => Some(id.to_string()),
+        FieldValue::UInt(n) => Some(n.to_string()),
+        _ => None,
+    }
+}
+
+pub fn of(sink: &MemorySink, kind: &str) -> Vec<Event> {
+    sink.events()
+        .into_iter()
+        .filter(|e| e.spec.name == kind)
+        .collect()
+}
+
+pub fn switched(sink: &MemorySink) -> Vec<Event> {
+    of(sink, "account.switched")
 }
 
 pub fn id(n: u8) -> String {
@@ -72,6 +112,7 @@ impl World {
         let http = Arc::new(ScriptedHttp::new());
         let clock = Arc::new(AtomicI64::new(NOW));
         let now = clock.clone();
+        let sink = Arc::new(MemorySink::new());
         let store = ClaudeAccounts::new(ClaudeEnv {
             keys: Keys {
                 runner,
@@ -84,6 +125,8 @@ impl World {
             data_dir: tmp.path("data"),
             list_file: tmp.path("data/daemon/accounts.json"),
             lanes: LaneStore::new(&tmp.path("home"), &tmp.path("data")),
+            events: sink.clone(),
+            history: Arc::new(SinkHistory(sink.clone())),
         });
         std::fs::create_dir_all(tmp.path("home/.claude")).ok();
         World {
@@ -92,6 +135,7 @@ impl World {
             http,
             clock,
             store,
+            sink,
         }
     }
 

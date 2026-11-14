@@ -102,3 +102,38 @@ fn record_leaves_an_unreadable_file_as_it_is() {
     assert!(record(&file, "a1:01", NOW).is_err());
     assert_eq!(std::fs::read_to_string(&file).unwrap(), "{broken");
 }
+
+#[test]
+fn merge_keeps_old_file_rows_before_the_first_recorded_one_and_prefers_recorded() {
+    let file = vec![
+        Entry {
+            at: 1.0,
+            id: "a".into(),
+        },
+        Entry {
+            at: 5.0,
+            id: "b".into(),
+        },
+        Entry {
+            at: 9.0,
+            id: "c".into(),
+        },
+    ];
+    let recorded = vec![
+        Entry {
+            at: 5.0,
+            id: "b".into(),
+        },
+        Entry {
+            at: 7.0,
+            id: "d".into(),
+        },
+    ];
+    let ids: Vec<String> = merge(file.clone(), recorded)
+        .into_iter()
+        .map(|e| e.id)
+        .collect();
+    assert_eq!(ids, ["a", "b", "d"]);
+    let alone: Vec<String> = merge(file, Vec::new()).into_iter().map(|e| e.id).collect();
+    assert_eq!(alone, ["a", "b", "c"]);
+}

@@ -1,4 +1,4 @@
-use super::account_log::{self, Entry};
+use super::account_log::{self, AccountSwitches, Entry};
 use super::cache::{cell_key, cell_parts, price_key, tool_of, Cache, Cell, Mark, Tokens};
 use super::other::{antigravity, codex, OtherPrices};
 pub use super::paths::hash;
@@ -82,6 +82,7 @@ pub struct Tracker {
     roots: Vec<Root>,
     cache_data: Option<PathBuf>,
     account_log: Option<PathBuf>,
+    switches: Option<Arc<dyn AccountSwitches>>,
     zone: ZoneFn,
     catalog: Arc<Catalog>,
     cache: Option<Cache>,
@@ -103,6 +104,7 @@ impl Tracker {
             roots,
             cache_data,
             account_log,
+            switches: None,
             zone: local_offset_secs,
             catalog,
             cache: None,
@@ -112,6 +114,11 @@ impl Tracker {
             last_persist: None,
             recount: None,
         }
+    }
+
+    pub fn with_switches(mut self, switches: Arc<dyn AccountSwitches>) -> Tracker {
+        self.switches = Some(switches);
+        self
     }
 
     pub fn with_zone(mut self, zone: ZoneFn) -> Tracker {
@@ -143,11 +150,15 @@ impl Tracker {
     }
 
     pub fn refresh(&mut self, now: f64) -> bool {
-        self.log = self
+        let file = self
             .account_log
             .as_deref()
             .map(account_log::load)
             .unwrap_or_default();
+        self.log = match &self.switches {
+            Some(switches) => account_log::merge(file, switches.switches()),
+            None => file,
+        };
         self.load();
         let dirty = self.scan_all();
         self.prune(now);

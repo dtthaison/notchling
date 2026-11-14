@@ -1,9 +1,10 @@
 use super::profile::{access_token, account_id_from_profile, is_expired, valid_id};
-use super::{err, AccountError, ClaudeAccount, ClaudeAccounts, State};
+use super::{err, AccountError, ClaudeAccount, ClaudeAccounts, State, SwitchWhy};
 use crate::accounts::Login;
 use crate::control::MoveAllPlan;
 use crate::lanes::{new_name, service_for, Lane};
 use crate::sessions::Agent;
+use notchling_events::kinds::accounts::LaneAction;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct MoveAllAccounts {
@@ -61,6 +62,7 @@ impl ClaudeAccounts {
         lanes.push(lane.clone());
         self.env.lanes.save(&lanes)?;
         self.save_list(&list)?;
+        self.push_lane(&lane.name, LaneAction::Created, Some(id));
         Ok(lane)
     }
 
@@ -102,6 +104,7 @@ impl ClaudeAccounts {
         lanes[i].email = account.email;
         self.env.lanes.save(&lanes)?;
         self.save_list(&list)?;
+        self.push_lane(&lanes[i].name, LaneAction::Switched, Some(id));
         Ok(lanes[i].clone())
     }
 
@@ -115,8 +118,9 @@ impl ClaudeAccounts {
         self.lane_login_is_saved(&lanes[i])?;
         self.env.lanes.remove_login(&self.env.keys, &lanes[i])?;
         let _ = self.env.lanes.remove_folder(&lanes[i], self.now_secs());
-        lanes.remove(i);
+        let gone = lanes.remove(i);
         self.env.lanes.save(&lanes)?;
+        self.push_lane(&gone.name, LaneAction::Removed, Some(&gone.account_id));
         Ok(true)
     }
 
@@ -132,7 +136,7 @@ impl ClaudeAccounts {
             }
         }
         if let Some(id) = &plan.switch_main {
-            match self.switch_to(id) {
+            match self.switch_for(id, &SwitchWhy::MOVE_ALL) {
                 Ok(_) => done.switched_to = Some(id.clone()),
                 Err(e) => done
                     .errors

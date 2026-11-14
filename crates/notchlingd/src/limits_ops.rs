@@ -183,6 +183,7 @@ impl LimitsOps {
         room: Arc<dyn Room>,
         catalog: Arc<Catalog>,
         inbox: Arc<InboxOps>,
+        history: Arc<dyn notchling_engine::cost::account_log::AccountSwitches>,
     ) -> LimitsOps {
         let config = if layout.socket_given {
             LimitConfig::in_memory()
@@ -192,7 +193,7 @@ impl LimitsOps {
         LimitsOps::new(
             accounts,
             Arc::new(config),
-            cost_ops::CostSetup::from_layout(layout, catalog).service(),
+            cost_ops::CostSetup::from_layout(layout, catalog).service_with(history),
             room,
         )
         .with_inbox(inbox)

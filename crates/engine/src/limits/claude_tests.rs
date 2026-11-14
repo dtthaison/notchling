@@ -1,6 +1,6 @@
 use super::claude::{Announce, ClaudeWatcher, NUDGE};
 use super::mode::{LimitConfig, LimitMode, CLAUDE};
-use super::sources::{AccountInfo, ClaudeSource, LaneInfo, StoppedJob, StoppedJobs};
+use super::sources::{AccountInfo, ClaudeSource, LaneInfo, LimitWhy, StoppedJob, StoppedJobs};
 use super::text::Zone;
 use super::usage::{AccountUsage, NamedWindow, UsageWindow};
 use crate::transcript::errors::LimitHit;
@@ -33,6 +33,7 @@ struct Store {
     lanes: Mutex<Vec<LaneInfo>>,
     switched: Mutex<Vec<String>>,
     lane_switched: Mutex<Vec<(String, String)>>,
+    whys: Mutex<Vec<LimitWhy>>,
     fail: Mutex<bool>,
 }
 
@@ -79,6 +80,10 @@ impl ClaudeSource for Store {
         self.switched.lock().unwrap().push(id.to_string());
         *self.active.lock().unwrap() = Some(id.to_string());
         Ok(())
+    }
+    fn switch_for_limit(&self, id: &str, why: &LimitWhy) -> Result<(), String> {
+        self.whys.lock().unwrap().push(*why);
+        self.switch_to(id)
     }
     fn switch_lane(&self, lane: &str, to: &str) -> Result<(), String> {
         self.lane_switched
@@ -216,6 +221,19 @@ fn notify_and_switch_moves_to_the_account_with_room_and_says_so_once() {
     r.store.set_usage("me", usage(5.0, 5.0, NOW + 60.0));
     r.watcher.check(NOW + 60.0);
     assert_eq!(r.store.switched.lock().unwrap().len(), 1);
+}
+
+#[test]
+fn the_switch_says_which_window_crossed_and_how_far() {
+    let mut r = rig(two_accounts(96.0), LimitMode::NotifyAndSwitch);
+    r.watcher.check(NOW);
+    let whys = r.store.whys.lock().unwrap().clone();
+    assert_eq!(whys.len(), 1);
+    assert_eq!(
+        whys[0].window,
+        Some(notchling_events::kinds::choices::LimitWindow::FiveHour)
+    );
+    assert_eq!(whys[0].used_pct, Some(96.0));
 }
 
 #[test]

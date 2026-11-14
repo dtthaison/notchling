@@ -1,3 +1,4 @@
+use crate::account_history::DbSwitches;
 use crate::accounts_ops::AccountsOps;
 use crate::acting::Acting;
 use crate::acting_ops::{ActingOps, Room};
@@ -276,6 +277,7 @@ pub struct Wired {
     pub settings: Arc<SettingsOps>,
     pub events: Arc<LateEmit>,
     pub salt: LateSalt,
+    history: Arc<DbSwitches>,
     log: OnceLock<(Arc<Mutex<EventsDb>>, Arc<LogOps>)>,
 }
 
@@ -334,7 +336,14 @@ impl Wired {
 
         let switches = Arc::new(Switches::off());
         let on = switches.accounts.clone();
-        let accounts = Arc::new(AccountsOps::for_daemon(layout, on.clone(), room.clone()));
+        let history = DbSwitches::new();
+        let accounts = Arc::new(AccountsOps::recording(
+            layout,
+            on.clone(),
+            room.clone(),
+            events.emit(),
+            history.clone(),
+        ));
         accounts.attach_acting(acting.clone());
         let claude_store = accounts.store();
         let names = claude_store.clone();
@@ -370,6 +379,7 @@ impl Wired {
             room.clone(),
             catalog.shared_catalog(),
             inbox.clone(),
+            history.clone(),
         ));
         limits.set_claude(
             Arc::new(ClaudeLimits::new(on.clone(), claude_store)),
@@ -442,6 +452,7 @@ impl Wired {
             settings,
             events: late,
             salt,
+            history,
             log: OnceLock::new(),
         }
     }
@@ -452,6 +463,7 @@ impl Wired {
     }
 
     pub fn set_log(&self, db: Arc<Mutex<EventsDb>>, ops: Arc<LogOps>) {
+        self.history.set(db.clone());
         let _ = self.log.set((db, ops));
     }
 

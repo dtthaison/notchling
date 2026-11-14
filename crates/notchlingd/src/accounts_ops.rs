@@ -15,7 +15,9 @@ use notchling_engine::accounts::keychain::{
     KeychainError, Keys, NoKeychain, SecurityOutput, SecurityRunner, SystemSecurity,
 };
 use notchling_engine::control::plan_move_all_jobs;
+use notchling_engine::cost::account_log::{AccountSwitches, NoSwitches};
 use notchling_engine::lanes::{start_command, LaneStore};
+use notchling_events::{Emit, NoEmit};
 use notchling_local_api::{ops, topics, ApiError, Caller, ErrorCode, OpSpec, Tier};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
@@ -117,6 +119,16 @@ impl AccountsOps {
     }
 
     pub fn for_daemon(layout: &Layout, flag: Arc<SwitchFlag>, room: Arc<dyn Room>) -> AccountsOps {
+        AccountsOps::recording(layout, flag, room, Arc::new(NoEmit), Arc::new(NoSwitches))
+    }
+
+    pub fn recording(
+        layout: &Layout,
+        flag: Arc<SwitchFlag>,
+        room: Arc<dyn Room>,
+        events: Arc<dyn Emit>,
+        history: Arc<dyn AccountSwitches>,
+    ) -> AccountsOps {
         let (runner, http): (Arc<dyn SecurityRunner>, Arc<dyn HttpClient>) = if layout.fixture {
             (
                 Arc::new(NoKeychain("a fixture root reaches no Keychain")),
@@ -147,6 +159,8 @@ impl AccountsOps {
             data_dir: layout.data_dir.clone(),
             list_file: layout.data_dir.join("daemon").join("accounts.json"),
             lanes: LaneStore::new(&home, &layout.data_dir),
+            events,
+            history,
         };
         AccountsOps::new(
             flag,
@@ -175,8 +189,11 @@ impl AccountsOps {
         job: impl FnOnce(Ctx) -> Result<Value, ApiError> + Send + 'static,
     ) -> Result<Value, ApiError> {
         let ctx = self.ctx.clone();
+        let scope = notchling_events::scope::current();
         let wait = Duration::from_millis(self.reply_wait_ms.load(Ordering::SeqCst));
-        accounts_late::run(&self.tickets, &self.ctx.room, wait, op, move || job(ctx))
+        accounts_late::run(&self.tickets, &self.ctx.room, wait, op, move || {
+            scope.run(|| job(ctx))
+        })
     }
 
     fn add_begin(&self) -> Result<Value, ApiError> {
