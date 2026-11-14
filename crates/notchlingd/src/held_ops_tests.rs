@@ -2,6 +2,7 @@ use crate::acting_ops_tests::{app, sessions, setup, Setup, PROMPT};
 use notchling_engine::reply::held::START_GRACE_MS;
 use notchling_local_api::{ops, topics};
 use serde_json::{json, Value};
+use std::sync::atomic::Ordering;
 
 const SCREEN: &[&str] = PROMPT;
 
@@ -72,6 +73,34 @@ fn the_held_text_is_typed_once_when_the_turn_ends() {
     let before = s.writes.lock().unwrap().len();
     s.ops.flush_held(3_000 + START_GRACE_MS);
     assert_eq!(s.writes.lock().unwrap().len(), before, "sent once");
+}
+
+#[test]
+fn held_text_the_terminal_does_not_send_stays_held_and_goes_out_later() {
+    let s = setup(true, SCREEN, sessions());
+    reply(&s, "job-a", "two");
+    finish(&s, "job-a");
+    s.deaf.store(true, Ordering::SeqCst);
+    s.ops.flush_held(1_000);
+    assert_eq!(
+        s.ops.held_text("job-a").as_deref(),
+        Some("two"),
+        "an Enter the terminal ignored sent nothing"
+    );
+    assert_eq!(
+        s.room.named(topics::SESSION_HELD).last().unwrap(),
+        &json!({"id": "job-a", "text": "two"})
+    );
+    s.deaf.store(false, Ordering::SeqCst);
+    let tried = s.writes.lock().unwrap().len();
+    s.ops.flush_held(2_000);
+    assert_eq!(s.writes.lock().unwrap().len(), tried, "not again at once");
+    s.ops.flush_held(1_000 + START_GRACE_MS);
+    assert_eq!(s.ops.held_text("job-a"), None);
+    assert_eq!(
+        s.room.named(topics::SESSION_HELD).last().unwrap(),
+        &json!({"id": "job-a", "text": null})
+    );
 }
 
 #[test]

@@ -1,0 +1,51 @@
+cursor 46 10 true
+
+ ▐▛███▛█   Claude Code v2.1.325
+▝▜██████▀  Haiku 5.5 · Claude Ultra
+ ▝▝   ▝▝   ~/work
+
+
+❯ Reply with just the word ok.
+
+⏺ ok
+
+✻ Worked for 2s · done 12:09 PM
+
+❯ Say only the word seen. /tmp/shots/one.png /tmp/shots/two.jpg
+
+⏺ seen
+
+✻ Worked for 2s · done 12:11 PM
+
+❯ [Image #1] [Image #2]Say only the word seen.
+  ⎿  [Image #1]
+  ⎿  [Image #2]
+
+⏺ seen
+
+✻ Crunched for 2s · done 12:11 PM
+
+❯ [Image #3] [Image #4]Say only the word big.
+  ⎿  [Image #3]
+  ⎿  [Image #4]
+
+⏺ big
+
+✻ Worked for 3s · done 12:13 PM
+
+❯ [Image #5] [Image #6]Say only the word race.
+  ⎿  [Image #5]
+  ⎿  [Image #6]
+
+⏺ race
+
+
+  ❯ /compact                           Free up context by summarizing the conversation so far
+    /autocompact                       Set how full the context gets before auto-summarizing
+    /computer-use                      Read this skill before the first step of any request to do something in an app on the person's own computer (Notes, Finder, System Settings, any desktop app),
+                                       to look at their screen, or for "computer use". Computer use (desktop control) lets Claude take screenshots of the person's desktop and control it with clicks…
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ /compact
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  work > Haiku 5.5 | 66.7k tokens | someone@example.invalid
+  paste again to expand

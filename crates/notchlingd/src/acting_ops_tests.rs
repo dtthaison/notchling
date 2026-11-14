@@ -2,6 +2,7 @@ use crate::acting::{Acting, ACTING_OFF};
 use crate::acting_ops::{ActingOps, Attacher, Room, ACTING_OPS};
 use notchling_engine::control::Launcher;
 use notchling_engine::reply::exec::{Markers, Pty, ScreenCheck};
+use notchling_engine::reply::fake::{FakePrompt, RULE};
 use notchling_engine::reply::keys;
 use notchling_engine::sessions::Roots;
 use notchling_local_api::{ops, ApiError, Caller, ClientKind, ErrorCode, OpSpec, Tier};
@@ -45,9 +46,8 @@ impl FakeRoom {
 }
 
 struct FakePty {
-    screen: Vec<String>,
+    prompt: FakePrompt,
     writes: Arc<Mutex<Vec<String>>>,
-    clock: u64,
 }
 
 impl Pty for FakePty {
@@ -56,20 +56,22 @@ impl Pty for FakePty {
             .lock()
             .unwrap()
             .push(String::from_utf8_lossy(bytes).into_owned());
-        Ok(())
+        self.prompt.write(bytes)
     }
-    fn wait_quiet(&mut self, quiet: Duration, _timeout: Duration) -> bool {
-        self.clock += quiet.as_millis() as u64;
-        true
+    fn wait_quiet(&mut self, quiet: Duration, timeout: Duration) -> bool {
+        self.prompt.wait_quiet(quiet, timeout)
     }
     fn screen(&mut self) -> Vec<String> {
-        self.screen.clone()
+        self.prompt.screen()
+    }
+    fn cursor(&mut self) -> Option<(usize, usize)> {
+        self.prompt.cursor()
     }
     fn sleep(&mut self, d: Duration) {
-        self.clock += d.as_millis() as u64;
+        self.prompt.sleep(d)
     }
     fn now_ms(&self) -> u64 {
-        self.clock
+        self.prompt.now_ms()
     }
 }
 
@@ -80,6 +82,7 @@ struct FakeAttacher {
     screen: Vec<String>,
     attached: Attaches,
     writes: Arc<Mutex<Vec<String>>>,
+    deaf: Arc<AtomicBool>,
 }
 
 impl Attacher for FakeAttacher {
@@ -88,10 +91,14 @@ impl Attacher for FakeAttacher {
             .lock()
             .unwrap()
             .push((job.to_string(), config_dir.map(String::from)));
+        let lines: Vec<&str> = self.screen.iter().map(String::as_str).collect();
+        let mut prompt = FakePrompt::new(&lines);
+        if self.deaf.load(Ordering::SeqCst) {
+            prompt = prompt.deaf();
+        }
         Ok(Box::new(FakePty {
-            screen: self.screen.clone(),
+            prompt,
             writes: self.writes.clone(),
-            clock: 0,
         }))
     }
     fn screen_check(&self) -> &dyn ScreenCheck {
@@ -129,6 +136,7 @@ pub(crate) struct Setup {
     pub room: Arc<FakeRoom>,
     pub attached: Attaches,
     pub writes: Arc<Mutex<Vec<String>>>,
+    pub deaf: Arc<AtomicBool>,
 }
 
 pub(crate) fn setup(on: bool, screen: &[&str], list: Value) -> Setup {
@@ -153,6 +161,7 @@ pub(crate) fn setup_in(
         ..FakeAttacher::default()
     };
     let (attached, writes) = (attacher.attached.clone(), attacher.writes.clone());
+    let deaf = attacher.deaf.clone();
     let me = std::process::id();
     let mut ops = ActingOps::new(
         Arc::new(Acting::in_memory(on)),
@@ -173,6 +182,7 @@ pub(crate) fn setup_in(
         room,
         attached,
         writes,
+        deaf,
     }
 }
 
@@ -200,7 +210,7 @@ pub(crate) fn code(result: Result<Value, ApiError>) -> (ErrorCode, String) {
     (e.code, e.message)
 }
 
-pub(crate) const PROMPT: &[&str] = &["> ", "  ? for shortcuts"];
+pub(crate) const PROMPT: &[&str] = &[RULE, "❯ ", RULE, "  ? for shortcuts"];
 
 #[test]
 fn every_acting_op_is_app_tier_and_refused_while_off() {
@@ -276,6 +286,49 @@ fn a_reply_types_the_plan_into_the_jobs_attach_terminal() {
             "\r".to_string()
         ]
     );
+}
+
+#[test]
+fn a_reply_the_terminal_keeps_in_its_box_is_an_error_not_a_sent_one() {
+    let s = setup(true, PROMPT, sessions());
+    s.deaf.store(true, Ordering::SeqCst);
+    let (c, m) = code(s.ops.call(
+        &app(),
+        ops::SESSION_REPLY,
+        &json!({"id": "job-idle", "text": "hi"}),
+    ));
+    assert_eq!(c, ErrorCode::Failed);
+    assert!(
+        m.starts_with("The message is typed in the session's terminal but wasn't sent"),
+        "{m}"
+    );
+    s.deaf.store(false, Ordering::SeqCst);
+    let again = s.ops.call(
+        &app(),
+        ops::SESSION_REPLY,
+        &json!({"id": "job-idle", "text": "hi"}),
+    );
+    assert_eq!(
+        again.unwrap(),
+        json!({"sent": true}),
+        "a reply that failed holds nothing back"
+    );
+}
+
+#[test]
+fn a_reply_is_typed_only_at_the_prompt() {
+    let s = setup(true, &["Resume a session", "  1. fix-hook"], sessions());
+    let (c, m) = code(s.ops.call(
+        &app(),
+        ops::SESSION_REPLY,
+        &json!({"id": "job-idle", "text": "hi"}),
+    ));
+    assert_eq!(c, ErrorCode::Failed);
+    assert!(
+        m.starts_with("The session's terminal isn't at its prompt"),
+        "{m}"
+    );
+    assert!(s.writes.lock().unwrap().is_empty());
 }
 
 #[test]

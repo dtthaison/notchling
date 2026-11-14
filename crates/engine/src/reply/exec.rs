@@ -1,6 +1,7 @@
-use super::keys::{self, timing::*, LEFT, SUBMIT};
+use super::keys::{self, timing::*, ENTER, LEFT, SUBMIT};
 use super::plan::{Plan, Step, Until};
 use super::popall;
+use crate::terminal::input_box::{self, Input};
 use crate::terminal::permission_dialog::{self, Decision, PermissionDialog};
 use std::path::PathBuf;
 use std::time::Duration;
@@ -9,6 +10,9 @@ pub trait Pty {
     fn write(&mut self, bytes: &[u8]) -> std::io::Result<()>;
     fn wait_quiet(&mut self, quiet: Duration, timeout: Duration) -> bool;
     fn screen(&mut self) -> Vec<String>;
+    fn cursor(&mut self) -> Option<(usize, usize)> {
+        None
+    }
     fn sleep(&mut self, duration: Duration);
     fn now_ms(&self) -> u64;
 }
@@ -75,6 +79,10 @@ pub enum Failure {
     Pty(String),
     Timeout,
     Dialog,
+    NoInput,
+    NotCleared,
+    NotTaken,
+    NotSent,
     QuestionGone,
     QuestionMismatch,
     NotPermission,
@@ -100,6 +108,22 @@ impl std::fmt::Display for Failure {
             Failure::Dialog => write!(
                 f,
                 "The session is asking you something. Answer it in the terminal, then send again."
+            ),
+            Failure::NoInput => write!(
+                f,
+                "The session's terminal isn't at its prompt, so nothing was sent. Open the terminal to see what it shows."
+            ),
+            Failure::NotCleared => write!(
+                f,
+                "The session's input box still holds text, so nothing was sent. Clear it in the terminal, then send again."
+            ),
+            Failure::NotTaken => write!(
+                f,
+                "The session's terminal didn't take the message, so it wasn't sent. Send it again."
+            ),
+            Failure::NotSent => write!(
+                f,
+                "The message is typed in the session's terminal but wasn't sent. Press Return there, or send it again."
             ),
             Failure::QuestionGone => write!(f, "That question isn't open in the session any more."),
             Failure::QuestionMismatch => write!(
@@ -161,6 +185,12 @@ pub fn execute(
     Ok(Outcome { taken: run.taken })
 }
 
+enum Shown {
+    Dialog,
+    Other,
+    Input(Input),
+}
+
 struct Run<'a> {
     pty: &'a mut dyn Pty,
     check: &'a dyn ScreenCheck,
@@ -190,6 +220,89 @@ impl Run<'_> {
         }
     }
 
+    fn shown(&mut self) -> Shown {
+        let lines = self.pty.screen();
+        if self.check.dialog_open(&lines) {
+            return Shown::Dialog;
+        }
+        match input_box::read(&lines, self.pty.cursor()) {
+            Some(input) => Shown::Input(input),
+            None => Shown::Other,
+        }
+    }
+
+    fn watch(
+        &mut self,
+        timeout_ms: u64,
+        mut done: impl FnMut(&Shown) -> Result<bool, Failure>,
+    ) -> Result<Option<Shown>, Failure> {
+        let deadline = self.pty.now_ms() + timeout_ms;
+        loop {
+            let shown = self.shown();
+            if done(&shown)? {
+                return Ok(None);
+            }
+            if self.pty.now_ms() >= deadline {
+                return Ok(Some(shown));
+            }
+            self.pty.sleep(ms(INPUT_POLL_MS));
+        }
+    }
+
+    fn await_input(&mut self, timeout_ms: u64, empty: bool) -> Result<(), Failure> {
+        let late = self.watch(timeout_ms, |shown| match shown {
+            Shown::Dialog => Err(Failure::Dialog),
+            Shown::Other => Ok(false),
+            Shown::Input(input) => Ok(input.empty || !empty),
+        })?;
+        match late {
+            None => Ok(()),
+            Some(Shown::Input(_)) => Err(Failure::NotCleared),
+            Some(_) => Err(Failure::NoInput),
+        }
+    }
+
+    fn await_paste(&mut self, timeout_ms: u64) -> Result<(), Failure> {
+        let mut last: Option<Input> = None;
+        let late = self.watch(timeout_ms, |shown| match shown {
+            Shown::Dialog => Err(Failure::Dialog),
+            Shown::Other => Ok(false),
+            Shown::Input(input) => {
+                let settled = !input.empty && last.as_ref() == Some(input);
+                last = Some(input.clone());
+                Ok(settled)
+            }
+        })?;
+        match late {
+            None => Ok(()),
+            Some(_) => Err(Failure::NotTaken),
+        }
+    }
+
+    fn submit(&mut self, timeout_ms: u64) -> Result<(), Failure> {
+        match self.shown() {
+            Shown::Dialog => return Err(Failure::Dialog),
+            Shown::Other => return Err(Failure::NoInput),
+            Shown::Input(input) if input.empty => return Err(Failure::NotTaken),
+            Shown::Input(_) => {}
+        }
+        self.write(ENTER)?;
+        let mut let_go = false;
+        let late = self.watch(timeout_ms, |shown| {
+            let free = match shown {
+                Shown::Input(input) => input.empty,
+                Shown::Dialog | Shown::Other => true,
+            };
+            let settled = free && let_go;
+            let_go = free;
+            Ok(settled)
+        })?;
+        match late {
+            None => Ok(()),
+            Some(_) => Err(Failure::NotSent),
+        }
+    }
+
     fn step(&mut self, step: &Step) -> Result<bool, Failure> {
         match step {
             Step::WaitQuiet {
@@ -214,8 +327,12 @@ impl Run<'_> {
                     return Err(Failure::QuestionGone);
                 }
             }
+            Step::AwaitInput { timeout_ms } => self.await_input(*timeout_ms, false)?,
+            Step::AwaitEmpty { timeout_ms } => self.await_input(*timeout_ms, true)?,
             Step::Keys(keys) => self.write(keys)?,
             Step::Paste(text) => self.write(&keys::bracketed(text))?,
+            Step::AwaitPaste { timeout_ms } => self.await_paste(*timeout_ms)?,
+            Step::Submit { timeout_ms } => self.submit(*timeout_ms)?,
             Step::Pause(n) => self.pty.sleep(ms(*n)),
             Step::WalkBackTo { question, tries } => {
                 let mut pressed = 0;

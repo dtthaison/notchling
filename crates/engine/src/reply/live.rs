@@ -60,6 +60,11 @@ impl Pty for LiveTerminal {
         }
     }
 
+    fn cursor(&mut self) -> Option<(usize, usize)> {
+        let screen = self.terminal.as_ref()?.screen();
+        screen.cursor_visible().then(|| screen.cursor())
+    }
+
     fn sleep(&mut self, duration: Duration) {
         let end = Instant::now() + duration;
         if let Some(t) = self.terminal.as_mut() {

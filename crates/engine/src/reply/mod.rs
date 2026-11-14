@@ -1,4 +1,5 @@
 pub mod exec;
+pub mod fake;
 pub mod held;
 pub mod keys;
 pub mod live;
@@ -10,6 +11,8 @@ pub mod shell;
 
 #[cfg(test)]
 mod exec_permission_tests;
+#[cfg(test)]
+mod exec_send_tests;
 #[cfg(test)]
 mod exec_tests;
 #[cfg(test)]
