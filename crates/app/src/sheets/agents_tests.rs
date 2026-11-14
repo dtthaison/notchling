@@ -35,10 +35,12 @@ fn every_hook_install_writes_has_a_text_and_every_text_is_written() {
 #[test]
 fn the_texts_are_one_plain_sentence_each() {
     for h in HOOKS {
-        assert!(h.what.ends_with('.') && !h.what.contains('\n'), "{h:?}");
-        assert!(h.what.len() < 120, "{h:?}");
+        let what = h.what.english();
+        assert!(what.ends_with('.') && !what.contains('\n'), "{h:?}");
+        assert!(what.len() < 120, "{h:?}");
     }
-    assert!(PASS_NOTE.contains("daemon") && PASS_NOTE.contains("Artifact"));
+    let pass_note = notchling_locale::settings::HOOKS_PASS_NOTE.english();
+    assert!(pass_note.contains("daemon") && pass_note.contains("Artifact"));
 }
 
 #[test]

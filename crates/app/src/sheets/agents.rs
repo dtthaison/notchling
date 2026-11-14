@@ -1,3 +1,5 @@
+use notchling_locale::{self as t, Text};
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Page {
     General,
@@ -9,6 +11,14 @@ impl Page {
     pub const ALL: [Page; 3] = [Page::General, Page::Agents, Page::Activity];
 
     pub fn title(self) -> &'static str {
+        match self {
+            Page::General => t::settings::page_general(),
+            Page::Agents => t::settings::page_agents(),
+            Page::Activity => t::settings::page_activity(),
+        }
+    }
+
+    pub fn id(self) -> &'static str {
         match self {
             Page::General => "General",
             Page::Agents => "Agents",
@@ -27,7 +37,7 @@ impl Tool {
 
     pub fn title(self) -> &'static str {
         match self {
-            Tool::ClaudeCode => "Claude Code",
+            Tool::ClaudeCode => t::settings::tool_claude_code(),
         }
     }
 
@@ -48,38 +58,36 @@ pub enum Section {
 pub struct HookInfo {
     pub event: &'static str,
     pub matcher: &'static str,
-    pub what: &'static str,
+    pub what: Text,
 }
 
 pub const HOOKS: [HookInfo; 5] = [
     HookInfo {
         event: "PermissionRequest",
         matcher: "*",
-        what: "Claude's permission asks show in the notch, in Chat and on the phone, not only in the terminal.",
+        what: t::settings::HOOK_PERMISSION_REQUEST,
     },
     HookInfo {
         event: "PreToolUse",
         matcher: "AskUserQuestion",
-        what: "Claude's multiple-choice questions can be answered from the notch, Chat or the phone.",
+        what: t::settings::HOOK_ASK_USER_QUESTION,
     },
     HookInfo {
         event: "PreToolUse",
         matcher: "Artifact",
-        what: "When Claude reads a page saved on this Mac, it is given the local copy's path instead of the live page.",
+        what: t::settings::HOOK_ARTIFACT_READ,
     },
     HookInfo {
         event: "PostToolUse",
         matcher: "Artifact",
-        what: "After a publish, a local copy is saved for the Pages window and notchling pages.",
+        what: t::settings::HOOK_ARTIFACT_SAVED,
     },
     HookInfo {
         event: "PostToolUseFailure",
         matcher: "Artifact",
-        what: "When a page read fails (a 404 or another account's page), Claude gets the local copy's path.",
+        what: t::settings::HOOK_ARTIFACT_READ_FAILED,
     },
 ];
-
-pub const PASS_NOTE: &str = "The permission and question hooks pass straight through, and Claude asks in its terminal, when the daemon, the app or Act on Sessions is off, and in a claude -p run. The Artifact hooks work without them.";
 
 pub fn info(event: &str, matcher: &str) -> Option<&'static HookInfo> {
     HOOKS

@@ -3,8 +3,9 @@ use notchling_engine::contract::Tool;
 use notchling_kit::metric::RADIUS_SM;
 use notchling_kit::ui::{card, hsla, label, KitPart, KitStyled};
 use notchling_kit::{Appearance, Ink, TypeRole};
+use notchling_locale as t;
 
-use super::capabilities::{parts, CapabilityRow, FOOTER, TITLE};
+use super::capabilities::{parts, CapabilityRow};
 
 fn tag(text: &str, a: Appearance) -> Div {
     div()
@@ -56,7 +57,7 @@ fn block(tool: Tool, rows: &[CapabilityRow], a: Appearance) -> Div {
 
 pub fn capabilities_section(a: Appearance, cx: &App) -> Div {
     let mut section = div().flex().flex_col().gap(px(10.0)).child(label(
-        TITLE,
+        t::settings::capabilities_title(),
         TypeRole::Section,
         Ink::TextFaint,
         a,
@@ -67,6 +68,11 @@ pub fn capabilities_section(a: Appearance, cx: &App) -> Div {
         }
     }
     section
-        .child(label(FOOTER, TypeRole::Meta, Ink::TextFaint, a))
-        .part(TITLE, a, cx)
+        .child(label(
+            t::settings::capabilities_footer(),
+            TypeRole::Meta,
+            Ink::TextFaint,
+            a,
+        ))
+        .part("What Notchling Can Do", a, cx)
 }

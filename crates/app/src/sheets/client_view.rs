@@ -2,11 +2,9 @@ use gpui::{div, prelude::*, px, App, Div};
 use notchling_engine::versions::Mark;
 use notchling_kit::ui::{card, hsla, label, KitPart};
 use notchling_kit::{Appearance, Ink, TypeRole};
+use notchling_locale as t;
 
 use super::client_model::{ClientPart, WorkerLine};
-
-pub const TITLE: &str = "Client";
-pub const CHECKING: &str = "Looking…";
 
 fn mark_ink(mark: Mark) -> Ink {
     match mark {
@@ -32,7 +30,7 @@ fn worker_row(line: &WorkerLine, a: Appearance) -> Div {
 }
 
 pub fn client_section(part: Option<&ClientPart>, a: Appearance, cx: &App) -> Div {
-    let found = part.map_or(CHECKING, |p| p.found.as_str());
+    let found = part.map_or(t::settings::client_looking(), |p| p.found.as_str());
     let mut rows = div().flex().flex_col().child(
         div()
             .px(px(14.0))
@@ -51,7 +49,12 @@ pub fn client_section(part: Option<&ClientPart>, a: Appearance, cx: &App) -> Div
         .flex()
         .flex_col()
         .gap(px(6.0))
-        .child(label(TITLE, TypeRole::Section, Ink::TextFaint, a))
+        .child(label(
+            t::settings::client_title(),
+            TypeRole::Section,
+            Ink::TextFaint,
+            a,
+        ))
         .child(card(a).overflow_hidden().child(rows))
         .part("Client", a, cx)
 }

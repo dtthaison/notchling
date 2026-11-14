@@ -11,6 +11,7 @@ use notchling_kit::ui::{
     button, card, hsla, icon, icon_button, label, scrollable, window_appearance, KitPart, KitStyled,
 };
 use notchling_kit::{sentence, Appearance, Icon, IconSize, Ink, TypeRole};
+use notchling_locale as t;
 use serde_json::{Map, Value};
 
 use super::agents::{Page, Tool};
@@ -249,7 +250,7 @@ impl SettingsView {
                     ButtonKind::Ghost
                 };
                 button(
-                    SharedString::from(format!("settings-page-{}", page.title())),
+                    SharedString::from(format!("settings-page-{}", page.id())),
                     page.title(),
                     kind,
                     PartState::Rest,
@@ -364,7 +365,7 @@ impl Render for SettingsView {
         let daemon = self.daemon(cx);
         let done = button(
             "settings-done",
-            "Done",
+            t::settings::done(),
             ButtonKind::Primary,
             PartState::Rest,
             a,
@@ -473,7 +474,7 @@ impl Render for SettingsView {
             .rounded(px(RADIUS_CARD))
             .overflow_hidden()
             .fill(Ink::Window, a)
-            .child(sheet_header(Icon::Settings, "Settings", done, a))
+            .child(sheet_header(Icon::Settings, t::settings::title(), done, a))
             .child(body)
             .children(self.error.as_deref().map(|e| {
                 label(e, TypeRole::Meta, Ink::Needs, a)

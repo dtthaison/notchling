@@ -1,14 +1,12 @@
 use notchling_engine::versions::{mark, Mark, Method, Tool, ToolState, Version, WorkerTools};
 use notchling_local_api::ops;
+use notchling_locale as t;
 use serde_json::{json, Value};
 
 use crate::acting::Request;
 use crate::actions::Actions;
 use crate::machines::versions_feed::mac_side;
 use crate::machines::versions_model::mark_text;
-
-pub const NOT_RUNNING: &str = "Notchling isn't running";
-pub const NOT_FOUND: &str = "Not found";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WorkerLine {
@@ -27,7 +25,7 @@ pub struct ClientPart {
 impl ClientPart {
     pub fn not_running() -> ClientPart {
         ClientPart {
-            found: NOT_RUNNING.to_owned(),
+            found: t::settings::client_not_running().to_owned(),
             workers: Vec::new(),
         }
     }
@@ -53,7 +51,7 @@ fn row_of(get: &Value, tool: Tool) -> Option<&Value> {
 
 fn found_line(row: &Value, home: &str) -> String {
     let Some(path) = row.get("path").and_then(Value::as_str) else {
-        return NOT_FOUND.to_owned();
+        return t::settings::client_not_found().to_owned();
     };
     let version = row
         .get("installed")
@@ -65,16 +63,14 @@ fn found_line(row: &Value, home: &str) -> String {
         .cloned()
         .and_then(|m| serde_json::from_value::<Method>(m).ok())
         .filter(|m| *m != Method::Unknown);
-    let mut line = format!(
-        "Found at {} · {}",
-        shown_path(path, home),
-        version.map_or("version unknown".to_owned(), |v| v.to_string())
-    );
-    if let Some(method) = method {
-        line.push_str(" · ");
-        line.push_str(method.title());
+    let path = shown_path(path, home);
+    let version = version.map_or(t::settings::client_version_unknown().to_owned(), |v| {
+        v.to_string()
+    });
+    match method {
+        Some(method) => t::settings::client_found_by(&path, &version, method.title()),
+        None => t::settings::client_found(&path, &version),
     }
-    line
 }
 
 fn worker_lines(tool: Tool, get: &Value, workers: &Value) -> Vec<WorkerLine> {
@@ -92,11 +88,16 @@ fn worker_lines(tool: Tool, get: &Value, workers: &Value) -> Vec<WorkerLine> {
             continue;
         };
         let (text, mark_of) = match state {
-            ToolState::NotInstalled => ("Not installed".to_owned(), Mark::NotInstalled),
+            ToolState::NotInstalled => (
+                t::settings::client_not_installed().to_owned(),
+                Mark::NotInstalled,
+            ),
             ToolState::Installed { version, .. } => {
                 let shown = version
                     .as_ref()
-                    .map_or("version unknown".to_owned(), |v| v.to_string());
+                    .map_or(t::settings::client_version_unknown().to_owned(), |v| {
+                        v.to_string()
+                    });
                 let mark_of = match &mac {
                     Some(_) => mark(tool, theirs.as_ref(), state, false),
                     None => Mark::Unknown,
@@ -122,7 +123,9 @@ pub fn client_part(tool: Tool, get: &Value, workers: &Value, home: &str) -> Clie
     if get.get("tools").and_then(Value::as_array).is_none() {
         return ClientPart::not_running();
     }
-    let found = row_of(get, tool).map_or(NOT_FOUND.to_owned(), |row| found_line(row, home));
+    let found = row_of(get, tool).map_or(t::settings::client_not_found().to_owned(), |row| {
+        found_line(row, home)
+    });
     ClientPart {
         found,
         workers: worker_lines(tool, get, workers),
