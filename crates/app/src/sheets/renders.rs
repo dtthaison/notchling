@@ -12,7 +12,7 @@ use super::new_session::{accounts, folders, NewSession};
 use crate::accounts::menu::targets;
 use crate::accounts::renders::{snapshot, Shown as AccountsShown};
 
-pub const VIEWS: [ViewSpec; 8] = [
+pub const VIEWS: [ViewSpec; 9] = [
     ViewSpec {
         name: "banner",
         size: (620.0, 260.0),
@@ -53,6 +53,11 @@ pub const VIEWS: [ViewSpec; 8] = [
         size: (620.0, 760.0),
         about: "the Agents page's Hooks with no daemon attached: the five explained, none checked",
     },
+    ViewSpec {
+        name: "settings-capabilities",
+        size: (620.0, 3500.0),
+        about: "the Agents page with What Notchling Can Do: each tool's fallback, not applicable and not built rows",
+    },
 ];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -65,6 +70,7 @@ pub enum Shown {
     SettingsAgentsPartial,
     SettingsAgentsEmpty,
     SettingsAgentsDetached,
+    SettingsCapabilities,
 }
 
 pub fn shown(name: &str) -> Option<Shown> {
@@ -77,6 +83,7 @@ pub fn shown(name: &str) -> Option<Shown> {
         "settings-agents-partial" => Shown::SettingsAgentsPartial,
         "settings-agents-empty" => Shown::SettingsAgentsEmpty,
         "settings-agents-detached" => Shown::SettingsAgentsDetached,
+        "settings-capabilities" => Shown::SettingsCapabilities,
         _ => return None,
     })
 }
@@ -90,7 +97,8 @@ pub fn acting(shown: Shown) -> Acting {
         | Shown::SettingsAgents
         | Shown::SettingsAgentsPartial
         | Shown::SettingsAgentsEmpty
-        | Shown::SettingsAgentsDetached => Acting::Off,
+        | Shown::SettingsAgentsDetached
+        | Shown::SettingsCapabilities => Acting::Off,
     }
 }
 
@@ -99,7 +107,8 @@ pub fn page(shown: Shown) -> Page {
         Shown::SettingsAgents
         | Shown::SettingsAgentsPartial
         | Shown::SettingsAgentsEmpty
-        | Shown::SettingsAgentsDetached => Page::Agents,
+        | Shown::SettingsAgentsDetached
+        | Shown::SettingsCapabilities => Page::Agents,
         _ => Page::General,
     }
 }

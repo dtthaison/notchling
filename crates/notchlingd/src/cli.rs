@@ -37,6 +37,9 @@ pub enum Command {
         json: bool,
         socket: Option<PathBuf>,
     },
+    Providers {
+        json: bool,
+    },
     Delegate {
         args: Vec<String>,
     },
@@ -68,6 +71,7 @@ pub fn usage() -> &'static str {
      notchling daemon [--socket <path>]          serve the local API\n  \
      notchling status [--json] [--socket <path>]  the daemon's version, pid, uptime and clients\n  \
      notchling sessions [--json] [--socket <path>]  the sessions the daemon sees\n  \
+     notchling providers [--json]          what Notchling can do for each tool: native, fallback, not applicable, gap\n  \
      notchling pages [words] [--json] [--socket <path>]  the saved Artifact pages (id, title, account), newest first\n  \
      notchling page <link|id|words> [--json] [--socket <path>]  where a saved page is, and who can republish it\n  \
      notchling delegate <codex|agy> [--model --effort --folder --out --write --session --timeout --json] -- <prompt>\n  \
@@ -159,9 +163,16 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Command, String> 
             word if (first == "pages" || first == "page") && !word.starts_with("--") => {
                 words.push(arg)
             }
-            "--socket" if action.is_none() => socket = Some(value(&mut args, "--socket")?),
+            "--socket" if action.is_none() && first != "providers" => {
+                socket = Some(value(&mut args, "--socket")?)
+            }
             "--dir" if action.is_some() => dir = Some(value(&mut args, "--dir")?),
-            "--json" if matches!(first.as_str(), "sessions" | "status" | "pages" | "page") => {
+            "--json"
+                if matches!(
+                    first.as_str(),
+                    "sessions" | "status" | "pages" | "page" | "providers"
+                ) =>
+            {
                 json = true
             }
             other => return Err(format!("unknown argument for {first}: {other}")),
@@ -172,6 +183,7 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Command, String> 
         ("status", _) => Ok(Command::Status { json, socket }),
         ("sessions", _) => Ok(Command::Sessions { json, socket }),
         ("hook", _) => Ok(Command::Hook { socket }),
+        ("providers", _) => Ok(Command::Providers { json }),
         ("pages", _) => Ok(Command::Pages {
             query: words.join(" "),
             json,
@@ -230,6 +242,22 @@ mod tests {
         );
         assert_eq!(p(&[]), Ok(Command::Help));
         assert_eq!(p(&["--version"]), Ok(Command::Version));
+    }
+
+    #[test]
+    fn providers_parses_and_shows_json_in_the_usage() {
+        assert_eq!(p(&["providers"]), Ok(Command::Providers { json: false }));
+        assert_eq!(
+            p(&["providers", "--json"]),
+            Ok(Command::Providers { json: true })
+        );
+        assert!(p(&["providers", "--socket", "/tmp/s.sock"]).is_err());
+        assert!(p(&["providers", "word"]).is_err());
+        let line = usage()
+            .lines()
+            .find(|l| l.trim_start().starts_with("notchling providers "))
+            .expect("a usage line for providers");
+        assert!(line.contains("[--json]"), "{line}");
     }
 
     #[test]

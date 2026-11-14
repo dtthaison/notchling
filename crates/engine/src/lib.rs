@@ -2,6 +2,7 @@ pub mod accounts;
 pub mod activity;
 pub mod bridge;
 pub mod catalog;
+pub mod contract;
 pub mod control;
 pub mod cost;
 pub mod delegate;

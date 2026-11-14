@@ -14,6 +14,10 @@ from guard.zones import Zones, case_shadowed, fold, protected_paths
 MAINTAINERS = frozenset({"dtthaison"})
 STATUS_CONTEXT = "maintainer-gate"
 SUMMARY_MAX = 140
+PROVIDER_FILES = (
+    "crates/engine/src/contract/gaps.json",
+    "crates/engine/src/contract/unwired.json",
+)
 
 
 @dataclass(frozen=True)
@@ -91,12 +95,11 @@ def _entries(text: Optional[str]) -> Counter:
     return Counter(entries)
 
 
-def baseline_reasons(repo: Path, base: str, head: str) -> List[str]:
-    path = lint.BASELINE
+def _growth_reasons(repo: Path, base: str, head: str, path: Path, rule: str) -> List[str]:
     try:
         after = _entries(_show(repo, head, path))
     except ValueError as e:
-        return [f"GUARD-BASELINE: {path} at the head is unreadable: {e}"]
+        return [f"{rule}: {path} at the head is unreadable: {e}"]
     try:
         before = _entries(_show(repo, base, path))
     except ValueError:
@@ -106,7 +109,18 @@ def baseline_reasons(repo: Path, base: str, head: str) -> List[str]:
         return []
     shown = "; ".join(a if len(a) <= 100 else a[:99] + "…" for a in added[:3])
     more = f" (+{len(added) - 3} more)" if len(added) > 3 else ""
-    return [f"GUARD-BASELINE: {path} grew by {len(added)} entries, it can only shrink: {shown}{more}"]
+    return [f"{rule}: {path} grew by {len(added)} entries, it can only shrink: {shown}{more}"]
+
+
+def baseline_reasons(repo: Path, base: str, head: str) -> List[str]:
+    return _growth_reasons(repo, base, head, lint.BASELINE, "GUARD-BASELINE")
+
+
+def provider_gap_reasons(repo: Path, base: str, head: str) -> List[str]:
+    reasons: List[str] = []
+    for path in PROVIDER_FILES:
+        reasons += _growth_reasons(repo, base, head, Path(path), "GUARD-PROVIDER-GAPS")
+    return reasons
 
 
 def approved_head(reviews: List[Dict], head_sha: str, maintainers: frozenset) -> bool:
@@ -156,6 +170,7 @@ def main(repo: Path, base: str, head: str, reviews_file: Optional[Path], post: b
     changes = diff(Path(repo), base, head)
     reasons = needs_maintainer(changes, zones) + collision_reasons(Path(repo), base, head, changes)
     reasons += baseline_reasons(Path(repo), base, head)
+    reasons += provider_gap_reasons(Path(repo), base, head)
     decision = decide(reasons, reviews, head_sha)
     for line in decision.details:
         print(line)

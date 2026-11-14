@@ -37,6 +37,7 @@ pub mod op_group;
 pub mod pages_cli;
 pub mod pages_ops;
 pub mod prompts;
+pub mod providers_cli;
 pub mod providers_daemon;
 mod providers_gate;
 pub mod providers_ops;
@@ -102,6 +103,8 @@ mod pages_ops_tests;
 #[cfg(test)]
 mod providers_add_tests;
 #[cfg(test)]
+mod providers_cli_tests;
+#[cfg(test)]
 mod providers_ops_tests;
 #[cfg(test)]
 mod providers_sync_tests;
@@ -152,6 +155,7 @@ pub fn run(command: Command) -> i32 {
             Some(l) => pages_cli::run(&l, &query, false, json),
             None => 1,
         },
+        Command::Providers { json } => providers_cli::run(json, &mut std::io::stdout()),
         Command::Delegate { args } => delegate_cli::run(&args),
         Command::DelegateModels { args } => delegate_cli::models(&args),
         Command::Secrets { args } => vault_cli::secrets(&args),

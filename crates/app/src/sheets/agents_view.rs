@@ -3,6 +3,7 @@ use notchling_kit::ui::{label, tool_icon, KitPart, ToolMark};
 use notchling_kit::{Appearance, Ink, TypeRole};
 
 use super::agents::{Section, Tool};
+use super::capabilities_view::capabilities_section;
 use super::hook_rows::HooksShown;
 use super::settings_hooks_view::hooks_section;
 
@@ -28,5 +29,6 @@ pub fn agents_page(tool: Tool, hooks: &HooksShown, a: Appearance, cx: &App) -> D
             Section::Hooks => hooks_section(hooks, a, cx),
         });
     }
-    page.part("Agents Page", a, cx)
+    page.child(capabilities_section(a, cx))
+        .part("Agents Page", a, cx)
 }

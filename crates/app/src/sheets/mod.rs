@@ -4,6 +4,11 @@ mod agents_tests;
 #[cfg(target_os = "macos")]
 pub mod agents_view;
 pub mod banner;
+pub mod capabilities;
+#[cfg(test)]
+mod capabilities_tests;
+#[cfg(target_os = "macos")]
+pub mod capabilities_view;
 pub mod hook_rows;
 #[cfg(test)]
 mod hook_rows_tests;
