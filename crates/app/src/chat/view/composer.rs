@@ -35,6 +35,7 @@ const PAD_BOTTOM: f32 = 6.0;
 const TEXT_PAD_LEADING: f32 = 6.0;
 const TEXT_PAD_VERTICAL: f32 = 6.0;
 const STOP_SQUARE: f32 = 12.0;
+const BOTTOM_PAD: f32 = (super::sidebar::FOOTER_HEIGHT - CONTROL) / 2.0;
 
 fn inset(base: f32, edge: f32) -> f32 {
     base - (edge - EDGE_REST)
@@ -746,7 +747,8 @@ pub fn render(view: &ChatView, a: Appearance, window: &Window, cx: &mut Context<
         .part_at("Composer", Corner::BottomLeading, a, cx);
     let footer = div()
         .mx(px(SIDE_PADDING))
-        .pt(px(6.0))
+        .min_h(px(CONTROL))
+        .mt(px(6.0))
         .flex()
         .items_center()
         .gap(px(8.0))
@@ -769,7 +771,7 @@ pub fn render(view: &ChatView, a: Appearance, window: &Window, cx: &mut Context<
         .flex()
         .flex_col()
         .pt(px(8.0))
-        .pb(px(SIDE_PADDING))
+        .pb(px(BOTTOM_PAD))
         .children(super::prompts::card(view, a, window, cx))
         .children(permission(view, a, cx))
         .children(view.activity_line().map(|activity| {
