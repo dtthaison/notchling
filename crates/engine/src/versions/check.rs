@@ -153,7 +153,7 @@ enum Verdict {
     CantTell,
 }
 
-fn find<'a>(outputs: &'a [Output], part: CheckPart) -> Option<&'a Option<(i32, String)>> {
+fn find(outputs: &[Output], part: CheckPart) -> Option<&Option<(i32, String)>> {
     outputs.iter().find(|(p, _)| *p == part).map(|(_, o)| o)
 }
 

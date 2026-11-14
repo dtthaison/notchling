@@ -289,10 +289,10 @@ pub fn claude_lines<'a>(skips: &mut Skips, lines: impl Iterator<Item = &'a [u8]>
                 }
             }
             "assistant" | "user" => claude_blocks(skips, version, &obj),
-            "queue-operation" => {
-                if !str_of(&obj, "operation").is_some_and(|op| QUEUE_OPS.contains(&op)) {
-                    skips.note(version, SkipKind::UnknownQueueOp);
-                }
+            "queue-operation"
+                if !str_of(&obj, "operation").is_some_and(|op| QUEUE_OPS.contains(&op)) =>
+            {
+                skips.note(version, SkipKind::UnknownQueueOp);
             }
             _ => {}
         }
