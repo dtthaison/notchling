@@ -1,22 +1,20 @@
 use crate::log_bus::{EnvMaker, Extra, Sink, SinkResult, Ticked};
 use crate::log_fold::{Fold, FoldAction};
+use crate::log_keys::{spawn_load, HeadWriter, LoadPlan, Loaded};
 use crate::log_queue::Stamped;
 use crate::log_retention::{KeepAudit, CAP_BYTES, RETENTION_EVERY_MS};
 use notchling_engine::logs::{
-    has_legacy, month_of, AuditDir, Checkpoint, KeyError, KeyRead, KeyStore, LegacyFile,
-    UserDeleted,
+    has_legacy, month_of, AuditDir, Checkpoint, KeyError, KeyStore, LegacyFile, UserDeleted,
 };
 use notchling_events::audit_line::{read_head, sealed_line, unsealed_line, UnsealedWhy};
-use notchling_events::kinds::security::{DaemonStarted, DataRoot, Sealing, StartAfter};
-use notchling_events::kinds::security_log::{
-    AuditChainStarted, AuditChecked, ChainReason, CheckResult,
-};
+use notchling_events::kinds::security::{DataRoot, StartAfter};
+use notchling_events::kinds::security_log::{AuditChainStarted, ChainReason};
 use notchling_events::spec::{Lock, Outcome, Sinks};
 use notchling_events::{
     Count, Envelope, Event, Hex, List, RefMode, Salt, Seal, Version, MAX_EVENT_BYTES,
 };
 use std::io;
-use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, TryRecvError};
+use std::sync::mpsc::Receiver;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -57,20 +55,22 @@ pub struct AuditSink {
     pub(crate) keep: KeepAudit,
     pub(crate) cap_bytes: u64,
     last_retention_ms: Option<i64>,
-    key_rx: Option<Receiver<KeyRead>>,
-    begun: Instant,
-    fresh: bool,
-    after: StartAfter,
-    held: Vec<Stamped>,
-    made: Vec<Extra>,
+    pub(crate) key_rx: Option<Receiver<Loaded>>,
+    pub(crate) begun: Instant,
+    pub(crate) loaded: bool,
+    pub(crate) checkpoint: Option<Checkpoint>,
+    writer: HeadWriter,
+    pub(crate) after: StartAfter,
+    pub(crate) held: Vec<Stamped>,
+    pub(crate) made: Vec<Extra>,
     fold: Fold,
-    stretch: Option<(u64, u64)>,
+    pub(crate) stretch: Option<(u64, u64)>,
     cp_want: bool,
     cp_last_ms: i64,
     cp_n: u64,
 }
 
-enum Offered {
+pub(crate) enum Offered {
     Written(u64),
     Held,
     Failed,
@@ -121,26 +121,13 @@ impl AuditSink {
             _ => StartAfter::Unknown,
         };
         let months = dir.months().unwrap_or_default();
-        let checkpoint = keys.read_head();
-        let fresh =
-            months.is_empty() && checkpoint.is_none() && !keys.head_exists() && !has_legacy(&dir);
-        let carried = checkpoint
-            .as_ref()
-            .map(|c| Carried {
-                settings_hash: c.settings_hash.clone(),
-                prune_anchor: c.prune_anchor.clone(),
-                user_deleted: c.user_deleted.clone(),
-            })
-            .unwrap_or_default();
+        let plan = LoadPlan {
+            quiet_dir: months.is_empty() && !has_legacy(&dir),
+            moved_legacy: !legacy.is_empty(),
+        };
         let month = months.last().copied().unwrap_or(0);
-        let (tx, rx) = channel();
-        let reader = keys.clone();
-        let spawned = std::thread::Builder::new()
-            .name("notchling-log-key".into())
-            .spawn(move || {
-                let _ = tx.send(reader.read_key());
-            });
-        let key_rx = spawned.is_ok().then_some(rx);
+        let key_rx = spawn_load(keys.clone(), plan);
+        let writer = HeadWriter::start(keys.clone());
         AuditSink {
             dir,
             keys,
@@ -153,13 +140,15 @@ impl AuditSink {
             last_seal,
             last_seal_n,
             month,
-            carried,
+            carried: Carried::default(),
             keep: KeepAudit::Year1,
             cap_bytes: CAP_BYTES,
             last_retention_ms: None,
             key_rx,
             begun: Instant::now(),
-            fresh,
+            loaded: false,
+            checkpoint: None,
+            writer,
             after,
             held: Vec::new(),
             made: Vec::new(),
@@ -179,9 +168,28 @@ impl AuditSink {
         (self.last_seal_n, self.last_seal.clone())
     }
 
-    pub fn start_new_chain(&mut self, reason: ChainReason) -> Result<u64, KeyError> {
+    pub fn keys(&self) -> Arc<dyn KeyStore> {
+        self.keys.clone()
+    }
+
+    pub fn loaded(&mut self) -> bool {
+        self.poll_key(Duration::ZERO);
+        self.loaded
+    }
+
+    pub fn checkpoint(&self) -> Option<Checkpoint> {
+        self.checkpoint.clone()
+    }
+
+    pub fn head_writer(&self) -> HeadWriter {
+        self.writer.clone()
+    }
+
+    pub fn start_new_chain(&mut self, reason: ChainReason, key: [u8; 32]) -> Result<u64, KeyError> {
+        if !self.loaded() {
+            return Err(KeyError::Io(io::ErrorKind::WouldBlock));
+        }
         let previous = self.last_seal.clone().map(|s| (self.last_seal_n, s));
-        let key = self.keys.create_key()?;
         self.key = Some(key);
         self.state = SealState::Sealed;
         self.last_seal = None;
@@ -197,7 +205,7 @@ impl AuditSink {
         Ok(n)
     }
 
-    fn now(&self) -> i64 {
+    pub(crate) fn now(&self) -> i64 {
         (self.start.clock)()
     }
 
@@ -207,130 +215,6 @@ impl AuditSink {
 
     pub(crate) fn write_checkpoint_now(&mut self, now: i64) -> io::Result<()> {
         self.write_checkpoint(now)
-    }
-
-    fn poll_key(&mut self, wait: Duration) {
-        let Some(rx) = &self.key_rx else {
-            if self.state == SealState::Starting {
-                self.settle(None);
-            }
-            return;
-        };
-        let answer = match rx.try_recv() {
-            Ok(read) => Some(read),
-            Err(TryRecvError::Disconnected) => {
-                self.key_rx = None;
-                if self.state == SealState::Starting {
-                    self.settle(None);
-                }
-                return;
-            }
-            Err(TryRecvError::Empty) if self.state == SealState::Starting && !wait.is_zero() => {
-                let left = self.start.key_wait.saturating_sub(self.begun.elapsed());
-                match rx.recv_timeout(wait.min(left)) {
-                    Ok(read) => Some(read),
-                    Err(RecvTimeoutError::Disconnected) => {
-                        self.key_rx = None;
-                        None
-                    }
-                    Err(RecvTimeoutError::Timeout) => None,
-                }
-            }
-            Err(TryRecvError::Empty) => None,
-        };
-        if let Some(read) = answer {
-            self.key_rx = None;
-            match self.state {
-                SealState::Starting => self.settle(Some(read)),
-                SealState::Unsealed(UnsealedWhy::KeyWaiting) => self.resume(read),
-                SealState::Sealed | SealState::Unsealed(_) => {}
-            }
-        } else if self.state == SealState::Starting && self.begun.elapsed() >= self.start.key_wait {
-            self.settle(None);
-        }
-    }
-
-    fn settle(&mut self, read: Option<KeyRead>) {
-        let mut chain: Option<ChainReason> = None;
-        match read {
-            Some(KeyRead::Found(key)) => {
-                self.key = Some(key);
-                self.state = SealState::Sealed;
-            }
-            Some(KeyRead::Missing) => {
-                if self.fresh || !self.legacy.is_empty() {
-                    match self.keys.create_key() {
-                        Ok(key) => {
-                            self.key = Some(key);
-                            self.state = SealState::Sealed;
-                            self.last_seal = None;
-                            chain = Some(ChainReason::FirstRun);
-                        }
-                        Err(_) => self.state = SealState::Unsealed(UnsealedWhy::KeyMissing),
-                    }
-                } else {
-                    self.state = SealState::Unsealed(UnsealedWhy::KeyMissing);
-                }
-            }
-            Some(KeyRead::Denied) => self.state = SealState::Unsealed(UnsealedWhy::KeyDenied),
-            None => self.state = SealState::Unsealed(UnsealedWhy::KeyWaiting),
-        }
-        if let Some(reason) = chain {
-            self.make(Event::new(
-                &self.chain_started(reason, None),
-                Outcome::Info,
-                self.now(),
-            ));
-        }
-        self.make(Event::new(
-            &DaemonStarted {
-                daemon: self.start.daemon.clone(),
-                macos: self.start.macos.clone(),
-                data_root: self.start.data_root,
-                after: self.after,
-                sealing: match self.state {
-                    SealState::Sealed => Sealing::Sealed,
-                    SealState::Unsealed(UnsealedWhy::KeyWaiting) => Sealing::Waiting,
-                    _ => Sealing::Unsealed,
-                },
-            },
-            Outcome::Info,
-            self.now(),
-        ));
-        if matches!(self.state, SealState::Unsealed(_)) {
-            self.make(Event::new(
-                &AuditChecked {
-                    result: CheckResult::Unsealed,
-                    from_n: None,
-                    to_n: None,
-                    first_bad_n: None,
-                },
-                Outcome::Info,
-                self.now(),
-            ));
-        }
-        for held in std::mem::take(&mut self.held) {
-            let _ = self.put_offered(&held);
-        }
-    }
-
-    fn resume(&mut self, read: KeyRead) {
-        let KeyRead::Found(key) = read else {
-            return;
-        };
-        self.key = Some(key);
-        self.state = SealState::Sealed;
-        let (from, to) = self.stretch.take().unwrap_or((self.n, self.n));
-        self.make(Event::new(
-            &AuditChecked {
-                result: CheckResult::Resumed,
-                from_n: Some(Count(from)),
-                to_n: Some(Count(to)),
-                first_bad_n: None,
-            },
-            Outcome::Info,
-            self.now(),
-        ));
     }
 
     pub(crate) fn chain_started(
@@ -371,7 +255,7 @@ impl AuditSink {
         n
     }
 
-    fn put_offered(&mut self, stamped: &Stamped) -> Offered {
+    pub(crate) fn put_offered(&mut self, stamped: &Stamped) -> Offered {
         let now = stamped.event.ts;
         for due in self.fold.due(now) {
             let n = self.put(&due);
@@ -461,9 +345,8 @@ impl AuditSink {
             user_deleted: self.carried.user_deleted.clone(),
             at: now,
         };
-        self.keys
-            .write_head(&checkpoint)
-            .map_err(|_| io::Error::other("the audit checkpoint can't be written"))?;
+        self.writer.submit(checkpoint.clone());
+        self.checkpoint = Some(checkpoint);
         self.cp_last_ms = now;
         self.cp_want = false;
         self.cp_n = self.n;
@@ -508,9 +391,17 @@ impl Sink for AuditSink {
 
     fn flush(&mut self, full: bool) -> io::Result<()> {
         self.dir.flush(full)?;
+        let lost = self.writer.take_failed();
+        if lost {
+            self.cp_want = true;
+            self.cp_last_ms = 0;
+        }
         let now = self.now();
         if self.cp_want && now - self.cp_last_ms >= CHECKPOINT_MIN_MS {
             self.write_checkpoint(now)?;
+        }
+        if lost {
+            return Err(io::Error::other("the audit checkpoint can't be written"));
         }
         Ok(())
     }
@@ -525,6 +416,7 @@ impl Sink for AuditSink {
             });
         }
         if self.state != SealState::Starting
+            && self.loaded
             && self
                 .last_retention_ms
                 .is_none_or(|last| now_ms - last >= RETENTION_EVERY_MS)
@@ -543,6 +435,12 @@ impl Sink for AuditSink {
             events: Vec::new(),
             extra: self.take_made(),
         }
+    }
+}
+
+impl Drop for AuditSink {
+    fn drop(&mut self) {
+        self.writer.stop();
     }
 }
 

@@ -53,9 +53,11 @@ pub mod limits_sources;
 pub mod limits_usage;
 pub mod log_activity;
 pub mod log_audit;
+mod log_audit_key;
 pub mod log_bus;
 pub mod log_checks;
 pub mod log_fold;
+pub mod log_keys;
 pub mod log_ops;
 pub mod log_queue;
 pub mod log_retention;
@@ -159,6 +161,8 @@ mod limits_inbox_tests;
 mod limits_ops_tests;
 #[cfg(test)]
 mod log_activity_tests;
+#[cfg(test)]
+mod log_audit_keychain_tests;
 #[cfg(test)]
 pub(crate) mod log_audit_tests;
 #[cfg(test)]

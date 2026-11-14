@@ -4,8 +4,11 @@ use sha2::{Digest, Sha256};
 use std::fs::{self, OpenOptions};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, MutexGuard};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Condvar, Mutex, MutexGuard};
 use std::time::Duration;
+
+const GATE_LIMIT: Duration = Duration::from_secs(60);
 
 pub const KEY_FILE: &str = "audit-key";
 pub const HEAD_FILE: &str = "audit-head";
@@ -47,8 +50,17 @@ struct Memory {
 }
 
 #[derive(Default)]
+struct Gate {
+    held: Mutex<bool>,
+    open: Condvar,
+    inside: AtomicUsize,
+    entered: AtomicUsize,
+}
+
+#[derive(Default)]
 pub struct MemoryKeyStore {
     inner: Mutex<Memory>,
+    gate: Gate,
 }
 
 impl MemoryKeyStore {
@@ -81,10 +93,43 @@ impl MemoryKeyStore {
     pub fn key(&self) -> Option<[u8; 32]> {
         self.lock().key
     }
+
+    pub fn hold(&self) {
+        *self.gate.held.lock().unwrap_or_else(|e| e.into_inner()) = true;
+    }
+
+    pub fn release(&self) {
+        *self.gate.held.lock().unwrap_or_else(|e| e.into_inner()) = false;
+        self.gate.open.notify_all();
+    }
+
+    pub fn waiting(&self) -> usize {
+        self.gate.inside.load(Ordering::SeqCst)
+    }
+
+    pub fn calls(&self) -> usize {
+        self.gate.entered.load(Ordering::SeqCst)
+    }
+
+    fn pass(&self) {
+        self.gate.entered.fetch_add(1, Ordering::SeqCst);
+        let held = self.gate.held.lock().unwrap_or_else(|e| e.into_inner());
+        if !*held {
+            return;
+        }
+        self.gate.inside.fetch_add(1, Ordering::SeqCst);
+        let _ = self
+            .gate
+            .open
+            .wait_timeout_while(held, GATE_LIMIT, |held| *held)
+            .unwrap_or_else(|e| e.into_inner());
+        self.gate.inside.fetch_sub(1, Ordering::SeqCst);
+    }
 }
 
 impl KeyStore for MemoryKeyStore {
     fn read_key(&self) -> KeyRead {
+        self.pass();
         let (key, deny, block) = {
             let inner = self.lock();
             (inner.key, inner.deny, inner.block)
@@ -100,21 +145,25 @@ impl KeyStore for MemoryKeyStore {
     }
 
     fn create_key(&self) -> Result<[u8; 32], KeyError> {
+        self.pass();
         let key = random_bytes::<32>().ok_or(KeyError::NoRandom)?;
         self.lock().key = Some(key);
         Ok(key)
     }
 
     fn read_head(&self) -> Option<Checkpoint> {
+        self.pass();
         self.lock().head.clone()
     }
 
     fn write_head(&self, checkpoint: &Checkpoint) -> Result<(), KeyError> {
+        self.pass();
         self.lock().head = Some(checkpoint.clone());
         Ok(())
     }
 
     fn head_exists(&self) -> bool {
+        self.pass();
         self.lock().head.is_some()
     }
 }

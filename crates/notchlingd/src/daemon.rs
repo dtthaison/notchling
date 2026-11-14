@@ -10,6 +10,7 @@ use crate::log_rotate::{StderrLog, CHECK_EVERY};
 use crate::log_start;
 use crate::signals;
 use notchling_engine::bridge::net::ports as bridge_ports;
+use notchling_engine::logs::KeyStore;
 use notchling_engine::sessions::{config_dirs, Monitor, Probes};
 use notchling_events::kinds::choices::SwitchName;
 use notchling_events::kinds::security::{DaemonStopped, StopCause, SwitchCause, SwitchChanged};
@@ -192,6 +193,7 @@ pub struct DaemonOptions {
     pub first_list_wait: Duration,
     pub before_scan: Option<Arc<dyn Fn() + Send + Sync>>,
     pub bridge_ports: (u16, u16),
+    pub keys: Option<Arc<dyn KeyStore>>,
 }
 
 impl Default for DaemonOptions {
@@ -202,6 +204,7 @@ impl Default for DaemonOptions {
             first_list_wait: FIRST_LIST_WAIT,
             before_scan: None,
             bridge_ports: (bridge_ports::LAN, bridge_ports::TUNNEL),
+            keys: None,
         }
     }
 }
@@ -239,7 +242,8 @@ pub fn run(
         let room = room.clone();
         Arc::new(move |topic, event, data| room.publish(topic, event, &data))
     };
-    let logs = log_start::start(&layout, env!("CARGO_PKG_VERSION"), publish.clone());
+    let keys = options.keys.clone().unwrap_or_else(|| layout.key_store());
+    let logs = log_start::start_with(&layout, env!("CARGO_PKG_VERSION"), publish.clone(), keys);
     let began = Instant::now();
     let wired = Wired::build(
         &layout,
@@ -359,7 +363,7 @@ pub fn run(
         Outcome::Info,
         wall_ms(),
     ));
-    logs.bus.close(Duration::from_secs(2));
+    logs.close(Duration::from_secs(2));
     served
 }
 

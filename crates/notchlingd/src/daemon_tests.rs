@@ -2,6 +2,7 @@
 
 use crate::daemon::{run, DaemonError, DaemonOptions};
 use crate::layout::Layout;
+use notchling_engine::logs::{KeyStore, MemoryKeyStore};
 use notchling_local_api::{ops, Client, ClientKind, ConnectOptions};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
@@ -205,4 +206,36 @@ fn a_second_daemon_is_refused_before_it_reads_the_list() {
         "the second daemon read the list before the lock refused it"
     );
     assert!(first.client().status().is_ok());
+}
+
+struct Release(Arc<MemoryKeyStore>);
+
+impl Drop for Release {
+    fn drop(&mut self) {
+        self.0.release();
+    }
+}
+
+#[test]
+fn the_socket_answers_while_the_keychain_is_blocked() {
+    let keys = Arc::new(MemoryKeyStore::new());
+    keys.set_key(Some([9; 32]));
+    keys.hold();
+    let blocked: Arc<dyn KeyStore> = keys.clone();
+    let options = DaemonOptions {
+        keys: Some(blocked),
+        ..DaemonOptions::default()
+    };
+    let daemon = Running::start("keychain", options, false);
+    let _release = Release(keys.clone());
+    assert!(
+        daemon.answers_within(Duration::from_secs(5)),
+        "no socket while the Keychain was blocked: the daemon reads the audit key before it binds"
+    );
+    let began = Instant::now();
+    let mut client = daemon.client();
+    assert!(client.status().is_ok());
+    let verified = client.call(ops::LOG_VERIFY, json!({})).unwrap();
+    assert!(verified["sealing"].is_string(), "{verified}");
+    assert!(began.elapsed() < Duration::from_secs(2));
 }
