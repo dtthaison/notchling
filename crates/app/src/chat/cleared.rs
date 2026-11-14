@@ -147,7 +147,10 @@ mod tests {
     }
 
     fn status_of(list: &[Subagent], id: &str) -> Status {
-        list.iter().find(|a| a.id == id).expect("listed").status
+        list.iter()
+            .find(|a| a.own_id() == id)
+            .expect("listed")
+            .status
     }
 
     #[test]
@@ -165,7 +168,7 @@ mod tests {
         tick();
         let new = s.write("p/new.jsonl", &cleared("worker"));
         let carried = subagents(&new.to_string_lossy(), "worker", &HashMap::new(), now());
-        let mut ids: Vec<&str> = carried.iter().map(|a| a.id.as_str()).collect();
+        let mut ids: Vec<&str> = carried.iter().map(|a| a.own_id()).collect();
         ids.sort_unstable();
         assert_eq!(ids, ["done", "run"]);
         assert_eq!(status_of(&carried, "done"), Status::Completed);
