@@ -1,7 +1,7 @@
 use super::engine::Catalog;
 use super::registry::{Machine, MachineOs};
 use super::step::{SetupStep, StepId};
-use super::{steps_machine, steps_repo, steps_sd, steps_secret, token_scope};
+use super::{steps_machine, steps_repo, steps_sd, steps_secret, steps_versions, token_scope};
 use std::sync::Arc;
 
 pub fn steps(m: &Machine, all: &[Machine]) -> Vec<SetupStep> {
@@ -11,6 +11,7 @@ pub fn steps(m: &Machine, all: &[Machine]) -> Vec<SetupStep> {
         out.push(step);
         if after {
             out.push(steps_secret::claude_login(m));
+            out.push(steps_versions::tool_versions(m));
         }
     }
     if let Some(job) = m.sd_worker() {
