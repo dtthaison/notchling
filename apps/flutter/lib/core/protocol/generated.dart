@@ -3240,7 +3240,7 @@ class ErrorResponseError {
 
   final ErrorCode code;
 
-  /// Text for the person; the Mac writes Vietnamese.
+  /// Text for the person, in English. Never parse it.
   final String message;
 }
 
