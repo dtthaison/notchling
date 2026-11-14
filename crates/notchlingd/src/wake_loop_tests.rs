@@ -197,7 +197,10 @@ fn a_cut_off_found_after_the_window_was_not_this_sleeps() {
 fn working_rows_terminals_and_rows_without_a_cut_off_get_nothing() {
     let r = rig();
     let mut terminal = job("t", AgentGroup::Completed);
-    terminal.target = AgentTarget::Process(7);
+    terminal.target = AgentTarget::Resume {
+        session_id: "s".into(),
+        cwd: "/tmp".into(),
+    };
     *r.agents.lock().unwrap() = vec![
         job("w", AgentGroup::Working),
         terminal,
