@@ -5,7 +5,7 @@ use notchling_kit::{Appearance, Ink, TypeRole};
 use super::agents::{Section, Tool};
 use super::capabilities_view::capabilities_section;
 use super::client_model::ClientPart;
-use super::client_view::client_section;
+use super::client_view::{client_section, ClientHandlers};
 use super::hook_rows::HooksShown;
 use super::settings_hooks_view::hooks_section;
 
@@ -28,13 +28,14 @@ pub fn agents_page(
     tool: Tool,
     hooks: &HooksShown,
     client: Option<&ClientPart>,
+    handlers: &ClientHandlers,
     a: Appearance,
     cx: &App,
 ) -> Div {
     let mut page = div().flex().flex_col().gap(px(14.0)).child(header(tool, a));
     for section in tool.sections() {
         page = page.child(match section {
-            Section::Client => client_section(client, a, cx),
+            Section::Client => client_section(client, handlers, a, cx),
             Section::Hooks => hooks_section(hooks, a, cx),
         });
     }

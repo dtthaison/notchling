@@ -1,0 +1,8 @@
+{"type":"user","version":"2.1.323","message":{"role":"user","content":"first"}}
+{"type":"assistant","version":"2.1.323","message":{"id":"m1","role":"assistant","content":[{"type":"hologram","text":"old"},{"type":"text","text":"ok"}]}}
+{"type":"system","version":"2.1.323","subtype":"turn_duration","durationMs":900}
+{"type":"user","version":"2.1.324","message":{"role":"user","content":"second"}}
+{"type":"assistant","version":"2.1.324","message":{"id":"m2","role":"assistant","content":[{"type":"text","text":"fine"}]}}
+{"type":"queue-operation","version":"2.1.324","operation":"enqueue","content":"later"}
+{"type":"queue-operation","version":"2.1.324","operation":"dequeue"}
+{"type":"system","version":"2.1.324","subtype":"turn_duration","durationMs":1500}

@@ -1,7 +1,7 @@
 use serde_json::{json, Value};
 
 use super::agents::Page;
-use super::client_model::{client_part, ClientPart};
+use super::client_model::{client_part, client_part_with, ClientPart, Extras};
 use super::hook_rows::HooksShown;
 use crate::acting::Acting;
 use crate::notch::source::{fixture_clock, DataRoot, Source};
@@ -14,7 +14,7 @@ use super::new_session::{accounts, folders, NewSession};
 use crate::accounts::menu::targets;
 use crate::accounts::renders::{snapshot, Shown as AccountsShown};
 
-pub const VIEWS: [ViewSpec; 10] = [
+pub const VIEWS: [ViewSpec; 12] = [
     ViewSpec {
         name: "banner",
         size: (620.0, 260.0),
@@ -65,6 +65,16 @@ pub const VIEWS: [ViewSpec; 10] = [
         size: (620.0, 900.0),
         about: "the Agents page's Client part: the Mac's Claude Code and two workers, one the same and one behind (fixture reply)",
     },
+    ViewSpec {
+        name: "settings-agents-client-failed",
+        size: (620.0, 900.0),
+        about: "the Client part after a new version failed its check: the red line, the soak and Go Back",
+    },
+    ViewSpec {
+        name: "settings-agents-client-update",
+        size: (620.0, 900.0),
+        about: "the Client part with a newer version out: Latest, Update (Install off, so disabled with its note) and the Partly Checked line",
+    },
 ];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -79,6 +89,8 @@ pub enum Shown {
     SettingsAgentsDetached,
     SettingsCapabilities,
     SettingsAgentsClient,
+    SettingsAgentsClientFailed,
+    SettingsAgentsClientUpdate,
 }
 
 pub fn shown(name: &str) -> Option<Shown> {
@@ -93,6 +105,8 @@ pub fn shown(name: &str) -> Option<Shown> {
         "settings-agents-detached" => Shown::SettingsAgentsDetached,
         "settings-capabilities" => Shown::SettingsCapabilities,
         "settings-agents-client" => Shown::SettingsAgentsClient,
+        "settings-agents-client-failed" => Shown::SettingsAgentsClientFailed,
+        "settings-agents-client-update" => Shown::SettingsAgentsClientUpdate,
         _ => return None,
     })
 }
@@ -108,7 +122,9 @@ pub fn acting(shown: Shown) -> Acting {
         | Shown::SettingsAgentsEmpty
         | Shown::SettingsAgentsDetached
         | Shown::SettingsCapabilities
-        | Shown::SettingsAgentsClient => Acting::Off,
+        | Shown::SettingsAgentsClient
+        | Shown::SettingsAgentsClientFailed
+        | Shown::SettingsAgentsClientUpdate => Acting::Off,
     }
 }
 
@@ -119,7 +135,9 @@ pub fn page(shown: Shown) -> Page {
         | Shown::SettingsAgentsEmpty
         | Shown::SettingsAgentsDetached
         | Shown::SettingsCapabilities
-        | Shown::SettingsAgentsClient => Page::Agents,
+        | Shown::SettingsAgentsClient
+        | Shown::SettingsAgentsClientFailed
+        | Shown::SettingsAgentsClientUpdate => Page::Agents,
         _ => Page::General,
     }
 }
@@ -161,11 +179,32 @@ pub fn client(shown: Shown) -> Option<ClientPart> {
         Shown::SettingsAgents
         | Shown::SettingsAgentsPartial
         | Shown::SettingsAgentsEmpty
-        | Shown::SettingsAgentsClient => {
-            let get = json!({"tools": [
-                {"tool": "claude", "installed": {"version": "2.1.324", "sha256": null},
-                 "method": "native", "path": "/Users/me/.local/bin/claude"},
-            ]});
+        | Shown::SettingsAgentsClient
+        | Shown::SettingsAgentsClientFailed
+        | Shown::SettingsAgentsClientUpdate => {
+            let mut row = json!({"tool": "claude", "installed": {"version": "2.1.324", "sha256": null},
+                 "method": "native", "path": "/Users/me/.local/bin/claude"});
+            let mut extras = Extras::default();
+            let reference = json!({"version": "2.1.324", "sha256": "ab", "result": "partly",
+                "partly": true, "at": 1_700_000_000_000_i64,
+                "unchecked": ["screens", "dialogs", "turns"]});
+            if shown == Shown::SettingsAgentsClientUpdate {
+                row["latest"] = json!("2.1.325");
+                row["reference"] = reference.clone();
+                row["usable"] = json!(true);
+                row["soak"] = json!({"since": "2.1.324", "turns": 41, "unknown": 0,
+                    "line": "41 turns on real sessions, none unknown"});
+            }
+            if shown == Shown::SettingsAgentsClientFailed {
+                row["installed"] = json!({"version": "2.1.325", "sha256": null});
+                row["reference"] = reference;
+                row["failed"] = json!([{"version": "2.1.325", "part": "transcripts",
+                    "at": 1_700_000_300_000_i64, "why": "2 lines it can't read"}]);
+                row["goBack"] = json!("2.1.324");
+                row["soak"] = json!({"since": "2.1.325", "turns": 12, "unknown": 2,
+                    "line": "12 turns on real sessions, 2 unknown lines"});
+            }
+            let get = json!({"tools": [row]});
             let workers = json!({"workers": {
                 "m1": {"tools": {"claude": {"state": "installed", "version": "2.1.324",
                     "method": "native", "path": "/home/w/.local/bin/claude"}}, "atMs": 1},
@@ -173,7 +212,16 @@ pub fn client(shown: Shown) -> Option<ClientPart> {
                     "method": "native", "path": "/home/w/.local/bin/claude"}}, "atMs": 1},
                 "ub-3": {"tools": {"claude": {"state": "notInstalled"}}, "atMs": 1},
             }});
-            Some(client_part(Tool::Claude, &get, &workers, "/Users/me"))
+            extras.install_on = false;
+            Some(
+                if shown == Shown::SettingsAgentsClientUpdate
+                    || shown == Shown::SettingsAgentsClientFailed
+                {
+                    client_part_with(Tool::Claude, &get, &workers, "/Users/me", extras)
+                } else {
+                    client_part(Tool::Claude, &get, &workers, "/Users/me")
+                },
+            )
         }
         _ => None,
     }

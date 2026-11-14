@@ -41,7 +41,7 @@ const OWN_QUIET: [&str; 6] = [
     ops::ACTIVITY_LIST,
 ];
 
-const NEVER_QUIET: [&str; 74] = [
+const NEVER_QUIET: [&str; 76] = [
     ops::HELLO,
     ops::DAEMON_STATUS,
     ops::SESSIONS_LIST,
@@ -116,6 +116,8 @@ const NEVER_QUIET: [&str; 74] = [
     ops::SETTINGS_SET,
     ops::SETTINGS_ASKED,
     ops::VERSIONS_GET,
+    ops::VERSIONS_CHECK,
+    ops::VERSIONS_UPDATE_LOCAL,
 ];
 
 const NEVER_QUIET_LIMITS: [&str; 2] = ["limits.set_mode", "cost.summary"];

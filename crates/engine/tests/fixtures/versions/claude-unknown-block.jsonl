@@ -1,0 +1,3 @@
+{"type":"user","version":"2.1.324","message":{"role":"user","content":"hello"}}
+{"type":"assistant","version":"2.1.324","message":{"id":"m1","role":"assistant","content":[{"type":"text","text":"PLANTED-MARKER-TEXT"},{"type":"hologram","text":"PLANTED-MARKER-BLOCK"}]}}
+{"type":"system","version":"2.1.324","subtype":"turn_duration","durationMs":1200}

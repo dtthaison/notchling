@@ -178,14 +178,21 @@ impl InboxModel {
 pub enum Target {
     Approval(String),
     Request(String),
+    Settings { page: String, tool: Option<String> },
 }
 
 pub fn target(open: &Value) -> Option<Target> {
     if let Some(ticket) = open.get("vault_approval").and_then(Value::as_str) {
         return Some(Target::Approval(ticket.to_owned()));
     }
-    let ticket = open.get("vault_request").and_then(Value::as_str)?;
-    Some(Target::Request(ticket.to_owned()))
+    if let Some(ticket) = open.get("vault_request").and_then(Value::as_str) {
+        return Some(Target::Request(ticket.to_owned()));
+    }
+    let page = open.get("settings").and_then(Value::as_str)?;
+    Some(Target::Settings {
+        page: page.to_owned(),
+        tool: open.get("tool").and_then(Value::as_str).map(str::to_owned),
+    })
 }
 
 pub fn is_local(action: ActionId) -> bool {

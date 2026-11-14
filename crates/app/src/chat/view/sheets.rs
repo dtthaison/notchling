@@ -192,6 +192,17 @@ impl ChatView {
         self.open_settings(cx);
     }
 
+    pub fn show_settings_agents(&mut self, cx: &mut Context<Self>) {
+        self.open_settings(cx);
+        let open = self
+            .sheet
+            .as_ref()
+            .and_then(|s| s.view.clone().downcast::<SettingsView>().ok());
+        if let Some(sheet) = open {
+            sheet.update(cx, |view, cx| view.show_agents(cx));
+        }
+    }
+
     pub fn applied_setting(&mut self, key: &str, value: &Value, cx: &mut Context<Self>) {
         crate::mac::settings_live::app_wide(key, value, cx);
         if crate::chat::history::on_change(key, value) {

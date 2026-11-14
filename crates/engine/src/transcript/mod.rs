@@ -11,6 +11,7 @@ pub mod model;
 pub mod scan;
 pub mod shells;
 pub mod snapshot;
+pub mod strict;
 pub mod subagents;
 pub mod tail;
 pub mod tally;
