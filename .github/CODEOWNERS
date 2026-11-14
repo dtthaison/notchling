@@ -30,6 +30,8 @@
 /crates/kit/
 /crates/engine/src/transcript/
 /crates/engine/src/search/
+/locales/
+/crates/locale/src/generated.rs
 
 # New files only
 /legacy/macos/Tests/
@@ -47,6 +49,8 @@
 /docs/superpowers/ @dtthaison
 /docs/agents/ @dtthaison
 /apps/flutter/lib/features/pairing/ @dtthaison
+/locales/languages.json @dtthaison
+/locales/*/consent.ftl @dtthaison
 /crates/**/Cargo.toml @dtthaison
 /crates/**/build.rs @dtthaison
 **/AGENTS.md @dtthaison
