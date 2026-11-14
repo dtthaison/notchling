@@ -276,3 +276,129 @@ def check_key(res: Resource, rel: str, stem: str, is_area: bool, msg: Message) -
     elif not key.startswith(stem + "-"):
         out.append(Problem(RULE_SUBSET, res.path, msg.line, f"a key in {rel} starts with {stem}-; {key} does not"))
     return out
+
+
+def english(tree: Tree) -> Dict[str, Tuple[str, Message]]:
+    en = tree.langs.get(tree.config.source)
+    out: Dict[str, Tuple[str, Message]] = {}
+    if en is None:
+        return out
+    for rel, res in sorted(en.files.items()):
+        for msg in res.messages:
+            out.setdefault(msg.key, (rel, msg))
+    return out
+
+
+def var_types_of(msg: Message) -> Dict[str, str]:
+    types: Dict[str, str] = {}
+    if isinstance(msg.value, Select):
+        types[msg.value.var] = "num"
+    for part in iter_parts(msg.value):
+        if isinstance(part, ftl.Num):
+            types[part.name] = "num"
+        elif isinstance(part, ftl.Var):
+            types.setdefault(part.name, "str")
+    return types
+
+
+def var_types(tree: Tree) -> Dict[str, Dict[str, str]]:
+    return {key: var_types_of(msg) for key, (_, msg) in english(tree).items()}
+
+
+def var_order(msg: Message) -> List[str]:
+    order: List[str] = []
+    if isinstance(msg.value, Select):
+        order.append(msg.value.var)
+    for part in iter_parts(msg.value):
+        if isinstance(part, (ftl.Var, ftl.Num)) and part.name not in order:
+            order.append(part.name)
+    return order
+
+
+LINK_RES = (
+    (re.compile(r"https?://|ftp://", re.I), "a link"),
+    (re.compile(r"\bwww\.", re.I), "a link"),
+    (re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+\.[A-Za-z]{2,}"), "an address"),
+    (re.compile(r"</?[A-Za-z][^>]*>"), "markup"),
+)
+
+
+def measure(value, terms: Dict[str, str]) -> int:
+    def one(pattern) -> int:
+        total = 0
+        for part in pattern:
+            if isinstance(part, Lit):
+                total += len(part.text)
+            elif isinstance(part, Term):
+                total += len(terms.get(part.name, ""))
+            else:
+                total += 1
+        return total
+
+    if isinstance(value, Select):
+        return max(one(v.pattern) for v in value.variants)
+    return one(value)
+
+
+def check_match(tree: Tree) -> List[Problem]:
+    out: List[Problem] = []
+    en_msgs = english(tree)
+    source = tree.config.source
+    en = tree.langs.get(source)
+    terms = en.files["shared.ftl"].terms if en and "shared.ftl" in en.files else {}
+    for tag, lang in sorted(tree.langs.items()):
+        if tag == source:
+            continue
+        for rel, res in sorted(lang.files.items()):
+            for msg in res.messages:
+                out.extend(match_one(res.path, rel, msg, en_msgs, terms))
+    return out
+
+
+def match_one(path: str, rel: str, msg: Message, en_msgs, terms: Dict[str, str]) -> List[Problem]:
+    def bad(message: str) -> List[Problem]:
+        return [Problem(RULE_MATCH, path, msg.line, message)]
+
+    if msg.key not in en_msgs:
+        return bad(
+            f"key {msg.key} is not in English; if English renamed it, run python3 tools/locale/gen.py --prune in the same pull request"
+        )
+    en_rel, en_msg = en_msgs[msg.key]
+    if en_rel != rel:
+        return bad(f"key {msg.key} belongs in {en_rel}, where English has it")
+    types = var_types_of(en_msg)
+    problems: List[Problem] = []
+    if isinstance(msg.value, Select):
+        sel = msg.value.var
+        if sel not in types:
+            problems += bad(f"the select is over ${sel}, which English does not have")
+        elif types[sel] != "num":
+            problems += bad(f"the select is over ${sel}, a string variable in English; only numbers can select")
+    for part in iter_parts(msg.value):
+        if isinstance(part, (ftl.Var, ftl.Num)):
+            if part.name not in types:
+                problems += bad(f"${part.name} is not a variable of the English message")
+            elif isinstance(part, ftl.Num) and types[part.name] != "num":
+                problems += bad(f"${part.name} is a string in English; NUMBER() takes numbers only")
+    if problems:
+        return problems
+    required = set(types)
+    if isinstance(msg.value, Select):
+        other = [v for v in msg.value.variants if v.default][0]
+        present = {p.name for p in other.pattern if isinstance(p, (ftl.Var, ftl.Num))}
+    else:
+        present = {p.name for p in msg.value if isinstance(p, (ftl.Var, ftl.Num))}
+    for name in sorted(required - present):
+        where = "the *[other] variant" if isinstance(msg.value, Select) else "the message"
+        problems += bad(f"${name} is in the English message and must be in {where}")
+    for part in iter_parts(msg.value):
+        if isinstance(part, Lit):
+            for regex, what in LINK_RES:
+                if regex.search(part.text):
+                    problems += bad(f"a translation carries {what}, which English does not have here")
+                    break
+    cap = 3 * measure(en_msg.value, terms) + 20
+    size = measure(msg.value, terms)
+    if size > cap:
+        problems += bad(f"the text is {size} characters; the most allowed is {cap} (three times English plus 20)")
+    return problems
