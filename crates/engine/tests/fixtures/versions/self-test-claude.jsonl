@@ -1,0 +1,7 @@
+{"type":"user","version":"self-test","message":{"role":"user","content":"Reply with OK"}}
+{"type":"queue-operation","version":"self-test","operation":"enqueue","content":"next"}
+{"type":"queue-operation","version":"self-test","operation":"dequeue"}
+{"type":"assistant","version":"self-test","message":{"id":"m1","role":"assistant","content":[{"type":"thinking","thinking":"..."},{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"ls"}}]}}
+{"type":"user","version":"self-test","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"a"}]}}
+{"type":"assistant","version":"self-test","message":{"id":"m2","role":"assistant","content":[{"type":"text","text":"OK"}]}}
+{"type":"system","version":"self-test","subtype":"turn_duration","durationMs":1000}
