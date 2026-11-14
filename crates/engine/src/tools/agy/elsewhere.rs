@@ -8,6 +8,7 @@ use serde_json::Value;
 use crate::accounts::procs::Procs;
 use crate::sessions::iso::parse_iso_ms;
 use crate::transcript::chat::cap_output;
+use crate::transcript::glance::{self, has, TailParser};
 use crate::transcript::model::{ChatItem, Conversation, ItemKind, Timestamp, ToolCall, ToolKind};
 use crate::transcript::text::{first_line, last_path_component, prefix_chars};
 use crate::transcript::util::json_sorted;
@@ -16,6 +17,8 @@ const LSOF: &str = "/usr/sbin/lsof";
 const PS: &str = "/bin/ps";
 const TIMEOUT: Duration = Duration::from_secs(3);
 const LOG_TAIL: u64 = 4 << 20;
+
+pub use crate::transcript::glance::Peeked;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Holder {
@@ -130,6 +133,37 @@ pub fn from_log_file(path: &Path, note: Option<&str>) -> (Conversation, bool) {
         });
     }
     (conversation, working)
+}
+
+fn planner_tokens(line: &[u8]) -> Option<u64> {
+    if !has(line, b"PLANNER_RESPONSE") {
+        return None;
+    }
+    let step: Value = serde_json::from_slice(line).ok()?;
+    if step.get("type").and_then(Value::as_str) != Some("PLANNER_RESPONSE") {
+        return None;
+    }
+    let n = |key: &str| step.get(key).and_then(Value::as_u64).unwrap_or(0);
+    let total = n("input_tokens")
+        .saturating_add(n("cache_read_tokens"))
+        .saturating_add(n("output_tokens"));
+    (total > 0).then_some(total)
+}
+
+fn recent_steps(lines: &[&[u8]]) -> Conversation {
+    let lines: Vec<String> = lines
+        .iter()
+        .map(|l| String::from_utf8_lossy(l).into_owned())
+        .collect();
+    from_lines(&lines).0
+}
+
+pub fn peek(path: &Path, with_recent: bool) -> Option<Peeked> {
+    glance::peek(
+        &path.to_string_lossy(),
+        planner_tokens,
+        with_recent.then_some(recent_steps as TailParser),
+    )
 }
 
 fn read_tail(path: &Path) -> Vec<String> {
@@ -407,3 +441,7 @@ fn user_request(content: &str) -> String {
 #[cfg(test)]
 #[path = "elsewhere_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "elsewhere_peek_tests.rs"]
+mod peek_tests;

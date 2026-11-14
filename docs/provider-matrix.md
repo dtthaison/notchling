@@ -4,9 +4,9 @@ Generated from crates/engine/src/contract by the provider_matrix test; NOTCHLING
 
 | Tool | Native | Fallback | Not applicable | Gap | Unwired |
 | --- | --- | --- | --- | --- | --- |
-| Claude Code | 32 | 2 | 1 | 4 | 34 |
-| Codex | 18 | 1 | 6 | 14 | 19 |
-| Antigravity | 19 | 0 | 4 | 16 | 19 |
+| Claude Code | 32 | 2 | 1 | 4 | 30 |
+| Codex | 22 | 1 | 6 | 10 | 19 |
+| Antigravity | 23 | 0 | 4 | 12 | 19 |
 
 ## Sessions
 
@@ -32,10 +32,10 @@ Generated from crates/engine/src/contract by the provider_matrix test; NOTCHLING
 
 | Capability | Claude Code | Codex | Antigravity |
 | --- | --- | --- | --- |
-| `subagent.list` | N: subagents/agent-*.jsonl and their .meta.json · unwired | GAP: phase 1: child rollouts by parent_thread_id | GAP: phase 1: summaries rows by parent_conversation_id |
-| `subagent.status` | N: task-notification, finished, handed back, 10 min quiet · unwired | GAP: phase 1: the child's task_complete or turn_aborted | GAP: phase 1: summaries status and killed, send_message |
-| `subagent.glance` | N: glance::peek over the subagent's transcript tail · unwired | GAP: phase 1: the child's token_count and newest call (meanwhile delegate-jobs) | GAP: phase 1: the child log's tokens and newest step |
-| `subagent.open` | N: The subagent's transcript · unwired | GAP: phase 1: the rollout from the child's own turn | GAP: phase 1: the child's log |
+| `subagent.list` | N: subagents/agent-*.jsonl and their .meta.json | N: child rollouts whose first session_meta names the parent | N: Summaries rows whose parent_conversation_id is the session |
+| `subagent.status` | N: task-notification, finished, handed back, 10 min quiet | N: the child's task_complete, error or turn_aborted | N: Summaries status and killed, send_message, the parent's [Message] |
+| `subagent.glance` | N: glance::peek over the subagent's transcript tail | N: the child's token_count and newest call | N: The child log's tokens and newest step |
+| `subagent.open` | N: The subagent's transcript | N: the rollout from the child's own turn | N: The child's log |
 | `subagent.stop` | NA: No outside stop for one subagent; Stop interrupts the whole turn | NA: Only the model's interrupt_agent stops a Codex subagent | NA: The Agent Manager's kill is inside agy; Notchling can't reach it |
 
 ## Signals

@@ -1,3 +1,4 @@
+pub mod children;
 pub mod config;
 pub mod elsewhere;
 mod live;

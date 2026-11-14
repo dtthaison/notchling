@@ -1,5 +1,6 @@
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use super::conformance::Checked;
@@ -10,11 +11,70 @@ use crate::transcript::subagents::{Origin, Status, Subagent};
 use crate::transcript::util::modified_secs;
 
 const CODEX_PARENT: &str = "01a1d5da-0000-7000-8000-00000000000a";
+const ANTIGRAVITY_PARENT: &str = "b0000000-0000-4000-8000-00000000000a";
+
+struct Scratch(PathBuf);
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
 
 struct World {
     parent: SessionRef,
     roots: Roots,
     now: Timestamp,
+    _scratch: Option<Scratch>,
+}
+
+fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(to)?;
+    for entry in std::fs::read_dir(from)? {
+        let entry = entry?;
+        let target = to.join(entry.file_name());
+        if entry.path().is_dir() {
+            copy_tree(&entry.path(), &target)?;
+        } else {
+            std::fs::copy(entry.path(), target)?;
+        }
+    }
+    Ok(())
+}
+
+fn antigravity_world(root: &Path) -> Option<World> {
+    static NEXT: AtomicUsize = AtomicUsize::new(0);
+    let dir = std::env::temp_dir().join(format!(
+        "nl-conformance-agy-{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    let scratch = Scratch(dir.clone());
+    let home = dir.join("agy");
+    copy_tree(&root.join("brain"), &home.join("brain")).ok()?;
+    let sql = std::fs::read_to_string(root.join("summaries.sql")).ok()?;
+    let db = rusqlite::Connection::open(home.join(crate::tools::agy::summaries::DB_NAME)).ok()?;
+    db.execute_batch(&sql).ok()?;
+    drop(db);
+    let id = format!("antigravity:{ANTIGRAVITY_PARENT}");
+    Some(World {
+        parent: SessionRef {
+            id: id.clone(),
+            tool: Tool::Antigravity,
+            transcript: None,
+            name: String::new(),
+            finished: Arc::default(),
+            session: id,
+        },
+        roots: Roots {
+            antigravity: home,
+            antigravity_copy: dir.join("copy"),
+            ..Roots::default()
+        },
+        now: 0.0,
+        _scratch: Some(scratch),
+    })
 }
 
 fn newest(dir: &Path, depth: usize) -> Timestamp {
@@ -51,6 +111,7 @@ fn world(tool: Tool, root: &Path) -> Option<World> {
                 },
                 roots: Roots::default(),
                 now: newest(&root.join("projects"), 4) + 5.0,
+                _scratch: None,
             })
         }
         Tool::Codex => {
@@ -71,9 +132,10 @@ fn world(tool: Tool, root: &Path) -> Option<World> {
                     ..Roots::default()
                 },
                 now: newest(&day, 0) + 5.0,
+                _scratch: None,
             })
         }
-        Tool::Antigravity => None,
+        Tool::Antigravity => antigravity_world(root),
     }
 }
 

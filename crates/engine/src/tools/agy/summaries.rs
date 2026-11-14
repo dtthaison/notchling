@@ -51,18 +51,41 @@ pub fn rows(root: &Path, copy_dir: &Path, now_secs: f64) -> Vec<Row> {
 }
 
 pub fn rows_cached(root: &Path, copy_dir: &Path, now_secs: f64, reuse: Duration) -> Vec<Row> {
+    with_copy(root, copy_dir, reuse, |copy| {
+        read_copy(copy, now_secs).unwrap_or_default()
+    })
+    .unwrap_or_default()
+}
+
+pub fn children_cached(
+    root: &Path,
+    copy_dir: &Path,
+    reuse: Duration,
+    parent: &str,
+) -> Vec<ChildRow> {
+    with_copy(root, copy_dir, reuse, |copy| children(copy, parent)).unwrap_or_default()
+}
+
+pub fn copy_file(copy_dir: &Path) -> PathBuf {
+    copy_dir.join(COPY_NAME)
+}
+
+fn with_copy<T>(
+    root: &Path,
+    copy_dir: &Path,
+    reuse: Duration,
+    read: impl FnOnce(&Path) -> T,
+) -> Option<T> {
     let source = root.join(DB_NAME);
     if !source.is_file() {
-        return Vec::new();
+        return None;
     }
     let mut made = COPIES
         .get_or_init(Mutex::default)
         .lock()
         .unwrap_or_else(|e| e.into_inner());
-    if notchling_platform::files::ensure_private_dir(copy_dir).is_err() {
-        return Vec::new();
-    }
-    let copy = copy_dir.join(COPY_NAME);
+    notchling_platform::files::ensure_private_dir(copy_dir).ok()?;
+    let copy = copy_file(copy_dir);
     let young = made
         .get(&copy)
         .is_some_and(|at| at.elapsed() < reuse && copy.is_file());
@@ -77,7 +100,56 @@ pub fn rows_cached(root: &Path, copy_dir: &Path, now_secs: f64, reuse: Duration)
         }
         made.insert(copy.clone(), Instant::now());
     }
-    read_copy(&copy, now_secs).unwrap_or_default()
+    Some(read(&copy))
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ChildRow {
+    pub id: String,
+    pub agent_name: String,
+    pub status: String,
+    pub killed: bool,
+    pub depth: u8,
+    pub modified: f64,
+}
+
+pub fn children(copy: &Path, parent: &str) -> Vec<ChildRow> {
+    read_children(copy, parent).unwrap_or_default()
+}
+
+fn read_children(copy: &Path, parent: &str) -> Result<Vec<ChildRow>, rusqlite::Error> {
+    if !copy.is_file() {
+        return Ok(Vec::new());
+    }
+    let db = Connection::open_with_flags(copy, OpenFlags::SQLITE_OPEN_READ_WRITE)?;
+    let mut statement = db.prepare(
+        "SELECT conversation_id, agent_name, status, killed, nesting_depth, last_modified_time \
+         FROM conversation_summaries WHERE parent_conversation_id = ?1 \
+         ORDER BY last_modified_time",
+    )?;
+    let mapped = statement.query_map([parent], |row| {
+        let text = |i: usize| -> String {
+            row.get::<_, Option<String>>(i)
+                .ok()
+                .flatten()
+                .unwrap_or_default()
+        };
+        let killed = match row.get::<_, rusqlite::types::Value>(3)? {
+            rusqlite::types::Value::Integer(n) => n != 0,
+            rusqlite::types::Value::Text(t) => matches!(t.as_str(), "1" | "true" | "TRUE"),
+            _ => false,
+        };
+        let depth = row.get::<_, Option<i64>>(4).ok().flatten().unwrap_or(1);
+        Ok(ChildRow {
+            id: text(0),
+            agent_name: text(1),
+            status: text(2),
+            killed,
+            depth: depth.clamp(1, 255) as u8,
+            modified: date(&text(5)).unwrap_or(0.0),
+        })
+    })?;
+    Ok(mapped.flatten().filter(|c| !c.id.is_empty()).collect())
 }
 
 fn with_suffix(path: &Path, suffix: &str) -> PathBuf {
@@ -184,3 +256,7 @@ pub fn title(text: &str) -> String {
 #[cfg(test)]
 #[path = "summaries_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "summaries_children_tests.rs"]
+mod children_tests;
