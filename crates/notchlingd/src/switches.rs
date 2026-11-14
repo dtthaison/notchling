@@ -1,6 +1,11 @@
 use crate::acting_ops::{bad, forbidden, Room};
+use crate::late_emit::Events;
 use crate::op_group::OpGroup;
-use notchling_local_api::{ops, topics, ApiError, AuditEntry, AuditLog, Caller, OpSpec};
+use notchling_events::kinds::choices::SwitchName;
+use notchling_events::kinds::security::{SwitchCause, SwitchChanged};
+use notchling_events::spec::Outcome;
+use notchling_events::{scope, Event};
+use notchling_local_api::{ops, topics, ApiError, Caller, OpSpec};
 use serde_json::{json, Map, Value};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, sync_channel, Sender, SyncSender};
@@ -159,7 +164,7 @@ impl Switches {
 pub struct SwitchOps {
     switches: Arc<Switches>,
     room: Arc<dyn Room>,
-    audit: Option<AuditLog>,
+    events: Option<Events>,
 }
 
 impl SwitchOps {
@@ -167,16 +172,16 @@ impl SwitchOps {
         SwitchOps {
             switches,
             room,
-            audit: None,
+            events: None,
         }
     }
 
-    pub fn with_audit(mut self, audit: AuditLog) -> SwitchOps {
-        self.audit = Some(audit);
+    pub fn with_events(mut self, events: Events) -> SwitchOps {
+        self.events = Some(events);
         self
     }
 
-    fn set(&self, caller: &Caller, args: &Value) -> Result<Value, ApiError> {
+    fn set(&self, _caller: &Caller, args: &Value) -> Result<Value, ApiError> {
         let usage = "settings.set_switch takes {\"switch\": \"accounts\"|\"vault\"|\"install\", \"on\": true|false}";
         let name = args
             .get("switch")
@@ -188,11 +193,18 @@ impl SwitchOps {
             .ok_or_else(|| bad(usage))?;
         let flag = self.switches.get(name).ok_or_else(|| bad(usage))?;
         flag.set(on);
-        if let Some(audit) = &self.audit {
-            let op = format!("{} {}", ops::SETTINGS_SET_SWITCH, flag.name());
-            let result = if on { "on" } else { "off" };
-            let entry = AuditEntry::now(&op, Some(caller.tier), caller.peer.as_deref(), result);
-            let _ = audit.append(&entry);
+        if let Some(events) = &self.events {
+            let cause = match args.get("restored").and_then(Value::as_bool) {
+                Some(true) => SwitchCause::RestoredAtLaunch,
+                _ => SwitchCause::User,
+            };
+            let switch = SwitchName::from_name(flag.name()).unwrap_or(SwitchName::Other);
+            events.push(Event::new(
+                &SwitchChanged { switch, on, cause },
+                Outcome::Ok,
+                crate::acting_ops::now_ms(),
+            ));
+            scope::mark_recorded();
         }
         let data = json!({"switch": flag.name(), "on": on});
         self.room
@@ -299,11 +311,9 @@ mod tests {
     fn the_op_sets_one_switch_and_says_so() {
         let room = Arc::new(FakeRoom::default());
         let switches = Arc::new(Switches::off());
-        let log =
-            std::env::temp_dir().join(format!("nl-switch-audit-{}.jsonl", std::process::id()));
-        let _ = std::fs::remove_file(&log);
-        let ops =
-            SwitchOps::new(switches.clone(), room.clone()).with_audit(AuditLog::new(log.clone()));
+        let sink = Arc::new(notchling_events::MemorySink::new());
+        let ops = SwitchOps::new(switches.clone(), room.clone())
+            .with_events(Events::fixed(sink.clone(), notchling_events::Salt([1; 32])));
         assert_eq!(ops.spec(ops::SETTINGS_SET_SWITCH), Some(OpSpec::APP));
         assert_eq!(ops.spec(ops::SETTINGS_SWITCHES), Some(OpSpec::AGENT));
         let calls = Arc::new(AtomicUsize::new(0));
@@ -340,13 +350,30 @@ mod tests {
             assert_eq!(e.code, ErrorCode::BadRequest, "{bad_args}");
         }
         assert!(!switches.vault.is_on());
-        let written = std::fs::read_to_string(&log).unwrap();
-        assert_eq!(written.lines().count(), 1, "{written}");
-        assert!(
-            written.contains("\"op\":\"settings.set_switch accounts\""),
-            "{written}"
+        let changed = crate::event_assert::of(&sink, "switch.changed");
+        assert_eq!(changed.len(), 1);
+        let text = |name: &str| crate::event_assert::text(&changed[0], name);
+        assert_eq!(text("switch").as_deref(), Some("accounts"));
+        assert_eq!(text("on").as_deref(), Some("true"));
+        assert_eq!(text("cause").as_deref(), Some("user"));
+    }
+
+    #[test]
+    fn a_restored_switch_says_restored_at_launch() {
+        let sink = Arc::new(notchling_events::MemorySink::new());
+        let switches = Arc::new(Switches::off());
+        let ops = SwitchOps::new(switches, Arc::new(FakeRoom::default()))
+            .with_events(Events::fixed(sink.clone(), notchling_events::Salt([1; 32])));
+        ops.call(
+            &app(),
+            ops::SETTINGS_SET_SWITCH,
+            &json!({"switch": "vault", "on": true, "restored": true}),
+        )
+        .unwrap();
+        let changed = crate::event_assert::of(&sink, "switch.changed");
+        assert_eq!(
+            crate::event_assert::text(&changed[0], "cause").as_deref(),
+            Some("restored_at_launch")
         );
-        assert!(written.contains("\"result\":\"on\""), "{written}");
-        let _ = std::fs::remove_file(&log);
     }
 }

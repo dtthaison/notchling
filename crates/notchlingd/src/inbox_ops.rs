@@ -17,6 +17,10 @@ const MAY_ALLOW: [&str; 2] = ["mac", "phone"];
 
 pub trait Responder: Send + Sync {
     fn answered(&self, item: &Item, action: ActionId) -> bool;
+
+    fn answered_by(&self, item: &Item, action: ActionId, _by: &str) -> bool {
+        self.answered(item, action)
+    }
 }
 
 type Clock = Arc<dyn Fn() -> i64 + Send + Sync>;
@@ -305,7 +309,7 @@ impl InboxOps {
             ));
         }
         if let Some(responder) = inner.responders.get(id).cloned() {
-            if !responder.answered(&current, action) {
+            if !responder.answered_by(&current, action, by) {
                 return Ok(refused(&current));
             }
         }

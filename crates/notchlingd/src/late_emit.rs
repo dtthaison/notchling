@@ -1,7 +1,9 @@
 use notchling_events::emit::{Committed, Unwritable, UnwritableWhy};
-use notchling_events::{Emit, Event};
+use notchling_events::{Emit, Event, Salt};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
+
+pub type LateSalt = Arc<OnceLock<Salt>>;
 
 #[derive(Default)]
 pub struct LateEmit {
@@ -43,6 +45,36 @@ impl Emit for LateEmit {
                 })
             }
         }
+    }
+}
+
+#[derive(Clone)]
+pub struct Events {
+    emit: Arc<dyn Emit>,
+    salt: LateSalt,
+}
+
+impl Events {
+    pub fn new(emit: Arc<dyn Emit>, salt: LateSalt) -> Events {
+        Events { emit, salt }
+    }
+
+    pub fn fixed(emit: Arc<dyn Emit>, salt: Salt) -> Events {
+        let cell = OnceLock::new();
+        let _ = cell.set(salt);
+        Events::new(emit, Arc::new(cell))
+    }
+
+    pub fn salt(&self) -> Salt {
+        self.salt.get().copied().unwrap_or(Salt([0; 32]))
+    }
+
+    pub fn push(&self, event: Event) {
+        self.emit.push(event);
+    }
+
+    pub fn commit(&self, event: Event) -> bool {
+        self.emit.commit(event).is_ok()
     }
 }
 

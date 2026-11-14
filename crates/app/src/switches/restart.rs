@@ -199,6 +199,10 @@ impl RestartNotice {
 
 pub trait TurnOn: Send + Sync {
     fn turn_on(&self, area: Area) -> Result<(), String>;
+
+    fn restore(&self, area: Area) -> Result<(), String> {
+        self.turn_on(area)
+    }
 }
 
 pub struct LiveTurnOn {
@@ -209,27 +213,35 @@ pub struct LiveTurnOn {
 
 impl LiveTurnOn {
     pub fn set(&self, area: Area, on: bool) -> Result<(), String> {
+        self.put(area, on, false)
+    }
+
+    fn put(&self, area: Area, on: bool, restored: bool) -> Result<(), String> {
         let switch = match area {
-            Area::Acting => return self.actions.choose(on).map(|_| ()),
-            Area::Bridge => return self.bridge.choose(on),
+            Area::Acting => return self.actions.choose_as(on, restored).map(|_| ()),
+            Area::Bridge => return self.bridge.choose_as(on, restored),
             Area::Accounts => Switch::Accounts,
             Area::Vault => Switch::Vault,
             Area::Install => Switch::Install,
         };
-        self.feed.choose(switch, on).map(|_| ())
+        self.feed.choose_as(switch, on, restored).map(|_| ())
     }
 }
 
 impl TurnOn for LiveTurnOn {
     fn turn_on(&self, area: Area) -> Result<(), String> {
-        self.set(area, true)
+        self.put(area, true, false)
+    }
+
+    fn restore(&self, area: Area) -> Result<(), String> {
+        self.put(area, true, true)
     }
 }
 
 pub fn restore(areas: &[Area], with: &dyn TurnOn, notice: &RestartNotice) -> Vec<String> {
     areas
         .iter()
-        .filter_map(|a| match with.turn_on(*a) {
+        .filter_map(|a| match with.restore(*a) {
             Ok(()) => {
                 notice.chose(*a, true);
                 None

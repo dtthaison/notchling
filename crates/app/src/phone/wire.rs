@@ -24,6 +24,10 @@ impl Call {
         Call::new(ops::BRIDGE_SET, json!({ "on": on }))
     }
 
+    pub fn set_restored(on: bool) -> Call {
+        Call::new(ops::BRIDGE_SET, json!({ "on": on, "restored": true }))
+    }
+
     pub fn status() -> Call {
         Call::new(ops::BRIDGE_STATUS, json!({}))
     }

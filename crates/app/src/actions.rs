@@ -165,10 +165,19 @@ impl Actions {
     }
 
     pub fn choose(&self, on: bool) -> Result<Acting, String> {
+        self.choose_as(on, false)
+    }
+
+    pub fn choose_as(&self, on: bool, restored: bool) -> Result<Acting, String> {
         let Some(transport) = &self.transport else {
             return Err(Acting::Detached.message().unwrap_or_default().to_owned());
         };
-        match transport.call(ops::SETTINGS_SET_ACTING, json!({ "on": on })) {
+        let args = if restored {
+            json!({ "on": on, "restored": true })
+        } else {
+            json!({ "on": on })
+        };
+        match transport.call(ops::SETTINGS_SET_ACTING, args) {
             Ok(reply) => {
                 let now = acting::from_status(&reply);
                 self.set(now);

@@ -247,7 +247,7 @@ pub fn run(
         room.clone(),
         options.bridge_ports,
     );
-    wired.set_events(logs.bus.clone());
+    wired.set_events(logs.bus.clone(), logs.salt);
     let checker = logs.checker(
         Arc::new(InboxWarnings::new(wired.inbox.clone(), Arc::new(wall_ms))),
         publish,

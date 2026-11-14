@@ -88,6 +88,8 @@ mod cost_ops_tests;
 #[cfg(test)]
 mod daemon_tests;
 #[cfg(test)]
+mod event_assert;
+#[cfg(test)]
 mod git_ops_branch_tests;
 #[cfg(test)]
 mod git_ops_tests;

@@ -1,7 +1,9 @@
 use super::*;
 use crate::acting_ops_tests::{app, FakeRoom};
+use crate::event_assert::{of, results, text};
 use crate::limits_ops_tests::TempDir;
 use notchling_engine::limits::mode::CLAUDE;
+use notchling_events::{MemorySink, Salt};
 use notchling_local_api::ClientKind;
 use std::sync::atomic::Ordering;
 
@@ -10,6 +12,7 @@ struct Rig {
     room: Arc<FakeRoom>,
     inbox: Arc<InboxOps>,
     limits: Arc<LimitConfig>,
+    sink: Arc<MemorySink>,
     ops: SettingsOps,
 }
 
@@ -32,8 +35,9 @@ fn rig(tag: &str, wait: Duration) -> Rig {
         "vault" => Some(false),
         _ => None,
     });
+    let sink = Arc::new(MemorySink::new());
     let ops = SettingsOps::new(tmp.path("data"), room.clone(), states)
-        .with_audit(AuditLog::new(tmp.path("audit.jsonl")))
+        .with_events(Events::fixed(sink.clone(), Salt([1; 32])))
         .with_limits(limits.clone())
         .with_inbox(inbox.clone())
         .with_ask_wait(wait);
@@ -42,6 +46,7 @@ fn rig(tag: &str, wait: Duration) -> Rig {
         room,
         inbox,
         limits,
+        sink,
         ops,
     }
 }
@@ -58,19 +63,12 @@ impl Rig {
             .cloned()
     }
 
-    fn audit(&self) -> Vec<Value> {
-        std::fs::read_to_string(self.tmp.path("audit.jsonl"))
-            .unwrap_or_default()
-            .lines()
-            .map(|l| serde_json::from_str(l).unwrap())
-            .collect()
+    fn audit(&self) -> Vec<notchling_events::Event> {
+        of(&self.sink, "settings.agent")
     }
 
     fn results(&self) -> Vec<String> {
-        self.audit()
-            .iter()
-            .map(|e| e["result"].as_str().unwrap_or_default().to_string())
-            .collect()
+        results(&self.sink, "settings.agent")
     }
 
     fn app_follows_the_inbox(&self) {
@@ -193,11 +191,11 @@ fn a_free_key_is_set_at_once_published_and_audited() {
     assert_eq!(r.stored("showPet"), Some(json!(false)));
     let audit = r.audit();
     assert_eq!(audit.len(), 2);
-    assert_eq!(audit[0]["op"], "settings.set");
-    assert_eq!(audit[0]["tier"], "agent");
-    assert_eq!(audit[0]["result"], "set");
-    assert_eq!(audit[0]["reason"], "chatHistory=\"8mb\"");
-    assert_eq!(audit[0]["peer"], "/agents/notchling");
+    assert_eq!(text(&audit[0], "key").as_deref(), Some("chatHistory"));
+    assert_eq!(text(&audit[0], "class").as_deref(), Some("free"));
+    assert_eq!(text(&audit[0], "result").as_deref(), Some("set"));
+    assert_eq!(text(&audit[0], "value_choice").as_deref(), Some("8mb"));
+    assert_eq!(text(&audit[1], "value_flag").as_deref(), Some("false"));
     assert!(r.inbox.items().is_empty(), "nothing to ask");
 }
 
@@ -242,7 +240,7 @@ fn switches_and_never_keys_are_refused_and_audited() {
     assert!(r.room.named(topics::SETTINGS_CHANGED).is_empty());
     assert!(r.inbox.items().is_empty());
     let results = r.results();
-    assert_eq!(results.len(), 9);
+    assert_eq!(results.len(), 8, "the app's refusal is the app's own");
     assert!(results.iter().all(|r| r == "refused"), "{results:?}");
 }
 
@@ -450,7 +448,7 @@ fn the_app_sets_an_ask_key_without_asking() {
         r.room.named(topics::SETTINGS_CHANGED),
         vec![json!({"key": "limitSwitchAt", "value": 90, "by": "app"})]
     );
-    assert_eq!(r.audit()[0]["tier"], "app");
+    assert!(r.audit().is_empty(), "an app change is not an agent's");
 }
 
 #[test]
@@ -468,4 +466,97 @@ fn closing_withdraws_the_asks_still_waiting() {
         .call(&agent(), ops::SETTINGS_ASKED, json!({"id": "setting-nope"}))
         .unwrap_err();
     assert_eq!(e.code, ErrorCode::Failed);
+}
+
+#[test]
+fn free_set_commits_before_writing() {
+    let r = rig("commit-first", ASK_WAIT);
+    r.call(
+        &agent(),
+        ops::SETTINGS_SET,
+        json!({"key": "showPet", "value": false}),
+    )
+    .unwrap();
+    assert_eq!(r.sink.commits(), 1);
+    assert_eq!(r.results(), ["set"]);
+}
+
+#[test]
+fn commit_failure_leaves_store_unchanged() {
+    let r = rig("commit-fails", ASK_WAIT);
+    r.sink.fail_commits(true);
+    let e = r
+        .call(
+            &agent(),
+            ops::SETTINGS_SET,
+            json!({"key": "showPet", "value": false}),
+        )
+        .unwrap_err();
+    assert_eq!(e.code, ErrorCode::Failed);
+    assert_eq!(e.message, "the audit log can't be written");
+    assert!(r.stored("showPet").is_none());
+    assert!(r.room.named(topics::SETTINGS_CHANGED).is_empty());
+}
+
+#[test]
+fn ask_allowed_commits_with_answered_by() {
+    let r = rig("ask-by", ASK_WAIT);
+    r.app_follows_the_inbox();
+    let id = ask(&r, "limitMode", json!("notify"));
+    r.inbox
+        .decide(&item_id(&id), ActionId::Allow, "phone")
+        .unwrap();
+    let done = asked(&r, &id);
+    assert_eq!(done["state"], "applied", "{done}");
+    let events = r.audit();
+    let allowed = events
+        .iter()
+        .find(|e| text(e, "result").as_deref() == Some("allowed"))
+        .unwrap();
+    assert_eq!(text(allowed, "answered_by").as_deref(), Some("phone"));
+    assert_eq!(text(allowed, "class").as_deref(), Some("ask"));
+    assert_eq!(r.sink.commits(), 1);
+}
+
+#[test]
+fn an_allowed_ask_is_not_applied_when_the_commit_fails() {
+    let r = rig("ask-commit-fails", ASK_WAIT);
+    r.app_follows_the_inbox();
+    let id = ask(&r, "limitMode", json!("notify"));
+    r.sink.fail_commits(true);
+    r.inbox
+        .decide(&item_id(&id), ActionId::Allow, "mac")
+        .unwrap();
+    let done = asked(&r, &id);
+    assert_eq!(done["state"], "failed", "{done}");
+    assert!(r.stored("limitMode").is_none());
+}
+
+#[test]
+fn text_value_is_chars_and_hash() {
+    let r = rig("text", ASK_WAIT);
+    r.app_follows_the_inbox();
+    let marker = "ctrl+alt+marker7";
+    ask(&r, "searchShortcut", json!(marker));
+    let events = r.audit();
+    assert_eq!(text(&events[0], "value_chars").as_deref(), Some("16"));
+    assert_eq!(text(&events[0], "value_hash").unwrap().len(), 16);
+    assert!(!format!("{:?}", r.sink.events()).contains(marker));
+}
+
+#[test]
+fn unknown_key_is_hashed() {
+    let r = rig("unknown-hash", ASK_WAIT);
+    let e = r
+        .call(
+            &agent(),
+            ops::SETTINGS_SET,
+            json!({"key": "my-private-key", "value": "v"}),
+        )
+        .unwrap_err();
+    assert_eq!(e.code, ErrorCode::BadRequest);
+    let events = r.audit();
+    assert_eq!(text(&events[0], "key").as_deref(), Some("unknown"));
+    assert_eq!(text(&events[0], "key_hash").unwrap().len(), 16);
+    assert!(!format!("{:?}", r.sink.events()).contains("my-private-key"));
 }
