@@ -64,9 +64,43 @@ pub struct Plan {
     pub detach: Vec<Step>,
 }
 
+impl Step {
+    pub fn name(&self) -> &'static str {
+        match self {
+            Step::WaitQuiet { .. } => "wait quiet",
+            Step::RefuseDialog => "refuse dialog",
+            Step::RequireDialog => "require dialog",
+            Step::AwaitInput { .. } => "await input",
+            Step::AwaitEmpty { .. } => "await empty",
+            Step::Keys(_) => "keys",
+            Step::Paste(_) => "paste",
+            Step::AwaitPaste { .. } => "await paste",
+            Step::Submit { .. } => "submit",
+            Step::Pause(_) => "pause",
+            Step::WalkBackTo { .. } => "walk back",
+            Step::ExpectQuestion(_) => "expect question",
+            Step::WaitFor { .. } => "wait for",
+            Step::SubmitIfReview { .. } => "submit review",
+            Step::MarkQueue => "mark queue",
+            Step::AwaitPopAll { .. } => "await pop all",
+            Step::EndUnlessTaken => "end unless taken",
+            Step::PressPermission { .. } => "press permission",
+        }
+    }
+}
+
 impl Plan {
     pub fn is_empty(&self) -> bool {
         self.steps.is_empty()
+    }
+
+    pub fn reply_chars(&self) -> Option<usize> {
+        let waits = |s: &Step| matches!(s, Step::AwaitPaste { .. });
+        let pasted = self.steps.iter().find_map(|s| match s {
+            Step::Paste(text) => Some(text.chars().count()),
+            _ => None,
+        });
+        pasted.filter(|_| self.steps.iter().any(waits))
     }
 
     pub fn writes(&self) -> Vec<String> {

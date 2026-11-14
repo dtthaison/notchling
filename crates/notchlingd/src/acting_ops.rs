@@ -8,7 +8,7 @@ use crate::late_emit::Events;
 use crate::prompts::{fit_list, question_json, Kind, Prompt, PromptStore};
 use notchling_engine::control::{Command, LaunchError, LaunchOutput, Launcher, PtyScript};
 use notchling_engine::reply::exec::{
-    execute, Failure, Outcome, Pty, QueueLog, ScreenCheck, TranscriptLog,
+    execute_noting, Failure, Outcome, Pty, QueueLog, ScreenCheck, TranscriptLog,
 };
 use notchling_engine::reply::plan::{self, Decision, Expected, Plan, PlanError};
 use notchling_engine::reply::question::{
@@ -126,6 +126,7 @@ pub struct ActingOps {
     codex: OnceLock<Arc<CodexOps>>,
     catalog: OnceLock<Arc<CatalogService>>,
     screen_file: Option<PathBuf>,
+    reply_screen_file: Option<PathBuf>,
     pub(crate) held: crate::held_ops::HeldState,
     pub(crate) events: Option<Events>,
 }
@@ -156,6 +157,7 @@ impl ActingOps {
             codex: OnceLock::new(),
             catalog: OnceLock::new(),
             screen_file: None,
+            reply_screen_file: None,
             held: crate::held_ops::HeldState::default(),
             events: None,
         }
@@ -163,6 +165,11 @@ impl ActingOps {
 
     pub fn with_screen_file(mut self, file: PathBuf) -> ActingOps {
         self.screen_file = Some(file);
+        self
+    }
+
+    pub fn with_reply_screen_file(mut self, file: PathBuf) -> ActingOps {
+        self.reply_screen_file = Some(file);
         self
     }
 
@@ -334,10 +341,23 @@ impl ActingOps {
                 why: attach_why(&err),
                 err,
             })?;
-        let played = execute(plan, pty.as_mut(), self.attacher.screen_check(), log);
+        let mut trail = Vec::new();
+        let check = self.attacher.screen_check();
+        let played = execute_noting(plan, pty.as_mut(), check, log, &mut trail);
         if let (Err(failure), Some(expect), Some(file)) = (&played, keep, &self.screen_file) {
             if failure.is_permission_refusal() {
-                keep_screen(file, expect, failure, &pty.screen());
+                let head = [
+                    format!("request: {}: {}", expect.tool, expect.summary),
+                    format!("refused: {failure}"),
+                ];
+                keep_screen(file, &head, &pty.screen());
+            }
+        }
+        let reply = plan.reply_chars().zip(self.reply_screen_file.as_ref());
+        if let (Err(failure), Some((chars, file))) = (&played, reply) {
+            if !matches!(failure, Failure::Pty(_)) {
+                let head = crate::reply_screen::head(&job, failure, chars, pty.cursor(), &trail);
+                keep_screen(file, &head, &crate::reply_screen::masked(&pty.screen()));
             }
         }
         played.map_err(|f| PlayError {
@@ -730,7 +750,7 @@ pub(crate) fn now_ms() -> i64 {
     notchling_engine::reply::popall::now_ms()
 }
 
-fn keep_screen(file: &Path, expect: &Expected, failure: &Failure, lines: &[String]) {
+fn keep_screen(file: &Path, head: &[String], lines: &[String]) {
     use std::io::Write;
     use std::os::unix::fs::OpenOptionsExt;
     if let Some(dir) = file.parent() {
@@ -745,8 +765,9 @@ fn keep_screen(file: &Path, expect: &Expected, failure: &Failure, lines: &[Strin
     else {
         return;
     };
-    let _ = writeln!(out, "request: {}: {}", expect.tool, expect.summary);
-    let _ = writeln!(out, "refused: {failure}");
+    for line in head {
+        let _ = writeln!(out, "{line}");
+    }
     let _ = writeln!(out, "----- screen ({} lines) -----", lines.len());
     for line in lines {
         let _ = writeln!(out, "{line}");

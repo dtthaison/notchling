@@ -159,6 +159,7 @@ Every log stays on your Mac. `Notchling` below is `~/Library/Application Support
 | `Notchling/account-log.json` | The old record of when each account became the active one. It is read once into the Activity store and no longer written. | Does not grow |
 | `Notchling/logs/crash.log` | A panic's message and place. It can quote what the app was showing. | Grows only on a crash |
 | `Notchling/permission-screen.txt` | The last permission prompt the daemon could not read. | One screen |
+| `Notchling/reply-screen.txt` | The last reply the daemon could not type into a session: why, and the terminal screen it ended on. What the input box held is masked, so your message is not in it. | One screen |
 
 **Settings > Activity** shows the Activity store, newest first: refusals and failures stand out, and you can filter by kind and search. Open a row for its event and outcome, and **Check Against the Audit Log** compares it with its sealed line. Each Audit line is sealed with a key kept in your Keychain, so a line that was edited or cut shows as broken; this is tamper-evident, not tamper-proof.
 

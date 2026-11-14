@@ -70,6 +70,7 @@ pub mod providers_daemon;
 mod providers_gate;
 pub mod providers_ops;
 pub mod quiet_ops;
+mod reply_screen;
 pub mod service;
 pub mod settings_asks;
 pub mod settings_cli;
@@ -173,6 +174,8 @@ mod providers_cli_tests;
 mod providers_ops_tests;
 #[cfg(test)]
 mod providers_sync_tests;
+#[cfg(test)]
+mod reply_screen_tests;
 #[cfg(test)]
 mod session_of_tests;
 #[cfg(test)]

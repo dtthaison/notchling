@@ -294,9 +294,11 @@ signal.
 
 `session.reply` answers `{"sent": true}` only after the session's input box took the text and let
 go of it. Anything else is `failed` with what happened, and nothing is reported sent: the terminal
-isn't at its prompt (nothing was typed), its input box kept an old draft, it never took the text,
-or the text is typed there but Enter didn't send it. Sending again is safe: a reply clears the box
-first.
+isn't at its prompt (nothing was typed), its input box kept an old draft, it never took the text
+(the box is on screen and still empty), or the text is typed there but Enter didn't send it. Sending
+again is safe: a reply clears the box first. A session whose process Claude Code had stopped is
+started by the attach, and the reply waits for its prompt (up to 15 s) before any key; one
+that never comes up is `failed` with "The session didn't open in time." and nothing typed.
 
 A reply to a Claude Code job that is working, or that got a message less than 20 s ago and
 hasn't shown work yet, is held by the daemon and not typed (`held_ops.rs`, engine `reply::held`).

@@ -8,7 +8,7 @@ use notchling_engine::sessions::Roots;
 use notchling_local_api::{ops, ApiError, Caller, ClientKind, ErrorCode, OpSpec, Tier};
 use serde_json::{json, Value};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -83,6 +83,7 @@ struct FakeAttacher {
     attached: Attaches,
     writes: Arc<Mutex<Vec<String>>>,
     deaf: Arc<AtomicBool>,
+    starting: Arc<AtomicU64>,
 }
 
 impl Attacher for FakeAttacher {
@@ -95,6 +96,10 @@ impl Attacher for FakeAttacher {
         let mut prompt = FakePrompt::new(&lines);
         if self.deaf.load(Ordering::SeqCst) {
             prompt = prompt.deaf();
+        }
+        match self.starting.load(Ordering::SeqCst) {
+            0 => {}
+            ms => prompt = prompt.starting_for(ms),
         }
         Ok(Box::new(FakePty {
             prompt,
@@ -137,6 +142,7 @@ pub(crate) struct Setup {
     pub attached: Attaches,
     pub writes: Arc<Mutex<Vec<String>>>,
     pub deaf: Arc<AtomicBool>,
+    pub starting: Arc<AtomicU64>,
 }
 
 pub(crate) fn setup(on: bool, screen: &[&str], list: Value) -> Setup {
@@ -161,7 +167,7 @@ pub(crate) fn setup_in(
         ..FakeAttacher::default()
     };
     let (attached, writes) = (attacher.attached.clone(), attacher.writes.clone());
-    let deaf = attacher.deaf.clone();
+    let (deaf, starting) = (attacher.deaf.clone(), attacher.starting.clone());
     let me = std::process::id();
     let mut ops = ActingOps::new(
         Arc::new(Acting::in_memory(on)),
@@ -183,6 +189,7 @@ pub(crate) fn setup_in(
         attached,
         writes,
         deaf,
+        starting,
     }
 }
 

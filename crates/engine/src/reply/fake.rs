@@ -5,6 +5,8 @@ use std::time::Duration;
 
 pub const RULE: &str = "────────────────────────────────────────";
 pub const PROMPT: [&str; 4] = [RULE, "❯ ", RULE, "  ? for shortcuts"];
+pub const STARTING: &str =
+    "  Session is starting — showing its transcript until it appears. Ctrl+Z to detach";
 
 #[derive(Clone, Debug, Default)]
 pub struct FakePrompt {
@@ -18,6 +20,8 @@ pub struct FakePrompt {
     landing: Option<(u64, String)>,
     deaf: bool,
     stuck: bool,
+    starting_ms: u64,
+    notice: String,
     pub writes: Vec<String>,
     pub sent: Vec<String>,
 }
@@ -65,6 +69,21 @@ impl FakePrompt {
     pub fn stuck(mut self) -> FakePrompt {
         self.stuck = true;
         self
+    }
+
+    pub fn starting_for(mut self, ms: u64) -> FakePrompt {
+        self.starting_ms = ms;
+        self.notice = STARTING.to_string();
+        self
+    }
+
+    pub fn noting(mut self, notice: &str) -> FakePrompt {
+        self.notice = notice.to_string();
+        self
+    }
+
+    pub fn starting(&self) -> bool {
+        self.clock < self.starting_ms
     }
 
     pub fn holding(mut self, text: &str) -> FakePrompt {
@@ -117,6 +136,10 @@ impl FakePrompt {
 impl Pty for FakePrompt {
     fn write(&mut self, bytes: &[u8]) -> std::io::Result<()> {
         let typed = String::from_utf8_lossy(bytes).into_owned();
+        if self.starting() {
+            self.writes.push(typed);
+            return Ok(());
+        }
         if typed == keys::clear_input() {
             if !self.stuck {
                 self.text.clear();
@@ -140,6 +163,11 @@ impl Pty for FakePrompt {
     }
 
     fn screen(&mut self) -> Vec<String> {
+        if self.starting() {
+            return ["⏺ ok", "", RULE, "❯", RULE, self.notice.as_str()]
+                .map(String::from)
+                .to_vec();
+        }
         let mut lines = self.before.clone();
         if self.boxed {
             lines.extend(self.rows());
@@ -149,7 +177,7 @@ impl Pty for FakePrompt {
     }
 
     fn cursor(&mut self) -> Option<(usize, usize)> {
-        if !self.boxed {
+        if !self.boxed || self.starting() {
             return None;
         }
         let rows = self.rows();
@@ -205,6 +233,23 @@ mod tests {
         assert_eq!(pty.held(), Some(""));
         pty.write(ENTER.as_bytes()).unwrap();
         assert!(pty.sent.is_empty());
+    }
+
+    #[test]
+    fn a_starting_session_shows_the_attachs_wait_and_drops_what_is_typed() {
+        let mut pty = FakePrompt::idle().starting_for(300);
+        assert_eq!(pty.screen()[2..], [RULE, "❯", RULE, STARTING]);
+        assert_eq!(pty.cursor(), None);
+        pty.write(keys::bracketed("lost").as_bytes()).unwrap();
+        pty.write(ENTER.as_bytes()).unwrap();
+        pty.sleep(Duration::from_millis(300));
+        assert_eq!(pty.screen(), PROMPT);
+        assert_eq!(pty.cursor(), Some((1, 2)));
+        assert_eq!(pty.held(), Some(""));
+        assert!(pty.sent.is_empty());
+        assert_eq!(pty.writes.len(), 2);
+        pty.write(keys::bracketed("hi").as_bytes()).unwrap();
+        assert_eq!(pty.held(), Some("hi"));
     }
 
     #[test]

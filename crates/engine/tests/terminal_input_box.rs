@@ -112,6 +112,81 @@ fn every_recorded_prompt_reads_as_an_empty_box() {
 }
 
 #[test]
+fn the_attach_draws_a_box_of_its_own_while_a_session_starts() {
+    let (lines, cursor) = shot("attach-starting.txt");
+    assert_eq!(cursor, None, "its cursor is hidden");
+    assert!(input_box::starting(&lines, cursor));
+    let drawn = input_box::read(&lines, cursor).expect("two rules and a mark");
+    assert_eq!(drawn.held, ["❯"]);
+    assert!(drawn.empty, "which reads as an empty input box");
+    assert!(!input_box::focused(&lines, cursor));
+    let (waking, cursor) = shot("attach-waking.txt");
+    assert!(input_box::starting(&waking, cursor));
+    assert_eq!(input_box::read(&waking, cursor), None);
+}
+
+#[test]
+fn a_started_sessions_prompt_has_the_cursor_once_it_is_drawn() {
+    let (drawing, cursor) = shot("started-mid-draw.txt");
+    assert_eq!(cursor, None);
+    assert!(!input_box::starting(&drawing, cursor));
+    assert!(input_box::read(&drawing, cursor).is_some());
+    assert!(!input_box::focused(&drawing, cursor));
+    let (lines, cursor) = shot("started.txt");
+    assert!(!input_box::starting(&lines, cursor));
+    assert!(input_box::read(&lines, cursor).unwrap().empty);
+    assert!(input_box::focused(&lines, cursor));
+}
+
+#[test]
+fn every_recorded_prompt_has_the_cursor_in_its_box_and_is_not_starting() {
+    for name in [
+        "long-paste.txt",
+        "new-job-hint.txt",
+        "pictures-left-unsent.txt",
+        "queued-hint.txt",
+        "shell-mode.txt",
+        "slash-menu.txt",
+        "three-lines.txt",
+        "typed.txt",
+        "working-after-send.txt",
+    ] {
+        let (lines, cursor) = shot(name);
+        assert!(cursor.is_some(), "{name}");
+        assert!(input_box::focused(&lines, cursor), "{name}");
+        assert!(!input_box::starting(&lines, None), "{name}");
+    }
+    for name in [
+        "attach-idle.bin",
+        "reply-paced.bin",
+        "clear-input-draft.bin",
+        "paste-multiline-clear.bin",
+        "plugin-0-attach.bin",
+        "queued-while-working.bin",
+        "take-back-queued.bin",
+        "esc-working.bin",
+    ] {
+        let screen = recorded(name);
+        let lines = screen.lines();
+        assert!(screen.cursor_visible(), "{name}");
+        assert!(input_box::focused(&lines, Some(screen.cursor())), "{name}");
+        assert!(!input_box::starting(&lines, None), "{name}");
+    }
+    let (transcript, cursor) = shot("transcript-view.txt");
+    assert!(!input_box::starting(&transcript, cursor));
+}
+
+#[test]
+fn a_recorded_box_shows_the_message_typed_into_it() {
+    assert!(read("typed.txt").shows("Reply with just the word ok."));
+    assert!(read("three-lines.txt").shows("one\ntwo\nthree"));
+    assert!(read("shell-mode.txt").shows("!ls -la"));
+    assert!(!read("new-job-hint.txt").holds("Try"));
+    assert!(!read("queued-hint.txt").holds("Press up to edit queued messages."));
+    assert!(!read("long-paste.txt").shows("anything"), "a folded paste");
+}
+
+#[test]
 fn a_question_on_screen_is_refused_before_its_rules_are_read_as_a_box() {
     let lines = recorded("question-open.bin").lines();
     assert!(keys::dialog_open(&lines));
