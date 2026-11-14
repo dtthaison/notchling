@@ -143,7 +143,7 @@ impl Sources for DaemonSources {
         self.inbox
             .decide(item_id, action, PHONE_ANSWERED_BY)
             .map_err(|e| match e.code {
-                ErrorCode::Failed => BridgeFailure::not_found("Không có mục này trong hộp thư."),
+                ErrorCode::Failed => BridgeFailure::not_found("No such item in the inbox."),
                 ErrorCode::Internal => BridgeFailure::internal(e.message),
                 _ => BridgeFailure::invalid(e.message),
             })
@@ -217,13 +217,13 @@ impl DaemonActing {
 
     fn row_of(&self, session: &Session) -> Result<String, BridgeFailure> {
         let Control::Job(job) = &session.control else {
-            return Err(BridgeFailure::view_only("Session này chỉ xem được."));
+            return Err(BridgeFailure::view_only("This session is view only."));
         };
         agents_of(&lock(&self.sessions))
             .into_iter()
             .find(|a| matches!(&a.target, AgentTarget::Job(j) if j == job))
             .map(|a| a.id)
-            .ok_or_else(|| BridgeFailure::not_found("Không tìm thấy session."))
+            .ok_or_else(|| BridgeFailure::not_found("Session not found."))
     }
 }
 
@@ -264,7 +264,7 @@ impl Acting for DaemonActing {
             ),
             (PromptResponse::Answers(_), PromptKind::Permission) => {
                 return Err(BridgeFailure::invalid(
-                    "Đây là yêu cầu cấp quyền, không phải câu hỏi.",
+                    "This is a permission request, not a question.",
                 ))
             }
         };
@@ -286,7 +286,7 @@ impl Acting for DaemonActing {
 
     fn take_over(&self, _: &Session, _: bool) -> Result<TakeoverOutcome, BridgeFailure> {
         Err(BridgeFailure::invalid(
-            "Máy này chưa tiếp quản được session từ điện thoại.",
+            "The Mac can't take over a session from the phone yet.",
         ))
     }
 }

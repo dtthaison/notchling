@@ -19,16 +19,16 @@ pub enum TakeoverError {
 }
 
 pub const ALIVE_REASON: &str =
-    "Đóng session ở nơi đang mở (Claude desktop / VS Code) rồi tiếp quản";
+    "Close the session where it is open (Claude desktop / VS Code), then take it over";
 
 impl std::fmt::Display for TakeoverError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
             TakeoverError::Alive => ALIVE_REASON,
-            TakeoverError::NoTranscript => "Không có transcript tiếp tục được trong ~/.claude/projects, nên không tiếp quản được.",
-            TakeoverError::Sdk => "Session chạy bằng claude -p, không tiếp quản được.",
-            TakeoverError::AlreadyControllable => "Console đã điều khiển được session này.",
-            TakeoverError::NoWorkingFolder => "Thư mục làm việc của session không còn.",
+            TakeoverError::NoTranscript => "No transcript to resume in ~/.claude/projects, so it can't be taken over.",
+            TakeoverError::Sdk => "The session runs with claude -p and can't be taken over.",
+            TakeoverError::AlreadyControllable => "Notchling can already control this session.",
+            TakeoverError::NoWorkingFolder => "The session's working folder is gone.",
         })
     }
 }

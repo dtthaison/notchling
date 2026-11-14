@@ -221,8 +221,8 @@ impl VizEngine {
         if total_calls == 0 && git.diff_stat.is_none() {
             return with_empty(
                 wire::VizKind::Flow,
-                "Chưa có công cụ nào chạy",
-                Some("Dòng thời gian hiện khi Claude đọc, sửa file hoặc chạy lệnh."),
+                "No tool has run yet",
+                Some("The timeline shows when Claude reads, edits files or runs commands."),
             );
         }
         let mut files: Vec<wire::FlowFile> = combined
@@ -260,8 +260,8 @@ impl VizEngine {
         if ordered.is_empty() {
             return with_empty(
                 wire::VizKind::Diagram,
-                "Chưa có sơ đồ nào",
-                Some("Khi Claude trả lời bằng khối ```mermaid, sơ đồ hiện ở đây."),
+                "No diagrams yet",
+                Some("When Claude replies with a ```mermaid block, the diagram shows here."),
             );
         }
         let blocks = ordered
@@ -289,7 +289,7 @@ impl VizEngine {
 
     pub fn entity_spec(&self, cwd: &str) -> wire::VizSpec {
         if cwd.is_empty() {
-            return with_empty(wire::VizKind::Entity, "Session chưa có thư mục", None);
+            return with_empty(wire::VizKind::Entity, "The session has no folder yet", None);
         }
         match self.schemas.scan(cwd) {
             Scan::Found(entity) => {
@@ -299,13 +299,13 @@ impl VizEngine {
             }
             Scan::NoTables => with_empty(
                 wire::VizKind::Entity,
-                "Không thấy schema trong thư mục này",
-                Some("Console đọc Prisma (*.prisma), SQL (CREATE TABLE trong *.sql) và Drift (class ... extends Table)."),
+                "No schema found in this folder",
+                Some("Notchling reads Prisma (*.prisma), SQL (CREATE TABLE in *.sql) and Drift (class ... extends Table)."),
             ),
             Scan::Unsupported => with_empty(
                 wire::VizKind::Entity,
-                "Máy này chưa đọc được schema",
-                Some("Tab Entity chưa có trên bản Console này."),
+                "The Mac can't read schemas yet",
+                Some("The Entity tab isn't available in this version."),
             ),
         }
     }
@@ -356,8 +356,8 @@ impl VizEngine {
         if points.is_empty() && tools.is_empty() {
             return with_empty(
                 wire::VizKind::Chart,
-                "Chưa có số liệu",
-                Some("Biểu đồ token và công cụ hiện khi session đã trả lời ít nhất một lần."),
+                "No numbers yet",
+                Some("The token and tool charts show once the session has replied at least once."),
             );
         }
         let mut spec = blank(wire::VizKind::Chart);
