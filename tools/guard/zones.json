@@ -31,6 +31,7 @@
     "!docs/agents/**",
     "apps/flutter/lib/features/**",
     "!apps/flutter/lib/features/pairing/**",
+    "apps/flutter/lib/l10n/**",
     "crates/app/**",
     "crates/kit/**",
     "crates/engine/src/transcript/**",
