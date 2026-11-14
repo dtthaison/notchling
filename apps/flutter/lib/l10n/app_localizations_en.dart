@@ -442,12 +442,48 @@ class AppL10nEn extends AppL10n {
   String get macsUse => 'Use this Mac';
 
   @override
+  String get notificationsChannelFinished => 'Finished sessions';
+
+  @override
+  String get notificationsChannelMessages => 'New messages from Claude';
+
+  @override
+  String get notificationsChannelNeedsYou => 'Sessions that need you';
+
+  @override
+  String get notificationsFinishedBody => 'Done';
+
+  @override
+  String get notificationsNeedsBody => 'Needs your answer';
+
+  @override
   String notificationsNeedsInputBody(String name) {
     return '$name is waiting.';
   }
 
   @override
   String get notificationsNeedsInputTitle => 'Session needs input';
+
+  @override
+  String get notificationsSummaryBody => 'Something new';
+
+  @override
+  String get notificationsWatching => 'Watching';
+
+  @override
+  String notificationsWatchingSessions(int count) {
+    final intl.NumberFormat countNumberFormat =
+        intl.NumberFormat.decimalPattern(localeName);
+    final String countString = countNumberFormat.format(count);
+
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Watching · $countString sessions',
+      one: 'Watching · $countString session',
+    );
+    return '$_temp0';
+  }
 
   @override
   String get pairingCameraDenied => 'Camera access is off. Use manual entry.';

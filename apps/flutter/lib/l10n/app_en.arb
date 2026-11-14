@@ -577,6 +577,26 @@
   "@macsUse": {
     "description": "Shown in the Paired Macs screen."
   },
+  "notificationsChannelFinished": "Finished sessions",
+  "@notificationsChannelFinished": {
+    "description": "The name of the Android notification channel for sessions that finished."
+  },
+  "notificationsChannelMessages": "New messages from Claude",
+  "@notificationsChannelMessages": {
+    "description": "The name of the Android notification channel for new messages from Claude."
+  },
+  "notificationsChannelNeedsYou": "Sessions that need you",
+  "@notificationsChannelNeedsYou": {
+    "description": "The name of the Android notification channel for sessions that need an answer. Shown in the system's notification settings."
+  },
+  "notificationsFinishedBody": "Done",
+  "@notificationsFinishedBody": {
+    "description": "The text of a notification when a session finished."
+  },
+  "notificationsNeedsBody": "Needs your answer",
+  "@notificationsNeedsBody": {
+    "description": "The text of a notification when Claude waits for an answer and has no question to show."
+  },
   "notificationsNeedsInputBody": "{name} is waiting.",
   "@notificationsNeedsInputBody": {
     "description": "Not shown yet. $name is the session name.",
@@ -589,6 +609,24 @@
   "notificationsNeedsInputTitle": "Session needs input",
   "@notificationsNeedsInputTitle": {
     "description": "Not shown yet."
+  },
+  "notificationsSummaryBody": "Something new",
+  "@notificationsSummaryBody": {
+    "description": "The text of the grouped notification that stands for several new ones."
+  },
+  "notificationsWatching": "Watching",
+  "@notificationsWatching": {
+    "description": "The line of the permanent notification while the app watches and no session is working."
+  },
+  "notificationsWatchingSessions": "{count, plural, one{Watching · {count} session} other{Watching · {count} sessions}}",
+  "@notificationsWatchingSessions": {
+    "description": "The line of the permanent notification while the app watches sessions that work or wait. $count is the number of those sessions.",
+    "placeholders": {
+      "count": {
+        "type": "int",
+        "format": "decimalPattern"
+      }
+    }
   },
   "pairingCameraDenied": "Camera access is off. Use manual entry.",
   "@pairingCameraDenied": {

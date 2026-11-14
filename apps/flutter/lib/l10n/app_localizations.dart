@@ -867,6 +867,36 @@ abstract class AppL10n {
   /// **'Use this Mac'**
   String get macsUse;
 
+  /// The name of the Android notification channel for sessions that finished.
+  ///
+  /// In en, this message translates to:
+  /// **'Finished sessions'**
+  String get notificationsChannelFinished;
+
+  /// The name of the Android notification channel for new messages from Claude.
+  ///
+  /// In en, this message translates to:
+  /// **'New messages from Claude'**
+  String get notificationsChannelMessages;
+
+  /// The name of the Android notification channel for sessions that need an answer. Shown in the system's notification settings.
+  ///
+  /// In en, this message translates to:
+  /// **'Sessions that need you'**
+  String get notificationsChannelNeedsYou;
+
+  /// The text of a notification when a session finished.
+  ///
+  /// In en, this message translates to:
+  /// **'Done'**
+  String get notificationsFinishedBody;
+
+  /// The text of a notification when Claude waits for an answer and has no question to show.
+  ///
+  /// In en, this message translates to:
+  /// **'Needs your answer'**
+  String get notificationsNeedsBody;
+
   /// Not shown yet. $name is the session name.
   ///
   /// In en, this message translates to:
@@ -878,6 +908,24 @@ abstract class AppL10n {
   /// In en, this message translates to:
   /// **'Session needs input'**
   String get notificationsNeedsInputTitle;
+
+  /// The text of the grouped notification that stands for several new ones.
+  ///
+  /// In en, this message translates to:
+  /// **'Something new'**
+  String get notificationsSummaryBody;
+
+  /// The line of the permanent notification while the app watches and no session is working.
+  ///
+  /// In en, this message translates to:
+  /// **'Watching'**
+  String get notificationsWatching;
+
+  /// The line of the permanent notification while the app watches sessions that work or wait. $count is the number of those sessions.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, one{Watching · {count} session} other{Watching · {count} sessions}}'**
+  String notificationsWatchingSessions(int count);
 
   /// Shown in pairing with a Mac.
   ///
