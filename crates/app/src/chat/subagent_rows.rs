@@ -1,10 +1,9 @@
 use std::collections::HashMap;
 use std::time::SystemTime;
 
+use notchling_engine::contract::Tool;
 use notchling_engine::transcript::model::Conversation;
-use notchling_engine::transcript::subagents::{
-    self, Origin as SubagentOrigin, Status as SubagentStatus, Subagent,
-};
+use notchling_engine::transcript::subagents::{self, Status as SubagentStatus, Subagent, Via};
 use notchling_kit::ui::ToolMark;
 use notchling_kit::{Icon, Ink, Status};
 
@@ -54,7 +53,7 @@ pub fn subagent_row(agent: &Subagent, read: Option<&Facts>) -> SubagentRow {
         .join(" ");
     let kind = (agent.agent_type != "general-purpose" && !agent.agent_type.is_empty())
         .then_some(agent.agent_type.as_str());
-    let handed_over = agent.origin != SubagentOrigin::Claude;
+    let handed_over = agent.origin.via == Via::Delegated;
     let parts = if handed_over {
         [
             Some(word),
@@ -83,10 +82,10 @@ pub fn subagent_row(agent: &Subagent, read: Option<&Facts>) -> SubagentRow {
         status_word: word.to_owned(),
         running: agent.is_running(),
         mark,
-        tool: match agent.origin {
-            SubagentOrigin::Claude => ToolMark::Claude,
-            SubagentOrigin::Codex => ToolMark::Codex,
-            SubagentOrigin::Antigravity => ToolMark::Antigravity,
+        tool: match agent.origin.tool {
+            Tool::Claude => ToolMark::Claude,
+            Tool::Codex => ToolMark::Codex,
+            Tool::Antigravity => ToolMark::Antigravity,
         },
         doing: read
             .filter(|_| agent.is_running())
@@ -176,7 +175,7 @@ impl<P: Peek> SubagentRows<P> {
     }
 
     fn facts(&mut self, agent: &Subagent) -> Option<Facts> {
-        if agent.path.is_empty() || agent.origin == SubagentOrigin::Antigravity {
+        if agent.path.is_empty() || agent.origin.tool == Tool::Antigravity {
             return None;
         }
         let stamp = stamp_of(&agent.path)?;

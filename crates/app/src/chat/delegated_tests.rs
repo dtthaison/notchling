@@ -1,5 +1,6 @@
 use super::*;
 use crate::testutil::Scratch;
+use notchling_engine::contract::Tool as Kind;
 use notchling_engine::delegate::options::{Options, Tool};
 use std::time::Duration;
 
@@ -54,7 +55,10 @@ fn only_the_jobs_a_session_handed_over_are_its_subagents() {
     let descriptions: Vec<_> = list.iter().map(|a| (a.origin, a.started)).collect();
     assert_eq!(
         descriptions,
-        [(Origin::Codex, 100.0), (Origin::Antigravity, 120.0)],
+        [
+            (Origin::delegated(Kind::Codex), 100.0),
+            (Origin::delegated(Kind::Antigravity), 120.0)
+        ],
         "oldest first, the other session's job left out"
     );
     assert!(subagents(&records, &["nobody".into()], &p, 130.0, &alive).is_empty());
@@ -84,7 +88,7 @@ fn a_job_reads_as_a_subagent_with_the_tools_name_model_and_status() {
     assert_eq!(running.model.as_deref(), Some("gpt-5.5"));
     assert_eq!(running.effort.as_deref(), Some("high"));
     assert_eq!(running.path, rollout.to_string_lossy());
-    assert_eq!(running.origin, Origin::Codex);
+    assert_eq!(running.origin, Origin::delegated(Kind::Codex));
 
     let done = subagent(
         &finished(job(Tool::Codex, "m", Some("c1"), 100.0, 1), End::Ok),

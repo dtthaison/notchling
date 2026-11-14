@@ -1,6 +1,7 @@
 use super::glance::Peeked;
 use super::model::{Conversation, Timestamp};
 use super::util::{file_times, modified_secs};
+use crate::contract::Tool;
 use serde::Deserialize;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -22,11 +23,38 @@ pub enum Status {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum Origin {
+pub enum Via {
     #[default]
-    Claude,
-    Codex,
-    Antigravity,
+    Native,
+    Delegated,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Origin {
+    pub tool: Tool,
+    pub via: Via,
+}
+
+impl Origin {
+    pub const fn native(tool: Tool) -> Origin {
+        Origin {
+            tool,
+            via: Via::Native,
+        }
+    }
+
+    pub const fn delegated(tool: Tool) -> Origin {
+        Origin {
+            tool,
+            via: Via::Delegated,
+        }
+    }
+}
+
+impl Default for Origin {
+    fn default() -> Origin {
+        Origin::native(Tool::Claude)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -43,11 +71,20 @@ pub struct Subagent {
     pub updated: Timestamp,
     pub status: Status,
     pub origin: Origin,
+    pub session: String,
+    pub parent: String,
+    pub depth: u8,
 }
 
 impl Subagent {
     pub fn is_running(&self) -> bool {
         self.status == Status::Running
+    }
+
+    pub fn own_id(&self) -> &str {
+        self.id
+            .split_once(':')
+            .map_or(self.id.as_str(), |(_, rest)| rest)
     }
 }
 
@@ -92,6 +129,10 @@ pub fn list(
     let Ok(entries) = std::fs::read_dir(&dir) else {
         return Vec::new();
     };
+    let session = Path::new(transcript_path)
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
     let mut out = Vec::new();
     for entry in entries.flatten() {
         let name = entry.file_name().to_string_lossy().into_owned();
@@ -107,7 +148,7 @@ pub fn list(
                 .to_string_lossy(),
         );
         let mut agent = Subagent {
-            id,
+            id: format!("claude:{id}"),
             path: file.clone(),
             description: opt_str(&meta, "description").unwrap_or_else(|| "Subagent".into()),
             agent_type: opt_str(&meta, "agentType").unwrap_or_else(|| "general-purpose".into()),
@@ -118,7 +159,10 @@ pub fn list(
             started,
             updated,
             status: Status::Quiet,
-            origin: Origin::Claude,
+            origin: Origin::native(Tool::Claude),
+            session: session.clone(),
+            parent: session.clone(),
+            depth: 1,
         };
         agent.status = status_of(&agent, finished, now);
         if agent.status != Status::Completed && agent.status != Status::Failed && handed_back(&file)
@@ -132,7 +176,7 @@ pub fn list(
 }
 
 pub fn status_of(agent: &Subagent, finished: &HashMap<String, String>, now: Timestamp) -> Status {
-    let word = finished.get(&agent.id).or_else(|| {
+    let word = finished.get(agent.own_id()).or_else(|| {
         if agent.background {
             None
         } else {
@@ -213,10 +257,10 @@ pub fn read_shared(path: &str) -> std::sync::Arc<Conversation> {
 }
 
 pub fn peek(origin: Origin, path: &str, with_recent: bool) -> Option<Peeked> {
-    match origin {
-        Origin::Claude => super::conversation::peek_subagent(path, with_recent),
-        Origin::Codex => super::codex::peek(path, with_recent),
-        Origin::Antigravity => None,
+    match origin.tool {
+        Tool::Claude => super::conversation::peek_subagent(path, with_recent),
+        Tool::Codex => super::codex::peek(path, with_recent),
+        Tool::Antigravity => None,
     }
 }
 
@@ -300,3 +344,7 @@ pub fn console_list(
     });
     agents
 }
+
+#[cfg(test)]
+#[path = "subagents_shape_tests.rs"]
+mod shape_tests;

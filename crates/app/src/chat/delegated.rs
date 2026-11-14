@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
+use notchling_engine::contract::Tool;
 use notchling_engine::delegate::record::{self, Delegation, End, State};
 use notchling_engine::tools::agy::elsewhere;
 use notchling_engine::tools::codex::list::find_rollout;
@@ -66,14 +67,14 @@ pub fn subagent(
     alive: &dyn Fn(u32) -> bool,
 ) -> Subagent {
     let (origin, title) = match record.tool.as_str() {
-        "agy" => (Origin::Antigravity, "Antigravity CLI"),
-        _ => (Origin::Codex, "Codex"),
+        "agy" => (Origin::delegated(Tool::Antigravity), "Antigravity CLI"),
+        _ => (Origin::delegated(Tool::Codex), "Codex"),
     };
     let path = record
         .session
         .as_deref()
-        .and_then(|session| match origin {
-            Origin::Antigravity => {
+        .and_then(|session| match origin.tool {
+            Tool::Antigravity => {
                 let log = elsewhere::log_path(places.antigravity, session);
                 log.is_file().then_some(log)
             }
@@ -88,7 +89,7 @@ pub fn subagent(
         State::Ended(End::Stopped) => Status::Stopped,
     };
     Subagent {
-        id: record.id(),
+        id: format!("job:{}", record.id()),
         path,
         description: record.description.clone(),
         agent_type: title.to_string(),
@@ -100,6 +101,9 @@ pub fn subagent(
         updated: record.ended.unwrap_or(now),
         status,
         origin,
+        session: record.parent_session.clone(),
+        parent: record.parent_session.clone(),
+        depth: 1,
     }
 }
 

@@ -248,6 +248,7 @@ pub fn no_writers(_: &str) -> Vec<i32> {
 mod tests {
     use super::*;
     use crate::chat::subagent_rows::SubagentRows;
+    use notchling_engine::contract::Tool;
     use notchling_engine::transcript::model::{BackgroundShell, SessionFacts, TaskEntry};
     use notchling_engine::transcript::subagents::{
         Origin as SubagentOrigin, Status as SubagentStatus, Subagent,
@@ -339,6 +340,9 @@ mod tests {
             updated: 0.0,
             status: SubagentStatus::Completed,
             origin: Default::default(),
+            session: String::new(),
+            parent: String::new(),
+            depth: 1,
         };
         let i = inspector(&Conversation::default(), &rows(&[agent]), &no_writers);
         assert_eq!(
@@ -373,6 +377,9 @@ mod tests {
             updated: 0.0,
             status,
             origin: Default::default(),
+            session: String::new(),
+            parent: String::new(),
+            depth: 1,
         }
     }
 
@@ -395,11 +402,11 @@ mod tests {
     #[test]
     fn a_job_handed_to_another_tool_names_the_tool_before_its_model() {
         let mut job = agent(SubagentStatus::Running, "Codex");
-        job.origin = SubagentOrigin::Codex;
+        job.origin = SubagentOrigin::delegated(Tool::Codex);
         job.model = Some("gpt-5.5".into());
         job.effort = Some("high".into());
         let mut gone = agent(SubagentStatus::Stopped, "Antigravity CLI");
-        gone.origin = SubagentOrigin::Antigravity;
+        gone.origin = SubagentOrigin::delegated(Tool::Antigravity);
         let i = inspector(&Conversation::default(), &rows(&[job, gone]), &no_writers);
         assert_eq!(i.subagents[0].detail, "Running · Codex · gpt-5.5 high");
         assert_eq!(i.subagents[0].doing, None, "no rollout yet, nothing to say");
@@ -422,7 +429,7 @@ mod tests {
             ),
         );
         let mut job = agent(SubagentStatus::Running, "Codex");
-        job.origin = SubagentOrigin::Codex;
+        job.origin = SubagentOrigin::delegated(Tool::Codex);
         job.path = rollout.to_string_lossy().into_owned();
         let i = inspector(&Conversation::default(), &rows(&[job]), &no_writers);
         let doing = i.subagents[0].doing.as_deref().expect("a running job says");

@@ -48,18 +48,21 @@ fn lists_with_meta_and_status() {
     let subs = subagents::list(&transcript, &finished(&[("abg", "completed")]), now);
     let mut ids: Vec<&str> = subs.iter().map(|a| a.id.as_str()).collect();
     ids.sort_unstable();
-    assert_eq!(ids, ["abg", "afg"]);
-    let bg = subs.iter().find(|a| a.id == "abg").expect("abg");
+    assert_eq!(ids, ["claude:abg", "claude:afg"]);
+    let bg = subs.iter().find(|a| a.id == "claude:abg").expect("abg");
     assert_eq!(bg.description, "Survey the repo");
     assert_eq!(bg.agent_type, "Explore");
     assert_eq!(bg.model.as_deref(), Some("sonnet"));
     assert!(bg.background);
     assert_eq!(bg.status, Status::Completed);
-    let fg = subs.iter().find(|a| a.id == "afg").expect("afg");
+    let fg = subs.iter().find(|a| a.id == "claude:afg").expect("afg");
     assert_eq!(fg.status, Status::Running, "just written, no word it ended");
     let later = subagents::list(&transcript, &HashMap::new(), now + 3600.0);
     assert_eq!(
-        later.iter().find(|a| a.id == "afg").map(|a| a.status),
+        later
+            .iter()
+            .find(|a| a.id == "claude:afg")
+            .map(|a| a.status),
         Some(Status::Quiet)
     );
 }
@@ -78,6 +81,9 @@ fn bare(background: bool) -> Subagent {
         updated: 0.0,
         status: Status::Quiet,
         origin: Default::default(),
+        session: String::new(),
+        parent: String::new(),
+        depth: 1,
     }
 }
 
@@ -123,7 +129,7 @@ fn reads_notifications_from_the_session_transcript() {
 fn reads_the_subagents_own_sidechain_transcript() {
     let (_scratch, transcript) = setup();
     let subs = subagents::list(&transcript, &HashMap::new(), now_secs());
-    let sub = subs.iter().find(|a| a.id == "abg").expect("abg");
+    let sub = subs.iter().find(|a| a.id == "claude:abg").expect("abg");
     let c = subagents::read(&sub.path);
     let texts: Vec<String> = c
         .items
@@ -159,7 +165,7 @@ fn a_handed_back_report_ends_a_quiet_agent() {
     );
     let subs = subagents::list(&transcript, &HashMap::new(), now_secs());
     assert_eq!(
-        subs.iter().find(|a| a.id == "afg").map(|a| a.status),
+        subs.iter().find(|a| a.id == "claude:afg").map(|a| a.status),
         Some(Status::Completed)
     );
 }
