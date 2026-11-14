@@ -10,7 +10,7 @@ use super::answer::{permission_choices, type_key, QuestionDraft, Typed};
 use super::cards::{line, text, A};
 use super::requests::HookRequest;
 use super::view::NotchView;
-use crate::acting::{Control, Decision, Request};
+use crate::acting::{Control, Request};
 use crate::chat::prompt_flow::{failure_text, sending_text, Sending};
 use crate::mac::gate;
 
