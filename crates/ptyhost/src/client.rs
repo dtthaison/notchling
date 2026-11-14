@@ -109,7 +109,7 @@ impl HostClient {
             let why = reply
                 .get("error")
                 .and_then(Value::as_str)
-                .unwrap_or("Lỗi không rõ.");
+                .unwrap_or("Unknown error.");
             return Err(HostError::Refused(why.to_string()));
         }
         Ok(match reply.get("data") {
