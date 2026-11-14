@@ -9,6 +9,11 @@ pub mod capabilities;
 mod capabilities_tests;
 #[cfg(target_os = "macos")]
 pub mod capabilities_view;
+pub mod client_model;
+#[cfg(test)]
+mod client_model_tests;
+#[cfg(target_os = "macos")]
+pub mod client_view;
 pub mod hook_rows;
 #[cfg(test)]
 mod hook_rows_tests;

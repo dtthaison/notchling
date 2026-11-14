@@ -31,11 +31,13 @@ pub mod steps_sd;
 pub mod steps_sd_check;
 pub mod steps_sd_service;
 pub mod steps_secret;
+mod steps_versions;
 mod steps_xcode;
 pub mod token_creation;
 pub mod token_scope;
 mod token_scope_net;
 pub mod usage;
+pub mod versions_facts;
 pub mod worker_json;
 
 #[cfg(test)]
@@ -126,3 +128,7 @@ mod tests_token_scope;
 mod tests_token_scope_gh;
 #[cfg(test)]
 mod tests_token_scope_view;
+#[cfg(test)]
+mod tests_versions_facts;
+#[cfg(test)]
+pub(crate) mod tests_versions_probe;

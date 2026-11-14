@@ -222,7 +222,10 @@ impl ChatView {
             this.applied_setting(&e.key, &e.value, cx);
         })
         .detach();
-        entity.update(cx, |view, cx| view.ask_hooks(hooks, cx));
+        entity.update(cx, |view, cx| {
+            view.ask_hooks(hooks, cx);
+            view.ask_client(cx);
+        });
         self.show(entity, cx);
     }
 }

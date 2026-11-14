@@ -6,6 +6,7 @@ Notable changes to Notchling. The format follows [Keep a Changelog](https://keep
 
 ### Added
 
+- Tool versions, read only: Settings > Agents shows where the Mac's Claude Code was found, its version and how it was installed, and each worker's version against the Mac's. Machines gets a Tool Versions row on every card (same, behind, ahead, or not installed) and says when Notchling isn't running. Nothing is installed or changed on a worker.
 - A notifications inbox: a bell in Chat (and a badge in the open notch) collects what needs you, such as a vault approval, a secret an agent asked for, or a limit notice. Answer from Chat or from the phone, and get a system notification when something new arrives.
 
 ### Fixed

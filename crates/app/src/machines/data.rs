@@ -18,8 +18,10 @@ use notchling_engine::vault::list::VaultIndex;
 use notchling_engine::vault::store::{system_keychain, Unsupported, VaultStore};
 use notchling_engine::vault::url::renew_url;
 use notchling_engine::vault::VaultRequest;
+use notchling_local_api::SOCKET_NAME;
 
 use super::model::{Parts, VaultList, VaultStamp};
+use super::versions_feed::{fixed_mac, DaemonVersions, FixedVersions, MacVersions};
 use crate::chat::data::DataRoot;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -78,6 +80,16 @@ impl Setup {
 
     pub fn vault_index(&self) -> VaultIndex {
         VaultIndex::in_data(&self.data_dir)
+    }
+
+    pub fn versions(&self) -> Arc<dyn MacVersions> {
+        if self.fixture {
+            Arc::new(FixedVersions(Ok(fixed_mac())))
+        } else {
+            Arc::new(DaemonVersions {
+                socket: self.data_dir.join(SOCKET_NAME),
+            })
+        }
     }
 
     pub fn parts(&self) -> Parts {
@@ -150,6 +162,7 @@ impl Setup {
             runner,
             clock: Arc::new(now_secs),
             off: (!self.live).then_some(OFF),
+            versions: self.versions(),
         }
     }
 }

@@ -5,6 +5,7 @@ use super::runner::{Call, Channel, CommandResult, OutputSink, Runner};
 use super::shell;
 use crate::accounts::Secret;
 use crate::vault::{VaultEntry, VaultRequest};
+use crate::versions::WorkerTools;
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -22,6 +23,7 @@ impl StepId {
     pub const BASE_TOOLS: StepId = StepId(Cow::Borrowed("base-tools"));
     pub const CLAUDE_CODE: StepId = StepId(Cow::Borrowed("claude-code"));
     pub const CLAUDE_LOGIN: StepId = StepId(Cow::Borrowed("claude-login"));
+    pub const TOOL_VERSIONS: StepId = StepId(Cow::Borrowed("tool-versions"));
     pub const XCODE: StepId = StepId(Cow::Borrowed("xcode"));
     pub const PLUGINS: StepId = StepId(Cow::Borrowed("plugins"));
     pub const ISSUES_TOKEN: StepId = StepId(Cow::Borrowed("issues-token"));
@@ -101,6 +103,7 @@ pub struct Detected {
     pub abilities: Option<MachineAbilities>,
     pub token_expires: Option<String>,
     pub sd_version: Option<String>,
+    pub tools: Option<WorkerTools>,
 }
 
 impl Detected {
@@ -119,6 +122,7 @@ impl Detected {
         over(&mut d.abilities, &new.abilities);
         over(&mut d.token_expires, &new.token_expires);
         over(&mut d.sd_version, &new.sd_version);
+        over(&mut d.tools, &new.tools);
         d
     }
 }

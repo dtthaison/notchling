@@ -3,7 +3,7 @@ use std::rc::Rc;
 use gpui::{div, prelude::*, px, Context, Div, SharedString};
 use notchling_kit::metric::RADIUS_MD;
 use notchling_kit::part::{ButtonKind, PartState};
-use notchling_kit::ui::{button, hsla, icon, label, KitStyled};
+use notchling_kit::ui::{button, hsla, icon, label, KitPart, KitStyled};
 use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 
 use super::forms::AddForm;
@@ -175,6 +175,15 @@ impl MachinesView {
             if let Some(note) = &self.model.rename_note {
                 column = column.child(label(note, TypeRole::Meta, Ink::Expired, a));
             }
+        }
+        if let Some(text) = self.model.versions_banner() {
+            column = column.child(
+                Self::banner(Icon::Info, text, Ink::AccentText, None, a).part(
+                    "Versions Banner",
+                    a,
+                    cx,
+                ),
+            );
         }
         let busy = self
             .model

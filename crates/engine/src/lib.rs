@@ -24,6 +24,7 @@ pub mod terminal;
 pub mod tools;
 pub mod transcript;
 pub mod vault;
+pub mod versions;
 pub mod viz;
 
 pub fn crate_name() -> &'static str {

@@ -45,7 +45,10 @@ fn the_texts_are_one_plain_sentence_each() {
 fn the_page_and_tool_lists_keep_their_order() {
     assert_eq!(Page::ALL, [Page::General, Page::Agents, Page::Activity]);
     assert_eq!(Tool::ALL, [Tool::ClaudeCode]);
-    assert_eq!(Tool::ClaudeCode.sections(), [Section::Hooks]);
+    assert_eq!(
+        Tool::ClaudeCode.sections(),
+        [Section::Client, Section::Hooks]
+    );
     assert_eq!(Page::Agents.title(), "Agents");
     assert_eq!(Page::Activity.title(), "Activity");
 }

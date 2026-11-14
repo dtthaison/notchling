@@ -178,6 +178,9 @@ pub(super) fn world_with_secrets(
         runner,
         clock: Arc::new(|| T0),
         off: Some(OFF),
+        versions: Arc::new(super::versions_feed::FixedVersions(Err(
+            super::versions_feed::MacVersionsError::NotRunning,
+        ))),
     };
     World {
         registry,

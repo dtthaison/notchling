@@ -104,6 +104,9 @@ pub mod ops {
     pub const GIT_BRANCHES: &str = "git.branches";
 
     pub const ACTIVITY_LIST: &str = "activity.list";
+
+    pub const VERSIONS_GET: &str = "versions.get";
+    pub const VERSIONS_WORKERS: &str = "versions.workers";
 }
 
 pub mod topics {
@@ -143,6 +146,9 @@ pub mod topics {
     pub const INBOX: &str = "inbox";
     pub const INBOX_CHANGED: &str = "inbox.changed";
     pub const INBOX_REMOVED: &str = "inbox.removed";
+
+    pub const VERSIONS: &str = "versions";
+    pub const VERSIONS_CHANGED: &str = "versions.changed";
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]

@@ -24,6 +24,8 @@ use super::forms::{AddForm, JobForm};
 pub use super::model_sheet::AdminPassword;
 use super::pieces::{DraftCheck, FixLine, FixPrompt, MachineChip, RunningSwitch, SecretRow};
 pub use super::runs::{AdminAsks, PendingAdmin, Run, RunDone};
+use super::versions_feed::{MacSide, MacVersions, MacVersionsError};
+use super::versions_model::{banner as versions_banner, rows as versions_rows, VersionRow};
 
 pub trait Registry: Send + Sync {
     fn load(&self) -> RegistryState;
@@ -71,6 +73,7 @@ pub struct Parts {
     pub runner: Arc<dyn Runner>,
     pub clock: Arc<dyn Fn() -> f64 + Send + Sync>,
     pub off: Option<&'static str>,
+    pub versions: Arc<dyn MacVersions>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -150,6 +153,7 @@ pub struct MachinesModel {
     issues: BTreeMap<String, Vec<GhIssue>>,
     generation: u64,
     pub diff: Option<DiffSheet>,
+    mac: Option<Result<MacSide, MacVersionsError>>,
 }
 
 impl MachinesModel {
@@ -181,11 +185,41 @@ impl MachinesModel {
             issues: BTreeMap::new(),
             generation: 0,
             diff: None,
+            mac: None,
         };
         model.refresh_machines();
         model.refresh_vault();
         model.rebase_vault();
         model
+    }
+
+    pub fn mac_versions(&self) -> Option<&Result<MacSide, MacVersionsError>> {
+        self.mac.as_ref()
+    }
+
+    pub fn set_mac_versions(&mut self, answer: Result<MacSide, MacVersionsError>) {
+        self.mac = Some(answer);
+    }
+
+    pub fn ask_mac_versions(&mut self) {
+        let answer = self.parts.versions.get();
+        self.set_mac_versions(answer);
+    }
+
+    pub fn version_rows(&self, machine: &str) -> Option<Vec<VersionRow>> {
+        let results = self.parts.engine.results(machine);
+        let tools = results
+            .get(&StepId::TOOL_VERSIONS)?
+            .detected
+            .tools
+            .clone()?;
+        let none = Err(MacVersionsError::NotRunning);
+        let mac = self.mac.as_ref().unwrap_or(&none);
+        Some(versions_rows(mac, &tools, &[]))
+    }
+
+    pub fn versions_banner(&self) -> Option<&'static str> {
+        self.mac.as_ref().and_then(versions_banner)
     }
 
     pub fn engine(&self) -> &SetupEngine {

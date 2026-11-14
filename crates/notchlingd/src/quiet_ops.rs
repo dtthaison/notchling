@@ -4,7 +4,7 @@ use serde_json::Value;
 use crate::limits_ops::LIMITS_STATUS;
 use crate::limits_usage::LIMITS_USAGE;
 
-pub const QUIET_READS: [&str; 9] = [
+pub const QUIET_READS: [&str; 10] = [
     ops::BRIDGE_STATUS,
     ops::BRIDGE_DEVICES,
     ops::BRIDGE_TUNNEL_STATUS,
@@ -14,6 +14,7 @@ pub const QUIET_READS: [&str; 9] = [
     ops::PROVIDERS_USAGE,
     LIMITS_STATUS,
     LIMITS_USAGE,
+    ops::VERSIONS_WORKERS,
 ];
 
 const SYNCING: [(&str, &str); 4] = [

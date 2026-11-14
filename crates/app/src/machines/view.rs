@@ -126,11 +126,24 @@ impl MachinesView {
         );
     }
 
+    pub(super) fn ask_mac(&mut self, cx: &mut Context<Self>) {
+        if self.fixed {
+            return;
+        }
+        let versions = self.model.parts.versions.clone();
+        Self::background(
+            cx,
+            move || versions.get(),
+            |view, answer, _| view.model.set_mac_versions(answer),
+        );
+    }
+
     pub(super) fn refresh_all(&mut self, cx: &mut Context<Self>) {
         self.reload(cx);
         if self.fixed {
             return;
         }
+        self.ask_mac(cx);
         let engine = self.model.parts.engine.clone();
         Self::background(cx, move || engine.refresh(None, true), |_, _, _| {});
     }
@@ -153,6 +166,7 @@ impl MachinesView {
             cx,
             move || poller.refresh(false),
             |view, _, cx| {
+                view.ask_mac(cx);
                 view.reload(cx);
                 view.check_after_poll(cx);
             },

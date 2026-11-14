@@ -10,6 +10,8 @@ use super::step::{
     StepContext, StepId,
 };
 use super::usage::SecretUsage;
+use super::versions_facts;
+use crate::versions::WorkerTools;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
@@ -88,6 +90,7 @@ pub(super) struct State {
     pub step_published: BTreeMap<String, BTreeMap<StepId, u64>>,
     pub shown: BTreeMap<u64, ShownRecord>,
     pub revision: u64,
+    pub tools_saved: BTreeMap<String, WorkerTools>,
 }
 
 pub struct SetupEngine {
@@ -192,6 +195,15 @@ impl SetupEngine {
             .get(machine)
             .cloned()
             .unwrap_or_default()
+    }
+    pub fn show(&self, machine: &str, id: StepId, result: CheckResult) {
+        let mut state = lock(&self.state);
+        state
+            .results
+            .entry(machine.to_owned())
+            .or_default()
+            .insert(id, result);
+        state.revision += 1;
     }
     pub fn running(&self, machine: &str) -> Option<StepId> {
         lock(&self.state).running.get(machine).cloned()
@@ -320,6 +332,7 @@ impl SetupEngine {
             .map(|m| m.name)
             .collect();
         let mut learned = false;
+        let mut tools_seen: Vec<(String, WorkerTools)> = Vec::new();
         for m in &targets {
             let Some(mut e) = evaluations.remove(&m.name) else {
                 continue;
@@ -366,6 +379,9 @@ impl SetupEngine {
             if e.slow_ran {
                 s.last_slow.insert(m.name.clone(), (self.deps.clock)());
             }
+            if let Some(tools) = &e.detected.tools {
+                tools_seen.push((m.name.clone(), tools.clone()));
+            }
             if e.detected != Detected::default() {
                 let old = s.facts.get(&m.name).cloned().unwrap_or_default();
                 s.facts.insert(m.name.clone(), old.merged(&e.detected));
@@ -376,7 +392,27 @@ impl SetupEngine {
             let names: BTreeSet<String> = targets.iter().map(|m| m.name.clone()).collect();
             self.save_facts(&names);
         }
+        self.save_tools(tools_seen, &registry);
         self.changed();
+    }
+
+    fn save_tools(&self, seen: Vec<(String, WorkerTools)>, registry: &[String]) {
+        let Some(data) = &self.deps.offers_data else {
+            return;
+        };
+        for (name, tools) in seen {
+            let unchanged = lock(&self.state)
+                .tools_saved
+                .get(&name)
+                .is_some_and(|old| versions_facts::same(old, &tools));
+            if unchanged {
+                continue;
+            }
+            if versions_facts::save(data, &name, &tools).is_ok() {
+                lock(&self.state).tools_saved.insert(name, tools);
+            }
+        }
+        let _ = versions_facts::prune(data, registry);
     }
 
     pub fn check_draft(&self, draft: &Machine) -> BTreeMap<StepId, CheckResult> {

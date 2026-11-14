@@ -33,13 +33,14 @@ impl Tool {
 
     pub fn sections(self) -> &'static [Section] {
         match self {
-            Tool::ClaudeCode => &[Section::Hooks],
+            Tool::ClaudeCode => &[Section::Client, Section::Hooks],
         }
     }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Section {
+    Client,
     Hooks,
 }
 
