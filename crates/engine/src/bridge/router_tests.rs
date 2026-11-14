@@ -690,3 +690,13 @@ fn projects_recent_and_unknown_ops() {
     rig.send(&connection, r#"{"id":3,"op":"ping"}"#);
     assert!(is_ok(&io.last_json()));
 }
+
+#[test]
+fn unknown_op_says_no_such_op() {
+    let rig = Rig::new();
+    let (connection, io, _) = rig.login("test-phone");
+    rig.send(&connection, r#"{"id":1,"op":"nope"}"#);
+    let reply = io.last_json();
+    assert_eq!(error_code(&reply), Some("invalid"));
+    assert_eq!(reply["error"]["message"], json!("No such op \"nope\"."));
+}

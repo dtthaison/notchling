@@ -70,7 +70,7 @@
       "takeover": {
         "available": false,
         "busy": true,
-        "reason": "Đóng session ở nơi đang mở (Claude desktop / VS Code) rồi tiếp quản",
+        "reason": "Close the session where it is open (Claude desktop / VS Code), then take it over",
         "stoppable": true
       },
       "tool": "claude"

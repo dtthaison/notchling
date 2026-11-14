@@ -26,7 +26,7 @@ impl Imaging for ImageCrate {
     fn jpeg(&self, data: &[u8], max_width: i64) -> Result<Vec<u8>, ImagingError> {
         if data.len() >= 12 && &data[4..8] == b"ftyp" {
             return Err(ImagingError::Unsupported(
-                "ảnh HEIC chưa đổi được sang JPEG trên máy này".into(),
+                "HEIC images can't be converted to JPEG on this Mac yet".into(),
             ));
         }
         let side = max_width.clamp(i64::from(MIN_SIDE), i64::from(MAX_SIDE)) as u32;

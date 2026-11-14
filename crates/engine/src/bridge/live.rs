@@ -65,7 +65,7 @@ pub trait Sources: Send + Sync {
         _item_id: &str,
         _action: ActionId,
     ) -> Result<InboxOutcome, BridgeFailure> {
-        Err(BridgeFailure::not_found("Không có hộp thư này."))
+        Err(BridgeFailure::not_found("No such inbox item."))
     }
     fn now_ms(&self) -> f64;
 }
@@ -84,7 +84,7 @@ pub trait Acting: Send + Sync {
     fn new_session(&self, cwd: &Path, model: Option<&str>) -> Result<(), BridgeFailure>;
     fn new_session_with_model(&self, _cwd: &Path, _model_id: &str) -> Result<(), BridgeFailure> {
         Err(BridgeFailure::invalid(
-            "Backend này không chọn được model theo id.",
+            "This backend can't pick a model by id.",
         ))
     }
     fn take_over(
@@ -95,7 +95,7 @@ pub trait Acting: Send + Sync {
 }
 
 pub const ACTING_OFF: &str =
-    "Máy này chưa bật quyền điều khiển session: ứng dụng Notchling cũ vẫn giữ chúng.";
+    "The Mac isn't allowed to control sessions yet: the older Notchling app still holds them.";
 
 pub struct ActingOff;
 
@@ -200,16 +200,16 @@ impl<S: Sources, A: Acting> LiveBackend<S, A> {
         let row = rows
             .iter()
             .find(|r| r.id == row_id)
-            .ok_or_else(|| BridgeFailure::not_found("Không có session này."))?;
+            .ok_or_else(|| BridgeFailure::not_found("No such session."))?;
         let (tool, id) = foreign::parse(row_id)
-            .ok_or_else(|| BridgeFailure::not_found("Không có session này."))?;
+            .ok_or_else(|| BridgeFailure::not_found("No such session."))?;
         let live = self.sources.foreign_live(std::slice::from_ref(row));
         let (conversation, running) = match tool {
             Tool::Codex => {
                 let path = row
                     .transcript_path
                     .as_deref()
-                    .ok_or_else(|| BridgeFailure::not_found("Chưa tìm thấy transcript."))?;
+                    .ok_or_else(|| BridgeFailure::not_found("Transcript not found yet."))?;
                 (codex::read(path), live.codex_running.contains(&id))
             }
             Tool::Agy => (
@@ -229,7 +229,7 @@ impl<S: Sources, A: Acting> LiveBackend<S, A> {
         self.sessions()
             .into_iter()
             .find(|s| s.id == id)
-            .ok_or_else(|| BridgeFailure::not_found("Không có session này."))
+            .ok_or_else(|| BridgeFailure::not_found("No such session."))
     }
 }
 
@@ -272,7 +272,7 @@ impl<S: Sources, A: Acting> BridgeBackend for LiveBackend<S, A> {
                 .and_then(|s| s.transcript_path.clone()),
             None => session.transcript_path.clone(),
         };
-        let path = path.ok_or_else(|| BridgeFailure::not_found("Chưa tìm thấy transcript."))?;
+        let path = path.ok_or_else(|| BridgeFailure::not_found("Transcript not found yet."))?;
         let read = chat::read_in(
             &path,
             subagent_id.is_none(),

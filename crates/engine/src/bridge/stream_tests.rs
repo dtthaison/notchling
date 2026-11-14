@@ -184,7 +184,7 @@ fn no_windows_and_hidden_windows_are_not_found() {
     assert_eq!(none.code, ErrorCode::NotFound);
     let hidden = choose_window(&[window(1, "a", false, false)], None).expect_err("hidden");
     assert_eq!(hidden.code, ErrorCode::NotFound);
-    assert!(hidden.message.contains("ẩn"));
+    assert!(hidden.message.contains("hidden"));
 }
 
 #[derive(Default)]
@@ -289,7 +289,7 @@ fn without_the_screen_recording_permission_nothing_is_listed() {
         .start(&connection, &options(None))
         .expect_err("refused");
     assert_eq!(failure.code, ErrorCode::Internal);
-    assert!(failure.message.contains("Ghi màn hình"));
+    assert!(failure.message.contains("Screen Recording"));
     assert!(lock(&state.plans).is_empty());
     assert_eq!(streamer.active(), 0);
 }

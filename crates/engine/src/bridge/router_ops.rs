@@ -24,15 +24,15 @@ fn int(body: &Body, key: &str) -> Option<i64> {
 pub(super) fn require<'a>(body: &'a Body, key: &str) -> Result<&'a str, BridgeFailure> {
     string(body, key)
         .filter(|v| !v.is_empty())
-        .ok_or_else(|| BridgeFailure::invalid(format!("Thiếu \"{key}\".")))
+        .ok_or_else(|| BridgeFailure::invalid(format!("Missing \"{key}\".")))
 }
 
 fn view_only() -> BridgeFailure {
-    BridgeFailure::view_only("Session mở ngoài Console — chỉ xem.")
+    BridgeFailure::view_only("This session is open outside Notchling: view only.")
 }
 
 fn busy_sending() -> BridgeFailure {
-    BridgeFailure::busy("Đang gửi tin trước đó vào session này.")
+    BridgeFailure::busy("An earlier message is still being sent to this session.")
 }
 
 pub fn local_url(text: &str) -> Option<&str> {
@@ -55,7 +55,7 @@ impl Router {
             .sessions()
             .into_iter()
             .find(|s| s.id == id)
-            .ok_or_else(|| BridgeFailure::not_found("Không có session này."))
+            .ok_or_else(|| BridgeFailure::not_found("No such session."))
     }
 
     fn exclusive<T>(
@@ -105,7 +105,7 @@ impl Router {
                 .bytes()
                 .all(|b| b.is_ascii_alphanumeric() || b == b'-');
         if !well_formed {
-            return Err(BridgeFailure::invalid("imageId không hợp lệ."));
+            return Err(BridgeFailure::invalid("imageId is not valid."));
         }
         self.session(session_id)?;
         let width = int(body, "maxWidth").unwrap_or(800).clamp(64, 1600);
@@ -148,7 +148,7 @@ impl Router {
             Some(text) => local_url(text)
                 .ok_or_else(|| {
                     BridgeFailure::invalid(
-                        "Chỉ chụp được URL http(s) trên localhost hoặc 127.0.0.1.",
+                        "Only http(s) URLs on localhost or 127.0.0.1 can be captured.",
                     )
                 })?
                 .to_string(),
@@ -157,7 +157,7 @@ impl Router {
                 .viz(session_id, false)?
                 .web_url
                 .filter(|u| local_url(u).is_some())
-                .ok_or_else(|| BridgeFailure::not_found("Session này chưa có URL web."))?,
+                .ok_or_else(|| BridgeFailure::not_found("This session has no web URL yet."))?,
         };
         let jpeg = self.backend.web_snapshot(&url, width)?;
         let announce = json!({"binary": true, "bytes": jpeg.len(), "format": "jpeg", "url": url});
@@ -175,7 +175,7 @@ impl Router {
         let text = require(body, "text")?;
         let length = text.chars().count();
         if length > MAX_TEXT_CHARACTERS {
-            return Err(BridgeFailure::invalid("Tin nhắn quá dài."));
+            return Err(BridgeFailure::invalid("The message is too long."));
         }
         let target = self.session(session_id)?;
         if target.control == Control::ViewOnly {
@@ -197,13 +197,13 @@ impl Router {
         let target = self.session(session_id)?;
         if target.control != Control::ConsolePty {
             return Err(BridgeFailure::view_only(
-                "Chỉ ngắt được session do Console giữ terminal.",
+                "Only sessions whose terminal Notchling holds can be interrupted.",
             ));
         }
-        let busy = BridgeFailure::busy("Đang gửi lệnh trước đó vào session này.");
+        let busy = BridgeFailure::busy("An earlier command is still being sent to this session.");
         self.exclusive(connection, session_id, busy, || {
             if !self.allow_send_now(session_id) {
-                return Err(BridgeFailure::busy("Vừa ngắt xong, đợi một chút."));
+                return Err(BridgeFailure::busy("Just interrupted, wait a moment."));
             }
             self.backend.send_now(&target)
         })?;
@@ -223,11 +223,11 @@ impl Router {
         let bytes = int(body, "bytes")
             .filter(|b| *b > 0 && *b as usize <= MAX_BYTES)
             .ok_or_else(|| {
-                BridgeFailure::invalid(format!("Ảnh phải nhỏ hơn {} MB.", MAX_BYTES / 1_048_576))
+                BridgeFailure::invalid(format!("The image must be under {} MB.", MAX_BYTES / 1_048_576))
             })?;
         let caption = string(body, "caption").unwrap_or_default();
         if caption.chars().count() > MAX_TEXT_CHARACTERS {
-            return Err(BridgeFailure::invalid("Chú thích quá dài."));
+            return Err(BridgeFailure::invalid("The caption is too long."));
         }
         if self.session(session_id)?.control == Control::ViewOnly {
             return Err(view_only());
@@ -248,7 +248,7 @@ impl Router {
         connection: &Arc<Connection>,
     ) -> Result<Value, BridgeFailure> {
         let upload_id = require(body, "uploadId")?;
-        let missing = || BridgeFailure::invalid("Thiếu \"seq\" hoặc \"data\" (base64).");
+        let missing = || BridgeFailure::invalid("Missing \"seq\" or \"data\" (base64).");
         let sequence = int(body, "seq").ok_or_else(missing)?;
         let chunk = string(body, "data")
             .and_then(|d| base64::engine::general_purpose::STANDARD.decode(d).ok())
@@ -270,7 +270,7 @@ impl Router {
             .finish(upload_id, connection.id, self.now_ms())
             .map_err(upload_failure)?;
         let ext = ImageStore::detect(&upload.data)
-            .ok_or_else(|| BridgeFailure::invalid("Chỉ nhận ảnh JPEG, PNG, GIF hoặc WebP."))?;
+            .ok_or_else(|| BridgeFailure::invalid("Only JPEG, PNG, GIF or WebP images are accepted."))?;
         let target = self.session(&upload.session_id)?;
         if target.control == Control::ViewOnly {
             return Err(view_only());
@@ -279,7 +279,7 @@ impl Router {
             let file = self
                 .images
                 .save(&upload.data, ext, self.now_ms())
-                .map_err(|_| BridgeFailure::internal("Mac không lưu được ảnh."))?;
+                .map_err(|_| BridgeFailure::internal("The Mac can't save the image."))?;
             let message = ImageStore::message(&upload.caption, &file.to_string_lossy());
             let sent = self.backend.send_message(&message, &target);
             if sent.is_err() {
@@ -311,21 +311,21 @@ impl Router {
         let prompt: PendingPrompt = self
             .backend
             .pending_prompt(request_id)
-            .ok_or_else(|| BridgeFailure::not_found("Không còn câu hỏi hoặc permission này."))?;
+            .ok_or_else(|| BridgeFailure::not_found("This question or permission is no longer open."))?;
         let response = match &prompt.kind {
             PromptKind::Permission => match body.get("allow").and_then(Value::as_bool) {
                 Some(true) => PromptResponse::Allow,
                 Some(false) => PromptResponse::Deny,
                 None => {
                     return Err(BridgeFailure::invalid(
-                        "Permission cần \"allow\": true hoặc false.",
+                        "A permission needs \"allow\": true or false.",
                     ))
                 }
             },
             PromptKind::Question(questions) => {
                 if questions.iter().any(|q| q.multi_select) {
                     return Err(BridgeFailure::invalid(
-                        "Câu hỏi chọn nhiều đáp án: trả lời trên terminal.",
+                        "A multiple-choice question: answer it in the terminal.",
                     ));
                 }
                 PromptResponse::Answers(answers(body, questions)?)
@@ -345,11 +345,11 @@ impl Router {
         let model_id = match body.get("modelId") {
             None | Some(Value::Null) => None,
             Some(Value::String(id)) if self.backend.model_allowed(id) => Some(id.as_str()),
-            Some(_) => return Err(BridgeFailure::invalid("Model không hợp lệ.")),
+            Some(_) => return Err(BridgeFailure::invalid("The model is not valid.")),
         };
         let model = string(body, "model");
         if model_id.is_none() && model.is_some_and(|m| !MODELS.contains(&m)) {
-            return Err(BridgeFailure::invalid("Model không hợp lệ."));
+            return Err(BridgeFailure::invalid("The model is not valid."));
         }
         let folder = validated_folder(cwd, &self.home)?;
         match model_id {
@@ -371,7 +371,7 @@ impl Router {
         let stop_original = match body.get("stopOriginal") {
             None => false,
             Some(raw) => raw.as_bool().ok_or_else(|| {
-                BridgeFailure::invalid("\"stopOriginal\" phải là true hoặc false.")
+                BridgeFailure::invalid("\"stopOriginal\" must be true or false.")
             })?,
         };
         let target = self.session(id)?;
@@ -470,10 +470,10 @@ impl Router {
 
 fn upload_failure(error: UploadError) -> BridgeFailure {
     match error {
-        UploadError::OutOfOrder => BridgeFailure::invalid("Mảnh ảnh sai thứ tự."),
-        UploadError::TooBig => BridgeFailure::invalid("Mảnh ảnh quá lớn."),
-        UploadError::Incomplete => BridgeFailure::invalid("Ảnh chưa gửi đủ."),
-        UploadError::Unknown => BridgeFailure::not_found("Không có lượt gửi ảnh này (hết hạn?)."),
+        UploadError::OutOfOrder => BridgeFailure::invalid("Image chunks are out of order."),
+        UploadError::TooBig => BridgeFailure::invalid("The image chunk is too large."),
+        UploadError::Incomplete => BridgeFailure::invalid("The image is incomplete."),
+        UploadError::Unknown => BridgeFailure::not_found("No such image upload (expired?)."),
     }
 }
 
@@ -481,7 +481,7 @@ pub fn answers(body: &Body, questions: &[PromptQuestion]) -> Result<Vec<String>,
     if let Some(text) = string(body, "text") {
         if questions.len() != 1 || text.is_empty() || text.chars().count() > 500 {
             return Err(BridgeFailure::invalid(
-                "\"text\" chỉ dùng cho một câu hỏi, tối đa 500 ký tự.",
+                "\"text\" works for a single question only, up to 500 characters.",
             ));
         }
         return Ok(vec![text.to_string()]);
@@ -489,11 +489,11 @@ pub fn answers(body: &Body, questions: &[PromptQuestion]) -> Result<Vec<String>,
     let raw: Vec<&Value> = match body.get("choice") {
         Some(Value::Array(list)) => list.iter().collect(),
         Some(single) => vec![single],
-        None => return Err(BridgeFailure::invalid("Cần \"choice\" hoặc \"text\".")),
+        None => return Err(BridgeFailure::invalid("\"choice\" or \"text\" is required.")),
     };
     if raw.len() != questions.len() {
         return Err(BridgeFailure::invalid(format!(
-            "Cần {} câu trả lời.",
+            "{} answers are required.",
             questions.len()
         )));
     }
@@ -505,13 +505,13 @@ pub fn answers(body: &Body, questions: &[PromptQuestion]) -> Result<Vec<String>,
                     .ok()
                     .filter(|n| (1..=question.options.len()).contains(n))
                     .map(|n| question.options[n - 1].clone())
-                    .ok_or_else(|| BridgeFailure::invalid(format!("Lựa chọn {number} không có.")));
+                    .ok_or_else(|| BridgeFailure::invalid(format!("There is no choice {number}.")));
             }
             value
                 .as_str()
                 .filter(|label| question.options.iter().any(|o| o == label))
                 .map(String::from)
-                .ok_or_else(|| BridgeFailure::invalid("Lựa chọn không khớp đáp án nào."))
+                .ok_or_else(|| BridgeFailure::invalid("The choice matches no answer."))
         })
         .collect()
 }

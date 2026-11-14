@@ -32,7 +32,7 @@ pub struct Unsupported;
 impl Snapshotter for Unsupported {
     fn capture(&self, request: &SnapshotRequest) -> Result<Vec<u8>, BridgeFailure> {
         Err(BridgeFailure::not_reachable(format!(
-            "Máy này chưa chụp được {}.",
+            "The Mac can't capture {} yet.",
             request.url
         )))
     }
@@ -44,7 +44,7 @@ pub fn allows_navigation(scheme: &str) -> bool {
 
 pub fn not_running_message(url: &Url) -> String {
     format!(
-        "{}:{} không chạy trên Mac (không trả lời trong 1 giây).",
+        "{}:{} isn't running on the Mac (no answer in 1 second).",
         url.host,
         url.port.map_or_else(|| "80".to_string(), |p| p.to_string())
     )
@@ -94,7 +94,7 @@ impl WebSnapshots {
 
     pub fn snapshot(&self, url: &str, width: i64) -> Result<Vec<u8>, BridgeFailure> {
         let parsed = Url::parse_local(url).ok_or_else(|| {
-            BridgeFailure::invalid("Chỉ chụp được URL http(s) trên localhost hoặc 127.0.0.1.")
+            BridgeFailure::invalid("Only http(s) URLs on localhost or 127.0.0.1 can be captured.")
         })?;
         if !(self.reachable)(&parsed) {
             return Err(BridgeFailure::not_reachable(not_running_message(&parsed)));
@@ -106,7 +106,7 @@ impl WebSnapshots {
         if jpeg.starts_with(&[0xFF, 0xD8]) {
             Ok(jpeg)
         } else {
-            Err(BridgeFailure::internal("Không mã hoá được ảnh JPEG."))
+            Err(BridgeFailure::internal("Can't encode the JPEG image."))
         }
     }
 }
