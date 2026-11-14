@@ -196,6 +196,15 @@ impl SetupEngine {
             .cloned()
             .unwrap_or_default()
     }
+    pub fn show(&self, machine: &str, id: StepId, result: CheckResult) {
+        let mut state = lock(&self.state);
+        state
+            .results
+            .entry(machine.to_owned())
+            .or_default()
+            .insert(id, result);
+        state.revision += 1;
+    }
     pub fn running(&self, machine: &str) -> Option<StepId> {
         lock(&self.state).running.get(machine).cloned()
     }

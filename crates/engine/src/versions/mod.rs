@@ -28,7 +28,7 @@ mod worker_tests;
 pub use identity::{Identity, IdentityCache};
 pub use mark::{mark, Mark};
 pub use method::{can_pin, Method};
-pub use mismatch::{mismatch, Mismatch};
+pub use mismatch::{mismatch, mismatch_between, Mismatch};
 pub use parse::cli_output;
 pub use version::Version;
 pub use worker::{parse_probe, ToolState, WorkerTools};

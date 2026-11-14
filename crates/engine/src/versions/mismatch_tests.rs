@@ -90,3 +90,19 @@ fn several_tools_come_in_tool_order() {
     assert_eq!(tools, vec![Tool::Claude, Tool::Codex]);
     assert_eq!(found[1].text(), "vps-1 runs Codex 0.165.0, the Mac 0.166.0");
 }
+
+#[test]
+fn between_compares_plain_version_maps() {
+    use super::mismatch::mismatch_between;
+    let found = mismatch_between(
+        &mac(&[(Tool::Claude, "2.1.324"), (Tool::Codex, "0.166.0")]),
+        "m1",
+        &mac(&[(Tool::Claude, "2.1.323"), (Tool::Codex, "0.166.0")]),
+    );
+    assert_eq!(found.len(), 1);
+    assert_eq!(
+        found[0].text(),
+        "m1 runs Claude Code 2.1.323, the Mac 2.1.324"
+    );
+    assert!(mismatch_between(&mac(&[(Tool::Agy, "1.0.0")]), "m1", &mac(&[])).is_empty());
+}
