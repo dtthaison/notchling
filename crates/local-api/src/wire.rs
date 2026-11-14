@@ -127,6 +127,9 @@ pub mod topics {
     pub const SESSION_HELD: &str = "session.held";
     pub const AGY_PERMISSION_PENDING: &str = "agy.permission.pending";
     pub const AGY_PERMISSION_RESOLVED: &str = "agy.permission.resolved";
+    pub const LOG: &str = "log";
+    pub const LOG_EVENT: &str = "log.event";
+    pub const LOG_CHECK: &str = "log.check";
     pub const BRIDGE: &str = "bridge";
     pub const BRIDGE_PAIR_REQUEST: &str = "bridge.pair.request";
     pub const BRIDGE_CHANGED: &str = "bridge.changed";

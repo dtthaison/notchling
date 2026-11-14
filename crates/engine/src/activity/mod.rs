@@ -6,8 +6,8 @@ mod row;
 
 pub use db::{DbError, EventsDb, Opened};
 pub use import::{
-    assign_seq, import_account_log, import_legacy_audit, import_remote_log, rebuild_from_months,
-    Imported,
+    assign_seq, expires, import_account_log, import_legacy_audit, import_remote_log,
+    rebuild_from_months, Imported,
 };
 pub use import_run::{import_once, ImportFiles, ImportReport};
 pub use reply::{

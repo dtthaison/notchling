@@ -261,6 +261,26 @@ impl EventsDb {
         Ok(removed as u64)
     }
 
+    pub fn expired_span(&self, now_ms: i64) -> Option<(i64, i64)> {
+        self.db
+            .query_row(
+                "SELECT MIN(ts), MAX(ts) FROM activity WHERE expires < ?1",
+                [now_ms],
+                |r| Ok((r.get::<_, Option<i64>>(0)?, r.get::<_, Option<i64>>(1)?)),
+            )
+            .ok()
+            .and_then(|(from, to)| Some((from?, to?)))
+    }
+
+    pub fn oldest_ts(&self) -> Option<i64> {
+        self.db
+            .query_row("SELECT MIN(ts) FROM activity", [], |r| {
+                r.get::<_, Option<i64>>(0)
+            })
+            .ok()
+            .flatten()
+    }
+
     pub fn size_bytes(&self) -> u64 {
         let pragma = |name: &str| -> i64 {
             self.db

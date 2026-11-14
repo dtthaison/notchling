@@ -27,7 +27,7 @@ struct Build<'a> {
     host: &'a str,
 }
 
-fn expires(kind: &str, ts: i64) -> i64 {
+pub fn expires(kind: &str, ts: i64) -> i64 {
     let days = registry::find(kind).map_or(0, |s| i64::from(s.keep_days));
     ts.saturating_add(DAY_MS * if days == 0 { AUDIT_DAYS } else { days })
 }
