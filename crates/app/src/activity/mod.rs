@@ -6,3 +6,6 @@ pub mod wire;
 
 #[cfg(test)]
 mod model_tests;
+
+#[cfg(test)]
+mod words_tests;
