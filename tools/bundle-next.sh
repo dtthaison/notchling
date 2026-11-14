@@ -3,6 +3,19 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 export PATH="$HOME/.cargo/bin:$PATH"
 
+IDENTITY="${NOTCHLING_SIGN_IDENTITY:--}"
+KEYCHAIN=()
+if [[ -n "${NOTCHLING_SIGN_KEYCHAIN:-}" ]]; then
+  KEYCHAIN=(--keychain "$NOTCHLING_SIGN_KEYCHAIN")
+fi
+if [[ "$IDENTITY" != "-" ]]; then
+  IDENTITIES="$(security find-identity -v -p codesigning ${NOTCHLING_SIGN_KEYCHAIN:-})"
+  if [[ "$IDENTITIES" != *"$IDENTITY"* ]]; then
+    echo "no code signing identity matching \"$IDENTITY\" (security find-identity -v -p codesigning lists them)" >&2
+    exit 1
+  fi
+fi
+
 cargo build --release --locked -p notchling-app -p notchling-notchlingd -p notchling-ptyhost
 TARGET="$(cargo metadata --format-version 1 --no-deps | python3 -c 'import json, sys; print(json.load(sys.stdin)["target_directory"])')/release"
 NAME="Notchling"
@@ -34,10 +47,23 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </dict>
 </plist>
 PLIST
-codesign --force --sign - "$APP/Contents/MacOS/notchling"
-codesign --force --sign - "$APP/Contents/Helpers/notchling-ptyhost"
-codesign --force --sign - "$APP"
+sign() {
+  codesign --force --timestamp=none "${KEYCHAIN[@]}" --sign "$IDENTITY" "$@"
+}
+sign --identifier dev.notchling.daemon "$APP/Contents/MacOS/notchling"
+sign --identifier dev.notchling.ptyhost "$APP/Contents/Helpers/notchling-ptyhost"
+sign "$APP"
 echo "built $APP ($VERSION)"
+if [[ "$IDENTITY" == "-" ]]; then
+  echo "signed ad hoc: the Keychain asks again for Notchling's items after this build is installed (docs/local-signing.md)"
+else
+  TEAM="$(codesign -dv "$APP/Contents/MacOS/notchling" 2>&1 | sed -n 's/^TeamIdentifier=//p')"
+  echo "signed with \"$IDENTITY\", team ${TEAM:-not set}"
+  APPLE_ISSUED='anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] and certificate leaf[field.1.2.840.113635.100.6.1.13] or anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.1] and certificate leaf[field.1.2.840.113635.100.6.1.12] or anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.1] and certificate leaf[field.1.2.840.113635.100.6.1.7]'
+  if ! codesign --verify -R="$APPLE_ISSUED" "$APP/Contents/MacOS/notchling" 2>/dev/null; then
+    echo "warning: not an Apple-issued development or Developer ID certificate, so the Keychain still tells builds apart by hash and asks again after each install (docs/local-signing.md)" >&2
+  fi
+fi
 
 if [[ "${1:-}" == "--install" ]]; then
   if grep -q "<string>local.notchling</string>" "/Applications/$NAME.app/Contents/Info.plist" 2>/dev/null; then
