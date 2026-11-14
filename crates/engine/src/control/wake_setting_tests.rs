@@ -31,9 +31,7 @@ fn a_resumer_waits_from_a_wake_until_its_window_has_passed() {
     assert!(!resumer.waiting());
     resumer.did_wake(0);
     assert!(resumer.waiting());
-    assert!(resumer
-        .check(&[], SETTLE_MS, true, &|_| None)
-        .is_empty());
+    assert!(resumer.check(&[], SETTLE_MS, true, &|_| None).is_empty());
     assert!(resumer.waiting(), "the window is still open");
     assert!(resumer
         .check(&[], WINDOW_MS + 1, true, &|_| None)

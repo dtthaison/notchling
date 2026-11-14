@@ -221,16 +221,17 @@ fn the_daemon_holds_only_while_an_app_is_attached_and_says_so_to_the_room() {
 #[test]
 fn awake_state_answers_what_is_held_now_to_the_app_and_is_a_quiet_read() {
     let d = daemon("awake-follow-op");
-    let ops = d
-        .wired
-        .ops(
-            &d.layout,
-            Arc::new(Mutex::new(json!([]))),
-            FirstScan::open(),
-            Duration::ZERO,
-        );
+    let ops = d.wired.ops(
+        &d.layout,
+        Arc::new(Mutex::new(json!([]))),
+        FirstScan::open(),
+        Duration::ZERO,
+    );
     assert_eq!(ops.spec(ops::AWAKE_STATE), Some(OpSpec::APP_QUIET));
-    let ask = || ops.call(&app_caller(), ops::AWAKE_STATE, &json!({})).unwrap();
+    let ask = || {
+        ops.call(&app_caller(), ops::AWAKE_STATE, &json!({}))
+            .unwrap()
+    };
     assert_eq!(ask(), json!({"holding": null}));
     d.room.app.store(true, Ordering::SeqCst);
     d.wired.awake.tick_once();

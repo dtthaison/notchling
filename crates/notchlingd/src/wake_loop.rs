@@ -77,13 +77,16 @@ impl ActingOps {
     }
 }
 
+pub type CutOff = Box<dyn Fn(&Agent) -> Option<String> + Send + Sync>;
+pub type Nudger = Box<dyn Fn(&Agent, &str) -> Result<(), String> + Send + Sync>;
+
 pub struct Sources {
     pub enabled: Box<dyn Fn() -> bool + Send + Sync>,
     pub can_act: Box<dyn Fn() -> bool + Send + Sync>,
     pub agents: Box<dyn Fn() -> Vec<Agent> + Send + Sync>,
-    pub cut_off: Box<dyn Fn(&Agent) -> Option<String> + Send + Sync>,
+    pub cut_off: CutOff,
     pub now_ms: Box<dyn Fn() -> i64 + Send + Sync>,
-    pub nudge: Box<dyn Fn(&Agent, &str) -> Result<(), String> + Send + Sync>,
+    pub nudge: Nudger,
 }
 
 pub struct WakeLoop {
@@ -144,9 +147,7 @@ impl WakeLoop {
         if lock(&self.wakes).woke() {
             lock(&self.resumer).did_wake((self.sources.now_ms)());
         }
-        if !lock(&self.resumer).waiting()
-            || !(self.sources.enabled)()
-            || !(self.sources.can_act)()
+        if !lock(&self.resumer).waiting() || !(self.sources.enabled)() || !(self.sources.can_act)()
         {
             return Vec::new();
         }

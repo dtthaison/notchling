@@ -20,7 +20,9 @@ impl Handler for Daemon {
 
     fn call(&self, _: &Caller, op: &str, _: &Value) -> Result<Value, ApiError> {
         match op {
-            ops::SETTINGS_SWITCHES => Ok(json!({"accounts": false, "vault": false, "install": false})),
+            ops::SETTINGS_SWITCHES => {
+                Ok(json!({"accounts": false, "vault": false, "install": false}))
+            }
             ops::VAULT_PENDING => Ok(json!({"approvals": [], "requests": []})),
             ops::AWAKE_STATE => Ok(self.holding.lock().unwrap().clone()),
             other => Err(ApiError::internal(format!("{other} has no handler"))),
@@ -102,17 +104,9 @@ fn the_cup_follows_what_the_daemon_holds_from_the_first_read_through_each_event_
     wait_until("the first read", || feed.take_hold() == Some(true));
     wait_until("the follow", || handle.app_following("settings"));
     assert_eq!(feed.take_hold(), None);
-    handle.publish(
-        "settings",
-        "awake.changed",
-        &json!({"holding": null}),
-    );
+    handle.publish("settings", "awake.changed", &json!({"holding": null}));
     wait_until("the release", || feed.take_hold() == Some(false));
-    handle.publish(
-        "settings",
-        "awake.changed",
-        &json!({"holding": "system"}),
-    );
+    handle.publish("settings", "awake.changed", &json!({"holding": "system"}));
     wait_until("the hold", || feed.take_hold() == Some(true));
     handle.shutdown();
     let _ = thread.join();

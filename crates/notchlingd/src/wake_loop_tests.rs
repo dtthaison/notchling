@@ -135,15 +135,28 @@ fn a_cut_off_job_is_told_to_continue_once_after_the_settle_time() {
     *r.agents.lock().unwrap() = vec![job("a", AgentGroup::Completed)];
     r.cut("a", "cut-1");
     r.wake_at(0);
-    assert!(r.tick_at(SETTLE_MS - 1).is_empty(), "the network is coming back");
+    assert!(
+        r.tick_at(SETTLE_MS - 1).is_empty(),
+        "the network is coming back"
+    );
     let nudges = r.tick_at(SETTLE_MS);
     assert_eq!(nudges.len(), 1);
     assert_eq!(nudges[0].agent_id, "a");
     assert_eq!(nudges[0].job_id, "job-a");
-    assert_eq!(*r.sent.lock().unwrap(), [("a".to_string(), NUDGE.to_string())]);
-    assert!(r.tick_at(SETTLE_MS + 5_000).is_empty(), "one nudge per cut-off");
+    assert_eq!(
+        *r.sent.lock().unwrap(),
+        [("a".to_string(), NUDGE.to_string())]
+    );
+    assert!(
+        r.tick_at(SETTLE_MS + 5_000).is_empty(),
+        "one nudge per cut-off"
+    );
     r.cut("a", "cut-2");
-    assert_eq!(r.tick_at(SETTLE_MS + 6_000).len(), 1, "a new cut-off is a new one");
+    assert_eq!(
+        r.tick_at(SETTLE_MS + 6_000).len(),
+        1,
+        "a new cut-off is a new one"
+    );
     assert_eq!(r.sent.lock().unwrap().len(), 2);
 }
 
@@ -160,7 +173,11 @@ fn nothing_is_sent_while_the_setting_is_off_or_the_daemon_may_not_act_and_it_wai
     assert!(r.tick_at(SETTLE_MS + 1_000).is_empty());
     assert!(r.sent.lock().unwrap().is_empty());
     r.can_act.store(true, Ordering::SeqCst);
-    assert_eq!(r.tick_at(SETTLE_MS + 2_000).len(), 1, "still inside the window");
+    assert_eq!(
+        r.tick_at(SETTLE_MS + 2_000).len(),
+        1,
+        "still inside the window"
+    );
 }
 
 #[test]
@@ -219,7 +236,11 @@ fn a_nudge_that_failed_is_not_sent_again_for_the_same_cut_off() {
     assert!(r.tick_at(SETTLE_MS + 2_000).is_empty());
     r.refuse.store(false, Ordering::SeqCst);
     r.cut("a", "cut-2");
-    assert_eq!(r.tick_at(SETTLE_MS + 4_000).len(), 1, "the row is free again");
+    assert_eq!(
+        r.tick_at(SETTLE_MS + 4_000).len(),
+        1,
+        "the row is free again"
+    );
     assert_eq!(r.sent.lock().unwrap().len(), 2);
 }
 
@@ -256,7 +277,11 @@ fn the_loop_thread_follows_a_wake_and_closing_stops_it() {
     r.wake.close();
     let seen = r.reads.load(Ordering::SeqCst);
     std::thread::sleep(Duration::from_millis(60));
-    assert_eq!(r.reads.load(Ordering::SeqCst), seen, "the thread has stopped");
+    assert_eq!(
+        r.reads.load(Ordering::SeqCst),
+        seen,
+        "the thread has stopped"
+    );
 }
 
 #[test]
@@ -292,11 +317,13 @@ fn only_a_real_root_listens_for_the_mac_waking() {
 
 const CUT: &str = r#"{"type":"assistant","uuid":"u-cut","isApiErrorMessage":true,"streamCutCause":"stream_suspended","message":{"content":[{"type":"text","text":"API Error: Your computer went to sleep mid-response"}]}}"#;
 
+type Attaches = Arc<Mutex<Vec<(String, Option<String>)>>>;
+
 struct Glue {
     wake: WakeLoop,
     woke: Arc<AtomicUsize>,
     now: Arc<AtomicI64>,
-    attached: Arc<Mutex<Vec<(String, Option<String>)>>>,
+    attached: Attaches,
     writes: Arc<Mutex<Vec<String>>>,
     acting: Arc<crate::acting::Acting>,
     room: Arc<FakeRoom>,
@@ -435,5 +462,9 @@ fn the_daemon_starts_the_wake_loop_and_closing_it_stops_listening() {
     wired.close();
     woke.fetch_add(1, Ordering::SeqCst);
     std::thread::sleep(Duration::from_millis(100));
-    assert_eq!(woke.load(Ordering::SeqCst), 1, "closed: nobody is listening");
+    assert_eq!(
+        woke.load(Ordering::SeqCst),
+        1,
+        "closed: nobody is listening"
+    );
 }
