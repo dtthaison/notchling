@@ -38,9 +38,9 @@ class EmitArbTests(unittest.TestCase):
 
     def test_locale_comes_first_and_keys_are_sorted(self):
         tree, _ = check.load(TREE)
-        keys = [k for k in json.loads(emit_arb.render(tree, "en")) if not k.startswith("@")]
+        keys = list(json.loads(emit_arb.render(tree, "en")))
         self.assertEqual(keys[0], "@@locale")
-        names = keys[1:]
+        names = [k for k in keys if not k.startswith("@")]
         self.assertEqual(names, sorted(names))
 
     def test_mac_messages_are_left_out(self):
