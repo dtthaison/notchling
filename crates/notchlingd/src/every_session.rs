@@ -1,14 +1,17 @@
+use crate::agy_ops::AgyOps;
 use crate::layout::Layout;
-use notchling_engine::bridge::foreign::ForeignRow;
+use notchling_engine::bridge::foreign::{self, ForeignRow, Tool};
+use notchling_engine::bridge::live::ForeignLive;
 use notchling_engine::sessions::{Agent, AgentGroup, AgentTarget};
 use notchling_engine::tools::agy::summaries::{self, Row};
 use notchling_engine::tools::codex::list as codex_list;
 use serde_json::{json, Value};
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
+pub const LIST_WITHIN_MS: f64 = 6.0 * 3_600_000.0;
 pub const CACHE_MS: i64 = 2_000;
 pub const CODEX_ROWS: usize = 30;
 pub const CODEX_DAYS: i64 = 14;
@@ -26,6 +29,7 @@ pub struct EverySession {
     agy_root: PathBuf,
     agy_copy_dir: PathBuf,
     cached: Mutex<Option<(i64, Vec<Agent>)>>,
+    agy: OnceLock<Arc<AgyOps>>,
 }
 
 impl EverySession {
@@ -36,6 +40,7 @@ impl EverySession {
             agy_root: layout.antigravity_dir(),
             agy_copy_dir: layout.antigravity_copy_dir(),
             cached: Mutex::new(None),
+            agy: OnceLock::new(),
         }
     }
 
@@ -46,7 +51,38 @@ impl EverySession {
             agy_root: PathBuf::new(),
             agy_copy_dir: PathBuf::new(),
             cached: Mutex::new(None),
+            agy: OnceLock::new(),
         }
+    }
+
+    pub fn attach_agy(&self, agy: Arc<AgyOps>) {
+        let _ = self.agy.set(agy);
+    }
+
+    pub fn live(&self, rows: &[ForeignRow], now_ms: i64) -> ForeignLive {
+        let mut live = ForeignLive::default();
+        let Some(agy) = self.agy.get() else {
+            return live;
+        };
+        let one = rows.len() == 1;
+        for row in rows {
+            let Some((Tool::Agy, id)) = foreign::parse(&row.id) else {
+                continue;
+            };
+            let recent = (now_ms as f64) - row.since_ms < LIST_WITHIN_MS;
+            if !one && !recent {
+                if row.working {
+                    live.agy_working.insert(id);
+                }
+                continue;
+            }
+            let read = agy.phone_read(&id, row.working);
+            if read.working {
+                live.agy_working.insert(id);
+            }
+            live.conversations.insert(row.id.clone(), read.conversation);
+        }
+        live
     }
 
     pub fn agents(&self, now_ms: i64) -> Vec<Agent> {

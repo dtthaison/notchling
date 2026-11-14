@@ -6,6 +6,7 @@ pub mod acting_ops;
 pub mod activity_ops;
 pub mod agy_elsewhere;
 pub mod agy_ops;
+pub mod agy_phone;
 pub mod agy_sink;
 pub mod attach;
 pub mod bridge_backend;
@@ -66,6 +67,8 @@ mod acting_ops_tests;
 mod acting_permission_tests;
 #[cfg(test)]
 mod activity_ops_tests;
+#[cfg(test)]
+mod agy_phone_tests;
 #[cfg(test)]
 mod bridge_models_tests;
 #[cfg(test)]

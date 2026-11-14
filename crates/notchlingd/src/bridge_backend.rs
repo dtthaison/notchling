@@ -6,7 +6,7 @@ use crate::prompts::{Kind, Prompt};
 use notchling_engine::bridge::agents;
 use notchling_engine::bridge::foreign::ForeignRow;
 use notchling_engine::bridge::inbox::InboxOutcome;
-use notchling_engine::bridge::live::{Acting, Sources};
+use notchling_engine::bridge::live::{Acting, ForeignLive, Sources};
 use notchling_engine::bridge::model::{
     Control, ModelChoice, PendingPrompt, PromptKind, PromptQuestion, PromptResponse, Session,
     TakeoverOutcome,
@@ -111,6 +111,10 @@ impl Sources for DaemonSources {
 
     fn foreign_rows(&self) -> Vec<ForeignRow> {
         self.every.rows(self.now_ms() as i64)
+    }
+
+    fn foreign_live(&self, rows: &[ForeignRow]) -> ForeignLive {
+        self.every.live(rows, self.now_ms() as i64)
     }
 
     fn projects_dir(&self) -> Option<PathBuf> {

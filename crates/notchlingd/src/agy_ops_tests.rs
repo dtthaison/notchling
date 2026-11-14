@@ -258,6 +258,22 @@ fn the_conversation_read_works_with_acting_off_and_follows_the_open_runner() {
 }
 
 #[test]
+fn the_phone_reads_a_session_open_here_from_the_runner_with_the_same_bound() {
+    let rig = rig(true);
+    rig.loaded();
+    let read = rig.ops.phone_read(SESSION, false);
+    let op = rig
+        .call(CONVERSATION, json!({"id": ROW, "peek": true}))
+        .unwrap();
+    let same: notchling_engine::transcript::model::Conversation =
+        serde_json::from_value(op["conversation"].clone()).unwrap();
+    assert!(!read.conversation.items.is_empty());
+    assert_eq!(read.conversation, same);
+    assert_eq!(read.working, op["working"] == true);
+    assert_eq!(read.omitted > 0, op["truncated"] == true);
+}
+
+#[test]
 fn open_runs_agy_in_the_sessions_own_folder_and_refuses_one_it_does_not_know() {
     let rig = rig(true);
     for bad_id in ["agy:nope", "agy:", "agy:../x", "claude:abc", "x"] {

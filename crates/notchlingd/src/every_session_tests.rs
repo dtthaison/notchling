@@ -1,4 +1,6 @@
+use crate::acting::Acting;
 use crate::acting_ops_tests::{setup, FakeRoom};
+use crate::agy_ops::AgyOps;
 use crate::bridge_backend::{Approvals, DaemonSources};
 use crate::daemon_wiring::Ops;
 use crate::every_session::{EverySession, CACHE_MS};
@@ -114,6 +116,14 @@ impl Fixture {
         .unwrap();
     }
 
+    pub(crate) fn agy_log(&self, id: &str, steps: &[Value]) {
+        let path =
+            notchling_engine::tools::agy::elsewhere::log_path(&self.layout.antigravity_dir(), id);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let text: Vec<String> = steps.iter().map(Value::to_string).collect();
+        std::fs::write(path, text.join("\n") + "\n").unwrap();
+    }
+
     pub(crate) fn every_tool(&self) {
         self.codex(CODEX_ID, None, "Fix the codex bug");
         self.antigravity(AGY_ID, "Edit the agy file", "IDLE", 60);
@@ -141,8 +151,19 @@ pub(crate) fn claude_agent() -> Agent {
     }
 }
 
-fn every(fixture: &Fixture) -> Arc<EverySession> {
-    Arc::new(EverySession::new(&fixture.layout))
+pub(crate) fn every_with_agy(fixture: &Fixture) -> (Arc<EverySession>, Arc<AgyOps>) {
+    let every = Arc::new(EverySession::new(&fixture.layout));
+    let agy = Arc::new(AgyOps::for_daemon(
+        &fixture.layout,
+        Arc::new(Acting::in_memory(false)),
+        Arc::new(FakeRoom::default()),
+    ));
+    every.attach_agy(agy.clone());
+    (every, agy)
+}
+
+pub(crate) fn every(fixture: &Fixture) -> Arc<EverySession> {
+    every_with_agy(fixture).0
 }
 
 fn cli() -> Caller {
@@ -158,7 +179,11 @@ pub(crate) fn claude_list() -> Arc<Mutex<Value>> {
     Arc::new(Mutex::new(json!([claude_agent()])))
 }
 
-fn sources(dir: &Path, list: Arc<Mutex<Value>>, every: Arc<EverySession>) -> DaemonSources {
+pub(crate) fn sources(
+    dir: &Path,
+    list: Arc<Mutex<Value>>,
+    every: Arc<EverySession>,
+) -> DaemonSources {
     let room = Arc::new(FakeRoom::default());
     DaemonSources {
         sessions: list,

@@ -355,6 +355,7 @@ impl Wired {
             room.clone(),
         ));
         acting.attach_agy(agy.clone());
+        every.attach_agy(agy.clone());
 
         let switches = Arc::new(Switches::off());
         let on = switches.accounts.clone();
