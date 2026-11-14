@@ -2,6 +2,7 @@ use crate::acting_ops::Room;
 use crate::op_group::OpGroup;
 use notchling_engine::control::launcher::{LaunchOutput, Launcher};
 use notchling_engine::control::plan::Command;
+use notchling_engine::machines::versions_facts;
 use notchling_engine::store;
 use notchling_engine::versions::mac::{detect, watch_paths, Installed, Problem, Roots};
 use notchling_engine::versions::record::{Cause, Fact, Recorder};
@@ -16,7 +17,7 @@ use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-pub const WORKERS_DOC: &str = "versions/workers";
+pub const WORKERS_DOC: &str = versions_facts::DOC;
 pub const SEEN_DOC: &str = "versions/seen";
 pub const RESCAN_EVERY: Duration = Duration::from_secs(600);
 pub const AGY_ASK_EVERY_MS: i64 = 600_000;

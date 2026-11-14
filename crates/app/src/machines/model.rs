@@ -24,6 +24,7 @@ use super::forms::{AddForm, JobForm};
 pub use super::model_sheet::AdminPassword;
 use super::pieces::{DraftCheck, FixLine, FixPrompt, MachineChip, RunningSwitch, SecretRow};
 pub use super::runs::{AdminAsks, PendingAdmin, Run, RunDone};
+use super::versions_feed::MacVersions;
 
 pub trait Registry: Send + Sync {
     fn load(&self) -> RegistryState;
@@ -71,6 +72,7 @@ pub struct Parts {
     pub runner: Arc<dyn Runner>,
     pub clock: Arc<dyn Fn() -> f64 + Send + Sync>,
     pub off: Option<&'static str>,
+    pub versions: Arc<dyn MacVersions>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

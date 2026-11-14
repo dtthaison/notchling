@@ -31,6 +31,9 @@ pub mod runs;
 #[cfg(target_os = "macos")]
 pub mod sheets_view;
 #[cfg(target_os = "macos")]
+pub mod versions_feed;
+#[cfg(test)]
+mod versions_feed_tests;
 pub mod view;
 #[cfg(target_os = "macos")]
 pub mod window;
