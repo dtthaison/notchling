@@ -432,13 +432,15 @@ class Surface extends StatelessWidget {
     return RepaintBoundary(
       child: CustomPaint(
         foregroundPainter: outline == null ? _EdgePainter(shape, kit) : null,
+        // The shadow is cast by a plain rounded rectangle: the GPU blurs that shape analytically, while a blurred
+        // superellipse path is a full Gaussian pass every frame the surface moves (the composer while the keyboard
+        // slides, bubbles while scrolling). Under the fill the difference doesn't show.
         child: DecoratedBox(
-          decoration: ShapeDecoration(
-            color: fill ?? kit.card,
-            shape: shape,
-            shadows: shadows.isEmpty ? null : shadows,
+          decoration: BoxDecoration(borderRadius: r, boxShadow: shadows.isEmpty ? null : shadows),
+          child: DecoratedBox(
+            decoration: ShapeDecoration(color: fill ?? kit.card, shape: shape),
+            child: content,
           ),
-          child: content,
         ),
       ),
     );
