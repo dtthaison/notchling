@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:math' as math;
+import 'dart:ui' as ui;
 import 'dart:collection';
 import 'dart:typed_data';
 
@@ -11,6 +13,9 @@ import '../../core/protocol/models.dart';
 import '../../l10n/app_localizations.dart';
 import '../connection/connection.dart';
 import 'chat_cache.dart';
+import 'gallery_math.dart';
+import 'markup_editor.dart';
+import 'photo_send.dart';
 
 /// Widths the phone asks the Mac for: a thumbnail under a message, and the full-screen view.
 const int thumbnailWidth = 480;
@@ -189,9 +194,11 @@ class _PictureThumbnailState extends ConsumerState<PictureThumbnail> {
   }
 }
 
-/// Full screen: swipe sideways through the message's pictures, pinch to zoom one. While a picture is zoomed in,
-/// a drag pans it instead of turning the page.
-class PictureViewer extends StatefulWidget {
+/// Full screen: drag sideways through the message's pictures, pinch to zoom one. One handler owns every gesture (a
+/// PageView plus InteractiveViewer fight over the same drag, and pinch lost on a phone): two fingers zoom and pan,
+/// one finger at 1x turns the page, one finger zoomed pans the picture and, once its edge is reached, carries on
+/// into the next page.
+class PictureViewer extends ConsumerStatefulWidget {
   const PictureViewer({super.key, required this.sessionId, required this.images, this.initial = 0, this.preview});
   final String sessionId;
   final List<ChatImage> images;
@@ -201,61 +208,335 @@ class PictureViewer extends StatefulWidget {
   final Uint8List? preview;
 
   @override
-  State<PictureViewer> createState() => _PictureViewerState();
+  ConsumerState<PictureViewer> createState() => _PictureViewerState();
 }
 
-class _PictureViewerState extends State<PictureViewer> {
-  late final PageController _pages = PageController(initialPage: widget.initial);
+class _PictureViewerState extends ConsumerState<PictureViewer> with SingleTickerProviderStateMixin {
+  late final AnimationController _anim;
+
+  /// Where the strip is, in pages (fractional while dragging or settling).
+  late double _position = widget.initial.toDouble();
   late int _index = widget.initial;
-  bool _zoomed = false;
+  double _zoom = 1;
+  Offset _pan = Offset.zero;
+  Size _viewport = Size.zero;
+
+  // What the running animation moves from and to.
+  double _fromPosition = 0, _toPosition = 0, _fromZoom = 1, _toZoom = 1;
+  Offset _fromPan = Offset.zero, _toPan = Offset.zero;
+
+  // The gesture in progress.
+  int _pointers = 0;
+  double _startZoom = 1;
+  Offset _startPan = Offset.zero;
+  Offset _startFocal = Offset.zero;
+  Offset _lastFocal = Offset.zero;
+  Offset _doubleTapAt = Offset.zero;
+
+  /// The bytes each page shows now (large when it arrived), for Reply and Mark up.
+  final Map<int, Uint8List> _bytes = <int, Uint8List>{};
+
+  int get _count => widget.images.length;
+
+  @override
+  void initState() {
+    super.initState();
+    _anim = AnimationController(vsync: this, duration: const Duration(milliseconds: 250))..addListener(_tick);
+  }
 
   @override
   void dispose() {
-    _pages.dispose();
+    _anim.dispose();
     super.dispose();
+  }
+
+  Size _contentOf(int index) => fittedSize(_viewport, widget.images[index].aspect ?? (_viewport.width / math.max(1, _viewport.height)));
+  Offset get _center => Offset(_viewport.width / 2, _viewport.height / 2);
+
+  // MARK: gestures
+
+  void _scaleStart(ScaleStartDetails details) {
+    _anim.stop();
+    _settleIndex();
+    _beginGesture(details.pointerCount, details.localFocalPoint);
+  }
+
+  /// Called again whenever the number of fingers changes, so the new gesture starts from where the old one ended.
+  void _beginGesture(int pointers, Offset focal) {
+    _pointers = pointers;
+    _startZoom = _zoom;
+    _startPan = _pan;
+    _startFocal = focal;
+    _lastFocal = focal;
+  }
+
+  /// A stopped animation can leave the strip between pages: the page it is closer to is the current one.
+  void _settleIndex() {
+    final int near = _position.round().clamp(0, _count - 1);
+    if (near != _index) {
+      _index = near;
+      _zoom = 1;
+      _pan = Offset.zero;
+    }
+  }
+
+  void _scaleUpdate(ScaleUpdateDetails details) {
+    if (_viewport.isEmpty) return;
+    if (details.pointerCount != _pointers) _beginGesture(details.pointerCount, details.localFocalPoint);
+    final Size content = _contentOf(_index);
+    if (details.pointerCount >= 2) {
+      final ({double zoom, Offset pan}) next = zoomAround(
+        focal: _startFocal - _center,
+        startPan: _startPan,
+        startZoom: _startZoom,
+        zoom: _startZoom * details.scale,
+        shift: details.localFocalPoint - _startFocal,
+        viewport: _viewport,
+        content: content,
+      );
+      setState(() {
+        _zoom = next.zoom;
+        _pan = next.pan;
+      });
+      return;
+    }
+    final Offset delta = details.localFocalPoint - _lastFocal;
+    _lastFocal = details.localFocalPoint;
+    setState(() {
+      if (_zoom <= 1.01) {
+        _position = dragPosition(_position, -delta.dx / _viewport.width, _count);
+        return;
+      }
+      double dx = delta.dx;
+      // A page left part-way across by an earlier overflow comes back before the picture pans again.
+      final double displaced = (_position - _index) * _viewport.width;
+      if (displaced != 0 && dx != 0 && (displaced > 0) == (dx > 0)) {
+        final double back = math.min(dx.abs(), displaced.abs()) * dx.sign;
+        _position -= back / _viewport.width;
+        dx -= back;
+      }
+      // Pan inside the picture; what is left of the horizontal move once its edge is reached turns the page.
+      final ({Offset pan, double overflow}) split = splitHorizontal(dx, _pan, _zoom, _viewport, content);
+      _pan = clampPan(Offset(split.pan.dx, split.pan.dy + delta.dy), _zoom, _viewport, content);
+      if (split.overflow != 0) _position = dragPosition(_position, -split.overflow / _viewport.width, _count);
+    });
+  }
+
+  void _scaleEnd(ScaleEndDetails details) {
+    _pointers = 0;
+    final double velocity = details.velocity.pixelsPerSecond.dx;
+    final bool offCenter = (_position - _index).abs() > 0.001;
+    if (offCenter) {
+      final int target = targetPage(_position, velocity, _index, _count);
+      _animateTo(position: target.toDouble(), zoom: target == _index ? _zoom : 1, pan: target == _index ? _pan : Offset.zero);
+    } else if (_zoom < 1.01) {
+      _animateTo(position: _position, zoom: 1, pan: Offset.zero);
+    }
+  }
+
+  void _doubleTapDown(TapDownDetails details) => _doubleTapAt = details.localPosition;
+
+  void _doubleTap() {
+    if (_viewport.isEmpty || (_position - _index).abs() > 0.001) return;
+    if (_zoom > 1.01) {
+      _animateTo(position: _position, zoom: 1, pan: Offset.zero);
+      return;
+    }
+    final ({double zoom, Offset pan}) next = zoomAround(
+      focal: _doubleTapAt - _center,
+      startPan: _pan,
+      startZoom: _zoom,
+      zoom: doubleTapZoom,
+      shift: Offset.zero,
+      viewport: _viewport,
+      content: _contentOf(_index),
+    );
+    _animateTo(position: _position, zoom: next.zoom, pan: next.pan);
+  }
+
+  // MARK: animation
+
+  void _animateTo({required double position, required double zoom, required Offset pan}) {
+    _fromPosition = _position;
+    _toPosition = position;
+    _fromZoom = _zoom;
+    _toZoom = zoom;
+    _fromPan = _pan;
+    _toPan = pan;
+    if (MediaQuery.disableAnimationsOf(context)) {
+      _anim.value = 1;
+      _tick();
+      _finish();
+      return;
+    }
+    _anim
+      ..value = 0
+      ..animateTo(1, curve: Curves.easeOutCubic).whenCompleteOrCancel(() {
+        if (mounted && _anim.value == 1) _finish();
+      });
+  }
+
+  void _tick() {
+    final double t = _anim.value;
+    setState(() {
+      _position = ui.lerpDouble(_fromPosition, _toPosition, t)!;
+      _zoom = ui.lerpDouble(_fromZoom, _toZoom, t)!;
+      _pan = Offset.lerp(_fromPan, _toPan, t)!;
+    });
+  }
+
+  /// The strip stopped on a page: the one left behind forgets its zoom.
+  void _finish() {
+    final int landed = _toPosition.round().clamp(0, _count - 1);
+    setState(() {
+      if (landed != _index) {
+        _index = landed;
+        _zoom = 1;
+        _pan = Offset.zero;
+      }
+      _position = landed.toDouble();
+    });
+  }
+
+  // MARK: actions
+
+  Uint8List? get _currentBytes => _bytes[_index];
+
+  Future<void> _reply() async {
+    final Uint8List? bytes = _currentBytes;
+    if (bytes == null) return;
+    final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
+    final AppL10n l10n = AppL10n.of(context);
+    final NavigatorState navigator = Navigator.of(context);
+    final bool sent = await previewAndSend(context, ref, widget.sessionId, bytes);
+    if (!sent) return;
+    navigator.pop();
+    messenger.showSnackBar(SnackBar(content: Text(l10n.photoSent)));
+  }
+
+  Future<void> _markup() async {
+    final Uint8List? bytes = _currentBytes;
+    if (bytes == null) return;
+    final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
+    final AppL10n l10n = AppL10n.of(context);
+    final NavigatorState navigator = Navigator.of(context);
+    final bool? sent = await navigator.push<bool>(MaterialPageRoute<bool>(
+      fullscreenDialog: true,
+      builder: (_) => MarkupEditor(sessionId: widget.sessionId, bytes: bytes),
+    ));
+    if (sent != true) return;
+    navigator.pop();
+    messenger.showSnackBar(SnackBar(content: Text(l10n.photoSent)));
+  }
+
+  // MARK: build
+
+  Widget _pageAt(int index) {
+    final bool current = index == _index;
+    final double x = (index - _position) * _viewport.width;
+    final Matrix4 matrix = Matrix4.translationValues(x + (current ? _pan.dx : 0), current ? _pan.dy : 0, 0);
+    if (current) matrix.scaleByDouble(_zoom, _zoom, 1, 1);
+    return Transform(
+      key: ValueKey<String>('page-${widget.images[index].id}'),
+      transform: matrix,
+      alignment: Alignment.center,
+      child: _PicturePage(
+        sessionId: widget.sessionId,
+        image: widget.images[index],
+        preview: index == widget.initial ? widget.preview : null,
+        onBytes: (Uint8List bytes) {
+          if (!mounted) return;
+          // The state is read when a button is pressed, so a rebuild is only needed to enable the buttons.
+          final bool first = !_bytes.containsKey(index);
+          _bytes[index] = bytes;
+          if (first && index == _index) setState(() {});
+        },
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     final AppL10n l10n = AppL10n.of(context);
-    final int count = widget.images.length;
+    final Kit kit = Kit.of(context);
+    final bool ready = _currentBytes != null;
     return Scaffold(
       backgroundColor: Kit.dark.sidebar,
       appBar: AppBar(
         backgroundColor: Kit.dark.sidebar,
         leading: IconButton(tooltip: l10n.pictureClose, icon: const Icon(Icons.close), onPressed: () => Navigator.of(context).pop()),
-        title: count > 1 ? Text('${_index + 1} / $count', style: Kit.of(context).label) : null,
+        title: _count > 1 ? Text('${_index + 1} / $_count', style: kit.label) : null,
         centerTitle: true,
       ),
-      body: PageView.builder(
-        controller: _pages,
-        physics: _zoomed ? const NeverScrollableScrollPhysics() : const PageScrollPhysics(),
-        itemCount: count,
-        onPageChanged: (int index) => setState(() {
-          _index = index;
-          _zoomed = false;
+      body: Stack(fit: StackFit.expand, children: <Widget>[
+        LayoutBuilder(builder: (BuildContext context, BoxConstraints constraints) {
+          _viewport = constraints.biggest;
+          return ClipRect(
+            child: GestureDetector(
+              key: const ValueKey<String>('picture-gallery'),
+              behavior: HitTestBehavior.opaque,
+              onScaleStart: _scaleStart,
+              onScaleUpdate: _scaleUpdate,
+              onScaleEnd: _scaleEnd,
+              onDoubleTapDown: _doubleTapDown,
+              onDoubleTap: _doubleTap,
+              child: Stack(fit: StackFit.expand, children: <Widget>[
+                for (int i = 0; i < _count; i++)
+                  // Only the pages that can be on screen are built; the others would load pictures for nothing.
+                  if ((i - _position).abs() < 1.5) _pageAt(i),
+              ]),
+            ),
+          );
         }),
-        itemBuilder: (BuildContext context, int index) => _PicturePage(
-          key: ValueKey<String>(widget.images[index].id),
-          sessionId: widget.sessionId,
-          image: widget.images[index],
-          preview: index == widget.initial ? widget.preview : null,
-          onZoom: (bool zoomed) {
-            if (zoomed != _zoomed) setState(() => _zoomed = zoomed);
-          },
+        Positioned(
+          left: 0,
+          right: 0,
+          bottom: 0,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(begin: Alignment.bottomCenter, end: Alignment.topCenter, colors: <Color>[Kit.dark.sidebar.withValues(alpha: 0.92), Kit.dark.sidebar.withValues(alpha: 0)]),
+            ),
+            child: SafeArea(
+              top: false,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(Space.lg, Space.xl, Space.lg, Space.md),
+                child: Row(children: <Widget>[
+                  Expanded(
+                    child: FilledButton.icon(
+                      key: const ValueKey<String>('picture-reply'),
+                      onPressed: ready ? () => unawaited(_reply()) : null,
+                      icon: const Icon(Icons.reply, size: 20),
+                      label: Text(l10n.pictureReply),
+                    ),
+                  ),
+                  const SizedBox(width: Space.md),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      key: const ValueKey<String>('picture-markup'),
+                      onPressed: ready ? () => unawaited(_markup()) : null,
+                      icon: const Icon(Icons.draw_outlined, size: 20),
+                      label: Text(l10n.pictureMarkup),
+                    ),
+                  ),
+                ]),
+              ),
+            ),
+          ),
         ),
-      ),
+      ]),
     );
   }
 }
 
 /// One picture in the viewer: thumbnail first (from memory or disk, usually already loaded), then the large one.
 class _PicturePage extends ConsumerStatefulWidget {
-  const _PicturePage({super.key, required this.sessionId, required this.image, required this.preview, required this.onZoom});
+  const _PicturePage({required this.sessionId, required this.image, required this.preview, required this.onBytes});
   final String sessionId;
   final ChatImage image;
   final Uint8List? preview;
-  final ValueChanged<bool> onZoom;
+
+  /// Each time better bytes arrive: the thumbnail, then the large version.
+  final ValueChanged<Uint8List> onBytes;
 
   @override
   ConsumerState<_PicturePage> createState() => _PicturePageState();
@@ -265,31 +546,24 @@ class _PicturePageState extends ConsumerState<_PicturePage> {
   late Uint8List? _shown = widget.preview;
   bool _sharp = false;
   bool _failed = false;
-  final TransformationController _transform = TransformationController();
 
   @override
   void initState() {
     super.initState();
-    _transform.addListener(_reportZoom);
+    final Uint8List? first = _shown;
+    if (first != null) WidgetsBinding.instance.addPostFrameCallback((_) => widget.onBytes(first));
     unawaited(_load());
   }
-
-  @override
-  void dispose() {
-    _transform
-      ..removeListener(_reportZoom)
-      ..dispose();
-    super.dispose();
-  }
-
-  void _reportZoom() => widget.onZoom(_transform.value.getMaxScaleOnAxis() > 1.01);
 
   Future<void> _load() async {
     final ChatPictureLoader loader = ref.read(chatPictureLoaderProvider);
     if (_shown == null) {
       try {
         final Uint8List thumb = await loader.load(widget.sessionId, widget.image);
-        if (mounted && !_sharp) setState(() => _shown = thumb);
+        if (mounted && !_sharp) {
+          setState(() => _shown = thumb);
+          widget.onBytes(thumb);
+        }
       } on BridgeException catch (error) {
         debugPrint('PictureViewer thumbnail(${widget.image.id}): ${error.code} ${error.message}');
       }
@@ -301,6 +575,7 @@ class _PicturePageState extends ConsumerState<_PicturePage> {
           _shown = bytes;
           _sharp = true;
         });
+        widget.onBytes(bytes);
       }
     } on BridgeException catch (error) {
       debugPrint('PictureViewer(${widget.image.id}): ${error.code} ${error.message}');
@@ -312,12 +587,7 @@ class _PicturePageState extends ConsumerState<_PicturePage> {
   Widget build(BuildContext context) {
     final Uint8List? shown = _shown;
     final Widget picture = shown != null
-        ? InteractiveViewer(
-            transformationController: _transform,
-            minScale: 1,
-            maxScale: 6,
-            child: Center(child: Image.memory(shown, fit: BoxFit.contain, gaplessPlayback: true)),
-          )
+        ? Center(child: Image.memory(shown, fit: BoxFit.contain, gaplessPlayback: true))
         : Center(
             child: _failed
                 ? Text(AppL10n.of(context).pictureFailed, style: Kit.of(context).labelSm)

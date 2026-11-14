@@ -65,17 +65,21 @@ List<ChatEntry> groupEntries(List<ChatMessage> messages) {
   return entries;
 }
 
-/// You: an accent-wash bubble on the right, 75% of the column at most.
+/// You: an accent-wash bubble on the right, 82% of the column at most, with what became of it underneath (waiting,
+/// or sent on your newest one).
 class UserBubble extends StatelessWidget {
-  const UserBubble({super.key, required this.message, required this.sessionId});
+  const UserBubble({super.key, required this.message, required this.sessionId, this.sent = false});
   final ChatMessage message;
   final String sessionId;
+
+  /// Your newest message, taken by the session: "sent" under it, in the line "sending" had, so nothing moves.
+  final bool sent;
 
   @override
   Widget build(BuildContext context) {
     final Kit kit = Kit.of(context);
     final AppL10n l10n = AppL10n.of(context);
-    return Align(
+    final Widget bubble = Align(
       alignment: Alignment.centerRight,
       child: FractionallySizedBox(
         widthFactor: 0.82,
@@ -100,17 +104,44 @@ class UserBubble extends StatelessWidget {
                   images: message.images,
                   alignEnd: true,
                 ),
-                if (message.queued) ...<Widget>[
-                  Padding(
-                    padding: const EdgeInsets.only(top: Space.xs),
-                    child: Text(l10n.chatQueued, style: kit.meta),
-                  ),
-                  SendNowAction(sessionId: sessionId),
-                ],
               ],
             ),
           ),
         ),
+      ),
+    );
+    if (message.queued) {
+      return Column(crossAxisAlignment: CrossAxisAlignment.end, mainAxisSize: MainAxisSize.min, children: <Widget>[
+        bubble,
+        BubbleStatus(l10n.chatQueued, trailing: SendNowAction(sessionId: sessionId)),
+      ]);
+    }
+    if (!sent) return bubble;
+    return Column(crossAxisAlignment: CrossAxisAlignment.end, mainAxisSize: MainAxisSize.min, children: <Widget>[
+      bubble,
+      BubbleStatus(l10n.chatSent),
+    ]);
+  }
+}
+
+/// One line under your bubble, on the right: what became of the message (sending, waiting, sent), plus an action.
+/// Every state uses this same line, so going from one to the next never changes the row's height.
+class BubbleStatus extends StatelessWidget {
+  const BubbleStatus(this.label, {super.key, this.trailing});
+  final String label;
+  final Widget? trailing;
+
+  @override
+  Widget build(BuildContext context) {
+    final Kit kit = Kit.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(top: Space.xs, right: Space.xs),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          Text(label, style: kit.meta, maxLines: 1),
+          ?trailing,
+        ],
       ),
     );
   }
@@ -643,10 +674,9 @@ class PendingBubble extends StatelessWidget {
     final AppL10n l10n = AppL10n.of(context);
     final bool shell = RegExp(r'^\s*!').hasMatch(text);
     final BorderRadius radius = BorderRadius.only(topLeft: Radius.circular(Radii.bubble), topRight: Radius.circular(Radii.bubble), bottomLeft: Radius.circular(Radii.bubble), bottomRight: Radius.circular(Radii.bubbleTail));
-    // The bubble is drawn exactly like the UserBubble that replaces it (same fill, padding, opacity, text, 82% at
-    // most). "Sending" sits beside it, not inside or under it: the list is anchored at the bottom, so any height that
-    // goes away when the Mac's transcript has the message would move the bubble. Only a failure, which needs its
-    // buttons, goes underneath.
+    // The bubble is drawn exactly like the UserBubble that replaces it (same fill, padding, text, 82% at most), and
+    // "sending" is the same BubbleStatus line that becomes "sent" under it, so the swap keeps the row's height (the
+    // list is anchored at the bottom: a line that went away would move the bubble).
     return LayoutBuilder(
       builder: (BuildContext context, BoxConstraints box) {
         final Widget bubble = ConstrainedBox(
@@ -661,16 +691,10 @@ class PendingBubble extends StatelessWidget {
           ),
         );
         if (!failed) {
-          return Row(
-            mainAxisAlignment: MainAxisAlignment.end,
+          return Column(
             crossAxisAlignment: CrossAxisAlignment.end,
-            children: <Widget>[
-              Flexible(
-                child: Text(l10n.chatSending, style: kit.meta, textAlign: TextAlign.end, maxLines: 1, overflow: TextOverflow.ellipsis),
-              ),
-              const SizedBox(width: Space.sm),
-              bubble,
-            ],
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[bubble, BubbleStatus(l10n.chatSending)],
           );
         }
         return Column(

@@ -479,6 +479,9 @@ class AppL10nEn extends AppL10n {
   String get chatSending => 'sending';
 
   @override
+  String get chatSent => 'sent';
+
+  @override
   String get chatSendFailed => 'Not sent';
 
   @override
@@ -632,6 +635,48 @@ class AppL10nEn extends AppL10n {
 
   @override
   String get photoSent => 'Photo sent';
+
+  @override
+  String get pictureReply => 'Reply';
+
+  @override
+  String get pictureMarkup => 'Mark up';
+
+  @override
+  String get markPen => 'Pen';
+
+  @override
+  String get markCircle => 'Circle';
+
+  @override
+  String get markBox => 'Box';
+
+  @override
+  String get markArrow => 'Arrow';
+
+  @override
+  String get markUndo => 'Undo';
+
+  @override
+  String get markClear => 'Clear';
+
+  @override
+  String get markNext => 'Next';
+
+  @override
+  String get markRendering => 'Preparing the picture';
+
+  @override
+  String get markFailed => 'Could not prepare the picture';
+
+  @override
+  String get markRed => 'Red';
+
+  @override
+  String get markYellow => 'Yellow';
+
+  @override
+  String get markWhite => 'White';
 
   @override
   String get photoTitle => 'Send a photo';

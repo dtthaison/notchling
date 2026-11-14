@@ -937,6 +937,12 @@ abstract class AppL10n {
   /// **'đang gửi'**
   String get chatSending;
 
+  /// No description provided for @chatSent.
+  ///
+  /// In vi, this message translates to:
+  /// **'đã gửi'**
+  String get chatSent;
+
   /// No description provided for @chatSendFailed.
   ///
   /// In vi, this message translates to:
@@ -1230,6 +1236,90 @@ abstract class AppL10n {
   /// In vi, this message translates to:
   /// **'Đã gửi ảnh'**
   String get photoSent;
+
+  /// No description provided for @pictureReply.
+  ///
+  /// In vi, this message translates to:
+  /// **'Trả lời'**
+  String get pictureReply;
+
+  /// No description provided for @pictureMarkup.
+  ///
+  /// In vi, this message translates to:
+  /// **'Vẽ'**
+  String get pictureMarkup;
+
+  /// No description provided for @markPen.
+  ///
+  /// In vi, this message translates to:
+  /// **'Bút'**
+  String get markPen;
+
+  /// No description provided for @markCircle.
+  ///
+  /// In vi, this message translates to:
+  /// **'Khoanh'**
+  String get markCircle;
+
+  /// No description provided for @markBox.
+  ///
+  /// In vi, this message translates to:
+  /// **'Khung'**
+  String get markBox;
+
+  /// No description provided for @markArrow.
+  ///
+  /// In vi, this message translates to:
+  /// **'Mũi tên'**
+  String get markArrow;
+
+  /// No description provided for @markUndo.
+  ///
+  /// In vi, this message translates to:
+  /// **'Hoàn tác'**
+  String get markUndo;
+
+  /// No description provided for @markClear.
+  ///
+  /// In vi, this message translates to:
+  /// **'Xoá hết'**
+  String get markClear;
+
+  /// No description provided for @markNext.
+  ///
+  /// In vi, this message translates to:
+  /// **'Gửi'**
+  String get markNext;
+
+  /// No description provided for @markRendering.
+  ///
+  /// In vi, this message translates to:
+  /// **'Đang tạo ảnh'**
+  String get markRendering;
+
+  /// No description provided for @markFailed.
+  ///
+  /// In vi, this message translates to:
+  /// **'Không tạo được ảnh'**
+  String get markFailed;
+
+  /// No description provided for @markRed.
+  ///
+  /// In vi, this message translates to:
+  /// **'Đỏ'**
+  String get markRed;
+
+  /// No description provided for @markYellow.
+  ///
+  /// In vi, this message translates to:
+  /// **'Vàng'**
+  String get markYellow;
+
+  /// No description provided for @markWhite.
+  ///
+  /// In vi, this message translates to:
+  /// **'Trắng'**
+  String get markWhite;
 
   /// No description provided for @photoTitle.
   ///

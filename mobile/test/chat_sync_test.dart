@@ -9,6 +9,7 @@ import 'package:agent_console/features/chat/chat_cache.dart';
 import 'package:agent_console/features/chat/chat_notifier.dart';
 import 'package:agent_console/features/chat/chat_parts.dart';
 import 'package:agent_console/features/chat/chat_pictures.dart';
+import 'package:agent_console/features/chat/photo_send.dart';
 import 'package:agent_console/features/connection/connection.dart';
 import 'package:agent_console/features/sessions/sessions_notifier.dart';
 import 'package:flutter/material.dart';
@@ -282,9 +283,51 @@ void main() {
       ));
       await tester.pump();
       expect(find.text('2 / 3'), findsOneWidget);
-      await tester.fling(find.byType(PageView), const Offset(-400, 0), 1000);
+      await tester.fling(find.byKey(const ValueKey<String>('picture-gallery')), const Offset(-400, 0), 1000);
       await tester.pumpAndSettle();
       expect(find.text('3 / 3'), findsOneWidget);
+    });
+
+    testWidgets('a pinch zooms the picture, and a swipe at 1x still turns the page', (WidgetTester tester) async {
+      final ChatPictureLoader loader = _ScriptedLoader(() => _tinyPng());
+      const List<ChatImage> two = <ChatImage>[
+        ChatImage(id: 'p-0', mediaType: 'image/png', width: 40, height: 30, bytes: 10),
+        ChatImage(id: 'p-1', mediaType: 'image/png', width: 40, height: 30, bytes: 10),
+      ];
+      await tester.pumpWidget(ProviderScope(
+        overrides: <Override>[chatPictureLoaderProvider.overrideWithValue(loader)],
+        child: host(const SizedBox(height: 560, child: PictureViewer(sessionId: 'c', images: two))),
+      ));
+      await tester.pump();
+      await tester.pump();
+      final Finder gallery = find.byKey(const ValueKey<String>('picture-gallery'));
+      final Offset center = tester.getCenter(gallery);
+      final TestGesture first = await tester.startGesture(center - const Offset(20, 0), pointer: 1);
+      final TestGesture second = await tester.startGesture(center + const Offset(20, 0), pointer: 2);
+      await tester.pump();
+      await first.moveTo(center - const Offset(60, 0));
+      await second.moveTo(center + const Offset(60, 0));
+      await tester.pump();
+      await first.up();
+      await second.up();
+      await tester.pumpAndSettle();
+      final Transform page = tester.widget<Transform>(find.byKey(const ValueKey<String>('page-p-0')));
+      expect(page.transform.getMaxScaleOnAxis(), greaterThan(1.2), reason: 'two fingers zoomed');
+      expect(find.text('1 / 2'), findsOneWidget, reason: 'a pinch does not turn the page');
+    });
+
+    testWidgets('Reply opens the preview with the picture being viewed', (WidgetTester tester) async {
+      final ChatPictureLoader loader = _ScriptedLoader(() => _tinyPng());
+      const List<ChatImage> one = <ChatImage>[ChatImage(id: 'p-0', mediaType: 'image/png', width: 1, height: 1, bytes: 10)];
+      await tester.pumpWidget(ProviderScope(
+        overrides: <Override>[chatPictureLoaderProvider.overrideWithValue(loader)],
+        child: host(const SizedBox(height: 560, child: PictureViewer(sessionId: 'c', images: one))),
+      ));
+      await tester.pump();
+      await tester.pump();
+      await tester.tap(find.byKey(const ValueKey<String>('picture-reply')));
+      await tester.pumpAndSettle();
+      expect(find.byType(PhotoPreview), findsOneWidget);
     });
 
     testWidgets("a tool group shows its tools' pictures without being opened, and none without a session", (WidgetTester tester) async {
@@ -425,3 +468,9 @@ class _FakePlayback extends ChatAudioPlayback {
     debugActivate(key);
   }
 }
+
+Uint8List _tinyPng() => Uint8List.fromList(<int>[
+      0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+      0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4, 0x89, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x63, 0xF8, 0xFF, 0xFF, 0x3F,
+      0x00, 0x05, 0xFE, 0x02, 0xFE, 0xA7, 0x35, 0x81, 0x84, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
+    ]);

@@ -56,6 +56,15 @@ class ConversationList extends StatelessWidget {
     final List<ChatEntry> newestFirst = entries.reversed.toList(
       growable: false,
     );
+    // "Sent" goes under your newest message only, and not while another one is still on its way.
+    final String? sentId = waiting.isNotEmpty
+        ? null
+        : newestFirst
+            .whereType<MessageEntry>()
+            .where((MessageEntry e) => e.message.role == ChatRole.user && e.message.kind != ChatKind.shell)
+            .firstOrNull
+            ?.message
+            .id;
     // Every row is keyed and found again by key: in this reversed list a new message, or the working line coming and
     // going, lands at index 0 and shifts every row, and without the lookup each visible message was built from
     // scratch (state, parsed markdown and all) on every step of a running session.
@@ -131,6 +140,7 @@ class ConversationList extends StatelessWidget {
               entry: entry,
               sessionId: sessionId,
               open: openGroups.contains(entry.id),
+              sent: entry is MessageEntry && entry.message.id == sentId,
             ),
           ),
         );
@@ -148,10 +158,14 @@ class ChatEntryView extends StatefulWidget {
     required this.entry,
     required this.sessionId,
     this.open = false,
+    this.sent = false,
   });
   final ChatEntry entry;
   final String sessionId;
   final bool open;
+
+  /// Your newest message: "sent" under it.
+  final bool sent;
 
   @override
   State<ChatEntryView> createState() => _ChatEntryViewState();
@@ -172,7 +186,7 @@ class _ChatEntryViewState extends State<ChatEntryView> {
       ToolGroupEntry() => ToolGroupView(entry: entry, initiallyOpen: widget.open, sessionId: widget.sessionId),
       MessageEntry(:final ChatMessage message) => switch ((message.role, message.kind)) {
         (ChatRole.user, ChatKind.shell) => ShellBubble(message: message),
-        (ChatRole.user, _) => UserBubble(message: message, sessionId: widget.sessionId),
+        (ChatRole.user, _) => UserBubble(message: message, sessionId: widget.sessionId, sent: widget.sent),
         (_, ChatKind.compaction) => CompactionNotice(message: message),
         _ => AssistantCard(message: message, sessionId: widget.sessionId),
       },

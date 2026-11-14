@@ -103,6 +103,22 @@ void main() {
       expect(session.facts!.contextFraction, 0.25);
       expect(session.facts!.limits.single.percent, 62);
     });
+
+    testWidgets('sending sits under the bubble, and becoming sent keeps the same height', (WidgetTester tester) async {
+      Future<Size> measure(Widget bubble) async {
+        await tester.pumpWidget(host(SizedBox(width: 390, child: Align(alignment: Alignment.topRight, child: bubble))));
+        return tester.getSize(find.byWidget(bubble));
+      }
+
+      final PendingBubble pending = PendingBubble(text: 'Sửa màu nút', failed: false, reason: null, onRetry: () {}, onDiscard: () {});
+      final Size sending = await measure(pending);
+      expect(tester.getTopLeft(find.text('đang gửi')).dy, greaterThan(tester.getBottomLeft(find.byType(Surface)).dy - 1), reason: 'under the bubble, not beside it');
+      final UserBubble sent = UserBubble(message: ChatMessage(id: 'u', role: ChatRole.user, text: 'Sửa màu nút', time: DateTime(2026)), sessionId: 's', sent: true);
+      final Size delivered = await measure(sent);
+      expect(find.text('đã gửi'), findsOneWidget);
+      expect(tester.getTopLeft(find.text('đã gửi')).dy, greaterThan(tester.getBottomLeft(find.byType(Surface)).dy - 1));
+      expect(delivered.height, sending.height);
+    });
   });
 
   group('composer', () {

@@ -479,6 +479,9 @@ class AppL10nVi extends AppL10n {
   String get chatSending => 'đang gửi';
 
   @override
+  String get chatSent => 'đã gửi';
+
+  @override
   String get chatSendFailed => 'Chưa gửi được';
 
   @override
@@ -632,6 +635,48 @@ class AppL10nVi extends AppL10n {
 
   @override
   String get photoSent => 'Đã gửi ảnh';
+
+  @override
+  String get pictureReply => 'Trả lời';
+
+  @override
+  String get pictureMarkup => 'Vẽ';
+
+  @override
+  String get markPen => 'Bút';
+
+  @override
+  String get markCircle => 'Khoanh';
+
+  @override
+  String get markBox => 'Khung';
+
+  @override
+  String get markArrow => 'Mũi tên';
+
+  @override
+  String get markUndo => 'Hoàn tác';
+
+  @override
+  String get markClear => 'Xoá hết';
+
+  @override
+  String get markNext => 'Gửi';
+
+  @override
+  String get markRendering => 'Đang tạo ảnh';
+
+  @override
+  String get markFailed => 'Không tạo được ảnh';
+
+  @override
+  String get markRed => 'Đỏ';
+
+  @override
+  String get markYellow => 'Vàng';
+
+  @override
+  String get markWhite => 'Trắng';
 
   @override
   String get photoTitle => 'Gửi ảnh';

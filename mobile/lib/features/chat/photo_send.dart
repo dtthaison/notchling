@@ -73,21 +73,28 @@ Future<void> pickAndSendPhoto(BuildContext context, WidgetRef ref, String sessio
     return;
   }
   if (bytes == null || !context.mounted) return;
-  final bool sent = await Navigator.of(context).push<bool>(
+  final bool sent = await previewAndSend(context, ref, sessionId, bytes);
+  if (sent) messenger.showSnackBar(SnackBar(content: Text(l10n.photoSent)));
+}
+
+/// The send closure of [PhotoPreview]: the picture and its caption go to exactly [sessionId], in pieces.
+Future<void> Function(String caption, void Function(double fraction) onProgress) photoSender(WidgetRef ref, String sessionId, Uint8List bytes) {
+  return (String caption, void Function(double) onProgress) async {
+    final BridgeClient? client = ref.read(bridgeClientProvider);
+    if (client == null || !client.isConnected) throw const BridgeException('disconnected', 'Chưa kết nối tới Mac.');
+    await client.sessionImage(sessionId, bytes, caption: caption, onProgress: onProgress);
+  };
+}
+
+/// Shows [bytes] with a caption field; true once it was sent.
+Future<bool> previewAndSend(BuildContext context, WidgetRef ref, String sessionId, Uint8List bytes) async {
+  return await Navigator.of(context).push<bool>(
         MaterialPageRoute<bool>(
           fullscreenDialog: true,
-          builder: (BuildContext route) => PhotoPreview(
-            bytes: bytes!,
-            send: (String caption, void Function(double) onProgress) async {
-              final BridgeClient? client = ref.read(bridgeClientProvider);
-              if (client == null || !client.isConnected) throw const BridgeException('disconnected', 'Chưa kết nối tới Mac.');
-              await client.sessionImage(sessionId, bytes!, caption: caption, onProgress: onProgress);
-            },
-          ),
+          builder: (BuildContext route) => PhotoPreview(bytes: bytes, send: photoSender(ref, sessionId, bytes)),
         ),
       ) ??
       false;
-  if (sent) messenger.showSnackBar(SnackBar(content: Text(l10n.photoSent)));
 }
 
 /// The photo, a caption field and Send. Shows progress while the pieces go, and the Mac's reason if it refuses.
