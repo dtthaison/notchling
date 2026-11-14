@@ -2,8 +2,14 @@ use crate::acting_ops::{ActingOps, Room};
 use crate::bridge_backend::{Approvals, DaemonActing, DaemonSources};
 use crate::every_session::EverySession;
 use crate::inbox_ops::InboxOps;
+use crate::late_emit::Events;
+use notchling_engine::bridge::events_audit::EventsAudit;
 use notchling_engine::bridge::live::LiveBackend;
 use notchling_engine::bridge::net::{fetch, files, Bridge, BridgeConfig};
+use notchling_events::kinds::choices::SwitchName;
+use notchling_events::kinds::security::{SwitchCause, SwitchChanged};
+use notchling_events::spec::Outcome;
+use notchling_events::{scope, Event};
 use notchling_local_api::{ops, topics, ApiError, OpSpec};
 use serde_json::{json, Value};
 use std::path::PathBuf;
@@ -36,6 +42,7 @@ pub struct BridgeOps {
     bridge: Bridge,
     approvals: Arc<Approvals>,
     room: Arc<dyn Room>,
+    events: Option<Events>,
 }
 
 impl BridgeOps {
@@ -78,7 +85,15 @@ impl BridgeOps {
             ),
             approvals,
             room,
+            events: None,
         }
+    }
+
+    pub fn with_events(mut self, events: Events) -> BridgeOps {
+        let audit = EventsAudit::new(events.emit(), Arc::new(files::now_ms));
+        self.bridge = self.bridge.with_audit(Arc::new(audit));
+        self.events = Some(events);
+        self
     }
 
     pub fn spec(&self, op: &str) -> Option<OpSpec> {
@@ -109,6 +124,22 @@ impl BridgeOps {
                     self.approvals.refuse_all();
                 }
                 let status = self.bridge.set(on);
+                if let Some(events) = &self.events {
+                    let cause = match args.get("restored").and_then(Value::as_bool) {
+                        Some(true) => SwitchCause::RestoredAtLaunch,
+                        _ => SwitchCause::User,
+                    };
+                    events.push(Event::new(
+                        &SwitchChanged {
+                            switch: SwitchName::Bridge,
+                            on,
+                            cause,
+                        },
+                        Outcome::Ok,
+                        crate::acting_ops::now_ms(),
+                    ));
+                    scope::mark_recorded();
+                }
                 self.room
                     .publish(topics::BRIDGE, topics::BRIDGE_CHANGED, &status);
                 Ok(status)

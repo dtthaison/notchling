@@ -3,7 +3,7 @@ use super::logic::{
     IN_USE_FRESH_FOR, SWITCH_GAP,
 };
 use super::mode::{LimitConfig, LimitMode, CLAUDE};
-use super::sources::{AccountInfo, ClaudeSource, StoppedJob, StoppedJobs};
+use super::sources::{AccountInfo, ClaudeSource, LimitWhy, StoppedJob, StoppedJobs};
 use super::text::{climb, clock, Zone};
 use super::usage::{AccountUsage, UsageWindow};
 use crate::transcript::errors::LimitHit;
@@ -237,7 +237,10 @@ impl ClaudeWatcher {
             switch_at as f64,
             now,
         );
-        match self.source.switch_to(&to.id) {
+        match self
+            .source
+            .switch_for_limit(&to.id, &limit_why(usage, switch_at as f64))
+        {
             Err(e) => self.say(&format!("Couldn't switch accounts: {e}")),
             Ok(()) => {
                 self.last_switch = Some(now);
@@ -392,5 +395,32 @@ impl ClaudeWatcher {
             self.switched_hits.insert(job.hit.id.clone());
             self.nudged_job_at.insert(job.job_id.clone(), now);
         }
+    }
+}
+
+fn limit_why(usage: Option<&AccountUsage>, switch_at: f64) -> LimitWhy {
+    use notchling_events::kinds::choices::LimitWindow;
+    let Some(usage) = usage else {
+        return LimitWhy::default();
+    };
+    let hit = |w: &Option<UsageWindow>| w.filter(|w| w.percent >= switch_at);
+    let (session, week) = (hit(&usage.session), hit(&usage.week));
+    let worst = usage
+        .stopping_windows()
+        .into_iter()
+        .filter(|w| w.percent >= switch_at)
+        .map(|w| w.percent)
+        .fold(None, |best: Option<f64>, p| {
+            Some(best.map_or(p, |b| b.max(p)))
+        });
+    let window = match (session, week) {
+        (Some(s), Some(w)) if w.percent > s.percent => Some(LimitWindow::Weekly),
+        (Some(_), _) => Some(LimitWindow::FiveHour),
+        (None, Some(_)) => Some(LimitWindow::Weekly),
+        (None, None) => None,
+    };
+    LimitWhy {
+        window,
+        used_pct: worst,
     }
 }

@@ -99,7 +99,7 @@ fn serve(socket: &Path, app_tier: bool, held: &Arc<Mutex<Vec<Value>>>) -> Runnin
         ServerConfig {
             socket: socket.to_path_buf(),
             allowlist,
-            audit: None,
+            events: None,
             version: "test".into(),
             limits: Limits::default(),
         },

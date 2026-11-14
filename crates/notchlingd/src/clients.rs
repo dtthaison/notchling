@@ -156,7 +156,7 @@ mod tests {
             ServerConfig {
                 socket: socket.clone(),
                 allowlist: Allowlist::new([std::env::current_exe().unwrap()]),
-                audit: None,
+                events: None,
                 version: "9.9.9".into(),
                 limits: Limits::default(),
             },

@@ -51,6 +51,7 @@ pub(crate) struct World {
     pub(crate) flag: Arc<SwitchFlag>,
     pub(crate) room: Arc<FakeRoom>,
     pub(crate) ops: AccountsOps,
+    pub(crate) sink: Arc<notchling_events::MemorySink>,
 }
 
 pub(crate) fn world(
@@ -62,6 +63,7 @@ pub(crate) fn world(
     let d = dir(tag);
     let flag = SwitchFlag::in_memory(ACCOUNTS, ACCOUNTS_OFF, on);
     let room = Arc::new(FakeRoom::default());
+    let sink = Arc::new(notchling_events::MemorySink::new());
     let env = ClaudeEnv {
         keys: Keys {
             runner: Arc::new(GatedSecurity {
@@ -83,6 +85,8 @@ pub(crate) fn world(
         data_dir: d.0.join("data"),
         list_file: d.0.join("data/daemon/accounts.json"),
         lanes: LaneStore::new(&d.0.join("home"), &d.0.join("data")),
+        events: sink.clone(),
+        history: Arc::new(notchling_engine::cost::account_log::NoSwitches),
     };
     let random = Arc::new(|| Some([7u8; 64]));
     let ops = AccountsOps::new(
@@ -91,7 +95,13 @@ pub(crate) fn world(
         room.clone(),
         random,
     );
-    World { d, flag, room, ops }
+    World {
+        d,
+        flag,
+        room,
+        ops,
+        sink,
+    }
 }
 
 fn files_under(path: &std::path::Path) -> Vec<PathBuf> {

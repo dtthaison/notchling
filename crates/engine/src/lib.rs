@@ -14,6 +14,7 @@ pub mod inbox;
 pub mod install;
 pub mod lanes;
 pub mod limits;
+pub mod logs;
 pub mod machines;
 pub mod pages;
 pub mod providers;

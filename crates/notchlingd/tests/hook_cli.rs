@@ -1,5 +1,7 @@
 #![cfg(unix)]
 
+mod common;
+
 use notchling_local_api::{ops, Client, ClientError, ClientKind, ErrorCode};
 use serde_json::json;
 use std::io::Write;
@@ -188,10 +190,24 @@ fn a_real_daemon_with_acting_off_lets_the_hook_pass_and_refuses_every_acting_op(
             other => panic!("{op}: {other:?}"),
         }
     }
-    let audit = std::fs::read_to_string(root.join("notchling/audit.jsonl")).unwrap();
-    assert!(audit.contains("\"op\":\"session.reply\""), "{audit}");
-    assert!(audit.contains("\"op\":\"codex.send\""), "{audit}");
-    assert!(audit.contains("\"result\":\"forbidden\""), "{audit}");
+    let lines = common::audit::wait_until(&root, |all| {
+        all.iter().any(|l| l["kind"] == "session.reply")
+            && all.iter().filter(|l| l["kind"] == "api.refused").count() >= 12
+    });
+    let refused: Vec<&str> = lines
+        .iter()
+        .filter(|l| l["kind"] == "api.refused")
+        .filter_map(|l| l["f"]["op"].as_str())
+        .collect();
+    assert!(refused.contains(&"codex.send"), "{refused:?}");
+    assert!(refused.contains(&"session.stop"), "{refused:?}");
+    assert!(lines
+        .iter()
+        .filter(|l| l["kind"] == "api.refused")
+        .all(|l| l["f"]["why"] == "forbidden"));
+    let reply = lines.iter().find(|l| l["kind"] == "session.reply").unwrap();
+    assert_eq!(reply["f"]["why"], "acting_off", "{reply}");
+    assert_eq!(reply["outcome"], "failed");
     assert!(!root.join("notchling/notchlingd-settings.json").exists());
 }
 
@@ -250,11 +266,10 @@ fn a_settings_file_that_says_on_is_ignored_at_every_start() {
         drop(app);
         drop(daemon);
     }
-    let audit = std::fs::read_to_string(root.join("notchling/audit.jsonl")).unwrap();
-    assert_eq!(
-        audit.matches("\"result\":\"file_said_on_ignored\"").count(),
-        2,
-        "{audit}"
-    );
+    let ignored = common::audit::of_kind(&root, "switch.changed")
+        .into_iter()
+        .filter(|line| line["f"]["cause"] == "file_said_on_ignored")
+        .count();
+    assert_eq!(ignored, 2);
     assert_eq!(std::fs::read(&file).unwrap(), br#"{"acting": true}"#);
 }

@@ -56,6 +56,28 @@ pub fn account_at(date: f64, entries: &[Entry]) -> String {
         .unwrap_or_default()
 }
 
+pub trait AccountSwitches: Send + Sync {
+    fn switches(&self) -> Vec<Entry>;
+}
+
+pub struct NoSwitches;
+
+impl AccountSwitches for NoSwitches {
+    fn switches(&self) -> Vec<Entry> {
+        Vec::new()
+    }
+}
+
+pub fn merge(file: Vec<Entry>, recorded: Vec<Entry>) -> Vec<Entry> {
+    let Some(first) = recorded.iter().map(|e| e.at).reduce(f64::min) else {
+        return file;
+    };
+    let mut all: Vec<Entry> = file.into_iter().filter(|e| e.at < first).collect();
+    all.extend(recorded);
+    all.sort_by(|a, b| a.at.partial_cmp(&b.at).unwrap_or(std::cmp::Ordering::Equal));
+    all
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum Plan {
     Unchanged,

@@ -139,6 +139,7 @@ pub trait RateLimiter: Send + Sync {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct AuditEntry {
     pub device: String,
+    pub device_id: String,
     pub op: String,
     pub session: Option<String>,
     pub length: Option<usize>,

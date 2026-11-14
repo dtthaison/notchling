@@ -1,15 +1,24 @@
-use crate::acting::{file_says_on, FILE_SAID_ON, SETTINGS_NAME};
+use crate::acting::{file_says_on, SETTINGS_NAME};
 use crate::acting_ops::Room;
 pub use crate::daemon_wiring::{Ops, Wired};
 use crate::layout::Layout;
+use crate::log_activity::Publish;
+use crate::log_bus::wall_ms;
+use crate::log_checks::InboxWarnings;
+use crate::log_ops::LogOps;
 use crate::log_rotate::{StderrLog, CHECK_EVERY};
+use crate::log_start;
+use crate::signals;
 use notchling_engine::bridge::net::ports as bridge_ports;
 use notchling_engine::sessions::{config_dirs, Monitor, Probes};
+use notchling_events::kinds::choices::SwitchName;
+use notchling_events::kinds::security::{DaemonStopped, StopCause, SwitchCause, SwitchChanged};
+use notchling_events::spec::Outcome;
+use notchling_events::{Emit, Event, Millis};
 use notchling_local_api::lock::InstanceLock;
 use notchling_local_api::tier::installed_app_paths;
 use notchling_local_api::{
-    ops, topics, Allowlist, AuditEntry, AuditLog, Limits, Server, ServerConfig, ServerHandle,
-    APP_TIER_PATHS_ENV,
+    topics, Allowlist, Limits, Server, ServerConfig, ServerHandle, APP_TIER_PATHS_ENV,
 };
 use notchling_platform::watch::{Batch, WatchConfig, Watcher};
 use serde_json::Value;
@@ -226,17 +235,33 @@ pub fn run(
     let sessions = Arc::new(Mutex::new(Value::Array(Vec::new())));
     let first_scan = FirstScan::pending();
     let room = Arc::new(LateRoom::default());
+    let publish: Publish = {
+        let room = room.clone();
+        Arc::new(move |topic, event, data| room.publish(topic, event, &data))
+    };
+    let logs = log_start::start(&layout, env!("CARGO_PKG_VERSION"), publish.clone());
+    let began = Instant::now();
     let wired = Wired::build(
         &layout,
         sessions.clone(),
         room.clone(),
         options.bridge_ports,
     );
+    wired.set_events(logs.bus.clone(), logs.salt);
+    let checker = logs.checker(
+        Arc::new(InboxWarnings::new(wired.inbox.clone(), Arc::new(wall_ms))),
+        publish,
+    );
+    wired.set_log(
+        logs.db.clone(),
+        Arc::new(LogOps::new(logs.audit.clone(), checker.clone())),
+    );
+    let _check_schedule = checker.spawn_schedule();
     let server = Server::bind(
         ServerConfig {
             socket: layout.socket.clone(),
             allowlist,
-            audit: Some(AuditLog::new(layout.audit_path())),
+            events: Some(logs.bus.clone()),
             version: env!("CARGO_PKG_VERSION").to_string(),
             limits: Limits::default(),
         },
@@ -252,8 +277,15 @@ pub fn run(
         _ => DaemonError::Io(e),
     })?;
     if file_says_on(&layout.data_dir.join(SETTINGS_NAME)) {
-        let entry = AuditEntry::now(ops::SETTINGS_SET_ACTING, None, None, FILE_SAID_ON);
-        let _ = AuditLog::new(layout.audit_path()).append(&entry);
+        logs.bus.push(Event::new(
+            &SwitchChanged {
+                switch: SwitchName::Acting,
+                on: false,
+                cause: SwitchCause::FileSaidOnIgnored,
+            },
+            Outcome::Refused,
+            wall_ms(),
+        ));
         eprintln!("notchling: {SETTINGS_NAME} says acting is on; ignored, acting starts off");
     }
     wired.load();
@@ -307,12 +339,26 @@ pub fn run(
     first_scan.finish();
     wired.close();
     handle.shutdown();
-    match thread.join() {
+    let served = match thread.join() {
         Ok(result) => result.map_err(DaemonError::Io),
         Err(_) => Err(DaemonError::Io(io::Error::other(
             "the server thread panicked",
         ))),
-    }
+    };
+    logs.bus.push(Event::new(
+        &DaemonStopped {
+            cause: if signals::stop_requested() {
+                StopCause::Signal
+            } else {
+                StopCause::Quit
+            },
+            uptime_ms: Millis(u64::try_from(began.elapsed().as_millis()).unwrap_or(u64::MAX)),
+        },
+        Outcome::Info,
+        wall_ms(),
+    ));
+    logs.bus.close(Duration::from_secs(2));
+    served
 }
 
 fn rotate_log(log: &StderrLog) {
@@ -344,7 +390,7 @@ fn wait_batch(rx: &Receiver<Batch>, wait: Duration) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use notchling_local_api::{Caller, ClientKind, Handler, OpSpec, Tier};
+    use notchling_local_api::{ops, Caller, ClientKind, Handler, OpSpec, Tier};
     use serde_json::json;
 
     fn caller() -> Caller {

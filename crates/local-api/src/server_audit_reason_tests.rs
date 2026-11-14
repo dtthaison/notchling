@@ -1,12 +1,11 @@
 #![cfg(unix)]
 
-use crate::audit::{audit_reason, REASON_CHARS};
 use crate::client::{Client, ConnectOptions};
 use crate::server::{Caller, Handler, Limits, OpSpec, Server, ServerConfig, ServerHandle};
-use crate::testutil::TempDir;
+use crate::testutil::{summary, TempDir};
 use crate::tier::Allowlist;
 use crate::wire::{ApiError, ClientKind, ErrorCode, Tier};
-use crate::AuditLog;
+use notchling_events::MemorySink;
 use serde_json::{json, Value};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -18,6 +17,10 @@ struct Refusing;
 impl Handler for Refusing {
     fn spec(&self, op: &str) -> Option<OpSpec> {
         matches!(op, "session.permission" | "accounts.switch").then_some(OpSpec::APP)
+    }
+
+    fn known_ops(&self) -> &[&'static str] {
+        &["session.permission", "accounts.switch"]
     }
 
     fn topics(&self) -> &[&str] {
@@ -45,7 +48,7 @@ impl Handler for Refusing {
 struct Running {
     _dir: TempDir,
     socket: PathBuf,
-    audit: PathBuf,
+    sink: Arc<MemorySink>,
     handle: ServerHandle,
 }
 
@@ -58,13 +61,13 @@ impl Drop for Running {
 fn start() -> Running {
     let dir = TempDir::new("srv-reason");
     let socket = dir.path().join("run/notchlingd.sock");
-    let audit = dir.path().join("audit.jsonl");
+    let sink = Arc::new(MemorySink::new());
     let me = std::env::current_exe().unwrap();
     let server = Server::bind(
         ServerConfig {
             socket: socket.clone(),
             allowlist: Allowlist::new([me]),
-            audit: Some(AuditLog::new(audit.clone())),
+            events: Some(sink.clone()),
             version: "9.9.9".into(),
             limits: Limits::default(),
         },
@@ -75,7 +78,7 @@ fn start() -> Running {
     Running {
         _dir: dir,
         socket,
-        audit,
+        sink,
         handle,
     }
 }
@@ -88,32 +91,35 @@ fn app(run: &Running) -> Client {
     Client::connect_with(&run.socket, ClientKind::App, "0.1.0", &options).unwrap()
 }
 
-fn audit_lines(run: &Running) -> Vec<Value> {
-    std::fs::read_to_string(&run.audit)
-        .unwrap_or_default()
-        .lines()
-        .map(|l| serde_json::from_str(l).unwrap())
-        .collect()
-}
-
 #[test]
-fn a_failed_answer_into_a_terminal_keeps_why_in_the_audit_line() {
+fn a_failed_answer_is_recorded_by_its_code_and_never_by_its_text() {
     let run = start();
     let mut client = app(&run);
     assert!(client.call("session.permission", json!({})).is_err());
     assert!(client
         .call("session.permission", json!({"fail": false}))
         .is_ok());
-    let lines = audit_lines(&run);
-    assert_eq!(lines.len(), 2);
-    assert_eq!(lines[0]["result"], "failed");
-    assert_eq!(lines[0]["reason"], REFUSAL);
-    assert_eq!(lines[1]["result"], "ok");
-    assert!(
-        lines[1].get("reason").is_none(),
-        "a call that went through has no reason: {}",
-        lines[1]
+    let names: Vec<(String, String)> = summary(&run.sink)
+        .into_iter()
+        .filter(|(name, _)| name != "app.attached")
+        .collect();
+    assert_eq!(
+        names,
+        vec![
+            ("op.failed".to_owned(), "session.permission".to_owned()),
+            ("op.called".to_owned(), "session.permission".to_owned()),
+        ]
     );
+    let shown = format!(
+        "{:?}",
+        run.sink
+            .events()
+            .iter()
+            .map(|e| &e.fields)
+            .collect::<Vec<_>>()
+    );
+    assert!(!shown.contains("terminal"), "{shown}");
+    assert!(!shown.contains("nothing was typed"), "{shown}");
 }
 
 #[test]
@@ -121,26 +127,15 @@ fn another_ops_error_text_stays_out_of_the_log() {
     let run = start();
     let mut client = app(&run);
     assert!(client.call("accounts.switch", json!({})).is_err());
-    let lines = audit_lines(&run);
-    assert_eq!(lines[0]["result"], "failed");
-    assert!(lines[0].get("reason").is_none(), "{}", lines[0]);
-}
-
-#[test]
-fn a_reason_is_one_capped_line_and_only_for_the_terminal_ops() {
-    assert_eq!(
-        audit_reason("session.permission", REFUSAL).as_deref(),
-        Some(REFUSAL)
+    let shown = format!(
+        "{:?}",
+        run.sink
+            .events()
+            .iter()
+            .map(|e| &e.fields)
+            .collect::<Vec<_>>()
     );
-    assert_eq!(
-        audit_reason("session.reply", "a\nb\r\n c").as_deref(),
-        Some("a b c")
-    );
-    assert_eq!(audit_reason("accounts.switch", "no login for x"), None);
-    assert_eq!(audit_reason("session.stop", "folder /x"), None);
-    assert_eq!(audit_reason("session.answer", "   "), None);
-    let long = "é".repeat(REASON_CHARS + 50);
-    let kept = audit_reason("session.answer", &long).unwrap();
-    assert_eq!(kept.chars().count(), REASON_CHARS + 1);
-    assert!(kept.ends_with('…') && kept.starts_with("éé"));
+    assert!(!shown.contains("example.com"), "{shown}");
+    assert!(!shown.contains("/Users/me"), "{shown}");
+    assert!(shown.contains("accounts.switch"), "{shown}");
 }

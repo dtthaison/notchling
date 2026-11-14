@@ -28,3 +28,25 @@ impl Drop for TempDir {
         let _ = std::fs::remove_dir_all(&self.0);
     }
 }
+
+pub fn field_text(event: &notchling_events::Event, name: &str) -> Option<String> {
+    use notchling_events::field::FieldValue;
+    match event.fields.get(name)? {
+        FieldValue::Name(text) => Some((*text).to_owned()),
+        FieldValue::Token(text) => Some(text.to_string()),
+        _ => None,
+    }
+}
+
+pub fn summary(sink: &notchling_events::MemorySink) -> Vec<(String, String)> {
+    sink.events()
+        .iter()
+        .map(|event| {
+            let detail = ["op", "why", "code", "result"]
+                .iter()
+                .find_map(|name| field_text(event, name))
+                .unwrap_or_default();
+            (event.spec.name.to_owned(), detail)
+        })
+        .collect()
+}

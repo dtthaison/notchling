@@ -1,5 +1,6 @@
 use crate::layout::Layout;
 use notchling_engine::catalog::Catalog;
+use notchling_engine::cost::account_log::AccountSwitches;
 use notchling_engine::cost::summary::Summary;
 use notchling_engine::cost::tracker::{Root, ANTIGRAVITY, CLAUDE_CODE, CODEX, DESKTOP};
 use notchling_engine::cost::{CostService, Snapshot, Tracker, Window};
@@ -39,12 +40,20 @@ impl CostSetup {
     }
 
     pub fn service(&self) -> Arc<CostService> {
-        CostService::new(Tracker::new(
+        CostService::new(self.tracker())
+    }
+
+    pub fn service_with(&self, switches: Arc<dyn AccountSwitches>) -> Arc<CostService> {
+        CostService::new(self.tracker().with_switches(switches))
+    }
+
+    fn tracker(&self) -> Tracker {
+        Tracker::new(
             self.roots.clone(),
             self.cache_data.clone(),
             Some(self.account_log.clone()),
             self.catalog.clone(),
-        ))
+        )
     }
 }
 

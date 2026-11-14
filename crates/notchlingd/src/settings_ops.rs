@@ -1,16 +1,19 @@
 use crate::acting_ops::{now_ms, Room};
 use crate::inbox_ops::InboxOps;
+use crate::late_emit::Events;
 use crate::op_group::OpGroup;
-use crate::settings_asks::{item_id, view, Applier, Ask, Asks, ASK_WAIT};
+use crate::settings_asks::{item_id, view, Applier, Ask, AskState, Asks, ASK_WAIT};
 use notchling_engine::inbox::{Action, ActionId, Item, Kind as ItemKind, Source, State};
 use notchling_engine::limits::mode::PROVIDERS;
 use notchling_engine::limits::{LimitConfig, LimitMode};
 use notchling_engine::settings::{
-    spec, switch, Access, KeySpec, Settings, SwitchSpec, KEYS, SWITCHES, SWITCH_WHY,
+    log_value, spec, switch, Access, KeySpec, Settings, SwitchSpec, KEYS, SWITCHES, SWITCH_WHY,
 };
-use notchling_local_api::{
-    ops, topics, ApiError, AuditEntry, AuditLog, Caller, ErrorCode, OpSpec, Tier,
-};
+use notchling_events::kinds::choices::Answerer;
+use notchling_events::kinds::settings::{AgentSetResult, SettingClass, SettingsAgent};
+use notchling_events::spec::Outcome;
+use notchling_events::{scope, Device, Event, Ref};
+use notchling_local_api::{ops, topics, ApiError, Caller, ErrorCode, OpSpec, Tier};
 use serde_json::{json, Value};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -25,14 +28,13 @@ pub const SETTINGS_OPS: [&str; 4] = [
 pub const MAX_CALL_WAIT: u64 = 60;
 const LIMIT_SWITCH_AT: &str = "limitSwitchAt";
 const CUT_KEY: usize = 64;
-const CUT_VALUE: usize = 120;
 
 pub type SwitchStates = Arc<dyn Fn(&str) -> Option<bool> + Send + Sync>;
 
 pub struct Writer {
     file: PathBuf,
     room: Arc<dyn Room>,
-    audit: Option<AuditLog>,
+    events: Option<Events>,
     limits: Option<Arc<LimitConfig>>,
 }
 
@@ -42,6 +44,38 @@ fn cut(text: &str, at: usize) -> String {
     }
     let kept: String = text.chars().take(at).collect();
     format!("{kept}…")
+}
+
+fn class_of(spec: &KeySpec) -> Option<SettingClass> {
+    match spec.access {
+        Access::Free => Some(SettingClass::Free),
+        Access::Ask => Some(SettingClass::Ask),
+        Access::Never => Some(SettingClass::Never),
+        Access::Unset => None,
+    }
+}
+
+fn outcome_of(result: AgentSetResult) -> Outcome {
+    match result {
+        AgentSetResult::Set | AgentSetResult::Allowed => Outcome::Ok,
+        AgentSetResult::Asked => Outcome::Waiting,
+        AgentSetResult::Denied
+        | AgentSetResult::Expired
+        | AgentSetResult::Refused
+        | AgentSetResult::UnknownKey
+        | AgentSetResult::BadValue
+        | AgentSetResult::NoApp => Outcome::Refused,
+        AgentSetResult::Full | AgentSetResult::Failed | AgentSetResult::Other => Outcome::Failed,
+    }
+}
+
+pub struct Said<'a> {
+    pub key: &'a str,
+    pub class: Option<SettingClass>,
+    pub value: &'a Value,
+    pub result: AgentSetResult,
+    pub by: Option<Answerer>,
+    pub device: Option<&'a str>,
 }
 
 fn shown(value: &Value) -> String {
@@ -105,46 +139,70 @@ impl Writer {
         Ok(before.as_ref() != Some(value))
     }
 
-    pub fn audit(
-        &self,
-        tier: Tier,
-        peer: Option<&std::path::Path>,
-        result: &str,
-        key: &str,
-        value: &Value,
-    ) {
-        let Some(audit) = &self.audit else {
-            return;
+    pub fn record(&self, said: &Said, commit: bool) -> bool {
+        let Some(events) = &self.events else {
+            return true;
         };
-        let reason = format!(
-            "{}={}",
-            cut(key, CUT_KEY),
-            cut(&value.to_string(), CUT_VALUE)
+        let logged = log_value(said.key, said.value, &events.salt());
+        let event = Event::new(
+            &SettingsAgent {
+                key: logged.key,
+                key_hash: logged.key_hash,
+                class: said.class,
+                value_flag: logged.value_flag,
+                value_number: logged.value_number,
+                value_choice: logged.value_choice,
+                value_chars: logged.value_chars,
+                value_hash: logged.value_hash,
+                result: said.result,
+                answered_by: said.by,
+                device: said.device.map(Ref::<Device>::new),
+            },
+            outcome_of(said.result),
+            now_ms(),
         );
-        let entry =
-            AuditEntry::now(ops::SETTINGS_SET, Some(tier), peer, result).with_reason(Some(reason));
-        let _ = audit.append(&entry);
+        if commit {
+            events.commit(event)
+        } else {
+            events.push(event);
+            true
+        }
     }
 }
 
 impl Applier for Writer {
     fn apply(&self, id: &str, ask: &Ask) -> Result<(), String> {
         let spec = spec(ask.key).ok_or("the setting is gone")?;
+        let said = Said {
+            key: ask.key,
+            class: class_of(spec),
+            value: &ask.value,
+            result: AgentSetResult::Allowed,
+            by: ask.by,
+            device: ask.device.as_deref(),
+        };
+        if !self.record(&said, true) {
+            return Err("the audit log can't be written".to_string());
+        }
         self.write(spec, &ask.value, "agent", Some(id)).map(|_| ())
     }
 
     fn ended(&self, _id: &str, ask: &Ask) {
-        let result = match ask.state.as_str() {
-            "applied" => "allowed",
-            other => other,
+        let result = match ask.state {
+            AskState::Denied => AgentSetResult::Denied,
+            AskState::Expired | AskState::Withdrawn => AgentSetResult::Expired,
+            AskState::Failed => AgentSetResult::Failed,
+            _ => return,
         };
-        self.audit(
-            Tier::Agent,
-            ask.peer.as_deref(),
+        let said = Said {
+            key: ask.key,
+            class: spec(ask.key).and_then(class_of),
+            value: &ask.value,
             result,
-            ask.key,
-            &ask.value,
-        );
+            by: ask.by,
+            device: ask.device.as_deref(),
+        };
+        self.record(&said, false);
     }
 }
 
@@ -162,7 +220,7 @@ impl SettingsOps {
             writer: Arc::new(Writer {
                 file: data_dir.join("settings.json"),
                 room,
-                audit: None,
+                events: None,
                 limits: None,
             }),
             switches,
@@ -172,9 +230,9 @@ impl SettingsOps {
         }
     }
 
-    pub fn with_audit(mut self, audit: AuditLog) -> SettingsOps {
+    pub fn with_events(mut self, events: Events) -> SettingsOps {
         if let Some(writer) = Arc::get_mut(&mut self.writer) {
-            writer.audit = Some(audit);
+            writer.events = Some(events);
         }
         self
     }
@@ -282,23 +340,36 @@ impl SettingsOps {
             .and_then(Value::as_u64)
             .unwrap_or(0)
             .min(MAX_CALL_WAIT);
-        let peer = caller.peer.as_deref();
-        let audit = |result: &str, value: &Value| {
-            self.writer.audit(caller.tier, peer, result, key, value);
+        let agent = caller.tier == Tier::Agent;
+        let note = |class: Option<SettingClass>, result: AgentSetResult, value: &Value| {
+            if agent {
+                self.writer.record(
+                    &Said {
+                        key,
+                        class,
+                        value,
+                        result,
+                        by: None,
+                        device: None,
+                    },
+                    false,
+                );
+                scope::mark_recorded();
+            }
         };
         if let Some(s) = switch(key) {
-            audit("refused", &raw);
+            note(Some(SettingClass::Never), AgentSetResult::Refused, &raw);
             return Err(forbidden(format!(
                 "{} ({}) is a switch: only the user turns it on or off, in Notchling's Settings, under Daemon.",
                 s.title, s.key
             )));
         }
         let Some(spec) = spec(key) else {
-            audit("unknown_key", &raw);
+            note(None, AgentSetResult::UnknownKey, &raw);
             return Err(bad(unknown(key)));
         };
         if !spec.access.shown() {
-            audit("refused", &raw);
+            note(class_of(spec), AgentSetResult::Refused, &raw);
             return Err(forbidden(format!(
                 "{} ({}) can't be changed by an agent: {}. The user changes it in Notchling.",
                 spec.shown_title(),
@@ -308,17 +379,30 @@ impl SettingsOps {
         }
         let value = spec.read_value(raw);
         if let Err(why) = spec.check(&value) {
-            audit("bad_value", &value);
+            note(class_of(spec), AgentSetResult::BadValue, &value);
             return Err(bad(format!("{why}.")));
         }
         let app = caller.tier == Tier::App;
         if app || spec.access == Access::Free {
             let by = if app { "app" } else { "agent" };
+            if !app {
+                let said = Said {
+                    key: spec.name,
+                    class: class_of(spec),
+                    value: &value,
+                    result: AgentSetResult::Set,
+                    by: None,
+                    device: None,
+                };
+                scope::mark_recorded();
+                if !self.writer.record(&said, true) {
+                    return Err(failed("the audit log can't be written"));
+                }
+            }
             let changed = self.writer.write(spec, &value, by, None).map_err(|why| {
-                audit("failed", &value);
+                note(class_of(spec), AgentSetResult::Failed, &value);
                 failed(format!("{} couldn't be set: {why}", spec.name))
             })?;
-            audit("set", &value);
             return Ok(
                 json!({"key": spec.name, "value": value, "state": "applied", "changed": changed}),
             );
@@ -333,14 +417,26 @@ impl SettingsOps {
         value: Value,
         wait: Duration,
     ) -> Result<Value, ApiError> {
-        let peer = caller.peer.as_deref();
+        let said = |result: AgentSetResult, value: &Value| {
+            self.writer.record(
+                &Said {
+                    key: spec.name,
+                    class: class_of(spec),
+                    value,
+                    result,
+                    by: None,
+                    device: None,
+                },
+                false,
+            );
+            scope::mark_recorded();
+        };
         let Some(inbox) = self
             .inbox
             .as_ref()
             .filter(|_| self.writer.room.can_follow(topics::INBOX))
         else {
-            self.writer
-                .audit(caller.tier, peer, "no_app", spec.name, &value);
+            said(AgentSetResult::NoApp, &value);
             return Err(ApiError::new(
                 ErrorCode::NeedsApproval,
                 format!(
@@ -354,8 +450,7 @@ impl SettingsOps {
         let ask = Ask::new(spec.name, value.clone(), caller.peer.clone(), self.ask_wait);
         self.asks.start(self.writer.clone(), Some(inbox.clone()));
         if !self.asks.open(&id, ask) {
-            self.writer
-                .audit(caller.tier, peer, "full", spec.name, &value);
+            said(AgentSetResult::Full, &value);
             return Err(failed(
                 "Too many changes wait for the user's approval; try again later.",
             ));
@@ -369,8 +464,7 @@ impl SettingsOps {
             self.item(&id, spec, &value, &before),
             Some(self.asks.responder(&id)),
         );
-        self.writer
-            .audit(caller.tier, peer, "asked", spec.name, &value);
+        said(AgentSetResult::Asked, &value);
         let now = self
             .asks
             .wait(&id, wait)

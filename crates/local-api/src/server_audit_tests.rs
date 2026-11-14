@@ -1,11 +1,11 @@
 #![cfg(unix)]
 
 use crate::client::{Client, ConnectOptions};
-use crate::server::{Caller, Handler, Limits, OpSpec, Server, ServerConfig, ServerHandle};
-use crate::testutil::TempDir;
+use crate::server::{Caller, Handler, Limits, OpHome, OpSpec, Server, ServerConfig, ServerHandle};
+use crate::testutil::{summary, TempDir};
 use crate::tier::Allowlist;
 use crate::wire::{ApiError, ClientKind, ErrorCode, Tier};
-use crate::AuditLog;
+use notchling_events::MemorySink;
 use serde_json::{json, Value};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -25,6 +25,26 @@ impl Handler for Acting {
 
     fn loud(&self, op: &str, args: &Value) -> bool {
         op == "peek.loud" && args["refresh"] == json!(true)
+    }
+
+    fn home(&self, op: &str) -> OpHome {
+        match op {
+            "peek" | "peek.fail" | "peek.loud" => OpHome::Quiet,
+            "read" | "slow" => OpHome::Quiet,
+            _ => OpHome::Called,
+        }
+    }
+
+    fn known_ops(&self) -> &[&'static str] {
+        &[
+            "session.reply",
+            "session.stop",
+            "slow",
+            "read",
+            "peek",
+            "peek.fail",
+            "peek.loud",
+        ]
     }
 
     fn topics(&self) -> &[&str] {
@@ -55,7 +75,7 @@ impl Handler for Acting {
 struct Running {
     _dir: TempDir,
     socket: PathBuf,
-    audit: PathBuf,
+    sink: Arc<MemorySink>,
     handle: ServerHandle,
 }
 
@@ -68,12 +88,12 @@ impl Drop for Running {
 fn start(allow: Allowlist) -> Running {
     let dir = TempDir::new("srv-m3");
     let socket = dir.path().join("run/notchlingd.sock");
-    let audit = dir.path().join("audit.jsonl");
+    let sink = Arc::new(MemorySink::new());
     let server = Server::bind(
         ServerConfig {
             socket: socket.clone(),
             allowlist: allow,
-            audit: Some(AuditLog::new(audit.clone())),
+            events: Some(sink.clone()),
             version: "9.9.9".into(),
             limits: Limits::default(),
         },
@@ -84,7 +104,7 @@ fn start(allow: Allowlist) -> Running {
     Running {
         _dir: dir,
         socket,
-        audit,
+        sink,
         handle,
     }
 }
@@ -97,16 +117,15 @@ fn connect(run: &Running, kind: ClientKind) -> Client {
     Client::connect_with(&run.socket, kind, "0.1.0", &options).unwrap()
 }
 
-fn audit_lines(run: &Running) -> Vec<Value> {
-    std::fs::read_to_string(&run.audit)
-        .unwrap_or_default()
-        .lines()
-        .map(|l| serde_json::from_str(l).unwrap())
+fn calls(run: &Running) -> Vec<(String, String)> {
+    summary(&run.sink)
+        .into_iter()
+        .filter(|(name, _)| name != "app.attached")
         .collect()
 }
 
 #[test]
-fn app_tier_calls_are_audited_with_their_outcome() {
+fn app_tier_calls_are_recorded_with_their_outcome() {
     let me = std::env::current_exe().unwrap();
     let run = start(Allowlist::new([me]));
     let mut app = connect(&run, ClientKind::App);
@@ -116,29 +135,18 @@ fn app_tier_calls_are_audited_with_their_outcome() {
     );
     assert!(app.call("session.stop", json!({})).is_err());
     assert_eq!(app.call("read", json!({})).unwrap(), json!({"sent": true}));
-    let lines = audit_lines(&run);
-    let summary: Vec<(String, String, String)> = lines
-        .iter()
-        .map(|l| {
-            (
-                l["op"].as_str().unwrap().to_string(),
-                l["tier"].as_str().unwrap().to_string(),
-                l["result"].as_str().unwrap().to_string(),
-            )
-        })
-        .collect();
     assert_eq!(
-        summary,
+        calls(&run),
         vec![
-            ("session.reply".into(), "app".into(), "ok".into()),
-            ("session.stop".into(), "app".into(), "unimplemented".into()),
+            ("op.called".to_owned(), "session.reply".to_owned()),
+            ("op.failed".to_owned(), "session.stop".to_owned()),
         ],
-        "agent-tier reads aren't audited"
+        "quiet reads aren't recorded"
     );
 }
 
 #[test]
-fn a_quiet_op_leaves_no_audit_line_on_success_but_failures_stay_audited() {
+fn a_quiet_op_records_nothing_on_success_but_failures_stay_recorded() {
     let me = std::env::current_exe().unwrap();
     let run = start(Allowlist::new([me]));
     let mut app = connect(&run, ClientKind::App);
@@ -147,38 +155,27 @@ fn a_quiet_op_leaves_no_audit_line_on_success_but_failures_stay_audited() {
     let agent_run = start(Allowlist::empty());
     let mut agent = connect(&agent_run, ClientKind::Cli);
     assert!(agent.call("peek", json!({})).is_err());
-    let summary = |run: &Running| -> Vec<(String, String)> {
-        audit_lines(run)
-            .iter()
-            .map(|l| {
-                (
-                    l["op"].as_str().unwrap().to_string(),
-                    l["result"].as_str().unwrap().to_string(),
-                )
-            })
-            .collect()
-    };
     assert_eq!(
-        summary(&run),
-        vec![("peek.fail".to_owned(), "failed".to_owned())]
+        calls(&run),
+        vec![("op.failed".to_owned(), "peek.fail".to_owned())]
     );
     assert_eq!(
-        summary(&agent_run),
-        vec![("peek".to_owned(), "forbidden".to_owned())]
+        calls(&agent_run),
+        vec![("api.refused".to_owned(), "peek".to_owned())]
     );
 }
 
 #[test]
-fn a_quiet_op_the_handler_calls_loud_is_audited_on_success() {
+fn a_quiet_op_the_handler_calls_loud_is_recorded_on_success() {
     let me = std::env::current_exe().unwrap();
     let run = start(Allowlist::new([me]));
     let mut app = connect(&run, ClientKind::App);
     assert!(app.call("peek.loud", json!({"refresh": false})).is_ok());
     assert!(app.call("peek.loud", json!({"refresh": true})).is_ok());
-    let lines = audit_lines(&run);
-    assert_eq!(lines.len(), 1);
-    assert_eq!(lines[0]["op"], "peek.loud");
-    assert_eq!(lines[0]["result"], "ok");
+    assert_eq!(
+        calls(&run),
+        vec![("op.called".to_owned(), "peek.loud".to_owned())]
+    );
 }
 
 #[test]

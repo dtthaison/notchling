@@ -59,7 +59,7 @@ fn serve(socket: &Path, calls: &Calls) -> Running {
         ServerConfig {
             socket: socket.to_path_buf(),
             allowlist: Allowlist::new([std::env::current_exe().expect("this test binary")]),
-            audit: None,
+            events: None,
             version: "test".into(),
             limits: Limits::default(),
         },
@@ -177,6 +177,35 @@ fn a_remembered_choice_sends_nothing_and_only_the_confirmed_notice_turns_them_on
         ]
     );
     assert_eq!(notice.state().offer(), []);
+    daemon.0.shutdown();
+    let _ = daemon.1.join();
+}
+
+#[test]
+fn a_restored_choice_says_so_and_a_users_does_not() {
+    let scratch = Scratch::new("sf-restored");
+    let socket = scratch.path().join(SOCKET_NAME);
+    let calls: Calls = Arc::default();
+    let daemon = serve(&socket, &calls);
+    let notice = Arc::new(RestartNotice::default());
+    let feed = start_with(&socket, Vec::new(), notice);
+    wait_until("the follow", || feed.following());
+    feed.choose_as(Switch::Vault, true, true).unwrap();
+    feed.choose(Switch::Accounts, true).unwrap();
+    let sets: Vec<Value> = calls
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|c| c.0 == "settings.set_switch")
+        .map(|c| c.1.clone())
+        .collect();
+    assert_eq!(
+        sets,
+        [
+            json!({"switch": "vault", "on": true, "restored": true}),
+            json!({"switch": "accounts", "on": true})
+        ]
+    );
     daemon.0.shutdown();
     let _ = daemon.1.join();
 }

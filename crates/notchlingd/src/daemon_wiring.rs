@@ -1,3 +1,4 @@
+use crate::account_history::DbSwitches;
 use crate::accounts_ops::AccountsOps;
 use crate::acting::Acting;
 use crate::acting_ops::{ActingOps, Room};
@@ -14,10 +15,13 @@ use crate::every_session::{EverySession, CLAUDE};
 use crate::git_ops::{live_folders, GitOps};
 use crate::inbox_ops::InboxOps;
 use crate::install_ops::{InstallOps, InstallSetup};
+use crate::late_emit::{Events, LateEmit, LateSalt};
 use crate::layout::Layout;
 use crate::limits_ops::LimitsOps;
 use crate::limits_sources::{ClaudeLimits, ProviderLimits, SessionJobs};
+use crate::log_ops::LogOps;
 use crate::op_group::OpGroup;
+use crate::op_kinds;
 use crate::pages_ops::{PagesOps, PagesSetup};
 use crate::providers_daemon::ProviderStores;
 use crate::providers_ops::ProvidersOps;
@@ -28,6 +32,7 @@ use crate::vault_ops::VaultOps;
 use crate::versions_ops::{AuditRecorder, VersionsOps};
 use notchling_engine::accounts::codex::login::idle_for_auto_switch;
 use notchling_engine::accounts::desktop::ClaudeName;
+use notchling_engine::activity::EventsDb;
 use notchling_engine::awake::Power;
 use notchling_engine::control::launcher::claude_path;
 use notchling_engine::control::session::home_of;
@@ -38,10 +43,11 @@ use notchling_engine::install::skills::SkillSpec;
 use notchling_engine::vault::skill as vault_skill;
 use notchling_engine::versions::mac::Roots as VersionRoots;
 use notchling_engine::versions::Version;
-use notchling_local_api::{ops, topics, ApiError, AuditLog, Caller, Handler, OpSpec, Tier};
+use notchling_events::{Emit, Salt};
+use notchling_local_api::{ops, topics, ApiError, Caller, Handler, OpHome, OpSpec, Tier};
 use serde_json::{Map, Value};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 pub struct Ops {
@@ -219,6 +225,18 @@ impl Handler for Ops {
         quiet_ops::loud(op, args)
     }
 
+    fn session_of(&self, pid: u32) -> Option<String> {
+        self.acting.as_ref().and_then(|a| a.session_of(pid))
+    }
+
+    fn home(&self, op: &str) -> OpHome {
+        op_kinds::home(op)
+    }
+
+    fn known_ops(&self) -> &[&'static str] {
+        op_kinds::known_ops()
+    }
+
     fn spec(&self, op: &str) -> Option<OpSpec> {
         let spec = match op {
             ops::SESSIONS_LIST => Some(OpSpec::AGENT),
@@ -314,6 +332,10 @@ pub struct Wired {
     pub settings: Arc<SettingsOps>,
     pub versions: Arc<VersionsOps>,
     pub awake: Arc<AwakeLoop>,
+    pub events: Arc<LateEmit>,
+    pub salt: LateSalt,
+    history: Arc<DbSwitches>,
+    log: OnceLock<(Arc<Mutex<EventsDb>>, Arc<LogOps>)>,
 }
 
 impl Wired {
@@ -333,6 +355,9 @@ impl Wired {
         bridge_ports: (u16, u16),
         power: Box<dyn Power>,
     ) -> Wired {
+        let late = LateEmit::new();
+        let salt: LateSalt = Arc::new(OnceLock::new());
+        let events = Events::new(late.clone(), salt.clone());
         let acting_switch = Arc::new(Acting::off());
         let claude = claude_path(Path::new(&home_of(&layout.roots())));
         let acting = Arc::new(
@@ -347,7 +372,8 @@ impl Wired {
                 Arc::new(LiveLauncher::new(RealLauncher::with_claude(claude.clone()))),
                 Box::new(|ms| std::thread::sleep(Duration::from_millis(ms))),
             )
-            .with_screen_file(layout.state_dir().join("permission-screen.txt")),
+            .with_screen_file(layout.state_dir().join("permission-screen.txt"))
+            .with_events(events.clone()),
         );
         let codex = Arc::new(CodexOps::for_daemon(
             layout,
@@ -356,16 +382,20 @@ impl Wired {
             &claude,
         ));
         acting.attach_codex(codex.clone());
-        let inbox = InboxOps::new(layout.data_dir.clone(), room.clone());
+        let inbox =
+            InboxOps::new(layout.data_dir.clone(), room.clone()).with_events(events.clone());
         let every = Arc::new(EverySession::new(layout));
-        let bridge = Arc::new(BridgeOps::new(
-            bridge_setup(layout, bridge_ports),
-            sessions.clone(),
-            acting.clone(),
-            room.clone(),
-            inbox.clone(),
-            every.clone(),
-        ));
+        let bridge = Arc::new(
+            BridgeOps::new(
+                bridge_setup(layout, bridge_ports),
+                sessions.clone(),
+                acting.clone(),
+                room.clone(),
+                inbox.clone(),
+                every.clone(),
+            )
+            .with_events(events.clone()),
+        );
         let agy = Arc::new(AgyOps::for_daemon(
             layout,
             acting.acting_switch(),
@@ -383,7 +413,14 @@ impl Wired {
 
         let switches = Arc::new(Switches::off());
         let on = switches.accounts.clone();
-        let accounts = Arc::new(AccountsOps::for_daemon(layout, on.clone(), room.clone()));
+        let history = DbSwitches::new();
+        let accounts = Arc::new(AccountsOps::recording(
+            layout,
+            on.clone(),
+            room.clone(),
+            events.emit(),
+            history.clone(),
+        ));
         accounts.attach_acting(acting.clone());
         let claude_store = accounts.store();
         let names = claude_store.clone();
@@ -419,6 +456,7 @@ impl Wired {
             room.clone(),
             catalog.shared_catalog(),
             inbox.clone(),
+            history.clone(),
         ));
         limits.set_claude(
             Arc::new(ClaudeLimits::new(on.clone(), claude_store)),
@@ -450,12 +488,14 @@ impl Wired {
             switches.vault.clone(),
             room.clone(),
             inbox.clone(),
+            events.clone(),
         ));
         let binary = std::env::current_exe().and_then(std::fs::canonicalize).ok();
         let mut install = InstallOps::new(
             InstallSetup::from_layout(layout, binary.clone()),
             switches.install.clone(),
-        );
+        )
+        .with_events(events.clone());
         if let Some(binary) = binary {
             install = install.with_skill(vault_skill_spec(&binary, vault.clone()));
         }
@@ -469,7 +509,7 @@ impl Wired {
         };
         let settings = Arc::new(
             SettingsOps::new(layout.data_dir.clone(), room.clone(), states)
-                .with_audit(AuditLog::new(layout.audit_path()))
+                .with_events(events.clone())
                 .with_limits(limits.config().clone())
                 .with_inbox(inbox.clone()),
         );
@@ -482,7 +522,7 @@ impl Wired {
             layout.data_dir.clone(),
             room.clone(),
             Arc::new(RealLauncher::with_claude(claude.clone())),
-            Arc::new(AuditRecorder::new(AuditLog::new(layout.audit_path()))),
+            Arc::new(AuditRecorder::new(events.clone())),
             Arc::new(|| {
                 std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
@@ -508,7 +548,21 @@ impl Wired {
             settings,
             versions,
             awake,
+            events: late,
+            salt,
+            history,
+            log: OnceLock::new(),
         }
+    }
+
+    pub fn set_events(&self, bus: Arc<dyn Emit>, salt: Salt) {
+        self.events.set(bus);
+        let _ = self.salt.set(salt);
+    }
+
+    pub fn set_log(&self, db: Arc<Mutex<EventsDb>>, ops: Arc<LogOps>) {
+        self.history.set(db.clone());
+        let _ = self.log.set((db, ops));
     }
 
     pub fn ops(
@@ -531,7 +585,7 @@ impl Wired {
             )))),
             folders,
         );
-        Ops::with_acting(sessions, self.acting.clone())
+        let ops = Ops::with_acting(sessions, self.acting.clone())
             .with_bridge(self.bridge.clone())
             .with_codex(self.codex.clone())
             .with_agy(self.agy.clone())
@@ -541,7 +595,7 @@ impl Wired {
             ))
             .with_group(Arc::new(
                 SwitchOps::new(self.switches.clone(), self.acting.room.clone())
-                    .with_audit(AuditLog::new(layout.audit_path())),
+                    .with_events(Events::new(self.events.clone(), self.salt.clone())),
             ))
             .with_group(self.accounts.clone())
             .with_group(self.install.clone())
@@ -553,8 +607,16 @@ impl Wired {
             .with_group(self.settings.clone())
             .with_group(self.versions.clone())
             .with_group(Arc::new(git))
-            .with_group(Arc::new(ActivityOps::for_daemon(layout)))
-            .with_first_scan(first_scan, first_wait)
+            .with_first_scan(first_scan, first_wait);
+        match self.log.get() {
+            Some((db, log)) => ops
+                .with_group(Arc::new(ActivityOps::new(
+                    db.clone(),
+                    Arc::new(|_, _| None),
+                )))
+                .with_group(log.clone()),
+            None => ops.with_group(Arc::new(ActivityOps::for_daemon(layout))),
+        }
     }
 
     pub fn start(&self) {

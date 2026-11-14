@@ -85,7 +85,7 @@ fn daemon(acting: bool, app_tier: bool) -> Daemon {
         ServerConfig {
             socket: socket.clone(),
             allowlist: allow,
-            audit: None,
+            events: None,
             version: "9.9.9".into(),
             limits: Limits::default(),
         },

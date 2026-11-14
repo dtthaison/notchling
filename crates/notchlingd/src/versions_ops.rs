@@ -1,4 +1,5 @@
 use crate::acting_ops::Room;
+use crate::late_emit::Events;
 use crate::op_group::OpGroup;
 use notchling_engine::control::launcher::{LaunchOutput, Launcher};
 use notchling_engine::control::plan::Command;
@@ -7,7 +8,10 @@ use notchling_engine::store;
 use notchling_engine::versions::mac::{detect, watch_paths, Installed, Problem, Roots};
 use notchling_engine::versions::record::{Cause, Fact, Recorder};
 use notchling_engine::versions::{cli_output, IdentityCache, Method, Tool, Version, WorkerTools};
-use notchling_local_api::{ops, topics, ApiError, AuditEntry, AuditLog, Caller, OpSpec};
+use notchling_events::kinds::agents::{ToolVersionSeen, VersionedTool};
+use notchling_events::spec::Outcome;
+use notchling_events::{field, Event};
+use notchling_local_api::{ops, topics, ApiError, Caller, OpSpec};
 use notchling_platform::watch::{WatchConfig, Watcher};
 use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
@@ -27,19 +31,34 @@ const SEEN_KEEP: usize = 400;
 pub type Clock = Arc<dyn Fn() -> i64 + Send + Sync>;
 
 pub struct AuditRecorder {
-    log: AuditLog,
+    events: Events,
 }
 
 impl AuditRecorder {
-    pub fn new(log: AuditLog) -> AuditRecorder {
-        AuditRecorder { log }
+    pub fn new(events: Events) -> AuditRecorder {
+        AuditRecorder { events }
     }
 }
 
 impl Recorder for AuditRecorder {
     fn record(&self, fact: Fact) {
-        let (op, result) = fact.audit_words();
-        let _ = self.log.append(&AuditEntry::now(op, None, None, &result));
+        let Fact::Seen { tool, version } = fact else {
+            return;
+        };
+        let tool = match tool {
+            Tool::Claude => VersionedTool::Claude,
+            Tool::Codex => VersionedTool::Codex,
+            Tool::Agy => VersionedTool::Agy,
+            Tool::Notchling => return,
+        };
+        self.events.push(Event::new(
+            &ToolVersionSeen {
+                tool,
+                version: field::Version::new(version.as_str()),
+            },
+            Outcome::Ok,
+            crate::acting_ops::now_ms(),
+        ));
     }
 }
 

@@ -855,3 +855,70 @@ fn a_borrowed_model_named_current_later_is_priced_again() {
 
 #[path = "tracker_v2_tests.rs"]
 mod v2;
+
+struct FixedSwitches(Vec<super::account_log::Entry>);
+
+impl super::account_log::AccountSwitches for FixedSwitches {
+    fn switches(&self) -> Vec<super::account_log::Entry> {
+        self.0.clone()
+    }
+}
+
+fn entry(at: f64, id: &str) -> super::account_log::Entry {
+    super::account_log::Entry {
+        at,
+        id: id.to_owned(),
+    }
+}
+
+#[test]
+fn switches_from_events_db_first() {
+    let tmp = TempDir::new("cost-switches");
+    let reference = NOW - 978_307_200.0;
+    std::fs::write(
+        tmp.path("account-log.json"),
+        format!(
+            r#"[{{"at":{},"id":"old-a"}},{{"at":{},"id":"file-b"}}]"#,
+            reference - 10.0 * DAY,
+            reference - 1.0 * DAY
+        ),
+    )
+    .unwrap();
+    let recorded = vec![
+        entry(NOW - 3.0 * DAY, "db-a"),
+        entry(NOW - 1.0 * DAY, "db-b"),
+    ];
+    let mut t = claude_tracker(&tmp).with_switches(Arc::new(FixedSwitches(recorded)));
+    append(
+        &tmp,
+        "projects/-p/a.jsonl",
+        &(usage_line("older", 1.0, NOW - 5.0 * DAY)
+            + &usage_line("a", 2.0, NOW - 2.0 * DAY)
+            + &usage_line("b", 4.0, NOW)),
+    );
+    t.refresh(NOW);
+    let by = &t.ranged(NOW).by_account[&Window::All];
+    near(by["old-a"].month, 1.0);
+    near(by["db-a"].month, 2.0);
+    near(by["db-b"].month, 4.0);
+    assert!(!by.contains_key("file-b"), "the recorded switches win");
+}
+
+#[test]
+fn file_is_the_fallback() {
+    let tmp = TempDir::new("cost-fallback");
+    let reference = NOW - 978_307_200.0;
+    std::fs::write(
+        tmp.path("account-log.json"),
+        format!(r#"[{{"at":{},"id":"file-a"}}]"#, reference - 3.0 * DAY),
+    )
+    .unwrap();
+    let mut t = claude_tracker(&tmp).with_switches(Arc::new(FixedSwitches(Vec::new())));
+    append(
+        &tmp,
+        "projects/-p/a.jsonl",
+        &usage_line("a", 2.0, NOW - 2.0 * DAY),
+    );
+    t.refresh(NOW);
+    near(t.ranged(NOW).by_account[&Window::All]["file-a"].month, 2.0);
+}

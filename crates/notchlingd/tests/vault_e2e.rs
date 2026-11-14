@@ -1,5 +1,7 @@
 #![cfg(unix)]
 
+mod common;
+
 use notchling_local_api::{ops, topics, Client, ClientError, ClientKind, ErrorCode};
 use serde_json::json;
 use std::path::{Path, PathBuf};
@@ -120,8 +122,25 @@ fn with_the_switch_off_every_vault_path_says_so() {
 
     assert!(!root.join("notchling/daemon/vault.json").exists());
     assert!(!root.join("notchling/vault.json").exists());
-    let audit = std::fs::read_to_string(root.join("notchling/audit.jsonl")).unwrap();
-    assert!(audit.contains("\"op\":\"vault.use\"") && audit.contains("\"result\":\"off\""));
+    let lines = common::audit::wait_until(&root, |all| {
+        all.iter().any(|l| {
+            l["kind"] == "api.refused"
+                && l["f"]["op"] == "vault.request"
+                && l["f"]["exe"] == "notchling"
+        })
+    });
+    let used = lines
+        .iter()
+        .find(|l| {
+            l["kind"] == "api.refused"
+                && l["f"]["op"] == "vault.use"
+                && l["f"]["exe"] == "notchling"
+        })
+        .expect("the command line's refused vault.use is recorded");
+    assert_eq!(used["f"]["tier"], "agent");
+    assert_eq!(used["f"]["why"], "forbidden");
+    assert_eq!(used["outcome"], "refused");
+    assert!(!lines.iter().any(|l| l["kind"] == "vault.secret_used"));
 }
 
 #[test]

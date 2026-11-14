@@ -3,10 +3,10 @@
 use crate::client::{Client, ClientError, ConnectOptions};
 use crate::framing::{LineReader, MAX_LINE};
 use crate::server::{Caller, Handler, Limits, OpSpec, Server, ServerConfig, ServerHandle};
-use crate::testutil::TempDir;
+use crate::testutil::{field_text, summary, TempDir};
 use crate::tier::Allowlist;
 use crate::wire::{ApiError, ClientKind, ErrorCode, Tier};
-use crate::AuditLog;
+use notchling_events::MemorySink;
 use serde_json::{json, Map, Value};
 use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
@@ -55,6 +55,16 @@ impl Handler for TestHandler {
     fn topics(&self) -> &[&str] {
         &["sessions"]
     }
+
+    fn known_ops(&self) -> &[&'static str] {
+        &[
+            "echo",
+            "settings.set",
+            "test.needsApproval",
+            "test.panic",
+            "test.extras",
+        ]
+    }
 }
 
 fn fast() -> Limits {
@@ -71,16 +81,11 @@ fn fast() -> Limits {
 }
 
 struct Running {
-    dir: TempDir,
+    _dir: TempDir,
     socket: PathBuf,
     handle: ServerHandle,
+    sink: Arc<MemorySink>,
     thread: Option<JoinHandle<std::io::Result<()>>>,
-}
-
-impl Running {
-    fn audit_path(&self) -> PathBuf {
-        self.dir.path().join("audit.jsonl")
-    }
 }
 
 impl Drop for Running {
@@ -99,11 +104,12 @@ fn me() -> PathBuf {
 fn start_with(allow: Allowlist, limits: Limits) -> Running {
     let dir = TempDir::new("srv");
     let socket = dir.path().join("run/notchlingd.sock");
+    let sink = Arc::new(MemorySink::new());
     let server = Server::bind(
         ServerConfig {
             socket: socket.clone(),
             allowlist: allow,
-            audit: Some(AuditLog::new(dir.path().join("audit.jsonl"))),
+            events: Some(sink.clone()),
             version: "9.9.9".into(),
             limits,
         },
@@ -112,9 +118,10 @@ fn start_with(allow: Allowlist, limits: Limits) -> Running {
     .unwrap();
     let (handle, thread) = server.spawn().unwrap();
     Running {
-        dir,
+        _dir: dir,
         socket,
         handle,
+        sink,
         thread: Some(thread),
     }
 }
@@ -283,16 +290,16 @@ fn an_app_op_from_the_agent_tier_is_forbidden_and_audited() {
         Err(ClientError::Api(e)) => assert_eq!(e.code, ErrorCode::Forbidden),
         other => panic!("{other:?}"),
     }
-    let text = std::fs::read_to_string(run.audit_path()).unwrap();
-    let line: Value = serde_json::from_str(text.trim()).unwrap();
-    assert_eq!(line["op"], "settings.set");
-    assert_eq!(line["tier"], "agent");
-    assert_eq!(line["result"], "forbidden");
-    let peer = PathBuf::from(line["peer"].as_str().unwrap());
+    let events = run.sink.events();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].spec.name, "api.refused");
     assert_eq!(
-        std::fs::canonicalize(peer).unwrap(),
-        std::fs::canonicalize(me()).unwrap()
+        field_text(&events[0], "op").as_deref(),
+        Some("settings.set")
     );
+    assert_eq!(field_text(&events[0], "tier").as_deref(), Some("agent"));
+    assert_eq!(field_text(&events[0], "why").as_deref(), Some("forbidden"));
+    assert!(events[0].fields.get("exe").is_some());
 }
 
 #[test]
@@ -303,8 +310,14 @@ fn approval_is_needed_while_no_app_is_attached() {
         Err(ClientError::Api(e)) => assert_eq!(e.code, ErrorCode::NeedsApproval),
         other => panic!("{other:?}"),
     }
-    let text = std::fs::read_to_string(run.audit_path()).unwrap();
-    assert!(text.contains("needs_approval"));
+    assert_eq!(
+        summary(&run.sink),
+        vec![("api.refused".to_owned(), "test.needsApproval".to_owned())]
+    );
+    assert_eq!(
+        field_text(&run.sink.events()[0], "why").as_deref(),
+        Some("needs_approval")
+    );
 }
 
 #[test]
@@ -531,7 +544,7 @@ fn config(socket: &Path) -> ServerConfig {
     ServerConfig {
         socket: socket.to_path_buf(),
         allowlist: Allowlist::empty(),
-        audit: None,
+        events: None,
         version: "1".into(),
         limits: fast(),
     }

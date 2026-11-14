@@ -1,4 +1,6 @@
 use crate::acting_ops::{now_ms, Room};
+use crate::inbox_events::events_of;
+use crate::late_emit::Events;
 use crate::op_group::OpGroup;
 use notchling_engine::bridge::inbox::InboxOutcome;
 use notchling_engine::inbox::{self, ActionId, Book, Change, Item, Kind, State};
@@ -17,6 +19,10 @@ const MAY_ALLOW: [&str; 2] = ["mac", "phone"];
 
 pub trait Responder: Send + Sync {
     fn answered(&self, item: &Item, action: ActionId) -> bool;
+
+    fn answered_by(&self, item: &Item, action: ActionId, _by: &str) -> bool {
+        self.answered(item, action)
+    }
 }
 
 type Clock = Arc<dyn Fn() -> i64 + Send + Sync>;
@@ -30,9 +36,18 @@ struct Inner {
     book: Book,
     responders: HashMap<String, Arc<dyn Responder>>,
     writes: Option<Sender<Msg>>,
+    events: Option<Events>,
 }
 
 impl Inner {
+    fn note(&self, changes: &[Change]) {
+        if let Some(events) = &self.events {
+            for event in events_of(changes) {
+                events.push(event);
+            }
+        }
+    }
+
     fn send(&self, changes: Vec<Change>) {
         if changes.is_empty() {
             return;
@@ -131,6 +146,7 @@ impl InboxOps {
             book: Book::new(),
             responders: HashMap::new(),
             writes: Some(writes),
+            events: None,
         };
         let ops = InboxOps {
             clock,
@@ -141,6 +157,11 @@ impl InboxOps {
             writer: Mutex::new(writer),
         };
         Arc::new(ops)
+    }
+
+    pub fn with_events(self: Arc<Self>, events: Events) -> Arc<InboxOps> {
+        lock(&self.inner).events = Some(events);
+        self
     }
 
     pub fn load(&self) {
@@ -158,6 +179,7 @@ impl InboxOps {
         let mut inner = lock(&self.inner);
         inner.book = saved;
         inner.responders.clear();
+        inner.note(&withdrawn);
         inner.send(withdrawn);
     }
 
@@ -176,6 +198,7 @@ impl InboxOps {
                 inner.responders.insert(id.clone(), responder);
             }
             inner.forget(&changes);
+            inner.note(&changes);
             inner.send(changes);
         }
         id
@@ -190,6 +213,7 @@ impl InboxOps {
             .into_iter()
             .collect();
         inner.responders.remove(id);
+        inner.note(&changes);
         inner.send(changes);
     }
 
@@ -209,6 +233,7 @@ impl InboxOps {
                 .map(Change::Removed),
         );
         inner.forget(&changes);
+        inner.note(&changes);
         inner.send(changes);
     }
 
@@ -305,12 +330,13 @@ impl InboxOps {
             ));
         }
         if let Some(responder) = inner.responders.get(id).cloned() {
-            if !responder.answered(&current, action) {
+            if !responder.answered_by(&current, action, by) {
                 return Ok(refused(&current));
             }
         }
         match inner.book.answer(id, action, by, now) {
             Ok(change) => {
+                inner.note(std::slice::from_ref(&change));
                 inner.send(vec![change]);
                 inner.responders.remove(id);
                 Ok(InboxOutcome {

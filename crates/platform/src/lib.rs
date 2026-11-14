@@ -5,6 +5,7 @@ pub mod awake;
 pub mod files;
 pub mod locale;
 pub mod notify;
+pub mod os_version;
 pub mod paths;
 #[cfg(target_os = "macos")]
 mod sys_mac;
@@ -44,6 +45,8 @@ impl From<io::Error> for Error {
         Error::Io(e)
     }
 }
+
+pub use os_version::os_version;
 
 pub type Result<T> = std::result::Result<T, Error>;
 

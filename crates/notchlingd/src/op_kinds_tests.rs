@@ -2,8 +2,10 @@ use crate::acting_ops_tests::FakeRoom;
 use crate::daemon::FirstScan;
 use crate::daemon_wiring::{Ops, Wired};
 use crate::layout::Layout;
+use crate::op_kinds::{home, known_ops, Home, HOMES};
 use crate::quiet_ops::QUIET_READS;
-use notchling_local_api::{ops, Handler, OpSpec};
+use notchling_events::registry;
+use notchling_local_api::{ops, Handler, OpHome, OpSpec};
 use serde_json::{json, Value};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -18,7 +20,7 @@ impl Drop for Root {
 }
 
 fn rig(tag: &str) -> (Root, Wired, Ops) {
-    let root = std::env::temp_dir().join(format!("nl-quiet-{tag}-{}", std::process::id()));
+    let root = std::env::temp_dir().join(format!("nl-kinds-{tag}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
     let layout = Layout::resolve(None, Some(root.as_os_str()), || None).unwrap();
     let sessions = Arc::new(Mutex::new(json!([])));
@@ -41,8 +43,11 @@ const OWN_QUIET: [&str; 6] = [
     ops::ACTIVITY_LIST,
 ];
 
-const NEVER_QUIET: [&str; 74] = [
+const NEVER_QUIET: [&str; 77] = [
     ops::HELLO,
+    ops::LOG_VERIFY,
+    ops::LOG_CHAIN_START,
+    ops::LOG_AUDIT_DELETE,
     ops::DAEMON_STATUS,
     ops::SESSIONS_LIST,
     ops::EVENTS_SUBSCRIBE,
@@ -141,10 +146,79 @@ fn every_op_name() -> Vec<String> {
 }
 
 #[test]
-fn only_read_only_polls_are_quiet_and_a_new_op_must_be_classified() {
-    let (_root, wired, ops) = rig("classify");
+fn every_op_has_a_home() {
     let names = every_op_name();
     assert!(names.len() > 70, "{}", names.len());
+    for name in &names {
+        assert!(
+            HOMES.iter().any(|(op, _)| op == name),
+            "{name} has no home in HOMES"
+        );
+    }
+    for (op, _) in HOMES {
+        assert!(
+            names.iter().any(|name| name == op),
+            "{op} is in HOMES but not in wire.rs"
+        );
+    }
+    let mut seen: Vec<&str> = HOMES.iter().map(|(op, _)| *op).collect();
+    seen.sort_unstable();
+    seen.dedup();
+    assert_eq!(seen.len(), HOMES.len(), "an op is listed twice");
+    assert_eq!(known_ops().len(), HOMES.len());
+}
+
+#[test]
+fn named_kinds_exist() {
+    for (op, home) in HOMES {
+        if let Home::Kind(kind) = home {
+            assert!(registry::find(kind).is_some(), "{op} names {kind}");
+        }
+    }
+}
+
+#[test]
+fn own_quiet_ops_are_quiet() {
+    let (_root, wired, ops) = rig("own");
+    for op in OWN_QUIET {
+        assert_eq!(home(op), OpHome::Quiet, "{op}");
+        assert_eq!(ops.spec(op), Some(OpSpec::APP_QUIET), "{op}");
+    }
+    wired.close();
+}
+
+#[test]
+fn quiet_reads_match_quiet_ops_rs() {
+    let (_root, wired, ops) = rig("reads");
+    for op in QUIET_READS {
+        assert_eq!(home(op), OpHome::Quiet, "{op}");
+        assert_eq!(ops.spec(op), Some(OpSpec::APP_QUIET), "{op}");
+    }
+    wired.close();
+}
+
+#[test]
+fn never_quiet_ops_are_not_quiet() {
+    let (_root, wired, ops) = rig("never");
+    for op in NEVER_QUIET.iter().chain(NEVER_QUIET_LIMITS.iter()) {
+        assert!(!ops.spec(op).is_some_and(|s| s.quiet_ok), "{op}");
+    }
+    wired.close();
+}
+
+#[test]
+fn an_op_with_its_own_kind_is_never_quiet_or_called() {
+    for (op, kind) in HOMES {
+        if matches!(kind, Home::Kind(_)) {
+            assert_eq!(home(op), OpHome::Kind, "{op}");
+        }
+    }
+    assert_eq!(home("not.an.op"), OpHome::Called);
+}
+
+#[test]
+fn every_op_is_classified_once_by_the_old_lists() {
+    let names = every_op_name();
     for name in &names {
         let op = name.as_str();
         let in_quiet = QUIET_READS.contains(&op);
@@ -155,17 +229,11 @@ fn only_read_only_polls_are_quiet_and_a_new_op_must_be_classified() {
             1,
             "{op} must be in exactly one of QUIET_READS, OWN_QUIET and NEVER_QUIET"
         );
-        let quiet = ops.spec(op).is_some_and(|s| s.quiet_ok);
-        assert_eq!(quiet, !in_never, "{op}");
     }
-    for op in QUIET_READS.iter().chain(OWN_QUIET.iter()) {
-        assert_eq!(ops.spec(op), Some(OpSpec::APP_QUIET), "{op}");
-    }
-    wired.close();
 }
 
 #[test]
-fn a_quiet_read_poll_that_syncs_is_audited_when_it_asks_for_the_sync() {
+fn a_quiet_read_poll_that_syncs_is_recorded_when_it_asks_for_the_sync() {
     let (_root, wired, ops) = rig("loud");
     for op in ["accounts.list", "providers.list"] {
         assert!(!ops.loud(op, &json!({"sync": false})), "{op}");

@@ -1,8 +1,10 @@
 use crate::acting::{Acting, ACTING_OFF};
+use crate::acting_events::{attach_why, log_down, session_ref, who, why_of, PlayError, Who};
 use crate::agy_ops::AgyOps;
 use crate::catalog_ops::CatalogService;
 use crate::codex_ops::CodexOps;
 use crate::hook_ops::Parents;
+use crate::late_emit::Events;
 use crate::prompts::{fit_list, question_json, Kind, Prompt, PromptStore};
 use notchling_engine::control::{Command, LaunchError, LaunchOutput, Launcher, PtyScript};
 use notchling_engine::reply::exec::{
@@ -15,6 +17,9 @@ use notchling_engine::reply::question::{
 use notchling_engine::reply::read::read_question;
 use notchling_engine::sessions::jobs::config_dir_for_job;
 use notchling_engine::sessions::{Agent, AgentGroup, AgentTarget, Roots};
+use notchling_events::kinds::agents::{AnswerKind, HeldThen, PromptKind};
+use notchling_events::kinds::choices::DoneOrFailed;
+use notchling_events::{Ref, Session};
 use notchling_local_api::{ops, topics, ApiError, Caller, ErrorCode, OpSpec, Tier};
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -122,6 +127,7 @@ pub struct ActingOps {
     catalog: OnceLock<Arc<CatalogService>>,
     screen_file: Option<PathBuf>,
     pub(crate) held: crate::held_ops::HeldState,
+    pub(crate) events: Option<Events>,
 }
 
 impl ActingOps {
@@ -151,6 +157,7 @@ impl ActingOps {
             catalog: OnceLock::new(),
             screen_file: None,
             held: crate::held_ops::HeldState::default(),
+            events: None,
         }
     }
 
@@ -223,6 +230,9 @@ impl ActingOps {
 
     pub fn call(&self, caller: &Caller, op: &str, args: &Value) -> Result<Value, ApiError> {
         if ACTING_OPS.contains(&op) && !self.acting.is_on() {
+            if op == ops::SESSION_REPLY {
+                self.note_acting_off(args, who(caller, args).via);
+            }
             return Err(forbidden(ACTING_OFF));
         }
         match op {
@@ -238,12 +248,11 @@ impl ActingOps {
             }
             ops::SESSION_QUESTION => self.question(caller, args),
             ops::HOOK_REQUEST => self.hook_request(caller, args),
-            ops::SESSION_REPLY => self.reply(args),
-            ops::SESSION_INTERRUPT => self.interrupt(args),
-            ops::SESSION_TAKE_BACK => self.take_back(args),
-            ops::SESSION_PERMISSION => self.permission(args),
-            ops::SESSION_ANSWER => self.answer(args),
-            op if CONTROL_OPS.contains(&op) => self.control(op, args),
+            ops::SESSION_REPLY => self.reply(caller, args),
+            ops::SESSION_PERMISSION => self.permission(caller, args),
+            ops::SESSION_ANSWER => self.answer(caller, args),
+            ops::SESSION_INTERRUPT | ops::SESSION_TAKE_BACK => self.controlled(caller, op, args),
+            op if CONTROL_OPS.contains(&op) => self.controlled(caller, op, args),
             _ => Err(ApiError::internal(format!("{op} has no handler"))),
         }
     }
@@ -254,6 +263,7 @@ impl ActingOps {
             .and_then(Value::as_bool)
             .ok_or_else(|| bad("settings.set_acting takes {\"on\": true|false}"))?;
         self.acting.set(on);
+        self.note_acting(on, args);
         if !on {
             for prompt in self.prompts.drain() {
                 self.resolved(&prompt, "pass", "acting_off");
@@ -297,7 +307,7 @@ impl ActingOps {
         agent: &Agent,
         plan: &Plan,
         log: &mut dyn QueueLog,
-    ) -> Result<Outcome, ApiError> {
+    ) -> Result<Outcome, PlayError> {
         let _one = self.typing.lock().unwrap_or_else(|e| e.into_inner());
         self.play_locked(agent, plan, log, None)
     }
@@ -308,32 +318,90 @@ impl ActingOps {
         plan: &Plan,
         log: &mut dyn QueueLog,
         keep: Option<&Expected>,
-    ) -> Result<Outcome, ApiError> {
+    ) -> Result<Outcome, PlayError> {
         if plan.is_empty() {
             return Ok(Outcome::default());
         }
         let job = match &agent.target {
             AgentTarget::Job(job) if agent.can_reply() => job.clone(),
-            _ => return Err(bad("this session takes no replies")),
+            _ => return Err(bad("this session takes no replies").into()),
         };
         let config_dir = config_dir_for_job(&self.roots, &job).or_else(|| agent.config_dir.clone());
-        let mut pty = self.attacher.attach(&job, config_dir.as_deref())?;
+        let mut pty = self
+            .attacher
+            .attach(&job, config_dir.as_deref())
+            .map_err(|err| PlayError {
+                why: attach_why(&err),
+                err,
+            })?;
         let played = execute(plan, pty.as_mut(), self.attacher.screen_check(), log);
         if let (Err(failure), Some(expect), Some(file)) = (&played, keep, &self.screen_file) {
             if failure.is_permission_refusal() {
                 keep_screen(file, expect, failure, &pty.screen());
             }
         }
-        played.map_err(|f| ApiError::new(ErrorCode::Failed, f.to_string()))
+        played.map_err(|f| PlayError {
+            why: why_of(&f),
+            err: ApiError::new(ErrorCode::Failed, f.to_string()),
+        })
     }
 
-    fn reply(&self, args: &Value) -> Result<Value, ApiError> {
+    fn reply(&self, caller: &Caller, args: &Value) -> Result<Value, ApiError> {
         let text = text_arg(args, "text")?;
         if text.trim().is_empty() {
             return Err(bad("the reply is empty"));
         }
         let agent = self.agent(args)?;
-        self.reply_or_hold(&agent, text, crate::held_ops::now_ms())
+        let via = who(caller, args).via;
+        let session = session_ref(&agent);
+        let chars = text.chars().count();
+        let by_agent = caller.tier == Tier::Agent;
+        if by_agent && !self.note_reply(session.clone(), via, chars, None, None, true) {
+            return Err(log_down());
+        }
+        let started = Instant::now();
+        let sent = self.reply_or_hold(&agent, text, crate::held_ops::now_ms());
+        match &sent {
+            Ok(value) if value.get("state").and_then(Value::as_str) == Some("queued") => {
+                self.note_held(session, HeldThen::SentAtTurnEnd);
+            }
+            Ok(_) if !by_agent => {
+                let waited = u64::try_from(started.elapsed().as_millis()).ok();
+                self.note_reply(session, via, chars, None, waited, false);
+            }
+            Ok(_) => {}
+            Err(failure) => {
+                self.note_reply(session, via, chars, Some(failure.why), None, false);
+            }
+        }
+        sent.map_err(ApiError::from)
+    }
+
+    fn controlled(&self, caller: &Caller, op: &str, args: &Value) -> Result<Value, ApiError> {
+        let target = self.target_of(op, args);
+        let by_agent = caller.tier == Tier::Agent;
+        if let (true, Some(target)) = (by_agent, &target) {
+            if !self.note_control(target, DoneOrFailed::Done, true) {
+                return Err(log_down());
+            }
+        }
+        let result = match op {
+            ops::SESSION_INTERRUPT => self.interrupt(args),
+            ops::SESSION_TAKE_BACK => self.take_back(args),
+            _ => self.control(op, args),
+        };
+        if let Some(target) = &target {
+            match (&result, by_agent) {
+                (Ok(_), false) => {
+                    self.note_control(target, DoneOrFailed::Done, false);
+                }
+                (Err(_), _) => {
+                    self.note_control(target, DoneOrFailed::Failed, false);
+                }
+                _ => {}
+            }
+        }
+        result
     }
 
     fn interrupt(&self, args: &Value) -> Result<Value, ApiError> {
@@ -390,11 +458,12 @@ impl ActingOps {
             .and_then(|s| self.prompts.for_session(&s, Kind::Question)))
     }
 
-    fn permission(&self, args: &Value) -> Result<Value, ApiError> {
+    fn permission(&self, caller: &Caller, args: &Value) -> Result<Value, ApiError> {
         let decision = text_arg(args, "decision")?;
+        let who = who(caller, args);
         let Some(prompt) = self.held(args)? else {
             if args.get("expect").is_some() {
-                return self.permission_on_screen(args, decision);
+                return self.permission_on_screen(args, decision, &who);
             }
             return Err(bad(
                 "no prompt with that id is waiting (answer by the prompt's id, or pass expect to answer a row's dialog)",
@@ -413,10 +482,34 @@ impl ActingOps {
             _ => return Err(bad("decision is allow, deny or always")),
         };
         self.decide(&prompt, response, decision)?;
+        self.note_prompt(&prompt, answer_of(decision), &who);
         Ok(json!({"decided": decision, "promptId": prompt.id}))
     }
 
-    fn permission_on_screen(&self, args: &Value, decision: &str) -> Result<Value, ApiError> {
+    fn note_prompt(&self, prompt: &Prompt, answer: AnswerKind, who: &Who) {
+        let kind = match prompt.kind {
+            Kind::Question => PromptKind::Question,
+            Kind::Permission => PromptKind::Permission,
+        };
+        let tool = prompt.event.get("tool_name").and_then(Value::as_str);
+        let waited = u64::try_from(now_ms().saturating_sub(prompt.created_ms)).ok();
+        self.note_answered(
+            Ref::<Session>::new(&prompt.session_id),
+            kind,
+            tool,
+            answer,
+            who,
+            waited,
+        );
+    }
+
+    fn permission_on_screen(
+        &self,
+        args: &Value,
+        decision: &str,
+        who: &Who,
+    ) -> Result<Value, ApiError> {
+        let spoken = decision;
         let decision =
             Decision::parse(decision).ok_or_else(|| bad("decision is allow, deny or always"))?;
         if args.get("message").is_some() {
@@ -435,10 +528,19 @@ impl ActingOps {
                 Some(&expect),
             )?;
         }
+        self.note_answered(
+            session_ref(&agent),
+            PromptKind::Permission,
+            Some(&expect.tool),
+            answer_of(spoken),
+            who,
+            None,
+        );
         Ok(json!({"decided": decision.word(), "answered": "terminal"}))
     }
 
-    fn answer(&self, args: &Value) -> Result<Value, ApiError> {
+    fn answer(&self, caller: &Caller, args: &Value) -> Result<Value, ApiError> {
+        let who = who(caller, args);
         let answers = args
             .get("answers")
             .ok_or_else(|| bad("answers is needed"))?;
@@ -451,12 +553,21 @@ impl ActingOps {
             let response =
                 json!({"action": "answer", "answers": hook_answers(&choices, &question)});
             self.decide(&prompt, response, "answer")?;
+            self.note_prompt(&prompt, typed_or_picked(answers), &who);
             return Ok(json!({"answered": "hook", "promptId": prompt.id}));
         }
         let agent = self.agent(args)?;
         let question = question_arg(args)?;
         let choices = choices_from_json(answers, &question.items).map_err(bad)?;
         self.play(&agent, &plan::answer(&choices, &question), &mut NoLog)?;
+        self.note_answered(
+            session_ref(&agent),
+            PromptKind::Question,
+            None,
+            typed_or_picked(answers),
+            &who,
+            None,
+        );
         Ok(json!({"answered": "terminal"}))
     }
 
@@ -510,6 +621,25 @@ impl ActingOps {
             }
             None => json!({"items": []}),
         })
+    }
+}
+
+fn answer_of(decision: &str) -> AnswerKind {
+    match decision {
+        "always" => AnswerKind::AllowAlways,
+        "deny" => AnswerKind::Deny,
+        _ => AnswerKind::AllowOnce,
+    }
+}
+
+fn typed_or_picked(answers: &Value) -> AnswerKind {
+    if answers
+        .as_array()
+        .is_some_and(|list| list.iter().any(Value::is_string))
+    {
+        AnswerKind::Typed
+    } else {
+        AnswerKind::Picked
     }
 }
 

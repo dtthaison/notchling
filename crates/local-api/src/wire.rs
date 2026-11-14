@@ -104,6 +104,9 @@ pub mod ops {
     pub const GIT_BRANCHES: &str = "git.branches";
 
     pub const ACTIVITY_LIST: &str = "activity.list";
+    pub const LOG_VERIFY: &str = "log.verify";
+    pub const LOG_CHAIN_START: &str = "log.chain.start";
+    pub const LOG_AUDIT_DELETE: &str = "log.audit.delete";
 
     pub const VERSIONS_GET: &str = "versions.get";
     pub const VERSIONS_WORKERS: &str = "versions.workers";
@@ -130,6 +133,9 @@ pub mod topics {
     pub const SESSION_HELD: &str = "session.held";
     pub const AGY_PERMISSION_PENDING: &str = "agy.permission.pending";
     pub const AGY_PERMISSION_RESOLVED: &str = "agy.permission.resolved";
+    pub const LOG: &str = "log";
+    pub const LOG_EVENT: &str = "log.event";
+    pub const LOG_CHECK: &str = "log.check";
     pub const BRIDGE: &str = "bridge";
     pub const BRIDGE_PAIR_REQUEST: &str = "bridge.pair.request";
     pub const BRIDGE_CHANGED: &str = "bridge.changed";

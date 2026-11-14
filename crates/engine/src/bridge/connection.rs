@@ -91,6 +91,10 @@ impl Connection {
         self.is_tunnel.then(|| self.remote_address.clone())
     }
 
+    pub(crate) fn device_id(&self) -> String {
+        self.device().map(|d| d.id).unwrap_or_default()
+    }
+
     pub(crate) fn device_name(&self) -> String {
         self.device().map(|d| d.name).unwrap_or_else(|| "?".into())
     }

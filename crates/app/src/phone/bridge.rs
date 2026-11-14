@@ -242,10 +242,19 @@ impl Bridge {
     }
 
     pub fn choose(&self, on: bool) -> Result<(), String> {
+        self.choose_as(on, false)
+    }
+
+    pub fn choose_as(&self, on: bool, restored: bool) -> Result<(), String> {
         if self.transport.is_none() {
             return Err(DETACHED_MESSAGE.into());
         }
-        match self.call(&Call::set(on)) {
+        let call = if restored {
+            Call::set_restored(on)
+        } else {
+            Call::set(on)
+        };
+        match self.call(&call) {
             Ok(v) => {
                 if let Some(notice) = &self.restart {
                     notice.chose(Area::Bridge, on);

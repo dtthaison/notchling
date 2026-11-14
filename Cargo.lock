@@ -3802,6 +3802,7 @@ dependencies = [
  "base64 0.22.1",
  "image",
  "libc",
+ "notchling-events",
  "notchling-platform",
  "notchling-protocol",
  "p12",
@@ -3825,6 +3826,8 @@ name = "notchling-events"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
+ "getrandom 0.3.4",
+ "hmac",
  "serde_json",
  "sha2 0.10.9",
 ]
@@ -3842,6 +3845,7 @@ name = "notchling-local-api"
 version = "0.1.0"
 dependencies = [
  "libc",
+ "notchling-events",
  "notchling-platform",
  "serde",
  "serde_json",
@@ -3866,6 +3870,7 @@ version = "0.1.0"
 dependencies = [
  "libc",
  "notchling-engine",
+ "notchling-events",
  "notchling-local-api",
  "notchling-platform",
  "p12",

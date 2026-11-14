@@ -1,5 +1,6 @@
 use notchling_engine::pages::clock::civil_at;
 use serde_json::Value;
+use std::collections::HashMap;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Kind {
@@ -61,7 +62,39 @@ pub struct Entry {
     pub who: String,
     pub result: String,
     pub detail: Option<String>,
+    pub event: Option<String>,
+    pub title: Option<String>,
+    pub outcome: Option<String>,
+    pub seq: Option<u64>,
+    pub audit_n: Option<u64>,
+    pub spooled: bool,
 }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LineCheck {
+    Matches,
+    Differs,
+    Unsealed,
+}
+
+impl LineCheck {
+    pub fn text(self) -> &'static str {
+        match self {
+            LineCheck::Matches => "Matches the sealed entry",
+            LineCheck::Differs => "Doesn't match the sealed entry",
+            LineCheck::Unsealed => "That entry isn't sealed",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Check {
+    Running,
+    Done(LineCheck),
+    Failed(String),
+}
+
+pub const SPOOLED_NOTE: &str = "Recorded by the app while the daemon was down";
 
 impl Entry {
     pub fn parse(value: &Value) -> Option<Entry> {
@@ -74,6 +107,44 @@ impl Entry {
             who: text("who")?,
             result: text("result")?,
             detail: text("detail").filter(|d| !d.is_empty()),
+            event: text("event"),
+            title: text("title").filter(|t| !t.is_empty()),
+            outcome: text("outcome"),
+            seq: value.get("seq").and_then(Value::as_u64),
+            audit_n: value.get("audit_n").and_then(Value::as_u64),
+            spooled: value.get("spooled").and_then(Value::as_bool) == Some(true),
+        })
+    }
+
+    pub fn heading(&self) -> &str {
+        self.title.as_deref().unwrap_or(&self.op)
+    }
+
+    pub fn compare(&self, reply: &Value) -> Option<LineCheck> {
+        let line = reply.get("line")?;
+        if line.get("sealed").and_then(Value::as_bool) != Some(true) {
+            return Some(LineCheck::Unsealed);
+        }
+        if line.get("seal_ok").and_then(Value::as_bool) != Some(true) {
+            return Some(LineCheck::Differs);
+        }
+        let same_text = |mine: &Option<String>, key: &str| {
+            mine.as_deref().is_none_or(|mine| {
+                line.get(key)
+                    .and_then(Value::as_str)
+                    .is_none_or(|theirs| theirs == mine)
+            })
+        };
+        let same_time = line
+            .get("ts")
+            .and_then(Value::as_i64)
+            .is_none_or(|ts| ts == self.time_ms);
+        let same =
+            same_text(&self.event, "kind") && same_text(&self.outcome, "outcome") && same_time;
+        Some(if same {
+            LineCheck::Matches
+        } else {
+            LineCheck::Differs
         })
     }
 
@@ -95,6 +166,7 @@ impl Entry {
         [&self.op, &self.result, &self.who]
             .into_iter()
             .chain(self.detail.as_ref())
+            .chain(self.title.as_ref())
             .any(|field| field.to_lowercase().contains(&needle))
     }
 }
@@ -115,6 +187,8 @@ pub struct ActivityModel {
     pub truncated: bool,
     pub kinds: Vec<Kind>,
     pub search: String,
+    pub open: Option<u64>,
+    pub checks: HashMap<u64, Check>,
 }
 
 impl ActivityModel {
@@ -149,6 +223,35 @@ impl ActivityModel {
             }
             Err(message) => self.load = Load::Failed(message),
         }
+    }
+
+    pub fn toggle_open(&mut self, seq: u64) {
+        self.open = if self.open == Some(seq) {
+            None
+        } else {
+            Some(seq)
+        };
+    }
+
+    pub fn begin_check(&mut self, seq: u64) -> bool {
+        if self.checks.get(&seq) == Some(&Check::Running) {
+            return false;
+        }
+        self.checks.insert(seq, Check::Running);
+        true
+    }
+
+    pub fn finish_check(&mut self, seq: u64, reply: Result<Value, String>) {
+        let entry = self.entries.iter().find(|e| e.seq == Some(seq));
+        let done = match (reply, entry) {
+            (Ok(value), Some(entry)) => match entry.compare(&value) {
+                Some(check) => Check::Done(check),
+                None => Check::Failed("The daemon didn't send that entry".to_owned()),
+            },
+            (Ok(_), None) => Check::Failed("That row is no longer listed".to_owned()),
+            (Err(message), _) => Check::Failed(message),
+        };
+        self.checks.insert(seq, done);
     }
 
     pub fn toggle(&mut self, kind: Kind) {

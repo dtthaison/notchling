@@ -2,6 +2,8 @@ use super::profile::{access_token, is_expired};
 use super::{err, AccountError, ClaudeAccount, ClaudeAccounts, State, SAVED_SERVICE};
 use crate::accounts::http::{HttpRequest, CLIENT_ID, TOKEN_URL};
 use crate::accounts::{Login, Secret};
+use notchling_events::kinds::accounts::LoginAction;
+use notchling_events::kinds::choices::DoneOrFailed;
 use serde_json::{json, Map, Value};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -71,6 +73,15 @@ impl ClaudeAccounts {
             return Ok(access_token(&oauth));
         }
         let renewal = self.renew_saved(state, id, saved)?;
+        match renewal {
+            Renewal::Renewed => {
+                self.push_login(id, LoginAction::RenewedSaved, DoneOrFailed::Done);
+            }
+            Renewal::Refused => {
+                self.push_login(id, LoginAction::RenewedSaved, DoneOrFailed::Failed);
+            }
+            Renewal::Failed | Renewal::Live => {}
+        }
         if let Some(entry) = list.iter_mut().find(|a| a.id == id) {
             match renewal {
                 Renewal::Renewed => entry.needs_login = false,

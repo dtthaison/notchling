@@ -1,10 +1,11 @@
 use super::access::{AccessConfigStore, TunnelGate};
-use super::audit::{AuditEntry, AuditLog};
+use super::audit::AuditLog;
 use super::devices::{DeviceStore, PairedDevice, StoreError};
 use super::jwt::{AccessJwtVerifier, AccessKeySet, Clock, Fetch};
 use super::limiter::AuthRateLimiter;
 use super::pairing::PairingCodes;
 use super::parts::{LogAudit, StoreDevices};
+use crate::bridge::backend::{self, Audit};
 use crate::bridge::{BridgeBackend, Connection, ConnectionIo, Hub, Router, RouterParts};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -23,6 +24,7 @@ pub struct Core {
     pub codes: Arc<PairingCodes>,
     pub limiter: Arc<AuthRateLimiter>,
     pub audit: Arc<AuditLog>,
+    sink: Arc<dyn Audit>,
     pub access: Arc<AccessConfigStore>,
     pub gate: TunnelGate,
     pub hub: Arc<Hub>,
@@ -34,6 +36,14 @@ pub struct Core {
 
 impl Core {
     pub fn new(bridge_dir: &Path, parts: CoreParts) -> Core {
+        Core::build(bridge_dir, parts, None)
+    }
+
+    pub fn with_audit(bridge_dir: &Path, parts: CoreParts, audit: Arc<dyn Audit>) -> Core {
+        Core::build(bridge_dir, parts, Some(audit))
+    }
+
+    fn build(bridge_dir: &Path, parts: CoreParts, given: Option<Arc<dyn Audit>>) -> Core {
         let now = parts.now;
         let limiter = Arc::new(AuthRateLimiter::new());
         let access = Arc::new(AccessConfigStore::open(
@@ -52,6 +62,12 @@ impl Core {
         ));
         let codes = Arc::new(PairingCodes::new());
         let audit = Arc::new(AuditLog::new(bridge_dir.join(super::audit::FILE_NAME)));
+        let sink: Arc<dyn Audit> = given.unwrap_or_else(|| {
+            Arc::new(LogAudit {
+                log: audit.clone(),
+                now: now.clone(),
+            })
+        });
         let hub = Arc::new(Hub::new());
         let clock = now.clone();
         let router = Router::new(RouterParts {
@@ -62,10 +78,7 @@ impl Core {
             }),
             codes: codes.clone(),
             limiter: limiter.clone(),
-            audit: Arc::new(LogAudit {
-                log: audit.clone(),
-                now: now.clone(),
-            }),
+            audit: sink.clone(),
             hub: hub.clone(),
             home: parts.home,
             images_dir: parts.images_dir,
@@ -76,6 +89,7 @@ impl Core {
             codes,
             limiter,
             audit,
+            sink,
             access,
             gate,
             hub,
@@ -132,10 +146,12 @@ impl Core {
         let Some(removed) = self.devices.revoke(device_id)? else {
             return Ok(None);
         };
-        let entry = AuditEntry::new(self.now(), &removed.name, "revoke");
-        if let Err(e) = self.audit.append(&entry) {
-            eprintln!("notchling bridge: audit log: {e}");
-        }
+        self.sink.append(backend::AuditEntry {
+            device: removed.name.clone(),
+            device_id: removed.id.clone(),
+            op: "revoke".into(),
+            ..backend::AuditEntry::default()
+        });
         self.hub.disconnect(device_id);
         Ok(Some(removed))
     }

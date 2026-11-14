@@ -11,7 +11,9 @@ publish.workspace = true
 sha2 = "0.10"
 # A Seal is a 32-byte keyed hash written as 44 base64 characters.
 base64 = "0.22"
-
-[dev-dependencies]
-# Tests parse what the hand-written JSON writers produce, to prove it is valid.
+# An op id, a boot id and the salt are random bytes from the OS.
+getrandom = "0.3"
+# The Audit's seal is HMAC-SHA256.
+hmac = "0.12"
+# The check and the importer read a line's head back.
 serde_json = "1"

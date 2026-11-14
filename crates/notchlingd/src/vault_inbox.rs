@@ -1,37 +1,71 @@
+use super::vault_events::device_now;
 use super::*;
 use crate::acting_ops::now_ms;
 use crate::inbox_ops::{InboxOps, Responder};
 use notchling_engine::inbox::{Action, ActionId, Item, Kind as ItemKind, Source, State};
+use notchling_events::kinds::choices::Answerer;
 use std::time::Instant;
 
 const COMMAND_CUT: usize = 120;
-const ANSWERED_BY_MAC: &str = "mac";
+
+fn answerer(by: &str) -> Answerer {
+    Answerer::from_name(by).unwrap_or(Answerer::Mac)
+}
 
 struct ApprovalResponder {
-    approvals: Arc<Waiters<Decision>>,
+    approvals: Arc<Waiters<Answered<Decision>>>,
     ticket: String,
 }
 
-impl Responder for ApprovalResponder {
-    fn answered(&self, _item: &Item, action: ActionId) -> bool {
-        let decision = match action {
+impl ApprovalResponder {
+    fn give(&self, action: ActionId, by: Answerer, device: Option<String>) -> bool {
+        let value = match action {
             ActionId::AllowOnce => Decision::Once,
             ActionId::AllowAlways => Decision::Always,
             ActionId::Deny => Decision::Deny,
             _ => return false,
         };
-        self.approvals.answer(&self.ticket, decision)
+        self.approvals
+            .answer(&self.ticket, Answered { value, by, device })
+    }
+}
+
+impl Responder for ApprovalResponder {
+    fn answered(&self, _item: &Item, action: ActionId) -> bool {
+        self.give(action, Answerer::Mac, None)
+    }
+
+    fn answered_by(&self, _item: &Item, action: ActionId, by: &str) -> bool {
+        self.give(action, answerer(by), device_now())
     }
 }
 
 struct RequestResponder {
-    requests: Arc<Waiters<Option<VaultEntry>>>,
+    requests: Arc<Waiters<Answered<Option<VaultEntry>>>>,
     ticket: String,
+}
+
+impl RequestResponder {
+    fn give(&self, action: ActionId, by: Answerer, device: Option<String>) -> bool {
+        action == ActionId::Cancel
+            && self.requests.answer(
+                &self.ticket,
+                Answered {
+                    value: None,
+                    by,
+                    device,
+                },
+            )
+    }
 }
 
 impl Responder for RequestResponder {
     fn answered(&self, _item: &Item, action: ActionId) -> bool {
-        action == ActionId::Cancel && self.requests.answer(&self.ticket, None)
+        self.give(action, Answerer::Mac, None)
+    }
+
+    fn answered_by(&self, _item: &Item, action: ActionId, by: &str) -> bool {
+        self.give(action, answerer(by), device_now())
     }
 }
 
@@ -55,9 +89,9 @@ impl Raised {
         }
     }
 
-    pub(super) fn close(mut self, state: State, answer: Option<ActionId>) {
+    pub(super) fn close(mut self, state: State, answer: Option<ActionId>, by: Option<Answerer>) {
         if let Some(inbox) = self.inbox.take() {
-            let by = (state == State::Answered).then_some(ANSWERED_BY_MAC);
+            let by = by.filter(|_| state == State::Answered).map(Answerer::name);
             inbox.resolve(&self.id, state, answer, by);
         }
     }

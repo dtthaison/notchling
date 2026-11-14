@@ -180,3 +180,29 @@ fn move_all_closes_the_lane_then_switches_the_main_login() {
     assert!(w.config_text().contains(&email(2)));
     assert!(w.store.lanes().is_empty());
 }
+
+#[test]
+fn a_lane_opened_switched_and_closed_pushes_lane_changed() {
+    let w = world("lane-events");
+    let lane = w.store.open_lane(&id(2)).unwrap();
+    w.store.switch_lane(&lane.name, &id(3)).unwrap();
+    w.store.close_lane(&lane.name).unwrap();
+    let changes = of(&w.sink, "lane.changed");
+    let actions: Vec<_> = changes.iter().filter_map(|e| text(e, "action")).collect();
+    assert_eq!(actions, ["created", "switched", "removed"]);
+    assert!(changes
+        .iter()
+        .all(|e| text(e, "lane").as_deref() == Some(lane.name.as_str())));
+    assert_eq!(text(&changes[1], "account"), Some(id(3)));
+}
+
+#[test]
+fn move_all_pushes_a_move_all_switch() {
+    let w = world("lane-move-all-event");
+    w.store.sync().unwrap();
+    let plan = MoveAllPlan::make(&[], &w.store.lanes(), Some(&id(1)), Some(&id(2)));
+    w.store.move_all_accounts(&plan);
+    let last = switched(&w.sink).pop().unwrap();
+    assert_eq!(text(&last, "cause").as_deref(), Some("move_all"));
+    assert_eq!(text(&last, "to"), Some(id(2)));
+}

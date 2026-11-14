@@ -1,12 +1,12 @@
 use crate::acting_ops::{now_ms, ActingOps, NoLog};
 use crate::limits_ops::SYNC_EVERY;
 use crate::switches::SwitchFlag;
-use notchling_engine::accounts::claude::ClaudeAccounts;
+use notchling_engine::accounts::claude::{ClaudeAccounts, SwitchWhy};
 use notchling_engine::accounts::http::{HttpRequest, USAGE_URL};
 use notchling_engine::control::{job_state_path, plan_respawn};
 use notchling_engine::limits::report::{Bar, BarKind, Group, UsageReport};
 use notchling_engine::limits::sources::{
-    stopped_in, AccountInfo, ClaudeSource, LaneInfo, ProviderAccountInfo, ProviderSource,
+    stopped_in, AccountInfo, ClaudeSource, LaneInfo, LimitWhy, ProviderAccountInfo, ProviderSource,
     StoppedJob, StoppedJobs,
 };
 use notchling_engine::limits::usage::{parse_usage, AccountUsage};
@@ -174,6 +174,14 @@ impl ClaudeSource for ClaudeLimits {
     fn switch_to(&self, id: &str) -> Result<(), String> {
         self.accounts.check().map_err(|e| e.message)?;
         self.store.switch_to(id).map(|_| ()).map_err(|e| e.0)
+    }
+
+    fn switch_for_limit(&self, id: &str, why: &LimitWhy) -> Result<(), String> {
+        self.accounts.check().map_err(|e| e.message)?;
+        self.store
+            .switch_for(id, &SwitchWhy::limit(why.window, why.used_pct))
+            .map(|_| ())
+            .map_err(|e| e.0)
     }
 
     fn switch_lane(&self, lane: &str, to: &str) -> Result<(), String> {

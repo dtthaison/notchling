@@ -1,7 +1,9 @@
+mod account_history;
 mod accounts_late;
 pub mod accounts_ops;
 mod accounts_signin;
 pub mod acting;
+mod acting_events;
 pub mod acting_ops;
 pub mod activity_ops;
 pub mod agy_elsewhere;
@@ -28,15 +30,28 @@ pub mod hook;
 pub mod hook_ops;
 pub mod hook_output;
 pub mod hook_pages;
+pub mod host_id;
+mod inbox_events;
 pub mod inbox_ops;
 pub mod install_ops;
+pub mod late_emit;
 pub mod late_reply;
 pub mod layout;
 pub mod limits_ops;
 pub mod limits_sources;
 pub mod limits_usage;
+pub mod log_activity;
+pub mod log_audit;
+pub mod log_bus;
+pub mod log_checks;
+pub mod log_fold;
+pub mod log_ops;
+pub mod log_queue;
+pub mod log_retention;
 pub mod log_rotate;
+pub mod log_start;
 pub mod op_group;
+pub mod op_kinds;
 pub mod pages_cli;
 pub mod pages_ops;
 pub mod prompts;
@@ -65,6 +80,8 @@ mod accounts_ops_log_tests;
 #[cfg(test)]
 mod accounts_ops_tests;
 #[cfg(test)]
+mod acting_events_tests;
+#[cfg(test)]
 mod acting_ops_tests;
 #[cfg(test)]
 mod acting_permission_tests;
@@ -85,6 +102,8 @@ mod cost_ops_tests;
 #[cfg(test)]
 mod daemon_tests;
 #[cfg(test)]
+mod event_assert;
+#[cfg(test)]
 mod every_session_tests;
 #[cfg(test)]
 mod git_ops_branch_tests;
@@ -99,15 +118,31 @@ mod hook_pages_tests;
 #[cfg(test)]
 mod hook_tests;
 #[cfg(test)]
+mod inbox_ops_events_tests;
+#[cfg(test)]
 mod inbox_ops_more_tests;
 #[cfg(test)]
 mod inbox_ops_tests;
+#[cfg(test)]
+mod install_events_tests;
 #[cfg(test)]
 mod install_ops_tests;
 #[cfg(test)]
 mod limits_inbox_tests;
 #[cfg(test)]
 mod limits_ops_tests;
+#[cfg(test)]
+mod log_activity_tests;
+#[cfg(test)]
+pub(crate) mod log_audit_tests;
+#[cfg(test)]
+mod log_bus_tests;
+#[cfg(test)]
+pub(crate) mod log_checks_tests;
+#[cfg(test)]
+mod log_ops_tests;
+#[cfg(test)]
+mod log_retention_tests;
 #[cfg(test)]
 mod pages_ops_tests;
 #[cfg(test)]
@@ -119,7 +154,7 @@ mod providers_ops_tests;
 #[cfg(test)]
 mod providers_sync_tests;
 #[cfg(test)]
-mod quiet_ops_tests;
+mod session_of_tests;
 #[cfg(test)]
 mod vault_ops_lock_tests;
 #[cfg(test)]

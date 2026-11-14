@@ -7,8 +7,6 @@ pub const ACTING_OFF: &str =
 
 pub const SETTINGS_NAME: &str = "notchlingd-settings.json";
 
-pub const FILE_SAID_ON: &str = "file_said_on_ignored";
-
 pub struct Acting {
     on: AtomicBool,
 }

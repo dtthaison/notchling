@@ -1,10 +1,28 @@
 use crate::vault_args::Decision;
 use notchling_engine::vault::{VaultEntry, VaultStore};
+use notchling_events::kinds::choices::Answerer;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::mpsc::{sync_channel, Receiver, RecvTimeoutError, SyncSender};
 use std::sync::{Mutex, Weak};
 use std::time::{Duration, Instant};
+
+#[derive(Clone, Debug)]
+pub(crate) struct Answered<T> {
+    pub value: T,
+    pub by: Answerer,
+    pub device: Option<String>,
+}
+
+impl<T> Answered<T> {
+    pub(crate) fn by_mac(value: T) -> Answered<T> {
+        Answered {
+            value,
+            by: Answerer::Mac,
+            device: None,
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Refused {
@@ -132,8 +150,8 @@ impl<T> Waiters<T> {
 
 pub(crate) struct OffHook {
     pub(crate) store: Weak<VaultStore>,
-    pub(crate) approvals: Weak<Waiters<Decision>>,
-    pub(crate) requests: Weak<Waiters<Option<VaultEntry>>>,
+    pub(crate) approvals: Weak<Waiters<Answered<Decision>>>,
+    pub(crate) requests: Weak<Waiters<Answered<Option<VaultEntry>>>>,
 }
 
 impl OffHook {

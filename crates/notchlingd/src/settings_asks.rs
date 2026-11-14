@@ -1,5 +1,7 @@
 use crate::inbox_ops::{InboxOps, Responder};
 use notchling_engine::inbox::{ActionId, Item, State};
+use notchling_events::kinds::choices::Answerer;
+use notchling_events::scope;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -49,6 +51,8 @@ pub struct Ask {
     pub state: AskState,
     pub message: Option<String>,
     pub peer: Option<PathBuf>,
+    pub by: Option<Answerer>,
+    pub device: Option<String>,
     deadline: Instant,
     ended: Option<Instant>,
 }
@@ -61,6 +65,8 @@ impl Ask {
             state: AskState::Waiting,
             message: None,
             peer,
+            by: None,
+            device: None,
             deadline: Instant::now() + wait,
             ended: None,
         }
@@ -158,7 +164,13 @@ impl Asks {
         }
     }
 
-    fn answer(&self, id: &str, action: ActionId) -> bool {
+    fn answer(
+        &self,
+        id: &str,
+        action: ActionId,
+        by: Option<Answerer>,
+        device: Option<String>,
+    ) -> bool {
         let msg = {
             let mut map = lock(&self.map);
             let Some(ask) = map.get_mut(id) else {
@@ -167,6 +179,8 @@ impl Asks {
             if ask.state != AskState::Waiting {
                 return false;
             }
+            ask.by = by;
+            ask.device = device;
             match action {
                 ActionId::Allow | ActionId::AllowOnce | ActionId::AllowAlways => {
                     ask.state = AskState::Allowed;
@@ -272,7 +286,16 @@ struct AskResponder {
 
 impl Responder for AskResponder {
     fn answered(&self, _item: &Item, action: ActionId) -> bool {
-        self.asks.answer(&self.id, action)
+        self.asks.answer(&self.id, action, None, None)
+    }
+
+    fn answered_by(&self, _item: &Item, action: ActionId, by: &str) -> bool {
+        let device = scope::current()
+            .actor
+            .and_then(|a| a.device)
+            .map(|d| d.as_str().to_owned());
+        self.asks
+            .answer(&self.id, action, Answerer::from_name(by), device)
     }
 }
 

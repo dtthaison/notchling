@@ -18,6 +18,12 @@ pub struct LaneInfo {
     pub email: String,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct LimitWhy {
+    pub window: Option<notchling_events::kinds::choices::LimitWindow>,
+    pub used_pct: Option<f64>,
+}
+
 pub trait ClaudeSource: Send + Sync {
     fn sync_usage(&self);
     fn sync_usage_now(&self) {
@@ -31,6 +37,9 @@ pub trait ClaudeSource: Send + Sync {
     }
     fn lanes(&self) -> Vec<LaneInfo>;
     fn switch_to(&self, id: &str) -> Result<(), String>;
+    fn switch_for_limit(&self, id: &str, _why: &LimitWhy) -> Result<(), String> {
+        self.switch_to(id)
+    }
     fn switch_lane(&self, lane: &str, to: &str) -> Result<(), String>;
 }
 

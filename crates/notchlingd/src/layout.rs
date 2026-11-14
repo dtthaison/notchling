@@ -1,9 +1,13 @@
+#[cfg(target_os = "macos")]
+use notchling_engine::logs::KeychainKeyStore;
+use notchling_engine::logs::{FileKeyStore, KeyStore};
 use notchling_engine::sessions::Roots;
 use notchling_engine::vault::list::VaultIndex;
 use notchling_local_api::lock::lock_path_for;
 use notchling_local_api::{AUDIT_NAME, SOCKET_NAME};
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 pub const DATA_ROOT_ENV: &str = "NOTCHLING_DATA_ROOT";
 
@@ -111,13 +115,41 @@ impl Layout {
         self.state_dir().join(AUDIT_NAME)
     }
 
-    pub fn remote_log_path(&self) -> PathBuf {
+    pub fn audit_dir(&self) -> PathBuf {
+        self.state_dir().join("audit")
+    }
+
+    pub fn events_db_path(&self) -> PathBuf {
+        self.state_dir().join("daemon").join("events.db")
+    }
+
+    pub fn salt_path(&self) -> PathBuf {
+        self.state_dir().join("daemon").join("log-salt")
+    }
+
+    pub fn host_id_path(&self) -> PathBuf {
+        self.state_dir().join("daemon").join("host-id")
+    }
+
+    pub fn bridge_dir(&self) -> PathBuf {
         self.data_dir
             .parent()
             .unwrap_or(&self.data_dir)
             .join("AgentConsole")
             .join("bridge")
+    }
+
+    pub fn remote_log_path(&self) -> PathBuf {
+        self.bridge_dir()
             .join(notchling_engine::bridge::net::audit::FILE_NAME)
+    }
+
+    pub fn key_store(&self) -> Arc<dyn KeyStore> {
+        #[cfg(target_os = "macos")]
+        if !self.fixture && !self.socket_given {
+            return Arc::new(KeychainKeyStore::for_data_dir(&self.data_dir));
+        }
+        Arc::new(FileKeyStore::new(self.state_dir().join("daemon")))
     }
 
     pub fn account_log_path(&self) -> PathBuf {

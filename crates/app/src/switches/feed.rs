@@ -362,10 +362,17 @@ impl SwitchFeed {
     }
 
     pub fn choose(&self, switch: Switch, on: bool) -> Result<Switches, String> {
+        self.choose_as(switch, on, false)
+    }
+
+    pub fn choose_as(&self, switch: Switch, on: bool, restored: bool) -> Result<Switches, String> {
         let Some(transport) = &self.transport else {
             return Err(crate::acting::DETACHED_MESSAGE.into());
         };
-        let (op, args) = switch.set_request(on);
+        let (op, mut args) = switch.set_request(on);
+        if restored {
+            args["restored"] = json!(true);
+        }
         match transport.call(op, args) {
             Ok(reply) => {
                 self.shared.restart.chose(Area::of(switch), on);

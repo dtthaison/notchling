@@ -1,9 +1,11 @@
 mod config;
+mod events;
 mod lanes_side;
 pub mod profile;
 pub mod signin;
 mod tokens;
 
+pub use events::SwitchWhy;
 pub use lanes_side::MoveAllAccounts;
 pub use tokens::Renewal;
 
@@ -11,9 +13,12 @@ use crate::accounts::http::{HttpClient, HttpRequest, PROFILE_URL};
 use crate::accounts::json_splice::set_top_level;
 use crate::accounts::keychain::Keys;
 use crate::accounts::{Login, Secret};
-use crate::cost::account_log;
+use crate::cost::account_log::AccountSwitches;
 use crate::docfile::DocFile;
 use crate::lanes::LaneStore;
+use notchling_events::kinds::accounts::LoginAction;
+use notchling_events::kinds::choices::DoneOrFailed;
+use notchling_events::Emit;
 use profile::{
     access_token, account_id_from_config, account_id_from_profile, is_expired,
     oauth_account_from_profile, plan_name, valid_id,
@@ -78,6 +83,8 @@ pub struct ClaudeEnv {
     pub data_dir: PathBuf,
     pub list_file: PathBuf,
     pub lanes: LaneStore,
+    pub events: Arc<dyn Emit>,
+    pub history: Arc<dyn AccountSwitches>,
 }
 
 #[derive(Default)]
@@ -141,17 +148,18 @@ impl ClaudeAccounts {
         (self.env.now_ms)()
     }
 
-    fn note_active(&self, state: &mut State) {
+    fn note_active(&self, state: &mut State, why: &SwitchWhy) {
         let Some(active) = state.active.clone() else {
             return;
         };
+        if state.logged.is_none() {
+            state.logged = self.env.history.switches().pop().map(|entry| entry.id);
+        }
         if state.logged.as_deref() == Some(active.as_str()) {
             return;
         }
-        let file = account_log::path(&self.env.data_dir);
-        if account_log::record(&file, &active, self.now()).is_ok() {
-            state.logged = Some(active);
-        }
+        self.push_switch(state.logged.as_deref(), &active, why);
+        state.logged = Some(active);
     }
 
     fn list_doc(&self) -> DocFile {
@@ -196,6 +204,10 @@ impl ClaudeAccounts {
     }
 
     pub fn switch_to(&self, id: &str) -> Result<Snapshot, AccountError> {
+        self.switch_for(id, &SwitchWhy::USER)
+    }
+
+    pub fn switch_for(&self, id: &str, why: &SwitchWhy) -> Result<Snapshot, AccountError> {
         if !valid_id(id) {
             return Err(err("That isn't an account id."));
         }
@@ -212,7 +224,7 @@ impl ClaudeAccounts {
             self.live_is_saved(&state)?;
             self.activate(id)?;
             state.active = Some(id.to_string());
-            self.note_active(&mut state);
+            self.note_active(&mut state, why);
         }
         if let Some(entry) = list.iter_mut().find(|a| a.id == id) {
             entry.needs_login = false;
@@ -249,7 +261,11 @@ impl ClaudeAccounts {
         slot.0
             .insert("claudeAiOauth".into(), login.clone().into_value());
         slot.0.insert("oauthAccount".into(), info.clone());
-        self.write_saved(&id, &slot)?;
+        if let Err(e) = self.write_saved(&id, &slot) {
+            self.push_login(&id, LoginAction::Added, DoneOrFailed::Failed);
+            return Err(e);
+        }
+        self.push_login(&id, LoginAction::Added, DoneOrFailed::Done);
         let info = Login(info.as_object().cloned().unwrap_or_default());
         let account = ClaudeAccount {
             id: id.clone(),
@@ -273,7 +289,11 @@ impl ClaudeAccounts {
                 lane.email, lane.name
             )));
         }
-        self.env.keys.delete(SAVED_SERVICE, id)?;
+        if let Err(e) = self.env.keys.delete(SAVED_SERVICE, id) {
+            self.push_login(id, LoginAction::Removed, DoneOrFailed::Failed);
+            return Err(e.into());
+        }
+        self.push_login(id, LoginAction::Removed, DoneOrFailed::Done);
         let mut list = self.saved_list();
         list.retain(|a| a.id != id);
         self.save_list(&list)?;
@@ -313,7 +333,7 @@ impl ClaudeAccounts {
         };
         state.known.insert(key, id.clone());
         state.active = Some(id.clone());
-        self.note_active(state);
+        self.note_active(state, &SwitchWhy::OTHER);
         let account = match profile {
             Some(p) => Some(oauth_account_from_profile(&p)),
             None => config

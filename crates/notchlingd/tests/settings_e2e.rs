@@ -1,5 +1,7 @@
 #![cfg(unix)]
 
+mod common;
+
 use notchling_engine::settings::Settings;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
@@ -163,16 +165,22 @@ fn an_agent_reads_and_changes_settings_through_the_command_line() {
         "{err}"
     );
 
-    let audit = std::fs::read_to_string(root.join("notchling/audit.jsonl")).unwrap();
-    let results: Vec<String> = audit
-        .lines()
-        .map(json_of)
-        .filter(|e| e["op"] == "settings.set")
-        .map(|e| e["result"].as_str().unwrap_or_default().to_string())
+    let lines = common::audit::wait_until(root, |all| {
+        all.iter().filter(|l| l["kind"] == "settings.agent").count() >= 5
+    });
+    let results: Vec<String> = lines
+        .iter()
+        .filter(|l| l["kind"] == "settings.agent")
+        .map(|l| l["f"]["result"].as_str().unwrap_or_default().to_string())
         .collect();
     assert_eq!(
         results,
         ["set", "refused", "refused", "bad_value", "no_app"]
+    );
+    let text = serde_json::to_string(&lines).unwrap();
+    assert!(
+        !text.contains("maybe"),
+        "a value is never written, only its length and hash"
     );
 }
 
