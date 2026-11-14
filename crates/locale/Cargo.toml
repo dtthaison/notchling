@@ -8,3 +8,9 @@ publish.workspace = true
 
 [lib]
 name = "notchling_locale"
+
+[dependencies]
+icu_decimal = "=2.4.0"
+icu_locale_core = "=2.4.0"
+icu_plurals = "=2.4.0"
+icu_provider = { version = "=2.4.0", features = ["sync"] }

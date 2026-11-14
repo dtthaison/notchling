@@ -1,4 +1,7 @@
+use std::sync::OnceLock;
+
 use crate::generated::{EN, KEYS, TABLES};
+use crate::numbers::Icu;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Text(pub(crate) u16);
@@ -143,25 +146,14 @@ fn render_parts(parts: &[Part], args: &[Arg<'_>], numbers: &dyn Numbers) -> Stri
     out
 }
 
-struct Plain;
-
-impl Numbers for Plain {
-    fn int(&self, n: i64) -> String {
-        n.to_string()
-    }
-
-    fn category(&self, n: i64) -> Cat {
-        if n == 1 {
-            Cat::One
-        } else {
-            Cat::Other
-        }
-    }
+pub(crate) fn numbers() -> &'static Icu {
+    static ENGLISH: OnceLock<Icu> = OnceLock::new();
+    ENGLISH.get_or_init(|| Icu::new("en", None))
 }
 
 pub fn format(text: Text, args: &[Arg<'_>]) -> String {
     match EN.get(text.0 as usize) {
-        Some(body) => format_body(body, args, &Plain),
+        Some(body) => format_body(body, args, numbers()),
         None => String::new(),
     }
 }

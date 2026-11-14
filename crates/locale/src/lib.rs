@@ -1,6 +1,8 @@
+pub mod fmt;
 mod format;
 #[rustfmt::skip]
 mod generated;
+mod numbers;
 
 pub use format::{format, lookup, shipped, Arg, Num, Text};
 pub use generated::*;
@@ -8,3 +10,7 @@ pub use generated::*;
 #[cfg(test)]
 #[path = "format_tests.rs"]
 mod format_tests;
+
+#[cfg(test)]
+#[path = "fmt_tests.rs"]
+mod fmt_tests;
