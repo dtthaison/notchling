@@ -142,7 +142,10 @@ chat-slash-header = Commands
 
 # Shown in the Chat screen.
 # $count is the number of tool steps.
-chat-tool-steps-count = { NUMBER($count) } tool steps
+chat-tool-steps-count = { $count ->
+    [one] { NUMBER($count) } tool step
+   *[other] { NUMBER($count) } tool steps
+}
 
 # Shown in the Chat screen.
 chat-tool-step-one = 1 tool step

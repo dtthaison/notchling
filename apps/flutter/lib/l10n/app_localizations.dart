@@ -762,7 +762,7 @@ abstract class AppL10n {
   /// Shown in the Chat screen. $count is the number of tool steps.
   ///
   /// In en, this message translates to:
-  /// **'{count} tool steps'**
+  /// **'{count, plural, one{{count} tool step} other{{count} tool steps}}'**
   String chatToolStepsCount(int count);
 
   /// Not shown yet.
@@ -918,8 +918,8 @@ abstract class AppL10n {
   /// Read aloud by a screen reader for the heading of one Mac in the session list. $name is the Mac's name, $link says whether it is connected, $count is how many sessions it has.
   ///
   /// In en, this message translates to:
-  /// **'{name}, {link}, {count} session'**
-  String macsComputerHeadingLabel(String name, String link, int count);
+  /// **'{count, plural, one{{name}, {link}, {count} session} other{{name}, {link}, {count} sessions}}'**
+  String macsComputerHeadingLabel(int count, String name, String link);
 
   /// Shown in the Paired Macs screen.
   ///
@@ -1182,8 +1182,8 @@ abstract class AppL10n {
   /// Read aloud by a screen reader for the heading of a group in the session list. $state is the group's name, $count is how many sessions it holds.
   ///
   /// In en, this message translates to:
-  /// **'{state}, {count} session'**
-  String sessionsGroupLabel(String state, int count);
+  /// **'{count, plural, one{{state}, {count} session} other{{state}, {count} sessions}}'**
+  String sessionsGroupLabel(int count, String state);
 
   /// Shown in the Sessions tab. $n is hours.
   ///
@@ -1266,7 +1266,7 @@ abstract class AppL10n {
   /// Shown in the Sessions tab. $count is the number of subagents.
   ///
   /// In en, this message translates to:
-  /// **'{count} subagents running'**
+  /// **'{count, plural, one{{count} subagent running} other{{count} subagents running}}'**
   String sessionsRunningSubagents(int count);
 
   /// Shown in the Sessions tab.
@@ -1308,13 +1308,13 @@ abstract class AppL10n {
   /// Shown in the Sessions tab. $count is the number of subagents.
   ///
   /// In en, this message translates to:
-  /// **'Hide {count} subagents'**
+  /// **'{count, plural, one{Hide {count} subagent} other{Hide {count} subagents}}'**
   String sessionsSubagentsHide(int count);
 
   /// Shown in the Sessions tab. $count is the number of subagents.
   ///
   /// In en, this message translates to:
-  /// **'Show {count} subagents'**
+  /// **'{count, plural, one{Show {count} subagent} other{Show {count} subagents}}'**
   String sessionsSubagentsShow(int count);
 
   /// Shown in the Sessions tab.

@@ -484,7 +484,7 @@
   "@chatToolStepOne": {
     "description": "Shown in the Chat screen."
   },
-  "chatToolStepsCount": "{count} tool steps",
+  "chatToolStepsCount": "{count, plural, one{{count} tool step} other{{count} tool steps}}",
   "@chatToolStepsCount": {
     "description": "Shown in the Chat screen. $count is the number of tool steps.",
     "placeholders": {
@@ -604,19 +604,19 @@
   "@macsAdd": {
     "description": "Shown in the Paired Macs screen."
   },
-  "macsComputerHeadingLabel": "{name}, {link}, {count} session",
+  "macsComputerHeadingLabel": "{count, plural, one{{name}, {link}, {count} session} other{{name}, {link}, {count} sessions}}",
   "@macsComputerHeadingLabel": {
     "description": "Read aloud by a screen reader for the heading of one Mac in the session list. $name is the Mac's name, $link says whether it is connected, $count is how many sessions it has.",
     "placeholders": {
+      "count": {
+        "type": "int",
+        "format": "decimalPattern"
+      },
       "name": {
         "type": "String"
       },
       "link": {
         "type": "String"
-      },
-      "count": {
-        "type": "int",
-        "format": "decimalPattern"
       }
     }
   },
@@ -819,16 +819,16 @@
   "@sessionsFilteredEmpty": {
     "description": "Shown in the Sessions tab."
   },
-  "sessionsGroupLabel": "{state}, {count} session",
+  "sessionsGroupLabel": "{count, plural, one{{state}, {count} session} other{{state}, {count} sessions}}",
   "@sessionsGroupLabel": {
     "description": "Read aloud by a screen reader for the heading of a group in the session list. $state is the group's name, $count is how many sessions it holds.",
     "placeholders": {
-      "state": {
-        "type": "String"
-      },
       "count": {
         "type": "int",
         "format": "decimalPattern"
+      },
+      "state": {
+        "type": "String"
       }
     }
   },
@@ -901,7 +901,7 @@
   "@sessionsNewSessionStarted": {
     "description": "Shown in the Sessions tab."
   },
-  "sessionsRunningSubagents": "{count} subagents running",
+  "sessionsRunningSubagents": "{count, plural, one{{count} subagent running} other{{count} subagents running}}",
   "@sessionsRunningSubagents": {
     "description": "Shown in the Sessions tab. $count is the number of subagents.",
     "placeholders": {
@@ -940,7 +940,7 @@
   "@sessionsStateRunning": {
     "description": "A session that is working on a turn. Shown in the Chat screen and the Sessions tab."
   },
-  "sessionsSubagentsHide": "Hide {count} subagents",
+  "sessionsSubagentsHide": "{count, plural, one{Hide {count} subagent} other{Hide {count} subagents}}",
   "@sessionsSubagentsHide": {
     "description": "Shown in the Sessions tab. $count is the number of subagents.",
     "placeholders": {
@@ -950,7 +950,7 @@
       }
     }
   },
-  "sessionsSubagentsShow": "Show {count} subagents",
+  "sessionsSubagentsShow": "{count, plural, one{Show {count} subagent} other{Show {count} subagents}}",
   "@sessionsSubagentsShow": {
     "description": "Shown in the Sessions tab. $count is the number of subagents.",
     "placeholders": {

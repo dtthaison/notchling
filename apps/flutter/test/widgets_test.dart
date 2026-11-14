@@ -80,7 +80,7 @@ void main() {
     testWidgets('the row is at least 56 dp and the subagent toggle at least 32 (a secondary target; the row is the main one)', (WidgetTester tester) async {
       await tester.pumpWidget(host(SessionRow(session: _session(subagents: <Subagent>[_agent()]), now: _now, onTap: () {}, onToggleExpand: () {})));
       expect(tester.getSize(find.byType(SessionRow)).height, greaterThanOrEqualTo(56));
-      expect(tester.getSize(find.bySemanticsLabel(RegExp('Show 1 subagents'))).height, greaterThanOrEqualTo(32));
+      expect(tester.getSize(find.bySemanticsLabel(RegExp('Show 1 subagent'))).height, greaterThanOrEqualTo(32));
     });
 
     testWidgets('survives the largest text size without overflow', (WidgetTester tester) async {

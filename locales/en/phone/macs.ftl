@@ -32,4 +32,7 @@ macs-keep-alive-setting = Keep connection in the background
 macs-keep-alive-hint = Get notifications while the app is in the background. Shows a small permanent notification.
 
 # Read aloud by a screen reader for the heading of one Mac in the session list. $name is the Mac's name, $link says whether it is connected, $count is how many sessions it has.
-macs-computer-heading-label = { $name }, { $link }, { NUMBER($count) } session
+macs-computer-heading-label = { $count ->
+    [one] { $name }, { $link }, { NUMBER($count) } session
+   *[other] { $name }, { $link }, { NUMBER($count) } sessions
+}

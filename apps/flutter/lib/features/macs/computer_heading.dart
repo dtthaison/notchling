@@ -23,7 +23,7 @@ class ComputerHeader extends StatelessWidget {
     final AppL10n l10n = AppL10n.of(context);
     return Semantics(
       header: true,
-      label: l10n.macsComputerHeadingLabel(computer.name, linkWord(l10n, computer.status), count),
+      label: l10n.macsComputerHeadingLabel(count, computer.name, linkWord(l10n, computer.status)),
       excludeSemantics: true,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(Space.lg, Space.xl, Space.lg, 0),

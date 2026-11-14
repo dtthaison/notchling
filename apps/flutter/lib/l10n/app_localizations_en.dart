@@ -380,7 +380,13 @@ class AppL10nEn extends AppL10n {
         intl.NumberFormat.decimalPattern(localeName);
     final String countString = countNumberFormat.format(count);
 
-    return '$countString tool steps';
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$countString tool steps',
+      one: '$countString tool step',
+    );
+    return '$_temp0';
   }
 
   @override
@@ -464,12 +470,18 @@ class AppL10nEn extends AppL10n {
   String get macsAdd => 'Add a Mac';
 
   @override
-  String macsComputerHeadingLabel(String name, String link, int count) {
+  String macsComputerHeadingLabel(int count, String name, String link) {
     final intl.NumberFormat countNumberFormat =
         intl.NumberFormat.decimalPattern(localeName);
     final String countString = countNumberFormat.format(count);
 
-    return '$name, $link, $countString session';
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$name, $link, $countString sessions',
+      one: '$name, $link, $countString session',
+    );
+    return '$_temp0';
   }
 
   @override
@@ -633,12 +645,18 @@ class AppL10nEn extends AppL10n {
   String get sessionsFilteredEmpty => 'No sessions in this project.';
 
   @override
-  String sessionsGroupLabel(String state, int count) {
+  String sessionsGroupLabel(int count, String state) {
     final intl.NumberFormat countNumberFormat =
         intl.NumberFormat.decimalPattern(localeName);
     final String countString = countNumberFormat.format(count);
 
-    return '$state, $countString session';
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$state, $countString sessions',
+      one: '$state, $countString session',
+    );
+    return '$_temp0';
   }
 
   @override
@@ -703,7 +721,13 @@ class AppL10nEn extends AppL10n {
         intl.NumberFormat.decimalPattern(localeName);
     final String countString = countNumberFormat.format(count);
 
-    return '$countString subagents running';
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$countString subagents running',
+      one: '$countString subagent running',
+    );
+    return '$_temp0';
   }
 
   @override
@@ -732,7 +756,13 @@ class AppL10nEn extends AppL10n {
         intl.NumberFormat.decimalPattern(localeName);
     final String countString = countNumberFormat.format(count);
 
-    return 'Hide $countString subagents';
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Hide $countString subagents',
+      one: 'Hide $countString subagent',
+    );
+    return '$_temp0';
   }
 
   @override
@@ -741,7 +771,13 @@ class AppL10nEn extends AppL10n {
         intl.NumberFormat.decimalPattern(localeName);
     final String countString = countNumberFormat.format(count);
 
-    return 'Show $countString subagents';
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Show $countString subagents',
+      one: 'Show $countString subagent',
+    );
+    return '$_temp0';
   }
 
   @override

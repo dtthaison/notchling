@@ -78,7 +78,7 @@ void main() {
   });
 
   test('accessibility_labels_count_sessions', () {
-    expect(l10n.sessionsGroupLabel('Working', 2), 'Working, 2 session');
-    expect(l10n.macsComputerHeadingLabel('Studio', 'Connected', 1), 'Studio, Connected, 1 session');
+    expect(l10n.sessionsGroupLabel(2, 'Working'), 'Working, 2 sessions');
+    expect(l10n.macsComputerHeadingLabel(1, 'Studio', 'Connected'), 'Studio, Connected, 1 session');
   });
 }

@@ -58,15 +58,24 @@ sessions-new-session-failed = Couldn't start a new session. Please try again.
 
 # Shown in the Sessions tab.
 # $count is the number of subagents.
-sessions-running-subagents = { NUMBER($count) } subagents running
+sessions-running-subagents = { $count ->
+    [one] { NUMBER($count) } subagent running
+   *[other] { NUMBER($count) } subagents running
+}
 
 # Shown in the Sessions tab.
 # $count is the number of subagents.
-sessions-subagents-show = Show { NUMBER($count) } subagents
+sessions-subagents-show = { $count ->
+    [one] Show { NUMBER($count) } subagent
+   *[other] Show { NUMBER($count) } subagents
+}
 
 # Shown in the Sessions tab.
 # $count is the number of subagents.
-sessions-subagents-hide = Hide { NUMBER($count) } subagents
+sessions-subagents-hide = { $count ->
+    [one] Hide { NUMBER($count) } subagent
+   *[other] Hide { NUMBER($count) } subagents
+}
 
 # Shown in the Sessions tab.
 sessions-just-now = Just now
@@ -106,4 +115,7 @@ sessions-filtered-empty = No sessions in this project.
 sessions-takeover-short = Take over
 
 # Read aloud by a screen reader for the heading of a group in the session list. $state is the group's name, $count is how many sessions it holds.
-sessions-group-label = { $state }, { NUMBER($count) } session
+sessions-group-label = { $count ->
+    [one] { $state }, { NUMBER($count) } session
+   *[other] { $state }, { NUMBER($count) } sessions
+}
