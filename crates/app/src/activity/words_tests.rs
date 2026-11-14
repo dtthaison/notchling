@@ -37,8 +37,10 @@ fn filter_and_empty_texts_use_messages() {
         ]
     );
 
-    let mut model = ActivityModel::default();
-    model.load = Load::Loading;
+    let mut model = ActivityModel {
+        load: Load::Loading,
+        ..ActivityModel::default()
+    };
     assert_eq!(
         model.empty_text().as_deref(),
         Some(t::settings::activity_loading())
