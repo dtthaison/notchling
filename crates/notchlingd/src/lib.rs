@@ -58,6 +58,7 @@ pub mod vault_ops;
 pub mod vault_wait;
 pub mod versions_check;
 pub mod versions_ops;
+pub mod versions_update;
 
 #[cfg(test)]
 mod accounts_late_tests;
@@ -131,6 +132,8 @@ mod versions_inbox_tests;
 mod versions_ops_tests;
 #[cfg(test)]
 mod versions_soak_tests;
+#[cfg(test)]
+mod versions_update_tests;
 
 use cli::{Command, ServiceAction};
 use layout::Layout;

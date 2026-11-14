@@ -108,6 +108,8 @@ pub mod ops {
     pub const VERSIONS_GET: &str = "versions.get";
     pub const VERSIONS_WORKERS: &str = "versions.workers";
     pub const VERSIONS_CHECK: &str = "versions.check";
+    pub const VERSIONS_LATEST: &str = "versions.latest";
+    pub const VERSIONS_UPDATE_LOCAL: &str = "versions.update_local";
 }
 
 pub mod topics {
@@ -151,6 +153,7 @@ pub mod topics {
     pub const VERSIONS: &str = "versions";
     pub const VERSIONS_CHANGED: &str = "versions.changed";
     pub const VERSIONS_CHECKED: &str = "versions.checked";
+    pub const VERSIONS_UPDATED: &str = "versions.updated";
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]

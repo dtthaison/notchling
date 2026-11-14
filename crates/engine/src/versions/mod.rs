@@ -1,5 +1,6 @@
 pub mod check;
 mod identity;
+pub mod latest;
 pub mod mac;
 pub mod mark;
 mod method;
@@ -8,6 +9,7 @@ mod parse;
 pub mod record;
 pub mod reference;
 pub mod soak;
+pub mod update;
 mod version;
 pub mod worker;
 
@@ -15,6 +17,8 @@ pub mod worker;
 mod check_tests;
 #[cfg(test)]
 mod identity_tests;
+#[cfg(test)]
+mod latest_tests;
 #[cfg(test)]
 mod mac_tests;
 #[cfg(test)]
@@ -29,6 +33,8 @@ mod record_tests;
 mod reference_tests;
 #[cfg(test)]
 mod soak_tests;
+#[cfg(test)]
+mod update_tests;
 #[cfg(test)]
 mod version_tests;
 #[cfg(test)]

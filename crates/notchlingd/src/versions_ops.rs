@@ -1,13 +1,18 @@
 use crate::acting_ops::Room;
 use crate::op_group::OpGroup;
+use crate::switches::SwitchFlag;
 use crate::versions_check::{Checks, Parts};
+use crate::versions_update::Updates;
 use notchling_engine::control::launcher::{LaunchOutput, Launcher};
 use notchling_engine::control::plan::Command;
 use notchling_engine::machines::versions_facts;
 use notchling_engine::store;
 use notchling_engine::versions::mac::{detect, watch_paths, Installed, Problem, Roots};
 use notchling_engine::versions::record::{Cause, Fact, Recorder};
-use notchling_engine::versions::{cli_output, IdentityCache, Method, Tool, Version, WorkerTools};
+use notchling_engine::versions::update::go_back_target;
+use notchling_engine::versions::{
+    can_pin, cli_output, IdentityCache, Method, Tool, Version, WorkerTools,
+};
 use notchling_local_api::{ops, topics, ApiError, AuditEntry, AuditLog, Caller, OpSpec};
 use notchling_platform::watch::{WatchConfig, Watcher};
 use serde_json::{json, Map, Value};
@@ -67,6 +72,8 @@ pub struct VersionsOps {
     clock: Clock,
     own: Version,
     checks: Arc<Checks>,
+    updates: Arc<Updates>,
+    rescan_wanted: Arc<AtomicBool>,
     exe: Mutex<Option<PathBuf>>,
     state: Mutex<State>,
     cache: Mutex<IdentityCache>,
@@ -142,6 +149,13 @@ impl VersionsOps {
             recorder.clone(),
             clock.clone(),
         );
+        let rescan_wanted = Arc::new(AtomicBool::new(false));
+        let updates = Arc::new(Updates::new(
+            launcher.clone(),
+            room.clone(),
+            clock.clone(),
+            rescan_wanted.clone(),
+        ));
         Arc::new(VersionsOps {
             roots,
             data_dir,
@@ -151,6 +165,8 @@ impl VersionsOps {
             clock,
             own,
             checks,
+            updates,
+            rescan_wanted,
             exe: Mutex::new(std::env::current_exe().ok()),
             state: Mutex::new(State::default()),
             cache: Mutex::new(IdentityCache::new()),
@@ -158,6 +174,18 @@ impl VersionsOps {
             stop: Arc::new(AtomicBool::new(false)),
             thread: Mutex::new(None),
         })
+    }
+
+    pub fn updates(&self) -> &Arc<Updates> {
+        &self.updates
+    }
+
+    pub fn set_install_switch(&self, switch: Arc<SwitchFlag>) {
+        self.updates.set_switch(switch);
+    }
+
+    pub fn wait_updates(&self) {
+        self.updates.wait();
     }
 
     pub fn checks(&self) -> &Arc<Checks> {
@@ -169,6 +197,7 @@ impl VersionsOps {
     }
 
     pub fn wait_checks(&self) {
+        self.updates.wait();
         self.checks.wait();
     }
 
@@ -230,11 +259,7 @@ impl VersionsOps {
     }
 
     fn check(&self, args: &Value) -> Result<Value, ApiError> {
-        let name = args
-            .get("tool")
-            .and_then(Value::as_str)
-            .ok_or_else(|| ApiError::bad_request("tool is a name"))?;
-        let tool = Tool::from_name(name).ok_or_else(|| ApiError::bad_request("unknown tool"))?;
+        let tool = Self::tool_arg(args)?;
         if !self.checks.enabled() {
             return Ok(json!({ "started": false, "running": false }));
         }
@@ -331,7 +356,7 @@ impl VersionsOps {
                     from,
                     to,
                     method: new.or(old).map_or(Method::Unknown, |i| i.method),
-                    cause: Cause::Outside,
+                    cause: self.updates.take_cause(tool, (self.clock)()),
                 });
             }
         }
@@ -395,9 +420,85 @@ impl VersionsOps {
         let rows: Vec<Value> = Tool::ALL
             .into_iter()
             .filter(|t| only.is_none_or(|o| o == *t))
-            .map(|t| row(t, found.get(&t), &self.checks))
+            .map(|t| {
+                let mut value = row(t, found.get(&t), &self.checks);
+                value["latest"] =
+                    json!(self.updates.known_latest(t).map(|v| v.as_str().to_string()));
+                value["goBack"] = json!(found
+                    .get(&t)
+                    .and_then(|i| self.go_back(t, i))
+                    .map(|v| v.as_str().to_string()));
+                value
+            })
             .collect();
         Ok(json!({ "tools": rows }))
+    }
+
+    fn seen_versions(&self, tool: Tool) -> Vec<Version> {
+        let list: Vec<String> = store::doc(&self.data_dir, SEEN_DOC)
+            .ok()
+            .flatten()
+            .and_then(|text| serde_json::from_str(&text).ok())
+            .unwrap_or_default();
+        let prefix = format!("{}:", tool.name());
+        list.iter()
+            .filter_map(|entry| entry.strip_prefix(&prefix))
+            .filter_map(Version::parse)
+            .collect()
+    }
+
+    fn go_back(&self, tool: Tool, installed: &Installed) -> Option<Version> {
+        if !can_pin(tool, installed.method) || tool == Tool::Notchling {
+            return None;
+        }
+        let current = installed.version.as_ref()?;
+        let failed: Vec<Version> = self
+            .checks
+            .book()
+            .failed_versions(tool)
+            .iter()
+            .filter_map(|(v, _)| Version::parse(v))
+            .collect();
+        go_back_target(&self.seen_versions(tool), current, &failed)
+    }
+
+    fn tool_arg(args: &Value) -> Result<Tool, ApiError> {
+        let name = args
+            .get("tool")
+            .and_then(Value::as_str)
+            .ok_or_else(|| ApiError::bad_request("tool is a name"))?;
+        Tool::from_name(name).ok_or_else(|| ApiError::bad_request("unknown tool"))
+    }
+
+    fn latest(&self, args: &Value) -> Result<Value, ApiError> {
+        let tool = Self::tool_arg(args)?;
+        Ok(self.updates.latest(tool))
+    }
+
+    fn update_local(&self, args: &Value) -> Result<Value, ApiError> {
+        self.updates.allowed()?;
+        let tool = Self::tool_arg(args)?;
+        let to = match args.get("to") {
+            None | Some(Value::Null) => None,
+            Some(Value::String(text)) => {
+                Some(Version::parse(text).ok_or_else(|| ApiError::bad_request("to is a version"))?)
+            }
+            Some(_) => return Err(ApiError::bad_request("to is a version")),
+        };
+        let found = self.snapshot();
+        let installed = found
+            .get(&tool)
+            .filter(|i| i.version.is_some())
+            .ok_or_else(|| ApiError::bad_request("that tool isn't installed here"))?;
+        let cause = if to.is_some() {
+            if to != self.go_back(tool, installed) {
+                return Err(ApiError::bad_request("that isn't a version to go back to"));
+            }
+            Cause::Rollback
+        } else {
+            Cause::UserUpdate
+        };
+        self.updates.start(tool, installed, to, cause)
     }
 
     fn workers(&self) -> Value {
@@ -441,13 +542,14 @@ impl VersionsOps {
         let mut watched = watch_paths(&self.roots);
         let mut watcher = Watcher::start(watched.clone(), WatchConfig::default()).ok();
         while !self.stop.load(Ordering::SeqCst) {
-            let changed = match &watcher {
+            let mut changed = match &watcher {
                 Some((_, rx)) => rx.recv_timeout(Duration::from_millis(200)).is_ok(),
                 None => {
                     std::thread::sleep(Duration::from_millis(200));
                     false
                 }
             };
+            changed |= self.rescan_wanted.swap(false, Ordering::SeqCst);
             if self.stop.load(Ordering::SeqCst) {
                 break;
             }
@@ -477,6 +579,8 @@ impl OpGroup for VersionsOps {
             ops::VERSIONS_GET => Some(OpSpec::AGENT),
             ops::VERSIONS_WORKERS => Some(OpSpec::APP),
             ops::VERSIONS_CHECK => Some(OpSpec::APP),
+            ops::VERSIONS_LATEST => Some(OpSpec::APP),
+            ops::VERSIONS_UPDATE_LOCAL => Some(OpSpec::APP),
             _ => None,
         }
     }
@@ -486,6 +590,8 @@ impl OpGroup for VersionsOps {
             ops::VERSIONS_GET => self.get(args),
             ops::VERSIONS_WORKERS => Ok(self.workers()),
             ops::VERSIONS_CHECK => self.check(args),
+            ops::VERSIONS_LATEST => self.latest(args),
+            ops::VERSIONS_UPDATE_LOCAL => self.update_local(args),
             other => Err(ApiError::internal(format!("{other} has no handler"))),
         }
     }
