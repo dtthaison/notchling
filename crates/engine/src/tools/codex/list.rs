@@ -144,6 +144,7 @@ fn row(path: &Path, meta: codex::Meta) -> Agent {
         config_dir: None,
         command: None,
         resume_session_id: None,
+        at_prompt: false,
     }
 }
 

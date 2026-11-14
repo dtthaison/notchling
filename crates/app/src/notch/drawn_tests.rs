@@ -21,6 +21,7 @@ fn agent(id: &str, since_ms: i64) -> Agent {
         config_dir: None,
         command: None,
         resume_session_id: None,
+        at_prompt: false,
     }
 }
 

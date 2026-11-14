@@ -58,6 +58,7 @@ pub fn agent_from_job(
     let tempo = str_field(job, "tempo");
     let status = live.and_then(|l| str_field(l, "status"));
 
+    let at_prompt = turn_is_over(job, state, status);
     let unprompted = str_field(job, "needs") == Some(FIRST_PROMPT)
         && matches!(state, "working" | "running" | "")
         && status != Some("waiting");
@@ -119,7 +120,23 @@ pub fn agent_from_job(
         command: (str_field(job, "template") == Some("exec"))
             .then(|| str_field(job, "intent").unwrap_or("").to_string()),
         resume_session_id: str_field(job, "resumeSessionId").map(String::from),
+        at_prompt,
     }
+}
+
+fn turn_is_over(job: &Value, state: &str, status: Option<&str>) -> bool {
+    match status {
+        Some("idle") => true,
+        Some("busy") => matches!(state, "done" | "blocked") && tasks_in_flight(job) > 0,
+        _ => false,
+    }
+}
+
+fn tasks_in_flight(job: &Value) -> u64 {
+    job.get("inFlight")
+        .and_then(|f| f.get("tasks"))
+        .and_then(Value::as_u64)
+        .unwrap_or(0)
 }
 
 pub fn agent_from_session(s: &Value, host_app: &dyn Fn(u32) -> Option<String>) -> Option<Agent> {
@@ -158,6 +175,7 @@ pub fn agent_from_session(s: &Value, host_app: &dyn Fn(u32) -> Option<String>) -
         config_dir: None,
         command: None,
         resume_session_id: None,
+        at_prompt: false,
     })
 }
 

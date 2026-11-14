@@ -2,7 +2,7 @@ use crate::acting_events::{session_ref, PlayError};
 use crate::acting_ops::{ActingOps, NoLog};
 use notchling_engine::reply::held::{Held, Route};
 use notchling_engine::reply::plan;
-use notchling_engine::sessions::{Agent, AgentGroup};
+use notchling_engine::sessions::Agent;
 use notchling_events::kinds::agents::ReplyVia;
 use notchling_local_api::topics;
 use serde_json::{json, Value};
@@ -40,8 +40,7 @@ impl ActingOps {
             self.play(agent, &plan::reply(text), &mut NoLog)?;
             return Ok(json!({"sent": true}));
         }
-        let working = agent.group == AgentGroup::Working;
-        let route = lock(&self.held.held).route(&agent.id, text, working, now_ms);
+        let route = lock(&self.held.held).route(&agent.id, text, agent.turn_running(), now_ms);
         match route {
             Route::Hold(all) => {
                 self.publish_held(&agent.id, Some(&all));

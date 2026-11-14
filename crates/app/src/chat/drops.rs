@@ -181,7 +181,30 @@ pub fn split_images(text: &str, exists: impl Fn(&Path) -> bool) -> (String, Vec<
         }
     }
     words.push_str(&text[at..]);
+    if !pictures.is_empty() {
+        words = one_blank_line_at_most(&words);
+    }
     (words.trim().to_owned(), pictures)
+}
+
+fn one_blank_line_at_most(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut blanks = 0;
+    for (i, line) in text.split('\n').enumerate() {
+        if line.trim().is_empty() {
+            blanks += 1;
+            if blanks > 1 {
+                continue;
+            }
+        } else {
+            blanks = 0;
+        }
+        if i > 0 {
+            out.push('\n');
+        }
+        out.push_str(line);
+    }
+    out
 }
 
 pub fn with_attachments(text: &str, files: &[PathBuf]) -> String {
@@ -389,6 +412,24 @@ mod tests {
         assert_eq!((words.as_str(), pictures.len()), ("", 1));
         let (words, _) = split_images("before /tmp/b.png after", |_| true);
         assert_eq!(words, "before after");
+    }
+
+    #[test]
+    fn a_picture_in_the_middle_of_held_messages_leaves_one_blank_line_not_four() {
+        let held = "padding bottom\n\n/tmp/a.png\n\nhi\n\nlook\n\n/tmp/b.png";
+        let (words, pictures) = split_images(held, |_| true);
+        assert_eq!(words, "padding bottom\n\nhi\n\nlook");
+        assert_eq!(pictures.len(), 2);
+        let (words, _) = split_images("a\n/tmp/a.png\n \n\n/tmp/b.png\nb", |_| true);
+        assert_eq!(words, "a\n\nb");
+    }
+
+    #[test]
+    fn text_with_no_picture_keeps_every_blank_line() {
+        let text = "a\n\n\n\nb /tmp/gone.png";
+        let (words, pictures) = split_images(text, |p| p != Path::new("/tmp/gone.png"));
+        assert_eq!(words, text);
+        assert!(pictures.is_empty());
     }
 
     #[test]

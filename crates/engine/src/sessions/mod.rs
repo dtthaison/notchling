@@ -6,6 +6,8 @@ pub mod lanes;
 pub mod monitor;
 
 #[cfg(test)]
+mod jobs_prompt_tests;
+#[cfg(test)]
 mod jobs_tests;
 #[cfg(test)]
 mod monitor_tests;

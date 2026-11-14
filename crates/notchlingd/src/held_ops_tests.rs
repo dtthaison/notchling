@@ -21,6 +21,16 @@ fn finish(s: &Setup, id: &str) {
     }
 }
 
+fn at_prompt(s: &Setup, id: &str, group: &str) {
+    let mut list = s.ops.sessions.lock().unwrap();
+    for row in list.as_array_mut().unwrap() {
+        if row["id"] == json!(id) {
+            row["group"] = json!(group);
+            row["atPrompt"] = json!(true);
+        }
+    }
+}
+
 fn typed(s: &Setup) -> String {
     s.writes.lock().unwrap().concat()
 }
@@ -124,4 +134,56 @@ fn nothing_is_flushed_while_acting_is_off() {
     s.ops.acting.set(true);
     s.ops.flush_held(100_000);
     assert!(typed(&s).contains("two"));
+}
+
+#[test]
+fn a_reply_to_a_row_working_only_for_background_tasks_is_typed_at_once() {
+    let s = setup(true, SCREEN, sessions());
+    at_prompt(&s, "job-a", "working");
+    let out = reply(&s, "job-a", "hi");
+    assert_eq!(out, json!({"sent": true}));
+    assert!(typed(&s).contains("hi"));
+    assert!(s.room.named(topics::SESSION_HELD).is_empty());
+    assert_eq!(s.ops.held_text("job-a"), None);
+}
+
+#[test]
+fn held_text_is_typed_once_the_turn_ends_though_the_row_still_says_working() {
+    let s = setup(true, SCREEN, sessions());
+    reply(&s, "job-a", "padding bottom");
+    reply(&s, "job-a", "hi");
+    s.ops.flush_held(1_000);
+    assert!(s.writes.lock().unwrap().is_empty(), "the turn is running");
+    at_prompt(&s, "job-a", "working");
+    s.ops.flush_held(2_000);
+    let written = typed(&s);
+    assert!(written.contains("padding bottom\n\nhi"), "{written}");
+    assert_eq!(s.ops.held_text("job-a"), None);
+}
+
+#[test]
+fn held_text_is_typed_into_a_session_that_ended_its_turn_asking_in_text() {
+    let s = setup(true, SCREEN, sessions());
+    reply(&s, "job-a", "two");
+    at_prompt(&s, "job-a", "needsInput");
+    s.ops.flush_held(1_000);
+    assert!(typed(&s).contains("two"));
+    assert_eq!(s.ops.held_text("job-a"), None);
+}
+
+#[test]
+fn held_text_waits_while_a_dialog_is_open() {
+    let s = setup(true, SCREEN, sessions());
+    reply(&s, "job-a", "two");
+    {
+        let mut list = s.ops.sessions.lock().unwrap();
+        for row in list.as_array_mut().unwrap() {
+            if row["id"] == json!("job-a") {
+                row["group"] = json!("needsInput");
+            }
+        }
+    }
+    s.ops.flush_held(1_000);
+    assert!(s.writes.lock().unwrap().is_empty());
+    assert_eq!(s.ops.held_text("job-a").as_deref(), Some("two"));
 }

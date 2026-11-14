@@ -141,6 +141,27 @@ fn the_live_session_file_sets_the_job_status() {
 }
 
 #[test]
+fn a_job_done_with_background_tasks_is_listed_working_and_at_its_prompt() {
+    let w = world(None);
+    w.tmp.write(
+        "home/.claude/jobs/ab12cd34/state.json",
+        &format!(
+            r#"{{"state":"done","tempo":"idle","sessionId":"conv","cwd":"/w","updatedAt":"{}","inFlight":{{"tasks":3,"queued":0,"kinds":["local_bash"],"drainableMonitors":0}}}}"#,
+            iso(3)
+        ),
+    );
+    w.tmp.write(
+        "home/.claude/sessions/100.json",
+        r#"{"sessionId":"conv","jobId":"ab12cd34","pid":100,"status":"busy","kind":"bg"}"#,
+    );
+    let rows = poll(&mut Monitor::default(), &w.roots, &[]);
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].group, AgentGroup::Working);
+    assert!(rows[0].at_prompt);
+    assert!(!rows[0].turn_running());
+}
+
+#[test]
 fn a_parked_terminal_session_is_shown_as_its_job() {
     let w = world(None);
     w.tmp.write(

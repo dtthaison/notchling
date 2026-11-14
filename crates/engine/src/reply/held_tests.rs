@@ -1,11 +1,17 @@
 use super::*;
 use crate::sessions::agent::sample;
-use crate::sessions::AgentTarget;
+use crate::sessions::{AgentGroup, AgentTarget};
 
 fn row(id: &str, group: AgentGroup) -> Agent {
     let mut agent = sample(AgentTarget::Job("ab12".into()), None);
     agent.id = id.into();
     agent.group = group;
+    agent
+}
+
+fn at_prompt(id: &str, group: AgentGroup) -> Agent {
+    let mut agent = row(id, group);
+    agent.at_prompt = true;
     agent
 }
 
@@ -105,4 +111,71 @@ fn a_direct_send_that_failed_does_not_hold_the_next() {
     held.route("a", "one", false, 0);
     held.not_sent("a");
     assert_eq!(held.route("a", "again", false, 100), Route::Send);
+}
+
+#[test]
+fn held_text_goes_when_the_turn_ended_though_background_tasks_keep_the_row_working() {
+    let mut held = Held::default();
+    held.route("a", "two", true, 0);
+    assert!(held
+        .ready(&[row("a", AgentGroup::Working)], 1_000)
+        .is_empty());
+    assert_eq!(
+        held.ready(&[at_prompt("a", AgentGroup::Working)], 2_000),
+        vec![("a".to_string(), "two".to_string())]
+    );
+}
+
+#[test]
+fn held_text_goes_to_a_session_that_ended_its_turn_asking_in_text() {
+    let mut held = Held::default();
+    held.route("a", "two", true, 0);
+    assert_eq!(
+        held.ready(&[at_prompt("a", AgentGroup::NeedsInput)], 1_000),
+        vec![("a".to_string(), "two".to_string())]
+    );
+}
+
+#[test]
+fn a_row_working_only_for_background_tasks_does_not_end_the_grace_after_a_send() {
+    let mut held = Held::default();
+    assert_eq!(held.route("a", "one", false, 0), Route::Send);
+    assert!(held
+        .ready(&[at_prompt("a", AgentGroup::Working)], 500)
+        .is_empty());
+    assert_eq!(
+        held.route("a", "two", false, 1_000),
+        Route::Hold("two".into()),
+        "the sent message has not started its turn yet"
+    );
+    assert!(held
+        .ready(&[row("a", AgentGroup::Working)], 1_500)
+        .is_empty());
+    assert_eq!(
+        held.route("a", "three", false, 2_000),
+        Route::Hold("two\n\nthree".into())
+    );
+}
+
+#[test]
+fn a_message_that_trails_blank_lines_joins_as_one_paragraph_break() {
+    let mut held = Held::default();
+    held.route("a", "padding bottom\n\n", true, 0);
+    assert_eq!(
+        held.route("a", "\n\nhi\n", true, 1_000),
+        Route::Hold("padding bottom\n\nhi\n".into())
+    );
+    assert_eq!(
+        held.route("a", "again", true, 2_000),
+        Route::Hold("padding bottom\n\nhi\n\nagain".into())
+    );
+}
+
+#[test]
+fn a_single_held_message_keeps_its_own_text() {
+    let mut held = Held::default();
+    assert_eq!(
+        held.route("a", "  fn x() {\n    1\n  }\n", true, 0),
+        Route::Hold("  fn x() {\n    1\n  }\n".into())
+    );
 }

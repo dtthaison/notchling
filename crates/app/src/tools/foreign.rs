@@ -50,6 +50,7 @@ pub fn agy_agent(row: &Row) -> Agent {
         config_dir: None,
         command: None,
         resume_session_id: None,
+        at_prompt: false,
     }
 }
 

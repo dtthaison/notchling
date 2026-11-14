@@ -222,6 +222,7 @@ mod tests {
             config_dir: None,
             command: None,
             resume_session_id: None,
+            at_prompt: false,
         };
         let lines = session_lines(&[a]);
         assert_eq!(lines.len(), 1);
