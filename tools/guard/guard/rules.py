@@ -150,6 +150,17 @@ def _guard_baseline() -> bool:
             and code == 1 and "GUARD-BASELINE" in out.getvalue())
 
 
+def _guard_provider_gaps() -> bool:
+    gaps, unwired = gate.PROVIDER_FILES
+    with _tmp() as root:
+        base = _repo(root, {gaps: json.dumps({"entries": ["codex subagent.list"]}),
+                            unwired: json.dumps({"entries": []})})
+        write(root, {gaps: json.dumps({"entries": ["codex subagent.list", "codex subagent.open"]})})
+        _git(root, "commit", "-q", "-am", "grow")
+        grew = gate.provider_gap_reasons(root, base, _git(root, "rev-parse", "HEAD"))
+    return any(r.startswith("GUARD-PROVIDER-GAPS:") for r in grew)
+
+
 def _guard_claude_md() -> bool:
     with _tmp() as root:
         _repo(root, {"CLAUDE.md": "@AGENTS.md\n", "legacy/macos/Sources/CLAUDE.md": "a second source\n"})
@@ -214,6 +225,7 @@ REGISTRY.update({
     "GUARD-PINS": _guard_pins,
     "GUARD-RULESETS": _guard_rulesets,
     "GUARD-BASELINE": _guard_baseline,
+    "GUARD-PROVIDER-GAPS": _guard_provider_gaps,
     "GUARD-CLAUDE-MD": _guard_claude_md,
     "GUARD-FEATURE-MAP": _guard_feature_map,
     "GUARD-RULES": _guard_rules,
