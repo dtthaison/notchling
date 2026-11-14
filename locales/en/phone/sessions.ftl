@@ -1,5 +1,11 @@
 ### The phone: the Sessions tab.
 
+# A session that is working on a turn. Shown in the Chat screen and the Sessions tab.
+sessions-state-running = Working
+
+# A session that finished its turn. Shown in the Sessions tab.
+sessions-state-done = Done
+
 # Shown in the Sessions tab.
 sessions-state-needs-input = Needs Input
 

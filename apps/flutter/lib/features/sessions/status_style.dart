@@ -35,8 +35,8 @@ extension SessionStateStyle on SessionState {
 
   String label(AppL10n l10n) => switch (this) {
     SessionState.needsInput => l10n.sessionsStateNeedsInput,
-    SessionState.running => l10n.stateRunning,
-    SessionState.done => l10n.stateDone,
+    SessionState.running => l10n.sessionsStateRunning,
+    SessionState.done => l10n.sessionsStateDone,
     SessionState.exited => l10n.sessionsStateExited,
   };
 }

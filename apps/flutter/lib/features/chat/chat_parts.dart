@@ -714,7 +714,7 @@ class _WorkingIndicatorState extends State<WorkingIndicator> with SingleTickerPr
     final AppL10n l10n = AppL10n.of(context);
     return Semantics(
       liveRegion: true,
-      label: widget.activity ?? l10n.stateRunning,
+      label: widget.activity ?? l10n.sessionsStateRunning,
       excludeSemantics: true,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(Space.sm, 0, Space.sm, 0),
@@ -747,7 +747,7 @@ class _WorkingIndicatorState extends State<WorkingIndicator> with SingleTickerPr
               child: AnimatedSwitcher(
                 duration: motionDuration(context),
                 child: Text(
-                  widget.activity ?? l10n.stateRunning,
+                  widget.activity ?? l10n.sessionsStateRunning,
                   key: ValueKey<String?>(widget.activity),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,

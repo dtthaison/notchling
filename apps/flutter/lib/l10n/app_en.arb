@@ -924,6 +924,10 @@
       }
     }
   },
+  "sessionsStateDone": "Done",
+  "@sessionsStateDone": {
+    "description": "A session that finished its turn. Shown in the Sessions tab."
+  },
   "sessionsStateExited": "Ended",
   "@sessionsStateExited": {
     "description": "Shown in the Sessions tab."
@@ -931,6 +935,10 @@
   "sessionsStateNeedsInput": "Needs Input",
   "@sessionsStateNeedsInput": {
     "description": "Shown in the Sessions tab."
+  },
+  "sessionsStateRunning": "Working",
+  "@sessionsStateRunning": {
+    "description": "A session that is working on a turn. Shown in the Chat screen and the Sessions tab."
   },
   "sessionsSubagentsHide": "Hide {count} subagents",
   "@sessionsSubagentsHide": {
@@ -987,14 +995,6 @@
   "settingsThemeSystem": "System",
   "@settingsThemeSystem": {
     "description": "Shown in Settings."
-  },
-  "stateDone": "Done",
-  "@stateDone": {
-    "description": "A session that finished its turn. Shown in the Sessions tab."
-  },
-  "stateRunning": "Working",
-  "@stateRunning": {
-    "description": "A session that is working on a turn. Shown in the Chat screen and the Sessions tab."
   },
   "visualizeBundleMissing": "The viz bundle is missing. Run tool/sync_viz.sh and rebuild.",
   "@visualizeBundleMissing": {

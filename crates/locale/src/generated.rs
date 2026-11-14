@@ -62,33 +62,17 @@ pub mod language {
     }
 }
 
-pub mod state {
-    use crate::Text;
-
-    pub const DONE: Text = Text(8);
-
-    pub fn done() -> &'static str {
-        DONE.get()
-    }
-
-    pub const RUNNING: Text = Text(9);
-
-    pub fn running() -> &'static str {
-        RUNNING.get()
-    }
-}
-
 pub mod units {
     use crate::Text;
 
-    pub const LIST_SEPARATOR: Text = Text(10);
+    pub const LIST_SEPARATOR: Text = Text(8);
 
     pub fn list_separator() -> &'static str {
         LIST_SEPARATOR.get()
     }
 }
 
-pub(crate) const COUNT: usize = 11;
+pub(crate) const COUNT: usize = 9;
 
 pub(crate) static KEYS: [(&str, Text); COUNT] = [
     ("consent-allow", Text(0)),
@@ -99,9 +83,7 @@ pub(crate) static KEYS: [(&str, Text); COUNT] = [
     ("item-expired", Text(5)),
     ("item-withdrawn", Text(6)),
     ("language-name", Text(7)),
-    ("state-done", Text(8)),
-    ("state-running", Text(9)),
-    ("units-list-separator", Text(10)),
+    ("units-list-separator", Text(8)),
 ];
 
 pub(crate) static EN: [Body; COUNT] = [
@@ -113,8 +95,6 @@ pub(crate) static EN: [Body; COUNT] = [
     Body::Plain("Expired"),
     Body::Plain("Withdrawn"),
     Body::Plain("English"),
-    Body::Plain("Done"),
-    Body::Plain("Working"),
     Body::Plain(", "),
 ];
 

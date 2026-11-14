@@ -1281,6 +1281,12 @@ abstract class AppL10n {
   /// **'No sessions match “{query}”.'**
   String sessionsSearchNoMatch(String query);
 
+  /// A session that finished its turn. Shown in the Sessions tab.
+  ///
+  /// In en, this message translates to:
+  /// **'Done'**
+  String get sessionsStateDone;
+
   /// Shown in the Sessions tab.
   ///
   /// In en, this message translates to:
@@ -1292,6 +1298,12 @@ abstract class AppL10n {
   /// In en, this message translates to:
   /// **'Needs Input'**
   String get sessionsStateNeedsInput;
+
+  /// A session that is working on a turn. Shown in the Chat screen and the Sessions tab.
+  ///
+  /// In en, this message translates to:
+  /// **'Working'**
+  String get sessionsStateRunning;
 
   /// Shown in the Sessions tab. $count is the number of subagents.
   ///
@@ -1358,18 +1370,6 @@ abstract class AppL10n {
   /// In en, this message translates to:
   /// **'System'**
   String get settingsThemeSystem;
-
-  /// A session that finished its turn. Shown in the Sessions tab.
-  ///
-  /// In en, this message translates to:
-  /// **'Done'**
-  String get stateDone;
-
-  /// A session that is working on a turn. Shown in the Chat screen and the Sessions tab.
-  ///
-  /// In en, this message translates to:
-  /// **'Working'**
-  String get stateRunning;
 
   /// Shown in the Visualize tab.
   ///

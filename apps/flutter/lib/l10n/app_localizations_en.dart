@@ -715,10 +715,16 @@ class AppL10nEn extends AppL10n {
   }
 
   @override
+  String get sessionsStateDone => 'Done';
+
+  @override
   String get sessionsStateExited => 'Ended';
 
   @override
   String get sessionsStateNeedsInput => 'Needs Input';
+
+  @override
+  String get sessionsStateRunning => 'Working';
 
   @override
   String sessionsSubagentsHide(int count) {
@@ -765,12 +771,6 @@ class AppL10nEn extends AppL10n {
 
   @override
   String get settingsThemeSystem => 'System';
-
-  @override
-  String get stateDone => 'Done';
-
-  @override
-  String get stateRunning => 'Working';
 
   @override
   String get visualizeBundleMissing =>
