@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 
+from guard import locale_lint
 from guard.source import strip_code, strip_comments
 from guard.tomldeps import lines_naming_outside_macos
 from guard.zones import glob_regex
@@ -32,6 +33,7 @@ class Rule:
     good: Tuple[str, str]
     exclude: Tuple[str, ...] = EXCLUDE
     warn: bool = False
+    probe_files: Tuple[Tuple[str, str], ...] = ()
 
     def applies(self, path: str) -> bool:
         if any(glob_regex(g).match(path) for g in self.exclude):
@@ -101,12 +103,14 @@ def _gpui_macos_only(path: str, lines: List[str], repo: Path) -> Found:
 GENERATED_FILES = frozenset({
     "crates/protocol/src/generated.rs",
     "apps/flutter/lib/core/protocol/generated.dart",
+    "crates/locale/src/generated.rs",
 })
+GENERATED_DIRS = ("apps/flutter/lib/l10n/",)
 
 
 def _file_size(limit: int) -> Check:
     def check(path: str, lines: List[str], repo: Path) -> Found:
-        if path in GENERATED_FILES:
+        if path in GENERATED_FILES or path.startswith(GENERATED_DIRS):
             return []
         return [(0, f"over {limit} lines")] if len(lines) > limit else []
     return check
@@ -152,6 +156,18 @@ RULES: List[Rule] = [
     Rule("LINT-FILE-SIZE-WARN", "Files over 600 lines should be split",
          ("legacy/macos/Sources/**", "crates/**", "apps/flutter/lib/**"), _file_size(600),
          ("legacy/macos/Sources/Notchling/A.swift", "x\n" * 601), ("legacy/macos/Sources/Notchling/A.swift", "x\n" * 600), warn=True),
+    Rule("LINT-LOCALE-LITERAL", "In an area that has moved to locales/, words come from a message, not a string literal",
+         ("crates/app/src/**/*.rs", "crates/kit/src/**/*.rs", "apps/flutter/lib/**/*.dart"), locale_lint.literal,
+         ("crates/app/src/notch/a.rs", 'fn f() { div().child("Reply to Claude") }\n'),
+         ("crates/app/src/notch/a.rs", "fn f() { div().child(t::notch::reply()) }\n"),
+         exclude=EXCLUDE + ("**/*_tests.rs", "**/tests_*.rs", "**/tests/**", "**/renders.rs",
+                            "crates/app/src/chat/bench_fixture.rs", "crates/app/src/testutil.rs",
+                            "apps/flutter/lib/l10n/**", "apps/flutter/lib/core/protocol/generated.dart"),
+         probe_files=((locale_lint.AREAS, locale_lint.AREAS_MOVED),)),
+    Rule("LINT-LOCALE-CONSENT", "A message that grants, refuses or pairs something belongs in consent.ftl, which the maintainer reviews",
+         ("locales/en/**/*.ftl",), locale_lint.consent,
+         ("locales/en/mac/chat.ftl", "chat-allow = Allow\n"), ("locales/en/mac/chat.ftl", "chat-reply = Reply\n"),
+         exclude=EXCLUDE + ("locales/en/consent.ftl",), warn=True),
 ]
 
 

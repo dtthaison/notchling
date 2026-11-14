@@ -56,7 +56,7 @@ def _lint_probe(rule_id: str) -> Callable[[], bool]:
     def probe() -> bool:
         path, text = lint.rule(rule_id).bad
         with _tmp() as root:
-            write(root, {path: text})
+            write(root, {path: text, **dict(lint.rule(rule_id).probe_files)})
             return any(v.rule == rule_id for v in lint.run(root, [path]))
     return probe
 
