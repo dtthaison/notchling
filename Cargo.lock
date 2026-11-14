@@ -3708,6 +3708,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "notchling-locale"
+version = "0.1.0"
+
+[[package]]
 name = "notchling-notchlingd"
 version = "0.1.0"
 dependencies = [

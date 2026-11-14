@@ -173,8 +173,9 @@ def render(tree: Tree) -> str:
         imports.append("Cat")
     if used.part:
         imports.append("Part")
-    imports += ["Table", "Text"]
-    out.append(f"use crate::{{{', '.join(imports)}}};")
+    imports.append("Table")
+    out.append(f"use crate::format::{{{', '.join(imports)}}};")
+    out.append("use crate::Text;")
     out.append("")
     for first in sorted(modules):
         names = ", ".join(sorted(module_use[first], key=lambda n: (n != "Arg", n != "Num", n)))
