@@ -1,4 +1,4 @@
-use crate::log_bus::{BusConfig, Enabled, LogBus, Sink, SinkResult};
+use crate::log_bus::{BusConfig, Enabled, EnvMaker, LogBus, Sink, SinkResult, Ticked};
 use crate::log_queue::Stamped;
 use notchling_events::kinds::choices::CallerTier;
 use notchling_events::kinds::diagnostics::{CallResult, OpCalled};
@@ -51,12 +51,14 @@ impl Sink for FakeSink {
             return SinkResult {
                 audit_n: vec![None; batch.len()],
                 failed: true,
+                extra: Vec::new(),
             };
         }
         self.shared.batches.lock().unwrap().push(batch.to_vec());
         SinkResult {
             audit_n: (0..batch.len() as u64).map(|n| Some(n + 100)).collect(),
             failed: false,
+            extra: Vec::new(),
         }
     }
 
@@ -65,8 +67,8 @@ impl Sink for FakeSink {
         Ok(())
     }
 
-    fn tick(&mut self, _now_ms: i64) -> Vec<Event> {
-        Vec::new()
+    fn tick(&mut self, _now_ms: i64) -> Ticked {
+        Ticked::default()
     }
 }
 
@@ -74,7 +76,12 @@ fn config() -> BusConfig {
     let mut cfg = BusConfig::daemon(Hex::new("abcdef0123456789").unwrap());
     cfg.batch_ms = 10;
     cfg.commit_wait = Duration::from_millis(400);
-    cfg.seq_start = 41;
+    cfg.env = EnvMaker::new(
+        Hex::new("abcdef0123456789").unwrap(),
+        Hex::new("b00710ad").unwrap(),
+        std::process::id(),
+        41,
+    );
     cfg
 }
 

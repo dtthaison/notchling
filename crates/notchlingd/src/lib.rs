@@ -32,7 +32,9 @@ pub mod layout;
 pub mod limits_ops;
 pub mod limits_sources;
 pub mod limits_usage;
+pub mod log_audit;
 pub mod log_bus;
+pub mod log_fold;
 pub mod log_queue;
 pub mod log_rotate;
 pub mod op_group;
@@ -99,6 +101,8 @@ mod install_ops_tests;
 mod limits_inbox_tests;
 #[cfg(test)]
 mod limits_ops_tests;
+#[cfg(test)]
+mod log_audit_tests;
 #[cfg(test)]
 mod log_bus_tests;
 #[cfg(test)]

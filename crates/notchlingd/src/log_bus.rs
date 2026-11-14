@@ -14,9 +14,16 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
+#[derive(Clone, Debug)]
+pub struct Extra {
+    pub stamped: Stamped,
+    pub audit_n: Option<u64>,
+}
+
 pub struct SinkResult {
     pub audit_n: Vec<Option<u64>>,
     pub failed: bool,
+    pub extra: Vec<Extra>,
 }
 
 impl SinkResult {
@@ -24,15 +31,56 @@ impl SinkResult {
         SinkResult {
             audit_n: vec![None; len],
             failed: false,
+            extra: Vec::new(),
         }
     }
+}
+
+#[derive(Default)]
+pub struct Ticked {
+    pub events: Vec<Event>,
+    pub extra: Vec<Extra>,
 }
 
 pub trait Sink: Send {
     fn sinks(&self) -> Sinks;
     fn write(&mut self, batch: &[Stamped], audit_n: &[Option<u64>]) -> SinkResult;
     fn flush(&mut self, full: bool) -> std::io::Result<()>;
-    fn tick(&mut self, now_ms: i64) -> Vec<Event>;
+    fn tick(&mut self, now_ms: i64) -> Ticked;
+}
+
+#[derive(Clone)]
+pub struct EnvMaker {
+    seq: Arc<AtomicU64>,
+    host: Hex,
+    boot: Hex,
+    pid: u32,
+}
+
+impl EnvMaker {
+    pub fn new(host: Hex, boot: Hex, pid: u32, seq_start: u64) -> EnvMaker {
+        EnvMaker {
+            seq: Arc::new(AtomicU64::new(seq_start.max(1))),
+            host,
+            boot,
+            pid,
+        }
+    }
+
+    pub fn make(&self, op_id: Option<Hex>, actor: Option<Actor>) -> Envelope {
+        Envelope {
+            ts_rx: None,
+            seq: self.seq.fetch_add(1, Ordering::SeqCst),
+            host: self.host.clone(),
+            proc: Proc::Daemon,
+            pid: self.pid,
+            boot: self.boot.clone(),
+            op_id,
+            actor,
+            repeat: None,
+            spooled: false,
+        }
+    }
 }
 
 pub type Enabled = Arc<dyn Fn(&KindSpec) -> bool + Send + Sync>;
@@ -45,10 +93,7 @@ pub struct BusConfig {
     pub batch_ms: u64,
     pub batch_max: usize,
     pub commit_wait: Duration,
-    pub host: Hex,
-    pub boot: Hex,
-    pub pid: u32,
-    pub seq_start: u64,
+    pub env: EnvMaker,
     pub clock: Arc<dyn Fn() -> i64 + Send + Sync>,
 }
 
@@ -61,10 +106,12 @@ impl BusConfig {
             batch_ms: 250,
             batch_max: 500,
             commit_wait: Duration::from_secs(2),
-            host,
-            boot: notchling_events::ids::new_boot(),
-            pid: std::process::id(),
-            seq_start: 1,
+            env: EnvMaker::new(
+                host,
+                notchling_events::ids::new_boot(),
+                std::process::id(),
+                1,
+            ),
             clock: Arc::new(wall_ms),
         }
     }
@@ -120,7 +167,6 @@ struct Lost {
 pub struct LogBus {
     cfg: BusConfig,
     enabled: Enabled,
-    seq: AtomicU64,
     state: Mutex<Queues>,
     ready: Condvar,
     counters: Counters,
@@ -147,7 +193,6 @@ fn caller_tier(actor: Option<&Actor>) -> CallerTier {
 impl LogBus {
     pub fn start(cfg: BusConfig, sinks: Vec<Box<dyn Sink>>, enabled: Enabled) -> Arc<LogBus> {
         let bus = Arc::new(LogBus {
-            seq: AtomicU64::new(cfg.seq_start.max(1)),
             cfg,
             enabled,
             state: Mutex::new(Queues::default()),
@@ -206,22 +251,6 @@ impl LogBus {
         }
     }
 
-    fn stamp(&self, event: &Event, op_id: Option<Hex>, actor: Option<Actor>) -> Envelope {
-        let _ = event;
-        Envelope {
-            ts_rx: None,
-            seq: self.seq.fetch_add(1, Ordering::SeqCst),
-            host: self.cfg.host.clone(),
-            proc: Proc::Daemon,
-            pid: self.cfg.pid,
-            boot: self.cfg.boot.clone(),
-            op_id,
-            actor,
-            repeat: None,
-            spooled: false,
-        }
-    }
-
     fn enqueue(
         &self,
         event: Event,
@@ -258,7 +287,7 @@ impl LogBus {
                     why: UnwritableWhy::Overflow,
                 });
             }
-            let env = self.stamp(&event, op_id, actor);
+            let env = self.cfg.env.make(op_id, actor);
             queues.always_bytes += bytes;
             queues.always.push_back(Stamped {
                 env,
@@ -270,7 +299,7 @@ impl LogBus {
                 self.counters.dropped_toggle.fetch_add(1, Ordering::SeqCst);
                 return Ok(());
             }
-            let env = self.stamp(&event, op_id, actor);
+            let env = self.cfg.env.make(op_id, actor);
             queues.toggle.push_back(Stamped {
                 env,
                 event,
@@ -370,12 +399,26 @@ impl LogBus {
         let has_always = batch.iter().any(|s| is_always(s.event.spec));
         let mut carry: Vec<Option<u64>> = vec![None; batch.len()];
         let mut broken: Vec<bool> = vec![false; sinks.len()];
+        let mut extras: Vec<Extra> = Vec::new();
         for (i, sink) in sinks.iter_mut().enumerate() {
-            let result = sink.write(batch, &carry);
+            let before = extras.len();
+            let mut result = if extras.is_empty() {
+                sink.write(batch, &carry)
+            } else {
+                let mut combined: Vec<Stamped> = extras.iter().map(|e| e.stamped.clone()).collect();
+                combined.extend_from_slice(batch);
+                let mut audit: Vec<Option<u64>> = extras.iter().map(|e| e.audit_n).collect();
+                audit.extend_from_slice(&carry);
+                let mut result = sink.write(&combined, &audit);
+                let cut = before.min(result.audit_n.len());
+                result.audit_n.drain(..cut);
+                result
+            };
             broken[i] = result.failed;
             if result.audit_n.len() == batch.len() && result.audit_n.iter().any(Option::is_some) {
-                carry = result.audit_n;
+                carry = std::mem::take(&mut result.audit_n);
             }
+            extras.append(&mut result.extra);
         }
         if has_commit || has_always {
             for (i, sink) in sinks.iter_mut().enumerate() {
@@ -455,10 +498,21 @@ impl LogBus {
 
     fn tick(&self, sinks: &mut [Box<dyn Sink>], dirty: &mut bool, reported: &mut Reported) {
         let now = (self.cfg.clock)();
-        for sink in sinks.iter_mut() {
-            for event in sink.tick(now) {
+        for i in 0..sinks.len() {
+            let ticked = sinks[i].tick(now);
+            for event in ticked.events {
                 self.requeue(event, None, None);
             }
+            if !ticked.extra.is_empty() {
+                let stamped: Vec<Stamped> =
+                    ticked.extra.iter().map(|e| e.stamped.clone()).collect();
+                let audit: Vec<Option<u64>> = ticked.extra.iter().map(|e| e.audit_n).collect();
+                for later in sinks.iter_mut().skip(i + 1) {
+                    let _ = later.write(&stamped, &audit);
+                }
+            }
+        }
+        for sink in sinks.iter_mut() {
             if *dirty {
                 let _ = sink.flush(false);
             }
