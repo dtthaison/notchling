@@ -2,6 +2,7 @@ use super::*;
 use crate::cluster_mirror::{Mirror, TailSource};
 use crate::cluster_sessions::{agent_row, Peer, RemoteSessions, RowSource};
 use crate::cluster_testkit::{Dir, FakeCalls};
+use crate::grant_roots::JobRoots;
 use crate::grant_use::tests::{cluster, id, job, Fake};
 use notchling_engine::cluster::grant_files::GrantValue;
 use notchling_engine::cluster::wire::OriginTier;
@@ -9,7 +10,7 @@ use notchling_engine::cluster::{JobState, NodeId};
 use serde_json::json;
 use std::io::Write;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
 use std::sync::Mutex;
 
 const JOB: &str = "j-0123456789ab";
@@ -37,6 +38,8 @@ struct Rig {
     fake: Arc<Fake>,
     masks: Arc<TailMasks>,
     closed: Arc<AtomicBool>,
+    roots: Arc<JobRoots>,
+    now: Arc<AtomicI64>,
     tails: Arc<MaskedTails>,
     inner: Arc<FakeCalls>,
 }
@@ -55,6 +58,8 @@ fn rig_short(id_: &str, short: Option<&str>) -> Rig {
     let masks = Arc::new(TailMasks::new());
     let closed = Arc::new(AtomicBool::new(false));
     let seen = closed.clone();
+    let roots = Arc::new(JobRoots::new());
+    let now = Arc::new(AtomicI64::new(1_000_000));
     let inner = Arc::new(FakeCalls::default());
     let tails = Arc::new(MaskedTails::new(
         inner.clone(),
@@ -65,6 +70,7 @@ fn rig_short(id_: &str, short: Option<&str>) -> Rig {
         }),
         (masks.clone(), fake.clone()),
         Arc::new(move |_: &str| seen.load(Ordering::SeqCst)),
+        (roots.clone(), clock_of(&now)),
     ));
     Rig {
         dir,
@@ -72,9 +78,16 @@ fn rig_short(id_: &str, short: Option<&str>) -> Rig {
         fake,
         masks,
         closed,
+        roots,
+        now,
         tails,
         inner,
     }
+}
+
+fn clock_of(now: &Arc<AtomicI64>) -> Clock {
+    let reading = now.clone();
+    Arc::new(move || reading.load(Ordering::SeqCst))
 }
 
 fn origin() -> Origin {
@@ -85,6 +98,10 @@ fn origin() -> Origin {
 }
 
 impl Rig {
+    fn local(&self) -> (Arc<JobRoots>, Clock) {
+        (self.roots.clone(), clock_of(&self.now))
+    }
+
     fn append(&self, text: &str) {
         let mut file = std::fs::OpenOptions::new()
             .append(true)
@@ -220,6 +237,7 @@ fn conversation_rig(reply: Value, id_: &str) -> Rig {
         }),
         (r.masks.clone(), r.fake.clone()),
         Arc::new(|_: &str| true),
+        r.local(),
     ));
     r
 }
@@ -409,3 +427,6 @@ fn mask_holds_across_chunk_boundaries_and_the_mirror_follows_by_source_offset() 
 
 #[path = "cluster_tail_lost_tests.rs"]
 mod lost;
+
+#[path = "cluster_tail_worker_tests.rs"]
+mod worker;

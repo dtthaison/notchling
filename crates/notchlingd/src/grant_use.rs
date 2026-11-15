@@ -1,7 +1,7 @@
 use crate::cluster_node::LocalCalls;
 use crate::cluster_redact::TailMasks;
 use crate::grant_broker::{Clock, View, GRANT_DELIVER, GRANT_REVOKE};
-use crate::grant_roots::{valid_job, valid_key, GrantMarks, JobRoots};
+use crate::grant_roots::{valid_job, valid_key, GrantMarks, JobRoots, StartTool};
 use crate::shell_jobs::SESSION_PREFIX;
 use crate::vault_caller::Processes;
 use crate::vault_ops::WorkerUse;
@@ -257,7 +257,7 @@ impl GrantUse {
         Ok(json!({"stored": name}))
     }
 
-    pub fn starting(&self, origin: &Origin, args: &Value) -> Option<String> {
+    pub fn starting(&self, origin: &Origin, args: &Value, tool: StartTool) -> Option<String> {
         if origin.tier != OriginTier::App {
             return None;
         }
@@ -269,7 +269,7 @@ impl GrantUse {
             .get("job")
             .and_then(Value::as_str)
             .filter(|j| valid_job(j))?;
-        self.parts.2.begin(job).then(|| job.to_string())
+        self.parts.2.begin(job, tool).then(|| job.to_string())
     }
 
     pub fn started(&self, job: &str, result: &Result<Value, ApiError>) {
@@ -440,7 +440,13 @@ impl UseCalls {
     }
 }
 
-pub const START_OPS: [&str; 2] = [ops::SESSION_NEW, ops::AGY_SEND];
+pub fn start_tool(op: &str) -> Option<StartTool> {
+    match op {
+        ops::SESSION_NEW => Some(StartTool::Claude),
+        ops::AGY_SEND => Some(StartTool::Agy),
+        _ => None,
+    }
+}
 
 impl LocalCalls for UseCalls {
     fn call(&self, op: &str, args: &Value, origin: &Origin) -> Result<Value, ApiError> {
@@ -448,15 +454,17 @@ impl LocalCalls for UseCalls {
         match op {
             GRANT_DELIVER => self.uses.deliver_at(origin, args, arrived),
             GRANT_REVOKE => self.uses.revoke(origin, args),
-            _ if START_OPS.contains(&op) => {
-                let job = self.uses.starting(origin, args);
-                let result = self.inner.call(op, args, origin);
-                if let Some(job) = job {
-                    self.uses.started(&job, &result);
+            _ => match start_tool(op) {
+                Some(tool) => {
+                    let job = self.uses.starting(origin, args, tool);
+                    let result = self.inner.call(op, args, origin);
+                    if let Some(job) = job {
+                        self.uses.started(&job, &result);
+                    }
+                    result
                 }
-                result
-            }
-            _ => self.inner.call(op, args, origin),
+                None => self.inner.call(op, args, origin),
+            },
         }
     }
 }

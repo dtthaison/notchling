@@ -23,10 +23,22 @@ pub fn valid_job(job: &str) -> bool {
     })
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StartTool {
+    Claude,
+    Agy,
+}
+
+#[derive(Default)]
+struct Begun {
+    keys: Vec<String>,
+    claude: bool,
+}
+
 #[derive(Default)]
 struct Roots {
     live: BTreeMap<String, u32>,
-    begun: BTreeMap<String, Vec<String>>,
+    begun: BTreeMap<String, Begun>,
     begun_order: VecDeque<String>,
     pending: BTreeMap<String, i64>,
     ended: BTreeSet<String>,
@@ -66,7 +78,7 @@ impl JobRoots {
         roots.live.insert(job.to_string(), pid);
     }
 
-    pub fn begin(&self, job: &str) -> bool {
+    pub fn begin(&self, job: &str, tool: StartTool) -> bool {
         if !valid_job(job) {
             return false;
         }
@@ -76,8 +88,11 @@ impl JobRoots {
         }
         roots.pending.remove(job);
         if !roots.begun.contains_key(job) {
-            roots.begun.insert(job.to_string(), Vec::new());
+            roots.begun.insert(job.to_string(), Begun::default());
             roots.begun_order.push_back(job.to_string());
+        }
+        if let Some(begun) = roots.begun.get_mut(job) {
+            begun.claude |= tool == StartTool::Claude;
         }
         while roots.begun_order.len() > BEGUN_MAX {
             if let Some(oldest) = roots.begun_order.pop_front() {
@@ -92,11 +107,15 @@ impl JobRoots {
             return;
         }
         let mut roots = lock(&self.inner);
-        if let Some(keys) = roots.begun.get_mut(job) {
-            if !keys.iter().any(|k| k == key) {
-                keys.push(key.to_string());
+        if let Some(begun) = roots.begun.get_mut(job) {
+            if !begun.keys.iter().any(|k| k == key) {
+                begun.keys.push(key.to_string());
             }
         }
+    }
+
+    pub fn ran_claude(&self, job: &str) -> bool {
+        lock(&self.inner).begun.get(job).is_some_and(|b| b.claude)
     }
 
     pub fn is_live(&self, job: &str) -> bool {
@@ -145,7 +164,7 @@ impl JobRoots {
         let mut live: BTreeMap<String, Vec<String>> = roots
             .begun
             .iter()
-            .map(|(job, keys)| (job.clone(), keys.clone()))
+            .map(|(job, begun)| (job.clone(), begun.keys.clone()))
             .collect();
         for job in roots.live.keys() {
             live.entry(job.clone())
@@ -160,7 +179,11 @@ impl JobRoots {
 
     pub fn keys(&self, job: &str) -> Vec<String> {
         let roots = lock(&self.inner);
-        let mut keys = roots.begun.get(job).cloned().unwrap_or_default();
+        let mut keys = roots
+            .begun
+            .get(job)
+            .map(|b| b.keys.clone())
+            .unwrap_or_default();
         if roots.live.contains_key(job) {
             keys.push(format!("{SESSION_PREFIX}{job}"));
         }

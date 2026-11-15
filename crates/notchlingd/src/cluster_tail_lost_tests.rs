@@ -96,6 +96,7 @@ fn prompts_rig(list: Vec<Value>) -> Rig {
         }),
         (r.masks.clone(), r.fake.clone()),
         Arc::new(|_: &str| true),
+        r.local(),
     ));
     r
 }
@@ -159,6 +160,7 @@ fn a_prompt_list_that_is_not_a_list_passes_through() {
         }),
         (r.masks.clone(), r.fake.clone()),
         Arc::new(|_: &str| true),
+        r.local(),
     ));
     let out = r.tails.call("prompts.list", &json!({}), &origin()).unwrap();
     assert_eq!(out, json!({"error": "x"}));
@@ -189,6 +191,7 @@ fn sessions_rig(list: Vec<Value>) -> Rig {
         }),
         (r.masks.clone(), r.fake.clone()),
         Arc::new(|_: &str| true),
+        r.local(),
     ));
     r
 }

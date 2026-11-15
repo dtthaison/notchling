@@ -386,6 +386,7 @@ impl ClusterParts {
             Arc::new(HandlerRows::new(handler.clone())),
             (grants.masks.clone(), view.clone()),
             Arc::new(move |job: &str| closing.log_closed(job)),
+            (grants.roots.clone(), clock_ms()),
         ));
         let launcher: Arc<dyn Launcher> =
             Arc::new(RealLauncher::with_claude(PathBuf::from("claude")));

@@ -1,8 +1,8 @@
 use crate::cluster_node::LocalCalls;
 use crate::cluster_redact::{mask_tail, mask_with, JobMasks, TailMasks};
 use crate::cluster_sessions::{tail, LocalRows, NODE_SESSIONS, NODE_TAIL};
-use crate::grant_broker::View;
-use crate::grant_roots::valid_job;
+use crate::grant_broker::{Clock, View};
+use crate::grant_roots::{valid_job, JobRoots};
 use crate::shell_jobs::SESSION_PREFIX;
 use notchling_engine::bridge::net::crypto::{base64, base64_decode};
 use notchling_engine::cluster::wire::Origin;
@@ -28,6 +28,8 @@ pub struct MaskedTails {
     masks: Arc<TailMasks>,
     view: Arc<dyn View>,
     closed: Closed,
+    roots: Arc<JobRoots>,
+    clock: Clock,
 }
 
 fn failed(why: impl Into<String>) -> ApiError {
@@ -55,6 +57,10 @@ struct Snap {
     login_blanket: bool,
 }
 
+fn running(state: JobState) -> bool {
+    matches!(state, JobState::Running | JobState::Dispatching)
+}
+
 fn blanked(mut row: Value) -> Value {
     if let Some(fields) = row.as_object_mut() {
         for key in ROW_TEXT {
@@ -70,6 +76,7 @@ impl MaskedTails {
         rows: Arc<dyn LocalRows>,
         (masks, view): (Arc<TailMasks>, Arc<dyn View>),
         closed: Closed,
+        (roots, clock): (Arc<JobRoots>, Clock),
     ) -> MaskedTails {
         MaskedTails {
             inner,
@@ -77,6 +84,8 @@ impl MaskedTails {
             masks,
             view,
             closed,
+            roots,
+            clock,
         }
     }
 
@@ -121,37 +130,49 @@ impl MaskedTails {
         }
     }
 
+    fn here(&self, job: &str) -> bool {
+        self.roots.is_live(job) || self.roots.is_pending(job, (self.clock)())
+    }
+
     fn all_over(&self) -> bool {
         let Some(state) = self.view.state() else {
             return false;
         };
         let me = self.view.me();
-        state
+        let listed = state
             .jobs
             .values()
             .filter(|j| Some(&j.spec.node) == me.as_ref())
-            .all(|j| !matches!(j.state, JobState::Running | JobState::Dispatching))
+            .all(|j| !running(j.state));
+        let local = self.roots.local((self.clock)());
+        listed
+            && local
+                .live
+                .keys()
+                .chain(&local.pending)
+                .all(|job| state.jobs.contains_key(job))
     }
 
     fn over(&self, job: &str) -> bool {
         let Some(state) = self.view.state() else {
             return false;
         };
-        let ended = state
-            .jobs
-            .get(job)
-            .is_none_or(|j| !matches!(j.state, JobState::Running | JobState::Dispatching));
+        let ended = match state.jobs.get(job) {
+            Some(listed) => !running(listed.state),
+            None => !self.here(job),
+        };
         ended && (self.closed)(job)
     }
 
     fn ran_claude(&self, snap: &Snap, job: &str) -> bool {
-        match (&snap.state, &snap.me) {
+        let listed = match (&snap.state, &snap.me) {
             (Some(state), Some(me)) => state
                 .jobs
                 .get(job)
                 .is_some_and(|j| j.spec.node == *me && j.session.is_some()),
             _ => false,
-        }
+        };
+        listed || self.roots.ran_claude(job)
     }
 
     fn mask(
