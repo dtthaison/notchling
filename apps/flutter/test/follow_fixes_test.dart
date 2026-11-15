@@ -366,7 +366,7 @@ void main() {
   group('a changed answer never rides an old key', () {
     final Map<FakeWs, ProviderContainer> chats = <FakeWs, ProviderContainer>{};
 
-    FakeWs prompts({String firstReply = 'timeout', Map<String, Object?>? cancelReply, bool holdCancel = false, bool holdFirst = false, String secondReply = 'answered'}) {
+    FakeWs prompts({String firstReply = 'timeout', Map<String, Object?>? cancelReply, Map<String, Object?>? cancelById, bool holdCancel = false, bool holdFirst = false, String secondReply = 'answered'}) {
       return FakeWs(onSend: (FakeWs s, Map<String, Object?> m) {
         switch (m['op']) {
           case 'hello':
@@ -385,7 +385,11 @@ void main() {
             }
           case 'held.cancel':
             if (holdCancel) return;
-            s.reply(m['id']!, data: cancelReply ?? <String, Object?>{'cancelled': true});
+            if (m['heldId'] != null && cancelById != null) {
+              s.reply(m['id']!, data: cancelById);
+            } else {
+              s.reply(m['id']!, data: cancelReply ?? <String, Object?>{'cancelled': true});
+            }
         }
       });
     }
@@ -480,7 +484,53 @@ void main() {
       final ChatNotifier chat = await chatOn(socket);
       await chat.allow(prompt, allow: true);
       await chat.allow(prompt, allow: false);
-      expect(order(socket), <String>['prompt.answertrue', 'held.cancel', 'prompt.answerfalse']);
+      expect(order(socket), <String>['prompt.answertrue', 'held.cancel', 'held.cancel', 'prompt.answerfalse']);
+    });
+
+    test('a key the Standby does not know is cancelled by the held id it returned', () async {
+      final FakeWs socket = prompts(
+        firstReply: 'held',
+        cancelReply: <String, Object?>{'cancelled': false},
+        cancelById: <String, Object?>{'cancelled': true},
+      );
+      final ChatNotifier chat = await chatOn(socket);
+      await chat.allow(prompt, allow: true);
+      await chat.allow(prompt, allow: false);
+      final List<Map<String, Object?>> cancels = _ops(<FakeWs>[socket], 'held.cancel').toList();
+      expect(cancels, hasLength(2));
+      expect(cancels[0]['key'], isNotNull);
+      expect(cancels[1]['heldId'], 'h1');
+      expect(cancels[1].containsKey('key'), isFalse);
+      expect(order(socket).last, 'prompt.answerfalse');
+      expect(stateOf(socket).answerConflict, isNull);
+    });
+
+    test('the held id also reports an answer that was already delivered', () async {
+      final FakeWs socket = prompts(
+        firstReply: 'held',
+        cancelReply: <String, Object?>{'cancelled': false},
+        cancelById: <String, Object?>{'cancelled': false, 'delivered': true},
+      );
+      final ChatNotifier chat = await chatOn(socket);
+      await chat.allow(prompt, allow: true);
+      await chat.allow(prompt, allow: false);
+      expect(order(socket), <String>['prompt.answertrue', 'held.cancel', 'held.cancel']);
+      expect(stateOf(socket).answerConflict?.delivered, isTrue);
+    });
+
+    test('the check shows as busy per request and blocks only that prompt', () async {
+      final FakeWs socket = prompts(firstReply: 'held', holdCancel: true);
+      final ChatNotifier chat = await chatOn(socket);
+      const PendingPrompt other = PendingPrompt(requestId: 'r2', sessionId: 's1', isPermission: true, toolName: 'Bash', summary: 'pwd', questions: <PromptQuestion>[]);
+      await chat.allow(prompt, allow: true);
+      final Future<void> first = chat.allow(prompt, allow: false);
+      await until(() => _ops(<FakeWs>[socket], 'held.cancel').isNotEmpty);
+      expect(stateOf(socket).checking, <String>{'r1'});
+      await chat.allow(other, allow: true);
+      expect(_ops(<FakeWs>[socket], 'prompt.answer'), hasLength(2), reason: 'another prompt in the same session still goes');
+      socket.reply(_ops(<FakeWs>[socket], 'held.cancel').single['id']!, data: <String, Object?>{'cancelled': true});
+      await first;
+      expect(stateOf(socket).checking, isEmpty);
     });
 
     test('a cancel that fails asks instead of sending', () async {
@@ -530,7 +580,8 @@ void main() {
       await allowing;
       await chat.allow(prompt, allow: true);
       final List<Map<String, Object?>> cancels = _ops(<FakeWs>[socket], 'held.cancel').toList();
-      expect(cancels.last['key'], answers[1]['key']);
+      expect(cancels.where((Map<String, Object?> c) => c.containsKey('key')).last['key'], answers[1]['key']);
+      expect(cancels.last['heldId'], 'h2');
     });
   });
 

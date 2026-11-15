@@ -237,6 +237,10 @@
   "@chatAnswerFailed": {
     "description": "Shown in the Chat screen."
   },
+  "chatAnswerChecking": "Checking your earlier answer…",
+  "@chatAnswerChecking": {
+    "description": "Shown in the Chat screen under a permission or question card while the phone checks whether an earlier answer was already delivered, before it sends a different one. The answer buttons wait until it is done."
+  },
   "chatAnswerMayDeliver": "Your earlier answer ({answer}) may still be delivered. Tap again to send this one instead.",
   "@chatAnswerMayDeliver": {
     "description": "Shown in the Chat screen under a permission or question card when the phone is asked to send a different answer while the first one may still be delivered. $answer is the earlier answer, such as Allow. Tapping an answer again sends it anyway.",

@@ -90,6 +90,7 @@ class ChatState {
     this.takeover = const TakeoverIdle(),
     this.pending = const <PendingSend>[],
     this.refreshing = false,
+    this.checking = const <String>{},
   });
 
   final LoadPhase phase;
@@ -104,6 +105,7 @@ class ChatState {
   final List<PendingSend> pending;
 
   final bool refreshing;
+  final Set<String> checking;
 
   ChatState copyWith({
     LoadPhase? phase,
@@ -119,6 +121,7 @@ class ChatState {
     TakeoverProgress? takeover,
     List<PendingSend>? pending,
     bool? refreshing,
+    Set<String>? checking,
   }) =>
       ChatState(
         phase: phase ?? this.phase,
@@ -132,6 +135,7 @@ class ChatState {
         takeover: takeover ?? this.takeover,
         pending: pending ?? this.pending,
         refreshing: refreshing ?? this.refreshing,
+        checking: checking ?? this.checking,
       );
 }
 
@@ -362,10 +366,19 @@ class ChatNotifier extends Notifier<ChatState> {
         (BridgeClient client, String key) => client.promptChoose(prompt.requestId, choices.cast<Object>(), key: key),
       );
 
-  bool _checking = false;
+  final Set<String> _checking = <String>{};
+
+  void _checks(String requestId, {required bool on}) {
+    if (on) {
+      _checking.add(requestId);
+    } else {
+      _checking.remove(requestId);
+    }
+    if (ref.mounted) state = state.copyWith(checking: Set<String>.unmodifiable(_checking));
+  }
 
   Future<void> _answer(String requestId, String decision, Future<String?> Function(BridgeClient client, String key) action) async {
-    if (_checking) return;
+    if (_checking.contains(requestId)) return;
     final BridgeClient? client = clientForSession(ref, sessionId);
     if (client == null) {
       state = state.copyWith(clearAnswerError: true, answerError: const BridgeException('disconnected', ''));
@@ -374,12 +387,17 @@ class ChatNotifier extends Notifier<ChatState> {
     _Attempt? attempt = _attempts[requestId];
     if (attempt != null && attempt.decision != decision) {
       final _Attempt earlier = attempt;
-      _checking = true;
+      _checks(requestId, on: true);
       try {
         bool settled = false;
         bool delivered = false;
         try {
-          final ({bool done, bool delivered, bool inFlight}) result = await client.heldCancel(key: earlier.key);
+          ({bool done, bool delivered, bool inFlight}) result = await client.heldCancel(key: earlier.key);
+          final String? held = earlier.heldId;
+          if (!result.done && !result.delivered && !result.inFlight && held != null) {
+            if (!ref.mounted) return;
+            result = await client.heldCancel(heldId: held);
+          }
           if (!ref.mounted) return;
           delivered = result.delivered;
           final bool sameMachine = identical(earlier.client, client) && earlier.node != null && earlier.node == client.holderKey;
@@ -400,7 +418,7 @@ class ChatNotifier extends Notifier<ChatState> {
           }
         }
       } finally {
-        _checking = false;
+        _checks(requestId, on: false);
       }
       if (identical(_attempts[requestId], earlier)) _attempts.remove(requestId);
       attempt = null;

@@ -14,11 +14,13 @@ class PendingCard extends StatefulWidget {
     required this.onChoose,
     this.error,
     this.conflict,
+    this.busy = false,
   });
 
   final PendingPrompt prompt;
   final String? error;
   final String? conflict;
+  final bool busy;
   final void Function({required bool allow}) onAllow;
 
   final void Function(List<int> choices) onChoose;
@@ -65,12 +67,12 @@ class _PendingCardState extends State<PendingCard> {
               PrimaryButton(
                 label: l10n.consentAllow,
                 semanticLabel: '${l10n.consentAllow} ${prompt.toolName}',
-                onPressed: () => widget.onAllow(allow: true),
+                onPressed: widget.busy ? null : () => widget.onAllow(allow: true),
               ),
               SecondaryButton(
                 label: l10n.consentDeny,
                 semanticLabel: '${l10n.consentDeny} ${prompt.toolName}',
-                onPressed: () => widget.onAllow(allow: false),
+                onPressed: widget.busy ? null : () => widget.onAllow(allow: false),
               ),
             ],
           ),
@@ -101,7 +103,7 @@ class _PendingCardState extends State<PendingCard> {
                 SecondaryButton(
                   label: '${i + 1}  ${question.options[i]}',
                   semanticLabel: '${i + 1}: ${question.options[i]}',
-                  onPressed: () => _pick(i + 1),
+                  onPressed: widget.busy ? null : () => _pick(i + 1),
                 ),
             ],
           ),
@@ -145,6 +147,10 @@ class _PendingCardState extends State<PendingCard> {
             ),
             const SizedBox(height: Space.sm),
             ...body,
+            if (widget.busy) ...<Widget>[
+              const SizedBox(height: Space.sm),
+              Text(l10n.chatAnswerChecking, style: Kit.of(context).bodySm),
+            ],
             if (widget.conflict != null) ...<Widget>[
               const SizedBox(height: Space.sm),
               Text(

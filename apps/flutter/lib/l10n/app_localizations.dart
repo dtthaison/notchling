@@ -369,6 +369,12 @@ abstract class AppL10n {
   /// **'Couldn\'t send the answer. Please try again.'**
   String get chatAnswerFailed;
 
+  /// Shown in the Chat screen under a permission or question card while the phone checks whether an earlier answer was already delivered, before it sends a different one. The answer buttons wait until it is done.
+  ///
+  /// In en, this message translates to:
+  /// **'Checking your earlier answer…'**
+  String get chatAnswerChecking;
+
   /// Shown in the Chat screen under a permission or question card when the phone is asked to send a different answer while the first one may still be delivered. $answer is the earlier answer, such as Allow. Tapping an answer again sends it anyway.
   ///
   /// In en, this message translates to:

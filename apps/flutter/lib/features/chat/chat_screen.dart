@@ -215,6 +215,9 @@ class _SessionChatState extends ConsumerState<_SessionChat> {
                         final AnswerConflict? conflict = ref.watch(
                           chatProvider(id).select((ChatState c) => c.answerConflict),
                         );
+                        final Set<String> checking = ref.watch(
+                          chatProvider(id).select((ChatState c) => c.checking),
+                        );
                         if (pending == null) {
                           return const SizedBox(width: double.infinity);
                         }
@@ -223,6 +226,7 @@ class _SessionChatState extends ConsumerState<_SessionChat> {
                           rise: 16,
                           child: PendingCard(
                             prompt: pending,
+                            busy: checking.contains(pending.requestId),
                             error: answerError == null ? null : bridgeErrorLine(l10n, answerError),
                             conflict: conflict == null || conflict.requestId != pending.requestId
                                 ? null

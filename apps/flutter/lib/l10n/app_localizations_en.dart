@@ -176,6 +176,9 @@ class AppL10nEn extends AppL10n {
   String get chatAnswerFailed => 'Couldn\'t send the answer. Please try again.';
 
   @override
+  String get chatAnswerChecking => 'Checking your earlier answer…';
+
+  @override
   String chatAnswerMayDeliver(String answer) {
     return 'Your earlier answer ($answer) may still be delivered. Tap again to send this one instead.';
   }

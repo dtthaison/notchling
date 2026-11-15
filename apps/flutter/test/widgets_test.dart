@@ -227,6 +227,14 @@ void main() {
       expect(find.text('1  main'), findsNothing);
     });
 
+    testWidgets('a busy card shows that it is checking and ignores taps', (WidgetTester tester) async {
+      final List<bool> answers = <bool>[];
+      await tester.pumpWidget(host(PendingCard(prompt: permission, busy: true, onAllow: ({required bool allow}) => answers.add(allow), onChoose: (List<int> c) {})));
+      await tester.tap(find.text('Allow'), warnIfMissed: false);
+      expect(answers, isEmpty);
+      expect(find.text('Checking your earlier answer…'), findsOneWidget);
+    });
+
     testWidgets('an answer error shows in the error color', (WidgetTester tester) async {
       await tester.pumpWidget(host(PendingCard(prompt: permission, error: 'x', onAllow: ({required bool allow}) {}, onChoose: (List<int> c) {})));
       expect(find.text("Couldn't send the answer. Please try again."), findsOneWidget);
