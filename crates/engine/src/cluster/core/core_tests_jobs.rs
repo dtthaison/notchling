@@ -431,7 +431,9 @@ fn a_stepped_down_home_says_who_is_primary_now() {
             msg: Msg::Call {
                 id: 77,
                 op: "cluster.dispatch".to_string(),
-                args: json!({"key": "k", "spec": spec("m5", Tool::Shell, json!({"command": "id"}))}),
+                args:
+                    json!({"key": "k", "spec": spec("m5", Tool::Shell, json!({"command": "id"}))})
+                        .into(),
                 origin: Origin {
                     node: m1.clone(),
                     tier: OriginTier::App,

@@ -267,6 +267,31 @@ fn the_vault_ops_go_only_to_the_node_that_holds_the_vault() {
 }
 
 #[test]
+fn a_vault_op_that_names_a_node_never_falls_back_to_this_machines_vault() {
+    let net = MemNet::new();
+    let alone = crate::cluster_testkit::node(&net, Opts::named("alone"));
+    let forward = NodeForward::new(alone.node.clone());
+    let named = json!({"node": other()});
+    for op in ["vault.list", "vault.save", "vault.remove"] {
+        let err = forward
+            .forward(&app(), op, &named)
+            .expect("routed")
+            .unwrap_err();
+        assert_eq!(err.code, ErrorCode::Failed, "{op}");
+        let err = forward
+            .forward(&app(), op, &json!({"node": 7}))
+            .expect("routed")
+            .unwrap_err();
+        assert_eq!(err.code, ErrorCode::BadRequest, "{op}");
+        assert!(forward.forward(&app(), op, &json!({})).is_none(), "{op}");
+        assert!(forward
+            .forward(&app(), op, &json!({"node": null}))
+            .is_none());
+    }
+    assert!(alone.calls.calls.lock().unwrap().is_empty());
+}
+
+#[test]
 fn a_worker_cannot_use_the_vault_through_the_node_link() {
     let net = MemNet::new();
     let (a, b) = pair(&net, client_home(), Opts::named("worker"));

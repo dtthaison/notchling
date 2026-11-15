@@ -198,7 +198,7 @@ fn a_worker_cannot_send_code_to_another_node() {
                 .local(LocalCmd::Forward {
                     node: a.id(),
                     op: op.to_string(),
-                    args: json!({}),
+                    args: json!({}).into(),
                     origin: Origin { node: b.id(), tier },
                 })
                 .unwrap_err();

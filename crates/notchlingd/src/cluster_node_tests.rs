@@ -136,7 +136,7 @@ fn the_home_runs_an_allowed_op_on_a_worker() {
         .local(LocalCmd::Forward {
             node: b.id(),
             op: "shell.run".to_string(),
-            args: json!({"command": "true"}),
+            args: json!({"command": "true"}).into(),
             origin,
         })
         .unwrap();
@@ -163,7 +163,7 @@ fn a_worker_cannot_run_ops_on_the_home() {
         .local(LocalCmd::Forward {
             node: a.id(),
             op: "shell.run".to_string(),
-            args: json!({"command": "true"}),
+            args: json!({"command": "true"}).into(),
             origin,
         })
         .unwrap_err();

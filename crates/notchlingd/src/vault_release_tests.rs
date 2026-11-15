@@ -19,6 +19,14 @@ fn names(list: &[&str]) -> Vec<String> {
     list.iter().map(|s| s.to_string()).collect()
 }
 
+fn ok() -> Result<(), String> {
+    Ok(())
+}
+
+fn moved() -> Result<(), String> {
+    Err("this machine isn't the primary vault node now".to_string())
+}
+
 fn failure(r: Result<Released, ApiError>) -> ApiError {
     match r {
         Err(e) => e,
@@ -26,7 +34,10 @@ fn failure(r: Result<Released, ApiError>) -> ApiError {
     }
 }
 
-fn pending_release(s: &Setup) -> (std::thread::JoinHandle<Result<Released, ApiError>>, Value) {
+fn pending_release(
+    s: &Setup,
+    still: fn() -> Result<(), String>,
+) -> (std::thread::JoinHandle<Result<Released, ApiError>>, Value) {
     s.room.follows.store(true, Ordering::SeqCst);
     let asked = || {
         let events = s.room.events.lock().unwrap();
@@ -37,7 +48,7 @@ fn pending_release(s: &Setup) -> (std::thread::JoinHandle<Result<Released, ApiEr
     };
     let before = asked();
     let ops = s.ops.clone();
-    let user = std::thread::spawn(move || ops.release(&who(), &names(&["gh"])));
+    let user = std::thread::spawn(move || ops.release(&who(), &names(&["gh"]), &still));
     for _ in 0..500 {
         if asked() > before {
             let event = s.room.pending(topics::VAULT_APPROVAL_PENDING).unwrap();
@@ -59,13 +70,13 @@ fn answer(s: &Setup, event: &Value, decision: &str) {
 fn a_release_gives_the_env_and_leaves_the_audit_to_the_caller() {
     let s = setup("rel-plain", true);
     seed(&s, false);
-    let got = s.ops.release(&who(), &names(&["GH", "gh"])).unwrap();
+    let got = s.ops.release(&who(), &names(&["GH", "gh"]), &ok).unwrap();
     assert_eq!(got.values.len(), 1);
     assert!(!got.asked);
     let (entry, value) = &got.values[0];
     assert_eq!(entry.id(), "gh");
     let env = decode_env(value).unwrap();
-    assert_eq!(env["GH_TOKEN"].expose(), TOKEN);
+    assert!(env["GH_TOKEN"].expose() == TOKEN, "the value differs");
     assert!(results(&s.sink, "vault.secret_used").is_empty());
     assert!(s.ops.note_released(&who(), "gh", &got));
     assert_eq!(results(&s.sink, "vault.secret_used"), ["given"]);
@@ -90,7 +101,7 @@ fn a_lookup_reads_the_list_and_never_a_value() {
 fn while_the_vault_is_off_nothing_is_looked_up_or_released() {
     let s = setup("rel-off", false);
     let e = s.ops.lookup(&names(&["gh"])).unwrap_err();
-    let released = failure(s.ops.release(&who(), &names(&["gh"])));
+    let released = failure(s.ops.release(&who(), &names(&["gh"]), &ok));
     assert_eq!(e.code, released.code);
     assert_eq!(*s.item.reads.lock().unwrap(), 0);
 }
@@ -99,7 +110,7 @@ fn while_the_vault_is_off_nothing_is_looked_up_or_released() {
 fn a_missing_name_is_named_without_listing_what_is_saved() {
     let s = setup("rel-missing", true);
     seed(&s, false);
-    let e = failure(s.ops.release(&who(), &names(&["ghost"])));
+    let e = failure(s.ops.release(&who(), &names(&["ghost"]), &ok));
     assert!(e.message.contains("No secret named ghost"), "{}", e.message);
     assert!(!e.message.contains("reg"), "{}", e.message);
 }
@@ -108,7 +119,7 @@ fn a_missing_name_is_named_without_listing_what_is_saved() {
 fn ask_first_names_the_node_and_job_and_releases_after_once() {
     let s = setup("rel-once", true);
     seed(&s, true);
-    let (user, event) = pending_release(&s);
+    let (user, event) = pending_release(&s, ok);
     assert_eq!(event["names"], json!(["gh"]));
     assert_eq!(event["command"], "make deploy");
     assert_eq!(event["folder"], "/w/app");
@@ -125,7 +136,7 @@ fn ask_first_names_the_node_and_job_and_releases_after_once() {
 fn a_denied_release_gives_nothing_and_is_audited_as_denied() {
     let s = setup("rel-deny", true);
     seed(&s, true);
-    let (user, event) = pending_release(&s);
+    let (user, event) = pending_release(&s, ok);
     answer(&s, &event, "deny");
     let e = failure(user.join().unwrap());
     assert_eq!(
@@ -140,12 +151,27 @@ fn a_denied_release_gives_nothing_and_is_audited_as_denied() {
 fn always_allow_stops_asking_for_that_secret() {
     let s = setup("rel-always", true);
     seed(&s, true);
-    let (user, event) = pending_release(&s);
+    let (user, event) = pending_release(&s, ok);
     answer(&s, &event, "always");
     assert!(user.join().unwrap().is_ok());
     assert_eq!(s.ops.store.entry("gh").unwrap().unwrap().ask, Some(false));
-    let again = s.ops.release(&who(), &names(&["gh"])).unwrap();
+    let again = s.ops.release(&who(), &names(&["gh"]), &ok).unwrap();
     assert!(!again.asked);
+}
+
+#[test]
+fn an_approval_that_comes_too_late_reads_no_value_and_stops_asking_for_nothing_more() {
+    let s = setup("rel-moved", true);
+    seed(&s, true);
+    s.ops.store.forget();
+    let reads = *s.item.reads.lock().unwrap();
+    let (user, event) = pending_release(&s, moved);
+    answer(&s, &event, "once");
+    let e = failure(user.join().unwrap());
+    assert_eq!(e.code, ErrorCode::Forbidden);
+    assert_eq!(*s.item.reads.lock().unwrap(), reads);
+    assert_eq!(results(&s.sink, "vault.secret_used"), ["cancelled"]);
+    assert!(!format!("{:?}", s.sink.events()).contains(TOKEN));
 }
 
 #[test]
@@ -154,7 +180,7 @@ fn ask_first_with_no_app_reads_no_value() {
     seed(&s, true);
     s.ops.store.forget();
     let reads = *s.item.reads.lock().unwrap();
-    let e = failure(s.ops.release(&who(), &names(&["gh"])));
+    let e = failure(s.ops.release(&who(), &names(&["gh"]), &ok));
     assert_eq!(e.code, ErrorCode::NeedsApproval);
     assert_eq!(*s.item.reads.lock().unwrap(), reads);
     assert_eq!(results(&s.sink, "vault.secret_used"), ["no_app"]);

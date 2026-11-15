@@ -13,6 +13,8 @@ pub struct ReleaseFor {
     pub folder: String,
 }
 
+pub type Still<'a> = dyn Fn() -> Result<(), String> + 'a;
+
 pub(super) enum Who<'a> {
     Caller(&'a Caller),
     Grant(&'a ReleaseFor),
@@ -38,7 +40,7 @@ impl VaultOps {
         who: &Who<'_>,
         names: &[String],
         (folder, command): (&str, &str),
-        trail: &mut Trail,
+        (trail, still): (&mut Trail, &Still<'_>),
     ) -> Result<Vec<(VaultEntry, VaultValue)>, (ApiError, SecretResult)> {
         let none = |e: ApiError| (e, SecretResult::Failed);
         let all = self.entries().map_err(none)?;
@@ -88,6 +90,10 @@ impl VaultOps {
                 }
             }
         }
+        if let Err(why) = still() {
+            let e = ApiError::new(ErrorCode::Forbidden, why);
+            return Err((e, SecretResult::Cancelled));
+        }
         let mut pairs = Vec::new();
         for entry in picked {
             match self.store.value(&entry) {
@@ -107,7 +113,12 @@ impl VaultOps {
         Ok(pairs)
     }
 
-    pub fn release(&self, who: &ReleaseFor, names: &[String]) -> Result<Released, ApiError> {
+    pub fn release(
+        &self,
+        who: &ReleaseFor,
+        names: &[String],
+        still: &Still<'_>,
+    ) -> Result<Released, ApiError> {
         if !self.switch.is_on() {
             self.off_hook().run();
             return Err(self.switch.refusal());
@@ -117,7 +128,7 @@ impl VaultOps {
             &Who::Grant(who),
             names,
             (&who.folder, &who.command),
-            &mut trail,
+            (&mut trail, still),
         );
         match got {
             Ok(pairs) => {

@@ -41,7 +41,11 @@ impl NodeForward {
 
 impl NodeForward {
     fn to_vault(&self, caller: &Caller, op: &str, args: &Value) -> Option<Result<Value, ApiError>> {
-        let wanted = args.get("node")?.as_str()?;
+        let wanted = match args.get("node") {
+            None | Some(Value::Null) => return None,
+            Some(Value::String(text)) => text.as_str(),
+            Some(_) => return Some(Err(ApiError::bad_request("node is a machine id"))),
+        };
         if caller.tier != Tier::App {
             return Some(Err(ApiError::new(
                 ErrorCode::Forbidden,
@@ -49,10 +53,14 @@ impl NodeForward {
             )));
         }
         let status = self.node.status();
-        let vault = status
+        let Some(vault) = status
             .pointer("/cluster/vault")
             .and_then(Value::as_str)
-            .and_then(NodeId::parse)?;
+            .and_then(NodeId::parse)
+        else {
+            let text = "this machine is in no cluster, so it has no other vault";
+            return Some(Err(ApiError::new(ErrorCode::Failed, text)));
+        };
         let member = |id: &NodeId| {
             status
                 .get("members")
@@ -93,7 +101,7 @@ impl NodeForward {
         Some(self.node.local(LocalCmd::Forward {
             node: vault,
             op: op.to_string(),
-            args: bare,
+            args: bare.into(),
             origin,
         }))
     }
@@ -121,7 +129,7 @@ impl Forward for NodeForward {
         Some(self.node.local(LocalCmd::Forward {
             node: to,
             op: op.to_string(),
-            args: bare,
+            args: bare.into(),
             origin,
         }))
     }

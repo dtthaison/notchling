@@ -258,6 +258,7 @@ impl NodeCore {
         self.dials.clear();
         self.out_calls.clear();
         self.local_runs.clear();
+        self.attaching.clear();
         self.seen.clear();
         self.joining = None;
         self.changed = true;

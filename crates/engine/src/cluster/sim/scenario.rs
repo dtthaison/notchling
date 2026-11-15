@@ -208,7 +208,7 @@ pub fn stale_call_scenario(plant_skip: bool) -> (World, Result<(), Violation>) {
         LocalCmd::Forward {
             node: w1.clone(),
             op: "session.reply".to_string(),
-            args: json!({"id": "s1", "text": "hello"}),
+            args: json!({"id": "s1", "text": "hello"}).into(),
             origin: Origin {
                 node: m5.clone(),
                 tier: OriginTier::App,

@@ -5,7 +5,7 @@ use crate::grant_broker::{
     GRANT_REVOKE_JOB, LOG_DOWN,
 };
 use crate::inbox_ops::InboxOps;
-use crate::vault_ops::{Looked, ReleaseFor, Released, VaultOps};
+use crate::vault_ops::{Looked, ReleaseFor, Released, Still, VaultOps};
 use notchling_engine::cluster::wire::{Origin, OriginTier};
 use notchling_engine::cluster::{ClusterState, Job, LocalCmd, NodeId};
 use notchling_engine::inbox::{Action, ActionId, Item, Kind, Source, State};
@@ -28,8 +28,13 @@ impl Vault for VaultOps {
         VaultOps::lookup(self, names)
     }
 
-    fn release(&self, who: &ReleaseFor, names: &[String]) -> Result<Released, ApiError> {
-        VaultOps::release(self, who, names)
+    fn release(
+        &self,
+        who: &ReleaseFor,
+        names: &[String],
+        still: &Still<'_>,
+    ) -> Result<Released, ApiError> {
+        VaultOps::release(self, who, names, still)
     }
 }
 
@@ -54,7 +59,7 @@ impl Link for NodeLink {
             LocalCmd::Forward {
                 node: node.clone(),
                 op: op.to_string(),
-                args,
+                args: args.into(),
                 origin,
             },
             LOCAL_WAIT,

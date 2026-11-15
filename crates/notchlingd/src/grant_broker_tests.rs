@@ -9,6 +9,8 @@ use std::sync::Mutex;
 
 const NOW: i64 = 1_000_000;
 
+type Hook = Box<dyn FnOnce(&Fake) + Send>;
+
 fn id(name: &str) -> NodeId {
     NodeId::from_fingerprint(&fingerprint(name.as_bytes())).expect("a node id")
 }
@@ -47,10 +49,14 @@ struct Inner {
     me: Option<NodeId>,
     waiting: Vec<String>,
     cleared: Vec<String>,
+    value_reads: usize,
+    during_approval: Option<Hook>,
+    after_read: Option<Hook>,
+    after_send: Option<Hook>,
 }
 
 #[derive(Default)]
-struct Fake {
+pub(super) struct Fake {
     inner: Mutex<Inner>,
 }
 
@@ -105,13 +111,26 @@ impl Vault for Fake {
         })
     }
 
-    fn release(&self, _who: &ReleaseFor, names: &[String]) -> Result<Released, ApiError> {
-        self.with(|i| {
+    fn release(
+        &self,
+        _who: &ReleaseFor,
+        names: &[String],
+        still: &Still<'_>,
+    ) -> Result<Released, ApiError> {
+        let hook = self.with(|i| {
             i.releases += 1;
             i.log.push("release".to_string());
-            if let Some(e) = i.release_err.clone() {
-                return Err(e);
-            }
+            i.during_approval.take()
+        });
+        if let Some(hook) = hook {
+            hook(self);
+        }
+        if let Some(e) = self.with(|i| i.release_err.clone()) {
+            return Err(e);
+        }
+        still().map_err(|why| ApiError::new(ErrorCode::Forbidden, why))?;
+        let released = self.with(|i| {
+            i.value_reads += 1;
             let mut values = Vec::new();
             for (n, name) in names.iter().enumerate() {
                 let mut env = BTreeMap::new();
@@ -119,20 +138,24 @@ impl Vault for Fake {
                 let asks = i.seen.get(name).is_some_and(|s| s.1);
                 values.push((entry(name, asks), encode_env(&env).expect("env")));
             }
-            Ok(Released {
+            Released {
                 values,
                 asked: false,
                 by: None,
                 device: None,
                 waited_ms: None,
-            })
-        })
+            }
+        });
+        if let Some(hook) = self.with(|i| i.after_read.take()) {
+            hook(self);
+        }
+        Ok(released)
     }
 }
 
 impl Link for Fake {
     fn call(&self, node: &NodeId, op: &str, args: Value) -> Result<Value, ApiError> {
-        self.with(|i| {
+        let sent = self.with(|i| {
             let name = args
                 .get("name")
                 .and_then(Value::as_str)
@@ -144,7 +167,11 @@ impl Link for Fake {
                 return Err(ApiError::new(ErrorCode::Failed, "the node is offline"));
             }
             Ok(json!({}))
-        })
+        });
+        if let Some(hook) = self.with(|i| i.after_send.take()) {
+            hook(self);
+        }
+        sent
     }
 }
 
@@ -257,6 +284,7 @@ fn a_released_secret_is_audited_before_it_is_sent() {
     fake.expect("db-pass", false);
     let m = worker(&["api-key", "db-pass"]);
     let job = job_on(&m, &["api-key", "db-pass"], JobState::Running);
+    live(&fake, &m, &job);
     let got = broker(&fake)
         .grant(
             &job,
@@ -282,6 +310,7 @@ fn a_value_travels_only_in_the_deliver_call() {
     fake.expect("api-key", false);
     let m = worker(&["api-key"]);
     let job = job_on(&m, &["api-key"], JobState::Running);
+    live(&fake, &m, &job);
     let got = broker(&fake).grant(&job, &facts(&m, true), &names(&["api-key"]), &who());
     assert!(!format!("{got:?}").contains("NL-MARKER"));
     let sends = fake.with(|i| i.sends.clone());
@@ -303,6 +332,7 @@ fn a_name_off_the_allowlist_is_refused_before_the_vault_is_read() {
     fake.expect("other", false);
     let m = worker(&["api-key"]);
     let job = job_on(&m, &["api-key"], JobState::Running);
+    live(&fake, &m, &job);
     let r = broker(&fake).grant(
         &job,
         &facts(&m, true),
@@ -323,6 +353,7 @@ fn nothing_is_read_or_sent_while_another_node_is_primary() {
     fake.expect("api-key", true);
     let m = worker(&["api-key"]);
     let job = job_on(&m, &["api-key"], JobState::Dispatching);
+    live(&fake, &m, &job);
     let got = broker(&fake)
         .grant(&job, &facts(&m, false), &names(&["api-key"]), &who())
         .expect("waits");
@@ -342,6 +373,7 @@ fn a_secret_the_vault_lacks_is_refused_with_nothing_released() {
     let fake = Arc::new(Fake::default());
     let m = worker(&["ghost"]);
     let job = job_on(&m, &["ghost"], JobState::Running);
+    live(&fake, &m, &job);
     let r = broker(&fake).grant(&job, &facts(&m, true), &names(&["ghost"]), &who());
     assert_eq!(code(r), ErrorCode::Forbidden);
     assert_eq!(
@@ -363,6 +395,7 @@ fn a_denied_approval_sends_nothing_and_audits_no_release() {
     });
     let m = worker(&["api-key"]);
     let job = job_on(&m, &["api-key"], JobState::Running);
+    live(&fake, &m, &job);
     let r = broker(&fake).grant(&job, &facts(&m, true), &names(&["api-key"]), &who());
     assert_eq!(code(r), ErrorCode::NeedsApproval);
     assert!(fake.with(|i| i.sends.is_empty()));
@@ -376,6 +409,7 @@ fn a_down_audit_log_stops_the_release_before_any_send() {
     fake.with(|i| i.audit_down = true);
     let m = worker(&["api-key"]);
     let job = job_on(&m, &["api-key"], JobState::Running);
+    live(&fake, &m, &job);
     let r = broker(&fake).grant(&job, &facts(&m, true), &names(&["api-key"]), &who());
     let e = r.expect_err("refused");
     assert_eq!(e.message, LOG_DOWN);
@@ -389,6 +423,7 @@ fn a_failed_send_revokes_what_the_job_already_has() {
     fake.with(|i| i.fail_op = Some(GRANT_DELIVER));
     let m = worker(&["api-key"]);
     let job = job_on(&m, &["api-key"], JobState::Running);
+    live(&fake, &m, &job);
     let r = broker(&fake).grant(&job, &facts(&m, true), &names(&["api-key"]), &who());
     assert_eq!(code(r), ErrorCode::Failed);
     let sends = fake.with(|i| i.sends.clone());
@@ -403,6 +438,7 @@ fn a_finished_job_gets_nothing() {
     fake.expect("api-key", false);
     let m = worker(&["api-key"]);
     let job = job_on(&m, &["api-key"], JobState::Done);
+    live(&fake, &m, &job);
     let r = broker(&fake).grant(&job, &facts(&m, true), &names(&["api-key"]), &who());
     assert_eq!(code(r), ErrorCode::Forbidden);
     assert_eq!(
@@ -417,6 +453,7 @@ fn names_are_lowercased_deduplicated_and_capped() {
     fake.expect("api-key", false);
     let m = worker(&["api-key"]);
     let job = job_on(&m, &["api-key"], JobState::Running);
+    live(&fake, &m, &job);
     let got = broker(&fake)
         .grant(
             &job,
@@ -457,180 +494,13 @@ fn cluster(home: &Member, vault: &Member, worker: &Member, job: Job) -> ClusterS
     }
 }
 
-fn request_rig(home_is_vault: bool) -> (Arc<Fake>, Member, Job) {
-    let fake = Arc::new(Fake::default());
-    fake.expect("api-key", true);
+fn live(fake: &Fake, worker: &Member, job: &Job) {
     let vault = member("vault-mac");
-    let other = member("home");
-    let w = worker(&["api-key"]);
-    let job = job_on(&w, &["api-key"], JobState::Running);
-    let home = if home_is_vault { &vault } else { &other };
-    let state = cluster(home, &vault, &w, job.clone());
+    let state = cluster(&vault, &vault, worker, job.clone());
     fake.with(|i| {
         i.state = Some(state);
         i.me = Some(vault.id.clone());
     });
-    (fake, w, job)
-}
-
-fn origin(member: &Member) -> Origin {
-    Origin {
-        node: member.id.clone(),
-        tier: OriginTier::Agent,
-    }
-}
-
-fn request_args(job: &Job) -> Value {
-    json!({
-        "job": job.id,
-        "names": ["api-key"],
-        "command": "make deploy",
-        "folder": "/work",
-    })
-}
-
-#[test]
-fn a_request_from_the_jobs_own_node_is_released_when_the_vault_is_primary() {
-    let (fake, w, job) = request_rig(true);
-    let out = broker(&fake)
-        .request(&origin(&w), &request_args(&job))
-        .expect("granted");
-    assert_eq!(out["delivered"], json!(["api-key"]));
-    assert_eq!(fake.with(|i| i.releases), 1);
-}
-
-#[test]
-fn a_request_waits_while_another_node_is_primary() {
-    let (fake, w, job) = request_rig(false);
-    let out = broker(&fake)
-        .request(&origin(&w), &request_args(&job))
-        .expect("waits");
-    assert!(out["waiting"].as_str().is_some());
-    assert_eq!(
-        fake.with(|i| (i.lookups, i.releases, i.sends.len())),
-        (0, 0, 0)
-    );
-}
-
-#[test]
-fn a_request_for_another_nodes_job_reads_nothing() {
-    let (fake, _w, job) = request_rig(true);
-    let stranger = member("stranger");
-    let e = broker(&fake)
-        .request(&origin(&stranger), &request_args(&job))
-        .expect_err("refused");
-    assert_eq!(e.code, ErrorCode::Forbidden);
-    assert_eq!(
-        fake.with(|i| (i.lookups, i.releases, i.sends.len())),
-        (0, 0, 0)
-    );
-}
-
-#[test]
-fn a_node_that_is_not_the_vault_node_refuses_requests() {
-    let (fake, w, job) = request_rig(true);
-    fake.with(|i| i.me = Some(id("home")));
-    let e = broker(&fake)
-        .request(&origin(&w), &request_args(&job))
-        .expect_err("refused");
-    assert_eq!(e.code, ErrorCode::Forbidden);
-    assert_eq!(fake.with(|i| (i.lookups, i.releases)), (0, 0));
-}
-
-#[test]
-fn a_malformed_request_is_a_bad_request() {
-    let (fake, w, job) = request_rig(true);
-    for args in [
-        json!({"names": ["api-key"]}),
-        json!({"job": job.id}),
-        json!({"job": job.id, "names": [1]}),
-        json!({"job": "j-missing", "names": ["api-key"]}),
-    ] {
-        let e = broker(&fake)
-            .request(&origin(&w), &args)
-            .expect_err("refused");
-        assert!(matches!(e.code, ErrorCode::BadRequest | ErrorCode::Failed));
-    }
-    assert_eq!(fake.with(|i| i.releases), 0);
-}
-
-fn attach_value(m: &Member, job: &Job, primary: bool) -> Value {
-    json!({
-        "job": job,
-        "member": m,
-        "vaultName": "vault-mac",
-        "vaultPrimary": primary,
-    })
-}
-
-#[test]
-fn an_attach_delivers_the_jobs_secrets_and_clears_its_notice() {
-    let fake = Arc::new(Fake::default());
-    fake.expect("api-key", false);
-    let m = worker(&["api-key"]);
-    let job = job_on(&m, &["api-key"], JobState::Dispatching);
-    let out = broker(&fake)
-        .attach(&attach_value(&m, &job, true))
-        .expect("attached");
-    assert_eq!(out["delivered"], json!(["api-key"]));
-    assert_eq!(fake.with(|i| i.cleared.clone()), ["j-1"]);
-    assert!(fake.with(|i| i.waiting.is_empty()));
-}
-
-#[test]
-fn an_attach_while_another_node_is_primary_raises_a_notice_and_reads_nothing() {
-    let fake = Arc::new(Fake::default());
-    fake.expect("api-key", true);
-    let m = worker(&["api-key"]);
-    let job = job_on(&m, &["api-key"], JobState::Dispatching);
-    let out = broker(&fake)
-        .attach(&attach_value(&m, &job, false))
-        .expect("waits");
-    assert!(out["waiting"].as_str().is_some());
-    assert_eq!(fake.with(|i| i.waiting.clone()), ["j-1"]);
-    assert_eq!(
-        fake.with(|i| (i.lookups, i.releases, i.sends.len())),
-        (0, 0, 0)
-    );
-}
-
-#[test]
-fn an_attach_that_is_refused_fails_and_carries_no_value() {
-    let fake = Arc::new(Fake::default());
-    fake.expect("api-key", false);
-    let m = worker(&[]);
-    let job = job_on(&m, &["api-key"], JobState::Dispatching);
-    let e = broker(&fake)
-        .attach(&attach_value(&m, &job, true))
-        .expect_err("refused");
-    assert_eq!(e.code, ErrorCode::Forbidden);
-    assert!(!e.message.contains("NL-MARKER"));
-    assert_eq!(fake.with(|i| (i.releases, i.sends.len())), (0, 0));
-}
-
-#[test]
-fn a_garbled_attach_is_a_bad_request() {
-    let fake = Arc::new(Fake::default());
-    let e = broker(&fake)
-        .attach(&json!({"job": "j-1"}))
-        .expect_err("refused");
-    assert_eq!(e.code, ErrorCode::BadRequest);
-}
-
-#[test]
-fn a_revoke_clears_the_notice_and_tells_the_node() {
-    let fake = Arc::new(Fake::default());
-    let m = worker(&[]);
-    let out = broker(&fake).revoke(&json!({"job": "j-1", "node": m.id.as_str()}));
-    assert!(out.is_ok());
-    assert_eq!(fake.with(|i| i.cleared.clone()), ["j-1"]);
-    let sends = fake.with(|i| i.sends.clone());
-    assert_eq!(sends.len(), 1);
-    assert!(sends[0].0.ends_with(":grant.revoke"));
-    let e = broker(&fake)
-        .revoke(&json!({"job": "j-1"}))
-        .expect_err("bad");
-    assert_eq!(e.code, ErrorCode::BadRequest);
 }
 
 #[test]
@@ -646,6 +516,11 @@ fn the_node_ops_are_the_ones_this_module_answers() {
         ]
     );
 }
+
+#[path = "grant_broker_recheck_tests.rs"]
+mod recheck;
+#[path = "grant_broker_request_tests.rs"]
+mod requests;
 
 #[test]
 fn a_grant_value_prints_hidden() {

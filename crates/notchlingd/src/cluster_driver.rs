@@ -237,7 +237,7 @@ impl Driver {
                 cmd: LocalCmd::Forward {
                     node,
                     op: "node.load".to_string(),
-                    args: json!({}),
+                    args: json!({}).into(),
                     origin,
                 },
             });
@@ -370,7 +370,7 @@ impl Driver {
             let cmd = LocalCmd::Forward {
                 node: home,
                 op: "cluster.join.token".to_string(),
-                args: json!({}),
+                args: json!({}).into(),
                 origin,
             };
             self.local_cmd(cmd, Some(answer));
@@ -498,7 +498,7 @@ impl Driver {
                 args,
                 origin,
                 ..
-            } => self.run_local(call, op, args, origin),
+            } => self.run_local(call, op, args.into_inner(), origin),
             Effect::Answer { local, result } => {
                 if let Some(reply) = self.replies.remove(&local) {
                     self.answered(reply, result);

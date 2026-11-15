@@ -166,7 +166,7 @@ impl NodeCore {
                 op,
                 args,
                 origin,
-            } => self.forward(id, node, op, args, origin, out),
+            } => self.forward(id, node, op, args.into_inner(), origin, out),
             LocalCmd::JobEvent { name, data } => {
                 let me = self.me.clone();
                 self.on_job_event(&me, &name, &data, out);

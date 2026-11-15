@@ -8,7 +8,7 @@ use crate::cluster::wire::{Msg, OriginTier, WireError};
 
 use super::core_tests::{answers, pair, run_locals, Hub};
 
-fn secret_job(key: &str, names: &[&str]) -> LocalCmd {
+pub(super) fn secret_job(key: &str, names: &[&str]) -> LocalCmd {
     LocalCmd::Dispatch {
         key: key.to_string(),
         spec: JobSpec {

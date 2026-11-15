@@ -147,7 +147,7 @@ fn node_switch_set_from_the_home_reaches_a_headless_worker() {
         .local(LocalCmd::Forward {
             node: w.id(),
             op: NODE_SWITCH_SET.to_string(),
-            args: json!({"switch": "acting", "on": true}),
+            args: json!({"switch": "acting", "on": true}).into(),
             origin: origin.clone(),
         })
         .unwrap();
@@ -158,7 +158,7 @@ fn node_switch_set_from_the_home_reaches_a_headless_worker() {
         .local(LocalCmd::Forward {
             node: w.id(),
             op: NODE_SWITCH_SET.to_string(),
-            args: json!({"switch": "vault", "on": true}),
+            args: json!({"switch": "vault", "on": true}).into(),
             origin,
         })
         .unwrap_err();

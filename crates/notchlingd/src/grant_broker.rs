@@ -1,7 +1,9 @@
-use crate::vault_ops::{Looked, ReleaseFor, Released};
+use crate::vault_ops::{Looked, ReleaseFor, Released, Still};
 use notchling_engine::cluster::grants::{decide, expires_ms, GrantAsk, GrantDecision};
 use notchling_engine::cluster::wire::Origin;
 use notchling_engine::cluster::{ClusterState, Job, Member, NodeId, Tool};
+use notchling_engine::cluster::{JobState, MemberState};
+use notchling_engine::vault::valid_name;
 use notchling_local_api::{ApiError, ErrorCode};
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -26,7 +28,12 @@ pub const LOG_DOWN: &str = "the audit log can't be written";
 
 pub trait Vault: Send + Sync {
     fn lookup(&self, names: &[String]) -> Result<Vec<Looked>, ApiError>;
-    fn release(&self, who: &ReleaseFor, names: &[String]) -> Result<Released, ApiError>;
+    fn release(
+        &self,
+        who: &ReleaseFor,
+        names: &[String],
+        still: &Still<'_>,
+    ) -> Result<Released, ApiError>;
 }
 
 pub trait Link: Send + Sync {
@@ -131,6 +138,14 @@ fn canonical(names: &[String]) -> Result<Vec<String>, ApiError> {
     Ok(seen)
 }
 
+fn audited(name: &str) -> &str {
+    if valid_name(name) {
+        name
+    } else {
+        "<invalid name>"
+    }
+}
+
 fn command_of(job: &Job) -> String {
     let text = match job.spec.args.get("command").and_then(Value::as_str) {
         Some(command) => command.to_string(),
@@ -184,7 +199,7 @@ impl GrantBroker {
             })
         };
         let no = |name: &str, why: String| {
-            self.audit.refused(&job.spec.node, who, name);
+            self.audit.refused(&job.spec.node, who, audited(name));
             refused(why)
         };
         let mut wait: Option<String> = None;
@@ -209,8 +224,16 @@ impl GrantBroker {
                 GrantDecision::Release | GrantDecision::Ask => {}
             }
         }
-        let released = self.vault.release(who, &names)?;
+        let still = || self.still(&job.id, &names);
+        let released = self.vault.release(who, &names, &still)?;
         let expires = expires_ms((self.clock)());
+        let changed = |why: String| {
+            for name in &names {
+                self.audit.refused(&job.spec.node, who, name);
+            }
+            refused(why)
+        };
+        still().map_err(changed)?;
         for (entry, _) in &released.values {
             let name = entry.id();
             let release = Release {
@@ -226,6 +249,12 @@ impl GrantBroker {
         let mut delivered = Vec::new();
         for (entry, value) in &released.values {
             let name = entry.id();
+            if let Err(why) = still() {
+                if !delivered.is_empty() {
+                    let _ = self.revoke_job(&job.id, &job.spec.node);
+                }
+                return Err(changed(why));
+            }
             let args = json!({
                 "job": job.id,
                 "name": name,
@@ -239,6 +268,27 @@ impl GrantBroker {
             delivered.push(name);
         }
         Ok(Grant::Delivered(delivered))
+    }
+
+    fn still(&self, job: &str, names: &[String]) -> Result<(), String> {
+        let state = self.view.state().ok_or("this node is in no cluster")?;
+        let me = self.view.me().ok_or("this node is in no cluster")?;
+        if state.vault != me || state.home != me {
+            return Err("this machine isn't the primary vault node now".to_string());
+        }
+        let found = state.jobs.get(job).ok_or("the job is gone")?;
+        if !matches!(found.state, JobState::Running | JobState::Dispatching) {
+            return Err(format!("job {job} isn't running"));
+        }
+        let member = state
+            .members
+            .get(&found.spec.node)
+            .filter(|m| m.state == MemberState::Active)
+            .ok_or("that machine isn't an active member")?;
+        match names.iter().find(|n| !member.secrets.allows(n)) {
+            Some(_) => Err(format!("a secret isn't allowed on {} now", member.name)),
+            None => Ok(()),
+        }
     }
 
     pub fn attach(&self, args: &Value) -> Result<Value, ApiError> {

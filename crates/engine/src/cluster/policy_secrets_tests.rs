@@ -42,14 +42,22 @@ fn only_the_vault_node_while_home_delivers_and_revokes() {
     standby_vault.is_vault = true;
     let worker = facts("w1", Role::Worker, false, MemberState::Active);
     for (who, sender) in [("m1", &promoted), ("m5", &standby_vault), ("w1", &worker)] {
-        for op in ["grant.deliver", "grant.revoke"] {
-            assert_eq!(
-                check(op, sender, &origin(who, OriginTier::Node)).err(),
-                Some(Denied::NotAllowed),
-                "{who} {op}"
-            );
-        }
+        let op = "grant.deliver";
+        assert_eq!(
+            check(op, sender, &origin(who, OriginTier::Node)).err(),
+            Some(Denied::NotAllowed),
+            "{who} {op}"
+        );
     }
+    for (who, sender) in [("m5", &standby_vault), ("w1", &worker)] {
+        assert_eq!(
+            check("grant.revoke", sender, &origin(who, OriginTier::Node)).err(),
+            Some(Denied::NotAllowed),
+            "{who}"
+        );
+    }
+    assert!(check("grant.revoke", &promoted, &origin("m1", OriginTier::Node)).is_ok());
+    assert!(check("grant.revoke", &promoted, &origin("m1", OriginTier::Agent)).is_err());
     assert!(check("grant.deliver", &vault, &origin("m5", OriginTier::Agent)).is_err());
     assert!(check("grant.deliver", &vault, &origin("m5", OriginTier::App)).is_err());
 }

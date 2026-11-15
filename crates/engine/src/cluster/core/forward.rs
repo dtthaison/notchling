@@ -1,6 +1,9 @@
 use serde_json::{json, Value};
 
-use super::{Effect, NodeCore, OutCall, Seen, Target, Then, CALL_MS, DEDUPE_MS, WORKSPACE_CALL_MS};
+use super::{
+    Effect, NodeCore, OutCall, Seen, Target, Then, ATTACH_CALL_MS, CALL_MS, DEDUPE_MS,
+    WORKSPACE_CALL_MS,
+};
 use crate::cluster::id::NodeId;
 use crate::cluster::members::Term;
 use crate::cluster::policy::{check, SenderFacts};
@@ -68,7 +71,7 @@ impl NodeCore {
                         args,
                         origin,
                         term,
-                    } => self.on_call(from, id, op, args, origin, term, out),
+                    } => self.on_call(from, id, op, args.into_inner(), origin, term, out),
                     Msg::Reply { id, ok, err } => self.on_reply(from, id, ok, err, out),
                     Msg::Event {
                         topic,
@@ -124,19 +127,10 @@ impl NodeCore {
             return;
         };
         let my_term = state.term.clone();
-        let facts = state.members.get(&from).map(|m| SenderFacts {
-            id: m.id.clone(),
-            role: role_of(state, &m.id),
-            client: m.client,
-            state: m.state,
-            is_home: state.home == m.id,
-            is_vault: state.vault == m.id,
-        });
         #[cfg(test)]
         let skip = self.skip_term_check
-            && facts
-                .as_ref()
-                .is_some_and(|_| role_of(state, &self.me) == crate::cluster::id::Role::Worker);
+            && state.members.contains_key(&from)
+            && role_of(state, &self.me) == crate::cluster::id::Role::Worker;
         #[cfg(not(test))]
         let skip = false;
         if !skip && term < my_term {
@@ -149,6 +143,16 @@ impl NodeCore {
             return;
         }
         self.adopt(&term, out);
+        let facts = self.state.as_ref().and_then(|state| {
+            state.members.get(&from).map(|m| SenderFacts {
+                id: m.id.clone(),
+                role: role_of(state, &m.id),
+                client: m.client,
+                state: m.state,
+                is_home: state.home == m.id,
+                is_vault: state.vault == m.id,
+            })
+        });
         let Some(facts) = facts else {
             self.refused_call(&from, id, &op, "not a member", out);
             return;
@@ -195,7 +199,7 @@ impl NodeCore {
                 out.push(Effect::RunLocal {
                     call,
                     op,
-                    args,
+                    args: args.into(),
                     origin,
                     term,
                 });
@@ -268,7 +272,7 @@ impl NodeCore {
             out.push(Effect::RunLocal {
                 call,
                 op,
-                args,
+                args: args.into(),
                 origin,
                 term,
             });
@@ -293,6 +297,8 @@ impl NodeCore {
         }
         let wait = if op.starts_with("workspace.") {
             WORKSPACE_CALL_MS
+        } else if op == "grant.request" {
+            ATTACH_CALL_MS
         } else {
             CALL_MS
         };
@@ -346,7 +352,7 @@ impl NodeCore {
             Msg::Call {
                 id,
                 op,
-                args,
+                args: args.into(),
                 origin,
                 term,
             },

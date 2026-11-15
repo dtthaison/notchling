@@ -7,6 +7,36 @@ use super::versions::Versions;
 
 pub const MAX_LINE: usize = 1 << 20;
 
+#[derive(Serialize, Deserialize, Clone, PartialEq, Default)]
+#[serde(transparent)]
+pub struct Args(Value);
+
+impl Args {
+    pub fn into_inner(self) -> Value {
+        self.0
+    }
+}
+
+impl From<Value> for Args {
+    fn from(value: Value) -> Args {
+        Args(value)
+    }
+}
+
+impl std::ops::Deref for Args {
+    type Target = Value;
+
+    fn deref(&self) -> &Value {
+        &self.0
+    }
+}
+
+impl std::fmt::Debug for Args {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Args(<hidden>)")
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "snake_case")]
 pub enum OriginTier {
@@ -94,7 +124,7 @@ pub enum Msg {
     Call {
         id: u64,
         op: String,
-        args: Value,
+        args: Args,
         origin: Origin,
         term: Term,
     },

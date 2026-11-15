@@ -217,7 +217,7 @@ impl NodeCore {
             out.push(Effect::RunLocal {
                 call,
                 op: op.to_string(),
-                args,
+                args: args.into(),
                 origin,
                 term,
             });
@@ -254,7 +254,7 @@ impl NodeCore {
         out.push(Effect::RunLocal {
             call,
             op: GRANT_ATTACH.to_string(),
-            args,
+            args: args.into(),
             origin,
             term,
         });
@@ -281,6 +281,12 @@ impl NodeCore {
         out: &mut Vec<Effect>,
     ) {
         self.attaching.remove(&job);
+        if !self.is_home() {
+            self.revoke_grants(&job, out);
+            let text = "this machine is no longer the primary";
+            self.finish(target, Err(refusal("refused", text)), out);
+            return;
+        }
         let current = self
             .state
             .as_ref()
@@ -374,9 +380,6 @@ impl NodeCore {
         let Some(found) = self.state.as_ref().and_then(|s| s.jobs.get(job)) else {
             return;
         };
-        if found.spec.secrets.is_empty() {
-            return;
-        }
         let args = json!({"job": job, "node": found.spec.node});
         let call = self.next_local;
         self.next_local += 1;
@@ -386,7 +389,7 @@ impl NodeCore {
         out.push(Effect::RunLocal {
             call,
             op: GRANT_REVOKE_JOB.to_string(),
-            args,
+            args: args.into(),
             origin,
             term,
         });

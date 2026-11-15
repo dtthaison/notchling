@@ -1,5 +1,5 @@
 use self::release::Who;
-pub use self::release::{Looked, ReleaseFor, Released};
+pub use self::release::{Looked, ReleaseFor, Released, Still};
 use self::vault_events::{Trail, LOG_DOWN};
 use crate::acting_ops::Room;
 use crate::inbox_ops::InboxOps;
@@ -274,8 +274,13 @@ impl VaultOps {
         let command = text(args, "command", MAX_COMMAND)
             .map_err(none)?
             .unwrap_or_default();
-        let pairs =
-            self.release_picked(&Who::Caller(caller), &names, (&folder, &command), trail)?;
+        let always = || Ok(());
+        let pairs = self.release_picked(
+            &Who::Caller(caller),
+            &names,
+            (&folder, &command),
+            (trail, &always),
+        )?;
         let (env, hide) = list::environment(&pairs);
         Ok(json!({"env": env, "hide": hide}))
     }

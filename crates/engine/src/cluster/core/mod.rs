@@ -14,7 +14,7 @@ use super::join::{JoinToken, Tokens};
 use super::members::{Desired, Member, MemberState, Term};
 use super::state::{role_of, Applied, Change, ClusterState, Command, CommandError, JournalEntry};
 use super::versions::Versions;
-use super::wire::{Msg, Origin, OriginTier, WireError};
+use super::wire::{Args, Msg, Origin, OriginTier, WireError};
 
 pub const PING_MS: u64 = 5_000;
 pub const OFFLINE_MS: u64 = 20_000;
@@ -102,7 +102,7 @@ pub enum LocalCmd {
     Forward {
         node: NodeId,
         op: String,
-        args: Value,
+        args: Args,
         origin: Origin,
     },
     JobEvent {
@@ -146,7 +146,7 @@ pub enum Effect {
     RunLocal {
         call: u64,
         op: String,
-        args: Value,
+        args: Args,
         origin: Origin,
         term: Term,
     },
@@ -525,6 +525,8 @@ impl NodeCore {
 mod core_tests;
 #[cfg(test)]
 mod core_tests_dispatch;
+#[cfg(test)]
+mod core_tests_grants_fix;
 #[cfg(test)]
 mod core_tests_headless;
 #[cfg(test)]
