@@ -2,6 +2,8 @@ mod glance;
 mod join;
 mod parser;
 mod queue;
+#[cfg(test)]
+mod stopped_tests;
 mod tools;
 mod user;
 

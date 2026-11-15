@@ -19,6 +19,7 @@ const TRIM_AT: usize = 1000;
 pub struct Parser {
     c: Conversation,
     call_index: HashMap<String, (usize, usize)>,
+    stops: HashMap<String, String>,
     counted: HashSet<String>,
     counted_order: Vec<String>,
     turn_output: HashMap<String, u64>,
@@ -330,6 +331,9 @@ impl Parser {
                 self.last_question_answered = false;
             }
         }
+        if let Some(shell) = shells::stopped_id(name, input) {
+            self.stops.insert(id.to_string(), shell);
+        }
         let call = make_call(id, name, input);
         if call.kind == ToolKind::Shell {
             self.c.facts.commands += 1;
@@ -438,6 +442,13 @@ impl Parser {
                 self.c
                     .finished_agents
                     .insert(id.to_string(), ended.to_string());
+            }
+        }
+        if let Some(shell) = tool_use_id.and_then(|id| self.stops.remove(id)) {
+            if !is_error {
+                self.c
+                    .finished_agents
+                    .insert(shell, shells::STOPPED.to_string());
             }
         }
         let Some(&(item, index)) = tool_use_id.and_then(|id| self.call_index.get(id)) else {

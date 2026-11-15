@@ -1,7 +1,25 @@
 use super::model::BackgroundShell;
+use serde_json::{Map, Value};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
+
+const STOP_TOOLS: [&str; 2] = ["TaskStop", "KillShell"];
+
+const STOP_KEYS: [&str; 3] = ["task_id", "shell_id", "bash_id"];
+
+pub const STOPPED: &str = "stopped";
+
+pub fn stopped_id(tool: &str, input: &Map<String, Value>) -> Option<String> {
+    if !STOP_TOOLS.contains(&tool) {
+        return None;
+    }
+    STOP_KEYS
+        .iter()
+        .find_map(|key| input.get(*key).and_then(Value::as_str))
+        .filter(|id| !id.is_empty())
+        .map(str::to_owned)
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Launch {
