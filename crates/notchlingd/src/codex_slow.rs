@@ -1,5 +1,8 @@
 use super::*;
 use crate::late_reply;
+use crate::outbox_ops::SendArgs;
+use crate::outbox_runners::Delivery;
+use notchling_engine::outbox::Via;
 
 const DRAFT_PREFIX: &str = "codex-new:";
 const MAX_DRAFT_BYTES: usize = 80;
@@ -22,7 +25,88 @@ pub(super) fn send_error(e: SendError) -> ApiError {
     }
 }
 
+fn options_of(pick: &Pick) -> Option<Value> {
+    let mut options = serde_json::Map::new();
+    if let Some(model) = &pick.model {
+        options.insert("model".into(), json!(model));
+    }
+    if let Some(effort) = &pick.effort {
+        options.insert("effort".into(), json!(effort));
+    }
+    (!options.is_empty()).then_some(Value::Object(options))
+}
+
+fn failed_with(e: ApiError) -> Delivery {
+    Delivery::Failed(e.message)
+}
+
 impl CodexOps {
+    pub(crate) fn attach_outbox(&self, outbox: Arc<OutboxOps>) {
+        let _ = self.outbox.set(outbox);
+    }
+
+    pub(crate) fn check_session(&self, session: &str) -> Result<(), ApiError> {
+        if self.runs.is_running(session) || find_rollout(&self.sessions_dir(), session).is_some() {
+            return Ok(());
+        }
+        Err(bad("No such session."))
+    }
+
+    pub(crate) fn is_busy(&self, session: &str) -> bool {
+        self.runs.is_running(session)
+    }
+
+    pub(super) fn enqueue(
+        &self,
+        outbox: &OutboxOps,
+        session: &str,
+        text: &str,
+        pick: &Pick,
+    ) -> Result<Value, ApiError> {
+        let row = outbox.send(&SendArgs {
+            id: row_id(session),
+            text: text.to_string(),
+            clear_box: false,
+            options: options_of(pick),
+            via: Via::Chat,
+        })?;
+        Ok(json!({
+            "id": row_id(session),
+            "session": session,
+            "state": "queued",
+            "waiting": outbox.position(&row),
+            "outboxId": row.id,
+        }))
+    }
+
+    pub(crate) fn start_turn(
+        &self,
+        session: &str,
+        text: &str,
+        options: Option<&Value>,
+    ) -> Result<(), Delivery> {
+        let pick = self
+            .pick(options.unwrap_or(&Value::Null))
+            .map_err(failed_with)?;
+        let folder = self.folder_of(session).map_err(failed_with)?;
+        let (codex, path) = (self.resolve)().ok_or_else(|| {
+            Delivery::Failed("Couldn't find the codex command. Install the Codex CLI first.".into())
+        })?;
+        self.runs.set_command(codex, Some(path));
+        self.runs.set_network(self.network_allowed());
+        let request = Request {
+            text: text.to_string(),
+            session: Some(session.to_string()),
+            folder,
+            pick,
+        };
+        match self.runs.send_if_idle(request) {
+            Ok(_) => Ok(()),
+            Err(SendError::Busy) => Err(Delivery::Busy),
+            Err(other) => Err(Delivery::Failed(other.to_string())),
+        }
+    }
+
     fn reply_wait(&self) -> Duration {
         Duration::from_millis(self.reply_wait_ms.load(Ordering::SeqCst))
     }

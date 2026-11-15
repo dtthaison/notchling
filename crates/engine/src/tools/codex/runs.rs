@@ -53,6 +53,7 @@ pub enum SendError {
     Spawn(String),
     NotStarted(String),
     NotAllowed,
+    Busy,
 }
 
 impl std::fmt::Display for SendError {
@@ -62,6 +63,7 @@ impl std::fmt::Display for SendError {
             SendError::Spawn(why) => f.write_str(why),
             SendError::NotStarted(why) => f.write_str(why),
             SendError::NotAllowed => f.write_str("Codex turns may not start right now"),
+            SendError::Busy => f.write_str("a Codex turn is running"),
         }
     }
 }
@@ -178,12 +180,23 @@ impl CodexRuns {
     }
 
     pub fn send(&self, request: Request) -> Result<Sent, SendError> {
+        self.start(request, true)
+    }
+
+    pub fn send_if_idle(&self, request: Request) -> Result<Sent, SendError> {
+        self.start(request, false)
+    }
+
+    fn start(&self, request: Request, queue_busy: bool) -> Result<Sent, SendError> {
         if let Some(session) = request.session.clone() {
             let mut state = self.state();
             if !self.may_start() {
                 return Err(SendError::NotAllowed);
             }
             if state.running.contains_key(&session) || state.reserved.contains_key(&session) {
+                if !queue_busy {
+                    return Err(SendError::Busy);
+                }
                 let folder = if request.folder.is_empty() {
                     let live = state.running.get(&session).map(|live| live.folder.clone());
                     live.or_else(|| state.reserved.get(&session).cloned())

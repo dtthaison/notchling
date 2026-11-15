@@ -28,6 +28,7 @@ use crate::op_kinds;
 use crate::outbox_courier::{real_clock, ClaudeCourier};
 use crate::outbox_ops::OutboxOps;
 use crate::outbox_postman::{Couriers, Postmen};
+use crate::outbox_runners::{link_agy, link_codex, AgyCourier, CodexCourier};
 use crate::outbox_verify::{SafeModes, TranscriptVerifier};
 use crate::pages_ops::{PagesOps, PagesSetup};
 use crate::providers_daemon::ProviderStores;
@@ -350,7 +351,15 @@ fn outbox_ops(
     }
 }
 
-fn postmen_for(outbox: &Arc<OutboxOps>, acting: &Arc<ActingOps>, layout: &Layout) -> Postmen {
+fn postmen_for(
+    outbox: &Arc<OutboxOps>,
+    acting: &Arc<ActingOps>,
+    layout: &Layout,
+    codex: &Arc<CodexOps>,
+    agy: &Arc<AgyOps>,
+) -> Postmen {
+    link_codex(outbox, codex);
+    link_agy(outbox, agy);
     let safe = Arc::new(SafeModes::default());
     let courier = Arc::new(ClaudeCourier::new(
         acting.clone(),
@@ -362,7 +371,11 @@ fn postmen_for(outbox: &Arc<OutboxOps>, acting: &Arc<ActingOps>, layout: &Layout
     outbox.set_resume(Arc::new(move |row| resume.resume(row)));
     let postmen = Postmen::build(
         outbox.clone(),
-        Couriers::claude_only(courier),
+        Couriers {
+            claude: courier,
+            codex: Arc::new(CodexCourier::new(codex.clone())),
+            antigravity: Arc::new(AgyCourier::new(agy.clone())),
+        },
         Arc::new(TranscriptVerifier::new(layout.roots(), safe)),
         acting.acting_switch(),
         real_clock(),
@@ -459,7 +472,13 @@ impl Wired {
         let inbox =
             InboxOps::new(layout.data_dir.clone(), room.clone()).with_events(events.clone());
         let outbox = Arc::new(outbox_ops(layout, &sessions, &acting, &room, &events));
-        let postmen = postmen_for(&outbox, &acting, layout);
+        let agy = Arc::new(AgyOps::for_daemon(
+            layout,
+            acting.acting_switch(),
+            room.clone(),
+        ));
+        acting.attach_agy(agy.clone());
+        let postmen = postmen_for(&outbox, &acting, layout, &codex, &agy);
         let every = Arc::new(EverySession::new(layout));
         let bridge = Arc::new(
             BridgeOps::new(
@@ -472,12 +491,6 @@ impl Wired {
             )
             .with_events(events.clone()),
         );
-        let agy = Arc::new(AgyOps::for_daemon(
-            layout,
-            acting.acting_switch(),
-            room.clone(),
-        ));
-        acting.attach_agy(agy.clone());
         let awake = Arc::new(AwakeLoop::for_daemon(
             layout,
             sessions.clone(),

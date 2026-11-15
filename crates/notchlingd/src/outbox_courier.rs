@@ -32,7 +32,7 @@ pub trait Courier: Send + Sync {
     fn verifies(&self) -> bool;
 }
 
-const NOTHING: Tried = Tried {
+pub(crate) const NOTHING: Tried = Tried {
     pasted: false,
     entered: false,
 };

@@ -3,7 +3,7 @@ use crate::acting_ops_tests::{code, FakeRoom};
 use notchling_engine::control::{FakeLauncher, LaunchOutput};
 use notchling_engine::tools::codex::fake::{FakeRun, FakeSpawner};
 
-struct Dir(PathBuf);
+pub(crate) struct Dir(pub(crate) PathBuf);
 
 impl Drop for Dir {
     fn drop(&mut self) {
@@ -11,22 +11,22 @@ impl Drop for Dir {
     }
 }
 
-struct Setup {
-    dir: Dir,
-    ops: Arc<CodexOps>,
-    spawner: Arc<FakeSpawner>,
-    launcher: Arc<FakeLauncher>,
-    room: Arc<FakeRoom>,
-    acting: Arc<Acting>,
+pub(crate) struct Setup {
+    pub(crate) dir: Dir,
+    pub(crate) ops: Arc<CodexOps>,
+    pub(crate) spawner: Arc<FakeSpawner>,
+    pub(crate) launcher: Arc<FakeLauncher>,
+    pub(crate) room: Arc<FakeRoom>,
+    pub(crate) acting: Arc<Acting>,
 }
 
-const SESSION: &str = "019a5c3e-aaaa-7bbb-8ccc-000000000001";
+pub(crate) const SESSION: &str = "019a5c3e-aaaa-7bbb-8ccc-000000000001";
 const STARTED: &str =
     r#"{"type":"thread.started","thread_id":"019a5c3e-new0-7bbb-8ccc-000000000002"}"#;
 const NEW_SESSION: &str = "019a5c3e-new0-7bbb-8ccc-000000000002";
 const DONE: &str = r#"{"type":"turn.completed","usage":{}}"#;
 
-fn setup(tag: &str, on: bool) -> Setup {
+pub(crate) fn setup(tag: &str, on: bool) -> Setup {
     let dir = std::env::temp_dir().join(format!("nl-codexops-{tag}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     for sub in ["home/work", "home/codex/sessions/2026/11/08", "data"] {
@@ -78,11 +78,11 @@ fn setup(tag: &str, on: bool) -> Setup {
 }
 
 impl Setup {
-    fn call(&self, op: &str, args: Value) -> Result<Value, ApiError> {
+    pub(crate) fn call(&self, op: &str, args: Value) -> Result<Value, ApiError> {
         self.ops.call(op, &args)
     }
 
-    fn work(&self) -> String {
+    pub(crate) fn work(&self) -> String {
         std::fs::canonicalize(self.dir.0.join("home/work"))
             .expect("work")
             .to_string_lossy()
@@ -104,7 +104,7 @@ impl Setup {
         );
     }
 
-    fn idle(&self) {
+    pub(crate) fn idle(&self) {
         let until = Instant::now() + Duration::from_secs(10);
         while self.ops.runs().active() > 0 && Instant::now() < until {
             std::thread::sleep(Duration::from_millis(5));

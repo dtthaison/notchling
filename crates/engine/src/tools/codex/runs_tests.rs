@@ -113,6 +113,40 @@ fn the_next_turn_of_a_session_resumes_it() {
 }
 
 #[test]
+fn send_if_idle_refuses_busy_without_queueing() {
+    let (runs, spawner, sink) = setup();
+    spawner.push(FakeRun::held(&[DONE]));
+    runs.send(request("first", Some("abc"))).expect("sends");
+    assert_eq!(
+        runs.send_if_idle(request("second", Some("abc"))),
+        Err(SendError::Busy)
+    );
+    assert_eq!(runs.waiting("abc"), 0);
+    assert_eq!(spawner.specs().len(), 1);
+    assert_eq!(sink.all(), [started("abc")]);
+    spawner.processes()[0].release();
+    assert_eq!(sink.wait_for(2), [started("abc"), ended("abc", None)]);
+    idle(&runs);
+}
+
+#[test]
+fn send_if_idle_starts_a_turn_on_an_idle_session() {
+    let (runs, spawner, sink) = setup();
+    spawner.push(FakeRun::ok(&[DONE]));
+    let sent = runs
+        .send_if_idle(request("more", Some("abc")))
+        .expect("starts");
+    assert_eq!(
+        sent,
+        Sent::Started {
+            session: "abc".into()
+        }
+    );
+    assert_eq!(sink.wait_for(2), [started("abc"), ended("abc", None)]);
+    idle(&runs);
+}
+
+#[test]
 fn a_message_sent_mid_turn_waits_and_goes_out_next() {
     let (runs, spawner, sink) = setup();
     spawner.push(FakeRun::held(&[DONE]));

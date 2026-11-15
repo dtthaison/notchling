@@ -22,9 +22,10 @@ use notchling_events::{scope, Event, Ref, Session};
 use notchling_local_api::{ops, topics, ApiError, Caller, ErrorCode, OpSpec, Tier};
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
 pub type Wake = Arc<dyn Fn(&str) + Send + Sync>;
+pub type Check = Arc<dyn Fn(&str) -> Result<(), ApiError> + Send + Sync>;
 pub type Resume = Arc<dyn Fn(&Row) -> Result<(), ApiError> + Send + Sync>;
 
 const SAVE_FAILED: &str = "Couldn't save the message.";
@@ -59,6 +60,8 @@ pub struct OutboxOps {
     notes: Mutex<HashMap<String, String>>,
     wake: Mutex<Option<Wake>>,
     resume: Mutex<Option<Resume>>,
+    codex_check: OnceLock<Check>,
+    agy_check: OnceLock<Check>,
     saving: bool,
 }
 
@@ -144,6 +147,8 @@ impl OutboxOps {
             notes: Mutex::new(HashMap::new()),
             wake: Mutex::new(None),
             resume: Mutex::new(None),
+            codex_check: OnceLock::new(),
+            agy_check: OnceLock::new(),
             saving: true,
         }
     }
@@ -212,6 +217,31 @@ impl OutboxOps {
 
     pub fn set_resume(&self, resume: Resume) {
         *lock(&self.resume) = Some(resume);
+    }
+
+    pub fn set_codex_check(&self, check: Check) {
+        let _ = self.codex_check.set(check);
+    }
+
+    pub fn set_agy_check(&self, check: Check) {
+        let _ = self.agy_check.set(check);
+    }
+
+    fn check_foreign(&self, tool: Tool, key: &str) -> Result<(), ApiError> {
+        let (check, prefix) = match tool {
+            Tool::Codex => (self.codex_check.get(), "codex:"),
+            _ => (self.agy_check.get(), "agy:"),
+        };
+        match check {
+            Some(check) => check(key.strip_prefix(prefix).unwrap_or(key)),
+            None => Ok(()),
+        }
+    }
+
+    pub fn position(&self, row: &Row) -> usize {
+        self.store
+            .list(Some(&row.session))
+            .map_or(1, |rows| position_of(&rows, &row.id))
     }
 
     pub fn set_note(&self, id: &str, note: Option<String>) {
@@ -329,7 +359,11 @@ impl OutboxOps {
                 Some(_) => return Err(bad("Reply in its terminal.")),
                 None => return Err(bad(NO_SESSION)),
             },
-            Tool::Codex | Tool::Antigravity => foreign_key(id).ok_or_else(|| bad(NO_SESSION))?,
+            Tool::Codex | Tool::Antigravity => {
+                let key = foreign_key(id).ok_or_else(|| bad(NO_SESSION))?;
+                self.check_foreign(tool, &key)?;
+                key
+            }
         };
         refuse_menu(tool, text)?;
         Ok(Target { key, tool })
@@ -375,10 +409,7 @@ impl OutboxOps {
             via,
         };
         let row = self.send(&send)?;
-        let position = self
-            .store
-            .list(Some(&row.session))
-            .map_or(1, |rows| position_of(&rows, &row.id));
+        let position = self.position(&row);
         Ok(json!({
             "outboxId": row.id,
             "session": row.session,

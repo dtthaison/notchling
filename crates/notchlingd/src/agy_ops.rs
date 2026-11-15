@@ -5,7 +5,10 @@ use crate::agy_phone::{LogReads, PhoneRead};
 use crate::agy_sink::{lock, now_secs, row_id, DaemonSink, Shared, Started};
 use crate::catalog_ops::CatalogService;
 use crate::layout::Layout;
+use crate::outbox_ops::{OutboxOps, SendArgs};
+use crate::outbox_runners::Delivery;
 use crate::pages_ops::Titles;
+use notchling_engine::outbox::Via;
 use notchling_engine::search::index::TitledSession;
 use notchling_engine::tools::acp::{RealSpawner, Spawner};
 use notchling_engine::tools::agy::summaries::{self, Row};
@@ -14,7 +17,7 @@ use notchling_engine::tools::codex::plan::MAX_PROMPT_BYTES;
 use notchling_local_api::{ops, topics, ApiError, ErrorCode, OpSpec};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 const COPY_REUSE: Duration = Duration::from_secs(3);
@@ -54,6 +57,7 @@ pub struct AgyOps {
     setup: AgySetup,
     elsewhere: Arc<Elsewhere>,
     logs: LogReads,
+    outbox: OnceLock<Arc<OutboxOps>>,
 }
 
 fn bad(message: impl Into<String>) -> ApiError {
@@ -105,6 +109,7 @@ impl AgyOps {
             logs: LogReads::new(setup.root.clone()),
             setup,
             elsewhere,
+            outbox: OnceLock::new(),
         }
     }
 
@@ -360,6 +365,16 @@ impl AgyOps {
         }
         if args.get("id").is_some() {
             let session = self.session_arg(args)?;
+            if let Some(outbox) = self.outbox.get() {
+                let row = outbox.send(&SendArgs {
+                    id: row_id(&session),
+                    text: text.to_string(),
+                    clear_box: false,
+                    options: None,
+                    via: Via::Chat,
+                })?;
+                return Ok(json!({"id": row_id(&session), "sent": true, "outboxId": row.id}));
+            }
             let folder = self.folder_for(&session)?;
             if let Some(holder) = self.elsewhere.check(&session) {
                 return Err(failed(holder.note()));
@@ -400,6 +415,39 @@ impl AgyOps {
         self.settle();
         sent.map_err(run_error)?;
         Ok(json!({"id": row_id(&session), "sent": true}))
+    }
+
+    pub(crate) fn attach_outbox(&self, outbox: Arc<OutboxOps>) {
+        let _ = self.outbox.set(outbox);
+    }
+
+    pub(crate) fn check_session(&self, session: &str) -> Result<(), ApiError> {
+        self.folder_for(session)
+            .map_err(|_| bad("No such session."))?;
+        match self.elsewhere.check(session) {
+            Some(holder) => Err(failed(holder.note())),
+            None => Ok(()),
+        }
+    }
+
+    pub(crate) fn is_busy(&self, session: &str) -> bool {
+        self.runner.is_working(session)
+    }
+
+    pub(crate) fn deliver(&self, session: &str, text: &str) -> Result<(), Delivery> {
+        let folder = self
+            .folder_for(session)
+            .map_err(|e| Delivery::Failed(e.message))?;
+        if self.elsewhere.check(session).is_some() {
+            return Err(Delivery::Busy);
+        }
+        let sent = self.runner.prompt(session, text, &folder);
+        self.settle();
+        match sent {
+            Ok(()) => Ok(()),
+            Err(RunError::Busy) => Err(Delivery::Busy),
+            Err(other) => Err(Delivery::Failed(run_error(other).message)),
+        }
     }
 
     fn settle(&self) {
@@ -489,4 +537,4 @@ impl AgyOps {
 
 #[cfg(test)]
 #[path = "agy_ops_tests.rs"]
-mod tests;
+pub(crate) mod tests;
