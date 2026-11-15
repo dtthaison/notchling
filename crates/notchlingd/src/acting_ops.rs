@@ -768,14 +768,14 @@ impl ActingOps {
             ));
         }
         let agent = self.agent(args)?;
-        let job = match &agent.target {
-            AgentTarget::Job(job) if agent.can_reply() => job.clone(),
-            _ => return Err(bad("this session has no terminal to read")),
-        };
+        let no_terminal = || bad("this session has no terminal to read");
+        if !matches!(&agent.target, AgentTarget::Job(_) if agent.can_reply()) {
+            return Err(no_terminal());
+        }
         self.locked(&agent, |agent| {
             let job = match &agent.target {
-                AgentTarget::Job(now) => now.clone(),
-                _ => job,
+                AgentTarget::Job(now) if agent.can_reply() => now.clone(),
+                _ => return Err(no_terminal()),
             };
             let config_dir =
                 config_dir_for_job(&self.roots, &job).or_else(|| agent.config_dir.clone());

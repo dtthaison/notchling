@@ -133,6 +133,79 @@ fn codex_and_agy_ids_are_their_own_key() {
 }
 
 #[test]
+fn codex_and_agy_ids_need_a_valid_suffix() {
+    let r = rig();
+    for id in [
+        "codex:",
+        "codex:a/b",
+        "codex:-x",
+        "agy:",
+        "agy:a/b",
+        "agy:a\\b",
+    ] {
+        assert_eq!(
+            code(call(&r, ops::SESSION_SEND, json!({"id": id, "text": "hi"}))),
+            (ErrorCode::BadRequest, "No such session.".into()),
+            "{id}"
+        );
+    }
+    assert!(r.store.list(None).unwrap().is_empty());
+}
+
+#[test]
+fn antigravity_alias_is_keyed_as_agy() {
+    let r = rig();
+    let sent = send(&r, "antigravity:c9", "to agy");
+    assert_eq!(sent["session"], "agy:c9");
+    send(&r, "agy:c9", "again");
+    assert_eq!(r.store.list(Some("agy:c9")).unwrap().len(), 2);
+    assert!(r.store.list(Some("antigravity:c9")).unwrap().is_empty());
+}
+
+#[test]
+fn edit_into_a_menu_command_is_refused() {
+    let r = rig();
+    let id = id_of(&send(&r, "job-idle", "hello"));
+    assert_eq!(
+        code(call(
+            &r,
+            ops::OUTBOX_EDIT,
+            json!({"id": id, "text": "/mcp"})
+        )),
+        (
+            ErrorCode::BadRequest,
+            "That command opens a menu; open the session's terminal.".into()
+        )
+    );
+    assert_eq!(r.store.get(&id).unwrap().unwrap().text, "hello");
+    let codex = id_of(&send(&r, "codex:t1", "hello"));
+    call(&r, ops::OUTBOX_EDIT, json!({"id": codex, "text": "/mcp"})).unwrap();
+}
+
+#[test]
+fn busy_refusal_is_worded_from_the_row_as_it_is_now() {
+    let r = rig();
+    let id = id_of(&send(&r, "job-idle", "hello"));
+    r.store.take(&id, 10).unwrap().unwrap();
+    assert_eq!(
+        code(Err(r.ops.busy_refusal(&id))),
+        (ErrorCode::Failed, "It's being sent.".into())
+    );
+    r.store
+        .set_state(&id, &[State::Sending], State::InQueue, None, None, 11)
+        .unwrap();
+    assert_eq!(
+        code(Err(r.ops.busy_refusal(&id))),
+        (ErrorCode::Failed, "It's in the session's queue.".into())
+    );
+    r.store.delete(&id).unwrap();
+    assert_eq!(
+        code(Err(r.ops.busy_refusal(&id))),
+        (ErrorCode::BadRequest, "No such message.".into())
+    );
+}
+
+#[test]
 fn send_refuses_with_exact_words() {
     let r = rig();
     let refuse = |args: Value| code(call(&r, ops::SESSION_SEND, args));

@@ -426,7 +426,7 @@ impl AgyOps {
     fn session_arg(&self, args: &Value) -> Result<String, ApiError> {
         let id = text_arg(args, "id")?;
         id.strip_prefix("agy:")
-            .filter(|s| !s.is_empty() && !s.contains(['/', '\\']))
+            .filter(|s| valid_session(s))
             .map(String::from)
             .ok_or_else(|| bad("id is an Antigravity row id, agy:<session>"))
     }
@@ -441,6 +441,10 @@ impl AgyOps {
             .map(|r| r.folder)
             .ok_or_else(|| bad(format!("no Antigravity session {session}")))
     }
+}
+
+pub(crate) fn valid_session(session: &str) -> bool {
+    !session.is_empty() && !session.contains(['/', '\\'])
 }
 
 fn since(row: &Value) -> f64 {

@@ -38,12 +38,12 @@ pub fn after(end: &TryEnd, tried: Tried, tries: u32, now_ms: i64) -> After {
     };
     match end {
         TryEnd::Ok => After::Verify,
+        _ if tried.entered => After::Verify,
         TryEnd::NotIdle => After::Wait {
             why: Why::Turn,
             next_ms: None,
         },
         TryEnd::AttachFailed => retry,
-        TryEnd::Failed(_) if tried.entered => After::Verify,
         TryEnd::Failed(failure) => match failure {
             Failure::Dialog => After::Wait {
                 why: Why::Dialog,

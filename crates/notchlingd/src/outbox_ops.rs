@@ -1,6 +1,7 @@
 use crate::acting::{Acting, ACTING_OFF};
 use crate::acting_events::{session_ref, who};
 use crate::acting_ops::{bad, forbidden, now_ms, Room};
+use crate::agy_ops::valid_session;
 use crate::late_emit::Events;
 use crate::op_group::OpGroup;
 use crate::outbox_rows::{keeps_note, position_of, positions, reply_via, wire};
@@ -10,6 +11,7 @@ use notchling_engine::outbox::{
     Change, InsertError, New, OutboxStore, Row, State, Tool, Via, Why, MAX_TEXT,
 };
 use notchling_engine::sessions::{Agent, Roots};
+use notchling_engine::tools::codex::plan::valid_session_id;
 use notchling_events::field::Count;
 use notchling_events::kinds::agents::{OutboxThen, SessionOutbox};
 use notchling_events::spec::Outcome;
@@ -28,6 +30,8 @@ const TOO_LONG: &str = "That message is over 100 KB.";
 const NO_MESSAGE: &str = "No such message.";
 const BEING_SENT: &str = "It's being sent.";
 const IN_QUEUE: &str = "It's in the session's queue.";
+const NO_SESSION: &str = "No such session.";
+const MENU: &str = "That command opens a menu; open the session's terminal.";
 
 pub struct SendArgs {
     pub id: String,
@@ -89,6 +93,23 @@ fn text_arg<'a>(args: &'a Value, key: &str) -> Result<&'a str, ApiError> {
 
 fn flag(args: &Value, key: &str) -> bool {
     args.get(key).and_then(Value::as_bool).unwrap_or(false)
+}
+
+fn foreign_key(id: &str) -> Option<String> {
+    if let Some(session) = id.strip_prefix("codex:") {
+        return valid_session_id(session).then(|| format!("codex:{session}"));
+    }
+    let session = id
+        .strip_prefix("agy:")
+        .or_else(|| id.strip_prefix("antigravity:"))?;
+    valid_session(session).then(|| format!("agy:{session}"))
+}
+
+fn refuse_menu(tool: Tool, text: &str) -> Result<(), ApiError> {
+    if tool == Tool::Claude && opens_menu(text) {
+        return Err(bad(MENU));
+    }
+    Ok(())
 }
 
 fn check_text(text: &str) -> Result<(), ApiError> {
@@ -242,6 +263,9 @@ impl OutboxOps {
     }
 
     fn key_of(&self, id: &str) -> String {
+        if tool_of(id) != Tool::Claude {
+            return foreign_key(id).unwrap_or_else(|| id.to_string());
+        }
         self.agent_by_id(id)
             .map_or_else(|| id.to_string(), |a| a.outbox_key())
     }
@@ -251,21 +275,15 @@ impl OutboxOps {
             return Err(bad("Start the session with codex.send or agy.send."));
         }
         let tool = tool_of(id);
-        let key = match self.agent_by_id(id) {
-            Some(agent) => {
-                if tool == Tool::Claude && !agent.can_reply() {
-                    return Err(bad("Reply in its terminal."));
-                }
-                agent.outbox_key()
-            }
-            None if tool != Tool::Claude => id.to_string(),
-            None => return Err(bad("No such session.")),
+        let key = match tool {
+            Tool::Claude => match self.agent_by_id(id) {
+                Some(agent) if agent.can_reply() => agent.outbox_key(),
+                Some(_) => return Err(bad("Reply in its terminal.")),
+                None => return Err(bad(NO_SESSION)),
+            },
+            Tool::Codex | Tool::Antigravity => foreign_key(id).ok_or_else(|| bad(NO_SESSION))?,
         };
-        if tool == Tool::Claude && opens_menu(text) {
-            return Err(bad(
-                "That command opens a menu; open the session's terminal.",
-            ));
-        }
+        refuse_menu(tool, text)?;
         Ok(Target { key, tool })
     }
 
@@ -347,25 +365,27 @@ impl OutboxOps {
             .ok_or_else(|| bad(NO_MESSAGE))
     }
 
-    fn busy(row: &Row) -> ApiError {
-        failed(if row.state == State::InQueue {
-            IN_QUEUE
-        } else {
-            BEING_SENT
-        })
+    pub(crate) fn busy_refusal(&self, id: &str) -> ApiError {
+        match self.store.get(id) {
+            Ok(Some(row)) if row.state == State::InQueue => failed(IN_QUEUE),
+            Ok(Some(_)) => failed(BEING_SENT),
+            Ok(None) => bad(NO_MESSAGE),
+            Err(_) => save_failed(),
+        }
     }
 
     fn edit(&self, args: &Value) -> Result<Value, ApiError> {
         let text = text_arg(args, "text")?;
         check_text(text)?;
         let row = self.row(args)?;
+        refuse_menu(row.tool, text)?;
         match self
             .store
             .edit(&row.id, text, now_ms())
             .map_err(|_| save_failed())?
         {
             Change::Done => {}
-            Change::Busy => return Err(OutboxOps::busy(&row)),
+            Change::Busy => return Err(self.busy_refusal(&row.id)),
             Change::Missing => return Err(bad(NO_MESSAGE)),
         }
         if let Ok(Some(edited)) = self.store.get(&row.id) {
@@ -380,7 +400,7 @@ impl OutboxOps {
         let row = self.row(args)?;
         match self.store.remove(&row.id).map_err(|_| save_failed())? {
             (Change::Done, _) => {}
-            (Change::Busy, _) => return Err(OutboxOps::busy(&row)),
+            (Change::Busy, _) => return Err(self.busy_refusal(&row.id)),
             (Change::Missing, _) => return Err(bad(NO_MESSAGE)),
         }
         self.publish_removed(&row.id, &row.session, "removed");

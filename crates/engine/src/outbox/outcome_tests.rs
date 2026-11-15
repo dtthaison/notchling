@@ -134,3 +134,17 @@ fn nothing_before_enter_is_ever_unsure() {
         assert!(matches!(got, After::Wait { .. }));
     }
 }
+
+#[test]
+fn any_end_after_enter_verifies() {
+    for end in [TryEnd::NotIdle, TryEnd::AttachFailed] {
+        assert_eq!(after(&end, ENTERED, 1, 0), After::Verify, "{end:?}");
+    }
+    for failure in all_failures() {
+        assert_eq!(
+            after(&TryEnd::Failed(failure.clone()), ENTERED, 1, 0),
+            After::Verify,
+            "{failure:?}"
+        );
+    }
+}

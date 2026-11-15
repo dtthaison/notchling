@@ -821,3 +821,26 @@ fn interrupt_locks_the_job_the_session_moved_to() {
     drop(new_guard);
     assert!(rx.recv_timeout(Duration::from_secs(5)).unwrap().is_ok());
 }
+
+#[test]
+fn question_refuses_a_session_that_left_its_job_while_waiting() {
+    let (ops, gate, _entered, _order) = gated("none");
+    open_gate(&gate);
+    let old = ops.typing_locks().for_job("abcd1234");
+    let old_guard = old.lock().unwrap();
+    let asked = question_in_thread(&ops, "job-a");
+    std::thread::sleep(Duration::from_millis(100));
+    {
+        let mut list = ops.sessions.lock().unwrap();
+        let row = list
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|r| r["id"] == "job-a")
+            .unwrap();
+        row["target"] = json!({"process": 4242});
+    }
+    drop(old_guard);
+    let read = asked.recv_timeout(Duration::from_secs(5)).unwrap();
+    assert_eq!(code(read).0, ErrorCode::BadRequest);
+}
