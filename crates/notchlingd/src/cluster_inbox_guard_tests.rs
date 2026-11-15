@@ -272,21 +272,6 @@ fn a_node_listing_gets_this_nodes_items_without_the_homes() {
 }
 
 #[test]
-fn a_mirror_the_owner_never_closes_expires_here_after_a_grace() {
-    let r = rig();
-    let owner = node(7);
-    let mut made = item("a");
-    made.expires_ms = Some(NOW + 1_000);
-    r.ops.mirror_changed(&owner, made).unwrap();
-    r.ops.tick(NOW + 5_999);
-    assert_eq!(r.ops.items()[0].state, State::Open);
-    r.ops.tick(NOW + 6_001);
-    let shown = r.ops.items().into_iter().next().unwrap();
-    assert_eq!(shown.state, State::Expired);
-    assert!(shown.closed_ms.is_some());
-}
-
-#[test]
 fn mirrors_are_never_saved_to_disk() {
     let r = rig();
     r.ops.mirror_changed(&node(7), item("a")).unwrap();

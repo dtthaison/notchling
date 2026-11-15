@@ -1,4 +1,4 @@
-use crate::inbox_mirrors::{localize, InboxLink};
+use crate::inbox_mirrors::{localize, Home, InboxLink};
 use crate::inbox_ops::InboxOps;
 use notchling_engine::inbox::{Change, Item};
 use std::collections::BTreeMap;
@@ -35,18 +35,19 @@ impl Follow {
             }
             seen.next_at = now + POLL_MS;
         }
-        let from_home = self
-            .link
-            .me()
-            .zip(self.link.home_items())
-            .map(|(me, (home, items))| localize(&me, &home, items));
         let known = self.inbox.local_ids();
-        let current: BTreeMap<String, Item> = from_home
-            .into_iter()
-            .flatten()
-            .filter(|item| !known.contains(&item.id))
-            .map(|item| (item.id.clone(), item))
-            .collect();
+        let current: BTreeMap<String, Item> = match self.link.home_items() {
+            Home::Unreachable => return,
+            Home::Off => BTreeMap::new(),
+            Home::Items(home, items) => match self.link.me() {
+                Some(me) => localize(&me, &home, items)
+                    .into_iter()
+                    .filter(|item| !known.contains(&item.id))
+                    .map(|item| (item.id.clone(), item))
+                    .collect(),
+                None => return,
+            },
+        };
         let mut seen = self.seen.lock().unwrap_or_else(|e| e.into_inner());
         let mut changes = Vec::new();
         for (id, item) in &current {
@@ -56,7 +57,11 @@ impl Follow {
                 Some(_) => {}
             }
         }
-        for id in seen.shown.keys().filter(|id| !current.contains_key(*id)) {
+        for id in seen
+            .shown
+            .keys()
+            .filter(|id| !current.contains_key(*id) && !known.contains(*id))
+        {
             changes.push(Change::Removed(id.clone()));
         }
         seen.shown = current;

@@ -2,7 +2,7 @@ use notchling_engine::cluster::{qualify, NodeId, Qualified};
 use notchling_engine::inbox::{ActionId, Change, Item, State, DETAIL_MAX, DONE_KEEP_MS, TITLE_MAX};
 use notchling_local_api::ApiError;
 use serde_json::Value;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 pub type Tap = Arc<dyn Fn(Vec<Change>) + Send + Sync>;
@@ -16,17 +16,28 @@ pub trait InboxLink: Send + Sync {
         action: ActionId,
         by: &str,
     ) -> Result<Value, ApiError>;
-    fn home_items(&self) -> Option<(NodeId, Vec<Item>)>;
+    fn home_items(&self) -> Home;
+}
+
+pub enum Home {
+    Off,
+    Unreachable,
+    Items(NodeId, Vec<Item>),
 }
 
 pub const MAX_PER_NODE: usize = 300;
-pub const EXPIRY_GRACE_MS: i64 = 5_000;
+pub const ID_MAX: usize = 200;
+pub const ACTIONS_MAX: usize = 8;
+pub const LABEL_MAX: usize = 60;
+pub const SOURCE_MAX: usize = 200;
+pub const BY_MAX: usize = 40;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Refusal {
     Qualified,
     Foreign,
     Empty,
+    TooLong,
     Full,
 }
 
@@ -36,6 +47,7 @@ impl Refusal {
             Refusal::Qualified => "an item id comes unqualified from its own node",
             Refusal::Foreign => "an item can only come from the node that owns it",
             Refusal::Empty => "an item needs an id",
+            Refusal::TooLong => "an item id is too long",
             Refusal::Full => "this node holds too many items from that node",
         }
     }
@@ -54,6 +66,9 @@ pub fn bare_id(owner: &NodeId, id: &str) -> Result<(), Refusal> {
     if id.is_empty() {
         return Err(Refusal::Empty);
     }
+    if id.chars().count() > ID_MAX {
+        return Err(Refusal::TooLong);
+    }
     match Qualified::parse(id) {
         Some(q) if q.node != *owner => Err(Refusal::Foreign),
         Some(_) => Err(Refusal::Qualified),
@@ -70,6 +85,15 @@ pub fn display(owner: &NodeId, mut item: Item) -> Result<Item, Refusal> {
     item.open = None;
     item.title = cut(item.title, TITLE_MAX);
     item.detail = cut(item.detail, DETAIL_MAX);
+    item.actions.truncate(ACTIONS_MAX);
+    for action in &mut item.actions {
+        action.label = cut(std::mem::take(&mut action.label), LABEL_MAX);
+    }
+    let source = &mut item.source;
+    for field in [&mut source.node, &mut source.session, &mut source.job] {
+        *field = field.take().map(|text| cut(text, SOURCE_MAX));
+    }
+    item.answered_by = item.answered_by.take().map(|by| cut(by, BY_MAX));
     Ok(item)
 }
 
@@ -188,17 +212,6 @@ impl Mirrors {
     }
 
     pub fn tick(&mut self, now_ms: i64) -> Vec<Change> {
-        let mut changes = Vec::new();
-        for item in self.items.values_mut() {
-            let lapsed = item
-                .expires_ms
-                .is_some_and(|at| at.saturating_add(EXPIRY_GRACE_MS) <= now_ms);
-            if item.state == State::Open && lapsed {
-                item.state = State::Expired;
-                item.closed_ms = Some(now_ms);
-                changes.push(Change::Updated(item.clone()));
-            }
-        }
         let gone: Vec<String> = self
             .items
             .values()
@@ -206,6 +219,22 @@ impl Mirrors {
             .filter(|item| now_ms - item.closed_ms.unwrap_or(item.created_ms) > DONE_KEEP_MS)
             .map(|item| item.id.clone())
             .collect();
+        let mut changes = Vec::new();
+        for id in gone {
+            self.items.remove(&id);
+            changes.push(Change::Removed(id));
+        }
+        changes
+    }
+
+    pub fn keep_owners(&mut self, owners: &BTreeSet<NodeId>) -> Vec<Change> {
+        let gone: Vec<String> = self
+            .items
+            .keys()
+            .filter(|id| !Qualified::parse(id).is_some_and(|q| owners.contains(&q.node)))
+            .cloned()
+            .collect();
+        let mut changes = Vec::new();
         for id in gone {
             self.items.remove(&id);
             changes.push(Change::Removed(id));

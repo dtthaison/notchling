@@ -398,13 +398,8 @@ impl InboxLink for Stuck {
         ))
     }
 
-    fn home_items(
-        &self,
-    ) -> Option<(
-        notchling_engine::cluster::NodeId,
-        Vec<notchling_engine::inbox::Item>,
-    )> {
-        None
+    fn home_items(&self) -> crate::inbox_mirrors::Home {
+        crate::inbox_mirrors::Home::Off
     }
 }
 

@@ -41,6 +41,9 @@ pub(crate) struct Fabric {
     pub home: Mutex<Option<NodeId>>,
     pub down: Mutex<BTreeSet<NodeId>>,
     pub failing: Mutex<BTreeSet<NodeId>>,
+    pub removed: Mutex<BTreeSet<NodeId>>,
+    pub not_keeping: Mutex<BTreeSet<NodeId>>,
+    pub attempts: Mutex<Vec<NodeId>>,
     pub sent: Mutex<Vec<(NodeId, NodeId, String, Value)>>,
     pub clock: Arc<AtomicI64>,
 }
@@ -57,6 +60,23 @@ impl Fabric {
 
     pub fn pass(&self, ms: i64) {
         self.clock.fetch_add(ms, Ordering::SeqCst);
+    }
+
+    pub fn remove(&self, id: &NodeId) {
+        self.removed.lock().unwrap().insert(id.clone());
+    }
+
+    pub fn stop_keeping(&self, id: &NodeId) {
+        self.not_keeping.lock().unwrap().insert(id.clone());
+    }
+
+    pub fn attempts_to(&self, id: &NodeId) -> usize {
+        self.attempts
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|to| *to == id)
+            .count()
     }
 
     pub fn set_failing(&self, id: &NodeId, failing: bool) {
@@ -100,17 +120,19 @@ impl Net for Wire {
     fn peers(&self) -> Vec<Peer> {
         let home = self.home();
         let down = self.fabric.down.lock().unwrap().clone();
+        let removed = self.fabric.removed.lock().unwrap().clone();
+        let not_keeping = self.fabric.not_keeping.lock().unwrap().clone();
         self.fabric
             .machines
             .lock()
             .unwrap()
             .values()
-            .filter(|m| m.id != self.me)
+            .filter(|m| m.id != self.me && !removed.contains(&m.id))
             .map(|m| Peer {
                 id: m.id.clone(),
                 name: m.name.clone(),
                 online: !down.contains(&m.id),
-                keeps: m.keeps || Some(&m.id) == home.as_ref(),
+                keeps: (m.keeps && !not_keeping.contains(&m.id)) || Some(&m.id) == home.as_ref(),
             })
             .collect()
     }
@@ -120,7 +142,9 @@ impl Net for Wire {
     }
 
     fn keeps(&self) -> bool {
-        self.home().as_ref() == Some(&self.me) || self.fabric.machine(&self.me).keeps
+        self.home().as_ref() == Some(&self.me)
+            || (self.fabric.machine(&self.me).keeps
+                && !self.fabric.not_keeping.lock().unwrap().contains(&self.me))
     }
 
     fn call(
@@ -138,6 +162,7 @@ impl Net for Wire {
                 format!("{} is offline", target.name),
             ));
         }
+        self.fabric.attempts.lock().unwrap().push(to.clone());
         if self.fabric.failing.lock().unwrap().contains(to) {
             return Err(ApiError::new(
                 ErrorCode::Failed,

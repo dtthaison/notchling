@@ -1,5 +1,5 @@
 use crate::cluster_node::{ClusterNode, LocalCalls};
-use crate::inbox_mirrors::{InboxLink, Refusal};
+use crate::inbox_mirrors::{Home, InboxLink, Refusal};
 use crate::inbox_ops::InboxOps;
 use notchling_engine::cluster::wire::{Origin, OriginTier};
 use notchling_engine::cluster::{LocalCmd, NodeId};
@@ -16,6 +16,8 @@ pub const FORWARD_WAIT: Duration = Duration::from_secs(5);
 pub const LIST_WAIT: Duration = Duration::from_secs(3);
 pub const RESYNC_MS: i64 = 60_000;
 pub const BACKOFF_MS: i64 = 5_000;
+pub const BACKOFF_MAX_MS: i64 = 300_000;
+pub const CLOSE_WAIT: Duration = Duration::from_secs(1);
 pub const QUEUE_MAX: usize = 1_000;
 const LOOP_EVERY: Duration = Duration::from_secs(1);
 
@@ -202,11 +204,12 @@ impl InboxLink for NetLink {
         )
     }
 
-    fn home_items(&self) -> Option<(NodeId, Vec<Item>)> {
-        let me = self.net.me()?;
-        let home = self.net.home()?;
+    fn home_items(&self) -> Home {
+        let (Some(me), Some(home)) = (self.net.me(), self.net.home()) else {
+            return Home::Off;
+        };
         if home == me || !self.net.is_client() {
-            return None;
+            return Home::Off;
         }
         let up = self
             .net
@@ -214,7 +217,7 @@ impl InboxLink for NetLink {
             .into_iter()
             .any(|p| p.id == home && p.online);
         if !up {
-            return None;
+            return Home::Off;
         }
         let list = self
             .net
@@ -225,13 +228,16 @@ impl InboxLink for NetLink {
                 OriginTier::App,
                 LIST_WAIT,
             )
-            .ok()?;
-        let items = list.get("items")?.as_array()?;
+            .ok()
+            .and_then(|list| list.get("items").and_then(Value::as_array).cloned());
+        let Some(items) = list else {
+            return Home::Unreachable;
+        };
         let items = items
             .iter()
             .filter_map(|item| serde_json::from_value::<Item>(item.clone()).ok())
             .collect();
-        Some((home, items))
+        Home::Items(home, items)
     }
 }
 
@@ -320,6 +326,8 @@ struct Queue {
     overflow: bool,
     synced: BTreeMap<NodeId, i64>,
     held_off: BTreeMap<NodeId, i64>,
+    fails: BTreeMap<NodeId, u32>,
+    last_targets: Vec<NodeId>,
     stop: bool,
 }
 
@@ -421,12 +429,30 @@ impl Outbox {
             .map(|_| ())
     }
 
+    fn keep_mirrors(&self) {
+        if self.net.me().is_none() {
+            return;
+        }
+        let owners: BTreeSet<NodeId> = if self.net.keeps() {
+            self.net.peers().into_iter().map(|p| p.id).collect()
+        } else {
+            BTreeSet::new()
+        };
+        self.inbox.keep_mirrors(&owners);
+    }
+
     pub fn flush(&self) {
         let now = (self.clock)();
+        self.keep_mirrors();
         let targets = self.targets();
         let batch = {
             let mut queue = lock(&self.queue);
             let overflow = std::mem::take(&mut queue.overflow);
+            if queue.last_targets != targets {
+                queue.last_targets = targets.clone();
+                queue.held_off.clear();
+                queue.fails.clear();
+            }
             queue.synced.retain(|id, at| {
                 targets.contains(id) && !overflow && now.saturating_sub(*at) < RESYNC_MS
             });
@@ -464,9 +490,15 @@ impl Outbox {
         if ok {
             queue.synced.insert(target.clone(), now);
             queue.held_off.remove(target);
+            queue.fails.remove(target);
         } else {
             queue.synced.remove(target);
-            queue.held_off.insert(target.clone(), now + BACKOFF_MS);
+            let fails = queue.fails.entry(target.clone()).or_insert(0);
+            let wait = (BACKOFF_MS << (*fails).min(7)).min(BACKOFF_MAX_MS);
+            *fails += 1;
+            queue
+                .held_off
+                .insert(target.clone(), now.saturating_add(wait));
         }
     }
 
@@ -499,7 +531,14 @@ impl Outbox {
         lock(&self.queue).stop = true;
         self.wake.notify_all();
         let thread = lock(&self.thread).take();
-        if let Some(handle) = thread {
+        let Some(handle) = thread else {
+            return;
+        };
+        let deadline = std::time::Instant::now() + CLOSE_WAIT;
+        while !handle.is_finished() && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        if handle.is_finished() {
             let _ = handle.join();
         }
     }
@@ -512,3 +551,7 @@ mod tests;
 #[cfg(test)]
 #[path = "cluster_inbox_guard_tests.rs"]
 mod guard_tests;
+
+#[cfg(test)]
+#[path = "cluster_inbox_fix_tests.rs"]
+mod fix_tests;

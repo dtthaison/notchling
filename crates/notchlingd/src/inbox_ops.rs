@@ -1,10 +1,10 @@
 use crate::acting_ops::{now_ms, Room};
 use crate::inbox_events::events_of;
-use crate::inbox_mirrors::{localize, InboxLink, Mirrors, Refusal, Tap};
+use crate::inbox_mirrors::{localize, Home, InboxLink, Mirrors, Refusal, Tap};
 use crate::late_emit::Events;
 use crate::op_group::OpGroup;
 use notchling_engine::bridge::inbox::InboxOutcome;
-use notchling_engine::cluster::{NodeId, Qualified};
+use notchling_engine::cluster::Qualified;
 use notchling_engine::inbox::{self, ActionId, Book, Change, Item, Kind, State};
 use notchling_local_api::{ops, topics, ApiError, Caller, ClientKind, ErrorCode, OpSpec, Tier};
 use serde_json::{json, Value};
@@ -326,7 +326,10 @@ impl InboxOps {
         let link = lock(&self.link).clone();
         let remote = link
             .filter(|_| with_home)
-            .and_then(|link| Some((link.me()?, link.home_items()?)));
+            .and_then(|link| match link.home_items() {
+                Home::Items(home, items) => Some((link.me()?, (home, items))),
+                _ => None,
+            });
         if let Some((me, (home, from_home))) = remote {
             let known: HashSet<String> = items.iter().map(|item| item.id.clone()).collect();
             items.extend(
@@ -366,58 +369,6 @@ impl InboxOps {
 
     pub fn items(&self) -> Vec<Item> {
         self.view(true)
-    }
-
-    pub fn local_ids(&self) -> HashSet<String> {
-        self.local_view().into_iter().map(|item| item.id).collect()
-    }
-
-    pub fn own_open(&self) -> Vec<Item> {
-        lock(&self.inner)
-            .book
-            .items()
-            .into_iter()
-            .filter(|item| item.state == State::Open)
-            .collect()
-    }
-
-    pub fn set_link(&self, link: Arc<dyn InboxLink>) {
-        *lock(&self.link) = Some(link);
-    }
-
-    pub fn set_tap(&self, tap: Tap) {
-        lock(&self.inner).tap = Some(tap);
-    }
-
-    pub fn mirror_changed(&self, owner: &NodeId, item: Item) -> Result<(), Refusal> {
-        let mut inner = lock(&self.inner);
-        let changes = inner.mirrors.changed(owner, item)?;
-        inner.show(changes);
-        Ok(())
-    }
-
-    pub fn mirror_removed(&self, owner: &NodeId, id: &str) -> Result<(), Refusal> {
-        let mut inner = lock(&self.inner);
-        let change = inner.mirrors.removed(owner, id)?;
-        inner.show(change.into_iter().collect());
-        Ok(())
-    }
-
-    pub fn mirror_sync(&self, owner: &NodeId, open: Vec<Item>) -> Result<(), Refusal> {
-        let mut inner = lock(&self.inner);
-        let changes = inner.mirrors.sync(owner, open)?;
-        inner.show(changes);
-        Ok(())
-    }
-
-    pub fn clear_mirrors(&self) {
-        let mut inner = lock(&self.inner);
-        let changes = inner.mirrors.clear();
-        inner.show(changes);
-    }
-
-    pub fn show_remote(&self, changes: Vec<Change>) {
-        lock(&self.inner).show(changes);
     }
 
     fn forward(
@@ -526,6 +477,9 @@ impl InboxOps {
         }))
     }
 }
+
+#[path = "inbox_ops_mirror.rs"]
+mod mirror_ops;
 
 fn allows_any(action: ActionId) -> bool {
     matches!(
