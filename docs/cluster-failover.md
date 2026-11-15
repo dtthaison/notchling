@@ -52,7 +52,9 @@ Work m5 did after the snapshot m1 resumed from stays on m5 as a side copy: the t
 
 ## If m5 comes back while m1 is off
 
-m5 learns the newer term from a Worker but can't reach m1.
+A Worker can't tell m5 about the newer term. So m5 stays primary, at its old term, until a Can Be Master machine reaches it: m1, or another one that follows m1. Until then the Workers refuse m5's calls with `stale_term`. Whether a Worker should be able to tell m5 is an open decision for the maintainer (R95 in the plan's ledger); signed terms would settle it.
+
+When a Can Be Master machine other than m1 reaches m5, m5 steps down. If it still can't reach m1:
 
 - A session m1 never touched continues on m5 at once.
 - A session m1 touched, or one m5 can't be sure about, **waits**: "`<title>` waits for m1, which has newer work in it." Its tool calls are denied until you choose. **Wait for m1** keeps it waiting. **Continue From This Copy** asks "Continue `<title>` here? The newer copy on m1 is kept beside it." and makes this copy the one that continues. When m1 returns, its newer work is kept as a side copy.
