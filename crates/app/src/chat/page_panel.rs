@@ -1,5 +1,5 @@
 use notchling_locale as t;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::pages::dates;
 use crate::search::wire::Page;
@@ -115,6 +115,18 @@ pub fn decide(url: &str, pages: &[Page]) -> Opens {
     match saved {
         Some(page) => Opens::Saved(Box::new(page.clone())),
         None => Opens::Live(link),
+    }
+}
+
+/// What the Folder tool and a click on the title show in Finder: the file
+/// being viewed, else a saved page's local copy. A live page has none.
+pub fn reveal_target(file: Option<&Path>, opens: &Opens) -> Option<PathBuf> {
+    if let Some(file) = file {
+        return Some(file.to_path_buf());
+    }
+    match opens {
+        Opens::Saved(page) if !page.path.is_empty() => Some(PathBuf::from(&page.path)),
+        _ => None,
     }
 }
 
@@ -369,6 +381,27 @@ mod tests {
         ));
         assert_eq!(decide("https://example.com/x", &pages), Opens::Browser);
         assert_eq!(decide("https://claude.ai/new", &pages), Opens::Browser);
+    }
+
+    #[test]
+    fn a_saved_page_or_a_file_can_be_revealed_a_live_page_cannot() {
+        let saved = Opens::Saved(Box::new(page("a", "/p/a/index.html", 0.0)));
+        assert_eq!(
+            reveal_target(None, &saved),
+            Some(PathBuf::from("/p/a/index.html"))
+        );
+        let file = Path::new("/w/notes.md");
+        assert_eq!(
+            reveal_target(Some(file), &Opens::File(file.to_path_buf())),
+            Some(file.to_path_buf())
+        );
+        let live = Opens::Live(ArtifactLink {
+            id: "a".into(),
+            code: false,
+        });
+        assert_eq!(reveal_target(None, &live), None);
+        let empty = Opens::Saved(Box::new(page("a", "", 0.0)));
+        assert_eq!(reveal_target(None, &empty), None);
     }
 
     #[test]
