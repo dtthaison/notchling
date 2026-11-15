@@ -1,6 +1,7 @@
 use super::conversation::MAX_LINE;
 use super::glance::has;
 use super::scan::{scan_lines, Line};
+use super::shells::Stops;
 use super::subagents::{notification_statuses, result_end};
 use super::tail::RAW_BYTES;
 use super::util::{parse_object, str_of};
@@ -44,9 +45,10 @@ pub fn read(path: &str) -> Finished {
 fn scan(path: &str, size: u64) -> HashMap<String, String> {
     let start = size.saturating_sub(WINDOW);
     let mut found = HashMap::new();
+    let mut stops = Stops::default();
     let scanned = scan_lines(path, start, size, start > 0, MAX_LINE, |line| {
         if let Line::Whole(line) = line {
-            note(line, &mut found);
+            note(line, &mut found, &mut stops);
         }
     });
     if let Ok(scanned) = scanned {
@@ -55,9 +57,11 @@ fn scan(path: &str, size: u64) -> HashMap<String, String> {
     found
 }
 
-fn note(line: &[u8], into: &mut HashMap<String, String>) {
+fn note(line: &[u8], into: &mut HashMap<String, String>, stops: &mut Stops) {
     let notified = has(line, b"<task-notification>");
-    if !notified && !(has(line, b"\"agentId\"") && has(line, b"tool_result")) {
+    let stop_call = has(line, b"TaskStop") || has(line, b"KillShell");
+    let result = has(line, b"tool_result") && (has(line, b"\"agentId\"") || stops.waits_in(line));
+    if !notified && !stop_call && !result {
         return;
     }
     let Some(map) = parse_object(line) else {
@@ -74,12 +78,35 @@ fn note(line: &[u8], into: &mut HashMap<String, String>) {
             }
         }
     }
-    if str_of(&obj, "type") == Some("user") {
-        results(&obj, into);
+    match str_of(&obj, "type") {
+        Some("user") => results(&obj, into, stops),
+        Some("assistant") => calls(&obj, stops),
+        _ => {}
     }
 }
 
-fn results(obj: &Value, into: &mut HashMap<String, String>) {
+fn calls(obj: &Value, stops: &mut Stops) {
+    let Some(blocks) = obj
+        .get("message")
+        .and_then(|m| m.get("content"))
+        .and_then(Value::as_array)
+    else {
+        return;
+    };
+    for block in blocks
+        .iter()
+        .filter(|b| str_of(b, "type") == Some("tool_use"))
+    {
+        let (Some(id), Some(name)) = (str_of(block, "id"), str_of(block, "name")) else {
+            continue;
+        };
+        if let Some(input) = block.get("input").and_then(Value::as_object) {
+            stops.call(id, name, input);
+        }
+    }
+}
+
+fn results(obj: &Value, into: &mut HashMap<String, String>, stops: &mut Stops) {
     let flag = |key| obj.get(key).and_then(Value::as_bool) == Some(true);
     if flag("isMeta") || flag("isCompactSummary") {
         return;
@@ -102,5 +129,6 @@ fn results(obj: &Value, into: &mut HashMap<String, String>) {
                 into.insert(id.to_string(), ended.to_string());
             }
         }
+        stops.result(str_of(block, "tool_use_id"), is_error, into);
     }
 }

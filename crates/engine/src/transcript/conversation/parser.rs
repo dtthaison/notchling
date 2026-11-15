@@ -1,13 +1,13 @@
 use super::queue::Queue;
 use super::tools::{apply_task_result, clip, diff_lines, make_call, result_text, written_lines};
 use super::user::{model_id_in_confirmation, user_item};
-use crate::transcript::model::*;
 use crate::transcript::scan::HEAD_BYTES;
 use crate::transcript::shells;
 use crate::transcript::snapshot::{self, PendingQuestion};
 use crate::transcript::subagents::{notification_statuses, result_end};
 use crate::transcript::tail::LineParser;
 use crate::transcript::util::{count_of, date_field, parse_object, str_of};
+use crate::transcript::{glance::has, model::*};
 use serde_json::{Map, Value};
 use std::collections::{BTreeMap, HashMap, HashSet};
 
@@ -19,7 +19,7 @@ const TRIM_AT: usize = 1000;
 pub struct Parser {
     c: Conversation,
     call_index: HashMap<String, (usize, usize)>,
-    stops: HashMap<String, String>,
+    stops: shells::Stops,
     counted: HashSet<String>,
     counted_order: Vec<String>,
     turn_output: HashMap<String, u64>,
@@ -134,7 +134,7 @@ impl Parser {
         {
             return;
         }
-        if contains(line, b"<task-notification>") {
+        if has(line, b"<task-notification>") {
             if let Ok(text) = std::str::from_utf8(line) {
                 for (id, status) in notification_statuses(&text.replace("\\/", "/")) {
                     self.c.finished_agents.insert(id, status);
@@ -331,9 +331,7 @@ impl Parser {
                 self.last_question_answered = false;
             }
         }
-        if let Some(shell) = shells::stopped_id(name, input) {
-            self.stops.insert(id.to_string(), shell);
-        }
+        self.stops.call(id, name, input);
         let call = make_call(id, name, input);
         if call.kind == ToolKind::Shell {
             self.c.facts.commands += 1;
@@ -444,13 +442,8 @@ impl Parser {
                     .insert(id.to_string(), ended.to_string());
             }
         }
-        if let Some(shell) = tool_use_id.and_then(|id| self.stops.remove(id)) {
-            if !is_error {
-                self.c
-                    .finished_agents
-                    .insert(shell, shells::STOPPED.to_string());
-            }
-        }
+        self.stops
+            .result(tool_use_id, is_error, &mut self.c.finished_agents);
         let Some(&(item, index)) = tool_use_id.and_then(|id| self.call_index.get(id)) else {
             return;
         };
@@ -604,8 +597,4 @@ fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
 
 fn compacted() -> ItemKind {
     ItemKind::notice("Conversation compacted", "rectangle.compress.vertical")
-}
-
-fn contains(haystack: &[u8], needle: &[u8]) -> bool {
-    haystack.windows(needle.len()).any(|w| w == needle)
 }

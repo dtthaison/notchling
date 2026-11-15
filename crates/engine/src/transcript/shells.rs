@@ -1,3 +1,4 @@
+use super::glance::has;
 use super::model::BackgroundShell;
 use serde_json::{Map, Value};
 use std::collections::HashMap;
@@ -8,9 +9,9 @@ const STOP_TOOLS: [&str; 2] = ["TaskStop", "KillShell"];
 
 const STOP_KEYS: [&str; 3] = ["task_id", "shell_id", "bash_id"];
 
-pub const STOPPED: &str = "stopped";
+const STOPPED: &str = "stopped";
 
-pub fn stopped_id(tool: &str, input: &Map<String, Value>) -> Option<String> {
+fn stopped_id(tool: &str, input: &Map<String, Value>) -> Option<String> {
     if !STOP_TOOLS.contains(&tool) {
         return None;
     }
@@ -19,6 +20,38 @@ pub fn stopped_id(tool: &str, input: &Map<String, Value>) -> Option<String> {
         .find_map(|key| input.get(*key).and_then(Value::as_str))
         .filter(|id| !id.is_empty())
         .map(str::to_owned)
+}
+
+#[derive(Default)]
+pub struct Stops(HashMap<String, String>);
+
+impl Stops {
+    pub fn call(&mut self, tool_use_id: &str, tool: &str, input: &Map<String, Value>) {
+        if tool_use_id.is_empty() {
+            return;
+        }
+        if let Some(target) = stopped_id(tool, input) {
+            self.0.insert(tool_use_id.to_string(), target);
+        }
+    }
+
+    pub fn result(
+        &mut self,
+        tool_use_id: Option<&str>,
+        is_error: bool,
+        into: &mut HashMap<String, String>,
+    ) {
+        let Some(target) = tool_use_id.and_then(|id| self.0.remove(id)) else {
+            return;
+        };
+        if !is_error {
+            into.insert(target, STOPPED.to_string());
+        }
+    }
+
+    pub fn waits_in(&self, line: &[u8]) -> bool {
+        self.0.keys().any(|id| has(line, id.as_bytes()))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
