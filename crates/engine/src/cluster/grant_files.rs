@@ -235,7 +235,39 @@ mod sys {
     }
 
     fn link_refused() -> io::Error {
-        io::Error::other("refusing a link or a file where a folder belongs")
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            "refusing a link or a file where a folder belongs",
+        )
+    }
+
+    pub fn is_not_a_folder(e: &io::Error) -> bool {
+        e.kind() == io::ErrorKind::InvalidData
+    }
+
+    fn clear_errno() -> bool {
+        #[cfg(any(target_os = "macos", target_os = "ios", target_os = "freebsd"))]
+        unsafe {
+            *libc::__error() = 0;
+        }
+        #[cfg(any(target_os = "linux", target_os = "android", target_os = "emscripten"))]
+        unsafe {
+            *libc::__errno_location() = 0;
+        }
+        #[cfg(any(target_os = "netbsd", target_os = "openbsd"))]
+        unsafe {
+            *libc::__errno() = 0;
+        }
+        cfg!(any(
+            target_os = "macos",
+            target_os = "ios",
+            target_os = "freebsd",
+            target_os = "linux",
+            target_os = "android",
+            target_os = "emscripten",
+            target_os = "netbsd",
+            target_os = "openbsd"
+        ))
     }
 
     fn euid() -> u32 {
@@ -389,9 +421,16 @@ mod sys {
             }
             unsafe { libc::rewinddir(dirp) };
             let mut names = Vec::new();
+            let can_tell = clear_errno();
             loop {
+                clear_errno();
                 let entry = unsafe { libc::readdir(dirp) };
                 if entry.is_null() {
+                    let err = io::Error::last_os_error();
+                    if can_tell && err.raw_os_error().is_some_and(|code| code != 0) {
+                        unsafe { libc::closedir(dirp) };
+                        return Err(err);
+                    }
                     break;
                 }
                 let name = unsafe { CStr::from_ptr((*entry).d_name.as_ptr()) }.to_bytes();
@@ -445,11 +484,16 @@ mod sys {
         Err(io::Error::other(super::NO_UNIX))
     }
 
+    pub fn is_not_a_folder(e: &io::Error) -> bool {
+        e.kind() == io::ErrorKind::InvalidData
+    }
+
     fn real_dir(path: &Path) -> io::Result<()> {
         if std::fs::symlink_metadata(path)?.is_dir() {
             Ok(())
         } else {
-            Err(io::Error::other(
+            Err(io::Error::new(
+                io::ErrorKind::InvalidData,
                 "refusing a link or a file where a folder belongs",
             ))
         }
@@ -550,7 +594,7 @@ mod sys {
     }
 }
 
-use sys::{verify_file_private, Dir};
+use sys::{is_not_a_folder, verify_file_private, Dir};
 
 fn clock_ms() -> i64 {
     std::time::SystemTime::now()
@@ -617,6 +661,8 @@ impl GrantStore {
         let Some(root) = self.root_dir(true)? else {
             return Err("grants folder is missing".to_string());
         };
+        root.verify_private()
+            .map_err(|e| format!("grants folder {}: {e}", root.path().display()))?;
         let Some(dir) = self.job_dir(&root, &grant.job, true)? else {
             return Err("grant folder is missing".to_string());
         };
@@ -740,6 +786,7 @@ impl GrantStore {
                         sweep_job(&dir, now_ms).and_then(|n| owned_or_err(&dir).map(|()| n))
                     }
                     Ok(None) => Ok(0),
+                    Err(e) if is_not_a_folder(&e) => remove_folder(&root, &entry).map(|()| 1),
                     Err(e) => Err(format!(
                         "grant folder {}: {e}",
                         root.path().join(&entry).display()
@@ -802,11 +849,13 @@ fn sweep_job(dir: &Dir, now_ms: i64) -> Result<usize, String> {
     for entry in names {
         let path = dir.path().join(&entry);
         let keep = match (stem_of(&entry), dir.open_file(&entry)) {
-            (Some(stem), Ok(Some(file))) => read_grant(file, &path).ok().is_some_and(|g| {
-                g.name == stem
-                    && dir.path().file_name().and_then(|n| n.to_str()) == Some(g.job.as_str())
-                    && g.expires_ms > now_ms
-            }),
+            (Some(stem), Ok(Some(file))) if verify_file_private(&file).is_ok() => {
+                read_grant(file, &path).ok().is_some_and(|g| {
+                    g.name == stem
+                        && dir.path().file_name().and_then(|n| n.to_str()) == Some(g.job.as_str())
+                        && g.expires_ms > now_ms
+                })
+            }
             _ => false,
         };
         if keep {

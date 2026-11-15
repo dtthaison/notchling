@@ -341,6 +341,80 @@ fn deletion_works_in_loose_folders() {
     assert!(!root(&tmp).join(JOB).join("z.json").exists());
 }
 
+#[cfg(unix)]
+#[test]
+fn put_creates_nothing_in_a_loose_root() {
+    let tmp = TempDir::new("grant-loose-root-put");
+    let store = store(&tmp);
+    fs::create_dir_all(root(&tmp)).expect("mkdir");
+    chmod(&root(&tmp), 0o750);
+    assert!(store
+        .put(&grant(JOB, "a", now() + MINUTE, "NL-MARKER-50"))
+        .is_err());
+    assert!(listing(&root(&tmp)).is_empty());
+    assert_eq!(mode_of(&root(&tmp)), 0o750);
+}
+
+#[cfg(unix)]
+#[test]
+fn sweep_does_not_keep_what_get_would_refuse() {
+    let tmp = TempDir::new("grant-sweep-nonprivate");
+    let store = store(&tmp);
+    let n = now();
+    for name in ["good", "open", "linked"] {
+        store
+            .put(&grant(JOB, name, n + 10 * MINUTE, "NL-MARKER-51"))
+            .expect("put");
+    }
+    let folder = root(&tmp).join(JOB);
+    chmod(&folder.join("open.json"), 0o644);
+    let copy = tmp.path("copy.json");
+    fs::hard_link(folder.join("linked.json"), &copy).expect("hard link");
+    assert_eq!(store.sweep(n, &live(&[JOB])).expect("sweep"), 2);
+    assert_eq!(listing(&folder), vec!["good.json".to_string()]);
+    assert!(copy.exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn a_link_or_file_at_a_live_jobs_folder_is_cleared_not_fatal() {
+    use std::os::unix::fs::symlink;
+    let tmp = TempDir::new("grant-sweep-live-link");
+    let store = store(&tmp);
+    let n = now();
+    let outside = tmp.path("outside");
+    tmp.write("outside/keep.txt", "NL-MARKER-52");
+    store
+        .put(&grant(JOB2, "a", n + MINUTE, "NL-MARKER-53"))
+        .expect("put");
+    symlink(&outside, root(&tmp).join(JOB)).expect("link");
+    assert_eq!(store.sweep(n, &live(&[JOB, JOB2])).expect("sweep"), 1);
+    assert!(fs::symlink_metadata(root(&tmp).join(JOB)).is_err());
+    assert_eq!(listing(&outside), vec!["keep.txt".to_string()]);
+    assert!(store.get(JOB2, "a", n).expect("get").is_some());
+
+    fs::write(root(&tmp).join(JOB), "x").expect("write");
+    assert_eq!(store.sweep(n, &live(&[JOB, JOB2])).expect("sweep"), 1);
+    assert!(!root(&tmp).join(JOB).exists());
+    assert_eq!(store.sweep(n, &live(&[JOB, JOB2])).expect("sweep"), 0);
+}
+
+#[test]
+fn sweep_lists_every_entry_of_a_big_folder() {
+    let tmp = TempDir::new("grant-sweep-big");
+    let store = store(&tmp);
+    let n = now();
+    store
+        .put(&grant(JOB, "keep", n + 10 * MINUTE, "NL-MARKER-54"))
+        .expect("put");
+    let folder = root(&tmp).join(JOB);
+    for i in 0..700 {
+        fs::write(folder.join(format!("stray{i}.txt")), "x").expect("write");
+    }
+    assert_eq!(store.sweep(n, &live(&[JOB])).expect("sweep"), 700);
+    assert_eq!(listing(&folder), vec!["keep.json".to_string()]);
+}
+
 #[test]
 fn expired_grant_is_deleted_on_get() {
     let tmp = TempDir::new("grant-expired");
