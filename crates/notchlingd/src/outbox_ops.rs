@@ -203,44 +203,49 @@ impl OutboxOps {
             return;
         };
         for row in rows {
-            let seen = match row.tool {
-                Tool::Claude => fresh::job_row(&self.roots, &Probes::from_proc(), &row.session)
-                    .and_then(|agent| {
-                        count_row(agent.transcript_path.as_deref()?, &agent.name, &row)
-                    }),
-                Tool::Codex | Tool::Antigravity => None,
-            };
-            let before = match (row.seen_before, row.queued_before) {
-                (Some(taken), Some(enqueued)) => Some(Seen {
-                    taken: usize::try_from(taken).unwrap_or(0),
-                    enqueued: usize::try_from(enqueued).unwrap_or(0),
-                }),
-                _ => None,
-            };
-            let judged = before.map_or(Verdict::Unsure, |b| verdict(seen, b, VERIFY_LOOK_MS));
-            let (to, why, then) = match judged {
-                Verdict::Sent => {
-                    if let Ok(true) = self.store.delete(&row.id) {
-                        self.publish_removed(&row.id, &row.session, "sent");
-                        self.emit_then(&row, OutboxThen::Sent);
-                    }
-                    continue;
-                }
-                Verdict::InQueue => (State::InQueue, None, OutboxThen::InQueue),
-                Verdict::Pending | Verdict::Unsure => {
-                    (State::Unsure, Some(Why::Restart), OutboxThen::Unsure)
-                }
-            };
-            if let Ok(true) =
-                self.store
-                    .set_state(&row.id, &[State::Sending], to, why, None, now_ms)
-            {
-                if let Ok(Some(changed)) = self.store.get(&row.id) {
-                    self.publish_changed(&changed);
-                }
-                self.emit_then(&row, then);
-            }
+            self.settle_sending(&row, now_ms);
         }
+    }
+
+    pub(crate) fn settle_sending(&self, row: &Row, now_ms: i64) -> bool {
+        let seen = match row.tool {
+            Tool::Claude => fresh::job_row(&self.roots, &Probes::from_proc(), &row.session)
+                .and_then(|agent| count_row(agent.transcript_path.as_deref()?, &agent.name, row)),
+            Tool::Codex | Tool::Antigravity => None,
+        };
+        let before = match (row.seen_before, row.queued_before) {
+            (Some(taken), Some(enqueued)) => Some(Seen {
+                taken: usize::try_from(taken).unwrap_or(0),
+                enqueued: usize::try_from(enqueued).unwrap_or(0),
+            }),
+            _ => None,
+        };
+        let judged = before.map_or(Verdict::Unsure, |b| verdict(seen, b, VERIFY_LOOK_MS));
+        let (to, why, then) = match judged {
+            Verdict::Sent => {
+                let Ok(true) = self.store.delete(&row.id) else {
+                    return false;
+                };
+                self.publish_removed(&row.id, &row.session, "sent");
+                self.emit_then(row, OutboxThen::Sent);
+                return true;
+            }
+            Verdict::InQueue => (State::InQueue, None, OutboxThen::InQueue),
+            Verdict::Pending | Verdict::Unsure => {
+                (State::Unsure, Some(Why::Restart), OutboxThen::Unsure)
+            }
+        };
+        let moved = self
+            .store
+            .set_state(&row.id, &[State::Sending], to, why, None, now_ms);
+        let Ok(true) = moved else {
+            return false;
+        };
+        if let Ok(Some(changed)) = self.store.get(&row.id) {
+            self.publish_changed(&changed);
+        }
+        self.emit_then(row, then);
+        true
     }
 
     pub fn set_wake(&self, wake: Wake) {

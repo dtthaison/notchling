@@ -92,6 +92,11 @@ fn a_listed_queue_entry_counts_the_calm_from_the_first_look() {
             ..
         }
     ));
+    let mut at = T0;
+    while at < T0 + QUEUE_STALE_MS - 1_000 {
+        at += 1_000;
+        r.courier.facts(&row, at);
+    }
     let early = r.courier.facts(&row, T0 + QUEUE_STALE_MS - 1);
     assert!(matches!(
         gate(&row, &early),
@@ -129,6 +134,34 @@ fn a_turn_in_between_restarts_the_queue_count() {
             ..
         }
     ));
+}
+
+#[test]
+fn a_gap_between_readings_restarts_the_calm_count() {
+    let r = rig();
+    *r.files.queue.lock().unwrap() = Some(QueueState {
+        waiting: vec!["lost".into()],
+        unknown: 0,
+    });
+    let row = r.send("job-idle", "hi");
+    assert_eq!(r.courier.facts(&row, T0).turn_over_since_ms, Some(T0));
+    let hour = T0 + 3_600_000;
+    let back = r.courier.facts(&row, hour);
+    assert_eq!(back.turn_over_since_ms, Some(hour));
+    assert!(matches!(
+        gate(&row, &back),
+        Gate::Wait {
+            why: Why::Queue,
+            ..
+        }
+    ));
+    let mut at = hour;
+    while at < hour + QUEUE_STALE_MS - 1_000 {
+        at += 1_000;
+        assert_eq!(r.courier.facts(&row, at).turn_over_since_ms, Some(hour));
+    }
+    let stale = r.courier.facts(&row, hour + QUEUE_STALE_MS);
+    assert_eq!(gate(&row, &stale), Gate::Go { guarded: true });
 }
 
 #[test]

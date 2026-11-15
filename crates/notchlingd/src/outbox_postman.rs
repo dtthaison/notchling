@@ -276,14 +276,14 @@ fn run(inner: Arc<Inner>, session: String, rx: Receiver<Msg>) {
                 }
             }
             Next::Done => {
-                postman.close_attach();
+                postman.end();
                 if finish(&inner, &session, &rx) {
                     return;
                 }
             }
         }
     }
-    postman.close_attach();
+    postman.end();
 }
 
 fn finish(inner: &Arc<Inner>, session: &str, rx: &Receiver<Msg>) -> bool {
@@ -332,6 +332,7 @@ pub(crate) struct Postman {
     gone_checked: Option<i64>,
     courier: Option<Arc<dyn Courier>>,
     owed: Option<Owed>,
+    cut_short: Option<String>,
 }
 
 fn baseline(row: &Row) -> Seen {
@@ -351,18 +352,14 @@ impl Postman {
             gone_checked: None,
             courier: None,
             owed: None,
+            cut_short: None,
         }
     }
 
     pub(crate) fn pass(&mut self, now: i64) -> Next {
-        if !self.inner.acting.is_on() || self.inner.stopped() {
-            self.close_attach();
-            return Next::Done;
-        }
         loop {
             if !self.inner.acting.is_on() || self.inner.stopped() {
-                self.close_attach();
-                return Next::Done;
+                return self.end();
             }
             if let Some(owed) = self.owed.take() {
                 if !self.land(owed) {
@@ -376,6 +373,9 @@ impl Postman {
             };
             self.courier = Some(self.inner.couriers.of(row.tool).clone());
             let timer = match row.state {
+                State::Sending if self.cut_short.as_deref() != Some(row.id.as_str()) => {
+                    self.orphan(&row, now)
+                }
                 State::Unsure | State::Box | State::Stopped | State::Sending => {
                     return self.rest(now, None)
                 }
@@ -386,6 +386,21 @@ impl Postman {
             if let Some(at) = timer {
                 return self.rest(now, Some(at));
             }
+        }
+    }
+
+    pub(crate) fn end(&mut self) -> Next {
+        self.close_attach();
+        if let Some(owed) = self.owed.take() {
+            self.land(owed);
+        }
+        Next::Done
+    }
+
+    fn orphan(&mut self, row: &Row, now: i64) -> Option<i64> {
+        match self.inner.ops.settle_sending(row, now) {
+            true => None,
+            false => Some(now + TICK_MS),
         }
     }
 
@@ -510,7 +525,8 @@ impl Postman {
             Err(_) => return Some(now + TICK_MS),
         };
         if taken.kind != row.kind || taken.text != row.text {
-            let again = store.requeue(&taken.id, &[State::Sending], taken.clear_box, now);
+            let before = taken.tries.saturating_sub(1);
+            let again = store.untake(&taken.id, taken.clear_box, before, now);
             return match again {
                 Ok(_) => {
                     self.publish(&taken.id);
@@ -541,7 +557,10 @@ impl Postman {
                     self.moved(&taken, State::Sending, State::InQueue, None, None, then);
                     false
                 }
-                Verdict::Pending => true,
+                Verdict::Pending => {
+                    self.cut_short = Some(taken.id.clone());
+                    true
+                }
                 Verdict::Unsure => {
                     let then = Some(OutboxThen::Unsure);
                     let why = Some(Why::NotFound);

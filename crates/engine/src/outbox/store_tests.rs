@@ -335,6 +335,23 @@ fn requeue_clears_the_try() {
 }
 
 #[test]
+fn untake_gives_the_take_back_with_the_old_tries() {
+    let store = OutboxStore::in_memory_for_tests();
+    let row = store.insert(&new("s", "a"), 1).unwrap();
+    let taken = store.take(&row.id, 2).unwrap().unwrap();
+    assert_eq!(taken.tries, 1);
+    assert_eq!(store.untake(&row.id, true, 0, 3).unwrap(), Change::Done);
+    let now = store.list(None).unwrap().remove(0);
+    assert_eq!(
+        (now.state, now.tries, now.clear_box),
+        (State::Queued, 0, true)
+    );
+    assert_eq!(now.attempt_ms, None);
+    assert_eq!(store.untake(&row.id, false, 0, 4).unwrap(), Change::Busy);
+    assert_eq!(store.untake("nope", false, 0, 4).unwrap(), Change::Missing);
+}
+
+#[test]
 fn head_and_sessions_follow_order() {
     let store = OutboxStore::in_memory_for_tests();
     let a1 = store.insert(&new("a", "1"), 1).unwrap();

@@ -692,6 +692,28 @@ fn an_edit_between_gate_and_take_is_gated_again() {
     assert_eq!(r.returns(), 0);
 }
 
+#[test]
+fn an_edit_between_gate_and_take_keeps_its_tries() {
+    let courier = Arc::new(Editing {
+        asked: AtomicUsize::new(0),
+        before: Mutex::new(None),
+    });
+    let r = rig_with(Options {
+        courier: Some(courier.clone()),
+        ..Options::default()
+    });
+    let row = r.send("job-a", "hi");
+    let (ops, id) = (r.ops.clone(), row.id.clone());
+    *courier.before.lock().unwrap() = Some(Box::new(move || {
+        ops.store().edit(&id, "/compact", T0).unwrap();
+    }));
+    let mut p = r.postmen.postman(BUSY);
+    p.pass(r.at(T0));
+    let now = r.row(&row.id).unwrap();
+    assert_eq!(now.tries, 0, "the take's try is given back");
+    assert_eq!(courier.asked.load(Ordering::SeqCst), 0, "nothing typed");
+}
+
 const NO_DELETE: &str = "CREATE TRIGGER no_delete BEFORE DELETE ON outbox \
     BEGIN SELECT RAISE(ABORT, 'database is locked'); END;";
 const NO_UNSURE: &str = "CREATE TRIGGER no_unsure BEFORE UPDATE ON outbox \
@@ -734,6 +756,46 @@ fn a_failed_state_change_after_delivery_is_retried() {
     assert_eq!(
         state(&r, &row.id),
         Some((State::Unsure, Some(Why::NotFound)))
+    );
+    assert_eq!(r.returns(), 1, "typed once");
+}
+
+#[test]
+fn an_owed_row_is_landed_before_acting_off_ends_the_postman() {
+    let r = rig();
+    let row = r.send("job-idle", "hi");
+    r.ops.store().run_sql_for_tests(NO_DELETE);
+    let mut p = r.postmen.postman(IDLE);
+    assert!(matches!(p.pass(r.at(T0)), Next::At(_)));
+    assert_eq!(state(&r, &row.id), Some((State::Sending, None)));
+    r.ops.store().run_sql_for_tests("DROP TRIGGER no_delete;");
+    r.acting_switch().set(false);
+    assert_eq!(p.pass(r.at(T0 + TICK_MS)), Next::Done);
+    assert_eq!(r.row(&row.id), None);
+    let gone = r.room.named("outbox.removed");
+    assert_eq!(gone.len(), 1);
+    assert_eq!(gone[0]["why"], "sent");
+    assert_eq!(r.returns(), 1, "typed once");
+}
+
+#[test]
+fn a_sending_head_left_by_a_dropped_postman_is_settled_when_acting_turns_on() {
+    let r = rig();
+    let row = r.send("job-idle", "hi");
+    r.ops.store().run_sql_for_tests(NO_DELETE);
+    let mut dropped = r.postmen.postman(IDLE);
+    dropped.pass(r.at(T0));
+    r.acting_switch().set(false);
+    assert_eq!(dropped.pass(r.at(T0 + TICK_MS)), Next::Done);
+    drop(dropped);
+    assert_eq!(state(&r, &row.id), Some((State::Sending, None)));
+    r.ops.store().run_sql_for_tests("DROP TRIGGER no_delete;");
+    r.acting_switch().set(true);
+    let mut fresh = r.postmen.postman(IDLE);
+    assert_eq!(fresh.pass(r.at(T0 + 2 * TICK_MS)), Next::Done);
+    assert_eq!(
+        state(&r, &row.id),
+        Some((State::Unsure, Some(Why::Restart)))
     );
     assert_eq!(r.returns(), 1, "typed once");
 }

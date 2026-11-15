@@ -19,6 +19,8 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
+const CALM_GAP_MS: i64 = 3_000;
+
 pub type Clock = Arc<dyn Fn() -> i64 + Send + Sync>;
 
 pub fn real_clock() -> Clock {
@@ -113,6 +115,7 @@ struct Memo {
     missing_since: Option<i64>,
     dialog_at: Option<i64>,
     calm_since: Option<i64>,
+    last_seen: Option<i64>,
 }
 
 pub struct ClaudeCourier {
@@ -342,6 +345,13 @@ impl Courier for ClaudeCourier {
                 other
             }
         };
+        let gap = memo
+            .last_seen
+            .replace(now_ms)
+            .is_some_and(|at| now_ms - at > CALM_GAP_MS);
+        if gap {
+            memo.calm_since = None;
+        }
         let turn_over_since_ms = match reading {
             Some(true) => Some(*memo.calm_since.get_or_insert(now_ms)),
             _ => {

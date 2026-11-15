@@ -306,6 +306,27 @@ impl OutboxStore {
         clear_box: bool,
         now_ms: i64,
     ) -> Result<Change, String> {
+        self.requeue_with(id, from, clear_box, None, now_ms)
+    }
+
+    pub fn untake(
+        &self,
+        id: &str,
+        clear_box: bool,
+        tries: u32,
+        now_ms: i64,
+    ) -> Result<Change, String> {
+        self.requeue_with(id, &[State::Sending], clear_box, Some(tries), now_ms)
+    }
+
+    fn requeue_with(
+        &self,
+        id: &str,
+        from: &[State],
+        clear_box: bool,
+        tries: Option<u32>,
+        now_ms: i64,
+    ) -> Result<Change, String> {
         let mut db = self.lock();
         let tx = db
             .transaction_with_behavior(TransactionBehavior::Immediate)
@@ -315,12 +336,16 @@ impl OutboxStore {
         }
         let sql = format!(
             "UPDATE outbox SET state = 'queued', clear_box = ?2, why = NULL, attempt_ms = NULL,
-                 seen_before = NULL, queued_before = NULL, next_ms = NULL, updated_ms = ?3
+                 seen_before = NULL, queued_before = NULL, next_ms = NULL, updated_ms = ?3,
+                 tries = COALESCE(?4, tries)
              WHERE id = ?1 AND state IN ({})",
             states(from)
         );
         let changed = tx
-            .execute(&sql, params![id, i64::from(clear_box), now_ms])
+            .execute(
+                &sql,
+                params![id, i64::from(clear_box), now_ms, tries.map(i64::from)],
+            )
             .map_err(db_err)?;
         tx.commit().map_err(db_err)?;
         Ok(if changed > 0 {
