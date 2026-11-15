@@ -25,6 +25,7 @@ use crate::limits_sources::{ClaudeLimits, ProviderLimits, SessionJobs};
 use crate::log_ops::LogOps;
 use crate::op_group::OpGroup;
 use crate::op_kinds;
+use crate::outbox_ops::OutboxOps;
 use crate::pages_ops::{PagesOps, PagesSetup};
 use crate::providers_daemon::ProviderStores;
 use crate::providers_ops::ProvidersOps;
@@ -44,6 +45,7 @@ use notchling_engine::control::RealLauncher;
 use notchling_engine::delegate::skill::SkillTool;
 use notchling_engine::git::SandboxedLauncher;
 use notchling_engine::install::skills::SkillSpec;
+use notchling_engine::outbox::OutboxStore;
 use notchling_engine::vault::skill as vault_skill;
 use notchling_engine::versions::mac::Roots as VersionRoots;
 use notchling_engine::versions::Version;
@@ -319,6 +321,32 @@ fn bridge_setup(layout: &Layout, ports: (u16, u16)) -> BridgeSetup {
     }
 }
 
+fn outbox_ops(
+    layout: &Layout,
+    sessions: &Arc<Mutex<Value>>,
+    acting: &Arc<ActingOps>,
+    room: &Arc<dyn Room>,
+    events: &Events,
+) -> OutboxOps {
+    let (store, saving) = match OutboxStore::open(&layout.data_dir) {
+        Ok(store) => (store, true),
+        Err(_) => (OutboxStore::in_memory_for_tests(), false),
+    };
+    let ops = OutboxOps::new(
+        Arc::new(store),
+        sessions.clone(),
+        layout.roots(),
+        acting.acting_switch(),
+        room.clone(),
+        Some(events.clone()),
+    );
+    if saving {
+        ops
+    } else {
+        ops.without_store()
+    }
+}
+
 pub struct Wired {
     pub acting: Arc<ActingOps>,
     pub codex: Arc<CodexOps>,
@@ -331,6 +359,7 @@ pub struct Wired {
     pub limits: Arc<LimitsOps>,
     pub catalog: Arc<CatalogService>,
     pub inbox: Arc<InboxOps>,
+    pub outbox: Arc<OutboxOps>,
     pub vault: Arc<VaultOps>,
     pub install: Arc<InstallOps>,
     pub settings: Arc<SettingsOps>,
@@ -404,6 +433,7 @@ impl Wired {
         acting.attach_codex(codex.clone());
         let inbox =
             InboxOps::new(layout.data_dir.clone(), room.clone()).with_events(events.clone());
+        let outbox = Arc::new(outbox_ops(layout, &sessions, &acting, &room, &events));
         let every = Arc::new(EverySession::new(layout));
         let bridge = Arc::new(
             BridgeOps::new(
@@ -583,6 +613,7 @@ impl Wired {
             limits,
             catalog,
             inbox,
+            outbox,
             vault,
             install: Arc::new(install),
             settings,
@@ -656,6 +687,7 @@ impl Wired {
             .with_group(self.limits.clone())
             .with_group(self.catalog.clone())
             .with_group(self.inbox.clone())
+            .with_group(self.outbox.clone())
             .with_group(self.vault.clone())
             .with_group(self.settings.clone())
             .with_group(self.versions.clone())

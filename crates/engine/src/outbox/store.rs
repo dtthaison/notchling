@@ -170,6 +170,10 @@ impl OutboxStore {
         }
     }
 
+    pub fn get(&self, id: &str) -> Result<Option<Row>, String> {
+        fetch(&self.lock(), id)
+    }
+
     pub fn head(&self, session: &str) -> Result<Option<Row>, String> {
         let db = self.lock();
         let rows = select(&db, "WHERE session = ?1 ORDER BY n LIMIT 1", &[&session])?;

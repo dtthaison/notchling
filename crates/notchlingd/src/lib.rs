@@ -65,6 +65,8 @@ pub mod log_rotate;
 pub mod log_start;
 pub mod op_group;
 pub mod op_kinds;
+pub mod outbox_ops;
+mod outbox_rows;
 pub mod pages_cli;
 pub mod pages_ops;
 pub mod prompts;

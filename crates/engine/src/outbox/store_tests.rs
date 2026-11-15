@@ -490,3 +490,11 @@ fn failed_read_in_take_leaves_the_row_queued() {
     assert_eq!(column::<String>(&store, "state", &row.id), "queued");
     assert_eq!(column::<i64>(&store, "tries", &row.id), 0);
 }
+
+#[test]
+fn get_finds_one_row_by_id() {
+    let store = OutboxStore::in_memory_for_tests();
+    let row = store.insert(&new("s", "a"), 1).unwrap();
+    assert_eq!(store.get(&row.id).unwrap(), Some(row));
+    assert_eq!(store.get("nope").unwrap(), None);
+}
