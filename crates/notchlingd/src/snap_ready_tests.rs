@@ -381,6 +381,44 @@ fn the_primarys_last_set_is_the_newest_offer_then_the_acked_lengths_then_zero() 
     assert_eq!(sender.last_set_mb(), 2);
 }
 
+#[test]
+fn the_acked_fallback_counts_only_current_members() {
+    let dir = TempDir::new("lastset-members");
+    let book = Arc::new(AckBook::new(dir.root()));
+    let (home, kept, gone) = (node_id(&id('a')), node_id(&id('b')), node_id(&id('c')));
+    let members = vec![
+        crate::snap_send::Candidate {
+            id: kept.clone(),
+            can_be_master: true,
+            online: true,
+            active: true,
+        },
+        crate::snap_send::Candidate {
+            id: gone.clone(),
+            can_be_master: true,
+            online: false,
+            active: false,
+        },
+    ];
+    let facts = crate::snap_send::Facts {
+        me: home.clone(),
+        home: Some(home),
+        members,
+    };
+    let sender = SnapSender::new(SenderParts {
+        peers: Arc::new(NoPeers),
+        facts: Arc::new(move || Some(facts.clone())),
+        ready: Arc::new(|_| false),
+        book: book.clone(),
+        retry: Duration::ZERO,
+    });
+    let small = std::collections::BTreeMap::from([(std::path::PathBuf::from("/t/a.jsonl"), 10)]);
+    let big = std::collections::BTreeMap::from([(std::path::PathBuf::from("/t/b.jsonl"), 9_000)]);
+    book.record(&kept, "s-1", small).unwrap();
+    book.record(&gone, "s-1", big).unwrap();
+    assert_eq!(sender.last_set_bytes(), 10);
+}
+
 fn write_current(cluster: &std::path::Path, home: &NodeId, m: &Manifest) {
     let root = cluster.join("standby").join(home.as_str());
     std::fs::create_dir_all(root.join("sets").join(&m.set)).unwrap();

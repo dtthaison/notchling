@@ -1,7 +1,7 @@
 use super::blob::sha256_of;
 use super::members::Term;
 use super::snapshot::{dir_digest, Manifest, Part, PartKind};
-use super::standby_store::StandbyStore;
+use super::standby_store::{Action, StandbyStore, TailMove};
 use super::testkit::id;
 use crate::sessions::testutil::TempDir;
 use std::fs;
@@ -603,4 +603,44 @@ fn a_cut_append_never_follows_a_link() {
     std::os::unix::fs::symlink(&outside, &at).unwrap();
     assert!(store.commit("s-2").is_err());
     assert_eq!(fs::read(&outside).unwrap(), b"abcdefZZZZ");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_cut_append_run_refuses_a_link_swapped_in_after_the_check() {
+    let tmp = TempDir::new("standby-runlink");
+    let staged = tmp.path("staged");
+    fs::write(&staged, b"defgh").unwrap();
+    let outside = tmp.path("outside");
+    fs::write(&outside, b"abcdefZZZZ").unwrap();
+    let dst = tmp.path("dst");
+    std::os::unix::fs::symlink(&outside, &dst).unwrap();
+    let step = TailMove {
+        action: Action::Append { cut: true },
+        staged,
+        dst,
+        from: 3,
+    };
+    assert!(step.run().is_err());
+    assert_eq!(fs::read(&outside).unwrap(), b"abcdefZZZZ");
+}
+
+#[cfg(unix)]
+#[test]
+fn an_uncut_append_run_refuses_a_link_too() {
+    let tmp = TempDir::new("standby-runlink2");
+    let staged = tmp.path("staged");
+    fs::write(&staged, b"defgh").unwrap();
+    let outside = tmp.path("outside");
+    fs::write(&outside, b"abc").unwrap();
+    let dst = tmp.path("dst");
+    std::os::unix::fs::symlink(&outside, &dst).unwrap();
+    let step = TailMove {
+        action: Action::Append { cut: false },
+        staged,
+        dst,
+        from: 3,
+    };
+    assert!(step.run().is_err());
+    assert_eq!(fs::read(&outside).unwrap(), b"abc");
 }

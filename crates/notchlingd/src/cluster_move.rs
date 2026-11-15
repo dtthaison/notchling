@@ -379,6 +379,10 @@ impl Restorer for RealRestorer {
             close: &|| Ok(()),
             reopen: &|| Ok(()),
         };
+        let login_path = crate::snap_restore::login_path(
+            self.git.as_ref(),
+            std::env::var("SHELL").ok().as_deref(),
+        );
         crate::snap_restore::restore(&crate::snap_restore::Request {
             cluster: &self.cluster,
             primary,
@@ -389,6 +393,7 @@ impl Restorer for RealRestorer {
             shared: true,
             git: self.git.as_ref(),
             read: self.read.as_ref(),
+            login_path: &login_path,
             db: &hooks,
             set,
             stage: Some(stage),

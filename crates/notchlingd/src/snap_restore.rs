@@ -13,7 +13,7 @@ use notchling_engine::cluster::snapshot::Manifest;
 use notchling_engine::cluster::standby_store::StandbyStore;
 use notchling_engine::cluster::workspace::GitCall;
 use notchling_engine::cluster::NodeId;
-use notchling_engine::control::{LaunchOutput, Launcher};
+use notchling_engine::control::{Command, LaunchOutput, Launcher};
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -28,6 +28,7 @@ pub struct Request<'a> {
     pub shared: bool,
     pub git: &'a dyn Launcher,
     pub read: &'a dyn Launcher,
+    pub login_path: &'a [PathBuf],
     pub db: &'a DbHooks<'a>,
     pub set: Option<&'a str>,
     pub stage: Option<&'a Path>,
@@ -221,6 +222,34 @@ pub fn run_step(step: &RestoreStep, req: &Request) -> Result<(), String> {
     }
 }
 
+const LOGIN_PATH_WAIT: Duration = Duration::from_secs(3);
+const LOGIN_PATH_MAX: usize = 64 * 1024;
+const LOGIN_PATH_MARK: &str = "NOTCHLING_LOGIN_PATH=";
+
+pub fn login_path(launcher: &dyn Launcher, shell: Option<&str>) -> Vec<PathBuf> {
+    let Some(shell) = shell.filter(|s| Path::new(s).is_absolute()) else {
+        return Vec::new();
+    };
+    let script = format!("printf '\\n{LOGIN_PATH_MARK}%s\\n' \"$PATH\"");
+    let command = Command::new(&[shell, "-lc", &script]);
+    let Ok((out, false)) = launcher.run_capped(&command, LOGIN_PATH_WAIT, LOGIN_PATH_MAX) else {
+        return Vec::new();
+    };
+    if out.code != 0 {
+        return Vec::new();
+    }
+    out.output
+        .lines()
+        .rev()
+        .find_map(|line| line.strip_prefix(LOGIN_PATH_MARK))
+        .map(|path| {
+            std::env::split_paths(path)
+                .filter(|dir| dir.is_absolute())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 pub fn chosen_set(
     cluster: &Path,
     primary: &NodeId,
@@ -240,9 +269,10 @@ pub fn chosen_set(
 
 pub fn restore(req: &Request) -> Result<Report, String> {
     let manifest = chosen_set(req.cluster, req.primary, req.set, req.node)?;
-    let path_dirs: Vec<PathBuf> = std::env::var_os("PATH")
+    let mut path_dirs: Vec<PathBuf> = std::env::var_os("PATH")
         .map(|path| std::env::split_paths(&path).collect())
         .unwrap_or_default();
+    path_dirs.extend(req.login_path.iter().cloned());
     let ctx = RestoreCtx {
         cluster: req.cluster,
         home: req.home,

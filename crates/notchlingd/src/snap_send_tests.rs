@@ -359,3 +359,22 @@ fn a_machine_that_is_not_primary_reports_no_replication() {
     *fx.net.home.lock().unwrap() = id_of(1);
     assert_eq!(fx.sender.replication(1), serde_json::json!([]));
 }
+
+#[test]
+fn a_copy_that_is_not_a_prefix_is_replaced_whole_not_spliced() {
+    let fx = Fixture::new("send-notprefix", &[(1, true)]);
+    fx.make_ready(&[id_of(1)]);
+    let held = fx
+        .net
+        .member(&id_of(1))
+        .cluster
+        .join(format!("standby/{}/tails/parts", fx.primary))
+        .join(fx.transcript().strip_prefix("/").unwrap());
+    std::fs::create_dir_all(held.parent().unwrap()).unwrap();
+    std::fs::write(&held, b"XXXXXX").unwrap();
+    let (manifest, dir) = fx.stage(1, 0, b"123456abcdef");
+    fx.sender.offer(manifest, dir);
+    assert!(fx.sender.wait_idle(WAIT));
+    assert_eq!(read(&fx, 1), b"123456abcdef");
+    assert_eq!(current(&fx, 1), Some("s-1".to_string()));
+}

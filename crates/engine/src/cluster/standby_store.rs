@@ -653,21 +653,21 @@ fn walk_lenient(dir: &Path, rel: &str, out: &mut Vec<(String, PathBuf)>) {
     }
 }
 
-enum Action {
+pub(super) enum Action {
     Replace,
     Keep,
     Append { cut: bool },
 }
 
-struct TailMove {
-    action: Action,
-    staged: PathBuf,
-    dst: PathBuf,
-    from: u64,
+pub(super) struct TailMove {
+    pub(super) action: Action,
+    pub(super) staged: PathBuf,
+    pub(super) dst: PathBuf,
+    pub(super) from: u64,
 }
 
 impl TailMove {
-    fn run(self) -> Result<(), String> {
+    pub(super) fn run(self) -> Result<(), String> {
         match self.action {
             Action::Keep => Ok(()),
             Action::Replace => {

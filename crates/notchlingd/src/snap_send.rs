@@ -188,15 +188,25 @@ impl SnapSender {
         let latest = lock(&self.inner.state).latest.clone();
         match latest {
             Some(o) => o.manifest.parts.iter().map(|p| p.len).sum(),
-            None => self
-                .inner
-                .parts
-                .book
-                .all()
-                .values()
-                .map(|a| a.lengths.values().sum::<u64>())
-                .max()
-                .unwrap_or(0),
+            None => {
+                let current: Option<BTreeSet<NodeId>> = (self.inner.parts.facts)().map(|facts| {
+                    facts
+                        .members
+                        .into_iter()
+                        .filter(|m| m.active)
+                        .map(|m| m.id)
+                        .collect()
+                });
+                self.inner
+                    .parts
+                    .book
+                    .all()
+                    .iter()
+                    .filter(|(id, _)| current.as_ref().is_none_or(|now| now.contains(*id)))
+                    .map(|(_, a)| a.lengths.values().sum::<u64>())
+                    .max()
+                    .unwrap_or(0)
+            }
         }
     }
 
@@ -476,12 +486,14 @@ impl Inner {
     }
 
     fn send(&self, id: &NodeId, offered: &Offered) -> Result<u64, String> {
-        let mut lengths = self
+        let booked = self
             .parts
             .book
             .get(id)
             .map(|acked| acked.lengths)
             .unwrap_or_default();
+        let mut lengths = booked.clone();
+        let mut whole = BTreeSet::new();
         let mut round = 0;
         let (manifest, missing) = loop {
             round += 1;
@@ -491,13 +503,15 @@ impl Inner {
             let missing: Vec<Part> =
                 serde_json::from_value(reply.get("missing").cloned().unwrap_or(Value::Null))
                     .map_err(|_| "the other machine's answer to an offer is damaged".to_string())?;
-            if tails_agree(&manifest, &actual) {
+            if tails_agree(&manifest, &actual, &whole) {
                 break (manifest, missing);
             }
             if round >= MAX_ROUNDS {
                 return Err("the other machine's transcripts keep changing".to_string());
             }
+            whole = unproven_from_zero(offered, &booked, &actual);
             lengths = actual;
+            lengths.retain(|path, _| !whole.contains(path));
         };
         for (index, part) in manifest.parts.iter().enumerate() {
             if missing.contains(part) {
@@ -653,12 +667,42 @@ pub(crate) fn lengths_of(reply: &Value) -> BTreeMap<PathBuf, u64> {
         .unwrap_or_default()
 }
 
-fn tails_agree(manifest: &Manifest, actual: &BTreeMap<PathBuf, u64>) -> bool {
+fn unproven_from_zero(
+    offered: &Offered,
+    booked: &BTreeMap<PathBuf, u64>,
+    actual: &BTreeMap<PathBuf, u64>,
+) -> BTreeSet<PathBuf> {
+    offered
+        .manifest
+        .parts
+        .iter()
+        .filter(|part| {
+            matches!(
+                part.kind,
+                PartKind::Tail {
+                    from: 0,
+                    rewritten: false
+                }
+            )
+        })
+        .map(|part| part.path.clone())
+        .filter(|path| {
+            let have = actual.get(path).copied().unwrap_or(0);
+            have != booked.get(path).copied().unwrap_or(0)
+        })
+        .collect()
+}
+
+fn tails_agree(
+    manifest: &Manifest,
+    actual: &BTreeMap<PathBuf, u64>,
+    whole: &BTreeSet<PathBuf>,
+) -> bool {
     manifest.parts.iter().all(|part| match part.kind {
         PartKind::Tail {
             from,
             rewritten: false,
-        } => {
+        } if !whole.contains(&part.path) => {
             let have = actual.get(&part.path).copied().unwrap_or(0);
             if from == 0 {
                 have == 0 || have > part.len

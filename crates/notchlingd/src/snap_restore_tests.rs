@@ -406,3 +406,49 @@ fn a_worktree_accepts_the_same_remote_written_another_way() {
 
     assert!(w.at("wt4").join("a.txt").exists());
 }
+
+fn login_shell_answer(output: &str) -> notchling_engine::control::FakeLauncher {
+    let fake = notchling_engine::control::FakeLauncher::new();
+    fake.push_output(Ok(notchling_engine::control::LaunchOutput::ok(output)));
+    fake
+}
+
+#[test]
+fn the_login_shells_path_is_read_once_bounded_and_noise_is_ignored() {
+    let fake = login_shell_answer(
+        "motd line\n\nNOTCHLING_LOGIN_PATH=/usr/bin:/Users/son/.local/bin:rel/dir:/Users/son/bin\n",
+    );
+    let dirs = crate::snap_restore::login_path(&fake, Some("/bin/zsh"));
+    assert_eq!(
+        dirs,
+        vec![
+            std::path::PathBuf::from("/usr/bin"),
+            std::path::PathBuf::from("/Users/son/.local/bin"),
+            std::path::PathBuf::from("/Users/son/bin"),
+        ]
+    );
+    let calls = fake.calls();
+    assert_eq!(calls.len(), 1);
+    let notchling_engine::control::Call::Run(command, wait) = &calls[0] else {
+        panic!("not a plain run");
+    };
+    assert_eq!(&command.argv[..2], ["/bin/zsh", "-lc"]);
+    assert!(*wait <= std::time::Duration::from_secs(5));
+}
+
+#[test]
+fn a_login_shell_that_fails_or_is_unknown_adds_nothing() {
+    let failed = notchling_engine::control::FakeLauncher::new();
+    failed.push_output(Ok(notchling_engine::control::LaunchOutput::failed(
+        1,
+        "NOTCHLING_LOGIN_PATH=/x",
+    )));
+    assert!(crate::snap_restore::login_path(&failed, Some("/bin/zsh")).is_empty());
+    let timed_out = notchling_engine::control::FakeLauncher::new();
+    timed_out.push_output(Err(notchling_engine::control::LaunchError::Timeout(3)));
+    assert!(crate::snap_restore::login_path(&timed_out, Some("/bin/zsh")).is_empty());
+    let none = notchling_engine::control::FakeLauncher::new();
+    assert!(crate::snap_restore::login_path(&none, None).is_empty());
+    assert!(crate::snap_restore::login_path(&none, Some("zsh")).is_empty());
+    assert!(none.calls().is_empty());
+}
