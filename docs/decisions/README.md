@@ -34,6 +34,7 @@ Most of them come from the design, [revision 2](https://github.com/dtthaison/not
 | [XXXX](XXXX-tool-versions-follow-the-mac.md) | Tool versions follow the Mac: workers run the Mac's checked versions, rolled out by one click | Proposed |
 | [XXXX](XXXX-sparkle-and-one-release-key.md) | Sparkle for the Rust app, and one EdDSA key for the appcast and the worker manifest; amends 0010 | Proposed |
 | [XXXX](XXXX-cluster-v1-nodes.md) | Cluster v1 nodes: one primary, standbys and workers, a journaled state and a node tier | Proposed |
+| [XXXX](XXXX-cluster-failover-and-fencing.md) | Cluster v1 failover and fencing: a long lease from one Standby, a gate at every tool call, claims and side copies that are never deleted | Proposed |
 
 0001 was written before records had a Status section. Its status is Accepted.
 

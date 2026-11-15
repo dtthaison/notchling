@@ -303,6 +303,8 @@ from the app in this run, or `cluster.join` (below), or a restart of a headless 
 - Status carries `failover: {value, armed, target}`: the primary's journaled value, whether the target has granted a lease at the
   current term, and the target's node id (or `null`). The settings key `clusterFailover` (class Ask) mirrors `value`: the journal on
   the primary wins, so an allowed agent `settings.set` is journaled first and fails (key unchanged) when the primary can't be reached.
+- The failover value is set by the app's `cluster.failover.set` (above) or an allowed `settings.set` of `clusterFailover`. The primary
+  refuses the call from a member that isn't marked client (`client_home`).
 - Topic `cluster` (agent tier): `cluster.changed` with the status body after a change other than load, and
   `cluster.refused {from, op, reason}` (also a `cluster.step` event, `refused`).
 - Calls from other nodes run through the same ops as `ClientKind::Node` with the socket's checks, recorded
@@ -554,6 +556,12 @@ Linux ([`crate::hook::parent_pid`]). Anything else is `forbidden`, and `notchlin
 on it. An agent inside that same session still descends from it; what this stops is a process
 answering for a session it doesn't belong to, and a pid it names for itself.
 
+`notchling hook --fence` is a second form with no op behind it: it asks no daemon and opens no socket. It reads the session
+id from the event, reads `<data dir>/cluster/fence.json` and passes (prints nothing, exit 0), waits up to 20 s, or prints a
+`PreToolUse` deny with the reason. No file passes; a file that exists but can't be read, or a session whose lease ran out
+on this boot, waits and then denies. It is the sixth hook slot `install.apply` writes. Nothing writes `fence.json` yet, so it
+always passes today.
+
 ## `install_ops.rs`
 
 E13 in the daemon (Milestone 6): installing the hook entries into Claude Code's
@@ -563,14 +571,21 @@ start, and until the maintainer turns it on the Swift app owns both (decision 00
 
 | Op | Tier | Args | Reply |
 | --- | --- | --- | --- |
-| `install.plan` | app | `{action?: "install" \| "remove", what?, with_swift_hooks?}` | the envelope, `applied: false`; reads only, works with the switch off |
-| `install.apply` | app | `{what?, with_swift_hooks?}` | the envelope |
+| `install.plan` | app | `{action?: "install" \| "remove", what?, with_swift_hooks?, node?}` | the envelope, `applied: false`; reads only, works with the switch off |
+| `install.apply` | app | `{what?, with_swift_hooks?, node?}` | the envelope |
 | `install.remove` | app | `{what?}` | the envelope |
 
 `what` names the parts to act on; left out it is all of them. The names are `prompt_hooks`
-(`PreToolUse` `AskUserQuestion` and `PermissionRequest` `*`), `page_hooks` (`PreToolUse`,
+(`PreToolUse` `AskUserQuestion` and `PermissionRequest` `*`, and the fence hook: `PreToolUse` `*` with the command
+`notchling hook --fence`, timeout 30 s, which stops a cluster session's tool calls on a machine it moved away from;
+it installs on every Mac, and outside a cluster it always passes), `page_hooks` (`PreToolUse`,
 `PostToolUse` and `PostToolUseFailure` matching `Artifact`) and the skills' folder names
 (`notchling-delegate`, `notchling-pages`, `notchling-settings` (Claude Code and Codex), and `notchling-vault` once the vault supplies it).
+
+`node` (a node id) runs the call on that machine instead, with its own folders and its own `install` switch. Only the
+primary forwards it, for the app tier, to an Active member; a `node` that is not a well-formed id is a bad request, never
+a local run, and the node's own id runs locally. A node whose switch is off answers `applied: false`, `on: false` and
+writes nothing. `install.remove` has no `node`.
 
 Settings > Skills & Models lists the skills with `install.plan` (no `what`, so it also plans the
 hooks it ignores) and its Reinstall Skills button sends `install.apply {what: [<every skill name the
