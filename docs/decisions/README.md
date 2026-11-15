@@ -35,6 +35,7 @@ Most of them come from the design, [revision 2](https://github.com/dtthaison/not
 | [XXXX](XXXX-sparkle-and-one-release-key.md) | Sparkle for the Rust app, and one EdDSA key for the appcast and the worker manifest; amends 0010 | Proposed |
 | [XXXX](XXXX-cluster-v1-nodes.md) | Cluster v1 nodes: one primary, standbys and workers, a journaled state and a node tier | Proposed |
 | [XXXX](XXXX-cluster-failover-and-fencing.md) | Cluster v1 failover and fencing: a long lease from one Standby, a gate at every tool call, claims and side copies that are never deleted | Proposed |
+| [XXXX](XXXX-cluster-standby-and-handover.md) | Cluster v1 Standby and handover: sets at every turn end, only pushed sessions move, a Standby relays or holds the phone's commands | Proposed |
 
 0001 was written before records had a Status section. Its status is Accepted.
 

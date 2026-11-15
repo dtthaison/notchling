@@ -164,15 +164,36 @@ in it goes to a third party: no server of the project, no cloud relay, no addres
   Sending code makes a git bundle of the commits that aren't pushed (at most 256 MB) and the Worker clones
   your repository's `origin` itself with its own credentials; bringing the work back sends the Worker's
   commits to your Mac. Uncommitted files and ignored files are not sent.
-- **The phone** sees other machines' sessions only through your Mac, over the same bridge and pairing as before;
-  a Worker never talks to the phone.
+- **What a Can Be Master machine holds:** a copy (a set) of what it needs to carry on the primary's main
+  sessions, sent at each of their turn ends, and only once that machine is ready, which includes disk
+  encryption (FileVault or LUKS) being on. A set holds each main session's transcripts, its session folder,
+  Claude Code's edit history and to-do files for it (for Codex, its rollout and its line of the session index).
+  It also holds the primary's `cluster.db` (the inbox and the cluster's state), the paired phones
+  (`devices.json`: names and token hashes, never the tokens) and the local copies of Artifact pages. The
+  machine keeps the two newest sets, 0600 in 0700 folders under `<data>/cluster/standby/`, and its own
+  `cluster.db` holds the phone commands it is holding for the primary (below).
+  Notchling doesn't encrypt them itself: the disk encryption protects them at rest. A set holds no code: for a
+  session's repository it carries the folder, the `origin` address (without a password or token), the branch
+  and the commit, and the machine that takes the session over gets the code from `origin` with its own git
+  access. A transcript holds what the session's tools read and printed, and the edit history holds earlier
+  versions of the files the session changed; both travel with the set, as a transcript does to a Mac that
+  follows the session. A set holds no secret values: no logins, tokens, Keychain items or vault values.
+- **A handover** (Move to <machine> Now) lays the moving sessions' files out on the new primary at the same
+  paths and starts them there. A local file that differs is never written over: it is moved to
+  `<data>/cluster/copies/` first, or the move is refused.
+- **The phone** sees other machines' sessions through your Mac, over the same bridge and pairing as before.
+  When your Mac can't be reached, the phone may connect to another Can Be Master machine of its cluster on the
+  LAN instead, pinned to the certificate your Mac listed for it, and that machine relays the phone's messages,
+  answers and new sessions to the primary. If the primary can't be reached either, that machine holds them in
+  its `cluster.db` until they are sent once or you cancel them. A Worker never talks to the phone.
 - **What never crosses:** Claude Code, Codex and Antigravity logins and tokens, lanes, the Secret Vault and its
   values (a dispatch that names secrets is refused in this version), the Keychain, `settings.json` and your own
-  files except the commits above. A Worker uses its own tool logins.
+  files except the commits and the sets above. A Worker and a Standby use their own tool logins.
 - **What a machine you removed keeps:** a machine that hears it was removed deletes `cluster.db`, the mirror
   files, and the incoming and outgoing transfer files. It keeps `<data>/cluster/work` (the repositories and
-  worktrees of sent code), `jobs/` (shell job logs), `workspaces/` (notes on sent code) and `node/` (its own
-  identity) until you delete them.
+  worktrees of sent code), `jobs/` (shell job logs), `workspaces/` (notes on sent code), `node/` (its own
+  identity), and, on a Can Be Master machine, `standby/` (the primary's sets) and `copies/` (files a handover
+  set aside) until you delete them.
 
 ## Tools Notchling starts
 
@@ -218,6 +239,9 @@ Links you click open in your browser.
 
 - It connects only to the Mac it paired with: on the LAN to that Mac's pinned certificate, or through
   the tunnel URL from the pairing, with the Access headers. On the LAN it never sends Access headers.
+  When that Mac is in a cluster and can't be reached, the phone may connect on the LAN to another Can Be
+  Master machine the Mac listed, only to the certificate fingerprint the Mac gave for it, and sends that
+  machine its token only after the certificate matches (see The cluster).
 - Voice dictation runs on the phone with a Whisper model bundled in the app.
 - None of its direct dependencies is an analytics or crash-reporting package (`apps/flutter/pubspec.yaml`).
 

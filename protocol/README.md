@@ -31,18 +31,18 @@ The answer's `data` depends on the op, so the schema names it `<Op>Response`. Th
 | `hello` | `token` | `device {id, name}`, `version`, `cluster? {primary, term, nodes[]}` |
 | `pair` | `code`, `device {name, platform?}` | `token`, `deviceId`, `version` |
 | `ping` | | `time` |
-| `sessions.list` | | `sessions`, `models?` |
-| `chat.get` | `sessionId`, `subagentId?`, `limit?`, `before?`, `after?` | `messages`, `hasMore`, `reset?` |
+| `sessions.list` | | `sessions`, `models?`, `stale?` |
+| `chat.get` | `sessionId`, `subagentId?`, `limit?`, `before?`, `after?` | `messages`, `hasMore`, `reset?`, `stale?` |
 | `viz.get` | `sessionId`, `entity?` | `suggested`, `webURL?`, `webCandidates?`, `flow?`, `diagram?`, `chart?`, `entity?` |
 | `web.snapshot` | `sessionId`, `width?`, `url?` | `binary`, `bytes`, `format`, `url`; and `sent` |
-| `session.message` | `sessionId`, `text` | `sent` |
-| `session.sendNow` | `sessionId` | `sent` |
+| `session.message` | `sessionId`, `text`, `key?` | `sent`, `relayed?`; or `held` |
+| `session.sendNow` | `sessionId`, `key?` | `sent`, `relayed?`; or `held` |
 | `session.image.begin` | `sessionId`, `bytes`, `caption?` | `uploadId`, `chunkBytes` |
 | `session.image.chunk` | `uploadId`, `seq`, `data` | `received` |
 | `session.image.end` | `uploadId` | `sent` |
 | `commands.list` | `sessionId` | `commands` |
-| `prompt.answer` | `requestId`, `allow?`, `choice?`, `text?` | `answered` |
-| `session.new` | `cwd`, `model?`, `modelId?` | `started` |
+| `prompt.answer` | `requestId`, `allow?`, `choice?`, `text?`, `key?` | `answered`, `relayed?`; or `held` |
+| `session.new` | `cwd`, `model?`, `modelId?`, `key?` | `started`, `relayed?`; or `held` |
 | `chat.image` | `sessionId`, `imageId`, `maxWidth?` | `binary`, `bytes`, `format`, `imageId`; and `sent` |
 | `session.takeover` | `sessionId`, `stopOriginal?` | `sessionId`, `resumed`, `stoppedPid?` |
 | `projects.recent` | | `projects` |
@@ -54,7 +54,7 @@ The answer's `data` depends on the op, so the schema names it `<Op>Response`. Th
 | `subscribe` | `sessions?`, `inbox?`, `held?`, `sessionId?`, `subagentId?`, `lastMessageId?`, `phone? {deviceWindowId?, fps?, width?}` | `subscribed: true` |
 | `unsubscribe` | | `subscribed: false` |
 
-A `?` marks an optional field. The schema has the types, limits and descriptions.
+A `?` marks an optional field. "or `held`" is the answer a Standby gives instead when it holds the command, `{"held": {"id", "at"}}` (`HeldResponse`, below). The schema has the types, limits and descriptions.
 
 ### Order of frames
 
