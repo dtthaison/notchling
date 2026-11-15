@@ -25,7 +25,7 @@ pub struct Socket {
 pub const SESSION_CALL_TIMEOUT: Duration = Duration::from_secs(60);
 
 pub fn call_timeout(op: &str) -> Duration {
-    if op.starts_with("session.") || op == ops::FOLDER_TRUST {
+    if (op.starts_with("session.") && op != ops::SESSION_SEND) || op == ops::FOLDER_TRUST {
         SESSION_CALL_TIMEOUT
     } else {
         CALL_TIMEOUT
@@ -287,6 +287,16 @@ mod tests {
             ops::SESSION_REMOVE,
         ] {
             assert_eq!(call_timeout(op), SESSION_CALL_TIMEOUT, "{op}");
+        }
+        for op in [
+            ops::SESSION_SEND,
+            ops::OUTBOX_LIST,
+            ops::OUTBOX_EDIT,
+            ops::OUTBOX_REMOVE,
+            ops::OUTBOX_RESEND,
+            ops::OUTBOX_DISCARD,
+        ] {
+            assert_eq!(call_timeout(op), notchling_local_api::CALL_TIMEOUT, "{op}");
         }
         assert!(SESSION_CALL_TIMEOUT >= std::time::Duration::from_secs(60));
         assert_eq!(

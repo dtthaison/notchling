@@ -48,6 +48,7 @@ pub mod markdown;
 pub mod markdown_cache;
 pub mod markers;
 pub mod message_meta;
+pub mod outbox;
 pub mod outgoing;
 pub mod page_panel;
 pub mod paging;

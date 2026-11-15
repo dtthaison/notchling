@@ -22,6 +22,12 @@ pub mod ops {
     pub const SESSION_COMMAND: &str = "session.command";
     pub const SESSION_QUESTION: &str = "session.question";
     pub const SESSION_HELD_DISCARD: &str = "session.held.discard";
+    pub const SESSION_SEND: &str = "session.send";
+    pub const OUTBOX_LIST: &str = "outbox.list";
+    pub const OUTBOX_EDIT: &str = "outbox.edit";
+    pub const OUTBOX_REMOVE: &str = "outbox.remove";
+    pub const OUTBOX_RESEND: &str = "outbox.resend";
+    pub const OUTBOX_DISCARD: &str = "outbox.discard";
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -148,8 +154,42 @@ impl Request {
         Request::new(ops::SESSION_REPLY, json!({ "id": id, "text": text }))
     }
 
+    pub fn send(id: &str, text: &str) -> Request {
+        Request::new(ops::SESSION_SEND, json!({ "id": id, "text": text }))
+    }
+
+    pub fn with_options(mut self, options: Value) -> Request {
+        if self.op == ops::SESSION_SEND {
+            self.args["options"] = options;
+        }
+        self
+    }
+
+    pub fn outbox_edit(id: &str, text: &str) -> Request {
+        Request::new(ops::OUTBOX_EDIT, json!({ "id": id, "text": text }))
+    }
+
+    pub fn outbox_remove(id: &str) -> Request {
+        Request::new(ops::OUTBOX_REMOVE, json!({ "id": id }))
+    }
+
+    pub fn outbox_resend(id: &str, clear_box: bool, resume: bool) -> Request {
+        let mut args = json!({ "id": id });
+        if clear_box {
+            args["clear_box"] = json!(true);
+        }
+        if resume {
+            args["resume"] = json!(true);
+        }
+        Request::new(ops::OUTBOX_RESEND, args)
+    }
+
+    pub fn outbox_discard(session: &str) -> Request {
+        Request::new(ops::OUTBOX_DISCARD, json!({ "session": session }))
+    }
+
     pub fn clearing_box(mut self) -> Request {
-        if self.op == ops::SESSION_REPLY {
+        if self.op == ops::SESSION_REPLY || self.op == ops::SESSION_SEND {
             self.args["clear_box"] = json!(true);
         }
         self
@@ -266,6 +306,54 @@ mod tests {
         let request = Request::held_discard("job-a");
         assert_eq!(request.op, "session.held.discard");
         assert_eq!(request.args, json!({"id": "job-a"}));
+    }
+
+    #[test]
+    fn the_outbox_requests_have_the_wire_shapes() {
+        let send = Request::send("s1", "go on").clearing_box();
+        assert_eq!(send.op, "session.send");
+        assert_eq!(
+            send.args,
+            json!({"id": "s1", "text": "go on", "clear_box": true})
+        );
+        let with = Request::send("s1", "go").with_options(json!({"model": "m"}));
+        assert_eq!(
+            with.args,
+            json!({"id": "s1", "text": "go", "options": {"model": "m"}})
+        );
+        assert_eq!(
+            Request::outbox_edit("o1", "new"),
+            Request {
+                op: "outbox.edit",
+                args: json!({"id": "o1", "text": "new"})
+            }
+        );
+        assert_eq!(
+            Request::outbox_remove("o1"),
+            Request {
+                op: "outbox.remove",
+                args: json!({"id": "o1"})
+            }
+        );
+        assert_eq!(
+            Request::outbox_resend("o1", false, false).args,
+            json!({"id": "o1"})
+        );
+        assert_eq!(
+            Request::outbox_resend("o1", true, false).args,
+            json!({"id": "o1", "clear_box": true})
+        );
+        assert_eq!(
+            Request::outbox_resend("o1", false, true).args,
+            json!({"id": "o1", "resume": true})
+        );
+        assert_eq!(
+            Request::outbox_discard("ab12cd34"),
+            Request {
+                op: "outbox.discard",
+                args: json!({"session": "ab12cd34"})
+            }
+        );
     }
 
     #[test]

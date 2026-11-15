@@ -6,6 +6,7 @@ use std::time::{Duration, Instant};
 
 use notchling_engine::catalog::{ModelInfo, Tool as CatalogTool};
 use notchling_engine::sessions::Agent;
+use notchling_engine::transcript::model::Conversation;
 use notchling_local_api::{
     ensure_daemon, ops, topics, Client, ClientError, ClientKind, ConnectOptions, Event, Started,
     SOCKET_NAME,
@@ -13,6 +14,7 @@ use notchling_local_api::{
 use serde_json::Value;
 
 use crate::chat::data::DataRoot;
+use crate::chat::outbox::OutboxFeed;
 use crate::tools::live::ToolLive;
 
 pub type Starter = Arc<dyn Fn(&Path) -> Result<Started, ClientError> + Send + Sync>;
@@ -86,6 +88,7 @@ pub struct View {
     pub agents: Option<Vec<Agent>>,
     pub prompts: Option<Vec<Value>>,
     pub tools: ToolLive,
+    pub outbox: OutboxFeed,
     pub answered: HashSet<String>,
     pub link: Link,
     pub generation: u64,
@@ -113,6 +116,7 @@ struct State {
     agents: Option<Vec<Agent>>,
     prompts: Option<Vec<Value>>,
     tools: ToolLive,
+    outbox: OutboxFeed,
     catalog: HashMap<CatalogTool, Vec<ModelInfo>>,
     catalog_generation: u64,
     answered: HashSet<String>,
@@ -171,6 +175,12 @@ impl Shared {
                     self.set_prompts(prompts);
                 }
             }
+            topics::OUTBOX_CHANGED | topics::OUTBOX_REMOVED => {
+                let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+                if state.outbox.apply(&event, now_ms()) {
+                    state.generation += 1;
+                }
+            }
             topics::CODEX_TURN | topics::SESSION_CHANGED | topics::SESSION_HELD => {
                 let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
                 if state.tools.apply(&event) {
@@ -178,6 +188,14 @@ impl Shared {
                 }
             }
             _ => {}
+        }
+    }
+
+    fn set_outbox(&self, outbox: OutboxFeed) {
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        if state.outbox != outbox {
+            state.outbox = outbox;
+            state.generation += 1;
         }
     }
 
@@ -210,6 +228,7 @@ impl SessionSource {
                     agents: None,
                     prompts: None,
                     tools: ToolLive::default(),
+                    outbox: OutboxFeed::default(),
                     catalog: HashMap::new(),
                     catalog_generation: 0,
                     answered: HashSet::new(),
@@ -247,6 +266,7 @@ impl SessionSource {
             agents: state.agents.clone(),
             prompts: state.prompts.clone(),
             tools: state.tools.clone(),
+            outbox: state.outbox.clone(),
             answered: state.answered.clone(),
             link: state.link,
             generation: state.generation,
@@ -270,6 +290,13 @@ impl SessionSource {
     pub fn held(&self) -> (Option<Vec<Value>>, HashSet<String>) {
         let state = self.shared.state.lock().unwrap_or_else(|e| e.into_inner());
         (state.prompts.clone(), state.answered.clone())
+    }
+
+    pub fn settle_outbox(&self, session: &str, conversation: &Conversation) {
+        let mut state = self.shared.state.lock().unwrap_or_else(|e| e.into_inner());
+        if state.outbox.settle(session, conversation, now_ms()) {
+            state.generation += 1;
+        }
     }
 
     pub fn mark_answered(&self, key: &str) {
@@ -300,8 +327,9 @@ fn run(config: SourceConfig, shared: &Shared) {
     while !shared.stopped() {
         let mut link = Link::Down;
         match connect(&config, &mut tried_start) {
-            Ok((client, agents, prompts)) => {
+            Ok((client, agents, prompts, outbox)) => {
                 shared.set_prompts(prompts);
+                shared.set_outbox(outbox);
                 shared.set(Link::Daemon, Some(agents));
                 failures = 0;
                 follow(client, shared);
@@ -316,13 +344,14 @@ fn run(config: SourceConfig, shared: &Shared) {
             return;
         }
         shared.set_prompts(None);
+        shared.set_outbox(OutboxFeed::default());
         shared.reset_tools();
         shared.set(link, None);
         sleep(config.backoff.delay(failures.saturating_sub(1)), shared);
     }
 }
 
-type Connected = (Client, Vec<Agent>, Option<Vec<Value>>);
+type Connected = (Client, Vec<Agent>, Option<Vec<Value>>, OutboxFeed);
 
 fn connect(config: &SourceConfig, tried_start: &mut bool) -> Result<Connected, ClientError> {
     let options = ConnectOptions {
@@ -350,7 +379,20 @@ fn connect(config: &SourceConfig, tried_start: &mut bool) -> Result<Connected, C
         Ok(_) | Err(ClientError::Api(_)) => {}
         Err(e) => return Err(e),
     }
+    let outboxed = match client.subscribe(&[topics::OUTBOX]) {
+        Ok(_) => true,
+        Err(ClientError::Api(_)) => false,
+        Err(e) => return Err(e),
+    };
     let mut agents = client.sessions::<Agent>()?;
+    let mut outbox = OutboxFeed::default();
+    if outboxed {
+        match client.call(ops::OUTBOX_LIST, serde_json::json!({})) {
+            Ok(Value::Array(list)) => outbox.seed(&list),
+            Ok(_) | Err(ClientError::Api(_)) => {}
+            Err(e) => return Err(e),
+        }
+    }
     let mut prompts = match followed {
         true => match client.call(ops::PROMPTS_LIST, serde_json::json!({})) {
             Ok(Value::Array(list)) => Some(list),
@@ -366,6 +408,9 @@ fn connect(config: &SourceConfig, tried_start: &mut bool) -> Result<Connected, C
                     agents = newer;
                 }
             }
+            topics::OUTBOX_CHANGED | topics::OUTBOX_REMOVED => {
+                outbox.apply(&event, now_ms());
+            }
             _ => {
                 if let Some(list) = &mut prompts {
                     held_change(list, &event);
@@ -373,7 +418,13 @@ fn connect(config: &SourceConfig, tried_start: &mut bool) -> Result<Connected, C
             }
         }
     }
-    Ok((client, agents, prompts))
+    Ok((client, agents, prompts, outbox))
+}
+
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis() as i64)
 }
 
 fn held_change(list: &mut Vec<Value>, event: &Event) {
@@ -466,3 +517,7 @@ mod tests;
 #[cfg(all(test, unix))]
 #[path = "session_source_prompts_tests.rs"]
 mod prompts_tests;
+
+#[cfg(all(test, unix))]
+#[path = "session_source_outbox_tests.rs"]
+mod outbox_tests;

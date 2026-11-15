@@ -1,0 +1,272 @@
+use std::collections::BTreeMap;
+
+use notchling_engine::outbox::{Kind, State, Tool, Via, Why};
+use notchling_engine::transcript::model::Conversation;
+use notchling_local_api::{topics, Event};
+use serde_json::Value;
+
+use super::outgoing::Outgoing;
+use crate::acting::Request;
+
+const SENT_KEPT: usize = 50;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OutboxRow {
+    pub id: String,
+    pub session: String,
+    pub tool: Tool,
+    pub kind: Kind,
+    pub text: String,
+    pub state: State,
+    pub why: Option<Why>,
+    pub boxed: Option<String>,
+    pub error: Option<String>,
+    pub position: usize,
+    pub queued_ms: i64,
+    pub updated_ms: i64,
+    pub via: Via,
+}
+
+fn word<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
+    value.get(key).and_then(Value::as_str)
+}
+
+impl OutboxRow {
+    pub fn from_wire(value: &Value) -> Option<OutboxRow> {
+        Some(OutboxRow {
+            id: word(value, "id")?.to_owned(),
+            session: word(value, "session")?.to_owned(),
+            tool: Tool::parse(word(value, "tool")?)?,
+            kind: Kind::parse(word(value, "kind")?)?,
+            text: word(value, "text")?.to_owned(),
+            state: State::parse(word(value, "state")?)?,
+            why: word(value, "why").and_then(Why::parse),
+            boxed: word(value, "box").map(str::to_owned),
+            error: word(value, "error").map(str::to_owned),
+            position: value
+                .get("position")
+                .and_then(Value::as_u64)
+                .map_or(1, |n| n as usize),
+            queued_ms: value.get("queuedMs").and_then(Value::as_i64).unwrap_or(0),
+            updated_ms: value.get("updatedMs").and_then(Value::as_i64).unwrap_or(0),
+            via: Via::parse(word(value, "via").unwrap_or("chat")).unwrap_or(Via::Chat),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Status {
+    Queued,
+    QueuedRetry,
+    WaitingDialog,
+    WaitsForTurn,
+    Sending,
+    QueuedInSession,
+    Sent,
+    MayBeIn,
+    BoxHasText(String),
+    Stopped,
+    NotFound,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Button {
+    Edit,
+    Remove,
+    SendAgain,
+    Drop,
+    ClearBoxAndSend,
+    ResumeAndSend,
+}
+
+impl Button {
+    pub fn request(self, id: &str) -> Option<Request> {
+        match self {
+            Button::Edit => None,
+            Button::Remove | Button::Drop => Some(Request::outbox_remove(id)),
+            Button::SendAgain => Some(Request::outbox_resend(id, false, false)),
+            Button::ClearBoxAndSend => Some(Request::outbox_resend(id, true, false)),
+            Button::ResumeAndSend => Some(Request::outbox_resend(id, false, true)),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Bubble {
+    pub id: String,
+    pub text: String,
+    pub status: Status,
+    pub buttons: Vec<Button>,
+}
+
+fn squeeze(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+pub fn bubble(row: &OutboxRow) -> Bubble {
+    let (status, buttons) = match row.state {
+        State::Queued => (Status::Queued, vec![Button::Edit, Button::Remove]),
+        State::Waiting => {
+            let status = match row.why {
+                Some(Why::Retry) => Status::QueuedRetry,
+                Some(Why::Dialog) => Status::WaitingDialog,
+                Some(Why::Turn) => Status::WaitsForTurn,
+                _ => Status::Queued,
+            };
+            (status, vec![Button::Edit, Button::Remove])
+        }
+        State::Sending => (Status::Sending, Vec::new()),
+        State::InQueue => (Status::QueuedInSession, Vec::new()),
+        State::Unsure => (Status::MayBeIn, vec![Button::SendAgain, Button::Drop]),
+        State::Box => (
+            Status::BoxHasText(squeeze(row.boxed.as_deref().unwrap_or_default())),
+            vec![Button::ClearBoxAndSend, Button::Edit, Button::Remove],
+        ),
+        State::Stopped => (
+            Status::Stopped,
+            vec![Button::ResumeAndSend, Button::Edit, Button::Remove],
+        ),
+        State::Gone => (Status::NotFound, vec![Button::Remove]),
+    };
+    Bubble {
+        id: row.id.clone(),
+        text: row.text.clone(),
+        status,
+        buttons,
+    }
+}
+
+pub fn hidden_queued(queued: &[String], rows: &[OutboxRow]) -> Option<usize> {
+    let held = rows.iter().find(|r| r.state == State::InQueue)?;
+    let wanted = squeeze(&held.text);
+    queued.iter().position(|entry| squeeze(entry) == wanted)
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct SentRow {
+    row: OutboxRow,
+    at_ms: i64,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct OutboxFeed {
+    rows: BTreeMap<String, Vec<OutboxRow>>,
+    sent: BTreeMap<String, Vec<SentRow>>,
+}
+
+impl OutboxFeed {
+    pub fn seed(&mut self, list: &[Value]) {
+        self.rows.clear();
+        for row in list.iter().filter_map(OutboxRow::from_wire) {
+            self.rows.entry(row.session.clone()).or_default().push(row);
+        }
+    }
+
+    pub fn rows(&self, session: &str) -> &[OutboxRow] {
+        self.rows.get(session).map_or(&[], Vec::as_slice)
+    }
+
+    pub fn apply(&mut self, event: &Event, now_ms: i64) -> bool {
+        match event.event.as_str() {
+            topics::OUTBOX_CHANGED => event
+                .data
+                .get("row")
+                .and_then(OutboxRow::from_wire)
+                .is_some_and(|row| self.upsert(row)),
+            topics::OUTBOX_REMOVED => {
+                let Some(id) = word(&event.data, "id") else {
+                    return false;
+                };
+                if word(&event.data, "why") == Some("sent") {
+                    return self.sent(id, now_ms);
+                }
+                self.take(id).is_some()
+            }
+            _ => false,
+        }
+    }
+
+    fn upsert(&mut self, row: OutboxRow) -> bool {
+        let list = self.rows.entry(row.session.clone()).or_default();
+        match list.iter_mut().find(|r| r.id == row.id) {
+            Some(known) if *known == row => false,
+            Some(known) => {
+                *known = row;
+                true
+            }
+            None => {
+                list.push(row);
+                true
+            }
+        }
+    }
+
+    fn take(&mut self, id: &str) -> Option<OutboxRow> {
+        let mut found = None;
+        for list in self.rows.values_mut() {
+            if let Some(at) = list.iter().position(|r| r.id == id) {
+                found = Some(list.remove(at));
+                break;
+            }
+        }
+        self.rows.retain(|_, list| !list.is_empty());
+        found
+    }
+
+    pub fn sent(&mut self, id: &str, now_ms: i64) -> bool {
+        let Some(row) = self.take(id) else {
+            return false;
+        };
+        let list = self.sent.entry(row.session.clone()).or_default();
+        list.push(SentRow { row, at_ms: now_ms });
+        if list.len() > SENT_KEPT {
+            list.remove(0);
+        }
+        true
+    }
+
+    pub fn settle(&mut self, session: &str, conversation: &Conversation, now_ms: i64) -> bool {
+        let Some(list) = self.sent.get_mut(session) else {
+            return false;
+        };
+        let before = list.len();
+        list.retain(|kept| {
+            let waiting = Outgoing {
+                text: kept.row.text.clone(),
+                seen: usize::MAX,
+                delivered_at: Some(kept.at_ms),
+                sent_at: kept.row.queued_ms,
+            };
+            waiting.keep(conversation, now_ms)
+        });
+        let changed = list.len() != before;
+        if list.is_empty() {
+            self.sent.remove(session);
+        }
+        changed
+    }
+
+    pub fn bubbles(&self, session: &str) -> Vec<Bubble> {
+        let sent = self
+            .sent
+            .get(session)
+            .into_iter()
+            .flatten()
+            .map(|kept| Bubble {
+                id: kept.row.id.clone(),
+                text: kept.row.text.clone(),
+                status: Status::Sent,
+                buttons: Vec::new(),
+            });
+        let waiting = self.rows(session).iter().map(bubble);
+        sent.chain(waiting).collect()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.rows.is_empty() && self.sent.is_empty()
+    }
+}
+
+#[cfg(test)]
+#[path = "outbox_tests.rs"]
+mod tests;
