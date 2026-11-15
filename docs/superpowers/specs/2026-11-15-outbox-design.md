@@ -1,7 +1,7 @@
 # Outbox: every message reaches its session, fast, once, in order
 
 - **Date:** 2026-11-15
-- **Status:** Approved design, written up for the build. The maintainer approved the design on 2026-11-15 ("finalize the mailbox, ready to plan and implement"). Nothing here is built.
+- **Status:** Approved design, written up for the build. The maintainer approved the design on 2026-11-15 ("finalize the mailbox, ready to plan and implement"), and answered [question 1](#for-the-maintainer) the same day: a message only in Claude Code's queue is not Sent; its row stays as **Queued in the session** (`in_queue`) until the model takes it. This text is amended for that answer. Nothing here is built.
 - **Source:** the design page *Outbox & Ask*, Part 1 (published artifact v8; local copy `docs/local/2026-11-15-outbox-ask-design.html`, not in git). Its rules, bubble states, retention table, two build details and the table of known problems 1 to 10 are decisions and are not reopened here. Part 2 (Ask: agents asking you questions) is **not in scope**; it comes later.
 - **Base:** `origin/agent-run-oss` 5f48fb0c, which holds the two fixes the design builds on: `agent/held-busy-background` (0617c60e: `turn_is_over` counts `busy` with `inFlight.tasks > 0` as "may be at its prompt") and `agent/reply-leftover-box` (1a73db2e: `Clearing`, `reply_attempts.rs`, `clear_box`, `ApiError::data`).
 - **Touches:** decisions 0004 (the daemon owns what acts), 0007 (tiers, additive API), 0011 (one owner per resource), 0014 (app data in SQLite), 0018 (Chat's parts), the typed event stream (XXXX), the cluster v1 design (a mailbox stays on the machine that owns the session). It needs a decision record of its own (plan task "Decision record").
@@ -12,7 +12,7 @@
 1. **Send never waits.** Chat, the notch, the phone and old clients put a message in the session's **Outbox**, a table in `notchling.db`, and get its id back in milliseconds. Nothing is typed on the caller's thread.
 2. **One postman per session** delivers that session's messages in the order they were sent. A slow session never holds up another.
 3. **Deliver like the terminal.** The postman types a message as soon as the session's input box can take text, even mid-turn. It waits only for an open dialog, or for an earlier message (ours or one the person typed) still unread in Claude Code's own queue. Slash commands, Codex and Antigravity wait for the turn to end.
-4. **Never twice.** After Return the postman watches the transcript (10 s, then one more look at 30 s). Found: the row is deleted and the transcript shows the message. Not found: **May already be in**, with Send Again and Drop. A daemon that stops while typing reloads that row as May already be in, never as Queued.
+4. **Never twice.** After Return the postman watches the transcript (10 s, then one more look at 30 s). Taken by the model (a user line or a `queued_command` attachment): the row is deleted and the transcript shows the message. Only in Claude Code's queue (an `enqueue` line): **Queued in the session**; the row stays until the model takes it, and comes back as May already be in if Claude Code drops it (its queue is memory). Neither: **May already be in**, with Send Again and Drop. A daemon that stops while typing reloads that row as May already be in (or Queued in the session), never as Queued.
 5. Leftover text of ours in the session's box is cleared (the leftover-box fix); anyone else's text stops the session's mailbox at **Box has other text**, with Clear Box and Send.
 6. The Outbox is a mailbox, not a history: a row lives only until its delivery is settled. Unsent work is never deleted silently; after 7 days it is raised once in the Inbox with Send and Discard.
 7. The ops are additive: `session.send` and `outbox.*`, an app-tier `outbox` topic. `session.reply` stays for old clients and runs on the Outbox. Held text (`held_ops.rs`) goes away.
@@ -28,7 +28,7 @@ Each is marked *Builder's call* again in the section it belongs to.
 | B2 | `sending` is one persisted state for "keys may be going out or Return was pressed and we are verifying"; Edit and Remove refuse it | [8](#8-data-model), [9](#9-states-and-what-moves-them) |
 | B3 | The head row of a session blocks the rows behind it, whatever its state, so order holds; a stuck head is visible and has its own actions | [9](#9-states-and-what-moves-them) |
 | B4 | Edit and Remove also work on Box has other text, Session stopped and Session not found rows (they are not being typed) | [9](#9-states-and-what-moves-them) |
-| B5 | Verification counts from the attempt's start, not the queue time: `seen_before` is the count since `attempt_ms − 2 s` taken when the row is taken, and the row is Sent when the count since that instant grows. It is the design's "count after queue time" made safe for rows that waited hours past the 1 MB transcript window | [10.6](#106-verifying) |
+| B5 | Verification counts from the attempt's start, not the queue time, in two counts (`Seen { enqueued, taken }`): `seen_before` (taken) and `queued_before` (enqueued) are the counts since `attempt_ms − 2 s` stored when the row is taken; the row is Sent when the taken count since that instant grows, and In Claude Code's queue when only the enqueued count does. It is the design's "count after queue time" made safe for rows that waited hours past the 1 MB transcript window | [10.6](#106-verifying) |
 | B6 | "After typing" means after Return. A failure before Return (nothing submitted) never goes to May already be in: it retries, or stops at Box has other text | [10.5](#105-what-a-try-ends-with) |
 | B7 | A session that disappears from every lane is never deleted from the Outbox by itself: its rows go to Session not found; only Notchling's own remove (or Discard) deletes them | [9](#9-states-and-what-moves-them) |
 | B8 | Session stopped = the job's `state` is `stopped`; the postman never attaches to it. Resume and Send runs `claude respawn <job>` (`control::session::plan_respawn`) and then queues the row | [10.3](#103-the-gate-claude-code) |
@@ -39,13 +39,13 @@ Each is marked *Builder's call* again in the section it belongs to.
 | B13 | Codex and Antigravity are delivered by their runners, not typed: Sent when the runner started the turn. A new `CodexRuns::send_if_idle` refuses instead of queueing in memory. Draft first messages (`codex-new:`, `agy-new:`) keep today's path | [10.8](#108-codex-and-antigravity) |
 | B14 | `session.send` is refused while acting is off, like every acting op; rows already in the Outbox wait | [11.1](#111-sessionsend) |
 | B15 | Text is at most 100 KB; at most 200 rows per session | [8](#8-data-model) |
-| B16 | `session.reply` = `session.send` plus a wait of up to 50 s for the row to settle; a row that ends needing the user is removed and returned as an error, as today's reply errors are | [11.3](#113-sessionreply-kept) |
+| B16 | `session.reply` = `session.send` plus a wait of up to 50 s for the row to settle; a row that ends needing the user is removed and returned as an error, as today's reply errors are; a row that reaches Claude Code's queue answers at once with the queued shape and stays | [11.3](#113-sessionreply-kept) |
 | B17 | The 7-day notice is one Inbox item per session (not per message), with no message text (the `inbox` table is class Cluster), raised once per row and not raised again after a restart | [13](#13-the-7-day-notice) |
 | B18 | Held text is memory only today, so nothing carries over at the first start; `session.held` is no longer published and `session.held.discard` discards the session's removable rows | [12](#12-migration-from-held-text) |
 | B19 | The notch has no reply box in the Rust app; it shows only a "needs you" hint. The phone's `session.message` goes into the Outbox and answers `{"sent": true}` as today; the phone shows no Outbox states in v1 and acts through the 7-day Inbox notice | [14](#14-what-the-user-sees) |
 | B20 | Sessions in Notchling's own terminal host: the Rust daemon has no host-terminal client yet, so there is nothing to deliver to; the courier interface has room for one. Sessions in another terminal app are refused at Send | [10.9](#109-terminal-sessions) |
 | B21 | Remote sessions (cluster) keep using `session.reply`, which the cluster already forwards to the owner node, where it runs on that node's Outbox. Cluster rules for `session.send` and `outbox.*` come after cluster b merges | [11.6](#116-cluster) |
-| B22 | A merged prompt (ours and the person's taken together by Claude Code) is labelled on the transcript message in Chat, not on an Outbox row, since the row is gone by then | [10.7](#107-merged-prompts) |
+| B22 | A merged prompt (ours and the person's taken together by Claude Code) is labelled on the transcript message in Chat, not on an Outbox row, since the row is settled by then (Sent, or May already be in when the merged line doesn't match its text alone) | [10.7](#107-merged-prompts) |
 | B23 | New event kind `session.outbox` for row life (queued, sent, unsure, removed …); `session.reply` stays the per-try record; `session.reply_held` stays registered and is no longer emitted | [11.5](#115-events-and-audit) |
 | B24 | A row is keyed by its job, not by the `sessions.list` row id: a Claude Code job's short id (`AgentTarget::Job`), which survives `/clear`, the first `sessionId`, `claude respawn` and a move; `codex:<thread>` and `agy:<conversation>` for the others. Ops take the row id callers know and resolve it *(settled after the builder check)* | [8](#8-data-model) |
 | B25 | The phone's send reaches Codex and Antigravity sessions too, through `session.send` (the bridge already names them with `codex:`/`agy:` job ids and today answers "Session not found.") *(settled after the builder check)* | [11.4](#114-the-phone) |
@@ -147,7 +147,7 @@ B keeps C's speed and steering, keeps the order and the one-prompt-per-message p
 | Typing a reply | `engine/src/reply/plan.rs::reply`, `exec.rs::execute_clearing`, `terminal/input_box.rs` | Reused unchanged; a new `plan::reply_in` for an attach that is already open |
 | Leftover clearing | `notchlingd/src/reply_attempts.rs`, `exec::Clearing` (leftover-box fix) | Reused: every try notes its text there; `clear_box` comes from the row |
 | `not_cleared` with the box text | `acting_ops.rs::play_inner` (`data {why, box}`) | Reused for the Box has other text state |
-| Sent-since check | `engine/src/transcript/sent.rs::sent_since` | Joined by `count_since` (counts, not yes/no) |
+| Sent-since check | `engine/src/transcript/sent.rs::sent_since` | Joined by `count_since` (two counts, enqueued and taken, not yes/no) |
 | Claude Code's queue | `engine/src/transcript/conversation/queue.rs` (`Queue`), `parser.rs::attachment`, `typed.rs::typed_prompt` | Reused by a light `queue_state` read |
 | The turn's live flags | `sessions/jobs.rs::turn_is_over`, `Agent::at_prompt`, `turn_running`, `takes_held_text` | Read by the safe rule only |
 | Codex's queue | `engine/src/tools/codex/runs.rs` (`state.outbox`, in memory) | Not used for existing sessions any more; `send_if_idle` added |
@@ -167,20 +167,22 @@ B keeps C's speed and steering, keeps the order and the one-prompt-per-message p
 - **Courier**: the per-tool part of the postman that knows how to deliver (type into a Claude Code job, start a Codex turn, prompt an Antigravity session).
 - **Take**: the postman's one database step that marks the head `sending` and reads its text.
 - **Try**: one take and what follows it.
-- **Claude Code's queue**: text typed while the model works, held by Claude Code until its next step; written to the transcript as `queue-operation` lines.
+- **Claude Code's queue**: text typed while the model works, held by Claude Code until its next step; written to the transcript as `queue-operation` lines. It is memory: a Claude Code restart drops it.
+- **Taken**: the model read the message: a typed user line (after a `dequeue`, or with none when Claude Code was idle) or a `queued_command` attachment naming it, or for a slash command its `local_command` line. An `enqueue` line alone is not a take.
+- **In Claude Code's queue** (`in_queue`): a row whose text Claude Code queued (an `enqueue` line) and the model has not taken yet.
 - **Safe rule**: wait for the turn to end before typing (today's held gate).
 - **Turn**, **transcript**, **busy**, **daemon**: as in the source's glossary.
 
 ## 7. The design as decided
 
-From the approved source, restated; nothing in this section is open.
+From the approved source, restated; nothing in this section is open. The maintainer's answer of 2026-11-15 to question 1 ([For the maintainer](#for-the-maintainer)) amends rule 4, the bubble and retention tables, the first build detail and problem 10; the amended words are marked *(amended 2026-11-15)*.
 
 ### 7.1 Four rules
 
 1. **Saved first.** The message is written to `notchling.db` before anything else, so a restart never loses it. Send returns in milliseconds; Chat shows the bubble as Queued.
 2. **Deliver like the terminal.** Type the message as soon as the session can take text, even mid-turn. Only two things make it wait: an open permission or question dialog, and an earlier Notchling message still unread in Claude Code's own queue.
 3. **One postman per session.** Only one thing types into a given terminal, in the order sent. A slow session never holds up another.
-4. **Never deliver twice.** After typing, check the transcript. There: Sent. Unsure: don't retype; show "May already be in the session" with Send Again and Drop. Old text in the box: show it with Clear Box and Send.
+4. **Never deliver twice.** After typing, check the transcript. Taken by the model: Sent. Only in Claude Code's queue: kept as "Queued in the session" until the model takes it *(amended 2026-11-15)*. Unsure: don't retype; show "May already be in the session" with Send Again and Drop. Old text in the box: show it with Clear Box and Send.
 
 ### 7.2 Bubble states
 
@@ -189,7 +191,8 @@ From the approved source, restated; nothing in this section is open.
 | Queued | In the mailbox, waiting its turn | Edit, Remove |
 | Waiting: dialog open | The session is asking you something first | Answer the dialog |
 | Sending | Being typed now | none (it takes a second) |
-| Sent | Found in the transcript | none |
+| Queued in the session | In Claude Code's queue: kept until the model takes it *(amended 2026-11-15)* | none |
+| Sent | The transcript shows the model took it | none |
 | May already be in | Typed, the transcript doesn't confirm it yet | Send Again, Drop |
 | Box has other text | Shows that text | Clear Box and Send |
 
@@ -199,7 +202,8 @@ Plus, from the known problems: Session stopped (Resume and Send), Waits for the 
 
 | When | The row |
 | --- | --- |
-| Sent (found in the transcript) | Deleted at once; Chat shows the transcript's message |
+| Sent (the transcript shows the model took it) | Deleted at once; Chat shows the transcript's message |
+| In Claude Code's queue | Kept until the model takes it (then Sent); if Claude Code drops it, May already be in *(amended 2026-11-15)* |
 | You Remove or Drop it | Deleted at once |
 | The session is removed | Deleted with it |
 | Queued, Waiting, May already be in | Kept until sent or you act; unsent work is never deleted silently |
@@ -209,14 +213,14 @@ At most 200 waiting rows per session. Only the character count goes to the Audit
 
 ### 7.4 Two build details
 
-- A message being typed when the daemon stopped comes back as May already be in, never as Queued.
-- Identical messages ("ok", "go on") are told apart by counting how many times the text appears in the transcript after each was queued, not by the text alone; that needs only the waiting rows, so sent rows can go at once. (Made precise in [10.6](#106-verifying), B5.)
+- A message being typed when the daemon stopped comes back as May already be in, never as Queued; one the transcript shows only in Claude Code's queue comes back as Queued in the session *(amended 2026-11-15)*.
+- Identical messages ("ok", "go on") are told apart by counting how many times the text appears in the transcript after each was queued, not by the text alone; that needs only the waiting rows, so sent rows can go at once. (Made precise in [10.6](#106-verifying), B5: two counts, enqueued and taken.)
 
 ### 7.5 Known problems and their solutions
 
 | # | Problem | Solution | Here |
 | --- | --- | --- | --- |
-| 1 | Knowing one of ours is still in Claude Code's queue | Read the queue lines (enqueue, dequeue, remove, popAll, `queued_command`). Ours is taken when one names it, or a turn ends after it. No queue line within 5 s of typing: the safe rule. A test per Claude Code version; the unknown-lines count switches to the safe rule | [10.3](#103-the-gate-claude-code) |
+| 1 | Knowing one of ours is still in Claude Code's queue | Read the queue lines (enqueue, dequeue, remove, popAll, `queued_command`). Ours has left the queue when one names it, or a turn ends after it (*amended 2026-11-15*: "left", since a turn end is not a take, [6](#6-terms)). No queue line within 5 s of typing: the safe rule. A test per Claude Code version; the unknown-lines count switches to the safe rule | [10.3](#103-the-gate-claude-code) |
 | 2 | Your own typing in the terminal | Text in the box is the Clear Box case. A message you typed sitting in Claude Code's queue makes ours wait. If they merge anyway, the bubble says so | [10.3](#103-the-gate-claude-code), [10.7](#107-merged-prompts) |
 | 3 | An attach per message is slow | One attach per session while it has rows; close after 10 s idle; the dialog check uses the same screen | [10.4](#104-attach-reuse-and-the-per-session-lock) |
 | 4 | Slash commands | Only at turn end. Confirmed by the `local_command` line; `/clear` by its new transcript. Menu commands never go through the Outbox | [10.3](#103-the-gate-claude-code), [10.6](#106-verifying) |
@@ -225,7 +229,7 @@ At most 200 waiting rows per session. Only the character count goes to the Audit
 | 7 | Terminal sessions | Notchling's own terminal host takes text like a background job; another terminal app is refused at Send | [10.9](#109-terminal-sessions) |
 | 8 | Codex and Antigravity | Same mailbox; the runner's own turn state; waits for the turn to end | [10.8](#108-codex-and-antigravity) |
 | 9 | Edit or Remove while typing | The take is one database step; Edit and Remove only on Queued or Waiting rows | [9](#9-states-and-what-moves-them) |
-| 10 | Too many May already be in | Watch the transcript (file events) up to 10 s, look once more at 30 s; a queue line naming it counts as received | [10.6](#106-verifying) |
+| 10 | Too many May already be in | Watch the transcript (file events) up to 10 s, look once more at 30 s; a line showing the model took it (a user line, `queued_command`) is Sent; an `enqueue` line alone keeps the row as Queued in the session, watched until the model takes it or Claude Code drops it *(amended 2026-11-15)* | [10.6](#106-verifying) |
 
 ## 8. Data model
 
@@ -248,6 +252,7 @@ CREATE TABLE IF NOT EXISTS outbox (
     updated_ms INTEGER NOT NULL,
     attempt_ms INTEGER,
     seen_before INTEGER,
+    queued_before INTEGER,
     tries INTEGER NOT NULL DEFAULT 0,
     next_ms INTEGER,
     noticed_ms INTEGER
@@ -267,10 +272,11 @@ CREATE INDEX IF NOT EXISTS outbox_age ON outbox(queued_ms);
 | `options` | JSON or null: Codex `{model, effort}` as `codex.send` takes them, checked again at delivery |
 | `via` | `chat`, `notch`, `phone`, `agent` (the existing `ReplyVia` words) |
 | `state` | [9](#9-states-and-what-moves-them) |
-| `why` | A reason code for `waiting` (`dialog`, `queue`, `turn`, `retry`), `unsure` (`not_found`, `restart`), `box` (`not_cleared`, `mixed`); never text |
+| `why` | A reason code for `waiting` (`dialog`, `queue`, `turn`, `retry`), `unsure` (`not_found`, `restart`, `dropped`: Claude Code's queue lost it untaken), `box` (`not_cleared`, `mixed`); none for `in_queue`; never text |
 | `clear_box` | The person pressed Clear Box and Send; used by the next try only, then reset |
 | `queued_ms`, `updated_ms` | Times in ms since 1970 |
-| `attempt_ms`, `seen_before` | Set by the take: when the try began and the count the verification compares with (B5) |
+| `attempt_ms`, `seen_before` | Set by the take: when the try began, and the **taken** count (user lines, `queued_command`, a command's `local_command` line) since `attempt_ms − 2 s` that the verification compares with (B5) |
+| `queued_before` | Set by the take beside `seen_before`: the **enqueued** count (`queue-operation` `enqueue` lines) since `attempt_ms − 2 s`; a growth of it alone makes the row `in_queue` (B5, [10.6](#106-verifying)) |
 | `tries` | Takes so far; drives the retry back-off |
 | `next_ms` | Earliest next try after a failure that typed nothing |
 | `noticed_ms` | When the 7-day notice was raised for this row |
@@ -288,16 +294,17 @@ CREATE INDEX IF NOT EXISTS outbox_age ON outbox(queued_ms);
 | `queued` | Queued | The postman (take), Edit, Remove |
 | `waiting` | `dialog`: Waiting: dialog open; `turn`: Waits for the current turn; `queue`, `retry`: Queued | The postman, Edit, Remove |
 | `sending` | Sending | The postman only |
+| `in_queue` | Queued in the session (no buttons; not a "needs you" state) | The postman only: Sent (delete) when the model takes it, `unsure`/`dropped` when Claude Code drops it ([10.6](#106-verifying)); `outbox.discard` and the 7-day notice's Discard delete it |
 | `unsure` | May already be in | Send Again (to `queued`), Drop (delete) |
 | `box` | Box has other text: «what the box holds» | Clear Box and Send (to `queued` with `clear_box`), Edit, Remove |
 | `stopped` | Session stopped | Resume and Send (respawn, then `queued`), Edit, Remove |
 | `gone` | Session not found | Remove; the postman puts it back to `queued` if the session comes back |
 
-- **The head blocks.** Only the head of a session is ever taken. Rows behind a head in any state are `queued` and show Queued. A head that needs the person (`unsure`, `box`, `stopped`, `gone`) stops the session's mailbox until they act; that is the order rule, and the bubble says why (*B3*).
-- **The take** is `UPDATE outbox SET state='sending', attempt_ms=?, seen_before=?, tries=tries+1, updated_ms=? WHERE id=? AND state IN ('queued','waiting') AND (next_ms IS NULL OR next_ms <= ?)` in one transaction; zero rows changed means Edit or Remove won, and the postman starts over (problem 9).
-- **Edit** (`outbox.edit`) and **Remove** (`outbox.remove`) change or delete a row only `WHERE state IN ('queued','waiting','box','stopped','gone')` (*B4*: those rows are not being typed). On `sending` they answer `failed` "It's being sent." and Chat keeps the buttons off. Remove on `unsure` is Drop. Edit resets `tries`, `next_ms` and `clear_box`.
-- **Send Again** (`outbox.resend {id}`) on `unsure` sets `queued`, clears `attempt_ms` and `seen_before`. The next try's `Clearing.earlier` includes the row's text, so if the text is still in the box it is cleared, not doubled (`exec.rs::submit`'s existing rule).
-- **Gone** (*B7*): a session missing from the fresh read and from every lane's `jobs/` for 60 s (`GONE_AFTER_MS`) moves its head to `gone`; rows are never deleted for it. Codex and Antigravity rows go `gone` when their rollout or summaries row is gone.
+- **The head blocks.** Only the head of a session is ever taken. Rows behind a head in any state are `queued` and show Queued. A head that needs the person (`unsure`, `box`, `stopped`, `gone`) stops the session's mailbox until they act; that is the order rule, and the bubble says why (*B3*). An `in_queue` head stops it too, until the model takes it or Claude Code drops it: a later row typed meanwhile would sit behind it in Claude Code's queue and could be merged with it.
+- **The take** is `UPDATE outbox SET state='sending', attempt_ms=?, seen_before=NULL, queued_before=NULL, tries=tries+1, updated_ms=? WHERE id=? AND state IN ('queued','waiting') AND (next_ms IS NULL OR next_ms <= ?)` in one transaction; zero rows changed means Edit or Remove won, and the postman starts over (problem 9). Right after it, before any key, the postman counts both baselines ([10.6](#106-verifying)) and stores them with `OutboxStore::set_seen(id, seen: Seen)` (`seen_before` = `taken`, `queued_before` = `enqueued`).
+- **Edit** (`outbox.edit`) and **Remove** (`outbox.remove`) change or delete a row only `WHERE state IN ('queued','waiting','box','stopped','gone')` (*B4*: those rows are not being typed). On `sending` they answer `failed` "It's being sent." and on `in_queue` `failed` "It's in the session's queue." (both `Change::Busy`), and Chat keeps the buttons off. Remove on `unsure` is Drop. Edit resets `tries`, `next_ms` and `clear_box`.
+- **Send Again** (`outbox.resend {id}`) on `unsure` sets `queued`, clears `attempt_ms`, `seen_before` and `queued_before`. The next try's `Clearing.earlier` includes the row's text, so if the text is still in the box it is cleared, not doubled (`exec.rs::submit`'s existing rule).
+- **Gone** (*B7*): a session missing from the fresh read and from every lane's `jobs/` for 60 s (`GONE_AFTER_MS`) moves its head to `gone`; rows are never deleted for it. An `in_queue` head goes to `unsure`/`dropped` instead, since its copy left with Claude Code's queue ([10.6](#106-verifying)). Codex and Antigravity rows go `gone` when their rollout or summaries row is gone.
 - **Session removed**: `session.remove` (and `codex.delete`) that succeeds deletes the session's rows and publishes `outbox.removed` with `why: "session_removed"`.
 
 ## 10. The postman
@@ -307,7 +314,7 @@ CREATE INDEX IF NOT EXISTS outbox_age ON outbox(queued_ms);
 `notchlingd/src/outbox_postman.rs`. A `Postmen` registry keyed by session id; a postman thread exists while its session has rows, at most `POSTMEN_MAX` (32) at once (the rest start as threads end; the 1 s tick retries). Each loops on a channel with `recv_timeout(next deadline)`:
 
 - **Wake** messages: a new row, an action on a row, acting turned on, the 7-day notice's Send.
-- **Tick**: at most every second while it has something timed (a settle, a retry, a verification, the attach's idle close).
+- **Tick**: at most every second while it has something timed (a settle, a retry, a verification, an `in_queue` head's watch, the attach's idle close).
 - It ends when its session has no rows and its attach is closed.
 
 Nothing runs while acting is off: a postman parks, closes its attach, and is woken by `settings.set_acting`. A plan already typing finishes (as today).
@@ -318,6 +325,9 @@ Nothing runs while acting is off: a postman parks, closes its attach, and is wok
 head = first row of the session (by n)
 none                          → close the attach after 10 s idle, then end
 unsure | box | stopped | gone → park until an action wakes it
+in_queue                      → watch (10.6): taken → Sent; dropped for 30 s → unsure/dropped;
+                                else park until the tick sees the transcript or the job change
+                                (the attach closes after 10 s, as with nothing to type)
 queued | waiting              → gate (10.3 or 10.8)
   Wait(why, recheck)          → persist waiting/why if it changed, sleep until recheck
   NeedsUser(state)            → persist state (box, stopped, gone)
@@ -326,7 +336,7 @@ queued | waiting              → gate (10.3 or 10.8)
 
 ### 10.3 The gate (Claude Code)
 
-Pure, in `engine/src/outbox/gate.rs`: facts in, a decision out. The daemon gathers the facts for the head only:
+Pure, in `engine/src/outbox/gate.rs`: facts in, a decision out. The daemon gathers the facts for a `queued` or `waiting` head only (an `in_queue` head is watched, not gated, [10.6](#106-verifying)):
 
 1. **Fresh job row**: `sessions::fresh::job_row` by the row's key (never the 5 s cache, so it works before the first scan fills `sessions.list`, as at start-up) and the job's own `state` (a small new `sessions::fresh::job_state`).
 2. **Gone**: no row and no `jobs/<id>/` in any lane for `GONE_AFTER_MS` → `NeedsUser(gone)` (*B7*).
@@ -334,8 +344,8 @@ Pure, in `engine/src/outbox/gate.rs`: facts in, a decision out. The daemon gathe
 4. **No replies here**: `!agent.can_reply()` can't happen for a row (refused at Send, [10.9](#109-terminal-sessions)); if a session changes into one, `NeedsUser(gone)`.
 5. **Dialog**: the live status is `waiting`, or the last screen the postman read showed a dialog → `Wait(dialog, 30 s)`; re-checked on the tick from the fresh row, and by the plan's `RefuseDialog` on the open attach (problem 3: same screen).
 6. **Command** (`kind == command`, problem 4) → the safe rule.
-7. **Safe mode** (*B11*) → the safe rule. A session is in safe mode when its last typed message showed neither a queue line nor a typed user line naming it within `QUEUE_LINE_MS` (5 s), until a later message shows one within 5 s; and while the read in item 8 finds a queue line it doesn't know (`QueueState::unknown > 0`: a `queue-operation` whose `operation` is outside `enqueue`, `dequeue`, `remove`, `popAll`, or a `queued_command` attachment whose `prompt` is neither text nor blocks). That count is per session and fresh on every read, so one odd line elsewhere never turns steering off everywhere, and it doesn't depend on version checks being on. *Settled after the builder check:* the versions soak (`versions/soak.rs`) latches every kind of unknown line until Claude Code changes version and runs only while version checks are on, so the gate does not read it.
-8. **Claude Code's queue** (problems 1 and 2): `transcript::queue_state(path)` (new, `engine/src/transcript/queue_state.rs`) reads the last 1 MB and runs the existing `conversation::queue::Queue` over it, plus two rules: an entry is taken by a `queued_command` attachment naming it, and by a `turn_duration` written after it. Its `waiting` list keeps only prompt-like entries (`typed_prompt`'s rules: not `<task-notification>`, not `<agent-message`, *B12*). Any waiting entry, ours or the person's, → `Wait(queue, on change)`; the postman re-reads when the transcript's size changes (a stat on the tick).
+7. **Safe mode** (*B11*) → the safe rule. A session is in safe mode when its last typed message showed neither a new `enqueue` line nor a new taken line naming it within `QUEUE_LINE_MS` (5 s) of Return, until a later message shows one within 5 s; and while the read in item 8 finds a queue line it doesn't know (`QueueState::unknown > 0`: a `queue-operation` whose `operation` is outside `enqueue`, `dequeue`, `remove`, `popAll`, or a `queued_command` attachment whose `prompt` is neither text nor blocks). That count is per session and fresh on every read, so one odd line elsewhere never turns steering off everywhere, and it doesn't depend on version checks being on. *Settled after the builder check:* the versions soak (`versions/soak.rs`) latches every kind of unknown line until Claude Code changes version and runs only while version checks are on, so the gate does not read it.
+8. **Claude Code's queue** (problems 1 and 2): `transcript::queue_state(path)` (new, `engine/src/transcript/queue_state.rs`) reads the last 1 MB and runs the existing `conversation::queue::Queue` over it, plus two rules: an entry leaves the list on a `queued_command` attachment naming it, and on a `turn_duration` written after it. (Leaving this list is not always a take: a `turn_duration`, `remove` or `popAll` is not one, [6](#6-terms), [10.6](#106-verifying).) Its `waiting` list keeps only prompt-like entries (`typed_prompt`'s rules: not `<task-notification>`, not `<agent-message`, *B12*). Any waiting entry, ours or the person's, → `Wait(queue, on change)`; the postman re-reads when the transcript's size changes (a stat on the tick).
 9. **Retry back-off**: `next_ms` in the future → `Wait(retry, next_ms)`.
 10. Otherwise **Go**, unguarded.
 
@@ -368,32 +378,45 @@ Every try's end is a `session.reply` event (via, chars, images, result, why, `wa
 
 ### 10.6 Verifying
 
-*Builder's call B5.* `engine/src/transcript/sent.rs::count_since(path, message, since_ms) -> Option<usize>` counts, in the last 1 MB, the lines at or after `since_ms` that carry the message:
+*Builder's call B5, amended 2026-11-15 (the maintainer's answer to question 1).* `engine/src/transcript/sent.rs::count_since(path, message, since_ms) -> Option<Seen>`, with `pub struct Seen { pub enqueued: usize, pub taken: usize }`, counts, in the last 1 MB, the lines at or after `since_ms` that carry the message, in two counts:
 
-- a typed user line (`typed_prompt` rules: not a tool result, not a subagent line, not meta);
-- a `queue-operation` `enqueue` line (its `content`);
-- an `attachment` of type `queued_command` (its `prompt`, text blocks joined).
+- **`enqueued`**: a `queue-operation` `enqueue` line naming it (its `content`). Claude Code queued it; the model has not read it.
+- **`taken`**: a typed user line (`typed_prompt` rules: not a tool result, not a subagent line, not meta; `<bash-input>` counts); an `attachment` of type `queued_command` naming it (its `prompt`, text blocks joined); for a command, its `local_command` system line or an older `<command-name>` user line.
 
-It is `None` when the 1 MB window starts after `since_ms` (as `sent_since`). Matching (problem 5): both sides whitespace-squeezed; a message's picture paths (Chat's `drops::with_attachments` form; the path rule moved from `app/src/chat/drops.rs::split_images` into the engine) are cut out and counted, and a transcript line's `[Image #N]` chips are cut out and its `image` blocks counted, so a message matches a line with the same caption and at least as many pictures; a `!cmd` message matches `cmd` in an enqueue line and `<bash-input>cmd</bash-input>` in a user line; a command matches its `local_command` system line (or an older `<command-name>` user line) by name and arguments; `/clear` is confirmed by a successor transcript (`transcript::locate`'s successor lookup) newer than the try. Long pastes need nothing special: the transcript holds the full text.
+A `dequeue` line carries no text, so it counts only through the user line that follows it. A `popAll` or `remove` line counts in neither: `popAll` is Up pulling the queue back into the box (`crates/AGENTS.md`), so the text left the queue without the model reading it, and `remove` takes it out. It is `None` when the 1 MB window starts after `since_ms` (as `sent_since`). Matching (problem 5): both sides whitespace-squeezed; a message's picture paths (Chat's `drops::with_attachments` form; the path rule moved from `app/src/chat/drops.rs::split_images` into the engine) are cut out and counted, and a transcript line's `[Image #N]` chips are cut out and its `image` blocks counted, so a message matches a line with the same caption and at least as many pictures; a `!cmd` message matches `cmd` in an enqueue line and `<bash-input>cmd</bash-input>` in a user line; a command matches its `local_command` system line (or an older `<command-name>` user line) by name and arguments; `/clear` is confirmed by a successor transcript (`transcript::locate`'s successor lookup) newer than the try, which counts as taken. Long pastes need nothing special: the transcript holds the full text.
 
-**Counting.** The take stores `seen_before = count_since(path, text, attempt_ms − 2 s)`. The row is Sent once `count_since(path, text, attempt_ms − 2 s) > seen_before`. Two "ok" rows: the second's take counts the first's line in its `seen_before`, so only a new line confirms it. Only the waiting row is needed; sent rows are gone (source detail 2). Counting from the try's start rather than the queue time is the same rule for a row taken at once, and stays inside the 1 MB window for a row that waited behind a dialog for hours.
+**Counting.** Right after the take, before any key, the postman stores both baselines from `count_since(path, text, attempt_ms − 2 s)`: `seen_before` = its `taken`, `queued_before` = its `enqueued` (`OutboxStore::set_seen(id, seen: Seen)`). The row is Sent once the `taken` count since that instant is above `seen_before`; it is In Claude Code's queue once only the `enqueued` count is above `queued_before`. Two "ok" rows: the second's take counts the first's lines in its baselines, so only a new line confirms it. Only the waiting row is needed; sent rows are gone (source detail 2). Counting from the try's start rather than the queue time is the same rule for a row taken at once, and stays inside the 1 MB window for a row that waited behind a dialog for hours.
 
-**Timing** (problem 10): after the plan ends, a `platform::watch::Watcher` on the transcript's folder (debounce 100 ms, max latency 500 ms) wakes a count on each batch naming the file, for `VERIFY_WATCH_MS` (10 s); not found, one more count at `VERIFY_LOOK_MS` (30 s) after Return. A queue line naming the message counts (it is an `enqueue`). Found: delete the row, publish `outbox.removed {why: "sent"}`, emit `session.outbox` `sent`, forget the session's `reply_attempts`. Not found or `None`: `unsure`/`not_found`. The session's next row waits for this verdict.
+**Timing** (problem 10): after the plan ends, a `platform::watch::Watcher` on the transcript's folder (debounce 100 ms, max latency 500 ms) wakes a count on each batch naming the file, for `VERIFY_WATCH_MS` (10 s), then one more count at `VERIFY_LOOK_MS` (30 s) after Return. Each count is judged by `engine/src/outbox/verdict.rs::verdict`, `Verdict { Sent, InQueue, Pending, Unsure }`:
 
-The 5 s queue-line test for safe mode ([10.3](#103-the-gate-claude-code) item 7) is read from the same counts: did an `enqueue` or a typed user line naming the message appear within 5 s of Return.
+- `taken > seen_before` → **Sent**: delete the row, publish `outbox.removed {why: "sent"}`, emit `session.outbox` `sent`, forget the session's `reply_attempts`.
+- else `enqueued > queued_before` → **InQueue**: the row goes to `in_queue` at once (persisted, `outbox.changed`, `session.outbox` `in_queue`) and stays; the watch below takes over (a taken line inside the same 10 s still makes it Sent).
+- else before 30 s → **Pending**; at 30 s → **Unsure**: `unsure`/`not_found`. A `None` count is neither taken nor enqueued.
 
-**At daemon start** (`OutboxOps::load`, called between `Server::bind` and `server.spawn()` like `InboxOps::load`): every Claude Code row in `sending` is counted once with its stored `attempt_ms` and `seen_before`: found, deleted as Sent; otherwise, or `None`, `unsure`/`restart` (source detail 1). Codex and Antigravity rows in `sending` become `unsure`/`restart` without a count. At most one row per session is `sending`, and each count is one 1 MB tail read.
+The session's next row waits for this verdict, and behind an `in_queue` head for as long as it stays there.
+
+**Watching a row in Claude Code's queue.** The postman keeps watching an `in_queue` head: on the tick it re-reads when the transcript's size changes (a stat) or the job's files change, with `count_since` (same `since`, same baselines) and `transcript::queue_state` ([10.3](#103-the-gate-claude-code) item 8). A new taken line (`taken > seen_before`) → Sent, as above (delete, `outbox.removed {why: "sent"}`, `session.outbox` `sent`). The row goes to `unsure` with `why: "dropped"` (`Why::Dropped`) when Claude Code's queue no longer holds it and no taken line appeared within `VERIFY_LOOK_MS` (30 s) of first seeing that. Claude Code's queue no longer holds it when:
+
+- `queue_state`'s `waiting` no longer lists the entry: a `remove`, a `popAll`, the lost-queue rule after a Claude Code restart (a typed prompt with no `dequeue` before it), or a later `turn_duration` with no take;
+- the job is stopped, or gone (no row and no `jobs/<id>/` in any lane);
+- the job's Claude Code process changed: its pid or start time, from the job's files if they record one, against what the postman noted when the row went `in_queue` (kept in memory only).
+
+The 30 s grace covers a take written just after the queue line that ended it (a `turn_duration`, then `dequeue` and the user line). `None` (the 1 MB window has passed the attempt) never counts as a take. The rule is pure, `verdict.rs::queued_verdict(seen: Option<Seen>, before: Seen, still_listed: bool, gone_since_ms: Option<i64>, now_ms: i64) -> QueuedVerdict { Sent, Stay, Unsure }`: `seen.taken > before.taken` → Sent; `still_listed` → Stay; `gone_since_ms` (when the postman first saw the queue no longer holding it, by any of the three ways above) at least `VERIFY_LOOK_MS` before `now_ms` → Unsure; else Stay. The implementer may refine the signature. A `dropped` row is an ordinary `unsure` one: Send Again, Drop, the 7-day notice.
+
+The 5 s queue-line test for safe mode ([10.3](#103-the-gate-claude-code) item 7) is read from the same counts and is unchanged: did a new `enqueue` or a new taken line naming the message appear within 5 s of Return (`enqueued > queued_before` or `taken > seen_before`).
+
+**At daemon start** (`OutboxOps::load`, called between `Server::bind` and `server.spawn()` like `InboxOps::load`): every Claude Code row in `sending` is counted once with its stored `attempt_ms`, `seen_before` and `queued_before`: taken grew → deleted as Sent; else enqueued grew → `in_queue` (its postman then watches it); else, or `None`, or no baselines stored → `unsure`/`restart` (source detail 1). A row already `in_queue` stays `in_queue` and its postman resumes watching it; the Claude Code process it was queued in was kept in memory only, so a Claude Code restart while the daemon was down is caught only by the queue read (the lost-queue rule) or the job's state ([16](#16-risks)). Codex and Antigravity rows in `sending` become `unsure`/`restart` without a count. At most one row per session is `sending`, and each count is one 1 MB tail read.
 
 ### 10.7 Merged prompts
 
-*Builder's call B22.* If the person types in the terminal while ours sits in Claude Code's queue, Claude Code may take both as one prompt (problem 2, "if they merge anyway, the bubble says so"). Our row was Sent at its `enqueue` line and is gone, so the label goes on the transcript message: the conversation parser marks a typed user line (or `queued_command` attachment) that was taken after a `dequeue` and holds two or more waiting entries' texts as `merged`, and Chat's user row shows a caption "Sent together with another message". A recorded line of a real merge is needed for the fixture (the plan's task says how to get one).
+*Builder's call B22.* If the person types in the terminal while ours sits in Claude Code's queue, Claude Code may take both as one prompt (problem 2, "if they merge anyway, the bubble says so"). Our row is `in_queue` then, and the merged line holds more than its text, so it is not a take by the matching rule above: when the entry leaves the queue and no line with its text alone follows within 30 s, the row goes to May already be in (`dropped`) and the person decides, which is the safe side. The row is not the place for the label (it ends Sent or May already be in), so the label goes on the transcript message: the conversation parser marks a typed user line (or `queued_command` attachment) that was taken after a `dequeue` and holds two or more waiting entries' texts as `merged`, and Chat's user row shows a caption "Sent together with another message". A recorded line of a real merge is needed for the fixture (the plan's task says how to get one).
 
 ### 10.8 Codex and Antigravity
 
 *Builder's call B13.* A courier per tool behind one trait (`notchlingd/src/outbox_courier.rs`): `facts`, `deliver`, and for Claude Code `verify`.
 
 - **Gate**: Codex is busy while `CodexRuns::is_running(session)`; Antigravity while `AgyOps`' runner `is_working(session)`. Busy → `Wait(turn, 1 s)` ("Waits for the current turn", problem 8). A session another `agy` holds (a delegation, `elsewhere`) is refused at Send as today; one that becomes held later waits as `turn`.
-- **Deliver**: Codex calls a new `CodexRuns::send_if_idle`, which starts the turn or answers `Busy` without queueing (the in-memory `state.outbox` stays only for drafts); Antigravity calls the runner's `prompt`. Started → Sent: the prompt is an argument or a JSON-RPC request, not typing, so there is no box and no doubt. `Busy` → `waiting`/`turn`. Any other error → `waiting`/`retry` with the error kept in memory for the bubble.
+- **Deliver**: Codex calls a new `CodexRuns::send_if_idle`, which starts the turn or answers `Busy` without queueing (the in-memory `state.outbox` stays only for drafts); Antigravity calls the runner's `prompt`. Started → Sent: the prompt is an argument or a JSON-RPC request, not typing, so there is no box and no doubt. These rows are never `in_queue` (unchanged by the answer to question 1). `Busy` → `waiting`/`turn`. Any other error → `waiting`/`retry` with the error kept in memory for the bubble.
 - **Options**: the row's `options` (`model`, `effort`) are checked again at delivery with `codex.send`'s rules.
 - **Drafts** keep today's path: a first message to `codex-new:`/`agy-new:` (or `draft_folder`) starts the session directly and is not an Outbox row; its later messages are.
 - `codex.send {id}` and `agy.send {id}` to an existing session now insert a row and answer at once (`codex.send`: `{"id", "session", "state": "queued", "waiting": <position>, "outboxId"}`; `agy.send`: `{"id", "sent": true, "outboxId"}`).
@@ -417,10 +440,10 @@ Refused (nothing saved): acting off (`forbidden`, `ACTING_OFF`, *B14*); empty te
 | Op | Args | Reply |
 | --- | --- | --- |
 | `outbox.list` | `{session?}` | `[row…]` in order, all sessions or one; not behind acting (read only) |
-| `outbox.edit` | `{id, text}` | `{"edited": true}`; `failed` "It's being sent." on a `sending` or `unsure` row; not found is `bad_request` |
-| `outbox.remove` | `{id}` | `{"removed": true}`; `failed` on `sending` |
+| `outbox.edit` | `{id, text}` | `{"edited": true}`; `failed` "It's being sent." on a `sending` or `unsure` row; `failed` "It's in the session's queue." on an `in_queue` row; not found is `bad_request` |
+| `outbox.remove` | `{id}` | `{"removed": true}`; `failed` "It's being sent." on `sending`; `failed` "It's in the session's queue." on `in_queue` |
 | `outbox.resend` | `{id, clear_box?: bool, resume?: bool}` | `{"state": "queued"}`: Send Again on `unsure`, Clear Box and Send on `box` (`clear_box: true`), Resume and Send on `stopped` (`resume: true`), Try Now on `waiting`/`retry` (clears `next_ms`) |
-| `outbox.discard` | `{session}` | `{"discarded": n}`: removes the session's rows that may be removed |
+| `outbox.discard` | `{session}` | `{"discarded": n}`: removes the session's rows that may be removed (every row but a `sending` one; an `in_queue` row too, since Discard is an explicit action) |
 
 A row on the wire: `{id, session, tool, kind, text, state, why?, box?, position, queuedMs, updatedMs, via, error?}` (`box` only for `box` rows, from memory; `error` only for Codex and Antigravity `retry` rows).
 
@@ -431,6 +454,7 @@ A row on the wire: `{id, session, tool, kind, text, state, why?, box?, position,
 *Builder's call B16.* `session.reply {id, text, clear_box?}` inserts a row as `session.send` would, then waits up to `REPLY_WAIT_MS` (50 s, under the app's 60 s `SESSION_CALL_TIMEOUT`) for it to settle:
 
 - Sent → `{"sent": true}`.
+- In Claude Code's queue (`in_queue`) → at once, without waiting for the deadline, `{"sent": true, "state": "queued", "waiting": <position>, "outboxId"}` (today's queued shape); the row stays and its postman keeps watching it.
 - Still queued, waiting or sending at the deadline → `{"sent": true, "state": "queued", "waiting": <position>, "outboxId"}` (today's held shape without `held`); the row stays.
 - `box` → `failed` with today's message and `data {why: "not_cleared", box}`; `unsure` → `failed` with `NotSent`'s message; `stopped`, `gone` → `failed` "The session is stopped." / "No such session."; in these four cases the row is removed first, because the caller puts the text back in its reply box as it does today.
 
@@ -447,7 +471,7 @@ Callers after the change: cluster forwarding of remote sessions (*B21*) and any 
 *Builder's call B23.*
 
 - `session.reply` (exists): one per try's end, from the postman, `via` the row's `via`. Its `waited_ms` becomes the time from queue to try.
-- `session.outbox` (new, `crates/events/src/kinds/agents.rs`, Activity and DIAG, `Durability::Push`, 30 days): `session: Ref<Session>`, `then: OutboxThen` (`queued`, `sent`, `unsure`, `box`, `stopped`, `gone`, `edited`, `removed`, `discarded`, `session_removed`, `restored_unsure`, `noticed`), `chars: Count`, `via: ReplyVia`. No text. The golden and `docs/log-kinds.md` are regenerated.
+- `session.outbox` (new, `crates/events/src/kinds/agents.rs`, Activity and DIAG, `Durability::Push`, 30 days): `session: Ref<Session>`, `then: OutboxThen` (`queued`, `in_queue`, `sent`, `unsure`, `box`, `stopped`, `gone`, `edited`, `removed`, `discarded`, `session_removed`, `restored_unsure`, `noticed`; `in_queue` added 2026-11-15, emitted when a row reaches Claude Code's queue, after a try or at daemon start), `chars: Count`, `via: ReplyVia`. No text. The golden and `docs/log-kinds.md` are regenerated.
 - `session.reply_held` stays registered (old rows name it) and is no longer emitted.
 - `op_kinds.rs` and `quiet_ops`: every new op is classified; none is quiet (they act, or `outbox.list` is asked on connect, not on a timer).
 - A test sends a text holding a planted token and asserts no event, audit line, `reply-screen.txt` or inbox item contains it.
@@ -469,9 +493,9 @@ Callers after the change: cluster forwarding of remote sessions (*B21*) and any 
 
 *Builder's call B17.* `notchlingd/src/outbox_inbox.rs`. A sweep at start (after `InboxOps::load`) and every hour:
 
-- For each session with rows whose `queued_ms` is 7 days old and `noticed_ms` is null: one Inbox item, id `outbox:<session>:<ms>` (fresh per raise), kind `outbox_unsent` (new `inbox::Kind`; the phone treats an unknown kind as a notice), title "Messages Not Sent", detail "3 messages to «session name» haven't gone out for 7 days." (the session's name from `sessions.list`, never message text: the `inbox` table is class Cluster), source `{session}`, actions **Send** (primary) and **Discard** (new `ActionId::Send`, `ActionId::Discard`; the phone shows any action by its label), no expiry. Those rows get `noticed_ms`.
+- For each session with rows whose `queued_ms` is 7 days old and `noticed_ms` is null (`in_queue` rows included): one Inbox item, id `outbox:<session>:<ms>` (fresh per raise), kind `outbox_unsent` (new `inbox::Kind`; the phone treats an unknown kind as a notice), title "Messages Not Sent", detail "3 messages to «session name» haven't gone out for 7 days." (the session's name from `sessions.list`, never message text: the `inbox` table is class Cluster), source `{session}`, actions **Send** (primary) and **Discard** (new `ActionId::Send`, `ActionId::Discard`; the phone shows any action by its label), no expiry. Those rows get `noticed_ms`.
 - The responder only hands the answer to the Outbox's channel and returns true (responders run under the inbox lock and never block).
-- **Send**: for each of those rows still there, its own action: `unsure` → Send Again, `box` → Clear Box and Send, `stopped` → Resume and Send, `waiting`/`retry` → Try Now; `queued`, `waiting` for a dialog, turn or queue, and `gone` stay as they are. **Discard**: removes those rows (not a `sending` one). Either resolves the item, `answered_by` `mac` or `phone`.
+- **Send**: for each of those rows still there, its own action: `unsure` → Send Again, `box` → Clear Box and Send, `stopped` → Resume and Send, `waiting`/`retry` → Try Now; `queued`, `waiting` for a dialog, turn or queue, `in_queue` and `gone` stay as they are. **Discard**: removes those rows (not a `sending` one; an `in_queue` one too). Either resolves the item, `answered_by` `mac` or `phone`.
 - When every noticed row of the session has gone (sent or removed elsewhere), the item is resolved Withdrawn.
 - **Once**: a row with `noticed_ms` is never noticed again. After a restart the open item loads Withdrawn (the Inbox's rule) and is not raised again; Chat still shows the rows with their actions.
 
@@ -479,7 +503,7 @@ Callers after the change: cluster forwarding of remote sessions (*B21*) and any 
 
 ### 14.1 Chat
 
-- Send returns at once; the reply box empties and the bubble shows Queued, then Sending, then the transcript's message. `ChatTools::sending` no longer spans a delivery.
+- Send returns at once; the reply box empties and the bubble shows Queued, then Sending, then the transcript's message (or Queued in the session until the model takes it). `ChatTools::sending` no longer spans a delivery.
 - Outbox rows are drawn after the conversation's items, in order, as user bubbles with a status line and buttons, from `ConversationInput::outbox` (the rows of the selected session; part of the list's tail key, so a state change measures the row again). Words come from `locales/en/mac/chat.ftl`.
 
 | Row | Status line | Buttons |
@@ -488,6 +512,7 @@ Callers after the change: cluster forwarding of remote sessions (*B21*) and any 
 | `waiting` `dialog` | Waiting: dialog open | Edit, Remove |
 | `waiting` `turn` | Waits for the current turn | Edit, Remove |
 | `sending` | Sending | none |
+| `in_queue` | Queued in the session (`chat-outbox-in-queue = Queued in the session`) | none |
 | `unsure` | May already be in the session | Send Again, Drop |
 | `box` | Box has other text: «text», one line, elided | Clear Box and Send, Edit, Remove |
 | `stopped` | Session stopped | Resume and Send, Edit, Remove |
@@ -495,14 +520,14 @@ Callers after the change: cluster forwarding of remote sessions (*B21*) and any 
 
 - **Sent**: on `outbox.removed {why: "sent"}` the bubble stays as Sent until a load shows the message (`chat/outgoing.rs::Outgoing::arrived`), at most `GRACE_MS`, so it never blinks out.
 - **Edit** puts the row's text in the reply box with an "Editing a queued message · Cancel" line; Return sends `outbox.edit`. If the row was taken meanwhile the edit fails, the line says "Already sent", and the text stays as a draft.
-- Claude Code's own queue (`Conversation::queued`, text typed into the session but not read by the model) keeps its existing Queued bubbles and take-back; an Outbox row that is Sent at its `enqueue` line becomes one of those.
+- Claude Code's own queue (`Conversation::queued`, text typed into the session but not read by the model) keeps its existing Queued bubbles and take-back. An `in_queue` row's text is also in that list (its `enqueue` line), so Chat draws the Outbox row and hides one matching entry of `Conversation::queued` (the same whitespace-squeezed text, the first match), and the message shows as one bubble. Entries the person typed keep their bubbles.
 - A merged prompt's user row has the caption "Sent together with another message" ([10.7](#107-merged-prompts)).
 - Chat sends Claude Code, Codex and Antigravity messages to existing sessions with `session.send`; Codex's and Antigravity's draft first messages keep `codex.send`/`agy.send`. A row with a cluster `node` keeps `session.reply`.
 - On (re)connect the app's session source asks `outbox.list` and follows the `outbox` topic.
 
 ### 14.2 Notch
 
-*Builder's call B19.* The Rust notch has no reply box, so nothing is sent from it. A session row whose head needs the person (`unsure`, `box`, `stopped`, `gone`) shows "Message needs you"; a click opens Chat on it.
+*Builder's call B19.* The Rust notch has no reply box, so nothing is sent from it. A session row whose head needs the person (`unsure`, `box`, `stopped`, `gone`) shows "Message needs you"; a click opens Chat on it. An `in_queue` head does not: the model will read it at its next step.
 
 ### 14.3 Phone
 
@@ -515,7 +540,7 @@ Engine tests use temp databases, transcript fixtures with real shapes and synthe
 **Rule 1, saved first**
 - `session.send` answers before the fake attach is entered (a blocking fake; the reply within 100 ms) and the row is in the table.
 - Rows survive a restart: open, insert, drop, open again, list.
-- A `sending` row at load: found in the transcript fixture → deleted as Sent; not found or `None` → `unsure`/`restart`; never `queued`.
+- A `sending` row at load: taken in the transcript fixture → deleted as Sent; only enqueued → `in_queue`; neither, or `None` → `unsure`/`restart`; never `queued`. An `in_queue` row at load stays `in_queue` and its postman watches it.
 - Schema 4 on a version-3 file keeps every other table's rows; the class test passes with `outbox`.
 
 **Rule 2, deliver like the terminal**
@@ -536,8 +561,9 @@ Engine tests use temp databases, transcript fixtures with real shapes and synthe
 - An answer and a reply to the same session never interleave keys (the fake records writes per lock holder).
 
 **Rule 4, never twice**
-- Two "ok" rows: the second is Sent only by a second new line (counting from the try).
-- `count_since` matches a long paste, a picture message (`[Image #N]` and image blocks), a `!` command (`enqueue` plain, user line `<bash-input>`), and refuses a `popAll` line as a delivery.
+- Two "ok" rows: the second is Sent only by a second new taken line (counting from the try).
+- `count_since` matches a long paste, a picture message (`[Image #N]` and image blocks), a `!` command (`enqueue` plain, user line `<bash-input>`); counts `enqueue` lines as `enqueued` and user lines, `queued_command` attachments and a command's `local_command` line as `taken`; a `dequeue` only through its user line; a `popAll` or `remove` line in neither.
+- An `enqueue` line alone → `in_queue`, never Sent; a taken line later → Sent; the entry removed, popped (`popAll`) or lost to a Claude Code restart (the lost-queue rule, or the job's process changed) with no take within 30 s → `unsure`/`dropped`; still listed → stays `in_queue`.
 - `NotCleared` → `box` with the box text on the topic and nowhere else; Clear Box and Send clears and types.
 - `NotSent` after Return, nothing in the fixture after 30 s → `unsure`; a line at 20 s → Sent.
 - `NotTaken`, `NoInput`, attach failure → `waiting`/`retry` with the back-off, never `unsure`.
@@ -545,27 +571,29 @@ Engine tests use temp databases, transcript fixtures with real shapes and synthe
 
 **Retention and the notice**
 - Sent, Remove, Drop, `outbox.discard`, `session.remove` and `codex.delete` delete; a vanished job goes `gone` after 60 s and is not deleted.
+- Edit and Remove on an `in_queue` row fail "It's in the session's queue."; `outbox.discard` removes it.
 - The 201st row is refused; text over 100 KB is refused.
-- The notice: one item per session, no message text (planted token), Send and Discard act and resolve it, raised once, not again after a restart.
+- The notice: one item per session, no message text (planted token), Send and Discard act and resolve it, raised once, not again after a restart; it counts `in_queue` rows, Send leaves them as they are and Discard removes them.
 
 **Codex and Antigravity**
 - A busy Codex session waits as `turn`; idle → `send_if_idle` starts it → deleted; a race to busy → `waiting`/`turn`, never queued in `CodexRuns`.
 - Antigravity likewise with its runner's `is_working` and `prompt`.
 
 **Compatibility**
-- `session.reply` returns `{"sent": true}` for a delivered row, the queued shape after 50 s, `failed` with `data {why: "not_cleared", box}` for a box (and the row removed).
+- `session.reply` returns `{"sent": true}` for a delivered row, the queued shape at once for a row that reaches `in_queue` (the row stays) and after 50 s for one still waiting, `failed` with `data {why: "not_cleared", box}` for a box (and the row removed).
 - `session.held.discard` discards the session's rows.
 - The bridge's `session.message` returns `{"sent": true}` at once with a row saved, `via: phone`.
 
 **No text anywhere**: one planted-token test over events, the Audit, Activity rows, `reply-screen.txt` and inbox items.
 
-**App** (pure models tested everywhere, renders on a Mac): the bubble model maps every state and `why` to words and buttons; `outbox.changed`/`removed` apply in order and a reconnect reseeds from `outbox.list`; Edit mode; `--render chat` with `NOTCHLING_RENDER_OUTBOX` for each state; `bench_chat` counts unchanged for a conversation with three Outbox rows.
+**App** (pure models tested everywhere, renders on a Mac): the bubble model maps every state and `why` to words and buttons (`in_queue`: Queued in the session, none); an `in_queue` row hides one matching `Conversation::queued` entry, so the message is one bubble; `outbox.changed`/`removed` apply in order and a reconnect reseeds from `outbox.list`; Edit mode; `--render chat` with `NOTCHLING_RENDER_OUTBOX` for each state; `bench_chat` counts unchanged for a conversation with three Outbox rows.
 
-**Live check** (maintainer only, plan's last task): a real background job with a long `until` shell, subagents running, a dialog open, leftover text in the box, a Codex session mid-turn, a daemon restart mid-send.
+**Live check** (maintainer only, plan's last task): a real background job with a long `until` shell, subagents running, a dialog open, leftover text in the box, a Codex session mid-turn, a daemon restart mid-send, a Claude Code restart while a message is Queued in the session.
 
 ## 16. Risks
 
-- **Claude Code's own queue is memory.** A row is Sent (and deleted) at its `enqueue` line; if Claude Code restarts before the model reads it, Claude Code loses it and Notchling no longer has the row. Chat's lost-queue rule stops showing it as Queued. Keeping such rows until they are taken would change the retention decision ([For the maintainer](#for-the-maintainer), question 1).
+- **A Claude Code restart while the daemon is down.** A row stays `in_queue` until the model takes it, and a Claude Code restart that drops its queue is caught by the lost-queue rule, the job's state or a change of the job's process ([10.6](#106-verifying)). The process the row was queued in is kept in memory only, so a Claude Code restart while the daemon was down that writes nothing to the transcript (no typed prompt after it, the job not stopped) leaves the row `in_queue` until the job's process is seen to change while the daemon runs, or the 7-day notice. (Resolved: question 1 is answered, and a row is no longer deleted at its `enqueue` line.)
+- **A long turn after the queue line.** A turn that writes more than 1 MB after an `in_queue` row's `enqueue` line pushes it out of both reads: `queue_state` no longer lists it and `count_since` is `None`. The row then reads as dropped and comes back as May already be in after 30 s, the safe side.
 - **A person typing the same words.** Identical text typed in the terminal during a verification counts as ours. Rare; the result is one missing copy, never a double.
 - **A dialog that stays open** stops that session's mailbox, by design; the bubble says so and the Inbox notice comes at 7 days.
 - **Format changes in Claude Code** (queue lines, the input box): an unknown queue line puts its session on the safe rule, and a queue line that stops appearing does too (the 5 s test); the input box rules are unchanged and fail closed (nothing typed).
@@ -586,12 +614,21 @@ New:
 - `crates/app/src/chat/outbox.rs` (pure bubble model), `crates/app/src/chat/view/outbox_rows.rs`
 - `docs/decisions/XXXX-outbox.md`, `changes/outbox.md`
 
-Changed: `engine/src/store.rs`, `store_class.rs`, `inbox/model.rs` (`Kind::OutboxUnsent`, `ActionId::Send`, `ActionId::Discard`), `transcript/conversation/` (merged flag), `sessions/agent.rs` (`outbox_key`), `tools/codex/runs.rs` (`send_if_idle`), `sessions/fresh.rs` (`job_state`); `crates/events/src/kinds/agents.rs`; `crates/local-api/src/wire.rs`; `notchlingd/src/acting_ops.rs`, `daemon_wiring.rs`, `lib.rs`, `op_kinds.rs`, `codex_ops.rs`, `agy_ops.rs`, `bridge_backend.rs`, `control_ops.rs`, `inbox_events.rs`, `acting_events.rs`; `app/src/actions.rs`, `chat/drops.rs`, `acting.rs`, `session_source.rs`, `tools/live.rs`, `chat/view/{tools,conversation,composer}.rs`, `app/src/inbox/` (words for the new actions), `notch/`; `locales/en/mac/chat.ftl`; `docs/local-api-ops.md`, `crates/AGENTS.md`, the crates' `AGENTS.md`, `docs/feature-map.md`.
+Changed: `engine/src/store.rs`, `store_class.rs`, `inbox/model.rs` (`Kind::OutboxUnsent`, `ActionId::Send`, `ActionId::Discard`), `transcript/conversation/` (merged flag), `sessions/agent.rs` (`outbox_key`), `tools/codex/runs.rs` (`send_if_idle`), `sessions/fresh.rs` (`job_state`, with the job's process id or start time when its files record one, for the `in_queue` watch); `crates/events/src/kinds/agents.rs`; `crates/local-api/src/wire.rs`; `notchlingd/src/acting_ops.rs`, `daemon_wiring.rs`, `lib.rs`, `op_kinds.rs`, `codex_ops.rs`, `agy_ops.rs`, `bridge_backend.rs`, `control_ops.rs`, `inbox_events.rs`, `acting_events.rs`; `app/src/actions.rs`, `chat/drops.rs`, `acting.rs`, `session_source.rs`, `tools/live.rs`, `chat/view/{tools,conversation,composer}.rs`, `app/src/inbox/` (words for the new actions), `notch/`; `locales/en/mac/chat.ftl`; `docs/local-api-ops.md`, `crates/AGENTS.md`, the crates' `AGENTS.md`, `docs/feature-map.md`.
 
 Removed: `notchlingd/src/held_ops.rs`, `held_ops_tests.rs`, `held_race_tests.rs`, `held_kept_tests.rs` (cases ported first), `engine/src/reply/held.rs`, `held_tests.rs`, `app/src/chat/box_holds.rs`.
 
 ## For the maintainer
 
-The builder check (Antigravity CLI, Gemini 4 Hydrogen, high effort, 2026-11-15) raised four questions. Three were settled here (*B11* scope, *B24*, *B25*). One changes a decision and is the maintainer's:
+The builder check (Antigravity CLI, Gemini 4 Hydrogen, high effort, 2026-11-15) raised four questions. Three were settled here (*B11* scope, *B24*, *B25*). One changed a decision and was the maintainer's:
 
-1. **Is a message Sent when Claude Code has queued it, or only when the model has read it?** The decided design counts a queue line naming the message as received (problem 10) and deletes a Sent row at once (retention). Claude Code's queue is in memory: if Claude Code restarts before the model reads the message, Claude Code drops it and Notchling has no row left (Chat's lost-queue rule stops showing it). Keeping such rows until they are taken (a `dequeue` and the user line, a `queued_command` attachment, or a later turn end) would need one more state ("In Claude Code's queue"), would make identical texts count only taken lines, and would turn a dropped queue into May already be in or Queued. **The plan builds the decided design** (Sent at the queue line); the change, if wanted, is one more state in Tasks 2, 5, 11 and 15.
+1. **Is a message Sent when Claude Code has queued it, or only when the model has read it?** The first draft counted a queue line naming the message as received (problem 10) and deleted a Sent row at once (retention). Claude Code's queue is in memory: if Claude Code restarts before the model reads the message, Claude Code drops it and Notchling would have no row left.
+
+   **Answered 2026-11-15, on the safe side: a message is not Sent when it only shows in Claude Code's queue.** What the design now builds (the orchestrator's rulings R1 to R11 in `docs/superpowers/plans/2026-11-15-outbox.ledger.md`):
+   - A new persisted state `in_queue`, bubble "Queued in the session", no buttons, not a "needs you" state ([9](#9-states-and-what-moves-them), [14](#14-what-the-user-sees)).
+   - `count_since` returns two counts, `Seen { enqueued, taken }`, and the take stores both baselines (`seen_before`, new column `queued_before`) ([8](#8-data-model), [10.6](#106-verifying)). A `popAll` or `remove` line is never a take: the maintainer's brief listed "dequeue/popAll naming it" as taken, and the orchestrator ruled that `popAll` leaves the queue untaken, since it is what the Up key writes when it pulls the queue back into the box; that is the safe side. A `dequeue` counts through the user line after it.
+   - After Return: taken → Sent; only enqueued → `in_queue` at once; neither by 30 s → May already be in ([10.6](#106-verifying)).
+   - An `in_queue` head blocks the session's later rows and is watched: a taken line → Sent; Claude Code's queue no longer holding it (a `remove`, a `popAll`, the lost-queue rule, a later turn end with no take, the job stopped, gone or its process changed) with no take within 30 s → May already be in (`dropped`) ([10.6](#106-verifying)).
+   - Edit and Remove refuse an `in_queue` row ("It's in the session's queue."); Discard removes it; the 7-day notice counts it and its Send leaves it ([11.2](#112-outbox), [13](#13-the-7-day-notice)).
+   - At daemon start a `sending` row whose copy is only enqueued becomes `in_queue`, and an `in_queue` row keeps being watched ([10.6](#106-verifying)); the gap that leaves is in [16](#16-risks).
+   - `session.reply` answers a row that reaches `in_queue` at once with the queued shape ([11.3](#113-sessionreply-kept)); Chat shows one bubble for it ([14.1](#141-chat)); Codex and Antigravity are unchanged ([10.8](#108-codex-and-antigravity)).
