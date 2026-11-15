@@ -8,6 +8,35 @@ const GIT_ARGS: [&str; 7] = [
     "--super-prefix",
 ];
 
+const GH_ARGS: [&str; 3] = ["-R", "--repo", "--hostname"];
+
+const GH_API_ARGS: [&str; 19] = [
+    "-X",
+    "--method",
+    "-H",
+    "--header",
+    "-q",
+    "--jq",
+    "-t",
+    "--template",
+    "-f",
+    "-F",
+    "--field",
+    "--raw-field",
+    "--input",
+    "--hostname",
+    "-p",
+    "--preview",
+    "--cache",
+    "-R",
+    "--repo",
+];
+
+const GH_READS: [&str; 13] = [
+    "view", "list", "status", "diff", "checks", "checkout", "browse", "search", "download",
+    "watch", "auth", "help", "version",
+];
+
 const KUBE_ARGS: [&str; 10] = [
     "-n",
     "--namespace",
@@ -21,7 +50,40 @@ const KUBE_ARGS: [&str; 10] = [
     "--token",
 ];
 
+const KUBE_READS: [&str; 14] = [
+    "get",
+    "describe",
+    "logs",
+    "top",
+    "explain",
+    "api-resources",
+    "api-versions",
+    "version",
+    "config",
+    "diff",
+    "auth",
+    "wait",
+    "cluster-info",
+    "port-forward",
+];
+
 const HELM_ARGS: [&str; 4] = ["-n", "--namespace", "--kube-context", "--kubeconfig"];
+
+const HELM_READS: [&str; 13] = [
+    "list",
+    "ls",
+    "status",
+    "get",
+    "history",
+    "template",
+    "lint",
+    "show",
+    "search",
+    "repo",
+    "dependency",
+    "version",
+    "env",
+];
 
 const PACKAGE_ARGS: [&str; 8] = [
     "--prefix",
@@ -63,12 +125,15 @@ const RSYNC_ARGS: [&str; 24] = [
     "--chmod",
 ];
 
-const CLOUD_ARGS: [&str; 19] = [
+const CLOUD_ARGS: [&str; 22] = [
     "--profile",
     "--region",
     "--output",
     "--query",
     "--endpoint-url",
+    "--ca-bundle",
+    "--cli-read-timeout",
+    "--cli-connect-timeout",
     "--project",
     "--zone",
     "--format",
@@ -85,11 +150,54 @@ const CLOUD_ARGS: [&str; 19] = [
     "--name",
 ];
 
-const CURL_ARG_FLAGS: &str = "oHuAebcmwxyYzKECDrQ";
+const CLOUD_WRITES: [&str; 40] = [
+    "delete",
+    "create",
+    "update",
+    "put",
+    "set",
+    "deploy",
+    "invoke",
+    "terminate",
+    "rm",
+    "cp",
+    "mv",
+    "sync",
+    "patch",
+    "run",
+    "start",
+    "stop",
+    "remove",
+    "add",
+    "import",
+    "ssh",
+    "scp",
+    "exec",
+    "apply",
+    "build",
+    "submit",
+    "attach",
+    "enable",
+    "disable",
+    "reset",
+    "resize",
+    "move",
+    "copy",
+    "upload",
+    "publish",
+    "grant",
+    "revoke",
+    "bind",
+    "trigger",
+    "rollback",
+    "rename",
+];
+
+const CURL_ARG_FLAGS: &str = "oHuAebcmwxyYzECDrQ";
 
 pub fn outward(name: &str, args: &[String]) -> bool {
     match name {
-        "git" => first_in(args, &GIT_ARGS, &["push", "send-email"]),
+        "git" => git(args),
         "gh" => gh(args),
         "npm" | "pnpm" | "yarn" => package(args),
         "cargo" => positionals(args, &[])
@@ -97,17 +205,25 @@ pub fn outward(name: &str, args: &[String]) -> bool {
             .find(|word| !word.starts_with('+'))
             .is_some_and(|word| word == "publish"),
         "docker" => docker(args),
-        "kubectl" => first_in(args, &KUBE_ARGS, &["apply", "delete", "rollout"]),
-        "helm" => first_in(args, &HELM_ARGS, &["install", "upgrade"]),
-        "terraform" | "tofu" => first_in(args, &[], &["apply", "destroy"]),
-        "fly" | "flyctl" => first_in(args, &[], &["deploy"]),
-        "firebase" => first_in(args, &["-P", "--project", "--config"], &["deploy"]),
+        "kubectl" => not_read(args, &KUBE_ARGS, &KUBE_READS),
+        "helm" => not_read(args, &HELM_ARGS, &HELM_READS),
+        "terraform" | "tofu" => terraform(args),
+        "fly" | "flyctl" => fly(args),
+        "firebase" => positionals(args, &["-P", "--project", "--config"])
+            .first()
+            .is_some_and(|word| word.contains("deploy")),
+        "wrangler" => first_in(
+            args,
+            &["-c", "--config", "-e", "--env"],
+            &["deploy", "publish"],
+        ),
         "vercel" => args.iter().any(|a| a == "--prod" || a == "--production"),
         "curl" => curl(args),
         "wget" => wget(args),
-        "ssh" | "scp" => true,
+        "ssh" | "scp" | "sftp" => true,
         "rsync" => rsync(args),
-        "aws" | "gcloud" | "az" => cloud(args),
+        "aws" => aws(args),
+        "gcloud" | "az" => gcloud(args),
         _ => false,
     }
 }
@@ -138,6 +254,12 @@ fn first_in(args: &[String], with_arg: &[&str], verbs: &[&str]) -> bool {
         .is_some_and(|word| verbs.contains(word))
 }
 
+fn not_read(args: &[String], with_arg: &[&str], reads: &[&str]) -> bool {
+    positionals(args, with_arg)
+        .first()
+        .is_some_and(|word| !reads.contains(word))
+}
+
 fn safe_method(method: &str) -> bool {
     matches!(method.to_ascii_uppercase().as_str(), "GET" | "HEAD")
 }
@@ -156,52 +278,136 @@ fn long_flag(word: &str) -> Option<(&str, Option<&str>)> {
     )
 }
 
+fn git(args: &[String]) -> bool {
+    let words = positionals(args, &GIT_ARGS);
+    matches!(
+        words.as_slice(),
+        ["push" | "send-email", ..] | ["subtree" | "lfs", "push", ..]
+    )
+}
+
 fn gh(args: &[String]) -> bool {
-    let words = positionals(args, &["-R", "--repo", "--hostname"]);
+    let words = positionals(args, &GH_ARGS);
     match words.as_slice() {
-        ["pr", "create" | "merge" | "close" | "comment", ..] => true,
-        ["release", ..] => true,
+        [] => false,
         ["api", ..] => gh_api(args),
-        _ => false,
+        [first, ..] if GH_READS.contains(first) => false,
+        [_] => false,
+        [_, verb, ..] => !GH_READS.contains(verb),
     }
 }
 
-fn gh_api(args: &[String]) -> bool {
-    let mut method: Option<String> = None;
-    let mut fields = false;
+struct ApiCall {
+    method: Option<String>,
+    fields: Vec<String>,
+    input: bool,
+}
+
+fn api_call(args: &[String]) -> ApiCall {
+    let mut call = ApiCall {
+        method: None,
+        fields: Vec::new(),
+        input: false,
+    };
     let mut at = 0;
     while let Some(word) = args.get(at) {
         at += 1;
         if word == "-X" {
-            method = take(args, &mut at);
+            call.method = take(args, &mut at);
         } else if let Some(value) = word.strip_prefix("-X") {
-            method = Some(value.to_string());
+            call.method = Some(value.to_string());
+        } else if matches!(word.as_str(), "-f" | "-F") {
+            call.fields.extend(take(args, &mut at));
+        } else if let Some(value) = word
+            .strip_prefix("-f")
+            .or_else(|| word.strip_prefix("-F"))
+            .filter(|v| !v.is_empty() && !word.starts_with("--"))
+        {
+            call.fields.push(value.to_string());
         } else if let Some((name, value)) = long_flag(word) {
             match name {
-                "method" => method = value.map(String::from).or_else(|| take(args, &mut at)),
-                "field" | "raw-field" | "input" => fields = true,
+                "method" => {
+                    call.method = value.map(String::from).or_else(|| take(args, &mut at));
+                }
+                "field" | "raw-field" => {
+                    call.fields
+                        .extend(value.map(String::from).or_else(|| take(args, &mut at)));
+                }
+                "input" => call.input = true,
                 _ => {}
             }
-        } else if word.starts_with("-f") || word.starts_with("-F") {
-            fields = true;
         }
     }
-    match method {
+    call
+}
+
+fn gh_api(args: &[String]) -> bool {
+    let words = positionals(args, &GH_API_ARGS);
+    let call = api_call(args);
+    if words.get(1) == Some(&"graphql") {
+        return call.input
+            || call.fields.iter().any(|field| {
+                field.strip_prefix("query=").is_some_and(|query| {
+                    query.starts_with('@') || query.to_ascii_lowercase().contains("mutation")
+                })
+            });
+    }
+    match call.method {
         Some(method) => !safe_method(&method),
-        None => fields,
+        None => call.input || !call.fields.is_empty(),
     }
 }
 
 fn package(args: &[String]) -> bool {
     let words = positionals(args, &PACKAGE_ARGS);
-    matches!(words.as_slice(), ["publish", ..] | ["npm", "publish", ..])
+    words.first() == Some(&"publish") || words.windows(2).any(|w| w == ["npm", "publish"])
 }
 
 fn docker(args: &[String]) -> bool {
     let words = positionals(args, &DOCKER_ARGS);
+    match words.as_slice() {
+        ["push", ..] | ["image" | "manifest" | "compose" | "buildx", "push", ..] => true,
+        ["build" | "bake", ..] | ["buildx" | "builder" | "image", "build" | "bake", ..] => {
+            pushes(args)
+        }
+        _ => false,
+    }
+}
+
+fn pushes(args: &[String]) -> bool {
+    let mut at = 0;
+    while let Some(word) = args.get(at) {
+        at += 1;
+        if word == "--push" || word.strip_prefix("--push=").is_some_and(|v| v != "false") {
+            return true;
+        }
+        let output = if word == "--output" || word == "-o" {
+            take(args, &mut at)
+        } else {
+            word.strip_prefix("--output=").map(String::from)
+        };
+        if output.is_some_and(|o| o.contains("push=true") || o.contains("type=registry")) {
+            return true;
+        }
+    }
+    false
+}
+
+fn terraform(args: &[String]) -> bool {
+    let words = positionals(args, &[]);
     matches!(
         words.as_slice(),
-        ["push", ..] | ["image" | "manifest" | "compose" | "buildx", "push", ..]
+        ["apply" | "destroy" | "import", ..] | ["state", "rm" | "mv" | "push", ..]
+    )
+}
+
+fn fly(args: &[String]) -> bool {
+    let words = positionals(args, &[]);
+    matches!(
+        words.as_slice(),
+        ["deploy" | "scale" | "machine" | "machines", ..]
+            | ["secrets", "set" | "unset" | "import", ..]
+            | ["apps", "destroy" | "create", ..]
     )
 }
 
@@ -219,22 +425,21 @@ fn curl(args: &[String]) -> bool {
                     body = true;
                     at += usize::from(value.is_none());
                 }
-                "form" | "form-string" | "upload-file" => {
+                "form" | "form-string" | "upload-file" | "config" => {
                     always = true;
                     at += usize::from(value.is_none());
                 }
                 _ => {}
             }
         } else if let Some(cluster) = word.strip_prefix('-') {
-            let chars: Vec<char> = cluster.chars().collect();
-            for (k, c) in chars.iter().enumerate() {
-                let rest: String = chars[k + 1..].iter().collect();
+            for (k, c) in cluster.char_indices() {
+                let rest = &cluster[k + c.len_utf8()..];
                 match c {
                     'X' => {
                         method = Some(if rest.is_empty() {
                             take(args, &mut at).unwrap_or_default()
                         } else {
-                            rest
+                            rest.to_string()
                         });
                         break;
                     }
@@ -243,13 +448,13 @@ fn curl(args: &[String]) -> bool {
                         at += usize::from(rest.is_empty());
                         break;
                     }
-                    'F' | 'T' => {
+                    'F' | 'T' | 'K' => {
                         always = true;
                         at += usize::from(rest.is_empty());
                         break;
                     }
                     'G' => get = true,
-                    c if CURL_ARG_FLAGS.contains(*c) => {
+                    c if CURL_ARG_FLAGS.contains(c) => {
                         at += usize::from(rest.is_empty());
                         break;
                     }
@@ -294,15 +499,14 @@ fn rsync(args: &[String]) -> bool {
     words.len() >= 2 && words.last().is_some_and(|dest| remote(dest))
 }
 
-fn is_read_verb(word: &str) -> bool {
-    if !word
-        .chars()
+fn plain_word(word: &str) -> bool {
+    word.chars()
         .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
-    {
-        return false;
-    }
-    matches!(word, "ls" | "show" | "help" | "version")
-        || ["describe", "list", "get"].iter().any(|verb| {
+}
+
+fn is_verb(word: &str, verbs: &[&str]) -> bool {
+    plain_word(word)
+        && verbs.iter().any(|verb| {
             word == *verb
                 || word
                     .strip_prefix(verb)
@@ -310,7 +514,42 @@ fn is_read_verb(word: &str) -> bool {
         })
 }
 
-fn cloud(args: &[String]) -> bool {
+fn is_read_verb(word: &str) -> bool {
+    matches!(word, "ls" | "show" | "help" | "version")
+        || is_verb(word, &["describe", "list", "get"])
+}
+
+fn aws(args: &[String]) -> bool {
     let words = positionals(args, &CLOUD_ARGS);
-    !words.is_empty() && !words.iter().take(4).any(|word| is_read_verb(word))
+    match words.as_slice() {
+        [] => false,
+        ["help" | "version"] => false,
+        [_, operation, ..] => !is_read_verb(operation),
+        [_] => true,
+    }
+}
+
+fn gcloud(args: &[String]) -> bool {
+    let mut at = 0;
+    while let Some(word) = args.get(at) {
+        if !word.starts_with('-') || word == "-" {
+            break;
+        }
+        at += if CLOUD_ARGS.contains(&word.as_str()) {
+            2
+        } else {
+            1
+        };
+    }
+    let words: Vec<&str> = args[at.min(args.len())..]
+        .iter()
+        .map(String::as_str)
+        .take_while(|word| !word.starts_with('-') || *word == "-")
+        .collect();
+    if words.is_empty() {
+        return false;
+    }
+    let read = words.iter().any(|word| is_read_verb(word));
+    let write = words.iter().any(|word| is_verb(word, &CLOUD_WRITES));
+    !read || write
 }

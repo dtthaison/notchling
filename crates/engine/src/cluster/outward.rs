@@ -5,11 +5,13 @@ use crate::transcript::model::{Conversation, ItemKind, ToolCall, ToolKind};
 mod commands;
 mod shell;
 
-const MCP_WORDS: [&str; 10] = [
-    "send", "post", "create", "update", "delete", "publish", "deploy", "merge", "write", "reply",
+const MCP_READS: [&str; 8] = [
+    "get", "list", "search", "read", "fetch", "find", "view", "describe",
 ];
 
-const READ_ACTIONS: [&str; 4] = ["read", "get", "list", "view"];
+const READ_ACTIONS: [&str; 5] = ["read", "get", "list", "view", "query"];
+
+const MIN_AGENT_ID: usize = 6;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CutStep {
@@ -19,17 +21,27 @@ pub struct CutStep {
 }
 
 pub fn is_outward(tool: &str, input: &Value) -> bool {
-    if tool == "Bash" {
-        return input
-            .get("command")
-            .and_then(Value::as_str)
-            .is_some_and(shell::is_outward);
+    let command = input.get("command").and_then(Value::as_str);
+    match tool {
+        "Bash" => command.is_some_and(shell::is_outward),
+        "Monitor" => command.is_none_or(shell::is_outward),
+        "Artifact" | "ArtifactData" | "ArtifactComments" => artifact_outward(input),
+        _ => mcp_outward(tool),
     }
-    if tool == "Artifact" {
-        return artifact_outward(input);
-    }
+}
+
+fn mcp_outward(tool: &str) -> bool {
     let lower = tool.to_ascii_lowercase();
-    lower.starts_with("mcp__") && MCP_WORDS.iter().any(|word| lower.contains(word))
+    let Some(rest) = lower.strip_prefix("mcp__") else {
+        return false;
+    };
+    let name = rest
+        .split_once("__")
+        .map_or(lower.as_str(), |(_, name)| name);
+    !MCP_READS.iter().any(|read| {
+        name.strip_prefix(read)
+            .is_some_and(|after| after.is_empty() || after.starts_with('_'))
+    })
 }
 
 fn artifact_outward(input: &Value) -> bool {
@@ -48,20 +60,54 @@ pub fn cut_steps(conv: &Conversation) -> Vec<CutStep> {
         .iter()
         .rposition(|item| matches!(item.kind, ItemKind::User { .. }))
         .map_or(0, |at| at + 1);
-    conv.items[start..]
+    let calls: Vec<&ToolCall> = conv.items[start..]
         .iter()
         .filter_map(|item| match &item.kind {
             ItemKind::Tools(calls) => Some(calls),
             _ => None,
         })
         .flatten()
+        .collect();
+    let mut steps: Vec<CutStep> = calls
+        .iter()
         .filter(|call| !call.finished)
         .map(|call| CutStep {
             tool: call.name.clone(),
             summary: call.title.clone(),
-            outward: is_outward(&call.name, &input_of(call)),
+            outward: call.kind == ToolKind::Agent || is_outward(&call.name, &input_of(call)),
         })
-        .collect()
+        .collect();
+    steps.extend(
+        conv.shells
+            .iter()
+            .filter(|shell| !conv.finished_agents.contains_key(&shell.id))
+            .map(|shell| CutStep {
+                tool: "Bash".to_string(),
+                summary: shell.title.clone(),
+                outward: is_outward("Bash", &json!({ "command": shell.command })),
+            }),
+    );
+    steps.extend(
+        calls
+            .iter()
+            .filter(|call| call.kind == ToolKind::Agent && call.finished)
+            .filter(|call| !agent_reported(conv, call))
+            .map(|call| CutStep {
+                tool: call.name.clone(),
+                summary: call.title.clone(),
+                outward: true,
+            }),
+    );
+    steps
+}
+
+fn agent_reported(conv: &Conversation, call: &ToolCall) -> bool {
+    conv.finished_agents.contains_key(&call.id)
+        || call.output.as_deref().is_some_and(|output| {
+            conv.finished_agents
+                .keys()
+                .any(|id| id.len() >= MIN_AGENT_ID && output.contains(id.as_str()))
+        })
 }
 
 fn input_of(call: &ToolCall) -> Value {

@@ -1,8 +1,13 @@
+use std::collections::HashMap;
+use std::time::{Duration, Instant};
+
 use serde_json::{json, Value};
 
 use super::outward::{cut_steps, is_outward, CutStep};
 use crate::transcript::conversation;
-use crate::transcript::model::{ChatItem, Conversation, ItemKind, ToolCall, ToolKind};
+use crate::transcript::model::{
+    BackgroundShell, ChatItem, Conversation, ItemKind, ToolCall, ToolKind,
+};
 
 fn bash(cmd: &str) -> bool {
     is_outward("Bash", &json!({ "command": cmd }))
@@ -17,6 +22,16 @@ fn all_outward(cmds: &[&str]) {
 fn none_outward(cmds: &[&str]) {
     for cmd in cmds {
         assert!(!bash(cmd), "{cmd} should not be outward");
+    }
+}
+
+fn tools(names: &[&str], input: &Value, outward: bool) {
+    for name in names {
+        assert_eq!(
+            is_outward(name, input),
+            outward,
+            "{name} with {input} should be outward: {outward}"
+        );
     }
 }
 
@@ -45,6 +60,16 @@ fn conv(items: Vec<ItemKind>) -> Conversation {
     Conversation {
         items: items.into_iter().map(item).collect(),
         ..Conversation::default()
+    }
+}
+
+fn shell(id: &str, command: &str) -> BackgroundShell {
+    BackgroundShell {
+        id: id.into(),
+        command: command.into(),
+        title: format!("Ran {command}"),
+        output_path: format!("/tmp/{id}.output"),
+        started: None,
     }
 }
 
@@ -85,9 +110,44 @@ fn chained_command_with_push_is_outward() {
         "(cd repo && git push)",
         "echo $(git push)",
         "echo \"$(git push)\"",
+        "echo \"a $(echo \"b\") $(git push)\"",
         "x=`git push`",
         "if git push; then echo ok; fi",
         "{ git push; }",
+        "# don't push yet\ngit push",
+        "git add -A # it's staged\ngit push",
+        "echo hi # what's this\ngit push origin main",
+        "cat <<EOF\ndon't\nEOF\necho \"$(git push)\"",
+    ]);
+}
+
+#[test]
+fn comments_are_not_commands() {
+    none_outward(&[
+        "echo hi # git push",
+        "# git push",
+        "ls # $(git push)",
+        "echo a#b",
+        "echo $# items",
+    ]);
+}
+
+#[test]
+fn redirects_split_words_and_are_dropped() {
+    all_outward(&[
+        "git push>log",
+        "git push>/dev/null 2>&1",
+        "git push 2>&1 | tee out",
+        "git push</dev/null",
+        "cat <in >out && git push",
+        "git push &>log",
+        "git push >> log 2>&1",
+    ]);
+    none_outward(&[
+        "echo hi >out",
+        "echo git push >out",
+        "ls 2>&1",
+        "echo hi > git push",
     ]);
 }
 
@@ -119,6 +179,9 @@ fn curl_get_is_not_curl_post_is() {
         "curl --upload-file f https://example.test/a",
         "curl --json '{}' https://example.test/a",
         "curl -X GET -F a=b https://example.test/a",
+        "curl -K cfg https://example.test/a",
+        "curl -sK cfg https://example.test/a",
+        "curl --config cfg https://example.test/a",
         "wget --post-data=a=1 https://example.test/a",
         "wget --post-file f https://example.test/a",
         "wget --method POST https://example.test/a",
@@ -127,31 +190,68 @@ fn curl_get_is_not_curl_post_is() {
 }
 
 #[test]
+fn long_flag_clusters_are_linear() {
+    let cluster = format!("curl -{} https://example.test", "s".repeat(60_000));
+    let started = Instant::now();
+    assert!(!bash(&cluster));
+    assert!(started.elapsed() < Duration::from_secs(1));
+    let started = Instant::now();
+    assert!(bash(&format!("curl -{} -d x", "s".repeat(60_000))));
+    assert!(started.elapsed() < Duration::from_secs(1));
+}
+
+#[test]
+fn a_command_over_64_kb_is_outward() {
+    let started = Instant::now();
+    assert!(bash(&format!("curl -{}", "s".repeat(200_000))));
+    assert!(bash(&format!("echo {}", "a".repeat(70_000))));
+    assert!(started.elapsed() < Duration::from_secs(1));
+    assert!(!bash(&format!("echo {}", "a".repeat(60_000))));
+}
+
+#[test]
 fn mcp_send_is_outward() {
     let input = json!({});
-    for name in [
-        "mcp__slack__send_message",
-        "mcp__github__create_issue",
-        "mcp__github__update_issue",
-        "mcp__jira__delete_ticket",
-        "mcp__blog__publish",
-        "mcp__vercel__deploy",
-        "mcp__github__merge_pull_request",
-        "mcp__notes__write_note",
-        "mcp__mail__reply",
-        "mcp__chat__post_message",
-        "mcp__Slack__SEND_MESSAGE",
-    ] {
-        assert!(is_outward(name, &input), "{name} should be outward");
-    }
-    for name in [
-        "mcp__github__list_issues",
-        "mcp__github__get_file_contents",
-        "mcp__slack__search",
-        "mcp__docs__read",
-    ] {
-        assert!(!is_outward(name, &input), "{name} should not be");
-    }
+    tools(
+        &[
+            "mcp__slack__send_message",
+            "mcp__github__create_issue",
+            "mcp__github__update_issue",
+            "mcp__jira__delete_ticket",
+            "mcp__blog__publish",
+            "mcp__vercel__deploy",
+            "mcp__github__merge_pull_request",
+            "mcp__github__push_files",
+            "mcp__notes__write_note",
+            "mcp__mail__reply",
+            "mcp__chat__post_message",
+            "mcp__Slack__SEND_MESSAGE",
+            "mcp__postgres__query",
+            "mcp__github__getIssue",
+            "mcp__github__searchfoo",
+            "mcp__lonely",
+            "mcp__github__getaway",
+        ],
+        &input,
+        true,
+    );
+    tools(
+        &[
+            "mcp__github__list_issues",
+            "mcp__github__get_file_contents",
+            "mcp__github__get_issue",
+            "mcp__slack__search",
+            "mcp__docs__read",
+            "mcp__docs__fetch_page",
+            "mcp__x__find_things",
+            "mcp__x__VIEW_Thing",
+            "mcp__x__describe",
+            "mcp__postgres__read_rows",
+            "mcp__push__list_things",
+        ],
+        &input,
+        false,
+    );
 }
 
 #[test]
@@ -168,6 +268,30 @@ fn artifact_publish_is_outward() {
         assert!(!is_outward("Artifact", &json!({ "action": action })));
         assert!(!is_outward("Artifact", &json!({ "mode": action })));
     }
+}
+
+#[test]
+fn artifact_data_and_comments_follow_the_artifact_rule() {
+    for tool in ["ArtifactData", "ArtifactComments"] {
+        assert!(is_outward(tool, &json!({"action": "set"})));
+        assert!(is_outward(tool, &json!({"action": "reply"})));
+        assert!(is_outward(tool, &json!({})));
+        assert!(is_outward(tool, &Value::Null));
+        assert!(!is_outward(tool, &json!({"action": "list"})));
+        assert!(!is_outward(tool, &json!({"action": "get"})));
+    }
+    assert!(!is_outward("ArtifactData", &json!({"action": "query"})));
+}
+
+#[test]
+fn monitor_follows_the_bash_check() {
+    assert!(is_outward("Monitor", &json!({"command": "git push"})));
+    assert!(is_outward(
+        "Monitor",
+        &json!({"command": "tail -f x && git push"})
+    ));
+    assert!(!is_outward("Monitor", &json!({"command": "tail -f log"})));
+    assert!(is_outward("Monitor", &json!({})));
 }
 
 #[test]
@@ -190,22 +314,28 @@ fn cut_artifact_with_unparseable_input_is_outward() {
 
 #[test]
 fn read_and_edit_are_not() {
-    for tool in [
-        "Read",
-        "Edit",
-        "Write",
-        "MultiEdit",
-        "Grep",
-        "Glob",
-        "WebFetch",
-        "WebSearch",
-        "Agent",
-        "TodoWrite",
-        "NotebookEdit",
-    ] {
-        assert!(!is_outward(tool, &json!({"file_path": "/w/a.rs"})));
-        assert!(!is_outward(tool, &json!({"command": "git push"})));
-    }
+    tools(
+        &[
+            "Read",
+            "Edit",
+            "Write",
+            "MultiEdit",
+            "Grep",
+            "Glob",
+            "WebFetch",
+            "WebSearch",
+            "Agent",
+            "TodoWrite",
+            "NotebookEdit",
+        ],
+        &json!({"file_path": "/w/a.rs"}),
+        false,
+    );
+    tools(
+        &["Read", "Edit", "Write", "Grep"],
+        &json!({"command": "git push"}),
+        false,
+    );
     assert!(!is_outward("Bash", &json!({})));
     assert!(!is_outward("Bash", &json!({"command": ""})));
     assert!(!is_outward("Bash", &json!({"command": 3})));
@@ -217,14 +347,23 @@ fn cut_steps_reads_unanswered_calls() {
     let steps = cut_steps(&c);
     assert_eq!(steps.len(), 1);
     assert_eq!(steps[0].tool, "Bash");
-    let last = c.items.last().expect("last item");
-    let ItemKind::Tools(calls) = &last.kind else {
-        panic!("last item is not tools");
-    };
-    let cut = calls.last().expect("a call");
+    let last_tools = c
+        .items
+        .iter()
+        .rev()
+        .find_map(|i| match &i.kind {
+            ItemKind::Tools(calls) => Some(calls),
+            _ => None,
+        })
+        .expect("a tools item");
+    let cut = last_tools.last().expect("a call");
     assert!(!cut.finished);
     assert_eq!(cut.input, "git push origin notes");
-    assert!(calls.iter().filter(|c| !c.finished).count() == 1);
+    assert_eq!(
+        last_tools.iter().filter(|c| !c.finished).count(),
+        1,
+        "{last_tools:?}"
+    );
 }
 
 #[test]
@@ -288,6 +427,69 @@ fn cut_mcp_call_takes_its_name_from_the_call() {
 }
 
 #[test]
+fn cut_foreground_agent_is_outward() {
+    for (name, input) in [("Agent", "do the push"), ("Task", "review")] {
+        let c = conv(vec![
+            ItemKind::user("go"),
+            ItemKind::Tools(vec![call(name, ToolKind::Agent, input, false)]),
+        ]);
+        let steps = cut_steps(&c);
+        assert_eq!(steps.len(), 1);
+        assert!(steps[0].outward);
+        assert_eq!(steps[0].tool, name);
+    }
+}
+
+#[test]
+fn running_background_shells_are_cut_steps() {
+    let mut c = conv(vec![ItemKind::user("go")]);
+    c.shells = vec![
+        shell("b1", "git push origin main"),
+        shell("b2", "sleep 600"),
+        shell("b3", "git push origin done"),
+    ];
+    c.finished_agents = HashMap::from([("b3".to_string(), "completed".to_string())]);
+    let steps = cut_steps(&c);
+    assert_eq!(
+        steps,
+        vec![
+            CutStep {
+                tool: "Bash".into(),
+                summary: "Ran git push origin main".into(),
+                outward: true,
+            },
+            CutStep {
+                tool: "Bash".into(),
+                summary: "Ran sleep 600".into(),
+                outward: false,
+            },
+        ]
+    );
+}
+
+#[test]
+fn background_agents_without_a_notification_are_outward_cut_steps() {
+    let mut launched = call("Agent", ToolKind::Agent, "push it", true);
+    launched.id = "t-bg".into();
+    launched.output = Some("Async agent launched successfully.\nagentId: abcdef123456".into());
+    let mut foreground = call("Agent", ToolKind::Agent, "review", true);
+    foreground.id = "t-fg".into();
+    foreground.output = Some("done".into());
+    let mut c = conv(vec![
+        ItemKind::user("go"),
+        ItemKind::Tools(vec![launched.clone(), foreground]),
+    ]);
+    c.finished_agents = HashMap::from([("t-fg".to_string(), "completed".to_string())]);
+    let steps = cut_steps(&c);
+    assert_eq!(steps.len(), 1);
+    assert_eq!(steps[0].tool, "Agent");
+    assert!(steps[0].outward);
+    c.finished_agents
+        .insert("abcdef123456".to_string(), "completed".to_string());
+    assert!(cut_steps(&c).is_empty());
+}
+
+#[test]
 fn git_family_table() {
     all_outward(&[
         "git push",
@@ -296,8 +498,16 @@ fn git_family_table() {
         "git -c user.name=x push",
         "git send-email --to a@example.test patch",
         "/usr/bin/git push",
+        "git subtree push --prefix=x origin main",
+        "git lfs push origin main",
     ]);
-    none_outward(&["git pull", "git checkout push", "git stash push"]);
+    none_outward(&[
+        "git pull",
+        "git checkout push",
+        "git stash push",
+        "git subtree pull --prefix=x origin main",
+        "git lfs ls-files",
+    ]);
 }
 
 #[test]
@@ -307,9 +517,15 @@ fn gh_family_table() {
         "gh pr merge 12",
         "gh pr close 12",
         "gh pr comment 12 -b hi",
+        "gh pr ready 3",
         "gh -R o/r pr merge 3",
         "gh release create v1",
         "gh release upload v1 a.tgz",
+        "gh issue create -t x",
+        "gh repo delete o/r",
+        "gh run rerun 3",
+        "gh workflow run x.yml",
+        "gh label create x",
         "gh api -X POST repos/o/r/issues",
         "gh api --method DELETE repos/o/r/issues/1",
         "gh api -XPATCH repos/o/r/issues/1",
@@ -317,13 +533,46 @@ fn gh_family_table() {
         "gh api repos/o/r/issues --input body.json",
     ]);
     none_outward(&[
+        "gh",
+        "gh pr",
         "gh pr view 12",
         "gh pr list",
         "gh pr checkout 12",
+        "gh pr diff 12",
+        "gh pr checks 12",
+        "gh pr status",
+        "gh run watch 3",
+        "gh run view 3",
+        "gh run download 3",
+        "gh release view v1",
+        "gh release list",
+        "gh release download v1",
         "gh issue list",
+        "gh browse",
+        "gh search repos x",
+        "gh status",
+        "gh auth status",
+        "gh help",
+        "gh version",
         "gh api repos/o/r/issues",
         "gh api -X GET repos/o/r/issues",
         "gh api --method GET repos/o/r/issues -f state=open",
+    ]);
+}
+
+#[test]
+fn gh_graphql_is_outward_only_for_a_mutation() {
+    all_outward(&[
+        "gh api graphql -f query='mutation { addStar(input: {}) { clientMutationId } }'",
+        "gh api graphql -f query='  MUTATION { x }'",
+        "gh api graphql -F query=@m.graphql",
+        "gh api graphql --input q.json",
+        "gh api graphql -F owner=o -f query='mutation($o: String) { x }'",
+    ]);
+    none_outward(&[
+        "gh api graphql -f query='query { viewer { login } }'",
+        "gh api graphql -F owner=o -f query='{ repository { id } }'",
+        "gh api graphql --field query='query { viewer { login } }'",
     ]);
 }
 
@@ -337,6 +586,8 @@ fn package_publish_table() {
         "pnpm -r publish",
         "yarn publish",
         "yarn npm publish",
+        "yarn workspace web npm publish",
+        "yarn workspaces foreach -A npm publish",
         "cargo publish",
         "cargo +nightly publish -p x",
         "docker push registry.test/app:1",
@@ -349,10 +600,59 @@ fn package_publish_table() {
         "npm run publish",
         "pnpm install",
         "yarn add left-pad",
+        "yarn workspaces foreach run build",
         "cargo build",
         "cargo test publish",
         "docker build -t app .",
         "docker pull app",
+    ]);
+}
+
+#[test]
+fn docker_builds_that_push_are_outward() {
+    all_outward(&[
+        "docker build --push -t a .",
+        "docker buildx build --push .",
+        "docker buildx bake --push",
+        "docker build --output type=registry,name=x .",
+        "docker buildx build -o type=image,push=true .",
+        "docker buildx build --output=type=registry .",
+        "docker image build --push .",
+    ]);
+    none_outward(&[
+        "docker build -t a .",
+        "docker buildx build --load .",
+        "docker buildx build --push=false .",
+        "docker buildx build -o type=local,dest=out .",
+    ]);
+}
+
+#[test]
+fn runners_are_wrappers() {
+    all_outward(&[
+        "npx vercel --prod",
+        "npx -y vercel --prod",
+        "npx --yes vercel --prod",
+        "npx -p vercel vercel --prod",
+        "npm exec -- vercel --prod",
+        "npm x -- vercel --prod",
+        "pnpm dlx vercel --prod",
+        "pnpm exec vercel --prod",
+        "yarn dlx vercel --prod",
+        "bunx vercel --prod",
+        "pnpx vercel --prod",
+        "npx wrangler deploy",
+        "wrangler publish",
+        "npx firebase deploy",
+        "npx -y gh pr merge 3",
+    ]);
+    none_outward(&[
+        "npx vercel",
+        "npx prettier --write .",
+        "npm exec -- tsc",
+        "pnpm dlx create-vite",
+        "wrangler dev",
+        "wrangler whoami",
     ]);
 }
 
@@ -362,31 +662,74 @@ fn infra_family_table() {
         "kubectl apply -f x.yaml",
         "kubectl delete pod p",
         "kubectl rollout restart deploy/d",
+        "kubectl rollout status deploy/d",
+        "kubectl exec p -- ls",
+        "kubectl scale deploy/d --replicas=0",
+        "kubectl create ns x",
+        "kubectl -n prod edit cm c",
         "kubectl -n prod apply -f x.yaml",
         "kubectl --context c1 delete pod p",
         "helm install r chart",
         "helm upgrade r chart",
+        "helm uninstall r",
+        "helm rollback r 1",
         "terraform apply",
         "terraform -chdir=infra apply -auto-approve",
         "terraform destroy",
+        "terraform import a.b id",
+        "terraform state rm a.b",
+        "terraform state push f",
         "tofu apply",
+        "tofu state mv a b",
         "fly deploy",
         "flyctl deploy --remote-only",
+        "fly secrets set A=b",
+        "fly apps destroy x",
+        "fly scale count 2",
+        "fly machine run img",
+        "flyctl machines stop m",
         "firebase deploy --only hosting",
+        "firebase hosting:channel:deploy preview",
         "vercel --prod",
         "vercel deploy --prod",
         "vercel --prod --yes",
     ]);
     none_outward(&[
+        "kubectl",
         "kubectl get pods",
         "kubectl describe pod p",
         "kubectl -n prod get pods",
         "kubectl logs p",
+        "kubectl top pods",
+        "kubectl explain pod",
+        "kubectl api-resources",
+        "kubectl api-versions",
+        "kubectl version",
+        "kubectl config view",
+        "kubectl diff -f x.yaml",
+        "kubectl auth can-i get pods",
+        "kubectl wait --for=condition=ready pod/p",
+        "kubectl cluster-info",
+        "kubectl port-forward p 8080:80",
         "helm list",
+        "helm ls",
+        "helm status r",
+        "helm get values r",
+        "helm history r",
         "helm template r chart",
+        "helm lint chart",
+        "helm show values chart",
+        "helm search repo x",
+        "helm repo add x https://example.test",
+        "helm dependency update chart",
+        "helm version",
+        "helm env",
         "terraform plan",
         "terraform init",
+        "terraform state list",
+        "terraform state show a.b",
         "fly status",
+        "fly secrets list",
         "firebase login",
         "vercel",
         "vercel dev",
@@ -399,6 +742,7 @@ fn remote_shell_table() {
     all_outward(&[
         "ssh host ls",
         "ssh -p 22 user@host",
+        "sftp host",
         "scp a.txt host:/tmp/",
         "scp host:/tmp/a.txt .",
         "rsync -a src/ host:/dst",
@@ -427,11 +771,18 @@ fn cloud_cli_table() {
         "aws ec2 run-instances --image-id x",
         "aws --profile p lambda update-function-code --function-name f",
         "aws s3 cp list.txt s3://b/",
+        "aws lambda invoke --function-name get-user out.json",
+        "aws secretsmanager put-secret-value --secret-id get-x",
+        "aws ec2 terminate-instances --instance-ids get-1",
         "gcloud compute instances delete i",
+        "gcloud compute instances delete list-vm",
         "gcloud run deploy s",
         "gcloud --project p app deploy",
+        "gcloud compute ssh get-x",
+        "gcloud storage cp a gs://b",
         "az vm delete -n v",
         "az group create -n g",
+        "az vm run-command invoke -n list-x",
     ]);
     none_outward(&[
         "aws s3 ls",
@@ -441,11 +792,15 @@ fn cloud_cli_table() {
         "aws sts get-caller-identity",
         "aws s3api list-buckets",
         "aws --profile p --region eu-west-1 s3 ls",
+        "aws configure get region",
         "aws --version",
+        "aws help",
         "gcloud compute instances list",
         "gcloud compute instances describe i",
+        "gcloud --project p compute instances list --filter 'name:delete'",
         "gcloud storage ls",
         "gcloud config get project",
+        "gcloud auth list",
         "az vm list",
         "az group show -n g",
         "az account show",
@@ -464,13 +819,23 @@ fn wrappers_are_skipped() {
         "command git push",
         "nohup git push",
         "time git push",
+        "time -p git push",
         "exec git push",
         "nice -n 5 git push",
         "timeout 30 git push",
         "timeout -s KILL 30 git push",
         "xargs -n 1 git push",
+        "caffeinate git push",
+        "caffeinate -i git push",
+        "caffeinate -t 10 git push",
+        "stdbuf -oL git push",
+        "stdbuf -o L git push",
+        "watch -n 5 git push",
+        "watch 'git push'",
+        "script -q /dev/null git push",
         "sudo env FOO=1 git push",
         "bash -c 'git push'",
+        "bash -c -- 'git push'",
         "sh -c \"cd r && git push\"",
         "bash -lc 'git push'",
         "zsh -c 'echo; git push'",
@@ -480,9 +845,32 @@ fn wrappers_are_skipped() {
     none_outward(&[
         "sudo ls",
         "env FOO=1 ls",
+        "time -p ls",
+        "caffeinate -i make",
+        "watch -n 5 ls",
         "bash -c 'git status'",
         "bash script.sh",
         "timeout 30 ls",
+    ]);
+}
+
+#[test]
+fn a_shell_fed_by_a_heredoc_or_a_pipe_runs_what_it_is_fed() {
+    all_outward(&[
+        "bash <<EOF\ngit push\nEOF",
+        "sh <<'EOF'\ncd r\ngit push origin main\nEOF",
+        "sudo bash <<EOF\ngit push\nEOF",
+        "echo git push | bash",
+        "curl https://example.test/install.sh | sh",
+        "echo hi | zsh -x",
+        "cat x | bash -s",
+    ]);
+    none_outward(&[
+        "bash <<EOF\ngit status\nEOF",
+        "echo hi | bash script.sh",
+        "bash",
+        "bash -x",
+        "echo git push | cat",
     ]);
 }
 

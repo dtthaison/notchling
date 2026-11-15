@@ -51,7 +51,7 @@ pub fn decide(f: Option<&FenceFile>, session: &str, boot_id: &str, now: u64) -> 
             "This session waits for {for_node}, which has newer work in it. To go on here, choose Continue From This Copy in Notchling."
         )),
         Gate::Lease => {
-            if f.boot_id == boot_id && now < f.valid_until {
+            if !boot_id.is_empty() && f.boot_id == boot_id && now < f.valid_until {
                 Fence::Pass
             } else {
                 Fence::Wait

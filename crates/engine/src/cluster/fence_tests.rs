@@ -119,6 +119,25 @@ fn garbage_file_waits_never_passes() {
     assert_eq!(decide_bytes(Some(b"not json"), "s1", "b1", 0), Fence::Wait);
     assert_eq!(decide_bytes(Some(b""), "s1", "b1", 0), Fence::Wait);
     assert_eq!(decide_bytes(Some(b"{}"), "s1", "b1", 0), Fence::Wait);
+    let well_formed = json(&file(&[("s1", Gate::Lease)], "b1", HOUR_MS));
+    let bogus = String::from_utf8(well_formed)
+        .expect("utf8")
+        .replace("\"lease\"", "\"bogus\"");
+    assert!(bogus.contains("\"bogus\""));
+    assert_eq!(parse(bogus.as_bytes()), None);
+    assert_eq!(
+        decide_bytes(Some(bogus.as_bytes()), "s1", "b1", 0),
+        Fence::Wait
+    );
+}
+
+#[test]
+fn empty_boot_id_never_passes_a_lease() {
+    let f = file(&[("s1", Gate::Lease)], "", HOUR_MS);
+    assert_eq!(decide(Some(&f), "s1", "", 10), Fence::Wait);
+    assert_eq!(decide_bytes(Some(&json(&f)), "s1", "", 10), Fence::Wait);
+    let free = file(&[("s1", Gate::Free)], "", HOUR_MS);
+    assert_eq!(decide(Some(&free), "s1", "", 10), Fence::Pass);
 }
 
 #[test]
