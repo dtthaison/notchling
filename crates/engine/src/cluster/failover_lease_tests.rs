@@ -562,6 +562,7 @@ struct World {
     now: u64,
     promotions: usize,
     automatic: usize,
+    manual_terms: BTreeSet<Term>,
     restarts: u64,
     rng: Rng,
 }
@@ -603,6 +604,7 @@ impl World {
             now: 1_000,
             promotions: 0,
             automatic: 0,
+            manual_terms: BTreeSet::new(),
             restarts: 0,
             rng,
         }
@@ -738,6 +740,11 @@ impl World {
         });
         self.promotions += 1;
         self.automatic += usize::from(due);
+        if !due {
+            if let Some(p) = self.primaries.last() {
+                self.manual_terms.insert(p.state.term.clone());
+            }
+        }
     }
 
     fn follow(&mut self) {
@@ -850,8 +857,11 @@ impl World {
                     continue;
                 };
                 if peer.primary.is_some()
-                    || primary.unaware.contains(node)
-                    || primary.state.term < peer.view.term
+                    || (primary.unaware.contains(node) && peer.view.term < primary.state.term)
+                    || self
+                        .manual_terms
+                        .iter()
+                        .any(|t| *t > primary.state.term && *t <= peer.view.term)
                     || !auto_promote_due(node, &peer.view, &peer.grantor, false, deadline)
                 {
                     continue;
