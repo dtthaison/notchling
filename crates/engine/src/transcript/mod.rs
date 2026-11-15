@@ -10,6 +10,7 @@ pub mod glance;
 pub mod locate;
 pub mod message;
 pub mod model;
+pub mod queue_state;
 pub mod restart;
 pub mod scan;
 pub mod sent;

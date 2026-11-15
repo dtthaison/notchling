@@ -19,7 +19,7 @@ pub(super) fn squeezed(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-fn said(obj: &Value) -> String {
+pub(super) fn said(obj: &Value) -> String {
     match obj.pointer("/message/content") {
         Some(Value::String(text)) => text.clone(),
         Some(Value::Array(blocks)) => blocks
@@ -86,13 +86,14 @@ pub fn sent_since(path: &str, text: &str, since_ms: i64) -> Option<bool> {
     reaches_back.then_some(false)
 }
 
-struct Queue {
-    waiting: Vec<String>,
-    batch: Vec<String>,
+#[derive(Default)]
+pub(super) struct Queue {
+    pub(super) waiting: Vec<String>,
+    pub(super) batch: Vec<String>,
 }
 
 impl Queue {
-    fn operation(&mut self, obj: &Value) {
+    pub(super) fn operation(&mut self, obj: &Value) {
         let content = str_of(obj, "content");
         match str_of(obj, "operation") {
             Some("enqueue") => self.waiting.extend(content.map(String::from)),
@@ -119,7 +120,7 @@ fn wants_something(message: &Message) -> bool {
     !message.text.is_empty() || message.pictures > 0
 }
 
-fn entry_matches(message: &Message, content: &str) -> bool {
+pub(super) fn entry_matches(message: &Message, content: &str) -> bool {
     if !wants_something(message) {
         return false;
     }
@@ -170,7 +171,7 @@ fn image_blocks(content: Option<&Value>) -> usize {
     })
 }
 
-fn attachment_text(obj: &Value) -> Option<(String, usize)> {
+pub(super) fn attachment_text(obj: &Value) -> Option<(String, usize)> {
     let attachment = obj.get("attachment")?;
     if str_of(attachment, "type") != Some("queued_command") {
         return None;
@@ -194,10 +195,7 @@ pub fn count_since(path: &str, message: &Message, since_ms: i64) -> Option<Seen>
     let lines = read_lines(path, WINDOW_BYTES).ok()?;
     let mut reaches_back = size <= WINDOW_BYTES;
     let mut seen = Seen::default();
-    let mut queue = Queue {
-        waiting: Vec::new(),
-        batch: Vec::new(),
-    };
+    let mut queue = Queue::default();
     for line in &lines {
         let Some(map) = parse_object(line.as_bytes()) else {
             continue;
