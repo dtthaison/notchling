@@ -697,6 +697,9 @@ impl Wired {
             events.clone(),
             sessions.clone(),
         );
+        if let Some(tell) = cluster.peer_teller() {
+            outbox.set_tell(tell);
+        }
         Wired {
             acting,
             codex,

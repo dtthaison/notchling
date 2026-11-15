@@ -66,8 +66,9 @@ impl Agent {
     }
 
     pub fn outbox_key(&self) -> String {
-        match &self.target {
-            AgentTarget::Job(job) => job.clone(),
+        match (&self.target, &self.node) {
+            (AgentTarget::Job(job), Some(node)) => format!("{}/{job}", node.id),
+            (AgentTarget::Job(job), None) => job.clone(),
             _ => self.id.clone(),
         }
     }

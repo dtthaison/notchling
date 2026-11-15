@@ -164,16 +164,19 @@ impl Request {
         self
     }
 
-    pub fn outbox_edit(id: &str, text: &str) -> Request {
-        Request::new(ops::OUTBOX_EDIT, json!({ "id": id, "text": text }))
+    pub fn outbox_edit(id: &str, session: &str, text: &str) -> Request {
+        Request::new(
+            ops::OUTBOX_EDIT,
+            json!({ "id": id, "session": session, "text": text }),
+        )
     }
 
-    pub fn outbox_remove(id: &str) -> Request {
-        Request::new(ops::OUTBOX_REMOVE, json!({ "id": id }))
+    pub fn outbox_remove(id: &str, session: &str) -> Request {
+        Request::new(ops::OUTBOX_REMOVE, json!({ "id": id, "session": session }))
     }
 
-    pub fn outbox_resend(id: &str, clear_box: bool, resume: bool) -> Request {
-        let mut args = json!({ "id": id });
+    pub fn outbox_resend(id: &str, session: &str, clear_box: bool, resume: bool) -> Request {
+        let mut args = json!({ "id": id, "session": session });
         if clear_box {
             args["clear_box"] = json!(true);
         }
@@ -310,30 +313,30 @@ mod tests {
             json!({"id": "s1", "text": "go", "options": {"model": "m"}})
         );
         assert_eq!(
-            Request::outbox_edit("o1", "new"),
+            Request::outbox_edit("o1", "ab12cd34", "new"),
             Request {
                 op: "outbox.edit",
-                args: json!({"id": "o1", "text": "new"})
+                args: json!({"id": "o1", "session": "ab12cd34", "text": "new"})
             }
         );
         assert_eq!(
-            Request::outbox_remove("o1"),
+            Request::outbox_remove("o1", "ab12cd34"),
             Request {
                 op: "outbox.remove",
-                args: json!({"id": "o1"})
+                args: json!({"id": "o1", "session": "ab12cd34"})
             }
         );
         assert_eq!(
-            Request::outbox_resend("o1", false, false).args,
-            json!({"id": "o1"})
+            Request::outbox_resend("o1", "ab12cd34", false, false).args,
+            json!({"id": "o1", "session": "ab12cd34"})
         );
         assert_eq!(
-            Request::outbox_resend("o1", true, false).args,
-            json!({"id": "o1", "clear_box": true})
+            Request::outbox_resend("o1", "n1/ab12cd34", true, false).args,
+            json!({"id": "o1", "session": "n1/ab12cd34", "clear_box": true})
         );
         assert_eq!(
-            Request::outbox_resend("o1", false, true).args,
-            json!({"id": "o1", "resume": true})
+            Request::outbox_resend("o1", "ab12cd34", false, true).args,
+            json!({"id": "o1", "session": "ab12cd34", "resume": true})
         );
         assert_eq!(
             Request::outbox_discard("ab12cd34"),

@@ -30,7 +30,7 @@ impl ChatTool for Codex {
         if is_draft(id) {
             codex_send_draft(id, &session.agent.cwd, text, &pick)
         } else {
-            send_request(id, session.agent.node.is_some(), text, Some(&pick))
+            send_request(id, text, Some(&pick))
         }
     }
 

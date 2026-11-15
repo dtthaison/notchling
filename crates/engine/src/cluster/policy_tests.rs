@@ -250,3 +250,70 @@ fn node_sessions_is_for_clients_and_the_home() {
     assert!(check("node.sessions", &client, &origin("m1", OriginTier::Node)).is_ok());
     assert!(check("node.sessions", &home, &origin("m5", OriginTier::Node)).is_ok());
 }
+
+const OUTBOX_OPS: [&str; 5] = [
+    "outbox.list",
+    "outbox.edit",
+    "outbox.remove",
+    "outbox.resend",
+    "outbox.discard",
+];
+
+#[test]
+fn session_send_forwards_to_owner() {
+    let client = facts("m1", Role::Standby, true, MemberState::Active);
+    let home = facts("m5", Role::Home, false, MemberState::Active);
+    for (name, sender) in [("m1", &client), ("m5", &home)] {
+        let rule = check("session.send", sender, &origin(name, OriginTier::App)).expect("rule");
+        assert_eq!(rule.id_field, Some("id"));
+        assert!(!rule.home_only);
+    }
+}
+
+#[test]
+fn worker_may_not_send() {
+    let worker = facts("w1", Role::Worker, false, MemberState::Active);
+    let standby = facts("m2", Role::Standby, false, MemberState::Active);
+    for (name, sender) in [("w1", &worker), ("m2", &standby)] {
+        for op in ["session.send"].into_iter().chain(OUTBOX_OPS) {
+            assert_eq!(
+                check(op, sender, &origin(name, OriginTier::App)).err(),
+                Some(Denied::TierTooHigh),
+                "{op}"
+            );
+            assert_eq!(
+                check(op, sender, &origin(name, OriginTier::Node)).err(),
+                Some(Denied::NotAllowed),
+                "{op}"
+            );
+            assert!(
+                check(op, sender, &origin(name, OriginTier::Agent)).is_err(),
+                "{op}"
+            );
+        }
+    }
+    let client = facts("m1", Role::Standby, true, MemberState::Active);
+    for op in ["session.send"].into_iter().chain(OUTBOX_OPS) {
+        assert!(
+            check(op, &client, &origin("m1", OriginTier::Agent)).is_err(),
+            "{op}"
+        );
+        assert!(
+            check(op, &client, &origin("m1", OriginTier::Node)).is_err(),
+            "{op}"
+        );
+    }
+}
+
+#[test]
+fn outbox_ops_forward_by_session() {
+    let client = facts("m1", Role::Standby, true, MemberState::Active);
+    let home = facts("m5", Role::Home, false, MemberState::Active);
+    for op in OUTBOX_OPS {
+        for (name, sender) in [("m1", &client), ("m5", &home)] {
+            let rule = check(op, sender, &origin(name, OriginTier::App)).expect(op);
+            assert_eq!(rule.id_field, Some("session"), "{op}");
+            assert!(!rule.home_only, "{op}");
+        }
+    }
+}

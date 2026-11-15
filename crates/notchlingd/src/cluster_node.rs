@@ -45,6 +45,7 @@ pub trait Hooks: Send + Sync {
     fn desired(&self, _desired: Desired) {}
     fn wiped(&self) {}
     fn peer_sessions(&self, _from: &NodeId) {}
+    fn peer_outbox(&self, _from: &NodeId, _name: &str, _data: &Value) {}
 }
 
 pub struct NoHooks;

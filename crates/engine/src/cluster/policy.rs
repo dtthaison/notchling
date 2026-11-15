@@ -73,7 +73,11 @@ const fn home_app_id(op: &'static str) -> Rule {
 }
 
 const fn client_app(op: &'static str) -> Rule {
-    rule(op, CLIENT, OriginTier::App, Some("id"), false)
+    client_app_by(op, "id")
+}
+
+const fn client_app_by(op: &'static str, field: &'static str) -> Rule {
+    rule(op, CLIENT, OriginTier::App, Some(field), false)
 }
 
 const fn client_plain(op: &'static str) -> Rule {
@@ -115,6 +119,12 @@ pub const RULES: &[Rule] = &[
     client_plain("workspace.return"),
     rule("delegate.run", HOME, OriginTier::Agent, None, false),
     client_app("session.reply"),
+    client_app("session.send"),
+    client_app_by("outbox.list", "session"),
+    client_app_by("outbox.edit", "session"),
+    client_app_by("outbox.remove", "session"),
+    client_app_by("outbox.resend", "session"),
+    client_app_by("outbox.discard", "session"),
     client_app("session.answer"),
     client_app("session.permission"),
     client_app("session.interrupt"),

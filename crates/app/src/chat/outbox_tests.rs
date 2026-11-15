@@ -137,24 +137,30 @@ fn a_row_with_a_word_this_app_does_not_know_is_skipped() {
 #[test]
 fn buttons_that_act_without_text_make_their_request() {
     assert_eq!(
-        Button::Remove.request("o1").unwrap().args,
-        json!({"id": "o1"})
+        Button::Remove.request("o1", "ab12").unwrap().args,
+        json!({"id": "o1", "session": "ab12"})
     );
-    assert_eq!(Button::Drop.request("o1").unwrap().op, "outbox.remove");
-    let again = Button::SendAgain.request("o1").unwrap();
+    assert_eq!(
+        Button::Drop.request("o1", "ab12").unwrap().op,
+        "outbox.remove"
+    );
+    let again = Button::SendAgain.request("o1", "ab12").unwrap();
     assert_eq!(
         (again.op, again.args),
-        ("outbox.resend", json!({"id": "o1"}))
+        ("outbox.resend", json!({"id": "o1", "session": "ab12"}))
     );
     assert_eq!(
-        Button::ClearBoxAndSend.request("o1").unwrap().args,
-        json!({"id": "o1", "clear_box": true})
+        Button::ClearBoxAndSend
+            .request("o1", "n1/ab12")
+            .unwrap()
+            .args,
+        json!({"id": "o1", "session": "n1/ab12", "clear_box": true})
     );
     assert_eq!(
-        Button::ResumeAndSend.request("o1").unwrap().args,
-        json!({"id": "o1", "resume": true})
+        Button::ResumeAndSend.request("o1", "ab12").unwrap().args,
+        json!({"id": "o1", "session": "ab12", "resume": true})
     );
-    assert!(Button::Edit.request("o1").is_none());
+    assert!(Button::Edit.request("o1", "ab12").is_none());
 }
 
 #[test]

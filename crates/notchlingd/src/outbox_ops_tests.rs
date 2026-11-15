@@ -97,6 +97,74 @@ fn send_saves_and_answers_at_once() {
 }
 
 #[test]
+fn peers_hear_a_change_without_text_and_a_removal_with_its_why() {
+    let r = rig();
+    let told = Arc::new(Mutex::new(Vec::<(String, String, Value)>::new()));
+    let seen = told.clone();
+    r.ops.set_tell(Arc::new(move |topic, name, data| {
+        seen.lock()
+            .unwrap()
+            .push((topic.to_string(), name.to_string(), data.clone()));
+    }));
+    let id = id_of(&send(&r, "job-idle", "a planted secret"));
+    call(&r, ops::OUTBOX_REMOVE, json!({"id": id})).unwrap();
+    let told = told.lock().unwrap();
+    assert_eq!(
+        *told,
+        [
+            (
+                "outbox".to_string(),
+                "outbox.changed".to_string(),
+                json!({})
+            ),
+            (
+                "outbox".to_string(),
+                "outbox.removed".to_string(),
+                json!({"id": id, "session": "idle0001", "why": "removed"})
+            ),
+        ]
+    );
+    assert!(!format!("{told:?}").contains("a planted secret"));
+}
+
+#[test]
+fn edit_remove_and_resend_ignore_the_session_the_cluster_routes_by() {
+    let r = rig();
+    let id = id_of(&send(&r, "job-idle", "first"));
+    let edited = call(
+        &r,
+        ops::OUTBOX_EDIT,
+        json!({"id": id, "text": "second", "session": "idle0001"}),
+    );
+    assert!(edited.is_ok(), "{edited:?}");
+    assert_eq!(r.store.list(None).unwrap()[0].text, "second");
+    r.store.take(&id, 10).unwrap().unwrap();
+    r.store
+        .set_state(
+            &id,
+            &[State::Sending],
+            State::Unsure,
+            Some(Why::NotFound),
+            None,
+            11,
+        )
+        .unwrap();
+    let resent = call(
+        &r,
+        ops::OUTBOX_RESEND,
+        json!({"id": id, "session": "idle0001"}),
+    );
+    assert!(resent.is_ok(), "{resent:?}");
+    let removed = call(
+        &r,
+        ops::OUTBOX_REMOVE,
+        json!({"id": id, "session": "somebody-else"}),
+    );
+    assert_eq!(removed.unwrap(), json!({"removed": true}));
+    assert!(r.store.list(None).unwrap().is_empty());
+}
+
+#[test]
 fn send_wakes_the_session_postman() {
     let r = rig();
     let woken = Arc::new(Mutex::new(Vec::<String>::new()));

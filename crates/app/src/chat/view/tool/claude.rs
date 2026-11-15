@@ -76,7 +76,7 @@ impl ChatTool for Claude {
     }
 
     fn send(&self, _view: &ChatView, session: &Session, text: &str) -> Request {
-        send_request(&session.agent.id, session.agent.node.is_some(), text, None)
+        send_request(&session.agent.id, text, None)
     }
 
     fn stop(&self, id: &str) -> Request {

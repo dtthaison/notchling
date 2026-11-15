@@ -29,6 +29,7 @@ pub type Wake = Arc<dyn Fn(&str) + Send + Sync>;
 pub type Check = Arc<dyn Fn(&str) -> Result<(), ApiError> + Send + Sync>;
 pub type Resume = Arc<dyn Fn(&Row) -> Result<(), ApiError> + Send + Sync>;
 pub type Clock = Arc<dyn Fn() -> i64 + Send + Sync>;
+pub type Tell = Arc<dyn Fn(&str, &str, &Value) + Send + Sync>;
 
 const SAVE_FAILED: &str = "Couldn't save the message.";
 const EMPTY: &str = "Type a message first.";
@@ -60,6 +61,7 @@ pub struct OutboxOps {
     wake: Mutex<Option<Wake>>,
     forget: Mutex<Option<Wake>>,
     resume: Mutex<Option<Resume>>,
+    tell: Mutex<Option<Tell>>,
     codex_check: OnceLock<Check>,
     agy_check: OnceLock<Check>,
     saving: bool,
@@ -150,6 +152,7 @@ impl OutboxOps {
             wake: Mutex::new(None),
             forget: Mutex::new(None),
             resume: Mutex::new(None),
+            tell: Mutex::new(None),
             codex_check: OnceLock::new(),
             agy_check: OnceLock::new(),
             saving: true,
@@ -245,6 +248,17 @@ impl OutboxOps {
         *lock(&self.resume) = Some(resume);
     }
 
+    pub fn set_tell(&self, tell: Tell) {
+        *lock(&self.tell) = Some(tell);
+    }
+
+    fn tell_peers(&self, name: &str, data: &Value) {
+        let tell = lock(&self.tell).clone();
+        if let Some(tell) = tell {
+            tell(topics::OUTBOX, name, data);
+        }
+    }
+
     pub fn set_codex_check(&self, check: Check) {
         let _ = self.codex_check.set(check);
     }
@@ -300,6 +314,7 @@ impl OutboxOps {
             topics::OUTBOX_CHANGED,
             &json!({"row": wire}),
         );
+        self.tell_peers(topics::OUTBOX_CHANGED, &json!({}));
         self.settle.bump();
     }
 
@@ -312,6 +327,10 @@ impl OutboxOps {
         }
         self.room.publish(
             topics::OUTBOX,
+            topics::OUTBOX_REMOVED,
+            &json!({"id": id, "session": session, "why": why}),
+        );
+        self.tell_peers(
             topics::OUTBOX_REMOVED,
             &json!({"id": id, "session": session, "why": why}),
         );

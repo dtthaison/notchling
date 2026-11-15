@@ -49,6 +49,23 @@ fn outbox_key_is_the_job_short_id_else_the_row_id() {
 }
 
 #[test]
+fn a_remote_rows_outbox_key_carries_its_node() {
+    let node = NodeRef {
+        id: "0123456789abcdef".into(),
+        name: "w1".into(),
+        online: true,
+    };
+    let mut job = sample(AgentTarget::Job("ab12cd34".into()), None);
+    job.id = "0123456789abcdef/6f1c2a9e".into();
+    job.node = Some(node.clone());
+    assert_eq!(job.outbox_key(), "0123456789abcdef/ab12cd34");
+    let mut codex = sample(AgentTarget::Process(7), None);
+    codex.id = "0123456789abcdef/codex:t1".into();
+    codex.node = Some(node);
+    assert_eq!(codex.outbox_key(), "0123456789abcdef/codex:t1");
+}
+
+#[test]
 fn the_node_field_is_absent_unless_set_and_old_rows_read() {
     let mut a = sample(AgentTarget::Job("ab".into()), None);
     let plain = serde_json::to_value(&a).unwrap();

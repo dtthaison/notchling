@@ -8,6 +8,7 @@ fn editing() -> Editing {
     Editing {
         chat_row: "job-a".into(),
         outbox_id: "o7".into(),
+        session: "ab12cd34".into(),
         before: "a half-typed line".into(),
     }
 }
@@ -22,7 +23,7 @@ fn queued_row(text: &str) -> OutboxRow {
 
 #[test]
 fn send_returns_and_clears_box_at_once() {
-    let begun = begin(None, send_request("job-a", false, "hello", None), "hello");
+    let begun = begin(None, send_request("job-a", "hello", None), "hello");
     assert_eq!(begun.draft_after.as_deref(), Some(""));
     assert!(begun.shows_queued);
     let rows = tail_rows(&[], None, &[], &["hello".to_owned()], begun.shows_queued);
@@ -43,11 +44,12 @@ fn edit_mode_sends_outbox_edit() {
     let editing = editing();
     let begun = begin(
         Some(&editing),
-        send_request("job-a", false, "new words", None),
+        send_request("job-a", "new words", None),
         "new words",
     );
     assert_eq!(begun.request.op, ops::OUTBOX_EDIT);
     assert_eq!(begun.request.args["id"], "o7");
+    assert_eq!(begun.request.args["session"], "ab12cd34");
     assert_eq!(begun.request.args["text"], "new words");
     assert_eq!(begun.draft_after, None);
     assert!(!begun.shows_queued);
@@ -107,10 +109,11 @@ fn edit_mode_attaches_nothing_to_the_message() {
 }
 
 #[test]
-fn cluster_row_keeps_session_reply() {
-    let remote = send_request("job-a", true, "hi", None);
-    assert_eq!(remote.op, ops::SESSION_REPLY);
-    let local = send_request("job-a", false, "hi", None);
+fn cluster_row_sends_through_the_outbox_like_a_local_one() {
+    let remote = send_request("n1/job-a", "hi", None);
+    assert_eq!(remote.op, ops::SESSION_SEND);
+    assert_eq!(remote.args["id"], "n1/job-a");
+    let local = send_request("job-a", "hi", None);
     assert_eq!(local.op, ops::SESSION_SEND);
     assert_eq!(local.args["id"], "job-a");
     assert!(local.args.get("options").is_none());
@@ -122,12 +125,12 @@ fn a_codex_pick_rides_as_options_and_an_empty_one_does_not() {
         model: Some("gpt-x".into()),
         effort: Some("high".into()),
     };
-    let sent = send_request("codex:t1", false, "go", Some(&pick));
+    let sent = send_request("codex:t1", "go", Some(&pick));
     assert_eq!(
         sent.args["options"],
         json!({"model": "gpt-x", "effort": "high"})
     );
-    let none = send_request("codex:t1", false, "go", Some(&Pick::default()));
+    let none = send_request("codex:t1", "go", Some(&Pick::default()));
     assert!(none.args.get("options").is_none());
 }
 

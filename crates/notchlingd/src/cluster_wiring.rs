@@ -9,6 +9,7 @@ use crate::cluster_node::{
     ClusterLog, ClusterNode, ClusterSetup, Hooks, JoinAsk, LocalCalls, NetSide, Probe, Submit, TICK,
 };
 use crate::cluster_ops::{follow_switch, ClusterOps};
+use crate::cluster_outbox::{OutboxFollower, RemoteOutbox};
 use crate::cluster_sessions::{
     is_client, HandlerRows, NodeSource, Refresher, RemoteSessions, SessionCalls,
 };
@@ -19,6 +20,7 @@ use crate::cluster_workspace_send::{CodeSender, NodePeers, ReturnOps, Sender};
 use crate::inbox_ops::InboxOps;
 use crate::late_emit::Events;
 use crate::layout::Layout;
+use crate::outbox_ops::Tell;
 use crate::shell_jobs::ShellJobs;
 use crate::switches::SwitchFlag;
 use crate::versions_ops::VersionsOps;
@@ -134,6 +136,7 @@ pub struct ClusterHooks {
     pub switches: Arc<HeadlessSwitches>,
     pub remote: Arc<RemoteSessions>,
     pub mirror: Arc<Mirror>,
+    pub outbox: Arc<RemoteOutbox>,
 }
 
 impl Hooks for ClusterHooks {
@@ -148,11 +151,16 @@ impl Hooks for ClusterHooks {
     fn wiped(&self) {
         self.mirror.clear();
         self.remote.clear();
+        self.outbox.clear();
     }
 
     fn peer_sessions(&self, from: &NodeId) {
         self.remote.mark_dirty(from);
         self.mirror.nudge();
+    }
+
+    fn peer_outbox(&self, from: &NodeId, name: &str, data: &Value) {
+        self.outbox.peer_event(from, name, data);
     }
 }
 
@@ -214,6 +222,7 @@ pub struct ClusterParts {
     mirror: Arc<Mirror>,
     publisher: Arc<Publisher>,
     refresher: Option<Refresher>,
+    outbox_follower: Option<OutboxFollower>,
     handler: Arc<LateHandler>,
 }
 
@@ -280,6 +289,15 @@ impl ClusterParts {
         let remote = Arc::new(RemoteSessions::new(mirror_dir.clone()).with_gate(Arc::new(
             move || gate.get().is_some_and(|node| is_client(&node.status())),
         )));
+        let outbox_gate = holder.clone();
+        let outbox = Arc::new(RemoteOutbox::new(
+            room.clone(),
+            Arc::new(move || {
+                outbox_gate
+                    .get()
+                    .is_some_and(|node| is_client(&node.status()))
+            }),
+        ));
         let publisher = Arc::new(Publisher::new(room.clone(), remote.clone(), sessions));
         let tail = Arc::new(LateTail::default());
         let capped: OnCap = {
@@ -338,10 +356,12 @@ impl ClusterParts {
             switches,
             remote: remote.clone(),
             mirror: mirror.clone(),
+            outbox: outbox.clone(),
         });
         let node = start_node(layout, room.clone(), (local, hooks), versions, log.clone());
         let audit = log.clone();
         let mut refresher = None;
+        let mut outbox_follower = None;
         if let Ok(node) = &node {
             reporter.attach(node.clone());
             follow_switch(&link, node);
@@ -355,6 +375,7 @@ impl ClusterParts {
                 remote.clone(),
                 Arc::new(move || shown.publish()),
             ));
+            outbox_follower = Some(OutboxFollower::spawn(node.clone(), outbox));
         }
         let ops = Arc::new(ClusterOps::new(node.clone(), link, room.clone(), audit));
         let code: Arc<dyn CodeSender> = sender.clone();
@@ -372,6 +393,7 @@ impl ClusterParts {
             mirror,
             publisher,
             refresher,
+            outbox_follower,
             handler,
         }
     }
@@ -388,6 +410,13 @@ impl ClusterParts {
         }
     }
 
+    pub fn peer_teller(&self) -> Option<Tell> {
+        let node = self.node.as_ref().ok()?.clone();
+        Some(Arc::new(move |topic, name, data| {
+            node.tell(topic, name, data.clone());
+        }))
+    }
+
     pub fn serve(&self, handler: &Arc<dyn Handler>) {
         self.handler.serve(handler);
     }
@@ -398,6 +427,9 @@ impl ClusterParts {
         self.mirror.close();
         if let Some(refresher) = &self.refresher {
             refresher.close();
+        }
+        if let Some(follower) = &self.outbox_follower {
+            follower.close();
         }
         if let Ok(node) = &self.node {
             node.close();

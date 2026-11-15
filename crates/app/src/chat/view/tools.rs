@@ -173,7 +173,7 @@ impl ChatView {
         };
         let outboxed = self
             .selected_session()
-            .is_some_and(|s| !is_draft(&s.agent.id) && s.agent.node.is_none());
+            .is_some_and(|s| !is_draft(&s.agent.id));
         tail_rows(
             &shown.queued,
             hidden,
@@ -198,7 +198,10 @@ impl ChatView {
             self.begin_edit(id, cx);
             return;
         }
-        let Some(request) = button.request(id) else {
+        let Some(session) = self.selected_session().map(|s| s.agent.outbox_key()) else {
+            return;
+        };
+        let Some(request) = button.request(id, &session) else {
             return;
         };
         if self
@@ -243,6 +246,7 @@ impl ChatView {
         self.tools.editing = Some(Editing {
             chat_row: chat_row.clone(),
             outbox_id: row.id,
+            session: row.session,
             before,
         });
         self.put_draft(&chat_row, row.text, cx);

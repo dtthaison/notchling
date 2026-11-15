@@ -140,6 +140,36 @@ fn an_event_from_a_peer_names_its_sender_whatever_it_claims() {
 }
 
 #[test]
+fn an_outbox_event_from_a_peer_keeps_only_ids_and_names_its_sender() {
+    let (mut hub, m5, w1) = pair();
+    let effects = hub.run(
+        &m5,
+        Input::Msg {
+            from: w1.clone(),
+            msg: Msg::Event {
+                topic: "outbox".to_string(),
+                name: "outbox.removed".to_string(),
+                data: json!({
+                    "id": "o1", "session": "ab12", "why": "sent", "text": "secret",
+                    "row": {"text": "secret"}, "from": "someone else", "n": 3,
+                }),
+            },
+        },
+    );
+    let data = effects
+        .iter()
+        .find_map(|e| match e {
+            Effect::Publish { topic, data, .. } if topic == "outbox" => Some(data.clone()),
+            _ => None,
+        })
+        .expect("published");
+    assert_eq!(
+        data,
+        json!({"id": "o1", "session": "ab12", "why": "sent", "from": w1})
+    );
+}
+
+#[test]
 fn a_peer_event_on_a_topic_this_node_does_not_consume_is_dropped() {
     let (mut hub, m5, w1) = pair();
     for topic in ["cluster", "prompts", "settings"] {

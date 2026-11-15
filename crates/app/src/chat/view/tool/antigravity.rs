@@ -33,7 +33,7 @@ impl ChatTool for Antigravity {
         if is_draft(&session.agent.id) {
             agy_send_draft(&session.agent.cwd, text)
         } else {
-            send_request(&session.agent.id, session.agent.node.is_some(), text, None)
+            send_request(&session.agent.id, text, None)
         }
     }
 

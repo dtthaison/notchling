@@ -81,13 +81,13 @@ pub enum Button {
 }
 
 impl Button {
-    pub fn request(self, id: &str) -> Option<Request> {
+    pub fn request(self, id: &str, session: &str) -> Option<Request> {
         match self {
             Button::Edit => None,
-            Button::Remove | Button::Drop => Some(Request::outbox_remove(id)),
-            Button::SendAgain => Some(Request::outbox_resend(id, false, false)),
-            Button::ClearBoxAndSend => Some(Request::outbox_resend(id, true, false)),
-            Button::ResumeAndSend => Some(Request::outbox_resend(id, false, true)),
+            Button::Remove | Button::Drop => Some(Request::outbox_remove(id, session)),
+            Button::SendAgain => Some(Request::outbox_resend(id, session, false, false)),
+            Button::ClearBoxAndSend => Some(Request::outbox_resend(id, session, true, false)),
+            Button::ResumeAndSend => Some(Request::outbox_resend(id, session, false, true)),
         }
     }
 }

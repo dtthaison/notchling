@@ -62,10 +62,7 @@ pub fn is_main(button: Button) -> bool {
     )
 }
 
-pub fn send_request(row: &str, remote: bool, text: &str, pick: Option<&Pick>) -> Request {
-    if remote {
-        return Request::reply(row, text);
-    }
+pub fn send_request(row: &str, text: &str, pick: Option<&Pick>) -> Request {
     let request = Request::send(row, text);
     match pick.and_then(options_of) {
         Some(options) => request.with_options(options),
@@ -88,6 +85,7 @@ fn options_of(pick: &Pick) -> Option<Value> {
 pub struct Editing {
     pub chat_row: String,
     pub outbox_id: String,
+    pub session: String,
     pub before: String,
 }
 
@@ -101,7 +99,7 @@ pub struct Begin {
 pub fn begin(editing: Option<&Editing>, send: Request, text: &str) -> Begin {
     match editing {
         Some(editing) => Begin {
-            request: Request::outbox_edit(&editing.outbox_id, text),
+            request: Request::outbox_edit(&editing.outbox_id, &editing.session, text),
             draft_after: None,
             shows_queued: false,
         },

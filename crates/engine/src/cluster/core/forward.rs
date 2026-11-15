@@ -79,6 +79,22 @@ impl NodeCore {
                             self.on_job_event(&from, &name, &data, out);
                             return;
                         }
+                        if topic == "outbox" {
+                            let from = json!(from);
+                            let mut fields = serde_json::Map::new();
+                            for key in ["id", "session", "why"] {
+                                if let Some(text) = data.get(key).filter(|v| v.is_string()) {
+                                    fields.insert(key.to_string(), text.clone());
+                                }
+                            }
+                            fields.insert("from".to_string(), from);
+                            out.push(Effect::Publish {
+                                topic,
+                                name,
+                                data: serde_json::Value::Object(fields),
+                            });
+                            return;
+                        }
                         if topic != "sessions" {
                             return;
                         }
