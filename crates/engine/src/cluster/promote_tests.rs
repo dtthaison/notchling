@@ -4,7 +4,7 @@ use super::claims::Claim;
 use super::failover::{arming_id, Failover, Grantor, REACH_MS};
 use super::failover_tests::{cluster, HALF_HOUR, HOUR};
 use super::id::Tool;
-use super::members::Term;
+use super::members::{MemberState, Term};
 use super::outward::CutStep;
 use super::promote::{
     next, Facts, MovingSession, Promote, PromoteAction, PromoteEvent, PromoteStep, RestoredSession,
@@ -611,6 +611,56 @@ fn codex_sessions_are_claimed_and_not_started() {
         .filter_map(claim_of)
         .any(|claim| claim.session == "c1"));
     assert!(!run.all.iter().any(is_resume));
+}
+
+#[test]
+fn a_codex_only_promote_runs_held_and_finishes() {
+    let mut f = plain();
+    f.set = Some(set_with(vec![session("c1", Tool::Codex, Movable::Yes)]));
+    let mut run = Run::new(false, true);
+    through_bump(&mut run, f);
+    let actions = run.feed(PromoteEvent::Restored(Ok(vec![restored(
+        "c1",
+        vec![push_step()],
+    )])));
+    assert_eq!(run.p.step, PromoteStep::Held);
+    assert_eq!(actions.last(), Some(&PromoteAction::RunHeld));
+    assert!(!run.all.iter().any(is_resume));
+    let actions = run.feed(PromoteEvent::HeldRun);
+    assert!(matches!(&actions[0], PromoteAction::PausedStep { session, .. } if session == "c1"));
+    run.feed(PromoteEvent::Announced);
+    assert_eq!(run.p.step, PromoteStep::Done);
+}
+
+#[test]
+fn a_mixed_set_waits_for_the_claude_resume() {
+    let mut f = plain();
+    f.set = Some(set_with(vec![
+        session("c1", Tool::Codex, Movable::Yes),
+        session("s1", Tool::Claude, Movable::Yes),
+    ]));
+    let mut run = Run::new(false, true);
+    through_bump(&mut run, f);
+    run.feed(PromoteEvent::Restored(Ok(vec![
+        restored("c1", vec![]),
+        restored("s1", vec![]),
+    ])));
+    assert_eq!(run.p.step, PromoteStep::Resume);
+    assert!(!run.all.contains(&PromoteAction::RunHeld));
+    run.feed(PromoteEvent::Resumed { failed: vec![] });
+    assert_eq!(run.p.step, PromoteStep::Held);
+}
+
+#[test]
+fn a_removed_member_cannot_promote() {
+    let mut run = Run::new(false, true);
+    let mut f = plain();
+    f.state.members.get_mut(&id("m1")).expect("m1").state = MemberState::Removed;
+    let actions = run.begin(f);
+    let reason = failed(&run).expect("failed");
+    assert!(reason.contains("isn't an active member"), "{reason}");
+    assert_eq!(actions.len(), 1);
+    assert!(!run.all.iter().any(is_term));
 }
 
 #[test]

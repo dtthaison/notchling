@@ -3,7 +3,7 @@ use std::sync::Arc;
 use super::claims::Claim;
 use super::failover::{promote_safety, Failover, Grantor, Safety, REACH_MS};
 use super::id::{NodeId, Tool};
-use super::members::Term;
+use super::members::{MemberState, Term};
 use super::outward::CutStep;
 use super::returns::{continue_here, Notice};
 use super::snapshot::repo_state::Movable;
@@ -204,6 +204,9 @@ fn check(q: &mut Promote, facts: Arc<Facts>, now: u64) -> Vec<PromoteAction> {
     let Some(member) = state.members.get(&q.node) else {
         return fail(q, format!("{me} isn't in this cluster"));
     };
+    if member.state != MemberState::Active {
+        return fail(q, format!("{me} isn't an active member of this cluster"));
+    }
     if !member.can_be_master {
         return fail(q, format!("{me} has Can Be Master off"));
     }
@@ -330,8 +333,12 @@ fn restored(q: &mut Promote, done: Vec<RestoredSession>, now: u64) -> Vec<Promot
         }
         q.resumed.push(found.clone());
     }
-    if q.resumed.is_empty() {
-        return hold(q, now);
+    if !actions
+        .iter()
+        .any(|a| matches!(a, PromoteAction::Resume { .. }))
+    {
+        actions.extend(hold(q, now));
+        return actions;
     }
     q.step = PromoteStep::Resume;
     q.step_at = now;
