@@ -1,4 +1,5 @@
 pub mod core;
+pub mod fence;
 pub mod id;
 pub mod jobs;
 pub mod join;
@@ -21,6 +22,8 @@ pub use members::{Desired, Member, MemberState, Term};
 pub use state::{role_of, ClusterState, Command, JournalEntry};
 pub use versions::{compat, Compat, Purpose, Versions};
 
+#[cfg(test)]
+mod fence_tests;
 #[cfg(test)]
 mod id_tests;
 #[cfg(test)]
