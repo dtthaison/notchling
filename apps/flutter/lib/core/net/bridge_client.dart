@@ -134,6 +134,8 @@ class SubscriptionSpec {
       };
 }
 
+const Duration holderFresh = Duration(hours: 1, minutes: 5);
+
 const List<Duration> defaultBackoff = <Duration>[
   Duration(seconds: 1),
   Duration(seconds: 2),
@@ -227,7 +229,9 @@ class BridgeClient {
   late String? _clusterPrimary = profile.clusterPrimary;
   bool _sawCluster = false;
   late int _term = profile.clusterTerm;
-  final Map<String, bool> _holders = <String, bool>{};
+  final Map<String, DateTime> _holders = <String, DateTime>{};
+  String? _claimedPrimary;
+  int _claimedTerm = 0;
   PinnedNode? _via;
   List<String> _refused = <String>[];
   bool _unauthorized = false;
@@ -240,12 +244,14 @@ class BridgeClient {
   Stream<PhoneFrame> get phoneFrames => _frameController.stream;
   ConnectionStatus get currentStatus => _status;
   bool get isConnected => _status.phase == LinkPhase.connected;
-  bool get holding => _holders.values.any((bool held) => held);
+  bool get holding => _holders.isNotEmpty;
+
+  String? get _primaryId => _claimedPrimary ?? _clusterPrimary;
 
   void markHeld(bool entries) {
     final String key = _via?.id ?? '';
     if (entries) {
-      _holders[key] = true;
+      _holders[key] = _clock();
     } else {
       _holders.remove(key);
     }
@@ -339,6 +345,8 @@ class BridgeClient {
     _connection = link.connection;
     _via = link.node;
     _preferLan = false;
+    final String holderKey = link.node?.id ?? '';
+    if (_holders.containsKey(holderKey)) _holders[holderKey] = _clock();
     if (link.node == null) onGoodRoute?.call(link.route);
   }
 
@@ -349,14 +357,14 @@ class BridgeClient {
       host: link.route.host,
       route: link.route.kind,
       via: node?.name,
-      primaryName: node == null || node.id == _clusterPrimary ? null : _primaryName(),
+      primaryName: node == null || node.id == _primaryId ? null : _primaryName(),
       primaryAnswers: primaryAnswers,
     );
   }
 
   String _primaryName() {
     for (final PinnedNode node in _nodes) {
-      if (node.id == _clusterPrimary) return node.name;
+      if (node.id == _primaryId) return node.name;
     }
     return profile.name;
   }
@@ -385,7 +393,7 @@ class BridgeClient {
         _markPrimaryAnswers(link, false);
         continue;
       }
-      if (_holders[link.node?.id ?? ''] == true) {
+      if (_holders.containsKey(link.node?.id ?? '')) {
         await back.connection.close();
         _markPrimaryAnswers(link, true);
         continue;
@@ -434,7 +442,10 @@ class BridgeClient {
     _avoid = null;
     if (avoid == null) {
       final List<_Route> all = <_Route>[...primary, ...others];
-      final Iterable<String> holders = _holders.entries.where((MapEntry<String, bool> e) => e.value).map((MapEntry<String, bool> e) => e.key);
+      final DateTime now = _clock();
+      final Iterable<String> holders = _holders.entries
+          .where((MapEntry<String, DateTime> e) => now.difference(e.value) <= holderFresh)
+          .map((MapEntry<String, DateTime> e) => e.key);
       if (holders.isEmpty) return all;
       final String holder = holders.first;
       return <_Route>[
@@ -453,9 +464,9 @@ class BridgeClient {
   List<_Route> _fallbackRoutes() {
     final Set<String> own = <String>{for (final String host in profile.hosts) '$host:${profile.port}'};
     final List<PinnedNode> ordered = <PinnedNode>[
-      ..._nodes.where((PinnedNode n) => n.id == _clusterPrimary),
-      ..._nodes.where((PinnedNode n) => n.id != _clusterPrimary && n.online),
-      ..._nodes.where((PinnedNode n) => n.id != _clusterPrimary && !n.online),
+      ..._nodes.where((PinnedNode n) => n.id == _primaryId),
+      ..._nodes.where((PinnedNode n) => n.id != _primaryId && n.online),
+      ..._nodes.where((PinnedNode n) => n.id != _primaryId && !n.online),
     ];
     final List<String> refused = <String>[];
     final List<_Route> routes = <_Route>[];
@@ -513,6 +524,8 @@ class BridgeClient {
       _sawCluster = false;
       _nodes = <PinnedNode>[];
       _clusterPrimary = null;
+      _claimedPrimary = null;
+      _claimedTerm = 0;
       _term = 0;
       if (had) onCluster?.call(null, 0, const <PinnedNode>[]);
       return;
@@ -536,14 +549,15 @@ class BridgeClient {
           <bool>[for (int i = 0; i < next.length; i++) jsonEncode(next[i].toJson()) == jsonEncode(_nodes[i].toJson())].every((bool b) => b);
       _nodes = next;
       _clusterPrimary = cluster.primary;
+      _claimedPrimary = null;
+      _claimedTerm = 0;
       _term = cluster.term;
       if (!same) onCluster?.call(cluster.primary, cluster.term, next);
       return;
     }
-    if (link.node != null && cluster.term > _term && cluster.primary != _clusterPrimary && _nodes.any((PinnedNode n) => n.id == cluster.primary)) {
-      _clusterPrimary = cluster.primary;
-      _term = cluster.term;
-      onCluster?.call(cluster.primary, cluster.term, _nodes);
+    if (link.node != null && cluster.term > _term && cluster.term > _claimedTerm && _nodes.any((PinnedNode n) => n.id == cluster.primary)) {
+      _claimedPrimary = cluster.primary;
+      _claimedTerm = cluster.term;
     }
   }
 
@@ -551,6 +565,7 @@ class BridgeClient {
 
   void _onPrimaryUnreachable(WsConnection from) {
     if (_stopped || _connection != from) return;
+    if (_holders.containsKey(_via?.id ?? '')) return;
     if (_via == null && _fallbackRoutes().isEmpty) return;
     final DateTime now = _clock();
     final DateTime? last = _lastRotate;
@@ -777,12 +792,17 @@ class BridgeClient {
     await request('session.sendNow', <String, Object?>{'sessionId': sessionId, 'key': key ?? newCommandKey()}, const Duration(seconds: 15));
   }
 
-  Future<void> promptAllow(String requestId, {required bool allow, String? key}) async {
-    await request('prompt.answer', <String, Object?>{'requestId': requestId, 'allow': allow, 'key': key ?? newCommandKey()});
+  Future<String?> promptAllow(String requestId, {required bool allow, String? key}) async {
+    final Json data = await request('prompt.answer', <String, Object?>{'requestId': requestId, 'allow': allow, 'key': key ?? newCommandKey()});
+    return _heldIdOf(data);
   }
 
-  Future<void> promptChoose(String requestId, List<Object> choices, {String? key}) async {
-    await request('prompt.answer', <String, Object?>{'requestId': requestId, 'choice': choices.length == 1 ? choices.single : choices, 'key': key ?? newCommandKey()});
+  Future<String?> promptChoose(String requestId, List<Object> choices, {String? key}) async {
+    final Json data = await request(
+      'prompt.answer',
+      <String, Object?>{'requestId': requestId, 'choice': choices.length == 1 ? choices.single : choices, 'key': key ?? newCommandKey()},
+    );
+    return _heldIdOf(data);
   }
 
   Future<void> sessionNew(String cwd, {String? model, String? key}) async {
@@ -837,6 +857,13 @@ class BridgeClient {
     if (!isConnected) return;
     await request('unsubscribe');
   }
+}
+
+String? _heldIdOf(Json data) {
+  final Object? held = data['held'];
+  if (held is! Map<Object?, Object?>) return null;
+  final Object? id = held['id'];
+  return id is String ? id : null;
 }
 
 List<wire.HeldEntry> _heldEntries(Json json) {

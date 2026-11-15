@@ -23,8 +23,9 @@ class SendNowSupport extends Notifier<bool> {
 final NotifierProvider<SendNowSupport, bool> sendNowSupportProvider = NotifierProvider<SendNowSupport, bool>(SendNowSupport.new);
 
 class SendNowAction extends ConsumerStatefulWidget {
-  const SendNowAction({super.key, required this.sessionId});
+  const SendNowAction({super.key, required this.sessionId, required this.messageId});
   final String sessionId;
+  final String messageId;
 
   @override
   ConsumerState<SendNowAction> createState() => _SendNowActionState();
@@ -33,6 +34,15 @@ class SendNowAction extends ConsumerStatefulWidget {
 class _SendNowActionState extends ConsumerState<SendNowAction> {
   bool _busy = false;
   String _key = newCommandKey();
+  String _keyFor = '';
+
+  String _keyForMessage() {
+    if (_keyFor != widget.messageId) {
+      _keyFor = widget.messageId;
+      _key = newCommandKey();
+    }
+    return _key;
+  }
 
   Future<void> _run() async {
     final AppL10n l10n = AppL10n.of(context);
@@ -52,7 +62,7 @@ class _SendNowActionState extends ConsumerState<SendNowAction> {
     setState(() => _busy = true);
     final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
     try {
-      await client.sessionSendNow(widget.sessionId, key: _key);
+      await client.sessionSendNow(widget.sessionId, key: _keyForMessage());
       _key = newCommandKey();
       unawaited(Future<void>.delayed(const Duration(seconds: 8), () {
         if (mounted) setState(() => _busy = false);

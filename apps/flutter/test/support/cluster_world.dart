@@ -97,6 +97,12 @@ class ClusterWorld {
           s.reply(id, data: hello(standby: standby));
         case 'subscribe':
           s.reply(id, data: <String, Object?>{'subscribed': true});
+        case 'chat.get':
+          if (standby) {
+            s.fail(id, 'primary_unreachable', 'm5 can not be reached');
+          } else {
+            s.reply(id, data: <String, Object?>{'messages': <Object?>[], 'hasMore': false});
+          }
         case 'held.list':
           if (heldListError != null) {
             s.fail(id, heldListError!);
@@ -151,6 +157,7 @@ BridgeClient clusterClient(
   MacProfile profile = m5Profile,
   Duration primaryRetry = const Duration(hours: 1),
   void Function(String?, int, List<PinnedNode>)? onCluster,
+  DateTime Function()? clock,
 }) =>
     BridgeClient(
       connector: world.connect,
@@ -159,6 +166,7 @@ BridgeClient clusterClient(
       backoff: const <Duration>[Duration(milliseconds: 20), Duration(milliseconds: 40)],
       primaryRetry: primaryRetry,
       onCluster: onCluster,
+      clock: clock,
     );
 
 Future<void> viaM1(BridgeClient client) => until(() => client.isConnected && client.currentStatus.via == 'm1');

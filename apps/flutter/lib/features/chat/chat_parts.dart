@@ -103,7 +103,7 @@ class UserBubble extends StatelessWidget {
                     padding: const EdgeInsets.only(top: Space.xs),
                     child: Text(l10n.chatQueued, style: kit.meta),
                   ),
-                  SendNowAction(sessionId: sessionId),
+                  SendNowAction(sessionId: sessionId, messageId: message.id),
                 ],
               ],
             ),

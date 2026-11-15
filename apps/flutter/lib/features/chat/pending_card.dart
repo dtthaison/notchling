@@ -13,10 +13,12 @@ class PendingCard extends StatefulWidget {
     required this.onAllow,
     required this.onChoose,
     this.error,
+    this.conflict,
   });
 
   final PendingPrompt prompt;
   final String? error;
+  final String? conflict;
   final void Function({required bool allow}) onAllow;
 
   final void Function(List<int> choices) onChoose;
@@ -143,6 +145,15 @@ class _PendingCardState extends State<PendingCard> {
             ),
             const SizedBox(height: Space.sm),
             ...body,
+            if (widget.conflict != null) ...<Widget>[
+              const SizedBox(height: Space.sm),
+              Text(
+                widget.conflict!,
+                style: Kit.of(
+                  context,
+                ).bodySm.copyWith(color: Kit.of(context).needs),
+              ),
+            ],
             if (widget.error != null) ...<Widget>[
               const SizedBox(height: Space.sm),
               Text(

@@ -308,7 +308,7 @@ void main() {
       await client.dispose();
     });
 
-    test('a fallback machine moves the primary only with a higher term', () async {
+    test('a fallback machine may move the primary for routing only, and only with a higher term', () async {
       final ClusterWorld world = ClusterWorld();
       Map<String, Object?> cluster(String primary, int term) => <String, Object?>{
             'primary': primary,
@@ -328,8 +328,8 @@ void main() {
       final BridgeClient newer = clusterClient(world, profile: pinnedM5(), onCluster: (String? p, int t, List<PinnedNode> n) => seen.add((p, t)));
       newer.start();
       await viaM1(newer);
-      expect(seen, <(String?, int)>[('m1', 4)]);
-      expect(newer.currentStatus.primaryName, isNull, reason: 'm1 is the primary now, so nothing is unreachable behind it');
+      expect(seen, isEmpty, reason: 'a fallback machine never has its term or primary stored');
+      expect(newer.currentStatus.primaryName, isNull, reason: 'm1 is the primary now for routing, so nothing is unreachable behind it');
       await newer.dispose();
     });
 
@@ -360,6 +360,221 @@ void main() {
       expect(client.currentStatus.route, RouteKind.tunnel);
       expect(learned, isEmpty);
       await client.dispose();
+    });
+  });
+
+  group('a changed answer never rides an old key', () {
+    FakeWs prompts({required List<Map<String, Object?>> held, String firstReply = 'timeout', Map<String, Object?>? cancelReply}) {
+      return FakeWs(onSend: (FakeWs s, Map<String, Object?> m) {
+        switch (m['op']) {
+          case 'hello':
+            s.reply(m['id']!, data: <String, Object?>{'version': 1});
+          case 'prompt.answer':
+            final int n = s.sent.where((Map<String, Object?> x) => x['op'] == 'prompt.answer').length;
+            if (n == 1 && firstReply == 'timeout') {
+              s.fail(m['id']!, 'timeout');
+            } else if (n == 1 && firstReply == 'held') {
+              s.reply(m['id']!, data: <String, Object?>{'held': <String, Object?>{'id': 'h1', 'at': 1}});
+            } else {
+              s.reply(m['id']!, data: <String, Object?>{'answered': true});
+            }
+          case 'held.list':
+            s.reply(m['id']!, data: <String, Object?>{'entries': List<Object?>.of(held), 'notices': <Object?>[]});
+          case 'held.cancel':
+            s.reply(m['id']!, data: cancelReply ?? <String, Object?>{'cancelled': true});
+        }
+      });
+    }
+
+    const PendingPrompt prompt = PendingPrompt(requestId: 'r1', sessionId: 's1', isPermission: true, toolName: 'Bash', summary: 'ls', questions: <PromptQuestion>[]);
+
+    List<String> order(FakeWs socket) => <String>[
+          for (final Map<String, Object?> m in socket.sent)
+            if (<String>['prompt.answer', 'held.list', 'held.cancel'].contains(m['op'])) '${m['op']}${m['allow'] ?? ''}',
+        ];
+
+    test('Allow times out and is held, then Deny cancels it first', () async {
+      final FakeWs socket = prompts(held: <Map<String, Object?>>[
+        <String, Object?>{'id': 'h1', 'op': 'prompt.answer', 'summary': 'Allow', 'at': 1, 'waiting': false},
+      ]);
+      final ProviderContainer container = containerWith(socket);
+      await connect(container);
+      container.listen<ChatState>(chatProvider('s1'), (ChatState? a, ChatState b) {});
+      final ChatNotifier chat = container.read(chatProvider('s1').notifier);
+      await chat.allow(prompt, allow: true);
+      await chat.allow(prompt, allow: false);
+      expect(order(socket), <String>['prompt.answertrue', 'held.list', 'held.cancel', 'prompt.answerfalse']);
+      expect(_ops(<FakeWs>[socket], 'held.cancel').single['heldId'], 'h1');
+      final List<Map<String, Object?>> answers = _ops(<FakeWs>[socket], 'prompt.answer').toList();
+      expect(answers[1]['key'], isNot(answers[0]['key']));
+      expect(container.read(chatProvider('s1')).answerConflict, isNull);
+    });
+
+    test('a held Allow whose id is known is cancelled by that id before Deny', () async {
+      final FakeWs socket = prompts(held: <Map<String, Object?>>[], firstReply: 'held');
+      final ProviderContainer container = containerWith(socket);
+      await connect(container);
+      container.listen<ChatState>(chatProvider('s1'), (ChatState? a, ChatState b) {});
+      final ChatNotifier chat = container.read(chatProvider('s1').notifier);
+      await chat.allow(prompt, allow: true);
+      await chat.allow(prompt, allow: false);
+      expect(order(socket), <String>['prompt.answertrue', 'held.cancel', 'prompt.answerfalse']);
+      expect(_ops(<FakeWs>[socket], 'held.cancel').single['heldId'], 'h1');
+    });
+
+    test('an Allow that was already delivered is not answered again with Deny', () async {
+      final FakeWs socket = prompts(held: <Map<String, Object?>>[], firstReply: 'held', cancelReply: <String, Object?>{'cancelled': false, 'delivered': true});
+      final ProviderContainer container = containerWith(socket);
+      await connect(container);
+      container.listen<ChatState>(chatProvider('s1'), (ChatState? a, ChatState b) {});
+      final ChatNotifier chat = container.read(chatProvider('s1').notifier);
+      await chat.allow(prompt, allow: true);
+      await chat.allow(prompt, allow: false);
+      expect(order(socket), <String>['prompt.answertrue', 'held.cancel']);
+    });
+
+    test('when the fate of Allow is unknown, Deny asks first and goes only on a second tap', () async {
+      final FakeWs socket = prompts(held: <Map<String, Object?>>[]);
+      final ProviderContainer container = containerWith(socket);
+      await connect(container);
+      container.listen<ChatState>(chatProvider('s1'), (ChatState? a, ChatState b) {});
+      final ChatNotifier chat = container.read(chatProvider('s1').notifier);
+      await chat.allow(prompt, allow: true);
+      await chat.allow(prompt, allow: false);
+      expect(order(socket), <String>['prompt.answertrue', 'held.list']);
+      final AnswerConflict? asked = container.read(chatProvider('s1')).answerConflict;
+      expect(asked?.earlier, 'allow');
+      expect(asked?.next, 'deny');
+
+      await chat.allow(prompt, allow: false);
+      expect(order(socket).last, 'prompt.answerfalse');
+      final List<Map<String, Object?>> answers = _ops(<FakeWs>[socket], 'prompt.answer').toList();
+      expect(answers[1]['key'], isNot(answers[0]['key']));
+      expect(container.read(chatProvider('s1')).answerConflict, isNull);
+    });
+  });
+
+  group('round two', () {
+    test('primary_unreachable never rotates away from the machine that holds commands', () async {
+      final ClusterWorld world = ClusterWorld();
+      final BridgeClient client = clusterClient(world, primaryRetry: const Duration(milliseconds: 30));
+      client.start();
+      await until(() => client.isConnected);
+      await world.primaryGoesDown();
+      await viaM1(client);
+      client.markHeld(true);
+      world.dialed.clear();
+      world.m5Up = true;
+      await expectLater(client.chatGet('s1'), throwsA(isA<BridgeException>().having((BridgeException e) => e.code, 'code', 'primary_unreachable')));
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+      expect(client.currentStatus.via, 'm1');
+      expect(client.isConnected, isTrue);
+      expect(world.m1, hasLength(1), reason: 'no reconnect to m1');
+      expect(client.currentStatus.primaryName, 'm5');
+      await client.dispose();
+    });
+
+    test('primary_unreachable still rotates when nothing is held', () async {
+      final ClusterWorld world = ClusterWorld();
+      final BridgeClient client = clusterClient(world, primaryRetry: const Duration(milliseconds: 30));
+      client.start();
+      await until(() => client.isConnected);
+      await world.primaryGoesDown();
+      await viaM1(client);
+      world.m5Up = true;
+      world.dialed.clear();
+      await expectLater(client.chatGet('s1'), throwsA(isA<BridgeException>()));
+      await until(() => world.dialed.contains('10.0.0.5:47821'));
+      await client.dispose();
+    });
+
+    test('a fallback machine claiming a huge term does not lock out the paired Mac', () async {
+      final ClusterWorld world = ClusterWorld();
+      world.m1ClusterOverride = <String, Object?>{
+        'primary': 'm1',
+        'term': 999999999,
+        'nodes': <Object?>[clusterNode('m5', 'm5', '10.0.0.5:47821', fpM5), clusterNode('m1', 'm1', '10.0.0.6:47821', fpM1)],
+      };
+      final List<(int, List<String>)> learned = <(int, List<String>)>[];
+      final BridgeClient client = clusterClient(
+        world,
+        profile: pinnedM5(),
+        primaryRetry: const Duration(milliseconds: 30),
+        onCluster: (String? p, int t, List<PinnedNode> n) => learned.add((t, <String>[for (final PinnedNode x in n) x.id])),
+      );
+      world.m5Up = false;
+      client.start();
+      await viaM1(client);
+      expect(learned, isEmpty);
+
+      world.extra.add(clusterNode('m7', 'm7', '10.0.0.7:47821', 'd' * 64));
+      world.m5Up = true;
+      await until(() => client.isConnected && client.currentStatus.via == null);
+      expect(learned.single.$1, 3, reason: 'the paired Mac, not the fallback, sets the term');
+      expect(learned.single.$2, contains('m7'));
+      await client.dispose();
+    });
+
+    test('a holder that has not answered for over an hour stops being tried first, but is kept', () async {
+      final ClusterWorld world = ClusterWorld();
+      DateTime now = DateTime(2026, 11, 16, 9);
+      final BridgeClient client = clusterClient(world, clock: () => now);
+      client.start();
+      await until(() => client.isConnected);
+      await world.primaryGoesDown();
+      await viaM1(client);
+      client.markHeld(true);
+      now = now.add(const Duration(hours: 2));
+      world.m5Up = true;
+      world.dialed.clear();
+      client.networkChanged();
+      await until(() => world.dialed.isNotEmpty && client.isConnected);
+      expect(world.dialed.first, '10.0.0.5:47821');
+      expect(client.holding, isTrue);
+      await client.dispose();
+    });
+
+    testWidgets('Send now for another queued message gets a new key', (WidgetTester tester) async {
+      final FakeWs socket = FakeWs(onSend: (FakeWs s, Map<String, Object?> m) {
+        switch (m['op']) {
+          case 'hello':
+            s.reply(m['id']!);
+          case 'sessions.list':
+            s.reply(m['id']!, data: <String, Object?>{'sessions': <Object?>[sessionJson('s')]});
+          case 'subscribe':
+            s.reply(m['id']!, data: <String, Object?>{'subscribed': true});
+          case 'session.sendNow':
+            s.fail(m['id']!, 'internal');
+        }
+      });
+      final ProviderContainer container = containerWith(socket);
+      await tester.runAsync(() async {
+        await connect(container);
+        container.listen<SessionsState>(sessionsProvider, (SessionsState? a, SessionsState b) {});
+        await until(() => container.read(sessionsProvider).sessions.isNotEmpty);
+      });
+      Widget bubble(String id) => UncontrolledProviderScope(
+            container: container,
+            child: host(UserBubble(message: ChatMessage(id: id, role: ChatRole.user, text: 'next', time: DateTime(2026), queued: true), sessionId: 's')),
+          );
+      Future<void> sendNow(int count) async {
+        await tester.tap(find.text('Send now'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.descendant(of: find.byType(AlertDialog), matching: find.text('Send now')));
+        await tester.runAsync(() => until(() => _ops(<FakeWs>[socket], 'session.sendNow').length == count));
+        await tester.pumpAndSettle();
+      }
+
+      await tester.pumpWidget(bubble('q1'));
+      await sendNow(1);
+      await sendNow(2);
+      await tester.pumpWidget(bubble('q2'));
+      await sendNow(3);
+      final List<Map<String, Object?>> sent = _ops(<FakeWs>[socket], 'session.sendNow').toList();
+      expect(sent[1]['key'], sent[0]['key']);
+      expect(sent[2]['key'], isNot(sent[0]['key']));
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump(const Duration(seconds: 9));
     });
   });
 }

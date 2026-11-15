@@ -228,6 +228,15 @@
   "@chatAnswerFailed": {
     "description": "Shown in the Chat screen."
   },
+  "chatAnswerMayDeliver": "Your earlier answer ({answer}) may still be delivered. Tap again to send this one instead.",
+  "@chatAnswerMayDeliver": {
+    "description": "Shown in the Chat screen under a permission or question card when the phone is asked to send a different answer while the first one may still be delivered. $answer is the earlier answer, such as Allow. Tapping an answer again sends it anyway.",
+    "placeholders": {
+      "answer": {
+        "type": "String"
+      }
+    }
+  },
   "chatAnswerOnMac": "Answer on the Mac",
   "@chatAnswerOnMac": {
     "description": "Not shown yet."

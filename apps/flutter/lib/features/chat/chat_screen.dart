@@ -212,6 +212,9 @@ class _SessionChatState extends ConsumerState<_SessionChat> {
                         final BridgeException? answerError = ref.watch(
                           chatProvider(id).select((ChatState c) => c.answerError),
                         );
+                        final AnswerConflict? conflict = ref.watch(
+                          chatProvider(id).select((ChatState c) => c.answerConflict),
+                        );
                         if (pending == null) {
                           return const SizedBox(width: double.infinity);
                         }
@@ -221,6 +224,13 @@ class _SessionChatState extends ConsumerState<_SessionChat> {
                           child: PendingCard(
                             prompt: pending,
                             error: answerError == null ? null : bridgeErrorLine(l10n, answerError),
+                            conflict: conflict == null || conflict.requestId != pending.requestId
+                                ? null
+                                : l10n.chatAnswerMayDeliver(switch (conflict.earlier) {
+                                    'allow' => l10n.consentAllow,
+                                    'deny' => l10n.consentDeny,
+                                    final String other => other.replaceFirst('choice:', ''),
+                                  }),
                             onAllow: ({required bool allow}) => unawaited(
                               ref.read(chatProvider(id).notifier).allow(pending, allow: allow),
                             ),
