@@ -69,7 +69,22 @@ impl NodeCore {
                 self.changed = true;
             }
         }
+        self.forget_stranger(&peer);
         self.fail_calls_to(&peer, "offline", out);
+    }
+
+    fn forget_stranger(&mut self, peer: &NodeId) {
+        let member = self
+            .state
+            .as_ref()
+            .is_some_and(|s| s.members.contains_key(peer));
+        let token_home = self.joining.as_ref().is_some_and(|j| j.token.home == *peer);
+        if member || token_home {
+            return;
+        }
+        if self.peers.get(peer).is_some_and(|p| !p.linked) {
+            self.peers.remove(peer);
+        }
     }
 
     pub(super) fn drop_link(&mut self, peer: &NodeId, out: &mut Vec<Effect>) {
@@ -84,6 +99,7 @@ impl NodeCore {
             self.changed = true;
         }
         out.push(Effect::Close { peer: peer.clone() });
+        self.forget_stranger(peer);
         self.fail_calls_to(peer, "offline", out);
     }
 

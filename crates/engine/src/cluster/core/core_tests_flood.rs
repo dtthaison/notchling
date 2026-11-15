@@ -427,3 +427,165 @@ fn a_held_report_is_dropped_when_the_home_steps_down() {
     assert!(!persisted(&due));
     assert_eq!(hub.core(&m5).state().expect("state").seq, seq);
 }
+
+fn strangers_connect_and_drop(hub: &mut Hub, home: &NodeId, count: usize) {
+    for n in 0..count {
+        let stranger = crate::cluster::testkit::id(&format!("stranger-{n}"));
+        hub.nodes.get_mut(home).expect("node").step(Input::Linked {
+            peer: stranger.clone(),
+        });
+        hub.nodes
+            .get_mut(home)
+            .expect("node")
+            .step(Input::Unlinked { peer: stranger });
+    }
+}
+
+#[test]
+fn strangers_connecting_and_dropping_leave_nothing_behind() {
+    let (mut hub, m5, _) = pair();
+    let before = hub.core(&m5).peers.len();
+    strangers_connect_and_drop(&mut hub, &m5, 2_000);
+    assert_eq!(hub.core(&m5).peers.len(), before);
+}
+
+#[test]
+fn a_stranger_the_node_closes_on_leaves_nothing_behind() {
+    let (mut hub, m5, _) = pair();
+    let before = hub.core(&m5).peers.len();
+    for n in 0..200 {
+        let stranger = crate::cluster::testkit::id(&format!("greeter-{n}"));
+        let node = hub.nodes.get_mut(&m5).expect("node");
+        node.step(Input::Linked {
+            peer: stranger.clone(),
+        });
+        let effects = node.step(Input::Msg {
+            from: stranger.clone(),
+            msg: Msg::Hello {
+                node: stranger.clone(),
+                cluster: Some("c1".to_string()),
+                versions: versions("linux"),
+                boot_id: "boot".to_string(),
+                term: None,
+            },
+        });
+        assert!(effects
+            .iter()
+            .any(|e| matches!(e, Effect::Close { peer } if *peer == stranger)));
+    }
+    assert_eq!(hub.core(&m5).peers.len(), before);
+}
+
+#[test]
+fn a_stranger_that_stays_linked_keeps_its_entry_until_it_drops() {
+    let (mut hub, m5, _) = pair();
+    let before = hub.core(&m5).peers.len();
+    let stranger = crate::cluster::testkit::id("stays");
+    let node = hub.nodes.get_mut(&m5).expect("node");
+    node.step(Input::Linked {
+        peer: stranger.clone(),
+    });
+    assert_eq!(node.peers.len(), before + 1);
+    node.step(Input::Unlinked { peer: stranger });
+    assert_eq!(node.peers.len(), before);
+}
+
+#[test]
+fn a_member_that_drops_keeps_its_entry() {
+    let (mut hub, m5, w1) = pair();
+    let before = hub.core(&m5).peers.len();
+    hub.run(&m5, Input::Unlinked { peer: w1.clone() });
+    assert_eq!(hub.core(&m5).peers.len(), before);
+    assert!(!hub.core(&m5).online().contains(&w1));
+}
+
+#[test]
+fn strangers_dropping_do_not_disturb_a_join_in_progress() {
+    let (mut hub, m5, _) = pair();
+    let w3 = hub.add("w3", "linux", false);
+    hub.local(
+        &m5,
+        LocalCmd::IssueToken {
+            secret: "s3".to_string(),
+            minter: m5.clone(),
+        },
+    );
+    let token = JoinToken {
+        cluster: "c1".to_string(),
+        home: m5.clone(),
+        fingerprint: fp("m5"),
+        addrs: vec!["100.64.0.5".to_string()],
+        port: 47823,
+        secret: "s3".to_string(),
+    };
+    hub.local(
+        &w3,
+        LocalCmd::JoinWith {
+            token,
+            me: member("w3", "linux", false),
+        },
+    );
+    hub.linked.push((m5.clone(), w3.clone()));
+    hub.run(&m5, Input::Linked { peer: w3.clone() });
+    hub.run(&w3, Input::Linked { peer: m5.clone() });
+    assert!(hub.core(&m5).peers.contains_key(&w3));
+    strangers_connect_and_drop(&mut hub, &m5, 300);
+    hub.linked.retain(|(a, b)| !(a == &m5 && b == &w3));
+    hub.run(&m5, Input::Unlinked { peer: w3.clone() });
+    hub.run(&w3, Input::Unlinked { peer: m5.clone() });
+    assert!(
+        hub.core(&m5).peers.contains_key(&w3),
+        "a pending member keeps its entry"
+    );
+    hub.linked.push((m5.clone(), w3.clone()));
+    hub.run(&m5, Input::Linked { peer: w3.clone() });
+    hub.run(&w3, Input::Linked { peer: m5.clone() });
+    hub.local(
+        &m5,
+        LocalCmd::Approve {
+            node: w3.clone(),
+            client: false,
+            can_be_master: false,
+        },
+    );
+    hub.tick_all(0);
+    let joined = hub.core(&w3).state().expect("the joiner is in the cluster");
+    assert_eq!(joined.home, m5);
+    assert!(hub.core(&m5).online().contains(&w3));
+    assert!(hub.core(&w3).online().contains(&m5));
+}
+
+#[test]
+fn a_denied_joiner_leaves_nothing_behind_once_it_drops() {
+    let (mut hub, m5, _) = pair();
+    let before = hub.core(&m5).peers.len();
+    let w3 = hub.add("w3", "linux", false);
+    hub.local(
+        &m5,
+        LocalCmd::IssueToken {
+            secret: "s3".to_string(),
+            minter: m5.clone(),
+        },
+    );
+    let token = JoinToken {
+        cluster: "c1".to_string(),
+        home: m5.clone(),
+        fingerprint: fp("m5"),
+        addrs: vec![],
+        port: 1,
+        secret: "s3".to_string(),
+    };
+    hub.local(
+        &w3,
+        LocalCmd::JoinWith {
+            token,
+            me: member("w3", "linux", false),
+        },
+    );
+    hub.linked.push((m5.clone(), w3.clone()));
+    hub.run(&m5, Input::Linked { peer: w3.clone() });
+    hub.run(&w3, Input::Linked { peer: m5.clone() });
+    hub.local(&m5, LocalCmd::Deny { node: w3.clone() });
+    hub.run(&m5, Input::Unlinked { peer: w3.clone() });
+    assert_eq!(hub.core(&m5).peers.len(), before);
+}
