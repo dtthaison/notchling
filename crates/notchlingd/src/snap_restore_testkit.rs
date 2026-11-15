@@ -171,6 +171,7 @@ impl World {
             node: "m1",
             aside,
             shared,
+            path_dirs: &[],
         };
         let git = launcher(&self.rig.t);
         plan_restore(&manifest, &ctx, &sessions, &|p: &Path| {

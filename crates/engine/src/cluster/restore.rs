@@ -88,6 +88,69 @@ pub struct RestoreCtx<'a> {
     pub node: &'a str,
     pub aside: bool,
     pub shared: bool,
+    pub path_dirs: &'a [PathBuf],
+}
+
+fn same(a: &str, b: &str) -> bool {
+    a.eq_ignore_ascii_case(b)
+}
+
+pub fn folded_starts_with(path: &Path, base: &Path) -> bool {
+    let mut path = path.components();
+    base.components().all(|part| {
+        path.next().is_some_and(|other| {
+            same(
+                &part.as_os_str().to_string_lossy(),
+                &other.as_os_str().to_string_lossy(),
+            )
+        })
+    })
+}
+
+fn folded_eq(a: &Path, b: &Path) -> bool {
+    folded_starts_with(a, b) && folded_starts_with(b, a)
+}
+
+pub fn origin_key(url: &str) -> String {
+    let trimmed = url.trim_end_matches('/');
+    let trimmed = trimmed.strip_suffix(".git").unwrap_or(trimmed);
+    let trimmed = trimmed.trim_end_matches('/');
+    if let Some((scheme, rest)) = trimmed.split_once("://") {
+        if scheme == "file" {
+            return rest.to_owned();
+        }
+        let (authority, path) = rest.split_once('/').unwrap_or((rest, ""));
+        let host = authority
+            .rsplit_once('@')
+            .map_or(authority, |(_, host)| host);
+        let (name, port) = match host.rsplit_once(':') {
+            Some((name, port)) if !host.ends_with(']') => (name, Some(port)),
+            _ => (host, None),
+        };
+        let default = matches!(
+            (scheme, port),
+            ("ssh", Some("22")) | ("https", Some("443")) | ("git", Some("9418"))
+        );
+        let name = name.to_ascii_lowercase();
+        return match port {
+            Some(port) if !default => format!("{name}:{port}/{path}"),
+            _ => format!("{name}/{path}"),
+        };
+    }
+    if trimmed.starts_with('/') {
+        return trimmed.to_owned();
+    }
+    match trimmed.split_once(':') {
+        Some((host, path)) => {
+            let host = host.rsplit_once('@').map_or(host, |(_, host)| host);
+            format!(
+                "{}/{}",
+                host.to_ascii_lowercase(),
+                path.trim_start_matches('/')
+            )
+        }
+        None => trimmed.to_owned(),
+    }
 }
 
 pub fn copy_name(text: &str) -> String {
@@ -320,13 +383,31 @@ impl<'a> Planner<'a> {
             return refuse("is in a hidden folder of the home folder, where a clone could change how this machine behaves");
         }
         let shared_cloud = parts.len() >= 3
-            && *first == "Library"
-            && matches!(parts[1], "CloudStorage" | "Mobile Documents");
-        if (*first == "Library" && !shared_cloud) || *first == "Applications" {
+            && same(first, "Library")
+            && (same(parts[1], "CloudStorage") || same(parts[1], "Mobile Documents"));
+        if (same(first, "Library") && !shared_cloud) || same(first, "Applications") {
             return refuse("is in a system folder of the home folder");
         }
-        if parts.contains(&".git") {
+        if parts.iter().any(|part| same(part, ".git")) {
             return refuse("is inside a .git folder");
+        }
+        if parts
+            .iter()
+            .any(|part| same(part, "bin") || same(part, "sbin"))
+        {
+            return refuse("has a bin folder in its path, where a clone could shadow a command");
+        }
+        if let Some(dir) = self
+            .ctx
+            .path_dirs
+            .iter()
+            .find(|dir| dir.starts_with(self.ctx.home) && folded_starts_with(dir, path))
+        {
+            return Err(format!(
+                "{} is, or holds, {} on this machine's PATH, where a clone could shadow a command",
+                path.display(),
+                dir.display()
+            ));
         }
         Ok(())
     }
@@ -367,7 +448,10 @@ impl<'a> Planner<'a> {
         let mut found = Vec::new();
         for (inner, owner) in &places {
             for (outer, _) in &places {
-                if inner != outer && inner.starts_with(outer) && *owner != Some(*outer) {
+                if inner != outer
+                    && folded_starts_with(inner, outer)
+                    && !owner.is_some_and(|owner| folded_eq(owner, outer))
+                {
                     found.push(format!(
                         "{} is inside {}, and only a linked worktree may be inside its own main repository",
                         inner.display(),
@@ -383,7 +467,11 @@ impl<'a> Planner<'a> {
 
     fn file_ok(&self, path: &Path) -> Result<(), String> {
         self.place_ok(path)?;
-        match self.roots.iter().find(|root| path.starts_with(root)) {
+        match self
+            .roots
+            .iter()
+            .find(|root| folded_starts_with(path, root))
+        {
             Some(root) => Err(format!(
                 "{} is inside the repository {}: code never travels",
                 path.display(),

@@ -6,14 +6,15 @@ use crate::snap_restore_fs::{
     repo_place, restore_db,
 };
 use notchling_engine::cluster::restore::{
-    blank_filters, drivers_probe, git_calls, plan_restore, PathState, RestoreCtx, RestoreStep,
+    blank_filters, drivers_probe, git_calls, origin_key, plan_restore, PathState, RestoreCtx,
+    RestoreStep,
 };
 use notchling_engine::cluster::standby_store::StandbyStore;
 use notchling_engine::cluster::workspace::GitCall;
 use notchling_engine::cluster::NodeId;
 use notchling_engine::control::{LaunchOutput, Launcher};
 use std::collections::BTreeSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 pub struct Request<'a> {
@@ -149,7 +150,7 @@ fn verify_main(req: &Request, main: &Path, origin: &str) -> Result<(), String> {
             "{shown} is a linked worktree, not a main repository"
         ));
     }
-    if facts.origin.as_deref() != Some(origin) {
+    if facts.origin.as_deref().map(origin_key) != Some(origin_key(origin)) {
         return Err(format!(
             "{shown} on {} has a different remote than the set's",
             req.node
@@ -219,12 +220,16 @@ pub fn restore(req: &Request) -> Result<Report, String> {
     let manifest = store
         .current()
         .ok_or_else(|| "There is no set to restore from".to_owned())?;
+    let path_dirs: Vec<PathBuf> = std::env::var_os("PATH")
+        .map(|path| std::env::split_paths(&path).collect())
+        .unwrap_or_default();
     let ctx = RestoreCtx {
         cluster: req.cluster,
         home: req.home,
         node: req.node,
         aside: req.aside,
         shared: req.shared,
+        path_dirs: &path_dirs,
     };
     let probe = |path: &Path| probe_state(req.read, req.home, path);
     let steps = plan_restore(&manifest, &ctx, req.sessions, &probe)?;

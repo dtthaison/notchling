@@ -389,3 +389,20 @@ fn a_filter_the_folder_defines_never_runs_while_restoring() {
     assert!(clone.join("new.txt").exists());
     assert!(!w.rig.marker.exists());
 }
+
+#[test]
+fn a_worktree_accepts_the_same_remote_written_another_way() {
+    let w = World::new();
+    w.rig.w(&["push", "-q", "origin", "main:refs/heads/feat4"]);
+    let step = RestoreStep::AddWorktree {
+        main: w.repo.clone(),
+        origin: format!("{}/", origin_of(&w)),
+        path: w.at("wt4"),
+        branch: "feat4".to_owned(),
+        head: head_of(&w),
+    };
+
+    w.step(&step).unwrap();
+
+    assert!(w.at("wt4").join("a.txt").exists());
+}

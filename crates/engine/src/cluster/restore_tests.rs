@@ -2,7 +2,8 @@ use super::blob::sha256_of;
 use super::id::Tool;
 use super::members::Term;
 use super::restore::{
-    blank_filters, drivers_probe, git_calls, plan_restore, PathState, RestoreCtx, RestoreStep,
+    blank_filters, drivers_probe, git_calls, origin_key, plan_restore, PathState, RestoreCtx,
+    RestoreStep,
 };
 use super::snapshot::{
     dir_digest, Manifest, Movable, Part, PartKind, RepoFacts, SessionEntry, Shape,
@@ -27,6 +28,7 @@ struct Rig {
     cluster: PathBuf,
     parts: Vec<(Part, Vec<u8>)>,
     sessions: Vec<SessionEntry>,
+    path_dirs: Vec<PathBuf>,
 }
 
 fn node() -> super::NodeId {
@@ -60,6 +62,7 @@ impl Rig {
             cluster,
             parts: Vec::new(),
             sessions: Vec::new(),
+            path_dirs: Vec::new(),
         }
     }
 
@@ -152,6 +155,7 @@ impl Rig {
             node: "m1",
             aside,
             shared,
+            path_dirs: &self.path_dirs,
         };
         let named: BTreeSet<String> = ids.iter().map(|s| (*s).to_owned()).collect();
         plan_restore(&m, &ctx, &named, probe)
@@ -667,6 +671,12 @@ fn a_repository_root_in_a_hidden_or_system_folder_is_refused() {
         ("Library/Application Support/x", "system folder"),
         ("Applications/x", "system folder"),
         ("code/a/.git/modules/x", ".git folder"),
+        ("library/LaunchAgents/x", "system folder"),
+        ("LIBRARY/Application Support/x", "system folder"),
+        ("APPLICATIONS/x", "system folder"),
+        ("x/.GIT/hooks", ".git folder"),
+        ("code/BIN/x", "bin folder"),
+        ("code/sbin", "bin folder"),
     ];
     for (n, (rel, why)) in refused.into_iter().enumerate() {
         let err = hostile_root(rel, &format!("restore-root-{n}")).unwrap_err();
@@ -675,6 +685,7 @@ fn a_repository_root_in_a_hidden_or_system_folder_is_refused() {
     assert!(hostile_root("code/a", "restore-root-ok").is_ok());
     assert!(hostile_root("Library/CloudStorage/Dropbox/a", "restore-root-cloud").is_ok());
     assert!(hostile_root("Library/CloudStorage", "restore-root-cloud-bare").is_err());
+    assert!(hostile_root("LIBRARY/cloudstorage/Dropbox/a", "restore-root-cloud-case").is_ok());
 }
 
 #[test]
@@ -825,4 +836,88 @@ fn git_calls_are_hardened_and_never_reach_for_a_login() {
         sha256: String::new()
     })
     .is_empty());
+}
+
+#[test]
+fn a_root_that_is_or_holds_a_path_folder_under_home_is_refused() {
+    let tools = |rig: &Rig| vec![rig.at("code/tools"), PathBuf::from("/usr/bin")];
+    for (n, (rel, refused)) in [
+        ("code/tools", true),
+        ("code", true),
+        ("CODE/Tools", true),
+        ("code/tools/x", false),
+        ("code/other", false),
+        ("usr", false),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let mut rig = Rig::new(&format!("restore-path-{n}"));
+        rig.path_dirs = tools(&rig);
+        let root = rig.at(rel);
+        rig.session(S1, "code/a", Movable::Yes);
+        rig.sessions[0].cwd = root.to_string_lossy().into_owned();
+        rig.sessions[0].repo.as_mut().unwrap().root = root;
+        let result = rig.plan(&[S1], false, false, &missing);
+        assert_eq!(result.is_err(), refused, "{rel}: {result:?}");
+        if let Err(why) = result {
+            assert!(why.contains("PATH"), "{rel}: {why}");
+        }
+    }
+}
+
+#[test]
+fn nested_roots_are_found_whatever_their_case() {
+    let mut rig = Rig::new("restore-nested-case");
+    rig.session(S1, "code/a", Movable::Yes);
+    rig.session(S2, "CODE/A/inner", Movable::Yes);
+    let why = rig.plan(&[S1, S2], false, false, &missing).unwrap_err();
+    assert!(why.contains("is inside"), "{why}");
+    let mut linked = Rig::new("restore-nested-case-linked");
+    let main = linked.at("code/a");
+    linked.session(S1, "code/a", Movable::Yes);
+    linked.session(S2, "code/a/wt", Movable::Yes);
+    linked.sessions[1].repo.as_mut().unwrap().main_repo = Some(main);
+    assert!(linked.plan(&[S1, S2], false, false, &missing).is_ok());
+    linked.sessions[1].repo.as_mut().unwrap().main_repo = Some(linked.at("CODE/A"));
+    assert!(linked.plan(&[S1, S2], false, false, &missing).is_err());
+}
+
+#[test]
+fn session_files_inside_a_root_are_refused_whatever_their_case() {
+    let mut rig = Rig::new("restore-inside-case");
+    let hook = rig.at("CODE/A/.git/hooks/post-checkout");
+    rig.session(S1, "code/a", Movable::Yes).transcripts = vec![hook.clone()];
+    rig.tail(&hook, 0, b"x\n");
+    assert!(rig
+        .plan(&[S1], false, false, &clean("main", HEAD))
+        .unwrap_err()
+        .contains("code never travels"));
+}
+
+#[test]
+fn origins_that_name_one_remote_share_a_key() {
+    let same = [
+        "git@github.com:me/r.git",
+        "git@GitHub.com:me/r",
+        "ssh://git@github.com/me/r.git",
+        "ssh://git@github.com:22/me/r/",
+        "https://github.com/me/r.git",
+        "https://me@GITHUB.com:443/me/r/",
+        "git://github.com/me/r",
+    ];
+    for url in same {
+        assert_eq!(origin_key(url), "github.com/me/r", "{url}");
+    }
+    assert_ne!(origin_key("https://github.com/me/R"), "github.com/me/r");
+    assert_ne!(
+        origin_key("https://github.com/me/r"),
+        origin_key("https://gitlab.com/me/r")
+    );
+    assert_ne!(
+        origin_key("ssh://git@github.com:2222/me/r"),
+        origin_key("ssh://git@github.com/me/r")
+    );
+    assert_eq!(origin_key("/srv/git/r.git/"), "/srv/git/r");
+    assert_eq!(origin_key("file:///srv/git/r.git"), "/srv/git/r");
 }
