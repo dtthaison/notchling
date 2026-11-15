@@ -3,6 +3,7 @@ use std::ffi::OsStr;
 use std::fmt;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
@@ -11,6 +12,8 @@ use crate::vault::entry::valid_name;
 pub const EXCLUDED_DIRS: &[&str] = &["cluster/grants", "cluster/logins", "cluster/incoming"];
 
 const MAX_FILE_BYTES: u64 = 256 * 1024;
+const MAX_VALUE_BYTES: usize = 32 * 1024;
+const NO_UNIX: &str = "grant files need a unix system";
 const FILE_VERSION: u32 = 1;
 const MAX_TREE_DEPTH: usize = 8;
 
@@ -19,6 +22,13 @@ fn wipe(bytes: &mut [u8]) {
         unsafe { std::ptr::write_volatile(byte, 0) };
     }
     std::sync::atomic::compiler_fence(std::sync::atomic::Ordering::SeqCst);
+}
+
+fn wipe_vec(bytes: &mut Vec<u8>) {
+    let capacity = bytes.capacity();
+    bytes.resize(capacity, 0);
+    wipe(bytes);
+    bytes.clear();
 }
 
 #[derive(Clone)]
@@ -37,7 +47,7 @@ impl GrantValue {
 impl Drop for GrantValue {
     fn drop(&mut self) {
         let mut bytes = std::mem::take(&mut self.0).into_bytes();
-        wipe(&mut bytes);
+        wipe_vec(&mut bytes);
     }
 }
 
@@ -151,7 +161,8 @@ fn stem_of(file: &OsStr) -> Option<&str> {
 
 fn read_grant(mut file: std::fs::File, path: &Path) -> Result<GrantFile, String> {
     let bad = || format!("malformed grant file {}", path.display());
-    let mut buffer = Vec::new();
+    let size = file.metadata().map_or(0, |m| m.len()).min(MAX_FILE_BYTES);
+    let mut buffer = Vec::with_capacity(size as usize + 1);
     let read = (&mut file)
         .take(MAX_FILE_BYTES + 1)
         .read_to_end(&mut buffer);
@@ -162,16 +173,16 @@ fn read_grant(mut file: std::fs::File, path: &Path) -> Result<GrantFile, String>
         Ok(_) => Err(bad()),
         Err(e) => Err(format!("can't read grant file {}: {e}", path.display())),
     };
-    wipe(&mut buffer);
+    wipe_vec(&mut buffer);
     parsed
 }
 
 #[cfg(unix)]
 mod sys {
-    use std::ffi::{CString, OsStr, OsString};
+    use std::ffi::{CStr, CString, OsStr, OsString};
     use std::fs::{DirBuilder, File, OpenOptions};
     use std::io;
-    use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
+    use std::os::fd::{AsRawFd, FromRawFd, IntoRawFd, OwnedFd, RawFd};
     use std::os::unix::ffi::OsStrExt;
     use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt};
     use std::path::{Path, PathBuf};
@@ -227,16 +238,23 @@ mod sys {
         io::Error::other("refusing a link or a file where a folder belongs")
     }
 
-    fn verify_private(fd: &OwnedFd) -> io::Result<()> {
-        let meta = File::from(fd.try_clone()?).metadata()?;
-        if !meta.is_dir() {
-            return Err(io::Error::other("not a folder"));
+    fn euid() -> u32 {
+        unsafe { libc::geteuid() }
+    }
+
+    pub fn verify_file_private(file: &File) -> io::Result<()> {
+        let meta = file.metadata()?;
+        if !meta.is_file() {
+            return Err(io::Error::other("not a regular file"));
         }
-        if meta.uid() != unsafe { libc::geteuid() } {
-            return Err(io::Error::other("a folder owned by someone else"));
+        if meta.nlink() != 1 {
+            return Err(io::Error::other("a file with more than one hard link"));
+        }
+        if meta.uid() != euid() {
+            return Err(io::Error::other("a file owned by someone else"));
         }
         if meta.mode() & 0o077 != 0 {
-            return Err(io::Error::other("a folder open to group or others"));
+            return Err(io::Error::other("a file open to group or others"));
         }
         Ok(())
     }
@@ -249,7 +267,6 @@ mod sys {
                 .open(path)
                 .map_err(|e| if is_link_error(&e) { link_refused() } else { e })?;
             let fd = OwnedFd::from(file);
-            verify_private(&fd)?;
             Ok(Dir {
                 fd,
                 path: path.to_path_buf(),
@@ -268,6 +285,28 @@ mod sys {
 
         pub fn path(&self) -> &Path {
             &self.path
+        }
+
+        fn meta(&self) -> io::Result<std::fs::Metadata> {
+            File::from(self.fd.try_clone()?).metadata()
+        }
+
+        pub fn verify_private(&self) -> io::Result<()> {
+            let meta = self.meta()?;
+            if !meta.is_dir() {
+                return Err(io::Error::other("not a folder"));
+            }
+            if meta.uid() != euid() {
+                return Err(io::Error::other("a folder owned by someone else"));
+            }
+            if meta.mode() & 0o077 != 0 {
+                return Err(io::Error::other("a folder open to group or others"));
+            }
+            Ok(())
+        }
+
+        pub fn owned_by_us(&self) -> io::Result<bool> {
+            Ok(self.meta()?.uid() == euid())
         }
 
         fn open_dir(&self, name: &OsStr) -> io::Result<OwnedFd> {
@@ -296,7 +335,6 @@ mod sys {
                     Err(e) => return Err(e),
                 }
             };
-            verify_private(&fd)?;
             Ok(Some(Dir {
                 fd,
                 path: self.path.join(name),
@@ -317,7 +355,7 @@ mod sys {
             let fd = match openat(
                 self.fd.as_raw_fd(),
                 name,
-                libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_NONBLOCK,
+                libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_NONBLOCK | libc::O_NOCTTY,
                 0,
             ) {
                 Ok(fd) => fd,
@@ -342,9 +380,27 @@ mod sys {
         }
 
         pub fn names(&self) -> io::Result<Vec<OsString>> {
-            std::fs::read_dir(&self.path)?
-                .map(|entry| entry.map(|e| e.file_name()))
-                .collect()
+            let raw = self.fd.try_clone()?.into_raw_fd();
+            let dirp = unsafe { libc::fdopendir(raw) };
+            if dirp.is_null() {
+                let err = io::Error::last_os_error();
+                drop(unsafe { OwnedFd::from_raw_fd(raw) });
+                return Err(err);
+            }
+            unsafe { libc::rewinddir(dirp) };
+            let mut names = Vec::new();
+            loop {
+                let entry = unsafe { libc::readdir(dirp) };
+                if entry.is_null() {
+                    break;
+                }
+                let name = unsafe { CStr::from_ptr((*entry).d_name.as_ptr()) }.to_bytes();
+                if name != b"." && name != b".." {
+                    names.push(OsStr::from_bytes(name).to_os_string());
+                }
+            }
+            unsafe { libc::closedir(dirp) };
+            Ok(names)
         }
 
         pub fn remove_tree(&self, name: &OsStr, depth: usize) -> io::Result<()> {
@@ -385,6 +441,10 @@ mod sys {
         path: PathBuf,
     }
 
+    pub fn verify_file_private(_file: &File) -> io::Result<()> {
+        Err(io::Error::other(super::NO_UNIX))
+    }
+
     fn real_dir(path: &Path) -> io::Result<()> {
         if std::fs::symlink_metadata(path)?.is_dir() {
             Ok(())
@@ -412,6 +472,14 @@ mod sys {
 
         pub fn path(&self) -> &Path {
             &self.path
+        }
+
+        pub fn verify_private(&self) -> io::Result<()> {
+            Err(io::Error::other(super::NO_UNIX))
+        }
+
+        pub fn owned_by_us(&self) -> io::Result<bool> {
+            Ok(true)
         }
 
         pub fn child(&self, name: &OsStr, create: bool) -> io::Result<Option<Dir>> {
@@ -482,17 +550,29 @@ mod sys {
     }
 }
 
-use sys::Dir;
+use sys::{verify_file_private, Dir};
+
+fn clock_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))
+}
 
 pub struct GrantStore {
     root: PathBuf,
+    lock: Mutex<()>,
 }
 
 impl GrantStore {
     pub fn new(cluster_dir: &Path) -> GrantStore {
         GrantStore {
             root: cluster_dir.join("grants"),
+            lock: Mutex::new(()),
         }
+    }
+
+    fn guard(&self) -> std::sync::MutexGuard<'_, ()> {
+        self.lock.lock().unwrap_or_else(|p| p.into_inner())
     }
 
     fn root_dir(&self, create: bool) -> Result<Option<Dir>, String> {
@@ -508,21 +588,40 @@ impl GrantStore {
         }
     }
 
-    fn job_dir(&self, job: &str, create: bool) -> Result<Option<Dir>, String> {
-        let Some(root) = self.root_dir(create)? else {
-            return Ok(None);
-        };
+    fn job_dir(&self, root: &Dir, job: &str, create: bool) -> Result<Option<Dir>, String> {
         root.child(OsStr::new(job), create)
             .map_err(|e| format!("grant folder {}: {e}", root.path().join(job).display()))
     }
 
+    fn private_pair(&self, root: &Dir, dir: &Dir) -> Result<(), String> {
+        root.verify_private()
+            .map_err(|e| format!("grants folder {}: {e}", root.path().display()))?;
+        dir.verify_private()
+            .map_err(|e| format!("grant folder {}: {e}", dir.path().display()))
+    }
+
     pub fn put(&self, grant: &GrantFile) -> Result<(), String> {
+        if !cfg!(unix) {
+            return Err(NO_UNIX.to_string());
+        }
         check_job(&grant.job)?;
         check_name(&grant.name)?;
-        let Some(dir) = self.job_dir(&grant.job, true)? else {
+        if grant.value.expose().len() > MAX_VALUE_BYTES {
+            return Err("a secret value is too large to deliver".to_string());
+        }
+        if grant.expires_ms <= clock_ms() {
+            return Err("grant already expired".to_string());
+        }
+        let name = grant.name.to_lowercase();
+        let _guard = self.guard();
+        let Some(root) = self.root_dir(true)? else {
             return Err("grants folder is missing".to_string());
         };
-        let file = file_name(&grant.name);
+        let Some(dir) = self.job_dir(&root, &grant.job, true)? else {
+            return Err("grant folder is missing".to_string());
+        };
+        self.private_pair(&root, &dir)?;
+        let file = file_name(&name);
         let path = dir.path().join(&file);
         match dir.open_file(OsStr::new(&file)) {
             Ok(Some(_)) => dir
@@ -531,33 +630,51 @@ impl GrantStore {
             Ok(None) => {}
             Err(e) => return Err(format!("grant file {}: {e}", path.display())),
         }
-        let mut bytes = serde_json::to_vec(grant)
-            .map_err(|_| format!("can't encode grant file {}", path.display()))?;
-        let written = (|| {
-            let mut out = dir.create_file(OsStr::new(&file))?;
-            let result = out.write_all(&bytes).and_then(|_| out.sync_all());
+        let stored = GrantFile {
+            job: grant.job.clone(),
+            name,
+            expires_ms: grant.expires_ms,
+            value: grant.value.clone(),
+        };
+        let mut bytes = Vec::with_capacity(stored.value.expose().len() * 6 + 256);
+        let encoded = serde_json::to_writer(&mut bytes, &stored)
+            .map_err(|_| format!("can't encode grant file {}", path.display()));
+        let written = encoded.and_then(|()| {
+            let mut out = dir
+                .create_file(OsStr::new(&file))
+                .map_err(|e| format!("can't write grant file {}: {e}", path.display()))?;
+            let result = out.write_all(&bytes).and_then(|()| out.sync_all());
             if result.is_err() {
                 let _ = dir.unlink(OsStr::new(&file));
             }
-            result
-        })();
-        wipe(&mut bytes);
-        written.map_err(|e| format!("can't write grant file {}: {e}", path.display()))
+            result.map_err(|e| format!("can't write grant file {}: {e}", path.display()))
+        });
+        wipe_vec(&mut bytes);
+        written
     }
 
     pub fn get(&self, job: &str, name: &str, now_ms: i64) -> Result<Option<GrantFile>, String> {
+        if !cfg!(unix) {
+            return Err(NO_UNIX.to_string());
+        }
         check_job(job)?;
         check_name(name)?;
-        let Some(dir) = self.job_dir(job, false)? else {
+        let name = name.to_lowercase();
+        let _guard = self.guard();
+        let Some(root) = self.root_dir(false)? else {
             return Ok(None);
         };
-        let file = file_name(name);
+        let Some(dir) = self.job_dir(&root, job, false)? else {
+            return Ok(None);
+        };
+        let file = file_name(&name);
         let path = dir.path().join(&file);
         let opened = match dir.open_file(OsStr::new(&file)) {
             Ok(Some(opened)) => opened,
             Ok(None) => return Ok(None),
             Err(e) => return Err(format!("grant file {}: {e}", path.display())),
         };
+        let private = verify_file_private(&opened);
         let grant = read_grant(opened, &path)?;
         if grant.job != job || grant.name != name {
             return Err(format!("malformed grant file {}", path.display()));
@@ -567,38 +684,44 @@ impl GrantStore {
                 .map_err(|e| format!("can't delete grant file {}: {e}", path.display()))?;
             return Ok(None);
         }
+        private.map_err(|e| format!("grant file {}: {e}", path.display()))?;
+        self.private_pair(&root, &dir)?;
         Ok(Some(grant))
     }
 
     pub fn remove(&self, job: &str, name: &str) -> Result<(), String> {
         check_job(job)?;
         check_name(name)?;
-        let Some(dir) = self.job_dir(job, false)? else {
+        let name = name.to_lowercase();
+        let _guard = self.guard();
+        let Some(root) = self.root_dir(false)? else {
             return Ok(());
         };
-        let file = file_name(name);
+        let Some(dir) = self.job_dir(&root, job, false)? else {
+            return Ok(());
+        };
+        let file = file_name(&name);
         dir.unlink(OsStr::new(&file)).map_err(|e| {
             format!(
                 "can't delete grant file {}: {e}",
                 dir.path().join(&file).display()
             )
-        })
+        })?;
+        owned_or_err(&dir)
     }
 
     pub fn remove_job(&self, job: &str) -> Result<(), String> {
         check_job(job)?;
+        let _guard = self.guard();
         let Some(root) = self.root_dir(false)? else {
             return Ok(());
         };
-        root.remove_tree(OsStr::new(job), 0).map_err(|e| {
-            format!(
-                "can't delete grant folder {}: {e}",
-                root.path().join(job).display()
-            )
-        })
+        let outcome = remove_folder(&root, OsStr::new(job));
+        outcome.and(owned_or_err(&root))
     }
 
     pub fn sweep(&self, now_ms: i64, live_jobs: &BTreeSet<String>) -> Result<usize, String> {
+        let _guard = self.guard();
         let Some(root) = self.root_dir(false)? else {
             return Ok(0);
         };
@@ -611,17 +734,19 @@ impl GrantStore {
             let live = entry
                 .to_str()
                 .is_some_and(|n| check_job(n).is_ok() && live_jobs.contains(n));
-            let path = root.path().join(&entry);
             let outcome = if live {
                 match root.child(&entry, false) {
-                    Ok(Some(dir)) => sweep_job(&dir, now_ms),
+                    Ok(Some(dir)) => {
+                        sweep_job(&dir, now_ms).and_then(|n| owned_or_err(&dir).map(|()| n))
+                    }
                     Ok(None) => Ok(0),
-                    Err(e) => Err(format!("grant folder {}: {e}", path.display())),
+                    Err(e) => Err(format!(
+                        "grant folder {}: {e}",
+                        root.path().join(&entry).display()
+                    )),
                 }
             } else {
-                root.remove_tree(&entry, 0)
-                    .map(|()| 1)
-                    .map_err(|e| format!("can't delete grant folder {}: {e}", path.display()))
+                remove_folder(&root, &entry).map(|()| 1)
             };
             match outcome {
                 Ok(n) => removed += n,
@@ -630,10 +755,41 @@ impl GrantStore {
                 }
             }
         }
+        if let Err(e) = owned_or_err(&root) {
+            first_error.get_or_insert(e);
+        }
         match first_error {
             Some(e) => Err(e),
             None => Ok(removed),
         }
+    }
+}
+
+fn remove_folder(root: &Dir, entry: &OsStr) -> Result<(), String> {
+    let path = root.path().join(entry);
+    let foreign = matches!(
+        root.child(entry, false),
+        Ok(Some(dir)) if !dir.owned_by_us().unwrap_or(false)
+    );
+    root.remove_tree(entry, 0)
+        .map_err(|e| format!("can't delete grant folder {}: {e}", path.display()))?;
+    if foreign {
+        return Err(format!(
+            "grant folder {} was owned by someone else",
+            path.display()
+        ));
+    }
+    Ok(())
+}
+
+fn owned_or_err(dir: &Dir) -> Result<(), String> {
+    match dir.owned_by_us() {
+        Ok(true) => Ok(()),
+        Ok(false) => Err(format!(
+            "grant folder {} is owned by someone else",
+            dir.path().display()
+        )),
+        Err(e) => Err(format!("grant folder {}: {e}", dir.path().display())),
     }
 }
 
