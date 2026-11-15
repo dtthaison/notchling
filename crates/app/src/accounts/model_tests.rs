@@ -330,3 +330,66 @@ fn a_claude_desktop_row_shows_the_limits_of_the_same_claude_code_account() {
         "another account's limits never show"
     );
 }
+
+#[test]
+fn the_codex_page_shows_what_is_left_and_the_credit_note_but_claude_still_shows_used() {
+    use notchling_engine::providers::usage::{Reached, Standing};
+    let mut s = snapshot(Shown::Claude);
+    let me = |s: &Snapshot| page(CODEX, s, &on(), false, NOW, Zone::UTC).rows[0].clone();
+    let RowContent::Limits(groups) = me(&s).content else {
+        panic!("the report");
+    };
+    assert_eq!(groups.len(), 1, "no standing, no note");
+    assert_eq!(groups[0].lines[0].percent_text, "59% left");
+    assert_eq!(groups[0].lines[1].percent_text, "27% left");
+    s.standing.insert(
+        CODEX.into(),
+        std::collections::BTreeMap::from([(
+            "u1:o1".to_owned(),
+            Standing {
+                reached: Some(Reached::Credits),
+                credits: None,
+            },
+        )]),
+    );
+    let RowContent::Limits(groups) = me(&s).content else {
+        panic!("the report and the note");
+    };
+    assert_eq!(groups.len(), 2);
+    assert_eq!(groups[1].notes[0].text, "Workspace is out of credits");
+    let claude = page(CLAUDE_CODE, &s, &on(), false, NOW, Zone::UTC);
+    let RowContent::Limits(own) = &claude.rows[1].content else {
+        panic!("a lane's own report");
+    };
+    assert_eq!(own[0].lines[1].percent_text, "58%", "Claude is still used");
+    let agy = page(ANTIGRAVITY, &s, &on(), false, NOW, Zone::UTC);
+    let RowContent::Limits(agy) = &agy.rows[0].content else {
+        panic!("the report");
+    };
+    assert_eq!(
+        agy[0].lines[0].percent_text, "92%",
+        "Antigravity is still used"
+    );
+}
+
+#[test]
+fn a_codex_account_with_no_bars_but_a_standing_still_says_so() {
+    use notchling_engine::providers::usage::{Reached, Standing};
+    let mut s = snapshot(Shown::Claude);
+    let work = |s: &Snapshot| page(CODEX, s, &on(), false, NOW, Zone::UTC).rows[1].clone();
+    assert!(matches!(work(&s).content, RowContent::Text { .. }));
+    s.standing.insert(
+        CODEX.into(),
+        std::collections::BTreeMap::from([(
+            "u2:o2".to_owned(),
+            Standing {
+                reached: Some(Reached::Limit),
+                credits: None,
+            },
+        )]),
+    );
+    let RowContent::Limits(groups) = work(&s).content else {
+        panic!("the note");
+    };
+    assert_eq!(groups[0].notes[0].text, "Usage limit reached");
+}

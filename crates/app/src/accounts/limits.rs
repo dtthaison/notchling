@@ -1,5 +1,6 @@
 use notchling_engine::limits::report::{BarKind, UsageReport};
 use notchling_engine::pages::clock::{civil_at, local_offset_secs};
+use notchling_engine::providers::usage::{Reached, Standing};
 
 use super::wire::Window;
 
@@ -30,6 +31,12 @@ impl Fill {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Basis {
+    Used,
+    Left,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct LimitLine {
     pub label: String,
@@ -37,12 +44,20 @@ pub struct LimitLine {
     pub percent_text: String,
     pub resets: Option<String>,
     pub fill: Fill,
+    pub left: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LimitNote {
+    pub text: String,
+    pub warning: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct LimitGroup {
     pub name: Option<String>,
     pub lines: Vec<LimitLine>,
+    pub notes: Vec<LimitNote>,
 }
 
 const WEEKDAYS: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -69,19 +84,28 @@ pub fn reset_text(resets_at: f64, now: f64, short: bool, zone: Zone) -> String {
 
 fn line(
     label: &str,
-    percent: f64,
+    used: f64,
     resets_at: Option<f64>,
     short: bool,
+    basis: Basis,
     now: f64,
     zone: Zone,
 ) -> LimitLine {
-    let percent = percent.clamp(0.0, 100.0);
+    let used = used.clamp(0.0, 100.0);
+    let (shown, text) = match basis {
+        Basis::Used => (used, format!("{}%", used.round() as i64)),
+        Basis::Left => {
+            let left = 100.0 - used;
+            (left, format!("{}% left", left.round() as i64))
+        }
+    };
     LimitLine {
         label: label.to_owned(),
-        percent,
-        percent_text: format!("{}%", percent.round() as i64),
+        percent: shown,
+        percent_text: text,
         resets: resets_at.map(|at| format!("resets {}", reset_text(at, now, short, zone))),
-        fill: Fill::of(percent),
+        fill: Fill::of(used),
+        left: basis == Basis::Left,
     }
 }
 
@@ -92,7 +116,7 @@ fn window_label(label: &str, kind: BarKind) -> String {
     }
 }
 
-pub fn groups(report: &UsageReport, now: f64, zone: Zone) -> Vec<LimitGroup> {
+fn groups_in(report: &UsageReport, basis: Basis, now: f64, zone: Zone) -> Vec<LimitGroup> {
     report
         .groups
         .iter()
@@ -107,13 +131,57 @@ pub fn groups(report: &UsageReport, now: f64, zone: Zone) -> Vec<LimitGroup> {
                         b.percent,
                         b.resets_at,
                         b.kind == BarKind::Session,
+                        basis,
                         now,
                         zone,
                     )
                 })
                 .collect(),
+            notes: Vec::new(),
         })
         .collect()
+}
+
+pub fn groups(report: &UsageReport, now: f64, zone: Zone) -> Vec<LimitGroup> {
+    groups_in(report, Basis::Used, now, zone)
+}
+
+fn notes(standing: &Standing) -> Vec<LimitNote> {
+    let mut out = Vec::new();
+    let mut add = |text: String, warning: bool| out.push(LimitNote { text, warning });
+    match standing.reached {
+        Some(Reached::Credits) => add("Workspace is out of credits".to_owned(), true),
+        Some(Reached::Limit) => add("Usage limit reached".to_owned(), true),
+        None => {}
+    }
+    if let Some(credits) = &standing.credits {
+        match (&credits.balance, credits.unlimited) {
+            (_, true) => add("Credits: unlimited".to_owned(), false),
+            (Some(balance), false) => add(format!("Credits: {balance}"), false),
+            (None, false) => {}
+        }
+    }
+    out
+}
+
+pub fn codex_groups(
+    report: Option<&UsageReport>,
+    standing: Option<&Standing>,
+    now: f64,
+    zone: Zone,
+) -> Vec<LimitGroup> {
+    let mut groups = report
+        .map(|r| groups_in(r, Basis::Left, now, zone))
+        .unwrap_or_default();
+    let notes = standing.map(notes).unwrap_or_default();
+    if !notes.is_empty() {
+        groups.push(LimitGroup {
+            name: None,
+            lines: Vec::new(),
+            notes,
+        });
+    }
+    groups
 }
 
 pub fn from_windows(windows: &[Window], now: f64, zone: Zone) -> Vec<LimitLine> {
@@ -129,7 +197,7 @@ pub fn from_windows(windows: &[Window], now: f64, zone: Zone) -> Vec<LimitLine> 
             } else {
                 &w.name
             };
-            line(label, w.percent, w.resets_at, short, now, zone)
+            line(label, w.percent, w.resets_at, short, Basis::Used, now, zone)
         })
         .collect()
 }
@@ -222,6 +290,10 @@ pub fn codex_meters(report: &UsageReport, now: f64, zone: Zone) -> Vec<Meter> {
         })
         .unwrap_or_default()
 }
+
+#[cfg(test)]
+#[path = "limits_left_tests.rs"]
+mod left_tests;
 
 #[cfg(test)]
 mod tests {

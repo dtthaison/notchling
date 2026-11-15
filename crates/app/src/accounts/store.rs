@@ -4,9 +4,11 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use notchling_engine::limits::report::UsageReport;
+use notchling_engine::providers::usage::Standing;
 use notchling_local_api::{ClientError, SOCKET_NAME};
 use serde_json::{json, Value};
 
+use super::standing;
 use super::wire::{
     parse_add, parse_claude_list, parse_claude_usage, parse_cost, parse_lanes, parse_limits,
     parse_move_plan, parse_move_result, parse_outcome, parse_providers, parse_usage,
@@ -28,6 +30,7 @@ pub struct Snapshot {
     pub lanes: Vec<Lane>,
     pub providers: ProviderList,
     pub usage: BTreeMap<String, BTreeMap<String, UsageReport>>,
+    pub standing: BTreeMap<String, BTreeMap<String, Standing>>,
     pub claude_usage: ClaudeUsage,
     pub limits: LimitsStatus,
     pub cost: Option<CostReply>,
@@ -50,6 +53,7 @@ struct Flight {
 #[derive(Default)]
 struct Forced {
     providers: BTreeMap<String, BTreeMap<String, UsageReport>>,
+    standing: BTreeMap<String, BTreeMap<String, Standing>>,
     claude: Option<ClaudeUsage>,
 }
 
@@ -268,6 +272,7 @@ impl Accounts {
             let first = Call::providers_usage(&p.id, true);
             if let Some(v) = self.settled(first, Call::providers_usage(&p.id, false)) {
                 forced.providers.insert(p.id.clone(), parse_usage(&v));
+                forced.standing.insert(p.id.clone(), standing::parse(&v));
             }
         }
         forced.claude = self
@@ -308,12 +313,18 @@ impl Accounts {
             return;
         }
         let mut usage = BTreeMap::new();
+        let mut standings = BTreeMap::new();
         if let (true, Ok(list)) = (sync, &providers) {
             for p in list.providers.iter().filter(|p| p.can(USAGE)) {
                 if let Some(reports) = forced.providers.remove(&p.id) {
                     usage.insert(p.id.clone(), reports);
+                    standings.insert(
+                        p.id.clone(),
+                        forced.standing.remove(&p.id).unwrap_or_default(),
+                    );
                 } else if let Ok(v) = self.call(&Call::providers_usage(&p.id, false)) {
                     usage.insert(p.id.clone(), parse_usage(&v));
+                    standings.insert(p.id.clone(), standing::parse(&v));
                 }
             }
         }
@@ -345,12 +356,14 @@ impl Accounts {
             }
             if sync {
                 s.usage = usage;
+                s.standing = standings;
             }
             if let Some(read) = claude_usage.filter(|_| on) {
                 s.claude_usage = read;
             }
             if !sync && !on {
                 s.usage.clear();
+                s.standing.clear();
                 s.claude_usage = ClaudeUsage::default();
             }
             s.error = None;
@@ -492,8 +505,10 @@ impl Accounts {
     pub fn refresh_usage(&self, switches: &Switches, provider: &str) -> Result<(), String> {
         let v = self.send(switches, &Call::providers_usage(provider, true))?;
         let reports = parse_usage(&v);
+        let reached = standing::parse(&v);
         self.update(|s| {
             s.usage.insert(provider.to_owned(), reports);
+            s.standing.insert(provider.to_owned(), reached);
         });
         Ok(())
     }

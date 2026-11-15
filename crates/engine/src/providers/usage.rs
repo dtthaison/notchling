@@ -1,3 +1,4 @@
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -82,6 +83,39 @@ impl UsageReport {
                 })).collect::<Vec<_>>(),
             })).collect::<Vec<_>>(),
         })
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Reached {
+    Credits,
+    Limit,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Credits {
+    #[serde(default)]
+    pub unlimited: bool,
+    #[serde(default)]
+    pub balance: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Standing {
+    #[serde(default)]
+    pub reached: Option<Reached>,
+    #[serde(default)]
+    pub credits: Option<Credits>,
+}
+
+impl Standing {
+    pub fn is_empty(&self) -> bool {
+        self.reached.is_none() && self.credits.is_none()
+    }
+
+    pub fn to_json(&self) -> Value {
+        serde_json::to_value(self).unwrap_or(Value::Null)
     }
 }
 

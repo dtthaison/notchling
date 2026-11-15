@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 
 use notchling_engine::cost::summary::{AccountCost, DayCost, ModelStat, NameCost, Summary};
 use notchling_engine::limits::report::{Bar, BarKind, Group, UsageReport};
+use notchling_engine::providers::usage::{Reached, Standing};
 
 use super::store::Snapshot;
 use super::wire::{
@@ -99,6 +100,13 @@ pub fn codex_report() -> UsageReport {
             ],
         }],
         fetched: NOW,
+    }
+}
+
+pub fn codex_standing() -> Standing {
+    Standing {
+        reached: Some(Reached::Credits),
+        credits: None,
     }
 }
 
@@ -315,6 +323,13 @@ pub fn snapshot(shown: Shown) -> Snapshot {
             BTreeMap::from([("g1".to_owned(), antigravity_report())]),
         );
     }
+    let mut standing = BTreeMap::new();
+    if shown == Shown::Codex {
+        standing.insert(
+            "codex".to_owned(),
+            BTreeMap::from([("u1:o1".to_owned(), codex_standing())]),
+        );
+    }
     Snapshot {
         attached: true,
         claude,
@@ -330,6 +345,7 @@ pub fn snapshot(shown: Shown) -> Snapshot {
             syncing: false,
         },
         usage,
+        standing,
         claude_usage: ClaudeUsage {
             reports: if on {
                 BTreeMap::from([("a2".to_owned(), claude_report())])
