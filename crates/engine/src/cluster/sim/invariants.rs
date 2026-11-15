@@ -19,6 +19,7 @@ pub enum Violation {
     RefreshOnWorker { node: NodeId },
     AnswerTwice { item: String },
     ReleasedOffPrimary { node: NodeId, term: Term },
+    ReleasedWithoutAllow { job: String },
 }
 
 pub fn check(world: &World) -> Result<(), Violation> {

@@ -9,7 +9,7 @@ pub const TIMEOUT: Duration = Duration::from_secs(5);
 pub const AGY_LOGIN_FILE: &str = ".gemini/jetski-standalone-oauth-token";
 pub const CODEX_COMMAND: &str = "codex login --device-auth";
 pub const AGY_COMMAND: &str = "agy";
-const FORBIDDEN: [&str; 4] = ["refresh", "logout", "setup-token", "--with-api-key"];
+pub const FORBIDDEN: [&str; 4] = ["refresh", "logout", "setup-token", "--with-api-key"];
 
 pub fn codex_signed_in(exit: i32, stdout: &str) -> bool {
     let text = stdout.to_ascii_lowercase();

@@ -482,10 +482,7 @@ impl World {
     }
 
     pub(super) fn trace_line(&mut self, n: &NodeId, text: &str) {
-        let name = self.name_of(n);
-        self.secrets.record(n, super::secrets::Path::Log, text);
-        self.trace
-            .push(format!("{:>8} {:<4} {}", self.now, name, text));
+        self.push_trace(n, text);
     }
 
     pub fn pending_join(&self, joiner: &NodeId) -> bool {

@@ -122,13 +122,11 @@ impl World {
     }
 
     pub(super) fn after_step(&mut self, n: &NodeId, before: Option<Term>, effects: Vec<Effect>) {
-        let name = self.name_of(n);
         let mut persisted = false;
         let mut wiped = false;
         self.step_sends.clear();
         for effect in effects {
-            self.trace
-                .push(format!("{:>8} {:<4} {}", self.now, name, summary(&effect)));
+            self.push_trace(n, &summary(&effect));
             self.scan_effect(n, &effect);
             match effect {
                 Effect::Send { to, msg } => self.send(n, &to, msg),
@@ -200,6 +198,12 @@ impl World {
                 node.journal = node.core.as_ref().and_then(|c| c.state().cloned());
             }
         }
+        if persisted && !wiped {
+            if let Some(state) = self.core(n).and_then(|c| c.state()) {
+                let text = super::secrets_scan::ser(state);
+                self.scan_persisted(n, &text);
+            }
+        }
         self.observe_jobs(n);
         let after = self.core(n).and_then(|c| c.highest_term().cloned());
         if let (Some(b), Some(a)) = (&before, &after) {
@@ -249,6 +253,7 @@ impl World {
     }
 
     pub(super) fn send(&mut self, from: &NodeId, to: &NodeId, msg: Msg) {
+        self.scan_wire(from, to, &msg);
         if let Msg::Call { op, args, .. } = &msg {
             if START_OPS.contains(&op.as_str()) && self.violation.is_none() {
                 let home_sees_active = self

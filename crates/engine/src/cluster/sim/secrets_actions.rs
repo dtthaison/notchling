@@ -2,9 +2,10 @@ use std::collections::BTreeMap;
 
 use serde_json::json;
 
-use super::world::World;
+use super::secrets_broker::BrokerEv;
+use super::world::{Event, World};
 use crate::cluster::core::LocalCmd;
-use crate::cluster::id::{NodeId, Tool};
+use crate::cluster::id::{qualify, NodeId, Qualified, Tool};
 use crate::cluster::jobs::{Job, JobSpec, JobState};
 use crate::cluster::wire::{Msg, Origin, OriginTier};
 
@@ -104,30 +105,6 @@ impl World {
         self.local(&node, cmd);
     }
 
-    pub fn answer_item(&mut self, from: &NodeId, item: &str, allow: bool) {
-        let owner = self
-            .secrets
-            .mirrors
-            .get(from)
-            .and_then(|m| m.get(item))
-            .map(|(o, _)| o.clone())
-            .or_else(|| self.secrets.vault_node.clone());
-        let Some(owner) = owner else {
-            return;
-        };
-        let action = if allow { "allow_once" } else { "deny" };
-        let cmd = LocalCmd::Forward {
-            node: owner,
-            op: "inbox.answer".to_string(),
-            args: json!({"id": item, "action": action}).into(),
-            origin: Origin {
-                node: from.clone(),
-                tier: OriginTier::App,
-            },
-        };
-        self.local(from, cmd);
-    }
-
     pub(super) fn secrets_action(&mut self, kind: u8) {
         match kind {
             0 | 1 => {
@@ -156,11 +133,9 @@ impl World {
                     .collect();
                 let mut open: Vec<(NodeId, String)> = Vec::new();
                 for mac in &macs {
-                    if let Some(list) = self.secrets.mirrors.get(mac) {
-                        for (id, (_, is_open)) in list {
-                            if *is_open && id.starts_with("secret:") {
-                                open.push((mac.clone(), id.clone()));
-                            }
+                    for id in self.secrets.mirrored(mac) {
+                        if id.contains("secret:") {
+                            open.push((mac.clone(), id));
                         }
                     }
                 }
@@ -172,8 +147,11 @@ impl World {
                 let allow = self.rng.chance(85);
                 self.answer_item(&mac, &item, allow);
                 if self.rng.chance(30) {
+                    let owner = Qualified::parse(&item).map_or(mac.clone(), |q| q.node);
+                    let plain = Qualified::parse(&item).map_or(item.clone(), |q| q.id);
+                    let qualified = qualify(&owner, &plain);
                     for other in macs.iter().filter(|m| **m != mac) {
-                        self.answer_item(other, &item, allow);
+                        self.answer_item(other, &qualified, allow);
                     }
                 }
             }
@@ -190,5 +168,91 @@ impl World {
                 self.login_failure(&workers[i].clone());
             }
         }
+    }
+
+    pub fn inject_deliver(
+        &mut self,
+        node: &NodeId,
+        job: &str,
+        name: &str,
+        (value, expires): (&str, i64),
+        since: u64,
+    ) {
+        let Some(vault) = self.secrets.vault_node.clone() else {
+            return;
+        };
+        self.inject_deliver_from(&vault, node, job, name, (value, expires), since);
+    }
+
+    pub fn inject_deliver_from(
+        &mut self,
+        from: &NodeId,
+        node: &NodeId,
+        job: &str,
+        name: &str,
+        (value, expires): (&str, i64),
+        since: u64,
+    ) {
+        let args = json!({"job": job, "name": name, "value": value, "expiresMs": expires});
+        let origin = Origin {
+            node: from.clone(),
+            tier: OriginTier::Node,
+        };
+        let ev = BrokerEv::Run {
+            node: node.clone(),
+            call: 0,
+            op: "grant.deliver".to_string(),
+            args,
+            origin,
+            arrived: (self.now, since),
+        };
+        let at = self.now + 1;
+        self.schedule(at, Event::Broker(ev));
+    }
+
+    pub fn inject_revoke(&mut self, node: &NodeId, job: &str, names: Option<&[&str]>) {
+        let Some(vault) = self.secrets.vault_node.clone() else {
+            return;
+        };
+        let args = match names {
+            Some(list) => json!({"job": job, "names": list}),
+            None => json!({"job": job}),
+        };
+        let origin = Origin {
+            node: vault,
+            tier: OriginTier::Node,
+        };
+        let ev = BrokerEv::Run {
+            node: node.clone(),
+            call: 0,
+            op: "grant.revoke".to_string(),
+            args,
+            origin,
+            arrived: (self.now, self.secrets.revoke_seq),
+        };
+        let at = self.now + 1;
+        self.schedule(at, Event::Broker(ev));
+    }
+
+    pub fn plant_grant(&mut self, node: &NodeId, job: &str, name: &str) {
+        let stored = super::secrets::Stored {
+            expires_at: self.now + 3_600_000,
+            value: String::new(),
+        };
+        let key = (job.to_string(), name.to_string());
+        self.secrets
+            .stores
+            .entry(node.clone())
+            .or_default()
+            .insert(key, stored);
+    }
+
+    pub fn set_release_term(&mut self, job: &str, name: &str, term: crate::cluster::members::Term) {
+        let key = (job.to_string(), name.to_string());
+        self.secrets.released_terms.insert(key, term);
+    }
+
+    pub fn worker_highest_term(&self, node: &NodeId) -> Option<crate::cluster::members::Term> {
+        self.core(node).and_then(|c| c.highest_term().cloned())
     }
 }

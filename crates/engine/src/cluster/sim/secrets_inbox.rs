@@ -1,9 +1,13 @@
+use std::path::Path as FsPath;
+use std::sync::Mutex;
+use std::time::Duration;
+
 use serde_json::{json, Value};
 
-use super::secrets::Path;
 use super::world::World;
-use crate::cluster::id::NodeId;
+use crate::cluster::id::{qualify, NodeId, Qualified};
 use crate::cluster::jobs::Job;
+use crate::cluster::logins::{probe, Sources, StatusRunner, TIMEOUT};
 use crate::cluster::members::MemberState;
 use crate::cluster::wire::{Origin, WireError};
 use crate::inbox::{Action, ActionId, AnswerError, Change, Item, Kind, Source, State};
@@ -12,20 +16,30 @@ fn refusal(why: impl Into<String>) -> WireError {
     WireError::new("forbidden", why)
 }
 
+#[derive(Default)]
+struct Recorder {
+    calls: Mutex<Vec<Vec<String>>>,
+}
+
+impl StatusRunner for Recorder {
+    fn run(&self, argv: &[String], _timeout: Duration) -> Option<(i32, String)> {
+        if let Ok(mut calls) = self.calls.lock() {
+            calls.push(argv.to_vec());
+        }
+        Some((1, "Not logged in".to_string()))
+    }
+}
+
 impl World {
     pub(super) fn approval_item(&mut self, node: &NodeId, job: &Job, names: &[String]) -> Item {
         let n = self.secrets.next_id();
         Item {
             id: format!("secret:{}:{n}", job.id),
             kind: Kind::SecretApproval,
-            title: format!(
-                "A job on {} wants {}",
-                self.name_of(&job.spec.node),
-                names.join(", ")
-            ),
-            detail: format!("asked on {}", self.name_of(node)),
+            title: format!("A job on {} wants a secret", self.name_of(&job.spec.node)),
+            detail: names.join(","),
             source: Source {
-                node: Some(job.spec.node.to_string()),
+                node: Some(node.to_string()),
                 session: None,
                 job: Some(job.id.clone()),
             },
@@ -66,12 +80,12 @@ impl World {
         self.mirror_changes(n, &changes);
     }
 
-    pub(super) fn note_mirror(&mut self, at: &NodeId, owner: &NodeId, changes: &[Change]) {
-        let list = self.secrets.mirrors.entry(at.clone()).or_default();
+    fn note_own(&mut self, n: &NodeId, changes: &[Change]) {
+        let list = self.secrets.mirrors.entry(n.clone()).or_default();
         for change in changes {
             match change {
                 Change::Raised(i) | Change::Updated(i) => {
-                    list.insert(i.id.clone(), (owner.clone(), i.state == State::Open));
+                    list.insert(i.id.clone(), i.state == State::Open);
                 }
                 Change::Removed(id) => {
                     list.remove(id);
@@ -81,30 +95,106 @@ impl World {
     }
 
     pub(super) fn mirror_changes(&mut self, n: &NodeId, changes: &[Change]) {
-        self.note_mirror(n, n, changes);
+        self.note_own(n, changes);
         for target in self.mirror_targets(n) {
-            let args = json!({"owner": n, "changes": changes});
-            self.forward_node_op(n, &target, "node.inbox", args);
+            for change in changes {
+                let args = match change {
+                    Change::Raised(i) | Change::Updated(i) => {
+                        json!({"event": "changed", "item": i})
+                    }
+                    Change::Removed(id) => json!({"event": "removed", "id": id}),
+                };
+                self.forward_node_op(n, &target, "node.inbox", args);
+            }
         }
     }
 
-    pub(super) fn mirror_in(&mut self, node: &NodeId, call: u64, args: &Value) {
-        let owner = args
-            .get("owner")
-            .and_then(|o| serde_json::from_value::<NodeId>(o.clone()).ok());
-        let changes = args
-            .get("changes")
-            .and_then(|c| serde_json::from_value::<Vec<Change>>(c.clone()).ok());
-        let text = args.to_string();
-        self.secrets.record(node, Path::Mirror, &text);
-        let result = match (owner, changes) {
-            (Some(owner), Some(changes)) => {
-                self.note_mirror(node, &owner, &changes);
-                Ok(json!({}))
+    pub(super) fn mirror_in(&mut self, node: &NodeId, call: u64, origin: &Origin, args: &Value) {
+        self.scan_mirror(node, args);
+        let owner = &origin.node;
+        let event = args.get("event").and_then(Value::as_str).unwrap_or("");
+        let item_of = |v: &Value| serde_json::from_value::<Item>(v.clone()).ok();
+        let bad = || Err(WireError::new("bad_request", "not an inbox mirror"));
+        let result = if owner == node {
+            Err(refusal("only another node sends its inbox items"))
+        } else {
+            let list = self.secrets.mirrors.entry(node.clone()).or_default();
+            match event {
+                "changed" => match args.get("item").and_then(item_of) {
+                    Some(item) => {
+                        list.insert(qualify(owner, &item.id), item.state == State::Open);
+                        Ok(json!({"ok": true}))
+                    }
+                    None => bad(),
+                },
+                "removed" => match args.get("id").and_then(Value::as_str) {
+                    Some(id) => {
+                        list.remove(&qualify(owner, id));
+                        Ok(json!({"ok": true}))
+                    }
+                    None => bad(),
+                },
+                "sync" => match args.get("items").and_then(Value::as_array) {
+                    Some(items) => {
+                        let prefix = qualify(owner, "");
+                        list.retain(|id, _| !id.starts_with(&prefix));
+                        for item in items.iter().filter_map(item_of) {
+                            list.insert(qualify(owner, &item.id), item.state == State::Open);
+                        }
+                        Ok(json!({"ok": true}))
+                    }
+                    None => bad(),
+                },
+                _ => bad(),
             }
-            _ => Err(WireError::new("bad_request", "not an inbox mirror")),
         };
         self.finish_local(node, call, result);
+    }
+
+    pub(super) fn mirrors_lost(&mut self, n: &NodeId) {
+        self.secrets.mirrors.remove(n);
+        let own: Vec<Change> = self
+            .secrets
+            .books
+            .get(n)
+            .map(|b| b.items().into_iter().map(Change::Updated).collect())
+            .unwrap_or_default();
+        self.note_own(n, &own);
+        let owners: Vec<NodeId> = self
+            .secrets
+            .books
+            .iter()
+            .filter(|(o, b)| *o != n && !b.items().is_empty())
+            .map(|(o, _)| o.clone())
+            .collect();
+        for owner in owners {
+            self.secrets.resync.insert((owner, n.clone()));
+        }
+    }
+
+    pub(super) fn secrets_resync(&mut self, owner: &NodeId) {
+        let pairs: Vec<NodeId> = self
+            .secrets
+            .resync
+            .iter()
+            .filter(|(o, t)| o == owner && self.is_up(t) && self.net.linked(owner, t))
+            .map(|(_, t)| t.clone())
+            .collect();
+        let items = self
+            .secrets
+            .books
+            .get(owner)
+            .map(|b| b.items())
+            .unwrap_or_default();
+        let targets = self.mirror_targets(owner);
+        for target in pairs {
+            self.secrets.resync.remove(&(owner.clone(), target.clone()));
+            if targets.contains(&target) {
+                let args = json!({"event": "sync", "items": items});
+                self.forward_node_op(owner, &target, "node.inbox", args);
+                self.secrets.stats.resynced += 1;
+            }
+        }
     }
 
     pub(super) fn owner_answer(&mut self, node: &NodeId, call: u64, origin: &Origin, args: &Value) {
@@ -114,10 +204,11 @@ impl World {
             _ => ActionId::AllowOnce,
         };
         let now = self.now as i64;
+        let key = qualify(node, id);
         let book = self.secrets.books.entry(node.clone()).or_default();
         match book.answer(id, action, origin.node.as_str(), now) {
             Ok(change) => {
-                *self.secrets.answered.entry(id.to_string()).or_default() += 1;
+                *self.secrets.answered.entry(key).or_default() += 1;
                 self.secrets.stats.answered += 1;
                 self.mirror_changes(node, &[change]);
                 self.finish_local(node, call, Ok(json!({})));
@@ -133,7 +224,7 @@ impl World {
                 }
             }
             Err(AnswerError::NotOpen(_)) if self.secrets.plant.answer_twice => {
-                *self.secrets.answered.entry(id.to_string()).or_default() += 1;
+                *self.secrets.answered.entry(key).or_default() += 1;
                 self.finish_local(node, call, Ok(json!({})));
             }
             Err(_) => {
@@ -143,12 +234,50 @@ impl World {
         }
     }
 
+    pub fn answer_item(&mut self, from: &NodeId, item: &str, allow: bool) {
+        let (owner, plain) = match Qualified::parse(item) {
+            Some(q) => (q.node, q.id),
+            None => (from.clone(), item.to_string()),
+        };
+        let action = if allow { "allow_once" } else { "deny" };
+        let cmd = crate::cluster::core::LocalCmd::Forward {
+            node: owner,
+            op: "inbox.answer".to_string(),
+            args: json!({"id": plain, "action": action}).into(),
+            origin: Origin {
+                node: from.clone(),
+                tier: crate::cluster::wire::OriginTier::App,
+            },
+        };
+        self.local(from, cmd);
+    }
+
     pub fn login_failure(&mut self, node: &NodeId) {
-        if self.secrets.plant.refresh {
-            self.secrets.refreshes.push(node.clone());
-            return;
-        }
         let name = self.name_of(node);
+        let os = if self.is_client(node) {
+            "macos"
+        } else {
+            "linux"
+        };
+        let runner = Recorder::default();
+        let sources = Sources {
+            codex: Some("codex"),
+            agy_installed: true,
+            os,
+            home: FsPath::new("/home/sim"),
+        };
+        let _ = probe(&sources, &runner, &|_| false);
+        if self.secrets.plant.refresh {
+            let argv: Vec<String> = ["claude", "auth", "refresh"]
+                .iter()
+                .map(|s| s.to_string())
+                .collect();
+            let _ = runner.run(&argv, TIMEOUT);
+        }
+        let calls = runner.calls.lock().map(|c| c.clone()).unwrap_or_default();
+        for argv in calls {
+            self.secrets.login_runs.push((node.clone(), argv));
+        }
         let item = Item {
             id: format!("login-needed:{name}:claude"),
             kind: Kind::LoginNeeded,

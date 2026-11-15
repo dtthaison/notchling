@@ -30,6 +30,7 @@ pub(super) enum BrokerEv {
         op: String,
         args: Value,
         origin: Origin,
+        arrived: (u64, u64),
     },
     Answer {
         node: NodeId,
@@ -46,6 +47,7 @@ pub(super) struct Pending {
     pub(super) names: Vec<String>,
     pub(super) values: Vec<(String, String)>,
     pub(super) delivered: Vec<String>,
+    pub(super) consume: bool,
 }
 
 fn refusal(why: impl Into<String>) -> WireError {
@@ -108,6 +110,7 @@ impl World {
             op: op.to_string(),
             args: args.clone(),
             origin: origin.clone(),
+            arrived: (self.now, self.secrets.revoke_seq),
         };
         self.schedule(at, Event::Broker(ev));
         true
@@ -132,13 +135,27 @@ impl World {
                 op,
                 args,
                 origin,
+                arrived,
             } => match op.as_str() {
                 "grant.attach" => self.b_attach(&node, call, &args),
                 "grant.request" => self.b_request(&node, call, &origin, &args),
                 "grant.revoke_job" => self.b_revoke_job(&node, call, &args),
-                "grant.deliver" => self.w_deliver(&node, call, &origin, &args),
+                "grant.deliver" => {
+                    if self.w_deliver(&node, call, (&origin, &args), arrived) {
+                        let at = self.now + 500;
+                        let ev = BrokerEv::Run {
+                            node,
+                            call,
+                            op,
+                            args,
+                            origin,
+                            arrived,
+                        };
+                        self.schedule(at, Event::Broker(ev));
+                    }
+                }
                 "grant.revoke" => self.w_revoke(&node, call, &origin, &args),
-                "node.inbox" => self.mirror_in(&node, call, &args),
+                "node.inbox" => self.mirror_in(&node, call, &origin, &args),
                 _ => self.owner_answer(&node, call, &origin, &args),
             },
             BrokerEv::Answer {
@@ -157,6 +174,7 @@ impl World {
         s.last_tick.remove(n);
         s.alive_since.remove(n);
         s.due.insert(n.clone(), 0);
+        self.mirrors_lost(n);
     }
 
     pub(super) fn finish_local(
@@ -194,7 +212,7 @@ impl World {
             return;
         };
         let names = job.spec.secrets.clone();
-        self.grant_start((node, call), job, member, names, primary);
+        self.grant_start((node, call), (job, member), names, (primary, false));
     }
 
     pub(super) fn b_request(&mut self, node: &NodeId, call: u64, origin: &Origin, args: &Value) {
@@ -223,20 +241,17 @@ impl World {
             return fail(self, refusal("not a member"));
         };
         let primary = state.home == state.vault;
-        self.grant_start((node, call), job.clone(), member.clone(), names, primary);
+        let who = (job.clone(), member.clone());
+        self.grant_start((node, call), who, names, (primary, true));
     }
 
     pub(super) fn grant_start(
         &mut self,
         (node, call): (&NodeId, u64),
-        job: Job,
-        member: Member,
+        (job, member): (Job, Member),
         names: Vec<String>,
-        vault_primary: bool,
+        (vault_primary, consume): (bool, bool),
     ) {
-        self.secrets
-            .job_nodes
-            .insert(job.id.clone(), job.spec.node.clone());
         let Some(names) = canonical(&names) else {
             let err = WireError::new("bad_request", "ask for 1 to 16 secrets");
             return self.finish_local(node, call, Err(err));
@@ -293,9 +308,10 @@ impl World {
             names: names.clone(),
             values: Vec::new(),
             delivered: Vec::new(),
+            consume,
         };
         self.secrets.pending.insert(pid, pending);
-        if asking {
+        if asking && !self.secrets.plant.skip_approval {
             let item = self.approval_item(node, &job, &names);
             let id = item.id.clone();
             self.secrets.approvals.insert(id, pid);
@@ -339,12 +355,29 @@ impl World {
         let Some(state) = self.state_of(&p.node) else {
             return;
         };
+        let asked: Vec<String> = p
+            .names
+            .iter()
+            .filter(|n| self.secrets.vault.get(*n).is_some_and(|(_, asks)| *asks))
+            .cloned()
+            .collect();
+        let current = self.secrets_current_term(&state.term);
+        if state.term < current {
+            self.secrets.stats.stale_releases += 1;
+        }
         self.secrets.releases.push(ReleaseRec {
             node: p.node.clone(),
             term: state.term.clone(),
             home: state.home.clone(),
             vault: state.vault.clone(),
+            job: p.job.id.clone(),
+            asked,
+            at_ms: self.now,
         });
+        for name in &p.names {
+            let key = (p.job.id.clone(), name.clone());
+            self.secrets.released_terms.insert(key, state.term.clone());
+        }
         let mut values = Vec::new();
         for name in &p.names {
             let marker = self
@@ -358,9 +391,9 @@ impl World {
                 values.push((name.clone(), value.expose().to_string()));
             }
             self.secrets.stats.released += 1;
-            if plant.leak && !self.secrets.leaked_once {
+            if let (Some(at), false) = (plant.leak, self.secrets.leaked_once) {
                 self.secrets.leaked_once = true;
-                self.trace_line(&p.node, &format!("released {marker}"));
+                self.plant_leak(&p.node, at, &marker);
             }
         }
         self.secrets.record(
@@ -381,6 +414,9 @@ impl World {
         let i = p.delivered.len();
         if i >= p.values.len() {
             self.secrets.pending.remove(&pid);
+            if p.consume {
+                self.consume_grants(&p.job.spec.node, &p.job.id, &p.names);
+            }
             let reply = Ok(json!({"delivered": p.delivered}));
             return self.finish_local(&p.node, p.call, reply);
         }
@@ -393,7 +429,7 @@ impl World {
         }
         let (name, value) = p.values[i].clone();
         let mut target = p.job.spec.node.clone();
-        if self.secrets.plant.misdeliver {
+        if self.secrets.plant.misroute {
             target = self.other_member(&p.node, &target).unwrap_or(target);
         }
         let args = json!({
@@ -474,16 +510,5 @@ impl World {
             },
         };
         self.local(from, cmd);
-    }
-
-    pub(super) fn b_revoke_job(&mut self, node: &NodeId, call: u64, args: &Value) {
-        let job = args.get("job").and_then(Value::as_str);
-        let target = args
-            .get("node")
-            .and_then(|n| serde_json::from_value::<NodeId>(n.clone()).ok());
-        if let (Some(job), Some(target), false) = (job, target, self.secrets.plant.keep_grants) {
-            self.forward_node_op(node, &target, "grant.revoke", json!({"job": job}));
-        }
-        self.finish_local(node, call, Ok(json!({})));
     }
 }
