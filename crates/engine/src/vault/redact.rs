@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
 pub const MIN_HIDDEN: usize = 4;
+const CLOSED_PREFIX: usize = 8;
 
 #[derive(Clone)]
 pub struct Redactor {
@@ -44,6 +45,41 @@ impl Redactor {
         let (out, _) = self.process(true);
         self.pending.clear();
         out
+    }
+
+    pub fn finish_closed(&mut self) -> Vec<u8> {
+        let split = self.closed_split();
+        let mut out;
+        match split {
+            Some(at) => {
+                let mut tail = self.pending.split_off(at);
+                out = self.process(true).0;
+                match self.pairs.iter().find(|(v, _)| v.starts_with(&tail)) {
+                    Some((_, mask)) => out.extend_from_slice(mask),
+                    None => out.extend_from_slice(&tail),
+                }
+                wipe(&mut tail);
+            }
+            None => out = self.process(true).0,
+        }
+        self.pending.clear();
+        out
+    }
+
+    fn closed_split(&self) -> Option<usize> {
+        let buf = &self.pending;
+        let last = buf.len().checked_sub(CLOSED_PREFIX)?;
+        let at = (0..=last).find(|&start| {
+            let tail = &buf[start..];
+            self.pairs
+                .iter()
+                .any(|(value, _)| value.len() > tail.len() && value.starts_with(tail))
+        })?;
+        let straddles = self
+            .runs(buf)
+            .iter()
+            .any(|run| run[0].start < at && end_of(run) > at);
+        (!straddles).then_some(at)
     }
 
     fn process(&self, at_end: bool) -> (Vec<u8>, usize) {
@@ -146,17 +182,21 @@ impl Drop for Redactor {
     }
 }
 
-fn wipe(bytes: &mut [u8]) {
+pub fn wipe(bytes: &mut [u8]) {
     for byte in bytes.iter_mut() {
         unsafe { std::ptr::write_volatile(byte, 0) };
     }
     std::sync::atomic::compiler_fence(std::sync::atomic::Ordering::SeqCst);
 }
 
+pub fn wipe_string(text: String) {
+    wipe(&mut text.into_bytes());
+}
+
 pub fn wipe_forms(forms: BTreeMap<String, String>) {
     for (key, mask) in forms {
-        wipe(&mut key.into_bytes());
-        wipe(&mut mask.into_bytes());
+        wipe_string(key);
+        wipe_string(mask);
     }
 }
 
@@ -164,11 +204,13 @@ const MIN_LINE: usize = 8;
 
 fn json_inner(text: &str) -> String {
     let quoted = serde_json::to_string(text).unwrap_or_default();
-    quoted
+    let inner = quoted
         .strip_prefix('"')
         .and_then(|rest| rest.strip_suffix('"'))
         .unwrap_or_default()
-        .to_string()
+        .to_string();
+    wipe_string(quoted);
+    inner
 }
 
 fn ascii_escaped(text: &str) -> String {
@@ -186,20 +228,38 @@ fn ascii_escaped(text: &str) -> String {
     out
 }
 
+fn html_escaped(json: &str) -> String {
+    json.replace('<', "\\u003c")
+        .replace('>', "\\u003e")
+        .replace('&', "\\u0026")
+        .replace('\u{2028}', "\\u2028")
+        .replace('\u{2029}', "\\u2029")
+}
+
 fn forms_of(text: &str, into: &mut Vec<String>) {
     into.push(text.to_string());
     let json = json_inner(text);
-    if json.contains('/') {
-        into.push(json.replace('/', "\\/"));
-    }
+    let mut levels = vec![json.clone()];
     if !text.is_ascii() {
-        let escaped = ascii_escaped(&json);
-        if escaped.contains('/') {
-            into.push(escaped.replace('/', "\\/"));
-        }
-        into.push(escaped);
+        levels.push(ascii_escaped(&json));
     }
-    into.push(json);
+    if text.contains(['<', '>', '&', '\u{2028}', '\u{2029}']) {
+        levels.push(html_escaped(&json));
+    }
+    let slashed: Vec<String> = levels
+        .iter()
+        .filter(|level| level.contains('/'))
+        .map(|level| level.replace('/', "\\/"))
+        .collect();
+    levels.extend(slashed);
+    for level in levels {
+        let doubled = json_inner(&level);
+        if doubled != level {
+            into.push(doubled);
+        }
+        into.push(level);
+    }
+    wipe_string(json);
 }
 
 pub fn hide_forms(value: &str, mask: &str) -> BTreeMap<String, String> {
@@ -212,9 +272,13 @@ pub fn hide_forms(value: &str, mask: &str) -> BTreeMap<String, String> {
             }
         }
     }
-    forms
-        .into_iter()
-        .filter(|form| !form.is_empty())
-        .map(|form| (form, mask.to_string()))
-        .collect()
+    let mut hidden = BTreeMap::new();
+    for form in forms {
+        if form.is_empty() || hidden.contains_key(&form) {
+            wipe_string(form);
+        } else {
+            hidden.insert(form, mask.to_string());
+        }
+    }
+    hidden
 }

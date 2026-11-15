@@ -1,13 +1,13 @@
 use notchling_engine::cluster::grant_files::GrantValue;
-use notchling_engine::vault::{hide_forms, wipe_forms, Redactor};
-use std::collections::{BTreeMap, HashMap};
+use notchling_engine::vault::{hide_forms, wipe, wipe_forms, Redactor};
+use std::collections::BTreeMap;
 use std::fmt;
 use std::io::{self, Write};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 struct Masked {
     generation: u64,
-    names: usize,
+    values: Vec<(String, GrantValue)>,
     template: Redactor,
 }
 
@@ -32,32 +32,47 @@ pub fn mask_for(name: &str) -> String {
     format!("[secret {name}]")
 }
 
+fn build(values: &[(String, GrantValue)]) -> Redactor {
+    let mut forms: BTreeMap<String, String> = BTreeMap::new();
+    for (name, value) in values {
+        forms.extend(hide_forms(value.expose(), &mask_for(name)));
+    }
+    let redactor = Redactor::new(&forms);
+    wipe_forms(forms);
+    redactor
+}
+
 impl TailMasks {
     pub fn new() -> TailMasks {
         TailMasks::default()
     }
 
-    pub fn set(&self, job: &str, values: Vec<(String, GrantValue)>) {
+    pub fn add(&self, job: &str, values: Vec<(String, GrantValue)>) {
         if values.is_empty() {
-            self.drop_job(job);
             return;
         }
-        let names = values.len();
-        let mut forms: BTreeMap<String, String> = BTreeMap::new();
-        for (name, value) in &values {
-            forms.extend(hide_forms(value.expose(), &mask_for(name)));
-        }
-        drop(values);
-        let template = Redactor::new(&forms);
-        wipe_forms(forms);
         let mut table = lock(&self.table);
+        let mut all = table
+            .jobs
+            .remove(job)
+            .map(|old| old.values)
+            .unwrap_or_default();
+        for (name, value) in values {
+            let known = all
+                .iter()
+                .any(|(n, v)| n == &name && v.expose() == value.expose());
+            if !known {
+                all.push((name, value));
+            }
+        }
+        let template = build(&all);
         table.next += 1;
         let generation = table.next;
         table.jobs.insert(
             job.to_string(),
             Masked {
                 generation,
-                names,
+                values: all,
                 template,
             },
         );
@@ -88,10 +103,30 @@ impl fmt::Debug for TailMasks {
         let table = lock(&self.table);
         let mut list = f.debug_map();
         for (job, masked) in &table.jobs {
-            list.entry(job, &format_args!("{} values", masked.names));
+            list.entry(job, &format_args!("{} values", masked.values.len()));
         }
         list.finish()
     }
+}
+
+pub fn mask_tail(
+    masks: &TailMasks,
+    job: &str,
+    offset: u64,
+    bytes: &[u8],
+    at_end: bool,
+) -> (Vec<u8>, u64) {
+    let length = bytes.len() as u64;
+    let Some(mut redactor) = masks.for_job(job) else {
+        return (bytes.to_vec(), offset + length);
+    };
+    let mut out = redactor.feed(bytes);
+    if at_end {
+        out.extend(redactor.finish_closed());
+        return (out, offset + length);
+    }
+    let held = redactor.held().len() as u64;
+    (out, offset + length - held)
 }
 
 #[derive(Default)]
@@ -103,7 +138,7 @@ struct Stream {
 impl Stream {
     fn feed(&mut self, masks: &TailMasks, job: &str, bytes: &[u8]) -> Vec<u8> {
         let current = masks.generation(job);
-        if current.is_some() && current != self.generation {
+        if current.is_some() && (self.redactor.is_none() || current != self.generation) {
             if let Some((generation, fresh)) = masks.fresh(job) {
                 let mut input = self
                     .redactor
@@ -114,7 +149,7 @@ impl Stream {
                 self.generation = Some(generation);
                 self.redactor = Some(fresh);
                 let out = self.feed_through(&input);
-                wipe_vec(input);
+                wipe(&mut input);
                 return out;
             }
         }
@@ -131,72 +166,8 @@ impl Stream {
     fn finish(&mut self) -> Vec<u8> {
         self.redactor
             .take()
-            .map(|mut redactor| redactor.finish())
+            .map(|mut redactor| redactor.finish_closed())
             .unwrap_or_default()
-    }
-}
-
-fn wipe_vec(mut bytes: Vec<u8>) {
-    for byte in bytes.iter_mut() {
-        unsafe { std::ptr::write_volatile(byte, 0) };
-    }
-    std::sync::atomic::compiler_fence(std::sync::atomic::Ordering::SeqCst);
-}
-
-type TailKey = (String, String, String);
-
-#[derive(Default)]
-pub struct TailFilters {
-    streams: Mutex<HashMap<TailKey, Arc<Mutex<Stream>>>>,
-}
-
-impl TailFilters {
-    pub fn new() -> TailFilters {
-        TailFilters::default()
-    }
-
-    pub fn filter(
-        &self,
-        masks: &TailMasks,
-        follower: &str,
-        file: &str,
-        job: &str,
-        bytes: &[u8],
-    ) -> Vec<u8> {
-        let key = (follower.to_string(), file.to_string(), job.to_string());
-        let stream = {
-            let mut streams = lock(&self.streams);
-            match streams.get(&key) {
-                Some(stream) => stream.clone(),
-                None if masks.generation(job).is_none() => return bytes.to_vec(),
-                None => streams.entry(key).or_default().clone(),
-            }
-        };
-        let mut stream = lock(&stream);
-        stream.feed(masks, job, bytes)
-    }
-
-    pub fn finish(&self, follower: &str, file: &str, job: &str) -> Vec<u8> {
-        let key = (follower.to_string(), file.to_string(), job.to_string());
-        let stream = lock(&self.streams).remove(&key);
-        match stream {
-            Some(stream) => lock(&stream).finish(),
-            None => Vec::new(),
-        }
-    }
-
-    pub fn drop_job(&self, job: &str) {
-        lock(&self.streams).retain(|(_, _, owner), _| owner != job);
-    }
-
-    pub fn count(&self) -> usize {
-        lock(&self.streams).len()
-    }
-}
-
-impl fmt::Debug for TailFilters {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "TailFilters({} streams)", self.count())
     }
 }
 
@@ -236,6 +207,9 @@ impl<W: Write> MaskedLog<W> {
 
 impl<W: Write> Write for MaskedLog<W> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        if self.closed {
+            return Err(io::Error::new(io::ErrorKind::BrokenPipe, "log is closed"));
+        }
         let out = self.stream.feed(&self.masks, &self.job, buf);
         self.inner.write_all(&out)?;
         Ok(buf.len())

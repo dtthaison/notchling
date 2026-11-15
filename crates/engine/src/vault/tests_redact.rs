@@ -354,3 +354,40 @@ fn a_cloned_redactor_keeps_its_own_state() {
     assert_eq!(String::from_utf8(out).unwrap(), "one [x] two");
     assert_eq!(b.feed(b"plain"), b"plain");
 }
+
+#[test]
+fn hide_forms_cover_html_and_double_escaped_json() {
+    let value = "NL-MARKER-13<&>\"q\"\\z";
+    let forms = super::redact::hide_forms(value, "[m]");
+    assert!(forms.contains_key("NL-MARKER-13\\u003c\\u0026\\u003e\\\"q\\\"\\\\z"));
+    assert!(forms.contains_key("NL-MARKER-13<&>\\\"q\\\"\\\\z"));
+    assert!(forms.contains_key("NL-MARKER-13<&>\\\\\\\"q\\\\\\\"\\\\\\\\z"));
+
+    let lines = super::redact::hide_forms("first line of text\nNL-MARKER-14-<LINE>-\"x\"", "[m]");
+    assert!(lines.contains_key("NL-MARKER-14-\\u003cLINE\\u003e-\\\"x\\\""));
+    assert!(lines.contains_key("NL-MARKER-14-<LINE>-\\\\\\\"x\\\\\\\""));
+}
+
+#[test]
+fn finish_closed_masks_a_held_prefix_of_eight_bytes_or_more() {
+    let h = hide(&[("NL-MARKER-15-VALUE", "[x]")]);
+    let mut r = Redactor::new(&h);
+    let mut out = r.feed(b"end NL-MARKER-1");
+    out.extend(r.finish_closed());
+    assert!(String::from_utf8(out).unwrap() == "end [x]");
+
+    let mut r = Redactor::new(&h);
+    let mut out = r.feed(b"end NL-MAR");
+    out.extend(r.finish_closed());
+    assert!(String::from_utf8(out).unwrap() == "end NL-MAR");
+
+    let mut r = Redactor::new(&h);
+    let mut out = r.feed(b"a NL-MARKER-15-VALUE b NL-MARKER-15-VALUE");
+    out.extend(r.finish_closed());
+    assert!(String::from_utf8(out).unwrap() == "a [x] b [x]");
+
+    let mut r = Redactor::new(&h);
+    let mut out = r.feed(b"plain");
+    out.extend(r.finish());
+    assert!(String::from_utf8(out).unwrap() == "plain");
+}
