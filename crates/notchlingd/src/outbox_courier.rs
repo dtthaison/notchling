@@ -1,6 +1,7 @@
 use crate::acting_events::{attach_why, session_ref, why_of};
 use crate::acting_ops::{keep_screen, shown_box, ActingOps, NoLog};
 use crate::outbox_rows::reply_via;
+use crate::outbox_verify::SafeModes;
 use crate::turn_gate::Guarded;
 use notchling_engine::control::plan_respawn;
 use notchling_engine::outbox::{
@@ -67,6 +68,7 @@ pub(crate) trait JobFiles: Send + Sync {
     fn status(&self, job: &str) -> Option<String>;
     fn restarted(&self, agent: &Agent, now_ms: i64) -> bool;
     fn queue(&self, transcript: &str) -> Option<QueueState>;
+    fn process(&self, job: &str) -> Option<(u32, Option<i64>)>;
 }
 
 pub(crate) struct LiveFiles {
@@ -96,6 +98,14 @@ impl JobFiles for LiveFiles {
     fn queue(&self, transcript: &str) -> Option<QueueState> {
         queue_state(transcript)
     }
+
+    fn process(&self, job: &str) -> Option<(u32, Option<i64>)> {
+        fresh::job_process(&self.roots, job)
+    }
+}
+
+pub(crate) fn live_files(roots: Roots) -> Arc<dyn JobFiles> {
+    Arc::new(LiveFiles { roots })
 }
 
 #[derive(Default)]
@@ -111,6 +121,7 @@ pub struct ClaudeCourier {
     clock: Clock,
     attaches: Mutex<HashMap<String, Box<dyn Pty + Send>>>,
     memos: Mutex<HashMap<String, Memo>>,
+    safe: Arc<SafeModes>,
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -123,14 +134,20 @@ fn calm(files: &dyn JobFiles, fresh: &Agent, now_ms: i64) -> bool {
 }
 
 impl ClaudeCourier {
-    pub fn new(acting: Arc<ActingOps>, roots: Roots, clock: Clock) -> ClaudeCourier {
-        ClaudeCourier::with_files(acting, Arc::new(LiveFiles { roots }), clock)
+    pub fn new(
+        acting: Arc<ActingOps>,
+        roots: Roots,
+        clock: Clock,
+        safe: Arc<SafeModes>,
+    ) -> ClaudeCourier {
+        ClaudeCourier::with_files(acting, live_files(roots), clock, safe)
     }
 
     pub(crate) fn with_files(
         acting: Arc<ActingOps>,
         files: Arc<dyn JobFiles>,
         clock: Clock,
+        safe: Arc<SafeModes>,
     ) -> ClaudeCourier {
         ClaudeCourier {
             acting,
@@ -138,6 +155,7 @@ impl ClaudeCourier {
             clock,
             attaches: Mutex::new(HashMap::new()),
             memos: Mutex::new(HashMap::new()),
+            safe,
         }
     }
 
@@ -307,7 +325,7 @@ impl Courier for ClaudeCourier {
             .and_then(|agent| agent.transcript_path.as_deref())
             .and_then(|path| self.files.queue(path))
             .unwrap_or_default();
-        let safe = queue.unknown > 0;
+        let safe = self.safe.is_safe(&row.session, &queue);
         let reading = (row.kind == Kind::Command || safe).then(|| {
             fresh
                 .as_ref()

@@ -27,7 +27,8 @@ use crate::op_group::OpGroup;
 use crate::op_kinds;
 use crate::outbox_courier::{real_clock, ClaudeCourier};
 use crate::outbox_ops::OutboxOps;
-use crate::outbox_postman::{Couriers, NoVerify, Postmen};
+use crate::outbox_postman::{Couriers, Postmen};
+use crate::outbox_verify::{SafeModes, TranscriptVerifier};
 use crate::pages_ops::{PagesOps, PagesSetup};
 use crate::providers_daemon::ProviderStores;
 use crate::providers_ops::ProvidersOps;
@@ -350,17 +351,19 @@ fn outbox_ops(
 }
 
 fn postmen_for(outbox: &Arc<OutboxOps>, acting: &Arc<ActingOps>, layout: &Layout) -> Postmen {
+    let safe = Arc::new(SafeModes::default());
     let courier = Arc::new(ClaudeCourier::new(
         acting.clone(),
         layout.roots(),
         real_clock(),
+        safe.clone(),
     ));
     let resume = courier.clone();
     outbox.set_resume(Arc::new(move |row| resume.resume(row)));
     let postmen = Postmen::build(
         outbox.clone(),
         Couriers::claude_only(courier),
-        Arc::new(NoVerify),
+        Arc::new(TranscriptVerifier::new(layout.roots(), safe)),
         acting.acting_switch(),
         real_clock(),
     );
@@ -744,6 +747,7 @@ impl Wired {
 
     pub fn load(&self) {
         self.inbox.load();
+        self.outbox.load(crate::acting_ops::now_ms());
     }
 
     pub fn close(&self) {

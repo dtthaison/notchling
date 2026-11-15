@@ -576,3 +576,12 @@ fn postmen_are_capped_and_the_rest_start_as_threads_end() {
     r.postmen.stop();
     assert_eq!(r.postmen.running(), 0);
 }
+
+#[test]
+fn a_verdict_cut_short_by_stop_leaves_the_row_sending() {
+    let r = rig();
+    r.verifier.waits.lock().unwrap().push_back(Verdict::Pending);
+    let row = r.send("job-idle", "hi");
+    r.postmen.postman(IDLE).pass(r.at(T0));
+    assert_eq!(state(&r, &row.id), Some((State::Sending, None)));
+}

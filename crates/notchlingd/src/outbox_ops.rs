@@ -5,13 +5,16 @@ use crate::agy_ops::valid_session;
 use crate::late_emit::Events;
 use crate::op_group::OpGroup;
 use crate::outbox_rows::{keeps_note, position_of, positions, reply_via, wire};
+use crate::outbox_verify::count_row;
 use notchling_engine::contract::Tool as RowTool;
 use notchling_engine::control::slash::opens_menu;
 use notchling_engine::outbox::{
-    Change, InsertError, New, OutboxStore, Row, State, Tool, Via, Why, MAX_TEXT,
+    verdict, Change, InsertError, New, OutboxStore, Row, State, Tool, Verdict, Via, Why, MAX_TEXT,
+    VERIFY_LOOK_MS,
 };
-use notchling_engine::sessions::{Agent, Roots};
+use notchling_engine::sessions::{fresh, Agent, Probes, Roots};
 use notchling_engine::tools::codex::plan::valid_session_id;
+use notchling_engine::transcript::sent::Seen;
 use notchling_events::field::Count;
 use notchling_events::kinds::agents::{OutboxThen, SessionOutbox};
 use notchling_events::spec::Outcome;
@@ -156,6 +159,51 @@ impl OutboxOps {
 
     pub fn roots(&self) -> &Roots {
         &self.roots
+    }
+
+    pub fn load(&self, now_ms: i64) {
+        let Ok(rows) = self.store.sending() else {
+            return;
+        };
+        for row in rows {
+            let seen = match row.tool {
+                Tool::Claude => fresh::job_row(&self.roots, &Probes::from_proc(), &row.session)
+                    .and_then(|agent| {
+                        count_row(agent.transcript_path.as_deref()?, &agent.name, &row)
+                    }),
+                Tool::Codex | Tool::Antigravity => None,
+            };
+            let before = match (row.seen_before, row.queued_before) {
+                (Some(taken), Some(enqueued)) => Some(Seen {
+                    taken: usize::try_from(taken).unwrap_or(0),
+                    enqueued: usize::try_from(enqueued).unwrap_or(0),
+                }),
+                _ => None,
+            };
+            let judged = before.map_or(Verdict::Unsure, |b| verdict(seen, b, VERIFY_LOOK_MS));
+            let (to, why, then) = match judged {
+                Verdict::Sent => {
+                    if let Ok(true) = self.store.delete(&row.id) {
+                        self.publish_removed(&row.id, &row.session, "sent");
+                        self.emit_then(&row, OutboxThen::Sent);
+                    }
+                    continue;
+                }
+                Verdict::InQueue => (State::InQueue, None, OutboxThen::InQueue),
+                Verdict::Pending | Verdict::Unsure => {
+                    (State::Unsure, Some(Why::Restart), OutboxThen::Unsure)
+                }
+            };
+            if let Ok(true) =
+                self.store
+                    .set_state(&row.id, &[State::Sending], to, why, None, now_ms)
+            {
+                if let Ok(Some(changed)) = self.store.get(&row.id) {
+                    self.publish_changed(&changed);
+                }
+                self.emit_then(&row, then);
+            }
+        }
     }
 
     pub fn set_wake(&self, wake: Wake) {

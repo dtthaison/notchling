@@ -122,7 +122,7 @@ fn keeper(dir: &Dir) -> Gatekeeper {
     let clock = Arc::new(AtomicI64::new(0));
     let ticks = clock.clone();
     let now: Clock = Arc::new(move || ticks.load(Ordering::SeqCst));
-    let courier = ClaudeCourier::new(ops, dir.roots(), now);
+    let courier = ClaudeCourier::new(ops, dir.roots(), now, Arc::default());
     let store = OutboxStore::in_memory_for_tests();
     let new = New {
         session: JOB.into(),

@@ -21,6 +21,7 @@ pub trait Verifier: Send + Sync {
     fn wait(&self, row: &Row, before: Seen, entered_ms: i64) -> Verdict;
     fn watch(&self, row: &Row, before: Seen, now_ms: i64) -> QueuedVerdict;
     fn next_look_ms(&self, row: &Row) -> Option<i64>;
+    fn close(&self) {}
 }
 
 pub struct NoVerify;
@@ -209,6 +210,7 @@ impl Postmen {
 
     pub fn stop(&self) {
         self.inner.stopped.store(true, Ordering::SeqCst);
+        self.inner.verifier.close();
         let all: Vec<Running> = {
             let mut registry = lock(&self.inner.registry);
             registry.stopped = true;
@@ -501,7 +503,8 @@ impl Postman {
                     let then = Some(OutboxThen::InQueue);
                     self.moved(&taken, State::Sending, State::InQueue, None, None, then)
                 }
-                Verdict::Pending | Verdict::Unsure => {
+                Verdict::Pending => true,
+                Verdict::Unsure => {
                     let then = Some(OutboxThen::Unsure);
                     let why = Some(Why::NotFound);
                     self.moved(&taken, State::Sending, State::Unsure, why, None, then);

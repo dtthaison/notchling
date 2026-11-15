@@ -68,6 +68,7 @@ pub mod outbox_courier;
 pub mod outbox_ops;
 pub mod outbox_postman;
 mod outbox_rows;
+pub mod outbox_verify;
 pub mod pages_cli;
 pub mod pages_ops;
 pub mod prompts;

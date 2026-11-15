@@ -4,6 +4,7 @@ use crate::acting_ops_tests::{row, sessions, setup_in, FakeRoom, Setup, PROMPT};
 use crate::outbox_courier::{ClaudeCourier, Clock, Courier, JobFiles};
 use crate::outbox_ops::{OutboxOps, SendArgs};
 use crate::outbox_postman::{Couriers, Postmen, Verifier};
+use crate::outbox_verify::SafeModes;
 use notchling_engine::control::{Command, LaunchError, LaunchOutput, Launcher, PtyScript};
 use notchling_engine::outbox::{OutboxStore, QueuedVerdict, Row, Verdict, Via};
 use notchling_engine::reply::keys::ENTER;
@@ -39,6 +40,7 @@ pub(crate) struct FakeFiles {
     pub statuses: Mutex<HashMap<String, String>>,
     pub restarted: AtomicBool,
     pub queue: Mutex<Option<QueueState>>,
+    pub processes: Mutex<HashMap<String, (u32, Option<i64>)>>,
 }
 
 impl JobFiles for FakeFiles {
@@ -58,6 +60,9 @@ impl JobFiles for FakeFiles {
     }
     fn queue(&self, _transcript: &str) -> Option<QueueState> {
         self.queue.lock().unwrap().clone()
+    }
+    fn process(&self, job: &str) -> Option<(u32, Option<i64>)> {
+        self.processes.lock().unwrap().get(job).copied()
     }
 }
 
@@ -151,6 +156,7 @@ pub(crate) struct Rig {
     pub deaf: Arc<AtomicBool>,
     pub human: Arc<Mutex<Vec<(u64, String)>>>,
     pub launched: Arc<Recorder>,
+    pub safe: Arc<SafeModes>,
 }
 
 pub(crate) struct Options {
@@ -240,10 +246,12 @@ pub(crate) fn rig_with(options: Options) -> Rig {
         room.clone(),
         None,
     ));
+    let safe = Arc::new(SafeModes::default());
     let courier = Arc::new(ClaudeCourier::with_files(
         acting.clone(),
         files.clone(),
         now.clone(),
+        safe.clone(),
     ));
     let verifier = Arc::new(Script::default());
     let claude: Arc<dyn Courier> = options.courier.unwrap_or_else(|| courier.clone());
@@ -269,6 +277,7 @@ pub(crate) fn rig_with(options: Options) -> Rig {
         deaf,
         human,
         launched,
+        safe,
     }
 }
 
