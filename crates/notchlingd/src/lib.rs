@@ -117,6 +117,8 @@ mod bridge_models_tests;
 #[cfg(test)]
 mod catalog_ops_tests;
 #[cfg(test)]
+mod catalog_roles_tests;
+#[cfg(test)]
 mod cluster_testkit;
 #[cfg(test)]
 mod codex_children_tests;

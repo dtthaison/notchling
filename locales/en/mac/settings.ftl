@@ -490,3 +490,143 @@ settings-activity-detail-event = Event: { $event }
 
 # Detail line under an Activity row. $outcome is how the event ended.
 settings-activity-detail-outcome = Outcome: { $outcome }
+
+## Skills & Models page
+
+# Tab of the Settings sheet: how skills and model choices work, which skills are installed and which model each job uses.
+settings-page-skills = Skills & Models
+
+# Name of a tool on the Skills & Models page.
+settings-tool-codex = { -brand-codex }
+
+# Name of a tool on the Skills & Models page.
+settings-tool-antigravity = { -brand-antigravity }
+
+# Section title on the Skills & Models page: how skills and model knowledge are kept up to date.
+settings-how-title = How It Works
+
+# First line under How It Works: skills follow the app's version.
+settings-how-skills = Skills are text that ships with { -brand-notchling }, so they update when the app does.
+
+# Second line under How It Works: the commands a skill calls do not change between versions.
+settings-how-commands = The commands a skill runs, such as notchling delegate, stay the same from one version to the next.
+
+# Third line under How It Works: model choices come from the providers' lists.
+settings-how-models = Which model to use for a job comes from the built-in list and each provider's own list of models, so a new model needs no app update.
+
+# Fourth line under How It Works: the user's file beats the built-in list.
+settings-how-override = Your override file wins over the built-in list.
+
+# Section title on the Skills & Models page: the skills Notchling writes for each tool.
+settings-skills-title = Skills
+
+# Shown above the skills while Notchling asks the daemon.
+settings-skills-checking = Checking the skills
+
+# Shown when the daemon is not attached, so the skills cannot be read.
+settings-skills-detached = The daemon isn't attached, so the skills can't be checked.
+
+# State tag of a skill: written, and the same as this version's text.
+settings-skill-installed = Installed
+
+# State tag of a skill: written by an older version, so its text differs.
+settings-skill-out-of-date = Out of date
+
+# State tag of a skill: not written yet.
+settings-skill-not-installed = Not installed
+
+# State tag of a skill: the tool it is for is not on this Mac.
+settings-skill-tool-missing = Tool not installed
+
+# State tag of a skill: a folder of that name is there and Notchling did not write it, so it is left alone.
+settings-skill-left-alone = Left alone
+
+# Button under the skills: writes the missing and out-of-date skills.
+settings-skills-reinstall = Reinstall Skills
+
+# Button text while the skills are being written.
+settings-skills-reinstalling = Reinstalling…
+
+# Line under the skills after a reinstall.
+settings-skills-reinstalled = Skills are up to date.
+
+# Line under the skills when the daemon's install switch is off.
+settings-skills-switch-off = Skills can't be written yet: the install switch is off in the daemon.
+
+# Note under the skills.
+settings-skills-footer = Skills go in each tool's own skills folder. A tool that isn't installed is skipped, and a folder Notchling didn't write is never changed.
+
+# Section title on the Skills & Models page: the model each job uses.
+settings-models-title = Models by Job
+
+# Shown above the jobs while Notchling asks the daemon.
+settings-models-checking = Checking the model lists
+
+# Shown when the daemon is not attached, so the model choices cannot be read.
+settings-models-detached = The daemon isn't attached, so the model choices can't be read.
+
+# Name of a job that a model is chosen for: review after each task.
+settings-role-review = Review
+
+# Name of a job that a model is chosen for: the review of a whole branch.
+settings-role-review-final = Final Review
+
+# Name of a job that a model is chosen for: the second review of code that touches secrets.
+settings-role-review-secrets = Secrets Review
+
+# Name of a job that a model is chosen for: the check of a spec against what was built.
+settings-role-spec-check = Spec Check
+
+# Line under a job that no model is marked for.
+settings-model-no-pick = No model is marked for this job.
+
+# Line for a model choice. $tool is the tool, $effort the effort level to run it at.
+settings-model-effort = { $tool } · effort { $effort }
+
+# Where a model choice came from: the list that ships with the app.
+settings-model-source-built-in = Built-in
+
+# Where a model choice came from: the user's own override file.
+settings-model-source-override = Your override
+
+# Where a model choice came from: the provider's own list replaced the marked model.
+settings-model-source-live = Live list
+
+# Line for a model choice when nothing in the marked model's family is on the provider's list.
+settings-model-none = No model available
+
+# Line under a model choice when the provider's list has not been read yet.
+settings-model-unchecked = Not checked against the provider's list yet.
+
+# Note under the jobs.
+settings-models-footer = The same choice notchling delegate-models --for makes for an agent.
+
+# Section title on the Skills & Models page: the user's own model list.
+settings-override-title = Override
+
+# Line in the Override section when there is no file.
+settings-override-missing = No override file yet. Open Override File makes an empty one.
+
+# Line in the Override section when the file is in use.
+settings-override-found = Your override file is in use.
+
+# Line in the Override section when the file can't be read as an override.
+settings-override-unreadable = The file isn't a JSON object, so it is ignored.
+
+# Button in the Override section: opens the file in the user's editor, making it first if it is missing.
+settings-override-open = Open Override File
+
+# Button in the Override section: reads the model choices again.
+settings-override-reload = Reload
+
+# Error when the empty override file could not be made. $why says what went wrong.
+settings-override-failed = Couldn't make the override file: { $why }
+
+# Note under the Override section.
+settings-override-footer = An entry here replaces the built-in one for the same model. Model choices change on Reload; prices, windows and names apply when the daemon starts.
+
+# Shown on the Skills & Models page when the daemon's answer isn't in a shape this version of the app reads.
+settings-reply-unreadable = The daemon's answer isn't one this app reads.
+
+# Line under Reinstall Skills when one skill could not be written. $skill is the skill's folder name, $why what went wrong.
+settings-skill-error = { $skill }: { $why }

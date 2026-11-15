@@ -6,7 +6,7 @@ use notchling_locale as t;
 
 use super::hook_rows::{HookLine, HookState, HooksShown};
 
-fn tag(text: &str, a: Appearance) -> Div {
+pub(super) fn tag(text: &str, a: Appearance) -> Div {
     div()
         .px(px(8.0))
         .h(px(20.0))

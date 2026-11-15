@@ -9,6 +9,7 @@ use crate::cost::prices::display_name;
 pub mod claude_code;
 pub mod claude_live;
 pub mod live_cache;
+pub mod override_file;
 pub mod roles;
 
 const BUILT_IN: &str = include_str!("../../data/catalog.json");

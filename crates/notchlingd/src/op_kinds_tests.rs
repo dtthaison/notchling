@@ -34,7 +34,8 @@ fn rig(tag: &str) -> (Root, Wired, Ops) {
     (Root(root), wired, ops)
 }
 
-const OWN_QUIET: [&str; 7] = [
+const OWN_QUIET: [&str; 8] = [
+    ops::CATALOG_ROLES,
     ops::GIT_STATUS,
     ops::GIT_DIFF,
     ops::GIT_BRANCH_DIFF_STAT,
