@@ -278,6 +278,10 @@ from the app in this run, or `cluster.join` (below), or a restart of a headless 
 | `cluster.join` | agent | `{token}` | `{state: "pending" \| "joined"}` |
 | `cluster.member.set` | app | `{node, canBeMaster?, client?, reference?, acceptsDelegation?, headless?, desired?}` | the member as stored |
 | `cluster.remove` | app | `{node}` | the member as stored, `state: "removed"` |
+| `cluster.follow` | app | `{id: "<node>/<session>"}` | `{following: true, id, until}` (`until` in ms; see Remote sessions) |
+| `cluster.dispatch` | agent (the app for anything but a delegate; see Dispatch) | `{node, key, tool: "claude" \| "agy" \| "shell", cwd, model?, text?, command?, code?: "folder" \| "send", secrets?}` or `{node, key, delegate: [args]}` | `{job, state, session, qualified, warning}`; a delegate adds `{exit, out, err}` |
+| `shell.stop` | app | `{id: "shell:<job>"}`, or `"<node>/shell:<job>"` for a job on another node | `{stopped: bool}` |
+| `cluster.return` | app | `{job}` | `{job, branch, node}` |
 
 - `joining` (additive) is `null` unless this node's own `cluster.join` is in progress, then `{since, cluster,
   primary, answered}`: `since` is the wall-clock ms when the join began, `cluster` the id from the token,
@@ -357,6 +361,109 @@ from the app in this run, or `cluster.join` (below), or a restart of a headless 
   app-origin call. `decision: "always"` from another node is refused with `bad_request` ("always can't be
   granted from another node; allow once, or answer on this machine"): it would write a permanent rule on a
   machine whose owner isn't at the keyboard.
+- `prompt.resolved.by` (topic `prompts`, app tier) says who or what ended a prompt: `app` (an answer), `stopping`,
+  `acting_off`, `timeout`, `no_app`, `hook_gone` or `closed` on the node that owns it; on a client's republished
+  copy also `offline` (the node went offline or left), `unfollowed` (the app detached, the node stopped being a
+  client or the 60 s follow lapsed) and `unlisted` (the owner's list no longer holds it). The `outcome` of
+  those last three is `pass`.
+
+### Remote sessions
+
+- `sessions.list` on a client node (its own member record has `client: true`) also holds every linked member's
+  rows, after its own. A remote row is the owner's `Agent` row with `id: "<node>/<id>"` (decision 0012), `host`
+  the node id, `node: {id, name, online}` (additive; absent on a local row) and `transcriptPath` the mirror file
+  on this machine once `cluster.follow` has made one, else `null`, never the owner's path. An offline node keeps
+  its rows with `online: false`; a node that left the member list loses them. A Worker's list never carries
+  another node's rows. A remote row must read as `Agent` (unknown fields are dropped), and its node comes only
+  from the link that proved it, never from the row. Claude Code rows come in the default list and in
+  `sessions.changed`; Codex, Antigravity and shell rows only with `tools: "all"`.
+- A shell job on this node is a row with `id: "shell:<job>"`, `tool: "shell"`, `host: "Shell"`,
+  `target: {process: <pid>}`, `command` the command line, `name` its first line cut to 60 characters, `label`
+  `Running`, `Done`, `Stopped` or `Failed` (`group` `working` or `completed`, `detail` the reason when there is
+  one) and `transcriptPath` the job's log (0600 under `<data>/cluster/jobs/`, stdout and stderr together). Rows
+  come with `tools: "all"` only; 50 are kept, finished ones dropped first. A shell row has no reply path.
+- `cluster.follow {id}` (app tier) leases a mirror of one remote session's transcript for 10 minutes (`until` is
+  now plus 600000 ms; at most 16 at once), renewed by calling it again. It is `failed` for a session this client
+  doesn't list or one with no transcript, and `bad_request` for an id that isn't on another node. The mirror
+  file grows by `node.tail` pulls (every 2 s, and when the owner announces a change) and stops at 256 MiB. Chat
+  calls it while a remote session is open, the phone's `chat.get` at most once a minute per session.
+- An op that takes a session id (`session.reply`, `.answer`, `.permission`, `.interrupt`, `.stop`, `codex.send`,
+  `codex.stop`, `agy.send`, `agy.cancel`, `agy.permission`, `agy.conversation`, `shell.stop`) goes to the owner
+  when the id is `<node>/<id>`, as the app tier only, never relayed twice; an unknown or offline node is an
+  error, never a local fallback. The phone's bridge calls the daemon at the app tier, so its replies on a remote
+  row go the same way; with no cluster attached the call is refused "`<node>` is not reachable from the phone
+  yet". The phone's list holds remote Claude Code rows only, with `node: {id, name, online}` (additive).
+
+### Dispatch
+
+`cluster.dispatch {node, key, ...}` starts a job on a node. Only the home dispatches: another member's call is
+forwarded to it, and a non-home asked directly answers `forbidden` "`<name>` is primary now". `key` (at most 128
+bytes) names the request: a second call with the same key answers the first job and starts nothing (the same
+body without `qualified`).
+
+- `tool: "claude"` takes `cwd` (absolute) and `model?` (becomes `--model`); `tool: "agy"` takes `cwd` and `text`
+  (the first message, at most 64 KB); `tool: "shell"` takes `cwd` and `command` (at most 64 KB). A field another
+  tool owns is `bad_request`. `session` in the reply is the session's id on that node and `qualified` its
+  `<node>/<id>`; for a shell job it is `shell:<job>`. `state` is `dispatching`, `running`, `done`, `failed`,
+  `interrupted` or `lost`.
+- `code: "folder"` (default) uses `cwd` as it is on the node. `code: "send"` (app tier only; refused for a
+  delegate, and a dispatch to this machine sends nothing) bundles the repository `cwd` is in, sends the unpushed
+  commits to the node as `node.put` chunks, has it clone `origin` once and add a worktree on branch
+  `notchling/<job>`, and starts the tool there (`cwd` becomes the worktree). Refused before anything is sent: a
+  folder outside a repository, a repository with no commits or no `origin`, a detached HEAD, more than 256 MB of
+  commits. `cluster.return {job}` later fetches the job's commits into `refs/heads/notchling/<node>/<job>` of the
+  local repository, never merging or forcing; it is `bad_request` for a job whose code wasn't sent and `failed`
+  when that branch already holds other commits.
+- `delegate: [args]` runs `notchling delegate` on the node (`delegate.run`, depth 1; `--write`, `--out`,
+  `--prompt-file`, Codex and a timeout over 2100 s are refused; `--folder` is required). It is the only form an
+  agent may send; anything else is `forbidden` "only the Notchling app starts that on another node". The node
+  needs `acceptsDelegation` (`cluster.member.set`), else "`<name>` doesn't take delegated jobs". The call waits
+  for the job (up to 36 minutes) and adds `{exit, out, err}` (each output at most 256 KB) to the body; the job
+  is `done` on exit 0 and `failed` otherwise.
+- `warning` is `null` or the one text `cluster::versions::compat` gives when the node's Notchling or tool
+  version differs from the reference's; it never blocks. Refusals come back as errors with a text for the user:
+  `forbidden` (not the primary, the app-only rule above), `bad_request` (arguments) and `failed` for the rest:
+  "`<name>` is not a member", "was removed", "is not approved yet", "is offline", "hasn't reported its
+  versions", a protocol or schema mismatch, a tool that isn't installed, and Claude Code on Linux ("isn't proven
+  yet") or Windows.
+- Codex is refused ("Codex jobs on another machine come in a later version") in the daemon and again in the
+  core, and so is a non-empty `secrets` list ("Secrets for jobs on another machine come in a later version"):
+  one refusal each to remove in a later version.
+- Allow `cluster.dispatch` and `cluster.return` 300 s, `cluster.follow` and `shell.stop` 60 s (the app's
+  `call_timeout`).
+- A job's end reaches the home as a `jobs` peer event (`job.state {job, state, detail}`: done, failed or
+  interrupted) from its node. `jobs` is not a local API topic. A Worker that restarts forgets its shell jobs and
+  the home keeps them `running`; nothing marks a job `lost` yet.
+
+### Node-only ops
+
+These travel between nodes as calls and have no local API name: `ops::*` has no constant for them and the socket
+answers them as an unknown op. The receiver checks the sender against `engine::cluster::policy::RULES` (the
+sender's role, the origin's tier, the origin node equal to the sender; a pending or removed sender is refused)
+and answers them before `Ops` (`cluster_switches`, `cluster_sessions`, `cluster_dispatch`, `cluster_blobs`,
+`cluster_workspace`). A forwarded session op (above) is the same kind of call with the bare id.
+
+| Op | Sent by (origin tier) | Args | Reply |
+| --- | --- | --- | --- |
+| `node.sessions` | a client or the home (node) | `{}` | the receiver's own `sessions.list {tools: "all"}` rows, never remote ones; a Worker never asks |
+| `node.tail` | a client or the home (app) | `{id, from, gen?}` | `{data (base64), next, size, reset, gen}`; at most 512 KB a call, only a transcript a row of this node names |
+| `node.follow` | a client or the home (app) | `{topic: "prompts"}` | `{following: true, topic, leaseMs: 60000}` |
+| `node.switch.set` | the home (node or app) | `{switch: "acting" \| "bridge" \| "install", on}` | `{switch, on, applied}`; only with no app attached |
+| `node.put` | the home (node), a client or the home (app) | `{transfer, offset, data (base64)}` | `{next}` |
+| `node.put.end` | as `node.put` | `{transfer, sha256}` | `{size}`; the file is renamed in only when the hash matches |
+| `workspace.prepare` | as `node.put` | `{job, facts, transfer}` | `{cwd, head}` |
+| `workspace.return` | as `node.put` | `{job, from, nonce?}` | `{data (base64), next, size, done, nonce}`, plus `sha256` on the last chunk |
+| `shell.run` | the home (node or app) | `{job, cwd, command}` | `{id: "shell:<job>", session, job, pid}`; the same job twice answers the first |
+| `delegate.run` | the home (agent) | `{args, job}` | `{exit, out, err}` |
+| `node.versions` | any member (node) | the sender's versions | `{}` |
+| `node.load` | any member (node) | `{}` | `{cpu, memUsedMb, memTotalMb}` or `null` |
+
+The session ops that are forwarded (`session.new`, `codex.send`, `agy.open`, `agy.send`, `session.stop`,
+`codex.stop`, `agy.cancel`, `shell.stop`) are accepted from the home at node or app origin; `session.reply`,
+`.answer`, `.permission`, `.interrupt`, `.stop`, `codex.send`, `.stop`, `agy.send`, `.cancel`, `.permission`,
+`.conversation`, `prompts.list` and `shell.stop` from a client or the home at app origin. `cluster.dispatch`,
+`cluster.member.set` and `cluster.remove` reach the home from a client at app origin, and `cluster.join.token`
+and a delegate `cluster.dispatch` from any member to the home.
 
 ## `codex_ops.rs`
 
@@ -506,6 +613,8 @@ account), and writes only the daemon's own cache.
 | Op | Tier | Args | Reply |
 | --- | --- | --- | --- |
 | `sessions.list` | agent | `{tools?: "claude" \| "all"}` | a bare list of rows (`Agent`, camelCase; `atPrompt: true` is present only on a Claude Code row whose turn may be over though its group says working or needs input, because background tasks or subagents run or it asked in text, and means the job file alone cannot say a turn is running: the daemon decides from the transcript before it types a reply). No argument, `{}` and `"claude"` give Claude Code's rows exactly as before. `"all"` adds Codex and Antigravity rows after them and puts `tool` (`claude`, `codex`, `antigravity`) on every row; any other `tools` is `bad_request`. `partial: true` beside `ok` still means the first read had not landed |
+
+On a cluster client node the list also holds other nodes' rows (`<node>/<id>`, `host`, `node {id, name, online}`) and, with `tools: "all"`, shell job rows (`shell:<job>`, `tool: "shell"`); their shapes are under "Remote sessions" in `cluster_ops.rs`.
 
 Codex rows are the 30 newest top-level rollouts under `<codex>/sessions` of the last 14 days (every age under a fixture root), without child rollouts (a first `session_meta` with `parent_thread_id` or `thread_source: "subagent"`); ids `codex:<thread>`. Antigravity rows are the summaries copy's top-level conversations of the last 14 days; ids `agy:<conversation>`. Both are cached 2 s, read only and need neither the bridge switch nor an app. `notchling sessions` and the phone's bridge (`Sources::foreign_rows`) ask for them; the app's session source and every other client keep the default. The `sessions` topic's events still carry Claude Code's rows only. The phone keeps `agy` as `Session.tool` on the wire. The phone's Antigravity rows take their working flag and chat read only: from the session open here, one another `agy` holds, or its own log (newest 512 KB, as `agy.conversation`; the phone protocol has no `truncated` field).
 
