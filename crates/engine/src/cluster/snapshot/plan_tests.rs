@@ -390,3 +390,97 @@ fn excluded_paths_are_never_planned() {
         .iter()
         .all(|p| !p.starts_with(rig.data().join("cluster/logins"))));
 }
+
+fn planned_inside(plan: &SetPlan, roots: &[&Path]) -> Vec<PathBuf> {
+    plan.files
+        .iter()
+        .chain(plan.dbs.iter())
+        .chain(plan.tails.iter().map(|(p, _)| p))
+        .filter(|p| roots.iter().any(|r| p.starts_with(r)))
+        .cloned()
+        .collect()
+}
+
+#[cfg(unix)]
+#[test]
+fn a_symlinked_ancestor_of_a_path_not_yet_on_disk_still_counts_as_inside() {
+    let rig = Rig::new("plan-symlink");
+    let real = rig.home.path("real");
+    std::fs::create_dir_all(real.join("repo")).expect("repo");
+    let link = rig.home.path("link");
+    std::os::unix::fs::symlink(&real, &link).expect("symlink");
+    let root = std::fs::canonicalize(real.join("repo")).expect("canonical");
+    let config = link.join("repo/.claude");
+    let transcript = config.join("projects/-p/abc.jsonl");
+    let m = main_session("abc", &config, &transcript);
+    let repos = BTreeMap::from([("abc".to_string(), Some(facts(&root)))]);
+    let plan = rig.plan(&[m], &repos, &BTreeMap::new());
+    let entry = &plan.sessions[0];
+    assert_eq!(entry.repo, None);
+    assert!(matches!(&entry.movable, Movable::No(why) if why.contains("holds files")));
+    assert_eq!(
+        planned_inside(&plan, &[&root, &link.join("repo")]),
+        Vec::<PathBuf>::new()
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_path_that_is_a_symlink_out_of_the_repository_is_still_inside_by_name() {
+    let rig = Rig::new("plan-symlink-out");
+    std::fs::create_dir_all(rig.home.path("repo")).expect("repo");
+    let root = std::fs::canonicalize(rig.home.path("repo")).expect("canonical");
+    let outside = rig.home.write("outside/abc.jsonl", "y");
+    let folder = root.join(".claude/projects/-p");
+    std::fs::create_dir_all(&folder).expect("folder");
+    let transcript = folder.join("abc.jsonl");
+    std::os::unix::fs::symlink(&outside, &transcript).expect("symlink");
+    let m = main_session("abc", &root.join(".claude"), &transcript);
+    let repos = BTreeMap::from([("abc".to_string(), Some(facts(&root)))]);
+    let plan = rig.plan(&[m], &repos, &BTreeMap::new());
+    assert_eq!(plan.sessions[0].repo, None);
+    assert_eq!(planned_inside(&plan, &[&root]), Vec::<PathBuf>::new());
+}
+
+#[test]
+fn a_planned_directory_holding_a_repository_is_left_out() {
+    let rig = Rig::new("plan-pages-repo");
+    let site = rig.data().join("pages/site");
+    std::fs::create_dir_all(site.join(".git")).expect("repo");
+    let root = std::fs::canonicalize(&site).expect("canonical");
+    let first = rig.session("abc", "x");
+    let second = rig.session("two", "y");
+    let repos = BTreeMap::from([
+        ("abc".to_string(), Some(facts(&root))),
+        ("two".to_string(), Some(facts(Path::new("/work/two")))),
+    ]);
+    let plan = rig.plan(&[first, second], &repos, &BTreeMap::new());
+    let entry = plan.sessions.iter().find(|s| s.id == "abc").expect("abc");
+    assert_eq!(entry.repo, None);
+    assert!(matches!(entry.movable, Movable::No(_)));
+    assert!(!plan.files.contains(&rig.data().join("pages")));
+    assert!(plan
+        .files
+        .contains(&rig.home.path("support/AgentConsole/bridge/devices.json")));
+    assert!(plan.tails.iter().any(|(p, _)| p.ends_with("two.jsonl")));
+    let alone = rig.plan(
+        &[rig.session("two", "y")],
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+    );
+    assert!(alone.files.contains(&rig.data().join("pages")));
+}
+
+#[test]
+fn a_linked_worktrees_main_repository_inside_a_planned_directory_is_left_out() {
+    let rig = Rig::new("plan-main-repo");
+    let main_repo = rig.data().join("pages/site");
+    std::fs::create_dir_all(&main_repo).expect("main");
+    let mut linked = facts(Path::new("/work/linked"));
+    linked.main_repo = Some(std::fs::canonicalize(&main_repo).expect("canonical"));
+    let m = rig.session("abc", "x");
+    let repos = BTreeMap::from([("abc".to_string(), Some(linked))]);
+    let plan = rig.plan(&[m], &repos, &BTreeMap::new());
+    assert!(!plan.files.contains(&rig.data().join("pages")));
+    assert_eq!(plan.sessions[0].repo, None);
+}

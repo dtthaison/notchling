@@ -118,15 +118,28 @@ pub fn smallest_acked(targets: &[BTreeMap<PathBuf, u64>]) -> BTreeMap<PathBuf, u
         .collect()
 }
 
+fn resolved(path: &Path) -> Option<PathBuf> {
+    let mut rest: Vec<&std::ffi::OsStr> = Vec::new();
+    let mut at = path;
+    loop {
+        if let Ok(real) = std::fs::canonicalize(at) {
+            return Some(rest.iter().rev().fold(real, |acc, name| acc.join(name)));
+        }
+        rest.push(at.file_name()?);
+        at = at.parent()?;
+    }
+}
+
 fn forms(path: &Path) -> Vec<PathBuf> {
     let mut all = vec![path.to_path_buf()];
-    let real = std::fs::canonicalize(path).ok().or_else(|| {
-        let parent = std::fs::canonicalize(path.parent()?).ok()?;
-        Some(parent.join(path.file_name()?))
-    });
-    if let Some(real) = real.filter(|real| real != path) {
-        all.push(real);
+    all.extend(resolved(path));
+    let is_link = std::fs::symlink_metadata(path).is_ok_and(|meta| meta.file_type().is_symlink());
+    if is_link {
+        if let (Some(parent), Some(name)) = (path.parent().and_then(resolved), path.file_name()) {
+            all.push(parent.join(name));
+        }
     }
+    all.dedup();
     all
 }
 
@@ -137,6 +150,19 @@ fn holds(root: &Path, path: &Path) -> bool {
             .iter()
             .any(|r| each.starts_with(r) || r.starts_with(each))
     })
+}
+
+fn contains(path: &Path, root: &Path) -> bool {
+    let paths = forms(path);
+    forms(root)
+        .iter()
+        .any(|r| paths.iter().any(|each| r.starts_with(each)))
+}
+
+fn roots_of(facts: &RepoFacts) -> Vec<PathBuf> {
+    let mut roots = vec![facts.root.clone()];
+    roots.extend(facts.main_repo.clone());
+    roots
 }
 
 fn bridge_devices(data: &Path) -> PathBuf {
@@ -200,17 +226,24 @@ pub fn plan_set(
         .chain(dbs.iter())
         .map(PathBuf::as_path)
         .collect();
-    let mut dropped: Vec<(usize, PathBuf)> = Vec::new();
+    let mut dropped: Vec<(usize, Vec<PathBuf>)> = Vec::new();
+    let mut repo_roots: Vec<PathBuf> = Vec::new();
     for (at, session) in sessions.iter_mut().enumerate() {
-        let Some(root) = session.repo.as_ref().map(|facts| facts.root.clone()) else {
+        let Some(facts) = session.repo.as_ref() else {
             continue;
         };
-        if !every.iter().any(|path| holds(&root, path)) {
+        let roots = roots_of(facts);
+        repo_roots.extend(roots.iter().cloned());
+        if !roots
+            .iter()
+            .any(|root| every.iter().any(|path| holds(root, path)))
+        {
             continue;
         }
+        let root = facts.root.clone();
         session.movable = Movable::No(format!("{} holds files a set carries", root.display()));
         session.repo = None;
-        dropped.push((at, root));
+        dropped.push((at, roots));
     }
 
     let mut tails: BTreeMap<PathBuf, u64> = BTreeMap::new();
@@ -219,7 +252,7 @@ pub fn plan_set(
         let inside = |path: &PathBuf| {
             dropped
                 .iter()
-                .any(|(who, root)| *who == at && holds(root, path))
+                .any(|(who, roots)| *who == at && roots.iter().any(|root| holds(root, path)))
         };
         for path in set.transcripts.iter().filter(|p| !inside(p)) {
             let from = acked.get(path).copied().unwrap_or(0);
@@ -232,6 +265,7 @@ pub fn plan_set(
         }
     }
     files.extend(shared);
+    files.retain(|path| !repo_roots.iter().any(|root| contains(path, root)));
     SetPlan {
         id: format!("s-{seq}"),
         trigger,
