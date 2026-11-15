@@ -1,4 +1,4 @@
-use super::stand_in::SessionEntry;
+use super::plan::SessionEntry;
 use crate::cluster::id::NodeId;
 use crate::cluster::members::Term;
 use serde::{Deserialize, Serialize};
