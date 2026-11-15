@@ -1,6 +1,7 @@
 use crate::cluster_testkit::{eventually, member, node, online, pair, Dir, Opts};
 use notchling_cluster_net::MemNet;
-use notchling_engine::cluster::wire::{Origin, OriginTier};
+use notchling_engine::cluster::core::PEER_STALE_TERM;
+use notchling_engine::cluster::wire::{Origin, OriginTier, WireError};
 use notchling_engine::cluster::LocalCmd;
 use serde_json::{json, Value};
 use std::sync::atomic::Ordering;
@@ -173,4 +174,16 @@ fn a_worker_cannot_run_ops_on_the_home() {
         "{err:?}"
     );
     assert!(a.calls.calls.lock().unwrap().is_empty());
+}
+
+#[test]
+fn a_relayed_stale_term_reaches_a_local_caller_as_forbidden() {
+    for code in ["stale_term", PEER_STALE_TERM] {
+        let err = super::api_error(WireError::new(code, "{}"));
+        assert_eq!(
+            err.code,
+            notchling_local_api::ErrorCode::Forbidden,
+            "{code}"
+        );
+    }
 }

@@ -29,6 +29,7 @@ pub const DIAL_BACKOFF_MS: (u64, u64) = (1_000, 60_000);
 pub const DEDUPE_MS: u64 = 300_000;
 pub const MAX_TERM_STEP: u64 = 64;
 pub const REASON_MAX: usize = 200;
+pub const PEER_STALE_TERM: &str = "peer_stale_term";
 
 #[derive(Clone, Debug)]
 pub enum Input {
@@ -536,5 +537,7 @@ mod core_tests_jobs;
 mod core_tests_minter;
 #[cfg(test)]
 mod core_tests_refused;
+#[cfg(test)]
+mod core_tests_relay;
 #[cfg(test)]
 mod core_tests_terms;

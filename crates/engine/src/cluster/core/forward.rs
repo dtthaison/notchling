@@ -1,7 +1,10 @@
 use serde_json::{json, Value};
 
 use super::link::clean_reason;
-use super::{Effect, NodeCore, OutCall, Seen, Target, Then, CALL_MS, DEDUPE_MS, WORKSPACE_CALL_MS};
+use super::{
+    Effect, NodeCore, OutCall, Seen, Target, Then, CALL_MS, DEDUPE_MS, PEER_STALE_TERM,
+    WORKSPACE_CALL_MS,
+};
 use crate::cluster::id::NodeId;
 use crate::cluster::members::Term;
 use crate::cluster::policy::{check, SenderFacts};
@@ -449,6 +452,7 @@ impl NodeCore {
         match target {
             Target::Local(local) => out.push(Effect::Answer { local, result }),
             Target::Peer(from, id) => {
+                let result = result.map_err(relayed);
                 let boot = self.boot_ms;
                 self.seen.insert(
                     (from.clone(), id),
@@ -463,4 +467,11 @@ impl NodeCore {
             }
         }
     }
+}
+
+fn relayed(e: WireError) -> WireError {
+    if e.code == "stale_term" {
+        return WireError::new(PEER_STALE_TERM, e.message);
+    }
+    e
 }

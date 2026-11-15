@@ -2,7 +2,7 @@ use crate::acting_ops::Room;
 use crate::cluster_driver::Driver;
 use crate::late_emit::Events as LogEvents;
 use notchling_cluster_net::{Conn, LinkEvents, Pins, Transport};
-use notchling_engine::cluster::core::{LocalCmd, CALL_MS, DELEGATE_CALL_MS};
+use notchling_engine::cluster::core::{LocalCmd, CALL_MS, DELEGATE_CALL_MS, PEER_STALE_TERM};
 use notchling_engine::cluster::failover::Failover;
 use notchling_engine::cluster::wire::{Origin, WireError};
 use notchling_engine::cluster::{Desired, Input, NodeId, Versions};
@@ -151,7 +151,7 @@ pub struct ClusterNode {
 
 pub fn api_error(e: WireError) -> ApiError {
     let code = match e.code.as_str() {
-        "forbidden" | "stale_term" => ErrorCode::Forbidden,
+        "forbidden" | "stale_term" | PEER_STALE_TERM => ErrorCode::Forbidden,
         "bad_args" => ErrorCode::BadRequest,
         _ => ErrorCode::Failed,
     };
