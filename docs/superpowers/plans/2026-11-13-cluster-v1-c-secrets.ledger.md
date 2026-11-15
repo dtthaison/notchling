@@ -45,3 +45,8 @@ grants: Task 1: complete (3993a092, 77308643, fd9fadfa).
 grants: Task 2: complete (a2db6353, 18be24ed, eafda720, fd9fadfa) — the earlier "complete" line names eafda720's subject.
 grants: Task 3: complete (ee0d563a, f5d64b50, 727b1412).
 grants: Lane done: C1–C3. C4 onward waits for B13 (daemon lane). Left for C4/C5: RULES additions and Dispatch calling attachable (G2), node.tail and shell-log wiring through mask_tail/MaskedLog (G3, G16), end_job/forget_job/mark_granted with a persisted "had grants" marker (G15), one shared Arc<GrantStore> (Task 5 note).
+
+grants: Maintainer accepted 2026-11-15: G15 stands as proposed — the masks are kept in memory (end_job keeps them, forget_job drops them when the job record is pruned) and a job known to have had grants with no masks is not served after a restart, until Task 5 persists a "had grants" marker.
+grants: Maintainer accepted 2026-11-15: G18 stands as proposed — escape forms not covered are triple escapes, JS-in-Go and base64 or other encodings of a value; those stay visible in a tail or log.
+grants: Maintainer accepted 2026-11-15: G10 stands as proposed — a Windows Worker gets no grants: put and get refuse on non-unix until a Windows ACL design exists.
+grants: Maintainer accepted 2026-11-15: a Linux Worker needs glibc 2.32 or newer, since G17's repair of a locked job folder calls fchmodat with AT_SYMLINK_NOFOLLOW, which older glibc does not support.

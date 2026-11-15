@@ -99,3 +99,14 @@ machines: Final re-review (agy): Needs fixes — binary check passes on version 
 machines: Ruling R15: the binary step's version fallback applies only with no dist folder or no dist file for a known os and arch; a dist file with an empty machine hash, or a dist folder with the os or arch not yet learned (first refresh, since evaluate's pass 2 doesn't carry abilities), is can't tell. A can't-tell step offers no Fix (cards show one only on a fail), so neither case offers one; a re-check settles the arch and the machine's own hash tool is the Fix's too — costs a machine with no hash tool never passing while a dist file exists, if wrong.
 machines: Fix round 3: 99d7646a (engine machines:: 660 pass; app machines:: 74 pass; clippy -D warnings clean; fmt clean; guard lint 0 new).
 machines: Final re-review (agy, gemini-4-hydrogen high, fix round 3 99d7646a): Approved — both findings fixed, no regressions (file inspection; the coordinator's checks: engine machines:: 660, app machines:: 74, clippy/fmt/guard clean). Lane done; open items for the maintainer in the final report.
+
+daemon: Maintainer accepted 2026-11-15: R7 and R10 stand as proposed — Codex jobs and secrets on a dispatch stay refused until their plans (Codex-in-cluster, plan C).
+daemon: Maintainer accepted 2026-11-15: R14 stands as proposed — a removed Worker keeps its work folder (<data>/cluster/work), since deleting it could lose work not yet returned.
+daemon: Maintainer accepted 2026-11-15: R15 stands as proposed — node.sessions is client-only (a client or the home, origin Node), narrowing plan B Task 4's "any Member" row.
+app: Maintainer accepted 2026-11-15: the B16 sheet gets a hint when the cluster switch is off (wave 2).
+app: Maintainer accepted 2026-11-15: the B16 sheet gets a Join field on the empty sheet (wave 2).
+app: Maintainer accepted 2026-11-15: the B16 sheet hides Copy Join Token while this Mac is not connected to a cluster (wave 2).
+app: Maintainer accepted 2026-11-15: the cluster files get a lint area of their own (wave 2).
+machines: Maintainer accepted 2026-11-15: item b into wave 2 — the binary and service steps are skipped on a Mac that has the app.
+machines: Maintainer accepted 2026-11-15: item c into wave 2 — the Linux service unit gets KillMode=process.
+machines: Maintainer accepted 2026-11-15: item d into wave 2 — the daemon reports "joining" while a join is in progress.

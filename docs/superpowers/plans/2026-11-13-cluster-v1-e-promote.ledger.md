@@ -32,3 +32,6 @@ pure: Task 4 fix round 3 re-review, agy (gemini-4-hydrogen high): Approved. Park
 pure: Task 3: complete (ef98e7bf; review Approved; its two minors folded into 09fe61b0 and cc22e7a7).
 pure: Task 4: complete (1be77dbd, 09fe61b0, cc22e7a7, 092409ee; final review agy and Fable, re-reviews agy Approved). cluster:: 178 tests, the whole engine crate green, clippy, fmt, comments and guard lint (0 new) clean.
 pure: Parked for the maintainer: amend plan E Task 4's table and wording (R7, R8, R11, R13); R12's parser fix (a TaskStop result recorded in finished_agents) in transcript/conversation/parser.rs; the why-notes for fence.rs and outward.rs go with Task 14 (R9); Task 9's hook read: only NotFound is None, read at most MAX_FENCE_BYTES + 1, no links, no FIFO; Task 8's write_fence refuses content over MAX_FENCE_BYTES.
+
+pure: Maintainer accepted 2026-11-15: plan E Task 4's text is amended to match rulings R7, R8, R11 and R13 (fail-safe outward): is_outward's bullet now states the fail-safe rules and cut_steps' bullet the background-work rules (docs/superpowers/plans/2026-11-13-cluster-v1-e-promote.md).
+pure: Maintainer accepted 2026-11-15: R12's lasting fix is scheduled for wave 2 — conversation/parser.rs records a TaskStop (and KillShell) result in finished_agents, so cut_steps no longer lists a stopped shell older than the kept items.

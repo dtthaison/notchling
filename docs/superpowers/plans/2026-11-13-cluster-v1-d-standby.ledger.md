@@ -33,3 +33,9 @@ gitdb: Ruling R19: a session's repository root that holds a plan path (a dotfile
 gitdb: Ruling R20: MAX_FILE counts a tail's bytes (a set sends only what a transcript gained); a tail over it is skipped, and Task 8 must refuse a session whose transcript isn't in the store — costs a session that can't move after a 100 MB turn.
 gitdb: Notes for Task 6: Tail { from: 0 } replaces the whole stored file; a target whose acked length is past the staged from gets a re-sliced, re-hashed tail; staged_path is in engine manifest.
 gitdb: Task 5 fix round 1: M8 uses a symlink_metadata check on the source db instead of SQLITE_OPEN_NOFOLLOW, which refuses any symlinked path component (macOS /var and /tmp); snap_files.rs is split into snap_copy.rs (copies), snap_db.rs (backup) and snap_files.rs (staging).
+
+pure: Maintainer accepted 2026-11-15: D Task 3 (the snapshot planner) is in wave 2; it follows D2, and D4 and C2 are merged now.
+gitdb: Maintainer accepted 2026-11-15: R5 and R17 stand as proposed — an http(s) origin is recorded without userinfo, and a token-in-URL remote then needs the target's own git access (M11); only ssh and scp forms keep a user.
+gitdb: Maintainer accepted 2026-11-15: R15 stands as proposed — a session moves only when its upstream is origin/<branch>; a session that tracks a fork stays on the primary.
+gitdb: Maintainer accepted 2026-11-15: R16 stands as proposed — a repository whose index holds a gitlink never moves ("<root> has submodules"); sessions in repositories with submodules stay on the primary in v1.
+gitdb: Maintainer accepted 2026-11-15: R19 stands as proposed — a session whose repository root holds a plan path (a dotfiles repo at ~) fails every stage closed, so such a session never moves until Task 3/7 leave its repo facts out and mark it No.
