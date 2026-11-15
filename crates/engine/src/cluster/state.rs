@@ -1,10 +1,11 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
 use super::grants::SecretAllow;
 use super::id::{NodeId, Role};
 use super::jobs::{job_id, Job, JobSpec, JobState};
+use super::main_sessions::MainSession;
 use super::members::{Desired, Member, MemberState, Term};
 use super::versions::Versions;
 
@@ -18,6 +19,12 @@ pub struct ClusterState {
     pub members: BTreeMap<NodeId, Member>,
     pub jobs: BTreeMap<String, Job>,
     pub seq: u64,
+    #[serde(default)]
+    pub main: BTreeMap<String, MainSession>,
+    #[serde(default)]
+    pub kept: BTreeSet<String>,
+    #[serde(default)]
+    pub ended: BTreeMap<String, i64>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -82,6 +89,14 @@ pub enum Command {
         session: Option<String>,
         detail: Option<String>,
     },
+    SetMain {
+        session: String,
+        main: bool,
+    },
+    Main {
+        main: BTreeMap<String, MainSession>,
+        ended: BTreeMap<String, i64>,
+    },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -103,6 +118,11 @@ pub enum Change {
         term: Term,
         home: NodeId,
         vault: NodeId,
+    },
+    Main {
+        main: BTreeMap<String, MainSession>,
+        kept: BTreeSet<String>,
+        ended: BTreeMap<String, i64>,
     },
 }
 
@@ -176,6 +196,14 @@ impl ClusterState {
         }
     }
 
+    fn main_change(&self) -> Change {
+        Change::Main {
+            main: self.main.clone(),
+            kept: self.kept.clone(),
+            ended: self.ended.clone(),
+        }
+    }
+
     fn entry(&mut self, now_ms: i64, command: Command) -> JournalEntry {
         self.seq += 1;
         JournalEntry {
@@ -245,6 +273,9 @@ pub fn start(
         members: members.iter().map(|m| (m.id.clone(), m.clone())).collect(),
         jobs: BTreeMap::new(),
         seq: 0,
+        main: BTreeMap::new(),
+        kept: BTreeSet::new(),
+        ended: BTreeMap::new(),
     };
     let mut changes = vec![state.cluster_change()];
     changes.extend(members.into_iter().map(|m| {
@@ -392,6 +423,18 @@ pub fn apply(
             }
             vec![Change::Job(job.clone())]
         }
+        Command::SetMain { session, main } => match set_main(state, session, *main) {
+            Some(change) => vec![change],
+            None => return Ok(Applied::none()),
+        },
+        Command::Main { main, ended } => {
+            if state.main == *main && state.ended == *ended {
+                return Ok(Applied::none());
+            }
+            state.main = main.clone();
+            state.ended = ended.clone();
+            vec![state.main_change()]
+        }
     };
     let entry = state.entry(now_ms, command);
     Ok(Applied {
@@ -464,6 +507,18 @@ fn dispatch(
     };
     state.jobs.insert(id, job.clone());
     Ok(Some(Change::Job(job)))
+}
+
+fn set_main(state: &mut ClusterState, session: &str, main: bool) -> Option<Change> {
+    let changed = if main {
+        state.kept.remove(session)
+    } else {
+        let added = state.kept.insert(session.to_string());
+        let dropped = state.main.remove(session).is_some();
+        state.ended.remove(session);
+        added || dropped
+    };
+    changed.then(|| state.main_change())
 }
 
 fn sync(

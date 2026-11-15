@@ -7,6 +7,7 @@ pub mod grants;
 pub mod id;
 pub mod jobs;
 pub mod join;
+pub mod main_sessions;
 pub mod members;
 pub mod outward;
 pub mod persist;
@@ -46,6 +47,8 @@ mod id_tests;
 mod jobs_tests;
 #[cfg(test)]
 mod join_tests;
+#[cfg(test)]
+mod main_sessions_tests;
 #[cfg(test)]
 mod outward_tests;
 #[cfg(test)]

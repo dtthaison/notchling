@@ -3,10 +3,12 @@ use serde_json::{json, Value};
 
 use super::{Effect, Joining, LocalCmd, NodeCore, Target, Then, CALL_MS, DELEGATE_CALL_MS};
 use crate::cluster::id::NodeId;
+use crate::cluster::main_sessions::reconcile;
 use crate::cluster::members::{Desired, Member, MemberState, Term};
 use crate::cluster::state::Command;
 use crate::cluster::versions::Versions;
 use crate::cluster::wire::{Msg, Origin, OriginTier, WireError};
+use crate::sessions::Agent;
 
 #[derive(Deserialize)]
 struct SetArgs {
@@ -28,6 +30,12 @@ struct SetArgs {
 #[derive(Deserialize)]
 struct RemoveArgs {
     node: NodeId,
+}
+
+#[derive(Deserialize)]
+struct MainArgs {
+    id: String,
+    main: bool,
 }
 
 fn refusal(code: &str, message: impl Into<String>) -> WireError {
@@ -119,6 +127,19 @@ impl NodeCore {
                     });
                     self.relay_to_home(id, "cluster.member.set", args, out);
                 }
+            }
+            LocalCmd::SetMain { session, main } => {
+                if self.is_home() {
+                    let result = self.set_main(session, main, out);
+                    self.finish(target, result, out);
+                } else {
+                    let args = json!({"id": session, "main": main});
+                    self.relay_to_home(id, "cluster.main.set", args, out);
+                }
+            }
+            LocalCmd::MainSeen { agents } => {
+                self.main_seen(&agents, out);
+                self.finish(target, Ok(json!({})), out);
             }
             LocalCmd::SetVersions { versions } => self.set_versions(id, versions, out),
             LocalCmd::Dispatch { key, spec, tier } => {
@@ -299,6 +320,36 @@ impl NodeCore {
             Err(_) => Err(refusal("bad_args", "not a removal")),
         };
         self.finish(target, result, out);
+    }
+
+    pub(super) fn native_main_set(&mut self, target: Target, args: &Value, out: &mut Vec<Effect>) {
+        let result = match serde_json::from_value::<MainArgs>(args.clone()) {
+            Ok(a) => self.set_main(a.id, a.main, out),
+            Err(_) => Err(refusal("bad_args", "not a main-session change")),
+        };
+        self.finish(target, result, out);
+    }
+
+    fn set_main(
+        &mut self,
+        session: String,
+        main: bool,
+        out: &mut Vec<Effect>,
+    ) -> Result<Value, WireError> {
+        self.apply(Command::SetMain { session, main }, out)
+            .map_err(|e| refusal("refused", e.to_string()))?;
+        Ok(json!({}))
+    }
+
+    fn main_seen(&mut self, agents: &[Agent], out: &mut Vec<Effect>) {
+        if !self.is_home() {
+            return;
+        }
+        let Some(state) = &self.state else {
+            return;
+        };
+        let (main, ended) = reconcile(&state.main, &state.ended, agents, &state.kept, self.wall_ms);
+        let _ = self.apply(Command::Main { main, ended }, out);
     }
 
     fn set_member(&mut self, a: SetArgs, out: &mut Vec<Effect>) -> Result<Value, WireError> {

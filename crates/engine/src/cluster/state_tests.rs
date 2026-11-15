@@ -456,3 +456,15 @@ fn state_round_trips_through_json() {
     let back: ClusterState = serde_json::from_str(&text).expect("state");
     assert_eq!(back, state);
 }
+
+#[test]
+fn a_state_saved_before_main_sessions_still_loads() {
+    let state = created();
+    let mut value = serde_json::to_value(&state).expect("json");
+    let fields = value.as_object_mut().expect("object");
+    for key in ["main", "kept", "ended"] {
+        fields.remove(key);
+    }
+    let back: ClusterState = serde_json::from_value(value).expect("state");
+    assert_eq!(back, state);
+}

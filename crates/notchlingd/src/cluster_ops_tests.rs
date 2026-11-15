@@ -239,3 +239,75 @@ fn member_set_and_remove_reach_the_home() {
         member(&home.node.status(), &worker.id()).is_none_or(|m| m["state"] == "removed")
     });
 }
+
+#[test]
+fn main_set_takes_a_session_and_a_flag() {
+    let net = MemNet::new();
+    let n = node(&net, Opts::named("mainargs"));
+    let w = wired(&n, false);
+    let cases = [
+        json!({}),
+        json!({"id": "job-1"}),
+        json!({"main": false}),
+        json!({"id": "job-1", "main": "no"}),
+    ];
+    for args in cases {
+        let err = w
+            .ops
+            .call(&caller(Tier::App), ops::CLUSTER_MAIN_SET, &args)
+            .unwrap_err();
+        assert_eq!(err.code, ErrorCode::BadRequest, "{args}");
+    }
+}
+
+#[test]
+fn main_set_on_the_home_keeps_a_session_here() {
+    let net = MemNet::new();
+    let n = node(&net, Opts::named("mainhome9"));
+    n.node.create("home").unwrap();
+    let w = wired(&n, true);
+    w.ops
+        .call(
+            &caller(Tier::App),
+            ops::CLUSTER_MAIN_SET,
+            &json!({"id": "job-1", "main": false}),
+        )
+        .unwrap();
+    assert_eq!(n.node.status()["kept"], json!(["job-1"]));
+    w.ops
+        .call(
+            &caller(Tier::App),
+            ops::CLUSTER_MAIN_SET,
+            &json!({"id": "job-1", "main": true}),
+        )
+        .unwrap();
+    assert_eq!(n.node.status()["kept"], json!([]));
+}
+
+#[test]
+fn main_set_from_a_client_reaches_the_home() {
+    let net = MemNet::new();
+    let (home, client) = pair(&net, Opts::named("home10"), Opts::named("client10"));
+    home.node
+        .local(notchling_engine::cluster::LocalCmd::SetMember {
+            node: client.id(),
+            can_be_master: None,
+            client: Some(true),
+            reference: None,
+            accepts_delegation: None,
+            headless: None,
+            desired: None,
+        })
+        .unwrap();
+    let w = wired(&client, true);
+    eventually("the client's change reaches the home", || {
+        w.ops
+            .call(
+                &caller(Tier::App),
+                ops::CLUSTER_MAIN_SET,
+                &json!({"id": "job-1", "main": false}),
+            )
+            .is_ok()
+    });
+    assert_eq!(home.node.status()["kept"], json!(["job-1"]));
+}

@@ -125,6 +125,7 @@ pub mod ops {
     pub const CLUSTER_JOIN: &str = "cluster.join";
     pub const CLUSTER_MEMBER_SET: &str = "cluster.member.set";
     pub const CLUSTER_REMOVE: &str = "cluster.remove";
+    pub const CLUSTER_MAIN_SET: &str = "cluster.main.set";
     pub const CLUSTER_FOLLOW: &str = "cluster.follow";
     pub const CLUSTER_DISPATCH: &str = "cluster.dispatch";
     pub const SHELL_STOP: &str = "shell.stop";

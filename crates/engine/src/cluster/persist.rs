@@ -143,6 +143,11 @@ pub fn load(cluster_dir: &Path) -> Result<Option<ClusterState>, String> {
             r.get(0)
         })
         .map_err(|e| e.to_string())?;
+    fn stored<T: serde::de::DeserializeOwned + Default>(
+        value: Option<String>,
+    ) -> Result<T, String> {
+        value.map_or_else(|| Ok(T::default()), |v| read(&v))
+    }
     Ok(Some(ClusterState {
         id: read(&id)?,
         name: read(&name)?,
@@ -152,6 +157,9 @@ pub fn load(cluster_dir: &Path) -> Result<Option<ClusterState>, String> {
         members,
         jobs,
         seq: u64::try_from(seq).map_err(|e| e.to_string())?,
+        main: stored(get("main")?)?,
+        kept: stored(get("kept")?)?,
+        ended: stored(get("ended")?)?,
     }))
 }
 
@@ -205,6 +213,20 @@ fn apply(tx: &rusqlite::Transaction<'_>, change: &Change) -> Result<(), String> 
                 params![j.id, j.key, text(j)?],
             )
             .map_err(es)?;
+        }
+        Change::Main { main, kept, ended } => {
+            for (key, value) in [
+                ("main", text(main)?),
+                ("kept", text(kept)?),
+                ("ended", text(ended)?),
+            ] {
+                tx.execute(
+                    "INSERT INTO state (key, value) VALUES (?1, ?2)
+                     ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                    params![key, value],
+                )
+                .map_err(es)?;
+            }
         }
         Change::Cluster {
             id,

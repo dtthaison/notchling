@@ -5,6 +5,7 @@ use serde_json::json;
 use super::{load, save, wipe, CLUSTER_DB};
 use crate::cluster::id::Tool;
 use crate::cluster::jobs::{job_id, JobSpec, JobState};
+use crate::cluster::main_sessions::MainSession;
 use crate::cluster::members::Term;
 use crate::cluster::state::{apply, start, Applied, ClusterState, Command};
 use crate::cluster::testkit::{id, member, versions};
@@ -54,6 +55,26 @@ fn built() -> (ClusterState, Vec<Applied>) {
             state: JobState::Running,
             session: Some("s".to_string()),
             detail: None,
+        },
+        Command::Main {
+            main: [(
+                "job-1".to_string(),
+                MainSession {
+                    id: "job-1".to_string(),
+                    tool: Tool::Claude,
+                    cwd: "/work".to_string(),
+                    config_dir: None,
+                    transcript: Some("/t.jsonl".to_string()),
+                    respawn: Vec::new(),
+                    since_ms: 2,
+                },
+            )]
+            .into(),
+            ended: [("job-1".to_string(), 3)].into(),
+        },
+        Command::SetMain {
+            session: "job-2".to_string(),
+            main: false,
         },
         Command::Term {
             term: Term {
@@ -232,4 +253,20 @@ fn a_newer_cluster_db_is_not_opened_for_the_inbox() {
         super::open_inbox(&dir, true).err().as_deref(),
         Some("cluster.db is from a newer Notchling")
     );
+}
+
+#[test]
+fn main_sessions_survive_a_reload_and_an_older_db_has_none() {
+    let tmp = TempDir::new("cluster-main");
+    let dir = tmp.path("cluster");
+    let (state, steps) = built();
+    save_all(&dir, &steps[..2]);
+    let older = load(&dir).expect("load").expect("state");
+    assert!(older.main.is_empty() && older.kept.is_empty() && older.ended.is_empty());
+    save_all(&tmp.path("again"), &steps);
+    let loaded = load(&tmp.path("again")).expect("load").expect("state");
+    assert!(loaded.main.contains_key("job-1"));
+    assert!(loaded.kept.contains("job-2"));
+    assert_eq!(loaded.ended["job-1"], 3);
+    assert_eq!(loaded, state);
 }

@@ -4,6 +4,7 @@ use crate::cluster_dispatch::{DispatchCalls, DispatchOps, NodeReporter};
 use crate::cluster_dispatch_delegate::RealDelegate;
 use crate::cluster_forward::{Forward, NodeForward};
 use crate::cluster_join::{JoinAsker, JOIN_WAIT};
+use crate::cluster_main::{MainFollower, EVERY as MAIN_EVERY};
 use crate::cluster_mirror::{FollowOps, Mirror, OnCap, TailSource, MIRROR_CAP, MIRROR_DIR};
 use crate::cluster_node::{
     ClusterLog, ClusterNode, ClusterSetup, Hooks, JoinAsk, LocalCalls, NetSide, Probe, Submit, TICK,
@@ -220,6 +221,7 @@ pub struct ClusterParts {
     mirror: Arc<Mirror>,
     publisher: Arc<Publisher>,
     refresher: Option<Refresher>,
+    main_follower: Option<MainFollower>,
     handler: Arc<LateHandler>,
 }
 
@@ -349,6 +351,7 @@ impl ClusterParts {
         let node = start_node(layout, room.clone(), (local, hooks), versions, log.clone());
         let audit = log.clone();
         let mut refresher = None;
+        let mut main_follower = None;
         if let Ok(node) = &node {
             reporter.attach(node.clone());
             follow_switch(&link, node);
@@ -361,6 +364,11 @@ impl ClusterParts {
                 node.clone(),
                 remote.clone(),
                 Arc::new(move || shown.publish()),
+            ));
+            main_follower = Some(MainFollower::spawn(
+                node.clone(),
+                Arc::new(HandlerRows::new(handler.clone())),
+                MAIN_EVERY,
             ));
         }
         let ops = Arc::new(ClusterOps::new(node.clone(), link, room.clone(), audit));
@@ -379,6 +387,7 @@ impl ClusterParts {
             mirror,
             publisher,
             refresher,
+            main_follower,
             handler,
         }
     }
@@ -405,6 +414,9 @@ impl ClusterParts {
         self.mirror.close();
         if let Some(refresher) = &self.refresher {
             refresher.close();
+        }
+        if let Some(follower) = &self.main_follower {
+            follower.close();
         }
         if let Ok(node) = &self.node {
             node.close();

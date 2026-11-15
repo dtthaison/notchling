@@ -177,6 +177,7 @@ impl NodeCore {
             "cluster.dispatch" => self.native_dispatch(target, &args, &origin, out),
             "cluster.member.set" => self.native_member_set(target, &args, out),
             "cluster.remove" => self.native_remove(target, &args, out),
+            "cluster.main.set" => self.native_main_set(target, &args, out),
             "node.versions" => self.native_versions(target, &args, out),
             _ => {
                 let call = self.next_local;

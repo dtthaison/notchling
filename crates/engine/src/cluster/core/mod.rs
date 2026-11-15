@@ -15,6 +15,7 @@ use super::members::{Desired, Member, MemberState, Term};
 use super::state::{role_of, Applied, Change, ClusterState, Command, CommandError, JournalEntry};
 use super::versions::Versions;
 use super::wire::{Msg, Origin, OriginTier, WireError};
+use crate::sessions::Agent;
 
 pub const PING_MS: u64 = 5_000;
 pub const OFFLINE_MS: u64 = 20_000;
@@ -103,6 +104,13 @@ pub enum LocalCmd {
     JoinWith {
         token: JoinToken,
         me: Member,
+    },
+    SetMain {
+        session: String,
+        main: bool,
+    },
+    MainSeen {
+        agents: Vec<Agent>,
     },
 }
 
@@ -369,6 +377,8 @@ impl NodeCore {
             "me": me,
             "members": members,
             "jobs": jobs,
+            "main": state.main.keys().collect::<Vec<_>>(),
+            "kept": state.kept,
         })
     }
 
@@ -511,5 +521,7 @@ mod core_tests_dispatch;
 mod core_tests_headless;
 #[cfg(test)]
 mod core_tests_jobs;
+#[cfg(test)]
+mod core_tests_main;
 #[cfg(test)]
 mod core_tests_terms;

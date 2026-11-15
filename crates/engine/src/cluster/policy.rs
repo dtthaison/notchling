@@ -132,6 +132,7 @@ pub const RULES: &[Rule] = &[
     client_home("cluster.dispatch"),
     client_home("cluster.member.set"),
     client_home("cluster.remove"),
+    client_home("cluster.main.set"),
     rule("node.sessions", CLIENT, OriginTier::Node, None, false),
     rule("node.versions", MEMBER, OriginTier::Node, None, false),
     rule("node.load", MEMBER, OriginTier::Node, None, false),
