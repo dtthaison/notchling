@@ -347,8 +347,12 @@ pub fn apply(
             vec![Change::Member(m.clone())]
         }
         Command::SetAllow { node, allow } => {
+            let next = SecretAllow::new(allow.names.iter().cloned(), allow.any);
+            if next.check().is_err() {
+                return Err(CommandError::BadTransition);
+            }
             let m = active_mut(state, node)?;
-            m.secrets = SecretAllow::new(allow.names.iter().cloned(), allow.any);
+            m.secrets = next;
             vec![Change::Member(m.clone())]
         }
         Command::Versions { node, versions } => {
@@ -427,6 +431,7 @@ fn propose(
     member.reference = false;
     member.accepts_delegation = false;
     member.desired = Desired::default();
+    member.secrets = SecretAllow::default();
     member.joined_ms = now_ms;
     state.members.insert(member.id.clone(), member.clone());
     Ok(vec![Change::Member(member)])

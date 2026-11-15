@@ -4,13 +4,30 @@ use serde::{Deserialize, Serialize};
 
 use super::jobs::{Job, JobSpec, JobState};
 use super::members::{Member, MemberState};
+use crate::vault::entry::valid_name;
 
 pub const GRANT_TTL_MS: i64 = 12 * 3_600_000;
+pub const MAX_ALLOWED_NAMES: usize = 256;
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
+#[serde(from = "RawAllow")]
 pub struct SecretAllow {
     pub names: BTreeSet<String>,
     pub any: bool,
+}
+
+#[derive(Deserialize)]
+struct RawAllow {
+    #[serde(default)]
+    names: BTreeSet<String>,
+    #[serde(default)]
+    any: bool,
+}
+
+impl From<RawAllow> for SecretAllow {
+    fn from(raw: RawAllow) -> SecretAllow {
+        SecretAllow::new(raw.names, raw.any)
+    }
 }
 
 impl SecretAllow {
@@ -18,6 +35,16 @@ impl SecretAllow {
         SecretAllow {
             names: names.into_iter().map(|n| n.to_lowercase()).collect(),
             any,
+        }
+    }
+
+    pub fn check(&self) -> Result<(), String> {
+        if self.names.len() > MAX_ALLOWED_NAMES {
+            return Err(format!("at most {MAX_ALLOWED_NAMES} names"));
+        }
+        match self.names.iter().find(|n| !valid_name(n)) {
+            Some(name) => Err(format!("{} isn't a valid secret name", shown(name))),
+            None => Ok(()),
         }
     }
 
@@ -51,6 +78,9 @@ pub fn decide(a: &GrantAsk) -> GrantDecision {
     if a.node.state != MemberState::Active {
         return GrantDecision::Refuse(format!("{} isn't an active member", a.node.name));
     }
+    if !valid_name(a.name) {
+        return GrantDecision::Refuse(format!("{} isn't a valid secret name", shown(a.name)));
+    }
     if !a.node.secrets.allows(a.name) {
         return GrantDecision::Refuse(format!("{} isn't allowed on {}", a.name, a.node.name));
     }
@@ -82,4 +112,8 @@ pub fn attachable(spec: &JobSpec, allow: &SecretAllow) -> Result<(), String> {
         Some(name) => Err(format!("{name} isn't allowed on that machine")),
         None => Ok(()),
     }
+}
+
+fn shown(name: &str) -> String {
+    name.chars().take(64).collect()
 }
