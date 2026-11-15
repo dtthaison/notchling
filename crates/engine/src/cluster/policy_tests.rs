@@ -70,7 +70,7 @@ fn non_client_claiming_app_is_refused() {
         Some(Denied::TierTooHigh)
     );
     assert_eq!(
-        check("node.sessions", &worker, &origin("w1", OriginTier::Agent)).err(),
+        check("node.versions", &worker, &origin("w1", OriginTier::Agent)).err(),
         Some(Denied::TierTooHigh)
     );
 }
@@ -231,4 +231,22 @@ fn worker_may_not_send_code_to_another_node() {
             "{op}"
         );
     }
+}
+
+#[test]
+fn node_sessions_is_for_clients_and_the_home() {
+    let worker = facts("w1", Role::Worker, false, MemberState::Active);
+    let standby = facts("m2", Role::Standby, false, MemberState::Active);
+    let client = facts("m1", Role::Standby, true, MemberState::Active);
+    let home = facts("m5", Role::Home, false, MemberState::Active);
+    assert_eq!(
+        check("node.sessions", &worker, &origin("w1", OriginTier::Node)).err(),
+        Some(Denied::NotAllowed)
+    );
+    assert_eq!(
+        check("node.sessions", &standby, &origin("m2", OriginTier::Node)).err(),
+        Some(Denied::NotAllowed)
+    );
+    assert!(check("node.sessions", &client, &origin("m1", OriginTier::Node)).is_ok());
+    assert!(check("node.sessions", &home, &origin("m5", OriginTier::Node)).is_ok());
 }

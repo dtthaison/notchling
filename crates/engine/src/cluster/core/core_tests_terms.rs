@@ -404,3 +404,26 @@ fn workspace_calls_wait_longer_than_plain_calls() {
     }
     assert_eq!(timeouts(&hub, start), 1);
 }
+
+#[test]
+fn a_workers_node_sessions_call_is_refused() {
+    let (mut hub, m5, w1) = pair();
+    let effects = hub.run(
+        &m5,
+        Input::Msg {
+            from: w1.clone(),
+            msg: Msg::Call {
+                id: 11,
+                op: "node.sessions".to_string(),
+                args: json!({}),
+                origin: Origin {
+                    node: w1.clone(),
+                    tier: OriginTier::Node,
+                },
+                term: hub.core(&m5).highest_term().cloned().expect("term"),
+            },
+        },
+    );
+    assert!(effects.iter().any(|e| matches!(e, Effect::Send { msg: Msg::Reply { err: Some(e), .. }, .. } if e.code == "forbidden")));
+    assert!(run_locals(&effects).is_empty());
+}
