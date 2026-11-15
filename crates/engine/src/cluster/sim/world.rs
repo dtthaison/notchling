@@ -5,6 +5,7 @@ use serde_json::Value;
 use super::host::SimHost;
 use super::invariants::Violation;
 use super::net::SimNet;
+use super::snaps::Snaps;
 use super::Rng;
 use crate::cluster::core::{Input, LocalCmd, NodeCore};
 use crate::cluster::id::NodeId;
@@ -40,6 +41,15 @@ pub(super) enum Event {
         node: NodeId,
         call: u64,
         result: Result<Value, WireError>,
+    },
+    Observe {
+        node: NodeId,
+        gen: u64,
+    },
+    SnapStep {
+        home: NodeId,
+        target: NodeId,
+        token: u64,
     },
 }
 
@@ -79,6 +89,7 @@ pub struct World {
     pub(super) first_home: Option<NodeId>,
     pub(super) skip_term_check: bool,
     pub(super) step_sends: Vec<((u64, u64), NodeId)>,
+    pub(super) snaps: Snaps,
 }
 
 impl World {
@@ -100,6 +111,7 @@ impl World {
             first_home: None,
             skip_term_check: false,
             step_sends: Vec::new(),
+            snaps: Snaps::default(),
         }
     }
 
@@ -262,6 +274,9 @@ impl World {
                 gen,
             },
         );
+        if self.snaps.on {
+            self.schedule_observe(n);
+        }
     }
 
     pub(super) fn schedule(&mut self, at: u64, event: Event) -> (u64, u64) {
@@ -371,6 +386,7 @@ impl World {
         node.tick_gen += 1;
         node.pins.clear();
         node.join_open = false;
+        self.snaps.node_crashed(n);
         for p in peers {
             self.net.disconnect(n, &p);
             let at = self.now + 1;
@@ -433,6 +449,9 @@ impl World {
                 gen,
             },
         );
+        if self.snaps.on {
+            self.schedule_observe(n);
+        }
         self.trace_line(n, "resume");
     }
 

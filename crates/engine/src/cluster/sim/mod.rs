@@ -3,12 +3,16 @@ mod invariants;
 mod net;
 mod run;
 mod scenario;
+mod snap_scenario;
+mod snaps;
 mod world;
 
 pub use host::SimHost;
 pub use invariants::{check, Violation};
 pub use net::SimNet;
 pub use scenario::{run_seed, run_seed_with, run_world, stale_call_scenario, Failure, Plant};
+pub use snap_scenario::{run_snap_seed, run_snap_world, snap_cast, SnapCast};
+pub use snaps::SnapPlant;
 pub use world::World;
 
 #[derive(Clone, Debug)]

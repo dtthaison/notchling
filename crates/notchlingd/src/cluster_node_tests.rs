@@ -1,9 +1,13 @@
+use crate::cluster_node::Hooks;
 use crate::cluster_testkit::{eventually, member, node, online, pair, Dir, Opts};
 use notchling_cluster_net::MemNet;
+use notchling_engine::cluster::core::SnapAsk;
+use notchling_engine::cluster::snapshot::{Observed, Trigger};
 use notchling_engine::cluster::wire::{Origin, OriginTier};
 use notchling_engine::cluster::LocalCmd;
 use serde_json::{json, Value};
 use std::sync::atomic::Ordering;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 #[test]
@@ -173,4 +177,75 @@ fn a_worker_cannot_run_ops_on_the_home() {
         "{err:?}"
     );
     assert!(a.calls.calls.lock().unwrap().is_empty());
+}
+
+#[derive(Default)]
+struct Asks(Mutex<Vec<SnapAsk>>);
+
+impl Hooks for Asks {
+    fn snapshot(&self, ask: SnapAsk) {
+        self.0.lock().unwrap().push(ask);
+    }
+}
+
+fn can_be_master(a: &crate::cluster_testkit::TestNode, b: &crate::cluster_testkit::TestNode) {
+    a.node
+        .local(LocalCmd::SetMember {
+            node: b.id(),
+            can_be_master: Some(true),
+            client: None,
+            reference: None,
+            accepts_delegation: None,
+            headless: None,
+            desired: None,
+        })
+        .unwrap();
+}
+
+#[test]
+fn a_snapshot_effect_reaches_the_hook_without_blocking_the_driver() {
+    let net = MemNet::new();
+    let asks = Arc::new(Asks::default());
+    let mut home = Opts::named("home");
+    home.hooks = Some(asks.clone());
+    let (a, b) = pair(&net, home, Opts::named("standby"));
+    can_be_master(&a, &b);
+    a.node
+        .local(LocalCmd::Snapshot {
+            trigger: Trigger::Ready(b.id()),
+        })
+        .unwrap();
+    eventually("the hook was asked", || !asks.0.lock().unwrap().is_empty());
+    let ask = asks.0.lock().unwrap()[0].clone();
+    assert_eq!(ask.trigger, Trigger::Ready(b.id()));
+    assert_eq!(ask.targets, vec![b.id()]);
+    assert_eq!(ask.home, a.id());
+    assert!(
+        a.node.status()["me"] == json!(a.id()),
+        "the driver still answers"
+    );
+}
+
+#[test]
+fn observed_input_reaches_the_core_and_asks_on_the_timer() {
+    let net = MemNet::new();
+    let asks = Arc::new(Asks::default());
+    let mut home = Opts::named("home");
+    home.hooks = Some(asks.clone());
+    let (a, b) = pair(&net, home, Opts::named("standby"));
+    can_be_master(&a, &b);
+    a.node.observe(Observed {
+        now_ms: 5_000_000,
+        ..Observed::default()
+    });
+    eventually("a timer set was asked", || {
+        !asks.0.lock().unwrap().is_empty()
+    });
+    assert_eq!(asks.0.lock().unwrap()[0].trigger, Trigger::Timer);
+    b.node.observe(Observed {
+        now_ms: 9_000_000,
+        ..Observed::default()
+    });
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(asks.0.lock().unwrap().len(), 1, "a standby never asks");
 }

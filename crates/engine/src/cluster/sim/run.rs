@@ -64,6 +64,12 @@ impl World {
                 self.step_linked(&a, &b);
                 self.step_linked(&b, &a);
             }
+            Event::Observe { node, gen } => self.observe(&node, gen),
+            Event::SnapStep {
+                home,
+                target,
+                token,
+            } => self.snap_step(&home, &target, token),
             other => self.hand_event(other),
         }
     }
@@ -166,6 +172,7 @@ impl World {
                 }
                 Effect::Persist { .. } => persisted = true,
                 Effect::Wipe => wiped = true,
+                Effect::Snapshot { plan } => self.snap_stage(n, plan),
                 Effect::Publish { .. } | Effect::SteppedDown { .. } => {}
                 Effect::RunLocal {
                     call,
@@ -228,7 +235,7 @@ impl World {
         );
     }
 
-    fn send(&mut self, from: &NodeId, to: &NodeId, msg: Msg) {
+    pub(super) fn send(&mut self, from: &NodeId, to: &NodeId, msg: Msg) {
         if let Msg::Call { op, args, .. } = &msg {
             if START_OPS.contains(&op.as_str()) && self.violation.is_none() {
                 let home_sees_active = self
@@ -320,6 +327,7 @@ fn summary(effect: &Effect) -> String {
         Effect::JoinRequest { node, .. } => format!("join_request {}", &node.as_str()[..4]),
         Effect::SteppedDown { term, .. } => format!("stepped_down {term}"),
         Effect::Wipe => "wipe".to_string(),
+        Effect::Snapshot { plan } => format!("snapshot s-{} {:?}", plan.seq, plan.trigger),
     }
 }
 

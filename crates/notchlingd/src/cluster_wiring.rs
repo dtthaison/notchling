@@ -21,12 +21,15 @@ use crate::inbox_ops::InboxOps;
 use crate::late_emit::Events;
 use crate::layout::Layout;
 use crate::shell_jobs::ShellJobs;
+use crate::snap_observe::{SnapObserver, EVERY as OBSERVE_EVERY};
 use crate::snap_recv::{self, SnapCalls};
+use crate::snap_run::{Context as SnapContext, SnapRunner, RETRY as STAGE_RETRY};
 use crate::snap_send::SnapSender;
 use crate::switches::SwitchFlag;
 use crate::versions_ops::VersionsOps;
 use notchling_cluster_net::{load_or_make, Pins, TcpTls, PORT};
 use notchling_engine::bridge::net::bridge::host_name;
+use notchling_engine::cluster::core::SnapAsk;
 use notchling_engine::cluster::wire::{Origin, OriginTier};
 use notchling_engine::cluster::{Desired, NodeId};
 use notchling_engine::control::{Launcher, RealLauncher};
@@ -138,6 +141,7 @@ pub struct ClusterHooks {
     pub remote: Arc<RemoteSessions>,
     pub mirror: Arc<Mirror>,
     pub inbox: Arc<InboxOps>,
+    pub snaps: Arc<SnapRunner>,
 }
 
 impl Hooks for ClusterHooks {
@@ -163,6 +167,10 @@ impl Hooks for ClusterHooks {
     fn peer_sessions(&self, from: &NodeId) {
         self.remote.mark_dirty(from);
         self.mirror.nudge();
+    }
+
+    fn snapshot(&self, ask: SnapAsk) {
+        self.snaps.submit(ask);
     }
 }
 
@@ -226,6 +234,8 @@ pub struct ClusterParts {
     publisher: Arc<Publisher>,
     refresher: Option<Refresher>,
     main_follower: Option<MainFollower>,
+    snap_run: Arc<SnapRunner>,
+    snap_observer: Option<SnapObserver>,
     handler: Arc<LateHandler>,
 }
 
@@ -327,6 +337,7 @@ impl ClusterParts {
         ));
         let launcher: Arc<dyn Launcher> =
             Arc::new(RealLauncher::with_claude(PathBuf::from("claude")));
+        let git: Arc<dyn Launcher> = launcher.clone();
         let blobs = Blobs::new(layout.cluster_dir());
         let workspace = Workspace::new(layout.cluster_dir(), launcher.clone(), blobs.clone());
         let snap = snap_recv::build(
@@ -335,6 +346,15 @@ impl ClusterParts {
             holder.clone(),
             Arc::new(snap_recv::no_member_is_ready),
         );
+        let snap_run = Arc::new(SnapRunner::spawn(
+            snap.sender.clone(),
+            SnapContext {
+                launcher: git,
+                home: layout.home(),
+                data: layout.data_dir.clone(),
+            },
+            STAGE_RETRY,
+        ));
         let sender = Sender::new(
             layout.cluster_dir(),
             launcher,
@@ -359,11 +379,13 @@ impl ClusterParts {
             remote: remote.clone(),
             mirror: mirror.clone(),
             inbox,
+            snaps: snap_run.clone(),
         });
         let node = start_node(layout, room.clone(), (local, hooks), versions, log.clone());
         let audit = log.clone();
         let mut refresher = None;
         let mut main_follower = None;
+        let mut snap_observer = None;
         if let Ok(node) = &node {
             reporter.attach(node.clone());
             follow_switch(&link, node);
@@ -381,6 +403,12 @@ impl ClusterParts {
                 node.clone(),
                 Arc::new(HandlerRows::new(handler.clone())),
                 MAIN_EVERY,
+            ));
+            snap_observer = Some(SnapObserver::spawn(
+                node.clone(),
+                Arc::new(HandlerRows::new(handler.clone())),
+                snap.sender.clone(),
+                OBSERVE_EVERY,
             ));
         }
         let ops = Arc::new(ClusterOps::new(node.clone(), link, room.clone(), audit));
@@ -401,6 +429,8 @@ impl ClusterParts {
             publisher,
             refresher,
             main_follower,
+            snap_run,
+            snap_observer,
             handler,
         }
     }
@@ -431,6 +461,10 @@ impl ClusterParts {
         if let Some(follower) = &self.main_follower {
             follower.close();
         }
+        if let Some(observer) = &self.snap_observer {
+            observer.close();
+        }
+        self.snap_run.close();
         if let Ok(node) = &self.node {
             node.close();
         }

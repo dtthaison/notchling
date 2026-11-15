@@ -143,6 +143,7 @@ impl NodeCore {
                 self.main_seen(&agents, &codex_exec, out);
                 self.finish(target, Ok(json!({})), out);
             }
+            LocalCmd::Snapshot { trigger } => self.snap_now(target, trigger, out),
             LocalCmd::SetVersions { versions } => self.set_versions(id, versions, out),
             LocalCmd::Dispatch { key, spec, tier } => {
                 if self.is_home() {

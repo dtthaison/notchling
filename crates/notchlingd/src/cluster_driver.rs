@@ -541,6 +541,7 @@ impl Driver {
                 Outcome::Ok,
             ),
             Effect::Wipe => self.wipe(),
+            Effect::Snapshot { plan } => self.hooks.snapshot(plan),
         }
     }
 

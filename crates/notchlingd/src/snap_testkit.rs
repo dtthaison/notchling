@@ -267,6 +267,22 @@ impl Fixture {
         }
     }
 
+    pub(crate) fn rebuild_sender(&self) -> SnapSender {
+        let facts_net = self.net.clone();
+        let ready_net = self.net.clone();
+        let me = self.primary.clone();
+        SnapSender::new(SenderParts {
+            peers: Arc::new(NetPeers {
+                from: self.primary.clone(),
+                net: self.net.clone(),
+            }),
+            facts: Arc::new(move || facts_net.facts_of(&me)),
+            ready: Arc::new(move |id| lock(&ready_net.ready).contains(id)),
+            book: self.book.clone(),
+            retry: Duration::ZERO,
+        })
+    }
+
     pub(crate) fn make_ready(&self, ids: &[NodeId]) {
         lock(&self.net.ready).extend(ids.iter().cloned());
     }

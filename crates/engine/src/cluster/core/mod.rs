@@ -3,6 +3,7 @@ mod dispatch;
 mod forward;
 mod join;
 mod link;
+mod snap;
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -12,10 +13,13 @@ use super::id::{NodeId, Tool};
 use super::jobs::JobSpec;
 use super::join::{JoinToken, Tokens};
 use super::members::{Desired, Member, MemberState, Term};
+use super::snapshot::{Observed, Trigger};
 use super::state::{role_of, Applied, Change, ClusterState, Command, CommandError, JournalEntry};
 use super::versions::Versions;
 use super::wire::{Msg, Origin, OriginTier, WireError};
 use crate::sessions::Agent;
+
+pub use snap::SnapAsk;
 
 pub const PING_MS: u64 = 5_000;
 pub const OFFLINE_MS: u64 = 20_000;
@@ -50,6 +54,9 @@ pub enum Input {
     LocalDone {
         call: u64,
         result: Result<Value, WireError>,
+    },
+    Observed {
+        observed: Observed,
     },
 }
 
@@ -113,6 +120,9 @@ pub enum LocalCmd {
         agents: Vec<Agent>,
         codex_exec: BTreeSet<String>,
     },
+    Snapshot {
+        trigger: Trigger,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -169,6 +179,9 @@ pub enum Effect {
         home: NodeId,
     },
     Wipe,
+    Snapshot {
+        plan: SnapAsk,
+    },
 }
 
 #[derive(Clone, Debug, Default)]
@@ -245,6 +258,7 @@ pub struct NodeCore {
     last_pins: Option<(Vec<String>, bool)>,
     changed: bool,
     aliases: BTreeMap<String, String>,
+    snap: snap::SnapCore,
     #[cfg(test)]
     pub(crate) skip_term_check: bool,
 }
@@ -276,6 +290,7 @@ impl NodeCore {
             last_pins: None,
             changed: false,
             aliases: BTreeMap::new(),
+            snap: snap::SnapCore::default(),
             #[cfg(test)]
             skip_term_check: false,
         }
@@ -398,6 +413,7 @@ impl NodeCore {
             Input::Msg { from, msg } => self.on_msg(from, msg, &mut out),
             Input::Local { id, cmd } => self.on_local(id, cmd, &mut out),
             Input::LocalDone { call, result } => self.local_done(call, result, &mut out),
+            Input::Observed { observed } => self.on_observed(observed, &mut out),
         }
         self.flush(&mut out);
         out
@@ -526,5 +542,7 @@ mod core_tests_headless;
 mod core_tests_jobs;
 #[cfg(test)]
 mod core_tests_main;
+#[cfg(test)]
+mod core_tests_snap;
 #[cfg(test)]
 mod core_tests_terms;

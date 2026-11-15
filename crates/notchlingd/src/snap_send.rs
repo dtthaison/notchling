@@ -12,7 +12,7 @@ use notchling_engine::cluster::NodeId;
 use notchling_local_api::{ApiError, ErrorCode};
 use serde_json::{json, Value};
 use sha2::{Digest as _, Sha256};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
@@ -114,6 +114,7 @@ pub struct Offered {
 struct Slot {
     busy: bool,
     queued: Option<Offered>,
+    sending: Option<String>,
     sent: Option<String>,
     failed: Option<Instant>,
     error: Option<String>,
@@ -191,6 +192,24 @@ impl SnapSender {
             }
         }
         started
+    }
+
+    pub fn targets(&self) -> Vec<NodeId> {
+        self.inner.targets()
+    }
+
+    pub fn pinned(&self) -> BTreeSet<String> {
+        let state = lock(&self.inner.state);
+        let mut sets: BTreeSet<String> = state
+            .latest
+            .iter()
+            .map(|o| o.manifest.set.clone())
+            .collect();
+        for slot in state.slots.values() {
+            sets.extend(slot.sending.clone());
+            sets.extend(slot.queued.iter().map(|o| o.manifest.set.clone()));
+        }
+        sets
     }
 
     pub fn sent(&self, node: &NodeId) -> Option<String> {
@@ -272,6 +291,11 @@ impl Inner {
     fn drain(&self, id: &NodeId, first: Offered) {
         let mut offered = first;
         loop {
+            lock(&self.state)
+                .slots
+                .entry(id.clone())
+                .or_default()
+                .sending = Some(offered.manifest.set.clone());
             let result = if self.targets().contains(id) {
                 self.send(id, &offered)
             } else {
@@ -279,6 +303,7 @@ impl Inner {
             };
             let mut state = lock(&self.state);
             let slot = state.slots.entry(id.clone()).or_default();
+            slot.sending = None;
             match result {
                 Ok(()) => {
                     slot.sent = Some(offered.manifest.set.clone());

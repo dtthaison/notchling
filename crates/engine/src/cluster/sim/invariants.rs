@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+use super::snaps::snap_violation;
 use super::world::World;
 use crate::cluster::id::NodeId;
 use crate::cluster::members::Term;
@@ -13,6 +14,9 @@ pub enum Violation {
     JobOnTwoNodes { job: String },
     DispatchToRemoved { job: String, node: NodeId },
     KeyTwoJobs { key: String },
+    StandbyAhead { node: NodeId, set: String },
+    TornSet { node: NodeId, set: String },
+    MovedUnpushed { session: String, node: NodeId },
 }
 
 pub fn check(world: &World) -> Result<(), Violation> {
@@ -72,5 +76,8 @@ pub fn check(world: &World) -> Result<(), Violation> {
             return Err(Violation::JobStartedTwice { job: key.0.clone() });
         }
     }
-    Ok(())
+    match snap_violation(world) {
+        Some(v) => Err(v),
+        None => Ok(()),
+    }
 }

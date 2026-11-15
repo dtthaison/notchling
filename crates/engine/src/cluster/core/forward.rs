@@ -4,6 +4,7 @@ use super::{Effect, NodeCore, OutCall, Seen, Target, Then, CALL_MS, DEDUPE_MS, W
 use crate::cluster::id::NodeId;
 use crate::cluster::members::Term;
 use crate::cluster::policy::{check, SenderFacts};
+use crate::cluster::standby_store::SNAP_ACK;
 use crate::cluster::state::role_of;
 use crate::cluster::wire::{Msg, Origin, OriginTier, WireError};
 
@@ -172,6 +173,9 @@ impl NodeCore {
                 result: None,
             },
         );
+        if op == SNAP_ACK {
+            self.record_ack(&from, &args);
+        }
         let target = Target::Peer(from, id);
         match op.as_str() {
             "cluster.dispatch" => self.native_dispatch(target, &args, &origin, out),

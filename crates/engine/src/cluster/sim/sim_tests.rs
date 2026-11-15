@@ -1,4 +1,7 @@
-use super::{run_seed, run_seed_with, run_world, stale_call_scenario, Plant, Violation, World};
+use super::{
+    run_seed, run_seed_with, run_snap_seed, run_snap_world, run_world, snap_cast,
+    stale_call_scenario, Plant, SnapPlant, Violation, World,
+};
 use crate::cluster::testkit::id;
 
 fn seeds() -> Vec<u64> {
@@ -131,4 +134,134 @@ fn a_crashed_home_comes_back_with_its_journal() {
         .map(|s| s.members.len());
     assert_eq!(jobs_before, jobs_after);
     assert!(world.core(&a).is_some_and(|c| c.online().contains(&b)));
+}
+
+fn finish_a_turn(world: &mut World, session: &str) {
+    world.snap_session_work(session);
+    world.run_for(3_000);
+    world.snap_session_finish(session);
+}
+
+fn newest(world: &World, home: &crate::cluster::id::NodeId) -> Option<String> {
+    world.snap_staged(home).last().cloned()
+}
+
+#[test]
+fn standby_never_ahead_over_seeds() {
+    for seed in seeds() {
+        if let Err(failure) = run_snap_seed(seed, 150, SnapPlant::default()) {
+            panic!("{failure}");
+        }
+    }
+}
+
+#[test]
+fn snapshots_happen_in_the_sim() {
+    let mut lines: Vec<String> = Vec::new();
+    for seed in 0..40 {
+        let (world, result) = run_snap_world(seed, 150, SnapPlant::default());
+        assert_eq!(result, Ok(()));
+        lines.extend(world.trace().iter().cloned());
+    }
+    for want in ["snapshot s-", "TurnEnd", "snap commit", "snap cut"] {
+        assert!(lines.iter().any(|l| l.contains(want)), "{want}");
+    }
+}
+
+#[test]
+fn crash_during_transfer_keeps_last_complete_set() {
+    let mut world = World::new(21);
+    let cast = snap_cast(&mut world, SnapPlant::default());
+    finish_a_turn(&mut world, "sim-a");
+    world.run_for(60_000);
+    let first = newest(&world, &cast.m5).expect("a first set");
+    assert_eq!(world.snap_current(&cast.m1, &cast.m5), Some(first.clone()));
+    finish_a_turn(&mut world, "sim-b");
+    let mut waited = 0;
+    while !world.snap_in_flight(&cast.m5, &cast.m1) && waited < 120_000 {
+        world.run_for(50);
+        waited += 50;
+    }
+    assert!(
+        world.snap_in_flight(&cast.m5, &cast.m1),
+        "no second transfer"
+    );
+    let second = newest(&world, &cast.m5).expect("a second set");
+    assert_ne!(first, second);
+    world.crash(&cast.m1);
+    world.run_for(5_000);
+    assert_eq!(world.snap_current(&cast.m1, &cast.m5), Some(first));
+    assert_eq!(check_ok(&world), Ok(()));
+    world.restart(&cast.m1);
+    world.run_for(90_000);
+    assert_eq!(
+        world.snap_current(&cast.m1, &cast.m5),
+        newest(&world, &cast.m5)
+    );
+    assert_eq!(check_ok(&world), Ok(()));
+}
+
+fn check_ok(world: &World) -> Result<(), Violation> {
+    super::check(world)
+}
+
+#[test]
+fn each_target_keeps_its_own_set() {
+    let mut world = World::new(22);
+    let cast = snap_cast(&mut world, SnapPlant::default());
+    finish_a_turn(&mut world, "sim-a");
+    world.run_for(60_000);
+    let first = newest(&world, &cast.m5).expect("a first set");
+    assert_eq!(world.snap_current(&cast.m1, &cast.m5), Some(first.clone()));
+    assert_eq!(world.snap_current(&cast.m2, &cast.m5), Some(first.clone()));
+    world.partition(&cast.m5, &cast.m2);
+    finish_a_turn(&mut world, "sim-b");
+    world.run_for(40_000);
+    finish_a_turn(&mut world, "sim-c");
+    world.run_for(40_000);
+    let latest = newest(&world, &cast.m5).expect("a newer set");
+    assert_ne!(first, latest);
+    assert_eq!(world.snap_current(&cast.m1, &cast.m5), Some(latest.clone()));
+    assert_eq!(world.snap_current(&cast.m2, &cast.m5), Some(first.clone()));
+    let behind = world.snap_versions(&cast.m5, &first);
+    let ahead = world.snap_versions(&cast.m5, &latest);
+    assert!(ahead["sim-b"] > behind["sim-b"] && ahead["sim-c"] > behind["sim-c"]);
+    assert_eq!(check_ok(&world), Ok(()));
+    world.heal();
+    world.run_for(120_000);
+    let latest = newest(&world, &cast.m5).expect("a set");
+    assert_eq!(world.snap_current(&cast.m2, &cast.m5), Some(latest.clone()));
+    assert_eq!(world.snap_current(&cast.m1, &cast.m5), Some(latest));
+    assert_eq!(check_ok(&world), Ok(()));
+}
+
+#[test]
+fn a_planted_torn_commit_is_caught() {
+    let plant = SnapPlant {
+        torn_commit: true,
+        ..SnapPlant::default()
+    };
+    let caught = (0..20).any(|seed| {
+        matches!(
+            run_snap_seed(seed, 80, plant),
+            Err(f) if matches!(f.violation, Violation::TornSet { .. })
+        )
+    });
+    assert!(caught);
+    assert!((0..20).all(|seed| run_snap_seed(seed, 80, SnapPlant::default()).is_ok()));
+}
+
+#[test]
+fn a_planted_unpushed_restore_is_caught() {
+    let plant = SnapPlant {
+        restore_unpushed: true,
+        ..SnapPlant::default()
+    };
+    let caught = (0..40).any(|seed| {
+        matches!(
+            run_snap_seed(seed, 120, plant),
+            Err(f) if matches!(f.violation, Violation::MovedUnpushed { .. })
+        )
+    });
+    assert!(caught);
 }

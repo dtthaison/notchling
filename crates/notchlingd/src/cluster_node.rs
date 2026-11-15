@@ -2,7 +2,8 @@ use crate::acting_ops::Room;
 use crate::cluster_driver::Driver;
 use crate::late_emit::Events as LogEvents;
 use notchling_cluster_net::{Conn, LinkEvents, Pins, Transport};
-use notchling_engine::cluster::core::{LocalCmd, CALL_MS, DELEGATE_CALL_MS};
+use notchling_engine::cluster::core::{LocalCmd, SnapAsk, CALL_MS, DELEGATE_CALL_MS};
+use notchling_engine::cluster::snapshot::Observed;
 use notchling_engine::cluster::wire::{Origin, WireError};
 use notchling_engine::cluster::{Desired, Input, NodeId, Versions};
 use notchling_events::kinds::choices::SwitchName;
@@ -48,6 +49,7 @@ pub trait Hooks: Send + Sync {
     }
     fn in_cluster(&self) {}
     fn peer_sessions(&self, _from: &NodeId) {}
+    fn snapshot(&self, _ask: SnapAsk) {}
 }
 
 pub struct NoHooks;
@@ -279,6 +281,10 @@ impl ClusterNode {
 
     pub fn submit(&self) -> Submit {
         Submit::new(self.tx.clone())
+    }
+
+    pub fn observe(&self, observed: Observed) {
+        let _ = self.tx.send(In::Core(Input::Observed { observed }));
     }
 
     pub fn set_link(&self, on: bool) {
