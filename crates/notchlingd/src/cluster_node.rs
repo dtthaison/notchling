@@ -43,7 +43,9 @@ pub struct JoinAsk {
 pub trait Hooks: Send + Sync {
     fn join_request(&self, _ask: JoinAsk, _node: Submit) {}
     fn desired(&self, _desired: Desired) {}
-    fn wiped(&self) {}
+    fn wiped(&self) -> bool {
+        true
+    }
     fn in_cluster(&self) {}
     fn peer_sessions(&self, _from: &NodeId) {}
 }

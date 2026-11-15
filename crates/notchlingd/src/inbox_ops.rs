@@ -16,6 +16,7 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 
 const TICK: Duration = Duration::from_secs(1);
+const LEAVE_WAIT: Duration = Duration::from_secs(5);
 const ANSWERED_BY: &str = "mac";
 const MAY_ALLOW: [&str; 2] = ["mac", "phone"];
 
@@ -32,7 +33,7 @@ type Clock = Arc<dyn Fn() -> i64 + Send + Sync>;
 enum Msg {
     Changes(Vec<Change>),
     Flush(Sender<()>),
-    Move(Store),
+    Move(Store, Option<Sender<bool>>),
 }
 
 struct Inner {
@@ -104,15 +105,20 @@ fn write_loop(
             Msg::Flush(ack) => {
                 let _ = ack.send(());
             }
-            Msg::Move(to) => relocate(&store, &data_dir, to),
+            Msg::Move(to, ack) => {
+                let moved = relocate(&store, &data_dir, to);
+                if let Some(ack) = ack {
+                    let _ = ack.send(moved);
+                }
+            }
         }
     }
 }
 
-fn relocate(store: &Mutex<Store>, data_dir: &Path, to: Store) {
+fn relocate(store: &Mutex<Store>, data_dir: &Path, to: Store) -> bool {
     let from = lock(store).clone();
     if from == to {
-        return;
+        return true;
     }
     let node_db = store::db_path(data_dir);
     let moved = match (&from, &to) {
@@ -125,10 +131,17 @@ fn relocate(store: &Mutex<Store>, data_dir: &Path, to: Store) {
         _ => Ok(0),
     };
     match moved {
-        Ok(_) => *lock(store) = to,
-        Err(why) => report(Err(format!(
-            "moving it failed: {why}; it stays where it was"
-        ))),
+        Ok(_) => {
+            *lock(store) = to;
+            true
+        }
+        Err(why) => {
+            report(Err(format!("moving it failed: {why}")));
+            if matches!(to, Store::Node(_)) {
+                *lock(store) = to;
+            }
+            false
+        }
     }
 }
 
@@ -215,32 +228,57 @@ impl InboxOps {
     pub fn join_cluster(&self) {
         let dir = lock(&self.cluster_dir).clone();
         if let Some(dir) = dir {
-            self.send_move(Store::Cluster(dir));
+            self.send_move(Store::Cluster(dir), None);
         }
     }
 
-    pub fn leave_cluster(&self) {
-        self.send_move(Store::Node(self.data_dir.clone()));
-        self.flush();
+    pub fn leave_cluster(&self) -> bool {
+        self.leave_cluster_within(LEAVE_WAIT)
     }
 
-    fn send_move(&self, to: Store) {
-        if let Some(writes) = &lock(&self.inner).writes {
-            let _ = writes.send(Msg::Move(to));
+    pub(crate) fn leave_cluster_within(&self, wait: Duration) -> bool {
+        let (ack_tx, ack_rx) = channel::<bool>();
+        let sent = self.send_move(Store::Node(self.data_dir.clone()), Some(ack_tx));
+        let moved = sent && ack_rx.recv_timeout(wait).unwrap_or(false);
+        *lock(&self.store) = Store::Node(self.data_dir.clone());
+        moved
+    }
+
+    fn send_move(&self, to: Store, ack: Option<Sender<bool>>) -> bool {
+        match &lock(&self.inner).writes {
+            Some(writes) => writes.send(Msg::Move(to, ack)).is_ok(),
+            None => false,
         }
     }
 
-    fn in_a_cluster(&self) -> bool {
-        let dir = lock(&self.cluster_dir).clone();
-        dir.is_some_and(|dir| matches!(cluster_persist::load(&dir), Ok(Some(_))))
+    fn settle_store(&self, now: i64) {
+        let Some(dir) = lock(&self.cluster_dir).clone() else {
+            return;
+        };
+        match cluster_persist::load(&dir) {
+            Ok(Some(_)) => {
+                self.join_cluster();
+                self.flush();
+            }
+            Ok(None) => {
+                let back = inbox::migrate_inbox_back(
+                    &dir.join(CLUSTER_DB),
+                    &store::db_path(&self.data_dir),
+                );
+                report(back.map(|_| ()));
+            }
+            Err(_) => {
+                let at = Store::Cluster(dir);
+                if inbox::load_from(&at, now).is_ok_and(|book| !book.items().is_empty()) {
+                    *lock(&self.store) = at;
+                }
+            }
+        }
     }
 
     pub fn load(&self) {
         let now = (self.clock)();
-        if self.in_a_cluster() {
-            self.join_cluster();
-            self.flush();
-        }
+        self.settle_store(now);
         let at = lock(&self.store).clone();
         let saved = inbox::load_from(&at, now).unwrap_or_else(|why| {
             eprintln!("notchling: reading the inbox failed ({why}); starting it empty");

@@ -110,8 +110,23 @@ impl Driver {
         for (_, conn) in std::mem::take(&mut self.conns) {
             conn.close();
         }
-        self.hooks.wiped();
-        let outcome = match persist::wipe(&self.setup.cluster_dir)
+        let inbox_safe = self.hooks.wiped();
+        let kept = inbox_safe || {
+            let aside = persist::keep_aside(&self.setup.cluster_dir, crate::acting_ops::now_ms());
+            let outcome = if aside.is_ok() {
+                Outcome::Ok
+            } else {
+                Outcome::Failed
+            };
+            self.audit.step(ClusterStep::Save, None, None, outcome);
+            aside.is_ok()
+        };
+        let first = if kept {
+            persist::wipe(&self.setup.cluster_dir)
+        } else {
+            Err("the inbox could not be kept".to_string())
+        };
+        let outcome = match first
             .and_then(|()| crate::cluster_mirror::wipe(&self.setup.cluster_dir))
             .and_then(|()| crate::cluster_blobs::wipe(&self.setup.cluster_dir))
         {

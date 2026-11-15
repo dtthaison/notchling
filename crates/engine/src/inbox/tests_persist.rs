@@ -245,6 +245,57 @@ fn leaving_a_cluster_moves_the_inbox_back() {
     assert_eq!(ids(&load(&data, 100).unwrap()), vec!["y", "x"]);
 }
 
+fn answered(id: &str, created_ms: i64, closed_ms: i64) -> Item {
+    let mut a = item(id, created_ms, State::Answered);
+    a.answer = Some(ActionId::Done);
+    a.closed_ms = Some(closed_ms);
+    a
+}
+
+#[test]
+fn a_newer_row_in_notchling_db_wins_over_a_stale_cluster_row() {
+    let tmp = TempDir::new("inbox-newer-source");
+    let (node_db, cluster_db, cluster_dir) = paths(&tmp);
+    let data = tmp.path("data");
+    let target = Store::Cluster(cluster_dir);
+    save_to(&target, &Change::Raised(item("b", 2, State::Open))).unwrap();
+    save(&data, &Change::Raised(answered("b", 2, 50))).unwrap();
+    assert_eq!(migrate_inbox(&node_db, &cluster_db), Ok(1));
+    assert!(rowids(&node_db).is_empty());
+    let book = load_from(&target, 100).unwrap();
+    assert_eq!(book.items()[0].state, State::Answered);
+    assert_eq!(rowids(&cluster_db).len(), 1);
+}
+
+#[test]
+fn a_newer_row_in_cluster_db_wins_over_a_stale_notchling_row_going_back() {
+    let tmp = TempDir::new("inbox-newer-back");
+    let (node_db, cluster_db, cluster_dir) = paths(&tmp);
+    let data = tmp.path("data");
+    let target = Store::Cluster(cluster_dir);
+    save(&data, &Change::Raised(item("b", 2, State::Expired))).unwrap();
+    save_to(&target, &Change::Raised(answered("b", 2, 50))).unwrap();
+    assert_eq!(migrate_inbox_back(&cluster_db, &node_db), Ok(1));
+    assert!(rowids(&cluster_db).is_empty());
+    assert_eq!(load(&data, 100).unwrap().items()[0].state, State::Answered);
+}
+
+#[test]
+fn an_older_source_row_never_replaces_a_newer_target_row() {
+    let tmp = TempDir::new("inbox-older-source");
+    let (node_db, cluster_db, cluster_dir) = paths(&tmp);
+    let data = tmp.path("data");
+    let target = Store::Cluster(cluster_dir);
+    save_to(&target, &Change::Raised(answered("b", 2, 50))).unwrap();
+    save(&data, &Change::Raised(item("b", 2, State::Expired))).unwrap();
+    assert_eq!(migrate_inbox(&node_db, &cluster_db), Ok(0));
+    assert!(rowids(&node_db).is_empty());
+    assert_eq!(
+        load_from(&target, 100).unwrap().items()[0].state,
+        State::Answered
+    );
+}
+
 #[test]
 fn migration_refuses_paths_that_are_not_the_databases() {
     let tmp = TempDir::new("inbox-names");

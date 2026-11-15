@@ -276,6 +276,26 @@ pub fn wipe(cluster_dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
+pub fn keep_aside(cluster_dir: &Path, now_ms: i64) -> Result<(), String> {
+    match std::fs::symlink_metadata(cluster_dir) {
+        Ok(meta) if meta.file_type().is_symlink() => {
+            return Err("refusing to move files through a symlink".to_string());
+        }
+        Ok(_) => {}
+        Err(_) => return Ok(()),
+    }
+    for suffix in ["", "-wal", "-shm"] {
+        let from = cluster_dir.join(format!("{CLUSTER_DB}{suffix}"));
+        let to = cluster_dir.join(format!("{CLUSTER_DB}.inbox-left-{now_ms}{suffix}"));
+        match std::fs::rename(&from, &to) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e.to_string()),
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 #[path = "persist_tests.rs"]
 mod persist_tests;

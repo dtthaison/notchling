@@ -241,6 +241,34 @@ fn the_inbox_table_is_added_to_an_existing_cluster_db() {
 }
 
 #[test]
+fn keep_aside_renames_the_database_and_its_side_files_and_deletes_nothing() {
+    let tmp = TempDir::new("cluster-aside");
+    let dir = tmp.path("cluster");
+    let (_, steps) = built();
+    save_all(&dir, &steps[..1]);
+    fs::write(dir.join("cluster.db-wal"), b"wal").expect("wal");
+    fs::write(dir.join("cluster.db-shm"), b"shm").expect("shm");
+    let before = fs::read(dir.join(CLUSTER_DB)).expect("bytes");
+    super::keep_aside(&dir, 77).expect("aside");
+    assert!(!dir.join(CLUSTER_DB).exists());
+    assert_eq!(
+        fs::read(dir.join("cluster.db.inbox-left-77")).expect("kept"),
+        before
+    );
+    assert_eq!(
+        fs::read(dir.join("cluster.db.inbox-left-77-wal")).expect("wal"),
+        b"wal"
+    );
+    assert_eq!(
+        fs::read(dir.join("cluster.db.inbox-left-77-shm")).expect("shm"),
+        b"shm"
+    );
+    wipe(&dir).expect("wipe");
+    assert!(dir.join("cluster.db.inbox-left-77").exists());
+    super::keep_aside(&tmp.path("never-made"), 1).expect("nothing to move");
+}
+
+#[test]
 fn a_newer_cluster_db_is_not_opened_for_the_inbox() {
     let tmp = TempDir::new("cluster-inbox-newer");
     let dir = tmp.path("cluster");

@@ -5,7 +5,7 @@ use crate::op_group::OpGroup;
 use notchling_engine::inbox::{self, ActionId, State};
 use notchling_local_api::{ops, ClientKind, ErrorCode, Tier};
 use serde_json::json;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 #[test]
 fn the_inbox_answers_only_the_app_itself() {
@@ -177,12 +177,9 @@ fn in_cluster(cluster_dir: &std::path::Path) {
 }
 
 fn stored(db: &std::path::Path) -> Vec<String> {
-    let Ok(db) = rusqlite::Connection::open(db) else {
-        return Vec::new();
-    };
-    let Ok(mut query) = db.prepare("SELECT id FROM inbox ORDER BY rowid") else {
-        return Vec::new();
-    };
+    let db = rusqlite::Connection::open_with_flags(db, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .unwrap();
+    let mut query = db.prepare("SELECT id FROM inbox ORDER BY rowid").unwrap();
     let rows = query
         .query_map([], |r| r.get::<_, String>(0))
         .unwrap()
@@ -277,10 +274,121 @@ fn leaving_a_cluster_brings_the_inbox_back_to_notchling_db() {
     ops.raise(item("b"), None);
     ops.flush();
     assert_eq!(stored(&cluster_dir.join("cluster.db")), ["a", "b"]);
-    ops.leave_cluster();
+    assert!(ops.leave_cluster());
     ops.raise(item("c"), None);
     ops.flush();
     assert_eq!(stored(&r.dir.join("notchling.db")), ["a", "b", "c"]);
     assert!(stored(&cluster_dir.join("cluster.db")).is_empty());
     ops.close();
+}
+
+struct Stuck(Mutex<Option<std::sync::mpsc::Receiver<()>>>);
+
+impl crate::acting_ops::Room for Stuck {
+    fn publish(&self, _topic: &str, _event: &str, _data: &serde_json::Value) {
+        let gate = self.0.lock().unwrap().take();
+        if let Some(gate) = gate {
+            let _ = gate.recv();
+        }
+    }
+    fn can_answer(&self) -> bool {
+        true
+    }
+    fn can_follow(&self, _topic: &str) -> bool {
+        true
+    }
+}
+
+#[test]
+fn a_failed_move_back_keeps_the_rows_and_the_store_ends_on_notchling_db() {
+    let r = rig();
+    let cluster_dir = r._tmp.path("cluster");
+    let cluster_db = cluster_dir.join("cluster.db");
+    let ops = r.ops.clone().with_cluster_dir(cluster_dir.clone());
+    ops.raise(item("a"), None);
+    ops.join_cluster();
+    ops.raise(item("b"), None);
+    ops.flush();
+    assert_eq!(stored(&cluster_db), ["a", "b"]);
+    rusqlite::Connection::open(&cluster_db)
+        .unwrap()
+        .execute_batch("PRAGMA user_version = 99;")
+        .unwrap();
+    assert!(!ops.leave_cluster());
+    ops.raise(item("c"), None);
+    ops.flush();
+    assert_eq!(stored(&r.dir.join("notchling.db")), ["c"]);
+    notchling_engine::cluster::persist::keep_aside(&cluster_dir, 5).unwrap();
+    assert!(!cluster_db.exists());
+    assert_eq!(
+        stored(&cluster_dir.join("cluster.db.inbox-left-5")),
+        ["a", "b"]
+    );
+    ops.close();
+}
+
+#[test]
+fn a_leave_that_waits_too_long_gives_up_and_writes_to_notchling_db() {
+    let tmp = crate::limits_ops_tests::TempDir::new("inbox-ops-stuck");
+    let (release, gate) = std::sync::mpsc::channel::<()>();
+    let room = Arc::new(Stuck(std::sync::Mutex::new(Some(gate))));
+    let dir = tmp.path("data");
+    let ops = InboxOps::with_clock(dir.clone(), room, Arc::new(|| NOW))
+        .with_cluster_dir(tmp.path("cluster"));
+    ops.raise(item("a"), None);
+    let started = std::time::Instant::now();
+    assert!(!ops.leave_cluster_within(std::time::Duration::from_millis(50)));
+    assert!(started.elapsed() < std::time::Duration::from_secs(2));
+    ops.raise(item("b"), None);
+    release.send(()).unwrap();
+    ops.flush();
+    assert_eq!(stored(&dir.join("notchling.db")), ["a", "b"]);
+    ops.close();
+}
+
+#[test]
+fn an_unreadable_cluster_state_still_shows_the_inbox_kept_in_cluster_db() {
+    let r = rig();
+    let cluster_dir = r._tmp.path("cluster");
+    let cluster_db = cluster_dir.join("cluster.db");
+    in_cluster(&cluster_dir);
+    let target = inbox::Store::Cluster(cluster_dir.clone());
+    inbox::save_to(&target, &inbox::Change::Raised(item("a"))).unwrap();
+    rusqlite::Connection::open(&cluster_db)
+        .unwrap()
+        .execute("UPDATE state SET value = 'x' WHERE key = 'term'", [])
+        .unwrap();
+    assert!(notchling_engine::cluster::persist::load(&cluster_dir).is_err());
+    let reopened = InboxOps::with_clock(
+        r.dir.clone(),
+        Arc::new(FakeRoom::default()),
+        Arc::new(|| NOW + 5),
+    )
+    .with_cluster_dir(cluster_dir.clone());
+    reopened.load();
+    assert_eq!(reopened.items().len(), 1);
+    reopened.raise(item("b"), None);
+    reopened.flush();
+    assert_eq!(stored(&cluster_db), ["a", "b"]);
+    reopened.close();
+}
+
+#[test]
+fn an_inbox_left_in_a_cluster_db_without_cluster_state_comes_back_to_notchling_db() {
+    let r = rig();
+    let cluster_dir = r._tmp.path("cluster");
+    let target = inbox::Store::Cluster(cluster_dir.clone());
+    inbox::save_to(&target, &inbox::Change::Raised(item("a"))).unwrap();
+    let reopened = InboxOps::with_clock(
+        r.dir.clone(),
+        Arc::new(FakeRoom::default()),
+        Arc::new(|| NOW + 5),
+    )
+    .with_cluster_dir(cluster_dir.clone());
+    reopened.load();
+    assert_eq!(reopened.items().len(), 1);
+    reopened.flush();
+    assert_eq!(stored(&r.dir.join("notchling.db")), ["a"]);
+    assert!(stored(&cluster_dir.join("cluster.db")).is_empty());
+    reopened.close();
 }

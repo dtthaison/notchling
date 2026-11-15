@@ -261,6 +261,41 @@ fn creating_and_joining_a_cluster_tells_the_hooks() {
     });
 }
 
+struct Unsafe;
+
+impl Hooks for Unsafe {
+    fn wiped(&self) -> bool {
+        false
+    }
+}
+
+#[test]
+fn a_wipe_that_could_not_save_the_inbox_keeps_cluster_db_aside() {
+    let net = MemNet::new();
+    let mut h = Opts::named("aside-home");
+    h.client = true;
+    let mut w = Opts::named("aside-worker");
+    w.hooks = Some(Arc::new(Unsafe));
+    let (a, b) = crate::cluster_testkit::pair(&net, h, w);
+    let dir = b.cluster_dir();
+    assert!(dir.join("cluster.db").exists());
+    a.node
+        .local(notchling_engine::cluster::LocalCmd::Remove { node: b.id() })
+        .unwrap();
+    eventually("cluster.db is moved aside", || {
+        !dir.join("cluster.db").exists()
+    });
+    let kept = std::fs::read_dir(&dir)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .any(|e| {
+            e.file_name()
+                .to_string_lossy()
+                .starts_with("cluster.db.inbox-left-")
+        });
+    assert!(kept);
+}
+
 #[test]
 fn the_item_names_the_node_plainly() {
     let ask = JoinAsk {

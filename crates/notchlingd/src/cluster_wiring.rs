@@ -147,10 +147,11 @@ impl Hooks for ClusterHooks {
         self.switches.follow(desired);
     }
 
-    fn wiped(&self) {
-        self.inbox.leave_cluster();
+    fn wiped(&self) -> bool {
+        let kept = self.inbox.leave_cluster();
         self.mirror.clear();
         self.remote.clear();
+        kept
     }
 
     fn in_cluster(&self) {

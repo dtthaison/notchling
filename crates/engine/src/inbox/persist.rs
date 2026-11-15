@@ -139,7 +139,8 @@ fn move_rows(from: &Store, to: &Store) -> Result<usize, String> {
         copied += tx
             .execute(
                 "INSERT INTO inbox (id, value, updated_ms) VALUES (?1, ?2, ?3)
-                 ON CONFLICT(id) DO NOTHING",
+                 ON CONFLICT(id) DO UPDATE SET value = excluded.value, updated_ms = excluded.updated_ms
+                 WHERE excluded.updated_ms > inbox.updated_ms",
                 params![id, value, updated_ms],
             )
             .map_err(|e| e.to_string())?;
