@@ -233,6 +233,56 @@ fn r2_the_final_set_reaches_a_target_held_since_before_the_ask() {
 }
 
 #[test]
+fn r3_the_final_set_reaches_a_target_busy_sending_an_older_one() {
+    let fx = Fixture::new("send-final-busy", &[(1, true)]);
+    fx.make_ready(&[id_of(1)]);
+    let a = id_of(1);
+    let (m1, d1) = fx.stage(1, 0, b"one\n");
+    fx.sender.offer(m1, d1);
+    assert!(fx.sender.wait_idle(WAIT));
+    fx.net.hold();
+    let (m2, d2) = fx.stage(2, 0, b"one\ntwo\n");
+    fx.sender.offer(m2, d2);
+    fx.net.wait_entered(2);
+    fx.sender.hold(&a, true);
+    let (m3, d3) = fx.stage(3, 0, b"one\ntwo\nthree\n");
+    assert!(fx.sender.offer(m3, d3).is_empty());
+    fx.sender.hold_from(&a, 3);
+    assert!(fx.sender.tick().is_empty());
+
+    assert!(fx.sender.push(&a, "s-3"));
+    fx.net.release();
+    assert!(fx.sender.wait_idle(WAIT));
+    assert_eq!(current(&fx, 1), Some("s-3".to_string()));
+}
+
+#[test]
+fn r3_the_final_set_reaches_a_target_backing_off_after_a_failed_send() {
+    let fx = Fixture::new("send-final-failed", &[(1, true)]);
+    fx.make_ready(&[id_of(1)]);
+    let a = id_of(1);
+    let sender = fx.sender_with_retry(Duration::from_secs(600));
+    let (m1, d1) = fx.stage(1, 0, b"one\n");
+    sender.offer(m1, d1);
+    assert!(sender.wait_idle(WAIT));
+    fx.net.cut(&a, "snap.part", 1);
+    let (m2, d2) = fx.stage(2, 0, b"one\ntwo\n");
+    sender.offer(m2, d2);
+    assert!(sender.wait_idle(WAIT));
+    assert!(sender.last_error(&a).is_some());
+    fx.net.mend();
+    sender.hold(&a, true);
+    let (m3, d3) = fx.stage(3, 0, b"one\ntwo\nthree\n");
+    assert!(sender.offer(m3, d3).is_empty());
+    sender.hold_from(&a, 3);
+    assert!(sender.tick().is_empty());
+
+    assert!(sender.push(&a, "s-3"));
+    assert!(sender.wait_idle(WAIT));
+    assert_eq!(current(&fx, 1), Some("s-3".to_string()));
+}
+
+#[test]
 fn a_target_back_online_gets_the_newest_set() {
     let fx = Fixture::new("send-back", &[(1, true)]);
     fx.make_ready(&[id_of(1)]);

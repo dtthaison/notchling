@@ -57,9 +57,7 @@ impl Snaps for RealSnaps {
         let seq = asked(&self.node)
             .map_err(|e| format!("the final snapshot wasn't started: {}", e.message))?;
         self.sender.hold_from(to, seq);
-        self.sender.tick();
         self.runner.wait_idle(SNAP_WAIT);
-        self.sender.wait_idle(SNAP_WAIT);
         let set = match self.runner.outcome(seq) {
             Some(Outcome::Staged(set)) => set,
             Some(Outcome::NoReadyTarget) => {
@@ -71,6 +69,10 @@ impl Snaps for RealSnaps {
             Some(Outcome::Failed(why)) => return Err(format!("the final snapshot failed: {why}")),
             None => return Err("the final snapshot didn't finish".to_string()),
         };
+        if !self.sender.push(to, &set) {
+            return Err("the final snapshot isn't the newest set".to_string());
+        }
+        self.sender.wait_idle(SNAP_WAIT);
         if self.sender.sent(to).as_deref() != Some(set.as_str()) {
             let why = self
                 .sender

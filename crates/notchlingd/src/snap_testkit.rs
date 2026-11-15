@@ -268,6 +268,10 @@ impl Fixture {
     }
 
     pub(crate) fn rebuild_sender(&self) -> SnapSender {
+        self.sender_with_retry(Duration::ZERO)
+    }
+
+    pub(crate) fn sender_with_retry(&self, retry: Duration) -> SnapSender {
         let facts_net = self.net.clone();
         let ready_net = self.net.clone();
         let me = self.primary.clone();
@@ -279,7 +283,7 @@ impl Fixture {
             facts: Arc::new(move || facts_net.facts_of(&me)),
             ready: Arc::new(move |id| lock(&ready_net.ready).contains(id)),
             book: self.book.clone(),
-            retry: Duration::ZERO,
+            retry,
         })
     }
 

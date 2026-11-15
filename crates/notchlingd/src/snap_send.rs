@@ -264,6 +264,29 @@ impl SnapSender {
         }
     }
 
+    pub fn push(&self, node: &NodeId, set: &str) -> bool {
+        let offered = {
+            let mut state = lock(&self.inner.state);
+            let Some(offered) = state.latest.clone().filter(|o| o.manifest.set == set) else {
+                return false;
+            };
+            if !state.allows(node, offered.manifest.seq) {
+                return false;
+            }
+            let slot = state.slots.entry(node.clone()).or_default();
+            let already = slot.sent.as_deref() == Some(set)
+                || slot.sending.as_deref() == Some(set)
+                || slot.queued.as_ref().is_some_and(|q| q.manifest.set == set);
+            if already {
+                return true;
+            }
+            slot.failed = None;
+            offered
+        };
+        Inner::enqueue(&self.inner, node, offered);
+        true
+    }
+
     pub fn hold_from(&self, node: &NodeId, seq: u64) {
         let mut state = lock(&self.inner.state);
         state.held.insert(node.clone(), seq);
