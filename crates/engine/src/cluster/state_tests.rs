@@ -3,7 +3,7 @@ use serde_json::json;
 use super::id::{Role, Tool};
 use super::jobs::{job_id, JobSpec, JobState};
 use super::members::{can_be_master_default, Desired, MemberState, Term, MAX_TERM_N};
-use super::state::{apply, role_of, start, ClusterState, Command, CommandError};
+use super::state::{apply, role_of, start, Change, ClusterState, Command, CommandError};
 use super::testkit::{id, member, versions, versions_updated};
 
 fn created() -> ClusterState {
@@ -565,4 +565,56 @@ fn versions_of_a_removed_member_are_still_refused() {
         91,
     );
     assert_eq!(late.err(), Some(CommandError::Removed(id("w1"))));
+}
+
+#[test]
+fn a_handover_term_through_sync_forgets_the_arming_like_a_promote_does() {
+    use super::failover::{arming_id, Failover};
+    let mut state = created();
+    joined(&mut state, "m1", "macos", true);
+    apply(
+        &mut state,
+        Command::SetFailover {
+            failover: Failover::After30m,
+        },
+        40,
+    )
+    .expect("failover");
+    let held = arming_id(&state);
+    let at = state.term.clone();
+    apply(
+        &mut state,
+        Command::Armed {
+            node: id("m1"),
+            term: at,
+            id: held,
+        },
+        50,
+    )
+    .expect("armed");
+    assert!(state.armed.is_some() && state.holders.contains_key(&id("m1")));
+    let members: Vec<_> = state.members.values().cloned().collect();
+    let term = Term {
+        n: state.term.n + 1,
+        node: id("m1"),
+    };
+    let synced = apply(
+        &mut state,
+        Command::Sync {
+            id: "c1".to_string(),
+            name: "home".to_string(),
+            term: term.clone(),
+            home: id("m1"),
+            vault: id("m5"),
+            members,
+        },
+        60,
+    )
+    .expect("sync");
+    assert_eq!(state.term, term);
+    assert_eq!(state.home, id("m1"));
+    assert_eq!(state.armed, None);
+    assert!(!state.holders.contains_key(&id("m1")));
+    assert!(synced.changes.contains(&Change::Armed(None)));
+    assert_eq!(state.failover, Failover::After30m);
 }

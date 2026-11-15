@@ -27,6 +27,7 @@ pub struct ClusterState {
     pub kept: BTreeSet<String>,
     #[serde(default)]
     pub ended: BTreeMap<String, i64>,
+    #[serde(default)]
     pub failover: Failover,
     #[serde(default)]
     pub armed: Option<(NodeId, Term)>,
