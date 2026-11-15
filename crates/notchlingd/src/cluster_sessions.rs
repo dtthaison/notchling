@@ -462,6 +462,25 @@ impl RemoteSessions {
         is_real_file(&path).then(|| path.to_string_lossy().into_owned())
     }
 
+    pub fn row_of(&self, node: &NodeId, owner_path: &str, session: &str) -> Option<String> {
+        let book = lock(&self.book);
+        let row = book.nodes.get(node)?.rows.iter().find(|row| {
+            let same_path = !owner_path.is_empty()
+                && row.get("transcriptPath").and_then(Value::as_str) == Some(owner_path);
+            let same_id =
+                !session.is_empty() && row.get("id").and_then(Value::as_str) == Some(session);
+            same_path
+                || same_id
+                || (!session.is_empty()
+                    && serde_json::from_value::<Agent>((*row).clone())
+                        .ok()
+                        .and_then(|agent| agent.session_id())
+                        .as_deref()
+                        == Some(session))
+        })?;
+        Some(qualify(node, row.get("id")?.as_str()?))
+    }
+
     pub fn raw(&self, node: &NodeId, id: &str) -> Option<Value> {
         let book = lock(&self.book);
         book.nodes

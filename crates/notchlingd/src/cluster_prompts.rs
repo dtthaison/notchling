@@ -1,25 +1,24 @@
 use crate::acting_ops::Room;
 use crate::cluster_forward::{PromptPush, NODE_FOLLOW};
 use crate::cluster_node::ClusterNode;
+use crate::cluster_prompts_clean::{clean_pending, clean_resolved, Found};
 use crate::cluster_sessions::{is_client, peers_of, NodeSource, Peer, RemoteSessions};
-use notchling_engine::cluster::{qualify, NodeId};
+use notchling_engine::cluster::NodeId;
 use notchling_local_api::{ops, topics, ApiError, Caller, ClientKind};
-use serde_json::{json, Map, Value};
+use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::mpsc::{channel, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, Weak};
 use std::time::Duration;
+
+pub use crate::cluster_prompts_clean::{ID_MAX, INPUT_MAX, QUESTION_MAX, TEXT_MAX};
 
 pub const FOLLOW_EVERY_MS: u64 = 30_000;
 pub const LEASE_MS: u64 = crate::cluster_forward::FOLLOW_LEASE_MS;
 pub const RETRY_MS: u64 = 5_000;
 pub const MAX_PER_NODE: usize = 50;
 pub const MAX_TOTAL: usize = 200;
-pub const ID_MAX: usize = 128;
-pub const TEXT_MAX: usize = 4_096;
-pub const JSON_MAX: usize = 64 * 1024;
 const LOOP_EVERY: Duration = Duration::from_secs(1);
-const ITEM_FIELDS: [&str; 5] = ["header", "question", "options", "details", "multiSelect"];
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
@@ -27,103 +26,6 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 
 fn now_ms() -> u64 {
     u64::try_from(crate::acting_ops::now_ms()).unwrap_or(0)
-}
-
-fn bare(value: Option<&Value>, allow_empty: bool) -> Option<String> {
-    let text = value?.as_str()?;
-    let fine = text.len() <= ID_MAX
-        && !text.contains('/')
-        && !text.chars().any(char::is_control)
-        && (allow_empty || !text.is_empty());
-    fine.then(|| text.to_string())
-}
-
-fn text(value: Option<&Value>) -> String {
-    value
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .chars()
-        .filter(|c| !c.is_control() || matches!(c, '\n' | '\t'))
-        .take(TEXT_MAX)
-        .collect()
-}
-
-fn small(value: &Value) -> bool {
-    serde_json::to_vec(value).is_ok_and(|bytes| bytes.len() <= JSON_MAX)
-}
-
-fn clean_question(value: &Value) -> Option<Value> {
-    if value.is_null() {
-        return Some(Value::Null);
-    }
-    let items = value.get("items")?.as_array()?;
-    let mut kept = Vec::new();
-    for item in items {
-        let fields = item.as_object()?;
-        let mut clean = Map::new();
-        for key in ITEM_FIELDS {
-            if let Some(v) = fields.get(key) {
-                clean.insert(key.to_string(), v.clone());
-            }
-        }
-        kept.push(Value::Object(clean));
-    }
-    let out = json!({"items": kept});
-    small(&out).then_some(out)
-}
-
-pub fn clean_pending(
-    node: &NodeId,
-    raw: &Value,
-    mirror: &dyn Fn(&NodeId, &str) -> Option<String>,
-) -> Option<Value> {
-    let fields = raw.as_object()?;
-    let id = bare(fields.get("id"), false)?;
-    let session = bare(fields.get("sessionId"), true)?;
-    let kind = match fields.get("kind").and_then(Value::as_str)? {
-        kind @ ("permission" | "question") => kind,
-        _ => return None,
-    };
-    let question = clean_question(fields.get("question").unwrap_or(&Value::Null))?;
-    let input = fields
-        .get("input")
-        .filter(|v| v.is_object() && small(v))
-        .cloned()
-        .unwrap_or_else(|| json!({}));
-    let owner_path = text(fields.get("transcriptPath"));
-    let transcript = (!owner_path.is_empty())
-        .then(|| mirror(node, &owner_path))
-        .flatten();
-    Some(json!({
-        "id": qualify(node, &id),
-        "sessionId": if session.is_empty() { String::new() } else { qualify(node, &session) },
-        "kind": kind,
-        "toolName": text(fields.get("toolName")),
-        "summary": text(fields.get("summary")),
-        "input": input,
-        "canAlwaysAllow": false,
-        "question": question,
-        "cwd": text(fields.get("cwd")),
-        "transcriptPath": transcript,
-        "createdMs": fields.get("createdMs").and_then(Value::as_i64).unwrap_or(0),
-        "node": node,
-    }))
-}
-
-pub fn clean_resolved(node: &NodeId, raw: &Value) -> Option<(String, Value)> {
-    let fields = raw.as_object()?;
-    let id = bare(fields.get("id"), false)?;
-    let session = bare(fields.get("sessionId"), true)?;
-    let qualified = qualify(node, &id);
-    let short = |key: &str| -> String { text(fields.get(key)).chars().take(32).collect() };
-    let data = json!({
-        "id": qualified,
-        "sessionId": if session.is_empty() { String::new() } else { qualify(node, &session) },
-        "outcome": short("outcome"),
-        "by": short("by"),
-        "node": node,
-    });
-    Some((qualified, data))
 }
 
 pub trait PromptSource: Send + Sync {
@@ -142,11 +44,21 @@ impl PromptSource for NodeSource {
     }
 }
 
+pub type Job = Box<dyn FnOnce() + Send>;
+pub type Spawn = Arc<dyn Fn(Job) + Send + Sync>;
+
+fn threaded() -> Spawn {
+    Arc::new(|job: Job| {
+        let _ = std::thread::Builder::new()
+            .name("cluster-prompts-ask".into())
+            .spawn(job);
+    })
+}
+
 #[derive(Default)]
 struct Followed {
     next_at: u64,
     ok_at: Option<u64>,
-    listed: bool,
     listing: bool,
     gone: BTreeSet<String>,
 }
@@ -161,11 +73,21 @@ impl Followed {
 struct Book {
     followed: BTreeMap<NodeId, Followed>,
     prompts: BTreeMap<String, (NodeId, Value)>,
+    busy: BTreeSet<NodeId>,
+    epoch: u64,
 }
 
 impl Book {
     fn count(&self, node: &NodeId) -> usize {
         self.prompts.values().filter(|(n, _)| n == node).count()
+    }
+
+    fn ids_of(&self, node: &NodeId) -> BTreeSet<String> {
+        self.prompts
+            .iter()
+            .filter(|(_, (n, _))| n == node)
+            .map(|(id, _)| id.clone())
+            .collect()
     }
 
     fn put(&mut self, node: &NodeId, shaped: Value) -> bool {
@@ -189,30 +111,49 @@ pub struct RemotePrompts {
     room: Arc<dyn Room>,
     mirror: Arc<RemoteSessions>,
     book: Mutex<Book>,
+    spawn: Spawn,
 }
 
 fn resolved_for(shaped: &Value, by: &str) -> Value {
-    json!({
+    let mut data = json!({
         "id": shaped["id"], "sessionId": shaped["sessionId"],
         "outcome": "pass", "by": by, "node": shaped["node"],
-    })
+    });
+    if let Some(row) = shaped.get("rowId") {
+        data["rowId"] = row.clone();
+    }
+    data
 }
 
 impl RemotePrompts {
-    pub fn new(room: Arc<dyn Room>, mirror: Arc<RemoteSessions>) -> RemotePrompts {
-        RemotePrompts {
+    pub fn new(room: Arc<dyn Room>, mirror: Arc<RemoteSessions>) -> Arc<RemotePrompts> {
+        RemotePrompts::with_spawn(room, mirror, threaded())
+    }
+
+    pub fn with_spawn(
+        room: Arc<dyn Room>,
+        mirror: Arc<RemoteSessions>,
+        spawn: Spawn,
+    ) -> Arc<RemotePrompts> {
+        Arc::new(RemotePrompts {
             room,
             mirror,
             book: Mutex::new(Book::default()),
-        }
+            spawn,
+        })
     }
 
     fn announce(&self, event: &str, data: &Value) {
         self.room.publish(topics::PROMPTS, event, data);
     }
 
-    fn mirrored(&self) -> impl Fn(&NodeId, &str) -> Option<String> + '_ {
-        |node, path| self.mirror.mirror_of(node, path)
+    fn find(&self) -> impl Fn(&NodeId, &str, &str) -> Found + '_ {
+        |node, path, session| Found {
+            mirror: (!path.is_empty())
+                .then(|| self.mirror.mirror_of(node, path))
+                .flatten(),
+            row: self.mirror.row_of(node, path, session),
+        }
     }
 
     pub fn list(&self) -> Vec<Value> {
@@ -234,19 +175,15 @@ impl RemotePrompts {
             _ => Vec::new(),
         };
         rows.extend(self.list());
-        Value::Array(rows)
+        Value::Array(crate::prompts::fit_list(rows))
     }
 
     pub fn drop_node(&self, node: &NodeId, why: &str) {
         let gone: Vec<Value> = {
             let mut book = lock(&self.book);
+            book.epoch += 1;
             book.followed.remove(node);
-            let ids: Vec<String> = book
-                .prompts
-                .iter()
-                .filter(|(_, (n, _))| n == node)
-                .map(|(id, _)| id.clone())
-                .collect();
+            let ids = book.ids_of(node);
             ids.iter()
                 .filter_map(|id| book.prompts.remove(id).map(|(_, p)| p))
                 .collect()
@@ -257,14 +194,12 @@ impl RemotePrompts {
     }
 
     pub fn stop(&self, why: &str) {
-        let nodes: Vec<NodeId> = {
+        let nodes: BTreeSet<NodeId> = {
             let book = lock(&self.book);
             book.followed
                 .keys()
                 .cloned()
                 .chain(book.prompts.values().map(|(n, _)| n.clone()))
-                .collect::<BTreeSet<_>>()
-                .into_iter()
                 .collect()
         };
         for node in nodes {
@@ -275,7 +210,7 @@ impl RemotePrompts {
     pub fn on_event(&self, from: &NodeId, event: &str, data: &Value) {
         let announce = match event {
             topics::PROMPT_PENDING => {
-                let Some(shaped) = clean_pending(from, data, &self.mirrored()) else {
+                let Some(shaped) = clean_pending(from, data, &self.find()) else {
                     return;
                 };
                 let mut book = lock(&self.book);
@@ -290,7 +225,7 @@ impl RemotePrompts {
                 book.put(from, shaped.clone()).then_some((event, shaped))
             }
             topics::PROMPT_RESOLVED => {
-                let Some((id, shaped)) = clean_resolved(from, data) else {
+                let Some((id, mut shaped)) = clean_resolved(from, data) else {
                     return;
                 };
                 let mut book = lock(&self.book);
@@ -300,11 +235,17 @@ impl RemotePrompts {
                 if f.listing {
                     f.gone.insert(id.clone());
                 }
-                let removed = matches!(book.prompts.get(&id), Some((n, _)) if n == from);
-                if removed {
+                let held = match book.prompts.get(&id) {
+                    Some((n, p)) if n == from => Some(p.clone()),
+                    _ => None,
+                };
+                if let Some(prompt) = &held {
                     book.prompts.remove(&id);
+                    if let Some(row) = prompt.get("rowId") {
+                        shaped["rowId"] = row.clone();
+                    }
                 }
-                removed.then_some((event, shaped))
+                held.map(|_| (event, shaped))
             }
             _ => return,
         };
@@ -313,26 +254,41 @@ impl RemotePrompts {
         }
     }
 
-    fn fill(&self, node: &NodeId, listed: &Value) {
+    fn fill(&self, node: &NodeId, listed: &Value, before: &BTreeSet<String>) {
         let Value::Array(rows) = listed else {
             return;
         };
         let mut fresh = Vec::new();
+        let mut gone = Vec::new();
         {
             let mut book = lock(&self.book);
+            let mut seen = BTreeSet::new();
             for row in rows.iter().filter(|r| r.get("tool").is_none()) {
-                let Some(shaped) = clean_pending(node, row, &self.mirrored()) else {
+                let Some(shaped) = clean_pending(node, row, &self.find()) else {
                     continue;
                 };
-                let id = shaped.get("id").and_then(Value::as_str).unwrap_or_default();
+                let id = shaped
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string();
+                seen.insert(id.clone());
                 let skip = book
                     .followed
                     .get(node)
-                    .is_none_or(|f| f.gone.contains(id) || !f.following());
+                    .is_none_or(|f| f.gone.contains(&id) || !f.following());
                 if !skip && book.put(node, shaped.clone()) {
                     fresh.push(shaped);
                 }
             }
+            for id in before.difference(&seen) {
+                if let Some((_, prompt)) = book.prompts.remove(id) {
+                    gone.push(prompt);
+                }
+            }
+        }
+        for prompt in gone {
+            self.announce(topics::PROMPT_RESOLVED, &resolved_for(&prompt, "unlisted"));
         }
         for prompt in fresh {
             self.announce(topics::PROMPT_PENDING, &prompt);
@@ -340,73 +296,83 @@ impl RemotePrompts {
     }
 
     fn renew(&self, node: &NodeId, source: &dyn PromptSource, now: u64) {
-        match source.follow(node) {
+        let epoch = lock(&self.book).epoch;
+        let followed = source.follow(node);
+        if lock(&self.book).epoch != epoch {
+            return;
+        }
+        let lapsed = lock(&self.book)
+            .followed
+            .get(node)
+            .and_then(|f| f.ok_at)
+            .is_some_and(|at| now >= at + LEASE_MS);
+        match followed {
             Ok(()) => {
-                let listed = {
+                if lapsed {
+                    self.drop_node(node, "unfollowed");
+                }
+                {
                     let mut book = lock(&self.book);
                     let f = book.followed.entry(node.clone()).or_default();
                     f.ok_at = Some(now);
                     f.next_at = now + FOLLOW_EVERY_MS;
-                    f.listed
-                };
-                if !listed {
-                    self.relist(node, source, now);
                 }
+                self.relist(node, source, now);
             }
             Err(_) => {
-                let lapsed = {
-                    let mut book = lock(&self.book);
-                    let f = book.followed.entry(node.clone()).or_default();
-                    f.next_at = now + RETRY_MS;
-                    f.ok_at.is_some_and(|at| now >= at + LEASE_MS)
-                };
                 if lapsed {
                     self.drop_node(node, "unfollowed");
-                    lock(&self.book)
-                        .followed
-                        .entry(node.clone())
-                        .or_default()
-                        .next_at = now + RETRY_MS;
                 }
+                let mut book = lock(&self.book);
+                book.followed.entry(node.clone()).or_default().next_at = now + RETRY_MS;
             }
         }
     }
 
     fn relist(&self, node: &NodeId, source: &dyn PromptSource, now: u64) {
-        if let Some(f) = lock(&self.book).followed.get_mut(node) {
-            f.listing = true;
-        }
+        let (epoch, before) = {
+            let mut book = lock(&self.book);
+            if let Some(f) = book.followed.get_mut(node) {
+                f.listing = true;
+                f.gone.clear();
+            }
+            (book.epoch, book.ids_of(node))
+        };
         let answer = source.list(node);
+        if lock(&self.book).epoch != epoch {
+            return;
+        }
         if let Ok(rows) = &answer {
-            self.fill(node, rows);
+            self.fill(node, rows, &before);
         }
         let mut book = lock(&self.book);
         if let Some(f) = book.followed.get_mut(node) {
             f.listing = false;
-            match answer {
-                Ok(_) => {
-                    f.listed = true;
-                    f.gone.clear();
-                }
-                Err(_) => f.next_at = now + RETRY_MS,
+            f.gone.clear();
+            if answer.is_err() {
+                f.next_at = now + RETRY_MS;
             }
         }
     }
 
-    pub fn sync(&self, peers: &[Peer], active: bool, source: &dyn PromptSource, now: u64) {
+    pub fn sync<S: PromptSource + 'static>(
+        self: &Arc<Self>,
+        peers: &[Peer],
+        active: bool,
+        source: &Arc<S>,
+        now: u64,
+    ) {
         if !active {
             self.stop("unfollowed");
             return;
         }
         let online: Vec<&Peer> = peers.iter().filter(|p| p.online).collect();
-        let tracked: Vec<NodeId> = {
+        let tracked: BTreeSet<NodeId> = {
             let book = lock(&self.book);
             book.followed
                 .keys()
                 .cloned()
                 .chain(book.prompts.values().map(|(n, _)| n.clone()))
-                .collect::<BTreeSet<_>>()
-                .into_iter()
                 .collect()
         };
         for node in tracked {
@@ -415,13 +381,19 @@ impl RemotePrompts {
             }
         }
         for peer in online {
-            let due = lock(&self.book)
-                .followed
-                .get(&peer.id)
-                .is_none_or(|f| now >= f.next_at);
-            if due {
-                self.renew(&peer.id, source, now);
+            let due = {
+                let mut book = lock(&self.book);
+                let ready = book.followed.get(&peer.id).is_none_or(|f| now >= f.next_at);
+                ready && book.busy.insert(peer.id.clone())
+            };
+            if !due {
+                continue;
             }
+            let (me, source, id) = (self.clone(), source.clone(), peer.id.clone());
+            (self.spawn)(Box::new(move || {
+                me.renew(&id, source.as_ref(), now);
+                lock(&me.book).busy.remove(&id);
+            }));
         }
     }
 }
@@ -444,7 +416,7 @@ impl PromptFollower {
         let _ = std::thread::Builder::new()
             .name("cluster-prompts".into())
             .spawn(move || {
-                let source = NodeSource::new(node.clone());
+                let source = Arc::new(NodeSource::new(node.clone()));
                 loop {
                     let status = node.status();
                     let active = wants_follow(&status, room.can_answer());
@@ -464,6 +436,21 @@ impl PromptFollower {
     }
 }
 
+pub fn leased_clients(status: &Value, nodes: &[String]) -> Vec<NodeId> {
+    let members = status.get("members").and_then(Value::as_array);
+    nodes
+        .iter()
+        .filter_map(|n| NodeId::parse(n))
+        .filter(|id| {
+            members.into_iter().flatten().any(|m| {
+                m.get("id").and_then(Value::as_str) == Some(id.as_str())
+                    && m.get("state").and_then(Value::as_str) == Some("active")
+                    && m.get("client").and_then(Value::as_bool) == Some(true)
+            })
+        })
+        .collect()
+}
+
 #[derive(Default)]
 pub struct NodePush {
     node: OnceLock<Weak<ClusterNode>>,
@@ -480,11 +467,17 @@ impl PromptPush for NodePush {
         let Some(node) = self.node.get().and_then(Weak::upgrade) else {
             return;
         };
-        let to: Vec<NodeId> = nodes.iter().filter_map(|n| NodeId::parse(n)).collect();
-        node.tell_to(to, topics::PROMPTS, event, data.clone());
+        let to = leased_clients(&node.status(), nodes);
+        if !to.is_empty() {
+            node.tell_to(to, topics::PROMPTS, event, data.clone());
+        }
     }
 }
 
 #[cfg(test)]
 #[path = "cluster_prompts_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "cluster_prompts_fix_tests.rs"]
+mod fix_tests;

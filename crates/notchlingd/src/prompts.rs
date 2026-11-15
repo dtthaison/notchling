@@ -289,6 +289,10 @@ pub fn fit_list(rows: Vec<Value>) -> Vec<Value> {
     out
 }
 
+pub fn push_row(row: &Value) -> Option<Value> {
+    fit_list(vec![row.clone()]).pop()
+}
+
 fn trim_row(row: &mut Value) {
     let Some(map) = row.as_object_mut() else {
         return;

@@ -1,11 +1,11 @@
 use super::{
-    clean_pending, NodePush, PromptFollower, PromptSource, RemotePrompts, FOLLOW_EVERY_MS,
-    MAX_PER_NODE, TEXT_MAX,
+    NodePush, PromptFollower, PromptSource, RemotePrompts, FOLLOW_EVERY_MS, MAX_PER_NODE, TEXT_MAX,
 };
 use crate::acting_ops::Room;
 use crate::acting_ops_tests::{app, caller, sessions, setup, Setup, PROMPT};
 use crate::cluster_forward::{Forward, NodeForward, PromptFollowers, PromptPush};
 use crate::cluster_node::{Hooks, LocalCalls};
+use crate::cluster_prompts_clean::{clean_pending, Found};
 use crate::cluster_sessions::{
     agent_row, peers_of, HandlerRows, Peer, RemoteSessions, RowSource, SessionCalls,
 };
@@ -21,11 +21,11 @@ use std::collections::BTreeMap;
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 
-fn node(n: u8) -> NodeId {
+pub(super) fn node(n: u8) -> NodeId {
     NodeId::parse(&format!("{n:016x}")).unwrap()
 }
 
-fn peer(n: u8, online: bool) -> Peer {
+pub(super) fn peer(n: u8, online: bool) -> Peer {
     Peer {
         id: node(n),
         name: format!("n{n}"),
@@ -33,7 +33,7 @@ fn peer(n: u8, online: bool) -> Peer {
     }
 }
 
-fn prompt(id: &str) -> Value {
+pub(super) fn prompt(id: &str) -> Value {
     json!({
         "id": id, "sessionId": "s1", "kind": "permission", "toolName": "Bash",
         "summary": "ls", "input": {"command": "ls"}, "canAlwaysAllow": true,
@@ -42,18 +42,18 @@ fn prompt(id: &str) -> Value {
 }
 
 #[derive(Default)]
-struct FakeSource {
-    follows: Mutex<Vec<NodeId>>,
-    lists: Mutex<Vec<NodeId>>,
-    rows: Mutex<BTreeMap<NodeId, Value>>,
+pub(super) struct FakeSource {
+    pub(super) follows: Mutex<Vec<NodeId>>,
+    pub(super) lists: Mutex<Vec<NodeId>>,
+    pub(super) rows: Mutex<BTreeMap<NodeId, Value>>,
 }
 
 impl FakeSource {
-    fn follows(&self) -> usize {
+    pub(super) fn follows(&self) -> usize {
         self.follows.lock().unwrap().len()
     }
 
-    fn set(&self, node: &NodeId, rows: Value) {
+    pub(super) fn set(&self, node: &NodeId, rows: Value) {
         self.rows.lock().unwrap().insert(node.clone(), rows);
     }
 }
@@ -76,7 +76,7 @@ impl PromptSource for FakeSource {
     }
 }
 
-struct OneRow(Value);
+pub(super) struct OneRow(pub(super) Value);
 
 impl RowSource for OneRow {
     fn rows(&self, _node: &NodeId) -> Result<Value, ApiError> {
@@ -84,18 +84,18 @@ impl RowSource for OneRow {
     }
 }
 
-struct Unit {
-    room: Arc<crate::acting_ops_tests::FakeRoom>,
-    remote: Arc<RemoteSessions>,
-    prompts: RemotePrompts,
-    dir: Dir,
+pub(super) struct Unit {
+    pub(super) room: Arc<crate::acting_ops_tests::FakeRoom>,
+    pub(super) remote: Arc<RemoteSessions>,
+    pub(super) prompts: Arc<RemotePrompts>,
+    pub(super) dir: Dir,
 }
 
-fn unit() -> Unit {
+pub(super) fn unit() -> Unit {
     let dir = Dir::new("prompts");
     let room = Arc::new(crate::acting_ops_tests::FakeRoom::default());
     let remote = Arc::new(RemoteSessions::new(dir.path().join("mirror")));
-    let prompts = RemotePrompts::new(room.clone(), remote.clone());
+    let prompts = RemotePrompts::with_spawn(room.clone(), remote.clone(), Arc::new(|job| job()));
     Unit {
         room,
         remote,
@@ -104,14 +104,14 @@ fn unit() -> Unit {
     }
 }
 
-fn following(u: &Unit, source: &FakeSource, n: u8) {
+pub(super) fn following(u: &Unit, source: &Arc<FakeSource>, n: u8) {
     u.prompts.sync(&[peer(n, true)], true, source, 0);
 }
 
 #[test]
 fn client_with_app_sends_node_follow_and_renews() {
     let u = unit();
-    let source = FakeSource::default();
+    let source = Arc::new(FakeSource::default());
     let peers = [peer(1, true), peer(2, true), peer(3, false)];
     u.prompts.sync(&peers, true, &source, 0);
     assert_eq!(*source.follows.lock().unwrap(), vec![node(1), node(2)]);
@@ -122,8 +122,8 @@ fn client_with_app_sends_node_follow_and_renews() {
     assert_eq!(source.follows(), 4);
     assert_eq!(
         source.lists.lock().unwrap().len(),
-        2,
-        "listed once per link"
+        4,
+        "listed again on every renewal"
     );
 }
 
@@ -141,7 +141,7 @@ fn worker_never_sends_node_follow() {
 #[test]
 fn follow_stops_when_app_detaches() {
     let u = unit();
-    let source = FakeSource::default();
+    let source = Arc::new(FakeSource::default());
     following(&u, &source, 1);
     u.prompts
         .on_event(&node(1), "prompt.pending", &prompt("p1"));
@@ -160,10 +160,14 @@ fn follow_stops_when_app_detaches() {
 }
 
 #[derive(Default)]
-struct Pushed(Mutex<Vec<(Vec<String>, String)>>);
+pub(super) struct Pushed(
+    pub(super) Mutex<Vec<(Vec<String>, String)>>,
+    pub(super) Mutex<Vec<Value>>,
+);
 
 impl PromptPush for Pushed {
-    fn push(&self, nodes: &[String], event: &str, _data: &Value) {
+    fn push(&self, nodes: &[String], event: &str, data: &Value) {
+        self.1.lock().unwrap().push(data.clone());
         self.0
             .lock()
             .unwrap()
@@ -246,7 +250,7 @@ fn tell_to_reaches_only_the_nodes_named() {
 #[test]
 fn client_republishes_remote_prompt_qualified() {
     let u = unit();
-    let source = FakeSource::default();
+    let source = Arc::new(FakeSource::default());
     following(&u, &source, 1);
     u.prompts
         .on_event(&node(1), "prompt.pending", &prompt("p1"));
@@ -296,7 +300,7 @@ fn a_prompt_from_a_node_not_followed_is_ignored() {
 #[test]
 fn remote_prompt_never_carries_owner_transcript_path() {
     let u = unit();
-    let source = FakeSource::default();
+    let source = Arc::new(FakeSource::default());
     following(&u, &source, 1);
     u.prompts
         .on_event(&node(1), "prompt.pending", &prompt("p1"));
@@ -327,7 +331,7 @@ fn remote_prompt_never_carries_owner_transcript_path() {
 #[test]
 fn hostile_prompt_event_is_dropped() {
     let u = unit();
-    let source = FakeSource::default();
+    let source = Arc::new(FakeSource::default());
     following(&u, &source, 1);
     let mut bad_ids = Vec::new();
     for id in ["a/b", "", "x\u{7}y", &"i".repeat(1_000)] {
@@ -382,7 +386,7 @@ fn hostile_prompt_event_is_dropped() {
 #[test]
 fn a_node_may_hold_only_so_many_prompts() {
     let u = unit();
-    let source = FakeSource::default();
+    let source = Arc::new(FakeSource::default());
     following(&u, &source, 1);
     for i in 0..MAX_PER_NODE + 10 {
         u.prompts
@@ -399,7 +403,7 @@ fn clean_pending_keeps_only_known_question_fields() {
         "header": "h", "question": "q?", "options": ["a", "b"], "details": null,
         "multiSelect": false, "evil": 1,
     }], "evil": 2});
-    let out = clean_pending(&node(1), &p, &|_, _| None).unwrap();
+    let out = clean_pending(&node(1), &p, &|_, _, _| Found::default()).unwrap();
     assert_eq!(
         out["question"],
         json!({"items": [{"header": "h", "question": "q?", "options": ["a", "b"],
@@ -410,7 +414,7 @@ fn clean_pending_keeps_only_known_question_fields() {
 #[test]
 fn offline_node_prompts_resolve() {
     let u = unit();
-    let source = FakeSource::default();
+    let source = Arc::new(FakeSource::default());
     u.prompts
         .sync(&[peer(1, true), peer(2, true)], true, &source, 0);
     u.prompts
@@ -445,7 +449,7 @@ fn offline_node_prompts_resolve() {
 #[test]
 fn a_prompt_already_pending_is_filled_in_from_the_owners_list() {
     let u = unit();
-    let source = FakeSource::default();
+    let source = Arc::new(FakeSource::default());
     source.set(
         &node(1),
         json!([prompt("p1"), {"id": "agy-perm:1", "tool": "agy", "kind": "permission"}]),
@@ -460,7 +464,7 @@ fn a_prompt_already_pending_is_filled_in_from_the_owners_list() {
 #[test]
 fn prompts_list_merges_remote_for_app_not_for_node() {
     let u = unit();
-    let source = FakeSource::default();
+    let source = Arc::new(FakeSource::default());
     following(&u, &source, 1);
     u.prompts
         .on_event(&node(1), "prompt.pending", &prompt("p1"));
@@ -522,7 +526,7 @@ fn rig() -> Rig {
     client_room.app.store(true, Ordering::SeqCst);
     let dir = Dir::new("prompts-rig");
     let remote = Arc::new(RemoteSessions::new(dir.path().join("mirror")));
-    let prompts = Arc::new(RemotePrompts::new(client_room.clone(), remote));
+    let prompts = RemotePrompts::with_spawn(client_room.clone(), remote, Arc::new(|job| job()));
     let mut worker = Opts::named("worker");
     worker.local = Some(local);
     worker.room = Some(room.clone());
@@ -557,7 +561,9 @@ fn permission() -> Value {
 
 impl Rig {
     fn follow(&self) {
-        let source = crate::cluster_sessions::NodeSource::new(self.client.node.clone());
+        let source = Arc::new(crate::cluster_sessions::NodeSource::new(
+            self.client.node.clone(),
+        ));
         self.prompts.sync(
             &peers_of(&self.client.node.status()),
             true,

@@ -316,23 +316,36 @@ from the app in this run, or `cluster.join` (below), or a restart of a headless 
   `{following: true, topic, leaseMs}`. It stops when the app detaches or the node stops being a client, so the
   leases lapse within 60 s; a Worker never sends it. While a node has an active lease, it also sends each
   hook-prompt `prompt.pending` and `prompt.resolved` of its own (topic `prompts`, the bodies below) to those
-  nodes only, as peer events (`Msg::Event`); agy prompts (they carry `tool`) and prompts that are themselves
+  nodes only (and only those that are still active client members when it is sent), as peer events
+  (`Msg::Event`); a `prompt.pending` is first trimmed with the rule `prompts.list` uses (a row over 128 KB gets
+  its `input` cut to `{}` and its text to 4000 characters and `trimmed: true`; one still over 128 KB is not
+  sent); agy prompts (they carry `tool`) and prompts that are themselves
   remote (their `id` has a `/`) are never sent on. The receiving core publishes a `prompts` peer event only
   when this node is a client and the sender an active member, with `from` set to the real sender.
 - The client republishes them on its own local `prompts` topic (app tier) with qualified ids (`<node>/<id>`,
   decision 0012). `prompt.pending` is `{id: "<node>/<prompt>", sessionId: "<node>/<session>" or "", kind:
   "permission" | "question", toolName, summary, input, canAlwaysAllow: false, question, cwd, transcriptPath,
-  createdMs, node: "<node id>"}`: `transcriptPath` is the mirror file of the session whose owner path the
+  createdMs, node: "<node id>", trimmed?: true, rowId?: "<node>/<row id>"}`: `rowId` (additive, left out when
+  unknown) is the qualified id of the owner's session row, from the remote rows this client holds, whose
+  transcript path equals the prompt's owner path or whose id or session id equals the prompt's `sessionId`
+  (the app ties a prompt to its row by it; it works for rows that aren't followed); `trimmed` says the
+  owner or this client cut `input`; `transcriptPath` is the mirror file of the session whose owner path the
   prompt named when a mirror exists, else `null`, never the owner's path; `canAlwaysAllow` is always `false`
-  (below). `prompt.resolved` is `{id, sessionId, outcome, by, node}`. Everything from the peer is validated: ids
+  (below). `prompt.resolved` is `{id, sessionId, outcome, by, node, rowId?}` (`rowId` as the pending row had it). Everything from the peer is validated: ids
   are bare (no `/`, no control characters, at most 128 bytes), `kind` is `permission` or `question`, text is cut
-  at 4096 characters, an `input` over 64 KB becomes `{}` and a `question` over 64 KB drops the event, unknown
-  fields are dropped, at most 50 prompts per node and 200 in all. When the link comes up the client fills the
-  table from the owner's `prompts.list` (the same op, called as a node, so it never carries remote prompts). A
+  at 4096 characters, an `input` over 64 KB becomes `{}` (with `trimmed: true`) and a `question` over 128 KB, the owner's own row
+  limit, drops the event, unknown
+  fields are dropped, at most 50 prompts per node and 200 in all. Each renewal (every 30 s, and the
+  first one when the link comes up) the client also reads the owner's `prompts.list` (the same op, called as a
+  node, so it never carries remote prompts), adds what it lacks and resolves (`by: "unlisted"`) what it held
+  before the call that the owner no longer lists, so a lost `prompt.resolved` is repaired; a follow that
+  succeeds after the 60 s lease has lapsed first drops that node's prompts (`by: "unfollowed"`). Each peer is
+  asked on a thread of its own, one at a time, so a dead peer never delays the others' renewals. A
   node going offline, leaving, a lapsed follow, or the app detaching publishes `prompt.resolved {outcome:
   "pass", by: "offline" | "unfollowed"}` for each of that node's prompts and drops them.
 - `prompts.list` on a client also carries the remote pending prompts (qualified, the shape above), after its
-  own, for an app caller and never for a `ClientKind::Node` caller.
+  own, for an app caller and never for a `ClientKind::Node` caller; the merged rows (its own first) go through the
+  same size fit as the local list, so the reply stays within the socket's line cap.
 - Answer one with `session.permission {id: "<node>/<prompt>", decision: "allow" | "deny", message?}` or
   `session.answer {id: "<node>/<prompt>", answers}`: the `id` field is routed to the owner with the bare id
   (app tier only, as every forwarded op), where the usual checks apply and it arrives as a `ClientKind::Node`

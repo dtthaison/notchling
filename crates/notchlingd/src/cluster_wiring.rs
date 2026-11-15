@@ -341,7 +341,7 @@ impl ClusterParts {
             )),
             switches: switches.clone(),
         });
-        let prompts = Arc::new(RemotePrompts::new(room.clone(), remote.clone()));
+        let prompts = RemotePrompts::new(room.clone(), remote.clone());
         let hooks: Arc<dyn Hooks> = Arc::new(ClusterHooks {
             asker: JoinAsker::new(inbox, JOIN_WAIT),
             switches,

@@ -109,9 +109,16 @@ impl PromptFollowers {
             return;
         };
         let nodes = self.nodes(now_ms);
-        if !nodes.is_empty() {
-            push.push(&nodes, event, data);
+        if nodes.is_empty() {
+            return;
         }
+        if event == topics::PROMPT_PENDING {
+            if let Some(row) = crate::prompts::push_row(data) {
+                push.push(&nodes, event, &row);
+            }
+            return;
+        }
+        push.push(&nodes, event, data);
     }
 }
 

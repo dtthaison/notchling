@@ -223,3 +223,38 @@ fn a_prompt_event_with_another_name_or_from_a_stranger_is_dropped() {
     );
     assert!(published(&effects, "prompt.pending").is_none());
 }
+
+#[test]
+fn a_prompt_event_from_a_greeted_member_that_is_not_active_is_dropped() {
+    for state in [MemberState::Pending, MemberState::Removed] {
+        let (mut hub, m5, w1) = pair();
+        let effects = hub.run(
+            &m5,
+            Input::Msg {
+                from: w1.clone(),
+                msg: prompt_event("prompt.pending"),
+            },
+        );
+        assert!(
+            published(&effects, "prompt.pending").is_some(),
+            "{state:?}: active first"
+        );
+        let core = hub.nodes.get_mut(&m5).expect("home");
+        core.state
+            .as_mut()
+            .expect("state")
+            .members
+            .get_mut(&w1)
+            .expect("member")
+            .state = state;
+        assert!(core.peers.get(&w1).is_some_and(|p| p.greeted));
+        let effects = hub.run(
+            &m5,
+            Input::Msg {
+                from: w1.clone(),
+                msg: prompt_event("prompt.pending"),
+            },
+        );
+        assert!(published(&effects, "prompt.pending").is_none(), "{state:?}");
+    }
+}
