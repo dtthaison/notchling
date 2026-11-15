@@ -2,8 +2,8 @@ use std::path::Path;
 use std::thread::JoinHandle;
 
 use notchling_local_api::{
-    ops, Allowlist, ApiError, Caller, Handler, Limits, OpSpec, Server, ServerConfig, ServerHandle,
-    Tier, SOCKET_NAME,
+    ops, Allowlist, ApiError, Caller, ErrorCode, Handler, Limits, OpSpec, Server, ServerConfig,
+    ServerHandle, Tier, SOCKET_NAME,
 };
 use serde_json::{json, Value};
 
@@ -28,9 +28,10 @@ struct Daemon {
 impl Handler for Daemon {
     fn spec(&self, op: &str) -> Option<OpSpec> {
         match op {
-            ops::CLUSTER_STATUS | ops::CLUSTER_JOIN_TOKEN | ops::SETTINGS_SET_SWITCH => {
-                Some(OpSpec::APP)
-            }
+            ops::CLUSTER_STATUS
+            | ops::CLUSTER_JOIN_TOKEN
+            | ops::CLUSTER_JOIN
+            | ops::SETTINGS_SET_SWITCH => Some(OpSpec::APP),
             _ => None,
         }
     }
@@ -40,6 +41,17 @@ impl Handler for Daemon {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .push((op.to_owned(), args.clone()));
+        if op == ops::CLUSTER_JOIN {
+            let token = args["token"].as_str().unwrap_or("");
+            return if token.ends_with("refused") {
+                Err(ApiError::new(
+                    ErrorCode::Failed,
+                    format!("the primary refused {token}"),
+                ))
+            } else {
+                Ok(json!({"state": "pending"}))
+            };
+        }
         Ok(match op {
             ops::CLUSTER_STATUS => status(),
             ops::CLUSTER_JOIN_TOKEN => json!({"token": "nlj1.secret"}),
@@ -162,4 +174,31 @@ fn without_a_daemon_the_model_is_empty_and_a_call_says_so() {
         Err(crate::acting::DETACHED_MESSAGE.to_owned())
     );
     assert!(feed.token().is_err());
+}
+
+#[test]
+fn a_join_goes_to_the_daemon_and_an_error_never_carries_the_token() {
+    let scratch = Scratch::new("cl-join");
+    let socket = scratch.path().join(SOCKET_NAME);
+    let calls: Calls = Arc::default();
+    let (handle, thread) = serve(&socket, &calls);
+    let feed = start(&socket);
+    wait_until("the status", || feed.snapshot().is_loaded());
+    let wire::JoinInput::Send(request) = wire::join("nlj1.goodtoken") else {
+        panic!("a token is sent");
+    };
+    assert_eq!(feed.send(&request), Ok(json!({"state": "pending"})));
+    assert!(recorded(&calls).contains(&(
+        ops::CLUSTER_JOIN.to_owned(),
+        json!({"token": "nlj1.goodtoken"})
+    )));
+    let wire::JoinInput::Send(request) = wire::join("nlj1.SECRETrefused") else {
+        panic!("a token is sent");
+    };
+    let error = feed.send(&request).expect_err("the daemon refuses");
+    assert!(error.contains("the primary refused"), "{error}");
+    assert!(!error.contains("SECRETrefused"), "{error}");
+    drop(feed);
+    handle.shutdown();
+    let _ = thread.join();
 }

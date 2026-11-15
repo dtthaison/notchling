@@ -130,9 +130,12 @@ impl ClusterFeed {
         };
         transport
             .call(request.op, request.args.clone())
-            .map_err(|e| match e {
-                ClientError::Api(api) => api.message,
-                other => other.to_string(),
+            .map_err(|e| {
+                let text = match e {
+                    ClientError::Api(api) => api.message,
+                    other => other.to_string(),
+                };
+                wire::without_token(&text, &request.args)
             })
     }
 

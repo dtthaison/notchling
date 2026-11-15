@@ -117,6 +117,7 @@ impl Line {
 pub struct ClusterModel {
     loaded: bool,
     cluster: Option<String>,
+    joining: Option<bool>,
     me: String,
     rows: Vec<NodeRow>,
     link: bool,
@@ -149,15 +150,15 @@ fn versions_of(member: &Value) -> Option<Versions> {
 
 fn os_word(versions: &Versions) -> String {
     let os = match versions.os.as_str() {
-        "macos" => "macOS",
-        "linux" => "Linux",
-        "windows" => "Windows",
+        "macos" => t::cluster::os_macos(),
+        "linux" => t::cluster::os_linux(),
+        "windows" => t::cluster::os_windows(),
         other => other,
     };
     if versions.arch.is_empty() {
         os.to_owned()
     } else {
-        format!("{os} {}", versions.arch)
+        t::cluster::os_arch(os, &versions.arch)
     }
 }
 
@@ -277,9 +278,14 @@ impl ClusterModel {
             .get("cluster")
             .filter(|c| c.is_object())
             .map(|c| text(c, "name").to_owned());
+        let joining = status
+            .get("joining")
+            .filter(|j| j.is_object() && cluster.is_none())
+            .map(|j| flag(j, "answered"));
         ClusterModel {
             loaded: true,
             cluster,
+            joining,
             me: me.to_owned(),
             rows: ranked
                 .into_iter()
@@ -320,7 +326,25 @@ impl ClusterModel {
     }
 
     pub fn can_create(&self) -> bool {
-        self.loaded && self.cluster.is_none() && self.error.is_none()
+        self.loaded && self.cluster.is_none() && self.joining.is_none() && self.error.is_none()
+    }
+
+    pub fn can_join(&self) -> bool {
+        self.can_create()
+    }
+
+    pub fn is_joining(&self) -> bool {
+        self.joining.is_some()
+    }
+
+    pub fn joining_text(&self) -> Option<&'static str> {
+        self.joining.map(|answered| {
+            if answered {
+                t::cluster::joining_waiting()
+            } else {
+                t::cluster::joining_asking()
+            }
+        })
     }
 
     pub fn unbuilt_error(&self) -> Option<&str> {
@@ -331,7 +355,7 @@ impl ClusterModel {
     }
 
     pub fn can_copy_token(&self) -> bool {
-        self.cluster.is_some()
+        self.cluster.is_some() && self.line() == Line::Connected
     }
 
     pub fn line(&self) -> Line {
@@ -350,6 +374,10 @@ impl ClusterModel {
 
     pub fn can_turn_on(&self) -> bool {
         self.cluster.is_some() && !self.link
+    }
+
+    pub fn off_hint(&self) -> Option<&'static str> {
+        (self.can_turn_on() && self.error.is_none()).then(t::cluster::off_hint)
     }
 
     pub fn toggle_can_be_master(&self, id: &str) -> Option<Request> {

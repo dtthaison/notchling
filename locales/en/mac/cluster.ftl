@@ -24,6 +24,13 @@ cluster-role-unknown = Member
 
 ## Rows
 
+# Names of operating systems as shown on a node.
+cluster-os-macos = macOS
+cluster-os-linux = Linux
+cluster-os-windows = Windows
+# An operating system with its processor architecture; $os is its name, $arch for example aarch64.
+cluster-os-arch = { $os } { $arch }
+
 # Beside the name of the node this app is on.
 cluster-this-mac = This Mac
 cluster-online = Online
@@ -60,6 +67,8 @@ cluster-link-not-listening = Not Listening
 cluster-link-on = Connected
 cluster-turn-on = Turn On
 cluster-turn-on-failed = Couldn't turn the cluster on: { $error }
+# Under the connection line while the cluster switch is off; Turn On is the button beside it.
+cluster-off-hint = The cluster is off on this Mac. Turn it on to connect to your other machines.
 
 ## Create and join
 
@@ -67,6 +76,19 @@ cluster-none = No cluster yet. Create one to share work between your machines.
 cluster-name-label = Cluster Name
 cluster-create = Create Cluster
 cluster-create-failed = Couldn't create the cluster: { $error }
+# Above the join token field on the sheet that has no cluster yet.
+cluster-join-intro = Or join a cluster that already exists. Copy a join token on its Primary and paste it here.
+cluster-join-label = Join Token
+cluster-join-placeholder = Paste a join token
+cluster-join = Join
+cluster-join-failed = Couldn't join the cluster: { $error }
+cluster-join-bad-token = That isn't a join token. A join token starts with nlj1.
+# Shown while this Mac's join has not been answered yet.
+cluster-joining-asking = Joining the cluster. Waiting for the Primary to answer…
+# Shown while the Primary has the join request and has not approved it.
+cluster-joining-waiting = Waiting for approval on the Primary. Approve this Mac there to finish joining.
+# Title of the sheet's body while this Mac is joining.
+cluster-joining = Joining…
 cluster-copy-token = Copy Join Token
 cluster-token-copied = Join token copied. It works once, for 10 minutes.
 cluster-token-failed = Couldn't make a join token: { $error }

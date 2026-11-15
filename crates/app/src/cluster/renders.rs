@@ -7,8 +7,9 @@ use crate::views::ViewSpec;
 pub const ME: &str = "a1b2c3d4e5f60718";
 pub const STANDBY: &str = "1122334455667788";
 pub const WORKER: &str = "99aabbccddeeff00";
+pub const THIS_MAC: &str = "MacBook";
 
-pub const VIEWS: [ViewSpec; 4] = [
+pub const VIEWS: [ViewSpec; 6] = [
     ViewSpec {
         name: "cluster",
         size: (WIDTH, HEIGHT),
@@ -16,8 +17,8 @@ pub const VIEWS: [ViewSpec; 4] = [
     },
     ViewSpec {
         name: "cluster-empty",
-        size: (WIDTH, 300.0),
-        about: "the cluster sheet before a cluster exists: Create Cluster (made-up data)",
+        size: (WIDTH, 440.0),
+        about: "the cluster sheet before a cluster exists: Create Cluster and Join (made-up data)",
     },
     ViewSpec {
         name: "cluster-many",
@@ -29,6 +30,16 @@ pub const VIEWS: [ViewSpec; 4] = [
         size: (WIDTH, HEIGHT),
         about: "the cluster sheet with the Standby row's menu open (made-up data)",
     },
+    ViewSpec {
+        name: "cluster-off",
+        size: (WIDTH, HEIGHT),
+        about: "the cluster sheet while the cluster switch is off: the hint and Turn On (made-up data)",
+    },
+    ViewSpec {
+        name: "cluster-joining",
+        size: (WIDTH, 300.0),
+        about: "the cluster sheet while this Mac waits for the Primary to approve its join (made-up data)",
+    },
 ];
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -37,6 +48,8 @@ pub enum Shown {
     Empty,
     Many,
     Menu,
+    Off,
+    Joining,
 }
 
 pub fn shown(name: &str) -> Option<Shown> {
@@ -45,6 +58,8 @@ pub fn shown(name: &str) -> Option<Shown> {
         "cluster-empty" => Some(Shown::Empty),
         "cluster-many" => Some(Shown::Many),
         "cluster-menu" => Some(Shown::Menu),
+        "cluster-off" => Some(Shown::Off),
+        "cluster-joining" => Some(Shown::Joining),
         _ => None,
     }
 }
@@ -141,6 +156,24 @@ pub fn empty() -> Value {
     json!({"cluster": null, "me": ME, "members": [], "link": false, "listening": null, "tailscale": true, "error": null})
 }
 
+pub fn off() -> Value {
+    let mut status = status();
+    status["link"] = json!(false);
+    status["listening"] = Value::Null;
+    status
+}
+
+pub fn joining(answered: bool) -> Value {
+    let mut status = empty();
+    status["joining"] = json!({
+        "since": 1_700_000_000_000_i64,
+        "cluster": "c-1",
+        "primary": STANDBY,
+        "answered": answered,
+    });
+    status
+}
+
 pub fn many() -> Value {
     let mut status = status();
     let extra: Vec<Value> = (1..=6)
@@ -171,6 +204,8 @@ pub fn model_of(which: Shown) -> ClusterModel {
     match which {
         Shown::Empty => model(false),
         Shown::Many => ClusterModel::from_status(&many(), ME),
+        Shown::Off => ClusterModel::from_status(&off(), ME),
+        Shown::Joining => ClusterModel::from_status(&joining(true), ME),
         Shown::Full | Shown::Menu => model(true),
     }
 }

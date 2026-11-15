@@ -17,7 +17,7 @@ use notchling_locale as t;
 
 use super::feed::ClusterFeed;
 use super::model::ClusterModel;
-use super::renders::{model_of, shown, Shown, STANDBY};
+use super::renders::{model_of, shown, Shown, STANDBY, THIS_MAC};
 use super::wire::{self, Request};
 use crate::accounts::flows::Alert;
 use crate::accounts::view_rows::{alert_overlay, Handler};
@@ -30,13 +30,27 @@ pub struct ClusterSheetView {
     pub(super) menu: Option<String>,
     pub(super) removing: Option<String>,
     name: Entity<TextEditor>,
+    token: Entity<TextEditor>,
     busy: bool,
     note: Option<(String, bool)>,
     drawn: u64,
     _name_events: Subscription,
+    _token_events: Subscription,
 }
 
 impl EventEmitter<Dismiss> for ClusterSheetView {}
+
+fn field_box(editor: &Entity<TextEditor>, focused: bool, a: Appearance) -> Div {
+    div()
+        .min_h(px(CONTROL))
+        .px(px(SPACE[1] + 2.0))
+        .flex()
+        .items_center()
+        .rounded(px(RADIUS_SM))
+        .kit_type(TypeRole::Body)
+        .look(&field_look(focused, a))
+        .child(div().flex_1().min_w(px(0.0)).child(editor.clone()))
+}
 
 fn this_mac() -> String {
     notchling_engine::bridge::net::bridge::host_name()
@@ -76,15 +90,24 @@ impl ClusterSheetView {
                 this.create(cx);
             }
         });
+        let token =
+            cx.new(|cx| TextEditor::new(t::cluster::join_placeholder(), 1, cx).single_line());
+        let token_events = cx.subscribe(&token, |this, _, event: &TextEditorEvent, cx| {
+            if *event == TextEditorEvent::Submit {
+                this.join(cx);
+            }
+        });
         ClusterSheetView {
             feed,
             menu: None,
             removing: None,
             name: editor,
+            token,
             busy: false,
             note: None,
             drawn: 0,
             _name_events: events,
+            _token_events: token_events,
         }
     }
 
@@ -138,6 +161,27 @@ impl ClusterSheetView {
             return;
         }
         self.run(wire::create(&name), t::cluster::create_failed, cx);
+    }
+
+    fn join(&mut self, cx: &mut Context<Self>) {
+        if self.busy || !self.feed.snapshot().can_join() {
+            return;
+        }
+        let typed = self.token.read(cx).text().to_owned();
+        let input = wire::join(&typed);
+        if input.clears_field() {
+            self.token.update(cx, |editor, cx| editor.set_text("", cx));
+        }
+        match input {
+            wire::JoinInput::Nothing => {}
+            wire::JoinInput::NotAToken => {
+                self.note = Some((t::cluster::join_bad_token().to_owned(), true));
+                cx.notify();
+            }
+            wire::JoinInput::Send(request) => {
+                self.run(request, t::cluster::join_failed, cx);
+            }
+        }
     }
 
     fn turn_on(&mut self, cx: &mut Context<Self>) {
@@ -198,6 +242,7 @@ impl ClusterSheetView {
 
     fn connection(&self, model: &ClusterModel, a: Appearance, cx: &mut Context<Self>) -> Div {
         let line = model.line();
+        let hint = model.off_hint();
         let ink = if line.is_problem() {
             Ink::Needs
         } else {
@@ -243,7 +288,12 @@ impl ClusterSheetView {
                 .on_click(cx.listener(|this, _, _, cx| this.copy_token(cx))),
             );
         }
-        row
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(SPACE[0]))
+            .child(row)
+            .children(hint.map(|hint| label(hint, TypeRole::Meta, Ink::TextMuted, a)))
     }
 
     fn state(&self) -> PartState {
@@ -266,17 +316,7 @@ impl ClusterSheetView {
                 Ink::TextFaint,
                 a,
             ))
-            .child(
-                div()
-                    .min_h(px(CONTROL))
-                    .px(px(SPACE[1] + 2.0))
-                    .flex()
-                    .items_center()
-                    .rounded(px(RADIUS_SM))
-                    .kit_type(TypeRole::Body)
-                    .look(&field_look(focused, a))
-                    .child(div().flex_1().min_w(px(0.0)).child(self.name.clone())),
-            )
+            .child(field_box(&self.name, focused, a))
             .child(
                 div().flex().child(
                     button(
@@ -289,6 +329,53 @@ impl ClusterSheetView {
                     .on_click(cx.listener(|this, _, _, cx| this.create(cx))),
                 ),
             )
+    }
+
+    fn join_form(&self, focused: bool, a: Appearance, cx: &mut Context<Self>) -> Div {
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(SPACE[1]))
+            .child(label(
+                t::cluster::join_intro(),
+                TypeRole::Body,
+                Ink::TextMuted,
+                a,
+            ))
+            .child(label(
+                t::cluster::join_label(),
+                TypeRole::Label,
+                Ink::TextFaint,
+                a,
+            ))
+            .child(field_box(&self.token, focused, a))
+            .child(
+                div().flex().child(
+                    button(
+                        "cluster-join",
+                        t::cluster::join(),
+                        ButtonKind::Secondary,
+                        self.state(),
+                        a,
+                    )
+                    .on_click(cx.listener(|this, _, _, cx| this.join(cx))),
+                ),
+            )
+            .part("Join Form", a, cx)
+    }
+
+    fn joining_body(&self, text: &str, a: Appearance) -> Div {
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(SPACE[1]))
+            .child(label(
+                t::cluster::joining(),
+                TypeRole::Heading,
+                Ink::Text,
+                a,
+            ))
+            .child(label(text, TypeRole::Body, Ink::TextMuted, a))
     }
 
     fn remove_alert(
@@ -349,8 +436,14 @@ impl Render for ClusterSheetView {
             ));
         } else if let Some(error) = model.unbuilt_error() {
             body = body.child(label(error, TypeRole::Body, Ink::Needs, a));
+        } else if let Some(text) = model.joining_text() {
+            body = body.child(self.joining_body(text, a));
         } else if model.can_create() {
-            body = body.child(self.create_form(self.name.read(cx).is_focused(window), a, cx));
+            let name_focused = self.name.read(cx).is_focused(window);
+            let token_focused = self.token.read(cx).is_focused(window);
+            body = body
+                .child(self.create_form(name_focused, a, cx))
+                .child(self.join_form(token_focused, a, cx));
         } else {
             body = body.child(self.connection(&model, a, cx));
             for row in model.rows() {
@@ -412,7 +505,7 @@ pub fn build_render(name: &str, cx: &mut gpui::App) -> Option<AnyView> {
     let which = shown(name)?;
     let feed = Arc::new(ClusterFeed::fixed(model_of(which)));
     let sheet = cx.new(|cx| {
-        let mut sheet = ClusterSheetView::fixed(feed, "MacBook", cx);
+        let mut sheet = ClusterSheetView::fixed(feed, THIS_MAC, cx);
         if which == Shown::Menu {
             sheet.menu = Some(STANDBY.to_owned());
         }
