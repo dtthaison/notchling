@@ -22,7 +22,7 @@ use notchling_engine::terminal::input_box;
 use notchling_events::kinds::agents::{AnswerKind, HeldThen, PromptKind};
 use notchling_events::kinds::choices::{DoneOrFailed, FailWhy};
 use notchling_events::{Ref, Session};
-use notchling_local_api::{ops, topics, ApiError, Caller, ErrorCode, OpSpec, Tier};
+use notchling_local_api::{ops, topics, ApiError, Caller, ClientKind, ErrorCode, OpSpec, Tier};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -68,6 +68,7 @@ pub trait Room: Send + Sync {
         self.can_answer()
     }
     fn follow_prompts(&self, _node: &str, _lease_ms: u64) {}
+    fn attach_prompt_push(&self, _push: Arc<dyn crate::cluster_forward::PromptPush>) {}
 }
 
 pub trait Attacher: Send + Sync {
@@ -598,6 +599,11 @@ impl ActingOps {
 
     fn permission(&self, caller: &Caller, args: &Value) -> Result<Value, ApiError> {
         let decision = text_arg(args, "decision")?;
+        if decision == "always" && caller.client == ClientKind::Node {
+            return Err(bad(
+                "always can't be granted from another node; allow once, or answer on this machine",
+            ));
+        }
         let who = who(caller, args);
         let Some(prompt) = self.held(args)? else {
             if args.get("expect").is_some() {

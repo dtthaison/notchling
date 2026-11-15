@@ -451,6 +451,17 @@ impl RemoteSessions {
         Value::Array(rows)
     }
 
+    pub fn mirror_of(&self, node: &NodeId, owner_path: &str) -> Option<String> {
+        let book = lock(&self.book);
+        let row =
+            book.nodes.get(node)?.rows.iter().find(|row| {
+                row.get("transcriptPath").and_then(Value::as_str) == Some(owner_path)
+            })?;
+        let qualified = qualify(node, row.get("id")?.as_str()?);
+        let path = mirror_path(&self.mirror, node, &qualified, owner_path)?;
+        is_real_file(&path).then(|| path.to_string_lossy().into_owned())
+    }
+
     pub fn raw(&self, node: &NodeId, id: &str) -> Option<Value> {
         let book = lock(&self.book);
         book.nodes

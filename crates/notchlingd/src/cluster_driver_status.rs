@@ -18,7 +18,29 @@ impl Driver {
         }
     }
 
+    pub(super) fn tell_to(&mut self, nodes: &[NodeId], topic: String, name: String, data: Value) {
+        let msg = Msg::Event { topic, name, data };
+        let Ok(line) = encode(&msg) else {
+            return;
+        };
+        for node in nodes {
+            if let Some(conn) = self.conns.get(node) {
+                let _ = conn.send(line.clone());
+            }
+        }
+    }
+
     pub(super) fn publish(&mut self, topic: &str, name: &str, data: &Value) {
+        if topic == topics::PROMPTS {
+            if let Some(from) = data
+                .get("from")
+                .and_then(Value::as_str)
+                .and_then(NodeId::parse)
+            {
+                self.hooks.peer_prompt(&from, name, data);
+            }
+            return;
+        }
         if topic == topics::SESSIONS && name == topics::SESSIONS_CHANGED {
             if let Some(from) = data
                 .get("from")

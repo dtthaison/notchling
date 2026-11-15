@@ -45,6 +45,7 @@ pub trait Hooks: Send + Sync {
     fn desired(&self, _desired: Desired) {}
     fn wiped(&self) {}
     fn peer_sessions(&self, _from: &NodeId) {}
+    fn peer_prompt(&self, _from: &NodeId, _event: &str, _data: &Value) {}
 }
 
 pub struct NoHooks;
@@ -92,6 +93,7 @@ pub(crate) enum In {
     Core(Input),
     Link(bool),
     Tell(String, String, Value),
+    TellTo(Vec<NodeId>, String, String, Value),
     Stop,
 }
 
@@ -285,6 +287,12 @@ impl ClusterNode {
         let _ = self
             .tx
             .send(In::Tell(topic.to_string(), name.to_string(), data));
+    }
+
+    pub fn tell_to(&self, nodes: Vec<NodeId>, topic: &str, name: &str, data: Value) {
+        let _ = self
+            .tx
+            .send(In::TellTo(nodes, topic.to_string(), name.to_string(), data));
     }
 
     fn wait(&self, make: impl FnOnce(Answer) -> In) -> Result<Value, ApiError> {

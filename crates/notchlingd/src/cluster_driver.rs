@@ -278,6 +278,7 @@ impl Driver {
             In::Core(input) => self.step(input),
             In::Link(on) => self.set_link(on),
             In::Tell(topic, name, data) => self.tell(topic, name, data),
+            In::TellTo(nodes, topic, name, data) => self.tell_to(&nodes, topic, name, data),
             In::Stop => {}
         }
         self.after();

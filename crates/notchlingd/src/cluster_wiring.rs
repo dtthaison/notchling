@@ -9,6 +9,7 @@ use crate::cluster_node::{
     ClusterLog, ClusterNode, ClusterSetup, Hooks, JoinAsk, LocalCalls, NetSide, Probe, Submit, TICK,
 };
 use crate::cluster_ops::{follow_switch, ClusterOps};
+use crate::cluster_prompts::{NodePush, PromptFollower, RemotePrompts};
 use crate::cluster_sessions::{
     is_client, HandlerRows, NodeSource, Refresher, RemoteSessions, SessionCalls,
 };
@@ -134,6 +135,7 @@ pub struct ClusterHooks {
     pub switches: Arc<HeadlessSwitches>,
     pub remote: Arc<RemoteSessions>,
     pub mirror: Arc<Mirror>,
+    pub prompts: Arc<RemotePrompts>,
 }
 
 impl Hooks for ClusterHooks {
@@ -153,6 +155,10 @@ impl Hooks for ClusterHooks {
     fn peer_sessions(&self, from: &NodeId) {
         self.remote.mark_dirty(from);
         self.mirror.nudge();
+    }
+
+    fn peer_prompt(&self, from: &NodeId, event: &str, data: &Value) {
+        self.prompts.on_event(from, event, data);
     }
 }
 
@@ -210,6 +216,8 @@ pub struct ClusterParts {
     pub returns: Arc<ReturnOps>,
     pub shells: Arc<ShellJobs>,
     pub remote: Arc<RemoteSessions>,
+    pub prompts: Arc<RemotePrompts>,
+    follower: Option<PromptFollower>,
     delegate: Arc<RealDelegate>,
     mirror: Arc<Mirror>,
     publisher: Arc<Publisher>,
@@ -333,17 +341,28 @@ impl ClusterParts {
             )),
             switches: switches.clone(),
         });
+        let prompts = Arc::new(RemotePrompts::new(room.clone(), remote.clone()));
         let hooks: Arc<dyn Hooks> = Arc::new(ClusterHooks {
             asker: JoinAsker::new(inbox, JOIN_WAIT),
             switches,
             remote: remote.clone(),
             mirror: mirror.clone(),
+            prompts: prompts.clone(),
         });
         let node = start_node(layout, room.clone(), (local, hooks), versions, log.clone());
         let audit = log.clone();
         let mut refresher = None;
+        let mut follower = None;
         if let Ok(node) = &node {
             reporter.attach(node.clone());
+            let push = Arc::new(NodePush::default());
+            push.attach(node);
+            room.attach_prompt_push(push);
+            follower = Some(PromptFollower::spawn(
+                node.clone(),
+                prompts.clone(),
+                room.clone(),
+            ));
             follow_switch(&link, node);
             rejoin_on_start(&link, node, room.as_ref(), &audit);
             let _ = tail.0.set(NodeSource::new(node.clone()));
@@ -369,6 +388,8 @@ impl ClusterParts {
             shells,
             delegate,
             remote,
+            prompts,
+            follower,
             mirror,
             publisher,
             refresher,
@@ -395,6 +416,9 @@ impl ClusterParts {
     pub fn close(&self) {
         self.delegate.stop();
         self.shells.close();
+        if let Some(follower) = &self.follower {
+            follower.close();
+        }
         self.mirror.close();
         if let Some(refresher) = &self.refresher {
             refresher.close();

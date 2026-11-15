@@ -28,11 +28,16 @@ impl Room for FakeRoom {
         self.followers
             .follow(node, crate::acting_ops::now_ms() + lease_ms as i64);
     }
-    fn publish(&self, _topic: &str, event: &str, data: &Value) {
+    fn attach_prompt_push(&self, push: Arc<dyn crate::cluster_forward::PromptPush>) {
+        self.followers.attach(push);
+    }
+    fn publish(&self, topic: &str, event: &str, data: &Value) {
         self.events
             .lock()
             .unwrap()
             .push((event.to_string(), data.clone()));
+        self.followers
+            .relay(crate::acting_ops::now_ms(), topic, event, data);
     }
     fn can_answer(&self) -> bool {
         self.app.load(Ordering::SeqCst)

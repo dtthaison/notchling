@@ -310,6 +310,35 @@ from the app in this run, or `cluster.join` (below), or a restart of a headless 
 - Calls from other nodes run through the same ops as `ClientKind::Node` with the socket's checks, recorded
   as a `cluster.step` event (`call`, the op and the origin node as `peer`). `node.switch.set {switch, on}` from the home sets `acting`,
   `bridge` or `install` on a node with no app attached, recorded as a `switch.changed` event (cause `cluster_node`).
+- Prompts on other nodes. A client node that has an app attached (`Room::can_answer`) sends every online linked
+  member `node.follow {topic: "prompts"}` (a daemon const, not a wire.rs op; policy `client_plain`) when the link
+  comes up and then every 30 s; the owner leases it for 60 s (`FOLLOW_LEASE_MS`) and answers
+  `{following: true, topic, leaseMs}`. It stops when the app detaches or the node stops being a client, so the
+  leases lapse within 60 s; a Worker never sends it. While a node has an active lease, it also sends each
+  hook-prompt `prompt.pending` and `prompt.resolved` of its own (topic `prompts`, the bodies below) to those
+  nodes only, as peer events (`Msg::Event`); agy prompts (they carry `tool`) and prompts that are themselves
+  remote (their `id` has a `/`) are never sent on. The receiving core publishes a `prompts` peer event only
+  when this node is a client and the sender an active member, with `from` set to the real sender.
+- The client republishes them on its own local `prompts` topic (app tier) with qualified ids (`<node>/<id>`,
+  decision 0012). `prompt.pending` is `{id: "<node>/<prompt>", sessionId: "<node>/<session>" or "", kind:
+  "permission" | "question", toolName, summary, input, canAlwaysAllow: false, question, cwd, transcriptPath,
+  createdMs, node: "<node id>"}`: `transcriptPath` is the mirror file of the session whose owner path the
+  prompt named when a mirror exists, else `null`, never the owner's path; `canAlwaysAllow` is always `false`
+  (below). `prompt.resolved` is `{id, sessionId, outcome, by, node}`. Everything from the peer is validated: ids
+  are bare (no `/`, no control characters, at most 128 bytes), `kind` is `permission` or `question`, text is cut
+  at 4096 characters, an `input` over 64 KB becomes `{}` and a `question` over 64 KB drops the event, unknown
+  fields are dropped, at most 50 prompts per node and 200 in all. When the link comes up the client fills the
+  table from the owner's `prompts.list` (the same op, called as a node, so it never carries remote prompts). A
+  node going offline, leaving, a lapsed follow, or the app detaching publishes `prompt.resolved {outcome:
+  "pass", by: "offline" | "unfollowed"}` for each of that node's prompts and drops them.
+- `prompts.list` on a client also carries the remote pending prompts (qualified, the shape above), after its
+  own, for an app caller and never for a `ClientKind::Node` caller.
+- Answer one with `session.permission {id: "<node>/<prompt>", decision: "allow" | "deny", message?}` or
+  `session.answer {id: "<node>/<prompt>", answers}`: the `id` field is routed to the owner with the bare id
+  (app tier only, as every forwarded op), where the usual checks apply and it arrives as a `ClientKind::Node`
+  app-origin call. `decision: "always"` from another node is refused with `bad_request` ("always can't be
+  granted from another node; allow once, or answer on this machine"): it would write a permanent rule on a
+  machine whose owner isn't at the keyboard.
 
 ## `codex_ops.rs`
 

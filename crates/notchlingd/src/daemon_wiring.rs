@@ -11,6 +11,7 @@ use crate::bridge_backend::APPROVAL_WAIT;
 use crate::bridge_ops::{BridgeOps, BridgeSetup};
 use crate::catalog_ops::CatalogService;
 use crate::cluster_forward::Forward;
+use crate::cluster_prompts::RemotePrompts;
 use crate::cluster_sessions::RemoteSessions;
 use crate::cluster_wiring::ClusterParts;
 use crate::codex_children::CodexChildren;
@@ -72,6 +73,7 @@ pub struct Ops {
     groups: Vec<Arc<dyn OpGroup>>,
     forward: Option<Arc<dyn Forward>>,
     remote: Option<Arc<RemoteSessions>>,
+    prompts: Option<Arc<RemotePrompts>>,
     topic_list: Vec<&'static str>,
     first: Arc<FirstScan>,
     first_wait: Duration,
@@ -91,6 +93,7 @@ impl Ops {
             groups: Vec::new(),
             forward: None,
             remote: None,
+            prompts: None,
             topic_list: vec![topics::SESSIONS],
             first: FirstScan::open(),
             first_wait: FIRST_LIST_WAIT,
@@ -171,6 +174,11 @@ impl Ops {
     ) -> Ops {
         self.forward = forward;
         self.remote = Some(remote);
+        self
+    }
+
+    pub fn with_remote_prompts(mut self, prompts: Arc<RemotePrompts>) -> Ops {
+        self.prompts = Some(prompts);
         self
     }
 
@@ -320,6 +328,13 @@ impl Handler for Ops {
         }
         match (op, &self.acting) {
             (ops::SESSIONS_LIST, _) => self.sessions_list(caller, args).map(|(list, _)| list),
+            (ops::PROMPTS_LIST, Some(acting)) => {
+                let local = acting.call(caller, op, args)?;
+                Ok(match &self.prompts {
+                    Some(prompts) => prompts.merge(local, caller),
+                    None => local,
+                })
+            }
             (op, Some(acting)) => acting.call(caller, op, args),
             (op, None) => Err(ApiError::internal(format!("{op} has no handler"))),
         }
@@ -718,6 +733,7 @@ impl Wired {
             .with_group(self.cluster.returns.clone())
             .with_shells(self.cluster.shells.clone())
             .with_cluster(self.cluster.forward(), self.cluster.remote.clone())
+            .with_remote_prompts(self.cluster.prompts.clone())
             .with_group(Arc::new(git))
             .with_group(Arc::new(AwakeOps::new(self.awake.clone())))
             .with_group(self.codex_children.clone())

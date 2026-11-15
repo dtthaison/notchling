@@ -2,10 +2,10 @@ use crate::cluster_node::ClusterNode;
 use notchling_engine::cluster::policy::RULES;
 use notchling_engine::cluster::wire::{Origin, OriginTier};
 use notchling_engine::cluster::{LocalCmd, NodeId, Qualified};
-use notchling_local_api::{ApiError, Caller, ClientKind, ErrorCode, Tier};
+use notchling_local_api::{topics, ApiError, Caller, ClientKind, ErrorCode, Tier};
 use serde_json::Value;
 use std::collections::BTreeMap;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 pub const NODE_FOLLOW: &str = "node.follow";
 pub const FOLLOW_LEASE_MS: u64 = 60_000;
@@ -63,9 +63,14 @@ impl Forward for NodeForward {
     }
 }
 
+pub trait PromptPush: Send + Sync {
+    fn push(&self, nodes: &[String], event: &str, data: &Value);
+}
+
 #[derive(Default)]
 pub struct PromptFollowers {
     until: Mutex<BTreeMap<String, i64>>,
+    push: OnceLock<Arc<dyn PromptPush>>,
 }
 
 impl PromptFollowers {
@@ -76,9 +81,37 @@ impl PromptFollowers {
     }
 
     pub fn active(&self, now_ms: i64) -> bool {
+        !self.nodes(now_ms).is_empty()
+    }
+
+    pub fn nodes(&self, now_ms: i64) -> Vec<String> {
         let mut until = self.until.lock().unwrap_or_else(|e| e.into_inner());
         until.retain(|_, end| *end > now_ms);
-        !until.is_empty()
+        until.keys().cloned().collect()
+    }
+
+    pub fn attach(&self, push: Arc<dyn PromptPush>) {
+        let _ = self.push.set(push);
+    }
+
+    pub fn relay(&self, now_ms: i64, topic: &str, event: &str, data: &Value) {
+        if topic != topics::PROMPTS
+            || !(event == topics::PROMPT_PENDING || event == topics::PROMPT_RESOLVED)
+            || data.get("tool").is_some()
+            || data
+                .get("id")
+                .and_then(Value::as_str)
+                .is_none_or(|id| id.contains('/'))
+        {
+            return;
+        }
+        let Some(push) = self.push.get() else {
+            return;
+        };
+        let nodes = self.nodes(now_ms);
+        if !nodes.is_empty() {
+            push.push(&nodes, event, data);
+        }
     }
 }
 
