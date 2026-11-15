@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 
 pub const MIN_HIDDEN: usize = 4;
 
+#[derive(Clone)]
 pub struct Redactor {
     pairs: Vec<(Vec<u8>, Vec<u8>)>,
     pending: Vec<u8>,
@@ -26,6 +27,10 @@ impl Redactor {
             pairs,
             pending: Vec::new(),
         }
+    }
+
+    pub fn held(&self) -> &[u8] {
+        &self.pending
     }
 
     pub fn feed(&mut self, data: &[u8]) -> Vec<u8> {
@@ -127,4 +132,89 @@ impl Redactor {
 
 fn end_of(run: &[Hit]) -> usize {
     run.iter().map(|h| h.end).max().unwrap_or(0)
+}
+
+impl Drop for Redactor {
+    fn drop(&mut self) {
+        for (value, mask) in self.pairs.iter_mut() {
+            wipe(value);
+            wipe(mask);
+        }
+        let capacity = self.pending.capacity();
+        self.pending.resize(capacity, 0);
+        wipe(&mut self.pending);
+    }
+}
+
+fn wipe(bytes: &mut [u8]) {
+    for byte in bytes.iter_mut() {
+        unsafe { std::ptr::write_volatile(byte, 0) };
+    }
+    std::sync::atomic::compiler_fence(std::sync::atomic::Ordering::SeqCst);
+}
+
+pub fn wipe_forms(forms: BTreeMap<String, String>) {
+    for (key, mask) in forms {
+        wipe(&mut key.into_bytes());
+        wipe(&mut mask.into_bytes());
+    }
+}
+
+const MIN_LINE: usize = 8;
+
+fn json_inner(text: &str) -> String {
+    let quoted = serde_json::to_string(text).unwrap_or_default();
+    quoted
+        .strip_prefix('"')
+        .and_then(|rest| rest.strip_suffix('"'))
+        .unwrap_or_default()
+        .to_string()
+}
+
+fn ascii_escaped(text: &str) -> String {
+    let mut out = String::new();
+    for ch in text.chars() {
+        if ch.is_ascii() {
+            out.push(ch);
+        } else {
+            let mut units = [0u16; 2];
+            for unit in ch.encode_utf16(&mut units) {
+                out.push_str(&format!("\\u{unit:04x}"));
+            }
+        }
+    }
+    out
+}
+
+fn forms_of(text: &str, into: &mut Vec<String>) {
+    into.push(text.to_string());
+    let json = json_inner(text);
+    if json.contains('/') {
+        into.push(json.replace('/', "\\/"));
+    }
+    if !text.is_ascii() {
+        let escaped = ascii_escaped(&json);
+        if escaped.contains('/') {
+            into.push(escaped.replace('/', "\\/"));
+        }
+        into.push(escaped);
+    }
+    into.push(json);
+}
+
+pub fn hide_forms(value: &str, mask: &str) -> BTreeMap<String, String> {
+    let mut forms = Vec::new();
+    forms_of(value, &mut forms);
+    if value.contains(['\n', '\r']) {
+        for line in value.split(['\n', '\r']) {
+            if line.chars().count() >= MIN_LINE {
+                forms_of(line, &mut forms);
+            }
+        }
+    }
+    forms
+        .into_iter()
+        .filter(|form| !form.is_empty())
+        .map(|form| (form, mask.to_string()))
+        .collect()
 }

@@ -25,7 +25,7 @@ pub use entry::{
     default_vars, prefix, valid_name, valid_var, Field, HostChange, Kind, PrefillChanges,
     VaultEntry, VaultRequest, VaultValue,
 };
-pub use redact::Redactor;
+pub use redact::{hide_forms, wipe_forms, Redactor};
 pub use store::{
     system_keychain, KeychainError, Saved, Unsupported, VaultError, VaultKeychain, VaultStore,
 };

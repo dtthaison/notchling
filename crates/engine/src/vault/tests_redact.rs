@@ -299,3 +299,58 @@ fn a_value_split_across_the_commands_writes_is_still_hidden() {
     assert_eq!(code, 0);
     assert_eq!(String::from_utf8(out).unwrap(), "[secret:x] done");
 }
+
+const PEM: &str = "-----BEGIN NL-MARKER-7-----\nNL-MARKER-7-LINE-AAAAAAAA\nNL-MARKER-7-LINE-BBBBBBBB\n-----END NL-MARKER-7-----";
+
+#[test]
+fn hide_forms_cover_json_escaped_and_lines() {
+    let forms = super::redact::hide_forms(PEM, "[secret pem]");
+    assert!(forms.contains_key(PEM));
+    assert!(forms.contains_key(&PEM.replace('\n', "\\n")));
+    assert!(forms.contains_key("NL-MARKER-7-LINE-AAAAAAAA"));
+    assert!(forms.contains_key("NL-MARKER-7-LINE-BBBBBBBB"));
+    assert!(forms.contains_key("-----BEGIN NL-MARKER-7-----"));
+    assert!(forms.values().all(|m| m == "[secret pem]"));
+
+    let crlf = super::redact::hide_forms(
+        "NL-MARKER-8-LINE-AAAAAAAA\r\nNL-MARKER-8-LINE-BBBBBBBB",
+        "[m]",
+    );
+    assert!(crlf.contains_key("NL-MARKER-8-LINE-AAAAAAAA"));
+    assert!(crlf.contains_key("NL-MARKER-8-LINE-BBBBBBBB"));
+    assert!(crlf.contains_key("NL-MARKER-8-LINE-AAAAAAAA\\r\\nNL-MARKER-8-LINE-BBBBBBBB"));
+
+    let short = super::redact::hide_forms("short\nlonger-than-eight", "[m]");
+    assert!(!short.contains_key("short"));
+    assert!(short.contains_key("longer-than-eight"));
+
+    let quoted = super::redact::hide_forms("NL-MARKER-9\"q/x\\y", "[m]");
+    assert!(quoted.contains_key("NL-MARKER-9\\\"q/x\\\\y"));
+    assert!(quoted.contains_key("NL-MARKER-9\\\"q\\/x\\\\y"));
+
+    let wide = super::redact::hide_forms("NL-MARKER-10-\u{e9}", "[m]");
+    assert!(wide.contains_key("NL-MARKER-10-\\u00e9"));
+}
+
+#[test]
+fn hidden_forms_mask_a_json_line() {
+    let forms = super::redact::hide_forms(PEM, "[secret pem]");
+    let line = format!("{{\"text\":{}}}\n", serde_json::to_string(PEM).unwrap());
+    let out = String::from_utf8(run_chunks(&forms, &[line.as_bytes()])).unwrap();
+    assert!(!out.contains("NL-MARKER-7"));
+    assert!(out.contains("[secret pem]"));
+}
+
+#[test]
+fn a_cloned_redactor_keeps_its_own_state() {
+    let h = hide(&[("abcdefgh", "[x]")]);
+    let mut a = Redactor::new(&h);
+    let mut b = a.clone();
+    let mut out = a.feed(b"one abc");
+    assert!(!a.held().is_empty());
+    assert!(b.held().is_empty());
+    out.extend(a.feed(b"defgh two"));
+    out.extend(a.finish());
+    assert_eq!(String::from_utf8(out).unwrap(), "one [x] two");
+    assert_eq!(b.feed(b"plain"), b"plain");
+}
