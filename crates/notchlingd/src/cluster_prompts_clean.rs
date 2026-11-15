@@ -97,7 +97,7 @@ pub fn clean_pending(node: &NodeId, raw: &Value, find: Finder) -> Option<Value> 
     if let Some(row) = found.row {
         out["rowId"] = json!(row);
     }
-    Some(out)
+    crate::prompts::push_row(&out)
 }
 
 pub fn clean_resolved(node: &NodeId, raw: &Value) -> Option<(String, Value)> {

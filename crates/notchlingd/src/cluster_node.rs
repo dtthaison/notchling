@@ -93,7 +93,7 @@ pub(crate) enum In {
     Core(Input),
     Link(bool),
     Tell(String, String, Value),
-    TellTo(Vec<NodeId>, String, String, Value),
+    TellTo(Vec<NodeId>, bool, String, String, Value),
     Stop,
 }
 
@@ -290,9 +290,21 @@ impl ClusterNode {
     }
 
     pub fn tell_to(&self, nodes: Vec<NodeId>, topic: &str, name: &str, data: Value) {
-        let _ = self
-            .tx
-            .send(In::TellTo(nodes, topic.to_string(), name.to_string(), data));
+        self.send_to(nodes, false, topic, name, data);
+    }
+
+    pub fn tell_clients(&self, nodes: Vec<NodeId>, topic: &str, name: &str, data: Value) {
+        self.send_to(nodes, true, topic, name, data);
+    }
+
+    fn send_to(&self, nodes: Vec<NodeId>, clients: bool, topic: &str, name: &str, data: Value) {
+        let _ = self.tx.send(In::TellTo(
+            nodes,
+            clients,
+            topic.to_string(),
+            name.to_string(),
+            data,
+        ));
     }
 
     fn wait(&self, make: impl FnOnce(Answer) -> In) -> Result<Value, ApiError> {

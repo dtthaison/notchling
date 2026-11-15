@@ -76,6 +76,13 @@ impl PromptSource for FakeSource {
     }
 }
 
+pub(super) fn inline() -> super::Spawn {
+    Arc::new(|job: super::Job| {
+        job();
+        Ok(())
+    })
+}
+
 pub(super) struct OneRow(pub(super) Value);
 
 impl RowSource for OneRow {
@@ -95,7 +102,7 @@ pub(super) fn unit() -> Unit {
     let dir = Dir::new("prompts");
     let room = Arc::new(crate::acting_ops_tests::FakeRoom::default());
     let remote = Arc::new(RemoteSessions::new(dir.path().join("mirror")));
-    let prompts = RemotePrompts::with_spawn(room.clone(), remote.clone(), Arc::new(|job| job()));
+    let prompts = RemotePrompts::with_spawn(room.clone(), remote.clone(), inline());
     Unit {
         room,
         remote,
@@ -526,7 +533,7 @@ fn rig() -> Rig {
     client_room.app.store(true, Ordering::SeqCst);
     let dir = Dir::new("prompts-rig");
     let remote = Arc::new(RemoteSessions::new(dir.path().join("mirror")));
-    let prompts = RemotePrompts::with_spawn(client_room.clone(), remote, Arc::new(|job| job()));
+    let prompts = RemotePrompts::with_spawn(client_room.clone(), remote, inline());
     let mut worker = Opts::named("worker");
     worker.local = Some(local);
     worker.room = Some(room.clone());

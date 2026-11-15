@@ -316,7 +316,7 @@ from the app in this run, or `cluster.join` (below), or a restart of a headless 
   `{following: true, topic, leaseMs}`. It stops when the app detaches or the node stops being a client, so the
   leases lapse within 60 s; a Worker never sends it. While a node has an active lease, it also sends each
   hook-prompt `prompt.pending` and `prompt.resolved` of its own (topic `prompts`, the bodies below) to those
-  nodes only (and only those that are still active client members when it is sent), as peer events
+  nodes only (and only those that are still active client members when the cluster driver sends it), as peer events
   (`Msg::Event`); a `prompt.pending` is first trimmed with the rule `prompts.list` uses (a row over 128 KB gets
   its `input` cut to `{}` and its text to 4000 characters and `trimmed: true`; one still over 128 KB is not
   sent); agy prompts (they carry `tool`) and prompts that are themselves
@@ -335,7 +335,9 @@ from the app in this run, or `cluster.join` (below), or a restart of a headless 
   are bare (no `/`, no control characters, at most 128 bytes), `kind` is `permission` or `question`, text is cut
   at 4096 characters, an `input` over 64 KB becomes `{}` (with `trimmed: true`) and a `question` over 128 KB, the owner's own row
   limit, drops the event, unknown
-  fields are dropped, at most 50 prompts per node and 200 in all. Each renewal (every 30 s, and the
+  fields are dropped, at most 50 prompts per node and 200 in all. The shaped row then gets the whole-row rule of
+  `prompts.list` (over 128 KB: trimmed as above; still over: not published), so every published row is listable.
+  Each `prompt.pending` the client publishes is followed by its `prompt.resolved`, never the other way round. Each renewal (every 30 s, and the
   first one when the link comes up) the client also reads the owner's `prompts.list` (the same op, called as a
   node, so it never carries remote prompts), adds what it lacks and resolves (`by: "unlisted"`) what it held
   before the call that the owner no longer lists, so a lost `prompt.resolved` is repaired; a follow that

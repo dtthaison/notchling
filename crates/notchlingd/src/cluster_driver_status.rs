@@ -1,7 +1,7 @@
 use super::Driver;
 use crate::cluster_node::lock;
 use notchling_engine::cluster::wire::{encode, Msg};
-use notchling_engine::cluster::NodeId;
+use notchling_engine::cluster::{MemberState, NodeId};
 use notchling_events::kinds::security::ClusterStep;
 use notchling_events::spec::Outcome;
 use notchling_local_api::topics;
@@ -18,12 +18,25 @@ impl Driver {
         }
     }
 
-    pub(super) fn tell_to(&mut self, nodes: &[NodeId], topic: String, name: String, data: Value) {
+    pub(super) fn tell_to(
+        &mut self,
+        nodes: &[NodeId],
+        clients: bool,
+        topic: String,
+        name: String,
+        data: Value,
+    ) {
         let msg = Msg::Event { topic, name, data };
         let Ok(line) = encode(&msg) else {
             return;
         };
-        for node in nodes {
+        let members = self.core.state().map(|s| &s.members);
+        let client = |node: &NodeId| {
+            members
+                .and_then(|m| m.get(node))
+                .is_some_and(|m| m.state == MemberState::Active && m.client)
+        };
+        for node in nodes.iter().filter(|n| !clients || client(n)) {
             if let Some(conn) = self.conns.get(node) {
                 let _ = conn.send(line.clone());
             }

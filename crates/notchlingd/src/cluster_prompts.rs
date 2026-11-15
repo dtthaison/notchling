@@ -1,23 +1,23 @@
 use crate::acting_ops::Room;
 use crate::cluster_forward::{PromptPush, NODE_FOLLOW};
 use crate::cluster_node::ClusterNode;
+use crate::cluster_prompts_book::{Book, Ticket};
 use crate::cluster_prompts_clean::{clean_pending, clean_resolved, Found};
 use crate::cluster_sessions::{is_client, peers_of, NodeSource, Peer, RemoteSessions};
 use notchling_engine::cluster::NodeId;
 use notchling_local_api::{ops, topics, ApiError, Caller, ClientKind};
 use serde_json::{json, Value};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::sync::mpsc::{channel, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, Weak};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
+pub use crate::cluster_prompts_book::{GONE_MAX, MAX_PER_NODE, MAX_TOTAL};
 pub use crate::cluster_prompts_clean::{ID_MAX, INPUT_MAX, QUESTION_MAX, TEXT_MAX};
 
 pub const FOLLOW_EVERY_MS: u64 = 30_000;
 pub const LEASE_MS: u64 = crate::cluster_forward::FOLLOW_LEASE_MS;
 pub const RETRY_MS: u64 = 5_000;
-pub const MAX_PER_NODE: usize = 50;
-pub const MAX_TOTAL: usize = 200;
 const LOOP_EVERY: Duration = Duration::from_secs(1);
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -45,65 +45,32 @@ impl PromptSource for NodeSource {
 }
 
 pub type Job = Box<dyn FnOnce() + Send>;
-pub type Spawn = Arc<dyn Fn(Job) + Send + Sync>;
+pub type Spawn = Arc<dyn Fn(Job) -> std::io::Result<()> + Send + Sync>;
+pub type Ticks = Arc<dyn Fn() -> u64 + Send + Sync>;
 
 fn threaded() -> Spawn {
     Arc::new(|job: Job| {
-        let _ = std::thread::Builder::new()
+        std::thread::Builder::new()
             .name("cluster-prompts-ask".into())
-            .spawn(job);
+            .spawn(job)
+            .map(|_| ())
     })
 }
 
-#[derive(Default)]
-struct Followed {
-    next_at: u64,
-    ok_at: Option<u64>,
-    listing: bool,
-    gone: BTreeSet<String>,
+fn monotonic() -> Ticks {
+    let start = Instant::now();
+    Arc::new(move || u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX))
 }
 
-impl Followed {
-    fn following(&self) -> bool {
-        self.ok_at.is_some()
-    }
+#[derive(Clone, Copy)]
+struct At {
+    now: u64,
+    tick: u64,
 }
 
-#[derive(Default)]
-struct Book {
-    followed: BTreeMap<NodeId, Followed>,
-    prompts: BTreeMap<String, (NodeId, Value)>,
-    busy: BTreeSet<NodeId>,
-    epoch: u64,
-}
-
-impl Book {
-    fn count(&self, node: &NodeId) -> usize {
-        self.prompts.values().filter(|(n, _)| n == node).count()
-    }
-
-    fn ids_of(&self, node: &NodeId) -> BTreeSet<String> {
-        self.prompts
-            .iter()
-            .filter(|(_, (n, _))| n == node)
-            .map(|(id, _)| id.clone())
-            .collect()
-    }
-
-    fn put(&mut self, node: &NodeId, shaped: Value) -> bool {
-        let Some(id) = shaped.get("id").and_then(Value::as_str).map(String::from) else {
-            return false;
-        };
-        match self.prompts.get(&id) {
-            Some((_, old)) if *old == shaped => return false,
-            Some(_) => {}
-            None if self.count(node) >= MAX_PER_NODE || self.prompts.len() >= MAX_TOTAL => {
-                return false
-            }
-            None => {}
-        }
-        self.prompts.insert(id, (node.clone(), shaped));
-        true
+impl At {
+    fn later(&self, tick: u64) -> u64 {
+        self.now.saturating_add(tick.saturating_sub(self.tick))
     }
 }
 
@@ -112,22 +79,22 @@ pub struct RemotePrompts {
     mirror: Arc<RemoteSessions>,
     book: Mutex<Book>,
     spawn: Spawn,
+    ticks: Ticks,
 }
 
-fn resolved_for(shaped: &Value, by: &str) -> Value {
-    let mut data = json!({
-        "id": shaped["id"], "sessionId": shaped["sessionId"],
-        "outcome": "pass", "by": by, "node": shaped["node"],
-    });
-    if let Some(row) = shaped.get("rowId") {
-        data["rowId"] = row.clone();
+struct Draining<'a>(&'a Mutex<Book>);
+
+impl Drop for Draining<'_> {
+    fn drop(&mut self) {
+        if std::thread::panicking() {
+            lock(self.0).release();
+        }
     }
-    data
 }
 
 impl RemotePrompts {
     pub fn new(room: Arc<dyn Room>, mirror: Arc<RemoteSessions>) -> Arc<RemotePrompts> {
-        RemotePrompts::with_spawn(room, mirror, threaded())
+        RemotePrompts::with_seams(room, mirror, threaded(), monotonic())
     }
 
     pub fn with_spawn(
@@ -135,16 +102,44 @@ impl RemotePrompts {
         mirror: Arc<RemoteSessions>,
         spawn: Spawn,
     ) -> Arc<RemotePrompts> {
+        RemotePrompts::with_seams(room, mirror, spawn, monotonic())
+    }
+
+    pub fn with_seams(
+        room: Arc<dyn Room>,
+        mirror: Arc<RemoteSessions>,
+        spawn: Spawn,
+        ticks: Ticks,
+    ) -> Arc<RemotePrompts> {
         Arc::new(RemotePrompts {
             room,
             mirror,
             book: Mutex::new(Book::default()),
             spawn,
+            ticks,
         })
     }
 
-    fn announce(&self, event: &str, data: &Value) {
-        self.room.publish(topics::PROMPTS, event, data);
+    fn change<R>(&self, edit: impl FnOnce(&mut Book) -> R) -> R {
+        let out = edit(&mut lock(&self.book));
+        self.flush();
+        out
+    }
+
+    fn flush(&self) {
+        if !lock(&self.book).claim() {
+            return;
+        }
+        let _guard = Draining(&self.book);
+        loop {
+            let batch = lock(&self.book).next_batch();
+            let Some(batch) = batch else {
+                return;
+            };
+            for (event, data) in batch {
+                self.room.publish(topics::PROMPTS, event, &data);
+            }
+        }
     }
 
     fn find(&self) -> impl Fn(&NodeId, &str, &str) -> Found + '_ {
@@ -179,180 +174,100 @@ impl RemotePrompts {
     }
 
     pub fn drop_node(&self, node: &NodeId, why: &str) {
-        let gone: Vec<Value> = {
-            let mut book = lock(&self.book);
-            book.epoch += 1;
-            book.followed.remove(node);
-            let ids = book.ids_of(node);
-            ids.iter()
-                .filter_map(|id| book.prompts.remove(id).map(|(_, p)| p))
-                .collect()
-        };
-        for prompt in gone {
-            self.announce(topics::PROMPT_RESOLVED, &resolved_for(&prompt, why));
-        }
+        self.change(|book| book.drop_node(node, why));
     }
 
     pub fn stop(&self, why: &str) {
-        let nodes: BTreeSet<NodeId> = {
-            let book = lock(&self.book);
-            book.followed
-                .keys()
-                .cloned()
-                .chain(book.prompts.values().map(|(n, _)| n.clone()))
-                .collect()
-        };
-        for node in nodes {
-            self.drop_node(&node, why);
-        }
+        self.change(|book| book.stop(why));
     }
 
     pub fn on_event(&self, from: &NodeId, event: &str, data: &Value) {
-        let announce = match event {
+        match event {
             topics::PROMPT_PENDING => {
                 let Some(shaped) = clean_pending(from, data, &self.find()) else {
                     return;
                 };
-                let mut book = lock(&self.book);
-                if !book.followed.get(from).is_some_and(Followed::following) {
-                    return;
-                }
-                if let Some(id) = shaped.get("id").and_then(Value::as_str) {
-                    if let Some(f) = book.followed.get_mut(from) {
-                        f.gone.remove(id);
-                    }
-                }
-                book.put(from, shaped.clone()).then_some((event, shaped))
+                self.change(|book| book.pending(from, shaped));
             }
             topics::PROMPT_RESOLVED => {
-                let Some((id, mut shaped)) = clean_resolved(from, data) else {
+                let Some((id, shaped)) = clean_resolved(from, data) else {
                     return;
                 };
-                let mut book = lock(&self.book);
-                let Some(f) = book.followed.get_mut(from).filter(|f| f.following()) else {
-                    return;
-                };
-                if f.listing {
-                    f.gone.insert(id.clone());
-                }
-                let held = match book.prompts.get(&id) {
-                    Some((n, p)) if n == from => Some(p.clone()),
-                    _ => None,
-                };
-                if let Some(prompt) = &held {
-                    book.prompts.remove(&id);
-                    if let Some(row) = prompt.get("rowId") {
-                        shaped["rowId"] = row.clone();
-                    }
-                }
-                held.map(|_| (event, shaped))
+                self.change(|book| book.resolved(from, &id, shaped));
             }
-            _ => return,
-        };
-        if let Some((event, data)) = announce {
-            self.announce(event, &data);
+            _ => {}
         }
     }
 
-    fn fill(&self, node: &NodeId, listed: &Value, before: &BTreeSet<String>) {
-        let Value::Array(rows) = listed else {
+    fn renew(&self, node: &NodeId, source: &dyn PromptSource, at: At, ticket: Ticket) {
+        if !lock(&self.book).current(node, ticket) {
             return;
-        };
-        let mut fresh = Vec::new();
-        let mut gone = Vec::new();
-        {
-            let mut book = lock(&self.book);
-            let mut seen = BTreeSet::new();
-            for row in rows.iter().filter(|r| r.get("tool").is_none()) {
-                let Some(shaped) = clean_pending(node, row, &self.find()) else {
-                    continue;
-                };
-                let id = shaped
-                    .get("id")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default()
-                    .to_string();
-                seen.insert(id.clone());
-                let skip = book
-                    .followed
-                    .get(node)
-                    .is_none_or(|f| f.gone.contains(&id) || !f.following());
-                if !skip && book.put(node, shaped.clone()) {
-                    fresh.push(shaped);
-                }
-            }
-            for id in before.difference(&seen) {
-                if let Some((_, prompt)) = book.prompts.remove(id) {
-                    gone.push(prompt);
-                }
-            }
         }
-        for prompt in gone {
-            self.announce(topics::PROMPT_RESOLVED, &resolved_for(&prompt, "unlisted"));
-        }
-        for prompt in fresh {
-            self.announce(topics::PROMPT_PENDING, &prompt);
-        }
-    }
-
-    fn renew(&self, node: &NodeId, source: &dyn PromptSource, now: u64) {
-        let epoch = lock(&self.book).epoch;
         let followed = source.follow(node);
-        if lock(&self.book).epoch != epoch {
-            return;
-        }
-        let lapsed = lock(&self.book)
-            .followed
-            .get(node)
-            .and_then(|f| f.ok_at)
-            .is_some_and(|at| now >= at + LEASE_MS);
-        match followed {
-            Ok(()) => {
-                if lapsed {
-                    self.drop_node(node, "unfollowed");
-                }
-                {
-                    let mut book = lock(&self.book);
-                    let f = book.followed.entry(node.clone()).or_default();
-                    f.ok_at = Some(now);
-                    f.next_at = now + FOLLOW_EVERY_MS;
-                }
-                self.relist(node, source, now);
+        let done = at.later((self.ticks)());
+        let next = self.change(|book| {
+            if !book.current(node, ticket) {
+                return None;
             }
-            Err(_) => {
-                if lapsed {
-                    self.drop_node(node, "unfollowed");
-                }
-                let mut book = lock(&self.book);
-                book.followed.entry(node.clone()).or_default().next_at = now + RETRY_MS;
+            let lapsed = book
+                .followed
+                .get(node)
+                .and_then(|f| f.ok_at)
+                .is_some_and(|ok| done >= ok.saturating_add(LEASE_MS));
+            if lapsed {
+                book.drop_node(node, "unfollowed");
             }
+            let fresh = book.ticket(node);
+            let f = book.followed.entry(node.clone()).or_default();
+            match followed {
+                Ok(()) => {
+                    f.ok_at = Some(at.now);
+                    f.next_at = at.now + FOLLOW_EVERY_MS;
+                    Some(fresh)
+                }
+                Err(_) => {
+                    f.next_at = done + RETRY_MS;
+                    None
+                }
+            }
+        });
+        if let Some(ticket) = next {
+            self.relist(node, source, at, ticket);
         }
     }
 
-    fn relist(&self, node: &NodeId, source: &dyn PromptSource, now: u64) {
-        let (epoch, before) = {
+    fn relist(&self, node: &NodeId, source: &dyn PromptSource, at: At, ticket: Ticket) {
+        let before = {
             let mut book = lock(&self.book);
-            if let Some(f) = book.followed.get_mut(node) {
-                f.listing = true;
-                f.gone.clear();
+            if !book.current(node, ticket) {
+                return;
             }
-            (book.epoch, book.ids_of(node))
+            let Some(f) = book.followed.get_mut(node) else {
+                return;
+            };
+            f.listing = true;
+            f.gone.clear();
+            book.ids_of(node)
         };
         let answer = source.list(node);
-        if lock(&self.book).epoch != epoch {
-            return;
-        }
-        if let Ok(rows) = &answer {
-            self.fill(node, rows, &before);
-        }
-        let mut book = lock(&self.book);
-        if let Some(f) = book.followed.get_mut(node) {
-            f.listing = false;
-            f.gone.clear();
-            if answer.is_err() {
-                f.next_at = now + RETRY_MS;
+        let done = at.later((self.ticks)());
+        let find = self.find();
+        self.change(|book| {
+            if book.current(node, ticket) {
+                match &answer {
+                    Ok(rows) => book.fill(node, rows, &before, &find),
+                    Err(_) => {
+                        if let Some(f) = book.followed.get_mut(node) {
+                            f.next_at = done + RETRY_MS;
+                        }
+                    }
+                }
             }
-        }
+            if let Some(f) = book.followed.get_mut(node) {
+                f.listing = false;
+                f.gone.clear();
+            }
+        });
     }
 
     pub fn sync<S: PromptSource + 'static>(
@@ -366,34 +281,37 @@ impl RemotePrompts {
             self.stop("unfollowed");
             return;
         }
-        let online: Vec<&Peer> = peers.iter().filter(|p| p.online).collect();
-        let tracked: BTreeSet<NodeId> = {
-            let book = lock(&self.book);
-            book.followed
-                .keys()
-                .cloned()
-                .chain(book.prompts.values().map(|(n, _)| n.clone()))
-                .collect()
+        let online: BTreeSet<&NodeId> = peers.iter().filter(|p| p.online).map(|p| &p.id).collect();
+        self.change(|book| {
+            for node in book.tracked() {
+                if !online.contains(&node) {
+                    book.drop_node(&node, "offline");
+                }
+            }
+        });
+        let at = At {
+            now,
+            tick: (self.ticks)(),
         };
-        for node in tracked {
-            if !online.iter().any(|p| p.id == node) {
-                self.drop_node(&node, "offline");
-            }
-        }
-        for peer in online {
-            let due = {
+        for id in online {
+            let ticket = {
                 let mut book = lock(&self.book);
-                let ready = book.followed.get(&peer.id).is_none_or(|f| now >= f.next_at);
-                ready && book.busy.insert(peer.id.clone())
+                let ready = book.followed.get(id).is_none_or(|f| now >= f.next_at);
+                if !(ready && book.busy.insert(id.clone())) {
+                    continue;
+                }
+                book.ticket(id)
             };
-            if !due {
-                continue;
+            let (me, source, node) = (self.clone(), source.clone(), id.clone());
+            let job: Job = Box::new(move || {
+                me.renew(&node, source.as_ref(), at, ticket);
+                lock(&me.book).busy.remove(&node);
+            });
+            if (self.spawn)(job).is_err() {
+                let mut book = lock(&self.book);
+                book.busy.remove(id);
+                book.followed.entry(id.clone()).or_default().next_at = now + RETRY_MS;
             }
-            let (me, source, id) = (self.clone(), source.clone(), peer.id.clone());
-            (self.spawn)(Box::new(move || {
-                me.renew(&id, source.as_ref(), now);
-                lock(&me.book).busy.remove(&id);
-            }));
         }
     }
 }
@@ -469,7 +387,7 @@ impl PromptPush for NodePush {
         };
         let to = leased_clients(&node.status(), nodes);
         if !to.is_empty() {
-            node.tell_to(to, topics::PROMPTS, event, data.clone());
+            node.tell_clients(to, topics::PROMPTS, event, data.clone());
         }
     }
 }
@@ -481,3 +399,7 @@ mod tests;
 #[cfg(test)]
 #[path = "cluster_prompts_fix_tests.rs"]
 mod fix_tests;
+
+#[cfg(test)]
+#[path = "cluster_prompts_race_tests.rs"]
+mod race_tests;
