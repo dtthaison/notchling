@@ -1,5 +1,7 @@
 use crate::acting::{file_says_on, SETTINGS_NAME};
 use crate::acting_ops::Room;
+use crate::cluster_forward::PromptFollowers;
+use crate::cluster_wiring::ClusterParts;
 pub use crate::daemon_wiring::{Ops, Wired};
 use crate::layout::Layout;
 use crate::log_activity::Publish;
@@ -19,7 +21,7 @@ use notchling_events::{Emit, Event, Millis};
 use notchling_local_api::lock::InstanceLock;
 use notchling_local_api::tier::installed_app_paths;
 use notchling_local_api::{
-    topics, Allowlist, Handler, Limits, Server, ServerConfig, ServerHandle, APP_TIER_PATHS_ENV,
+    Allowlist, Handler, Limits, Server, ServerConfig, ServerHandle, APP_TIER_PATHS_ENV,
 };
 use notchling_platform::watch::{Batch, WatchConfig, Watcher};
 use serde_json::Value;
@@ -85,7 +87,7 @@ impl FirstScan {
 }
 
 #[derive(Default)]
-pub struct LateRoom(OnceLock<ServerHandle>);
+pub struct LateRoom(OnceLock<ServerHandle>, PromptFollowers);
 
 impl LateRoom {
     pub fn set(&self, handle: ServerHandle) {
@@ -106,6 +108,17 @@ impl Room for LateRoom {
 
     fn can_follow(&self, topic: &str) -> bool {
         self.0.get().is_some_and(|h| h.app_following(topic))
+    }
+
+    fn can_answer_prompts(&self) -> bool {
+        self.can_answer() || self.1.active(now_ms())
+    }
+
+    fn follow_prompts(&self, node: &str, lease_ms: u64) {
+        self.1.follow(
+            node,
+            now_ms().saturating_add(i64::try_from(lease_ms).unwrap_or(0)),
+        );
     }
 }
 
@@ -158,7 +171,7 @@ fn scan(
     lister: &mut Lister,
     options: &DaemonOptions,
     sessions: &Mutex<Value>,
-    handle: &ServerHandle,
+    cluster: &ClusterParts,
 ) {
     if let Some(hold) = &options.before_scan {
         hold();
@@ -175,7 +188,7 @@ fn scan(
         differs
     };
     if differs {
-        handle.publish(topics::SESSIONS, topics::SESSIONS_CHANGED, &next);
+        cluster.local_changed(&next);
     }
 }
 
@@ -311,7 +324,7 @@ pub fn run(
     }
     let mut watched = lister.watched();
     let mut watch = start_watch(&watched, options.watch);
-    scan(&mut lister, &options, &sessions, &handle);
+    scan(&mut lister, &options, &sessions, &wired.cluster);
     first_scan.finish();
     let mut last_poll = Instant::now();
     while !stop() {
@@ -333,7 +346,7 @@ pub fn run(
             continue;
         }
         last_poll = Instant::now();
-        scan(&mut lister, &options, &sessions, &handle);
+        scan(&mut lister, &options, &sessions, &wired.cluster);
         wired.agy.reap();
         let now = lister.watched();
         if now != watched {

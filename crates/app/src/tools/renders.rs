@@ -91,6 +91,7 @@ pub fn agy_permission_scene() -> Scene {
         command: None,
         resume_session_id: None,
         at_prompt: false,
+        node: None,
     });
     if let Some(request) = agy_prompt().as_ref().and_then(HookRequest::from_prompt) {
         loaded.requests.insert(AGY_ROW.to_owned(), request);

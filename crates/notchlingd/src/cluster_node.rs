@@ -43,6 +43,7 @@ pub trait Hooks: Send + Sync {
     fn join_request(&self, _ask: JoinAsk, _node: Submit) {}
     fn desired(&self, _desired: Desired) {}
     fn wiped(&self) {}
+    fn peer_sessions(&self, _from: &NodeId) {}
 }
 
 pub struct NoHooks;
@@ -89,6 +90,7 @@ pub(crate) enum In {
     Join(String, bool, Answer),
     Core(Input),
     Link(bool),
+    Tell(String, String, Value),
     Stop,
 }
 
@@ -165,6 +167,7 @@ fn known_node_ops() -> &'static [&'static str] {
     NAMES.get_or_init(|| {
         let mut names = crate::op_kinds::known_ops().to_vec();
         names.push(crate::cluster_switches::NODE_SWITCH_SET);
+        names.extend(crate::cluster_sessions::NODE_OPS);
         names
     })
 }
@@ -273,6 +276,12 @@ impl ClusterNode {
 
     pub fn set_link(&self, on: bool) {
         let _ = self.tx.send(In::Link(on));
+    }
+
+    pub fn tell(&self, topic: &str, name: &str, data: Value) {
+        let _ = self
+            .tx
+            .send(In::Tell(topic.to_string(), name.to_string(), data));
     }
 
     fn wait(&self, make: impl FnOnce(Answer) -> In) -> Result<Value, ApiError> {

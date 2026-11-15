@@ -1,7 +1,7 @@
 use serde_json::json;
 
 use super::core_tests::{pair, Hub};
-use super::{Effect, LocalCmd};
+use super::{Effect, Input, LocalCmd};
 use crate::cluster::members::MemberState;
 use crate::cluster::testkit::{id, member};
 use crate::cluster::wire::{decode, Msg};
@@ -113,4 +113,28 @@ fn an_older_join_message_reads_as_not_headless() {
             ..
         }
     ));
+}
+
+#[test]
+fn an_event_from_a_peer_names_its_sender_whatever_it_claims() {
+    let (mut hub, m5, w1) = pair();
+    let effects = hub.run(
+        &m5,
+        Input::Msg {
+            from: w1.clone(),
+            msg: Msg::Event {
+                topic: "sessions".to_string(),
+                name: "sessions.changed".to_string(),
+                data: json!({"from": "someone else"}),
+            },
+        },
+    );
+    let data = effects
+        .iter()
+        .find_map(|e| match e {
+            Effect::Publish { name, data, .. } if name == "sessions.changed" => Some(data.clone()),
+            _ => None,
+        })
+        .expect("published");
+    assert_eq!(data["from"], json!(w1));
 }

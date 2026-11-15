@@ -110,7 +110,9 @@ impl Driver {
         for (_, conn) in std::mem::take(&mut self.conns) {
             conn.close();
         }
-        let outcome = match persist::wipe(&self.setup.cluster_dir) {
+        let outcome = match persist::wipe(&self.setup.cluster_dir)
+            .and_then(|()| crate::cluster_mirror::wipe(&self.setup.cluster_dir))
+        {
             Ok(()) => Outcome::Ok,
             Err(_) => Outcome::Failed,
         };

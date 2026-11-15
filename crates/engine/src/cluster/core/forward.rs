@@ -71,7 +71,14 @@ impl NodeCore {
                         term,
                     } => self.on_call(from, id, op, args, origin, term, out),
                     Msg::Reply { id, ok, err } => self.on_reply(from, id, ok, err, out),
-                    Msg::Event { topic, name, data } => {
+                    Msg::Event {
+                        topic,
+                        name,
+                        mut data,
+                    } => {
+                        if let Some(fields) = data.as_object_mut() {
+                            fields.insert("from".to_string(), json!(from));
+                        }
                         out.push(Effect::Publish { topic, name, data })
                     }
                     Msg::Ping { boot_ms } => self.on_ping(&from, boot_ms, out),

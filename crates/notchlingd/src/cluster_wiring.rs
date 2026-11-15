@@ -1,9 +1,12 @@
 use crate::acting_ops::Room;
+use crate::cluster_forward::{Forward, NodeForward};
 use crate::cluster_join::{JoinAsker, JOIN_WAIT};
+use crate::cluster_mirror::{FollowOps, Mirror, TailSource, MIRROR_DIR};
 use crate::cluster_node::{
     ClusterLog, ClusterNode, ClusterSetup, Hooks, JoinAsk, LocalCalls, NetSide, Probe, Submit, TICK,
 };
 use crate::cluster_ops::{follow_switch, ClusterOps};
+use crate::cluster_sessions::{HandlerRows, NodeSource, Refresher, RemoteSessions, SessionCalls};
 use crate::cluster_switches::{HeadlessSwitches, LateHandler, NodeCalls, OpsPanel};
 use crate::cluster_versions::{own, with_tools};
 use crate::inbox_ops::InboxOps;
@@ -14,7 +17,7 @@ use crate::versions_ops::VersionsOps;
 use notchling_cluster_net::{load_or_make, Pins, TcpTls, PORT};
 use notchling_engine::bridge::net::bridge::host_name;
 use notchling_engine::cluster::wire::{Origin, OriginTier};
-use notchling_engine::cluster::Desired;
+use notchling_engine::cluster::{Desired, NodeId};
 use notchling_events::kinds::security::{ClusterStep, SwitchCause};
 use notchling_events::spec::Outcome;
 use notchling_local_api::spawn::in_cargo_target;
@@ -22,7 +25,7 @@ use notchling_local_api::{topics, ApiError, Caller, ClientKind, ErrorCode, Handl
 use serde_json::{json, Value};
 use std::ffi::OsStr;
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, OnceLock};
 
 pub const LOOPBACK_ENV: &str = "NOTCHLING_CLUSTER_LOOPBACK";
 pub const IDENTITY_DIR: &str = "node";
@@ -98,6 +101,8 @@ impl LocalCalls for DaemonCalls {
 pub struct ClusterHooks {
     pub asker: JoinAsker,
     pub switches: Arc<HeadlessSwitches>,
+    pub remote: Arc<RemoteSessions>,
+    pub mirror: Arc<Mirror>,
 }
 
 impl Hooks for ClusterHooks {
@@ -107,6 +112,36 @@ impl Hooks for ClusterHooks {
 
     fn desired(&self, desired: Desired) {
         self.switches.follow(desired);
+    }
+
+    fn wiped(&self) {
+        self.mirror.clear();
+    }
+
+    fn peer_sessions(&self, from: &NodeId) {
+        self.remote.mark_dirty(from);
+        self.mirror.nudge();
+    }
+}
+
+#[derive(Default)]
+struct LateTail(OnceLock<NodeSource>);
+
+impl TailSource for LateTail {
+    fn tail(
+        &self,
+        node: &NodeId,
+        id: &str,
+        from: u64,
+        seen: Option<&str>,
+    ) -> Result<Value, ApiError> {
+        match self.0.get() {
+            Some(source) => source.tail(node, id, from, seen),
+            None => Err(ApiError::new(
+                ErrorCode::Failed,
+                "the cluster node isn't up",
+            )),
+        }
     }
 }
 
@@ -138,7 +173,16 @@ pub fn rejoin_on_start(
 pub struct ClusterParts {
     pub node: Result<Arc<ClusterNode>, String>,
     pub ops: Arc<ClusterOps>,
+    pub follow: Arc<FollowOps>,
+    pub remote: Arc<RemoteSessions>,
+    mirror: Arc<Mirror>,
+    refresher: Option<Refresher>,
+    room: Arc<dyn Room>,
     handler: Arc<LateHandler>,
+}
+
+fn clock() -> crate::cluster_mirror::Clock {
+    Arc::new(|| u64::try_from(crate::acting_ops::now_ms()).unwrap_or(0))
 }
 
 fn node_name() -> String {
@@ -188,27 +232,68 @@ impl ClusterParts {
         versions: Arc<VersionsOps>,
         inbox: Arc<InboxOps>,
         events: Events,
+        sessions: Arc<Mutex<Value>>,
     ) -> ClusterParts {
         let log = ClusterLog::new(events);
         let handler = Arc::new(LateHandler::default());
         let panel = Arc::new(OpsPanel::new(handler.clone()));
         let switches = Arc::new(HeadlessSwitches::new(panel, room.clone(), log.clone()));
+        let mirror_dir = layout.cluster_dir().join(MIRROR_DIR);
+        let remote = Arc::new(RemoteSessions::new(mirror_dir.clone()));
+        let tail = Arc::new(LateTail::default());
+        let mirror = Mirror::new(mirror_dir, remote.clone(), tail.clone(), clock());
         let local: Arc<dyn LocalCalls> = Arc::new(NodeCalls {
-            inner: DaemonCalls::new(handler.clone(), room.clone()),
+            inner: Arc::new(SessionCalls::new(
+                DaemonCalls::new(handler.clone(), room.clone()),
+                Arc::new(HandlerRows::new(handler.clone())),
+                room.clone(),
+            )),
             switches: switches.clone(),
         });
         let hooks: Arc<dyn Hooks> = Arc::new(ClusterHooks {
             asker: JoinAsker::new(inbox, JOIN_WAIT),
             switches,
+            remote: remote.clone(),
+            mirror: mirror.clone(),
         });
         let node = start_node(layout, room.clone(), (local, hooks), versions, log.clone());
         let audit = log.clone();
+        let mut refresher = None;
         if let Ok(node) = &node {
             follow_switch(&link, node);
             rejoin_on_start(&link, node, room.as_ref(), &audit);
+            let _ = tail.0.set(NodeSource::new(node.clone()));
+            mirror.spawn();
+            let (told, local_rows, shown) = (remote.clone(), sessions, room.clone());
+            refresher = Some(Refresher::spawn(
+                node.clone(),
+                remote.clone(),
+                Arc::new(move || publish_sessions(shown.as_ref(), &told, &local_rows)),
+            ));
         }
-        let ops = Arc::new(ClusterOps::new(node.clone(), link, room, audit));
-        ClusterParts { node, ops, handler }
+        let ops = Arc::new(ClusterOps::new(node.clone(), link, room.clone(), audit));
+        ClusterParts {
+            node,
+            ops,
+            follow: Arc::new(FollowOps::new(mirror.clone())),
+            remote,
+            mirror,
+            refresher,
+            room,
+            handler,
+        }
+    }
+
+    pub fn forward(&self) -> Option<Arc<dyn Forward>> {
+        let node = self.node.as_ref().ok()?;
+        Some(Arc::new(NodeForward::new(node.clone())))
+    }
+
+    pub fn local_changed(&self, local: &Value) {
+        publish_merged(self.room.as_ref(), &self.remote, local);
+        if let Ok(node) = &self.node {
+            node.tell(topics::SESSIONS, topics::SESSIONS_CHANGED, json!({}));
+        }
     }
 
     pub fn serve(&self, handler: &Arc<dyn Handler>) {
@@ -216,10 +301,27 @@ impl ClusterParts {
     }
 
     pub fn close(&self) {
+        self.mirror.close();
+        if let Some(refresher) = &self.refresher {
+            refresher.close();
+        }
         if let Ok(node) = &self.node {
             node.close();
         }
     }
+}
+
+pub(crate) fn publish_merged(room: &dyn Room, remote: &RemoteSessions, local: &Value) {
+    room.publish(
+        topics::SESSIONS,
+        topics::SESSIONS_CHANGED,
+        &remote.merge(local),
+    );
+}
+
+fn publish_sessions(room: &dyn Room, remote: &RemoteSessions, local: &Mutex<Value>) {
+    let local = local.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    publish_merged(room, remote, &local);
 }
 
 #[cfg(test)]

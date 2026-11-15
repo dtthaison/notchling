@@ -148,6 +148,7 @@ fn every_rule_names_a_known_op() {
         "node.put",
         "node.put.end",
         "node.tail",
+        "node.follow",
         "node.sessions",
         "node.versions",
         "node.load",

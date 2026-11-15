@@ -63,6 +63,10 @@ pub trait Room: Send + Sync {
     fn publish(&self, topic: &str, event: &str, data: &Value);
     fn can_answer(&self) -> bool;
     fn can_follow(&self, topic: &str) -> bool;
+    fn can_answer_prompts(&self) -> bool {
+        self.can_answer()
+    }
+    fn follow_prompts(&self, _node: &str, _lease_ms: u64) {}
 }
 
 pub trait Attacher: Send + Sync {

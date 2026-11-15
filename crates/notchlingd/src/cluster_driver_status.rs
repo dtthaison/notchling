@@ -1,5 +1,6 @@
 use super::Driver;
 use crate::cluster_node::lock;
+use notchling_engine::cluster::wire::{encode, Msg};
 use notchling_engine::cluster::NodeId;
 use notchling_events::kinds::security::ClusterStep;
 use notchling_events::spec::Outcome;
@@ -7,7 +8,27 @@ use notchling_local_api::topics;
 use serde_json::{json, Value};
 
 impl Driver {
+    pub(super) fn tell(&mut self, topic: String, name: String, data: Value) {
+        let msg = Msg::Event { topic, name, data };
+        let Ok(line) = encode(&msg) else {
+            return;
+        };
+        for conn in self.conns.values() {
+            let _ = conn.send(line.clone());
+        }
+    }
+
     pub(super) fn publish(&mut self, topic: &str, name: &str, data: &Value) {
+        if topic == topics::SESSIONS && name == topics::SESSIONS_CHANGED {
+            if let Some(from) = data
+                .get("from")
+                .and_then(Value::as_str)
+                .and_then(NodeId::parse)
+            {
+                self.hooks.peer_sessions(&from);
+            }
+            return;
+        }
         if topic != topics::CLUSTER || name == topics::CLUSTER_CHANGED {
             return;
         }

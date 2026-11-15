@@ -76,6 +76,10 @@ const fn client_app(op: &'static str) -> Rule {
     rule(op, CLIENT, OriginTier::App, Some("id"), false)
 }
 
+const fn client_plain(op: &'static str) -> Rule {
+    rule(op, CLIENT, OriginTier::App, None, false)
+}
+
 const fn client_home(op: &'static str) -> Rule {
     rule(op, CLIENT_ONLY, OriginTier::App, None, true)
 }
@@ -123,6 +127,7 @@ pub const RULES: &[Rule] = &[
     client_app("agy.conversation"),
     client_app("prompts.list"),
     client_app("node.tail"),
+    client_plain("node.follow"),
     client_app("shell.stop"),
     client_home("cluster.dispatch"),
     client_home("cluster.member.set"),

@@ -159,3 +159,125 @@ fn the_wired_daemon_lists_every_tool_on_request_and_claude_code_by_default() {
     assert_eq!(default, json!([]));
     w.close();
 }
+
+struct Rows(Value);
+
+impl crate::cluster_sessions::RowSource for Rows {
+    fn rows(&self, _node: &notchling_engine::cluster::NodeId) -> Result<Value, ApiError> {
+        Ok(self.0.clone())
+    }
+}
+
+fn peer(online: bool) -> crate::cluster_sessions::Peer {
+    crate::cluster_sessions::Peer {
+        id: notchling_engine::cluster::NodeId::parse("00000000000000a1").unwrap(),
+        name: "w1".into(),
+        online,
+    }
+}
+
+fn remote_with_a_row(tag: &str) -> Arc<crate::cluster_sessions::RemoteSessions> {
+    let dir = std::env::temp_dir().join(format!("nl-wiring-remote-{tag}-{}", std::process::id()));
+    let remote = Arc::new(crate::cluster_sessions::RemoteSessions::new(dir));
+    remote.sync(&[peer(true)], &Rows(json!([{"id": "s1"}])), 0);
+    remote
+}
+
+struct Forwarded;
+
+impl crate::cluster_forward::Forward for Forwarded {
+    fn forward(&self, caller: &Caller, op: &str, args: &Value) -> Option<Result<Value, ApiError>> {
+        let me = notchling_engine::cluster::NodeId::parse("0123456789abcdef").unwrap();
+        let (node, bare) = crate::cluster_forward::route(op, args, &me)?;
+        Some(Ok(
+            json!({"to": node, "args": bare, "tier": format!("{:?}", caller.tier)}),
+        ))
+    }
+}
+
+#[test]
+fn the_list_carries_remote_rows_for_clients_but_never_for_a_node() {
+    let local = Arc::new(Mutex::new(json!([{"id": "mine"}])));
+    let ops = Ops::new(local).with_cluster(None, remote_with_a_row("list"));
+    let listed = ops.call(&app(), ops::SESSIONS_LIST, &Value::Null).unwrap();
+    let ids: Vec<&str> = listed
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|r| r["id"].as_str())
+        .collect();
+    assert_eq!(ids, vec!["mine", "00000000000000a1/s1"]);
+    let node = Caller {
+        tier: Tier::Agent,
+        client: ClientKind::Node,
+        peer: None,
+        pid: None,
+    };
+    let own = ops.call(&node, ops::SESSIONS_LIST, &Value::Null).unwrap();
+    assert_eq!(
+        own,
+        json!([{"id": "mine"}]),
+        "a node is only told this node's rows"
+    );
+}
+
+#[test]
+fn a_qualified_id_is_routed_before_any_local_op_runs() {
+    let ops = Ops::new(Arc::new(Mutex::new(json!([]))))
+        .with_cluster(Some(Arc::new(Forwarded)), remote_with_a_row("route"));
+    let out = ops
+        .call(
+            &app(),
+            ops::SESSION_REPLY,
+            &json!({"id": "00000000000000a1/s1", "text": "hi"}),
+        )
+        .unwrap();
+    assert_eq!(out["to"], "00000000000000a1");
+    assert_eq!(out["args"], json!({"id": "s1", "text": "hi"}));
+    let local = ops.call(
+        &app(),
+        ops::SESSION_REPLY,
+        &json!({"id": "s1", "text": "hi"}),
+    );
+    assert!(
+        local.is_err(),
+        "a bare id reaches the local op, which has no handler here"
+    );
+}
+
+#[test]
+fn a_local_change_is_published_with_the_remote_rows() {
+    let room = FakeRoom::default();
+    let remote = remote_with_a_row("changed");
+    crate::cluster_wiring::publish_merged(&room, &remote, &json!([{"id": "mine"}]));
+    let sent = room.named("sessions.changed");
+    assert_eq!(sent.len(), 1);
+    let ids: Vec<&str> = sent[0]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|r| r["id"].as_str())
+        .collect();
+    assert_eq!(ids, vec!["mine", "00000000000000a1/s1"]);
+}
+
+#[test]
+fn the_daemons_scan_publishes_through_the_cluster_parts() {
+    let root = std::env::temp_dir().join(format!("nl-wiring-scan-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let layout = Layout::resolve(None, Some(root.as_os_str()), || None).unwrap();
+    let room = Arc::new(FakeRoom::default());
+    let w = Wired::build(
+        &layout,
+        Arc::new(Mutex::new(json!([]))),
+        room.clone(),
+        (0, 0),
+    );
+    w.cluster.local_changed(&json!([{"id": "mine"}]));
+    assert_eq!(
+        room.named("sessions.changed"),
+        vec![json!([{"id": "mine"}])]
+    );
+    w.close();
+    let _ = std::fs::remove_dir_all(&root);
+}
