@@ -32,15 +32,19 @@ fn letters(text: &str) -> String {
     text.chars().filter(|c| c.is_alphanumeric()).collect()
 }
 
-fn without_chips(text: &str) -> String {
+fn strip_chips(text: &str) -> (String, usize) {
     let mut out = String::new();
+    let mut chips = 0;
     let mut rest = text;
     while let Some(at) = rest.find("[Image#") {
         out.push_str(&rest[..at]);
         let tail = &rest[at + "[Image#".len()..];
         let digits = tail.chars().take_while(char::is_ascii_digit).count();
         match tail[digits..].strip_prefix(']') {
-            Some(after) if digits > 0 => rest = after,
+            Some(after) if digits > 0 => {
+                chips += 1;
+                rest = after;
+            }
             _ => {
                 out.push_str("[Image#");
                 rest = tail;
@@ -48,7 +52,130 @@ fn without_chips(text: &str) -> String {
         }
     }
     out.push_str(rest);
-    out
+    (out, chips)
+}
+
+const PICTURE_EXTENSIONS: [&str; 5] = [".png", ".jpg", ".jpeg", ".gif", ".webp"];
+const PICTURES_MAX: usize = 8;
+
+fn path_shaped(path: &str) -> bool {
+    path.strip_prefix('/')
+        .and_then(|rest| rest.find('/'))
+        .is_some_and(|at| at > 0)
+}
+
+fn path_token(text: &str) -> Option<(String, &str)> {
+    let mut path = String::new();
+    let end = match text.chars().next()? {
+        quote @ ('\'' | '"') => {
+            let mut at = 1;
+            loop {
+                let close = text[at..].find(quote)?;
+                path.push_str(&text[at..at + close]);
+                at += close + 1;
+                if quote == '\'' && text[at..].starts_with("\\''") {
+                    path.push('\'');
+                    at += 3;
+                } else {
+                    break at;
+                }
+            }
+        }
+        _ => {
+            let end = text.find(char::is_whitespace).unwrap_or(text.len());
+            path.push_str(&text[..end]);
+            end
+        }
+    };
+    let tail = &text[end..];
+    if !tail.is_empty() && !tail.starts_with(' ') {
+        return None;
+    }
+    path_shaped(&path).then(|| (path, tail.trim_start_matches(' ')))
+}
+
+fn path_line(line: &str) -> Option<Vec<String>> {
+    let mut rest = line.trim_matches(' ');
+    let mut paths = Vec::new();
+    while !rest.is_empty() {
+        let (path, tail) = path_token(rest)?;
+        paths.push(path);
+        rest = tail;
+    }
+    Some(paths)
+}
+
+fn is_picture(path: &str) -> bool {
+    let path = path.to_ascii_lowercase();
+    PICTURE_EXTENSIONS.iter().any(|ext| path.ends_with(ext))
+}
+
+struct Message {
+    pieces: Vec<(String, bool)>,
+    literal: bool,
+}
+
+impl Message {
+    fn of(text: &str) -> Message {
+        let mut pieces = Vec::new();
+        let mut literal = false;
+        for line in text.split('\n') {
+            match path_line(line) {
+                Some(paths) => {
+                    pieces.extend(paths.iter().map(|path| (letters(path), is_picture(path))));
+                }
+                None => {
+                    let line = squeezed(line);
+                    literal |= strip_chips(&line).1 > 0;
+                    pieces.push((letters(&line), false));
+                }
+            }
+        }
+        Message { pieces, literal }
+    }
+
+    fn seen(&self, shown: &str) -> Option<(String, usize)> {
+        match (self.literal, self.pictures()) {
+            (false, _) => Some(strip_chips(shown)),
+            (true, 0) => Some((shown.to_string(), 0)),
+            (true, _) => None,
+        }
+    }
+
+    fn pictures(&self) -> usize {
+        self.pieces.iter().filter(|(_, picture)| *picture).count()
+    }
+
+    fn kept(&self, gone: impl Fn(usize) -> bool) -> String {
+        let mut nth = 0;
+        let mut kept = String::new();
+        for (words, picture) in &self.pieces {
+            let read = *picture && gone(nth);
+            nth += usize::from(*picture);
+            if !read {
+                kept.push_str(words);
+            }
+        }
+        kept
+    }
+
+    fn without(&self, chips: usize) -> Vec<String> {
+        let pictures = self.pictures();
+        if chips > pictures {
+            return Vec::new();
+        }
+        if pictures > PICTURES_MAX {
+            return match chips {
+                0 => vec![self.kept(|_| false)],
+                n if n == pictures => vec![self.kept(|_| true)],
+                _ => Vec::new(),
+            };
+        }
+        (0..1usize << pictures)
+            .filter(|mask| mask.count_ones() as usize == chips)
+            .map(|mask| self.kept(|nth| mask >> nth & 1 == 1))
+            .collect()
+    }
 }
 
 fn folded(typed: &str) -> bool {
@@ -84,20 +211,32 @@ impl Input {
         rows.join("\n")
     }
 
+    fn shown(&self) -> String {
+        self.held.iter().map(|row| squeezed(row)).collect()
+    }
+
     pub fn leftover_of(&self, earlier: &[String]) -> bool {
-        let shown: String = self.held.iter().map(|row| squeezed(row)).collect();
-        let typed: String = shown.chars().skip(1).collect();
-        if self.empty || folded(&typed) || folded(&shown) {
+        if self.empty {
             return false;
         }
-        let have = letters(&without_chips(&shown));
-        let size = have.chars().count();
-        size > 0
-            && earlier.iter().any(|text| {
-                let want = letters(text);
-                have == want
-                    || (size >= MIN_PART && (want.starts_with(&have) || want.ends_with(&have)))
-            })
+        let marked = self.shown();
+        earlier.iter().any(|text| {
+            let message = Message::of(text);
+            let Some((shown, chips)) = message.seen(&marked) else {
+                return false;
+            };
+            let typed: String = shown.chars().skip(1).collect();
+            if folded(&typed) || folded(&shown) {
+                return false;
+            }
+            let have = letters(&shown);
+            let size = have.chars().count();
+            size > 0
+                && message.without(chips).iter().any(|want| {
+                    have == *want
+                        || (size >= MIN_PART && (want.starts_with(&have) || want.ends_with(&have)))
+                })
+        })
     }
 
     pub fn shows(&self, text: &str) -> bool {
@@ -119,9 +258,15 @@ impl Input {
             Fill::Whole | Fill::Folded => true,
             Fill::Empty => false,
             Fill::Part | Fill::Foreign => {
-                let shown: String = self.held.iter().map(|row| squeezed(row)).collect();
-                let want = letters(text);
-                !want.is_empty() && letters(&shown).contains(&want)
+                let message = Message::of(text);
+                let Some((shown, chips)) = message.seen(&self.shown()) else {
+                    return false;
+                };
+                let have = letters(&shown);
+                message
+                    .without(chips.min(message.pictures()))
+                    .iter()
+                    .any(|want| !want.is_empty() && have.contains(want))
             }
         }
     }
@@ -130,19 +275,28 @@ impl Input {
         if self.empty && !self.shows(text) {
             return Fill::Empty;
         }
-        let shown: String = self.held.iter().map(|row| squeezed(row)).collect();
+        let message = Message::of(text);
+        let Some((shown, real)) = message.seen(&self.shown()) else {
+            return Fill::Foreign;
+        };
+        if real > message.pictures() {
+            return Fill::Foreign;
+        }
         let typed: String = shown.chars().skip(1).collect();
         if folded(&typed) || folded(&shown) {
             return Fill::Folded;
         }
-        let want = letters(text);
-        if want.is_empty() {
+        if letters(text).is_empty() {
             return Fill::Whole;
         }
+        let wants = message.without(real);
         let have = letters(&shown);
-        if have == want {
+        if wants.contains(&have) {
             Fill::Whole
-        } else if !have.is_empty() && want.starts_with(&have) {
+        } else if wants.iter().any(|want| match have.is_empty() {
+            true => real > 0 && !want.is_empty(),
+            false => want.starts_with(&have),
+        }) {
             Fill::Part
         } else {
             Fill::Foreign

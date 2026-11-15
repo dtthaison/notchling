@@ -24,6 +24,8 @@ pub struct FakePrompt {
     notice: String,
     noisy: bool,
     fold_at: usize,
+    reads_pictures: bool,
+    chips: u32,
     human: Vec<(u64, String)>,
     pub writes: Vec<String>,
     pub sent: Vec<String>,
@@ -99,6 +101,11 @@ impl FakePrompt {
         self
     }
 
+    pub fn reading_pictures(mut self) -> FakePrompt {
+        self.reads_pictures = true;
+        self
+    }
+
     pub fn typing(mut self, at_ms: u64, text: &str) -> FakePrompt {
         self.human.push((at_ms, text.to_string()));
         self
@@ -152,9 +159,55 @@ impl FakePrompt {
             if self.clock < due {
                 self.landing = Some((due, text));
             } else if self.boxed {
-                self.text.push_str(&text);
+                let shown = self.landed(&text);
+                self.text.push_str(&shown);
             }
         }
+    }
+
+    fn landed(&mut self, text: &str) -> String {
+        if !self.reads_pictures {
+            return text.to_string();
+        }
+        let mut chips: Vec<String> = Vec::new();
+        let mut rest: Vec<String> = Vec::new();
+        for line in text.split('\n') {
+            let mut pieces: Vec<String> = Vec::new();
+            for word in line.split(' ') {
+                match (
+                    word.starts_with('/') || word.starts_with("'/"),
+                    pieces.last_mut(),
+                ) {
+                    (false, Some(last)) => {
+                        last.push(' ');
+                        last.push_str(word);
+                    }
+                    _ => pieces.push(word.to_string()),
+                }
+            }
+            pieces.retain(|piece| !piece.trim().is_empty());
+            let paths = pieces
+                .iter()
+                .all(|piece| piece.starts_with('/') || piece.starts_with("'/"));
+            if pieces.len() > 1 && !paths {
+                rest.push(line.to_string());
+                continue;
+            }
+            for piece in pieces {
+                let bare = piece.trim_matches('\'').to_ascii_lowercase();
+                let picture = [".png", ".jpg", ".jpeg", ".gif", ".webp"]
+                    .iter()
+                    .any(|ext| bare.ends_with(ext));
+                match picture && bare.starts_with('/') {
+                    true => {
+                        self.chips += 1;
+                        chips.push(format!("[Image #{}]", self.chips));
+                    }
+                    false => rest.push(piece),
+                }
+            }
+        }
+        format!("{}{}", chips.join(" "), rest.join("\n"))
     }
 
     fn entered(&mut self) {
