@@ -28,6 +28,10 @@ mod cluster_driver_order_tests;
 #[cfg(test)]
 mod cluster_driver_rebuild_tests;
 pub mod cluster_forward;
+pub mod cluster_inbox;
+pub mod cluster_inbox_follow;
+#[cfg(test)]
+pub(crate) mod cluster_inbox_testkit;
 pub mod cluster_join;
 pub mod cluster_mirror;
 pub mod cluster_node;
@@ -63,6 +67,7 @@ pub mod hook_output;
 pub mod hook_pages;
 pub mod host_id;
 mod inbox_events;
+pub mod inbox_mirrors;
 pub mod inbox_ops;
 pub mod install_ops;
 pub mod late_emit;

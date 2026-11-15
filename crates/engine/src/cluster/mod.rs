@@ -51,6 +51,8 @@ mod join_tests;
 #[cfg(test)]
 mod outward_tests;
 #[cfg(test)]
+mod policy_inbox_tests;
+#[cfg(test)]
 mod policy_secrets_tests;
 #[cfg(test)]
 mod policy_tests;

@@ -3,6 +3,8 @@ use crate::cluster_blobs::Blobs;
 use crate::cluster_dispatch::{DispatchCalls, DispatchOps, NodeReporter};
 use crate::cluster_dispatch_delegate::RealDelegate;
 use crate::cluster_forward::{Forward, NoNodeForward, NodeForward};
+use crate::cluster_inbox::{InboxCalls, NetLink, NodeNet, Outbox};
+use crate::cluster_inbox_follow::Follow;
 use crate::cluster_join::{JoinAsker, JOIN_WAIT};
 use crate::cluster_mirror::{FollowOps, Mirror, OnCap, TailSource, MIRROR_CAP, MIRROR_DIR};
 use crate::cluster_node::{
@@ -144,6 +146,7 @@ pub struct ClusterHooks {
     pub switches: Arc<HeadlessSwitches>,
     pub remote: Arc<RemoteSessions>,
     pub mirror: Arc<Mirror>,
+    pub inbox: Arc<InboxOps>,
 }
 
 impl Hooks for ClusterHooks {
@@ -158,6 +161,7 @@ impl Hooks for ClusterHooks {
     fn wiped(&self) {
         self.mirror.clear();
         self.remote.clear();
+        self.inbox.clear_mirrors();
     }
 
     fn peer_sessions(&self, from: &NodeId) {
@@ -223,6 +227,7 @@ pub struct ClusterParts {
     delegate: Arc<RealDelegate>,
     mirror: Arc<Mirror>,
     janitor: Arc<GrantJanitor>,
+    outbox: Arc<Outbox>,
     publisher: Arc<Publisher>,
     refresher: Option<Refresher>,
     handler: Arc<LateHandler>,
@@ -250,6 +255,10 @@ pub(crate) fn on_disk(cluster_dir: &Path) -> OnDisk {
 
 fn disk_vault(dir: PathBuf) -> crate::grant_use::Disk {
     Arc::new(move || on_disk(&dir))
+}
+
+fn clock_i64() -> crate::cluster_inbox::Clock {
+    Arc::new(crate::acting_ops::now_ms)
 }
 
 fn clock_ms() -> crate::grant_broker::Clock {
@@ -400,6 +409,10 @@ impl ClusterParts {
             clock_ms(),
         ));
         let granting: Arc<dyn LocalCalls> = Arc::new(GrantCalls::new(workspace_calls, broker));
+        let net = Arc::new(NodeNet::new(holder.clone()));
+        let granting: Arc<dyn LocalCalls> =
+            Arc::new(InboxCalls::new(granting, net.clone(), inbox.clone()));
+        let outbox = Outbox::new(net.clone(), inbox.clone(), clock_i64());
         let local: Arc<dyn LocalCalls> = Arc::new(NodeCalls {
             inner: Arc::new(DispatchCalls::new(
                 granting,
@@ -410,10 +423,11 @@ impl ClusterParts {
             switches: switches.clone(),
         });
         let hooks: Arc<dyn Hooks> = Arc::new(ClusterHooks {
-            asker: JoinAsker::new(inbox, JOIN_WAIT),
+            asker: JoinAsker::new(inbox.clone(), JOIN_WAIT),
             switches,
             remote: remote.clone(),
             mirror: mirror.clone(),
+            inbox: inbox.clone(),
         });
         let node = start_node(layout, room.clone(), (local, hooks), versions, log.clone());
         let audit = log.clone();
@@ -426,6 +440,11 @@ impl ClusterParts {
             let _ = holder.set(node.clone());
             mirror.spawn();
             janitor.spawn();
+            let link = Arc::new(NetLink::new(net));
+            inbox.set_link(link.clone());
+            inbox.set_tap(outbox.tap());
+            outbox.follow(Follow::new(inbox.clone(), link));
+            outbox.spawn();
             let shown = publisher.clone();
             refresher = Some(Refresher::spawn(
                 node.clone(),
@@ -448,6 +467,7 @@ impl ClusterParts {
             remote,
             mirror,
             janitor,
+            outbox,
             publisher,
             refresher,
             handler,
@@ -474,6 +494,7 @@ impl ClusterParts {
         self.shells.close();
         self.mirror.close();
         self.janitor.close();
+        self.outbox.close();
         if let Some(refresher) = &self.refresher {
             refresher.close();
         }

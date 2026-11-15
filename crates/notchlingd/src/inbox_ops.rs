@@ -1,8 +1,10 @@
 use crate::acting_ops::{now_ms, Room};
 use crate::inbox_events::events_of;
+use crate::inbox_mirrors::{localize, InboxLink, Mirrors, Refusal, Tap};
 use crate::late_emit::Events;
 use crate::op_group::OpGroup;
 use notchling_engine::bridge::inbox::InboxOutcome;
+use notchling_engine::cluster::{NodeId, Qualified};
 use notchling_engine::inbox::{self, ActionId, Book, Change, Item, Kind, State};
 use notchling_local_api::{ops, topics, ApiError, Caller, ClientKind, ErrorCode, OpSpec, Tier};
 use serde_json::{json, Value};
@@ -16,6 +18,7 @@ use std::time::Duration;
 const TICK: Duration = Duration::from_secs(1);
 const ANSWERED_BY: &str = "mac";
 const MAY_ALLOW: [&str; 2] = ["mac", "phone"];
+pub(crate) const NO_SUCH_ITEM: &str = "No such inbox item.";
 
 pub trait Responder: Send + Sync {
     fn answered(&self, item: &Item, action: ActionId) -> bool;
@@ -29,6 +32,7 @@ type Clock = Arc<dyn Fn() -> i64 + Send + Sync>;
 
 enum Msg {
     Changes(Vec<Change>),
+    Shown(Vec<Change>),
     Flush(Sender<()>),
 }
 
@@ -37,6 +41,8 @@ struct Inner {
     responders: HashMap<String, Arc<dyn Responder>>,
     writes: Option<Sender<Msg>>,
     events: Option<Events>,
+    mirrors: Mirrors,
+    tap: Option<Tap>,
 }
 
 impl Inner {
@@ -52,8 +58,20 @@ impl Inner {
         if changes.is_empty() {
             return;
         }
+        if let Some(tap) = &self.tap {
+            tap(changes.clone());
+        }
         if let Some(writes) = &self.writes {
             let _ = writes.send(Msg::Changes(changes));
+        }
+    }
+
+    fn show(&self, changes: Vec<Change>) {
+        if changes.is_empty() {
+            return;
+        }
+        if let Some(writes) = &self.writes {
+            let _ = writes.send(Msg::Shown(changes));
         }
     }
 
@@ -76,6 +94,7 @@ pub struct InboxOps {
     clock: Clock,
     data_dir: PathBuf,
     inner: Mutex<Inner>,
+    link: Mutex<Option<Arc<dyn InboxLink>>>,
     stop: Mutex<Option<Sender<()>>>,
     thread: Mutex<Option<JoinHandle<()>>>,
     writer: Mutex<Option<JoinHandle<()>>>,
@@ -87,6 +106,11 @@ fn write_loop(reads: Receiver<Msg>, data_dir: PathBuf, room: Arc<dyn Room>) {
             Msg::Changes(changes) => {
                 for change in &changes {
                     persist(&data_dir, change);
+                    publish(room.as_ref(), change);
+                }
+            }
+            Msg::Shown(changes) => {
+                for change in &changes {
                     publish(room.as_ref(), change);
                 }
             }
@@ -147,11 +171,14 @@ impl InboxOps {
             responders: HashMap::new(),
             writes: Some(writes),
             events: None,
+            mirrors: Mirrors::default(),
+            tap: None,
         };
         let ops = InboxOps {
             clock,
             data_dir,
             inner: Mutex::new(inner),
+            link: Mutex::new(None),
             stop: Mutex::new(None),
             thread: Mutex::new(None),
             writer: Mutex::new(writer),
@@ -235,6 +262,8 @@ impl InboxOps {
         inner.forget(&changes);
         inner.note(&changes);
         inner.send(changes);
+        let shown = inner.mirrors.tick(now_ms);
+        inner.show(shown);
     }
 
     pub fn spawn_loop(self: &Arc<Self>) {
@@ -285,9 +314,38 @@ impl InboxOps {
         }
     }
 
-    fn list(&self) -> Value {
+    fn local_view(&self) -> Vec<Item> {
         let inner = lock(&self.inner);
-        json!({"items": inner.book.items(), "unread": inner.book.unread()})
+        let mut items = inner.book.items();
+        items.extend(inner.mirrors.items());
+        items
+    }
+
+    fn view(&self, with_home: bool) -> Vec<Item> {
+        let mut items = self.local_view();
+        let link = lock(&self.link).clone();
+        let remote = link
+            .filter(|_| with_home)
+            .and_then(|link| Some((link.me()?, link.home_items()?)));
+        if let Some((me, (home, from_home))) = remote {
+            let known: HashSet<String> = items.iter().map(|item| item.id.clone()).collect();
+            items.extend(
+                localize(&me, &home, from_home)
+                    .into_iter()
+                    .filter(|item| !known.contains(&item.id)),
+            );
+        }
+        items.sort_by_key(|item| std::cmp::Reverse(item.created_ms));
+        items
+    }
+
+    fn list(&self, with_home: bool) -> Value {
+        let items = self.view(with_home);
+        let unread = items
+            .iter()
+            .filter(|item| item.state == State::Open && !item.seen)
+            .count();
+        json!({"items": items, "unread": unread})
     }
 
     fn seen(&self, args: &Value) -> Result<Value, ApiError> {
@@ -301,14 +359,108 @@ impl InboxOps {
         let mut inner = lock(&self.inner);
         let changes = inner.book.mark_seen(&ids);
         inner.send(changes);
-        Ok(json!({"unread": inner.book.unread()}))
+        let shown = inner.mirrors.mark_seen(&ids);
+        inner.show(shown);
+        Ok(json!({"unread": inner.book.unread() + inner.mirrors.unread()}))
     }
 
     pub fn items(&self) -> Vec<Item> {
-        lock(&self.inner).book.items()
+        self.view(true)
+    }
+
+    pub fn local_ids(&self) -> HashSet<String> {
+        self.local_view().into_iter().map(|item| item.id).collect()
+    }
+
+    pub fn own_open(&self) -> Vec<Item> {
+        lock(&self.inner)
+            .book
+            .items()
+            .into_iter()
+            .filter(|item| item.state == State::Open)
+            .collect()
+    }
+
+    pub fn set_link(&self, link: Arc<dyn InboxLink>) {
+        *lock(&self.link) = Some(link);
+    }
+
+    pub fn set_tap(&self, tap: Tap) {
+        lock(&self.inner).tap = Some(tap);
+    }
+
+    pub fn mirror_changed(&self, owner: &NodeId, item: Item) -> Result<(), Refusal> {
+        let mut inner = lock(&self.inner);
+        let changes = inner.mirrors.changed(owner, item)?;
+        inner.show(changes);
+        Ok(())
+    }
+
+    pub fn mirror_removed(&self, owner: &NodeId, id: &str) -> Result<(), Refusal> {
+        let mut inner = lock(&self.inner);
+        let change = inner.mirrors.removed(owner, id)?;
+        inner.show(change.into_iter().collect());
+        Ok(())
+    }
+
+    pub fn mirror_sync(&self, owner: &NodeId, open: Vec<Item>) -> Result<(), Refusal> {
+        let mut inner = lock(&self.inner);
+        let changes = inner.mirrors.sync(owner, open)?;
+        inner.show(changes);
+        Ok(())
+    }
+
+    pub fn clear_mirrors(&self) {
+        let mut inner = lock(&self.inner);
+        let changes = inner.mirrors.clear();
+        inner.show(changes);
+    }
+
+    pub fn show_remote(&self, changes: Vec<Change>) {
+        lock(&self.inner).show(changes);
+    }
+
+    fn forward(
+        &self,
+        owner: Qualified,
+        full: &str,
+        (action, by): (ActionId, &str),
+    ) -> Result<InboxOutcome, ApiError> {
+        let link = lock(&self.link)
+            .clone()
+            .ok_or_else(|| ApiError::new(ErrorCode::Failed, NO_SUCH_ITEM))?;
+        if let Some(shown) = lock(&self.inner).mirrors.get(full) {
+            if shown.state != State::Open {
+                return Ok(refused(shown));
+            }
+            if !shown.actions.iter().any(|offered| offered.id == action) {
+                return Err(bad("The item doesn't offer that action."));
+            }
+        }
+        if allows_any(action) && !MAY_ALLOW.contains(&by) {
+            return Err(ApiError::new(
+                ErrorCode::Forbidden,
+                "Only the Mac or a paired phone may allow a secret.",
+            ));
+        }
+        let answered = link.answer(&owner.node, &owner.id, action, by)?;
+        outcome_of(&answered)
     }
 
     pub fn decide(&self, id: &str, action: ActionId, by: &str) -> Result<InboxOutcome, ApiError> {
+        let me = lock(&self.link).as_ref().and_then(|link| link.me());
+        let parsed = Qualified::parse(id);
+        if let Some(owner) = parsed.clone().filter(|q| Some(&q.node) != me.as_ref()) {
+            return self.forward(owner, id, (action, by));
+        }
+        let id = match parsed {
+            Some(own) => own.id,
+            None => id.to_string(),
+        };
+        self.decide_own(&id, action, by)
+    }
+
+    fn decide_own(&self, id: &str, action: ActionId, by: &str) -> Result<InboxOutcome, ApiError> {
         let now = (self.clock)();
         let mut inner = lock(&self.inner);
         let current = inner
@@ -316,7 +468,7 @@ impl InboxOps {
             .items()
             .into_iter()
             .find(|item| item.id == id)
-            .ok_or_else(|| ApiError::new(ErrorCode::Failed, "No such inbox item."))?;
+            .ok_or_else(|| ApiError::new(ErrorCode::Failed, NO_SUCH_ITEM))?;
         if current.state != State::Open {
             return Ok(refused(&current));
         }
@@ -353,7 +505,7 @@ impl InboxOps {
         }
     }
 
-    fn answer(&self, args: &Value) -> Result<Value, ApiError> {
+    fn answer(&self, args: &Value, from_node: bool) -> Result<Value, ApiError> {
         let id = args
             .get("id")
             .and_then(Value::as_str)
@@ -361,7 +513,12 @@ impl InboxOps {
         let action: ActionId =
             serde_json::from_value(args.get("action").cloned().unwrap_or(Value::Null))
                 .map_err(|_| bad("action is not one the inbox knows"))?;
-        let outcome = self.decide(id, action, ANSWERED_BY)?;
+        let by = args
+            .get("by")
+            .and_then(Value::as_str)
+            .filter(|by| from_node && MAY_ALLOW.contains(by))
+            .unwrap_or(ANSWERED_BY);
+        let outcome = self.decide(id, action, by)?;
         Ok(json!({
             "answered": outcome.answered,
             "state": state_name(outcome.state),
@@ -370,12 +527,29 @@ impl InboxOps {
     }
 }
 
+fn allows_any(action: ActionId) -> bool {
+    matches!(
+        action,
+        ActionId::Allow | ActionId::AllowOnce | ActionId::AllowAlways
+    )
+}
+
 fn allows_secret(item: &Item, action: ActionId) -> bool {
-    matches!(item.kind, Kind::SecretApproval | Kind::NodeJoin)
-        && matches!(
-            action,
-            ActionId::Allow | ActionId::AllowOnce | ActionId::AllowAlways
-        )
+    matches!(item.kind, Kind::SecretApproval | Kind::NodeJoin) && allows_any(action)
+}
+
+fn outcome_of(answered: &Value) -> Result<InboxOutcome, ApiError> {
+    let unreadable = || ApiError::new(ErrorCode::Failed, "The answer came back unreadable.");
+    Ok(InboxOutcome {
+        answered: answered
+            .get("answered")
+            .and_then(Value::as_bool)
+            .ok_or_else(unreadable)?,
+        state: serde_json::from_value(answered.get("state").cloned().unwrap_or(Value::Null))
+            .map_err(|_| unreadable())?,
+        answer: serde_json::from_value(answered.get("answer").cloned().unwrap_or(Value::Null))
+            .map_err(|_| unreadable())?,
+    })
 }
 
 fn refused(item: &Item) -> InboxOutcome {
@@ -392,15 +566,19 @@ impl OpGroup for InboxOps {
     }
 
     fn call(&self, caller: &Caller, op: &str, args: &Value) -> Result<Value, ApiError> {
-        if caller.tier != Tier::App || caller.client != ClientKind::App {
+        let from_app = caller.tier == Tier::App && caller.client == ClientKind::App;
+        let from_node = caller.tier == Tier::App
+            && caller.client == ClientKind::Node
+            && matches!(op, ops::INBOX_LIST | ops::INBOX_ANSWER);
+        if !from_app && !from_node {
             return Err(ApiError::new(
                 ErrorCode::Forbidden,
                 "The inbox is the app's.",
             ));
         }
         match op {
-            ops::INBOX_LIST => Ok(self.list()),
-            ops::INBOX_ANSWER => self.answer(args),
+            ops::INBOX_LIST => Ok(self.list(from_app)),
+            ops::INBOX_ANSWER => self.answer(args, from_node),
             ops::INBOX_SEEN => self.seen(args),
             _ => Err(ApiError::internal(format!("{op} has no handler"))),
         }

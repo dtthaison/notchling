@@ -163,6 +163,9 @@ pub const RULES: &[Rule] = &[
     to_vault("vault.list", CLIENT, OriginTier::App),
     to_vault("vault.save", CLIENT, OriginTier::App),
     to_vault("vault.remove", CLIENT, OriginTier::App),
+    client_plain("inbox.answer"),
+    client_plain("inbox.list"),
+    rule("node.inbox", MEMBER, OriginTier::Node, None, false),
 ];
 
 fn stands(sender: &SenderFacts, sent: Sent) -> bool {

@@ -160,6 +160,7 @@ fn every_rule_names_a_known_op() {
         "grant.deliver",
         "grant.revoke",
         "grant.request",
+        "node.inbox",
     ];
     let wire = std::fs::read_to_string(concat!(
         env!("CARGO_MANIFEST_DIR"),

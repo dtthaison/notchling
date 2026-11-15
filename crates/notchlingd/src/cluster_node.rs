@@ -173,6 +173,7 @@ fn known_node_ops() -> &'static [&'static str] {
         names.extend(crate::cluster_dispatch::NODE_OPS);
         names.extend(crate::cluster_workspace::NODE_OPS);
         names.extend(crate::grant_broker::NODE_OPS);
+        names.extend(crate::cluster_inbox::NODE_OPS);
         names
     })
 }
