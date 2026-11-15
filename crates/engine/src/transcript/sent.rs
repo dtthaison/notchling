@@ -100,7 +100,10 @@ impl Queue {
             Some("dequeue") if !self.waiting.is_empty() => {
                 self.batch.push(self.waiting.remove(0));
             }
-            Some("popAll") => self.waiting.clear(),
+            Some("popAll") => {
+                self.waiting.clear();
+                self.batch.clear();
+            }
             Some("remove") => self.leave(content),
             _ => {}
         }
@@ -154,9 +157,16 @@ fn command_matches(message: &Message, text: &str) -> bool {
     named.trim_start_matches('/') == name && squeezed(&given) == *args
 }
 
+fn took_prompt(obj: &Value, text: &str, images: usize) -> bool {
+    typed_prompt(obj, text) || (text.trim().is_empty() && images > 0 && !carries_result(obj))
+}
+
 fn takes(message: &Message, queue: &mut Queue, text: &str, images: usize) -> usize {
     let batch = std::mem::take(&mut queue.batch);
     if batch.len() >= 2 && squeezed(text) == squeezed(&batch.join("\n")) {
+        if images < message.pictures {
+            return 0;
+        }
         return batch.iter().filter(|e| entry_matches(message, e)).count();
     }
     usize::from(line_matches(message, text, images))
@@ -208,6 +218,9 @@ pub fn count_since(path: &str, message: &Message, since_ms: i64) -> Option<Seen>
         if !counting {
             reaches_back = true;
         }
+        if flag(&obj, "isSidechain") || flag(&obj, "isMeta") || flag(&obj, "isCompactSummary") {
+            continue;
+        }
         match str_of(&obj, "type") {
             Some("queue-operation") => {
                 queue.operation(&obj);
@@ -221,17 +234,21 @@ pub fn count_since(path: &str, message: &Message, since_ms: i64) -> Option<Seen>
             Some("user") if !flag(&obj, "isSidechain") && !carries_result(&obj) => {
                 let text = said(&obj);
                 let images = image_blocks(obj.pointer("/message/content"));
-                if typed_prompt(&obj, &text) {
+                if took_prompt(&obj, &text, images) {
                     let taken = takes(message, &mut queue, &text, images);
                     if counting {
                         seen.taken += taken;
                     }
-                } else if counting && command_matches(message, &text) {
-                    seen.taken += 1;
+                } else {
+                    queue.batch.clear();
+                    if counting && command_matches(message, &text) {
+                        seen.taken += 1;
+                    }
                 }
             }
             Some("system") if str_of(&obj, "subtype") == Some("local_command") => {
                 let text = str_of(&obj, "content").unwrap_or_default();
+                queue.batch.clear();
                 if counting && command_matches(message, text) {
                     seen.taken += 1;
                 }
@@ -241,11 +258,13 @@ pub fn count_since(path: &str, message: &Message, since_ms: i64) -> Option<Seen>
                     continue;
                 };
                 queue.leave(Some(&text));
-                if typed_prompt(&obj, &text) {
+                if took_prompt(&obj, &text, images) {
                     let taken = takes(message, &mut queue, &text, images);
                     if counting {
                         seen.taken += taken;
                     }
+                } else {
+                    queue.batch.clear();
                 }
             }
             _ => {}

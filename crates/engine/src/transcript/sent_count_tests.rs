@@ -184,3 +184,127 @@ fn subagent_and_tool_result_lines_never_count() {
 fn an_empty_message_matches_nothing() {
     assert_eq!(count("counts.jsonl", "", 0), seen(0, 0));
 }
+
+fn stamp(second: u32) -> String {
+    format!("2026-11-15T10:00:{second:02}.000Z")
+}
+
+fn op(operation: &str, content: Option<&str>, second: u32) -> String {
+    let mut line = json!({"type": "queue-operation", "operation": operation,
+        "timestamp": stamp(second)});
+    if let Some(content) = content {
+        line["content"] = json!(content);
+    }
+    line.to_string()
+}
+
+fn user(content: serde_json::Value, second: u32) -> String {
+    json!({"type": "user", "timestamp": stamp(second),
+        "message": {"role": "user", "content": content}})
+    .to_string()
+}
+
+#[test]
+fn meta_sidechain_and_summary_lines_never_count() {
+    let command = "<command-name>/model</command-name><command-args>opus</command-args>";
+    for key in ["isMeta", "isSidechain", "isCompactSummary"] {
+        let mut meta_user = json!({"type": "user", "timestamp": stamp(10),
+            "message": {"role": "user", "content": command}});
+        meta_user[key] = json!(true);
+        let mut meta_system = json!({"type": "system", "subtype": "local_command",
+            "timestamp": stamp(20), "content": command});
+        meta_system[key] = json!(true);
+        let mut meta_attachment = json!({"type": "attachment", "timestamp": stamp(30),
+            "attachment": {"type": "queued_command", "prompt": "/model opus"}});
+        meta_attachment[key] = json!(true);
+        let lines = [
+            meta_user.to_string(),
+            meta_system.to_string(),
+            meta_attachment.to_string(),
+        ];
+        assert_eq!(count_lines(&lines, "/model opus", 0), seen(0, 0), "{key}");
+    }
+}
+
+#[test]
+fn picture_only_message_is_taken_by_an_image_only_line() {
+    let picture = Message {
+        text: String::new(),
+        pictures: 1,
+        bash: None,
+        command: None,
+    };
+    let image = json!({"type": "image", "source": {"type": "base64", "data": "x"}});
+    let lines = [
+        user(json!([image.clone()]), 10),
+        user(json!("[Image #3]"), 20),
+        user(
+            json!([image.clone(), {"type": "text", "text": "[Image #4]"}]),
+            30,
+        ),
+        json!({"type": "attachment", "timestamp": stamp(40),
+            "attachment": {"type": "queued_command", "prompt": [image.clone()]}})
+        .to_string(),
+        user(json!([{"type": "text", "text": "plain"}]), 50),
+        user(
+            json!([{"type": "tool_result", "tool_use_id": "t", "content": "x"}, image]),
+            55,
+        ),
+    ];
+    let dir = TempDir::new("count-since");
+    let path = dir.write("t.jsonl", &lines.join("\n"));
+    assert_eq!(
+        count_since(&path.to_string_lossy(), &picture, at(0)),
+        seen(0, 3)
+    );
+}
+
+#[test]
+fn merged_line_needs_the_pictures_too() {
+    let with_picture = Message {
+        text: "hi".to_string(),
+        pictures: 1,
+        bash: None,
+        command: None,
+    };
+    assert_eq!(
+        count_since(&fixture("merged.jsonl"), &with_picture, at(0)),
+        seen(2, 0)
+    );
+}
+
+#[test]
+fn a_dequeued_notification_does_not_break_a_later_merge() {
+    let lines = [
+        op(
+            "enqueue",
+            Some("<task-notification>done</task-notification>"),
+            1,
+        ),
+        op("dequeue", None, 2),
+        user(json!("<task-notification>done</task-notification>"), 3),
+        op("enqueue", Some("a"), 4),
+        op("enqueue", Some("b"), 5),
+        op("dequeue", None, 6),
+        op("dequeue", None, 6),
+        user(json!("a\nb"), 7),
+    ];
+    assert_eq!(count_lines(&lines, "a", 0), seen(1, 1));
+    assert_eq!(count_lines(&lines, "b", 0), seen(1, 1));
+}
+
+#[test]
+fn pop_all_clears_a_dequeued_entry_before_a_later_merge() {
+    let lines = [
+        op("enqueue", Some("x"), 1),
+        op("dequeue", None, 2),
+        op("popAll", None, 3),
+        op("enqueue", Some("a"), 4),
+        op("enqueue", Some("b"), 5),
+        op("dequeue", None, 6),
+        op("dequeue", None, 6),
+        user(json!("a\nb"), 7),
+    ];
+    assert_eq!(count_lines(&lines, "a", 0), seen(1, 1));
+    assert_eq!(count_lines(&lines, "b", 0), seen(1, 1));
+}
