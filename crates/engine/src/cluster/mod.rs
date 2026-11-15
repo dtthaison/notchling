@@ -1,4 +1,5 @@
 pub mod blob;
+pub mod claims;
 pub mod core;
 pub mod failover;
 pub mod fence;
@@ -12,6 +13,7 @@ pub mod members;
 pub mod outward;
 pub mod persist;
 pub mod policy;
+pub mod returns;
 pub mod shell_job;
 pub mod snapshot;
 pub mod state;
@@ -34,6 +36,8 @@ pub use versions::{compat, Compat, Purpose, Versions};
 #[cfg(test)]
 mod blob_tests;
 #[cfg(test)]
+mod claims_tests;
+#[cfg(test)]
 mod failover_lease_tests;
 #[cfg(test)]
 mod failover_tests;
@@ -55,6 +59,8 @@ mod join_tests;
 mod outward_tests;
 #[cfg(test)]
 mod policy_tests;
+#[cfg(test)]
+mod returns_tests;
 #[cfg(test)]
 mod shell_job_tests;
 #[cfg(test)]

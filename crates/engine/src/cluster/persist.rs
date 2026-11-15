@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
 
+use super::claims::{Claim, SideCopy};
 use super::failover::{ArmingId, Failover};
 use super::id::NodeId;
 use super::jobs::Job;
@@ -145,6 +146,14 @@ pub fn load(cluster_dir: &Path) -> Result<Option<ClusterState>, String> {
         Some(value) => read::<BTreeMap<NodeId, ArmingId>>(&value)?,
         None => seeded_holders(&armed),
     };
+    let claims = match get("claims")? {
+        Some(value) => read::<BTreeMap<String, Claim>>(&value)?,
+        None => BTreeMap::new(),
+    };
+    let side_copies = match get("side_copies")? {
+        Some(value) => read::<Vec<SideCopy>>(&value)?,
+        None => Vec::new(),
+    };
     Ok(Some(ClusterState {
         id: read(&id)?,
         name: read(&name)?,
@@ -157,6 +166,8 @@ pub fn load(cluster_dir: &Path) -> Result<Option<ClusterState>, String> {
         failover,
         armed,
         holders,
+        claims,
+        side_copies,
     }))
 }
 
@@ -217,6 +228,8 @@ fn apply(tx: &rusqlite::Transaction<'_>, change: &Change) -> Result<(), String> 
             put_state(tx, "armed", &text(armed)?)?;
         }
         Change::Holders(holders) => put_state(tx, "holders", &text(holders)?)?,
+        Change::Claims(claims) => put_state(tx, "claims", &text(claims)?)?,
+        Change::SideCopies(copies) => put_state(tx, "side_copies", &text(copies)?)?,
         Change::Cluster {
             id,
             name,

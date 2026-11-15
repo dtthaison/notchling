@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+use super::claims::{hide_side_copies, put_claim, put_side_copy, touch, Claim, SideCopy};
 use super::failover::{ArmingId, Failover};
 use super::grants::SecretAllow;
 use super::id::{NodeId, Role};
@@ -25,6 +26,10 @@ pub struct ClusterState {
     pub armed: Option<(NodeId, Term)>,
     #[serde(default)]
     pub holders: BTreeMap<NodeId, ArmingId>,
+    #[serde(default)]
+    pub claims: BTreeMap<String, Claim>,
+    #[serde(default)]
+    pub side_copies: Vec<SideCopy>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -101,6 +106,19 @@ pub enum Command {
         node: NodeId,
         seen: Option<ArmingId>,
     },
+    Claim {
+        claim: Claim,
+    },
+    Touched {
+        session: String,
+    },
+    SideCopy {
+        copy: SideCopy,
+    },
+    HideSideCopy {
+        session: String,
+        node: NodeId,
+    },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -119,6 +137,8 @@ pub enum Change {
     Failover(Failover),
     Armed(Option<(NodeId, Term)>),
     Holders(BTreeMap<NodeId, ArmingId>),
+    Claims(BTreeMap<String, Claim>),
+    SideCopies(Vec<SideCopy>),
     Cluster {
         id: String,
         name: String,
@@ -286,6 +306,8 @@ pub fn start(
         failover: Failover::Off,
         armed: None,
         holders: BTreeMap::new(),
+        claims: BTreeMap::new(),
+        side_copies: Vec::new(),
     };
     let mut changes = vec![state.cluster_change()];
     changes.extend(members.into_iter().map(|m| {
@@ -493,6 +515,31 @@ pub fn apply(
                 return Ok(Applied::none());
             }
             changes
+        }
+        Command::Claim { claim } => {
+            active_mut(state, &claim.node)?;
+            if !put_claim(&mut state.claims, claim) {
+                return Ok(Applied::none());
+            }
+            vec![Change::Claims(state.claims.clone())]
+        }
+        Command::Touched { session } => match touch(&mut state.claims, session) {
+            None => return Err(CommandError::BadTransition),
+            Some(false) => return Ok(Applied::none()),
+            Some(true) => vec![Change::Claims(state.claims.clone())],
+        },
+        Command::SideCopy { copy } => {
+            if !put_side_copy(&mut state.side_copies, copy, now_ms) {
+                return Ok(Applied::none());
+            }
+            vec![Change::SideCopies(state.side_copies.clone())]
+        }
+        Command::HideSideCopy { session, node } => {
+            match hide_side_copies(&mut state.side_copies, session, node) {
+                None => return Err(CommandError::BadTransition),
+                Some(false) => return Ok(Applied::none()),
+                Some(true) => vec![Change::SideCopies(state.side_copies.clone())],
+            }
         }
     };
     let entry = state.entry(now_ms, command);
