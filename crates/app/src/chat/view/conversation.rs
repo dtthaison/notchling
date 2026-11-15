@@ -18,8 +18,9 @@ use super::conversation_view::{ConversationInput, ConversationState, Conversatio
 use super::markdown::{self, Sel};
 use super::row_select::{self, key_of};
 use super::steps_view::{hairline, step_group, thinking};
-use super::{message_actions, opinions, ChatView};
+use super::{message_actions, opinions, outbox_rows, ChatView};
 use crate::chat::activity::Activity;
+use crate::chat::outbox::Bubble as OutboxBubble;
 use crate::chat::rows::Row;
 
 pub(super) const ROW_GAP: f32 = 14.0;
@@ -142,55 +143,84 @@ pub(super) fn latest_pill(
     )
 }
 
-struct Bubble<'a> {
+struct Look<'a> {
     queued: bool,
     sending: bool,
-    note: Option<&'a str>,
+    outbox: Option<&'a OutboxBubble>,
     merged: bool,
     chat: &'a WeakEntity<ChatView>,
 }
 
-fn discard_link(chat: &WeakEntity<ChatView>, a: Appearance) -> Stateful<Div> {
-    let chat = chat.clone();
-    div()
-        .id("held-discard")
-        .flex_shrink_0()
-        .cursor_pointer()
-        .child(label(
-            t::chat::held_discard(),
-            TypeRole::Meta,
-            Ink::AccentText,
+fn outbox_status(bubble: &OutboxBubble, chat: &WeakEntity<ChatView>, a: Appearance) -> Div {
+    let buttons = bubble.buttons.iter().map(|&kind| {
+        let (id, to) = (bubble.id.clone(), chat.clone());
+        let ink = if outbox_rows::is_main(kind) {
+            ButtonKind::Secondary
+        } else {
+            ButtonKind::Ghost
+        };
+        button(
+            SharedString::from(format!("{}-{}", outbox_rows::button_id(kind), bubble.id)),
+            outbox_rows::button_label(kind),
+            ink,
+            PartState::Rest,
             a,
-        ))
+        )
+        .flex_shrink_0()
         .on_click(move |_, _, cx| {
-            chat.update(cx, |view, cx| view.discard_held(cx)).ok();
+            to.update(cx, |view, cx| view.outbox_press(&id, kind, cx))
+                .ok();
         })
+    });
+    div()
+        .max_w(relative(0.75))
+        .min_h(px(super::message_actions::ROW_HEIGHT))
+        .flex()
+        .flex_wrap()
+        .justify_end()
+        .items_center()
+        .gap(px(4.0))
+        .child(icon(Icon::Clock, 13.0, Ink::TextFaint, a).flex_shrink_0())
+        .child(
+            label(
+                &outbox_rows::status_line(&bubble.status),
+                TypeRole::Meta,
+                Ink::TextFaint,
+                a,
+            )
+            .min_w(px(0.0))
+            .px(px(4.0)),
+        )
+        .children(buttons)
 }
 
 fn user_row(
     sel: &Sel,
     split: (String, Vec<std::path::PathBuf>),
     images: usize,
-    bubble: Bubble,
+    look: Look,
     a: Appearance,
     cx: &App,
 ) -> Div {
-    let Bubble {
+    let Look {
         queued,
         sending,
-        note: waiting_note,
+        outbox,
         merged,
         chat,
-    } = bubble;
+    } = look;
     let id = sel.id();
-    let name = crate::chat::markers::bubble_part(queued, sending);
+    let name = match outbox {
+        Some(_) => crate::chat::markers::OUTBOX_BUBBLE,
+        None => crate::chat::markers::bubble_part(queued, sending),
+    };
     let note = if sending {
         t::chat::sending_note()
     } else {
         t::chat::queued_note()
     };
     let (words, pictures) = split;
-    let status = queued.then(|| match waiting_note {
+    let status = queued.then(|| match outbox {
         None => div()
             .h(px(super::message_actions::ROW_HEIGHT))
             .flex()
@@ -198,19 +228,7 @@ fn user_row(
             .gap(px(4.0))
             .child(icon(Icon::Clock, 13.0, Ink::TextFaint, a))
             .child(label(note, TypeRole::Meta, Ink::TextFaint, a).px(px(4.0))),
-        Some(state) => div()
-            .max_w(relative(0.75))
-            .min_h(px(super::message_actions::ROW_HEIGHT))
-            .flex()
-            .items_center()
-            .gap(px(4.0))
-            .child(icon(Icon::Clock, 13.0, Ink::TextFaint, a).flex_shrink_0())
-            .child(
-                label(state, TypeRole::Meta, Ink::TextFaint, a)
-                    .min_w(px(0.0))
-                    .px(px(4.0)),
-            )
-            .child(discard_link(chat, a)),
+        Some(bubble) => outbox_status(bubble, chat, a),
     });
     div()
         .w_full()
@@ -304,18 +322,18 @@ fn row_element(
             images,
             queued,
             sending,
-            note,
+            outbox,
             merged,
         } => {
             let split = crate::chat::drops::split_images(text, |p| s.markdown.borrow().is_file(p));
-            let bubble = Bubble {
+            let look = Look {
                 queued: *queued,
                 sending: *sending,
-                note: note.as_deref(),
+                outbox: outbox.as_ref(),
                 merged: *merged,
                 chat: &input.chat,
             };
-            user_row(sel, split, *images, bubble, a, cx)
+            user_row(sel, split, *images, look, a, cx)
         }
         Row::Assistant { text } => {
             let folder = input.session.as_ref().map_or("", |s| s.cwd.as_str());
@@ -462,10 +480,7 @@ pub(super) fn empty_column(
     cx: &mut Context<ConversationView>,
 ) -> Option<Stateful<Div>> {
     let shown = &*input.shown;
-    let empty = shown.items.is_empty()
-        && shown.queued.is_empty()
-        && input.held.is_none()
-        && input.outgoing.is_empty();
+    let empty = shown.items.is_empty() && input.tail.is_empty();
     let state = if input.subagent.as_ref().is_some_and(|sub| !sub.loaded) {
         Empty::Loading
     } else if input.loading {

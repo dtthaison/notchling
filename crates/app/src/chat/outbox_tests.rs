@@ -311,3 +311,15 @@ fn agent_accessors_follow_the_outbox_key_not_the_row_id() {
     assert!(feed.settle_for(&agent, &shown, 22_000));
     assert!(feed.bubbles_for(&agent).is_empty());
 }
+
+#[test]
+fn an_outgoing_text_is_hidden_once_the_feed_shows_its_bubble_one_for_one() {
+    let bubbles = vec![bubble(&row("o1", "queued", None, "ok  then"))];
+    let outgoing = vec![
+        "ok then".to_owned(),
+        "ok then".to_owned(),
+        "other".to_owned(),
+    ];
+    assert_eq!(unbubbled(outgoing, &bubbles), ["ok then", "other"]);
+    assert_eq!(unbubbled(vec!["x".to_owned()], &[]), ["x"]);
+}

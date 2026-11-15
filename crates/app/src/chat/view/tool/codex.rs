@@ -1,6 +1,7 @@
 use gpui::{App, Context};
 use notchling_locale as t;
 
+use super::super::outbox_rows::send_request;
 use super::{active_email, AccountButton, ChatTool};
 use crate::accounts::model::CODEX;
 use crate::acting::Request;
@@ -9,7 +10,7 @@ use crate::chat::limit_ring as rules;
 use crate::chat::pickers::{self, Menu, MODEL, RESET};
 use crate::chat::view::limit_ring::Shown;
 use crate::chat::view::ChatView;
-use crate::tools::requests::{codex_send, codex_send_draft, codex_stop, is_draft};
+use crate::tools::requests::{codex_send_draft, codex_stop, is_draft};
 use notchling_engine::tools::codex::models;
 
 pub(super) struct Codex;
@@ -29,7 +30,7 @@ impl ChatTool for Codex {
         if is_draft(id) {
             codex_send_draft(id, &session.agent.cwd, text, &pick)
         } else {
-            codex_send(id, text, &pick)
+            send_request(id, session.agent.node.is_some(), text, Some(&pick))
         }
     }
 

@@ -143,6 +143,22 @@ pub fn hidden_queued(queued: &[String], rows: &[OutboxRow]) -> Option<usize> {
     queued.iter().position(|entry| squeeze(entry) == wanted)
 }
 
+pub fn unbubbled(outgoing: Vec<String>, bubbles: &[Bubble]) -> Vec<String> {
+    let mut covered: Vec<String> = bubbles.iter().map(|b| squeeze(&b.text)).collect();
+    outgoing
+        .into_iter()
+        .filter(
+            |text| match covered.iter().position(|c| *c == squeeze(text)) {
+                Some(at) => {
+                    covered.remove(at);
+                    false
+                }
+                None => true,
+            },
+        )
+        .collect()
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct SentRow {
     row: OutboxRow,

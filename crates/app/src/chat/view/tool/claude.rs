@@ -1,6 +1,7 @@
 use gpui::{App, Context};
 use notchling_locale as t;
 
+use super::super::outbox_rows::send_request;
 use super::{AccountButton, ChatTool};
 use crate::accounts::model::CLAUDE_CODE;
 use crate::acting::Request;
@@ -75,7 +76,7 @@ impl ChatTool for Claude {
     }
 
     fn send(&self, _view: &ChatView, session: &Session, text: &str) -> Request {
-        Request::reply(&session.agent.id, text)
+        send_request(&session.agent.id, session.agent.node.is_some(), text, None)
     }
 
     fn stop(&self, id: &str) -> Request {

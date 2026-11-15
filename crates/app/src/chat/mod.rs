@@ -3,7 +3,6 @@ pub mod bench_fixture;
 pub mod blocks;
 #[cfg(test)]
 mod blocks_tests;
-pub mod box_holds;
 pub mod branch;
 pub mod branch_rows;
 #[cfg(test)]

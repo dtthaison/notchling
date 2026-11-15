@@ -1,6 +1,7 @@
 use gpui::{App, Context};
 use notchling_locale as t;
 
+use super::super::outbox_rows::send_request;
 use super::{active_email, AccountButton, ChatTool};
 use crate::accounts::model::ANTIGRAVITY;
 use crate::acting::Request;
@@ -9,7 +10,7 @@ use crate::chat::limit_ring as rules;
 use crate::chat::pickers::{self, agy_option, Menu};
 use crate::chat::view::limit_ring::Shown;
 use crate::chat::view::ChatView;
-use crate::tools::requests::{agy_cancel, agy_send, agy_send_draft, is_draft};
+use crate::tools::requests::{agy_cancel, agy_send_draft, is_draft};
 
 pub(super) struct Antigravity;
 
@@ -32,7 +33,7 @@ impl ChatTool for Antigravity {
         if is_draft(&session.agent.id) {
             agy_send_draft(&session.agent.cwd, text)
         } else {
-            agy_send(&session.agent.id, text)
+            send_request(&session.agent.id, session.agent.node.is_some(), text, None)
         }
     }
 

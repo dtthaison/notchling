@@ -65,7 +65,7 @@ fn transcripts_in_the_fixture_are_read_relative_to_the_root() {
             images: 0,
             queued: false,
             sending: false,
-            note: None,
+            outbox: None,
             merged: false
         }
     );
@@ -109,7 +109,7 @@ fn transcripts_in_the_fixture_are_read_relative_to_the_root() {
             images: 0,
             queued: true,
             sending: false,
-            note: None,
+            outbox: None,
             merged: false
         })
     );

@@ -6,7 +6,7 @@ use notchling_engine::transcript::model::{ChatItem, ItemKind};
 
 use super::*;
 use crate::chat::markdown_cache::Cache;
-use crate::chat::rows::Row;
+use crate::chat::rows::{tail_rows, Row};
 use crate::chat::selection::copied as old_copy;
 use crate::chat::view::row_blocks::rows_blocks;
 
@@ -135,7 +135,7 @@ fn queued_rows_have_distinct_keys() {
         images: 0,
         queued: true,
         sending: false,
-        note: None,
+        outbox: None,
         merged: false,
     };
     let sending = Row::User {
@@ -143,7 +143,7 @@ fn queued_rows_have_distinct_keys() {
         images: 0,
         queued: true,
         sending: true,
-        note: None,
+        outbox: None,
         merged: false,
     };
     let keys = [
@@ -304,8 +304,13 @@ fn copies_the_same_text_as_the_draw_order_selection_on_every_fixture() {
         let cache = std::cell::RefCell::new(Cache::default());
         let model = rows_blocks(
             &conversation,
-            Some("held"),
-            &["still going".to_owned()],
+            &tail_rows(
+                &conversation.queued,
+                None,
+                &[],
+                &["held".to_owned(), "still going".to_owned()],
+                false,
+            ),
             None,
             "",
             &cache,

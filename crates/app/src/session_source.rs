@@ -14,7 +14,7 @@ use notchling_local_api::{
 use serde_json::Value;
 
 use crate::chat::data::DataRoot;
-use crate::chat::outbox::OutboxFeed;
+use crate::chat::outbox::{Bubble, OutboxFeed, OutboxRow};
 use crate::tools::live::ToolLive;
 
 pub type Starter = Arc<dyn Fn(&Path) -> Result<Started, ClientError> + Send + Sync>;
@@ -181,7 +181,7 @@ impl Shared {
                     state.generation += 1;
                 }
             }
-            topics::CODEX_TURN | topics::SESSION_CHANGED | topics::SESSION_HELD => {
+            topics::CODEX_TURN | topics::SESSION_CHANGED => {
                 let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
                 if state.tools.apply(&event) {
                     state.generation += 1;
@@ -302,6 +302,23 @@ impl SessionSource {
     pub fn held(&self) -> (Option<Vec<Value>>, HashSet<String>) {
         let state = self.shared.state.lock().unwrap_or_else(|e| e.into_inner());
         (state.prompts.clone(), state.answered.clone())
+    }
+
+    pub fn outbox_bubbles(&self, agent: &Agent) -> Vec<Bubble> {
+        let state = self.shared.state.lock().unwrap_or_else(|e| e.into_inner());
+        state.outbox.bubbles_for(agent)
+    }
+
+    pub fn outbox_rows(&self, agent: &Agent) -> Vec<OutboxRow> {
+        let state = self.shared.state.lock().unwrap_or_else(|e| e.into_inner());
+        state.outbox.rows_for(agent).to_vec()
+    }
+
+    pub fn settle_outbox_for(&self, agent: &Agent, conversation: &Conversation) {
+        let mut state = self.shared.state.lock().unwrap_or_else(|e| e.into_inner());
+        if state.outbox.settle_for(agent, conversation, now_ms()) {
+            state.generation += 1;
+        }
     }
 
     pub fn settle_outbox(&self, session: &str, conversation: &Conversation) {

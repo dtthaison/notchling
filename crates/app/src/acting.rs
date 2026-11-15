@@ -21,7 +21,6 @@ pub mod ops {
     pub const SESSION_MOVE: &str = "session.move";
     pub const SESSION_COMMAND: &str = "session.command";
     pub const SESSION_QUESTION: &str = "session.question";
-    pub const SESSION_HELD_DISCARD: &str = "session.held.discard";
     pub const SESSION_SEND: &str = "session.send";
     pub const OUTBOX_LIST: &str = "outbox.list";
     pub const OUTBOX_EDIT: &str = "outbox.edit";
@@ -241,10 +240,6 @@ impl Request {
         Request::new(ops::SESSION_QUESTION, json!({ "id": id }))
     }
 
-    pub fn held_discard(id: &str) -> Request {
-        Request::new(ops::SESSION_HELD_DISCARD, json!({ "id": id }))
-    }
-
     pub fn interrupt(id: &str) -> Request {
         Request::new(ops::SESSION_INTERRUPT, json!({ "id": id }))
     }
@@ -300,13 +295,6 @@ mod tests {
     use super::*;
     use notchling_local_api::ApiError;
     use std::io;
-
-    #[test]
-    fn a_discard_names_the_session_and_nothing_else() {
-        let request = Request::held_discard("job-a");
-        assert_eq!(request.op, "session.held.discard");
-        assert_eq!(request.args, json!({"id": "job-a"}));
-    }
 
     #[test]
     fn the_outbox_requests_have_the_wire_shapes() {

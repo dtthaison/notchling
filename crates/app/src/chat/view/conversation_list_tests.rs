@@ -4,7 +4,8 @@ use notchling_engine::transcript::model::{ChatItem, ItemKind, ToolCall, ToolKind
 use super::*;
 use crate::chat::data::Tool;
 use crate::chat::log::diff;
-use crate::chat::rows::{rows, with_outgoing};
+use crate::chat::outbox::{Bubble, Status};
+use crate::chat::rows::{rows, tail_rows};
 use crate::chat::view::conversation_view::SessionShown;
 
 fn item(id: &str, text: &str) -> ChatItem {
@@ -23,6 +24,7 @@ fn conv(range: Range<usize>) -> Arc<Conversation> {
 }
 
 fn input_for(session: &str, shown: Arc<Conversation>) -> ConversationInput {
+    let tail = tail_rows(&shown.queued, None, &[], &[], false);
     ConversationInput {
         shown,
         subagent: None,
@@ -33,9 +35,7 @@ fn input_for(session: &str, shown: Arc<Conversation>) -> ConversationInput {
             working: false,
         }),
         held_working: false,
-        held: None,
-        held_note: None,
-        outgoing: Vec::new(),
+        tail,
         loading: false,
         empty_note: None,
         subagents: Vec::new(),
@@ -120,7 +120,7 @@ fn the_tail_rows_follow_the_queue() {
     let c0 = conv(0..3);
     rows.sync(&input(c0.clone()), None, false);
     let mut typed = input(c0.clone());
-    typed.outgoing = vec!["hello".into()];
+    typed.tail = tail_rows(&[], None, &[], &["hello".to_owned()], false);
     rows.sync(&typed, None, false);
     assert_eq!(rows.state.item_count(), 6);
     assert_eq!(rows.spliced(), vec![(4..4, 1)]);
@@ -142,54 +142,74 @@ fn the_tail_rows_follow_the_queue() {
     assert_eq!(rows.keys().last().map(|k| k.as_ref()), Some("i3"));
 }
 
+fn waiting_bubble(id: &str, text: &str, status: Status) -> Bubble {
+    Bubble {
+        id: id.into(),
+        text: text.into(),
+        status,
+        buttons: Vec::new(),
+    }
+}
+
 #[test]
 fn the_keys_are_the_ones_the_rows_were_selected_by() {
     let mut shown = Conversation::clone(&conv(0..3));
     shown.queued = vec!["a".into(), "b".into()];
     let outgoing = vec!["c".to_string()];
-    let rows = with_outgoing(rows(&shown), &outgoing);
+    let tail = tail_rows(&shown.queued, None, &[], &outgoing, false);
+    let rows = rows(&Conversation {
+        queued: Vec::new(),
+        ..shown.clone()
+    })
+    .into_iter()
+    .chain(tail.clone())
+    .collect::<Vec<_>>();
     let drawn: Vec<_> = rows
         .iter()
         .enumerate()
         .map(|(i, row)| crate::chat::view::row_select::key_of(&shown.items, i, row))
         .collect();
-    assert_eq!(keys_of(&shown, None, &outgoing), drawn);
+    assert_eq!(keys_of(&shown, &tail), drawn);
     for (i, row) in rows.iter().enumerate() {
         let mut input = input(Arc::new(shown.clone()));
-        input.outgoing = outgoing.clone();
+        input.tail = tail.clone();
         assert_eq!(row_at(&input, i).as_ref(), Some(row), "row {i}");
     }
 }
 
 #[test]
-fn a_held_message_is_one_queued_row_between_the_queue_and_the_sending_ones() {
+fn an_outbox_row_sits_after_the_queue_and_before_the_sending_ones() {
     let mut shown = Conversation::clone(&conv(0..3));
     shown.queued = vec!["a".into()];
-    let outgoing = vec!["c".to_string()];
-    let held = Some("b1\n\nb2");
-    let keys: Vec<String> = keys_of(&shown, held, &outgoing)
+    let bubbles = vec![waiting_bubble("o1", "b1\n\nb2", Status::Queued)];
+    let tail = tail_rows(&shown.queued, None, &bubbles, &["c".to_string()], false);
+    let keys: Vec<String> = keys_of(&shown, &tail)
         .iter()
         .map(|k| k.to_string())
         .collect();
     assert_eq!(
         &keys[3..],
-        ["queued-0", "queued-1", "sending-2"],
+        ["queued-0", "outbox-o1", "sending-2"],
         "{keys:?}"
     );
     let mut input = input(Arc::new(shown));
-    input.held = held.map(String::from);
-    input.outgoing = outgoing;
-    let user = |text: &str, sending| Row::User {
-        text: text.into(),
-        images: 0,
-        queued: true,
-        sending,
-        note: None,
-        merged: false,
-    };
-    assert_eq!(row_at(&input, 3), Some(user("a", false)));
-    assert_eq!(row_at(&input, 4), Some(user("b1\n\nb2", false)));
-    assert_eq!(row_at(&input, 5), Some(user("c", true)));
+    input.tail = tail;
+    assert!(matches!(
+        row_at(&input, 3),
+        Some(Row::User {
+            sending: false,
+            outbox: None,
+            ..
+        })
+    ));
+    assert!(matches!(
+        row_at(&input, 4),
+        Some(Row::User { outbox: Some(b), .. }) if b.id == "o1"
+    ));
+    assert!(matches!(
+        row_at(&input, 5),
+        Some(Row::User { sending: true, .. })
+    ));
     assert_eq!(row_at(&input, 6), None);
 }
 
@@ -323,25 +343,26 @@ fn a_draw_with_nothing_new_leaves_a_reader_near_the_end_where_they_are() {
 }
 
 #[test]
-fn a_held_message_shows_the_state_the_daemon_gave_it_and_measures_its_row_again_when_it_changes() {
+fn an_outbox_row_measures_its_row_again_when_its_state_changes() {
     let mut rows = list();
     let c0 = conv(0..3);
     let mut waiting = input(c0.clone());
-    waiting.held = Some("two".into());
+    waiting.tail = tail_rows(
+        &[],
+        None,
+        &[waiting_bubble("o1", "two", Status::Queued)],
+        &[],
+        false,
+    );
     rows.sync(&waiting, None, false);
     let before = rows.spliced().len();
-    let user = |note: Option<&str>| Row::User {
-        text: "two".into(),
-        images: 0,
-        queued: true,
-        sending: false,
-        note: note.map(String::from),
-        merged: false,
-    };
-    assert_eq!(row_at(&waiting, 3), Some(user(None)));
-    let note = "Waiting — the terminal box has other text";
-    waiting.held_note = Some(note.into());
-    assert_eq!(row_at(&waiting, 3), Some(user(Some(note))));
+    waiting.tail = tail_rows(
+        &[],
+        None,
+        &[waiting_bubble("o1", "two", Status::MayBeIn)],
+        &[],
+        false,
+    );
     rows.sync(&waiting, None, false);
     assert_eq!(rows.spliced().len(), before + 1, "its height may differ");
     assert_eq!(rows.spliced().last(), Some(&(4..5, 1)));
@@ -350,9 +371,20 @@ fn a_held_message_shows_the_state_the_daemon_gave_it_and_measures_its_row_again_
 }
 
 #[test]
-fn a_state_with_no_held_text_is_never_shown() {
-    let c0 = conv(0..3);
-    let mut shown = input(c0);
-    shown.held_note = Some("Waiting".into());
-    assert_eq!(row_at(&shown, 3), None);
+fn the_queued_entry_an_outbox_row_stands_for_is_not_drawn_twice() {
+    let mut shown = Conversation::clone(&conv(0..3));
+    shown.queued = vec!["first".into(), "ok then".into()];
+    let bubbles = vec![waiting_bubble("o1", "ok  then", Status::QueuedInSession)];
+    let tail = tail_rows(&shown.queued, Some(1), &bubbles, &[], false);
+    assert_eq!(tail.len(), 2);
+    let mut input = input(Arc::new(shown));
+    input.tail = tail;
+    assert!(
+        matches!(row_at(&input, 3), Some(Row::User { text, outbox: None, .. }) if text == "first")
+    );
+    assert!(matches!(
+        row_at(&input, 4),
+        Some(Row::User { outbox: Some(b), .. }) if b.status == Status::QueuedInSession
+    ));
+    assert_eq!(row_at(&input, 5), None);
 }

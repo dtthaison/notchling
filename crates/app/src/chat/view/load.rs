@@ -241,7 +241,6 @@ impl ChatView {
         self.loading = true;
         self.open_at_end(cx);
         self.tools.error = None;
-        self.tools.boxed = None;
         self.tools.picker = None;
         self.tools.agy = None;
         self.tools.agy_fetched = None;

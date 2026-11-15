@@ -1,0 +1,141 @@
+use notchling_locale as t;
+use serde_json::{json, Value};
+
+use crate::acting::Request;
+use crate::chat::outbox::{Button, Status};
+use crate::tools::requests::Pick;
+
+pub fn status_line(status: &Status) -> String {
+    match status {
+        Status::Queued => t::chat::outbox_queued().to_owned(),
+        Status::QueuedRetry => t::chat::outbox_retry().to_owned(),
+        Status::WaitingDialog => t::chat::outbox_dialog().to_owned(),
+        Status::WaitsForTurn => t::chat::outbox_turn().to_owned(),
+        Status::Sending => t::chat::outbox_sending().to_owned(),
+        Status::QueuedInSession => t::chat::outbox_in_queue().to_owned(),
+        Status::Sent => t::chat::outbox_sent().to_owned(),
+        Status::MayBeIn => t::chat::outbox_maybe().to_owned(),
+        Status::BoxHasText(text) => t::chat::outbox_box(&shortened(text)),
+        Status::Stopped => t::chat::outbox_stopped().to_owned(),
+        Status::NotFound => t::chat::outbox_gone().to_owned(),
+    }
+}
+
+const SHOWN_MAX: usize = 160;
+
+fn shortened(text: &str) -> String {
+    match text.char_indices().nth(SHOWN_MAX) {
+        Some((end, _)) => format!("{}…", text[..end].trim_end()),
+        None => text.to_owned(),
+    }
+}
+
+pub fn button_label(button: Button) -> &'static str {
+    match button {
+        Button::Edit => t::chat::outbox_edit(),
+        Button::Remove => t::chat::outbox_remove(),
+        Button::SendAgain => t::chat::outbox_send_again(),
+        Button::Drop => t::chat::outbox_drop(),
+        Button::ClearBoxAndSend => t::chat::outbox_clear_send(),
+        Button::ResumeAndSend => t::chat::outbox_resume_send(),
+    }
+}
+
+pub fn button_id(button: Button) -> &'static str {
+    match button {
+        Button::Edit => "outbox-edit",
+        Button::Remove => "outbox-remove",
+        Button::SendAgain => "outbox-send-again",
+        Button::Drop => "outbox-drop",
+        Button::ClearBoxAndSend => "outbox-clear-send",
+        Button::ResumeAndSend => "outbox-resume-send",
+    }
+}
+
+pub fn is_main(button: Button) -> bool {
+    matches!(
+        button,
+        Button::SendAgain | Button::ClearBoxAndSend | Button::ResumeAndSend
+    )
+}
+
+pub fn send_request(row: &str, remote: bool, text: &str, pick: Option<&Pick>) -> Request {
+    if remote {
+        return Request::reply(row, text);
+    }
+    let request = Request::send(row, text);
+    match pick.and_then(options_of) {
+        Some(options) => request.with_options(options),
+        None => request,
+    }
+}
+
+fn options_of(pick: &Pick) -> Option<Value> {
+    let mut options = json!({});
+    if let Some(model) = &pick.model {
+        options["model"] = json!(model);
+    }
+    if let Some(effort) = &pick.effort {
+        options["effort"] = json!(effort);
+    }
+    (pick.model.is_some() || pick.effort.is_some()).then_some(options)
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Editing {
+    pub chat_row: String,
+    pub outbox_id: String,
+    pub before: String,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct Begin {
+    pub request: Request,
+    pub draft_after: Option<String>,
+    pub shows_queued: bool,
+}
+
+pub fn begin(editing: Option<&Editing>, send: Request, text: &str) -> Begin {
+    match editing {
+        Some(editing) => Begin {
+            request: Request::outbox_edit(&editing.outbox_id, text),
+            draft_after: None,
+            shows_queued: false,
+        },
+        None => Begin {
+            request: send,
+            draft_after: Some(String::new()),
+            shows_queued: true,
+        },
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct EditEnd {
+    pub draft: String,
+    pub note: Option<&'static str>,
+}
+
+impl Editing {
+    pub fn finished(&self, accepted: bool, text: &str) -> EditEnd {
+        if accepted {
+            EditEnd {
+                draft: self.before.clone(),
+                note: None,
+            }
+        } else {
+            EditEnd {
+                draft: text.to_owned(),
+                note: Some(t::chat::outbox_already_sent()),
+            }
+        }
+    }
+
+    pub fn cancelled(&self) -> String {
+        self.before.clone()
+    }
+}
+
+#[cfg(test)]
+#[path = "outbox_rows_tests.rs"]
+mod tests;

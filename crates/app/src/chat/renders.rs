@@ -1,3 +1,4 @@
+use crate::chat::outbox::{bubble, Bubble, OutboxRow};
 use crate::views::ViewSpec;
 
 pub const VIEWS: [ViewSpec; 2] = [
@@ -13,15 +14,54 @@ pub const VIEWS: [ViewSpec; 2] = [
     },
 ];
 
-pub fn held_preview(how: &str) -> Option<(String, Option<String>)> {
-    let text = "Please run the whole suite again\n\nand then push".to_owned();
-    let note = match how {
-        "plain" => None,
-        "box" => Some("Waiting — the terminal box has other text"),
-        "mixed" => Some(
-            "Something else was typed in the session's input box while the message went in, so it wasn't sent. Check the terminal.",
-        ),
+pub const OUTBOX_STATES: [&str; 12] = [
+    "queued", "retry", "dialog", "turn", "sending", "in_queue", "sent", "maybe", "box", "stopped",
+    "gone", "three",
+];
+
+fn preview_row(state: &str, why: Option<&str>, text: &str) -> Option<Bubble> {
+    let mut wire = serde_json::json!({
+        "id": format!("preview-{state}"), "session": "preview", "tool": "claude",
+        "kind": "prompt", "text": text, "state": state, "position": 1,
+        "queuedMs": 1, "updatedMs": 1, "via": "chat",
+    });
+    if let Some(why) = why {
+        wire["why"] = serde_json::json!(why);
+    }
+    if state == "box" {
+        wire["box"] = serde_json::json!("a half-written line\nthat someone typed in the terminal");
+    }
+    OutboxRow::from_wire(&wire).map(|row| bubble(&row))
+}
+
+pub fn outbox_preview(how: &str) -> Option<Vec<Bubble>> {
+    let text = "Please run the whole suite again\n\nand then push";
+    let one = |state: &str, why: Option<&str>| preview_row(state, why, text).into_iter().collect();
+    Some(match how {
+        "queued" => one("queued", None),
+        "retry" => one("waiting", Some("retry")),
+        "dialog" => one("waiting", Some("dialog")),
+        "turn" => one("waiting", Some("turn")),
+        "sending" => one("sending", None),
+        "in_queue" => one("in_queue", None),
+        "sent" => vec![Bubble {
+            id: "preview-sent".into(),
+            text: text.into(),
+            status: crate::chat::outbox::Status::Sent,
+            buttons: Vec::new(),
+        }],
+        "maybe" => one("unsure", Some("restart")),
+        "box" => one("box", None),
+        "stopped" => one("stopped", None),
+        "gone" => one("gone", None),
+        "three" => [
+            preview_row("waiting", Some("turn"), "First, check the build"),
+            preview_row("queued", None, "Then fix whatever fails"),
+            preview_row("box", None, text),
+        ]
+        .into_iter()
+        .flatten()
+        .collect(),
         _ => return None,
-    };
-    Some((text, note.map(String::from)))
+    })
 }

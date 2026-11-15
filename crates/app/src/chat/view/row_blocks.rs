@@ -9,20 +9,24 @@ use super::row_select::key_of;
 use super::ChatView;
 use crate::chat::blocks::{plain_blocks, Shown};
 use crate::chat::markdown_cache::Cache;
-use crate::chat::rows::{rows, with_held, with_outgoing};
+use crate::chat::rows::{row_of, Row};
 
 pub(super) fn rows_blocks(
     shown: &Conversation,
-    held: Option<&str>,
-    outgoing: &[String],
+    tail: &[Row],
     live: Option<usize>,
     folder: &str,
     cache: &RefCell<Cache>,
     is_open: &dyn Fn(&str) -> bool,
 ) -> Vec<(SharedString, Vec<String>)> {
     let is_file = |path: &std::path::Path| cache.borrow().is_file(path);
-    with_outgoing(with_held(rows(shown), held), outgoing)
+    let all: Vec<Row> = shown
+        .items
         .iter()
+        .map(row_of)
+        .chain(tail.iter().cloned())
+        .collect();
+    all.iter()
         .enumerate()
         .map(|(i, row)| {
             let key = key_of(&shown.items, i, row);
@@ -50,8 +54,7 @@ pub(super) fn input_blocks(
     let folder = input.session.as_ref().map_or("", |s| s.cwd.as_str());
     rows_blocks(
         &input.shown,
-        input.held.as_deref(),
-        &input.outgoing,
+        &input.tail,
         live_group_of(input),
         folder,
         &s.markdown,

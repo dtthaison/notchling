@@ -34,7 +34,7 @@ struct Built {
     session: Option<String>,
     agent: Option<String>,
     keys: Vec<SharedString>,
-    tail: Vec<(bool, String, Option<String>)>,
+    tail: Vec<Row>,
     live: Option<SharedString>,
     inset: bool,
 }
@@ -46,39 +46,24 @@ pub(super) struct ListRows {
     pub spliced: std::cell::RefCell<Vec<(Range<usize>, usize)>>,
 }
 
-fn queued_len(shown: &Conversation, held: Option<&str>) -> usize {
-    shown.queued.len() + usize::from(held.is_some())
-}
-
-pub(super) fn keys_of(
-    shown: &Conversation,
-    held: Option<&str>,
-    outgoing: &[String],
-) -> Vec<SharedString> {
+pub(super) fn keys_of(shown: &Conversation, tail: &[Row]) -> Vec<SharedString> {
     let mut keys: Vec<SharedString> = shown
         .items
         .iter()
         .map(|item| SharedString::from(item.id.clone()))
         .collect();
-    let queued = queued_len(shown, held);
-    let tail = queued + outgoing.len();
-    keys.extend((0..tail).map(|k| {
-        let kind = if k < queued { "queued" } else { "sending" };
-        SharedString::from(format!("{kind}-{k}"))
+    keys.extend(tail.iter().enumerate().map(|(k, row)| match row {
+        Row::User {
+            outbox: Some(bubble),
+            ..
+        } if !bubble.id.is_empty() => SharedString::from(format!("outbox-{}", bubble.id)),
+        Row::User { sending: true, .. }
+        | Row::User {
+            outbox: Some(_), ..
+        } => SharedString::from(format!("sending-{k}")),
+        _ => SharedString::from(format!("queued-{k}")),
     }));
     keys
-}
-
-fn tail_of(
-    shown: &Conversation,
-    held: Option<&str>,
-    note: Option<&str>,
-    outgoing: &[String],
-) -> Vec<(bool, String, Option<String>)> {
-    let queued = shown.queued.iter().map(|text| (false, text.clone(), None));
-    let held = held.map(|text| (false, text.to_owned(), note.map(String::from)));
-    let sending = outgoing.iter().map(|text| (true, text.clone(), None));
-    queued.chain(held).chain(sending).collect()
 }
 
 pub(super) fn row_at(input: &ConversationInput, i: usize) -> Option<Row> {
@@ -86,29 +71,7 @@ pub(super) fn row_at(input: &ConversationInput, i: usize) -> Option<Row> {
     if let Some(item) = shown.items.get(i) {
         return Some(row_of(item));
     }
-    let k = i - shown.items.len();
-    let user = |text: &String, sending: bool, note: Option<&String>| Row::User {
-        text: text.clone(),
-        images: 0,
-        queued: true,
-        sending,
-        note: note.cloned(),
-        merged: false,
-    };
-    let queued = queued_len(shown, input.held.as_deref());
-    if k < shown.queued.len() {
-        return Some(user(&shown.queued[k], false, None));
-    }
-    if k < queued {
-        return input
-            .held
-            .as_ref()
-            .map(|text| user(text, false, input.held_note.as_ref()));
-    }
-    input
-        .outgoing
-        .get(k - queued)
-        .map(|text| user(text, true, None))
+    input.tail.get(i - shown.items.len()).cloned()
 }
 
 pub(super) fn at_bottom(state: &ListState) -> bool {
@@ -204,14 +167,8 @@ impl ListRows {
         change: Option<&Pending>,
         force_follow: bool,
     ) -> Synced {
-        let held = input.held.as_deref();
-        let keys = keys_of(&input.shown, held, &input.outgoing);
-        let tail = tail_of(
-            &input.shown,
-            held,
-            input.held_note.as_deref(),
-            &input.outgoing,
-        );
+        let keys = keys_of(&input.shown, &input.tail);
+        let tail = input.tail.clone();
         let live = live_group_of(input).and_then(|i| keys.get(i).cloned());
         let session = input.session.as_ref().map(|s| s.id.clone());
         let agent = input.subagent.as_ref().map(|s| s.agent_id.clone());
@@ -415,9 +372,7 @@ impl ConversationView {
         let Some(input) = self.input.as_ref() else {
             return div().into_any_element();
         };
-        let rows = input.shown.items.len()
-            + queued_len(&input.shown, input.held.as_deref())
-            + input.outgoing.len();
+        let rows = input.shown.items.len() + input.tail.len();
         if ix == 0 {
             let inset = if input.tasks_inset {
                 super::tasks::INSET
