@@ -42,3 +42,4 @@ daemon: Task 14 re-review (agy gemini-4-hydrogen high): Approved — Turns per c
 daemon: Task 14: complete (aecd887f, 49ab3881; engine cluster::workspace 12, cluster::blob 6, notchlingd cluster_workspace 30, cluster_blobs 11).
 daemon: Final review (agy gemini-4-hydrogen high, whole branch 70cda366..87a521c3): Needs fixes — node.sessions rule allowed any Member, so a Worker could read a client's or the home's session list. Verified. End-to-end flow, term fencing on new ops, cleanup, locks, file sizes and purity found clean.
 daemon: Ruling R15: node.sessions is client-only (client or home, origin Node), narrowing plan B Task 4's "any Member" row — only clients pull it (R4), and a Worker must not read the maintainer's sessions — costs a policy row if a later plan needs a Standby to read them.
+daemon: Final review fix: 3ac71859 (engine cluster:: 154, notchlingd cluster_ 173).
