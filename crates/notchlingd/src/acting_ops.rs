@@ -9,7 +9,7 @@ use crate::late_emit::Events;
 use crate::prompts::{fit_list, question_json, Kind, Prompt, PromptStore};
 use notchling_engine::control::{Command, LaunchError, LaunchOutput, Launcher, PtyScript};
 use notchling_engine::reply::exec::{
-    execute_noting, Failure, Outcome, Pty, QueueLog, ScreenCheck, TranscriptLog,
+    execute_clearing, Clearing, Failure, Outcome, Pty, QueueLog, ScreenCheck, TranscriptLog,
 };
 use notchling_engine::reply::plan::{self, Decision, Expected, Plan, PlanError};
 use notchling_engine::reply::question::{
@@ -18,6 +18,7 @@ use notchling_engine::reply::question::{
 use notchling_engine::reply::read::read_question;
 use notchling_engine::sessions::jobs::config_dir_for_job;
 use notchling_engine::sessions::{Agent, AgentGroup, AgentTarget, Roots};
+use notchling_engine::terminal::input_box;
 use notchling_events::kinds::agents::{AnswerKind, HeldThen, PromptKind};
 use notchling_events::kinds::choices::{DoneOrFailed, FailWhy};
 use notchling_events::{Ref, Session};
@@ -131,6 +132,7 @@ pub struct ActingOps {
     screen_file: Option<PathBuf>,
     reply_screen_file: Option<PathBuf>,
     pub(crate) held: crate::held_ops::HeldState,
+    pub(crate) attempts: crate::reply_attempts::Attempts,
     pub(crate) rest: Box<dyn Rest>,
     pub(crate) events: Option<Events>,
 }
@@ -164,6 +166,7 @@ impl ActingOps {
             screen_file: None,
             reply_screen_file: None,
             held: crate::held_ops::HeldState::default(),
+            attempts: crate::reply_attempts::Attempts::default(),
             events: None,
         }
     }
@@ -331,6 +334,26 @@ impl ActingOps {
         self.play_locked(agent, plan, log, None)
     }
 
+    pub(crate) fn play_reply(
+        &self,
+        agent: &Agent,
+        text: &str,
+        clear_box: bool,
+    ) -> Result<Outcome, PlayError> {
+        self.play_clearing(agent, &plan::reply(text), &mut NoLog, clear_box)
+    }
+
+    pub(crate) fn play_clearing(
+        &self,
+        agent: &Agent,
+        plan: &Plan,
+        log: &mut dyn QueueLog,
+        clear_box: bool,
+    ) -> Result<Outcome, PlayError> {
+        let _one = self.typing.lock().unwrap_or_else(|e| e.into_inner());
+        self.play_inner(agent, plan, log, None, None, clear_box)
+    }
+
     pub(crate) fn play_guarded(
         &self,
         agent: &Agent,
@@ -339,7 +362,7 @@ impl ActingOps {
         guard: &dyn Fn() -> bool,
     ) -> Result<Outcome, PlayError> {
         let _one = self.typing.lock().unwrap_or_else(|e| e.into_inner());
-        self.play_inner(agent, plan, log, None, Some(guard))
+        self.play_inner(agent, plan, log, None, Some(guard), false)
     }
 
     fn play_locked(
@@ -349,7 +372,7 @@ impl ActingOps {
         log: &mut dyn QueueLog,
         keep: Option<&Expected>,
     ) -> Result<Outcome, PlayError> {
-        self.play_inner(agent, plan, log, keep, None)
+        self.play_inner(agent, plan, log, keep, None, false)
     }
 
     fn play_inner(
@@ -359,6 +382,7 @@ impl ActingOps {
         log: &mut dyn QueueLog,
         keep: Option<&Expected>,
         guard: Option<&dyn Fn() -> bool>,
+        clear_box: bool,
     ) -> Result<Outcome, PlayError> {
         if plan.is_empty() {
             return Ok(Outcome::default());
@@ -377,6 +401,14 @@ impl ActingOps {
                 typed: false,
             })?;
         let mut trail = Vec::new();
+        let began = now_ms();
+        let clearing = Clearing {
+            earlier: match plan.reply_text() {
+                Some(_) => self.attempts.recent(&agent.id, began),
+                None => Vec::new(),
+            },
+            any: clear_box,
+        };
         let check = self.attacher.screen_check();
         let refused = AtomicBool::new(false);
         let typed = AtomicBool::new(false);
@@ -390,7 +422,7 @@ impl ActingOps {
             }),
             None => pty,
         };
-        let played = execute_noting(plan, pty.as_mut(), check, log, &mut trail);
+        let played = execute_clearing(plan, pty.as_mut(), check, log, &mut trail, &clearing);
         if refused.load(Ordering::SeqCst) {
             return Err(PlayError {
                 why: FailWhy::NotIdle,
@@ -417,10 +449,33 @@ impl ActingOps {
                 keep_screen(file, &head, &crate::reply_screen::masked(&pty.screen()));
             }
         }
-        played.map_err(|f| PlayError {
-            why: why_of(&f),
-            typed: typed.load(Ordering::SeqCst),
-            err: ApiError::new(ErrorCode::Failed, f.to_string()),
+        if let Some(text) = plan.reply_text() {
+            match &played {
+                Ok(_) => self.attempts.forget(&agent.id),
+                Err(Failure::NotCleared | Failure::Pty(_)) => {}
+                Err(_) => self.attempts.note(&agent.id, text, began),
+            }
+        }
+        let in_box = match (&played, plan.reply_text()) {
+            (Err(Failure::NotCleared), Some(_)) => {
+                input_box::typed_text(&pty.screen(), pty.cursor())
+            }
+            _ => None,
+        };
+        played.map_err(|f| {
+            let mut err = ApiError::new(ErrorCode::Failed, f.to_string());
+            if f == Failure::NotCleared && plan.reply_text().is_some() {
+                let mut data = json!({"why": "not_cleared"});
+                if let Some(text) = in_box {
+                    data["box"] = json!(shown_box(&text));
+                }
+                err = err.with_data(data);
+            }
+            PlayError {
+                why: why_of(&f),
+                typed: typed.load(Ordering::SeqCst),
+                err,
+            }
         })
     }
 
@@ -438,7 +493,8 @@ impl ActingOps {
             return Err(log_down());
         }
         let started = Instant::now();
-        let sent = self.reply_or_hold(&agent, text, crate::held_ops::now_ms());
+        let clear_box = clear_box_arg(args)?;
+        let sent = self.reply_or_hold(&agent, text, crate::held_ops::now_ms(), clear_box);
         match &sent {
             Ok(value) if value.get("state").and_then(Value::as_str) == Some("queued") => {
                 self.note_held(session, HeldThen::SentAtTurnEnd);
@@ -727,6 +783,23 @@ impl QueueLog for NoLog {
     fn mark(&mut self) {}
     fn popped_all(&mut self, _text: &str) -> bool {
         false
+    }
+}
+
+pub const BOX_SHOWN_MAX: usize = 1_000;
+
+fn shown_box(text: &str) -> String {
+    match text.char_indices().nth(BOX_SHOWN_MAX) {
+        Some((end, _)) => format!("{}…", &text[..end]),
+        None => text.to_owned(),
+    }
+}
+
+fn clear_box_arg(args: &Value) -> Result<bool, ApiError> {
+    match args.get("clear_box") {
+        None | Some(Value::Null) => Ok(false),
+        Some(Value::Bool(on)) => Ok(*on),
+        Some(_) => Err(bad("clear_box is true or false")),
     }
 }
 

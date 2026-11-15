@@ -224,6 +224,8 @@ impl ErrorCode {
 pub struct ApiError {
     pub code: ErrorCode,
     pub message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data: Option<Value>,
 }
 
 impl ApiError {
@@ -231,7 +233,13 @@ impl ApiError {
         ApiError {
             code,
             message: message.into(),
+            data: None,
         }
+    }
+
+    pub fn with_data(mut self, data: Value) -> ApiError {
+        self.data = Some(data);
+        self
     }
 
     pub fn bad_request(message: impl Into<String>) -> ApiError {
@@ -357,7 +365,11 @@ pub fn ok_reply(id: u64, result: Value) -> Value {
 }
 
 pub fn err_reply(id: u64, error: &ApiError) -> Value {
-    json!({ "id": id, "err": { "code": error.code.as_str(), "message": error.message } })
+    let mut err = json!({ "code": error.code.as_str(), "message": error.message });
+    if let (Some(data), Some(map)) = (&error.data, err.as_object_mut()) {
+        map.insert("data".to_owned(), data.clone());
+    }
+    json!({ "id": id, "err": err })
 }
 
 pub fn event_line(event: &str, data: &Value) -> Value {
@@ -411,6 +423,33 @@ mod tests {
                 event: "sessions.changed".into(),
                 data: json!([1])
             })
+        );
+    }
+
+    #[test]
+    fn an_error_may_carry_data_and_one_without_still_reads_the_old_way() {
+        let plain = ApiError::new(ErrorCode::Failed, "no");
+        assert_eq!(
+            err_reply(2, &plain),
+            json!({"id": 2, "err": {"code": "failed", "message": "no"}}),
+            "nothing is added when there is no data"
+        );
+        let held = ApiError::new(ErrorCode::Failed, "no").with_data(json!({"box": "a draft"}));
+        let line = serde_json::to_vec(&err_reply(5, &held)).unwrap();
+        assert_eq!(
+            Incoming::parse(&line).unwrap(),
+            Incoming::Reply {
+                id: 5,
+                result: Err(held)
+            }
+        );
+        let old = br#"{"id":6,"err":{"code":"failed","message":"no"}}"#;
+        assert_eq!(
+            Incoming::parse(old).unwrap(),
+            Incoming::Reply {
+                id: 6,
+                result: Err(plain)
+            }
         );
     }
 

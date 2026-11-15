@@ -148,7 +148,7 @@ impl std::fmt::Display for Failure {
             ),
             Failure::NotCleared => write!(
                 f,
-                "The session's input box holds text that isn't from this message, so nothing was typed. Send again when it is empty."
+                "The session's input box holds other text, so the message wasn't sent."
             ),
             Failure::NotTaken => write!(
                 f,
@@ -201,6 +201,12 @@ fn ms(n: u64) -> Duration {
 pub const TRAIL_MAX: usize = 60;
 const TRAIL_ROW: usize = 100;
 
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Clearing {
+    pub earlier: Vec<String>,
+    pub any: bool,
+}
+
 pub fn execute(
     plan: &Plan,
     pty: &mut dyn Pty,
@@ -217,11 +223,23 @@ pub fn execute_noting(
     log: &mut dyn QueueLog,
     trail: &mut Vec<String>,
 ) -> Result<Outcome, Failure> {
+    execute_clearing(plan, pty, check, log, trail, &Clearing::default())
+}
+
+pub fn execute_clearing(
+    plan: &Plan,
+    pty: &mut dyn Pty,
+    check: &dyn ScreenCheck,
+    log: &mut dyn QueueLog,
+    trail: &mut Vec<String>,
+    clearing: &Clearing,
+) -> Result<Outcome, Failure> {
     let began = pty.now_ms();
     let mut run = Run {
         pty,
         check,
         log,
+        clearing,
         taken: false,
         pressed: None,
         pasted: String::new(),
@@ -290,6 +308,7 @@ struct Run<'a> {
     pty: &'a mut dyn Pty,
     check: &'a dyn ScreenCheck,
     log: &'a mut dyn QueueLog,
+    clearing: &'a Clearing,
     taken: bool,
     pressed: Option<PermissionDialog>,
     pasted: String,
@@ -382,6 +401,14 @@ impl Run<'_> {
         match self.shown() {
             Shown::Input(input, _) => match input.fill(&text) {
                 Fill::Empty | Fill::Whole => Ok(()),
+                _ if self.clearing.any => {
+                    self.note("clearing the text the box holds, as asked");
+                    Ok(())
+                }
+                _ if input.leftover_of(&self.clearing.earlier) => {
+                    self.note("clearing what an earlier try of ours left in the box");
+                    Ok(())
+                }
                 Fill::Part | Fill::Folded | Fill::Foreign => Err(Failure::NotCleared),
             },
             _ => Ok(()),

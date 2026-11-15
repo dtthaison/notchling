@@ -47,7 +47,7 @@ hook's request. Built and switched off: while [`Acting`] is off every acting op 
 
 | Op | Tier | Args | Reply |
 | --- | --- | --- | --- |
-| `session.reply` | app | `{id, text}` | `{"sent": true}`, or `{"sent": true, "state": "queued", "waiting": 1, "held": <text>}` when the session is working or just got a message (below) |
+| `session.reply` | app | `{id, text, clear_box?: bool}` | `{"sent": true}`, or `{"sent": true, "state": "queued", "waiting": 1, "held": <text>}` when the session is working or just got a message (below) |
 | `session.held.discard` | app | `{id}` | `{"discarded": true}` when a held text was forgotten (and `session.held` says `text: null`), `{"discarded": false}` when none was held |
 | `session.answer` | app | `{id, answers: [[n...] or "text"], question?: {items}}` | `{"answered": "hook" or "terminal", "promptId"?}` |
 | `session.permission` | app | `{id, decision: "allow"/"deny"/"always", message?}` | `{"decided": decision, "promptId"}` |
@@ -295,11 +295,27 @@ signal.
 
 `session.reply` answers `{"sent": true}` only after the session's input box took the text and let
 go of it. Anything else is `failed` with what happened, and nothing is reported sent: the terminal
-isn't at its prompt (nothing was typed), its input box kept an old draft, it never took the text
-(the box is on screen and still empty), or the text is typed there but Enter didn't send it. Sending
-again is safe: a reply clears the box first. A session whose process Claude Code had stopped is
-started by the attach, and the reply waits for its prompt (up to 15 s) before any key; one
-that never comes up is `failed` with "The session didn't open in time." and nothing typed.
+isn't at its prompt (nothing was typed), its input box holds text that isn't ours, it never took the
+text (the box is on screen and still empty), or the text is typed there but Enter didn't send it.
+Sending again is safe: a reply clears the box first. A session whose process Claude Code had
+stopped is started by the attach, and the reply waits for its prompt (up to 15 s) before any key;
+one that never comes up is `failed` with "The session didn't open in time." and nothing typed.
+
+What may be cleared. A box that holds the whole message, or the whole or a start or an end (at least
+10 letters and digits) of a text this daemon tried to put in that session and did not see go out
+(the last five per session, 12 hours, in memory), is cleared with the reply's usual keys (Ctrl+E,
+Ctrl+U, Backspace per line; never Ctrl+K, Esc or Ctrl+C) and the new message goes on. Any other
+text is never typed over: the call is `failed` with the message "The session's input box holds
+other text, so the message wasn't sent." and `err.data` `{"why": "not_cleared", "box"?: "<the text>"}`
+(`box` is what the input box holds, cut at 1000 characters, left out when it can't be read; it is
+sent to the caller only, never written to the audit log, an event or `reply-screen.txt`). Sending
+the same call again with `clear_box: true` clears the box with those keys whatever it holds,
+checks that it is empty (a box that does not empty, or that a person typed into meanwhile, is
+`not_cleared` again, with nothing pasted and no Enter) and then types and sends as usual. A folded
+paste (`[Pasted text #N +M lines]`) is only ever cleared that way. `clear_box` is `true`, `false`
+or absent; anything else is `bad_request`. A reply that is held for a working session ignores it
+(the text is typed later, as before). The error's `data` is a general, additive part of the wire:
+`{"code", "message", "data"?}`.
 
 A reply to a Claude Code job that is working, or that got a message less than 20 s ago and
 hasn't shown work yet, is held by the daemon and not typed (`held_ops.rs`, engine `reply::held`).

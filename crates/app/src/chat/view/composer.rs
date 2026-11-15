@@ -98,6 +98,50 @@ fn status(
     )
 }
 
+fn box_holds_row(
+    view: &ChatView,
+    ready: bool,
+    a: Appearance,
+    cx: &mut Context<ChatView>,
+) -> Option<Div> {
+    let held = view.box_holds()?;
+    let (state, ink) = if ready {
+        (PartState::Rest, Ink::Text)
+    } else {
+        (PartState::Disabled, Ink::TextFaint)
+    };
+    let button = button_with(
+        "clear-box-send",
+        label(t::chat::box_clear_send(), TypeRole::Label, ink, a),
+        ButtonKind::Secondary,
+        state,
+        a,
+    )
+    .flex_shrink_0();
+    let button = if ready {
+        button.on_click(cx.listener(|this, _, _, cx| this.send_text_clearing_box(cx)))
+    } else {
+        button
+    };
+    Some(
+        div()
+            .mx(px(SIDE_PADDING))
+            .pb(px(6.0))
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .child(
+                div().flex_1().min_w(px(0.0)).child(
+                    label(&sentence(&held.line()), TypeRole::Meta, Ink::Needs, a)
+                        .w_full()
+                        .elide(),
+                ),
+            )
+            .child(button.part_at("Clear Box Button", Corner::Top, a, cx))
+            .part_at("Box Holds Notice", Corner::Trailing, a, cx),
+    )
+}
+
 fn open_menu(view: &ChatView) -> Option<(String, bool)> {
     match &view.tools.picker {
         Some(p) => Some((p.menu.clone(), p.more)),
@@ -785,6 +829,12 @@ pub fn render(view: &ChatView, a: Appearance, window: &Window, cx: &mut Context<
                     &activity, stalled, shell, a, cx,
                 ))
         }))
+        .children(box_holds_row(
+            view,
+            control.enabled && !empty && !view.tools.sending,
+            a,
+            cx,
+        ))
         .child(card)
         .child(footer)
         .children(super::slash_menu::render(view, a, cx))

@@ -94,13 +94,17 @@ impl Plan {
         self.steps.is_empty()
     }
 
-    pub fn reply_chars(&self) -> Option<usize> {
+    pub fn reply_text(&self) -> Option<&str> {
         let waits = |s: &Step| matches!(s, Step::AwaitPaste { .. });
         let pasted = self.steps.iter().find_map(|s| match s {
-            Step::Paste(text) => Some(text.chars().count()),
+            Step::Paste(text) => Some(text.as_str()),
             _ => None,
         });
         pasted.filter(|_| self.steps.iter().any(waits))
+    }
+
+    pub fn reply_chars(&self) -> Option<usize> {
+        self.reply_text().map(|text| text.chars().count())
     }
 
     pub fn writes(&self) -> Vec<String> {
