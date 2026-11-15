@@ -1,6 +1,8 @@
 use super::message::Message;
 use super::restart::{carries_result, flag, WINDOW_BYTES};
-use super::sent::{attachment_text, entry_matches, names, said, Queue};
+use super::sent::{
+    attachment_text, entry_matches, image_blocks, names, said, squeezed, took_prompt, Queue,
+};
 use super::tail::read_lines;
 use super::typed::typed_prompt;
 use super::util::{parse_object, str_of};
@@ -27,25 +29,24 @@ fn prompt_like(entry: &str) -> bool {
 
 fn user_line(queue: &mut Queue, obj: &Value) {
     let text = said(obj);
-    if text.trim().is_empty() {
+    let images = image_blocks(obj.pointer("/message/content"));
+    if text.trim().is_empty() && images == 0 {
         return;
     }
-    if !typed_prompt(obj, &text) {
+    if !took_prompt(obj, &text, images) {
         queue.other_line(&text);
         return;
     }
-    let batch = std::mem::take(&mut queue.batch);
+    let mut batch = std::mem::take(&mut queue.batch);
     if batch.len() > 1 {
-        return;
+        if squeezed(&text) == squeezed(&batch.join("\n")) {
+            return;
+        }
+        batch.clear();
     }
     let listed = queue.waiting.iter().position(|e| names(e, &text));
     let Some(first) = batch.first() else {
-        match listed {
-            Some(at) => {
-                queue.waiting.drain(..=at);
-            }
-            None => queue.waiting.clear(),
-        }
+        queue.forget_waiting(listed);
         return;
     };
     if names(first, &text) {
@@ -56,7 +57,7 @@ fn user_line(queue: &mut Queue, obj: &Value) {
             queue.waiting.remove(at);
             queue.waiting.insert(0, first.clone());
         }
-        None => queue.waiting.clear(),
+        None => queue.forget_waiting(None),
     }
 }
 

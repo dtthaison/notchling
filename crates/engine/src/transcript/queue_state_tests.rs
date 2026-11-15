@@ -317,3 +317,114 @@ fn a_notification_delivered_in_a_tool_result_leaves_the_queue() {
     ];
     assert!(waiting(&lines).is_empty());
 }
+
+fn picture_only(second: u32) -> String {
+    json!({"type":"user","timestamp":stamp(second),"message":{"role":"user","content":[
+        {"type":"image","source":{"type":"base64","media_type":"image/png","data":"AAAA"}}]}})
+    .to_string()
+}
+
+#[test]
+fn a_picture_only_line_frees_its_entry_like_a_typed_prompt() {
+    let lines = [enqueue(1, "[Image #1]"), enqueue(2, "b"), picture_only(3)];
+    assert_eq!(waiting(&lines), ["b"]);
+}
+
+#[test]
+fn a_picture_only_line_after_a_dequeue_consumes_the_batch() {
+    let lines = [
+        enqueue(1, "[Image #1]"),
+        enqueue(2, "b"),
+        op("dequeue", None, 3),
+        picture_only(4),
+    ];
+    assert_eq!(waiting(&lines), ["b"]);
+}
+
+#[test]
+fn an_unrelated_prompt_after_a_two_entry_batch_still_drains_by_match() {
+    let lines = [
+        enqueue(1, "a"),
+        enqueue(2, "b"),
+        enqueue(3, "c"),
+        enqueue(4, "d"),
+        op("dequeue", None, 5),
+        op("dequeue", None, 5),
+        typed("c", 6),
+    ];
+    assert_eq!(waiting(&lines), ["d"]);
+}
+
+#[test]
+fn an_unrelated_prompt_after_a_two_entry_batch_clears_a_lost_queue() {
+    let lines = [
+        enqueue(1, "a"),
+        enqueue(2, "b"),
+        enqueue(3, "c"),
+        op("dequeue", None, 4),
+        op("dequeue", None, 4),
+        typed("never queued", 5),
+    ];
+    assert!(waiting(&lines).is_empty());
+}
+
+#[test]
+fn a_merged_two_entry_batch_still_frees_both() {
+    let lines = [
+        enqueue(1, "a"),
+        enqueue(2, "b"),
+        enqueue(3, "c"),
+        op("dequeue", None, 4),
+        op("dequeue", None, 4),
+        typed("a\nb", 5),
+    ];
+    assert_eq!(waiting(&lines), ["c"]);
+}
+
+#[test]
+fn a_remove_matches_its_credit_the_way_entries_are_matched() {
+    let lines = [
+        enqueue(1, "yes [Image #1]"),
+        enqueue(2, "yes"),
+        taken_in_turn("yes [Image #1]", 3),
+        op("remove", Some("yes"), 4),
+    ];
+    assert_eq!(waiting(&lines), ["yes"]);
+}
+
+#[test]
+fn a_drain_forgets_the_credits() {
+    let lines = [
+        enqueue(1, "yes"),
+        enqueue(2, "x"),
+        enqueue(3, "yes"),
+        taken_in_turn("yes", 4),
+        typed("x", 5),
+        op("remove", Some("yes"), 6),
+    ];
+    assert!(waiting(&lines).is_empty());
+}
+
+#[test]
+fn an_enqueue_of_a_credited_text_drops_the_credit() {
+    let lines = [
+        enqueue(1, "yes"),
+        taken_in_turn("yes", 2),
+        enqueue(3, "yes"),
+        op("remove", Some("yes"), 4),
+    ];
+    assert!(waiting(&lines).is_empty());
+}
+
+#[test]
+fn a_lost_queue_clear_forgets_the_credits() {
+    let lines = [
+        enqueue(1, "yes"),
+        taken_in_turn("yes", 2),
+        enqueue(3, "z"),
+        typed("never queued", 4),
+        enqueue(5, "yes"),
+        op("remove", Some("yes"), 6),
+    ];
+    assert!(waiting(&lines).is_empty());
+}

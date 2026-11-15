@@ -103,7 +103,14 @@ impl Queue {
     pub(super) fn operation(&mut self, obj: &Value) {
         let content = str_of(obj, "content");
         match str_of(obj, "operation") {
-            Some("enqueue") => self.waiting.extend(content.map(String::from)),
+            Some("enqueue") => {
+                if let Some(content) = content {
+                    if let Some(at) = self.credit.iter().position(|c| names(c, content)) {
+                        self.credit.remove(at);
+                    }
+                    self.waiting.push(content.to_owned());
+                }
+            }
             Some("dequeue") if !self.waiting.is_empty() => {
                 self.batch.push(self.waiting.remove(0));
             }
@@ -114,8 +121,17 @@ impl Queue {
     }
 
     pub(super) fn turn_end(&mut self) {
-        self.waiting.clear();
         self.batch.clear();
+        self.forget_waiting(None);
+    }
+
+    pub(super) fn forget_waiting(&mut self, through: Option<usize>) {
+        match through {
+            Some(at) => {
+                self.waiting.drain(..=at);
+            }
+            None => self.waiting.clear(),
+        }
         self.credit.clear();
     }
 
@@ -133,7 +149,7 @@ impl Queue {
 
     pub(super) fn taken_in_turn(&mut self, text: &str) {
         if self.drop_entry(text) {
-            self.credit.push(squeezed(text));
+            self.credit.push(text.to_owned());
         }
     }
 
@@ -141,8 +157,7 @@ impl Queue {
         let Some(content) = content else {
             return;
         };
-        let key = squeezed(content);
-        if let Some(at) = self.credit.iter().position(|c| *c == key) {
+        if let Some(at) = self.credit.iter().position(|c| names(c, content)) {
             self.credit.remove(at);
             return;
         }
@@ -227,7 +242,7 @@ fn command_matches(message: &Message, text: &str) -> bool {
     named.trim_start_matches('/') == name && squeezed(&given) == *args
 }
 
-fn took_prompt(obj: &Value, text: &str, images: usize) -> bool {
+pub(super) fn took_prompt(obj: &Value, text: &str, images: usize) -> bool {
     typed_prompt(obj, text) || (text.trim().is_empty() && images > 0 && !carries_result(obj))
 }
 
@@ -242,7 +257,7 @@ fn takes(message: &Message, queue: &mut Queue, text: &str, images: usize) -> usi
     usize::from(line_matches(message, text, images))
 }
 
-fn image_blocks(content: Option<&Value>) -> usize {
+pub(super) fn image_blocks(content: Option<&Value>) -> usize {
     content.and_then(Value::as_array).map_or(0, |blocks| {
         blocks
             .iter()
