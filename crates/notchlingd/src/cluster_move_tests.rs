@@ -39,6 +39,7 @@ pub(crate) struct FakeActs {
     who: &'static str,
     log: Log,
     pub(crate) on_stop: Mutex<Option<Hook>>,
+    pub(crate) on_start: Mutex<Option<Hook>>,
     pub(crate) swaps: AtomicUsize,
     pub(crate) held: OnceLock<Arc<crate::cluster_relay::HeldRelay>>,
 }
@@ -70,6 +71,9 @@ impl Acts for FakeActs {
     }
 
     fn start_claude(&self, session: &MainSession) -> Result<(), String> {
+        if let Some(hook) = self.on_start.lock().unwrap().as_ref() {
+            hook(&session.id);
+        }
         self.log.lock().unwrap().push(format!(
             "{} start {} {}",
             self.who,
@@ -151,6 +155,7 @@ impl Restorer for WorldRestorer {
 
 pub(crate) enum Fault {
     LoseAnswer,
+    DropEarly,
     Fail(&'static str),
 }
 
@@ -167,6 +172,9 @@ pub(crate) struct FakeLink {
     pub(crate) fences: Mutex<Vec<Option<String>>>,
     pub(crate) switches: AtomicUsize,
     pub(crate) waits: Mutex<Vec<Duration>>,
+    pub(crate) on_take: Mutex<Option<Hook>>,
+    pub(crate) late: Mutex<Vec<std::thread::JoinHandle<()>>>,
+    pub(crate) entered: Mutex<Option<std::sync::mpsc::Receiver<()>>>,
 }
 
 pub(crate) fn member(id: &NodeId, name: &str) -> Member {
@@ -241,6 +249,9 @@ impl FakeLink {
             fences: Mutex::new(Vec::new()),
             switches: AtomicUsize::new(0),
             waits: Mutex::new(Vec::new()),
+            on_take: Mutex::new(None),
+            late: Mutex::new(Vec::new()),
+            entered: Mutex::new(None),
         })
     }
 
@@ -310,6 +321,17 @@ impl Link for FakeLink {
         if let Some(Fault::Fail(code)) = fault {
             return Err(WireError::new(code, format!("scripted {code}")));
         }
+        if matches!(fault, Some(Fault::DropEarly)) {
+            let (peer, from) = (self.peer().clone(), origin(&self.me));
+            let late = std::thread::spawn(move || {
+                let _ = peer.resume_op(&args, &from);
+            });
+            self.late.lock().unwrap().push(late);
+            if let Some(entered) = self.entered.lock().unwrap().take() {
+                let _ = entered.recv_timeout(WAIT);
+            }
+            return Err(WireError::new("offline", "the link dropped"));
+        }
         let answer = self
             .peer()
             .resume_op(&args, &origin(&self.me))
@@ -328,6 +350,9 @@ impl Link for FakeLink {
         let held = status["cluster"]["home"].as_str() == Some(self.me.as_str());
         if held && status["cluster"]["term"]["n"].as_u64() == Some(takeover.term.n) {
             return Ok(json!({}));
+        }
+        if let Some(hook) = self.on_take.lock().unwrap().as_ref() {
+            hook("");
         }
         if takeover.staged {
             adopt_staged(&self.cluster).map_err(|why| WireError::new("failed", why))?;
@@ -401,6 +426,7 @@ fn side(w: &Arc<World>, who: &'static str, link: Arc<FakeLink>, log: &Log, clust
         who,
         log: log.clone(),
         on_stop: Mutex::new(None),
+        on_start: Mutex::new(None),
         swaps: AtomicUsize::new(0),
         held: OnceLock::new(),
     });

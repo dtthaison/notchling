@@ -3,18 +3,18 @@ use crate::cluster_node::{api_error, refused, LocalCalls};
 use crate::snap_restore_fs::staged_db;
 use notchling_engine::cluster::core::{eligible, Takeover};
 use notchling_engine::cluster::move_home::{
-    IN_PROGRESS, MOVE_FREEZE, MOVE_RESUME, MOVE_STOP, MOVE_SWITCH, MOVE_UNDO,
+    resume_call_ms, IN_PROGRESS, MOVE_FREEZE, MOVE_RESUME, MOVE_STOP, MOVE_SWITCH, MOVE_UNDO,
 };
-use notchling_engine::cluster::persist;
+use notchling_engine::cluster::persist::{self, CLUSTER_DB};
 use notchling_engine::cluster::wire::Origin;
 use notchling_engine::cluster::NodeId;
-use notchling_engine::inbox::{Item, State as ItemState};
 use notchling_local_api::{ApiError, ErrorCode};
 use serde_json::{json, Value};
 use std::collections::BTreeSet;
 use std::io::Write;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 pub const TOOK_FILE: &str = "move-took.json";
 
@@ -106,6 +106,15 @@ impl<T: Default> Drop for Busy<'_, T> {
     }
 }
 
+struct Resuming<'a>(&'a Mover);
+
+impl Drop for Resuming<'_> {
+    fn drop(&mut self) {
+        *lock(&self.0.resuming) = false;
+        self.0.resumed.notify_all();
+    }
+}
+
 impl Mover {
     fn begin_switch(&self, term: u64) -> Result<Busy<'_, Option<u64>>, ApiError> {
         let mut running = lock(&self.switching);
@@ -116,13 +125,17 @@ impl Mover {
         Ok(Busy(&self.switching))
     }
 
-    fn begin_resume(&self) -> Result<Busy<'_, bool>, ApiError> {
-        let mut running = lock(&self.resuming);
+    fn begin_resume(&self, within: Duration) -> Result<Resuming<'_>, ApiError> {
+        let running = lock(&self.resuming);
+        let (mut running, _) = self
+            .resumed
+            .wait_timeout_while(running, within, |busy| *busy)
+            .unwrap_or_else(|e| e.into_inner());
         if *running {
             return Err(failed(IN_PROGRESS));
         }
         *running = true;
-        Ok(Busy(&self.resuming))
+        Ok(Resuming(self))
     }
 
     pub fn switch_here(&self, args: &Value, origin: &Origin) -> Result<Value, ApiError> {
@@ -195,22 +208,12 @@ impl Mover {
         }
         takeover.restored = Some(restored);
         takeover.staged = true;
-        let earlier: Vec<Item> = self
-            .p
-            .inbox
-            .items()
-            .into_iter()
-            .filter(|item| item.state == ItemState::Open)
-            .collect();
-        self.p.inbox.flush();
-        let answer = self.p.link.take_primary(takeover);
-        self.p.acts.db_replaced();
-        self.p.inbox.load();
-        for item in earlier {
-            if !self.p.inbox.items().iter().any(|kept| kept.id == item.id) {
-                self.p.inbox.raise(item, None);
-            }
-        }
+        let db = self.p.cluster.join(CLUSTER_DB);
+        let answer = self.p.inbox.across_db_swap(&db, || {
+            let answer = self.p.link.take_primary(takeover);
+            self.p.acts.db_replaced();
+            answer
+        });
         answer.map_err(api_error)
     }
 
@@ -229,7 +232,11 @@ impl Mover {
             let name = self.name_of(&took.from);
             return Err(refused(format!("only {name} can resume its sessions here")));
         }
-        let _busy = self.begin_resume()?;
+        let within = Duration::from_millis(resume_call_ms(sessions.len()));
+        let _busy = self.begin_resume(within)?;
+        if let Some(now) = read_took(&self.p.cluster).filter(|now| now.term == took.term) {
+            took = now;
+        }
         let mut rows = Vec::new();
         for id in sessions {
             if took.started.contains(&id) {

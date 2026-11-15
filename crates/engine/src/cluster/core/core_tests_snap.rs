@@ -261,3 +261,40 @@ fn an_ack_with_a_relative_path_is_ignored() {
     );
     assert!(hub.core(&home).acked(&id("m1")).is_none());
 }
+
+#[test]
+fn r2_a_fenced_primary_asks_only_for_the_final_set_then_catches_up() {
+    let mut hub = with_standby();
+    let m5 = id("m5");
+    observe(&mut hub, "m5", observed(SessionState::Working, NOW));
+    hub.local(
+        &m5,
+        LocalCmd::Fence {
+            reason: Some("The primary is moving to m1".to_string()),
+        },
+    );
+    let turn_end = observe(&mut hub, "m5", observed(SessionState::Idle, NOW + 2_000));
+    assert!(snapshots(&turn_end).is_empty());
+    let timer = observe(&mut hub, "m5", observed(SessionState::Idle, NOW + 400_000));
+    assert!(snapshots(&timer).is_empty());
+    let ready = hub.local(
+        &m5,
+        LocalCmd::Snapshot {
+            trigger: Trigger::Ready(id("m1")),
+        },
+    );
+    assert!(snapshots(&ready).is_empty());
+    assert!(matches!(answers(&ready)[0], Err(e) if e.code == "refused"));
+    let last = hub.local(
+        &m5,
+        LocalCmd::Snapshot {
+            trigger: Trigger::Final,
+        },
+    );
+    assert_eq!(snapshots(&last).len(), 1);
+
+    let lifted = hub.local(&m5, LocalCmd::Fence { reason: None });
+    let asks = snapshots(&lifted);
+    assert_eq!(asks.len(), 1);
+    assert_eq!(asks[0].trigger, Trigger::Ready(id("m1")));
+}

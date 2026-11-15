@@ -401,6 +401,7 @@ pub struct Mover {
     pub(crate) p: MoveParts,
     pub(crate) switching: Mutex<Option<u64>>,
     pub(crate) resuming: Mutex<bool>,
+    pub(crate) resumed: std::sync::Condvar,
 }
 
 fn text_of<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
@@ -448,6 +449,7 @@ impl Mover {
             p: parts,
             switching: Mutex::new(None),
             resuming: Mutex::new(false),
+            resumed: std::sync::Condvar::new(),
         })
     }
 

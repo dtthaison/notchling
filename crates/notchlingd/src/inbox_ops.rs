@@ -32,6 +32,7 @@ type Clock = Arc<dyn Fn() -> i64 + Send + Sync>;
 
 enum Msg {
     Changes(Vec<Change>),
+    Publish(Vec<Change>),
     Flush(Sender<()>),
     Move(Store, Option<Sender<bool>>),
 }
@@ -41,6 +42,7 @@ struct Inner {
     responders: HashMap<String, Arc<dyn Responder>>,
     writes: Option<Sender<Msg>>,
     events: Option<Events>,
+    paused: Option<Vec<Change>>,
 }
 
 impl Inner {
@@ -52,12 +54,25 @@ impl Inner {
         }
     }
 
-    fn send(&self, changes: Vec<Change>) {
+    fn send(&mut self, changes: Vec<Change>) {
         if changes.is_empty() {
+            return;
+        }
+        if let Some(paused) = &mut self.paused {
+            paused.extend(changes);
             return;
         }
         if let Some(writes) = &self.writes {
             let _ = writes.send(Msg::Changes(changes));
+        }
+    }
+
+    fn publish(&self, changes: Vec<Change>) {
+        if changes.is_empty() {
+            return;
+        }
+        if let Some(writes) = &self.writes {
+            let _ = writes.send(Msg::Publish(changes));
         }
     }
 
@@ -99,6 +114,11 @@ fn write_loop(
                 for change in &changes {
                     let at = lock(&store).clone();
                     persist(&at, change);
+                    publish(room.as_ref(), change);
+                }
+            }
+            Msg::Publish(changes) => {
+                for change in &changes {
                     publish(room.as_ref(), change);
                 }
             }
@@ -166,6 +186,23 @@ fn publish(room: &dyn Room, change: &Change) {
     }
 }
 
+#[cfg(unix)]
+fn file_id(path: &Path) -> Option<(u64, u64)> {
+    use std::os::unix::fs::MetadataExt;
+    std::fs::metadata(path).ok().map(|m| (m.dev(), m.ino()))
+}
+
+#[cfg(not(unix))]
+fn file_id(path: &Path) -> Option<(u64, u64)> {
+    let meta = std::fs::metadata(path).ok()?;
+    let at = meta
+        .modified()
+        .ok()?
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?;
+    Some((at.as_nanos() as u64, meta.len()))
+}
+
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
 }
@@ -201,6 +238,7 @@ impl InboxOps {
             responders: HashMap::new(),
             writes: Some(writes),
             events: None,
+            paused: None,
         };
         let ops = InboxOps {
             clock,
@@ -382,6 +420,72 @@ impl InboxOps {
         if sent {
             let _ = ack_rx.recv();
         }
+    }
+
+    pub fn across_db_swap<T>(&self, db: &Path, swap: impl FnOnce() -> T) -> T {
+        lock(&self.inner).paused = Some(Vec::new());
+        self.flush();
+        let before = file_id(db);
+        let out = swap();
+        let replaced = file_id(db) != before;
+        let mut inner = lock(&self.inner);
+        let waiting = inner.paused.take().unwrap_or_default();
+        if replaced {
+            self.adopt(&mut inner, &waiting);
+        } else {
+            inner.send(waiting);
+        }
+        out
+    }
+
+    fn adopt(&self, inner: &mut Inner, waiting: &[Change]) {
+        let at = lock(&self.store).clone();
+        let mut items = inbox::read_from(&at).unwrap_or_else(|why| {
+            report(Err(format!("reading the replaced inbox failed: {why}")));
+            Vec::new()
+        });
+        let local = inner.book.items();
+        let stored: HashSet<String> = items.iter().map(|i| i.id.clone()).collect();
+        let touched: HashSet<&str> = waiting
+            .iter()
+            .filter_map(|change| match change {
+                Change::Raised(item) | Change::Updated(item) => Some(item.id.as_str()),
+                Change::Removed(_) => None,
+            })
+            .collect();
+        let mut writes = Vec::new();
+        for item in &local {
+            let carried = item.state == State::Open || touched.contains(item.id.as_str());
+            if carried && !stored.contains(&item.id) {
+                items.push(item.clone());
+                writes.push(Change::Raised(item.clone()));
+            }
+        }
+        let now: HashSet<String> = items.iter().map(|i| i.id.clone()).collect();
+        let mut shown: Vec<Change> = items
+            .iter()
+            .filter(|item| !local.contains(item))
+            .map(|item| match local.iter().any(|l| l.id == item.id) {
+                true => Change::Updated(item.clone()),
+                false => Change::Raised(item.clone()),
+            })
+            .collect();
+        shown.extend(
+            local
+                .iter()
+                .filter(|l| !now.contains(&l.id))
+                .map(|l| Change::Removed(l.id.clone())),
+        );
+        let open: HashSet<String> = items
+            .iter()
+            .filter(|i| i.state == State::Open)
+            .map(|i| i.id.clone())
+            .collect();
+        inner.responders.retain(|id, _| open.contains(id));
+        inner.book = Book::from_items(items);
+        inner.note(&shown);
+        inner.publish(shown);
+        inner.send(writes);
     }
 
     pub fn close(&self) {

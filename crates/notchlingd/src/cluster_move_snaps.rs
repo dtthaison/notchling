@@ -53,8 +53,11 @@ impl Snaps for RealSnaps {
     }
 
     fn final_set(&self, to: &NodeId, name: &str) -> Result<Manifest, String> {
+        self.sender.hold(to, true);
         let seq = asked(&self.node)
             .map_err(|e| format!("the final snapshot wasn't started: {}", e.message))?;
+        self.sender.hold_from(to, seq);
+        self.sender.tick();
         self.runner.wait_idle(SNAP_WAIT);
         self.sender.wait_idle(SNAP_WAIT);
         let set = match self.runner.outcome(seq) {

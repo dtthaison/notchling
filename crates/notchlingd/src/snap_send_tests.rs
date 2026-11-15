@@ -211,6 +211,28 @@ fn m6_a_held_target_gets_no_newer_set_until_released() {
 }
 
 #[test]
+fn r2_the_final_set_reaches_a_target_held_since_before_the_ask() {
+    let fx = Fixture::new("send-final", &[(1, true), (2, true)]);
+    fx.make_ready(&[id_of(1), id_of(2)]);
+    let (m1, d1) = fx.stage(1, 0, b"one\n");
+    fx.sender.offer(m1, d1);
+    assert!(fx.sender.wait_idle(WAIT));
+    fx.sender.hold(&id_of(1), true);
+    let (m2, d2) = fx.stage(2, 0, b"one\ntwo\n");
+    assert_eq!(fx.sender.offer(m2, d2), vec![id_of(2)]);
+    assert!(fx.sender.wait_idle(WAIT));
+    let (m3, d3) = fx.stage(3, 0, b"one\ntwo\nthree\n");
+    assert_eq!(fx.sender.offer(m3, d3), vec![id_of(2)]);
+    assert!(fx.sender.wait_idle(WAIT));
+    assert_eq!(current(&fx, 1), Some("s-1".to_string()));
+
+    fx.sender.hold_from(&id_of(1), 3);
+    assert_eq!(fx.sender.tick(), vec![id_of(1)]);
+    assert!(fx.sender.wait_idle(WAIT));
+    assert_eq!(current(&fx, 1), Some("s-3".to_string()));
+}
+
+#[test]
 fn a_target_back_online_gets_the_newest_set() {
     let fx = Fixture::new("send-back", &[(1, true)]);
     fx.make_ready(&[id_of(1)]);

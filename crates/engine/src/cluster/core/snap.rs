@@ -30,6 +30,7 @@ pub(super) struct SnapCore {
     seq: u64,
     last_set_ms: Option<i64>,
     acks: BTreeMap<NodeId, Acked>,
+    deferred: Option<Trigger>,
 }
 
 fn seq_of(set: &str) -> Option<u64> {
@@ -103,6 +104,9 @@ impl NodeCore {
                 return;
             }
         };
+        if self.fence.is_some() {
+            return;
+        }
         keep_main(&mut now.session_state, &main);
         keep_main(&mut now.git_locks, &main);
         keep_main(&mut now.last_write_ms, &main);
@@ -123,6 +127,10 @@ impl NodeCore {
                 "forbidden",
                 "only the primary takes a snapshot",
             ))
+        } else if let (Some(why), false) = (&self.fence, trigger == Trigger::Final) {
+            let why = why.clone();
+            self.snap.deferred = Some(trigger);
+            Err(WireError::new(super::REFUSED, why))
         } else {
             match self.snap_ask(trigger, self.wall_ms) {
                 Some(plan) => {
@@ -137,6 +145,21 @@ impl NodeCore {
             }
         };
         self.finish(target, result, out);
+    }
+
+    pub(super) fn set_fence(&mut self, reason: Option<String>, out: &mut Vec<Effect>) {
+        let lifted = reason.is_none() && self.fence.is_some();
+        self.fence = reason;
+        let deferred = if lifted {
+            self.snap.deferred.take()
+        } else {
+            None
+        };
+        if let (Some(trigger), true) = (deferred, self.is_home()) {
+            if let Some(plan) = self.snap_ask(trigger, self.wall_ms) {
+                out.push(Effect::Snapshot { plan });
+            }
+        }
     }
 
     pub(super) fn record_ack(&mut self, from: &NodeId, args: &Value) {

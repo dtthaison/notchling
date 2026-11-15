@@ -26,8 +26,19 @@ pub fn load(data_dir: &Path, now_ms: i64) -> Result<Book, String> {
 }
 
 pub fn load_from(from: &Store, now_ms: i64) -> Result<Book, String> {
+    let mut items = read_from(from)?;
+    for item in &mut items {
+        if item.state == State::Open {
+            item.state = State::Withdrawn;
+            item.closed_ms = Some(now_ms);
+        }
+    }
+    Ok(Book::from_items(items))
+}
+
+pub fn read_from(from: &Store) -> Result<Vec<Item>, String> {
     let Some(db) = from.open(false)? else {
-        return Ok(Book::new());
+        return Ok(Vec::new());
     };
     let mut query = db
         .prepare("SELECT value FROM inbox ORDER BY rowid")
@@ -43,13 +54,9 @@ pub fn load_from(from: &Store, now_ms: i64) -> Result<Book, String> {
         };
         item.title = cut(item.title, TITLE_MAX);
         item.detail = cut(item.detail, DETAIL_MAX);
-        if item.state == State::Open {
-            item.state = State::Withdrawn;
-            item.closed_ms = Some(now_ms);
-        }
         items.push(item);
     }
-    Ok(Book::from_items(items))
+    Ok(items)
 }
 
 pub fn save(data_dir: &Path, change: &Change) -> Result<(), String> {

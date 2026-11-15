@@ -152,6 +152,8 @@ mod catalog_ops_tests;
 #[cfg(test)]
 mod catalog_roles_tests;
 #[cfg(test)]
+mod cluster_move_fix2_tests;
+#[cfg(test)]
 mod cluster_move_fix_tests;
 #[cfg(test)]
 mod cluster_move_tests;

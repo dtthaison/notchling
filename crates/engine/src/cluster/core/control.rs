@@ -153,7 +153,7 @@ impl NodeCore {
                 self.move_switch(id, (to, sessions, set), out)
             }
             LocalCmd::Fence { reason } => {
-                self.fence = reason;
+                self.set_fence(reason, out);
                 self.finish(target, Ok(json!({})), out);
             }
             LocalCmd::SetVersions { versions } => self.set_versions(id, versions, out),

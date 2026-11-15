@@ -124,7 +124,13 @@ struct Slot {
 struct State {
     latest: Option<Offered>,
     slots: BTreeMap<NodeId, Slot>,
-    held: BTreeSet<NodeId>,
+    held: BTreeMap<NodeId, u64>,
+}
+
+impl State {
+    fn allows(&self, id: &NodeId, seq: u64) -> bool {
+        self.held.get(id).is_none_or(|from| seq >= *from)
+    }
 }
 
 pub struct SenderParts {
@@ -163,7 +169,12 @@ impl SnapSender {
     pub fn offer(&self, manifest: Manifest, dir: PathBuf) -> Vec<NodeId> {
         let offered = Offered { manifest, dir };
         lock(&self.inner.state).latest = Some(offered.clone());
-        let targets = self.inner.targets();
+        let seq = offered.manifest.seq;
+        let targets: Vec<NodeId> = {
+            let all = self.inner.targets();
+            let state = lock(&self.inner.state);
+            all.into_iter().filter(|id| state.allows(id, seq)).collect()
+        };
         for id in &targets {
             Inner::enqueue(&self.inner, id, offered.clone());
         }
@@ -205,7 +216,8 @@ impl SnapSender {
                         || s.failed
                             .is_some_and(|at| at.elapsed() < self.inner.parts.retry)
                 });
-                (behind && !waiting).then_some(latest)
+                let allowed = state.allows(&id, latest.manifest.seq);
+                (behind && !waiting && allowed).then_some(latest)
             };
             if let Some(offered) = next {
                 Inner::enqueue(&self.inner, &id, offered);
@@ -245,14 +257,25 @@ impl SnapSender {
     }
 
     pub fn hold(&self, node: &NodeId, on: bool) {
-        let mut state = lock(&self.inner.state);
         if on {
-            state.held.insert(node.clone());
+            self.hold_from(node, u64::MAX);
+        } else {
+            lock(&self.inner.state).held.remove(node);
+        }
+    }
+
+    pub fn hold_from(&self, node: &NodeId, seq: u64) {
+        let mut state = lock(&self.inner.state);
+        state.held.insert(node.clone(), seq);
+        let stale = state
+            .slots
+            .get(node)
+            .and_then(|slot| slot.queued.as_ref())
+            .is_some_and(|queued| queued.manifest.seq < seq);
+        if stale {
             if let Some(slot) = state.slots.get_mut(node) {
                 slot.queued = None;
             }
-        } else {
-            state.held.remove(node);
         }
     }
 
@@ -294,7 +317,7 @@ impl Inner {
         let held = lock(&self.state).held.clone();
         self.candidates(true)
             .into_iter()
-            .filter(|id| !held.contains(id))
+            .filter(|id| held.get(id) != Some(&u64::MAX))
             .collect()
     }
 
@@ -319,7 +342,7 @@ impl Inner {
     fn enqueue(this: &Arc<Inner>, id: &NodeId, offered: Offered) {
         {
             let mut state = lock(&this.state);
-            if state.held.contains(id) {
+            if !state.allows(id, offered.manifest.seq) {
                 return;
             }
             let slot = state.slots.entry(id.clone()).or_default();
@@ -359,10 +382,11 @@ impl Inner {
                 Err("that machine is not ready or not online".to_string())
             };
             let mut state = lock(&self.state);
-            let held = state.held.contains(id);
+            let from = state.held.get(id).copied();
             let slot = state.slots.entry(id.clone()).or_default();
             slot.sending = None;
-            if held {
+            if from.is_some_and(|from| slot.queued.as_ref().is_some_and(|q| q.manifest.seq < from))
+            {
                 slot.queued = None;
             }
             match result {
