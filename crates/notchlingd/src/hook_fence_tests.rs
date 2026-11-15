@@ -1,4 +1,4 @@
-use crate::hook_fence::{answer, deny_output, read_fence, Seen};
+use crate::hook_fence::{answer, budgeted, deny_output, read_fence, Seen};
 use notchling_engine::cluster::fence::{
     after_wait, Fence, FenceFile, Gate, FENCE_FILE, FENCE_VERSION, MAX_FENCE_BYTES, POLL_MS,
     WAIT_MAX_MS,
@@ -9,6 +9,7 @@ use serde_json::{json, Value};
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 const BOOT: &str = "boot-1";
 const HOUR_MS: u64 = 3_600_000;
@@ -369,4 +370,99 @@ fn only_not_found_means_no_file() {
     assert_eq!(read_fence(&dir.0.join(FENCE_FILE)), Seen::Unreadable);
     expect_unreadable_denies(&dir, "a file in place of the folder");
     assert_eq!(read_fence(&dir.0.join("missing/fence.json")), Seen::Absent);
+}
+
+fn secs(n: u64) -> Duration {
+    Duration::from_secs(n)
+}
+
+#[test]
+fn stdin_and_the_answer_share_one_budget() {
+    let spent = Cell::new(Duration::ZERO);
+    let asked = Cell::new(Duration::ZERO);
+    let left = Cell::new(Duration::ZERO);
+    let out = budgeted(
+        secs(25),
+        secs(5),
+        &|| spent.get(),
+        |limit| {
+            asked.set(limit);
+            spent.set(secs(4));
+            Some(event("s1"))
+        },
+        |_, remaining| {
+            left.set(remaining);
+            Some("deny".to_string())
+        },
+    );
+    assert_eq!(out.as_deref(), Some("deny"));
+    assert_eq!(asked.get(), secs(5));
+    assert_eq!(left.get(), secs(21));
+}
+
+#[test]
+fn a_slow_stdin_leaves_the_answer_the_wait_it_needs_and_no_more() {
+    let spent = Cell::new(Duration::ZERO);
+    let left = Cell::new(Duration::ZERO);
+    budgeted(
+        secs(25),
+        secs(5),
+        &|| spent.get(),
+        |_| {
+            spent.set(secs(5));
+            Some(event("s1"))
+        },
+        |_, remaining| {
+            left.set(remaining);
+            None
+        },
+    );
+    assert_eq!(left.get(), Duration::from_millis(WAIT_MAX_MS));
+    assert!(secs(5) + left.get() <= secs(25));
+}
+
+#[test]
+fn stdin_never_gets_more_than_what_is_left_of_the_total() {
+    let asked = Cell::new(Duration::ZERO);
+    budgeted(
+        secs(25),
+        secs(5),
+        &|| secs(23),
+        |limit| {
+            asked.set(limit);
+            None
+        },
+        |_, _| None,
+    );
+    assert_eq!(asked.get(), secs(2));
+    let late = budgeted(
+        secs(25),
+        secs(5),
+        &|| secs(40),
+        |l| Some(vec![l.as_secs() as u8]),
+        |_, r| {
+            assert_eq!(r, Duration::ZERO);
+            None
+        },
+    );
+    assert_eq!(late, None);
+}
+
+#[test]
+fn no_stdin_or_no_session_never_reaches_the_answer() {
+    for read in [None, Some(b"junk".to_vec()), Some(b"{}".to_vec())] {
+        let called = Cell::new(false);
+        let out = budgeted(
+            secs(25),
+            secs(5),
+            &|| Duration::ZERO,
+            |_| read,
+            |_, _| {
+                called.set(true);
+                Some("x".into())
+            },
+        );
+        assert_eq!(out, None);
+        assert!(!called.get());
+    }
 }

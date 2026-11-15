@@ -270,7 +270,7 @@ impl InstallOps {
             command: install::hook_command(binary, self.setup.os),
             prompt: request.prompt,
             pages: request.pages,
-            fence: Want::Leave,
+            fence: request.prompt,
         })
     }
 

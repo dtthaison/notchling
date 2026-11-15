@@ -9,7 +9,7 @@ fn written() -> BTreeSet<(String, String)> {
         command: "'/Applications/Notchling.app/Contents/MacOS/notchling' hook".into(),
         prompt: Want::Install,
         pages: Want::Install,
-        fence: Want::Leave,
+        fence: Want::Install,
     };
     let plan = plan_hooks("{}", &wanted).expect("an empty settings file takes the hooks");
     detect(&plan.text)

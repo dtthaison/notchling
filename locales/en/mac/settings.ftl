@@ -309,6 +309,9 @@ settings-hook-artifact-saved = After a publish, a local copy is saved for the Pa
 # What the hook after a failed Artifact read does.
 settings-hook-artifact-read-failed = When a page read fails (a 404 or another account's page), { -brand-claude } gets the local copy's path.
 
+# What the hook before every tool call does. A cluster is a group of Macs and servers.
+settings-hook-fence = Keeps a cluster session from running tool calls here once it moved to another machine.
+
 # Shown above the hooks when the settings file was left alone because it is not valid JSON.
 settings-hooks-refused-invalid-json = { -brand-claude-code }'s settings.json was left alone: it isn't valid JSON.
 

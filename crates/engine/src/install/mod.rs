@@ -10,8 +10,7 @@ pub mod toml_edit;
 pub use command::{classify, hook_command, summary, Origin};
 pub use file::{apply, load, plan, Applied, FileError, FilePlan, State};
 pub use hooks::{
-    detect, managed_slots, plan_hooks, Category, Found, HookPlan, Refused, Slot, Want, Wanted,
-    FENCE_SLOT, SLOTS,
+    detect, plan_hooks, Category, Found, HookPlan, Refused, Slot, Want, Wanted, SLOTS,
 };
 pub use skills::{apply_skills, plan_skills, Action, SkillPlan, SkillResult, SkillSpec, ToolRoots};
 

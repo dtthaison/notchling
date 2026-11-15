@@ -6,12 +6,13 @@ use serde_json::{json, Value};
 use std::fs::{File, OpenOptions};
 use std::io::{ErrorKind, Read, Write};
 use std::path::Path;
+use std::path::PathBuf;
 use std::sync::mpsc::channel;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const MAX_INPUT: u64 = 16 * 1024 * 1024;
 const STDIN_WAIT: Duration = Duration::from_secs(5);
-const DEADLINE: Duration = Duration::from_millis(WAIT_MAX_MS + 5_000);
+const TOTAL_BUDGET: Duration = Duration::from_millis(WAIT_MAX_MS + 5_000);
 const CLOCK_FAILED: u64 = u64::MAX - 1;
 
 #[derive(Debug, PartialEq, Eq)]
@@ -122,47 +123,72 @@ fn real_sleep(ms: u64) {
     std::thread::sleep(Duration::from_millis(ms));
 }
 
-fn read_stdin() -> Option<Vec<u8>> {
+fn read_stdin(limit: Duration) -> Option<Vec<u8>> {
     let (tx, rx) = channel();
-    std::thread::Builder::new()
+    let spawned = std::thread::Builder::new()
         .name("hook-fence-stdin".into())
         .spawn(move || {
-            let mut input = Vec::new();
-            let ok = std::io::stdin()
-                .take(MAX_INPUT)
-                .read_to_end(&mut input)
-                .is_ok();
-            let _ = tx.send(ok.then_some(input));
-        })
-        .ok()?;
-    rx.recv_timeout(STDIN_WAIT).ok()?
+            let _ = tx.send(slurp());
+        });
+    if spawned.is_err() {
+        return slurp();
+    }
+    rx.recv_timeout(limit).ok()?
 }
 
-fn answer_with_deadline(input: Vec<u8>, data: std::path::PathBuf) -> Option<String> {
+fn slurp() -> Option<Vec<u8>> {
+    let mut input = Vec::new();
+    std::io::stdin()
+        .take(MAX_INPUT)
+        .read_to_end(&mut input)
+        .ok()
+        .map(|_| input)
+}
+
+fn answer_for_real(input: &[u8], data: &Path) -> Option<String> {
+    let boot_id = notchling_platform::clock::boot_id().unwrap_or_default();
+    answer(input, data, &boot_id, &real_now, &real_sleep)
+}
+
+fn answer_with_deadline(input: Vec<u8>, data: PathBuf, limit: Duration) -> Option<String> {
     let (tx, rx) = channel();
+    let work = (input.clone(), data.clone());
     let spawned = std::thread::Builder::new()
         .name("hook-fence".into())
         .spawn(move || {
-            let boot_id = notchling_platform::clock::boot_id().unwrap_or_default();
-            let _ = tx.send(answer(&input, &data, &boot_id, &real_now, &real_sleep));
+            let _ = tx.send(answer_for_real(&work.0, &work.1));
         });
     if spawned.is_err() {
-        return None;
+        return answer_for_real(&input, &data);
     }
-    match rx.recv_timeout(DEADLINE) {
+    match rx.recv_timeout(limit) {
         Ok(out) => out,
         Err(_) => Some(after_wait_output()),
     }
 }
 
+pub(crate) fn budgeted(
+    total: Duration,
+    stdin_max: Duration,
+    elapsed: &dyn Fn() -> Duration,
+    read: impl FnOnce(Duration) -> Option<Vec<u8>>,
+    decide: impl FnOnce(Vec<u8>, Duration) -> Option<String>,
+) -> Option<String> {
+    let input = read(stdin_max.min(total.saturating_sub(elapsed())))?;
+    session_of(&input)?;
+    decide(input, total.saturating_sub(elapsed()))
+}
+
 pub fn run(layout: &Layout) -> i32 {
-    let Some(input) = read_stdin() else {
-        return 0;
-    };
-    if session_of(&input).is_none() {
-        return 0;
-    }
-    if let Some(text) = answer_with_deadline(input, layout.data_dir.clone()) {
+    let started = Instant::now();
+    let out = budgeted(
+        TOTAL_BUDGET,
+        STDIN_WAIT,
+        &|| started.elapsed(),
+        read_stdin,
+        |input, left| answer_with_deadline(input, layout.data_dir.clone(), left),
+    );
+    if let Some(text) = out {
         let mut stdout = std::io::stdout();
         let _ = stdout.write_all(text.as_bytes());
         let _ = stdout.flush();

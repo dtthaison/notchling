@@ -41,7 +41,7 @@ fn states(shown: &HooksShown) -> Vec<HookState> {
 }
 
 #[test]
-fn the_five_hooks_are_rows_with_their_text_and_command() {
+fn the_six_hooks_are_rows_with_their_text_and_command() {
     let shown = shown(ours());
     assert_eq!(
         titles(&shown),
@@ -51,9 +51,10 @@ fn the_five_hooks_are_rows_with_their_text_and_command() {
             "PreToolUse · Artifact",
             "PostToolUse · Artifact",
             "PostToolUseFailure · Artifact",
+            "PreToolUse · *",
         ]
     );
-    assert_eq!(states(&shown), [HookState::Installed; 5]);
+    assert_eq!(states(&shown), [HookState::Installed; 6]);
     for (line, hook) in shown.lines().iter().zip(HOOKS) {
         assert_eq!(line.what, hook.what.get());
         assert_eq!(
@@ -75,14 +76,15 @@ fn a_hook_that_is_not_in_the_file_says_so_and_has_no_command() {
             HookState::Installed,
             HookState::Missing,
             HookState::Missing,
+            HookState::Missing,
         ]
     );
     let lines = shown.lines();
-    assert_eq!(lines.len(), 5);
+    assert_eq!(lines.len(), 6);
     assert!(lines[0].command.is_none() && lines[2].command.is_some());
     assert!(lines.iter().all(|l| l.what != t::settings::hooks_other()));
     let none = self::shown(vec![]);
-    assert_eq!(states(&none), [HookState::Missing; 5]);
+    assert_eq!(states(&none), [HookState::Missing; 6]);
 }
 
 #[test]
@@ -101,26 +103,27 @@ fn swift_and_unmanaged_entries_are_told_apart() {
             HookState::Missing,
             HookState::Missing,
             HookState::Missing,
+            HookState::Missing,
             HookState::NotManaged,
             HookState::Swift,
         ]
     );
     let lines = shown.lines();
     assert_eq!(lines[0].command, None);
-    assert_eq!(lines[5].title, "PostToolUse · Artifact");
-    assert_eq!(lines[6].title, "Stop · *");
-    assert_eq!(lines[6].what, t::settings::hooks_other());
+    assert_eq!(lines[6].title, "PostToolUse · Artifact");
+    assert_eq!(lines[7].title, "Stop · *");
+    assert_eq!(lines[7].what, t::settings::hooks_other());
 }
 
 #[test]
 fn an_unknown_slot_still_gets_a_plain_line_and_a_cut_name() {
     let long = "X".repeat(100);
     let shown = shown(vec![entry("Stop", &long, "notchling", true)]);
-    let line = shown.lines().remove(5);
+    let line = shown.lines().remove(6);
     assert_eq!(line.title, format!("Stop · {}", "X".repeat(40)));
     assert_eq!(line.what, t::settings::hooks_other());
     let empty_matcher = shown_one(entry("PermissionRequest", "", "notchling", false));
-    assert_eq!(empty_matcher.lines()[5].title, "PermissionRequest · *");
+    assert_eq!(empty_matcher.lines()[6].title, "PermissionRequest · *");
 }
 
 fn shown_one(e: Value) -> HooksShown {
@@ -133,7 +136,7 @@ fn other_hooks_never_show() {
         entry("Stop", "*", "other", false),
         entry("PermissionRequest", "*", "notchling", true),
     ]);
-    assert_eq!(shown.lines().len(), 5);
+    assert_eq!(shown.lines().len(), 6);
     assert_eq!(shown.lines()[0].state, HookState::Installed);
     assert!(!format!("{:?}", shown.lines()).contains("Stop"));
 }
@@ -163,11 +166,11 @@ fn the_state_words_are_plain() {
 }
 
 #[test]
-fn a_detached_daemon_says_so_above_the_five_unchecked_rows() {
+fn a_detached_daemon_says_so_above_the_six_unchecked_rows() {
     let shown = HooksShown::from_plan(Err(DETACHED.to_owned()));
     assert_eq!(shown, HooksShown::Detached);
     assert_eq!(shown.status().as_deref(), Some(DETACHED));
-    assert_eq!(states(&shown), [HookState::Unknown; 5]);
+    assert_eq!(states(&shown), [HookState::Unknown; 6]);
 }
 
 #[test]
@@ -220,7 +223,7 @@ fn a_refused_file_shows_one_category_and_none_of_its_text() {
             format!("Claude Code's settings.json was left alone: it {category}.")
         );
         assert!(!status.contains("SECRET-TOKEN"));
-        assert_eq!(states(&shown), [HookState::Unknown; 5]);
+        assert_eq!(states(&shown), [HookState::Unknown; 6]);
     }
     let none = HooksShown::from_plan(Ok(facts("refused", None, vec![])));
     assert!(none.status().unwrap().ends_with("can't be read."));

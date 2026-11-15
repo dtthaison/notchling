@@ -40,7 +40,7 @@ pub const VIEWS: [ViewSpec; 13] = [
     ViewSpec {
         name: "settings-agents",
         size: (620.0, 760.0),
-        about: "the Settings sheet's Agents page: Claude Code's Hooks with all five installed (fixture reply)",
+        about: "the Settings sheet's Agents page: Claude Code's Hooks with all six installed (fixture reply)",
     },
     ViewSpec {
         name: "settings-agents-partial",
@@ -55,7 +55,7 @@ pub const VIEWS: [ViewSpec; 13] = [
     ViewSpec {
         name: "settings-agents-detached",
         size: (620.0, 760.0),
-        about: "the Agents page's Hooks with no daemon attached: the five explained, none checked",
+        about: "the Agents page's Hooks with no daemon attached: the six explained, none checked",
     },
     ViewSpec {
         name: "settings-capabilities",
@@ -175,6 +175,7 @@ pub fn hooks(shown: Shown) -> HooksShown {
             hook("PreToolUse", "Artifact", "notchling", true),
             hook("PostToolUse", "Artifact", "notchling", true),
             hook("PostToolUseFailure", "Artifact", "notchling", true),
+            hook("PreToolUse", "*", "notchling", true),
         ],
     };
     let reply = json!({"on": false, "applied": false,
@@ -376,9 +377,9 @@ mod tests {
         assert_eq!(trust.stage, Stage::Untrusted);
         assert_eq!(acting(Shown::TrustFolder), Acting::On);
         assert_eq!(banners().all().len(), 4);
-        assert_eq!(hooks(Shown::SettingsAgents).lines().len(), 5);
-        assert_eq!(hooks(Shown::SettingsAgentsPartial).lines().len(), 6);
-        assert_eq!(hooks(Shown::SettingsAgentsEmpty).lines().len(), 5);
+        assert_eq!(hooks(Shown::SettingsAgents).lines().len(), 6);
+        assert_eq!(hooks(Shown::SettingsAgentsPartial).lines().len(), 7);
+        assert_eq!(hooks(Shown::SettingsAgentsEmpty).lines().len(), 6);
         assert_eq!(hooks(Shown::SettingsAgentsDetached), HooksShown::Detached);
         assert_eq!(page(Shown::Settings), Page::General);
         assert_eq!(page(Shown::SettingsAgents), Page::Agents);

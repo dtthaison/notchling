@@ -190,3 +190,26 @@ fn the_fence_flag_takes_nothing_else() {
     let out = child.wait_with_output().unwrap();
     assert!(passed(&out), "{out:?}");
 }
+
+#[test]
+fn a_stdin_that_never_closes_passes_inside_the_budget() {
+    let dir = scratch("openstdin");
+    write_fence(&dir.0, Gate::Moved { to: "m1".into() }, "x", 0);
+    let started = Instant::now();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_notchling"))
+        .args(["hook", "--fence"])
+        .env("NOTCHLING_DATA_ROOT", dir.0.join("root"))
+        .env("HOME", &dir.0)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let held = child.stdin.take().unwrap();
+    let out = child.wait_with_output().unwrap();
+    drop(held);
+    assert!(passed(&out), "{out:?}");
+    let took = started.elapsed();
+    assert!(took >= Duration::from_secs(4), "{took:?}");
+    assert!(took < Duration::from_secs(12), "{took:?}");
+}

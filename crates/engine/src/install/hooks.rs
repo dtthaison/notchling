@@ -9,6 +9,8 @@ pub const PAGE_PRE_TIMEOUT: u64 = 60;
 pub const PAGE_TIMEOUT: u64 = 10;
 pub const FENCE_TIMEOUT: u64 = 30;
 pub const FENCE_FLAG: &str = "--fence";
+pub const FENCE_MATCHER: &str = "*";
+pub const FENCE_EVENT: &str = "PreToolUse";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Want {
@@ -32,7 +34,7 @@ pub struct Slot {
     pub timeout: u64,
 }
 
-pub const SLOTS: [Slot; 5] = [
+pub const SLOTS: [Slot; 6] = [
     Slot {
         category: Category::Prompt,
         event: "PreToolUse",
@@ -63,18 +65,13 @@ pub const SLOTS: [Slot; 5] = [
         matcher: "Artifact",
         timeout: PAGE_TIMEOUT,
     },
+    Slot {
+        category: Category::Fence,
+        event: FENCE_EVENT,
+        matcher: FENCE_MATCHER,
+        timeout: FENCE_TIMEOUT,
+    },
 ];
-
-pub const FENCE_SLOT: Slot = Slot {
-    category: Category::Fence,
-    event: "PreToolUse",
-    matcher: "*",
-    timeout: FENCE_TIMEOUT,
-};
-
-pub fn managed_slots() -> impl Iterator<Item = &'static Slot> {
-    SLOTS.iter().chain(std::iter::once(&FENCE_SLOT))
-}
 
 #[derive(Clone, Debug)]
 pub struct Wanted {
@@ -163,7 +160,9 @@ fn survey(root: &Node, text: &str) -> Vec<Entry> {
                     continue;
                 };
                 let managed = origin == Origin::Notchling
-                    && managed_slots().any(|s| s.event == member.key && Some(s.matcher) == matcher);
+                    && SLOTS
+                        .iter()
+                        .any(|s| s.event == member.key && Some(s.matcher) == matcher);
                 out.push(Entry {
                     found: Found {
                         event: member.key.clone(),
@@ -248,7 +247,7 @@ pub fn plan_hooks(text: &str, wanted: &Wanted) -> Result<HookPlan, Refused> {
     let mut removals: Vec<&Entry> = Vec::new();
     let mut appends: Vec<&Slot> = Vec::new();
 
-    for slot in managed_slots() {
+    for slot in &SLOTS {
         let want = wanted.want(slot.category);
         let command = wanted.command_for(slot);
         if want == Want::Leave {
