@@ -1,5 +1,6 @@
 pub mod entry;
 pub mod expiry;
+mod forms;
 #[cfg(target_os = "macos")]
 mod keychain_mac;
 pub mod list;
@@ -15,6 +16,8 @@ mod tests;
 #[cfg(test)]
 mod tests_redact;
 #[cfg(test)]
+mod tests_redact_window;
+#[cfg(test)]
 mod tests_reminders;
 #[cfg(test)]
 mod tests_store;
@@ -25,7 +28,7 @@ pub use entry::{
     default_vars, prefix, valid_name, valid_var, Field, HostChange, Kind, PrefillChanges,
     VaultEntry, VaultRequest, VaultValue,
 };
-pub use redact::Redactor;
+pub use redact::{hide_forms, wipe, wipe_forms, wipe_string, Redactor};
 pub use store::{
     system_keychain, KeychainError, Saved, Unsupported, VaultError, VaultKeychain, VaultStore,
 };

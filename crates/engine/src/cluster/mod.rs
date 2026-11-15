@@ -1,5 +1,8 @@
 pub mod core;
 pub mod fence;
+pub mod grant_files;
+mod grant_files_sys;
+pub mod grants;
 pub mod id;
 pub mod jobs;
 pub mod join;
@@ -25,6 +28,12 @@ pub use versions::{compat, Compat, Purpose, Versions};
 
 #[cfg(test)]
 mod fence_tests;
+#[cfg(test)]
+mod grant_files_hostile_tests;
+#[cfg(test)]
+mod grant_files_tests;
+#[cfg(test)]
+mod grants_tests;
 #[cfg(test)]
 mod id_tests;
 #[cfg(test)]

@@ -23,6 +23,7 @@ mod cluster_driver;
 pub mod cluster_join;
 pub mod cluster_node;
 pub mod cluster_ops;
+pub mod cluster_redact;
 pub mod cluster_switches;
 pub mod cluster_versions;
 pub mod cluster_wiring;
@@ -118,6 +119,8 @@ mod bridge_models_tests;
 mod catalog_ops_tests;
 #[cfg(test)]
 mod catalog_roles_tests;
+#[cfg(test)]
+mod cluster_redact_tests;
 #[cfg(test)]
 mod cluster_testkit;
 #[cfg(test)]

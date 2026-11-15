@@ -6,6 +6,7 @@ use crate::cluster_node::{
 use notchling_cluster_net::{Conn, Listener};
 use notchling_engine::bridge::net::crypto::{hex, random_bytes, random_token};
 use notchling_engine::cluster::core::LocalCmd;
+use notchling_engine::cluster::grants::SecretAllow;
 use notchling_engine::cluster::join::{decode_token, encode_token, JoinToken};
 use notchling_engine::cluster::persist;
 use notchling_engine::cluster::wire::{decode, encode, Msg, Origin, OriginTier, WireError};
@@ -332,6 +333,7 @@ impl Driver {
             versions: Some(self.setup.versions.clone()),
             desired: Desired::default(),
             joined_ms: now_ms(),
+            secrets: SecretAllow::default(),
         }
     }
 
