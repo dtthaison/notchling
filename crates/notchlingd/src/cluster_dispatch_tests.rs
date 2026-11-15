@@ -237,7 +237,7 @@ fn an_agent_cannot_start_a_session_or_a_shell_job() {
 }
 
 #[test]
-fn codex_and_secrets_wait_for_a_later_version() {
+fn codex_waits_for_a_later_version_and_secrets_need_the_allowlist() {
     let net = MemNet::new();
     let (a, b) = pair(&net, home_opts(&BOTH), worker_opts("macos", &BOTH));
     let (ops, _dir) = ops_of(&a);
@@ -250,10 +250,8 @@ fn codex_and_secrets_wait_for_a_later_version() {
     let mut secret = claude_args(&b, "s");
     secret["secrets"] = json!(["gh"]);
     let err = dispatch(&ops, &app(), secret).unwrap_err();
-    assert_eq!(
-        err.message,
-        "Secrets for jobs on another machine come in a later version"
-    );
+    assert!(err.message.contains("gh"), "{}", err.message);
+    assert!(err.message.contains("allowed"), "{}", err.message);
     let mut empty = claude_args(&b, "e");
     empty["secrets"] = json!([]);
     assert!(dispatch(&ops, &app(), empty).is_ok());
@@ -294,6 +292,40 @@ fn bad_arguments_are_refused_before_anything_is_sent() {
     let (key, spec) = build(&good, OriginTier::App).unwrap();
     assert_eq!(key, "k");
     assert_eq!(spec.cwd, "/srv");
+}
+
+#[test]
+fn secret_names_are_checked_lowercased_and_deduplicated() {
+    let node = "0123456789abcdef";
+    let base = json!({"node": node, "tool": "claude", "cwd": "/srv", "key": "k"});
+    let with = |secrets: Value| {
+        let mut args = base.clone();
+        args["secrets"] = secrets;
+        build(&args, OriginTier::App)
+    };
+    let (_, spec) = with(json!(["GH", "gh", "Db.Pass"])).unwrap();
+    assert_eq!(spec.secrets, ["gh", "db.pass"]);
+    assert!(with(json!([])).unwrap().1.secrets.is_empty());
+    assert!(build(&base, OriginTier::App).unwrap().1.secrets.is_empty());
+    let many: Vec<String> = (0..17).map(|n| format!("s{n}")).collect();
+    for bad in [
+        json!("gh"),
+        json!([1]),
+        json!(["has space"]),
+        json!([""]),
+        json!(many),
+    ] {
+        let got = with(bad.clone());
+        assert_eq!(got.unwrap_err().code, ErrorCode::BadRequest, "{bad}");
+    }
+    let delegate = json!({
+        "node": node,
+        "delegate": ["agy", "--", "x"],
+        "key": "k",
+        "secrets": ["gh"],
+    });
+    let err = build(&delegate, OriginTier::App).unwrap_err();
+    assert_eq!(err.code, ErrorCode::BadRequest);
 }
 
 #[test]

@@ -1,10 +1,14 @@
 use serde_json::{json, Value};
 
-use super::{Effect, NodeCore, Target, Then, CALL_MS, DELEGATE_CALL_MS};
+use super::{
+    Effect, NodeCore, Target, Then, CALL_MS, DELEGATE_CALL_MS, GRANT_ATTACH, GRANT_REVOKE_JOB,
+    WAITING,
+};
+use crate::cluster::grants::attachable;
 use crate::cluster::id::{NodeId, Tool};
 use crate::cluster::jobs::{job_id, Job, JobSpec, JobState};
 use crate::cluster::members::MemberState;
-use crate::cluster::shell_job::{CODEX_LATER, SECRETS_LATER};
+use crate::cluster::shell_job::CODEX_LATER;
 use crate::cluster::state::Command;
 use crate::cluster::versions::{compat, Compat, Purpose, Versions};
 use crate::cluster::wire::{Origin, OriginTier, WireError};
@@ -65,6 +69,31 @@ impl NodeCore {
             self.finish(target, Ok(reply), out);
             return;
         }
+        let warning = match self.precheck(&spec, tier) {
+            Ok(warning) => warning,
+            Err(e) => {
+                self.finish(target, Err(e), out);
+                return;
+            }
+        };
+        if let Err(e) = self.check_secrets(&spec) {
+            self.finish(target, Err(e), out);
+            return;
+        }
+        let job = job_id(&key);
+        let has_secrets = !spec.secrets.is_empty();
+        if let Err(e) = self.apply(Command::Dispatch { key, spec }, out) {
+            self.finish(target, Err(refusal("refused", e.to_string())), out);
+            return;
+        }
+        if has_secrets {
+            self.attach(target, job, warning, out);
+        } else {
+            self.start_tool(target, job, warning, out);
+        }
+    }
+
+    fn precheck(&self, spec: &JobSpec, tier: OriginTier) -> Result<Option<String>, WireError> {
         let node = spec.node.clone();
         let name = self.member_name(&node);
         let member_state = self
@@ -73,35 +102,19 @@ impl NodeCore {
             .and_then(|s| s.members.get(&node))
             .map(|m| (m.state, m.versions.clone(), m.accepts_delegation));
         let versions = match member_state {
-            None => {
-                self.finish(
-                    target,
-                    Err(refusal("unknown_node", format!("{name} is not a member"))),
-                    out,
-                );
-                return;
-            }
+            None => return Err(refusal("unknown_node", format!("{name} is not a member"))),
             Some((MemberState::Removed, _, _)) => {
-                self.finish(
-                    target,
-                    Err(refusal("removed", format!("{name} was removed"))),
-                    out,
-                );
-                return;
+                return Err(refusal("removed", format!("{name} was removed")))
             }
             Some((MemberState::Pending, _, _)) => {
-                self.finish(
-                    target,
-                    Err(refusal("pending", format!("{name} is not approved yet"))),
-                    out,
-                );
-                return;
+                return Err(refusal("pending", format!("{name} is not approved yet")))
             }
             Some((MemberState::Active, versions, accepts)) => {
                 if tier != OriginTier::App && !accepts {
-                    let text = format!("{name} doesn't take delegated jobs");
-                    self.finish(target, Err(refusal("refused", text)), out);
-                    return;
+                    return Err(refusal(
+                        "refused",
+                        format!("{name} doesn't take delegated jobs"),
+                    ));
                 }
                 if node == self.me {
                     Some(self.versions.clone())
@@ -111,42 +124,72 @@ impl NodeCore {
             }
         };
         if node != self.me && !self.is_online(&node) {
-            self.finish(
-                target,
-                Err(refusal("offline", format!("{name} is offline"))),
-                out,
-            );
-            return;
+            return Err(refusal("offline", format!("{name} is offline")));
         }
         let Some(versions) = versions else {
-            let text = format!("{name} hasn't reported its versions");
-            self.finish(target, Err(refusal("refused", text)), out);
-            return;
+            return Err(refusal(
+                "refused",
+                format!("{name} hasn't reported its versions"),
+            ));
         };
-        let warning = match compat(
+        match compat(
             &self.reference_versions(),
             &versions,
             &name,
             Purpose::Dispatch(spec.tool),
         ) {
-            Compat::Refuse(text) => {
-                self.finish(target, Err(refusal("refused", text)), out);
-                return;
-            }
-            Compat::Warn(text) => Some(text),
-            Compat::Ok => None,
-        };
-        let job = job_id(&key);
-        if let Err(e) = self.apply(
-            Command::Dispatch {
-                key,
-                spec: spec.clone(),
-            },
-            out,
-        ) {
-            self.finish(target, Err(refusal("refused", e.to_string())), out);
-            return;
+            Compat::Refuse(text) => Err(refusal("refused", text)),
+            Compat::Warn(text) => Ok(Some(text)),
+            Compat::Ok => Ok(None),
         }
+    }
+
+    fn check_secrets(&self, spec: &JobSpec) -> Result<(), WireError> {
+        if spec.secrets.is_empty() {
+            return Ok(());
+        }
+        let Some(state) = &self.state else {
+            return Err(refusal("no_cluster", "this node is in no cluster"));
+        };
+        if spec.is_delegate() {
+            return Err(refusal("bad_args", "a delegate job takes no secrets"));
+        }
+        if spec.secrets.len() > MAX_ATTACHED {
+            return Err(refusal(
+                "bad_args",
+                format!("at most {MAX_ATTACHED} secrets go with one job"),
+            ));
+        }
+        if spec.node == state.vault {
+            let name = self.member_name(&state.vault);
+            let text = format!("{name} holds the vault: a job there asks with notchling secret");
+            return Err(refusal("refused", text));
+        }
+        let allow = state
+            .members
+            .get(&spec.node)
+            .map(|m| m.secrets.clone())
+            .unwrap_or_default();
+        attachable(spec, &allow).map_err(|text| refusal("refused", text))
+    }
+
+    fn start_tool(
+        &mut self,
+        target: Target,
+        job: String,
+        warning: Option<String>,
+        out: &mut Vec<Effect>,
+    ) {
+        let Some(spec) = self
+            .state
+            .as_ref()
+            .and_then(|s| s.jobs.get(&job))
+            .map(|j| j.spec.clone())
+        else {
+            self.finish(target, Err(refusal("refused", "no such job")), out);
+            return;
+        };
+        let node = spec.node.clone();
         let (op, origin, wait) = if spec.is_delegate() {
             let origin = Origin {
                 node: self.me.clone(),
@@ -181,6 +224,172 @@ impl NodeCore {
         } else {
             self.call_out_within(&node, op.to_string(), args, origin, (then, wait), out);
         }
+    }
+
+    fn attach(
+        &mut self,
+        target: Target,
+        job: String,
+        warning: Option<String>,
+        out: &mut Vec<Effect>,
+    ) {
+        let Some(args) = self.attach_args(&job) else {
+            self.fail_job(&job, "no such job", out);
+            self.finish(target, Err(refusal("refused", "no such job")), out);
+            return;
+        };
+        let call = self.next_local;
+        self.next_local += 1;
+        self.attaching.insert(job.clone());
+        self.local_runs.insert(
+            call,
+            Then::Attach {
+                job,
+                warning,
+                target,
+            },
+        );
+        let origin = self.node_origin();
+        let term = self.current_term();
+        out.push(Effect::RunLocal {
+            call,
+            op: GRANT_ATTACH.to_string(),
+            args,
+            origin,
+            term,
+        });
+    }
+
+    fn attach_args(&self, job: &str) -> Option<Value> {
+        let state = self.state.as_ref()?;
+        let found = state.jobs.get(job)?;
+        let member = state.members.get(&found.spec.node)?;
+        Some(json!({
+            "job": found,
+            "member": member,
+            "vaultName": self.member_name(&state.vault),
+            "vaultPrimary": state.home == state.vault && state.home == self.me,
+        }))
+    }
+
+    pub(super) fn attached(
+        &mut self,
+        job: String,
+        warning: Option<String>,
+        target: Target,
+        result: Result<Value, WireError>,
+        out: &mut Vec<Effect>,
+    ) {
+        self.attaching.remove(&job);
+        let current = self
+            .state
+            .as_ref()
+            .and_then(|s| s.jobs.get(&job))
+            .map(|j| j.state);
+        if current != Some(JobState::Dispatching) {
+            self.revoke_grants(&job, out);
+            let text = "the job ended before its secrets arrived";
+            self.finish(target, Err(refusal("refused", text)), out);
+            return;
+        }
+        let waiting = result
+            .as_ref()
+            .ok()
+            .and_then(|v| v.get("waiting"))
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        match (result, waiting) {
+            (Err(e), _) => {
+                self.fail_job(&job, &e.message, out);
+                self.finish(target, Err(e), out);
+            }
+            (Ok(_), Some(text)) => {
+                let detail: String = format!("{WAITING}{text}")
+                    .chars()
+                    .take(DETAIL_MAX)
+                    .collect();
+                let command = Command::JobState {
+                    id: job.clone(),
+                    state: JobState::Dispatching,
+                    session: None,
+                    detail: Some(detail),
+                };
+                let _ = self.apply(command, out);
+                let reply = self
+                    .state
+                    .as_ref()
+                    .and_then(|s| s.jobs.get(&job))
+                    .map(|j| job_reply(j, None))
+                    .unwrap_or(Value::Null);
+                self.finish(target, Ok(reply), out);
+            }
+            (Ok(_), None) => self.start_tool(target, job, warning, out),
+        }
+    }
+
+    pub(super) fn retry_attach(&mut self, out: &mut Vec<Effect>) {
+        if !self.is_home() {
+            return;
+        }
+        let Some(state) = &self.state else {
+            return;
+        };
+        if state.vault != self.me {
+            return;
+        }
+        let ready: Vec<(String, JobSpec)> = state
+            .jobs
+            .values()
+            .filter(|j| {
+                j.state == JobState::Dispatching
+                    && !j.spec.secrets.is_empty()
+                    && j.detail.as_deref().is_some_and(|d| d.starts_with(WAITING))
+                    && !self.attaching.contains(&j.id)
+            })
+            .map(|j| (j.id.clone(), j.spec.clone()))
+            .collect();
+        for (job, spec) in ready {
+            let checked = self
+                .precheck(&spec, OriginTier::App)
+                .and_then(|warning| self.check_secrets(&spec).map(|_| warning));
+            match checked {
+                Ok(warning) => self.attach(Target::Nobody, job, warning, out),
+                Err(e) => self.fail_job(&job, &e.message, out),
+            }
+        }
+    }
+
+    fn fail_job(&mut self, job: &str, why: &str, out: &mut Vec<Effect>) {
+        let command = Command::JobState {
+            id: job.to_string(),
+            state: JobState::Failed,
+            session: None,
+            detail: Some(why.chars().take(DETAIL_MAX).collect()),
+        };
+        let _ = self.apply(command, out);
+        self.revoke_grants(job, out);
+    }
+
+    pub(super) fn revoke_grants(&mut self, job: &str, out: &mut Vec<Effect>) {
+        let Some(found) = self.state.as_ref().and_then(|s| s.jobs.get(job)) else {
+            return;
+        };
+        if found.spec.secrets.is_empty() {
+            return;
+        }
+        let args = json!({"job": job, "node": found.spec.node});
+        let call = self.next_local;
+        self.next_local += 1;
+        self.local_runs.insert(call, Then::Reply(Target::Nobody));
+        let origin = self.node_origin();
+        let term = self.current_term();
+        out.push(Effect::RunLocal {
+            call,
+            op: GRANT_REVOKE_JOB.to_string(),
+            args,
+            origin,
+            term,
+        });
     }
 
     pub(super) fn native_dispatch(
@@ -241,6 +450,7 @@ impl NodeCore {
             detail,
         };
         let _ = self.apply(command, out);
+        self.revoke_grants(job, out);
     }
 
     pub(super) fn dispatched(
@@ -255,16 +465,19 @@ impl NodeCore {
         let node = found.map(|j| j.spec.node.clone());
         let current = found.map(|j| j.state);
         let has_session = found.is_some_and(|j| j.session.is_some());
+        let stale =
+            found.is_some_and(|j| j.detail.as_deref().is_some_and(|d| d.starts_with(WAITING)));
         let reply = match result {
             Ok(reply) => reply,
             Err(e) => {
                 let command = Command::JobState {
-                    id: job,
+                    id: job.clone(),
                     state: JobState::Failed,
                     session: None,
                     detail: Some(e.message.clone()),
                 };
                 let _ = self.apply(command, out);
+                self.revoke_grants(&job, out);
                 return Err(e);
             }
         };
@@ -279,7 +492,7 @@ impl NodeCore {
                 id: job.clone(),
                 state: JobState::Running,
                 session: session.clone(),
-                detail: warning.clone(),
+                detail: warning.clone().or_else(|| stale.then(String::new)),
             };
             let _ = self.apply(command, out);
         } else if let (Some(state), Some(session), false) = (current, &session, has_session) {
@@ -335,6 +548,7 @@ impl NodeCore {
 }
 
 const DETAIL_MAX: usize = 200;
+const MAX_ATTACHED: usize = 16;
 
 fn job_reply(job: &Job, warning: Option<&str>) -> Value {
     json!({
@@ -346,9 +560,6 @@ fn job_reply(job: &Job, warning: Option<&str>) -> Value {
 }
 
 fn check_spec(spec: &JobSpec) -> Result<(), WireError> {
-    if !spec.secrets.is_empty() {
-        return Err(refusal("refused", SECRETS_LATER));
-    }
     if spec.args.get("delegate").is_some() && !(spec.is_delegate() && spec.tool == Tool::Agy) {
         return Err(refusal(
             "bad_args",

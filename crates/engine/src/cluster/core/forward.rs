@@ -130,6 +130,7 @@ impl NodeCore {
             client: m.client,
             state: m.state,
             is_home: state.home == m.id,
+            is_vault: state.vault == m.id,
         });
         #[cfg(test)]
         let skip = self.skip_term_check
@@ -159,6 +160,14 @@ impl NodeCore {
                 return;
             }
         };
+        if rule.vault_only && self.state.as_ref().is_some_and(|s| s.vault != self.me) {
+            let why = match &self.state {
+                Some(s) => format!("{} holds the vault", self.member_name(&s.vault)),
+                None => "not in a cluster".to_string(),
+            };
+            self.refused_call(&from, id, &op, &why, out);
+            return;
+        }
         if rule.home_only && !self.is_home() {
             let name = self.state.as_ref().map(|s| self.member_name(&s.home));
             let why = format!("{} is primary now", name.unwrap_or_default());
@@ -177,6 +186,7 @@ impl NodeCore {
             "cluster.dispatch" => self.native_dispatch(target, &args, &origin, out),
             "cluster.member.set" => self.native_member_set(target, &args, out),
             "cluster.remove" => self.native_remove(target, &args, out),
+            "cluster.allow.set" => self.native_allow_set(target, &args, out),
             "node.versions" => self.native_versions(target, &args, out),
             _ => {
                 let call = self.next_local;
@@ -417,6 +427,11 @@ impl NodeCore {
                 let result = self.dispatched(job, warning, result, out);
                 self.finish(target, result, out);
             }
+            Then::Attach {
+                job,
+                warning,
+                target,
+            } => self.attached(job, warning, target, result, out),
         }
     }
 
@@ -427,6 +442,7 @@ impl NodeCore {
         out: &mut Vec<Effect>,
     ) {
         match target {
+            Target::Nobody => {}
             Target::Local(local) => out.push(Effect::Answer { local, result }),
             Target::Peer(from, id) => {
                 let boot = self.boot_ms;

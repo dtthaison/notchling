@@ -315,6 +315,7 @@ impl NodeCore {
             }
         }
         self.expire_calls(out);
+        self.retry_attach(out);
         self.expire_join(out);
         self.prune_seen();
         self.dial(out);

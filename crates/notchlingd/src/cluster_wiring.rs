@@ -16,11 +16,14 @@ use crate::cluster_switches::{HeadlessSwitches, LateHandler, NodeCalls, OpsPanel
 use crate::cluster_versions::{own, with_tools};
 use crate::cluster_workspace::{Workspace, WorkspaceCalls};
 use crate::cluster_workspace_send::{CodeSender, NodePeers, ReturnOps, Sender};
+use crate::grant_broker::GrantBroker;
+use crate::grant_calls::{EventAudit, GrantCalls, InboxNotices, NodeLink, NodeView};
 use crate::inbox_ops::InboxOps;
 use crate::late_emit::Events;
 use crate::layout::Layout;
 use crate::shell_jobs::ShellJobs;
 use crate::switches::SwitchFlag;
+use crate::vault_ops::VaultOps;
 use crate::versions_ops::VersionsOps;
 use notchling_cluster_net::{load_or_make, Pins, TcpTls, PORT};
 use notchling_engine::bridge::net::bridge::host_name;
@@ -221,6 +224,10 @@ fn clock() -> crate::cluster_mirror::Clock {
     Arc::new(|| u64::try_from(crate::acting_ops::now_ms()).unwrap_or(0))
 }
 
+fn clock_ms() -> crate::grant_broker::Clock {
+    Arc::new(crate::acting_ops::now_ms)
+}
+
 fn node_name() -> String {
     let name = host_name().unwrap_or_else(|| "node".to_string());
     name.strip_suffix(".local").unwrap_or(&name).to_string()
@@ -266,7 +273,7 @@ impl ClusterParts {
         room: Arc<dyn Room>,
         link: Arc<SwitchFlag>,
         versions: Arc<VersionsOps>,
-        inbox: Arc<InboxOps>,
+        (inbox, vault): (Arc<InboxOps>, Arc<VaultOps>),
         events: Events,
         sessions: Arc<Mutex<Value>>,
     ) -> ClusterParts {
@@ -324,9 +331,20 @@ impl ClusterParts {
         );
         let workspace_calls: Arc<dyn LocalCalls> =
             Arc::new(WorkspaceCalls::new(sessions_calls, workspace));
+        let broker = Arc::new(GrantBroker::new(
+            (
+                vault.clone(),
+                Arc::new(NodeLink::new(holder.clone())),
+                Arc::new(EventAudit::new(vault, log.clone())),
+            ),
+            Arc::new(InboxNotices::new(inbox.clone())),
+            Arc::new(NodeView::new(holder.clone())),
+            clock_ms(),
+        ));
+        let granting: Arc<dyn LocalCalls> = Arc::new(GrantCalls::new(workspace_calls, broker));
         let local: Arc<dyn LocalCalls> = Arc::new(NodeCalls {
             inner: Arc::new(DispatchCalls::new(
-                workspace_calls,
+                granting,
                 shells.clone(),
                 delegate.clone(),
                 takes,

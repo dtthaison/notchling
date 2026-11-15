@@ -22,7 +22,7 @@ fn refusal(err: ApiError, result: SecretResult) -> Refusal {
 impl VaultOps {
     pub(super) fn approve(
         &self,
-        caller: &Caller,
+        who: &Who<'_>,
         asking: &[VaultEntry],
         command: &str,
         folder: &str,
@@ -48,11 +48,20 @@ impl VaultOps {
         let id = ticket.id.clone();
         let names: Vec<&str> = asking.iter().map(|e| e.name.as_str()).collect();
         let entries: Vec<Value> = asking.iter().map(entry_json).collect();
-        let verified = crate::vault_caller::verified(self.processes.as_ref(), caller, folder);
+        let verified = match who {
+            Who::Caller(caller) => {
+                crate::vault_caller::verified(self.processes.as_ref(), caller, folder)
+            }
+            Who::Grant(grant) => json!({"node": grant.node_name, "job": grant.job}),
+        };
         let event = json!({"id": id, "names": names, "entries": entries, "command": command,
                            "folder": folder, "verified": verified});
         self.approvals.describe(&id, &event);
-        let raised = self.raise_approval(&id, &names, command, folder);
+        let by = match who {
+            Who::Grant(grant) => Some(*grant),
+            Who::Caller(_) => None,
+        };
+        let raised = self.raise_approval(&id, &names, (command, folder), by);
         self.room
             .publish(topics::VAULT, topics::VAULT_APPROVAL_PENDING, &event);
         let still = || self.switch.is_on() && self.room.can_follow(topics::VAULT);

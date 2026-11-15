@@ -278,6 +278,7 @@ from the app in this run, or `cluster.join` (below), or a restart of a headless 
 | `cluster.join` | agent | `{token}` | `{state: "pending" \| "joined"}` |
 | `cluster.member.set` | app | `{node, canBeMaster?, client?, reference?, acceptsDelegation?, headless?, desired?}` | the member as stored |
 | `cluster.remove` | app | `{node}` | the member as stored, `state: "removed"` |
+| `cluster.allow.set` | app | `{node, names?, any?}` | `{}`; `names` replaces the vault secrets a job on that machine may carry, `any` allows every name; a field left out stays as it was; relayed to the home from a client |
 
 - `Member` is `{id, name, role, canBeMaster, online, client, headless, reference, state, versions, load, desired,
   acceptsDelegation}`; `role` is `home`, `standby` or `worker`, `state` `pending`, `active` or `removed`,

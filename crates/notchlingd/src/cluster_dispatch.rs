@@ -4,10 +4,11 @@ use crate::cluster_node::{ClusterNode, LocalCalls, DELEGATE_WAIT, LOCAL_WAIT};
 use crate::cluster_workspace_send::{code_mode, Code, CodeSender};
 use crate::op_group::OpGroup;
 use crate::shell_jobs::{Reporter, ShellJobs};
-use notchling_engine::cluster::core::CALL_MS;
-use notchling_engine::cluster::shell_job::{CODEX_LATER, MAX_COMMAND, SECRETS_LATER};
+use notchling_engine::cluster::core::{ATTACH_CALL_MS, CALL_MS};
+use notchling_engine::cluster::shell_job::{CODEX_LATER, MAX_COMMAND};
 use notchling_engine::cluster::wire::{Origin, OriginTier};
 use notchling_engine::cluster::{JobSpec, JobState, LocalCmd, NodeId, Qualified, Tool};
+use notchling_engine::vault::valid_name;
 use notchling_local_api::{ops, ApiError, Caller, ErrorCode, OpSpec, Tier};
 use serde_json::{json, Value};
 use std::sync::{Arc, OnceLock, Weak};
@@ -106,6 +107,33 @@ fn delegate_spec(node: NodeId, args: &Value) -> Result<JobSpec, ApiError> {
     })
 }
 
+pub const MAX_SECRETS: usize = 16;
+
+fn secret_names(args: &Value) -> Result<Vec<String>, ApiError> {
+    let list = match args.get("secrets") {
+        None | Some(Value::Null) => return Ok(Vec::new()),
+        Some(Value::Array(list)) => list,
+        Some(_) => return Err(bad("secrets is a list of names")),
+    };
+    if list.len() > MAX_SECRETS {
+        return Err(bad(format!(
+            "at most {MAX_SECRETS} secrets go with one job"
+        )));
+    }
+    let mut names: Vec<String> = Vec::new();
+    for item in list {
+        let name = item
+            .as_str()
+            .filter(|n| valid_name(n))
+            .ok_or_else(|| bad("secrets takes names: letters, digits, - _ or ."))?
+            .to_lowercase();
+        if !names.contains(&name) {
+            names.push(name);
+        }
+    }
+    Ok(names)
+}
+
 pub fn build(args: &Value, tier: OriginTier) -> Result<(String, JobSpec), ApiError> {
     let usage = "cluster.dispatch takes {\"node\": id, \"key\": text, \"tool\": claude|agy|shell, \"cwd\": path, ...} or {\"node\", \"key\", \"delegate\": [args]}";
     let key = opt_text(args, "key")?
@@ -114,17 +142,16 @@ pub fn build(args: &Value, tier: OriginTier) -> Result<(String, JobSpec), ApiErr
     let node = opt_text(args, "node")?
         .and_then(NodeId::parse)
         .ok_or_else(|| bad(usage))?;
-    match args.get("secrets") {
-        None | Some(Value::Null) => {}
-        Some(Value::Array(list)) if list.is_empty() => {}
-        Some(Value::Array(_)) => return Err(bad(SECRETS_LATER)),
-        Some(_) => return Err(bad("secrets is a list of names")),
-    }
-    let spec = if args.get("delegate").is_some() {
+    let secrets = secret_names(args)?;
+    let mut spec = if args.get("delegate").is_some() {
         delegate_spec(node, args)?
     } else {
         plain_spec(node, args)?
     };
+    if !secrets.is_empty() && spec.is_delegate() {
+        return Err(bad("a delegate job takes no secrets"));
+    }
+    spec.secrets = secrets;
     if tier != OriginTier::App && !spec.is_delegate() {
         return Err(ApiError::new(
             ErrorCode::Forbidden,
@@ -241,8 +268,10 @@ impl DispatchOps {
         let (key, spec) = build(args, tier)?;
         let within = if spec.is_delegate() {
             DELEGATE_WAIT + LOCAL_WAIT
-        } else {
+        } else if spec.secrets.is_empty() {
             LOCAL_WAIT + Duration::from_millis(CALL_MS)
+        } else {
+            LOCAL_WAIT + Duration::from_millis(CALL_MS + ATTACH_CALL_MS)
         };
         self.node()?
             .local_within(LocalCmd::Dispatch { key, spec, tier }, within)

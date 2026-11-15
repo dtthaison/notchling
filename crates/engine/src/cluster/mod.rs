@@ -39,6 +39,8 @@ mod grant_files_hostile_tests;
 #[cfg(test)]
 mod grant_files_tests;
 #[cfg(test)]
+mod grants_env_tests;
+#[cfg(test)]
 mod grants_tests;
 #[cfg(test)]
 mod id_tests;
@@ -48,6 +50,8 @@ mod jobs_tests;
 mod join_tests;
 #[cfg(test)]
 mod outward_tests;
+#[cfg(test)]
+mod policy_secrets_tests;
 #[cfg(test)]
 mod policy_tests;
 #[cfg(test)]

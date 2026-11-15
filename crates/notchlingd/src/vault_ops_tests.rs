@@ -43,7 +43,7 @@ impl FakeRoom {
 #[derive(Clone, Default)]
 pub(super) struct FakeItem {
     data: Arc<Mutex<Option<Vec<u8>>>>,
-    reads: Arc<Mutex<u32>>,
+    pub(super) reads: Arc<Mutex<u32>>,
 }
 
 impl VaultKeychain for FakeItem {

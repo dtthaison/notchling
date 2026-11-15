@@ -61,6 +61,7 @@ impl Driver {
     }
 
     pub(super) fn after(&mut self) {
+        *lock(&self.shared.state) = self.core.state().cloned();
         let status = self.status();
         if status == self.published {
             return;

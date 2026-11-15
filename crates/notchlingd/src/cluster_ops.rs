@@ -10,13 +10,14 @@ use notchling_local_api::{ops, topics, ApiError, Caller, ErrorCode, OpSpec, Tier
 use serde_json::{json, Value};
 use std::sync::Arc;
 
-pub const CLUSTER_OPS: [&str; 6] = [
+pub const CLUSTER_OPS: [&str; 7] = [
     ops::CLUSTER_STATUS,
     ops::CLUSTER_CREATE,
     ops::CLUSTER_JOIN_TOKEN,
     ops::CLUSTER_JOIN,
     ops::CLUSTER_MEMBER_SET,
     ops::CLUSTER_REMOVE,
+    ops::CLUSTER_ALLOW_SET,
 ];
 
 pub struct ClusterOps {
@@ -112,6 +113,35 @@ impl ClusterOps {
         node.join(token, headless)
     }
 
+    fn allow_set(&self, args: &Value) -> Result<Value, ApiError> {
+        let usage = "cluster.allow.set takes {\"node\": id, \"names\"?: [name, …], \"any\"?: bool}";
+        let fields = args.as_object().ok_or_else(|| bad(usage))?;
+        if fields
+            .keys()
+            .any(|k| !["node", "names", "any"].contains(&k.as_str()))
+        {
+            return Err(bad(usage));
+        }
+        let names = match fields.get("names") {
+            None | Some(Value::Null) => None,
+            Some(Value::Array(list)) => Some(
+                list.iter()
+                    .map(|n| n.as_str().map(str::to_string).ok_or_else(|| bad(usage)))
+                    .collect::<Result<Vec<_>, _>>()?,
+            ),
+            Some(_) => return Err(bad(usage)),
+        };
+        let any = match fields.get("any") {
+            None | Some(Value::Null) => None,
+            Some(v) => Some(v.as_bool().ok_or_else(|| bad(usage))?),
+        };
+        self.node()?.local(LocalCmd::SetAllow {
+            node: node_arg(args, usage)?,
+            names,
+            any,
+        })
+    }
+
     fn member_set(&self, args: &Value) -> Result<Value, ApiError> {
         let usage = "cluster.member.set takes {\"node\": id, \"canBeMaster\"?, \"client\"?, \"reference\"?, \"acceptsDelegation\"?, \"headless\"?, \"desired\"?}";
         let known = [
@@ -155,9 +185,10 @@ impl OpGroup for ClusterOps {
             ops::CLUSTER_STATUS | ops::CLUSTER_JOIN_TOKEN | ops::CLUSTER_JOIN => {
                 Some(OpSpec::AGENT)
             }
-            ops::CLUSTER_CREATE | ops::CLUSTER_MEMBER_SET | ops::CLUSTER_REMOVE => {
-                Some(OpSpec::APP)
-            }
+            ops::CLUSTER_CREATE
+            | ops::CLUSTER_MEMBER_SET
+            | ops::CLUSTER_REMOVE
+            | ops::CLUSTER_ALLOW_SET => Some(OpSpec::APP),
             _ => None,
         }
     }
@@ -172,6 +203,7 @@ impl OpGroup for ClusterOps {
             ops::CLUSTER_JOIN_TOKEN => self.node()?.join_token(),
             ops::CLUSTER_JOIN => self.join(caller, args),
             ops::CLUSTER_MEMBER_SET => self.member_set(args),
+            ops::CLUSTER_ALLOW_SET => self.allow_set(args),
             ops::CLUSTER_REMOVE => {
                 let node = node_arg(args, "cluster.remove takes {\"node\": id}")?;
                 self.node()?.local(LocalCmd::Remove { node })

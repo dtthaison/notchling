@@ -44,6 +44,8 @@ pub mod daemon_wiring;
 pub mod delegate_cli;
 pub mod every_session;
 pub mod git_ops;
+pub mod grant_broker;
+pub mod grant_calls;
 mod held_guard;
 pub mod held_ops;
 pub mod hook;

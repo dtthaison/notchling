@@ -25,6 +25,10 @@ pub const STATUS_JOBS: usize = 50;
 pub const JOIN_ANSWER_MS: u64 = 15_000;
 pub const DIAL_BACKOFF_MS: (u64, u64) = (1_000, 60_000);
 pub const DEDUPE_MS: u64 = 300_000;
+pub const ATTACH_CALL_MS: u64 = 8 * 60_000;
+pub const GRANT_ATTACH: &str = "grant.attach";
+pub const GRANT_REVOKE_JOB: &str = "grant.revoke_job";
+pub const WAITING: &str = "Waiting for ";
 
 #[derive(Clone, Debug)]
 pub enum Input {
@@ -84,6 +88,11 @@ pub enum LocalCmd {
     },
     SetVersions {
         versions: Versions,
+    },
+    SetAllow {
+        node: NodeId,
+        names: Option<Vec<String>>,
+        any: Option<bool>,
     },
     Dispatch {
         key: String,
@@ -182,12 +191,18 @@ struct Dial {
 enum Target {
     Local(u64),
     Peer(NodeId, u64),
+    Nobody,
 }
 
 #[derive(Clone, Debug)]
 enum Then {
     Reply(Target),
     Dispatch {
+        job: String,
+        warning: Option<String>,
+        target: Target,
+    },
+    Attach {
         job: String,
         warning: Option<String>,
         target: Target,
@@ -229,6 +244,7 @@ pub struct NodeCore {
     dials: BTreeMap<NodeId, Dial>,
     out_calls: BTreeMap<u64, OutCall>,
     local_runs: BTreeMap<u64, Then>,
+    attaching: BTreeSet<String>,
     seen: BTreeMap<(NodeId, u64), Seen>,
     joining: Option<Joining>,
     next_wire: u64,
@@ -259,6 +275,7 @@ impl NodeCore {
             dials: BTreeMap::new(),
             out_calls: BTreeMap::new(),
             local_runs: BTreeMap::new(),
+            attaching: BTreeSet::new(),
             seen: BTreeMap::new(),
             joining: None,
             next_wire: 1,
@@ -332,6 +349,7 @@ impl NodeCore {
                     "versions": m.versions,
                     "desired": m.desired,
                     "acceptsDelegation": m.accepts_delegation,
+                    "secrets": m.secrets,
                 })
             })
             .collect();
@@ -511,5 +529,7 @@ mod core_tests_dispatch;
 mod core_tests_headless;
 #[cfg(test)]
 mod core_tests_jobs;
+#[cfg(test)]
+mod core_tests_secrets;
 #[cfg(test)]
 mod core_tests_terms;

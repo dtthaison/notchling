@@ -7,6 +7,7 @@ pub enum Sent {
     Home,
     Client,
     Member,
+    Vault,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -16,6 +17,7 @@ pub struct Rule {
     pub tier: OriginTier,
     pub id_field: Option<&'static str>,
     pub home_only: bool,
+    pub vault_only: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -25,6 +27,7 @@ pub struct SenderFacts {
     pub client: bool,
     pub state: MemberState,
     pub is_home: bool,
+    pub is_vault: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -39,6 +42,7 @@ const HOME: &[Sent] = &[Sent::Home];
 const CLIENT: &[Sent] = &[Sent::Client, Sent::Home];
 const CLIENT_ONLY: &[Sent] = &[Sent::Client];
 const MEMBER: &[Sent] = &[Sent::Member];
+const VAULT_HOME: &[Sent] = &[Sent::Vault];
 
 const fn rule(
     op: &'static str,
@@ -53,6 +57,18 @@ const fn rule(
         tier,
         id_field,
         home_only,
+        vault_only: false,
+    }
+}
+
+const fn to_vault(op: &'static str, from: &'static [Sent], tier: OriginTier) -> Rule {
+    Rule {
+        op,
+        from,
+        tier,
+        id_field: None,
+        home_only: false,
+        vault_only: true,
     }
 }
 
@@ -138,6 +154,13 @@ pub const RULES: &[Rule] = &[
     rule("cluster.join.token", MEMBER, OriginTier::Agent, None, true),
     rule("cluster.join.token", MEMBER, OriginTier::App, None, true),
     rule("cluster.dispatch", MEMBER, OriginTier::Agent, None, true),
+    client_home("cluster.allow.set"),
+    rule("grant.deliver", VAULT_HOME, OriginTier::Node, None, false),
+    rule("grant.revoke", VAULT_HOME, OriginTier::Node, None, false),
+    to_vault("grant.request", MEMBER, OriginTier::Agent),
+    to_vault("vault.list", CLIENT, OriginTier::App),
+    to_vault("vault.save", CLIENT, OriginTier::App),
+    to_vault("vault.remove", CLIENT, OriginTier::App),
 ];
 
 fn stands(sender: &SenderFacts, sent: Sent) -> bool {
@@ -145,6 +168,7 @@ fn stands(sender: &SenderFacts, sent: Sent) -> bool {
         Sent::Home => sender.is_home,
         Sent::Client => sender.client,
         Sent::Member => true,
+        Sent::Vault => sender.is_home && sender.is_vault,
     }
 }
 

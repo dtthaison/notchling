@@ -4,7 +4,7 @@ use crate::late_emit::Events as LogEvents;
 use notchling_cluster_net::{Conn, LinkEvents, Pins, Transport};
 use notchling_engine::cluster::core::{LocalCmd, CALL_MS, DELEGATE_CALL_MS};
 use notchling_engine::cluster::wire::{Origin, WireError};
-use notchling_engine::cluster::{Desired, Input, NodeId, Versions};
+use notchling_engine::cluster::{ClusterState, Desired, Input, NodeId, Versions};
 use notchling_events::kinds::choices::SwitchName;
 use notchling_events::kinds::security::{
     ClusterStep, ClusterStepTaken, SwitchCause, SwitchChanged,
@@ -132,6 +132,7 @@ impl LinkEvents for Events {
 pub(crate) struct Shared {
     pub status: Mutex<Value>,
     pub rejoin: Mutex<Option<NodeId>>,
+    pub state: Mutex<Option<ClusterState>>,
 }
 
 pub(crate) fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -171,6 +172,7 @@ fn known_node_ops() -> &'static [&'static str] {
         names.extend(crate::cluster_sessions::NODE_OPS);
         names.extend(crate::cluster_dispatch::NODE_OPS);
         names.extend(crate::cluster_workspace::NODE_OPS);
+        names.extend(crate::grant_broker::NODE_OPS);
         names
     })
 }
@@ -271,6 +273,10 @@ impl ClusterNode {
             return json!({"cluster": Value::Null, "me": self.me, "members": []});
         }
         status
+    }
+
+    pub fn state(&self) -> Option<ClusterState> {
+        lock(&self.shared.state).clone()
     }
 
     pub fn submit(&self) -> Submit {

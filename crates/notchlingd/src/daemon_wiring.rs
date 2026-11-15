@@ -620,7 +620,7 @@ impl Wired {
             room.clone(),
             switches.cluster.clone(),
             versions.clone(),
-            inbox.clone(),
+            (inbox.clone(), vault.clone()),
             events.clone(),
             sessions.clone(),
         );

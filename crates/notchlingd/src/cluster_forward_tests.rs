@@ -241,3 +241,39 @@ fn headless_node_waits_for_cluster_follower_on_permission() {
         .unwrap();
     assert_eq!(thread.join().unwrap()["action"], "allow");
 }
+
+#[test]
+fn the_vault_ops_go_only_to_the_node_that_holds_the_vault() {
+    let net = MemNet::new();
+    let (a, b) = pair(&net, client_home(), Opts::named("worker"));
+    let own = NodeForward::new(a.node.clone());
+    let there = json!({"node": a.id()});
+    assert!(own.forward(&app(), "vault.list", &there).is_none());
+    assert!(own.forward(&app(), "vault.list", &json!({})).is_none());
+    let elsewhere = json!({"node": b.id()});
+    let err = own
+        .forward(&app(), "vault.list", &elsewhere)
+        .expect("routed")
+        .unwrap_err();
+    assert_eq!(err.code, ErrorCode::BadRequest);
+    let agent = caller_of(Tier::Agent, ClientKind::Cli);
+    let err = own
+        .forward(&agent, "vault.save", &there)
+        .expect("routed")
+        .unwrap_err();
+    assert_eq!(err.code, ErrorCode::Forbidden);
+    assert!(a.calls.calls.lock().unwrap().is_empty());
+    assert!(b.calls.calls.lock().unwrap().is_empty());
+}
+
+#[test]
+fn a_worker_cannot_use_the_vault_through_the_node_link() {
+    let net = MemNet::new();
+    let (a, b) = pair(&net, client_home(), Opts::named("worker"));
+    let forward = NodeForward::new(b.node.clone());
+    let got = forward
+        .forward(&app(), "vault.list", &json!({"node": a.id()}))
+        .expect("routed");
+    assert!(got.is_err(), "{got:?}");
+    assert!(a.calls.calls.lock().unwrap().is_empty());
+}
