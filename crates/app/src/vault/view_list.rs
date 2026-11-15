@@ -1,6 +1,7 @@
-use gpui::{div, prelude::*, px, Context, Div, SharedString};
+use gpui::{div, prelude::*, px, AnyElement, Context, Div, SharedString};
+use notchling_kit::metric::SIDE_PADDING;
 use notchling_kit::part::ButtonKind;
-use notchling_kit::ui::{button, card, label, KitStyled, MONO_FONT};
+use notchling_kit::ui::{button, card, label, scrollable, KitStyled, MONO_FONT};
 use notchling_kit::{Appearance, Ink, TypeRole};
 
 use super::form::Form;
@@ -122,4 +123,14 @@ pub(super) fn list_row(row: &Row, a: Appearance, cx: &mut Context<VaultSheetView
         .gap(px(10.0))
         .child(details)
         .child(buttons)
+}
+
+pub(super) fn notice(text: &str, ink: Ink, a: Appearance) -> AnyElement {
+    scrollable(div().id("vault-notice").p(px(SIDE_PADDING)).child(label(
+        text,
+        TypeRole::Body,
+        ink,
+        a,
+    )))
+    .into_any_element()
 }

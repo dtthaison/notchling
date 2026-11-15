@@ -132,7 +132,7 @@ cluster-vault-tab-local = This Mac
 cluster-vault-tab-remote = Vault on { $name }
 cluster-vault-offline = The vault is on { $name }, which is offline
 cluster-vault-unknown = This Mac doesn't know which machine holds the vault.
-cluster-vault-unreachable = Can't reach the vault on the other machine. Nothing was saved or removed.
+cluster-vault-unreachable = Can't reach the vault. Nothing was saved or removed.
 # Shown when the machine a form or a removal was opened for is no longer the one this Mac would send it to.
 cluster-vault-moved = The vault changed while this was open, so nothing was saved or removed. Open it again.
 # Tab label while this Mac can't tell which machine holds the vault.

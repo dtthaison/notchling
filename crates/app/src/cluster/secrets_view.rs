@@ -176,7 +176,7 @@ pub fn editor_body<V: 'static>(
         }
         body = body.child(list);
     }
-    if model.at_cap() {
+    if model.shows_list() && model.at_cap() {
         body = body.child(label(
             &t::cluster::secrets_cap(&MAX_ALLOWED_NAMES.to_string()),
             TypeRole::Meta,
@@ -185,12 +185,7 @@ pub fn editor_body<V: 'static>(
         ));
     }
     if let Some(error) = editor.error {
-        body = body.child(label(
-            &t::cluster::secrets_failed(error),
-            TypeRole::Meta,
-            Ink::Needs,
-            a,
-        ));
+        body = body.child(label(error, TypeRole::Meta, Ink::Needs, a));
     }
     body.part("Node Secrets", a, cx)
 }

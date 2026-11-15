@@ -1,5 +1,7 @@
 use gpui::Context;
 
+use notchling_locale as t;
+
 use super::model::ClusterModel;
 use super::renders::{vault_names as fixture_names, WORKER};
 use super::secrets::{save_request, vault_names, SecretsModel};
@@ -121,7 +123,7 @@ impl ClusterSheetView {
                     Ok(_) => view.editing = None,
                     Err(error) => {
                         if let Some(editing) = view.editing.as_mut() {
-                            editing.error = Some(error);
+                            editing.error = Some(t::cluster::secrets_failed(&error));
                         }
                     }
                 }

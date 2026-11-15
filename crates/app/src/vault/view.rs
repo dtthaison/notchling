@@ -19,6 +19,7 @@ use super::form::{Form, Typed};
 use super::form_view::{form_body, form_footer, FormEvent};
 use super::list::{list, remove_alert, List, TITLE};
 use super::store::Vault;
+use super::view_list::notice;
 use crate::accounts::flows::Alert;
 use crate::accounts::view_rows::{alert_overlay, Handler};
 use crate::cluster::feed::ClusterFeed;
@@ -38,6 +39,7 @@ pub struct VaultSheetView {
     cluster: Arc<ClusterFeed>,
     pub(super) remote_tab: bool,
     pin: Option<Target>,
+    seen_target: Target,
     form: Option<Form>,
     pub(super) removing: Option<String>,
     busy: bool,
@@ -70,6 +72,7 @@ impl VaultSheetView {
             cluster,
             remote_tab: false,
             pin: None,
+            seen_target: Target::Local,
             form: None,
             removing: None,
             busy: false,
@@ -85,8 +88,10 @@ impl VaultSheetView {
                 ticks += 1;
                 let due = this.update(cx, |view, _| {
                     let changes = view.feed.changes().vault;
-                    let moved = changes != view.seen_vault;
+                    let target = view.target();
+                    let moved = changes != view.seen_vault || target != view.seen_target;
                     view.seen_vault = changes;
+                    view.seen_target = target;
                     moved || ticks.is_multiple_of(REFRESH_EVERY.as_secs())
                 });
                 match due {
@@ -120,6 +125,7 @@ impl VaultSheetView {
             cluster,
             remote_tab: false,
             pin: None,
+            seen_target: Target::Local,
             form,
             removing: None,
             busy: false,
@@ -152,6 +158,13 @@ impl VaultSheetView {
 
     fn store(&self) -> Option<Arc<Vault>> {
         self.store_pinned(None).ok()
+    }
+
+    fn pinned_node(&self) -> Option<String> {
+        match &self.pin {
+            Some(Target::Remote(id)) => Some(id.clone()),
+            _ => None,
+        }
     }
 
     pub(super) fn ask_remove(&mut self, name: &str, cx: &mut Context<Self>) {
@@ -304,14 +317,15 @@ impl VaultSheetView {
         if let Some(form) = self.form.as_mut() {
             form.forget_value();
         }
+        let pinned = self.pinned_node();
         self.run(
             move |v, sw| {
-                v.save(
+                v.save_at(
+                    pinned.as_deref(),
                     sw,
                     &entry,
                     value.as_ref(),
-                    replacing.as_deref(),
-                    request.as_deref(),
+                    (replacing.as_deref(), request.as_deref()),
                 )
             },
             |view, result, _| match result {
@@ -441,18 +455,16 @@ impl Render for VaultSheetView {
                     )),
                 )
             }
-            None if unreachable || remote.as_ref().is_some_and(|n| !n.online) => (
+            None if unreachable || remote.as_ref().is_some_and(|n| !n.online) => {
+                let text = match &remote {
+                    Some(node) => t::cluster::vault_offline(&node.name),
+                    None => t::cluster::vault_unreachable().to_owned(),
+                };
+                (TITLE, notice(&text, Ink::Needs, a), None)
+            }
+            None if remote.is_some() && !snapshot.attached => (
                 TITLE,
-                scrollable(div().id("vault-offline").p(px(SIDE_PADDING)).child(label(
-                    &match &remote {
-                        Some(node) => t::cluster::vault_offline(&node.name),
-                        None => t::cluster::vault_unreachable().to_owned(),
-                    },
-                    TypeRole::Body,
-                    Ink::Needs,
-                    a,
-                )))
-                .into_any_element(),
+                notice(t::cluster::secrets_reading(), Ink::TextMuted, a),
                 None,
             ),
             None => {
@@ -505,8 +517,9 @@ impl Render for VaultSheetView {
                     return;
                 };
                 if yes {
+                    let pinned = this.pinned_node();
                     this.run(
-                        move |v, sw| v.remove(sw, &name),
+                        move |v, sw| v.remove_at(pinned.as_deref(), sw, &name),
                         |view, r, _| view.note = r.err(),
                         cx,
                     );

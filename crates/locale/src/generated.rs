@@ -5366,7 +5366,7 @@ pub(crate) static EN: [Body; COUNT] = [
     Body::Parts(&[Part::Lit("Vault on "), Part::Str(0)]),
     Body::Plain("Vault on Another Machine"),
     Body::Plain("This Mac doesn't know which machine holds the vault."),
-    Body::Plain("Can't reach the vault on the other machine. Nothing was saved or removed."),
+    Body::Plain("Can't reach the vault. Nothing was saved or removed."),
     Body::Plain("Allow"),
     Body::Plain("Deny"),
     Body::Plain("Allow"),

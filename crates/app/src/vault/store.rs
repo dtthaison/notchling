@@ -134,15 +134,31 @@ impl Vault {
         }
     }
 
+    fn current_node(&self) -> Option<String> {
+        self.remote.as_ref().and_then(|slot| lock(slot).clone())
+    }
+
     fn send(&self, switches: &Switches, call: &Call) -> Result<Value, String> {
+        self.send_at(switches, call, None)
+    }
+
+    fn send_at(
+        &self,
+        switches: &Switches,
+        call: &Call,
+        pinned: Option<&str>,
+    ) -> Result<Value, String> {
         self.gate(switches)?;
         let Some(transport) = &self.transport else {
             return Err(crate::acting::DETACHED_MESSAGE.into());
         };
         let mut args = call.args.clone();
-        if let Some(slot) = &self.remote {
-            let node = lock(slot).clone().unwrap_or_default();
-            args["node"] = Value::String(node);
+        if self.remote.is_some() {
+            let node = self.current_node().unwrap_or_default();
+            if pinned.is_some_and(|p| p != node) {
+                return Err(t::cluster::vault_moved().to_owned());
+            }
+            args["node"] = Value::String(pinned.map_or(node, str::to_owned));
         }
         transport.call(call.op, args).map_err(|e| {
             if switches::detaches(&e) {
@@ -170,7 +186,11 @@ impl Vault {
             });
             return;
         }
+        let asked = self.current_node();
         if let Ok(v) = self.send(switches, &Call::list()) {
+            if self.current_node() != asked {
+                return;
+            }
             self.update(|s| {
                 s.attached = true;
                 s.entries = parse_entries(&v);
@@ -187,7 +207,19 @@ impl Vault {
         replacing: Option<&str>,
         request: Option<&str>,
     ) -> Result<(), String> {
-        let v = self.send(switches, &Call::save(entry, value, replacing, request))?;
+        self.save_at(None, switches, entry, value, (replacing, request))
+    }
+
+    pub fn save_at(
+        &self,
+        pinned: Option<&str>,
+        switches: &Switches,
+        entry: &VaultEntry,
+        value: Option<&VaultValue>,
+        (replacing, request): (Option<&str>, Option<&str>),
+    ) -> Result<(), String> {
+        let call = Call::save(entry, value, replacing, request);
+        let v = self.send_at(switches, &call, pinned)?;
         if let Ok(saved) = serde_json::from_value::<VaultEntry>(v["entry"].clone()) {
             self.update(|s| {
                 s.entries
@@ -201,7 +233,16 @@ impl Vault {
     }
 
     pub fn remove(&self, switches: &Switches, name: &str) -> Result<(), String> {
-        self.send(switches, &Call::remove(name))?;
+        self.remove_at(None, switches, name)
+    }
+
+    pub fn remove_at(
+        &self,
+        pinned: Option<&str>,
+        switches: &Switches,
+        name: &str,
+    ) -> Result<(), String> {
+        self.send_at(switches, &Call::remove(name), pinned)?;
         self.update(|s| {
             s.entries.retain(|e| e.name != name);
             s.error = None;
@@ -351,7 +392,7 @@ mod tests {
 
     #[test]
     fn a_remote_vault_forgets_its_list_when_the_node_changes_even_from_none() {
-        let (remote, _) = (Vault::remote_over(Arc::new(Shared(Arc::new(NoCalls)))), ());
+        let remote = Vault::remote_over(Arc::new(NoCalls));
         remote.update(|s| {
             s.attached = true;
             s.entries = vec![VaultEntry::new("old", Kind::Token)];
@@ -366,5 +407,32 @@ mod tests {
         fn call(&self, _: &str, _: Value) -> Result<Value, ClientError> {
             Ok(Value::Null)
         }
+    }
+
+    #[test]
+    fn a_pinned_node_goes_with_the_call_or_the_call_is_refused() {
+        let calls: Arc<Mutex<Vec<Value>>> = Arc::default();
+        struct Record(Arc<Mutex<Vec<Value>>>);
+        impl Transport for Record {
+            fn call(&self, _: &str, args: Value) -> Result<Value, ClientError> {
+                self.0.lock().expect("calls").push(args);
+                Ok(json!({"removed": true}))
+            }
+        }
+        let remote = Vault::remote_over(Arc::new(Record(calls.clone())));
+        let on = Switches::all_on();
+        remote.set_node(Some("node-a"));
+        remote.remove_at(Some("node-a"), &on, "x").expect("pinned");
+        assert_eq!(calls.lock().expect("calls")[0]["node"], "node-a");
+        remote.set_node(Some("node-b"));
+        let entry = VaultEntry::new("x", Kind::Token);
+        let refused = remote.save_at(Some("node-a"), &on, &entry, None, (None, None));
+        assert!(refused.is_err());
+        assert!(remote.remove_at(Some("node-a"), &on, "x").is_err());
+        assert_eq!(
+            calls.lock().expect("calls").len(),
+            1,
+            "nothing reached node-b"
+        );
     }
 }
