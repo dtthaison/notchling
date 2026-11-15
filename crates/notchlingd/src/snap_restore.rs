@@ -43,11 +43,16 @@ pub fn probe_state(git: &dyn Launcher, path: &Path) -> PathState {
             if empty {
                 return PathState::Missing;
             }
-            let Ok(Some(facts)) = read_repo(path, git) else {
-                return PathState::Changed;
+            let facts = match read_repo(path, git) {
+                Ok(Some(facts)) => facts,
+                Ok(None) => return PathState::Foreign,
+                Err(_) => return PathState::Changed,
             };
             let same = std::fs::canonicalize(path).is_ok_and(|real| real == facts.root);
-            if !same || facts.dirty || facts.untracked {
+            if !same {
+                return PathState::Foreign;
+            }
+            if facts.dirty || facts.untracked {
                 return PathState::Changed;
             }
             PathState::Clean {
@@ -55,7 +60,7 @@ pub fn probe_state(git: &dyn Launcher, path: &Path) -> PathState {
                 head: facts.head,
             }
         }
-        _ => PathState::Changed,
+        _ => PathState::Foreign,
     }
 }
 
@@ -113,6 +118,15 @@ pub fn run_step(step: &RestoreStep, req: &Request) -> Result<(), String> {
         }
         RestoreStep::FastForward { path, .. } | RestoreStep::AddWorktree { path, .. } => {
             crate::snap_restore_fs::guard(home, path)?;
+            match step {
+                RestoreStep::AddWorktree { main, .. } => {
+                    crate::snap_restore_fs::real_folder(home, main)?;
+                }
+                RestoreStep::FastForward { path, .. } => {
+                    crate::snap_restore_fs::real_folder(home, path)?;
+                }
+                _ => {}
+            }
             if let Some(parent) = path.parent() {
                 make_dirs(home, parent)?;
             }

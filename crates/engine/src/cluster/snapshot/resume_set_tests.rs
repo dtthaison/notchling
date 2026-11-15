@@ -1,4 +1,4 @@
-use super::resume_set::resume_set;
+use super::resume_set::{resume_set, shaped};
 use crate::cluster::id::Tool;
 use crate::cluster::main_sessions::MainSession;
 use crate::sessions::testutil::TempDir;
@@ -57,6 +57,53 @@ fn resume_set_for_claude_lists_its_files() {
             home.path(".claude/todos/abc-other.json"),
         ]
     );
+}
+
+#[test]
+fn every_path_the_table_lists_has_the_shape_a_restore_accepts() {
+    let home = TempDir::new("resume-shaped");
+    let transcript = home.write(".claude/projects/-work-repo/abc.jsonl", &said("abc"));
+    home.write(".claude/todos/abc-agent-abc.json", "[]");
+    let set = resume_set(
+        &main_session("abc", Tool::Claude, Some(transcript)),
+        home.root(),
+    );
+    for path in &set.transcripts {
+        assert!(
+            shaped(Tool::Claude, "abc", home.root(), path, true),
+            "{path:?}"
+        );
+    }
+    for path in set.files.iter().chain(&set.dirs) {
+        assert!(
+            shaped(Tool::Claude, "abc", home.root(), path, false),
+            "{path:?}"
+        );
+    }
+    let rollout = home.write(".codex/sessions/2026/11/15/rollout-t-abc.jsonl", "{}\n");
+    let set = resume_set(
+        &main_session("codex:abc", Tool::Codex, Some(rollout)),
+        home.root(),
+    );
+    for path in &set.transcripts {
+        assert!(
+            shaped(Tool::Codex, "codex:abc", home.root(), path, true),
+            "{path:?}"
+        );
+    }
+    for path in &set.files {
+        assert!(
+            shaped(Tool::Codex, "codex:abc", home.root(), path, false),
+            "{path:?}"
+        );
+    }
+    assert!(!shaped(
+        Tool::Claude,
+        "abc",
+        home.root(),
+        &home.path(".zshrc"),
+        false
+    ));
 }
 
 #[test]

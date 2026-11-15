@@ -14,7 +14,7 @@ pub use repo_state::{
     filter_probe, movable, parse, read_plan, without_filters, GitCall, GitOutput, Movable,
     RepoFacts,
 };
-pub use resume_set::{resume_set, ResumeSet};
+pub use resume_set::{resume_set, shaped, ResumeSet};
 
 #[cfg(test)]
 mod exclude_tests;

@@ -428,11 +428,9 @@ fn shared_parts_are_restored_with_the_database_last() {
     let mut rig = Rig::new("restore-shared");
     let db = rig.at("data/cluster/cluster.db");
     let devices = rig.at("AgentConsole/bridge/devices.json");
-    let other = rig.at("data/other.txt");
     let pages = rig.at("data/pages");
     rig.whole(PartKind::Db, &db, b"db");
     rig.whole(PartKind::File, &devices, b"[]");
-    rig.whole(PartKind::File, &other, b"x");
     rig.parts.push((
         Part {
             kind: PartKind::Dir,
@@ -453,7 +451,7 @@ fn shared_parts_are_restored_with_the_database_last() {
 fn a_codex_index_is_merged_for_its_session_only() {
     let mut rig = Rig::new("restore-index");
     let index = rig.at(".codex/session_index.jsonl");
-    let rollout = rig.at(".codex/sessions/2026/11/15/rollout-x.jsonl");
+    let rollout = rig.at(".codex/sessions/2026/11/15/rollout-x-abc.jsonl");
     let entry = rig.session("codex:abc", "code/a", Movable::Yes);
     entry.tool = Tool::Codex;
     entry.transcripts = vec![rollout.clone()];
@@ -472,6 +470,125 @@ fn a_codex_index_is_merged_for_its_session_only() {
     assert!(!steps
         .iter()
         .any(|s| matches!(s, RestoreStep::PutFile { to, .. } if *to == index)));
+}
+
+fn empty_dir(rig: &mut Rig, path: &Path) {
+    rig.parts.push((
+        Part {
+            kind: PartKind::Dir,
+            path: path.to_path_buf(),
+            sha256: dir_digest(&[]),
+            len: 0,
+        },
+        Vec::new(),
+    ));
+}
+
+#[test]
+fn a_hostile_set_cannot_restore_a_shared_part_this_machine_doesnt_own() {
+    let hostile: [(&str, PartKind); 5] = [
+        (".ssh", PartKind::Dir),
+        ("Library/LaunchAgents", PartKind::Dir),
+        ("data/notchling.db", PartKind::Db),
+        ("elsewhere/AgentConsole/bridge/devices.json", PartKind::File),
+        ("data/cluster/other.db", PartKind::Db),
+    ];
+    for (n, (rel, kind)) in hostile.into_iter().enumerate() {
+        let mut rig = Rig::new(&format!("restore-hostile-shared-{n}"));
+        let path = rig.at(rel);
+        if kind == PartKind::Dir {
+            empty_dir(&mut rig, &path);
+        } else {
+            rig.whole(kind, &path, b"x");
+        }
+        let why = rig.plan(&[], false, true, &missing).unwrap_err();
+        assert!(
+            why.contains("shared part this machine doesn't restore"),
+            "{rel}: {why}"
+        );
+        assert!(why.contains(rel), "{why}");
+        assert!(rig.plan(&[], false, false, &missing).unwrap().is_empty());
+    }
+}
+
+#[test]
+fn a_session_can_only_restore_the_files_a_session_keeps() {
+    let cases: [(&str, bool); 8] = [
+        (".zshrc", false),
+        (".claude/settings.json", false),
+        (".claude/projects/p/s1.jsonl", true),
+        (".claude/projects/p/q/s1.jsonl", true),
+        (".claude/other/s1.jsonl", true),
+        (".claude/todos/other-1.json", false),
+        (".claude-lanes/work/todos/s1-agent.json", false),
+        (".ssh/authorized_keys", true),
+    ];
+    let expect_ok = [false, false, true, false, false, false, true, false];
+    for (n, ((rel, transcript), ok)) in cases.into_iter().zip(expect_ok).enumerate() {
+        let mut rig = Rig::new(&format!("restore-shapes-{n}"));
+        let path = rig.at(rel);
+        let entry = rig.session("s1", "code/a", Movable::Yes);
+        if transcript {
+            entry.transcripts = vec![path.clone()];
+        } else {
+            entry.files = vec![path.clone()];
+        }
+        if transcript {
+            rig.tail(&path, 0, b"x\n");
+        } else {
+            rig.whole(PartKind::File, &path, b"x");
+        }
+        let result = rig.plan(&["s1"], false, false, &clean("main", HEAD));
+        assert_eq!(result.is_ok(), ok, "{rel}: {result:?}");
+        if !ok {
+            assert!(result
+                .unwrap_err()
+                .contains("isn't a file the session keeps"));
+        }
+    }
+}
+
+#[test]
+fn a_codex_session_keeps_only_its_own_rollout_and_the_index() {
+    let mut rig = Rig::new("restore-codex-shapes");
+    let own = rig.at(".codex/sessions/2026/11/15/rollout-t-abc.jsonl");
+    let other = rig.at(".codex/sessions/2026/11/15/rollout-t-zzz.jsonl");
+    let entry = rig.session("codex:abc", "code/a", Movable::Yes);
+    entry.tool = Tool::Codex;
+    entry.transcripts = vec![own.clone(), other.clone()];
+    rig.tail(&own, 0, b"{}\n");
+    rig.tail(&other, 0, b"{}\n");
+    let why = rig
+        .plan(&["codex:abc"], false, false, &clean("main", HEAD))
+        .unwrap_err();
+    assert!(why.contains("rollout-t-zzz.jsonl"), "{why}");
+    assert!(!why.contains("rollout-t-abc.jsonl"), "{why}");
+}
+
+#[test]
+fn a_main_repository_that_is_not_a_repository_is_refused() {
+    let mut rig = Rig::new("restore-foreign-main");
+    let main = rig.at("code/main");
+    rig.session("s1", "code/wt", Movable::Yes);
+    rig.sessions[0].repo.as_mut().unwrap().main_repo = Some(main.clone());
+    let wt = rig.at("code/wt");
+    let why = rig
+        .plan(&["s1"], false, false, &move |path| {
+            if path == wt {
+                PathState::Missing
+            } else {
+                PathState::Foreign
+            }
+        })
+        .unwrap_err();
+    assert!(why.contains("isn't a repository"), "{why}");
+    assert!(why.starts_with(&main.display().to_string()), "{why}");
+    let mut root = Rig::new("restore-foreign-root");
+    root.session("s1", "code/a", Movable::Yes);
+    let why = root
+        .plan(&["s1"], false, false, &|_| PathState::Foreign)
+        .unwrap_err();
+    assert!(why.contains("isn't a repository"), "{why}");
 }
 
 #[test]

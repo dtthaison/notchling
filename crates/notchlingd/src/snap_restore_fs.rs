@@ -68,6 +68,15 @@ pub fn guard(home: &Path, path: &Path) -> Result<(), String> {
     Ok(())
 }
 
+pub fn real_folder(home: &Path, path: &Path) -> Result<(), String> {
+    guard(home, path)?;
+    match fs::symlink_metadata(path) {
+        Ok(meta) if meta.is_dir() => Ok(()),
+        Ok(_) => Err(format!("{} isn't a plain folder", path.display())),
+        Err(e) => Err(io(path, e)),
+    }
+}
+
 pub fn make_dirs(home: &Path, dir: &Path) -> Result<(), String> {
     guard(home, dir)?;
     let rel = dir
@@ -259,6 +268,7 @@ pub fn put_dir(home: &Path, from: &Path, to: &Path, sha256: &str, len: u64) -> R
     make_dirs(home, to)?;
     for (rel, path, _, hash) in listed {
         let dst = to.join(&rel);
+        guard(home, &dst)?;
         if plain_or_missing(&dst)? && hash_file(&dst)?.1 == hash {
             continue;
         }
@@ -365,6 +375,7 @@ pub fn merge_devices(home: &Path, from: &Path, to: &Path, sha256: &str) -> Resul
         .parent()
         .ok_or_else(|| format!("{} has no folder", to.display()))?;
     make_dirs(home, parent)?;
+    plain_or_missing(to)?;
     let _lock = FileLock::acquire(to).map_err(|e| io(to, e))?;
     let mut mine = read_devices(to).map_err(|e| e.to_string())?;
     let before = mine.len();

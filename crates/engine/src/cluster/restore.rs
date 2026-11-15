@@ -1,8 +1,11 @@
 use super::id::Tool;
-use super::snapshot::{excluded_dir, Manifest, Movable, Part, PartKind, RepoFacts, SessionEntry};
+use super::persist::CLUSTER_DB;
+use super::snapshot::plan::bridge_devices;
+use super::snapshot::{
+    excluded_dir, shaped, Manifest, Movable, Part, PartKind, RepoFacts, SessionEntry,
+};
 use super::standby_store::{hash_file, hash_range, plain_len, StandbyStore};
 use super::workspace::{origin_ok, valid_branch, GitCall, SLOW_SECS};
-use crate::bridge::net::devices::FILE_NAME as DEVICES;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path, PathBuf};
 
@@ -14,6 +17,7 @@ pub enum PathState {
     Missing,
     Clean { branch: String, head: String },
     Changed,
+    Foreign,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -214,7 +218,7 @@ pub fn git_calls(step: &RestoreStep) -> Vec<GitCall> {
                         main,
                         &["worktree", "add", "-b", branch, "--", &target, head],
                     ),
-                    "already exists",
+                    "a branch named",
                     &format!("{branch} already exists in the main repository"),
                 ),
                 tracking(path, branch),
@@ -354,6 +358,11 @@ impl<'a> Planner<'a> {
         self.wanted.insert(root.clone(), want);
         let (branch, head) = (branch.to_owned(), facts.head.clone());
         match (self.probe)(root) {
+            PathState::Foreign => Err(format!(
+                "{} on {} isn't a repository",
+                root.display(),
+                self.node()
+            )),
             PathState::Changed => Err(format!(
                 "{} on {} has its own changes",
                 root.display(),
@@ -391,14 +400,29 @@ impl<'a> Planner<'a> {
                     return Ok(());
                 };
                 self.place_ok(main)?;
-                let there = self.cloned.contains(main) || (self.probe)(main) != PathState::Missing;
-                if !there {
-                    return Err(format!(
-                        "{} isn't on {}: {} is a linked worktree of it",
-                        main.display(),
-                        self.node(),
-                        root.display()
-                    ));
+                let state = if self.cloned.contains(main) {
+                    PathState::Changed
+                } else {
+                    (self.probe)(main)
+                };
+                match state {
+                    PathState::Missing => {
+                        return Err(format!(
+                            "{} isn't on {}: {} is a linked worktree of it",
+                            main.display(),
+                            self.node(),
+                            root.display()
+                        ));
+                    }
+                    PathState::Foreign => {
+                        return Err(format!(
+                            "{} on {} isn't a repository: {} is a linked worktree of it",
+                            main.display(),
+                            self.node(),
+                            root.display()
+                        ));
+                    }
+                    PathState::Clean { .. } | PathState::Changed => {}
                 }
                 self.push_repo(RestoreStep::AddWorktree {
                     main: main.clone(),
@@ -433,8 +457,25 @@ impl<'a> Planner<'a> {
             .find(|part| part.path == path && want(&part.kind))
     }
 
-    fn transcript(&mut self, entry: &SessionEntry, path: &Path) -> Result<(), String> {
+    fn session_path(
+        &self,
+        entry: &SessionEntry,
+        path: &Path,
+        transcript: bool,
+    ) -> Result<(), String> {
         self.file_ok(path)?;
+        if shaped(entry.tool, &entry.id, self.ctx.home, path, transcript) {
+            return Ok(());
+        }
+        Err(format!(
+            "{} can't move: {} isn't a file the session keeps",
+            entry.id,
+            path.display()
+        ))
+    }
+
+    fn transcript(&mut self, entry: &SessionEntry, path: &Path) -> Result<(), String> {
+        self.session_path(entry, path, true)?;
         let id = &entry.id;
         let Some(part) = self.part(path, |kind| matches!(kind, PartKind::Tail { .. })) else {
             return Err(format!(
@@ -502,7 +543,7 @@ impl<'a> Planner<'a> {
     }
 
     fn sidecar(&mut self, entry: &SessionEntry, path: &Path) -> Result<(), String> {
-        self.file_ok(path)?;
+        self.session_path(entry, path, false)?;
         let Some(part) = self.part(path, |kind| matches!(kind, PartKind::File | PartKind::Dir))
         else {
             return Ok(());
@@ -572,41 +613,42 @@ impl<'a> Planner<'a> {
             .iter()
             .flat_map(|entry| entry.transcripts.iter().chain(&entry.files))
             .collect();
+        let data = self.ctx.cluster.parent().unwrap_or(self.ctx.cluster);
+        let db = self.ctx.cluster.join(CLUSTER_DB);
+        let pages = data.join("pages");
+        let devices = bridge_devices(data);
         for part in &self.m.parts {
             if owned.contains(&part.path) {
                 continue;
             }
-            let name = part.path.file_name().is_some_and(|name| name == DEVICES);
+            let Some(from) = self.store.stored(&self.m.set, &part.path) else {
+                self.refuse(format!("{} can't be stored", part.path.display()));
+                continue;
+            };
+            let to = part.path.clone();
+            let sha256 = part.sha256.clone();
             let step = match &part.kind {
-                PartKind::Db => {
-                    self.store
-                        .stored(&self.m.set, &part.path)
-                        .map(|from| RestoreStep::RestoreDb {
-                            from,
-                            to: part.path.clone(),
-                            sha256: part.sha256.clone(),
-                        })
+                PartKind::Db if part.path == db => {
+                    Some(RestoreStep::RestoreDb { from, to, sha256 })
                 }
-                PartKind::File if name => self.store.stored(&self.m.set, &part.path).map(|from| {
-                    RestoreStep::MergeDevices {
-                        from,
-                        to: part.path.clone(),
-                        sha256: part.sha256.clone(),
-                    }
+                PartKind::File if part.path == devices => {
+                    Some(RestoreStep::MergeDevices { from, to, sha256 })
+                }
+                PartKind::Dir if part.path == pages => Some(RestoreStep::PutDir {
+                    from,
+                    to,
+                    sha256,
+                    len: part.len,
                 }),
-                PartKind::Dir => {
-                    self.store
-                        .stored(&self.m.set, &part.path)
-                        .map(|from| RestoreStep::PutDir {
-                            from,
-                            to: part.path.clone(),
-                            sha256: part.sha256.clone(),
-                            len: part.len,
-                        })
-                }
                 _ => None,
             };
-            let Some(step) = step else { continue };
+            let Some(step) = step else {
+                self.refuse(format!(
+                    "{} is a shared part this machine doesn't restore",
+                    part.path.display()
+                ));
+                continue;
+            };
             match self.file_ok(&part.path).and_then(|()| match step.clone() {
                 RestoreStep::PutDir { .. } => self.local_dir(&part.path),
                 _ => Ok(()),

@@ -174,6 +174,55 @@ fn a_sidecar_folder_is_merged_and_nothing_in_it_is_deleted() {
 }
 
 #[test]
+fn a_sidecar_folder_never_reads_through_a_link_that_leaves_home() {
+    let w = World::new();
+    let transcript = w.transcript("s1", b"one\n");
+    let history = w.at(".claude/file-history/s1");
+    put(&history.join("v1/a.txt"), b"first");
+    w.stage(
+        vec![w.entry("s1", &w.repo, &[&transcript], &[&history])],
+        &[],
+        &[],
+    );
+    fs::remove_dir_all(&history).unwrap();
+    let elsewhere = crate::limits_ops_tests::TempDir::new("restore-dir-out");
+    elsewhere.write("a.txt", "first");
+    fs::create_dir_all(&history).unwrap();
+    std::os::unix::fs::symlink(elsewhere.root(), history.join("v1")).unwrap();
+
+    let why = w.run(&["s1"], false, false).unwrap_err();
+
+    assert!(why.contains("leads out of"), "{why}");
+    assert_eq!(fs::read_dir(elsewhere.root()).unwrap().count(), 1);
+    assert_eq!(
+        fs::read_to_string(elsewhere.path("a.txt")).unwrap(),
+        "first"
+    );
+}
+
+#[test]
+fn a_devices_file_that_is_a_link_is_refused_and_its_target_left_alone() {
+    let w = World::new();
+    let devices = devices_at(&w);
+    put(&devices, &encode(&[device("a", "Phone A")]));
+    w.stage(vec![], &[&devices], &[]);
+    fs::remove_file(&devices).unwrap();
+    let target = w.rig.t.path("real-devices.json");
+    let same = encode(&[device("a", "Phone A")]);
+    fs::write(&target, &same).unwrap();
+    std::os::unix::fs::symlink(&target, &devices).unwrap();
+
+    let why = w.run(&[], false, true).unwrap_err();
+
+    assert!(why.contains("plain file"), "{why}");
+    assert_eq!(fs::read(&target).unwrap(), same);
+    assert!(fs::symlink_metadata(&devices)
+        .unwrap()
+        .file_type()
+        .is_symlink());
+}
+
+#[test]
 fn a_codex_index_gets_only_the_moving_sessions_line() {
     let w = World::new();
     let rollout = w.at(".codex/sessions/2026/11/15/rollout-x-abc.jsonl");

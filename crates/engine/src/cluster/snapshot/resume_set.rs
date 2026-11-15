@@ -81,6 +81,57 @@ fn codex(m: &MainSession, home: &Path) -> ResumeSet {
     set
 }
 
+fn parts_below<'a>(home: &Path, path: &'a Path) -> Option<Vec<&'a str>> {
+    let rel = path.strip_prefix(home).ok()?;
+    rel.components()
+        .map(|part| match part {
+            std::path::Component::Normal(name) => name.to_str(),
+            _ => None,
+        })
+        .collect()
+}
+
+pub fn shaped(tool: Tool, id: &str, home: &Path, path: &Path, transcript: bool) -> bool {
+    let Some(parts) = parts_below(home, path) else {
+        return false;
+    };
+    match tool {
+        Tool::Claude => {
+            let rest = match parts.as_slice() {
+                [".claude", rest @ ..] => rest,
+                [".claude-lanes", lane, rest @ ..] if !lane.is_empty() => rest,
+                _ => return false,
+            };
+            match (transcript, rest) {
+                (true, ["projects", slug, name]) => {
+                    !slug.is_empty() && name.strip_suffix(".jsonl").is_some_and(|s| !s.is_empty())
+                }
+                (false, ["projects", slug, dir]) => !slug.is_empty() && *dir == id,
+                (false, ["file-history", dir]) => *dir == id,
+                (false, ["todos", name]) => {
+                    name.starts_with(&format!("{id}-")) && name.ends_with(".json")
+                }
+                _ => false,
+            }
+        }
+        Tool::Codex => {
+            let uuid = id.strip_prefix("codex:").unwrap_or(id);
+            match (transcript, parts.as_slice()) {
+                (true, [".codex", "sessions", between @ .., name]) => {
+                    between.iter().all(|part| !part.is_empty())
+                        && name.starts_with("rollout-")
+                        && name.ends_with(".jsonl")
+                        && !uuid.is_empty()
+                        && name.contains(uuid)
+                }
+                (false, [".codex", "session_index.jsonl"]) => true,
+                _ => false,
+            }
+        }
+        Tool::Agy | Tool::Shell => false,
+    }
+}
+
 pub fn resume_set(m: &MainSession, home: &Path) -> ResumeSet {
     match m.tool {
         Tool::Claude => claude(m, home),

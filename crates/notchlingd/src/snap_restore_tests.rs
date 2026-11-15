@@ -215,9 +215,72 @@ fn a_probe_tells_missing_empty_clean_changed_and_not_a_repository() {
     assert_eq!(w.state(&w.at("empty")), PathState::Missing);
     fs::create_dir_all(w.at("plain")).unwrap();
     fs::write(w.at("plain/x"), "x").unwrap();
-    assert_eq!(w.state(&w.at("plain")), PathState::Changed);
+    assert_eq!(w.state(&w.at("plain")), PathState::Foreign);
     fs::write(w.repo.join("new.txt"), "untracked\n").unwrap();
     assert_eq!(w.state(&w.repo), PathState::Changed);
     fs::write(w.at("file"), "x").unwrap();
-    assert_eq!(w.state(&w.at("file")), PathState::Changed);
+    assert_eq!(w.state(&w.at("file")), PathState::Foreign);
+    std::os::unix::fs::symlink(&w.repo, w.at("link")).unwrap();
+    assert_eq!(w.state(&w.at("link")), PathState::Foreign);
+}
+
+#[test]
+fn a_symlinked_main_repository_is_refused_and_its_target_left_alone() {
+    let w = World::new();
+    let tree = worktree(&w);
+    let transcript = w.transcript("s1", b"one\n");
+    w.stage(vec![w.entry("s1", &tree, &[&transcript], &[])], &[], &[]);
+    let elsewhere = crate::limits_ops_tests::TempDir::new("restore-main-out");
+    let outside = elsewhere.path("main");
+    let origin = w.rig.origin.to_string_lossy().into_owned();
+    w.rig
+        .git(elsewhere.root(), &["clone", "-q", &origin, "main"]);
+    let before = w.rig.git(&outside, &["worktree", "list"]);
+    fs::remove_dir_all(&tree).unwrap();
+    w.rig.w(&["worktree", "prune"]);
+    fs::remove_dir_all(&w.repo).unwrap();
+    std::os::unix::fs::symlink(&outside, &w.repo).unwrap();
+    fs::remove_file(&transcript).unwrap();
+
+    let why = w.run(&["s1"], false, false).unwrap_err();
+
+    assert!(why.contains("isn't a repository"), "{why}");
+    assert_eq!(w.rig.git(&outside, &["worktree", "list"]), before);
+    assert!(!tree.exists() && !transcript.exists());
+    assert!(crate::snap_restore_fs::real_folder(&w.home, &w.repo).is_err());
+}
+
+#[test]
+fn an_empty_folder_at_a_worktrees_place_is_filled_or_refused_clearly() {
+    let w = World::new();
+    let tree = worktree(&w);
+    let want = head(&w, &tree);
+    let transcript = w.transcript("s1", b"one\n");
+    w.stage(vec![w.entry("s1", &tree, &[&transcript], &[])], &[], &[]);
+    w.rig
+        .w(&["worktree", "remove", "--force", &tree.to_string_lossy()]);
+    w.rig.w(&["branch", "-q", "-D", "feat"]);
+    fs::create_dir_all(&tree).unwrap();
+
+    match w.run(&["s1"], false, false) {
+        Ok(_) => assert_eq!(head(&w, &tree), want),
+        Err(why) => assert!(
+            why.contains(&tree.display().to_string()) && !why.contains("already exists in"),
+            "{why}"
+        ),
+    }
+}
+
+#[test]
+fn a_branch_that_already_exists_in_the_main_repository_is_named_as_that() {
+    let w = World::new();
+    let tree = worktree(&w);
+    let transcript = w.transcript("s1", b"one\n");
+    w.stage(vec![w.entry("s1", &tree, &[&transcript], &[])], &[], &[]);
+    w.rig
+        .w(&["worktree", "remove", "--force", &tree.to_string_lossy()]);
+
+    let why = w.run(&["s1"], false, false).unwrap_err();
+
+    assert_eq!(why, "feat already exists in the main repository");
 }

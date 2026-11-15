@@ -173,7 +173,7 @@ fn roots_of(facts: &RepoFacts) -> Vec<PathBuf> {
     roots
 }
 
-fn bridge_devices(data: &Path) -> PathBuf {
+pub fn bridge_devices(data: &Path) -> PathBuf {
     data.parent()
         .unwrap_or(data)
         .join("AgentConsole")
