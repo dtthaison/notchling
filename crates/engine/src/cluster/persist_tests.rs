@@ -6,6 +6,7 @@ use super::{load, save, wipe, CLUSTER_DB};
 use crate::cluster::id::Tool;
 use crate::cluster::jobs::{job_id, JobSpec, JobState};
 use crate::cluster::members::Term;
+use crate::cluster::members::MAX_TERM_N;
 use crate::cluster::state::{apply, start, Applied, ClusterState, Command};
 use crate::cluster::testkit::{id, member, versions_updated};
 use crate::sessions::testutil::TempDir;
@@ -193,4 +194,128 @@ fn the_database_is_private_and_a_link_in_its_place_is_refused() {
     )
     .is_err());
     assert_eq!(fs::read(&target).expect("bytes"), b"");
+}
+
+fn saved(name: &str) -> (crate::sessions::testutil::TempDir, std::path::PathBuf) {
+    let tmp = TempDir::new(name);
+    let dir = tmp.path("cluster");
+    let (_, steps) = built();
+    save_all(&dir, &steps);
+    (tmp, dir)
+}
+
+fn tamper(dir: &std::path::Path, sql: &str, value: &str) {
+    let db = rusqlite::Connection::open(dir.join(CLUSTER_DB)).expect("db");
+    db.execute(sql, [value]).expect("tamper");
+}
+
+fn too_big() -> serde_json::Value {
+    json!({"n": MAX_TERM_N + 1, "node": id("m5")})
+}
+
+fn refused_for_its_term(dir: &std::path::Path) {
+    let error = load(dir).expect_err("a term the journal can't store");
+    assert!(error.contains("term"), "{error}");
+    assert!(error.contains(&(MAX_TERM_N + 1).to_string()), "{error}");
+}
+
+#[test]
+fn a_stored_term_the_journal_cannot_hold_is_refused() {
+    let (_tmp, dir) = saved("cluster-big-term");
+    tamper(
+        &dir,
+        "UPDATE state SET value = ?1 WHERE key = 'term'",
+        &too_big().to_string(),
+    );
+    refused_for_its_term(&dir);
+}
+
+#[test]
+fn a_term_of_u64_max_is_refused() {
+    let (_tmp, dir) = saved("cluster-max-term");
+    let huge = json!({"n": u64::MAX, "node": id("m5")});
+    tamper(
+        &dir,
+        "UPDATE state SET value = ?1 WHERE key = 'term'",
+        &huge.to_string(),
+    );
+    let error = load(&dir).expect_err("a term the journal can't store");
+    assert!(error.contains(&u64::MAX.to_string()), "{error}");
+}
+
+#[test]
+fn the_largest_storable_term_still_loads() {
+    let (_tmp, dir) = saved("cluster-top-term");
+    let top = json!({"n": MAX_TERM_N, "node": id("m5")});
+    tamper(
+        &dir,
+        "UPDATE state SET value = ?1 WHERE key = 'term'",
+        &top.to_string(),
+    );
+    let loaded = load(&dir).expect("load").expect("state");
+    assert_eq!(loaded.term.n, MAX_TERM_N);
+}
+
+#[test]
+fn an_armed_term_the_journal_cannot_hold_is_refused() {
+    let (_tmp, dir) = saved("cluster-big-armed");
+    let armed = json!([id("w1"), too_big()]);
+    tamper(
+        &dir,
+        "INSERT INTO state (key, value) VALUES ('armed', ?1)",
+        &armed.to_string(),
+    );
+    refused_for_its_term(&dir);
+}
+
+#[test]
+fn a_holders_term_the_journal_cannot_hold_is_refused() {
+    let (_tmp, dir) = saved("cluster-big-holder");
+    let holders = json!({id("w1"): {"term": too_big(), "seq": 1}});
+    tamper(
+        &dir,
+        "INSERT INTO state (key, value) VALUES ('holders', ?1)",
+        &holders.to_string(),
+    );
+    refused_for_its_term(&dir);
+}
+
+#[test]
+fn a_claims_term_the_journal_cannot_hold_is_refused() {
+    let (_tmp, dir) = saved("cluster-big-claim");
+    let claims = json!({"s": {
+        "session": "s",
+        "node": id("w1"),
+        "n": 1,
+        "term": too_big(),
+        "base_set": "b",
+        "base_len": 0,
+        "touched": false,
+    }});
+    tamper(
+        &dir,
+        "INSERT INTO state (key, value) VALUES ('claims', ?1)",
+        &claims.to_string(),
+    );
+    refused_for_its_term(&dir);
+}
+
+#[test]
+fn a_jobs_term_the_journal_cannot_hold_is_refused() {
+    let (_tmp, dir) = saved("cluster-big-job");
+    let db = rusqlite::Connection::open(dir.join(CLUSTER_DB)).expect("db");
+    let (job, value): (String, String) = db
+        .query_row("SELECT id, value FROM jobs", [], |r| {
+            Ok((r.get(0)?, r.get(1)?))
+        })
+        .expect("a job");
+    let mut stored: serde_json::Value = serde_json::from_str(&value).expect("json");
+    stored["term"] = too_big();
+    db.execute(
+        "UPDATE jobs SET value = ?1 WHERE id = ?2",
+        [stored.to_string(), job],
+    )
+    .expect("tamper");
+    drop(db);
+    refused_for_its_term(&dir);
 }

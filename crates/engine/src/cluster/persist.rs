@@ -154,10 +154,24 @@ pub fn load(cluster_dir: &Path) -> Result<Option<ClusterState>, String> {
         Some(value) => read::<Vec<SideCopy>>(&value)?,
         None => Vec::new(),
     };
+    let term = read::<Term>(&term)?;
+    let terms = std::iter::once(&term)
+        .chain(armed.iter().map(|(_, t)| t))
+        .chain(holders.values().map(|h| &h.term))
+        .chain(jobs.values().map(|j| &j.term))
+        .chain(claims.values().map(|c| &c.term));
+    for stored in terms {
+        if !stored.storable() {
+            return Err(format!(
+                "cluster.db holds a term the journal can't store: {}",
+                stored.n
+            ));
+        }
+    }
     Ok(Some(ClusterState {
         id: read(&id)?,
         name: read(&name)?,
-        term: read::<Term>(&term)?,
+        term,
         home: read::<NodeId>(&home)?,
         vault: read::<NodeId>(&vault)?,
         members,
