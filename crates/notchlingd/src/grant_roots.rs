@@ -1,10 +1,12 @@
 use crate::vault_caller::Processes;
 use std::collections::{BTreeMap, BTreeSet, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard};
 
 const WALK_MAX: usize = 64;
 const ENDED_MAX: usize = 512;
+const REVOKES_MAX: usize = 512;
 pub const MARKS_DIR: &str = "grant-marks";
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -24,9 +26,14 @@ struct Roots {
     order: VecDeque<String>,
 }
 
+type Revoke = (u64, String, Option<BTreeSet<String>>);
+
 #[derive(Default)]
 pub struct JobRoots {
     inner: Mutex<Roots>,
+    gate: Mutex<()>,
+    seq: AtomicU64,
+    revokes: Mutex<VecDeque<Revoke>>,
 }
 
 impl JobRoots {
@@ -56,6 +63,30 @@ impl JobRoots {
                 roots.ended.remove(&oldest);
             }
         }
+    }
+
+    pub fn gate(&self) -> MutexGuard<'_, ()> {
+        lock(&self.gate)
+    }
+
+    pub fn now_seq(&self) -> u64 {
+        self.seq.load(Ordering::SeqCst)
+    }
+
+    pub fn note_revoke(&self, job: &str, names: Option<&[String]>) {
+        let at = self.seq.fetch_add(1, Ordering::SeqCst) + 1;
+        let names = names.map(|list| list.iter().map(|n| n.to_lowercase()).collect());
+        let mut book = lock(&self.revokes);
+        book.push_back((at, job.to_string(), names));
+        while book.len() > REVOKES_MAX {
+            book.pop_front();
+        }
+    }
+
+    pub fn revoked_since(&self, job: &str, name: &str, since: u64) -> bool {
+        lock(&self.revokes).iter().any(|(at, j, names)| {
+            *at > since && j == job && names.as_ref().is_none_or(|n| n.contains(name))
+        })
     }
 
     pub fn is_ended(&self, job: &str) -> bool {

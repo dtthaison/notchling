@@ -153,6 +153,10 @@ pub(crate) fn real_now() -> i64 {
 }
 
 pub(crate) fn rig_at(clock: Clock, me: &str) -> Rig {
+    rig_full(clock, me, Arc::new(|| None))
+}
+
+pub(crate) fn rig_full(clock: Clock, me: &str, disk: Disk) -> Rig {
     let dir = Dir::new("grant-use");
     let fake = Arc::new(Fake::default());
     *fake.me.lock().unwrap() = Some(id(me));
@@ -176,7 +180,8 @@ pub(crate) fn rig_at(clock: Clock, me: &str) -> Rig {
             (fake.clone(), fake.clone()),
             (Arc::new(tree), clock),
         )
-        .with_known_wait(Duration::from_millis(80)),
+        .with_known_wait(Duration::from_millis(80))
+        .with_disk(disk),
     );
     Rig {
         dir,
@@ -407,3 +412,5 @@ fn bad_arguments_are_refused_before_anything_is_read() {
 
 #[path = "grant_deliver_tests.rs"]
 mod deliver;
+#[path = "grant_fix_tests.rs"]
+mod fixes;

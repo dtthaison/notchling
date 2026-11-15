@@ -232,6 +232,15 @@ fn clock() -> crate::cluster_mirror::Clock {
     Arc::new(|| u64::try_from(crate::acting_ops::now_ms()).unwrap_or(0))
 }
 
+fn disk_vault(dir: PathBuf) -> crate::grant_use::Disk {
+    Arc::new(move || {
+        notchling_engine::cluster::persist::load(&dir)
+            .ok()
+            .flatten()
+            .map(|state| state.vault)
+    })
+}
+
 fn clock_ms() -> crate::grant_broker::Clock {
     Arc::new(crate::acting_ops::now_ms)
 }
@@ -348,16 +357,19 @@ impl ClusterParts {
         );
         let workspace_calls: Arc<dyn LocalCalls> =
             Arc::new(WorkspaceCalls::new(sessions_calls, workspace));
-        let uses = Arc::new(GrantUse::new(
-            grants.store.clone(),
-            grants.parts(),
-            view.clone(),
-            (
-                Arc::new(NodeAsker::new(holder.clone())),
-                Arc::new(ClusterUseAudit::new(log.clone())),
-            ),
-            (Arc::new(SystemProcesses), clock_ms()),
-        ));
+        let uses = Arc::new(
+            GrantUse::new(
+                grants.store.clone(),
+                grants.parts(),
+                view.clone(),
+                (
+                    Arc::new(NodeAsker::new(holder.clone())),
+                    Arc::new(ClusterUseAudit::new(log.clone())),
+                ),
+                (Arc::new(SystemProcesses), clock_ms()),
+            )
+            .with_disk(disk_vault(layout.cluster_dir())),
+        );
         vault.set_worker(uses.clone());
         let janitor = GrantJanitor::new(
             grants.store.clone(),

@@ -16,10 +16,13 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 pub const NOT_A_JOB: &str = "secret isn't available here: this command isn't part of a cluster job";
+pub const NOT_LOADED: &str = "secret isn't available yet: this machine's cluster is still loading";
 pub const KNOWN_WAIT: Duration = Duration::from_secs(3);
 const MAX_NAMES: usize = 16;
 const TEXT_MAX: usize = 4096;
 const POLL: Duration = Duration::from_millis(50);
+
+pub type Disk = Arc<dyn Fn() -> Option<NodeId> + Send + Sync>;
 
 type Strings = BTreeMap<String, String>;
 
@@ -39,6 +42,7 @@ pub struct GrantUse {
     procs: Arc<dyn Processes>,
     clock: Clock,
     known_wait: Duration,
+    disk: Disk,
 }
 
 fn refused(message: impl Into<String>) -> ApiError {
@@ -102,7 +106,13 @@ impl GrantUse {
             procs,
             clock,
             known_wait: KNOWN_WAIT,
+            disk: Arc::new(|| None),
         }
+    }
+
+    pub fn with_disk(mut self, disk: Disk) -> GrantUse {
+        self.disk = disk;
+        self
     }
 
     pub fn with_known_wait(mut self, wait: Duration) -> GrantUse {
@@ -170,8 +180,15 @@ impl GrantUse {
             .get("expiresMs")
             .and_then(Value::as_i64)
             .ok_or_else(|| ApiError::bad_request(usage))?;
+        let since = self.parts.2.now_seq();
         let value = GrantValue::new(raw.to_string());
         let env = decode_env(&value).map_err(failed)?;
+        let masked: Vec<(String, GrantValue)> = env
+            .into_values()
+            .filter(|v| !v.expose().is_empty())
+            .map(|v| (name.clone(), v))
+            .collect();
+        TailMasks::check(&masked).map_err(failed)?;
         if self.parts.2.is_ended(job) {
             return Err(failed(format!("job {job} isn't running")));
         }
@@ -181,14 +198,18 @@ impl GrantUse {
         if expires <= now {
             return Err(failed("the grant has already expired"));
         }
-        let masked: Vec<(String, GrantValue)> = env
-            .into_values()
-            .filter(|v| !v.expose().is_empty())
-            .map(|v| (name.clone(), v))
-            .collect();
-        self.parts.1.mark(job).map_err(failed)?;
-        self.parts.0.mark_granted(job);
-        self.parts.0.add(job, masked).map_err(failed)?;
+        let _gate = self.parts.2.gate();
+        if self.parts.2.is_ended(job) || self.parts.2.revoked_since(job, &name, since) {
+            return Err(failed(format!("job {job} isn't running")));
+        }
+        match (self.view.state(), self.view.me()) {
+            (Some(state), Some(me)) if running(&state, &me, job).is_some_and(is_live) => {}
+            _ => return Err(failed(format!("job {job} isn't running"))),
+        }
+        if !masked.is_empty() {
+            self.parts.1.mark(job).map_err(failed)?;
+            self.parts.0.add(job, masked).map_err(failed)?;
+        }
         self.store
             .put(&GrantFile {
                 job: job.to_string(),
@@ -221,6 +242,8 @@ impl GrantUse {
             ),
             Some(_) => return Err(ApiError::bad_request(usage)),
         };
+        let _gate = self.parts.2.gate();
+        self.parts.2.note_revoke(job, names.as_deref());
         let result = match &names {
             None => self.store.remove_job(job),
             Some(names) => {
@@ -311,8 +334,13 @@ impl GrantUse {
 
 impl WorkerUse for GrantUse {
     fn use_secrets(&self, caller: &Caller, args: &Value) -> Option<Result<Value, ApiError>> {
-        let state = self.view.state()?;
-        let me = self.view.me()?;
+        let (Some(state), Some(me)) = (self.view.state(), self.view.me()) else {
+            return match (self.disk)() {
+                None => None,
+                Some(vault) if self.view.me().as_ref() == Some(&vault) => None,
+                Some(_) => Some(Err(failed(NOT_LOADED))),
+            };
+        };
         if state.vault == me {
             return None;
         }

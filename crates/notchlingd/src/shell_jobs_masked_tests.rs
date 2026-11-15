@@ -45,6 +45,7 @@ struct Rig {
     masks: Arc<TailMasks>,
     roots: Arc<JobRoots>,
     ended: Arc<AtomicUsize>,
+    reaped: Arc<AtomicUsize>,
     jobs: Arc<ShellJobs>,
 }
 
@@ -53,15 +54,19 @@ fn rig(tag: &str) -> Rig {
     let masks = Arc::new(TailMasks::new());
     let roots = Arc::new(JobRoots::new());
     let ended = Arc::new(AtomicUsize::new(0));
-    let (counted, ending) = (ended.clone(), roots.clone());
+    let reaped = Arc::new(AtomicUsize::new(0));
+    let (counted, ending, reaping) = (ended.clone(), roots.clone(), reaped.clone());
     let data = Dir::new(&format!("{tag}-data"));
     let jobs =
         ShellJobs::new(data.path().to_path_buf(), reporter.clone()).with_grants(ShellGrants {
             masks: masks.clone(),
             roots: roots.clone(),
-            ended: Arc::new(move |job: &str| {
-                counted.fetch_add(1, Ordering::SeqCst);
+            reaped: Arc::new(move |job: &str| {
+                reaping.fetch_add(1, Ordering::SeqCst);
                 ending.end(job);
+            }),
+            ended: Arc::new(move |_: &str| {
+                counted.fetch_add(1, Ordering::SeqCst);
             }),
         });
     Rig {
@@ -71,6 +76,7 @@ fn rig(tag: &str) -> Rig {
         masks,
         roots,
         ended,
+        reaped,
         jobs,
     }
 }
@@ -215,4 +221,23 @@ fn a_process_in_the_job_tree_is_found_by_the_real_process_table() {
     assert_eq!(rig.roots.job_of(&procs, child).as_deref(), Some(JOB));
     assert_eq!(rig.roots.job_of(&procs, std::process::id()), None);
     assert_ne!(child, root);
+}
+
+#[test]
+fn the_root_goes_when_the_process_is_reaped_not_when_the_output_drains() {
+    let rig = rig("reaped");
+    rig.run("(sleep 6 &) ; echo done");
+    let until = Instant::now() + Duration::from_millis(1500);
+    while rig.reaped.load(Ordering::SeqCst) == 0 && Instant::now() < until {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(rig.reaped.load(Ordering::SeqCst), 1, "reaped at once");
+    assert!(rig.roots.is_ended(JOB));
+    assert_eq!(
+        rig.ended.load(Ordering::SeqCst),
+        0,
+        "the masks end only after the drain"
+    );
+    rig.reporter.wait(JOB);
+    assert_eq!(rig.ended.load(Ordering::SeqCst), 1);
 }

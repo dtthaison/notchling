@@ -31,6 +31,7 @@ type Done = Arc<(Mutex<bool>, Condvar)>;
 pub struct ShellGrants {
     pub masks: Arc<TailMasks>,
     pub roots: Arc<JobRoots>,
+    pub reaped: Arc<dyn Fn(&str) + Send + Sync>,
     pub ended: Arc<dyn Fn(&str) + Send + Sync>,
 }
 
@@ -235,6 +236,9 @@ fn watch(
     (done, pumped): (Done, Done),
 ) {
     let status = child.wait();
+    if let Some(grants) = inner.grants.get() {
+        (grants.reaped)(&job);
+    }
     let (state, detail) = {
         let mut jobs = lock(&inner.jobs);
         let stopping = jobs.get(&job).is_some_and(|e| e.stopping);

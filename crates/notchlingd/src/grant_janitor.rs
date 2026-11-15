@@ -66,6 +66,7 @@ impl GrantJanitor {
     }
 
     pub fn tick(&self) -> Result<usize, String> {
+        let _gate = self.parts.2.gate();
         let now = (self.clock)();
         let state = self.view.state();
         let me = self.view.me();

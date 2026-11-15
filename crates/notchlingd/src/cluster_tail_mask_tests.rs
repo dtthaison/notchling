@@ -17,12 +17,16 @@ const JOB: &str = "j-0123456789ab";
 struct Rows {
     path: PathBuf,
     id: String,
+    short: Option<String>,
 }
 
 impl LocalRows for Rows {
     fn rows(&self) -> Result<Vec<Value>, ApiError> {
         let mut row = agent_row(&self.id);
         row["transcriptPath"] = json!(self.path.to_string_lossy());
+        if let Some(short) = &self.short {
+            row["target"] = json!({"job": short});
+        }
         Ok(vec![row])
     }
 }
@@ -38,6 +42,10 @@ struct Rig {
 }
 
 fn rig(id_: &str) -> Rig {
+    rig_short(id_, None)
+}
+
+fn rig_short(id_: &str, short: Option<&str>) -> Rig {
     let dir = Dir::new("tail-mask");
     let file = dir.path().join("job.log");
     std::fs::write(&file, b"").unwrap();
@@ -53,6 +61,7 @@ fn rig(id_: &str) -> Rig {
         Arc::new(Rows {
             path: file.clone(),
             id: id_.to_string(),
+            short: short.map(str::to_string),
         }),
         (masks.clone(), fake.clone()),
         Arc::new(move |_: &str| seen.load(Ordering::SeqCst)),
@@ -132,14 +141,97 @@ fn tail_masks_json_escaped_multiline_value() {
 }
 
 #[test]
-fn a_session_row_is_tied_to_its_job_by_the_session_id() {
+fn a_claude_row_is_tied_to_its_job_by_its_short_job_id() {
     let mut running = job(JOB, "worker", JobState::Running);
-    running.session = Some("sess-1".to_string());
-    let r = rig("sess-1");
+    running.session = Some("c1".to_string());
+    let r = rig_short("0b9e6c0e-1111-2222-3333-444455556666", Some("c1"));
     *r.fake.state.lock().unwrap() = Some(cluster("vault", &[running]));
     r.grant("NL-MARKER-1");
     r.append("said NL-MARKER-1\n");
-    assert!(!served(&r.tail("sess-1", 0).unwrap()).contains("NL-MARKER"));
+    let out = r.tail("0b9e6c0e-1111-2222-3333-444455556666", 0).unwrap();
+    assert!(!served(&out).contains("NL-MARKER"), "masked by its own job");
+    assert!(served(&out).contains("[secret api-key]"));
+}
+
+#[test]
+fn a_row_tied_to_no_job_is_masked_with_every_jobs_masks() {
+    let r = rig("some-other-session");
+    r.grant("NL-MARKER-1");
+    r.append("said NL-MARKER-1\n");
+    let out = r.tail("some-other-session", 0).unwrap();
+    assert!(!served(&out).contains("NL-MARKER"), "the union masks it");
+}
+
+#[test]
+fn a_row_tied_to_no_job_is_refused_while_any_job_lost_its_masks() {
+    let r = rig("some-other-session");
+    r.masks.mark_granted("j-ffffffffffff");
+    r.append("anything\n");
+    let err = r.tail("some-other-session", 0).expect_err("refused");
+    assert_eq!(err.message, UNMAPPED_LOST);
+}
+
+#[test]
+fn a_row_with_no_masks_on_the_node_is_served_as_is() {
+    let r = rig("some-other-session");
+    r.append("plain\n");
+    assert!(served(&r.tail("some-other-session", 0).unwrap()) == "plain\n");
+}
+
+struct Conversation(Value);
+
+impl LocalCalls for Conversation {
+    fn call(&self, _op: &str, _args: &Value, _origin: &Origin) -> Result<Value, ApiError> {
+        Ok(self.0.clone())
+    }
+}
+
+fn conversation_rig(reply: Value, id_: &str) -> Rig {
+    let mut r = rig(id_);
+    r.tails = Arc::new(MaskedTails::new(
+        Arc::new(Conversation(reply)),
+        Arc::new(Rows {
+            path: r.file.clone(),
+            id: id_.to_string(),
+            short: None,
+        }),
+        (r.masks.clone(), r.fake.clone()),
+        Arc::new(|_: &str| true),
+    ));
+    r
+}
+
+fn ask(r: &Rig, id_: &str) -> Result<Value, ApiError> {
+    r.tails
+        .call("agy.conversation", &json!({"id": id_}), &origin())
+}
+
+#[test]
+fn an_agy_conversation_is_masked_for_its_job_and_for_unmapped_rows() {
+    let reply =
+        json!({"conversation": {"items": [{"text": "key is NL-MARKER-1\nNL-MARKER-LINE"}]}});
+    let mut running = job(JOB, "worker", JobState::Running);
+    running.session = Some("agy:one".to_string());
+    for id_ in ["agy:one", "agy:unknown"] {
+        let r = conversation_rig(reply.clone(), id_);
+        *r.fake.state.lock().unwrap() = Some(cluster("vault", &[running.clone()]));
+        let one = vec![(
+            "api-key".to_string(),
+            GrantValue::new("NL-MARKER-1\nNL-MARKER-LINE".to_string()),
+        )];
+        r.masks.add(JOB, one).unwrap();
+        let out = ask(&r, id_).expect("served");
+        assert!(!out.to_string().contains("NL-MARKER"), "{id_} was masked");
+        assert!(out.to_string().contains("[secret api-key]"));
+    }
+    let r = conversation_rig(reply.clone(), "agy:unknown");
+    r.masks.mark_granted(JOB);
+    assert!(
+        ask(&r, "agy:unknown").is_err(),
+        "refused while masks are lost"
+    );
+    let r = conversation_rig(reply.clone(), "agy:unknown");
+    assert!(ask(&r, "agy:unknown").unwrap() == reply, "no masks, as is");
 }
 
 #[test]
@@ -266,4 +358,23 @@ fn mask_holds_across_chunk_boundaries_and_the_mirror_follows_by_source_offset() 
     let before = mirrored();
     mirror.pull();
     assert_eq!(mirrored(), before, "a quiet pull changes nothing");
+    drop(mirror);
+    let again = now.clone();
+    let restarted = Mirror::new(
+        r.dir.path().join("mirror"),
+        remote.clone(),
+        owner.clone(),
+        Arc::new(move || again.load(Ordering::SeqCst)),
+    );
+    restarted.follow(&qualified).expect("following");
+    r.append("third NL-MARKER-A-SECRET-TOKEN\n");
+    restarted.pull();
+    let text = mirrored();
+    assert!(!text.contains("NL-MARKER"), "no value after a restart");
+    assert!(
+        text.starts_with("start [secret api-key] end\n"),
+        "the mirror restarted from the source start"
+    );
+    assert!(text.ends_with("third [secret api-key]\n"));
+    assert_eq!(text.matches("start ").count(), 1, "nothing was doubled");
 }

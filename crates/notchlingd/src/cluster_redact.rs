@@ -12,6 +12,7 @@ struct Masked {
     values: Vec<(String, GrantValue)>,
     template: Option<Redactor>,
     ended: bool,
+    lost: bool,
 }
 
 #[derive(Default)]
@@ -62,20 +63,14 @@ impl TailMasks {
     }
 
     pub fn add(&self, job: &str, values: Vec<(String, GrantValue)>) -> Result<(), String> {
-        if let Some((name, _)) = values
-            .iter()
-            .find(|(_, value)| value.expose().len() > MAX_VALUE_BYTES)
-        {
-            return Err(format!(
-                "the value of {name} is larger than {MAX_VALUE_BYTES} bytes and can't be masked"
-            ));
-        }
+        TailMasks::check(&values)?;
         if values.is_empty() {
             return Ok(());
         }
         let mut table = lock(&self.table);
         let old = table.jobs.remove(job);
         let ended = old.as_ref().is_some_and(|m| m.ended);
+        let lost = old.as_ref().is_some_and(|m| m.lost);
         let mut all = old.map(|m| m.values).unwrap_or_default();
         for (name, value) in values {
             let known = all
@@ -95,9 +90,46 @@ impl TailMasks {
                 values: all,
                 template: Some(template),
                 ended,
+                lost,
             },
         );
         Ok(())
+    }
+
+    pub fn check(values: &[(String, GrantValue)]) -> Result<(), String> {
+        match values
+            .iter()
+            .find(|(_, value)| value.expose().len() > MAX_VALUE_BYTES)
+        {
+            Some((name, _)) => Err(format!(
+                "the value of {name} is larger than {MAX_VALUE_BYTES} bytes and can't be masked"
+            )),
+            None => Ok(()),
+        }
+    }
+
+    pub fn lost(&self, job: &str) -> bool {
+        lock(&self.table)
+            .jobs
+            .get(job)
+            .is_some_and(|m| m.lost || m.template.is_none())
+    }
+
+    pub fn any_lost(&self) -> bool {
+        lock(&self.table)
+            .jobs
+            .values()
+            .any(|m| m.lost || m.template.is_none())
+    }
+
+    pub fn union(&self) -> Option<Redactor> {
+        let table = lock(&self.table);
+        let all: Vec<(String, GrantValue)> = table
+            .jobs
+            .values()
+            .flat_map(|m| m.values.iter().cloned())
+            .collect();
+        (!all.is_empty()).then(|| build(&all))
     }
 
     pub fn mark_granted(&self, job: &str) {
@@ -109,6 +141,7 @@ impl TailMasks {
                 values: Vec::new(),
                 template: None,
                 ended: false,
+                lost: true,
             });
     }
 
@@ -184,12 +217,26 @@ pub fn mask_tail(
     at_end: bool,
 ) -> Result<(Vec<u8>, u64), String> {
     let length = bytes.len() as u64;
+    if masks.lost(job) {
+        return Err(gone_message(job));
+    }
     match masks.state(job) {
         JobMasks::Never => return Ok((bytes.to_vec(), offset + length)),
         JobMasks::Gone => return Err(gone_message(job)),
         JobMasks::Masked => {}
     }
     let redactor = masks.for_job(job).ok_or_else(|| gone_message(job))?;
+    mask_with(redactor, offset, lead, bytes, at_end)
+}
+
+pub fn mask_with(
+    redactor: Redactor,
+    offset: u64,
+    lead: &[u8],
+    bytes: &[u8],
+    at_end: bool,
+) -> Result<(Vec<u8>, u64), String> {
+    let length = bytes.len() as u64;
     let lookback = redactor.lookback();
     let lead = &lead[lead.len().saturating_sub(lookback)..];
     let (out, held) = redactor.mask_window(lead, bytes, at_end);

@@ -323,10 +323,11 @@ impl Mirror {
         }
     }
 
-    fn resume_at(&self, key: &str, mirrored: u64) -> u64 {
+    fn resume_at(&self, key: &str, mirrored: u64) -> (u64, bool) {
         match lock(&self.offsets).get(key) {
-            Some(offset) if mirrored > 0 => *offset,
-            _ => mirrored,
+            Some(offset) if mirrored > 0 => (*offset, false),
+            None if mirrored > 0 => (0, true),
+            _ => (mirrored, false),
         }
     }
 
@@ -377,7 +378,7 @@ impl Mirror {
             let Some(mirrored) = file_len(&follow.file) else {
                 return;
             };
-            let from = self.resume_at(key, mirrored);
+            let (from, restart) = self.resume_at(key, mirrored);
             let seen = lock(&self.seen).get(key).cloned();
             let Ok(out) = self
                 .source
@@ -392,7 +393,7 @@ impl Mirror {
             else {
                 return;
             };
-            let reset = out.get("reset").and_then(Value::as_bool).unwrap_or(false);
+            let reset = restart || out.get("reset").and_then(Value::as_bool).unwrap_or(false);
             let gen = out.get("gen").and_then(Value::as_str).map(str::to_string);
             match self.store(key, follow, (&data, reset, gen), epoch) {
                 Ok(true) => {}

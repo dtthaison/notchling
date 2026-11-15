@@ -34,15 +34,17 @@ impl GrantParts {
     }
 
     pub fn shell(&self) -> ShellGrants {
-        let (store, masks, roots) = (self.store.clone(), self.masks.clone(), self.roots.clone());
+        let (store, roots) = (self.store.clone(), self.roots.clone());
+        let masks = self.masks.clone();
         ShellGrants {
             masks: self.masks.clone(),
             roots: self.roots.clone(),
-            ended: Arc::new(move |job: &str| {
+            reaped: Arc::new(move |job: &str| {
+                let _gate = roots.gate();
                 roots.end(job);
                 let _ = store.remove_job(job);
-                masks.end_job(job);
             }),
+            ended: Arc::new(move |job: &str| masks.end_job(job)),
         }
     }
 }

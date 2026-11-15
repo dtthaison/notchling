@@ -117,6 +117,19 @@ fn a_malformed_or_oversize_value_is_refused_whole() {
     let big = deliver_args(JOB, "api-key", "API_TOKEN", &"x".repeat(40_000));
     assert!(deliver(&rig, &big).is_err(), "too big to mask");
     assert!(rig.store.get(JOB, "api-key", real_now()).unwrap().is_none());
+    assert!(rig.marks.list().is_empty(), "no marker for a refused value");
+    assert_eq!(
+        rig.masks.state(JOB),
+        JobMasks::Never,
+        "the job stays served"
+    );
+    let empty = deliver_args(JOB, "api-key", "API_TOKEN", "");
+    deliver(&rig, &empty).expect("nothing to mask");
+    assert!(
+        rig.marks.list().is_empty(),
+        "no marker with nothing to mask"
+    );
+    assert_eq!(rig.masks.state(JOB), JobMasks::Never);
     for bad in [
         json!({"job": JOB, "name": "api-key", "value": 3, "expiresMs": 1}),
         json!({"job": "../x", "name": "api-key", "value": "{}", "expiresMs": 1}),
@@ -187,7 +200,10 @@ fn job_end_deletes_grants() {
         roots: rig.roots.clone(),
     };
     rig.roots.set(JOB, 500);
-    (parts.shell().ended)(JOB);
+    let shell = parts.shell();
+    (shell.reaped)(JOB);
+    assert!(rig.masks.state(JOB) == JobMasks::Masked);
+    (shell.ended)(JOB);
     assert!(rig.store.get(JOB, "one", real_now()).unwrap().is_none());
     assert!(rig.roots.is_ended(JOB));
     assert!(rig.masks.is_ended(JOB));

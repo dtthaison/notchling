@@ -226,6 +226,20 @@ fn a_job_known_to_have_had_grants_is_not_served_without_masks() {
 }
 
 #[test]
+fn a_restored_job_stays_unservable_after_an_add_but_its_log_masks_new_output() {
+    let masks = Arc::new(TailMasks::new());
+    masks.mark_granted("j1");
+    masks.add("j1", vec![grant("api-token", TOKEN)]).unwrap();
+    assert!(masks.lost("j1"));
+    assert!(mask_tail(&masks, "j1", 0, b"", b"x", true).is_err());
+    assert!(masks.any_lost());
+    let sink = Arc::new(Mutex::new(Vec::<u8>::new()));
+    let mut log = MaskedLog::new(Shared(sink.clone()), masks, "j1");
+    log.write_all(format!("new {TOKEN}\n").as_bytes()).unwrap();
+    assert!(!logged(&sink).contains("NL-MARKER"), "a new line is masked");
+}
+
+#[test]
 fn a_short_held_prefix_at_the_end_is_masked_and_a_later_read_cannot_rebuild_it() {
     let masks = masks_with("j1", vec![grant("api-token", TOKEN)]);
     let data = format!("x NL-MAR{}", &TOKEN[6..]).into_bytes();
