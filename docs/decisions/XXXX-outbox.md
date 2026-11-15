@@ -27,9 +27,9 @@ The maintainer approved the design on 2026-11-15 and answered its open question 
 - It amends the held-text notes in `crates/AGENTS.md` (Things that bit before): the guess "is a turn running?" survives only in the safe rule.
 - `held_ops.rs` and `reply/held.rs` are replaced; `reply_attempts` and `Clearing` (the leftover-box fix) are kept and used by every try.
 - The maintainer chose (2026-11-15) not to count Claude Code's queue as delivered, so a dropped queue comes back as May already be in. The remaining gap: the Claude Code process a row was queued in is kept in memory only, so a Claude Code restart while the daemon is down that writes nothing to the transcript leaves the row In Claude Code's queue until the job's process is seen to change, or the 7-day notice (design §16).
-- The cluster keeps each mailbox on the node that owns the session: remote sessions keep `session.reply`, which the cluster forwards to the owner.
+- The cluster keeps each mailbox on the node that owns the session: `session.send` and the `outbox.*` ops are forwarded to the owner, and a client node follows the owner's rows (`session.reply` is forwarded too, for older apps).
 - Only character counts reach the Audit and Activity; message text lives only in the Outbox row and on the app-tier topic.
-- Nothing here is built. The plan is [2026-11-15-outbox](../superpowers/plans/2026-11-15-outbox.md).
+- Built on branch `agent/outbox`. The plan is [2026-11-15-outbox](../superpowers/plans/2026-11-15-outbox.md).
 
 ## Status
 
