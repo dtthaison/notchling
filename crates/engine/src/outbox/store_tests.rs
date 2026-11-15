@@ -450,3 +450,43 @@ fn migrate_from_v3_keeps_rows() {
         .unwrap();
     assert_eq!(version, 4);
 }
+
+fn corrupt_options(store: &OutboxStore, id: &str) {
+    store
+        .lock()
+        .execute(
+            "UPDATE outbox SET options = '{not json' WHERE id = ?1",
+            [id],
+        )
+        .unwrap();
+}
+
+fn column<T: rusqlite::types::FromSql>(store: &OutboxStore, name: &str, id: &str) -> T {
+    store
+        .lock()
+        .query_row(
+            &format!("SELECT {name} FROM outbox WHERE id = ?1"),
+            [id],
+            |r| r.get(0),
+        )
+        .unwrap()
+}
+
+#[test]
+fn malformed_options_is_a_decode_error() {
+    let store = OutboxStore::in_memory_for_tests();
+    let row = store.insert(&new("s", "a"), 1).unwrap();
+    corrupt_options(&store, &row.id);
+    assert!(store.list(None).is_err());
+    assert!(store.head("s").is_err());
+}
+
+#[test]
+fn failed_read_in_take_leaves_the_row_queued() {
+    let store = OutboxStore::in_memory_for_tests();
+    let row = store.insert(&new("s", "a"), 1).unwrap();
+    corrupt_options(&store, &row.id);
+    assert!(store.take(&row.id, 10).is_err());
+    assert_eq!(column::<String>(&store, "state", &row.id), "queued");
+    assert_eq!(column::<i64>(&store, "tries", &row.id), 0);
+}

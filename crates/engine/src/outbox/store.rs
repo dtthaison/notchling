@@ -55,7 +55,12 @@ fn row_of(r: &rusqlite::Row<'_>) -> rusqlite::Result<Row> {
         tool: word(r, 3, "tool", Tool::parse)?,
         kind: word(r, 4, "kind", Kind::parse)?,
         text: r.get(5)?,
-        options: options.and_then(|text| serde_json::from_str(&text).ok()),
+        options: match options {
+            Some(text) => {
+                Some(serde_json::from_str(&text).map_err(|_| column_error(6, "options"))?)
+            }
+            None => None,
+        },
         via: word(r, 7, "via", Via::parse)?,
         state: word(r, 8, "state", State::parse)?,
         why: match why {
@@ -108,7 +113,7 @@ impl OutboxStore {
         OutboxStore { db: Mutex::new(db) }
     }
 
-    fn lock(&self) -> MutexGuard<'_, Connection> {
+    pub(super) fn lock(&self) -> MutexGuard<'_, Connection> {
         self.db.lock().unwrap_or_else(|e| e.into_inner())
     }
 
@@ -181,8 +186,11 @@ impl OutboxStore {
     }
 
     pub fn take(&self, id: &str, now_ms: i64) -> Result<Option<Row>, String> {
-        let db = self.lock();
-        let changed = db
+        let mut db = self.lock();
+        let tx = db
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(db_err)?;
+        let changed = tx
             .execute(
                 "UPDATE outbox SET state = 'sending', attempt_ms = ?2, seen_before = NULL,
                      queued_before = NULL, tries = tries + 1, why = NULL, updated_ms = ?2
@@ -194,7 +202,9 @@ impl OutboxStore {
         if changed == 0 {
             return Ok(None);
         }
-        fetch(&db, id)
+        let row = fetch(&tx, id)?;
+        tx.commit().map_err(db_err)?;
+        Ok(row)
     }
 
     pub fn set_seen(&self, id: &str, seen: Seen) -> Result<(), String> {
@@ -234,8 +244,11 @@ impl OutboxStore {
     }
 
     pub fn edit(&self, id: &str, text: &str, now_ms: i64) -> Result<Change, String> {
-        let db = self.lock();
-        let Some(row) = fetch(&db, id)? else {
+        let mut db = self.lock();
+        let tx = db
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(db_err)?;
+        let Some(row) = fetch(&tx, id)? else {
             return Ok(Change::Missing);
         };
         let sql = format!(
@@ -245,9 +258,10 @@ impl OutboxStore {
             states(EDITABLE)
         );
         let kind = Kind::of(row.tool, text);
-        let changed = db
+        let changed = tx
             .execute(&sql, params![id, text, kind.as_str(), now_ms])
             .map_err(db_err)?;
+        tx.commit().map_err(db_err)?;
         Ok(if changed > 0 {
             Change::Done
         } else {
@@ -256,16 +270,20 @@ impl OutboxStore {
     }
 
     pub fn remove(&self, id: &str) -> Result<(Change, Option<Row>), String> {
-        let db = self.lock();
-        let Some(row) = fetch(&db, id)? else {
+        let mut db = self.lock();
+        let tx = db
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(db_err)?;
+        let Some(row) = fetch(&tx, id)? else {
             return Ok((Change::Missing, None));
         };
-        let changed = db
+        let changed = tx
             .execute(
                 "DELETE FROM outbox WHERE id = ?1 AND state NOT IN ('sending', 'in_queue')",
                 [id],
             )
             .map_err(db_err)?;
+        tx.commit().map_err(db_err)?;
         Ok(if changed > 0 {
             (Change::Done, Some(row))
         } else {
@@ -280,8 +298,11 @@ impl OutboxStore {
         clear_box: bool,
         now_ms: i64,
     ) -> Result<Change, String> {
-        let db = self.lock();
-        if fetch(&db, id)?.is_none() {
+        let mut db = self.lock();
+        let tx = db
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(db_err)?;
+        if fetch(&tx, id)?.is_none() {
             return Ok(Change::Missing);
         }
         let sql = format!(
@@ -290,9 +311,10 @@ impl OutboxStore {
              WHERE id = ?1 AND state IN ({})",
             states(from)
         );
-        let changed = db
+        let changed = tx
             .execute(&sql, params![id, i64::from(clear_box), now_ms])
             .map_err(db_err)?;
+        tx.commit().map_err(db_err)?;
         Ok(if changed > 0 {
             Change::Done
         } else {
