@@ -2,12 +2,13 @@ use serde_json::Value;
 
 use super::host::START_OPS;
 use super::invariants::Violation;
+use super::secrets_broker::BrokerEv;
 use super::world::{Event, World};
 use crate::cluster::core::{Effect, Input};
 use crate::cluster::id::NodeId;
 use crate::cluster::members::{MemberState, Term};
 use crate::cluster::testkit::fp;
-use crate::cluster::wire::Msg;
+use crate::cluster::wire::{Msg, Origin};
 
 const TICK_MS: u64 = 1_000;
 
@@ -33,6 +34,7 @@ impl World {
                         wall_ms: wall,
                     },
                 );
+                self.secrets_tick(&node);
                 let at = self.now + TICK_MS;
                 self.schedule(at, Event::Tick { node, gen });
             }
@@ -64,6 +66,7 @@ impl World {
                 self.step_linked(&a, &b);
                 self.step_linked(&b, &a);
             }
+            Event::Broker(ev) => self.broker_event(ev),
             other => self.hand_event(other),
         }
     }
@@ -126,6 +129,7 @@ impl World {
         for effect in effects {
             self.trace
                 .push(format!("{:>8} {:<4} {}", self.now, name, summary(&effect)));
+            self.scan_effect(n, &effect);
             match effect {
                 Effect::Send { to, msg } => self.send(n, &to, msg),
                 Effect::Dial {
@@ -171,10 +175,21 @@ impl World {
                     call,
                     op,
                     args,
+                    origin,
                     term,
-                    ..
-                } => self.run_local(n, call, &op, &args, &term, before.as_ref()),
-                Effect::Answer { local, result } => self.answers.push((n.clone(), local, result)),
+                } => self.run_local(n, (call, &op, &args, &origin), &term, before.as_ref()),
+                Effect::Answer { local, result } => {
+                    if self.secrets.waiting.contains_key(&(n.clone(), local)) {
+                        let ev = BrokerEv::Answer {
+                            node: n.clone(),
+                            local,
+                            result: result.clone(),
+                        };
+                        let at = self.now + 1;
+                        self.schedule(at, Event::Broker(ev));
+                    }
+                    self.answers.push((n.clone(), local, result));
+                }
                 Effect::JoinRequest { node, .. } => self.join_requests.push((n.clone(), node)),
             }
         }
@@ -185,6 +200,7 @@ impl World {
                 node.journal = node.core.as_ref().and_then(|c| c.state().cloned());
             }
         }
+        self.observe_jobs(n);
         let after = self.core(n).and_then(|c| c.highest_term().cloned());
         if let (Some(b), Some(a)) = (&before, &after) {
             if a < b && self.violation.is_none() {
@@ -202,9 +218,7 @@ impl World {
     fn run_local(
         &mut self,
         n: &NodeId,
-        call: u64,
-        op: &str,
-        args: &Value,
+        (call, op, args, origin): (u64, &str, &Value, &Origin),
         term: &Term,
         before: Option<&Term>,
     ) {
@@ -216,7 +230,13 @@ impl World {
                 });
             }
         }
+        if self.route_run(n, call, (op, args), origin) {
+            return;
+        }
         let result = self.host.run(n, op, args, term, self.now);
+        if START_OPS.contains(&op) {
+            self.secrets_started(n, args);
+        }
         let at = self.now + 1 + self.rng.below(5);
         self.schedule(
             at,
@@ -228,7 +248,7 @@ impl World {
         );
     }
 
-    fn send(&mut self, from: &NodeId, to: &NodeId, msg: Msg) {
+    pub(super) fn send(&mut self, from: &NodeId, to: &NodeId, msg: Msg) {
         if let Msg::Call { op, args, .. } = &msg {
             if START_OPS.contains(&op.as_str()) && self.violation.is_none() {
                 let home_sees_active = self

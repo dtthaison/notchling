@@ -3,12 +3,21 @@ mod invariants;
 mod net;
 mod run;
 mod scenario;
+mod secrets;
+mod secrets_actions;
+mod secrets_broker;
+mod secrets_check;
+mod secrets_inbox;
+mod secrets_scan;
+mod secrets_scenario;
+mod secrets_worker;
 mod world;
 
 pub use host::SimHost;
 pub use invariants::{check, Violation};
 pub use net::SimNet;
 pub use scenario::{run_seed, run_seed_with, run_world, stale_call_scenario, Failure, Plant};
+pub use secrets::{SecretPlant, SimSecrets, Stats};
 pub use world::World;
 
 #[derive(Clone, Debug)]
@@ -39,5 +48,7 @@ impl Rng {
     }
 }
 
+#[cfg(test)]
+mod sim_secrets_tests;
 #[cfg(test)]
 mod sim_tests;

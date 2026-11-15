@@ -13,6 +13,12 @@ pub enum Violation {
     JobOnTwoNodes { job: String },
     DispatchToRemoved { job: String, node: NodeId },
     KeyTwoJobs { key: String },
+    SecretLeaked { node: NodeId, path: String },
+    GrantOnWrongNode { job: String, node: NodeId },
+    GrantOutlivedJob { job: String, node: NodeId },
+    RefreshOnWorker { node: NodeId },
+    AnswerTwice { item: String },
+    ReleasedOffPrimary { node: NodeId, term: Term },
 }
 
 pub fn check(world: &World) -> Result<(), Violation> {
@@ -72,5 +78,5 @@ pub fn check(world: &World) -> Result<(), Violation> {
             return Err(Violation::JobStartedTwice { job: key.0.clone() });
         }
     }
-    Ok(())
+    super::secrets_check::check_secrets(world)
 }

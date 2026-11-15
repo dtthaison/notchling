@@ -38,7 +38,7 @@ fn invariants_hold_over_seeds() {
 fn a_planted_double_start_is_caught() {
     let plant = Plant {
         double_start: true,
-        skip_term_check: false,
+        ..Plant::default()
     };
     let caught = (0..20).any(|seed| {
         matches!(

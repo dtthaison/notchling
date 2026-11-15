@@ -5,6 +5,8 @@ use serde_json::Value;
 use super::host::SimHost;
 use super::invariants::Violation;
 use super::net::SimNet;
+use super::secrets::SimSecrets;
+use super::secrets_broker::BrokerEv;
 use super::Rng;
 use crate::cluster::core::{Input, LocalCmd, NodeCore};
 use crate::cluster::id::NodeId;
@@ -41,6 +43,7 @@ pub(super) enum Event {
         call: u64,
         result: Result<Value, WireError>,
     },
+    Broker(BrokerEv),
 }
 
 pub(super) struct SimNode {
@@ -79,6 +82,7 @@ pub struct World {
     pub(super) first_home: Option<NodeId>,
     pub(super) skip_term_check: bool,
     pub(super) step_sends: Vec<((u64, u64), NodeId)>,
+    pub(super) secrets: SimSecrets,
 }
 
 impl World {
@@ -100,6 +104,7 @@ impl World {
             first_home: None,
             skip_term_check: false,
             step_sends: Vec::new(),
+            secrets: SimSecrets::default(),
         }
     }
 
@@ -382,6 +387,7 @@ impl World {
                 },
             );
         }
+        self.secrets_crashed(n);
         self.trace_line(n, "crash");
     }
 
@@ -477,6 +483,7 @@ impl World {
 
     pub(super) fn trace_line(&mut self, n: &NodeId, text: &str) {
         let name = self.name_of(n);
+        self.secrets.record(n, super::secrets::Path::Log, text);
         self.trace
             .push(format!("{:>8} {:<4} {}", self.now, name, text));
     }
