@@ -5,16 +5,11 @@ use serde_json::{json, Value};
 use super::secrets::{Path, StaleAccept, Stored, GRANT_LIFE_MS, JANITOR_MS, KNOWN_WAIT_MS};
 use super::world::World;
 use crate::cluster::id::NodeId;
-use crate::cluster::jobs::JobState;
 use crate::cluster::members::Term;
 use crate::cluster::wire::{Origin, WireError};
 
 fn refusal(why: impl Into<String>) -> WireError {
     WireError::new("forbidden", why)
-}
-
-fn live(state: JobState) -> bool {
-    matches!(state, JobState::Running | JobState::Dispatching)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -40,37 +35,33 @@ impl World {
             .max()
     }
 
+    /// What this machine's own daemon knows about a job: a start ran here,
+    /// or its own process ended. A Worker's engine state holds no jobs, and
+    /// nothing the home knows reaches the Worker except by a message.
     pub(super) fn knows_job(&self, node: &NodeId, job: &str) -> Knows {
-        if self
-            .secrets
-            .local_ended
-            .contains_key(&(node.clone(), job.to_string()))
-        {
-            return Knows::Ended;
-        }
-        if self
-            .secrets
-            .started_on
-            .contains(&(node.clone(), job.to_string()))
-        {
-            return Knows::Live;
-        }
-        let Some(own) = self.state_of(node) else {
-            return Knows::Unknown;
-        };
-        if own.home != *node && !self.net.linked(node, &own.home) {
-            return Knows::Unknown;
-        }
-        let home = if own.home == *node {
-            Some(own)
+        let key = (node.clone(), job.to_string());
+        if self.secrets.local_ended.contains_key(&key) {
+            Knows::Ended
+        } else if self.secrets.started_on.contains(&key) {
+            Knows::Live
         } else {
-            self.state_of(&own.home)
-        };
-        match home.and_then(|h| h.jobs.get(job).cloned()) {
-            Some(j) if j.spec.node == *node && live(j.state) => Knows::Live,
-            Some(j) if j.spec.node == *node => Knows::Ended,
-            _ => Knows::Unknown,
+            Knows::Unknown
         }
+    }
+
+    pub(super) fn live_here(&self, node: &NodeId) -> BTreeSet<String> {
+        self.secrets
+            .started_on
+            .iter()
+            .filter(|(n, job)| {
+                n == node
+                    && !self
+                        .secrets
+                        .local_ended
+                        .contains_key(&(n.clone(), job.clone()))
+            })
+            .map(|(_, job)| job.clone())
+            .collect()
     }
 
     pub(super) fn b_revoke_job(&mut self, node: &NodeId, call: u64, args: &Value) {
@@ -149,35 +140,44 @@ impl World {
             self.finish_local(node, call, err("failed", "the job isn't running"));
             return false;
         }
-        let stored = Stored {
-            expires_at: expires as u64,
-            value: value.to_string(),
+        let (intended, release) = match self.secrets.mark_of(value) {
+            Some(m) => (Some(m.target.clone()), m.release),
+            None => (None, None),
         };
-        let key = (job.to_string(), name.clone());
-        let release = self.secrets.released_terms.get(&key).cloned();
-        if let Some(release) = release {
+        if let Some(rid) = release {
+            let released = self.secrets.releases[rid].term.clone();
             let own = self.core(node).and_then(|c| c.highest_term().cloned());
             let elsewhere = self.held_term();
-            if own.is_some_and(|held| release < held) {
+            if own.is_some_and(|held| released < held) {
                 self.secrets.stale_accepts.push(StaleAccept {
                     node: node.clone(),
-                    release,
+                    release: released,
                 });
-            } else if elsewhere.is_some_and(|held| release < held) {
+            } else if elsewhere.is_some_and(|held| released < held) {
                 self.secrets.stats.split_accepts += 1;
             }
         }
+        let stored = Stored {
+            expires_at: expires as u64,
+            stored_at: self.now,
+            value: value.to_string(),
+            intended,
+            release,
+        };
+        let key = (job.to_string(), name.clone());
         self.secrets
             .stores
             .entry(node.clone())
             .or_default()
             .insert(key, stored);
-        self.secrets.record(node, Path::Store { job }, value);
+        self.secrets.record(node, Path::Store, value);
         self.secrets.stats.stored += 1;
         self.finish_local(node, call, Ok(json!({"stored": name})));
         false
     }
 
+    /// A revoke removes what is stored and bars the delivers that arrived
+    /// before it. It does not end the job: a later fresh deliver is fine.
     pub(super) fn w_revoke(&mut self, node: &NodeId, call: u64, origin: &Origin, args: &Value) {
         let allowed = self
             .state_of(node)
@@ -191,7 +191,6 @@ impl World {
                 .filter_map(|n| n.as_str().map(str::to_lowercase))
                 .collect()
         });
-        let now = self.now;
         self.secrets.revoke_seq += 1;
         let seq = self.secrets.revoke_seq;
         self.secrets
@@ -205,106 +204,31 @@ impl World {
         }
         let removed = (before - store.len()) as u64;
         self.secrets.stats.revoked += removed;
-        if names.is_none() {
-            self.secrets
-                .local_ended
-                .entry((node.clone(), job.to_string()))
-                .or_insert(now);
-        }
         self.finish_local(node, call, Ok(json!({})));
     }
 
-    pub(super) fn observe_jobs(&mut self, n: &NodeId) {
-        let Some(state) = self.core(n).and_then(|c| c.state()) else {
-            return;
-        };
-        let seen: Vec<(String, NodeId, bool)> = state
-            .jobs
-            .values()
-            .map(|j| (j.id.clone(), j.spec.node.clone(), live(j.state)))
-            .collect();
-        let home = state.home.clone();
-        let now = self.now;
-        for (job, node, alive) in seen {
-            self.secrets
-                .truth
-                .entry(job.clone())
-                .or_default()
-                .insert(node);
-            if !alive && home == *n {
-                self.secrets.ended.entry((home.clone(), job)).or_insert(now);
-            }
-        }
-    }
-
-    fn reachable(&self, n: &NodeId) -> bool {
-        match self.core(n).and_then(|c| c.state()) {
-            Some(s) => s.home == *n || self.net.linked(n, &s.home),
-            None => false,
-        }
-    }
-
-    fn told_ended(&self, n: &NodeId) -> BTreeSet<String> {
-        let Some(own) = self.state_of(n) else {
-            return BTreeSet::new();
-        };
-        if own.home != *n && !self.net.linked(n, &own.home) {
-            return BTreeSet::new();
-        }
-        let home = if own.home == *n {
-            Some(own)
-        } else {
-            self.state_of(&own.home)
-        };
-        home.map(|h| {
-            h.jobs
-                .values()
-                .filter(|j| !live(j.state))
-                .map(|j| j.id.clone())
-                .collect()
-        })
-        .unwrap_or_default()
-    }
-
+    /// The Worker's janitor: a sweep at start, every 30 s, and when the set
+    /// of jobs running here changes. It sees only this machine's jobs.
     pub(super) fn secrets_tick(&mut self, n: &NodeId) {
         let now = self.now;
-        let reachable = self.reachable(n);
-        let last = self.secrets.last_tick.insert(n.clone(), now);
-        let gap = last.map_or(0, |t| now.saturating_sub(t));
-        if last.is_none() || gap > 2_500 {
-            self.secrets.alive_since.insert(n.clone(), now);
-        }
-        let slot = self.secrets.reach.entry(n.clone()).or_insert(None);
-        if gap > 2_500 || !reachable {
-            *slot = None;
-        }
-        if reachable && slot.is_none() {
-            *slot = Some(now);
-        }
         self.secrets_resync(n);
-        let due = *self
-            .secrets
-            .due
-            .entry(n.clone())
-            .or_insert(now + JANITOR_MS);
-        if now < due {
+        let live = self.live_here(n);
+        let changed = self.secrets.live_seen.get(n) != Some(&live);
+        let due = self.secrets.due.get(n).copied().unwrap_or(0);
+        if !changed && now < due {
             return;
         }
+        self.secrets.live_seen.insert(n.clone(), live.clone());
         self.secrets.due.insert(n.clone(), now + JANITOR_MS);
         if self.secrets.plant.keep_grants {
             return;
         }
-        let told = self.told_ended(n);
         let s = &mut self.secrets;
         let Some(store) = s.stores.get_mut(n) else {
             return;
         };
         let before = store.len();
-        store.retain(|(job, _), g| {
-            let expired = g.expires_at <= now;
-            let mine = s.local_ended.contains_key(&(n.clone(), job.clone()));
-            !(expired || mine || told.contains(job))
-        });
+        store.retain(|(job, _), g| g.expires_at > now && live.contains(job));
         s.stats.revoked += (before - store.len()) as u64;
     }
 
@@ -328,18 +252,25 @@ impl World {
         self.consume_grants(n, job, &names);
     }
 
+    /// A child takes a grant at use, as `GrantStore::get` lets it: only a
+    /// grant still stored, not expired, for a job still running here.
     pub(super) fn consume_grants(&mut self, n: &NodeId, job: &str, names: &[String]) {
+        if self.knows_job(n, job) != Knows::Live {
+            return;
+        }
+        let now = self.now;
         for name in names {
             let held = self
                 .secrets
                 .stores
                 .get(n)
                 .and_then(|s| s.get(&(job.to_string(), name.clone())))
+                .filter(|g| g.expires_at > now)
                 .map(|g| g.value.clone());
             let Some(value) = held else {
                 continue;
             };
-            self.secrets.record(n, Path::ChildEnv { job }, &value);
+            self.secrets.record(n, Path::ChildEnv, &value);
             self.secrets.child_env += 1;
             self.secrets.stats.consumed += 1;
             if self.secrets.plant.child_echo {

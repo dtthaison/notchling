@@ -57,6 +57,7 @@ pub(super) struct SimNode {
     pub(super) suspended: bool,
     pub(super) held: Vec<Event>,
     pub(super) boot_origin: u64,
+    pub(super) up_since: u64,
     pub(super) boot_n: u32,
     pub(super) drift: i64,
     pub(super) skew: i64,
@@ -164,6 +165,10 @@ impl World {
         self.nodes.get(n).is_some_and(|x| x.alive)
     }
 
+    pub fn up_since(&self, n: &NodeId) -> Option<u64> {
+        self.nodes.get(n).map(|x| x.up_since)
+    }
+
     pub fn is_suspended(&self, n: &NodeId) -> bool {
         self.nodes.get(n).is_some_and(|x| x.suspended)
     }
@@ -232,6 +237,7 @@ impl World {
             suspended: false,
             held: Vec::new(),
             boot_origin: self.now,
+            up_since: self.now,
             boot_n: 0,
             drift,
             skew,
@@ -400,6 +406,7 @@ impl World {
         }
         node.alive = true;
         node.boot_origin = self.now;
+        node.up_since = self.now;
         node.boot_n += 1;
         self.boot_core(n);
         self.trace_line(n, "restart");
@@ -425,6 +432,7 @@ impl World {
             return;
         }
         node.suspended = false;
+        node.up_since = self.now;
         node.tick_gen += 1;
         let gen = node.tick_gen;
         let held = std::mem::take(&mut node.held);

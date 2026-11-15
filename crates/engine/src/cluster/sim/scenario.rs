@@ -103,6 +103,7 @@ pub fn run_world(seed: u64, steps: usize, plant: Plant) -> (World, Result<(), Vi
     let macs = [cast.m5.clone(), cast.m1.clone()];
     let mut keys: Vec<String> = Vec::new();
     if let Err(v) = check(&world) {
+        world.note_stats();
         return (world, Err(v));
     }
     for step in 0..steps {
@@ -192,9 +193,11 @@ pub fn run_world(seed: u64, steps: usize, plant: Plant) -> (World, Result<(), Vi
         let settle = 150 + world.rng().below(1_500);
         world.run_for(settle);
         if let Err(v) = check(&world) {
+            world.note_stats();
             return (world, Err(v));
         }
     }
+    world.note_stats();
     (world, Ok(()))
 }
 

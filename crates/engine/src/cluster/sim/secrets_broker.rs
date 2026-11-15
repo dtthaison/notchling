@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use serde_json::{json, Value};
 
 use super::secrets::SecretPlant;
-use super::secrets::{Path, ReleaseRec, SimSecrets, GRANT_LIFE_MS};
+use super::secrets::{Path, Release, SimSecrets, GRANT_LIFE_MS};
 use super::world::{Event, World};
 use crate::cluster::core::LocalCmd;
 use crate::cluster::grants::{decide, encode_env, GrantAsk, GrantDecision};
@@ -47,7 +47,9 @@ pub(super) struct Pending {
     pub(super) names: Vec<String>,
     pub(super) values: Vec<(String, String)>,
     pub(super) delivered: Vec<String>,
-    pub(super) consume: bool,
+    pub(super) approval: Option<String>,
+    pub(super) target: Option<NodeId>,
+    pub(super) expires: i64,
 }
 
 fn refusal(why: impl Into<String>) -> WireError {
@@ -70,6 +72,11 @@ fn var_of(name: &str) -> String {
 }
 
 impl World {
+    pub(super) fn note_stats(&mut self) {
+        let line = format!("{:>8} ---- secrets {:?}", self.now, self.secrets.stats());
+        self.trace.push(line);
+    }
+
     pub fn secrets(&self) -> &SimSecrets {
         &self.secrets
     }
@@ -170,9 +177,9 @@ impl World {
         let s = &mut self.secrets;
         s.pending.retain(|_, p| p.node != *n);
         s.waiting.retain(|(node, _), _| node != n);
-        s.reach.insert(n.clone(), None);
-        s.last_tick.remove(n);
-        s.alive_since.remove(n);
+        s.consuming.retain(|(node, _), _| node != n);
+        s.started_on.retain(|(node, _)| node != n);
+        s.live_seen.remove(n);
         s.due.insert(n.clone(), 0);
         self.mirrors_lost(n);
     }
@@ -194,6 +201,10 @@ impl World {
         );
     }
 
+    pub fn state_of_pub(&self, n: &NodeId) -> Option<crate::cluster::ClusterState> {
+        self.state_of(n)
+    }
+
     pub(super) fn state_of(&self, n: &NodeId) -> Option<crate::cluster::ClusterState> {
         self.core(n).and_then(|c| c.state()).cloned()
     }
@@ -212,7 +223,7 @@ impl World {
             return;
         };
         let names = job.spec.secrets.clone();
-        self.grant_start((node, call), (job, member), names, (primary, false));
+        self.grant_start((node, call), (job, member), names, primary);
     }
 
     pub(super) fn b_request(&mut self, node: &NodeId, call: u64, origin: &Origin, args: &Value) {
@@ -242,7 +253,7 @@ impl World {
         };
         let primary = state.home == state.vault;
         let who = (job.clone(), member.clone());
-        self.grant_start((node, call), who, names, (primary, true));
+        self.grant_start((node, call), who, names, primary);
     }
 
     pub(super) fn grant_start(
@@ -250,7 +261,7 @@ impl World {
         (node, call): (&NodeId, u64),
         (job, member): (Job, Member),
         names: Vec<String>,
-        (vault_primary, consume): (bool, bool),
+        vault_primary: bool,
     ) {
         let Some(names) = canonical(&names) else {
             let err = WireError::new("bad_request", "ask for 1 to 16 secrets");
@@ -308,15 +319,27 @@ impl World {
             names: names.clone(),
             values: Vec::new(),
             delivered: Vec::new(),
-            consume,
+            approval: None,
+            target: None,
+            expires: 0,
         };
         self.secrets.pending.insert(pid, pending);
         if asking && !self.secrets.plant.skip_approval {
             let item = self.approval_item(node, &job, &names);
             let id = item.id.clone();
-            self.secrets.approvals.insert(id, pid);
+            self.secrets.approvals.insert(id.clone(), pid);
+            self.secrets.last_approval = Some(id.clone());
+            if let Some(p) = self.secrets.pending.get_mut(&pid) {
+                p.approval = Some(id);
+            }
             self.raise_item(node, item);
         } else {
+            if asking {
+                let stale = self.secrets.last_approval.clone();
+                if let Some(p) = self.secrets.pending.get_mut(&pid) {
+                    p.approval = stale;
+                }
+            }
             self.release(pid);
         }
     }
@@ -355,45 +378,44 @@ impl World {
         let Some(state) = self.state_of(&p.node) else {
             return;
         };
-        let asked: Vec<String> = p
+        let target = state
+            .jobs
+            .get(&p.job.id)
+            .map_or_else(|| p.job.spec.node.clone(), |j| j.spec.node.clone());
+        let approval = p.approval.clone();
+        let asked: Vec<(String, Option<String>)> = p
             .names
             .iter()
             .filter(|n| self.secrets.vault.get(*n).is_some_and(|(_, asks)| *asks))
-            .cloned()
+            .map(|n| (n.clone(), approval.clone()))
             .collect();
-        let current = self.secrets_current_term(&state.term);
-        if state.term < current {
+        let newest = self.secrets_current_term(&state.term);
+        if state.term < newest {
             self.secrets.stats.stale_releases += 1;
         }
-        self.secrets.releases.push(ReleaseRec {
+        let rid = self.secrets.releases.len();
+        self.secrets.releases.push(Release {
             node: p.node.clone(),
             term: state.term.clone(),
+            newest,
             home: state.home.clone(),
             vault: state.vault.clone(),
             job: p.job.id.clone(),
+            target: target.clone(),
             asked,
             at_ms: self.now,
         });
-        for name in &p.names {
-            let key = (p.job.id.clone(), name.clone());
-            self.secrets.released_terms.insert(key, state.term.clone());
-        }
         let mut values = Vec::new();
         for name in &p.names {
-            let marker = self
-                .secrets
-                .vault
-                .get(name)
-                .map(|(m, _)| m.clone())
-                .unwrap_or_default();
-            let env = BTreeMap::from([(var_of(name), marker.clone())]);
+            let token = self.secrets.new_mark(&target, Some(rid));
+            let env = BTreeMap::from([(var_of(name), token.clone())]);
             if let Ok(value) = encode_env(&env) {
                 values.push((name.clone(), value.expose().to_string()));
             }
             self.secrets.stats.released += 1;
             if let (Some(at), false) = (plant.leak, self.secrets.leaked_once) {
                 self.secrets.leaked_once = true;
-                self.plant_leak(&p.node, at, &marker);
+                self.plant_leak(&p.node, at, &token);
             }
         }
         self.secrets.record(
@@ -401,8 +423,11 @@ impl World {
             Path::Audit,
             &format!("released {}", p.names.join(",")),
         );
+        let expires = (self.now + GRANT_LIFE_MS) as i64;
         if let Some(slot) = self.secrets.pending.get_mut(&pid) {
             slot.values = values;
+            slot.target = Some(target);
+            slot.expires = expires;
         }
         self.deliver_next(pid);
     }
@@ -414,9 +439,6 @@ impl World {
         let i = p.delivered.len();
         if i >= p.values.len() {
             self.secrets.pending.remove(&pid);
-            if p.consume {
-                self.consume_grants(&p.job.spec.node, &p.job.id, &p.names);
-            }
             let reply = Ok(json!({"delivered": p.delivered}));
             return self.finish_local(&p.node, p.call, reply);
         }
@@ -428,7 +450,7 @@ impl World {
             }
         }
         let (name, value) = p.values[i].clone();
-        let mut target = p.job.spec.node.clone();
+        let mut target = p.target.clone().unwrap_or_else(|| p.job.spec.node.clone());
         if self.secrets.plant.misroute {
             target = self.other_member(&p.node, &target).unwrap_or(target);
         }
@@ -436,7 +458,7 @@ impl World {
             "job": p.job.id,
             "name": name,
             "value": value,
-            "expiresMs": (self.now + GRANT_LIFE_MS) as i64,
+            "expiresMs": p.expires,
         });
         let local = self.next_local;
         self.secrets.waiting.insert((p.node.clone(), local), pid);

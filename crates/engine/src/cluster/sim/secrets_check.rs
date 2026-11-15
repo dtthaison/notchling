@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use super::invariants::Violation;
 use super::secrets::{RECOVERY_MS, STEADY_MS};
 use super::world::World;
@@ -13,8 +15,10 @@ pub(super) fn check_secrets(world: &World) -> Result<(), Violation> {
         });
     }
     for (node, store) in &s.stores {
-        for (job, _) in store.keys() {
-            if !s.truth.get(job).is_some_and(|nodes| nodes.contains(node)) {
+        for ((job, _), grant) in store {
+            let meant = grant.release.map(|r| &s.releases[r]);
+            let right_job = meant.is_none_or(|r| r.job == *job);
+            if grant.intended.as_ref() != Some(node) || !right_job {
                 return Err(Violation::GrantOnWrongNode {
                     job: job.clone(),
                     node: node.clone(),
@@ -36,7 +40,8 @@ pub(super) fn check_secrets(world: &World) -> Result<(), Violation> {
             term: a.release.clone(),
         });
     }
-    for r in &s.releases {
+    let mut used: BTreeMap<&str, usize> = BTreeMap::new();
+    for (rid, r) in s.releases.iter().enumerate() {
         let at_vault = s.vault_node.as_ref() == Some(&r.node);
         let own = at_vault && r.vault == r.node && r.home == r.node && r.term.node == r.node;
         if !own {
@@ -46,15 +51,23 @@ pub(super) fn check_secrets(world: &World) -> Result<(), Violation> {
             });
         }
         let book = s.books.get(&r.node);
-        for name in &r.asked {
-            let allowed = book.is_some_and(|b| {
-                b.items().iter().any(|i| {
-                    i.source.job.as_deref() == Some(r.job.as_str())
-                        && i.detail.split(',').any(|n| n == name)
-                        && i.state == State::Answered
-                        && matches!(i.answer, Some(ActionId::AllowOnce | ActionId::AllowAlways))
-                        && i.closed_ms.is_some_and(|c| c as u64 <= r.at_ms)
-                })
+        for (name, approval) in &r.asked {
+            let item = approval
+                .as_deref()
+                .and_then(|id| book.and_then(|b| b.items().into_iter().find(|i| i.id == id)));
+            let allowed = item.as_ref().is_some_and(|i| {
+                i.source.job.as_deref() == Some(r.job.as_str())
+                    && i.detail.split(',').any(|n| n == name)
+                    && i.state == State::Answered
+                    && i.closed_ms.is_some_and(|c| c as u64 <= r.at_ms)
+                    && match i.answer {
+                        Some(ActionId::AllowOnce) => {
+                            let id = approval.as_deref().unwrap_or_default();
+                            *used.entry(id).or_insert(rid) == rid
+                        }
+                        Some(ActionId::AllowAlways) => true,
+                        _ => false,
+                    }
             });
             if !allowed {
                 return Err(Violation::ReleasedWithoutAllow { job: r.job.clone() });
@@ -66,25 +79,17 @@ pub(super) fn check_secrets(world: &World) -> Result<(), Violation> {
         if !world.is_up(node) {
             continue;
         }
-        let alive = s.alive_since.get(node).copied();
-        let reach = s.reach.get(node).copied().flatten();
-        for (job, _) in store.keys() {
-            let home = world.state_of(node).map(|st| st.home);
-            let told_at = home.and_then(|h| s.ended.get(&(h, job.clone())));
-            let (base, told) = match (s.local_ended.get(&(node.clone(), job.clone())), told_at) {
-                (Some(t), _) => (*t, false),
-                (None, Some(t)) => (*t, true),
-                _ => continue,
-            };
-            let ready = match (alive, told, reach) {
-                (None, ..) | (_, true, None) => continue,
-                (Some(a), false, _) => a,
-                (Some(a), true, Some(r)) => a.max(r),
-            };
-            let (since, limit) = if ready <= base {
-                (base, STEADY_MS)
+        let up = world.up_since(node).unwrap_or(0);
+        for ((job, _), grant) in store {
+            let key = (node.clone(), job.clone());
+            if s.started_on.contains(&key) && !s.local_ended.contains_key(&key) {
+                continue;
+            }
+            let base = s.local_ended.get(&key).copied().unwrap_or(grant.stored_at);
+            let (since, limit) = if up > base {
+                (up, RECOVERY_MS)
             } else {
-                (ready, RECOVERY_MS)
+                (base, STEADY_MS)
             };
             if now.saturating_sub(since) > limit {
                 return Err(Violation::GrantOutlivedJob {

@@ -1,11 +1,15 @@
 use serde::Serialize;
 use serde_json::{json, Value};
 
+use super::host::START_OPS;
 use super::secrets::{LeakAt, Path};
-use super::world::World;
+use super::secrets_broker::BrokerEv;
+use super::world::{Event, World};
 use crate::cluster::core::Effect;
 use crate::cluster::id::NodeId;
+use crate::cluster::jobs::JobSpec;
 use crate::cluster::members::Term;
+use crate::cluster::state::{Command, JournalEntry};
 use crate::cluster::wire::{Msg, Origin, OriginTier, WireError};
 
 pub(super) fn ser<T: Serialize>(value: &T) -> String {
@@ -15,18 +19,14 @@ pub(super) fn ser<T: Serialize>(value: &T) -> String {
     }
 }
 
-fn job_of(args: &Value) -> Option<&str> {
-    args.get("job").and_then(Value::as_str)
-}
-
 impl World {
     pub(super) fn scan_wire(&mut self, from: &NodeId, to: &NodeId, msg: &Msg) {
         let text = ser(msg);
-        let (op, job) = match msg {
-            Msg::Call { op, args, .. } => (op.as_str(), job_of(args)),
-            _ => ("msg", None),
+        let op = match msg {
+            Msg::Call { op, .. } => op.as_str(),
+            _ => "msg",
         };
-        self.secrets.record(from, Path::Wire { op, to, job }, &text);
+        self.secrets.record(from, Path::Wire { op, to }, &text);
     }
 
     pub(super) fn scan_mirror(&mut self, n: &NodeId, body: &Value) {
@@ -47,12 +47,8 @@ impl World {
                 let text = format!("{topic} {name} {data}");
                 self.secrets.record(n, Path::Publish, &text);
             }
-            Effect::RunLocal { op, args, .. } => {
-                let path = Path::Run {
-                    op,
-                    job: job_of(args),
-                };
-                self.secrets.record(n, path, &args.to_string());
+            Effect::RunLocal { op, args, .. } if !START_OPS.contains(&op.as_str()) => {
+                self.secrets.record(n, Path::Run { op }, &args.to_string());
             }
             Effect::Answer { result, .. } => {
                 let text = match result {
@@ -72,44 +68,100 @@ impl World {
             .push(format!("{:>8} {:<4} {}", self.now, name, text));
     }
 
+    /// Plants go in through the same doors honest data uses: an effect the
+    /// node "emits" on its next step, a message to its inbox handler, a
+    /// trace line, a Book item.
     pub(super) fn plant_leak(&mut self, n: &NodeId, at: LeakAt, marker: &str) {
         let args = json!({"job": "j-leak", "note": marker});
-        match at {
-            LeakAt::Log => self.push_trace(n, &format!("released {marker}")),
-            LeakAt::Journal => self.scan_persisted(n, &format!("{{\"jobs\":\"{marker}\"}}")),
-            LeakAt::Publish => {
-                let effect = Effect::Publish {
-                    topic: "sessions".to_string(),
-                    name: "session.changed".to_string(),
-                    data: args,
-                };
-                self.scan_effect(n, &effect);
+        let term = self.state_of(n).map(|s| s.term).unwrap_or(Term {
+            n: 0,
+            node: n.clone(),
+        });
+        let effect = match at {
+            LeakAt::Log => {
+                self.push_trace(n, &format!("released {marker}"));
+                return;
             }
-            LeakAt::Mirror => self.scan_mirror(n, &args),
-            LeakAt::Argv => self.secrets_started(n, &json!({"job": "j-leak", "prompt": marker})),
-            LeakAt::Run => {
-                let effect = Effect::RunLocal {
+            LeakAt::Mirror => {
+                let ev = BrokerEv::Run {
+                    node: n.clone(),
                     call: 0,
-                    op: "shell.run".to_string(),
-                    args: args.into(),
+                    op: "node.inbox".to_string(),
+                    args,
                     origin: Origin {
                         node: n.clone(),
                         tier: OriginTier::Node,
                     },
-                    term: self.state_of(n).map(|s| s.term).unwrap_or(Term {
-                        n: 0,
-                        node: n.clone(),
-                    }),
+                    arrived: (self.now, self.secrets.revoke_seq),
                 };
-                self.scan_effect(n, &effect);
+                let when = self.now + 1;
+                self.schedule(when, Event::Broker(ev));
+                return;
             }
-            LeakAt::Answer => {
-                let effect = Effect::Answer {
-                    local: 0,
-                    result: Err(WireError::new("failed", marker)),
+            LeakAt::Inbox => {
+                let item = self.login_item(n, marker);
+                self.raise_item(n, item);
+                return;
+            }
+            LeakAt::Journal => {
+                let spec = JobSpec {
+                    node: n.clone(),
+                    tool: crate::cluster::id::Tool::Shell,
+                    cwd: "/srv/repo".to_string(),
+                    args,
+                    secrets: Vec::new(),
                 };
-                self.scan_effect(n, &effect);
+                Effect::Persist {
+                    entry: JournalEntry {
+                        seq: 0,
+                        at_ms: self.now as i64,
+                        term,
+                        command: Command::Dispatch {
+                            key: "leak".to_string(),
+                            spec,
+                        },
+                    },
+                    changes: Vec::new(),
+                }
             }
-        }
+            LeakAt::Publish => Effect::Publish {
+                topic: "sessions".to_string(),
+                name: "session.changed".to_string(),
+                data: args,
+            },
+            LeakAt::Argv => Effect::RunLocal {
+                call: 0,
+                op: "shell.run".to_string(),
+                args: json!({"job": "j-leak", "prompt": marker}).into(),
+                origin: Origin {
+                    node: n.clone(),
+                    tier: OriginTier::Node,
+                },
+                term,
+            },
+            LeakAt::Run => Effect::RunLocal {
+                call: 0,
+                op: "session.reply".to_string(),
+                args: args.into(),
+                origin: Origin {
+                    node: n.clone(),
+                    tier: OriginTier::Node,
+                },
+                term,
+            },
+            LeakAt::Answer => Effect::Answer {
+                local: 0,
+                result: Err(WireError::new("failed", marker)),
+            },
+        };
+        self.secrets.planted.push((n.clone(), effect));
+    }
+
+    pub(super) fn take_planted(&mut self, n: &NodeId) -> Vec<Effect> {
+        let (mine, rest): (Vec<_>, Vec<_>) = std::mem::take(&mut self.secrets.planted)
+            .into_iter()
+            .partition(|(node, _)| node == n);
+        self.secrets.planted = rest;
+        mine.into_iter().map(|(_, e)| e).collect()
     }
 }

@@ -102,7 +102,34 @@ impl World {
                 tier: OriginTier::Agent,
             },
         };
-        self.local(&node, cmd);
+        let call = self.local(&node, cmd);
+        self.secrets.consuming.insert((node, call), found.id);
+    }
+
+    /// A job that asked for a secret takes it when the answer to its request
+    /// reaches this machine, and only what the answer says was delivered.
+    pub(super) fn consume_on_answer(
+        &mut self,
+        n: &NodeId,
+        local: u64,
+        result: &Result<serde_json::Value, crate::cluster::wire::WireError>,
+    ) {
+        let Some(job) = self.secrets.consuming.remove(&(n.clone(), local)) else {
+            return;
+        };
+        let Ok(reply) = result else {
+            return;
+        };
+        let names: Vec<String> = reply
+            .get("delivered")
+            .and_then(serde_json::Value::as_array)
+            .map(|l| {
+                l.iter()
+                    .filter_map(|v| v.as_str().map(str::to_string))
+                    .collect()
+            })
+            .unwrap_or_default();
+        self.consume_grants(n, &job, &names);
     }
 
     pub(super) fn secrets_action(&mut self, kind: u8) {
@@ -170,6 +197,8 @@ impl World {
         }
     }
 
+    /// A deliver from the vault node's own origin, for a value carrying
+    /// marker values this test made up; the marker is bound to `node`.
     pub fn inject_deliver(
         &mut self,
         node: &NodeId,
@@ -181,7 +210,41 @@ impl World {
         let Some(vault) = self.secrets.vault_node.clone() else {
             return;
         };
+        self.bind_markers(value, node, None);
         self.inject_deliver_from(&vault, node, job, name, (value, expires), since);
+    }
+
+    pub fn bind_markers(&mut self, value: &str, node: &NodeId, release: Option<usize>) {
+        for token in super::secrets::tokens_in(value) {
+            let mark = super::secrets::Mark {
+                target: node.clone(),
+                release,
+            };
+            self.secrets.marks.entry(token).or_insert(mark);
+        }
+    }
+
+    /// Record a release exactly as the broker would, without running it, and
+    /// return the value to deliver for it.
+    pub fn register_release(
+        &mut self,
+        (home, job, target): (&NodeId, &str, &NodeId),
+        (term, newest): (crate::cluster::members::Term, crate::cluster::members::Term),
+    ) -> String {
+        let rid = self.secrets.releases.len();
+        self.secrets.releases.push(super::secrets::Release {
+            node: home.clone(),
+            term,
+            newest,
+            home: home.clone(),
+            vault: home.clone(),
+            job: job.to_string(),
+            target: target.clone(),
+            asked: Vec::new(),
+            at_ms: self.now,
+        });
+        let token = self.secrets.new_mark(target, Some(rid));
+        format!("{{\"TOK\":\"{token}\"}}")
     }
 
     pub fn inject_deliver_from(
@@ -237,7 +300,10 @@ impl World {
     pub fn plant_grant(&mut self, node: &NodeId, job: &str, name: &str) {
         let stored = super::secrets::Stored {
             expires_at: self.now + 3_600_000,
+            stored_at: self.now,
             value: String::new(),
+            intended: None,
+            release: None,
         };
         let key = (job.to_string(), name.to_string());
         self.secrets
@@ -247,12 +313,43 @@ impl World {
             .insert(key, stored);
     }
 
-    pub fn set_release_term(&mut self, job: &str, name: &str, term: crate::cluster::members::Term) {
-        let key = (job.to_string(), name.to_string());
-        self.secrets.released_terms.insert(key, term);
-    }
-
     pub fn worker_highest_term(&self, node: &NodeId) -> Option<crate::cluster::members::Term> {
         self.core(node).and_then(|c| c.highest_term().cloned())
+    }
+
+    pub fn highest_term_anywhere(&self) -> Option<crate::cluster::members::Term> {
+        self.held_term()
+    }
+
+    /// A grant with a known home on this node for a job nothing here runs.
+    pub fn plant_orphan_grant(&mut self, node: &NodeId, job: &str, name: &str) {
+        let stored = super::secrets::Stored {
+            expires_at: self.now + 3_600_000,
+            stored_at: self.now,
+            value: String::new(),
+            intended: Some(node.clone()),
+            release: None,
+        };
+        let key = (job.to_string(), name.to_string());
+        self.secrets
+            .stores
+            .entry(node.clone())
+            .or_default()
+            .insert(key, stored);
+    }
+
+    pub fn know_job(&mut self, node: &NodeId, job: &str) {
+        self.secrets
+            .started_on
+            .insert((node.clone(), job.to_string()));
+    }
+
+    pub fn forget_mirror(&mut self, node: &NodeId) {
+        self.secrets.mirrors.remove(node);
+    }
+
+    pub fn use_grants(&mut self, node: &NodeId, job: &str, names: &[&str]) {
+        let names: Vec<String> = names.iter().map(|n| n.to_string()).collect();
+        self.consume_grants(node, job, &names);
     }
 }

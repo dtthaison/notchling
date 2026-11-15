@@ -4,6 +4,8 @@ use std::time::Duration;
 
 use serde_json::{json, Value};
 
+use super::secrets::{Path as SecretPath, RESYNC_MS};
+use super::secrets_scan::ser;
 use super::world::World;
 use crate::cluster::id::{qualify, NodeId, Qualified};
 use crate::cluster::jobs::Job;
@@ -76,6 +78,8 @@ impl World {
     }
 
     pub(super) fn raise_item(&mut self, n: &NodeId, item: Item) {
+        let text = ser(&item);
+        self.secrets.record(n, SecretPath::Inbox, &text);
         let changes = self.secrets.books.entry(n.clone()).or_default().raise(item);
         self.mirror_changes(n, &changes);
     }
@@ -97,6 +101,13 @@ impl World {
     pub(super) fn mirror_changes(&mut self, n: &NodeId, changes: &[Change]) {
         self.note_own(n, changes);
         for target in self.mirror_targets(n) {
+            if !self
+                .secrets
+                .synced
+                .contains_key(&(n.clone(), target.clone()))
+            {
+                continue;
+            }
             for change in changes {
                 let args = match change {
                     Change::Raised(i) | Change::Updated(i) => {
@@ -153,6 +164,7 @@ impl World {
 
     pub(super) fn mirrors_lost(&mut self, n: &NodeId) {
         self.secrets.mirrors.remove(n);
+        self.secrets.synced.retain(|(owner, _), _| owner != n);
         let own: Vec<Change> = self
             .secrets
             .books
@@ -160,38 +172,41 @@ impl World {
             .map(|b| b.items().into_iter().map(Change::Updated).collect())
             .unwrap_or_default();
         self.note_own(n, &own);
-        let owners: Vec<NodeId> = self
-            .secrets
-            .books
-            .iter()
-            .filter(|(o, b)| *o != n && !b.items().is_empty())
-            .map(|(o, _)| o.clone())
-            .collect();
-        for owner in owners {
-            self.secrets.resync.insert((owner, n.clone()));
-        }
     }
 
+    /// The daemon's outbox: a full sync to a target it has not synced (or
+    /// not in the last 60 s), changes only to synced ones, a target that
+    /// goes offline dropped from the synced set.
     pub(super) fn secrets_resync(&mut self, owner: &NodeId) {
-        let pairs: Vec<NodeId> = self
-            .secrets
-            .resync
-            .iter()
-            .filter(|(o, t)| o == owner && self.is_up(t) && self.net.linked(owner, t))
-            .map(|(_, t)| t.clone())
+        let now = self.now;
+        let targets: Vec<NodeId> = self
+            .mirror_targets(owner)
+            .into_iter()
+            .filter(|t| self.is_up(t) && self.net.linked(owner, t))
             .collect();
-        let items = self
+        self.secrets.synced.retain(|(o, t), at| {
+            o != owner || (targets.contains(t) && now.saturating_sub(*at) < RESYNC_MS)
+        });
+        let items: Vec<Item> = self
             .secrets
             .books
             .get(owner)
-            .map(|b| b.items())
+            .map(|b| {
+                b.items()
+                    .into_iter()
+                    .filter(|i| i.state == State::Open)
+                    .collect()
+            })
             .unwrap_or_default();
-        let targets = self.mirror_targets(owner);
-        for target in pairs {
-            self.secrets.resync.remove(&(owner.clone(), target.clone()));
-            if targets.contains(&target) {
-                let args = json!({"event": "sync", "items": items});
-                self.forward_node_op(owner, &target, "node.inbox", args);
+        for target in targets {
+            let key = (owner.clone(), target.clone());
+            if self.secrets.synced.contains_key(&key) {
+                continue;
+            }
+            self.secrets.synced.insert(key, now);
+            let args = json!({"event": "sync", "items": items});
+            self.forward_node_op(owner, &target, "node.inbox", args);
+            if !items.is_empty() {
                 self.secrets.stats.resynced += 1;
             }
         }
@@ -278,11 +293,18 @@ impl World {
         for argv in calls {
             self.secrets.login_runs.push((node.clone(), argv));
         }
-        let item = Item {
+        let detail = format!("Run claude on {name} and sign in with /login");
+        let item = self.login_item(node, &detail);
+        self.raise_item(node, item);
+    }
+
+    pub(super) fn login_item(&self, node: &NodeId, detail: &str) -> Item {
+        let name = self.name_of(node);
+        Item {
             id: format!("login-needed:{name}:claude"),
             kind: Kind::LoginNeeded,
             title: format!("Claude Code needs a sign-in on {name}"),
-            detail: format!("Run claude on {name} and sign in with /login"),
+            detail: detail.to_string(),
             source: Source {
                 node: Some(node.to_string()),
                 session: None,
@@ -301,7 +323,6 @@ impl World {
             seen: false,
             open: None,
             closed_ms: None,
-        };
-        self.raise_item(node, item);
+        }
     }
 }

@@ -114,10 +114,11 @@ impl World {
 
     pub(super) fn step(&mut self, n: &NodeId, input: Input) {
         let before = self.core(n).and_then(|c| c.highest_term().cloned());
-        let effects = match self.nodes.get_mut(n).and_then(|x| x.core.as_mut()) {
+        let mut effects = match self.nodes.get_mut(n).and_then(|x| x.core.as_mut()) {
             Some(core) => core.step(input),
             None => return,
         };
+        effects.extend(self.take_planted(n));
         self.after_step(n, before, effects);
     }
 
@@ -177,6 +178,7 @@ impl World {
                     term,
                 } => self.run_local(n, (call, &op, &args, &origin), &term, before.as_ref()),
                 Effect::Answer { local, result } => {
+                    self.consume_on_answer(n, local, &result);
                     if self.secrets.waiting.contains_key(&(n.clone(), local)) {
                         let ev = BrokerEv::Answer {
                             node: n.clone(),
@@ -204,7 +206,6 @@ impl World {
                 self.scan_persisted(n, &text);
             }
         }
-        self.observe_jobs(n);
         let after = self.core(n).and_then(|c| c.highest_term().cloned());
         if let (Some(b), Some(a)) = (&before, &after) {
             if a < b && self.violation.is_none() {
