@@ -34,6 +34,7 @@ Most of them come from the design, [revision 2](https://github.com/dtthaison/not
 | [XXXX](XXXX-tool-versions-follow-the-mac.md) | Tool versions follow the Mac: workers run the Mac's checked versions, rolled out by one click | Proposed |
 | [XXXX](XXXX-sparkle-and-one-release-key.md) | Sparkle for the Rust app, and one EdDSA key for the appcast and the worker manifest; amends 0010 | Proposed |
 | [XXXX](XXXX-cluster-v1-nodes.md) | Cluster v1 nodes: one primary, standbys and workers, a journaled state and a node tier | Proposed |
+| [XXXX](XXXX-skills-follow-the-app-data-follows-the-source.md) | Skills follow the app, data follows the source: skill text without changing data, commands as the stable contract, model data from catalog, override and live lists | Accepted |
 
 0001 was written before records had a Status section. Its status is Accepted.
 
