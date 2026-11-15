@@ -441,6 +441,7 @@ chat-panel-file-cut = Only the first 1 MB is shown. Open it in its app to read t
 chat-panel-reload = Reload the page
 chat-panel-open-browser = Open in Browser
 chat-panel-show-in-finder = Show in Finder
+chat-panel-show-folder = Show this page's folder in Finder
 chat-panel-close = Close
 chat-panel-back-to-details = Back to Details
 

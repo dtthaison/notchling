@@ -585,6 +585,7 @@ pub fn render(
         .or_else(|| shown.html.as_ref().map(|h| h.path.clone()));
     let is_diff = shown.diff.is_some();
     let is_file = file_path.is_some() || is_diff;
+    let reveal_target = crate::chat::page_panel::reveal_target(file_path.as_deref(), &shown.opens);
     let subtitle = match &shown.html {
         Some(html) if html.is_page() => html.page_subtitle.clone(),
         _ => shown.subtitle.clone(),
@@ -604,6 +605,33 @@ pub fn render(
         .flex_1()
         .min_w(px(0.0))
         .elide();
+    // A saved page or a file: the name reveals it in Finder, like the Folder tool.
+    let title = match reveal_target.clone() {
+        Some(path) => {
+            let tip = if file_path.is_some() {
+                t::chat::panel_show_in_finder()
+            } else {
+                t::chat::panel_show_folder()
+            };
+            div()
+                .flex_1()
+                .min_w(px(0.0))
+                .flex()
+                .child(gate::tip_text(
+                    div()
+                        .id("page-panel-title")
+                        .min_w(px(0.0))
+                        .overflow_hidden()
+                        .cursor_pointer()
+                        .child(title)
+                        .on_click(move |_, _, cx| cx.reveal_path(&path)),
+                    tip.into(),
+                    a,
+                ))
+                .into_any_element()
+        }
+        None => title.into_any_element(),
+    };
     let tool = |id: &'static str, shape: Icon, tip: &'static str| {
         gate::tip_text(
             icon_button(
@@ -638,7 +666,7 @@ pub fn render(
         )
         .on_click(move |_, _, cx| cx.open_url(&link))
     });
-    let reveal = file_path.clone().map(|path| {
+    let reveal = reveal_target.map(|path| {
         tool(
             "page-panel-reveal",
             Icon::Folder,
