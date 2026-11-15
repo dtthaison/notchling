@@ -90,6 +90,13 @@ pub fn sent_since(path: &str, text: &str, since_ms: i64) -> Option<bool> {
 pub(super) struct Queue {
     pub(super) waiting: Vec<String>,
     pub(super) batch: Vec<String>,
+    credit: Vec<String>,
+}
+
+pub(super) fn names(entry: &str, line: &str) -> bool {
+    let bash = between(line, "<bash-input>", "</bash-input>", true);
+    squeezed(&cut_chips(entry)) == squeezed(&cut_chips(line))
+        || bash.is_some_and(|command| squeezed(&command) == squeezed(entry))
 }
 
 impl Queue {
@@ -100,22 +107,81 @@ impl Queue {
             Some("dequeue") if !self.waiting.is_empty() => {
                 self.batch.push(self.waiting.remove(0));
             }
-            Some("popAll") => {
-                self.waiting.clear();
-                self.batch.clear();
-            }
-            Some("remove") => self.leave(content),
+            Some("popAll") => self.turn_end(),
+            Some("remove") => self.remove(content),
             _ => {}
         }
     }
 
-    fn leave(&mut self, content: Option<&str>) {
-        let Some(content) = content.map(squeezed) else {
+    pub(super) fn turn_end(&mut self) {
+        self.waiting.clear();
+        self.batch.clear();
+        self.credit.clear();
+    }
+
+    fn drop_entry(&mut self, text: &str) -> bool {
+        if let Some(at) = self.waiting.iter().position(|e| names(e, text)) {
+            self.waiting.remove(at);
+            return true;
+        }
+        if let Some(at) = self.batch.iter().position(|e| names(e, text)) {
+            self.batch.remove(at);
+            return true;
+        }
+        false
+    }
+
+    pub(super) fn taken_in_turn(&mut self, text: &str) {
+        if self.drop_entry(text) {
+            self.credit.push(squeezed(text));
+        }
+    }
+
+    fn remove(&mut self, content: Option<&str>) {
+        let Some(content) = content else {
             return;
         };
-        if let Some(at) = self.waiting.iter().position(|e| squeezed(e) == content) {
-            self.waiting.remove(at);
+        let key = squeezed(content);
+        if let Some(at) = self.credit.iter().position(|c| *c == key) {
+            self.credit.remove(at);
+            return;
         }
+        self.drop_entry(content);
+    }
+
+    pub(super) fn other_line(&mut self, text: &str) {
+        let Some(first) = self.batch.first() else {
+            return;
+        };
+        let command = text.contains("<command-name>") && first.trim_start().starts_with('/');
+        if self.batch.len() == 1 && (names(first, text) || command) {
+            self.batch.clear();
+        } else if self.batch.len() > 1 && squeezed(text) == squeezed(&self.batch.join("\n")) {
+            self.batch.clear();
+        } else if self.batch.len() == 1 {
+            if let Some(at) = self.waiting.iter().position(|e| names(e, text)) {
+                let first = self.batch.remove(0);
+                self.waiting.remove(at);
+                self.waiting.insert(0, first);
+            }
+        }
+    }
+
+    pub(super) fn delivered_in_result(&mut self, obj: &Value) {
+        let Some(blocks) = obj.pointer("/message/content").and_then(Value::as_array) else {
+            return;
+        };
+        let texts: Vec<String> = blocks
+            .iter()
+            .filter(|b| str_of(b, "type") == Some("text"))
+            .filter_map(|b| str_of(b, "text"))
+            .map(squeezed)
+            .collect();
+        self.waiting.retain(|entry| {
+            let key = squeezed(entry);
+            let notice = key.starts_with('<') && !key.starts_with("<bash-input>");
+            !(notice && !key.is_empty() && texts.iter().any(|t| t.contains(&key)))
+        });
     }
 }
 
@@ -231,7 +297,11 @@ pub fn count_since(path: &str, message: &Message, since_ms: i64) -> Option<Seen>
                     seen.enqueued += 1;
                 }
             }
-            Some("user") if !flag(&obj, "isSidechain") && !carries_result(&obj) => {
+            Some("user") if carries_result(&obj) => queue.delivered_in_result(&obj),
+            Some("system") if str_of(&obj, "subtype") == Some("turn_duration") => {
+                queue.turn_end();
+            }
+            Some("user") => {
                 let text = said(&obj);
                 let images = image_blocks(obj.pointer("/message/content"));
                 if took_prompt(&obj, &text, images) {
@@ -240,7 +310,7 @@ pub fn count_since(path: &str, message: &Message, since_ms: i64) -> Option<Seen>
                         seen.taken += taken;
                     }
                 } else {
-                    queue.batch.clear();
+                    queue.other_line(&text);
                     if counting && command_matches(message, &text) {
                         seen.taken += 1;
                     }
@@ -248,7 +318,7 @@ pub fn count_since(path: &str, message: &Message, since_ms: i64) -> Option<Seen>
             }
             Some("system") if str_of(&obj, "subtype") == Some("local_command") => {
                 let text = str_of(&obj, "content").unwrap_or_default();
-                queue.batch.clear();
+                queue.other_line(text);
                 if counting && command_matches(message, text) {
                     seen.taken += 1;
                 }
@@ -257,14 +327,9 @@ pub fn count_since(path: &str, message: &Message, since_ms: i64) -> Option<Seen>
                 let Some((text, images)) = attachment_text(&obj) else {
                     continue;
                 };
-                queue.leave(Some(&text));
-                if took_prompt(&obj, &text, images) {
-                    let taken = takes(message, &mut queue, &text, images);
-                    if counting {
-                        seen.taken += taken;
-                    }
-                } else {
-                    queue.batch.clear();
+                queue.taken_in_turn(&text);
+                if counting && took_prompt(&obj, &text, images) {
+                    seen.taken += usize::from(line_matches(message, &text, images));
                 }
             }
             _ => {}

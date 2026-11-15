@@ -308,3 +308,52 @@ fn pop_all_clears_a_dequeued_entry_before_a_later_merge() {
     assert_eq!(count_lines(&lines, "a", 0), seen(1, 1));
     assert_eq!(count_lines(&lines, "b", 0), seen(1, 1));
 }
+
+#[test]
+fn an_interrupt_line_between_dequeue_and_merged_prompt_keeps_the_batch() {
+    let lines = [
+        op("enqueue", Some("a"), 1),
+        op("enqueue", Some("b"), 2),
+        op("dequeue", None, 3),
+        op("dequeue", None, 3),
+        user(json!("[Request interrupted by user for tool use]"), 4),
+        user(json!("a\nb"), 5),
+    ];
+    assert_eq!(count_lines(&lines, "a", 0), seen(1, 1));
+    assert_eq!(count_lines(&lines, "b", 0), seen(1, 1));
+}
+
+#[test]
+fn a_notification_delivered_in_a_tool_result_does_not_break_a_later_merge() {
+    let note = "<task-notification>done</task-notification>";
+    let delivered = user(
+        json!([{"type": "tool_result", "tool_use_id": "t", "content": "ok"},
+            {"type": "text", "text": note}]),
+        4,
+    );
+    let lines = [
+        op("enqueue", Some(note), 1),
+        op("enqueue", Some("a"), 2),
+        op("enqueue", Some("b"), 3),
+        delivered,
+        op("dequeue", None, 5),
+        op("dequeue", None, 5),
+        user(json!("a\nb"), 6),
+    ];
+    assert_eq!(count_lines(&lines, "a", 0), seen(1, 1));
+}
+
+#[test]
+fn a_turn_end_forgets_a_stale_dequeue_for_a_later_merge() {
+    let lines = [
+        op("enqueue", Some("x"), 1),
+        op("dequeue", None, 2),
+        json!({"type": "system", "subtype": "turn_duration", "timestamp": stamp(3)}).to_string(),
+        op("enqueue", Some("a"), 4),
+        op("enqueue", Some("b"), 5),
+        op("dequeue", None, 6),
+        op("dequeue", None, 6),
+        user(json!("a\nb"), 7),
+    ];
+    assert_eq!(count_lines(&lines, "a", 0), seen(1, 1));
+}

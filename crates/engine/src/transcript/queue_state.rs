@@ -1,8 +1,7 @@
-use super::message::{cut_chips, Message};
+use super::message::Message;
 use super::restart::{carries_result, flag, WINDOW_BYTES};
-use super::sent::{attachment_text, entry_matches, said, squeezed, Queue};
+use super::sent::{attachment_text, entry_matches, names, said, Queue};
 use super::tail::read_lines;
-use super::text::between;
 use super::typed::typed_prompt;
 use super::util::{parse_object, str_of};
 use serde_json::Value;
@@ -22,12 +21,6 @@ impl QueueState {
     }
 }
 
-fn names(entry: &str, line: &str) -> bool {
-    let bash = between(line, "<bash-input>", "</bash-input>", true);
-    squeezed(&cut_chips(entry)) == squeezed(&cut_chips(line))
-        || bash.is_some_and(|command| squeezed(&command) == squeezed(entry))
-}
-
 fn prompt_like(entry: &str) -> bool {
     typed_prompt(&Value::Null, entry)
 }
@@ -37,28 +30,33 @@ fn user_line(queue: &mut Queue, obj: &Value) {
     if text.trim().is_empty() {
         return;
     }
+    if !typed_prompt(obj, &text) {
+        queue.other_line(&text);
+        return;
+    }
     let batch = std::mem::take(&mut queue.batch);
-    if batch.is_empty() {
-        if typed_prompt(obj, &text) {
-            queue.waiting.clear();
+    if batch.len() > 1 {
+        return;
+    }
+    let listed = queue.waiting.iter().position(|e| names(e, &text));
+    let Some(first) = batch.first() else {
+        match listed {
+            Some(at) => {
+                queue.waiting.remove(at);
+            }
+            None => queue.waiting.clear(),
         }
         return;
-    }
-    if squeezed(&text) == squeezed(&batch.join("\n")) || batch.len() != 1 {
+    };
+    if names(first, &text) {
         return;
     }
-    if names(&batch[0], &text) {
-        return;
-    }
-    if let Some(at) = queue.waiting.iter().position(|e| names(e, &text)) {
-        queue.waiting.remove(at);
-        queue.waiting.insert(0, batch[0].clone());
-    }
-}
-
-fn leave(queue: &mut Queue, text: &str) {
-    if let Some(at) = queue.waiting.iter().position(|e| names(e, text)) {
-        queue.waiting.remove(at);
+    match listed {
+        Some(at) => {
+            queue.waiting.remove(at);
+            queue.waiting.insert(0, first.clone());
+        }
+        None => queue.waiting.clear(),
     }
 }
 
@@ -78,6 +76,11 @@ pub fn queue_state(path: &str) -> Option<QueueState> {
             continue;
         };
         let obj = Value::Object(map);
+        let set_aside =
+            flag(&obj, "isSidechain") || flag(&obj, "isMeta") || flag(&obj, "isCompactSummary");
+        if set_aside {
+            continue;
+        }
         match str_of(&obj, "type") {
             Some("queue-operation") => {
                 if is_known_operation(&obj) {
@@ -86,21 +89,20 @@ pub fn queue_state(path: &str) -> Option<QueueState> {
                     unknown += 1;
                 }
             }
-            Some("user") if !flag(&obj, "isSidechain") && !carries_result(&obj) => {
-                user_line(&mut queue, &obj);
+            Some("user") if carries_result(&obj) => queue.delivered_in_result(&obj),
+            Some("user") => user_line(&mut queue, &obj),
+            Some("system") if str_of(&obj, "subtype") == Some("turn_duration") => {
+                queue.turn_end();
             }
-            Some("system")
-                if str_of(&obj, "subtype") == Some("turn_duration")
-                    && !flag(&obj, "isSidechain") =>
-            {
-                queue.waiting.clear();
+            Some("system") if str_of(&obj, "subtype") == Some("local_command") => {
+                queue.other_line(str_of(&obj, "content").unwrap_or_default());
             }
             Some("attachment")
                 if obj.pointer("/attachment/type").and_then(Value::as_str)
                     == Some("queued_command") =>
             {
                 match attachment_text(&obj) {
-                    Some((text, _)) => leave(&mut queue, &text),
+                    Some((text, _)) => queue.taken_in_turn(&text),
                     None => unknown += 1,
                 }
             }

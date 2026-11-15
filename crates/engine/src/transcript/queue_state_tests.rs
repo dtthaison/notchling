@@ -141,3 +141,168 @@ fn listed_matches_a_bash_message_and_counts_copies() {
     assert_eq!(got.listed(&message("! ls -la")), 1);
     assert_eq!(got.listed(&message("ok")), 2);
 }
+
+fn stamp(second: u32) -> String {
+    format!("2026-11-15T10:00:{second:02}.000Z")
+}
+
+fn op(operation: &str, content: Option<&str>, second: u32) -> String {
+    let mut line =
+        json!({"type":"queue-operation","operation":operation,"timestamp":stamp(second)});
+    if let Some(content) = content {
+        line["content"] = json!(content);
+    }
+    line.to_string()
+}
+
+fn typed(content: &str, second: u32) -> String {
+    json!({"type":"user","timestamp":stamp(second),"message":{"role":"user","content":content}})
+        .to_string()
+}
+
+fn taken_in_turn(prompt: &str, second: u32) -> String {
+    json!({"type":"attachment","timestamp":stamp(second),
+        "attachment":{"type":"queued_command","prompt":prompt,"commandMode":"prompt"}})
+    .to_string()
+}
+
+fn turn_end(second: u32) -> String {
+    json!({"type":"system","subtype":"turn_duration","timestamp":stamp(second)}).to_string()
+}
+
+fn waiting(lines: &[String]) -> Vec<String> {
+    raw(lines).unwrap().waiting
+}
+
+#[test]
+fn lines_that_are_not_the_prompt_leave_the_dequeue_alone() {
+    let result = json!({"type":"user","timestamp":stamp(4),"message":{"role":"user","content":[
+        {"type":"tool_result","tool_use_id":"t","content":"ok"}]}})
+    .to_string();
+    let meta = json!({"type":"user","isMeta":true,"timestamp":stamp(5),
+        "message":{"role":"user","content":"Caveat: output below"}})
+    .to_string();
+    let summary = json!({"type":"user","isCompactSummary":true,"timestamp":stamp(5),
+        "message":{"role":"user","content":"This session is being continued"}})
+    .to_string();
+    let others = [
+        typed("[Request interrupted by user for tool use]", 5),
+        typed("<local-command-stdout>done</local-command-stdout>", 5),
+        typed("<bash-stdout>x</bash-stdout><bash-stderr></bash-stderr>", 5),
+        meta,
+        summary,
+    ];
+    for other in others {
+        let lines = [
+            enqueue(1, "first"),
+            enqueue(2, "second"),
+            op("dequeue", None, 3),
+            result.clone(),
+            other.clone(),
+            typed("first", 6),
+        ];
+        assert_eq!(waiting(&lines), ["second"], "{other}");
+    }
+}
+
+#[test]
+fn pop_all_forgets_the_dequeued_entry() {
+    let lines = [
+        enqueue(1, "a"),
+        op("dequeue", None, 2),
+        op("popAll", None, 3),
+        enqueue(4, "b"),
+        enqueue(5, "c"),
+        typed("b", 6),
+    ];
+    assert_eq!(waiting(&lines), ["c"]);
+}
+
+#[test]
+fn turn_end_forgets_the_dequeued_entry() {
+    let lines = [
+        enqueue(1, "a"),
+        op("dequeue", None, 2),
+        turn_end(3),
+        enqueue(4, "b"),
+        enqueue(5, "c"),
+        typed("b", 6),
+    ];
+    assert_eq!(waiting(&lines), ["c"]);
+}
+
+#[test]
+fn an_attachment_takes_a_dequeued_entry_out_of_the_batch() {
+    let lines = [
+        enqueue(1, "a"),
+        op("dequeue", None, 2),
+        taken_in_turn("a", 3),
+        enqueue(4, "b"),
+        enqueue(5, "c"),
+        typed("b", 6),
+    ];
+    assert_eq!(waiting(&lines), ["c"]);
+}
+
+#[test]
+fn a_prompt_that_matches_nothing_clears_the_queue_even_after_a_dequeue() {
+    let lines = [
+        enqueue(1, "a"),
+        enqueue(2, "b"),
+        op("dequeue", None, 3),
+        typed("something else entirely", 4),
+    ];
+    assert!(waiting(&lines).is_empty());
+}
+
+#[test]
+fn an_entry_taken_in_turn_and_removed_counts_once() {
+    let lines = [
+        enqueue(1, "yes"),
+        enqueue(2, "yes"),
+        taken_in_turn("yes", 3),
+        op("remove", Some("yes"), 4),
+    ];
+    assert_eq!(waiting(&lines), ["yes"]);
+}
+
+#[test]
+fn a_remove_with_no_credit_still_removes_one_copy() {
+    let lines = [
+        enqueue(1, "yes"),
+        enqueue(2, "yes"),
+        op("remove", Some("yes"), 3),
+    ];
+    assert_eq!(waiting(&lines), ["yes"]);
+}
+
+#[test]
+fn a_credit_does_not_outlive_the_turn() {
+    let lines = [
+        enqueue(1, "yes"),
+        taken_in_turn("yes", 2),
+        turn_end(3),
+        enqueue(4, "yes"),
+        op("remove", Some("yes"), 5),
+    ];
+    assert!(waiting(&lines).is_empty());
+}
+
+#[test]
+fn a_notification_delivered_in_a_tool_result_leaves_the_queue() {
+    let note = "<task-notification>\n<task-id>b1</task-id>\n<status>completed</status>\n</task-notification>";
+    let delivered = json!({"type":"user","timestamp":stamp(5),"message":{"role":"user","content":[
+        {"type":"tool_result","tool_use_id":"t","content":"ok"},
+        {"type":"text","text":note}]}})
+    .to_string();
+    let lines = [
+        enqueue(1, note),
+        enqueue(2, "a"),
+        enqueue(3, "b"),
+        delivered,
+        op("dequeue", None, 6),
+        op("dequeue", None, 6),
+        typed("a\nb", 7),
+    ];
+    assert!(waiting(&lines).is_empty());
+}
