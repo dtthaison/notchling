@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
 
+use super::held::{Delivered, Held, HeldQueue};
 use super::id::NodeId;
 use super::jobs::Job;
 use super::members::{Member, Term};
@@ -86,6 +87,94 @@ pub fn open_inbox(dir: &Path, create: bool) -> Result<Option<Connection>, String
     };
     db.execute_batch(INBOX_TABLE).map_err(|e| e.to_string())?;
     Ok(Some(db))
+}
+
+const HELD_STATE: &str = "held";
+const DELIVERED_STATE: &str = "delivered";
+
+const HELD_TABLE: &str = "CREATE TABLE IF NOT EXISTS held (
+    id TEXT PRIMARY KEY, seq INTEGER NOT NULL, state TEXT NOT NULL,
+    confirmed INTEGER NOT NULL, value TEXT NOT NULL)";
+
+pub fn open_held(dir: &Path, create: bool) -> Result<Option<Connection>, String> {
+    let Some(db) = open(dir, create)? else {
+        return Ok(None);
+    };
+    db.execute_batch(HELD_TABLE).map_err(|e| e.to_string())?;
+    Ok(Some(db))
+}
+
+pub fn load_held(cluster_dir: &Path) -> Result<HeldQueue, String> {
+    let Some(db) = open_held(cluster_dir, false)? else {
+        return Ok(HeldQueue::default());
+    };
+    let mut query = db
+        .prepare("SELECT state, confirmed, value FROM held ORDER BY seq")
+        .map_err(|e| e.to_string())?;
+    let rows = query
+        .query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, i64>(1)?,
+                r.get::<_, String>(2)?,
+            ))
+        })
+        .map_err(|e| e.to_string())?;
+    let mut entries = Vec::new();
+    let mut ranked: Vec<(i64, String)> = Vec::new();
+    let mut delivered = Vec::new();
+    for row in rows {
+        let (state, rank, value) = row.map_err(|e| e.to_string())?;
+        match state.as_str() {
+            HELD_STATE => {
+                let held: Held = read(&value)?;
+                if rank > 0 {
+                    ranked.push((rank, held.id.clone()));
+                }
+                entries.push(held);
+            }
+            DELIVERED_STATE => delivered.push(read::<Delivered>(&value)?),
+            other => return Err(format!("held row in an unknown state: {other}")),
+        }
+    }
+    ranked.sort();
+    Ok(HeldQueue {
+        entries,
+        confirmed: ranked.into_iter().map(|(_, id)| id).collect(),
+        delivered,
+    })
+}
+
+pub fn save_held(cluster_dir: &Path, queue: &HeldQueue) -> Result<(), String> {
+    let Some(mut db) = open_held(cluster_dir, true)? else {
+        return Err("cluster.db could not be opened".to_string());
+    };
+    let tx = db
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .map_err(|e| e.to_string())?;
+    tx.execute("DELETE FROM held", [])
+        .map_err(|e| e.to_string())?;
+    let insert = "INSERT INTO held (id, seq, state, confirmed, value) VALUES (?1, ?2, ?3, ?4, ?5)";
+    for (seq, done) in queue.delivered.iter().enumerate() {
+        tx.execute(
+            insert,
+            params![done.id, seq as i64, DELIVERED_STATE, 0, text(done)?],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    for (seq, held) in queue.entries.iter().enumerate() {
+        let rank = queue
+            .confirmed
+            .iter()
+            .position(|c| *c == held.id)
+            .map_or(0, |at| at as i64 + 1);
+        tx.execute(
+            insert,
+            params![held.id, seq as i64, HELD_STATE, rank, text(held)?],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    tx.commit().map_err(|e| e.to_string())
 }
 
 fn text<T: serde::Serialize>(value: &T) -> Result<String, String> {

@@ -5,6 +5,7 @@ pub mod fence;
 pub mod grant_files;
 mod grant_files_sys;
 pub mod grants;
+pub mod held;
 pub mod id;
 pub mod jobs;
 pub mod join;
@@ -46,6 +47,8 @@ mod grant_files_hostile_tests;
 mod grant_files_tests;
 #[cfg(test)]
 mod grants_tests;
+#[cfg(test)]
+mod held_tests;
 #[cfg(test)]
 mod id_tests;
 #[cfg(test)]

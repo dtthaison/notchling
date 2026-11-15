@@ -1,0 +1,141 @@
+use serde_json::json;
+
+use super::held::{Held, HeldQueue, HeldTarget, HELD_STALE_MS, MAX_DELIVERED};
+
+fn held(id: &str, device: &str, request: &str, at_ms: i64) -> Held {
+    Held {
+        id: id.to_string(),
+        op: "session.reply".to_string(),
+        args: json!({"text": id}),
+        target: HeldTarget::Session("s1".to_string()),
+        device: device.to_string(),
+        request: request.to_string(),
+        at_ms,
+    }
+}
+
+fn ids(items: &[Held]) -> Vec<&str> {
+    items.iter().map(|h| h.id.as_str()).collect()
+}
+
+#[test]
+fn unreachable_primary_holds_in_order() {
+    let mut queue = HeldQueue::default();
+    for (n, at) in [("a", 10), ("b", 20), ("c", 30)] {
+        assert_eq!(queue.hold(held(n, "d1", n, at)), n);
+    }
+    assert_eq!(ids(&queue.list()), ["a", "b", "c"]);
+    let taken = queue.take_all();
+    assert_eq!(ids(&taken), ["a", "b", "c"]);
+    assert!(queue.list().is_empty());
+    assert!(queue.take_all().is_empty());
+}
+
+#[test]
+fn same_request_twice_is_held_once() {
+    let mut queue = HeldQueue::default();
+    assert_eq!(queue.hold(held("a", "d1", "r1", 10)), "a");
+    assert_eq!(queue.hold(held("b", "d1", "r1", 20)), "a");
+    assert_eq!(queue.hold(held("c", "d2", "r1", 30)), "c");
+    assert_eq!(ids(&queue.list()), ["a", "c"]);
+    assert_eq!(queue.list()[0].at_ms, 10);
+}
+
+#[test]
+fn a_request_repeated_after_delivery_is_not_held_again() {
+    let mut queue = HeldQueue::default();
+    queue.hold(held("a", "d1", "r1", 10));
+    queue.take_all();
+    assert_eq!(queue.hold(held("b", "d1", "r1", 20)), "a");
+    assert!(queue.list().is_empty());
+    assert_eq!(queue.hold(held("c", "d1", "r2", 30)), "c");
+}
+
+#[test]
+fn held_over_an_hour_waits_for_confirm() {
+    let mut queue = HeldQueue::default();
+    queue.hold(held("old", "d1", "r1", 0));
+    queue.hold(held("new", "d1", "r2", 1_000));
+    let now = HELD_STALE_MS;
+    assert!(queue.waiting(now).is_empty());
+    let now = HELD_STALE_MS + 1;
+    assert_eq!(ids(&queue.waiting(now)), ["old"]);
+    assert_eq!(ids(&queue.take_due(now)), ["new"]);
+    assert_eq!(ids(&queue.list()), ["old"]);
+    assert_eq!(ids(&queue.waiting(now)), ["old"]);
+    assert!(queue.take_due(now).is_empty());
+}
+
+#[test]
+fn confirm_sends_a_waiting_entry() {
+    let mut queue = HeldQueue::default();
+    queue.hold(held("old1", "d1", "r1", 0));
+    queue.hold(held("old2", "d1", "r2", 1));
+    queue.hold(held("new", "d1", "r3", HELD_STALE_MS));
+    let now = HELD_STALE_MS + 5;
+    assert!(queue.confirm("old2"));
+    assert!(!queue.confirm("nothing"));
+    assert_eq!(ids(&queue.waiting(now)), ["old1"]);
+    assert_eq!(ids(&queue.take_due(now)), ["new", "old2"]);
+    assert_eq!(ids(&queue.list()), ["old1"]);
+    assert!(queue.confirm("old1"));
+    assert_eq!(ids(&queue.take_due(now)), ["old1"]);
+    assert!(queue.list().is_empty());
+}
+
+#[test]
+fn waiting_entry_cancels() {
+    let mut queue = HeldQueue::default();
+    queue.hold(held("old", "d1", "r1", 0));
+    let now = HELD_STALE_MS + 1;
+    assert_eq!(ids(&queue.waiting(now)), ["old"]);
+    assert!(queue.cancel("old"));
+    assert!(queue.waiting(now).is_empty());
+    assert!(queue.take_due(now).is_empty());
+    assert!(!queue.was_delivered("old"));
+}
+
+#[test]
+fn cancel_removes_a_held_command() {
+    let mut queue = HeldQueue::default();
+    queue.hold(held("a", "d1", "r1", 1));
+    queue.hold(held("b", "d1", "r2", 2));
+    assert!(queue.cancel("a"));
+    assert_eq!(ids(&queue.list()), ["b"]);
+    assert!(!queue.cancel("a"));
+    assert!(!queue.cancel("never"));
+    assert!(!queue.was_delivered("a"));
+}
+
+#[test]
+fn cancel_after_delivery_reports_delivered() {
+    let mut queue = HeldQueue::default();
+    queue.hold(held("a", "d1", "r1", 1));
+    queue.hold(held("b", "d1", "r2", 2));
+    queue.take_due(3);
+    assert!(!queue.cancel("a"));
+    assert!(queue.was_delivered("a"));
+    assert!(queue.was_delivered("b"));
+    assert!(!queue.was_delivered("c"));
+}
+
+#[test]
+fn the_delivered_record_keeps_only_the_newest() {
+    let mut queue = HeldQueue::default();
+    for n in 0..MAX_DELIVERED + 2 {
+        queue.hold(held(&format!("h{n}"), "d1", &format!("r{n}"), 1));
+        queue.take_all();
+    }
+    assert!(!queue.was_delivered("h0"));
+    assert!(!queue.was_delivered("h1"));
+    assert!(queue.was_delivered("h2"));
+    assert!(queue.was_delivered(&format!("h{}", MAX_DELIVERED + 1)));
+}
+
+#[test]
+fn take_all_sends_a_waiting_entry_too() {
+    let mut queue = HeldQueue::default();
+    queue.hold(held("old", "d1", "r1", 0));
+    queue.hold(held("new", "d1", "r2", HELD_STALE_MS + 9));
+    assert_eq!(ids(&queue.take_all()), ["old", "new"]);
+}

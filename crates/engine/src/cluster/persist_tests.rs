@@ -300,3 +300,100 @@ fn main_sessions_survive_a_reload_and_an_older_db_has_none() {
     assert_eq!(loaded.ended["job-1"], 3);
     assert_eq!(loaded, state);
 }
+
+fn queued(id: &str, request: &str, at_ms: i64) -> crate::cluster::held::Held {
+    crate::cluster::held::Held {
+        id: id.to_string(),
+        op: "session.reply".to_string(),
+        args: json!({"text": id, "n": 1}),
+        target: if request == "r2" {
+            crate::cluster::held::HeldTarget::Primary
+        } else {
+            crate::cluster::held::HeldTarget::Session("s1".to_string())
+        },
+        device: "d1".to_string(),
+        request: request.to_string(),
+        at_ms,
+    }
+}
+
+#[test]
+fn held_survives_restart() {
+    use crate::cluster::held::{HeldQueue, HELD_STALE_MS};
+    let tmp = TempDir::new("cluster-held");
+    let dir = tmp.path("cluster");
+    assert_eq!(super::load_held(&dir).expect("none"), HeldQueue::default());
+    assert!(!dir.exists());
+    let mut queue = HeldQueue::default();
+    queue.hold(queued("done", "r0", 1));
+    queue.take_all();
+    queue.hold(queued("a", "r1", 10));
+    queue.hold(queued("b", "r2", 20));
+    queue.hold(queued("c", "r3", 30));
+    assert!(queue.confirm("b"));
+    super::save_held(&dir, &queue).expect("save");
+    let loaded = super::load_held(&dir).expect("load");
+    assert_eq!(loaded, queue);
+    assert_eq!(
+        loaded
+            .list()
+            .iter()
+            .map(|h| h.id.as_str())
+            .collect::<Vec<_>>(),
+        ["a", "b", "c"]
+    );
+    assert!(loaded.was_delivered("done"));
+    let mut loaded = loaded;
+    assert_eq!(loaded.hold(queued("x", "r0", 99)), "done");
+    let now = 20 + HELD_STALE_MS + 1;
+    assert_eq!(loaded.waiting(now).len(), 1);
+    let due: Vec<String> = loaded.take_due(now).into_iter().map(|h| h.id).collect();
+    assert_eq!(due, ["c", "b"]);
+    super::save_held(&dir, &loaded).expect("save again");
+    let again = super::load_held(&dir).expect("load again");
+    assert_eq!(again, loaded);
+    assert!(again.was_delivered("b") && again.was_delivered("c"));
+    assert_eq!(again.list().len(), 1);
+}
+
+#[test]
+fn an_older_cluster_db_without_the_held_table_still_opens() {
+    let tmp = TempDir::new("cluster-held-older");
+    let dir = tmp.path("cluster");
+    let (state, steps) = built();
+    save_all(&dir, &steps);
+    {
+        let db = rusqlite::Connection::open(dir.join(CLUSTER_DB)).expect("db");
+        let tables: i64 = db
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE name = 'held'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("count");
+        assert_eq!(tables, 0);
+    }
+    assert!(super::load_held(&dir).expect("load").list().is_empty());
+    assert_eq!(load(&dir).expect("load").expect("state"), state);
+    let mut queue = crate::cluster::held::HeldQueue::default();
+    queue.hold(queued("a", "r1", 1));
+    super::save_held(&dir, &queue).expect("save");
+    assert_eq!(load(&dir).expect("load").expect("state"), state);
+    assert_eq!(super::load_held(&dir).expect("load"), queue);
+}
+
+#[test]
+fn a_newer_cluster_db_is_not_opened_for_the_held_queue() {
+    let tmp = TempDir::new("cluster-held-newer");
+    let dir = tmp.path("cluster");
+    fs::create_dir_all(&dir).expect("dir");
+    {
+        let db = rusqlite::Connection::open(dir.join(CLUSTER_DB)).expect("db");
+        db.execute_batch("PRAGMA user_version = 99;").expect("v");
+    }
+    assert_eq!(
+        super::load_held(&dir).err().as_deref(),
+        Some("cluster.db is from a newer Notchling")
+    );
+    assert!(super::save_held(&dir, &Default::default()).is_err());
+}
