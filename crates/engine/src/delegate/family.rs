@@ -14,7 +14,14 @@ fn version_of(segment: &str) -> Option<Vec<u64>> {
     if !segment.starts_with(|c: char| c.is_ascii_digit()) {
         return None;
     }
-    segment.split('.').map(|n| n.parse::<u64>().ok()).collect()
+    let mut parts = segment
+        .split('.')
+        .map(|n| n.parse::<u64>().ok())
+        .collect::<Option<Vec<u64>>>()?;
+    while parts.len() > 1 && parts.last() == Some(&0) {
+        parts.pop();
+    }
+    Some(parts)
 }
 
 pub fn parse(id: &str) -> Option<Family> {

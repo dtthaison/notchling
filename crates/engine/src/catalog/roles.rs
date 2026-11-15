@@ -60,10 +60,17 @@ fn parse_tool(section: &Value, keep_empty: bool) -> ToolRoles {
     let picks = list("picks")
         .iter()
         .filter_map(|p| {
+            let roles = strings(p, "roles");
+            let effort = match text(p, "effort") {
+                Some(effort) => effort,
+                // A removal names only the model.
+                None if keep_empty && roles.is_empty() => String::new(),
+                None => return None,
+            };
             Some(Pick {
                 model: text(p, "model")?,
-                effort: text(p, "effort")?,
-                roles: strings(p, "roles"),
+                effort,
+                roles,
                 note: text(p, "use").unwrap_or_default(),
             })
         })
@@ -84,6 +91,7 @@ fn parse_tool(section: &Value, keep_empty: bool) -> ToolRoles {
                 note: text(a, "use").unwrap_or_default(),
             })
         })
+        .filter(|a| keep_empty || !a.roles.is_empty())
         .collect();
     ToolRoles { picks, avoids }
 }
@@ -179,7 +187,8 @@ impl ToolRoles {
         self.picks.iter().filter(|p| p.model == model).collect()
     }
 
-    /// Roles a model name is marked not for.
+    /// Roles a model name is marked not for, whatever the effort (an entry with an effort
+    /// of its own is left out: see `excluded`).
     pub fn not_for(&self, model: &str) -> Vec<String> {
         let model = model.to_lowercase();
         let mut roles: Vec<String> = Vec::new();
@@ -196,12 +205,23 @@ impl ToolRoles {
         roles
     }
 
-    /// Efforts no model should use for a role, as `(effort, roles)`.
-    pub fn not_for_efforts(&self) -> Vec<(String, Vec<String>)> {
+    /// Whether `model` at `effort` must not be used for `role`: an entry hits when its
+    /// `match` is in the model name (if it has one) and its `effort` is the effort (if it has one).
+    pub fn excluded(&self, model: &str, effort: &str, role: &str) -> bool {
+        let model = model.to_lowercase();
+        let effort = effort.to_lowercase();
+        self.avoids.iter().any(|a| {
+            a.roles.iter().any(|r| r == role)
+                && a.matching.as_ref().is_none_or(|m| model.contains(m))
+                && a.effort.as_ref().is_none_or(|e| *e == effort)
+        })
+    }
+
+    /// Entries that name an effort: `(match, effort, roles)`.
+    pub fn not_for_efforts(&self) -> Vec<(Option<String>, String, Vec<String>)> {
         self.avoids
             .iter()
-            .filter(|a| a.matching.is_none())
-            .filter_map(|a| Some((a.effort.clone()?, a.roles.clone())))
+            .filter_map(|a| Some((a.matching.clone(), a.effort.clone()?, a.roles.clone())))
             .collect()
     }
 }

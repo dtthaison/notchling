@@ -56,3 +56,12 @@ fn nothing_live_and_skips() {
         _ => panic!("one"),
     }
 }
+
+#[test]
+fn a_trailing_zero_is_the_same_version() {
+    let l = live(&["gemini-4.0-hydrogen"]);
+    match newest("gemini-4-hydrogen", &l, |_| false) {
+        Newest::One(id, newer) => assert_eq!((id, newer), ("gemini-4.0-hydrogen", false)),
+        _ => panic!("one"),
+    }
+}

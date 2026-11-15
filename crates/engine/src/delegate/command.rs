@@ -114,9 +114,8 @@ fn usage_error(err: &mut dyn Write, message: &str) -> i32 {
 }
 
 pub fn models_listing(args: &[String], deps: &Deps, out: &mut dyn Write) -> i32 {
-    let (args, role) = role_models::split_for(args);
-    if let Some(role) = role {
-        return role_models::run_for(role, deps, out);
+    if role_models::wants_for(args) {
+        return role_models::run_for(args, false, deps, out);
     }
     let only = args.first().and_then(|a| Tool::from_name(a));
     let roles = Roles::load(deps.catalog_file.as_deref());
@@ -168,9 +167,8 @@ pub fn models_listing(args: &[String], deps: &Deps, out: &mut dyn Write) -> i32 
 }
 
 pub fn models_listing_json(args: &[String], deps: &Deps, out: &mut dyn Write) -> i32 {
-    let (args, role) = role_models::split_for(args);
-    if let Some(role) = role {
-        return role_models::run_for(role, deps, out);
+    if role_models::wants_for(args) {
+        return role_models::run_for(args, true, deps, out);
     }
     let only = args.first().and_then(|a| Tool::from_name(a));
     let roles = Roles::load(deps.catalog_file.as_deref());

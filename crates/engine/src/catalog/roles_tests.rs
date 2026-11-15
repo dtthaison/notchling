@@ -36,7 +36,7 @@ fn the_built_in_catalog_marks_what_is_not_for_review() {
     assert_eq!(r.tool("codex").not_for("gpt-6-luna"), ["review"]);
     assert_eq!(
         agy.not_for_efforts(),
-        [("ultra".to_string(), vec!["review".to_string()])]
+        [(None, "ultra".to_string(), vec!["review".to_string()])]
     );
 }
 
@@ -115,4 +115,43 @@ fn a_missing_or_broken_override_leaves_the_data_file() {
         Roles::load(Some(&temp("odd", r#"{"codex":{"picks":"x","not_for":3}}"#))),
         built
     );
+}
+
+#[test]
+fn an_entry_with_a_match_and_an_effort_excludes_only_that_pair() {
+    let r = Roles::parse(&json!({"antigravity": {"not_for": [
+        {"match": "hydrogen", "effort": "high", "roles": ["review"]},
+        {"effort": "ultra", "roles": ["review"]},
+        {"match": "flash", "roles": ["review"]}]}}));
+    let agy = r.tool("antigravity");
+    assert!(agy.excluded("gemini-4-hydrogen", "high", "review"));
+    assert!(!agy.excluded("gemini-4-hydrogen", "low", "review"));
+    assert!(!agy.excluded("gemini-4-argon", "high", "review"));
+    assert!(!agy.excluded("gemini-4-hydrogen", "high", "spec-check"));
+    assert!(
+        agy.excluded("gemini-4-argon", "ULTRA", "review"),
+        "any model at that effort"
+    );
+    assert!(
+        agy.excluded("gemini-4-flash", "low", "review"),
+        "any effort for that model"
+    );
+    assert_eq!(agy.not_for_efforts().len(), 2);
+    assert!(
+        agy.not_for("gemini-4-hydrogen").is_empty(),
+        "not for it at every effort"
+    );
+}
+
+#[test]
+fn an_override_removes_a_pick_by_naming_only_the_model_and_empty_not_for_entries_are_dropped() {
+    let path = temp(
+        "remove",
+        r#"{"antigravity":{"picks":[{"model":"gemini-4-hydrogen","roles":[]}]}}"#,
+    );
+    let r = Roles::load(Some(&path));
+    assert!(r.tool("antigravity").picks_for("review").is_empty());
+    assert_eq!(r.tool("antigravity").picks_for("spec-check").len(), 1);
+    let parsed = Roles::parse(&json!({"codex": {"not_for": [{"effort": "ultra", "roles": []}]}}));
+    assert!(parsed.tool("codex").avoids.is_empty());
 }
