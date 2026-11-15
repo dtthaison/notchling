@@ -37,7 +37,7 @@ use crate::switches::SwitchFlag;
 use crate::versions_ops::VersionsOps;
 use notchling_cluster_net::{load_or_make, Pins, TcpTls, PORT};
 use notchling_engine::bridge::net::bridge::host_name;
-use notchling_engine::cluster::core::SnapAsk;
+use notchling_engine::cluster::core::{SnapAsk, VERSIONS_GAP_MS};
 use notchling_engine::cluster::failover::Failover;
 use notchling_engine::cluster::versions::BridgeFacts;
 use notchling_engine::cluster::wire::{Origin, OriginTier};
@@ -310,6 +310,7 @@ fn start_node(
         client: cfg!(target_os = "macos"),
         name: node_name(),
         tick: TICK,
+        versions_gap_ms: VERSIONS_GAP_MS,
         probe: Some(probe),
     };
     let net = NetSide {

@@ -102,7 +102,8 @@ impl Driver {
         *crate::cluster_node::lock(&shared.rejoin) =
             state.as_ref().and_then(|s| s.rejoin_home(&me));
         let core = NodeCore::new(me.clone(), setup.versions.clone(), state, setup.client)
-            .with_boot_id(boot_id.clone());
+            .with_boot_id(boot_id.clone())
+            .with_versions_gap(setup.versions_gap_ms);
         Driver {
             setup,
             net,
@@ -488,7 +489,8 @@ impl Driver {
             state,
             self.setup.client,
         )
-        .with_boot_id(self.boot_id.clone());
+        .with_boot_id(self.boot_id.clone())
+        .with_versions_gap(self.setup.versions_gap_ms);
         self.step(Input::Tick {
             boot_ms: self.boot_ms(),
             wall_ms: now_ms(),

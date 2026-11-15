@@ -74,6 +74,7 @@ pub struct ClusterSetup {
     pub client: bool,
     pub name: String,
     pub tick: Duration,
+    pub versions_gap_ms: u64,
     pub probe: Option<Probe>,
 }
 

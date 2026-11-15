@@ -275,6 +275,7 @@ pub(crate) fn node(net: &Arc<MemNet>, opts: Opts) -> TestNode {
         client: opts.client,
         name: opts.name.to_string(),
         tick: Duration::from_millis(50),
+        versions_gap_ms: 0,
         probe: None,
     };
     let (sink, log) = test_log();

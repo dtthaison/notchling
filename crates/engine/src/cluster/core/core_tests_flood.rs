@@ -589,3 +589,34 @@ fn a_denied_joiner_leaves_nothing_behind_once_it_drops() {
     hub.run(&m5, Input::Unlinked { peer: w3.clone() });
     assert_eq!(hub.core(&m5).peers.len(), before);
 }
+
+#[test]
+fn a_core_with_no_gap_journals_every_change_at_once() {
+    let (mut hub, m5, w1) = pair();
+    hub.nodes.get_mut(&m5).expect("node").versions_gap_ms = 0;
+    let (a, b) = (versions_updated("linux"), versions("linux"));
+    let seq = hub.core(&m5).state().expect("state").seq;
+    for id in 1..=4u64 {
+        let report_now = if id % 2 == 1 { &a } else { &b };
+        let effects = report(&mut hub, &m5, &w1, id, value(report_now));
+        assert!(persisted(&effects), "report {id}");
+        assert!(pushed_members(&effects), "report {id}");
+    }
+    assert_eq!(hub.core(&m5).state().expect("state").seq, seq + 4);
+    assert!(!persisted(&hub.tick(&m5, VERSIONS_GAP_MS)));
+}
+
+#[test]
+fn a_core_holds_a_second_change_for_its_own_gap_not_the_default() {
+    let (mut hub, m5, w1) = pair();
+    hub.nodes.get_mut(&m5).expect("node").versions_gap_ms = 500;
+    let (a, b) = (versions_updated("linux"), versions("linux"));
+    report(&mut hub, &m5, &w1, 1, value(&a));
+    let held = report(&mut hub, &m5, &w1, 2, value(&b));
+    assert!(!persisted(&held));
+    assert_eq!(stored(&hub, &m5, &w1), a);
+    assert!(!persisted(&hub.tick(&m5, 499)));
+    let due = hub.tick(&m5, 500);
+    assert!(persisted(&due));
+    assert_eq!(stored(&hub, &m5, &w1), b);
+}

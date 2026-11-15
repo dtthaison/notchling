@@ -290,6 +290,7 @@ pub struct NodeCore {
     local_runs: BTreeMap<u64, Then>,
     seen: BTreeMap<(NodeId, u64), Seen>,
     versions_gate: BTreeMap<NodeId, VersionsGate>,
+    versions_gap_ms: u64,
     joining: Option<Joining>,
     next_wire: u64,
     next_local: u64,
@@ -325,6 +326,7 @@ impl NodeCore {
             local_runs: BTreeMap::new(),
             seen: BTreeMap::new(),
             versions_gate: BTreeMap::new(),
+            versions_gap_ms: VERSIONS_GAP_MS,
             joining: None,
             next_wire: 1,
             next_local: 1,
@@ -341,6 +343,11 @@ impl NodeCore {
 
     pub fn with_boot_id(mut self, boot_id: String) -> NodeCore {
         self.boot_id = boot_id;
+        self
+    }
+
+    pub fn with_versions_gap(mut self, ms: u64) -> NodeCore {
+        self.versions_gap_ms = ms;
         self
     }
 

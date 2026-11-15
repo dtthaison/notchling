@@ -5,7 +5,6 @@ use serde_json::{json, Value};
 
 use super::{
     shown_members, Effect, Joining, LocalCmd, NodeCore, Target, Then, CALL_MS, DELEGATE_CALL_MS,
-    VERSIONS_GAP_MS,
 };
 use crate::cluster::failover::{armed_at_current, Failover};
 use crate::cluster::id::NodeId;
@@ -356,11 +355,9 @@ impl NodeCore {
             return Ok(false);
         }
         let boot = self.boot_ms;
+        let gap = self.versions_gap_ms;
         let gate = self.versions_gate.entry(node.clone()).or_default();
-        if gate
-            .last
-            .is_some_and(|at| boot.saturating_sub(at) < VERSIONS_GAP_MS)
-        {
+        if gate.last.is_some_and(|at| boot.saturating_sub(at) < gap) {
             gate.held = Some(versions);
             return Ok(false);
         }
@@ -387,6 +384,7 @@ impl NodeCore {
             return;
         }
         let boot = self.boot_ms;
+        let gap = self.versions_gap_ms;
         if let Some(state) = &self.state {
             self.versions_gate.retain(|id, _| {
                 state
@@ -399,9 +397,7 @@ impl NodeCore {
             .versions_gate
             .iter()
             .filter(|(_, g)| {
-                g.held.is_some()
-                    && g.last
-                        .is_none_or(|at| boot.saturating_sub(at) >= VERSIONS_GAP_MS)
+                g.held.is_some() && g.last.is_none_or(|at| boot.saturating_sub(at) >= gap)
             })
             .map(|(id, _)| id.clone())
             .collect();
