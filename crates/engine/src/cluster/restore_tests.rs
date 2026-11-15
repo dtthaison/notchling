@@ -77,7 +77,10 @@ impl Rig {
         let body = bytes[from as usize..].to_vec();
         self.parts.push((
             Part {
-                kind: PartKind::Tail { from },
+                kind: PartKind::Tail {
+                    from,
+                    rewritten: false,
+                },
                 path: path.to_path_buf(),
                 sha256: sha256_of(&body),
                 len: body.len() as u64,

@@ -93,7 +93,10 @@ fn manifest_lists_every_part_with_hash() {
             &PartKind::Db,
             &PartKind::File,
             &PartKind::Dir,
-            &PartKind::Tail { from: 9 }
+            &PartKind::Tail {
+                from: 9,
+                rewritten: false
+            }
         ]
     );
     let paths: Vec<&PathBuf> = manifest.parts.iter().map(|p| &p.path).collect();
@@ -290,7 +293,13 @@ fn rewritten_tail_is_staged_whole() {
     p.tails = vec![(tail.clone(), 100)];
     let manifest = stage_set(&p, &rig.stage, &meta()).unwrap();
     assert_eq!(manifest.parts.len(), 1);
-    assert_eq!(manifest.parts[0].kind, PartKind::Tail { from: 0 });
+    assert_eq!(
+        manifest.parts[0].kind,
+        PartKind::Tail {
+            from: 0,
+            rewritten: true
+        }
+    );
     assert_eq!(manifest.parts[0].len, 10);
     assert_eq!(manifest.parts[0].sha256, hex(b"0123456789"));
     assert_eq!(

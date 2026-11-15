@@ -11,7 +11,11 @@ pub enum PartKind {
     Db,
     File,
     Dir,
-    Tail { from: u64 },
+    Tail {
+        from: u64,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        rewritten: bool,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

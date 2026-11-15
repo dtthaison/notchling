@@ -6,10 +6,12 @@ use notchling_engine::cluster::id::Tool;
 use notchling_engine::cluster::main_sessions::MainSession;
 use notchling_engine::cluster::members::Term;
 use notchling_engine::cluster::snapshot::{Manifest, Movable, PartKind, Trigger};
-use notchling_engine::control::{FakeLauncher, LaunchError, Launcher, RealLauncher};
+use notchling_engine::control::{
+    Command, FakeLauncher, LaunchError, LaunchOutput, Launcher, PtyScript, RealLauncher,
+};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 const WAIT: Duration = Duration::from_secs(20);
@@ -228,6 +230,19 @@ fn grow(fx: &Fixture, len: usize) {
     put(&fx.transcript(), &vec![b'x'; len]);
 }
 
+fn tail_kind(ctx: &Context, set: &str) -> (u64, bool) {
+    let bytes = std::fs::read(ctx.outgoing().join(set).join("manifest.json")).unwrap();
+    let manifest: Manifest = serde_json::from_slice(&bytes).unwrap();
+    manifest
+        .parts
+        .iter()
+        .find_map(|p| match p.kind {
+            PartKind::Tail { from, rewritten } => Some((from, rewritten)),
+            _ => None,
+        })
+        .expect("a tail part")
+}
+
 fn tail_from(ctx: &Context, set: &str) -> u64 {
     let bytes = std::fs::read(ctx.outgoing().join(set).join("manifest.json")).unwrap();
     let manifest: Manifest = serde_json::from_slice(&bytes).unwrap();
@@ -235,7 +250,7 @@ fn tail_from(ctx: &Context, set: &str) -> u64 {
         .parts
         .iter()
         .find_map(|p| match p.kind {
-            PartKind::Tail { from } => Some(from),
+            PartKind::Tail { from, .. } => Some(from),
             _ => None,
         })
         .expect("a tail part")
@@ -328,24 +343,163 @@ fn the_runner_says_what_became_of_each_ask() {
     runner.close();
 }
 
+type Hook = Box<dyn FnOnce() + Send>;
+
+struct Hooked {
+    inner: RealLauncher,
+    hook: Mutex<Option<Hook>>,
+}
+
+impl Launcher for Hooked {
+    fn run(&self, command: &Command, timeout: Duration) -> Result<LaunchOutput, LaunchError> {
+        let hook = self.hook.lock().unwrap().take();
+        if let Some(hook) = hook {
+            hook();
+        }
+        self.inner.run(command, timeout)
+    }
+
+    fn run_pty(&self, script: &PtyScript) -> Result<bool, LaunchError> {
+        self.inner.run_pty(script)
+    }
+}
+
+fn nothing_main(fx: &Fixture, seq: u64) -> SnapAsk {
+    let mut next = ask(fx, &lay_out_session(fx), seq);
+    next.main = Vec::new();
+    next
+}
+
+fn lay_out_session(fx: &Fixture) -> MainSession {
+    MainSession {
+        id: "s1".to_string(),
+        tool: Tool::Claude,
+        cwd: fx.t.path("work/repo").display().to_string(),
+        config_dir: None,
+        transcript: Some(fx.transcript().display().to_string()),
+        respawn: Vec::new(),
+        since_ms: 1,
+    }
+}
+
 #[test]
-fn a_busy_retry_gives_way_to_a_newer_ask_at_once() {
+fn an_ask_that_lands_while_a_stage_runs_ends_its_busy_wait_at_once() {
     let fx = Fixture::new("run-supersede", &[(1, true)]);
     fx.make_ready(&[id_of(1)]);
     let session = lay_out(&fx);
     std::fs::write(fx.transcript(), b"one\ntwo\nthree\n").unwrap();
-    let ctx = context(&fx, real());
-    let runner = SnapRunner::spawn(Arc::new(take_sender(&fx)), ctx, Duration::from_secs(60));
+    let holder: Arc<OnceLock<Arc<SnapRunner>>> = Arc::new(OnceLock::new());
+    let (second, third) = (nothing_main(&fx, 9), nothing_main(&fx, 10));
+    let seen = holder.clone();
+    let launcher = Hooked {
+        inner: RealLauncher::with_claude(PathBuf::from("/nonexistent/claude")),
+        hook: Mutex::new(Some(Box::new(move || {
+            let runner = seen.get().expect("the runner");
+            runner.submit(second);
+            runner.submit(third);
+        }))),
+    };
+    let ctx = context(&fx, Arc::new(launcher));
+    let runner = Arc::new(SnapRunner::spawn(
+        Arc::new(take_sender(&fx)),
+        ctx,
+        Duration::from_secs(60),
+    ));
+    let _ = holder.set(runner.clone());
     runner.submit(ask(&fx, &session, 8));
-    let start = std::time::Instant::now();
-    while runner.last_error().is_none() && start.elapsed() < WAIT {
-        std::thread::sleep(Duration::from_millis(10));
-    }
-    assert!(runner.last_error().is_some());
-    put(&fx.transcript(), b"one\ntwo\nthree\n");
-    runner.submit(ask(&fx, &session, 9));
     assert!(runner.wait_idle(Duration::from_secs(10)));
     assert_eq!(runner.outcome(8), Some(Outcome::Superseded));
-    assert_eq!(runner.outcome(9), Some(Outcome::Staged("s-9".to_string())));
+    assert_eq!(runner.outcome(9), Some(Outcome::Superseded));
+    assert_eq!(
+        runner.outcome(10),
+        Some(Outcome::Staged("s-10".to_string()))
+    );
+    assert_eq!(runner.outcome(7), None);
     runner.close();
+}
+
+#[test]
+fn an_online_target_gets_only_the_new_bytes_while_another_has_never_acked() {
+    let fx = Fixture::new("run-delta", &[(1, true), (2, true)]);
+    fx.make_ready(&[id_of(1), id_of(2)]);
+    fx.net.set_online(&id_of(2), false);
+    let session = lay_out(&fx);
+    let ctx = context(&fx, real());
+    let now = crate::snap_files_tests::now_ms;
+    grow(&fx, 100);
+    take(&fx.sender, &ctx, &ask(&fx, &session, 1), now()).unwrap();
+    assert!(fx.sender.wait_idle(WAIT));
+    assert_eq!(standby_copy(&fx, 1).len(), 100);
+    grow(&fx, 300);
+    take(&fx.sender, &ctx, &ask(&fx, &session, 2), now()).unwrap();
+    assert!(fx.sender.wait_idle(WAIT));
+    assert_eq!(tail_kind(&ctx, "s-2"), (0, false));
+    assert_eq!(standby_copy(&fx, 1).len(), 300);
+    let sent = fx.store_of(&id_of(1)).current().unwrap();
+    let part = sent
+        .parts
+        .iter()
+        .find(|p| matches!(p.kind, PartKind::Tail { .. }))
+        .unwrap();
+    assert_eq!(
+        part.kind,
+        PartKind::Tail {
+            from: 100,
+            rewritten: false
+        }
+    );
+    assert_eq!(part.len, 200);
+    fx.net.set_online(&id_of(2), true);
+    assert_eq!(fx.sender.tick(), vec![id_of(2)]);
+    assert!(fx.sender.wait_idle(WAIT));
+    assert_eq!(standby_copy(&fx, 2).len(), 300);
+    let whole = fx.store_of(&id_of(2)).current().unwrap();
+    let part = whole
+        .parts
+        .iter()
+        .find(|p| matches!(p.kind, PartKind::Tail { .. }))
+        .unwrap();
+    assert_eq!(
+        part.kind,
+        PartKind::Tail {
+            from: 0,
+            rewritten: false
+        }
+    );
+    assert_eq!(part.len, 300);
+}
+
+#[test]
+fn a_rewritten_transcript_replaces_the_whole_file_on_every_target() {
+    let fx = Fixture::new("run-rewrite", &[(1, true), (2, true)]);
+    fx.make_ready(&[id_of(1), id_of(2)]);
+    let session = lay_out(&fx);
+    let ctx = context(&fx, real());
+    let now = crate::snap_files_tests::now_ms;
+    grow(&fx, 300);
+    take(&fx.sender, &ctx, &ask(&fx, &session, 1), now()).unwrap();
+    assert!(fx.sender.wait_idle(WAIT));
+    assert_eq!(standby_copy(&fx, 1).len(), 300);
+    assert_eq!(standby_copy(&fx, 2).len(), 300);
+    put(&fx.transcript(), &[b'y'; 50]);
+    take(&fx.sender, &ctx, &ask(&fx, &session, 2), now()).unwrap();
+    assert!(fx.sender.wait_idle(WAIT));
+    assert_eq!(tail_kind(&ctx, "s-2"), (0, true));
+    for n in [1, 2] {
+        assert_eq!(standby_copy(&fx, n), vec![b'y'; 50]);
+        let held = fx.store_of(&id_of(n)).current().unwrap();
+        let part = held
+            .parts
+            .iter()
+            .find(|p| matches!(p.kind, PartKind::Tail { .. }))
+            .unwrap();
+        assert_eq!(
+            part.kind,
+            PartKind::Tail {
+                from: 0,
+                rewritten: true
+            }
+        );
+        assert_eq!(part.len, 50);
+    }
 }

@@ -412,7 +412,7 @@ impl Inner {
             return Ok(());
         }
         let skip = match part.kind {
-            PartKind::Tail { from } => from.saturating_sub(staged_from(offered, &part.path)),
+            PartKind::Tail { from, .. } => from.saturating_sub(staged_from(offered, &part.path)),
             _ => 0,
         };
         self.push(id, &name, &src, (skip, part.len), Some(&part.sha256))?;
@@ -521,9 +521,16 @@ pub(crate) fn lengths_of(reply: &Value) -> BTreeMap<PathBuf, u64> {
 
 fn tails_agree(manifest: &Manifest, actual: &BTreeMap<PathBuf, u64>) -> bool {
     manifest.parts.iter().all(|part| match part.kind {
-        PartKind::Tail { from } if from > 0 => {
+        PartKind::Tail {
+            from,
+            rewritten: false,
+        } => {
             let have = actual.get(&part.path).copied().unwrap_or(0);
-            have == from || have == from + part.len
+            if from == 0 {
+                have == 0 || have > part.len
+            } else {
+                have == from || have == from + part.len
+            }
         }
         _ => true,
     })
@@ -535,7 +542,7 @@ fn staged_from(offered: &Offered, path: &Path) -> u64 {
         .parts
         .iter()
         .find_map(|p| match p.kind {
-            PartKind::Tail { from } if p.path == path => Some(from),
+            PartKind::Tail { from, .. } if p.path == path => Some(from),
             _ => None,
         })
         .unwrap_or(0)
@@ -561,17 +568,20 @@ fn hash_range(path: &Path, skip: u64, len: u64) -> Result<String, String> {
 pub fn for_target(offered: &Offered, lengths: &BTreeMap<PathBuf, u64>) -> Result<Manifest, String> {
     let mut manifest = offered.manifest.clone();
     for part in &mut manifest.parts {
-        let PartKind::Tail { from } = part.kind else {
+        let PartKind::Tail { from, rewritten } = part.kind else {
             continue;
         };
-        if from == 0 {
+        if rewritten {
             continue;
         }
         let have = lengths.get(&part.path).copied().unwrap_or(0);
+        let end = from + part.len;
+        if from == 0 && (have == 0 || have > end) {
+            continue;
+        }
         if have == from {
             continue;
         }
-        let end = from + part.len;
         if have < from || have > end {
             return Err(format!(
                 "{} is at {have} there, outside what this set carries ({from} to {end})",
@@ -583,7 +593,10 @@ pub fn for_target(offered: &Offered, lengths: &BTreeMap<PathBuf, u64>) -> Result
             .ok_or_else(|| format!("{} can't be sent", part.path.display()))?;
         part.sha256 = hash_range(&src, skip, part.len - skip)?;
         part.len -= skip;
-        part.kind = PartKind::Tail { from: have };
+        part.kind = PartKind::Tail {
+            from: have,
+            rewritten: false,
+        };
     }
     Ok(manifest)
 }

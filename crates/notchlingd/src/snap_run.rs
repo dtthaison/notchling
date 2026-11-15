@@ -164,7 +164,11 @@ impl SnapRunner {
     }
 
     pub fn submit(&self, ask: SnapAsk) {
-        lock(&self.shared.state).pending = Some(ask);
+        let mut state = lock(&self.shared.state);
+        if let Some(old) = state.pending.replace(ask) {
+            state.record(old.seq, Outcome::Superseded);
+        }
+        drop(state);
         self.shared.wake.notify_all();
     }
 

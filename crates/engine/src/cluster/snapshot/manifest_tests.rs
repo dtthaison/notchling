@@ -49,7 +49,10 @@ fn manifest_round_trips_through_json() {
                 len: 3,
             },
             Part {
-                kind: PartKind::Tail { from: 40 },
+                kind: PartKind::Tail {
+                    from: 40,
+                    rewritten: false,
+                },
                 path: PathBuf::from("/d/t.jsonl"),
                 sha256: "dd".to_owned(),
                 len: 4,
@@ -141,7 +144,11 @@ fn staged_path_refuses_relative_and_dotted_paths() {
 
 #[test]
 fn part_kinds_and_verdicts_serialise_in_snake_case() {
-    let tail = serde_json::to_string(&PartKind::Tail { from: 3 }).expect("tail");
+    let tail = serde_json::to_string(&PartKind::Tail {
+        from: 3,
+        rewritten: false,
+    })
+    .expect("tail");
     assert_eq!(tail, r#"{"tail":{"from":3}}"#);
     assert_eq!(serde_json::to_string(&PartKind::Db).expect("db"), r#""db""#);
     assert_eq!(
@@ -150,4 +157,26 @@ fn part_kinds_and_verdicts_serialise_in_snake_case() {
     );
     let no = serde_json::to_string(&Movable::No("why".to_owned())).expect("no");
     assert_eq!(no, r#"{"no":"why"}"#);
+}
+
+#[test]
+fn a_rewritten_tail_is_written_only_when_set_and_old_manifests_read_as_not() {
+    let marked = PartKind::Tail {
+        from: 0,
+        rewritten: true,
+    };
+    let text = serde_json::to_string(&marked).expect("tail");
+    assert_eq!(text, r#"{"tail":{"from":0,"rewritten":true}}"#);
+    assert_eq!(
+        serde_json::from_str::<PartKind>(&text).expect("back"),
+        marked
+    );
+    let old: PartKind = serde_json::from_str(r#"{"tail":{"from":7}}"#).expect("old");
+    assert_eq!(
+        old,
+        PartKind::Tail {
+            from: 7,
+            rewritten: false
+        }
+    );
 }

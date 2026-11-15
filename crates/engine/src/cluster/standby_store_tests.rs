@@ -92,7 +92,14 @@ fn send(store: &StandbyStore, tmp: &TempDir, m: &Manifest, bodies: &[(&Part, &[u
 }
 
 fn tail_set(set: &str, seq: u64, from: u64, bytes: &[u8]) -> (Manifest, Part) {
-    let tail = part(PartKind::Tail { from }, "/prim/t.jsonl", bytes);
+    let tail = part(
+        PartKind::Tail {
+            from,
+            rewritten: false,
+        },
+        "/prim/t.jsonl",
+        bytes,
+    );
     (manifest(set, seq, vec![tail.clone()]), tail)
 }
 
@@ -102,7 +109,14 @@ fn complete_set_becomes_current() {
     let store = store(&tmp);
     let db = part(PartKind::Db, "/prim/cluster.db", b"db-bytes");
     let file = part(PartKind::File, "/prim/devices.json", b"{}");
-    let tail = part(PartKind::Tail { from: 0 }, "/prim/t.jsonl", b"one\ntwo\n");
+    let tail = part(
+        PartKind::Tail {
+            from: 0,
+            rewritten: false,
+        },
+        "/prim/t.jsonl",
+        b"one\ntwo\n",
+    );
     let (dir_root, dir) = dir_source(&tmp, "pages", &[("a.html", b"<a>"), ("img/b.png", b"png")]);
     let m = manifest(
         "s-1",
@@ -297,7 +311,14 @@ fn resume_sends_only_missing_parts() {
     let tmp = TempDir::new("standby-resume");
     let a = part(PartKind::File, "/prim/a", b"aaa");
     let b = part(PartKind::Db, "/prim/b.db", b"bbb");
-    let c = part(PartKind::Tail { from: 0 }, "/prim/c.jsonl", b"ccc");
+    let c = part(
+        PartKind::Tail {
+            from: 0,
+            rewritten: false,
+        },
+        "/prim/c.jsonl",
+        b"ccc",
+    );
     let m = manifest("s-1", 1, vec![a.clone(), b.clone(), c.clone()]);
     let first = store(&tmp);
     assert!(first.missing(&m).len() == 3);
@@ -511,13 +532,41 @@ fn a_tail_never_overlaps_a_file_or_folder_part() {
     let tmp = TempDir::new("standby-overlap");
     let store = store(&tmp);
     let dir = part(PartKind::Dir, "/prim/a", b"");
-    let under = part(PartKind::Tail { from: 0 }, "/prim/a/b", b"x");
+    let under = part(
+        PartKind::Tail {
+            from: 0,
+            rewritten: false,
+        },
+        "/prim/a/b",
+        b"x",
+    );
     assert!(store.begin(&manifest("s-1", 1, vec![dir, under])).is_err());
     let file = part(PartKind::File, "/prim/t", b"x");
-    let same = part(PartKind::Tail { from: 0 }, "/prim/t", b"x");
+    let same = part(
+        PartKind::Tail {
+            from: 0,
+            rewritten: false,
+        },
+        "/prim/t",
+        b"x",
+    );
     assert!(store.begin(&manifest("s-2", 2, vec![same, file])).is_err());
-    let tail = part(PartKind::Tail { from: 0 }, "/prim/t", b"x");
-    let inside = part(PartKind::Tail { from: 0 }, "/prim/t/u", b"x");
+    let tail = part(
+        PartKind::Tail {
+            from: 0,
+            rewritten: false,
+        },
+        "/prim/t",
+        b"x",
+    );
+    let inside = part(
+        PartKind::Tail {
+            from: 0,
+            rewritten: false,
+        },
+        "/prim/t/u",
+        b"x",
+    );
     assert!(store
         .begin(&manifest("s-3", 3, vec![tail, inside]))
         .is_err());

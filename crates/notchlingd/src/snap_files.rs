@@ -281,6 +281,7 @@ fn tail_part(
     }
     let mut dst = None;
     let mut start = from;
+    let mut rewritten = false;
     loop {
         let len = match fs::symlink_metadata(src) {
             Ok(found) => found.len(),
@@ -299,13 +300,19 @@ fn tail_part(
         match copy_tail(src, start, target, meta.quiet_ms, meta.now_ms)? {
             Copied::Done { len, sha256 } => {
                 return Ok(Some(Part {
-                    kind: PartKind::Tail { from: start },
+                    kind: PartKind::Tail {
+                        from: start,
+                        rewritten,
+                    },
                     path: src.to_path_buf(),
                     sha256,
                     len,
                 }));
             }
-            Copied::Rewritten if start != 0 => start = 0,
+            Copied::Rewritten if start != 0 => {
+                start = 0;
+                rewritten = true;
+            }
             _ => return Err(format!("{} is still being written", src.display())),
         }
     }

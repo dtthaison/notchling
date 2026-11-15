@@ -81,8 +81,8 @@ fn newest_queued_set_wins() {
     let fx = Fixture::new("send-newest", &[(1, true)]);
     fx.make_ready(&[id_of(1)]);
     let (m1, d1) = fx.stage(1, 0, b"first\n");
-    let (m2, d2) = fx.stage(2, 0, b"second\n");
-    let (m3, d3) = fx.stage(3, 0, b"third\n");
+    let (m2, d2) = fx.stage(2, 0, b"first\nsecond\n");
+    let (m3, d3) = fx.stage(3, 0, b"first\nsecond\nthird\n");
     fx.net.hold();
     fx.sender.offer(m1, d1);
     fx.net.wait_entered(1);
@@ -90,9 +90,9 @@ fn newest_queued_set_wins() {
     fx.sender.offer(m3.clone(), d3);
     fx.net.release();
     assert!(fx.sender.wait_idle(WAIT));
-    assert_eq!(fx.store_of(&id_of(1)).current(), Some(m3));
+    assert_eq!(current(&fx, 1), Some(m3.set.clone()));
     assert_eq!(fx.net.calls(&id_of(1), "snap.offer"), 2);
-    assert_eq!(read(&fx, 1), b"third\n");
+    assert_eq!(read(&fx, 1), b"first\nsecond\nthird\n");
     let sets = fx
         .net
         .member(&id_of(1))
@@ -166,7 +166,7 @@ fn each_target_is_sent_from_its_own_acknowledged_length() {
         held.parts
             .iter()
             .find_map(|p| match p.kind {
-                PartKind::Tail { from } => Some((from, p.len)),
+                PartKind::Tail { from, .. } => Some((from, p.len)),
                 _ => None,
             })
             .unwrap()

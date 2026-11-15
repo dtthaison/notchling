@@ -483,7 +483,7 @@ impl<'a> Planner<'a> {
                 path.display()
             ));
         };
-        let PartKind::Tail { from } = part.kind else {
+        let PartKind::Tail { from, .. } = part.kind else {
             return Err(format!("{id} can't move: {} isn't a tail", path.display()));
         };
         let stored = self

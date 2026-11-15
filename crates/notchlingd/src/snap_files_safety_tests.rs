@@ -191,7 +191,8 @@ fn a_big_transcript_with_a_small_new_tail_is_staged() {
     assert_eq!(
         manifest.parts[0].kind,
         PartKind::Tail {
-            from: MAX_FILE + 990
+            from: MAX_FILE + 990,
+            rewritten: false
         }
     );
     assert_eq!(manifest.parts[0].len, 10);

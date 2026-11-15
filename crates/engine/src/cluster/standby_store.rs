@@ -157,7 +157,7 @@ fn validate(m: &Manifest) -> Result<(), String> {
                 part.path.display()
             ));
         }
-        if let PartKind::Tail { from } = part.kind {
+        if let PartKind::Tail { from, .. } = part.kind {
             if from.checked_add(part.len).is_none() {
                 return Err(format!("{} has an impossible length", part.path.display()));
             }
@@ -374,7 +374,7 @@ impl StandbyStore {
         let dst = self.place(&partial, &part.path)?;
         match part.kind {
             PartKind::Db | PartKind::File => self.install_file(from, &dst, part),
-            PartKind::Tail { from: start } => {
+            PartKind::Tail { from: start, .. } => {
                 self.check_tail(&part.path, start, part)?;
                 self.install_file(from, &dst, part)
             }
@@ -513,7 +513,7 @@ impl StandbyStore {
             let at = self
                 .verified(&partial, part)
                 .map_err(|why| format!("{set} is incomplete: {why}"))?;
-            if let PartKind::Tail { from } = part.kind {
+            if let PartKind::Tail { from, .. } = part.kind {
                 moves.push(self.tail_move(part, from, at)?);
             }
         }
