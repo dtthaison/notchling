@@ -23,6 +23,8 @@ pub mod cluster_cli;
 pub mod cluster_dispatch;
 pub mod cluster_dispatch_delegate;
 mod cluster_driver;
+#[cfg(test)]
+mod cluster_driver_order_tests;
 pub mod cluster_forward;
 pub mod cluster_join;
 pub mod cluster_mirror;

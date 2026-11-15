@@ -1,6 +1,6 @@
-use super::Driver;
+use super::{Driver, Reply};
 use crate::cluster_node::lock;
-use notchling_engine::cluster::wire::{encode, Msg};
+use notchling_engine::cluster::wire::{encode, Msg, WireError};
 use notchling_engine::cluster::NodeId;
 use notchling_events::kinds::security::ClusterStep;
 use notchling_events::spec::Outcome;
@@ -88,5 +88,17 @@ impl Driver {
             self.room
                 .publish(topics::CLUSTER, topics::CLUSTER_CHANGED, &status);
         }
+    }
+}
+
+pub(super) fn answer(reply: Reply, result: Result<Value, WireError>) {
+    match reply {
+        Reply::Wait(tx) => {
+            let _ = tx.send(result);
+        }
+        Reply::Token(tx, token) => {
+            let _ = tx.send(result.map(|_| json!({"token": token})));
+        }
+        Reply::Load(_) => {}
     }
 }

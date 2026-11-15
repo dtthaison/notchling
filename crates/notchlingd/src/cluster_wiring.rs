@@ -2,7 +2,7 @@ use crate::acting_ops::Room;
 use crate::cluster_blobs::Blobs;
 use crate::cluster_dispatch::{DispatchCalls, DispatchOps, NodeReporter};
 use crate::cluster_dispatch_delegate::RealDelegate;
-use crate::cluster_forward::{Forward, NodeForward};
+use crate::cluster_forward::{Forward, NoNodeForward, NodeForward};
 use crate::cluster_join::{JoinAsker, JOIN_WAIT};
 use crate::cluster_mirror::{FollowOps, Mirror, OnCap, TailSource, MIRROR_CAP, MIRROR_DIR};
 use crate::cluster_node::{
@@ -395,8 +395,7 @@ impl ClusterParts {
     }
 
     pub fn forward(&self) -> Option<Arc<dyn Forward>> {
-        let node = self.node.as_ref().ok()?;
-        Some(Arc::new(NodeForward::new(node.clone())))
+        Some(forwarder(&self.node))
     }
 
     pub fn local_changed(&self) {
@@ -420,6 +419,13 @@ impl ClusterParts {
         if let Ok(node) = &self.node {
             node.close();
         }
+    }
+}
+
+pub fn forwarder(node: &Result<Arc<ClusterNode>, String>) -> Arc<dyn Forward> {
+    match node {
+        Ok(node) => Arc::new(NodeForward::new(node.clone())),
+        Err(_) => Arc::new(NoNodeForward),
     }
 }
 

@@ -8,6 +8,7 @@ pub enum Sent {
     Client,
     Member,
     Vault,
+    VaultNode,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -43,6 +44,7 @@ const CLIENT: &[Sent] = &[Sent::Client, Sent::Home];
 const CLIENT_ONLY: &[Sent] = &[Sent::Client];
 const MEMBER: &[Sent] = &[Sent::Member];
 const VAULT_HOME: &[Sent] = &[Sent::Vault];
+const CLEAR: &[Sent] = &[Sent::Home, Sent::VaultNode];
 
 const fn rule(
     op: &'static str,
@@ -156,7 +158,7 @@ pub const RULES: &[Rule] = &[
     rule("cluster.dispatch", MEMBER, OriginTier::Agent, None, true),
     client_home("cluster.allow.set"),
     rule("grant.deliver", VAULT_HOME, OriginTier::Node, None, false),
-    rule("grant.revoke", HOME, OriginTier::Node, None, false),
+    rule("grant.revoke", CLEAR, OriginTier::Node, None, false),
     to_vault("grant.request", MEMBER, OriginTier::Agent),
     to_vault("vault.list", CLIENT, OriginTier::App),
     to_vault("vault.save", CLIENT, OriginTier::App),
@@ -169,6 +171,7 @@ fn stands(sender: &SenderFacts, sent: Sent) -> bool {
         Sent::Client => sender.client,
         Sent::Member => true,
         Sent::Vault => sender.is_home && sender.is_vault,
+        Sent::VaultNode => sender.is_vault,
     }
 }
 

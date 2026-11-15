@@ -3,7 +3,8 @@ use serde_json::json;
 use super::{
     Effect, Input, LocalCmd, ATTACH_CALL_MS, CALL_MS, GRANT_ATTACH, GRANT_REVOKE_JOB, PING_MS,
 };
-use crate::cluster::id::NodeId;
+use crate::cluster::id::{NodeId, Tool};
+use crate::cluster::jobs::JobSpec;
 use crate::cluster::jobs::{job_id, JobState};
 use crate::cluster::members::{MemberState, Term};
 use crate::cluster::testkit::id;
@@ -306,4 +307,115 @@ fn the_debug_of_a_call_hides_its_arguments() {
         assert!(!text.contains("NL-MARKER"), "a value shows in Debug");
         assert!(text.contains("hidden"));
     }
+}
+
+#[test]
+fn a_delegate_job_revokes_its_grants_when_it_ends_either_way() {
+    for exit in [0, 3] {
+        let (mut hub, m5, w1) = pair();
+        let key = format!("d{exit}");
+        let spec = JobSpec {
+            node: w1.clone(),
+            tool: Tool::Agy,
+            cwd: "/srv/repo".to_string(),
+            args: json!({"delegate": ["agy", "--json", "--", "hi"]}),
+            secrets: Vec::new(),
+        };
+        hub.local(
+            &m5,
+            LocalCmd::Dispatch {
+                key,
+                spec,
+                tier: OriginTier::App,
+            },
+        );
+        let call = hub
+            .seen
+            .iter()
+            .filter(|(n, _)| n == "w1")
+            .flat_map(|(_, e)| run_locals(std::slice::from_ref(e)))
+            .find(|(_, op, _)| op == "delegate.run")
+            .expect("the run")
+            .0;
+        let before = hub.seen.len();
+        hub.run(
+            &w1,
+            Input::LocalDone {
+                call,
+                result: Ok(json!({"exit": exit, "out": "", "err": ""})),
+            },
+        );
+        let revoked = hub.seen[before..]
+            .iter()
+            .filter(|(n, e)| {
+                n == "m5" && matches!(e, Effect::RunLocal { op, .. } if op == GRANT_REVOKE_JOB)
+            })
+            .count();
+        assert_eq!(revoked, 1, "exit {exit}");
+    }
+}
+
+#[test]
+fn a_rollback_revoke_from_a_vault_node_that_stepped_down_is_accepted() {
+    let mut hub = Hub::new();
+    let m5 = hub.add("m5", "macos", true);
+    let m1 = hub.add("m1", "macos", true);
+    let w1 = hub.add("w1", "linux", false);
+    hub.create("m5");
+    hub.join_as("m5", "m1", "macos", true, true);
+    hub.join("m5", "w1", "linux", false);
+    hub.link(&m1, &w1);
+    let newer = Term {
+        n: hub.core(&w1).highest_term().expect("term").n + 1,
+        node: m1.clone(),
+    };
+    hub.run(
+        &w1,
+        Input::Msg {
+            from: m1.clone(),
+            msg: Msg::Call {
+                id: 1,
+                op: "node.load".to_string(),
+                args: json!({}).into(),
+                origin: Origin {
+                    node: m1.clone(),
+                    tier: OriginTier::Node,
+                },
+                term: newer.clone(),
+            },
+        },
+    );
+    assert_eq!(hub.core(&w1).state().expect("state").home, m1);
+    let call = |id: u64, op: &str| Msg::Call {
+        id,
+        op: op.to_string(),
+        args: json!({"job": "j-1"}).into(),
+        origin: Origin {
+            node: m5.clone(),
+            tier: OriginTier::Node,
+        },
+        term: newer.clone(),
+    };
+    let revoke = hub.run(
+        &w1,
+        Input::Msg {
+            from: m5.clone(),
+            msg: call(2, "grant.revoke"),
+        },
+    );
+    assert_eq!(
+        run_locals(&revoke)
+            .iter()
+            .filter(|(_, op, _)| op == "grant.revoke")
+            .count(),
+        1
+    );
+    let deliver = hub.run(
+        &w1,
+        Input::Msg {
+            from: m5.clone(),
+            msg: call(3, "grant.deliver"),
+        },
+    );
+    assert!(run_locals(&deliver).is_empty());
 }

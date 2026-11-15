@@ -1,7 +1,7 @@
 use crate::acting_ops::Room;
 use crate::cluster_node::{
-    wire_error, Answer, ClusterLog, ClusterSetup, Hooks, In, JoinAsk, LocalCalls, NetSide, Parts,
-    Shared, Submit,
+    lock, wire_error, Answer, ClusterLog, ClusterSetup, Hooks, In, JoinAsk, LocalCalls, NetSide,
+    Parts, Shared, Submit,
 };
 use notchling_cluster_net::{Conn, Listener};
 use notchling_engine::bridge::net::crypto::{hex, random_bytes, random_token};
@@ -420,6 +420,7 @@ impl Driver {
     fn step(&mut self, input: Input) {
         let effects = self.core.step(input);
         let mut rest = effects.into_iter();
+        let mut runs = Vec::new();
         while let Some(effect) = rest.next() {
             if let Effect::Persist { entry, changes } = &effect {
                 if let Err(why) = persist::save(&self.setup.cluster_dir, entry, changes) {
@@ -428,6 +429,14 @@ impl Driver {
                 }
                 continue;
             }
+            if matches!(effect, Effect::RunLocal { .. }) {
+                runs.push(effect);
+                continue;
+            }
+            self.effect(effect);
+        }
+        *lock(&self.shared.state) = self.core.state().cloned();
+        for effect in runs {
             self.effect(effect);
         }
     }
@@ -582,19 +591,9 @@ impl Driver {
     }
 }
 
-fn answer(reply: Reply, result: Result<Value, WireError>) {
-    match reply {
-        Reply::Wait(tx) => {
-            let _ = tx.send(result);
-        }
-        Reply::Token(tx, token) => {
-            let _ = tx.send(result.map(|_| json!({"token": token})));
-        }
-        Reply::Load(_) => {}
-    }
-}
-
 #[path = "cluster_driver_links.rs"]
 mod links;
 #[path = "cluster_driver_status.rs"]
 mod status;
+
+use status::answer;

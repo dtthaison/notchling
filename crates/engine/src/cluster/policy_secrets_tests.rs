@@ -49,7 +49,14 @@ fn only_the_vault_node_while_home_delivers_and_revokes() {
             "{who} {op}"
         );
     }
-    for (who, sender) in [("m5", &standby_vault), ("w1", &worker)] {
+    let standby = facts("m2", Role::Standby, true, MemberState::Active);
+    assert!(check(
+        "grant.revoke",
+        &standby_vault,
+        &origin("m5", OriginTier::Node)
+    )
+    .is_ok());
+    for (who, sender) in [("m2", &standby), ("w1", &worker)] {
         assert_eq!(
             check("grant.revoke", sender, &origin(who, OriginTier::Node)).err(),
             Some(Denied::NotAllowed),

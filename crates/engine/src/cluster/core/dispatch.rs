@@ -521,6 +521,7 @@ impl NodeCore {
                 detail,
             };
             let _ = self.apply(command, out);
+            self.revoke_grants(&job, out);
         }
         let state = self
             .state

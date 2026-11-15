@@ -29,6 +29,19 @@ pub trait Forward: Send + Sync {
     fn forward(&self, caller: &Caller, op: &str, args: &Value) -> Option<Result<Value, ApiError>>;
 }
 
+pub struct NoNodeForward;
+
+impl Forward for NoNodeForward {
+    fn forward(&self, _caller: &Caller, op: &str, args: &Value) -> Option<Result<Value, ApiError>> {
+        let named = !matches!(args.get("node"), None | Some(Value::Null));
+        if !VAULT_RELAYED.contains(&op) || !named {
+            return None;
+        }
+        let text = "this machine is in no cluster, so it has no other vault";
+        Some(Err(ApiError::new(ErrorCode::Failed, text)))
+    }
+}
+
 pub struct NodeForward {
     node: Arc<ClusterNode>,
 }
