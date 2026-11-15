@@ -246,9 +246,13 @@ pub(super) fn took_prompt(obj: &Value, text: &str, images: usize) -> bool {
     typed_prompt(obj, text) || (text.trim().is_empty() && images > 0 && !carries_result(obj))
 }
 
+pub(super) fn joined(batch: &[String], text: &str) -> bool {
+    batch.len() >= 2 && squeezed(text) == squeezed(&batch.join("\n"))
+}
+
 fn takes(message: &Message, queue: &mut Queue, text: &str, images: usize) -> usize {
     let batch = std::mem::take(&mut queue.batch);
-    if batch.len() >= 2 && squeezed(text) == squeezed(&batch.join("\n")) {
+    if joined(&batch, text) {
         if images < message.pictures {
             return 0;
         }

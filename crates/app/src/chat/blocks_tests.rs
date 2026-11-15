@@ -29,6 +29,7 @@ fn user(text: &str) -> Row {
         queued: false,
         sending: false,
         note: None,
+        merged: false,
     }
 }
 

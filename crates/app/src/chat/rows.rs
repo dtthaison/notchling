@@ -16,6 +16,7 @@ pub enum Row {
         queued: bool,
         sending: bool,
         note: Option<String>,
+        merged: bool,
     },
     Assistant {
         text: String,
@@ -181,12 +182,17 @@ fn tool_row(call: &ToolCall) -> ToolRow {
 
 pub fn row_of(item: &ChatItem) -> Row {
     match &item.kind {
-        ItemKind::User { text, images } => Row::User {
+        ItemKind::User {
+            text,
+            images,
+            merged,
+        } => Row::User {
             text: text.clone(),
             images: *images,
             queued: false,
             sending: false,
             note: None,
+            merged: *merged,
         },
         ItemKind::Assistant { text } => Row::Assistant { text: text.clone() },
         ItemKind::Thinking { seconds, text } => Row::Thinking {
@@ -222,6 +228,7 @@ pub fn rows(conversation: &Conversation) -> Vec<Row> {
         queued: true,
         sending: false,
         note: None,
+        merged: false,
     }));
     out
 }
@@ -233,6 +240,7 @@ pub fn with_held(mut rows: Vec<Row>, held: Option<&str>) -> Vec<Row> {
         queued: true,
         sending: false,
         note: None,
+        merged: false,
     }));
     rows
 }
@@ -244,6 +252,7 @@ pub fn with_outgoing(mut rows: Vec<Row>, outgoing: &[String]) -> Vec<Row> {
         queued: true,
         sending: true,
         note: None,
+        merged: false,
     }));
     rows
 }
@@ -259,6 +268,18 @@ mod tests {
             kind,
             date: None,
         }
+    }
+
+    #[test]
+    fn a_merged_message_becomes_a_merged_row() {
+        let kind = |merged| ItemKind::User {
+            text: "ok\nok".into(),
+            images: 0,
+            merged,
+        };
+        let merged = |row: Row| matches!(row, Row::User { merged: true, .. });
+        assert!(merged(row_of(&item(kind(true)))));
+        assert!(!merged(row_of(&item(kind(false)))));
     }
 
     #[test]
@@ -305,6 +326,7 @@ mod tests {
                 queued: false,
                 sending: false,
                 note: None,
+                merged: false,
             }
         );
         assert_eq!(
@@ -349,6 +371,7 @@ mod tests {
                 queued: true,
                 sending: false,
                 note: None,
+                merged: false,
             }
         );
     }
@@ -369,6 +392,7 @@ mod tests {
                 queued: true,
                 sending: true,
                 note: None,
+                merged: false,
             }
         );
     }

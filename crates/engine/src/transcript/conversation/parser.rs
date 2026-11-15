@@ -396,6 +396,7 @@ impl Parser {
                 self.c.facts.model = Some(id);
             }
             if let Some(kind) = user_item(text, 0) {
+                let kind = self.merged_kind(kind, text);
                 self.append_user(kind, date, true);
             }
             return;
@@ -420,6 +421,7 @@ impl Parser {
         }
         if !text.is_empty() || images > 0 {
             if let Some(kind) = user_item(&text, images) {
+                let kind = self.merged_kind(kind, &text);
                 self.append_user(kind, date, true);
             }
         }
@@ -517,7 +519,19 @@ impl Parser {
                 .count();
         }
         if let Some(kind @ ItemKind::User { .. }) = user_item(&text, images) {
+            let kind = self.merged_kind(kind, &text);
             self.append(kind, date);
+        }
+    }
+
+    fn merged_kind(&mut self, kind: ItemKind, raw: &str) -> ItemKind {
+        match kind {
+            ItemKind::User { text, images, .. } => ItemKind::User {
+                text,
+                images,
+                merged: self.queue.merged(raw),
+            },
+            other => other,
         }
     }
 

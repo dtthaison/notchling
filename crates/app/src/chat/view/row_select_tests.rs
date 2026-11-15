@@ -136,6 +136,7 @@ fn queued_rows_have_distinct_keys() {
         queued: true,
         sending: false,
         note: None,
+        merged: false,
     };
     let sending = Row::User {
         text: "going".into(),
@@ -143,6 +144,7 @@ fn queued_rows_have_distinct_keys() {
         queued: true,
         sending: true,
         note: None,
+        merged: false,
     };
     let keys = [
         key_of(&items, 0, &queued),

@@ -140,6 +140,7 @@ fn the_outbox_is_listed_then_followed() {
             kind: ItemKind::User {
                 text: "first".into(),
                 images: 0,
+                merged: false,
             },
             date: Some(now_ms() as f64 / 1000.0 + 5.0),
         }],

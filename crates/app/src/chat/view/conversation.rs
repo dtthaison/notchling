@@ -146,6 +146,7 @@ struct Bubble<'a> {
     queued: bool,
     sending: bool,
     note: Option<&'a str>,
+    merged: bool,
     chat: &'a WeakEntity<ChatView>,
 }
 
@@ -178,6 +179,7 @@ fn user_row(
         queued,
         sending,
         note: waiting_note,
+        merged,
         chat,
     } = bubble;
     let id = sel.id();
@@ -256,6 +258,9 @@ fn user_row(
                 a,
             ))
         })
+        .when(merged, |d| {
+            d.child(label(t::chat::merged(), TypeRole::Meta, Ink::TextFaint, a))
+        })
         .children(status)
 }
 
@@ -300,12 +305,14 @@ fn row_element(
             queued,
             sending,
             note,
+            merged,
         } => {
             let split = crate::chat::drops::split_images(text, |p| s.markdown.borrow().is_file(p));
             let bubble = Bubble {
                 queued: *queued,
                 sending: *sending,
                 note: note.as_deref(),
+                merged: *merged,
                 chat: &input.chat,
             };
             user_row(sel, split, *images, bubble, a, cx)

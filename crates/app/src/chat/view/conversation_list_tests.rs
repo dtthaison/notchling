@@ -185,6 +185,7 @@ fn a_held_message_is_one_queued_row_between_the_queue_and_the_sending_ones() {
         queued: true,
         sending,
         note: None,
+        merged: false,
     };
     assert_eq!(row_at(&input, 3), Some(user("a", false)));
     assert_eq!(row_at(&input, 4), Some(user("b1\n\nb2", false)));
@@ -335,6 +336,7 @@ fn a_held_message_shows_the_state_the_daemon_gave_it_and_measures_its_row_again_
         queued: true,
         sending: false,
         note: note.map(String::from),
+        merged: false,
     };
     assert_eq!(row_at(&waiting, 3), Some(user(None)));
     let note = "Waiting — the terminal box has other text";

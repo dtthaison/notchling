@@ -97,6 +97,7 @@ pub fn user_item(raw: &str, images: usize) -> Option<ItemKind> {
         return Some(ItemKind::User {
             text: format!("! {command}"),
             images,
+            merged: false,
         });
     }
     if let Some(output) = shell_output(&text) {
@@ -125,5 +126,9 @@ pub fn user_item(raw: &str, images: usize) -> Option<ItemKind> {
     if text.is_empty() && images == 0 {
         return None;
     }
-    Some(ItemKind::User { text, images })
+    Some(ItemKind::User {
+        text,
+        images,
+        merged: false,
+    })
 }

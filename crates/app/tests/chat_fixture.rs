@@ -65,7 +65,8 @@ fn transcripts_in_the_fixture_are_read_relative_to_the_root() {
             images: 0,
             queued: false,
             sending: false,
-            note: None
+            note: None,
+            merged: false
         }
     );
     assert!(matches!(&rows[1], Row::Thinking { title, .. } if title == "Thought for 4s"));
@@ -108,7 +109,8 @@ fn transcripts_in_the_fixture_are_read_relative_to_the_root() {
             images: 0,
             queued: true,
             sending: false,
-            note: None
+            note: None,
+            merged: false
         })
     );
 }

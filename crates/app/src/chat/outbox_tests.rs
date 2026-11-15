@@ -47,6 +47,7 @@ fn user_items(texts: &[(&str, f64)]) -> Conversation {
                 kind: ItemKind::User {
                     text: (*t).to_owned(),
                     images: 0,
+                    merged: false,
                 },
                 date: Some(*at),
             })

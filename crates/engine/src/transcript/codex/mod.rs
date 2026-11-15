@@ -235,7 +235,11 @@ impl Parser {
                     });
                     self.items.push(ChatItem {
                         id,
-                        kind: ItemKind::User { text, images },
+                        kind: ItemKind::User {
+                            text,
+                            images,
+                            merged: false,
+                        },
                         date,
                     });
                 }

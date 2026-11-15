@@ -93,6 +93,7 @@ pub(super) fn row_at(input: &ConversationInput, i: usize) -> Option<Row> {
         queued: true,
         sending,
         note: note.cloned(),
+        merged: false,
     };
     let queued = queued_len(shown, input.held.as_deref());
     if k < shown.queued.len() {

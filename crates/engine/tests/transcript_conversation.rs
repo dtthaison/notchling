@@ -9,7 +9,24 @@ fn user(text: &str) -> ItemKind {
     ItemKind::User {
         text: text.into(),
         images: 0,
+        merged: false,
     }
+}
+
+fn merged_user(text: &str) -> ItemKind {
+    ItemKind::User {
+        text: text.into(),
+        images: 0,
+        merged: true,
+    }
+}
+
+fn users(c: &Conversation) -> Vec<ItemKind> {
+    c.items
+        .iter()
+        .filter(|i| matches!(i.kind, ItemKind::User { .. }))
+        .map(|i| i.kind.clone())
+        .collect()
 }
 
 fn read_lines_as_file(lines: &[&str]) -> Conversation {
@@ -441,4 +458,56 @@ fn write_results_show_created_files_as_added_lines() {
             },
         ]
     );
+}
+
+#[test]
+fn merged_prompt_is_marked() {
+    let path =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/queue/merged.jsonl");
+    let c = conversation::read(&s(&path));
+    assert_eq!(
+        users(&c),
+        [
+            user("Check the repo"),
+            merged_user("check the logs\nthen run tests"),
+            merged_user("ok\nok"),
+            user("one alone"),
+        ]
+    );
+    assert!(c.queued.is_empty());
+}
+
+#[test]
+fn merged_attachment_is_marked() {
+    let c = read_lines_as_file(&[
+        r#"{"type":"queue-operation","operation":"enqueue","timestamp":"2026-11-15T10:00:10.000Z","content":"first"}"#,
+        r#"{"type":"queue-operation","operation":"enqueue","timestamp":"2026-11-15T10:00:10.100Z","content":"second"}"#,
+        r#"{"type":"queue-operation","operation":"dequeue","timestamp":"2026-11-15T10:00:12.500Z"}"#,
+        r#"{"type":"queue-operation","operation":"dequeue","timestamp":"2026-11-15T10:00:12.500Z"}"#,
+        r#"{"type":"attachment","attachment":{"type":"queued_command","prompt":"first\nsecond","commandMode":"prompt"},"timestamp":"2026-11-15T10:00:12.600Z"}"#,
+    ]);
+    assert_eq!(users(&c), [merged_user("first\nsecond")]);
+}
+
+#[test]
+fn single_dequeue_is_not_merged() {
+    let c = read_lines_as_file(&[
+        r#"{"type":"queue-operation","operation":"enqueue","timestamp":"2026-11-15T10:00:10.000Z","content":"first"}"#,
+        r#"{"type":"queue-operation","operation":"enqueue","timestamp":"2026-11-15T10:00:10.100Z","content":"second"}"#,
+        r#"{"type":"queue-operation","operation":"dequeue","timestamp":"2026-11-15T10:00:12.500Z"}"#,
+        r#"{"type":"user","message":{"role":"user","content":"first\nsecond"},"timestamp":"2026-11-15T10:00:12.600Z"}"#,
+    ]);
+    assert_eq!(users(&c), [user("first\nsecond")]);
+}
+
+#[test]
+fn two_dequeues_with_another_line_are_not_merged() {
+    let c = read_lines_as_file(&[
+        r#"{"type":"queue-operation","operation":"enqueue","timestamp":"2026-11-15T10:00:10.000Z","content":"first"}"#,
+        r#"{"type":"queue-operation","operation":"enqueue","timestamp":"2026-11-15T10:00:10.100Z","content":"second"}"#,
+        r#"{"type":"queue-operation","operation":"dequeue","timestamp":"2026-11-15T10:00:12.500Z"}"#,
+        r#"{"type":"queue-operation","operation":"dequeue","timestamp":"2026-11-15T10:00:12.500Z"}"#,
+        r#"{"type":"user","message":{"role":"user","content":"something else"},"timestamp":"2026-11-15T10:00:12.600Z"}"#,
+    ]);
+    assert_eq!(users(&c), [user("something else")]);
 }

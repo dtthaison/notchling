@@ -249,6 +249,7 @@ mod tests {
         let user = conversation(vec![ItemKind::User {
             text: "go".into(),
             images: 0,
+            merged: false,
         }]);
         assert_eq!(line(&user, true, 0.0).unwrap().text, "Thinking…");
         let writing = conversation(vec![ItemKind::Assistant { text: "A".into() }]);
@@ -438,6 +439,7 @@ mod tests {
         let mut image = conversation(vec![ItemKind::User {
             text: "  ".into(),
             images: 1,
+            merged: false,
         }]);
         image.turn_start = Some(0.0);
         assert_eq!(stalled(&image, true, 9_999.0), None);

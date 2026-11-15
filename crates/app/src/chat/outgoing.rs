@@ -86,6 +86,7 @@ mod tests {
                     kind: ItemKind::User {
                         text: (*t).to_owned(),
                         images: 0,
+                        merged: false,
                     },
                     date: None,
                 })
