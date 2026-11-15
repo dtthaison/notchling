@@ -1,5 +1,5 @@
 use super::command_for;
-use crate::cluster_workspace_testkit::{node_id, Fixture};
+use crate::cluster_workspace_testkit::{node_id, noise, Fixture};
 use notchling_engine::cluster::jobs::job_id;
 use notchling_engine::cluster::workspace::{GitCall, NO_NEW_COMMITS};
 use serde_json::json;
@@ -67,15 +67,7 @@ fn a_pushed_branch_sends_no_bundle_and_a_subfolder_is_kept() {
 #[test]
 fn a_big_bundle_goes_in_several_chunks() {
     let fx = Fixture::new("ws-big");
-    let mut seed = 12345u64;
-    let noise: Vec<u8> = (0..700_000)
-        .map(|_| {
-            seed = seed
-                .wrapping_mul(6364136223846793005)
-                .wrapping_add(1442695040888963407);
-            (seed >> 33) as u8
-        })
-        .collect();
+    let noise = noise(700_000);
     std::fs::write(fx.repo.join("noise.bin"), &noise).unwrap();
     fx.git(&fx.repo, &["add", "noise.bin"]);
     fx.git(&fx.repo, &["commit", "-q", "-m", "noise"]);
@@ -410,4 +402,122 @@ fn git_env_is_scrubbed() {
     assert!(command
         .argv
         .contains(&"core.hooksPath=/dev/null".to_string()));
+}
+
+fn tip_in(fx: &Fixture, tree: &Path) -> String {
+    fx.git(tree, &["rev-parse", "HEAD"])
+}
+
+fn clone_of(fx: &Fixture) -> std::path::PathBuf {
+    std::fs::read_dir(fx.worker_cluster.join("work"))
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .find(|p| {
+            p.file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with("repo-")
+        })
+        .expect("the cached clone")
+}
+
+#[test]
+fn a_new_branch_with_no_commits_sends_no_bundle() {
+    let fx = Fixture::new("ws-newbranch");
+    fx.git(&fx.repo, &["checkout", "-q", "-b", "feature/new"]);
+    let head = fx.git(&fx.repo, &["rev-parse", "HEAD"]);
+    let facts = fx.sender.read_facts(fx.repo_str()).unwrap();
+    assert_eq!(facts.unpushed, 0);
+    assert_eq!(facts.upstream, None);
+    let cwd = fx
+        .sender
+        .send_code(&node_id('a'), "worker", "kn1", fx.repo_str())
+        .unwrap();
+    assert_eq!(fx.ops(), vec!["workspace.prepare"]);
+    assert_eq!(tip_in(&fx, Path::new(&cwd)), head);
+}
+
+#[test]
+fn a_branch_behind_its_upstream_sends_no_bundle() {
+    let fx = Fixture::new("ws-behind");
+    fx.commit("a.txt", "two\n", "two");
+    fx.git(&fx.repo, &["push", "-q"]);
+    fx.git(&fx.repo, &["reset", "-q", "--hard", "HEAD~1"]);
+    let head = fx.git(&fx.repo, &["rev-parse", "HEAD"]);
+    let facts = fx.sender.read_facts(fx.repo_str()).unwrap();
+    assert!(facts.upstream.is_some());
+    assert_eq!(facts.unpushed, 0);
+    let cwd = fx
+        .sender
+        .send_code(&node_id('a'), "worker", "kb1", fx.repo_str())
+        .unwrap();
+    assert_eq!(fx.ops(), vec!["workspace.prepare"]);
+    assert_eq!(tip_in(&fx, Path::new(&cwd)), head);
+}
+
+#[test]
+fn unpushed_commits_are_counted() {
+    let fx = Fixture::new("ws-count");
+    assert_eq!(fx.sender.read_facts(fx.repo_str()).unwrap().unpushed, 0);
+    fx.commit("a.txt", "two\n", "two");
+    fx.commit("a.txt", "three\n", "three");
+    assert_eq!(fx.sender.read_facts(fx.repo_str()).unwrap().unpushed, 2);
+}
+
+#[test]
+fn a_cached_clone_finds_a_newer_base() {
+    let fx = Fixture::new("ws-newbase");
+    let node = node_id('a');
+    fx.sender
+        .send_code(&node, "worker", "first", fx.repo_str())
+        .unwrap();
+    fx.commit("a.txt", "two\n", "two");
+    fx.git(&fx.repo, &["push", "-q"]);
+    fx.git(&fx.repo, &["checkout", "-q", "-b", "feature/later"]);
+    let head = fx.commit("c.txt", "local\n", "local only");
+    let cwd = fx
+        .sender
+        .send_code(&node, "worker", "second", fx.repo_str())
+        .unwrap();
+    let tree = Path::new(&cwd);
+    assert_eq!(tip_in(&fx, tree), head);
+    assert_eq!(
+        std::fs::read_to_string(tree.join("a.txt")).unwrap(),
+        "two\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(tree.join("c.txt")).unwrap(),
+        "local\n"
+    );
+}
+
+#[test]
+fn a_retried_prepare_keeps_the_start_ref() {
+    let fx = Fixture::new("ws-startref");
+    let node = node_id('a');
+    let first = fx.git(&fx.repo, &["rev-parse", "HEAD"]);
+    let cwd = fx
+        .sender
+        .send_code(&node, "w", "ks", fx.repo_str())
+        .unwrap();
+    let job = job_id("ks");
+    let tree = Path::new(&cwd);
+    std::fs::write(tree.join("w.txt"), "w").unwrap();
+    fx.git(tree, &["add", "."]);
+    fx.git(tree, &["commit", "-q", "-m", "worker"]);
+    let theirs = tip_in(&fx, tree);
+    fx.commit("a.txt", "moved on\n", "moved on");
+    let again = fx
+        .sender
+        .send_code(&node, "w", "ks", fx.repo_str())
+        .unwrap();
+    assert_eq!(again, cwd);
+    let start_ref = format!("refs/notchling/start/{job}");
+    let start = fx.git(&clone_of(&fx), &["rev-parse", &start_ref]);
+    assert_eq!(start, first, "the start ref stays where the worktree began");
+    fx.sender.bring_back(&job).unwrap();
+    let branch = format!("refs/heads/notchling/w/{job}");
+    assert_eq!(fx.git(&fx.repo, &["rev-parse", &branch]), theirs);
+    let range = format!("{first}..{branch}");
+    assert_eq!(fx.git(&fx.repo, &["rev-list", "--count", &range]), "1");
 }

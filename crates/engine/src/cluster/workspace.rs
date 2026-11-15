@@ -93,6 +93,8 @@ pub struct RepoFacts {
     pub branch: String,
     pub head: String,
     pub upstream: Option<String>,
+    #[serde(default)]
+    pub unpushed: u32,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -272,28 +274,23 @@ pub fn plan_send(facts: &RepoFacts, out: &str) -> Result<SendPlan, String> {
     if !path_ok(out) {
         return Err("the bundle path must be absolute".to_string());
     }
+    if facts.unpushed == 0 {
+        return Ok(SendPlan { bundle: None });
+    }
     let branch = format!("refs/heads/{}", facts.branch);
-    let args: Vec<String> = match &facts.upstream {
-        Some(up) if *up == facts.head => return Ok(SendPlan { bundle: None }),
-        Some(up) => vec![
-            "bundle".to_string(),
-            "create".to_string(),
-            out.to_string(),
-            format!("{up}..{branch}"),
+    let call = GitCall::new(
+        &facts.root,
+        &[
+            "bundle",
+            "create",
+            out,
+            &branch,
+            "--not",
+            "--remotes=origin",
         ],
-        None => vec![
-            "bundle".to_string(),
-            "create".to_string(),
-            out.to_string(),
-            branch,
-            "--not".to_string(),
-            "--remotes=origin".to_string(),
-        ],
-    };
-    let mut call = GitCall::new(&facts.root, &[]);
-    call.args = args;
-    call.timeout_secs = SLOW_SECS;
-    let call = call.refuse("", "git couldn't bundle the commits to send");
+    )
+    .slow()
+    .refuse("", "git couldn't bundle the commits to send");
     Ok(SendPlan { bundle: Some(call) })
 }
 
@@ -336,11 +333,11 @@ pub fn plan_prepare(
                 "--no-tags",
                 "--",
                 "origin",
-                &format!("+refs/heads/{branch}:refs/remotes/origin/{branch}"),
+                "+refs/heads/*:refs/remotes/origin/*",
             ],
         )
         .slow()
-        .may_fail(),
+        .refuse("", "Couldn't fetch the repository's remote on this machine"),
     ];
     if let Some(bundle) = bundle {
         calls.push(
@@ -367,14 +364,17 @@ pub fn plan_prepare(
             "The commit isn't on the remote and no unpushed commits were sent",
         ),
     );
-    calls.push(GitCall::new(
-        &dir,
-        &[
-            "update-ref",
-            &format!("refs/notchling/start/{job}"),
-            &facts.head,
-        ],
-    ));
+    calls.push(
+        GitCall::new(
+            &dir,
+            &[
+                "update-ref",
+                &format!("refs/notchling/start/{job}"),
+                &facts.head,
+            ],
+        )
+        .unless_present(&tree),
+    );
     calls.push(
         GitCall::new(
             &dir,
@@ -465,6 +465,7 @@ pub struct FactsCalls {
     pub branch: GitCall,
     pub origin: GitCall,
     pub upstream: GitCall,
+    pub unpushed: GitCall,
 }
 
 pub fn facts_calls(cwd: &str) -> Result<FactsCalls, String> {
@@ -477,6 +478,10 @@ pub fn facts_calls(cwd: &str) -> Result<FactsCalls, String> {
         branch: GitCall::new(cwd, &["symbolic-ref", "--short", "-q", "HEAD"]),
         origin: GitCall::new(cwd, &["remote", "get-url", "origin"]),
         upstream: GitCall::new(cwd, &["rev-parse", "--verify", "-q", "@{upstream}"]),
+        unpushed: GitCall::new(
+            cwd,
+            &["rev-list", "--count", "HEAD", "--not", "--remotes=origin"],
+        ),
     })
 }
 
@@ -487,6 +492,7 @@ pub struct FactsOut {
     pub branch: Option<String>,
     pub origin: Option<String>,
     pub upstream: Option<String>,
+    pub unpushed: Option<String>,
 }
 
 fn line(text: &str) -> String {
@@ -498,12 +504,18 @@ pub fn parse_facts(out: FactsOut) -> Result<RepoFacts, String> {
     let Some(branch) = branch else {
         return Err("Check out a branch first: this repository is on a detached HEAD".to_string());
     };
+    let unpushed = out
+        .unpushed
+        .as_deref()
+        .and_then(|n| line(n).parse::<u32>().ok())
+        .ok_or_else(|| "git couldn't count the commits the remote lacks".to_string())?;
     let facts = RepoFacts {
         root: line(&out.root),
         origin: out.origin.map(|o| line(&o)).filter(|o| !o.is_empty()),
         branch,
         head: line(&out.head),
         upstream: out.upstream.map(|u| line(&u)).filter(|u| !u.is_empty()),
+        unpushed,
     };
     checked(&facts)?;
     if !path_ok(&facts.root) {

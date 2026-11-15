@@ -91,6 +91,26 @@ pub fn remove_plain(path: &Path) {
     }
 }
 
+pub fn sweep_old(dir: &Path, now: SystemTime, suffix: &str) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !entry.file_name().to_string_lossy().ends_with(suffix) {
+            continue;
+        }
+        let old = std::fs::symlink_metadata(&path)
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| now.duration_since(t).ok())
+            .is_some_and(|age| age > STALE);
+        if old {
+            remove_plain(&path);
+        }
+    }
+}
+
 pub fn wipe(cluster: &Path) -> Result<(), String> {
     for name in [INCOMING_DIR, OUTGOING_DIR] {
         let dir = cluster.join(name);
@@ -139,19 +159,7 @@ impl Blobs {
         let Ok(dir) = self.dir() else {
             return;
         };
-        if let Ok(entries) = std::fs::read_dir(&dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                let old = std::fs::symlink_metadata(&path)
-                    .and_then(|m| m.modified())
-                    .ok()
-                    .and_then(|t| now.duration_since(t).ok())
-                    .is_some_and(|age| age > STALE);
-                if old {
-                    remove_plain(&path);
-                }
-            }
-        }
+        sweep_old(&dir, now, "");
         lock(&self.open).retain(|name, _| std::fs::symlink_metadata(part_path(&dir, name)).is_ok());
     }
 

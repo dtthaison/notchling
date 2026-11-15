@@ -14,6 +14,7 @@ fn facts() -> RepoFacts {
         branch: "feature/x".to_string(),
         head: HEAD.to_string(),
         upstream: Some(UP.to_string()),
+        unpushed: 2,
     }
 }
 
@@ -38,6 +39,7 @@ fn all_calls() -> Vec<GitCall> {
         reads.branch,
         reads.origin,
         reads.upstream,
+        reads.unpushed,
     ]);
     calls
 }
@@ -94,31 +96,8 @@ fn scrubbed_names_are_every_git_variable() {
 fn send_plan_bundles_only_unpushed_commits() {
     let f = facts();
     let plan = plan_send(&f, "/data/send.bundle").unwrap();
-    let call = plan.bundle.expect("head is ahead of its upstream");
+    let call = plan.bundle.expect("two commits the remote lacks");
     assert_eq!(call.cwd, "/Users/me/code/notchling");
-    let line = joined(&call);
-    assert!(
-        line.ends_with(&format!(
-            "bundle create /data/send.bundle {UP}..refs/heads/feature/x"
-        )),
-        "{line}"
-    );
-    let level = RepoFacts {
-        upstream: Some(HEAD.to_string()),
-        ..facts()
-    };
-    assert!(plan_send(&level, "/data/send.bundle")
-        .unwrap()
-        .bundle
-        .is_none());
-    let never_pushed = RepoFacts {
-        upstream: None,
-        ..facts()
-    };
-    let call = plan_send(&never_pushed, "/data/send.bundle")
-        .unwrap()
-        .bundle
-        .expect("a branch with no upstream sends what origin lacks");
     let line = joined(&call);
     assert!(
         line.ends_with(
@@ -126,6 +105,29 @@ fn send_plan_bundles_only_unpushed_commits() {
         ),
         "{line}"
     );
+    for upstream in [None, Some(HEAD.to_string()), Some(UP.to_string())] {
+        let nothing = RepoFacts {
+            upstream,
+            unpushed: 0,
+            ..facts()
+        };
+        assert!(
+            plan_send(&nothing, "/data/send.bundle")
+                .unwrap()
+                .bundle
+                .is_none(),
+            "nothing unpushed means no bundle, whatever the upstream says"
+        );
+    }
+    let ahead = RepoFacts {
+        upstream: None,
+        unpushed: 1,
+        ..facts()
+    };
+    assert!(plan_send(&ahead, "/data/send.bundle")
+        .unwrap()
+        .bundle
+        .is_some());
 }
 
 #[test]
@@ -148,12 +150,16 @@ fn prepare_clones_once_and_adds_a_worktree() {
     let lines: Vec<String> = calls.iter().map(joined).collect();
     let fetch_origin = lines
         .iter()
+        .position(|l| l.ends_with("fetch --no-tags -- origin +refs/heads/*:refs/remotes/origin/*"))
+        .expect("origin fetch of every branch");
+    let start = lines
+        .iter()
         .position(|l| {
-            l.ends_with(
-                "fetch --no-tags -- origin +refs/heads/feature/x:refs/remotes/origin/feature/x",
-            )
+            l.ends_with(&format!(
+                "update-ref refs/notchling/start/j-0123456789ab {HEAD}"
+            ))
         })
-        .expect("origin fetch");
+        .expect("start ref");
     let fetch_bundle = lines
         .iter()
         .position(|l| l.ends_with("fetch --no-tags -- /data/in/t1 +refs/heads/feature/x:refs/notchling/in/j-0123456789ab"))
@@ -171,11 +177,20 @@ fn prepare_clones_once_and_adds_a_worktree() {
         })
         .expect("worktree");
     assert!(fetch_origin < fetch_bundle && fetch_bundle < verify && verify < worktree);
+    assert!(verify < start && start < worktree);
+    assert_eq!(
+        calls[start].skip_if_exists.as_deref(),
+        Some("/data/work/jobs/j-0123456789ab"),
+        "the start ref is written only when the worktree is created"
+    );
+    assert!(
+        !calls[fetch_origin].allow_failure,
+        "a cached clone must really be refreshed"
+    );
     assert_eq!(
         calls[worktree].skip_if_exists.as_deref(),
         Some("/data/work/jobs/j-0123456789ab")
     );
-    assert!(calls[fetch_origin].allow_failure);
     assert!(!calls[verify].allow_failure);
     assert_eq!(calls[worktree].cwd, dir);
     let without = plan_prepare(&f, "j-0123456789ab", "/data/work", None).unwrap();
@@ -332,6 +347,7 @@ fn facts_are_read_and_checked() {
         branch: branch.map(|b| format!("{b}\n")),
         origin: origin.map(|o| format!("{o}\n")),
         upstream: upstream.map(|u| format!("{u}\n")),
+        unpushed: Some("3\n".to_string()),
     };
     let got = parse_facts(out(Some("main"), Some("git@h:o/r.git"), Some(UP))).unwrap();
     assert_eq!(got.root, "/repo");
@@ -339,6 +355,7 @@ fn facts_are_read_and_checked() {
     assert_eq!(got.branch, "main");
     assert_eq!(got.origin.as_deref(), Some("git@h:o/r.git"));
     assert_eq!(got.upstream.as_deref(), Some(UP));
+    assert_eq!(got.unpushed, 3);
     let bare = parse_facts(out(Some("main"), None, None)).unwrap();
     assert_eq!(bare.origin, None);
     assert_eq!(bare.upstream, None);
@@ -348,7 +365,14 @@ fn facts_are_read_and_checked() {
     assert!(parse_facts(out(Some("a b"), None, None)).is_err());
     assert!(parse_facts(out(Some("main"), Some("ext::x"), None)).is_err());
     assert!(parse_facts(out(Some("main"), None, Some("zzz"))).is_err());
+    for unpushed in [None, Some("x\n"), Some("-1\n"), Some("")] {
+        let mut broken = out(Some("main"), None, None);
+        broken.unpushed = unpushed.map(str::to_string);
+        assert!(parse_facts(broken).is_err(), "{unpushed:?}");
+    }
     assert!(facts_calls("relative").is_err());
+    let calls = facts_calls("/repo").unwrap();
+    assert!(joined(&calls.unpushed).ends_with("rev-list --count HEAD --not --remotes=origin"));
 }
 
 #[test]

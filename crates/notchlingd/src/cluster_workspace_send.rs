@@ -137,6 +137,7 @@ impl Sender {
             branch: self.one(&calls.branch)?,
             origin: self.one(&calls.origin)?,
             upstream: self.one(&calls.upstream)?,
+            unpushed: self.one(&calls.unpushed)?,
         };
         parse_facts(out).map_err(bad)
     }
@@ -276,11 +277,14 @@ impl Sender {
         let mut out = create_private(file).map_err(|e| failed(format!("the bundle file: {e}")))?;
         let mut incoming = Incoming::default();
         let mut from = 0u64;
+        let mut nonce = Value::Null;
         let limit = MAX_BLOB / notchling_engine::cluster::blob::CHUNK as u64 + 4;
         for _ in 0..limit {
-            let reply = self
-                .peers
-                .call(node, NODE_RETURN, json!({"job": job, "from": from}))?;
+            let args = json!({"job": job, "from": from, "nonce": nonce});
+            let reply = self.peers.call(node, NODE_RETURN, args)?;
+            if from == 0 {
+                nonce = reply.get("nonce").cloned().unwrap_or(Value::Null);
+            }
             let data = reply
                 .get("data")
                 .and_then(Value::as_str)

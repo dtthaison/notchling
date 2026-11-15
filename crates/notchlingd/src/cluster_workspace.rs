@@ -1,25 +1,29 @@
 use crate::cluster_blobs::{
-    is_real_file, private_dir, remove_plain, Blobs, NODE_PUT, NODE_PUT_END, OUTGOING_DIR,
+    is_real_file, private_dir, remove_plain, sweep_old, Blobs, NODE_PUT, NODE_PUT_END, OUTGOING_DIR,
 };
 use crate::cluster_node::LocalCalls;
-use notchling_engine::bridge::net::crypto::base64;
+use notchling_engine::bridge::net::crypto::{base64, hex, random_bytes};
 use notchling_engine::cluster::blob::{safe_name, Digest, CHUNK};
 use notchling_engine::cluster::wire::Origin;
 use notchling_engine::cluster::workspace::{
-    plan_cleanup, plan_prepare, plan_return, scrubbed, worktree_dir, GitCall, RepoFacts, ENV,
+    plan_cleanup, plan_prepare, plan_return, repo_dir, scrubbed, worktree_dir, GitCall, RepoFacts,
+    ENV,
 };
 use notchling_engine::control::{Command, LaunchOutput, Launcher};
 use notchling_local_api::{ApiError, ErrorCode};
 use serde_json::{json, Value};
+use std::collections::BTreeSet;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::Duration;
+use std::time::SystemTime;
 
 pub const NODE_PREPARE: &str = "workspace.prepare";
 pub const NODE_RETURN: &str = "workspace.return";
 pub const NODE_OPS: [&str; 4] = [NODE_PUT, NODE_PUT_END, NODE_PREPARE, NODE_RETURN];
 pub const WORK_DIR: &str = "work";
+const RETURN_SUFFIX: &str = ".return.bundle";
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
@@ -96,11 +100,43 @@ fn text_of(path: &Path) -> Result<&str, ApiError> {
         .ok_or_else(|| failed("a folder name isn't plain text"))
 }
 
+#[derive(Default)]
+pub struct Turns {
+    held: Mutex<BTreeSet<String>>,
+    wake: Condvar,
+}
+
+pub struct Turn<'a> {
+    turns: &'a Turns,
+    key: String,
+}
+
+impl Turns {
+    pub fn claim(&self, key: &str) -> Turn<'_> {
+        let mut held = lock(&self.held);
+        while held.contains(key) {
+            held = self.wake.wait(held).unwrap_or_else(|e| e.into_inner());
+        }
+        held.insert(key.to_string());
+        Turn {
+            turns: self,
+            key: key.to_string(),
+        }
+    }
+}
+
+impl Drop for Turn<'_> {
+    fn drop(&mut self) {
+        lock(&self.turns.held).remove(&self.key);
+        self.turns.wake.notify_all();
+    }
+}
+
 pub struct Workspace {
     cluster: PathBuf,
     git: Arc<dyn Launcher>,
     blobs: Arc<Blobs>,
-    busy: Mutex<()>,
+    turns: Turns,
 }
 
 impl Workspace {
@@ -109,7 +145,7 @@ impl Workspace {
             cluster,
             git,
             blobs,
-            busy: Mutex::new(()),
+            turns: Turns::default(),
         })
     }
 
@@ -143,7 +179,8 @@ impl Workspace {
         };
         let tree = worktree_dir(job, root).map_err(bad)?;
         let calls = plan_prepare(&facts, job, root, bundle_text.as_deref()).map_err(bad)?;
-        let _turn = lock(&self.busy);
+        let dir = repo_dir(&facts, root).map_err(bad)?;
+        let _turn = self.turns.claim(&dir);
         let existed = std::fs::symlink_metadata(&tree).is_ok();
         let result = run_calls(self.git.as_ref(), &calls);
         if let Some(t) = transfer {
@@ -172,13 +209,24 @@ impl Workspace {
             .ok_or_else(|| bad("from is a number"))?;
         let out_dir = private_dir(&self.cluster, OUTGOING_DIR)
             .map_err(|e| failed(format!("the outgoing folder: {e}")))?;
-        let file = out_dir.join(format!("{job}.return.bundle"));
+        let nonce = if from == 0 {
+            hex(&random_bytes(8).map_err(|_| failed("no randomness for the return"))?)
+        } else {
+            args.get("nonce")
+                .and_then(Value::as_str)
+                .filter(|n| safe_name(n))
+                .ok_or_else(|| bad("nonce is the one the first reply gave"))?
+                .to_string()
+        };
+        let file = out_dir.join(format!("{job}.{nonce}.return.bundle"));
         if from == 0 {
+            sweep_old(&out_dir, SystemTime::now(), RETURN_SUFFIX);
             let root = self.work_root()?;
             let call = plan_return(job, text_of(&root)?, text_of(&file)?).map_err(bad)?;
-            let _turn = lock(&self.busy);
-            remove_plain(&file);
-            run_calls(self.git.as_ref(), &[call]).map_err(failed)?;
+            if let Err(why) = run_calls(self.git.as_ref(), &[call]) {
+                remove_plain(&file);
+                return Err(failed(why));
+            }
         }
         if !is_real_file(&file) {
             return Err(failed("there is no work waiting to be brought back"));
@@ -200,6 +248,7 @@ impl Workspace {
             "next": next,
             "size": size,
             "done": done,
+            "nonce": nonce,
         });
         if done {
             reply["sha256"] = json!(hash_file(&file).map_err(|e| failed(e.to_string()))?);
@@ -255,3 +304,7 @@ impl LocalCalls for WorkspaceCalls {
 #[cfg(test)]
 #[path = "cluster_workspace_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "cluster_workspace_turns_tests.rs"]
+mod turns_tests;

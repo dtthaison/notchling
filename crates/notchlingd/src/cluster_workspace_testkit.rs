@@ -8,7 +8,7 @@ use notchling_engine::control::{Command, LaunchError, LaunchOutput, Launcher, Re
 use notchling_local_api::ApiError;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
 pub(crate) struct Isolated {
@@ -39,6 +39,94 @@ impl Launcher for Isolated {
     fn run_pty(&self, _script: &PtyScript) -> Result<bool, LaunchError> {
         Err(LaunchError::Unsupported)
     }
+}
+
+pub(crate) struct Gated {
+    inner: Isolated,
+    hold: String,
+    entered: Arc<(Mutex<bool>, Condvar)>,
+    release: Arc<(Mutex<bool>, Condvar)>,
+}
+
+pub(crate) struct Gate {
+    entered: Arc<(Mutex<bool>, Condvar)>,
+    release: Arc<(Mutex<bool>, Condvar)>,
+}
+
+const GATE_WAIT: Duration = Duration::from_secs(20);
+
+fn wait_flag(flag: &(Mutex<bool>, Condvar)) -> bool {
+    let (lock, wake) = flag;
+    let mut set = lock.lock().unwrap();
+    let deadline = std::time::Instant::now() + GATE_WAIT;
+    while !*set {
+        let left = deadline.saturating_duration_since(std::time::Instant::now());
+        if left.is_zero() {
+            return false;
+        }
+        set = wake.wait_timeout(set, left).unwrap().0;
+    }
+    true
+}
+
+fn raise(flag: &(Mutex<bool>, Condvar)) {
+    *flag.0.lock().unwrap() = true;
+    flag.1.notify_all();
+}
+
+impl Gate {
+    pub(crate) fn wait_entered(&self) -> bool {
+        wait_flag(&self.entered)
+    }
+
+    pub(crate) fn open(&self) {
+        raise(&self.release);
+    }
+}
+
+impl Gated {
+    pub(crate) fn new(home: PathBuf, hold: &str) -> (Gated, Gate) {
+        let entered = Arc::new((Mutex::new(false), Condvar::new()));
+        let release = Arc::new((Mutex::new(false), Condvar::new()));
+        let gate = Gate {
+            entered: entered.clone(),
+            release: release.clone(),
+        };
+        let gated = Gated {
+            inner: Isolated::new(home),
+            hold: hold.to_string(),
+            entered,
+            release,
+        };
+        (gated, gate)
+    }
+}
+
+impl Launcher for Gated {
+    fn run(&self, command: &Command, timeout: Duration) -> Result<LaunchOutput, LaunchError> {
+        let clones = command.argv.iter().any(|a| a == "clone");
+        if clones && command.argv.iter().any(|a| a.contains(&self.hold)) {
+            raise(&self.entered);
+            wait_flag(&self.release);
+        }
+        self.inner.run(command, timeout)
+    }
+
+    fn run_pty(&self, script: &PtyScript) -> Result<bool, LaunchError> {
+        self.inner.run_pty(script)
+    }
+}
+
+pub(crate) fn noise(len: usize) -> Vec<u8> {
+    let mut seed = 12345u64;
+    (0..len)
+        .map(|_| {
+            seed = seed
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            (seed >> 33) as u8
+        })
+        .collect()
 }
 
 pub(crate) fn git_in(home: &Path, dir: Option<&Path>, args: &[&str]) -> String {
@@ -164,6 +252,31 @@ impl Fixture {
         self.git(&self.repo, &["add", file]);
         self.git(&self.repo, &["commit", "-q", "-m", message]);
         self.git(&self.repo, &["rev-parse", "HEAD"])
+    }
+
+    pub(crate) fn second_repo(&self, name: &str) -> (PathBuf, PathBuf) {
+        let origin = self.dir.path().join(format!("{name}.git"));
+        let repo = self.dir.path().join(name);
+        let bare = [
+            "init",
+            "-q",
+            "--bare",
+            "-b",
+            "main",
+            origin.to_str().unwrap(),
+        ];
+        git_in(&self.home, None, &bare);
+        let work = ["init", "-q", "-b", "main", repo.to_str().unwrap()];
+        git_in(&self.home, None, &work);
+        self.git(
+            &repo,
+            &["remote", "add", "origin", origin.to_str().unwrap()],
+        );
+        std::fs::write(repo.join("b.txt"), "b\n").unwrap();
+        self.git(&repo, &["add", "b.txt"]);
+        self.git(&repo, &["commit", "-q", "-m", "b"]);
+        self.git(&repo, &["push", "-q", "-u", "origin", "main"]);
+        (origin, repo)
     }
 
     pub(crate) fn repo_str(&self) -> &str {
