@@ -34,6 +34,7 @@ Most of them come from the design, [revision 2](https://github.com/dtthaison/not
 | [XXXX](XXXX-tool-versions-follow-the-mac.md) | Tool versions follow the Mac: workers run the Mac's checked versions, rolled out by one click | Proposed |
 | [XXXX](XXXX-sparkle-and-one-release-key.md) | Sparkle for the Rust app, and one EdDSA key for the appcast and the worker manifest; amends 0010 | Proposed |
 | [XXXX](XXXX-cluster-v1-nodes.md) | Cluster v1 nodes: one primary, standbys and workers, a journaled state and a node tier | Proposed |
+| [XXXX](XXXX-phone-push.md) | Phone push: FCM, ids only, sent by the primary or by any Can Be Master machine while it is silent | Proposed |
 
 0001 was written before records had a Status section. Its status is Accepted.
 
