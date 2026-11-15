@@ -26,7 +26,13 @@ struct RawAllow {
 
 impl From<RawAllow> for SecretAllow {
     fn from(raw: RawAllow) -> SecretAllow {
-        SecretAllow::new(raw.names, raw.any)
+        let names = raw
+            .names
+            .into_iter()
+            .map(|n| n.to_lowercase())
+            .filter(|n| valid_name(n))
+            .take(MAX_ALLOWED_NAMES);
+        SecretAllow::new(names, raw.any)
     }
 }
 
@@ -108,10 +114,15 @@ pub fn expires_ms(released_ms: i64) -> i64 {
 }
 
 pub fn attachable(spec: &JobSpec, allow: &SecretAllow) -> Result<(), String> {
-    match spec.secrets.iter().find(|name| !allow.allows(name)) {
-        Some(name) => Err(format!("{name} isn't allowed on that machine")),
-        None => Ok(()),
+    for name in &spec.secrets {
+        if !valid_name(name) {
+            return Err(format!("{} isn't a valid secret name", shown(name)));
+        }
+        if !allow.allows(name) {
+            return Err(format!("{name} isn't allowed on that machine"));
+        }
     }
+    Ok(())
 }
 
 fn shown(name: &str) -> String {

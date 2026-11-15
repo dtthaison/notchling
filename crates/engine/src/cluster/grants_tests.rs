@@ -453,3 +453,43 @@ fn journaled_mixed_case_allow_replays_as_lowercase() {
     );
     assert!(replayed.members[&id("w1")].secrets.names.contains("github"));
 }
+
+#[test]
+fn attachable_refuses_invalid_names_even_with_any_on() {
+    let mut spec = job(JobState::Dispatching).spec;
+    for bad in ["../x", "a b", "", "1x"] {
+        spec.secrets = vec!["github".to_string(), bad.to_string()];
+        assert_eq!(
+            attachable(&spec, &allow(&[], true)),
+            Err(format!("{bad} isn't a valid secret name")),
+            "{bad:?}"
+        );
+    }
+    spec.secrets = vec!["x".repeat(5_000)];
+    assert_eq!(
+        attachable(&spec, &allow(&[], true)),
+        Err(format!("{} isn't a valid secret name", "x".repeat(64)))
+    );
+    spec.secrets = vec!["../x".to_string()];
+    assert_eq!(
+        attachable(&spec, &allow(&["../x"], false)),
+        Err("../x isn't a valid secret name".to_string())
+    );
+}
+
+#[test]
+fn wire_allowlist_drops_junk_and_caps_names() {
+    let mut names: Vec<String> = (0..300).map(|i| format!("n{i:03}")).collect();
+    names.extend(["../x", "a b", "", "1x"].map(String::from));
+    names.push("x".repeat(5_000));
+    names.push("GitHub".to_string());
+    let loaded: SecretAllow =
+        serde_json::from_value(json!({"names": names, "any": true})).expect("load");
+    assert!(loaded.any);
+    assert_eq!(loaded.names.len(), 256);
+    assert!(loaded.check().is_ok());
+    assert!(loaded.names.iter().all(|n| n.chars().count() < 64));
+    let small: SecretAllow =
+        serde_json::from_value(json!({"names": ["GitHub", "../x", "NPM", "a/b"]})).expect("load");
+    assert_eq!(small, allow(&["github", "npm"], false));
+}
