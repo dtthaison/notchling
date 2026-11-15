@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
 use super::id::NodeId;
@@ -40,44 +42,92 @@ pub fn failover_target(state: &ClusterState, ready: &dyn Fn(&NodeId) -> bool) ->
         .map(|m| m.id.clone())
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Hold {
+    reported: Failover,
+    until: Option<u64>,
+    seen: u64,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct PrimaryLease {
-    asked: Option<(u64, u64)>,
-    until: Option<u64>,
-    reported: Option<Failover>,
+    next_seq: u64,
+    asked: BTreeMap<NodeId, (u64, u64)>,
+    holds: BTreeMap<NodeId, Hold>,
 }
 
 impl PrimaryLease {
-    pub fn ask(&mut self, now: u64) -> u64 {
-        let last = self.asked.map_or(0, |(seq, _)| seq);
-        let seq = now.max(last.saturating_add(1));
-        self.asked = Some((seq, now));
-        seq
+    pub fn new(seed: u64) -> PrimaryLease {
+        PrimaryLease {
+            next_seq: seed,
+            ..PrimaryLease::default()
+        }
     }
 
-    pub fn granted(&mut self, seq: u64, reported: Failover) -> bool {
-        let Some((asked, sent)) = self.asked else {
+    pub fn ask(&mut self, node: &NodeId, now: u64) -> u64 {
+        self.next_seq = self.next_seq.saturating_add(1);
+        self.asked.insert(node.clone(), (self.next_seq, now));
+        self.next_seq
+    }
+
+    pub fn granted(&mut self, node: &NodeId, seq: u64, reported: Failover, seen: u64) -> bool {
+        match self.asked.get(node) {
+            Some((asked, _)) if *asked == seq => {}
+            _ => return false,
+        }
+        let Some((_, sent)) = self.asked.remove(node) else {
             return false;
         };
-        if asked != seq {
-            return false;
-        }
-        self.reported = Some(reported);
-        self.until = reported.delay_ms().map(|d| sent.saturating_add(d));
+        let until = reported.delay_ms().map(|d| sent.saturating_add(d));
+        self.holds.insert(
+            node.clone(),
+            Hold {
+                reported,
+                until,
+                seen,
+            },
+        );
         true
     }
 
-    pub fn reported(&self) -> Option<Failover> {
-        self.reported
+    pub fn released(&mut self, node: &NodeId, seq: u64, seen: u64) -> bool {
+        self.granted(node, seq, Failover::Off, seen)
     }
 
-    pub fn gates_until(&self, armed: bool) -> u64 {
-        match (self.reported, self.until) {
-            (Some(Failover::Off), _) => u64::MAX,
-            (Some(_), Some(until)) => until.saturating_sub(FENCE_LEAD_MS),
-            _ if armed => 0,
-            _ => u64::MAX,
+    pub fn reported(&self, node: &NodeId) -> Option<Failover> {
+        self.holds.get(node).map(|h| h.reported)
+    }
+
+    pub fn releasable(&self, holders: &BTreeMap<NodeId, u64>) -> Vec<(NodeId, u64)> {
+        holders
+            .keys()
+            .filter_map(|n| {
+                let hold = self.holds.get(n)?;
+                (hold.reported == Failover::Off).then(|| (n.clone(), hold.seen))
+            })
+            .collect()
+    }
+
+    pub fn gates_until(&self, holders: &BTreeMap<NodeId, u64>) -> u64 {
+        let mut gate = u64::MAX;
+        let known = self
+            .holds
+            .iter()
+            .filter(|(_, h)| h.reported != Failover::Off)
+            .map(|(n, _)| n);
+        for node in holders.keys().chain(known) {
+            match self.holds.get(node) {
+                Some(Hold {
+                    reported: Failover::Off,
+                    ..
+                }) => {}
+                Some(Hold {
+                    until: Some(until), ..
+                }) => gate = gate.min(until.saturating_sub(FENCE_LEAD_MS)),
+                _ => return 0,
+            }
         }
+        gate
     }
 }
 
@@ -122,6 +172,17 @@ impl Grantor {
     }
 }
 
+pub fn armed_at_current(state: &ClusterState) -> bool {
+    state.armed.as_ref().is_some_and(|(node, term)| {
+        *term == state.term
+            && *node != state.home
+            && state
+                .members
+                .get(node)
+                .is_some_and(|m| m.state == MemberState::Active && m.can_be_master)
+    })
+}
+
 pub fn auto_promote_due(
     me: &NodeId,
     state: &ClusterState,
@@ -133,10 +194,8 @@ pub fn auto_promote_due(
         && *me != state.home
         && !grantor.revoked
         && !reaches_primary
-        && state
-            .armed
-            .as_ref()
-            .is_some_and(|(node, term)| node == me && *term == state.term)
+        && armed_at_current(state)
+        && state.armed.as_ref().is_some_and(|(node, _)| node == me)
         && grantor.safe_after().is_some_and(|after| now >= after)
 }
 

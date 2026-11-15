@@ -141,6 +141,10 @@ pub fn load(cluster_dir: &Path) -> Result<Option<ClusterState>, String> {
         Some(value) => read::<Option<(NodeId, Term)>>(&value)?,
         None => None,
     };
+    let holders = match get("holders")? {
+        Some(value) => read::<BTreeMap<NodeId, u64>>(&value)?,
+        None => BTreeMap::new(),
+    };
     Ok(Some(ClusterState {
         id: read(&id)?,
         name: read(&name)?,
@@ -152,6 +156,7 @@ pub fn load(cluster_dir: &Path) -> Result<Option<ClusterState>, String> {
         seq: u64::try_from(seq).map_err(|e| e.to_string())?,
         failover,
         armed,
+        holders,
     }))
 }
 
@@ -208,6 +213,7 @@ fn apply(tx: &rusqlite::Transaction<'_>, change: &Change) -> Result<(), String> 
         }
         Change::Failover(failover) => put_state(tx, "failover", &text(failover)?)?,
         Change::Armed(armed) => put_state(tx, "armed", &text(armed)?)?,
+        Change::Holders(holders) => put_state(tx, "holders", &text(holders)?)?,
         Change::Cluster {
             id,
             name,
