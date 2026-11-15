@@ -1,4 +1,5 @@
 use super::*;
+use notchling_engine::limits::renew::RenewState;
 use notchling_engine::limits::sources::{AccountInfo, LaneInfo};
 use notchling_engine::limits::usage::{AccountUsage, UsageWindow};
 use std::sync::atomic::AtomicU32;
@@ -69,6 +70,9 @@ impl ClaudeSource for Fake {
     fn usage_error(&self, id: &str) -> Option<String> {
         (id == "b").then(|| "The saved login has expired.".to_string())
     }
+    fn renewal(&self, id: &str) -> Option<RenewState> {
+        (id == "b").then_some(RenewState::Renewing)
+    }
     fn lanes(&self) -> Vec<LaneInfo> {
         Vec::new()
     }
@@ -101,6 +105,13 @@ fn it_lists_each_accounts_report_and_why_another_has_none() {
     assert_eq!(reply["errors"]["b"], "The saved login has expired.");
     assert!(reply.get("refreshing").is_none());
     assert_eq!(fake.forced.load(Ordering::SeqCst), 0, "a read reads only");
+}
+
+#[test]
+fn it_says_which_logins_are_being_renewed() {
+    let op = op(100, Arc::new(Fake::new()));
+    let reply = op.call(true, &json!({})).unwrap();
+    assert_eq!(reply["renewals"], json!({"b": "renewing"}));
 }
 
 #[test]

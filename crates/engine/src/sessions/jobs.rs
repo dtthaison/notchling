@@ -121,6 +121,7 @@ pub fn agent_from_job(
             .then(|| str_field(job, "intent").unwrap_or("").to_string()),
         resume_session_id: str_field(job, "resumeSessionId").map(String::from),
         at_prompt,
+        node: None,
     }
 }
 
@@ -176,6 +177,7 @@ pub fn agent_from_session(s: &Value, host_app: &dyn Fn(u32) -> Option<String>) -
         command: None,
         resume_session_id: None,
         at_prompt: false,
+        node: None,
     })
 }
 

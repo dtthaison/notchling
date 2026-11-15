@@ -89,7 +89,7 @@ impl ActingOps {
                 "hook.request comes only from a hook the event's Claude Code session started",
             ));
         };
-        if !self.room.can_answer() {
+        if !self.room.can_answer_prompts() {
             return Ok(pass("no app is attached"));
         }
         let wait = args
@@ -111,7 +111,7 @@ impl ActingOps {
             }
             let why = if started.elapsed() >= wait {
                 "timeout"
-            } else if !self.room.can_answer() {
+            } else if !self.room.can_answer_prompts() {
                 "no_app"
             } else if !alive(pid) {
                 "hook_gone"

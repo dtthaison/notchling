@@ -79,7 +79,10 @@ pub fn usage() -> &'static str {
      notchling page <link|id|words> [--json] [--socket <path>]  where a saved page is, and who can republish it\n  \
      notchling delegate <codex|agy> [--model --effort --folder --out --write --session --timeout --json] -- <prompt>\n  \
      \u{20}                                           hand a job to another tool and wait (read-only unless --write)\n  \
-     notchling delegate-models [codex|agy] [--json]  the models and efforts each tool offers\n  \
+     notchling delegate agy --machine <node> [--folder --model --effort --timeout --json] -- <prompt>\n  \
+     \u{20}                                           the same on another machine of your cluster (read-only)\n  \
+     notchling delegate-models [codex|agy] [--json]  the models and efforts each tool offers, with what each is for\n  \
+     notchling delegate-models --for <role>  the tool, model and effort for review, review-final, review-secrets or spec-check\n  \
      notchling secrets [words] [--json]    the saved secrets that fit a URL, host or words (never values)\n  \
      notchling secret <name>[,<name>…] -- <command> [args…]\n  \
      \u{20}                                           run a command with secrets, its output hidden\n  \

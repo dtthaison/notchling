@@ -7,6 +7,8 @@ pub const MARK: &str = ".notchling-skill";
 const MARK_TEXT: &str = "Written by Notchling. Notchling updates and removes this skill; delete this file to keep the folder as it is.\n";
 const SKILL_FILE: &str = "SKILL.md";
 
+pub const TOOL_MISSING: &str = "the tool is not installed here";
+
 #[derive(Clone, Debug)]
 pub struct ToolRoots {
     pub claude: PathBuf,
@@ -115,7 +117,7 @@ fn plan_one(roots: &ToolRoots, spec: &SkillSpec, tool: SkillTool, want: Want) ->
     if !roots.root(tool).is_dir() {
         return match want {
             Want::Remove => done(Action::Absent, None),
-            _ => done(Action::Skip, Some("the tool is not installed here")),
+            _ => done(Action::Skip, Some(TOOL_MISSING)),
         };
     }
     match (owner(&dir), want) {

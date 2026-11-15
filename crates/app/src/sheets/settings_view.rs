@@ -22,7 +22,11 @@ use super::banner::Banners;
 use super::client_model::{self, ClientPart};
 use super::client_view::ClientHandlers;
 use super::hook_rows::HooksShown;
+use super::models_rows::ModelsShown;
 use super::settings::{change, sections, Daemon, Field, Row};
+use super::settings_skills_view::{skills_page, SkillsHandlers, SkillsPageState};
+use super::skills_models;
+use super::skills_rows::{reinstall_result, SkillsShown};
 use super::view::{sheet_header, Acts, Dismiss};
 use crate::activity::view::ActivityView;
 mod shortcut;
@@ -38,6 +42,10 @@ pub struct SettingsView {
     error: Option<String>,
     busy: Option<Area>,
     hooks: HooksShown,
+    skills: SkillsShown,
+    models: ModelsShown,
+    skills_busy: bool,
+    skills_result: Option<(String, bool)>,
     client: Option<ClientPart>,
     watching: bool,
     confirming_back: bool,
@@ -70,6 +78,10 @@ impl SettingsView {
             error: None,
             busy: None,
             hooks: HooksShown::Checking,
+            skills: SkillsShown::Checking,
+            models: ModelsShown::Checking,
+            skills_busy: false,
+            skills_result: None,
             client: None,
             watching: false,
             confirming_back: false,
@@ -89,6 +101,12 @@ impl SettingsView {
 
     pub fn with_hooks(mut self, hooks: HooksShown) -> SettingsView {
         self.hooks = hooks;
+        self
+    }
+
+    pub fn with_skills(mut self, skills: SkillsShown, models: ModelsShown) -> SettingsView {
+        self.skills = skills;
+        self.models = models;
         self
     }
 
@@ -115,6 +133,9 @@ impl SettingsView {
         self.page = page;
         if page == Page::Agents {
             self.ask_client(cx);
+        }
+        if page == Page::Skills {
+            self.ask_skills(cx);
         }
         if page == Page::Activity {
             match &self.activity {
@@ -248,6 +269,82 @@ impl SettingsView {
                 cx.notify();
             })),
             confirming: self.confirming_back,
+        }
+    }
+
+    pub fn ask_skills(&mut self, cx: &mut Context<Self>) {
+        let actions = self.acts.actions.clone();
+        let home = std::env::var("HOME").unwrap_or_default();
+        cx.spawn(async move |this, cx| {
+            let (skills, models) = cx
+                .background_executor()
+                .spawn(async move { skills_models::load(&actions, &home) })
+                .await;
+            this.update(cx, |view, cx| {
+                view.skills = skills;
+                view.models = models;
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    fn reinstall_skills(&mut self, cx: &mut Context<Self>) {
+        let names = self.skills.names();
+        if self.skills_busy || names.is_empty() {
+            return;
+        }
+        self.skills_busy = true;
+        self.skills_result = None;
+        let actions = self.acts.actions.clone();
+        cx.spawn(async move |this, cx| {
+            let reply = cx
+                .background_executor()
+                .spawn(async move { skills_models::reinstall(&actions, &names) })
+                .await;
+            this.update(cx, |view, cx| {
+                view.skills_busy = false;
+                view.skills_result = Some(match reinstall_result(reply) {
+                    Ok(done) => (done.to_owned(), false),
+                    Err(e) => (e, true),
+                });
+                view.ask_skills(cx);
+            })
+            .ok();
+        })
+        .detach();
+        cx.notify();
+    }
+
+    fn open_override(&mut self, cx: &mut Context<Self>) {
+        let Some(path) = self.models.file().and_then(|f| f.path.clone()) else {
+            return;
+        };
+        let path = std::path::PathBuf::from(path);
+        match notchling_engine::catalog::override_file::ensure(&path) {
+            Ok(made) => {
+                self.skills_result = None;
+                cx.open_with_system(&path);
+                if made {
+                    self.ask_skills(cx);
+                }
+            }
+            Err(why) => {
+                self.skills_result = Some((t::settings::override_failed(&why), true));
+            }
+        }
+        cx.notify();
+    }
+
+    fn skills_handlers(&self, cx: &mut Context<Self>) -> SkillsHandlers {
+        SkillsHandlers {
+            reinstall: Rc::new(cx.listener(|this, _, _, cx| this.reinstall_skills(cx))),
+            open_override: Rc::new(cx.listener(|this, _, _, cx| this.open_override(cx))),
+            reload: Rc::new(cx.listener(|this, _, _, cx| {
+                this.skills_result = None;
+                this.ask_skills(cx);
+            })),
         }
     }
 
@@ -562,6 +659,16 @@ impl Render for SettingsView {
                 a,
                 cx,
             ));
+        }
+        if self.page == Page::Skills {
+            let handlers = self.skills_handlers(cx);
+            let state = SkillsPageState {
+                skills: &self.skills,
+                models: &self.models,
+                busy: self.skills_busy,
+                result: self.skills_result.as_ref(),
+            };
+            list = list.child(skills_page(&state, &handlers, a, cx));
         }
         let body = if self.page == Page::Activity {
             div()

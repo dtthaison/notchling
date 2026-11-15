@@ -47,3 +47,20 @@ fn outbox_key_is_the_job_short_id_else_the_row_id() {
     codex.id = "codex:t1".into();
     assert_eq!(codex.outbox_key(), "codex:t1");
 }
+
+#[test]
+fn the_node_field_is_absent_unless_set_and_old_rows_read() {
+    let mut a = sample(AgentTarget::Job("ab".into()), None);
+    let plain = serde_json::to_value(&a).unwrap();
+    assert!(plain.get("node").is_none(), "{plain}");
+    let back: Agent = serde_json::from_value(plain).unwrap();
+    assert_eq!(back.node, None);
+    a.node = Some(NodeRef {
+        id: "0123456789abcdef".into(),
+        name: "w1".into(),
+        online: false,
+    });
+    let row = serde_json::to_value(&a).unwrap();
+    assert_eq!(row["node"]["online"], false);
+    assert_eq!(serde_json::from_value::<Agent>(row).unwrap(), a);
+}

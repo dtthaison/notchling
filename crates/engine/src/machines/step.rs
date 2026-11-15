@@ -32,6 +32,10 @@ impl StepId {
     pub const SERVICE: StepId = StepId(Cow::Borrowed("service"));
     pub const SD_CHECK: StepId = StepId(Cow::Borrowed("sd-check"));
     pub const RUNNING: StepId = StepId(Cow::Borrowed("running"));
+    pub const NODE_TAILSCALE: StepId = StepId(Cow::Borrowed("node-tailscale"));
+    pub const NODE_BINARY: StepId = StepId(Cow::Borrowed("node-binary"));
+    pub const NODE_SERVICE: StepId = StepId(Cow::Borrowed("node-service"));
+    pub const NODE_JOINED: StepId = StepId(Cow::Borrowed("node-joined"));
 
     pub fn self_update(tool: Tool) -> StepId {
         StepId(Cow::Owned(format!("self-update:{}", tool.name())))
@@ -52,6 +56,10 @@ impl StepId {
 
     pub fn raw(&self) -> &str {
         &self.0
+    }
+
+    pub fn is_node(&self) -> bool {
+        self.0.starts_with("node-")
     }
 }
 
@@ -111,6 +119,7 @@ pub struct Detected {
     pub token_expires: Option<String>,
     pub sd_version: Option<String>,
     pub tools: Option<WorkerTools>,
+    pub node: Option<String>,
 }
 
 impl Detected {
@@ -130,6 +139,7 @@ impl Detected {
         over(&mut d.token_expires, &new.token_expires);
         over(&mut d.sd_version, &new.sd_version);
         over(&mut d.tools, &new.tools);
+        over(&mut d.node, &new.node);
         d
     }
 }
@@ -338,6 +348,38 @@ impl Opener for NoOpener {
     fn open_form(&self, _request: &VaultRequest) {}
 }
 
+pub trait ClusterTokens: Send + Sync {
+    fn join_token(&self) -> Result<String, String>;
+    fn cluster_id(&self) -> Result<Option<String>, String>;
+    fn can_be_master(&self, machine: &str) -> Option<bool>;
+    fn can_be_master_of(&self, machine: &str, node: Option<&str>) -> Option<bool> {
+        let _ = node;
+        self.can_be_master(machine)
+    }
+    fn can_be_master_all(
+        &self,
+        asks: &[(String, Option<String>)],
+    ) -> BTreeMap<String, Option<bool>> {
+        asks.iter()
+            .map(|(name, node)| (name.clone(), self.can_be_master_of(name, node.as_deref())))
+            .collect()
+    }
+}
+
+pub struct NoCluster;
+
+impl ClusterTokens for NoCluster {
+    fn join_token(&self) -> Result<String, String> {
+        Err("the cluster isn't available here".into())
+    }
+    fn cluster_id(&self) -> Result<Option<String>, String> {
+        Err("the cluster isn't available here".into())
+    }
+    fn can_be_master(&self, _machine: &str) -> Option<bool> {
+        None
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct InstalledPlugin {
     pub version: String,
@@ -362,6 +404,8 @@ pub struct StepContext {
     pub now: f64,
     pub scratch: PathBuf,
     pub masks: Masks,
+    pub tokens: Arc<dyn ClusterTokens>,
+    pub dist_dir: Option<PathBuf>,
 }
 
 impl StepContext {

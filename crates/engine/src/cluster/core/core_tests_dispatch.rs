@@ -103,7 +103,7 @@ fn dispatch_from_client_goes_through_home() {
     assert!(hub.core(&m5).state().expect("state").members[&m1].client);
     hub.link(&m1, &w1);
     hub.tick_all(0);
-    let effects = hub.local(&m1, dispatch_cmd("k", "w1", Tool::Codex));
+    let effects = hub.local(&m1, dispatch_cmd("k", "w1", Tool::Agy));
     assert!(answers(&effects).is_empty());
     let calls: Vec<_> = effects
         .iter()

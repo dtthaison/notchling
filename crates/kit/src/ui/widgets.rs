@@ -304,6 +304,14 @@ pub fn account_line(text: &str, lane: bool, appearance: Appearance) -> Div {
     )
 }
 
+pub fn node_line(text: &str, appearance: Appearance) -> Div {
+    marked_line(
+        icon(Icon::Server, 9.0, Ink::TextFaint, appearance),
+        15.0,
+        label(text, TypeRole::Meta, Ink::TextFaint, appearance).line_height(px(SESSION_LINE_META)),
+    )
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn session_row_marked(
     id: impl Into<ElementId>,

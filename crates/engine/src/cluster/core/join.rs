@@ -1,6 +1,7 @@
 use serde_json::json;
 
 use super::{Effect, NodeCore, Target};
+use crate::cluster::grants::SecretAllow;
 use crate::cluster::id::NodeId;
 use crate::cluster::members::{can_be_master_default, Desired, Member, MemberState, Term};
 use crate::cluster::state::Command;
@@ -154,6 +155,7 @@ impl NodeCore {
             versions: Some(versions.clone()),
             desired: Desired::default(),
             joined_ms: self.wall_ms,
+            secrets: SecretAllow::default(),
         };
         if self
             .apply(

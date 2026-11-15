@@ -19,6 +19,7 @@ pub struct SidebarRow {
     pub status: Status,
     pub tool: Tool,
     pub config_dir: Option<String>,
+    pub node: Option<super::sidebar_node::NodeLabel>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -96,6 +97,7 @@ fn row(session: &Session, now_ms: i64) -> SidebarRow {
         status: status_of(agent.group),
         tool: session.tool,
         config_dir: agent.config_dir.clone(),
+        node: None,
     }
 }
 
@@ -296,6 +298,7 @@ pub(crate) mod tests {
                 command: None,
                 resume_session_id: None,
                 at_prompt: false,
+                node: None,
             },
             tool,
             transcript: None,

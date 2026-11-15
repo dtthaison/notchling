@@ -94,6 +94,7 @@ pub mod ops {
     pub const VAULT_PENDING: &str = "vault.pending";
 
     pub const CATALOG_GET: &str = "catalog.get";
+    pub const CATALOG_ROLES: &str = "catalog.roles";
 
     pub const INBOX_LIST: &str = "inbox.list";
     pub const INBOX_ANSWER: &str = "inbox.answer";
@@ -124,6 +125,10 @@ pub mod ops {
     pub const CLUSTER_JOIN: &str = "cluster.join";
     pub const CLUSTER_MEMBER_SET: &str = "cluster.member.set";
     pub const CLUSTER_REMOVE: &str = "cluster.remove";
+    pub const CLUSTER_FOLLOW: &str = "cluster.follow";
+    pub const CLUSTER_DISPATCH: &str = "cluster.dispatch";
+    pub const SHELL_STOP: &str = "shell.stop";
+    pub const CLUSTER_RETURN: &str = "cluster.return";
 
     pub const SESSION_SEND: &str = "session.send";
     pub const OUTBOX_LIST: &str = "outbox.list";

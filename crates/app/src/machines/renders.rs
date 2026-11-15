@@ -105,7 +105,7 @@ pub fn model(which: Shown) -> MachinesModel {
         Shown::Machines => {}
         Shown::Fix => model.request_set_up(&StepId::STAYS_AWAKE, "m1"),
         Shown::Add => {
-            model.open_sheet(Sheet::Add(AddForm::new()));
+            model.open_sheet(Sheet::Add(Box::new(AddForm::new())));
         }
         Shown::Jobs => model.tab = Tab::Jobs,
         Shown::Versions => seed_versions(&model),

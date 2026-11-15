@@ -15,6 +15,12 @@ pub struct JobSpec {
     pub secrets: Vec<String>,
 }
 
+impl JobSpec {
+    pub fn is_delegate(&self) -> bool {
+        self.args.get("delegate").is_some_and(Value::is_array)
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum JobState {
@@ -32,6 +38,8 @@ impl JobState {
         matches!(
             (self, next),
             (Dispatching, Running)
+                | (Dispatching, Done)
+                | (Dispatching, Interrupted)
                 | (Dispatching, Failed)
                 | (Running, Done)
                 | (Running, Failed)

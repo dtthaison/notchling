@@ -71,7 +71,68 @@ fn fail<T>(message: impl Into<String>) -> Result<T, ParseError> {
     })
 }
 
-pub const USAGE: &str = "Usage: notchling delegate <codex|agy> [--model <m>] [--effort <e>] [--folder <dir>] [--out <dir>]\n                         [--write] [--session <id>] [--timeout <seconds>] [--json] -- <prompt>\n       notchling delegate-models [codex|agy]";
+pub const USAGE: &str = "Usage: notchling delegate <codex|agy> [--model <m>] [--effort <e>] [--folder <dir>] [--out <dir>]\n                         [--write] [--session <id>] [--timeout <seconds>] [--json] -- <prompt>\n       notchling delegate-models [codex|agy] [--json]\n       notchling delegate-models --for <role>";
+
+pub const MAX_REMOTE_TIMEOUT_SECS: u64 = 2_100;
+
+pub fn take_machine(args: &[String]) -> Result<(Option<String>, Vec<String>), ParseError> {
+    let mut machine: Option<String> = None;
+    let mut rest: Vec<String> = Vec::new();
+    let mut i = 0;
+    while i < args.len() {
+        let a = args[i].as_str();
+        if a == "--" {
+            rest.extend(args[i..].iter().cloned());
+            break;
+        }
+        if a == "--machine" {
+            let Some(v) = args.get(i + 1).filter(|v| !v.starts_with("--")) else {
+                return fail("--machine needs a node name.");
+            };
+            if machine.is_some() {
+                return fail("--machine takes one node.");
+            }
+            machine = Some(v.clone());
+            i += 2;
+            continue;
+        }
+        rest.push(args[i].clone());
+        i += 1;
+    }
+    Ok((machine, rest))
+}
+
+pub fn to_args(parsed: &Parsed) -> Vec<String> {
+    let o = &parsed.options;
+    let mut list = vec![o.tool.raw().to_string()];
+    let mut pair = |flag: &str, value: &Option<String>| {
+        if let Some(v) = value {
+            list.push(flag.to_string());
+            list.push(v.clone());
+        }
+    };
+    pair("--model", &o.model);
+    pair("--effort", &o.effort);
+    pair("--folder", &Some(o.folder.clone()));
+    pair("--out", &o.out);
+    pair("--session", &o.session);
+    let secs = if o.timeout.subsec_nanos() == 0 {
+        o.timeout.as_secs().to_string()
+    } else {
+        o.timeout.as_secs_f64().to_string()
+    };
+    list.push("--timeout".to_string());
+    list.push(secs);
+    if o.write {
+        list.push("--write".to_string());
+    }
+    if parsed.json {
+        list.push("--json".to_string());
+    }
+    list.push("--".to_string());
+    list.push(o.prompt.clone());
+    list
+}
 
 pub const MAX_DEPTH: u32 = 2;
 pub const DEPTH_VARIABLE: &str = "NOTCHLING_DELEGATE_DEPTH";

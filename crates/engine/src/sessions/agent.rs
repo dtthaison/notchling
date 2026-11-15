@@ -37,6 +37,15 @@ pub struct Agent {
     pub resume_session_id: Option<String>,
     #[serde(default, skip_serializing_if = "is_false")]
     pub at_prompt: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub node: Option<NodeRef>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NodeRef {
+    pub id: String,
+    pub name: String,
+    pub online: bool,
 }
 
 fn is_false(flag: &bool) -> bool {
@@ -97,6 +106,7 @@ pub(crate) fn sample(target: AgentTarget, transcript: Option<&str>) -> Agent {
         command: None,
         resume_session_id: None,
         at_prompt: false,
+        node: None,
     }
 }
 

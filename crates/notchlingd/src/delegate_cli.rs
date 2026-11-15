@@ -55,6 +55,7 @@ pub fn folders(
         claude_json: layout.home().join(".claude.json"),
         path,
         network,
+        catalog_file: layout.state_dir().join("catalog.json"),
     }
 }
 
@@ -77,6 +78,9 @@ fn setup() -> Option<(Layout, Folders)> {
 }
 
 pub fn run(args: &[String]) -> i32 {
+    if let Some(code) = crate::cluster_dispatch_delegate::run_machine(args) {
+        return code;
+    }
     let Some((layout, folders)) = setup() else {
         return 2;
     };

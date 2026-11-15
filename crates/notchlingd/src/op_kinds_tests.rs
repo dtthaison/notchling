@@ -34,7 +34,8 @@ fn rig(tag: &str) -> (Root, Wired, Ops) {
     (Root(root), wired, ops)
 }
 
-const OWN_QUIET: [&str; 7] = [
+const OWN_QUIET: [&str; 8] = [
+    ops::CATALOG_ROLES,
     ops::GIT_STATUS,
     ops::GIT_DIFF,
     ops::GIT_BRANCH_DIFF_STAT,
@@ -44,7 +45,7 @@ const OWN_QUIET: [&str; 7] = [
     ops::CODEX_CHILDREN,
 ];
 
-const NEVER_QUIET: [&str; 92] = [
+const NEVER_QUIET: [&str; 96] = [
     ops::HELLO,
     ops::LOG_VERIFY,
     ops::LOG_CHAIN_START,
@@ -137,6 +138,10 @@ const NEVER_QUIET: [&str; 92] = [
     ops::CLUSTER_JOIN,
     ops::CLUSTER_MEMBER_SET,
     ops::CLUSTER_REMOVE,
+    ops::CLUSTER_FOLLOW,
+    ops::CLUSTER_DISPATCH,
+    ops::SHELL_STOP,
+    ops::CLUSTER_RETURN,
 ];
 
 const NEVER_QUIET_LIMITS: [&str; 2] = ["limits.set_mode", "cost.summary"];

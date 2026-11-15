@@ -87,6 +87,7 @@ fn the_server_serves_every_area_and_the_vault_skill_is_offered_to_install() {
         "limits.status",
         "cost.summary",
         ops::CATALOG_GET,
+        ops::CATALOG_ROLES,
         ops::VAULT_LIST,
         ops::INBOX_LIST,
         ops::INSTALL_PLAN,
@@ -158,4 +159,241 @@ fn the_wired_daemon_lists_every_tool_on_request_and_claude_code_by_default() {
     let default = ops.call(&app(), ops::SESSIONS_LIST, &Value::Null).unwrap();
     assert_eq!(default, json!([]));
     w.close();
+}
+
+struct Rows(Value);
+
+impl crate::cluster_sessions::RowSource for Rows {
+    fn rows(&self, _node: &notchling_engine::cluster::NodeId) -> Result<Value, ApiError> {
+        Ok(self.0.clone())
+    }
+}
+
+fn peer(online: bool) -> crate::cluster_sessions::Peer {
+    crate::cluster_sessions::Peer {
+        id: notchling_engine::cluster::NodeId::parse("00000000000000a1").unwrap(),
+        name: "w1".into(),
+        online,
+    }
+}
+
+fn remote_with(tag: &str, rows: Value) -> Arc<crate::cluster_sessions::RemoteSessions> {
+    let dir = std::env::temp_dir().join(format!("nl-wiring-remote-{tag}-{}", std::process::id()));
+    let remote = Arc::new(crate::cluster_sessions::RemoteSessions::new(dir));
+    remote.sync(&[peer(true)], &Rows(rows), 0);
+    remote
+}
+
+fn remote_with_a_row(tag: &str) -> Arc<crate::cluster_sessions::RemoteSessions> {
+    remote_with(tag, json!([crate::cluster_sessions::agent_row("s1")]))
+}
+
+struct Forwarded;
+
+impl crate::cluster_forward::Forward for Forwarded {
+    fn forward(&self, caller: &Caller, op: &str, args: &Value) -> Option<Result<Value, ApiError>> {
+        let me = notchling_engine::cluster::NodeId::parse("0123456789abcdef").unwrap();
+        let (node, bare) = crate::cluster_forward::route(op, args, &me)?;
+        Some(Ok(
+            json!({"to": node, "args": bare, "tier": format!("{:?}", caller.tier)}),
+        ))
+    }
+}
+
+#[test]
+fn the_list_carries_remote_rows_for_clients_but_never_for_a_node() {
+    let local = Arc::new(Mutex::new(json!([{"id": "mine"}])));
+    let ops = Ops::new(local).with_cluster(None, remote_with_a_row("list"));
+    let listed = ops.call(&app(), ops::SESSIONS_LIST, &Value::Null).unwrap();
+    let ids: Vec<&str> = listed
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|r| r["id"].as_str())
+        .collect();
+    assert_eq!(ids, vec!["mine", "00000000000000a1/s1"]);
+    let node = Caller {
+        tier: Tier::Agent,
+        client: ClientKind::Node,
+        peer: None,
+        pid: None,
+    };
+    let own = ops.call(&node, ops::SESSIONS_LIST, &Value::Null).unwrap();
+    assert_eq!(
+        own,
+        json!([{"id": "mine"}]),
+        "a node is only told this node's rows"
+    );
+}
+
+#[test]
+fn a_qualified_id_is_routed_before_any_local_op_runs() {
+    let ops = Ops::new(Arc::new(Mutex::new(json!([]))))
+        .with_cluster(Some(Arc::new(Forwarded)), remote_with_a_row("route"));
+    let out = ops
+        .call(
+            &app(),
+            ops::SESSION_REPLY,
+            &json!({"id": "00000000000000a1/s1", "text": "hi"}),
+        )
+        .unwrap();
+    assert_eq!(out["to"], "00000000000000a1");
+    assert_eq!(out["args"], json!({"id": "s1", "text": "hi"}));
+    let local = ops.call(
+        &app(),
+        ops::SESSION_REPLY,
+        &json!({"id": "s1", "text": "hi"}),
+    );
+    assert!(
+        local.is_err(),
+        "a bare id reaches the local op, which has no handler here"
+    );
+}
+
+fn listed_ids(list: &Value) -> Vec<&str> {
+    list.as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|r| r["id"].as_str())
+        .collect()
+}
+
+fn publisher(
+    room: &Arc<FakeRoom>,
+    remote: &Arc<crate::cluster_sessions::RemoteSessions>,
+    local: Arc<Mutex<Value>>,
+) -> crate::cluster_wiring::Publisher {
+    crate::cluster_wiring::Publisher::new(room.clone(), remote.clone(), local)
+}
+
+#[test]
+fn a_local_change_is_published_with_the_remote_rows() {
+    let room = Arc::new(FakeRoom::default());
+    let remote = remote_with_a_row("changed");
+    publisher(
+        &room,
+        &remote,
+        Arc::new(Mutex::new(json!([{"id": "mine"}]))),
+    )
+    .publish();
+    let sent = room.named("sessions.changed");
+    assert_eq!(sent.len(), 1);
+    assert_eq!(listed_ids(&sent[0]), vec!["mine", "00000000000000a1/s1"]);
+}
+
+#[test]
+fn a_publish_reads_the_local_list_when_it_goes_out_and_skips_a_repeat() {
+    let room = Arc::new(FakeRoom::default());
+    let remote = remote_with_a_row("fresh");
+    let local = Arc::new(Mutex::new(json!([{"id": "old"}])));
+    let publisher = publisher(&room, &remote, local.clone());
+    *local.lock().unwrap() = json!([{"id": "new"}]);
+    publisher.publish();
+    publisher.publish();
+    let sent = room.named("sessions.changed");
+    assert_eq!(
+        sent.len(),
+        1,
+        "a second publish of the same list is dropped"
+    );
+    assert_eq!(listed_ids(&sent[0]), vec!["new", "00000000000000a1/s1"]);
+}
+
+fn mixed_rows() -> Value {
+    let mut codex = crate::cluster_sessions::agent_row("c1");
+    codex["tool"] = json!("codex");
+    let mut claude = crate::cluster_sessions::agent_row("s1");
+    claude["tool"] = json!("claude");
+    json!([claude, codex, {"id": "junk", "name": 4}, "text"])
+}
+
+#[test]
+fn a_remote_row_that_is_not_an_agent_is_dropped_and_local_rows_still_list() {
+    let local = Arc::new(Mutex::new(json!([{"id": "mine"}])));
+    let ops = Ops::new(local).with_cluster(None, remote_with("junk", mixed_rows()));
+    let every = json!({"tools": "all"});
+    let listed = ops.call(&app(), ops::SESSIONS_LIST, &every).unwrap();
+    assert_eq!(
+        listed_ids(&listed),
+        vec!["mine", "00000000000000a1/s1", "00000000000000a1/c1"]
+    );
+}
+
+#[test]
+fn remote_codex_rows_stay_out_of_the_claude_list_and_the_change_event() {
+    let local = Arc::new(Mutex::new(json!([{"id": "mine"}])));
+    let remote = remote_with("tools", mixed_rows());
+    let ops = Ops::new(local.clone()).with_cluster(None, remote.clone());
+    let claude = ops.call(&app(), ops::SESSIONS_LIST, &Value::Null).unwrap();
+    assert_eq!(listed_ids(&claude), vec!["mine", "00000000000000a1/s1"]);
+    let every = ops
+        .call(&app(), ops::SESSIONS_LIST, &json!({"tools": "all"}))
+        .unwrap();
+    assert!(listed_ids(&every).contains(&"00000000000000a1/c1"));
+    let room = Arc::new(FakeRoom::default());
+    publisher(&room, &remote, local).publish();
+    let sent = room.named("sessions.changed");
+    assert_eq!(listed_ids(&sent[0]), vec!["mine", "00000000000000a1/s1"]);
+}
+
+struct Counted(std::sync::atomic::AtomicUsize);
+
+impl crate::cluster_sessions::RowSource for Counted {
+    fn rows(&self, _node: &notchling_engine::cluster::NodeId) -> Result<Value, ApiError> {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Ok(json!([crate::cluster_sessions::agent_row("s1")]))
+    }
+}
+
+#[test]
+fn a_worker_lists_and_announces_no_remote_rows_and_asks_for_none() {
+    use std::sync::atomic::Ordering::SeqCst;
+    let dir = std::env::temp_dir().join(format!("nl-wiring-worker-{}", std::process::id()));
+    let client = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let gate = client.clone();
+    let remote = Arc::new(
+        crate::cluster_sessions::RemoteSessions::new(dir)
+            .with_gate(Arc::new(move || gate.load(SeqCst))),
+    );
+    let asked = Counted(std::sync::atomic::AtomicUsize::new(0));
+    remote.sync(&[peer(true)], &asked, 0);
+    assert_eq!(asked.0.load(SeqCst), 0, "a Worker sends no node.sessions");
+    let local = Arc::new(Mutex::new(json!([{"id": "mine"}])));
+    let ops = Ops::new(local.clone()).with_cluster(None, remote.clone());
+    for args in [Value::Null, json!({"tools": "all"})] {
+        let list = ops.call(&app(), ops::SESSIONS_LIST, &args).unwrap();
+        assert_eq!(listed_ids(&list), vec!["mine"]);
+    }
+    let room = Arc::new(FakeRoom::default());
+    publisher(&room, &remote, local).publish();
+    assert_eq!(
+        room.named("sessions.changed"),
+        vec![json!([{"id": "mine"}])]
+    );
+    client.store(true, SeqCst);
+    remote.sync(&[peer(true)], &asked, 0);
+    assert_eq!(
+        asked.0.load(SeqCst),
+        1,
+        "decided from the record at use time"
+    );
+    assert_eq!(remote.rows().len(), 1);
+}
+
+#[test]
+fn the_daemons_scan_publishes_through_the_cluster_parts() {
+    let root = std::env::temp_dir().join(format!("nl-wiring-scan-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let layout = Layout::resolve(None, Some(root.as_os_str()), || None).unwrap();
+    let room = Arc::new(FakeRoom::default());
+    let sessions = Arc::new(Mutex::new(json!([])));
+    let w = Wired::build(&layout, sessions.clone(), room.clone(), (0, 0));
+    *sessions.lock().unwrap() = json!([{"id": "mine"}]);
+    w.cluster.local_changed();
+    assert_eq!(
+        room.named("sessions.changed"),
+        vec![json!([{"id": "mine"}])]
+    );
+    w.close();
+    let _ = std::fs::remove_dir_all(&root);
 }

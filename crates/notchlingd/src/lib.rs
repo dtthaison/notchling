@@ -18,14 +18,23 @@ pub mod bridge_ops;
 pub mod catalog_ops;
 pub mod cli;
 pub mod clients;
+pub mod cluster_blobs;
 pub mod cluster_cli;
+pub mod cluster_dispatch;
+pub mod cluster_dispatch_delegate;
 mod cluster_driver;
+pub mod cluster_forward;
 pub mod cluster_join;
+pub mod cluster_mirror;
 pub mod cluster_node;
 pub mod cluster_ops;
+pub mod cluster_redact;
+pub mod cluster_sessions;
 pub mod cluster_switches;
 pub mod cluster_versions;
 pub mod cluster_wiring;
+pub mod cluster_workspace;
+pub mod cluster_workspace_send;
 pub mod codex_children;
 pub mod codex_ops;
 pub mod control_ops;
@@ -86,7 +95,12 @@ pub mod service;
 pub mod settings_asks;
 pub mod settings_cli;
 pub mod settings_ops;
+pub mod shell_jobs;
 pub mod signals;
+pub mod snap_copy;
+pub mod snap_db;
+pub mod snap_files;
+pub mod snap_repo;
 pub mod switches;
 mod turn_gate;
 pub mod typing_locks;
@@ -126,7 +140,13 @@ mod bridge_models_tests;
 #[cfg(test)]
 mod catalog_ops_tests;
 #[cfg(test)]
+mod catalog_roles_tests;
+#[cfg(test)]
+mod cluster_redact_tests;
+#[cfg(test)]
 mod cluster_testkit;
+#[cfg(test)]
+mod cluster_workspace_testkit;
 #[cfg(test)]
 mod codex_children_tests;
 #[cfg(test)]
@@ -195,6 +215,18 @@ mod reply_clear_tests;
 mod reply_screen_tests;
 #[cfg(test)]
 mod session_of_tests;
+#[cfg(all(test, unix))]
+mod snap_copy_tests;
+#[cfg(all(test, unix))]
+mod snap_files_safety_tests;
+#[cfg(all(test, unix))]
+mod snap_files_stage_tests;
+#[cfg(all(test, unix))]
+mod snap_files_tests;
+#[cfg(all(test, unix))]
+mod snap_repo_safety_tests;
+#[cfg(all(test, unix))]
+mod snap_repo_tests;
 #[cfg(test)]
 mod vault_ops_lock_tests;
 #[cfg(test)]

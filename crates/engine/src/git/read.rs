@@ -43,7 +43,7 @@ pub struct Diff {
     pub untracked: bool,
 }
 
-pub(super) fn command(cwd: &str, drivers: &[String], args: &[&str]) -> Command {
+pub(crate) fn command(cwd: &str, drivers: &[String], args: &[&str]) -> Command {
     let mut argv: Vec<String> = [
         "--no-optional-locks",
         "-c",
@@ -104,7 +104,7 @@ pub(super) fn run_capped(
         .map_err(launch_failure)
 }
 
-fn driver_names(config: &str) -> Vec<String> {
+pub(crate) fn driver_names(config: &str) -> Vec<String> {
     let mut names: Vec<String> = config
         .split('\0')
         .filter_map(|entry| {

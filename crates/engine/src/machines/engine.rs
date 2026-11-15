@@ -6,8 +6,8 @@ use super::registry::{Machine, RegistryFiles};
 use super::runner::Runner;
 use super::shell;
 use super::step::{
-    CheckResult, Detected, FixContext, FixOutcome, MacFacts, Opener, SecretSource, SetupStep,
-    StepContext, StepId,
+    CheckResult, ClusterTokens, Detected, FixContext, FixOutcome, MacFacts, NoCluster, Opener,
+    SecretSource, SetupStep, StepContext, StepId,
 };
 use super::usage::SecretUsage;
 use super::versions_facts;
@@ -98,6 +98,8 @@ pub struct SetupEngine {
     pub(super) catalog: Catalog,
     pub(super) state: Arc<Mutex<State>>,
     pub(super) on_change: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
+    pub(super) tokens: Arc<dyn ClusterTokens>,
+    pub(super) dist_dir: Option<PathBuf>,
 }
 
 #[derive(Default)]
@@ -165,9 +167,21 @@ impl SetupEngine {
             catalog,
             state: Arc::new(Mutex::new(State::default())),
             on_change: Mutex::new(None),
+            tokens: Arc::new(NoCluster),
+            dist_dir: None,
         };
         engine.load_offers();
         engine
+    }
+
+    pub fn with_cluster(
+        mut self,
+        tokens: Arc<dyn ClusterTokens>,
+        dist_dir: Option<PathBuf>,
+    ) -> SetupEngine {
+        self.tokens = tokens;
+        self.dist_dir = dist_dir;
+        self
     }
 
     pub fn set_on_change(&self, f: Option<Arc<dyn Fn() + Send + Sync>>) {
@@ -281,6 +295,8 @@ impl SetupEngine {
             now: (self.deps.clock)(),
             scratch: self.deps.scratch.clone(),
             masks: masks.clone(),
+            tokens: self.tokens.clone(),
+            dist_dir: self.dist_dir.clone(),
         }
     }
 

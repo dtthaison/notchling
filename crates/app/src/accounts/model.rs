@@ -4,8 +4,9 @@ use crate::switches::{Switch, Switches};
 use super::flows::{add_panel, AddPanel};
 use super::limits::{self, LimitGroup, Zone};
 use super::store::Snapshot;
-use super::wire::Provider;
+use super::wire::{Provider, Renewal};
 use notchling_engine::limits::report::UsageReport;
+use notchling_locale as t;
 
 pub const CLAUDE_CODE: &str = "claudeCode";
 pub const CLAUDE_DESKTOP: &str = "claudeDesktop";
@@ -168,6 +169,14 @@ fn claude_page(s: &Snapshot, switches: &Switches, busy: bool, now: f64, zone: Zo
                     }
                 } else {
                     RowContent::Limits(limits::groups(report, now, zone))
+                }
+            } else if let Some(state) = s.claude_usage.renewals.get(&a.id) {
+                RowContent::Text {
+                    text: match state {
+                        Renewal::Renewing => t::accounts::renewing().into(),
+                        Renewal::Failed => t::accounts::renew_failed().into(),
+                    },
+                    warning: *state == Renewal::Failed,
                 }
             } else if let Some(why) = s.claude_usage.errors.get(&a.id) {
                 RowContent::Text {

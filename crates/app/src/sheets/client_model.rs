@@ -50,7 +50,7 @@ impl ClientPart {
     }
 }
 
-fn shown_path(path: &str, home: &str) -> String {
+pub(super) fn shown_path(path: &str, home: &str) -> String {
     if home.len() > 1 {
         if let Some(rest) = path.strip_prefix(home) {
             if rest.starts_with('/') {

@@ -315,6 +315,13 @@ pub fn still_refreshing(v: &Value) -> bool {
 pub struct ClaudeUsage {
     pub reports: BTreeMap<String, UsageReport>,
     pub errors: BTreeMap<String, String>,
+    pub renewals: BTreeMap<String, Renewal>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Renewal {
+    Renewing,
+    Failed,
 }
 
 pub fn parse_claude_usage(v: &Value) -> ClaudeUsage {
@@ -326,6 +333,19 @@ pub fn parse_claude_usage(v: &Value) -> ClaudeUsage {
             .map(|m| {
                 m.iter()
                     .filter_map(|(id, why)| Some((id.clone(), why.as_str()?.to_owned())))
+                    .collect()
+            })
+            .unwrap_or_default(),
+        renewals: v
+            .get("renewals")
+            .and_then(Value::as_object)
+            .map(|m| {
+                m.iter()
+                    .filter_map(|(id, state)| match state.as_str()? {
+                        "renewing" => Some((id.clone(), Renewal::Renewing)),
+                        "failed" => Some((id.clone(), Renewal::Failed)),
+                        _ => None,
+                    })
                     .collect()
             })
             .unwrap_or_default(),

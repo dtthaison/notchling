@@ -22,6 +22,7 @@ fn agent(id: &str, since_ms: i64) -> Agent {
         command: None,
         resume_session_id: None,
         at_prompt: false,
+        node: None,
     }
 }
 

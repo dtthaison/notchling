@@ -4,6 +4,8 @@ pub mod limits;
 pub mod menu;
 pub mod model;
 pub mod renders;
+#[cfg(test)]
+mod renew_tests;
 pub mod store;
 #[cfg(target_os = "macos")]
 pub mod view;

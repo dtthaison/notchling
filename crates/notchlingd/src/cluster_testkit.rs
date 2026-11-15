@@ -155,6 +155,7 @@ pub(crate) struct Opts {
     pub fingerprint: Option<String>,
     pub headless: bool,
     pub room: Option<Arc<FakeRoom>>,
+    pub tools: Vec<(notchling_engine::versions::Tool, &'static str)>,
 }
 
 impl Opts {
@@ -170,6 +171,7 @@ impl Opts {
             fingerprint: None,
             headless: false,
             room: None,
+            tools: Vec::new(),
         }
     }
 }
@@ -189,6 +191,10 @@ pub(crate) fn node(net: &Arc<MemNet>, opts: Opts) -> TestNode {
     let calls = Arc::new(FakeCalls::default());
     let mut versions = own();
     versions.os = opts.os.to_string();
+    for (tool, version) in &opts.tools {
+        let parsed = notchling_engine::versions::Version::parse(version).expect("a version");
+        versions.tools.insert(*tool, parsed);
+    }
     let setup = ClusterSetup {
         cluster_dir: opts
             .cluster_dir

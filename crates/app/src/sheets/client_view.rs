@@ -29,7 +29,7 @@ fn mark_ink(mark: Mark) -> Ink {
     }
 }
 
-fn row_shell(a: Appearance, first: bool) -> Div {
+pub(super) fn row_shell(a: Appearance, first: bool) -> Div {
     let row = div()
         .px(px(14.0))
         .py(px(8.0))
@@ -52,7 +52,7 @@ fn worker_row(line: &WorkerLine, a: Appearance) -> Div {
         .child(label(line.state, TypeRole::Meta, mark_ink(line.mark), a).flex_shrink_0())
 }
 
-fn note_stack(text: &str, ink: Ink, note: Option<&str>, a: Appearance) -> Div {
+pub(super) fn note_stack(text: &str, ink: Ink, note: Option<&str>, a: Appearance) -> Div {
     let mut stack =
         div()
             .flex_1()
@@ -66,7 +66,7 @@ fn note_stack(text: &str, ink: Ink, note: Option<&str>, a: Appearance) -> Div {
     stack
 }
 
-fn action(
+pub(super) fn action(
     id: &'static str,
     title: &str,
     kind: ButtonKind,

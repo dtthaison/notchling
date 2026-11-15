@@ -83,6 +83,43 @@ fn a_start_of_a_message_of_ours_is_ours_too() {
 }
 
 #[test]
+fn a_picture_the_person_pasted_beside_words_like_ours_is_not_cleared_as_ours() {
+    let r = setup();
+    unheard(&r, &reply(FIRST));
+    r.writes.lock().unwrap().clear();
+    leave(&r, &format!("[Image #5]{FIRST}"));
+    let err = call(&r, &reply("now fix it")).unwrap_err();
+    assert_eq!(err.code, ErrorCode::Failed);
+    assert!(r.writes.lock().unwrap().is_empty(), "not a key");
+}
+
+#[test]
+fn a_picture_the_person_pasted_is_not_cleared_as_a_chip_our_words_name() {
+    let named = "why does [Image #1] fail?";
+    let r = setup();
+    unheard(&r, &reply(named));
+    r.writes.lock().unwrap().clear();
+    leave(&r, "[Image #5]why does fail?");
+    let err = call(&r, &reply("now fix it")).unwrap_err();
+    assert_eq!(err.code, ErrorCode::Failed);
+    assert!(r.writes.lock().unwrap().is_empty(), "not a key");
+}
+
+#[test]
+fn a_message_of_ours_left_in_the_box_with_its_picture_as_a_chip_is_ours_too() {
+    let with_picture =
+        "ok\n\n'/Users/me/Library/Application Support/Notchling/drops/17/Screenshot 1.png'";
+    let r = setup();
+    unheard(&r, &reply(with_picture));
+    assert_eq!(r.acting.attempts.recent("job-idle", T0), [with_picture]);
+    r.writes.lock().unwrap().clear();
+    leave(&r, "[Image #47]ok");
+    let out = call(&r, &reply("now fix it"));
+    assert_eq!(out.unwrap(), json!({"sent": true}));
+    assert_eq!(*r.writes.lock().unwrap(), typed("now fix it"));
+}
+
+#[test]
 fn once_a_message_went_through_nothing_in_the_box_is_taken_for_ours_any_more() {
     let r = setup();
     unheard(&r, &reply(FIRST));

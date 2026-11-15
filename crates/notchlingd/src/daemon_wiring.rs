@@ -10,6 +10,8 @@ use crate::awake_ops::AwakeOps;
 use crate::bridge_backend::APPROVAL_WAIT;
 use crate::bridge_ops::{BridgeOps, BridgeSetup};
 use crate::catalog_ops::CatalogService;
+use crate::cluster_forward::Forward;
+use crate::cluster_sessions::RemoteSessions;
 use crate::cluster_wiring::ClusterParts;
 use crate::codex_children::CodexChildren;
 use crate::codex_ops::CodexOps;
@@ -36,6 +38,7 @@ use crate::providers_daemon::ProviderStores;
 use crate::providers_ops::ProvidersOps;
 use crate::quiet_ops;
 use crate::settings_ops::{SettingsOps, SwitchStates};
+use crate::shell_jobs::ShellJobs;
 use crate::switches::{SwitchFlag, SwitchOps, Switches};
 use crate::vault_ops::VaultOps;
 use crate::versions_ops::{AuditRecorder, VersionsOps};
@@ -51,11 +54,14 @@ use notchling_engine::delegate::skill::SkillTool;
 use notchling_engine::git::SandboxedLauncher;
 use notchling_engine::install::skills::SkillSpec;
 use notchling_engine::outbox::OutboxStore;
+use notchling_engine::limits::renew::ClaudeRenewer;
 use notchling_engine::vault::skill as vault_skill;
 use notchling_engine::versions::mac::Roots as VersionRoots;
 use notchling_engine::versions::Version;
 use notchling_events::{Emit, Salt};
-use notchling_local_api::{ops, topics, ApiError, Caller, Handler, OpHome, OpSpec, Tier};
+use notchling_local_api::{
+    ops, topics, ApiError, Caller, ClientKind, Handler, OpHome, OpSpec, Tier,
+};
 use serde_json::{Map, Value};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -69,7 +75,10 @@ pub struct Ops {
     agy: Option<Arc<AgyOps>>,
     pages: Option<Arc<PagesOps>>,
     every: Option<Arc<EverySession>>,
+    shells: Option<Arc<ShellJobs>>,
     groups: Vec<Arc<dyn OpGroup>>,
+    forward: Option<Arc<dyn Forward>>,
+    remote: Option<Arc<RemoteSessions>>,
     topic_list: Vec<&'static str>,
     first: Arc<FirstScan>,
     first_wait: Duration,
@@ -85,7 +94,10 @@ impl Ops {
             agy: None,
             pages: None,
             every: None,
+            shells: None,
             groups: Vec::new(),
+            forward: None,
+            remote: None,
             topic_list: vec![topics::SESSIONS],
             first: FirstScan::open(),
             first_wait: FIRST_LIST_WAIT,
@@ -154,6 +166,21 @@ impl Ops {
         self
     }
 
+    pub fn with_shells(mut self, shells: Arc<ShellJobs>) -> Ops {
+        self.shells = Some(shells);
+        self
+    }
+
+    pub fn with_cluster(
+        mut self,
+        forward: Option<Arc<dyn Forward>>,
+        remote: Arc<RemoteSessions>,
+    ) -> Ops {
+        self.forward = forward;
+        self.remote = Some(remote);
+        self
+    }
+
     pub fn with_first_scan(mut self, first: Arc<FirstScan>, wait: Duration) -> Ops {
         self.first = first;
         self.first_wait = wait;
@@ -185,7 +212,7 @@ fn tagged(list: Value, tool: &str) -> Vec<Value> {
 }
 
 impl Ops {
-    fn sessions_list(&self, args: &Value) -> Result<(Value, bool), ApiError> {
+    fn sessions_list(&self, caller: &Caller, args: &Value) -> Result<(Value, bool), ApiError> {
         let every = every_tool(args)?;
         let landed = self.first.wait(self.first_wait);
         let list = self
@@ -193,14 +220,25 @@ impl Ops {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .clone();
-        if !every {
-            return Ok((list, landed));
+        let list = if every {
+            let mut rows = tagged(list, CLAUDE);
+            if let Some(other) = &self.every {
+                rows.extend(other.values(now_ms()));
+            }
+            if let Some(shells) = &self.shells {
+                rows.extend(shells.rows());
+            }
+            Value::Array(rows)
+        } else {
+            list
+        };
+        match &self.remote {
+            Some(remote) if caller.client != ClientKind::Node && every => {
+                Ok((remote.merge_all(&list), landed))
+            }
+            Some(remote) if caller.client != ClientKind::Node => Ok((remote.merge(&list), landed)),
+            _ => Ok((list, landed)),
         }
-        let mut rows = tagged(list, CLAUDE);
-        if let Some(other) = &self.every {
-            rows.extend(other.values(now_ms()));
-        }
-        Ok((Value::Array(rows), landed))
     }
 }
 
@@ -221,7 +259,7 @@ impl Handler for Ops {
         if op != ops::SESSIONS_LIST {
             return (self.call(caller, op, args), Map::new());
         }
-        let (list, landed) = match self.sessions_list(args) {
+        let (list, landed) = match self.sessions_list(caller, args) {
             Ok(answer) => answer,
             Err(e) => return (Err(e), Map::new()),
         };
@@ -265,6 +303,13 @@ impl Handler for Ops {
     }
 
     fn call(&self, caller: &Caller, op: &str, args: &Value) -> Result<Value, ApiError> {
+        if let Some(routed) = self
+            .forward
+            .as_ref()
+            .and_then(|forward| forward.forward(caller, op, args))
+        {
+            return routed;
+        }
         if let Some(bridge) = self.bridge.as_ref().filter(|b| b.spec(op).is_some()) {
             return bridge.call(op, args);
         }
@@ -281,7 +326,7 @@ impl Handler for Ops {
             return group.call(caller, op, args);
         }
         match (op, &self.acting) {
-            (ops::SESSIONS_LIST, _) => self.sessions_list(args).map(|(list, _)| list),
+            (ops::SESSIONS_LIST, _) => self.sessions_list(caller, args).map(|(list, _)| list),
             (op, Some(acting)) => acting.call(caller, op, args),
             (op, None) => Err(ApiError::internal(format!("{op} has no handler"))),
         }
@@ -506,7 +551,7 @@ impl Wired {
         every.attach_agy(agy.clone());
         let wake = Arc::new(WakeLoop::for_daemon(
             layout,
-            sessions,
+            sessions.clone(),
             acting.clone(),
             room.clone(),
             wakes,
@@ -560,7 +605,14 @@ impl Wired {
             history.clone(),
         ));
         limits.set_claude(
-            Arc::new(ClaudeLimits::new(on.clone(), claude_store)),
+            Arc::new(
+                ClaudeLimits::new(on.clone(), claude_store).with_renewer(Arc::new(
+                    ClaudeRenewer::new(
+                        Arc::new(RealLauncher::with_claude(claude.clone())),
+                        layout.roots(),
+                    ),
+                )),
+            ),
             Arc::new(SessionJobs::new(acting.clone())),
         );
         let codex_store = stores.codex.clone();
@@ -643,6 +695,7 @@ impl Wired {
             versions.clone(),
             inbox.clone(),
             events.clone(),
+            sessions.clone(),
         );
         Wired {
             acting,
@@ -737,6 +790,11 @@ impl Wired {
             .with_group(self.settings.clone())
             .with_group(self.versions.clone())
             .with_group(self.cluster.ops.clone())
+            .with_group(self.cluster.follow.clone())
+            .with_group(self.cluster.dispatch.clone())
+            .with_group(self.cluster.returns.clone())
+            .with_shells(self.cluster.shells.clone())
+            .with_cluster(self.cluster.forward(), self.cluster.remote.clone())
             .with_group(Arc::new(git))
             .with_group(Arc::new(AwakeOps::new(self.awake.clone())))
             .with_group(self.codex_children.clone())

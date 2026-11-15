@@ -235,6 +235,9 @@ impl ChatView {
                 tooltip: None,
             };
         };
+        if let Some(control) = self.remote_control(&session.agent.id) {
+            return control;
+        }
         match super::tool::of(session.tool).refusal(self, session) {
             Some(why) if why == t::chat::agy_busy() && !gate.enabled => gate,
             Some(why) => Control {

@@ -6,6 +6,7 @@ use super::keys::{self, timing::*};
 use super::plan;
 
 const WITH_PICTURES: &str = "What changed?\n\n/tmp/shots/one.png /tmp/shots/two.jpg";
+const WITH_SHOT: &str = "i want click refresh it will refresh is it ok?\n\n'/Users/me/Library/Application Support/Notchling/drops/1794723941465/Screenshot 2026-11-15 at 1.25.35 PM.png'";
 
 fn typed(text: &str) -> Vec<String> {
     vec![
@@ -234,4 +235,72 @@ fn a_borrowed_pty_types_into_the_one_it_borrows() {
     assert_eq!(played, Ok(Outcome { taken: false }));
     assert_eq!(fake.sent, ["a"]);
     assert_eq!(fake.writes, typed("a"));
+}
+
+#[test]
+fn a_message_whose_pictures_the_session_turned_into_chips_is_sent_once() {
+    let mut pty = FakePrompt::idle().reading_pictures().pasting_for(400);
+    assert_eq!(send(&mut pty, WITH_SHOT), Ok(Outcome { taken: false }));
+    assert_eq!(
+        pty.sent,
+        ["[Image #1]i want click refresh it will refresh is it ok?"]
+    );
+    assert_eq!(
+        pty.writes,
+        typed(WITH_SHOT),
+        "one clear, one paste, one Enter"
+    );
+    assert_eq!(pty.held(), Some(""));
+
+    let mut pty = FakePrompt::idle().reading_pictures();
+    assert_eq!(send(&mut pty, WITH_PICTURES), Ok(Outcome { taken: false }));
+    assert_eq!(pty.sent, ["[Image #1] [Image #2]What changed?"]);
+    assert_eq!(pty.writes, typed(WITH_PICTURES));
+}
+
+#[test]
+fn a_chipped_message_the_session_ignores_is_not_sent_and_gets_one_enter() {
+    let mut pty = FakePrompt::idle().reading_pictures().deaf();
+    assert_eq!(send(&mut pty, WITH_PICTURES), Err(Failure::NotSent));
+    assert!(pty.sent.is_empty());
+    assert_eq!(
+        pty.writes,
+        typed(WITH_PICTURES),
+        "one Enter, never a second"
+    );
+}
+
+#[test]
+fn text_a_person_types_beside_the_chips_is_never_sent_with_them() {
+    let mut pty = FakePrompt::idle()
+        .reading_pictures()
+        .typing(ATTACH_QUIET_MS + KEY_PAUSE_MS + 10, "my own words");
+    assert_eq!(send(&mut pty, WITH_PICTURES), Err(Failure::Mixed));
+    assert!(pty.sent.is_empty());
+    assert_eq!(pty.writes, typed(WITH_PICTURES)[..2], "no Enter");
+}
+
+#[test]
+fn a_message_that_names_a_chip_in_words_is_sent_once_and_a_foreign_chip_beside_it_is_not() {
+    let text = "why does [Image #1] fail?";
+    let mut pty = FakePrompt::idle().reading_pictures();
+    assert_eq!(send(&mut pty, text), Ok(Outcome { taken: false }));
+    assert_eq!(pty.sent, [text]);
+    assert_eq!(pty.writes, typed(text));
+
+    let mut pty = FakePrompt::idle()
+        .reading_pictures()
+        .typing(ATTACH_QUIET_MS + KEY_PAUSE_MS + 10, "[Image #9]");
+    assert_eq!(send(&mut pty, text), Err(Failure::Mixed));
+    assert!(pty.sent.is_empty());
+    assert_eq!(pty.writes, typed(text)[..2], "no Enter");
+}
+
+#[test]
+fn a_message_with_chip_words_and_a_picture_is_never_sent_by_us() {
+    let text = "why does [Image #1] fail?\n\n/tmp/shots/one.png";
+    let mut pty = FakePrompt::idle().reading_pictures();
+    assert_eq!(send(&mut pty, text), Err(Failure::Mixed));
+    assert!(pty.sent.is_empty());
+    assert_eq!(pty.writes, typed(text)[..2], "no Enter");
 }

@@ -42,7 +42,7 @@ impl ChatView {
             return;
         };
         let asked = self.selected.clone();
-        let wanted = asked.clone();
+        let wanted = self.loader_id(asked.as_deref());
         let view = self.source.view();
         let (claude, live) = (view.agents, view.tools);
         loader.files_prompts = view.prompts.is_none();
@@ -118,10 +118,11 @@ impl ChatView {
         let mut conversation_changed = false;
         let mut layout_changed = false;
         self.sessions = self.open_rows(all);
+        self.apply_remote_preview(cx);
         conversation_changed |= self.selected_session() != selected_before.as_ref();
         if self.selected == asked {
             let was = self.selected.take();
-            self.selected = if draft_asked {
+            self.selected = if draft_asked || self.remote_preview {
                 asked.clone()
             } else {
                 loaded.selected
@@ -276,6 +277,7 @@ impl ChatView {
             self.redraw_chrome(cx);
         }
         self.inbox_tick(cx);
+        self.cluster_tick(cx);
         let dot = self.bridge_on();
         if dot != self.phone_dot {
             self.phone_dot = dot;

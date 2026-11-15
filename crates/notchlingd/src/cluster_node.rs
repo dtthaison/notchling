@@ -2,7 +2,7 @@ use crate::acting_ops::Room;
 use crate::cluster_driver::Driver;
 use crate::late_emit::Events as LogEvents;
 use notchling_cluster_net::{Conn, LinkEvents, Pins, Transport};
-use notchling_engine::cluster::core::{LocalCmd, CALL_MS};
+use notchling_engine::cluster::core::{LocalCmd, CALL_MS, DELEGATE_CALL_MS};
 use notchling_engine::cluster::wire::{Origin, WireError};
 use notchling_engine::cluster::{Desired, Input, NodeId, Versions};
 use notchling_events::kinds::choices::SwitchName;
@@ -22,6 +22,7 @@ use std::time::Duration;
 pub const TICK: Duration = Duration::from_secs(1);
 pub const CLOSE_WAIT: Duration = Duration::from_secs(3);
 pub const LOCAL_WAIT: Duration = Duration::from_millis(CALL_MS + 2_000);
+pub const DELEGATE_WAIT: Duration = Duration::from_millis(DELEGATE_CALL_MS + 5_000);
 
 pub trait LocalCalls: Send + Sync {
     fn call(&self, op: &str, args: &Value, origin: &Origin) -> Result<Value, ApiError>;
@@ -43,6 +44,7 @@ pub trait Hooks: Send + Sync {
     fn join_request(&self, _ask: JoinAsk, _node: Submit) {}
     fn desired(&self, _desired: Desired) {}
     fn wiped(&self) {}
+    fn peer_sessions(&self, _from: &NodeId) {}
 }
 
 pub struct NoHooks;
@@ -89,6 +91,7 @@ pub(crate) enum In {
     Join(String, bool, Answer),
     Core(Input),
     Link(bool),
+    Tell(String, String, Value),
     Stop,
 }
 
@@ -165,6 +168,9 @@ fn known_node_ops() -> &'static [&'static str] {
     NAMES.get_or_init(|| {
         let mut names = crate::op_kinds::known_ops().to_vec();
         names.push(crate::cluster_switches::NODE_SWITCH_SET);
+        names.extend(crate::cluster_sessions::NODE_OPS);
+        names.extend(crate::cluster_dispatch::NODE_OPS);
+        names.extend(crate::cluster_workspace::NODE_OPS);
         names
     })
 }
@@ -275,12 +281,26 @@ impl ClusterNode {
         let _ = self.tx.send(In::Link(on));
     }
 
+    pub fn tell(&self, topic: &str, name: &str, data: Value) {
+        let _ = self
+            .tx
+            .send(In::Tell(topic.to_string(), name.to_string(), data));
+    }
+
     fn wait(&self, make: impl FnOnce(Answer) -> In) -> Result<Value, ApiError> {
+        self.wait_within(make, LOCAL_WAIT)
+    }
+
+    fn wait_within(
+        &self,
+        make: impl FnOnce(Answer) -> In,
+        within: Duration,
+    ) -> Result<Value, ApiError> {
         let (answer, rx) = channel();
         self.tx
             .send(make(answer))
             .map_err(|_| ApiError::internal("the cluster node has stopped"))?;
-        match rx.recv_timeout(LOCAL_WAIT) {
+        match rx.recv_timeout(within) {
             Ok(result) => result.map_err(api_error),
             Err(_) => Err(ApiError::new(
                 ErrorCode::Failed,
@@ -291,6 +311,10 @@ impl ClusterNode {
 
     pub fn local(&self, cmd: LocalCmd) -> Result<Value, ApiError> {
         self.wait(|answer| In::Local(cmd, Some(answer)))
+    }
+
+    pub fn local_within(&self, cmd: LocalCmd, within: Duration) -> Result<Value, ApiError> {
+        self.wait_within(|answer| In::Local(cmd, Some(answer)), within)
     }
 
     pub fn create(&self, name: &str) -> Result<Value, ApiError> {

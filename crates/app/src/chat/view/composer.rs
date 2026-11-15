@@ -77,7 +77,12 @@ fn status(
     cx: &Context<ChatView>,
 ) -> Option<Div> {
     let (text, ink) = if let Some(error) = &view.tools.error {
-        (error_text(error, view.prompt.is_shown()), Ink::Needs)
+        (
+            sentence(&error_text(error, view.prompt.is_shown())),
+            Ink::Needs,
+        )
+    } else if let Some(note) = view.offline_note() {
+        (note, Ink::TextMuted)
     } else if view.tools.sending {
         return None;
     } else if let Some(n) = view
@@ -86,12 +91,12 @@ fn status(
         .map(|id| view.tools.live.waiting(id))
         .filter(|n| *n > 0)
     {
-        (t::chat::messages_wait(n), Ink::TextMuted)
+        (sentence(&t::chat::messages_wait(n)), Ink::TextMuted)
     } else {
-        (control.tooltip?.to_owned(), Ink::TextFaint)
+        (sentence(control.tooltip?), Ink::TextFaint)
     };
     Some(
-        label(&sentence(&text), TypeRole::Meta, ink, a)
+        label(&text, TypeRole::Meta, ink, a)
             .w_full()
             .elide()
             .part_at("Composer Hint", Corner::Trailing, a, cx),

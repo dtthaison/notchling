@@ -292,6 +292,7 @@ fn job_agent(id: &str, job: &str) -> Agent {
         command: None,
         resume_session_id: None,
         at_prompt: false,
+        node: None,
     }
 }
 

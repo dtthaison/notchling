@@ -1,12 +1,12 @@
 use gpui::{div, prelude::*, px, AnyElement, App, Context, Div, ExternalPaths, SharedString};
 use notchling_kit::labels::Corner;
 use notchling_kit::metric::TITLE_BAR;
-use notchling_kit::metric::TOOL_ICON;
+use notchling_kit::metric::{OFFLINE_OPACITY, TOOL_ICON};
 use notchling_kit::part::{ButtonKind, PartState};
 use notchling_kit::scrollbar::GUTTER;
 use notchling_kit::ui::{
-    account_line, hsla, icon_button, label, scrollable, session_row_marked, tool_icon, KitPart,
-    KitStyled, ToolMark,
+    account_line, hsla, icon_button, label, node_line, scrollable, session_row_marked, tool_icon,
+    KitPart, KitStyled, ToolMark,
 };
 use notchling_kit::{Appearance, Icon, IconSize, Ink, TypeRole};
 use notchling_locale as t;
@@ -59,6 +59,11 @@ fn footer(a: Appearance, note: Option<&'static str>, cx: &mut Context<ChatView>)
             footer_button("vault", Icon::Key, t::chat::vault_tip(), a)
                 .part_at("Vault Button", Corner::TopLeading, a, cx)
                 .on_click(cx.listener(|this, _, _, cx| this.open_vault_sheet(cx))),
+        )
+        .child(
+            footer_button("cluster", Icon::Server, t::cluster::tip(), a)
+                .part_at("Cluster Button", Corner::TopLeading, a, cx)
+                .on_click(cx.listener(|this, _, _, cx| this.open_cluster_sheet(cx))),
         )
         .children(note.map(|note| {
             let line = label(note, TypeRole::Meta, Ink::TextFaint, a);
@@ -144,6 +149,7 @@ pub(super) fn model(view: &ChatView, _: &App) -> SidebarModel {
         &view.accounts.snapshot(),
         view.daemon_note,
     )
+    .with_nodes(&view.nodes())
 }
 
 pub(super) fn render(m: &SidebarModel, a: Appearance, cx: &mut Context<ChatView>) -> AnyElement {
@@ -206,6 +212,14 @@ pub(super) fn render(m: &SidebarModel, a: Appearance, cx: &mut Context<ChatView>
                 let line = account_line(&acc.text, acc.lane, a);
                 line.part_at("Session Account", Corner::Trailing, a, cx)
             });
+            let account = match &row.node {
+                Some(node) => {
+                    let line = node_line(&node.line(), a);
+                    Some(line.part_at("Session Node", Corner::Trailing, a, cx))
+                }
+                None => account,
+            };
+            let dimmed = row.node.as_ref().is_some_and(|node| !node.online);
             let menu_id = row.id.clone();
             let drop_id = row.id.clone();
             let over = hsla(Ink::Selection.color(a));
@@ -230,7 +244,8 @@ pub(super) fn render(m: &SidebarModel, a: Appearance, cx: &mut Context<ChatView>
                     cx.stop_propagation();
                 },
             ));
-            let row_el = super::row_menu::on_right_click(row_el, menu_id, cx);
+            let row_el = super::row_menu::on_right_click(row_el, menu_id, cx)
+                .when(dimmed, |row| row.opacity(OFFLINE_OPACITY));
             list = list.child(row_el.part_at("Session Row", Corner::Trailing, a, cx));
         }
     }

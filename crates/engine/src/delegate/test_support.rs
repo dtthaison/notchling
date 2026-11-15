@@ -73,6 +73,7 @@ pub fn rig(agy: AcpFake) -> Rig {
         codex_media_root: root.join("codex-home/generated_images"),
         path: "/fake/bin".into(),
         network: true,
+        catalog_file: Some(root.join("catalog.json")),
         agy_binary: Some("/fake/agy".into()),
         agy: agy.clone() as Arc<dyn AcpSpawner>,
         agy_media_root: root.join("agy/brain"),

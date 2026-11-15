@@ -605,7 +605,6 @@ pub fn render(
         .flex_1()
         .min_w(px(0.0))
         .elide();
-    // A saved page or a file: the name reveals it in Finder, like the Folder tool.
     let title = match reveal_target.clone() {
         Some(path) => {
             let tip = if file_path.is_some() {

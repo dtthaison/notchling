@@ -3,6 +3,8 @@ use serde_json::{json, Value};
 use super::agents::Page;
 use super::client_model::{client_part, client_part_with, ClientPart, Extras};
 use super::hook_rows::HooksShown;
+use super::models_rows::ModelsShown;
+use super::skills_rows::SkillsShown;
 use crate::acting::Acting;
 use crate::notch::source::{fixture_clock, DataRoot, Source};
 use crate::views::ViewSpec;
@@ -14,7 +16,7 @@ use super::new_session::{accounts, folders, NewSession};
 use crate::accounts::menu::targets;
 use crate::accounts::renders::{snapshot, Shown as AccountsShown};
 
-pub const VIEWS: [ViewSpec; 12] = [
+pub const VIEWS: [ViewSpec; 13] = [
     ViewSpec {
         name: "banner",
         size: (620.0, 260.0),
@@ -71,6 +73,11 @@ pub const VIEWS: [ViewSpec; 12] = [
         about: "the Client part after a new version failed its check: the red line, the soak and Go Back",
     },
     ViewSpec {
+        name: "settings-skills",
+        size: (620.0, 1640.0),
+        about: "the Settings sheet's Skills & Models page: How It Works, each tool's skills (installed, out of date, not installed, tool missing), Models by Job (built-in, override and live-list choices) and the Override file (fixture replies)",
+    },
+    ViewSpec {
         name: "settings-agents-client-update",
         size: (620.0, 900.0),
         about: "the Client part with a newer version out: Latest, Update (Install off, so disabled with its note) and the Partly Checked line",
@@ -91,6 +98,7 @@ pub enum Shown {
     SettingsAgentsClient,
     SettingsAgentsClientFailed,
     SettingsAgentsClientUpdate,
+    SettingsSkills,
 }
 
 pub fn shown(name: &str) -> Option<Shown> {
@@ -107,6 +115,7 @@ pub fn shown(name: &str) -> Option<Shown> {
         "settings-agents-client" => Shown::SettingsAgentsClient,
         "settings-agents-client-failed" => Shown::SettingsAgentsClientFailed,
         "settings-agents-client-update" => Shown::SettingsAgentsClientUpdate,
+        "settings-skills" => Shown::SettingsSkills,
         _ => return None,
     })
 }
@@ -124,7 +133,8 @@ pub fn acting(shown: Shown) -> Acting {
         | Shown::SettingsCapabilities
         | Shown::SettingsAgentsClient
         | Shown::SettingsAgentsClientFailed
-        | Shown::SettingsAgentsClientUpdate => Acting::Off,
+        | Shown::SettingsAgentsClientUpdate
+        | Shown::SettingsSkills => Acting::Off,
     }
 }
 
@@ -138,6 +148,7 @@ pub fn page(shown: Shown) -> Page {
         | Shown::SettingsAgentsClient
         | Shown::SettingsAgentsClientFailed
         | Shown::SettingsAgentsClientUpdate => Page::Agents,
+        Shown::SettingsSkills => Page::Skills,
         _ => Page::General,
     }
 }
@@ -171,6 +182,80 @@ pub fn hooks(shown: Shown) -> HooksShown {
             "hooks": {"state": "present", "refused": null, "changes": [], "notes": [],
                       "present": present}}});
     HooksShown::from_plan(HookFacts::parse(&reply).ok_or_else(|| "no plan".to_owned()))
+}
+
+fn plan_skill(name: &str, tool: &str, action: &str, reason: Option<&str>) -> Value {
+    json!({"name": name, "tool": tool, "action": action, "reason": reason,
+        "tool_missing": reason.is_some_and(|r| r.contains("not installed")),
+        "path": "/Users/me/.claude/skills/x", "error": null})
+}
+
+pub fn skills_models(shown: Shown) -> Option<(SkillsShown, ModelsShown)> {
+    if shown != Shown::SettingsSkills {
+        return None;
+    }
+    let plan = json!({"on": true, "applied": false, "plan": {"skills": [
+        plan_skill("notchling-delegate", "claude", "unchanged", None),
+        plan_skill("notchling-pages", "claude", "update", None),
+        plan_skill("notchling-settings", "claude", "write", None),
+        plan_skill("notchling-delegate", "codex", "unchanged", None),
+        plan_skill("notchling-settings", "codex", "unchanged", None),
+        plan_skill("notchling-delegate", "antigravity", "skip",
+            Some("the tool is not installed here")),
+    ]}});
+    let choice = |tool: &str, marked: &str, model: Option<&str>, effort: &str, source: &str| {
+        json!({"tool": tool, "marked": marked, "model": model, "effort": effort,
+            "source": source, "note": null, "advice": null, "checked": true})
+    };
+    let mut review = choice(
+        "antigravity",
+        "gemini-4-hydrogen",
+        Some("gemini-4.1-hydrogen"),
+        "high",
+        "live",
+    );
+    review["note"] =
+        json!("gemini-4-hydrogen is gone; using gemini-4.1-hydrogen (same family, newer)");
+    review["advice"] = json!(
+        "Review after each task. Cannot run commands: put the diff and task text in files under .review/."
+    );
+    let mut last = choice(
+        "codex",
+        "gpt-6-astra",
+        Some("gpt-6-astra"),
+        "xhigh",
+        "built_in",
+    );
+    last["advice"] = json!("Final review of a branch. Can run git diff itself.");
+    let mut secrets_agy = choice(
+        "antigravity",
+        "gemini-4-argon",
+        Some("gemini-4-argon"),
+        "xhigh",
+        "override",
+    );
+    secrets_agy["note"] = json!("newer in family: gemini-4.1-argon");
+    let mut unchecked = choice(
+        "antigravity",
+        "gemini-4-argon",
+        Some("gemini-4-argon"),
+        "high",
+        "built_in",
+    );
+    unchecked["checked"] = json!(false);
+    let roles = json!({"roles": [
+        {"role": "review", "choices": [review]},
+        {"role": "review-final", "choices": [last.clone()]},
+        {"role": "review-secrets", "choices": [last, secrets_agy]},
+        {"role": "spec-check", "choices": [unchecked]},
+        {"role": "triage", "choices": []},
+    ], "override": {
+        "path": "/Users/me/Library/Application Support/Notchling/catalog.json",
+        "state": "found"}});
+    Some((
+        SkillsShown::from_reply(Ok(plan)),
+        ModelsShown::from_reply(Ok(roles), "/Users/me"),
+    ))
 }
 
 pub fn client(shown: Shown) -> Option<ClientPart> {
@@ -297,6 +382,11 @@ mod tests {
         assert_eq!(hooks(Shown::SettingsAgentsDetached), HooksShown::Detached);
         assert_eq!(page(Shown::Settings), Page::General);
         assert_eq!(page(Shown::SettingsAgents), Page::Agents);
+        assert_eq!(page(Shown::SettingsSkills), Page::Skills);
+        let (skills, models) = skills_models(Shown::SettingsSkills).unwrap();
+        assert_eq!(skills.names().len(), 3);
+        assert!(models.file().is_some());
+        assert!(skills_models(Shown::Settings).is_none());
         assert_eq!(
             client(Shown::SettingsAgentsClient).unwrap().workers.len(),
             3
