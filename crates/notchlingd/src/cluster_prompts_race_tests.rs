@@ -8,7 +8,7 @@ use crate::cluster_sessions::RemoteSessions;
 use crate::cluster_testkit::{eventually, pair, Dir, Opts};
 use notchling_cluster_net::MemNet;
 use notchling_engine::cluster::{qualify, LocalCmd, NodeId};
-use notchling_local_api::{ApiError, Caller, ClientKind, Tier};
+use notchling_local_api::ApiError;
 use serde_json::{json, Value};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -302,47 +302,4 @@ fn spawn_failure_frees_the_peer() {
     prompts.sync(&[peer(1, true)], true, &source, RETRY_MS);
     assert_eq!(attempts.load(Ordering::SeqCst), 2);
     assert_eq!(source.follows(), 1);
-}
-
-#[test]
-fn published_row_is_always_listable() {
-    let u = unit();
-    let source = Arc::new(FakeSource::default());
-    let row_bytes = 128 * 1024;
-    let mut owner = prompt("big");
-    owner["kind"] = json!("question");
-    let mut fill = row_bytes - 400;
-    loop {
-        owner["question"] = json!({"items": [{"header": "h", "question": "q".repeat(fill),
-                                              "options": ["a"], "multiSelect": false}]});
-        let size = serde_json::to_vec(&owner).unwrap().len();
-        if size >= row_bytes - 8 {
-            break;
-        }
-        fill += row_bytes - 8 - size;
-    }
-    assert!(
-        crate::prompts::push_row(&owner).is_some(),
-        "the owner sends it"
-    );
-    let mut pushed = owner.clone();
-    pushed["id"] = json!("pushed");
-    source.set(&node(1), json!([owner]));
-    u.prompts.sync(&[peer(1, true)], true, &source, 0);
-    u.prompts.on_event(&node(1), "prompt.pending", &pushed);
-    let app = Caller {
-        tier: Tier::App,
-        client: ClientKind::App,
-        peer: None,
-        pid: None,
-    };
-    let listed: Vec<Value> = u.prompts.merge(json!([]), &app).as_array().unwrap().clone();
-    for shown in u.room.named("prompt.pending") {
-        assert!(
-            listed.iter().any(|l| l["id"] == shown["id"]),
-            "{} published but not listable",
-            shown["id"]
-        );
-    }
-    assert_eq!(u.prompts.list().len(), listed.len());
 }

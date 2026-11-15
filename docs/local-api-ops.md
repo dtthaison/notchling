@@ -336,11 +336,14 @@ from the app in this run, or `cluster.join` (below), or a restart of a headless 
   at 4096 characters, an `input` over 64 KB becomes `{}` (with `trimmed: true`) and a `question` over 128 KB, the owner's own row
   limit, drops the event, unknown
   fields are dropped, at most 50 prompts per node and 200 in all. The shaped row then gets the whole-row rule of
-  `prompts.list` (over 128 KB: trimmed as above; still over: not published), so every published row is listable.
+  `prompts.list` (over 128 KB: trimmed as above; still over: not published), and the client holds remote rows
+  only up to 384 KiB in all (a new row past that is not published); the app's `prompts.list` fits local rows
+  into 768 KiB minus what is held and then lists every held remote row, so every published row is listable.
   Each `prompt.pending` the client publishes is followed by its `prompt.resolved`, never the other way round. Each renewal (every 30 s, and the
   first one when the link comes up) the client also reads the owner's `prompts.list` (the same op, called as a
   node, so it never carries remote prompts), adds what it lacks and resolves (`by: "unlisted"`) what it held
-  before the call that the owner no longer lists, so a lost `prompt.resolved` is repaired; a follow that
+  before the call that the owner no longer lists, so a lost `prompt.resolved` is repaired (skipped when the
+  owner's rows sum to over 640 KiB, since its list may then have been cut at 768 KiB and a missing row may still be pending); a follow that
   succeeds after the 60 s lease has lapsed first drops that node's prompts (`by: "unfollowed"`). Each peer is
   asked on a thread of its own, one at a time, so a dead peer never delays the others' renewals. A
   node going offline, leaving, a lapsed follow, or the app detaching publishes `prompt.resolved {outcome:

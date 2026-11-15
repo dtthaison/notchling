@@ -12,7 +12,7 @@ use std::sync::mpsc::{channel, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, Weak};
 use std::time::{Duration, Instant};
 
-pub use crate::cluster_prompts_book::{GONE_MAX, MAX_PER_NODE, MAX_TOTAL};
+pub use crate::cluster_prompts_book::{GONE_MAX, MAX_PER_NODE, MAX_TOTAL, REMOTE_BYTES};
 pub use crate::cluster_prompts_clean::{ID_MAX, INPUT_MAX, QUESTION_MAX, TEXT_MAX};
 
 pub const FOLLOW_EVERY_MS: u64 = 30_000;
@@ -82,6 +82,14 @@ pub struct RemotePrompts {
     ticks: Ticks,
 }
 
+struct Free<'a>(&'a Mutex<Book>, &'a NodeId);
+
+impl Drop for Free<'_> {
+    fn drop(&mut self) {
+        lock(self.0).busy.remove(self.1);
+    }
+}
+
 struct Draining<'a>(&'a Mutex<Book>);
 
 impl Drop for Draining<'_> {
@@ -132,13 +140,12 @@ impl RemotePrompts {
         }
         let _guard = Draining(&self.book);
         loop {
-            let batch = lock(&self.book).next_batch();
-            let Some(batch) = batch else {
+            let next = lock(&self.book).next_event();
+            let Some((event, data)) = next else {
                 return;
             };
-            for (event, data) in batch {
-                self.room.publish(topics::PROMPTS, event, &data);
-            }
+            self.room.publish(topics::PROMPTS, event, &data);
+            lock(&self.book).published();
         }
     }
 
@@ -152,11 +159,11 @@ impl RemotePrompts {
     }
 
     pub fn list(&self) -> Vec<Value> {
-        let mut rows: Vec<Value> = lock(&self.book)
-            .prompts
-            .values()
-            .map(|(_, p)| p.clone())
-            .collect();
+        Self::rows_of(&lock(&self.book))
+    }
+
+    fn rows_of(book: &Book) -> Vec<Value> {
+        let mut rows: Vec<Value> = book.prompts.values().map(|(_, p)| p.clone()).collect();
         rows.sort_by_key(|p| p.get("createdMs").and_then(Value::as_i64).unwrap_or(0));
         rows
     }
@@ -165,12 +172,18 @@ impl RemotePrompts {
         if caller.client == ClientKind::Node {
             return local;
         }
-        let mut rows = match local {
+        let rows = match local {
             Value::Array(rows) => rows,
             _ => Vec::new(),
         };
-        rows.extend(self.list());
-        Value::Array(crate::prompts::fit_list(rows))
+        let (remote, held) = {
+            let book = lock(&self.book);
+            (Self::rows_of(&book), book.held_bytes())
+        };
+        let budget = crate::prompts::LIST_BYTES.saturating_sub(held);
+        let mut rows = crate::prompts::fit_within(rows, budget);
+        rows.extend(remote);
+        Value::Array(rows)
     }
 
     pub fn drop_node(&self, node: &NodeId, why: &str) {
@@ -304,8 +317,8 @@ impl RemotePrompts {
             };
             let (me, source, node) = (self.clone(), source.clone(), id.clone());
             let job: Job = Box::new(move || {
+                let _free = Free(&me.book, &node);
                 me.renew(&node, source.as_ref(), at, ticket);
-                lock(&me.book).busy.remove(&node);
             });
             if (self.spawn)(job).is_err() {
                 let mut book = lock(&self.book);
@@ -403,3 +416,7 @@ mod fix_tests;
 #[cfg(test)]
 #[path = "cluster_prompts_race_tests.rs"]
 mod race_tests;
+
+#[cfg(test)]
+#[path = "cluster_prompts_budget_tests.rs"]
+mod budget_tests;

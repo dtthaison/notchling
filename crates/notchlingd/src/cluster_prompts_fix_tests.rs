@@ -39,7 +39,9 @@ fn merged_list_stays_under_the_line_cap_and_keeps_local_rows() {
         p["input"] = json!({"command": "c".repeat(60_000)});
         u.prompts.on_event(&node(1), "prompt.pending", &p);
     }
-    assert!(u.prompts.list().len() > 20);
+    let held = u.prompts.list();
+    let bytes: usize = held.iter().map(crate::prompts::row_bytes).sum();
+    assert!(held.len() > 3 && bytes <= super::REMOTE_BYTES, "{bytes}");
     let local = json!([{"id": "mine-1"}, {"id": "mine-2"}]);
     let merged = u.prompts.merge(local, &app());
     let size = serde_json::to_vec(&merged).unwrap().len();
@@ -47,7 +49,7 @@ fn merged_list_stays_under_the_line_cap_and_keeps_local_rows() {
     let rows = merged.as_array().unwrap();
     assert_eq!(rows[0]["id"], "mine-1");
     assert_eq!(rows[1]["id"], "mine-2");
-    assert!(rows.len() > 3 && rows.len() < 42, "{}", rows.len());
+    assert_eq!(rows.len(), 2 + held.len());
 }
 
 #[test]

@@ -1,4 +1,5 @@
 use crate::cluster_prompts_clean::{clean_pending, Finder};
+use crate::prompts::row_bytes;
 use notchling_engine::cluster::NodeId;
 use notchling_local_api::topics;
 use serde_json::{json, Value};
@@ -7,6 +8,7 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 pub const MAX_PER_NODE: usize = 50;
 pub const MAX_TOTAL: usize = 200;
 pub const GONE_MAX: usize = MAX_PER_NODE * 4;
+pub const REMOTE_BYTES: usize = 384 * 1024;
 
 #[derive(Default)]
 pub(crate) struct Followed {
@@ -41,6 +43,7 @@ pub(crate) struct Book {
     pub(crate) busy: BTreeSet<NodeId>,
     gens: BTreeMap<NodeId, u64>,
     stops: u64,
+    bytes: usize,
     outbox: VecDeque<(&'static str, Value)>,
     draining: bool,
 }
@@ -101,12 +104,26 @@ impl Book {
         true
     }
 
-    pub(crate) fn next_batch(&mut self) -> Option<Vec<(&'static str, Value)>> {
-        if self.outbox.is_empty() {
+    pub(crate) fn next_event(&mut self) -> Option<(&'static str, Value)> {
+        let next = self.outbox.front().cloned();
+        if next.is_none() {
             self.draining = false;
-            return None;
         }
-        Some(self.outbox.drain(..).collect())
+        next
+    }
+
+    pub(crate) fn published(&mut self) {
+        self.outbox.pop_front();
+    }
+
+    pub(crate) fn held_bytes(&self) -> usize {
+        self.bytes
+    }
+
+    fn take(&mut self, id: &str) -> Option<(NodeId, Value)> {
+        let held = self.prompts.remove(id)?;
+        self.bytes = self.bytes.saturating_sub(row_bytes(&held.1));
+        Some(held)
     }
 
     pub(crate) fn release(&mut self) {
@@ -117,12 +134,17 @@ impl Book {
         let Some(id) = shaped.get("id").and_then(Value::as_str).map(String::from) else {
             return;
         };
-        match self.prompts.get(&id) {
+        let size = row_bytes(&shaped);
+        let freed = match self.prompts.get(&id) {
             Some((_, old)) if *old == shaped => return,
-            Some(_) => {}
+            Some((_, old)) => row_bytes(old),
             None if self.count(node) >= MAX_PER_NODE || self.prompts.len() >= MAX_TOTAL => return,
-            None => {}
+            None => 0,
+        };
+        if self.bytes - freed + size > REMOTE_BYTES {
+            return;
         }
+        self.bytes = self.bytes - freed + size;
         self.prompts.insert(id, (node.clone(), shaped.clone()));
         self.say(topics::PROMPT_PENDING, shaped);
     }
@@ -146,7 +168,7 @@ impl Book {
         if !held {
             return;
         }
-        if let Some((_, prompt)) = self.prompts.remove(id) {
+        if let Some((_, prompt)) = self.take(id) {
             if let Some(row) = prompt.get("rowId") {
                 shaped["rowId"] = row.clone();
             }
@@ -158,7 +180,7 @@ impl Book {
         *self.gens.entry(node.clone()).or_insert(0) += 1;
         self.followed.remove(node);
         for id in self.ids_of(node) {
-            if let Some((_, prompt)) = self.prompts.remove(&id) {
+            if let Some((_, prompt)) = self.take(&id) {
                 self.say(topics::PROMPT_RESOLVED, resolved_for(&prompt, why));
             }
         }
@@ -200,8 +222,11 @@ impl Book {
                 self.put(node, shaped);
             }
         }
+        if crate::prompts::may_be_cut(rows) {
+            return;
+        }
         for id in before.difference(&seen) {
-            if let Some((_, prompt)) = self.prompts.remove(id) {
+            if let Some((_, prompt)) = self.take(id) {
                 self.say(topics::PROMPT_RESOLVED, resolved_for(&prompt, "unlisted"));
             }
         }

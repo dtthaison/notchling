@@ -266,13 +266,25 @@ fn pass_all(held: BTreeMap<String, Held>, reason: &str) -> Vec<Prompt> {
     all
 }
 
-const ROW_BYTES: usize = 128 * 1024;
-const LIST_BYTES: usize = 768 * 1024;
+pub const ROW_BYTES: usize = 128 * 1024;
+pub const LIST_BYTES: usize = 768 * 1024;
 const TEXT_CHARS: usize = 4000;
 const DIFF_LINES: usize = 400;
 
+pub fn row_bytes(row: &Value) -> usize {
+    row.to_string().len()
+}
+
 pub fn fit_list(rows: Vec<Value>) -> Vec<Value> {
-    let weight = |row: &Value| row.to_string().len();
+    fit_within(rows, LIST_BYTES)
+}
+
+pub fn may_be_cut(listed: &[Value]) -> bool {
+    listed.iter().map(row_bytes).sum::<usize>() > LIST_BYTES - ROW_BYTES
+}
+
+pub fn fit_within(rows: Vec<Value>, budget: usize) -> Vec<Value> {
+    let weight = row_bytes;
     let mut used = 0;
     let mut out = Vec::with_capacity(rows.len());
     for mut row in rows {
@@ -280,7 +292,7 @@ pub fn fit_list(rows: Vec<Value>) -> Vec<Value> {
             trim_row(&mut row);
         }
         let size = weight(&row);
-        if size > ROW_BYTES || used + size > LIST_BYTES {
+        if size > ROW_BYTES || used + size > budget {
             continue;
         }
         used += size;
