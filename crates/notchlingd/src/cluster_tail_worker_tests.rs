@@ -1,7 +1,10 @@
 use super::*;
+use crate::cluster_redact::JobMasks;
 use crate::grant_janitor::GrantJanitor;
 use crate::grant_roots::PENDING_MS;
-use crate::grant_use::tests::{deliver_args, from_vault, real_now, rig_at, Rig as Grants};
+use crate::grant_use::tests::{
+    deliver_args, from_vault, real_now, rig_at, Rig as Grants, OTHER_JOB,
+};
 use crate::grant_use::UseCalls;
 use notchling_local_api::ops;
 
@@ -91,7 +94,17 @@ fn untied() -> Worker {
     worker("some-other-session", None, json!({"session": "c1"}))
 }
 
+const OTHER_VALUE: &str = "NL-MARKER-OTHER-VALUE";
+
 impl Worker {
+    fn deliver_to(&self, job: &str, name: &str, value: &str) {
+        let args = deliver_args(job, name, "V", value);
+        self.grants
+            .uses
+            .deliver(&from_vault(), &args)
+            .expect("accepted before the job starts here");
+    }
+
     fn deliver(&self) {
         let args = deliver_args(JOB, "api-key", "V", VALUE);
         self.grants
@@ -315,4 +328,66 @@ fn a_lost_login_refuses_the_claude_row_of_a_job_that_began_a_claude_start_only()
         w.tail(0).expect_err("now it ran Claude").message,
         UNMAPPED_LOST
     );
+}
+
+#[test]
+fn a_shell_row_of_a_job_with_no_grants_is_masked_with_another_jobs_value() {
+    let shell = format!("shell:{JOB}");
+    let w = worker(&shell, None, json!({}));
+    w.deliver_to(OTHER_JOB, "other-key", OTHER_VALUE);
+    assert_eq!(
+        w.grants.masks.state(JOB),
+        JobMasks::Never,
+        "no masks of its own"
+    );
+    w.append(&format!("it read the file: {OTHER_VALUE} done\n"));
+    let out = w.tail(0).expect("served");
+    assert_eq!(served(&out), "it read the file: [secret other-key] done\n");
+}
+
+#[test]
+fn a_tied_claude_row_is_masked_with_another_jobs_value() {
+    let w = claude();
+    w.deliver_to(OTHER_JOB, "other-key", OTHER_VALUE);
+    w.deliver();
+    w.begin(ops::SESSION_NEW);
+    w.key();
+    w.append(&format!("read {OTHER_VALUE} and {VALUE}\n"));
+    let out = w.tail(0).expect("served");
+    assert_eq!(
+        served(&out),
+        "read [secret other-key] and [secret api-key]\n"
+    );
+}
+
+#[test]
+fn a_held_prefix_of_another_jobs_value_is_not_flushed_while_the_row_is_live() {
+    let w = claude();
+    w.deliver_to(OTHER_JOB, "other-key", OTHER_VALUE);
+    w.deliver();
+    w.begin(ops::SESSION_NEW);
+    w.key();
+    w.append("said NL-MARKER-OTH");
+    let first = w.tail(0).expect("served");
+    assert_eq!(served(&first), "said ", "the prefix is held");
+    assert!(is_held(&first));
+    w.append("ER-VALUE more\n");
+    let second = w.tail(first["next"].as_u64().unwrap()).expect("served");
+    let both = served(&first) + &served(&second);
+    assert_eq!(both, "said [secret other-key] more\n");
+}
+
+#[test]
+fn a_held_prefix_of_another_jobs_value_is_masked_once_the_row_is_over() {
+    let w = claude();
+    w.deliver_to(OTHER_JOB, "other-key", OTHER_VALUE);
+    w.deliver();
+    w.begin(ops::SESSION_NEW);
+    w.key();
+    w.append("said NL-MARKER-OTH");
+    assert!(is_held(&w.tail(0).unwrap()));
+    w.ends_here();
+    let end = w.tail(0).expect("served");
+    assert_eq!(served(&end), "said [secret other-key]");
+    assert_eq!(end["next"], end["size"]);
 }

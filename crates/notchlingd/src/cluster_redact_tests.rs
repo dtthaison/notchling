@@ -188,8 +188,8 @@ fn adding_never_unmasks_and_forget_job_clears() {
         "duplicate stored"
     );
     masks.forget_job("j1");
-    assert!(masks.for_job("j1").is_none());
-    assert!(masks.generation("j1").is_none());
+    assert!(masks.union().is_none());
+    assert!(masks.union_generation().is_none());
     assert!(masks.state("j1") == JobMasks::Never);
 }
 
@@ -274,7 +274,7 @@ fn values_over_the_cap_are_refused_and_nothing_is_added() {
 #[test]
 fn job_without_grants_is_served_as_is() {
     let masks = TailMasks::new();
-    assert!(masks.for_job("j1").is_none());
+    assert!(masks.union().is_none());
     let raw: Vec<u8> = vec![0, 159, 146, 150, b'N', b'L', b'\n', 255];
     let (out, next) = mask_tail(&masks, "j1", 10, b"lead", &raw, false).unwrap();
     assert!(out == raw, "bytes changed");
@@ -331,6 +331,36 @@ fn a_log_started_before_any_grant_masks_once_one_arrives() {
 }
 
 #[test]
+fn a_log_is_masked_with_the_values_granted_to_other_jobs() {
+    let masks = Arc::new(masks_with("j2", vec![grant("tok", TOKEN)]));
+    let sink = Arc::new(Mutex::new(Vec::<u8>::new()));
+    let mut log = MaskedLog::new(Shared(sink.clone()), masks, "j1");
+    log.write_all(format!("read {TOKEN} now\n").as_bytes())
+        .unwrap();
+    log.close().unwrap();
+    let written = logged(&sink);
+    assert!(
+        !written.contains("NL-MARKER-3"),
+        "another job's value leaked"
+    );
+    assert_eq!(written, "read [secret tok] now\n");
+}
+
+#[test]
+fn a_value_granted_to_another_job_while_a_log_is_open_rescans_what_it_holds() {
+    let masks = Arc::new(masks_with("j1", vec![grant("one", "NL-MARKER-8-ONE-AAAA")]));
+    let sink = Arc::new(Mutex::new(Vec::<u8>::new()));
+    let mut log = MaskedLog::new(Shared(sink.clone()), masks.clone(), "j1");
+    log.write_all(b"a NL-MARKER-8-").unwrap();
+    masks
+        .add("j2", vec![grant("two", "NL-MARKER-8-TWO-BBBB")])
+        .unwrap();
+    log.write_all(b"TWO-BBBB b\n").unwrap();
+    log.close().unwrap();
+    assert_eq!(logged(&sink), "a [secret two] b\n");
+}
+
+#[test]
 fn a_log_for_a_job_that_lost_its_masks_refuses_to_write() {
     let masks = Arc::new(TailMasks::new());
     masks.mark_granted("j1");
@@ -375,11 +405,11 @@ fn closing_the_log_masks_a_held_prefix_once() {
 }
 
 #[test]
-fn for_job_gives_a_fresh_redactor_each_time() {
+fn the_union_gives_a_fresh_redactor_each_time() {
     let masks = masks_with("j1", vec![grant("tok", "NL-MARKER-6-TOKEN-9876")]);
-    let mut a = masks.for_job("j1").unwrap();
+    let mut a = masks.union().unwrap();
     assert!(a.feed(b"NL-MARKER-6-TO").is_empty());
-    let mut b = masks.for_job("j1").unwrap();
+    let mut b = masks.union().unwrap();
     assert!(b.feed(b"plain") == b"plain");
 }
 
@@ -463,11 +493,11 @@ fn adding_the_same_standing_value_twice_changes_nothing_and_a_cap_holds() {
     masks
         .add_standing(vec![grant("claude-worker", TOKEN)])
         .unwrap();
-    let before = masks.generation("j1");
+    let before = masks.union_generation();
     masks
         .add_standing(vec![grant("claude-worker", TOKEN)])
         .unwrap();
-    assert_eq!(masks.generation("j1"), before);
+    assert_eq!(masks.union_generation(), before);
     for n in 1..crate::cluster_redact::MAX_STANDING {
         masks
             .add_standing(vec![grant("v", &format!("NL-MARKER-5-VALUE-{n:04}"))])

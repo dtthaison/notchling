@@ -12,6 +12,7 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 const JOB: &str = "j-0123456789ab";
+const OTHER: &str = "j-ba9876543210";
 
 #[derive(Default)]
 struct Recorder {
@@ -128,6 +129,29 @@ fn shell_log_is_masked_at_write() {
     assert!(!log.contains("NL-MARKER"), "no value reached the log");
     assert_eq!(log.matches("[secret api-key]").count(), 3);
     assert!(log.contains("a [secret api-key] b\n"));
+}
+
+#[test]
+fn a_shell_log_is_masked_with_the_values_granted_to_other_jobs() {
+    let rig = rig("other-jobs");
+    rig.masks
+        .add(
+            OTHER,
+            vec![(
+                "other-key".to_string(),
+                GrantValue::new("NL-MARKER-OTHER-VALUE".to_string()),
+            )],
+        )
+        .expect("added");
+    assert_eq!(rig.masks.state(JOB), JobMasks::Never, "none of its own");
+    rig.run("printf 'read NL-MARKER-OTHER-VALUE\\n'; echo NL-MARKER-OTHER-VALUE >&2");
+    rig.reporter.wait(JOB);
+    let log = rig.log();
+    assert!(
+        !log.contains("NL-MARKER"),
+        "no value reached the log: {log}"
+    );
+    assert_eq!(log.matches("[secret other-key]").count(), 2);
 }
 
 #[test]

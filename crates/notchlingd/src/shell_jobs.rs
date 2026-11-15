@@ -290,6 +290,10 @@ impl ShellJobs {
         }
     }
 
+    pub fn mask_text(&self, text: &str) -> String {
+        self.masks().mask_text(text)
+    }
+
     pub fn log_closed(&self, job: &str) -> bool {
         lock(&self.inner.jobs)
             .get(job)

@@ -343,7 +343,11 @@ impl DispatchCalls {
         let list = args_of(args.get("args").unwrap_or(&Value::Null))?;
         check(&list)?;
         let (exit, out, err) = self.runner.run(&list);
-        Ok(json!({"exit": exit, "out": out, "err": err}))
+        Ok(json!({
+            "exit": exit,
+            "out": self.shells.mask_text(&out),
+            "err": self.shells.mask_text(&err),
+        }))
     }
 }
 

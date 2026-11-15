@@ -1,5 +1,5 @@
 use crate::cluster_node::LocalCalls;
-use crate::cluster_redact::{mask_tail, mask_with, JobMasks, TailMasks};
+use crate::cluster_redact::{mask_job_tail, mask_with, TailMasks};
 use crate::cluster_sessions::{tail, LocalRows, NODE_SESSIONS, NODE_TAIL};
 use crate::grant_broker::{Clock, View};
 use crate::grant_roots::{valid_job, JobRoots};
@@ -187,13 +187,14 @@ impl MaskedTails {
                 if snap.login_blanket && self.ran_claude(snap, job) {
                     return Err(failed(UNMAPPED_LOST));
                 }
-                if self.masks.state(job) == JobMasks::Never {
-                    return Ok(None);
-                }
                 if shell_log && self.masks.lost(job) {
                     return Ok(None);
                 }
-                mask_tail(&self.masks, job, offset, lead, bytes, at_end)
+                if snap.union.is_none() && !self.masks.lost(job) {
+                    return Ok(None);
+                }
+                let union = snap.union.clone();
+                mask_job_tail(&self.masks, job, union, offset, lead, bytes, at_end)
                     .map(Some)
                     .map_err(failed)
             }
@@ -211,11 +212,8 @@ impl MaskedTails {
         }
     }
 
-    fn lookback(&self, snap: &Snap, job: Option<&str>) -> usize {
-        match job {
-            Some(job) => self.masks.lookback(job),
-            None => snap.union.as_ref().map_or(0, |r| r.lookback()),
-        }
+    fn lookback(snap: &Snap) -> usize {
+        snap.union.as_ref().map_or(0, |r| r.lookback())
     }
 
     fn tail(&self, args: &Value) -> Result<Value, ApiError> {
@@ -240,7 +238,7 @@ impl MaskedTails {
         let path = row
             .and_then(|row| row.get("transcriptPath").and_then(Value::as_str))
             .ok_or_else(|| failed("that session has no transcript"))?;
-        let lead = lead_of(Path::new(path), start, self.lookback(&snap, job.as_deref()))?;
+        let lead = lead_of(Path::new(path), start, Self::lookback(&snap))?;
         let over = match &job {
             Some(job) => self.over(job),
             None => self.all_over(),
