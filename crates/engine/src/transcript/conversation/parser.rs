@@ -148,8 +148,14 @@ impl Parser {
         }
         match kind {
             "system" => self.system(&obj, date),
-            "assistant" => self.assistant(&obj, date),
-            "user" => self.user(&obj, date),
+            "assistant" => {
+                self.queue.end_batch();
+                self.assistant(&obj, date);
+            }
+            "user" => {
+                self.user(&obj, date);
+                self.queue.end_batch();
+            }
             "queue-operation" => self.queue.operation(&obj),
             "attachment" => self.attachment(&obj, date),
             _ => {}

@@ -273,6 +273,118 @@ fn a_removed_row_that_was_never_seen_leaves_no_sent_bubble() {
     assert!(feed.bubbles("s1").is_empty());
 }
 
+#[test]
+fn a_row_that_comes_back_after_sent_is_not_kept_as_sent() {
+    let mut feed = OutboxFeed::default();
+    feed.apply(&changed(wire("a", "s1", "sending", None, "again")), 0);
+    feed.apply(&removed("a", "s1", "sent"), 1_000);
+    assert_eq!(feed.bubbles("s1")[0].status, Status::Sent);
+    assert!(feed.apply(&changed(wire("a", "s1", "queued", None, "again")), 2_000));
+    let shown = feed.bubbles("s1");
+    assert_eq!(shown.len(), 1);
+    assert_eq!(shown[0].status, Status::Queued);
+    assert_eq!(shown[0].buttons, vec![Button::Edit, Button::Remove]);
+    feed.apply(&removed("a", "s1", "removed"), 3_000);
+    assert!(feed.bubbles("s1").is_empty());
+    assert!(feed.is_empty());
+}
+
+#[test]
+fn reseeding_rows_drops_sent_entries_whose_row_is_back() {
+    let mut feed = OutboxFeed::default();
+    feed.apply(&changed(wire("a", "s1", "sending", None, "one")), 0);
+    feed.apply(&changed(wire("b", "s1", "sending", None, "two")), 0);
+    feed.apply(&removed("a", "s1", "sent"), 1_000);
+    feed.apply(&removed("b", "s1", "sent"), 1_000);
+    let mut fresh = OutboxFeed::default();
+    fresh.seed(&[wire("a", "s1", "unsure", Some("not_found"), "one")]);
+    feed.reseed_rows(fresh);
+    let shown = feed.bubbles("s1");
+    let kinds: Vec<(&str, Status)> = shown
+        .iter()
+        .map(|b| (b.id.as_str(), b.status.clone()))
+        .collect();
+    assert_eq!(kinds, [("b", Status::Sent), ("a", Status::MayBeIn)]);
+}
+
+fn pending(text: &str) -> Outgoing {
+    Outgoing::new(text, &Conversation::default(), 0)
+}
+
+fn outgoing_texts(list: &[Outgoing]) -> Vec<String> {
+    list.iter().map(|o| o.text.clone()).collect()
+}
+
+#[test]
+fn an_outgoing_goes_once_the_feed_shows_its_row_so_an_edit_leaves_no_ghost() {
+    let mut feed = OutboxFeed::default();
+    let mut list = vec![pending("ok then")];
+    deliver(&mut list, "ok then", 100, Some("o1"));
+    assert_eq!(list[0].boxed.as_deref(), Some("o1"));
+    drop_boxed(&mut list, |id| feed.shows(id));
+    assert_eq!(list.len(), 1, "the row has not arrived yet");
+
+    feed.apply(&changed(wire("o1", "s1", "queued", None, "ok then")), 200);
+    drop_boxed(&mut list, |id| feed.shows(id));
+    assert!(list.is_empty());
+
+    feed.apply(&changed(wire("o1", "s1", "queued", None, "ok, then")), 300);
+    let bubbles = feed.bubbles("s1");
+    assert_eq!(bubbles[0].text, "ok, then");
+    assert!(unbubbled(outgoing_texts(&list), &bubbles).is_empty());
+}
+
+#[test]
+fn a_removed_row_leaves_no_outgoing_bubble_behind() {
+    let mut feed = OutboxFeed::default();
+    let mut list = vec![pending("remove me")];
+    deliver(&mut list, "remove me", 100, Some("o1"));
+    feed.apply(&changed(wire("o1", "s1", "queued", None, "remove me")), 200);
+    drop_boxed(&mut list, |id| feed.shows(id));
+    feed.apply(&removed("o1", "s1", "removed"), 300);
+    assert!(feed.bubbles("s1").is_empty());
+    assert!(unbubbled(outgoing_texts(&list), &feed.bubbles("s1")).is_empty());
+}
+
+#[test]
+fn a_sent_row_counts_as_shown_while_its_sent_bubble_stays() {
+    let mut feed = OutboxFeed::default();
+    feed.apply(&changed(wire("o1", "s1", "sending", None, "ship")), 0);
+    feed.apply(&removed("o1", "s1", "sent"), 10);
+    assert!(feed.shows("o1"));
+    assert!(!feed.shows("o2"));
+    let mut list = vec![pending("ship")];
+    deliver(&mut list, "ship", 20, Some("o1"));
+    drop_boxed(&mut list, |id| feed.shows(id));
+    assert!(list.is_empty());
+}
+
+#[test]
+fn only_the_delivered_copy_is_tied_to_its_row() {
+    let mut list = vec![pending("ok"), pending("ok"), pending("other")];
+    deliver(&mut list, "ok", 100, Some("o1"));
+    assert_eq!(list[0].boxed.as_deref(), Some("o1"));
+    assert_eq!(list[0].delivered_at, Some(100));
+    assert_eq!(list[1].boxed, None);
+    assert_eq!(list[1].delivered_at, None);
+    deliver(&mut list, "ok", 150, None);
+    assert_eq!(list[1].delivered_at, Some(150));
+    assert_eq!(list[1].boxed, None);
+    drop_boxed(&mut list, |_| true);
+    assert_eq!(outgoing_texts(&list), ["ok", "other"]);
+}
+
+#[test]
+fn forgetting_a_row_drops_only_the_outgoing_tied_to_it() {
+    let mut list = vec![pending("a"), pending("b"), pending("c")];
+    deliver(&mut list, "a", 1, Some("o1"));
+    deliver(&mut list, "b", 1, Some("o2"));
+    forget(&mut list, "o1");
+    assert_eq!(outgoing_texts(&list), ["b", "c"]);
+    forget(&mut list, "zzz");
+    assert_eq!(list.len(), 2);
+}
+
 fn job_agent(id: &str, job: &str) -> Agent {
     Agent {
         id: id.into(),

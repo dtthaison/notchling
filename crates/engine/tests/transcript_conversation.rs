@@ -500,6 +500,54 @@ fn single_dequeue_is_not_merged() {
     assert_eq!(users(&c), [user("first\nsecond")]);
 }
 
+const ENQUEUE_TWO: [&str; 2] = [
+    r#"{"type":"queue-operation","operation":"enqueue","timestamp":"2026-11-15T10:00:10.000Z","content":"first"}"#,
+    r#"{"type":"queue-operation","operation":"enqueue","timestamp":"2026-11-15T10:00:10.100Z","content":"second"}"#,
+];
+
+const DEQUEUE_TWO: [&str; 2] = [
+    r#"{"type":"queue-operation","operation":"dequeue","timestamp":"2026-11-15T10:00:12.500Z"}"#,
+    r#"{"type":"queue-operation","operation":"dequeue","timestamp":"2026-11-15T10:00:12.500Z"}"#,
+];
+
+const TYPED_JOINED: &str = r#"{"type":"user","message":{"role":"user","content":"first\nsecond"},"timestamp":"2026-11-15T10:05:00.000Z"}"#;
+
+fn after_a_batch(between: &[&str]) -> Vec<ItemKind> {
+    let mut lines: Vec<&str> = ENQUEUE_TWO.to_vec();
+    lines.extend(DEQUEUE_TWO);
+    lines.extend(between);
+    lines.push(TYPED_JOINED);
+    users(&read_lines_as_file(&lines))
+}
+
+#[test]
+fn a_batch_does_not_outlive_an_assistant_line() {
+    let assistant = r#"{"type":"assistant","message":{"id":"m1","model":"claude-opus-5-5","role":"assistant","content":[{"type":"text","text":"Working."}]},"timestamp":"2026-11-15T10:00:13.000Z"}"#;
+    assert_eq!(after_a_batch(&[assistant]), [user("first\nsecond")]);
+}
+
+#[test]
+fn a_batch_does_not_outlive_a_tool_result_line() {
+    let result = r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"ok"}]},"timestamp":"2026-11-15T10:00:13.000Z"}"#;
+    assert_eq!(after_a_batch(&[result]), [user("first\nsecond")]);
+}
+
+#[test]
+fn a_batch_does_not_outlive_a_meta_user_line() {
+    let meta = r#"{"type":"user","isMeta":true,"message":{"role":"user","content":"Caveat: local command output"},"timestamp":"2026-11-15T10:00:13.000Z"}"#;
+    assert_eq!(after_a_batch(&[meta]), [user("first\nsecond")]);
+}
+
+#[test]
+fn system_attachment_and_progress_lines_leave_the_batch_alone() {
+    let between = [
+        r#"{"type":"system","subtype":"stop_hook_summary","timestamp":"2026-11-15T10:00:12.550Z"}"#,
+        r#"{"type":"attachment","attachment":{"type":"token_usage","used":1000,"total":200000},"timestamp":"2026-11-15T10:00:12.560Z"}"#,
+        r#"{"type":"progress","data":{"type":"hook_progress"},"timestamp":"2026-11-15T10:00:12.570Z"}"#,
+    ];
+    assert_eq!(after_a_batch(&between), [merged_user("first\nsecond")]);
+}
+
 #[test]
 fn two_dequeues_with_another_line_are_not_merged() {
     let c = read_lines_as_file(&[

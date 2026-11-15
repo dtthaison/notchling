@@ -10,8 +10,8 @@ use crate::outbox_verify::count_row;
 use notchling_engine::contract::Tool as RowTool;
 use notchling_engine::control::slash::opens_menu;
 use notchling_engine::outbox::{
-    verdict, Change, InsertError, New, OutboxStore, Row, State, Tool, Verdict, Via, Why, MAX_TEXT,
-    VERIFY_LOOK_MS,
+    verdict, Change, InsertError, New, OutboxStore, Row, State, Tool, Verdict, Via, Why,
+    BEING_SENT, IN_QUEUE, MAX_TEXT, NO_MESSAGE, VERIFY_LOOK_MS,
 };
 use notchling_engine::sessions::{fresh, Agent, Probes, Roots};
 use notchling_engine::tools::codex::plan::valid_session_id;
@@ -33,9 +33,6 @@ pub type Clock = Arc<dyn Fn() -> i64 + Send + Sync>;
 const SAVE_FAILED: &str = "Couldn't save the message.";
 const EMPTY: &str = "Type a message first.";
 const TOO_LONG: &str = "That message is over 100 KB.";
-const NO_MESSAGE: &str = "No such message.";
-const BEING_SENT: &str = "It's being sent.";
-const IN_QUEUE: &str = "It's in the session's queue.";
 const NO_SESSION: &str = "No such session.";
 const MENU: &str = "That command opens a menu; open the session's terminal.";
 

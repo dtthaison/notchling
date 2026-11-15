@@ -2,6 +2,7 @@ use super::*;
 use crate::acting::ops;
 use crate::chat::outbox::{bubble, OutboxRow};
 use crate::chat::rows::{tail_rows, Row};
+use notchling_engine::outbox::{BEING_SENT, IN_QUEUE, NO_MESSAGE};
 
 fn editing() -> Editing {
     Editing {
@@ -50,18 +51,59 @@ fn edit_mode_sends_outbox_edit() {
     assert_eq!(begun.request.args["text"], "new words");
     assert_eq!(begun.draft_after, None);
     assert!(!begun.shows_queued);
-    assert_eq!(
-        editing.finished(true, "new words").draft,
-        "a half-typed line"
-    );
+    let end = editing.finished(Ok(()), "new words");
+    assert!(end.leave);
+    assert_eq!(end.draft.as_deref(), Some("a half-typed line"));
+    assert_eq!(end.note, None);
     assert_eq!(editing.cancelled(), "a half-typed line");
 }
 
 #[test]
-fn lost_edit_keeps_text_as_draft() {
-    let end = editing().finished(false, "new words");
-    assert_eq!(end.draft, "new words");
-    assert_eq!(end.note, Some("Already sent"));
+fn an_edit_of_a_message_that_is_gone_or_sent_keeps_the_text_as_a_draft() {
+    for message in [NO_MESSAGE, BEING_SENT, IN_QUEUE] {
+        let end = editing().finished(Err(message), "new words");
+        assert!(end.leave, "{message}");
+        assert_eq!(end.draft.as_deref(), Some("new words"), "{message}");
+        assert_eq!(end.note.as_deref(), Some("Already sent"), "{message}");
+    }
+}
+
+#[test]
+fn any_other_refusal_keeps_the_edit_open_with_the_daemons_words() {
+    for message in [
+        "Type a message first.",
+        "That message is over 100 KB.",
+        "That command opens a menu; open the session's terminal.",
+        "Couldn't save the message.",
+        "Notchling's daemon isn't running.",
+    ] {
+        let end = editing().finished(Err(message), "new words");
+        assert!(!end.leave, "{message}");
+        assert_eq!(end.draft, None, "{message}");
+        assert_eq!(end.note.as_deref(), Some(message));
+    }
+}
+
+#[test]
+fn an_edit_is_lost_when_its_row_is_no_longer_in_the_outbox() {
+    let editing = editing();
+    assert!(editing.is_lost(&[]));
+    assert!(editing.is_lost(&[queued_row("x")]));
+    let mut here = queued_row("x");
+    here.id = "o7".into();
+    assert!(!editing.is_lost(&[queued_row("y"), here]));
+}
+
+#[test]
+fn edit_mode_attaches_nothing_to_the_message() {
+    let files = vec![std::path::PathBuf::from("/tmp/a.png")];
+    let editing = editing();
+    assert!(attachments_for(Some(&editing), "job-a", files.clone()).is_empty());
+    assert_eq!(
+        attachments_for(Some(&editing), "job-b", files.clone()),
+        files
+    );
+    assert_eq!(attachments_for(None, "job-a", files.clone()), files);
 }
 
 #[test]

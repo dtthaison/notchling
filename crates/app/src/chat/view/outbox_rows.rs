@@ -1,8 +1,11 @@
+use std::path::PathBuf;
+
+use notchling_engine::outbox::is_settled;
 use notchling_locale as t;
 use serde_json::{json, Value};
 
 use crate::acting::Request;
-use crate::chat::outbox::{Button, Status};
+use crate::chat::outbox::{Button, OutboxRow, Status};
 use crate::tools::requests::Pick;
 
 pub fn status_line(status: &Status) -> String {
@@ -112,27 +115,45 @@ pub fn begin(editing: Option<&Editing>, send: Request, text: &str) -> Begin {
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct EditEnd {
-    pub draft: String,
-    pub note: Option<&'static str>,
+    pub leave: bool,
+    pub draft: Option<String>,
+    pub note: Option<String>,
 }
 
 impl Editing {
-    pub fn finished(&self, accepted: bool, text: &str) -> EditEnd {
-        if accepted {
-            EditEnd {
-                draft: self.before.clone(),
+    pub fn finished(&self, result: Result<(), &str>, text: &str) -> EditEnd {
+        match result {
+            Ok(()) => EditEnd {
+                leave: true,
+                draft: Some(self.before.clone()),
                 note: None,
-            }
-        } else {
-            EditEnd {
-                draft: text.to_owned(),
-                note: Some(t::chat::outbox_already_sent()),
-            }
+            },
+            Err(message) if is_settled(message) => EditEnd {
+                leave: true,
+                draft: Some(text.to_owned()),
+                note: Some(t::chat::outbox_already_sent().to_owned()),
+            },
+            Err(message) => EditEnd {
+                leave: false,
+                draft: None,
+                note: Some(message.to_owned()),
+            },
         }
     }
 
     pub fn cancelled(&self) -> String {
         self.before.clone()
+    }
+
+    pub fn is_lost(&self, rows: &[OutboxRow]) -> bool {
+        !rows.iter().any(|row| row.id == self.outbox_id)
+    }
+}
+
+pub fn attachments_for(editing: Option<&Editing>, row: &str, files: Vec<PathBuf>) -> Vec<PathBuf> {
+    match editing {
+        Some(editing) if editing.chat_row == row => Vec::new(),
+        _ => files,
     }
 }
 

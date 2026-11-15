@@ -9,18 +9,20 @@ struct SavedDrafts(HashMap<String, String>);
 
 impl Global for SavedDrafts {}
 use notchling_engine::catalog::{ModelInfo, Tool as CatalogTool};
+use notchling_engine::outbox::NO_MESSAGE;
+use notchling_engine::sessions::Agent;
 use notchling_engine::tools::agy::ConfigOption;
 use notchling_engine::tools::codex::models;
 use notchling_engine::transcript::model::Conversation;
 use serde_json::Value;
 
-use super::outbox_rows::{begin, Editing};
+use super::outbox_rows::{begin, EditEnd, Editing};
 use super::ChatView;
 use crate::acting::{Acting, Control, Request};
 use crate::actions::SendFailure;
 use crate::chat::claude_picker::{self, Hint, Kind};
 use crate::chat::data::{Session, Tool};
-use crate::chat::outbox::{hidden_queued, unbubbled, Bubble, Button};
+use crate::chat::outbox::{deliver, drop_boxed, forget, hidden_queued, unbubbled, Bubble, Button};
 use crate::chat::outgoing::Outgoing;
 use crate::chat::prompts::is_dialog;
 use crate::chat::rows::{tail_rows, Row};
@@ -121,12 +123,15 @@ impl ChatTools {
         self.drafts.get(id).map(String::as_str).unwrap_or("")
     }
 
-    fn delivered(&mut self, row: &str, text: &str, now_ms: i64) {
-        if let Some(out) = self.outgoing.get_mut(row).and_then(|list| {
-            list.iter_mut()
-                .find(|o| o.text == text && o.delivered_at.is_none())
-        }) {
-            out.delivered(now_ms);
+    fn delivered(&mut self, row: &str, text: &str, now_ms: i64, outbox: Option<&str>) {
+        if let Some(list) = self.outgoing.get_mut(row) {
+            deliver(list, text, now_ms, outbox);
+        }
+    }
+
+    fn forget_outbox(&mut self, id: &str) {
+        for list in self.outgoing.values_mut() {
+            forget(list, id);
         }
     }
 
@@ -203,6 +208,9 @@ impl ChatView {
             .is_some_and(|e| e.outbox_id == id)
         {
             self.cancel_edit(cx);
+        }
+        if matches!(button, Button::Remove | Button::Drop) {
+            self.tools.forget_outbox(id);
         }
         self.spawn_send(
             request,
@@ -421,7 +429,7 @@ impl ChatView {
         if self.tools.starting.contains_key(&session.agent.id) {
             return;
         }
-        let files = self.attached(&session.agent.id);
+        let files = self.reply_files(&session.agent.id);
         let text = crate::chat::drops::with_attachments(self.tools.editor.read(cx).text(), &files);
         self.dispatch(session, text, true, cx);
     }
@@ -501,7 +509,8 @@ impl ChatView {
             begun.request,
             move |view, result, cx| match result {
                 Ok(reply) => {
-                    view.tools.delivered(&id, &sent_text, now_ms());
+                    let boxed = reply.get("outboxId").and_then(Value::as_str);
+                    view.tools.delivered(&id, &sent_text, now_ms(), boxed);
                     if reply.get("outboxId").is_none() && queues {
                         match sent_state(&reply) {
                             Sent::Queued(_) => {
@@ -564,18 +573,41 @@ impl ChatView {
         self.spawn_send(
             request,
             move |view, result, cx| {
-                let off = result
-                    .as_ref()
-                    .err()
-                    .filter(|m| crate::acting::is_off(m))
-                    .cloned();
-                let end = editing.finished(result.is_ok(), &text);
-                view.tools.editing = None;
-                view.put_draft(&editing.chat_row, end.draft, cx);
-                view.tools.error = off.or(end.note.map(str::to_owned));
+                let end =
+                    editing.finished(result.as_ref().map(|_| ()).map_err(String::as_str), &text);
+                view.end_edit(&editing, end, cx);
             },
             cx,
         );
+    }
+
+    fn end_edit(&mut self, editing: &Editing, end: EditEnd, cx: &mut Context<Self>) {
+        if end.leave {
+            self.tools.editing = None;
+            self.tools.forget_outbox(&editing.outbox_id);
+        }
+        if let Some(draft) = end.draft {
+            self.put_draft(&editing.chat_row, draft, cx);
+        }
+        self.tools.error = end.note;
+    }
+
+    fn leave_lost_edit(&mut self, agent: &Agent, cx: &mut Context<Self>) {
+        if self.acting(cx) != Acting::On {
+            return;
+        }
+        let rows = self.source.outbox_rows(agent);
+        let Some(editing) = self
+            .tools
+            .editing
+            .clone()
+            .filter(|e| e.chat_row == agent.id && e.is_lost(&rows))
+        else {
+            return;
+        };
+        let typed = self.tools.editor.read(cx).text().to_owned();
+        let end = editing.finished(Err(NO_MESSAGE), &typed);
+        self.end_edit(&editing, end, cx);
     }
 
     pub(super) fn stop(&mut self, cx: &mut Context<Self>) {
@@ -634,7 +666,7 @@ impl ChatView {
                                 view.tools.retrying = None;
                                 match result {
                                     Ok(_) => {
-                                        view.tools.delivered(&row, &sent, now_ms());
+                                        view.tools.delivered(&row, &sent, now_ms(), None);
                                         view.conversation_state(cx, |s| s.follow_sent = true);
                                         view.reload_now(cx);
                                     }
@@ -820,10 +852,12 @@ impl ChatView {
         };
         self.source
             .settle_outbox_for(&session.agent, &self.conversation);
+        self.leave_lost_edit(&session.agent, cx);
         let id = session.agent.id;
         let now = now_ms();
         if let Some(list) = self.tools.outgoing.get_mut(&id) {
             list.retain(|o| o.keep(&self.conversation, now));
+            drop_boxed(list, |row| self.source.outbox_shows(row));
         }
         for (row, queued) in self.tools.queued.iter_mut() {
             queued.truncate(self.tools.live.waiting(row));

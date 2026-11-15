@@ -40,6 +40,10 @@ impl Queue {
         }
     }
 
+    pub(super) fn end_batch(&mut self) {
+        self.batch.clear();
+    }
+
     pub(super) fn merged(&mut self, text: &str) -> bool {
         joined(&std::mem::take(&mut self.batch), text)
     }

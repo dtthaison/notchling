@@ -563,7 +563,7 @@ const THUMB_HEIGHT: f32 = 64.0;
 const FILE_TILE: f32 = 180.0;
 
 fn thumbnails(view: &ChatView, id: &str, a: Appearance, cx: &mut Context<ChatView>) -> Option<Div> {
-    let attached = view.attached(id);
+    let attached = view.reply_files(id);
     let mut tiles: Vec<(std::path::PathBuf, bool)> =
         attached.iter().map(|p| (p.clone(), true)).collect();
     for path in crate::chat::drops::image_words(view.tools.editor.read(cx).text()) {
@@ -706,7 +706,7 @@ pub fn render(view: &ChatView, a: Appearance, window: &Window, cx: &mut Context<
     let id = view.selected.clone().unwrap_or_default();
     let empty = !view.composer.preview.typed
         && view.tools.draft(&id).trim().is_empty()
-        && view.attached(&id).is_empty();
+        && view.reply_files(&id).is_empty();
     let focused = control.enabled && view.tools.focus.is_focused(window);
     let edge = if focused { EDGE_FOCUSED } else { EDGE_REST };
     let edge_color = if focused {

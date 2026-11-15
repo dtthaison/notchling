@@ -1,6 +1,7 @@
 mod gate;
 mod model;
 mod outcome;
+mod refusal;
 mod store;
 mod verdict;
 
@@ -20,6 +21,7 @@ pub use model::{
     new_id, Change, InsertError, Kind, New, Row, State, Tool, Via, Why, MAX_ROWS, MAX_TEXT,
 };
 pub use outcome::{after, backoff_ms, After, Tried, TryEnd};
+pub use refusal::{is_settled, BEING_SENT, IN_QUEUE, NO_MESSAGE};
 pub use store::OutboxStore;
 pub use verdict::{line_within, queued_verdict, verdict, QueuedVerdict, Verdict};
 
@@ -32,6 +34,9 @@ mod model_tests;
 #[cfg(test)]
 #[path = "outcome_tests.rs"]
 mod outcome_tests;
+#[cfg(test)]
+#[path = "refusal_tests.rs"]
+mod refusal_tests;
 #[cfg(test)]
 #[path = "store_tests.rs"]
 mod store_tests;

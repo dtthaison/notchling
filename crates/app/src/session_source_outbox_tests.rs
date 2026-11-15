@@ -199,7 +199,10 @@ fn a_sent_bubble_survives_a_reconnect_until_the_transcript_shows_it() {
         &json!({"id": "o1", "session": "ab12cd34", "why": "sent"}),
     );
     wait_for(&source, "the sent bubble", |v| {
-        !v.outbox.bubbles("ab12cd34").is_empty()
+        v.outbox
+            .bubbles("ab12cd34")
+            .first()
+            .is_some_and(|b| b.status == Status::Sent)
     });
     first.0.shutdown();
     let _ = first.1.join();

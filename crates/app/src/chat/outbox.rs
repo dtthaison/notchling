@@ -168,6 +168,24 @@ pub fn unbubbled(outgoing: Vec<String>, bubbles: &[Bubble]) -> Vec<String> {
         .collect()
 }
 
+pub fn deliver(list: &mut [Outgoing], text: &str, now_ms: i64, row: Option<&str>) {
+    if let Some(out) = list
+        .iter_mut()
+        .find(|o| o.text == text && o.delivered_at.is_none())
+    {
+        out.delivered(now_ms);
+        out.boxed = row.map(str::to_owned);
+    }
+}
+
+pub fn drop_boxed(list: &mut Vec<Outgoing>, shows: impl Fn(&str) -> bool) {
+    list.retain(|o| !o.boxed.as_deref().is_some_and(&shows));
+}
+
+pub fn forget(list: &mut Vec<Outgoing>, row: &str) {
+    list.retain(|o| o.boxed.as_deref() != Some(row));
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct SentRow {
     row: OutboxRow,
@@ -186,6 +204,7 @@ impl OutboxFeed {
         for row in list.iter().filter_map(OutboxRow::from_wire) {
             self.rows.entry(row.session.clone()).or_default().push(row);
         }
+        self.prune_sent();
     }
 
     pub fn clear_rows(&mut self) {
@@ -197,6 +216,22 @@ impl OutboxFeed {
         for (session, list) in fresh.sent {
             self.sent.entry(session).or_default().extend(list);
         }
+        self.prune_sent();
+    }
+
+    pub fn shows(&self, id: &str) -> bool {
+        self.rows.values().flatten().any(|row| row.id == id)
+            || self.sent.values().flatten().any(|kept| kept.row.id == id)
+    }
+
+    fn prune_sent(&mut self) -> bool {
+        let rows = &self.rows;
+        let before: usize = self.sent.values().map(Vec::len).sum();
+        for list in self.sent.values_mut() {
+            list.retain(|kept| !rows.values().flatten().any(|row| row.id == kept.row.id));
+        }
+        self.sent.retain(|_, list| !list.is_empty());
+        before != self.sent.values().map(Vec::len).sum::<usize>()
     }
 
     pub fn rows(&self, session: &str) -> &[OutboxRow] {
@@ -241,7 +276,7 @@ impl OutboxFeed {
 
     fn upsert(&mut self, row: OutboxRow) -> bool {
         let list = self.rows.entry(row.session.clone()).or_default();
-        match list.iter_mut().find(|r| r.id == row.id) {
+        let changed = match list.iter_mut().find(|r| r.id == row.id) {
             Some(known) if *known == row => false,
             Some(known) => {
                 *known = row;
@@ -251,7 +286,8 @@ impl OutboxFeed {
                 list.push(row);
                 true
             }
-        }
+        };
+        self.prune_sent() || changed
     }
 
     fn take(&mut self, id: &str) -> Option<OutboxRow> {
@@ -289,6 +325,7 @@ impl OutboxFeed {
                 seen: usize::MAX,
                 delivered_at: Some(kept.at_ms),
                 sent_at: kept.row.queued_ms,
+                boxed: None,
             };
             waiting.keep(conversation, now_ms)
         });
