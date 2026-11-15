@@ -4,6 +4,7 @@ use notchling_engine::cluster::Qualified;
 use notchling_locale as t;
 
 use super::sidebar::SidebarModel;
+use crate::acting::Control;
 use crate::cluster::model::ClusterModel;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -72,4 +73,11 @@ impl SidebarModel {
 
 pub fn reply_note(row_id: &str, nodes: &Nodes) -> Option<String> {
     node_label(row_id, nodes)?.reply_note()
+}
+
+pub fn reply_control(row_id: &str, nodes: &Nodes) -> Option<Control> {
+    reply_note(row_id, nodes).map(|_| Control {
+        enabled: false,
+        tooltip: None,
+    })
 }

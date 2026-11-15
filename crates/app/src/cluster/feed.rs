@@ -101,13 +101,12 @@ impl ClusterFeed {
 
     pub fn start(config: FeedConfig, transport: Arc<dyn Transport>) -> ClusterFeed {
         let mut feed = ClusterFeed::none();
-        feed.transport = Some(transport);
         let shared = feed.shared.clone();
         let spawned = std::thread::Builder::new()
             .name("notchling-cluster-feed".into())
             .spawn(move || run(&config, &shared));
-        if let Err(e) = spawned {
-            eprintln!("follow the daemon's cluster: {e}");
+        if spawned.is_ok() {
+            feed.transport = Some(transport);
         }
         feed
     }

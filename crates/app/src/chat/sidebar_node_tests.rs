@@ -3,8 +3,9 @@ use notchling_engine::sessions::AgentGroup;
 use super::data::Tool;
 use super::sidebar::tests::session;
 use super::sidebar::{sidebar_model, SidebarModel};
-use super::sidebar_node::{node_label, reply_note, Nodes};
+use super::sidebar_node::{node_label, reply_control, reply_note, Nodes};
 use crate::accounts::store::Snapshot;
+use crate::acting::Control;
 use crate::cluster::model::ClusterModel;
 use crate::cluster::renders::{status, ME, STANDBY, WORKER};
 
@@ -52,6 +53,19 @@ fn offline_remote_row_disables_reply() {
     );
     assert_eq!(reply_note(&ids[1], &nodes), None);
     assert_eq!(reply_note("local-job", &nodes), None);
+    assert_eq!(
+        reply_control(&ids[0], &nodes),
+        Some(Control {
+            enabled: false,
+            tooltip: None
+        })
+    );
+    assert_eq!(reply_control(&ids[1], &nodes), None);
+    assert_eq!(reply_control("local-job", &nodes), None);
+    assert_eq!(
+        reply_control(&remote("ffffffffffffffff", "x"), &nodes).map(|c| c.enabled),
+        Some(false)
+    );
     let model = model(&ids, &nodes);
     let rows = rows(&model);
     assert!(!rows[0].node.as_ref().expect("label").online);

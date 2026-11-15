@@ -28,15 +28,22 @@ pub struct NodeRow {
     pub me: bool,
     pub pending: bool,
     pub removed: bool,
+    pub active: bool,
+    pub primary: bool,
+    pub client: bool,
 }
 
 impl NodeRow {
     pub fn offers_menu(&self) -> bool {
-        !self.removed
+        self.active
+    }
+
+    pub fn offers_acting(&self) -> bool {
+        self.offers_menu() && !self.me && !self.client
     }
 
     pub fn offers_remove(&self) -> bool {
-        !self.removed && !self.me
+        self.offers_menu() && !self.me && !self.primary
     }
 
     pub fn state_word(&self) -> &'static str {
@@ -161,13 +168,21 @@ fn warnings_for(reference: &Versions, node: &Versions, name: &str) -> Vec<String
         out.push(text);
         return out;
     }
+    let mut add = |text: String| {
+        for part in text.split("; ") {
+            if !out.iter().any(|seen| seen == part) {
+                out.push(part.to_owned());
+            }
+        }
+    };
+    if let Compat::Refuse(text) | Compat::Warn(text) =
+        compat(reference, node, name, Purpose::Dispatch(ClusterTool::Shell))
+    {
+        add(text);
+    }
     for (_, tool) in TOOLS {
         if let Compat::Warn(text) = compat(reference, node, name, Purpose::Dispatch(tool)) {
-            for part in text.split("; ") {
-                if !out.iter().any(|seen| seen == part) {
-                    out.push(part.to_owned());
-                }
-            }
+            add(text);
         }
     }
     out
@@ -230,6 +245,9 @@ fn row_of(member: &Value, me: &str, reference: Option<&Versions>) -> NodeRow {
         ),
         pending: state == "pending",
         removed: state == "removed",
+        active: state == "active",
+        primary: text(member, "role") == "home",
+        client: flag(member, "client"),
     }
 }
 
@@ -333,7 +351,7 @@ impl ClusterModel {
     }
 
     pub fn toggle_acting(&self, id: &str) -> Option<Request> {
-        let row = self.row(id).filter(|r| r.offers_menu())?;
+        let row = self.row(id).filter(|r| r.offers_acting())?;
         let (acting, bridge, install) = row.desired;
         Some(wire::desired(
             &row.id,

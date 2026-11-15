@@ -3,21 +3,20 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use gpui::{
-    deferred, div, prelude::*, px, AnyView, ClipboardItem, Context, Div, Entity, EventEmitter,
-    Render, SharedString, Subscription, Window,
+    div, prelude::*, px, AnyView, ClipboardItem, Context, Div, Entity, EventEmitter, Render,
+    Subscription, Window,
 };
-use notchling_kit::labels::Corner;
-use notchling_kit::metric::{SIDE_PADDING, SPACE};
+use notchling_kit::metric::{CONTROL, RADIUS_SM, SIDE_PADDING, SPACE};
+use notchling_kit::part::field_look;
 use notchling_kit::part::{ButtonKind, PartState};
 use notchling_kit::ui::{
-    button, card, hsla, icon, icon_button, label, menu_panel, menu_rule, scrollable,
-    window_appearance, KitPart, KitStyled, MenuItem, TextEditor, TextEditorEvent,
+    button, label, scrollable, window_appearance, KitPart, KitStyled, TextEditor, TextEditorEvent,
 };
-use notchling_kit::{Appearance, Icon, IconSize, Ink, TypeRole};
+use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 use notchling_locale as t;
 
 use super::feed::ClusterFeed;
-use super::model::{ClusterModel, NodeRow};
+use super::model::ClusterModel;
 use super::renders::{model, shown};
 use super::wire::{self, Request};
 use crate::accounts::flows::Alert;
@@ -28,8 +27,8 @@ const POLL: Duration = Duration::from_millis(500);
 
 pub struct ClusterSheetView {
     feed: Arc<ClusterFeed>,
-    menu: Option<String>,
-    removing: Option<String>,
+    pub(super) menu: Option<String>,
+    pub(super) removing: Option<String>,
     name: Entity<TextEditor>,
     busy: bool,
     note: Option<(String, bool)>,
@@ -174,7 +173,7 @@ impl ClusterSheetView {
         cx.notify();
     }
 
-    fn toggle_menu(&mut self, id: &str, cx: &mut Context<Self>) {
+    pub(super) fn toggle_menu(&mut self, id: &str, cx: &mut Context<Self>) {
         self.menu = if self.menu.as_deref() == Some(id) {
             None
         } else {
@@ -183,7 +182,7 @@ impl ClusterSheetView {
         cx.notify();
     }
 
-    fn pick(
+    pub(super) fn pick(
         &mut self,
         id: &str,
         ask: impl FnOnce(&ClusterModel, &str) -> Option<Request>,
@@ -195,172 +194,6 @@ impl ClusterSheetView {
             Some(request) => self.run(request, t::cluster::change_failed, cx),
             None => cx.notify(),
         }
-    }
-
-    fn dot(row: &NodeRow, a: Appearance) -> Div {
-        let ink = if row.online && !row.removed {
-            Ink::Done
-        } else {
-            Ink::TextFaint
-        };
-        div()
-            .flex_shrink_0()
-            .size(px(SPACE[1]))
-            .rounded_full()
-            .fill(ink, a)
-    }
-
-    fn pill(text: &str, ink: Ink, wash: Ink, a: Appearance) -> Div {
-        div()
-            .h(px(notchling_kit::metric::PILL_HEIGHT))
-            .px(px(SPACE[1]))
-            .flex_shrink_0()
-            .rounded_full()
-            .fill(wash, a)
-            .flex()
-            .items_center()
-            .child(label(text, TypeRole::Label, ink, a))
-    }
-
-    fn row_menu(&self, row: &NodeRow, a: Appearance, cx: &mut Context<Self>) -> Div {
-        let id = row.id.clone();
-        let mut items = menu_panel(a)
-            .absolute()
-            .right(px(SPACE[1]))
-            .top(px(SPACE[4] + SPACE[1]));
-        let master = id.clone();
-        items = items.child(
-            MenuItem::new(
-                SharedString::from(format!("node-master-{id}")),
-                t::cluster::can_be_master(),
-            )
-            .checked(row.can_be_master)
-            .build(a)
-            .on_click(cx.listener(move |this, _, _, cx| {
-                this.pick(&master, ClusterModel::toggle_can_be_master, cx)
-            })),
-        );
-        let acting = id.clone();
-        items = items.child(
-            MenuItem::new(
-                SharedString::from(format!("node-acting-{id}")),
-                if row.desired.0 {
-                    t::cluster::acting_off()
-                } else {
-                    t::cluster::acting_on()
-                },
-            )
-            .build(a)
-            .on_click(cx.listener(move |this, _, _, cx| {
-                this.pick(&acting, ClusterModel::toggle_acting, cx)
-            })),
-        );
-        if row.offers_remove() {
-            let remove = id.clone();
-            items = items.child(menu_rule(a)).child(
-                MenuItem::new(
-                    SharedString::from(format!("node-remove-{id}")),
-                    t::cluster::remove(),
-                )
-                .build(a)
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.menu = None;
-                    this.removing = Some(remove.clone());
-                    cx.notify();
-                })),
-            );
-        }
-        items
-    }
-
-    fn node_row(&self, row: &NodeRow, a: Appearance, cx: &mut Context<Self>) -> Div {
-        let id = row.id.clone();
-        let mut title = div()
-            .flex()
-            .items_center()
-            .gap(px(SPACE[1]))
-            .child(Self::dot(row, a))
-            .child(label(&row.name, TypeRole::Heading, Ink::Text, a).elide())
-            .child(Self::pill(row.role, Ink::AccentText, Ink::AccentWash, a));
-        if row.me {
-            title = title.child(Self::pill(
-                t::cluster::this_mac(),
-                Ink::TextMuted,
-                Ink::Raised,
-                a,
-            ));
-        }
-        let mut head = div()
-            .flex()
-            .items_center()
-            .gap(px(SPACE[1]))
-            .child(div().flex_1().min_w(px(0.0)).child(title));
-        head = head.child(label(row.state_word(), TypeRole::Meta, Ink::TextMuted, a));
-        if row.offers_menu() {
-            let open = self.menu.as_deref() == Some(row.id.as_str());
-            head = head.child(
-                icon_button(
-                    SharedString::from(format!("node-more-{id}")),
-                    Icon::More,
-                    IconSize::Button.points(),
-                    if open {
-                        ButtonKind::Secondary
-                    } else {
-                        ButtonKind::Ghost
-                    },
-                    PartState::Rest,
-                    a,
-                )
-                .on_click(cx.listener(move |this, _, _, cx| this.toggle_menu(&id, cx))),
-            );
-        }
-        let dim = if row.removed {
-            Ink::TextFaint
-        } else {
-            Ink::TextMuted
-        };
-        let mut about: Vec<String> = Vec::new();
-        about.extend((!row.os.is_empty()).then(|| row.os.clone()));
-        about.extend(row.app_version.as_deref().map(t::cluster::app_version));
-        let mut body = div().flex().flex_col().gap(px(SPACE[0] / 2.0)).child(head);
-        if !about.is_empty() {
-            body = body.child(label(&about.join(" · "), TypeRole::Meta, dim, a));
-        }
-        if let Some(load) = row.load_text() {
-            body = body.child(label(&load, TypeRole::Meta, dim, a));
-        }
-        let tools = row.tool_texts();
-        if !tools.is_empty() {
-            body = body.child(label(&tools.join(" · "), TypeRole::Meta, Ink::TextFaint, a));
-        }
-        for warning in &row.warnings {
-            body = body.child(
-                div()
-                    .flex()
-                    .items_start()
-                    .gap(px(SPACE[0]))
-                    .child(icon(
-                        Icon::Warning,
-                        TypeRole::Meta.spec().size,
-                        Ink::Needs,
-                        a,
-                    ))
-                    .child(div().flex_1().min_w(px(0.0)).child(label(
-                        warning,
-                        TypeRole::Meta,
-                        Ink::Needs,
-                        a,
-                    ))),
-            );
-        }
-        let menu = (self.menu.as_deref() == Some(row.id.as_str()) && row.offers_menu())
-            .then(|| deferred(self.row_menu(row, a, cx)).with_priority(1));
-        card(a)
-            .relative()
-            .p(px(SPACE[2]))
-            .child(body)
-            .children(menu)
-            .part_at("Node Row", Corner::TopTrailing, a, cx)
     }
 
     fn connection(&self, model: &ClusterModel, a: Appearance, cx: &mut Context<Self>) -> Div {
@@ -421,7 +254,7 @@ impl ClusterSheetView {
         }
     }
 
-    fn create_form(&self, a: Appearance, cx: &mut Context<Self>) -> Div {
+    fn create_form(&self, focused: bool, a: Appearance, cx: &mut Context<Self>) -> Div {
         div()
             .flex()
             .flex_col()
@@ -435,16 +268,13 @@ impl ClusterSheetView {
             ))
             .child(
                 div()
-                    .h(px(notchling_kit::metric::CONTROL))
+                    .min_h(px(CONTROL))
                     .px(px(SPACE[1] + 2.0))
                     .flex()
                     .items_center()
-                    .rounded(px(notchling_kit::metric::RADIUS_SM))
-                    .fill(Ink::Card, a)
-                    .border(px(1.0))
-                    .border_color(hsla(Ink::Hairline.color(a)))
+                    .rounded(px(RADIUS_SM))
                     .kit_type(TypeRole::Body)
-                    .ink(Ink::Text, a)
+                    .look(&field_look(focused, a))
                     .child(div().flex_1().min_w(px(0.0)).child(self.name.clone())),
             )
             .child(
@@ -517,7 +347,7 @@ impl Render for ClusterSheetView {
                 a,
             ));
         } else if model.can_create() {
-            body = body.child(self.create_form(a, cx));
+            body = body.child(self.create_form(self.name.read(cx).is_focused(window), a, cx));
         } else {
             body = body.child(self.connection(&model, a, cx));
             for row in model.rows() {

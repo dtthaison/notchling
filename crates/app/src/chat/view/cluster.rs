@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use gpui::{AppContext, Context};
 use notchling_engine::cluster::Qualified;
+use notchling_engine::sessions::AgentGroup;
 
 use super::ChatView;
 use crate::chat::sidebar_node::{reply_note, Nodes};
@@ -45,22 +46,35 @@ impl ChatView {
         self.remote_preview = true;
     }
 
-    pub(super) fn apply_remote_preview(&mut self) {
+    pub(super) fn apply_remote_preview(&mut self, cx: &mut Context<Self>) {
         if !self.remote_preview {
             return;
         }
-        for (session, node) in self.sessions.iter_mut().zip([STANDBY, WORKER]) {
+        let mut target = None;
+        for session in self.sessions.iter_mut() {
             if Qualified::parse(&session.agent.id).is_some() {
                 continue;
             }
-            let qualified = format!("{node}/{}", session.agent.id);
-            if self.selected.as_deref() == Some(session.agent.id.as_str()) {
-                self.selected = Some(qualified.clone());
+            let node = match session.agent.group {
+                AgentGroup::Working => WORKER,
+                AgentGroup::NeedsInput => STANDBY,
+                AgentGroup::Completed => continue,
+            };
+            session.agent.id = format!("{node}/{}", session.agent.id);
+            if node == WORKER {
+                target = Some(session.agent.id.clone());
             }
-            session.agent.id = qualified;
         }
-        if let Some(second) = self.sessions.get(1) {
-            self.selected = Some(second.agent.id.clone());
+        if let Some(id) = target {
+            self.select(&id, cx);
+        }
+    }
+
+    pub(super) fn loader_id(&self, id: Option<&str>) -> Option<String> {
+        let id = id?;
+        match Qualified::parse(id) {
+            Some(q) if self.remote_preview => Some(q.id),
+            _ => Some(id.to_owned()),
         }
     }
 }

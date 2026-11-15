@@ -1,4 +1,4 @@
-### The cluster: the Machines button at the foot of the Sidebar, the cluster sheet with one row per node, and the node names on remote sessions in the Sidebar.
+### The cluster: the Cluster button at the foot of the Sidebar, the cluster sheet with one row per node, and the node names on remote sessions in the Sidebar.
 
 ## Button and sheet
 
@@ -38,6 +38,7 @@ cluster-tool-missing = { $tool } not installed
 cluster-load = CPU { $cpu }% · Memory { $used } of { $total } GB
 # The app version a node runs; $version is the number.
 cluster-app-version = Notchling { $version }
+# Tooltip of the button that opens a node's menu.
 cluster-more = More
 
 ## Row menu
@@ -50,7 +51,6 @@ cluster-remove-title = Remove This Node?
 # Confirmation text; $name is the node's name.
 cluster-remove-note = { $name } leaves the cluster and its sessions leave every list. It can join again with a new token.
 cluster-remove-confirm = Remove
-cluster-cancel = Cancel
 
 ## Connection
 

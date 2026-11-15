@@ -112,10 +112,88 @@ fn acting_toggle_keeps_bridge_and_install() {
             "desired": {"acting": true, "bridge": true, "install": true},
         })
     );
-    let back = model.toggle_acting(ME).expect("me row");
+    let standby = model.toggle_acting(STANDBY).expect("standby row");
     assert_eq!(
-        back.args["desired"],
-        json!({"acting": false, "bridge": true, "install": false})
+        standby.args["desired"],
+        json!({"acting": true, "bridge": false, "install": false})
+    );
+}
+
+#[test]
+fn acting_is_not_offered_for_this_mac_or_a_client() {
+    let mut status = status();
+    set_member(&mut status, WORKER, "client", json!(true));
+    let model = ClusterModel::from_status(&status, ME);
+    assert_eq!(model.toggle_acting(ME), None);
+    assert_eq!(model.toggle_acting(WORKER), None);
+    assert!(!model.row(ME).expect("me").offers_acting());
+    assert!(!model.row(WORKER).expect("worker").offers_acting());
+    assert!(model.row(WORKER).expect("worker").offers_menu());
+    assert!(model.row(STANDBY).expect("standby").offers_acting());
+}
+
+#[test]
+fn only_an_active_member_has_a_menu_and_the_primary_cannot_be_removed() {
+    let mut status = status();
+    set_member(&mut status, WORKER, "state", json!("pending"));
+    let model = ClusterModel::from_status(&status, ME);
+    let pending = model.row(WORKER).expect("pending");
+    assert!(!pending.offers_menu() && !pending.offers_remove());
+    assert_eq!(model.remove(WORKER), None);
+    assert_eq!(model.toggle_can_be_master(WORKER), None);
+    assert_eq!(model.toggle_acting(WORKER), None);
+    let from_the_worker = ClusterModel::from_status(&super::renders::status(), WORKER);
+    assert_eq!(
+        from_the_worker.remove(ME),
+        None,
+        "the primary is never removed"
+    );
+    assert!(!from_the_worker.row(ME).expect("primary").offers_remove());
+    assert!(from_the_worker.row(ME).expect("primary").offers_menu());
+}
+
+#[test]
+fn a_node_with_another_schema_shows_the_schema_text() {
+    let mut status = status();
+    let mut versions = status["members"][1]["versions"].clone();
+    versions["schema"] = json!(2);
+    set_member(&mut status, STANDBY, "versions", versions);
+    let model = ClusterModel::from_status(&status, ME);
+    let warnings = &model.row(STANDBY).expect("standby").warnings;
+    assert!(
+        warnings
+            .iter()
+            .any(|w| w == "mac-mini has cluster schema 2, this Mac 1"),
+        "{warnings:?}"
+    );
+}
+
+#[test]
+fn a_node_with_no_tools_and_another_notchling_version_says_so() {
+    let mut status = status();
+    let mut versions = status["members"][0]["versions"].clone();
+    versions["tools"] = json!({});
+    versions["notchling"] = json!("0.8.0");
+    set_member(&mut status, WORKER, "versions", versions);
+    let model = ClusterModel::from_status(&status, ME);
+    let warnings = &model.row(WORKER).expect("worker").warnings;
+    assert_eq!(
+        warnings,
+        &["build-box runs Notchling 0.8.0, the Mac 0.9.0".to_owned()]
+    );
+}
+
+#[test]
+fn a_node_that_takes_no_dispatched_jobs_says_so() {
+    let mut status = status();
+    let mut versions = status["members"][1]["versions"].clone();
+    versions["features"] = json!([]);
+    set_member(&mut status, STANDBY, "versions", versions);
+    let model = ClusterModel::from_status(&status, ME);
+    let warnings = &model.row(STANDBY).expect("standby").warnings;
+    assert_eq!(
+        warnings,
+        &["mac-mini doesn't take dispatched jobs".to_owned()]
     );
 }
 
