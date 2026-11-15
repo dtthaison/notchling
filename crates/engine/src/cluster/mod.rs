@@ -5,6 +5,7 @@ pub mod join;
 pub mod members;
 pub mod persist;
 pub mod policy;
+pub mod shell_job;
 pub mod state;
 pub mod versions;
 pub mod wire;
@@ -29,6 +30,8 @@ mod jobs_tests;
 mod join_tests;
 #[cfg(test)]
 mod policy_tests;
+#[cfg(test)]
+mod shell_job_tests;
 #[cfg(test)]
 mod state_tests;
 #[cfg(test)]

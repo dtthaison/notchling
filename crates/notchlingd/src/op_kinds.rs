@@ -111,6 +111,8 @@ pub const HOMES: &[(&str, Home)] = &[
     (ops::CLUSTER_MEMBER_SET, Home::Called),
     (ops::CLUSTER_REMOVE, Home::Called),
     (ops::CLUSTER_FOLLOW, Home::Called),
+    (ops::CLUSTER_DISPATCH, Home::Called),
+    (ops::SHELL_STOP, Home::Called),
     (ops::CODEX_CHILDREN, Home::Quiet),
     (ops::LOG_VERIFY, Home::Quiet),
     (ops::LOG_CHAIN_START, Home::Kind("audit.chain_started")),

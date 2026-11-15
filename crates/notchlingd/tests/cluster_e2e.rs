@@ -129,3 +129,155 @@ fn a_fixture_daemon_is_a_node_that_links_nowhere() {
     let audit = common::audit::raw_lines(root).join("\n");
     assert!(!audit.contains("nlj1."), "no token in the audit log");
 }
+
+fn node_daemon(root: &Path, home: &Path) -> Daemon {
+    let mut cmd = notchling(root);
+    cmd.env("HOME", home)
+        .env(
+            notchling_local_api::APP_TIER_PATHS_ENV,
+            std::env::current_exe().unwrap(),
+        )
+        .env("NOTCHLING_CLUSTER_LOOPBACK", "1")
+        .env("NOTCHLING_CLUSTER_PORT", "0")
+        .arg("daemon")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    let daemon = Daemon(cmd.spawn().unwrap());
+    let socket = common::socket(root);
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while Instant::now() < deadline {
+        if std::os::unix::net::UnixStream::connect(&socket).is_ok() {
+            return daemon;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    panic!("no daemon on {}", socket.display());
+}
+
+fn app(root: &Path) -> notchling_local_api::Client {
+    let mut client = common::connect(root, notchling_local_api::ClientKind::App);
+    client.set_timeout(Duration::from_secs(30));
+    client
+}
+
+fn eventually(what: &str, mut check: impl FnMut() -> bool) {
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while Instant::now() < deadline {
+        if check() {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    panic!("never happened: {what}");
+}
+
+#[test]
+fn two_daemons_join_and_run_a_shell_job() {
+    let dir = common::scratch("cluster-shell");
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("../app/fixtures/notch");
+    let (root_a, root_b) = (dir.0.join("a"), dir.0.join("b"));
+    common::copy_tree(&fixture, &root_a);
+    common::copy_tree(&fixture, &root_b);
+    let (home_a, home_b) = (dir.0.join("home-a"), dir.0.join("home-b"));
+    let work = dir.0.join("work");
+    for folder in [&home_a, &home_b, &work] {
+        std::fs::create_dir_all(folder).unwrap();
+    }
+    let _daemon_a = node_daemon(&root_a, &home_a);
+    let _daemon_b = node_daemon(&root_b, &home_b);
+    let (mut a, mut b) = (app(&root_a), app(&root_b));
+
+    a.call("cluster.create", serde_json::json!({"name": "e2e"}))
+        .unwrap();
+    a.call(
+        "settings.set_switch",
+        serde_json::json!({"switch": "cluster", "on": true}),
+    )
+    .unwrap();
+    let token = a.call("cluster.join.token", serde_json::json!({})).unwrap()["token"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let joined = b
+        .call("cluster.join", serde_json::json!({"token": token}))
+        .unwrap();
+    assert_eq!(joined["state"], "pending", "{joined}");
+
+    let mut item = String::new();
+    eventually("the join shows in the primary's inbox", || {
+        let list = a.call("inbox.list", serde_json::json!({})).unwrap();
+        let found = list["items"].as_array().and_then(|items| {
+            items
+                .iter()
+                .find(|i| i["kind"] == "node_join" && i["state"] == "open")
+        });
+        match found {
+            Some(i) => {
+                item = i["id"].as_str().unwrap().to_string();
+                true
+            }
+            None => false,
+        }
+    });
+    a.call(
+        "inbox.answer",
+        serde_json::json!({"id": item, "action": "allow"}),
+    )
+    .unwrap();
+
+    let worker = b.call("cluster.status", serde_json::json!({})).unwrap()["me"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    eventually("the worker is online", || {
+        let status = a.call("cluster.status", serde_json::json!({})).unwrap();
+        status["members"].as_array().is_some_and(|members| {
+            members
+                .iter()
+                .any(|m| m["id"] == worker && m["online"] == true && m["state"] == "active")
+        })
+    });
+
+    let job = serde_json::json!({
+        "node": worker, "tool": "shell", "cwd": work.to_string_lossy(),
+        "command": "printf ok", "key": "e2e-shell-1",
+    });
+    let mut reply = Value::Null;
+    eventually("the worker takes the job", || {
+        match a.call("cluster.dispatch", job.clone()) {
+            Ok(r) => {
+                reply = r;
+                true
+            }
+            Err(_) => false,
+        }
+    });
+    let id = reply["job"].as_str().expect("a job id").to_string();
+    assert!(
+        reply["session"].as_str().unwrap().starts_with("shell:"),
+        "{reply}"
+    );
+
+    let log = root_b
+        .join("notchling/cluster/jobs")
+        .join(format!("{id}.log"));
+    eventually("the job's log says ok", || {
+        std::fs::read_to_string(&log).is_ok_and(|text| text == "ok")
+    });
+    eventually("the primary sees the job done", || {
+        let status = a.call("cluster.status", serde_json::json!({})).unwrap();
+        status["jobs"]
+            .as_array()
+            .is_some_and(|jobs| jobs.iter().any(|j| j["id"] == id && j["state"] == "done"))
+    });
+    let rows = b
+        .call("sessions.list", serde_json::json!({"tools": "all"}))
+        .unwrap();
+    assert!(
+        rows.as_array().unwrap().iter().any(|row| {
+            row["id"].as_str().is_some_and(|i| i.starts_with("shell:")) && row["tool"] == "shell"
+        }),
+        "the worker lists its shell job: {rows}"
+    );
+}

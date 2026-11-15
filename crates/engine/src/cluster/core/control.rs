@@ -1,7 +1,7 @@
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use super::{Effect, Joining, LocalCmd, NodeCore, Target, Then};
+use super::{Effect, Joining, LocalCmd, NodeCore, Target, Then, CALL_MS, DELEGATE_CALL_MS};
 use crate::cluster::id::NodeId;
 use crate::cluster::members::{Desired, Member, MemberState, Term};
 use crate::cluster::state::Command;
@@ -123,14 +123,19 @@ impl NodeCore {
             LocalCmd::SetVersions { versions } => self.set_versions(id, versions, out),
             LocalCmd::Dispatch { key, spec, tier } => {
                 if self.is_home() {
-                    self.dispatch_here(target, key, spec, out);
+                    self.dispatch_here(target, key, spec, tier, out);
                 } else {
                     let origin = Origin {
                         node: self.me.clone(),
                         tier,
                     };
+                    let wait = if spec.is_delegate() {
+                        DELEGATE_CALL_MS + CALL_MS
+                    } else {
+                        CALL_MS
+                    };
                     let args = json!({"key": key, "spec": spec});
-                    self.relay_to_home_as(id, "cluster.dispatch", args, origin, out);
+                    self.relay_to_home_within(id, "cluster.dispatch", args, origin, wait, out);
                 }
             }
             LocalCmd::Forward {
@@ -139,6 +144,11 @@ impl NodeCore {
                 args,
                 origin,
             } => self.forward(id, node, op, args, origin, out),
+            LocalCmd::JobEvent { name, data } => {
+                let me = self.me.clone();
+                self.on_job_event(&me, &name, &data, out);
+                self.finish(target, Ok(json!({})), out);
+            }
             LocalCmd::JoinWith { token, me } => {
                 let result = if self.state.is_some() || self.joining.is_some() {
                     Err(refusal("exists", "this node is already in a cluster"))
@@ -174,6 +184,18 @@ impl NodeCore {
         origin: Origin,
         out: &mut Vec<Effect>,
     ) {
+        self.relay_to_home_within(local, op, args, origin, CALL_MS, out);
+    }
+
+    fn relay_to_home_within(
+        &mut self,
+        local: u64,
+        op: &str,
+        args: Value,
+        origin: Origin,
+        wait: u64,
+        out: &mut Vec<Effect>,
+    ) {
         let target = Target::Local(local);
         let Some(home) = self.state.as_ref().map(|s| s.home.clone()) else {
             self.finish(
@@ -192,12 +214,12 @@ impl NodeCore {
             );
             return;
         }
-        self.call_out(
+        self.call_out_within(
             &home,
             op.to_string(),
             args,
             origin,
-            Then::Reply(target),
+            (Then::Reply(target), wait),
             out,
         );
     }

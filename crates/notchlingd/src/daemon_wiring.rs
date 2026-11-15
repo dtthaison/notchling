@@ -32,6 +32,7 @@ use crate::providers_daemon::ProviderStores;
 use crate::providers_ops::ProvidersOps;
 use crate::quiet_ops;
 use crate::settings_ops::{SettingsOps, SwitchStates};
+use crate::shell_jobs::ShellJobs;
 use crate::switches::{SwitchFlag, SwitchOps, Switches};
 use crate::vault_ops::VaultOps;
 use crate::versions_ops::{AuditRecorder, VersionsOps};
@@ -66,6 +67,7 @@ pub struct Ops {
     agy: Option<Arc<AgyOps>>,
     pages: Option<Arc<PagesOps>>,
     every: Option<Arc<EverySession>>,
+    shells: Option<Arc<ShellJobs>>,
     groups: Vec<Arc<dyn OpGroup>>,
     forward: Option<Arc<dyn Forward>>,
     remote: Option<Arc<RemoteSessions>>,
@@ -84,6 +86,7 @@ impl Ops {
             agy: None,
             pages: None,
             every: None,
+            shells: None,
             groups: Vec::new(),
             forward: None,
             remote: None,
@@ -155,6 +158,11 @@ impl Ops {
         self
     }
 
+    pub fn with_shells(mut self, shells: Arc<ShellJobs>) -> Ops {
+        self.shells = Some(shells);
+        self
+    }
+
     pub fn with_cluster(
         mut self,
         forward: Option<Arc<dyn Forward>>,
@@ -208,6 +216,9 @@ impl Ops {
             let mut rows = tagged(list, CLAUDE);
             if let Some(other) = &self.every {
                 rows.extend(other.values(now_ms()));
+            }
+            if let Some(shells) = &self.shells {
+                rows.extend(shells.rows());
             }
             Value::Array(rows)
         } else {
@@ -695,6 +706,8 @@ impl Wired {
             .with_group(self.versions.clone())
             .with_group(self.cluster.ops.clone())
             .with_group(self.cluster.follow.clone())
+            .with_group(self.cluster.dispatch.clone())
+            .with_shells(self.cluster.shells.clone())
             .with_cluster(self.cluster.forward(), self.cluster.remote.clone())
             .with_group(Arc::new(git))
             .with_group(Arc::new(AwakeOps::new(self.awake.clone())))

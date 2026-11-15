@@ -1,4 +1,6 @@
 use crate::acting_ops::Room;
+use crate::cluster_dispatch::{DispatchCalls, DispatchOps, NodeReporter};
+use crate::cluster_dispatch_delegate::RealDelegate;
 use crate::cluster_forward::{Forward, NodeForward};
 use crate::cluster_join::{JoinAsker, JOIN_WAIT};
 use crate::cluster_mirror::{FollowOps, Mirror, OnCap, TailSource, MIRROR_CAP, MIRROR_DIR};
@@ -14,6 +16,7 @@ use crate::cluster_versions::{own, with_tools};
 use crate::inbox_ops::InboxOps;
 use crate::late_emit::Events;
 use crate::layout::Layout;
+use crate::shell_jobs::ShellJobs;
 use crate::switches::SwitchFlag;
 use crate::versions_ops::VersionsOps;
 use notchling_cluster_net::{load_or_make, Pins, TcpTls, PORT};
@@ -30,10 +33,32 @@ use std::path::Path;
 use std::sync::{Arc, Mutex, OnceLock};
 
 pub const LOOPBACK_ENV: &str = "NOTCHLING_CLUSTER_LOOPBACK";
+pub const PORT_ENV: &str = "NOTCHLING_CLUSTER_PORT";
 pub const IDENTITY_DIR: &str = "node";
 
 pub fn loopback_ok(env: Option<&OsStr>, exe: Option<&Path>) -> bool {
     env == Some(OsStr::new("1")) && exe.is_some_and(in_cargo_target)
+}
+
+pub fn cluster_port(loopback: bool, raw: Option<&OsStr>) -> u16 {
+    if !loopback {
+        return PORT;
+    }
+    raw.and_then(OsStr::to_str)
+        .and_then(|text| text.trim().parse().ok())
+        .unwrap_or(PORT)
+}
+
+pub fn accepts_delegation(status: &Value) -> bool {
+    let me = status.get("me").and_then(Value::as_str);
+    status
+        .get("members")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .find(|m| m.get("id").and_then(Value::as_str) == me)
+        .and_then(|m| m.get("acceptsDelegation").and_then(Value::as_bool))
+        .unwrap_or(false)
 }
 
 pub fn node_caller(origin: &Origin) -> Caller {
@@ -177,7 +202,10 @@ pub struct ClusterParts {
     pub node: Result<Arc<ClusterNode>, String>,
     pub ops: Arc<ClusterOps>,
     pub follow: Arc<FollowOps>,
+    pub dispatch: Arc<DispatchOps>,
+    pub shells: Arc<ShellJobs>,
     pub remote: Arc<RemoteSessions>,
+    delegate: Arc<RealDelegate>,
     mirror: Arc<Mirror>,
     publisher: Arc<Publisher>,
     refresher: Option<Refresher>,
@@ -212,7 +240,7 @@ fn start_node(
         cluster_dir,
         fixture: layout.fixture,
         loopback_ok: loopback,
-        port: PORT,
+        port: cluster_port(loopback, std::env::var_os(PORT_ENV).as_deref()),
         versions: own(),
         client: cfg!(target_os = "macos"),
         name: node_name(),
@@ -267,11 +295,25 @@ impl ClusterParts {
             clock(),
             (MIRROR_CAP, capped),
         );
+        let reporter = Arc::new(NodeReporter::default());
+        let shells = ShellJobs::new(layout.data_dir.clone(), reporter.clone());
+        let delegate = Arc::new(RealDelegate::new(layout));
+        let asks = holder.clone();
+        let takes: crate::cluster_dispatch::Takes = Arc::new(move || {
+            asks.get()
+                .is_some_and(|node| accepts_delegation(&node.status()))
+        });
+        let sessions_calls: Arc<dyn LocalCalls> = Arc::new(SessionCalls::new(
+            DaemonCalls::new(handler.clone(), room.clone()),
+            Arc::new(HandlerRows::new(handler.clone())),
+            room.clone(),
+        ));
         let local: Arc<dyn LocalCalls> = Arc::new(NodeCalls {
-            inner: Arc::new(SessionCalls::new(
-                DaemonCalls::new(handler.clone(), room.clone()),
-                Arc::new(HandlerRows::new(handler.clone())),
-                room.clone(),
+            inner: Arc::new(DispatchCalls::new(
+                sessions_calls,
+                shells.clone(),
+                delegate.clone(),
+                takes,
             )),
             switches: switches.clone(),
         });
@@ -285,6 +327,7 @@ impl ClusterParts {
         let audit = log.clone();
         let mut refresher = None;
         if let Ok(node) = &node {
+            reporter.attach(node.clone());
             follow_switch(&link, node);
             rejoin_on_start(&link, node, room.as_ref(), &audit);
             let _ = tail.0.set(NodeSource::new(node.clone()));
@@ -298,10 +341,14 @@ impl ClusterParts {
             ));
         }
         let ops = Arc::new(ClusterOps::new(node.clone(), link, room.clone(), audit));
+        let dispatch = DispatchOps::new(node.clone(), shells.clone());
         ClusterParts {
             node,
             ops,
             follow: Arc::new(FollowOps::new(mirror.clone())),
+            dispatch,
+            shells,
+            delegate,
             remote,
             mirror,
             publisher,
@@ -327,6 +374,8 @@ impl ClusterParts {
     }
 
     pub fn close(&self) {
+        self.delegate.stop();
+        self.shells.close();
         self.mirror.close();
         if let Some(refresher) = &self.refresher {
             refresher.close();

@@ -18,7 +18,13 @@ pub struct SimHost {
     pub double_start: bool,
 }
 
-pub const START_OPS: [&str; 4] = ["session.new", "codex.send", "agy.open", "shell.run"];
+pub const START_OPS: [&str; 5] = [
+    "session.new",
+    "codex.send",
+    "agy.open",
+    "agy.send",
+    "shell.run",
+];
 
 impl SimHost {
     pub fn run(

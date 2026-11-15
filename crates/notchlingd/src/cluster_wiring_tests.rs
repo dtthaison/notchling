@@ -123,3 +123,43 @@ fn daemon_calls_wait_for_the_server_and_never_keep_it_alive() {
         ErrorCode::Failed
     );
 }
+
+#[test]
+fn the_port_override_counts_only_under_the_loopback_test_switch() {
+    assert_eq!(
+        super::cluster_port(false, Some(OsStr::new("0"))),
+        super::PORT
+    );
+    assert_eq!(super::cluster_port(true, None), super::PORT);
+    assert_eq!(super::cluster_port(true, Some(OsStr::new("0"))), 0);
+    assert_eq!(
+        super::cluster_port(true, Some(OsStr::new(" 51234 "))),
+        51234
+    );
+    assert_eq!(
+        super::cluster_port(true, Some(OsStr::new("junk"))),
+        super::PORT
+    );
+    assert_eq!(
+        super::cluster_port(true, Some(OsStr::new("70000"))),
+        super::PORT
+    );
+}
+
+#[test]
+fn a_node_takes_delegation_only_when_its_own_member_says_so() {
+    let status = |flag: bool| {
+        json!({
+            "me": "aaaaaaaaaaaaaaaa",
+            "members": [
+                {"id": "bbbbbbbbbbbbbbbb", "acceptsDelegation": true},
+                {"id": "aaaaaaaaaaaaaaaa", "acceptsDelegation": flag},
+            ],
+        })
+    };
+    assert!(super::accepts_delegation(&status(true)));
+    assert!(!super::accepts_delegation(&status(false)));
+    assert!(!super::accepts_delegation(
+        &json!({"cluster": null, "me": "a", "members": []})
+    ));
+}

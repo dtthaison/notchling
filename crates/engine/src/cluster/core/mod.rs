@@ -19,6 +19,8 @@ use super::wire::{Msg, Origin, OriginTier, WireError};
 pub const PING_MS: u64 = 5_000;
 pub const OFFLINE_MS: u64 = 20_000;
 pub const CALL_MS: u64 = 30_000;
+pub const DELEGATE_CALL_MS: u64 = 36 * 60_000;
+pub const STATUS_JOBS: usize = 50;
 pub const JOIN_ANSWER_MS: u64 = 15_000;
 pub const DIAL_BACKOFF_MS: (u64, u64) = (1_000, 60_000);
 pub const DEDUPE_MS: u64 = 300_000;
@@ -92,6 +94,10 @@ pub enum LocalCmd {
         op: String,
         args: Value,
         origin: Origin,
+    },
+    JobEvent {
+        name: String,
+        data: Value,
     },
     JoinWith {
         token: JoinToken,
@@ -295,7 +301,7 @@ impl NodeCore {
     pub fn status(&self) -> Value {
         let me = self.me.to_string();
         let Some(state) = &self.state else {
-            return json!({"cluster": Value::Null, "me": me, "members": []});
+            return json!({"cluster": Value::Null, "me": me, "members": [], "jobs": []});
         };
         let online = self.online();
         let members: Vec<Value> = state
@@ -328,6 +334,29 @@ impl NodeCore {
                 })
             })
             .collect();
+        let mut jobs: Vec<&super::jobs::Job> = state.jobs.values().collect();
+        jobs.sort_by(|a, b| b.created_ms.cmp(&a.created_ms).then(a.id.cmp(&b.id)));
+        let jobs: Vec<Value> = jobs
+            .into_iter()
+            .take(STATUS_JOBS)
+            .map(|j| {
+                let qualified = j
+                    .session
+                    .as_ref()
+                    .map(|s| super::id::qualify(&j.spec.node, s));
+                json!({
+                    "id": j.id,
+                    "node": j.spec.node,
+                    "tool": j.spec.tool,
+                    "cwd": j.spec.cwd,
+                    "state": j.state,
+                    "session": j.session,
+                    "qualified": qualified,
+                    "detail": j.detail,
+                    "createdMs": j.created_ms,
+                })
+            })
+            .collect();
         json!({
             "cluster": {
                 "id": state.id,
@@ -338,6 +367,7 @@ impl NodeCore {
             },
             "me": me,
             "members": members,
+            "jobs": jobs,
         })
     }
 
@@ -466,7 +496,7 @@ impl NodeCore {
         match tool {
             Tool::Claude => "session.new",
             Tool::Codex => "codex.send",
-            Tool::Agy => "agy.open",
+            Tool::Agy => "agy.send",
             Tool::Shell => "shell.run",
         }
     }
@@ -478,5 +508,7 @@ mod core_tests;
 mod core_tests_dispatch;
 #[cfg(test)]
 mod core_tests_headless;
+#[cfg(test)]
+mod core_tests_jobs;
 #[cfg(test)]
 mod core_tests_terms;

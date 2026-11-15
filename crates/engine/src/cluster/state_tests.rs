@@ -317,7 +317,7 @@ fn job_state_moves_forward_only() {
         )
     };
     assert_eq!(
-        go(&mut state, JobState::Done).err(),
+        go(&mut state, JobState::Lost).err(),
         Some(CommandError::BadTransition)
     );
     go(&mut state, JobState::Running).expect("running");

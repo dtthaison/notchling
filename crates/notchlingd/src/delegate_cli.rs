@@ -77,6 +77,9 @@ fn setup() -> Option<(Layout, Folders)> {
 }
 
 pub fn run(args: &[String]) -> i32 {
+    if let Some(code) = crate::cluster_dispatch_delegate::run_machine(args) {
+        return code;
+    }
     let Some((layout, folders)) = setup() else {
         return 2;
     };

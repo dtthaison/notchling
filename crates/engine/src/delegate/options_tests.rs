@@ -148,3 +148,73 @@ fn tool_names() {
     assert_eq!(Tool::Agy.title(), "Antigravity CLI");
     assert_eq!(Tool::from_name("CODEX"), Some(Tool::Codex));
 }
+
+#[test]
+fn machine_is_taken_out_before_the_double_dash_only() {
+    let (machine, rest) = take_machine(&args(&[
+        "agy",
+        "--machine",
+        "w1",
+        "--json",
+        "--",
+        "--machine",
+        "x",
+    ]))
+    .unwrap();
+    assert_eq!(machine.as_deref(), Some("w1"));
+    assert_eq!(rest, args(&["agy", "--json", "--", "--machine", "x"]));
+    let (none, same) = take_machine(&args(&["codex", "--", "hi"])).unwrap();
+    assert_eq!(none, None);
+    assert_eq!(same, args(&["codex", "--", "hi"]));
+    let (first, rest) = take_machine(&args(&["--machine", "w1", "agy", "--", "hi"])).unwrap();
+    assert_eq!(first.as_deref(), Some("w1"));
+    assert_eq!(rest, args(&["agy", "--", "hi"]));
+}
+
+#[test]
+fn machine_needs_one_node_name() {
+    for list in [
+        &["agy", "--machine"][..],
+        &["agy", "--machine", "--json"][..],
+        &["agy", "--machine", "a", "--machine", "b", "--", "x"][..],
+    ] {
+        assert!(take_machine(&args(list)).is_err(), "{list:?}");
+    }
+}
+
+#[test]
+fn to_args_round_trips_through_parse() {
+    let first = parse_in(&[
+        "agy",
+        "--model",
+        "m",
+        "--effort",
+        "low",
+        "--folder",
+        "src",
+        "--out",
+        "o",
+        "--session",
+        "s1",
+        "--timeout",
+        "90.5",
+        "--json",
+        "--",
+        "--odd",
+        "prompt",
+    ])
+    .unwrap();
+    let list = to_args(&first);
+    let words: Vec<&str> = list.iter().map(String::as_str).collect();
+    assert_eq!(first, parse_in(&words).unwrap());
+    let plain = to_args(&parse_in(&["codex", "--", "hi"]).unwrap());
+    assert_eq!(plain.first().map(String::as_str), Some("codex"));
+    assert!(!plain.iter().any(|a| a == "--json" || a == "--write"));
+    assert_eq!(plain.last().map(String::as_str), Some("hi"));
+}
+
+#[test]
+fn a_remote_timeout_has_a_ceiling_above_the_default() {
+    assert_eq!(MAX_REMOTE_TIMEOUT_SECS, 2_100);
+    assert!(std::hint::black_box(MAX_REMOTE_TIMEOUT_SECS) > DEFAULT_TIMEOUT_SECS);
+}
