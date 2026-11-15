@@ -231,6 +231,12 @@ impl ChatView {
                 tooltip: None,
             };
         };
+        if self.offline_note().is_some() {
+            return Control {
+                enabled: false,
+                tooltip: None,
+            };
+        }
         match super::tool::of(session.tool).refusal(self, session) {
             Some(why) if why == t::chat::agy_busy() && !gate.enabled => gate,
             Some(why) => Control {

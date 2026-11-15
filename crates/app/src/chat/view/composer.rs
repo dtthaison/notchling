@@ -78,6 +78,8 @@ fn status(
 ) -> Option<Div> {
     let (text, ink) = if let Some(error) = &view.tools.error {
         (error_text(error, view.prompt.is_shown()), Ink::Needs)
+    } else if let Some(note) = view.offline_note() {
+        (note, Ink::TextMuted)
     } else if view.tools.sending {
         return None;
     } else if let Some(n) = view

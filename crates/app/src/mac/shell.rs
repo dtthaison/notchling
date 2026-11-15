@@ -62,6 +62,10 @@ pub struct AppInbox(pub Arc<crate::inbox::feed::InboxFeed>);
 
 impl Global for AppInbox {}
 
+pub struct AppCluster(pub Arc<crate::cluster::feed::ClusterFeed>);
+
+impl Global for AppCluster {}
+
 pub struct AppAccounts(pub Arc<crate::accounts::store::Accounts>);
 
 impl Global for AppAccounts {}
@@ -139,6 +143,9 @@ pub fn run(data_root: Option<PathBuf>, open_chat_now: bool) -> i32 {
         cx.set_global(AppInbox(Arc::new(crate::inbox::feed::InboxFeed::for_run(
             root.as_ref(),
         ))));
+        cx.set_global(AppCluster(Arc::new(
+            crate::cluster::feed::ClusterFeed::for_run(root.as_ref()),
+        )));
         if feed.is_live() {
             super::restart_notice::watch(
                 cx,

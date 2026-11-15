@@ -118,6 +118,7 @@ impl ChatView {
         let mut conversation_changed = false;
         let mut layout_changed = false;
         self.sessions = self.open_rows(all);
+        self.apply_remote_preview();
         conversation_changed |= self.selected_session() != selected_before.as_ref();
         if self.selected == asked {
             let was = self.selected.take();
@@ -275,6 +276,7 @@ impl ChatView {
             self.redraw_chrome(cx);
         }
         self.inbox_tick(cx);
+        self.cluster_tick(cx);
         let dot = self.bridge_on();
         if dot != self.phone_dot {
             self.phone_dot = dot;

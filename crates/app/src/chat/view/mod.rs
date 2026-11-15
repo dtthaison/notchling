@@ -1,6 +1,7 @@
 mod accounts;
 mod changes;
 mod changes_panel;
+mod cluster;
 mod composer;
 mod conversation;
 mod conversation_list;
@@ -103,6 +104,7 @@ pub const COPY_MENU_ENV: &str = "NOTCHLING_RENDER_COPY_MENU";
 pub const ACCOUNT_MENU_ENV: &str = "NOTCHLING_RENDER_ACCOUNT_MENU";
 pub const PAGE_ENV: &str = page_panel::PAGE_ENV;
 pub const INBOX_ENV: &str = "NOTCHLING_RENDER_INBOX";
+pub const REMOTE_ENV: &str = "NOTCHLING_RENDER_REMOTE";
 pub const SENDING_ENV: &str = "NOTCHLING_RENDER_SENDING";
 pub const HELD_ENV: &str = "NOTCHLING_RENDER_HELD";
 
@@ -156,6 +158,9 @@ pub struct ChatView {
     bridge: Arc<Bridge>,
     phone: Option<Entity<PhonePanelView>>,
     phone_dot: bool,
+    cluster: Arc<crate::cluster::feed::ClusterFeed>,
+    seen_cluster: u64,
+    remote_preview: bool,
     inbox: Arc<InboxFeed>,
     inbox_panel: Option<Entity<InboxPanelView>>,
     seen_inbox: u64,
@@ -260,6 +265,9 @@ impl ChatView {
         }
         if switch(INBOX_ENV) {
             view.preview_inbox(cx);
+        }
+        if switch(REMOTE_ENV) {
+            view.preview_remote();
         }
         if let Ok(id) = std::env::var(PAGE_ENV) {
             view.page.preview(&id);
@@ -434,6 +442,9 @@ impl ChatView {
             bridge: phone::app_bridge(cx),
             phone: None,
             phone_dot: false,
+            cluster: cluster::app_cluster(cx),
+            seen_cluster: 0,
+            remote_preview: false,
             inbox: inbox::app_inbox(cx),
             inbox_panel: None,
             seen_inbox: 0,

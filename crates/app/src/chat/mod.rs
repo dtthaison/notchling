@@ -76,6 +76,9 @@ pub mod selection;
 pub mod shell_list;
 pub mod shell_rows;
 pub mod sidebar;
+pub mod sidebar_node;
+#[cfg(test)]
+mod sidebar_node_tests;
 #[cfg(test)]
 mod sidebar_words_tests;
 pub mod simulator;
