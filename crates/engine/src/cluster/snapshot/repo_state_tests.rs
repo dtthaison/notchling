@@ -4,7 +4,7 @@ use super::repo_state::{
 };
 use std::path::{Path, PathBuf};
 
-fn out(code: i32, stdout: &str) -> GitOutput {
+pub(super) fn out(code: i32, stdout: &str) -> GitOutput {
     GitOutput {
         code,
         stdout: stdout.to_owned(),
@@ -12,17 +12,17 @@ fn out(code: i32, stdout: &str) -> GitOutput {
     }
 }
 
-fn z(records: &[&str]) -> String {
+pub(super) fn z(records: &[&str]) -> String {
     let mut text = records.join("\0");
     text.push('\0');
     text
 }
 
-fn top(root: &str) -> GitOutput {
+pub(super) fn top(root: &str) -> GitOutput {
     out(0, &format!("{root}\n{root}/.git\n{root}/.git\n"))
 }
 
-const OID: &str = "0123456789abcdef0123456789abcdef01234567";
+pub(super) const OID: &str = "0123456789abcdef0123456789abcdef01234567";
 
 fn head_records(extra: &[&str]) -> Vec<String> {
     let mut all = vec![
@@ -33,27 +33,28 @@ fn head_records(extra: &[&str]) -> Vec<String> {
     all
 }
 
-fn status(records: &[String]) -> GitOutput {
+pub(super) fn status(records: &[String]) -> GitOutput {
     let refs: Vec<&str> = records.iter().map(String::as_str).collect();
     out(0, &z(&refs))
 }
 
-fn with_upstream(entries: &[&str]) -> GitOutput {
+pub(super) fn with_upstream(entries: &[&str]) -> GitOutput {
     let mut extra = vec!["# branch.upstream origin/main", "# branch.ab +0 -0"];
     extra.extend(entries);
     status(&head_records(&extra))
 }
 
-fn pushed() -> Vec<GitOutput> {
+pub(super) fn pushed() -> Vec<GitOutput> {
     vec![
         top("/w/repo"),
         with_upstream(&[]),
         out(0, "0\n"),
         out(0, "git@github.com:o/r.git\n"),
+        out(0, "H 100644 aaa 0\ta.txt\0"),
     ]
 }
 
-fn facts(outputs: &[GitOutput]) -> RepoFacts {
+pub(super) fn facts(outputs: &[GitOutput]) -> RepoFacts {
     parse(Path::new("/w/repo"), outputs).unwrap().unwrap()
 }
 
@@ -215,6 +216,7 @@ fn not_a_repository_is_none() {
         out(128, ""),
         out(128, ""),
         out(128, ""),
+        out(128, ""),
     ];
     assert_eq!(parse(Path::new("/w/none"), &o), Ok(None));
 }
@@ -235,7 +237,7 @@ fn a_failed_status_is_an_error() {
 
 #[test]
 fn the_wrong_number_of_outputs_is_an_error() {
-    assert!(parse(Path::new("/w/repo"), &pushed()[..3]).is_err());
+    assert!(parse(Path::new("/w/repo"), &pushed()[..4]).is_err());
 }
 
 #[test]
@@ -275,6 +277,17 @@ fn an_http_origin_never_carries_a_credential() {
         ("https://host/x.git", "https://host/x.git"),
         ("https://u:p@host", "https://host"),
         ("ssh://git:secret@host/o/r", "ssh://git@host/o/r"),
+        ("git+ssh://u:p@h/x", "git+ssh://u@h/x"),
+        ("ssh+git://u@h/x", "ssh+git://u@h/x"),
+        ("persistent-https://TOKEN@h/x", "persistent-https://h/x"),
+        ("ftp://TOKEN@h/x", "ftp://h/x"),
+        ("ftps://u:p@h/x", "ftps://h/x"),
+        ("git://TOKEN@h/x", "git://h/x"),
+        ("codecommit::https://TOKEN@h/x", "codecommit::https://h/x"),
+        ("a::b::https://u:p@h/x", "a::b::https://h/x"),
+        ("ssh://git@[::1]/x", "ssh://git@[::1]/x"),
+        ("git@[::1]:o/r.git", "git@[::1]:o/r.git"),
+        ("file:///srv/o/r.git", "file:///srv/o/r.git"),
     ] {
         assert_eq!(origin_of(url).as_deref(), Some(want), "{url}");
     }
@@ -301,6 +314,7 @@ fn repo(branch: Option<&str>) -> RepoFacts {
         unpushed: 0,
         dirty: false,
         untracked: false,
+        submodules: false,
         main_repo: None,
     }
 }
@@ -388,7 +402,7 @@ fn after_folder(call: &GitCall) -> Vec<String> {
 fn every_call_is_hardened() {
     std::env::set_var("GIT_SNAP_REPO_TEST_VAR", "x");
     let calls = read_plan(Path::new("/w/repo"));
-    assert_eq!(calls.len(), 4);
+    assert_eq!(calls.len(), 5);
     for call in &calls {
         let args = call.args();
         assert_eq!(args[0], "--no-optional-locks");
@@ -440,7 +454,8 @@ fn the_plan_asks_for_what_the_parser_reads() {
             "--porcelain=v2",
             "--branch",
             "-z",
-            "--untracked-files=normal"
+            "--untracked-files=normal",
+            "--ignore-submodules=all"
         ]
     );
     assert_eq!(
@@ -448,6 +463,7 @@ fn the_plan_asks_for_what_the_parser_reads() {
         ["rev-list", "--count", "@{upstream}..HEAD"]
     );
     assert_eq!(after_folder(&calls[3]), ["remote", "get-url", "origin"]);
+    assert_eq!(after_folder(&calls[4]), ["ls-files", "-z", "-s", "-v"]);
 }
 
 #[test]
@@ -468,7 +484,7 @@ fn the_filter_probe_is_a_hardened_config_read() {
 fn filters_are_blanked_on_every_call() {
     let probe = "filter.x.clean\nscript\0filter.a.b.smudge\ncat\0filter.x.required\ntrue\0";
     let calls = without_filters(read_plan(Path::new("/w/repo")), probe).unwrap();
-    assert_eq!(calls.len(), 4);
+    assert_eq!(calls.len(), 5);
     for call in &calls {
         let args = call.args();
         let pairs = flags(&args);

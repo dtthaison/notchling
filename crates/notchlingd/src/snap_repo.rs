@@ -6,11 +6,15 @@ use std::path::Path;
 use std::time::Duration;
 
 const CALL_TIMEOUT: Duration = Duration::from_secs(10);
+const MAX_OUTPUT: usize = 32 * 1024 * 1024;
 
 fn run(launcher: &dyn Launcher, call: &GitCall) -> Result<GitOutput, String> {
-    let out = launcher
-        .run(&call.to_command(), CALL_TIMEOUT)
+    let (out, capped) = launcher
+        .run_capped(&call.to_command(), CALL_TIMEOUT, MAX_OUTPUT)
         .map_err(|why| why.to_string())?;
+    if capped {
+        return Err("git answered more than can be read".to_owned());
+    }
     Ok(GitOutput {
         code: out.code,
         stdout: out.output,

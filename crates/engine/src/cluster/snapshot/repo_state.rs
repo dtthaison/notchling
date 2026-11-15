@@ -14,6 +14,7 @@ pub struct RepoFacts {
     pub unpushed: u32,
     pub dirty: bool,
     pub untracked: bool,
+    pub submodules: bool,
     pub main_repo: Option<PathBuf>,
 }
 
@@ -78,10 +79,12 @@ pub fn read_plan(folder: &Path) -> Vec<GitCall> {
                 "--branch",
                 "-z",
                 "--untracked-files=normal",
+                "--ignore-submodules=all",
             ],
         ),
         GitCall::new(folder, &["rev-list", "--count", "@{upstream}..HEAD"]),
         GitCall::new(folder, &["remote", "get-url", "origin"]),
+        GitCall::new(folder, &["ls-files", "-z", "-s", "-v"]),
     ]
 }
 
@@ -108,12 +111,20 @@ struct Layout {
     main_repo: Option<PathBuf>,
 }
 
+fn first_line(text: &str) -> &str {
+    text.lines().next().unwrap_or("").trim()
+}
+
 fn layout(out: &GitOutput) -> Result<Option<Layout>, String> {
-    if out.code == 128 {
+    if out.code == 128 && out.stderr.contains("not a git repository") {
         return Ok(None);
     }
     if out.code != 0 {
-        return Err(format!("git rev-parse exited {}", out.code));
+        return Err(format!(
+            "git rev-parse exited {}: {}",
+            out.code,
+            first_line(&out.stderr)
+        ));
     }
     let lines: Vec<&str> = out.stdout.lines().collect();
     let [root, git_dir, common] = lines[..] else {
@@ -138,6 +149,7 @@ struct StatusFacts {
     head: String,
     branch: Option<String>,
     upstream: Option<String>,
+    has_counts: bool,
     dirty: bool,
     untracked: bool,
 }
@@ -155,6 +167,7 @@ fn status_facts(text: &str) -> StatusFacts {
                 "branch.oid" if value != "(initial)" => facts.head = value.to_owned(),
                 "branch.head" if value != "(detached)" => facts.branch = Some(value.to_owned()),
                 "branch.upstream" => facts.upstream = Some(value.to_owned()),
+                "branch.ab" => facts.has_counts = true,
                 _ => {}
             }
         } else if record.starts_with("1 ") || record.starts_with("u ") {
@@ -166,7 +179,41 @@ fn status_facts(text: &str) -> StatusFacts {
             facts.untracked = true;
         }
     }
+    if !facts.has_counts {
+        facts.upstream = None;
+    }
     facts
+}
+
+struct IndexFacts {
+    hidden_edits: bool,
+    submodules: bool,
+}
+
+fn index_facts(out: &GitOutput) -> Result<IndexFacts, String> {
+    if out.code != 0 {
+        return Err(format!(
+            "git ls-files exited {}: {}",
+            out.code,
+            first_line(&out.stderr)
+        ));
+    }
+    let mut facts = IndexFacts {
+        hidden_edits: false,
+        submodules: false,
+    };
+    for record in out.stdout.split('\0').filter(|r| !r.is_empty()) {
+        let header = record.split('\t').next().unwrap_or("");
+        let mut fields = header.split(' ');
+        let tag = fields.next().unwrap_or("");
+        if tag.chars().any(|c| c.is_ascii_lowercase() || c == 'S') {
+            facts.hidden_edits = true;
+        }
+        if fields.next() == Some("160000") {
+            facts.submodules = true;
+        }
+    }
+    Ok(facts)
 }
 
 fn unpushed(out: &GitOutput, upstream: bool) -> Result<u32, String> {
@@ -182,19 +229,51 @@ fn unpushed(out: &GitOutput, upstream: bool) -> Result<u32, String> {
         .map_err(|_| "git rev-list didn't answer a count".to_owned())
 }
 
+fn is_transport(name: &str) -> bool {
+    !name.is_empty()
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.' | '_'))
+}
+
+fn is_ssh(scheme: &str) -> bool {
+    ["ssh", "git+ssh", "ssh+git"]
+        .iter()
+        .any(|ssh| scheme.eq_ignore_ascii_case(ssh))
+}
+
 fn without_credentials(url: &str) -> String {
+    if let Some((helper, address)) = url.split_once("::") {
+        if is_transport(helper) {
+            return format!("{helper}::{}", without_credentials(address));
+        }
+    }
     let Some((scheme, rest)) = url.split_once("://") else {
-        return url.to_owned();
+        return scp_user_only(url);
     };
     let end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
     let (authority, tail) = rest.split_at(end);
     let Some((userinfo, host)) = authority.rsplit_once('@') else {
         return url.to_owned();
     };
-    let web = scheme.eq_ignore_ascii_case("http") || scheme.eq_ignore_ascii_case("https");
-    match userinfo.split_once(':') {
-        _ if web => format!("{scheme}://{host}{tail}"),
-        Some((user, _)) => format!("{scheme}://{user}@{host}{tail}"),
+    let user = userinfo.split(':').next().unwrap_or("");
+    if is_ssh(scheme) && !user.is_empty() {
+        format!("{scheme}://{user}@{host}{tail}")
+    } else {
+        format!("{scheme}://{host}{tail}")
+    }
+}
+
+fn scp_user_only(url: &str) -> String {
+    let Some(colon) = url.find(':') else {
+        return url.to_owned();
+    };
+    let (prefix, path) = url.split_at(colon);
+    if prefix.contains('/') {
+        return url.to_owned();
+    }
+    match prefix.rsplit_once('@') {
+        Some((user, host)) => format!("{}@{host}{path}", user.split(':').next().unwrap_or("")),
         None => url.to_owned(),
     }
 }
@@ -208,9 +287,9 @@ fn origin(out: &GitOutput) -> Option<String> {
 }
 
 pub fn parse(folder: &Path, outputs: &[GitOutput]) -> Result<Option<RepoFacts>, String> {
-    let [top, status, ahead, remote] = outputs else {
+    let [top, status, ahead, remote, files] = outputs else {
         return Err(format!(
-            "{} git answers for {}, wanted 4",
+            "{} git answers for {}, wanted 5",
             outputs.len(),
             folder.display()
         ));
@@ -219,9 +298,14 @@ pub fn parse(folder: &Path, outputs: &[GitOutput]) -> Result<Option<RepoFacts>, 
         return Ok(None);
     };
     if status.code != 0 {
-        return Err(format!("git status exited {}", status.code));
+        return Err(format!(
+            "git status exited {}: {}",
+            status.code,
+            first_line(&status.stderr)
+        ));
     }
     let facts = status_facts(&status.stdout);
+    let index = index_facts(files)?;
     Ok(Some(RepoFacts {
         root: layout.root,
         origin: origin(remote),
@@ -229,8 +313,9 @@ pub fn parse(folder: &Path, outputs: &[GitOutput]) -> Result<Option<RepoFacts>, 
         head: facts.head,
         unpushed: unpushed(ahead, facts.upstream.is_some())?,
         upstream: facts.upstream,
-        dirty: facts.dirty,
+        dirty: facts.dirty || index.hidden_edits,
         untracked: facts.untracked,
+        submodules: index.submodules,
         main_repo: layout.main_repo,
     }))
 }
@@ -252,10 +337,17 @@ pub fn movable(f: Option<&RepoFacts>, folder: &str) -> Movable {
     if f.untracked {
         return Movable::No(format!("{root} has untracked files"));
     }
+    if f.submodules {
+        return Movable::No(format!("{root} has submodules"));
+    }
     let Some(branch) = &f.branch else {
         return Movable::No(format!("{root} isn't on a branch"));
     };
-    if f.upstream.is_none() || f.origin.is_none() {
+    let on_origin = f
+        .upstream
+        .as_deref()
+        .is_some_and(|u| u.starts_with("origin/"));
+    if !on_origin || f.origin.is_none() {
         return Movable::No(format!("{branch} has no pushed upstream"));
     }
     if f.unpushed > 0 {

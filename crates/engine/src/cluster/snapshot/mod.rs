@@ -6,4 +6,6 @@ pub use repo_state::{
 };
 
 #[cfg(test)]
+mod repo_state_index_tests;
+#[cfg(test)]
 mod repo_state_tests;

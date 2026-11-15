@@ -189,6 +189,8 @@ mod reply_screen_tests;
 #[cfg(test)]
 mod session_of_tests;
 #[cfg(all(test, unix))]
+mod snap_repo_safety_tests;
+#[cfg(all(test, unix))]
 mod snap_repo_tests;
 #[cfg(test)]
 mod vault_ops_lock_tests;

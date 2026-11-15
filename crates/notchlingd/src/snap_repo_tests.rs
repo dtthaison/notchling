@@ -1,15 +1,49 @@
-use crate::limits_ops_tests::TempDir;
 use crate::snap_repo::read_repo;
 use notchling_engine::cluster::snapshot::{movable, Movable, RepoFacts};
-use notchling_engine::control::{Launcher, RealLauncher};
-use std::collections::BTreeMap;
-use std::os::unix::fs::PermissionsExt;
+use notchling_engine::control::{
+    Command, LaunchError, LaunchOutput, Launcher, PtyScript, RealLauncher,
+};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::Command as Process;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, SystemTime};
 
-fn plain_git(home: &Path, dir: &Path, args: &[&str]) -> std::process::Output {
-    let mut command = Command::new("git");
+pub(super) struct Scratch(PathBuf);
+
+impl Scratch {
+    fn new(tag: &str) -> Scratch {
+        static NEXT: AtomicU32 = AtomicU32::new(0);
+        let n = NEXT.fetch_add(1, Ordering::SeqCst);
+        let dir =
+            std::env::temp_dir().join(format!("nl-snaprepo-{tag}-{}-{n}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        Scratch(dir)
+    }
+
+    pub(super) fn root(&self) -> &Path {
+        &self.0
+    }
+
+    pub(super) fn path(&self, rel: &str) -> PathBuf {
+        self.0.join(rel)
+    }
+
+    pub(super) fn write(&self, rel: &str, text: &str) {
+        let path = self.path(rel);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, text).unwrap();
+    }
+}
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+pub(super) fn plain_git(home: &Path, dir: &Path, args: &[&str]) -> std::process::Output {
+    let mut command = Process::new("git");
     for (key, _) in std::env::vars_os() {
         if key.to_string_lossy().starts_with("GIT_") {
             command.env_remove(key);
@@ -33,16 +67,16 @@ fn plain_git(home: &Path, dir: &Path, args: &[&str]) -> std::process::Output {
         .expect("git runs")
 }
 
-struct Rig {
-    t: TempDir,
-    work: PathBuf,
-    origin: PathBuf,
-    marker: PathBuf,
+pub(super) struct Rig {
+    pub(super) t: Scratch,
+    pub(super) work: PathBuf,
+    pub(super) origin: PathBuf,
+    pub(super) marker: PathBuf,
 }
 
 impl Rig {
-    fn new(tag: &str) -> Rig {
-        let t = TempDir::new(tag);
+    pub(super) fn new(tag: &str) -> Rig {
+        let t = Scratch::new(tag);
         let work = t.path("work");
         let origin = t.path("origin.git");
         let marker = t.path("marker");
@@ -56,7 +90,7 @@ impl Rig {
         }
     }
 
-    fn git(&self, dir: &Path, args: &[&str]) -> String {
+    pub(super) fn git(&self, dir: &Path, args: &[&str]) -> String {
         let out = plain_git(self.t.root(), dir, args);
         assert!(
             out.status.success(),
@@ -66,12 +100,12 @@ impl Rig {
         String::from_utf8_lossy(&out.stdout).into_owned()
     }
 
-    fn w(&self, args: &[&str]) -> String {
+    pub(super) fn w(&self, args: &[&str]) -> String {
         self.git(&self.work, args)
     }
 
-    fn pushed() -> Rig {
-        let rig = Rig::new("snaprepo");
+    pub(super) fn pushed() -> Rig {
+        let rig = Rig::new("pushed");
         rig.git(&rig.origin, &["init", "-q", "--bare", "-b", "main"]);
         rig.w(&["init", "-q", "-b", "main"]);
         rig.t.write("work/a.txt", "one\n");
@@ -83,34 +117,83 @@ impl Rig {
         rig
     }
 
-    fn commit_in(&self, dir: &Path, file: &str) {
+    pub(super) fn commit_in(&self, dir: &Path, file: &str) {
         std::fs::write(dir.join(file), "more\n").unwrap();
         self.git(dir, &["add", "."]);
         self.git(dir, &["commit", "-q", "-m", file]);
     }
 
-    fn read(&self) -> Option<RepoFacts> {
-        read_in(&self.work)
+    pub(super) fn read(&self) -> Option<RepoFacts> {
+        read_in(&self.t, &self.work)
     }
 
-    fn root(&self) -> PathBuf {
+    pub(super) fn root(&self) -> PathBuf {
         std::fs::canonicalize(&self.work).unwrap()
     }
 }
 
-fn launcher() -> Box<dyn Launcher> {
-    let real = RealLauncher::with_claude(PathBuf::from("/nonexistent/claude"));
+pub(super) struct Isolated {
+    inner: Box<dyn Launcher>,
+    home: PathBuf,
+}
+
+impl Isolated {
+    fn tame(&self, command: &Command) -> Command {
+        command
+            .clone()
+            .with_env("HOME", self.home.to_str())
+            .with_env("GIT_CONFIG_GLOBAL", Some("/dev/null"))
+            .with_env("GIT_CONFIG_NOSYSTEM", Some("1"))
+    }
+}
+
+impl Launcher for Isolated {
+    fn run(&self, command: &Command, timeout: Duration) -> Result<LaunchOutput, LaunchError> {
+        self.inner.run(&self.tame(command), timeout)
+    }
+
+    fn run_capped(
+        &self,
+        command: &Command,
+        timeout: Duration,
+        max_bytes: usize,
+    ) -> Result<(LaunchOutput, bool), LaunchError> {
+        self.inner
+            .run_capped(&self.tame(command), timeout, max_bytes)
+    }
+
+    fn run_pty(&self, script: &PtyScript) -> Result<bool, LaunchError> {
+        self.inner.run_pty(script)
+    }
+}
+
+pub(super) fn real() -> RealLauncher {
+    RealLauncher::with_claude(PathBuf::from("/nonexistent/claude"))
+}
+
+pub(super) fn unsandboxed(t: &Scratch) -> Isolated {
+    Isolated {
+        inner: Box::new(real()),
+        home: t.root().to_path_buf(),
+    }
+}
+
+pub(super) fn launcher(t: &Scratch) -> Isolated {
     #[cfg(target_os = "macos")]
-    return Box::new(notchling_engine::git::SandboxedLauncher::waiting(
-        std::sync::Arc::new(real),
+    let inner: Box<dyn Launcher> = Box::new(notchling_engine::git::SandboxedLauncher::waiting(
+        std::sync::Arc::new(real()),
         Duration::from_secs(60),
     ));
     #[cfg(not(target_os = "macos"))]
-    Box::new(real)
+    let inner: Box<dyn Launcher> = Box::new(real());
+    Isolated {
+        inner,
+        home: t.root().to_path_buf(),
+    }
 }
 
-fn read_in(folder: &Path) -> Option<RepoFacts> {
-    read_repo(folder, &*launcher()).unwrap()
+pub(super) fn read_in(t: &Scratch, folder: &Path) -> Option<RepoFacts> {
+    read_repo(folder, &launcher(t)).unwrap()
 }
 
 fn verdict(rig: &Rig) -> Movable {
@@ -118,13 +201,13 @@ fn verdict(rig: &Rig) -> Movable {
     movable(rig.read().as_ref(), &folder)
 }
 
-fn no(text: String) -> Movable {
-    Movable::No(text)
+fn no(text: &str) -> Movable {
+    Movable::No(text.to_owned())
 }
 
-fn bump_mtime(path: &Path) {
+pub(super) fn bump_mtime(path: &Path, secs: u64) {
     let file = std::fs::OpenOptions::new().write(true).open(path).unwrap();
-    file.set_modified(SystemTime::now() + Duration::from_secs(30))
+    file.set_modified(SystemTime::now() + Duration::from_secs(secs))
         .unwrap();
 }
 
@@ -141,8 +224,13 @@ fn pushed_clean_tree_is_movable() {
     );
     assert_eq!(facts.head, rig.w(&["rev-parse", "HEAD"]).trim());
     assert_eq!(
-        (facts.unpushed, facts.dirty, facts.untracked),
-        (0, false, false)
+        (
+            facts.unpushed,
+            facts.dirty,
+            facts.untracked,
+            facts.submodules
+        ),
+        (0, false, false, false)
     );
     assert_eq!(facts.main_repo, None);
     assert_eq!(verdict(&rig), Movable::Yes);
@@ -152,9 +240,10 @@ fn pushed_clean_tree_is_movable() {
 fn uncommitted_change_is_not_movable() {
     let rig = Rig::pushed();
     rig.t.write("work/a.txt", "one\ntwo\n");
+    let root = rig.root().display().to_string();
     assert_eq!(
         verdict(&rig),
-        no(format!("{} has uncommitted changes", rig.root().display()))
+        no(&format!("{root} has uncommitted changes"))
     );
 }
 
@@ -167,13 +256,26 @@ fn a_staged_change_is_not_movable() {
 }
 
 #[test]
+fn hidden_edits_are_not_movable() {
+    for flag in ["--assume-unchanged", "--skip-worktree"] {
+        let rig = Rig::pushed();
+        rig.w(&["update-index", flag, "a.txt"]);
+        rig.t.write("work/a.txt", "hidden\n");
+        let root = rig.root().display().to_string();
+        assert_eq!(
+            verdict(&rig),
+            no(&format!("{root} has uncommitted changes")),
+            "{flag}"
+        );
+    }
+}
+
+#[test]
 fn untracked_file_is_not_movable() {
     let rig = Rig::pushed();
     rig.t.write("work/loose.txt", "x\n");
-    assert_eq!(
-        verdict(&rig),
-        no(format!("{} has untracked files", rig.root().display()))
-    );
+    let root = rig.root().display().to_string();
+    assert_eq!(verdict(&rig), no(&format!("{root} has untracked files")));
 }
 
 #[test]
@@ -194,15 +296,9 @@ fn ahead_of_upstream_is_not_movable() {
     let rig = Rig::pushed();
     rig.commit_in(&rig.work, "b.txt");
     assert_eq!(rig.read().unwrap().unpushed, 1);
-    assert_eq!(
-        verdict(&rig),
-        no("main has 1 commits that aren't pushed".to_owned())
-    );
+    assert_eq!(verdict(&rig), no("main has 1 commits that aren't pushed"));
     rig.commit_in(&rig.work, "d.txt");
-    assert_eq!(
-        verdict(&rig),
-        no("main has 2 commits that aren't pushed".to_owned())
-    );
+    assert_eq!(verdict(&rig), no("main has 2 commits that aren't pushed"));
 }
 
 #[test]
@@ -221,19 +317,18 @@ fn behind_upstream_is_movable() {
     rig.commit_in(&other, "theirs.txt");
     rig.git(&other, &["push", "-q"]);
     rig.w(&["fetch", "-q"]);
-    let facts = rig.read().unwrap();
-    assert_eq!(facts.unpushed, 0);
+    assert_eq!(rig.read().unwrap().unpushed, 0);
     assert_eq!(verdict(&rig), Movable::Yes);
 }
 
 #[test]
 fn no_upstream_is_not_movable() {
-    let rig = Rig::new("snaprepo-nup");
+    let rig = Rig::new("noup");
     rig.w(&["init", "-q", "-b", "main"]);
     rig.commit_in(&rig.work, "a.txt");
     let facts = rig.read().unwrap();
     assert_eq!((facts.upstream.clone(), facts.origin.clone()), (None, None));
-    assert_eq!(verdict(&rig), no("main has no pushed upstream".to_owned()));
+    assert_eq!(verdict(&rig), no("main has no pushed upstream"));
 }
 
 #[test]
@@ -242,25 +337,58 @@ fn a_branch_with_an_origin_but_no_upstream_is_not_movable() {
     rig.w(&["checkout", "-q", "-b", "topic"]);
     let facts = rig.read().unwrap();
     assert!(facts.origin.is_some() && facts.upstream.is_none());
-    assert_eq!(verdict(&rig), no("topic has no pushed upstream".to_owned()));
+    assert_eq!(verdict(&rig), no("topic has no pushed upstream"));
+}
+
+#[test]
+fn local_tracking_branch_is_not_movable() {
+    let rig = Rig::pushed();
+    rig.w(&["checkout", "-q", "-b", "topic", "--track", "main"]);
+    let facts = rig.read().unwrap();
+    assert_eq!(facts.upstream.as_deref(), Some("main"));
+    assert_eq!(verdict(&rig), no("topic has no pushed upstream"));
+}
+
+#[test]
+fn upstream_on_another_remote_is_not_movable() {
+    let rig = Rig::pushed();
+    let fork = rig.t.path("fork.git");
+    std::fs::create_dir_all(&fork).unwrap();
+    rig.git(&fork, &["init", "-q", "--bare", "-b", "main"]);
+    rig.w(&["remote", "add", "fork", &fork.to_string_lossy()]);
+    rig.w(&["push", "-q", "-u", "fork", "main"]);
+    let facts = rig.read().unwrap();
+    assert_eq!(facts.upstream.as_deref(), Some("fork/main"));
+    assert_eq!(facts.unpushed, 0);
+    assert_eq!(verdict(&rig), no("main has no pushed upstream"));
+}
+
+#[test]
+fn an_upstream_deleted_on_origin_is_not_movable() {
+    let rig = Rig::pushed();
+    rig.w(&["checkout", "-q", "-b", "topic"]);
+    rig.w(&["push", "-q", "-u", "origin", "topic"]);
+    rig.w(&["push", "-q", "origin", "--delete", "topic"]);
+    rig.w(&["fetch", "-q", "--prune"]);
+    assert_eq!(rig.read().unwrap().upstream, None);
+    assert_eq!(verdict(&rig), no("topic has no pushed upstream"));
 }
 
 #[test]
 fn an_unborn_branch_is_not_movable() {
-    let rig = Rig::new("snaprepo-unborn");
+    let rig = Rig::new("unborn");
     rig.w(&["init", "-q", "-b", "main"]);
-    let facts = rig.read().unwrap();
-    assert_eq!(facts.head, "");
-    assert_eq!(verdict(&rig), no("main has no pushed upstream".to_owned()));
+    assert_eq!(rig.read().unwrap().head, "");
+    assert_eq!(verdict(&rig), no("main has no pushed upstream"));
 }
 
 #[test]
 fn not_a_repo_is_not_movable() {
-    let rig = Rig::new("snaprepo-none");
+    let rig = Rig::new("none");
     assert_eq!(rig.read(), None);
     assert_eq!(
         verdict(&rig),
-        no(format!("{} isn't a git repository", rig.work.display()))
+        no(&format!("{} isn't a git repository", rig.work.display()))
     );
 }
 
@@ -271,10 +399,8 @@ fn detached_head_is_not_movable() {
     let facts = rig.read().unwrap();
     assert_eq!(facts.branch, None);
     assert_eq!(facts.head, rig.w(&["rev-parse", "HEAD"]).trim());
-    assert_eq!(
-        verdict(&rig),
-        no(format!("{} isn't on a branch", rig.root().display()))
-    );
+    let root = rig.root().display().to_string();
+    assert_eq!(verdict(&rig), no(&format!("{root} isn't on a branch")));
 }
 
 #[test]
@@ -289,7 +415,7 @@ fn linked_worktree_names_its_main_repo() {
         "-b",
         "other",
     ]);
-    let facts = read_in(&linked).unwrap();
+    let facts = read_in(&rig.t, &linked).unwrap();
     assert_eq!(facts.root, std::fs::canonicalize(&linked).unwrap());
     assert_eq!(facts.main_repo, Some(rig.root()));
     assert_eq!(facts.branch.as_deref(), Some("other"));
@@ -297,153 +423,40 @@ fn linked_worktree_names_its_main_repo() {
 }
 
 #[test]
-fn a_dirty_submodule_makes_the_tree_dirty() {
+fn repo_with_submodules_is_not_movable() {
     let rig = Rig::pushed();
+    add_submodule(&rig);
+    let facts = rig.read().unwrap();
+    assert!(facts.submodules);
+    assert!(!facts.dirty);
+    let root = rig.root().display().to_string();
+    assert_eq!(verdict(&rig), no(&format!("{root} has submodules")));
+}
+
+pub(super) fn add_submodule(rig: &Rig) {
     let sub = rig.t.path("sub");
     std::fs::create_dir_all(&sub).unwrap();
     rig.git(&sub, &["init", "-q", "-b", "main"]);
-    rig.commit_in(&sub, "s.txt");
+    rig.t.write("sub/.gitattributes", "* filter=x\n");
+    rig.t.write("sub/s.txt", "one\n");
+    rig.git(&sub, &["add", "."]);
+    rig.git(&sub, &["commit", "-q", "-m", "sub"]);
     rig.w(&["submodule", "add", "-q", &sub.to_string_lossy(), "mod"]);
     rig.w(&["commit", "-q", "-m", "add submodule"]);
     rig.w(&["push", "-q"]);
-    assert!(!rig.read().unwrap().dirty);
-    rig.t.write("work/mod/s.txt", "changed\n");
-    assert!(rig.read().unwrap().dirty);
-}
-
-type Files = BTreeMap<PathBuf, (u64, SystemTime)>;
-
-fn walk(dir: &Path, base: &Path, into: &mut Files) {
-    for entry in std::fs::read_dir(dir).unwrap() {
-        let path = entry.unwrap().path();
-        let meta = std::fs::symlink_metadata(&path).unwrap();
-        if meta.is_dir() {
-            walk(&path, base, into);
-        } else {
-            let rel = path.strip_prefix(base).unwrap().to_path_buf();
-            into.insert(rel, (meta.len(), meta.modified().unwrap()));
-        }
-    }
-}
-
-struct Picture {
-    files: Files,
-    index: Vec<u8>,
-    index_mtime: SystemTime,
-    refs: BTreeMap<PathBuf, Vec<u8>>,
-    packed: Option<Vec<u8>>,
-    stash: String,
-}
-
-fn picture(rig: &Rig) -> Picture {
-    let dot = rig.work.join(".git");
-    let mut files = Files::new();
-    walk(&dot, &dot, &mut files);
-    let mut refs = BTreeMap::new();
-    for rel in files.keys().filter(|p| p.starts_with("refs")) {
-        refs.insert(rel.clone(), std::fs::read(dot.join(rel)).unwrap());
-    }
-    Picture {
-        files,
-        index: std::fs::read(dot.join("index")).unwrap(),
-        index_mtime: std::fs::metadata(dot.join("index"))
-            .unwrap()
-            .modified()
-            .unwrap(),
-        refs,
-        packed: std::fs::read(dot.join("packed-refs")).ok(),
-        stash: rig.w(&["stash", "list"]),
-    }
 }
 
 #[test]
-fn reading_state_never_changes_the_repo() {
-    let rig = Rig::pushed();
-    rig.t.write("work/c.txt", "one\ntwo\n");
-    rig.t.write("work/loose.txt", "x\n");
-    rig.w(&["stash", "push", "-q", "-m", "keep"]);
-    rig.t.write("work/loose.txt", "x\n");
-    rig.w(&["pack-refs", "--all"]);
-    bump_mtime(&rig.work.join("a.txt"));
-    let before = picture(&rig);
-    assert!(before.packed.is_some());
-    assert!(before.stash.contains("keep"));
-    let facts = rig.read().unwrap();
-    assert!(facts.untracked);
-    let after = picture(&rig);
-    assert_eq!(before.index, after.index, "the index bytes changed");
-    assert_eq!(
-        before.index_mtime, after.index_mtime,
-        "the index was touched"
-    );
-    assert_eq!(before.refs, after.refs);
-    assert_eq!(before.packed, after.packed);
-    assert_eq!(before.stash, after.stash);
-    assert_eq!(before.files, after.files, "a file under .git changed");
-
-    let control = plain_git(rig.t.root(), &rig.work, &["status", "--porcelain"]);
-    assert!(control.status.success());
-    let touched = picture(&rig);
-    assert_ne!(
-        before.index, touched.index,
-        "a plain status leaves the index alone, so this test would prove nothing"
-    );
-}
-
-fn trap(rig: &Rig, name: &str) -> String {
-    let path = rig.t.path(name);
-    let body = format!(
-        "#!/bin/sh\ntouch '{}'\ncat \"$1\" 2>/dev/null\n",
-        rig.marker.display()
-    );
-    std::fs::write(&path, body).unwrap();
-    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
-    path.to_string_lossy().into_owned()
-}
-
-fn must_not_run(rig: &Rig, control: &[&str]) {
-    assert!(!rig.marker.exists());
-    let out = plain_git(rig.t.root(), &rig.work, control);
-    assert!(out.status.success());
-    assert!(
-        rig.marker.exists(),
-        "the trap never fires without the guards, so this test would prove nothing"
-    );
-    std::fs::remove_file(&rig.marker).unwrap();
-    let plain = RealLauncher::with_claude(PathBuf::from("/nonexistent/claude"));
-    for launcher in [&plain as &dyn Launcher, &*launcher()] {
-        let facts = read_repo(&rig.work, launcher).unwrap().unwrap();
-        assert!(!rig.marker.exists(), "a program of the repository ran");
-        assert!(facts.dirty);
+fn the_test_launcher_ignores_the_global_config() {
+    let rig = Rig::new("global");
+    rig.t.write(".gitconfig", "[user]\n\tname = leaked\n");
+    let ask = Command::new(&["git", "config", "--global", "--get", "user.name"]);
+    for launcher in [
+        &launcher(&rig.t) as &dyn Launcher,
+        &unsandboxed(&rig.t) as &dyn Launcher,
+    ] {
+        let out = launcher.run(&ask, Duration::from_secs(10)).unwrap();
+        assert_eq!(out.code, 1, "{}", out.output);
+        assert_eq!(out.output, "");
     }
-}
-
-fn make_stale_and_dirty(rig: &Rig) {
-    rig.t.write("work/c.txt", "one\ntwo\n");
-    bump_mtime(&rig.work.join("a.txt"));
-}
-
-#[test]
-fn hooks_and_fsmonitor_never_run() {
-    let rig = Rig::pushed();
-    rig.w(&["config", "core.fsmonitor", &trap(&rig, "monitor.sh")]);
-    make_stale_and_dirty(&rig);
-    must_not_run(&rig, &["status"]);
-
-    let rig = Rig::pushed();
-    let hook = rig.work.join(".git/hooks/post-index-change");
-    std::fs::create_dir_all(hook.parent().unwrap()).unwrap();
-    std::fs::copy(trap(&rig, "hook.sh"), &hook).unwrap();
-    std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
-    make_stale_and_dirty(&rig);
-    must_not_run(&rig, &["status"]);
-
-    let rig = Rig::pushed();
-    rig.t.write("work/.gitattributes", "* filter=x\n");
-    rig.w(&["add", ".gitattributes"]);
-    rig.w(&["commit", "-q", "-m", "attributes"]);
-    rig.w(&["push", "-q"]);
-    rig.w(&["config", "filter.x.clean", &trap(&rig, "clean.sh")]);
-    make_stale_and_dirty(&rig);
-    must_not_run(&rig, &["diff", "HEAD", "--numstat"]);
 }
