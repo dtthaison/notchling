@@ -89,15 +89,19 @@ fn agy_prompt_dispatched_only_then_sent() {
 }
 
 #[test]
-fn agy_still_queued_at_the_bound_is_unsure() {
-    let (a, _) = agy_holding(None, Duration::from_millis(100));
+fn agy_timed_out_dispatch_is_retried_and_never_goes_out() {
+    let (a, load) = agy_holding(None, Duration::from_millis(100));
     let row = a.b.send(ROW, "hi");
     a.b.postmen.postman(&row.session).pass(a.b.at(T0));
-    assert_eq!(
-        a.b.state(&row.id),
-        Some((State::Unsure, Some(Why::Restart)))
-    );
+    assert_eq!(a.b.state(&row.id), Some((State::Waiting, Some(Why::Retry))));
+    let note = a.b.outbox.note(&row.id).unwrap();
+    assert!(note.contains("took too long to load"), "{note}");
     assert!(a.b.removed().is_empty());
+    let request = wait_for_load(&load);
+    let process = a.rig.process();
+    process.push(&json!({"jsonrpc": "2.0", "id": request["id"], "result": {}}));
+    std::thread::sleep(Duration::from_millis(200));
+    assert!(process.requests("session/prompt").is_empty());
 }
 
 #[test]

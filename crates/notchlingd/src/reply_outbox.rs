@@ -92,6 +92,7 @@ impl ActingOps {
         };
         match outbox.wait_settled(&row, REPLY_WAIT_MS) {
             Settled::Sent => Ok(json!({"sent": true})),
+            Settled::Removed => Err(failed("The message was removed.")),
             Settled::InQueue(row) | Settled::Pending(row) => Ok(queued(outbox, &row)),
             Settled::NeedsUser(row, note) => match outbox.give_back(&row) {
                 true => Err(refusal(&row, note)),

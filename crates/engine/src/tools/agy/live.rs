@@ -4,7 +4,7 @@ use crate::tools::acp::{Connection, Handler, Spawner, METHOD_NOT_FOUND};
 use crate::transcript::acp::Transcript;
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU8, AtomicUsize, Ordering};
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, Weak};
 
@@ -12,7 +12,15 @@ pub const MAX_OPEN: usize = 8;
 
 pub(super) type Job = Box<dyn FnOnce() + Send>;
 
-pub(super) type Told = Sender<Result<(), RunError>>;
+pub(super) const CLAIM_QUEUED: u8 = 0;
+pub(super) const CLAIM_DISPATCHED: u8 = 1;
+pub(super) const CLAIM_CANCELLED: u8 = 2;
+
+#[derive(Clone)]
+pub(super) struct Told {
+    pub(super) tx: Sender<Result<(), RunError>>,
+    pub(super) claim: Arc<AtomicU8>,
+}
 
 pub(super) struct Live {
     pub(super) conn: Connection,
@@ -290,6 +298,17 @@ impl Inner {
         text: &str,
         told: Option<Told>,
     ) {
+        if let Some(told) = &told {
+            let won = told.claim.compare_exchange(
+                CLAIM_QUEUED,
+                CLAIM_DISPATCHED,
+                Ordering::SeqCst,
+                Ordering::SeqCst,
+            );
+            if won.is_err() {
+                return;
+            }
+        }
         let now = (self.now)();
         let allowed = self.may_start.get().is_none_or(|may| may());
         let failed = {
@@ -311,7 +330,7 @@ impl Inner {
         if let Some(e) = failed {
             self.emit(live, Change::TurnEnded(Some(e.to_string())));
             if let Some(told) = told {
-                let _ = told.send(Err(e));
+                let _ = told.tx.send(Err(e));
             }
             return;
         }
@@ -323,7 +342,7 @@ impl Inner {
             Box::new(move |result| runner.turn_done(&l, result)),
         );
         if let Some(told) = told {
-            let _ = told.send(match written {
+            let _ = told.tx.send(match written {
                 true => Ok(()),
                 false => Err(RunError::Start(format!("{NAME} isn't running."))),
             });

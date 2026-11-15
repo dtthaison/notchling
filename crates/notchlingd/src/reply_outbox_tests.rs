@@ -1,6 +1,7 @@
 use crate::acting_ops_tests::{app, code};
 use crate::codex_ops::tests::{self as codex_t, SESSION as CODEX_SESSION};
 use crate::event_assert::of;
+use crate::op_group::OpGroup;
 use crate::outbox_ops::OutboxOps;
 use crate::outbox_runners::link_codex;
 use crate::outbox_testkit::{rig, rig_with, Options, Rig, DIALOG, DRAFT, IDLE, T0};
@@ -155,6 +156,97 @@ fn reply_returns_queued_shape_when_in_queue() {
         out,
         json!({"sent": true, "state": "queued", "waiting": 1, "outboxId": row.id})
     );
+    r.postmen.stop();
+}
+
+#[test]
+fn reply_to_a_stopped_session_fails_and_removes_the_row() {
+    let r = rig();
+    r.files.set_state(IDLE, "stopped");
+    r.threaded();
+    let err = reply(&r, "hello?").unwrap_err();
+    assert_eq!(err.code, ErrorCode::Failed);
+    assert_eq!(err.message, "The session is stopped.");
+    assert!(rows(&r).is_empty());
+    assert_eq!(
+        r.room.named("outbox.removed").last().unwrap()["why"],
+        "removed"
+    );
+    r.postmen.stop();
+}
+
+#[test]
+fn reply_to_a_vanished_session_fails_and_removes_the_row() {
+    let r = rig_with(Options {
+        screen: DIALOG,
+        ..Options::default()
+    });
+    r.threaded();
+    let out = reply_in_thread(&r, "anyone there");
+    assert!(until(|| rows(&r)
+        .first()
+        .is_some_and(|row| row.state == State::Waiting)));
+    r.files.vanish(IDLE);
+    r.at(T0 + 1_000);
+    r.postmen.waker()(IDLE);
+    std::thread::sleep(Duration::from_millis(1_200));
+    r.at(T0 + 61_000);
+    r.postmen.waker()(IDLE);
+    let err = out
+        .recv_timeout(Duration::from_secs(10))
+        .unwrap()
+        .unwrap_err();
+    assert_eq!(err.code, ErrorCode::Failed);
+    assert_eq!(err.message, "No such session.");
+    assert!(rows(&r).is_empty());
+    assert_eq!(
+        r.room.named("outbox.removed").last().unwrap()["why"],
+        "removed"
+    );
+    r.postmen.stop();
+}
+
+#[test]
+fn reply_waiting_when_the_row_is_removed_fails_as_removed() {
+    let r = rig_with(Options {
+        screen: DIALOG,
+        ..Options::default()
+    });
+    r.threaded();
+    let out = reply_in_thread(&r, "never mind");
+    assert!(until(|| rows(&r)
+        .first()
+        .is_some_and(|row| row.state == State::Waiting)));
+    let id = rows(&r).remove(0).id;
+    r.ops
+        .call(&app(), ops::OUTBOX_REMOVE, &json!({"id": id}))
+        .unwrap();
+    let err = out
+        .recv_timeout(Duration::from_secs(5))
+        .unwrap()
+        .unwrap_err();
+    assert_eq!(err.code, ErrorCode::Failed);
+    assert_eq!(err.message, "The message was removed.");
+    r.postmen.stop();
+}
+
+#[test]
+fn reply_waiting_when_its_session_is_discarded_fails_as_removed() {
+    let r = rig_with(Options {
+        screen: DIALOG,
+        ..Options::default()
+    });
+    r.threaded();
+    let out = reply_in_thread(&r, "never mind");
+    assert!(until(|| rows(&r)
+        .first()
+        .is_some_and(|row| row.state == State::Waiting)));
+    r.ops.discard_session(IDLE).unwrap();
+    let err = out
+        .recv_timeout(Duration::from_secs(5))
+        .unwrap()
+        .unwrap_err();
+    assert_eq!(err.message, "The message was removed.");
     r.postmen.stop();
 }
 

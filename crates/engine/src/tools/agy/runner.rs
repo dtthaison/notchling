@@ -1,16 +1,18 @@
 use super::config::{AgyCommand, ConfigOption, Permission};
-use super::live::{cancelled, Inner, Job, Told, MAX_OPEN};
+use super::live::{cancelled, Inner, Job, Told, CLAIM_CANCELLED, CLAIM_QUEUED, MAX_OPEN};
 use crate::tools::acp::Spawner;
 use crate::transcript::model::Conversation;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::fmt;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
 use std::sync::mpsc::{channel, RecvTimeoutError};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 pub const NAME: &str = "Antigravity";
+
+const WRITE_GRACE: Duration = Duration::from_millis(500);
 
 pub const NO_BINARY: &str = "Couldn't find the agy command. Install Antigravity CLI first.";
 
@@ -185,10 +187,32 @@ impl Runner {
         wait: Duration,
     ) -> Result<(), RunError> {
         let (tx, rx) = channel();
-        self.queue_prompt(id, text, folder, Some(tx))?;
+        let claim = Arc::new(AtomicU8::new(CLAIM_QUEUED));
+        let told = Told {
+            tx,
+            claim: claim.clone(),
+        };
+        self.queue_prompt(id, text, folder, Some(told))?;
         match rx.recv_timeout(wait) {
             Ok(result) => result,
-            Err(RecvTimeoutError::Timeout) => Err(RunError::Pending),
+            Err(RecvTimeoutError::Timeout) => {
+                let cancelled = claim.compare_exchange(
+                    CLAIM_QUEUED,
+                    CLAIM_CANCELLED,
+                    Ordering::SeqCst,
+                    Ordering::SeqCst,
+                );
+                if cancelled.is_err() {
+                    return match rx.recv_timeout(WRITE_GRACE) {
+                        Ok(result) => result,
+                        Err(_) => Err(RunError::Pending),
+                    };
+                }
+                if let Some(live) = self.inner.get(id) {
+                    live.lock().working = false;
+                }
+                Err(RunError::Start(format!("{NAME} took too long to load.")))
+            }
             Err(RecvTimeoutError::Disconnected) => Err(RunError::Start(format!(
                 "{NAME} closed before the message went out."
             ))),

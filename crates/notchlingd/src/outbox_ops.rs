@@ -307,6 +307,7 @@ impl OutboxOps {
     }
 
     pub fn publish_removed(&self, id: &str, session: &str, why: &str) {
+        self.settle.removed(id, why);
         self.set_note(id, None);
         let forget = lock(&self.forget).clone();
         if let Some(forget) = forget {

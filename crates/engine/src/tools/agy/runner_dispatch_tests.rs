@@ -58,15 +58,46 @@ fn dispatch_reports_a_failed_load() {
 }
 
 #[test]
-fn dispatch_still_queued_at_the_bound_is_pending() {
+fn dispatch_timed_out_is_cancelled_and_never_goes_out() {
     let load = Arc::new(Mutex::new(None));
     let rig = rig_with(holding_load(load.clone()), Some("/fake/agy"));
     let got = rig
         .runner
         .dispatch("x", "hello", "/work", Duration::from_millis(100));
-    assert_eq!(got, Err(RunError::Pending));
+    assert_eq!(
+        got,
+        Err(RunError::Start("Antigravity took too long to load.".into()))
+    );
+    assert!(!rig.runner.is_working("x"));
+    let request = wait_for_load(&load);
     let process = rig.spawner.spawned().remove(0);
+    ok(&process, &request, json!({}));
+    std::thread::sleep(Duration::from_millis(200));
     assert!(process.requests("session/prompt").is_empty());
+    assert!(!rig.runner.is_working("x"));
+}
+
+#[test]
+fn dispatch_cancelled_leaves_the_session_free_for_the_next_prompt() {
+    let load = Arc::new(Mutex::new(None));
+    let rig = rig_with(holding_load(load.clone()), Some("/fake/agy"));
+    let got = rig
+        .runner
+        .dispatch("x", "first", "/work", Duration::from_millis(100));
+    assert!(got.is_err());
+    let again = rig.runner.prompt("x", "second", "/work");
+    assert_eq!(again, Ok(()));
+    let request = wait_for_load(&load);
+    let process = rig.spawner.spawned().remove(0);
+    ok(&process, &request, json!({}));
+    let end = Instant::now() + Duration::from_secs(10);
+    while process.requests("session/prompt").is_empty() {
+        assert!(Instant::now() < end, "second prompt never went out");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let prompts = process.requests("session/prompt");
+    assert_eq!(prompts.len(), 1);
+    assert_eq!(prompts[0]["params"]["prompt"][0]["text"], "second");
 }
 
 #[test]
