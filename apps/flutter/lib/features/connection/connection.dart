@@ -7,7 +7,6 @@ import '../../core/net/bridge_client.dart';
 import '../../core/net/ws_transport.dart';
 import '../../core/pairing/mac_profile.dart';
 import '../macs/macs_notifier.dart';
-import '../sessions/held_notifier.dart';
 
 final computerClientProvider = Provider.family<BridgeClient?, String>((Ref ref, String hostId) {
   final String? key = ref.watch(macsProvider.select((MacsState s) => s.keyOf(hostId)));
@@ -17,8 +16,7 @@ final computerClientProvider = Provider.family<BridgeClient?, String>((Ref ref, 
     connector: ref.read(wsConnectorProvider),
     profile: mac,
     onGoodRoute: (Endpoint route) => unawaited(ref.read(macsProvider.notifier).rememberRoute(hostId, route)),
-    onCluster: (String? primary, List<PinnedNode> nodes) => unawaited(ref.read(macsProvider.notifier).rememberCluster(hostId, primary, nodes)),
-    canReturnToPrimary: () => ref.read(macsProvider).activeId != hostId || !ref.read(heldPendingProvider)[0],
+    onCluster: (String? primary, int term, List<PinnedNode> nodes) => unawaited(ref.read(macsProvider.notifier).rememberCluster(hostId, primary, term, nodes)),
     primaryRetry: ref.read(primaryRetryProvider),
   )..start();
   final StreamSubscription<void> networkChanges = ref.read(networkChangesProvider).listen((void _) => client.networkChanged());

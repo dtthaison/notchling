@@ -113,9 +113,9 @@ class MacsNotifier extends Notifier<MacsState> {
     await _saveScopes(scopes);
   }
 
-  Future<void> rememberCluster(String id, String? primary, List<PinnedNode> nodes) async {
+  Future<void> rememberCluster(String id, String? primary, int term, List<PinnedNode> nodes) async {
     if (state.byId(id) == null) return;
-    final List<MacProfile> macs = <MacProfile>[for (final MacProfile m in state.macs) m.id == id ? m.withCluster(primary, nodes) : m];
+    final List<MacProfile> macs = <MacProfile>[for (final MacProfile m in state.macs) m.id == id ? m.withCluster(primary, nodes, term: term) : m];
     state = state.copyWith(macs: macs);
     await _store.save(macs);
   }

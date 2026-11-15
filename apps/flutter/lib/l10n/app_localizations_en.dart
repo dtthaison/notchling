@@ -707,6 +707,9 @@ class AppL10nEn extends AppL10n {
   String get sessionsHeldDismiss => 'Dismiss';
 
   @override
+  String get sessionsHeldFailed => 'Couldn\'t update that command. Try again.';
+
+  @override
   String sessionsHeldOn(String name) {
     return 'Held on $name';
   }

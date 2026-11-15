@@ -324,13 +324,17 @@ class ChatNotifier extends Notifier<ChatState> {
 
   void dismissSendError() => state = state.copyWith(send: const SendIdle());
 
+  final Map<String, String> _answerKeys = <String, String>{};
+
+  String _answerKey(String requestId) => _answerKeys.putIfAbsent(requestId, newCommandKey);
+
   Future<void> allow(PendingPrompt prompt, {required bool allow}) =>
-      _answer((BridgeClient client) => client.promptAllow(prompt.requestId, allow: allow));
+      _answer(prompt.requestId, (BridgeClient client, String key) => client.promptAllow(prompt.requestId, allow: allow, key: key));
 
   Future<void> choose(PendingPrompt prompt, List<int> choices) =>
-      _answer((BridgeClient client) => client.promptChoose(prompt.requestId, choices.cast<Object>()));
+      _answer(prompt.requestId, (BridgeClient client, String key) => client.promptChoose(prompt.requestId, choices.cast<Object>(), key: key));
 
-  Future<void> _answer(Future<void> Function(BridgeClient client) action) async {
+  Future<void> _answer(String requestId, Future<void> Function(BridgeClient client, String key) action) async {
     state = state.copyWith(clearAnswerError: true);
     final BridgeClient? client = clientForSession(ref, sessionId);
     if (client == null) {
@@ -338,7 +342,8 @@ class ChatNotifier extends Notifier<ChatState> {
       return;
     }
     try {
-      await action(client);
+      await action(client, _answerKey(requestId));
+      _answerKeys.remove(requestId);
     } on BridgeException catch (error) {
       if (!ref.mounted) return;
       state = state.copyWith(answerError: error);

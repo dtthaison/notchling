@@ -38,7 +38,7 @@ class ComputerSessionsNotifier extends Notifier<SessionsState> {
 
   Future<void> _subscribe(BridgeClient client) async {
     try {
-      await client.subscribe(const SubscriptionSpec(sessions: true));
+      await client.subscribe(SubscriptionSpec(sessions: true, held: client.inCluster));
     } on BridgeException catch (_) {
     }
   }

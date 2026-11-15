@@ -10,6 +10,7 @@ import '../core/net/ws_transport.dart';
 import '../features/chat/chat_screen.dart';
 import '../features/connection/connection.dart';
 import '../features/connection/subscription_sync.dart';
+import '../features/sessions/held_notifier.dart';
 import '../features/inbox/inbox_notifier.dart';
 import '../features/inbox/inbox_screen.dart';
 import '../features/macs/macs_notifier.dart';
@@ -101,6 +102,7 @@ class _AppRootState extends ConsumerState<AppRoot> with WidgetsBindingObserver {
     }
     if (macs.active == null) return const PairingScreen();
     ref.watch(subscriptionSyncProvider);
+    ref.watch(heldTrackingProvider);
     return const HomeShell();
   }
 }

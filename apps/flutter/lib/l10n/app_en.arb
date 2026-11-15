@@ -907,6 +907,10 @@
   "@sessionsHeldDismiss": {
     "description": "Shown in the Sessions tab on a message that says a held command was dropped. Dismisses the message."
   },
+  "sessionsHeldFailed": "Couldn't update that command. Try again.",
+  "@sessionsHeldFailed": {
+    "description": "Shown in the Sessions tab under a held command when the Mac did not do what was asked, such as cancelling or sending it."
+  },
   "sessionsHeldOn": "Held on {name}",
   "@sessionsHeldOn": {
     "description": "Shown in the Sessions tab above the list, on a command the phone sent while the Mac could not be reached. $name is the computer that keeps it until it can be sent.",

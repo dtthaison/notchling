@@ -146,3 +146,6 @@ sessions-held-cancel = Cancel
 
 # Shown in the Sessions tab on a message that says a held command was dropped. Dismisses the message.
 sessions-held-dismiss = Dismiss
+
+# Shown in the Sessions tab under a held command when the Mac did not do what was asked, such as cancelling or sending it.
+sessions-held-failed = Couldn't update that command. Try again.

@@ -55,6 +55,7 @@ class MacProfile {
     this.lastGoodWasTunnel = false,
     this.nodes = const <PinnedNode>[],
     this.clusterPrimary,
+    this.clusterTerm = 0,
   });
 
   factory MacProfile.fromJson(Json json) => MacProfile(
@@ -69,6 +70,7 @@ class MacProfile {
         lastGoodWasTunnel: json['lastGoodWasTunnel'] == true,
         nodes: _readNodes(json['nodes']),
         clusterPrimary: json.strOrNull('clusterPrimary'),
+        clusterTerm: json.integer('clusterTerm', orElse: 0),
       );
 
   static List<PinnedNode> _readNodes(Object? raw) {
@@ -97,6 +99,7 @@ class MacProfile {
 
   final List<PinnedNode> nodes;
   final String? clusterPrimary;
+  final int clusterTerm;
 
   List<String> get orderedHosts {
     final String? good = lastGoodHost;
@@ -120,15 +123,15 @@ class MacProfile {
 
   MacProfile withLastGoodHost(String host) => MacProfile(
       id: id, name: name, hosts: hosts, port: port, fingerprint: fingerprint, token: token, lastGoodHost: host, tunnel: tunnel,
-      nodes: nodes, clusterPrimary: clusterPrimary);
+      nodes: nodes, clusterPrimary: clusterPrimary, clusterTerm: clusterTerm);
 
   MacProfile withLastGoodTunnel() => MacProfile(
       id: id, name: name, hosts: hosts, port: port, fingerprint: fingerprint, token: token, lastGoodHost: lastGoodHost, tunnel: tunnel,
-      lastGoodWasTunnel: true, nodes: nodes, clusterPrimary: clusterPrimary);
+      lastGoodWasTunnel: true, nodes: nodes, clusterPrimary: clusterPrimary, clusterTerm: clusterTerm);
 
-  MacProfile withCluster(String? primary, List<PinnedNode> learned) => MacProfile(
+  MacProfile withCluster(String? primary, List<PinnedNode> learned, {int term = 0}) => MacProfile(
       id: id, name: name, hosts: hosts, port: port, fingerprint: fingerprint, token: token, lastGoodHost: lastGoodHost, tunnel: tunnel,
-      lastGoodWasTunnel: lastGoodWasTunnel, nodes: learned, clusterPrimary: primary);
+      lastGoodWasTunnel: lastGoodWasTunnel, nodes: learned, clusterPrimary: primary, clusterTerm: term);
 
   Json toJson() => <String, Object?>{
         'id': id,
@@ -142,6 +145,7 @@ class MacProfile {
         'lastGoodWasTunnel': lastGoodWasTunnel,
         if (nodes.isNotEmpty) 'nodes': <Object?>[for (final PinnedNode n in nodes) n.toJson()],
         'clusterPrimary': ?clusterPrimary,
+        if (clusterTerm != 0) 'clusterTerm': clusterTerm,
       };
 }
 

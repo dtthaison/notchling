@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../app/theme/tokens.dart';
 import '../../app/widgets/common.dart';
 import '../../core/net/bridge_client.dart';
+import '../../core/net/command_key.dart';
 import '../../l10n/app_localizations.dart';
 import '../connection/connection.dart';
 
@@ -38,6 +39,8 @@ class _NewSessionSheetState extends ConsumerState<_NewSessionSheet> {
   String? _folder;
   String _model = 'default';
   bool _starting = false;
+  String _key = newCommandKey();
+  String _keyFor = '';
 
   Future<void> _start() async {
     final String? folder = _folder;
@@ -59,7 +62,12 @@ class _NewSessionSheetState extends ConsumerState<_NewSessionSheet> {
     if (confirmed != true) return;
     setState(() => _starting = true);
     try {
-      await ref.read(bridgeClientProvider)!.sessionNew(folder, model: _model == 'default' ? null : _model);
+      final String command = '$folder\n$_model';
+      if (_keyFor != command) {
+        _key = newCommandKey();
+        _keyFor = command;
+      }
+      await ref.read(bridgeClientProvider)!.sessionNew(folder, model: _model == 'default' ? null : _model, key: _key);
       navigator.pop();
       messenger.showSnackBar(SnackBar(content: Text(l10n.sessionsNewSessionStarted)));
     } on BridgeException {

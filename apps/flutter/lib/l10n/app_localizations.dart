@@ -1263,6 +1263,12 @@ abstract class AppL10n {
   /// **'Dismiss'**
   String get sessionsHeldDismiss;
 
+  /// Shown in the Sessions tab under a held command when the Mac did not do what was asked, such as cancelling or sending it.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t update that command. Try again.'**
+  String get sessionsHeldFailed;
+
   /// Shown in the Sessions tab above the list, on a command the phone sent while the Mac could not be reached. $name is the computer that keeps it until it can be sent.
   ///
   /// In en, this message translates to:

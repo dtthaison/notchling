@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/theme/tokens.dart';
 import '../../core/net/bridge_client.dart';
+import '../../core/net/command_key.dart';
 import '../../core/protocol/models.dart';
 import '../../l10n/app_localizations.dart';
 import '../connection/bridge_errors.dart';
@@ -31,6 +32,7 @@ class SendNowAction extends ConsumerStatefulWidget {
 
 class _SendNowActionState extends ConsumerState<SendNowAction> {
   bool _busy = false;
+  String _key = newCommandKey();
 
   Future<void> _run() async {
     final AppL10n l10n = AppL10n.of(context);
@@ -50,7 +52,8 @@ class _SendNowActionState extends ConsumerState<SendNowAction> {
     setState(() => _busy = true);
     final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
     try {
-      await client.sessionSendNow(widget.sessionId);
+      await client.sessionSendNow(widget.sessionId, key: _key);
+      _key = newCommandKey();
       unawaited(Future<void>.delayed(const Duration(seconds: 8), () {
         if (mounted) setState(() => _busy = false);
       }));

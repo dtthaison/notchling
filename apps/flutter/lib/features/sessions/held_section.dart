@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -16,17 +18,21 @@ class HeldSection extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final HeldState held = ref.watch(heldProvider);
+    final String? active = ref.watch(macsProvider.select((MacsState s) => s.active?.id));
+    if (active == null) return const SizedBox.shrink();
+    final HeldState held = ref.watch(computerHeldProvider(active));
     final ConnectionStatus status = ref.watch(connectionStatusProvider);
     final String own = ref.watch(macsProvider.select((MacsState s) => s.active?.name ?? ''));
-    final HeldNotifier notifier = ref.read(heldProvider.notifier);
+    final ComputerHeldNotifier notifier = ref.read(computerHeldProvider(active).notifier);
     return HeldList(
       entries: held.entries,
       notices: held.notices,
-      nodeName: status.via ?? own,
+      nodeName: held.holder.isEmpty ? (status.via ?? own) : held.holder,
       primaryAnswers: status.primaryAnswers,
-      onCancel: (String id) => notifier.cancel(id),
-      onConfirm: (String id) => notifier.confirm(id),
+      enabled: status.phase == LinkPhase.connected,
+      failed: held.failed,
+      onCancel: (String id) => unawaited(notifier.cancel(id)),
+      onConfirm: (String id) => unawaited(notifier.confirm(id)),
       onDismiss: notifier.dismiss,
     );
   }
@@ -42,8 +48,12 @@ class HeldList extends StatelessWidget {
     required this.onCancel,
     required this.onConfirm,
     required this.onDismiss,
+    this.enabled = true,
+    this.failed = false,
   });
 
+  final bool enabled;
+  final bool failed;
   final List<wire.HeldEntry> entries;
   final List<wire.HeldNotice> notices;
   final String nodeName;
@@ -84,9 +94,14 @@ class HeldList extends StatelessWidget {
                 entry: entry,
                 nodeName: nodeName,
                 primaryAnswers: primaryAnswers,
-                onCancel: () => onCancel(entry.id),
-                onConfirm: () => onConfirm(entry.id),
+                onCancel: enabled ? () => onCancel(entry.id) : null,
+                onConfirm: enabled ? () => onConfirm(entry.id) : null,
               ),
+            ),
+          if (failed && entries.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(bottom: Space.sm),
+              child: Text(l10n.sessionsHeldFailed, style: kit.meta.copyWith(color: kit.danger)),
             ),
         ],
       ),
@@ -100,8 +115,8 @@ class _HeldRow extends StatelessWidget {
   final wire.HeldEntry entry;
   final String nodeName;
   final bool primaryAnswers;
-  final VoidCallback onCancel;
-  final VoidCallback onConfirm;
+  final VoidCallback? onCancel;
+  final VoidCallback? onConfirm;
 
   @override
   Widget build(BuildContext context) {
@@ -111,7 +126,7 @@ class _HeldRow extends StatelessWidget {
     final String heldOn = l10n.sessionsHeldOn(nodeName);
     return Semantics(
       container: true,
-      label: entry.waiting ? '${l10n.sessionsHeldWaiting}. $heldOn. ${entry.summary}' : '$heldOn. ${entry.summary}',
+      label: <String>[if (entry.waiting) l10n.sessionsHeldWaiting, heldOn, entry.summary].join(' '),
       child: Surface(
         padding: const EdgeInsets.all(Space.md),
         child: Column(
