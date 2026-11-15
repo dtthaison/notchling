@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 
+use super::grants::SecretAllow;
 use super::id::{fingerprint, NodeId};
 use super::members::{Desired, Member, MemberState};
 use super::versions::{Versions, CLUSTER_SCHEMA, FEATURE_DISPATCH, NODE_PROTO};
@@ -46,5 +47,6 @@ pub fn member(name: &str, os: &str, client: bool) -> Member {
         versions: Some(versions(os)),
         desired: Desired::default(),
         joined_ms: 0,
+        secrets: SecretAllow::default(),
     }
 }

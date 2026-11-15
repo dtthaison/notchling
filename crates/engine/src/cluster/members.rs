@@ -2,6 +2,7 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
+use super::grants::SecretAllow;
 use super::id::NodeId;
 use super::versions::Versions;
 
@@ -49,6 +50,8 @@ pub struct Member {
     pub versions: Option<Versions>,
     pub desired: Desired,
     pub joined_ms: i64,
+    #[serde(default)]
+    pub secrets: SecretAllow,
 }
 
 pub fn can_be_master_default(os: &str) -> bool {

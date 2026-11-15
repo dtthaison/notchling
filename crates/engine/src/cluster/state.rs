@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+use super::grants::SecretAllow;
 use super::id::{NodeId, Role};
 use super::jobs::{job_id, Job, JobSpec, JobState};
 use super::members::{Desired, Member, MemberState, Term};
@@ -62,6 +63,10 @@ pub enum Command {
         #[serde(default)]
         headless: Option<bool>,
         desired: Option<Desired>,
+    },
+    SetAllow {
+        node: NodeId,
+        allow: SecretAllow,
     },
     Versions {
         node: NodeId,
@@ -339,6 +344,11 @@ pub fn apply(
             if let Some(v) = desired {
                 m.desired = *v;
             }
+            vec![Change::Member(m.clone())]
+        }
+        Command::SetAllow { node, allow } => {
+            let m = active_mut(state, node)?;
+            m.secrets = SecretAllow::new(allow.names.iter().cloned(), allow.any);
             vec![Change::Member(m.clone())]
         }
         Command::Versions { node, versions } => {
