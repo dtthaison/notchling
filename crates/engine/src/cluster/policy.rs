@@ -159,6 +159,7 @@ pub const RULES: &[Rule] = &[
     client_home("cluster.allow.set"),
     rule("grant.deliver", VAULT_HOME, OriginTier::Node, None, false),
     rule("grant.revoke", CLEAR, OriginTier::Node, None, false),
+    rule("login.deliver", VAULT_HOME, OriginTier::Node, None, false),
     to_vault("grant.request", MEMBER, OriginTier::Agent),
     to_vault("vault.list", CLIENT, OriginTier::App),
     to_vault("vault.save", CLIENT, OriginTier::App),

@@ -411,3 +411,72 @@ fn a_restored_job_is_found_by_its_session_keys() {
     masks.add("j3", vec![grant("api-token", TOKEN)]).unwrap();
     assert!(!masks.unidentified_lost(), "a live job isn't lost");
 }
+
+#[test]
+fn a_standing_value_is_masked_in_a_job_that_holds_no_grants() {
+    let masks = TailMasks::new();
+    assert_eq!(masks.state("j9"), JobMasks::Never);
+    masks
+        .add_standing(vec![grant("claude-worker", TOKEN)])
+        .unwrap();
+    assert_eq!(masks.state("j9"), JobMasks::Masked);
+    let out = whole(&masks, "j9", format!("x {TOKEN} y").as_bytes());
+    assert!(!out.contains("NL-MARKER"), "a standing value leaked");
+    assert!(out.contains("[secret claude-worker]"));
+}
+
+#[test]
+fn a_standing_value_and_a_job_value_are_both_masked_together() {
+    let masks = masks_with("j1", vec![grant("api-token", "NL-MARKER-4-TOKEN-0000")]);
+    masks
+        .add_standing(vec![grant("claude-worker", TOKEN)])
+        .unwrap();
+    let line = format!("a {TOKEN} b NL-MARKER-4-TOKEN-0000 c");
+    let out = whole(&masks, "j1", line.as_bytes());
+    assert!(!out.contains("NL-MARKER"), "a value leaked");
+    assert!(out.contains("[secret claude-worker]") && out.contains("[secret api-token]"));
+    let union = masks.union().expect("a union");
+    let (all, _) = crate::cluster_redact::mask_with(union, 0, &[], line.as_bytes(), true).unwrap();
+    assert!(!text(all).contains("NL-MARKER"));
+}
+
+#[test]
+fn a_standing_value_added_while_a_log_is_open_masks_the_rest_of_it() {
+    let masks = Arc::new(TailMasks::new());
+    let sink = Arc::new(Mutex::new(Vec::<u8>::new()));
+    let mut log = MaskedLog::new(Shared(sink.clone()), masks.clone(), "j1");
+    log.write_all(b"before\n").unwrap();
+    masks
+        .add_standing(vec![grant("claude-worker", TOKEN)])
+        .unwrap();
+    log.write_all(format!("the {TOKEN} appears\n").as_bytes())
+        .unwrap();
+    log.close().unwrap();
+    let written = logged(&sink);
+    assert!(!written.contains("NL-MARKER"), "a standing value leaked");
+    assert!(written.contains("[secret claude-worker]"));
+}
+
+#[test]
+fn adding_the_same_standing_value_twice_changes_nothing_and_a_cap_holds() {
+    let masks = TailMasks::new();
+    masks
+        .add_standing(vec![grant("claude-worker", TOKEN)])
+        .unwrap();
+    let before = masks.generation("j1");
+    masks
+        .add_standing(vec![grant("claude-worker", TOKEN)])
+        .unwrap();
+    assert_eq!(masks.generation("j1"), before);
+    for n in 1..crate::cluster_redact::MAX_STANDING {
+        masks
+            .add_standing(vec![grant("v", &format!("NL-MARKER-5-VALUE-{n:04}"))])
+            .unwrap();
+    }
+    let err = masks
+        .add_standing(vec![grant("v", "NL-MARKER-5-ONE-TOO-MANY")])
+        .unwrap_err();
+    assert!(!err.contains("NL-MARKER"));
+    let big = vec![grant("v", &"x".repeat(40_000))];
+    assert!(masks.add_standing(big).is_err());
+}

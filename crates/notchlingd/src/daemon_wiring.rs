@@ -624,6 +624,7 @@ impl Wired {
             events.clone(),
             sessions.clone(),
         );
+        acting.attach_login(cluster.login.clone());
         Wired {
             acting,
             codex,

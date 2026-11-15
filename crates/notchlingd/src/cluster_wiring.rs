@@ -6,6 +6,8 @@ use crate::cluster_forward::{Forward, NoNodeForward, NodeForward};
 use crate::cluster_inbox::{InboxCalls, NetLink, NodeNet, Outbox};
 use crate::cluster_inbox_follow::Follow;
 use crate::cluster_join::{JoinAsker, JOIN_WAIT};
+use crate::cluster_logins::{LoginCalls, LoginEnv, LoginHold};
+use crate::cluster_logins_send::{LoginDeliverer, NodeOnline, Parts, Stamps};
 use crate::cluster_mirror::{FollowOps, Mirror, OnCap, TailSource, MIRROR_CAP, MIRROR_DIR};
 use crate::cluster_node::{
     ClusterLog, ClusterNode, ClusterSetup, Hooks, JoinAsk, LocalCalls, NetSide, Probe, Submit, TICK,
@@ -16,7 +18,7 @@ use crate::cluster_sessions::{
 };
 use crate::cluster_switches::{HeadlessSwitches, LateHandler, NodeCalls, OpsPanel};
 use crate::cluster_tail_mask::MaskedTails;
-use crate::cluster_versions::{own, with_tools};
+use crate::cluster_versions::{own, with_logins, with_tools};
 use crate::cluster_workspace::{Workspace, WorkspaceCalls};
 use crate::cluster_workspace_send::{CodeSender, NodePeers, ReturnOps, Sender};
 use crate::grant_broker::GrantBroker;
@@ -36,6 +38,7 @@ use crate::vault_ops::VaultOps;
 use crate::versions_ops::VersionsOps;
 use notchling_cluster_net::{load_or_make, Pins, TcpTls, PORT};
 use notchling_engine::bridge::net::bridge::host_name;
+use notchling_engine::cluster::login_files::LoginStore;
 use notchling_engine::cluster::wire::{Origin, OriginTier};
 use notchling_engine::cluster::{Desired, NodeId};
 use notchling_engine::control::{Launcher, RealLauncher};
@@ -147,6 +150,7 @@ pub struct ClusterHooks {
     pub remote: Arc<RemoteSessions>,
     pub mirror: Arc<Mirror>,
     pub inbox: Arc<InboxOps>,
+    pub login: Arc<LoginHold>,
 }
 
 impl Hooks for ClusterHooks {
@@ -162,6 +166,7 @@ impl Hooks for ClusterHooks {
         self.mirror.clear();
         self.remote.clear();
         self.inbox.clear_mirrors();
+        self.login.wipe();
     }
 
     fn peer_sessions(&self, from: &NodeId) {
@@ -224,6 +229,8 @@ pub struct ClusterParts {
     pub returns: Arc<ReturnOps>,
     pub shells: Arc<ShellJobs>,
     pub remote: Arc<RemoteSessions>,
+    pub login: Arc<LoginHold>,
+    logins: Arc<LoginDeliverer>,
     delegate: Arc<RealDelegate>,
     mirror: Arc<Mirror>,
     janitor: Arc<GrantJanitor>,
@@ -275,7 +282,7 @@ fn start_node(
     room: Arc<dyn Room>,
     links: (Arc<dyn LocalCalls>, Arc<dyn Hooks>),
     versions: Arc<VersionsOps>,
-    log: ClusterLog,
+    (log, login): (ClusterLog, Arc<LoginHold>),
 ) -> Result<Arc<ClusterNode>, String> {
     let cluster_dir = layout.cluster_dir();
     let identity = load_or_make(&cluster_dir.join(IDENTITY_DIR)).map_err(|e| e.to_string())?;
@@ -284,7 +291,8 @@ fn start_node(
     let loopback = loopback_ok(std::env::var_os(LOOPBACK_ENV).as_deref(), exe.as_deref());
     let pins = Pins::default();
     let transport = Arc::new(TcpTls::new(identity, pins.clone(), loopback));
-    let probe: Probe = Box::new(move || with_tools(versions.tool_versions()));
+    let probe: Probe =
+        Box::new(move || with_logins(with_tools(versions.tool_versions()), login.standing()));
     let setup = ClusterSetup {
         cluster_dir,
         fixture: layout.fixture,
@@ -347,6 +355,12 @@ impl ClusterParts {
         let reporter = Arc::new(NodeReporter::default());
         let grants = GrantParts::new(&layout.cluster_dir());
         let view = Arc::new(NodeView::new(holder.clone()));
+        let login = LoginHold::new(
+            Arc::new(LoginStore::new(&layout.cluster_dir())),
+            grants.masks.clone(),
+            view.clone(),
+            clock_ms(),
+        );
         let shells =
             ShellJobs::new(layout.data_dir.clone(), reporter.clone()).with_grants(grants.shell());
         let delegate = Arc::new(RealDelegate::new(layout));
@@ -398,6 +412,19 @@ impl ClusterParts {
             clock_ms(),
         );
         let workspace_calls: Arc<dyn LocalCalls> = Arc::new(UseCalls::new(workspace_calls, uses));
+        let logins = LoginDeliverer::new(
+            Parts {
+                vault: vault.clone(),
+                entries: vault.clone(),
+                link: Arc::new(NodeLink::new(holder.clone())),
+                audit: Arc::new(EventAudit::new(vault.clone(), log.clone())),
+                view: view.clone(),
+                online: Arc::new(NodeOnline::new(holder.clone())),
+                notes: inbox.clone(),
+            },
+            Stamps::load(&layout.cluster_dir()),
+            clock_ms(),
+        );
         let broker = Arc::new(GrantBroker::new(
             (
                 vault.clone(),
@@ -409,6 +436,7 @@ impl ClusterParts {
             clock_ms(),
         ));
         let granting: Arc<dyn LocalCalls> = Arc::new(GrantCalls::new(workspace_calls, broker));
+        let granting: Arc<dyn LocalCalls> = Arc::new(LoginCalls::new(granting, login.clone()));
         let net = Arc::new(NodeNet::new(holder.clone()));
         let granting: Arc<dyn LocalCalls> =
             Arc::new(InboxCalls::new(granting, net.clone(), inbox.clone()));
@@ -428,8 +456,15 @@ impl ClusterParts {
             remote: remote.clone(),
             mirror: mirror.clone(),
             inbox: inbox.clone(),
+            login: login.clone(),
         });
-        let node = start_node(layout, room.clone(), (local, hooks), versions, log.clone());
+        let node = start_node(
+            layout,
+            room.clone(),
+            (local, hooks),
+            versions,
+            (log.clone(), login.clone()),
+        );
         let audit = log.clone();
         let mut refresher = None;
         if let Ok(node) = &node {
@@ -440,6 +475,7 @@ impl ClusterParts {
             let _ = holder.set(node.clone());
             mirror.spawn();
             janitor.spawn();
+            logins.spawn();
             let link = Arc::new(NetLink::new(net));
             inbox.set_link(link.clone());
             inbox.set_tap(outbox.tap());
@@ -465,6 +501,8 @@ impl ClusterParts {
             shells,
             delegate,
             remote,
+            login,
+            logins,
             mirror,
             janitor,
             outbox,
@@ -494,6 +532,7 @@ impl ClusterParts {
         self.shells.close();
         self.mirror.close();
         self.janitor.close();
+        self.logins.close();
         self.outbox.close();
         if let Some(refresher) = &self.refresher {
             refresher.close();

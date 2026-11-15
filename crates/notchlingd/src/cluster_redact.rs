@@ -17,11 +17,20 @@ struct Masked {
     released: bool,
 }
 
+struct Standing {
+    generation: u64,
+    values: Vec<(String, GrantValue)>,
+    template: Redactor,
+}
+
 #[derive(Default)]
 struct Table {
     next: u64,
     jobs: BTreeMap<String, Masked>,
+    standing: Option<Standing>,
 }
+
+pub const MAX_STANDING: usize = 16;
 
 #[derive(Default)]
 pub struct TailMasks {
@@ -39,6 +48,10 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+fn combined(job: u64, standing: u64) -> u64 {
+    job.wrapping_mul(1_000_003).wrapping_add(standing)
 }
 
 pub fn mask_for(name: &str) -> String {
@@ -102,6 +115,40 @@ impl TailMasks {
         Ok(())
     }
 
+    pub fn add_standing(&self, values: Vec<(String, GrantValue)>) -> Result<(), String> {
+        TailMasks::check(&values)?;
+        let mut table = lock(&self.table);
+        let held = table.standing.as_ref().map_or(0, |s| s.values.len());
+        let mut all = table
+            .standing
+            .as_ref()
+            .map(|s| s.values.clone())
+            .unwrap_or_default();
+        for (name, value) in values {
+            let known = all
+                .iter()
+                .any(|(n, v)| n == &name && v.expose() == value.expose());
+            if !known {
+                all.push((name, value));
+            }
+        }
+        if all.len() == held {
+            return Ok(());
+        }
+        if all.len() > MAX_STANDING {
+            return Err("too many different standing values since the last restart".to_string());
+        }
+        let template = build(&all);
+        table.next += 1;
+        let generation = table.next;
+        table.standing = Some(Standing {
+            generation,
+            values: all,
+            template,
+        });
+        Ok(())
+    }
+
     pub fn check(values: &[(String, GrantValue)]) -> Result<(), String> {
         match values
             .iter()
@@ -134,6 +181,7 @@ impl TailMasks {
             .jobs
             .values()
             .flat_map(|m| m.values.iter().cloned())
+            .chain(table.standing.iter().flat_map(|s| s.values.iter().cloned()))
             .collect();
         (!all.is_empty()).then(|| build(&all))
     }
@@ -196,7 +244,9 @@ impl TailMasks {
     }
 
     pub fn state(&self, job: &str) -> JobMasks {
-        match lock(&self.table).jobs.get(job) {
+        let table = lock(&self.table);
+        match table.jobs.get(job) {
+            None if table.standing.is_some() => JobMasks::Masked,
             None => JobMasks::Never,
             Some(m) if m.template.is_none() => JobMasks::Gone,
             Some(_) => JobMasks::Masked,
@@ -208,28 +258,46 @@ impl TailMasks {
     }
 
     pub fn generation(&self, job: &str) -> Option<u64> {
-        lock(&self.table)
-            .jobs
-            .get(job)
-            .filter(|m| m.template.is_some())
-            .map(|m| m.generation)
+        let table = lock(&self.table);
+        match (table.jobs.get(job), &table.standing) {
+            (Some(m), standing) if m.template.is_some() => Some(
+                standing
+                    .as_ref()
+                    .map_or(m.generation, |s| combined(m.generation, s.generation)),
+            ),
+            (Some(_), _) => None,
+            (None, standing) => standing.as_ref().map(|s| s.generation),
+        }
     }
 
     pub fn lookback(&self, job: &str) -> usize {
-        lock(&self.table)
-            .jobs
-            .get(job)
-            .and_then(|m| m.template.as_ref())
-            .map_or(0, |t| t.lookback())
+        self.fresh(job)
+            .map_or(0, |(_, redactor)| redactor.lookback())
     }
 
     fn fresh(&self, job: &str) -> Option<(u64, Redactor)> {
         let table = lock(&self.table);
-        let masked = table.jobs.get(job)?;
-        masked
-            .template
-            .as_ref()
-            .map(|t| (masked.generation, t.clone()))
+        match (table.jobs.get(job), &table.standing) {
+            (Some(masked), None) => masked
+                .template
+                .as_ref()
+                .map(|t| (masked.generation, t.clone())),
+            (Some(masked), Some(standing)) => {
+                masked.template.as_ref()?;
+                let all: Vec<(String, GrantValue)> = masked
+                    .values
+                    .iter()
+                    .chain(&standing.values)
+                    .cloned()
+                    .collect();
+                Some((
+                    combined(masked.generation, standing.generation),
+                    build(&all),
+                ))
+            }
+            (None, Some(standing)) => Some((standing.generation, standing.template.clone())),
+            (None, None) => None,
+        }
     }
 }
 
@@ -239,6 +307,12 @@ impl fmt::Debug for TailMasks {
         let mut list = f.debug_map();
         for (job, masked) in &table.jobs {
             list.entry(job, &format_args!("{} values", masked.values.len()));
+        }
+        if let Some(standing) = &table.standing {
+            list.entry(
+                &"standing",
+                &format_args!("{} values", standing.values.len()),
+            );
         }
         list.finish()
     }

@@ -174,6 +174,15 @@ impl VaultOps {
             .collect())
     }
 
+    pub fn info(&self, name: &str) -> Result<Option<VaultEntry>, ApiError> {
+        if !self.switch.is_on() {
+            self.off_hook().run();
+            return Err(self.switch.refusal());
+        }
+        let id = name.to_lowercase();
+        Ok(self.entries()?.into_iter().find(|e| e.id() == id))
+    }
+
     pub fn note_refused(&self, who: &ReleaseFor, name: &str) {
         let mut trail = Trail::new(who.folder.clone(), who.command.clone());
         trail.names = vec![name.to_string()];

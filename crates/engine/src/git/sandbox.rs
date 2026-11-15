@@ -268,6 +268,7 @@ impl SandboxedLauncher {
             argv,
             env: command.env.clone(),
             cwd: command.cwd.clone(),
+            secret_env: command.secret_env.clone(),
         })
     }
 

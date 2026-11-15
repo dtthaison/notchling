@@ -33,6 +33,8 @@ pub mod cluster_inbox_follow;
 #[cfg(test)]
 pub(crate) mod cluster_inbox_testkit;
 pub mod cluster_join;
+pub mod cluster_logins;
+pub mod cluster_logins_send;
 pub mod cluster_mirror;
 pub mod cluster_node;
 pub mod cluster_ops;
@@ -130,6 +132,8 @@ mod accounts_ops_log_tests;
 mod accounts_ops_tests;
 #[cfg(test)]
 mod acting_events_tests;
+#[cfg(test)]
+mod acting_login_tests;
 #[cfg(test)]
 mod acting_ops_tests;
 #[cfg(test)]

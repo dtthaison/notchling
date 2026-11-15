@@ -130,6 +130,8 @@ mod tests_sd_service_versions;
 #[cfg(test)]
 mod tests_sd_worker;
 #[cfg(test)]
+mod tests_secret_node;
+#[cfg(test)]
 mod tests_secret_steps;
 #[cfg(test)]
 mod tests_secrets;

@@ -95,3 +95,12 @@ fn with_tools_keeps_the_node_tools_only() {
     assert_eq!(versions.tools[&Tool::Agy], v("1.2.3"));
     assert_eq!(versions.notchling, env!("CARGO_PKG_VERSION"));
 }
+
+#[test]
+fn a_standing_login_is_reported_and_none_is_left_out() {
+    let with = with_logins(own(), true);
+    assert_eq!(with.logins.get(&Tool::Claude), Some(&true));
+    assert_eq!(with.logins.len(), 1);
+    let without = with_logins(own(), false);
+    assert!(without.logins.is_empty());
+}

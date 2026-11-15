@@ -12,6 +12,7 @@ pub enum Kind {
     VersionCheckFailed,
     VersionDrift,
     NodeJoin,
+    LoginNeeded,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]

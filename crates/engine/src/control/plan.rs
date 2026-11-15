@@ -1,13 +1,32 @@
+use crate::cluster::grant_files::GrantValue;
 use std::collections::BTreeMap;
 
 pub const CONFIG_DIR_VAR: &str = "CLAUDE_CONFIG_DIR";
+pub const LOGIN_TOKEN_VAR: &str = "CLAUDE_CODE_OAUTH_TOKEN";
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default)]
 pub struct Command {
     pub argv: Vec<String>,
     pub env: BTreeMap<String, Option<String>>,
     pub cwd: Option<String>,
+    pub secret_env: BTreeMap<String, GrantValue>,
 }
+
+impl PartialEq for Command {
+    fn eq(&self, other: &Command) -> bool {
+        self.argv == other.argv
+            && self.env == other.env
+            && self.cwd == other.cwd
+            && self.secret_env.len() == other.secret_env.len()
+            && self
+                .secret_env
+                .iter()
+                .zip(&other.secret_env)
+                .all(|((ka, va), (kb, vb))| ka == kb && va.expose() == vb.expose())
+    }
+}
+
+impl Eq for Command {}
 
 impl Command {
     pub fn new(argv: &[&str]) -> Self {
@@ -44,6 +63,42 @@ impl Command {
 
     pub fn program(&self) -> &str {
         self.argv.first().map_or("", String::as_str)
+    }
+
+    pub fn with_secret_env(mut self, key: &str, value: GrantValue) -> Self {
+        self.secret_env.insert(key.to_string(), value);
+        self
+    }
+
+    pub fn keys_only(&self) -> Command {
+        let mut shown = self.clone();
+        shown.secret_env = self
+            .secret_env
+            .keys()
+            .map(|key| (key.clone(), GrantValue::new(String::new())))
+            .collect();
+        shown
+    }
+}
+
+impl Plan {
+    pub fn with_claude_secret_env(&self, key: &str, value: &GrantValue) -> Plan {
+        let steps = self
+            .steps
+            .iter()
+            .map(|step| match step {
+                Step::Run(run) if run.command.program() == "claude" => {
+                    let mut run = run.clone();
+                    run.command = run.command.with_secret_env(key, value.clone());
+                    Step::Run(run)
+                }
+                other => other.clone(),
+            })
+            .collect();
+        Plan {
+            steps,
+            outcome: self.outcome,
+        }
     }
 }
 

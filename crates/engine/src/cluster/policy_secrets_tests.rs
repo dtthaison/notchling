@@ -114,3 +114,23 @@ fn the_allowlist_is_set_on_the_home_by_a_client() {
     let worker = facts("w1", Role::Worker, false, MemberState::Active);
     assert!(check("cluster.allow.set", &worker, &origin("w1", OriginTier::App)).is_err());
 }
+
+#[test]
+fn only_the_vault_node_while_home_delivers_a_standing_login() {
+    let vault = vault_home("m5");
+    assert!(check("login.deliver", &vault, &origin("m5", OriginTier::Node)).is_ok());
+    let promoted = facts("m1", Role::Home, true, MemberState::Active);
+    let mut standby_vault = facts("m5", Role::Standby, true, MemberState::Active);
+    standby_vault.is_vault = true;
+    let worker = facts("w1", Role::Worker, false, MemberState::Active);
+    for (who, sender) in [("m1", &promoted), ("m5", &standby_vault), ("w1", &worker)] {
+        assert_eq!(
+            check("login.deliver", sender, &origin(who, OriginTier::Node)).err(),
+            Some(Denied::NotAllowed),
+            "{who}"
+        );
+    }
+    for tier in [OriginTier::Agent, OriginTier::App] {
+        assert!(check("login.deliver", &vault, &origin("m5", tier)).is_err());
+    }
+}

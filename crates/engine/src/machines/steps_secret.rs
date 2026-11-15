@@ -2,9 +2,10 @@ use super::registry::{Machine, MachineOs, SdWorkerSettings};
 use super::runner::{Channel, OutputSink};
 use super::shell;
 use super::step::{
-    run, Cadence, CheckResult, FixContext, FixOutcome, FixPlan, Probe, SecretSource, SetupStep,
-    StepFix, StepId,
+    run, Cadence, CheckResult, FixContext, FixOutcome, FixPlan, Probe, RemoteOutput, SecretSource,
+    SetupStep, StepContext, StepFix, StepId,
 };
+use super::steps_node::{json_from, BINARY};
 use super::token_creation;
 use super::usage::{SecretFormat, SecretUsage};
 use crate::accounts::Secret;
@@ -34,7 +35,58 @@ pub fn issues_usage(m: &Machine, job: &SdWorkerSettings) -> SecretUsage {
     }
 }
 
+pub const SENT_BY_THE_CLUSTER: &str = "Sent by the cluster";
+
+fn cluster_sends_login(m: &Machine) -> bool {
+    m.node.is_some() && m.sd_worker().is_none()
+}
+
+fn cluster_login(m: &Machine) -> SetupStep {
+    SetupStep::new(
+        StepId::CLAUDE_LOGIN,
+        "Claude login",
+        vec![StepId::REACHABLE, StepId::NODE_JOINED],
+        Cadence::EveryRefresh,
+        Probe::remote(
+            format!("{} cluster status --json", shell::path(BINARY)),
+            parse_cluster_login,
+        ),
+        StepFix::HowTo(format!(
+            "The cluster sends this. Save {} in the Secret Vault with an expiry date on the Mac that holds the vault; while that Mac is the primary it sends the token to {}. Then check again.",
+            m.claude_secret, m.name
+        )),
+    )
+}
+
+fn parse_cluster_login(out: &RemoteOutput, _ctx: &StepContext) -> CheckResult {
+    let Some(status) = json_from(&out.text) else {
+        return CheckResult::cant_tell("the Notchling service there didn't answer");
+    };
+    let me = status["me"].as_str().unwrap_or("");
+    let member = status["members"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|m| m["id"].as_str() == Some(me));
+    let Some(member) = member else {
+        return CheckResult::cant_tell("this machine isn't in the cluster's list yet");
+    };
+    if member["versions"].is_null() {
+        return CheckResult::cant_tell("the node hasn't reported its logins yet");
+    }
+    if member["versions"]["logins"]["claude"].as_bool() == Some(true) {
+        CheckResult::pass(SENT_BY_THE_CLUSTER)
+    } else {
+        CheckResult::fail(
+            "not sent yet: the Mac that holds the vault sends it while it is the primary",
+        )
+    }
+}
+
 pub fn claude_login(m: &Machine) -> SetupStep {
+    if cluster_sends_login(m) {
+        return cluster_login(m);
+    }
     let usage = claude_usage(m);
     let request = VaultRequest {
         name: usage.name.clone(),
