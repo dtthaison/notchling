@@ -238,3 +238,12 @@ fn a_message_that_names_a_chip_in_words_is_sent_once_and_a_foreign_chip_beside_i
     assert!(pty.sent.is_empty());
     assert_eq!(pty.writes, typed(text)[..2], "no Enter");
 }
+
+#[test]
+fn a_message_with_chip_words_and_a_picture_is_never_sent_by_us() {
+    let text = "why does [Image #1] fail?\n\n/tmp/shots/one.png";
+    let mut pty = FakePrompt::idle().reading_pictures();
+    assert_eq!(send(&mut pty, text), Err(Failure::Mixed));
+    assert!(pty.sent.is_empty());
+    assert_eq!(pty.writes, typed(text)[..2], "no Enter");
+}

@@ -266,3 +266,36 @@ fn a_picture_the_person_pasted_beside_our_words_is_never_cleared_as_ours() {
         assert_eq!(pty.held(), Some(left));
     }
 }
+
+#[test]
+fn a_picture_the_person_pasted_is_never_cleared_as_a_chip_our_words_name() {
+    let earlier = Clearing {
+        earlier: vec![
+            "why does [Image #1] fail?".to_string(),
+            "see [Image #1]".to_string(),
+            "why does [Image #1] fail?\n\n/tmp/a.png".to_string(),
+        ],
+        any: false,
+    };
+    for left in [
+        "[Image #5]why does fail?",
+        "[Image #5]why does fail",
+        "[Image #5]see",
+        "[Image #5]",
+        "[Image #5] [Pasted text #10 +20 lines]",
+        "[Image #2]why does [Image #1] fail?",
+    ] {
+        let mut pty = FakePrompt::idle().holding(left);
+        let (out, _) = send(&mut pty, "now fix it", &earlier);
+        assert_eq!(out, Err(Failure::NotCleared), "{left}");
+        assert!(
+            pty.writes.is_empty(),
+            "{left}: not a key, not even the clear"
+        );
+        assert_eq!(pty.held(), Some(left));
+    }
+    let mut pty = FakePrompt::idle().holding("why does [Image #1] fail?");
+    let (out, trail) = send(&mut pty, "now fix it", &earlier);
+    assert_eq!(out, Ok(Outcome { taken: false }), "{trail:#?}");
+    assert_eq!(pty.sent, ["now fix it"]);
+}

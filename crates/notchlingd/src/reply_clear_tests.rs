@@ -99,6 +99,26 @@ fn a_picture_the_person_pasted_beside_words_like_ours_is_not_cleared_as_ours() {
 }
 
 #[test]
+fn a_picture_the_person_pasted_is_not_cleared_as_a_chip_our_words_name() {
+    let named = "why does [Image #1] fail?";
+    let s = setup(true, PROMPT, sessions());
+    s.deaf.store(true, Ordering::SeqCst);
+    assert!(s
+        .ops
+        .call(&app(), ops::SESSION_REPLY, &reply(named))
+        .is_err());
+    s.writes.lock().unwrap().clear();
+    s.deaf.store(false, Ordering::SeqCst);
+    leave(&s, "[Image #5]why does fail?");
+    let err = s
+        .ops
+        .call(&app(), ops::SESSION_REPLY, &reply("now fix it"))
+        .unwrap_err();
+    assert_eq!(err.code, ErrorCode::Failed);
+    assert!(s.writes.lock().unwrap().is_empty(), "not a key");
+}
+
+#[test]
 fn a_message_of_ours_left_in_the_box_with_its_picture_as_a_chip_is_ours_too() {
     let with_picture =
         "ok\n\n'/Users/me/Library/Application Support/Notchling/drops/17/Screenshot 1.png'";
