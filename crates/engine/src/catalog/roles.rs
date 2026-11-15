@@ -1,6 +1,3 @@
-//! What each delegate model is for, from the catalog's `picks` and `not_for` lists.
-//! Additive: readers that only know `prices` skip both keys.
-
 use serde_json::Value;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -11,7 +8,6 @@ pub struct Pick {
     pub note: String,
 }
 
-/// A model name fragment, an effort, or both that a role should not use.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Avoid {
     pub matching: Option<String>,
@@ -63,7 +59,6 @@ fn parse_tool(section: &Value, keep_empty: bool) -> ToolRoles {
             let roles = strings(p, "roles");
             let effort = match text(p, "effort") {
                 Some(effort) => effort,
-                // A removal names only the model.
                 None if keep_empty && roles.is_empty() => String::new(),
                 None => return None,
             };
@@ -115,9 +110,6 @@ impl Roles {
             .unwrap_or_default()
     }
 
-    /// The data file with the user's `catalog.json` laid over it: a pick replaces the
-    /// compiled-in ones for the same model (an empty `roles` removes them), a `not_for`
-    /// entry replaces the one with the same `match` and `effort`. Bad entries are skipped.
     pub fn load(override_file: Option<&std::path::Path>) -> Roles {
         let mut roles = Roles::built_in();
         let root = override_file
@@ -136,7 +128,6 @@ impl Roles {
         roles
     }
 
-    /// `tool` is the catalog's name: `codex` or `antigravity`.
     pub fn tool(&self, tool: &str) -> &ToolRoles {
         match tool {
             "codex" => &self.codex,
@@ -144,7 +135,6 @@ impl Roles {
         }
     }
 
-    /// Every role any model is marked for, in first-seen order.
     pub fn all_roles(&self) -> Vec<String> {
         let mut roles: Vec<String> = Vec::new();
         for tool in [&self.codex, &self.antigravity] {
@@ -187,8 +177,6 @@ impl ToolRoles {
         self.picks.iter().filter(|p| p.model == model).collect()
     }
 
-    /// Roles a model name is marked not for, whatever the effort (an entry with an effort
-    /// of its own is left out: see `excluded`).
     pub fn not_for(&self, model: &str) -> Vec<String> {
         let model = model.to_lowercase();
         let mut roles: Vec<String> = Vec::new();
@@ -205,8 +193,6 @@ impl ToolRoles {
         roles
     }
 
-    /// Whether `model` at `effort` must not be used for `role`: an entry hits when its
-    /// `match` is in the model name (if it has one) and its `effort` is the effort (if it has one).
     pub fn excluded(&self, model: &str, effort: &str, role: &str) -> bool {
         let model = model.to_lowercase();
         let effort = effort.to_lowercase();
@@ -217,7 +203,6 @@ impl ToolRoles {
         })
     }
 
-    /// Entries that name an effort: `(match, effort, roles)`.
     pub fn not_for_efforts(&self) -> Vec<(Option<String>, String, Vec<String>)> {
         self.avoids
             .iter()

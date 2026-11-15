@@ -1,6 +1,3 @@
-//! Settings > Skills & Models, the Skills section: each tool's Notchling skills and their state,
-//! from the daemon's `install.plan` (the installer's dry run), and the reinstall's reply.
-
 use notchling_locale as t;
 use serde_json::Value;
 
@@ -26,8 +23,6 @@ impl SkillState {
         }
     }
 
-    /// The installer's action for one skill in one tool, as `install.plan` words it. A removal
-    /// is never planned by an install, so it has no state.
     pub fn of_plan(action: &str, tool_missing: bool) -> Option<SkillState> {
         match action {
             "unchanged" => Some(SkillState::Installed),
@@ -90,7 +85,6 @@ pub enum SkillsShown {
     Failed(String),
     Found {
         tools: Vec<ToolSkills>,
-        /// The daemon's install switch: with it off a reinstall writes nothing.
         install_on: bool,
     },
 }
@@ -146,7 +140,6 @@ impl SkillsShown {
         }
     }
 
-    /// The line above the skills while there is nothing to list.
     pub fn status(&self) -> Option<String> {
         match self {
             SkillsShown::Checking => Some(t::settings::skills_checking().into()),
@@ -156,7 +149,6 @@ impl SkillsShown {
         }
     }
 
-    /// Every skill the daemon planned, once, for the reinstall's `what`.
     pub fn names(&self) -> Vec<String> {
         let SkillsShown::Found { tools, .. } = self else {
             return Vec::new();
@@ -180,7 +172,6 @@ impl SkillsShown {
         ) && !self.names().is_empty()
     }
 
-    /// Why the button is off, when the daemon's switch is the reason.
     pub fn switch_note(&self) -> Option<&'static str> {
         match self {
             SkillsShown::Found {
@@ -191,9 +182,6 @@ impl SkillsShown {
     }
 }
 
-/// The line beside Reinstall Skills and whether it is an error: the last result (a failed
-/// reinstall, an override file that couldn't be made) first, so the standing switch note never
-/// hides it, else the switch note.
 pub fn beside_button(
     skills: &SkillsShown,
     result: Option<&(String, bool)>,
@@ -204,9 +192,6 @@ pub fn beside_button(
     }
 }
 
-/// What a reinstall's reply says: `Ok` when it wrote (or had nothing to write); the switch-off
-/// line when the daemon says `on: false`; the first skill's error when one failed; a reply
-/// that says none of these is one this app doesn't read.
 pub fn reinstall_result(reply: Result<Value, String>) -> Result<&'static str, String> {
     let reply = reply?;
     if reply.get("on").and_then(Value::as_bool) == Some(false) {

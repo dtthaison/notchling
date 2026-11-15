@@ -118,8 +118,6 @@ pub fn decide(url: &str, pages: &[Page]) -> Opens {
     }
 }
 
-/// What the Folder tool and a click on the title show in Finder: the file
-/// being viewed, else a saved page's local copy. A live page has none.
 pub fn reveal_target(file: Option<&Path>, opens: &Opens) -> Option<PathBuf> {
     if let Some(file) = file {
         return Some(file.to_path_buf());

@@ -272,7 +272,6 @@ impl SettingsView {
         }
     }
 
-    /// Asks the daemon for the skills' states and the model choices, off the draw.
     pub fn ask_skills(&mut self, cx: &mut Context<Self>) {
         let actions = self.acts.actions.clone();
         let home = std::env::var("HOME").unwrap_or_default();
@@ -318,7 +317,6 @@ impl SettingsView {
         cx.notify();
     }
 
-    /// Makes the empty override file when there is none, then opens it in the user's editor.
     fn open_override(&mut self, cx: &mut Context<Self>) {
         let Some(path) = self.models.file().and_then(|f| f.path.clone()) else {
             return;

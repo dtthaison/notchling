@@ -16,13 +16,10 @@ pub struct SkillsHandlers {
     pub reload: Click,
 }
 
-/// What the page shows besides the daemon's answers.
 pub struct SkillsPageState<'a> {
     pub skills: &'a SkillsShown,
     pub models: &'a ModelsShown,
-    /// A reinstall is running.
     pub busy: bool,
-    /// The last reinstall's result, or why the override file couldn't be made.
     pub result: Option<&'a (String, bool)>,
 }
 

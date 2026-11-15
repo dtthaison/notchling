@@ -1,6 +1,3 @@
-//! Settings > Skills & Models, Models by Job and Override: what the daemon's `catalog.roles`
-//! says each job uses, where that choice came from, and the user's override file.
-
 use notchling_locale as t;
 use serde_json::Value;
 
@@ -35,15 +32,11 @@ impl Source {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ChoiceLine {
-    /// The tool and the effort, as one line.
     pub tool_effort: String,
-    /// The model to use, or the line that says none is available.
     pub model: String,
     pub has_model: bool,
     pub source: Source,
-    /// The engine's note that the marked model was replaced or has a newer sibling.
     pub note: Option<String>,
-    /// The catalog's advice for this pick.
     pub advice: Option<String>,
     pub unchecked: bool,
 }
@@ -73,9 +66,7 @@ impl OverrideState {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OverrideInfo {
-    /// The file's path as the daemon says it, for opening.
     pub path: Option<String>,
-    /// The same with the home folder as `~`, for showing.
     pub shown: String,
     pub state: OverrideState,
 }

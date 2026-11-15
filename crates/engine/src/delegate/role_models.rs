@@ -1,5 +1,3 @@
-//! `delegate-models` with the catalog's roles: what each model is for, and `--for <role>`.
-
 use super::agy_pick;
 use super::deps::Deps;
 use super::family::{self, Newest};
@@ -17,7 +15,6 @@ pub fn catalog_name(tool: Tool) -> &'static str {
     }
 }
 
-/// The text after a model's line: its marked roles with the effort, the use note, what it is not for.
 pub fn suffix(roles: &ToolRoles, model: &str) -> String {
     let mut text = String::new();
     let picks = roles.picks_of(model);
@@ -38,7 +35,6 @@ pub fn suffix(roles: &ToolRoles, model: &str) -> String {
     text
 }
 
-/// One line per entry that names an effort, with the model name it is limited to if any.
 pub fn effort_lines(roles: &ToolRoles) -> Vec<String> {
     roles
         .not_for_efforts()
@@ -50,7 +46,6 @@ pub fn effort_lines(roles: &ToolRoles) -> Vec<String> {
         .collect()
 }
 
-/// The `roles` and `notFor` fields of one model's JSON entry.
 pub fn json_fields(roles: &ToolRoles, model: &str, into: &mut Value) {
     let picks = roles.picks_of(model);
     if !picks.is_empty() {
@@ -90,13 +85,11 @@ pub fn efforts_json(roles: &ToolRoles) -> Value {
         .collect()
 }
 
-/// What a tool lists now, and the replacements it names itself (Codex's `upgrade`).
 pub struct Live {
     pub models: Vec<String>,
     pub hints: Vec<(String, String)>,
 }
 
-/// `models_cache.json`'s `upgrade` on a model: a slug, or an object naming one.
 pub fn codex_hints(codex_home: &Path) -> Vec<(String, String)> {
     use std::io::Read;
     let Ok(file) = std::fs::File::open(codex_home.join("models_cache.json")) else {
@@ -153,8 +146,6 @@ fn live_of(tool: Tool, deps: &Deps) -> Live {
     }
 }
 
-/// The model to use for one marked pick, and a note when it isn't the marked one or a
-/// newer one exists. A model or effort the catalog says is not for the role is never chosen.
 pub fn resolve(
     marked: &str,
     effort: &str,
@@ -211,7 +202,6 @@ pub struct Found {
     pub error: Option<String>,
 }
 
-/// What `--for <role>` answers: a pick per marked model that has a usable model now.
 pub fn find(role: &str, roles: &Roles, deps: &Deps) -> Found {
     let role = role.to_lowercase();
     let mut found = Found {
@@ -251,8 +241,6 @@ pub fn find(role: &str, roles: &Roles, deps: &Deps) -> Found {
     found
 }
 
-/// `delegate-models --for <role>` as text (one line per pick, then `note:` lines) or, with
-/// `--json`, `{"role", "picks": [{"tool","model","effort"}], "notes": [], "error"?}`.
 pub fn models_for(role: &str, json: bool, roles: &Roles, deps: &Deps, out: &mut dyn Write) -> i32 {
     let found = find(role, roles, deps);
     let code = i32::from(found.error.is_some());
@@ -286,12 +274,10 @@ pub fn models_for(role: &str, json: bool, roles: &Roles, deps: &Deps, out: &mut 
     code
 }
 
-/// Whether the arguments ask for `--for`.
 pub fn wants_for(args: &[String]) -> bool {
     args.iter().any(|a| a == "--for" || a.starts_with("--for="))
 }
 
-/// `--for <role>` or `--for=<role>`; nothing else but `--json` is accepted beside it.
 pub fn run_for(args: &[String], json: bool, deps: &Deps, out: &mut dyn Write) -> i32 {
     let roles = Roles::load(deps.catalog_file.as_deref());
     let mut role: Option<String> = None;

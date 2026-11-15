@@ -11,8 +11,8 @@ pub mod members;
 pub mod outward;
 pub mod persist;
 pub mod policy;
-pub mod snapshot;
 pub mod shell_job;
+pub mod snapshot;
 pub mod state;
 pub mod versions;
 pub mod wire;
@@ -31,6 +31,8 @@ pub use state::{role_of, ClusterState, Command, JournalEntry};
 pub use versions::{compat, Compat, Purpose, Versions};
 
 #[cfg(test)]
+mod blob_tests;
+#[cfg(test)]
 mod fence_tests;
 #[cfg(test)]
 mod grant_files_hostile_tests;
@@ -38,8 +40,6 @@ mod grant_files_hostile_tests;
 mod grant_files_tests;
 #[cfg(test)]
 mod grants_tests;
-#[cfg(test)]
-mod blob_tests;
 #[cfg(test)]
 mod id_tests;
 #[cfg(test)]

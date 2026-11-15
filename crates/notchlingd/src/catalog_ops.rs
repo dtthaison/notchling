@@ -224,7 +224,6 @@ impl CatalogService {
         .with_override_file(state.join("catalog.json"))
     }
 
-    /// The user's `catalog.json`, which `catalog.roles` reads afresh on every call.
     pub fn with_override_file(mut self, file: PathBuf) -> CatalogService {
         self.override_file = Some(file);
         self
@@ -408,7 +407,6 @@ impl CatalogService {
 }
 
 impl CatalogService {
-    /// What each model role resolves to now, and the override file's place and state.
     fn roles(&self) -> Value {
         let file = self.override_file.as_deref();
         let roles = Roles::load(file);

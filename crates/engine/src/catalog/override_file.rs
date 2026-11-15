@@ -1,7 +1,3 @@
-//! The user's `catalog.json` beside the daemon's socket: what Settings shows of it, and the
-//! empty starter it creates so there is a file to open. JSON has no comments, so the starter
-//! is `{}`, which the loaders read as "nothing overridden".
-
 use std::fs;
 use std::path::Path;
 
@@ -10,9 +6,7 @@ pub const STARTER: &str = "{}\n";
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum State {
     Missing,
-    /// A file with JSON that is an object (possibly empty).
     Found,
-    /// A file the loaders skip: not JSON, or JSON that is not an object.
     Unreadable,
 }
 
@@ -37,7 +31,6 @@ pub fn state(path: &Path) -> State {
     }
 }
 
-/// Makes the starter when nothing is at `path`; never touches what is there. True when it wrote.
 pub fn ensure(path: &Path) -> Result<bool, String> {
     if fs::symlink_metadata(path).is_ok() {
         return Ok(false);

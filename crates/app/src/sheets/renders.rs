@@ -190,7 +190,6 @@ fn plan_skill(name: &str, tool: &str, action: &str, reason: Option<&str>) -> Val
         "path": "/Users/me/.claude/skills/x", "error": null})
 }
 
-/// The Skills & Models page over made-up replies: one of each skill state and each model source.
 pub fn skills_models(shown: Shown) -> Option<(SkillsShown, ModelsShown)> {
     if shown != Shown::SettingsSkills {
         return None;

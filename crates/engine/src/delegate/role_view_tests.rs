@@ -8,7 +8,6 @@ fn live(models: &[&str]) -> Live {
     }
 }
 
-/// The override laid over the data file the way `Roles::load` does it.
 fn user(tag: &str, text: &str) -> Roles {
     let dir = std::env::temp_dir().join(format!("nl-roleview-{}-{tag}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
@@ -219,12 +218,10 @@ fn an_excluded_pick_is_not_shown_even_when_the_live_list_is_unknown() {
 #[test]
 fn no_model_is_never_tagged_live() {
     let built = Roles::built_in();
-    // The built-in pick's family has nothing live: no model, still Built-in.
     let v = views(&built, &built, &live(&[]), &live(&["gemini-4-flash"]));
     let c = &of(&v, "review").choices[0];
     assert_eq!(c.model, None);
     assert_eq!(c.source, Source::BuiltIn);
-    // A built-in pick the catalog excludes with the list unknown: no model, Built-in.
     let roles = user(
         "excl-builtin",
         r#"{"antigravity": {"not_for": [{"match": "hydrogen", "roles": ["review"]}]}}"#,

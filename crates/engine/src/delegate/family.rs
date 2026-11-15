@@ -1,7 +1,3 @@
-//! A model's family: the codename word (hydrogen, argon, sol, flash) with what comes
-//! before the version and what follows the codename. `gemini-4-hydrogen` and
-//! `gemini-4.1-hydrogen` are one family; `gemini-4-hydrogen-xhigh` is another variant.
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Family {
     pub prefix: String,
@@ -50,11 +46,9 @@ impl Family {
 
 pub enum Newest<'a> {
     Nothing,
-    /// The newest live model of the family, and whether it is newer than the marked one.
     One(&'a str, bool),
 }
 
-/// The newest live model of `marked`'s family other than `marked`, skipping `skip`ped ones.
 pub fn newest<'a>(marked: &str, live: &'a [String], skip: impl Fn(&str) -> bool) -> Newest<'a> {
     let Some(family) = parse(marked) else {
         return Newest::Nothing;

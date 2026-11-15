@@ -7,7 +7,6 @@ pub const MARK: &str = ".notchling-skill";
 const MARK_TEXT: &str = "Written by Notchling. Notchling updates and removes this skill; delete this file to keep the folder as it is.\n";
 const SKILL_FILE: &str = "SKILL.md";
 
-/// The reason a skill is skipped when its tool has no folder here; the daemon also says it as a flag.
 pub const TOOL_MISSING: &str = "the tool is not installed here";
 
 #[derive(Clone, Debug)]
