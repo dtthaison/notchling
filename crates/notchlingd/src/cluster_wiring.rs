@@ -22,7 +22,7 @@ use crate::late_emit::Events;
 use crate::layout::Layout;
 use crate::shell_jobs::ShellJobs;
 use crate::snap_observe::{SnapObserver, EVERY as OBSERVE_EVERY};
-use crate::snap_ready::{last_set_mb_of, predicate, SenderSlot};
+use crate::snap_ready::{predicate, LastSet, SenderSlot};
 use crate::snap_recv::{self, SnapCalls};
 use crate::snap_run::{Context as SnapContext, SnapRunner, RETRY as STAGE_RETRY};
 use crate::snap_send::SnapSender;
@@ -269,7 +269,7 @@ fn start_node(
     );
     let probe: Probe = Box::new(move || {
         let mut found = with_tools(versions.tool_versions());
-        found.host = Some(host.facts());
+        found.host = host.facts();
         found
     });
     let setup = ClusterSetup {
@@ -350,11 +350,16 @@ impl ClusterParts {
         let blobs = Blobs::new(layout.cluster_dir());
         let workspace = Workspace::new(layout.cluster_dir(), launcher.clone(), blobs.clone());
         let sender_slot: SenderSlot = Arc::new(OnceLock::new());
+        let last_set = Arc::new(LastSet::new(
+            holder.clone(),
+            sender_slot.clone(),
+            layout.cluster_dir(),
+        ));
         let snap = snap_recv::build(
             layout.cluster_dir(),
             blobs,
             holder.clone(),
-            predicate(holder.clone(), sender_slot.clone()),
+            predicate(last_set.clone()),
         );
         let _ = sender_slot.set(snap.sender.clone());
         let snap_run = Arc::new(SnapRunner::spawn(
@@ -422,10 +427,9 @@ impl ClusterParts {
                 OBSERVE_EVERY,
             ));
         }
-        let last_set = sender_slot.clone();
         let ops = Arc::new(
             ClusterOps::new(node.clone(), link, room.clone(), audit)
-                .with_last_set(Arc::new(move || last_set_mb_of(&last_set))),
+                .with_last_set(Arc::new(move || last_set.mb())),
         );
         let code: Arc<dyn CodeSender> = sender.clone();
         let dispatch = DispatchOps::with_code(node.clone(), shells.clone(), Some(code));

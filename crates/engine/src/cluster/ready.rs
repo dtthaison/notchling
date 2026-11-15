@@ -72,6 +72,7 @@ fn gb(mb: u64) -> String {
 fn host_of<'a>(s: Subject<'a>) -> Result<&'a HostFacts, String> {
     s.versions
         .and_then(|v| v.host.as_ref())
+        .filter(|h| !h.home.is_empty() && !h.user.is_empty())
         .ok_or_else(|| format!("{} hasn't reported its disk yet", s.name))
 }
 

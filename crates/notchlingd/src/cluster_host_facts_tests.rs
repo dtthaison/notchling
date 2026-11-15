@@ -147,20 +147,74 @@ fn host_facts_probe_runs_read_only_commands() {
     }
 }
 
+fn watched(fake: &Arc<FakeLauncher>, every: Duration, retry: Duration) -> HostWatch {
+    HostWatch::spawn(Arc::new(probe("macos", fake)), every, retry)
+}
+
+fn until(what: &str, mut check: impl FnMut() -> bool) {
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while std::time::Instant::now() < deadline {
+        if check() {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    panic!("never happened: {what}");
+}
+
 #[test]
-fn facts_are_read_at_most_every_ten_minutes() {
+fn the_cadence_is_ten_minutes_and_a_minute_after_an_unknown_read() {
+    assert_eq!(EVERY, Duration::from_secs(600));
+    assert_eq!(RETRY, Duration::from_secs(60));
+    assert_eq!(TIMEOUT, Duration::from_secs(5));
+}
+
+#[test]
+fn a_known_read_is_not_repeated_before_its_cadence() {
     let fake = Arc::new(FakeLauncher::new());
     fake.push_output(Ok(LaunchOutput::ok("FileVault is On.")));
-    let p = probe("macos", &fake);
-    let first = p.facts();
-    let second = p.facts();
-    assert_eq!(first, second);
+    let watch = watched(&fake, Duration::from_secs(3600), Duration::from_millis(5));
+    until("the first read", || watch.facts().is_some());
+    std::thread::sleep(Duration::from_millis(100));
     assert_eq!(fake.commands().len(), 1);
-    assert_eq!(EVERY, Duration::from_secs(600));
-    let again = probe("macos", &fake).with_every(Duration::ZERO);
-    again.facts();
-    again.facts();
-    assert_eq!(fake.commands().len(), 3);
+    assert_eq!(watch.facts().unwrap().encrypted, Some(true));
+}
+
+#[test]
+fn an_unknown_read_is_retried_at_the_short_cadence() {
+    let fake = Arc::new(FakeLauncher::new());
+    fake.push_output(Ok(LaunchOutput::ok("odd")));
+    fake.push_output(Ok(LaunchOutput::ok("FileVault is On.")));
+    let watch = watched(&fake, Duration::from_secs(3600), Duration::from_millis(5));
+    until("the retry found it", || {
+        watch.facts().is_some_and(|f| f.encrypted == Some(true))
+    });
+    assert_eq!(fake.commands().len(), 2);
+}
+
+#[test]
+fn nothing_is_known_until_the_first_read_and_a_slow_probe_never_waits_for_a_caller() {
+    let fake = Arc::new(FakeLauncher::new());
+    fake.set_delay(Duration::from_millis(400));
+    fake.push_output(Ok(LaunchOutput::ok("FileVault is On.")));
+    let started = std::time::Instant::now();
+    let watch = watched(&fake, Duration::from_secs(3600), Duration::from_secs(3600));
+    assert_eq!(watch.facts(), None);
+    assert!(started.elapsed() < Duration::from_millis(200));
+    until("the slow read lands", || watch.facts().is_some());
+}
+
+#[test]
+fn dropping_the_watch_stops_the_reads() {
+    let fake = Arc::new(FakeLauncher::new());
+    let watch = watched(&fake, Duration::from_millis(5), Duration::from_millis(5));
+    assert!(watch.running());
+    until("a few reads", || fake.commands().len() >= 3);
+    drop(watch);
+    std::thread::sleep(Duration::from_millis(50));
+    let after = fake.commands().len();
+    std::thread::sleep(Duration::from_millis(100));
+    assert_eq!(fake.commands().len(), after);
 }
 
 #[test]

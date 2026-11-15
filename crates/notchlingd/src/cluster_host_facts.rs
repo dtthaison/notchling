@@ -2,10 +2,12 @@ use notchling_engine::cluster::ready::HostFacts;
 use notchling_engine::control::{Command, Launcher};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
+use std::sync::mpsc::{channel, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 pub const EVERY: Duration = Duration::from_secs(600);
+pub const RETRY: Duration = Duration::from_secs(60);
 const FDESETUP: &str = "/usr/bin/fdesetup";
 pub const TIMEOUT: Duration = Duration::from_secs(5);
 const FREE_STEP_MB: u64 = 256;
@@ -24,8 +26,6 @@ pub struct HostProbe {
     launcher: Arc<dyn Launcher>,
     host: Host,
     free: FreeMb,
-    every: Duration,
-    cache: Mutex<Option<(Instant, HostFacts)>>,
 }
 
 impl HostProbe {
@@ -34,29 +34,10 @@ impl HostProbe {
             launcher,
             host,
             free,
-            every: EVERY,
-            cache: Mutex::new(None),
         }
-    }
-
-    pub fn with_every(mut self, every: Duration) -> HostProbe {
-        self.every = every;
-        self
     }
 
     pub fn facts(&self) -> HostFacts {
-        let mut cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some((at, facts)) = cache.as_ref() {
-            if at.elapsed() < self.every {
-                return facts.clone();
-            }
-        }
-        let facts = self.read();
-        *cache = Some((Instant::now(), facts.clone()));
-        facts
-    }
-
-    fn read(&self) -> HostFacts {
         let free = (self.free)(&self.host.home).unwrap_or(0);
         HostFacts {
             encrypted: self.encrypted(),
@@ -97,6 +78,45 @@ impl HostProbe {
             return None;
         }
         home_on_crypt(&out.output, &self.host.home)
+    }
+}
+
+pub fn is_known(facts: &HostFacts) -> bool {
+    facts.encrypted.is_some() && facts.free_mb > 0
+}
+
+pub struct HostWatch {
+    seen: Arc<Mutex<Option<HostFacts>>>,
+    stop: Option<Sender<()>>,
+}
+
+impl HostWatch {
+    pub fn spawn(probe: Arc<HostProbe>, every: Duration, retry: Duration) -> HostWatch {
+        let seen: Arc<Mutex<Option<HostFacts>>> = Arc::new(Mutex::new(None));
+        let (stop, stopped) = channel::<()>();
+        let slot = seen.clone();
+        let spawned = std::thread::Builder::new()
+            .name("host-facts".into())
+            .spawn(move || loop {
+                let facts = probe.facts();
+                let wait = if is_known(&facts) { every } else { retry };
+                *slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(facts);
+                if !matches!(stopped.recv_timeout(wait), Err(RecvTimeoutError::Timeout)) {
+                    return;
+                }
+            });
+        HostWatch {
+            seen,
+            stop: spawned.ok().map(|_| stop),
+        }
+    }
+
+    pub fn facts(&self) -> Option<HostFacts> {
+        self.seen.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
+    pub fn running(&self) -> bool {
+        self.stop.is_some()
     }
 }
 
@@ -184,9 +204,9 @@ pub fn user_name(home: &Path) -> String {
         .unwrap_or_default()
 }
 
-pub fn real(launcher: Arc<dyn Launcher>, home: PathBuf) -> HostProbe {
+pub fn real(launcher: Arc<dyn Launcher>, home: PathBuf) -> HostWatch {
     let user = user_name(&home);
-    HostProbe::new(
+    let probe = HostProbe::new(
         launcher,
         Host {
             os: std::env::consts::OS,
@@ -194,7 +214,8 @@ pub fn real(launcher: Arc<dyn Launcher>, home: PathBuf) -> HostProbe {
             user,
         },
         Box::new(free_mb_of),
-    )
+    );
+    HostWatch::spawn(Arc::new(probe), EVERY, RETRY)
 }
 
 #[cfg(test)]

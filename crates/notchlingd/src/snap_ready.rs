@@ -3,24 +3,66 @@ use crate::cluster_node::ClusterNode;
 use crate::snap_send::SnapSender;
 use notchling_engine::cluster::ready::{assess, ready_in};
 use notchling_engine::cluster::snapshot::Trigger;
+use notchling_engine::cluster::standby_store::StandbyStore;
 use notchling_engine::cluster::{LocalCmd, NodeId};
 use serde_json::Value;
 use std::collections::BTreeSet;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 
 pub type Ready = Arc<dyn Fn(&NodeId) -> bool + Send + Sync>;
 pub type SenderSlot = Arc<OnceLock<Arc<SnapSender>>>;
 
-pub fn last_set_mb_of(sender: &SenderSlot) -> u64 {
-    sender.get().map_or(0, |s| s.last_set_mb())
+pub struct LastSet {
+    node: Arc<OnceLock<Arc<ClusterNode>>>,
+    sender: SenderSlot,
+    cluster: PathBuf,
 }
 
-pub fn predicate(node: Arc<OnceLock<Arc<ClusterNode>>>, sender: SenderSlot) -> Ready {
+pub fn standby_set_bytes(cluster: &Path, home: &NodeId) -> u64 {
+    StandbyStore::new(cluster, home)
+        .current()
+        .map_or(0, |m| m.parts.iter().map(|p| p.len).sum())
+}
+
+impl LastSet {
+    pub fn new(
+        node: Arc<OnceLock<Arc<ClusterNode>>>,
+        sender: SenderSlot,
+        cluster: PathBuf,
+    ) -> LastSet {
+        LastSet {
+            node,
+            sender,
+            cluster,
+        }
+    }
+
+    pub fn mb(&self) -> u64 {
+        let Some(node) = self.node.get() else {
+            return 0;
+        };
+        let status = node.status();
+        let bytes = if is_home(&status) {
+            self.sender.get().map_or(0, |s| s.last_set_bytes())
+        } else {
+            status
+                .get("cluster")
+                .and_then(|c| c.get("home"))
+                .and_then(Value::as_str)
+                .and_then(NodeId::parse)
+                .map_or(0, |home| standby_set_bytes(&self.cluster, &home))
+        };
+        bytes.div_ceil(1024 * 1024)
+    }
+}
+
+pub fn predicate(last: Arc<LastSet>) -> Ready {
     Arc::new(move |id: &NodeId| {
-        let Some(node) = node.get() else {
+        let Some(node) = last.node.get() else {
             return false;
         };
-        ready_in(&node.status(), id, last_set_mb_of(&sender))
+        ready_in(&node.status(), id, last.mb())
     })
 }
 

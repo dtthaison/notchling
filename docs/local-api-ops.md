@@ -283,6 +283,17 @@ from the app in this run, or `cluster.join` (below), or a restart of a headless 
 - `Member` is `{id, name, role, canBeMaster, online, client, headless, reference, state, versions, load, desired,
   acceptsDelegation}`; `role` is `home`, `standby` or `worker`, `state` `pending`, `active` or `removed`,
   `load` `{cpu, memUsedMb, memTotalMb}` or `null`, `desired` `{acting, bridge, install}`.
+- `Member.versions` may carry `host` `{encrypted: bool \| null, home, user, free_mb}`, the machine's own report of
+  its disk (FileVault or LUKS, read-only, at most every 10 minutes by a background thread, free space rounded down to
+  256 MB); a node that hasn't reported yet, or reports an empty `home` or `user`, has no usable `host` and is not ready.
+- `cluster.status` adds `ready` `{ok, reason, checks: [{id, ok, text}]}` to every active Can Be Master member (`id` is
+  `encrypted`, `home`, `space` or `tools`; `reason` is the first failing check's text, or `null`). `cluster.changed`
+  events carry the status without `ready`: read `cluster.status` for it. The space check needs twice the newest set
+  and 5 GB, and the set's size comes from the node that answers: on the primary the newest set it staged (before
+  any, the largest total of transcript lengths a Standby acknowledged, else 0); on a Standby the size of its own
+  current set from the primary (the sum of the set's part lengths, 0 before one). So a Standby's own status and the
+  primary's can differ on `space` while the sets are changing; the primary's figure is the one that decides whether
+  a set is sent.
 - `cluster.join` refuses `"this node is already in a cluster"`. With the switch off it turns the switch on
   when the app asks, or an agent while no app is attached (a headless machine), recorded
   as a `switch.changed` event (switch `cluster`, cause `user` or `cluster_join`); an agent's join while an app is

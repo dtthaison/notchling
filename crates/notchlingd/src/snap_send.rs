@@ -169,12 +169,24 @@ impl SnapSender {
         targets
     }
 
+    pub fn last_set_bytes(&self) -> u64 {
+        let latest = lock(&self.inner.state).latest.clone();
+        match latest {
+            Some(o) => o.manifest.parts.iter().map(|p| p.len).sum(),
+            None => self
+                .inner
+                .parts
+                .book
+                .all()
+                .values()
+                .map(|a| a.lengths.values().sum::<u64>())
+                .max()
+                .unwrap_or(0),
+        }
+    }
+
     pub fn last_set_mb(&self) -> u64 {
-        let state = lock(&self.inner.state);
-        state.latest.as_ref().map_or(0, |o| {
-            let bytes: u64 = o.manifest.parts.iter().map(|p| p.len).sum();
-            bytes.div_ceil(1024 * 1024)
-        })
+        self.last_set_bytes().div_ceil(1024 * 1024)
     }
 
     pub fn tick(&self) -> Vec<NodeId> {

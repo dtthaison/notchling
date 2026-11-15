@@ -120,7 +120,7 @@ fn a_missing_tool_is_not_ready_with_a_reason() {
 }
 
 #[test]
-fn can_be_master_is_inert_until_ready() {
+fn not_ready_until_every_check_passes() {
     let mut standby = master("m1", Some(facts(Some(false))));
     assert!(ready(&standby, &primary(), 0).is_err());
     standby.can_be_master = false;
@@ -218,4 +218,18 @@ fn checks_read_back_from_the_status_a_machine_card_gets() {
     assert!(got[1].1.is_ok() && got[2].1.is_ok() && got[3].1.is_ok());
     assert_eq!(checks_in(&status, off.id.as_str()), None);
     assert_eq!(checks_in(&status, "nobody"), None);
+}
+
+#[test]
+fn empty_home_or_user_counts_as_unknown() {
+    for blank in ["home", "user"] {
+        let mut h = facts(Some(true));
+        match blank {
+            "home" => h.home.clear(),
+            _ => h.user.clear(),
+        }
+        let standby = master("m1", Some(h));
+        let why = ready(&standby, &primary(), 0).expect_err("not ready");
+        assert!(why.contains("m1"), "{blank}: {why}");
+    }
 }
