@@ -1,0 +1,38 @@
+{
+  "data": {
+    "cluster": {
+      "nodes": [
+        {
+          "addrs": [
+            "192.168.1.5:47821"
+          ],
+          "canBeMaster": true,
+          "fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "id": "0123456789abcdef",
+          "name": "m5",
+          "online": false
+        },
+        {
+          "addrs": [
+            "192.168.1.6:47821",
+            "m1.local:47821"
+          ],
+          "canBeMaster": true,
+          "fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "id": "fedcba9876543210",
+          "name": "m1",
+          "online": true
+        }
+      ],
+      "primary": "0123456789abcdef",
+      "term": 3
+    },
+    "device": {
+      "id": "6D0F2A58-3B77-4C0E-9A41-5E8B1C7D2F90",
+      "name": "Son's iPhone"
+    },
+    "version": 1
+  },
+  "id": 1,
+  "ok": true
+}

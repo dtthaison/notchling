@@ -39,9 +39,18 @@ pub(crate) struct FakeActs {
     who: &'static str,
     log: Log,
     pub(crate) on_stop: Mutex<Option<Hook>>,
+    pub(crate) swaps: AtomicUsize,
+    pub(crate) held: OnceLock<Arc<crate::cluster_relay::HeldRelay>>,
 }
 
 impl Acts for FakeActs {
+    fn db_replaced(&self) {
+        self.swaps.fetch_add(1, Ordering::SeqCst);
+        if let Some(held) = self.held.get() {
+            held.carry();
+        }
+    }
+
     fn stop_claude(&self, id: &str) -> Result<(), String> {
         if let Some(hook) = self.on_stop.lock().unwrap().as_ref() {
             hook(id);
@@ -392,6 +401,8 @@ fn side(w: &Arc<World>, who: &'static str, link: Arc<FakeLink>, log: &Log, clust
         who,
         log: log.clone(),
         on_stop: Mutex::new(None),
+        swaps: AtomicUsize::new(0),
+        held: OnceLock::new(),
     });
     let rows = Arc::new(Rows::default());
     let snaps = Arc::new(StoreSnaps {

@@ -2,6 +2,7 @@ use crate::cluster_prompts::RemotePrompts;
 use crate::cluster_sessions::RemoteSessions;
 use crate::cluster_switches::LateHandler;
 use notchling_engine::bridge::model::{PendingPrompt, PromptKind, PromptQuestion};
+use notchling_engine::bridge::relay::Relay;
 use notchling_engine::sessions::Agent;
 use notchling_local_api::{ops, ApiError, Caller, ClientKind, ErrorCode, Tier};
 use serde_json::{json, Value};
@@ -20,6 +21,7 @@ struct Parts {
 
 pub struct PhoneCluster {
     parts: OnceLock<Parts>,
+    relay: OnceLock<Arc<dyn Relay>>,
     followed: Mutex<HashMap<String, u64>>,
 }
 
@@ -40,6 +42,7 @@ impl PhoneCluster {
     pub fn none() -> Arc<PhoneCluster> {
         Arc::new(PhoneCluster {
             parts: OnceLock::new(),
+            relay: OnceLock::new(),
             followed: Mutex::new(HashMap::new()),
         })
     }
@@ -55,6 +58,14 @@ impl PhoneCluster {
             sessions,
             prompts,
         });
+    }
+
+    pub fn attach_relay(&self, relay: Arc<dyn Relay>) {
+        let _ = self.relay.set(relay);
+    }
+
+    pub fn relay(&self) -> Option<Arc<dyn Relay>> {
+        self.relay.get().cloned()
     }
 
     pub fn attached(&self) -> bool {

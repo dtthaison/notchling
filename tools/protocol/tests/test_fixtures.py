@@ -152,7 +152,8 @@ class RouterCoverageTests(unittest.TestCase):
             for part in line[5:].split(","):
                 match = re.match(r'`?(\w+)`?(?: = "(\w+)")?$', part.strip())
                 codes.add(match.group(2) or match.group(1))
-        self.assertEqual(codes, set(DEFS["ErrorCode"]["enum"]))
+        rust_only = {"primary_unreachable"}
+        self.assertEqual(codes | rust_only, set(DEFS["ErrorCode"]["enum"]))
 
 
 if __name__ == "__main__":

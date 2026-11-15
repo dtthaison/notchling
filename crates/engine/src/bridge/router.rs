@@ -156,8 +156,11 @@ impl Router {
         };
         self.limiter.record_success(&connection.remote_address);
         self.devices.touch(&device.id);
-        let data =
+        let mut data =
             json!({"device": {"id": device.id, "name": device.name}, "version": wire::VERSION});
+        if let Some(cluster) = self.backend.relay().and_then(|relay| relay.cluster()) {
+            data["cluster"] = cluster;
+        }
         connection.authenticate(device);
         connection.send_text(wire::ok(id, data));
     }
@@ -257,9 +260,13 @@ impl Router {
                             .collect(),
                     );
                 }
+                self.mark_stale(&mut data);
                 Ok(data)
             }
-            "chat.get" => self.chat_get(body),
+            "chat.get" => self.chat_get(body).map(|mut data| {
+                self.mark_stale(&mut data);
+                data
+            }),
             "viz.get" => self.viz_get(body),
             "web.snapshot" => self.web_snapshot(body, id, connection),
             "session.message" => self.session_message(body, connection),
@@ -273,6 +280,9 @@ impl Router {
             "chat.image" => self.chat_image(body, id, connection),
             "session.takeover" => self.session_takeover(body, connection),
             "inbox.list" => Ok(self.inbox_list()),
+            "held.list" => Ok(self.held_list()),
+            "held.cancel" => self.held_cancel(body),
+            "held.confirm" => self.held_confirm(body),
             "inbox.answer" => self.inbox_answer(body, connection),
             "projects.recent" => Ok(json!({"projects": self.backend.recent_projects()})),
             "subscribe" => self.subscribe(body, connection),
@@ -325,6 +335,14 @@ pub(crate) fn reply_error(connection: &Connection, id: Option<&Value>, failure: 
 }
 
 pub fn validated_folder(path: &str, home: &Path) -> Result<PathBuf, BridgeFailure> {
+    let resolved = validated_path(path, home)?;
+    if !resolved.is_dir() {
+        return Err(BridgeFailure::not_found("The folder doesn't exist."));
+    }
+    Ok(resolved)
+}
+
+pub fn validated_path(path: &str, home: &Path) -> Result<PathBuf, BridgeFailure> {
     if !path.starts_with('/') {
         return Err(BridgeFailure::invalid("cwd must be an absolute path."));
     }
@@ -334,9 +352,6 @@ pub fn validated_folder(path: &str, home: &Path) -> Result<PathBuf, BridgeFailur
         return Err(BridgeFailure::invalid(
             "Only folders inside the Mac's home folder can be opened.",
         ));
-    }
-    if !resolved.is_dir() {
-        return Err(BridgeFailure::not_found("The folder doesn't exist."));
     }
     Ok(resolved)
 }

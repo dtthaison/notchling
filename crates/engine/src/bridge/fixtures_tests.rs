@@ -1,5 +1,8 @@
 use super::fixtures_data::*;
-use super::test_support::{inbox_item, is_ok, RecordingIo, Rig, NOW_MS};
+use super::relay::{HeldNoticeView, HeldView};
+use super::test_support::{
+    inbox_item, is_ok, scripted_cluster, Plan, RecordingIo, Rig, ScriptedRelay, NOW_MS,
+};
 use super::wire::{self, BridgeFailure};
 use crate::inbox::{ActionId, Kind};
 use serde_json::{json, Value};
@@ -34,8 +37,15 @@ fn canned(rig: &Rig) {
 }
 
 fn connect() -> Phone {
+    connect_with(None)
+}
+
+fn connect_with(relay: Option<Arc<ScriptedRelay>>) -> Phone {
     let rig = Rig::new();
     canned(&rig);
+    if let Some(relay) = relay {
+        rig.backend.with(|s| s.relay = Some(relay));
+    }
     std::fs::create_dir_all(rig.home().join("src/app")).expect("project");
     let (_, token) = super::backend::Devices::register(rig.devices.as_ref(), "Son's iPhone", "ios")
         .expect("register");
@@ -87,6 +97,11 @@ impl Run {
         phone.io.texts()[before..].to_vec()
     }
 
+    fn round_trip_failure(&mut self, phone: &Phone, request: &str, patch: Value) -> String {
+        let text = self.request(request, patch);
+        self.send(phone, &text).last().expect("an answer").clone()
+    }
+
     fn round_trip(
         &mut self,
         phone: &Phone,
@@ -126,6 +141,7 @@ fn every_fixture_is_captured_or_accepted() {
     uploads(&mut run);
     subscriptions(&mut run);
     inbox(&mut run);
+    relay(&mut run);
     errors(&mut run);
     binary_frames();
 
@@ -592,4 +608,126 @@ fn binary_frames() {
         wire::frame::phone(7, &jpeg),
         [b"PHN1".as_slice(), &[0, 0, 0, 7], &jpeg].concat()
     );
+}
+
+fn held_entries() -> Vec<HeldView> {
+    vec![
+        HeldView {
+            id: "held-1".into(),
+            op: "session.message".into(),
+            session_id: Some("0123456789abcdef/job-7".into()),
+            summary: "Run the tests again".into(),
+            at_ms: 1_793_541_465_000,
+            waiting: false,
+        },
+        HeldView {
+            id: "held-2".into(),
+            op: "session.new".into(),
+            session_id: None,
+            summary: "New session in /Users/example/src/app".into(),
+            at_ms: 1_793_537_865_000,
+            waiting: true,
+        },
+    ]
+}
+
+fn relay(run: &mut Run) {
+    let none = || json!({});
+
+    let relay = ScriptedRelay::new(Some(scripted_cluster()));
+    let phone = connect_with(Some(relay.clone()));
+    let hello = phone.io.texts()[0].clone();
+    run.request("HelloRequest", none());
+    run.capture("HelloResponse.cluster", &hello, |o| {
+        set_data(
+            o,
+            "device",
+            json!({"id": "6D0F2A58-3B77-4C0E-9A41-5E8B1C7D2F90", "name": "Son's iPhone"}),
+        );
+    });
+
+    relay.plan(Plan::Relayed);
+    let sent = run.round_trip(&phone, "SessionMessageRequest", json!({"id": 9}), None);
+    run.capture("SentResponse.relayed", &sent[0], |_| {});
+    let project = phone
+        .rig
+        .home()
+        .join("src/app")
+        .to_string_lossy()
+        .into_owned();
+    let started = run.round_trip(&phone, "SessionNewRequest", json!({"cwd": project}), None);
+    run.capture("SessionNewResponse.relayed", &started[0], |_| {});
+    let answered = run.round_trip(&phone, "PromptAnswerRequest", none(), None);
+    run.capture("PromptAnswerResponse.relayed", &answered[0], |_| {});
+
+    relay.plan(Plan::Fail(BridgeFailure::primary_unreachable(
+        "m5",
+        "m5 can't be reached, and no copy of that chat is on this Mac.",
+    )));
+    let refused = run.round_trip_failure(&phone, "SessionMessageRequest", json!({"id": 46}));
+    run.capture("ErrorResponse.primary_unreachable", &refused, |_| {});
+
+    *relay.stale.lock().expect("stale") = Some(1_793_541_000_000);
+    run.round_trip(
+        &phone,
+        "SessionsListRequest",
+        none(),
+        Some("SessionsListResponse.stale"),
+    );
+    run.round_trip(
+        &phone,
+        "ChatGetRequest",
+        none(),
+        Some("ChatGetResponse.stale"),
+    );
+    *relay.stale.lock().expect("stale") = None;
+
+    let empty = connect_with(Some(ScriptedRelay::new(None)));
+    run.round_trip(
+        &empty,
+        "HeldListRequest",
+        none(),
+        Some("HeldListResponse.empty"),
+    );
+
+    let relay = ScriptedRelay::new(None);
+    *relay.entries.lock().expect("entries") = held_entries();
+    *relay.notices.lock().expect("notices") = vec![HeldNoticeView {
+        id: "held-0".into(),
+        reason: "m5 closed that question before your answer arrived".into(),
+        at_ms: 1_793_541_465_500,
+    }];
+    let phone = connect_with(Some(relay.clone()));
+    let subscribed = run.round_trip(&phone, "SubscribeRequest.held", none(), None);
+    assert_eq!(subscribed.len(), 2, "the held state, then the answer");
+    run.capture("HeldChangedEvent", &subscribed[0], |_| {});
+    run.round_trip(&phone, "HeldListRequest", none(), Some("HeldListResponse"));
+    run.round_trip(
+        &phone,
+        "HeldConfirmRequest",
+        none(),
+        Some("HeldConfirmResponse"),
+    );
+    run.round_trip(
+        &phone,
+        "HeldCancelRequest",
+        none(),
+        Some("HeldCancelResponse"),
+    );
+    relay
+        .delivered
+        .lock()
+        .expect("delivered")
+        .push("held-1".into());
+    run.round_trip(
+        &phone,
+        "HeldCancelRequest",
+        none(),
+        Some("HeldCancelResponse.delivered"),
+    );
+
+    relay.plan(Plan::Hold);
+    relay.entries.lock().expect("entries").clear();
+    let held = run.round_trip(&phone, "SessionMessageRequest", json!({"id": 44}), None);
+    run.capture("HeldResponse", held.last().expect("answer"), |_| {});
 }

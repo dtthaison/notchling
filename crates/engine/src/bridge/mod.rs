@@ -10,9 +10,11 @@ pub mod inbox;
 pub mod live;
 pub mod model;
 pub mod net;
+pub mod relay;
 pub mod router;
 mod router_inbox;
 mod router_ops;
+mod router_relay;
 pub mod snapshot;
 pub mod stream;
 pub mod uploads;
@@ -43,6 +45,8 @@ mod inbox_tests;
 mod live_tests;
 #[cfg(test)]
 mod router_cluster_tests;
+#[cfg(test)]
+mod router_relay_tests;
 #[cfg(test)]
 mod router_tests;
 #[cfg(test)]

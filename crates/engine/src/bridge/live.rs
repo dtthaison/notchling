@@ -4,6 +4,7 @@ use super::extras::{wire_image, Extras};
 use super::foreign::{self, AcpPermission, ForeignRow, Tool};
 use super::inbox::InboxOutcome;
 use super::model::*;
+use super::relay::Relay;
 use super::wire::BridgeFailure;
 use crate::inbox::{ActionId, Item};
 use crate::transcript::{chat, codex, conversation, model::Conversation, snapshot};
@@ -56,6 +57,9 @@ pub trait Sources: Send + Sync {
     }
     fn request_approval(&self, _device_name: &str, _platform: &str, _address: &str) -> bool {
         false
+    }
+    fn relay(&self) -> Option<Arc<dyn Relay>> {
+        None
     }
     fn inbox_items(&self) -> Vec<Item> {
         Vec::new()
@@ -400,6 +404,10 @@ impl<S: Sources, A: Acting> BridgeBackend for LiveBackend<S, A> {
 
     fn stop_phone(&self, connection: &Arc<Connection>) {
         self.extras.streamer.stop(connection);
+    }
+
+    fn relay(&self) -> Option<Arc<dyn Relay>> {
+        self.sources.relay()
     }
 
     fn inbox_items(&self) -> Vec<Item> {

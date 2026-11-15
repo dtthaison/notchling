@@ -4,7 +4,9 @@ use super::model::{
     Control, PendingPrompt, PhoneOptions, PromptKind, PromptQuestion, PromptResponse, Session,
     ALREADY_CONTROLLABLE,
 };
-use super::router::{validated_folder, Router, MAX_TEXT_CHARACTERS, MODELS};
+use super::relay::HeldAct;
+use super::router::{validated_path, Router, MAX_TEXT_CHARACTERS, MODELS};
+use super::router_relay::{mark_relayed, Audited, Gate};
 use super::uploads::{ImageStore, UploadError, CHUNK_BYTES, MAX_BYTES};
 use super::wire::{self, BridgeFailure};
 use base64::Engine;
@@ -185,11 +187,24 @@ impl Router {
         if target.control == Control::ViewOnly {
             return Err(view_only());
         }
+        let act = HeldAct::Message {
+            session_id: session_id.to_string(),
+            text: text.to_string(),
+        };
+        let audited = Audited {
+            op: "message",
+            session: Some(session_id),
+            length: Some(length),
+        };
+        let relayed = match self.gate(connection, body, &act, Some(&target), audited)? {
+            Gate::Answer(data) => return Ok(data),
+            Gate::Go { relayed } => relayed,
+        };
         self.exclusive(connection, session_id, busy_sending(), || {
             self.backend.send_message(text, &target)
         })?;
         self.audit(connection, "message", Some(session_id), Some(length));
-        Ok(json!({"sent": true}))
+        Ok(mark_relayed(json!({"sent": true}), relayed))
     }
 
     pub(crate) fn session_send_now(
@@ -204,6 +219,18 @@ impl Router {
                 "Only sessions whose terminal Notchling holds can be interrupted.",
             ));
         }
+        let act = HeldAct::SendNow {
+            session_id: session_id.to_string(),
+        };
+        let audited = Audited {
+            op: "sendNow",
+            session: Some(session_id),
+            length: Some(0),
+        };
+        let relayed = match self.gate(connection, body, &act, Some(&target), audited)? {
+            Gate::Answer(data) => return Ok(data),
+            Gate::Go { relayed } => relayed,
+        };
         let busy = BridgeFailure::busy("An earlier command is still being sent to this session.");
         self.exclusive(connection, session_id, busy, || {
             if !self.allow_send_now(session_id) {
@@ -212,7 +239,7 @@ impl Router {
             self.backend.send_now(&target)
         })?;
         self.audit(connection, "sendNow", Some(session_id), Some(0));
-        Ok(json!({"sent": true}))
+        Ok(mark_relayed(json!({"sent": true}), relayed))
     }
 
     pub(crate) fn image_begin(
@@ -345,9 +372,32 @@ impl Router {
                 PromptResponse::Answers(answers(body, questions)?)
             }
         };
+        let act = HeldAct::Answer {
+            request_id: request_id.to_string(),
+            session_id: prompt.session_id.clone(),
+            allow: match &response {
+                PromptResponse::Allow => Some(true),
+                PromptResponse::Deny => Some(false),
+                PromptResponse::Answers(_) => None,
+            },
+            answers: match &response {
+                PromptResponse::Answers(list) => Some(list.clone()),
+                _ => None,
+            },
+        };
+        let session = self.session(&prompt.session_id).ok();
+        let audited = Audited {
+            op: "answer",
+            session: Some(&prompt.session_id),
+            length: None,
+        };
+        let relayed = match self.gate(connection, body, &act, session.as_ref(), audited)? {
+            Gate::Answer(data) => return Ok(data),
+            Gate::Go { relayed } => relayed,
+        };
         self.backend.respond(&prompt, &response)?;
         self.audit(connection, "answer", Some(&prompt.session_id), None);
-        Ok(json!({"answered": true}))
+        Ok(mark_relayed(json!({"answered": true}), relayed))
     }
 
     pub(crate) fn session_new(
@@ -365,7 +415,24 @@ impl Router {
         if model_id.is_none() && model.is_some_and(|m| !MODELS.contains(&m)) {
             return Err(BridgeFailure::invalid("The model is not valid."));
         }
-        let folder = validated_folder(cwd, &self.home)?;
+        let folder = validated_path(cwd, &self.home)?;
+        let act = HeldAct::NewSession {
+            cwd: folder.to_string_lossy().into_owned(),
+            model: model.filter(|m| *m != "default").map(str::to_string),
+            model_id: model_id.map(str::to_string),
+        };
+        let audited = Audited {
+            op: "newSession",
+            session: None,
+            length: None,
+        };
+        let relayed = match self.gate(connection, body, &act, None, audited)? {
+            Gate::Answer(data) => return Ok(data),
+            Gate::Go { relayed } => relayed,
+        };
+        if !folder.is_dir() {
+            return Err(BridgeFailure::not_found("The folder doesn't exist."));
+        }
         match model_id {
             Some(id) => self.backend.new_session_with_model(&folder, id)?,
             None => self
@@ -373,7 +440,7 @@ impl Router {
                 .new_session(&folder, model.filter(|m| *m != "default"))?,
         }
         self.audit(connection, "newSession", None, None);
-        Ok(json!({"started": true}))
+        Ok(mark_relayed(json!({"started": true}), relayed))
     }
 
     pub(crate) fn session_takeover(
@@ -460,6 +527,7 @@ impl Router {
             }
             sub.wants_inbox = true;
         }
+        self.subscribe_held(connection, body);
         if let Some(options) = phone {
             self.backend.start_phone(connection, &options)?;
             connection.subscription().phone_active = true;
@@ -472,6 +540,8 @@ impl Router {
             let mut sub = connection.subscription();
             sub.wants_sessions = false;
             sub.wants_inbox = false;
+            sub.wants_held = false;
+            sub.last_held_json = None;
             sub.known_inbox.clear();
             sub.chat_session_id = None;
             sub.chat_subagent_id = None;

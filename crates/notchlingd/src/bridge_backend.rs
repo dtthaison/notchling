@@ -13,6 +13,7 @@ use notchling_engine::bridge::model::{
     Control, ModelChoice, PendingPrompt, PromptKind, PromptQuestion, PromptResponse, Session,
     TakeoverOutcome,
 };
+use notchling_engine::bridge::relay::Relay;
 use notchling_engine::bridge::BridgeFailure;
 use notchling_engine::catalog::{Tier as ModelTier, Tool};
 use notchling_engine::cluster::Qualified;
@@ -165,6 +166,10 @@ impl Sources for DaemonSources {
                 ErrorCode::Internal => BridgeFailure::internal(e.message),
                 _ => BridgeFailure::invalid(e.message),
             })
+    }
+
+    fn relay(&self) -> Option<Arc<dyn Relay>> {
+        self.cluster.relay()
     }
 
     fn follow_remote(&self, session: &Session) {
@@ -353,7 +358,7 @@ pub(crate) fn model_id(short: &str, catalog: &CatalogService) -> Option<String> 
         .map(|m| m.id)
 }
 
-fn answer_json(answers: &[String], items: &[PromptQuestion]) -> Value {
+pub(crate) fn answer_json(answers: &[String], items: &[PromptQuestion]) -> Value {
     Value::Array(
         answers
             .iter()

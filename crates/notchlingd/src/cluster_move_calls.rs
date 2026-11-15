@@ -204,6 +204,7 @@ impl Mover {
             .collect();
         self.p.inbox.flush();
         let answer = self.p.link.take_primary(takeover);
+        self.p.acts.db_replaced();
         self.p.inbox.load();
         for item in earlier {
             if !self.p.inbox.items().iter().any(|kept| kept.id == item.id) {

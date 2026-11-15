@@ -5,12 +5,13 @@ use super::connection::{lock, Connection, ConnectionIo};
 use super::hub::Hub;
 use super::inbox::InboxOutcome;
 use super::model::*;
+use super::relay::{Call, Cancelled, HeldList, HeldNoticeView, HeldRef, HeldView, Relay, Routed};
 use super::router::{Router, RouterParts};
 use super::wire::BridgeFailure;
 use crate::inbox::{Action, ActionId, Item, Kind, Source, State};
 use crate::sessions::testutil::TempDir;
 use notchling_protocol::generated as wire;
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -107,6 +108,7 @@ pub struct FakeState {
     pub inbox_answer_calls: usize,
     pub inbox_answer_devices: Vec<Option<String>>,
     pub acting_off: bool,
+    pub relay: Option<Arc<dyn Relay>>,
 }
 
 #[derive(Default)]
@@ -229,6 +231,9 @@ impl BridgeBackend for FakeBackend {
     fn stop_phone(&self, _: &Arc<Connection>) {}
     fn acting_on(&self) -> bool {
         self.with(|s| !s.acting_off)
+    }
+    fn relay(&self) -> Option<Arc<dyn Relay>> {
+        self.with(|s| s.relay.clone())
     }
     fn inbox_items(&self) -> Vec<Item> {
         self.with(|s| s.inbox.clone())
@@ -527,4 +532,118 @@ pub fn inbox_item(id: &str, kind: Kind) -> Item {
         open: None,
         closed_ms: None,
     }
+}
+
+#[derive(Clone)]
+pub enum Plan {
+    Local,
+    Relayed,
+    Hold,
+    Done(Value),
+    Fail(BridgeFailure),
+}
+
+pub struct ScriptedRelay {
+    pub cluster: Mutex<Option<Value>>,
+    pub stale: Mutex<Option<i64>>,
+    pub plan: Mutex<Plan>,
+    pub entries: Mutex<Vec<HeldView>>,
+    pub notices: Mutex<Vec<HeldNoticeView>>,
+    pub delivered: Mutex<Vec<String>>,
+    pub calls: Mutex<Vec<(String, String, String)>>,
+}
+
+impl ScriptedRelay {
+    pub fn new(cluster: Option<Value>) -> Arc<ScriptedRelay> {
+        Arc::new(ScriptedRelay {
+            cluster: Mutex::new(cluster),
+            stale: Mutex::new(None),
+            plan: Mutex::new(Plan::Local),
+            entries: Mutex::new(Vec::new()),
+            notices: Mutex::new(Vec::new()),
+            delivered: Mutex::new(Vec::new()),
+            calls: Mutex::new(Vec::new()),
+        })
+    }
+
+    pub fn plan(&self, plan: Plan) {
+        *lock(&self.plan) = plan;
+    }
+}
+
+impl Relay for ScriptedRelay {
+    fn cluster(&self) -> Option<Value> {
+        lock(&self.cluster).clone()
+    }
+
+    fn route(&self, call: &Call<'_>) -> Routed {
+        lock(&self.calls).push((
+            call.device.to_string(),
+            call.request.to_string(),
+            call.act.op().to_string(),
+        ));
+        let plan = lock(&self.plan).clone();
+        match plan {
+            Plan::Local => Routed::Local,
+            Plan::Relayed => Routed::Relayed,
+            Plan::Done(data) => Routed::Done(data),
+            Plan::Fail(failure) => Routed::Fail(failure),
+            Plan::Hold => {
+                let mut entries = lock(&self.entries);
+                let id = format!("held-{}", entries.len() + 1);
+                entries.push(HeldView {
+                    id: id.clone(),
+                    op: call.act.op().to_string(),
+                    session_id: call.act.session_id().map(str::to_string),
+                    summary: call.act.summary(),
+                    at_ms: NOW_MS as i64,
+                    waiting: false,
+                });
+                Routed::Held(HeldRef {
+                    id,
+                    at_ms: NOW_MS as i64,
+                })
+            }
+        }
+    }
+
+    fn list(&self) -> HeldList {
+        HeldList {
+            entries: lock(&self.entries).clone(),
+            notices: lock(&self.notices).clone(),
+        }
+    }
+
+    fn cancel(&self, id: &str) -> Cancelled {
+        if lock(&self.delivered).iter().any(|d| d == id) {
+            return Cancelled::Delivered;
+        }
+        let mut entries = lock(&self.entries);
+        match entries.iter().position(|e| e.id == id) {
+            Some(at) => {
+                entries.remove(at);
+                Cancelled::Dropped
+            }
+            None => Cancelled::Unknown,
+        }
+    }
+
+    fn confirm(&self, id: &str) -> bool {
+        lock(&self.entries).iter().any(|e| e.id == id && e.waiting)
+    }
+
+    fn stale_ms(&self) -> Option<i64> {
+        *lock(&self.stale)
+    }
+}
+
+pub fn scripted_cluster() -> Value {
+    json!({
+        "primary": "0123456789abcdef",
+        "term": 3,
+        "nodes": [
+            {"id": "0123456789abcdef", "name": "m5", "addrs": ["192.168.1.5:47821"], "fingerprint": "aa".repeat(32), "canBeMaster": true, "online": false},
+            {"id": "fedcba9876543210", "name": "m1", "addrs": ["192.168.1.6:47821", "m1.local:47821"], "fingerprint": "bb".repeat(32), "canBeMaster": true, "online": true}
+        ]
+    })
 }

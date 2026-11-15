@@ -28,7 +28,7 @@ The answer's `data` depends on the op, so the schema names it `<Op>Response`. Th
 
 | Op | Request (`<Name>Request`) | Answer `data` (`<Name>Response`) |
 | --- | --- | --- |
-| `hello` | `token` | `device {id, name}`, `version` |
+| `hello` | `token` | `device {id, name}`, `version`, `cluster? {primary, term, nodes[]}` |
 | `pair` | `code`, `device {name, platform?}` | `token`, `deviceId`, `version` |
 | `ping` | | `time` |
 | `sessions.list` | | `sessions`, `models?` |
@@ -48,7 +48,10 @@ The answer's `data` depends on the op, so the schema names it `<Op>Response`. Th
 | `projects.recent` | | `projects` |
 | `inbox.list` | | `items`, `unread` |
 | `inbox.answer` | `itemId`, `action` | `answered`, `state`, `answer?` |
-| `subscribe` | `sessions?`, `inbox?`, `sessionId?`, `subagentId?`, `lastMessageId?`, `phone? {deviceWindowId?, fps?, width?}` | `subscribed: true` |
+| `held.list` | | `entries[]`, `notices?[]` |
+| `held.cancel` | `heldId` | `cancelled`, `delivered?` |
+| `held.confirm` | `heldId` | `confirmed` |
+| `subscribe` | `sessions?`, `inbox?`, `held?`, `sessionId?`, `subagentId?`, `lastMessageId?`, `phone? {deviceWindowId?, fps?, width?}` | `subscribed: true` |
 | `unsubscribe` | | `subscribed: false` |
 
 A `?` marks an optional field. The schema has the types, limits and descriptions.
@@ -60,6 +63,8 @@ A `?` marks an optional field. The schema has the types, limits and descriptions
 - `web.snapshot` and `chat.image` answer twice with the same `id`: first the JSON that announces a binary frame, then the binary frame and `{"ok": true, "data": {"sent": true}}` (the Mac writes both without waiting for the first; they may arrive in either order). A client takes the first answer as the reply and the binary frame as the picture.
 - A photo goes up as `session.image.begin`, any number of `session.image.chunk` (`seq` 0, 1, 2, in order, at most `chunkBytes` of data each, base64), then `session.image.end`.
 - `subscribe` with `inbox: true` sends every inbox item as an `inbox` event with an `item` on the next tick, then one for each item that changes, and `{"event": "inbox", "removed": id}` for one that leaves. `inbox.answer` takes the first answer: `answered: false` says the Mac or another phone was first and gives its `state` and `answer`. `open` is never answered from a phone. A Mac without the inbox answers `invalid` to `inbox.list`, and a phone that never sends `inbox` gets no inbox event.
+- A Mac in a cluster adds `cluster` to its `hello` answer: `primary` (a node id), `term`, and `nodes`, every Can Be Master machine with `id`, `name`, `addrs` (host:port of its bridge), `fingerprint` (of the certificate its bridge serves) and `online`. A phone that finds its Mac down tries the other nodes' addresses in order and pins the listed fingerprint. A Mac in no cluster, and an older Mac, send no `cluster`.
+- A Standby answers `session.message`, `session.sendNow`, `prompt.answer` and `session.new` for the primary: `relayed: true` in the answer says it was sent on. When the primary can't be reached the answer is `{"held": {"id", "at"}}` instead: the command is kept on the Standby, sent once and in order when the primary is back (or after a promote), and one older than an hour waits for `held.confirm`. `held.list` shows them with `waiting`, and `notices` for the ones dropped (a closed question's answer: "<primary> closed that question before your answer arrived"). `subscribe` with `held: true` sends a `held.changed` event with the same fields now and on every change. `held.cancel` answers `delivered: true` for one that already went. A read answered from the newest snapshot set instead of the primary carries `stale`, the set's time in milliseconds, in `sessions.list` and `chat.get`.
 - A `prompt` event with a `prompt` is new; one with `resolved: true` and a `requestId` withdraws it.
 
 ## Binary frames
@@ -74,7 +79,7 @@ WebSocket binary frames, always 4 bytes of magic, a big-endian `uint32`, then a 
 
 ## Errors
 
-`error.code` is one of `unauthorized`, `not_found`, `view_only`, `invalid`, `busy`, `not_reachable`, `internal`. `message` is text for the person, in English; do not parse it. A code the receiver doesn't know is read as an unknown error, not a crash (the generated types have an `unknown` case).
+`error.code` is one of `unauthorized`, `not_found`, `view_only`, `invalid`, `busy`, `not_reachable`, `primary_unreachable` (with `error.primary`, the primary's name: a Standby couldn't reach it and has no copy of what was asked), `internal`. `message` is text for the person, in English; do not parse it. A code the receiver doesn't know is read as an unknown error, not a crash (the generated types have an `unknown` case).
 
 ## Rules for changing it
 

@@ -139,3 +139,62 @@ fn take_all_sends_a_waiting_entry_too() {
     queue.hold(held("new", "d1", "r2", HELD_STALE_MS + 9));
     assert_eq!(ids(&queue.take_all()), ["old", "new"]);
 }
+
+#[test]
+fn kept_back_entries_return_to_the_front_in_order() {
+    let mut queue = HeldQueue::default();
+    for (n, at) in [("a", 1), ("b", 2), ("c", 3)] {
+        queue.hold(held(n, "d1", n, at));
+    }
+    let due = queue.take_due(5);
+    assert_eq!(ids(&due), ["a", "b", "c"]);
+    queue.hold(held("d", "d1", "d", 6));
+    queue.keep_back(vec![due[0].clone(), due[2].clone()], 7);
+    assert_eq!(ids(&queue.list()), ["a", "c", "d"]);
+    assert!(!queue.was_delivered("a"));
+    assert!(queue.was_delivered("b"));
+    assert_eq!(queue.hold(held("a2", "d1", "a", 8)), "a");
+    assert_eq!(ids(&queue.take_due(9)), ["a", "c", "d"]);
+}
+
+#[test]
+fn a_kept_back_stale_entry_stays_confirmed() {
+    let mut queue = HeldQueue::default();
+    queue.hold(held("old", "d1", "r1", 0));
+    let now = HELD_STALE_MS + 1;
+    queue.confirm("old");
+    let due = queue.take_due(now);
+    assert_eq!(ids(&due), ["old"]);
+    queue.keep_back(due, now);
+    assert!(queue.waiting(now).is_empty());
+    assert_eq!(ids(&queue.take_due(now)), ["old"]);
+}
+
+#[test]
+fn absorb_adds_the_entries_it_lacks_and_the_delivered_record() {
+    let mut mine = HeldQueue::default();
+    mine.hold(held("a", "d1", "r1", 1));
+    mine.hold(held("b", "d1", "r2", 2));
+    mine.take_due(3);
+    mine.hold(held("c", "d1", "r3", 4));
+    let mut theirs = HeldQueue::default();
+    theirs.hold(held("x", "d2", "r1", 5));
+    theirs.hold(held("c", "d1", "r3", 4));
+    theirs.absorb(&mine);
+    assert_eq!(ids(&theirs.list()), ["x", "c"]);
+    assert!(theirs.was_delivered("a"));
+    assert!(theirs.was_delivered("b"));
+    assert_eq!(theirs.hold(held("a2", "d1", "r1", 6)), "a");
+}
+
+#[test]
+fn absorb_keeps_a_waiting_entry_confirmed() {
+    let mut mine = HeldQueue::default();
+    mine.hold(held("old", "d1", "r1", 0));
+    mine.confirm("old");
+    let mut theirs = HeldQueue::default();
+    theirs.absorb(&mine);
+    assert_eq!(ids(&theirs.list()), ["old"]);
+    let now = HELD_STALE_MS + 1;
+    assert!(theirs.waiting(now).is_empty());
+}

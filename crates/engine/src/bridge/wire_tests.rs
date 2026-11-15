@@ -72,6 +72,13 @@ fn response_encoding_shape_and_id_echo() {
         "sorted keys, stable text"
     );
     assert_eq!(wire::code_name(ErrorCode::NotReachable), "not_reachable");
+    let unreachable = BridgeFailure::primary_unreachable("m5", "m5 can't be reached.");
+    let text: Value =
+        serde_json::from_str(&wire::error(Some(&json!(3)), &unreachable)).expect("json");
+    assert_eq!(
+        text,
+        json!({"id": 3, "ok": false, "error": {"code": "primary_unreachable", "message": "m5 can't be reached.", "primary": "m5"}})
+    );
     let mut fields = serde_json::Map::new();
     fields.insert("data".into(), json!([]));
     assert_eq!(

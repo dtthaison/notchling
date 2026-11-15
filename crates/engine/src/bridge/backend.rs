@@ -4,6 +4,7 @@ use super::model::{
     BridgeViz, ChatMessage, ChatPage, Command, ModelChoice, PendingPrompt, PhoneOptions,
     PromptResponse, Session, TakeoverOutcome,
 };
+use super::relay::Relay;
 use super::wire::BridgeFailure;
 use crate::inbox::{ActionId, Item};
 use std::path::Path;
@@ -100,6 +101,10 @@ pub trait BridgeBackend: Send + Sync {
     ) -> Result<(), BridgeFailure>;
 
     fn stop_phone(&self, connection: &Arc<Connection>);
+
+    fn relay(&self) -> Option<Arc<dyn Relay>> {
+        None
+    }
 
     fn inbox_items(&self) -> Vec<Item> {
         Vec::new()

@@ -6,6 +6,7 @@ use crate::inbox_ops::InboxOps;
 use crate::late_emit::Events;
 use notchling_engine::bridge::events_audit::EventsAudit;
 use notchling_engine::bridge::live::LiveBackend;
+use notchling_engine::bridge::net::devices::Replica;
 use notchling_engine::bridge::net::{fetch, files, Bridge, BridgeConfig};
 use notchling_events::kinds::choices::SwitchName;
 use notchling_events::kinds::security::{SwitchCause, SwitchChanged};
@@ -14,7 +15,7 @@ use notchling_events::{scope, Event};
 use notchling_local_api::{ops, topics, ApiError, OpSpec};
 use serde_json::{json, Value};
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 pub const BRIDGE_OPS: [&str; 7] = [
@@ -44,6 +45,8 @@ pub struct BridgeOps {
     approvals: Arc<Approvals>,
     room: Arc<dyn Room>,
     cluster: Arc<PhoneCluster>,
+    lan_port: u16,
+    replica: Arc<OnceLock<Replica>>,
     events: Option<Events>,
 }
 
@@ -81,22 +84,44 @@ impl BridgeOps {
                 .lan
                 .set_ip(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST));
         }
+        let replica: Arc<OnceLock<Replica>> = Arc::new(OnceLock::new());
+        let source = replica.clone();
+        let from_set: Replica = Arc::new(move || source.get().and_then(|find| find()));
         BridgeOps {
             bridge: Bridge::new(
                 config,
                 Arc::new(backend),
                 fetch::live(),
                 Arc::new(files::now_ms),
-            ),
+            )
+            .with_replica(from_set),
+            replica,
             approvals,
             room,
             cluster,
+            lan_port: setup.lan_port,
             events: None,
         }
     }
 
     pub fn cluster(&self) -> Arc<PhoneCluster> {
         self.cluster.clone()
+    }
+
+    pub fn served(&self) -> crate::cluster_relay::Served {
+        let status = self.bridge.status();
+        let port = self.bridge.ports().map_or(self.lan_port, |(lan, _)| lan);
+        let fingerprint = status["fingerprint"].as_str().map(str::to_string);
+        crate::cluster_relay::Served { port, fingerprint }
+    }
+
+    pub fn with_node_identity(mut self, dir: PathBuf) -> BridgeOps {
+        self.bridge = self.bridge.with_node_identity(dir);
+        self
+    }
+
+    pub fn set_replica(&self, find: Replica) {
+        let _ = self.replica.set(find);
     }
 
     pub fn with_events(mut self, events: Events) -> BridgeOps {

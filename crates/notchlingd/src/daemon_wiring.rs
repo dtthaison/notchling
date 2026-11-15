@@ -12,6 +12,8 @@ use crate::bridge_ops::{BridgeOps, BridgeSetup};
 use crate::catalog_ops::CatalogService;
 use crate::cluster_forward::{acting_gated, Forward};
 use crate::cluster_prompts::RemotePrompts;
+use crate::cluster_relay::HeldRelay;
+use crate::cluster_relay_wiring::{devices_replica, parts as relay_parts, RelayEnv};
 use crate::cluster_sessions::RemoteSessions;
 use crate::cluster_wiring::ClusterParts;
 use crate::codex_children::CodexChildren;
@@ -503,7 +505,12 @@ impl Wired {
                 inbox.clone(),
                 every.clone(),
             )
-            .with_events(events.clone()),
+            .with_events(events.clone())
+            .with_node_identity(
+                layout
+                    .cluster_dir()
+                    .join(crate::cluster_wiring::IDENTITY_DIR),
+            ),
         );
         let agy = Arc::new(AgyOps::for_daemon(
             layout,
@@ -673,6 +680,22 @@ impl Wired {
             cluster.remote.clone(),
             cluster.prompts.clone(),
         );
+        let relay = Arc::new(HeldRelay::new(relay_parts(RelayEnv {
+            cluster: layout.cluster_dir(),
+            link: cluster.link(),
+            phone: bridge.cluster(),
+            bridge: bridge.clone(),
+            acting: acting.clone(),
+            sessions: sessions.clone(),
+            clock: Arc::new(crate::acting_ops::now_ms),
+        })));
+        bridge.set_replica(devices_replica(
+            layout.cluster_dir(),
+            layout.data_dir.clone(),
+            cluster.link(),
+        ));
+        let _ = cluster.held().set(relay.clone());
+        bridge.cluster().attach_relay(relay);
         Wired {
             acting,
             codex,

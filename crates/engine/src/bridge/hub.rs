@@ -2,6 +2,8 @@ use super::backend::BridgeBackend;
 use super::connection::{lock, Connection, ConnectionIo};
 use super::inbox::wire_item;
 use super::model::Session;
+use super::relay::{list_json, Relay};
+use super::router_relay::held_event;
 use super::wire;
 use serde_json::{Map, Value};
 use std::collections::{BTreeMap, HashSet};
@@ -64,7 +66,39 @@ impl Hub {
         targets.len()
     }
 
+    pub fn push_held(&self, relay: &dyn Relay) {
+        let wanting: Vec<_> = self
+            .all()
+            .into_iter()
+            .filter(|c| c.is_authenticated() && c.wants_held())
+            .collect();
+        if wanting.is_empty() {
+            return;
+        }
+        let list = relay.list();
+        let json = wire::text(&list_json(&list));
+        let event = held_event(&list);
+        for connection in wanting {
+            let changed = {
+                let mut sub = connection.subscription();
+                if sub.last_held_json.as_deref() == Some(json.as_str()) {
+                    false
+                } else {
+                    sub.last_held_json = Some(json.clone());
+                    true
+                }
+            };
+            if changed {
+                connection.send_text(event.clone());
+            }
+        }
+    }
+
     pub fn tick(&self, backend: &dyn BridgeBackend) {
+        if let Some(relay) = backend.relay() {
+            relay.tick();
+            self.push_held(relay.as_ref());
+        }
         let subscribers: Vec<_> = self
             .all()
             .into_iter()

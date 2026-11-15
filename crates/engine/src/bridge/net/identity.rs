@@ -8,6 +8,8 @@ pub const P12: &str = "identity.p12";
 pub const PASS: &str = "identity.pass";
 pub const CERT_PEM: &str = "cert.pem";
 pub const KEY_PEM: &str = "key.pem";
+pub const NODE_CERT: &str = "node.pem";
+pub const NODE_KEY: &str = "node.key";
 
 pub struct BridgeIdentity {
     pub certificate: CertificateDer<'static>,
@@ -51,6 +53,19 @@ impl BridgeIdentity {
         dir.join(P12).is_file() || (dir.join(CERT_PEM).is_file() && dir.join(KEY_PEM).is_file())
     }
 
+    pub fn load_or_node(dir: &Path, node: Option<&Path>) -> Result<BridgeIdentity, IdentityError> {
+        match Self::load(dir) {
+            Err(IdentityError::Missing) => {}
+            other => return other,
+        }
+        let node = node.ok_or(IdentityError::Missing)?;
+        let (cert, key) = (node.join(NODE_CERT), node.join(NODE_KEY));
+        if !cert.is_file() || !key.is_file() {
+            return Err(IdentityError::Missing);
+        }
+        Self::from_files(&cert, &key)
+    }
+
     pub fn load(dir: &Path) -> Result<BridgeIdentity, IdentityError> {
         if dir.join(P12).is_file() {
             return Self::from_p12(dir);
@@ -88,8 +103,12 @@ impl BridgeIdentity {
     }
 
     fn from_pem(dir: &Path) -> Result<BridgeIdentity, IdentityError> {
-        let cert = CertificateDer::from_pem_file(dir.join(CERT_PEM)).map_err(unreadable)?;
-        let key = PrivateKeyDer::from_pem_file(dir.join(KEY_PEM)).map_err(unreadable)?;
+        Self::from_files(&dir.join(CERT_PEM), &dir.join(KEY_PEM))
+    }
+
+    fn from_files(cert: &Path, key: &Path) -> Result<BridgeIdentity, IdentityError> {
+        let cert = CertificateDer::from_pem_file(cert).map_err(unreadable)?;
+        let key = PrivateKeyDer::from_pem_file(key).map_err(unreadable)?;
         Self::new(cert, key)
     }
 

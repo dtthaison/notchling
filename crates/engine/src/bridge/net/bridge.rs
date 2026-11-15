@@ -27,6 +27,7 @@ pub struct BridgeConfig {
     pub limits: Limits,
     pub home: PathBuf,
     pub images_dir: PathBuf,
+    pub node_dir: Option<PathBuf>,
 }
 
 impl BridgeConfig {
@@ -50,12 +51,18 @@ impl BridgeConfig {
             limits: Limits::default(),
             home,
             images_dir,
+            node_dir: None,
         }
     }
 
     pub fn with_ports(mut self, lan: u16, tunnel: u16) -> BridgeConfig {
         self.lan.set_port(lan);
         self.tunnel.set_port(tunnel);
+        self
+    }
+
+    pub fn with_node_identity(mut self, dir: PathBuf) -> BridgeConfig {
+        self.node_dir = Some(dir);
         self
     }
 
@@ -113,6 +120,7 @@ pub struct Bridge {
     fetch: Fetch,
     now: Clock,
     audit: Option<Arc<dyn Audit>>,
+    replica: Option<super::devices::Replica>,
     state: Mutex<State>,
 }
 
@@ -129,8 +137,19 @@ impl Bridge {
             fetch,
             now,
             audit: None,
+            replica: None,
             state: Mutex::new(State::Off),
         }
+    }
+
+    pub fn with_node_identity(mut self, dir: PathBuf) -> Bridge {
+        self.config.node_dir = Some(dir);
+        self
+    }
+
+    pub fn with_replica(mut self, replica: super::devices::Replica) -> Bridge {
+        self.replica = Some(replica);
+        self
     }
 
     pub fn with_audit(mut self, audit: Arc<dyn Audit>) -> Bridge {
@@ -191,7 +210,8 @@ impl Bridge {
 
     fn start(&self) -> Result<Running, String> {
         let bridge_dir = self.config.bridge_dir();
-        let identity = BridgeIdentity::load(&bridge_dir).map_err(|e| e.to_string())?;
+        let identity = BridgeIdentity::load_or_node(&bridge_dir, self.config.node_dir.as_deref())
+            .map_err(|e| e.to_string())?;
         let tls = identity.server_config().map_err(|e| e.to_string())?;
         let parts = CoreParts {
             backend: self.backend.clone(),
@@ -204,6 +224,9 @@ impl Bridge {
             Some(audit) => Core::with_audit(&bridge_dir, parts, audit.clone()),
             None => Core::new(&bridge_dir, parts),
         });
+        if let Some(replica) = &self.replica {
+            core.devices.set_replica(replica.clone());
+        }
         let limits = self.config.limits;
         let bind = |addr: SocketAddr, kind: Kind| {
             Listener::start(addr, kind, core.clone(), limits)

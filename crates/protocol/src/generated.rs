@@ -22,6 +22,8 @@ pub enum ErrorCode {
     NotReachable,
     #[serde(rename = "internal")]
     Internal,
+    #[serde(rename = "primary_unreachable")]
+    PrimaryUnreachable,
     #[serde(other)]
     Unknown,
 }
@@ -846,6 +848,9 @@ pub struct SubscribeRequest {
     /// Push the inbox's items, and each one raised, changed or removed after. Absent means no inbox pushes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub inbox: Option<bool>,
+    /// Additive: push held.changed when a command held on this Mac is added, delivered, dropped, cancelled or starts waiting. Absent means no held pushes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub held: Option<bool>,
 }
 
 /// Stream the Mac's device window as PHN1 frames.
@@ -908,6 +913,8 @@ pub struct HelloResponseData {
     pub device: HelloResponseDataDevice,
     /// The bridge wire version, 1.
     pub version: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cluster: Option<HelloCluster>,
 }
 
 /// The paired phone.
@@ -970,6 +977,9 @@ pub struct SessionsListResponseData {
     /// The Claude models a new session may start on now, current ones only, as the Mac's catalog lists them. Absent from an older Mac; the phone then offers its short names.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub models: Option<Vec<SessionsListResponseDataModelsItem>>,
+    /// Additive: when the answer comes from a copy that may be behind (a Can Be Master Mac that can't reach the primary), the time of that copy, in milliseconds since 1970. Absent for a live answer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stale: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1000,6 +1010,9 @@ pub struct ChatGetResponseData {
     /// The after message is gone; replace what the phone has with this page.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reset: Option<bool>,
+    /// Additive: when the answer comes from a copy that may be behind (a Can Be Master Mac that can't reach the primary), the time of that copy, in milliseconds since 1970. Absent for a live answer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stale: Option<i64>,
 }
 
 /// The viz specs.
@@ -1085,6 +1098,9 @@ pub struct SentResponse {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SentResponseData {
     pub sent: bool,
+    /// Additive: true when a Can Be Master Mac that isn't the primary passed the command on to the primary. Absent otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub relayed: Option<bool>,
 }
 
 /// Done.
@@ -1162,6 +1178,9 @@ pub struct PromptAnswerResponse {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PromptAnswerResponseData {
     pub answered: bool,
+    /// Additive: true when a Can Be Master Mac that isn't the primary passed the command on to the primary. Absent otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub relayed: Option<bool>,
 }
 
 /// The session is starting.
@@ -1178,6 +1197,9 @@ pub struct SessionNewResponse {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SessionNewResponseData {
     pub started: bool,
+    /// Additive: true when a Can Be Master Mac that isn't the primary passed the command on to the primary. Absent otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub relayed: Option<bool>,
 }
 
 /// The session to switch to.
@@ -1305,6 +1327,9 @@ pub struct ErrorResponseError {
     pub code: ErrorCode,
     /// Text for the person, in English. Never parse it.
     pub message: String,
+    /// Additive: with primary_unreachable, the name of the primary this Mac couldn't reach.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub primary: Option<String>,
 }
 
 /// The session list changed (also sent once on subscribe).
@@ -1360,6 +1385,182 @@ pub struct InboxRemovedEvent {
     pub event: String,
     /// The removed item's id.
     pub removed: String,
+}
+
+/// Additive: a Can Be Master machine of the Mac's cluster, for a phone that wants a way in when the primary is down.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClusterNode {
+    /// The node's id.
+    pub id: String,
+    /// The name to show.
+    pub name: String,
+    /// Addresses the machine's bridge may be reached at, host:port.
+    pub addrs: Vec<String>,
+    /// The SHA-256 fingerprint, lower-case hex, of the certificate this machine's bridge serves.
+    pub fingerprint: String,
+    pub can_be_master: bool,
+    /// False while the Mac answering can't reach it.
+    pub online: bool,
+}
+
+/// Additive: the cluster this Mac belongs to. Absent from a Mac in no cluster and from an older Mac; the phone then knows one machine.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HelloCluster {
+    /// The primary's node id.
+    pub primary: String,
+    /// The primary's term; a higher one is newer.
+    pub term: i64,
+    /// Every Can Be Master machine.
+    pub nodes: Vec<ClusterNode>,
+}
+
+/// A command this Mac holds until the primary can be reached.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HeldRef {
+    /// The held command's id, for held.cancel and held.confirm.
+    pub id: String,
+    /// When it was held, in milliseconds since 1970.
+    pub at: i64,
+}
+
+/// A command held on this Mac, in the order it will be sent.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HeldEntry {
+    pub id: String,
+    /// The phone op that was held, such as session.message.
+    pub op: String,
+    /// The session it is for, when it is for one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
+    /// A short line to show, such as the start of the message.
+    pub summary: String,
+    /// When it was held, in milliseconds since 1970.
+    pub at: i64,
+    /// True when it was held for over an hour: it is sent only after held.confirm.
+    pub waiting: bool,
+}
+
+/// A held command that was dropped instead of sent, with the reason to show.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HeldNotice {
+    /// The dropped entry's id.
+    pub id: String,
+    /// Text for the person, in English.
+    pub reason: String,
+    /// When it was dropped, in milliseconds since 1970.
+    pub at: i64,
+}
+
+/// The commands this Mac holds. Paired phone only.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HeldListRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<Value>,
+    pub op: String,
+}
+
+/// Drops a held command. Paired phone only.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HeldCancelRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<Value>,
+    pub op: String,
+    /// The held command's id.
+    pub held_id: String,
+}
+
+/// Sends a held command that waited over an hour, after the fresh ones. Paired phone only.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HeldConfirmRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<Value>,
+    pub op: String,
+    /// The held command's id.
+    pub held_id: String,
+}
+
+/// The command is held on this Mac until the primary can be reached; it is not sent yet.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HeldResponse {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<Value>,
+    pub ok: bool,
+    /// The answer.
+    pub data: HeldResponseData,
+}
+
+/// The answer.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HeldResponseData {
+    pub held: HeldRef,
+}
+
+/// What this Mac holds.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HeldListResponse {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<Value>,
+    pub ok: bool,
+    /// The answer.
+    pub data: HeldListResponseData,
+}
+
+/// The answer.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HeldListResponseData {
+    pub entries: Vec<HeldEntry>,
+    /// The last commands dropped, newest last.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notices: Option<Vec<HeldNotice>>,
+}
+
+/// The held command is gone.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HeldCancelResponse {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<Value>,
+    pub ok: bool,
+    /// The answer.
+    pub data: HeldCancelResponseData,
+}
+
+/// The answer.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HeldCancelResponseData {
+    pub cancelled: bool,
+    /// True when the command was already sent, so there was nothing to cancel.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delivered: Option<bool>,
+}
+
+/// The waiting command will be sent in order.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HeldConfirmResponse {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<Value>,
+    pub ok: bool,
+    /// The answer.
+    pub data: HeldConfirmResponseData,
+}
+
+/// The answer.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HeldConfirmResponseData {
+    /// False when no waiting command has that id.
+    pub confirmed: bool,
+}
+
+/// What this Mac holds changed. Sent only to a connection that subscribed with held: true.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HeldChangedEvent {
+    pub event: String,
+    pub entries: Vec<HeldEntry>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notices: Option<Vec<HeldNotice>>,
 }
 
 fn round<T: DeserializeOwned + Serialize>(value: &Value) -> Result<Value, serde_json::Error> {
@@ -1456,6 +1657,19 @@ pub fn roundtrip(name: &str, value: &Value) -> Option<Result<Value, serde_json::
         "OpenEvent" => round::<OpenEvent>(value),
         "InboxEvent" => round::<InboxEvent>(value),
         "InboxRemovedEvent" => round::<InboxRemovedEvent>(value),
+        "ClusterNode" => round::<ClusterNode>(value),
+        "HelloCluster" => round::<HelloCluster>(value),
+        "HeldRef" => round::<HeldRef>(value),
+        "HeldEntry" => round::<HeldEntry>(value),
+        "HeldNotice" => round::<HeldNotice>(value),
+        "HeldListRequest" => round::<HeldListRequest>(value),
+        "HeldCancelRequest" => round::<HeldCancelRequest>(value),
+        "HeldConfirmRequest" => round::<HeldConfirmRequest>(value),
+        "HeldResponse" => round::<HeldResponse>(value),
+        "HeldListResponse" => round::<HeldListResponse>(value),
+        "HeldCancelResponse" => round::<HeldCancelResponse>(value),
+        "HeldConfirmResponse" => round::<HeldConfirmResponse>(value),
+        "HeldChangedEvent" => round::<HeldChangedEvent>(value),
         _ => return None,
     })
 }

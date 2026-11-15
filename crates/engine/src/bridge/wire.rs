@@ -8,6 +8,7 @@ pub const VERSION: i64 = 1;
 pub struct BridgeFailure {
     pub code: ErrorCode,
     pub message: String,
+    pub primary: Option<String>,
 }
 
 impl BridgeFailure {
@@ -15,6 +16,15 @@ impl BridgeFailure {
         BridgeFailure {
             code,
             message: message.into(),
+            primary: None,
+        }
+    }
+
+    pub fn primary_unreachable(primary: &str, message: impl Into<String>) -> BridgeFailure {
+        BridgeFailure {
+            code: ErrorCode::PrimaryUnreachable,
+            message: message.into(),
+            primary: Some(primary.to_string()),
         }
     }
 
@@ -63,6 +73,7 @@ pub fn code_name(code: ErrorCode) -> &'static str {
         ErrorCode::Invalid => "invalid",
         ErrorCode::Busy => "busy",
         ErrorCode::NotReachable => "not_reachable",
+        ErrorCode::PrimaryUnreachable => "primary_unreachable",
         ErrorCode::Internal | ErrorCode::Unknown => "internal",
     }
 }
@@ -81,6 +92,9 @@ pub fn error(id: Option<&Value>, failure: &BridgeFailure) -> String {
     let mut detail = Map::new();
     detail.insert("code".into(), Value::from(code_name(failure.code)));
     detail.insert("message".into(), Value::from(failure.message.as_str()));
+    if let Some(primary) = &failure.primary {
+        detail.insert("primary".into(), Value::from(primary.as_str()));
+    }
     let mut object = Map::new();
     object.insert("ok".into(), Value::Bool(false));
     object.insert("error".into(), Value::Object(detail));

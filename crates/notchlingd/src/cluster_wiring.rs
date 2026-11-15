@@ -15,6 +15,7 @@ use crate::cluster_node::{
 };
 use crate::cluster_ops::{follow_switch, ClusterOps};
 use crate::cluster_prompts::{NodePush, PromptFollower, RemotePrompts};
+use crate::cluster_relay_wiring::{HeldActs, HeldSlot};
 use crate::cluster_sessions::{
     is_client, HandlerRows, NodeSource, Refresher, RemoteSessions, SessionCalls,
 };
@@ -252,6 +253,8 @@ pub struct ClusterParts {
     snap_run: Arc<SnapRunner>,
     snap_observer: Option<SnapObserver>,
     handler: Arc<LateHandler>,
+    link: Arc<LateLink>,
+    held: HeldSlot,
 }
 
 fn clock() -> crate::cluster_mirror::Clock {
@@ -396,17 +399,21 @@ impl ClusterParts {
             snap.node.clone(),
         ));
         let move_link = Arc::new(LateLink::default());
+        let held: HeldSlot = Arc::new(OnceLock::new());
         let mover = Mover::new(MoveParts {
             link: move_link.clone(),
-            acts: Arc::new(RealActs {
-                daemon: DaemonCalls::new(handler.clone(), room.clone()),
-                me: {
-                    let holder = holder.clone();
-                    Arc::new(move || holder.get().map(|node| node.me().clone()))
-                },
-                launcher: move_launcher.clone(),
-                roots: layout.roots(),
-                pause: Arc::new(|ms| std::thread::sleep(std::time::Duration::from_millis(ms))),
+            acts: Arc::new(HeldActs {
+                slot: held.clone(),
+                inner: Arc::new(RealActs {
+                    daemon: DaemonCalls::new(handler.clone(), room.clone()),
+                    me: {
+                        let holder = holder.clone();
+                        Arc::new(move || holder.get().map(|node| node.me().clone()))
+                    },
+                    launcher: move_launcher.clone(),
+                    roots: layout.roots(),
+                    pause: Arc::new(|ms| std::thread::sleep(std::time::Duration::from_millis(ms))),
+                }),
             }),
             rows: Arc::new(HandlerRows::new(handler.clone())),
             snaps: Arc::new(RealSnaps {
@@ -526,6 +533,8 @@ impl ClusterParts {
             snap_run,
             snap_observer,
             handler,
+            link: move_link,
+            held,
         }
     }
 
@@ -543,6 +552,14 @@ impl ClusterParts {
 
     pub fn handler(&self) -> Arc<LateHandler> {
         self.handler.clone()
+    }
+
+    pub fn link(&self) -> Arc<LateLink> {
+        self.link.clone()
+    }
+
+    pub fn held(&self) -> HeldSlot {
+        self.held.clone()
     }
 
     pub fn serve(&self, handler: &Arc<dyn Handler>) {

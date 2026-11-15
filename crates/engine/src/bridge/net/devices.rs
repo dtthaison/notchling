@@ -115,15 +115,19 @@ struct State {
     halted: bool,
 }
 
+pub type Replica = std::sync::Arc<dyn Fn() -> Option<PathBuf> + Send + Sync>;
+
 pub struct DeviceStore {
     file: PathBuf,
     state: Mutex<State>,
+    replica: std::sync::OnceLock<Replica>,
 }
 
 impl DeviceStore {
     pub fn open(file: PathBuf) -> DeviceStore {
         let store = DeviceStore {
             file,
+            replica: std::sync::OnceLock::new(),
             state: Mutex::new(State {
                 devices: Vec::new(),
                 seen: None,
@@ -134,6 +138,27 @@ impl DeviceStore {
         };
         store.refresh(&mut store.lock());
         store
+    }
+
+    pub fn with_replica(self, replica: Replica) -> DeviceStore {
+        self.set_replica(replica);
+        self
+    }
+
+    pub fn set_replica(&self, replica: Replica) {
+        let _ = self.replica.set(replica);
+    }
+
+    fn replicated(&self, candidate: &[u8]) -> Option<PairedDevice> {
+        let file = self.replica.get()?()?;
+        let devices = read_devices(&file).ok()?;
+        let mut found = None;
+        for device in devices {
+            if constant_time_eq(candidate, &hex_bytes(&device.token_hash)) {
+                found = Some(device);
+            }
+        }
+        found
     }
 
     pub fn halt(&self) {
@@ -183,7 +208,8 @@ impl DeviceStore {
                 found = Some(device.clone());
             }
         }
-        found
+        drop(state);
+        found.or_else(|| self.replicated(&candidate))
     }
 
     pub fn revoke(&self, id: &str) -> Result<Option<PairedDevice>, StoreError> {

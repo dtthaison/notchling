@@ -1,0 +1,30 @@
+{
+  "data": {
+    "entries": [
+      {
+        "at": 1793541465000,
+        "id": "held-1",
+        "op": "session.message",
+        "sessionId": "0123456789abcdef/job-7",
+        "summary": "Run the tests again",
+        "waiting": false
+      },
+      {
+        "at": 1793537865000,
+        "id": "held-2",
+        "op": "session.new",
+        "summary": "New session in /Users/example/src/app",
+        "waiting": true
+      }
+    ],
+    "notices": [
+      {
+        "at": 1793541465500,
+        "id": "held-0",
+        "reason": "m5 closed that question before your answer arrived"
+      }
+    ]
+  },
+  "id": 41,
+  "ok": true
+}

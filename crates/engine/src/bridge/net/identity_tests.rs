@@ -260,3 +260,53 @@ fn the_identity_is_served_in_a_handshake() {
     let identity = BridgeIdentity::load(&bridge).unwrap();
     assert_eq!(served_fingerprint(&identity), sha256_hex(&der));
 }
+
+fn write_node_identity(dir: &Path) -> Vec<u8> {
+    std::fs::create_dir_all(dir).unwrap();
+    let key = rcgen::KeyPair::generate().unwrap();
+    let cert = rcgen::CertificateParams::new(vec!["notchling-node".to_string()])
+        .unwrap()
+        .self_signed(&key)
+        .unwrap();
+    std::fs::write(dir.join("node.pem"), cert.pem()).unwrap();
+    std::fs::write(dir.join("node.key"), key.serialize_pem()).unwrap();
+    cert.der().to_vec()
+}
+
+#[test]
+fn a_node_with_no_bridge_identity_serves_its_node_certificate() {
+    let dir = TempDir::new("identity-node");
+    let bridge = dir.path("bridge");
+    let node = dir.path("cluster/identity");
+    let der = write_node_identity(&node);
+    let identity = BridgeIdentity::load_or_node(&bridge, Some(&node)).unwrap();
+    assert_eq!(identity.fingerprint, sha256_hex(&der));
+    assert!(!bridge.exists(), "nothing is written for it");
+    assert_eq!(
+        BridgeIdentity::load_or_node(&bridge, None).unwrap_err(),
+        IdentityError::Missing
+    );
+}
+
+#[test]
+fn a_bridge_identity_is_served_before_the_node_certificate() {
+    let dir = TempDir::new("identity-both");
+    let bridge = dir.path("bridge");
+    let node = dir.path("cluster/identity");
+    write_node_identity(&node);
+    let der = make_swift_identity(&bridge);
+    let identity = BridgeIdentity::load_or_node(&bridge, Some(&node)).unwrap();
+    assert_eq!(identity.fingerprint, sha256_hex(&der));
+}
+
+#[test]
+fn half_a_node_identity_is_missing() {
+    let dir = TempDir::new("identity-half");
+    let node = dir.path("cluster/identity");
+    write_node_identity(&node);
+    std::fs::remove_file(node.join("node.key")).unwrap();
+    assert_eq!(
+        BridgeIdentity::load_or_node(&dir.path("bridge"), Some(&node)).unwrap_err(),
+        IdentityError::Missing
+    );
+}

@@ -157,3 +157,68 @@ fn touch_writes_at_most_once_a_minute() {
     assert_eq!(on_disk(&store), Some(NOW + 61_000));
     store.touch("nobody", NOW).unwrap();
 }
+
+type Replica = std::sync::Arc<dyn Fn() -> Option<std::path::PathBuf> + Send + Sync>;
+
+fn replica_of(file: std::path::PathBuf) -> Replica {
+    std::sync::Arc::new(move || Some(file.clone()))
+}
+
+#[test]
+fn replicated_devices_are_accepted() {
+    let dir = TempDir::new("devices-replica");
+    let set_copy = dir.write("sets/s1/devices.json", SWIFT);
+    let store =
+        DeviceStore::open(dir.path("bridge/devices.json")).with_replica(replica_of(set_copy));
+    assert!(store.devices().is_empty(), "nothing is paired here");
+    let iphone = store
+        .authenticate(IPHONE_TOKEN)
+        .expect("the newest set's phone");
+    assert_eq!(iphone.id, "6D0F2A58-3B77-4C0E-9A41-5E8B1C7D2F90");
+    assert!(store.authenticate(PIXEL_TOKEN).is_some());
+    assert!(store.authenticate("not-a-token").is_none());
+    store.touch(&iphone.id, NOW).unwrap();
+    assert!(
+        !dir.path("bridge/devices.json").exists(),
+        "a replicated phone never writes a local file"
+    );
+}
+
+#[test]
+fn a_newer_set_replaces_the_older_one_and_a_missing_one_accepts_nobody() {
+    let dir = TempDir::new("devices-replica-newer");
+    let one = dir.write("sets/s1/devices.json", SWIFT);
+    let chosen = std::sync::Arc::new(std::sync::Mutex::new(Some(one)));
+    let pick = chosen.clone();
+    let store = DeviceStore::open(dir.path("bridge/devices.json"))
+        .with_replica(std::sync::Arc::new(move || pick.lock().unwrap().clone()));
+    assert!(store.authenticate(IPHONE_TOKEN).is_some());
+    let newer = dir.write("sets/s2/devices.json", "[]");
+    *chosen.lock().unwrap() = Some(newer);
+    assert!(
+        store.authenticate(IPHONE_TOKEN).is_none(),
+        "revoked on the primary, gone with the next set"
+    );
+    *chosen.lock().unwrap() = None;
+    assert!(store.authenticate(IPHONE_TOKEN).is_none());
+}
+
+#[test]
+fn a_local_phone_still_authenticates_beside_a_replica() {
+    let dir = TempDir::new("devices-replica-local");
+    let set_copy = dir.write("sets/s1/devices.json", "[]");
+    let store =
+        DeviceStore::open(dir.path("bridge/devices.json")).with_replica(replica_of(set_copy));
+    let (device, token) = store.register("Phone", "ios", NOW).unwrap();
+    assert_eq!(store.authenticate(&token).unwrap().id, device.id);
+}
+
+#[test]
+fn an_unreadable_replica_accepts_nobody_and_never_blocks_local_phones() {
+    let dir = TempDir::new("devices-replica-bad");
+    let bad = dir.write("sets/s1/devices.json", "{not json");
+    let store = DeviceStore::open(dir.path("bridge/devices.json")).with_replica(replica_of(bad));
+    assert!(store.authenticate(IPHONE_TOKEN).is_none());
+    let (_, token) = store.register("Phone", "ios", NOW).unwrap();
+    assert!(store.authenticate(&token).is_some());
+}

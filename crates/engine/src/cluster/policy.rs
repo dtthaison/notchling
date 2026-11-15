@@ -7,6 +7,7 @@ pub enum Sent {
     Home,
     Client,
     Member,
+    Standby,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -39,6 +40,7 @@ const HOME: &[Sent] = &[Sent::Home];
 const CLIENT: &[Sent] = &[Sent::Client, Sent::Home];
 const CLIENT_ONLY: &[Sent] = &[Sent::Client];
 const MEMBER: &[Sent] = &[Sent::Member];
+const PHONE_RELAY: &[Sent] = &[Sent::Client, Sent::Standby];
 
 const fn rule(
     op: &'static str,
@@ -82,6 +84,10 @@ const fn client_plain(op: &'static str) -> Rule {
 
 const fn client_home(op: &'static str) -> Rule {
     rule(op, CLIENT_ONLY, OriginTier::App, None, true)
+}
+
+const fn phone_relay(op: &'static str) -> Rule {
+    rule(op, PHONE_RELAY, OriginTier::App, None, true)
 }
 
 pub const RULES: &[Rule] = &[
@@ -139,6 +145,8 @@ pub const RULES: &[Rule] = &[
     client_plain("node.follow"),
     client_app("shell.stop"),
     client_home("cluster.dispatch"),
+    phone_relay("session.new"),
+    phone_relay("cluster.dispatch"),
     client_home("cluster.member.set"),
     client_home("cluster.remove"),
     client_home("cluster.main.set"),
@@ -157,6 +165,7 @@ fn stands(sender: &SenderFacts, sent: Sent) -> bool {
         Sent::Home => sender.is_home,
         Sent::Client => sender.client,
         Sent::Member => true,
+        Sent::Standby => sender.role == Role::Standby,
     }
 }
 
@@ -169,7 +178,11 @@ pub fn check(op: &str, sender: &SenderFacts, origin: &Origin) -> Result<&'static
     if origin.node != sender.id {
         return Err(Denied::NotAllowed);
     }
-    if origin.tier == OriginTier::App && !sender.client && !sender.is_home {
+    if origin.tier == OriginTier::App
+        && !sender.client
+        && !sender.is_home
+        && sender.role != Role::Standby
+    {
         return Err(Denied::TierTooHigh);
     }
     let mut highest: Option<OriginTier> = None;

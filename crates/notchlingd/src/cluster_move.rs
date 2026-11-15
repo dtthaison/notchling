@@ -216,6 +216,8 @@ pub trait Acts: Send + Sync {
     fn start_claude(&self, session: &MainSession) -> Result<(), String>;
 
     fn primary_moved(&self, _to: &NodeId) {}
+
+    fn db_replaced(&self) {}
 }
 
 pub struct RealActs {

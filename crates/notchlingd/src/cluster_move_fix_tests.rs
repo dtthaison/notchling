@@ -522,3 +522,105 @@ fn l6_a_lane_session_is_checked_against_the_lane() {
     put(&lane.join(".claude.json"), trusting(&p.w.home).as_bytes());
     assert_eq!(trust_check(&p.w.home, &manifest, &ids, "m1"), Ok(()));
 }
+
+struct Quiet;
+
+impl crate::cluster_relay::Wire for Quiet {
+    fn status(&self) -> Value {
+        json!({"cluster": null, "members": []})
+    }
+
+    fn call(
+        &self,
+        _: &notchling_engine::cluster::NodeId,
+        _: &str,
+        _: Value,
+        _: Duration,
+    ) -> Result<Value, WireError> {
+        Err(WireError::new("offline", "nobody"))
+    }
+}
+
+impl crate::cluster_relay::SetView for Quiet {
+    fn newest_ms(&self) -> Option<i64> {
+        None
+    }
+
+    fn transcript(&self, _: &std::path::Path) -> Option<std::path::PathBuf> {
+        None
+    }
+}
+
+fn held_relay(dir: &std::path::Path) -> Arc<crate::cluster_relay::HeldRelay> {
+    Arc::new(crate::cluster_relay::HeldRelay::new(
+        crate::cluster_relay::Parts {
+            wire: Arc::new(Quiet),
+            dir: dir.to_path_buf(),
+            clock: Arc::new(|| 0),
+            prompts: Arc::new(|_| None),
+            model: Arc::new(|_| None),
+            rows: Arc::new(Vec::new),
+            set: Arc::new(Quiet),
+            bridge: Arc::new(|| crate::cluster_relay::Served {
+                port: 1,
+                fingerprint: None,
+            }),
+        },
+    ))
+}
+
+#[test]
+fn r122_a_held_entry_survives_the_database_the_takeover_swaps_in() {
+    use notchling_engine::cluster::held::{Held, HeldQueue, HeldTarget};
+    use notchling_engine::cluster::persist;
+    let p = pair(&one(), &|_| {});
+    let mut queue = HeldQueue::default();
+    queue.hold(Held {
+        id: "h1".into(),
+        op: "session.message".into(),
+        args: json!({"sessionId": "x/y", "text": "wait for me"}),
+        target: HeldTarget::Session("x/y".into()),
+        device: "phone-1".into(),
+        request: "4".into(),
+        at_ms: 5,
+    });
+    persist::save_held(&p.to.cluster, &queue).expect("saved");
+    assert!(p.to.acts.held.set(held_relay(&p.to.cluster)).is_ok());
+
+    switch_to_b(&p, Some(&p.manifest.set)).expect("the switch landed");
+
+    assert_eq!(p.to.acts.swaps.load(SeqCst), 1);
+    let kept = persist::load_held(&p.to.cluster).expect("readable").list();
+    assert_eq!(kept.len(), 1, "carried over the swap");
+    assert_eq!(kept[0].id, "h1");
+}
+
+#[test]
+fn r122_a_refused_takeover_leaves_them_where_they_were() {
+    use notchling_engine::cluster::held::{Held, HeldQueue, HeldTarget};
+    use notchling_engine::cluster::persist;
+    let p = pair(&one(), &|_| {});
+    let mut queue = HeldQueue::default();
+    queue.hold(Held {
+        id: "h1".into(),
+        op: "session.sendNow".into(),
+        args: json!({"sessionId": "x/y"}),
+        target: HeldTarget::Session("x/y".into()),
+        device: "phone-1".into(),
+        request: "4".into(),
+        at_ms: 5,
+    });
+    persist::save_held(&p.to.cluster, &queue).expect("saved");
+    assert!(p.to.acts.held.set(held_relay(&p.to.cluster)).is_ok());
+    *p.to.link.take_fails.lock().unwrap() = Some("the core said no".to_string());
+
+    assert!(switch_to_b(&p, None).is_err());
+
+    assert_eq!(
+        persist::load_held(&p.to.cluster)
+            .expect("readable")
+            .list()
+            .len(),
+        1
+    );
+}

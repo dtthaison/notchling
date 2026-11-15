@@ -37,7 +37,8 @@
         "invalid",
         "busy",
         "not_reachable",
-        "internal"
+        "internal",
+        "primary_unreachable"
       ]
     },
     "SessionState": {
@@ -1679,6 +1680,10 @@
         "inbox": {
           "type": "boolean",
           "description": "Push the inbox's items, and each one raised, changed or removed after. Absent means no inbox pushes."
+        },
+        "held": {
+          "type": "boolean",
+          "description": "Additive: push held.changed when a command held on this Mac is added, delivered, dropped, cancelled or starts waiting. Absent means no held pushes."
         }
       },
       "required": [
@@ -1782,6 +1787,9 @@
             "version": {
               "type": "integer",
               "description": "The bridge wire version, 1."
+            },
+            "cluster": {
+              "$ref": "#/$defs/HelloCluster"
             }
           },
           "required": [
@@ -1910,6 +1918,10 @@
                 ],
                 "additionalProperties": true
               }
+            },
+            "stale": {
+              "type": "integer",
+              "description": "Additive: when the answer comes from a copy that may be behind (a Can Be Master Mac that can't reach the primary), the time of that copy, in milliseconds since 1970. Absent for a live answer."
             }
           },
           "required": [
@@ -1952,6 +1964,10 @@
             "reset": {
               "type": "boolean",
               "description": "The after message is gone; replace what the phone has with this page."
+            },
+            "stale": {
+              "type": "integer",
+              "description": "Additive: when the answer comes from a copy that may be behind (a Can Be Master Mac that can't reach the primary), the time of that copy, in milliseconds since 1970. Absent for a live answer."
             }
           },
           "required": [
@@ -2128,6 +2144,10 @@
             "sent": {
               "type": "boolean",
               "const": true
+            },
+            "relayed": {
+              "type": "boolean",
+              "description": "Additive: true when a Can Be Master Mac that isn't the primary passed the command on to the primary. Absent otherwise."
             }
           },
           "required": [
@@ -2274,6 +2294,10 @@
             "answered": {
               "type": "boolean",
               "const": true
+            },
+            "relayed": {
+              "type": "boolean",
+              "description": "Additive: true when a Can Be Master Mac that isn't the primary passed the command on to the primary. Absent otherwise."
             }
           },
           "required": [
@@ -2306,6 +2330,10 @@
             "started": {
               "type": "boolean",
               "const": true
+            },
+            "relayed": {
+              "type": "boolean",
+              "description": "Additive: true when a Can Be Master Mac that isn't the primary passed the command on to the primary. Absent otherwise."
             }
           },
           "required": [
@@ -2559,6 +2587,10 @@
             "message": {
               "type": "string",
               "description": "Text for the person, in English. Never parse it."
+            },
+            "primary": {
+              "type": "string",
+              "description": "Additive: with primary_unreachable, the name of the primary this Mac couldn't reach."
             }
           },
           "required": [
@@ -2716,6 +2748,381 @@
       ],
       "additionalProperties": true
     },
+    "ClusterNode": {
+      "type": "object",
+      "description": "Additive: a Can Be Master machine of the Mac's cluster, for a phone that wants a way in when the primary is down.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "The node's id."
+        },
+        "name": {
+          "type": "string",
+          "description": "The name to show."
+        },
+        "addrs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Addresses the machine's bridge may be reached at, host:port."
+        },
+        "fingerprint": {
+          "type": "string",
+          "description": "The SHA-256 fingerprint, lower-case hex, of the certificate this machine's bridge serves."
+        },
+        "canBeMaster": {
+          "type": "boolean"
+        },
+        "online": {
+          "type": "boolean",
+          "description": "False while the Mac answering can't reach it."
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "addrs",
+        "fingerprint",
+        "canBeMaster",
+        "online"
+      ],
+      "additionalProperties": true
+    },
+    "HelloCluster": {
+      "type": "object",
+      "description": "Additive: the cluster this Mac belongs to. Absent from a Mac in no cluster and from an older Mac; the phone then knows one machine.",
+      "properties": {
+        "primary": {
+          "type": "string",
+          "description": "The primary's node id."
+        },
+        "term": {
+          "type": "integer",
+          "description": "The primary's term; a higher one is newer."
+        },
+        "nodes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ClusterNode"
+          },
+          "description": "Every Can Be Master machine."
+        }
+      },
+      "required": [
+        "primary",
+        "term",
+        "nodes"
+      ],
+      "additionalProperties": true
+    },
+    "HeldRef": {
+      "type": "object",
+      "description": "A command this Mac holds until the primary can be reached.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "The held command's id, for held.cancel and held.confirm."
+        },
+        "at": {
+          "type": "integer",
+          "description": "When it was held, in milliseconds since 1970."
+        }
+      },
+      "required": [
+        "id",
+        "at"
+      ],
+      "additionalProperties": true
+    },
+    "HeldEntry": {
+      "type": "object",
+      "description": "A command held on this Mac, in the order it will be sent.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "op": {
+          "type": "string",
+          "description": "The phone op that was held, such as session.message."
+        },
+        "sessionId": {
+          "type": "string",
+          "description": "The session it is for, when it is for one."
+        },
+        "summary": {
+          "type": "string",
+          "description": "A short line to show, such as the start of the message."
+        },
+        "at": {
+          "type": "integer",
+          "description": "When it was held, in milliseconds since 1970."
+        },
+        "waiting": {
+          "type": "boolean",
+          "description": "True when it was held for over an hour: it is sent only after held.confirm."
+        }
+      },
+      "required": [
+        "id",
+        "op",
+        "summary",
+        "at",
+        "waiting"
+      ],
+      "additionalProperties": true
+    },
+    "HeldNotice": {
+      "type": "object",
+      "description": "A held command that was dropped instead of sent, with the reason to show.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "The dropped entry's id."
+        },
+        "reason": {
+          "type": "string",
+          "description": "Text for the person, in English."
+        },
+        "at": {
+          "type": "integer",
+          "description": "When it was dropped, in milliseconds since 1970."
+        }
+      },
+      "required": [
+        "id",
+        "reason",
+        "at"
+      ],
+      "additionalProperties": true
+    },
+    "HeldListRequest": {
+      "type": "object",
+      "description": "The commands this Mac holds. Paired phone only.",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "op": {
+          "type": "string",
+          "const": "held.list"
+        }
+      },
+      "required": [
+        "op"
+      ],
+      "additionalProperties": true
+    },
+    "HeldCancelRequest": {
+      "type": "object",
+      "description": "Drops a held command. Paired phone only.",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "op": {
+          "type": "string",
+          "const": "held.cancel"
+        },
+        "heldId": {
+          "type": "string",
+          "description": "The held command's id."
+        }
+      },
+      "required": [
+        "op",
+        "heldId"
+      ],
+      "additionalProperties": true
+    },
+    "HeldConfirmRequest": {
+      "type": "object",
+      "description": "Sends a held command that waited over an hour, after the fresh ones. Paired phone only.",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "op": {
+          "type": "string",
+          "const": "held.confirm"
+        },
+        "heldId": {
+          "type": "string",
+          "description": "The held command's id."
+        }
+      },
+      "required": [
+        "op",
+        "heldId"
+      ],
+      "additionalProperties": true
+    },
+    "HeldResponse": {
+      "type": "object",
+      "description": "The command is held on this Mac until the primary can be reached; it is not sent yet.",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "ok": {
+          "type": "boolean",
+          "const": true
+        },
+        "data": {
+          "type": "object",
+          "description": "The answer.",
+          "properties": {
+            "held": {
+              "$ref": "#/$defs/HeldRef"
+            }
+          },
+          "required": [
+            "held"
+          ],
+          "additionalProperties": true
+        }
+      },
+      "required": [
+        "ok",
+        "data"
+      ],
+      "additionalProperties": true
+    },
+    "HeldListResponse": {
+      "type": "object",
+      "description": "What this Mac holds.",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "ok": {
+          "type": "boolean",
+          "const": true
+        },
+        "data": {
+          "type": "object",
+          "description": "The answer.",
+          "properties": {
+            "entries": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/HeldEntry"
+              }
+            },
+            "notices": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/HeldNotice"
+              },
+              "description": "The last commands dropped, newest last."
+            }
+          },
+          "required": [
+            "entries"
+          ],
+          "additionalProperties": true
+        }
+      },
+      "required": [
+        "ok",
+        "data"
+      ],
+      "additionalProperties": true
+    },
+    "HeldCancelResponse": {
+      "type": "object",
+      "description": "The held command is gone.",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "ok": {
+          "type": "boolean",
+          "const": true
+        },
+        "data": {
+          "type": "object",
+          "description": "The answer.",
+          "properties": {
+            "cancelled": {
+              "type": "boolean"
+            },
+            "delivered": {
+              "type": "boolean",
+              "description": "True when the command was already sent, so there was nothing to cancel."
+            }
+          },
+          "required": [
+            "cancelled"
+          ],
+          "additionalProperties": true
+        }
+      },
+      "required": [
+        "ok",
+        "data"
+      ],
+      "additionalProperties": true
+    },
+    "HeldConfirmResponse": {
+      "type": "object",
+      "description": "The waiting command will be sent in order.",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "ok": {
+          "type": "boolean",
+          "const": true
+        },
+        "data": {
+          "type": "object",
+          "description": "The answer.",
+          "properties": {
+            "confirmed": {
+              "type": "boolean",
+              "description": "False when no waiting command has that id."
+            }
+          },
+          "required": [
+            "confirmed"
+          ],
+          "additionalProperties": true
+        }
+      },
+      "required": [
+        "ok",
+        "data"
+      ],
+      "additionalProperties": true
+    },
+    "HeldChangedEvent": {
+      "type": "object",
+      "description": "What this Mac holds changed. Sent only to a connection that subscribed with held: true.",
+      "properties": {
+        "event": {
+          "type": "string",
+          "const": "held.changed"
+        },
+        "entries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/HeldEntry"
+          }
+        },
+        "notices": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/HeldNotice"
+          }
+        }
+      },
+      "required": [
+        "event",
+        "entries"
+      ],
+      "additionalProperties": true
+    },
     "Request": {
       "description": "A frame the phone sends; the op says which.",
       "oneOf": [
@@ -2784,6 +3191,15 @@
         },
         {
           "$ref": "#/$defs/InboxAnswerRequest"
+        },
+        {
+          "$ref": "#/$defs/HeldListRequest"
+        },
+        {
+          "$ref": "#/$defs/HeldCancelRequest"
+        },
+        {
+          "$ref": "#/$defs/HeldConfirmRequest"
         }
       ]
     },
@@ -2810,6 +3226,9 @@
         },
         {
           "$ref": "#/$defs/InboxRemovedEvent"
+        },
+        {
+          "$ref": "#/$defs/HeldChangedEvent"
         }
       ]
     }

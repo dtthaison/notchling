@@ -1,0 +1,9 @@
+{
+  "error": {
+    "code": "primary_unreachable",
+    "message": "m5 can't be reached, and no copy of that chat is on this Mac.",
+    "primary": "m5"
+  },
+  "id": 46,
+  "ok": false
+}

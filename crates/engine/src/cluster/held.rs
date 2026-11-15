@@ -126,6 +126,37 @@ impl HeldQueue {
         true
     }
 
+    pub fn keep_back(&mut self, back: Vec<Held>, now_ms: i64) {
+        for entry in &back {
+            self.delivered.retain(|d| d.id != entry.id);
+            if stale(entry, now_ms) && !self.confirmed.contains(&entry.id) {
+                self.confirmed.push(entry.id.clone());
+            }
+        }
+        let mut entries = back;
+        entries.append(&mut self.entries);
+        self.entries = entries;
+    }
+
+    pub fn absorb(&mut self, earlier: &HeldQueue) {
+        for entry in &earlier.entries {
+            if self.entries.iter().any(|e| e.id == entry.id) {
+                continue;
+            }
+            self.entries.push(entry.clone());
+            if earlier.confirmed.contains(&entry.id) {
+                self.confirmed.push(entry.id.clone());
+            }
+        }
+        for done in &earlier.delivered {
+            if !self.delivered.iter().any(|d| d.id == done.id) {
+                self.delivered.push(done.clone());
+            }
+        }
+        let over = self.delivered.len().saturating_sub(MAX_DELIVERED);
+        self.delivered.drain(..over);
+    }
+
     fn record(&mut self, sent: &[Held]) {
         self.delivered.extend(sent.iter().map(|h| Delivered {
             id: h.id.clone(),

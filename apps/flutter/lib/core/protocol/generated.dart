@@ -50,6 +50,7 @@ enum ErrorCode {
   busy('busy'),
   notReachable('not_reachable'),
   internal('internal'),
+  primaryUnreachable('primary_unreachable'),
   unknown('unknown');
 
   const ErrorCode(this.wire);
@@ -2029,6 +2030,7 @@ class SubscribeRequest {
     this.lastMessageId,
     this.phone,
     this.inbox,
+    this.held,
   });
 
   factory SubscribeRequest.fromJson(JsonMap json) => SubscribeRequest(
@@ -2040,6 +2042,7 @@ class SubscribeRequest {
     lastMessageId: _maybe(json, 'lastMessageId', _asString),
     phone: _maybe(json, 'phone', (Object? v) => SubscribeRequestPhone.fromJson(_asMap(v))),
     inbox: _maybe(json, 'inbox', _asBool),
+    held: _maybe(json, 'held', _asBool),
   );
 
   JsonMap toJson() => <String, Object?>{
@@ -2051,6 +2054,7 @@ class SubscribeRequest {
     if (lastMessageId != null) 'lastMessageId': lastMessageId,
     if (phone != null) 'phone': phone!.toJson(),
     if (inbox != null) 'inbox': inbox,
+    if (held != null) 'held': held,
   };
 
   final Object? id;
@@ -2071,6 +2075,9 @@ class SubscribeRequest {
 
   /// Push the inbox's items, and each one raised, changed or removed after. Absent means no inbox pushes.
   final bool? inbox;
+
+  /// Additive: push held.changed when a command held on this Mac is added, delivered, dropped, cancelled or starts waiting. Absent means no held pushes.
+  final bool? held;
 }
 
 /// Stream the Mac's device window as PHN1 frames.
@@ -2209,16 +2216,19 @@ class HelloResponseData {
   const HelloResponseData({
     required this.device,
     required this.version,
+    this.cluster,
   });
 
   factory HelloResponseData.fromJson(JsonMap json) => HelloResponseData(
     device: _need(json, 'device', (Object? v) => HelloResponseDataDevice.fromJson(_asMap(v))),
     version: _need(json, 'version', _asInt),
+    cluster: _maybe(json, 'cluster', (Object? v) => HelloCluster.fromJson(_asMap(v))),
   );
 
   JsonMap toJson() => <String, Object?>{
     'device': device.toJson(),
     'version': version,
+    if (cluster != null) 'cluster': cluster!.toJson(),
   };
 
   /// The paired phone.
@@ -2226,6 +2236,7 @@ class HelloResponseData {
 
   /// The bridge wire version, 1.
   final int version;
+  final HelloCluster? cluster;
 }
 
 /// The paired phone.
@@ -2378,22 +2389,28 @@ class SessionsListResponseData {
   const SessionsListResponseData({
     required this.sessions,
     this.models,
+    this.stale,
   });
 
   factory SessionsListResponseData.fromJson(JsonMap json) => SessionsListResponseData(
     sessions: _need(json, 'sessions', (Object? v) => _asList<Session>(v, (Object? e) => Session.fromJson(_asMap(e)))),
     models: _maybe(json, 'models', (Object? v) => _asList<SessionsListResponseDataModelsItem>(v, (Object? e) => SessionsListResponseDataModelsItem.fromJson(_asMap(e)))),
+    stale: _maybe(json, 'stale', _asInt),
   );
 
   JsonMap toJson() => <String, Object?>{
     'sessions': <Object?>[for (final Session e in sessions) e.toJson()],
     if (models != null) 'models': <Object?>[for (final SessionsListResponseDataModelsItem e in models!) e.toJson()],
+    if (stale != null) 'stale': stale,
   };
 
   final List<Session> sessions;
 
   /// The Claude models a new session may start on now, current ones only, as the Mac's catalog lists them. Absent from an older Mac; the phone then offers its short names.
   final List<SessionsListResponseDataModelsItem>? models;
+
+  /// Additive: when the answer comes from a copy that may be behind (a Can Be Master Mac that can't reach the primary), the time of that copy, in milliseconds since 1970. Absent for a live answer.
+  final int? stale;
 }
 
 class SessionsListResponseDataModelsItem {
@@ -2452,18 +2469,21 @@ class ChatGetResponseData {
     required this.messages,
     required this.hasMore,
     this.reset,
+    this.stale,
   });
 
   factory ChatGetResponseData.fromJson(JsonMap json) => ChatGetResponseData(
     messages: _need(json, 'messages', (Object? v) => _asList<ChatMessage>(v, (Object? e) => ChatMessage.fromJson(_asMap(e)))),
     hasMore: _need(json, 'hasMore', _asBool),
     reset: _maybe(json, 'reset', _asBool),
+    stale: _maybe(json, 'stale', _asInt),
   );
 
   JsonMap toJson() => <String, Object?>{
     'messages': <Object?>[for (final ChatMessage e in messages) e.toJson()],
     'hasMore': hasMore,
     if (reset != null) 'reset': reset,
+    if (stale != null) 'stale': stale,
   };
 
   final List<ChatMessage> messages;
@@ -2473,6 +2493,9 @@ class ChatGetResponseData {
 
   /// The after message is gone; replace what the phone has with this page.
   final bool? reset;
+
+  /// Additive: when the answer comes from a copy that may be behind (a Can Be Master Mac that can't reach the primary), the time of that copy, in milliseconds since 1970. Absent for a live answer.
+  final int? stale;
 }
 
 /// The viz specs.
@@ -2687,17 +2710,23 @@ class SentResponse {
 class SentResponseData {
   const SentResponseData({
     this.sent = true,
+    this.relayed,
   });
 
   factory SentResponseData.fromJson(JsonMap json) => SentResponseData(
     sent: _need(json, 'sent', _asBool),
+    relayed: _maybe(json, 'relayed', _asBool),
   );
 
   JsonMap toJson() => <String, Object?>{
     'sent': sent,
+    if (relayed != null) 'relayed': relayed,
   };
 
   final bool sent;
+
+  /// Additive: true when a Can Be Master Mac that isn't the primary passed the command on to the primary. Absent otherwise.
+  final bool? relayed;
 }
 
 /// Done.
@@ -2879,17 +2908,23 @@ class PromptAnswerResponse {
 class PromptAnswerResponseData {
   const PromptAnswerResponseData({
     this.answered = true,
+    this.relayed,
   });
 
   factory PromptAnswerResponseData.fromJson(JsonMap json) => PromptAnswerResponseData(
     answered: _need(json, 'answered', _asBool),
+    relayed: _maybe(json, 'relayed', _asBool),
   );
 
   JsonMap toJson() => <String, Object?>{
     'answered': answered,
+    if (relayed != null) 'relayed': relayed,
   };
 
   final bool answered;
+
+  /// Additive: true when a Can Be Master Mac that isn't the primary passed the command on to the primary. Absent otherwise.
+  final bool? relayed;
 }
 
 /// The session is starting.
@@ -2923,17 +2958,23 @@ class SessionNewResponse {
 class SessionNewResponseData {
   const SessionNewResponseData({
     this.started = true,
+    this.relayed,
   });
 
   factory SessionNewResponseData.fromJson(JsonMap json) => SessionNewResponseData(
     started: _need(json, 'started', _asBool),
+    relayed: _maybe(json, 'relayed', _asBool),
   );
 
   JsonMap toJson() => <String, Object?>{
     'started': started,
+    if (relayed != null) 'relayed': relayed,
   };
 
   final bool started;
+
+  /// Additive: true when a Can Be Master Mac that isn't the primary passed the command on to the primary. Absent otherwise.
+  final bool? relayed;
 }
 
 /// The session to switch to.
@@ -3260,22 +3301,28 @@ class ErrorResponseError {
   const ErrorResponseError({
     required this.code,
     required this.message,
+    this.primary,
   });
 
   factory ErrorResponseError.fromJson(JsonMap json) => ErrorResponseError(
     code: _need(json, 'code', (Object? v) => ErrorCode.parse(_asString(v))),
     message: _need(json, 'message', _asString),
+    primary: _maybe(json, 'primary', _asString),
   );
 
   JsonMap toJson() => <String, Object?>{
     'code': code.wire,
     'message': message,
+    if (primary != null) 'primary': primary,
   };
 
   final ErrorCode code;
 
   /// Text for the person, in English. Never parse it.
   final String message;
+
+  /// Additive: with primary_unreachable, the name of the primary this Mac couldn't reach.
+  final String? primary;
 }
 
 /// The session list changed (also sent once on subscribe).
@@ -3435,6 +3482,472 @@ class InboxRemovedEvent {
   final String removed;
 }
 
+/// Additive: a Can Be Master machine of the Mac's cluster, for a phone that wants a way in when the primary is down.
+class ClusterNode {
+  const ClusterNode({
+    required this.id,
+    required this.name,
+    required this.addrs,
+    required this.fingerprint,
+    required this.canBeMaster,
+    required this.online,
+  });
+
+  factory ClusterNode.fromJson(JsonMap json) => ClusterNode(
+    id: _need(json, 'id', _asString),
+    name: _need(json, 'name', _asString),
+    addrs: _need(json, 'addrs', (Object? v) => _asList<String>(v, _asString)),
+    fingerprint: _need(json, 'fingerprint', _asString),
+    canBeMaster: _need(json, 'canBeMaster', _asBool),
+    online: _need(json, 'online', _asBool),
+  );
+
+  JsonMap toJson() => <String, Object?>{
+    'id': id,
+    'name': name,
+    'addrs': addrs,
+    'fingerprint': fingerprint,
+    'canBeMaster': canBeMaster,
+    'online': online,
+  };
+
+  /// The node's id.
+  final String id;
+
+  /// The name to show.
+  final String name;
+
+  /// Addresses the machine's bridge may be reached at, host:port.
+  final List<String> addrs;
+
+  /// The SHA-256 fingerprint, lower-case hex, of the certificate this machine's bridge serves.
+  final String fingerprint;
+  final bool canBeMaster;
+
+  /// False while the Mac answering can't reach it.
+  final bool online;
+}
+
+/// Additive: the cluster this Mac belongs to. Absent from a Mac in no cluster and from an older Mac; the phone then knows one machine.
+class HelloCluster {
+  const HelloCluster({
+    required this.primary,
+    required this.term,
+    required this.nodes,
+  });
+
+  factory HelloCluster.fromJson(JsonMap json) => HelloCluster(
+    primary: _need(json, 'primary', _asString),
+    term: _need(json, 'term', _asInt),
+    nodes: _need(json, 'nodes', (Object? v) => _asList<ClusterNode>(v, (Object? e) => ClusterNode.fromJson(_asMap(e)))),
+  );
+
+  JsonMap toJson() => <String, Object?>{
+    'primary': primary,
+    'term': term,
+    'nodes': <Object?>[for (final ClusterNode e in nodes) e.toJson()],
+  };
+
+  /// The primary's node id.
+  final String primary;
+
+  /// The primary's term; a higher one is newer.
+  final int term;
+
+  /// Every Can Be Master machine.
+  final List<ClusterNode> nodes;
+}
+
+/// A command this Mac holds until the primary can be reached.
+class HeldRef {
+  const HeldRef({
+    required this.id,
+    required this.at,
+  });
+
+  factory HeldRef.fromJson(JsonMap json) => HeldRef(
+    id: _need(json, 'id', _asString),
+    at: _need(json, 'at', _asInt),
+  );
+
+  JsonMap toJson() => <String, Object?>{
+    'id': id,
+    'at': at,
+  };
+
+  /// The held command's id, for held.cancel and held.confirm.
+  final String id;
+
+  /// When it was held, in milliseconds since 1970.
+  final int at;
+}
+
+/// A command held on this Mac, in the order it will be sent.
+class HeldEntry {
+  const HeldEntry({
+    required this.id,
+    required this.op,
+    this.sessionId,
+    required this.summary,
+    required this.at,
+    required this.waiting,
+  });
+
+  factory HeldEntry.fromJson(JsonMap json) => HeldEntry(
+    id: _need(json, 'id', _asString),
+    op: _need(json, 'op', _asString),
+    sessionId: _maybe(json, 'sessionId', _asString),
+    summary: _need(json, 'summary', _asString),
+    at: _need(json, 'at', _asInt),
+    waiting: _need(json, 'waiting', _asBool),
+  );
+
+  JsonMap toJson() => <String, Object?>{
+    'id': id,
+    'op': op,
+    if (sessionId != null) 'sessionId': sessionId,
+    'summary': summary,
+    'at': at,
+    'waiting': waiting,
+  };
+
+  final String id;
+
+  /// The phone op that was held, such as session.message.
+  final String op;
+
+  /// The session it is for, when it is for one.
+  final String? sessionId;
+
+  /// A short line to show, such as the start of the message.
+  final String summary;
+
+  /// When it was held, in milliseconds since 1970.
+  final int at;
+
+  /// True when it was held for over an hour: it is sent only after held.confirm.
+  final bool waiting;
+}
+
+/// A held command that was dropped instead of sent, with the reason to show.
+class HeldNotice {
+  const HeldNotice({
+    required this.id,
+    required this.reason,
+    required this.at,
+  });
+
+  factory HeldNotice.fromJson(JsonMap json) => HeldNotice(
+    id: _need(json, 'id', _asString),
+    reason: _need(json, 'reason', _asString),
+    at: _need(json, 'at', _asInt),
+  );
+
+  JsonMap toJson() => <String, Object?>{
+    'id': id,
+    'reason': reason,
+    'at': at,
+  };
+
+  /// The dropped entry's id.
+  final String id;
+
+  /// Text for the person, in English.
+  final String reason;
+
+  /// When it was dropped, in milliseconds since 1970.
+  final int at;
+}
+
+/// The commands this Mac holds. Paired phone only.
+class HeldListRequest {
+  const HeldListRequest({
+    this.id,
+    this.op = 'held.list',
+  });
+
+  factory HeldListRequest.fromJson(JsonMap json) => HeldListRequest(
+    id: json['id'],
+    op: _need(json, 'op', _asString),
+  );
+
+  JsonMap toJson() => <String, Object?>{
+    if (id != null) 'id': id,
+    'op': op,
+  };
+
+  final Object? id;
+  final String op;
+}
+
+/// Drops a held command. Paired phone only.
+class HeldCancelRequest {
+  const HeldCancelRequest({
+    this.id,
+    this.op = 'held.cancel',
+    required this.heldId,
+  });
+
+  factory HeldCancelRequest.fromJson(JsonMap json) => HeldCancelRequest(
+    id: json['id'],
+    op: _need(json, 'op', _asString),
+    heldId: _need(json, 'heldId', _asString),
+  );
+
+  JsonMap toJson() => <String, Object?>{
+    if (id != null) 'id': id,
+    'op': op,
+    'heldId': heldId,
+  };
+
+  final Object? id;
+  final String op;
+
+  /// The held command's id.
+  final String heldId;
+}
+
+/// Sends a held command that waited over an hour, after the fresh ones. Paired phone only.
+class HeldConfirmRequest {
+  const HeldConfirmRequest({
+    this.id,
+    this.op = 'held.confirm',
+    required this.heldId,
+  });
+
+  factory HeldConfirmRequest.fromJson(JsonMap json) => HeldConfirmRequest(
+    id: json['id'],
+    op: _need(json, 'op', _asString),
+    heldId: _need(json, 'heldId', _asString),
+  );
+
+  JsonMap toJson() => <String, Object?>{
+    if (id != null) 'id': id,
+    'op': op,
+    'heldId': heldId,
+  };
+
+  final Object? id;
+  final String op;
+
+  /// The held command's id.
+  final String heldId;
+}
+
+/// The command is held on this Mac until the primary can be reached; it is not sent yet.
+class HeldResponse {
+  const HeldResponse({
+    this.id,
+    this.ok = true,
+    required this.data,
+  });
+
+  factory HeldResponse.fromJson(JsonMap json) => HeldResponse(
+    id: json['id'],
+    ok: _need(json, 'ok', _asBool),
+    data: _need(json, 'data', (Object? v) => HeldResponseData.fromJson(_asMap(v))),
+  );
+
+  JsonMap toJson() => <String, Object?>{
+    if (id != null) 'id': id,
+    'ok': ok,
+    'data': data.toJson(),
+  };
+
+  final Object? id;
+  final bool ok;
+
+  /// The answer.
+  final HeldResponseData data;
+}
+
+/// The answer.
+class HeldResponseData {
+  const HeldResponseData({
+    required this.held,
+  });
+
+  factory HeldResponseData.fromJson(JsonMap json) => HeldResponseData(
+    held: _need(json, 'held', (Object? v) => HeldRef.fromJson(_asMap(v))),
+  );
+
+  JsonMap toJson() => <String, Object?>{
+    'held': held.toJson(),
+  };
+
+  final HeldRef held;
+}
+
+/// What this Mac holds.
+class HeldListResponse {
+  const HeldListResponse({
+    this.id,
+    this.ok = true,
+    required this.data,
+  });
+
+  factory HeldListResponse.fromJson(JsonMap json) => HeldListResponse(
+    id: json['id'],
+    ok: _need(json, 'ok', _asBool),
+    data: _need(json, 'data', (Object? v) => HeldListResponseData.fromJson(_asMap(v))),
+  );
+
+  JsonMap toJson() => <String, Object?>{
+    if (id != null) 'id': id,
+    'ok': ok,
+    'data': data.toJson(),
+  };
+
+  final Object? id;
+  final bool ok;
+
+  /// The answer.
+  final HeldListResponseData data;
+}
+
+/// The answer.
+class HeldListResponseData {
+  const HeldListResponseData({
+    required this.entries,
+    this.notices,
+  });
+
+  factory HeldListResponseData.fromJson(JsonMap json) => HeldListResponseData(
+    entries: _need(json, 'entries', (Object? v) => _asList<HeldEntry>(v, (Object? e) => HeldEntry.fromJson(_asMap(e)))),
+    notices: _maybe(json, 'notices', (Object? v) => _asList<HeldNotice>(v, (Object? e) => HeldNotice.fromJson(_asMap(e)))),
+  );
+
+  JsonMap toJson() => <String, Object?>{
+    'entries': <Object?>[for (final HeldEntry e in entries) e.toJson()],
+    if (notices != null) 'notices': <Object?>[for (final HeldNotice e in notices!) e.toJson()],
+  };
+
+  final List<HeldEntry> entries;
+
+  /// The last commands dropped, newest last.
+  final List<HeldNotice>? notices;
+}
+
+/// The held command is gone.
+class HeldCancelResponse {
+  const HeldCancelResponse({
+    this.id,
+    this.ok = true,
+    required this.data,
+  });
+
+  factory HeldCancelResponse.fromJson(JsonMap json) => HeldCancelResponse(
+    id: json['id'],
+    ok: _need(json, 'ok', _asBool),
+    data: _need(json, 'data', (Object? v) => HeldCancelResponseData.fromJson(_asMap(v))),
+  );
+
+  JsonMap toJson() => <String, Object?>{
+    if (id != null) 'id': id,
+    'ok': ok,
+    'data': data.toJson(),
+  };
+
+  final Object? id;
+  final bool ok;
+
+  /// The answer.
+  final HeldCancelResponseData data;
+}
+
+/// The answer.
+class HeldCancelResponseData {
+  const HeldCancelResponseData({
+    required this.cancelled,
+    this.delivered,
+  });
+
+  factory HeldCancelResponseData.fromJson(JsonMap json) => HeldCancelResponseData(
+    cancelled: _need(json, 'cancelled', _asBool),
+    delivered: _maybe(json, 'delivered', _asBool),
+  );
+
+  JsonMap toJson() => <String, Object?>{
+    'cancelled': cancelled,
+    if (delivered != null) 'delivered': delivered,
+  };
+
+  final bool cancelled;
+
+  /// True when the command was already sent, so there was nothing to cancel.
+  final bool? delivered;
+}
+
+/// The waiting command will be sent in order.
+class HeldConfirmResponse {
+  const HeldConfirmResponse({
+    this.id,
+    this.ok = true,
+    required this.data,
+  });
+
+  factory HeldConfirmResponse.fromJson(JsonMap json) => HeldConfirmResponse(
+    id: json['id'],
+    ok: _need(json, 'ok', _asBool),
+    data: _need(json, 'data', (Object? v) => HeldConfirmResponseData.fromJson(_asMap(v))),
+  );
+
+  JsonMap toJson() => <String, Object?>{
+    if (id != null) 'id': id,
+    'ok': ok,
+    'data': data.toJson(),
+  };
+
+  final Object? id;
+  final bool ok;
+
+  /// The answer.
+  final HeldConfirmResponseData data;
+}
+
+/// The answer.
+class HeldConfirmResponseData {
+  const HeldConfirmResponseData({
+    required this.confirmed,
+  });
+
+  factory HeldConfirmResponseData.fromJson(JsonMap json) => HeldConfirmResponseData(
+    confirmed: _need(json, 'confirmed', _asBool),
+  );
+
+  JsonMap toJson() => <String, Object?>{
+    'confirmed': confirmed,
+  };
+
+  /// False when no waiting command has that id.
+  final bool confirmed;
+}
+
+/// What this Mac holds changed. Sent only to a connection that subscribed with held: true.
+class HeldChangedEvent {
+  const HeldChangedEvent({
+    this.event = 'held.changed',
+    required this.entries,
+    this.notices,
+  });
+
+  factory HeldChangedEvent.fromJson(JsonMap json) => HeldChangedEvent(
+    event: _need(json, 'event', _asString),
+    entries: _need(json, 'entries', (Object? v) => _asList<HeldEntry>(v, (Object? e) => HeldEntry.fromJson(_asMap(e)))),
+    notices: _maybe(json, 'notices', (Object? v) => _asList<HeldNotice>(v, (Object? e) => HeldNotice.fromJson(_asMap(e)))),
+  );
+
+  JsonMap toJson() => <String, Object?>{
+    'event': event,
+    'entries': <Object?>[for (final HeldEntry e in entries) e.toJson()],
+    if (notices != null) 'notices': <Object?>[for (final HeldNotice e in notices!) e.toJson()],
+  };
+
+  final String event;
+  final List<HeldEntry> entries;
+  final List<HeldNotice>? notices;
+}
+
 /// Parses a map as the type named by the key and writes it back.
 final Map<String, JsonMap Function(JsonMap)> roundtrips = <String, JsonMap Function(JsonMap)>{
   'Subagent': (JsonMap json) => Subagent.fromJson(json).toJson(),
@@ -3523,4 +4036,17 @@ final Map<String, JsonMap Function(JsonMap)> roundtrips = <String, JsonMap Funct
   'OpenEvent': (JsonMap json) => OpenEvent.fromJson(json).toJson(),
   'InboxEvent': (JsonMap json) => InboxEvent.fromJson(json).toJson(),
   'InboxRemovedEvent': (JsonMap json) => InboxRemovedEvent.fromJson(json).toJson(),
+  'ClusterNode': (JsonMap json) => ClusterNode.fromJson(json).toJson(),
+  'HelloCluster': (JsonMap json) => HelloCluster.fromJson(json).toJson(),
+  'HeldRef': (JsonMap json) => HeldRef.fromJson(json).toJson(),
+  'HeldEntry': (JsonMap json) => HeldEntry.fromJson(json).toJson(),
+  'HeldNotice': (JsonMap json) => HeldNotice.fromJson(json).toJson(),
+  'HeldListRequest': (JsonMap json) => HeldListRequest.fromJson(json).toJson(),
+  'HeldCancelRequest': (JsonMap json) => HeldCancelRequest.fromJson(json).toJson(),
+  'HeldConfirmRequest': (JsonMap json) => HeldConfirmRequest.fromJson(json).toJson(),
+  'HeldResponse': (JsonMap json) => HeldResponse.fromJson(json).toJson(),
+  'HeldListResponse': (JsonMap json) => HeldListResponse.fromJson(json).toJson(),
+  'HeldCancelResponse': (JsonMap json) => HeldCancelResponse.fromJson(json).toJson(),
+  'HeldConfirmResponse': (JsonMap json) => HeldConfirmResponse.fromJson(json).toJson(),
+  'HeldChangedEvent': (JsonMap json) => HeldChangedEvent.fromJson(json).toJson(),
 };

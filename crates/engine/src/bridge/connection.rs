@@ -19,6 +19,8 @@ pub(crate) fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 pub(crate) struct Subscription {
     pub wants_sessions: bool,
     pub wants_inbox: bool,
+    pub wants_held: bool,
+    pub last_held_json: Option<String>,
     pub known_inbox: HashMap<String, String>,
     pub chat_session_id: Option<String>,
     pub chat_subagent_id: Option<String>,
@@ -77,6 +79,10 @@ impl Connection {
 
     pub(crate) fn wants_inbox(&self) -> bool {
         lock(&self.subscription).wants_inbox
+    }
+
+    pub(crate) fn wants_held(&self) -> bool {
+        lock(&self.subscription).wants_held
     }
 
     pub fn wants_sessions(&self) -> bool {

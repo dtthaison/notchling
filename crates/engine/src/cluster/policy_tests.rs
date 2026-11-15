@@ -300,3 +300,47 @@ fn an_ack_goes_back_to_the_primary_only() {
     let removed = facts("m1", Role::Standby, true, MemberState::Removed);
     assert!(check("snap.ack", &removed, &origin("m1", OriginTier::Node)).is_err());
 }
+
+#[test]
+fn a_standby_or_client_may_relay_a_phones_commands_to_the_primary() {
+    let standby = facts("m2", Role::Standby, false, MemberState::Active);
+    let client = facts("m1", Role::Standby, true, MemberState::Active);
+    let worker = facts("w1", Role::Worker, false, MemberState::Active);
+    for op in ["session.new", "cluster.dispatch"] {
+        for (sender, name) in [(&standby, "m2"), (&client, "m1")] {
+            let rule = check(op, sender, &origin(name, OriginTier::App)).expect("rule");
+            assert!(rule.home_only, "{op} goes to the primary only");
+            assert_eq!(rule.id_field, None);
+            assert!(
+                check(op, sender, &origin(name, OriginTier::Node)).is_err(),
+                "{op}"
+            );
+            if op == "session.new" {
+                assert!(
+                    check(op, sender, &origin(name, OriginTier::Agent)).is_err(),
+                    "{op}"
+                );
+            }
+        }
+        assert!(
+            check(op, &worker, &origin("w1", OriginTier::App)).is_err(),
+            "{op}"
+        );
+    }
+}
+
+#[test]
+fn a_standby_claiming_the_app_tier_gets_only_the_relayed_ops() {
+    let standby = facts("m2", Role::Standby, false, MemberState::Active);
+    for op in [
+        "session.reply",
+        "node.put",
+        "cluster.main.set",
+        "session.stop",
+    ] {
+        assert!(
+            check(op, &standby, &origin("m2", OriginTier::App)).is_err(),
+            "{op}"
+        );
+    }
+}
