@@ -52,15 +52,22 @@ pub fn wanted(prompt: Want, pages: Want) -> Wanted {
         command: CMD.to_string(),
         prompt,
         pages,
+        fence: Want::Leave,
     }
 }
 
 pub fn install_all() -> Wanted {
-    wanted(Want::Install, Want::Install)
+    Wanted {
+        fence: Want::Install,
+        ..wanted(Want::Install, Want::Install)
+    }
 }
 
 pub fn remove_all() -> Wanted {
-    wanted(Want::Remove, Want::Remove)
+    Wanted {
+        fence: Want::Remove,
+        ..wanted(Want::Remove, Want::Remove)
+    }
 }
 
 pub fn value(text: &str) -> serde_json::Value {

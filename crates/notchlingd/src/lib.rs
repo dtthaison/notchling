@@ -47,6 +47,7 @@ pub mod git_ops;
 mod held_guard;
 pub mod held_ops;
 pub mod hook;
+pub mod hook_fence;
 pub mod hook_ops;
 pub mod hook_output;
 pub mod hook_pages;
@@ -160,6 +161,8 @@ mod held_kept_tests;
 mod held_ops_tests;
 #[cfg(test)]
 mod held_race_tests;
+#[cfg(test)]
+mod hook_fence_tests;
 #[cfg(test)]
 mod hook_ops_tests;
 #[cfg(test)]
@@ -290,6 +293,10 @@ pub fn run(command: Command) -> i32 {
         Command::Settings { args } => settings_cli::run(&args),
         Command::Cluster { args } => cluster_cli::run(&args),
         Command::Service { action, dir } => run_service(action, dir.as_deref()),
+        Command::HookFence => match Layout::from_env(None) {
+            Some(l) => hook_fence::run(&l),
+            None => 0,
+        },
         Command::Hook { socket } => match Layout::from_env(socket.as_deref()) {
             Some(l) => hook::run(&l),
             None => 0,

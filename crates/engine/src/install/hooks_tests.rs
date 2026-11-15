@@ -67,10 +67,10 @@ const EVERY_FIXTURE: [(&str, &str); 7] = [
 ];
 
 #[test]
-fn installing_adds_the_five_entries_to_a_users_file_and_changes_nothing_else() {
+fn installing_adds_the_six_entries_to_a_users_file_and_changes_nothing_else() {
     let out = plan(USER_HOOKS, &install_all());
     assert!(out.changed);
-    assert_eq!(out.changes.len(), 5, "{:?}", out.changes);
+    assert_eq!(out.changes.len(), 6, "{:?}", out.changes);
     assert!(
         out.changes.iter().all(|c| c.starts_with("add ")),
         "{:?}",
@@ -97,6 +97,7 @@ fn the_entries_are_the_swift_apps_slots_and_timeouts() {
         vec![
             ("AskUserQuestion".into(), CMD.into(), 300),
             ("Artifact".into(), CMD.into(), 60),
+            ("*".into(), format!("{CMD} --fence"), 30),
         ]
     );
     assert_eq!(
@@ -130,7 +131,7 @@ fn installing_twice_changes_nothing() {
                 .iter()
                 .filter(|n| n.ends_with("already installed"))
                 .count(),
-            5,
+            6,
             "{name}"
         );
     }
@@ -142,7 +143,7 @@ fn removing_takes_exactly_ours_out_of_every_fixture() {
         let installed = plan(text, &install_all());
         let back = plan(&installed.text, &remove_all());
         assert!(back.changed, "{name}");
-        assert_eq!(back.changes.len(), 5, "{name}");
+        assert_eq!(back.changes.len(), 6, "{name}");
         assert!(ours(&value(&back.text), "PreToolUse").is_empty(), "{name}");
         match name {
             "odd" | "empty-hooks" => assert_eq!(
@@ -184,10 +185,10 @@ fn the_swift_apps_entries_are_reported_and_never_touched() {
     let out = plan(SWIFT_INSTALLED, &install_all());
     let v = value(&out.text);
     assert_eq!(without_ours(v.clone()), value(SWIFT_INSTALLED));
-    assert_eq!(v["hooks"]["PreToolUse"].as_array().unwrap().len(), 5);
+    assert_eq!(v["hooks"]["PreToolUse"].as_array().unwrap().len(), 6);
     let now = detect(&out.text).unwrap();
     assert_eq!(now.iter().filter(|f| f.origin == Origin::Swift).count(), 5);
-    assert_eq!(now.iter().filter(|f| f.managed).count(), 5);
+    assert_eq!(now.iter().filter(|f| f.managed).count(), 6);
     assert_eq!(plan(&out.text, &remove_all()).text, SWIFT_INSTALLED);
 }
 
@@ -405,7 +406,7 @@ fn odd_formatting_is_kept() {
         v["hooks"]["PreToolUse"][0]["hooks"][0]["command"],
         "lint.sh"
     );
-    assert_eq!(ours(&v, "PreToolUse").len(), 2);
+    assert_eq!(ours(&v, "PreToolUse").len(), 3);
     let back = plan(&out.text, &remove_all());
     for kept in [
         "// my settings",
