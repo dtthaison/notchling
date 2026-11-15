@@ -1,6 +1,7 @@
+#[cfg(unix)]
+use crate::hook_fence::read_fd_within;
 use crate::hook_fence::{
-    answer, answer_within, bounded, budgeted, deny_output, read_fd_within, read_fence, spawn_real,
-    Seen,
+    answer, answer_within, bounded, budgeted, deny_output, read_fence, spawn_real, Seen,
 };
 use notchling_engine::cluster::fence::{
     after_wait, Fence, FenceFile, Gate, FENCE_FILE, FENCE_VERSION, MAX_FENCE_BYTES, POLL_MS,
@@ -470,21 +471,25 @@ fn no_stdin_or_no_session_never_reaches_the_answer() {
     }
 }
 
+#[cfg(unix)]
 fn pipe() -> (i32, i32) {
     let mut fds = [0i32; 2];
     assert_eq!(unsafe { libc::pipe(fds.as_mut_ptr()) }, 0);
     (fds[0], fds[1])
 }
 
+#[cfg(unix)]
 fn put_bytes(fd: i32, bytes: &[u8]) {
     let n = unsafe { libc::write(fd, bytes.as_ptr().cast(), bytes.len()) };
     assert_eq!(n as usize, bytes.len());
 }
 
+#[cfg(unix)]
 fn close(fd: i32) {
     unsafe { libc::close(fd) };
 }
 
+#[cfg(unix)]
 #[test]
 fn a_stdin_that_never_closes_ends_at_the_limit_with_nothing() {
     let (r, w) = pipe();
@@ -498,6 +503,7 @@ fn a_stdin_that_never_closes_ends_at_the_limit_with_nothing() {
     close(w);
 }
 
+#[cfg(unix)]
 #[test]
 fn a_stdin_that_closes_is_read_whole_and_a_cap_cuts_it() {
     let (r, w) = pipe();
