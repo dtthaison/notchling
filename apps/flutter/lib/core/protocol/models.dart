@@ -266,6 +266,27 @@ class SessionFacts {
       : (contextTokens! / contextWindow!).clamp(0, 1).toDouble();
 }
 
+class SessionNode {
+  const SessionNode({required this.id, required this.name, this.online = true});
+
+  static SessionNode? tryParse(Object? raw) {
+    if (raw is! Map<Object?, Object?>) return null;
+    final Json json = raw.cast<String, Object?>();
+    final String id = json.strOrNull('id') ?? '';
+    final String name = json.strOrNull('name') ?? '';
+    if (id.isEmpty && name.isEmpty) return null;
+    return SessionNode(
+      id: id,
+      name: name.isEmpty ? id : name,
+      online: json.boolean('online', orElse: true),
+    );
+  }
+
+  final String id;
+  final String name;
+  final bool online;
+}
+
 class Session {
   const Session({
     required this.id,
@@ -282,6 +303,7 @@ class Session {
     this.activity,
     this.facts,
     this.lastMessage,
+    this.node,
   });
 
   factory Session.fromJson(Json json) {
@@ -307,6 +329,7 @@ class Session {
       facts: json['facts'] is Map<Object?, Object?>
           ? SessionFacts.fromJson(json.object('facts'))
           : null,
+      node: SessionNode.tryParse(json['node']),
     );
   }
 
@@ -328,6 +351,8 @@ class Session {
   final SessionFacts? facts;
 
   final LastMessage? lastMessage;
+
+  final SessionNode? node;
 
   int get runningSubagents => subagents.where((Subagent s) => s.running).length;
   bool get canMessage => control != SessionControl.viewOnly;

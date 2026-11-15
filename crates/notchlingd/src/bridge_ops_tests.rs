@@ -359,6 +359,7 @@ fn the_bridge_acts_only_through_the_acting_switch() {
     let off = DaemonActing {
         ops: acting_ops(false, sessions.clone(), Arc::new(FakeRoom::default())),
         sessions: sessions.clone(),
+        cluster: crate::bridge_cluster::PhoneCluster::none(),
     };
     let refused = off.send_message("hi", &job_session()).unwrap_err();
     assert_eq!(refused.message, ACTING_OFF);
@@ -366,6 +367,7 @@ fn the_bridge_acts_only_through_the_acting_switch() {
     let on = DaemonActing {
         ops: acting_ops(true, sessions.clone(), Arc::new(FakeRoom::default())),
         sessions,
+        cluster: crate::bridge_cluster::PhoneCluster::none(),
     };
     let typed = on.send_message("hi", &job_session()).unwrap_err();
     assert!(

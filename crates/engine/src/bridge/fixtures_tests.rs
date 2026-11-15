@@ -213,6 +213,20 @@ fn queries(run: &mut Run) {
         Some("SessionsListResponse.models"),
     );
     phone.rig.backend.with(|s| s.models.clear());
+    phone.rig.backend.with(|s| {
+        s.sessions[1].node = Some(super::model::SessionNode {
+            id: "0123456789abcdef".into(),
+            name: "mac-mini".into(),
+            online: false,
+        })
+    });
+    run.round_trip(
+        &phone,
+        "SessionsListRequest",
+        none(),
+        Some("SessionsListResponse.node"),
+    );
+    phone.rig.backend.with(|s| s.sessions[1].node = None);
     run.round_trip(&phone, "ChatGetRequest", none(), Some("ChatGetResponse"));
     run.round_trip(
         &phone,

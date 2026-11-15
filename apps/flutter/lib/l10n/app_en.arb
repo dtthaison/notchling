@@ -938,6 +938,19 @@
   "@sessionsNewSessionStarted": {
     "description": "Shown in the Sessions tab."
   },
+  "sessionsNodeOffline": "Offline",
+  "@sessionsNodeOffline": {
+    "description": "Shown on a session row in the Sessions tab beside the name of its computer, when that computer can't be reached right now. Also read aloud."
+  },
+  "sessionsNodeOn": "On {name}",
+  "@sessionsNodeOn": {
+    "description": "Read aloud by a screen reader for a session that runs on another computer of the cluster. $name is that computer's name.",
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
   "sessionsRunningSubagents": "{count, plural, one{{count} subagent running} other{{count} subagents running}}",
   "@sessionsRunningSubagents": {
     "description": "Shown in the Sessions tab. $count is the number of subagents.",

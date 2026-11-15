@@ -49,6 +49,7 @@ fn sources(ops: &Arc<ActingOps>) -> (DaemonSources, TempDir) {
             Arc::new(crate::acting_ops_tests::FakeRoom::default()),
         ),
         every: Arc::new(EverySession::none()),
+        cluster: crate::bridge_cluster::PhoneCluster::none(),
         projects_dir: PathBuf::from("/nonexistent/projects"),
     };
     (sources, tmp)
@@ -129,6 +130,7 @@ fn a_model_id_starts_a_session_on_exactly_that_model() {
     let acting = DaemonActing {
         ops: ops.clone(),
         sessions: Arc::new(Mutex::new(json!([]))),
+        cluster: crate::bridge_cluster::PhoneCluster::none(),
     };
     fake.push_output(Ok(LaunchOutput::ok(
         "backgrounded · 6ce4c19c · api (idle)\n",

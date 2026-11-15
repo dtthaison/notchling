@@ -196,6 +196,7 @@ pub(crate) fn sources(
         approvals: Arc::new(Approvals::new(room.clone(), Duration::from_secs(1))),
         inbox: InboxOps::new(dir.join("inbox"), room),
         every,
+        cluster: crate::bridge_cluster::PhoneCluster::none(),
         projects_dir: dir.join("projects"),
     }
 }

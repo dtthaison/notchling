@@ -49,4 +49,5 @@ Session withSessionId(Session session, String id) => Session(
       activity: session.activity,
       facts: session.facts,
       lastMessage: session.lastMessage,
+      node: session.node,
     );

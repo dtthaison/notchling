@@ -742,6 +742,14 @@ class AppL10nEn extends AppL10n {
   String get sessionsNewSessionStarted => 'The Mac started a new session.';
 
   @override
+  String get sessionsNodeOffline => 'Offline';
+
+  @override
+  String sessionsNodeOn(String name) {
+    return 'On $name';
+  }
+
+  @override
   String sessionsRunningSubagents(int count) {
     final intl.NumberFormat countNumberFormat =
         intl.NumberFormat.decimalPattern(localeName);

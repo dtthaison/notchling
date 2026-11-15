@@ -1311,6 +1311,18 @@ abstract class AppL10n {
   /// **'The Mac started a new session.'**
   String get sessionsNewSessionStarted;
 
+  /// Shown on a session row in the Sessions tab beside the name of its computer, when that computer can't be reached right now. Also read aloud.
+  ///
+  /// In en, this message translates to:
+  /// **'Offline'**
+  String get sessionsNodeOffline;
+
+  /// Read aloud by a screen reader for a session that runs on another computer of the cluster. $name is that computer's name.
+  ///
+  /// In en, this message translates to:
+  /// **'On {name}'**
+  String sessionsNodeOn(String name);
+
   /// Shown in the Sessions tab. $count is the number of subagents.
   ///
   /// In en, this message translates to:

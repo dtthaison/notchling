@@ -67,6 +67,7 @@ pub trait Sources: Send + Sync {
     ) -> Result<InboxOutcome, BridgeFailure> {
         Err(BridgeFailure::not_found("No such inbox item."))
     }
+    fn follow_remote(&self, _session: &Session) {}
     fn now_ms(&self) -> f64;
 }
 
@@ -264,6 +265,9 @@ impl<S: Sources, A: Acting> BridgeBackend for LiveBackend<S, A> {
             return self.foreign_messages(session_id);
         }
         let session = self.find(session_id)?;
+        if session.node.is_some() {
+            self.sources.follow_remote(&session);
+        }
         let path = match subagent_id {
             Some(sub) => session
                 .subagents

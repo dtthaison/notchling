@@ -1,4 +1,5 @@
 use crate::acting_ops::{ActingOps, Room};
+use crate::bridge_cluster::PhoneCluster;
 use crate::catalog_ops::CatalogService;
 use crate::every_session::EverySession;
 use crate::inbox_ops::InboxOps;
@@ -13,6 +14,7 @@ use notchling_engine::bridge::model::{
 };
 use notchling_engine::bridge::BridgeFailure;
 use notchling_engine::catalog::{Tier as ModelTier, Tool};
+use notchling_engine::cluster::Qualified;
 use notchling_engine::inbox::{ActionId, Item};
 use notchling_engine::sessions::{Agent, AgentTarget};
 use notchling_local_api::{ops, topics, ApiError, Caller, ClientKind, ErrorCode, Tier};
@@ -85,6 +87,7 @@ pub struct DaemonSources {
     pub approvals: Arc<Approvals>,
     pub inbox: Arc<InboxOps>,
     pub every: Arc<EverySession>,
+    pub cluster: Arc<PhoneCluster>,
     pub projects_dir: PathBuf,
 }
 
@@ -94,16 +97,19 @@ fn agents_of(list: &Value) -> Vec<Agent> {
 
 impl Sources for DaemonSources {
     fn claude_sessions(&self) -> Vec<Session> {
-        let rows = agents_of(&lock(&self.sessions));
+        let mut rows = agents_of(&lock(&self.sessions));
+        rows.extend(self.cluster.agents());
         let mut sessions = agents::sessions(&rows);
-        let mut prompts = self.acting.prompts().list();
-        prompts.sort_by_key(|p| p.created_ms);
+        let mut prompts: Vec<PendingPrompt> =
+            self.acting.prompts().list().iter().map(pending).collect();
+        prompts.extend(self.cluster.prompts());
+        prompts.sort_by(|a, b| a.created_ms.total_cmp(&b.created_ms));
         for prompt in prompts {
             if let Some(session) = sessions
                 .iter_mut()
                 .find(|s| s.id == prompt.session_id && s.pending.is_none())
             {
-                session.pending = Some(pending(&prompt));
+                session.pending = Some(prompt);
             }
         }
         sessions
@@ -160,6 +166,10 @@ impl Sources for DaemonSources {
             })
     }
 
+    fn follow_remote(&self, session: &Session) {
+        self.cluster.follow(&session.id, self.now_ms() as u64);
+    }
+
     fn now_ms(&self) -> f64 {
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -202,6 +212,7 @@ pub fn pending(prompt: &Prompt) -> PendingPrompt {
 pub struct DaemonActing {
     pub ops: Arc<ActingOps>,
     pub sessions: Arc<Mutex<Value>>,
+    pub cluster: Arc<PhoneCluster>,
 }
 
 fn bridge_caller() -> Caller {
@@ -226,6 +237,25 @@ impl DaemonActing {
         self.ops.call(&bridge_caller(), op, &args).map_err(failure)
     }
 
+    fn forward(&self, node: &str, op: &str, args: Value) -> Result<(), BridgeFailure> {
+        if !self.cluster.attached() {
+            return Err(BridgeFailure::not_reachable(format!(
+                "{node} is not reachable from the phone yet."
+            )));
+        }
+        self.cluster.call(op, &args).map(|_| ()).map_err(failure)
+    }
+
+    fn remote_row(&self, session: &Session) -> Result<Option<(String, String)>, BridgeFailure> {
+        let Some(node) = &session.node else {
+            return Ok(None);
+        };
+        match &session.control {
+            Control::Job(id) => Ok(Some((node.name.clone(), id.clone()))),
+            _ => Err(BridgeFailure::view_only("This session is view only.")),
+        }
+    }
+
     fn row_of(&self, session: &Session) -> Result<String, BridgeFailure> {
         let Control::Job(job) = &session.control else {
             return Err(BridgeFailure::view_only("This session is view only."));
@@ -244,12 +274,18 @@ impl Acting for DaemonActing {
     }
 
     fn send_message(&self, text: &str, session: &Session) -> Result<(), BridgeFailure> {
+        if let Some((node, id)) = self.remote_row(session)? {
+            return self.forward(&node, ops::SESSION_REPLY, json!({"id": id, "text": text}));
+        }
         let id = self.row_of(session)?;
         self.call(ops::SESSION_REPLY, json!({"id": id, "text": text}))
             .map(|_| ())
     }
 
     fn send_now(&self, session: &Session) -> Result<(), BridgeFailure> {
+        if let Some((node, id)) = self.remote_row(session)? {
+            return self.forward(&node, ops::SESSION_INTERRUPT, json!({"id": id}));
+        }
         let id = self.row_of(session)?;
         self.call(ops::SESSION_INTERRUPT, json!({"id": id}))
             .map(|_| ())
@@ -279,6 +315,9 @@ impl Acting for DaemonActing {
                 ))
             }
         };
+        if Qualified::parse(&prompt.id).is_some() {
+            return self.forward("That node", op, args);
+        }
         self.call(op, args).map(|_| ())
     }
 

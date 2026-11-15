@@ -639,6 +639,11 @@ impl Wired {
             events.clone(),
             sessions.clone(),
         );
+        bridge.cluster().attach(
+            cluster.handler(),
+            cluster.remote.clone(),
+            cluster.prompts.clone(),
+        );
         Wired {
             acting,
             codex,

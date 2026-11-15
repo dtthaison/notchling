@@ -14,6 +14,7 @@ pub mod attach;
 pub mod awake_loop;
 pub mod awake_ops;
 pub mod bridge_backend;
+pub mod bridge_cluster;
 pub mod bridge_ops;
 pub mod catalog_ops;
 pub mod cli;

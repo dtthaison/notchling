@@ -119,3 +119,9 @@ sessions-group-label = { $count ->
     [one] { $state }, { NUMBER($count) } session
    *[other] { $state }, { NUMBER($count) } sessions
 }
+
+# Read aloud by a screen reader for a session that runs on another computer of the cluster. $name is that computer's name.
+sessions-node-on = On { $name }
+
+# Shown on a session row in the Sessions tab beside the name of its computer, when that computer can't be reached right now. Also read aloud.
+sessions-node-offline = Offline

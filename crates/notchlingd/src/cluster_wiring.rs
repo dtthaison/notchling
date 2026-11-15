@@ -409,6 +409,10 @@ impl ClusterParts {
         }
     }
 
+    pub fn handler(&self) -> Arc<LateHandler> {
+        self.handler.clone()
+    }
+
     pub fn serve(&self, handler: &Arc<dyn Handler>) {
         self.handler.serve(handler);
     }

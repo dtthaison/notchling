@@ -42,6 +42,8 @@ mod inbox_tests;
 #[cfg(test)]
 mod live_tests;
 #[cfg(test)]
+mod router_cluster_tests;
+#[cfg(test)]
 mod router_tests;
 #[cfg(test)]
 mod snapshot_tests;

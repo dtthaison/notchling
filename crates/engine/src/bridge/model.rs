@@ -3,8 +3,8 @@ use notchling_protocol::generated as wire;
 use std::collections::BTreeMap;
 
 pub use wire::{
-    ChatMessage, Command, Facts, LastMessage, Limit, PromptQuestion, SessionState, Subagent,
-    VizSpec,
+    ChatMessage, Command, Facts, LastMessage, Limit, PromptQuestion, SessionNode, SessionState,
+    Subagent, VizSpec,
 };
 
 pub const ALIVE_REASON: &str =
@@ -94,6 +94,7 @@ pub struct Session {
     pub facts: Option<Facts>,
     pub last_message: Option<LastMessage>,
     pub tool: String,
+    pub node: Option<SessionNode>,
 }
 
 impl Session {
@@ -122,6 +123,7 @@ impl Session {
             facts: None,
             last_message: None,
             tool: "claude".into(),
+            node: None,
         }
     }
 
@@ -155,6 +157,7 @@ impl Session {
             facts: self.facts.clone(),
             last_message: self.last_message.clone(),
             tool: self.tool.clone(),
+            node: self.node.clone(),
         }
     }
 }

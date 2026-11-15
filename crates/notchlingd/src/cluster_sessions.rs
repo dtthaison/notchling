@@ -434,6 +434,10 @@ impl RemoteSessions {
             .collect()
     }
 
+    pub fn claude_rows(&self) -> Vec<Value> {
+        self.rows_for(false)
+    }
+
     pub fn merge(&self, local: &Value) -> Value {
         Self::joined(local, self.rows_for(false))
     }
