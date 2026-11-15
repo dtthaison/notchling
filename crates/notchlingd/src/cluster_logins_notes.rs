@@ -8,7 +8,7 @@ pub const NEEDED: &str = "login-needed:";
 pub const NO_EXPIRY: &str = "login-no-expiry:";
 pub const NOTICE_DAYS: i64 = 14;
 pub const DAY_MS: i64 = 86_400_000;
-const VARIANTS: usize = 30;
+pub(crate) const VARIANTS: usize = 30;
 
 pub trait Notes: Send + Sync {
     fn raise(&self, item: Item);
@@ -42,7 +42,13 @@ impl Notes for InboxOps {
     }
 }
 
-fn notice(id: String, kind: Kind, text: (String, String), node: Option<&NodeId>, now: i64) -> Item {
+pub(crate) fn notice(
+    id: String,
+    kind: Kind,
+    text: (String, String),
+    node: Option<&NodeId>,
+    now: i64,
+) -> Item {
     Item {
         id,
         kind,
@@ -104,7 +110,7 @@ pub fn wanted(
     wanted
 }
 
-fn base_of(id: &str) -> &str {
+pub(crate) fn base_of(id: &str) -> &str {
     id.split('#').next().unwrap_or(id)
 }
 
@@ -128,7 +134,7 @@ fn variant(base: &str, n: usize) -> String {
     }
 }
 
-fn raise_once(notes: &dyn Notes, base: &str, mut item: Item) {
+pub(crate) fn raise_once(notes: &dyn Notes, base: &str, mut item: Item) {
     let mut latest = None;
     for n in 1..=VARIANTS {
         let id = variant(base, n);

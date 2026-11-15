@@ -36,6 +36,8 @@ impl StepId {
     pub const NODE_BINARY: StepId = StepId(Cow::Borrowed("node-binary"));
     pub const NODE_SERVICE: StepId = StepId(Cow::Borrowed("node-service"));
     pub const NODE_JOINED: StepId = StepId(Cow::Borrowed("node-joined"));
+    pub const NODE_CODEX_LOGIN: StepId = StepId(Cow::Borrowed("node-codex-login"));
+    pub const NODE_AGY_LOGIN: StepId = StepId(Cow::Borrowed("node-agy-login"));
 
     pub fn self_update(tool: Tool) -> StepId {
         StepId(Cow::Owned(format!("self-update:{}", tool.name())))

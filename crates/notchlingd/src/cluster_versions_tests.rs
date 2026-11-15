@@ -104,3 +104,20 @@ fn a_standing_login_is_reported_and_none_is_left_out() {
     let without = with_logins(own(), false);
     assert!(without.logins.is_empty());
 }
+
+#[test]
+fn probed_logins_fill_codex_and_agy_and_leave_claude_to_its_own_report() {
+    let probed = BTreeMap::from([
+        (Tool::Codex, false),
+        (Tool::Agy, true),
+        (Tool::Claude, false),
+    ]);
+    let versions = with_probed(with_logins(own(), true), probed.clone());
+    assert_eq!(versions.logins.get(&Tool::Codex), Some(&false));
+    assert_eq!(versions.logins.get(&Tool::Agy), Some(&true));
+    assert_eq!(versions.logins.get(&Tool::Claude), Some(&true));
+    let none = with_probed(own(), BTreeMap::new());
+    assert!(none.logins.is_empty());
+    let only = with_probed(own(), probed);
+    assert_eq!(only.logins.get(&Tool::Claude), Some(&false));
+}

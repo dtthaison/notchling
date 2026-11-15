@@ -27,6 +27,7 @@ pub mod step;
 pub mod steps_machine;
 pub mod steps_node;
 mod steps_node_binary;
+mod steps_node_logins;
 mod steps_node_service;
 pub mod steps_push;
 pub mod steps_replace;
@@ -89,6 +90,8 @@ mod tests_merge_git_b;
 mod tests_morning;
 #[cfg(test)]
 mod tests_node_final;
+#[cfg(test)]
+mod tests_node_logins;
 #[cfg(test)]
 mod tests_node_steps;
 #[cfg(test)]

@@ -36,6 +36,7 @@ pub mod cluster_join;
 pub mod cluster_logins;
 pub mod cluster_logins_jobs;
 pub mod cluster_logins_notes;
+pub mod cluster_logins_probe;
 pub mod cluster_logins_send;
 pub mod cluster_mirror;
 pub mod cluster_node;

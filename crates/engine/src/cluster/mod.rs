@@ -8,6 +8,7 @@ pub mod id;
 pub mod jobs;
 pub mod join;
 pub mod login_files;
+pub mod logins;
 pub mod members;
 pub mod outward;
 pub mod persist;

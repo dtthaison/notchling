@@ -35,6 +35,13 @@ pub fn with_logins(mut versions: Versions, claude: bool) -> Versions {
     versions
 }
 
+pub fn with_probed(mut versions: Versions, probed: BTreeMap<Tool, bool>) -> Versions {
+    for (tool, signed_in) in probed {
+        versions.logins.entry(tool).or_insert(signed_in);
+    }
+    versions
+}
+
 pub fn probe(roots: &Roots, cache: &mut IdentityCache, agy: Option<Version>) -> Versions {
     let mut tools = BTreeMap::new();
     for tool in [Tool::Claude, Tool::Codex] {

@@ -81,6 +81,9 @@ fn dispatch(
         if !node.tools.contains_key(&vt) {
             return Compat::Refuse(format!("{} isn't installed on {node_name}", tool.title()));
         }
+        if node.logins.get(&vt) == Some(&false) {
+            return Compat::Refuse(format!("{} isn't signed in on {node_name}", tool.title()));
+        }
         if tool == Tool::Claude && node.os == "windows" {
             return Compat::Refuse("Claude Code doesn't run on Windows nodes in v1".to_string());
         }

@@ -7,6 +7,7 @@ use crate::cluster_inbox::{InboxCalls, NetLink, NodeNet, Outbox};
 use crate::cluster_inbox_follow::Follow;
 use crate::cluster_join::{JoinAsker, JOIN_WAIT};
 use crate::cluster_logins::{LoginCalls, LoginEnv, LoginHold, CLUSTER_LOGIN_ON};
+use crate::cluster_logins_probe::{has_content, LoginProbe, SystemStatus};
 use crate::cluster_logins_send::{LoginDeliverer, NodeOnline, Parts, Stamps};
 use crate::cluster_mirror::{FollowOps, Mirror, OnCap, TailSource, MIRROR_CAP, MIRROR_DIR};
 use crate::cluster_node::{
@@ -19,7 +20,7 @@ use crate::cluster_sessions::{
 };
 use crate::cluster_switches::{HeadlessSwitches, LateHandler, NodeCalls, OpsPanel};
 use crate::cluster_tail_mask::MaskedTails;
-use crate::cluster_versions::{own, with_logins, with_tools};
+use crate::cluster_versions::{own, with_logins, with_probed, with_tools};
 use crate::cluster_workspace::{Workspace, WorkspaceCalls};
 use crate::cluster_workspace_send::{CodeSender, NodePeers, ReturnOps, Sender};
 use crate::grant_broker::GrantBroker;
@@ -283,7 +284,7 @@ fn start_node(
     room: Arc<dyn Room>,
     links: (Arc<dyn LocalCalls>, Arc<dyn Hooks>),
     versions: Arc<VersionsOps>,
-    (log, login): (ClusterLog, Arc<LoginHold>),
+    (log, login, probed): (ClusterLog, Arc<LoginHold>, Arc<LoginProbe>),
 ) -> Result<Arc<ClusterNode>, String> {
     let cluster_dir = layout.cluster_dir();
     let identity = load_or_make(&cluster_dir.join(IDENTITY_DIR)).map_err(|e| e.to_string())?;
@@ -292,8 +293,10 @@ fn start_node(
     let loopback = loopback_ok(std::env::var_os(LOOPBACK_ENV).as_deref(), exe.as_deref());
     let pins = Pins::default();
     let transport = Arc::new(TcpTls::new(identity, pins.clone(), loopback));
-    let probe: Probe =
-        Box::new(move || with_logins(with_tools(versions.tool_versions()), login.standing()));
+    let probe: Probe = Box::new(move || {
+        let found = with_logins(with_tools(versions.tool_versions()), login.standing());
+        with_probed(found, probed.logins())
+    });
     let setup = ClusterSetup {
         cluster_dir,
         fixture: layout.fixture,
@@ -462,12 +465,21 @@ impl ClusterParts {
             inbox: inbox.clone(),
             login: login.clone(),
         });
+        let probed = LoginProbe::new(
+            (
+                versions.clone(),
+                Arc::new(SystemStatus),
+                Arc::new(has_content),
+            ),
+            (inbox.clone(), Arc::new(crate::acting_ops::now_ms)),
+            (node_name(), std::env::consts::OS.to_string()),
+        );
         let node = start_node(
             layout,
             room.clone(),
             (local, hooks),
             versions,
-            (log.clone(), login.clone()),
+            (log.clone(), login.clone(), probed),
         );
         let audit = log.clone();
         let mut refresher = None;
