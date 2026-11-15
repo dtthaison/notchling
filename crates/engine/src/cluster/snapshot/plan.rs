@@ -133,17 +133,21 @@ fn resolved(path: &Path) -> Option<PathBuf> {
 fn forms(path: &Path) -> Vec<PathBuf> {
     let mut all = vec![path.to_path_buf()];
     all.extend(resolved(path));
-    let is_link = std::fs::symlink_metadata(path).is_ok_and(|meta| meta.file_type().is_symlink());
-    if is_link {
-        if let (Some(parent), Some(name)) = (path.parent().and_then(resolved), path.file_name()) {
-            all.push(parent.join(name));
-        }
+    for ancestor in path.ancestors() {
+        let (Some(parent), Some(name)) = (ancestor.parent(), ancestor.file_name()) else {
+            continue;
+        };
+        let (Some(real), Ok(rest)) = (resolved(parent), path.strip_prefix(ancestor)) else {
+            continue;
+        };
+        all.push(real.join(name).join(rest));
     }
-    all.dedup();
+    let mut seen = BTreeSet::new();
+    all.retain(|form| seen.insert(form.clone()));
     all
 }
 
-fn holds(root: &Path, path: &Path) -> bool {
+pub(super) fn holds(root: &Path, path: &Path) -> bool {
     let roots = forms(root);
     forms(path).iter().any(|each| {
         roots

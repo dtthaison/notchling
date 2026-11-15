@@ -428,18 +428,25 @@ fn a_symlinked_ancestor_of_a_path_not_yet_on_disk_still_counts_as_inside() {
 #[test]
 fn a_path_that_is_a_symlink_out_of_the_repository_is_still_inside_by_name() {
     let rig = Rig::new("plan-symlink-out");
-    std::fs::create_dir_all(rig.home.path("repo")).expect("repo");
-    let root = std::fs::canonicalize(rig.home.path("repo")).expect("canonical");
-    let outside = rig.home.write("outside/abc.jsonl", "y");
-    let folder = root.join(".claude/projects/-p");
-    std::fs::create_dir_all(&folder).expect("folder");
-    let transcript = folder.join("abc.jsonl");
-    std::os::unix::fs::symlink(&outside, &transcript).expect("symlink");
-    let m = main_session("abc", &root.join(".claude"), &transcript);
+    let real = rig.home.path("real");
+    std::fs::create_dir_all(real.join("repo/.claude/projects")).expect("repo");
+    let link = rig.home.path("link");
+    std::os::unix::fs::symlink(&real, &link).expect("symlink");
+    let root = std::fs::canonicalize(real.join("repo")).expect("canonical");
+    let outside = rig.home.write("outside/dir/abc.jsonl", "y");
+    let target = outside.parent().expect("dir").to_path_buf();
+    std::os::unix::fs::symlink(&target, root.join(".claude/projects/-p")).expect("inner");
+    let config = link.join("repo/.claude");
+    let transcript = config.join("projects/-p/abc.jsonl");
+    assert!(super::plan::holds(&root, &transcript));
+    let m = main_session("abc", &config, &transcript);
     let repos = BTreeMap::from([("abc".to_string(), Some(facts(&root)))]);
     let plan = rig.plan(&[m], &repos, &BTreeMap::new());
     assert_eq!(plan.sessions[0].repo, None);
-    assert_eq!(planned_inside(&plan, &[&root]), Vec::<PathBuf>::new());
+    assert_eq!(
+        planned_inside(&plan, &[&root, &link.join("repo"), &target]),
+        Vec::<PathBuf>::new()
+    );
 }
 
 #[test]
