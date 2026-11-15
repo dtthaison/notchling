@@ -8,11 +8,14 @@ use notchling_engine::cluster::NodeId;
 use notchling_local_api::{ops, topics, ApiError, Caller, ClientKind};
 use serde_json::{json, Value};
 use std::collections::BTreeSet;
-use std::sync::mpsc::{channel, RecvTimeoutError, Sender};
+use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, Weak};
 use std::time::{Duration, Instant};
 
-pub use crate::cluster_prompts_book::{GONE_MAX, MAX_PER_NODE, MAX_TOTAL, REMOTE_BYTES};
+pub use crate::cluster_prompts_book::{
+    GONE_MAX, MAX_PER_NODE, MAX_TOTAL, PUBLISH_TRIES, REMOTE_BYTES,
+};
 pub use crate::cluster_prompts_clean::{ID_MAX, INPUT_MAX, QUESTION_MAX, TEXT_MAX};
 
 pub const FOLLOW_EVERY_MS: u64 = 30_000;
@@ -348,22 +351,41 @@ impl PromptFollower {
             .name("cluster-prompts".into())
             .spawn(move || {
                 let source = Arc::new(NodeSource::new(node.clone()));
-                loop {
-                    let status = node.status();
-                    let active = wants_follow(&status, room.can_answer());
-                    prompts.sync(&peers_of(&status), active, &source, now_ms());
-                    match rx.recv_timeout(LOOP_EVERY) {
-                        Err(RecvTimeoutError::Timeout) => {}
-                        _ => break,
-                    }
-                }
-                prompts.stop("unfollowed");
+                let status = || node.status();
+                let app = || room.can_answer();
+                follow_loop(&prompts, &status, &app, &source, &rx, LOOP_EVERY);
             });
         PromptFollower { stop }
     }
 
     pub fn close(&self) {
         let _ = self.stop.send(());
+    }
+}
+
+fn follow_loop<S: PromptSource + 'static>(
+    prompts: &Arc<RemotePrompts>,
+    status: &dyn Fn() -> Value,
+    app: &dyn Fn() -> bool,
+    source: &Arc<S>,
+    rx: &Receiver<()>,
+    every: Duration,
+) {
+    loop {
+        let _ = catch_unwind(AssertUnwindSafe(|| {
+            let status = status();
+            let active = wants_follow(&status, app());
+            prompts.sync(&peers_of(&status), active, source, now_ms());
+        }));
+        match rx.recv_timeout(every) {
+            Err(RecvTimeoutError::Timeout) => {}
+            _ => break,
+        }
+    }
+    for _ in 0..=PUBLISH_TRIES {
+        if catch_unwind(AssertUnwindSafe(|| prompts.stop("unfollowed"))).is_ok() {
+            return;
+        }
     }
 }
 

@@ -9,6 +9,7 @@ pub const MAX_PER_NODE: usize = 50;
 pub const MAX_TOTAL: usize = 200;
 pub const GONE_MAX: usize = MAX_PER_NODE * 4;
 pub const REMOTE_BYTES: usize = 384 * 1024;
+pub const PUBLISH_TRIES: u8 = 2;
 
 #[derive(Default)]
 pub(crate) struct Followed {
@@ -44,7 +45,7 @@ pub(crate) struct Book {
     gens: BTreeMap<NodeId, u64>,
     stops: u64,
     bytes: usize,
-    outbox: VecDeque<(&'static str, Value)>,
+    outbox: VecDeque<(&'static str, Value, u8)>,
     draining: bool,
 }
 
@@ -93,7 +94,7 @@ impl Book {
     }
 
     fn say(&mut self, event: &'static str, data: Value) {
-        self.outbox.push_back((event, data));
+        self.outbox.push_back((event, data, 0));
     }
 
     pub(crate) fn claim(&mut self) -> bool {
@@ -105,11 +106,19 @@ impl Book {
     }
 
     pub(crate) fn next_event(&mut self) -> Option<(&'static str, Value)> {
-        let next = self.outbox.front().cloned();
-        if next.is_none() {
-            self.draining = false;
+        while self
+            .outbox
+            .front()
+            .is_some_and(|(_, _, tries)| *tries >= PUBLISH_TRIES)
+        {
+            self.outbox.pop_front();
         }
-        next
+        let Some((event, data, tries)) = self.outbox.front_mut() else {
+            self.draining = false;
+            return None;
+        };
+        *tries += 1;
+        Some((*event, data.clone()))
     }
 
     pub(crate) fn published(&mut self) {

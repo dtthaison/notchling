@@ -1,15 +1,18 @@
 use super::tests::{following, inline, node, peer, prompt, unit, FakeSource, Unit};
-use super::{RemotePrompts, FOLLOW_EVERY_MS};
+use super::{lock, PromptSource, RemotePrompts, FOLLOW_EVERY_MS};
 use crate::acting_ops::Room;
 use crate::acting_ops_tests::FakeRoom;
 use crate::cluster_sessions::RemoteSessions;
 use crate::cluster_testkit::Dir;
 use crate::prompts::{fit_list, push_row, row_bytes, LIST_BYTES, ROW_BYTES};
-use notchling_engine::cluster::qualify;
+use notchling_engine::cluster::{qualify, NodeId};
+use notchling_local_api::ApiError;
 use notchling_local_api::{Caller, ClientKind, Tier};
 use serde_json::{json, Value};
 use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::sync::mpsc::channel;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 fn sized(id: &str, bytes: usize) -> Value {
     let mut row = prompt(id);
@@ -168,10 +171,14 @@ fn owner_list_cut_never_resolves_a_held_prompt() {
 struct PanicRoom {
     inner: FakeRoom,
     panic_on: Mutex<Option<Value>>,
+    always: Mutex<Option<Value>>,
 }
 
 impl Room for PanicRoom {
     fn publish(&self, topic: &str, event: &str, data: &Value) {
+        if self.always.lock().unwrap().as_ref() == Some(&data["id"]) {
+            panic!("publish always fails");
+        }
         let armed = self.panic_on.lock().unwrap().take();
         match armed {
             Some(id) if id == data["id"] => panic!("publish failed"),
@@ -217,4 +224,101 @@ fn publish_panic_keeps_the_rest_of_the_batch() {
             json!(qualify(&node(1), "p2"))
         ]
     );
+}
+
+fn panic_rig(tag: &str) -> (Arc<PanicRoom>, Arc<RemotePrompts>, Dir) {
+    let room = Arc::new(PanicRoom::default());
+    let dir = Dir::new(tag);
+    let remote = Arc::new(RemoteSessions::new(dir.path().join("mirror")));
+    let prompts = RemotePrompts::with_spawn(room.clone(), remote, inline());
+    (room, prompts, dir)
+}
+
+fn ids_of(room: &PanicRoom, event: &str) -> Vec<Value> {
+    room.inner
+        .named(event)
+        .iter()
+        .map(|r| r["id"].clone())
+        .collect()
+}
+
+#[test]
+fn a_publish_that_always_panics_is_dropped_and_the_rest_goes_out() {
+    let (room, prompts, _dir) = panic_rig("prompts-always");
+    let source = Arc::new(FakeSource::default());
+    prompts.sync(&[peer(1, true)], true, &source, 0);
+    let q = |id: &str| json!(qualify(&node(1), id));
+    *room.always.lock().unwrap() = Some(q("p1"));
+    let pend = |id: &str| {
+        catch_unwind(AssertUnwindSafe(|| {
+            prompts.on_event(&node(1), "prompt.pending", &prompt(id))
+        }))
+    };
+    assert!(pend("p1").is_err(), "first try");
+    assert!(pend("p2").is_err(), "the one retry");
+    assert!(pend("p3").is_ok(), "then it is dropped");
+    assert_eq!(ids_of(&room, "prompt.pending"), vec![q("p2"), q("p3")]);
+    assert!(catch_unwind(AssertUnwindSafe(|| prompts.stop("unfollowed"))).is_err());
+    assert!(catch_unwind(AssertUnwindSafe(|| prompts.stop("unfollowed"))).is_err());
+    prompts.stop("unfollowed");
+    assert_eq!(ids_of(&room, "prompt.resolved"), vec![q("p2"), q("p3")]);
+}
+
+#[test]
+fn follower_thread_survives_a_publish_panic() {
+    let (room, prompts, _dir) = panic_rig("prompts-follower");
+    let source = Arc::new(FakeSource::default());
+    source.set(&node(1), json!([prompt("p1"), prompt("p2")]));
+    let q = |id: &str| json!(qualify(&node(1), id));
+    *room.always.lock().unwrap() = Some(q("p1"));
+    let status = json!({"me": node(9), "members": [
+        {"id": node(9), "state": "active", "client": true},
+        {"id": node(1), "state": "active", "online": true, "name": "n1"},
+    ]});
+    let (stop, rx) = channel();
+    let looping = {
+        let prompts = prompts.clone();
+        std::thread::spawn(move || {
+            let status = move || status.clone();
+            let app = || true;
+            super::follow_loop(
+                &prompts,
+                &status,
+                &app,
+                &source,
+                &rx,
+                Duration::from_millis(5),
+            );
+        })
+    };
+    crate::cluster_testkit::eventually("p2 goes out after p1 is dropped", || {
+        ids_of(&room, "prompt.pending").contains(&q("p2"))
+    });
+    stop.send(()).unwrap();
+    assert!(looping.join().is_ok(), "the follower thread never dies");
+    assert!(prompts.list().is_empty());
+    assert_eq!(ids_of(&room, "prompt.resolved"), vec![q("p2")]);
+}
+
+struct Exploding;
+
+impl PromptSource for Exploding {
+    fn follow(&self, _node: &NodeId) -> Result<(), ApiError> {
+        panic!("follow failed");
+    }
+
+    fn list(&self, _node: &NodeId) -> Result<Value, ApiError> {
+        Ok(json!([]))
+    }
+}
+
+#[test]
+fn renew_panic_frees_the_busy_slot() {
+    let u = unit();
+    let source = Arc::new(Exploding);
+    let failed = catch_unwind(AssertUnwindSafe(|| {
+        u.prompts.sync(&[peer(1, true)], true, &source, 0)
+    }));
+    assert!(failed.is_err());
+    assert!(lock(&u.prompts.book).busy.is_empty());
 }
