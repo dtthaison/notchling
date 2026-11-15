@@ -8,6 +8,7 @@ use std::sync::Arc;
 pub(crate) enum Delivery {
     Busy,
     Failed(String),
+    Cut,
 }
 
 const STARTED: Tried = Tried {
@@ -30,6 +31,7 @@ fn ended(delivered: Result<(), Delivery>) -> (TryEnd, Tried, Option<String>) {
     match delivered {
         Ok(()) => (TryEnd::Ok, STARTED, None),
         Err(Delivery::Busy) => (TryEnd::NotIdle, NOTHING, None),
+        Err(Delivery::Cut) => (TryEnd::Cut, STARTED, None),
         Err(Delivery::Failed(why)) => (TryEnd::AttachFailed, NOTHING, Some(why)),
     }
 }

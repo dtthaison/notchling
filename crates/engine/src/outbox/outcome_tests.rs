@@ -148,3 +148,16 @@ fn any_end_after_enter_verifies() {
         );
     }
 }
+
+#[test]
+fn cut_after_start_is_unsure_restart_never_retried() {
+    for tried in [NONE, PASTED, ENTERED] {
+        for tries in [0, 1, 5] {
+            assert_eq!(
+                after(&TryEnd::Cut, tried, tries, 1_000),
+                After::Unsure(Why::Restart),
+                "{tried:?} {tries}"
+            );
+        }
+    }
+}

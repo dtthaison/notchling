@@ -72,9 +72,19 @@ pub(crate) struct Rig {
     pub(crate) room: Arc<FakeRoom>,
     pub(crate) spawner: Arc<FakeSpawner>,
     pub(crate) folder: PathBuf,
+    pub(crate) acting: Arc<Acting>,
 }
 
 pub(crate) fn rig_with(on: bool, spawner: FakeSpawner, binary: Option<&str>) -> Rig {
+    rig_full(on, spawner, binary, Duration::from_secs(10))
+}
+
+pub(crate) fn rig_full(
+    on: bool,
+    spawner: FakeSpawner,
+    binary: Option<&str>,
+    dispatch_wait: Duration,
+) -> Rig {
     let folder = scratch("work");
     let room = Arc::new(FakeRoom::default());
     let acting = Arc::new(Acting::in_memory(on));
@@ -91,6 +101,7 @@ pub(crate) fn rig_with(on: bool, spawner: FakeSpawner, binary: Option<&str>) -> 
             home: scratch("home"),
             binary: binary.map(String::from),
             start_wait: Duration::from_secs(10),
+            dispatch_wait,
             timing: Timing::default(),
         },
     );
@@ -101,6 +112,7 @@ pub(crate) fn rig_with(on: bool, spawner: FakeSpawner, binary: Option<&str>) -> 
         room,
         spawner,
         folder,
+        acting,
     }
 }
 

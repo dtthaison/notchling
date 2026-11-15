@@ -515,6 +515,11 @@ impl Postman {
                     true
                 }
             },
+            After::Unsure(why) => {
+                let then = Some(OutboxThen::Unsure);
+                self.moved(&taken, State::Sending, State::Unsure, Some(why), None, then);
+                true
+            }
             After::Box(why) => {
                 self.inner.ops.set_note(&taken.id, note);
                 let then = Some(OutboxThen::Box);

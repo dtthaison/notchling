@@ -554,3 +554,6 @@ fn cancelled_a(c: &Change) -> bool {
 
 #[path = "runner_limits_tests.rs"]
 mod limits;
+
+#[path = "runner_dispatch_tests.rs"]
+mod dispatch;

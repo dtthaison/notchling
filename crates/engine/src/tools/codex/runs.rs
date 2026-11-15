@@ -54,6 +54,7 @@ pub enum SendError {
     NotStarted(String),
     NotAllowed,
     Busy,
+    Cut,
 }
 
 impl std::fmt::Display for SendError {
@@ -64,6 +65,7 @@ impl std::fmt::Display for SendError {
             SendError::NotStarted(why) => f.write_str(why),
             SendError::NotAllowed => f.write_str("Codex turns may not start right now"),
             SendError::Busy => f.write_str("a Codex turn is running"),
+            SendError::Cut => f.write_str("the Codex turn was stopped as it started"),
         }
     }
 }
@@ -107,6 +109,27 @@ pub struct CodexRuns {
 }
 
 type Announce = Sender<Result<String, String>>;
+
+struct Begun {
+    process: Arc<dyn ToolProcess>,
+    cut: bool,
+}
+
+#[cfg(test)]
+thread_local! {
+    pub(super) static NO_FOLLOW_THREAD: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+fn spawn_follow(follow: impl FnOnce() + Send + 'static) -> std::io::Result<()> {
+    #[cfg(test)]
+    if NO_FOLLOW_THREAD.with(std::cell::Cell::get) {
+        return Err(std::io::Error::other("no thread"));
+    }
+    std::thread::Builder::new()
+        .name("codex-turn".into())
+        .spawn(follow)
+        .map(|_| ())
+}
 
 impl CodexRuns {
     pub fn new(
@@ -227,6 +250,7 @@ impl CodexRuns {
                 .insert(session.clone(), request.folder.clone());
             drop(state);
             return match self.begin(&request, Some(&session), None) {
+                Ok(Begun { cut: true, .. }) if !queue_busy => Err(SendError::Cut),
                 Ok(_) => Ok(Sent::Started { session }),
                 Err(e) => {
                     let mut state = self.state();
@@ -248,7 +272,7 @@ impl CodexRuns {
         }
         let (tx, rx) = channel();
         let process = match self.begin(&request, None, Some(tx)) {
-            Ok(process) => process,
+            Ok(begun) => begun.process,
             Err(e) => {
                 self.state().active -= 1;
                 return Err(e);
@@ -290,8 +314,21 @@ impl CodexRuns {
         request: &Request,
         session: Option<&str>,
         announce: Option<Announce>,
-    ) -> Result<Arc<dyn ToolProcess>, SendError> {
+    ) -> Result<Begun, SendError> {
+        if !self.may_start() {
+            return Err(SendError::NotAllowed);
+        }
         let spec = self.spec_for(request, session);
+        let (hand, take) = channel::<Arc<dyn ToolProcess>>();
+        let runs = self.clone();
+        let owner = session.map(String::from);
+        let folder = request.folder.clone();
+        spawn_follow(move || {
+            if let Ok(process) = take.recv() {
+                runs.follow(process, owner, folder, announce);
+            }
+        })
+        .map_err(|e| SendError::Spawn(e.to_string()))?;
         let process = self
             .inner
             .spawner
@@ -308,7 +345,8 @@ impl CodexRuns {
                 },
             );
         }
-        if !self.may_start() {
+        let cut = !self.may_start();
+        if cut {
             process.interrupt();
         }
         if let Some(session) = session {
@@ -316,25 +354,8 @@ impl CodexRuns {
                 session: session.to_string(),
             });
         }
-        let runs = self.clone();
-        let following = process.clone();
-        let owner = session.map(String::from);
-        let folder = request.folder.clone();
-        std::thread::Builder::new()
-            .name("codex-turn".into())
-            .spawn(move || runs.follow(following, owner, folder, announce))
-            .map_err(|e| {
-                process.interrupt();
-                if let Some(session) = session {
-                    self.state().running.remove(session);
-                    self.inner.sink.event(TurnEvent::Ended {
-                        session: Some(session.to_string()),
-                        failure: Some(e.to_string()),
-                    });
-                }
-                SendError::Spawn(e.to_string())
-            })?;
-        Ok(process)
+        let _ = hand.send(process.clone());
+        Ok(Begun { process, cut })
     }
 
     fn follow(

@@ -345,6 +345,8 @@ fn missing_job_is_gone_after_60s_and_back_when_it_returns() {
 
 struct Plain {
     asked: AtomicUsize,
+    end: TryEnd,
+    verifies: bool,
 }
 
 impl Courier for Plain {
@@ -364,11 +366,11 @@ impl Courier for Plain {
             pasted: false,
             entered: false,
         };
-        (TryEnd::Ok, tried, None)
+        (self.end.clone(), tried, None)
     }
     fn close(&self, _session: &str) {}
     fn verifies(&self) -> bool {
-        false
+        self.verifies
     }
 }
 
@@ -376,6 +378,8 @@ impl Courier for Plain {
 fn courier_that_does_not_verify_is_sent_at_once() {
     let plain = Arc::new(Plain {
         asked: AtomicUsize::new(0),
+        end: TryEnd::Ok,
+        verifies: false,
     });
     let r = rig_with(Options {
         courier: Some(plain.clone()),
@@ -386,6 +390,30 @@ fn courier_that_does_not_verify_is_sent_at_once() {
     assert_eq!(r.row(&row.id), None);
     assert_eq!(plain.asked.load(Ordering::SeqCst), 1);
     assert_eq!(r.verifier.asked.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn a_cut_try_is_unsure_restart_and_never_tried_again() {
+    for verifies in [false, true] {
+        let plain = Arc::new(Plain {
+            asked: AtomicUsize::new(0),
+            end: TryEnd::Cut,
+            verifies,
+        });
+        let r = rig_with(Options {
+            courier: Some(plain.clone()),
+            ..Options::default()
+        });
+        let row = r.send("job-idle", "hi");
+        let mut p = r.postmen.postman(IDLE);
+        p.pass(r.at(T0));
+        p.pass(r.at(T0 + 400_000));
+        assert_eq!(
+            state(&r, &row.id),
+            Some((State::Unsure, Some(Why::Restart)))
+        );
+        assert_eq!(plain.asked.load(Ordering::SeqCst), 1);
+    }
 }
 
 #[test]

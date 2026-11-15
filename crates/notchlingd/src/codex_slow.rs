@@ -102,7 +102,8 @@ impl CodexOps {
         };
         match self.runs.send_if_idle(request) {
             Ok(_) => Ok(()),
-            Err(SendError::Busy) => Err(Delivery::Busy),
+            Err(SendError::Busy | SendError::NotAllowed) => Err(Delivery::Busy),
+            Err(SendError::Cut) => Err(Delivery::Cut),
             Err(other) => Err(Delivery::Failed(other.to_string())),
         }
     }

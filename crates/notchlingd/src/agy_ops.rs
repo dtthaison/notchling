@@ -16,11 +16,16 @@ use notchling_engine::tools::agy::{self, RunError, Runner, Timing};
 use notchling_engine::tools::codex::plan::MAX_PROMPT_BYTES;
 use notchling_local_api::{ops, topics, ApiError, ErrorCode, OpSpec};
 use serde_json::{json, Value};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, OnceLock};
-use std::time::Duration;
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 const COPY_REUSE: Duration = Duration::from_secs(3);
+
+const DISPATCH_WAIT: Duration = Duration::from_secs(30);
+
+const HELD_FRESH: Duration = Duration::from_secs(3);
 
 pub const SESSIONS: &str = ops::AGY_SESSIONS;
 pub const STATE: &str = ops::AGY_STATE;
@@ -47,6 +52,7 @@ pub struct AgySetup {
     pub home: PathBuf,
     pub binary: Option<String>,
     pub start_wait: Duration,
+    pub dispatch_wait: Duration,
     pub timing: Timing,
 }
 
@@ -58,6 +64,7 @@ pub struct AgyOps {
     elsewhere: Arc<Elsewhere>,
     logs: LogReads,
     outbox: OnceLock<Arc<OutboxOps>>,
+    held: Mutex<HashMap<String, (Instant, bool)>>,
 }
 
 fn bad(message: impl Into<String>) -> ApiError {
@@ -110,6 +117,7 @@ impl AgyOps {
             setup,
             elsewhere,
             outbox: OnceLock::new(),
+            held: Mutex::new(HashMap::new()),
         }
     }
 
@@ -431,21 +439,44 @@ impl AgyOps {
     }
 
     pub(crate) fn is_busy(&self, session: &str) -> bool {
-        self.runner.is_working(session)
+        self.runner.is_working(session) || self.held(session)
+    }
+
+    fn held(&self, session: &str) -> bool {
+        let cached = lock(&self.held).get(session).copied();
+        if let Some((_, held)) = cached.filter(|(at, _)| at.elapsed() < HELD_FRESH) {
+            return held;
+        }
+        let held = self.elsewhere.check(session).is_some();
+        let mut cache = lock(&self.held);
+        cache.retain(|_, (at, _)| at.elapsed() < HELD_FRESH);
+        cache.insert(session.to_string(), (Instant::now(), held));
+        held
     }
 
     pub(crate) fn deliver(&self, session: &str, text: &str) -> Result<(), Delivery> {
+        if !self.acting.is_on() {
+            return Err(Delivery::Busy);
+        }
         let folder = self
             .folder_for(session)
             .map_err(|e| Delivery::Failed(e.message))?;
         if self.elsewhere.check(session).is_some() {
             return Err(Delivery::Busy);
         }
-        let sent = self.runner.prompt(session, text, &folder);
-        self.settle();
+        let sent = self
+            .runner
+            .dispatch(session, text, &folder, self.setup.dispatch_wait);
+        let off = !self.acting.is_on();
+        if off {
+            self.acting_off();
+        }
         match sent {
+            Ok(()) if off => Err(Delivery::Cut),
             Ok(()) => Ok(()),
-            Err(RunError::Busy) => Err(Delivery::Busy),
+            Err(RunError::Pending) => Err(Delivery::Cut),
+            Err(RunError::Busy | RunError::NotAllowed) => Err(Delivery::Busy),
+            Err(_) if off => Err(Delivery::Busy),
             Err(other) => Err(Delivery::Failed(run_error(other).message)),
         }
     }
@@ -529,6 +560,7 @@ impl AgyOps {
                 home,
                 binary: binary.map(|p| p.to_string_lossy().into_owned()),
                 start_wait: Duration::from_secs(4),
+                dispatch_wait: DISPATCH_WAIT,
                 timing: Timing::default(),
             },
         )

@@ -85,20 +85,20 @@ impl Connection {
         self.inner.lock_state().closed
     }
 
-    pub fn request(&self, method: &str, params: Value, done: Done) {
+    pub fn request(&self, method: &str, params: Value, done: Done) -> bool {
         let id = {
             let mut state = self.inner.lock_state();
             if state.closed {
                 drop(state);
                 done(Err(format!("{} isn't running.", self.inner.name)));
-                return;
+                return false;
             }
             let id = state.next_id;
             state.next_id += 1;
             state.waiting.insert(id, done);
             id
         };
-        self.send(&json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params}));
+        self.send(&json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params}))
     }
 
     pub fn notify(&self, method: &str, params: Value) {
@@ -115,10 +115,12 @@ impl Connection {
         );
     }
 
-    fn send(&self, message: &Value) {
-        if !self.inner.write(message) {
+    fn send(&self, message: &Value) -> bool {
+        let written = self.inner.write(message);
+        if !written {
             self.inner.ended(None);
         }
+        written
     }
 
     pub fn close(&self) {

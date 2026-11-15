@@ -1,12 +1,12 @@
 use super::config::{AgyCommand, ConfigOption, Permission};
-use super::live::{cancelled, Inner, Job, MAX_OPEN};
+use super::live::{cancelled, Inner, Job, Told, MAX_OPEN};
 use crate::tools::acp::Spawner;
 use crate::transcript::model::Conversation;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::mpsc::channel;
+use std::sync::mpsc::{channel, RecvTimeoutError};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
@@ -58,6 +58,7 @@ pub enum RunError {
     Refused(String),
     Start(String),
     NotAllowed,
+    Pending,
 }
 
 impl fmt::Display for RunError {
@@ -67,6 +68,9 @@ impl fmt::Display for RunError {
             RunError::Busy => f.write_str("a turn is running; send again when it ends"),
             RunError::Refused(why) | RunError::Start(why) => f.write_str(why),
             RunError::NotAllowed => f.write_str("starting Antigravity sessions is switched off"),
+            RunError::Pending => {
+                f.write_str("the message is still waiting for Antigravity to load")
+            }
         }
     }
 }
@@ -170,6 +174,34 @@ impl Runner {
     }
 
     pub fn prompt(&self, id: &str, text: &str, folder: &str) -> Result<(), RunError> {
+        self.queue_prompt(id, text, folder, None)
+    }
+
+    pub fn dispatch(
+        &self,
+        id: &str,
+        text: &str,
+        folder: &str,
+        wait: Duration,
+    ) -> Result<(), RunError> {
+        let (tx, rx) = channel();
+        self.queue_prompt(id, text, folder, Some(tx))?;
+        match rx.recv_timeout(wait) {
+            Ok(result) => result,
+            Err(RecvTimeoutError::Timeout) => Err(RunError::Pending),
+            Err(RecvTimeoutError::Disconnected) => Err(RunError::Start(format!(
+                "{NAME} closed before the message went out."
+            ))),
+        }
+    }
+
+    fn queue_prompt(
+        &self,
+        id: &str,
+        text: &str,
+        folder: &str,
+        told: Option<Told>,
+    ) -> Result<(), RunError> {
         let inner = &self.inner;
         let retry = inner.get(id).is_some_and(|l| l.lock().failed_at.is_some());
         let live = inner.open(id, folder, retry)?;
@@ -187,7 +219,7 @@ impl Runner {
             id.to_string(),
             text.to_string(),
         );
-        let job: Job = Box::new(move || runner.begin_prompt(&l, &id, &text));
+        let job: Job = Box::new(move || runner.begin_prompt(&l, &id, &text, told));
         let now = {
             let mut st = live.lock();
             if st.loaded || st.load_error.is_some() {

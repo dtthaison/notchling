@@ -13,12 +13,14 @@ pub enum TryEnd {
     Failed(Failure),
     NotIdle,
     AttachFailed,
+    Cut,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum After {
     Verify,
     Box(Why),
+    Unsure(Why),
     Wait { why: Why, next_ms: Option<i64> },
 }
 
@@ -37,6 +39,7 @@ pub fn after(end: &TryEnd, tried: Tried, tries: u32, now_ms: i64) -> After {
         next_ms: Some(now_ms + backoff_ms(tries)),
     };
     match end {
+        TryEnd::Cut => After::Unsure(Why::Restart),
         TryEnd::Ok => After::Verify,
         _ if tried.entered => After::Verify,
         TryEnd::NotIdle => After::Wait {

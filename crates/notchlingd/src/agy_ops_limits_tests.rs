@@ -221,6 +221,7 @@ fn a_draft_that_loses_the_race_with_acting_off_spawns_nothing_more() {
             home: scratch("home"),
             binary: Some("/fake/agy".into()),
             start_wait: Duration::from_secs(10),
+            dispatch_wait: Duration::from_secs(10),
             timing: Timing::default(),
         },
     );
@@ -254,6 +255,7 @@ fn turning_acting_off_closes_every_session_and_cancels_what_waited() {
             home: scratch("home"),
             binary: Some("/fake/agy".into()),
             start_wait: Duration::from_secs(10),
+            dispatch_wait: Duration::from_secs(10),
             timing: Timing::default(),
         },
     ));

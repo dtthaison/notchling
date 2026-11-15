@@ -445,10 +445,28 @@ fn a_turn_that_started_as_starting_went_off_is_interrupted() {
     let on = switch(&runs);
     spawner.push(FakeRun::held(&[]));
     spawner.on_spawn(Box::new(move || on.store(false, Ordering::SeqCst)));
-    runs.send(request("go", Some("abc"))).expect("sends");
+    assert_eq!(
+        runs.send_if_idle(request("go", Some("abc"))),
+        Err(SendError::Cut)
+    );
     assert_eq!(sink.wait_for(2), [started("abc"), ended("abc", None)]);
     assert_eq!(spawner.processes()[0].interrupts(), 1);
     idle(&runs);
+    assert!(!runs.is_running("abc"));
+}
+
+#[test]
+fn a_thread_failure_starts_no_process() {
+    let (runs, spawner, sink) = setup();
+    spawner.push(FakeRun::ok(&[DONE]));
+    NO_FOLLOW_THREAD.with(|no| no.set(true));
+    let got = runs.send_if_idle(request("go", Some("abc")));
+    NO_FOLLOW_THREAD.with(|no| no.set(false));
+    assert!(matches!(got, Err(SendError::Spawn(_))), "{got:?}");
+    assert!(spawner.specs().is_empty(), "no codex was started");
+    assert_eq!(runs.active(), 0);
+    assert!(!runs.is_running("abc"));
+    assert!(sink.all().is_empty());
 }
 
 #[test]
