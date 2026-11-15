@@ -4,7 +4,7 @@ use crate::inbox_mirrors::{localize, Home, InboxLink, Mirrors, Refusal, Tap};
 use crate::late_emit::Events;
 use crate::op_group::OpGroup;
 use notchling_engine::bridge::inbox::InboxOutcome;
-use notchling_engine::cluster::Qualified;
+use notchling_engine::cluster::{NodeId, Qualified};
 use notchling_engine::inbox::{self, ActionId, Book, Change, Item, Kind, State};
 use notchling_local_api::{ops, topics, ApiError, Caller, ClientKind, ErrorCode, OpSpec, Tier};
 use serde_json::{json, Value};
@@ -95,6 +95,7 @@ pub struct InboxOps {
     data_dir: PathBuf,
     inner: Mutex<Inner>,
     link: Mutex<Option<Arc<dyn InboxLink>>>,
+    last_home: Mutex<Option<(NodeId, Vec<Item>)>>,
     stop: Mutex<Option<Sender<()>>>,
     thread: Mutex<Option<JoinHandle<()>>>,
     writer: Mutex<Option<JoinHandle<()>>>,
@@ -179,6 +180,7 @@ impl InboxOps {
             data_dir,
             inner: Mutex::new(inner),
             link: Mutex::new(None),
+            last_home: Mutex::new(None),
             stop: Mutex::new(None),
             thread: Mutex::new(None),
             writer: Mutex::new(writer),
@@ -324,12 +326,15 @@ impl InboxOps {
     fn view(&self, with_home: bool) -> Vec<Item> {
         let mut items = self.local_view();
         let link = lock(&self.link).clone();
-        let remote = link
-            .filter(|_| with_home)
-            .and_then(|link| match link.home_items() {
-                Home::Items(home, items) => Some((link.me()?, (home, items))),
-                _ => None,
-            });
+        let remote = link.filter(|_| with_home).and_then(|link| {
+            let seen = match link.home_items() {
+                Home::Items(home, items) => Some((home, items)),
+                Home::Unreachable => lock(&self.last_home).clone(),
+                Home::Off => None,
+            };
+            *lock(&self.last_home) = seen.clone();
+            Some((link.me()?, seen?))
+        });
         if let Some((me, (home, from_home))) = remote {
             let known: HashSet<String> = items.iter().map(|item| item.id.clone()).collect();
             items.extend(

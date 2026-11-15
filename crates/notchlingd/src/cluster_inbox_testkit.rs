@@ -70,6 +70,10 @@ impl Fabric {
         self.not_keeping.lock().unwrap().insert(id.clone());
     }
 
+    pub fn resume_keeping(&self, id: &NodeId) {
+        self.not_keeping.lock().unwrap().remove(id);
+    }
+
     pub fn attempts_to(&self, id: &NodeId) -> usize {
         self.attempts
             .lock()

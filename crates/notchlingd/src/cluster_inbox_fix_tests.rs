@@ -54,6 +54,7 @@ fn a_node_that_stops_keeping_drops_every_mirror() {
     assert_eq!(standby.rig.ops.local_ids().len(), 1);
     fabric.stop_keeping(&node(2));
     standby.outbox.flush();
+    standby.outbox.flush();
     assert!(standby.rig.ops.local_ids().is_empty());
 }
 
@@ -278,4 +279,38 @@ fn close_does_not_wait_on_a_blocked_call() {
     outbox.close();
     assert!(started.elapsed() < Duration::from_secs(3));
     let _ = release.send(());
+}
+
+#[test]
+fn the_list_keeps_the_homes_items_while_the_home_is_slow_and_drops_them_when_it_is_gone() {
+    let fabric = quartet();
+    let (home, standby) = (fabric.machine(&node(5)), fabric.machine(&node(2)));
+    home.raise("h1");
+    let id = format!("{}/h1", node(5));
+    let listed = || standby.rig.ops.items().into_iter().any(|i| i.id == id);
+    assert!(listed());
+    fabric.set_failing(&node(5), true);
+    assert!(listed());
+    fabric.set_failing(&node(5), false);
+    assert!(listed());
+    fabric.set_down(&node(5), true);
+    assert!(!listed());
+}
+
+#[test]
+fn one_flicker_of_the_keeping_role_keeps_the_mirrors() {
+    let fabric = quartet();
+    let (standby, worker) = (fabric.machine(&node(2)), fabric.machine(&node(9)));
+    worker.raise("a");
+    worker.outbox.flush();
+    fabric.stop_keeping(&node(2));
+    standby.outbox.flush();
+    assert_eq!(standby.rig.ops.local_ids().len(), 1);
+    fabric.resume_keeping(&node(2));
+    standby.outbox.flush();
+    fabric.stop_keeping(&node(2));
+    standby.outbox.flush();
+    assert_eq!(standby.rig.ops.local_ids().len(), 1);
+    standby.outbox.flush();
+    assert!(standby.rig.ops.local_ids().is_empty());
 }

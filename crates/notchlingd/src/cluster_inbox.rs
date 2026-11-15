@@ -18,6 +18,7 @@ pub const RESYNC_MS: i64 = 60_000;
 pub const BACKOFF_MS: i64 = 5_000;
 pub const BACKOFF_MAX_MS: i64 = 300_000;
 pub const CLOSE_WAIT: Duration = Duration::from_secs(1);
+pub const KEEP_MISSES: u32 = 2;
 pub const QUEUE_MAX: usize = 1_000;
 const LOOP_EVERY: Duration = Duration::from_secs(1);
 
@@ -338,6 +339,7 @@ pub struct Outbox {
     queue: Mutex<Queue>,
     wake: Condvar,
     follow: Mutex<Option<Arc<crate::cluster_inbox_follow::Follow>>>,
+    misses: Mutex<u32>,
     thread: Mutex<Option<std::thread::JoinHandle<()>>>,
 }
 
@@ -381,6 +383,7 @@ impl Outbox {
             queue: Mutex::new(Queue::default()),
             wake: Condvar::new(),
             follow: Mutex::new(None),
+            misses: Mutex::new(0),
             thread: Mutex::new(None),
         })
     }
@@ -434,8 +437,14 @@ impl Outbox {
             return;
         }
         let owners: BTreeSet<NodeId> = if self.net.keeps() {
+            *lock(&self.misses) = 0;
             self.net.peers().into_iter().map(|p| p.id).collect()
         } else {
+            let mut misses = lock(&self.misses);
+            *misses += 1;
+            if *misses < KEEP_MISSES {
+                return;
+            }
             BTreeSet::new()
         };
         self.inbox.keep_mirrors(&owners);
