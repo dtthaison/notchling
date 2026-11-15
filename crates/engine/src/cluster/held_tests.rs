@@ -285,7 +285,7 @@ fn one_device_cannot_push_another_devices_delivered_record_out() {
     assert!(queue.was_delivered("theirs"));
     assert!(!queue.was_delivered("m0"));
     assert!(queue.was_delivered(&format!("m{}", MAX_DELIVERED_PER_DEVICE + 29)));
-    assert!(MAX_DELIVERED_PER_DEVICE < MAX_DELIVERED);
+    const { assert!(MAX_DELIVERED_PER_DEVICE < MAX_DELIVERED) };
 }
 
 #[test]

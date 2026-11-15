@@ -80,11 +80,6 @@ impl MoveRunner {
     }
 
     #[cfg(test)]
-    pub(crate) fn recovering(&self) -> bool {
-        lock(&self.run).busy
-    }
-
-    #[cfg(test)]
     pub(crate) fn nudge_pending(&self) -> bool {
         lock(&self.run).nudged
     }
