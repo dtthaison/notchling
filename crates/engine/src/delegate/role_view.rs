@@ -76,7 +76,8 @@ fn choice(
     let users = !built_in.tool(name).picks.contains(pick);
     let source = if users {
         Source::Override
-    } else if model.as_deref() != Some(pick.model.as_str()) {
+    } else if model.as_ref().is_some_and(|m| *m != pick.model) {
+        // Only a successor from the live list earns the tag; no model at all is not "live".
         Source::Live
     } else {
         Source::BuiltIn

@@ -215,3 +215,22 @@ fn an_excluded_pick_is_not_shown_even_when_the_live_list_is_unknown() {
         .unwrap();
     assert_eq!(hydrogen.model.as_deref(), Some("gemini-4-hydrogen"));
 }
+
+#[test]
+fn no_model_is_never_tagged_live() {
+    let built = Roles::built_in();
+    // The built-in pick's family has nothing live: no model, still Built-in.
+    let v = views(&built, &built, &live(&[]), &live(&["gemini-4-flash"]));
+    let c = &of(&v, "review").choices[0];
+    assert_eq!(c.model, None);
+    assert_eq!(c.source, Source::BuiltIn);
+    // A built-in pick the catalog excludes with the list unknown: no model, Built-in.
+    let roles = user(
+        "excl-builtin",
+        r#"{"antigravity": {"not_for": [{"match": "hydrogen", "roles": ["review"]}]}}"#,
+    );
+    let v = views(&roles, &built, &live(&[]), &live(&[]));
+    let c = &of(&v, "review").choices[0];
+    assert_eq!(c.model, None);
+    assert_eq!(c.source, Source::BuiltIn);
+}
