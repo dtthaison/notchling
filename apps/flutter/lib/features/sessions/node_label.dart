@@ -6,10 +6,9 @@ import '../../l10n/app_localizations.dart';
 
 const double offlineOpacity = 0.55;
 
-String nodeSpoken(AppL10n l10n, SessionNode node) {
-  final String on = l10n.sessionsNodeOn(node.name);
-  return node.online ? on : '$on, ${l10n.sessionsNodeOffline}';
-}
+String nodeSpoken(AppL10n l10n, SessionNode node) => node.online
+    ? l10n.sessionsNodeOn(node.name)
+    : l10n.sessionsNodeOnOffline(node.name);
 
 class NodeLabel extends StatelessWidget {
   const NodeLabel({super.key, required this.node});

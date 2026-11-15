@@ -378,6 +378,135 @@ fn the_bridge_acts_only_through_the_acting_switch() {
     assert!(on.send_message("hi", &view_only).is_err());
 }
 
+struct Counting(Arc<std::sync::atomic::AtomicUsize>);
+
+impl crate::cluster_forward::Forward for Counting {
+    fn forward(
+        &self,
+        _: &notchling_local_api::Caller,
+        _: &str,
+        _: &Value,
+    ) -> Option<Result<Value, notchling_local_api::ApiError>> {
+        self.0.fetch_add(1, Ordering::SeqCst);
+        Some(Ok(json!({"forwarded": true})))
+    }
+}
+
+struct RemoteWorld {
+    handler: Arc<dyn notchling_local_api::Handler>,
+    cluster: Arc<crate::bridge_cluster::PhoneCluster>,
+    sent: Arc<std::sync::atomic::AtomicUsize>,
+    acting: Arc<ActingOps>,
+    _dir: Scratch,
+}
+
+fn remote_world(on: bool) -> RemoteWorld {
+    let sent = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let sessions = Arc::new(Mutex::new(json!([])));
+    let acting = acting_ops(on, sessions.clone(), Arc::new(FakeRoom::default()));
+    let dir = scratch("forward-acting");
+    let remote = Arc::new(crate::cluster_sessions::RemoteSessions::new(
+        dir.0.join("mirror"),
+    ));
+    let handler: Arc<dyn notchling_local_api::Handler> = Arc::new(
+        crate::daemon::Ops::with_acting(sessions, acting.clone())
+            .with_cluster(Some(Arc::new(Counting(sent.clone()))), remote.clone()),
+    );
+    let late = Arc::new(crate::cluster_switches::LateHandler::default());
+    late.serve(&handler);
+    let cluster = crate::bridge_cluster::PhoneCluster::none();
+    let prompts =
+        crate::cluster_prompts::RemotePrompts::new(Arc::new(FakeRoom::default()), remote.clone());
+    cluster.attach(late, remote, prompts);
+    RemoteWorld {
+        handler,
+        cluster,
+        sent,
+        acting,
+        _dir: dir,
+    }
+}
+
+fn the_app() -> notchling_local_api::Caller {
+    notchling_local_api::Caller {
+        tier: notchling_local_api::Tier::App,
+        client: notchling_local_api::ClientKind::App,
+        peer: None,
+        pid: None,
+    }
+}
+
+#[test]
+fn forward_refused_while_acting_off() {
+    use notchling_local_api::{ops, ErrorCode};
+    const REMOTE: &str = "0123456789abcdef/job-7";
+    let off = remote_world(false);
+    for (op, args) in [
+        (ops::SESSION_REPLY, json!({"id": REMOTE, "text": "hi"})),
+        (ops::SESSION_INTERRUPT, json!({"id": REMOTE})),
+        (
+            ops::SESSION_PERMISSION,
+            json!({"id": REMOTE, "decision": "allow"}),
+        ),
+        (ops::SESSION_ANSWER, json!({"id": REMOTE, "answers": []})),
+        (ops::CODEX_SEND, json!({"id": REMOTE, "text": "hi"})),
+        (ops::AGY_SEND, json!({"id": REMOTE, "text": "hi"})),
+    ] {
+        let refused = off.handler.call(&the_app(), op, &args).unwrap_err();
+        assert_eq!(refused.code, ErrorCode::Forbidden, "{op}");
+        assert_eq!(refused.message, ACTING_OFF, "{op}");
+    }
+    assert_eq!(off.sent.load(Ordering::SeqCst), 0, "nothing was forwarded");
+
+    let phone = DaemonActing {
+        ops: off.acting.clone(),
+        sessions: Arc::new(Mutex::new(json!([]))),
+        cluster: off.cluster.clone(),
+    };
+    let mut remote = Session::new(
+        REMOTE,
+        "n",
+        "/tmp",
+        Control::Job(REMOTE.into()),
+        SessionState::Running,
+    );
+    remote.node = Some(notchling_engine::bridge::model::SessionNode {
+        id: "0123456789abcdef".into(),
+        name: "mac-mini".into(),
+        online: true,
+    });
+    assert_eq!(
+        phone.send_message("hi", &remote).unwrap_err().message,
+        ACTING_OFF
+    );
+    assert_eq!(phone.send_now(&remote).unwrap_err().message, ACTING_OFF);
+    let prompt = notchling_engine::bridge::model::PendingPrompt {
+        id: "0123456789abcdef/p1".into(),
+        session_id: REMOTE.into(),
+        kind: notchling_engine::bridge::model::PromptKind::Permission,
+        tool_name: "Bash".into(),
+        summary: "ls".into(),
+        created_ms: 0.0,
+    };
+    let denied = phone
+        .respond(
+            &prompt,
+            &notchling_engine::bridge::model::PromptResponse::Allow,
+        )
+        .unwrap_err();
+    assert_eq!(denied.message, ACTING_OFF);
+
+    let on = remote_world(true);
+    on.handler
+        .call(
+            &the_app(),
+            ops::SESSION_REPLY,
+            &json!({"id": REMOTE, "text": "hi"}),
+        )
+        .unwrap();
+    assert_eq!(on.sent.load(Ordering::SeqCst), 1, "with acting on it goes");
+}
+
 #[test]
 fn the_phones_short_names_still_map() {
     use crate::bridge_backend::model_id;

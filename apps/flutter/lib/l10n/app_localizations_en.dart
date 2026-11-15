@@ -750,6 +750,11 @@ class AppL10nEn extends AppL10n {
   }
 
   @override
+  String sessionsNodeOnOffline(String name) {
+    return 'On $name, offline';
+  }
+
+  @override
   String sessionsRunningSubagents(int count) {
     final intl.NumberFormat countNumberFormat =
         intl.NumberFormat.decimalPattern(localeName);

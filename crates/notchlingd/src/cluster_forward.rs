@@ -2,7 +2,7 @@ use crate::cluster_node::ClusterNode;
 use notchling_engine::cluster::policy::RULES;
 use notchling_engine::cluster::wire::{Origin, OriginTier};
 use notchling_engine::cluster::{LocalCmd, NodeId, Qualified};
-use notchling_local_api::{topics, ApiError, Caller, ClientKind, ErrorCode, Tier};
+use notchling_local_api::{ops, topics, ApiError, Caller, ClientKind, ErrorCode, Tier};
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -22,6 +22,21 @@ pub fn route(op: &str, args: &Value, me: &NodeId) -> Option<(NodeId, Value)> {
     let mut bare = args.clone();
     bare[field] = Value::String(owner.id);
     Some((owner.node, bare))
+}
+
+pub fn names_other_node(op: &str, args: &Value) -> bool {
+    RULES
+        .iter()
+        .filter(|rule| rule.op == op)
+        .find_map(|rule| rule.id_field)
+        .and_then(|field| args.get(field)?.as_str())
+        .is_some_and(|id| Qualified::parse(id).is_some())
+}
+
+pub fn acting_class(op: &str) -> bool {
+    crate::acting_ops::ACTING_OPS.contains(&op)
+        || crate::agy_ops::ACTING_OPS.contains(&op)
+        || matches!(op, ops::CODEX_SEND | ops::CODEX_STOP)
 }
 
 pub trait Forward: Send + Sync {

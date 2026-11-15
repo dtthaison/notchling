@@ -48,7 +48,7 @@ class AlertPrefs {
   bool isMuted(String scope, String sessionId) => muted.contains(storageKey(scope, sessionId));
 
   Set<String> mutedIn(String scope) => scope.isEmpty
-      ? <String>{for (final String key in muted) if (SessionRef.parse(key) == null) key}
+      ? <String>{for (final String key in muted) ?idInBareScope(key)}
       : <String>{for (final String key in muted) if (key.startsWith('$scope/')) key.substring(scope.length + 1)};
 
   AlertPrefs copyWith({bool? keepAlive, Set<String>? muted, bool? loaded}) =>

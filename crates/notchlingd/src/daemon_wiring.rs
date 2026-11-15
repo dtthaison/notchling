@@ -1,6 +1,6 @@
 use crate::account_history::DbSwitches;
 use crate::accounts_ops::AccountsOps;
-use crate::acting::Acting;
+use crate::acting::{Acting, ACTING_OFF};
 use crate::acting_ops::{ActingOps, Room};
 use crate::activity_ops::ActivityOps;
 use crate::agy_ops::AgyOps;
@@ -10,7 +10,7 @@ use crate::awake_ops::AwakeOps;
 use crate::bridge_backend::APPROVAL_WAIT;
 use crate::bridge_ops::{BridgeOps, BridgeSetup};
 use crate::catalog_ops::CatalogService;
-use crate::cluster_forward::Forward;
+use crate::cluster_forward::{acting_class, names_other_node, Forward};
 use crate::cluster_prompts::RemotePrompts;
 use crate::cluster_sessions::RemoteSessions;
 use crate::cluster_wiring::ClusterParts;
@@ -54,7 +54,7 @@ use notchling_engine::versions::mac::Roots as VersionRoots;
 use notchling_engine::versions::Version;
 use notchling_events::{Emit, Salt};
 use notchling_local_api::{
-    ops, topics, ApiError, Caller, ClientKind, Handler, OpHome, OpSpec, Tier,
+    ops, topics, ApiError, Caller, ClientKind, ErrorCode, Handler, OpHome, OpSpec, Tier,
 };
 use serde_json::{Map, Value};
 use std::path::{Path, PathBuf};
@@ -304,6 +304,13 @@ impl Handler for Ops {
     }
 
     fn call(&self, caller: &Caller, op: &str, args: &Value) -> Result<Value, ApiError> {
+        if caller.client != ClientKind::Node
+            && self.acting.as_ref().is_some_and(|a| !a.is_on())
+            && acting_class(op)
+            && names_other_node(op, args)
+        {
+            return Err(ApiError::new(ErrorCode::Forbidden, ACTING_OFF));
+        }
         if let Some(routed) = self
             .forward
             .as_ref()

@@ -1,3 +1,4 @@
+use crate::acting::ACTING_OFF;
 use crate::acting_ops::{ActingOps, Room};
 use crate::bridge_cluster::PhoneCluster;
 use crate::catalog_ops::CatalogService;
@@ -238,6 +239,9 @@ impl DaemonActing {
     }
 
     fn forward(&self, node: &str, op: &str, args: Value) -> Result<(), BridgeFailure> {
+        if !self.ops.is_on() {
+            return Err(BridgeFailure::invalid(ACTING_OFF));
+        }
         if !self.cluster.attached() {
             return Err(BridgeFailure::not_reachable(format!(
                 "{node} is not reachable from the phone yet."

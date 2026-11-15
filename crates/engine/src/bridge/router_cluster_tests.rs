@@ -303,6 +303,25 @@ fn phone_never_sends_always_for_a_remote_prompt() {
     );
 }
 
+#[test]
+fn phone_photo_to_a_remote_session_is_refused_and_nothing_is_saved() {
+    let world = world_with(vec![remote_agent(None, true), local_agent()]);
+    let phone = phone(&world);
+    let begin = |id: &str| {
+        phone.ask(json!({
+            "id": 2, "op": "session.image.begin", "sessionId": id, "bytes": 10
+        }))
+    };
+    let reply = begin(REMOTE);
+    assert_eq!(error_code(&reply), Some("invalid"), "{reply}");
+    assert_eq!(
+        reply["error"]["message"],
+        "Photos to a session on another computer come later."
+    );
+    assert!(is_ok(&begin("local-1")));
+    assert!(phone.recorded.lock().expect("recorded").sent.is_empty());
+}
+
 fn read(path: &str) -> Value {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../protocol/fixtures");
     serde_json::from_str(&std::fs::read_to_string(root.join(path)).expect("fixture"))

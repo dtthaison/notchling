@@ -1,4 +1,4 @@
-use super::{pending, PhoneCluster, FOLLOW_EVERY_MS, FOLLOW_RETRY_MS};
+use super::{pending, PhoneCluster, FOLLOWED_MAX, FOLLOW_EVERY_MS, FOLLOW_RETRY_MS};
 use crate::acting_ops_tests::{setup, FakeRoom};
 use crate::bridge_backend::DaemonActing;
 use crate::cluster_forward::route;
@@ -331,4 +331,17 @@ fn every_call_the_phone_makes_on_a_remote_id_has_a_route_to_its_owner() {
         assert!(!bare["id"].as_str().unwrap().contains('/'), "{op}");
     }
     assert!(route("cluster.follow", &json!({"id": ROW}), &me).is_none());
+}
+
+#[test]
+fn the_follow_book_holds_at_most_its_cap_and_drops_the_oldest() {
+    let w = world();
+    for n in 0..FOLLOWED_MAX + 10 {
+        w.cluster
+            .follow(&format!("0123456789abcdef/s{n}"), 1_000 + n as u64);
+    }
+    assert!(w.cluster.followed_len() <= FOLLOWED_MAX);
+    let before = w.seen.ops().len();
+    w.cluster.follow("0123456789abcdef/s0", 2_000);
+    assert_eq!(w.seen.ops().len(), before + 1, "the oldest was forgotten");
 }

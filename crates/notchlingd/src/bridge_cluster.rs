@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 pub const FOLLOW_EVERY_MS: u64 = 60_000;
 pub const FOLLOW_RETRY_MS: u64 = 5_000;
-const FOLLOWED_MAX: usize = 64;
+pub const FOLLOWED_MAX: usize = 64;
 
 struct Parts {
     handler: Arc<LateHandler>,
@@ -91,6 +91,11 @@ impl PhoneCluster {
         parts.handler.get()?.call(&the_phone(), op, args)
     }
 
+    #[cfg(test)]
+    pub(crate) fn followed_len(&self) -> usize {
+        lock(&self.followed).len()
+    }
+
     pub fn follow(&self, id: &str, now_ms: u64) {
         {
             let mut followed = lock(&self.followed);
@@ -99,6 +104,13 @@ impl PhoneCluster {
             }
             if followed.len() >= FOLLOWED_MAX {
                 followed.retain(|_, until| *until > now_ms);
+            }
+            while followed.len() >= FOLLOWED_MAX {
+                let oldest = followed.iter().min_by_key(|(_, until)| **until);
+                match oldest.map(|(id, _)| id.clone()) {
+                    Some(id) => followed.remove(&id),
+                    None => break,
+                };
             }
             followed.insert(id.to_string(), now_ms + FOLLOW_RETRY_MS);
         }

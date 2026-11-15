@@ -30,9 +30,20 @@ class SessionRef {
   String toString() => 'SessionRef($qualified)';
 }
 
-String storageKey(String scope, String sessionId) => scope.isEmpty ? sessionId : '$scope/$sessionId';
+const String bareMark = '/';
 
-bool keyInScope(String scope, String key) => scope.isEmpty ? SessionRef.parse(key) == null : key.startsWith('$scope/');
+String storageKey(String scope, String sessionId) {
+  if (scope.isNotEmpty) return '$scope/$sessionId';
+  return SessionRef.parse(sessionId) == null ? sessionId : '$bareMark$sessionId';
+}
+
+bool keyInScope(String scope, String key) =>
+    scope.isEmpty ? key.startsWith(bareMark) || SessionRef.parse(key) == null : key.startsWith('$scope/');
+
+String? idInBareScope(String key) {
+  if (key.startsWith(bareMark)) return key.substring(bareMark.length);
+  return SessionRef.parse(key) == null ? key : null;
+}
 
 Session withSessionId(Session session, String id) => Session(
       id: id,

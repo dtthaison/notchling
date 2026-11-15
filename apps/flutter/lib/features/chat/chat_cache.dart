@@ -138,7 +138,7 @@ class ScopedChatCache implements ChatCache {
   final ChatCache _inner;
   final String scope;
 
-  String _key(String sessionId) => scope.isEmpty ? sessionId : '$scope/$sessionId';
+  String _key(String sessionId) => storageKey(scope, sessionId);
 
   @override
   Future<List<ChatMessage>> loadMessages(String sessionId) => _inner.loadMessages(_key(sessionId));

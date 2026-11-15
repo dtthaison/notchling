@@ -87,7 +87,7 @@ void main() {
     );
     expect(dimmed.opacity, lessThan(1));
     expect(
-      find.bySemanticsLabel(RegExp('On mac-mini, Offline')),
+      find.bySemanticsLabel(RegExp('On mac-mini, offline')),
       findsOneWidget,
     );
 

@@ -951,6 +951,15 @@
       }
     }
   },
+  "sessionsNodeOnOffline": "On {name}, offline",
+  "@sessionsNodeOnOffline": {
+    "description": "Read aloud by a screen reader for a session that runs on another computer of the cluster when that computer can't be reached right now. $name is that computer's name.",
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
   "sessionsRunningSubagents": "{count, plural, one{{count} subagent running} other{{count} subagents running}}",
   "@sessionsRunningSubagents": {
     "description": "Shown in the Sessions tab. $count is the number of subagents.",

@@ -1323,6 +1323,12 @@ abstract class AppL10n {
   /// **'On {name}'**
   String sessionsNodeOn(String name);
 
+  /// Read aloud by a screen reader for a session that runs on another computer of the cluster when that computer can't be reached right now. $name is that computer's name.
+  ///
+  /// In en, this message translates to:
+  /// **'On {name}, offline'**
+  String sessionsNodeOnOffline(String name);
+
   /// Shown in the Sessions tab. $count is the number of subagents.
   ///
   /// In en, this message translates to:
