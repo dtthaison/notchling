@@ -121,6 +121,10 @@ pub struct Job {
     pub sd_worker: Option<SdWorkerSettings>,
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NodeSettings {}
+
 fn claude_worker() -> String {
     "claude-worker".into()
 }
@@ -143,6 +147,8 @@ pub struct Machine {
     pub abilities: Option<MachineAbilities>,
     #[serde(default)]
     pub jobs: Vec<Job>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub node: Option<NodeSettings>,
 }
 
 impl Machine {
@@ -157,6 +163,7 @@ impl Machine {
             claude_secret: claude_worker(),
             abilities: None,
             jobs: Vec::new(),
+            node: None,
         }
     }
 

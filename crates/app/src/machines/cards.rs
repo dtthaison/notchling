@@ -79,6 +79,7 @@ impl MachinesView {
             Ink::TextMuted,
             a,
         ));
+        body = body.child(self.node_row(machine, busy, a, cx));
         if machine.admin() == AdminAccess::RootSsh {
             body = body.child(marked(
                 Icon::Warning,

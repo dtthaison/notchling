@@ -3,7 +3,7 @@ use super::masks::Masks;
 use super::registry::{Machine, MachineAbilities, MachineOs, MachineRepo, SdWorkerSettings};
 use super::runner::{Channel, OutputSink, ScriptedRunner};
 use super::shell;
-use super::step::{FixContext, MacFacts, Opener, SecretSource, StepContext};
+use super::step::{FixContext, MacFacts, NoCluster, Opener, SecretSource, StepContext};
 use crate::accounts::Secret;
 use crate::vault::{VaultEntry, VaultRequest};
 use std::collections::BTreeMap;
@@ -270,6 +270,8 @@ impl Ctx {
             now: self.now,
             scratch: PathBuf::from("/nonexistent/scratch-for-tests"),
             masks: self.masks.clone(),
+            tokens: Arc::new(NoCluster),
+            dist_dir: None,
         }
     }
 

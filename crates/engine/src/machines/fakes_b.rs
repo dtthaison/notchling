@@ -4,8 +4,8 @@ use super::registry::{Machine, MachineAbilities, MachineOs, MachineRepo, SdWorke
 use super::runner::{CommandResult, Recorded, ScriptedRunner};
 use super::shell;
 use super::step::{
-    FixContext, FixPlan, MacFacts, NoOpener, NoSecrets, Probe, RemoteParse, SetupStep, StepContext,
-    StepFix, StepId,
+    FixContext, FixPlan, MacFacts, NoCluster, NoOpener, NoSecrets, Probe, RemoteParse, SetupStep,
+    StepContext, StepFix, StepId,
 };
 use crate::accounts::Secret;
 use std::path::{Path, PathBuf};
@@ -153,6 +153,8 @@ impl Rig {
             now: 1_800_000_000.0,
             scratch: self.tmp.path().join("scratch"),
             masks: self.masks.clone(),
+            tokens: Arc::new(NoCluster),
+            dist_dir: None,
         }
     }
 

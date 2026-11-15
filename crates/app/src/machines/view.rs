@@ -138,14 +138,31 @@ impl MachinesView {
         );
     }
 
+    pub(super) fn ask_cluster(&mut self, cx: &mut Context<Self>) {
+        if self.fixed {
+            return;
+        }
+        let ask = self.model.cluster_ask();
+        Self::background(
+            cx,
+            move || ask.run(),
+            |view, answer, _| view.model.set_masters(answer),
+        );
+    }
+
     pub(super) fn refresh_all(&mut self, cx: &mut Context<Self>) {
         self.reload(cx);
         if self.fixed {
             return;
         }
         self.ask_mac(cx);
+        self.ask_cluster(cx);
         let engine = self.model.parts.engine.clone();
-        Self::background(cx, move || engine.refresh(None, true), |_, _, _| {});
+        Self::background(
+            cx,
+            move || engine.refresh(None, true),
+            |view, _, cx| view.ask_cluster(cx),
+        );
     }
 
     pub(super) fn check(&mut self, machine: &str, cx: &mut Context<Self>) {
@@ -154,7 +171,11 @@ impl MachinesView {
         }
         let engine = self.model.parts.engine.clone();
         let names = vec![machine.to_owned()];
-        Self::background(cx, move || engine.refresh(Some(&names), true), |_, _, _| {});
+        Self::background(
+            cx,
+            move || engine.refresh(Some(&names), true),
+            |view, _, cx| view.ask_cluster(cx),
+        );
     }
 
     fn poll(&mut self, cx: &mut Context<Self>) {
@@ -167,6 +188,7 @@ impl MachinesView {
             move || poller.refresh(false),
             |view, _, cx| {
                 view.ask_mac(cx);
+                view.ask_cluster(cx);
                 view.reload(cx);
                 view.check_after_poll(cx);
             },

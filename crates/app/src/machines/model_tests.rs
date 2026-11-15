@@ -11,7 +11,7 @@ use notchling_engine::machines::poller::MachinePoller;
 use notchling_engine::machines::registry::{AdminAccess, Machine, MachineOs, RegistryState};
 use notchling_engine::machines::runner::{Refusing, Runner, ScriptedRunner, OFF};
 use notchling_engine::machines::step::{
-    Detected, MacFacts, NoOpener, NoSecrets, SecretSource, StepId,
+    Detected, MacFacts, NoCluster, NoOpener, NoSecrets, SecretSource, StepId,
 };
 use notchling_engine::vault::entry::{Kind, VaultEntry};
 
@@ -181,6 +181,7 @@ pub(super) fn world_with_secrets(
         versions: Arc::new(super::versions_feed::FixedVersions(Err(
             super::versions_feed::MacVersionsError::NotRunning,
         ))),
+        cluster: Arc::new(NoCluster),
     };
     World {
         registry,
