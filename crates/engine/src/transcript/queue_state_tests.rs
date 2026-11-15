@@ -256,6 +256,17 @@ fn a_prompt_that_matches_nothing_clears_the_queue_even_after_a_dequeue() {
 }
 
 #[test]
+fn an_idle_prompt_drains_the_entries_before_it() {
+    let lines = [
+        enqueue(1, "a"),
+        enqueue(2, "b"),
+        enqueue(3, "c"),
+        typed("b", 4),
+    ];
+    assert_eq!(waiting(&lines), vec!["c".to_string()]);
+}
+
+#[test]
 fn an_entry_taken_in_turn_and_removed_counts_once() {
     let lines = [
         enqueue(1, "yes"),

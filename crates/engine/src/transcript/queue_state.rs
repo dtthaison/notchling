@@ -42,7 +42,7 @@ fn user_line(queue: &mut Queue, obj: &Value) {
     let Some(first) = batch.first() else {
         match listed {
             Some(at) => {
-                queue.waiting.remove(at);
+                queue.waiting.drain(..=at);
             }
             None => queue.waiting.clear(),
         }
