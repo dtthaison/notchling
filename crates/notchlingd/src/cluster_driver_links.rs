@@ -113,6 +113,7 @@ impl Driver {
         self.hooks.wiped();
         let outcome = match persist::wipe(&self.setup.cluster_dir)
             .and_then(|()| crate::cluster_mirror::wipe(&self.setup.cluster_dir))
+            .and_then(|()| crate::cluster_blobs::wipe(&self.setup.cluster_dir))
         {
             Ok(()) => Outcome::Ok,
             Err(_) => Outcome::Failed,

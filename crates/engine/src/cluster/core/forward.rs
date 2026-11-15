@@ -1,6 +1,6 @@
 use serde_json::{json, Value};
 
-use super::{Effect, NodeCore, OutCall, Seen, Target, Then, CALL_MS, DEDUPE_MS};
+use super::{Effect, NodeCore, OutCall, Seen, Target, Then, CALL_MS, DEDUPE_MS, WORKSPACE_CALL_MS};
 use crate::cluster::id::NodeId;
 use crate::cluster::members::Term;
 use crate::cluster::policy::{check, SenderFacts};
@@ -281,7 +281,12 @@ impl NodeCore {
             );
             return;
         }
-        self.call_out(&node, op, args, origin, Then::Reply(target), out);
+        let wait = if op.starts_with("workspace.") {
+            WORKSPACE_CALL_MS
+        } else {
+            CALL_MS
+        };
+        self.call_out_within(&node, op, args, origin, (Then::Reply(target), wait), out);
     }
 
     pub(super) fn current_term(&self) -> Term {

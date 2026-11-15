@@ -127,6 +127,7 @@ pub mod ops {
     pub const CLUSTER_FOLLOW: &str = "cluster.follow";
     pub const CLUSTER_DISPATCH: &str = "cluster.dispatch";
     pub const SHELL_STOP: &str = "shell.stop";
+    pub const CLUSTER_RETURN: &str = "cluster.return";
 }
 
 pub mod topics {

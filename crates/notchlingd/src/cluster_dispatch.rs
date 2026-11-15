@@ -1,6 +1,7 @@
 use crate::acting_ops::bad;
 use crate::cluster_dispatch_delegate::{args_of, check, DelegateRunner};
 use crate::cluster_node::{ClusterNode, LocalCalls, DELEGATE_WAIT, LOCAL_WAIT};
+use crate::cluster_workspace_send::{code_mode, Code, CodeSender};
 use crate::op_group::OpGroup;
 use crate::shell_jobs::{Reporter, ShellJobs};
 use notchling_engine::cluster::core::CALL_MS;
@@ -161,11 +162,58 @@ impl Reporter for NodeReporter {
 pub struct DispatchOps {
     node: Result<Arc<ClusterNode>, String>,
     shells: Arc<ShellJobs>,
+    code: Option<Arc<dyn CodeSender>>,
+}
+
+fn name_of(status: &Value, node: &NodeId) -> String {
+    status
+        .get("members")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .find(|m| m.get("id") == Some(&json!(node)))
+        .and_then(|m| m.get("name").and_then(Value::as_str))
+        .unwrap_or(node.as_str())
+        .to_string()
 }
 
 impl DispatchOps {
     pub fn new(node: Result<Arc<ClusterNode>, String>, shells: Arc<ShellJobs>) -> Arc<DispatchOps> {
-        Arc::new(DispatchOps { node, shells })
+        DispatchOps::with_code(node, shells, None)
+    }
+
+    pub fn with_code(
+        node: Result<Arc<ClusterNode>, String>,
+        shells: Arc<ShellJobs>,
+        code: Option<Arc<dyn CodeSender>>,
+    ) -> Arc<DispatchOps> {
+        Arc::new(DispatchOps { node, shells, code })
+    }
+
+    fn with_sent_code(&self, tier: OriginTier, args: &Value) -> Result<Value, ApiError> {
+        if tier != OriginTier::App {
+            return Err(ApiError::new(
+                ErrorCode::Forbidden,
+                "only the Notchling app sends code to another node",
+            ));
+        }
+        if args.get("delegate").is_some() {
+            return Err(bad("code isn't taken by a delegate job"));
+        }
+        let (key, spec) = build(args, tier)?;
+        let node = self.node()?;
+        if spec.node == *node.me() {
+            return Ok(args.clone());
+        }
+        let sender = self
+            .code
+            .as_ref()
+            .ok_or_else(|| bad("sending code isn't available here"))?;
+        let name = name_of(&node.status(), &spec.node);
+        let cwd = sender.send(&spec.node, &name, &key, &spec.cwd)?;
+        let mut sent = args.clone();
+        sent["cwd"] = json!(cwd);
+        Ok(sent)
     }
 
     fn node(&self) -> Result<&Arc<ClusterNode>, ApiError> {
@@ -182,6 +230,13 @@ impl DispatchOps {
             OriginTier::App
         } else {
             OriginTier::Agent
+        };
+        let sent;
+        let args = if code_mode(args)? == Code::Send {
+            sent = self.with_sent_code(tier, args)?;
+            &sent
+        } else {
+            args
         };
         let (key, spec) = build(args, tier)?;
         let within = if spec.is_delegate() {

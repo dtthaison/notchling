@@ -707,6 +707,7 @@ impl Wired {
             .with_group(self.cluster.ops.clone())
             .with_group(self.cluster.follow.clone())
             .with_group(self.cluster.dispatch.clone())
+            .with_group(self.cluster.returns.clone())
             .with_shells(self.cluster.shells.clone())
             .with_cluster(self.cluster.forward(), self.cluster.remote.clone())
             .with_group(Arc::new(git))

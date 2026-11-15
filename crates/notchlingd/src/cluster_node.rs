@@ -170,6 +170,7 @@ fn known_node_ops() -> &'static [&'static str] {
         names.push(crate::cluster_switches::NODE_SWITCH_SET);
         names.extend(crate::cluster_sessions::NODE_OPS);
         names.extend(crate::cluster_dispatch::NODE_OPS);
+        names.extend(crate::cluster_workspace::NODE_OPS);
         names
     })
 }

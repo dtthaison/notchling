@@ -171,3 +171,64 @@ fn every_rule_names_a_known_op() {
         );
     }
 }
+
+#[test]
+fn client_may_send_code_to_a_worker() {
+    let ops = [
+        "node.put",
+        "node.put.end",
+        "workspace.prepare",
+        "workspace.return",
+    ];
+    let client = facts("m1", Role::Standby, true, MemberState::Active);
+    let home = facts("m5", Role::Home, true, MemberState::Active);
+    for op in ops {
+        assert!(
+            check(op, &client, &origin("m1", OriginTier::App)).is_ok(),
+            "{op}"
+        );
+        assert!(
+            check(op, &home, &origin("m5", OriginTier::App)).is_ok(),
+            "{op}"
+        );
+        assert!(
+            check(op, &home, &origin("m5", OriginTier::Node)).is_ok(),
+            "{op}"
+        );
+    }
+}
+
+#[test]
+fn worker_may_not_send_code_to_another_node() {
+    let ops = [
+        "node.put",
+        "node.put.end",
+        "workspace.prepare",
+        "workspace.return",
+    ];
+    let worker = facts("w1", Role::Worker, false, MemberState::Active);
+    let standby = facts("m2", Role::Standby, false, MemberState::Active);
+    for op in ops {
+        for tier in [OriginTier::Node, OriginTier::App, OriginTier::Agent] {
+            assert!(
+                check(op, &worker, &origin("w1", tier)).is_err(),
+                "{op} {tier:?}"
+            );
+            assert!(
+                check(op, &standby, &origin("m2", tier)).is_err(),
+                "{op} {tier:?}"
+            );
+        }
+    }
+    let client = facts("m1", Role::Standby, true, MemberState::Active);
+    for op in ops {
+        assert!(
+            check(op, &client, &origin("m1", OriginTier::Agent)).is_err(),
+            "{op}"
+        );
+        assert!(
+            check(op, &client, &origin("m1", OriginTier::Node)).is_err(),
+            "{op}"
+        );
+    }
+}

@@ -1,3 +1,4 @@
+pub mod blob;
 pub mod core;
 pub mod id;
 pub mod jobs;
@@ -9,6 +10,7 @@ pub mod shell_job;
 pub mod state;
 pub mod versions;
 pub mod wire;
+pub mod workspace;
 
 #[cfg(test)]
 pub mod sim;
@@ -22,6 +24,8 @@ pub use members::{Desired, Member, MemberState, Term};
 pub use state::{role_of, ClusterState, Command, JournalEntry};
 pub use versions::{compat, Compat, Purpose, Versions};
 
+#[cfg(test)]
+mod blob_tests;
 #[cfg(test)]
 mod id_tests;
 #[cfg(test)]
@@ -38,3 +42,5 @@ mod state_tests;
 mod versions_tests;
 #[cfg(test)]
 mod wire_tests;
+#[cfg(test)]
+mod workspace_tests;

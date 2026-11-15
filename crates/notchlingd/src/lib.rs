@@ -18,6 +18,7 @@ pub mod bridge_ops;
 pub mod catalog_ops;
 pub mod cli;
 pub mod clients;
+pub mod cluster_blobs;
 pub mod cluster_cli;
 pub mod cluster_dispatch;
 pub mod cluster_dispatch_delegate;
@@ -31,6 +32,8 @@ pub mod cluster_sessions;
 pub mod cluster_switches;
 pub mod cluster_versions;
 pub mod cluster_wiring;
+pub mod cluster_workspace;
+pub mod cluster_workspace_send;
 pub mod codex_children;
 pub mod codex_ops;
 pub mod control_ops;
@@ -123,6 +126,8 @@ mod bridge_models_tests;
 mod catalog_ops_tests;
 #[cfg(test)]
 mod cluster_testkit;
+#[cfg(test)]
+mod cluster_workspace_testkit;
 #[cfg(test)]
 mod codex_children_tests;
 #[cfg(test)]

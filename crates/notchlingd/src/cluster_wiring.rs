@@ -1,4 +1,5 @@
 use crate::acting_ops::Room;
+use crate::cluster_blobs::Blobs;
 use crate::cluster_dispatch::{DispatchCalls, DispatchOps, NodeReporter};
 use crate::cluster_dispatch_delegate::RealDelegate;
 use crate::cluster_forward::{Forward, NodeForward};
@@ -13,6 +14,8 @@ use crate::cluster_sessions::{
 };
 use crate::cluster_switches::{HeadlessSwitches, LateHandler, NodeCalls, OpsPanel};
 use crate::cluster_versions::{own, with_tools};
+use crate::cluster_workspace::{Workspace, WorkspaceCalls};
+use crate::cluster_workspace_send::{CodeSender, NodePeers, ReturnOps, Sender};
 use crate::inbox_ops::InboxOps;
 use crate::late_emit::Events;
 use crate::layout::Layout;
@@ -23,13 +26,14 @@ use notchling_cluster_net::{load_or_make, Pins, TcpTls, PORT};
 use notchling_engine::bridge::net::bridge::host_name;
 use notchling_engine::cluster::wire::{Origin, OriginTier};
 use notchling_engine::cluster::{Desired, NodeId};
+use notchling_engine::control::{Launcher, RealLauncher};
 use notchling_events::kinds::security::{ClusterStep, SwitchCause};
 use notchling_events::spec::Outcome;
 use notchling_local_api::spawn::in_cargo_target;
 use notchling_local_api::{topics, ApiError, Caller, ClientKind, ErrorCode, Handler, Tier};
 use serde_json::{json, Value};
 use std::ffi::OsStr;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
 pub const LOOPBACK_ENV: &str = "NOTCHLING_CLUSTER_LOOPBACK";
@@ -203,6 +207,7 @@ pub struct ClusterParts {
     pub ops: Arc<ClusterOps>,
     pub follow: Arc<FollowOps>,
     pub dispatch: Arc<DispatchOps>,
+    pub returns: Arc<ReturnOps>,
     pub shells: Arc<ShellJobs>,
     pub remote: Arc<RemoteSessions>,
     delegate: Arc<RealDelegate>,
@@ -308,9 +313,20 @@ impl ClusterParts {
             Arc::new(HandlerRows::new(handler.clone())),
             room.clone(),
         ));
+        let launcher: Arc<dyn Launcher> =
+            Arc::new(RealLauncher::with_claude(PathBuf::from("claude")));
+        let blobs = Blobs::new(layout.cluster_dir());
+        let workspace = Workspace::new(layout.cluster_dir(), launcher.clone(), blobs);
+        let sender = Sender::new(
+            layout.cluster_dir(),
+            launcher,
+            Arc::new(NodePeers::new(holder.clone())),
+        );
+        let workspace_calls: Arc<dyn LocalCalls> =
+            Arc::new(WorkspaceCalls::new(sessions_calls, workspace));
         let local: Arc<dyn LocalCalls> = Arc::new(NodeCalls {
             inner: Arc::new(DispatchCalls::new(
-                sessions_calls,
+                workspace_calls,
                 shells.clone(),
                 delegate.clone(),
                 takes,
@@ -341,12 +357,15 @@ impl ClusterParts {
             ));
         }
         let ops = Arc::new(ClusterOps::new(node.clone(), link, room.clone(), audit));
-        let dispatch = DispatchOps::new(node.clone(), shells.clone());
+        let code: Arc<dyn CodeSender> = sender.clone();
+        let dispatch = DispatchOps::with_code(node.clone(), shells.clone(), Some(code));
+        let returns = ReturnOps::new(sender);
         ClusterParts {
             node,
             ops,
             follow: Arc::new(FollowOps::new(mirror.clone())),
             dispatch,
+            returns,
             shells,
             delegate,
             remote,
