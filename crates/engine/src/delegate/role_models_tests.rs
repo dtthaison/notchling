@@ -168,13 +168,7 @@ fn the_providers_own_replacement_comes_first() {
         rig.deps.codex_home.join("models_cache.json"),
         r#"{"models":[
           {"slug":"gpt-6.2-astra","visibility":"list"},
-          {"slug":"gpt-6.3-astra","visibility":"list"}]}"#,
-    )
-    .unwrap();
-    std::fs::write(
-        rig.deps.codex_home.join("models_cache.json"),
-        r#"{"models":[
-          {"slug":"gpt-6.2-astra","visibility":"list"},
+          {"slug":"gpt-6.3-astra","visibility":"list"},
           {"slug":"gpt-5-astra","visibility":"hide","upgrade":"gpt-6.2-astra"}]}"#,
     )
     .unwrap();
@@ -182,7 +176,8 @@ fn the_providers_own_replacement_comes_first() {
     assert_eq!(code, 0);
     assert_eq!(
         text,
-        "codex --model gpt-6.2-astra --effort xhigh\nnote: gpt-5-astra is gone; using gpt-6.2-astra (the provider's replacement)\n"
+        "codex --model gpt-6.2-astra --effort xhigh\nnote: gpt-5-astra is gone; using gpt-6.2-astra (the provider's replacement)\n",
+        "the hint wins over the newer gpt-6.3-astra"
     );
 }
 
@@ -306,14 +301,108 @@ fn the_json_listing_carries_roles_use_and_not_for() {
         v["agy"]["notForEfforts"],
         json!([{"effort": "ultra", "notFor": ["review"]}])
     );
+}
 
+fn catalog(rig: &Rig, body: &str) {
+    std::fs::write(rig.deps.catalog_file.clone().unwrap(), body).unwrap();
+}
+
+#[test]
+fn a_model_marked_not_for_the_role_is_never_printed() {
+    let agy = "gemini-4-hydrogen-high\tH\ngemini-4.1-hydrogen-high\tH\ngemini-4-argon-high\tA\n";
+    let rig = with(Some(CODEX), Some(agy));
+    catalog(
+        &rig,
+        r#"{"antigravity":{"not_for":[{"match":"gemini-4-hydrogen","roles":["review"]}]}}"#,
+    );
+    assert_eq!(
+        pick(&rig, "review"),
+        (
+            0,
+            "agy --model gemini-4.1-hydrogen --effort high\nnote: gemini-4-hydrogen is not for review; using gemini-4.1-hydrogen (same family, newer)\n"
+                .into()
+        ),
+        "the marked model is excluded, so a family model takes over"
+    );
+    catalog(
+        &rig,
+        r#"{"antigravity":{"not_for":[{"match":"hydrogen","roles":["review"]}]}}"#,
+    );
+    assert_eq!(
+        pick(&rig, "review"),
+        (1, "no model for review; run delegate-models\n".into())
+    );
+}
+
+#[test]
+fn an_effort_or_a_hint_target_that_is_not_for_the_role_is_refused() {
+    let rig = with(Some(CODEX), Some(AGY));
+    catalog(
+        &rig,
+        r#"{"antigravity":{"picks":[{"model":"gemini-4-argon","effort":"ultra","roles":["review"]},{"model":"gemini-4-hydrogen","roles":[]}]}}"#,
+    );
+    assert_eq!(pick(&rig, "review").0, 1, "ultra is not for review");
+    catalog(
+        &rig,
+        r#"{"antigravity":{"not_for":[{"match":"hydrogen","effort":"high","roles":["review"]}]}}"#,
+    );
+    assert_eq!(pick(&rig, "review").0, 1, "hydrogen at high is excluded");
+    let cache = r#"{"models":[
+      {"slug":"gpt-6-terra","visibility":"list"},
+      {"slug":"gpt-5-astra","visibility":"hide","upgrade":"gpt-6-terra"}]}"#;
+    let rig = with(Some(cache), None);
+    catalog(
+        &rig,
+        r#"{"codex":{"picks":[{"model":"gpt-6-astra","effort":"xhigh","roles":[]},{"model":"gpt-5-astra","effort":"xhigh","roles":["review"]}]}}"#,
+    );
+    assert_eq!(
+        pick(&rig, "review"),
+        (1, "no model for review; run delegate-models\n".into()),
+        "terra is not for review, even as the provider's replacement"
+    );
+}
+
+#[test]
+fn for_checks_its_arguments_and_can_print_json() {
+    let rig = with(Some(CODEX), Some(AGY));
+    let run = |args: &[&str]| {
+        let mut out = Vec::new();
+        let code = models_listing(&words(args), &rig.deps, &mut out);
+        (code, String::from_utf8(out).unwrap())
+    };
+    let ok = (
+        0,
+        "agy --model gemini-4-hydrogen --effort high\n".to_string(),
+    );
+    assert_eq!(run(&["--for=review"]), ok);
+    assert_eq!(run(&["--for", " Review "]), ok);
+    assert_eq!(run(&["--for", ""]).0, 2);
+    assert_eq!(run(&["--for="]).0, 2);
+    assert_eq!(run(&["--for"]).0, 2);
+    let (code, text) = run(&["--for", "review", "bogus"]);
+    assert_eq!(
+        (code, text.as_str()),
+        (2, "--for takes only a role, not bogus\n")
+    );
     let mut out = Vec::new();
     assert_eq!(
         models_listing_json(&words(&["--for", "review"]), &rig.deps, &mut out),
         0
     );
+    let v: Value = serde_json::from_slice(&out).unwrap();
     assert_eq!(
-        String::from_utf8(out).unwrap(),
-        "agy --model gemini-4-hydrogen --effort high\n"
+        v,
+        json!({"role": "review", "picks": [{"tool": "agy", "model": "gemini-4-hydrogen", "effort": "high"}], "notes": []})
     );
+    let mut out = Vec::new();
+    assert_eq!(
+        models_listing_json(&words(&["--for", "poetry"]), &rig.deps, &mut out),
+        1
+    );
+    let v: Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(v["picks"], json!([]));
+    assert!(v["error"]
+        .as_str()
+        .unwrap()
+        .starts_with("no model marked for poetry"));
 }
