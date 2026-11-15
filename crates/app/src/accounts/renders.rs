@@ -337,6 +337,7 @@ pub fn snapshot(shown: Shown) -> Snapshot {
                 BTreeMap::new()
             },
             errors: BTreeMap::new(),
+            renewals: BTreeMap::new(),
         },
         limits: LimitsStatus {
             accounts_on: on,

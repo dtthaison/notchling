@@ -71,7 +71,7 @@ impl ClaudeUsage {
                 self.syncing.store(false, Ordering::SeqCst);
             }
         }
-        let (mut reports, mut errors) = (Map::new(), Map::new());
+        let (mut reports, mut errors, mut renewals) = (Map::new(), Map::new(), Map::new());
         for account in source.accounts() {
             if let Some(usage) = source.usage(&account.id) {
                 let report = UsageReport::from_account(&usage);
@@ -79,11 +79,17 @@ impl ClaudeUsage {
                     reports.insert(account.id.clone(), value);
                 }
             }
+            if let Some(state) = source.renewal(&account.id) {
+                renewals.insert(account.id.clone(), json!(state.wire()));
+            }
             if let Some(why) = source.usage_error(&account.id) {
                 errors.insert(account.id, json!(why));
             }
         }
         let mut reply = json!({"accounts_on": true, "reports": reports, "errors": errors});
+        if !renewals.is_empty() {
+            reply["renewals"] = Value::Object(renewals);
+        }
         if self.syncing.load(Ordering::SeqCst) {
             reply["refreshing"] = json!(true);
         }

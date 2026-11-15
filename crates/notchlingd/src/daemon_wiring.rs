@@ -44,6 +44,7 @@ use notchling_engine::control::RealLauncher;
 use notchling_engine::delegate::skill::SkillTool;
 use notchling_engine::git::SandboxedLauncher;
 use notchling_engine::install::skills::SkillSpec;
+use notchling_engine::limits::renew::ClaudeRenewer;
 use notchling_engine::vault::skill as vault_skill;
 use notchling_engine::versions::mac::Roots as VersionRoots;
 use notchling_engine::versions::Version;
@@ -487,7 +488,14 @@ impl Wired {
             history.clone(),
         ));
         limits.set_claude(
-            Arc::new(ClaudeLimits::new(on.clone(), claude_store)),
+            Arc::new(
+                ClaudeLimits::new(on.clone(), claude_store).with_renewer(Arc::new(
+                    ClaudeRenewer::new(
+                        Arc::new(RealLauncher::with_claude(claude.clone())),
+                        layout.roots(),
+                    ),
+                )),
+            ),
             Arc::new(SessionJobs::new(acting.clone())),
         );
         let codex_store = stores.codex.clone();
