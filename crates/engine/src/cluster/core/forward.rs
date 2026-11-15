@@ -129,18 +129,10 @@ impl NodeCore {
             return;
         };
         let my_term = state.term.clone();
-        let facts = state.members.get(&from).map(|m| SenderFacts {
-            id: m.id.clone(),
-            role: role_of(state, &m.id),
-            client: m.client,
-            state: m.state,
-            is_home: state.home == m.id,
-        });
         #[cfg(test)]
         let skip = self.skip_term_check
-            && facts
-                .as_ref()
-                .is_some_and(|_| role_of(state, &self.me) == crate::cluster::id::Role::Worker);
+            && state.members.contains_key(&from)
+            && role_of(state, &self.me) == crate::cluster::id::Role::Worker;
         #[cfg(not(test))]
         let skip = false;
         if !skip && term < my_term {
@@ -153,6 +145,15 @@ impl NodeCore {
             return;
         }
         self.adopt(&term, out);
+        let facts = self.state.as_ref().and_then(|state| {
+            state.members.get(&from).map(|m| SenderFacts {
+                id: m.id.clone(),
+                role: role_of(state, &m.id),
+                client: m.client,
+                state: m.state,
+                is_home: state.home == m.id,
+            })
+        });
         let Some(facts) = facts else {
             self.refused_call(&from, id, &op, "not a member", out);
             return;

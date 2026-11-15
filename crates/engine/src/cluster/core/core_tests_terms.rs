@@ -329,6 +329,51 @@ fn install_forward_from_a_primary_that_lost_its_term_is_refused() {
 }
 
 #[test]
+fn a_call_stamped_with_a_newer_term_is_judged_after_adopting_it() {
+    for (op, tier) in [
+        ("install.apply", OriginTier::App),
+        ("install.plan", OriginTier::App),
+        ("session.new", OriginTier::Node),
+        ("shell.run", OriginTier::App),
+    ] {
+        let (mut hub, m5, w1) = pair();
+        let newer = Term {
+            n: 2,
+            node: id("w1"),
+        };
+        let effects = hub.run(
+            &w1,
+            Input::Msg {
+                from: m5.clone(),
+                msg: Msg::Call {
+                    id: 31,
+                    op: op.to_string(),
+                    args: json!({}),
+                    origin: Origin {
+                        node: m5.clone(),
+                        tier,
+                    },
+                    term: newer.clone(),
+                },
+            },
+        );
+        assert_eq!(hub.core(&w1).highest_term(), Some(&newer), "{op}");
+        assert_eq!(hub.core(&w1).state().expect("state").home, id("w1"), "{op}");
+        assert!(run_locals(&effects).is_empty(), "{op} ran");
+        let refused = effects.iter().any(|e| {
+            matches!(
+                e,
+                Effect::Send {
+                    msg: Msg::Reply { err: Some(_), .. },
+                    ..
+                }
+            )
+        });
+        assert!(refused, "{op}");
+    }
+}
+
+#[test]
 fn newer_term_is_adopted() {
     let (mut hub, m5, w1) = pair();
     let newer = Term {
