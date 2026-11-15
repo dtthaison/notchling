@@ -22,3 +22,4 @@ gitdb: Ruling R11: a directory in plan.files is one Dir part (len the sum, sha25
 gitdb: Ruling R12: one Busy file or db fails the whole stage and removes its folder; a Rewritten tail is staged whole as Tail { from: 0 }; a missing file is skipped, a missing db is an error; a path inside a session's repository is refused (code never travels).
 gitdb: Ruling R13: copy_tail is Rewritten when shorter than `from` or its inode changed during the copy; a recorded inode across sets would be Task 6's (it keeps lengths only) — costs a missed replace-with-longer-file if wrong.
 gitdb: Ruling R14: backup_db steps 256 pages / 5 ms and, after 10 s or repeated restarts under a busy writer, finishes with one step(-1) under one read lock — a stepped backup of a db written all the time can restart forever; rusqlite becomes a notchlingd dependency with "backup", plus sha2.
+gitdb: Task 5: implemented a3f88969 (6 engine + 22 daemon tests)
