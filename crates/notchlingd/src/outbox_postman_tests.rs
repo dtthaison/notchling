@@ -443,6 +443,24 @@ fn acting_off_parks_and_closes_attach() {
     assert!(!r.typed().contains("two"));
 }
 
+#[test]
+fn acting_off_during_a_verify_types_nothing_more() {
+    let r = rig();
+    let switch = r.acting_switch();
+    *r.verifier.during_wait.lock().unwrap() = Some(Box::new(move || {
+        switch.set(false);
+    }));
+    let first = r.send("job-idle", "first");
+    let second = r.send("job-idle", "second");
+    let mut p = r.postmen.postman(IDLE);
+    assert_eq!(p.pass(r.at(T0)), Next::Done);
+    assert_eq!(r.row(&first.id), None);
+    assert!(!r.typed().contains("second"));
+    let behind = r.row(&second.id).unwrap();
+    assert_eq!((behind.state, behind.tries), (State::Queued, 0));
+    assert_eq!(r.courier.open(), 0);
+}
+
 fn threaded(r: &Rig) {
     r.ops.set_wake(r.postmen.waker());
     r.postmen.begin();

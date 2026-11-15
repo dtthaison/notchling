@@ -93,6 +93,7 @@ pub(crate) struct Script {
     pub next_look: Mutex<Option<i64>>,
     pub asked: AtomicUsize,
     pub watched_at: Mutex<Vec<i64>>,
+    pub during_wait: Mutex<Option<Box<dyn Fn() + Send>>>,
 }
 
 impl Verifier for Script {
@@ -102,6 +103,9 @@ impl Verifier for Script {
     }
     fn wait(&self, _row: &Row, _before: Seen, _entered_ms: i64) -> Verdict {
         self.asked.fetch_add(1, Ordering::SeqCst);
+        if let Some(hook) = self.during_wait.lock().unwrap().as_ref() {
+            hook();
+        }
         self.waits
             .lock()
             .unwrap()

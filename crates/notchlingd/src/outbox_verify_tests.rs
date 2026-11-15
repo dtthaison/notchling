@@ -83,7 +83,7 @@ impl Waits for FakeWaits<'_> {
 }
 
 impl Pause for FakePause {
-    fn watch(&self, _file: &Path) -> Box<dyn Waits + '_> {
+    fn watch(&self, _file: &Path, _any_jsonl: bool) -> Box<dyn Waits + '_> {
         Box::new(FakeWaits(self))
     }
 
@@ -527,6 +527,123 @@ fn vanished_job_in_queue_waits_60s_then_30s() {
     assert_eq!(at(50_001), QueuedVerdict::Stay);
     assert_eq!(at(200_000), QueuedVerdict::Stay);
     assert_eq!(e.verifier.next_look_ms(&row), None);
+}
+
+fn set_process(e: &Env, process: Option<(u32, Option<i64>)>) {
+    let mut all = e.r.files.processes.lock().unwrap();
+    match process {
+        Some(p) => all.insert(IDLE.into(), p),
+        None => all.remove(IDLE),
+    };
+}
+
+#[test]
+fn a_watch_is_not_evicted_by_age() {
+    let e = env();
+    set_process(&e, Some((100, None)));
+    let row = e.in_queue("first");
+    let base = before(&row);
+    assert_eq!(
+        e.verifier.watch(&row, base, T0 + 2_000),
+        QueuedVerdict::Stay
+    );
+    let other = e.r.send("job-idle2", "elsewhere");
+    assert_eq!(
+        e.verifier.watch(&other, before(&other), T0 + 700_000),
+        QueuedVerdict::Stay
+    );
+    set_process(&e, Some((200, None)));
+    e.verifier.watch(&row, base, T0 + 700_001);
+    assert_eq!(e.verifier.next_look_ms(&row), Some(T0 + 730_001));
+}
+
+#[test]
+fn a_row_that_ends_drops_its_watch() {
+    let e = env();
+    let row = e.in_queue("first");
+    e.verifier.watch(&row, before(&row), T0 + 2_000);
+    assert_eq!(e.verifier.watching(), 1);
+    e.r.ops.store().delete(&row.id).unwrap();
+    e.r.ops.publish_removed(&row.id, &row.session, "discarded");
+    assert_eq!(e.verifier.watching(), 0);
+
+    let row = e.in_queue("second");
+    e.verifier.watch(&row, before(&row), T0 + 3_000);
+    assert_eq!(e.verifier.watching(), 1);
+    e.verifier.forget(&row.id);
+    assert_eq!(e.verifier.watching(), 0);
+}
+
+#[test]
+fn a_changed_process_stays_changed_when_it_reads_as_none() {
+    let e = env();
+    set_process(&e, Some((100, None)));
+    let row = e.in_queue("first");
+    let base = before(&row);
+    set_process(&e, Some((200, None)));
+    assert_eq!(
+        e.verifier.watch(&row, base, T0 + 10_000),
+        QueuedVerdict::Stay
+    );
+    set_process(&e, None);
+    assert_eq!(
+        e.verifier.watch(&row, base, T0 + 20_000),
+        QueuedVerdict::Stay
+    );
+    assert_eq!(e.verifier.next_look_ms(&row), Some(T0 + 40_000));
+    assert_eq!(
+        e.verifier.watch(&row, base, T0 + 40_000),
+        QueuedVerdict::Unsure
+    );
+}
+
+#[test]
+fn the_first_watch_of_a_vanished_job_still_waits_60s_then_30s() {
+    let e = env();
+    let row = e.in_queue("first");
+    let base = before(&row);
+    e.r.files.vanish(IDLE);
+    let at = |ms: i64| e.verifier.watch(&row, base, T0 + 10_000 + ms);
+    assert_eq!(at(0), QueuedVerdict::Stay);
+    assert_eq!(at(30_000), QueuedVerdict::Stay);
+    assert_eq!(at(60_000), QueuedVerdict::Stay);
+    assert_eq!(at(89_999), QueuedVerdict::Stay);
+    assert_eq!(at(90_000), QueuedVerdict::Unsure);
+}
+
+#[test]
+fn any_new_jsonl_in_the_folder_wakes_a_clear_waiter() {
+    let file = Path::new("/w/projects/demo/old.jsonl");
+    let batch = |name: &str| Batch {
+        paths: [PathBuf::from("/w/projects/demo").join(name)].into(),
+        rescan: false,
+    };
+    assert!(names(&batch("old.jsonl"), file, false));
+    assert!(!names(&batch("next.jsonl"), file, false));
+    assert!(names(&batch("next.jsonl"), file, true));
+    assert!(!names(&batch("notes.txt"), file, true));
+}
+
+#[test]
+fn a_real_clear_waiter_wakes_on_the_successor_file() {
+    let dir = Folder::new("real-wait");
+    let old = dir.0.join("old.jsonl");
+    append(&old, &[operation(0, "dequeue")]);
+    let clock = real_clock();
+    let pause = RealPause {
+        clock: clock.clone(),
+        closed: Arc::new(AtomicBool::new(false)),
+    };
+    let mut waits = pause.watch(&old, true);
+    let next = dir.0.join("next.jsonl");
+    let writer = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(300));
+        append(&next, &[operation(0, "dequeue")]);
+    });
+    let started = clock();
+    waits.next(started + 20_000);
+    writer.join().unwrap();
+    assert!(clock() - started < 10_000);
 }
 
 #[test]

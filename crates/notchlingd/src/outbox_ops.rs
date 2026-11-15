@@ -59,6 +59,7 @@ pub struct OutboxOps {
     events: Option<Events>,
     notes: Mutex<HashMap<String, String>>,
     wake: Mutex<Option<Wake>>,
+    forget: Mutex<Option<Wake>>,
     resume: Mutex<Option<Resume>>,
     codex_check: OnceLock<Check>,
     agy_check: OnceLock<Check>,
@@ -146,6 +147,7 @@ impl OutboxOps {
             events,
             notes: Mutex::new(HashMap::new()),
             wake: Mutex::new(None),
+            forget: Mutex::new(None),
             resume: Mutex::new(None),
             codex_check: OnceLock::new(),
             agy_check: OnceLock::new(),
@@ -215,6 +217,10 @@ impl OutboxOps {
         *lock(&self.wake) = Some(wake);
     }
 
+    pub fn set_forget(&self, forget: Wake) {
+        *lock(&self.forget) = Some(forget);
+    }
+
     pub fn set_resume(&self, resume: Resume) {
         *lock(&self.resume) = Some(resume);
     }
@@ -278,6 +284,10 @@ impl OutboxOps {
 
     pub fn publish_removed(&self, id: &str, session: &str, why: &str) {
         self.set_note(id, None);
+        let forget = lock(&self.forget).clone();
+        if let Some(forget) = forget {
+            forget(id);
+        }
         self.room.publish(
             topics::OUTBOX,
             topics::OUTBOX_REMOVED,

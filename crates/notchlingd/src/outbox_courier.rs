@@ -100,7 +100,7 @@ impl JobFiles for LiveFiles {
     }
 
     fn process(&self, job: &str) -> Option<(u32, Option<i64>)> {
-        fresh::job_process(&self.roots, job)
+        fresh::job_process(&self.roots, &Probes::from_proc(), job)
     }
 }
 

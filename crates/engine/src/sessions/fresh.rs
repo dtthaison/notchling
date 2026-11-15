@@ -75,8 +75,8 @@ pub fn job_status(roots: &Roots, probes: &Probes, short_id: &str) -> Option<Stri
     live.get("status").and_then(Value::as_str).map(String::from)
 }
 
-pub fn job_process(roots: &Roots, short_id: &str) -> Option<(u32, Option<i64>)> {
-    let live = live_file(roots, &|_| true, short_id)?;
+pub fn job_process(roots: &Roots, probes: &Probes, short_id: &str) -> Option<(u32, Option<i64>)> {
+    let live = live_file(roots, probes.is_alive, short_id)?;
     let pid = live.get("pid").and_then(|n| {
         n.as_u64()
             .or_else(|| n.as_f64().map(|f| f as u64))

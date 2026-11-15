@@ -117,13 +117,36 @@ fn job_status_is_the_live_session_files_status() {
 fn job_process_is_the_pid_and_start_the_files_record() {
     let dir = TempDir::new("fresh-process");
     dir.write("claude/jobs/be50d36a/state.json", &job("done", 0, "x"));
-    assert_eq!(job_process(&roots(&dir), "be50d36a"), None);
+    assert_eq!(
+        job_process(&roots(&dir), &Probes::from_proc(), "be50d36a"),
+        None
+    );
     let mut file: serde_json::Value = serde_json::from_str(&live("busy")).unwrap();
-    file["pid"] = json!(4242);
     file["startedAt"] = json!(1_794_000_000_000_i64);
     dir.write("claude/sessions/1.json", &file.to_string());
     assert_eq!(
-        job_process(&roots(&dir), "be50d36a"),
-        Some((4242, Some(1_794_000_000_000)))
+        job_process(&roots(&dir), &Probes::from_proc(), "be50d36a"),
+        Some((std::process::id(), Some(1_794_000_000_000)))
+    );
+}
+
+#[test]
+fn job_process_ignores_a_session_file_of_a_dead_pid() {
+    let dir = TempDir::new("fresh-process-dead");
+    dir.write("claude/jobs/be50d36a/state.json", &job("done", 0, "x"));
+    let mut old: serde_json::Value = serde_json::from_str(&live("busy")).unwrap();
+    old["pid"] = json!(4_000_000_000_u64);
+    old["startedAt"] = json!(1_i64);
+    dir.write("claude/sessions/0.json", &old.to_string());
+    assert_eq!(
+        job_process(&roots(&dir), &Probes::from_proc(), "be50d36a"),
+        None
+    );
+    let mut file: serde_json::Value = serde_json::from_str(&live("busy")).unwrap();
+    file["startedAt"] = json!(2_i64);
+    dir.write("claude/sessions/1.json", &file.to_string());
+    assert_eq!(
+        job_process(&roots(&dir), &Probes::from_proc(), "be50d36a"),
+        Some((std::process::id(), Some(2)))
     );
 }

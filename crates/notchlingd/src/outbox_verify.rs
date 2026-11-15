@@ -19,7 +19,6 @@ use std::time::{Duration, UNIX_EPOCH};
 
 pub const SINCE_BEFORE_MS: i64 = 2_000;
 const SLICE_MS: i64 = 250;
-const FORGET_MS: i64 = 600_000;
 const WATCH: WatchConfig = WatchConfig {
     poll: Duration::from_secs(1),
     debounce: Duration::from_millis(100),
@@ -55,7 +54,7 @@ pub(crate) trait Waits {
 }
 
 pub(crate) trait Pause: Send + Sync {
-    fn watch(&self, file: &Path) -> Box<dyn Waits + '_>;
+    fn watch(&self, file: &Path, any_jsonl: bool) -> Box<dyn Waits + '_>;
     fn sleep(&self, deadline_ms: i64);
 }
 
@@ -67,6 +66,7 @@ struct RealPause {
 struct RealWaits<'a> {
     pause: &'a RealPause,
     file: PathBuf,
+    any_jsonl: bool,
     batches: Option<(Watcher, Receiver<Batch>)>,
 }
 
@@ -88,7 +88,7 @@ impl Waits for RealWaits<'_> {
                 continue;
             };
             match batches.recv_timeout(slice) {
-                Ok(batch) if batch.rescan || names(&batch, &self.file) => return,
+                Ok(batch) if batch.rescan || names(&batch, &self.file, self.any_jsonl) => return,
                 Ok(_) | Err(RecvTimeoutError::Timeout) => {}
                 Err(RecvTimeoutError::Disconnected) => self.batches = None,
             }
@@ -96,20 +96,21 @@ impl Waits for RealWaits<'_> {
     }
 }
 
-fn names(batch: &Batch, file: &Path) -> bool {
-    batch
-        .paths
-        .iter()
-        .any(|p| p.file_name() == file.file_name())
+fn names(batch: &Batch, file: &Path, any_jsonl: bool) -> bool {
+    batch.paths.iter().any(|p| {
+        p.file_name() == file.file_name()
+            || (any_jsonl && p.extension().is_some_and(|e| e == "jsonl"))
+    })
 }
 
 impl Pause for RealPause {
-    fn watch(&self, file: &Path) -> Box<dyn Waits + '_> {
+    fn watch(&self, file: &Path, any_jsonl: bool) -> Box<dyn Waits + '_> {
         let folder = file.parent().map(Path::to_path_buf);
         let batches = folder.and_then(|f| Watcher::start(vec![f], WATCH).ok());
         Box::new(RealWaits {
             pause: self,
             file: file.to_path_buf(),
+            any_jsonl,
             batches,
         })
     }
@@ -163,9 +164,9 @@ struct Watch {
     seen: Option<Seen>,
     listed: bool,
     process: Option<(u32, Option<i64>)>,
+    changed: bool,
     missing_since: Option<i64>,
     gone_since: Option<i64>,
-    touched: i64,
 }
 
 pub struct TranscriptVerifier {
@@ -212,10 +213,12 @@ impl TranscriptVerifier {
     }
 
     fn put(&self, id: &str, watch: Watch) {
-        let mut watches = lock(&self.watches);
-        let now = watch.touched;
-        watches.retain(|_, w| now - w.touched < FORGET_MS);
-        watches.insert(id.to_string(), watch);
+        lock(&self.watches).insert(id.to_string(), watch);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn watching(&self) -> usize {
+        lock(&self.watches).len()
     }
 
     fn take(&self, id: &str) -> Option<Watch> {
@@ -241,14 +244,12 @@ impl TranscriptVerifier {
             .map(|since| since + GONE_AFTER_MS)
             .filter(|at| now_ms >= *at);
         let stopped = state.as_deref() == Some("stopped");
-        let changed = match (watch.process, self.files.process(&row.session)) {
-            (Some(first), Some(now)) => first != now,
-            (None, now) => {
-                watch.process = now;
-                false
-            }
-            (Some(_), None) => false,
-        };
+        match (watch.process, self.files.process(&row.session)) {
+            (Some(first), Some(now)) => watch.changed |= first != now,
+            (None, now) => watch.process = now,
+            (Some(_), None) => {}
+        }
+        let changed = watch.changed;
         if let Some(path) = watch.path.clone() {
             let size = std::fs::metadata(&path).map_or(0, |m| m.len());
             let read = Some((path.clone(), size));
@@ -281,9 +282,10 @@ impl Verifier for TranscriptVerifier {
 
     fn wait(&self, row: &Row, before: Seen, entered_ms: i64) -> Verdict {
         let found = self.transcript(row);
-        let mut waits = found
-            .as_ref()
-            .map(|(path, _)| self.pause.watch(Path::new(path)));
+        let mut waits = found.as_ref().map(|(path, _)| {
+            self.pause
+                .watch(Path::new(path), is_clear(&message_of(row)))
+        });
         let mut noted = false;
         loop {
             let now = (self.clock)();
@@ -299,8 +301,13 @@ impl Verifier for TranscriptVerifier {
                 Verdict::Pending => {}
                 Verdict::InQueue => {
                     let watch = Watch {
+                        path: found.as_ref().map(|(path, _)| path.clone()),
+                        name: found
+                            .as_ref()
+                            .map(|(_, name)| name.clone())
+                            .unwrap_or_default(),
+                        listed: true,
                         process: self.files.process(&row.session),
-                        touched: now,
                         ..Watch::default()
                     };
                     self.put(&row.id, watch);
@@ -332,7 +339,6 @@ impl Verifier for TranscriptVerifier {
         let still = self.refresh(row, &mut watch, now_ms);
         let judged = queued_verdict(watch.seen, before, still, watch.gone_since, now_ms);
         if judged == QueuedVerdict::Stay {
-            watch.touched = now_ms;
             self.put(&row.id, watch);
         }
         judged
@@ -343,6 +349,10 @@ impl Verifier for TranscriptVerifier {
             .get(&row.id)
             .and_then(|w| w.gone_since)
             .map(|since| since + VERIFY_LOOK_MS)
+    }
+
+    fn forget(&self, id: &str) {
+        self.take(id);
     }
 
     fn close(&self) {

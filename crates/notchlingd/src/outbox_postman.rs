@@ -21,6 +21,7 @@ pub trait Verifier: Send + Sync {
     fn wait(&self, row: &Row, before: Seen, entered_ms: i64) -> Verdict;
     fn watch(&self, row: &Row, before: Seen, now_ms: i64) -> QueuedVerdict;
     fn next_look_ms(&self, row: &Row) -> Option<i64>;
+    fn forget(&self, _id: &str) {}
     fn close(&self) {}
 }
 
@@ -136,6 +137,8 @@ impl Postmen {
         acting: Arc<Acting>,
         clock: Clock,
     ) -> Postmen {
+        let forgetting = verifier.clone();
+        ops.set_forget(Arc::new(move |id| forgetting.forget(id)));
         Postmen {
             inner: Arc::new(Inner {
                 ops,
@@ -339,7 +342,8 @@ impl Postman {
             return Next::Done;
         }
         loop {
-            if self.inner.stopped() {
+            if !self.inner.acting.is_on() || self.inner.stopped() {
+                self.close_attach();
                 return Next::Done;
             }
             let row = match self.inner.ops.store().head(&self.session) {
