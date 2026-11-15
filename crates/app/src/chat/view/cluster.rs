@@ -54,16 +54,15 @@ impl ChatView {
         if !self.followed.due(Some(session), now) || self.remote_refused(&row, Action::Reply) {
             return;
         }
-        self.followed.begin(&row, now);
+        let request = self.followed.begin(&row, now);
         let actions = self.acts(cx).actions;
-        let keyed = row.clone();
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_executor()
                 .spawn(async move { actions.read(&Request::cluster_follow(&row)) })
                 .await;
             this.update(cx, |view, _| {
-                view.followed.finish(&keyed, result.is_ok(), now_ms());
+                view.followed.finish(request, result.is_ok(), now_ms());
             })
             .ok();
         })
