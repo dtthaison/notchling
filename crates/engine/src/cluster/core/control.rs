@@ -68,7 +68,7 @@ impl NodeCore {
                 } else if !self.may_mint(&minter) {
                     Err(refusal("forbidden", "only a member makes join tokens"))
                 } else {
-                    self.tokens.issue(secret, minter, self.wall_ms);
+                    self.tokens.issue(secret, minter, &self.me, self.wall_ms);
                     Ok(json!({}))
                 };
                 self.finish(target, result, out);

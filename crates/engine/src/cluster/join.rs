@@ -8,6 +8,7 @@ use super::id::NodeId;
 
 pub const TOKEN_TTL_MS: i64 = 600_000;
 pub const MAX_OPEN_TOKENS: usize = 16;
+pub const MAX_TOKENS_PER_MINTER: usize = 4;
 const PREFIX: &str = "nlj1.";
 const MAX_TOKEN: usize = 4096;
 
@@ -46,22 +47,38 @@ pub struct Tokens {
 }
 
 impl Tokens {
-    pub fn issue(&mut self, secret: String, minter: NodeId, now_ms: i64) {
+    pub fn issue(&mut self, secret: String, minter: NodeId, home: &NodeId, now_ms: i64) {
         self.issued
             .retain(|_, (at, _)| now_ms - *at <= TOKEN_TTL_MS);
         self.issued.remove(&secret);
+        while self.count_of(&minter) >= MAX_TOKENS_PER_MINTER {
+            if !self.drop_oldest(|by| *by == minter) {
+                break;
+            }
+        }
         while self.issued.len() >= MAX_OPEN_TOKENS {
-            let oldest = self
-                .issued
-                .iter()
-                .min_by(|a, b| a.1 .0.cmp(&b.1 .0).then_with(|| a.0.cmp(b.0)))
-                .map(|(secret, _)| secret.clone());
-            match oldest {
-                Some(oldest) => self.issued.remove(&oldest),
-                None => break,
-            };
+            if !self.drop_oldest(|by| by != home) && !self.drop_oldest(|_| true) {
+                break;
+            }
         }
         self.issued.insert(secret, (now_ms, minter));
+    }
+
+    fn count_of(&self, minter: &NodeId) -> usize {
+        self.issued.values().filter(|(_, by)| by == minter).count()
+    }
+
+    fn drop_oldest(&mut self, wanted: impl Fn(&NodeId) -> bool) -> bool {
+        let oldest = self
+            .issued
+            .iter()
+            .filter(|(_, (_, by))| wanted(by))
+            .min_by(|a, b| a.1 .0.cmp(&b.1 .0).then_with(|| a.0.cmp(b.0)))
+            .map(|(secret, _)| secret.clone());
+        match oldest {
+            Some(oldest) => self.issued.remove(&oldest).is_some(),
+            None => false,
+        }
     }
 
     pub fn has_open(&self, now_ms: i64) -> bool {
