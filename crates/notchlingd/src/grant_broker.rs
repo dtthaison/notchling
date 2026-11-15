@@ -227,13 +227,13 @@ impl GrantBroker {
         let still = || self.still(&job.id, &names);
         let released = self.vault.release(who, &names, &still)?;
         let expires = expires_ms((self.clock)());
-        let changed = |why: String| {
-            for name in &names {
+        let changed = |why: String, unsent: &[String]| {
+            for name in unsent {
                 self.audit.refused(&job.spec.node, who, name);
             }
             refused(why)
         };
-        still().map_err(changed)?;
+        still().map_err(|why| changed(why, &names))?;
         for (entry, _) in &released.values {
             let name = entry.id();
             let release = Release {
@@ -246,14 +246,15 @@ impl GrantBroker {
                 .released(&release)
                 .map_err(|_| failed(LOG_DOWN))?;
         }
-        let mut delivered = Vec::new();
+        let mut delivered: Vec<String> = Vec::new();
         for (entry, value) in &released.values {
             let name = entry.id();
             if let Err(why) = still() {
                 if !delivered.is_empty() {
-                    let _ = self.revoke_job(&job.id, &job.spec.node);
+                    let _ = self.revoke_names(&job.id, &job.spec.node, Some(&delivered));
                 }
-                return Err(changed(why));
+                let unsent = &names[delivered.len().min(names.len())..];
+                return Err(changed(why, unsent));
             }
             let args = json!({
                 "job": job.id,
@@ -262,7 +263,9 @@ impl GrantBroker {
                 "expiresMs": expires,
             });
             if let Err(e) = self.link.call(&job.spec.node, GRANT_DELIVER, args) {
-                let _ = self.revoke_job(&job.id, &job.spec.node);
+                let mut sent = delivered.clone();
+                sent.push(name);
+                let _ = self.revoke_names(&job.id, &job.spec.node, Some(&sent));
                 return Err(e);
             }
             delivered.push(name);
@@ -377,9 +380,20 @@ impl GrantBroker {
     }
 
     pub fn revoke_job(&self, job: &str, node: &NodeId) -> Result<(), ApiError> {
-        self.link
-            .call(node, GRANT_REVOKE, json!({"job": job}))
-            .map(|_| ())
+        self.revoke_names(job, node, None)
+    }
+
+    fn revoke_names(
+        &self,
+        job: &str,
+        node: &NodeId,
+        names: Option<&[String]>,
+    ) -> Result<(), ApiError> {
+        let args = match names {
+            Some(names) => json!({"job": job, "names": names}),
+            None => json!({"job": job}),
+        };
+        self.link.call(node, GRANT_REVOKE, args).map(|_| ())
     }
 
     pub fn revoke(&self, args: &Value) -> Result<Value, ApiError> {

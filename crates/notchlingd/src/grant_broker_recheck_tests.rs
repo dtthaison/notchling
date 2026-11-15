@@ -130,6 +130,11 @@ fn a_change_between_two_sends_stops_the_second_and_revokes_the_first() {
     assert!(sends[0].0.ends_with(":grant.deliver"));
     assert!(sends[1].0.ends_with(":grant.revoke"));
     assert!(!sends[1].1.contains("NL-MARKER"));
+    let revoked: Value = serde_json::from_str(&sends[1].1).unwrap();
+    assert_eq!(revoked["names"], json!(["api-key"]));
+    let log = fake.log();
+    assert!(log.contains(&"refused:db-pass".to_string()), "{log:?}");
+    assert!(!log.contains(&"refused:api-key".to_string()), "{log:?}");
 }
 
 #[test]

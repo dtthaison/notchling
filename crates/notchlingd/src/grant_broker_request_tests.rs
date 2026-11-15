@@ -173,6 +173,8 @@ fn a_revoke_clears_the_notice_and_tells_the_node() {
     let sends = fake.with(|i| i.sends.clone());
     assert_eq!(sends.len(), 1);
     assert!(sends[0].0.ends_with(":grant.revoke"));
+    let sent: Value = serde_json::from_str(&sends[0].1).unwrap();
+    assert!(sent.get("names").is_none(), "{sent}");
     let e = broker(&fake)
         .revoke(&json!({"job": "j-1"}))
         .expect_err("bad");

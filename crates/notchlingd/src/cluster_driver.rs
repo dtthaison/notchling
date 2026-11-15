@@ -424,7 +424,8 @@ impl Driver {
         while let Some(effect) = rest.next() {
             if let Effect::Persist { entry, changes } = &effect {
                 if let Err(why) = persist::save(&self.setup.cluster_dir, entry, changes) {
-                    self.save_failed(why, rest.collect());
+                    let rest = self.revoke_unsaved(runs, rest.collect());
+                    self.save_failed(why, rest);
                     return;
                 }
                 continue;

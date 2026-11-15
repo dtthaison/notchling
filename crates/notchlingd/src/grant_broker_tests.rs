@@ -45,6 +45,7 @@ struct Inner {
     release_err: Option<ApiError>,
     audit_down: bool,
     fail_op: Option<&'static str>,
+    fail_after: Option<(&'static str, usize)>,
     state: Option<ClusterState>,
     me: Option<NodeId>,
     waiting: Vec<String>,
@@ -162,7 +163,11 @@ impl Link for Fake {
                 .unwrap_or("")
                 .to_string();
             i.log.push(format!("send:{op}:{name}"));
+            let earlier = i.sends.iter().filter(|s| s.0.ends_with(op)).count();
             i.sends.push((format!("{node}:{op}"), args.to_string()));
+            if i.fail_after == Some((op_name(op), earlier)) {
+                return Err(ApiError::new(ErrorCode::Failed, "the node is offline"));
+            }
             if i.fail_op == Some(op_name(op)) {
                 return Err(ApiError::new(ErrorCode::Failed, "the node is offline"));
             }
@@ -430,6 +435,31 @@ fn a_failed_send_revokes_what_the_job_already_has() {
     assert_eq!(sends.len(), 2);
     assert!(sends[1].0.ends_with(":grant.revoke"));
     assert!(!sends[1].1.contains("NL-MARKER"));
+    let revoked: Value = serde_json::from_str(&sends[1].1).unwrap();
+    assert_eq!(revoked["names"], json!(["api-key"]));
+}
+
+#[test]
+fn a_failed_second_send_revokes_the_names_of_this_call() {
+    let fake = Arc::new(Fake::default());
+    fake.expect("api-key", false);
+    fake.expect("db-pass", false);
+    fake.with(|i| i.fail_after = Some((GRANT_DELIVER, 1)));
+    let m = worker(&["api-key", "db-pass"]);
+    let job = job_on(&m, &["api-key", "db-pass"], JobState::Running);
+    live(&fake, &m, &job);
+    let r = broker(&fake).grant(
+        &job,
+        &facts(&m, true),
+        &names(&["api-key", "db-pass"]),
+        &who(),
+    );
+    assert_eq!(code(r), ErrorCode::Failed);
+    let sends = fake.with(|i| i.sends.clone());
+    assert_eq!(sends.len(), 3);
+    let revoked: Value = serde_json::from_str(&sends[2].1).unwrap();
+    assert_eq!(revoked["names"], json!(["api-key", "db-pass"]));
+    assert_eq!(revoked["job"], "j-1");
 }
 
 #[test]

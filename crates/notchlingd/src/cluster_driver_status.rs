@@ -1,13 +1,22 @@
 use super::{Driver, Reply};
 use crate::cluster_node::lock;
+use notchling_engine::cluster::core::GRANT_REVOKE_JOB;
 use notchling_engine::cluster::wire::{encode, Msg, WireError};
-use notchling_engine::cluster::NodeId;
+use notchling_engine::cluster::{Effect, NodeId};
 use notchling_events::kinds::security::ClusterStep;
 use notchling_events::spec::Outcome;
 use notchling_local_api::topics;
 use serde_json::{json, Value};
 
 impl Driver {
+    pub(super) fn revoke_unsaved(&mut self, runs: Vec<Effect>, rest: Vec<Effect>) -> Vec<Effect> {
+        let (revokes, others) = revocations(runs, rest);
+        for revoke in revokes {
+            self.effect(revoke);
+        }
+        others
+    }
+
     pub(super) fn tell(&mut self, topic: String, name: String, data: Value) {
         let msg = Msg::Event { topic, name, data };
         let Ok(line) = encode(&msg) else {
@@ -101,4 +110,17 @@ pub(super) fn answer(reply: Reply, result: Result<Value, WireError>) {
         }
         Reply::Load(_) => {}
     }
+}
+
+fn revocations(runs: Vec<Effect>, rest: Vec<Effect>) -> (Vec<Effect>, Vec<Effect>) {
+    let mut revokes = Vec::new();
+    let mut others = Vec::new();
+    for effect in runs.into_iter().chain(rest) {
+        match effect {
+            Effect::RunLocal { ref op, .. } if op == GRANT_REVOKE_JOB => revokes.push(effect),
+            Effect::RunLocal { .. } => {}
+            other => others.push(other),
+        }
+    }
+    (revokes, others)
 }
