@@ -1,5 +1,6 @@
 use crate::cluster_node::{JoinAsk, Submit};
 use crate::inbox_ops::{InboxOps, Responder};
+use notchling_engine::cluster::text::{self, NAME_MAX};
 use notchling_engine::cluster::LocalCmd;
 use notchling_engine::inbox::{Action, ActionId, Item, Kind, Source, State};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -7,7 +8,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 pub const JOIN_WAIT: Duration = Duration::from_secs(600);
-const NAME_MAX: usize = 64;
 
 fn now_ms() -> i64 {
     std::time::SystemTime::now()
@@ -17,12 +17,7 @@ fn now_ms() -> i64 {
 }
 
 fn plain(text: &str) -> String {
-    text.chars()
-        .filter(|c| !c.is_control())
-        .take(NAME_MAX)
-        .collect::<String>()
-        .trim()
-        .to_string()
+    text::plain(text, NAME_MAX)
 }
 
 pub fn join_item(id: &str, ask: &JoinAsk, created_ms: i64, wait: Duration) -> Item {

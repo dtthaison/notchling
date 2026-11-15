@@ -15,6 +15,7 @@ use super::jobs::JobSpec;
 use super::join::{JoinToken, Tokens};
 use super::members::{Desired, Member, MemberState, Term};
 use super::state::{role_of, Applied, Change, ClusterState, Command, CommandError, JournalEntry};
+use super::text::{plain, NAME_MAX};
 use super::versions::Versions;
 use super::wire::{Msg, Origin, OriginTier, WireError};
 
@@ -343,7 +344,7 @@ impl NodeCore {
                 };
                 json!({
                     "id": m.id,
-                    "name": m.name,
+                    "name": shown_name(&m.name, &m.id),
                     "role": role,
                     "canBeMaster": m.can_be_master,
                     "online": m.id == self.me || online.contains(&m.id),
@@ -383,7 +384,7 @@ impl NodeCore {
         json!({
             "cluster": {
                 "id": state.id,
-                "name": state.name,
+                "name": plain(&state.name, NAME_MAX),
                 "term": state.term,
                 "home": state.home,
                 "vault": state.vault,
@@ -499,7 +500,7 @@ impl NodeCore {
         self.state
             .as_ref()
             .and_then(|s| s.members.get(id))
-            .map(|m| m.name.clone())
+            .map(|m| shown_name(&m.name, &m.id))
             .unwrap_or_else(|| id.to_string())
     }
 
@@ -526,10 +527,30 @@ impl NodeCore {
     }
 }
 
+pub(super) fn shown_name(name: &str, id: &NodeId) -> String {
+    let shown = plain(name, NAME_MAX);
+    if shown.is_empty() {
+        return id.to_string();
+    }
+    shown
+}
+
+pub(super) fn shown_members(members: Vec<Member>) -> Vec<Member> {
+    members
+        .into_iter()
+        .map(|mut m| {
+            m.name = shown_name(&m.name, &m.id);
+            m
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod core_tests;
 #[cfg(test)]
 mod core_tests_adopt;
+#[cfg(test)]
+mod core_tests_clean;
 #[cfg(test)]
 mod core_tests_dispatch;
 #[cfg(test)]

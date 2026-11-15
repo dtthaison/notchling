@@ -6,6 +6,7 @@ use crate::cluster::jobs::{job_id, Job, JobSpec, JobState};
 use crate::cluster::members::MemberState;
 use crate::cluster::shell_job::{CODEX_LATER, SECRETS_LATER};
 use crate::cluster::state::Command;
+use crate::cluster::text;
 use crate::cluster::versions::{compat, Compat, Purpose, Versions};
 use crate::cluster::wire::{Origin, OriginTier, WireError};
 
@@ -233,7 +234,7 @@ impl NodeCore {
         let detail = data
             .get("detail")
             .and_then(Value::as_str)
-            .map(|d| d.chars().take(DETAIL_MAX).collect::<String>());
+            .map(|d| text::clean(d, DETAIL_MAX));
         let command = Command::JobState {
             id: job.to_string(),
             state,
@@ -262,7 +263,7 @@ impl NodeCore {
                     id: job,
                     state: JobState::Failed,
                     session: None,
-                    detail: Some(e.message.clone()),
+                    detail: Some(text::clean(&e.message, DETAIL_MAX)),
                 };
                 let _ = self.apply(command, out);
                 return Err(e);
@@ -273,7 +274,7 @@ impl NodeCore {
             .or_else(|| reply.get("id"))
             .or_else(|| reply.get("jobId"))
             .and_then(|s| s.as_str())
-            .map(str::to_string);
+            .map(|s| text::clean(s, SESSION_MAX));
         if current == Some(JobState::Dispatching) {
             let command = Command::JobState {
                 id: job.clone(),
@@ -335,6 +336,7 @@ impl NodeCore {
 }
 
 const DETAIL_MAX: usize = 200;
+const SESSION_MAX: usize = 200;
 
 fn job_reply(job: &Job, warning: Option<&str>) -> Value {
     json!({

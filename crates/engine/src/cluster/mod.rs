@@ -18,6 +18,7 @@ pub mod returns;
 pub mod shell_job;
 pub mod snapshot;
 pub mod state;
+pub mod text;
 pub mod versions;
 pub mod wire;
 pub mod workspace;
@@ -68,6 +69,8 @@ mod returns_tests;
 mod shell_job_tests;
 #[cfg(test)]
 mod state_tests;
+#[cfg(test)]
+mod text_tests;
 #[cfg(test)]
 mod versions_tests;
 #[cfg(test)]

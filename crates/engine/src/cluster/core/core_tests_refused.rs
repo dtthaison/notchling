@@ -204,14 +204,22 @@ fn a_reason_loses_its_bidi_and_zero_width_characters() {
 fn every_listed_format_character_is_replaced_and_its_neighbours_are_not() {
     let ranges = [
         (0xad, 0xad),
+        (0x34f, 0x34f),
         (0x61c, 0x61c),
+        (0x115f, 0x1160),
         (0x180e, 0x180e),
         (0x200b, 0x200f),
+        (0x2028, 0x2029),
         (0x202a, 0x202e),
         (0x2060, 0x2064),
         (0x2066, 0x206f),
+        (0x3164, 0x3164),
+        (0xfe00, 0xfe0f),
         (0xfeff, 0xfeff),
+        (0xffa0, 0xffa0),
         (0xfff9, 0xfffb),
+        (0xe0000, 0xe007f),
+        (0xe0100, 0xe01ef),
     ];
     let listed = |cp: u32| ranges.iter().any(|(lo, hi)| (*lo..=*hi).contains(&cp));
     for (lo, hi) in ranges {
@@ -223,7 +231,9 @@ fn every_listed_format_character_is_replaced_and_its_neighbours_are_not() {
             if listed(cp) {
                 continue;
             }
-            let c = char::from_u32(cp).expect("scalar");
+            let Some(c) = char::from_u32(cp) else {
+                continue;
+            };
             let text = format!("a{c}b");
             assert_eq!(clean_reason(&text), text, "{cp:x}");
         }

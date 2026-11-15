@@ -2,7 +2,8 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use super::{
-    Effect, Joining, LocalCmd, NodeCore, Target, Then, CALL_MS, DELEGATE_CALL_MS, VERSIONS_GAP_MS,
+    shown_members, Effect, Joining, LocalCmd, NodeCore, Target, Then, CALL_MS, DELEGATE_CALL_MS,
+    VERSIONS_GAP_MS,
 };
 use crate::cluster::failover::{armed_at_current, Failover};
 use crate::cluster::id::NodeId;
@@ -540,7 +541,7 @@ impl NodeCore {
                 term,
                 home,
                 vault: vault.unwrap_or(old_vault),
-                members,
+                members: shown_members(members),
             },
             out,
         );

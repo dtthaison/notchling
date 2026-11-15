@@ -290,6 +290,88 @@ fn an_unnamed_maker_shows_as_its_node_id() {
     );
 }
 
+fn ask_with(name: &str, os: &str, arch: &str, addr: &str, maker: &str) -> JoinAsk {
+    JoinAsk {
+        item: "node-join:0123456789abcdef".to_string(),
+        node: NodeId::parse("0123456789abcdef").unwrap(),
+        name: name.to_string(),
+        os: os.to_string(),
+        arch: arch.to_string(),
+        addr: Some(addr.to_string()),
+        can_be_master: false,
+        headless: false,
+        minter: NodeId::parse("fedcba9876543210").unwrap(),
+        minter_name: maker.to_string(),
+    }
+}
+
+const HIDDEN: [char; 17] = [
+    '\u{e0000}',
+    '\u{e0041}',
+    '\u{e007f}',
+    '\u{fe00}',
+    '\u{fe0f}',
+    '\u{e0100}',
+    '\u{e01ef}',
+    '\u{2028}',
+    '\u{2029}',
+    '\u{34f}',
+    '\u{115f}',
+    '\u{1160}',
+    '\u{3164}',
+    '\u{ffa0}',
+    '\u{200b}',
+    '\u{202e}',
+    '\u{feff}',
+];
+
+#[test]
+fn every_part_of_the_prompt_loses_the_characters_nobody_can_see() {
+    for hidden in HIDDEN {
+        let with = |text: &str| text.replace('#', &hidden.to_string());
+        let ask = ask_with(
+            &with("b#ox"),
+            &with("li#nux"),
+            &with("x8#6"),
+            &with("100.#64.0.9"),
+            &with("ma#ker"),
+        );
+        let item = join_item("x", &ask, 1_000, Duration::from_secs(600));
+        assert_eq!(
+            item.title, "Add box to the cluster",
+            "U+{:04X}",
+            hidden as u32
+        );
+        assert_eq!(
+            item.detail, "linux x86 · 100.64.0.9 · 0123456789abcdef · Token made by maker",
+            "U+{:04X}",
+            hidden as u32
+        );
+    }
+}
+
+#[test]
+fn a_name_or_maker_made_only_of_hidden_characters_shows_as_its_node_id() {
+    let blank: String = HIDDEN.iter().collect();
+    let ask = ask_with(&blank, "linux", "x86_64", "100.64.0.9", &blank);
+    let item = join_item("x", &ask, 1_000, Duration::from_secs(600));
+    assert_eq!(item.title, "Add 0123456789abcdef to the cluster");
+    assert!(
+        item.detail.ends_with("Token made by fedcba9876543210"),
+        "{}",
+        item.detail
+    );
+}
+
+#[test]
+fn a_long_prompt_text_is_cut_to_the_name_limit() {
+    let long = "z".repeat(10_000);
+    let ask = ask_with(&long, &long, &long, &long, &long);
+    let item = join_item("x", &ask, 1_000, Duration::from_secs(600));
+    assert_eq!(item.title, format!("Add {} to the cluster", "z".repeat(64)));
+    assert!(item.detail.len() < 600, "{}", item.detail.len());
+}
+
 fn item_for(h: &Home, who: &TestNode) -> Item {
     let prefix = format!("node-join:{}:", who.id());
     eventually("the join item", || {

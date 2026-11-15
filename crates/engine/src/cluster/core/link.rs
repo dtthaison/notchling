@@ -7,6 +7,7 @@ use super::{
 use crate::cluster::id::NodeId;
 use crate::cluster::members::{Member, MemberState, Term};
 use crate::cluster::state::Command;
+use crate::cluster::text;
 use crate::cluster::versions::{compat, Compat, Purpose, Versions};
 use crate::cluster::wire::{Msg, WireError};
 
@@ -443,25 +444,7 @@ impl NodeCore {
 }
 
 pub(super) fn clean_reason(text: &str) -> String {
-    text.chars()
-        .take(REASON_MAX)
-        .map(|c| if c.is_control() || unseen(c) { ' ' } else { c })
-        .collect()
-}
-
-fn unseen(c: char) -> bool {
-    matches!(
-        c,
-        '\u{ad}'
-            | '\u{61c}'
-            | '\u{180e}'
-            | '\u{200b}'..='\u{200f}'
-            | '\u{202a}'..='\u{202e}'
-            | '\u{2060}'..='\u{2064}'
-            | '\u{2066}'..='\u{206f}'
-            | '\u{feff}'
-            | '\u{fff9}'..='\u{fffb}'
-    )
+    text::clean(text, REASON_MAX)
 }
 
 fn would_dial(a: &Member, b: &NodeId, home: &NodeId) -> bool {

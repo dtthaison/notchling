@@ -1,11 +1,12 @@
 use serde_json::json;
 
-use super::{Effect, NodeCore, Target};
+use super::{shown_members, Effect, NodeCore, Target};
 use crate::cluster::failover::Failover;
 use crate::cluster::grants::SecretAllow;
 use crate::cluster::id::NodeId;
 use crate::cluster::members::{can_be_master_default, Desired, Member, MemberState, Term};
 use crate::cluster::state::Command;
+use crate::cluster::text::{plain, NAME_MAX};
 use crate::cluster::versions::{compat, Compat, Purpose, Versions};
 use crate::cluster::wire::{Msg, WireError};
 
@@ -142,6 +143,7 @@ impl NodeCore {
             }
             _ => {}
         }
+        let name = super::shown_name(&name, &from);
         let Some(minter) = self.tokens.take(&secret, self.wall_ms) else {
             self.refuse(&from, "bad token", true, out);
             return;
@@ -240,11 +242,11 @@ impl NodeCore {
         let applied = self.apply(
             Command::Sync {
                 id: cluster,
-                name,
+                name: plain(&name, NAME_MAX),
                 term,
                 home,
                 vault,
-                members,
+                members: shown_members(members),
             },
             out,
         );
