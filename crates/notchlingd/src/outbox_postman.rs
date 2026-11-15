@@ -15,6 +15,8 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 
 pub const TICK_MS: i64 = 1_000;
+const LAND_TRIES: u32 = 3;
+const LAND_BACKOFF_MS: u64 = 40;
 
 pub trait Verifier: Send + Sync {
     fn seen(&self, row: &Row) -> Option<Seen>;
@@ -309,12 +311,27 @@ fn finish(inner: &Arc<Inner>, session: &str, rx: &Receiver<Msg>) -> bool {
     true
 }
 
+enum Owed {
+    Sent(Row),
+    Moved(Move),
+}
+
+struct Move {
+    row: Row,
+    from: State,
+    to: State,
+    why: Option<Why>,
+    next_ms: Option<i64>,
+    then: Option<OutboxThen>,
+}
+
 pub(crate) struct Postman {
     inner: Arc<Inner>,
     session: String,
     attach_until: Option<i64>,
     gone_checked: Option<i64>,
     courier: Option<Arc<dyn Courier>>,
+    owed: Option<Owed>,
 }
 
 fn baseline(row: &Row) -> Seen {
@@ -333,6 +350,7 @@ impl Postman {
             attach_until: None,
             gone_checked: None,
             courier: None,
+            owed: None,
         }
     }
 
@@ -345,6 +363,11 @@ impl Postman {
             if !self.inner.acting.is_on() || self.inner.stopped() {
                 self.close_attach();
                 return Next::Done;
+            }
+            if let Some(owed) = self.owed.take() {
+                if !self.land(owed) {
+                    return self.rest(now, Some(now + TICK_MS));
+                }
             }
             let row = match self.inner.ops.store().head(&self.session) {
                 Ok(Some(row)) => row,
@@ -486,6 +509,16 @@ impl Postman {
             Ok(None) => return None,
             Err(_) => return Some(now + TICK_MS),
         };
+        if taken.kind != row.kind || taken.text != row.text {
+            let again = store.requeue(&taken.id, &[State::Sending], taken.clear_box, now);
+            return match again {
+                Ok(_) => {
+                    self.publish(&taken.id);
+                    None
+                }
+                Err(_) => Some(now + TICK_MS),
+            };
+        }
         self.inner.ops.publish_changed(&taken);
         let courier = self.courier();
         let verifies = courier.verifies();
@@ -505,26 +538,24 @@ impl Postman {
                 Verdict::Sent => self.sent(&taken),
                 Verdict::InQueue => {
                     let then = Some(OutboxThen::InQueue);
-                    self.moved(&taken, State::Sending, State::InQueue, None, None, then)
+                    self.moved(&taken, State::Sending, State::InQueue, None, None, then);
+                    false
                 }
                 Verdict::Pending => true,
                 Verdict::Unsure => {
                     let then = Some(OutboxThen::Unsure);
                     let why = Some(Why::NotFound);
-                    self.moved(&taken, State::Sending, State::Unsure, why, None, then);
-                    true
+                    self.moved(&taken, State::Sending, State::Unsure, why, None, then)
                 }
             },
             After::Unsure(why) => {
                 let then = Some(OutboxThen::Unsure);
-                self.moved(&taken, State::Sending, State::Unsure, Some(why), None, then);
-                true
+                self.moved(&taken, State::Sending, State::Unsure, Some(why), None, then)
             }
             After::Box(why) => {
                 self.inner.ops.set_note(&taken.id, note);
                 let then = Some(OutboxThen::Box);
-                self.moved(&taken, State::Sending, State::Box, Some(why), None, then);
-                true
+                self.moved(&taken, State::Sending, State::Box, Some(why), None, then)
             }
             After::Wait { why, next_ms } => {
                 if why == Why::Retry {
@@ -537,7 +568,8 @@ impl Postman {
                     Some(why),
                     next_ms,
                     None,
-                )
+                );
+                false
             }
         };
         if rested {
@@ -547,17 +579,12 @@ impl Postman {
         }
     }
 
-    fn sent(&self, row: &Row) -> bool {
-        let _ = self.inner.ops.store().delete(&row.id);
-        self.inner
-            .ops
-            .publish_removed(&row.id, &row.session, "sent");
-        self.inner.ops.emit_then(row, OutboxThen::Sent);
-        true
+    fn sent(&mut self, row: &Row) -> bool {
+        self.settle(Owed::Sent(row.clone()))
     }
 
     fn moved(
-        &self,
+        &mut self,
         row: &Row,
         from: State,
         to: State,
@@ -565,15 +592,72 @@ impl Postman {
         next_ms: Option<i64>,
         then: Option<OutboxThen>,
     ) -> bool {
-        let now = (self.inner.clock)();
-        let store = self.inner.ops.store();
-        if let Ok(true) = store.set_state(&row.id, &[from], to, why, next_ms, now) {
-            self.publish(&row.id);
-            if let Some(then) = then {
-                self.inner.ops.emit_then(row, then);
+        self.settle(Owed::Moved(Move {
+            row: row.clone(),
+            from,
+            to,
+            why,
+            next_ms,
+            then,
+        }))
+    }
+
+    fn settle(&mut self, owed: Owed) -> bool {
+        for attempt in 0..LAND_TRIES {
+            if attempt > 0 {
+                std::thread::sleep(Duration::from_millis(LAND_BACKOFF_MS * u64::from(attempt)));
+            }
+            if self.try_land(&owed) {
+                return true;
             }
         }
+        self.owed = Some(owed);
         false
+    }
+
+    fn land(&mut self, owed: Owed) -> bool {
+        if self.try_land(&owed) {
+            return true;
+        }
+        self.owed = Some(owed);
+        false
+    }
+
+    fn try_land(&self, owed: &Owed) -> bool {
+        match owed {
+            Owed::Sent(row) => {
+                if self.inner.ops.store().delete(&row.id).is_err() {
+                    return false;
+                }
+                self.inner
+                    .ops
+                    .publish_removed(&row.id, &row.session, "sent");
+                self.inner.ops.emit_then(row, OutboxThen::Sent);
+                true
+            }
+            Owed::Moved(step) => {
+                let now = (self.inner.clock)();
+                let store = self.inner.ops.store();
+                let landed = store.set_state(
+                    &step.row.id,
+                    &[step.from],
+                    step.to,
+                    step.why,
+                    step.next_ms,
+                    now,
+                );
+                let Ok(changed) = landed else {
+                    return false;
+                };
+                if changed {
+                    self.publish(&step.row.id);
+                    if let Some(then) = step.then {
+                        self.inner.ops.emit_then(&step.row, then);
+                    }
+                }
+                true
+            }
+        }
     }
 
     fn publish(&self, id: &str) {

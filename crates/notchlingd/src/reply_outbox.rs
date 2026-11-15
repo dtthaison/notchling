@@ -10,6 +10,8 @@ use notchling_local_api::{ApiError, Caller, ErrorCode, Tier};
 use serde_json::{json, Value};
 
 const SAVE_FAILED: &str = "Couldn't save the message.";
+const MAY_BE_IN: &str =
+    "It may already be in the session. Check the session before sending it again.";
 
 fn failed(message: impl Into<String>) -> ApiError {
     ApiError::new(ErrorCode::Failed, message)
@@ -43,6 +45,7 @@ fn refusal(row: &Row, note: Option<String>) -> ApiError {
         }
         State::Stopped => failed("The session is stopped."),
         State::Gone => failed("No such session."),
+        State::Unsure => failed(MAY_BE_IN),
         _ => failed(Failure::NotSent.to_string()),
     }
 }

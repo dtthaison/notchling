@@ -326,7 +326,7 @@ impl Courier for ClaudeCourier {
             .and_then(|path| self.files.queue(path))
             .unwrap_or_default();
         let safe = self.safe.is_safe(&row.session, &queue);
-        let reading = (row.kind == Kind::Command || safe).then(|| {
+        let reading = (row.kind == Kind::Command || safe || !queue.waiting.is_empty()).then(|| {
             fresh
                 .as_ref()
                 .is_some_and(|agent| calm(self.files.as_ref(), agent, now_ms))

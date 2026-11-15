@@ -1,7 +1,7 @@
 use super::*;
 use crate::outbox_courier::Courier;
 use crate::outbox_testkit::{rig, rig_with, Options, Rig, BUSY, DIALOG, DRAFT, IDLE, NO_BOX, T0};
-use notchling_engine::outbox::{Facts, Tried, TryEnd};
+use notchling_engine::outbox::{Facts, Kind, Tried, TryEnd};
 use notchling_engine::transcript::queue_state::QueueState;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
@@ -630,4 +630,110 @@ fn a_verdict_cut_short_by_stop_leaves_the_row_sending() {
     let row = r.send("job-idle", "hi");
     r.postmen.postman(IDLE).pass(r.at(T0));
     assert_eq!(state(&r, &row.id), Some((State::Sending, None)));
+}
+
+struct Editing {
+    asked: AtomicUsize,
+    before: Mutex<Option<Box<dyn FnOnce() + Send>>>,
+}
+
+impl Courier for Editing {
+    fn facts(&self, _row: &Row, now_ms: i64) -> Facts {
+        let hook = self.before.lock().unwrap().take();
+        if let Some(hook) = hook {
+            hook();
+        }
+        Facts {
+            now_ms,
+            job: Job::Live {
+                status: Some("busy".into()),
+            },
+            dialog_on_screen: false,
+            queue_waiting: 0,
+            safe: false,
+            turn_over_since_ms: None,
+        }
+    }
+    fn deliver(&self, _row: &Row, _guarded: bool) -> (TryEnd, Tried, Option<String>) {
+        self.asked.fetch_add(1, Ordering::SeqCst);
+        let tried = Tried {
+            pasted: true,
+            entered: true,
+        };
+        (TryEnd::Ok, tried, None)
+    }
+    fn close(&self, _session: &str) {}
+    fn verifies(&self) -> bool {
+        false
+    }
+}
+
+#[test]
+fn an_edit_between_gate_and_take_is_gated_again() {
+    let courier = Arc::new(Editing {
+        asked: AtomicUsize::new(0),
+        before: Mutex::new(None),
+    });
+    let r = rig_with(Options {
+        courier: Some(courier.clone()),
+        ..Options::default()
+    });
+    let row = r.send("job-a", "hi");
+    let (ops, id) = (r.ops.clone(), row.id.clone());
+    *courier.before.lock().unwrap() = Some(Box::new(move || {
+        ops.store().edit(&id, "/compact", T0).unwrap();
+    }));
+    let mut p = r.postmen.postman(BUSY);
+    p.pass(r.at(T0));
+    assert_eq!(courier.asked.load(Ordering::SeqCst), 0, "nothing typed");
+    let now = r.row(&row.id).unwrap();
+    assert_eq!((now.text.as_str(), now.kind), ("/compact", Kind::Command));
+    assert_eq!((now.state, now.why), (State::Waiting, Some(Why::Turn)));
+    assert_eq!(r.returns(), 0);
+}
+
+const NO_DELETE: &str = "CREATE TRIGGER no_delete BEFORE DELETE ON outbox \
+    BEGIN SELECT RAISE(ABORT, 'database is locked'); END;";
+const NO_UNSURE: &str = "CREATE TRIGGER no_unsure BEFORE UPDATE ON outbox \
+    WHEN NEW.state = 'unsure' BEGIN SELECT RAISE(ABORT, 'database is locked'); END;";
+
+#[test]
+fn a_failed_delete_after_delivery_is_retried_not_dropped() {
+    let r = rig();
+    let row = r.send("job-idle", "hi");
+    r.ops.store().run_sql_for_tests(NO_DELETE);
+    let mut p = r.postmen.postman(IDLE);
+    let next = p.pass(r.at(T0));
+    assert!(matches!(next, Next::At(_)), "keeps ticking: {next:?}");
+    assert_eq!(r.returns(), 1);
+    assert_eq!(state(&r, &row.id), Some((State::Sending, None)));
+    assert!(r.room.named("outbox.removed").is_empty(), "not told");
+    assert!(matches!(p.pass(r.at(T0 + TICK_MS)), Next::At(_)));
+    assert!(r.room.named("outbox.removed").is_empty());
+    r.ops.store().run_sql_for_tests("DROP TRIGGER no_delete;");
+    p.pass(r.at(T0 + 2 * TICK_MS));
+    assert_eq!(r.row(&row.id), None);
+    let gone = r.room.named("outbox.removed");
+    assert_eq!(gone.len(), 1);
+    assert_eq!(gone[0]["why"], "sent");
+    assert_eq!(r.returns(), 1, "typed once");
+}
+
+#[test]
+fn a_failed_state_change_after_delivery_is_retried() {
+    let r = rig();
+    r.verifier.waits.lock().unwrap().push_back(Verdict::Unsure);
+    let row = r.send("job-idle", "hi");
+    r.ops.store().run_sql_for_tests(NO_UNSURE);
+    let mut p = r.postmen.postman(IDLE);
+    let next = p.pass(r.at(T0));
+    assert!(matches!(next, Next::At(_)), "keeps ticking: {next:?}");
+    assert_eq!(state(&r, &row.id), Some((State::Sending, None)));
+    r.ops.store().run_sql_for_tests("DROP TRIGGER no_unsure;");
+    p.pass(r.at(T0 + TICK_MS));
+    assert_eq!(
+        state(&r, &row.id),
+        Some((State::Unsure, Some(Why::NotFound)))
+    );
+    assert_eq!(r.returns(), 1, "typed once");
 }

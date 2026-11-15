@@ -137,7 +137,24 @@ fn reply_unsure_error_removes_row() {
     r.threaded();
     let err = reply(&r, "maybe in").unwrap_err();
     assert_eq!(err.code, ErrorCode::Failed);
-    assert_eq!(err.message, Failure::NotSent.to_string());
+    assert!(rows(&r).is_empty());
+    r.postmen.stop();
+}
+
+#[test]
+fn an_unsure_reply_says_it_may_already_be_in() {
+    let r = rig();
+    r.verifier.waits.lock().unwrap().push_back(Verdict::Unsure);
+    r.threaded();
+    let err = reply(&r, "maybe in").unwrap_err();
+    assert_eq!(err.code, ErrorCode::Failed);
+    assert_eq!(
+        err.message,
+        "It may already be in the session. Check the session before sending it again."
+    );
+    assert_ne!(err.message, Failure::NotSent.to_string());
+    assert!(!err.message.contains("wasn't sent"));
+    assert!(err.data.is_none());
     assert!(rows(&r).is_empty());
     r.postmen.stop();
 }

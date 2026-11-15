@@ -1,4 +1,6 @@
-use super::{Kind, Row, State, Why, DIALOG_RECHECK_MS, GONE_AFTER_MS, TURN_SETTLE_MS};
+use super::{
+    Kind, Row, State, Why, DIALOG_RECHECK_MS, GONE_AFTER_MS, QUEUE_STALE_MS, TURN_SETTLE_MS,
+};
 
 const RECHECK_MS: i64 = 1_000;
 
@@ -57,12 +59,22 @@ pub fn gate(row: &Row, facts: &Facts) -> Gate {
         return safe_rule(facts);
     }
     if facts.queue_waiting > 0 {
+        if queue_is_stale(status, facts) {
+            return Gate::Go { guarded: true };
+        }
         return Gate::Wait {
             why: Why::Queue,
             until_ms: now + RECHECK_MS,
         };
     }
     Gate::Go { guarded: false }
+}
+
+fn queue_is_stale(status: Option<&str>, facts: &Facts) -> bool {
+    matches!(status, Some("idle" | "shell"))
+        && facts
+            .turn_over_since_ms
+            .is_some_and(|since| facts.now_ms - since >= QUEUE_STALE_MS)
 }
 
 fn safe_rule(facts: &Facts) -> Gate {

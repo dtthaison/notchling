@@ -157,6 +157,70 @@ fn queue_entry_waits() {
     );
 }
 
+fn idle_with_queue(now_ms: i64, over_for_ms: Option<i64>, status: &str) -> Facts {
+    let mut f = facts(now_ms);
+    f.job = Job::Live {
+        status: Some(status.into()),
+    };
+    f.queue_waiting = 1;
+    f.turn_over_since_ms = over_for_ms.map(|ms| now_ms - ms);
+    f
+}
+
+#[test]
+fn stale_queue_entries_on_an_idle_job_go_guarded() {
+    for status in ["idle", "shell"] {
+        assert_eq!(
+            gate(
+                &row(Kind::Prompt),
+                &idle_with_queue(50_000, Some(QUEUE_STALE_MS), status)
+            ),
+            Gate::Go { guarded: true }
+        );
+        assert_eq!(
+            gate(
+                &row(Kind::Prompt),
+                &idle_with_queue(50_000, Some(QUEUE_STALE_MS * 6), status)
+            ),
+            Gate::Go { guarded: true }
+        );
+    }
+}
+
+#[test]
+fn queue_entries_while_working_still_wait() {
+    let wait = Gate::Wait {
+        why: Why::Queue,
+        until_ms: 51_000,
+    };
+    for status in [Some("busy"), None] {
+        let mut f = idle_with_queue(50_000, Some(60_000), "busy");
+        f.job = Job::Live {
+            status: status.map(String::from),
+        };
+        assert_eq!(gate(&row(Kind::Prompt), &f), wait);
+    }
+}
+
+#[test]
+fn queue_entries_right_after_a_turn_still_wait() {
+    let wait = Gate::Wait {
+        why: Why::Queue,
+        until_ms: 51_000,
+    };
+    assert_eq!(
+        gate(
+            &row(Kind::Prompt),
+            &idle_with_queue(50_000, Some(QUEUE_STALE_MS - 1), "idle")
+        ),
+        wait
+    );
+    assert_eq!(
+        gate(&row(Kind::Prompt), &idle_with_queue(50_000, None, "idle")),
+        wait
+    );
+}
+
 #[test]
 fn idle_or_busy_session_goes_at_once() {
     assert_eq!(

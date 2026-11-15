@@ -10,6 +10,7 @@ pub const VERIFY_WATCH_MS: i64 = 10_000;
 pub const VERIFY_LOOK_MS: i64 = 30_000;
 pub const ATTACH_IDLE_MS: i64 = 10_000;
 pub const TURN_SETTLE_MS: i64 = 3_000;
+pub const QUEUE_STALE_MS: i64 = 10_000;
 pub const GONE_AFTER_MS: i64 = 60_000;
 pub const GONE_RECHECK_MS: i64 = 10_000;
 pub const DIALOG_RECHECK_MS: i64 = 30_000;

@@ -113,6 +113,10 @@ impl OutboxStore {
         OutboxStore { db: Mutex::new(db) }
     }
 
+    pub fn run_sql_for_tests(&self, sql: &str) {
+        self.lock().execute_batch(sql).expect("test sql");
+    }
+
     pub(super) fn lock(&self) -> MutexGuard<'_, Connection> {
         self.db.lock().unwrap_or_else(|e| e.into_inner())
     }

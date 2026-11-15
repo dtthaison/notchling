@@ -97,9 +97,23 @@ impl RemoteOutbox {
     }
 
     pub fn clear(&self) {
-        let mut book = lock(&self.book);
-        book.nodes.clear();
-        book.dirty.clear();
+        let dropped = {
+            let mut book = lock(&self.book);
+            book.dirty.clear();
+            std::mem::take(&mut book.nodes)
+        };
+        self.say_removed(dropped.into_values().flat_map(|remote| remote.rows));
+    }
+
+    fn say_removed(&self, rows: impl IntoIterator<Item = (String, Value)>) {
+        for (id, row) in rows {
+            let session = text(&row, "session").unwrap_or_default();
+            self.room.publish(
+                topics::OUTBOX,
+                topics::OUTBOX_REMOVED,
+                &removal(&id, session, "removed"),
+            );
+        }
     }
 
     pub fn nudge(&self) {
@@ -162,9 +176,19 @@ impl RemoteOutbox {
             self.clear();
             return;
         }
-        let wanted: Vec<(NodeId, u64)> = {
+        let (left, wanted): (Vec<Known>, Vec<(NodeId, u64)>) = {
             let mut book = lock(&self.book);
-            book.nodes.retain(|id, _| peers.iter().any(|p| p.id == *id));
+            let left: Vec<NodeId> = book
+                .nodes
+                .keys()
+                .filter(|id| !peers.iter().any(|p| p.id == **id))
+                .cloned()
+                .collect();
+            let left: Vec<Known> = left
+                .iter()
+                .filter_map(|id| book.nodes.remove(id))
+                .map(|remote| remote.rows)
+                .collect();
             let dirty = std::mem::take(&mut book.dirty);
             let mut wanted = Vec::new();
             for peer in peers {
@@ -178,8 +202,9 @@ impl RemoteOutbox {
                     wanted.push((peer.id.clone(), remote.heard));
                 }
             }
-            wanted
+            (left, wanted)
         };
+        self.say_removed(left.into_iter().flatten());
         for (id, heard) in wanted {
             let answer = source
                 .list(&id)

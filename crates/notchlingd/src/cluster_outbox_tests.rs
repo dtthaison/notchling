@@ -189,6 +189,44 @@ fn a_node_that_may_not_follow_pulls_and_publishes_nothing() {
     assert!(room.events.lock().unwrap().is_empty());
 }
 
+fn gone(id: &str) -> Value {
+    json!({"id": id, "session": format!("{}/ab12cd34", owner()), "why": "removed"})
+}
+
+#[test]
+fn a_peer_that_leaves_has_its_rows_removed() {
+    let room = following_room();
+    let remote = follower(&room);
+    let source = Rows::new(vec![row("o1", "queued"), row("o2", "waiting")]);
+    remote.sync(&peer(true), &source, 0);
+    assert!(room.named("outbox.removed").is_empty());
+    remote.sync(&[], &source, 1);
+    assert_eq!(room.named("outbox.removed"), vec![gone("o1"), gone("o2")]);
+    assert!(remote.rows(None).is_empty());
+    remote.sync(&[], &source, 2);
+    assert_eq!(room.named("outbox.removed").len(), 2, "said once");
+}
+
+#[test]
+fn rows_are_removed_when_this_node_stops_following() {
+    let room = following_room();
+    let remote = follower(&room);
+    let source = Rows::new(vec![row("o1", "queued"), row("o2", "waiting")]);
+    remote.sync(&peer(true), &source, 0);
+    room.following.lock().unwrap().clear();
+    remote.sync(&peer(true), &source, 1);
+    assert_eq!(room.named("outbox.removed"), vec![gone("o1"), gone("o2")]);
+    remote.sync(&peer(true), &source, 2);
+    assert_eq!(room.named("outbox.removed").len(), 2, "said once");
+    room.following.lock().unwrap().push("outbox".into());
+    remote.sync(&peer(true), &source, 3);
+    assert_eq!(
+        room.named("outbox.changed").len(),
+        4,
+        "the next follow starts from a full list"
+    );
+}
+
 #[test]
 fn an_offline_or_unknown_peer_is_not_asked() {
     let room = following_room();

@@ -1,6 +1,6 @@
 use super::*;
 use crate::outbox_testkit::{rig, rig_with, Options, Rig, BUSY, IDLE, T0};
-use notchling_engine::outbox::{gate, Gate, State, Why, TURN_SETTLE_MS};
+use notchling_engine::outbox::{gate, Gate, State, Why, QUEUE_STALE_MS, TURN_SETTLE_MS};
 use notchling_engine::reply::keys::timing::{ATTACH_QUIET_MS, KEY_PAUSE_MS};
 use std::sync::atomic::Ordering;
 
@@ -71,6 +71,64 @@ fn an_unknown_queue_line_makes_the_session_safe() {
     ));
     let settled = r.courier.facts(&row, T0 + TURN_SETTLE_MS);
     assert_eq!(gate(&row, &settled), Gate::Go { guarded: true });
+}
+
+#[test]
+fn a_listed_queue_entry_counts_the_calm_from_the_first_look() {
+    let r = rig();
+    *r.files.queue.lock().unwrap() = Some(QueueState {
+        waiting: vec!["lost".into()],
+        unknown: 0,
+    });
+    let row = r.send("job-idle", "hi");
+    let first = r.courier.facts(&row, T0);
+    assert_eq!(first.queue_waiting, 1);
+    assert!(!first.safe);
+    assert_eq!(first.turn_over_since_ms, Some(T0));
+    assert!(matches!(
+        gate(&row, &first),
+        Gate::Wait {
+            why: Why::Queue,
+            ..
+        }
+    ));
+    let early = r.courier.facts(&row, T0 + QUEUE_STALE_MS - 1);
+    assert!(matches!(
+        gate(&row, &early),
+        Gate::Wait {
+            why: Why::Queue,
+            ..
+        }
+    ));
+    let stale = r.courier.facts(&row, T0 + QUEUE_STALE_MS);
+    assert_eq!(gate(&row, &stale), Gate::Go { guarded: true });
+}
+
+#[test]
+fn a_turn_in_between_restarts_the_queue_count() {
+    let r = rig();
+    *r.files.queue.lock().unwrap() = Some(QueueState {
+        waiting: vec!["lost".into()],
+        unknown: 0,
+    });
+    let row = r.send("job-a", "hi");
+    let mut agent = r.files.rows.lock().unwrap()[BUSY].clone();
+    agent.at_prompt = true;
+    r.files.put(BUSY, agent);
+    r.files.set_status(BUSY, "idle");
+    assert_eq!(r.courier.facts(&row, T0).turn_over_since_ms, Some(T0));
+    r.files.restarted.store(true, Ordering::SeqCst);
+    assert_eq!(r.courier.facts(&row, T0 + 6_000).turn_over_since_ms, None);
+    r.files.restarted.store(false, Ordering::SeqCst);
+    let again = r.courier.facts(&row, T0 + QUEUE_STALE_MS);
+    assert_eq!(again.turn_over_since_ms, Some(T0 + QUEUE_STALE_MS));
+    assert!(matches!(
+        gate(&row, &again),
+        Gate::Wait {
+            why: Why::Queue,
+            ..
+        }
+    ));
 }
 
 #[test]
