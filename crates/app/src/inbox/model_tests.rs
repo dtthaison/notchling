@@ -122,6 +122,24 @@ fn a_done_row_says_what_was_decided_and_where() {
 }
 
 #[test]
+fn inbox_answered_words_for_send_and_discard() {
+    for (answer, by, said) in [
+        ("send", json!("mac"), "Sent · Mac"),
+        ("discard", json!("phone"), "Discarded · Phone"),
+        ("send", Value::Null, "Sent"),
+        ("discard", Value::Null, "Discarded"),
+    ] {
+        let mut model = InboxModel::default();
+        let mut done = item("a", 1_000, "answered", true);
+        done["answer"] = json!(answer);
+        done["answered_by"] = by;
+        done["detail"] = json!("");
+        model.apply(&changed(done));
+        assert_eq!(model.sections().1[0].result.as_deref(), Some(said));
+    }
+}
+
+#[test]
 fn expired_row_says_expired() {
     let mut model = InboxModel::default();
     model.apply(&changed(item("a", 1_000, "expired", true)));

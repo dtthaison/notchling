@@ -137,6 +137,15 @@ pub fn bubble(row: &OutboxRow) -> Bubble {
     }
 }
 
+pub fn head_needs_you(rows: &[OutboxRow]) -> bool {
+    rows.first().is_some_and(|head| {
+        matches!(
+            head.state,
+            State::Unsure | State::Box | State::Stopped | State::Gone
+        )
+    })
+}
+
 pub fn hidden_queued(queued: &[String], rows: &[OutboxRow]) -> Option<usize> {
     let held = rows.iter().find(|r| r.state == State::InQueue)?;
     let wanted = squeeze(&held.text);
@@ -196,6 +205,10 @@ impl OutboxFeed {
 
     pub fn rows_for(&self, agent: &Agent) -> &[OutboxRow] {
         self.rows(&agent.outbox_key())
+    }
+
+    pub fn needs_you(&self, agent: &Agent) -> bool {
+        head_needs_you(self.rows_for(agent))
     }
 
     pub fn bubbles_for(&self, agent: &Agent) -> Vec<Bubble> {

@@ -434,3 +434,69 @@ fn the_settings_switches_set_the_width_the_peek_text_and_fold_a_hidden_notch() {
         "a hidden notch comes back closed"
     );
 }
+
+fn wire_row(id: &str, session: &str, state: &str) -> serde_json::Value {
+    serde_json::json!({
+        "id": id, "session": session, "tool": "claude", "kind": "prompt", "text": "hello",
+        "state": state, "position": 1, "queuedMs": 10_000, "updatedMs": 10_000, "via": "chat",
+    })
+}
+
+fn needing(group: AgentGroup, states: &[&str]) -> (NotchModel, Agent) {
+    let agent = agent("a", group);
+    let mut feed = OutboxFeed::default();
+    let rows: Vec<_> = states
+        .iter()
+        .enumerate()
+        .map(|(i, state)| wire_row(&format!("r{i}"), "job-a", state))
+        .collect();
+    feed.seed(&rows);
+    let mut m = model(vec![agent.clone()]);
+    m.set_message_needs(&feed);
+    (m, agent)
+}
+
+#[test]
+fn needs_you_only_for_user_states() {
+    for (state, needs) in [
+        ("unsure", true),
+        ("box", true),
+        ("stopped", true),
+        ("gone", true),
+        ("queued", false),
+        ("waiting", false),
+        ("sending", false),
+        ("in_queue", false),
+    ] {
+        let (m, agent) = needing(AgentGroup::Working, &[state]);
+        assert_eq!(m.message_needs_you(&agent), needs, "{state}");
+        let line = m.status_line(&agent);
+        assert_eq!(line == t::notch::message_needs_you(), needs, "{state}");
+    }
+}
+
+#[test]
+fn only_the_head_of_the_outbox_decides() {
+    let (m, a) = needing(AgentGroup::Working, &["queued", "unsure"]);
+    assert!(!m.message_needs_you(&a));
+    let (m, a) = needing(AgentGroup::Working, &["unsure", "queued"]);
+    assert!(m.message_needs_you(&a));
+    let (m, a) = needing(AgentGroup::Working, &[]);
+    assert!(!m.message_needs_you(&a));
+}
+
+#[test]
+fn a_question_or_permission_keeps_the_line() {
+    let (mut m, a) = needing(AgentGroup::NeedsInput, &["unsure"]);
+    m.requests.insert("a".into(), permission("a"));
+    assert!(m.status_line(&a).starts_with("Wants to use"));
+}
+
+#[test]
+fn message_hint_is_drawn_and_leaves_the_row_alone() {
+    let (m, agent) = needing(AgentGroup::Working, &["unsure"]);
+    let (quiet, _) = needing(AgentGroup::Working, &[]);
+    assert_ne!(m.drawn(), quiet.drawn());
+    assert_eq!(m.row_height(&agent), quiet.row_height(&agent));
+    assert_eq!(m.agent("a").map(|a| a.group), Some(AgentGroup::Working));
+}

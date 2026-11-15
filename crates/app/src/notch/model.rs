@@ -5,6 +5,8 @@ use notchling_engine::transcript::snapshot::{PendingQuestion, QuestionItem, Snap
 use notchling_kit::Status;
 use notchling_locale as t;
 
+use crate::chat::outbox::OutboxFeed;
+
 use super::layout::{
     collapsed_size, detail_size, list_size, peek_size, permission_height, question_height,
     row_height, NotchState, NotchWidth, PeekContent, Size, DEFAULT_NOTCH,
@@ -65,6 +67,7 @@ pub struct NotchModel {
     pub card_height: Option<f64>,
     pub answered: HashSet<String>,
     pub inbox_unread: usize,
+    pub message_needs: HashSet<String>,
     hovering: bool,
     pending: Option<Pending>,
     last_groups: Option<HashMap<String, AgentGroup>>,
@@ -87,6 +90,7 @@ impl Default for NotchModel {
             card_height: None,
             answered: HashSet::new(),
             inbox_unread: 0,
+            message_needs: HashSet::new(),
             hovering: false,
             pending: None,
             last_groups: None,
@@ -174,6 +178,19 @@ impl NotchModel {
             .or_else(|| agent.detail.clone())
     }
 
+    pub fn set_message_needs(&mut self, feed: &OutboxFeed) {
+        self.message_needs = self
+            .agents
+            .iter()
+            .filter(|a| feed.needs_you(a))
+            .map(|a| a.id.clone())
+            .collect();
+    }
+
+    pub fn message_needs_you(&self, agent: &Agent) -> bool {
+        self.message_needs.contains(&agent.id)
+    }
+
     pub fn status_line(&self, agent: &Agent) -> String {
         if let Some(r) = self.permission(&agent.id) {
             return t::notch::wants_to_use(&r.tool_name, &r.summary);
@@ -183,6 +200,9 @@ impl NotchModel {
             .and_then(|q| q.items.into_iter().next())
         {
             return t::notch::asks(&first.question);
+        }
+        if self.message_needs_you(agent) {
+            return t::notch::message_needs_you().to_owned();
         }
         let snapshot = self.snapshot(&agent.id);
         if agent.group == AgentGroup::NeedsInput {

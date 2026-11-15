@@ -18,6 +18,7 @@ pub struct Drawn {
     answered: Vec<String>,
     card_height: Option<f64>,
     inbox_unread: usize,
+    message_needs: Vec<String>,
     ages: Vec<String>,
 }
 
@@ -37,6 +38,8 @@ impl NotchModel {
         requests.sort_by(|a, b| a.0.cmp(&b.0));
         let mut answered: Vec<_> = self.answered.iter().cloned().collect();
         answered.sort();
+        let mut message_needs: Vec<_> = self.message_needs.iter().cloned().collect();
+        message_needs.sort();
         Drawn {
             agents: self.agents.clone(),
             snapshots,
@@ -50,6 +53,7 @@ impl NotchModel {
             answered,
             card_height: self.card_height,
             inbox_unread: self.inbox_unread,
+            message_needs,
             ages: self
                 .agents
                 .iter()

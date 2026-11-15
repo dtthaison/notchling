@@ -2489,1289 +2489,1295 @@ pub mod notch {
         HOST_BACKGROUND.get()
     }
 
-    pub const NEEDS_INPUT: Text = Text(450);
+    pub const MESSAGE_NEEDS_YOU: Text = Text(450);
+
+    pub fn message_needs_you() -> &'static str {
+        MESSAGE_NEEDS_YOU.get()
+    }
+
+    pub const NEEDS_INPUT: Text = Text(451);
 
     pub fn needs_input() -> &'static str {
         NEEDS_INPUT.get()
     }
 
-    pub const NEXT: Text = Text(451);
+    pub const NEXT: Text = Text(452);
 
     pub fn next() -> &'static str {
         NEXT.get()
     }
 
-    pub const NO_MESSAGES: Text = Text(452);
+    pub const NO_MESSAGES: Text = Text(453);
 
     pub fn no_messages() -> &'static str {
         NO_MESSAGES.get()
     }
 
-    pub const OPEN: Text = Text(453);
+    pub const OPEN: Text = Text(454);
 
     pub fn open() -> &'static str {
         OPEN.get()
     }
 
-    pub const PICK_ANY: Text = Text(454);
+    pub const PICK_ANY: Text = Text(455);
 
     pub fn pick_any() -> &'static str {
         PICK_ANY.get()
     }
 
     pub fn question_step(n: impl Into<Num>, total: impl Into<Num>) -> String {
-        crate::format(Text(455), &[Arg::Num(n.into()), Arg::Num(total.into())])
+        crate::format(Text(456), &[Arg::Num(n.into()), Arg::Num(total.into())])
     }
 
     pub fn question_tab(n: impl Into<Num>) -> String {
-        crate::format(Text(456), &[Arg::Num(n.into())])
+        crate::format(Text(457), &[Arg::Num(n.into())])
     }
 
-    pub const READ_ONLY: Text = Text(457);
+    pub const READ_ONLY: Text = Text(458);
 
     pub fn read_only() -> &'static str {
         READ_ONLY.get()
     }
 
     pub fn row_host(host: &str, age: &str) -> String {
-        crate::format(Text(458), &[Arg::Str(host), Arg::Str(age)])
+        crate::format(Text(459), &[Arg::Str(host), Arg::Str(age)])
     }
 
-    pub const SUBMIT: Text = Text(459);
+    pub const SUBMIT: Text = Text(460);
 
     pub fn submit() -> &'static str {
         SUBMIT.get()
     }
 
-    pub const TAB_DONE: Text = Text(460);
+    pub const TAB_DONE: Text = Text(461);
 
     pub fn tab_done() -> &'static str {
         TAB_DONE.get()
     }
 
-    pub const TAB_INPUT: Text = Text(461);
+    pub const TAB_INPUT: Text = Text(462);
 
     pub fn tab_input() -> &'static str {
         TAB_INPUT.get()
     }
 
-    pub const TAB_WORKING: Text = Text(462);
+    pub const TAB_WORKING: Text = Text(463);
 
     pub fn tab_working() -> &'static str {
         TAB_WORKING.get()
     }
 
-    pub const THINKING: Text = Text(463);
+    pub const THINKING: Text = Text(464);
 
     pub fn thinking() -> &'static str {
         THINKING.get()
     }
 
-    pub const TYPE_ELSE: Text = Text(464);
+    pub const TYPE_ELSE: Text = Text(465);
 
     pub fn type_else() -> &'static str {
         TYPE_ELSE.get()
     }
 
     pub fn wants_to_use(tool: &str, summary: &str) -> String {
-        crate::format(Text(465), &[Arg::Str(tool), Arg::Str(summary)])
+        crate::format(Text(466), &[Arg::Str(tool), Arg::Str(summary)])
     }
 
     pub fn you(prompt: &str) -> String {
-        crate::format(Text(466), &[Arg::Str(prompt)])
+        crate::format(Text(467), &[Arg::Str(prompt)])
     }
 }
 
 pub mod settings {
     use crate::{Arg, Num, Text};
 
-    pub const ACT_ON_SESSIONS: Text = Text(467);
+    pub const ACT_ON_SESSIONS: Text = Text(468);
 
     pub fn act_on_sessions() -> &'static str {
         ACT_ON_SESSIONS.get()
     }
 
-    pub const ACTIVITY_CHECK_BUTTON: Text = Text(468);
+    pub const ACTIVITY_CHECK_BUTTON: Text = Text(469);
 
     pub fn activity_check_button() -> &'static str {
         ACTIVITY_CHECK_BUTTON.get()
     }
 
-    pub const ACTIVITY_CHECK_DIFFERS: Text = Text(469);
+    pub const ACTIVITY_CHECK_DIFFERS: Text = Text(470);
 
     pub fn activity_check_differs() -> &'static str {
         ACTIVITY_CHECK_DIFFERS.get()
     }
 
-    pub const ACTIVITY_CHECK_GONE: Text = Text(470);
+    pub const ACTIVITY_CHECK_GONE: Text = Text(471);
 
     pub fn activity_check_gone() -> &'static str {
         ACTIVITY_CHECK_GONE.get()
     }
 
-    pub const ACTIVITY_CHECK_MATCHES: Text = Text(471);
+    pub const ACTIVITY_CHECK_MATCHES: Text = Text(472);
 
     pub fn activity_check_matches() -> &'static str {
         ACTIVITY_CHECK_MATCHES.get()
     }
 
-    pub const ACTIVITY_CHECK_NO_ENTRY: Text = Text(472);
+    pub const ACTIVITY_CHECK_NO_ENTRY: Text = Text(473);
 
     pub fn activity_check_no_entry() -> &'static str {
         ACTIVITY_CHECK_NO_ENTRY.get()
     }
 
-    pub const ACTIVITY_CHECK_RUNNING: Text = Text(473);
+    pub const ACTIVITY_CHECK_RUNNING: Text = Text(474);
 
     pub fn activity_check_running() -> &'static str {
         ACTIVITY_CHECK_RUNNING.get()
     }
 
-    pub const ACTIVITY_CHECK_UNSEALED: Text = Text(474);
+    pub const ACTIVITY_CHECK_UNSEALED: Text = Text(475);
 
     pub fn activity_check_unsealed() -> &'static str {
         ACTIVITY_CHECK_UNSEALED.get()
     }
 
     pub fn activity_chip(label: &str, count: impl Into<Num>) -> String {
-        crate::format(Text(475), &[Arg::Str(label), Arg::Num(count.into())])
+        crate::format(Text(476), &[Arg::Str(label), Arg::Num(count.into())])
     }
 
     pub fn activity_detail_event(event: &str) -> String {
-        crate::format(Text(476), &[Arg::Str(event)])
+        crate::format(Text(477), &[Arg::Str(event)])
     }
 
     pub fn activity_detail_outcome(outcome: &str) -> String {
-        crate::format(Text(477), &[Arg::Str(outcome)])
+        crate::format(Text(478), &[Arg::Str(outcome)])
     }
 
-    pub const ACTIVITY_EMPTY: Text = Text(478);
+    pub const ACTIVITY_EMPTY: Text = Text(479);
 
     pub fn activity_empty() -> &'static str {
         ACTIVITY_EMPTY.get()
     }
 
     pub fn activity_from_phone(who: &str) -> String {
-        crate::format(Text(479), &[Arg::Str(who)])
+        crate::format(Text(480), &[Arg::Str(who)])
     }
 
-    pub const ACTIVITY_KIND_ACCOUNT_SWITCH: Text = Text(480);
+    pub const ACTIVITY_KIND_ACCOUNT_SWITCH: Text = Text(481);
 
     pub fn activity_kind_account_switch() -> &'static str {
         ACTIVITY_KIND_ACCOUNT_SWITCH.get()
     }
 
-    pub const ACTIVITY_KIND_ACTED: Text = Text(481);
+    pub const ACTIVITY_KIND_ACTED: Text = Text(482);
 
     pub fn activity_kind_acted() -> &'static str {
         ACTIVITY_KIND_ACTED.get()
     }
 
-    pub const ACTIVITY_KIND_FAILED: Text = Text(482);
+    pub const ACTIVITY_KIND_FAILED: Text = Text(483);
 
     pub fn activity_kind_failed() -> &'static str {
         ACTIVITY_KIND_FAILED.get()
     }
 
-    pub const ACTIVITY_KIND_INBOX: Text = Text(483);
+    pub const ACTIVITY_KIND_INBOX: Text = Text(484);
 
     pub fn activity_kind_inbox() -> &'static str {
         ACTIVITY_KIND_INBOX.get()
     }
 
-    pub const ACTIVITY_KIND_REFUSED: Text = Text(484);
+    pub const ACTIVITY_KIND_REFUSED: Text = Text(485);
 
     pub fn activity_kind_refused() -> &'static str {
         ACTIVITY_KIND_REFUSED.get()
     }
 
-    pub const ACTIVITY_KIND_SETTING: Text = Text(485);
+    pub const ACTIVITY_KIND_SETTING: Text = Text(486);
 
     pub fn activity_kind_setting() -> &'static str {
         ACTIVITY_KIND_SETTING.get()
     }
 
     pub fn activity_line(who: &str, result: &str) -> String {
-        crate::format(Text(486), &[Arg::Str(who), Arg::Str(result)])
+        crate::format(Text(487), &[Arg::Str(who), Arg::Str(result)])
     }
 
     pub fn activity_line_detail(who: &str, result: &str, detail: &str) -> String {
-        crate::format(Text(487), &[Arg::Str(who), Arg::Str(result), Arg::Str(detail)])
+        crate::format(Text(488), &[Arg::Str(who), Arg::Str(result), Arg::Str(detail)])
     }
 
-    pub const ACTIVITY_LOADING: Text = Text(488);
+    pub const ACTIVITY_LOADING: Text = Text(489);
 
     pub fn activity_loading() -> &'static str {
         ACTIVITY_LOADING.get()
     }
 
-    pub const ACTIVITY_MONTH_APR: Text = Text(489);
+    pub const ACTIVITY_MONTH_APR: Text = Text(490);
 
     pub fn activity_month_apr() -> &'static str {
         ACTIVITY_MONTH_APR.get()
     }
 
-    pub const ACTIVITY_MONTH_AUG: Text = Text(490);
+    pub const ACTIVITY_MONTH_AUG: Text = Text(491);
 
     pub fn activity_month_aug() -> &'static str {
         ACTIVITY_MONTH_AUG.get()
     }
 
-    pub const ACTIVITY_MONTH_DEC: Text = Text(491);
+    pub const ACTIVITY_MONTH_DEC: Text = Text(492);
 
     pub fn activity_month_dec() -> &'static str {
         ACTIVITY_MONTH_DEC.get()
     }
 
-    pub const ACTIVITY_MONTH_FEB: Text = Text(492);
+    pub const ACTIVITY_MONTH_FEB: Text = Text(493);
 
     pub fn activity_month_feb() -> &'static str {
         ACTIVITY_MONTH_FEB.get()
     }
 
-    pub const ACTIVITY_MONTH_JAN: Text = Text(493);
+    pub const ACTIVITY_MONTH_JAN: Text = Text(494);
 
     pub fn activity_month_jan() -> &'static str {
         ACTIVITY_MONTH_JAN.get()
     }
 
-    pub const ACTIVITY_MONTH_JUL: Text = Text(494);
+    pub const ACTIVITY_MONTH_JUL: Text = Text(495);
 
     pub fn activity_month_jul() -> &'static str {
         ACTIVITY_MONTH_JUL.get()
     }
 
-    pub const ACTIVITY_MONTH_JUN: Text = Text(495);
+    pub const ACTIVITY_MONTH_JUN: Text = Text(496);
 
     pub fn activity_month_jun() -> &'static str {
         ACTIVITY_MONTH_JUN.get()
     }
 
-    pub const ACTIVITY_MONTH_MAR: Text = Text(496);
+    pub const ACTIVITY_MONTH_MAR: Text = Text(497);
 
     pub fn activity_month_mar() -> &'static str {
         ACTIVITY_MONTH_MAR.get()
     }
 
-    pub const ACTIVITY_MONTH_MAY: Text = Text(497);
+    pub const ACTIVITY_MONTH_MAY: Text = Text(498);
 
     pub fn activity_month_may() -> &'static str {
         ACTIVITY_MONTH_MAY.get()
     }
 
-    pub const ACTIVITY_MONTH_NOV: Text = Text(498);
+    pub const ACTIVITY_MONTH_NOV: Text = Text(499);
 
     pub fn activity_month_nov() -> &'static str {
         ACTIVITY_MONTH_NOV.get()
     }
 
-    pub const ACTIVITY_MONTH_OCT: Text = Text(499);
+    pub const ACTIVITY_MONTH_OCT: Text = Text(500);
 
     pub fn activity_month_oct() -> &'static str {
         ACTIVITY_MONTH_OCT.get()
     }
 
-    pub const ACTIVITY_MONTH_SEP: Text = Text(500);
+    pub const ACTIVITY_MONTH_SEP: Text = Text(501);
 
     pub fn activity_month_sep() -> &'static str {
         ACTIVITY_MONTH_SEP.get()
     }
 
-    pub const ACTIVITY_NO_MATCH: Text = Text(501);
+    pub const ACTIVITY_NO_MATCH: Text = Text(502);
 
     pub fn activity_no_match() -> &'static str {
         ACTIVITY_NO_MATCH.get()
     }
 
-    pub const ACTIVITY_REFRESH: Text = Text(502);
+    pub const ACTIVITY_REFRESH: Text = Text(503);
 
     pub fn activity_refresh() -> &'static str {
         ACTIVITY_REFRESH.get()
     }
 
-    pub const ACTIVITY_REFRESHING: Text = Text(503);
+    pub const ACTIVITY_REFRESHING: Text = Text(504);
 
     pub fn activity_refreshing() -> &'static str {
         ACTIVITY_REFRESHING.get()
     }
 
-    pub const ACTIVITY_SEARCH: Text = Text(504);
+    pub const ACTIVITY_SEARCH: Text = Text(505);
 
     pub fn activity_search() -> &'static str {
         ACTIVITY_SEARCH.get()
     }
 
     pub fn activity_showing(shown: impl Into<Num>, total: impl Into<Num>) -> String {
-        crate::format(Text(505), &[Arg::Num(shown.into()), Arg::Num(total.into())])
+        crate::format(Text(506), &[Arg::Num(shown.into()), Arg::Num(total.into())])
     }
 
-    pub const ACTIVITY_SPOOLED: Text = Text(506);
+    pub const ACTIVITY_SPOOLED: Text = Text(507);
 
     pub fn activity_spooled() -> &'static str {
         ACTIVITY_SPOOLED.get()
     }
 
     pub fn activity_time_am(hour: &str, minute: &str) -> String {
-        crate::format(Text(507), &[Arg::Str(hour), Arg::Str(minute)])
+        crate::format(Text(508), &[Arg::Str(hour), Arg::Str(minute)])
     }
 
     pub fn activity_time_date(month: &str, day: &str, clock: &str) -> String {
-        crate::format(Text(508), &[Arg::Str(month), Arg::Str(day), Arg::Str(clock)])
+        crate::format(Text(509), &[Arg::Str(month), Arg::Str(day), Arg::Str(clock)])
     }
 
     pub fn activity_time_date_year(month: &str, day: &str, year: &str, clock: &str) -> String {
-        crate::format(Text(509), &[Arg::Str(month), Arg::Str(day), Arg::Str(year), Arg::Str(clock)])
+        crate::format(Text(510), &[Arg::Str(month), Arg::Str(day), Arg::Str(year), Arg::Str(clock)])
     }
 
     pub fn activity_time_pm(hour: &str, minute: &str) -> String {
-        crate::format(Text(510), &[Arg::Str(hour), Arg::Str(minute)])
+        crate::format(Text(511), &[Arg::Str(hour), Arg::Str(minute)])
     }
 
-    pub const ACTIVITY_TRUNCATED: Text = Text(511);
+    pub const ACTIVITY_TRUNCATED: Text = Text(512);
 
     pub fn activity_truncated() -> &'static str {
         ACTIVITY_TRUNCATED.get()
     }
 
-    pub const ANSWER_FROM_NOTCH: Text = Text(512);
+    pub const ANSWER_FROM_NOTCH: Text = Text(513);
 
     pub fn answer_from_notch() -> &'static str {
         ANSWER_FROM_NOTCH.get()
     }
 
-    pub const ANTIGRAVITY_LIMIT_MODE: Text = Text(513);
+    pub const ANTIGRAVITY_LIMIT_MODE: Text = Text(514);
 
     pub fn antigravity_limit_mode() -> &'static str {
         ANTIGRAVITY_LIMIT_MODE.get()
     }
 
-    pub const ANTIGRAVITY_LIMIT_MODE_NOTIFY: Text = Text(514);
+    pub const ANTIGRAVITY_LIMIT_MODE_NOTIFY: Text = Text(515);
 
     pub fn antigravity_limit_mode_notify() -> &'static str {
         ANTIGRAVITY_LIMIT_MODE_NOTIFY.get()
     }
 
-    pub const ANTIGRAVITY_LIMIT_MODE_NOTIFY_AND_SWITCH: Text = Text(515);
+    pub const ANTIGRAVITY_LIMIT_MODE_NOTIFY_AND_SWITCH: Text = Text(516);
 
     pub fn antigravity_limit_mode_notify_and_switch() -> &'static str {
         ANTIGRAVITY_LIMIT_MODE_NOTIFY_AND_SWITCH.get()
     }
 
-    pub const ANTIGRAVITY_LIMIT_MODE_OFF: Text = Text(516);
+    pub const ANTIGRAVITY_LIMIT_MODE_OFF: Text = Text(517);
 
     pub fn antigravity_limit_mode_off() -> &'static str {
         ANTIGRAVITY_LIMIT_MODE_OFF.get()
     }
 
-    pub const APPEARANCE: Text = Text(517);
+    pub const APPEARANCE: Text = Text(518);
 
     pub fn appearance() -> &'static str {
         APPEARANCE.get()
     }
 
-    pub const APPEARANCE_DARK: Text = Text(518);
+    pub const APPEARANCE_DARK: Text = Text(519);
 
     pub fn appearance_dark() -> &'static str {
         APPEARANCE_DARK.get()
     }
 
-    pub const APPEARANCE_LIGHT: Text = Text(519);
+    pub const APPEARANCE_LIGHT: Text = Text(520);
 
     pub fn appearance_light() -> &'static str {
         APPEARANCE_LIGHT.get()
     }
 
-    pub const APPEARANCE_SYSTEM: Text = Text(520);
+    pub const APPEARANCE_SYSTEM: Text = Text(521);
 
     pub fn appearance_system() -> &'static str {
         APPEARANCE_SYSTEM.get()
     }
 
-    pub const CAPABILITIES_FOOTER: Text = Text(521);
+    pub const CAPABILITIES_FOOTER: Text = Text(522);
 
     pub fn capabilities_footer() -> &'static str {
         CAPABILITIES_FOOTER.get()
     }
 
-    pub const CAPABILITIES_TITLE: Text = Text(522);
+    pub const CAPABILITIES_TITLE: Text = Text(523);
 
     pub fn capabilities_title() -> &'static str {
         CAPABILITIES_TITLE.get()
     }
 
-    pub const CAPABILITY_FALLBACK: Text = Text(523);
+    pub const CAPABILITY_FALLBACK: Text = Text(524);
 
     pub fn capability_fallback() -> &'static str {
         CAPABILITY_FALLBACK.get()
     }
 
-    pub const CAPABILITY_GAP: Text = Text(524);
+    pub const CAPABILITY_GAP: Text = Text(525);
 
     pub fn capability_gap() -> &'static str {
         CAPABILITY_GAP.get()
     }
 
-    pub const CAPABILITY_NOT_APPLICABLE: Text = Text(525);
+    pub const CAPABILITY_NOT_APPLICABLE: Text = Text(526);
 
     pub fn capability_not_applicable() -> &'static str {
         CAPABILITY_NOT_APPLICABLE.get()
     }
 
-    pub const CHAT_HISTORY: Text = Text(526);
+    pub const CHAT_HISTORY: Text = Text(527);
 
     pub fn chat_history() -> &'static str {
         CHAT_HISTORY.get()
     }
 
-    pub const CHAT_HISTORY_V16MB: Text = Text(527);
+    pub const CHAT_HISTORY_V16MB: Text = Text(528);
 
     pub fn chat_history_v16mb() -> &'static str {
         CHAT_HISTORY_V16MB.get()
     }
 
-    pub const CHAT_HISTORY_V2MB: Text = Text(528);
+    pub const CHAT_HISTORY_V2MB: Text = Text(529);
 
     pub fn chat_history_v2mb() -> &'static str {
         CHAT_HISTORY_V2MB.get()
     }
 
-    pub const CHAT_HISTORY_V4MB: Text = Text(529);
+    pub const CHAT_HISTORY_V4MB: Text = Text(530);
 
     pub fn chat_history_v4mb() -> &'static str {
         CHAT_HISTORY_V4MB.get()
     }
 
-    pub const CHAT_HISTORY_V8MB: Text = Text(530);
+    pub const CHAT_HISTORY_V8MB: Text = Text(531);
 
     pub fn chat_history_v8mb() -> &'static str {
         CHAT_HISTORY_V8MB.get()
     }
 
-    pub const CLIENT_CANCEL: Text = Text(531);
+    pub const CLIENT_CANCEL: Text = Text(532);
 
     pub fn client_cancel() -> &'static str {
         CLIENT_CANCEL.get()
     }
 
-    pub const CLIENT_CANT_TELL: Text = Text(532);
+    pub const CLIENT_CANT_TELL: Text = Text(533);
 
     pub fn client_cant_tell() -> &'static str {
         CLIENT_CANT_TELL.get()
     }
 
-    pub const CLIENT_CHECK_AGAIN: Text = Text(533);
+    pub const CLIENT_CHECK_AGAIN: Text = Text(534);
 
     pub fn client_check_again() -> &'static str {
         CLIENT_CHECK_AGAIN.get()
     }
 
-    pub const CLIENT_CHECKING: Text = Text(534);
+    pub const CLIENT_CHECKING: Text = Text(535);
 
     pub fn client_checking() -> &'static str {
         CLIENT_CHECKING.get()
     }
 
     pub fn client_found(path: &str, version: &str) -> String {
-        crate::format(Text(535), &[Arg::Str(path), Arg::Str(version)])
+        crate::format(Text(536), &[Arg::Str(path), Arg::Str(version)])
     }
 
     pub fn client_found_by(path: &str, version: &str, method: &str) -> String {
-        crate::format(Text(536), &[Arg::Str(path), Arg::Str(version), Arg::Str(method)])
+        crate::format(Text(537), &[Arg::Str(path), Arg::Str(version), Arg::Str(method)])
     }
 
-    pub const CLIENT_INSTALL_FIRST: Text = Text(537);
+    pub const CLIENT_INSTALL_FIRST: Text = Text(538);
 
     pub fn client_install_first() -> &'static str {
         CLIENT_INSTALL_FIRST.get()
     }
 
-    pub const CLIENT_LOOKING: Text = Text(538);
+    pub const CLIENT_LOOKING: Text = Text(539);
 
     pub fn client_looking() -> &'static str {
         CLIENT_LOOKING.get()
     }
 
-    pub const CLIENT_NOT_CHECKED: Text = Text(539);
+    pub const CLIENT_NOT_CHECKED: Text = Text(540);
 
     pub fn client_not_checked() -> &'static str {
         CLIENT_NOT_CHECKED.get()
     }
 
-    pub const CLIENT_NOT_FOUND: Text = Text(540);
+    pub const CLIENT_NOT_FOUND: Text = Text(541);
 
     pub fn client_not_found() -> &'static str {
         CLIENT_NOT_FOUND.get()
     }
 
-    pub const CLIENT_NOT_INSTALLED: Text = Text(541);
+    pub const CLIENT_NOT_INSTALLED: Text = Text(542);
 
     pub fn client_not_installed() -> &'static str {
         CLIENT_NOT_INSTALLED.get()
     }
 
-    pub const CLIENT_NOT_RUNNING: Text = Text(542);
+    pub const CLIENT_NOT_RUNNING: Text = Text(543);
 
     pub fn client_not_running() -> &'static str {
         CLIENT_NOT_RUNNING.get()
     }
 
-    pub const CLIENT_TITLE: Text = Text(543);
+    pub const CLIENT_TITLE: Text = Text(544);
 
     pub fn client_title() -> &'static str {
         CLIENT_TITLE.get()
     }
 
-    pub const CLIENT_UPDATE: Text = Text(544);
+    pub const CLIENT_UPDATE: Text = Text(545);
 
     pub fn client_update() -> &'static str {
         CLIENT_UPDATE.get()
     }
 
-    pub const CLIENT_VERSION_UNKNOWN: Text = Text(545);
+    pub const CLIENT_VERSION_UNKNOWN: Text = Text(546);
 
     pub fn client_version_unknown() -> &'static str {
         CLIENT_VERSION_UNKNOWN.get()
     }
 
-    pub const CODEX_LIMIT_MODE: Text = Text(546);
+    pub const CODEX_LIMIT_MODE: Text = Text(547);
 
     pub fn codex_limit_mode() -> &'static str {
         CODEX_LIMIT_MODE.get()
     }
 
-    pub const CODEX_LIMIT_MODE_NOTIFY: Text = Text(547);
+    pub const CODEX_LIMIT_MODE_NOTIFY: Text = Text(548);
 
     pub fn codex_limit_mode_notify() -> &'static str {
         CODEX_LIMIT_MODE_NOTIFY.get()
     }
 
-    pub const CODEX_LIMIT_MODE_NOTIFY_AND_SWITCH: Text = Text(548);
+    pub const CODEX_LIMIT_MODE_NOTIFY_AND_SWITCH: Text = Text(549);
 
     pub fn codex_limit_mode_notify_and_switch() -> &'static str {
         CODEX_LIMIT_MODE_NOTIFY_AND_SWITCH.get()
     }
 
-    pub const CODEX_LIMIT_MODE_OFF: Text = Text(549);
+    pub const CODEX_LIMIT_MODE_OFF: Text = Text(550);
 
     pub fn codex_limit_mode_off() -> &'static str {
         CODEX_LIMIT_MODE_OFF.get()
     }
 
-    pub const CODEX_NETWORK: Text = Text(550);
+    pub const CODEX_NETWORK: Text = Text(551);
 
     pub fn codex_network() -> &'static str {
         CODEX_NETWORK.get()
     }
 
-    pub const CONTINUE_AFTER_SLEEP: Text = Text(551);
+    pub const CONTINUE_AFTER_SLEEP: Text = Text(552);
 
     pub fn continue_after_sleep() -> &'static str {
         CONTINUE_AFTER_SLEEP.get()
     }
 
-    pub const DONE: Text = Text(552);
+    pub const DONE: Text = Text(553);
 
     pub fn done() -> &'static str {
         DONE.get()
     }
 
-    pub const FOOTER_ACCOUNT_LIMIT: Text = Text(553);
+    pub const FOOTER_ACCOUNT_LIMIT: Text = Text(554);
 
     pub fn footer_account_limit() -> &'static str {
         FOOTER_ACCOUNT_LIMIT.get()
     }
 
-    pub const FOOTER_CHAT: Text = Text(554);
+    pub const FOOTER_CHAT: Text = Text(555);
 
     pub fn footer_chat() -> &'static str {
         FOOTER_CHAT.get()
     }
 
-    pub const FOOTER_DAEMON: Text = Text(555);
+    pub const FOOTER_DAEMON: Text = Text(556);
 
     pub fn footer_daemon() -> &'static str {
         FOOTER_DAEMON.get()
     }
 
-    pub const FOOTER_KEEP_MAC_AWAKE: Text = Text(556);
+    pub const FOOTER_KEEP_MAC_AWAKE: Text = Text(557);
 
     pub fn footer_keep_mac_awake() -> &'static str {
         FOOTER_KEEP_MAC_AWAKE.get()
     }
 
-    pub const FOOTER_SEARCH: Text = Text(557);
+    pub const FOOTER_SEARCH: Text = Text(558);
 
     pub fn footer_search() -> &'static str {
         FOOTER_SEARCH.get()
     }
 
-    pub const HIDE_NOTCH: Text = Text(558);
+    pub const HIDE_NOTCH: Text = Text(559);
 
     pub fn hide_notch() -> &'static str {
         HIDE_NOTCH.get()
     }
 
-    pub const HOOK_ARTIFACT_READ: Text = Text(559);
+    pub const HOOK_ARTIFACT_READ: Text = Text(560);
 
     pub fn hook_artifact_read() -> &'static str {
         HOOK_ARTIFACT_READ.get()
     }
 
-    pub const HOOK_ARTIFACT_READ_FAILED: Text = Text(560);
+    pub const HOOK_ARTIFACT_READ_FAILED: Text = Text(561);
 
     pub fn hook_artifact_read_failed() -> &'static str {
         HOOK_ARTIFACT_READ_FAILED.get()
     }
 
-    pub const HOOK_ARTIFACT_SAVED: Text = Text(561);
+    pub const HOOK_ARTIFACT_SAVED: Text = Text(562);
 
     pub fn hook_artifact_saved() -> &'static str {
         HOOK_ARTIFACT_SAVED.get()
     }
 
-    pub const HOOK_ASK_USER_QUESTION: Text = Text(562);
+    pub const HOOK_ASK_USER_QUESTION: Text = Text(563);
 
     pub fn hook_ask_user_question() -> &'static str {
         HOOK_ASK_USER_QUESTION.get()
     }
 
-    pub const HOOK_INSTALLED: Text = Text(563);
+    pub const HOOK_INSTALLED: Text = Text(564);
 
     pub fn hook_installed() -> &'static str {
         HOOK_INSTALLED.get()
     }
 
-    pub const HOOK_MISSING: Text = Text(564);
+    pub const HOOK_MISSING: Text = Text(565);
 
     pub fn hook_missing() -> &'static str {
         HOOK_MISSING.get()
     }
 
-    pub const HOOK_NOT_MANAGED: Text = Text(565);
+    pub const HOOK_NOT_MANAGED: Text = Text(566);
 
     pub fn hook_not_managed() -> &'static str {
         HOOK_NOT_MANAGED.get()
     }
 
-    pub const HOOK_PERMISSION_REQUEST: Text = Text(566);
+    pub const HOOK_PERMISSION_REQUEST: Text = Text(567);
 
     pub fn hook_permission_request() -> &'static str {
         HOOK_PERMISSION_REQUEST.get()
     }
 
-    pub const HOOK_SWIFT: Text = Text(567);
+    pub const HOOK_SWIFT: Text = Text(568);
 
     pub fn hook_swift() -> &'static str {
         HOOK_SWIFT.get()
     }
 
-    pub const HOOKS: Text = Text(568);
+    pub const HOOKS: Text = Text(569);
 
     pub fn hooks() -> &'static str {
         HOOKS.get()
     }
 
-    pub const HOOKS_CHECKING: Text = Text(569);
+    pub const HOOKS_CHECKING: Text = Text(570);
 
     pub fn hooks_checking() -> &'static str {
         HOOKS_CHECKING.get()
     }
 
-    pub const HOOKS_FOOTER: Text = Text(570);
+    pub const HOOKS_FOOTER: Text = Text(571);
 
     pub fn hooks_footer() -> &'static str {
         HOOKS_FOOTER.get()
     }
 
-    pub const HOOKS_OTHER: Text = Text(571);
+    pub const HOOKS_OTHER: Text = Text(572);
 
     pub fn hooks_other() -> &'static str {
         HOOKS_OTHER.get()
     }
 
-    pub const HOOKS_PASS_NOTE: Text = Text(572);
+    pub const HOOKS_PASS_NOTE: Text = Text(573);
 
     pub fn hooks_pass_note() -> &'static str {
         HOOKS_PASS_NOTE.get()
     }
 
-    pub const HOOKS_REFUSED_BROKEN_LINK: Text = Text(573);
+    pub const HOOKS_REFUSED_BROKEN_LINK: Text = Text(574);
 
     pub fn hooks_refused_broken_link() -> &'static str {
         HOOKS_REFUSED_BROKEN_LINK.get()
     }
 
-    pub const HOOKS_REFUSED_EVENT_NOT_LIST: Text = Text(574);
+    pub const HOOKS_REFUSED_EVENT_NOT_LIST: Text = Text(575);
 
     pub fn hooks_refused_event_not_list() -> &'static str {
         HOOKS_REFUSED_EVENT_NOT_LIST.get()
     }
 
-    pub const HOOKS_REFUSED_HOOKS_NOT_OBJECT: Text = Text(575);
+    pub const HOOKS_REFUSED_HOOKS_NOT_OBJECT: Text = Text(576);
 
     pub fn hooks_refused_hooks_not_object() -> &'static str {
         HOOKS_REFUSED_HOOKS_NOT_OBJECT.get()
     }
 
-    pub const HOOKS_REFUSED_INVALID_JSON: Text = Text(576);
+    pub const HOOKS_REFUSED_INVALID_JSON: Text = Text(577);
 
     pub fn hooks_refused_invalid_json() -> &'static str {
         HOOKS_REFUSED_INVALID_JSON.get()
     }
 
-    pub const HOOKS_REFUSED_NOT_OBJECT: Text = Text(577);
+    pub const HOOKS_REFUSED_NOT_OBJECT: Text = Text(578);
 
     pub fn hooks_refused_not_object() -> &'static str {
         HOOKS_REFUSED_NOT_OBJECT.get()
     }
 
-    pub const HOOKS_REFUSED_NOT_REGULAR: Text = Text(578);
+    pub const HOOKS_REFUSED_NOT_REGULAR: Text = Text(579);
 
     pub fn hooks_refused_not_regular() -> &'static str {
         HOOKS_REFUSED_NOT_REGULAR.get()
     }
 
-    pub const HOOKS_REFUSED_NOT_UTF8: Text = Text(579);
+    pub const HOOKS_REFUSED_NOT_UTF8: Text = Text(580);
 
     pub fn hooks_refused_not_utf8() -> &'static str {
         HOOKS_REFUSED_NOT_UTF8.get()
     }
 
-    pub const HOOKS_REFUSED_READ_ONLY: Text = Text(580);
+    pub const HOOKS_REFUSED_READ_ONLY: Text = Text(581);
 
     pub fn hooks_refused_read_only() -> &'static str {
         HOOKS_REFUSED_READ_ONLY.get()
     }
 
-    pub const HOOKS_REFUSED_TOO_BIG: Text = Text(581);
+    pub const HOOKS_REFUSED_TOO_BIG: Text = Text(582);
 
     pub fn hooks_refused_too_big() -> &'static str {
         HOOKS_REFUSED_TOO_BIG.get()
     }
 
-    pub const HOOKS_REFUSED_TWICE: Text = Text(582);
+    pub const HOOKS_REFUSED_TWICE: Text = Text(583);
 
     pub fn hooks_refused_twice() -> &'static str {
         HOOKS_REFUSED_TWICE.get()
     }
 
-    pub const HOOKS_REFUSED_UNREADABLE: Text = Text(583);
+    pub const HOOKS_REFUSED_UNREADABLE: Text = Text(584);
 
     pub fn hooks_refused_unreadable() -> &'static str {
         HOOKS_REFUSED_UNREADABLE.get()
     }
 
-    pub const HOW_COMMANDS: Text = Text(584);
+    pub const HOW_COMMANDS: Text = Text(585);
 
     pub fn how_commands() -> &'static str {
         HOW_COMMANDS.get()
     }
 
-    pub const HOW_MODELS: Text = Text(585);
+    pub const HOW_MODELS: Text = Text(586);
 
     pub fn how_models() -> &'static str {
         HOW_MODELS.get()
     }
 
-    pub const HOW_OVERRIDE: Text = Text(586);
+    pub const HOW_OVERRIDE: Text = Text(587);
 
     pub fn how_override() -> &'static str {
         HOW_OVERRIDE.get()
     }
 
-    pub const HOW_SKILLS: Text = Text(587);
+    pub const HOW_SKILLS: Text = Text(588);
 
     pub fn how_skills() -> &'static str {
         HOW_SKILLS.get()
     }
 
-    pub const HOW_TITLE: Text = Text(588);
+    pub const HOW_TITLE: Text = Text(589);
 
     pub fn how_title() -> &'static str {
         HOW_TITLE.get()
     }
 
-    pub const INSTALL_HOOKS_AND_SKILLS: Text = Text(589);
+    pub const INSTALL_HOOKS_AND_SKILLS: Text = Text(590);
 
     pub fn install_hooks_and_skills() -> &'static str {
         INSTALL_HOOKS_AND_SKILLS.get()
     }
 
-    pub const KEEP_DISPLAY_ON: Text = Text(590);
+    pub const KEEP_DISPLAY_ON: Text = Text(591);
 
     pub fn keep_display_on() -> &'static str {
         KEEP_DISPLAY_ON.get()
     }
 
-    pub const KEEP_PAGES: Text = Text(591);
+    pub const KEEP_PAGES: Text = Text(592);
 
     pub fn keep_pages() -> &'static str {
         KEEP_PAGES.get()
     }
 
-    pub const LIMIT_MODE: Text = Text(592);
+    pub const LIMIT_MODE: Text = Text(593);
 
     pub fn limit_mode() -> &'static str {
         LIMIT_MODE.get()
     }
 
-    pub const LIMIT_MODE_NOTIFY: Text = Text(593);
+    pub const LIMIT_MODE_NOTIFY: Text = Text(594);
 
     pub fn limit_mode_notify() -> &'static str {
         LIMIT_MODE_NOTIFY.get()
     }
 
-    pub const LIMIT_MODE_NOTIFY_AND_SWITCH: Text = Text(594);
+    pub const LIMIT_MODE_NOTIFY_AND_SWITCH: Text = Text(595);
 
     pub fn limit_mode_notify_and_switch() -> &'static str {
         LIMIT_MODE_NOTIFY_AND_SWITCH.get()
     }
 
-    pub const LIMIT_MODE_OFF: Text = Text(595);
+    pub const LIMIT_MODE_OFF: Text = Text(596);
 
     pub fn limit_mode_off() -> &'static str {
         LIMIT_MODE_OFF.get()
     }
 
-    pub const LIMIT_SWITCH_AT: Text = Text(596);
+    pub const LIMIT_SWITCH_AT: Text = Text(597);
 
     pub fn limit_switch_at() -> &'static str {
         LIMIT_SWITCH_AT.get()
     }
 
-    pub const LOGINS_AND_LANES: Text = Text(597);
+    pub const LOGINS_AND_LANES: Text = Text(598);
 
     pub fn logins_and_lanes() -> &'static str {
         LOGINS_AND_LANES.get()
     }
 
-    pub const MODE: Text = Text(598);
+    pub const MODE: Text = Text(599);
 
     pub fn mode() -> &'static str {
         MODE.get()
     }
 
-    pub const MODE_OFF: Text = Text(599);
+    pub const MODE_OFF: Text = Text(600);
 
     pub fn mode_off() -> &'static str {
         MODE_OFF.get()
     }
 
-    pub const MODE_ON: Text = Text(600);
+    pub const MODE_ON: Text = Text(601);
 
     pub fn mode_on() -> &'static str {
         MODE_ON.get()
     }
 
-    pub const MODE_WHILE_WORKING: Text = Text(601);
+    pub const MODE_WHILE_WORKING: Text = Text(602);
 
     pub fn mode_while_working() -> &'static str {
         MODE_WHILE_WORKING.get()
     }
 
     pub fn model_effort(tool: &str, effort: &str) -> String {
-        crate::format(Text(602), &[Arg::Str(tool), Arg::Str(effort)])
+        crate::format(Text(603), &[Arg::Str(tool), Arg::Str(effort)])
     }
 
-    pub const MODEL_NO_PICK: Text = Text(603);
+    pub const MODEL_NO_PICK: Text = Text(604);
 
     pub fn model_no_pick() -> &'static str {
         MODEL_NO_PICK.get()
     }
 
-    pub const MODEL_NONE: Text = Text(604);
+    pub const MODEL_NONE: Text = Text(605);
 
     pub fn model_none() -> &'static str {
         MODEL_NONE.get()
     }
 
-    pub const MODEL_SOURCE_BUILT_IN: Text = Text(605);
+    pub const MODEL_SOURCE_BUILT_IN: Text = Text(606);
 
     pub fn model_source_built_in() -> &'static str {
         MODEL_SOURCE_BUILT_IN.get()
     }
 
-    pub const MODEL_SOURCE_LIVE: Text = Text(606);
+    pub const MODEL_SOURCE_LIVE: Text = Text(607);
 
     pub fn model_source_live() -> &'static str {
         MODEL_SOURCE_LIVE.get()
     }
 
-    pub const MODEL_SOURCE_OVERRIDE: Text = Text(607);
+    pub const MODEL_SOURCE_OVERRIDE: Text = Text(608);
 
     pub fn model_source_override() -> &'static str {
         MODEL_SOURCE_OVERRIDE.get()
     }
 
-    pub const MODEL_UNCHECKED: Text = Text(608);
+    pub const MODEL_UNCHECKED: Text = Text(609);
 
     pub fn model_unchecked() -> &'static str {
         MODEL_UNCHECKED.get()
     }
 
-    pub const MODELS_CHECKING: Text = Text(609);
+    pub const MODELS_CHECKING: Text = Text(610);
 
     pub fn models_checking() -> &'static str {
         MODELS_CHECKING.get()
     }
 
-    pub const MODELS_DETACHED: Text = Text(610);
+    pub const MODELS_DETACHED: Text = Text(611);
 
     pub fn models_detached() -> &'static str {
         MODELS_DETACHED.get()
     }
 
-    pub const MODELS_FOOTER: Text = Text(611);
+    pub const MODELS_FOOTER: Text = Text(612);
 
     pub fn models_footer() -> &'static str {
         MODELS_FOOTER.get()
     }
 
-    pub const MODELS_TITLE: Text = Text(612);
+    pub const MODELS_TITLE: Text = Text(613);
 
     pub fn models_title() -> &'static str {
         MODELS_TITLE.get()
     }
 
-    pub const NOTCH_WIDTH: Text = Text(613);
+    pub const NOTCH_WIDTH: Text = Text(614);
 
     pub fn notch_width() -> &'static str {
         NOTCH_WIDTH.get()
     }
 
-    pub const NOTCH_WIDTH_LARGE: Text = Text(614);
+    pub const NOTCH_WIDTH_LARGE: Text = Text(615);
 
     pub fn notch_width_large() -> &'static str {
         NOTCH_WIDTH_LARGE.get()
     }
 
-    pub const NOTCH_WIDTH_MEDIUM: Text = Text(615);
+    pub const NOTCH_WIDTH_MEDIUM: Text = Text(616);
 
     pub fn notch_width_medium() -> &'static str {
         NOTCH_WIDTH_MEDIUM.get()
     }
 
-    pub const NOTCH_WIDTH_SMALL: Text = Text(616);
+    pub const NOTCH_WIDTH_SMALL: Text = Text(617);
 
     pub fn notch_width_small() -> &'static str {
         NOTCH_WIDTH_SMALL.get()
     }
 
     pub fn override_failed(why: &str) -> String {
-        crate::format(Text(617), &[Arg::Str(why)])
+        crate::format(Text(618), &[Arg::Str(why)])
     }
 
-    pub const OVERRIDE_FOOTER: Text = Text(618);
+    pub const OVERRIDE_FOOTER: Text = Text(619);
 
     pub fn override_footer() -> &'static str {
         OVERRIDE_FOOTER.get()
     }
 
-    pub const OVERRIDE_FOUND: Text = Text(619);
+    pub const OVERRIDE_FOUND: Text = Text(620);
 
     pub fn override_found() -> &'static str {
         OVERRIDE_FOUND.get()
     }
 
-    pub const OVERRIDE_MISSING: Text = Text(620);
+    pub const OVERRIDE_MISSING: Text = Text(621);
 
     pub fn override_missing() -> &'static str {
         OVERRIDE_MISSING.get()
     }
 
-    pub const OVERRIDE_OPEN: Text = Text(621);
+    pub const OVERRIDE_OPEN: Text = Text(622);
 
     pub fn override_open() -> &'static str {
         OVERRIDE_OPEN.get()
     }
 
-    pub const OVERRIDE_RELOAD: Text = Text(622);
+    pub const OVERRIDE_RELOAD: Text = Text(623);
 
     pub fn override_reload() -> &'static str {
         OVERRIDE_RELOAD.get()
     }
 
-    pub const OVERRIDE_TITLE: Text = Text(623);
+    pub const OVERRIDE_TITLE: Text = Text(624);
 
     pub fn override_title() -> &'static str {
         OVERRIDE_TITLE.get()
     }
 
-    pub const OVERRIDE_UNREADABLE: Text = Text(624);
+    pub const OVERRIDE_UNREADABLE: Text = Text(625);
 
     pub fn override_unreadable() -> &'static str {
         OVERRIDE_UNREADABLE.get()
     }
 
-    pub const PAGE_ACTIVITY: Text = Text(625);
+    pub const PAGE_ACTIVITY: Text = Text(626);
 
     pub fn page_activity() -> &'static str {
         PAGE_ACTIVITY.get()
     }
 
-    pub const PAGE_AGENTS: Text = Text(626);
+    pub const PAGE_AGENTS: Text = Text(627);
 
     pub fn page_agents() -> &'static str {
         PAGE_AGENTS.get()
     }
 
-    pub const PAGE_GENERAL: Text = Text(627);
+    pub const PAGE_GENERAL: Text = Text(628);
 
     pub fn page_general() -> &'static str {
         PAGE_GENERAL.get()
     }
 
-    pub const PAGE_SKILLS: Text = Text(628);
+    pub const PAGE_SKILLS: Text = Text(629);
 
     pub fn page_skills() -> &'static str {
         PAGE_SKILLS.get()
     }
 
-    pub const PHONE_BRIDGE: Text = Text(629);
+    pub const PHONE_BRIDGE: Text = Text(630);
 
     pub fn phone_bridge() -> &'static str {
         PHONE_BRIDGE.get()
     }
 
-    pub const REPLY_FROM_NOTCH: Text = Text(630);
+    pub const REPLY_FROM_NOTCH: Text = Text(631);
 
     pub fn reply_from_notch() -> &'static str {
         REPLY_FROM_NOTCH.get()
     }
 
-    pub const REPLY_UNREADABLE: Text = Text(631);
+    pub const REPLY_UNREADABLE: Text = Text(632);
 
     pub fn reply_unreadable() -> &'static str {
         REPLY_UNREADABLE.get()
     }
 
-    pub const ROLE_REVIEW: Text = Text(632);
+    pub const ROLE_REVIEW: Text = Text(633);
 
     pub fn role_review() -> &'static str {
         ROLE_REVIEW.get()
     }
 
-    pub const ROLE_REVIEW_FINAL: Text = Text(633);
+    pub const ROLE_REVIEW_FINAL: Text = Text(634);
 
     pub fn role_review_final() -> &'static str {
         ROLE_REVIEW_FINAL.get()
     }
 
-    pub const ROLE_REVIEW_SECRETS: Text = Text(634);
+    pub const ROLE_REVIEW_SECRETS: Text = Text(635);
 
     pub fn role_review_secrets() -> &'static str {
         ROLE_REVIEW_SECRETS.get()
     }
 
-    pub const ROLE_SPEC_CHECK: Text = Text(635);
+    pub const ROLE_SPEC_CHECK: Text = Text(636);
 
     pub fn role_spec_check() -> &'static str {
         ROLE_SPEC_CHECK.get()
     }
 
-    pub const SEARCH_SHORTCUT: Text = Text(636);
+    pub const SEARCH_SHORTCUT: Text = Text(637);
 
     pub fn search_shortcut() -> &'static str {
         SEARCH_SHORTCUT.get()
     }
 
-    pub const SECRET_VAULT: Text = Text(637);
+    pub const SECRET_VAULT: Text = Text(638);
 
     pub fn secret_vault() -> &'static str {
         SECRET_VAULT.get()
     }
 
-    pub const SECTION_ACCOUNT_LIMIT: Text = Text(638);
+    pub const SECTION_ACCOUNT_LIMIT: Text = Text(639);
 
     pub fn section_account_limit() -> &'static str {
         SECTION_ACCOUNT_LIMIT.get()
     }
 
-    pub const SECTION_CHAT: Text = Text(639);
+    pub const SECTION_CHAT: Text = Text(640);
 
     pub fn section_chat() -> &'static str {
         SECTION_CHAT.get()
     }
 
-    pub const SECTION_CLAUDE_CODE: Text = Text(640);
+    pub const SECTION_CLAUDE_CODE: Text = Text(641);
 
     pub fn section_claude_code() -> &'static str {
         SECTION_CLAUDE_CODE.get()
     }
 
-    pub const SECTION_CODEX: Text = Text(641);
+    pub const SECTION_CODEX: Text = Text(642);
 
     pub fn section_codex() -> &'static str {
         SECTION_CODEX.get()
     }
 
-    pub const SECTION_DAEMON: Text = Text(642);
+    pub const SECTION_DAEMON: Text = Text(643);
 
     pub fn section_daemon() -> &'static str {
         SECTION_DAEMON.get()
     }
 
-    pub const SECTION_GENERAL: Text = Text(643);
+    pub const SECTION_GENERAL: Text = Text(644);
 
     pub fn section_general() -> &'static str {
         SECTION_GENERAL.get()
     }
 
-    pub const SECTION_KEEP_MAC_AWAKE: Text = Text(644);
+    pub const SECTION_KEEP_MAC_AWAKE: Text = Text(645);
 
     pub fn section_keep_mac_awake() -> &'static str {
         SECTION_KEEP_MAC_AWAKE.get()
     }
 
-    pub const SECTION_NOTCH: Text = Text(645);
+    pub const SECTION_NOTCH: Text = Text(646);
 
     pub fn section_notch() -> &'static str {
         SECTION_NOTCH.get()
     }
 
-    pub const SECTION_SEARCH: Text = Text(646);
+    pub const SECTION_SEARCH: Text = Text(647);
 
     pub fn section_search() -> &'static str {
         SECTION_SEARCH.get()
     }
 
-    pub const SHORTCUT_NEEDS_KEY: Text = Text(647);
+    pub const SHORTCUT_NEEDS_KEY: Text = Text(648);
 
     pub fn shortcut_needs_key() -> &'static str {
         SHORTCUT_NEEDS_KEY.get()
     }
 
-    pub const SHORTCUT_OFF: Text = Text(648);
+    pub const SHORTCUT_OFF: Text = Text(649);
 
     pub fn shortcut_off() -> &'static str {
         SHORTCUT_OFF.get()
     }
 
-    pub const SHORTCUT_RECORD: Text = Text(649);
+    pub const SHORTCUT_RECORD: Text = Text(650);
 
     pub fn shortcut_record() -> &'static str {
         SHORTCUT_RECORD.get()
     }
 
-    pub const SHORTCUT_RECORDING: Text = Text(650);
+    pub const SHORTCUT_RECORDING: Text = Text(651);
 
     pub fn shortcut_recording() -> &'static str {
         SHORTCUT_RECORDING.get()
     }
 
-    pub const SHOW_LAST_REPLY: Text = Text(651);
+    pub const SHOW_LAST_REPLY: Text = Text(652);
 
     pub fn show_last_reply() -> &'static str {
         SHOW_LAST_REPLY.get()
     }
 
-    pub const SHOW_PET: Text = Text(652);
+    pub const SHOW_PET: Text = Text(653);
 
     pub fn show_pet() -> &'static str {
         SHOW_PET.get()
     }
 
     pub fn skill_error(skill: &str, why: &str) -> String {
-        crate::format(Text(653), &[Arg::Str(skill), Arg::Str(why)])
+        crate::format(Text(654), &[Arg::Str(skill), Arg::Str(why)])
     }
 
-    pub const SKILL_INSTALLED: Text = Text(654);
+    pub const SKILL_INSTALLED: Text = Text(655);
 
     pub fn skill_installed() -> &'static str {
         SKILL_INSTALLED.get()
     }
 
-    pub const SKILL_LEFT_ALONE: Text = Text(655);
+    pub const SKILL_LEFT_ALONE: Text = Text(656);
 
     pub fn skill_left_alone() -> &'static str {
         SKILL_LEFT_ALONE.get()
     }
 
-    pub const SKILL_NOT_INSTALLED: Text = Text(656);
+    pub const SKILL_NOT_INSTALLED: Text = Text(657);
 
     pub fn skill_not_installed() -> &'static str {
         SKILL_NOT_INSTALLED.get()
     }
 
-    pub const SKILL_OUT_OF_DATE: Text = Text(657);
+    pub const SKILL_OUT_OF_DATE: Text = Text(658);
 
     pub fn skill_out_of_date() -> &'static str {
         SKILL_OUT_OF_DATE.get()
     }
 
-    pub const SKILL_TOOL_MISSING: Text = Text(658);
+    pub const SKILL_TOOL_MISSING: Text = Text(659);
 
     pub fn skill_tool_missing() -> &'static str {
         SKILL_TOOL_MISSING.get()
     }
 
-    pub const SKILLS_CHECKING: Text = Text(659);
+    pub const SKILLS_CHECKING: Text = Text(660);
 
     pub fn skills_checking() -> &'static str {
         SKILLS_CHECKING.get()
     }
 
-    pub const SKILLS_DETACHED: Text = Text(660);
+    pub const SKILLS_DETACHED: Text = Text(661);
 
     pub fn skills_detached() -> &'static str {
         SKILLS_DETACHED.get()
     }
 
-    pub const SKILLS_FOOTER: Text = Text(661);
+    pub const SKILLS_FOOTER: Text = Text(662);
 
     pub fn skills_footer() -> &'static str {
         SKILLS_FOOTER.get()
     }
 
-    pub const SKILLS_REINSTALL: Text = Text(662);
+    pub const SKILLS_REINSTALL: Text = Text(663);
 
     pub fn skills_reinstall() -> &'static str {
         SKILLS_REINSTALL.get()
     }
 
-    pub const SKILLS_REINSTALLED: Text = Text(663);
+    pub const SKILLS_REINSTALLED: Text = Text(664);
 
     pub fn skills_reinstalled() -> &'static str {
         SKILLS_REINSTALLED.get()
     }
 
-    pub const SKILLS_REINSTALLING: Text = Text(664);
+    pub const SKILLS_REINSTALLING: Text = Text(665);
 
     pub fn skills_reinstalling() -> &'static str {
         SKILLS_REINSTALLING.get()
     }
 
-    pub const SKILLS_SWITCH_OFF: Text = Text(665);
+    pub const SKILLS_SWITCH_OFF: Text = Text(666);
 
     pub fn skills_switch_off() -> &'static str {
         SKILLS_SWITCH_OFF.get()
     }
 
-    pub const SKILLS_TITLE: Text = Text(666);
+    pub const SKILLS_TITLE: Text = Text(667);
 
     pub fn skills_title() -> &'static str {
         SKILLS_TITLE.get()
     }
 
-    pub const TITLE: Text = Text(667);
+    pub const TITLE: Text = Text(668);
 
     pub fn title() -> &'static str {
         TITLE.get()
     }
 
-    pub const TOOL_ANTIGRAVITY: Text = Text(668);
+    pub const TOOL_ANTIGRAVITY: Text = Text(669);
 
     pub fn tool_antigravity() -> &'static str {
         TOOL_ANTIGRAVITY.get()
     }
 
-    pub const TOOL_CLAUDE_CODE: Text = Text(669);
+    pub const TOOL_CLAUDE_CODE: Text = Text(670);
 
     pub fn tool_claude_code() -> &'static str {
         TOOL_CLAUDE_CODE.get()
     }
 
-    pub const TOOL_CODEX: Text = Text(670);
+    pub const TOOL_CODEX: Text = Text(671);
 
     pub fn tool_codex() -> &'static str {
         TOOL_CODEX.get()
@@ -3782,329 +3788,329 @@ pub mod units {
     use crate::{Arg, Num, Text};
 
     pub fn age_days(n: impl Into<Num>) -> String {
-        crate::format(Text(671), &[Arg::Num(n.into())])
-    }
-
-    pub fn age_hours(n: impl Into<Num>) -> String {
         crate::format(Text(672), &[Arg::Num(n.into())])
     }
 
-    pub fn age_minutes(n: impl Into<Num>) -> String {
+    pub fn age_hours(n: impl Into<Num>) -> String {
         crate::format(Text(673), &[Arg::Num(n.into())])
     }
 
-    pub const AGE_NOW: Text = Text(674);
+    pub fn age_minutes(n: impl Into<Num>) -> String {
+        crate::format(Text(674), &[Arg::Num(n.into())])
+    }
+
+    pub const AGE_NOW: Text = Text(675);
 
     pub fn age_now() -> &'static str {
         AGE_NOW.get()
     }
 
-    pub const AM: Text = Text(675);
+    pub const AM: Text = Text(676);
 
     pub fn am() -> &'static str {
         AM.get()
     }
 
     pub fn clock(hour: impl Into<Num>, minute: &str, suffix: &str) -> String {
-        crate::format(Text(676), &[Arg::Num(hour.into()), Arg::Str(minute), Arg::Str(suffix)])
+        crate::format(Text(677), &[Arg::Num(hour.into()), Arg::Str(minute), Arg::Str(suffix)])
     }
 
     pub fn date_full(weekday: &str, month: &str, day: &str, year: &str, time: &str) -> String {
-        crate::format(Text(677), &[Arg::Str(weekday), Arg::Str(month), Arg::Str(day), Arg::Str(year), Arg::Str(time)])
+        crate::format(Text(678), &[Arg::Str(weekday), Arg::Str(month), Arg::Str(day), Arg::Str(year), Arg::Str(time)])
     }
 
     pub fn date_short(month: &str, day: &str) -> String {
-        crate::format(Text(678), &[Arg::Str(month), Arg::Str(day)])
+        crate::format(Text(679), &[Arg::Str(month), Arg::Str(day)])
     }
 
     pub fn date_year(month: &str, day: &str, year: &str) -> String {
-        crate::format(Text(679), &[Arg::Str(month), Arg::Str(day), Arg::Str(year)])
+        crate::format(Text(680), &[Arg::Str(month), Arg::Str(day), Arg::Str(year)])
     }
 
     pub fn duration_hours(hours: impl Into<Num>, minutes: impl Into<Num>) -> String {
-        crate::format(Text(680), &[Arg::Num(hours.into()), Arg::Num(minutes.into())])
+        crate::format(Text(681), &[Arg::Num(hours.into()), Arg::Num(minutes.into())])
     }
 
     pub fn duration_minutes(minutes: impl Into<Num>, seconds: &str) -> String {
-        crate::format(Text(681), &[Arg::Num(minutes.into()), Arg::Str(seconds)])
+        crate::format(Text(682), &[Arg::Num(minutes.into()), Arg::Str(seconds)])
     }
 
     pub fn duration_seconds(n: impl Into<Num>) -> String {
-        crate::format(Text(682), &[Arg::Num(n.into())])
+        crate::format(Text(683), &[Arg::Num(n.into())])
     }
 
     pub fn hours_ago(count: impl Into<Num>) -> String {
-        crate::format(Text(683), &[Arg::Num(count.into())])
+        crate::format(Text(684), &[Arg::Num(count.into())])
     }
 
-    pub const JUST_NOW: Text = Text(684);
+    pub const JUST_NOW: Text = Text(685);
 
     pub fn just_now() -> &'static str {
         JUST_NOW.get()
     }
 
-    pub const LIST_SEPARATOR: Text = Text(685);
+    pub const LIST_SEPARATOR: Text = Text(686);
 
     pub fn list_separator() -> &'static str {
         LIST_SEPARATOR.get()
     }
 
     pub fn millions(value: &str) -> String {
-        crate::format(Text(686), &[Arg::Str(value)])
+        crate::format(Text(687), &[Arg::Str(value)])
     }
 
     pub fn minutes_ago(count: impl Into<Num>) -> String {
-        crate::format(Text(687), &[Arg::Num(count.into())])
+        crate::format(Text(688), &[Arg::Num(count.into())])
     }
 
-    pub const MONTH_APR: Text = Text(688);
+    pub const MONTH_APR: Text = Text(689);
 
     pub fn month_apr() -> &'static str {
         MONTH_APR.get()
     }
 
-    pub const MONTH_AUG: Text = Text(689);
+    pub const MONTH_AUG: Text = Text(690);
 
     pub fn month_aug() -> &'static str {
         MONTH_AUG.get()
     }
 
-    pub const MONTH_DEC: Text = Text(690);
+    pub const MONTH_DEC: Text = Text(691);
 
     pub fn month_dec() -> &'static str {
         MONTH_DEC.get()
     }
 
-    pub const MONTH_FEB: Text = Text(691);
+    pub const MONTH_FEB: Text = Text(692);
 
     pub fn month_feb() -> &'static str {
         MONTH_FEB.get()
     }
 
-    pub const MONTH_JAN: Text = Text(692);
+    pub const MONTH_JAN: Text = Text(693);
 
     pub fn month_jan() -> &'static str {
         MONTH_JAN.get()
     }
 
-    pub const MONTH_JUL: Text = Text(693);
+    pub const MONTH_JUL: Text = Text(694);
 
     pub fn month_jul() -> &'static str {
         MONTH_JUL.get()
     }
 
-    pub const MONTH_JUN: Text = Text(694);
+    pub const MONTH_JUN: Text = Text(695);
 
     pub fn month_jun() -> &'static str {
         MONTH_JUN.get()
     }
 
-    pub const MONTH_LONG_APR: Text = Text(695);
+    pub const MONTH_LONG_APR: Text = Text(696);
 
     pub fn month_long_apr() -> &'static str {
         MONTH_LONG_APR.get()
     }
 
-    pub const MONTH_LONG_AUG: Text = Text(696);
+    pub const MONTH_LONG_AUG: Text = Text(697);
 
     pub fn month_long_aug() -> &'static str {
         MONTH_LONG_AUG.get()
     }
 
-    pub const MONTH_LONG_DEC: Text = Text(697);
+    pub const MONTH_LONG_DEC: Text = Text(698);
 
     pub fn month_long_dec() -> &'static str {
         MONTH_LONG_DEC.get()
     }
 
-    pub const MONTH_LONG_FEB: Text = Text(698);
+    pub const MONTH_LONG_FEB: Text = Text(699);
 
     pub fn month_long_feb() -> &'static str {
         MONTH_LONG_FEB.get()
     }
 
-    pub const MONTH_LONG_JAN: Text = Text(699);
+    pub const MONTH_LONG_JAN: Text = Text(700);
 
     pub fn month_long_jan() -> &'static str {
         MONTH_LONG_JAN.get()
     }
 
-    pub const MONTH_LONG_JUL: Text = Text(700);
+    pub const MONTH_LONG_JUL: Text = Text(701);
 
     pub fn month_long_jul() -> &'static str {
         MONTH_LONG_JUL.get()
     }
 
-    pub const MONTH_LONG_JUN: Text = Text(701);
+    pub const MONTH_LONG_JUN: Text = Text(702);
 
     pub fn month_long_jun() -> &'static str {
         MONTH_LONG_JUN.get()
     }
 
-    pub const MONTH_LONG_MAR: Text = Text(702);
+    pub const MONTH_LONG_MAR: Text = Text(703);
 
     pub fn month_long_mar() -> &'static str {
         MONTH_LONG_MAR.get()
     }
 
-    pub const MONTH_LONG_MAY: Text = Text(703);
+    pub const MONTH_LONG_MAY: Text = Text(704);
 
     pub fn month_long_may() -> &'static str {
         MONTH_LONG_MAY.get()
     }
 
-    pub const MONTH_LONG_NOV: Text = Text(704);
+    pub const MONTH_LONG_NOV: Text = Text(705);
 
     pub fn month_long_nov() -> &'static str {
         MONTH_LONG_NOV.get()
     }
 
-    pub const MONTH_LONG_OCT: Text = Text(705);
+    pub const MONTH_LONG_OCT: Text = Text(706);
 
     pub fn month_long_oct() -> &'static str {
         MONTH_LONG_OCT.get()
     }
 
-    pub const MONTH_LONG_SEP: Text = Text(706);
+    pub const MONTH_LONG_SEP: Text = Text(707);
 
     pub fn month_long_sep() -> &'static str {
         MONTH_LONG_SEP.get()
     }
 
-    pub const MONTH_MAR: Text = Text(707);
+    pub const MONTH_MAR: Text = Text(708);
 
     pub fn month_mar() -> &'static str {
         MONTH_MAR.get()
     }
 
-    pub const MONTH_MAY: Text = Text(708);
+    pub const MONTH_MAY: Text = Text(709);
 
     pub fn month_may() -> &'static str {
         MONTH_MAY.get()
     }
 
-    pub const MONTH_NOV: Text = Text(709);
+    pub const MONTH_NOV: Text = Text(710);
 
     pub fn month_nov() -> &'static str {
         MONTH_NOV.get()
     }
 
-    pub const MONTH_OCT: Text = Text(710);
+    pub const MONTH_OCT: Text = Text(711);
 
     pub fn month_oct() -> &'static str {
         MONTH_OCT.get()
     }
 
-    pub const MONTH_SEP: Text = Text(711);
+    pub const MONTH_SEP: Text = Text(712);
 
     pub fn month_sep() -> &'static str {
         MONTH_SEP.get()
     }
 
-    pub const PM: Text = Text(712);
+    pub const PM: Text = Text(713);
 
     pub fn pm() -> &'static str {
         PM.get()
     }
 
     pub fn reset_clock(weekday: &str, hour: impl Into<Num>, minute: &str, suffix: &str) -> String {
-        crate::format(Text(713), &[Arg::Str(weekday), Arg::Num(hour.into()), Arg::Str(minute), Arg::Str(suffix)])
+        crate::format(Text(714), &[Arg::Str(weekday), Arg::Num(hour.into()), Arg::Str(minute), Arg::Str(suffix)])
     }
 
     pub fn thousands(value: &str) -> String {
-        crate::format(Text(714), &[Arg::Str(value)])
+        crate::format(Text(715), &[Arg::Str(value)])
     }
 
-    pub const WEEKDAY_FRI: Text = Text(715);
+    pub const WEEKDAY_FRI: Text = Text(716);
 
     pub fn weekday_fri() -> &'static str {
         WEEKDAY_FRI.get()
     }
 
-    pub const WEEKDAY_LONG_FRIDAY: Text = Text(716);
+    pub const WEEKDAY_LONG_FRIDAY: Text = Text(717);
 
     pub fn weekday_long_friday() -> &'static str {
         WEEKDAY_LONG_FRIDAY.get()
     }
 
-    pub const WEEKDAY_LONG_MONDAY: Text = Text(717);
+    pub const WEEKDAY_LONG_MONDAY: Text = Text(718);
 
     pub fn weekday_long_monday() -> &'static str {
         WEEKDAY_LONG_MONDAY.get()
     }
 
-    pub const WEEKDAY_LONG_SATURDAY: Text = Text(718);
+    pub const WEEKDAY_LONG_SATURDAY: Text = Text(719);
 
     pub fn weekday_long_saturday() -> &'static str {
         WEEKDAY_LONG_SATURDAY.get()
     }
 
-    pub const WEEKDAY_LONG_SUNDAY: Text = Text(719);
+    pub const WEEKDAY_LONG_SUNDAY: Text = Text(720);
 
     pub fn weekday_long_sunday() -> &'static str {
         WEEKDAY_LONG_SUNDAY.get()
     }
 
-    pub const WEEKDAY_LONG_THURSDAY: Text = Text(720);
+    pub const WEEKDAY_LONG_THURSDAY: Text = Text(721);
 
     pub fn weekday_long_thursday() -> &'static str {
         WEEKDAY_LONG_THURSDAY.get()
     }
 
-    pub const WEEKDAY_LONG_TUESDAY: Text = Text(721);
+    pub const WEEKDAY_LONG_TUESDAY: Text = Text(722);
 
     pub fn weekday_long_tuesday() -> &'static str {
         WEEKDAY_LONG_TUESDAY.get()
     }
 
-    pub const WEEKDAY_LONG_WEDNESDAY: Text = Text(722);
+    pub const WEEKDAY_LONG_WEDNESDAY: Text = Text(723);
 
     pub fn weekday_long_wednesday() -> &'static str {
         WEEKDAY_LONG_WEDNESDAY.get()
     }
 
-    pub const WEEKDAY_MON: Text = Text(723);
+    pub const WEEKDAY_MON: Text = Text(724);
 
     pub fn weekday_mon() -> &'static str {
         WEEKDAY_MON.get()
     }
 
-    pub const WEEKDAY_SAT: Text = Text(724);
+    pub const WEEKDAY_SAT: Text = Text(725);
 
     pub fn weekday_sat() -> &'static str {
         WEEKDAY_SAT.get()
     }
 
-    pub const WEEKDAY_SUN: Text = Text(725);
+    pub const WEEKDAY_SUN: Text = Text(726);
 
     pub fn weekday_sun() -> &'static str {
         WEEKDAY_SUN.get()
     }
 
-    pub const WEEKDAY_THU: Text = Text(726);
+    pub const WEEKDAY_THU: Text = Text(727);
 
     pub fn weekday_thu() -> &'static str {
         WEEKDAY_THU.get()
     }
 
-    pub const WEEKDAY_TUE: Text = Text(727);
+    pub const WEEKDAY_TUE: Text = Text(728);
 
     pub fn weekday_tue() -> &'static str {
         WEEKDAY_TUE.get()
     }
 
-    pub const WEEKDAY_WED: Text = Text(728);
+    pub const WEEKDAY_WED: Text = Text(729);
 
     pub fn weekday_wed() -> &'static str {
         WEEKDAY_WED.get()
     }
 
     pub fn yesterday(time: &str) -> String {
-        crate::format(Text(729), &[Arg::Str(time)])
+        crate::format(Text(730), &[Arg::Str(time)])
     }
 }
 
-pub(crate) const COUNT: usize = 730;
+pub(crate) const COUNT: usize = 731;
 
 pub(crate) static KEYS: [(&str, Text); COUNT] = [
     ("accounts-renew-failed", Text(0)),
@@ -4557,286 +4563,287 @@ pub(crate) static KEYS: [(&str, Text); COUNT] = [
     ("notch-empty-working", Text(447)),
     ("notch-exited", Text(448)),
     ("notch-host-background", Text(449)),
-    ("notch-needs-input", Text(450)),
-    ("notch-next", Text(451)),
-    ("notch-no-messages", Text(452)),
-    ("notch-open", Text(453)),
-    ("notch-pick-any", Text(454)),
-    ("notch-question-step", Text(455)),
-    ("notch-question-tab", Text(456)),
-    ("notch-read-only", Text(457)),
-    ("notch-row-host", Text(458)),
-    ("notch-submit", Text(459)),
-    ("notch-tab-done", Text(460)),
-    ("notch-tab-input", Text(461)),
-    ("notch-tab-working", Text(462)),
-    ("notch-thinking", Text(463)),
-    ("notch-type-else", Text(464)),
-    ("notch-wants-to-use", Text(465)),
-    ("notch-you", Text(466)),
-    ("settings-act-on-sessions", Text(467)),
-    ("settings-activity-check-button", Text(468)),
-    ("settings-activity-check-differs", Text(469)),
-    ("settings-activity-check-gone", Text(470)),
-    ("settings-activity-check-matches", Text(471)),
-    ("settings-activity-check-no-entry", Text(472)),
-    ("settings-activity-check-running", Text(473)),
-    ("settings-activity-check-unsealed", Text(474)),
-    ("settings-activity-chip", Text(475)),
-    ("settings-activity-detail-event", Text(476)),
-    ("settings-activity-detail-outcome", Text(477)),
-    ("settings-activity-empty", Text(478)),
-    ("settings-activity-from-phone", Text(479)),
-    ("settings-activity-kind-account-switch", Text(480)),
-    ("settings-activity-kind-acted", Text(481)),
-    ("settings-activity-kind-failed", Text(482)),
-    ("settings-activity-kind-inbox", Text(483)),
-    ("settings-activity-kind-refused", Text(484)),
-    ("settings-activity-kind-setting", Text(485)),
-    ("settings-activity-line", Text(486)),
-    ("settings-activity-line-detail", Text(487)),
-    ("settings-activity-loading", Text(488)),
-    ("settings-activity-month-apr", Text(489)),
-    ("settings-activity-month-aug", Text(490)),
-    ("settings-activity-month-dec", Text(491)),
-    ("settings-activity-month-feb", Text(492)),
-    ("settings-activity-month-jan", Text(493)),
-    ("settings-activity-month-jul", Text(494)),
-    ("settings-activity-month-jun", Text(495)),
-    ("settings-activity-month-mar", Text(496)),
-    ("settings-activity-month-may", Text(497)),
-    ("settings-activity-month-nov", Text(498)),
-    ("settings-activity-month-oct", Text(499)),
-    ("settings-activity-month-sep", Text(500)),
-    ("settings-activity-no-match", Text(501)),
-    ("settings-activity-refresh", Text(502)),
-    ("settings-activity-refreshing", Text(503)),
-    ("settings-activity-search", Text(504)),
-    ("settings-activity-showing", Text(505)),
-    ("settings-activity-spooled", Text(506)),
-    ("settings-activity-time-am", Text(507)),
-    ("settings-activity-time-date", Text(508)),
-    ("settings-activity-time-date-year", Text(509)),
-    ("settings-activity-time-pm", Text(510)),
-    ("settings-activity-truncated", Text(511)),
-    ("settings-answer-from-notch", Text(512)),
-    ("settings-antigravity-limit-mode", Text(513)),
-    ("settings-antigravity-limit-mode-notify", Text(514)),
-    ("settings-antigravity-limit-mode-notify-and-switch", Text(515)),
-    ("settings-antigravity-limit-mode-off", Text(516)),
-    ("settings-appearance", Text(517)),
-    ("settings-appearance-dark", Text(518)),
-    ("settings-appearance-light", Text(519)),
-    ("settings-appearance-system", Text(520)),
-    ("settings-capabilities-footer", Text(521)),
-    ("settings-capabilities-title", Text(522)),
-    ("settings-capability-fallback", Text(523)),
-    ("settings-capability-gap", Text(524)),
-    ("settings-capability-not-applicable", Text(525)),
-    ("settings-chat-history", Text(526)),
-    ("settings-chat-history-v16mb", Text(527)),
-    ("settings-chat-history-v2mb", Text(528)),
-    ("settings-chat-history-v4mb", Text(529)),
-    ("settings-chat-history-v8mb", Text(530)),
-    ("settings-client-cancel", Text(531)),
-    ("settings-client-cant-tell", Text(532)),
-    ("settings-client-check-again", Text(533)),
-    ("settings-client-checking", Text(534)),
-    ("settings-client-found", Text(535)),
-    ("settings-client-found-by", Text(536)),
-    ("settings-client-install-first", Text(537)),
-    ("settings-client-looking", Text(538)),
-    ("settings-client-not-checked", Text(539)),
-    ("settings-client-not-found", Text(540)),
-    ("settings-client-not-installed", Text(541)),
-    ("settings-client-not-running", Text(542)),
-    ("settings-client-title", Text(543)),
-    ("settings-client-update", Text(544)),
-    ("settings-client-version-unknown", Text(545)),
-    ("settings-codex-limit-mode", Text(546)),
-    ("settings-codex-limit-mode-notify", Text(547)),
-    ("settings-codex-limit-mode-notify-and-switch", Text(548)),
-    ("settings-codex-limit-mode-off", Text(549)),
-    ("settings-codex-network", Text(550)),
-    ("settings-continue-after-sleep", Text(551)),
-    ("settings-done", Text(552)),
-    ("settings-footer-account-limit", Text(553)),
-    ("settings-footer-chat", Text(554)),
-    ("settings-footer-daemon", Text(555)),
-    ("settings-footer-keep-mac-awake", Text(556)),
-    ("settings-footer-search", Text(557)),
-    ("settings-hide-notch", Text(558)),
-    ("settings-hook-artifact-read", Text(559)),
-    ("settings-hook-artifact-read-failed", Text(560)),
-    ("settings-hook-artifact-saved", Text(561)),
-    ("settings-hook-ask-user-question", Text(562)),
-    ("settings-hook-installed", Text(563)),
-    ("settings-hook-missing", Text(564)),
-    ("settings-hook-not-managed", Text(565)),
-    ("settings-hook-permission-request", Text(566)),
-    ("settings-hook-swift", Text(567)),
-    ("settings-hooks", Text(568)),
-    ("settings-hooks-checking", Text(569)),
-    ("settings-hooks-footer", Text(570)),
-    ("settings-hooks-other", Text(571)),
-    ("settings-hooks-pass-note", Text(572)),
-    ("settings-hooks-refused-broken-link", Text(573)),
-    ("settings-hooks-refused-event-not-list", Text(574)),
-    ("settings-hooks-refused-hooks-not-object", Text(575)),
-    ("settings-hooks-refused-invalid-json", Text(576)),
-    ("settings-hooks-refused-not-object", Text(577)),
-    ("settings-hooks-refused-not-regular", Text(578)),
-    ("settings-hooks-refused-not-utf8", Text(579)),
-    ("settings-hooks-refused-read-only", Text(580)),
-    ("settings-hooks-refused-too-big", Text(581)),
-    ("settings-hooks-refused-twice", Text(582)),
-    ("settings-hooks-refused-unreadable", Text(583)),
-    ("settings-how-commands", Text(584)),
-    ("settings-how-models", Text(585)),
-    ("settings-how-override", Text(586)),
-    ("settings-how-skills", Text(587)),
-    ("settings-how-title", Text(588)),
-    ("settings-install-hooks-and-skills", Text(589)),
-    ("settings-keep-display-on", Text(590)),
-    ("settings-keep-pages", Text(591)),
-    ("settings-limit-mode", Text(592)),
-    ("settings-limit-mode-notify", Text(593)),
-    ("settings-limit-mode-notify-and-switch", Text(594)),
-    ("settings-limit-mode-off", Text(595)),
-    ("settings-limit-switch-at", Text(596)),
-    ("settings-logins-and-lanes", Text(597)),
-    ("settings-mode", Text(598)),
-    ("settings-mode-off", Text(599)),
-    ("settings-mode-on", Text(600)),
-    ("settings-mode-while-working", Text(601)),
-    ("settings-model-effort", Text(602)),
-    ("settings-model-no-pick", Text(603)),
-    ("settings-model-none", Text(604)),
-    ("settings-model-source-built-in", Text(605)),
-    ("settings-model-source-live", Text(606)),
-    ("settings-model-source-override", Text(607)),
-    ("settings-model-unchecked", Text(608)),
-    ("settings-models-checking", Text(609)),
-    ("settings-models-detached", Text(610)),
-    ("settings-models-footer", Text(611)),
-    ("settings-models-title", Text(612)),
-    ("settings-notch-width", Text(613)),
-    ("settings-notch-width-large", Text(614)),
-    ("settings-notch-width-medium", Text(615)),
-    ("settings-notch-width-small", Text(616)),
-    ("settings-override-failed", Text(617)),
-    ("settings-override-footer", Text(618)),
-    ("settings-override-found", Text(619)),
-    ("settings-override-missing", Text(620)),
-    ("settings-override-open", Text(621)),
-    ("settings-override-reload", Text(622)),
-    ("settings-override-title", Text(623)),
-    ("settings-override-unreadable", Text(624)),
-    ("settings-page-activity", Text(625)),
-    ("settings-page-agents", Text(626)),
-    ("settings-page-general", Text(627)),
-    ("settings-page-skills", Text(628)),
-    ("settings-phone-bridge", Text(629)),
-    ("settings-reply-from-notch", Text(630)),
-    ("settings-reply-unreadable", Text(631)),
-    ("settings-role-review", Text(632)),
-    ("settings-role-review-final", Text(633)),
-    ("settings-role-review-secrets", Text(634)),
-    ("settings-role-spec-check", Text(635)),
-    ("settings-search-shortcut", Text(636)),
-    ("settings-secret-vault", Text(637)),
-    ("settings-section-account-limit", Text(638)),
-    ("settings-section-chat", Text(639)),
-    ("settings-section-claude-code", Text(640)),
-    ("settings-section-codex", Text(641)),
-    ("settings-section-daemon", Text(642)),
-    ("settings-section-general", Text(643)),
-    ("settings-section-keep-mac-awake", Text(644)),
-    ("settings-section-notch", Text(645)),
-    ("settings-section-search", Text(646)),
-    ("settings-shortcut-needs-key", Text(647)),
-    ("settings-shortcut-off", Text(648)),
-    ("settings-shortcut-record", Text(649)),
-    ("settings-shortcut-recording", Text(650)),
-    ("settings-show-last-reply", Text(651)),
-    ("settings-show-pet", Text(652)),
-    ("settings-skill-error", Text(653)),
-    ("settings-skill-installed", Text(654)),
-    ("settings-skill-left-alone", Text(655)),
-    ("settings-skill-not-installed", Text(656)),
-    ("settings-skill-out-of-date", Text(657)),
-    ("settings-skill-tool-missing", Text(658)),
-    ("settings-skills-checking", Text(659)),
-    ("settings-skills-detached", Text(660)),
-    ("settings-skills-footer", Text(661)),
-    ("settings-skills-reinstall", Text(662)),
-    ("settings-skills-reinstalled", Text(663)),
-    ("settings-skills-reinstalling", Text(664)),
-    ("settings-skills-switch-off", Text(665)),
-    ("settings-skills-title", Text(666)),
-    ("settings-title", Text(667)),
-    ("settings-tool-antigravity", Text(668)),
-    ("settings-tool-claude-code", Text(669)),
-    ("settings-tool-codex", Text(670)),
-    ("units-age-days", Text(671)),
-    ("units-age-hours", Text(672)),
-    ("units-age-minutes", Text(673)),
-    ("units-age-now", Text(674)),
-    ("units-am", Text(675)),
-    ("units-clock", Text(676)),
-    ("units-date-full", Text(677)),
-    ("units-date-short", Text(678)),
-    ("units-date-year", Text(679)),
-    ("units-duration-hours", Text(680)),
-    ("units-duration-minutes", Text(681)),
-    ("units-duration-seconds", Text(682)),
-    ("units-hours-ago", Text(683)),
-    ("units-just-now", Text(684)),
-    ("units-list-separator", Text(685)),
-    ("units-millions", Text(686)),
-    ("units-minutes-ago", Text(687)),
-    ("units-month-apr", Text(688)),
-    ("units-month-aug", Text(689)),
-    ("units-month-dec", Text(690)),
-    ("units-month-feb", Text(691)),
-    ("units-month-jan", Text(692)),
-    ("units-month-jul", Text(693)),
-    ("units-month-jun", Text(694)),
-    ("units-month-long-apr", Text(695)),
-    ("units-month-long-aug", Text(696)),
-    ("units-month-long-dec", Text(697)),
-    ("units-month-long-feb", Text(698)),
-    ("units-month-long-jan", Text(699)),
-    ("units-month-long-jul", Text(700)),
-    ("units-month-long-jun", Text(701)),
-    ("units-month-long-mar", Text(702)),
-    ("units-month-long-may", Text(703)),
-    ("units-month-long-nov", Text(704)),
-    ("units-month-long-oct", Text(705)),
-    ("units-month-long-sep", Text(706)),
-    ("units-month-mar", Text(707)),
-    ("units-month-may", Text(708)),
-    ("units-month-nov", Text(709)),
-    ("units-month-oct", Text(710)),
-    ("units-month-sep", Text(711)),
-    ("units-pm", Text(712)),
-    ("units-reset-clock", Text(713)),
-    ("units-thousands", Text(714)),
-    ("units-weekday-fri", Text(715)),
-    ("units-weekday-long-friday", Text(716)),
-    ("units-weekday-long-monday", Text(717)),
-    ("units-weekday-long-saturday", Text(718)),
-    ("units-weekday-long-sunday", Text(719)),
-    ("units-weekday-long-thursday", Text(720)),
-    ("units-weekday-long-tuesday", Text(721)),
-    ("units-weekday-long-wednesday", Text(722)),
-    ("units-weekday-mon", Text(723)),
-    ("units-weekday-sat", Text(724)),
-    ("units-weekday-sun", Text(725)),
-    ("units-weekday-thu", Text(726)),
-    ("units-weekday-tue", Text(727)),
-    ("units-weekday-wed", Text(728)),
-    ("units-yesterday", Text(729)),
+    ("notch-message-needs-you", Text(450)),
+    ("notch-needs-input", Text(451)),
+    ("notch-next", Text(452)),
+    ("notch-no-messages", Text(453)),
+    ("notch-open", Text(454)),
+    ("notch-pick-any", Text(455)),
+    ("notch-question-step", Text(456)),
+    ("notch-question-tab", Text(457)),
+    ("notch-read-only", Text(458)),
+    ("notch-row-host", Text(459)),
+    ("notch-submit", Text(460)),
+    ("notch-tab-done", Text(461)),
+    ("notch-tab-input", Text(462)),
+    ("notch-tab-working", Text(463)),
+    ("notch-thinking", Text(464)),
+    ("notch-type-else", Text(465)),
+    ("notch-wants-to-use", Text(466)),
+    ("notch-you", Text(467)),
+    ("settings-act-on-sessions", Text(468)),
+    ("settings-activity-check-button", Text(469)),
+    ("settings-activity-check-differs", Text(470)),
+    ("settings-activity-check-gone", Text(471)),
+    ("settings-activity-check-matches", Text(472)),
+    ("settings-activity-check-no-entry", Text(473)),
+    ("settings-activity-check-running", Text(474)),
+    ("settings-activity-check-unsealed", Text(475)),
+    ("settings-activity-chip", Text(476)),
+    ("settings-activity-detail-event", Text(477)),
+    ("settings-activity-detail-outcome", Text(478)),
+    ("settings-activity-empty", Text(479)),
+    ("settings-activity-from-phone", Text(480)),
+    ("settings-activity-kind-account-switch", Text(481)),
+    ("settings-activity-kind-acted", Text(482)),
+    ("settings-activity-kind-failed", Text(483)),
+    ("settings-activity-kind-inbox", Text(484)),
+    ("settings-activity-kind-refused", Text(485)),
+    ("settings-activity-kind-setting", Text(486)),
+    ("settings-activity-line", Text(487)),
+    ("settings-activity-line-detail", Text(488)),
+    ("settings-activity-loading", Text(489)),
+    ("settings-activity-month-apr", Text(490)),
+    ("settings-activity-month-aug", Text(491)),
+    ("settings-activity-month-dec", Text(492)),
+    ("settings-activity-month-feb", Text(493)),
+    ("settings-activity-month-jan", Text(494)),
+    ("settings-activity-month-jul", Text(495)),
+    ("settings-activity-month-jun", Text(496)),
+    ("settings-activity-month-mar", Text(497)),
+    ("settings-activity-month-may", Text(498)),
+    ("settings-activity-month-nov", Text(499)),
+    ("settings-activity-month-oct", Text(500)),
+    ("settings-activity-month-sep", Text(501)),
+    ("settings-activity-no-match", Text(502)),
+    ("settings-activity-refresh", Text(503)),
+    ("settings-activity-refreshing", Text(504)),
+    ("settings-activity-search", Text(505)),
+    ("settings-activity-showing", Text(506)),
+    ("settings-activity-spooled", Text(507)),
+    ("settings-activity-time-am", Text(508)),
+    ("settings-activity-time-date", Text(509)),
+    ("settings-activity-time-date-year", Text(510)),
+    ("settings-activity-time-pm", Text(511)),
+    ("settings-activity-truncated", Text(512)),
+    ("settings-answer-from-notch", Text(513)),
+    ("settings-antigravity-limit-mode", Text(514)),
+    ("settings-antigravity-limit-mode-notify", Text(515)),
+    ("settings-antigravity-limit-mode-notify-and-switch", Text(516)),
+    ("settings-antigravity-limit-mode-off", Text(517)),
+    ("settings-appearance", Text(518)),
+    ("settings-appearance-dark", Text(519)),
+    ("settings-appearance-light", Text(520)),
+    ("settings-appearance-system", Text(521)),
+    ("settings-capabilities-footer", Text(522)),
+    ("settings-capabilities-title", Text(523)),
+    ("settings-capability-fallback", Text(524)),
+    ("settings-capability-gap", Text(525)),
+    ("settings-capability-not-applicable", Text(526)),
+    ("settings-chat-history", Text(527)),
+    ("settings-chat-history-v16mb", Text(528)),
+    ("settings-chat-history-v2mb", Text(529)),
+    ("settings-chat-history-v4mb", Text(530)),
+    ("settings-chat-history-v8mb", Text(531)),
+    ("settings-client-cancel", Text(532)),
+    ("settings-client-cant-tell", Text(533)),
+    ("settings-client-check-again", Text(534)),
+    ("settings-client-checking", Text(535)),
+    ("settings-client-found", Text(536)),
+    ("settings-client-found-by", Text(537)),
+    ("settings-client-install-first", Text(538)),
+    ("settings-client-looking", Text(539)),
+    ("settings-client-not-checked", Text(540)),
+    ("settings-client-not-found", Text(541)),
+    ("settings-client-not-installed", Text(542)),
+    ("settings-client-not-running", Text(543)),
+    ("settings-client-title", Text(544)),
+    ("settings-client-update", Text(545)),
+    ("settings-client-version-unknown", Text(546)),
+    ("settings-codex-limit-mode", Text(547)),
+    ("settings-codex-limit-mode-notify", Text(548)),
+    ("settings-codex-limit-mode-notify-and-switch", Text(549)),
+    ("settings-codex-limit-mode-off", Text(550)),
+    ("settings-codex-network", Text(551)),
+    ("settings-continue-after-sleep", Text(552)),
+    ("settings-done", Text(553)),
+    ("settings-footer-account-limit", Text(554)),
+    ("settings-footer-chat", Text(555)),
+    ("settings-footer-daemon", Text(556)),
+    ("settings-footer-keep-mac-awake", Text(557)),
+    ("settings-footer-search", Text(558)),
+    ("settings-hide-notch", Text(559)),
+    ("settings-hook-artifact-read", Text(560)),
+    ("settings-hook-artifact-read-failed", Text(561)),
+    ("settings-hook-artifact-saved", Text(562)),
+    ("settings-hook-ask-user-question", Text(563)),
+    ("settings-hook-installed", Text(564)),
+    ("settings-hook-missing", Text(565)),
+    ("settings-hook-not-managed", Text(566)),
+    ("settings-hook-permission-request", Text(567)),
+    ("settings-hook-swift", Text(568)),
+    ("settings-hooks", Text(569)),
+    ("settings-hooks-checking", Text(570)),
+    ("settings-hooks-footer", Text(571)),
+    ("settings-hooks-other", Text(572)),
+    ("settings-hooks-pass-note", Text(573)),
+    ("settings-hooks-refused-broken-link", Text(574)),
+    ("settings-hooks-refused-event-not-list", Text(575)),
+    ("settings-hooks-refused-hooks-not-object", Text(576)),
+    ("settings-hooks-refused-invalid-json", Text(577)),
+    ("settings-hooks-refused-not-object", Text(578)),
+    ("settings-hooks-refused-not-regular", Text(579)),
+    ("settings-hooks-refused-not-utf8", Text(580)),
+    ("settings-hooks-refused-read-only", Text(581)),
+    ("settings-hooks-refused-too-big", Text(582)),
+    ("settings-hooks-refused-twice", Text(583)),
+    ("settings-hooks-refused-unreadable", Text(584)),
+    ("settings-how-commands", Text(585)),
+    ("settings-how-models", Text(586)),
+    ("settings-how-override", Text(587)),
+    ("settings-how-skills", Text(588)),
+    ("settings-how-title", Text(589)),
+    ("settings-install-hooks-and-skills", Text(590)),
+    ("settings-keep-display-on", Text(591)),
+    ("settings-keep-pages", Text(592)),
+    ("settings-limit-mode", Text(593)),
+    ("settings-limit-mode-notify", Text(594)),
+    ("settings-limit-mode-notify-and-switch", Text(595)),
+    ("settings-limit-mode-off", Text(596)),
+    ("settings-limit-switch-at", Text(597)),
+    ("settings-logins-and-lanes", Text(598)),
+    ("settings-mode", Text(599)),
+    ("settings-mode-off", Text(600)),
+    ("settings-mode-on", Text(601)),
+    ("settings-mode-while-working", Text(602)),
+    ("settings-model-effort", Text(603)),
+    ("settings-model-no-pick", Text(604)),
+    ("settings-model-none", Text(605)),
+    ("settings-model-source-built-in", Text(606)),
+    ("settings-model-source-live", Text(607)),
+    ("settings-model-source-override", Text(608)),
+    ("settings-model-unchecked", Text(609)),
+    ("settings-models-checking", Text(610)),
+    ("settings-models-detached", Text(611)),
+    ("settings-models-footer", Text(612)),
+    ("settings-models-title", Text(613)),
+    ("settings-notch-width", Text(614)),
+    ("settings-notch-width-large", Text(615)),
+    ("settings-notch-width-medium", Text(616)),
+    ("settings-notch-width-small", Text(617)),
+    ("settings-override-failed", Text(618)),
+    ("settings-override-footer", Text(619)),
+    ("settings-override-found", Text(620)),
+    ("settings-override-missing", Text(621)),
+    ("settings-override-open", Text(622)),
+    ("settings-override-reload", Text(623)),
+    ("settings-override-title", Text(624)),
+    ("settings-override-unreadable", Text(625)),
+    ("settings-page-activity", Text(626)),
+    ("settings-page-agents", Text(627)),
+    ("settings-page-general", Text(628)),
+    ("settings-page-skills", Text(629)),
+    ("settings-phone-bridge", Text(630)),
+    ("settings-reply-from-notch", Text(631)),
+    ("settings-reply-unreadable", Text(632)),
+    ("settings-role-review", Text(633)),
+    ("settings-role-review-final", Text(634)),
+    ("settings-role-review-secrets", Text(635)),
+    ("settings-role-spec-check", Text(636)),
+    ("settings-search-shortcut", Text(637)),
+    ("settings-secret-vault", Text(638)),
+    ("settings-section-account-limit", Text(639)),
+    ("settings-section-chat", Text(640)),
+    ("settings-section-claude-code", Text(641)),
+    ("settings-section-codex", Text(642)),
+    ("settings-section-daemon", Text(643)),
+    ("settings-section-general", Text(644)),
+    ("settings-section-keep-mac-awake", Text(645)),
+    ("settings-section-notch", Text(646)),
+    ("settings-section-search", Text(647)),
+    ("settings-shortcut-needs-key", Text(648)),
+    ("settings-shortcut-off", Text(649)),
+    ("settings-shortcut-record", Text(650)),
+    ("settings-shortcut-recording", Text(651)),
+    ("settings-show-last-reply", Text(652)),
+    ("settings-show-pet", Text(653)),
+    ("settings-skill-error", Text(654)),
+    ("settings-skill-installed", Text(655)),
+    ("settings-skill-left-alone", Text(656)),
+    ("settings-skill-not-installed", Text(657)),
+    ("settings-skill-out-of-date", Text(658)),
+    ("settings-skill-tool-missing", Text(659)),
+    ("settings-skills-checking", Text(660)),
+    ("settings-skills-detached", Text(661)),
+    ("settings-skills-footer", Text(662)),
+    ("settings-skills-reinstall", Text(663)),
+    ("settings-skills-reinstalled", Text(664)),
+    ("settings-skills-reinstalling", Text(665)),
+    ("settings-skills-switch-off", Text(666)),
+    ("settings-skills-title", Text(667)),
+    ("settings-title", Text(668)),
+    ("settings-tool-antigravity", Text(669)),
+    ("settings-tool-claude-code", Text(670)),
+    ("settings-tool-codex", Text(671)),
+    ("units-age-days", Text(672)),
+    ("units-age-hours", Text(673)),
+    ("units-age-minutes", Text(674)),
+    ("units-age-now", Text(675)),
+    ("units-am", Text(676)),
+    ("units-clock", Text(677)),
+    ("units-date-full", Text(678)),
+    ("units-date-short", Text(679)),
+    ("units-date-year", Text(680)),
+    ("units-duration-hours", Text(681)),
+    ("units-duration-minutes", Text(682)),
+    ("units-duration-seconds", Text(683)),
+    ("units-hours-ago", Text(684)),
+    ("units-just-now", Text(685)),
+    ("units-list-separator", Text(686)),
+    ("units-millions", Text(687)),
+    ("units-minutes-ago", Text(688)),
+    ("units-month-apr", Text(689)),
+    ("units-month-aug", Text(690)),
+    ("units-month-dec", Text(691)),
+    ("units-month-feb", Text(692)),
+    ("units-month-jan", Text(693)),
+    ("units-month-jul", Text(694)),
+    ("units-month-jun", Text(695)),
+    ("units-month-long-apr", Text(696)),
+    ("units-month-long-aug", Text(697)),
+    ("units-month-long-dec", Text(698)),
+    ("units-month-long-feb", Text(699)),
+    ("units-month-long-jan", Text(700)),
+    ("units-month-long-jul", Text(701)),
+    ("units-month-long-jun", Text(702)),
+    ("units-month-long-mar", Text(703)),
+    ("units-month-long-may", Text(704)),
+    ("units-month-long-nov", Text(705)),
+    ("units-month-long-oct", Text(706)),
+    ("units-month-long-sep", Text(707)),
+    ("units-month-mar", Text(708)),
+    ("units-month-may", Text(709)),
+    ("units-month-nov", Text(710)),
+    ("units-month-oct", Text(711)),
+    ("units-month-sep", Text(712)),
+    ("units-pm", Text(713)),
+    ("units-reset-clock", Text(714)),
+    ("units-thousands", Text(715)),
+    ("units-weekday-fri", Text(716)),
+    ("units-weekday-long-friday", Text(717)),
+    ("units-weekday-long-monday", Text(718)),
+    ("units-weekday-long-saturday", Text(719)),
+    ("units-weekday-long-sunday", Text(720)),
+    ("units-weekday-long-thursday", Text(721)),
+    ("units-weekday-long-tuesday", Text(722)),
+    ("units-weekday-long-wednesday", Text(723)),
+    ("units-weekday-mon", Text(724)),
+    ("units-weekday-sat", Text(725)),
+    ("units-weekday-sun", Text(726)),
+    ("units-weekday-thu", Text(727)),
+    ("units-weekday-tue", Text(728)),
+    ("units-weekday-wed", Text(729)),
+    ("units-yesterday", Text(730)),
 ];
 
 pub(crate) static EN: [Body; COUNT] = [
@@ -5290,6 +5297,7 @@ pub(crate) static EN: [Body; COUNT] = [
     Body::Plain("Nothing working"),
     Body::Plain("This session has exited."),
     Body::Plain("bg"),
+    Body::Plain("Message needs you"),
     Body::Plain("Needs input"),
     Body::Plain("Next"),
     Body::Plain("No messages yet"),

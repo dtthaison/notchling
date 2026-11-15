@@ -27,6 +27,9 @@ notch-empty-completed = Nothing completed
 # State of a session that waits for an answer while it was working a moment ago.
 notch-needs-input = Needs input
 
+# Second line of a row whose session has a message of the user's that did not go in and waits for a decision in Chat.
+notch-message-needs-you = Message needs you
+
 ## Rows
 
 # Second line of a working row when the session shows no activity yet.
