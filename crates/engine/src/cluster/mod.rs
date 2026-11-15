@@ -13,6 +13,7 @@ pub mod members;
 pub mod outward;
 pub mod persist;
 pub mod policy;
+pub mod promote;
 pub mod returns;
 pub mod shell_job;
 pub mod snapshot;
@@ -59,6 +60,8 @@ mod join_tests;
 mod outward_tests;
 #[cfg(test)]
 mod policy_tests;
+#[cfg(test)]
+mod promote_tests;
 #[cfg(test)]
 mod returns_tests;
 #[cfg(test)]
