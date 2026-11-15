@@ -240,6 +240,9 @@ chat-slash-todos = Show the current task list
 # What the /help command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names.
 chat-slash-help = Show help
 
+# Shown in the Chat screen under a permission or question card while the phone checks whether an earlier answer was already delivered, before it sends a different one. The answer buttons wait until it is done.
+chat-answer-checking = Checking your earlier answer…
+
 # Shown in the Chat screen under a permission or question card when the phone is asked to send a different answer while the first one may still be delivered. $answer is the earlier answer, such as Allow. Tapping an answer again sends it anyway.
 chat-answer-may-deliver = Your earlier answer ({ $answer }) may still be delivered. Tap again to send this one instead.
 

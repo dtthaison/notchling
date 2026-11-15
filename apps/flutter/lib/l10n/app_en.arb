@@ -224,6 +224,10 @@
   "@chatActivityIdle": {
     "description": "Not shown yet."
   },
+  "chatAnswerChecking": "Checking your earlier answer…",
+  "@chatAnswerChecking": {
+    "description": "Shown in the Chat screen under a permission or question card while the phone checks whether an earlier answer was already delivered, before it sends a different one. The answer buttons wait until it is done."
+  },
   "chatAnswerDelivered": "Your earlier answer ({answer}) was already delivered. Nothing more was sent.",
   "@chatAnswerDelivered": {
     "description": "Shown in the Chat screen under a permission or question card when the phone is asked to send a different answer but the first one was already delivered to the Mac, so nothing more is sent. $answer is the earlier answer, such as Allow.",
@@ -236,10 +240,6 @@
   "chatAnswerFailed": "Couldn't send the answer. Please try again.",
   "@chatAnswerFailed": {
     "description": "Shown in the Chat screen."
-  },
-  "chatAnswerChecking": "Checking your earlier answer…",
-  "@chatAnswerChecking": {
-    "description": "Shown in the Chat screen under a permission or question card while the phone checks whether an earlier answer was already delivered, before it sends a different one. The answer buttons wait until it is done."
   },
   "chatAnswerMayDeliver": "Your earlier answer ({answer}) may still be delivered. Tap again to send this one instead.",
   "@chatAnswerMayDeliver": {
