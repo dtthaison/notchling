@@ -272,16 +272,16 @@ from the app in this run, or `cluster.join` (below), or a restart of a headless 
 
 | Op | Tier | Args | Reply |
 | --- | --- | --- | --- |
-| `cluster.status` | agent | `{}` | `{cluster: {id, name, term, home, vault} \| null, joining: {since, cluster, primary, answered} \| null, me, members: [Member], link, listening, tailscale, error}` |
-| `cluster.create` | app | `{name}` | the new cluster's state; this node is its home (primary) and reference |
+| `cluster.status` | agent | `{}` | `{cluster: {id, name, term, home, vault} \| null, joining: {since, cluster, primary, answered} \| null, me, members: [Member], jobs: [Job], link, listening, tailscale, error}`; `jobs` is the 50 newest dispatched jobs, `[]` with no cluster, each `{id, node, tool, cwd, state, session, qualified, detail, createdMs}` |
+| `cluster.create` | app | `{name}` | `{cluster: <id>}`; this node is its home (primary) and reference, and `cluster.status` has the rest |
 | `cluster.join.token` | agent | `{}` | `{token: "nlj1.…"}`, one use, 10 minutes; a non-home member asks its home |
 | `cluster.join` | agent | `{token}` | `{state: "pending" \| "joined"}` |
-| `cluster.member.set` | app | `{node, canBeMaster?, client?, reference?, acceptsDelegation?, headless?, desired?}` | the member as stored |
-| `cluster.remove` | app | `{node}` | the member as stored, `state: "removed"` |
+| `cluster.member.set` | app | `{node, canBeMaster?, client?, reference?, acceptsDelegation?, headless?, desired?}` | `{}`; `cluster.status` shows the member as stored |
+| `cluster.remove` | app | `{node}` | `{}`; the member shows `state: "removed"` in `cluster.status` |
 | `cluster.follow` | app | `{id: "<node>/<session>"}` | `{following: true, id, until}` (`until` in ms; see Remote sessions) |
 | `cluster.dispatch` | agent (the app for anything but a delegate; see Dispatch) | `{node, key, tool: "claude" \| "agy" \| "shell", cwd, model?, text?, command?, code?: "folder" \| "send", secrets?}` or `{node, key, delegate: [args]}` | `{job, state, session, qualified, warning}`; a delegate adds `{exit, out, err}` |
 | `shell.stop` | app | `{id: "shell:<job>"}`, or `"<node>/shell:<job>"` for a job on another node | `{stopped: bool}` |
-| `cluster.return` | app | `{job}` | `{job, branch, node}` |
+| `cluster.return` | app | `{job}` | `{job, branch: "notchling/<node name slug>/<job>", node: <the node's name>}` |
 
 - `joining` (additive) is `null` unless this node's own `cluster.join` is in progress, then `{since, cluster,
   primary, answered}`: `since` is the wall-clock ms when the join began, `cluster` the id from the token,
@@ -362,7 +362,7 @@ from the app in this run, or `cluster.join` (below), or a restart of a headless 
   granted from another node; allow once, or answer on this machine"): it would write a permanent rule on a
   machine whose owner isn't at the keyboard.
 - `prompt.resolved.by` (topic `prompts`, app tier) says who or what ended a prompt: `app` (an answer), `stopping`,
-  `acting_off`, `timeout`, `no_app`, `hook_gone` or `closed` on the node that owns it; on a client's republished
+  `acting_off`, `timeout`, `no_app` or `hook_gone` on the node that owns it (a hook whose wait ended because its channel closed answers the hook with a pass and publishes no `prompt.resolved`); on a client's republished
   copy also `offline` (the node went offline or left), `unfollowed` (the app detached, the node stopped being a
   client or the 60 s follow lapsed) and `unlisted` (the owner's list no longer holds it). The `outcome` of
   those last three is `pass`.
@@ -398,8 +398,11 @@ from the app in this run, or `cluster.join` (below), or a restart of a headless 
 
 `cluster.dispatch {node, key, ...}` starts a job on a node. Only the home dispatches: another member's call is
 forwarded to it, and a non-home asked directly answers `forbidden` "`<name>` is primary now". `key` (at most 128
-bytes) names the request: a second call with the same key answers the first job and starts nothing (the same
-body without `qualified`).
+bytes) names the request: a second call with the same key starts no second job and answers the first one's
+`{job, state, session, warning}` (the core's `job_reply`: no `qualified`; `warning` is the job's saved detail; a
+delegate's repeat has no `exit`, `out` or `err`). With `code: "send"` the daemon sends the code (bundle,
+`node.put`, `workspace.prepare`, the note under `<data>/cluster/workspaces/<job>.json`) before the core looks at the
+key, so a repeat sends it again; the prepare finds the job's worktree and reuses it untouched.
 
 - `tool: "claude"` takes `cwd` (absolute) and `model?` (becomes `--model`); `tool: "agy"` takes `cwd` and `text`
   (the first message, at most 64 KB); `tool: "shell"` takes `cwd` and `command` (at most 64 KB). A field another
@@ -411,8 +414,9 @@ body without `qualified`).
   commits to the node as `node.put` chunks, has it clone `origin` once and add a worktree on branch
   `notchling/<job>`, and starts the tool there (`cwd` becomes the worktree). Refused before anything is sent: a
   folder outside a repository, a repository with no commits or no `origin`, a detached HEAD, more than 256 MB of
-  commits. `cluster.return {job}` later fetches the job's commits into `refs/heads/notchling/<node>/<job>` of the
-  local repository, never merging or forcing; it is `bad_request` for a job whose code wasn't sent and `failed`
+  commits. `cluster.return {job}` later fetches the job's commits into `refs/heads/notchling/<node name slug>/<job>`
+  of the local repository (the slug is the node's name lowercased, other characters turned to `-`; the reply's
+  `node` is the name), never merging or forcing; it is `bad_request` for a job whose code wasn't sent and `failed`
   when that branch already holds other commits.
 - `delegate: [args]` runs `notchling delegate` on the node (`delegate.run`, depth 1; `--write`, `--out`,
   `--prompt-file`, Codex and a timeout over 2100 s are refused; `--folder` is required). It is the only form an

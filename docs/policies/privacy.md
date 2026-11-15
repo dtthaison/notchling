@@ -145,15 +145,18 @@ with Machines turns it on again by itself after a restart). The cluster is for y
 in it goes to a third party: no server of the project, no cloud relay, no address on the internet.
 
 - **How:** one TCP port (47823) on the machine's Tailscale addresses only, TLS 1.3 with both ends pinned by the
-  certificate's SHA-256 fingerprint. A machine that isn't in the member list, or isn't yet approved, is
-  dropped before it can send anything; a join needs your Allow in the Inbox and a one-time token that lasts
-  10 minutes. Tailscale itself is yours and is outside this page.
+  certificate's SHA-256 fingerprint. A machine that isn't a member is refused at the handshake, except that
+  while a join token is open (10 minutes, one use) the primary lets one unpinned machine in far enough to ask
+  to join; it must hold the token's secret, and nothing else it sends is answered until you Allow it in the
+  Inbox. A member waiting for your Allow is pinned but can do nothing. Tailscale itself is yours and is
+  outside this page.
 - **Between members, always:** the machine's name, OS, architecture, Notchling and tool versions, which tools it
   has, its load (CPU and memory) and the member list with each member's role and settings.
 - **A client (a Mac with the app) receives, from the machines it follows:** their session lists (names,
-  folders, states, labels and the details a row shows), the tail of a transcript while you have that session open
-  in Chat or on the phone (its text, tool calls and tool output, kept as a mirror file on your Mac, 0600,
-  at most 256 MiB each), and the permission and question prompts of their sessions with the tool's input.
+  folders, states, labels and the details a row shows), the whole transcript of a session you open in Chat or on
+  the phone, from its start (its text, tool calls and tool output), kept as a mirror file on your Mac, 0600, at
+  most 256 MiB each, until this Mac is removed from the cluster; it keeps pulling new lines for up to 10
+  minutes after you leave the session, and the permission and question prompts of their sessions with the tool's input.
 - **A client sends to the machine that owns a session:** your replies, answers, permission decisions
   ("always" is never sent), interrupts and stop requests for that session.
 - **Dispatched work:** when you start a session, shell job or delegated job on a Worker, its command, its text,
@@ -166,8 +169,10 @@ in it goes to a third party: no server of the project, no cloud relay, no addres
 - **What never crosses:** Claude Code, Codex and Antigravity logins and tokens, lanes, the Secret Vault and its
   values (a dispatch that names secrets is refused in this version), the Keychain, `settings.json` and your own
   files except the commits above. A Worker uses its own tool logins.
-- **What a machine you removed keeps:** a removed Worker deletes its cluster state, mirror and incoming files
-  when it hears it was removed (its outgoing files too); its work folder under `<data>/cluster/work` stays until you delete it.
+- **What a machine you removed keeps:** a machine that hears it was removed deletes `cluster.db`, the mirror
+  files, and the incoming and outgoing transfer files. It keeps `<data>/cluster/work` (the repositories and
+  worktrees of sent code), `jobs/` (shell job logs), `workspaces/` (notes on sent code) and `node/` (its own
+  identity) until you delete them.
 
 ## Tools Notchling starts
 
