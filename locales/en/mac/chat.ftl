@@ -198,6 +198,11 @@ chat-messages-wait = { $count ->
     [one] { $count } message waits for this turn to end.
    *[other] { $count } messages wait for this turn to end.
 }
+# $text is what the session's terminal box holds, on one line and cut when long.
+chat-box-holds = The session's input box holds other text, so nothing was sent: { $text }
+chat-box-holds-unread = The session's input box holds other text, so nothing was sent.
+# The button that deletes the text in the session's terminal box, then sends the message in the reply box.
+chat-box-clear-send = Clear Box and Send
 chat-add-files = Add files or photos
 chat-add-folder = Add folder
 chat-slash-commands = Slash commands

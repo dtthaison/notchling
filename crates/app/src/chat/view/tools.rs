@@ -15,6 +15,8 @@ use serde_json::Value;
 
 use super::ChatView;
 use crate::acting::{Acting, Control, Request};
+use crate::actions::SendFailure;
+use crate::chat::box_holds::BoxHolds;
 use crate::chat::claude_picker::{self, Hint, Kind};
 use crate::chat::data::{Session, Tool};
 use crate::chat::outgoing::Outgoing;
@@ -46,6 +48,7 @@ pub struct ChatTools {
     pub drafts: HashMap<String, String>,
     pub sending: bool,
     pub error: Option<String>,
+    pub boxed: Option<BoxHolds>,
     pub picks: HashMap<String, Pick>,
     pub agy: Option<AgyConversation>,
     pub agy_fetched: Option<(String, u64)>,
@@ -88,6 +91,7 @@ impl ChatTools {
                 .unwrap_or_default(),
             sending: false,
             error: None,
+            boxed: None,
             picks: HashMap::new(),
             agy: None,
             agy_fetched: None,
@@ -306,13 +310,27 @@ impl ChatView {
         done: impl FnOnce(&mut ChatView, Result<Value, String>, &mut Context<ChatView>) + 'static,
         cx: &mut Context<Self>,
     ) {
+        self.spawn_send_full(
+            request,
+            move |view, result, cx| done(view, result.map_err(|failure| failure.message), cx),
+            cx,
+        );
+    }
+
+    pub(super) fn spawn_send_full(
+        &mut self,
+        request: Request,
+        done: impl FnOnce(&mut ChatView, Result<Value, SendFailure>, &mut Context<ChatView>) + 'static,
+        cx: &mut Context<Self>,
+    ) {
         let actions = self.acts(cx).actions;
         self.tools.sending = true;
         self.tools.error = None;
+        self.tools.boxed = None;
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_executor()
-                .spawn(async move { actions.send(&request) })
+                .spawn(async move { actions.send_full(&request) })
                 .await;
             this.update(cx, |view, cx| {
                 view.tools.sending = false;
@@ -337,7 +355,27 @@ impl ChatView {
         }
         let files = self.attached(&session.agent.id);
         let text = crate::chat::drops::with_attachments(self.tools.editor.read(cx).text(), &files);
-        self.dispatch(session, text, true, cx);
+        self.dispatch(session, text, true, false, cx);
+    }
+
+    pub(super) fn send_text_clearing_box(&mut self, cx: &mut Context<Self>) {
+        if self.tools.sending || !self.composer_control(cx).enabled {
+            return;
+        }
+        let Some(session) = self.selected_session().cloned() else {
+            return;
+        };
+        if self.tools.starting.contains_key(&session.agent.id) {
+            return;
+        }
+        let files = self.attached(&session.agent.id);
+        let text = crate::chat::drops::with_attachments(self.tools.editor.read(cx).text(), &files);
+        self.dispatch(session, text, true, true, cx);
+    }
+
+    pub(super) fn box_holds(&self) -> Option<&BoxHolds> {
+        let row = self.selected.as_deref()?;
+        self.tools.boxed.as_ref().filter(|held| held.row == row)
     }
 
     pub(super) fn run_available(&self, cx: &App) -> bool {
@@ -376,11 +414,19 @@ impl ChatView {
             session,
             crate::chat::run_command::message(command),
             false,
+            false,
             cx,
         );
     }
 
-    fn dispatch(&mut self, session: Session, text: String, from_box: bool, cx: &mut Context<Self>) {
+    fn dispatch(
+        &mut self,
+        session: Session,
+        text: String,
+        from_box: bool,
+        clear_box: bool,
+        cx: &mut Context<Self>,
+    ) {
         let id = session.agent.id.clone();
         if text.is_empty() {
             return;
@@ -390,6 +436,11 @@ impl ChatView {
             return;
         }
         let request = tool.send(self, &session, &text);
+        let request = if clear_box {
+            request.clearing_box()
+        } else {
+            request
+        };
         let queues = tool.queues();
         if from_box {
             self.put_draft(&id, String::new(), cx);
@@ -402,7 +453,7 @@ impl ChatView {
             .push(Outgoing::new(&text, &self.conversation, now_ms()));
         self.follow_sent_now(cx);
         let sent_text = text;
-        self.spawn_send(
+        self.spawn_send_full(
             request,
             move |view, result, cx| match result {
                 Ok(reply) => {
@@ -440,7 +491,7 @@ impl ChatView {
                     }
                     view.reload_now(cx);
                 }
-                Err(message) => {
+                Err(failure) => {
                     view.tools.take_outgoing(&id, &sent_text);
                     if from_box {
                         let typed = view.tools.drafts.remove(&id).unwrap_or_default();
@@ -451,8 +502,13 @@ impl ChatView {
                         };
                         view.put_draft(&id, back, cx);
                     }
-                    let asking = is_dialog(&message);
-                    view.tools.error = Some(message);
+                    let held = BoxHolds::from_data(&id, failure.data.as_ref());
+                    if let Some(held) = held.filter(|_| from_box) {
+                        view.tools.boxed = Some(held);
+                        return;
+                    }
+                    let asking = is_dialog(&failure.message);
+                    view.tools.error = Some(failure.message);
                     if asking {
                         view.reload_now(cx);
                     }

@@ -51,6 +51,7 @@ impl ActingOps {
         agent: &Agent,
         text: &str,
         now_ms: i64,
+        clear_box: bool,
     ) -> Result<Value, PlayError> {
         if !agent.can_reply() {
             self.play(agent, &plan::reply(text), &mut NoLog)?;
@@ -64,7 +65,7 @@ impl ActingOps {
                 self.publish_held(&agent.id, Some(&all), note.as_deref());
                 Ok(json!({"sent": true, "state": "queued", "waiting": 1, "held": all}))
             }
-            Route::Send => match self.play(agent, &plan::reply(text), &mut NoLog) {
+            Route::Send => match self.play_reply(agent, text, clear_box) {
                 Ok(_) => Ok(json!({"sent": true})),
                 Err(e) => {
                     lock(&self.held.held).not_sent(&agent.id);

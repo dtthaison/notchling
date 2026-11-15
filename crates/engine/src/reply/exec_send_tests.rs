@@ -163,7 +163,7 @@ fn the_new_failures_say_what_happened_and_what_to_do() {
     );
     assert_eq!(
         Failure::NotCleared.to_string(),
-        "The session's input box holds text that isn't from this message, so nothing was typed. Send again when it is empty."
+        "The session's input box holds other text, so the message wasn't sent."
     );
     assert_eq!(
         Failure::NotTaken.to_string(),

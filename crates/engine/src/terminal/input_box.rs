@@ -3,6 +3,7 @@ pub const RULE_MIN: usize = 16;
 pub const HOME_COL: usize = 2;
 pub const MASK: char = '·';
 pub const MARKS: [char; 2] = ['❯', '!'];
+pub const MIN_PART: usize = 10;
 
 pub const STARTING_MARKERS: [&str; 10] = [
     "Ctrl+Z to detach",
@@ -31,6 +32,25 @@ fn letters(text: &str) -> String {
     text.chars().filter(|c| c.is_alphanumeric()).collect()
 }
 
+fn without_chips(text: &str) -> String {
+    let mut out = String::new();
+    let mut rest = text;
+    while let Some(at) = rest.find("[Image#") {
+        out.push_str(&rest[..at]);
+        let tail = &rest[at + "[Image#".len()..];
+        let digits = tail.chars().take_while(char::is_ascii_digit).count();
+        match tail[digits..].strip_prefix(']') {
+            Some(after) if digits > 0 => rest = after,
+            _ => {
+                out.push_str("[Image#");
+                rest = tail;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
 fn folded(typed: &str) -> bool {
     typed.starts_with("[Pastedtext#") && typed.ends_with(']') && typed.matches(']').count() == 1
 }
@@ -45,6 +65,41 @@ pub enum Fill {
 }
 
 impl Input {
+    pub fn typed(&self) -> String {
+        let mut rows: Vec<&str> = self
+            .held
+            .iter()
+            .enumerate()
+            .map(|(n, row)| match n {
+                0 => row
+                    .strip_prefix(MARKS)
+                    .unwrap_or(row)
+                    .trim_start_matches(char::is_whitespace),
+                _ => row.trim_start_matches(char::is_whitespace),
+            })
+            .collect();
+        while rows.last().is_some_and(|row| row.is_empty()) {
+            rows.pop();
+        }
+        rows.join("\n")
+    }
+
+    pub fn leftover_of(&self, earlier: &[String]) -> bool {
+        let shown: String = self.held.iter().map(|row| squeezed(row)).collect();
+        let typed: String = shown.chars().skip(1).collect();
+        if self.empty || folded(&typed) || folded(&shown) {
+            return false;
+        }
+        let have = letters(&without_chips(&shown));
+        let size = have.chars().count();
+        size > 0
+            && earlier.iter().any(|text| {
+                let want = letters(text);
+                have == want
+                    || (size >= MIN_PART && (want.starts_with(&have) || want.ends_with(&have)))
+            })
+    }
+
     pub fn shows(&self, text: &str) -> bool {
         let want = squeezed(text);
         if want.is_empty() {
@@ -93,6 +148,12 @@ impl Input {
             Fill::Foreign
         }
     }
+}
+
+pub fn typed_text(lines: &[String], cursor: Option<(usize, usize)>) -> Option<String> {
+    let input = read(lines, cursor).filter(|input| !input.empty)?;
+    let text = input.typed();
+    (!text.trim().is_empty()).then_some(text)
 }
 
 pub fn masked(lines: &[String]) -> Vec<String> {

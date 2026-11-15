@@ -82,6 +82,21 @@ impl Choice for SettingsChoice {
     }
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct SendFailure {
+    pub message: String,
+    pub data: Option<Value>,
+}
+
+impl SendFailure {
+    fn said(message: &str) -> SendFailure {
+        SendFailure {
+            message: message.to_owned(),
+            data: None,
+        }
+    }
+}
+
 pub struct Actions {
     transport: Option<Box<dyn Transport>>,
     said: Mutex<Acting>,
@@ -201,12 +216,18 @@ impl Actions {
     }
 
     pub fn send(&self, request: &Request) -> Result<Value, String> {
+        self.send_full(request).map_err(|failure| failure.message)
+    }
+
+    pub fn send_full(&self, request: &Request) -> Result<Value, SendFailure> {
         let said = self.said();
         let Some(transport) = &self.transport else {
-            return Err(Acting::Detached.message().unwrap_or_default().to_owned());
+            return Err(SendFailure::said(
+                Acting::Detached.message().unwrap_or_default(),
+            ));
         };
         if let Some(message) = said.message() {
-            return Err(message.to_owned());
+            return Err(SendFailure::said(message));
         }
         transport
             .call(request.op, request.args.clone())
@@ -215,8 +236,11 @@ impl Actions {
                     self.set(acting);
                 }
                 match e {
-                    ClientError::Api(api) => api.message,
-                    other => other.to_string(),
+                    ClientError::Api(api) => SendFailure {
+                        message: api.message,
+                        data: api.data,
+                    },
+                    other => SendFailure::said(&other.to_string()),
                 }
             })
     }
@@ -333,6 +357,31 @@ mod tests {
         assert_eq!(actions.acting(true), Acting::Off);
         let sent: Vec<String> = calls.lock().unwrap().iter().map(|c| c.0.clone()).collect();
         assert_eq!(sent, ["daemon.status", "session.reply"]);
+    }
+
+    #[test]
+    fn a_refusal_brings_the_daemons_data_to_the_caller_and_a_clearing_reply_is_asked_as_such() {
+        let data = json!({"why": "not_cleared", "box": "a draft"});
+        let carried = data.clone();
+        let (actions, calls) = fake(move |op| match op {
+            "daemon.status" => Ok(json!({"acting": true})),
+            _ => Err(ClientError::Api(
+                ApiError::new(ErrorCode::Failed, "box holds text").with_data(carried.clone()),
+            )),
+        });
+        assert_eq!(actions.refresh(), Acting::On);
+        let failure = actions
+            .send_full(&Request::reply("s1", "hi").clearing_box())
+            .unwrap_err();
+        assert_eq!(failure.message, "box holds text");
+        assert_eq!(failure.data, Some(data));
+        assert_eq!(
+            actions.send(&Request::reply("s1", "hi")).unwrap_err(),
+            "box holds text"
+        );
+        let calls = calls.lock().unwrap();
+        assert_eq!(calls[1].1["clear_box"], json!(true));
+        assert_eq!(calls[2].1.get("clear_box"), None);
     }
 
     struct Chosen(Mutex<bool>);

@@ -148,6 +148,13 @@ impl Request {
         Request::new(ops::SESSION_REPLY, json!({ "id": id, "text": text }))
     }
 
+    pub fn clearing_box(mut self) -> Request {
+        if self.op == ops::SESSION_REPLY {
+            self.args["clear_box"] = json!(true);
+        }
+        self
+    }
+
     pub fn answer(id: &str, answers: &[Answer]) -> Request {
         let answers: Vec<Value> = answers.iter().map(Answer::to_value).collect();
         Request::new(ops::SESSION_ANSWER, json!({ "id": id, "answers": answers }))
@@ -355,6 +362,23 @@ mod tests {
             json!({"id": "job-a", "answers": [[2]], "question": {"items": [{"header": "DB",
                 "question": "Which db?", "options": ["Postgres", "SQLite"], "details": [],
                 "multiSelect": false}]}})
+        );
+    }
+
+    #[test]
+    fn a_reply_can_ask_for_the_sessions_box_to_be_cleared_and_nothing_else_can() {
+        assert_eq!(
+            Request::reply("s1", "go on").clearing_box().args,
+            json!({"id": "s1", "text": "go on", "clear_box": true})
+        );
+        assert_eq!(
+            Request::reply("s1", "go on").args,
+            json!({"id": "s1", "text": "go on"}),
+            "a plain reply never asks"
+        );
+        assert_eq!(
+            Request::interrupt("s1").clearing_box(),
+            Request::interrupt("s1")
         );
     }
 
