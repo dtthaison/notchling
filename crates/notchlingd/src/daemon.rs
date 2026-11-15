@@ -188,7 +188,7 @@ fn scan(
         differs
     };
     if differs {
-        cluster.local_changed(&next);
+        cluster.local_changed();
     }
 }
 

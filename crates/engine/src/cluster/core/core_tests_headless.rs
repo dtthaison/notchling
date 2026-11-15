@@ -138,3 +138,27 @@ fn an_event_from_a_peer_names_its_sender_whatever_it_claims() {
         .expect("published");
     assert_eq!(data["from"], json!(w1));
 }
+
+#[test]
+fn a_peer_event_on_a_topic_this_node_does_not_consume_is_dropped() {
+    let (mut hub, m5, w1) = pair();
+    for topic in ["cluster", "prompts", "settings"] {
+        let effects = hub.run(
+            &m5,
+            Input::Msg {
+                from: w1.clone(),
+                msg: Msg::Event {
+                    topic: topic.to_string(),
+                    name: "cluster.refused".to_string(),
+                    data: json!({"from": "forged"}),
+                },
+            },
+        );
+        assert!(
+            !effects
+                .iter()
+                .any(|e| matches!(e, Effect::Publish { name, .. } if name == "cluster.refused")),
+            "{topic}"
+        );
+    }
+}

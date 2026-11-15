@@ -76,6 +76,9 @@ impl NodeCore {
                         name,
                         mut data,
                     } => {
+                        if topic != "sessions" {
+                            return;
+                        }
                         if let Some(fields) = data.as_object_mut() {
                             fields.insert("from".to_string(), json!(from));
                         }

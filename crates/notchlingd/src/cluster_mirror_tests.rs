@@ -31,7 +31,9 @@ impl RowSource for Owner {
         } else {
             Value::Null
         };
-        Ok(json!([{"id": "s1", "transcriptPath": path}]))
+        let mut row = crate::cluster_sessions::agent_row("s1");
+        row["transcriptPath"] = path;
+        Ok(json!([row]))
     }
 }
 
@@ -60,6 +62,7 @@ impl TailSource for Owner {
 }
 
 struct Rig {
+    capped: Arc<Mutex<Vec<NodeId>>>,
     dir: Dir,
     owner: Arc<Owner>,
     remote: Arc<RemoteSessions>,
@@ -68,6 +71,10 @@ struct Rig {
 }
 
 fn rig_with(has_path: bool) -> Rig {
+    rig_built(has_path, super::MIRROR_CAP)
+}
+
+fn rig_built(has_path: bool, cap: u64) -> Rig {
     let dir = Dir::new("mirror");
     let file = dir.path().join("owner").join("s1.jsonl");
     std::fs::create_dir_all(file.parent().unwrap()).unwrap();
@@ -93,13 +100,20 @@ fn rig_with(has_path: bool) -> Rig {
         let now = now.clone();
         Arc::new(move || now.load(Ordering::SeqCst))
     };
-    let mirror = Mirror::new(
+    let capped = Arc::new(Mutex::new(Vec::new()));
+    let told: super::OnCap = {
+        let capped = capped.clone();
+        Arc::new(move |node: &NodeId| capped.lock().unwrap().push(node.clone()))
+    };
+    let mirror = Mirror::with_cap(
         dir.path().join("cluster/mirror"),
         remote.clone(),
         owner.clone(),
         clock,
+        (cap, told),
     );
     Rig {
+        capped,
         dir,
         owner,
         remote,
@@ -122,11 +136,13 @@ fn qualified() -> String {
 
 impl Rig {
     fn mirrored(&self) -> PathBuf {
-        self.dir
-            .path()
-            .join("cluster/mirror")
-            .join(owner().as_str())
-            .join("s1.jsonl")
+        mirror_path(
+            &self.dir.path().join("cluster/mirror"),
+            &owner(),
+            &qualified(),
+            "s1.jsonl",
+        )
+        .unwrap()
     }
 
     fn append(&self, text: &str) {
@@ -140,17 +156,33 @@ impl Rig {
 }
 
 #[test]
-fn the_mirror_file_is_named_by_the_owners_file_name_only() {
+fn the_mirror_file_is_named_by_a_hash_of_the_qualified_id_and_the_extension() {
     let dir = Path::new("/m");
     let node = owner();
-    assert_eq!(
-        mirror_path(dir, &node, "/home/x/.claude/projects/p/abc.jsonl"),
-        Some(dir.join(node.as_str()).join("abc.jsonl"))
+    let q = format!("{node}/abc");
+    let path = mirror_path(dir, &node, &q, "/home/x/.claude/projects/p/abc.jsonl").unwrap();
+    let name = path.file_name().unwrap().to_str().unwrap();
+    let (stem, ext) = name.split_once('.').unwrap();
+    assert_eq!(ext, "jsonl");
+    assert_eq!(stem.len(), 16);
+    assert!(stem.bytes().all(|b| b.is_ascii_hexdigit()), "{stem}");
+    assert_eq!(path.parent().unwrap(), dir.join(node.as_str()));
+    assert!(
+        !name.contains("abc"),
+        "nothing the owner sent picks the name"
     );
-    assert_eq!(mirror_path(dir, &node, ""), None);
-    assert_eq!(mirror_path(dir, &node, "/"), None);
-    assert_eq!(mirror_path(dir, &node, ".."), None);
-    assert_eq!(mirror_path(dir, &node, "/a/.."), None);
+    let other = mirror_path(dir, &node, &format!("{node}/abd"), "/x/abd.jsonl").unwrap();
+    assert_ne!(path, other);
+    let odd = mirror_path(dir, &node, &q, "/x/a.j$on;rm").unwrap();
+    assert_eq!(
+        odd.file_name().unwrap().len(),
+        16,
+        "an odd extension is dropped"
+    );
+    assert_eq!(mirror_path(dir, &node, &q, ""), None);
+    assert_eq!(mirror_path(dir, &node, &q, "/"), None);
+    assert_eq!(mirror_path(dir, &node, &q, ".."), None);
+    assert_eq!(mirror_path(dir, &node, &q, "/a/.."), None);
 }
 
 #[test]
@@ -271,7 +303,11 @@ fn only_a_known_session_of_another_node_can_be_followed() {
 fn follows_are_capped() {
     let r = rig();
     let rows: Vec<Value> = (0..MAX_FOLLOWS + 1)
-        .map(|n| json!({"id": format!("s{n}"), "transcriptPath": format!("/o/s{n}.jsonl")}))
+        .map(|n| {
+            let mut row = crate::cluster_sessions::agent_row(&format!("s{n}"));
+            row["transcriptPath"] = json!(format!("/o/s{n}.jsonl"));
+            row
+        })
         .collect();
     struct Many(Vec<Value>);
     impl RowSource for Many {
@@ -314,6 +350,110 @@ fn a_link_in_the_mirror_folder_is_never_written_through() {
     r.mirror.follow(&qualified()).unwrap();
     r.mirror.pull();
     assert_eq!(std::fs::read(&target).unwrap(), b"keep");
+}
+
+#[cfg(unix)]
+fn outside_with_nothing_in_it(r: &Rig) -> PathBuf {
+    let outside = r.dir.path().join("outside");
+    std::fs::create_dir_all(&outside).unwrap();
+    outside
+}
+
+#[cfg(unix)]
+#[test]
+fn a_linked_node_folder_is_never_written_through() {
+    let r = rig();
+    let outside = outside_with_nothing_in_it(&r);
+    let root = r.dir.path().join("cluster/mirror");
+    std::fs::create_dir_all(&root).unwrap();
+    std::os::unix::fs::symlink(&outside, root.join(owner().as_str())).unwrap();
+    r.mirror.follow(&qualified()).unwrap();
+    r.mirror.pull();
+    assert_eq!(std::fs::read_dir(&outside).unwrap().count(), 0);
+    assert!(!r.remote.rows().is_empty());
+    assert_eq!(r.remote.rows()[0]["transcriptPath"], Value::Null);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_linked_mirror_folder_is_never_written_through() {
+    let r = rig();
+    let outside = outside_with_nothing_in_it(&r);
+    std::fs::create_dir_all(r.dir.path().join("cluster")).unwrap();
+    std::os::unix::fs::symlink(&outside, r.dir.path().join("cluster/mirror")).unwrap();
+    r.mirror.follow(&qualified()).unwrap();
+    r.mirror.pull();
+    assert_eq!(std::fs::read_dir(&outside).unwrap().count(), 0);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_linked_cluster_folder_is_never_written_through() {
+    let r = rig();
+    let outside = outside_with_nothing_in_it(&r);
+    std::os::unix::fs::symlink(&outside, r.dir.path().join("cluster")).unwrap();
+    r.mirror.follow(&qualified()).unwrap();
+    r.mirror.pull();
+    assert_eq!(std::fs::read_dir(&outside).unwrap().count(), 0);
+}
+
+#[test]
+fn a_mirror_file_stops_growing_at_the_cap_and_nothing_is_deleted() {
+    let r = rig_built(true, 6);
+    r.mirror.follow(&qualified()).unwrap();
+    r.mirror.pull();
+    assert_eq!(std::fs::read(r.mirrored()).unwrap(), b"one\n");
+    r.append("two\n");
+    r.mirror.pull();
+    assert_eq!(
+        std::fs::read(r.mirrored()).unwrap(),
+        b"one\n",
+        "a chunk that would pass the cap isn't written, and the file isn't cut"
+    );
+    assert_eq!(r.mirror.following(), 0, "the follow stopped");
+    assert_eq!(*r.capped.lock().unwrap(), vec![owner()]);
+    let asked = r.owner.asked.lock().unwrap().len();
+    r.mirror.pull();
+    assert_eq!(
+        r.owner.asked.lock().unwrap().len(),
+        asked,
+        "and stays stopped"
+    );
+}
+
+#[test]
+fn the_last_gen_survives_a_follow_that_lapsed() {
+    let r = rig();
+    r.mirror.follow(&qualified()).unwrap();
+    r.mirror.pull();
+    r.now.fetch_add(FOLLOW_MS + 1, Ordering::SeqCst);
+    r.mirror.pull();
+    assert_eq!(r.mirror.following(), 0);
+    r.append("two\n");
+    r.mirror.follow(&qualified()).unwrap();
+    r.mirror.pull();
+    let asked = r.owner.asked.lock().unwrap().clone();
+    let last = asked.last().unwrap();
+    assert!(
+        last.1.is_some(),
+        "the owner is told which file was read: {asked:?}"
+    );
+    assert_eq!(last.0, 4, "and only the new part is asked for");
+    assert_eq!(std::fs::read(r.mirrored()).unwrap(), b"one\ntwo\n");
+}
+
+#[test]
+fn clearing_forgets_the_follows_and_the_gens() {
+    let r = rig();
+    r.mirror.follow(&qualified()).unwrap();
+    r.mirror.pull();
+    r.mirror.clear();
+    assert_eq!(r.mirror.following(), 0);
+    r.mirror.pull();
+    r.mirror.follow(&qualified()).unwrap();
+    r.mirror.pull();
+    let asked = r.owner.asked.lock().unwrap().clone();
+    assert_eq!(asked.last().unwrap().1, None, "{asked:?}");
 }
 
 #[test]
@@ -431,7 +571,9 @@ fn a_followed_transcript_crosses_the_node_wire() {
     let dir = Dir::new("mirror-wire");
     let transcript = dir.path().join("s1.jsonl");
     std::fs::write(&transcript, b"one\ntwo\n").unwrap();
-    let rows = vec![json!({"id": "s1", "transcriptPath": transcript.to_string_lossy()})];
+    let mut row = crate::cluster_sessions::agent_row("s1");
+    row["transcriptPath"] = json!(transcript.to_string_lossy());
+    let rows = vec![row];
     let net = MemNet::new();
     let mut home = Opts::named("home");
     home.client = true;
@@ -451,7 +593,8 @@ fn a_followed_transcript_crosses_the_node_wire() {
     let mirror = Mirror::new(mirror_dir.clone(), remote.clone(), source.clone(), clock);
     mirror.follow(&format!("{}/s1", b.id())).unwrap();
     mirror.pull();
-    let copy = mirror_dir.join(b.id().as_str()).join("s1.jsonl");
+    let copy =
+        super::mirror_path(&mirror_dir, &b.id(), &format!("{}/s1", b.id()), "s1.jsonl").unwrap();
     assert_eq!(std::fs::read(&copy).unwrap(), b"one\ntwo\n");
     assert_eq!(
         remote.rows()[0]["transcriptPath"],

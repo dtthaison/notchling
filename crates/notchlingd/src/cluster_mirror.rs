@@ -1,13 +1,13 @@
 use crate::cluster_sessions::{NodeSource, RemoteSessions, NODE_TAIL};
 use crate::op_group::OpGroup;
-use notchling_engine::bridge::net::crypto::base64_decode;
+use notchling_engine::bridge::net::crypto::{base64_decode, sha256_hex};
 use notchling_engine::cluster::{NodeId, Qualified};
 use notchling_local_api::{ops, ApiError, Caller, ErrorCode, OpSpec};
 use serde_json::{json, Value};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::Duration;
 
@@ -15,9 +15,14 @@ pub const MIRROR_DIR: &str = "mirror";
 pub const FOLLOW_MS: u64 = 600_000;
 pub const MAX_FOLLOWS: usize = 16;
 const MAX_ROUNDS: usize = 8;
+/// A mirror file never grows past this; the follow stops instead.
+pub const MIRROR_CAP: u64 = 256 * 1024 * 1024;
+const MAX_SEEN: usize = 1024;
 const PULL_EVERY: Duration = Duration::from_secs(2);
 
 pub type Clock = Arc<dyn Fn() -> u64 + Send + Sync>;
+/// Told once per session whose mirror hit the cap, with the owning node.
+pub type OnCap = Arc<dyn Fn(&NodeId) + Send + Sync>;
 
 pub trait TailSource: Send + Sync {
     fn tail(
@@ -53,12 +58,58 @@ fn bad(why: &str) -> ApiError {
     ApiError::new(ErrorCode::BadRequest, why)
 }
 
-pub fn mirror_path(dir: &Path, node: &NodeId, remote_path: &str) -> Option<PathBuf> {
+/// The mirror file for one remote session: a name made from the qualified id,
+/// so no remote text picks the file, plus the original extension.
+pub fn mirror_path(
+    dir: &Path,
+    node: &NodeId,
+    qualified: &str,
+    remote_path: &str,
+) -> Option<PathBuf> {
     let name = Path::new(remote_path).file_name()?.to_str()?;
     if name.is_empty() || name == ".." {
         return None;
     }
-    Some(dir.join(node.as_str()).join(name))
+    let mut file = sha256_hex(qualified.as_bytes())[..16].to_string();
+    if let Some(ext) = Path::new(name).extension().and_then(|e| e.to_str()) {
+        if !ext.is_empty() && ext.len() <= 8 && ext.bytes().all(|b| b.is_ascii_alphanumeric()) {
+            file.push('.');
+            file.push_str(ext);
+        }
+    }
+    Some(dir.join(node.as_str()).join(file))
+}
+
+fn is_real_dir(path: &Path) -> bool {
+    std::fs::symlink_metadata(path).is_ok_and(|meta| meta.is_dir())
+}
+
+/// A mirror file counts only when it and its folders are real, not links.
+pub fn is_real_file(path: &Path) -> bool {
+    let plain = std::fs::symlink_metadata(path).is_ok_and(|meta| meta.is_file());
+    plain && path.parent().is_some_and(is_real_dir)
+}
+
+/// Makes `<cluster>/mirror/<node>`, refusing to go through a link at any level.
+fn ensure_real_dirs(folder: &Path) -> std::io::Result<()> {
+    let refuse = || std::io::Error::other("a mirror folder is a link or not a folder");
+    let mut chain: Vec<&Path> = folder.ancestors().take(3).collect();
+    chain.reverse();
+    for dir in chain {
+        match std::fs::symlink_metadata(dir) {
+            Ok(meta) if meta.is_dir() => {}
+            Ok(_) => return Err(refuse()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                notchling_platform::files::ensure_private_dir(dir)
+                    .map_err(std::io::Error::other)?;
+                if !is_real_dir(dir) {
+                    return Err(refuse());
+                }
+            }
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(())
 }
 
 pub fn wipe(cluster_dir: &Path) -> Result<(), String> {
@@ -79,7 +130,6 @@ struct Follow {
     id: String,
     file: PathBuf,
     until: u64,
-    seen: Option<String>,
 }
 
 pub struct Mirror {
@@ -88,6 +138,13 @@ pub struct Mirror {
     source: Arc<dyn TailSource>,
     clock: Clock,
     follows: Mutex<BTreeMap<String, Follow>>,
+    /// The last `gen` per mirror file; it outlives a follow that lapsed.
+    seen: Mutex<BTreeMap<String, String>>,
+    capped: Mutex<BTreeSet<String>>,
+    cap: u64,
+    on_cap: OnCap,
+    epoch: AtomicU64,
+    writing: Mutex<()>,
     nudged: Mutex<bool>,
     wake: Condvar,
     stop: AtomicBool,
@@ -95,7 +152,7 @@ pub struct Mirror {
 
 fn write_chunk(path: &Path, data: &[u8], reset: bool) -> std::io::Result<()> {
     if let Some(parent) = path.parent() {
-        notchling_platform::files::ensure_private_dir(parent).map_err(std::io::Error::other)?;
+        ensure_real_dirs(parent)?;
     }
     if let Ok(meta) = std::fs::symlink_metadata(path) {
         if !meta.is_file() {
@@ -132,12 +189,28 @@ impl Mirror {
         source: Arc<dyn TailSource>,
         clock: Clock,
     ) -> Arc<Mirror> {
+        Mirror::with_cap(dir, remote, source, clock, (MIRROR_CAP, Arc::new(|_| {})))
+    }
+
+    pub fn with_cap(
+        dir: PathBuf,
+        remote: Arc<RemoteSessions>,
+        source: Arc<dyn TailSource>,
+        clock: Clock,
+        (cap, on_cap): (u64, OnCap),
+    ) -> Arc<Mirror> {
         Arc::new(Mirror {
             dir,
             remote,
             source,
             clock,
             follows: Mutex::new(BTreeMap::new()),
+            seen: Mutex::new(BTreeMap::new()),
+            capped: Mutex::new(BTreeSet::new()),
+            cap,
+            on_cap,
+            epoch: AtomicU64::new(0),
+            writing: Mutex::new(()),
             nudged: Mutex::new(false),
             wake: Condvar::new(),
             stop: AtomicBool::new(false),
@@ -169,7 +242,7 @@ impl Mirror {
         let file = row
             .get("transcriptPath")
             .and_then(Value::as_str)
-            .and_then(|path| mirror_path(&self.dir, &q.node, path))
+            .and_then(|path| mirror_path(&self.dir, &q.node, qualified, path))
             .ok_or_else(|| ApiError::new(ErrorCode::Failed, "that session has no transcript"))?;
         let until = (self.clock)() + FOLLOW_MS;
         {
@@ -182,7 +255,6 @@ impl Mirror {
                     "too many sessions are followed at once",
                 ));
             }
-            let seen = follows.get(qualified).and_then(|f| f.seen.clone());
             follows.insert(
                 qualified.to_string(),
                 Follow {
@@ -190,7 +262,6 @@ impl Mirror {
                     id: q.id,
                     file,
                     until,
-                    seen,
                 },
             );
         }
@@ -198,12 +269,19 @@ impl Mirror {
         Ok(json!({"following": true, "id": qualified, "until": until}))
     }
 
+    /// Forgets every follow and what was read. A pull already under way
+    /// writes nothing after this returns.
     pub fn clear(&self) {
+        self.epoch.fetch_add(1, Ordering::SeqCst);
+        let _quiet = lock(&self.writing);
         lock(&self.follows).clear();
+        lock(&self.seen).clear();
+        lock(&self.capped).clear();
     }
 
     pub fn pull(&self) {
         let now = (self.clock)();
+        let epoch = self.epoch.load(Ordering::SeqCst);
         let live: Vec<(String, Follow)> = {
             let mut follows = lock(&self.follows);
             follows.retain(|_, f| f.until > now);
@@ -213,44 +291,92 @@ impl Mirror {
                 .collect()
         };
         for (key, follow) in live {
-            let seen = self.pull_one(&follow);
-            if let Some(slot) = lock(&self.follows).get_mut(&key) {
-                slot.seen = seen;
+            self.pull_one(&key, &follow, epoch);
+        }
+    }
+
+    fn remember(&self, key: &str, seen: Option<String>) {
+        let mut book = lock(&self.seen);
+        match seen {
+            Some(gen) => {
+                if book.len() >= MAX_SEEN && !book.contains_key(key) {
+                    let oldest = book.keys().next().cloned();
+                    if let Some(oldest) = oldest {
+                        book.remove(&oldest);
+                    }
+                }
+                book.insert(key.to_string(), gen);
+            }
+            None => {
+                book.remove(key);
             }
         }
     }
 
-    fn pull_one(&self, follow: &Follow) -> Option<String> {
-        let mut seen = follow.seen.clone();
+    /// Writes one chunk unless the mirror was wiped meanwhile or the file
+    /// would pass the cap. `Ok(false)` means the follow stopped.
+    fn store(
+        &self,
+        key: &str,
+        follow: &Follow,
+        chunk: (&[u8], bool, Option<String>),
+        epoch: u64,
+    ) -> Result<bool, ()> {
+        let (data, reset, gen) = chunk;
+        let _write = lock(&self.writing);
+        if self.epoch.load(Ordering::SeqCst) != epoch {
+            return Err(());
+        }
+        if reset || !data.is_empty() {
+            let had = if reset {
+                0
+            } else {
+                file_len(&follow.file).ok_or(())?
+            };
+            if had + data.len() as u64 > self.cap {
+                lock(&self.follows).remove(key);
+                if lock(&self.capped).insert(key.to_string()) {
+                    (self.on_cap)(&follow.node);
+                }
+                return Ok(false);
+            }
+            write_chunk(&follow.file, data, reset).map_err(|_| ())?;
+        }
+        self.remember(key, gen);
+        Ok(true)
+    }
+
+    fn pull_one(&self, key: &str, follow: &Follow, epoch: u64) {
         for _ in 0..MAX_ROUNDS {
             let Some(from) = file_len(&follow.file) else {
-                return seen;
+                return;
             };
+            let seen = lock(&self.seen).get(key).cloned();
             let Ok(out) = self
                 .source
                 .tail(&follow.node, &follow.id, from, seen.as_deref())
             else {
-                return seen;
+                return;
             };
             let Some(data) = out
                 .get("data")
                 .and_then(Value::as_str)
                 .and_then(base64_decode)
             else {
-                return seen;
+                return;
             };
             let reset = out.get("reset").and_then(Value::as_bool).unwrap_or(false);
-            if (reset || !data.is_empty()) && write_chunk(&follow.file, &data, reset).is_err() {
-                return seen;
+            let gen = out.get("gen").and_then(Value::as_str).map(str::to_string);
+            match self.store(key, follow, (&data, reset, gen), epoch) {
+                Ok(true) => {}
+                Ok(false) | Err(()) => return,
             }
-            seen = out.get("gen").and_then(Value::as_str).map(str::to_string);
             let next = out.get("next").and_then(Value::as_u64).unwrap_or(0);
             let size = out.get("size").and_then(Value::as_u64).unwrap_or(0);
             if data.is_empty() || next >= size {
                 break;
             }
         }
-        seen
     }
 
     pub fn nudge(&self) {

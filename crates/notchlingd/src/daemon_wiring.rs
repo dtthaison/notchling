@@ -214,6 +214,9 @@ impl Ops {
             list
         };
         match &self.remote {
+            Some(remote) if caller.client != ClientKind::Node && every => {
+                Ok((remote.merge_all(&list), landed))
+            }
             Some(remote) if caller.client != ClientKind::Node => Ok((remote.merge(&list), landed)),
             _ => Ok((list, landed)),
         }

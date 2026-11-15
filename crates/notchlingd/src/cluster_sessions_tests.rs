@@ -1,9 +1,10 @@
 use super::{
-    peers_of, tail, LocalRows, NodeSource, Peer, RemoteSessions, RowSource, SessionCalls,
-    NODE_FOLLOW, NODE_SESSIONS, NODE_TAIL, STALE_MS, TAIL_MAX,
+    agent_row, peers_of, tail, LocalRows, NodeSource, Peer, RemoteSessions, RowSource,
+    SessionCalls, NODE_FOLLOW, NODE_SESSIONS, NODE_TAIL, STALE_MS, TAIL_MAX,
 };
 use crate::acting_ops::Room;
 use crate::acting_ops_tests::FakeRoom;
+use crate::cluster_mirror::mirror_path;
 use crate::cluster_node::{Hooks, LocalCalls};
 use crate::cluster_testkit::{eventually, pair, Dir, Opts};
 use notchling_cluster_net::MemNet;
@@ -61,11 +62,11 @@ fn remote_rows_are_qualified_with_node_field() {
     let dir = Dir::new("rows");
     let sessions = remote(&dir);
     let rows = Rows::default();
-    rows.set(
-        &node(1),
-        json!([{"id": "s1", "name": "build", "host": "Background", "transcriptPath": "/w/s1.jsonl",
-                "target": {"job": "ab12"}}]),
-    );
+    let mut row = agent_row("s1");
+    row["name"] = json!("build");
+    row["transcriptPath"] = json!("/w/s1.jsonl");
+    row["target"] = json!({"job": "ab12"});
+    rows.set(&node(1), json!([row]));
     sessions.sync(&[peer(1, "w1", true)], &rows, 0);
     let merged = sessions.merge(&json!([{"id": "local", "host": "Background"}]));
     let list = merged.as_array().unwrap();
@@ -88,16 +89,17 @@ fn a_mirror_file_becomes_the_rows_transcript_path() {
     let dir = Dir::new("rows-mirror");
     let sessions = remote(&dir);
     let rows = Rows::default();
-    rows.set(
-        &node(1),
-        json!([{"id": "s1", "transcriptPath": "/w/s1.jsonl"}]),
-    );
+    let mut row = agent_row("s1");
+    row["transcriptPath"] = json!("/w/s1.jsonl");
+    rows.set(&node(1), json!([row]));
     sessions.sync(&[peer(1, "w1", true)], &rows, 0);
-    let file = dir
-        .path()
-        .join("mirror")
-        .join(node(1).as_str())
-        .join("s1.jsonl");
+    let file = mirror_path(
+        &dir.path().join("mirror"),
+        &node(1),
+        &format!("{}/s1", node(1)),
+        "/w/s1.jsonl",
+    )
+    .unwrap();
     std::fs::create_dir_all(file.parent().unwrap()).unwrap();
     std::fs::write(&file, b"x").unwrap();
     let row = sessions.rows().remove(0);
@@ -105,11 +107,48 @@ fn a_mirror_file_becomes_the_rows_transcript_path() {
 }
 
 #[test]
+fn a_remote_row_is_kept_as_an_agent_with_its_tool_and_nothing_else() {
+    let dir = Dir::new("rows-shape");
+    let sessions = remote(&dir);
+    let rows = Rows::default();
+    let mut codex = agent_row("c1");
+    codex["tool"] = json!("codex");
+    codex["secret"] = json!("not a field of Agent");
+    let mut broken = agent_row("b1");
+    broken["group"] = json!("sideways");
+    rows.set(&node(1), json!([codex, broken, agent_row("s1")]));
+    sessions.sync(&[peer(1, "w1", true)], &rows, 0);
+    let list = sessions.rows();
+    assert_eq!(list.len(), 2, "{list:?}");
+    assert_eq!(list[0]["tool"], "codex");
+    assert!(list[0].get("secret").is_none());
+    assert!(list[1].get("tool").is_none());
+    let claude = sessions.merge(&json!([]));
+    assert_eq!(claude.as_array().unwrap().len(), 1, "only Claude rows");
+    assert_eq!(sessions.merge_all(&json!([])).as_array().unwrap().len(), 2);
+}
+
+#[test]
+fn only_a_client_members_node_is_a_client() {
+    use super::is_client;
+    let status = |client: bool| {
+        json!({"me": node(1), "members": [
+            {"id": node(2), "client": true},
+            {"id": node(1), "client": client},
+        ]})
+    };
+    assert!(is_client(&status(true)));
+    assert!(!is_client(&status(false)));
+    assert!(!is_client(&json!({"me": node(1), "members": []})));
+    assert!(!is_client(&json!({"cluster": null})));
+}
+
+#[test]
 fn offline_node_rows_say_offline() {
     let dir = Dir::new("rows-offline");
     let sessions = remote(&dir);
     let rows = Rows::default();
-    rows.set(&node(1), json!([{"id": "s1"}]));
+    rows.set(&node(1), json!([agent_row("s1")]));
     sessions.sync(&[peer(1, "w1", true)], &rows, 0);
     assert_eq!(sessions.rows()[0]["node"]["online"], true);
     sessions.sync(&[peer(1, "w1", false)], &rows, 1_000);
@@ -124,8 +163,8 @@ fn a_node_that_is_no_longer_a_member_leaves_every_list() {
     let dir = Dir::new("rows-gone");
     let sessions = remote(&dir);
     let rows = Rows::default();
-    rows.set(&node(1), json!([{"id": "s1"}]));
-    rows.set(&node(2), json!([{"id": "s2"}]));
+    rows.set(&node(1), json!([agent_row("s1")]));
+    rows.set(&node(2), json!([agent_row("s2")]));
     sessions.sync(&[peer(1, "w1", true), peer(2, "w2", true)], &rows, 0);
     assert_eq!(sessions.rows().len(), 2);
     sessions.sync(&[peer(2, "w2", true)], &rows, 1_000);
@@ -139,7 +178,7 @@ fn rows_are_asked_on_link_on_an_event_and_when_stale() {
     let dir = Dir::new("rows-asked");
     let sessions = remote(&dir);
     let rows = Rows::default();
-    rows.set(&node(1), json!([{"id": "s1"}]));
+    rows.set(&node(1), json!([agent_row("s1")]));
     let online = [peer(1, "w1", true)];
     sessions.sync(&online, &rows, 0);
     sessions.sync(&online, &rows, 1_000);
@@ -163,7 +202,7 @@ fn a_failed_ask_keeps_the_last_rows_and_retries_soon() {
     let dir = Dir::new("rows-fail");
     let sessions = remote(&dir);
     let rows = Rows::default();
-    rows.set(&node(1), json!([{"id": "s1"}]));
+    rows.set(&node(1), json!([agent_row("s1")]));
     let online = [peer(1, "w1", true)];
     sessions.sync(&online, &rows, 0);
     rows.by_node
@@ -187,7 +226,7 @@ fn rows_without_an_id_are_dropped() {
     let rows = Rows::default();
     rows.set(
         &node(1),
-        json!([{"id": "s1"}, {"name": "no id"}, 7, {"id": 3}, {"id": ""}]),
+        json!([agent_row("s1"), {"name": "no id"}, 7, {"id": 3}, {"id": ""}, agent_row("")]),
     );
     sessions.sync(&[peer(1, "w1", true)], &rows, 0);
     assert_eq!(sessions.rows().len(), 1);
@@ -374,7 +413,9 @@ impl LocalCalls for Listing {
     fn call(&self, op: &str, _args: &Value, _origin: &Origin) -> Result<Value, ApiError> {
         match op {
             NODE_SESSIONS => {
-                Ok(json!([{"id": "s1", "name": "remote one", "transcriptPath": null}]))
+                let mut row = agent_row("s1");
+                row["name"] = json!("remote one");
+                Ok(json!([row]))
             }
             other => Ok(json!({"ran": other})),
         }

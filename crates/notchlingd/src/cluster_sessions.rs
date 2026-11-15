@@ -1,11 +1,12 @@
 use crate::acting_ops::Room;
 use crate::cluster_forward::{FOLLOW_LEASE_MS, NODE_FOLLOW};
-use crate::cluster_mirror::mirror_path;
+use crate::cluster_mirror::{is_real_file, mirror_path};
 use crate::cluster_node::{ClusterNode, LocalCalls};
 use crate::cluster_switches::LateHandler;
 use notchling_engine::bridge::net::crypto::base64;
 use notchling_engine::cluster::wire::{Origin, OriginTier};
 use notchling_engine::cluster::{qualify, LocalCmd, NodeId};
+use notchling_engine::sessions::Agent;
 use notchling_local_api::{ops, topics, ApiError, Caller, ClientKind, ErrorCode, Tier};
 use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
@@ -244,8 +245,11 @@ struct Book {
     dirty: Vec<NodeId>,
 }
 
+pub type Gate = Arc<dyn Fn() -> bool + Send + Sync>;
+
 pub struct RemoteSessions {
     mirror: PathBuf,
+    gate: Gate,
     book: Mutex<Book>,
     nudged: Mutex<bool>,
     wake: Condvar,
@@ -257,24 +261,65 @@ fn valid(rows: Value) -> Option<Vec<Value>> {
     };
     Some(
         rows.into_iter()
-            .filter(|row| {
-                row.get("id")
-                    .and_then(Value::as_str)
-                    .is_some_and(|id| !id.is_empty())
+            .filter_map(|row| {
+                let tool = row.get("tool").and_then(Value::as_str).map(str::to_string);
+                let agent: Agent = serde_json::from_value(row).ok()?;
+                if agent.id.is_empty() {
+                    return None;
+                }
+                let mut clean = serde_json::to_value(agent).ok()?;
+                if let Some(tool) = tool {
+                    clean["tool"] = Value::String(tool);
+                }
+                Some(clean)
             })
             .take(MAX_ROWS)
             .collect(),
     )
 }
 
+fn is_claude(row: &Value) -> bool {
+    row.get("tool")
+        .and_then(Value::as_str)
+        .is_none_or(|tool| tool == "claude")
+}
+
+pub fn is_client(status: &Value) -> bool {
+    let me = status.get("me").and_then(Value::as_str);
+    status
+        .get("members")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .find(|m| m.get("id").and_then(Value::as_str) == me)
+        .and_then(|m| m.get("client").and_then(Value::as_bool))
+        .unwrap_or(false)
+}
+
 impl RemoteSessions {
     pub fn new(mirror: PathBuf) -> RemoteSessions {
         RemoteSessions {
             mirror,
+            gate: Arc::new(|| true),
             book: Mutex::new(Book::default()),
             nudged: Mutex::new(false),
             wake: Condvar::new(),
         }
+    }
+
+    pub fn with_gate(mut self, gate: Gate) -> RemoteSessions {
+        self.gate = gate;
+        self
+    }
+
+    pub fn allowed(&self) -> bool {
+        (self.gate)()
+    }
+
+    pub fn clear(&self) {
+        let mut book = lock(&self.book);
+        book.nodes.clear();
+        book.dirty.clear();
     }
 
     pub fn mark_dirty(&self, node: &NodeId) {
@@ -305,6 +350,10 @@ impl RemoteSessions {
     }
 
     pub fn sync(&self, peers: &[Peer], source: &dyn RowSource, now: u64) {
+        if !self.allowed() {
+            self.clear();
+            return;
+        }
         let wanted: Vec<NodeId> = {
             let mut book = lock(&self.book);
             book.nodes.retain(|id, _| peers.iter().any(|p| p.id == *id));
@@ -347,7 +396,8 @@ impl RemoteSessions {
         let fields = row.as_object()?;
         let id = fields.get("id")?.as_str()?;
         let mut out: Map<String, Value> = fields.clone();
-        out.insert("id".into(), json!(qualify(node, id)));
+        let qualified = qualify(node, id);
+        out.insert("id".into(), json!(qualified));
         out.insert("host".into(), json!(node));
         out.insert(
             "node".into(),
@@ -356,14 +406,22 @@ impl RemoteSessions {
         let mirrored = fields
             .get("transcriptPath")
             .and_then(Value::as_str)
-            .and_then(|path| mirror_path(&self.mirror, node, path))
-            .filter(|path| path.is_file())
+            .and_then(|path| mirror_path(&self.mirror, node, &qualified, path))
+            .filter(|path| is_real_file(path))
             .map(|path| json!(path.to_string_lossy()));
         out.insert("transcriptPath".into(), mirrored.unwrap_or(Value::Null));
         Some(Value::Object(out))
     }
 
+    /// Every remote row, whatever its tool. Empty unless this node is a client.
     pub fn rows(&self) -> Vec<Value> {
+        self.rows_for(true)
+    }
+
+    fn rows_for(&self, all: bool) -> Vec<Value> {
+        if !self.allowed() {
+            return Vec::new();
+        }
         let book = lock(&self.book);
         book.nodes
             .iter()
@@ -371,17 +429,28 @@ impl RemoteSessions {
                 remote
                     .rows
                     .iter()
+                    .filter(move |row| all || is_claude(row))
                     .filter_map(|row| self.shaped(node, remote, row))
             })
             .collect()
     }
 
+    /// The local list plus the Claude rows of other nodes, as the app reads it.
     pub fn merge(&self, local: &Value) -> Value {
+        Self::joined(local, self.rows_for(false))
+    }
+
+    /// The same with every tool's rows, for `tools: "all"`.
+    pub fn merge_all(&self, local: &Value) -> Value {
+        Self::joined(local, self.rows_for(true))
+    }
+
+    fn joined(local: &Value, remote: Vec<Value>) -> Value {
         let mut rows = match local {
             Value::Array(rows) => rows.clone(),
             _ => Vec::new(),
         };
-        rows.extend(self.rows());
+        rows.extend(remote);
         Value::Array(rows)
     }
 
@@ -434,6 +503,16 @@ impl Refresher {
         self.stop.store(true, Ordering::SeqCst);
         self.remote.nudge();
     }
+}
+
+/// A row the way Agent serializes, for tests that stand in for a remote node.
+#[cfg(test)]
+pub(crate) fn agent_row(id: &str) -> Value {
+    json!({
+        "id": id, "name": id, "project": "p", "cwd": "/tmp", "group": "completed",
+        "label": "Idle", "sinceMs": 1, "target": {"job": id}, "host": "Background",
+        "headless": false,
+    })
 }
 
 #[cfg(test)]
