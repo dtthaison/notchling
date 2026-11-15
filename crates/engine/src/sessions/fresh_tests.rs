@@ -44,7 +44,7 @@ fn a_row_is_read_again_from_the_job_and_live_files_each_time() {
     assert_eq!(first.detail.as_deref(), Some("asks"));
     dir.write(
         "claude/jobs/be50d36a/state.json",
-        &job("working", 4, "new turn"),
+        &job("working", 0, "new turn"),
     );
     let next = job_row(&roots(&dir), &probes, "be50d36a").unwrap();
     assert!(!next.at_prompt);
