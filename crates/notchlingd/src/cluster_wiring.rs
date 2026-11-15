@@ -4,8 +4,12 @@ use crate::cluster_dispatch::{DispatchCalls, DispatchOps, NodeReporter};
 use crate::cluster_dispatch_delegate::RealDelegate;
 use crate::cluster_forward::{Forward, NodeForward};
 use crate::cluster_join::{JoinAsker, JOIN_WAIT};
-use crate::cluster_main::{MainFollower, EVERY as MAIN_EVERY};
+use crate::cluster_main::{MainFollower, Originators, EVERY as MAIN_EVERY};
 use crate::cluster_mirror::{FollowOps, Mirror, OnCap, TailSource, MIRROR_CAP, MIRROR_DIR};
+use crate::cluster_move::{LateLink, MoveGate, MoveParts, Mover, RealActs, RealRestorer};
+use crate::cluster_move_calls::MoveCalls;
+use crate::cluster_move_run::MoveRunner;
+use crate::cluster_move_snaps::RealSnaps;
 use crate::cluster_node::{
     ClusterLog, ClusterNode, ClusterSetup, Hooks, JoinAsk, LocalCalls, NetSide, Probe, Submit, TICK,
 };
@@ -34,6 +38,7 @@ use notchling_engine::cluster::core::SnapAsk;
 use notchling_engine::cluster::wire::{Origin, OriginTier};
 use notchling_engine::cluster::{Desired, NodeId};
 use notchling_engine::control::{Launcher, RealLauncher};
+use notchling_engine::git::SandboxedLauncher;
 use notchling_events::kinds::security::{ClusterStep, SwitchCause};
 use notchling_events::spec::Outcome;
 use notchling_local_api::spawn::in_cargo_target;
@@ -230,6 +235,7 @@ pub struct ClusterParts {
     pub shells: Arc<ShellJobs>,
     pub remote: Arc<RemoteSessions>,
     pub snap: Arc<SnapSender>,
+    pub gate: Arc<MoveGate>,
     delegate: Arc<RealDelegate>,
     mirror: Arc<Mirror>,
     publisher: Arc<Publisher>,
@@ -347,6 +353,7 @@ impl ClusterParts {
         let launcher: Arc<dyn Launcher> =
             Arc::new(RealLauncher::with_claude(PathBuf::from("claude")));
         let git: Arc<dyn Launcher> = launcher.clone();
+        let move_launcher = launcher.clone();
         let blobs = Blobs::new(layout.cluster_dir());
         let workspace = Workspace::new(layout.cluster_dir(), launcher.clone(), blobs.clone());
         let sender_slot: SenderSlot = Arc::new(OnceLock::new());
@@ -380,15 +387,57 @@ impl ClusterParts {
             Arc::new(WorkspaceCalls::new(sessions_calls, workspace)),
             snap.node.clone(),
         ));
-        let local: Arc<dyn LocalCalls> = Arc::new(NodeCalls {
-            inner: Arc::new(DispatchCalls::new(
-                workspace_calls,
-                shells.clone(),
-                delegate.clone(),
-                takes,
-            )),
-            switches: switches.clone(),
+        let move_link = Arc::new(LateLink::default());
+        let mover = Mover::new(MoveParts {
+            link: move_link.clone(),
+            acts: Arc::new(RealActs {
+                daemon: DaemonCalls::new(handler.clone(), room.clone()),
+                me: {
+                    let holder = holder.clone();
+                    Arc::new(move || holder.get().map(|node| node.me().clone()))
+                },
+                launcher: move_launcher.clone(),
+                roots: layout.roots(),
+                pause: Arc::new(|ms| std::thread::sleep(std::time::Duration::from_millis(ms))),
+            }),
+            rows: Arc::new(HandlerRows::new(handler.clone())),
+            snaps: Arc::new(RealSnaps {
+                node: move_link.clone(),
+                runner: snap_run.clone(),
+                sender: snap.sender.clone(),
+            }),
+            inbox: inbox.clone(),
+            gate: Arc::new(MoveGate::default()),
+            cluster: layout.cluster_dir(),
+            clock: Arc::new(crate::acting_ops::now_ms),
+            ready: {
+                let last = last_set.clone();
+                Arc::new(move |status, to| {
+                    notchling_engine::cluster::ready::assess(status, last.mb())
+                        .get(to)
+                        .map_or(Err("it isn't a standby".to_string()), |a| a.ready.clone())
+                })
+            },
+            restore: Arc::new(RealRestorer {
+                cluster: layout.cluster_dir(),
+                home: layout.home(),
+                git: move_launcher.clone(),
+                read: Arc::new(SandboxedLauncher::new(move_launcher.clone())),
+            }),
         });
+        let runner = MoveRunner::new(mover.clone(), layout.cluster_dir());
+        let local: Arc<dyn LocalCalls> = Arc::new(MoveCalls::new(
+            Arc::new(NodeCalls {
+                inner: Arc::new(DispatchCalls::new(
+                    workspace_calls,
+                    shells.clone(),
+                    delegate.clone(),
+                    takes,
+                )),
+                switches: switches.clone(),
+            }),
+            mover.clone(),
+        ));
         let hooks: Arc<dyn Hooks> = Arc::new(ClusterHooks {
             asker: JoinAsker::new(inbox.clone(), JOIN_WAIT),
             switches,
@@ -408,6 +457,8 @@ impl ClusterParts {
             rejoin_on_start(&link, node, room.as_ref(), &audit);
             let _ = tail.0.set(NodeSource::new(node.clone()));
             let _ = holder.set(node.clone());
+            let _ = move_link.0.set(node.clone());
+            runner.recover();
             mirror.spawn();
             let shown = publisher.clone();
             refresher = Some(Refresher::spawn(
@@ -415,10 +466,11 @@ impl ClusterParts {
                 remote.clone(),
                 Arc::new(move || shown.publish()),
             ));
-            main_follower = Some(MainFollower::spawn(
+            main_follower = Some(MainFollower::spawn_with(
                 node.clone(),
                 Arc::new(HandlerRows::new(handler.clone())),
                 MAIN_EVERY,
+                Originators::with_roots(layout.roots()),
             ));
             snap_observer = Some(SnapObserver::spawn(
                 node.clone(),
@@ -429,7 +481,8 @@ impl ClusterParts {
         }
         let ops = Arc::new(
             ClusterOps::new(node.clone(), link, room.clone(), audit)
-                .with_last_set(Arc::new(move || last_set.mb())),
+                .with_last_set(Arc::new(move || last_set.mb()))
+                .with_mover(runner.clone()),
         );
         let code: Arc<dyn CodeSender> = sender.clone();
         let dispatch = DispatchOps::with_code(node.clone(), shells.clone(), Some(code));
@@ -444,6 +497,7 @@ impl ClusterParts {
             delegate,
             remote,
             snap: snap.sender,
+            gate: mover.gate().clone(),
             mirror,
             publisher,
             refresher,

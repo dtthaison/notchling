@@ -1,5 +1,6 @@
 mod host;
 mod invariants;
+mod move_scenario;
 mod net;
 mod run;
 mod scenario;
@@ -9,6 +10,7 @@ mod world;
 
 pub use host::SimHost;
 pub use invariants::{check, Violation};
+pub use move_scenario::{move_cast, run_move_seed, run_move_world, MoveCast};
 pub use net::SimNet;
 pub use scenario::{run_seed, run_seed_with, run_world, stale_call_scenario, Failure, Plant};
 pub use snap_scenario::{run_snap_seed, run_snap_world, snap_cast, SnapCast};
@@ -43,5 +45,7 @@ impl Rng {
     }
 }
 
+#[cfg(test)]
+mod move_tests;
 #[cfg(test)]
 mod sim_tests;

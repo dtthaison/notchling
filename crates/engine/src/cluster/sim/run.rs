@@ -223,6 +223,10 @@ impl World {
                 });
             }
         }
+        if op == "move.switch" {
+            self.run_takeover(n, call, args);
+            return;
+        }
         let result = self.host.run(n, op, args, term, self.now);
         let at = self.now + 1 + self.rng.below(5);
         self.schedule(

@@ -1,10 +1,12 @@
 use crate::acting_ops::{bad, Room};
+use crate::cluster_move_run::MoveRunner;
 use crate::cluster_node::{ClusterLog, ClusterNode};
 use crate::op_group::OpGroup;
 use crate::switches::SwitchFlag;
 use notchling_engine::cluster::join::decode_token;
 use notchling_engine::cluster::main_sessions::valid_id;
 use notchling_engine::cluster::ready::annotate;
+use notchling_engine::cluster::wire::{Origin, OriginTier};
 use notchling_engine::cluster::{Desired, LocalCmd, NodeId};
 use notchling_events::kinds::security::SwitchCause;
 use notchling_events::spec::Outcome;
@@ -12,7 +14,7 @@ use notchling_local_api::{ops, topics, ApiError, Caller, ErrorCode, OpSpec, Tier
 use serde_json::{json, Value};
 use std::sync::Arc;
 
-pub const CLUSTER_OPS: [&str; 7] = [
+pub const CLUSTER_OPS: [&str; 9] = [
     ops::CLUSTER_STATUS,
     ops::CLUSTER_CREATE,
     ops::CLUSTER_JOIN_TOKEN,
@@ -20,6 +22,8 @@ pub const CLUSTER_OPS: [&str; 7] = [
     ops::CLUSTER_MEMBER_SET,
     ops::CLUSTER_REMOVE,
     ops::CLUSTER_MAIN_SET,
+    ops::CLUSTER_MOVE_HOME,
+    ops::CLUSTER_MOVE_NOW,
 ];
 
 pub struct ClusterOps {
@@ -28,6 +32,7 @@ pub struct ClusterOps {
     room: Arc<dyn Room>,
     audit: ClusterLog,
     last_set_mb: Arc<dyn Fn() -> u64 + Send + Sync>,
+    mover: Option<Arc<MoveRunner>>,
 }
 
 fn text<'a>(args: &'a Value, key: &str, usage: &str) -> Result<&'a str, ApiError> {
@@ -66,11 +71,17 @@ impl ClusterOps {
             room,
             audit,
             last_set_mb: Arc::new(|| 0),
+            mover: None,
         }
     }
 
     pub fn with_last_set(mut self, last_set_mb: Arc<dyn Fn() -> u64 + Send + Sync>) -> ClusterOps {
         self.last_set_mb = last_set_mb;
+        self
+    }
+
+    pub fn with_mover(mut self, mover: Arc<MoveRunner>) -> ClusterOps {
+        self.mover = Some(mover);
         self
     }
 
@@ -88,6 +99,7 @@ impl ClusterOps {
             Ok(node) => {
                 let mut status = node.status();
                 annotate(&mut status, (self.last_set_mb)());
+                status["move"] = self.mover.as_ref().map_or(Value::Null, |m| m.status());
                 status
             }
             Err(why) => {
@@ -139,6 +151,63 @@ impl ClusterOps {
         self.node()?.local(LocalCmd::SetMain { session, main })
     }
 
+    fn at_home(&self, op: &str, args: &Value) -> Result<Option<Value>, ApiError> {
+        let node = self.node()?;
+        let status = node.status();
+        let me = status.get("me").and_then(Value::as_str);
+        let home = status["cluster"]["home"].as_str();
+        let Some(home) = home else {
+            return Err(ApiError::new(
+                ErrorCode::Failed,
+                "this node is in no cluster",
+            ));
+        };
+        if Some(home) == me {
+            return Ok(None);
+        }
+        let home = NodeId::parse(home).ok_or_else(|| bad("the cluster's primary is unknown"))?;
+        let origin = Origin {
+            node: node.me().clone(),
+            tier: OriginTier::App,
+        };
+        node.local(LocalCmd::Forward {
+            node: home,
+            op: op.to_string(),
+            args: args.clone(),
+            origin,
+        })
+        .map(Some)
+    }
+
+    fn mover(&self) -> Result<&Arc<MoveRunner>, ApiError> {
+        self.mover
+            .as_ref()
+            .ok_or_else(|| ApiError::new(ErrorCode::Failed, "this machine can't move the primary"))
+    }
+
+    fn move_home(&self, args: &Value) -> Result<Value, ApiError> {
+        let usage = "cluster.move_home takes {\"to\": node id}";
+        let fields = args.as_object().ok_or_else(|| bad(usage))?;
+        if fields.len() != 1 {
+            return Err(bad(usage));
+        }
+        let to = text(args, "to", usage)
+            .ok()
+            .and_then(NodeId::parse)
+            .ok_or_else(|| bad(usage))?;
+        if let Some(answer) = self.at_home(ops::CLUSTER_MOVE_HOME, args)? {
+            return Ok(answer);
+        }
+        self.mover()?.start(&to, false)
+    }
+
+    fn move_now(&self, args: &Value) -> Result<Value, ApiError> {
+        if let Some(answer) = self.at_home(ops::CLUSTER_MOVE_NOW, args)? {
+            return Ok(answer);
+        }
+        self.mover()?.move_now()
+    }
+
     fn member_set(&self, args: &Value) -> Result<Value, ApiError> {
         let usage = "cluster.member.set takes {\"node\": id, \"canBeMaster\"?, \"client\"?, \"reference\"?, \"acceptsDelegation\"?, \"headless\"?, \"desired\"?}";
         let known = [
@@ -185,7 +254,9 @@ impl OpGroup for ClusterOps {
             ops::CLUSTER_CREATE
             | ops::CLUSTER_MEMBER_SET
             | ops::CLUSTER_REMOVE
-            | ops::CLUSTER_MAIN_SET => Some(OpSpec::APP),
+            | ops::CLUSTER_MAIN_SET
+            | ops::CLUSTER_MOVE_HOME
+            | ops::CLUSTER_MOVE_NOW => Some(OpSpec::APP),
             _ => None,
         }
     }
@@ -201,6 +272,8 @@ impl OpGroup for ClusterOps {
             ops::CLUSTER_JOIN => self.join(caller, args),
             ops::CLUSTER_MEMBER_SET => self.member_set(args),
             ops::CLUSTER_MAIN_SET => self.main_set(args),
+            ops::CLUSTER_MOVE_HOME => self.move_home(args),
+            ops::CLUSTER_MOVE_NOW => self.move_now(args),
             ops::CLUSTER_REMOVE => {
                 let node = node_arg(args, "cluster.remove takes {\"node\": id}")?;
                 self.node()?.local(LocalCmd::Remove { node })

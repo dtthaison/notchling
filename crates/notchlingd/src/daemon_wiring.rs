@@ -72,6 +72,7 @@ pub struct Ops {
     groups: Vec<Arc<dyn OpGroup>>,
     forward: Option<Arc<dyn Forward>>,
     remote: Option<Arc<RemoteSessions>>,
+    gate: Option<Arc<crate::cluster_move::MoveGate>>,
     topic_list: Vec<&'static str>,
     first: Arc<FirstScan>,
     first_wait: Duration,
@@ -91,6 +92,7 @@ impl Ops {
             groups: Vec::new(),
             forward: None,
             remote: None,
+            gate: None,
             topic_list: vec![topics::SESSIONS],
             first: FirstScan::open(),
             first_wait: FIRST_LIST_WAIT,
@@ -171,6 +173,11 @@ impl Ops {
     ) -> Ops {
         self.forward = forward;
         self.remote = Some(remote);
+        self
+    }
+
+    pub fn with_move_gate(mut self, gate: Arc<crate::cluster_move::MoveGate>) -> Ops {
+        self.gate = Some(gate);
         self
     }
 
@@ -296,6 +303,10 @@ impl Handler for Ops {
     }
 
     fn call(&self, caller: &Caller, op: &str, args: &Value) -> Result<Value, ApiError> {
+        if let Some(gate) = &self.gate {
+            let acting = self.acting.as_ref();
+            gate.check(op, args, &|id| acting.and_then(|a| a.prompt_session(id)))?;
+        }
         if let Some(routed) = self
             .forward
             .as_ref()
@@ -719,6 +730,7 @@ impl Wired {
             .with_group(self.cluster.returns.clone())
             .with_shells(self.cluster.shells.clone())
             .with_cluster(self.cluster.forward(), self.cluster.remote.clone())
+            .with_move_gate(self.cluster.gate.clone())
             .with_group(Arc::new(git))
             .with_group(Arc::new(AwakeOps::new(self.awake.clone())))
             .with_group(self.codex_children.clone())

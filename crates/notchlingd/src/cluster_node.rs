@@ -177,6 +177,7 @@ pub(crate) fn known_node_ops() -> &'static [&'static str] {
         names.extend(crate::cluster_dispatch::NODE_OPS);
         names.extend(crate::cluster_workspace::NODE_OPS);
         names.extend(crate::snap_recv::SNAP_OPS);
+        names.extend(crate::cluster_move::MOVE_OPS);
         names
     })
 }
@@ -325,6 +326,15 @@ impl ClusterNode {
 
     pub fn local_within(&self, cmd: LocalCmd, within: Duration) -> Result<Value, ApiError> {
         self.wait_within(|answer| In::Local(cmd, Some(answer)), within)
+    }
+
+    pub fn local_wire(&self, cmd: LocalCmd, within: Duration) -> Result<Value, WireError> {
+        let (answer, rx) = channel();
+        self.tx
+            .send(In::Local(cmd, Some(answer)))
+            .map_err(|_| WireError::new("not_sent", "the cluster node has stopped"))?;
+        rx.recv_timeout(within)
+            .unwrap_or_else(|_| Err(WireError::new("timeout", "the cluster node didn't answer")))
     }
 
     pub fn create(&self, name: &str) -> Result<Value, ApiError> {

@@ -4,6 +4,7 @@ mod forward;
 mod join;
 mod link;
 mod snap;
+mod takeover;
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -20,12 +21,14 @@ use super::wire::{Msg, Origin, OriginTier, WireError};
 use crate::sessions::Agent;
 
 pub use snap::SnapAsk;
+pub use takeover::{Takeover, NOT_SENT};
 
 pub const PING_MS: u64 = 5_000;
 pub const OFFLINE_MS: u64 = 20_000;
 pub const CALL_MS: u64 = 30_000;
 pub const DELEGATE_CALL_MS: u64 = 36 * 60_000;
 pub const WORKSPACE_CALL_MS: u64 = 20 * 60_000;
+pub const MOVE_CALL_MS: u64 = 5 * 60_000;
 pub const STATUS_JOBS: usize = 50;
 pub const JOIN_ANSWER_MS: u64 = 15_000;
 pub const DIAL_BACKOFF_MS: (u64, u64) = (1_000, 60_000);
@@ -119,9 +122,17 @@ pub enum LocalCmd {
     MainSeen {
         agents: Vec<Agent>,
         codex_exec: BTreeSet<String>,
+        respawn: BTreeMap<String, Vec<String>>,
     },
     Snapshot {
         trigger: Trigger,
+    },
+    TakePrimary {
+        takeover: Box<Takeover>,
+    },
+    MoveSwitch {
+        to: NodeId,
+        sessions: Vec<String>,
     },
 }
 
@@ -544,5 +555,7 @@ mod core_tests_jobs;
 mod core_tests_main;
 #[cfg(test)]
 mod core_tests_snap;
+#[cfg(test)]
+mod core_tests_takeover;
 #[cfg(test)]
 mod core_tests_terms;

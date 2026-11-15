@@ -28,6 +28,10 @@ pub mod cluster_host_facts;
 pub mod cluster_join;
 pub mod cluster_main;
 pub mod cluster_mirror;
+pub mod cluster_move;
+pub mod cluster_move_calls;
+pub mod cluster_move_run;
+pub mod cluster_move_snaps;
 pub mod cluster_node;
 pub mod cluster_ops;
 pub mod cluster_redact;
@@ -141,6 +145,8 @@ mod bridge_models_tests;
 mod catalog_ops_tests;
 #[cfg(test)]
 mod catalog_roles_tests;
+#[cfg(test)]
+mod cluster_move_tests;
 #[cfg(test)]
 mod cluster_redact_tests;
 #[cfg(test)]

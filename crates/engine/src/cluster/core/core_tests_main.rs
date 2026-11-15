@@ -47,6 +47,7 @@ fn the_home_keeps_main_current_from_the_session_list() {
         LocalCmd::MainSeen {
             agents: vec![agent("job-1"), agent("agy:x"), agent("codex:other")],
             codex_exec: BTreeSet::new(),
+            respawn: Default::default(),
         },
     );
     let state = hub.core(&m5).state().expect("state");
@@ -64,6 +65,7 @@ fn a_member_that_is_not_the_home_ignores_the_session_list() {
         LocalCmd::MainSeen {
             agents: vec![agent("job-1")],
             codex_exec: BTreeSet::new(),
+            respawn: Default::default(),
         },
     );
     assert!(hub.core(&c1).state().expect("state").main.is_empty());
@@ -78,6 +80,7 @@ fn keep_on_reaches_the_home_from_a_client() {
         LocalCmd::MainSeen {
             agents: vec![agent("job-1")],
             codex_exec: BTreeSet::new(),
+            respawn: Default::default(),
         },
     );
     hub.local(
@@ -139,6 +142,7 @@ fn seen(hub: &mut Hub, who: &str, ids: &[&str]) {
         LocalCmd::MainSeen {
             agents: ids.iter().map(|i| agent(i)).collect(),
             codex_exec: BTreeSet::new(),
+            respawn: Default::default(),
         },
     );
 }

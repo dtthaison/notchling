@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -139,11 +139,17 @@ impl NodeCore {
                     self.relay_to_home(id, "cluster.main.set", args, out);
                 }
             }
-            LocalCmd::MainSeen { agents, codex_exec } => {
-                self.main_seen(&agents, &codex_exec, out);
+            LocalCmd::MainSeen {
+                agents,
+                codex_exec,
+                respawn,
+            } => {
+                self.main_seen(&agents, &codex_exec, &respawn, out);
                 self.finish(target, Ok(json!({})), out);
             }
             LocalCmd::Snapshot { trigger } => self.snap_now(target, trigger, out),
+            LocalCmd::TakePrimary { takeover } => self.take_primary(target, *takeover, out),
+            LocalCmd::MoveSwitch { to, sessions } => self.move_switch(id, (to, sessions), out),
             LocalCmd::SetVersions { versions } => self.set_versions(id, versions, out),
             LocalCmd::Dispatch { key, spec, tier } => {
                 if self.is_home() {
@@ -362,6 +368,7 @@ impl NodeCore {
         &mut self,
         agents: &[Agent],
         codex_exec: &BTreeSet<String>,
+        respawn: &BTreeMap<String, Vec<String>>,
         out: &mut Vec<Effect>,
     ) {
         if !self.is_home() {
@@ -371,13 +378,18 @@ impl NodeCore {
         let Some(state) = &self.state else {
             return;
         };
-        let (main, ended, kept) = reconcile(
+        let (mut main, ended, kept) = reconcile(
             &state.main,
             &state.ended,
             agents,
             (&state.kept, codex_exec),
             self.wall_ms,
         );
+        for (id, session) in &mut main {
+            if let Some(flags) = respawn.get(id) {
+                session.respawn = flags.clone();
+            }
+        }
         let _ = self.apply(Command::Main { main, ended, kept }, out);
     }
 

@@ -236,6 +236,10 @@ impl ActingOps {
         &self.prompts
     }
 
+    pub fn prompt_session(&self, id: &str) -> Option<String> {
+        self.prompts.get(id).map(|prompt| prompt.session_id)
+    }
+
     pub fn close(&self) {
         for prompt in self.prompts.close() {
             self.resolved(&prompt, "pass", "stopping");

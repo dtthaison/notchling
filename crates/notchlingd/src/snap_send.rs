@@ -243,6 +243,13 @@ impl SnapSender {
             .and_then(|s| s.sent.clone())
     }
 
+    pub fn latest_manifest(&self) -> Option<Manifest> {
+        lock(&self.inner.state)
+            .latest
+            .as_ref()
+            .map(|offered| offered.manifest.clone())
+    }
+
     pub fn last_error(&self, node: &NodeId) -> Option<String> {
         lock(&self.inner.state)
             .slots

@@ -1,9 +1,11 @@
 use crate::cluster_node::ClusterNode;
 use crate::cluster_sessions::LocalRows;
-use notchling_engine::cluster::LocalCmd;
-use notchling_engine::sessions::Agent;
+use notchling_engine::cluster::main_sessions::tool_of_row;
+use notchling_engine::cluster::{LocalCmd, Tool};
+use notchling_engine::control::session::flags_for_job;
+use notchling_engine::sessions::{Agent, AgentTarget, Roots};
 use serde_json::Value;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::io::Read;
 use std::path::Path;
 use std::sync::mpsc::{channel, RecvTimeoutError, Sender};
@@ -54,9 +56,31 @@ pub fn originator(line: &str) -> Option<String> {
 #[derive(Default)]
 pub struct Originators {
     seen: Mutex<HashMap<String, bool>>,
+    roots: Option<Roots>,
 }
 
 impl Originators {
+    pub fn with_roots(roots: Roots) -> Originators {
+        Originators {
+            seen: Mutex::new(HashMap::new()),
+            roots: Some(roots),
+        }
+    }
+
+    pub fn respawn_flags(&self, agents: &[Agent]) -> BTreeMap<String, Vec<String>> {
+        let Some(roots) = &self.roots else {
+            return BTreeMap::new();
+        };
+        agents
+            .iter()
+            .filter(|a| a.node.is_none() && tool_of_row(&a.id) == Tool::Claude)
+            .filter_map(|a| match &a.target {
+                AgentTarget::Job(job) => Some((a.id.clone(), flags_for_job(roots, job, &a.name))),
+                _ => None,
+            })
+            .collect()
+    }
+
     pub fn exec_ids(&self, agents: &[Agent]) -> BTreeSet<String> {
         let mut seen = self.seen.lock().unwrap_or_else(|e| e.into_inner());
         let live: BTreeSet<&str> = agents
@@ -95,8 +119,13 @@ pub fn tick(node: &ClusterNode, rows: &dyn LocalRows, origins: &Originators) -> 
     };
     let agents = agents_of(rows);
     let codex_exec = origins.exec_ids(&agents);
-    node.local(LocalCmd::MainSeen { agents, codex_exec })
-        .is_ok()
+    let respawn = origins.respawn_flags(&agents);
+    node.local(LocalCmd::MainSeen {
+        agents,
+        codex_exec,
+        respawn,
+    })
+    .is_ok()
 }
 
 pub struct MainFollower {
@@ -109,11 +138,19 @@ impl MainFollower {
         rows: Arc<dyn LocalRows>,
         every: Duration,
     ) -> MainFollower {
+        MainFollower::spawn_with(node, rows, every, Originators::default())
+    }
+
+    pub fn spawn_with(
+        node: Arc<ClusterNode>,
+        rows: Arc<dyn LocalRows>,
+        every: Duration,
+        origins: Originators,
+    ) -> MainFollower {
         let (stop, stopped) = channel::<()>();
         let spawned = std::thread::Builder::new()
             .name("cluster-main".into())
             .spawn(move || {
-                let origins = Originators::default();
                 while let Err(RecvTimeoutError::Timeout) = stopped.recv_timeout(every) {
                     tick(&node, rows.as_ref(), &origins);
                 }

@@ -10,6 +10,7 @@ pub mod jobs;
 pub mod join;
 pub mod main_sessions;
 pub mod members;
+pub mod move_home;
 pub mod outward;
 pub mod persist;
 pub mod policy;
@@ -53,6 +54,8 @@ mod jobs_tests;
 mod join_tests;
 #[cfg(test)]
 mod main_sessions_tests;
+#[cfg(test)]
+mod move_home_tests;
 #[cfg(test)]
 mod outward_tests;
 #[cfg(test)]

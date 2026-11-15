@@ -9,6 +9,7 @@ use crate::versions::{self, Version};
 pub const NODE_PROTO: u32 = 1;
 pub const CLUSTER_SCHEMA: u32 = 1;
 pub const LINUX_CLAUDE_PROVEN: bool = false;
+pub const RESUME_PROOF_RECORDED: bool = false;
 pub const FEATURE_DISPATCH: &str = "dispatch";
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]

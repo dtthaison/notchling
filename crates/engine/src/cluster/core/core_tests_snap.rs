@@ -46,6 +46,7 @@ fn with_standby() -> Hub {
         LocalCmd::MainSeen {
             agents: vec![agent("sess-1")],
             codex_exec: BTreeSet::new(),
+            respawn: Default::default(),
         },
     );
     hub

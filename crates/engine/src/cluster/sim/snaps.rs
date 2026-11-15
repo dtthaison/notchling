@@ -352,6 +352,7 @@ impl World {
                 LocalCmd::MainSeen {
                     agents,
                     codex_exec: BTreeSet::new(),
+                    respawn: Default::default(),
                 },
             );
         }
