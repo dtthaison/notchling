@@ -51,6 +51,10 @@ impl NodeCore {
             self.finish(target, Err(err), out);
             return;
         }
+        if let Err(e) = self.fenced() {
+            self.finish(target, Err(e), out);
+            return;
+        }
         if let Err(e) = check_spec(&spec) {
             self.finish(target, Err(e), out);
             return;

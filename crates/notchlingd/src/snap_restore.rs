@@ -3,12 +3,13 @@ use crate::snap_repo::read_repo;
 pub use crate::snap_restore_fs::DbHooks;
 use crate::snap_restore_fs::{
     append_tail, make_dirs, merge_devices, merge_index, move_aside, put_dir, put_file, real_folder,
-    repo_place, restore_db,
+    repo_place, restore_db, stage_db,
 };
 use notchling_engine::cluster::restore::{
     blank_filters, drivers_probe, git_calls, origin_key, plan_restore, PathState, RestoreCtx,
     RestoreStep,
 };
+use notchling_engine::cluster::snapshot::Manifest;
 use notchling_engine::cluster::standby_store::StandbyStore;
 use notchling_engine::cluster::workspace::GitCall;
 use notchling_engine::cluster::NodeId;
@@ -28,6 +29,8 @@ pub struct Request<'a> {
     pub git: &'a dyn Launcher,
     pub read: &'a dyn Launcher,
     pub db: &'a DbHooks<'a>,
+    pub set: Option<&'a str>,
+    pub stage: Option<&'a Path>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -204,7 +207,10 @@ pub fn run_step(step: &RestoreStep, req: &Request) -> Result<(), String> {
             len,
         } => put_dir(home, from, to, sha256, *len),
         RestoreStep::MoveAside { path, to } => move_aside(home, path, to),
-        RestoreStep::RestoreDb { from, to, sha256 } => restore_db(home, from, to, sha256, req.db),
+        RestoreStep::RestoreDb { from, to, sha256 } => match req.stage {
+            Some(stage) => stage_db(home, from, stage, sha256),
+            None => restore_db(home, from, to, sha256, req.db),
+        },
         RestoreStep::MergeDevices { from, to, sha256 } => merge_devices(home, from, to, sha256),
         RestoreStep::MergeIndex {
             from,
@@ -215,11 +221,25 @@ pub fn run_step(step: &RestoreStep, req: &Request) -> Result<(), String> {
     }
 }
 
-pub fn restore(req: &Request) -> Result<Report, String> {
-    let store = StandbyStore::new(req.cluster, req.primary);
-    let manifest = store
+pub fn chosen_set(
+    cluster: &Path,
+    primary: &NodeId,
+    set: Option<&str>,
+    node: &str,
+) -> Result<Manifest, String> {
+    let manifest = StandbyStore::new(cluster, primary)
         .current()
         .ok_or_else(|| "There is no set to restore from".to_owned())?;
+    match set {
+        Some(want) if manifest.set != want => Err(format!(
+            "{node} doesn't hold the final snapshot {want} complete"
+        )),
+        _ => Ok(manifest),
+    }
+}
+
+pub fn restore(req: &Request) -> Result<Report, String> {
+    let manifest = chosen_set(req.cluster, req.primary, req.set, req.node)?;
     let path_dirs: Vec<PathBuf> = std::env::var_os("PATH")
         .map(|path| std::env::split_paths(&path).collect())
         .unwrap_or_default();

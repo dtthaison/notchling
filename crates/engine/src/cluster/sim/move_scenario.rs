@@ -3,7 +3,7 @@ use serde_json::Value;
 use super::invariants::{check, Violation};
 use super::scenario::Failure;
 use super::world::{Event, World};
-use crate::cluster::core::{Input, LocalCmd, Takeover};
+use crate::cluster::core::{Input, LocalCmd, Takeover, MOVE_CALL_MS, NOT_SENT, REFUSED};
 use crate::cluster::id::NodeId;
 use crate::cluster::wire::WireError;
 
@@ -64,18 +64,84 @@ impl World {
         );
     }
 
-    pub fn move_home(&mut self, from: &NodeId, to: &NodeId) {
+    pub fn move_home(&mut self, from: &NodeId, to: &NodeId) -> u64 {
         self.local(
             from,
             LocalCmd::MoveSwitch {
                 to: to.clone(),
                 sessions: Vec::new(),
+                set: None,
             },
-        );
+        )
     }
 
     pub fn thinks_home(&self, n: &NodeId) -> bool {
         self.core(n).is_some_and(|c| c.is_home())
+    }
+
+    pub fn answer_to(&self, n: &NodeId, call: u64) -> Option<Result<Value, WireError>> {
+        self.answers
+            .iter()
+            .rev()
+            .find(|(node, local, _)| node == n && *local == call)
+            .map(|(_, _, result)| result.clone())
+    }
+
+    fn switched_to(&self, mv: &PendingMove) -> bool {
+        self.core(&mv.from)
+            .and_then(|c| c.state())
+            .is_some_and(|s| s.home == mv.to && s.term.n > mv.term)
+    }
+
+    pub fn retry_move(&mut self, mv: &mut PendingMove) -> bool {
+        if self.switched_to(mv) {
+            return true;
+        }
+        let answer = self.answer_to(&mv.from, mv.call);
+        if matches!(answer, Some(Ok(_))) {
+            return true;
+        }
+        let refused = matches!(
+            &answer,
+            Some(Err(e)) if e.code == REFUSED || e.code == NOT_SENT
+        );
+        if refused && !mv.maybe_sent {
+            return true;
+        }
+        if answer.is_some() || self.now >= mv.sent_at + MOVE_CALL_MS {
+            mv.maybe_sent = true;
+            mv.call = self.move_home(&mv.from, &mv.to);
+            mv.sent_at = self.now;
+            self.trace_line(&mv.from.clone(), "retry move.switch");
+        }
+        false
+    }
+}
+
+pub struct PendingMove {
+    pub from: NodeId,
+    pub to: NodeId,
+    pub term: u64,
+    pub call: u64,
+    pub sent_at: u64,
+    pub maybe_sent: bool,
+}
+
+impl PendingMove {
+    pub fn start(world: &mut World, from: &NodeId, to: &NodeId) -> PendingMove {
+        let term = world
+            .core(from)
+            .and_then(|c| c.state())
+            .map_or(0, |s| s.term.n);
+        let call = world.move_home(from, to);
+        PendingMove {
+            from: from.clone(),
+            to: to.clone(),
+            term,
+            call,
+            sent_at: world.now(),
+            maybe_sent: false,
+        }
     }
 }
 
@@ -94,6 +160,7 @@ pub fn run_move_world(seed: u64, steps: usize) -> (World, Result<(), Violation>)
         cast.w1.clone(),
     ];
     let macs = [cast.m5.clone(), cast.m1.clone(), cast.m2.clone()];
+    let mut pending: Vec<PendingMove> = Vec::new();
     if let Err(v) = check(&world) {
         return (world, Err(v));
     }
@@ -103,8 +170,9 @@ pub fn run_move_world(seed: u64, steps: usize) -> (World, Result<(), Violation>)
             0..=29 => {
                 let from = pick(&mut world, &macs);
                 let to = pick(&mut world, &macs);
-                if from != to && world.thinks_home(&from) {
-                    world.move_home(&from, &to);
+                let busy = pending.iter().any(|mv: &PendingMove| mv.from == from);
+                if from != to && !busy && world.thinks_home(&from) {
+                    pending.push(PendingMove::start(&mut world, &from, &to));
                 }
             }
             30..=39 => {
@@ -142,6 +210,7 @@ pub fn run_move_world(seed: u64, steps: usize) -> (World, Result<(), Violation>)
         }
         let settle = 150 + world.rng().below(1_500);
         world.run_for(settle);
+        pending.retain_mut(|mv| !world.retry_move(mv));
         if let Err(v) = check(&world) {
             return (world, Err(v));
         }

@@ -423,6 +423,13 @@ impl Driver {
         let effects = self.core.step(input);
         let mut rest = effects.into_iter();
         while let Some(effect) = rest.next() {
+            if matches!(effect, Effect::AdoptStaged) {
+                if let Err(why) = crate::snap_restore_fs::adopt_staged(&self.setup.cluster_dir) {
+                    self.save_failed(why, rest.collect());
+                    return;
+                }
+                continue;
+            }
             if let Effect::Persist { entry, changes } = &effect {
                 if let Err(why) = persist::save(&self.setup.cluster_dir, entry, changes) {
                     self.save_failed(why, rest.collect());
@@ -495,7 +502,7 @@ impl Driver {
                 self.net.pins.set(fingerprints);
                 self.net.pins.set_join_open(join_open);
             }
-            Effect::Persist { .. } => {}
+            Effect::Persist { .. } | Effect::AdoptStaged => {}
             Effect::Publish { topic, name, data } => self.publish(&topic, &name, &data),
             Effect::RunLocal {
                 call,

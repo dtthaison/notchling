@@ -1,4 +1,4 @@
-use super::{move_cast, run_move_seed, run_move_world, World};
+use super::{check, move_cast, run_move_seed, run_move_world, PendingMove, World};
 
 fn seeds() -> Vec<u64> {
     if let Ok(one) = std::env::var("NOTCHLING_SIM_SEED") {
@@ -30,7 +30,12 @@ fn moves_happen_in_the_sim() {
         assert_eq!(result, Ok(()));
         lines.extend(world.trace().iter().cloned());
     }
-    for want in ["call move.switch", "run move.switch", "stepped_down"] {
+    for want in [
+        "call move.switch",
+        "run move.switch",
+        "stepped_down",
+        "retry move.switch",
+    ] {
         assert!(lines.iter().any(|l| l.contains(want)), "{want}");
     }
 }
@@ -61,4 +66,76 @@ fn a_move_toward_a_cut_off_machine_changes_nothing() {
     assert!(world.thinks_home(&cast.m5));
     let state = world.core(&cast.m5).and_then(|c| c.state()).expect("state");
     assert_eq!(state.term.n, 1);
+}
+
+fn until_home(world: &mut World, n: &super::super::id::NodeId) -> bool {
+    for _ in 0..200 {
+        world.run_for(1);
+        if world.thinks_home(n) {
+            return true;
+        }
+    }
+    false
+}
+
+#[test]
+fn a_lost_switch_answer_is_retried_and_lands_once() {
+    let mut world = World::new(33);
+    let cast = move_cast(&mut world);
+    let mut mv = PendingMove::start(&mut world, &cast.m5, &cast.m1);
+    assert!(until_home(&mut world, &cast.m1), "m1 never took the term");
+    world.partition(&cast.m5, &cast.m1);
+    world.run_for(2_000);
+    assert_eq!(check(&world), Ok(()));
+    let first = world.answer_to(&cast.m5, mv.call);
+    assert!(!matches!(&first, Some(Ok(_))), "{first:?}");
+    assert!(!world.retry_move(&mut mv), "the move isn't over yet");
+    assert!(mv.maybe_sent);
+    world.run_for(2_000);
+    let retried = world.answer_to(&cast.m5, mv.call);
+    assert!(
+        !matches!(&retried, Some(Err(e)) if e.code == "refused"),
+        "{retried:?}"
+    );
+    world.heal();
+    let mut done = false;
+    for _ in 0..30 {
+        world.run_for(2_000);
+        assert_eq!(check(&world), Ok(()));
+        if world.retry_move(&mut mv) {
+            done = true;
+            break;
+        }
+    }
+    assert!(done, "the retried move never finished");
+    world.run_for(10_000);
+    assert_eq!(check(&world), Ok(()));
+    for node in [&cast.m5, &cast.m1, &cast.m2, &cast.w1] {
+        let state = world.core(node).and_then(|c| c.state()).expect("state");
+        assert_eq!(state.home, cast.m1, "{}", world.name_of(node));
+        assert_eq!(state.term.n, 2);
+    }
+}
+
+#[test]
+fn a_retry_toward_a_term_already_taken_answers_ok() {
+    let mut world = World::new(34);
+    let cast = move_cast(&mut world);
+    world.partition(&cast.m1, &cast.m2);
+    world.partition(&cast.m1, &cast.w1);
+    let first = world.move_home(&cast.m5, &cast.m1);
+    assert!(until_home(&mut world, &cast.m1));
+    let again = world.move_home(&cast.m5, &cast.m1);
+    world.run_for(500);
+    let answers = [
+        world.answer_to(&cast.m5, first),
+        world.answer_to(&cast.m5, again),
+    ];
+    assert!(
+        answers
+            .iter()
+            .all(|a| !matches!(a, Some(Err(e)) if e.code == "refused")),
+        "{answers:?}"
+    );
+    assert_eq!(check(&world), Ok(()));
 }

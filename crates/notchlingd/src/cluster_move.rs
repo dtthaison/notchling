@@ -4,32 +4,46 @@ use crate::inbox_ops::InboxOps;
 use notchling_engine::cluster::core::Takeover;
 use notchling_engine::cluster::main_sessions::MainSession;
 use notchling_engine::cluster::move_home::{
-    left_behind, MoveFacts, StopResult, SwitchResult, ToFacts,
+    left_behind, moving_text, resume_call_ms, FinalSet, MoveFacts, StopResult, SwitchResult,
+    ToFacts,
 };
 use notchling_engine::cluster::move_home::{
     MOVE_FREEZE, MOVE_RESUME, MOVE_STOP, MOVE_SWITCH, MOVE_UNDO,
 };
 use notchling_engine::cluster::persist;
 use notchling_engine::cluster::snapshot::{Manifest, Movable};
-use notchling_engine::cluster::versions::Compat;
+use notchling_engine::cluster::versions::{compat, Compat, Purpose, Versions};
 use notchling_engine::cluster::wire::{Origin, OriginTier, WireError};
 use notchling_engine::cluster::{LocalCmd, NodeId, Tool};
 use notchling_engine::control::session::{conversation_of, resume_plan_step};
 use notchling_engine::control::{execute, Outcome as PlanOutcome, Plan, Step};
+use notchling_engine::delegate::agy_trust::claude_trusts;
 use notchling_engine::inbox::{Item, Kind, Source, State as ItemState};
-use notchling_engine::sessions::agent::Agent;
+use notchling_engine::sessions::agent::{Agent, AgentTarget};
 use notchling_engine::sessions::lanes::Roots;
-use notchling_local_api::{ApiError, ErrorCode};
+use notchling_local_api::{ops, ApiError, ErrorCode};
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
 pub const MOVE_OPS: [&str; 5] = [MOVE_FREEZE, MOVE_STOP, MOVE_SWITCH, MOVE_RESUME, MOVE_UNDO];
 pub const SNAP_WAIT: Duration = Duration::from_secs(5 * 60);
 pub const SWITCH_WAIT: Duration = Duration::from_secs(5 * 60 + 5);
-pub const RESUME_WAIT: Duration = Duration::from_secs(2 * 60);
+pub const FENCED_OPS: [&str; 5] = [
+    ops::SESSION_NEW,
+    ops::SESSION_MOVE,
+    ops::CLUSTER_DISPATCH,
+    ops::CLUSTER_MAIN_SET,
+    ops::CLUSTER_RETURN,
+];
+
+pub type Started = Vec<(String, Result<(), String>)>;
+
+pub fn resume_wait(sessions: usize) -> Duration {
+    Duration::from_millis(resume_call_ms(sessions) + 5_000)
+}
 
 pub(crate) fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
@@ -42,6 +56,7 @@ pub fn failed(why: impl Into<String>) -> ApiError {
 #[derive(Default)]
 pub struct MoveGate {
     held: Mutex<Option<(BTreeSet<String>, String)>>,
+    fence: Mutex<Option<String>>,
 }
 
 impl MoveGate {
@@ -51,6 +66,14 @@ impl MoveGate {
 
     pub fn thaw(&self) {
         *lock(&self.held) = None;
+    }
+
+    pub fn fence(&self, to_name: &str) {
+        *lock(&self.fence) = Some(moving_text(to_name));
+    }
+
+    pub fn unfence(&self) {
+        *lock(&self.fence) = None;
     }
 
     pub fn frozen(&self) -> Vec<String> {
@@ -66,6 +89,11 @@ impl MoveGate {
         args: &Value,
         prompt_session: &dyn Fn(&str) -> Option<String>,
     ) -> Result<(), ApiError> {
+        if let Some(why) = lock(&self.fence).as_ref() {
+            if FENCED_OPS.contains(&op) {
+                return Err(failed(why.clone()));
+            }
+        }
         let held = lock(&self.held);
         let Some((ids, to_name)) = held.as_ref() else {
             return Ok(());
@@ -89,7 +117,12 @@ impl MoveGate {
 
 pub trait Link: Send + Sync {
     fn status(&self) -> Value;
-    fn switch(&self, to: &NodeId, sessions: &[String]) -> Result<Value, WireError>;
+    fn switch(
+        &self,
+        to: &NodeId,
+        sessions: &[String],
+        set: Option<&str>,
+    ) -> Result<Value, WireError>;
     fn call(
         &self,
         to: &NodeId,
@@ -98,6 +131,7 @@ pub trait Link: Send + Sync {
         within: Duration,
     ) -> Result<Value, WireError>;
     fn take_primary(&self, takeover: Takeover) -> Result<Value, WireError>;
+    fn fence(&self, reason: Option<String>);
 }
 
 #[derive(Default)]
@@ -123,11 +157,17 @@ impl Link for LateLink {
             .unwrap_or_else(|| json!({"cluster": Value::Null, "members": []}))
     }
 
-    fn switch(&self, to: &NodeId, sessions: &[String]) -> Result<Value, WireError> {
+    fn switch(
+        &self,
+        to: &NodeId,
+        sessions: &[String],
+        set: Option<&str>,
+    ) -> Result<Value, WireError> {
         self.node()?.local_wire(
             LocalCmd::MoveSwitch {
                 to: to.clone(),
                 sessions: sessions.to_vec(),
+                set: set.map(str::to_string),
             },
             SWITCH_WAIT,
         )
@@ -163,6 +203,10 @@ impl Link for LateLink {
             },
             Duration::from_secs(30),
         )
+    }
+
+    fn fence(&self, reason: Option<String>) {
+        let _ = self.local(LocalCmd::Fence { reason }, Duration::from_secs(30));
     }
 }
 
@@ -251,16 +295,55 @@ pub trait Snaps: Send + Sync {
     fn latest(&self) -> Option<Manifest>;
     fn catch_up(&self, to: &NodeId, name: &str) -> Result<(), String>;
     fn final_set(&self, to: &NodeId, name: &str) -> Result<Manifest, String>;
+    fn hold(&self, to: &NodeId, on: bool);
 }
 
 pub trait Restorer: Send + Sync {
+    fn check(
+        &self,
+        primary: &NodeId,
+        node: &str,
+        set: Option<&str>,
+        sessions: &BTreeSet<String>,
+    ) -> Result<(), String>;
     fn restore(
         &self,
         primary: &NodeId,
         node: &str,
         sessions: &BTreeSet<String>,
-        hooks: &crate::snap_restore::DbHooks,
+        set: Option<&str>,
+        stage: &Path,
     ) -> Result<(), String>;
+}
+
+fn claude_json_of(home: &Path, transcript: Option<&PathBuf>) -> PathBuf {
+    let config = transcript.and_then(|t| t.ancestors().nth(3));
+    match config {
+        Some(dir) if dir != home.join(".claude") => dir.join(".claude.json"),
+        _ => home.join(".claude.json"),
+    }
+}
+
+pub fn trust_check(
+    home: &Path,
+    manifest: &Manifest,
+    sessions: &BTreeSet<String>,
+    node: &str,
+) -> Result<(), String> {
+    for entry in &manifest.sessions {
+        if entry.tool != Tool::Claude || !sessions.contains(&entry.id) {
+            continue;
+        }
+        let file = claude_json_of(home, entry.transcripts.first());
+        let text = std::fs::read_to_string(&file).unwrap_or_default();
+        if !claude_trusts(&text, Path::new(&entry.cwd)) {
+            return Err(format!(
+                "{} isn't trusted by Claude Code on {node}",
+                entry.cwd
+            ));
+        }
+    }
+    Ok(())
 }
 
 pub struct RealRestorer {
@@ -271,13 +354,29 @@ pub struct RealRestorer {
 }
 
 impl Restorer for RealRestorer {
+    fn check(
+        &self,
+        primary: &NodeId,
+        node: &str,
+        set: Option<&str>,
+        sessions: &BTreeSet<String>,
+    ) -> Result<(), String> {
+        let manifest = crate::snap_restore::chosen_set(&self.cluster, primary, set, node)?;
+        trust_check(&self.home, &manifest, sessions, node)
+    }
+
     fn restore(
         &self,
         primary: &NodeId,
         node: &str,
         sessions: &BTreeSet<String>,
-        hooks: &crate::snap_restore::DbHooks,
+        set: Option<&str>,
+        stage: &Path,
     ) -> Result<(), String> {
+        let hooks = crate::snap_restore::DbHooks {
+            close: &|| Ok(()),
+            reopen: &|| Ok(()),
+        };
         crate::snap_restore::restore(&crate::snap_restore::Request {
             cluster: &self.cluster,
             primary,
@@ -288,7 +387,9 @@ impl Restorer for RealRestorer {
             shared: true,
             git: self.git.as_ref(),
             read: self.read.as_ref(),
-            db: hooks,
+            db: &hooks,
+            set,
+            stage: Some(stage),
         })
         .map(|_| ())
     }
@@ -296,15 +397,56 @@ impl Restorer for RealRestorer {
 
 pub struct Mover {
     pub(crate) p: MoveParts,
+    pub(crate) switching: Mutex<Option<u64>>,
+    pub(crate) resuming: Mutex<bool>,
 }
 
 fn text_of<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
     value.get(key).and_then(Value::as_str)
 }
 
+fn versions_of(member: Option<&Value>) -> Option<Versions> {
+    member
+        .and_then(|m| m.get("versions"))
+        .and_then(|v| serde_json::from_value(v.clone()).ok())
+}
+
+fn member_of<'a>(status: &'a Value, id: &str) -> Option<&'a Value> {
+    status["members"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|m| text_of(m, "id") == Some(id))
+}
+
+pub fn promote_compat(status: &Value, to: &NodeId, name: &str) -> Compat {
+    let reference = status["members"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|m| m["reference"].as_bool() == Some(true) && text_of(m, "state") == Some("active"))
+        .or_else(|| text_of(status, "me").and_then(|me| member_of(status, me)));
+    let Some(mine) = versions_of(reference) else {
+        return Compat::Refuse("this machine's versions aren't known yet".to_string());
+    };
+    let Some(theirs) = versions_of(member_of(status, to.as_str())) else {
+        return Compat::Refuse(format!("{name} hasn't reported its versions"));
+    };
+    compat(&mine, &theirs, name, Purpose::Promote)
+}
+
+pub fn switched_to(status: &Value, to: &NodeId, term: u64) -> bool {
+    status["cluster"]["home"].as_str() == Some(to.as_str())
+        && status["cluster"]["term"]["n"].as_u64().unwrap_or(0) >= term
+}
+
 impl Mover {
     pub fn new(parts: MoveParts) -> Arc<Mover> {
-        Arc::new(Mover { p: parts })
+        Arc::new(Mover {
+            p: parts,
+            switching: Mutex::new(None),
+            resuming: Mutex::new(false),
+        })
     }
 
     pub fn gate(&self) -> &Arc<MoveGate> {
@@ -321,11 +463,7 @@ impl Mover {
 
     pub fn name_of(&self, id: &NodeId) -> String {
         let status = self.p.link.status();
-        status["members"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .find(|m| text_of(m, "id") == Some(id.as_str()))
+        member_of(&status, id.as_str())
             .and_then(|m| text_of(m, "name"))
             .unwrap_or("that machine")
             .to_string()
@@ -336,19 +474,16 @@ impl Mover {
         let me = text_of(&status, "me").and_then(NodeId::parse);
         let home = status["cluster"]["home"].as_str().and_then(NodeId::parse);
         let term = status["cluster"]["term"]["n"].as_u64().unwrap_or(0);
-        let member = status["members"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .find(|m| text_of(m, "id") == Some(to.as_str()))
-            .cloned();
+        let member = member_of(&status, to.as_str()).cloned();
         let ready = (self.p.ready)(&status, to);
+        let name = member
+            .as_ref()
+            .and_then(|m| text_of(m, "name"))
+            .unwrap_or("that machine")
+            .to_string();
         let to_facts = ToFacts {
-            name: member
-                .as_ref()
-                .and_then(|m| text_of(m, "name"))
-                .unwrap_or("that machine")
-                .to_string(),
+            compat: promote_compat(&status, to, &name),
+            name,
             member: member
                 .as_ref()
                 .is_some_and(|m| text_of(m, "state") == Some("active")),
@@ -358,7 +493,6 @@ impl Mover {
             online: member
                 .as_ref()
                 .is_some_and(|m| m["online"].as_bool() == Some(true)),
-            compat: Compat::Ok,
             ready,
         };
         let main: Vec<String> = status["main"]
@@ -394,16 +528,47 @@ impl Mover {
         self.p.gate.thaw();
     }
 
-    pub fn working(&self, among: &[String]) -> Vec<String> {
-        let rows = self.p.rows.rows().unwrap_or_default();
-        let mut busy: Vec<String> = rows
+    pub fn fence(&self, to_name: &str) {
+        self.p.gate.fence(to_name);
+        self.p.link.fence(Some(moving_text(to_name)));
+    }
+
+    pub fn unfence(&self) {
+        self.p.gate.unfence();
+        self.p.link.fence(None);
+    }
+
+    pub fn hold(&self, to: &NodeId, on: bool) {
+        self.p.snaps.hold(to, on);
+    }
+
+    fn agents(&self) -> Vec<Agent> {
+        self.p
+            .rows
+            .rows()
+            .unwrap_or_default()
             .into_iter()
             .filter_map(|row| serde_json::from_value::<Agent>(row).ok())
+            .collect()
+    }
+
+    pub fn working(&self, among: &[String]) -> Vec<String> {
+        let mut busy: Vec<String> = self
+            .agents()
+            .into_iter()
             .filter(|agent| agent.turn_running() && among.contains(&agent.id))
             .map(|agent| agent.id)
             .collect();
         busy.sort();
         busy
+    }
+
+    pub fn live(&self, id: &str) -> bool {
+        self.agents().into_iter().any(|agent| {
+            agent.id == id
+                && agent.node.is_none()
+                && matches!(agent.target, AgentTarget::Job(_) | AgentTarget::Process(_))
+        })
     }
 
     fn tool_of(&self, id: &str) -> Tool {
@@ -414,70 +579,83 @@ impl Mover {
             .map_or(Tool::Claude, |entry| entry.tool)
     }
 
+    pub fn stop_one(&self, id: &str) -> Result<(), String> {
+        match self.tool_of(id) {
+            Tool::Claude => self.p.acts.stop_claude(id),
+            _ => {
+                self.p.acts.stop_codex(id);
+                Ok(())
+            }
+        }
+    }
+
     pub fn stop(&self, sessions: &[String]) -> StopResult {
         let mut result = StopResult::default();
         for id in sessions {
-            match self.tool_of(id) {
-                Tool::Claude => match self.p.acts.stop_claude(id) {
-                    Ok(()) => result.done.push(id.clone()),
-                    Err(why) => {
-                        result.failed = Some((id.clone(), why));
-                        return result;
-                    }
-                },
-                _ => {
-                    self.p.acts.stop_codex(id);
-                    result.done.push(id.clone());
+            match self.stop_one(id) {
+                Ok(()) => result.done.push(id.clone()),
+                Err(why) => {
+                    result.failed = Some((id.clone(), why));
+                    return result;
                 }
             }
         }
         result
     }
 
-    pub fn final_snapshot(
-        &self,
-        to: &NodeId,
-        moving: &[String],
-    ) -> Result<Vec<(String, String)>, String> {
+    pub fn final_snapshot(&self, to: &NodeId, moving: &[String]) -> Result<FinalSet, String> {
+        let at_ms = self.now();
         let manifest = self.p.snaps.final_set(to, &self.name_of(to))?;
         let entries: Vec<(String, Movable)> = manifest
             .sessions
             .into_iter()
             .map(|entry| (entry.id, entry.movable))
             .collect();
-        Ok(left_behind(moving, &entries))
+        Ok(FinalSet {
+            set: manifest.set,
+            left: left_behind(moving, &entries),
+            at_ms,
+        })
     }
 
-    pub fn switch(&self, to: &NodeId, sessions: &[String]) -> SwitchResult {
+    pub fn switch(
+        &self,
+        to: &NodeId,
+        sessions: &[String],
+        set: Option<&str>,
+        term: u64,
+    ) -> SwitchResult {
         let status = self.p.link.status();
-        if status["cluster"]["home"].as_str() == Some(to.as_str()) {
+        if status["cluster"].is_null() {
+            return SwitchResult::Lost("this machine's cluster node isn't up yet".to_string());
+        }
+        if switched_to(&status, to, term) {
             return SwitchResult::Done;
         }
-        match self.p.link.switch(to, sessions) {
+        match self.p.link.switch(to, sessions, set) {
             Ok(_) => SwitchResult::Done,
-            Err(e) if matches!(e.code.as_str(), "not_sent" | "refused" | "stale_term") => {
-                SwitchResult::Refused(e.message)
-            }
-            Err(e) => SwitchResult::Lost(e.message),
+            Err(_) if switched_to(&self.p.link.status(), to, term) => SwitchResult::Done,
+            Err(e) => match e.code.as_str() {
+                "refused" => SwitchResult::Refused(e.message),
+                "not_sent" => SwitchResult::NotSent(e.message),
+                _ => SwitchResult::Lost(e.message),
+            },
         }
     }
 
-    pub fn resume(&self, to: &NodeId, sessions: &[String]) -> Vec<(String, Result<(), String>)> {
-        let answer = self
+    pub fn resume(&self, to: &NodeId, sessions: &[String]) -> Result<Started, String> {
+        let reached = self
             .p
             .link
-            .call(to, MOVE_RESUME, json!({"sessions": sessions}), RESUME_WAIT);
-        let reached = match answer {
-            Ok(value) => value,
-            Err(e) => {
-                return sessions
-                    .iter()
-                    .map(|id| (id.clone(), Err(e.message.clone())))
-                    .collect()
-            }
-        };
+            .call(
+                to,
+                MOVE_RESUME,
+                json!({"sessions": sessions}),
+                resume_wait(sessions.len()),
+            )
+            .map_err(|e| e.message)?;
         let found = reached["results"].as_array().cloned().unwrap_or_default();
-        sessions
+        Ok(sessions
             .iter()
             .map(|id| {
                 let row = found.iter().find(|r| text_of(r, "id") == Some(id.as_str()));
@@ -488,13 +666,37 @@ impl Mover {
                 };
                 (id.clone(), result)
             })
+            .collect())
+    }
+
+    fn mains(&self) -> BTreeMap<String, MainSession> {
+        persist::load(&self.p.cluster)
+            .ok()
+            .flatten()
+            .map(|s| s.main)
+            .unwrap_or_default()
+    }
+
+    fn start_one(&self, main: &BTreeMap<String, MainSession>, id: &str) -> Result<(), String> {
+        match main.get(id) {
+            None => Err("this machine has no record of it".to_string()),
+            Some(session) if session.tool != Tool::Claude => Ok(()),
+            Some(_) if self.live(id) => Ok(()),
+            Some(session) => self.p.acts.start_claude(session),
+        }
+    }
+
+    pub fn start_here(&self, sessions: &[String]) -> Started {
+        let main = self.mains();
+        sessions
+            .iter()
+            .map(|id| (id.clone(), self.start_one(&main, id)))
             .collect()
     }
 
-    pub fn start_here(&self, sessions: &[String]) -> Vec<(String, Result<(), String>)> {
-        let state = persist::load(&self.p.cluster).ok().flatten();
-        let main: BTreeMap<String, MainSession> = state.map(|s| s.main).unwrap_or_default();
-        sessions
+    pub fn restart(&self, sessions: &[String], unless_live: &[String]) -> Started {
+        let main = self.mains();
+        let mut results: Started = sessions
             .iter()
             .map(|id| {
                 let result = match main.get(id) {
@@ -504,11 +706,27 @@ impl Mover {
                 };
                 (id.clone(), result)
             })
-            .collect()
+            .collect();
+        for id in unless_live {
+            if !sessions.contains(id) {
+                results.push((id.clone(), self.start_one(&main, id)));
+            }
+        }
+        results
     }
 
-    pub fn restart(&self, sessions: &[String]) -> Vec<(String, Result<(), String>)> {
-        self.start_here(sessions)
+    pub fn stragglers(&self, since_ms: i64) -> Vec<String> {
+        self.p
+            .inbox
+            .items()
+            .into_iter()
+            .filter(|item| {
+                item.state == ItemState::Open
+                    && item.created_ms >= since_ms
+                    && !item.id.starts_with("cluster-move")
+            })
+            .map(|item| item.title)
+            .collect()
     }
 
     pub fn notice(&self, id: &str, kind: Kind, title: &str, detail: &str) {

@@ -152,17 +152,36 @@ pub struct ClusterNode {
     thread: Mutex<Option<JoinHandle<()>>>,
 }
 
+pub const KEPT_CODES: [&str; 3] = ["refused", "not_sent", "stale_term"];
+
 pub fn api_error(e: WireError) -> ApiError {
     let code = match e.code.as_str() {
         "forbidden" | "stale_term" => ErrorCode::Forbidden,
         "bad_args" => ErrorCode::BadRequest,
         _ => ErrorCode::Failed,
     };
-    ApiError::new(code, e.message)
+    let kept = KEPT_CODES.contains(&e.code.as_str());
+    let error = ApiError::new(code, e.message);
+    if kept {
+        error.with_data(json!({"wire": e.code}))
+    } else {
+        error
+    }
+}
+
+pub fn refused(why: impl Into<String>) -> ApiError {
+    ApiError::new(ErrorCode::Failed, why).with_data(json!({"wire": "refused"}))
 }
 
 pub fn wire_error(e: ApiError) -> WireError {
-    WireError::new(e.code.as_str(), e.message)
+    let kept = e
+        .data
+        .as_ref()
+        .and_then(|d| d.get("wire"))
+        .and_then(Value::as_str)
+        .filter(|code| KEPT_CODES.contains(code))
+        .map(str::to_string);
+    WireError::new(kept.as_deref().unwrap_or(e.code.as_str()), e.message)
 }
 
 #[derive(Clone)]

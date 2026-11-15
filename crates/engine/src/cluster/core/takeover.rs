@@ -6,7 +6,7 @@ use serde_json::{json, Value};
 use super::{Effect, NodeCore, Target, Then, MOVE_CALL_MS};
 use crate::cluster::id::NodeId;
 use crate::cluster::members::{Member, MemberState, Term};
-use crate::cluster::state::{Change, ClusterState, Command};
+use crate::cluster::state::{apply, Change, ClusterState, Command};
 use crate::cluster::wire::WireError;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -18,30 +18,49 @@ pub struct Takeover {
     pub members: Vec<Member>,
     #[serde(default)]
     pub sessions: Vec<String>,
+    #[serde(default)]
+    pub set: Option<String>,
     #[serde(skip)]
     pub restored: Option<ClusterState>,
+    #[serde(skip)]
+    pub staged: bool,
 }
 
 pub const NOT_SENT: &str = "not_sent";
+pub const REFUSED: &str = "refused";
 
 fn not_sent(why: impl Into<String>) -> WireError {
     WireError::new(NOT_SENT, why)
 }
 
 fn refused(why: &str) -> WireError {
-    WireError::new("refused", why)
+    WireError::new(REFUSED, why)
+}
+
+pub fn eligible(t: &Takeover, me: &NodeId) -> bool {
+    t.members
+        .iter()
+        .any(|m| m.id == *me && m.state == MemberState::Active && m.can_be_master)
 }
 
 impl NodeCore {
+    pub(super) fn fenced(&self) -> Result<(), WireError> {
+        match &self.fence {
+            Some(why) => Err(refused(why)),
+            None => Ok(()),
+        }
+    }
+
     pub(super) fn move_switch(
         &mut self,
         local: u64,
-        (to, sessions): (NodeId, Vec<String>),
+        (to, sessions, set): (NodeId, Vec<String>, Option<String>),
         out: &mut Vec<Effect>,
     ) {
         let target = Target::Local(local);
         let ask = self.takeover_for(&to).map(|mut t| {
             t.sessions = sessions;
+            t.set = set;
             t
         });
         match ask {
@@ -89,7 +108,9 @@ impl NodeCore {
             vault: state.vault.clone(),
             members: self.shared_members(),
             sessions: Vec::new(),
+            set: None,
             restored: None,
+            staged: false,
         })
     }
 
@@ -115,13 +136,13 @@ impl NodeCore {
         if t.term <= state.term {
             return Err(refused("this machine already has a newer term"));
         }
-        let eligible = t
-            .members
-            .iter()
-            .any(|m| m.id == me && m.state == MemberState::Active && m.can_be_master);
-        if !eligible {
+        if !eligible(&t, &me) {
             return Err(refused("this machine can't be primary"));
         }
+        if t.restored.as_ref().is_some_and(|r| r.id != t.id) {
+            return Err(refused("the restored database is another cluster's"));
+        }
+        let mut next = state.clone();
         let dropped: Vec<NodeId> = match &t.restored {
             Some(restored) => {
                 let listed: BTreeSet<&NodeId> = t.members.iter().map(|m| &m.id).collect();
@@ -134,39 +155,46 @@ impl NodeCore {
             }
             None => Vec::new(),
         };
-        if let (Some(restored), Some(state)) = (&t.restored, &mut self.state) {
-            state.jobs = restored.jobs.clone();
-            state.main = restored.main.clone();
-            state.kept = restored.kept.clone();
-            state.ended = restored.ended.clone();
-            state.seq = state.seq.max(restored.seq);
+        if let Some(restored) = &t.restored {
+            next.jobs = restored.jobs.clone();
+            next.main = restored.main.clone();
+            next.kept = restored.kept.clone();
+            next.ended = restored.ended.clone();
+            next.seq = next.seq.max(restored.seq);
         }
         let command = Command::Sync {
-            id: t.id,
-            name: t.name,
+            id: t.id.clone(),
+            name: t.name.clone(),
             term: t.term.clone(),
             home: me,
-            vault: t.vault,
+            vault: t.vault.clone(),
             members: t.members.clone(),
         };
-        let mark = out.len();
-        self.apply(command, out)
-            .map_err(|e| refused(&e.to_string()))?;
-        if t.restored.is_some() {
-            self.complete_persist(&t.members, dropped, &mut out[mark..]);
+        let applied =
+            apply(&mut next, command, self.wall_ms).map_err(|e| refused(&e.to_string()))?;
+        self.state = Some(next);
+        self.changed = true;
+        if t.staged {
+            out.push(Effect::AdoptStaged);
+        }
+        if let Some(entry) = applied.entry {
+            let mut changes = applied.changes;
+            if t.restored.is_some() {
+                self.complete_persist(&t.members, dropped, &mut changes);
+            }
+            out.push(Effect::Persist { entry, changes });
         }
         self.push_members(None, out);
         Ok(json!({"term": t.term}))
     }
 
-    fn complete_persist(&self, members: &[Member], dropped: Vec<NodeId>, out: &mut [Effect]) {
+    fn complete_persist(
+        &self,
+        members: &[Member],
+        dropped: Vec<NodeId>,
+        changes: &mut Vec<Change>,
+    ) {
         let Some(state) = &self.state else {
-            return;
-        };
-        let Some(Effect::Persist { changes, .. }) = out
-            .iter_mut()
-            .find(|effect| matches!(effect, Effect::Persist { .. }))
-        else {
             return;
         };
         changes.extend(dropped.into_iter().map(Change::Dropped));

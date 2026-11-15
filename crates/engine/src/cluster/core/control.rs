@@ -149,7 +149,13 @@ impl NodeCore {
             }
             LocalCmd::Snapshot { trigger } => self.snap_now(target, trigger, out),
             LocalCmd::TakePrimary { takeover } => self.take_primary(target, *takeover, out),
-            LocalCmd::MoveSwitch { to, sessions } => self.move_switch(id, (to, sessions), out),
+            LocalCmd::MoveSwitch { to, sessions, set } => {
+                self.move_switch(id, (to, sessions, set), out)
+            }
+            LocalCmd::Fence { reason } => {
+                self.fence = reason;
+                self.finish(target, Ok(json!({})), out);
+            }
             LocalCmd::SetVersions { versions } => self.set_versions(id, versions, out),
             LocalCmd::Dispatch { key, spec, tier } => {
                 if self.is_home() {
@@ -347,6 +353,7 @@ impl NodeCore {
         main: bool,
         out: &mut Vec<Effect>,
     ) -> Result<Value, WireError> {
+        self.fenced()?;
         let canonical = self.aliases.get(&session).unwrap_or(&session).clone();
         let mut ids = vec![canonical.clone()];
         if main {
@@ -373,7 +380,7 @@ impl NodeCore {
         respawn: &BTreeMap<String, Vec<String>>,
         out: &mut Vec<Effect>,
     ) {
-        if !self.is_home() {
+        if !self.is_home() || self.fence.is_some() {
             return;
         }
         self.aliases = aliases(agents);

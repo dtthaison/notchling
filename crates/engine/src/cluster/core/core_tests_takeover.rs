@@ -2,8 +2,8 @@ use std::collections::BTreeMap;
 
 use serde_json::json;
 
-use super::core_tests::{answers, Hub};
-use super::{Effect, LocalCmd, Takeover};
+use super::core_tests::{answers, dispatch_cmd, Hub};
+use super::{call_wait, Effect, LocalCmd, Takeover, CALL_MS, MOVE_CALL_MS};
 use crate::cluster::id::{NodeId, Tool};
 use crate::cluster::jobs::{job_id, Job, JobSpec, JobState};
 use crate::cluster::main_sessions::MainSession;
@@ -37,7 +37,9 @@ fn takeover_for(hub: &Hub, from: &NodeId, to: &NodeId) -> Takeover {
         vault: state.vault.clone(),
         members: hub.core(from).shared_members(),
         sessions: Vec::new(),
+        set: None,
         restored: None,
+        staged: false,
     }
 }
 
@@ -211,4 +213,111 @@ fn a_member_missing_from_the_restored_database_is_dropped_there() {
         .expect("state")
         .members
         .contains_key(&ghost));
+}
+
+#[test]
+fn l5_a_takeover_refused_late_changes_nothing() {
+    let (mut hub, m5, m1) = trio();
+    let before = hub.core(&m1).state().expect("state").clone();
+    let mut restored = restored_state(&hub, &m5, 900);
+    restored.id = "another".to_string();
+    let mut takeover = takeover_for(&hub, &m5, &m1);
+    takeover.restored = Some(restored);
+    takeover.staged = true;
+    let effects = take(&mut hub, &m1, takeover);
+    assert!(matches!(answers(&effects)[0], Err(e) if e.code == "refused"));
+    assert_eq!(hub.core(&m1).state().expect("state"), &before);
+    assert!(!effects
+        .iter()
+        .any(|e| matches!(e, Effect::AdoptStaged | Effect::Persist { .. })));
+
+    let mut ineligible = takeover_for(&hub, &m5, &m1);
+    ineligible.restored = Some(restored_state(&hub, &m5, 900));
+    ineligible.staged = true;
+    for m in &mut ineligible.members {
+        if m.id == m1 {
+            m.can_be_master = false;
+        }
+    }
+    let effects = take(&mut hub, &m1, ineligible);
+    assert!(matches!(answers(&effects)[0], Err(e) if e.code == "refused"));
+    assert_eq!(hub.core(&m1).state().expect("state"), &before);
+    assert!(!effects.iter().any(|e| matches!(e, Effect::AdoptStaged)));
+}
+
+#[test]
+fn m5_a_staged_takeover_adopts_the_database_right_before_it_persists() {
+    let (mut hub, m5, m1) = trio();
+    let mut takeover = takeover_for(&hub, &m5, &m1);
+    takeover.restored = Some(restored_state(&hub, &m5, 900));
+    takeover.staged = true;
+    let effects = take(&mut hub, &m1, takeover.clone());
+    assert!(answers(&effects)[0].is_ok());
+    let adopt = effects
+        .iter()
+        .position(|e| matches!(e, Effect::AdoptStaged))
+        .expect("the staged database is adopted");
+    let persist = effects
+        .iter()
+        .position(|e| matches!(e, Effect::Persist { .. }))
+        .expect("persisted");
+    assert_eq!(adopt + 1, persist);
+    let again = take(&mut hub, &m1, takeover);
+    assert!(answers(&again)[0].is_ok());
+    assert!(!again.iter().any(|e| matches!(e, Effect::AdoptStaged)));
+}
+
+#[test]
+fn m7_a_fenced_primary_refuses_dispatch_and_main_changes() {
+    let (mut hub, m5, _) = trio();
+    let why = "The primary is moving to m1".to_string();
+    hub.local(
+        &m5,
+        LocalCmd::Fence {
+            reason: Some(why.clone()),
+        },
+    );
+    let effects = hub.local(&m5, dispatch_cmd("k", "w1", Tool::Shell));
+    assert!(matches!(answers(&effects)[0], Err(e) if e.message == why && e.code == "refused"));
+    let effects = hub.local(
+        &m5,
+        LocalCmd::SetMain {
+            session: "sess-9".to_string(),
+            main: false,
+        },
+    );
+    assert!(matches!(answers(&effects)[0], Err(e) if e.message == why));
+    let state = hub.core(&m5).state().expect("state").clone();
+    hub.local(
+        &m5,
+        LocalCmd::MainSeen {
+            agents: Vec::new(),
+            codex_exec: Default::default(),
+            respawn: Default::default(),
+        },
+    );
+    assert_eq!(hub.core(&m5).state().expect("state"), &state);
+    assert!(state.jobs.is_empty());
+
+    hub.local(&m5, LocalCmd::Fence { reason: None });
+    let effects = hub.local(
+        &m5,
+        LocalCmd::SetMain {
+            session: "sess-9".to_string(),
+            main: false,
+        },
+    );
+    assert!(answers(&effects)[0].is_ok());
+}
+
+#[test]
+fn m2_move_calls_wait_for_what_the_target_does() {
+    let three = json!({"sessions": ["a", "b", "c"]});
+    assert_eq!(
+        call_wait("move.resume", &three),
+        crate::cluster::move_home::resume_call_ms(3)
+    );
+    assert!(call_wait("move.resume", &three) > CALL_MS);
+    assert_eq!(call_wait("move.switch", &json!({})), MOVE_CALL_MS);
+    assert_eq!(call_wait("session.reply", &json!({})), CALL_MS);
 }

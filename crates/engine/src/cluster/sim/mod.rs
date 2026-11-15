@@ -10,7 +10,7 @@ mod world;
 
 pub use host::SimHost;
 pub use invariants::{check, Violation};
-pub use move_scenario::{move_cast, run_move_seed, run_move_world, MoveCast};
+pub use move_scenario::{move_cast, run_move_seed, run_move_world, MoveCast, PendingMove};
 pub use net::SimNet;
 pub use scenario::{run_seed, run_seed_with, run_world, stale_call_scenario, Failure, Plant};
 pub use snap_scenario::{run_snap_seed, run_snap_world, snap_cast, SnapCast};

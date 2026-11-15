@@ -1,12 +1,34 @@
 use serde_json::{json, Value};
 
-use super::{Effect, NodeCore, OutCall, Seen, Target, Then, CALL_MS, DEDUPE_MS, WORKSPACE_CALL_MS};
+use super::{
+    Effect, NodeCore, OutCall, Seen, Target, Then, CALL_MS, DEDUPE_MS, MOVE_CALL_MS,
+    WORKSPACE_CALL_MS,
+};
 use crate::cluster::id::NodeId;
 use crate::cluster::members::{MemberState, Term};
+use crate::cluster::move_home::{resume_call_ms, MOVE_RESUME};
 use crate::cluster::policy::{check, SenderFacts};
 use crate::cluster::standby_store::SNAP_ACK;
 use crate::cluster::state::role_of;
 use crate::cluster::wire::{Msg, Origin, OriginTier, WireError};
+
+pub fn call_wait(op: &str, args: &Value) -> u64 {
+    if op == MOVE_RESUME {
+        let count = args
+            .get("sessions")
+            .and_then(Value::as_array)
+            .map_or(0, Vec::len);
+        return resume_call_ms(count);
+    }
+    if op.starts_with("move.") {
+        return MOVE_CALL_MS;
+    }
+    if op.starts_with("workspace.") || op.starts_with("snap.") {
+        WORKSPACE_CALL_MS
+    } else {
+        CALL_MS
+    }
+}
 
 impl NodeCore {
     pub(super) fn on_msg(&mut self, from: NodeId, msg: Msg, out: &mut Vec<Effect>) {
@@ -319,11 +341,7 @@ impl NodeCore {
             );
             return;
         }
-        let wait = if op.starts_with("workspace.") || op.starts_with("snap.") {
-            WORKSPACE_CALL_MS
-        } else {
-            CALL_MS
-        };
+        let wait = call_wait(&op, &args);
         self.call_out_within(&node, op, args, origin, (Then::Reply(target), wait), out);
     }
 

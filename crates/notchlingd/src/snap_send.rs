@@ -124,6 +124,7 @@ struct Slot {
 struct State {
     latest: Option<Offered>,
     slots: BTreeMap<NodeId, Slot>,
+    held: BTreeSet<NodeId>,
 }
 
 pub struct SenderParts {
@@ -243,6 +244,18 @@ impl SnapSender {
             .and_then(|s| s.sent.clone())
     }
 
+    pub fn hold(&self, node: &NodeId, on: bool) {
+        let mut state = lock(&self.inner.state);
+        if on {
+            state.held.insert(node.clone());
+            if let Some(slot) = state.slots.get_mut(node) {
+                slot.queued = None;
+            }
+        } else {
+            state.held.remove(node);
+        }
+    }
+
     pub fn latest_manifest(&self) -> Option<Manifest> {
         lock(&self.inner.state)
             .latest
@@ -278,7 +291,11 @@ impl SnapSender {
 
 impl Inner {
     fn targets(&self) -> Vec<NodeId> {
+        let held = lock(&self.state).held.clone();
         self.candidates(true)
+            .into_iter()
+            .filter(|id| !held.contains(id))
+            .collect()
     }
 
     fn candidates(&self, online_only: bool) -> Vec<NodeId> {
@@ -302,6 +319,9 @@ impl Inner {
     fn enqueue(this: &Arc<Inner>, id: &NodeId, offered: Offered) {
         {
             let mut state = lock(&this.state);
+            if state.held.contains(id) {
+                return;
+            }
             let slot = state.slots.entry(id.clone()).or_default();
             if slot.busy {
                 slot.queued = Some(offered);
@@ -339,8 +359,12 @@ impl Inner {
                 Err("that machine is not ready or not online".to_string())
             };
             let mut state = lock(&self.state);
+            let held = state.held.contains(id);
             let slot = state.slots.entry(id.clone()).or_default();
             slot.sending = None;
+            if held {
+                slot.queued = None;
+            }
             match result {
                 Ok(()) => {
                     slot.sent = Some(offered.manifest.set.clone());

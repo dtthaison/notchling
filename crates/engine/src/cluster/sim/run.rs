@@ -173,7 +173,7 @@ impl World {
                 Effect::Persist { .. } => persisted = true,
                 Effect::Wipe => wiped = true,
                 Effect::Snapshot { plan } => self.snap_stage(n, plan),
-                Effect::Publish { .. } | Effect::SteppedDown { .. } => {}
+                Effect::Publish { .. } | Effect::SteppedDown { .. } | Effect::AdoptStaged => {}
                 Effect::RunLocal {
                     call,
                     op,
@@ -331,6 +331,7 @@ fn summary(effect: &Effect) -> String {
         Effect::JoinRequest { node, .. } => format!("join_request {}", &node.as_str()[..4]),
         Effect::SteppedDown { term, .. } => format!("stepped_down {term}"),
         Effect::Wipe => "wipe".to_string(),
+        Effect::AdoptStaged => "adopt_staged".to_string(),
         Effect::Snapshot { plan } => format!("snapshot s-{} {:?}", plan.seq, plan.trigger),
     }
 }

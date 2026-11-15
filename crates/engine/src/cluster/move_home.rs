@@ -12,6 +12,18 @@ pub const MOVE_UNDO: &str = "move.undo";
 pub const FREEZE_WAIT_MS: i64 = 600_000;
 pub const SWITCH_NOTICE_TRIES: u32 = 150;
 pub const NO_PROOF: &str = "Moving the primary needs the resume proof first";
+pub const RESUME_START_MS: u64 = 75_000;
+pub const RESUME_CAP_MS: u64 = 20 * 60_000;
+pub const RESUME_TRIES: u32 = 5;
+pub const IN_PROGRESS: &str = "A handover is in progress here";
+
+pub fn resume_call_ms(sessions: usize) -> u64 {
+    (RESUME_START_MS * sessions as u64 + 15_000).min(RESUME_CAP_MS)
+}
+
+pub fn moving_text(to_name: &str) -> String {
+    format!("The primary is moving to {to_name}")
+}
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub enum MoveStep {
@@ -50,6 +62,14 @@ pub struct MoveSaga {
     pub tries: u32,
     #[serde(default)]
     pub failed: Vec<(String, String)>,
+    #[serde(default)]
+    pub stopping: Vec<String>,
+    #[serde(default)]
+    pub maybe_sent: bool,
+    #[serde(default)]
+    pub set: Option<String>,
+    #[serde(default)]
+    pub final_ms: Option<i64>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -84,9 +104,17 @@ pub struct StopResult {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FinalSet {
+    pub set: String,
+    pub left: Vec<(String, String)>,
+    pub at_ms: i64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SwitchResult {
     Done,
     Refused(String),
+    NotSent(String),
     Lost(String),
 }
 
@@ -98,7 +126,7 @@ pub enum MoveEvent {
     Working { now_ms: i64, working: Vec<String> },
     MoveNow { working: Vec<String> },
     Cut(StopResult),
-    Final(Result<Vec<(String, String)>, String>),
+    Final(Result<FinalSet, String>),
     Stopped(StopResult),
     Switched(SwitchResult),
     Resumed(Vec<(String, Result<(), String>)>),
@@ -110,18 +138,38 @@ pub enum MoveEvent {
 pub enum MoveAction {
     Check,
     CatchUp,
-    Freeze { sessions: Vec<String> },
+    Freeze {
+        sessions: Vec<String>,
+    },
     Poll,
-    StopCut { sessions: Vec<String> },
+    StopCut {
+        sessions: Vec<String>,
+    },
+    Fence,
     FinalSnapshot,
-    StopOld { sessions: Vec<String> },
-    Switch { term: u64, attempt: u32 },
-    Resume { sessions: Vec<String> },
+    HoldSets,
+    StopOld {
+        sessions: Vec<String>,
+    },
+    Switch {
+        term: u64,
+        attempt: u32,
+    },
+    Resume {
+        sessions: Vec<String>,
+    },
     Announce,
+    Guard,
     Unfreeze,
-    Restart { sessions: Vec<String> },
+    Restart {
+        sessions: Vec<String>,
+        unless_live: Vec<String>,
+    },
     Notice(String),
-    ResumeFailed { session: String, why: String },
+    ResumeFailed {
+        session: String,
+        why: String,
+    },
 }
 
 pub fn failure_notice(reason: &str) -> String {
@@ -130,6 +178,21 @@ pub fn failure_notice(reason: &str) -> String {
 
 pub fn announce_notice(name: &str) -> String {
     format!("{name} is primary now")
+}
+
+pub fn step_name(step: &MoveStep) -> &'static str {
+    match step {
+        MoveStep::Prepare => "prepare",
+        MoveStep::CatchUp => "catch_up",
+        MoveStep::Freeze => "freeze",
+        MoveStep::FinalSnapshot => "final_snapshot",
+        MoveStep::StopOld => "stop_old",
+        MoveStep::Switch => "switch",
+        MoveStep::Resume => "resume",
+        MoveStep::Announce => "announce",
+        MoveStep::Done => "done",
+        MoveStep::Undo(_) => "undone",
+    }
 }
 
 pub fn prepare(
@@ -210,6 +273,10 @@ impl MoveSaga {
             stopped: Vec::new(),
             tries: 0,
             failed: Vec::new(),
+            stopping: Vec::new(),
+            maybe_sent: false,
+            set: None,
+            final_ms: None,
         }
     }
 
@@ -236,6 +303,39 @@ impl MoveSaga {
         )
     }
 
+    pub fn fenced(&self) -> bool {
+        matches!(
+            self.step,
+            MoveStep::FinalSnapshot
+                | MoveStep::StopOld
+                | MoveStep::Switch
+                | MoveStep::Resume
+                | MoveStep::Announce
+        )
+    }
+
+    pub fn mark_stopping(&mut self, id: &str) {
+        self.stopping = vec![id.to_string()];
+    }
+
+    pub fn mark_stopped(&mut self, id: &str) {
+        self.stopping.retain(|s| s != id);
+        if !self.stopped.iter().any(|s| s == id) {
+            self.stopped.push(id.to_string());
+        }
+    }
+
+    fn took_stops(&mut self, result: StopResult) {
+        for id in result.done {
+            self.mark_stopped(&id);
+        }
+        if let Some((id, _)) = result.failed {
+            if !self.stopping.contains(&id) && !self.stopped.contains(&id) {
+                self.stopping.push(id);
+            }
+        }
+    }
+
     fn undo(&self, reason: &str) -> (MoveSaga, Vec<MoveAction>) {
         if self.switching() || self.finished() {
             return (self.clone(), Vec::new());
@@ -247,9 +347,10 @@ impl MoveSaga {
         let mut next = self.clone();
         next.step = MoveStep::Undo(reason.to_string());
         let mut actions = vec![MoveAction::Unfreeze];
-        if !self.stopped.is_empty() {
+        if !self.stopped.is_empty() || !self.stopping.is_empty() {
             actions.push(MoveAction::Restart {
                 sessions: self.stopped.clone(),
+                unless_live: self.stopping.clone(),
             });
         }
         actions.push(MoveAction::Notice(failure_notice(reason)));
@@ -279,7 +380,7 @@ impl MoveSaga {
             .collect();
         if working.is_empty() {
             next.step = MoveStep::FinalSnapshot;
-            return (next, vec![MoveAction::FinalSnapshot]);
+            return (next, vec![MoveAction::Fence, MoveAction::FinalSnapshot]);
         }
         if self.now {
             next.cut = working.clone();
@@ -344,30 +445,23 @@ pub fn next(s: &MoveSaga, ev: MoveEvent, proof: bool) -> (MoveSaga, Vec<MoveActi
         }
         (MoveStep::Freeze, MoveEvent::Cut(result)) => {
             let mut next = s.clone();
-            next.stopped.extend(result.done);
-            match result.failed {
+            let failed = result.failed.clone();
+            next.took_stops(result);
+            match failed {
                 Some((id, why)) => next.undo(&format!("{id} didn't stop: {why}")),
                 None => {
                     next.step = MoveStep::FinalSnapshot;
-                    (next, vec![MoveAction::FinalSnapshot])
+                    (next, vec![MoveAction::Fence, MoveAction::FinalSnapshot])
                 }
             }
         }
         (MoveStep::FinalSnapshot, MoveEvent::Final(Err(why))) => s.undo(&why),
-        (MoveStep::FinalSnapshot, MoveEvent::Final(Ok(left))) => {
-            let mut next = s.clone();
-            next.moving
-                .retain(|id| !left.iter().any(|(gone, _)| gone == id));
-            next.staying.extend(left);
-            next.staying.sort();
-            next.step = MoveStep::StopOld;
-            let sessions = next.stop_old();
-            (next, vec![MoveAction::StopOld { sessions }])
-        }
+        (MoveStep::FinalSnapshot, MoveEvent::Final(Ok(found))) => final_taken(s, found),
         (MoveStep::StopOld, MoveEvent::Stopped(result)) => {
             let mut next = s.clone();
-            next.stopped.extend(result.done);
-            match result.failed {
+            let failed = result.failed.clone();
+            next.took_stops(result);
+            match failed {
                 Some((id, why)) => next.undo(&format!("{id} didn't stop: {why}")),
                 None => {
                     next.step = MoveStep::Switch;
@@ -393,22 +487,66 @@ pub fn next(s: &MoveSaga, ev: MoveEvent, proof: bool) -> (MoveSaga, Vec<MoveActi
         (MoveStep::Announce, MoveEvent::Announced) => {
             let mut next = s.clone();
             next.step = MoveStep::Done;
-            (next, Vec::new())
+            (next, vec![MoveAction::Unfreeze])
         }
         _ => (s.clone(), Vec::new()),
     }
 }
 
+pub fn unsaved(
+    prev: &MoveSaga,
+    after: &MoveSaga,
+    why: &str,
+) -> Option<(MoveSaga, Vec<MoveAction>)> {
+    if prev.switching() || after.finished() {
+        return None;
+    }
+    Some(after.compensate(&format!("the move couldn't be saved: {why}")))
+}
+
+fn final_taken(s: &MoveSaga, found: FinalSet) -> (MoveSaga, Vec<MoveAction>) {
+    let mut next = s.clone();
+    let left = found.left;
+    next.set = Some(found.set);
+    next.final_ms = Some(found.at_ms);
+    next.moving
+        .retain(|id| !left.iter().any(|(gone, _)| gone == id));
+    let back: Vec<String> = next
+        .stopped
+        .iter()
+        .filter(|id| left.iter().any(|(gone, _)| gone == *id))
+        .cloned()
+        .collect();
+    next.stopped.retain(|id| !back.contains(id));
+    next.staying.extend(left);
+    next.staying.sort();
+    next.step = MoveStep::StopOld;
+    let mut actions = vec![MoveAction::HoldSets];
+    if !back.is_empty() {
+        actions.push(MoveAction::Restart {
+            sessions: back,
+            unless_live: Vec::new(),
+        });
+    }
+    let sessions = next.stop_old();
+    actions.push(MoveAction::StopOld { sessions });
+    (next, actions)
+}
+
 fn switched(s: &MoveSaga, result: SwitchResult) -> (MoveSaga, Vec<MoveAction>) {
     let mut next = s.clone();
+    let surely_unsent = !s.maybe_sent && s.tries == 0;
     match result {
         SwitchResult::Done => {
             next.step = MoveStep::Resume;
             let sessions = next.moving.clone();
             (next, vec![MoveAction::Resume { sessions }])
         }
-        SwitchResult::Refused(why) => s.compensate(&why),
-        SwitchResult::Lost(why) => {
+        SwitchResult::Refused(why) | SwitchResult::NotSent(why) if surely_unsent => {
+            s.compensate(&why)
+        }
+        SwitchResult::Refused(why) | SwitchResult::NotSent(why) | SwitchResult::Lost(why) => {
+            next.maybe_sent = true;
             next.tries += 1;
             let mut actions = vec![next.switch_action()];
             if next.tries == SWITCH_NOTICE_TRIES {
@@ -429,14 +567,22 @@ fn restarted(s: &MoveSaga) -> (MoveSaga, Vec<MoveAction>) {
         | MoveStep::Freeze
         | MoveStep::FinalSnapshot
         | MoveStep::StopOld => s.undo("Notchling restarted during the move"),
-        MoveStep::Switch => (s.clone(), vec![s.switch_action()]),
+        MoveStep::Switch => {
+            let mut next = s.clone();
+            next.maybe_sent = true;
+            let action = next.switch_action();
+            (next, vec![MoveAction::Guard, action])
+        }
         MoveStep::Resume => (
             s.clone(),
-            vec![MoveAction::Resume {
-                sessions: s.moving.clone(),
-            }],
+            vec![
+                MoveAction::Guard,
+                MoveAction::Resume {
+                    sessions: s.moving.clone(),
+                },
+            ],
         ),
-        MoveStep::Announce => (s.clone(), vec![MoveAction::Announce]),
+        MoveStep::Announce => (s.clone(), vec![MoveAction::Guard, MoveAction::Announce]),
         MoveStep::Done | MoveStep::Undo(_) => (s.clone(), Vec::new()),
     }
 }

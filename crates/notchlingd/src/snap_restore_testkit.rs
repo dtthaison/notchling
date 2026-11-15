@@ -133,6 +133,33 @@ impl World {
             git: &git,
             read: &read,
             db,
+            set: None,
+            stage: None,
+        })
+    }
+
+    pub(crate) fn run_staged(
+        &self,
+        ids: &[&str],
+        set: Option<&str>,
+        stage: &Path,
+    ) -> Result<Report, String> {
+        let sessions: BTreeSet<String> = ids.iter().map(|s| (*s).to_owned()).collect();
+        let read = launcher(&self.rig.t);
+        let git = unsandboxed(&self.rig.t);
+        restore(&Request {
+            cluster: &self.cluster,
+            primary: &node(),
+            home: &self.home,
+            node: "m1",
+            sessions: &sessions,
+            aside: false,
+            shared: true,
+            git: &git,
+            read: &read,
+            db: &ok_hooks(),
+            set,
+            stage: Some(stage),
         })
     }
 
@@ -153,6 +180,8 @@ impl World {
                 git: &git,
                 read: &read,
                 db: &ok_hooks(),
+                set: None,
+                stage: None,
             },
         )
     }

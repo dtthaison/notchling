@@ -2,6 +2,7 @@ use crate::snap_copy::{create_private_file, hash_file, hex, remove_quietly};
 use crate::snap_db::backup_db;
 use notchling_engine::bridge::net::devices::{encode, read_devices};
 use notchling_engine::bridge::net::files::{write_private, FileLock};
+use notchling_engine::cluster::persist::CLUSTER_DB;
 use notchling_engine::cluster::snapshot::dir_digest;
 use rusqlite::{Connection, OpenFlags};
 use serde_json::Value;
@@ -406,6 +407,47 @@ pub fn restore_db(
     let reopened = (hooks.reopen)();
     swapped?;
     reopened.map_err(|why| format!("the database was restored but didn't reopen: {why}"))
+}
+
+pub const MOVE_STAGE: &str = "move-stage";
+
+pub fn staged_db(cluster: &Path) -> PathBuf {
+    cluster.join(MOVE_STAGE).join(CLUSTER_DB)
+}
+
+pub fn stage_db(home: &Path, from: &Path, stage: &Path, sha256: &str) -> Result<(), String> {
+    checked(from, sha256, None)?;
+    let parent = stage
+        .parent()
+        .ok_or_else(|| format!("{} has no folder", stage.display()))?;
+    make_dirs(home, parent)?;
+    plain_or_missing(stage)?;
+    let temp = temp_beside(stage);
+    let built = backup_db(from, &temp).and_then(|()| sound(&temp));
+    if let Err(why) = built {
+        remove_quietly(&temp);
+        return Err(why);
+    }
+    clear_side_files(stage);
+    fs::rename(&temp, stage).map_err(|e| {
+        remove_quietly(&temp);
+        io(stage, e)
+    })
+}
+
+pub fn adopt_staged(cluster: &Path) -> Result<(), String> {
+    let stage = staged_db(cluster);
+    if !plain_or_missing(&stage)? {
+        return Err("no restored database is waiting".to_string());
+    }
+    let db = cluster.join(CLUSTER_DB);
+    plain_or_missing(&db)?;
+    fs::rename(&stage, &db).map_err(|e| io(&db, e))?;
+    clear_side_files(&db);
+    if let Some(parent) = stage.parent() {
+        let _ = fs::remove_dir(parent);
+    }
+    Ok(())
 }
 
 pub fn merge_devices(home: &Path, from: &Path, to: &Path, sha256: &str) -> Result<(), String> {

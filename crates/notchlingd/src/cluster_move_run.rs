@@ -1,6 +1,8 @@
-use crate::cluster_move::{failed, lock, Mover};
+use crate::cluster_move::{failed, lock, Mover, Started};
+use crate::cluster_move_calls::write_durably;
 use notchling_engine::cluster::move_home::{
-    announce_notice, next, prepare, MoveAction, MoveEvent, MoveSaga, MoveStep,
+    announce_notice, next, prepare, step_name, unsaved, MoveAction, MoveEvent, MoveSaga, MoveStep,
+    StopResult, RESUME_TRIES,
 };
 use notchling_engine::cluster::versions::RESUME_PROOF_RECORDED;
 use notchling_engine::cluster::NodeId;
@@ -63,25 +65,49 @@ impl MoveRunner {
         })
     }
 
+    fn claim(&self) -> bool {
+        let mut run = lock(&self.run);
+        if run.busy {
+            return false;
+        }
+        run.busy = true;
+        run.nudged = false;
+        true
+    }
+
+    fn release(&self) {
+        lock(&self.run).busy = false;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn nudge_pending(&self) -> bool {
+        lock(&self.run).nudged
+    }
+
     pub fn recover(self: &Arc<Self>) {
         let saga = lock(&self.run).saga.clone();
         let Some(saga) = saga.filter(|s| !s.finished()) else {
             return;
         };
-        self.spawn(saga, vec![MoveEvent::Restarted]);
+        if !self.claim() {
+            return;
+        }
+        if self.spawn(saga, vec![MoveEvent::Restarted]).is_err() {
+            self.release();
+        }
     }
 
     pub fn status(&self) -> Value {
         match &lock(&self.run).saga {
             None => Value::Null,
             Some(s) => {
-                let (step, reason) = match &s.step {
-                    MoveStep::Undo(why) => ("undone".to_string(), Some(why.clone())),
-                    other => (format!("{other:?}").to_lowercase(), None),
+                let reason = match &s.step {
+                    MoveStep::Undo(why) => Some(why.clone()),
+                    _ => None,
                 };
                 json!({
                     "to": s.to,
-                    "step": step,
+                    "step": step_name(&s.step),
                     "moving": s.moving,
                     "staying": s.staying,
                     "cut": s.cut,
@@ -94,9 +120,17 @@ impl MoveRunner {
     }
 
     pub fn start(self: &Arc<Self>, to: &NodeId, now: bool) -> Result<Value, ApiError> {
-        if lock(&self.run).busy {
+        if !self.claim() {
             return Err(failed("A move is already running"));
         }
+        let begun = self.begin(to, now);
+        if begun.is_err() {
+            self.release();
+        }
+        begun
+    }
+
+    fn begin(self: &Arc<Self>, to: &NodeId, now: bool) -> Result<Value, ApiError> {
         let me = self
             .mover
             .me()
@@ -104,7 +138,8 @@ impl MoveRunner {
         let facts = self.mover.facts(to);
         let ready = prepare(&me, to, &facts, self.proof).map_err(failed)?;
         let saga = MoveSaga::new(me, to.clone(), self.mover.now(), now);
-        self.spawn(saga, vec![MoveEvent::Checked(facts)]);
+        self.spawn(saga, vec![MoveEvent::Checked(facts)])
+            .map_err(|_| failed("Couldn't start the move"))?;
         Ok(json!({"started": true, "moving": ready.moving, "staying": ready.staying}))
     }
 
@@ -136,39 +171,40 @@ impl MoveRunner {
         done
     }
 
-    fn spawn(self: &Arc<Self>, saga: MoveSaga, first: Vec<MoveEvent>) {
-        lock(&self.run).busy = true;
+    fn spawn(self: &Arc<Self>, saga: MoveSaga, first: Vec<MoveEvent>) -> std::io::Result<()> {
         lock(&self.run).saga = Some(saga.clone());
         let me = self.clone();
         let handle = std::thread::Builder::new()
             .name("cluster-move".into())
             .spawn(move || {
                 me.drive(saga, first);
-                lock(&me.run).busy = false;
-            })
-            .ok();
-        *lock(&self.thread) = handle;
+                me.release();
+            })?;
+        *lock(&self.thread) = Some(handle);
+        Ok(())
     }
 
-    fn save(&self, saga: &MoveSaga) {
+    fn save(&self, saga: &MoveSaga) -> Result<(), String> {
         lock(&self.run).saga = Some(saga.clone());
-        let Ok(bytes) = serde_json::to_vec(saga) else {
-            return;
-        };
-        let temp = self.dir.join(format!("{SAGA_FILE}.tmp"));
-        if std::fs::write(&temp, bytes).is_ok() {
-            let _ = std::fs::rename(&temp, self.dir.join(SAGA_FILE));
-        }
+        let bytes = serde_json::to_vec(saga).map_err(|e| e.to_string())?;
+        write_durably(&self.dir, SAGA_FILE, &bytes)
     }
 
     fn drive(&self, mut saga: MoveSaga, first: Vec<MoveEvent>) {
         let mut events: VecDeque<MoveEvent> = first.into();
         while let Some(event) = events.pop_front() {
-            let (after, actions) = next(&saga, event, self.proof);
+            let prev = saga.clone();
+            let (after, mut actions) = next(&saga, event, self.proof);
             saga = after;
-            self.save(&saga);
+            if let Err(why) = self.save(&saga) {
+                if let Some((undone, undo)) = unsaved(&prev, &saga, &why) {
+                    saga = undone;
+                    actions = undo;
+                    let _ = self.save(&saga);
+                }
+            }
             for action in actions {
-                if let Some(result) = self.perform(&saga, action) {
+                if let Some(result) = self.perform(&mut saga, action) {
                     events.push_back(result);
                 }
             }
@@ -187,8 +223,72 @@ impl MoveRunner {
         std::mem::take(&mut run.nudged)
     }
 
-    fn perform(&self, saga: &MoveSaga, action: MoveAction) -> Option<MoveEvent> {
+    fn stop_journaled(&self, saga: &mut MoveSaga, sessions: &[String]) -> StopResult {
+        let mut result = StopResult::default();
+        for id in sessions {
+            saga.mark_stopping(id);
+            if let Err(why) = self.save(saga) {
+                let why = format!("the move couldn't be saved: {why}");
+                result.failed = Some((id.clone(), why));
+                return result;
+            }
+            match self.mover.stop_one(id) {
+                Ok(()) => {
+                    saga.mark_stopped(id);
+                    let _ = self.save(saga);
+                    result.done.push(id.clone());
+                }
+                Err(why) => {
+                    result.failed = Some((id.clone(), why));
+                    return result;
+                }
+            }
+        }
+        result
+    }
+
+    fn resume(&self, saga: &MoveSaga, sessions: &[String]) -> Started {
+        let mut last = String::new();
+        for attempt in 0..RESUME_TRIES {
+            if attempt > 0 {
+                self.nudge_wait(self.retry);
+            }
+            match self.mover.resume(&saga.to, sessions) {
+                Ok(rows) => return rows,
+                Err(why) => last = why,
+            }
+        }
+        sessions
+            .iter()
+            .map(|id| (id.clone(), Err(last.clone())))
+            .collect()
+    }
+
+    fn announce(&self, saga: &MoveSaga) {
         let mover = &self.mover;
+        mover.p.acts.primary_moved(&saga.to);
+        let left = saga
+            .final_ms
+            .map(|at| mover.stragglers(at))
+            .unwrap_or_default();
+        let detail = if left.is_empty() {
+            String::new()
+        } else {
+            format!(
+                "Raised on this machine during the move, still here: {}",
+                left.join(", ")
+            )
+        };
+        mover.notice(
+            &format!("cluster-move-{}", saga.started_ms),
+            Kind::Notice,
+            &announce_notice(&saga.to_name),
+            &detail,
+        );
+    }
+
+    fn perform(&self, saga: &mut MoveSaga, action: MoveAction) -> Option<MoveEvent> {
+        let mover = self.mover.clone();
         match action {
             MoveAction::Check => Some(MoveEvent::Checked(mover.facts(&saga.to))),
             MoveAction::CatchUp => Some(MoveEvent::CaughtUp(mover.catch_up(&saga.to))),
@@ -210,36 +310,58 @@ impl MoveRunner {
                     }
                 })
             }
-            MoveAction::StopCut { sessions } => Some(MoveEvent::Cut(mover.stop(&sessions))),
+            MoveAction::StopCut { sessions } => {
+                Some(MoveEvent::Cut(self.stop_journaled(saga, &sessions)))
+            }
+            MoveAction::Fence => {
+                mover.fence(&saga.to_name);
+                None
+            }
             MoveAction::FinalSnapshot => Some(MoveEvent::Final(
                 mover.final_snapshot(&saga.to, &saga.moving),
             )),
-            MoveAction::StopOld { sessions } => Some(MoveEvent::Stopped(mover.stop(&sessions))),
-            MoveAction::Switch { attempt, .. } => {
+            MoveAction::HoldSets => {
+                mover.hold(&saga.to, true);
+                None
+            }
+            MoveAction::StopOld { sessions } => {
+                Some(MoveEvent::Stopped(self.stop_journaled(saga, &sessions)))
+            }
+            MoveAction::Switch { attempt, term } => {
                 if attempt > 0 {
                     self.nudge_wait(self.retry);
                 }
-                Some(MoveEvent::Switched(mover.switch(&saga.to, &saga.moving)))
+                Some(MoveEvent::Switched(mover.switch(
+                    &saga.to,
+                    &saga.moving,
+                    saga.set.as_deref(),
+                    term,
+                )))
             }
             MoveAction::Resume { sessions } => {
-                Some(MoveEvent::Resumed(mover.resume(&saga.to, &sessions)))
+                Some(MoveEvent::Resumed(self.resume(saga, &sessions)))
             }
             MoveAction::Announce => {
-                mover.p.acts.primary_moved(&saga.to);
-                mover.notice(
-                    &format!("cluster-move-{}", saga.started_ms),
-                    Kind::Notice,
-                    &announce_notice(&saga.to_name),
-                    "",
-                );
+                self.announce(saga);
                 Some(MoveEvent::Announced)
+            }
+            MoveAction::Guard => {
+                mover.freeze(&saga.moving, &saga.to_name);
+                mover.fence(&saga.to_name);
+                mover.hold(&saga.to, true);
+                None
             }
             MoveAction::Unfreeze => {
                 mover.thaw();
+                mover.unfence();
+                mover.hold(&saga.to, false);
                 None
             }
-            MoveAction::Restart { sessions } => {
-                for (id, result) in mover.restart(&sessions) {
+            MoveAction::Restart {
+                sessions,
+                unless_live,
+            } => {
+                for (id, result) in mover.restart(&sessions, &unless_live) {
                     if let Err(why) = result {
                         mover.notice(
                             &format!("cluster-move-restart-{id}"),

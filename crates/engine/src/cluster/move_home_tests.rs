@@ -1,7 +1,8 @@
 use super::id::NodeId;
 use super::move_home::{
-    failure_notice, left_behind, next, prepare, MoveAction, MoveEvent, MoveFacts, MoveSaga,
-    MoveStep, StopResult, SwitchResult, ToFacts, FREEZE_WAIT_MS, NO_PROOF, SWITCH_NOTICE_TRIES,
+    failure_notice, left_behind, next, prepare, resume_call_ms, step_name, unsaved, FinalSet,
+    MoveAction, MoveEvent, MoveFacts, MoveSaga, MoveStep, StopResult, SwitchResult, ToFacts,
+    FREEZE_WAIT_MS, NO_PROOF, RESUME_CAP_MS, SWITCH_NOTICE_TRIES,
 };
 use super::snapshot::Movable;
 use super::testkit::id;
@@ -9,6 +10,14 @@ use super::versions::Compat;
 
 fn ids() -> (NodeId, NodeId) {
     (id("m5"), id("m1"))
+}
+
+fn fin(left: Vec<(String, String)>) -> FinalSet {
+    FinalSet {
+        set: "s-final".to_string(),
+        left,
+        at_ms: 4_000,
+    }
 }
 
 fn to_facts() -> ToFacts {
@@ -75,7 +84,7 @@ fn to_switch() -> MoveSaga {
                 now_ms: 3_000,
                 working: Vec::new(),
             },
-            MoveEvent::Final(Ok(Vec::new())),
+            MoveEvent::Final(Ok(fin(Vec::new()))),
             MoveEvent::Stopped(StopResult {
                 done: vec!["a".to_string(), "c".to_string()],
                 failed: None,
@@ -206,7 +215,7 @@ fn freeze_waits_for_turn_ends() {
         true,
     );
     assert_eq!(done.step, MoveStep::FinalSnapshot);
-    assert_eq!(actions, vec![MoveAction::FinalSnapshot]);
+    assert_eq!(actions, vec![MoveAction::Fence, MoveAction::FinalSnapshot]);
 
     let (late, actions) = next(
         &still,
@@ -251,7 +260,7 @@ fn move_now_ends_the_wait_and_names_cut_sessions() {
     assert_eq!(after.step, MoveStep::FinalSnapshot);
     assert_eq!(after.cut, vec!["a".to_string()]);
     assert_eq!(after.stopped, vec!["a".to_string()]);
-    assert_eq!(actions, vec![MoveAction::FinalSnapshot]);
+    assert_eq!(actions, vec![MoveAction::Fence, MoveAction::FinalSnapshot]);
 
     let (nothing, actions) = next(
         &frozen,
@@ -262,7 +271,7 @@ fn move_now_ends_the_wait_and_names_cut_sessions() {
     );
     assert_eq!(nothing.step, MoveStep::FinalSnapshot);
     assert!(nothing.cut.is_empty());
-    assert_eq!(actions, vec![MoveAction::FinalSnapshot]);
+    assert_eq!(actions, vec![MoveAction::Fence, MoveAction::FinalSnapshot]);
 
     let early = next(
         &started(false),
@@ -306,7 +315,7 @@ fn session_unmovable_in_final_set_stays() {
     .0;
     let (saga, actions) = next(
         &at_final,
-        MoveEvent::Final(Ok(vec![("c".to_string(), "repo changed".to_string())])),
+        MoveEvent::Final(Ok(fin(vec![("c".to_string(), "repo changed".to_string())]))),
         true,
     );
     assert_eq!(saga.moving, vec!["a".to_string()]);
@@ -315,11 +324,16 @@ fn session_unmovable_in_final_set_stays() {
         .staying
         .contains(&("c".to_string(), "repo changed".to_string())));
     assert_eq!(saga.step, MoveStep::StopOld);
+    assert_eq!(saga.set.as_deref(), Some("s-final"));
+    assert_eq!(saga.final_ms, Some(4_000));
     assert_eq!(
         actions,
-        vec![MoveAction::StopOld {
-            sessions: vec!["a".to_string()]
-        }]
+        vec![
+            MoveAction::HoldSets,
+            MoveAction::StopOld {
+                sessions: vec!["a".to_string()]
+            }
+        ]
     );
 }
 
@@ -358,7 +372,7 @@ fn failure_before_switch_compensates() {
                 now_ms: 3_000,
                 working: Vec::new(),
             },
-            MoveEvent::Final(Ok(Vec::new())),
+            MoveEvent::Final(Ok(fin(Vec::new()))),
         ],
     )
     .0;
@@ -377,7 +391,8 @@ fn failure_before_switch_compensates() {
         vec![
             MoveAction::Unfreeze,
             MoveAction::Restart {
-                sessions: vec!["a".to_string()]
+                sessions: vec!["a".to_string()],
+                unless_live: vec!["c".to_string()],
             },
             MoveAction::Notice(failure_notice("c didn't stop: claude stop failed")),
         ]
@@ -396,7 +411,7 @@ fn failure_before_switch_compensates() {
     assert!(matches!(refused.step, MoveStep::Undo(_)));
     assert!(actions
         .iter()
-        .any(|a| matches!(a, MoveAction::Restart { sessions } if sessions.len() == 2)));
+        .any(|a| matches!(a, MoveAction::Restart { sessions, .. } if sessions.len() == 2)));
 }
 
 #[test]
@@ -410,7 +425,7 @@ fn switch_bumps_term_once() {
                 now_ms: 3_000,
                 working: Vec::new(),
             },
-            MoveEvent::Final(Ok(Vec::new())),
+            MoveEvent::Final(Ok(fin(Vec::new()))),
             MoveEvent::Stopped(StopResult {
                 done: vec!["a".to_string(), "c".to_string()],
                 failed: None,
@@ -448,12 +463,16 @@ fn switch_bumps_term_once() {
 
     let (restart, actions) = next(&switch, MoveEvent::Restarted, true);
     assert_eq!(restart.step, MoveStep::Switch);
+    assert!(restart.maybe_sent);
     assert_eq!(
         actions,
-        vec![MoveAction::Switch {
-            term: 4,
-            attempt: 0
-        }]
+        vec![
+            MoveAction::Guard,
+            MoveAction::Switch {
+                term: 4,
+                attempt: 0
+            }
+        ]
     );
 
     let mut long = switch;
@@ -479,7 +498,10 @@ fn no_undo_after_switch() {
     let (restarted, actions) = next(&resumed, MoveEvent::Restarted, true);
     assert_eq!(restarted.step, MoveStep::Resume);
     assert!(!actions.contains(&MoveAction::Unfreeze));
-    assert!(matches!(actions.as_slice(), [MoveAction::Resume { .. }]));
+    assert!(matches!(
+        actions.as_slice(),
+        [MoveAction::Guard, MoveAction::Resume { .. }]
+    ));
 
     let (failed, actions) = next(
         &resumed,
@@ -511,7 +533,7 @@ fn no_undo_after_switch() {
     let (done, actions) = next(&failed, MoveEvent::Announced, true);
     assert_eq!(done.step, MoveStep::Done);
     assert!(done.finished());
-    assert!(actions.is_empty());
+    assert_eq!(actions, vec![MoveAction::Unfreeze]);
     let (same, _) = next(&done, MoveEvent::Restarted, true);
     assert_eq!(same, done);
 }
@@ -529,10 +551,13 @@ fn resume_never_sends_a_message() {
             | MoveAction::Freeze { .. }
             | MoveAction::Poll
             | MoveAction::StopCut { .. }
+            | MoveAction::Fence
             | MoveAction::FinalSnapshot
+            | MoveAction::HoldSets
             | MoveAction::StopOld { .. }
             | MoveAction::Switch { .. }
             | MoveAction::Announce
+            | MoveAction::Guard
             | MoveAction::Unfreeze
             | MoveAction::Restart { .. }
             | MoveAction::Notice(_)
@@ -547,4 +572,211 @@ fn a_saga_survives_the_journal() {
     let text = serde_json::to_string(&saga).unwrap();
     let back: MoveSaga = serde_json::from_str(&text).unwrap();
     assert_eq!(back, saga);
+}
+
+fn undone(saga: &MoveSaga) -> bool {
+    matches!(saga.step, MoveStep::Undo(_))
+}
+
+#[test]
+fn h1_a_refusal_after_a_lost_answer_rolls_forward() {
+    let (lost, _) = next(
+        &to_switch(),
+        MoveEvent::Switched(SwitchResult::Lost("the link dropped".to_string())),
+        true,
+    );
+    assert!(lost.maybe_sent);
+    for answer in [
+        SwitchResult::NotSent("m1 is offline".to_string()),
+        SwitchResult::Refused("this machine already has a newer term".to_string()),
+    ] {
+        let (after, actions) = next(&lost, MoveEvent::Switched(answer), true);
+        assert!(!undone(&after), "{after:?}");
+        assert_eq!(after.step, MoveStep::Switch);
+        assert_eq!(
+            actions,
+            vec![MoveAction::Switch {
+                term: 4,
+                attempt: 2
+            }]
+        );
+        assert!(!actions
+            .iter()
+            .any(|a| matches!(a, MoveAction::Restart { .. } | MoveAction::Unfreeze)));
+    }
+}
+
+#[test]
+fn h1_a_restart_at_switch_never_undoes() {
+    let (back, _) = next(&to_switch(), MoveEvent::Restarted, true);
+    for answer in [
+        SwitchResult::NotSent("the cluster node isn't running".to_string()),
+        SwitchResult::Refused("that term isn't this machine's".to_string()),
+    ] {
+        let (after, actions) = next(&back, MoveEvent::Switched(answer), true);
+        assert_eq!(after.step, MoveStep::Switch);
+        assert!(matches!(actions.as_slice(), [MoveAction::Switch { .. }]));
+    }
+}
+
+#[test]
+fn h1_only_a_first_answered_refusal_or_nothing_sent_undoes() {
+    for answer in [
+        SwitchResult::Refused("m1 can't be primary".to_string()),
+        SwitchResult::NotSent("m1 is offline".to_string()),
+    ] {
+        let (after, actions) = next(&to_switch(), MoveEvent::Switched(answer), true);
+        assert!(undone(&after));
+        assert!(actions.contains(&MoveAction::Unfreeze));
+    }
+    let (after, _) = next(
+        &to_switch(),
+        MoveEvent::Switched(SwitchResult::Lost("timed out".to_string())),
+        true,
+    );
+    assert!(!undone(&after));
+}
+
+#[test]
+fn h3_a_cut_session_left_behind_by_the_final_set_starts_again() {
+    let (cut, _) = next(
+        &to_freeze(),
+        MoveEvent::MoveNow {
+            working: vec!["a".to_string()],
+        },
+        true,
+    );
+    let (at_final, _) = next(
+        &cut,
+        MoveEvent::Cut(StopResult {
+            done: vec!["a".to_string()],
+            failed: None,
+        }),
+        true,
+    );
+    let why = "It has commits that aren't pushed".to_string();
+    let (saga, actions) = next(
+        &at_final,
+        MoveEvent::Final(Ok(fin(vec![("a".to_string(), why.clone())]))),
+        true,
+    );
+    assert!(saga.staying.contains(&("a".to_string(), why)));
+    assert!(!saga.stopped.contains(&"a".to_string()));
+    assert!(!saga.moving.contains(&"a".to_string()));
+    assert_eq!(
+        actions,
+        vec![
+            MoveAction::HoldSets,
+            MoveAction::Restart {
+                sessions: vec!["a".to_string()],
+                unless_live: Vec::new(),
+            },
+            MoveAction::StopOld {
+                sessions: vec!["c".to_string()]
+            },
+        ]
+    );
+}
+
+#[test]
+fn m1_a_stop_in_flight_restarts_only_if_it_is_down() {
+    let at_stop = drive(
+        &to_freeze(),
+        vec![
+            MoveEvent::Working {
+                now_ms: 3_000,
+                working: Vec::new(),
+            },
+            MoveEvent::Final(Ok(fin(Vec::new()))),
+        ],
+    )
+    .0;
+    let mut journaled = at_stop.clone();
+    journaled.mark_stopping("a");
+    journaled.mark_stopped("a");
+    journaled.mark_stopping("c");
+    assert_eq!(journaled.stopped, vec!["a".to_string()]);
+    assert_eq!(journaled.stopping, vec!["c".to_string()]);
+    let back: MoveSaga = serde_json::from_str(&serde_json::to_string(&journaled).unwrap()).unwrap();
+    let (after, actions) = next(&back, MoveEvent::Restarted, true);
+    assert!(undone(&after));
+    assert!(actions.contains(&MoveAction::Restart {
+        sessions: vec!["a".to_string()],
+        unless_live: vec!["c".to_string()],
+    }));
+}
+
+#[test]
+fn m7_the_old_primary_is_fenced_from_the_final_snapshot_to_the_end() {
+    let (at_final, actions) = next(
+        &to_freeze(),
+        MoveEvent::Working {
+            now_ms: 3_000,
+            working: Vec::new(),
+        },
+        true,
+    );
+    assert_eq!(actions.first(), Some(&MoveAction::Fence));
+    assert!(at_final.fenced());
+    assert!(!to_freeze().fenced());
+    assert!(to_switch().fenced());
+    let resumed = next(&to_switch(), MoveEvent::Switched(SwitchResult::Done), true).0;
+    let announced = next(&resumed, MoveEvent::Resumed(Vec::new()), true).0;
+    assert!(announced.fenced());
+    let (done, actions) = next(&announced, MoveEvent::Announced, true);
+    assert!(!done.fenced());
+    assert_eq!(actions, vec![MoveAction::Unfreeze]);
+}
+
+#[test]
+fn l3_a_switch_that_wasnt_journaled_is_never_sent() {
+    let at_stop = drive(
+        &to_freeze(),
+        vec![
+            MoveEvent::Working {
+                now_ms: 3_000,
+                working: Vec::new(),
+            },
+            MoveEvent::Final(Ok(fin(Vec::new()))),
+        ],
+    )
+    .0;
+    let (switch, _) = next(
+        &at_stop,
+        MoveEvent::Stopped(StopResult {
+            done: vec!["a".to_string(), "c".to_string()],
+            failed: None,
+        }),
+        true,
+    );
+    assert_eq!(switch.step, MoveStep::Switch);
+    let (after, actions) = unsaved(&at_stop, &switch, "disk full").expect("an undo");
+    assert!(undone(&after));
+    assert!(!actions
+        .iter()
+        .any(|a| matches!(a, MoveAction::Switch { .. })));
+    assert!(actions
+        .iter()
+        .any(|a| matches!(a, MoveAction::Restart { sessions, .. } if sessions.len() == 2)));
+    let (lost, _) = next(
+        &switch,
+        MoveEvent::Switched(SwitchResult::Lost("timed out".to_string())),
+        true,
+    );
+    assert!(unsaved(&switch, &lost, "disk full").is_none());
+}
+
+#[test]
+fn l4_step_names_are_snake_case() {
+    assert_eq!(step_name(&MoveStep::CatchUp), "catch_up");
+    assert_eq!(step_name(&MoveStep::FinalSnapshot), "final_snapshot");
+    assert_eq!(step_name(&MoveStep::StopOld), "stop_old");
+    assert_eq!(step_name(&MoveStep::Undo("x".to_string())), "undone");
+}
+
+#[test]
+fn m2_the_resume_wait_grows_with_the_sessions_and_is_capped() {
+    assert!(resume_call_ms(1) >= 60_000);
+    assert!(resume_call_ms(4) > resume_call_ms(1) + 3 * 60_000);
+    assert_eq!(resume_call_ms(10_000), RESUME_CAP_MS);
 }

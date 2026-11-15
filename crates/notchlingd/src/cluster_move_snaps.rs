@@ -32,6 +32,10 @@ impl Snaps for RealSnaps {
         self.sender.latest_manifest()
     }
 
+    fn hold(&self, to: &NodeId, on: bool) {
+        self.sender.hold(to, on);
+    }
+
     fn catch_up(&self, to: &NodeId, name: &str) -> Result<(), String> {
         let Some(latest) = self.sender.latest_manifest() else {
             return Ok(());

@@ -20,8 +20,9 @@ use super::versions::Versions;
 use super::wire::{Msg, Origin, OriginTier, WireError};
 use crate::sessions::Agent;
 
+pub use forward::call_wait;
 pub use snap::SnapAsk;
-pub use takeover::{Takeover, NOT_SENT};
+pub use takeover::{eligible, Takeover, NOT_SENT, REFUSED};
 
 pub const PING_MS: u64 = 5_000;
 pub const OFFLINE_MS: u64 = 20_000;
@@ -133,6 +134,10 @@ pub enum LocalCmd {
     MoveSwitch {
         to: NodeId,
         sessions: Vec<String>,
+        set: Option<String>,
+    },
+    Fence {
+        reason: Option<String>,
     },
 }
 
@@ -193,6 +198,7 @@ pub enum Effect {
     Snapshot {
         plan: SnapAsk,
     },
+    AdoptStaged,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -271,6 +277,7 @@ pub struct NodeCore {
     changed: bool,
     aliases: BTreeMap<String, String>,
     snap: snap::SnapCore,
+    fence: Option<String>,
     #[cfg(test)]
     pub(crate) skip_term_check: bool,
 }
@@ -303,6 +310,7 @@ impl NodeCore {
             changed: false,
             aliases: BTreeMap::new(),
             snap: snap::SnapCore::default(),
+            fence: None,
             #[cfg(test)]
             skip_term_check: false,
         }
