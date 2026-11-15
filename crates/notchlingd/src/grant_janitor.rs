@@ -22,18 +22,20 @@ pub struct GrantJanitor {
     parts: (Arc<TailMasks>, Arc<GrantMarks>, Arc<JobRoots>),
     view: Arc<dyn View>,
     clock: Clock,
-    last: Mutex<Option<BTreeMap<String, JobState>>>,
+    last: Mutex<Option<Mine>>,
     nudged: Mutex<bool>,
     wake: Condvar,
     stop: AtomicBool,
 }
 
-fn mine(state: &ClusterState, me: &NodeId) -> BTreeMap<String, JobState> {
+type Mine = BTreeMap<String, (JobState, Option<String>)>;
+
+fn mine(state: &ClusterState, me: &NodeId) -> Mine {
     state
         .jobs
         .values()
         .filter(|j| j.spec.node == *me)
-        .map(|j| (j.id.clone(), j.state))
+        .map(|j| (j.id.clone(), (j.state, j.session.clone())))
         .collect()
 }
 
@@ -41,9 +43,9 @@ fn live_state(state: JobState) -> bool {
     matches!(state, JobState::Running | JobState::Dispatching)
 }
 
-fn live_of(jobs: &BTreeMap<String, JobState>) -> BTreeSet<String> {
+fn live_of(jobs: &Mine) -> BTreeSet<String> {
     jobs.iter()
-        .filter(|(_, s)| live_state(**s))
+        .filter(|(_, (s, _))| live_state(*s))
         .map(|(id, _)| id.clone())
         .collect()
 }
@@ -74,12 +76,12 @@ impl GrantJanitor {
         let me = self.view.me();
         let jobs = match (&state, &me) {
             (Some(state), Some(me)) => mine(state, me),
-            _ => BTreeMap::new(),
+            _ => Mine::new(),
         };
         let live = live_of(&jobs);
         let swept = self.store.sweep(now, &live);
         for job in self.parts.2.rooted() {
-            if jobs.get(&job).is_some_and(|s| !live_state(*s)) {
+            if jobs.get(&job).is_some_and(|(s, _)| !live_state(*s)) {
                 self.parts.2.end(&job);
             }
         }
@@ -95,11 +97,6 @@ impl GrantJanitor {
     fn tend(&self, state: &ClusterState, live: &BTreeSet<String>, marked: &Marked, now: i64) {
         let (masks, marks, _) = &self.parts;
         let job = &marked.job;
-        if !state.jobs.contains_key(job) {
-            masks.forget_job(job);
-            marks.remove(job);
-            return;
-        }
         if live.contains(job) {
             let keys = keys_of(state, job);
             if keys.iter().any(|k| !marked.keys.contains(k)) && marks.mark_with(job, &keys).is_ok()
@@ -108,14 +105,14 @@ impl GrantJanitor {
             }
             return;
         }
+        masks.mark_granted_as(job, &marked.keys);
         masks.end_job(job);
         match marked.ended_ms {
             None => {
                 let _ = marks.stamp_end(job, now);
             }
             Some(at) if now.saturating_sub(at) >= GRANT_TTL_MS && masks.lost(job) => {
-                masks.forget_job(job);
-                marks.remove(job);
+                masks.release_blanket(job);
             }
             Some(_) => {}
         }
@@ -124,7 +121,7 @@ impl GrantJanitor {
     fn changed(&self) -> bool {
         let now = match (self.view.state(), self.view.me()) {
             (Some(state), Some(me)) => mine(&state, &me),
-            _ => BTreeMap::new(),
+            _ => Mine::new(),
         };
         lock(&self.last).as_ref() != Some(&now)
     }

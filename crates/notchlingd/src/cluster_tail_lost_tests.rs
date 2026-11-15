@@ -239,3 +239,27 @@ fn a_session_row_of_a_job_that_lost_its_masks_keeps_its_row_but_not_its_text() {
     }
     assert_eq!(list[1]["detail"], "ls");
 }
+
+#[test]
+fn a_session_row_whose_masked_text_no_longer_parses_is_dropped_whole() {
+    let r = sessions_rig(vec![
+        json!({"id": "unknown-session", "name": "build", "label": "x"}),
+        row("quiet", None, "ls"),
+    ]);
+    r.grant("\"id\":\"unknown-session\"");
+    let list = sessions(&r);
+    assert_eq!(list.len(), 1, "the broken row is gone, not half kept");
+    assert_eq!(list[0]["id"], "quiet");
+}
+
+#[test]
+fn rows_are_masked_with_one_snapshot_of_the_state() {
+    let r = sessions_rig(vec![
+        row("a", None, "echo NL-MARKER-1"),
+        row("b", None, "echo NL-MARKER-1"),
+    ]);
+    r.grant("NL-MARKER-1");
+    let list = sessions(&r);
+    assert_eq!(list.len(), 2);
+    assert!(!Value::Array(list).to_string().contains("NL-MARKER"));
+}

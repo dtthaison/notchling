@@ -72,16 +72,31 @@ fn a_finished_job_is_ended_and_its_grants_go() {
 }
 
 #[test]
-fn a_pruned_job_record_forgets_its_masks_and_mark() {
+fn a_pruned_job_record_keeps_its_masks_and_mark() {
     let rig = rig();
     rig.uses
         .deliver(&from_vault(), &deliver_args(JOB, "one", "V", "NL-MARKER-1"))
         .expect("stored");
     *rig.fake.state.lock().unwrap() = Some(cluster("vault", &[]));
     janitor(&rig).tick().expect("swept");
-    assert_eq!(rig.masks.state(JOB), JobMasks::Never);
-    assert!(rig.marks.list().is_empty());
-    assert!(!has(&rig, JOB, "one"));
+    assert_eq!(rig.masks.state(JOB), JobMasks::Masked);
+    assert_eq!(rig.marks.list(), [JOB.to_string()]);
+    assert!(!has(&rig, JOB, "one"), "its grants still go");
+}
+
+#[test]
+fn a_lost_job_missing_from_the_state_stays_lost_and_keyed() {
+    let rig = rig();
+    let one = keys(&["shell:j-0123456789ab"]);
+    rig.marks.mark_with(JOB, &one).unwrap();
+    *rig.fake.state.lock().unwrap() = Some(cluster("vault", &[]));
+    at(&rig, 1_000).tick().expect("swept");
+    assert_eq!(rig.masks.state(JOB), JobMasks::Gone);
+    assert_eq!(
+        rig.masks.job_for_key("shell:j-0123456789ab"),
+        Some(JOB.to_string())
+    );
+    assert_eq!(rig.marks.list(), [JOB.to_string()]);
 }
 
 #[test]
@@ -136,7 +151,7 @@ fn a_finished_jobs_mark_gets_one_end_time() {
 }
 
 #[test]
-fn a_lost_mark_ends_twelve_hours_after_its_job_ended() {
+fn a_keyed_lost_jobs_masks_and_mark_outlast_the_twelve_hours() {
     let rig = rig();
     let one = keys(&["shell:j-0123456789ab"]);
     rig.marks.mark_with(JOB, &one).unwrap();
@@ -145,13 +160,46 @@ fn a_lost_mark_ends_twelve_hours_after_its_job_ended() {
     let start = 1_000_000;
     at(&rig, start).tick().expect("swept");
     assert_eq!(rig.masks.state(JOB), JobMasks::Gone);
-    at(&rig, start + TTL - 1).tick().expect("swept");
-    assert_eq!(rig.masks.state(JOB), JobMasks::Gone, "not yet");
+    at(&rig, start + 3 * TTL).tick().expect("swept");
+    assert_eq!(rig.masks.state(JOB), JobMasks::Gone, "still refused");
+    assert!(rig.masks.lost(JOB));
     assert_eq!(rig.marks.list(), [JOB.to_string()]);
+    assert_eq!(
+        rig.masks.job_for_key("shell:j-0123456789ab"),
+        Some(JOB.to_string())
+    );
+}
+
+#[test]
+fn an_unkeyed_lost_job_stops_blocking_other_rows_after_the_twelve_hours_but_stays() {
+    let rig = rig();
+    rig.marks.mark_with(JOB, &[]).unwrap();
+    rig.masks.mark_granted(JOB);
+    finished(&rig);
+    let start = 1_000_000;
+    at(&rig, start).tick().expect("swept");
+    at(&rig, start + TTL - 1).tick().expect("swept");
+    assert!(rig.masks.unidentified_lost(), "not yet");
     at(&rig, start + TTL).tick().expect("swept");
-    assert_eq!(rig.masks.state(JOB), JobMasks::Never, "its masks end");
-    assert!(rig.marks.list().is_empty(), "and its mark");
-    assert_eq!(rig.masks.job_for_key("shell:j-0123456789ab"), None);
+    assert!(!rig.masks.unidentified_lost(), "other rows are served");
+    assert_eq!(rig.masks.state(JOB), JobMasks::Gone, "its own masks stay");
+    assert_eq!(rig.marks.list(), [JOB.to_string()], "and its mark");
+}
+
+#[test]
+fn a_session_the_state_gains_is_picked_up_without_waiting_for_the_sweep() {
+    let rig = rig();
+    rig.marks.mark_with(JOB, &[]).unwrap();
+    rig.masks.mark_granted(JOB);
+    let mut claude = job(JOB, "worker", JobState::Running);
+    claude.spec.tool = Tool::Claude;
+    *rig.fake.state.lock().unwrap() = Some(cluster("vault", &[claude.clone()]));
+    let janitor = at(&rig, 1_000);
+    janitor.tick().expect("swept");
+    assert!(!janitor.changed(), "nothing new");
+    claude.session = Some("c1".to_string());
+    *rig.fake.state.lock().unwrap() = Some(cluster("vault", &[claude]));
+    assert!(janitor.changed(), "a session link is a change");
 }
 
 #[test]

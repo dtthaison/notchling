@@ -6,7 +6,8 @@ use crate::grant_roots::valid_job;
 use crate::shell_jobs::SESSION_PREFIX;
 use notchling_engine::bridge::net::crypto::{base64, base64_decode};
 use notchling_engine::cluster::wire::Origin;
-use notchling_engine::cluster::JobState;
+use notchling_engine::cluster::{ClusterState, JobState, NodeId};
+use notchling_engine::vault::Redactor;
 use notchling_local_api::{ApiError, ErrorCode};
 use serde_json::Value;
 use std::io::{Read, Seek, SeekFrom};
@@ -46,6 +47,13 @@ fn lead_of(path: &Path, start: u64, want: usize) -> Result<Vec<u8>, ApiError> {
     Ok(lead)
 }
 
+struct Snap {
+    state: Option<ClusterState>,
+    me: Option<NodeId>,
+    union: Option<Redactor>,
+    blanket: bool,
+}
+
 fn blanked(mut row: Value) -> Value {
     if let Some(fields) = row.as_object_mut() {
         for key in ROW_TEXT {
@@ -71,7 +79,16 @@ impl MaskedTails {
         }
     }
 
-    fn job_for(&self, id: &str, row: Option<&Value>) -> Option<String> {
+    fn snap(&self) -> Snap {
+        Snap {
+            state: self.view.state(),
+            me: self.view.me(),
+            union: self.masks.union(),
+            blanket: self.masks.unidentified_lost(),
+        }
+    }
+
+    fn job_for(&self, snap: &Snap, id: &str, row: Option<&Value>) -> Option<String> {
         if let Some(job) = id.strip_prefix(SESSION_PREFIX) {
             return valid_job(job).then(|| job.to_string());
         }
@@ -79,11 +96,11 @@ impl MaskedTails {
             .and_then(|r| r.get("target"))
             .and_then(|t| t.get("job"))
             .and_then(Value::as_str);
-        let from_state = match (self.view.state(), self.view.me()) {
+        let from_state = match (&snap.state, &snap.me) {
             (Some(state), Some(me)) => state
                 .jobs
                 .values()
-                .filter(|j| j.spec.node == me)
+                .filter(|j| j.spec.node == *me)
                 .find(|j| {
                     j.session
                         .as_deref()
@@ -122,6 +139,7 @@ impl MaskedTails {
 
     fn mask(
         &self,
+        snap: &Snap,
         job: Option<&str>,
         (offset, lead, bytes): (u64, &[u8], &[u8]),
         (at_end, shell_log): (bool, bool),
@@ -139,12 +157,12 @@ impl MaskedTails {
                     .map_err(failed)
             }
             None => {
-                if self.masks.unidentified_lost() {
+                if snap.blanket {
                     return Err(failed(UNMAPPED_LOST));
                 }
-                match self.masks.union() {
+                match &snap.union {
                     None => Ok(None),
-                    Some(redactor) => mask_with(redactor, offset, lead, bytes, at_end)
+                    Some(redactor) => mask_with(redactor.clone(), offset, lead, bytes, at_end)
                         .map(Some)
                         .map_err(failed),
                 }
@@ -152,10 +170,10 @@ impl MaskedTails {
         }
     }
 
-    fn lookback(&self, job: Option<&str>) -> usize {
+    fn lookback(&self, snap: &Snap, job: Option<&str>) -> usize {
         match job {
             Some(job) => self.masks.lookback(job),
-            None => self.masks.union().map_or(0, |r| r.lookback()),
+            None => snap.union.as_ref().map_or(0, |r| r.lookback()),
         }
     }
 
@@ -166,7 +184,8 @@ impl MaskedTails {
         let row = rows
             .iter()
             .find(|row| row.get("id").and_then(Value::as_str) == Some(id));
-        let job = self.job_for(id, row);
+        let snap = self.snap();
+        let job = self.job_for(&snap, id, row);
         let data = out
             .get("data")
             .and_then(Value::as_str)
@@ -180,13 +199,14 @@ impl MaskedTails {
         let path = row
             .and_then(|row| row.get("transcriptPath").and_then(Value::as_str))
             .ok_or_else(|| failed("that session has no transcript"))?;
-        let lead = lead_of(Path::new(path), start, self.lookback(job.as_deref()))?;
+        let lead = lead_of(Path::new(path), start, self.lookback(&snap, job.as_deref()))?;
         let over = match &job {
             Some(job) => self.over(job),
             None => self.all_over(),
         };
         let at_end = next >= size && over;
         let Some((masked, held_next)) = self.mask(
+            &snap,
             job.as_deref(),
             (start, &lead, &data),
             (at_end, id.starts_with(SESSION_PREFIX)),
@@ -210,10 +230,15 @@ impl MaskedTails {
         let row = rows
             .iter()
             .find(|row| row.get("id").and_then(Value::as_str) == Some(id));
-        let job = self.job_for(id, row);
+        let snap = self.snap();
+        let job = self.job_for(&snap, id, row);
         let text = reply.to_string();
-        let Some((masked, _)) =
-            self.mask(job.as_deref(), (0, &[], text.as_bytes()), (true, false))?
+        let Some((masked, _)) = self.mask(
+            &snap,
+            job.as_deref(),
+            (0, &[], text.as_bytes()),
+            (true, false),
+        )?
         else {
             return Ok(reply);
         };
@@ -225,18 +250,22 @@ impl MaskedTails {
         let Value::Array(list) = reply else {
             return Ok(reply);
         };
+        let snap = self.snap();
         let rows = list
             .into_iter()
-            .map(|row| {
+            .filter_map(|row| {
                 let id = row.get("id").and_then(Value::as_str).unwrap_or_default();
-                let job = self.job_for(id, Some(&row));
+                let job = self.job_for(&snap, id, Some(&row));
                 let text = row.to_string();
-                match self.mask(job.as_deref(), (0, &[], text.as_bytes()), (true, false)) {
-                    Ok(None) => row,
-                    Ok(Some((masked, _))) => {
-                        serde_json::from_slice(&masked).unwrap_or_else(|_| blanked(row))
-                    }
-                    Err(_) => blanked(row),
+                match self.mask(
+                    &snap,
+                    job.as_deref(),
+                    (0, &[], text.as_bytes()),
+                    (true, false),
+                ) {
+                    Ok(None) => Some(row),
+                    Ok(Some((masked, _))) => serde_json::from_slice(&masked).ok(),
+                    Err(_) => Some(blanked(row)),
                 }
             })
             .collect();
@@ -249,6 +278,7 @@ impl MaskedTails {
             return Ok(reply);
         };
         let rows = self.rows.rows().unwrap_or_default();
+        let snap = self.snap();
         let served = list
             .into_iter()
             .filter_map(|prompt| {
@@ -259,9 +289,14 @@ impl MaskedTails {
                 let row = rows
                     .iter()
                     .find(|row| row.get("id").and_then(Value::as_str) == Some(id));
-                let job = self.job_for(id, row);
+                let job = self.job_for(&snap, id, row);
                 let text = prompt.to_string();
-                match self.mask(job.as_deref(), (0, &[], text.as_bytes()), (true, false)) {
+                match self.mask(
+                    &snap,
+                    job.as_deref(),
+                    (0, &[], text.as_bytes()),
+                    (true, false),
+                ) {
                     Ok(None) => Some(prompt),
                     Ok(Some((masked, _))) => serde_json::from_slice(&masked).ok(),
                     Err(_) => None,

@@ -14,6 +14,7 @@ struct Masked {
     ended: bool,
     lost: bool,
     keys: Vec<String>,
+    released: bool,
 }
 
 #[derive(Default)]
@@ -73,6 +74,7 @@ impl TailMasks {
         let ended = old.as_ref().is_some_and(|m| m.ended);
         let lost = old.as_ref().is_some_and(|m| m.lost);
         let keys = old.as_ref().map(|m| m.keys.clone()).unwrap_or_default();
+        let released = old.as_ref().is_some_and(|m| m.released);
         let mut all = old.map(|m| m.values).unwrap_or_default();
         for (name, value) in values {
             let known = all
@@ -94,6 +96,7 @@ impl TailMasks {
                 ended,
                 lost,
                 keys,
+                released,
             },
         );
         Ok(())
@@ -148,6 +151,7 @@ impl TailMasks {
             ended: false,
             lost: true,
             keys: Vec::new(),
+            released: false,
         });
         for key in keys {
             if !masked.keys.contains(key) {
@@ -168,12 +172,18 @@ impl TailMasks {
         lock(&self.table)
             .jobs
             .values()
-            .any(|m| (m.lost || m.template.is_none()) && m.keys.is_empty())
+            .any(|m| (m.lost || m.template.is_none()) && m.keys.is_empty() && !m.released)
     }
 
     pub fn end_job(&self, job: &str) {
         if let Some(masked) = lock(&self.table).jobs.get_mut(job) {
             masked.ended = true;
+        }
+    }
+
+    pub fn release_blanket(&self, job: &str) {
+        if let Some(masked) = lock(&self.table).jobs.get_mut(job) {
+            masked.released = true;
         }
     }
 
