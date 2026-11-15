@@ -301,15 +301,22 @@ fn main_set_from_a_client_reaches_the_home() {
             desired: None,
         })
         .unwrap();
-    let w = wired(&client, true);
-    eventually("the client's change reaches the home", || {
-        w.ops
-            .call(
-                &caller(Tier::App),
-                ops::CLUSTER_MAIN_SET,
-                &json!({"id": "job-1", "main": false}),
-            )
-            .is_ok()
-    });
+    let w = wired(&client, false);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    loop {
+        let sent = w.ops.call(
+            &caller(Tier::App),
+            ops::CLUSTER_MAIN_SET,
+            &json!({"id": "job-1", "main": false}),
+        );
+        if sent.is_ok() {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the client's change never reached the home: {sent:?}"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
     assert_eq!(home.node.status()["kept"], json!(["job-1"]));
 }

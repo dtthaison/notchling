@@ -96,6 +96,8 @@ pub enum Command {
     Main {
         main: BTreeMap<String, MainSession>,
         ended: BTreeMap<String, i64>,
+        #[serde(default)]
+        kept: BTreeSet<String>,
     },
 }
 
@@ -432,12 +434,13 @@ pub fn apply(
                 None => return Ok(Applied::none()),
             }
         }
-        Command::Main { main, ended } => {
-            if state.main == *main && state.ended == *ended {
+        Command::Main { main, ended, kept } => {
+            if state.main == *main && state.ended == *ended && state.kept == *kept {
                 return Ok(Applied::none());
             }
             state.main = main.clone();
             state.ended = ended.clone();
+            state.kept = kept.clone();
             vec![state.main_change()]
         }
     };

@@ -244,6 +244,7 @@ pub struct NodeCore {
     next_local: u64,
     last_pins: Option<(Vec<String>, bool)>,
     changed: bool,
+    aliases: BTreeMap<String, String>,
     #[cfg(test)]
     pub(crate) skip_term_check: bool,
 }
@@ -274,6 +275,7 @@ impl NodeCore {
             next_local: 1,
             last_pins: None,
             changed: false,
+            aliases: BTreeMap::new(),
             #[cfg(test)]
             skip_term_check: false,
         }

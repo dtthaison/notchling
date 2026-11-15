@@ -132,3 +132,79 @@ fn the_home_applies_a_local_set_main_at_once() {
     assert!(answers(&effects).iter().all(|r| r.is_ok()));
     assert!(hub.core(&m5).state().expect("state").kept.contains("job-1"));
 }
+
+fn seen(hub: &mut Hub, who: &str, ids: &[&str]) {
+    hub.local(
+        &id(who),
+        LocalCmd::MainSeen {
+            agents: ids.iter().map(|i| agent(i)).collect(),
+            codex_exec: BTreeSet::new(),
+        },
+    );
+}
+
+fn set(hub: &mut Hub, who: &str, session: &str, main: bool) {
+    hub.local(
+        &id(who),
+        LocalCmd::SetMain {
+            session: session.to_string(),
+            main,
+        },
+    );
+}
+
+#[test]
+fn keep_on_the_short_id_then_undone_by_the_session_id() {
+    let mut hub = client_pair();
+    let m5 = id("m5");
+    set(&mut hub, "m5", "ab12cd34", false);
+    seen(&mut hub, "m5", &["sess-1"]);
+    let state = hub.core(&m5).state().expect("state");
+    assert_eq!(state.kept, ["sess-1".to_string()].into());
+    assert!(state.main.is_empty());
+    set(&mut hub, "m5", "sess-1", true);
+    seen(&mut hub, "m5", &["sess-1"]);
+    let state = hub.core(&m5).state().expect("state");
+    assert!(state.kept.is_empty());
+    assert!(state.main.contains_key("sess-1"));
+}
+
+#[test]
+fn keep_on_the_short_id_drops_the_session_from_main_at_once() {
+    let mut hub = client_pair();
+    let m5 = id("m5");
+    seen(&mut hub, "m5", &["sess-1"]);
+    assert!(hub
+        .core(&m5)
+        .state()
+        .expect("state")
+        .main
+        .contains_key("sess-1"));
+    set(&mut hub, "m5", "ab12cd34", false);
+    let state = hub.core(&m5).state().expect("state");
+    assert_eq!(state.kept, ["sess-1".to_string()].into());
+    assert!(state.main.is_empty() && state.ended.is_empty());
+    seen(&mut hub, "m5", &["sess-1"]);
+    let state = hub.core(&m5).state().expect("state");
+    assert!(state.main.is_empty() && state.ended.is_empty());
+    set(&mut hub, "m5", "ab12cd34", true);
+    seen(&mut hub, "m5", &["sess-1"]);
+    assert!(hub
+        .core(&m5)
+        .state()
+        .expect("state")
+        .main
+        .contains_key("sess-1"));
+}
+
+#[test]
+fn keep_chosen_on_a_session_id_is_not_ended_either() {
+    let mut hub = client_pair();
+    let m5 = id("m5");
+    seen(&mut hub, "m5", &["sess-1"]);
+    set(&mut hub, "m5", "sess-1", false);
+    seen(&mut hub, "m5", &["sess-1"]);
+    let state = hub.core(&m5).state().expect("state");
+    assert!(state.main.is_empty() && state.ended.is_empty());
+    assert_eq!(state.kept, ["sess-1".to_string()].into());
+}

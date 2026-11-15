@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::fs;
 
 use serde_json::json;
@@ -71,6 +72,7 @@ fn built() -> (ClusterState, Vec<Applied>) {
             )]
             .into(),
             ended: [("job-1".to_string(), 3)].into(),
+            kept: BTreeSet::new(),
         },
         Command::SetMain {
             session: "job-2".to_string(),

@@ -1,7 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::id::Tool;
-use super::main_sessions::{is_main, may_be_main, reconcile, valid_id, DAY_MS, HEADLESS, NOT_YET};
+use super::main_sessions::{
+    is_main, may_be_main, reconcile, valid_id, DAY_MS, EXITED, HEADLESS, NOT_YET,
+};
 use super::state::{apply, start, Change, ClusterState, Command};
 use super::testkit::member;
 use crate::sessions::{Agent, AgentGroup, AgentTarget, NodeRef};
@@ -131,14 +133,14 @@ fn set_main_is_journaled() {
 fn set_main_off_drops_a_main_session_and_the_monitor_does_not_bring_it_back() {
     let mut state = created();
     let seen = [agent("job-1")];
-    let (main, ended) = reconcile(
+    let (main, ended, kept) = reconcile(
         &state.main,
         &state.ended,
         &seen,
         (&state.kept, &BTreeSet::new()),
         100,
     );
-    apply(&mut state, Command::Main { main, ended }, 100).expect("main");
+    apply(&mut state, Command::Main { main, ended, kept }, 100).expect("main");
     assert!(state.main.contains_key("job-1"));
     apply(
         &mut state,
@@ -150,7 +152,7 @@ fn set_main_off_drops_a_main_session_and_the_monitor_does_not_bring_it_back() {
     )
     .expect("set main");
     assert!(!state.main.contains_key("job-1"));
-    let (main, _) = reconcile(
+    let (main, _, _) = reconcile(
         &state.main,
         &state.ended,
         &seen,
@@ -164,18 +166,18 @@ fn set_main_off_drops_a_main_session_and_the_monitor_does_not_bring_it_back() {
 fn ended_session_leaves_main_after_a_day() {
     let kept = (&BTreeSet::new(), &BTreeSet::new());
     let live = [agent("job-1")];
-    let (main, ended) = reconcile(&BTreeMap::new(), &BTreeMap::new(), &live, kept, 1_000);
+    let (main, ended, _) = reconcile(&BTreeMap::new(), &BTreeMap::new(), &live, kept, 1_000);
     assert_eq!(main["job-1"].tool, Tool::Claude);
     assert_eq!(main["job-1"].cwd, "/work/repo");
     assert_eq!(main["job-1"].since_ms, 1_000);
-    let (main, ended) = reconcile(&main, &ended, &[], kept, 2_000);
+    let (main, ended, _) = reconcile(&main, &ended, &[], kept, 2_000);
     assert!(main.contains_key("job-1"));
-    let (main, ended) = reconcile(&main, &ended, &[], kept, 2_000 + DAY_MS - 1);
+    let (main, ended, _) = reconcile(&main, &ended, &[], kept, 2_000 + DAY_MS - 1);
     assert!(main.contains_key("job-1"));
     let back = reconcile(&main, &ended, &live, kept, 3_000 + DAY_MS);
     assert!(back.0.contains_key("job-1"));
     assert!(back.1.is_empty());
-    let (main, ended) = reconcile(&main, &ended, &[], kept, 2_000 + DAY_MS);
+    let (main, ended, _) = reconcile(&main, &ended, &[], kept, 2_000 + DAY_MS);
     assert!(main.is_empty());
     assert!(ended.is_empty());
 }
@@ -193,7 +195,7 @@ fn phone_started_session_is_main() {
         cwd: "/work/repo".to_string(),
     };
     let exec: BTreeSet<String> = ["codex:phone-1".to_string()].into();
-    let (main, _) = reconcile(
+    let (main, _, _) = reconcile(
         &BTreeMap::new(),
         &BTreeMap::new(),
         &[job, codex],
@@ -224,7 +226,7 @@ fn a_job_is_main_only_once_it_has_its_session_id_and_a_transcript() {
     assert_eq!(may_be_main(&fresh), Err(NOT_YET.to_string()));
     fresh.transcript_path = Some("/t.jsonl".to_string());
     assert_eq!(may_be_main(&fresh), Ok(()));
-    let (main, _) = reconcile(
+    let (main, _, _) = reconcile(
         &BTreeMap::new(),
         &BTreeMap::new(),
         &[agent("ab12cd34")],
@@ -259,7 +261,7 @@ fn codex_is_main_only_when_notchling_started_it() {
         cwd: "/work/repo".to_string(),
     };
     let none = BTreeSet::new();
-    let (main, _) = reconcile(
+    let (main, _, _) = reconcile(
         &BTreeMap::new(),
         &BTreeMap::new(),
         &[codex.clone(), agent("sess-1")],
@@ -269,7 +271,7 @@ fn codex_is_main_only_when_notchling_started_it() {
     assert!(!main.contains_key("codex:c1"));
     assert!(main.contains_key("sess-1"));
     let exec: BTreeSet<String> = ["codex:c1".to_string()].into();
-    let (main, _) = reconcile(
+    let (main, _, _) = reconcile(
         &BTreeMap::new(),
         &BTreeMap::new(),
         &[codex],
@@ -300,4 +302,84 @@ fn session_ids_are_short_and_plain() {
         assert!(err.is_err());
     }
     assert!(state.kept.is_empty());
+}
+
+#[test]
+fn an_exited_headless_row_never_enters_main() {
+    let none = BTreeSet::new();
+    let mut live = agent("sess-h");
+    live.headless = true;
+    live.target = AgentTarget::Process(77);
+    let (main, ended, _) = reconcile(
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &[live.clone()],
+        (&none, &none),
+        1,
+    );
+    assert!(main.is_empty());
+    let mut exited = live;
+    exited.headless = false;
+    exited.target = AgentTarget::Resume {
+        session_id: "sess-h".to_string(),
+        cwd: "/work/repo".to_string(),
+    };
+    assert_eq!(may_be_main(&exited), Err(EXITED.to_string()));
+    let (main, _, _) = reconcile(&main, &ended, &[exited], (&none, &none), 2);
+    assert!(main.is_empty());
+}
+
+#[test]
+fn a_main_session_that_exits_is_ended_and_leaves_after_a_day() {
+    let none = BTreeSet::new();
+    let mut live = agent("sess-t");
+    live.target = AgentTarget::Process(77);
+    let (main, ended, _) = reconcile(
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &[live.clone()],
+        (&none, &none),
+        1,
+    );
+    assert!(main.contains_key("sess-t"));
+    live.target = AgentTarget::Resume {
+        session_id: "sess-t".to_string(),
+        cwd: "/work/repo".to_string(),
+    };
+    let (main, ended, _) = reconcile(&main, &ended, &[live.clone()], (&none, &none), 10);
+    assert_eq!(ended["sess-t"], 10);
+    assert!(main.contains_key("sess-t"));
+    let (main, ended, _) = reconcile(&main, &ended, &[live], (&none, &none), 10 + DAY_MS);
+    assert!(main.is_empty() && ended.is_empty());
+}
+
+#[test]
+fn a_short_id_in_kept_becomes_the_session_id_when_the_row_shows_both() {
+    let none = BTreeSet::new();
+    let kept: BTreeSet<String> = ["ab12cd34".to_string()].into();
+    let row = agent("sess-1");
+    let (main, ended, kept) = reconcile(
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        std::slice::from_ref(&row),
+        (&kept, &none),
+        1,
+    );
+    assert!(main.is_empty() && ended.is_empty());
+    assert_eq!(kept, ["sess-1".to_string()].into());
+    let main_before: BTreeMap<_, _> = [(
+        "sess-1".to_string(),
+        super::main_sessions::MainSession {
+            id: "sess-1".to_string(),
+            tool: Tool::Claude,
+            cwd: "/work/repo".to_string(),
+            config_dir: None,
+            transcript: None,
+            respawn: Vec::new(),
+            since_ms: 1,
+        },
+    )]
+    .into();
+    let (main, ended, _) = reconcile(&main_before, &BTreeMap::new(), &[row], (&kept, &none), 2);
+    assert!(main.is_empty() && ended.is_empty());
 }

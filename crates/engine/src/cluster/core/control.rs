@@ -5,7 +5,7 @@ use serde_json::{json, Value};
 
 use super::{Effect, Joining, LocalCmd, NodeCore, Target, Then, CALL_MS, DELEGATE_CALL_MS};
 use crate::cluster::id::NodeId;
-use crate::cluster::main_sessions::reconcile;
+use crate::cluster::main_sessions::{aliases, reconcile};
 use crate::cluster::members::{Desired, Member, MemberState, Term};
 use crate::cluster::state::Command;
 use crate::cluster::versions::Versions;
@@ -338,8 +338,22 @@ impl NodeCore {
         main: bool,
         out: &mut Vec<Effect>,
     ) -> Result<Value, WireError> {
-        self.apply(Command::SetMain { session, main }, out)
-            .map_err(|e| refusal("refused", e.to_string()))?;
+        let canonical = self.aliases.get(&session).unwrap_or(&session).clone();
+        let mut ids = vec![canonical.clone()];
+        if main {
+            ids.push(session);
+            ids.extend(
+                self.aliases
+                    .iter()
+                    .filter(|(_, v)| **v == canonical)
+                    .map(|(k, _)| k.clone()),
+            );
+        }
+        ids.dedup();
+        for id in ids {
+            self.apply(Command::SetMain { session: id, main }, out)
+                .map_err(|e| refusal("refused", e.to_string()))?;
+        }
         Ok(json!({}))
     }
 
@@ -352,17 +366,18 @@ impl NodeCore {
         if !self.is_home() {
             return;
         }
+        self.aliases = aliases(agents);
         let Some(state) = &self.state else {
             return;
         };
-        let (main, ended) = reconcile(
+        let (main, ended, kept) = reconcile(
             &state.main,
             &state.ended,
             agents,
             (&state.kept, codex_exec),
             self.wall_ms,
         );
-        let _ = self.apply(Command::Main { main, ended }, out);
+        let _ = self.apply(Command::Main { main, ended, kept }, out);
     }
 
     fn set_member(&mut self, a: SetArgs, out: &mut Vec<Effect>) -> Result<Value, WireError> {
