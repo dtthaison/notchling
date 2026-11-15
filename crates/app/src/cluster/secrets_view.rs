@@ -6,8 +6,9 @@ use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 use notchling_locale as t;
 
 use super::model::{Login, NodeRow};
-use super::secrets::{summary, SecretsModel, SecretsPicker};
+use super::secrets::{summary, SecretsModel, SecretsPicker, MAX_ATTACHED};
 use crate::accounts::view_rows::Handler;
+use notchling_engine::cluster::grants::MAX_ALLOWED_NAMES;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SecretsEvent {
@@ -175,6 +176,14 @@ pub fn editor_body<V: 'static>(
         }
         body = body.child(list);
     }
+    if model.at_cap() {
+        body = body.child(label(
+            &t::cluster::secrets_cap(&MAX_ALLOWED_NAMES.to_string()),
+            TypeRole::Meta,
+            Ink::Needs,
+            a,
+        ));
+    }
     if let Some(error) = editor.error {
         body = body.child(label(
             &t::cluster::secrets_failed(error),
@@ -261,6 +270,14 @@ pub fn picker<V: 'static>(
         };
         out = out.child(check_row(check, a, cx, on));
     }
+    if picker.at_cap() {
+        out = out.child(label(
+            &t::cluster::secrets_cap(&MAX_ATTACHED.to_string()),
+            TypeRole::Meta,
+            Ink::Needs,
+            a,
+        ));
+    }
     if let Some(note) = picker.note() {
         out = out.child(label(note, TypeRole::Meta, Ink::Needs, a));
     }
@@ -268,7 +285,7 @@ pub fn picker<V: 'static>(
 }
 
 pub fn vault_tabs<V: 'static>(
-    name: &str,
+    name: Option<&str>,
     remote: bool,
     a: Appearance,
     cx: &mut Context<V>,
@@ -302,7 +319,10 @@ pub fn vault_tabs<V: 'static>(
         .child(
             button(
                 "vault-tab-remote",
-                &t::cluster::vault_tab_remote(name),
+                &name.map_or_else(
+                    || t::cluster::vault_tab_unknown().to_owned(),
+                    t::cluster::vault_tab_remote,
+                ),
                 kind(remote),
                 PartState::Rest,
                 a,

@@ -13,4 +13,6 @@ pub mod store;
 pub mod view;
 #[cfg(target_os = "macos")]
 pub mod view_list;
+#[cfg(target_os = "macos")]
+mod view_render;
 pub mod wire;

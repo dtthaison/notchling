@@ -7,7 +7,10 @@ use serde_json::{json, Value};
 
 use super::model::{ClusterModel, Login};
 use super::renders::{allow, status, vault_names, ME, STANDBY, WORKER};
-use super::secrets::{summary, vault_names as read_names, SecretsModel, SecretsPicker};
+use super::secrets::{
+    save_request, store_for, summary, target, vault_names as read_names, SecretsModel,
+    SecretsPicker, Target,
+};
 use crate::actions::Transport;
 use crate::switches::Switches;
 use crate::vault::store::Vault;
@@ -428,4 +431,140 @@ fn a_relay_refusal_is_shown_as_it_came() {
     let model = ClusterModel::from_status(&elsewhere, WORKER);
     let error = read_names(&model, &local, &remote, &Switches::all_on()).unwrap_err();
     assert_eq!(error, "The vault is on mac-mini, which is offline");
+}
+
+fn local_and_remote() -> (Arc<Vault>, Calls, Arc<Vault>, Calls) {
+    let local_calls: Calls = Arc::default();
+    let local = Arc::new(Vault::over(Box::new(Relay {
+        calls: local_calls.clone(),
+        fail: None,
+    })));
+    let (remote, remote_calls) = relay(None);
+    (local, local_calls, remote, remote_calls)
+}
+
+fn remote_model() -> ClusterModel {
+    let mut elsewhere = status();
+    elsewhere["cluster"]["vault"] = json!(STANDBY);
+    model_of(&elsewhere)
+}
+
+#[test]
+fn the_target_is_local_remote_or_unreachable() {
+    assert_eq!(target(false, &remote_model()), Target::Local);
+    assert_eq!(
+        target(true, &remote_model()),
+        Target::Remote(STANDBY.to_owned())
+    );
+    assert_eq!(target(true, &ClusterModel::default()), Target::Unreachable);
+    assert_eq!(
+        target(true, &model_of(&status())),
+        Target::Unreachable,
+        "this Mac holds the vault: there is no other one to write to"
+    );
+}
+
+#[test]
+fn feed_lost_means_no_local_save_or_remove() {
+    let (local, local_calls, remote, remote_calls) = local_and_remote();
+    let pinned = Target::Remote(STANDBY.to_owned());
+    let lost = ClusterModel::default();
+    assert!(store_for(Some(&pinned), true, &lost, &local, &remote).is_err());
+    assert!(store_for(None, true, &lost, &local, &remote).is_err());
+    let mut other = status();
+    other["cluster"]["vault"] = json!(WORKER);
+    let moved = model_of(&other);
+    assert!(store_for(Some(&pinned), true, &moved, &local, &remote).is_err());
+    assert!(local_calls.lock().expect("calls").is_empty());
+    assert!(remote_calls.lock().expect("calls").is_empty());
+}
+
+#[test]
+fn a_pinned_target_that_still_holds_gets_its_own_store() {
+    let (local, _, remote, _) = local_and_remote();
+    let here = model_of(&status());
+    let got = store_for(Some(&Target::Local), false, &here, &local, &remote).expect("local");
+    assert!(Arc::ptr_eq(&got, &local));
+    let pinned = Target::Remote(STANDBY.to_owned());
+    let got = store_for(Some(&pinned), true, &remote_model(), &local, &remote).expect("remote");
+    assert!(Arc::ptr_eq(&got, &remote));
+    let switched = store_for(Some(&Target::Local), true, &remote_model(), &local, &remote);
+    assert!(
+        switched.is_err(),
+        "a form opened on This Mac never goes remote"
+    );
+}
+
+#[test]
+fn a_lost_daemon_is_an_error_not_an_empty_vault() {
+    struct Gone;
+    impl Transport for Gone {
+        fn call(&self, _: &str, _: Value) -> Result<Value, ClientError> {
+            Err(ClientError::Closed)
+        }
+    }
+    let (local, _, _, _) = local_and_remote();
+    let remote = Vault::remote_over(Arc::new(Gone));
+    let error = read_names(&remote_model(), &local, &remote, &Switches::all_on());
+    assert_eq!(error, Err(crate::acting::DETACHED_MESSAGE.to_owned()));
+}
+
+#[test]
+fn save_says_why_it_cannot_go() {
+    let model = model_of(&status());
+    let edit = SecretsModel::new(&names(), &SecretAllow::default());
+    assert!(save_request(&model, WORKER, &edit, true).is_ok());
+    assert_eq!(
+        save_request(&model, WORKER, &edit, false),
+        Err(crate::acting::DETACHED_MESSAGE.to_owned())
+    );
+    assert_eq!(
+        save_request(&model, ME, &edit, true),
+        Err("This machine can't take secrets any more, so nothing was saved.".to_owned())
+    );
+    let mut gone = status();
+    gone["members"][0]["state"] = json!("removed");
+    assert!(save_request(&model_of(&gone), WORKER, &edit, true).is_err());
+    assert!(save_request(&ClusterModel::default(), WORKER, &edit, true).is_err());
+}
+
+#[test]
+fn the_caps_are_visible() {
+    let many: Vec<String> = (0..MAX_ALLOWED_NAMES + 1)
+        .map(|n| format!("s{n}"))
+        .collect();
+    let mut edit = SecretsModel::new(&many, &SecretAllow::default());
+    assert!(!edit.at_cap());
+    for name in &many {
+        edit.toggle(name);
+    }
+    assert!(edit.at_cap());
+    let some: Vec<String> = (0..17).map(|n| format!("s{n}")).collect();
+    let mut picker = SecretsPicker::new(&some, &SecretAllow::new(Vec::new(), true), None);
+    assert!(!picker.at_cap());
+    for name in &some {
+        picker.toggle(name);
+    }
+    assert!(picker.at_cap());
+}
+
+#[test]
+fn a_new_vault_node_never_shows_the_old_nodes_list() {
+    let (remote, _) = relay(None);
+    let on = Switches::all_on();
+    remote.set_node(Some(STANDBY));
+    remote.refresh(&on);
+    assert_eq!(remote.snapshot().entries.len(), 2);
+    remote.set_node(Some(WORKER));
+    assert!(remote.snapshot().entries.is_empty());
+    remote.refresh(&on);
+    remote.set_node(None);
+    assert!(remote.snapshot().entries.is_empty());
+    let fixed = Vault::remote_fixed(vec![VaultEntry::new("kept", Kind::Token)]);
+    fixed.set_node(Some(STANDBY));
+    assert_eq!(
+        fixed.snapshot().entries.len(),
+        1,
+        "a render keeps its entries"
+    );
 }

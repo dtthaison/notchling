@@ -99,7 +99,7 @@ cluster-secrets = Secrets…
 cluster-secrets-title = Secrets on { $name }
 cluster-secrets-about = A job on this machine can carry only the secrets checked here. Each is sent to the machine when the job starts and deleted when it ends.
 cluster-secrets-any = Any Secret
-cluster-secrets-any-about = Every secret in the vault, by name, on this machine. The list below stays as it is.
+cluster-secrets-any-about = Every secret in the vault, by name, on this machine. Your checked names are kept for when this is off.
 cluster-secrets-reading = Reading the vault…
 cluster-secrets-empty = The vault has no secrets yet.
 # Beside a checked name that is no longer saved in the vault.
@@ -108,6 +108,10 @@ cluster-secrets-save = Save
 cluster-secrets-cancel = Cancel
 cluster-secrets-failed = Couldn't change the secrets: { $error }
 cluster-secrets-vault-failed = Couldn't read the vault: { $error }
+# Shown when Save finds the machine can no longer take secrets (removed, inactive or a client).
+cluster-secrets-node-gone = This machine can't take secrets any more, so nothing was saved.
+# Under the list when the most secrets are checked; $max is the limit.
+cluster-secrets-cap = At most { $max } secrets. Uncheck one to choose another.
 cluster-secrets-none = No secrets
 cluster-secrets-any-short = Any secret
 # Line on a node's row; $count is how many secrets it may carry.
@@ -128,3 +132,8 @@ cluster-vault-tab-local = This Mac
 cluster-vault-tab-remote = Vault on { $name }
 cluster-vault-offline = The vault is on { $name }, which is offline
 cluster-vault-unknown = This Mac doesn't know which machine holds the vault.
+cluster-vault-unreachable = Can't reach the vault on the other machine. Nothing was saved or removed.
+# Shown when the machine a form or a removal was opened for is no longer the one this Mac would send it to.
+cluster-vault-moved = The vault changed while this was open, so nothing was saved or removed. Open it again.
+# Tab label while this Mac can't tell which machine holds the vault.
+cluster-vault-tab-unknown = Vault on Another Machine

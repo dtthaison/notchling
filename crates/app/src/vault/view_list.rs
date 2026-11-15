@@ -112,8 +112,7 @@ pub(super) fn list_row(row: &Row, a: Appearance, cx: &mut Context<VaultSheetView
     };
     buttons = buttons.child(remove.when(remove_control.enabled, |b| {
         b.on_click(cx.listener(move |this, _, _, cx| {
-            this.removing = Some(n.clone());
-            cx.notify();
+            this.ask_remove(&n, cx);
         }))
     }));
     card(a)

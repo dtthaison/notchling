@@ -76,10 +76,9 @@ impl Vault {
         let mut held = lock(slot);
         let next = node.map(str::to_owned);
         if *held != next {
-            let changed_hands = held.is_some();
             *held = next;
             drop(held);
-            if changed_hands {
+            if self.transport.is_some() {
                 self.update(|s| *s = Snapshot::default());
             }
         }
@@ -348,5 +347,24 @@ mod tests {
             1,
             "a render keeps what it was given"
         );
+    }
+
+    #[test]
+    fn a_remote_vault_forgets_its_list_when_the_node_changes_even_from_none() {
+        let (remote, _) = (Vault::remote_over(Arc::new(Shared(Arc::new(NoCalls)))), ());
+        remote.update(|s| {
+            s.attached = true;
+            s.entries = vec![VaultEntry::new("old", Kind::Token)];
+        });
+        remote.set_node(Some("node-a"));
+        assert!(remote.snapshot().entries.is_empty());
+    }
+
+    struct NoCalls;
+
+    impl Transport for NoCalls {
+        fn call(&self, _: &str, _: Value) -> Result<Value, ClientError> {
+            Ok(Value::Null)
+        }
     }
 }

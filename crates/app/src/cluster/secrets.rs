@@ -7,6 +7,7 @@ use notchling_locale as t;
 use serde_json::{json, Value};
 
 use super::model::{ClusterModel, VaultNode};
+use super::wire::Request;
 use crate::switches::feed::SwitchFeed;
 use crate::switches::{Switch, Switches};
 use crate::vault::store::Vault;
@@ -64,6 +65,10 @@ impl SecretsModel {
 
     pub fn shows_list(&self) -> bool {
         !self.any
+    }
+
+    pub fn at_cap(&self) -> bool {
+        self.chosen().len() >= MAX_ALLOWED_NAMES
     }
 
     pub fn toggle(&mut self, name: &str) {
@@ -153,6 +158,10 @@ impl SecretsPicker {
         self.offered.is_empty()
     }
 
+    pub fn at_cap(&self) -> bool {
+        self.chosen.len() >= MAX_ATTACHED
+    }
+
     pub fn is_on(&self, name: &str) -> bool {
         self.chosen.contains(&name.to_lowercase())
     }
@@ -177,6 +186,58 @@ impl SecretsPicker {
         }
         args
     }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Target {
+    Local,
+    Remote(String),
+    Unreachable,
+}
+
+pub fn target(remote_tab: bool, model: &ClusterModel) -> Target {
+    if !remote_tab {
+        return Target::Local;
+    }
+    match model.remote_vault() {
+        Some(node) => Target::Remote(node.id.clone()),
+        None => Target::Unreachable,
+    }
+}
+
+pub fn store_for(
+    pinned: Option<&Target>,
+    remote_tab: bool,
+    model: &ClusterModel,
+    local: &Arc<Vault>,
+    remote: &Arc<Vault>,
+) -> Result<Arc<Vault>, String> {
+    let now = target(remote_tab, model);
+    if pinned.is_some_and(|p| *p != now) {
+        return Err(t::cluster::vault_moved().to_owned());
+    }
+    match now {
+        Target::Local => Ok(local.clone()),
+        Target::Remote(id) => {
+            remote.set_node(Some(&id));
+            Ok(remote.clone())
+        }
+        Target::Unreachable => Err(t::cluster::vault_unreachable().to_owned()),
+    }
+}
+
+pub fn save_request(
+    model: &ClusterModel,
+    node: &str,
+    edit: &SecretsModel,
+    live: bool,
+) -> Result<Request, String> {
+    if !live {
+        return Err(crate::acting::DETACHED_MESSAGE.to_owned());
+    }
+    model
+        .set_secrets(node, edit)
+        .ok_or_else(|| t::cluster::secrets_node_gone().to_owned())
 }
 
 pub struct VaultAccess {
@@ -209,6 +270,7 @@ pub fn vault_names(
     let snapshot = store.snapshot();
     match snapshot.error {
         Some(error) => Err(error),
+        None if !snapshot.attached => Err(crate::acting::DETACHED_MESSAGE.to_owned()),
         None => Ok(snapshot.entries.into_iter().map(|e| e.name).collect()),
     }
 }

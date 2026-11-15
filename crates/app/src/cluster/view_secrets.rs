@@ -2,7 +2,7 @@ use gpui::Context;
 
 use super::model::ClusterModel;
 use super::renders::{vault_names as fixture_names, WORKER};
-use super::secrets::{vault_names, SecretsModel};
+use super::secrets::{save_request, vault_names, SecretsModel};
 use super::secrets_view::SecretsEvent;
 use super::view::ClusterSheetView;
 
@@ -86,15 +86,23 @@ impl ClusterSheetView {
     }
 
     fn save_secrets(&mut self, cx: &mut Context<Self>) {
-        let Some(editing) = self.editing.as_ref() else {
+        let Some(editing) = self.editing.as_ref().filter(|_| !self.busy) else {
             return;
         };
-        let request = editing
-            .model
-            .as_ref()
-            .and_then(|m| self.feed.snapshot().set_secrets(&editing.node, m));
-        let Some(request) = request.filter(|_| !self.busy && self.feed.is_live()) else {
+        let Some(model) = editing.model.as_ref() else {
             return;
+        };
+        let live = self.feed.is_live();
+        let request = save_request(&self.feed.snapshot(), &editing.node, model, live);
+        let request = match request {
+            Ok(request) => request,
+            Err(error) => {
+                if let Some(editing) = self.editing.as_mut() {
+                    editing.error = Some(error);
+                }
+                cx.notify();
+                return;
+            }
         };
         self.busy = true;
         let feed = self.feed.clone();
