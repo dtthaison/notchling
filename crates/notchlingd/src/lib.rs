@@ -94,7 +94,9 @@ pub mod signals;
 pub mod snap_copy;
 pub mod snap_db;
 pub mod snap_files;
+pub mod snap_recv;
 pub mod snap_repo;
+pub mod snap_send;
 pub mod switches;
 pub mod vault_args;
 pub mod vault_caller;
@@ -223,6 +225,8 @@ mod snap_files_tests;
 mod snap_repo_safety_tests;
 #[cfg(all(test, unix))]
 mod snap_repo_tests;
+#[cfg(all(test, unix))]
+mod snap_testkit;
 #[cfg(test)]
 mod vault_ops_lock_tests;
 #[cfg(test)]

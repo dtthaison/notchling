@@ -144,6 +144,10 @@ fn every_rule_names_a_known_op() {
         "delegate.run",
         "workspace.prepare",
         "workspace.return",
+        "snap.offer",
+        "snap.part",
+        "snap.commit",
+        "snap.ack",
         "node.switch.set",
         "node.put",
         "node.put.end",
@@ -249,4 +253,45 @@ fn node_sessions_is_for_clients_and_the_home() {
     );
     assert!(check("node.sessions", &client, &origin("m1", OriginTier::Node)).is_ok());
     assert!(check("node.sessions", &home, &origin("m5", OriginTier::Node)).is_ok());
+}
+
+#[test]
+fn only_the_primary_may_send_a_set_and_only_to_a_standby() {
+    let home = facts("m5", Role::Home, true, MemberState::Active);
+    let standby = facts("m1", Role::Standby, true, MemberState::Active);
+    let worker = facts("w1", Role::Worker, false, MemberState::Active);
+    for op in ["snap.offer", "snap.part", "snap.commit"] {
+        assert!(
+            check(op, &home, &origin("m5", OriginTier::Node)).is_ok(),
+            "{op}"
+        );
+        assert_eq!(
+            check(op, &standby, &origin("m1", OriginTier::Node)).err(),
+            Some(Denied::NotAllowed),
+            "{op}"
+        );
+        assert_eq!(
+            check(op, &worker, &origin("w1", OriginTier::Node)).err(),
+            Some(Denied::NotAllowed),
+            "{op}"
+        );
+        assert!(
+            check(op, &home, &origin("m5", OriginTier::Agent)).is_err(),
+            "{op}"
+        );
+        assert!(
+            check(op, &home, &origin("m5", OriginTier::App)).is_err(),
+            "{op}"
+        );
+    }
+}
+
+#[test]
+fn an_ack_goes_back_to_the_primary_only() {
+    let standby = facts("m1", Role::Standby, true, MemberState::Active);
+    let rule = check("snap.ack", &standby, &origin("m1", OriginTier::Node)).expect("rule");
+    assert!(rule.home_only);
+    assert!(check("snap.ack", &standby, &origin("m1", OriginTier::Agent)).is_err());
+    let removed = facts("m1", Role::Standby, true, MemberState::Removed);
+    assert!(check("snap.ack", &removed, &origin("m1", OriginTier::Node)).is_err());
 }

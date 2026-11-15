@@ -1,3 +1,4 @@
+pub mod ack_book;
 pub mod blob;
 pub mod core;
 pub mod fence;
@@ -14,6 +15,7 @@ pub mod persist;
 pub mod policy;
 pub mod shell_job;
 pub mod snapshot;
+pub mod standby_store;
 pub mod state;
 pub mod versions;
 pub mod wire;
@@ -55,6 +57,8 @@ mod outward_tests;
 mod policy_tests;
 #[cfg(test)]
 mod shell_job_tests;
+#[cfg(test)]
+mod standby_store_tests;
 #[cfg(test)]
 mod state_tests;
 #[cfg(test)]

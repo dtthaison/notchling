@@ -282,7 +282,7 @@ impl NodeCore {
             );
             return;
         }
-        let wait = if op.starts_with("workspace.") {
+        let wait = if op.starts_with("workspace.") || op.starts_with("snap.") {
             WORKSPACE_CALL_MS
         } else {
             CALL_MS

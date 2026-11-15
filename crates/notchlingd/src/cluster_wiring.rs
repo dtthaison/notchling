@@ -21,6 +21,8 @@ use crate::inbox_ops::InboxOps;
 use crate::late_emit::Events;
 use crate::layout::Layout;
 use crate::shell_jobs::ShellJobs;
+use crate::snap_recv::{self, SnapCalls};
+use crate::snap_send::SnapSender;
 use crate::switches::SwitchFlag;
 use crate::versions_ops::VersionsOps;
 use notchling_cluster_net::{load_or_make, Pins, TcpTls, PORT};
@@ -218,6 +220,7 @@ pub struct ClusterParts {
     pub returns: Arc<ReturnOps>,
     pub shells: Arc<ShellJobs>,
     pub remote: Arc<RemoteSessions>,
+    pub snap: Arc<SnapSender>,
     delegate: Arc<RealDelegate>,
     mirror: Arc<Mirror>,
     publisher: Arc<Publisher>,
@@ -325,14 +328,22 @@ impl ClusterParts {
         let launcher: Arc<dyn Launcher> =
             Arc::new(RealLauncher::with_claude(PathBuf::from("claude")));
         let blobs = Blobs::new(layout.cluster_dir());
-        let workspace = Workspace::new(layout.cluster_dir(), launcher.clone(), blobs);
+        let workspace = Workspace::new(layout.cluster_dir(), launcher.clone(), blobs.clone());
+        let snap = snap_recv::build(
+            layout.cluster_dir(),
+            blobs,
+            holder.clone(),
+            Arc::new(snap_recv::no_member_is_ready),
+        );
         let sender = Sender::new(
             layout.cluster_dir(),
             launcher,
             Arc::new(NodePeers::new(holder.clone())),
         );
-        let workspace_calls: Arc<dyn LocalCalls> =
-            Arc::new(WorkspaceCalls::new(sessions_calls, workspace));
+        let workspace_calls: Arc<dyn LocalCalls> = Arc::new(SnapCalls::new(
+            Arc::new(WorkspaceCalls::new(sessions_calls, workspace)),
+            snap.node.clone(),
+        ));
         let local: Arc<dyn LocalCalls> = Arc::new(NodeCalls {
             inner: Arc::new(DispatchCalls::new(
                 workspace_calls,
@@ -385,6 +396,7 @@ impl ClusterParts {
             shells,
             delegate,
             remote,
+            snap: snap.sender,
             mirror,
             publisher,
             refresher,
