@@ -7,15 +7,15 @@ use crate::cluster::members::{Term, MAX_TERM_N};
 use crate::cluster::testkit::{id, versions};
 use crate::cluster::wire::{Msg, Origin, OriginTier, WireError};
 
-struct Cast {
-    hub: Hub,
-    h: NodeId,
-    x: NodeId,
-    n: NodeId,
-    w: NodeId,
+pub(super) struct Cast {
+    pub(super) hub: Hub,
+    pub(super) h: NodeId,
+    pub(super) x: NodeId,
+    pub(super) n: NodeId,
+    pub(super) w: NodeId,
 }
 
-fn stranded() -> Cast {
+pub(super) fn stranded() -> Cast {
     let mut hub = Hub::new();
     let h = hub.add("m5", "macos", true);
     let x = hub.add("x1", "macos", true);
@@ -61,7 +61,7 @@ fn promote(hub: &mut Hub, who: &NodeId) {
     }
 }
 
-fn newer() -> Term {
+pub(super) fn newer() -> Term {
     Term {
         n: 2,
         node: id("x1"),
@@ -172,7 +172,7 @@ fn reply_stale(hub: &mut Hub, n: &NodeId, from: &NodeId, term: Term) {
     );
 }
 
-fn relink(hub: &mut Hub, a: &NodeId, b: &NodeId) {
+pub(super) fn relink(hub: &mut Hub, a: &NodeId, b: &NodeId) {
     if !hub.is_linked(a, b) {
         hub.linked.push((a.clone(), b.clone()));
     }
@@ -180,12 +180,12 @@ fn relink(hub: &mut Hub, a: &NodeId, b: &NodeId) {
     hub.run(b, Input::Linked { peer: a.clone() });
 }
 
-fn unmoved(c: &Cast) -> bool {
+pub(super) fn unmoved(c: &Cast) -> bool {
     let state = c.hub.core(&c.n).state().expect("state");
     state.home == c.h && state.term.n == 1
 }
 
-fn follows_x_with_its_members(c: &Cast) -> bool {
+pub(super) fn follows_x_with_its_members(c: &Cast) -> bool {
     let state = c.hub.core(&c.n).state().expect("state");
     state.home == c.x
         && state.term == newer()

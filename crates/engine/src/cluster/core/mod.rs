@@ -529,6 +529,8 @@ mod core_tests_flood;
 #[cfg(test)]
 mod core_tests_headless;
 #[cfg(test)]
+mod core_tests_heal;
+#[cfg(test)]
 mod core_tests_jobs;
 #[cfg(test)]
 mod core_tests_minter;
