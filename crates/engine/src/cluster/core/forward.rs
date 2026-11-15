@@ -144,7 +144,7 @@ impl NodeCore {
             self.reply(&from, id, Err(err), out);
             return;
         }
-        if !self.adopt(&term, out) {
+        if !self.adopt(&term, &from, out) {
             self.refused_call(&from, id, &op, "bad_term", out);
             return;
         }
@@ -239,7 +239,7 @@ impl NodeCore {
                 if e.code == "stale_term" {
                     if let Ok(v) = serde_json::from_str::<Value>(&e.message) {
                         if let Ok(t) = serde_json::from_value::<Term>(v["term"].clone()) {
-                            self.adopt(&t, out);
+                            self.adopt(&t, &from, out);
                         }
                     }
                 }

@@ -1,6 +1,8 @@
 use serde_json::json;
 
-use super::{Dial, Effect, NodeCore, DIAL_BACKOFF_MS, JOIN_ANSWER_MS, OFFLINE_MS, PING_MS};
+use super::{
+    Dial, Effect, NodeCore, DIAL_BACKOFF_MS, JOIN_ANSWER_MS, MAX_TERM_STEP, OFFLINE_MS, PING_MS,
+};
 use crate::cluster::id::NodeId;
 use crate::cluster::members::{Member, MemberState, Term};
 use crate::cluster::state::Command;
@@ -162,7 +164,7 @@ impl NodeCore {
             return;
         }
         if let Some(t) = &term {
-            if !self.adopt(t, out) {
+            if !self.adopt(t, &from, out) {
                 self.refuse(&from, "bad_term", true, out);
                 return;
             }
@@ -212,7 +214,7 @@ impl NodeCore {
         if !known {
             return;
         }
-        self.adopt(&term, out);
+        self.adopt(&term, &from, out);
         self.greet(&from);
     }
 
@@ -238,14 +240,23 @@ impl NodeCore {
                 return;
             }
         }
-        let from_home = self.state.as_ref().is_some_and(|s| s.home == from);
-        if reason == "removed" && from_home {
+        let Some(state) = &self.state else {
+            return;
+        };
+        let known = state
+            .members
+            .get(&from)
+            .is_some_and(|m| m.state == MemberState::Active);
+        if !known {
+            return;
+        }
+        if reason == "removed" && state.home == from {
             self.wipe(out);
             return;
         }
         if reason == "stale_term" {
             if let Some(t) = term {
-                self.adopt(&t, out);
+                self.adopt(&t, &from, out);
             }
         }
         out.push(self.publish("cluster.refused", json!({"from": from, "reason": reason})));
@@ -268,26 +279,41 @@ impl NodeCore {
         out.push(Effect::Wipe);
     }
 
-    pub(super) fn term_comes_from_a_promotable(&self, term: &Term) -> bool {
+    fn term_may_be_adopted(&self, term: &Term, sender: &NodeId) -> bool {
         let Some(state) = &self.state else {
             return false;
         };
-        *term <= state.term
+        if !term.storable() {
+            return false;
+        }
+        let Some(limit) = state.term.n.checked_add(MAX_TERM_STEP) else {
+            return false;
+        };
+        if term.n > limit {
+            return false;
+        }
+        let may_be_primary = state.members.get(sender).is_some_and(|m| {
+            m.state == MemberState::Active && (m.can_be_master || state.home == m.id)
+        });
+        if !may_be_primary {
+            return false;
+        }
+        *sender == term.node
             || state
                 .members
                 .get(&term.node)
-                .is_some_and(|m| m.state == MemberState::Active && m.can_be_master)
+                .is_some_and(|m| m.state == MemberState::Active)
     }
 
-    pub(super) fn adopt(&mut self, term: &Term, out: &mut Vec<Effect>) -> bool {
-        if !self.term_comes_from_a_promotable(term) {
-            return false;
-        }
+    pub(super) fn adopt(&mut self, term: &Term, sender: &NodeId, out: &mut Vec<Effect>) -> bool {
         let Some(state) = &self.state else {
             return false;
         };
         if *term <= state.term {
             return true;
+        }
+        if !self.term_may_be_adopted(term, sender) {
+            return false;
         }
         let was_home = state.home == self.me;
         if self

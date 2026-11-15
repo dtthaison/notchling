@@ -415,7 +415,7 @@ impl NodeCore {
             return;
         }
         let (id, name, old_vault) = (state.id.clone(), state.name.clone(), state.vault.clone());
-        if home != term.node || !self.adopt(&term, out) {
+        if home != term.node || !self.adopt(&term, &from, out) {
             self.refuse(&from, "bad_term", false, out);
             return;
         }
