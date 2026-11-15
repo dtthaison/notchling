@@ -30,7 +30,7 @@ final Provider<void> subscriptionSyncProvider = Provider<void>((Ref ref) {
   final bool phone = ref.watch(phoneWantedProvider);
   ref.watch(connectedCountProvider);
   if (client == null) return;
-  unawaited(_apply(ref, client, SubscriptionSpec(sessions: true, inbox: true, sessionId: selected, phoneFps: phone && selected != null ? 8 : null, phoneWidth: 360)));
+  unawaited(_apply(ref, client, SubscriptionSpec(sessions: true, inbox: true, held: client.inCluster, sessionId: selected, phoneFps: phone && selected != null ? 8 : null, phoneWidth: 360)));
 });
 
 final Provider<List<SubscriptionSpec?>> _lastSpecProvider = Provider<List<SubscriptionSpec?>>((Ref ref) => <SubscriptionSpec?>[null]);

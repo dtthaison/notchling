@@ -128,3 +128,21 @@ sessions-node-on-offline = On { $name }, offline
 
 # Shown on a session row in the Sessions tab beside the name of its computer, when that computer can't be reached right now. Also read aloud.
 sessions-node-offline = Offline
+
+# Shown in the Sessions tab above the list, on a command the phone sent while the Mac could not be reached. $name is the computer that keeps it until it can be sent.
+sessions-held-on = Held on { $name }
+
+# Shown in the Sessions tab on a held command that has waited over an hour and is not sent on its own. Also read aloud.
+sessions-held-waiting = Waiting
+
+# Shown in the Sessions tab on a held command that waited over an hour, once the Mac can be reached again. The buttons under it are Send and Cancel.
+sessions-held-still-send = Still send?
+
+# Shown in the Sessions tab on a held command. Sends it now.
+sessions-held-send = Send
+
+# Shown in the Sessions tab on a held command. Drops it without sending.
+sessions-held-cancel = Cancel
+
+# Shown in the Sessions tab on a message that says a held command was dropped. Dismisses the message.
+sessions-held-dismiss = Dismiss

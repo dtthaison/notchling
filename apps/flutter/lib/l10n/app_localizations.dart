@@ -99,6 +99,12 @@ abstract class AppL10n {
   /// **'Cancel'**
   String get appCancel;
 
+  /// Shown in the app shell when the phone refuses to connect to other computers of the cluster because it cannot check who they are. $names is their names.
+  ///
+  /// In en, this message translates to:
+  /// **'Not connecting to {names}: the phone can\'t verify it is the right computer.'**
+  String appCannotVerifyNodes(String names);
+
   /// Shown in the Chat screen and pairing with a Mac.
   ///
   /// In en, this message translates to:
@@ -260,6 +266,18 @@ abstract class AppL10n {
   /// In en, this message translates to:
   /// **'Could not take over: {reason}'**
   String appTakeoverFailed(String reason);
+
+  /// Shown in the app shell while the phone is connected to another computer of the cluster. $node is the computer it is connected to, $primary the one that cannot be reached.
+  ///
+  /// In en, this message translates to:
+  /// **'Through {node} · {primary} isn\'t reachable'**
+  String appThroughNode(String node, String primary);
+
+  /// Shown in the app shell while the phone is connected to another computer of the cluster. $node is the computer it is connected to.
+  ///
+  /// In en, this message translates to:
+  /// **'Through {node}'**
+  String appThroughNodeOnly(String node);
 
   /// Shown in the Chat screen and the Sessions tab.
   ///
@@ -1232,6 +1250,42 @@ abstract class AppL10n {
   /// In en, this message translates to:
   /// **'{count, plural, one{{state}, {count} session} other{{state}, {count} sessions}}'**
   String sessionsGroupLabel(int count, String state);
+
+  /// Shown in the Sessions tab on a held command. Drops it without sending.
+  ///
+  /// In en, this message translates to:
+  /// **'Cancel'**
+  String get sessionsHeldCancel;
+
+  /// Shown in the Sessions tab on a message that says a held command was dropped. Dismisses the message.
+  ///
+  /// In en, this message translates to:
+  /// **'Dismiss'**
+  String get sessionsHeldDismiss;
+
+  /// Shown in the Sessions tab above the list, on a command the phone sent while the Mac could not be reached. $name is the computer that keeps it until it can be sent.
+  ///
+  /// In en, this message translates to:
+  /// **'Held on {name}'**
+  String sessionsHeldOn(String name);
+
+  /// Shown in the Sessions tab on a held command. Sends it now.
+  ///
+  /// In en, this message translates to:
+  /// **'Send'**
+  String get sessionsHeldSend;
+
+  /// Shown in the Sessions tab on a held command that waited over an hour, once the Mac can be reached again. The buttons under it are Send and Cancel.
+  ///
+  /// In en, this message translates to:
+  /// **'Still send?'**
+  String get sessionsHeldStillSend;
+
+  /// Shown in the Sessions tab on a held command that has waited over an hour and is not sent on its own. Also read aloud.
+  ///
+  /// In en, this message translates to:
+  /// **'Waiting'**
+  String get sessionsHeldWaiting;
 
   /// Shown in the Sessions tab. $n is hours.
   ///

@@ -12,6 +12,11 @@ class AppL10nEn extends AppL10n {
   String get appCancel => 'Cancel';
 
   @override
+  String appCannotVerifyNodes(String names) {
+    return 'Not connecting to $names: the phone can\'t verify it is the right computer.';
+  }
+
+  @override
   String get appClose => 'Close';
 
   @override
@@ -108,6 +113,16 @@ class AppL10nEn extends AppL10n {
   @override
   String appTakeoverFailed(String reason) {
     return 'Could not take over: $reason';
+  }
+
+  @override
+  String appThroughNode(String node, String primary) {
+    return 'Through $node · $primary isn\'t reachable';
+  }
+
+  @override
+  String appThroughNodeOnly(String node) {
+    return 'Through $node';
   }
 
   @override
@@ -684,6 +699,26 @@ class AppL10nEn extends AppL10n {
     );
     return '$_temp0';
   }
+
+  @override
+  String get sessionsHeldCancel => 'Cancel';
+
+  @override
+  String get sessionsHeldDismiss => 'Dismiss';
+
+  @override
+  String sessionsHeldOn(String name) {
+    return 'Held on $name';
+  }
+
+  @override
+  String get sessionsHeldSend => 'Send';
+
+  @override
+  String get sessionsHeldStillSend => 'Still send?';
+
+  @override
+  String get sessionsHeldWaiting => 'Waiting';
 
   @override
   String sessionsHoursShort(int n) {

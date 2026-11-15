@@ -15,6 +15,7 @@ import '../macs/computers.dart';
 import '../macs/macs_notifier.dart';
 import '../macs/session_ref.dart';
 import 'archive_store.dart';
+import 'held_section.dart';
 import 'session_list_parts.dart';
 import 'new_session_sheet.dart';
 import '../chat/takeover_flow.dart';
@@ -79,6 +80,7 @@ class _SessionsScreenState extends ConsumerState<SessionsScreen> {
           r.id,
     };
     return SessionsView(
+      banner: const HeldSection(),
       state: sessions,
       computers: <ComputerHeading>[
         for (final ComputerSessions c in all) ComputerHeading(id: c.computer.id, name: c.computer.name, status: c.status),
@@ -142,8 +144,11 @@ class SessionsView extends StatelessWidget {
     required this.onTakeover,
     this.archived = const <String>{},
     this.computers = const <ComputerHeading>[],
+    this.banner,
     this.now,
   });
+
+  final Widget? banner;
 
   final List<ComputerHeading> computers;
   final SessionsState state;
@@ -334,7 +339,7 @@ class SessionsView extends StatelessWidget {
       onRefresh: onRefresh,
       child: ListView(
         physics: const AlwaysScrollableScrollPhysics(),
-        children: <Widget>[header, ...content],
+        children: <Widget>[header, ?banner, ...content],
       ),
     );
   }

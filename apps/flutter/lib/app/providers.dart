@@ -13,6 +13,8 @@ final Provider<WsConnector> wsConnectorProvider = Provider<WsConnector>((Ref ref
 final Provider<Stream<void>> networkChangesProvider =
     Provider<Stream<void>>((Ref ref) => Connectivity().onConnectivityChanged.map((List<ConnectivityResult> _) {}));
 
+final Provider<Duration> primaryRetryProvider = Provider<Duration>((Ref ref) => const Duration(seconds: 15));
+
 final Provider<String> deviceNameProvider = Provider<String>((Ref ref) => Platform.isAndroid ? 'Android' : 'iPhone');
 
 final Provider<String> platformNameProvider = Provider<String>((Ref ref) => Platform.isAndroid ? 'android' : 'ios');

@@ -4,8 +4,10 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import '../pairing/mac_profile.dart';
+import '../protocol/generated.dart' as wire;
 import '../protocol/json.dart';
 import '../protocol/models.dart';
+import 'command_key.dart';
 import 'tunnel.dart';
 import 'ws_transport.dart';
 
@@ -26,8 +28,24 @@ class BridgeException implements Exception {
 enum LinkPhase { connecting, connected, disconnected }
 
 class ConnectionStatus {
-  const ConnectionStatus(this.phase, {this.retryAt, this.error, this.host, this.route, this.revoked = false});
+  const ConnectionStatus(
+    this.phase, {
+    this.retryAt,
+    this.error,
+    this.host,
+    this.route,
+    this.revoked = false,
+    this.via,
+    this.primaryName,
+    this.primaryAnswers = false,
+    this.refused = const <String>[],
+  });
   final LinkPhase phase;
+
+  final String? via;
+  final String? primaryName;
+  final bool primaryAnswers;
+  final List<String> refused;
 
   final RouteKind? route;
 
@@ -72,6 +90,16 @@ class InboxAnswer {
   final String? answer;
 }
 
+class HeldEvent extends BridgeEvent {
+  const HeldEvent(this.entries, this.notices);
+  final List<wire.HeldEntry> entries;
+  final List<wire.HeldNotice> notices;
+}
+
+class HeldHintEvent extends BridgeEvent {
+  const HeldHintEvent();
+}
+
 class OpenEvent extends BridgeEvent {
   const OpenEvent();
 }
@@ -83,9 +111,10 @@ class PhoneFrame {
 }
 
 class SubscriptionSpec {
-  const SubscriptionSpec({this.sessions = false, this.inbox = false, this.sessionId, this.subagentId, this.phoneFps, this.phoneWidth, this.phoneWindowId});
+  const SubscriptionSpec({this.sessions = false, this.inbox = false, this.held = false, this.sessionId, this.subagentId, this.phoneFps, this.phoneWidth, this.phoneWindowId});
   final bool sessions;
   final bool inbox;
+  final bool held;
   final String? sessionId;
   final String? subagentId;
   final int? phoneFps;
@@ -99,6 +128,7 @@ class SubscriptionSpec {
         if (inbox) 'inbox': true,
         'sessionId': ?sessionId,
         'subagentId': ?subagentId,
+        if (held) 'held': true,
         if (wantsPhone)
           'phone': <String, Object?>{'fps': phoneFps, 'width': phoneWidth ?? 400, 'deviceWindowId': ?phoneWindowId},
       };
@@ -113,6 +143,41 @@ const List<Duration> defaultBackoff = <Duration>[
   Duration(seconds: 30),
 ];
 
+class _Route {
+  const _Route(this.endpoint, this.node);
+  final Endpoint endpoint;
+  final PinnedNode? node;
+}
+
+class _Link {
+  const _Link(this.connection, this.closed, this.route, this.node, this.hello);
+  final WsConnection connection;
+  final Completer<void> closed;
+  final Endpoint route;
+  final PinnedNode? node;
+  final Json hello;
+}
+
+({String host, int port})? splitAddress(String address) {
+  final String text = address.trim();
+  final String host;
+  final String portText;
+  if (text.startsWith('[')) {
+    final int close = text.indexOf(']');
+    if (close < 2 || text.length < close + 3 || text[close + 1] != ':') return null;
+    host = text.substring(1, close);
+    portText = text.substring(close + 2);
+  } else {
+    final int colon = text.lastIndexOf(':');
+    if (colon <= 0 || text.indexOf(':') != colon) return null;
+    host = text.substring(0, colon);
+    portText = text.substring(colon + 1);
+  }
+  final int? port = int.tryParse(portText);
+  if (host.isEmpty || port == null || port < 1 || port > 65535) return null;
+  return (host: host, port: port);
+}
+
 class BridgeClient {
   BridgeClient({
     required this.connector,
@@ -120,6 +185,9 @@ class BridgeClient {
     this.requestTimeout = const Duration(seconds: 15),
     this.backoff = defaultBackoff,
     this.onGoodRoute,
+    this.onCluster,
+    this.canReturnToPrimary,
+    this.primaryRetry = const Duration(seconds: 15),
     DateTime Function()? clock,
   }) : _clock = clock ?? DateTime.now;
 
@@ -129,6 +197,9 @@ class BridgeClient {
   final List<Duration> backoff;
 
   final void Function(Endpoint route)? onGoodRoute;
+  final void Function(String? primary, List<PinnedNode> nodes)? onCluster;
+  final bool Function()? canReturnToPrimary;
+  final Duration primaryRetry;
   final DateTime Function() _clock;
 
   final StreamController<ConnectionStatus> _statusController = StreamController<ConnectionStatus>.broadcast();
@@ -154,7 +225,14 @@ class BridgeClient {
   }
   SubscriptionSpec? _subscription;
   Completer<void>? _wake;
-  Completer<void>? _closed;
+  late List<PinnedNode> _nodes = List<PinnedNode>.of(profile.nodes);
+  late String? _clusterPrimary = profile.clusterPrimary;
+  bool _sawCluster = false;
+  PinnedNode? _via;
+  List<String> _refused = <String>[];
+  bool _unauthorized = false;
+  String? _avoid;
+  DateTime? _lastRotate;
   ConnectionStatus _status = const ConnectionStatus(LinkPhase.disconnected);
 
   Stream<ConnectionStatus> get status => _statusController.stream;
@@ -162,6 +240,8 @@ class BridgeClient {
   Stream<PhoneFrame> get phoneFrames => _frameController.stream;
   ConnectionStatus get currentStatus => _status;
   bool get isConnected => _status.phase == LinkPhase.connected;
+  bool get inCluster => _sawCluster || _nodes.isNotEmpty;
+  String get nodeName => _via?.name ?? profile.name;
 
   void _setStatus(ConnectionStatus next) {
     _status = next;
@@ -212,69 +292,247 @@ class BridgeClient {
     while (!_stopped) {
       _setStatus(const ConnectionStatus(LinkPhase.connecting));
       Object? lastError;
-      final WsConnection? connection = await _openAndLogin((Object error) => lastError = error);
+      final _Link? link = await _openAny((Object error) => lastError = error);
       if (_stopped) {
-        await connection?.close();
+        await link?.connection.close();
         break;
       }
-      if (connection != null) {
+      if (link != null) {
         round = 0;
-        _connection = connection;
-        _setStatus(ConnectionStatus(LinkPhase.connected, host: _status.host, route: _status.route));
+        _install(link);
+        _learn(link);
+        _setStatus(_connectedStatus(link));
         unawaited(_resubscribe());
-        await _closed!.future;
+        await _stayConnected(link);
         _connection = null;
+        _via = null;
         _failPending(const BridgeException('disconnected', ''));
         if (_stopped) break;
         if (_reconnectNow) {
           _reconnectNow = false;
           continue;
         }
-      } else if (lastError case final BridgeException error when error.isUnauthorized) {
-        _setStatus(ConnectionStatus(LinkPhase.disconnected, error: error, revoked: true));
+      } else if (_unauthorized) {
+        _setStatus(ConnectionStatus(LinkPhase.disconnected, error: lastError, revoked: true));
         return;
       }
       final Duration delay = backoff[round < backoff.length ? round : backoff.length - 1];
       round++;
-      _setStatus(ConnectionStatus(LinkPhase.disconnected, retryAt: _clock().add(delay), error: lastError));
+      _setStatus(ConnectionStatus(LinkPhase.disconnected, retryAt: _clock().add(delay), error: lastError, refused: _refused));
       _wake = Completer<void>();
       await Future.any<void>(<Future<void>>[Future<void>.delayed(delay), _wake!.future]);
       _wake = null;
     }
   }
 
-  Future<WsConnection?> _openAndLogin(void Function(Object error) onError) async {
-    final List<Endpoint> routes = profile.endpoints(preferLan: _preferLan);
-    for (final Endpoint route in routes) {
-      if (_stopped) return null;
-      WsConnection? connection;
-      try {
-        connection = await connector(route);
-        _closed = Completer<void>();
-        final Completer<void> closedNow = _closed!;
-        connection.messages.listen(
-          _onMessage,
-          onDone: () { if (!closedNow.isCompleted) closedNow.complete(); },
-          onError: (Object _) { if (!closedNow.isCompleted) closedNow.complete(); },
-          cancelOnError: true,
-        );
-        _connection = connection;
-        await request('hello', <String, Object?>{'token': profile.token}, const Duration(seconds: 8));
-        _preferLan = false;
-        _setStatus(ConnectionStatus(LinkPhase.connecting, host: route.host, route: route.kind));
-        onGoodRoute?.call(route);
-        return connection;
-      } on Object catch (error) {
-        onError(error);
-        _connection = null;
-        try {
-          await connection?.close();
-        } on Object catch (_) {
-        }
-        if (error is BridgeException && error.isUnauthorized) return null;
+  void _install(_Link link) {
+    _connection = link.connection;
+    _via = link.node;
+    _preferLan = false;
+    if (link.node == null) onGoodRoute?.call(link.route);
+  }
+
+  ConnectionStatus _connectedStatus(_Link link, {bool primaryAnswers = false}) {
+    final PinnedNode? node = link.node;
+    return ConnectionStatus(
+      LinkPhase.connected,
+      host: link.route.host,
+      route: link.route.kind,
+      via: node?.name,
+      primaryName: node == null || node.id == _clusterPrimary ? null : _primaryName(),
+      primaryAnswers: primaryAnswers,
+    );
+  }
+
+  String _primaryName() {
+    for (final PinnedNode node in _nodes) {
+      if (node.id == _clusterPrimary) return node.name;
+    }
+    return profile.name;
+  }
+
+  Future<void> _stayConnected(_Link first) async {
+    _Link link = first;
+    while (!_stopped) {
+      if (link.node == null) {
+        await link.closed.future;
+        return;
       }
+      final Completer<void> tick = Completer<void>();
+      final Timer timer = Timer(primaryRetry, () {
+        if (!tick.isCompleted) tick.complete();
+      });
+      await Future.any<void>(<Future<void>>[link.closed.future, tick.future]);
+      timer.cancel();
+      if (link.closed.isCompleted || _stopped) return;
+      final _Link? back = await _probePrimary();
+      if (_stopped || link.closed.isCompleted) {
+        await back?.connection.close();
+        return;
+      }
+      if (back == null) {
+        _markPrimaryAnswers(link, false);
+        continue;
+      }
+      if (canReturnToPrimary?.call() == false) {
+        await back.connection.close();
+        _markPrimaryAnswers(link, true);
+        continue;
+      }
+      _failPending(const BridgeException('disconnected', ''));
+      final _Link old = link;
+      link = back;
+      _install(back);
+      _learn(back);
+      _setStatus(_connectedStatus(back));
+      unawaited(_resubscribe());
+      await old.connection.close();
+    }
+  }
+
+  void _markPrimaryAnswers(_Link link, bool answers) {
+    if (_status.phase != LinkPhase.connected || _status.primaryAnswers == answers) return;
+    _setStatus(_connectedStatus(link, primaryAnswers: answers));
+  }
+
+  Future<_Link?> _probePrimary() async {
+    for (final Endpoint endpoint in profile.endpoints(preferLan: true)) {
+      if (_stopped) return null;
+      final _Link? link = await _openRoute(_Route(endpoint, null), (Object _) {}, probe: true);
+      if (link != null) return link;
     }
     return null;
+  }
+
+  Future<_Link?> _openAny(void Function(Object error) onError) async {
+    _unauthorized = false;
+    final List<_Route> routes = _routes();
+    for (final _Route route in routes) {
+      if (_stopped) return null;
+      final _Link? link = await _openRoute(route, onError);
+      if (link != null) return link;
+      if (_unauthorized) return null;
+    }
+    return null;
+  }
+
+  List<_Route> _routes() {
+    final List<_Route> primary = <_Route>[for (final Endpoint e in profile.endpoints(preferLan: _preferLan)) _Route(e, null)];
+    final List<_Route> others = _fallbackRoutes();
+    final String? avoid = _avoid;
+    _avoid = null;
+    if (avoid == null) return <_Route>[...primary, ...others];
+    if (avoid.isEmpty) return <_Route>[...others, ...primary];
+    return <_Route>[
+      ...primary,
+      ...others.where((_Route r) => r.node?.id != avoid),
+      ...others.where((_Route r) => r.node?.id == avoid),
+    ];
+  }
+
+  List<_Route> _fallbackRoutes() {
+    final Set<String> own = <String>{for (final String host in profile.hosts) '$host:${profile.port}'};
+    final List<PinnedNode> ordered = <PinnedNode>[
+      ..._nodes.where((PinnedNode n) => n.id == _clusterPrimary),
+      ..._nodes.where((PinnedNode n) => n.id != _clusterPrimary && n.online),
+      ..._nodes.where((PinnedNode n) => n.id != _clusterPrimary && !n.online),
+    ];
+    final List<String> refused = <String>[];
+    final List<_Route> routes = <_Route>[];
+    for (final PinnedNode node in ordered) {
+      if (!node.canBeMaster) continue;
+      if (!node.hasValidPin) {
+        if (!refused.contains(node.name)) refused.add(node.name);
+        continue;
+      }
+      for (final String addr in node.addrs) {
+        final ({String host, int port})? at = splitAddress(addr);
+        if (at == null || own.contains('${at.host}:${at.port}')) continue;
+        routes.add(_Route(
+          Endpoint(host: at.host, port: at.port, fingerprint: node.fingerprint.trim().toLowerCase(), timeout: const Duration(seconds: 4)),
+          node,
+        ));
+      }
+    }
+    _refused = refused;
+    return routes;
+  }
+
+  Future<_Link?> _openRoute(_Route route, void Function(Object error) onError, {bool probe = false}) async {
+    WsConnection? connection;
+    try {
+      connection = await connector(route.endpoint);
+      final Completer<void> closed = Completer<void>();
+      connection.messages.listen(
+        _onMessage,
+        onDone: () { if (!closed.isCompleted) closed.complete(); },
+        onError: (Object _) { if (!closed.isCompleted) closed.complete(); },
+        cancelOnError: true,
+      );
+      final Json hello = await _requestOn(connection, 'hello', <String, Object?>{'token': profile.token}, const Duration(seconds: 8));
+      return _Link(connection, closed, route.endpoint, route.node, hello);
+    } on Object catch (error) {
+      onError(error);
+      try {
+        await connection?.close();
+      } on Object catch (_) {
+      }
+      final PinnedNode? node = route.node;
+      if (error is FingerprintMismatch && node != null && !_refused.contains(node.name)) _refused = <String>[..._refused, node.name];
+      if (error is BridgeException && error.isUnauthorized && node == null && !probe) _unauthorized = true;
+      return null;
+    }
+  }
+
+  void _learn(_Link link) {
+    final Object? raw = link.hello['cluster'];
+    if (raw is! Map<Object?, Object?>) {
+      if (link.node != null) return;
+      final bool had = _inCluster();
+      _sawCluster = false;
+      _nodes = <PinnedNode>[];
+      _clusterPrimary = null;
+      if (had) onCluster?.call(null, const <PinnedNode>[]);
+      return;
+    }
+    final wire.HelloCluster cluster;
+    try {
+      cluster = wire.HelloCluster.fromJson(raw.cast<String, Object?>());
+    } on FormatException catch (_) {
+      return;
+    }
+    final List<PinnedNode> heard = <PinnedNode>[
+      for (final wire.ClusterNode n in cluster.nodes)
+        PinnedNode(id: n.id, name: n.name, addrs: n.addrs, fingerprint: n.fingerprint, canBeMaster: n.canBeMaster, online: n.online),
+    ];
+    _sawCluster = true;
+    List<PinnedNode> next;
+    if (link.node == null) {
+      next = heard;
+    } else {
+      final Set<String> known = <String>{for (final PinnedNode n in _nodes) n.id};
+      next = <PinnedNode>[..._nodes, for (final PinnedNode n in heard) if (!known.contains(n.id)) n];
+    }
+    final bool same = next.length == _nodes.length &&
+        _clusterPrimary == cluster.primary &&
+        <bool>[for (int i = 0; i < next.length; i++) jsonEncode(next[i].toJson()) == jsonEncode(_nodes[i].toJson())].every((bool b) => b);
+    _nodes = next;
+    _clusterPrimary = cluster.primary;
+    if (!same) onCluster?.call(cluster.primary, next);
+  }
+
+  bool _inCluster() => _sawCluster || _nodes.isNotEmpty;
+
+  void _onPrimaryUnreachable(WsConnection from) {
+    if (_stopped || _connection != from) return;
+    if (_via == null && _fallbackRoutes().isEmpty) return;
+    final DateTime now = _clock();
+    final DateTime? last = _lastRotate;
+    if (last != null && now.difference(last) < primaryRetry) return;
+    _lastRotate = now;
+    _avoid = _via?.id ?? '';
+    _reconnectNow = true;
+    unawaited(from.close());
   }
 
   Future<void> _resubscribe() async {
@@ -331,6 +589,8 @@ class BridgeClient {
           } else {
             _eventController.add(InboxEvent(item: InboxItem.fromJson(json.object('item'))));
           }
+        case 'held.changed':
+          _eventController.add(HeldEvent(_heldEntries(json), _heldNotices(json)));
         case 'open':
           _eventController.add(const OpenEvent());
       }
@@ -366,9 +626,13 @@ class BridgeClient {
     }
   }
 
-  Future<Json> request(String op, [Json params = const <String, Object?>{}, Duration? timeout, int? idOverride]) async {
+  Future<Json> request(String op, [Json params = const <String, Object?>{}, Duration? timeout, int? idOverride]) {
     final WsConnection? connection = _connection;
     if (connection == null) throw const BridgeException('disconnected', '');
+    return _requestOn(connection, op, params, timeout, idOverride);
+  }
+
+  Future<Json> _requestOn(WsConnection connection, String op, Json params, [Duration? timeout, int? idOverride]) async {
     final int id = idOverride ?? _nextId++;
     final Completer<Json> completer = Completer<Json>();
     _pending[id] = completer;
@@ -382,10 +646,13 @@ class BridgeClient {
     }
     if (response['ok'] == true) {
       final Object? data = response['data'];
-      return data is Map<Object?, Object?> ? data.cast<String, Object?>() : <String, Object?>{};
+      final Json result = data is Map<Object?, Object?> ? data.cast<String, Object?>() : <String, Object?>{};
+      if (result['held'] is Map<Object?, Object?> && !_eventController.isClosed) _eventController.add(const HeldHintEvent());
+      return result;
     }
     final Object? error = response['error'];
     if (error is Map<Object?, Object?>) {
+      if (error['code'] == 'primary_unreachable') _onPrimaryUnreachable(connection);
       throw BridgeException('${error['code']}', '${error['message'] ?? ''}');
     }
     throw const BridgeException('internal', '');
@@ -471,24 +738,24 @@ class BridgeClient {
     }
   }
 
-  Future<void> sessionMessage(String sessionId, String text) async {
-    await request('session.message', <String, Object?>{'sessionId': sessionId, 'text': text}, const Duration(seconds: 60));
+  Future<void> sessionMessage(String sessionId, String text, {String? key}) async {
+    await request('session.message', <String, Object?>{'sessionId': sessionId, 'text': text, 'key': key ?? newCommandKey()}, const Duration(seconds: 60));
   }
 
-  Future<void> sessionSendNow(String sessionId) async {
-    await request('session.sendNow', <String, Object?>{'sessionId': sessionId}, const Duration(seconds: 15));
+  Future<void> sessionSendNow(String sessionId, {String? key}) async {
+    await request('session.sendNow', <String, Object?>{'sessionId': sessionId, 'key': key ?? newCommandKey()}, const Duration(seconds: 15));
   }
 
   Future<void> promptAllow(String requestId, {required bool allow}) async {
-    await request('prompt.answer', <String, Object?>{'requestId': requestId, 'allow': allow});
+    await request('prompt.answer', <String, Object?>{'requestId': requestId, 'allow': allow, 'key': newCommandKey()});
   }
 
   Future<void> promptChoose(String requestId, List<Object> choices) async {
-    await request('prompt.answer', <String, Object?>{'requestId': requestId, 'choice': choices.length == 1 ? choices.single : choices});
+    await request('prompt.answer', <String, Object?>{'requestId': requestId, 'choice': choices.length == 1 ? choices.single : choices, 'key': newCommandKey()});
   }
 
   Future<void> sessionNew(String cwd, {String? model}) async {
-    await request('session.new', <String, Object?>{'cwd': cwd, 'model': ?model}, const Duration(seconds: 30));
+    await request('session.new', <String, Object?>{'cwd': cwd, 'model': ?model, 'key': newCommandKey()}, const Duration(seconds: 30));
   }
 
   Future<String> sessionTakeover(String sessionId, {bool stopOriginal = false}) async {
@@ -507,6 +774,21 @@ class BridgeClient {
     return InboxAnswer(answered: data.boolean('answered'), state: data.strOrNull('state') ?? 'answered', answer: data.strOrNull('answer'));
   }
 
+  Future<({List<wire.HeldEntry> entries, List<wire.HeldNotice> notices})> heldList() async {
+    final Json data = await request('held.list');
+    return (entries: _heldEntries(data), notices: _heldNotices(data));
+  }
+
+  Future<bool> heldCancel(String heldId) async {
+    final Json data = await request('held.cancel', <String, Object?>{'heldId': heldId});
+    return data.boolean('cancelled');
+  }
+
+  Future<bool> heldConfirm(String heldId) async {
+    final Json data = await request('held.confirm', <String, Object?>{'heldId': heldId});
+    return data.boolean('confirmed');
+  }
+
   Future<List<String>> projectsRecent() async => (await request('projects.recent')).strings('projects');
 
   Future<void> ping() async {
@@ -523,6 +805,35 @@ class BridgeClient {
     _subscription = null;
     if (!isConnected) return;
     await request('unsubscribe');
+  }
+}
+
+List<wire.HeldEntry> _heldEntries(Json json) {
+  final List<wire.HeldEntry> entries = <wire.HeldEntry>[];
+  for (final Json item in _lenient(json['entries'])) {
+    try {
+      entries.add(wire.HeldEntry.fromJson(item));
+    } on FormatException catch (_) {
+    }
+  }
+  return entries;
+}
+
+List<wire.HeldNotice> _heldNotices(Json json) {
+  final List<wire.HeldNotice> notices = <wire.HeldNotice>[];
+  for (final Json item in _lenient(json['notices'])) {
+    try {
+      notices.add(wire.HeldNotice.fromJson(item));
+    } on FormatException catch (_) {
+    }
+  }
+  return notices;
+}
+
+Iterable<Json> _lenient(Object? raw) sync* {
+  if (raw is! List<Object?>) return;
+  for (final Object? item in raw) {
+    if (item is Map<Object?, Object?>) yield item.cast<String, Object?>();
   }
 }
 

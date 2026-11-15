@@ -90,3 +90,12 @@ app-not-now = Not now
 
 # Shown in the app shell and Settings.
 app-settings-title = Settings
+
+# Shown in the app shell while the phone is connected to another computer of the cluster. $node is the computer it is connected to, $primary the one that cannot be reached.
+app-through-node = Through { $node } · { $primary } isn't reachable
+
+# Shown in the app shell while the phone is connected to another computer of the cluster. $node is the computer it is connected to.
+app-through-node-only = Through { $node }
+
+# Shown in the app shell when the phone refuses to connect to other computers of the cluster because it cannot check who they are. $names is their names.
+app-cannot-verify-nodes = Not connecting to { $names }: the phone can't verify it is the right computer.

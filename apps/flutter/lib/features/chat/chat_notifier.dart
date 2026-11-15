@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/net/bridge_client.dart';
+import '../../core/net/command_key.dart';
 import '../../core/protocol/models.dart';
 import '../connection/connection.dart';
 import '../macs/computers.dart';
@@ -46,14 +47,15 @@ class TakeoverFailed extends TakeoverProgress {
 }
 
 class PendingSend {
-  const PendingSend({required this.id, required this.text, required this.time, this.failed = false, this.reason});
+  const PendingSend({required this.id, required this.key, required this.text, required this.time, this.failed = false, this.reason});
   final String id;
+  final String key;
   final String text;
   final DateTime time;
   final bool failed;
   final BridgeException? reason;
 
-  PendingSend asFailed(BridgeException? why) => PendingSend(id: id, text: text, time: time, failed: true, reason: why);
+  PendingSend asFailed(BridgeException? why) => PendingSend(id: id, key: key, text: text, time: time, failed: true, reason: why);
 }
 
 class ChatState {
@@ -262,7 +264,7 @@ class ChatNotifier extends Notifier<ChatState> {
       state = state.copyWith(send: SendFailed(text: trimmed, viewOnly: true));
       return false;
     }
-    final PendingSend entry = PendingSend(id: 'local:${_localCounter++}', text: trimmed, time: DateTime.now());
+    final PendingSend entry = PendingSend(id: 'local:${_localCounter++}', key: newCommandKey(), text: trimmed, time: DateTime.now());
     state = state.copyWith(send: const SendIdle(), pending: <PendingSend>[...state.pending, entry]);
     unawaited(_deliver(entry));
     return true;
@@ -275,7 +277,7 @@ class ChatNotifier extends Notifier<ChatState> {
       return;
     }
     try {
-      await client.sessionMessage(sessionId, entry.text);
+      await client.sessionMessage(sessionId, entry.text, key: entry.key);
     } on BridgeException catch (error) {
       if (!ref.mounted) return;
       if (error.isViewOnly) state = state.copyWith(send: SendFailed(text: entry.text, viewOnly: true));
@@ -291,7 +293,7 @@ class ChatNotifier extends Notifier<ChatState> {
   Future<void> retry(String id) async {
     final int index = state.pending.indexWhere((PendingSend p) => p.id == id);
     if (index < 0) return;
-    final PendingSend fresh = PendingSend(id: id, text: state.pending[index].text, time: DateTime.now());
+    final PendingSend fresh = PendingSend(id: id, key: state.pending[index].key, text: state.pending[index].text, time: DateTime.now());
     state = state.copyWith(pending: <PendingSend>[for (final PendingSend p in state.pending) p.id == id ? fresh : p]);
     await _deliver(fresh);
   }

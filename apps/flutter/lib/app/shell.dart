@@ -396,6 +396,9 @@ class _ConnectionBannerState extends ConsumerState<ConnectionBanner> {
           text = status.error != null
               ? l10n.appNoRouteToMac
               : l10n.appConnectionLostRetry(seconds);
+          if (status.refused.isNotEmpty) {
+            text = '$text\n${l10n.appCannotVerifyNodes(status.refused.join(', '))}';
+          }
           color = Kit.of(context).danger;
           icon = Icons.wifi_off;
           retry = () => ref.read(bridgeClientProvider)?.retryNow();
@@ -411,6 +414,13 @@ class _ConnectionBannerState extends ConsumerState<ConnectionBanner> {
               : l10n.appConnectedVia(route);
           color = viaInternet ? Kit.of(context).needs : Kit.of(context).working;
           icon = viaInternet ? Icons.public : Icons.check;
+        }
+        final String? through = status.via;
+        if (through != null) {
+          final String? down = status.primaryName;
+          text = down == null ? l10n.appThroughNodeOnly(through) : l10n.appThroughNode(through, down);
+          color = Kit.of(context).needs;
+          icon = Icons.swap_horiz;
         }
     }
     if (text == null) return const SizedBox.shrink();

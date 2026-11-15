@@ -4,6 +4,15 @@
   "@appCancel": {
     "description": "Shown in the Chat screen and the Paired Macs screen and the Sessions tab."
   },
+  "appCannotVerifyNodes": "Not connecting to {names}: the phone can't verify it is the right computer.",
+  "@appCannotVerifyNodes": {
+    "description": "Shown in the app shell when the phone refuses to connect to other computers of the cluster because it cannot check who they are. $names is their names.",
+    "placeholders": {
+      "names": {
+        "type": "String"
+      }
+    }
+  },
   "appClose": "Close",
   "@appClose": {
     "description": "Shown in the Chat screen and pairing with a Mac."
@@ -130,6 +139,27 @@
     "description": "Shown in the Chat screen and the Sessions tab. $reason is the reason.",
     "placeholders": {
       "reason": {
+        "type": "String"
+      }
+    }
+  },
+  "appThroughNode": "Through {node} · {primary} isn't reachable",
+  "@appThroughNode": {
+    "description": "Shown in the app shell while the phone is connected to another computer of the cluster. $node is the computer it is connected to, $primary the one that cannot be reached.",
+    "placeholders": {
+      "node": {
+        "type": "String"
+      },
+      "primary": {
+        "type": "String"
+      }
+    }
+  },
+  "appThroughNodeOnly": "Through {node}",
+  "@appThroughNodeOnly": {
+    "description": "Shown in the app shell while the phone is connected to another computer of the cluster. $node is the computer it is connected to.",
+    "placeholders": {
+      "node": {
         "type": "String"
       }
     }
@@ -868,6 +898,35 @@
         "type": "String"
       }
     }
+  },
+  "sessionsHeldCancel": "Cancel",
+  "@sessionsHeldCancel": {
+    "description": "Shown in the Sessions tab on a held command. Drops it without sending."
+  },
+  "sessionsHeldDismiss": "Dismiss",
+  "@sessionsHeldDismiss": {
+    "description": "Shown in the Sessions tab on a message that says a held command was dropped. Dismisses the message."
+  },
+  "sessionsHeldOn": "Held on {name}",
+  "@sessionsHeldOn": {
+    "description": "Shown in the Sessions tab above the list, on a command the phone sent while the Mac could not be reached. $name is the computer that keeps it until it can be sent.",
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "sessionsHeldSend": "Send",
+  "@sessionsHeldSend": {
+    "description": "Shown in the Sessions tab on a held command. Sends it now."
+  },
+  "sessionsHeldStillSend": "Still send?",
+  "@sessionsHeldStillSend": {
+    "description": "Shown in the Sessions tab on a held command that waited over an hour, once the Mac can be reached again. The buttons under it are Send and Cancel."
+  },
+  "sessionsHeldWaiting": "Waiting",
+  "@sessionsHeldWaiting": {
+    "description": "Shown in the Sessions tab on a held command that has waited over an hour and is not sent on its own. Also read aloud."
   },
   "sessionsHoursShort": "{n} h",
   "@sessionsHoursShort": {
