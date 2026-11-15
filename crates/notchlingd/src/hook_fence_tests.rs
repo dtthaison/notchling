@@ -1,4 +1,7 @@
-use crate::hook_fence::{answer, budgeted, deny_output, read_fence, Seen};
+use crate::hook_fence::{
+    answer, answer_within, bounded, budgeted, deny_output, read_fd_within, read_fence, spawn_real,
+    Seen,
+};
 use notchling_engine::cluster::fence::{
     after_wait, Fence, FenceFile, Gate, FENCE_FILE, FENCE_VERSION, MAX_FENCE_BYTES, POLL_MS,
     WAIT_MAX_MS,
@@ -465,4 +468,132 @@ fn no_stdin_or_no_session_never_reaches_the_answer() {
         assert_eq!(out, None);
         assert!(!called.get());
     }
+}
+
+fn pipe() -> (i32, i32) {
+    let mut fds = [0i32; 2];
+    assert_eq!(unsafe { libc::pipe(fds.as_mut_ptr()) }, 0);
+    (fds[0], fds[1])
+}
+
+fn put_bytes(fd: i32, bytes: &[u8]) {
+    let n = unsafe { libc::write(fd, bytes.as_ptr().cast(), bytes.len()) };
+    assert_eq!(n as usize, bytes.len());
+}
+
+fn close(fd: i32) {
+    unsafe { libc::close(fd) };
+}
+
+#[test]
+fn a_stdin_that_never_closes_ends_at_the_limit_with_nothing() {
+    let (r, w) = pipe();
+    put_bytes(w, b"{\"session_id\": \"s1\"");
+    let started = std::time::Instant::now();
+    assert_eq!(read_fd_within(r, Duration::from_millis(300), 1 << 20), None);
+    let took = started.elapsed();
+    assert!(took >= Duration::from_millis(250), "{took:?}");
+    assert!(took < secs(3), "{took:?}");
+    close(r);
+    close(w);
+}
+
+#[test]
+fn a_stdin_that_closes_is_read_whole_and_a_cap_cuts_it() {
+    let (r, w) = pipe();
+    put_bytes(w, &event("s1"));
+    close(w);
+    assert_eq!(
+        read_fd_within(r, secs(5), 1 << 20).as_deref(),
+        Some(&event("s1")[..])
+    );
+    close(r);
+    let (r, w) = pipe();
+    put_bytes(w, &[b'a'; 100]);
+    close(w);
+    assert_eq!(read_fd_within(r, secs(5), 10).map(|v| v.len()), Some(10));
+    close(r);
+    let (r, w) = pipe();
+    close(w);
+    assert_eq!(read_fd_within(r, secs(5), 10), Some(Vec::new()));
+    close(r);
+}
+
+#[test]
+fn the_answers_wait_is_cut_to_what_the_budget_leaves() {
+    let dir = scratch("within");
+    put(&dir.0, &fence(Gate::Lease, BOOT, 0));
+    for (max, sleeps) in [
+        (3_000, 3_000 / POLL_MS),
+        (WAIT_MAX_MS * 5, WAIT_MAX_MS / POLL_MS),
+        (0, 0),
+    ] {
+        let clock = Clock::at(10_000);
+        let out = answer_within(
+            &event("s1"),
+            &dir.0,
+            BOOT,
+            &|| clock.now.get(),
+            &|ms| {
+                clock.sleeps.set(clock.sleeps.get() + 1);
+                clock.now.set(clock.now.get() + ms);
+            },
+            max,
+        );
+        assert_eq!(denied(&out), after_wait_text(), "{max}");
+        assert_eq!(clock.sleeps.get(), sleeps, "{max}");
+    }
+}
+
+thread_local! {
+    static SEEN_MAX: Cell<u64> = const { Cell::new(0) };
+}
+
+fn spawn_fails(_: Box<dyn FnOnce() + Send>) -> std::io::Result<()> {
+    Err(std::io::Error::other("no threads"))
+}
+
+fn records_the_wait(_: &[u8], _: &Path, max: u64) -> Option<String> {
+    SEEN_MAX.with(|c| c.set(max));
+    Some("sync answer".to_string())
+}
+
+fn hangs(_: &[u8], _: &Path, _: u64) -> Option<String> {
+    std::thread::sleep(secs(3));
+    None
+}
+
+#[test]
+fn when_no_thread_starts_the_answer_runs_here_with_the_remaining_budget() {
+    for (limit, max) in [
+        (secs(7), 7_000),
+        (Duration::from_millis(1_500), 1_500),
+        (secs(60), WAIT_MAX_MS),
+        (Duration::ZERO, 0),
+    ] {
+        SEEN_MAX.with(|c| c.set(u64::MAX));
+        let out = bounded(
+            spawn_fails,
+            records_the_wait,
+            event("s1"),
+            PathBuf::from("/nowhere"),
+            limit,
+        );
+        assert_eq!(out.as_deref(), Some("sync answer"));
+        assert_eq!(SEEN_MAX.with(Cell::get), max, "{limit:?}");
+    }
+}
+
+#[test]
+fn an_answer_that_hangs_ends_in_the_after_wait_deny_at_the_limit() {
+    let started = std::time::Instant::now();
+    let out = bounded(
+        spawn_real,
+        hangs,
+        event("s1"),
+        PathBuf::from("/nowhere"),
+        Duration::from_millis(150),
+    );
+    assert_eq!(denied(&out), after_wait_text());
+    assert!(started.elapsed() < secs(2), "{:?}", started.elapsed());
 }

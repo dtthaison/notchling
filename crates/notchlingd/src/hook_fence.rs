@@ -88,8 +88,20 @@ pub fn answer(
     now: &dyn Fn() -> u64,
     sleep: &dyn Fn(u64),
 ) -> Option<String> {
+    answer_within(stdin, data, boot_id, now, sleep, WAIT_MAX_MS)
+}
+
+pub(crate) fn answer_within(
+    stdin: &[u8],
+    data: &Path,
+    boot_id: &str,
+    now: &dyn Fn() -> u64,
+    sleep: &dyn Fn(u64),
+    max_wait: u64,
+) -> Option<String> {
     let session = session_of(stdin)?;
     let path = data.join(FENCE_FILE);
+    let max_wait = max_wait.min(WAIT_MAX_MS);
     let started = now();
     let mut polls = 0u64;
     loop {
@@ -100,7 +112,7 @@ pub fn answer(
         }
         polls += 1;
         let waited = now().saturating_sub(started);
-        if waited >= WAIT_MAX_MS || polls * POLL_MS > WAIT_MAX_MS {
+        if waited >= max_wait || polls * POLL_MS > max_wait {
             break;
         }
         sleep(POLL_MS);
@@ -123,43 +135,99 @@ fn real_sleep(ms: u64) {
     std::thread::sleep(Duration::from_millis(ms));
 }
 
+#[cfg(unix)]
+fn read_stdin(limit: Duration) -> Option<Vec<u8>> {
+    read_fd_within(0, limit, MAX_INPUT)
+}
+
+#[cfg(unix)]
+pub(crate) fn read_fd_within(fd: i32, limit: Duration, cap: u64) -> Option<Vec<u8>> {
+    let deadline = Instant::now() + limit;
+    let mut input = Vec::new();
+    let mut chunk = [0u8; 8192];
+    loop {
+        let left = deadline.saturating_duration_since(Instant::now());
+        let ms = left.as_millis().min(i32::MAX as u128) as i32;
+        let mut p = libc::pollfd {
+            fd,
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        let ready = unsafe { libc::poll(&mut p, 1, ms) };
+        if ready < 0 {
+            if std::io::Error::last_os_error().kind() == ErrorKind::Interrupted {
+                continue;
+            }
+            return None;
+        }
+        if ready == 0 {
+            return None;
+        }
+        let n = unsafe { libc::read(fd, chunk.as_mut_ptr().cast(), chunk.len()) };
+        if n < 0 {
+            if std::io::Error::last_os_error().kind() == ErrorKind::Interrupted {
+                continue;
+            }
+            return None;
+        }
+        if n == 0 {
+            return Some(input);
+        }
+        input.extend_from_slice(&chunk[..n as usize]);
+        if input.len() as u64 >= cap {
+            input.truncate(cap as usize);
+            return Some(input);
+        }
+    }
+}
+
+#[cfg(not(unix))]
 fn read_stdin(limit: Duration) -> Option<Vec<u8>> {
     let (tx, rx) = channel();
-    let spawned = std::thread::Builder::new()
+    std::thread::Builder::new()
         .name("hook-fence-stdin".into())
         .spawn(move || {
-            let _ = tx.send(slurp());
-        });
-    if spawned.is_err() {
-        return slurp();
-    }
+            let mut input = Vec::new();
+            let ok = std::io::stdin()
+                .take(MAX_INPUT)
+                .read_to_end(&mut input)
+                .is_ok();
+            let _ = tx.send(ok.then_some(input));
+        })
+        .ok()?;
     rx.recv_timeout(limit).ok()?
 }
 
-fn slurp() -> Option<Vec<u8>> {
-    let mut input = Vec::new();
-    std::io::stdin()
-        .take(MAX_INPUT)
-        .read_to_end(&mut input)
-        .ok()
-        .map(|_| input)
-}
+pub(crate) type Spawn = fn(Box<dyn FnOnce() + Send>) -> std::io::Result<()>;
+pub(crate) type Work = fn(&[u8], &Path, u64) -> Option<String>;
 
-fn answer_for_real(input: &[u8], data: &Path) -> Option<String> {
-    let boot_id = notchling_platform::clock::boot_id().unwrap_or_default();
-    answer(input, data, &boot_id, &real_now, &real_sleep)
-}
-
-fn answer_with_deadline(input: Vec<u8>, data: PathBuf, limit: Duration) -> Option<String> {
-    let (tx, rx) = channel();
-    let work = (input.clone(), data.clone());
-    let spawned = std::thread::Builder::new()
+pub(crate) fn spawn_real(work: Box<dyn FnOnce() + Send>) -> std::io::Result<()> {
+    std::thread::Builder::new()
         .name("hook-fence".into())
-        .spawn(move || {
-            let _ = tx.send(answer_for_real(&work.0, &work.1));
-        });
-    if spawned.is_err() {
-        return answer_for_real(&input, &data);
+        .spawn(work)
+        .map(|_| ())
+}
+
+pub(crate) fn work_real(input: &[u8], data: &Path, max_wait: u64) -> Option<String> {
+    let boot_id = notchling_platform::clock::boot_id().unwrap_or_default();
+    answer_within(input, data, &boot_id, &real_now, &real_sleep, max_wait)
+}
+
+pub(crate) fn bounded(
+    spawn: Spawn,
+    work: Work,
+    input: Vec<u8>,
+    data: PathBuf,
+    limit: Duration,
+) -> Option<String> {
+    let max_wait = limit.as_millis().min(WAIT_MAX_MS as u128) as u64;
+    let (tx, rx) = channel();
+    let (sent_input, sent_data) = (input.clone(), data.clone());
+    let started = spawn(Box::new(move || {
+        let _ = tx.send(work(&sent_input, &sent_data, max_wait));
+    }));
+    if started.is_err() {
+        return work(&input, &data, max_wait);
     }
     match rx.recv_timeout(limit) {
         Ok(out) => out,
@@ -186,7 +254,7 @@ pub fn run(layout: &Layout) -> i32 {
         STDIN_WAIT,
         &|| started.elapsed(),
         read_stdin,
-        |input, left| answer_with_deadline(input, layout.data_dir.clone(), left),
+        |input, left| bounded(spawn_real, work_real, input, layout.data_dir.clone(), left),
     );
     if let Some(text) = out {
         let mut stdout = std::io::stdout();
