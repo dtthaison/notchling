@@ -292,6 +292,21 @@ fn origins_that_are_fine() {
 }
 
 #[test]
+fn origins_that_start_an_ssh_option() {
+    for url in [
+        "ssh://-oProxyCommand=x/r.git",
+        "ssh://-oProxyCommand=x@host/r.git",
+        "ssh://git@-oProxyCommand=x/r.git",
+        "https://-x/r.git",
+        "-oProxyCommand=x:r",
+        "git@-oProxyCommand=x:r",
+        "user@-host:r",
+    ] {
+        assert!(!origin_ok(url), "{url}");
+    }
+}
+
+#[test]
 fn branch_names_follow_git_rules() {
     for good in ["main", "feature/x", "a-b_c.d", "release/1.2", "é"] {
         assert!(valid_branch(good), "{good}");

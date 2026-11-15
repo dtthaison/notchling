@@ -91,40 +91,90 @@ fn parts_below<'a>(home: &Path, path: &'a Path) -> Option<Vec<&'a str>> {
         .collect()
 }
 
-pub fn shaped(tool: Tool, id: &str, home: &Path, path: &Path, transcript: bool) -> bool {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Shape {
+    Transcript,
+    File,
+    Dir,
+}
+
+pub fn uuid_like(text: &str) -> bool {
+    (32..=64).contains(&text.len()) && text.bytes().all(|b| b == b'-' || b.is_ascii_hexdigit())
+}
+
+fn claude_config<'a, 'b>(parts: &'b [&'a str]) -> Option<(&'b [&'a str], &'b [&'a str])> {
+    match parts {
+        [".claude", ..] => Some(parts.split_at(1)),
+        [".claude-lanes", lane, ..] if !lane.is_empty() => Some(parts.split_at(2)),
+        _ => None,
+    }
+}
+
+fn stem_of(name: &str) -> Option<&str> {
+    name.strip_suffix(".jsonl").filter(|stem| uuid_like(stem))
+}
+
+fn claude_shaped(id: &str, own: &[PathBuf], home: &Path, parts: &[&str], shape: Shape) -> bool {
+    let Some(main) = own.last().and_then(|main| parts_below(home, main)) else {
+        return false;
+    };
+    let Some((main_config, ["projects", slug, name])) = claude_config(&main) else {
+        return false;
+    };
+    if stem_of(name).is_none() {
+        return false;
+    }
+    let Some((config, rest)) = claude_config(parts) else {
+        return false;
+    };
+    if config != main_config {
+        return false;
+    }
+    let mut ids: Vec<&str> = own
+        .iter()
+        .filter_map(|path| path.file_stem().and_then(|stem| stem.to_str()))
+        .collect();
+    ids.push(id);
+    ids.retain(|candidate| uuid_like(candidate));
+    match (shape, rest) {
+        (Shape::Transcript, ["projects", folder, name]) => {
+            folder == slug && stem_of(name).is_some()
+        }
+        (Shape::Dir, ["projects", folder, dir]) => folder == slug && ids.contains(dir),
+        (Shape::Dir, ["file-history", dir]) => ids.contains(dir),
+        (Shape::File, ["todos", name]) => ids.iter().any(|each| {
+            name.strip_prefix(*each)
+                .and_then(|tail| tail.strip_prefix('-'))
+                .is_some_and(|tail| tail.len() > ".json".len() && tail.ends_with(".json"))
+        }),
+        _ => false,
+    }
+}
+
+pub fn shaped(
+    tool: Tool,
+    id: &str,
+    own: &[PathBuf],
+    home: &Path,
+    path: &Path,
+    shape: Shape,
+) -> bool {
     let Some(parts) = parts_below(home, path) else {
         return false;
     };
     match tool {
-        Tool::Claude => {
-            let rest = match parts.as_slice() {
-                [".claude", rest @ ..] => rest,
-                [".claude-lanes", lane, rest @ ..] if !lane.is_empty() => rest,
-                _ => return false,
-            };
-            match (transcript, rest) {
-                (true, ["projects", slug, name]) => {
-                    !slug.is_empty() && name.strip_suffix(".jsonl").is_some_and(|s| !s.is_empty())
-                }
-                (false, ["projects", slug, dir]) => !slug.is_empty() && *dir == id,
-                (false, ["file-history", dir]) => *dir == id,
-                (false, ["todos", name]) => {
-                    name.starts_with(&format!("{id}-")) && name.ends_with(".json")
-                }
-                _ => false,
-            }
-        }
+        Tool::Claude => claude_shaped(id, own, home, &parts, shape),
         Tool::Codex => {
-            let uuid = id.strip_prefix("codex:").unwrap_or(id);
-            match (transcript, parts.as_slice()) {
-                (true, [".codex", "sessions", between @ .., name]) => {
+            let Some(uuid) = id.strip_prefix("codex:").filter(|uuid| uuid_like(uuid)) else {
+                return false;
+            };
+            match (shape, parts.as_slice()) {
+                (Shape::Transcript, [".codex", "sessions", between @ .., name]) => {
                     between.iter().all(|part| !part.is_empty())
                         && name.starts_with("rollout-")
-                        && name.ends_with(".jsonl")
-                        && !uuid.is_empty()
-                        && name.contains(uuid)
+                        && name.ends_with(&format!("{uuid}.jsonl"))
                 }
-                (false, [".codex", "session_index.jsonl"]) => true,
+                (Shape::File, [".codex", "session_index.jsonl"]) => true,
                 _ => false,
             }
         }

@@ -1,6 +1,6 @@
 use crate::snap_files_tests::{count, make_db, put};
 use crate::snap_restore::DbHooks;
-use crate::snap_restore_testkit::World;
+use crate::snap_restore_testkit::{World, CODEX, S1};
 use notchling_engine::bridge::net::devices::{decode, encode, read_devices, PairedDevice};
 use notchling_engine::cluster::snapshot::SessionEntry;
 use notchling_engine::cluster::Tool;
@@ -26,8 +26,8 @@ fn device(id: &str, name: &str) -> PairedDevice {
 }
 
 fn staged(w: &World, bytes: &[u8]) -> std::path::PathBuf {
-    let transcript = w.transcript("s1", bytes);
-    w.stage(vec![w.entry("s1", &w.repo, &[&transcript], &[])], &[], &[]);
+    let transcript = w.transcript(S1, bytes);
+    w.stage(vec![w.entry(S1, &w.repo, &[&transcript], &[])], &[], &[]);
     transcript
 }
 
@@ -37,7 +37,7 @@ fn a_missing_transcript_is_put_private_in_private_folders() {
     let transcript = staged(&w, b"one\ntwo\n");
     fs::remove_dir_all(w.at(".claude")).unwrap();
 
-    w.run(&["s1"], false, false).unwrap();
+    w.run(&[S1], false, false).unwrap();
 
     assert_eq!(fs::read(&transcript).unwrap(), b"one\ntwo\n");
     assert_eq!(mode(&transcript), 0o600);
@@ -51,7 +51,7 @@ fn a_shorter_local_copy_gets_only_the_rest_appended() {
     let transcript = staged(&w, b"one\ntwo\nthree\n");
     fs::write(&transcript, b"one\ntwo\n").unwrap();
 
-    let report = w.run(&["s1"], false, false).unwrap();
+    let report = w.run(&[S1], false, false).unwrap();
 
     assert_eq!(report.steps, 1);
     assert_eq!(fs::read(&transcript).unwrap(), b"one\ntwo\nthree\n");
@@ -61,7 +61,7 @@ fn a_shorter_local_copy_gets_only_the_rest_appended() {
 fn a_transcript_already_the_same_needs_nothing() {
     let w = World::new();
     let transcript = staged(&w, b"one\n");
-    let report = w.run(&["s1"], false, false).unwrap();
+    let report = w.run(&[S1], false, false).unwrap();
     assert_eq!(report.steps, 0);
     assert_eq!(fs::read(&transcript).unwrap(), b"one\n");
 }
@@ -72,9 +72,9 @@ fn longer_local_transcript_refuses() {
     let transcript = staged(&w, b"one\n");
     fs::write(&transcript, b"one\nmore work here\n").unwrap();
 
-    let why = w.run(&["s1"], false, false).unwrap_err();
+    let why = w.run(&[S1], false, false).unwrap_err();
 
-    assert_eq!(why, "s1 ran on m1 after this set");
+    assert_eq!(why, format!("{S1} ran on m1 after this set"));
     assert_eq!(fs::read(&transcript).unwrap(), b"one\nmore work here\n");
     assert!(!w.cluster.join("copies").exists());
 }
@@ -86,18 +86,18 @@ fn aside_keeps_the_local_copy() {
     let local = b"one\nthe work done here after the set\n";
     fs::write(&transcript, local).unwrap();
 
-    w.run(&["s1"], true, false).unwrap();
+    w.run(&[S1], true, false).unwrap();
 
     let kept = w
         .cluster
-        .join("copies/s1/s-1")
+        .join(format!("copies/{S1}/s-1"))
         .join(transcript.strip_prefix("/").unwrap());
     assert_eq!(fs::read(&kept).unwrap(), local);
     assert_eq!(fs::read(&transcript).unwrap(), b"one\n");
     assert_eq!(mode(kept.parent().unwrap()), 0o700);
 
     fs::write(&transcript, local).unwrap();
-    w.run(&["s1"], true, false).unwrap();
+    w.run(&[S1], true, false).unwrap();
     assert_eq!(fs::read(format!("{}.1", kept.display())).unwrap(), local);
     assert_eq!(fs::read(&kept).unwrap(), local);
 }
@@ -111,7 +111,7 @@ fn a_link_that_leads_out_of_home_is_never_followed() {
     fs::create_dir_all(w.at(".claude")).unwrap();
     std::os::unix::fs::symlink(elsewhere.root(), w.at(".claude/projects")).unwrap();
 
-    let why = w.run(&["s1"], false, false).unwrap_err();
+    let why = w.run(&[S1], false, false).unwrap_err();
 
     assert!(why.contains("leads out of"), "{why}");
     assert!(fs::read_dir(elsewhere.root()).unwrap().next().is_none());
@@ -127,10 +127,13 @@ fn a_link_that_stays_inside_home_is_allowed() {
     fs::create_dir_all(w.at(".claude")).unwrap();
     std::os::unix::fs::symlink(&inside, w.at(".claude/projects")).unwrap();
 
-    w.run(&["s1"], false, false).unwrap();
+    w.run(&[S1], false, false).unwrap();
 
     assert_eq!(fs::read(&transcript).unwrap(), b"one\n");
-    assert_eq!(fs::read(inside.join("p/s1.jsonl")).unwrap(), b"one\n");
+    assert_eq!(
+        fs::read(inside.join(format!("p/{S1}.jsonl"))).unwrap(),
+        b"one\n"
+    );
 }
 
 #[test]
@@ -142,7 +145,7 @@ fn a_link_at_the_file_itself_is_refused() {
     fs::write(&target, "keep me").unwrap();
     std::os::unix::fs::symlink(&target, &transcript).unwrap();
 
-    let why = w.run(&["s1"], false, false).unwrap_err();
+    let why = w.run(&[S1], false, false).unwrap_err();
 
     assert!(why.contains("plain file"), "{why}");
     assert_eq!(fs::read_to_string(&target).unwrap(), "keep me");
@@ -151,12 +154,12 @@ fn a_link_at_the_file_itself_is_refused() {
 #[test]
 fn a_sidecar_folder_is_merged_and_nothing_in_it_is_deleted() {
     let w = World::new();
-    let transcript = w.transcript("s1", b"one\n");
-    let history = w.at(".claude/file-history/s1");
+    let transcript = w.transcript(S1, b"one\n");
+    let history = w.at(&format!(".claude/file-history/{S1}"));
     put(&history.join("v1/a.txt"), b"first");
     put(&history.join("b.txt"), b"second");
     w.stage(
-        vec![w.entry("s1", &w.repo, &[&transcript], &[&history])],
+        vec![w.entry(S1, &w.repo, &[&transcript], &[&history])],
         &[],
         &[],
     );
@@ -164,7 +167,7 @@ fn a_sidecar_folder_is_merged_and_nothing_in_it_is_deleted() {
     put(&history.join("mine.txt"), b"local only");
     put(&history.join("b.txt"), b"older");
 
-    w.run(&["s1"], false, false).unwrap();
+    w.run(&[S1], false, false).unwrap();
 
     assert_eq!(fs::read(history.join("v1/a.txt")).unwrap(), b"first");
     assert_eq!(fs::read(history.join("b.txt")).unwrap(), b"second");
@@ -176,11 +179,11 @@ fn a_sidecar_folder_is_merged_and_nothing_in_it_is_deleted() {
 #[test]
 fn a_sidecar_folder_never_reads_through_a_link_that_leaves_home() {
     let w = World::new();
-    let transcript = w.transcript("s1", b"one\n");
-    let history = w.at(".claude/file-history/s1");
+    let transcript = w.transcript(S1, b"one\n");
+    let history = w.at(&format!(".claude/file-history/{S1}"));
     put(&history.join("v1/a.txt"), b"first");
     w.stage(
-        vec![w.entry("s1", &w.repo, &[&transcript], &[&history])],
+        vec![w.entry(S1, &w.repo, &[&transcript], &[&history])],
         &[],
         &[],
     );
@@ -190,7 +193,7 @@ fn a_sidecar_folder_never_reads_through_a_link_that_leaves_home() {
     fs::create_dir_all(&history).unwrap();
     std::os::unix::fs::symlink(elsewhere.root(), history.join("v1")).unwrap();
 
-    let why = w.run(&["s1"], false, false).unwrap_err();
+    let why = w.run(&[S1], false, false).unwrap_err();
 
     assert!(why.contains("leads out of"), "{why}");
     assert_eq!(fs::read_dir(elsewhere.root()).unwrap().count(), 1);
@@ -225,14 +228,20 @@ fn a_devices_file_that_is_a_link_is_refused_and_its_target_left_alone() {
 #[test]
 fn a_codex_index_gets_only_the_moving_sessions_line() {
     let w = World::new();
-    let rollout = w.at(".codex/sessions/2026/11/15/rollout-x-abc.jsonl");
+    let rollout = w.at(&format!(
+        ".codex/sessions/2026/11/15/rollout-x-{CODEX}.jsonl"
+    ));
     put(&rollout, b"{}\n");
     let index = w.at(".codex/session_index.jsonl");
     put(
         &index,
-        b"{\"id\":\"abc\",\"thread_name\":\"mine\"}\n{\"id\":\"zzz\",\"thread_name\":\"theirs\"}\n",
+        format!(
+            "{{\"id\":\"{CODEX}\",\"thread_name\":\"mine\"}}\n{{\"id\":\"zzz\",\"thread_name\":\"theirs\"}}\n"
+        )
+        .as_bytes(),
     );
-    let mut entry: SessionEntry = w.entry("codex:abc", &w.repo, &[&rollout], &[&index]);
+    let mut entry: SessionEntry =
+        w.entry(&format!("codex:{CODEX}"), &w.repo, &[&rollout], &[&index]);
     entry.tool = Tool::Codex;
     w.stage(vec![entry], &[], &[]);
     fs::write(
@@ -242,13 +251,15 @@ fn a_codex_index_gets_only_the_moving_sessions_line() {
     .unwrap();
     fs::remove_file(&rollout).unwrap();
 
-    w.run(&["codex:abc"], false, false).unwrap();
+    w.run(&[&format!("codex:{CODEX}")], false, false).unwrap();
 
     assert_eq!(
         fs::read_to_string(&index).unwrap(),
-        "{\"id\":\"zzz\",\"thread_name\":\"local theirs\"}\n{\"id\":\"other\",\"thread_name\":\"o\"}\n{\"id\":\"abc\",\"thread_name\":\"mine\"}\n"
+        format!(
+            "{{\"id\":\"zzz\",\"thread_name\":\"local theirs\"}}\n{{\"id\":\"other\",\"thread_name\":\"o\"}}\n{{\"id\":\"{CODEX}\",\"thread_name\":\"mine\"}}\n"
+        )
     );
-    w.run(&["codex:abc"], false, false).unwrap();
+    w.run(&[&format!("codex:{CODEX}")], false, false).unwrap();
     assert_eq!(fs::read_to_string(&index).unwrap().lines().count(), 3);
     assert!(rollout.exists());
 }
@@ -265,9 +276,9 @@ fn devices_are_merged_never_removed() {
         &devices,
         &encode(&[device("a", "Phone A"), device("b", "Phone B")]),
     );
-    let transcript = w.transcript("s1", b"one\n");
+    let transcript = w.transcript(S1, b"one\n");
     w.stage(
-        vec![w.entry("s1", &w.repo, &[&transcript], &[])],
+        vec![w.entry(S1, &w.repo, &[&transcript], &[])],
         &[&devices],
         &[],
     );
@@ -422,17 +433,17 @@ fn a_database_that_will_not_close_is_not_replaced() {
 #[test]
 fn restore_steps_never_touch_excluded_dirs() {
     let w = World::new();
-    let transcript = w.transcript("s1", b"one\n");
-    let secret = w.at("data/cluster/grants/s1-grant.json");
+    let transcript = w.transcript(S1, b"one\n");
+    let secret = w.at(&format!("data/cluster/grants/{S1}-grant.json"));
     put(&secret, b"{\"secret\":1}");
     w.stage(
-        vec![w.entry("s1", &w.repo, &[&transcript], &[&secret])],
+        vec![w.entry(S1, &w.repo, &[&transcript], &[&secret])],
         &[&secret],
         &[],
     );
     fs::remove_file(&secret).unwrap();
 
-    let steps = w.plan(&["s1"], false, true);
+    let steps = w.plan(&[S1], false, true);
 
     match steps {
         Err(why) => assert!(why.contains("never carries"), "{why}"),

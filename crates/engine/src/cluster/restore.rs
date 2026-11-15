@@ -2,10 +2,11 @@ use super::id::Tool;
 use super::persist::CLUSTER_DB;
 use super::snapshot::plan::bridge_devices;
 use super::snapshot::{
-    excluded_dir, shaped, Manifest, Movable, Part, PartKind, RepoFacts, SessionEntry,
+    excluded_dir, shaped, Manifest, Movable, Part, PartKind, RepoFacts, SessionEntry, Shape,
 };
 use super::standby_store::{hash_file, hash_range, plain_len, StandbyStore};
-use super::workspace::{origin_ok, valid_branch, GitCall, SLOW_SECS};
+use super::workspace::{origin_ok, valid_branch, GitCall, HARDENING, QUICK_SECS, SLOW_SECS};
+use crate::git::read::driver_names;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path, PathBuf};
 
@@ -35,6 +36,7 @@ pub enum RestoreStep {
     },
     AddWorktree {
         main: PathBuf,
+        origin: String,
         path: PathBuf,
         branch: String,
         head: String,
@@ -165,6 +167,33 @@ fn have(at: &Path, head: &str) -> GitCall {
     )
 }
 
+pub fn drivers_probe(cwd: &Path) -> GitCall {
+    let mut probe = call(cwd, &["config", "-z", "--get-regexp", "^filter\\."]);
+    probe.allow_failure = true;
+    probe.timeout_secs = QUICK_SECS;
+    probe
+}
+
+pub fn blank_filters(call: &GitCall, probe_stdout: &str) -> Result<Vec<String>, String> {
+    let names = driver_names(probe_stdout);
+    if names.iter().any(|n| n.contains('=') || n.contains('\n')) {
+        return Err("a filter name git can't be told to skip".to_owned());
+    }
+    let mut argv: Vec<String> = HARDENING.iter().map(|a| (*a).to_owned()).collect();
+    for name in &names {
+        for key in ["clean", "smudge", "process"] {
+            argv.push("-c".to_owned());
+            argv.push(format!("filter.{name}.{key}="));
+        }
+        argv.push("-c".to_owned());
+        argv.push(format!("filter.{name}.required=false"));
+    }
+    argv.push("-C".to_owned());
+    argv.push(call.cwd.clone());
+    argv.extend(call.args.iter().cloned());
+    Ok(argv)
+}
+
 pub fn git_calls(step: &RestoreStep) -> Vec<GitCall> {
     match step {
         RestoreStep::CloneRepo {
@@ -208,6 +237,7 @@ pub fn git_calls(step: &RestoreStep) -> Vec<GitCall> {
             path,
             branch,
             head,
+            ..
         } => {
             let target = path.to_string_lossy();
             vec![
@@ -268,6 +298,87 @@ impl<'a> Planner<'a> {
             ));
         }
         Ok(())
+    }
+
+    fn repo_ok(&self, path: &Path) -> Result<(), String> {
+        self.place_ok(path)?;
+        let rel = path
+            .strip_prefix(self.ctx.home)
+            .map_err(|_| format!("{} isn't under {}", path.display(), self.ctx.home.display()))?;
+        let parts: Vec<&str> = rel
+            .components()
+            .filter_map(|part| match part {
+                Component::Normal(name) => name.to_str(),
+                _ => None,
+            })
+            .collect();
+        let refuse = |why: &str| Err(format!("{} {why}", path.display()));
+        let Some(first) = parts.first() else {
+            return refuse("is the home folder itself");
+        };
+        if first.starts_with('.') {
+            return refuse("is in a hidden folder of the home folder, where a clone could change how this machine behaves");
+        }
+        let shared_cloud = parts.len() >= 3
+            && *first == "Library"
+            && matches!(parts[1], "CloudStorage" | "Mobile Documents");
+        if (*first == "Library" && !shared_cloud) || *first == "Applications" {
+            return refuse("is in a system folder of the home folder");
+        }
+        if parts.contains(&".git") {
+            return refuse("is inside a .git folder");
+        }
+        Ok(())
+    }
+
+    fn origin_here(&self, origin: &str) -> Result<(), String> {
+        let local = match origin.strip_prefix("file://") {
+            Some(rest) => Some(rest),
+            None => origin.starts_with('/').then_some(origin),
+        };
+        let Some(local) = local else {
+            return Ok(());
+        };
+        let path = Path::new(local);
+        let plain = path.is_absolute()
+            && path
+                .components()
+                .all(|part| matches!(part, Component::RootDir | Component::Normal(_)));
+        if plain && path.starts_with(self.ctx.home) {
+            Ok(())
+        } else {
+            Err(format!(
+                "{origin} is a folder on the primary, not under {}: restore clones only from a remote or a folder here",
+                self.ctx.home.display()
+            ))
+        }
+    }
+
+    fn nested(&self, named: &[&SessionEntry]) -> Vec<String> {
+        let mut places: Vec<(&Path, Option<&Path>)> = Vec::new();
+        for entry in named {
+            if let (Movable::Yes, Some(facts)) = (&entry.movable, entry.repo.as_ref()) {
+                places.push((&facts.root, facts.main_repo.as_deref()));
+                if let Some(main) = facts.main_repo.as_deref() {
+                    places.push((main, None));
+                }
+            }
+        }
+        let mut found = Vec::new();
+        for (inner, owner) in &places {
+            for (outer, _) in &places {
+                if inner != outer && inner.starts_with(outer) && *owner != Some(*outer) {
+                    found.push(format!(
+                        "{} is inside {}, and only a linked worktree may be inside its own main repository",
+                        inner.display(),
+                        outer.display()
+                    ));
+                }
+            }
+        }
+        found.sort();
+        found.dedup();
+        found
     }
 
     fn file_ok(&self, path: &Path) -> Result<(), String> {
@@ -343,7 +454,15 @@ impl<'a> Planner<'a> {
             return Err(format!("{id} can't move: its branch or commit isn't valid"));
         }
         let root = &facts.root;
-        self.place_ok(root)?;
+        self.repo_ok(root)?;
+        self.origin_here(origin)?;
+        if !Path::new(&entry.cwd).starts_with(root) {
+            return Err(format!(
+                "{id} can't move: its folder {} isn't inside its repository {}",
+                entry.cwd,
+                root.display()
+            ));
+        }
         let want = (branch.to_owned(), facts.head.clone());
         if let Some(seen) = self.wanted.get(root) {
             return if *seen == want {
@@ -399,7 +518,7 @@ impl<'a> Planner<'a> {
                     });
                     return Ok(());
                 };
-                self.place_ok(main)?;
+                self.repo_ok(main)?;
                 let state = if self.cloned.contains(main) {
                     PathState::Changed
                 } else {
@@ -426,6 +545,7 @@ impl<'a> Planner<'a> {
                 }
                 self.push_repo(RestoreStep::AddWorktree {
                     main: main.clone(),
+                    origin: origin.to_owned(),
                     path: root.clone(),
                     branch,
                     head,
@@ -457,14 +577,16 @@ impl<'a> Planner<'a> {
             .find(|part| part.path == path && want(&part.kind))
     }
 
-    fn session_path(
-        &self,
-        entry: &SessionEntry,
-        path: &Path,
-        transcript: bool,
-    ) -> Result<(), String> {
+    fn session_path(&self, entry: &SessionEntry, path: &Path, shape: Shape) -> Result<(), String> {
         self.file_ok(path)?;
-        if shaped(entry.tool, &entry.id, self.ctx.home, path, transcript) {
+        if shaped(
+            entry.tool,
+            &entry.id,
+            &entry.transcripts,
+            self.ctx.home,
+            path,
+            shape,
+        ) {
             return Ok(());
         }
         Err(format!(
@@ -475,7 +597,7 @@ impl<'a> Planner<'a> {
     }
 
     fn transcript(&mut self, entry: &SessionEntry, path: &Path) -> Result<(), String> {
-        self.session_path(entry, path, true)?;
+        self.session_path(entry, path, Shape::Transcript)?;
         let id = &entry.id;
         let Some(part) = self.part(path, |kind| matches!(kind, PartKind::Tail { .. })) else {
             return Err(format!(
@@ -543,11 +665,17 @@ impl<'a> Planner<'a> {
     }
 
     fn sidecar(&mut self, entry: &SessionEntry, path: &Path) -> Result<(), String> {
-        self.session_path(entry, path, false)?;
+        self.file_ok(path)?;
         let Some(part) = self.part(path, |kind| matches!(kind, PartKind::File | PartKind::Dir))
         else {
             return Ok(());
         };
+        let shape = if part.kind == PartKind::Dir {
+            Shape::Dir
+        } else {
+            Shape::File
+        };
+        self.session_path(entry, path, shape)?;
         let from = self
             .store
             .stored(&self.m.set, path)
@@ -693,6 +821,9 @@ pub fn plan_restore(
         }
     }
     named.sort_by_key(|entry| entry.repo.as_ref().is_some_and(|f| f.main_repo.is_some()));
+    for why in planner.nested(&named) {
+        planner.refuse(why);
+    }
     for entry in named {
         planner.session(entry);
     }

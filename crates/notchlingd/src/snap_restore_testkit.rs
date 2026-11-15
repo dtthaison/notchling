@@ -1,7 +1,7 @@
 use crate::snap_files::stage_set;
 use crate::snap_files_tests::{meta, node, put};
 use crate::snap_repo_tests::{launcher, read_in, unsandboxed, Rig};
-use crate::snap_restore::{restore, DbHooks, Report, Request};
+use crate::snap_restore::{restore, run_step, DbHooks, Report, Request};
 use notchling_engine::cluster::restore::{plan_restore, PathState, RestoreCtx, RestoreStep};
 use notchling_engine::cluster::snapshot::{movable, staged_path, Manifest, SessionEntry};
 use notchling_engine::cluster::snapshot::{SetPlan, Trigger};
@@ -9,6 +9,9 @@ use notchling_engine::cluster::standby_store::StandbyStore;
 use notchling_engine::cluster::Tool;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
+
+pub(crate) const S1: &str = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa";
+pub(crate) const CODEX: &str = "bbbbbbbb-1111-4111-8111-bbbbbbbbbbbb";
 
 pub(crate) struct World {
     pub(crate) rig: Rig,
@@ -31,6 +34,8 @@ impl World {
         let cluster = home.join("data/cluster");
         let repo = rig.root();
         assert_eq!(repo, home.join("work"));
+        let origin = std::fs::canonicalize(&rig.origin).unwrap();
+        rig.w(&["remote", "set-url", "origin", &origin.to_string_lossy()]);
         World {
             rig,
             home,
@@ -131,6 +136,27 @@ impl World {
         })
     }
 
+    pub(crate) fn step(&self, step: &RestoreStep) -> Result<(), String> {
+        let sessions = BTreeSet::new();
+        let read = launcher(&self.rig.t);
+        let git = unsandboxed(&self.rig.t);
+        run_step(
+            step,
+            &Request {
+                cluster: &self.cluster,
+                primary: &node(),
+                home: &self.home,
+                node: "m1",
+                sessions: &sessions,
+                aside: false,
+                shared: false,
+                git: &git,
+                read: &read,
+                db: &ok_hooks(),
+            },
+        )
+    }
+
     pub(crate) fn plan(
         &self,
         ids: &[&str],
@@ -148,11 +174,11 @@ impl World {
         };
         let git = launcher(&self.rig.t);
         plan_restore(&manifest, &ctx, &sessions, &|p: &Path| {
-            crate::snap_restore::probe_state(&git, p)
+            crate::snap_restore::probe_state(&git, &self.home, p)
         })
     }
 
     pub(crate) fn state(&self, path: &Path) -> PathState {
-        crate::snap_restore::probe_state(&launcher(&self.rig.t), path)
+        crate::snap_restore::probe_state(&launcher(&self.rig.t), &self.home, path)
     }
 }

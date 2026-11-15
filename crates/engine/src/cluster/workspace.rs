@@ -145,8 +145,10 @@ pub fn origin_ok(url: &str) -> bool {
         }
         let authority = rest.split('/').next().unwrap_or("");
         return match authority.rsplit_once('@') {
-            Some((userinfo, _)) => !userinfo.contains(':'),
-            None => true,
+            Some((userinfo, host)) => {
+                !userinfo.contains(':') && !userinfo.starts_with('-') && !host.starts_with('-')
+            }
+            None => !authority.starts_with('-'),
         };
     }
     if url.starts_with('/') {
@@ -155,6 +157,8 @@ pub fn origin_ok(url: &str) -> bool {
     match url.split_once(':') {
         Some((host, path)) => {
             !host.is_empty()
+                && !host.starts_with('-')
+                && !host.contains("@-")
                 && !path.is_empty()
                 && !path.starts_with(':')
                 && !host.contains('/')

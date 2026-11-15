@@ -38,7 +38,11 @@ pub(crate) fn failed(why: impl Into<String>) -> ApiError {
 }
 
 pub fn command_for(call: &GitCall, inherited: impl IntoIterator<Item = String>) -> Command {
-    let mut command = Command::from_args("git", &call.argv());
+    command_with(&call.argv(), inherited)
+}
+
+pub fn command_with(argv: &[String], inherited: impl IntoIterator<Item = String>) -> Command {
+    let mut command = Command::from_args("git", argv);
     for name in scrubbed(inherited) {
         command = command.with_env(&name, None);
     }

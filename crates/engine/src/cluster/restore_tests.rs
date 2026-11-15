@@ -1,8 +1,12 @@
 use super::blob::sha256_of;
 use super::id::Tool;
 use super::members::Term;
-use super::restore::{git_calls, plan_restore, PathState, RestoreCtx, RestoreStep};
-use super::snapshot::{dir_digest, Manifest, Movable, Part, PartKind, RepoFacts, SessionEntry};
+use super::restore::{
+    blank_filters, drivers_probe, git_calls, plan_restore, PathState, RestoreCtx, RestoreStep,
+};
+use super::snapshot::{
+    dir_digest, Manifest, Movable, Part, PartKind, RepoFacts, SessionEntry, Shape,
+};
 use super::standby_store::StandbyStore;
 use super::testkit::id;
 use crate::sessions::testutil::TempDir;
@@ -12,6 +16,10 @@ use std::path::{Path, PathBuf};
 
 const HEAD: &str = "1111111111111111111111111111111111111111";
 const OLDER: &str = "2222222222222222222222222222222222222222";
+const S1: &str = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa";
+const S2: &str = "aaaaaaaa-2222-4222-8222-aaaaaaaaaaaa";
+const CODEX: &str = "bbbbbbbb-1111-4111-8111-bbbbbbbbbbbb";
+const CODEX_OTHER: &str = "bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb";
 
 struct Rig {
     tmp: TempDir,
@@ -165,8 +173,8 @@ fn clean(branch: &str, head: &str) -> impl Fn(&Path) -> PathState {
 #[test]
 fn a_missing_folder_is_cloned_at_its_commit() {
     let mut rig = Rig::new("restore-clone");
-    rig.session("s1", "code/a", Movable::Yes);
-    let steps = rig.plan(&["s1"], false, false, &missing).unwrap();
+    rig.session(S1, "code/a", Movable::Yes);
+    let steps = rig.plan(&[S1], false, false, &missing).unwrap();
     assert_eq!(
         steps,
         vec![RestoreStep::CloneRepo {
@@ -181,9 +189,9 @@ fn a_missing_folder_is_cloned_at_its_commit() {
 #[test]
 fn a_clean_clone_behind_the_set_is_fast_forwarded_and_one_at_the_commit_needs_nothing() {
     let mut rig = Rig::new("restore-ff");
-    rig.session("s1", "code/a", Movable::Yes);
+    rig.session(S1, "code/a", Movable::Yes);
     let steps = rig
-        .plan(&["s1"], false, false, &clean("main", OLDER))
+        .plan(&[S1], false, false, &clean("main", OLDER))
         .unwrap();
     assert_eq!(
         steps,
@@ -194,7 +202,7 @@ fn a_clean_clone_behind_the_set_is_fast_forwarded_and_one_at_the_commit_needs_no
         }]
     );
     assert!(rig
-        .plan(&["s1"], false, false, &clean("main", HEAD))
+        .plan(&[S1], false, false, &clean("main", HEAD))
         .unwrap()
         .is_empty());
 }
@@ -202,25 +210,25 @@ fn a_clean_clone_behind_the_set_is_fast_forwarded_and_one_at_the_commit_needs_no
 #[test]
 fn restore_refuses_a_folder_with_its_own_changes() {
     let mut rig = Rig::new("restore-changed");
-    rig.session("s1", "code/a", Movable::Yes);
+    rig.session(S1, "code/a", Movable::Yes);
     let why = rig
-        .plan(&["s1"], false, false, &|_| PathState::Changed)
+        .plan(&[S1], false, false, &|_| PathState::Changed)
         .unwrap_err();
     assert_eq!(
         why,
         format!("{} on m1 has its own changes", rig.at("code/a").display())
     );
     assert!(rig
-        .plan(&["s1"], true, false, &|_| PathState::Changed)
+        .plan(&[S1], true, false, &|_| PathState::Changed)
         .is_err());
 }
 
 #[test]
 fn restore_refuses_a_clone_on_another_branch() {
     let mut rig = Rig::new("restore-branch");
-    rig.session("s1", "code/a", Movable::Yes);
+    rig.session(S1, "code/a", Movable::Yes);
     let why = rig
-        .plan(&["s1"], false, false, &clean("feature", HEAD))
+        .plan(&[S1], false, false, &clean("feature", HEAD))
         .unwrap_err();
     assert_eq!(
         why,
@@ -232,14 +240,14 @@ fn restore_refuses_a_clone_on_another_branch() {
 fn unmovable_session_is_not_restored() {
     let mut rig = Rig::new("restore-unmovable");
     rig.session(
-        "s1",
+        S1,
         "code/a",
         Movable::No("/x has uncommitted changes".to_owned()),
     );
-    rig.session("s2", "code/b", Movable::Yes);
-    let why = rig.plan(&["s1"], false, false, &missing).unwrap_err();
-    assert_eq!(why, "s1 can't move: /x has uncommitted changes");
-    let steps = rig.plan(&["s2"], false, false, &missing).unwrap();
+    rig.session(S2, "code/b", Movable::Yes);
+    let why = rig.plan(&[S1], false, false, &missing).unwrap_err();
+    assert_eq!(why, format!("{S1} can't move: /x has uncommitted changes"));
+    let steps = rig.plan(&[S2], false, false, &missing).unwrap();
     assert_eq!(steps.len(), 1);
     assert!(rig.plan(&["gone"], false, false, &missing).is_err());
     assert!(rig.plan(&[], false, false, &missing).unwrap().is_empty());
@@ -249,13 +257,13 @@ fn unmovable_session_is_not_restored() {
 fn a_linked_worktree_needs_its_main_repository_there() {
     let mut rig = Rig::new("restore-worktree");
     let main = rig.at("code/main");
-    rig.session("s1", "code/wt", Movable::Yes);
+    rig.session(S1, "code/wt", Movable::Yes);
     rig.sessions[0].repo.as_mut().unwrap().main_repo = Some(main.clone());
-    let why = rig.plan(&["s1"], false, false, &missing).unwrap_err();
+    let why = rig.plan(&[S1], false, false, &missing).unwrap_err();
     assert!(why.starts_with(&main.display().to_string()), "{why}");
     let wt = rig.at("code/wt");
     let steps = rig
-        .plan(&["s1"], false, false, &move |path| {
+        .plan(&[S1], false, false, &move |path| {
             if path == wt {
                 PathState::Missing
             } else {
@@ -267,6 +275,7 @@ fn a_linked_worktree_needs_its_main_repository_there() {
         steps,
         vec![RestoreStep::AddWorktree {
             main,
+            origin: "git@example.invalid:o/r.git".to_owned(),
             path: rig.at("code/wt"),
             branch: "main".to_owned(),
             head: HEAD.to_owned(),
@@ -277,22 +286,20 @@ fn a_linked_worktree_needs_its_main_repository_there() {
 #[test]
 fn a_shared_repository_is_planned_once_and_at_one_commit() {
     let mut rig = Rig::new("restore-shared-repo");
-    rig.session("s1", "code/a", Movable::Yes);
-    rig.session("s2", "code/a", Movable::Yes);
+    rig.session(S1, "code/a", Movable::Yes);
+    rig.session(S2, "code/a", Movable::Yes);
     assert_eq!(
-        rig.plan(&["s1", "s2"], false, false, &missing)
-            .unwrap()
-            .len(),
+        rig.plan(&[S1, S2], false, false, &missing).unwrap().len(),
         1
     );
     rig.sessions[1].repo.as_mut().unwrap().head = OLDER.to_owned();
-    let why = rig.plan(&["s1", "s2"], false, false, &missing).unwrap_err();
+    let why = rig.plan(&[S1, S2], false, false, &missing).unwrap_err();
     assert!(why.contains("two commits"), "{why}");
 }
 
 fn with_transcript(rig: &mut Rig, local: Option<&[u8]>, stored: &[u8]) -> PathBuf {
-    let path = rig.at(".claude/projects/p/s1.jsonl");
-    rig.session("s1", "code/a", Movable::Yes).transcripts = vec![path.clone()];
+    let path = rig.at(&format!(".claude/projects/p/{S1}.jsonl"));
+    rig.session(S1, "code/a", Movable::Yes).transcripts = vec![path.clone()];
     rig.tail(&path, 0, stored);
     if let Some(bytes) = local {
         fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -305,15 +312,11 @@ fn with_transcript(rig: &mut Rig, local: Option<&[u8]>, stored: &[u8]) -> PathBu
 fn a_transcript_is_put_appended_or_left_alone() {
     let mut rig = Rig::new("restore-transcript");
     let path = with_transcript(&mut rig, None, b"one\ntwo\nthree\n");
-    let steps = rig
-        .plan(&["s1"], false, false, &clean("main", HEAD))
-        .unwrap();
+    let steps = rig.plan(&[S1], false, false, &clean("main", HEAD)).unwrap();
     assert!(matches!(&steps[..], [RestoreStep::PutFile { to, len: 14, .. }] if *to == path));
     fs::create_dir_all(path.parent().unwrap()).unwrap();
     fs::write(&path, b"one\ntwo\n").unwrap();
-    let steps = rig
-        .plan(&["s1"], false, false, &clean("main", HEAD))
-        .unwrap();
+    let steps = rig.plan(&[S1], false, false, &clean("main", HEAD)).unwrap();
     assert!(matches!(
         &steps[..],
         [RestoreStep::AppendTail {
@@ -324,7 +327,7 @@ fn a_transcript_is_put_appended_or_left_alone() {
     ));
     fs::write(&path, b"one\ntwo\nthree\n").unwrap();
     assert!(rig
-        .plan(&["s1"], false, false, &clean("main", HEAD))
+        .plan(&[S1], false, false, &clean("main", HEAD))
         .unwrap()
         .is_empty());
 }
@@ -338,9 +341,9 @@ fn longer_local_transcript_refuses() {
         b"one\ntwo\nthree\n",
     );
     let why = rig
-        .plan(&["s1"], false, false, &clean("main", HEAD))
+        .plan(&[S1], false, false, &clean("main", HEAD))
         .unwrap_err();
-    assert_eq!(why, "s1 ran on m1 after this set");
+    assert_eq!(why, format!("{S1} ran on m1 after this set"));
 }
 
 #[test]
@@ -348,13 +351,13 @@ fn a_different_local_transcript_refuses_whatever_its_length() {
     let mut rig = Rig::new("restore-different");
     with_transcript(&mut rig, Some(b"one\ntwx\nthree\n"), b"one\ntwo\nthree\n");
     let why = rig
-        .plan(&["s1"], false, false, &clean("main", HEAD))
+        .plan(&[S1], false, false, &clean("main", HEAD))
         .unwrap_err();
-    assert_eq!(why, "s1 ran on m1 after this set");
+    assert_eq!(why, format!("{S1} ran on m1 after this set"));
     let mut shorter = Rig::new("restore-different-short");
     with_transcript(&mut shorter, Some(b"one\ntwx\n"), b"one\ntwo\nthree\n");
     assert!(shorter
-        .plan(&["s1"], false, false, &clean("main", HEAD))
+        .plan(&[S1], false, false, &clean("main", HEAD))
         .is_err());
 }
 
@@ -362,12 +365,10 @@ fn a_different_local_transcript_refuses_whatever_its_length() {
 fn aside_moves_the_local_transcript_first() {
     let mut rig = Rig::new("restore-aside");
     let path = with_transcript(&mut rig, Some(b"longer than the set\n"), b"one\n");
-    let steps = rig
-        .plan(&["s1"], true, false, &clean("main", HEAD))
-        .unwrap();
+    let steps = rig.plan(&[S1], true, false, &clean("main", HEAD)).unwrap();
     let copy = rig
         .cluster
-        .join("copies/s1/s-1")
+        .join(format!("copies/{S1}/s-1"))
         .join(path.strip_prefix("/").unwrap());
     assert!(
         matches!(&steps[0], RestoreStep::MoveAside { path: p, to } if *p == path && *to == copy)
@@ -379,22 +380,25 @@ fn aside_moves_the_local_transcript_first() {
 #[test]
 fn a_transcript_missing_from_the_set_refuses() {
     let mut rig = Rig::new("restore-no-transcript");
-    let path = rig.at(".claude/projects/p/s1.jsonl");
-    rig.session("s1", "code/a", Movable::Yes).transcripts = vec![path];
+    let path = rig.at(&format!(".claude/projects/p/{S1}.jsonl"));
+    rig.session(S1, "code/a", Movable::Yes).transcripts = vec![path];
     let why = rig
-        .plan(&["s1"], false, false, &clean("main", HEAD))
+        .plan(&[S1], false, false, &clean("main", HEAD))
         .unwrap_err();
-    assert!(why.starts_with("s1 can't move: its transcript"), "{why}");
+    assert!(
+        why.starts_with(&format!("{S1} can't move: its transcript")),
+        "{why}"
+    );
 }
 
 #[test]
 fn restore_steps_never_touch_excluded_dirs() {
     let mut rig = Rig::new("restore-excluded");
     let grants = rig.at("data/cluster/grants/s1.jsonl");
-    rig.session("s1", "code/a", Movable::Yes).transcripts = vec![grants.clone()];
+    rig.session(S1, "code/a", Movable::Yes).transcripts = vec![grants.clone()];
     rig.tail(&grants, 0, b"x\n");
     let why = rig
-        .plan(&["s1"], false, false, &clean("main", HEAD))
+        .plan(&[S1], false, false, &clean("main", HEAD))
         .unwrap_err();
     assert!(why.contains("never carries"), "{why}");
     let mut shared = Rig::new("restore-excluded-shared");
@@ -410,18 +414,18 @@ fn restore_steps_never_touch_excluded_dirs() {
 fn paths_outside_the_home_folder_or_inside_a_repository_refuse() {
     let mut rig = Rig::new("restore-outside");
     let outside = PathBuf::from("/etc/s1.jsonl");
-    rig.session("s1", "code/a", Movable::Yes).transcripts = vec![outside.clone()];
+    rig.session(S1, "code/a", Movable::Yes).transcripts = vec![outside.clone()];
     rig.tail(&outside, 0, b"x\n");
     assert!(rig
-        .plan(&["s1"], false, false, &clean("main", HEAD))
+        .plan(&[S1], false, false, &clean("main", HEAD))
         .unwrap_err()
         .contains("isn't under"));
     let mut inside = Rig::new("restore-inside");
     let hook = inside.at("code/a/.git/hooks/post-checkout");
-    inside.session("s1", "code/a", Movable::Yes).transcripts = vec![hook.clone()];
+    inside.session(S1, "code/a", Movable::Yes).transcripts = vec![hook.clone()];
     inside.tail(&hook, 0, b"x\n");
     assert!(inside
-        .plan(&["s1"], false, false, &clean("main", HEAD))
+        .plan(&[S1], false, false, &clean("main", HEAD))
         .unwrap_err()
         .contains("code never travels"));
 }
@@ -454,8 +458,10 @@ fn shared_parts_are_restored_with_the_database_last() {
 fn a_codex_index_is_merged_for_its_session_only() {
     let mut rig = Rig::new("restore-index");
     let index = rig.at(".codex/session_index.jsonl");
-    let rollout = rig.at(".codex/sessions/2026/11/15/rollout-x-abc.jsonl");
-    let entry = rig.session("codex:abc", "code/a", Movable::Yes);
+    let rollout = rig.at(&format!(
+        ".codex/sessions/2026/11/15/rollout-x-{CODEX}.jsonl"
+    ));
+    let entry = rig.session(&format!("codex:{CODEX}"), "code/a", Movable::Yes);
     entry.tool = Tool::Codex;
     entry.transcripts = vec![rollout.clone()];
     entry.files = vec![index.clone()];
@@ -466,10 +472,15 @@ fn a_codex_index_is_merged_for_its_session_only() {
         b"{\"id\":\"abc\"}\n{\"id\":\"zzz\"}\n",
     );
     let steps = rig
-        .plan(&["codex:abc"], false, false, &clean("main", HEAD))
+        .plan(
+            &[&format!("codex:{CODEX}")],
+            false,
+            false,
+            &clean("main", HEAD),
+        )
         .unwrap();
     assert!(steps.iter().any(|s| matches!(s,
-        RestoreStep::MergeIndex { to, session, .. } if *to == index && session == "abc")));
+        RestoreStep::MergeIndex { to, session, .. } if *to == index && session == CODEX)));
     assert!(!steps
         .iter()
         .any(|s| matches!(s, RestoreStep::PutFile { to, .. } if *to == index)));
@@ -516,37 +527,75 @@ fn a_hostile_set_cannot_restore_a_shared_part_this_machine_doesnt_own() {
 
 #[test]
 fn a_session_can_only_restore_the_files_a_session_keeps() {
-    let cases: [(&str, bool); 8] = [
-        (".zshrc", false),
-        (".claude/settings.json", false),
-        (".claude/projects/p/s1.jsonl", true),
-        (".claude/projects/p/q/s1.jsonl", true),
-        (".claude/other/s1.jsonl", true),
-        (".claude/todos/other-1.json", false),
-        (".claude-lanes/work/todos/s1-agent.json", false),
-        (".ssh/authorized_keys", true),
+    let main = format!(".claude/projects/p/{S1}.jsonl");
+    let cases: Vec<(String, Shape, bool)> = vec![
+        (".zshrc".to_owned(), Shape::File, false),
+        (".claude/settings.json".to_owned(), Shape::File, false),
+        (main.clone(), Shape::Transcript, true),
+        (
+            format!(".claude/projects/p/q/{S1}.jsonl"),
+            Shape::Transcript,
+            false,
+        ),
+        (
+            format!(".claude/other/{S1}.jsonl"),
+            Shape::Transcript,
+            false,
+        ),
+        (
+            ".claude/projects/p/s1.jsonl".to_owned(),
+            Shape::Transcript,
+            false,
+        ),
+        (
+            format!(".claude/projects/other/{S2}.jsonl"),
+            Shape::Transcript,
+            false,
+        ),
+        (".claude/todos/other-1.json".to_owned(), Shape::File, false),
+        (format!(".claude/todos/{S1}-agent.json"), Shape::File, true),
+        (
+            format!(".claude-lanes/work/todos/{S1}-agent.json"),
+            Shape::File,
+            false,
+        ),
+        (".ssh/authorized_keys".to_owned(), Shape::Transcript, false),
+        (".ssh".to_owned(), Shape::Dir, false),
+        (".claude/projects/p/.git".to_owned(), Shape::Dir, false),
+        (".claude/file-history/hooks".to_owned(), Shape::Dir, false),
+        (format!(".claude/file-history/{S1}"), Shape::Dir, true),
+        (format!(".claude/projects/p/{S1}"), Shape::Dir, true),
+        (format!(".claude/todos/{S1}"), Shape::Dir, false),
+        (format!(".claude/file-history/{S1}"), Shape::File, false),
     ];
-    let expect_ok = [false, false, true, false, false, false, true, false];
-    for (n, ((rel, transcript), ok)) in cases.into_iter().zip(expect_ok).enumerate() {
+    for (n, (rel, shape, ok)) in cases.into_iter().enumerate() {
         let mut rig = Rig::new(&format!("restore-shapes-{n}"));
-        let path = rig.at(rel);
-        let entry = rig.session("s1", "code/a", Movable::Yes);
-        if transcript {
-            entry.transcripts = vec![path.clone()];
-        } else {
-            entry.files = vec![path.clone()];
+        let path = rig.at(&rel);
+        let main_path = rig.at(&main);
+        let entry = rig.session(S1, "code/a", Movable::Yes);
+        entry.transcripts = vec![main_path.clone()];
+        match shape {
+            Shape::Transcript => {
+                if path != main_path {
+                    entry.transcripts.insert(0, path.clone());
+                }
+            }
+            _ => entry.files = vec![path.clone()],
         }
-        if transcript {
-            rig.tail(&path, 0, b"x\n");
-        } else {
-            rig.whole(PartKind::File, &path, b"x");
+        rig.tail(&main_path, 0, b"x\n");
+        match shape {
+            Shape::Transcript if path != main_path => rig.tail(&path, 0, b"x\n"),
+            Shape::Transcript => {}
+            Shape::File => rig.whole(PartKind::File, &path, b"x"),
+            Shape::Dir => empty_dir(&mut rig, &path),
         }
-        let result = rig.plan(&["s1"], false, false, &clean("main", HEAD));
+        let result = rig.plan(&[S1], false, false, &clean("main", HEAD));
         assert_eq!(result.is_ok(), ok, "{rel}: {result:?}");
-        if !ok {
-            assert!(result
-                .unwrap_err()
-                .contains("isn't a file the session keeps"));
+        if let Err(why) = result {
+            assert!(
+                why.contains("isn't a file the session keeps"),
+                "{rel}: {why}"
+            );
         }
     }
 }
@@ -554,29 +603,185 @@ fn a_session_can_only_restore_the_files_a_session_keeps() {
 #[test]
 fn a_codex_session_keeps_only_its_own_rollout_and_the_index() {
     let mut rig = Rig::new("restore-codex-shapes");
-    let own = rig.at(".codex/sessions/2026/11/15/rollout-t-abc.jsonl");
-    let other = rig.at(".codex/sessions/2026/11/15/rollout-t-zzz.jsonl");
-    let entry = rig.session("codex:abc", "code/a", Movable::Yes);
+    let own = rig.at(&format!(
+        ".codex/sessions/2026/11/15/rollout-t-{CODEX}.jsonl"
+    ));
+    let other = rig.at(&format!(
+        ".codex/sessions/2026/11/15/rollout-t-{CODEX_OTHER}.jsonl"
+    ));
+    let entry = rig.session(&format!("codex:{CODEX}"), "code/a", Movable::Yes);
     entry.tool = Tool::Codex;
     entry.transcripts = vec![own.clone(), other.clone()];
     rig.tail(&own, 0, b"{}\n");
     rig.tail(&other, 0, b"{}\n");
     let why = rig
-        .plan(&["codex:abc"], false, false, &clean("main", HEAD))
+        .plan(
+            &[&format!("codex:{CODEX}")],
+            false,
+            false,
+            &clean("main", HEAD),
+        )
         .unwrap_err();
-    assert!(why.contains("rollout-t-zzz.jsonl"), "{why}");
-    assert!(!why.contains("rollout-t-abc.jsonl"), "{why}");
+    assert!(why.contains(CODEX_OTHER), "{why}");
+    assert!(!why.contains(&format!("rollout-t-{CODEX}.jsonl")), "{why}");
+}
+
+#[test]
+fn an_id_that_is_not_a_uuid_keeps_nothing() {
+    let mut rig = Rig::new("restore-short-id");
+    let path = rig.at(".claude/projects/p/a.jsonl");
+    let entry = rig.session("a", "code/a", Movable::Yes);
+    entry.transcripts = vec![path.clone()];
+    rig.tail(&path, 0, b"x\n");
+    let why = rig
+        .plan(&["a"], false, false, &clean("main", HEAD))
+        .unwrap_err();
+    assert!(why.contains("isn't a file the session keeps"), "{why}");
+    let mut codex = Rig::new("restore-short-codex");
+    let rollout = codex.at(".codex/sessions/2026/11/15/rollout-t-1.jsonl");
+    let entry = codex.session("codex:1", "code/a", Movable::Yes);
+    entry.tool = Tool::Codex;
+    entry.transcripts = vec![rollout.clone()];
+    codex.tail(&rollout, 0, b"{}\n");
+    assert!(codex
+        .plan(&["codex:1"], false, false, &clean("main", HEAD))
+        .is_err());
+}
+
+fn hostile_root(rel: &str, tag: &str) -> Result<Vec<RestoreStep>, String> {
+    let mut rig = Rig::new(tag);
+    let root = rig.at(rel);
+    rig.session(S1, "code/a", Movable::Yes);
+    rig.sessions[0].cwd = root.to_string_lossy().into_owned();
+    rig.sessions[0].repo.as_mut().unwrap().root = root;
+    rig.plan(&[S1], false, false, &missing)
+}
+
+#[test]
+fn a_repository_root_in_a_hidden_or_system_folder_is_refused() {
+    let refused = [
+        (".ssh", "hidden folder"),
+        (".config/agents", "hidden folder"),
+        (".claude/skills/x", "hidden folder"),
+        ("Library/LaunchAgents", "system folder"),
+        ("Library/Application Support/x", "system folder"),
+        ("Applications/x", "system folder"),
+        ("code/a/.git/modules/x", ".git folder"),
+    ];
+    for (n, (rel, why)) in refused.into_iter().enumerate() {
+        let err = hostile_root(rel, &format!("restore-root-{n}")).unwrap_err();
+        assert!(err.contains(why), "{rel}: {err}");
+    }
+    assert!(hostile_root("code/a", "restore-root-ok").is_ok());
+    assert!(hostile_root("Library/CloudStorage/Dropbox/a", "restore-root-cloud").is_ok());
+    assert!(hostile_root("Library/CloudStorage", "restore-root-cloud-bare").is_err());
+}
+
+#[test]
+fn the_home_folder_itself_is_not_a_repository_root() {
+    let mut rig = Rig::new("restore-home-root");
+    let home = rig.home.clone();
+    rig.session(S1, "code/a", Movable::Yes);
+    rig.sessions[0].repo.as_mut().unwrap().root = home.clone();
+    rig.sessions[0].cwd = home.to_string_lossy().into_owned();
+    let why = rig.plan(&[S1], false, false, &missing).unwrap_err();
+    assert!(why.contains("home folder itself"), "{why}");
+}
+
+#[test]
+fn a_session_folder_outside_its_repository_is_refused() {
+    let mut rig = Rig::new("restore-cwd");
+    rig.session(S1, "code/a", Movable::Yes);
+    rig.sessions[0].cwd = rig.at("code/b").to_string_lossy().into_owned();
+    let why = rig.plan(&[S1], false, false, &missing).unwrap_err();
+    assert!(why.contains("isn't inside its repository"), "{why}");
+}
+
+#[test]
+fn nested_repositories_are_refused_except_a_worktree_in_its_main() {
+    let mut rig = Rig::new("restore-nested");
+    rig.session(S1, "code/a", Movable::Yes);
+    rig.session(S2, "code/a/inner", Movable::Yes);
+    let why = rig.plan(&[S1, S2], false, false, &missing).unwrap_err();
+    assert!(why.contains("is inside"), "{why}");
+    let mut linked = Rig::new("restore-nested-linked");
+    let main = linked.at("code/a");
+    linked.session(S1, "code/a", Movable::Yes);
+    linked.session(S2, "code/a/.claude/worktrees/x", Movable::Yes);
+    linked.sessions[1].repo.as_mut().unwrap().main_repo = Some(main);
+    assert!(linked.plan(&[S1, S2], false, false, &missing).is_ok());
+    assert!(hostile_root("go/src/x", "restore-root-go").is_ok());
+    assert!(hostile_root("code/a/.git/hooks", "restore-root-hooks").is_err());
+}
+
+#[test]
+fn a_clone_from_a_folder_on_the_primary_outside_home_is_refused() {
+    let cases = [
+        ("/etc/evil", false),
+        ("file:///etc/evil", false),
+        ("file:///var/../etc", false),
+        ("git@example.invalid:o/r.git", true),
+        ("https://example.invalid/o/r.git", true),
+    ];
+    for (n, (origin, ok)) in cases.into_iter().enumerate() {
+        let mut rig = Rig::new(&format!("restore-origin-{n}"));
+        rig.session(S1, "code/a", Movable::Yes);
+        rig.sessions[0].repo.as_mut().unwrap().origin = Some(origin.to_owned());
+        let result = rig.plan(&[S1], false, false, &missing);
+        assert_eq!(result.is_ok(), ok, "{origin}: {result:?}");
+    }
+    let mut under = Rig::new("restore-origin-home");
+    under.session(S1, "code/a", Movable::Yes);
+    let local = under.at("mirrors/r.git");
+    under.sessions[0].repo.as_mut().unwrap().origin = Some(local.to_string_lossy().into_owned());
+    assert!(under.plan(&[S1], false, false, &missing).is_ok());
+    under.sessions[0].repo.as_mut().unwrap().origin = Some(format!("file://{}", local.display()));
+    assert!(under.plan(&[S1], false, false, &missing).is_ok());
+}
+
+#[test]
+fn blanking_filters_names_every_driver_the_folder_defines() {
+    let step = RestoreStep::FastForward {
+        path: PathBuf::from("/h/code/a"),
+        branch: "main".to_owned(),
+        head: HEAD.to_owned(),
+    };
+    let calls = git_calls(&step);
+    let probe = drivers_probe(Path::new("/h/code/a"));
+    assert!(probe.allow_failure);
+    assert!(probe.argv().join(" ").contains("--get-regexp ^filter"));
+    let found = "filter.lfs.clean\ngit-lfs clean\0filter.x.smudge\nboom\0";
+    let joined = blank_filters(&calls[3], found).unwrap().join(" ");
+    for name in ["lfs", "x"] {
+        for key in ["clean", "smudge", "process"] {
+            assert!(
+                joined.contains(&format!("filter.{name}.{key}= ")),
+                "{joined}"
+            );
+        }
+        assert!(
+            joined.contains(&format!("filter.{name}.required=false")),
+            "{joined}"
+        );
+    }
+    assert!(joined.contains("core.hooksPath=/dev/null"), "{joined}");
+    assert!(
+        joined.contains("-C /h/code/a merge -q --ff-only"),
+        "{joined}"
+    );
+    let plain = blank_filters(&calls[3], "").unwrap().join(" ");
+    assert!(!plain.contains("filter."), "{plain}");
 }
 
 #[test]
 fn a_main_repository_that_is_not_a_repository_is_refused() {
     let mut rig = Rig::new("restore-foreign-main");
     let main = rig.at("code/main");
-    rig.session("s1", "code/wt", Movable::Yes);
+    rig.session(S1, "code/wt", Movable::Yes);
     rig.sessions[0].repo.as_mut().unwrap().main_repo = Some(main.clone());
     let wt = rig.at("code/wt");
     let why = rig
-        .plan(&["s1"], false, false, &move |path| {
+        .plan(&[S1], false, false, &move |path| {
             if path == wt {
                 PathState::Missing
             } else {
@@ -587,9 +792,9 @@ fn a_main_repository_that_is_not_a_repository_is_refused() {
     assert!(why.contains("isn't a repository"), "{why}");
     assert!(why.starts_with(&main.display().to_string()), "{why}");
     let mut root = Rig::new("restore-foreign-root");
-    root.session("s1", "code/a", Movable::Yes);
+    root.session(S1, "code/a", Movable::Yes);
     let why = root
-        .plan(&["s1"], false, false, &|_| PathState::Foreign)
+        .plan(&[S1], false, false, &|_| PathState::Foreign)
         .unwrap_err();
     assert!(why.contains("isn't a repository"), "{why}");
 }

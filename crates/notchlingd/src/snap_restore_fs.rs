@@ -68,6 +68,46 @@ pub fn guard(home: &Path, path: &Path) -> Result<(), String> {
     Ok(())
 }
 
+pub fn repo_place(
+    home: &Path,
+    path: &Path,
+    main: Option<&Path>,
+    strict: bool,
+) -> Result<(), String> {
+    guard(home, path)?;
+    let rel = path
+        .strip_prefix(home)
+        .map_err(|_| format!("{} isn't under {}", path.display(), home.display()))?;
+    let count = rel.components().count();
+    let mut here = home.to_path_buf();
+    for (n, part) in rel.components().enumerate() {
+        here.push(part.as_os_str());
+        match fs::symlink_metadata(&here) {
+            Ok(meta) if meta.file_type().is_symlink() => {
+                return Err(format!(
+                    "{} is a link; a repository sits in real folders only",
+                    here.display()
+                ));
+            }
+            Ok(meta) if !meta.is_dir() => {
+                return Err(format!("{} isn't a folder", here.display()));
+            }
+            Ok(_) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => break,
+            Err(e) => return Err(io(&here, e)),
+        }
+        let allowed = main.is_some_and(|main| main == here);
+        if strict && n + 1 < count && !allowed && fs::symlink_metadata(here.join(".git")).is_ok() {
+            return Err(format!(
+                "{} is inside the repository {}",
+                path.display(),
+                here.display()
+            ));
+        }
+    }
+    Ok(())
+}
+
 pub fn real_folder(home: &Path, path: &Path) -> Result<(), String> {
     guard(home, path)?;
     match fs::symlink_metadata(path) {
