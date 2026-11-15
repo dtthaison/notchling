@@ -444,6 +444,9 @@ pub fn apply(
             if m.state == MemberState::Removed {
                 return Err(CommandError::Removed(node.clone()));
             }
+            if m.versions.as_ref() == Some(versions) {
+                return Ok(Applied::none());
+            }
             m.versions = Some(versions.clone());
             vec![Change::Member(m.clone())]
         }

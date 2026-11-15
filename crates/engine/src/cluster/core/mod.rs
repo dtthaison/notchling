@@ -437,8 +437,8 @@ impl NodeCore {
                 entry,
                 changes: applied.changes.clone(),
             });
+            self.changed = true;
         }
-        self.changed = true;
         Ok(applied.changes)
     }
 
@@ -521,6 +521,8 @@ mod core_tests_adopt;
 mod core_tests_dispatch;
 #[cfg(test)]
 mod core_tests_failover;
+#[cfg(test)]
+mod core_tests_flood;
 #[cfg(test)]
 mod core_tests_headless;
 #[cfg(test)]

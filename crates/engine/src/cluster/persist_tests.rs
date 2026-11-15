@@ -7,7 +7,7 @@ use crate::cluster::id::Tool;
 use crate::cluster::jobs::{job_id, JobSpec, JobState};
 use crate::cluster::members::Term;
 use crate::cluster::state::{apply, start, Applied, ClusterState, Command};
-use crate::cluster::testkit::{id, member, versions};
+use crate::cluster::testkit::{id, member, versions_updated};
 use crate::sessions::testutil::TempDir;
 
 fn built() -> (ClusterState, Vec<Applied>) {
@@ -37,7 +37,7 @@ fn built() -> (ClusterState, Vec<Applied>) {
         },
         Command::Versions {
             node: w1.id.clone(),
-            versions: versions("linux"),
+            versions: versions_updated("linux"),
         },
         Command::Dispatch {
             key: "k".to_string(),

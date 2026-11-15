@@ -31,6 +31,12 @@ pub fn versions(os: &str) -> Versions {
     }
 }
 
+pub fn versions_updated(os: &str) -> Versions {
+    let mut updated = versions(os);
+    updated.notchling = "0.2.0".to_string();
+    updated
+}
+
 pub fn member(name: &str, os: &str, client: bool) -> Member {
     Member {
         id: id(name),

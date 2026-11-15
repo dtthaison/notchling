@@ -4,7 +4,7 @@ use super::id::{Role, Tool};
 use super::jobs::{job_id, JobSpec, JobState};
 use super::members::{can_be_master_default, Desired, MemberState, Term, MAX_TERM_N};
 use super::state::{apply, role_of, start, ClusterState, Command, CommandError};
-use super::testkit::{id, member, versions};
+use super::testkit::{id, member, versions, versions_updated};
 
 fn created() -> ClusterState {
     let (state, _, _) = start(
@@ -354,7 +354,7 @@ fn seq_grows_by_one_per_entry() {
         },
         Command::Versions {
             node: m.id.clone(),
-            versions: versions("linux"),
+            versions: versions_updated("linux"),
         },
     ] {
         let entry = apply(&mut state, command, 70)
@@ -507,4 +507,50 @@ fn the_largest_storable_term_is_still_accepted() {
     apply(&mut state, Command::Term { term: top.clone() }, 80).expect("term");
     assert_eq!(state.term, top);
     assert_eq!(state.home, id("m1"));
+}
+
+#[test]
+fn the_same_versions_again_change_nothing_and_journal_nothing() {
+    let mut state = created();
+    joined(&mut state, "w1", "linux", false);
+    let before = state.clone();
+    let again = apply(
+        &mut state,
+        Command::Versions {
+            node: id("w1"),
+            versions: versions("linux"),
+        },
+        90,
+    )
+    .expect("versions");
+    assert!(again.entry.is_none());
+    assert!(again.changes.is_empty());
+    assert_eq!(state, before);
+    let changed = apply(
+        &mut state,
+        Command::Versions {
+            node: id("w1"),
+            versions: versions_updated("linux"),
+        },
+        91,
+    )
+    .expect("versions");
+    assert_eq!(changed.entry.expect("entry").seq, before.seq + 1);
+    assert_eq!(changed.changes.len(), 1);
+}
+
+#[test]
+fn versions_of_a_removed_member_are_still_refused() {
+    let mut state = created();
+    joined(&mut state, "w1", "linux", false);
+    apply(&mut state, Command::Remove { node: id("w1") }, 90).expect("remove");
+    let late = apply(
+        &mut state,
+        Command::Versions {
+            node: id("w1"),
+            versions: versions("linux"),
+        },
+        91,
+    );
+    assert_eq!(late.err(), Some(CommandError::Removed(id("w1"))));
 }

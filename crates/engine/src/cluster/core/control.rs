@@ -237,8 +237,12 @@ impl NodeCore {
         let target = Target::Local(local);
         if self.is_home() {
             let me = self.me.clone();
-            let _ = self.apply(Command::Versions { node: me, versions }, out);
-            self.push_members(None, out);
+            if self
+                .apply(Command::Versions { node: me, versions }, out)
+                .is_ok_and(|changes| !changes.is_empty())
+            {
+                self.push_members(None, out);
+            }
             self.finish(target, Ok(json!({})), out);
             return;
         }
@@ -276,8 +280,10 @@ impl NodeCore {
                     },
                     out,
                 ) {
-                    Ok(_) => {
-                        self.push_members(None, out);
+                    Ok(changes) => {
+                        if !changes.is_empty() {
+                            self.push_members(None, out);
+                        }
                         Ok(json!({}))
                     }
                     Err(e) => Err(refusal("refused", e.to_string())),

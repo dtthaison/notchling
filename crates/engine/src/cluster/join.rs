@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use super::id::NodeId;
 
 pub const TOKEN_TTL_MS: i64 = 600_000;
+pub const MAX_OPEN_TOKENS: usize = 16;
 const PREFIX: &str = "nlj1.";
 const MAX_TOKEN: usize = 4096;
 
@@ -47,6 +48,18 @@ pub struct Tokens {
 impl Tokens {
     pub fn issue(&mut self, secret: String, now_ms: i64) {
         self.issued.retain(|_, at| now_ms - *at <= TOKEN_TTL_MS);
+        self.issued.remove(&secret);
+        while self.issued.len() >= MAX_OPEN_TOKENS {
+            let oldest = self
+                .issued
+                .iter()
+                .min_by(|a, b| a.1.cmp(b.1).then_with(|| a.0.cmp(b.0)))
+                .map(|(secret, _)| secret.clone());
+            match oldest {
+                Some(oldest) => self.issued.remove(&oldest),
+                None => break,
+            };
+        }
         self.issued.insert(secret, now_ms);
     }
 
