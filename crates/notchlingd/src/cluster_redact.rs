@@ -5,10 +5,13 @@ use std::fmt;
 use std::io::{self, Write};
 use std::sync::{Arc, Mutex, MutexGuard};
 
+const MAX_VALUE_BYTES: usize = 32 * 1024;
+
 struct Masked {
     generation: u64,
     values: Vec<(String, GrantValue)>,
-    template: Redactor,
+    template: Option<Redactor>,
+    ended: bool,
 }
 
 #[derive(Default)]
@@ -22,6 +25,13 @@ pub struct TailMasks {
     table: Mutex<Table>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum JobMasks {
+    Never,
+    Gone,
+    Masked,
+}
+
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex
         .lock()
@@ -30,6 +40,10 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 
 pub fn mask_for(name: &str) -> String {
     format!("[secret {name}]")
+}
+
+pub fn gone_message(job: &str) -> String {
+    format!("the masks for job {job} are gone; its output isn't served")
 }
 
 fn build(values: &[(String, GrantValue)]) -> Redactor {
@@ -47,16 +61,22 @@ impl TailMasks {
         TailMasks::default()
     }
 
-    pub fn add(&self, job: &str, values: Vec<(String, GrantValue)>) {
+    pub fn add(&self, job: &str, values: Vec<(String, GrantValue)>) -> Result<(), String> {
+        if let Some((name, _)) = values
+            .iter()
+            .find(|(_, value)| value.expose().len() > MAX_VALUE_BYTES)
+        {
+            return Err(format!(
+                "the value of {name} is larger than {MAX_VALUE_BYTES} bytes and can't be masked"
+            ));
+        }
         if values.is_empty() {
-            return;
+            return Ok(());
         }
         let mut table = lock(&self.table);
-        let mut all = table
-            .jobs
-            .remove(job)
-            .map(|old| old.values)
-            .unwrap_or_default();
+        let old = table.jobs.remove(job);
+        let ended = old.as_ref().is_some_and(|m| m.ended);
+        let mut all = old.map(|m| m.values).unwrap_or_default();
         for (name, value) in values {
             let known = all
                 .iter()
@@ -73,13 +93,45 @@ impl TailMasks {
             Masked {
                 generation,
                 values: all,
-                template,
+                template: Some(template),
+                ended,
             },
         );
+        Ok(())
     }
 
-    pub fn drop_job(&self, job: &str) {
+    pub fn mark_granted(&self, job: &str) {
+        lock(&self.table)
+            .jobs
+            .entry(job.to_string())
+            .or_insert(Masked {
+                generation: 0,
+                values: Vec::new(),
+                template: None,
+                ended: false,
+            });
+    }
+
+    pub fn end_job(&self, job: &str) {
+        if let Some(masked) = lock(&self.table).jobs.get_mut(job) {
+            masked.ended = true;
+        }
+    }
+
+    pub fn forget_job(&self, job: &str) {
         lock(&self.table).jobs.remove(job);
+    }
+
+    pub fn is_ended(&self, job: &str) -> bool {
+        lock(&self.table).jobs.get(job).is_some_and(|m| m.ended)
+    }
+
+    pub fn state(&self, job: &str) -> JobMasks {
+        match lock(&self.table).jobs.get(job) {
+            None => JobMasks::Never,
+            Some(m) if m.template.is_none() => JobMasks::Gone,
+            Some(_) => JobMasks::Masked,
+        }
     }
 
     pub fn for_job(&self, job: &str) -> Option<Redactor> {
@@ -87,14 +139,28 @@ impl TailMasks {
     }
 
     pub fn generation(&self, job: &str) -> Option<u64> {
-        lock(&self.table).jobs.get(job).map(|m| m.generation)
-    }
-
-    fn fresh(&self, job: &str) -> Option<(u64, Redactor)> {
         lock(&self.table)
             .jobs
             .get(job)
-            .map(|m| (m.generation, m.template.clone()))
+            .filter(|m| m.template.is_some())
+            .map(|m| m.generation)
+    }
+
+    pub fn lookback(&self, job: &str) -> usize {
+        lock(&self.table)
+            .jobs
+            .get(job)
+            .and_then(|m| m.template.as_ref())
+            .map_or(0, |t| t.lookback())
+    }
+
+    fn fresh(&self, job: &str) -> Option<(u64, Redactor)> {
+        let table = lock(&self.table);
+        let masked = table.jobs.get(job)?;
+        masked
+            .template
+            .as_ref()
+            .map(|t| (masked.generation, t.clone()))
     }
 }
 
@@ -113,20 +179,25 @@ pub fn mask_tail(
     masks: &TailMasks,
     job: &str,
     offset: u64,
+    lead: &[u8],
     bytes: &[u8],
     at_end: bool,
-) -> (Vec<u8>, u64) {
+) -> Result<(Vec<u8>, u64), String> {
     let length = bytes.len() as u64;
-    let Some(mut redactor) = masks.for_job(job) else {
-        return (bytes.to_vec(), offset + length);
-    };
-    let mut out = redactor.feed(bytes);
-    if at_end {
-        out.extend(redactor.finish_closed());
-        return (out, offset + length);
+    match masks.state(job) {
+        JobMasks::Never => return Ok((bytes.to_vec(), offset + length)),
+        JobMasks::Gone => return Err(gone_message(job)),
+        JobMasks::Masked => {}
     }
-    let held = redactor.held().len() as u64;
-    (out, offset + length - held)
+    let redactor = masks.for_job(job).ok_or_else(|| gone_message(job))?;
+    let lookback = redactor.lookback();
+    let lead = &lead[lead.len().saturating_sub(lookback)..];
+    let (out, held) = redactor.mask_window(lead, bytes, at_end);
+    if !at_end && held > lookback {
+        let (out, _) = redactor.mask_window(lead, bytes, true);
+        return Ok((out, offset + length));
+    }
+    Ok((out, offset + length - held as u64))
 }
 
 #[derive(Default)]
@@ -136,7 +207,10 @@ struct Stream {
 }
 
 impl Stream {
-    fn feed(&mut self, masks: &TailMasks, job: &str, bytes: &[u8]) -> Vec<u8> {
+    fn feed(&mut self, masks: &TailMasks, job: &str, bytes: &[u8]) -> Result<Vec<u8>, String> {
+        if masks.state(job) == JobMasks::Gone && self.redactor.is_none() {
+            return Err(gone_message(job));
+        }
         let current = masks.generation(job);
         if current.is_some() && (self.redactor.is_none() || current != self.generation) {
             if let Some((generation, fresh)) = masks.fresh(job) {
@@ -150,10 +224,10 @@ impl Stream {
                 self.redactor = Some(fresh);
                 let out = self.feed_through(&input);
                 wipe(&mut input);
-                return out;
+                return Ok(out);
             }
         }
-        self.feed_through(bytes)
+        Ok(self.feed_through(bytes))
     }
 
     fn feed_through(&mut self, bytes: &[u8]) -> Vec<u8> {
@@ -210,7 +284,10 @@ impl<W: Write> Write for MaskedLog<W> {
         if self.closed {
             return Err(io::Error::new(io::ErrorKind::BrokenPipe, "log is closed"));
         }
-        let out = self.stream.feed(&self.masks, &self.job, buf);
+        let out = self
+            .stream
+            .feed(&self.masks, &self.job, buf)
+            .map_err(|message| io::Error::new(io::ErrorKind::PermissionDenied, message))?;
         self.inner.write_all(&out)?;
         Ok(buf.len())
     }

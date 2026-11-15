@@ -369,7 +369,7 @@ fn hide_forms_cover_html_and_double_escaped_json() {
 }
 
 #[test]
-fn finish_closed_masks_a_held_prefix_of_eight_bytes_or_more() {
+fn finish_closed_masks_any_held_prefix() {
     let h = hide(&[("NL-MARKER-15-VALUE", "[x]")]);
     let mut r = Redactor::new(&h);
     let mut out = r.feed(b"end NL-MARKER-1");
@@ -379,7 +379,7 @@ fn finish_closed_masks_a_held_prefix_of_eight_bytes_or_more() {
     let mut r = Redactor::new(&h);
     let mut out = r.feed(b"end NL-MAR");
     out.extend(r.finish_closed());
-    assert!(String::from_utf8(out).unwrap() == "end NL-MAR");
+    assert!(String::from_utf8(out).unwrap() == "end [x]");
 
     let mut r = Redactor::new(&h);
     let mut out = r.feed(b"a NL-MARKER-15-VALUE b NL-MARKER-15-VALUE");

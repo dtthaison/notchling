@@ -1,5 +1,6 @@
 pub mod entry;
 pub mod expiry;
+mod forms;
 #[cfg(target_os = "macos")]
 mod keychain_mac;
 pub mod list;
@@ -14,6 +15,8 @@ pub mod url;
 mod tests;
 #[cfg(test)]
 mod tests_redact;
+#[cfg(test)]
+mod tests_redact_window;
 #[cfg(test)]
 mod tests_reminders;
 #[cfg(test)]
