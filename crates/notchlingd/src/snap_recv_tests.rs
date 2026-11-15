@@ -188,3 +188,57 @@ fn an_ack_counts_only_from_a_can_be_master_standby_on_the_primary() {
         .unwrap()
         .is_err());
 }
+
+#[test]
+fn snap_ops_are_audited_by_name() {
+    let known = crate::cluster_node::known_node_ops();
+    for op in crate::snap_recv::SNAP_OPS {
+        assert!(known.contains(&op), "{op}");
+    }
+}
+
+#[test]
+fn a_retried_commit_of_the_current_set_is_acked_again() {
+    let fx = rig("recv-retry-commit");
+    fx.make_ready(&[id_of(1)]);
+    let (manifest, dir) = fx.stage(1, 0, b"one\ntwo\n");
+    fx.sender.offer(manifest.clone(), dir);
+    assert!(fx.sender.wait_idle(std::time::Duration::from_secs(20)));
+    let acks = fx.net.calls(&fx.primary, "snap.ack");
+    assert_eq!(acks, 1);
+    let standby = fx.net.member(&id_of(1));
+    let origin = node_origin(&fx.primary);
+    let offered = standby
+        .node
+        .call("snap.offer", &json!({"manifest": manifest}), &origin)
+        .unwrap()
+        .unwrap();
+    assert_eq!(offered["missing"], json!([]));
+    let again = standby
+        .node
+        .call("snap.commit", &json!({"set": "s-1"}), &origin)
+        .unwrap()
+        .unwrap();
+    assert_eq!(again["set"], "s-1");
+    assert_eq!(
+        again["lengths"][fx.transcript().to_str().unwrap()],
+        json!(8)
+    );
+    assert_eq!(fx.net.calls(&fx.primary, "snap.ack"), 2);
+    assert_eq!(fx.book.get(&id_of(1)).unwrap().set, "s-1");
+    assert_eq!(fx.store_of(&id_of(1)).current(), Some(manifest));
+}
+
+#[test]
+fn a_dropped_commit_reply_is_retried_by_the_sender() {
+    let fx = rig("recv-dropped-reply");
+    fx.make_ready(&[id_of(1)]);
+    let (manifest, dir) = fx.stage(1, 0, b"one\n");
+    fx.sender.offer(manifest.clone(), dir.clone());
+    assert!(fx.sender.wait_idle(std::time::Duration::from_secs(20)));
+    fx.book.forget(&id_of(1));
+    fx.sender.offer(manifest, dir);
+    assert!(fx.sender.wait_idle(std::time::Duration::from_secs(20)));
+    assert!(fx.sender.last_error(&id_of(1)).is_none());
+    assert_eq!(fx.book.get(&id_of(1)).unwrap().set, "s-1");
+}

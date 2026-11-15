@@ -505,3 +505,53 @@ fn ack_book_keeps_each_node_and_survives_a_restart() {
     book.forget(&two);
     assert!(AckBook::new(&tmp.path("cluster")).get(&two).is_none());
 }
+
+#[test]
+fn a_tail_never_overlaps_a_file_or_folder_part() {
+    let tmp = TempDir::new("standby-overlap");
+    let store = store(&tmp);
+    let dir = part(PartKind::Dir, "/prim/a", b"");
+    let under = part(PartKind::Tail { from: 0 }, "/prim/a/b", b"x");
+    assert!(store.begin(&manifest("s-1", 1, vec![dir, under])).is_err());
+    let file = part(PartKind::File, "/prim/t", b"x");
+    let same = part(PartKind::Tail { from: 0 }, "/prim/t", b"x");
+    assert!(store.begin(&manifest("s-2", 2, vec![same, file])).is_err());
+    let tail = part(PartKind::Tail { from: 0 }, "/prim/t", b"x");
+    let inside = part(PartKind::Tail { from: 0 }, "/prim/t/u", b"x");
+    assert!(store
+        .begin(&manifest("s-3", 3, vec![tail, inside]))
+        .is_err());
+}
+
+#[test]
+fn a_retried_commit_of_the_current_set_is_ok() {
+    let tmp = TempDir::new("standby-recommit");
+    let store = store(&tmp);
+    let (m, t) = tail_set("s-1", 1, 0, b"abc");
+    send(&store, &tmp, &m, &[(&t, b"abc")]);
+    store.commit("s-1").unwrap();
+    store.begin(&m).unwrap();
+    store.commit("s-1").unwrap();
+    assert_eq!(store.current(), Some(m));
+    assert_eq!(fs::read(tail_file(&tmp, "/prim/t.jsonl")).unwrap(), b"abc");
+    assert!(store.commit("s-9").is_err());
+}
+
+#[cfg(unix)]
+#[test]
+fn a_cut_append_never_follows_a_link() {
+    let tmp = TempDir::new("standby-cutlink");
+    let store = store(&tmp);
+    let (m1, t1) = tail_set("s-1", 1, 0, b"abc");
+    send(&store, &tmp, &m1, &[(&t1, b"abc")]);
+    store.commit("s-1").unwrap();
+    let (m2, t2) = tail_set("s-2", 2, 3, b"defgh");
+    send(&store, &tmp, &m2, &[(&t2, b"defgh")]);
+    let outside = tmp.path("outside");
+    fs::write(&outside, b"abcdefZZZZ").unwrap();
+    let at = tail_file(&tmp, "/prim/t.jsonl");
+    fs::remove_file(&at).unwrap();
+    std::os::unix::fs::symlink(&outside, &at).unwrap();
+    assert!(store.commit("s-2").is_err());
+    assert_eq!(fs::read(&outside).unwrap(), b"abcdefZZZZ");
+}

@@ -166,7 +166,7 @@ pub struct ClusterLog {
     events: Option<LogEvents>,
 }
 
-fn known_node_ops() -> &'static [&'static str] {
+pub(crate) fn known_node_ops() -> &'static [&'static str] {
     static NAMES: std::sync::OnceLock<Vec<&'static str>> = std::sync::OnceLock::new();
     NAMES.get_or_init(|| {
         let mut names = crate::op_kinds::known_ops().to_vec();
@@ -174,6 +174,7 @@ fn known_node_ops() -> &'static [&'static str] {
         names.extend(crate::cluster_sessions::NODE_OPS);
         names.extend(crate::cluster_dispatch::NODE_OPS);
         names.extend(crate::cluster_workspace::NODE_OPS);
+        names.extend(crate::snap_recv::SNAP_OPS);
         names
     })
 }

@@ -2,7 +2,7 @@ use super::blob::{safe_name, Digest, CHUNK};
 use super::id::NodeId;
 use super::snapshot::{dir_digest, staged_path, Manifest, Part, PartKind};
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::fs::{self, File};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Component, Path, PathBuf};
@@ -146,7 +146,6 @@ fn validate(m: &Manifest) -> Result<(), String> {
     if m.parts.len() > MAX_PARTS {
         return Err("the set has too many parts".to_string());
     }
-    let mut tails = BTreeSet::new();
     let mut placed: Vec<&Path> = Vec::new();
     for part in &m.parts {
         if !hex64(&part.sha256) {
@@ -158,22 +157,15 @@ fn validate(m: &Manifest) -> Result<(), String> {
                 part.path.display()
             ));
         }
-        match part.kind {
-            PartKind::Tail { from } => {
-                if from.checked_add(part.len).is_none() {
-                    return Err(format!("{} has an impossible length", part.path.display()));
-                }
-                if !tails.insert(&part.path) {
-                    return Err(format!("{} is in the set twice", part.path.display()));
-                }
-            }
-            _ => {
-                if placed.iter().any(|other| overlaps(other, &part.path)) {
-                    return Err(format!("{} is in the set twice", part.path.display()));
-                }
-                placed.push(&part.path);
+        if let PartKind::Tail { from } = part.kind {
+            if from.checked_add(part.len).is_none() {
+                return Err(format!("{} has an impossible length", part.path.display()));
             }
         }
+        if placed.iter().any(|other| overlaps(other, &part.path)) {
+            return Err(format!("{} is in the set twice", part.path.display()));
+        }
+        placed.push(&part.path);
     }
     Ok(())
 }
@@ -499,6 +491,9 @@ impl StandbyStore {
 
     pub fn commit(&self, set: &str) -> Result<(), String> {
         valid_set(set)?;
+        if self.current().is_some_and(|held| held.set == set) {
+            return Ok(());
+        }
         let partial = self.partial(set);
         let m = self
             .read_manifest(&partial)
@@ -680,10 +675,14 @@ impl TailMove {
             }
             Action::Append { cut } => {
                 if cut {
-                    let file = fs::OpenOptions::new()
-                        .write(true)
-                        .open(&self.dst)
-                        .map_err(|e| io(&self.dst, e))?;
+                    let mut options = fs::OpenOptions::new();
+                    options.write(true);
+                    #[cfg(unix)]
+                    {
+                        use std::os::unix::fs::OpenOptionsExt;
+                        options.custom_flags(libc::O_NOFOLLOW);
+                    }
+                    let file = options.open(&self.dst).map_err(|e| io(&self.dst, e))?;
                     file.set_len(self.from).map_err(|e| io(&self.dst, e))?;
                 }
                 append(&self.staged, &self.dst)
