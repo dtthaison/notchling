@@ -5,6 +5,7 @@ pub mod join;
 pub mod members;
 pub mod persist;
 pub mod policy;
+pub mod snapshot;
 pub mod state;
 pub mod versions;
 pub mod wire;
