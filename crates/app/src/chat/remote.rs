@@ -21,11 +21,6 @@ pub fn is_remote(agent: &Agent) -> bool {
     Qualified::parse(&agent.id).is_some()
 }
 
-pub fn follow_due(selected: Option<&Session>, last_ms: i64, now_ms: i64) -> bool {
-    selected.is_some_and(|s| is_remote(&s.agent))
-        && now_ms.saturating_sub(last_ms) >= FOLLOW_EVERY_MS
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Source {
     Local,

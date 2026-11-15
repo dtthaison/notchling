@@ -376,23 +376,26 @@ from the app in this run, or `cluster.join` (below), or a restart of a headless 
   its rows with `online: false`; a node that left the member list loses them. A Worker's list never carries
   another node's rows. A remote row must read as `Agent` (unknown fields are dropped), and its node comes only
   from the link that proved it, never from the row. Claude Code rows come in the default list and in
-  `sessions.changed`; Codex, Antigravity and shell rows only with `tools: "all"`.
+  `sessions.changed`; Codex, Antigravity and shell rows only with `tools: "all"`. `sessions.list {remote: "shell"}` (additive; anything else but `null` is `bad_request`) adds the linked members' shell rows to the default list and nothing else, for a client that shows them; the daemon then also sends `sessions.remote.shell` on topic `sessions` whenever that set changes (data: the whole current list of remote shell rows, `[]` once the last is gone; never sent while there are none and there never were). `sessions.changed` is unchanged.
 - A shell job on this node is a row with `id: "shell:<job>"`, `tool: "shell"`, `host: "Shell"`,
   `target: {process: <pid>}`, `command` the command line, `name` its first line cut to 60 characters, `label`
   `Running`, `Done`, `Stopped` or `Failed` (`group` `working` or `completed`, `detail` the reason when there is
   one) and `transcriptPath` the job's log (0600 under `<data>/cluster/jobs/`, stdout and stderr together). Rows
   come with `tools: "all"` only; 50 are kept, finished ones dropped first. A shell row has no reply path.
 - `cluster.follow {id}` (app tier) leases a mirror of one remote session's transcript for 10 minutes (`until` is
-  now plus 600000 ms; at most 16 at once), renewed by calling it again. It is `failed` for a session this client
+  now plus 600000 ms; at most 16 at once, and a 17th drops the lease renewed longest ago instead of being refused), renewed by calling it again. It is `failed` for a session this client
   doesn't list or one with no transcript, and `bad_request` for an id that isn't on another node. The mirror
   file grows by `node.tail` pulls (every 2 s, and when the owner announces a change) and stops at 256 MiB. Chat
-  calls it while a remote session is open, the phone's `chat.get` at most once a minute per session.
+  calls it while a remote session is open (a refusal is tried again after 5 s; it needs no acting switch, since it only copies a transcript here), the phone's `chat.get` at most once a minute per session and for its four newest chats.
 - An op that takes a session id (`session.reply`, `.answer`, `.permission`, `.interrupt`, `.stop`, `codex.send`,
   `codex.stop`, `agy.send`, `agy.cancel`, `agy.permission`, `agy.conversation`, `shell.stop`) goes to the owner
   when the id is `<node>/<id>`, as the app tier only, never relayed twice; an unknown or offline node is an
   error, never a local fallback. The phone's bridge calls the daemon at the app tier, so its replies on a remote
   row go the same way; with no cluster attached the call is refused "`<node>` is not reachable from the phone
   yet". The phone's list holds remote Claude Code rows only, with `node: {id, name, online}` (additive).
+  With this node's acting switch off, `shell.stop` (a local id too) and an app-tier `cluster.dispatch` that isn't a
+  `delegate` answer `forbidden` with [`ACTING_OFF`], like the session ops above; `cluster.follow` and
+  `cluster.return` don't, since they only copy into this Mac's own mirror and repository.
 
 ### Dispatch
 

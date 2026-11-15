@@ -243,6 +243,13 @@ fn two_daemons_join_and_run_a_shell_job() {
         "node": worker, "tool": "shell", "cwd": work.to_string_lossy(),
         "command": "printf ok", "key": "e2e-shell-1",
     });
+    let off = a.call("cluster.dispatch", job.clone()).unwrap_err();
+    assert!(
+        off.to_string().contains("acting is off"),
+        "an app dispatch needs this Mac's acting switch: {off}"
+    );
+    a.call("settings.set_acting", serde_json::json!({"on": true}))
+        .unwrap();
     let mut reply = Value::Null;
     eventually("the worker takes the job", || {
         match a.call("cluster.dispatch", job.clone()) {

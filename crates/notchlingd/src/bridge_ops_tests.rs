@@ -508,6 +508,64 @@ fn forward_refused_while_acting_off() {
 }
 
 #[test]
+fn shell_stop_and_an_app_dispatch_are_refused_while_acting_off() {
+    use notchling_local_api::{ops, ApiError, Caller, ClientKind, ErrorCode, Tier};
+    const REMOTE_JOB: &str = "0123456789abcdef/shell:j1";
+    let agent = Caller {
+        tier: Tier::Agent,
+        client: ClientKind::Cli,
+        peer: None,
+        pid: None,
+    };
+    let node = Caller {
+        client: ClientKind::Node,
+        ..agent.clone()
+    };
+    let is_off = |e: ApiError| e.code == ErrorCode::Forbidden && e.message == ACTING_OFF;
+    let dispatch = json!({
+        "node": "0123456789abcdef", "key": "k", "tool": "shell", "cwd": "/w", "command": "make",
+    });
+    let delegate = json!({"node": "0123456789abcdef", "key": "k", "delegate": ["codex"]});
+
+    let off = remote_world(false);
+    for id in [REMOTE_JOB, "shell:j1"] {
+        let refused = off
+            .handler
+            .call(&the_app(), ops::SHELL_STOP, &json!({"id": id}))
+            .unwrap_err();
+        assert!(is_off(refused), "{id}");
+    }
+    let refused = off
+        .handler
+        .call(&the_app(), ops::CLUSTER_DISPATCH, &dispatch)
+        .unwrap_err();
+    assert!(is_off(refused), "an app dispatch starts work on a Worker");
+    assert_eq!(off.sent.load(Ordering::SeqCst), 0, "nothing was forwarded");
+    let other = off
+        .handler
+        .call(&agent, ops::CLUSTER_DISPATCH, &delegate)
+        .err();
+    assert!(
+        !other.is_some_and(is_off),
+        "an agent's delegate --machine is not an acting op"
+    );
+    let from_node = off
+        .handler
+        .call(&node, ops::SHELL_STOP, &json!({"id": "shell:j1"}))
+        .err();
+    assert!(
+        !from_node.is_some_and(is_off),
+        "a node's own call is the owner's to gate"
+    );
+
+    let on = remote_world(true);
+    on.handler
+        .call(&the_app(), ops::SHELL_STOP, &json!({"id": REMOTE_JOB}))
+        .unwrap();
+    assert_eq!(on.sent.load(Ordering::SeqCst), 1, "with acting on it goes");
+}
+
+#[test]
 fn the_phones_short_names_still_map() {
     use crate::bridge_backend::model_id;
     use crate::catalog_ops_tests::seeded;

@@ -284,6 +284,10 @@ fn is_claude(row: &Value) -> bool {
         .is_none_or(|tool| tool == "claude")
 }
 
+fn is_shell(row: &Value) -> bool {
+    row.get("tool").and_then(Value::as_str) == Some("shell")
+}
+
 pub fn is_client(status: &Value) -> bool {
     let me = status.get("me").and_then(Value::as_str);
     status
@@ -417,7 +421,7 @@ impl RemoteSessions {
         self.rows_for(true)
     }
 
-    fn rows_for(&self, all: bool) -> Vec<Value> {
+    fn rows_where(&self, keep: impl Fn(&Value) -> bool) -> Vec<Value> {
         if !self.allowed() {
             return Vec::new();
         }
@@ -428,10 +432,25 @@ impl RemoteSessions {
                 remote
                     .rows
                     .iter()
-                    .filter(move |row| all || is_claude(row))
+                    .filter(|row| keep(row))
                     .filter_map(|row| self.shaped(node, remote, row))
             })
             .collect()
+    }
+
+    fn rows_for(&self, all: bool) -> Vec<Value> {
+        self.rows_where(|row| all || is_claude(row))
+    }
+
+    pub fn shell_rows(&self) -> Vec<Value> {
+        self.rows_where(is_shell)
+    }
+
+    pub fn merge_shell(&self, local: &Value) -> Value {
+        Self::joined(
+            local,
+            self.rows_where(|row| is_claude(row) || is_shell(row)),
+        )
     }
 
     pub fn claude_rows(&self) -> Vec<Value> {

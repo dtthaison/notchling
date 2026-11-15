@@ -397,3 +397,77 @@ fn the_daemons_scan_publishes_through_the_cluster_parts() {
     w.close();
     let _ = std::fs::remove_dir_all(&root);
 }
+
+fn shell_row() -> Value {
+    let mut row = crate::cluster_sessions::agent_row("shell:j1");
+    row["tool"] = json!("shell");
+    row["command"] = json!("make");
+    row
+}
+
+fn with_shell_and_agy() -> Value {
+    let mut agy = crate::cluster_sessions::agent_row("agy:a1");
+    agy["tool"] = json!("antigravity");
+    json!([crate::cluster_sessions::agent_row("s1"), shell_row(), agy])
+}
+
+#[test]
+fn remote_shell_rows_come_only_when_asked_for() {
+    let local = Arc::new(Mutex::new(json!([{"id": "mine"}])));
+    let ops = Ops::new(local).with_cluster(None, remote_with("shell", with_shell_and_agy()));
+    for args in [Value::Null, json!({}), json!({"tools": "claude"})] {
+        let list = ops.call(&app(), ops::SESSIONS_LIST, &args).unwrap();
+        assert_eq!(listed_ids(&list), vec!["mine", "00000000000000a1/s1"]);
+    }
+    let shell = ops
+        .call(&app(), ops::SESSIONS_LIST, &json!({"remote": "shell"}))
+        .unwrap();
+    assert_eq!(
+        listed_ids(&shell),
+        vec!["mine", "00000000000000a1/s1", "00000000000000a1/shell:j1"],
+        "Antigravity rows stay out: Chat reads those itself"
+    );
+    let bad = ops.call(&app(), ops::SESSIONS_LIST, &json!({"remote": "agy"}));
+    assert!(bad.is_err());
+    let node = Caller {
+        tier: Tier::Agent,
+        client: ClientKind::Node,
+        peer: None,
+        pid: None,
+    };
+    let own = ops
+        .call(&node, ops::SESSIONS_LIST, &json!({"remote": "shell"}))
+        .unwrap();
+    assert_eq!(own, json!([{"id": "mine"}]));
+}
+
+#[test]
+fn a_change_in_remote_shell_rows_is_announced_apart_from_sessions_changed() {
+    let room = Arc::new(FakeRoom::default());
+    let local = Arc::new(Mutex::new(json!([{"id": "mine"}])));
+    let remote = remote_with(
+        "shell-event",
+        json!([crate::cluster_sessions::agent_row("s1")]),
+    );
+    let publisher = publisher(&room, &remote, local);
+    publisher.publish();
+    assert!(
+        room.named("sessions.remote.shell").is_empty(),
+        "no shell rows, nothing to say"
+    );
+    remote.mark_dirty(&peer(true).id);
+    remote.sync(&[peer(true)], &Rows(with_shell_and_agy()), 1);
+    publisher.publish();
+    publisher.publish();
+    let sent = room.named("sessions.remote.shell");
+    assert_eq!(sent.len(), 1, "a repeat is dropped");
+    assert_eq!(listed_ids(&sent[0]), vec!["00000000000000a1/shell:j1"]);
+    assert_eq!(
+        room.named("sessions.changed").len(),
+        1,
+        "other clients' event is unchanged"
+    );
+    remote.clear();
+    publisher.publish();
+    assert_eq!(room.named("sessions.remote.shell").last(), Some(&json!([])));
+}

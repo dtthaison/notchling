@@ -84,6 +84,7 @@ pub enum Link {
 #[derive(Clone, Debug, PartialEq)]
 pub struct View {
     pub agents: Option<Vec<Agent>>,
+    pub shells: Vec<Agent>,
     pub prompts: Option<Vec<Value>>,
     pub tools: ToolLive,
     pub answered: HashSet<String>,
@@ -111,6 +112,7 @@ pub const DAEMON_UNTRUSTED_NOTE: &str = "Daemon not trusted";
 
 struct State {
     agents: Option<Vec<Agent>>,
+    shells: Vec<Agent>,
     prompts: Option<Vec<Value>>,
     tools: ToolLive,
     catalog: HashMap<CatalogTool, Vec<ModelInfo>>,
@@ -136,6 +138,14 @@ impl Shared {
         }
     }
 
+    fn set_shells(&self, shells: Vec<Agent>) {
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        if state.shells != shells {
+            state.shells = shells;
+            state.generation += 1;
+        }
+    }
+
     fn set_catalog(&self, tool: CatalogTool, models: Vec<ModelInfo>) {
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         if state.catalog.get(&tool) != Some(&models) {
@@ -157,6 +167,11 @@ impl Shared {
             topics::SESSIONS_CHANGED => {
                 if let Ok(agents) = serde_json::from_value::<Vec<Agent>>(event.data) {
                     self.set(Link::Daemon, Some(agents));
+                }
+            }
+            topics::SESSIONS_REMOTE_SHELL => {
+                if let Ok(rows) = serde_json::from_value::<Vec<Agent>>(event.data) {
+                    self.set_shells(remote_shells(rows));
                 }
             }
             topics::PROMPT_PENDING | topics::PROMPT_RESOLVED => {
@@ -208,6 +223,7 @@ impl SessionSource {
             shared: Arc::new(Shared {
                 state: Mutex::new(State {
                     agents: None,
+                    shells: Vec::new(),
                     prompts: None,
                     tools: ToolLive::default(),
                     catalog: HashMap::new(),
@@ -245,6 +261,7 @@ impl SessionSource {
         let state = self.shared.state.lock().unwrap_or_else(|e| e.into_inner());
         View {
             agents: state.agents.clone(),
+            shells: state.shells.clone(),
             prompts: state.prompts.clone(),
             tools: state.tools.clone(),
             answered: state.answered.clone(),
@@ -300,8 +317,9 @@ fn run(config: SourceConfig, shared: &Shared) {
     while !shared.stopped() {
         let mut link = Link::Down;
         match connect(&config, &mut tried_start) {
-            Ok((client, agents, prompts)) => {
+            Ok((client, agents, shells, prompts)) => {
                 shared.set_prompts(prompts);
+                shared.set_shells(shells);
                 shared.set(Link::Daemon, Some(agents));
                 failures = 0;
                 follow(client, shared);
@@ -316,13 +334,25 @@ fn run(config: SourceConfig, shared: &Shared) {
             return;
         }
         shared.set_prompts(None);
+        shared.set_shells(Vec::new());
         shared.reset_tools();
         shared.set(link, None);
         sleep(config.backoff.delay(failures.saturating_sub(1)), shared);
     }
 }
 
-type Connected = (Client, Vec<Agent>, Option<Vec<Value>>);
+type Connected = (Client, Vec<Agent>, Vec<Agent>, Option<Vec<Value>>);
+
+pub fn remote_shells(rows: Vec<Agent>) -> Vec<Agent> {
+    rows.into_iter()
+        .filter(|a| crate::chat::remote::is_remote(a) && crate::chat::remote::is_shell(a))
+        .collect()
+}
+
+pub fn split_shells(rows: Vec<Agent>) -> (Vec<Agent>, Vec<Agent>) {
+    rows.into_iter()
+        .partition(|a| !(crate::chat::remote::is_remote(a) && crate::chat::remote::is_shell(a)))
+}
 
 fn connect(config: &SourceConfig, tried_start: &mut bool) -> Result<Connected, ClientError> {
     let options = ConnectOptions {
@@ -350,7 +380,9 @@ fn connect(config: &SourceConfig, tried_start: &mut bool) -> Result<Connected, C
         Ok(_) | Err(ClientError::Api(_)) => {}
         Err(e) => return Err(e),
     }
-    let mut agents = client.sessions::<Agent>()?;
+    let (mut agents, mut shells) = split_shells(
+        client.call_as::<Vec<Agent>>(ops::SESSIONS_LIST, serde_json::json!({"remote": "shell"}))?,
+    );
     let mut prompts = match followed {
         true => match client.call(ops::PROMPTS_LIST, serde_json::json!({})) {
             Ok(Value::Array(list)) => Some(list),
@@ -366,6 +398,11 @@ fn connect(config: &SourceConfig, tried_start: &mut bool) -> Result<Connected, C
                     agents = newer;
                 }
             }
+            topics::SESSIONS_REMOTE_SHELL => {
+                if let Ok(rows) = serde_json::from_value::<Vec<Agent>>(event.data) {
+                    shells = remote_shells(rows);
+                }
+            }
             _ => {
                 if let Some(list) = &mut prompts {
                     held_change(list, &event);
@@ -373,7 +410,7 @@ fn connect(config: &SourceConfig, tried_start: &mut bool) -> Result<Connected, C
             }
         }
     }
-    Ok((client, agents, prompts))
+    Ok((client, agents, shells, prompts))
 }
 
 fn held_change(list: &mut Vec<Value>, event: &Event) {

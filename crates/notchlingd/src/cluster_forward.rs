@@ -36,7 +36,18 @@ pub fn names_other_node(op: &str, args: &Value) -> bool {
 pub fn acting_class(op: &str) -> bool {
     crate::acting_ops::ACTING_OPS.contains(&op)
         || crate::agy_ops::ACTING_OPS.contains(&op)
-        || matches!(op, ops::CODEX_SEND | ops::CODEX_STOP)
+        || matches!(op, ops::CODEX_SEND | ops::CODEX_STOP | ops::SHELL_STOP)
+}
+
+pub fn acting_gated(caller: &Caller, op: &str, args: &Value) -> bool {
+    if caller.client == ClientKind::Node {
+        return false;
+    }
+    match op {
+        ops::SHELL_STOP => true,
+        ops::CLUSTER_DISPATCH => caller.tier == Tier::App && args.get("delegate").is_none(),
+        _ => acting_class(op) && names_other_node(op, args),
+    }
 }
 
 pub trait Forward: Send + Sync {

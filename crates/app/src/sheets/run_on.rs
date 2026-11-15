@@ -1,5 +1,5 @@
 use notchling_engine::bridge::net::crypto::{hex, random_bytes};
-use notchling_engine::cluster::shell_job::{CODEX_LATER, MAX_COMMAND};
+use notchling_engine::cluster::shell_job::{AGY_LATER, CODEX_LATER, MAX_COMMAND};
 use notchling_engine::cluster::{compat, Compat, Purpose, Tool as ClusterTool, Versions};
 use notchling_locale as t;
 use serde_json::{json, Value};
@@ -186,6 +186,8 @@ impl RunOn {
             row.reason = Some(t::cluster::node_offline(&c.name));
         } else if tool == ClusterTool::Codex {
             row.reason = Some(CODEX_LATER.to_owned());
+        } else if tool == ClusterTool::Agy {
+            row.reason = Some(AGY_LATER.to_owned());
         } else {
             match (&self.reference, &c.versions) {
                 (Some(reference), Some(node)) => {
@@ -288,7 +290,7 @@ impl NewSession {
             return false;
         }
         if !target.remote.takes_text() {
-            return target.remote != Remote::Codex;
+            return !matches!(target.remote, Remote::Codex);
         }
         let text = target.text.trim();
         !text.is_empty()

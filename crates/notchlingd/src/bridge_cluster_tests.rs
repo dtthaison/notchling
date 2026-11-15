@@ -345,3 +345,19 @@ fn the_follow_book_holds_at_most_its_cap_and_drops_the_oldest() {
     w.cluster.follow("0123456789abcdef/s0", 2_000);
     assert_eq!(w.seen.ops().len(), before + 1, "the oldest was forgotten");
 }
+
+#[test]
+fn the_phone_keeps_only_its_few_newest_chats_followed() {
+    assert_eq!(FOLLOWED_MAX, 4, "well under the daemon's 16 in all");
+    let w = world();
+    for n in 0..6u64 {
+        w.cluster
+            .follow(&format!("0123456789abcdef/s{n}"), 1_000 + n * 10);
+    }
+    assert_eq!(w.cluster.followed_len(), FOLLOWED_MAX);
+    let before = w.seen.ops().len();
+    w.cluster.follow("0123456789abcdef/s5", 1_100);
+    assert_eq!(w.seen.ops().len(), before, "a newest chat is still held");
+    w.cluster.follow("0123456789abcdef/s0", 1_100);
+    assert_eq!(w.seen.ops().len(), before + 1, "an old one is asked again");
+}

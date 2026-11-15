@@ -10,7 +10,7 @@ use crate::awake_ops::AwakeOps;
 use crate::bridge_backend::APPROVAL_WAIT;
 use crate::bridge_ops::{BridgeOps, BridgeSetup};
 use crate::catalog_ops::CatalogService;
-use crate::cluster_forward::{acting_class, names_other_node, Forward};
+use crate::cluster_forward::{acting_gated, Forward};
 use crate::cluster_prompts::RemotePrompts;
 use crate::cluster_sessions::RemoteSessions;
 use crate::cluster_wiring::ClusterParts;
@@ -200,6 +200,16 @@ fn every_tool(args: &Value) -> Result<bool, ApiError> {
     }
 }
 
+fn with_remote_shell(args: &Value) -> Result<bool, ApiError> {
+    match args.get("remote") {
+        None | Some(Value::Null) => Ok(false),
+        Some(Value::String(kind)) if kind == "shell" => Ok(true),
+        Some(_) => Err(ApiError::bad_request(
+            "sessions.list takes {\"remote\": \"shell\"}",
+        )),
+    }
+}
+
 fn tagged(list: Value, tool: &str) -> Vec<Value> {
     let Value::Array(rows) = list else {
         return Vec::new();
@@ -215,6 +225,7 @@ fn tagged(list: Value, tool: &str) -> Vec<Value> {
 impl Ops {
     fn sessions_list(&self, caller: &Caller, args: &Value) -> Result<(Value, bool), ApiError> {
         let every = every_tool(args)?;
+        let shell = with_remote_shell(args)?;
         let landed = self.first.wait(self.first_wait);
         let list = self
             .sessions
@@ -236,6 +247,9 @@ impl Ops {
         match &self.remote {
             Some(remote) if caller.client != ClientKind::Node && every => {
                 Ok((remote.merge_all(&list), landed))
+            }
+            Some(remote) if caller.client != ClientKind::Node && shell => {
+                Ok((remote.merge_shell(&list), landed))
             }
             Some(remote) if caller.client != ClientKind::Node => Ok((remote.merge(&list), landed)),
             _ => Ok((list, landed)),
@@ -304,11 +318,7 @@ impl Handler for Ops {
     }
 
     fn call(&self, caller: &Caller, op: &str, args: &Value) -> Result<Value, ApiError> {
-        if caller.client != ClientKind::Node
-            && self.acting.as_ref().is_some_and(|a| !a.is_on())
-            && acting_class(op)
-            && names_other_node(op, args)
-        {
+        if self.acting.as_ref().is_some_and(|a| !a.is_on()) && acting_gated(caller, op, args) {
             return Err(ApiError::new(ErrorCode::Forbidden, ACTING_OFF));
         }
         if let Some(routed) = self

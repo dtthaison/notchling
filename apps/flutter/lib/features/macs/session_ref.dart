@@ -16,7 +16,12 @@ class SessionRef {
     return match == null ? null : SessionRef(match.group(1)!, match.group(2)!);
   }
 
-  static SessionRef fromPayload(String payload, {required String fallbackHost}) => parse(payload) ?? SessionRef(fallbackHost, payload);
+  static SessionRef fromPayload(String payload, {required String fallbackHost}) {
+    if (payload.startsWith(bareMark)) return SessionRef(fallbackHost, payload.substring(bareMark.length));
+    return parse(payload) ?? SessionRef(fallbackHost, payload);
+  }
+
+  static SessionRef? onComputer(String sessionId, {required bool manyComputers}) => manyComputers ? parse(sessionId) : null;
 
   SessionRef onHostIfUnknown(String defaultHost) => host.isEmpty ? SessionRef(defaultHost, id) : this;
 

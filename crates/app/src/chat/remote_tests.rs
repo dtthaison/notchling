@@ -6,8 +6,8 @@ use serde_json::json;
 
 use super::data::{DataRoot, Session, Tool};
 use super::remote::{
-    bring_back_job, brought_back, follow_due, job_of_worktree, shell_conversation, source,
-    waiting_for_mirror, Source, FOLLOW_EVERY_MS, LOG_TAIL_BYTES,
+    bring_back_job, brought_back, job_of_worktree, shell_conversation, source, waiting_for_mirror,
+    Source, LOG_TAIL_BYTES,
 };
 use crate::acting::Request;
 use crate::cluster::renders::WORKER;
@@ -99,27 +99,6 @@ fn a_path_with_dots_or_a_relative_one_is_not_the_mirror() {
         Source::Pending,
         "absolute only"
     );
-}
-
-#[test]
-fn follow_is_due_every_minute_while_selected() {
-    let remote_row = session(agent(&remote("j1"), None), None);
-    let local_row = session(agent("j1", None), None);
-    assert!(!follow_due(None, 0, 10 * FOLLOW_EVERY_MS));
-    assert!(!follow_due(Some(&local_row), 0, 10 * FOLLOW_EVERY_MS));
-    assert!(follow_due(Some(&remote_row), 0, FOLLOW_EVERY_MS));
-    assert!(!follow_due(Some(&remote_row), 1_000, FOLLOW_EVERY_MS));
-    assert!(follow_due(
-        Some(&remote_row),
-        1_000,
-        1_000 + FOLLOW_EVERY_MS
-    ));
-    assert!(!follow_due(
-        Some(&remote_row),
-        5_000_000,
-        5_000_000 + FOLLOW_EVERY_MS - 1
-    ));
-    assert_eq!(FOLLOW_EVERY_MS, 60_000);
 }
 
 fn shell_agent(id: &str, log: &Path) -> Agent {

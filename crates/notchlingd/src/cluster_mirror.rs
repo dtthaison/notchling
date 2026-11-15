@@ -226,6 +226,11 @@ impl Mirror {
         })
     }
 
+    #[cfg(test)]
+    pub(crate) fn follows_of(&self, qualified: &str) -> bool {
+        lock(&self.follows).contains_key(qualified)
+    }
+
     pub fn following(&self) -> usize {
         let now = (self.clock)();
         let mut follows = lock(&self.follows);
@@ -258,11 +263,15 @@ impl Mirror {
             let now = (self.clock)();
             let mut follows = lock(&self.follows);
             follows.retain(|_, f| f.until > now);
-            if !follows.contains_key(qualified) && follows.len() >= MAX_FOLLOWS {
-                return Err(ApiError::new(
-                    ErrorCode::Failed,
-                    "too many sessions are followed at once",
-                ));
+            while !follows.contains_key(qualified) && follows.len() >= MAX_FOLLOWS {
+                let stalest = follows
+                    .iter()
+                    .min_by_key(|(_, f)| f.until)
+                    .map(|(key, _)| key.clone());
+                match stalest {
+                    Some(key) => follows.remove(&key),
+                    None => break,
+                };
             }
             follows.insert(
                 qualified.to_string(),

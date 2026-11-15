@@ -69,6 +69,9 @@ pub mod remote;
 pub mod remote_control;
 #[cfg(test)]
 mod remote_control_tests;
+pub mod remote_follow;
+#[cfg(test)]
+mod remote_follow_tests;
 #[cfg(test)]
 mod remote_prompt_tests;
 #[cfg(test)]

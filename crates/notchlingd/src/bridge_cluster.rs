@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 pub const FOLLOW_EVERY_MS: u64 = 60_000;
 pub const FOLLOW_RETRY_MS: u64 = 5_000;
-pub const FOLLOWED_MAX: usize = 64;
+pub const FOLLOWED_MAX: usize = 4;
 
 struct Parts {
     handler: Arc<LateHandler>,

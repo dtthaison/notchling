@@ -7,7 +7,6 @@ use notchling_engine::sessions::AgentGroup;
 use super::ChatView;
 use crate::acting::Control;
 use crate::acting::Request;
-use crate::chat::remote::follow_due;
 use crate::chat::remote_control::{refused, remote_control, Action};
 use crate::chat::sidebar_node::{reply_note, Nodes};
 use crate::cluster::feed::ClusterFeed;
@@ -51,24 +50,24 @@ impl ChatView {
             return;
         };
         let row = session.agent.id.clone();
-        let last = match &self.followed {
-            Some((followed, at)) if *followed == row => *at,
-            _ => 0,
-        };
         let now = now_ms();
-        if !follow_due(Some(session), last, now)
-            || self.remote_refused(&row, Action::Reply)
-            || !self.acting(cx).control().enabled
-        {
+        if !self.followed.due(Some(session), now) || self.remote_refused(&row, Action::Reply) {
             return;
         }
-        self.followed = Some((row.clone(), now));
+        self.followed.begin(&row, now);
         let actions = self.acts(cx).actions;
-        cx.background_executor()
-            .spawn(async move {
-                actions.send(&Request::cluster_follow(&row)).ok();
+        let keyed = row.clone();
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move { actions.read(&Request::cluster_follow(&row)) })
+                .await;
+            this.update(cx, |view, _| {
+                view.followed.finish(&keyed, result.is_ok(), now_ms());
             })
-            .detach();
+            .ok();
+        })
+        .detach();
     }
 
     pub(super) fn nodes(&self) -> Nodes {

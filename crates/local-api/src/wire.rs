@@ -134,6 +134,7 @@ pub mod ops {
 pub mod topics {
     pub const SESSIONS: &str = "sessions";
     pub const SESSIONS_CHANGED: &str = "sessions.changed";
+    pub const SESSIONS_REMOTE_SHELL: &str = "sessions.remote.shell";
     pub const PROMPTS: &str = "prompts";
     pub const PROMPT_PENDING: &str = "prompt.pending";
     pub const PROMPT_RESOLVED: &str = "prompt.resolved";

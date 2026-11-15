@@ -112,9 +112,6 @@ fn claude_on_linux_is_refused_until_proven() {
             .is_some_and(|r| r.contains("Linux")),
         "{worker:?}"
     );
-    let rows = run_on(&status).rows(ClusterTool::Agy);
-    let worker = rows.iter().find(|r| r.name == "build-box").expect("a row");
-    assert!(worker.pickable(), "Antigravity runs on Linux: {worker:?}");
     let rows = run_on(&status).rows(ClusterTool::Shell);
     assert!(rows.iter().all(|r| r.pickable()), "{rows:?}");
 }
@@ -203,17 +200,37 @@ fn shell_command_dispatch_carries_command() {
     sheet.stage = Stage::Choosing;
     sheet.pick_remote(Remote::Agy);
     sheet.set_text("look at the failing test");
-    let request = sheet.dispatch_request().expect("a dispatch");
-    let a = args(&request);
-    assert_eq!(a["tool"], "agy");
-    assert_eq!(a["text"], "look at the failing test");
-    assert!(a.get("command").is_none());
+    assert!(
+        sheet.dispatch_request().is_none(),
+        "Chat can't show an Antigravity job on another machine yet"
+    );
+    assert_eq!(
+        sheet.node_row().and_then(|r| r.reason).as_deref(),
+        Some("Antigravity on another machine comes later.")
+    );
+}
+
+#[test]
+fn antigravity_on_another_node_is_refused_like_codex() {
+    let status = status();
+    let rows = run_on(&status).rows(ClusterTool::Agy);
+    let mini = rows.iter().find(|r| r.name == "mac-mini").expect("a row");
+    assert!(!mini.pickable());
+    assert_eq!(
+        mini.reason.as_deref(),
+        Some("Antigravity on another machine comes later.")
+    );
+    assert!(rows[0].pickable(), "this Mac still runs Antigravity");
+    let mut sheet = sheet(&status);
+    sheet.pick_remote(Remote::Agy);
+    sheet.pick_node(STANDBY);
+    assert_eq!(sheet.target.node, None, "a refused node can't be picked");
 }
 
 #[test]
 fn no_secrets_on_dispatch() {
     let allowed = ["node", "tool", "cwd", "key", "code", "command", "text"];
-    for remote in [Remote::Claude, Remote::Agy, Remote::Shell] {
+    for remote in [Remote::Claude, Remote::Shell] {
         let mut sheet = sheet(&status());
         sheet.pick_remote(remote);
         sheet.pick_node(STANDBY);
@@ -287,11 +304,16 @@ fn the_account_picked_on_this_mac_decides_which_nodes_can_be_picked() {
     sheet.pick_account(1);
     assert_eq!(sheet.target.remote, Remote::Agy);
     sheet.pick_node(WORKER);
-    assert_eq!(sheet.target.node.as_deref(), Some(WORKER));
-    sheet.pick_account(2);
+    assert_eq!(sheet.target.node, None, "Antigravity elsewhere is refused");
+    sheet.pick_account(0);
+    sheet.pick_node(STANDBY);
+    assert_eq!(sheet.target.node.as_deref(), Some(STANDBY));
+    sheet.pick_account(1);
     assert_eq!(
         sheet.target.remote,
-        Remote::Agy,
-        "a node is kept once it is picked"
+        Remote::Claude,
+        "the tool stays once a node is picked"
     );
+    sheet.pick_remote(Remote::Agy);
+    assert!(!sheet.remote_ready(), "the picked node now refuses it");
 }

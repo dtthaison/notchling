@@ -508,7 +508,7 @@ pub fn recent_projects(
     };
     let mut ordered: Vec<&Session> = sessions.iter().collect();
     ordered.sort_by(|a, b| b.last_activity_ms().total_cmp(&a.last_activity_ms()));
-    for session in ordered {
+    for session in ordered.into_iter().filter(|s| s.node.is_none()) {
         add(session.cwd.clone(), &mut result);
     }
     let mut entries: Vec<(String, std::time::SystemTime)> = projects_dir
