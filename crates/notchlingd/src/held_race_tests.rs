@@ -209,7 +209,7 @@ fn the_job_and_live_files_are_read_again_so_a_cached_calm_row_is_not_enough() {
     let s = session(&dir, "working", false);
     say(&s, "co");
     set_row(&s, &dir, "completed", false);
-    job_file(&dir, "working", 3, "a new turn");
+    job_file(&dir, "working", 0, "a new turn");
     for tick in 1..=30 {
         s.ops.flush_held(tick * 1_000);
     }
@@ -461,4 +461,132 @@ fn a_new_turn_the_job_file_has_not_caught_up_with_is_still_waited_out_under_a_sh
     }
     assert!(typed(&s).is_empty());
     assert_eq!(s.ops.held_text(ID).as_deref(), Some("3"));
+}
+
+fn subagents_job_file(dir: &Dir, tasks: u64) {
+    let job = json!({
+        "state": "working", "tempo": "active", "detail": "waiting on the agents",
+        "inFlight": {"tasks": tasks, "queued": 0, "kinds": ["artifact_watch", "local_agent"],
+            "drainableMonitors": 1},
+        "template": "bg", "name": "main", "sessionId": "be50d36a-4348-4ba6-ab58-96959399a893",
+        "linkScanPath": dir.transcript(), "cwd": "/Users/me/app",
+        "updatedAt": "2026-11-15T03:11:00.000Z"
+    });
+    dir.write(&format!("claude/jobs/{JOB}/state.json"), &job.to_string());
+}
+
+fn subagents_session(dir: &Dir) -> Setup {
+    let list = json!([row_from_files(dir)]);
+    from_files(setup_in(true, PROMPT, list, dir.roots(), None), dir.roots())
+}
+
+fn turn_over_with_subagents(dir: &Dir) {
+    lines(
+        dir,
+        &[
+            prompt_line("go"),
+            assistant("the agents are out"),
+            turn_end(),
+        ],
+    );
+}
+
+#[test]
+fn a_reply_to_a_busy_job_whose_turn_ended_while_subagents_run_is_typed_at_once() {
+    let dir = Dir::new("agents-direct");
+    turn_over_with_subagents(&dir);
+    subagents_job_file(&dir, 7);
+    live_file(&dir, "busy");
+    let s = subagents_session(&dir);
+    assert_eq!(say(&s, "go on"), json!({"sent": true}));
+    assert!(typed(&s).contains("go on"));
+    assert_eq!(s.ops.held_text(ID), None);
+}
+
+#[test]
+fn a_reply_held_in_a_turn_goes_in_after_the_settle_once_only_subagents_keep_the_job_busy() {
+    let dir = Dir::new("agents-held");
+    lines(&dir, &[prompt_line("go"), assistant("starting")]);
+    subagents_job_file(&dir, 7);
+    live_file(&dir, "busy");
+    let s = subagents_session(&dir);
+    assert_eq!(say(&s, "go on")["state"], json!("queued"));
+    s.ops.flush_held(1_000);
+    s.ops.flush_held(1_000 + SETTLE_MS);
+    assert!(typed(&s).is_empty(), "the turn is running");
+
+    turn_over_with_subagents(&dir);
+    *s.ops.sessions.lock().unwrap() = json!([row_from_files(&dir)]);
+    s.ops.flush_held(30_000);
+    s.ops.flush_held(30_000 + SETTLE_MS - 1);
+    assert!(typed(&s).is_empty(), "not before the settle time");
+    s.ops.flush_held(30_000 + SETTLE_MS);
+    assert!(typed(&s).contains("go on"));
+    assert_eq!(s.ops.held_text(ID), None);
+}
+
+#[test]
+fn a_prompt_after_the_last_turn_end_is_a_running_turn_even_with_subagents_in_flight() {
+    let dir = Dir::new("agents-new-turn");
+    lines(
+        &dir,
+        &[
+            prompt_line("go"),
+            assistant("the agents are out"),
+            turn_end(),
+            prompt_line("and the tests?"),
+        ],
+    );
+    subagents_job_file(&dir, 7);
+    live_file(&dir, "busy");
+    let s = subagents_session(&dir);
+    assert_eq!(say(&s, "also this")["state"], json!("queued"));
+    for tick in 1..=30 {
+        s.ops.flush_held(tick * 1_000);
+    }
+    assert!(typed(&s).is_empty());
+    assert!(s.attached.lock().unwrap().is_empty());
+    assert_eq!(s.ops.held_text(ID).as_deref(), Some("also this"));
+}
+
+#[test]
+fn a_turn_that_starts_inside_the_settle_time_is_waited_out_under_subagents_too() {
+    let dir = Dir::new("agents-settle");
+    lines(&dir, &[prompt_line("go"), assistant("starting")]);
+    subagents_job_file(&dir, 7);
+    live_file(&dir, "busy");
+    let s = subagents_session(&dir);
+    assert_eq!(say(&s, "go on")["state"], json!("queued"));
+    turn_over_with_subagents(&dir);
+    *s.ops.sessions.lock().unwrap() = json!([row_from_files(&dir)]);
+    s.ops.flush_held(30_000);
+    lines(
+        &dir,
+        &[
+            prompt_line("go"),
+            assistant("the agents are out"),
+            turn_end(),
+            prompt_line("typed in the terminal"),
+        ],
+    );
+    for tick in 0..30 {
+        s.ops.flush_held(30_000 + SETTLE_MS + tick * 1_000);
+    }
+    assert!(typed(&s).is_empty(), "the new turn is waited out");
+    assert_eq!(s.ops.held_text(ID).as_deref(), Some("go on"));
+}
+
+#[test]
+fn a_busy_job_with_nothing_in_flight_is_still_the_turn_whatever_the_transcript_says() {
+    let dir = Dir::new("agents-none");
+    turn_over_with_subagents(&dir);
+    subagents_job_file(&dir, 0);
+    live_file(&dir, "busy");
+    let s = subagents_session(&dir);
+    assert_eq!(say(&s, "go on")["state"], json!("queued"));
+    for tick in 1..=30 {
+        s.ops.flush_held(tick * 1_000);
+    }
+    assert!(typed(&s).is_empty());
+    assert_eq!(s.ops.held_text(ID).as_deref(), Some("go on"));
 }

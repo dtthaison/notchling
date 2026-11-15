@@ -58,7 +58,7 @@ pub fn agent_from_job(
     let tempo = str_field(job, "tempo");
     let status = live.and_then(|l| str_field(l, "status"));
 
-    let at_prompt = turn_is_over(job, state, status);
+    let at_prompt = turn_is_over(job, status);
     let unprompted = str_field(job, "needs") == Some(FIRST_PROMPT)
         && matches!(state, "working" | "running" | "")
         && status != Some("waiting");
@@ -124,10 +124,10 @@ pub fn agent_from_job(
     }
 }
 
-fn turn_is_over(job: &Value, state: &str, status: Option<&str>) -> bool {
+fn turn_is_over(job: &Value, status: Option<&str>) -> bool {
     match status {
         Some("idle" | "shell") => true,
-        Some("busy") => matches!(state, "done" | "blocked") && tasks_in_flight(job) > 0,
+        Some("busy") => tasks_in_flight(job) > 0,
         _ => false,
     }
 }

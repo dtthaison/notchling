@@ -55,21 +55,49 @@ fn a_turn_that_ended_asking_a_question_while_tasks_run_is_at_its_prompt() {
 }
 
 #[test]
-fn a_running_turn_is_not_at_its_prompt() {
-    let a = row(&job("working", "active", 3), Some(&live("busy")));
-    assert_eq!(a.group, AgentGroup::Working);
-    assert!(!a.at_prompt);
-    assert!(a.turn_running());
-    assert!(!a.takes_held_text());
+fn a_busy_job_with_tasks_in_flight_is_only_maybe_at_its_prompt_whatever_its_state_says() {
+    for (state, tempo) in [("working", "active"), ("running", "idle"), ("", "active")] {
+        let a = row(&job(state, tempo, 3), Some(&live("busy")));
+        assert_eq!(a.group, AgentGroup::Working, "state {state:?}");
+        assert!(a.at_prompt, "state {state:?}: the transcript decides");
+        assert!(!a.turn_running());
+        assert!(a.takes_held_text());
+    }
+}
+
+#[test]
+fn the_maintainers_job_running_subagents_after_its_turn_ended_is_at_its_prompt() {
+    let job = json!({
+        "state": "working", "tempo": "active", "detail": "waiting on the agents",
+        "inFlight": {"tasks": 7, "queued": 0, "kinds": ["artifact_watch", "local_agent"],
+            "drainableMonitors": 1},
+        "template": "bg", "name": "main",
+        "sessionId": "be50d36a-4348-4ba6-ab58-96959399a893",
+        "resumeSessionId": "fee7356b-b891-4f6f-b4e7-35f7093b251c",
+        "daemonShort": "be50d36a", "cwd": "/Users/me/app", "backend": "daemon",
+        "updatedAt": "2026-11-15T03:11:00.000Z"
+    });
+    let a = row(&job, Some(&live("busy")));
+    assert_eq!(
+        (a.group, a.label.as_str()),
+        (AgentGroup::Working, "Working"),
+        "the display stays Working"
+    );
+    assert!(a.at_prompt);
+    assert!(!a.turn_running());
+    assert!(a.takes_held_text());
+    assert!(a.can_reply());
 }
 
 #[test]
 fn a_turn_starting_before_the_job_file_says_so_is_not_called_over() {
-    let a = row(&job("done", "idle", 0), Some(&live("busy")));
-    assert_eq!(a.group, AgentGroup::Working);
-    assert!(!a.at_prompt, "busy with nothing in flight is the turn");
-    let other = row(&job("running", "idle", 2), Some(&live("busy")));
-    assert!(!other.at_prompt);
+    for state in ["done", "working", "running"] {
+        let a = row(&job(state, "idle", 0), Some(&live("busy")));
+        assert_eq!(a.group, AgentGroup::Working, "state {state}");
+        assert!(!a.at_prompt, "busy with nothing in flight is the turn");
+        assert!(a.turn_running());
+        assert!(!a.takes_held_text());
+    }
 }
 
 #[test]
@@ -145,7 +173,7 @@ fn an_older_job_file_without_in_flight_counts_keeps_the_old_reading() {
 
 #[test]
 fn the_flag_stays_off_the_wire_unless_set() {
-    let off = row(&job("working", "active", 3), Some(&live("busy")));
+    let off = row(&job("working", "active", 0), Some(&live("busy")));
     assert!(serde_json::to_value(&off)
         .unwrap()
         .get("atPrompt")
