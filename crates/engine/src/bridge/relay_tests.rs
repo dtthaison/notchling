@@ -67,7 +67,9 @@ fn summaries_are_short_single_lines() {
 fn the_list_is_camel_case_and_leaves_out_empty_notices() {
     let list = HeldList {
         entries: vec![HeldView {
+            key: None,
             id: "h1".into(),
+            device: "phone-1".into(),
             op: "session.message".into(),
             session_id: Some("s".into()),
             summary: "hi".into(),

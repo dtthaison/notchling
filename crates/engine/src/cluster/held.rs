@@ -40,7 +40,69 @@ fn stale(h: &Held, now_ms: i64) -> bool {
     now_ms.saturating_sub(h.at_ms) > HELD_STALE_MS
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub enum Found {
+    Held(Held),
+    Delivered(String),
+}
+
 impl HeldQueue {
+    pub fn find(&self, device: &str, request: &str) -> Option<Found> {
+        if let Some(held) = self
+            .entries
+            .iter()
+            .find(|e| e.device == device && e.request == request)
+        {
+            return Some(Found::Held(held.clone()));
+        }
+        self.delivered
+            .iter()
+            .find(|d| d.device == device && d.request == request)
+            .map(|d| Found::Delivered(d.id.clone()))
+    }
+
+    pub fn note_sent(&mut self, id: &str, device: &str, request: &str) {
+        self.delivered
+            .retain(|d| !(d.device == device && d.request == request));
+        self.delivered.push(Delivered {
+            id: id.to_string(),
+            device: device.to_string(),
+            request: request.to_string(),
+        });
+        let over = self.delivered.len().saturating_sub(MAX_DELIVERED);
+        self.delivered.drain(..over);
+    }
+
+    pub fn forget_sent(&mut self, device: &str, request: &str) {
+        self.delivered
+            .retain(|d| !(d.device == device && d.request == request));
+    }
+
+    pub fn owns(&self, id: &str, device: &str) -> bool {
+        self.entries
+            .iter()
+            .any(|e| e.id == id && e.device == device)
+    }
+
+    pub fn delivered_to(&self, id: &str, device: &str) -> bool {
+        self.delivered
+            .iter()
+            .any(|d| d.id == id && d.device == device)
+    }
+
+    pub fn count(&self, device: Option<&str>) -> usize {
+        self.entries
+            .iter()
+            .filter(|e| device.is_none_or(|d| e.device == d))
+            .count()
+    }
+
+    pub fn is_waiting(&self, id: &str, now_ms: i64) -> bool {
+        self.entries
+            .iter()
+            .any(|e| e.id == id && stale(e, now_ms) && !self.confirmed.contains(&e.id))
+    }
+
     pub fn hold(&mut self, h: Held) -> String {
         if let Some(same) = self
             .entries

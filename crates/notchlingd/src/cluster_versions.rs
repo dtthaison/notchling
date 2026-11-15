@@ -15,6 +15,7 @@ pub fn own() -> Versions {
         tools: BTreeMap::new(),
         logins: BTreeMap::new(),
         host: None,
+        bridge: None,
     }
 }
 

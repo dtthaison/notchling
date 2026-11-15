@@ -102,6 +102,7 @@ impl HeldAct {
 pub struct Call<'a> {
     pub device: &'a str,
     pub request: &'a str,
+    pub key: Option<&'a str>,
     pub act: &'a HeldAct,
     pub session: Option<&'a Session>,
 }
@@ -124,6 +125,8 @@ pub enum Routed {
 #[derive(Debug, Clone, PartialEq)]
 pub struct HeldView {
     pub id: String,
+    pub device: String,
+    pub key: Option<String>,
     pub op: String,
     pub session_id: Option<String>,
     pub summary: String,
@@ -134,6 +137,7 @@ pub struct HeldView {
 #[derive(Debug, Clone, PartialEq)]
 pub struct HeldNoticeView {
     pub id: String,
+    pub device: String,
     pub reason: String,
     pub at_ms: i64,
 }
@@ -148,6 +152,7 @@ pub struct HeldList {
 pub enum Cancelled {
     Dropped,
     Delivered,
+    InFlight,
     Unknown,
 }
 
@@ -156,11 +161,15 @@ pub trait Relay: Send + Sync {
 
     fn route(&self, call: &Call<'_>) -> Routed;
 
-    fn list(&self) -> HeldList;
+    fn list(&self, device: &str) -> HeldList;
 
-    fn cancel(&self, id: &str) -> Cancelled;
+    fn cancel(&self, device: &str, id: &str) -> Cancelled;
 
-    fn confirm(&self, id: &str) -> bool;
+    fn cancel_key(&self, _device: &str, _key: &str) -> Cancelled {
+        Cancelled::Unknown
+    }
+
+    fn confirm(&self, device: &str, id: &str) -> bool;
 
     fn stale_ms(&self) -> Option<i64>;
 
@@ -181,6 +190,9 @@ pub fn entry_json(entry: &HeldView) -> Value {
     });
     if let Some(session) = &entry.session_id {
         value["sessionId"] = Value::from(session.as_str());
+    }
+    if let Some(key) = &entry.key {
+        value["key"] = Value::from(key.as_str());
     }
     value
 }

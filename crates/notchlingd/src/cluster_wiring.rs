@@ -37,6 +37,7 @@ use crate::versions_ops::VersionsOps;
 use notchling_cluster_net::{load_or_make, Pins, TcpTls, PORT};
 use notchling_engine::bridge::net::bridge::host_name;
 use notchling_engine::cluster::core::SnapAsk;
+use notchling_engine::cluster::versions::BridgeFacts;
 use notchling_engine::cluster::wire::{Origin, OriginTier};
 use notchling_engine::cluster::{Desired, NodeId};
 use notchling_engine::control::{Launcher, RealLauncher};
@@ -266,11 +267,14 @@ fn node_name() -> String {
     name.strip_suffix(".local").unwrap_or(&name).to_string()
 }
 
+pub type BridgeFactsFn = Arc<dyn Fn() -> Option<BridgeFacts> + Send + Sync>;
+
 fn start_node(
     layout: &Layout,
     room: Arc<dyn Room>,
     links: (Arc<dyn LocalCalls>, Arc<dyn Hooks>),
     versions: Arc<VersionsOps>,
+    bridge: BridgeFactsFn,
     log: ClusterLog,
 ) -> Result<Arc<ClusterNode>, String> {
     let cluster_dir = layout.cluster_dir();
@@ -287,6 +291,7 @@ fn start_node(
     let probe: Probe = Box::new(move || {
         let mut found = with_tools(versions.tool_versions());
         found.host = host.facts();
+        found.bridge = bridge();
         found
     });
     let setup = ClusterSetup {
@@ -313,7 +318,7 @@ impl ClusterParts {
         layout: &Layout,
         room: Arc<dyn Room>,
         link: Arc<SwitchFlag>,
-        versions: Arc<VersionsOps>,
+        versions: (Arc<VersionsOps>, BridgeFactsFn),
         inbox: Arc<InboxOps>,
         events: Events,
         sessions: Arc<Mutex<Value>>,
@@ -463,7 +468,14 @@ impl ClusterParts {
             snaps: snap_run.clone(),
             prompts: prompts.clone(),
         });
-        let node = start_node(layout, room.clone(), (local, hooks), versions, log.clone());
+        let node = start_node(
+            layout,
+            room.clone(),
+            (local, hooks),
+            versions.0,
+            versions.1,
+            log.clone(),
+        );
         let audit = log.clone();
         let mut refresher = None;
         let mut main_follower = None;

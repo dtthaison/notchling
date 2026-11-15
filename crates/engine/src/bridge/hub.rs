@@ -75,10 +75,10 @@ impl Hub {
         if wanting.is_empty() {
             return;
         }
-        let list = relay.list();
-        let json = wire::text(&list_json(&list));
-        let event = held_event(&list);
         for connection in wanting {
+            let list = relay.list(&connection.device_id());
+            let json = wire::text(&list_json(&list));
+            let event = held_event(&list);
             let changed = {
                 let mut sub = connection.subscription();
                 if sub.last_held_json.as_deref() == Some(json.as_str()) {

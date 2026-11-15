@@ -9,6 +9,8 @@ use std::sync::Arc;
 
 type Body = Map<String, Value>;
 
+const MAX_KEY: usize = 64;
+
 pub(crate) enum Gate {
     Go { relayed: bool },
     Answer(Value),
@@ -46,10 +48,15 @@ impl Router {
             return Ok(Gate::Go { relayed: false });
         };
         let request = body.get("id").map(Value::to_string).unwrap_or_default();
+        let key = body
+            .get("key")
+            .and_then(Value::as_str)
+            .filter(|k| !k.is_empty() && k.len() <= MAX_KEY);
         let device = connection.device_id();
         let call = Call {
             device: &device,
             request: &request,
+            key,
             act,
             session,
         };
@@ -69,33 +76,55 @@ impl Router {
         }
     }
 
-    pub(crate) fn held_list(&self) -> Value {
+    pub(crate) fn held_list(&self, connection: &Arc<Connection>) -> Value {
         match self.backend.relay() {
-            Some(relay) => list_json(&relay.list()),
+            Some(relay) => list_json(&relay.list(&connection.device_id())),
             None => json!({"entries": []}),
         }
     }
 
-    pub(crate) fn held_cancel(&self, body: &Body) -> Result<Value, BridgeFailure> {
-        let id = require(body, "heldId")?;
+    pub(crate) fn held_cancel(
+        &self,
+        connection: &Arc<Connection>,
+        body: &Body,
+    ) -> Result<Value, BridgeFailure> {
+        let key = body
+            .get("key")
+            .and_then(Value::as_str)
+            .filter(|k| !k.is_empty());
+        let id = match key {
+            Some(_) => None,
+            None => Some(require(body, "heldId")?),
+        };
         let Some(relay) = self.backend.relay() else {
             return Ok(json!({"cancelled": false}));
         };
-        let answer = match relay.cancel(id) {
+        let device = connection.device_id();
+        let outcome = match (key, id) {
+            (Some(key), _) => relay.cancel_key(&device, key),
+            (None, Some(id)) => relay.cancel(&device, id),
+            (None, None) => Cancelled::Unknown,
+        };
+        let answer = match outcome {
             Cancelled::Dropped => json!({"cancelled": true}),
             Cancelled::Delivered => json!({"cancelled": false, "delivered": true}),
+            Cancelled::InFlight => json!({"cancelled": false, "inFlight": true}),
             Cancelled::Unknown => json!({"cancelled": false}),
         };
         self.push_held(&relay);
         Ok(answer)
     }
 
-    pub(crate) fn held_confirm(&self, body: &Body) -> Result<Value, BridgeFailure> {
+    pub(crate) fn held_confirm(
+        &self,
+        connection: &Arc<Connection>,
+        body: &Body,
+    ) -> Result<Value, BridgeFailure> {
         let id = require(body, "heldId")?;
         let Some(relay) = self.backend.relay() else {
             return Ok(json!({"confirmed": false}));
         };
-        let confirmed = relay.confirm(id);
+        let confirmed = relay.confirm(&connection.device_id(), id);
         self.push_held(&relay);
         Ok(json!({"confirmed": confirmed}))
     }
@@ -112,13 +141,14 @@ impl Router {
             connection.subscription().wants_held = true;
             return;
         };
-        let text = wire::text(&list_json(&relay.list()));
+        let list = relay.list(&connection.device_id());
+        let text = wire::text(&list_json(&list));
         {
             let mut sub = connection.subscription();
             sub.wants_held = true;
             sub.last_held_json = Some(text);
         }
-        connection.send_text(held_event(&relay.list()));
+        connection.send_text(held_event(&list));
     }
 }
 

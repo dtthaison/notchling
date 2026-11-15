@@ -4,6 +4,7 @@
       {
         "at": 1793541465000,
         "id": "held-1",
+        "key": "7f9c2d44-5b1e-4a3a-9d0e-2c6b8e1f4a77",
         "op": "session.message",
         "sessionId": "0123456789abcdef/job-7",
         "summary": "Run the tests again",

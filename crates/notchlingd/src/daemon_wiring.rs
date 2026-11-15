@@ -44,6 +44,7 @@ use notchling_engine::accounts::codex::login::idle_for_auto_switch;
 use notchling_engine::accounts::desktop::ClaudeName;
 use notchling_engine::activity::EventsDb;
 use notchling_engine::awake::Power;
+use notchling_engine::cluster::versions::BridgeFacts;
 use notchling_engine::control::launcher::claude_path;
 use notchling_engine::control::session::home_of;
 use notchling_engine::control::RealLauncher;
@@ -670,7 +671,16 @@ impl Wired {
             layout,
             room.clone(),
             switches.cluster.clone(),
-            versions.clone(),
+            (versions.clone(), {
+                let bridge = bridge.clone();
+                Arc::new(move || {
+                    let served = bridge.served();
+                    Some(BridgeFacts {
+                        port: served.port,
+                        fingerprint: served.fingerprint,
+                    })
+                })
+            }),
             inbox.clone(),
             events.clone(),
             sessions.clone(),
@@ -694,6 +704,7 @@ impl Wired {
             layout.data_dir.clone(),
             cluster.link(),
         ));
+        relay.start();
         let _ = cluster.held().set(relay.clone());
         bridge.cluster().attach_relay(relay);
         Wired {

@@ -29,6 +29,7 @@ pub fn versions(os: &str) -> Versions {
         tools,
         logins: BTreeMap::new(),
         host: None,
+        bridge: None,
     }
 }
 

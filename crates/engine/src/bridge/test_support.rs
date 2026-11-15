@@ -550,7 +550,10 @@ pub struct ScriptedRelay {
     pub entries: Mutex<Vec<HeldView>>,
     pub notices: Mutex<Vec<HeldNoticeView>>,
     pub delivered: Mutex<Vec<String>>,
+    pub delivered_keys: Mutex<Vec<String>>,
+    pub inflight_keys: Mutex<Vec<String>>,
     pub calls: Mutex<Vec<(String, String, String)>>,
+    pub keys: Mutex<Vec<Option<String>>>,
 }
 
 impl ScriptedRelay {
@@ -562,7 +565,10 @@ impl ScriptedRelay {
             entries: Mutex::new(Vec::new()),
             notices: Mutex::new(Vec::new()),
             delivered: Mutex::new(Vec::new()),
+            delivered_keys: Mutex::new(Vec::new()),
+            inflight_keys: Mutex::new(Vec::new()),
             calls: Mutex::new(Vec::new()),
+            keys: Mutex::new(Vec::new()),
         })
     }
 
@@ -577,6 +583,7 @@ impl Relay for ScriptedRelay {
     }
 
     fn route(&self, call: &Call<'_>) -> Routed {
+        lock(&self.keys).push(call.key.map(str::to_string));
         lock(&self.calls).push((
             call.device.to_string(),
             call.request.to_string(),
@@ -593,6 +600,8 @@ impl Relay for ScriptedRelay {
                 let id = format!("held-{}", entries.len() + 1);
                 entries.push(HeldView {
                     id: id.clone(),
+                    key: call.key.map(str::to_string),
+                    device: call.device.to_string(),
                     op: call.act.op().to_string(),
                     session_id: call.act.session_id().map(str::to_string),
                     summary: call.act.summary(),
@@ -607,19 +616,31 @@ impl Relay for ScriptedRelay {
         }
     }
 
-    fn list(&self) -> HeldList {
+    fn list(&self, device: &str) -> HeldList {
+        let mine = |d: &str| d.is_empty() || d == device;
         HeldList {
-            entries: lock(&self.entries).clone(),
-            notices: lock(&self.notices).clone(),
+            entries: lock(&self.entries)
+                .iter()
+                .filter(|e| mine(&e.device))
+                .cloned()
+                .collect(),
+            notices: lock(&self.notices)
+                .iter()
+                .filter(|n| mine(&n.device))
+                .cloned()
+                .collect(),
         }
     }
 
-    fn cancel(&self, id: &str) -> Cancelled {
+    fn cancel(&self, device: &str, id: &str) -> Cancelled {
         if lock(&self.delivered).iter().any(|d| d == id) {
             return Cancelled::Delivered;
         }
         let mut entries = lock(&self.entries);
-        match entries.iter().position(|e| e.id == id) {
+        match entries
+            .iter()
+            .position(|e| e.id == id && (e.device.is_empty() || e.device == device))
+        {
             Some(at) => {
                 entries.remove(at);
                 Cancelled::Dropped
@@ -628,8 +649,28 @@ impl Relay for ScriptedRelay {
         }
     }
 
-    fn confirm(&self, id: &str) -> bool {
-        lock(&self.entries).iter().any(|e| e.id == id && e.waiting)
+    fn cancel_key(&self, device: &str, key: &str) -> Cancelled {
+        let mut entries = lock(&self.entries);
+        let at = entries.iter().position(|e| {
+            e.key.as_deref() == Some(key) && (e.device.is_empty() || e.device == device)
+        });
+        if let Some(at) = at {
+            entries.remove(at);
+            return Cancelled::Dropped;
+        }
+        if lock(&self.inflight_keys).iter().any(|k| k == key) {
+            return Cancelled::InFlight;
+        }
+        if lock(&self.delivered_keys).iter().any(|k| k == key) {
+            return Cancelled::Delivered;
+        }
+        Cancelled::Unknown
+    }
+
+    fn confirm(&self, device: &str, id: &str) -> bool {
+        lock(&self.entries)
+            .iter()
+            .any(|e| e.id == id && e.waiting && (e.device.is_empty() || e.device == device))
     }
 
     fn stale_ms(&self) -> Option<i64> {

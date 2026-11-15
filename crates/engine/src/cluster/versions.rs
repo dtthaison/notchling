@@ -27,6 +27,15 @@ pub struct Versions {
     pub logins: BTreeMap<versions::Tool, bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub host: Option<HostFacts>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bridge: Option<BridgeFacts>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct BridgeFacts {
+    pub port: u16,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fingerprint: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

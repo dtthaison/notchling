@@ -688,6 +688,9 @@ pub struct SessionMessageRequest {
     pub session_id: String,
     /// 1 to 20000 characters.
     pub text: String,
+    /// Additive: one value the phone makes up for each command it sends and repeats unchanged on every retry. A Standby that holds or relays the command uses it to tell a retry of the same command from a different command. Without it, the request id, op and arguments stand in. An older Mac ignores it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key: Option<String>,
 }
 
 /// Interrupts the running turn so the queued message runs next.
@@ -699,6 +702,9 @@ pub struct SessionSendNowRequest {
     pub op: String,
     /// The session's id.
     pub session_id: String,
+    /// Additive: one value the phone makes up for each command it sends and repeats unchanged on every retry. A Standby that holds or relays the command uses it to tell a retry of the same command from a different command. Without it, the request id, op and arguments stand in. An older Mac ignores it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key: Option<String>,
 }
 
 /// Starts a photo upload.
@@ -768,6 +774,9 @@ pub struct PromptAnswerRequest {
     /// A free-text answer to a single question, at most 500 characters.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
+    /// Additive: one value the phone makes up for each command it sends and repeats unchanged on every retry. A Standby that holds or relays the command uses it to tell a retry of the same command from a different command. Without it, the request id, op and arguments stand in. An older Mac ignores it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key: Option<String>,
 }
 
 /// Starts a Claude Code session in a folder inside the Mac's home.
@@ -785,6 +794,9 @@ pub struct SessionNewRequest {
     /// A model id from the `models` of sessions.list, such as claude-opus-5-5 (a [1m] or date suffix is accepted). Wins over `model` when both are sent; the Mac answers invalid for an id it doesn't list. An older Mac ignores it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model_id: Option<String>,
+    /// Additive: one value the phone makes up for each command it sends and repeats unchanged on every retry. A Standby that holds or relays the command uses it to tell a retry of the same command from a different command. Without it, the request id, op and arguments stand in. An older Mac ignores it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key: Option<String>,
 }
 
 /// A JPEG of a picture in the chat. The Mac answers with JSON, then a binary IMG1 frame.
@@ -1440,6 +1452,9 @@ pub struct HeldEntry {
     pub at: i64,
     /// True when it was held for over an hour: it is sent only after held.confirm.
     pub waiting: bool,
+    /// Additive: the key the phone sent with the command, when it sent one. held.cancel takes it in place of heldId.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key: Option<String>,
 }
 
 /// A held command that was dropped instead of sent, with the reason to show.
@@ -1461,15 +1476,19 @@ pub struct HeldListRequest {
     pub op: String,
 }
 
-/// Drops a held command. Paired phone only.
+/// Drops a held command, by heldId or by key. Paired phone only.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HeldCancelRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub id: Option<Value>,
     pub op: String,
-    /// The held command's id.
-    pub held_id: String,
+    /// The held command's id. Either this or key.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub held_id: Option<String>,
+    /// Additive: the key the phone sent with the command, as an alternative to heldId. Looked up among this phone's own held and sent commands.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key: Option<String>,
 }
 
 /// Sends a held command that waited over an hour, after the fresh ones. Paired phone only.
@@ -1530,11 +1549,15 @@ pub struct HeldCancelResponse {
 
 /// The answer.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct HeldCancelResponseData {
     pub cancelled: bool,
     /// True when the command was already sent, so there was nothing to cancel.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub delivered: Option<bool>,
+    /// True when the Mac is sending the command right now and the result isn't known yet, so it can't be cancelled.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub in_flight: Option<bool>,
 }
 
 /// The waiting command will be sent in order.

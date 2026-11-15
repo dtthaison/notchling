@@ -4,14 +4,14 @@ use notchling_engine::bridge::relay::{
     Call, Cancelled, HeldAct, HeldList, HeldNoticeView, HeldRef, HeldView, Relay, Routed,
 };
 use notchling_engine::bridge::BridgeFailure;
-use notchling_engine::cluster::held::{Held, HeldQueue, HeldTarget};
+use notchling_engine::cluster::held::{Found, Held, HeldQueue, HeldTarget};
 use notchling_engine::cluster::persist;
 use notchling_engine::cluster::wire::WireError;
 use notchling_engine::cluster::{NodeId, Qualified};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Condvar, Mutex, Weak};
 use std::time::Duration;
 
 pub const SEND_WAIT: Duration = Duration::from_secs(10);
@@ -40,6 +40,19 @@ pub struct Served {
     pub fingerprint: Option<String>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Limits {
+    pub total: usize,
+    pub device: usize,
+}
+
+impl Limits {
+    pub const DEFAULT: Limits = Limits {
+        total: 200,
+        device: 50,
+    };
+}
+
 pub type Clock = Arc<dyn Fn() -> i64 + Send + Sync>;
 pub type PromptFinder = Arc<dyn Fn(&str) -> Option<PendingPrompt> + Send + Sync>;
 pub type ModelFinder = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
@@ -53,13 +66,36 @@ pub struct Parts {
     pub rows: Arc<dyn Fn() -> Vec<String> + Send + Sync>,
     pub set: Arc<dyn SetView>,
     pub bridge: Arc<dyn Fn() -> Served + Send + Sync>,
+    pub limits: Limits,
+}
+
+#[derive(Default)]
+struct Work {
+    wanted: bool,
+    busy: bool,
+    stop: bool,
+}
+
+#[derive(Default)]
+struct Signal {
+    state: Mutex<Work>,
+    changed: Condvar,
+}
+
+impl Signal {
+    fn wake(&self) {
+        lock(&self.state).wanted = true;
+        self.changed.notify_all();
+    }
 }
 
 pub struct HeldRelay {
     parts: Parts,
     queue: Mutex<HeldQueue>,
+    flight: Mutex<Vec<Held>>,
     notices: Mutex<Vec<HeldNoticeView>>,
-    turn: Mutex<()>,
+    signal: Arc<Signal>,
+    flushing: AtomicBool,
     next: AtomicU64,
 }
 
@@ -131,15 +167,84 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
+fn fnv(text: &str) -> u64 {
+    text.bytes().fold(0xcbf2_9ce4_8422_2325, |hash, byte| {
+        (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3)
+    })
+}
+
+fn target_of(act: &HeldAct) -> HeldTarget {
+    match act.session_id() {
+        Some(session) => HeldTarget::Session(session.to_string()),
+        None => HeldTarget::Primary,
+    }
+}
+
+fn host_of(addr: &str) -> String {
+    if let Some(rest) = addr.strip_prefix('[') {
+        let host = rest.split(']').next().unwrap_or(rest);
+        return format!("[{host}]");
+    }
+    match addr.matches(':').count() {
+        0 => addr.to_string(),
+        1 => addr.split(':').next().unwrap_or(addr).to_string(),
+        _ => format!("[{addr}]"),
+    }
+}
+
 impl HeldRelay {
     pub fn new(parts: Parts) -> HeldRelay {
         let queue = persist::load_held(&parts.dir).unwrap_or_default();
         HeldRelay {
             parts,
             queue: Mutex::new(queue),
+            flight: Mutex::new(Vec::new()),
             notices: Mutex::new(Vec::new()),
-            turn: Mutex::new(()),
+            signal: Arc::new(Signal::default()),
+            flushing: AtomicBool::new(false),
             next: AtomicU64::new(0),
+        }
+    }
+
+    pub fn start(self: &Arc<Self>) {
+        let signal = self.signal.clone();
+        let relay: Weak<HeldRelay> = Arc::downgrade(self);
+        let _ = std::thread::Builder::new()
+            .name("held-flush".to_string())
+            .spawn(move || loop {
+                {
+                    let mut state = lock(&signal.state);
+                    while !state.wanted && !state.stop {
+                        state = signal
+                            .changed
+                            .wait(state)
+                            .unwrap_or_else(|e| e.into_inner());
+                    }
+                    if state.stop {
+                        return;
+                    }
+                    state.wanted = false;
+                    state.busy = true;
+                }
+                if let Some(relay) = relay.upgrade() {
+                    relay.flush();
+                }
+                lock(&signal.state).busy = false;
+                signal.changed.notify_all();
+            });
+    }
+
+    #[cfg(test)]
+    fn settle(&self) {
+        let until = std::time::Instant::now() + Duration::from_secs(10);
+        let mut state = lock(&self.signal.state);
+        while (state.wanted || state.busy) && std::time::Instant::now() < until {
+            state = self
+                .signal
+                .changed
+                .wait_timeout(state, Duration::from_millis(50))
+                .unwrap_or_else(|e| e.into_inner())
+                .0;
         }
     }
 
@@ -147,10 +252,16 @@ impl HeldRelay {
         (self.parts.clock)()
     }
 
-    fn save(&self, queue: &HeldQueue) {
-        if let Err(why) = persist::save_held(&self.parts.dir, queue) {
-            eprintln!("notchling: the held commands couldn't be saved: {why}");
-        }
+    fn new_id(&self) -> String {
+        format!(
+            "h{}-{}",
+            self.now(),
+            self.next.fetch_add(1, Ordering::SeqCst)
+        )
+    }
+
+    fn save(&self, queue: &HeldQueue) -> bool {
+        persist::save_held(&self.parts.dir, queue).is_ok()
     }
 
     pub fn carry(&self) {
@@ -162,33 +273,34 @@ impl HeldRelay {
     }
 
     pub fn flush(&self) {
-        if lock(&self.queue).list().is_empty() {
+        if self.flushing.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        self.flush_once();
+        self.flushing.store(false, Ordering::SeqCst);
+    }
+
+    fn flush_once(&self) {
+        if lock(&self.queue).count(None) == 0 {
             return;
         }
         let status = self.parts.wire.status();
         let Some(ctx) = Ctx::of(&status) else {
             return;
         };
-        let _turn = lock(&self.turn);
-        self.flush_locked(&ctx);
-    }
-
-    fn flush_locked(&self, ctx: &Ctx) {
         if !ctx.reachable() {
             return;
         }
-        let now = self.now();
         let due = {
             let mut queue = lock(&self.queue);
-            let due = queue.take_due(now);
-            if !due.is_empty() {
-                self.save(&queue);
+            let due = queue.take_due(self.now());
+            if due.is_empty() {
+                return;
             }
+            *lock(&self.flight) = due.clone();
+            self.save(&queue);
             due
         };
-        if due.is_empty() {
-            return;
-        }
         let rows = (self.parts.rows)();
         let mut back = Vec::new();
         let mut stopped = false;
@@ -197,29 +309,38 @@ impl HeldRelay {
                 back.push(held);
                 continue;
             }
-            match self.deliver(ctx, &rows, &held) {
-                Outcome::Sent => {}
+            match self.deliver(&ctx, &rows, &held) {
+                Outcome::Sent => self.landed(&held),
                 Outcome::Down => {
                     stopped = true;
                     back.push(held);
                 }
                 Outcome::Stay => back.push(held),
-                Outcome::Drop(reason) => self.notice(&held.id, reason, now),
+                Outcome::Drop(reason) => {
+                    self.notice(&held, reason);
+                    self.landed(&held);
+                }
             }
         }
         let mut queue = lock(&self.queue);
         if !back.is_empty() {
-            queue.keep_back(back, now);
+            queue.keep_back(back, self.now());
         }
+        lock(&self.flight).clear();
         self.save(&queue);
     }
 
-    fn notice(&self, id: &str, reason: String, at_ms: i64) {
+    fn landed(&self, held: &Held) {
+        lock(&self.flight).retain(|h| h.id != held.id);
+    }
+
+    fn notice(&self, held: &Held, reason: String) {
         let mut notices = lock(&self.notices);
         notices.push(HeldNoticeView {
-            id: id.to_string(),
+            id: held.id.clone(),
+            device: held.device.clone(),
             reason,
-            at_ms,
+            at_ms: self.now(),
         });
         let over = notices.len().saturating_sub(NOTICES_KEPT);
         notices.drain(..over);
@@ -229,14 +350,8 @@ impl HeldRelay {
         let Some(owner) = Qualified::parse(session) else {
             return Some(ctx.primary.clone());
         };
-        let at = |node: &NodeId| rows.contains(&format!("{}/{}", node.as_str(), owner.id));
-        if at(&ctx.primary) {
-            Some(ctx.primary.clone())
-        } else if owner.node != ctx.primary && at(&owner.node) {
-            None
-        } else {
-            Some(ctx.primary.clone())
-        }
+        rows.contains(&format!("{}/{}", ctx.primary.as_str(), owner.id))
+            .then(|| ctx.primary.clone())
     }
 
     fn request(&self, act: &HeldAct, target: &NodeId) -> Result<(&'static str, Value), ()> {
@@ -327,38 +442,79 @@ impl HeldRelay {
         }
     }
 
-    fn hold(&self, call: &Call<'_>) -> Routed {
+    fn ident(&self, call: &Call<'_>) -> String {
+        if let Some(key) = call.key {
+            return format!("k:{key}");
+        }
+        if call.request.is_empty() {
+            return format!("u:{}", self.new_id());
+        }
+        let body = format!("{}|{}", call.act.op(), call.act.args());
+        format!("r:{}:{:016x}", call.request, fnv(&body))
+    }
+
+    fn hold(&self, call: &Call<'_>, ident: &str, ctx: &Ctx) -> Routed {
         let now = self.now();
-        let act = call.act;
-        let target = match act.session_id() {
-            Some(session) => HeldTarget::Session(session.to_string()),
-            None => HeldTarget::Primary,
+        let mut queue = lock(&self.queue);
+        let (all, mine) = {
+            let flight = lock(&self.flight);
+            (
+                queue.count(None) + flight.len(),
+                queue.count(Some(call.device))
+                    + flight.iter().filter(|h| h.device == call.device).count(),
+            )
         };
+        let limits = self.parts.limits;
+        if all >= limits.total || mine >= limits.device {
+            return Routed::Fail(BridgeFailure::primary_unreachable(
+                &ctx.primary_name,
+                format!(
+                    "{} isn't reachable and too many commands are already waiting for it. Try again when it is back.",
+                    ctx.primary_name
+                ),
+            ));
+        }
         let held = Held {
-            id: format!("h{now}-{}", self.next.fetch_add(1, Ordering::SeqCst)),
-            op: act.op().to_string(),
-            args: act.args(),
-            target,
+            id: self.new_id(),
+            op: call.act.op().to_string(),
+            args: call.act.args(),
+            target: target_of(call.act),
             device: call.device.to_string(),
-            request: call.request.to_string(),
+            request: ident.to_string(),
             at_ms: now,
         };
-        let mut queue = lock(&self.queue);
         let id = queue.hold(held);
         let at_ms = queue
             .list()
             .iter()
             .find(|e| e.id == id)
             .map_or(now, |e| e.at_ms);
-        self.save(&queue);
+        if !self.save(&queue) {
+            queue.cancel(&id);
+            return Routed::Fail(BridgeFailure::primary_unreachable(
+                &ctx.primary_name,
+                format!(
+                    "{} isn't reachable and this machine couldn't keep your command to send later.",
+                    ctx.primary_name
+                ),
+            ));
+        }
+        drop(queue);
+        self.signal.wake();
         Routed::Held(HeldRef { id, at_ms })
     }
 
-    fn waiting_ahead(&self) -> bool {
+    fn blocked(&self, act: &HeldAct) -> bool {
         let now = self.now();
+        let target = target_of(act);
         let queue = lock(&self.queue);
+        let flight = lock(&self.flight);
         let waiting: Vec<String> = queue.waiting(now).into_iter().map(|e| e.id).collect();
-        queue.list().iter().any(|e| !waiting.contains(&e.id))
+        queue
+            .list()
+            .iter()
+            .chain(flight.iter())
+            .any(|e| e.target == target && !waiting.contains(&e.id))
     }
 
     fn owned_by_primary(call: &Call<'_>, ctx: &Ctx) -> bool {
@@ -370,6 +526,47 @@ impl HeldRelay {
 
     fn stale(&self, ctx: &Ctx) -> bool {
         ctx.standby && !ctx.primary_online
+    }
+
+    fn node_json(&self, ctx: &Ctx, served: &Served, member: &Value) -> Value {
+        let id = member["id"].as_str().unwrap_or_default();
+        let mine = id == ctx.me.as_str();
+        let facts = &member["versions"]["bridge"];
+        let port = if mine {
+            Some(served.port)
+        } else {
+            facts["port"].as_u64().and_then(|p| u16::try_from(p).ok())
+        };
+        let fingerprint = if mine {
+            served.fingerprint.clone()
+        } else {
+            facts["fingerprint"].as_str().map(str::to_string)
+        };
+        let addrs: Vec<String> = match port {
+            Some(port) => member["addrs"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .map(|a| format!("{}:{port}", host_of(a)))
+                .collect(),
+            None => Vec::new(),
+        };
+        json!({
+            "id": id,
+            "name": member["name"],
+            "addrs": addrs,
+            "fingerprint": fingerprint.unwrap_or_default(),
+            "canBeMaster": true,
+            "online": member["online"].as_bool().unwrap_or(false),
+        })
+    }
+}
+
+impl Drop for HeldRelay {
+    fn drop(&mut self) {
+        lock(&self.signal.state).stop = true;
+        self.signal.changed.notify_all();
     }
 }
 
@@ -385,34 +582,7 @@ impl Relay for HeldRelay {
                 m["canBeMaster"].as_bool() == Some(true)
                     && m.get("state").and_then(Value::as_str).unwrap_or("active") == "active"
             })
-            .map(|m| {
-                let id = m["id"].as_str().unwrap_or_default();
-                let fingerprint = match (&served.fingerprint, id == ctx.me.as_str()) {
-                    (Some(own), true) => own.clone(),
-                    _ => m["fingerprint"].as_str().unwrap_or_default().to_string(),
-                };
-                let addrs: Vec<String> = m["addrs"]
-                    .as_array()
-                    .into_iter()
-                    .flatten()
-                    .filter_map(Value::as_str)
-                    .map(|a| {
-                        if a.contains(':') && !a.starts_with('[') {
-                            format!("[{a}]:{}", served.port)
-                        } else {
-                            format!("{a}:{}", served.port)
-                        }
-                    })
-                    .collect();
-                json!({
-                    "id": id,
-                    "name": m["name"],
-                    "addrs": addrs,
-                    "fingerprint": fingerprint,
-                    "canBeMaster": true,
-                    "online": m["online"].as_bool().unwrap_or(false),
-                })
-            })
+            .map(|m| self.node_json(&ctx, &served, m))
             .collect();
         Some(json!({
             "primary": ctx.primary.as_str(),
@@ -426,20 +596,35 @@ impl Relay for HeldRelay {
         let Some(ctx) = Ctx::of(&status) else {
             return Routed::Local;
         };
-        let _turn = lock(&self.turn);
-        self.flush_locked(&ctx);
         if !ctx.standby || !Self::owned_by_primary(call, &ctx) {
             return Routed::Local;
         }
-        if !ctx.primary_online || self.waiting_ahead() {
-            return self.hold(call);
+        let ident = self.ident(call);
+        let found = lock(&self.queue).find(call.device, &ident);
+        match found {
+            Some(Found::Held(held)) => {
+                return Routed::Held(HeldRef {
+                    id: held.id,
+                    at_ms: held.at_ms,
+                })
+            }
+            Some(Found::Delivered(_)) => return Routed::Done(done(call.act)),
+            None => {}
+        }
+        if !ctx.primary_online || self.blocked(call.act) {
+            return self.hold(call, &ident, &ctx);
         }
         let Ok((op, args)) = self.request(call.act, &ctx.primary) else {
             return Routed::Fail(BridgeFailure::invalid("That can't be sent."));
         };
+        lock(&self.queue).note_sent(&self.new_id(), call.device, &ident);
+        let forget = || lock(&self.queue).forget_sent(call.device, &ident);
         match self.parts.wire.call(&ctx.primary, op, args, SEND_WAIT) {
             Ok(_) => Routed::Done(done(call.act)),
-            Err(e) if UNREACHABLE.contains(&e.code.as_str()) => self.hold(call),
+            Err(e) if UNREACHABLE.contains(&e.code.as_str()) => {
+                forget();
+                self.hold(call, &ident, &ctx)
+            }
             Err(e) if e.code == "timeout" => Routed::Fail(BridgeFailure::primary_unreachable(
                 &ctx.primary_name,
                 format!(
@@ -447,17 +632,23 @@ impl Relay for HeldRelay {
                     ctx.primary_name
                 ),
             )),
-            Err(e) => Routed::Fail(BridgeFailure::invalid(e.message)),
+            Err(e) => {
+                forget();
+                Routed::Fail(BridgeFailure::invalid(e.message))
+            }
         }
     }
 
-    fn list(&self) -> HeldList {
+    fn list(&self, device: &str) -> HeldList {
         let now = self.now();
         let queue = lock(&self.queue);
+        let flight = lock(&self.flight);
         let waiting: Vec<String> = queue.waiting(now).into_iter().map(|e| e.id).collect();
-        let entries = queue
-            .list()
-            .into_iter()
+        let entries = flight
+            .iter()
+            .cloned()
+            .chain(queue.list())
+            .filter(|held| held.device == device)
             .map(|held| {
                 let act = HeldAct::from_parts(&held.op, &held.args);
                 HeldView {
@@ -467,7 +658,9 @@ impl Relay for HeldRelay {
                         HeldTarget::Primary => None,
                     },
                     waiting: waiting.contains(&held.id),
+                    key: held.request.strip_prefix("k:").map(str::to_string),
                     id: held.id,
+                    device: held.device,
                     op: held.op,
                     at_ms: held.at_ms,
                 }
@@ -475,31 +668,66 @@ impl Relay for HeldRelay {
             .collect();
         HeldList {
             entries,
-            notices: lock(&self.notices).clone(),
+            notices: lock(&self.notices)
+                .iter()
+                .filter(|n| n.device == device)
+                .cloned()
+                .collect(),
         }
     }
 
-    fn cancel(&self, id: &str) -> Cancelled {
+    fn cancel(&self, device: &str, id: &str) -> Cancelled {
         let mut queue = lock(&self.queue);
-        if queue.was_delivered(id) {
-            return Cancelled::Delivered;
-        }
-        if queue.cancel(id) {
+        if queue.owns(id, device) {
+            queue.cancel(id);
             self.save(&queue);
             return Cancelled::Dropped;
+        }
+        let in_flight = lock(&self.flight)
+            .iter()
+            .any(|h| h.id == id && h.device == device);
+        if in_flight {
+            return Cancelled::InFlight;
+        }
+        if queue.delivered_to(id, device) {
+            return Cancelled::Delivered;
         }
         Cancelled::Unknown
     }
 
-    fn confirm(&self, id: &str) -> bool {
+    fn cancel_key(&self, device: &str, key: &str) -> Cancelled {
+        let ident = format!("k:{key}");
+        let mut queue = lock(&self.queue);
+        match queue.find(device, &ident) {
+            Some(Found::Held(held)) => {
+                queue.cancel(&held.id);
+                self.save(&queue);
+                Cancelled::Dropped
+            }
+            Some(Found::Delivered(id)) => {
+                let in_flight = lock(&self.flight).iter().any(|h| h.id == id);
+                if in_flight {
+                    Cancelled::InFlight
+                } else {
+                    Cancelled::Delivered
+                }
+            }
+            None => Cancelled::Unknown,
+        }
+    }
+
+    fn confirm(&self, device: &str, id: &str) -> bool {
         let confirmed = {
             let mut queue = lock(&self.queue);
-            let confirmed = queue.confirm(id);
-            self.save(&queue);
-            confirmed
+            let waiting = queue.owns(id, device) && queue.is_waiting(id, self.now());
+            if waiting {
+                queue.confirm(id);
+                self.save(&queue);
+            }
+            waiting
         };
         if confirmed {
-            self.flush();
+            self.signal.wake();
         }
         confirmed
     }
@@ -525,7 +753,9 @@ impl Relay for HeldRelay {
     }
 
     fn tick(&self) {
-        self.flush();
+        if lock(&self.queue).count(None) > 0 {
+            self.signal.wake();
+        }
     }
 }
 

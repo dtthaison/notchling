@@ -373,6 +373,16 @@ fn actions(run: &mut Run) {
         json!({ "cwd": project }),
         None,
     );
+    for keyed in ["SessionMessageRequest.key", "PromptAnswerRequest.key"] {
+        run.round_trip(&phone, keyed, none(), None);
+    }
+    run.round_trip(&connect(), "SessionSendNowRequest.key", none(), None);
+    run.round_trip(
+        &phone,
+        "SessionNewRequest.key",
+        json!({ "cwd": project }),
+        None,
+    );
     let started: Vec<Option<String>> = phone
         .rig
         .backend
@@ -382,7 +392,8 @@ fn actions(run: &mut Run) {
         [
             Some("opus".to_string()),
             None,
-            Some("claude-fable-5-2".to_string())
+            Some("claude-fable-5-2".to_string()),
+            Some("opus".to_string())
         ]
     );
 
@@ -614,6 +625,8 @@ fn held_entries() -> Vec<HeldView> {
     vec![
         HeldView {
             id: "held-1".into(),
+            key: Some("7f9c2d44-5b1e-4a3a-9d0e-2c6b8e1f4a77".into()),
+            device: String::new(),
             op: "session.message".into(),
             session_id: Some("0123456789abcdef/job-7".into()),
             summary: "Run the tests again".into(),
@@ -622,6 +635,8 @@ fn held_entries() -> Vec<HeldView> {
         },
         HeldView {
             id: "held-2".into(),
+            key: None,
+            device: String::new(),
             op: "session.new".into(),
             session_id: None,
             summary: "New session in /Users/example/src/app".into(),
@@ -694,6 +709,7 @@ fn relay(run: &mut Run) {
     *relay.entries.lock().expect("entries") = held_entries();
     *relay.notices.lock().expect("notices") = vec![HeldNoticeView {
         id: "held-0".into(),
+        device: String::new(),
         reason: "m5 closed that question before your answer arrived".into(),
         at_ms: 1_793_541_465_500,
     }];
@@ -724,6 +740,17 @@ fn relay(run: &mut Run) {
         "HeldCancelRequest",
         none(),
         Some("HeldCancelResponse.delivered"),
+    );
+    relay
+        .inflight_keys
+        .lock()
+        .expect("inflight")
+        .push("7f9c2d44-5b1e-4a3a-9d0e-2c6b8e1f4a77".into());
+    run.round_trip(
+        &phone,
+        "HeldCancelRequest.key",
+        none(),
+        Some("HeldCancelResponse.inFlight"),
     );
 
     relay.plan(Plan::Hold);

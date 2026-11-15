@@ -4,7 +4,7 @@ use crate::bridge_cluster::PhoneCluster;
 use crate::bridge_ops::BridgeOps;
 use crate::cluster_move::{Acts, LateLink, Link};
 use crate::cluster_node::wire_error;
-use crate::cluster_relay::{HeldRelay, Parts, SetView, Wire};
+use crate::cluster_relay::{HeldRelay, Limits, Parts, SetView, Wire};
 use notchling_engine::bridge::net::devices::Replica;
 use notchling_engine::cluster::main_sessions::MainSession;
 use notchling_engine::cluster::snapshot::plan::bridge_devices;
@@ -180,5 +180,6 @@ pub fn parts(env: RelayEnv) -> Parts {
             link: env.link,
         }),
         bridge: Arc::new(move || bridge.served()),
+        limits: Limits::DEFAULT,
     }
 }

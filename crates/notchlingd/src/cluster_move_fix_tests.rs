@@ -565,6 +565,7 @@ fn held_relay(dir: &std::path::Path) -> Arc<crate::cluster_relay::HeldRelay> {
                 port: 1,
                 fingerprint: None,
             }),
+            limits: crate::cluster_relay::Limits::DEFAULT,
         },
     ))
 }

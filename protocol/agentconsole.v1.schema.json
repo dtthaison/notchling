@@ -1335,6 +1335,10 @@
         "text": {
           "type": "string",
           "description": "1 to 20000 characters."
+        },
+        "key": {
+          "type": "string",
+          "description": "Additive: one value the phone makes up for each command it sends and repeats unchanged on every retry. A Standby that holds or relays the command uses it to tell a retry of the same command from a different command. Without it, the request id, op and arguments stand in. An older Mac ignores it."
         }
       },
       "required": [
@@ -1358,6 +1362,10 @@
         "sessionId": {
           "type": "string",
           "description": "The session's id."
+        },
+        "key": {
+          "type": "string",
+          "description": "Additive: one value the phone makes up for each command it sends and repeats unchanged on every retry. A Standby that holds or relays the command uses it to tell a retry of the same command from a different command. Without it, the request id, op and arguments stand in. An older Mac ignores it."
         }
       },
       "required": [
@@ -1515,6 +1523,10 @@
         "text": {
           "type": "string",
           "description": "A free-text answer to a single question, at most 500 characters."
+        },
+        "key": {
+          "type": "string",
+          "description": "Additive: one value the phone makes up for each command it sends and repeats unchanged on every retry. A Standby that holds or relays the command uses it to tell a retry of the same command from a different command. Without it, the request id, op and arguments stand in. An older Mac ignores it."
         }
       },
       "required": [
@@ -1551,6 +1563,10 @@
         "modelId": {
           "type": "string",
           "description": "A model id from the `models` of sessions.list, such as claude-opus-5-5 (a [1m] or date suffix is accepted). Wins over `model` when both are sent; the Mac answers invalid for an id it doesn't list. An older Mac ignores it."
+        },
+        "key": {
+          "type": "string",
+          "description": "Additive: one value the phone makes up for each command it sends and repeats unchanged on every retry. A Standby that holds or relays the command uses it to tell a retry of the same command from a different command. Without it, the request id, op and arguments stand in. An older Mac ignores it."
         }
       },
       "required": [
@@ -2861,6 +2877,10 @@
         "waiting": {
           "type": "boolean",
           "description": "True when it was held for over an hour: it is sent only after held.confirm."
+        },
+        "key": {
+          "type": "string",
+          "description": "Additive: the key the phone sent with the command, when it sent one. held.cancel takes it in place of heldId."
         }
       },
       "required": [
@@ -2915,7 +2935,7 @@
     },
     "HeldCancelRequest": {
       "type": "object",
-      "description": "Drops a held command. Paired phone only.",
+      "description": "Drops a held command, by heldId or by key. Paired phone only.",
       "properties": {
         "id": {
           "$ref": "#/$defs/Id"
@@ -2926,12 +2946,15 @@
         },
         "heldId": {
           "type": "string",
-          "description": "The held command's id."
+          "description": "The held command's id. Either this or key."
+        },
+        "key": {
+          "type": "string",
+          "description": "Additive: the key the phone sent with the command, as an alternative to heldId. Looked up among this phone's own held and sent commands."
         }
       },
       "required": [
-        "op",
-        "heldId"
+        "op"
       ],
       "additionalProperties": true
     },
@@ -3050,6 +3073,10 @@
             "delivered": {
               "type": "boolean",
               "description": "True when the command was already sent, so there was nothing to cancel."
+            },
+            "inFlight": {
+              "type": "boolean",
+              "description": "True when the Mac is sending the command right now and the result isn't known yet, so it can't be cancelled."
             }
           },
           "required": [

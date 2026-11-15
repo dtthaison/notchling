@@ -1,6 +1,6 @@
 use serde_json::json;
 
-use super::held::{Held, HeldQueue, HeldTarget, HELD_STALE_MS, MAX_DELIVERED};
+use super::held::{Found, Held, HeldQueue, HeldTarget, HELD_STALE_MS, MAX_DELIVERED};
 
 fn held(id: &str, device: &str, request: &str, at_ms: i64) -> Held {
     Held {
@@ -197,4 +197,74 @@ fn absorb_keeps_a_waiting_entry_confirmed() {
     assert_eq!(ids(&theirs.list()), ["old"]);
     let now = HELD_STALE_MS + 1;
     assert!(theirs.waiting(now).is_empty());
+}
+
+#[test]
+fn find_answers_from_the_held_and_the_delivered() {
+    let mut queue = HeldQueue::default();
+    queue.hold(held("a", "d1", "k:one", 10));
+    queue.hold(held("b", "d1", "k:two", 20));
+    assert!(matches!(queue.find("d1", "k:one"), Some(Found::Held(h)) if h.id == "a"));
+    assert_eq!(
+        queue.find("d2", "k:one"),
+        None,
+        "another phone's key is another command"
+    );
+    let due = queue.take_due(30);
+    assert_eq!(ids(&due), ["a", "b"]);
+    assert_eq!(
+        queue.find("d1", "k:one"),
+        Some(Found::Delivered("a".to_string()))
+    );
+    assert_eq!(queue.find("d1", "k:nine"), None);
+}
+
+#[test]
+fn a_command_sent_straight_is_remembered_for_its_retry() {
+    let mut queue = HeldQueue::default();
+    queue.note_sent("x1", "d1", "k:one");
+    queue.note_sent("x1", "d1", "k:one");
+    assert_eq!(
+        queue.find("d1", "k:one"),
+        Some(Found::Delivered("x1".to_string()))
+    );
+    assert!(queue.was_delivered("x1"));
+    for n in 0..MAX_DELIVERED + 5 {
+        queue.note_sent(&format!("y{n}"), "d1", &format!("k:{n}"));
+    }
+    assert_eq!(queue.find("d1", "k:one"), None, "the record is bounded");
+}
+
+#[test]
+fn counts_and_waiting_are_read_without_changing_anything() {
+    let mut queue = HeldQueue::default();
+    queue.hold(held("a", "d1", "r1", 10));
+    queue.hold(held("b", "d2", "r1", 20));
+    queue.hold(held("c", "d1", "r2", 30));
+    assert_eq!(queue.count(None), 3);
+    assert_eq!(queue.count(Some("d1")), 2);
+    assert!(!queue.is_waiting("a", 10 + HELD_STALE_MS));
+    assert!(queue.is_waiting("a", 11 + HELD_STALE_MS));
+    assert!(!queue.is_waiting("zzz", 11 + HELD_STALE_MS));
+    queue.confirm("a");
+    assert!(
+        !queue.is_waiting("a", 11 + HELD_STALE_MS),
+        "confirmed is no longer waiting"
+    );
+}
+
+#[test]
+fn ownership_and_forgetting_are_per_phone() {
+    let mut queue = HeldQueue::default();
+    queue.hold(held("a", "d1", "k:one", 10));
+    assert!(queue.owns("a", "d1"));
+    assert!(!queue.owns("a", "d2"));
+    queue.note_sent("x", "d1", "k:two");
+    assert!(queue.delivered_to("x", "d1"));
+    assert!(!queue.delivered_to("x", "d2"));
+    queue.forget_sent("d2", "k:two");
+    assert!(queue.delivered_to("x", "d1"));
+    queue.forget_sent("d1", "k:two");
+    assert!(!queue.delivered_to("x", "d1"));
+    assert_eq!(queue.find("d1", "k:two"), None);
 }

@@ -1667,6 +1667,7 @@ class SessionMessageRequest {
     this.op = 'session.message',
     required this.sessionId,
     required this.text,
+    this.key,
   });
 
   factory SessionMessageRequest.fromJson(JsonMap json) => SessionMessageRequest(
@@ -1674,6 +1675,7 @@ class SessionMessageRequest {
     op: _need(json, 'op', _asString),
     sessionId: _need(json, 'sessionId', _asString),
     text: _need(json, 'text', _asString),
+    key: _maybe(json, 'key', _asString),
   );
 
   JsonMap toJson() => <String, Object?>{
@@ -1681,6 +1683,7 @@ class SessionMessageRequest {
     'op': op,
     'sessionId': sessionId,
     'text': text,
+    if (key != null) 'key': key,
   };
 
   final Object? id;
@@ -1691,6 +1694,9 @@ class SessionMessageRequest {
 
   /// 1 to 20000 characters.
   final String text;
+
+  /// Additive: one value the phone makes up for each command it sends and repeats unchanged on every retry. A Standby that holds or relays the command uses it to tell a retry of the same command from a different command. Without it, the request id, op and arguments stand in. An older Mac ignores it.
+  final String? key;
 }
 
 /// Interrupts the running turn so the queued message runs next.
@@ -1699,18 +1705,21 @@ class SessionSendNowRequest {
     this.id,
     this.op = 'session.sendNow',
     required this.sessionId,
+    this.key,
   });
 
   factory SessionSendNowRequest.fromJson(JsonMap json) => SessionSendNowRequest(
     id: json['id'],
     op: _need(json, 'op', _asString),
     sessionId: _need(json, 'sessionId', _asString),
+    key: _maybe(json, 'key', _asString),
   );
 
   JsonMap toJson() => <String, Object?>{
     if (id != null) 'id': id,
     'op': op,
     'sessionId': sessionId,
+    if (key != null) 'key': key,
   };
 
   final Object? id;
@@ -1718,6 +1727,9 @@ class SessionSendNowRequest {
 
   /// The session's id.
   final String sessionId;
+
+  /// Additive: one value the phone makes up for each command it sends and repeats unchanged on every retry. A Standby that holds or relays the command uses it to tell a retry of the same command from a different command. Without it, the request id, op and arguments stand in. An older Mac ignores it.
+  final String? key;
 }
 
 /// Starts a photo upload.
@@ -1855,6 +1867,7 @@ class PromptAnswerRequest {
     this.allow,
     this.choice,
     this.text,
+    this.key,
   });
 
   factory PromptAnswerRequest.fromJson(JsonMap json) => PromptAnswerRequest(
@@ -1864,6 +1877,7 @@ class PromptAnswerRequest {
     allow: _maybe(json, 'allow', _asBool),
     choice: json['choice'],
     text: _maybe(json, 'text', _asString),
+    key: _maybe(json, 'key', _asString),
   );
 
   JsonMap toJson() => <String, Object?>{
@@ -1873,6 +1887,7 @@ class PromptAnswerRequest {
     if (allow != null) 'allow': allow,
     if (choice != null) 'choice': choice,
     if (text != null) 'text': text,
+    if (key != null) 'key': key,
   };
 
   final Object? id;
@@ -1887,6 +1902,9 @@ class PromptAnswerRequest {
 
   /// A free-text answer to a single question, at most 500 characters.
   final String? text;
+
+  /// Additive: one value the phone makes up for each command it sends and repeats unchanged on every retry. A Standby that holds or relays the command uses it to tell a retry of the same command from a different command. Without it, the request id, op and arguments stand in. An older Mac ignores it.
+  final String? key;
 }
 
 /// Starts a Claude Code session in a folder inside the Mac's home.
@@ -1897,6 +1915,7 @@ class SessionNewRequest {
     required this.cwd,
     this.model,
     this.modelId,
+    this.key,
   });
 
   factory SessionNewRequest.fromJson(JsonMap json) => SessionNewRequest(
@@ -1905,6 +1924,7 @@ class SessionNewRequest {
     cwd: _need(json, 'cwd', _asString),
     model: _maybe(json, 'model', _asString),
     modelId: _maybe(json, 'modelId', _asString),
+    key: _maybe(json, 'key', _asString),
   );
 
   JsonMap toJson() => <String, Object?>{
@@ -1913,6 +1933,7 @@ class SessionNewRequest {
     'cwd': cwd,
     if (model != null) 'model': model,
     if (modelId != null) 'modelId': modelId,
+    if (key != null) 'key': key,
   };
 
   final Object? id;
@@ -1926,6 +1947,9 @@ class SessionNewRequest {
 
   /// A model id from the `models` of sessions.list, such as claude-opus-5-5 (a [1m] or date suffix is accepted). Wins over `model` when both are sent; the Mac answers invalid for an id it doesn't list. An older Mac ignores it.
   final String? modelId;
+
+  /// Additive: one value the phone makes up for each command it sends and repeats unchanged on every retry. A Standby that holds or relays the command uses it to tell a retry of the same command from a different command. Without it, the request id, op and arguments stand in. An older Mac ignores it.
+  final String? key;
 }
 
 /// A JPEG of a picture in the chat. The Mac answers with JSON, then a binary IMG1 frame.
@@ -3591,6 +3615,7 @@ class HeldEntry {
     required this.summary,
     required this.at,
     required this.waiting,
+    this.key,
   });
 
   factory HeldEntry.fromJson(JsonMap json) => HeldEntry(
@@ -3600,6 +3625,7 @@ class HeldEntry {
     summary: _need(json, 'summary', _asString),
     at: _need(json, 'at', _asInt),
     waiting: _need(json, 'waiting', _asBool),
+    key: _maybe(json, 'key', _asString),
   );
 
   JsonMap toJson() => <String, Object?>{
@@ -3609,6 +3635,7 @@ class HeldEntry {
     'summary': summary,
     'at': at,
     'waiting': waiting,
+    if (key != null) 'key': key,
   };
 
   final String id;
@@ -3627,6 +3654,9 @@ class HeldEntry {
 
   /// True when it was held for over an hour: it is sent only after held.confirm.
   final bool waiting;
+
+  /// Additive: the key the phone sent with the command, when it sent one. held.cancel takes it in place of heldId.
+  final String? key;
 }
 
 /// A held command that was dropped instead of sent, with the reason to show.
@@ -3680,31 +3710,37 @@ class HeldListRequest {
   final String op;
 }
 
-/// Drops a held command. Paired phone only.
+/// Drops a held command, by heldId or by key. Paired phone only.
 class HeldCancelRequest {
   const HeldCancelRequest({
     this.id,
     this.op = 'held.cancel',
-    required this.heldId,
+    this.heldId,
+    this.key,
   });
 
   factory HeldCancelRequest.fromJson(JsonMap json) => HeldCancelRequest(
     id: json['id'],
     op: _need(json, 'op', _asString),
-    heldId: _need(json, 'heldId', _asString),
+    heldId: _maybe(json, 'heldId', _asString),
+    key: _maybe(json, 'key', _asString),
   );
 
   JsonMap toJson() => <String, Object?>{
     if (id != null) 'id': id,
     'op': op,
-    'heldId': heldId,
+    if (heldId != null) 'heldId': heldId,
+    if (key != null) 'key': key,
   };
 
   final Object? id;
   final String op;
 
-  /// The held command's id.
-  final String heldId;
+  /// The held command's id. Either this or key.
+  final String? heldId;
+
+  /// Additive: the key the phone sent with the command, as an alternative to heldId. Looked up among this phone's own held and sent commands.
+  final String? key;
 }
 
 /// Sends a held command that waited over an hour, after the fresh ones. Paired phone only.
@@ -3860,22 +3896,28 @@ class HeldCancelResponseData {
   const HeldCancelResponseData({
     required this.cancelled,
     this.delivered,
+    this.inFlight,
   });
 
   factory HeldCancelResponseData.fromJson(JsonMap json) => HeldCancelResponseData(
     cancelled: _need(json, 'cancelled', _asBool),
     delivered: _maybe(json, 'delivered', _asBool),
+    inFlight: _maybe(json, 'inFlight', _asBool),
   );
 
   JsonMap toJson() => <String, Object?>{
     'cancelled': cancelled,
     if (delivered != null) 'delivered': delivered,
+    if (inFlight != null) 'inFlight': inFlight,
   };
 
   final bool cancelled;
 
   /// True when the command was already sent, so there was nothing to cancel.
   final bool? delivered;
+
+  /// True when the Mac is sending the command right now and the result isn't known yet, so it can't be cancelled.
+  final bool? inFlight;
 }
 
 /// The waiting command will be sent in order.
