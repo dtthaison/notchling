@@ -7,7 +7,7 @@ use notchling_engine::cluster::join::decode_token;
 use notchling_engine::cluster::{Desired, LocalCmd, NodeId};
 use notchling_events::kinds::security::SwitchCause;
 use notchling_events::spec::Outcome;
-use notchling_local_api::{ops, topics, ApiError, Caller, ErrorCode, OpSpec, Tier};
+use notchling_local_api::{ops, topics, ApiError, Caller, ClientKind, ErrorCode, OpSpec, Tier};
 use serde_json::{json, Value};
 use std::sync::Arc;
 
@@ -114,6 +114,19 @@ impl ClusterOps {
         node.join(token, headless)
     }
 
+    fn join_token(&self, caller: &Caller, args: &Value) -> Result<Value, ApiError> {
+        let node = self.node()?;
+        if caller.client != ClientKind::Node {
+            return node.join_token();
+        }
+        let usage = "cluster.join.token from another node names who asked: {\"minter\": id}";
+        let minter = text(args, "minter", usage)
+            .ok()
+            .and_then(NodeId::parse)
+            .ok_or_else(|| bad(usage))?;
+        node.join_token_for(minter)
+    }
+
     fn failover_set(&self, args: &Value) -> Result<Value, ApiError> {
         let usage = "cluster.failover.set takes {\"value\": \"off\", \"30m\" or \"1h\"}";
         let failover = args
@@ -182,7 +195,7 @@ impl OpGroup for ClusterOps {
                 let name = text(args, "name", "cluster.create takes {\"name\": text}")?;
                 self.node()?.create(name.trim())
             }
-            ops::CLUSTER_JOIN_TOKEN => self.node()?.join_token(),
+            ops::CLUSTER_JOIN_TOKEN => self.join_token(caller, args),
             ops::CLUSTER_JOIN => self.join(caller, args),
             ops::CLUSTER_MEMBER_SET => self.member_set(args),
             ops::CLUSTER_REMOVE => {

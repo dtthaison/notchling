@@ -35,6 +35,11 @@ pub fn join_item(id: &str, ask: &JoinAsk, created_ms: i64, wait: Duration) -> It
         detail.push(addr);
     }
     detail.push(ask.node.to_string());
+    let maker = match plain(&ask.minter_name) {
+        name if name.is_empty() => ask.minter.to_string(),
+        name => name,
+    };
+    detail.push(format!("Token made by {maker}"));
     if ask.can_be_master {
         detail.push("Can Be Master".to_string());
     }

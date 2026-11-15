@@ -65,6 +65,7 @@ pub enum LocalCmd {
     },
     IssueToken {
         secret: String,
+        minter: NodeId,
     },
     Approve {
         node: NodeId,
@@ -161,6 +162,8 @@ pub enum Effect {
         addr: Option<String>,
         can_be_master: bool,
         headless: bool,
+        minter: NodeId,
+        minter_name: String,
     },
     SteppedDown {
         term: Term,
@@ -527,6 +530,8 @@ mod core_tests_flood;
 mod core_tests_headless;
 #[cfg(test)]
 mod core_tests_jobs;
+#[cfg(test)]
+mod core_tests_minter;
 #[cfg(test)]
 mod core_tests_refused;
 #[cfg(test)]

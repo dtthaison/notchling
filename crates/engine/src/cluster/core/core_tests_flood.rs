@@ -127,6 +127,7 @@ fn only_the_newest_open_tokens_can_still_join() {
             &m5,
             LocalCmd::IssueToken {
                 secret: format!("t{i}"),
+                minter: m5.clone(),
             },
         );
     }

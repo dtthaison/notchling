@@ -189,6 +189,12 @@ impl NodeCore {
             "cluster.failover.set" => self.native_failover_set(target, &args, out),
             "node.versions" => self.native_versions(target, &args, out),
             _ => {
+                let args = match &target {
+                    Target::Peer(minter, _) if op == "cluster.join.token" => {
+                        json!({"minter": minter})
+                    }
+                    _ => args,
+                };
                 let call = self.next_local;
                 self.next_local += 1;
                 self.local_runs.insert(call, Then::Reply(target));

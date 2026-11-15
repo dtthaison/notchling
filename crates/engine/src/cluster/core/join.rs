@@ -78,6 +78,14 @@ impl NodeCore {
         self.finish(target, result, out);
     }
 
+    fn may_hold_primary_role(&self, id: &NodeId) -> bool {
+        self.state.as_ref().is_some_and(|s| {
+            s.members.get(id).is_some_and(|m| {
+                m.state == MemberState::Active && (m.can_be_master || s.home == m.id)
+            })
+        })
+    }
+
     fn send_join_ok(&mut self, to: &NodeId, out: &mut Vec<Effect>) {
         let Some(state) = &self.state else {
             return;
@@ -134,10 +142,10 @@ impl NodeCore {
             }
             _ => {}
         }
-        if !self.tokens.take(&secret, self.wall_ms) {
+        let Some(minter) = self.tokens.take(&secret, self.wall_ms) else {
             self.refuse(&from, "bad token", true, out);
             return;
-        }
+        };
         if let Compat::Refuse(text) = compat(&self.versions, &versions, &name, Purpose::Link) {
             self.refuse(&from, &text, true, out);
             return;
@@ -172,6 +180,8 @@ impl NodeCore {
             self.refuse(&from, "refused", true, out);
             return;
         }
+        let can_be_master =
+            can_be_master_default(&versions.os) && self.may_hold_primary_role(&minter);
         out.push(Effect::JoinRequest {
             item: item.clone(),
             node: from.clone(),
@@ -179,8 +189,10 @@ impl NodeCore {
             os: versions.os.clone(),
             arch: versions.arch.clone(),
             addr: addrs.first().cloned(),
-            can_be_master: can_be_master_default(&versions.os),
+            can_be_master,
             headless,
+            minter_name: self.member_name(&minter),
+            minter,
         });
         self.send(&from, Msg::JoinPending { item }, out);
     }

@@ -276,7 +276,7 @@ impl Driver {
             }
             In::Local(cmd, answer) => self.local_cmd(cmd, answer),
             In::Create(name, answer) => self.create(name, answer),
-            In::Token(answer) => self.token(answer),
+            In::Token(minter, answer) => self.token(minter, answer),
             In::Join(token, headless, answer) => self.join(&token, headless, answer),
             In::Core(input) => self.step(input),
             In::Link(on) => self.set_link(on),
@@ -354,7 +354,7 @@ impl Driver {
         self.local_cmd(LocalCmd::Create { id, name, me }, Some(answer));
     }
 
-    fn token(&mut self, answer: Answer) {
+    fn token(&mut self, minter: Option<NodeId>, answer: Answer) {
         let Some(state) = self.core.state() else {
             let _ = answer.send(Err(WireError::new(
                 "no_cluster",
@@ -362,6 +362,13 @@ impl Driver {
             )));
             return;
         };
+        if !self.core.is_home() && minter.is_some() {
+            let _ = answer.send(Err(WireError::new(
+                "forbidden",
+                "only the primary makes join tokens",
+            )));
+            return;
+        }
         if !self.core.is_home() {
             let (home, origin) = (
                 state.home.clone(),
@@ -397,7 +404,10 @@ impl Driver {
         let id = self.reply_id(Reply::Token(answer, token));
         self.step(Input::Local {
             id,
-            cmd: LocalCmd::IssueToken { secret },
+            cmd: LocalCmd::IssueToken {
+                secret,
+                minter: minter.unwrap_or_else(|| self.me.clone()),
+            },
         });
     }
 
@@ -516,6 +526,8 @@ impl Driver {
                 addr,
                 can_be_master,
                 headless,
+                minter,
+                minter_name,
             } => {
                 let ask = JoinAsk {
                     item,
@@ -526,6 +538,8 @@ impl Driver {
                     addr,
                     can_be_master,
                     headless,
+                    minter,
+                    minter_name,
                 };
                 let submit = Submit::new(self.tx.clone());
                 let hooks = self.hooks.clone();

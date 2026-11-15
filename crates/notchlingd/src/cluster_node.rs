@@ -39,6 +39,8 @@ pub struct JoinAsk {
     pub addr: Option<String>,
     pub can_be_master: bool,
     pub headless: bool,
+    pub minter: NodeId,
+    pub minter_name: String,
 }
 
 pub trait Hooks: Send + Sync {
@@ -89,7 +91,7 @@ pub(crate) enum In {
     DialDone(NodeId),
     Local(LocalCmd, Option<Answer>),
     Create(String, Answer),
-    Token(Answer),
+    Token(Option<NodeId>, Answer),
     Join(String, bool, Answer),
     Core(Input),
     Link(bool),
@@ -328,7 +330,11 @@ impl ClusterNode {
     }
 
     pub fn join_token(&self) -> Result<Value, ApiError> {
-        self.wait(In::Token)
+        self.wait(|answer| In::Token(None, answer))
+    }
+
+    pub fn join_token_for(&self, minter: NodeId) -> Result<Value, ApiError> {
+        self.wait(|answer| In::Token(Some(minter), answer))
     }
 
     pub fn join(&self, token: &str, headless: bool) -> Result<Value, ApiError> {

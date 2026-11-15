@@ -62,12 +62,14 @@ impl NodeCore {
                 };
                 self.finish(target, result, out);
             }
-            LocalCmd::IssueToken { secret } => {
-                let result = if self.is_home() {
-                    self.tokens.issue(secret, self.wall_ms);
-                    Ok(json!({}))
-                } else {
+            LocalCmd::IssueToken { secret, minter } => {
+                let result = if !self.is_home() {
                     Err(refusal("forbidden", "only the primary makes join tokens"))
+                } else if !self.may_mint(&minter) {
+                    Err(refusal("forbidden", "only a member makes join tokens"))
+                } else {
+                    self.tokens.issue(secret, minter, self.wall_ms);
+                    Ok(json!({}))
                 };
                 self.finish(target, result, out);
             }
@@ -340,6 +342,15 @@ impl NodeCore {
         self.dials.remove(node);
         self.push_members(None, out);
         Ok(json!({}))
+    }
+
+    fn may_mint(&self, minter: &NodeId) -> bool {
+        *minter == self.me
+            || self
+                .state
+                .as_ref()
+                .and_then(|s| s.members.get(minter))
+                .is_some_and(|m| m.state == MemberState::Active)
     }
 
     pub(super) fn shared_members(&self) -> Vec<Member> {

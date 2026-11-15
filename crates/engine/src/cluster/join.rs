@@ -42,35 +42,36 @@ pub fn decode_token(s: &str) -> Result<JoinToken, String> {
 
 #[derive(Clone, Debug, Default)]
 pub struct Tokens {
-    issued: BTreeMap<String, i64>,
+    issued: BTreeMap<String, (i64, NodeId)>,
 }
 
 impl Tokens {
-    pub fn issue(&mut self, secret: String, now_ms: i64) {
-        self.issued.retain(|_, at| now_ms - *at <= TOKEN_TTL_MS);
+    pub fn issue(&mut self, secret: String, minter: NodeId, now_ms: i64) {
+        self.issued
+            .retain(|_, (at, _)| now_ms - *at <= TOKEN_TTL_MS);
         self.issued.remove(&secret);
         while self.issued.len() >= MAX_OPEN_TOKENS {
             let oldest = self
                 .issued
                 .iter()
-                .min_by(|a, b| a.1.cmp(b.1).then_with(|| a.0.cmp(b.0)))
+                .min_by(|a, b| a.1 .0.cmp(&b.1 .0).then_with(|| a.0.cmp(b.0)))
                 .map(|(secret, _)| secret.clone());
             match oldest {
                 Some(oldest) => self.issued.remove(&oldest),
                 None => break,
             };
         }
-        self.issued.insert(secret, now_ms);
+        self.issued.insert(secret, (now_ms, minter));
     }
 
     pub fn has_open(&self, now_ms: i64) -> bool {
-        self.issued.values().any(|at| now_ms - *at <= TOKEN_TTL_MS)
+        self.issued
+            .values()
+            .any(|(at, _)| now_ms - *at <= TOKEN_TTL_MS)
     }
 
-    pub fn take(&mut self, secret: &str, now_ms: i64) -> bool {
-        match self.issued.remove(secret) {
-            Some(at) => now_ms - at <= TOKEN_TTL_MS,
-            None => false,
-        }
+    pub fn take(&mut self, secret: &str, now_ms: i64) -> Option<NodeId> {
+        let (at, minter) = self.issued.remove(secret)?;
+        (now_ms - at <= TOKEN_TTL_MS).then_some(minter)
     }
 }

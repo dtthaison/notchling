@@ -274,7 +274,7 @@ from the app in this run, or `cluster.join` (below), or a restart of a headless 
 | --- | --- | --- | --- |
 | `cluster.status` | agent | `{}` | `{cluster: {id, name, term, home, vault} \| null, me, members: [Member], link, listening, tailscale, error}` |
 | `cluster.create` | app | `{name}` | the new cluster's state; this node is its home (primary) and reference |
-| `cluster.join.token` | agent | `{}` | `{token: "nlj1.…"}`, one use, 10 minutes; a non-home member asks its home |
+| `cluster.join.token` | agent | `{}` | `{token: "nlj1.…"}`, one use, 10 minutes, at most 16 open at once (the oldest is dropped); a non-home member asks its home, which records that member as the maker |
 | `cluster.join` | agent | `{token}` | `{state: "pending" \| "joined"}` |
 | `cluster.member.set` | app | `{node, canBeMaster?, client?, reference?, acceptsDelegation?, headless?, desired?}` | the member as stored |
 | `cluster.remove` | app | `{node}` | the member as stored, `state: "removed"` |
@@ -298,6 +298,8 @@ from the app in this run, or `cluster.join` (below), or a restart of a headless 
   `accounts` never follow. The home's app clears the mark with `cluster.member.set {node, headless: false}`.
 - A join on the home raises the inbox item `node-join:<node>:<ms>`, kind `node_join`, actions Add (`allow`)
   and Deny; only `mac` or `phone` may allow it. Unanswered for 10 minutes it expires and the joiner is denied.
+  The detail names who made the token ("Token made by <name>"), and Can Be Master defaults on for a Mac only
+  when the maker is the primary or a member that has Can Be Master on.
 - `notchling cluster join --token-stdin` reads the token from stdin only; a token among the arguments is
   refused.
 - Status carries `failover: {value, armed, target}`: the primary's journaled value, whether the target has granted a lease at the

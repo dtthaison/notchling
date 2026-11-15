@@ -210,6 +210,7 @@ fn join_token_from_client_node_is_minted_by_home() {
     assert_eq!(calls[0].0, "cluster.join.token");
     assert_eq!(calls[0].2.node, w.id());
     assert_eq!(calls[0].2.tier, OriginTier::Agent);
+    assert_eq!(calls[0].1, json!({"minter": w.id()}));
     let minted = token(&h.node);
     assert_eq!(decode_token(&minted).unwrap().home, h.node.id());
     let late = joiner(&net, "jbox6b", "linux");
@@ -247,10 +248,15 @@ fn the_item_names_the_node_plainly() {
         addr: Some("100.64.0.9".to_string()),
         can_be_master: false,
         headless: false,
+        minter: NodeId::parse("fedcba9876543210").unwrap(),
+        minter_name: "ma\u{1b}[0m\nker".to_string(),
     };
     let item = join_item("x", &ask, 1_000, Duration::from_secs(600));
     assert_eq!(item.title, "Add evil[31mname to the cluster");
-    assert_eq!(item.detail, "linux x86_64 · 100.64.0.9 · 0123456789abcdef");
+    assert_eq!(
+        item.detail,
+        "linux x86_64 · 100.64.0.9 · 0123456789abcdef · Token made by ma[0mker"
+    );
     assert_eq!(item.expires_ms, Some(601_000));
     assert_eq!(
         serde_json::to_value(&item.actions).unwrap(),
@@ -260,4 +266,84 @@ fn the_item_names_the_node_plainly() {
         ])
     );
     assert_eq!(serde_json::to_value(item.kind).unwrap(), "node_join");
+}
+
+#[test]
+fn an_unnamed_maker_shows_as_its_node_id() {
+    let ask = JoinAsk {
+        item: "node-join:0123456789abcdef".to_string(),
+        node: NodeId::parse("0123456789abcdef").unwrap(),
+        name: "box".to_string(),
+        os: "linux".to_string(),
+        arch: "x86_64".to_string(),
+        addr: None,
+        can_be_master: false,
+        headless: false,
+        minter: NodeId::parse("fedcba9876543210").unwrap(),
+        minter_name: "\u{1b}".to_string(),
+    };
+    let item = join_item("x", &ask, 1_000, Duration::from_secs(600));
+    assert!(
+        item.detail.ends_with("Token made by fedcba9876543210"),
+        "{}",
+        item.detail
+    );
+}
+
+fn item_for(h: &Home, who: &TestNode) -> Item {
+    let prefix = format!("node-join:{}:", who.id());
+    eventually("the join item", || {
+        joins(h).iter().any(|i| i.id.starts_with(&prefix))
+    });
+    joins(h)
+        .into_iter()
+        .find(|i| i.id.starts_with(&prefix))
+        .unwrap()
+}
+
+#[test]
+fn the_prompt_names_who_made_the_token_and_a_workers_token_adds_no_can_be_master_default() {
+    let net = MemNet::new();
+    let h = home(&net, "jhomeM1", JOIN_WAIT);
+    let w = joiner(&net, "jboxM1", "linux");
+    w.node.join(&token(&h.node), false).unwrap();
+    let item = asked(&h);
+    h.inbox.decide(&item.id, ActionId::Allow, "mac").unwrap();
+    eventually("the worker is active", || {
+        online(&h.node.node.status(), &w.id()) && online(&w.node.status(), &h.node.id())
+    });
+
+    let mac = joiner(&net, "jmacM1", "macos");
+    mac.node.join(&token(&h.node), false).unwrap();
+    let own = item_for(&h, &mac);
+    assert!(own.detail.contains("Can Be Master"), "{}", own.detail);
+    assert!(
+        own.detail.contains("Token made by jhomeM1"),
+        "{}",
+        own.detail
+    );
+
+    let other = joiner(&net, "jmacM2", "macos");
+    let minted = h.node.node.join_token_for(w.id()).unwrap()["token"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    other.node.join(&minted, false).unwrap();
+    let theirs = item_for(&h, &other);
+    assert!(
+        !theirs.detail.contains("Can Be Master"),
+        "{}",
+        theirs.detail
+    );
+    assert!(
+        theirs.detail.contains("Token made by jboxM1"),
+        "{}",
+        theirs.detail
+    );
+    h.inbox.decide(&theirs.id, ActionId::Allow, "mac").unwrap();
+    eventually("the node is active", || {
+        online(&h.node.node.status(), &other.id())
+    });
+    let status = h.node.node.status();
+    assert_eq!(member(&status, &other.id()).unwrap()["canBeMaster"], false);
 }
