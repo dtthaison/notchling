@@ -2,6 +2,7 @@ use crate::acting_ops::Room;
 use crate::cluster_blobs::Blobs;
 use crate::cluster_dispatch::{DispatchCalls, DispatchOps, NodeReporter};
 use crate::cluster_dispatch_delegate::RealDelegate;
+use crate::cluster_failover_setting::{FailoverSink, KeyMirror, NodeSink};
 use crate::cluster_forward::{Forward, NodeForward};
 use crate::cluster_join::{JoinAsker, JOIN_WAIT};
 use crate::cluster_mirror::{FollowOps, Mirror, OnCap, TailSource, MIRROR_CAP, MIRROR_DIR};
@@ -24,6 +25,7 @@ use crate::switches::SwitchFlag;
 use crate::versions_ops::VersionsOps;
 use notchling_cluster_net::{load_or_make, Pins, TcpTls, PORT};
 use notchling_engine::bridge::net::bridge::host_name;
+use notchling_engine::cluster::failover::Failover;
 use notchling_engine::cluster::wire::{Origin, OriginTier};
 use notchling_engine::cluster::{Desired, NodeId};
 use notchling_engine::control::{Launcher, RealLauncher};
@@ -134,6 +136,7 @@ pub struct ClusterHooks {
     pub switches: Arc<HeadlessSwitches>,
     pub remote: Arc<RemoteSessions>,
     pub mirror: Arc<Mirror>,
+    pub failover: KeyMirror,
 }
 
 impl Hooks for ClusterHooks {
@@ -153,6 +156,10 @@ impl Hooks for ClusterHooks {
     fn peer_sessions(&self, from: &NodeId) {
         self.remote.mark_dirty(from);
         self.mirror.nudge();
+    }
+
+    fn failover(&self, value: Failover, order: u64) {
+        self.failover.follow(value, order);
     }
 }
 
@@ -338,6 +345,7 @@ impl ClusterParts {
             switches,
             remote: remote.clone(),
             mirror: mirror.clone(),
+            failover: KeyMirror::new(layout.data_dir.join("settings.json"), room.clone()),
         });
         let node = start_node(layout, room.clone(), (local, hooks), versions, log.clone());
         let audit = log.clone();
@@ -374,6 +382,11 @@ impl ClusterParts {
             refresher,
             handler,
         }
+    }
+
+    pub fn failover_sink(&self) -> Option<Arc<dyn FailoverSink>> {
+        let node = self.node.as_ref().ok()?;
+        Some(Arc::new(NodeSink::new(node.clone())))
     }
 
     pub fn forward(&self) -> Option<Arc<dyn Forward>> {

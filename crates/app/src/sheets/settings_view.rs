@@ -29,11 +29,14 @@ use super::skills_models;
 use super::skills_rows::{reinstall_result, SkillsShown};
 use super::view::{sheet_header, Acts, Dismiss};
 use crate::activity::view::ActivityView;
+mod cluster;
 mod shortcut;
 use crate::mac::shell::{AppAccounts, AppActions, AppBridge, AppSwitchFeed};
 use crate::switches::restart::{Area, LiveTurnOn};
 use crate::switches::Switch;
 use crate::welcome::hooks::Hooks;
+
+const CLUSTER_AFTER: usize = 2;
 
 pub struct SettingsView {
     store: Option<Settings>,
@@ -53,6 +56,7 @@ pub struct SettingsView {
     tool: Tool,
     activity: Option<Entity<ActivityView>>,
     shortcut: shortcut::ShortcutState,
+    cluster: Option<Arc<crate::cluster::feed::ClusterFeed>>,
 }
 
 pub struct SettingChanged {
@@ -89,6 +93,7 @@ impl SettingsView {
             tool: Tool::ClaudeCode,
             activity: None,
             shortcut: shortcut::ShortcutState::default(),
+            cluster: None,
         }
     }
 
@@ -601,7 +606,7 @@ impl Render for SettingsView {
         } else {
             Vec::new()
         };
-        for section in general {
+        for (at, section) in general.into_iter().enumerate() {
             let mut rows = card(a).flex().flex_col();
             for (k, row) in section.rows.iter().enumerate() {
                 n += 1;
@@ -648,6 +653,9 @@ impl Render for SettingsView {
                             .map(|f| label(f, TypeRole::Meta, Ink::TextFaint, a)),
                     ),
             );
+            if at == CLUSTER_AFTER {
+                list = list.children(self.cluster_section(&mut n, a, cx));
+            }
         }
         if self.page == Page::Agents {
             let handlers = self.client_handlers(cx);

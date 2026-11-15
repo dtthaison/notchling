@@ -1,4 +1,5 @@
 use crate::acting_ops::{now_ms, Room};
+use crate::cluster_failover_setting::{parse, FailoverSink, KEY as FAILOVER_KEY};
 use crate::inbox_ops::InboxOps;
 use crate::late_emit::Events;
 use crate::op_group::OpGroup;
@@ -16,7 +17,7 @@ use notchling_events::{scope, Device, Event, Ref};
 use notchling_local_api::{ops, topics, ApiError, Caller, ErrorCode, OpSpec, Tier};
 use serde_json::{json, Value};
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 pub const SETTINGS_OPS: [&str; 4] = [
@@ -36,6 +37,7 @@ pub struct Writer {
     room: Arc<dyn Room>,
     events: Option<Events>,
     limits: Option<Arc<LimitConfig>>,
+    failover: OnceLock<Arc<dyn FailoverSink>>,
 }
 
 fn cut(text: &str, at: usize) -> String {
@@ -124,6 +126,12 @@ impl Writer {
     ) -> Result<bool, String> {
         if let Some(limits) = &self.limits {
             apply_limit(limits, spec.name, value)?;
+        }
+        if spec.name == FAILOVER_KEY {
+            if let Some(sink) = self.failover.get() {
+                let failover = parse(value).ok_or("failover is off, 30m or 1h")?;
+                sink.set(failover)?;
+            }
         }
         let mut store = Settings::open(&self.file).map_err(|e| e.to_string())?;
         let before = store.get(spec.name);
@@ -222,6 +230,7 @@ impl SettingsOps {
                 room,
                 events: None,
                 limits: None,
+                failover: OnceLock::new(),
             }),
             switches,
             asks: Asks::new(),
@@ -242,6 +251,10 @@ impl SettingsOps {
             writer.limits = Some(limits);
         }
         self
+    }
+
+    pub fn bind_failover(&self, sink: Arc<dyn FailoverSink>) {
+        let _ = self.writer.failover.set(sink);
     }
 
     pub fn with_inbox(mut self, inbox: Arc<InboxOps>) -> SettingsOps {

@@ -1,4 +1,5 @@
 use crate::acting_ops::{bad, Room};
+use crate::cluster_failover_setting::parse;
 use crate::cluster_node::{ClusterLog, ClusterNode};
 use crate::op_group::OpGroup;
 use crate::switches::SwitchFlag;
@@ -10,13 +11,14 @@ use notchling_local_api::{ops, topics, ApiError, Caller, ErrorCode, OpSpec, Tier
 use serde_json::{json, Value};
 use std::sync::Arc;
 
-pub const CLUSTER_OPS: [&str; 6] = [
+pub const CLUSTER_OPS: [&str; 7] = [
     ops::CLUSTER_STATUS,
     ops::CLUSTER_CREATE,
     ops::CLUSTER_JOIN_TOKEN,
     ops::CLUSTER_JOIN,
     ops::CLUSTER_MEMBER_SET,
     ops::CLUSTER_REMOVE,
+    ops::CLUSTER_FAILOVER_SET,
 ];
 
 pub struct ClusterOps {
@@ -112,6 +114,16 @@ impl ClusterOps {
         node.join(token, headless)
     }
 
+    fn failover_set(&self, args: &Value) -> Result<Value, ApiError> {
+        let usage = "cluster.failover.set takes {\"value\": \"off\", \"30m\" or \"1h\"}";
+        let failover = args
+            .get("value")
+            .and_then(parse)
+            .ok_or_else(|| bad(usage))?;
+        self.node()?.local(LocalCmd::SetFailover { failover })?;
+        Ok(json!({"value": failover}))
+    }
+
     fn member_set(&self, args: &Value) -> Result<Value, ApiError> {
         let usage = "cluster.member.set takes {\"node\": id, \"canBeMaster\"?, \"client\"?, \"reference\"?, \"acceptsDelegation\"?, \"headless\"?, \"desired\"?}";
         let known = [
@@ -155,9 +167,10 @@ impl OpGroup for ClusterOps {
             ops::CLUSTER_STATUS | ops::CLUSTER_JOIN_TOKEN | ops::CLUSTER_JOIN => {
                 Some(OpSpec::AGENT)
             }
-            ops::CLUSTER_CREATE | ops::CLUSTER_MEMBER_SET | ops::CLUSTER_REMOVE => {
-                Some(OpSpec::APP)
-            }
+            ops::CLUSTER_CREATE
+            | ops::CLUSTER_MEMBER_SET
+            | ops::CLUSTER_REMOVE
+            | ops::CLUSTER_FAILOVER_SET => Some(OpSpec::APP),
             _ => None,
         }
     }
@@ -176,6 +189,7 @@ impl OpGroup for ClusterOps {
                 let node = node_arg(args, "cluster.remove takes {\"node\": id}")?;
                 self.node()?.local(LocalCmd::Remove { node })
             }
+            ops::CLUSTER_FAILOVER_SET => self.failover_set(args),
             _ => Err(ApiError::internal(format!("{op} has no handler"))),
         }
     }

@@ -1,5 +1,6 @@
 mod control;
 mod dispatch;
+mod failover_set;
 mod forward;
 mod join;
 mod link;
@@ -8,6 +9,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::{json, Value};
 
+use super::failover::Failover;
 use super::id::{NodeId, Tool};
 use super::jobs::JobSpec;
 use super::join::{JoinToken, Tokens};
@@ -84,6 +86,9 @@ pub enum LocalCmd {
     },
     SetVersions {
         versions: Versions,
+    },
+    SetFailover {
+        failover: Failover,
     },
     Dispatch {
         key: String,
@@ -235,6 +240,7 @@ pub struct NodeCore {
     next_local: u64,
     last_pins: Option<(Vec<String>, bool)>,
     changed: bool,
+    primary_armed: bool,
     #[cfg(test)]
     pub(crate) skip_term_check: bool,
 }
@@ -265,6 +271,7 @@ impl NodeCore {
             next_local: 1,
             last_pins: None,
             changed: false,
+            primary_armed: false,
             #[cfg(test)]
             skip_term_check: false,
         }
@@ -369,6 +376,7 @@ impl NodeCore {
             "me": me,
             "members": members,
             "jobs": jobs,
+            "failover": self.failover_status(state),
         })
     }
 
@@ -507,6 +515,8 @@ impl NodeCore {
 mod core_tests;
 #[cfg(test)]
 mod core_tests_dispatch;
+#[cfg(test)]
+mod core_tests_failover;
 #[cfg(test)]
 mod core_tests_headless;
 #[cfg(test)]

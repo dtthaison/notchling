@@ -624,6 +624,9 @@ impl Wired {
             events.clone(),
             sessions.clone(),
         );
+        if let Some(sink) = cluster.failover_sink() {
+            settings.bind_failover(sink);
+        }
         Wired {
             acting,
             codex,

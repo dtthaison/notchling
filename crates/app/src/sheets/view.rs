@@ -618,6 +618,13 @@ pub fn build_render(name: &str, cx: &mut gpui::App) -> Option<gpui::AnyView> {
                 let view = SettingsView::new(None, acts)
                     .with_hooks(hooks(which))
                     .with_page(page(which));
+                let view = if which == Shown::SettingsCluster {
+                    view.with_cluster(Arc::new(crate::cluster::feed::ClusterFeed::fixed(
+                        super::renders::cluster_model(),
+                    )))
+                } else {
+                    view
+                };
                 let view = match skills_models(which) {
                     Some((skills, models)) => view.with_skills(skills, models),
                     None => view,

@@ -23,6 +23,7 @@ pub mod cluster_cli;
 pub mod cluster_dispatch;
 pub mod cluster_dispatch_delegate;
 mod cluster_driver;
+pub mod cluster_failover_setting;
 pub mod cluster_forward;
 pub mod cluster_join;
 pub mod cluster_mirror;

@@ -3,6 +3,7 @@ use crate::cluster_driver::Driver;
 use crate::late_emit::Events as LogEvents;
 use notchling_cluster_net::{Conn, LinkEvents, Pins, Transport};
 use notchling_engine::cluster::core::{LocalCmd, CALL_MS, DELEGATE_CALL_MS};
+use notchling_engine::cluster::failover::Failover;
 use notchling_engine::cluster::wire::{Origin, WireError};
 use notchling_engine::cluster::{Desired, Input, NodeId, Versions};
 use notchling_events::kinds::choices::SwitchName;
@@ -45,6 +46,7 @@ pub trait Hooks: Send + Sync {
     fn desired(&self, _desired: Desired) {}
     fn wiped(&self) {}
     fn peer_sessions(&self, _from: &NodeId) {}
+    fn failover(&self, _value: Failover, _order: u64) {}
 }
 
 pub struct NoHooks;

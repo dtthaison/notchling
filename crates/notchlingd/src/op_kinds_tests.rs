@@ -45,7 +45,7 @@ const OWN_QUIET: [&str; 8] = [
     ops::CODEX_CHILDREN,
 ];
 
-const NEVER_QUIET: [&str; 90] = [
+const NEVER_QUIET: [&str; 91] = [
     ops::HELLO,
     ops::LOG_VERIFY,
     ops::LOG_CHAIN_START,
@@ -136,6 +136,7 @@ const NEVER_QUIET: [&str; 90] = [
     ops::CLUSTER_DISPATCH,
     ops::SHELL_STOP,
     ops::CLUSTER_RETURN,
+    ops::CLUSTER_FAILOVER_SET,
 ];
 
 const NEVER_QUIET_LIMITS: [&str; 2] = ["limits.set_mode", "cost.summary"];

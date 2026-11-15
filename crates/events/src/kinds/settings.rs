@@ -44,6 +44,7 @@ log_choice! {
         ChatHistory = "chatHistory",
         Appearance = "appearance",
         SearchShortcut = "searchShortcut",
+        ClusterFailover = "clusterFailover",
         VaultReminderSent = "vaultReminderSent",
         BridgeEnabled = "bridgeEnabled",
         DebugAccessCertsFile = "debugAccessCertsFile",
@@ -68,6 +69,8 @@ log_choice! {
         System = "system",
         Light = "light",
         Dark = "dark",
+        After30m = "30m",
+        After1h = "1h",
     }
 }
 

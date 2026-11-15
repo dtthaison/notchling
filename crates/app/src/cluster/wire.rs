@@ -50,6 +50,13 @@ pub fn desired(node: &str, desired: Desired) -> Request {
     }
 }
 
+pub fn failover(value: &str) -> Request {
+    Request {
+        op: ops::CLUSTER_FAILOVER_SET,
+        args: json!({"value": value}),
+    }
+}
+
 pub fn remove(node: &str) -> Request {
     Request {
         op: ops::CLUSTER_REMOVE,

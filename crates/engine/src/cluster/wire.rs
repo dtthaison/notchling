@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use super::failover::Failover;
 use super::id::NodeId;
 use super::members::{Member, Term};
 use super::versions::Versions;
@@ -83,6 +84,8 @@ pub enum Msg {
         #[serde(default)]
         vault: Option<NodeId>,
         members: Vec<Member>,
+        #[serde(default)]
+        failover: Option<Failover>,
     },
     Members {
         term: Term,
@@ -90,6 +93,10 @@ pub enum Msg {
         #[serde(default)]
         vault: Option<NodeId>,
         members: Vec<Member>,
+        #[serde(default)]
+        failover: Option<Failover>,
+        #[serde(default)]
+        armed: bool,
     },
     Call {
         id: u64,

@@ -1,6 +1,7 @@
 use serde_json::json;
 
 use super::{Effect, NodeCore, Target};
+use crate::cluster::failover::Failover;
 use crate::cluster::grants::SecretAllow;
 use crate::cluster::id::NodeId;
 use crate::cluster::members::{can_be_master_default, Desired, Member, MemberState, Term};
@@ -88,6 +89,7 @@ impl NodeCore {
             home: state.home.clone(),
             vault: Some(state.vault.clone()),
             members: self.shared_members(),
+            failover: Some(state.failover),
         };
         self.send(to, msg, out);
     }
@@ -208,6 +210,7 @@ impl NodeCore {
         home: NodeId,
         vault: Option<NodeId>,
         members: Vec<Member>,
+        failover: Option<Failover>,
         out: &mut Vec<Effect>,
     ) {
         let Some(j) = &self.joining else {
@@ -233,6 +236,7 @@ impl NodeCore {
             },
             out,
         );
+        self.follow_failover(failover, false, out);
         if !answered {
             let result = match applied {
                 Ok(_) => Ok(json!({"state": "joined"})),

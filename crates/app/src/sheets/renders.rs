@@ -16,7 +16,7 @@ use super::new_session::{accounts, folders, NewSession};
 use crate::accounts::menu::targets;
 use crate::accounts::renders::{snapshot, Shown as AccountsShown};
 
-pub const VIEWS: [ViewSpec; 13] = [
+pub const VIEWS: [ViewSpec; 14] = [
     ViewSpec {
         name: "banner",
         size: (620.0, 260.0),
@@ -36,6 +36,11 @@ pub const VIEWS: [ViewSpec; 13] = [
         name: "settings",
         size: (620.0, 1660.0),
         about: "the Settings sheet's General page with acting shown read-only (defaults), the Search section and the Chat section",
+    },
+    ViewSpec {
+        name: "settings-cluster",
+        size: (620.0, 1800.0),
+        about: "the Settings sheet's General page on a Mac in a cluster: Automatic Failover on After 30 Minutes with the machines named and the not ready line (made-up data)",
     },
     ViewSpec {
         name: "settings-agents",
@@ -90,6 +95,7 @@ pub enum Shown {
     NewSession,
     TrustFolder,
     Settings,
+    SettingsCluster,
     SettingsAgents,
     SettingsAgentsPartial,
     SettingsAgentsEmpty,
@@ -107,6 +113,7 @@ pub fn shown(name: &str) -> Option<Shown> {
         "new-session" => Shown::NewSession,
         "trust-folder" => Shown::TrustFolder,
         "settings" => Shown::Settings,
+        "settings-cluster" => Shown::SettingsCluster,
         "settings-agents" => Shown::SettingsAgents,
         "settings-agents-partial" => Shown::SettingsAgentsPartial,
         "settings-agents-empty" => Shown::SettingsAgentsEmpty,
@@ -126,6 +133,7 @@ pub fn acting(shown: Shown) -> Acting {
         Shown::Banner
         | Shown::NewSession
         | Shown::Settings
+        | Shown::SettingsCluster
         | Shown::SettingsAgents
         | Shown::SettingsAgentsPartial
         | Shown::SettingsAgentsEmpty
@@ -329,6 +337,13 @@ pub fn new_session(shown: Shown) -> NewSession {
         sheet.started(Err("Workspace not trusted".into()));
     }
     sheet
+}
+
+pub fn cluster_model() -> crate::cluster::model::ClusterModel {
+    use crate::cluster::renders::{status, ME, STANDBY};
+    let mut made_up = status();
+    made_up["failover"] = json!({"value": "30m", "armed": false, "target": STANDBY});
+    crate::cluster::model::ClusterModel::from_status(&made_up, ME)
 }
 
 pub fn banners() -> Banners {

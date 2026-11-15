@@ -6,6 +6,7 @@ use crate::cluster_node::{
 use notchling_cluster_net::{Conn, Listener};
 use notchling_engine::bridge::net::crypto::{hex, random_bytes, random_token};
 use notchling_engine::cluster::core::LocalCmd;
+use notchling_engine::cluster::failover::Failover;
 use notchling_engine::cluster::grants::SecretAllow;
 use notchling_engine::cluster::join::{decode_token, encode_token, JoinToken};
 use notchling_engine::cluster::persist;
@@ -57,6 +58,7 @@ pub(crate) struct Driver {
     last: BTreeMap<&'static str, Instant>,
     error: Option<String>,
     published: Value,
+    told_failover: Option<(Failover, u64)>,
     tailscale: bool,
     later: Vec<(Reply, Result<Value, WireError>)>,
 }
@@ -126,6 +128,7 @@ impl Driver {
             last: BTreeMap::new(),
             error,
             published: Value::Null,
+            told_failover: None,
             tailscale: false,
             later: Vec::new(),
         }

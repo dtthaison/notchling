@@ -278,6 +278,7 @@ from the app in this run, or `cluster.join` (below), or a restart of a headless 
 | `cluster.join` | agent | `{token}` | `{state: "pending" \| "joined"}` |
 | `cluster.member.set` | app | `{node, canBeMaster?, client?, reference?, acceptsDelegation?, headless?, desired?}` | the member as stored |
 | `cluster.remove` | app | `{node}` | the member as stored, `state: "removed"` |
+| `cluster.failover.set` | app | `{value: "off" \| "30m" \| "1h"}` | `{value}`; journaled on the primary, a client member's call is forwarded there |
 
 - `Member` is `{id, name, role, canBeMaster, online, client, headless, reference, state, versions, load, desired,
   acceptsDelegation}`; `role` is `home`, `standby` or `worker`, `state` `pending`, `active` or `removed`,
@@ -299,6 +300,9 @@ from the app in this run, or `cluster.join` (below), or a restart of a headless 
   and Deny; only `mac` or `phone` may allow it. Unanswered for 10 minutes it expires and the joiner is denied.
 - `notchling cluster join --token-stdin` reads the token from stdin only; a token among the arguments is
   refused.
+- Status carries `failover: {value, armed, target}`: the primary's journaled value, whether the target has granted a lease at the
+  current term, and the target's node id (or `null`). The settings key `clusterFailover` (class Ask) mirrors `value`: the journal on
+  the primary wins, so an allowed agent `settings.set` is journaled first and fails (key unchanged) when the primary can't be reached.
 - Topic `cluster` (agent tier): `cluster.changed` with the status body after a change other than load, and
   `cluster.refused {from, op, reason}` (also a `cluster.step` event, `refused`).
 - Calls from other nodes run through the same ops as `ClientKind::Node` with the socket's checks, recorded

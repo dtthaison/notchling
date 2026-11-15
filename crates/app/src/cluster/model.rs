@@ -113,10 +113,30 @@ impl Line {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FailoverStatus {
+    pub value: String,
+    pub armed: bool,
+    pub target: Option<String>,
+}
+
+fn failover_of(status: &Value) -> Option<FailoverStatus> {
+    let failover = status.get("failover").filter(|f| f.is_object())?;
+    Some(FailoverStatus {
+        value: text(failover, "value").to_owned(),
+        armed: flag(failover, "armed"),
+        target: failover
+            .get("target")
+            .and_then(Value::as_str)
+            .map(str::to_owned),
+    })
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ClusterModel {
     loaded: bool,
     cluster: Option<String>,
+    failover: Option<FailoverStatus>,
     me: String,
     rows: Vec<NodeRow>,
     link: bool,
@@ -280,6 +300,7 @@ impl ClusterModel {
         ClusterModel {
             loaded: true,
             cluster,
+            failover: failover_of(status),
             me: me.to_owned(),
             rows: ranked
                 .into_iter()
@@ -305,6 +326,10 @@ impl ClusterModel {
 
     pub fn cluster_name(&self) -> Option<&str> {
         self.cluster.as_deref()
+    }
+
+    pub fn failover(&self) -> Option<&FailoverStatus> {
+        self.failover.as_ref()
     }
 
     pub fn rows(&self) -> Vec<NodeRow> {

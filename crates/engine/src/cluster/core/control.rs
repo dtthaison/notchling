@@ -2,6 +2,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use super::{Effect, Joining, LocalCmd, NodeCore, Target, Then, CALL_MS, DELEGATE_CALL_MS};
+use crate::cluster::failover::{armed_at_current, Failover};
 use crate::cluster::id::NodeId;
 use crate::cluster::members::{Desired, Member, MemberState, Term};
 use crate::cluster::state::Command;
@@ -121,6 +122,7 @@ impl NodeCore {
                 }
             }
             LocalCmd::SetVersions { versions } => self.set_versions(id, versions, out),
+            LocalCmd::SetFailover { failover } => self.local_failover(id, failover, out),
             LocalCmd::Dispatch { key, spec, tier } => {
                 if self.is_home() {
                     self.dispatch_here(target, key, spec, tier, out);
@@ -168,7 +170,13 @@ impl NodeCore {
         }
     }
 
-    fn relay_to_home(&mut self, local: u64, op: &str, args: Value, out: &mut Vec<Effect>) {
+    pub(super) fn relay_to_home(
+        &mut self,
+        local: u64,
+        op: &str,
+        args: Value,
+        out: &mut Vec<Effect>,
+    ) {
         let origin = Origin {
             node: self.me.clone(),
             tier: OriginTier::App,
@@ -353,6 +361,8 @@ impl NodeCore {
             home: state.home.clone(),
             vault: Some(state.vault.clone()),
             members: self.shared_members(),
+            failover: Some(state.failover),
+            armed: armed_at_current(state),
         };
         let targets: Vec<NodeId> = match only {
             Some(n) => vec![n.clone()],
@@ -375,6 +385,7 @@ impl NodeCore {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn on_members(
         &mut self,
         from: NodeId,
@@ -382,6 +393,8 @@ impl NodeCore {
         home: NodeId,
         vault: Option<NodeId>,
         members: Vec<Member>,
+        failover: Option<Failover>,
+        armed: bool,
         out: &mut Vec<Effect>,
     ) {
         let Some(state) = &self.state else {
@@ -421,5 +434,6 @@ impl NodeCore {
             },
             out,
         );
+        self.follow_failover(failover, armed, out);
     }
 }

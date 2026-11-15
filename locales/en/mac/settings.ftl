@@ -633,3 +633,32 @@ settings-reply-unreadable = The daemon's answer isn't one this app reads.
 
 # Line under Reinstall Skills when one skill could not be written. $skill is the skill's folder name, $why what went wrong.
 settings-skill-error = { $skill }: { $why }
+
+## Cluster section
+
+# Section title on the General page, shown only on a Mac that is in a cluster.
+settings-section-cluster = Cluster
+
+# Row in the Cluster section: how long the primary Mac can be unreachable before a Standby takes over its sessions.
+settings-cluster-failover = Automatic Failover
+
+# Choice of the Automatic Failover row: no machine takes over by itself.
+settings-cluster-failover-off = Off
+
+# Choice of the Automatic Failover row: a Standby takes over after the primary has been unreachable for 30 minutes.
+settings-cluster-failover-v30m = After 30 Minutes
+
+# Choice of the Automatic Failover row: a Standby takes over after the primary has been unreachable for 1 hour.
+settings-cluster-failover-v1h = After 1 Hour
+
+# Line under the Automatic Failover row while it is on. $standby is the name of the machine that takes over, $primary the name of the primary Mac.
+settings-cluster-failover-line = { $standby } takes over when { $primary } can't be reached for this long. { $primary } pauses those sessions 2 minutes before.
+
+# Line under the Automatic Failover row while it is off.
+settings-cluster-failover-off-line = Off: no machine takes over by itself.
+
+# Line under the Automatic Failover row while it is on and no machine in the cluster is able to take over.
+settings-cluster-failover-no-standby = No Standby can take over yet. Turn on Can Be Master for another machine in the cluster.
+
+# Line under the Automatic Failover row while it is on and the machine that takes over hasn't yet confirmed it is ready.
+settings-cluster-failover-not-ready = Automatic failover: not ready

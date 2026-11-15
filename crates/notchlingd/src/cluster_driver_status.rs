@@ -60,12 +60,34 @@ impl Driver {
         status
     }
 
+    fn tell_failover(&mut self, status: &Value) {
+        let value = status
+            .get("failover")
+            .and_then(|f| f.get("value"))
+            .and_then(crate::cluster_failover_setting::parse);
+        let Some(value) = value else {
+            self.told_failover = None;
+            return;
+        };
+        let order = match self.told_failover {
+            Some((told, _)) if told == value => return,
+            Some((_, order)) => order + 1,
+            None => 1,
+        };
+        self.told_failover = Some((value, order));
+        let hooks = self.hooks.clone();
+        let _ = std::thread::Builder::new()
+            .name("cluster-failover".into())
+            .spawn(move || hooks.failover(value, order));
+    }
+
     pub(super) fn after(&mut self) {
         let status = self.status();
         if status == self.published {
             return;
         }
         *lock(&self.shared.status) = status.clone();
+        self.tell_failover(&status);
         let mut public = status.clone();
         if let Some(members) = public.get_mut("members").and_then(Value::as_array_mut) {
             for member in members {

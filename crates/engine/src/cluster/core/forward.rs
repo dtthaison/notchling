@@ -50,7 +50,10 @@ impl NodeCore {
                 home,
                 vault,
                 members,
-            } => self.on_join_ok(from, cluster, name, term, home, vault, members, out),
+                failover,
+            } => self.on_join_ok(
+                from, cluster, name, term, home, vault, members, failover, out,
+            ),
             other => {
                 if !self.peers.get(&from).is_some_and(|p| p.greeted) {
                     return;
@@ -61,7 +64,9 @@ impl NodeCore {
                         home,
                         vault,
                         members,
-                    } => self.on_members(from, term, home, vault, members, out),
+                        failover,
+                        armed,
+                    } => self.on_members(from, term, home, vault, members, failover, armed, out),
                     Msg::Call {
                         id,
                         op,
@@ -177,6 +182,7 @@ impl NodeCore {
             "cluster.dispatch" => self.native_dispatch(target, &args, &origin, out),
             "cluster.member.set" => self.native_member_set(target, &args, out),
             "cluster.remove" => self.native_remove(target, &args, out),
+            "cluster.failover.set" => self.native_failover_set(target, &args, out),
             "node.versions" => self.native_versions(target, &args, out),
             _ => {
                 let call = self.next_local;
