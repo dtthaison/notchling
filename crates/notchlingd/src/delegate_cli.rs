@@ -55,6 +55,7 @@ pub fn folders(
         claude_json: layout.home().join(".claude.json"),
         path,
         network,
+        catalog_file: layout.state_dir().join("catalog.json"),
     }
 }
 

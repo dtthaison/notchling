@@ -15,6 +15,7 @@ pub struct Deps {
     pub codex_media_root: PathBuf,
     pub path: String,
     pub network: bool,
+    pub catalog_file: Option<PathBuf>,
 
     pub agy_binary: Option<String>,
     pub agy: Arc<dyn AcpSpawner>,

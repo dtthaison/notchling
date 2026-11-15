@@ -17,6 +17,7 @@ pub struct Folders {
     pub claude_json: PathBuf,
     pub path: String,
     pub network: bool,
+    pub catalog_file: PathBuf,
 }
 
 const MODELS_TIMEOUT: Duration = Duration::from_secs(60);
@@ -30,6 +31,7 @@ pub fn deps(folders: &Folders, stop: Arc<AtomicBool>) -> Deps {
         codex_media_root: folders.codex_home.join("generated_images"),
         path,
         network: folders.network,
+        catalog_file: Some(folders.catalog_file.clone()),
         agy_binary: crate::tools::agy::find_binary(&folders.home)
             .map(|p| p.to_string_lossy().into_owned()),
         agy: Arc::new(AcpSpawner::new(&folders.home)),
@@ -123,6 +125,7 @@ mod tests {
             claude_json: home.join(".claude.json"),
             path: String::new(),
             network: true,
+            catalog_file: home.join("catalog.json"),
         };
         let d = deps(&folders, Arc::new(AtomicBool::new(false)));
         assert_eq!(d.codex_media_root, home.join(".codex/generated_images"));

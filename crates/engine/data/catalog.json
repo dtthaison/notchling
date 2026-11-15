@@ -41,7 +41,29 @@
       {"id": "gpt-4.1", "input": 2.0, "output": 8.0, "cache_read": 0.50},
       {"id": "o3", "input": 2.0, "output": 8.0, "cache_read": 0.50},
       {"id": "o4-mini", "input": 1.10, "output": 4.40, "cache_read": 0.275}
+    ],
+    "picks": [
+      {"model": "gpt-6-astra", "effort": "xhigh", "roles": ["review-final", "review-secrets"],
+       "use": "Final review of a branch; with gemini-4-argon high for code touching secrets, vault, auth or accounts. Can run git diff itself."}
+    ],
+    "not_for": [
+      {"match": "terra", "roles": ["review"], "use": "Not for review."},
+      {"match": "luna", "roles": ["review"], "use": "Not for review."}
     ]
   },
-  "antigravity": {"prices": []}
+  "antigravity": {
+    "prices": [],
+    "picks": [
+      {"model": "gemini-4-hydrogen", "effort": "high", "roles": ["review"],
+       "use": "Review after each task. Cannot run commands: put the diff and task text in files under .review/."},
+      {"model": "gemini-4-argon", "effort": "high", "roles": ["review-secrets", "spec-check"],
+       "use": "Builder check of a spec; second reviewer for code touching secrets, vault, auth or accounts. Cannot run commands: use files under .review/."}
+    ],
+    "not_for": [
+      {"match": "orchestrator", "roles": ["review"], "use": "Not for review."},
+      {"match": "flash", "roles": ["review"], "use": "Not for review."},
+      {"match": "claude", "roles": ["review"], "use": "Not for review."},
+      {"effort": "ultra", "roles": ["review"], "use": "Not for review."}
+    ]
+  }
 }
