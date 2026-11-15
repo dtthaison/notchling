@@ -67,3 +67,4 @@ e2: Ruling R37: `gates_until` skips an Off hold only when the node is no longer 
 e2: Ruling R38: `load()` seeds `holders` from the `armed` row (id 0) when the `holders` row is missing (a cluster.db written by 4854cf3e) — costs nothing.
 e2: Task 7 note: ask every holder each RENEW_MS (not only the target) so releases can arrive; the sweep's World models it.
 e2: Task 7 note: the new Command variants (SetFailover, Armed, Released) and the new `ClusterState` fields need a versions/compat check (a feature word in `Versions`) before an older node receives them in a journal or snapshot.
+e2: Task 1 fix round 2: b92945b (holders survive a term change, arming ids, Off hold only after release, load seeds holders; 32 failover tests; cluster:: 361 tests; clippy, fmt, comments, guard lint (0 new) clean).
