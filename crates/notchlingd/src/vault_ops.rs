@@ -21,7 +21,7 @@ use notchling_events::kinds::secrets::{Approval, EntryAction, RequestResult, Sec
 use notchling_local_api::{ops, topics, ApiError, Caller, ClientKind, ErrorCode, OpSpec, Tier};
 use serde_json::{json, Map, Value};
 use std::collections::BTreeSet;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 pub const APPROVAL_WAIT: Duration = Duration::from_secs(300);
@@ -63,7 +63,12 @@ impl Default for VaultTiming {
     }
 }
 
+pub trait WorkerUse: Send + Sync {
+    fn use_secrets(&self, caller: &Caller, args: &Value) -> Option<Result<Value, ApiError>>;
+}
+
 pub struct VaultOps {
+    worker: OnceLock<Arc<dyn WorkerUse>>,
     switch: Arc<SwitchFlag>,
     store: Arc<VaultStore>,
     room: Arc<dyn Room>,
@@ -86,6 +91,7 @@ fn said_no(message: &str) -> ApiError {
 impl VaultOps {
     pub fn new(switch: Arc<SwitchFlag>, store: VaultStore, room: Arc<dyn Room>) -> VaultOps {
         let ops = VaultOps {
+            worker: OnceLock::new(),
             switch,
             store: Arc::new(store),
             room,
@@ -136,6 +142,10 @@ impl VaultOps {
         .with_inbox(inbox)
     }
 
+    pub fn set_worker(&self, worker: Arc<dyn WorkerUse>) {
+        let _ = self.worker.set(worker);
+    }
+
     pub fn with_inbox(mut self, inbox: Arc<InboxOps>) -> VaultOps {
         self.inbox = Some(inbox);
         self
@@ -179,6 +189,11 @@ impl VaultOps {
     }
 
     pub fn call(&self, caller: &Caller, op: &str, args: &Value) -> Result<Value, ApiError> {
+        if op == ops::VAULT_USE {
+            if let Some(answer) = self.worker.get().and_then(|w| w.use_secrets(caller, args)) {
+                return answer;
+            }
+        }
         if !self.switch.is_on() {
             self.off_hook().run();
             return Err(self.switch.refusal());
@@ -383,6 +398,9 @@ mod tests;
 #[cfg(test)]
 #[path = "vault_ops_inbox_tests.rs"]
 mod vault_ops_inbox_tests;
+#[cfg(test)]
+#[path = "vault_ops_worker_tests.rs"]
+mod worker_tests;
 
 impl OpGroup for VaultOps {
     fn spec(&self, op: &str) -> Option<OpSpec> {

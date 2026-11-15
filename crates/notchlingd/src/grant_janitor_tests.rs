@@ -1,0 +1,126 @@
+use super::*;
+use crate::cluster_redact::JobMasks;
+use crate::grant_use::tests::{
+    cluster, deliver_args, from_vault, job, put, real_now, rig, Rig, JOB, OTHER_JOB,
+};
+use std::sync::atomic::AtomicI64;
+
+fn janitor_at(rig: &Rig, clock: Clock) -> Arc<GrantJanitor> {
+    GrantJanitor::new(
+        rig.store.clone(),
+        (rig.masks.clone(), rig.marks.clone(), rig.roots.clone()),
+        rig.fake.clone(),
+        clock,
+    )
+}
+
+fn janitor(rig: &Rig) -> Arc<GrantJanitor> {
+    janitor_at(rig, Arc::new(real_now))
+}
+
+fn has(rig: &Rig, job: &str, name: &str) -> bool {
+    rig.store.get(job, name, real_now()).unwrap().is_some()
+}
+
+#[test]
+fn sweep_removes_expired_and_dead_jobs() {
+    let rig = rig();
+    put(&rig, JOB, "live", "V", "NL-MARKER-1");
+    put(&rig, OTHER_JOB, "dead", "V", "NL-MARKER-2");
+    put(&rig, "j-abcdefabcdef", "unknown", "V", "NL-MARKER-3");
+    *rig.fake.state.lock().unwrap() = Some(cluster(
+        "vault",
+        &[
+            job(JOB, "worker", JobState::Running),
+            job(OTHER_JOB, "worker", JobState::Done),
+        ],
+    ));
+    let swept = janitor(&rig).tick().expect("swept");
+    assert_eq!(swept, 2, "the finished and the unknown job");
+    assert!(has(&rig, JOB, "live"));
+    assert!(!has(&rig, OTHER_JOB, "dead"));
+    assert!(!has(&rig, "j-abcdefabcdef", "unknown"));
+    let later = real_now() + 2 * 3_600_000;
+    let expiring = janitor_at(&rig, Arc::new(move || later));
+    assert_eq!(expiring.tick().expect("swept"), 1, "the expired grant");
+    assert!(rig.store.get(JOB, "live", real_now()).unwrap().is_none());
+}
+
+#[test]
+fn a_finished_job_is_ended_and_its_grants_go() {
+    let rig = rig();
+    rig.uses
+        .deliver(&from_vault(), &deliver_args(JOB, "one", "V", "NL-MARKER-1"))
+        .expect("stored");
+    rig.roots.set(JOB, 500);
+    let janitor = janitor(&rig);
+    janitor.tick().expect("swept");
+    assert!(has(&rig, JOB, "one"), "a running job keeps its grants");
+    assert!(!rig.masks.is_ended(JOB));
+    *rig.fake.state.lock().unwrap() = Some(cluster("vault", &[job(JOB, "worker", JobState::Done)]));
+    janitor.tick().expect("swept");
+    assert!(!has(&rig, JOB, "one"), "job end deletes");
+    assert!(rig.roots.is_ended(JOB));
+    assert!(rig.masks.is_ended(JOB));
+    assert_eq!(
+        rig.masks.state(JOB),
+        JobMasks::Masked,
+        "masks outlive the job"
+    );
+    assert_eq!(rig.marks.list(), [JOB.to_string()], "the mark outlives it");
+}
+
+#[test]
+fn a_pruned_job_record_forgets_its_masks_and_mark() {
+    let rig = rig();
+    rig.uses
+        .deliver(&from_vault(), &deliver_args(JOB, "one", "V", "NL-MARKER-1"))
+        .expect("stored");
+    *rig.fake.state.lock().unwrap() = Some(cluster("vault", &[]));
+    janitor(&rig).tick().expect("swept");
+    assert_eq!(rig.masks.state(JOB), JobMasks::Never);
+    assert!(rig.marks.list().is_empty());
+    assert!(!has(&rig, JOB, "one"));
+}
+
+#[test]
+fn no_cluster_state_sweeps_grants_but_keeps_masks_and_marks() {
+    let rig = rig();
+    rig.uses
+        .deliver(&from_vault(), &deliver_args(JOB, "one", "V", "NL-MARKER-1"))
+        .expect("stored");
+    *rig.fake.state.lock().unwrap() = None;
+    janitor(&rig).tick().expect("swept");
+    assert!(!has(&rig, JOB, "one"), "no grant without a cluster");
+    assert_eq!(rig.masks.state(JOB), JobMasks::Masked);
+    assert_eq!(rig.marks.list(), [JOB.to_string()]);
+}
+
+#[test]
+fn a_root_for_a_job_not_yet_in_the_state_is_kept() {
+    let rig = rig();
+    let late = "j-dddddddddddd";
+    rig.roots.set(late, 600);
+    janitor(&rig).tick().expect("swept");
+    assert!(!rig.roots.is_ended(late));
+    assert_eq!(rig.roots.rooted(), [late.to_string()]);
+}
+
+#[test]
+fn the_thread_sweeps_on_a_state_change_and_stops() {
+    let rig = rig();
+    put(&rig, JOB, "one", "V", "NL-MARKER-1");
+    let clock = Arc::new(AtomicI64::new(real_now()));
+    let ticking = clock.clone();
+    let janitor = janitor_at(&rig, Arc::new(move || ticking.load(Ordering::SeqCst)));
+    janitor.spawn();
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(has(&rig, JOB, "one"), "still live");
+    *rig.fake.state.lock().unwrap() = Some(cluster("vault", &[job(JOB, "worker", JobState::Done)]));
+    let until = Instant::now() + Duration::from_secs(10);
+    while has(&rig, JOB, "one") && Instant::now() < until {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert!(!has(&rig, JOB, "one"), "swept after the state changed");
+    janitor.close();
+}

@@ -1,4 +1,6 @@
 use crate::acting_ops::now_ms;
+use crate::cluster_redact::{MaskedLog, TailMasks};
+use crate::grant_roots::JobRoots;
 use notchling_engine::cluster::shell_job::{scrub, shell_plan, ShellPlan};
 use notchling_engine::cluster::JobState;
 use notchling_engine::sessions::{Agent, AgentGroup, AgentTarget};
@@ -6,14 +8,17 @@ use notchling_local_api::{ApiError, ErrorCode};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::fs::File;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::process::Stdio;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Condvar, Mutex, MutexGuard};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
 pub const KEEP: usize = 50;
 pub const GRACE: Duration = Duration::from_secs(2);
+pub const DRAIN: Duration = Duration::from_secs(2);
 pub const SESSION_PREFIX: &str = "shell:";
 const NAME_MAX: usize = 60;
 
@@ -22,6 +27,12 @@ pub trait Reporter: Send + Sync {
 }
 
 type Done = Arc<(Mutex<bool>, Condvar)>;
+
+pub struct ShellGrants {
+    pub masks: Arc<TailMasks>,
+    pub roots: Arc<JobRoots>,
+    pub ended: Arc<dyn Fn(&str) + Send + Sync>,
+}
 
 struct Entry {
     command: String,
@@ -32,11 +43,14 @@ struct Entry {
     ended: Option<(i64, JobState, Option<String>)>,
     stopping: bool,
     done: Done,
+    pumped: Done,
 }
 
 struct Inner {
     data: PathBuf,
     reporter: Arc<dyn Reporter>,
+    grants: OnceLock<ShellGrants>,
+    idle: Arc<TailMasks>,
     grace_ms: AtomicU64,
     jobs: Mutex<BTreeMap<String, Entry>>,
     watchers: Mutex<Vec<JoinHandle<()>>>,
@@ -105,16 +119,20 @@ fn open_log(log: &Path) -> std::io::Result<File> {
 }
 
 #[cfg(unix)]
-fn launch(plan: &ShellPlan, cwd: &str, log: &File) -> std::io::Result<std::process::Child> {
+fn launch(
+    plan: &ShellPlan,
+    cwd: &str,
+    (out, err): (Stdio, Stdio),
+) -> std::io::Result<std::process::Child> {
     use std::os::unix::process::CommandExt;
-    use std::process::{Command, Stdio};
+    use std::process::Command;
     let mut command = Command::new(&plan.argv[0]);
     command
         .args(&plan.argv[1..])
         .current_dir(cwd)
         .stdin(Stdio::null())
-        .stdout(log.try_clone()?)
-        .stderr(log.try_clone()?)
+        .stdout(out)
+        .stderr(err)
         .process_group(0);
     for (name, _) in std::env::vars_os() {
         let lossy = name.to_string_lossy().into_owned();
@@ -126,7 +144,11 @@ fn launch(plan: &ShellPlan, cwd: &str, log: &File) -> std::io::Result<std::proce
 }
 
 #[cfg(not(unix))]
-fn launch(_plan: &ShellPlan, _cwd: &str, _log: &File) -> std::io::Result<std::process::Child> {
+fn launch(
+    _plan: &ShellPlan,
+    _cwd: &str,
+    _out: (Stdio, Stdio),
+) -> std::io::Result<std::process::Child> {
     Err(std::io::Error::other("shell jobs need a Unix shell"))
 }
 
@@ -177,7 +199,41 @@ fn classify(status: &std::process::ExitStatus, stopping: bool) -> (JobState, Opt
     }
 }
 
-fn watch(inner: Arc<Inner>, job: String, mut child: std::process::Child, done: Done) {
+fn pump(mut reader: std::io::PipeReader, mut log: MaskedLog<File>, pumped: Done) {
+    let mut buffer = [0u8; 8192];
+    let mut lost = false;
+    loop {
+        match reader.read(&mut buffer) {
+            Ok(0) => break,
+            Ok(n) => {
+                if !lost && log.write_all(&buffer[..n]).is_err() {
+                    lost = true;
+                }
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+            Err(_) => break,
+        }
+    }
+    let _ = log.close();
+    let (flag, wake) = &*pumped;
+    *lock(flag) = true;
+    wake.notify_all();
+}
+
+fn drained(pumped: &Done) {
+    let (flag, wake) = &**pumped;
+    let finished = lock(flag);
+    let _ = wake
+        .wait_timeout_while(finished, DRAIN, |gone| !*gone)
+        .unwrap_or_else(|e| e.into_inner());
+}
+
+fn watch(
+    inner: Arc<Inner>,
+    job: String,
+    mut child: std::process::Child,
+    (done, pumped): (Done, Done),
+) {
     let status = child.wait();
     let (state, detail) = {
         let mut jobs = lock(&inner.jobs);
@@ -196,6 +252,10 @@ fn watch(inner: Arc<Inner>, job: String, mut child: std::process::Child, done: D
         *lock(flag) = true;
         wake.notify_all();
     }
+    drained(&pumped);
+    if let Some(grants) = inner.grants.get() {
+        (grants.ended)(&job);
+    }
     inner.reporter.report(&job, state, detail);
 }
 
@@ -205,11 +265,31 @@ impl ShellJobs {
             inner: Arc::new(Inner {
                 data,
                 reporter,
+                grants: OnceLock::new(),
+                idle: Arc::new(TailMasks::new()),
                 grace_ms: AtomicU64::new(GRACE.as_millis() as u64),
                 jobs: Mutex::new(BTreeMap::new()),
                 watchers: Mutex::new(Vec::new()),
             }),
         })
+    }
+
+    pub fn with_grants(self: Arc<Self>, grants: ShellGrants) -> Arc<ShellJobs> {
+        let _ = self.inner.grants.set(grants);
+        self
+    }
+
+    fn masks(&self) -> Arc<TailMasks> {
+        match self.inner.grants.get() {
+            Some(grants) => grants.masks.clone(),
+            None => self.inner.idle.clone(),
+        }
+    }
+
+    pub fn log_closed(&self, job: &str) -> bool {
+        lock(&self.inner.jobs)
+            .get(job)
+            .is_none_or(|e| *lock(&e.pumped.0))
     }
 
     pub fn with_grace(self: Arc<Self>, grace: Duration) -> Arc<ShellJobs> {
@@ -238,10 +318,28 @@ impl ShellJobs {
             std::io::ErrorKind::AlreadyExists => failed("that job's log already exists"),
             _ => failed(format!("the job's log: {e}")),
         })?;
-        let child = launch(&plan, cwd, &log).map_err(|e| failed(format!("starting: {e}")))?;
-        drop(log);
+        let (reader, writer) =
+            std::io::pipe().map_err(|e| failed(format!("the job's output: {e}")))?;
+        let streams = writer
+            .try_clone()
+            .map(|err| (Stdio::from(writer), Stdio::from(err)))
+            .map_err(|e| failed(format!("the job's output: {e}")))?;
+        let child = launch(&plan, cwd, streams).map_err(|e| failed(format!("starting: {e}")))?;
         let pid = child.id();
+        if let Some(grants) = self.inner.grants.get() {
+            grants.roots.set(job, pid);
+        }
         let done: Done = Arc::new((Mutex::new(false), Condvar::new()));
+        let pumped: Done = Arc::new((Mutex::new(false), Condvar::new()));
+        let masked = MaskedLog::new(log, self.masks(), job);
+        let piping = pumped.clone();
+        let pumping = std::thread::Builder::new()
+            .name("shell-log".into())
+            .spawn(move || pump(reader, masked, piping));
+        if let Err(e) = pumping {
+            signal_group(pid, KILL);
+            return Err(failed(format!("no thread for the job's output: {e}")));
+        }
         {
             let mut jobs = lock(&self.inner.jobs);
             jobs.insert(
@@ -255,6 +353,7 @@ impl ShellJobs {
                     ended: None,
                     stopping: false,
                     done: done.clone(),
+                    pumped: pumped.clone(),
                 },
             );
             prune(&mut jobs);
@@ -263,7 +362,7 @@ impl ShellJobs {
         let name = job.to_string();
         let spawned = std::thread::Builder::new()
             .name("shell-job".into())
-            .spawn(move || watch(inner, name, child, done));
+            .spawn(move || watch(inner, name, child, (done, pumped)));
         match spawned {
             Ok(handle) => lock(&self.inner.watchers).push(handle),
             Err(e) => {
@@ -395,3 +494,7 @@ fn row(job: &str, e: &Entry) -> Option<Value> {
 #[cfg(test)]
 #[path = "shell_jobs_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "shell_jobs_masked_tests.rs"]
+mod masked_tests;

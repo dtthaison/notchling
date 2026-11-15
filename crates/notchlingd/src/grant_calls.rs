@@ -4,8 +4,10 @@ use crate::grant_broker::{
     Audit, GrantBroker, Link, Notices, Release, Vault, View, GRANT_ATTACH, GRANT_REQUEST,
     GRANT_REVOKE_JOB, LOG_DOWN,
 };
+use crate::grant_use::{Asker, UseAudit};
 use crate::inbox_ops::InboxOps;
 use crate::vault_ops::{Looked, ReleaseFor, Released, Still, VaultOps};
+use notchling_engine::cluster::core::ATTACH_CALL_MS;
 use notchling_engine::cluster::wire::{Origin, OriginTier};
 use notchling_engine::cluster::{ClusterState, Job, LocalCmd, NodeId};
 use notchling_engine::inbox::{Action, ActionId, Item, Kind, Source, State};
@@ -14,6 +16,7 @@ use notchling_events::spec::Outcome;
 use notchling_local_api::{ApiError, ErrorCode};
 use serde_json::Value;
 use std::sync::{Arc, OnceLock};
+use std::time::Duration;
 
 pub type Holder = Arc<OnceLock<Arc<ClusterNode>>>;
 
@@ -64,6 +67,57 @@ impl Link for NodeLink {
             },
             LOCAL_WAIT,
         )
+    }
+}
+
+pub struct NodeAsker {
+    holder: Holder,
+}
+
+impl NodeAsker {
+    pub fn new(holder: Holder) -> NodeAsker {
+        NodeAsker { holder }
+    }
+}
+
+impl Asker for NodeAsker {
+    fn request(&self, vault: &NodeId, args: Value) -> Result<Value, ApiError> {
+        let this = node_of(&self.holder)?;
+        let origin = Origin {
+            node: this.me().clone(),
+            tier: OriginTier::Agent,
+        };
+        this.local_within(
+            LocalCmd::Forward {
+                node: vault.clone(),
+                op: GRANT_REQUEST.to_string(),
+                args: args.into(),
+                origin,
+            },
+            LOCAL_WAIT + Duration::from_millis(ATTACH_CALL_MS),
+        )
+    }
+}
+
+pub struct ClusterUseAudit {
+    log: ClusterLog,
+}
+
+impl ClusterUseAudit {
+    pub fn new(log: ClusterLog) -> ClusterUseAudit {
+        ClusterUseAudit { log }
+    }
+}
+
+impl UseAudit for ClusterUseAudit {
+    fn used(&self, vault: &NodeId, _job: &str, ok: bool) {
+        let (step, outcome) = if ok {
+            (ClusterStep::Call, Outcome::Ok)
+        } else {
+            (ClusterStep::Refused, Outcome::Refused)
+        };
+        self.log
+            .step(step, Some(vault.as_str()), Some("vault.use"), outcome);
     }
 }
 

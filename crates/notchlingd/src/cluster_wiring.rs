@@ -13,16 +13,23 @@ use crate::cluster_sessions::{
     is_client, HandlerRows, NodeSource, Refresher, RemoteSessions, SessionCalls,
 };
 use crate::cluster_switches::{HeadlessSwitches, LateHandler, NodeCalls, OpsPanel};
+use crate::cluster_tail_mask::MaskedTails;
 use crate::cluster_versions::{own, with_tools};
 use crate::cluster_workspace::{Workspace, WorkspaceCalls};
 use crate::cluster_workspace_send::{CodeSender, NodePeers, ReturnOps, Sender};
 use crate::grant_broker::GrantBroker;
-use crate::grant_calls::{EventAudit, GrantCalls, InboxNotices, NodeLink, NodeView};
+use crate::grant_calls::{
+    ClusterUseAudit, EventAudit, GrantCalls, InboxNotices, NodeAsker, NodeLink, NodeView,
+};
+use crate::grant_janitor::GrantJanitor;
+use crate::grant_use::{GrantUse, UseCalls};
+use crate::grant_wiring::GrantParts;
 use crate::inbox_ops::InboxOps;
 use crate::late_emit::Events;
 use crate::layout::Layout;
 use crate::shell_jobs::ShellJobs;
 use crate::switches::SwitchFlag;
+use crate::vault_caller::SystemProcesses;
 use crate::vault_ops::VaultOps;
 use crate::versions_ops::VersionsOps;
 use notchling_cluster_net::{load_or_make, Pins, TcpTls, PORT};
@@ -215,6 +222,7 @@ pub struct ClusterParts {
     pub remote: Arc<RemoteSessions>,
     delegate: Arc<RealDelegate>,
     mirror: Arc<Mirror>,
+    janitor: Arc<GrantJanitor>,
     publisher: Arc<Publisher>,
     refresher: Option<Refresher>,
     handler: Arc<LateHandler>,
@@ -308,17 +316,26 @@ impl ClusterParts {
             (MIRROR_CAP, capped),
         );
         let reporter = Arc::new(NodeReporter::default());
-        let shells = ShellJobs::new(layout.data_dir.clone(), reporter.clone());
+        let grants = GrantParts::new(&layout.cluster_dir());
+        let view = Arc::new(NodeView::new(holder.clone()));
+        let shells =
+            ShellJobs::new(layout.data_dir.clone(), reporter.clone()).with_grants(grants.shell());
         let delegate = Arc::new(RealDelegate::new(layout));
         let asks = holder.clone();
         let takes: crate::cluster_dispatch::Takes = Arc::new(move || {
             asks.get()
                 .is_some_and(|node| accepts_delegation(&node.status()))
         });
-        let sessions_calls: Arc<dyn LocalCalls> = Arc::new(SessionCalls::new(
-            DaemonCalls::new(handler.clone(), room.clone()),
+        let closing = shells.clone();
+        let sessions_calls: Arc<dyn LocalCalls> = Arc::new(MaskedTails::new(
+            Arc::new(SessionCalls::new(
+                DaemonCalls::new(handler.clone(), room.clone()),
+                Arc::new(HandlerRows::new(handler.clone())),
+                room.clone(),
+            )),
             Arc::new(HandlerRows::new(handler.clone())),
-            room.clone(),
+            (grants.masks.clone(), view.clone()),
+            Arc::new(move |job: &str| closing.log_closed(job)),
         ));
         let launcher: Arc<dyn Launcher> =
             Arc::new(RealLauncher::with_claude(PathBuf::from("claude")));
@@ -331,6 +348,24 @@ impl ClusterParts {
         );
         let workspace_calls: Arc<dyn LocalCalls> =
             Arc::new(WorkspaceCalls::new(sessions_calls, workspace));
+        let uses = Arc::new(GrantUse::new(
+            grants.store.clone(),
+            grants.parts(),
+            view.clone(),
+            (
+                Arc::new(NodeAsker::new(holder.clone())),
+                Arc::new(ClusterUseAudit::new(log.clone())),
+            ),
+            (Arc::new(SystemProcesses), clock_ms()),
+        ));
+        vault.set_worker(uses.clone());
+        let janitor = GrantJanitor::new(
+            grants.store.clone(),
+            grants.parts(),
+            view.clone(),
+            clock_ms(),
+        );
+        let workspace_calls: Arc<dyn LocalCalls> = Arc::new(UseCalls::new(workspace_calls, uses));
         let broker = Arc::new(GrantBroker::new(
             (
                 vault.clone(),
@@ -338,7 +373,7 @@ impl ClusterParts {
                 Arc::new(EventAudit::new(vault, log.clone())),
             ),
             Arc::new(InboxNotices::new(inbox.clone())),
-            Arc::new(NodeView::new(holder.clone())),
+            view,
             clock_ms(),
         ));
         let granting: Arc<dyn LocalCalls> = Arc::new(GrantCalls::new(workspace_calls, broker));
@@ -367,6 +402,7 @@ impl ClusterParts {
             let _ = tail.0.set(NodeSource::new(node.clone()));
             let _ = holder.set(node.clone());
             mirror.spawn();
+            janitor.spawn();
             let shown = publisher.clone();
             refresher = Some(Refresher::spawn(
                 node.clone(),
@@ -388,6 +424,7 @@ impl ClusterParts {
             delegate,
             remote,
             mirror,
+            janitor,
             publisher,
             refresher,
             handler,
@@ -413,6 +450,7 @@ impl ClusterParts {
         self.delegate.stop();
         self.shells.close();
         self.mirror.close();
+        self.janitor.close();
         if let Some(refresher) = &self.refresher {
             refresher.close();
         }

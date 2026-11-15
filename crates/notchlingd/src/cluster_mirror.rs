@@ -146,6 +146,7 @@ pub struct Mirror {
     clock: Clock,
     follows: Mutex<BTreeMap<String, Follow>>,
     seen: Mutex<BTreeMap<String, String>>,
+    offsets: Mutex<BTreeMap<String, u64>>,
     capped: Mutex<BTreeSet<String>>,
     cap: u64,
     on_cap: OnCap,
@@ -215,6 +216,7 @@ impl Mirror {
             clock,
             follows: Mutex::new(BTreeMap::new()),
             seen: Mutex::new(BTreeMap::new()),
+            offsets: Mutex::new(BTreeMap::new()),
             capped: Mutex::new(BTreeSet::new()),
             cap,
             on_cap,
@@ -283,6 +285,7 @@ impl Mirror {
         let _quiet = lock(&self.writing);
         lock(&self.follows).clear();
         lock(&self.seen).clear();
+        lock(&self.offsets).clear();
         lock(&self.capped).clear();
     }
 
@@ -320,6 +323,24 @@ impl Mirror {
         }
     }
 
+    fn resume_at(&self, key: &str, mirrored: u64) -> u64 {
+        match lock(&self.offsets).get(key) {
+            Some(offset) if mirrored > 0 => *offset,
+            _ => mirrored,
+        }
+    }
+
+    fn advance(&self, key: &str, next: u64) {
+        let mut book = lock(&self.offsets);
+        if book.len() >= MAX_SEEN && !book.contains_key(key) {
+            let oldest = book.keys().next().cloned();
+            if let Some(oldest) = oldest {
+                book.remove(&oldest);
+            }
+        }
+        book.insert(key.to_string(), next);
+    }
+
     fn store(
         &self,
         key: &str,
@@ -353,9 +374,10 @@ impl Mirror {
 
     fn pull_one(&self, key: &str, follow: &Follow, epoch: u64) {
         for _ in 0..MAX_ROUNDS {
-            let Some(from) = file_len(&follow.file) else {
+            let Some(mirrored) = file_len(&follow.file) else {
                 return;
             };
+            let from = self.resume_at(key, mirrored);
             let seen = lock(&self.seen).get(key).cloned();
             let Ok(out) = self
                 .source
@@ -378,6 +400,7 @@ impl Mirror {
             }
             let next = out.get("next").and_then(Value::as_u64).unwrap_or(0);
             let size = out.get("size").and_then(Value::as_u64).unwrap_or(0);
+            self.advance(key, next);
             if data.is_empty() || next >= size {
                 break;
             }

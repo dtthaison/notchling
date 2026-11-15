@@ -1,0 +1,153 @@
+use crate::cluster_redact::TailMasks;
+use crate::grant_broker::{Clock, View};
+use crate::grant_roots::{GrantMarks, JobRoots};
+use notchling_engine::cluster::grant_files::GrantStore;
+use notchling_engine::cluster::{ClusterState, JobState, NodeId};
+use std::collections::{BTreeMap, BTreeSet};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard};
+use std::time::{Duration, Instant};
+
+pub const SWEEP_EVERY: Duration = Duration::from_secs(30);
+const POLL_EVERY: Duration = Duration::from_secs(1);
+
+fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+pub struct GrantJanitor {
+    store: Arc<GrantStore>,
+    parts: (Arc<TailMasks>, Arc<GrantMarks>, Arc<JobRoots>),
+    view: Arc<dyn View>,
+    clock: Clock,
+    last: Mutex<Option<BTreeMap<String, JobState>>>,
+    nudged: Mutex<bool>,
+    wake: Condvar,
+    stop: AtomicBool,
+}
+
+fn mine(state: &ClusterState, me: &NodeId) -> BTreeMap<String, JobState> {
+    state
+        .jobs
+        .values()
+        .filter(|j| j.spec.node == *me)
+        .map(|j| (j.id.clone(), j.state))
+        .collect()
+}
+
+fn live_state(state: JobState) -> bool {
+    matches!(state, JobState::Running | JobState::Dispatching)
+}
+
+fn live_of(jobs: &BTreeMap<String, JobState>) -> BTreeSet<String> {
+    jobs.iter()
+        .filter(|(_, s)| live_state(**s))
+        .map(|(id, _)| id.clone())
+        .collect()
+}
+
+impl GrantJanitor {
+    pub fn new(
+        store: Arc<GrantStore>,
+        parts: (Arc<TailMasks>, Arc<GrantMarks>, Arc<JobRoots>),
+        view: Arc<dyn View>,
+        clock: Clock,
+    ) -> Arc<GrantJanitor> {
+        Arc::new(GrantJanitor {
+            store,
+            parts,
+            view,
+            clock,
+            last: Mutex::new(None),
+            nudged: Mutex::new(false),
+            wake: Condvar::new(),
+            stop: AtomicBool::new(false),
+        })
+    }
+
+    pub fn tick(&self) -> Result<usize, String> {
+        let now = (self.clock)();
+        let state = self.view.state();
+        let me = self.view.me();
+        let jobs = match (&state, &me) {
+            (Some(state), Some(me)) => mine(state, me),
+            _ => BTreeMap::new(),
+        };
+        let live = live_of(&jobs);
+        let swept = self.store.sweep(now, &live);
+        for job in self.parts.2.rooted() {
+            if jobs.get(&job).is_some_and(|s| !live_state(*s)) {
+                self.parts.2.end(&job);
+            }
+        }
+        if let Some(state) = &state {
+            for job in self.parts.1.list() {
+                if !state.jobs.contains_key(&job) {
+                    self.parts.0.forget_job(&job);
+                    self.parts.1.remove(&job);
+                } else if !live.contains(&job) {
+                    self.parts.0.end_job(&job);
+                }
+            }
+        }
+        *lock(&self.last) = Some(jobs);
+        swept
+    }
+
+    fn changed(&self) -> bool {
+        let now = match (self.view.state(), self.view.me()) {
+            (Some(state), Some(me)) => mine(&state, &me),
+            _ => BTreeMap::new(),
+        };
+        lock(&self.last).as_ref() != Some(&now)
+    }
+
+    pub fn nudge(&self) {
+        *lock(&self.nudged) = true;
+        self.wake.notify_all();
+    }
+
+    fn wait(&self) {
+        let mut nudged = lock(&self.nudged);
+        if !*nudged {
+            nudged = self
+                .wake
+                .wait_timeout(nudged, POLL_EVERY)
+                .unwrap_or_else(|e| e.into_inner())
+                .0;
+        }
+        *nudged = false;
+    }
+
+    pub fn spawn(self: &Arc<GrantJanitor>) {
+        let janitor = self.clone();
+        let spawned = std::thread::Builder::new()
+            .name("grant-janitor".into())
+            .spawn(move || {
+                let mut swept = Instant::now();
+                let _ = janitor.tick();
+                while !janitor.stop.load(Ordering::SeqCst) {
+                    janitor.wait();
+                    if janitor.stop.load(Ordering::SeqCst) {
+                        break;
+                    }
+                    if janitor.changed() || swept.elapsed() >= SWEEP_EVERY {
+                        let _ = janitor.tick();
+                        swept = Instant::now();
+                    }
+                }
+            });
+        if spawned.is_err() {
+            self.stop.store(true, Ordering::SeqCst);
+        }
+    }
+
+    pub fn close(&self) {
+        self.stop.store(true, Ordering::SeqCst);
+        self.nudge();
+    }
+}
+
+#[cfg(test)]
+#[path = "grant_janitor_tests.rs"]
+mod tests;
