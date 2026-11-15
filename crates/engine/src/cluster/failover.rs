@@ -120,9 +120,11 @@ impl PrimaryLease {
                 Some(Hold {
                     reported: Failover::Off,
                     ..
-                }) => {}
+                }) if !holders.contains_key(node) => {}
                 Some(Hold {
-                    until: Some(until), ..
+                    reported: Failover::After30m | Failover::After1h,
+                    until: Some(until),
+                    ..
                 }) => gate = gate.min(until.saturating_sub(FENCE_LEAD_MS)),
                 _ => return 0,
             }
@@ -170,6 +172,15 @@ impl Grantor {
                 .max(self.booted_at.saturating_add(delay)),
         )
     }
+}
+
+pub fn arming_id(state: &ClusterState) -> u64 {
+    let local = (state.term.n << 32) | ((state.seq + 1) & 0xFFFF_FFFF);
+    state
+        .holders
+        .values()
+        .max()
+        .map_or(local, |top| local.max(top.saturating_add(1)))
 }
 
 pub fn armed_at_current(state: &ClusterState) -> bool {

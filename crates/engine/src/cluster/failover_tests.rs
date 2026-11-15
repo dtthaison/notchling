@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
 
 use super::failover::{
-    auto_promote_due, failover_target, promote_safety, Failover, Grantor, PrimaryLease, Safety,
-    FENCE_LEAD_MS, REACH_MS, RENEW_MS,
+    arming_id, auto_promote_due, failover_target, promote_safety, Failover, Grantor, PrimaryLease,
+    Safety, FENCE_LEAD_MS, REACH_MS, RENEW_MS,
 };
 use super::id::NodeId;
 use super::members::Term;
@@ -60,11 +60,13 @@ fn set(state: &mut ClusterState, failover: Failover) {
 
 fn arm(state: &mut ClusterState, name: &str) {
     let term = state.term.clone();
+    let armed_id = arming_id(state);
     apply(
         state,
         Command::Armed {
             node: id(name),
             term,
+            id: armed_id,
         },
         310,
     )
@@ -179,14 +181,15 @@ fn off_never_expires() {
     let mut lease = PrimaryLease::new(0);
     let seq = lease.ask(&id("m1"), 1_000);
     lease.granted(&id("m1"), seq, Failover::Off, 0);
-    assert_eq!(lease.gates_until(&held()), u64::MAX);
+    assert_eq!(lease.gates_until(&held()), 0);
     assert_eq!(lease.gates_until(&BTreeMap::new()), u64::MAX);
     let on = lease.ask(&id("m1"), 31_000);
     lease.granted(&id("m1"), on, Failover::After1h, 0);
     assert_ne!(lease.gates_until(&held()), u64::MAX);
     let off = lease.ask(&id("m1"), 61_000);
     lease.granted(&id("m1"), off, Failover::Off, 0);
-    assert_eq!(lease.gates_until(&held()), u64::MAX);
+    assert_eq!(lease.gates_until(&held()), 0);
+    assert_eq!(lease.gates_until(&BTreeMap::new()), u64::MAX);
 }
 
 #[test]
@@ -547,7 +550,8 @@ fn turning_on_arms_only_after_a_grant() {
             &mut state,
             Command::Armed {
                 node: id("m1"),
-                term: term.clone()
+                term: term.clone(),
+                id: 1,
             },
             320
         )
@@ -598,6 +602,7 @@ fn arming_is_checked_and_idempotent() {
             Command::Armed {
                 node: id(node),
                 term: at,
+                id: 1,
             },
             330,
         );
@@ -606,11 +611,13 @@ fn arming_is_checked_and_idempotent() {
     assert_eq!(state.armed, None);
     arm(&mut state, "m1");
     let seq = state.seq;
+    let same = state.holders[&id("m1")];
     let again = apply(
         &mut state,
         Command::Armed {
             node: id("m1"),
             term,
+            id: same,
         },
         340,
     )
@@ -674,6 +681,7 @@ fn failover_and_arming_survive_the_cluster_db() {
         Command::Armed {
             node: m1.id.clone(),
             term: state.term.clone(),
+            id: 7,
         },
     ];
     for command in commands {

@@ -95,6 +95,8 @@ pub enum Command {
     Armed {
         node: NodeId,
         term: Term,
+        #[serde(default)]
+        id: u64,
     },
     Released {
         node: NodeId,
@@ -208,9 +210,8 @@ impl ClusterState {
         if self.armed.take().is_some() {
             changes.push(Change::Armed(None));
         }
-        if !self.holders.is_empty() {
-            self.holders.clear();
-            changes.push(Change::Holders(BTreeMap::new()));
+        if self.holders.remove(&self.home).is_some() {
+            changes.push(Change::Holders(self.holders.clone()));
         }
     }
 
@@ -449,19 +450,23 @@ pub fn apply(
             state.armed = None;
             vec![Change::Failover(*failover), Change::Armed(None)]
         }
-        Command::Armed { node, term } => {
+        Command::Armed { node, term, id } => {
             if *term != state.term || state.failover == Failover::Off || *node == state.home {
+                return Err(CommandError::BadTransition);
+            }
+            let held = state.holders.get(node).copied();
+            if held.is_some_and(|h| *id < h) {
                 return Err(CommandError::BadTransition);
             }
             if !active_mut(state, node)?.can_be_master {
                 return Err(CommandError::BadTransition);
             }
             let armed = Some((node.clone(), term.clone()));
-            if state.armed == armed && state.holders.contains_key(node) {
+            if state.armed == armed && held == Some(*id) {
                 return Ok(Applied::none());
             }
             state.armed = armed.clone();
-            state.holders.insert(node.clone(), state.seq + 1);
+            state.holders.insert(node.clone(), *id);
             vec![Change::Armed(armed), Change::Holders(state.holders.clone())]
         }
         Command::Released { node, seen } => {

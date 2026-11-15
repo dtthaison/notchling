@@ -143,7 +143,7 @@ pub fn load(cluster_dir: &Path) -> Result<Option<ClusterState>, String> {
     };
     let holders = match get("holders")? {
         Some(value) => read::<BTreeMap<NodeId, u64>>(&value)?,
-        None => BTreeMap::new(),
+        None => armed.iter().map(|(node, _)| (node.clone(), 0)).collect(),
     };
     Ok(Some(ClusterState {
         id: read(&id)?,
