@@ -9,6 +9,7 @@ use notchling_engine::cluster::persist;
 use notchling_engine::cluster::wire::WireError;
 use notchling_engine::cluster::{NodeId, Qualified};
 use serde_json::{json, Value};
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex, Weak};
@@ -16,6 +17,9 @@ use std::time::Duration;
 
 pub const SEND_WAIT: Duration = Duration::from_secs(10);
 pub const NOTICES_KEPT: usize = 20;
+pub const NOTICES_PER_DEVICE: usize = 10;
+pub const STAY_FIRST_MS: i64 = 15_000;
+pub const STAY_CAP_MS: i64 = 300_000;
 
 const UNREACHABLE: [&str; 3] = ["offline", "no_cluster", "not_sent"];
 
@@ -35,6 +39,7 @@ pub trait SetView: Send + Sync {
     fn transcript(&self, original: &Path) -> Option<PathBuf>;
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Served {
     pub port: u16,
     pub fingerprint: Option<String>,
@@ -94,9 +99,16 @@ pub struct HeldRelay {
     queue: Mutex<HeldQueue>,
     flight: Mutex<Vec<Held>>,
     notices: Mutex<Vec<HeldNoticeView>>,
+    stays: Mutex<BTreeMap<String, Stay>>,
+    routing: Mutex<()>,
     signal: Arc<Signal>,
     flushing: AtomicBool,
     next: AtomicU64,
+}
+
+struct Stay {
+    tries: u32,
+    retry_ms: i64,
 }
 
 struct Ctx {
@@ -149,6 +161,7 @@ enum Outcome {
     Down,
     Stay,
     Drop(String),
+    Unsure(String),
 }
 
 fn bare(id: &str) -> String {
@@ -200,6 +213,8 @@ impl HeldRelay {
             queue: Mutex::new(queue),
             flight: Mutex::new(Vec::new()),
             notices: Mutex::new(Vec::new()),
+            stays: Mutex::new(BTreeMap::new()),
+            routing: Mutex::new(()),
             signal: Arc::new(Signal::default()),
             flushing: AtomicBool::new(false),
             next: AtomicU64::new(0),
@@ -291,9 +306,11 @@ impl HeldRelay {
         if !ctx.reachable() {
             return;
         }
+        let rows = (self.parts.rows)();
+        let resting = self.resting(&ctx, &rows);
         let due = {
             let mut queue = lock(&self.queue);
-            let due = queue.take_due(self.now());
+            let due = queue.take_due_except(self.now(), &resting);
             if due.is_empty() {
                 return;
             }
@@ -301,7 +318,6 @@ impl HeldRelay {
             self.save(&queue);
             due
         };
-        let rows = (self.parts.rows)();
         let mut back = Vec::new();
         let mut stopped = false;
         for held in due {
@@ -312,11 +328,20 @@ impl HeldRelay {
             match self.deliver(&ctx, &rows, &held) {
                 Outcome::Sent => self.landed(&held),
                 Outcome::Down => {
+                    lock(&self.stays).remove(&held.id);
                     stopped = true;
                     back.push(held);
                 }
-                Outcome::Stay => back.push(held),
+                Outcome::Stay => {
+                    self.rest(&held.id);
+                    back.push(held);
+                }
                 Outcome::Drop(reason) => {
+                    lock(&self.queue).forget_sent(&held.device, &held.request);
+                    self.notice(&held, reason);
+                    self.landed(&held);
+                }
+                Outcome::Unsure(reason) => {
                     self.notice(&held, reason);
                     self.landed(&held);
                 }
@@ -331,7 +356,41 @@ impl HeldRelay {
     }
 
     fn landed(&self, held: &Held) {
+        lock(&self.stays).remove(&held.id);
         lock(&self.flight).retain(|h| h.id != held.id);
+    }
+
+    fn rest(&self, id: &str) {
+        let now = self.now();
+        let mut stays = lock(&self.stays);
+        let tries = stays.get(id).map_or(0, |stay| stay.tries).saturating_add(1);
+        let wait = (STAY_FIRST_MS << (tries - 1).min(5)).min(STAY_CAP_MS);
+        stays.insert(
+            id.to_string(),
+            Stay {
+                tries,
+                retry_ms: now + wait,
+            },
+        );
+    }
+
+    fn resting(&self, ctx: &Ctx, rows: &[String]) -> BTreeSet<String> {
+        if lock(&self.stays).is_empty() {
+            return BTreeSet::new();
+        }
+        let entries = lock(&self.queue).list();
+        let now = self.now();
+        let mut stays = lock(&self.stays);
+        stays.retain(|id, _| entries.iter().any(|e| e.id == *id));
+        entries
+            .iter()
+            .filter(|e| stays.get(&e.id).is_some_and(|stay| stay.retry_ms > now))
+            .filter(|e| match &e.target {
+                HeldTarget::Session(session) => self.place(ctx, rows, session).is_none(),
+                HeldTarget::Primary => false,
+            })
+            .map(|e| e.id.clone())
+            .collect()
     }
 
     fn notice(&self, held: &Held, reason: String) {
@@ -341,6 +400,15 @@ impl HeldRelay {
             device: held.device.clone(),
             reason,
             at_ms: self.now(),
+        });
+        let mut mine = notices.iter().filter(|n| n.device == held.device).count();
+        notices.retain(|n| {
+            if n.device == held.device && mine > NOTICES_PER_DEVICE {
+                mine -= 1;
+                false
+            } else {
+                true
+            }
         });
         let over = notices.len().saturating_sub(NOTICES_KEPT);
         notices.drain(..over);
@@ -432,7 +500,7 @@ impl HeldRelay {
         match self.parts.wire.call(&target, op, args, SEND_WAIT) {
             Ok(_) => Outcome::Sent,
             Err(e) if UNREACHABLE.contains(&e.code.as_str()) => Outcome::Down,
-            Err(e) if e.code == "timeout" => Outcome::Drop(format!(
+            Err(e) if e.code == "timeout" => Outcome::Unsure(format!(
                 "{} didn't answer; check whether \"{}\" arrived",
                 ctx.primary_name,
                 act.summary()
@@ -600,25 +668,37 @@ impl Relay for HeldRelay {
             return Routed::Local;
         }
         let ident = self.ident(call);
-        let found = lock(&self.queue).find(call.device, &ident);
-        match found {
-            Some(Found::Held(held)) => {
-                return Routed::Held(HeldRef {
-                    id: held.id,
-                    at_ms: held.at_ms,
-                })
+        let (op, args) = {
+            let _gate = lock(&self.routing);
+            let found = lock(&self.queue).find(call.device, &ident);
+            match found {
+                Some(Found::Held(held)) => {
+                    return Routed::Held(HeldRef {
+                        id: held.id,
+                        at_ms: held.at_ms,
+                    })
+                }
+                Some(Found::Delivered(_)) => return Routed::Done(done(call.act)),
+                None => {}
             }
-            Some(Found::Delivered(_)) => return Routed::Done(done(call.act)),
-            None => {}
-        }
-        if !ctx.primary_online || self.blocked(call.act) {
-            return self.hold(call, &ident, &ctx);
-        }
-        let Ok((op, args)) = self.request(call.act, &ctx.primary) else {
-            return Routed::Fail(BridgeFailure::invalid("That can't be sent."));
+            if !ctx.primary_online || self.blocked(call.act) {
+                return self.hold(call, &ident, &ctx);
+            }
+            let Ok(request) = self.request(call.act, &ctx.primary) else {
+                return Routed::Fail(BridgeFailure::invalid("That can't be sent."));
+            };
+            {
+                let mut queue = lock(&self.queue);
+                queue.note_sent(&self.new_id(), call.device, &ident);
+                self.save(&queue);
+            }
+            request
         };
-        lock(&self.queue).note_sent(&self.new_id(), call.device, &ident);
-        let forget = || lock(&self.queue).forget_sent(call.device, &ident);
+        let forget = || {
+            let mut queue = lock(&self.queue);
+            queue.forget_sent(call.device, &ident);
+            self.save(&queue);
+        };
         match self.parts.wire.call(&ctx.primary, op, args, SEND_WAIT) {
             Ok(_) => Routed::Done(done(call.act)),
             Err(e) if UNREACHABLE.contains(&e.code.as_str()) => {
@@ -762,3 +842,15 @@ impl Relay for HeldRelay {
 #[cfg(test)]
 #[path = "cluster_relay_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "cluster_relay_prompts_tests.rs"]
+mod prompts_tests;
+
+#[cfg(test)]
+#[path = "cluster_relay_phone_tests.rs"]
+mod phone_tests;
+
+#[cfg(test)]
+#[path = "cluster_relay_retry_tests.rs"]
+mod retry_tests;

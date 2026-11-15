@@ -3,6 +3,7 @@ use serde_json::Value;
 
 pub const HELD_STALE_MS: i64 = 3_600_000;
 pub const MAX_DELIVERED: usize = 256;
+pub const MAX_DELIVERED_PER_DEVICE: usize = 64;
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "snake_case")]
@@ -68,6 +69,24 @@ impl HeldQueue {
             id: id.to_string(),
             device: device.to_string(),
             request: request.to_string(),
+        });
+        self.trim_delivered();
+    }
+
+    fn trim_delivered(&mut self) {
+        let mut counts: std::collections::BTreeMap<String, usize> =
+            std::collections::BTreeMap::new();
+        for done in &self.delivered {
+            *counts.entry(done.device.clone()).or_default() += 1;
+        }
+        self.delivered.retain(|done| {
+            let count = counts.entry(done.device.clone()).or_default();
+            if *count > MAX_DELIVERED_PER_DEVICE {
+                *count -= 1;
+                false
+            } else {
+                true
+            }
         });
         let over = self.delivered.len().saturating_sub(MAX_DELIVERED);
         self.delivered.drain(..over);
@@ -148,11 +167,21 @@ impl HeldQueue {
     }
 
     pub fn take_due(&mut self, now_ms: i64) -> Vec<Held> {
+        self.take_due_except(now_ms, &std::collections::BTreeSet::new())
+    }
+
+    pub fn take_due_except(
+        &mut self,
+        now_ms: i64,
+        resting: &std::collections::BTreeSet<String>,
+    ) -> Vec<Held> {
         let mut due = Vec::new();
         let mut confirmed: Vec<(usize, Held)> = Vec::new();
         let mut kept = Vec::new();
         for entry in std::mem::take(&mut self.entries) {
-            if !stale(&entry, now_ms) {
+            if resting.contains(&entry.id) {
+                kept.push(entry);
+            } else if !stale(&entry, now_ms) {
                 due.push(entry);
             } else if let Some(rank) = self.confirmed.iter().position(|c| *c == entry.id) {
                 confirmed.push((rank, entry));
@@ -215,8 +244,7 @@ impl HeldQueue {
                 self.delivered.push(done.clone());
             }
         }
-        let over = self.delivered.len().saturating_sub(MAX_DELIVERED);
-        self.delivered.drain(..over);
+        self.trim_delivered();
     }
 
     fn record(&mut self, sent: &[Held]) {
@@ -225,7 +253,6 @@ impl HeldQueue {
             device: h.device.clone(),
             request: h.request.clone(),
         }));
-        let over = self.delivered.len().saturating_sub(MAX_DELIVERED);
-        self.delivered.drain(..over);
+        self.trim_delivered();
     }
 }

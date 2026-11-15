@@ -123,7 +123,12 @@ fn cancel_after_delivery_reports_delivered() {
 fn the_delivered_record_keeps_only_the_newest() {
     let mut queue = HeldQueue::default();
     for n in 0..MAX_DELIVERED + 2 {
-        queue.hold(held(&format!("h{n}"), "d1", &format!("r{n}"), 1));
+        queue.hold(held(
+            &format!("h{n}"),
+            &format!("d{}", n % 5),
+            &format!("r{n}"),
+            1,
+        ));
         queue.take_all();
     }
     assert!(!queue.was_delivered("h0"));
@@ -267,4 +272,30 @@ fn ownership_and_forgetting_are_per_phone() {
     queue.forget_sent("d1", "k:two");
     assert!(!queue.delivered_to("x", "d1"));
     assert_eq!(queue.find("d1", "k:two"), None);
+}
+
+#[test]
+fn one_device_cannot_push_another_devices_delivered_record_out() {
+    use super::held::MAX_DELIVERED_PER_DEVICE;
+    let mut queue = HeldQueue::default();
+    queue.note_sent("theirs", "d2", "r0");
+    for n in 0..(MAX_DELIVERED_PER_DEVICE + 30) {
+        queue.note_sent(&format!("m{n}"), "d1", &format!("r{n}"));
+    }
+    assert!(queue.was_delivered("theirs"));
+    assert!(!queue.was_delivered("m0"));
+    assert!(queue.was_delivered(&format!("m{}", MAX_DELIVERED_PER_DEVICE + 29)));
+    assert!(MAX_DELIVERED_PER_DEVICE < MAX_DELIVERED);
+}
+
+#[test]
+fn take_due_except_leaves_the_resting_entries_untouched() {
+    let mut queue = HeldQueue::default();
+    queue.hold(held("a", "d1", "r1", 1));
+    queue.hold(held("b", "d1", "r2", 2));
+    let resting = std::collections::BTreeSet::from(["a".to_string()]);
+    let due = queue.take_due_except(3, &resting);
+    assert_eq!(ids(&due), ["b"]);
+    assert_eq!(ids(&queue.list()), ["a"]);
+    assert!(!queue.was_delivered("a"));
 }

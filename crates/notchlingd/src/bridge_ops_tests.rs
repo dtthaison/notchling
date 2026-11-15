@@ -617,3 +617,55 @@ fn bridge_set_pushes_switch_changed_with_its_cause() {
         Some("restored_at_launch")
     );
 }
+
+#[test]
+fn the_served_probe_reads_a_cache_set_when_the_bridge_starts_or_stops() {
+    let dir = scratch("served");
+    swift_folder(&dir.0.join("AgentConsole"));
+    let (lan, tunnel) = free_ports();
+    let (ops, _) = bridge_ops(&dir.0, lan, tunnel);
+    let off = ops.served();
+    assert_eq!((off.port, off.fingerprint.clone()), (lan, None));
+    ops.call(ops::BRIDGE_SET, &json!({"on": true})).unwrap();
+    let on = ops.served();
+    assert_eq!(on.port, lan);
+    assert_eq!(on.fingerprint.as_deref().map(str::len), Some(64));
+    ops.call(ops::BRIDGE_SET, &json!({"on": false})).unwrap();
+    assert_eq!(ops.served(), off);
+    ops.call(ops::BRIDGE_SET, &json!({"on": true})).unwrap();
+    assert_eq!(ops.served(), on);
+    ops.close();
+    assert_eq!(ops.served(), off);
+}
+
+#[test]
+fn a_bridge_that_fails_to_start_serves_no_fingerprint() {
+    let dir = scratch("served-failed");
+    let (lan, tunnel) = free_ports();
+    let (ops, _) = bridge_ops(&dir.0, lan, tunnel);
+    let status = ops.call(ops::BRIDGE_SET, &json!({"on": true})).unwrap();
+    assert_eq!(status["state"], "failed", "{status}");
+    assert_eq!(ops.served().fingerprint, None);
+}
+
+#[test]
+fn the_served_probe_never_waits_on_the_bridge() {
+    let dir = scratch("served-wait");
+    swift_folder(&dir.0.join("AgentConsole"));
+    let (lan, tunnel) = free_ports();
+    let (ops, _) = bridge_ops(&dir.0, lan, tunnel);
+    let ops = Arc::new(ops);
+    ops.call(ops::BRIDGE_SET, &json!({"on": true})).unwrap();
+    let flip = {
+        let ops = ops.clone();
+        std::thread::spawn(move || {
+            for n in 0..6 {
+                let _ = ops.call(ops::BRIDGE_SET, &json!({"on": n % 2 == 1}));
+            }
+        })
+    };
+    for _ in 0..2_000 {
+        assert_eq!(ops.served().port, lan);
+    }
+    flip.join().unwrap();
+}

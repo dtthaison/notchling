@@ -46,6 +46,7 @@ pub struct BridgeOps {
     room: Arc<dyn Room>,
     cluster: Arc<PhoneCluster>,
     lan_port: u16,
+    served: Mutex<crate::cluster_relay::Served>,
     replica: Arc<OnceLock<Replica>>,
     events: Option<Events>,
 }
@@ -100,6 +101,10 @@ impl BridgeOps {
             room,
             cluster,
             lan_port: setup.lan_port,
+            served: Mutex::new(crate::cluster_relay::Served {
+                port: setup.lan_port,
+                fingerprint: None,
+            }),
             events: None,
         }
     }
@@ -109,10 +114,20 @@ impl BridgeOps {
     }
 
     pub fn served(&self) -> crate::cluster_relay::Served {
-        let status = self.bridge.status();
-        let port = self.bridge.ports().map_or(self.lan_port, |(lan, _)| lan);
+        self.served
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+
+    fn remember(&self, status: &Value) {
+        let port = status["port"]
+            .as_u64()
+            .and_then(|port| u16::try_from(port).ok())
+            .unwrap_or(self.lan_port);
         let fingerprint = status["fingerprint"].as_str().map(str::to_string);
-        crate::cluster_relay::Served { port, fingerprint }
+        *self.served.lock().unwrap_or_else(|e| e.into_inner()) =
+            crate::cluster_relay::Served { port, fingerprint };
     }
 
     pub fn with_node_identity(mut self, dir: PathBuf) -> BridgeOps {
@@ -159,6 +174,7 @@ impl BridgeOps {
                     self.approvals.refuse_all();
                 }
                 let status = self.bridge.set(on);
+                self.remember(&status);
                 if let Some(events) = &self.events {
                     let cause = match args.get("restored").and_then(Value::as_bool) {
                         Some(true) => SwitchCause::RestoredAtLaunch,
@@ -206,7 +222,8 @@ impl BridgeOps {
     pub fn close(&self) {
         self.bridge.halt();
         self.approvals.refuse_all();
-        self.bridge.set(false);
+        let status = self.bridge.set(false);
+        self.remember(&status);
     }
 }
 
