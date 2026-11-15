@@ -2,7 +2,7 @@ use serde_json::{json, Value};
 
 use super::{Effect, Input, LocalCmd, NodeCore, CALL_MS, DEDUPE_MS, PING_MS, WORKSPACE_CALL_MS};
 use crate::cluster::id::{NodeId, Tool};
-use crate::cluster::members::Term;
+use crate::cluster::members::{MemberState, Term};
 use crate::cluster::testkit::{id, versions};
 use crate::cluster::wire::{Msg, Origin, OriginTier};
 
@@ -755,4 +755,70 @@ fn the_primarys_armed_flag_is_forgotten_with_its_term() {
         },
     );
     assert_eq!(hub.core(&w1).status()["failover"]["armed"], false);
+}
+
+fn removed_list(hub: &Hub, who: &NodeId, source: &NodeId) -> Vec<crate::cluster::members::Member> {
+    let mut members: Vec<_> = hub
+        .core(source)
+        .state()
+        .expect("state")
+        .members
+        .values()
+        .cloned()
+        .collect();
+    for member in members.iter_mut().filter(|m| m.id == *who) {
+        member.state = MemberState::Removed;
+    }
+    members
+}
+
+#[test]
+fn a_forged_members_push_cannot_wipe_a_node() {
+    let (mut hub, m5, w1) = pair();
+    let on_primary = hub.run(
+        &m5,
+        Input::Msg {
+            from: w1.clone(),
+            msg: Msg::Members {
+                term: Term {
+                    n: 2,
+                    node: id("w1"),
+                },
+                home: w1.clone(),
+                vault: None,
+                members: removed_list(&hub, &m5, &m5),
+                failover: None,
+                armed: false,
+            },
+        },
+    );
+    assert!(refused_reply(&on_primary));
+    assert!(!on_primary.iter().any(|e| matches!(e, Effect::Wipe)));
+    assert_eq!(hub.core(&m5).state().expect("state").home, m5);
+
+    let (mut hub, m5, w1) = pair();
+    let w2 = hub.add("w2", "linux", false);
+    hub.join("m5", "w2", "linux", false);
+    hub.linked.push((w1.clone(), w2.clone()));
+    hub.run(&w1, Input::Linked { peer: w2.clone() });
+    hub.run(&w2, Input::Linked { peer: w1.clone() });
+    let state = hub.core(&w1).state().expect("state").clone();
+    assert_eq!(state.home, m5);
+    let forged = hub.run(
+        &w1,
+        Input::Msg {
+            from: w2.clone(),
+            msg: Msg::Members {
+                term: state.term.clone(),
+                home: w2.clone(),
+                vault: None,
+                members: removed_list(&hub, &w1, &m5),
+                failover: None,
+                armed: false,
+            },
+        },
+    );
+    assert!(refused_reply(&forged), "{forged:?}");
+    assert!(!forged.iter().any(|e| matches!(e, Effect::Wipe)));
+    assert_eq!(hub.core(&w1).state().expect("state").home, m5);
 }

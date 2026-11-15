@@ -415,15 +415,19 @@ impl NodeCore {
             return;
         }
         let (id, name, old_vault) = (state.id.clone(), state.name.clone(), state.vault.clone());
+        if home != term.node || !self.adopt(&term, out) {
+            self.refuse(&from, "bad_term", false, out);
+            return;
+        }
+        if self.state.as_ref().is_none_or(|s| s.home != from) {
+            self.refuse(&from, "bad_term", false, out);
+            return;
+        }
         let removed = members
             .iter()
             .any(|m| m.id == self.me && m.state == MemberState::Removed);
         if removed {
             self.wipe(out);
-            return;
-        }
-        if home != term.node || !self.adopt(&term, out) {
-            self.refuse(&from, "bad_term", false, out);
             return;
         }
         let _ = self.apply(
