@@ -81,6 +81,10 @@ pub mod settings_asks;
 pub mod settings_cli;
 pub mod settings_ops;
 pub mod signals;
+pub mod snap_copy;
+pub mod snap_db;
+pub mod snap_files;
+pub mod snap_repo;
 pub mod switches;
 pub mod vault_args;
 pub mod vault_caller;
@@ -195,6 +199,18 @@ mod reply_clear_tests;
 mod reply_screen_tests;
 #[cfg(test)]
 mod session_of_tests;
+#[cfg(all(test, unix))]
+mod snap_copy_tests;
+#[cfg(all(test, unix))]
+mod snap_files_safety_tests;
+#[cfg(all(test, unix))]
+mod snap_files_stage_tests;
+#[cfg(all(test, unix))]
+mod snap_files_tests;
+#[cfg(all(test, unix))]
+mod snap_repo_safety_tests;
+#[cfg(all(test, unix))]
+mod snap_repo_tests;
 #[cfg(test)]
 mod vault_ops_lock_tests;
 #[cfg(test)]
