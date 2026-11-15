@@ -89,6 +89,7 @@ pub const HOMES: &[(&str, Home)] = &[
     (ops::VAULT_REQUEST_CANCEL, Home::Kind("inbox.closed")),
     (ops::VAULT_PENDING, Home::Quiet),
     (ops::CATALOG_GET, Home::Quiet),
+    (ops::CATALOG_ROLES, Home::Quiet),
     (ops::INBOX_LIST, Home::Quiet),
     (ops::INBOX_ANSWER, Home::Kind("inbox.closed")),
     (ops::INBOX_SEEN, Home::Called),

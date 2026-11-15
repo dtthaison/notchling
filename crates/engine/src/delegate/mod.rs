@@ -12,6 +12,7 @@ pub mod progress;
 pub mod real;
 pub mod record;
 pub mod role_models;
+pub mod role_view;
 pub mod second_opinion;
 pub mod second_opinion_host;
 pub mod second_opinion_store;

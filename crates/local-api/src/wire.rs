@@ -94,6 +94,7 @@ pub mod ops {
     pub const VAULT_PENDING: &str = "vault.pending";
 
     pub const CATALOG_GET: &str = "catalog.get";
+    pub const CATALOG_ROLES: &str = "catalog.roles";
 
     pub const INBOX_LIST: &str = "inbox.list";
     pub const INBOX_ANSWER: &str = "inbox.answer";

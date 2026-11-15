@@ -115,7 +115,7 @@ first. The first start after the upgrade imports the old `audit.jsonl`, `remote-
 An app-tier call is recorded as an event (Audit and Activity) unless its spec is `OpSpec::APP_QUIET` and it succeeded.
 These read-only polls are quiet: `awake.state`, `bridge.status`, `bridge.devices`, `bridge.tunnel.status`,
 `accounts.list`, `lanes.list`, `providers.list`, `providers.usage`, `limits.status`, `limits.usage`,
-`git.status`, `git.diff`, `activity.list`, `codex.children` and `versions.workers`. A call to `accounts.list` or `providers.list` with
+`git.status`, `git.diff`, `activity.list`, `catalog.roles`, `codex.children` and `versions.workers`. A call to `accounts.list` or `providers.list` with
 `sync: true`, or to `providers.usage` or `limits.usage` with `refresh: true`, reads Keychain and the network,
 so it is logged. Failures and refusals of a quiet op are logged too. No op that acts, writes or touches the
 vault is quiet.
@@ -190,6 +190,7 @@ file and the daemon's own cache, and the one thing it writes is that cache.
 | Op | Tier | Args | Reply |
 | --- | --- | --- | --- |
 | `catalog.get` | agent | `{tool: "claude" \| "codex" \| "antigravity"}` | see below |
+| `catalog.roles` | app (quiet) | `{}` | `{roles, override}`, see below |
 
 | Event | Topic | Body | When |
 | --- | --- | --- | --- |
@@ -233,6 +234,28 @@ file and the daemon's own cache, and the one thing it writes is that cache.
   `claude-` id, another tool's is its whole id), `windows` and `names` (objects keyed by the
   full model id). An entry that doesn't parse, or a negative price, is skipped alone.
 - Codex and Antigravity models also carry roles for `notchling delegate-models --for <role>`: `picks` (`{"model": "gemini-4-hydrogen", "effort": "high", "roles": ["review"], "use": "one line"}`) and `not_for` (`{"match": "flash", "roles": ["review"]}` or `{"effort": "ultra", "roles": ["review"]}`). In the override file a pick replaces the compiled-in ones for the same model id (empty `roles` removes them) and may name a model only the live list reports; a `not_for` entry replaces the one with the same `match` and `effort` (empty `roles` removes it). A role never lets a session start on a model the allowlist refuses; it only names one. The command line (`delegate-models`, no daemon) reads the same file; `--for` reads the data file, then the override, then the live list: a marked model that is gone gives way to the provider's own replacement (Codex's `upgrade`) or the newest live model of its family (the codename word, the number compared numerically: `gemini-4-hydrogen` to `gemini-4.1-hydrogen`), said in a `note:` line; a newer family model while the marked one is live is a note only.
+- `catalog.roles` is what Settings > Skills & Models shows under Models by Job: the choice `notchling
+  delegate-models --for <role>` makes for each role, with where it came from. It reads the user's
+  `catalog.json` afresh on every call (so an edit shows at once, unlike prices and windows, which
+  are read at daemon start), the data file, Codex's `models_cache.json` (with its `upgrade` hints) and
+  Antigravity's cached list. Read only, app tier, quiet.
+
+  ```json
+  {"roles": [{"role": "review", "choices": [
+      {"tool": "antigravity", "marked": "gemini-4-hydrogen", "model": "gemini-4.1-hydrogen",
+       "effort": "high", "source": "live", "note": "gemini-4-hydrogen is gone; using gemini-4.1-hydrogen (same family, newer)",
+       "advice": "Review after each task. ...", "checked": true}]}],
+   "override": {"path": "/…/Notchling/catalog.json", "state": "missing" | "found" | "unreadable"}}
+  ```
+
+  `roles` lists `review`, `review-final`, `review-secrets` and `spec-check` first, then any other
+  role the catalog marks; a role with no pick has `choices: []`. `source` is `override` when the pick
+  is the user's own entry, `live` when the marked model is gone and its successor stands in, else
+  `built_in`. `model` is `null` when nothing live is in the marked model's family. `checked` is
+  false while the tool's live list is unknown (Antigravity's, until a session reported it): `model`
+  is then the marked one, not verified. `note` is English text from the engine, the same as the
+  command line's `note:` line. `override.state` is `unreadable` for a file the loaders skip (not
+  JSON, or not an object).
 - The same catalog is read elsewhere in the daemon: `cost.summary`'s prices (`cost_ops`), the
   `session.new --model` check (`control_ops`, through [`CatalogService::is_allowed`]: the
   built-in models plus the live lists, a Claude id in the shape `[a-z][a-z0-9.-]*` with an
@@ -543,6 +566,13 @@ start, and until the maintainer turns it on the Swift app owns both (decision 00
 (`PreToolUse` `AskUserQuestion` and `PermissionRequest` `*`), `page_hooks` (`PreToolUse`,
 `PostToolUse` and `PostToolUseFailure` matching `Artifact`) and the skills' folder names
 (`notchling-delegate`, `notchling-pages`, `notchling-settings` (Claude Code and Codex), and `notchling-vault` once the vault supplies it).
+
+Settings > Skills & Models lists the skills with `install.plan` (no `what`, so it also plans the
+hooks it ignores) and its Reinstall Skills button sends `install.apply {what: [<every skill name the
+plan listed>]}`, which leaves the hook entries alone. With the switch off the reply says so and nothing is
+written. A skill's `action` reads as: `unchanged` installed, `update` out of date, `write` not installed,
+`skip` with the reason "the tool is not installed here" the tool is missing, any other `skip` a folder
+Notchling doesn't own, left alone.
 
 The envelope:
 

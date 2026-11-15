@@ -5,8 +5,11 @@ use crate::switches::SwitchFlag;
 use notchling_engine::accounts::claude::ClaudeAccounts;
 use notchling_engine::accounts::http::{HttpClient, HttpRequest, HttpResponse};
 use notchling_engine::catalog::live_cache::{refresh_due, LiveCache};
+use notchling_engine::catalog::roles::Roles;
 use notchling_engine::catalog::{claude_code, claude_live};
-use notchling_engine::catalog::{model_key, Catalog, LiveModel, ModelInfo, Tool};
+use notchling_engine::catalog::{model_key, override_file, Catalog, LiveModel, ModelInfo, Tool};
+use notchling_engine::delegate::role_models::{codex_hints, Live};
+use notchling_engine::delegate::role_view;
 use notchling_engine::tools::agy::ConfigOption;
 use notchling_engine::tools::codex::models as codex_models;
 use notchling_local_api::{ops, topics, ApiError, Caller, OpSpec};
@@ -155,6 +158,7 @@ pub struct CatalogService {
     codex: Held,
     claude_code: Option<PathBuf>,
     claude_code_list: Held,
+    override_file: Option<PathBuf>,
     spawner: Spawner,
 }
 
@@ -184,6 +188,7 @@ impl CatalogService {
             codex: Mutex::new(None),
             claude_code: None,
             claude_code_list: Mutex::new(None),
+            override_file: None,
             spawner: thread_spawner(),
         }
     }
@@ -216,6 +221,13 @@ impl CatalogService {
         )
         .with_room(room)
         .with_claude_code_config(config)
+        .with_override_file(state.join("catalog.json"))
+    }
+
+    /// The user's `catalog.json`, which `catalog.roles` reads afresh on every call.
+    pub fn with_override_file(mut self, file: PathBuf) -> CatalogService {
+        self.override_file = Some(file);
+        self
     }
 
     pub fn with_claude_code_config(mut self, file: PathBuf) -> CatalogService {
@@ -395,12 +407,41 @@ impl CatalogService {
     }
 }
 
+impl CatalogService {
+    /// What each model role resolves to now, and the override file's place and state.
+    fn roles(&self) -> Value {
+        let file = self.override_file.as_deref();
+        let roles = Roles::load(file);
+        let live = |tool: Tool, hints: Vec<(String, String)>| Live {
+            models: self.live(tool).1.into_iter().map(|m| m.id).collect(),
+            hints,
+        };
+        let codex = live(Tool::Codex, codex_hints(&self.codex_dir));
+        let agy = live(Tool::Antigravity, Vec::new());
+        let views = role_view::views(&roles, &Roles::built_in(), &codex, &agy);
+        json!({
+            "roles": role_view::to_json(&views),
+            "override": {
+                "path": file.map(|f| f.to_string_lossy().into_owned()),
+                "state": file.map_or("missing", |f| override_file::state(f).as_str()),
+            },
+        })
+    }
+}
+
 impl OpGroup for CatalogService {
     fn spec(&self, op: &str) -> Option<OpSpec> {
-        (op == ops::CATALOG_GET).then_some(OpSpec::AGENT)
+        match op {
+            ops::CATALOG_GET => Some(OpSpec::AGENT),
+            ops::CATALOG_ROLES => Some(OpSpec::APP_QUIET),
+            _ => None,
+        }
     }
 
     fn call(&self, _caller: &Caller, op: &str, args: &Value) -> Result<Value, ApiError> {
+        if op == ops::CATALOG_ROLES {
+            return Ok(self.roles());
+        }
         if op != ops::CATALOG_GET {
             return Err(ApiError::internal(format!("{op} has no handler")));
         }
