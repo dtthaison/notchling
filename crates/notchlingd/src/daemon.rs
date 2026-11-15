@@ -331,6 +331,7 @@ pub fn run(
     let mut watch = start_watch(&watched, options.watch);
     scan(&mut lister, &options, &sessions, &wired.cluster);
     first_scan.finish();
+    wired.cluster.recover_moves();
     let mut last_poll = Instant::now();
     while !stop() {
         if let Some(log) = log

@@ -263,6 +263,7 @@ pub struct ClusterParts {
     handler: Arc<LateHandler>,
     link: Arc<LateLink>,
     held: HeldSlot,
+    pub(crate) runner: Arc<MoveRunner>,
 }
 
 fn clock() -> crate::cluster_mirror::Clock {
@@ -505,7 +506,6 @@ impl ClusterParts {
             let _ = tail.0.set(NodeSource::new(node.clone()));
             let _ = holder.set(node.clone());
             let _ = move_link.0.set(node.clone());
-            runner.recover();
             mirror.spawn();
             let shown = publisher.clone();
             refresher = Some(Refresher::spawn(
@@ -562,6 +562,7 @@ impl ClusterParts {
             handler,
             link: move_link,
             held,
+            runner,
         }
     }
 
@@ -596,6 +597,12 @@ impl ClusterParts {
 
     pub fn serve(&self, handler: &Arc<dyn Handler>) {
         self.handler.serve(handler);
+    }
+
+    pub fn recover_moves(&self) {
+        if self.node.is_ok() {
+            self.runner.recover();
+        }
     }
 
     pub fn close(&self) {

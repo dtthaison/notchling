@@ -471,3 +471,41 @@ fn a_change_in_remote_shell_rows_is_announced_apart_from_sessions_changed() {
     publisher.publish();
     assert_eq!(room.named("sessions.remote.shell").last(), Some(&json!([])));
 }
+
+#[test]
+fn a_move_is_recovered_only_when_the_daemon_asks_after_it_has_started() {
+    use notchling_engine::cluster::move_home::{MoveSaga, MoveStep};
+    let root = std::env::temp_dir().join(format!("nl-wiring-recover-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let layout = Layout::resolve(None, Some(root.as_os_str()), || None).unwrap();
+    let _cleanup = Root(root.clone());
+    let a = notchling_engine::cluster::NodeId::parse(&"a".repeat(16)).unwrap();
+    let b = notchling_engine::cluster::NodeId::parse(&"b".repeat(16)).unwrap();
+    let mut saga = MoveSaga::new(a, b, 1, false);
+    saga.step = MoveStep::StopOld;
+    saga.moving = vec!["job-1".to_string()];
+    std::fs::create_dir_all(layout.cluster_dir()).unwrap();
+    std::fs::write(
+        layout
+            .cluster_dir()
+            .join(crate::cluster_move_run::SAGA_FILE),
+        serde_json::to_vec(&saga).unwrap(),
+    )
+    .unwrap();
+    let sessions = Arc::new(Mutex::new(json!([])));
+    let w = Wired::build(&layout, sessions, Arc::new(FakeRoom::default()), (0, 0));
+    assert!(w.cluster.node.is_ok(), "the fixture daemon has a node");
+    w.cluster
+        .runner
+        .wait_done(std::time::Duration::from_secs(5));
+    assert_eq!(
+        w.cluster.runner.status()["step"],
+        "stop_old",
+        "building the daemon starts nothing"
+    );
+    w.cluster.recover_moves();
+    w.cluster
+        .runner
+        .wait_done(std::time::Duration::from_secs(10));
+    assert_ne!(w.cluster.runner.status()["step"], "stop_old");
+}
