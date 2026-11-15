@@ -291,10 +291,19 @@ impl Driver {
         NodeId::from_fingerprint(fp)
     }
 
+    fn impostor(&self, fp: &str) -> bool {
+        Driver::peer_of(fp)
+            .and_then(|id| self.core.state().and_then(|s| s.members.get(&id)))
+            .is_some_and(|m| m.fingerprint != fp)
+    }
+
     fn line(&mut self, fp: &str, line: &[u8]) {
         let Some(from) = Driver::peer_of(fp) else {
             return;
         };
+        if self.impostor(fp) {
+            return;
+        }
         let Ok(msg) = decode(line) else {
             return;
         };

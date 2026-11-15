@@ -1,10 +1,11 @@
 use crate::cluster_testkit::{eventually, member, node, online, pair, Dir, Opts};
-use notchling_cluster_net::MemNet;
+use notchling_cluster_net::{Conn, LinkEvents, MemNet, MemTransport, Pins, Transport};
 use notchling_engine::cluster::core::PEER_STALE_TERM;
-use notchling_engine::cluster::wire::{Origin, OriginTier, WireError};
-use notchling_engine::cluster::LocalCmd;
+use notchling_engine::cluster::wire::{encode, Msg, Origin, OriginTier, WireError};
+use notchling_engine::cluster::{LocalCmd, NodeId, Term};
 use serde_json::{json, Value};
 use std::sync::atomic::Ordering;
+use std::sync::Arc;
 use std::time::Duration;
 
 #[test]
@@ -186,4 +187,104 @@ fn a_relayed_stale_term_reaches_a_local_caller_as_forbidden() {
             "{code}"
         );
     }
+}
+
+struct Silent;
+
+impl LinkEvents for Silent {
+    fn opened(&self, _conn: Arc<dyn Conn>) {}
+
+    fn line(&self, _peer_fp: &str, _line: Vec<u8>) {}
+
+    fn closed(&self, _peer_fp: &str, _conn_id: u64) {}
+}
+
+fn lookalike(real: &str) -> String {
+    format!("{}{}", &real[..16], "e".repeat(48))
+}
+
+#[test]
+fn a_certificate_that_only_shares_a_members_id_cannot_take_its_place() {
+    let net = MemNet::new();
+    let (a, b) = pair(&net, Opts::named("home8"), Opts::named("worker8"));
+    a.node
+        .local(LocalCmd::SetMember {
+            node: b.id(),
+            can_be_master: Some(true),
+            client: None,
+            reference: None,
+            accepts_delegation: None,
+            headless: None,
+            desired: None,
+        })
+        .unwrap();
+    a.node.join_token().unwrap();
+    let fake = lookalike(&b.fp);
+    assert_ne!(fake, b.fp);
+    assert_eq!(NodeId::from_fingerprint(&fake), Some(b.id()));
+    let stranger = MemTransport::on(&net, &fake, Pins::default());
+    let addrs = a.transport.addrs();
+    let mut dialed = None;
+    eventually("the join window admits an unpinned certificate", || {
+        dialed = stranger.dial(&addrs, 47823, &a.fp, Arc::new(Silent)).ok();
+        dialed.is_some()
+    });
+    let conn = dialed.unwrap();
+    let cluster = a.node.status()["cluster"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let hello = Msg::Hello {
+        node: b.id(),
+        cluster: Some(cluster),
+        versions: crate::cluster_versions::own(),
+        boot_id: "boot".to_string(),
+        term: Some(Term { n: 5, node: b.id() }),
+    };
+    let _ = conn.send(encode(&hello).unwrap());
+    eventually("the home closes the look-alike", || !conn.is_open());
+    std::thread::sleep(Duration::from_millis(300));
+    let status = a.node.status();
+    assert_eq!(status["cluster"]["term"]["n"], 1, "{status}");
+    assert_eq!(status["cluster"]["home"], json!(a.id()));
+    assert!(online(&status, &b.id()), "the real member stays linked");
+    assert!(online(&b.node.status(), &a.id()));
+}
+
+#[test]
+fn a_line_from_a_certificate_that_only_shares_a_members_id_is_ignored() {
+    let net = MemNet::new();
+    let (a, b) = pair(&net, Opts::named("home9"), Opts::named("worker9"));
+    a.node
+        .local(LocalCmd::SetMember {
+            node: b.id(),
+            can_be_master: Some(true),
+            client: None,
+            reference: None,
+            accepts_delegation: None,
+            headless: None,
+            desired: None,
+        })
+        .unwrap();
+    let cluster = a.node.status()["cluster"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let hello = Msg::Hello {
+        node: b.id(),
+        cluster: Some(cluster),
+        versions: crate::cluster_versions::own(),
+        boot_id: "boot".to_string(),
+        term: Some(Term { n: 5, node: b.id() }),
+    };
+    let fake = lookalike(&b.fp);
+    let _ = a
+        .node
+        .tx
+        .send(super::In::Line(fake, encode(&hello).unwrap()));
+    a.node.join_token().unwrap();
+    let status = a.node.status();
+    assert_eq!(status["cluster"]["term"]["n"], 1, "{status}");
+    assert_eq!(status["cluster"]["home"], json!(a.id()));
+    assert!(online(&status, &b.id()));
 }

@@ -13,6 +13,10 @@ impl Driver {
             conn.close();
             return;
         };
+        if self.impostor(&conn.peer_fingerprint()) {
+            conn.close();
+            return;
+        }
         if !self.link {
             conn.close();
             return;
