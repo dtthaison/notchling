@@ -292,6 +292,16 @@ impl NodeCore {
         self
     }
 
+    pub fn counters(&self) -> (u64, u64) {
+        (self.next_wire, self.next_local)
+    }
+
+    pub fn with_counters(mut self, (wire, local): (u64, u64)) -> NodeCore {
+        self.next_wire = self.next_wire.max(wire);
+        self.next_local = self.next_local.max(local);
+        self
+    }
+
     pub fn me(&self) -> &NodeId {
         &self.me
     }

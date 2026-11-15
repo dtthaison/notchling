@@ -1,3 +1,4 @@
+use self::status::answer;
 use crate::acting_ops::Room;
 use crate::cluster_node::{
     lock, wire_error, Answer, ClusterLog, ClusterSetup, Hooks, In, JoinAsk, LocalCalls, NetSide,
@@ -464,7 +465,8 @@ impl Driver {
             state,
             self.setup.client,
         )
-        .with_boot_id(self.boot_id.clone());
+        .with_boot_id(self.boot_id.clone())
+        .with_counters(self.core.counters());
         self.step(Input::Tick {
             boot_ms: self.boot_ms(),
             wall_ms: now_ms(),
@@ -596,5 +598,3 @@ impl Driver {
 mod links;
 #[path = "cluster_driver_status.rs"]
 mod status;
-
-use status::answer;
