@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap, VecDeque};
 
 use notchling_engine::outbox::{Kind, State, Tool, Via, Why};
 use notchling_engine::sessions::Agent;
@@ -10,6 +10,7 @@ use super::outgoing::Outgoing;
 use crate::acting::Request;
 
 const SENT_KEPT: usize = 50;
+const GONE_KEPT: usize = 200;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OutboxRow {
@@ -182,6 +183,12 @@ pub fn drop_boxed(list: &mut Vec<Outgoing>, shows: impl Fn(&str) -> bool) {
     list.retain(|o| !o.boxed.as_deref().is_some_and(&shows));
 }
 
+pub fn drop_covered(lists: &mut HashMap<String, Vec<Outgoing>>, covers: impl Fn(&str) -> bool) {
+    for list in lists.values_mut() {
+        drop_boxed(list, &covers);
+    }
+}
+
 pub fn forget(list: &mut Vec<Outgoing>, row: &str) {
     list.retain(|o| o.boxed.as_deref() != Some(row));
 }
@@ -196,13 +203,27 @@ struct SentRow {
 pub struct OutboxFeed {
     rows: BTreeMap<String, Vec<OutboxRow>>,
     sent: BTreeMap<String, Vec<SentRow>>,
+    gone: VecDeque<String>,
+}
+
+fn queue_order(row: &OutboxRow) -> (i64, usize) {
+    (row.queued_ms, row.position)
+}
+
+fn place(list: &mut Vec<OutboxRow>, row: OutboxRow) {
+    let key = queue_order(&row);
+    let at = list
+        .iter()
+        .position(|known| queue_order(known) > key)
+        .unwrap_or(list.len());
+    list.insert(at, row);
 }
 
 impl OutboxFeed {
     pub fn seed(&mut self, list: &[Value]) {
         self.rows.clear();
         for row in list.iter().filter_map(OutboxRow::from_wire) {
-            self.rows.entry(row.session.clone()).or_default().push(row);
+            place(self.rows.entry(row.session.clone()).or_default(), row);
         }
         self.prune_sent();
     }
@@ -222,6 +243,21 @@ impl OutboxFeed {
     pub fn shows(&self, id: &str) -> bool {
         self.rows.values().flatten().any(|row| row.id == id)
             || self.sent.values().flatten().any(|kept| kept.row.id == id)
+    }
+
+    pub fn covers(&self, id: &str) -> bool {
+        self.shows(id) || self.gone.iter().any(|gone| gone == id)
+    }
+
+    fn remember_gone(&mut self, id: &str) -> bool {
+        if self.gone.iter().any(|gone| gone == id) {
+            return false;
+        }
+        self.gone.push_back(id.to_owned());
+        if self.gone.len() > GONE_KEPT {
+            self.gone.pop_front();
+        }
+        true
     }
 
     fn prune_sent(&mut self) -> bool {
@@ -268,7 +304,8 @@ impl OutboxFeed {
                 if word(&event.data, "why") == Some("sent") {
                     return self.sent(id, now_ms);
                 }
-                self.take(id).is_some()
+                let taken = self.take(id).is_some();
+                self.remember_gone(id) || taken
             }
             _ => false,
         }
@@ -283,7 +320,7 @@ impl OutboxFeed {
                 true
             }
             None => {
-                list.push(row);
+                place(list, row);
                 true
             }
         };

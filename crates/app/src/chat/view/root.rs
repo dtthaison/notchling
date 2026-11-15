@@ -61,7 +61,11 @@ impl Render for ChatView {
             });
         let shown = self.lay_out_panels(window);
         let in_subagent = self.open_subagent.is_some();
-        let takes_drops = !in_subagent && self.composer_control(cx).enabled;
+        let takes_drops = crate::chat::composer::takes_drops(
+            in_subagent,
+            self.composer_control(cx).enabled,
+            self.editing_here(),
+        );
         let conversation = div()
             .relative()
             .flex_1()

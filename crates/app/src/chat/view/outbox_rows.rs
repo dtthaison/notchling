@@ -87,6 +87,8 @@ pub struct Editing {
     pub outbox_id: String,
     pub session: String,
     pub before: String,
+    pub round: u64,
+    pub sending: bool,
 }
 
 #[derive(Debug, PartialEq)]
@@ -146,6 +148,20 @@ impl Editing {
     pub fn is_lost(&self, rows: &[OutboxRow]) -> bool {
         !rows.iter().any(|row| row.id == self.outbox_id)
     }
+
+    pub fn lost(&self, chat_row: &str, rows: &[OutboxRow]) -> bool {
+        self.chat_row == chat_row && !self.sending && self.is_lost(rows)
+    }
+
+    pub fn same_edit(&self, other: &Editing) -> bool {
+        self.chat_row == other.chat_row
+            && self.outbox_id == other.outbox_id
+            && self.round == other.round
+    }
+}
+
+pub fn settle_edit(current: Option<&Editing>, asked: &Editing, end: EditEnd) -> Option<EditEnd> {
+    current.filter(|now| now.same_edit(asked)).map(|_| end)
 }
 
 pub fn attachments_for(editing: Option<&Editing>, row: &str, files: Vec<PathBuf>) -> Vec<PathBuf> {

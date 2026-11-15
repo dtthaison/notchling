@@ -9,20 +9,18 @@ struct SavedDrafts(HashMap<String, String>);
 
 impl Global for SavedDrafts {}
 use notchling_engine::catalog::{ModelInfo, Tool as CatalogTool};
-use notchling_engine::outbox::NO_MESSAGE;
-use notchling_engine::sessions::Agent;
 use notchling_engine::tools::agy::ConfigOption;
 use notchling_engine::tools::codex::models;
 use notchling_engine::transcript::model::Conversation;
 use serde_json::Value;
 
-use super::outbox_rows::{begin, EditEnd, Editing};
+use super::outbox_rows::{begin, Editing};
 use super::ChatView;
 use crate::acting::{Acting, Control, Request};
 use crate::actions::SendFailure;
 use crate::chat::claude_picker::{self, Hint, Kind};
 use crate::chat::data::{Session, Tool};
-use crate::chat::outbox::{deliver, drop_boxed, forget, hidden_queued, unbubbled, Bubble, Button};
+use crate::chat::outbox::{deliver, drop_covered, forget, hidden_queued, unbubbled, Bubble};
 use crate::chat::outgoing::Outgoing;
 use crate::chat::prompts::is_dialog;
 use crate::chat::rows::{tail_rows, Row};
@@ -54,6 +52,7 @@ pub struct ChatTools {
     pub sending: bool,
     pub error: Option<String>,
     pub editing: Option<Editing>,
+    pub edit_round: u64,
     pub picks: HashMap<String, Pick>,
     pub agy: Option<AgyConversation>,
     pub agy_fetched: Option<(String, u64)>,
@@ -97,6 +96,7 @@ impl ChatTools {
             sending: false,
             error: None,
             editing: None,
+            edit_round: 0,
             picks: HashMap::new(),
             agy: None,
             agy_fetched: None,
@@ -129,7 +129,7 @@ impl ChatTools {
         }
     }
 
-    fn forget_outbox(&mut self, id: &str) {
+    pub(super) fn forget_outbox(&mut self, id: &str) {
         for list in self.outgoing.values_mut() {
             forget(list, id);
         }
@@ -191,81 +191,6 @@ impl ChatView {
             Some(session) => self.source.outbox_bubbles(&session.agent),
             None => Vec::new(),
         }
-    }
-
-    pub(super) fn outbox_press(&mut self, id: &str, button: Button, cx: &mut Context<Self>) {
-        if button == Button::Edit {
-            self.begin_edit(id, cx);
-            return;
-        }
-        let Some(session) = self.selected_session().map(|s| s.agent.outbox_key()) else {
-            return;
-        };
-        let Some(request) = button.request(id, &session) else {
-            return;
-        };
-        if self
-            .tools
-            .editing
-            .as_ref()
-            .is_some_and(|e| e.outbox_id == id)
-        {
-            self.cancel_edit(cx);
-        }
-        if matches!(button, Button::Remove | Button::Drop) {
-            self.tools.forget_outbox(id);
-        }
-        self.spawn_send(
-            request,
-            |view, result, _| {
-                if let Err(message) = result {
-                    view.tools.error = Some(message);
-                }
-            },
-            cx,
-        );
-    }
-
-    fn begin_edit(&mut self, id: &str, cx: &mut Context<Self>) {
-        let Some(session) = self.selected_session().map(|s| s.agent.clone()) else {
-            return;
-        };
-        let Some(row) = self
-            .source
-            .outbox_rows(&session)
-            .into_iter()
-            .find(|row| row.id == id)
-        else {
-            return;
-        };
-        let chat_row = session.id.clone();
-        let before = match &self.tools.editing {
-            Some(editing) if editing.chat_row == chat_row => editing.before.clone(),
-            _ => self.tools.draft(&chat_row).to_owned(),
-        };
-        self.tools.editing = Some(Editing {
-            chat_row: chat_row.clone(),
-            outbox_id: row.id,
-            session: row.session,
-            before,
-        });
-        self.put_draft(&chat_row, row.text, cx);
-        cx.notify();
-    }
-
-    pub(super) fn cancel_edit(&mut self, cx: &mut Context<Self>) {
-        let Some(editing) = self.tools.editing.take() else {
-            return;
-        };
-        self.put_draft(&editing.chat_row, editing.cancelled(), cx);
-        cx.notify();
-    }
-
-    pub(super) fn editing_here(&self) -> bool {
-        self.tools
-            .editing
-            .as_ref()
-            .is_some_and(|e| self.selected.as_deref() == Some(e.chat_row.as_str()))
     }
 
     pub(super) fn acting(&self, cx: &mut Context<Self>) -> Acting {
@@ -567,53 +492,6 @@ impl ChatView {
         );
     }
 
-    fn submit_edit(
-        &mut self,
-        editing: Editing,
-        request: Request,
-        text: String,
-        cx: &mut Context<Self>,
-    ) {
-        self.spawn_send(
-            request,
-            move |view, result, cx| {
-                let end =
-                    editing.finished(result.as_ref().map(|_| ()).map_err(String::as_str), &text);
-                view.end_edit(&editing, end, cx);
-            },
-            cx,
-        );
-    }
-
-    fn end_edit(&mut self, editing: &Editing, end: EditEnd, cx: &mut Context<Self>) {
-        if end.leave {
-            self.tools.editing = None;
-            self.tools.forget_outbox(&editing.outbox_id);
-        }
-        if let Some(draft) = end.draft {
-            self.put_draft(&editing.chat_row, draft, cx);
-        }
-        self.tools.error = end.note;
-    }
-
-    fn leave_lost_edit(&mut self, agent: &Agent, cx: &mut Context<Self>) {
-        if self.acting(cx) != Acting::On {
-            return;
-        }
-        let rows = self.source.outbox_rows(agent);
-        let Some(editing) = self
-            .tools
-            .editing
-            .clone()
-            .filter(|e| e.chat_row == agent.id && e.is_lost(&rows))
-        else {
-            return;
-        };
-        let typed = self.tools.editor.read(cx).text().to_owned();
-        let end = editing.finished(Err(NO_MESSAGE), &typed);
-        self.end_edit(&editing, end, cx);
-    }
-
     pub(super) fn stop(&mut self, cx: &mut Context<Self>) {
         if self.tools.sending || !self.acting(cx).control().enabled {
             return;
@@ -850,6 +728,9 @@ impl ChatView {
     pub(super) fn sync_tools(&mut self, cx: &mut Context<Self>) {
         let view = self.source.view();
         self.tools.live = view.tools;
+        drop_covered(&mut self.tools.outgoing, |row| {
+            self.source.outbox_covers(row)
+        });
         self.follow_starting_drafts(cx);
         let Some(session) = self.selected_session().cloned() else {
             return;
@@ -861,7 +742,6 @@ impl ChatView {
         let now = now_ms();
         if let Some(list) = self.tools.outgoing.get_mut(&id) {
             list.retain(|o| o.keep(&self.conversation, now));
-            drop_boxed(list, |row| self.source.outbox_shows(row));
         }
         for (row, queued) in self.tools.queued.iter_mut() {
             queued.truncate(self.tools.live.waiting(row));

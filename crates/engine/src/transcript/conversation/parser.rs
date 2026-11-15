@@ -64,6 +64,24 @@ impl Parser {
     }
 
     fn oversized_result(&mut self, head: &[u8]) {
+        self.oversized_output(head);
+        if self.oversized_ends_batch(head) {
+            self.queue.end_batch();
+        }
+    }
+
+    fn oversized_ends_batch(&self, head: &[u8]) -> bool {
+        if !self.include_sidechain && contains(head, br#""isSidechain":true"#) {
+            return false;
+        }
+        let Some(message) = find(head, br#""message":"#) else {
+            return false;
+        };
+        let top = &head[..message];
+        contains(top, br#""type":"user""#) || contains(top, br#""type":"assistant""#)
+    }
+
+    fn oversized_output(&mut self, head: &[u8]) {
         let Some(id) = oversized_tool_result(head) else {
             return;
         };

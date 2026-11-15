@@ -18,7 +18,9 @@ use notchling_locale as t;
 use super::render_map::WindowRegion;
 use super::ChatView;
 use crate::chat::claude_picker::Kind;
-use crate::chat::composer::{action, add_menu, is_add_files, with_slash, Action, Add, AddItem};
+use crate::chat::composer::{
+    action, add_allowed, add_menu_for, is_add_files, with_slash, Action, Add, AddItem,
+};
 use crate::chat::pickers;
 use crate::chat::prompts::error_text;
 use crate::mac::gate;
@@ -392,6 +394,10 @@ impl ChatView {
 
     fn pick_add(&mut self, add: Add, window: &mut Window, cx: &mut Context<Self>) {
         self.composer.add_menu = false;
+        if !add_allowed(add, self.editing_here()) {
+            cx.notify();
+            return;
+        }
         match add {
             Add::Files => self.pick_paths(false, window, cx),
             Add::Folder => self.pick_paths(true, window, cx),
@@ -497,6 +503,8 @@ fn add_button(
     cx: &mut Context<ChatView>,
 ) -> Option<Div> {
     let session = view.selected_session()?;
+    let items = add_menu_for(session.tool, view.editing_here());
+    let enabled = enabled && !items.is_empty();
     let open = enabled && view.composer.menu_open();
     let kind = if open {
         ButtonKind::Secondary
@@ -522,7 +530,7 @@ fn add_button(
         })
         .part_at("Add Button", Corner::Top, a, cx);
     let menu = open.then(|| {
-        let rows = add_menu(session.tool)
+        let rows = items
             .into_iter()
             .enumerate()
             .map(|(i, item)| add_row(i, item, a, cx))
@@ -744,6 +752,7 @@ pub fn render(view: &ChatView, a: Appearance, window: &Window, cx: &mut Context<
         .child(add_button(view, control.enabled, a, cx).unwrap_or_else(div))
         .children(action_button(act, control.enabled, a, cx));
     let accent_edge = hsla(Ink::Accent.color(a));
+    let editing = view.editing_here();
     let card = div()
         .id("composer")
         .mx(px(SIDE_PADDING))
@@ -773,12 +782,16 @@ pub fn render(view: &ChatView, a: Appearance, window: &Window, cx: &mut Context<
                 }))
                 .capture_key_down(cx.listener(|this, e: &KeyDownEvent, window, cx| {
                     let (k, m) = (&e.keystroke, &e.keystroke.modifiers);
-                    if is_add_files(&k.key, m.platform, m.shift, m.alt, m.control) {
+                    if is_add_files(&k.key, m.platform, m.shift, m.alt, m.control)
+                        && add_allowed(Add::Files, this.editing_here())
+                    {
                         this.pick_add(Add::Files, window, cx);
                         cx.stop_propagation();
                     }
                 }))
-                .drag_over::<ExternalPaths>(move |style, _, _, _| style.border_color(accent_edge))
+        })
+        .when(control.enabled && !editing, |c| {
+            c.drag_over::<ExternalPaths>(move |style, _, _, _| style.border_color(accent_edge))
         })
         .part_at("Composer", Corner::BottomLeading, a, cx);
     let footer = div()

@@ -195,7 +195,9 @@ fn changed_and_removed_apply_in_order() {
     assert_eq!(feed.rows("s1").len(), 2);
     assert!(feed.apply(&removed("a", "s1", "removed"), 0));
     assert_eq!(ids(&feed, "s1"), ["b"]);
+    assert!(feed.apply(&removed("zzz", "s1", "removed"), 0));
     assert!(!feed.apply(&removed("zzz", "s1", "removed"), 0));
+    assert_eq!(ids(&feed, "s1"), ["b"]);
     assert!(feed.rows("nobody").is_empty());
     assert!(!feed.apply(&event("outbox.other", json!({})), 0));
 }
@@ -350,6 +352,105 @@ fn a_removed_row_leaves_no_outgoing_bubble_behind() {
     feed.apply(&removed("o1", "s1", "removed"), 300);
     assert!(feed.bubbles("s1").is_empty());
     assert!(unbubbled(outgoing_texts(&list), &feed.bubbles("s1")).is_empty());
+}
+
+fn lists(entries: &[(&str, &str, &str)]) -> std::collections::HashMap<String, Vec<Outgoing>> {
+    let mut lists: std::collections::HashMap<String, Vec<Outgoing>> = Default::default();
+    for (chat, text, row) in entries {
+        let list = lists.entry((*chat).to_owned()).or_default();
+        list.push(pending(text));
+        deliver(list, text, 100, Some(row));
+    }
+    lists
+}
+
+#[test]
+fn a_row_removed_before_the_feed_showed_it_drops_its_outgoing_in_any_session() {
+    let mut feed = OutboxFeed::default();
+    let mut all = lists(&[
+        ("job-a", "vanishes", "o1"),
+        ("job-b", "stays", "o2"),
+        ("job-c", "edited away", "o3"),
+    ]);
+    assert!(feed.apply(&removed("o1", "s1", "removed"), 200));
+    feed.apply(
+        &changed(wire("o3", "s3", "queued", None, "edited away")),
+        210,
+    );
+    drop_covered(&mut all, |id| feed.covers(id));
+    assert!(all["job-a"].is_empty());
+    assert_eq!(outgoing_texts(&all["job-b"]), ["stays"]);
+    assert!(all["job-c"].is_empty());
+}
+
+#[test]
+fn a_sent_message_for_a_row_never_shown_keeps_its_outgoing_until_the_transcript_has_it() {
+    let mut feed = OutboxFeed::default();
+    let mut all = lists(&[("job-a", "went out", "o1")]);
+    assert!(!feed.apply(&removed("o1", "s1", "sent"), 200));
+    drop_covered(&mut all, |id| feed.covers(id));
+    assert_eq!(outgoing_texts(&all["job-a"]), ["went out"]);
+}
+
+#[test]
+fn the_memory_of_removed_rows_is_bounded_and_forgets_the_oldest() {
+    let mut feed = OutboxFeed::default();
+    for n in 0..GONE_KEPT + 5 {
+        feed.apply(&removed(&format!("r{n}"), "s1", "removed"), 0);
+    }
+    assert!(!feed.covers("r0"));
+    assert!(!feed.covers("r4"));
+    assert!(feed.covers("r5"));
+    assert!(feed.covers(&format!("r{}", GONE_KEPT + 4)));
+}
+
+#[test]
+fn rows_arriving_out_of_order_are_placed_in_queue_order() {
+    let mut feed = OutboxFeed::default();
+    let at = |id: &str, queued: i64, position: u64| {
+        let mut value = wire(id, "s1", "queued", None, id);
+        value["queuedMs"] = json!(queued);
+        value["position"] = json!(position);
+        value
+    };
+    feed.apply(&changed(at("c", 3_000, 3)), 0);
+    feed.apply(&changed(at("a", 1_000, 1)), 0);
+    feed.apply(&changed(at("b", 2_000, 2)), 0);
+    let ids: Vec<&str> = feed.rows("s1").iter().map(|r| r.id.as_str()).collect();
+    assert_eq!(ids, ["a", "b", "c"]);
+    feed.apply(&changed(at("b", 2_000, 2)), 0);
+    feed.apply(&changed(wire("b", "s1", "sending", None, "b")), 0);
+    let ids: Vec<&str> = feed.rows("s1").iter().map(|r| r.id.as_str()).collect();
+    assert_eq!(ids, ["a", "b", "c"], "an update keeps its place");
+}
+
+#[test]
+fn rows_with_the_same_time_keep_their_arrival_order_unless_the_position_says_otherwise() {
+    let mut feed = OutboxFeed::default();
+    let at = |id: &str, position: u64| {
+        let mut value = wire(id, "s1", "queued", None, id);
+        value["position"] = json!(position);
+        value
+    };
+    feed.apply(&changed(at("x", 2)), 0);
+    feed.apply(&changed(at("y", 1)), 0);
+    feed.apply(&changed(at("z", 3)), 0);
+    let ids: Vec<&str> = feed.rows("s1").iter().map(|r| r.id.as_str()).collect();
+    assert_eq!(ids, ["y", "x", "z"]);
+}
+
+#[test]
+fn a_head_that_needs_you_is_the_first_in_queue_order_not_in_arrival_order() {
+    let mut feed = OutboxFeed::default();
+    let at = |id: &str, state: &str, queued: i64| {
+        let mut value = wire(id, "ab12cd34", state, None, id);
+        value["queuedMs"] = json!(queued);
+        value
+    };
+    feed.apply(&changed(at("late", "queued", 9_000)), 0);
+    feed.apply(&changed(at("early", "unsure", 1_000)), 0);
+    let agent = job_agent("ab12cd34", "ab12cd34");
+    assert!(feed.needs_you(&agent));
 }
 
 #[test]

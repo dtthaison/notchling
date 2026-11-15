@@ -538,6 +538,61 @@ fn a_batch_does_not_outlive_a_meta_user_line() {
     assert_eq!(after_a_batch(&[meta]), [user("first\nsecond")]);
 }
 
+fn big_assistant() -> String {
+    let pad = "x".repeat(450_000);
+    format!(
+        r#"{{"type":"assistant","message":{{"id":"m9","model":"claude-opus-5-5","role":"assistant","content":[{{"type":"text","text":"{pad}"}}]}},"timestamp":"2026-11-15T10:00:13.000Z"}}"#
+    )
+}
+
+fn big_tool_result() -> String {
+    let pad = "x".repeat(450_000);
+    format!(
+        r#"{{"type":"user","message":{{"role":"user","content":[{{"type":"tool_result","tool_use_id":"t1","content":"{pad}"}}]}},"timestamp":"2026-11-15T10:00:13.000Z"}}"#
+    )
+}
+
+#[test]
+fn a_batch_does_not_outlive_an_oversized_tool_result_line() {
+    let big = big_tool_result();
+    assert_eq!(after_a_batch(&[&big]), [user("first\nsecond")]);
+}
+
+#[test]
+fn a_batch_does_not_outlive_an_oversized_assistant_line() {
+    let big = big_assistant();
+    assert_eq!(after_a_batch(&[&big]), [user("first\nsecond")]);
+}
+
+#[test]
+fn a_whole_oversized_line_handed_to_the_parser_ends_the_batch_too() {
+    let mut parser = conversation::Parser::new();
+    for line in ENQUEUE_TWO.iter().chain(DEQUEUE_TWO.iter()) {
+        parser.consume(line.as_bytes());
+    }
+    parser.consume(big_tool_result().as_bytes());
+    parser.consume(TYPED_JOINED.as_bytes());
+    assert_eq!(users(&parser.conversation()), [user("first\nsecond")]);
+}
+
+#[test]
+fn an_oversized_system_line_leaves_the_batch_alone() {
+    let pad = "x".repeat(450_000);
+    let big = format!(
+        r#"{{"type":"system","subtype":"stop_hook_summary","content":"{pad}","timestamp":"2026-11-15T10:00:12.550Z"}}"#
+    );
+    assert_eq!(after_a_batch(&[&big]), [merged_user("first\nsecond")]);
+}
+
+#[test]
+fn an_oversized_line_of_a_subagent_leaves_the_batch_alone() {
+    let pad = "x".repeat(450_000);
+    let big = format!(
+        r#"{{"isSidechain":true,"type":"assistant","message":{{"id":"m9","role":"assistant","content":[{{"type":"text","text":"{pad}"}}]}},"timestamp":"2026-11-15T10:00:12.550Z"}}"#
+    );
+    assert_eq!(after_a_batch(&[&big]), [merged_user("first\nsecond")]);
+}
+
 #[test]
 fn system_attachment_and_progress_lines_leave_the_batch_alone() {
     let between = [

@@ -10,6 +10,8 @@ fn editing() -> Editing {
         outbox_id: "o7".into(),
         session: "ab12cd34".into(),
         before: "a half-typed line".into(),
+        round: 1,
+        sending: false,
     }
 }
 
@@ -94,6 +96,39 @@ fn an_edit_is_lost_when_its_row_is_no_longer_in_the_outbox() {
     let mut here = queued_row("x");
     here.id = "o7".into();
     assert!(!editing.is_lost(&[queued_row("y"), here]));
+}
+
+#[test]
+fn an_answer_ends_only_the_edit_that_asked() {
+    let asked = editing();
+    let ends = || asked.finished(Ok(()), "new words");
+    assert_eq!(settle_edit(Some(&asked), &asked, ends()), Some(ends()));
+    assert_eq!(settle_edit(None, &asked, ends()), None);
+    let began_again = Editing {
+        round: 2,
+        ..editing()
+    };
+    assert_eq!(settle_edit(Some(&began_again), &asked, ends()), None);
+    let another_row = Editing {
+        outbox_id: "o8".into(),
+        ..editing()
+    };
+    assert_eq!(settle_edit(Some(&another_row), &asked, ends()), None);
+    let another_chat = Editing {
+        chat_row: "job-b".into(),
+        ..editing()
+    };
+    assert_eq!(settle_edit(Some(&another_chat), &asked, ends()), None);
+}
+
+#[test]
+fn an_edit_whose_request_is_in_flight_is_not_lost() {
+    let mut asked = editing();
+    assert!(asked.lost("job-a", &[]));
+    assert!(!asked.lost("job-b", &[]));
+    asked.sending = true;
+    assert!(!asked.lost("job-a", &[]));
+    assert!(asked.is_lost(&[]));
 }
 
 #[test]

@@ -22,6 +22,7 @@ mod markdown;
 mod message_actions;
 mod native_spin;
 mod opinions;
+mod outbox_edit;
 mod outbox_rows;
 mod page_panel;
 mod paged_rows;
