@@ -181,3 +181,42 @@ fn refuse_waits_and_never_types() {
     assert!(!Refuse.verifies());
     assert_eq!(Refuse.deliver(&row, false).0, TryEnd::AttachFailed);
 }
+
+#[test]
+fn a_dialog_before_any_paste_notes_nothing() {
+    let r = rig_with(Options {
+        screen: crate::outbox_testkit::DIALOG,
+        ..Options::default()
+    });
+    let row = taken(&r, "job-idle", "hi");
+    let (end, tried, _) = r.courier.deliver(&row, false);
+    assert_eq!(end, TryEnd::Failed(Failure::Dialog));
+    assert!(!tried.pasted);
+    assert!(r.acting.attempts.recent("job-idle", T0 + 1_000).is_empty());
+}
+
+#[test]
+fn a_pasted_try_notes_the_text_it_typed() {
+    let r = rig();
+    r.human
+        .lock()
+        .unwrap()
+        .push((ATTACH_QUIET_MS + KEY_PAUSE_MS + 10, "x".to_string()));
+    let row = taken(&r, "job-idle", "two");
+    let (end, _, _) = r.courier.deliver(&row, false);
+    assert_eq!(end, TryEnd::Failed(Failure::Mixed));
+    assert_eq!(r.acting.attempts.recent("job-idle", T0 + 1_000), ["two"]);
+}
+
+#[test]
+fn an_early_failure_closes_the_open_attach() {
+    let r = rig();
+    let one = taken(&r, "job-idle", "one");
+    assert_eq!(r.courier.deliver(&one, false).0, TryEnd::Ok);
+    assert_eq!(r.courier.open(), 1);
+    r.ops.store().delete(&one.id).unwrap();
+    let two = taken(&r, "job-idle", "two");
+    r.files.vanish(IDLE);
+    assert_eq!(r.courier.deliver(&two, false).0, TryEnd::AttachFailed);
+    assert_eq!(r.courier.open(), 0);
+}

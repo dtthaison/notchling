@@ -198,7 +198,6 @@ impl ClaudeCourier {
             earlier: self.acting.attempts.recent(&agent.id, began),
             any: row.clear_box,
         };
-        self.acting.attempts.note(&agent.id, &row.text, began);
         let (refused, pasted, entered) = (
             AtomicBool::new(false),
             AtomicBool::new(false),
@@ -228,6 +227,12 @@ impl ClaudeCourier {
             pasted: pasted.load(Ordering::SeqCst),
             entered: entered.load(Ordering::SeqCst),
         };
+        let mixed = matches!(played, Err(Failure::Mixed));
+        if let (Some(text), true, true) =
+            (plan.reply_text(), played.is_err(), tried.pasted || mixed)
+        {
+            self.acting.attempts.note(&agent.id, text, began);
+        }
         if refused.load(Ordering::SeqCst) {
             self.note(row, agent, Some(FailWhy::NotIdle));
             return (TryEnd::NotIdle, tried, None);
@@ -340,6 +345,7 @@ impl Courier for ClaudeCourier {
 
     fn deliver(&self, row: &Row, guarded: bool) -> (TryEnd, Tried, Option<String>) {
         let Some(agent) = self.files.row(&row.session).filter(Agent::can_reply) else {
+            self.close(&row.session);
             return (TryEnd::AttachFailed, NOTHING, None);
         };
         let typing = self.acting.typing_locks().for_job(&row.session);

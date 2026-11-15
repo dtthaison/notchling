@@ -108,7 +108,7 @@ fn foreign_box_text_stops_at_box_with_text() {
     });
     let row = r.send("job-idle", "hello");
     let mut p = r.postmen.postman(IDLE);
-    assert_eq!(p.pass(r.at(T0)), Next::At(T0 + 1_000));
+    assert_eq!(p.pass(r.at(T0)), Next::Done);
     assert_eq!(
         state(&r, &row.id),
         Some((State::Box, Some(Why::NotCleared)))
@@ -486,8 +486,55 @@ fn a_new_row_wakes_a_thread_and_stop_joins_it() {
     assert_eq!(r.postmen.running(), 0);
     assert_eq!(r.courier.open(), 0, "stop closes the attach");
     let later = r.send("job-idle", "after stop");
-    std::thread::sleep(Duration::from_millis(20));
+    assert_eq!(r.postmen.running(), 0, "a wake after stop starts nothing");
     assert_eq!(r.row(&later.id).unwrap().state, State::Queued);
+}
+
+#[test]
+fn a_wake_queued_before_stop_types_nothing() {
+    let r = rig();
+    threaded(&r);
+    let typing = r.acting.typing_locks().for_job(IDLE);
+    let held = typing.lock().unwrap();
+    let first = r.send("job-idle", "first");
+    assert!(until(|| r.row(&first.id).unwrap().state == State::Sending));
+    let second = r.send("job-idle", "second");
+    let postmen = r.postmen.clone();
+    let stopping = std::thread::spawn(move || postmen.stop());
+    assert!(until(|| lock(&r.postmen.inner.registry).stopped));
+    drop(held);
+    stopping.join().unwrap();
+    assert_eq!(r.postmen.running(), 0);
+    assert!(!r.typed().contains("second"));
+    assert_eq!(r.row(&second.id).unwrap().state, State::Queued);
+}
+
+#[test]
+fn a_failed_try_does_not_hold_the_attach() {
+    let r = rig_with(Options {
+        screen: NO_BOX,
+        ..Options::default()
+    });
+    let row = r.send("job-idle", "hi");
+    let mut p = r.postmen.postman(IDLE);
+    p.pass(r.at(T0));
+    assert_eq!(r.row(&row.id).unwrap().next_ms, Some(T0 + 30_000));
+    assert_eq!(p.pass(r.at(T0 + 1_000)), Next::At(T0 + 30_000));
+}
+
+#[test]
+fn acting_off_wakes_a_running_postman_at_once() {
+    let r = rig();
+    threaded(&r);
+    let row = r.send("job-idle", "hi");
+    assert!(until(|| r.row(&row.id).is_none()));
+    assert!(until(|| r.courier.open() == 1));
+    let started = Instant::now();
+    r.acting_switch().set(false);
+    assert!(until(|| r.postmen.running() == 0));
+    assert!(started.elapsed() < Duration::from_millis(500));
+    assert_eq!(r.courier.open(), 0);
+    r.postmen.stop();
 }
 
 #[test]
@@ -507,16 +554,25 @@ fn acting_turned_on_wakes_every_session() {
 fn postmen_are_capped_and_the_rest_start_as_threads_end() {
     let r = rig();
     threaded(&r);
-    let mut ids = Vec::new();
-    for n in 0..(POSTMEN_MAX + 3) {
-        ids.push(r.send(&format!("codex:t{n}"), "hi").id);
+    let mut rows = Vec::new();
+    for n in 0..POSTMEN_MAX {
+        rows.push(r.send(&format!("codex:t{n}"), "hi"));
     }
     assert!(until(|| r.postmen.running() == POSTMEN_MAX));
-    assert_eq!(
-        lock(&r.postmen.inner.registry).pending.len(),
-        3,
-        "the rest wait their turn"
+    let waiting = r.send("job-idle", "waits its turn");
+    let pending = || lock(&r.postmen.inner.registry).pending.clone();
+    assert_eq!(pending(), [IDLE.to_string()], "the rest wait their turn");
+    r.ops.store().delete(&rows[0].id).unwrap();
+    r.postmen.wake(&rows[0].session);
+    assert!(
+        until(|| r.row(&waiting.id).is_none()),
+        "the pending one ran"
     );
+    assert!(pending().is_empty());
+    r.at(T0 + ATTACH_IDLE_MS);
+    r.postmen.wake(IDLE);
+    assert!(until(|| r.postmen.running() == POSTMEN_MAX - 1));
+    assert_eq!(r.courier.open(), 0, "and finished");
     r.postmen.stop();
     assert_eq!(r.postmen.running(), 0);
 }

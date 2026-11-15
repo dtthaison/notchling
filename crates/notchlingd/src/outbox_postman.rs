@@ -2,12 +2,13 @@ use crate::acting::Acting;
 use crate::outbox_courier::{real_clock, Clock, Courier, Refuse};
 use crate::outbox_ops::{OutboxOps, Wake};
 use notchling_engine::outbox::{
-    after, gate, After, Gate, Job, QueuedVerdict, Row, State, Tool, Verdict, Why, ATTACH_IDLE_MS,
-    GONE_RECHECK_MS, POSTMEN_MAX,
+    after, gate, After, Gate, Job, QueuedVerdict, Row, State, Tool, TryEnd, Verdict, Why,
+    ATTACH_IDLE_MS, GONE_RECHECK_MS, POSTMEN_MAX,
 };
 use notchling_engine::transcript::sent::Seen;
 use notchling_events::kinds::agents::OutboxThen;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, Sender, TryRecvError};
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
 use std::thread::JoinHandle;
@@ -97,6 +98,13 @@ struct Inner {
     acting: Arc<Acting>,
     clock: Clock,
     registry: Mutex<Registry>,
+    stopped: AtomicBool,
+}
+
+impl Inner {
+    fn stopped(&self) -> bool {
+        self.stopped.load(Ordering::SeqCst)
+    }
 }
 
 #[derive(Clone)]
@@ -135,6 +143,7 @@ impl Postmen {
                 acting,
                 clock,
                 registry: Mutex::new(Registry::default()),
+                stopped: AtomicBool::new(false),
             }),
         }
     }
@@ -149,8 +158,11 @@ impl Postmen {
         }
         let weak = Arc::downgrade(&self.inner);
         self.inner.acting.watch(Arc::new(move |on| {
-            if let (true, Some(inner)) = (on, weak.upgrade()) {
-                Postmen { inner }.wake_all();
+            if let Some(inner) = weak.upgrade() {
+                match on {
+                    true => Postmen { inner }.wake_all(),
+                    false => Postmen { inner }.wake_running(),
+                }
             }
         }));
         self.wake_all();
@@ -181,6 +193,13 @@ impl Postmen {
         }
     }
 
+    fn wake_running(&self) {
+        let registry = lock(&self.inner.registry);
+        for running in registry.running.values() {
+            let _ = running.tx.send(Msg::Wake);
+        }
+    }
+
     pub fn wake_all(&self) {
         let sessions = self.inner.ops.store().sessions().unwrap_or_default();
         for session in sessions {
@@ -189,6 +208,7 @@ impl Postmen {
     }
 
     pub fn stop(&self) {
+        self.inner.stopped.store(true, Ordering::SeqCst);
         let all: Vec<Running> = {
             let mut registry = lock(&self.inner.registry);
             registry.stopped = true;
@@ -244,6 +264,9 @@ fn run(inner: Arc<Inner>, session: String, rx: Receiver<Msg>) {
                     Ok(Msg::Stop) | Err(RecvTimeoutError::Disconnected) => break,
                     Ok(Msg::Wake) | Err(RecvTimeoutError::Timeout) => {}
                 }
+                if inner.stopped() {
+                    break;
+                }
             }
             Next::Done => {
                 postman.close_attach();
@@ -257,6 +280,9 @@ fn run(inner: Arc<Inner>, session: String, rx: Receiver<Msg>) {
 }
 
 fn finish(inner: &Arc<Inner>, session: &str, rx: &Receiver<Msg>) -> bool {
+    if inner.stopped() {
+        return true;
+    }
     let mut registry = lock(&inner.registry);
     match rx.try_recv() {
         Ok(Msg::Wake) => return false,
@@ -306,11 +332,14 @@ impl Postman {
     }
 
     pub(crate) fn pass(&mut self, now: i64) -> Next {
-        if !self.inner.acting.is_on() {
+        if !self.inner.acting.is_on() || self.inner.stopped() {
             self.close_attach();
             return Next::Done;
         }
         loop {
+            if self.inner.stopped() {
+                return Next::Done;
+            }
             let row = match self.inner.ops.store().head(&self.session) {
                 Ok(Some(row)) => row,
                 Ok(None) => return self.rest(now, None),
@@ -463,8 +492,8 @@ impl Postman {
         };
         let (end, tried, note) = courier.deliver(&taken, guarded);
         let ended = (self.inner.clock)();
-        self.attach_until = Some(ended + ATTACH_IDLE_MS);
-        let sent = match after(&end, tried, taken.tries, ended) {
+        self.attach_until = (end == TryEnd::Ok).then_some(ended + ATTACH_IDLE_MS);
+        let rested = match after(&end, tried, taken.tries, ended) {
             After::Verify if !verifies => self.sent(&taken),
             After::Verify => match self.inner.verifier.wait(&taken, before, ended) {
                 Verdict::Sent => self.sent(&taken),
@@ -475,13 +504,15 @@ impl Postman {
                 Verdict::Pending | Verdict::Unsure => {
                     let then = Some(OutboxThen::Unsure);
                     let why = Some(Why::NotFound);
-                    self.moved(&taken, State::Sending, State::Unsure, why, None, then)
+                    self.moved(&taken, State::Sending, State::Unsure, why, None, then);
+                    true
                 }
             },
             After::Box(why) => {
                 self.inner.ops.set_note(&taken.id, note);
                 let then = Some(OutboxThen::Box);
-                self.moved(&taken, State::Sending, State::Box, Some(why), None, then)
+                self.moved(&taken, State::Sending, State::Box, Some(why), None, then);
+                true
             }
             After::Wait { why, next_ms } => {
                 if why == Why::Retry {
@@ -497,7 +528,7 @@ impl Postman {
                 )
             }
         };
-        if sent {
+        if rested {
             None
         } else {
             Some(ended + TICK_MS)
