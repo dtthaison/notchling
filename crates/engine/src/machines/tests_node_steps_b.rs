@@ -52,6 +52,32 @@ fn binary_with_matching_hash_passes() {
 }
 
 #[test]
+fn binary_with_dist_and_no_hash_cant_tell() {
+    let rig = Rig::new(node_linux());
+    let dist = TempDir::new("dist-nohash");
+    std::fs::write(dist.path().join("notchling-linux-x86_64"), BUILD).unwrap();
+    let text = format!("{MAC_BUILD}\nsha256=\n");
+    let state = binary_probe(&rig, Some(dist.path()), &text);
+    assert!(matches!(state, CheckState::CantTell(_)), "{state:?}");
+    assert!(state.text().contains("can't be hashed"), "{state:?}");
+}
+
+#[test]
+fn binary_with_unknown_arch_cant_tell() {
+    let mut m = node_linux();
+    m.abilities.as_mut().unwrap().arch = None;
+    let rig = Rig::new(m);
+    let dist = TempDir::new("dist-noarch");
+    let text = format!("{MAC_BUILD}\nsha256={}\n", hex(BUILD));
+    let state = binary_probe(&rig, Some(dist.path()), &text);
+    assert_eq!(
+        state,
+        CheckState::CantTell("Checking the machine's architecture first".into())
+    );
+    assert!(binary_probe(&rig, None, &text).is_pass());
+}
+
+#[test]
 fn binary_without_a_dist_file_falls_back_to_the_version() {
     let rig = Rig::new(node_linux());
     let dist = TempDir::new("dist-none");

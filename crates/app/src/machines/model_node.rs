@@ -22,14 +22,15 @@ impl MachinesModel {
         machine.node.is_some()
     }
 
-    pub fn set_node(&mut self, machine: &str, on: bool) {
-        let _ = self.commit(|list| match list.iter_mut().find(|m| m.name == machine) {
+    pub fn set_node(&mut self, machine: &str, on: bool) -> bool {
+        let saved = self.commit(|list| match list.iter_mut().find(|m| m.name == machine) {
             Some(m) => {
                 m.node = on.then(NodeSettings::default);
                 true
             }
             None => false,
         });
+        saved.is_ok() && on
     }
 
     pub fn cluster_ask(&self) -> ClusterAsk {

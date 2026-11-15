@@ -68,7 +68,7 @@ fn node_toggle_sets_settings() {
         .iter()
         .any(|s| s.id == StepId::NODE_JOINED));
 
-    model.set_node("m1", true);
+    assert!(model.set_node("m1", true), "turning it on asks for a check");
     assert_eq!(
         lock(&w.registry.list)[0].node,
         Some(NodeSettings::default())
@@ -92,7 +92,14 @@ fn node_toggle_sets_settings() {
     }
     assert!(model.can_be_master_line(&m1).is_some());
 
-    model.set_node("m1", false);
+    assert!(
+        !model.set_node("m1", false),
+        "turning it off checks nothing"
+    );
+    assert!(
+        !model.set_node("nobody", true),
+        "an unknown machine checks nothing"
+    );
     assert_eq!(lock(&w.registry.list)[0].node, None);
     let m1 = model.machine("m1").unwrap();
     assert!(!model.node_on(&m1));

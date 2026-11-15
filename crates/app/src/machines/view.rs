@@ -190,7 +190,10 @@ impl MachinesView {
         Self::background(
             cx,
             move || engine.refresh(None, false),
-            |view, _, _| view.model.checked(),
+            |view, _, cx| {
+                view.model.checked();
+                view.ask_cluster(cx);
+            },
         );
     }
 
@@ -228,7 +231,10 @@ impl MachinesView {
         Self::background(
             cx,
             move || run.execute(&engine),
-            |view, (done, outcome), _| view.model.finished(&done, &outcome),
+            |view, (done, outcome), cx| {
+                view.model.finished(&done, &outcome);
+                view.ask_cluster(cx);
+            },
         );
     }
 

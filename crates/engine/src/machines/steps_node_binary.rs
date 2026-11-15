@@ -78,9 +78,17 @@ fn parse_binary(out: &RemoteOutput, ctx: &StepContext) -> CheckResult {
         }
         return CheckResult::fail("notchling isn't installed in ~/.local/bin on the machine");
     }
+    if ctx.dist_dir.is_some()
+        && (os_word(&ctx.machine).is_none() || arch_word(&ctx.machine).is_none())
+    {
+        return CheckResult::cant_tell("Checking the machine's architecture first");
+    }
     let want = dist_path(&ctx.machine, ctx.dist_dir.as_ref()).and_then(|p| file_hash(&p));
     match want {
-        Some(want) if !have.is_empty() => {
+        Some(_) if have.is_empty() => CheckResult::cant_tell(format!(
+            "{line} is there, but its build can't be hashed on the machine (no sha256sum or shasum)"
+        )),
+        Some(want) => {
             if have == want {
                 CheckResult::pass(format!("{line}, the same build as this Mac's"))
             } else {

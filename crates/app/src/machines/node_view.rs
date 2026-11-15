@@ -38,7 +38,9 @@ impl MachinesView {
         .when(enabled, |s| {
             s.on_click(cx.listener(move |this, _, _, cx| {
                 let now = this.model.machine(&name).is_some_and(|m| m.node.is_some());
-                this.model.set_node(&name, !now);
+                if this.model.set_node(&name, !now) {
+                    this.check(&name, cx);
+                }
                 cx.notify();
             }))
         });
