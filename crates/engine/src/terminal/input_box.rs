@@ -58,61 +58,84 @@ fn strip_chips(text: &str) -> (String, usize) {
 const PICTURE_EXTENSIONS: [&str; 5] = [".png", ".jpg", ".jpeg", ".gif", ".webp"];
 const PICTURES_MAX: usize = 8;
 
-fn path_starts(text: &str) -> bool {
-    let text = text.strip_prefix(['"', '\'']).unwrap_or(text);
-    let mut chars = text.chars();
-    match chars.next() {
-        Some('/') => true,
-        Some(c) if c.is_ascii_alphabetic() => {
-            chars.next() == Some(':') && chars.next() == Some('\\')
-        }
-        _ => false,
-    }
+fn path_shaped(path: &str) -> bool {
+    path.strip_prefix('/')
+        .and_then(|rest| rest.find('/'))
+        .is_some_and(|at| at > 0)
 }
 
-fn path_pieces(line: &str) -> Vec<&str> {
-    let mut pieces = Vec::new();
-    let mut from = 0;
-    for (at, c) in line.char_indices() {
-        if c == ' ' && path_starts(&line[at + 1..]) {
-            pieces.push(&line[from..at]);
-            from = at + 1;
+fn path_token(text: &str) -> Option<(String, &str)> {
+    let mut path = String::new();
+    let end = match text.chars().next()? {
+        quote @ ('\'' | '"') => {
+            let mut at = 1;
+            loop {
+                let close = text[at..].find(quote)?;
+                path.push_str(&text[at..at + close]);
+                at += close + 1;
+                if quote == '\'' && text[at..].starts_with("\\''") {
+                    path.push('\'');
+                    at += 3;
+                } else {
+                    break at;
+                }
+            }
         }
-    }
-    pieces.push(&line[from..]);
-    pieces.retain(|piece| !piece.trim().is_empty());
-    pieces
-}
-
-fn is_picture(piece: &str) -> bool {
-    let piece = piece.trim();
-    if !path_starts(piece) {
-        return false;
-    }
-    let bare = match piece.as_bytes() {
-        [first @ (b'"' | b'\''), .., last] if first == last => &piece[1..piece.len() - 1],
-        _ => piece,
+        _ => {
+            let end = text.find(char::is_whitespace).unwrap_or(text.len());
+            path.push_str(&text[..end]);
+            end
+        }
     };
-    let bare = bare.to_ascii_lowercase();
-    PICTURE_EXTENSIONS.iter().any(|ext| bare.ends_with(ext))
+    let tail = &text[end..];
+    if !tail.is_empty() && !tail.starts_with(' ') {
+        return None;
+    }
+    path_shaped(&path).then(|| (path, tail.trim_start_matches(' ')))
+}
+
+fn path_line(line: &str) -> Option<Vec<String>> {
+    let mut rest = line.trim_matches(' ');
+    let mut paths = Vec::new();
+    while !rest.is_empty() {
+        let (path, tail) = path_token(rest)?;
+        paths.push(path);
+        rest = tail;
+    }
+    Some(paths)
+}
+
+fn is_picture(path: &str) -> bool {
+    let path = path.to_ascii_lowercase();
+    PICTURE_EXTENSIONS.iter().any(|ext| path.ends_with(ext))
 }
 
 struct Message {
     pieces: Vec<(String, bool)>,
+    literal: usize,
 }
 
 impl Message {
     fn of(text: &str) -> Message {
         let mut pieces = Vec::new();
+        let mut literal = 0;
         for line in text.split('\n') {
-            let parts = path_pieces(line);
-            if parts.len() > 1 && !parts.iter().all(|part| path_starts(part.trim_start())) {
-                pieces.push((letters(line), false));
-                continue;
+            match path_line(line) {
+                Some(paths) => {
+                    pieces.extend(paths.iter().map(|path| (letters(path), is_picture(path))));
+                }
+                None => {
+                    let (words, chips) = strip_chips(&squeezed(line));
+                    literal += chips;
+                    pieces.push((letters(&words), false));
+                }
             }
-            pieces.extend(parts.iter().map(|part| (letters(part), is_picture(part))));
         }
-        Message { pieces }
+        Message { pieces, literal }
+    }
+
+    fn real_chips(&self, chips: usize) -> Option<usize> {
+        chips.checked_sub(self.literal)
     }
 
     fn pictures(&self) -> usize {
@@ -148,6 +171,12 @@ impl Message {
             .filter(|mask| mask.count_ones() as usize == chips)
             .map(|mask| self.kept(|nth| mask >> nth & 1 == 1))
             .collect()
+    }
+
+    fn after_chips(&self, chips: usize) -> Vec<String> {
+        self.real_chips(chips)
+            .map(|real| self.without(real))
+            .unwrap_or_default()
     }
 }
 
@@ -198,11 +227,7 @@ impl Input {
         let size = have.chars().count();
         size > 0
             && earlier.iter().any(|text| {
-                let mut wants = Message::of(text).without(chips);
-                if chips > 0 {
-                    wants.push(letters(text));
-                }
-                wants.iter().any(|want| {
+                Message::of(text).after_chips(chips).iter().any(|want| {
                     have == *want
                         || (size >= MIN_PART && (want.starts_with(&have) || want.ends_with(&have)))
                 })
@@ -231,8 +256,11 @@ impl Input {
                 let (shown, chips) = strip_chips(&self.shown());
                 let message = Message::of(text);
                 let have = letters(&shown);
+                let real = chips
+                    .saturating_sub(message.literal)
+                    .min(message.pictures());
                 message
-                    .without(chips.min(message.pictures()))
+                    .without(real)
                     .iter()
                     .any(|want| !want.is_empty() && have.contains(want))
             }
@@ -245,22 +273,23 @@ impl Input {
         }
         let (shown, chips) = strip_chips(&self.shown());
         let message = Message::of(text);
-        if chips > message.pictures() {
-            return Fill::Foreign;
-        }
+        let real = match message.real_chips(chips) {
+            Some(real) if real <= message.pictures() => real,
+            _ => return Fill::Foreign,
+        };
         let typed: String = shown.chars().skip(1).collect();
         if folded(&typed) || folded(&shown) {
             return Fill::Folded;
         }
-        let wants = message.without(chips);
-        if chips == 0 && wants.iter().all(String::is_empty) {
+        if letters(text).is_empty() {
             return Fill::Whole;
         }
+        let wants = message.without(real);
         let have = letters(&shown);
         if wants.contains(&have) {
             Fill::Whole
         } else if wants.iter().any(|want| match have.is_empty() {
-            true => chips > 0 && !want.is_empty(),
+            true => real > 0 && !want.is_empty(),
             false => want.starts_with(&have),
         }) {
             Fill::Part
@@ -761,6 +790,101 @@ mod tests {
             Fill::Foreign,
             "a path inside a sentence is never read as a picture"
         );
+    }
+
+    #[test]
+    fn only_a_line_of_nothing_but_paths_in_the_form_chat_writes_holds_pictures() {
+        let own = |rows: &[&str], text: &str| box_of(rows).fill(text);
+        for text in [
+            "/fix the layout bug in header.png",
+            "/review /tmp/notes.png",
+            "/tmp/a.png and /tmp/b.png",
+            "'/tmp/a.png' vs '/tmp/b.png'",
+            "see /tmp/notes.png please",
+            "hello /tmp/x.jpg",
+            "look\n\n/tmp/a.png then",
+            "look\n\n/a.png",
+            "look\n\nnotes.png",
+        ] {
+            assert_eq!(own(&["❯\u{a0}[Image #1]"], text), Fill::Foreign, "{text}");
+            assert_eq!(
+                own(&["❯\u{a0}[Image #1]look"], text),
+                Fill::Foreign,
+                "{text}"
+            );
+        }
+        assert_eq!(
+            own(
+                &["❯\u{a0}/fix the layout bug in header.png"],
+                "/fix the layout bug in header.png"
+            ),
+            Fill::Whole
+        );
+        let phone = "hello /tmp/phone-images/x.jpg";
+        assert_eq!(
+            own(&["❯\u{a0}hello /tmp/phone-images/x.jpg"], phone),
+            Fill::Whole
+        );
+        let chats = "look\n\n'/tmp/it'\\''s a.png' /tmp/b.png /tmp/notes.rs";
+        assert_eq!(
+            own(
+                &["❯\u{a0}[Image #1] [Image #2]look", "  /tmp/notes.rs"],
+                chats
+            ),
+            Fill::Whole
+        );
+        let phone_only = "\"/tmp/phone images/x.jpg\"";
+        assert_eq!(own(&["❯\u{a0}[Image #1]"], phone_only), Fill::Whole);
+    }
+
+    #[test]
+    fn a_chip_the_person_pasted_is_never_the_message_nor_a_leftover_of_it() {
+        let plain = [String::from("Please run the whole suite again")];
+        for row in [
+            "❯\u{a0}[Image #5]Please run the whole suite again",
+            "❯\u{a0}[Image #5]Please run the",
+            "❯\u{a0}[Image #5] [Image #6]Please run the whole suite again",
+        ] {
+            let left = box_of(&[row]);
+            assert!(!left.leftover_of(&plain), "{row}");
+            assert_eq!(left.fill(&plain[0]), Fill::Foreign, "{row}");
+        }
+        let one = [String::from("Fix this bug now\n\n/tmp/a.png")];
+        assert!(!box_of(&["❯\u{a0}[Image #5] [Image #6]Fix this bug now"]).leftover_of(&one));
+        assert!(box_of(&["❯\u{a0}[Image #5]Fix this bug now"]).leftover_of(&one));
+        assert!(box_of(&["❯\u{a0}Fix this bug now"]).leftover_of(&one));
+    }
+
+    #[test]
+    fn a_message_that_names_a_chip_in_words_is_still_the_message() {
+        let text = "why does [Image #1] fail?";
+        assert_eq!(
+            box_of(&["❯\u{a0}why does [Image #1] fail?"]).fill(text),
+            Fill::Whole
+        );
+        assert_eq!(
+            box_of(&["❯\u{a0}why does [Image #1]", "  fail?"]).fill(text),
+            Fill::Whole
+        );
+        assert_eq!(
+            box_of(&["❯\u{a0}[Image #2]why does [Image #1] fail?"]).fill(text),
+            Fill::Foreign,
+            "a chip of the person's beside it"
+        );
+        assert_eq!(
+            box_of(&["❯\u{a0}why does fail?"]).fill(text),
+            Fill::Foreign,
+            "a chip missing from it"
+        );
+        let both = "why does [Image #1] fail?\n\n'/tmp/a b.png'";
+        assert_eq!(
+            box_of(&["❯\u{a0}[Image #2]why does [Image #1] fail?"]).fill(both),
+            Fill::Whole
+        );
+        assert!(box_of(&["❯\u{a0}[Image #2]why does [Image #1] fail?"]).leftover_of(&[both.into()]));
+        let more = box_of(&["❯\u{a0}why does [Image #1] fail? and more"]);
+        assert!(more.carries(text));
+        assert!(!box_of(&["❯\u{a0}[Image #1]"]).carries(text));
     }
 
     #[test]

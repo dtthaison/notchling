@@ -222,3 +222,19 @@ fn text_a_person_types_beside_the_chips_is_never_sent_with_them() {
     assert!(pty.sent.is_empty());
     assert_eq!(pty.writes, typed(WITH_PICTURES)[..2], "no Enter");
 }
+
+#[test]
+fn a_message_that_names_a_chip_in_words_is_sent_once_and_a_foreign_chip_beside_it_is_not() {
+    let text = "why does [Image #1] fail?";
+    let mut pty = FakePrompt::idle().reading_pictures();
+    assert_eq!(send(&mut pty, text), Ok(Outcome { taken: false }));
+    assert_eq!(pty.sent, [text]);
+    assert_eq!(pty.writes, typed(text));
+
+    let mut pty = FakePrompt::idle()
+        .reading_pictures()
+        .typing(ATTACH_QUIET_MS + KEY_PAUSE_MS + 10, "[Image #9]");
+    assert_eq!(send(&mut pty, text), Err(Failure::Mixed));
+    assert!(pty.sent.is_empty());
+    assert_eq!(pty.writes, typed(text)[..2], "no Enter");
+}

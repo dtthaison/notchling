@@ -241,3 +241,28 @@ fn an_earlier_try_with_a_picture_is_ours_even_when_its_words_are_short() {
     assert_eq!(out, Err(Failure::NotCleared), "nothing says it is ours");
     assert!(pty.writes.is_empty());
 }
+
+#[test]
+fn a_picture_the_person_pasted_beside_our_words_is_never_cleared_as_ours() {
+    let earlier = Clearing {
+        earlier: vec![
+            EARLIER.to_string(),
+            "Fix this bug now\n\n/tmp/a.png".to_string(),
+        ],
+        any: false,
+    };
+    for left in [
+        "[Image #5]Please run the whole suite again and tell me what failed",
+        "[Image #5]Please run the whole suite",
+        "[Image #5] [Image #6]Fix this bug now",
+    ] {
+        let mut pty = FakePrompt::idle().holding(left);
+        let (out, _) = send(&mut pty, "now fix it", &earlier);
+        assert_eq!(out, Err(Failure::NotCleared), "{left}");
+        assert!(
+            pty.writes.is_empty(),
+            "{left}: not a key, not even the clear"
+        );
+        assert_eq!(pty.held(), Some(left));
+    }
+}
