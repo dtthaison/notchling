@@ -1,7 +1,6 @@
 use crate::limits_ops_tests::TempDir;
-use crate::snap_files::{
-    backup_db, copy_quiet, copy_quiet_hooked, copy_tail, copy_tail_hooked, Copied, StageMeta,
-};
+use crate::snap_db::{backup_db, backup_db_limited, backup_db_report, BackupLimits, BackupPath};
+use crate::snap_files::StageMeta;
 use notchling_engine::cluster::id::NodeId;
 use notchling_engine::cluster::members::Term;
 use notchling_engine::cluster::snapshot::{SetPlan, Trigger};
@@ -167,134 +166,55 @@ fn backup_of_a_missing_db_is_an_error() {
     assert!(!t.path("nope.db").exists());
 }
 
-#[test]
-fn quiet_file_is_copied_with_its_hash() {
-    let t = TempDir::new("snap-quiet");
-    let src = t.path("a.json");
-    let dst = t.path("out.json");
-    put(&src, b"{\"a\":1}");
-    let copied = copy_quiet(&src, &dst, QUIET, now_ms()).unwrap();
-    assert_eq!(
-        copied,
-        Copied::Done {
-            len: 7,
-            sha256: hex(b"{\"a\":1}")
-        }
-    );
-    assert_eq!(fs::read(&dst).unwrap(), b"{\"a\":1}");
-    assert_eq!(
-        fs::metadata(&dst).unwrap().permissions().mode() & 0o777,
-        0o600
-    );
+fn mtime(path: &Path) -> SystemTime {
+    fs::metadata(path).unwrap().modified().unwrap()
 }
 
 #[test]
-fn busy_file_is_not_copied() {
-    let t = TempDir::new("snap-busy");
-    let src = t.path("a.json");
-    let dst = t.path("out.json");
-    put(&src, b"fresh");
-    age(&src, 100);
+fn idle_backup_leaves_the_source_untouched() {
+    let t = TempDir::new("snap-backup-idle");
+    let src = t.path("data/cluster.db");
+    let dst = t.path("out/cluster.db");
+    fs::create_dir_all(dst.parent().unwrap()).unwrap();
+    drop(make_db(&src, 200));
+    old(&src);
+    let bytes = fs::read(&src).unwrap();
+    let stamp = mtime(&src);
+    backup_db(&src, &dst).unwrap();
+    assert_eq!(fs::read(&src).unwrap(), bytes);
+    assert_eq!(mtime(&src), stamp);
+}
+
+#[test]
+fn a_tiny_deadline_forces_one_whole_copy() {
+    let t = TempDir::new("snap-backup-whole");
+    let src = t.path("data/cluster.db");
+    let dst = t.path("out/cluster.db");
+    fs::create_dir_all(dst.parent().unwrap()).unwrap();
+    drop(make_db(&src, 500));
+    let limits = BackupLimits {
+        stepped_for: Duration::ZERO,
+        total: Duration::from_secs(30),
+    };
     assert_eq!(
-        copy_quiet(&src, &dst, QUIET, now_ms()).unwrap(),
-        Copied::Busy
+        backup_db_limited(&src, &dst, &limits).unwrap(),
+        BackupPath::Whole
     );
-    assert!(!dst.exists());
-    age(&src, QUIET as u64 + 5_000);
-    assert!(matches!(
-        copy_quiet(&src, &dst, QUIET, now_ms()).unwrap(),
-        Copied::Done { .. }
-    ));
+    let copy = Connection::open(&dst).unwrap();
+    assert_eq!(count(&copy), 500);
+    let dst2 = t.path("out/second.db");
+    assert_eq!(backup_db_report(&src, &dst2).unwrap(), BackupPath::Stepped);
 }
 
 #[test]
-fn file_changed_during_the_copy_is_busy() {
-    let t = TempDir::new("snap-changed");
-    let src = t.path("a.json");
-    let dst = t.path("out.json");
-    put(&src, b"first");
-    let again = src.clone();
-    let copied = copy_quiet_hooked(&src, &dst, QUIET, now_ms(), &mut || {
-        fs::write(&again, b"second and longer").unwrap();
-    })
-    .unwrap();
-    assert_eq!(copied, Copied::Busy);
-    assert!(!dst.exists());
-}
-
-#[test]
-fn tail_copies_only_new_bytes() {
-    let t = TempDir::new("snap-tail");
-    let src = t.path("t.jsonl");
-    let dst = t.path("tail");
-    put(&src, b"hello world");
-    let copied = copy_tail(&src, 6, &dst, QUIET, now_ms()).unwrap();
-    assert_eq!(
-        copied,
-        Copied::Done {
-            len: 5,
-            sha256: hex(b"world")
-        }
-    );
-    assert_eq!(fs::read(&dst).unwrap(), b"world");
-}
-
-#[test]
-fn tail_from_the_end_is_empty() {
-    let t = TempDir::new("snap-tail-end");
-    let src = t.path("t.jsonl");
-    let dst = t.path("tail");
-    put(&src, b"abc");
-    let copied = copy_tail(&src, 3, &dst, QUIET, now_ms()).unwrap();
-    assert_eq!(
-        copied,
-        Copied::Done {
-            len: 0,
-            sha256: hex(b"")
-        }
-    );
-}
-
-#[test]
-fn busy_transcript_is_not_copied() {
-    let t = TempDir::new("snap-tail-busy");
-    let src = t.path("t.jsonl");
-    let dst = t.path("tail");
-    put(&src, b"abcdef");
-    age(&src, 50);
-    assert_eq!(
-        copy_tail(&src, 2, &dst, QUIET, now_ms()).unwrap(),
-        Copied::Busy
-    );
-    assert!(!dst.exists());
-}
-
-#[test]
-fn shorter_transcript_is_rewritten() {
-    let t = TempDir::new("snap-short");
-    let src = t.path("t.jsonl");
-    let dst = t.path("tail");
-    put(&src, b"abc");
-    assert_eq!(
-        copy_tail(&src, 10, &dst, QUIET, now_ms()).unwrap(),
-        Copied::Rewritten
-    );
-    assert!(!dst.exists());
-}
-
-#[test]
-fn replaced_transcript_is_rewritten() {
-    let t = TempDir::new("snap-replaced");
-    let src = t.path("t.jsonl");
-    let dst = t.path("tail");
-    put(&src, b"0123456789");
-    let again = src.clone();
-    let copied = copy_tail_hooked(&src, 4, &dst, QUIET, now_ms(), &mut || {
-        let other = again.with_file_name("other");
-        fs::write(&other, b"0123456789abcdef").unwrap();
-        fs::rename(&other, &again).unwrap();
-    })
-    .unwrap();
-    assert_eq!(copied, Copied::Rewritten);
+fn a_symlinked_source_db_is_refused() {
+    let t = TempDir::new("snap-backup-link");
+    let src = t.path("data/cluster.db");
+    let link = t.path("data/link.db");
+    let dst = t.path("out/link.db");
+    fs::create_dir_all(dst.parent().unwrap()).unwrap();
+    drop(make_db(&src, 5));
+    std::os::unix::fs::symlink(&src, &link).unwrap();
+    assert!(backup_db(&link, &dst).is_err());
     assert!(!dst.exists());
 }

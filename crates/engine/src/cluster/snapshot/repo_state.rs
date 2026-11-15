@@ -321,6 +321,7 @@ pub fn parse(folder: &Path, outputs: &[GitOutput]) -> Result<Option<RepoFacts>, 
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Movable {
     Yes,
     No(String),

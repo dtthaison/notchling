@@ -1,30 +1,14 @@
+use crate::snap_copy::{copy_quiet, copy_tail, hash_file, Copied};
+use crate::snap_db::backup_db;
 use notchling_engine::cluster::id::NodeId;
 use notchling_engine::cluster::members::Term;
 use notchling_engine::cluster::snapshot::{
-    dir_digest, excluded, Manifest, Part, PartKind, SetPlan,
+    dir_digest, excluded, staged_path, Manifest, Part, PartKind, SetPlan, EXCLUDED_DIRS, MAX_FILE,
 };
-use rusqlite::backup::{Backup, StepResult};
-use rusqlite::{Connection, OpenFlags};
-use sha2::{Digest, Sha256};
-use std::fs::{self, File, OpenOptions};
-use std::io::{Read, Seek, SeekFrom, Write};
+use std::fs;
 use std::path::{Component, Path, PathBuf};
-use std::time::{Duration, Instant, SystemTime};
 
-const PAGES_PER_STEP: i32 = 256;
-const STEP_PAUSE: Duration = Duration::from_millis(5);
-const STEPPED_FOR: Duration = Duration::from_secs(10);
-const MAX_RESTARTS: u32 = 3;
-const FINAL_PAUSE: Duration = Duration::from_millis(50);
-const FINAL_TRIES: u32 = 200;
-const CHUNK: usize = 64 * 1024;
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Copied {
-    Done { len: u64, sha256: String },
-    Busy,
-    Rewritten,
-}
+const STAGING: &str = ".staging";
 
 #[derive(Clone, Debug)]
 pub struct StageMeta {
@@ -34,85 +18,6 @@ pub struct StageMeta {
     pub created_ms: i64,
     pub quiet_ms: i64,
     pub now_ms: i64,
-}
-
-struct Stat {
-    len: u64,
-    modified: Option<SystemTime>,
-    inode: u64,
-}
-
-impl Stat {
-    fn quiet(&self, quiet_ms: i64, now_ms: i64) -> bool {
-        let modified_ms = self
-            .modified
-            .and_then(|at| at.duration_since(SystemTime::UNIX_EPOCH).ok())
-            .map(|d| d.as_millis() as i64)
-            .unwrap_or(0);
-        now_ms.saturating_sub(modified_ms) >= quiet_ms
-    }
-
-    fn same(&self, other: &Stat) -> bool {
-        self.len == other.len && self.modified == other.modified && self.inode == other.inode
-    }
-}
-
-fn inode_of(meta: &fs::Metadata) -> u64 {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::MetadataExt;
-        meta.ino()
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = meta;
-        0
-    }
-}
-
-fn stat_file(path: &Path) -> Result<Stat, String> {
-    let meta = fs::symlink_metadata(path).map_err(|e| format!("{}: {e}", path.display()))?;
-    if !meta.is_file() {
-        return Err(format!("{} is not a regular file", path.display()));
-    }
-    Ok(Stat {
-        len: meta.len(),
-        modified: meta.modified().ok(),
-        inode: inode_of(&meta),
-    })
-}
-
-fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
-}
-
-fn open_source(path: &Path) -> Result<File, String> {
-    let mut options = OpenOptions::new();
-    options.read(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.custom_flags(libc::O_NOFOLLOW);
-    }
-    options
-        .open(path)
-        .map_err(|e| format!("{}: {e}", path.display()))
-}
-
-fn create_private_file(path: &Path) -> std::io::Result<File> {
-    match fs::remove_file(path) {
-        Ok(()) => {}
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-        Err(e) => return Err(e),
-    }
-    let mut options = OpenOptions::new();
-    options.write(true).create_new(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
-    }
-    options.open(path)
 }
 
 fn private_dirs(path: &Path) -> Result<(), String> {
@@ -128,233 +33,96 @@ fn private_dirs(path: &Path) -> Result<(), String> {
         .map_err(|e| format!("{}: {e}", path.display()))
 }
 
-fn pump(input: &mut dyn Read, out: &mut dyn Write) -> Result<(u64, String), String> {
-    let mut hasher = Sha256::new();
-    let mut buffer = vec![0u8; CHUNK];
-    let mut total = 0u64;
-    loop {
-        let n = input.read(&mut buffer).map_err(|e| e.to_string())?;
-        if n == 0 {
-            break;
+fn variants(path: &Path) -> Vec<PathBuf> {
+    let mut all = vec![path.to_path_buf()];
+    if let (Some(parent), Some(name)) = (path.parent(), path.file_name()) {
+        if let Ok(real) = fs::canonicalize(parent) {
+            let joined = real.join(name);
+            if joined != path {
+                all.push(joined);
+            }
         }
-        hasher.update(&buffer[..n]);
-        out.write_all(&buffer[..n]).map_err(|e| e.to_string())?;
-        total += n as u64;
     }
-    Ok((total, hex(&hasher.finalize())))
+    all
 }
 
-fn hash_file(path: &Path) -> Result<(u64, String), String> {
-    let mut file = open_source(path)?;
-    pump(&mut file, &mut std::io::sink())
+fn root_variants(root: &Path) -> Vec<PathBuf> {
+    let mut all = vec![root.to_path_buf()];
+    if let Ok(real) = fs::canonicalize(root) {
+        if real != root {
+            all.push(real);
+        }
+    }
+    all
 }
 
-fn remove_quietly(path: &Path) {
-    let _ = fs::remove_file(path);
+fn excluded_any(path: &Path) -> bool {
+    variants(path).iter().any(|each| excluded(each))
 }
 
-pub fn copy_quiet(src: &Path, dst: &Path, quiet_ms: i64, now_ms: i64) -> Result<Copied, String> {
-    copy_quiet_hooked(src, dst, quiet_ms, now_ms, &mut || {})
-}
-
-pub(crate) fn copy_quiet_hooked(
-    src: &Path,
-    dst: &Path,
-    quiet_ms: i64,
-    now_ms: i64,
-    after_copy: &mut dyn FnMut(),
-) -> Result<Copied, String> {
-    let result = quiet_copy(src, dst, quiet_ms, now_ms, after_copy);
-    if !matches!(result, Ok(Copied::Done { .. })) {
-        remove_quietly(dst);
-    }
-    result
-}
-
-fn quiet_copy(
-    src: &Path,
-    dst: &Path,
-    quiet_ms: i64,
-    now_ms: i64,
-    after_copy: &mut dyn FnMut(),
-) -> Result<Copied, String> {
-    let before = stat_file(src)?;
-    if !before.quiet(quiet_ms, now_ms) {
-        return Ok(Copied::Busy);
-    }
-    let input = open_source(src)?;
-    let mut out = create_private_file(dst).map_err(|e| format!("{}: {e}", dst.display()))?;
-    let (len, sha256) = pump(&mut input.take(before.len), &mut out)?;
-    out.sync_all().map_err(|e| e.to_string())?;
-    after_copy();
-    let after = stat_file(src)?;
-    if len != before.len || !before.same(&after) {
-        return Ok(Copied::Busy);
-    }
-    Ok(Copied::Done { len, sha256 })
-}
-
-pub fn copy_tail(
-    src: &Path,
-    from: u64,
-    dst: &Path,
-    quiet_ms: i64,
-    now_ms: i64,
-) -> Result<Copied, String> {
-    copy_tail_hooked(src, from, dst, quiet_ms, now_ms, &mut || {})
-}
-
-pub(crate) fn copy_tail_hooked(
-    src: &Path,
-    from: u64,
-    dst: &Path,
-    quiet_ms: i64,
-    now_ms: i64,
-    after_copy: &mut dyn FnMut(),
-) -> Result<Copied, String> {
-    let result = tail_copy(src, from, dst, quiet_ms, now_ms, after_copy);
-    if !matches!(result, Ok(Copied::Done { .. })) {
-        remove_quietly(dst);
-    }
-    result
-}
-
-fn tail_copy(
-    src: &Path,
-    from: u64,
-    dst: &Path,
-    quiet_ms: i64,
-    now_ms: i64,
-    after_copy: &mut dyn FnMut(),
-) -> Result<Copied, String> {
-    let before = stat_file(src)?;
-    if !before.quiet(quiet_ms, now_ms) {
-        return Ok(Copied::Busy);
-    }
-    if before.len < from {
-        return Ok(Copied::Rewritten);
-    }
-    let mut input = open_source(src)?;
-    input
-        .seek(SeekFrom::Start(from))
-        .map_err(|e| format!("{}: {e}", src.display()))?;
-    let mut out = create_private_file(dst).map_err(|e| format!("{}: {e}", dst.display()))?;
-    let (len, sha256) = pump(&mut input.take(before.len - from), &mut out)?;
-    out.sync_all().map_err(|e| e.to_string())?;
-    after_copy();
-    let after = stat_file(src)?;
-    if after.inode != before.inode || after.len < before.len || len != before.len - from {
-        return Ok(Copied::Rewritten);
-    }
-    Ok(Copied::Done { len, sha256 })
-}
-
-pub fn backup_db(src: &Path, dst: &Path) -> Result<(), String> {
-    let source = Connection::open_with_flags(
-        src,
-        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-    )
-    .map_err(|e| format!("{}: {e}", src.display()))?;
-    source
-        .busy_timeout(Duration::from_secs(5))
-        .map_err(|e| e.to_string())?;
-    let result = copy_db(&source, dst);
-    if result.is_err() {
-        remove_quietly(dst);
-    }
-    for suffix in ["-wal", "-shm", "-journal"] {
-        let mut name = dst.as_os_str().to_owned();
-        name.push(suffix);
-        remove_quietly(Path::new(&name));
-    }
-    result
-}
-
-fn copy_db(source: &Connection, dst: &Path) -> Result<(), String> {
-    create_private_file(dst).map_err(|e| format!("{}: {e}", dst.display()))?;
-    let mut target = Connection::open(dst).map_err(|e| format!("{}: {e}", dst.display()))?;
+fn in_excluded_dir(path: &Path) -> bool {
+    let parts: Vec<Component> = path.components().collect();
+    if parts
+        .iter()
+        .any(|part| matches!(part, Component::ParentDir))
     {
-        let backup = Backup::new(source, &mut target).map_err(|e| e.to_string())?;
-        run_steps(&backup)?;
+        return true;
     }
-    target
-        .pragma_update_and_check(None, "journal_mode", "DELETE", |row| {
-            row.get::<_, String>(0)
-        })
-        .map_err(|e| e.to_string())?;
-    target.close().map_err(|(_, e)| e.to_string())
+    EXCLUDED_DIRS.iter().any(|dir| {
+        let want: Vec<Component> = Path::new(dir).components().collect();
+        parts.windows(want.len()).any(|window| window == want)
+    })
 }
 
-fn run_steps(backup: &Backup<'_, '_>) -> Result<(), String> {
-    let started = Instant::now();
-    let mut restarts = 0u32;
-    let mut last_remaining = i32::MAX;
-    while started.elapsed() < STEPPED_FOR && restarts <= MAX_RESTARTS {
-        if let StepResult::Done = backup.step(PAGES_PER_STEP).map_err(|e| e.to_string())? {
-            return Ok(());
-        }
-        let remaining = backup.progress().remaining;
-        if remaining > last_remaining {
-            restarts += 1;
-        }
-        last_remaining = remaining;
-        std::thread::sleep(STEP_PAUSE);
-    }
-    for _ in 0..FINAL_TRIES {
-        if let StepResult::Done = backup.step(-1).map_err(|e| e.to_string())? {
-            return Ok(());
-        }
-        std::thread::sleep(FINAL_PAUSE);
-    }
-    Err("the database stayed busy".to_owned())
+fn tail_excluded(path: &Path) -> bool {
+    variants(path).iter().any(|each| in_excluded_dir(each))
 }
 
 fn valid_set_id(id: &str) -> Result<(), String> {
     let mut parts = Path::new(id).components();
     match (parts.next(), parts.next()) {
-        (Some(Component::Normal(name)), None) if name == id => Ok(()),
+        (Some(Component::Normal(name)), None) if name == id && !id.ends_with(STAGING) => Ok(()),
         _ => Err(format!("{id:?} is not a set id")),
     }
 }
 
-fn refuse_repo_paths(plan: &SetPlan) -> Result<(), String> {
-    let roots: Vec<&Path> = plan
+fn refuse_unsafe_paths(plan: &SetPlan, stage: &Path) -> Result<(), String> {
+    let roots: Vec<PathBuf> = plan
         .sessions
         .iter()
-        .filter_map(|s| s.repo.as_ref().map(|r| r.root.as_path()))
+        .filter_map(|s| s.repo.as_ref())
+        .flat_map(|repo| root_variants(&repo.root))
         .collect();
+    let stages = root_variants(stage);
     let paths = plan
         .dbs
         .iter()
         .chain(plan.files.iter())
         .chain(plan.tails.iter().map(|(path, _)| path));
     for path in paths {
-        for root in &roots {
-            if path.starts_with(root) || root.starts_with(path) {
+        for each in variants(path) {
+            if let Some(root) = roots
+                .iter()
+                .find(|root| each.starts_with(root) || root.starts_with(&each))
+            {
                 return Err(format!(
                     "{} is inside the repository {}: code never travels",
                     path.display(),
                     root.display()
                 ));
             }
+            if stages
+                .iter()
+                .any(|held| each.starts_with(held) || held.starts_with(&each))
+            {
+                return Err(format!(
+                    "{} is inside or around the staging folder",
+                    path.display()
+                ));
+            }
         }
     }
     Ok(())
-}
-
-fn staged_path(set_dir: &Path, source: &Path) -> Result<PathBuf, String> {
-    if !source.is_absolute() {
-        return Err(format!("{} is not an absolute path", source.display()));
-    }
-    let mut target = set_dir.join("parts");
-    for component in source.components() {
-        match component {
-            Component::Normal(name) => target.push(name),
-            Component::RootDir | Component::Prefix(_) => {}
-            _ => return Err(format!("{} has a . or .. part", source.display())),
-        }
-    }
-    Ok(target)
 }
 
 enum Source {
@@ -376,22 +144,31 @@ fn classify(path: &Path) -> Result<Source, String> {
 }
 
 fn prepare_target(set_dir: &Path, source: &Path) -> Result<PathBuf, String> {
-    let target = staged_path(set_dir, source)?;
+    let target = staged_path(set_dir, source)
+        .ok_or_else(|| format!("{} can't be staged", source.display()))?;
     if let Some(parent) = target.parent() {
         private_dirs(parent)?;
     }
     Ok(target)
 }
 
-fn quiet_part(src: &Path, dst: &Path, meta: &StageMeta) -> Result<(u64, String), String> {
-    match copy_quiet(src, dst, meta.quiet_ms, meta.now_ms)? {
-        Copied::Done { len, sha256 } => Ok((len, sha256)),
-        _ => Err(format!("{} is still being written", src.display())),
+pub(crate) fn copy_listed(
+    src: &Path,
+    dst: &Path,
+    meta: &StageMeta,
+) -> Result<Option<(u64, String)>, String> {
+    match copy_quiet(src, dst, meta.quiet_ms, meta.now_ms) {
+        Ok(Copied::Done { len, sha256 }) => Ok(Some((len, sha256))),
+        Ok(_) => Err(format!("{} is still being written", src.display())),
+        Err(why) => match fs::symlink_metadata(src) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            _ => Err(why),
+        },
     }
 }
 
 fn db_part(set_dir: &Path, src: &Path) -> Result<Option<Part>, String> {
-    if excluded(src) {
+    if excluded_any(src) {
         return Ok(None);
     }
     match classify(src)? {
@@ -411,7 +188,7 @@ fn db_part(set_dir: &Path, src: &Path) -> Result<Option<Part>, String> {
 }
 
 fn file_part(set_dir: &Path, src: &Path, meta: &StageMeta) -> Result<Option<Part>, String> {
-    if excluded(src) {
+    if excluded_any(src) {
         return Ok(None);
     }
     match classify(src)? {
@@ -419,8 +196,7 @@ fn file_part(set_dir: &Path, src: &Path, meta: &StageMeta) -> Result<Option<Part
         Source::Dir => dir_part(set_dir, src, meta),
         Source::File => {
             let dst = prepare_target(set_dir, src)?;
-            let (len, sha256) = quiet_part(src, &dst, meta)?;
-            Ok(Some(Part {
+            Ok(copy_listed(src, &dst, meta)?.map(|(len, sha256)| Part {
                 kind: PartKind::File,
                 path: src.to_path_buf(),
                 sha256,
@@ -431,17 +207,27 @@ fn file_part(set_dir: &Path, src: &Path, meta: &StageMeta) -> Result<Option<Part
 }
 
 fn walk_files(dir: &Path, rel: &str, out: &mut Vec<(String, PathBuf)>) -> Result<(), String> {
-    let entries = fs::read_dir(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    let entries = match fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(format!("{}: {e}", dir.display())),
+    };
     for entry in entries {
         let entry = entry.map_err(|e| format!("{}: {e}", dir.display()))?;
         let path = entry.path();
-        let name = entry.file_name().to_string_lossy().into_owned();
+        let file_name = entry.file_name();
+        let Some(name) = file_name.to_str() else {
+            continue;
+        };
+        if name.contains('\n') {
+            continue;
+        }
         let rel_name = if rel.is_empty() {
-            name
+            name.to_owned()
         } else {
             format!("{rel}/{name}")
         };
-        if excluded(&path) {
+        if excluded_any(&path) {
             continue;
         }
         match classify(&path)? {
@@ -466,7 +252,9 @@ fn dir_part(set_dir: &Path, src: &Path, meta: &StageMeta) -> Result<Option<Part>
         if let Some(parent) = dst.parent() {
             private_dirs(parent)?;
         }
-        let (len, sha256) = quiet_part(&path, &dst, meta)?;
+        let Some((len, sha256)) = copy_listed(&path, &dst, meta)? else {
+            continue;
+        };
         total += len;
         entries.push((rel, len, sha256));
     }
@@ -484,17 +272,31 @@ fn tail_part(
     from: u64,
     meta: &StageMeta,
 ) -> Result<Option<Part>, String> {
-    if excluded(src) {
+    if tail_excluded(src) {
         return Ok(None);
     }
     match classify(src)? {
         Source::File => {}
         _ => return Ok(None),
     }
-    let dst = prepare_target(set_dir, src)?;
+    let mut dst = None;
     let mut start = from;
     loop {
-        match copy_tail(src, start, &dst, meta.quiet_ms, meta.now_ms)? {
+        let len = match fs::symlink_metadata(src) {
+            Ok(found) => found.len(),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(format!("{}: {e}", src.display())),
+        };
+        if len.saturating_sub(start) > MAX_FILE {
+            return Ok(None);
+        }
+        if dst.is_none() {
+            dst = Some(prepare_target(set_dir, src)?);
+        }
+        let Some(target) = dst.as_deref() else {
+            return Ok(None);
+        };
+        match copy_tail(src, start, target, meta.quiet_ms, meta.now_ms)? {
             Copied::Done { len, sha256 } => {
                 return Ok(Some(Part {
                     kind: PartKind::Tail { from: start },
@@ -544,21 +346,35 @@ fn write_manifest(
     Ok(manifest)
 }
 
+fn remove_dir(path: &Path) -> Result<(), String> {
+    match fs::remove_dir_all(path) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(format!("{}: {e}", path.display())),
+    }
+}
+
+fn publish(work: &Path, set_dir: &Path) -> Result<(), String> {
+    remove_dir(set_dir)?;
+    fs::rename(work, set_dir).map_err(|e| format!("{}: {e}", set_dir.display()))
+}
+
 pub fn stage_set(plan: &SetPlan, stage: &Path, meta: &StageMeta) -> Result<Manifest, String> {
     valid_set_id(&plan.id)?;
-    refuse_repo_paths(plan)?;
-    notchling_platform::files::ensure_private_dir(stage).map_err(|e| e.to_string())?;
-    let set_dir = stage.join(&plan.id);
-    match fs::remove_dir_all(&set_dir) {
-        Ok(()) => {}
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-        Err(e) => return Err(format!("{}: {e}", set_dir.display())),
+    if fs::symlink_metadata(stage).is_ok_and(|found| found.file_type().is_symlink()) {
+        return Err(format!("{} is a symlink", stage.display()));
     }
-    private_dirs(&set_dir.join("parts"))?;
-    let result = stage_parts(plan, &set_dir, meta)
-        .and_then(|parts| write_manifest(plan, &set_dir, meta, parts));
+    notchling_platform::files::ensure_private_dir(stage).map_err(|e| e.to_string())?;
+    refuse_unsafe_paths(plan, stage)?;
+    let set_dir = stage.join(&plan.id);
+    let work = stage.join(format!("{}{STAGING}", plan.id));
+    remove_dir(&work)?;
+    private_dirs(&work.join("parts"))?;
+    let result = stage_parts(plan, &work, meta)
+        .and_then(|parts| write_manifest(plan, &work, meta, parts))
+        .and_then(|manifest| publish(&work, &set_dir).map(|()| manifest));
     if result.is_err() {
-        let _ = fs::remove_dir_all(&set_dir);
+        let _ = fs::remove_dir_all(&work);
     }
     result
 }

@@ -1,4 +1,4 @@
-use super::manifest::{dir_digest, Manifest, Part, PartKind};
+use super::manifest::{dir_digest, staged_path, Manifest, Part, PartKind};
 use super::{excluded, Movable, SessionEntry, MAX_FILE};
 use crate::cluster::id::Tool;
 use crate::cluster::members::Term;
@@ -112,5 +112,40 @@ fn excluded_names_a_regular_file_over_the_limit() {
     assert!(excluded(&big));
     assert!(!excluded(&small));
     assert!(!excluded(&dir.join("missing")));
+    assert!(excluded(Path::new("/data/pages/../cluster/grants")));
+    assert!(excluded(Path::new("/data/../pages")));
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn staged_path_lays_a_source_under_parts() {
+    assert_eq!(
+        staged_path(
+            Path::new("/stage/s-1"),
+            Path::new("/home/u/.claude/p/s.jsonl")
+        ),
+        Some(PathBuf::from("/stage/s-1/parts/home/u/.claude/p/s.jsonl"))
+    );
+}
+
+#[test]
+fn staged_path_refuses_relative_and_dotted_paths() {
+    let set = Path::new("/stage/s-1");
+    assert_eq!(staged_path(set, Path::new("home/u/a")), None);
+    assert_eq!(staged_path(set, Path::new("/home/../etc/a")), None);
+    assert_eq!(staged_path(set, Path::new("/home/./u/a")), None);
+    assert_eq!(staged_path(set, Path::new("/home/u/..")), None);
+}
+
+#[test]
+fn part_kinds_and_verdicts_serialise_in_snake_case() {
+    let tail = serde_json::to_string(&PartKind::Tail { from: 3 }).expect("tail");
+    assert_eq!(tail, r#"{"tail":{"from":3}}"#);
+    assert_eq!(serde_json::to_string(&PartKind::Db).expect("db"), r#""db""#);
+    assert_eq!(
+        serde_json::to_string(&Movable::Yes).expect("yes"),
+        r#""yes""#
+    );
+    let no = serde_json::to_string(&Movable::No("why".to_owned())).expect("no");
+    assert_eq!(no, r#"{"no":"why"}"#);
 }

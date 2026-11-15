@@ -3,9 +3,10 @@ use crate::cluster::id::NodeId;
 use crate::cluster::members::Term;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::path::PathBuf;
+use std::path::{Component, Path, PathBuf};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum PartKind {
     Db,
     File,
@@ -44,4 +45,23 @@ pub fn dir_digest(entries: &[(String, u64, String)]) -> String {
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect()
+}
+
+pub fn staged_path(set_dir: &Path, source: &Path) -> Option<PathBuf> {
+    if !source.is_absolute() {
+        return None;
+    }
+    let text = source.to_string_lossy();
+    if text.split(['/', '\\']).any(|part| part == ".") {
+        return None;
+    }
+    let mut target = set_dir.join("parts");
+    for component in source.components() {
+        match component {
+            Component::Normal(name) => target.push(name),
+            Component::RootDir | Component::Prefix(_) => {}
+            Component::CurDir | Component::ParentDir => return None,
+        }
+    }
+    Some(target)
 }

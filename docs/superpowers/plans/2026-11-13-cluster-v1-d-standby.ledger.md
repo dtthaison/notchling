@@ -23,3 +23,12 @@ gitdb: Ruling R12: one Busy file or db fails the whole stage and removes its fol
 gitdb: Ruling R13: copy_tail is Rewritten when shorter than `from` or its inode changed during the copy; a recorded inode across sets would be Task 6's (it keeps lengths only) — costs a missed replace-with-longer-file if wrong.
 gitdb: Ruling R14: backup_db steps 256 pages / 5 ms and, after 10 s or repeated restarts under a busy writer, finishes with one step(-1) under one read lock — a stepped backup of a db written all the time can restart forever; rusqlite becomes a notchlingd dependency with "backup", plus sha2.
 gitdb: Task 5: implemented a3f88969 (6 engine + 22 daemon tests)
+gitdb: Task 4 re-review (opus): Approved (981fcc71). Parked minor → final fix round: a local branch named origin/<x> passes the origin/ check; count `rev-list --count HEAD --not --remotes=origin` instead.
+gitdb: Task 4: complete (80daee72, 981fcc71).
+gitdb: Task 5: implemented a3f88969, 22e9514c (review on 22e9514c).
+gitdb: Task 5 review (opus): Needs fixes — I1 copy_tail took a tail of a file rewritten in place during the copy; minors M1–M13. Fix round 1 → resume implementer.
+gitdb: Ruling R18: the source db's -wal/-shm may appear beside a cleanly closed WAL db on the backup's read-only open; accepted, the sources are dbs the daemon owns — costs two small files.
+gitdb: Ruling R19: a session's repository root that holds a plan path (a dotfiles repo at ~ holds every transcript) fails every stage, closed — Task 3/7 must leave such a session's repo facts out and mark it No — Needs the maintainer (until then a repo at ~ blocks sets).
+gitdb: Ruling R20: MAX_FILE counts a tail's bytes (a set sends only what a transcript gained); a tail over it is skipped, and Task 8 must refuse a session whose transcript isn't in the store — costs a session that can't move after a 100 MB turn.
+gitdb: Notes for Task 6: Tail { from: 0 } replaces the whole stored file; a target whose acked length is past the staged from gets a re-sliced, re-hashed tail; staged_path is in engine manifest.
+gitdb: Task 5 fix round 1: M8 uses a symlink_metadata check on the source db instead of SQLITE_OPEN_NOFOLLOW, which refuses any symlinked path component (macOS /var and /tmp); snap_files.rs is split into snap_copy.rs (copies), snap_db.rs (backup) and snap_files.rs (staging).

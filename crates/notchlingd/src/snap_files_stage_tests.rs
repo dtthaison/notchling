@@ -10,24 +10,29 @@ use std::fs;
 use std::os::unix::fs::{symlink, PermissionsExt};
 use std::path::{Path, PathBuf};
 
-struct Rig {
-    t: TempDir,
-    stage: PathBuf,
+pub(crate) struct Rig {
+    pub(crate) t: TempDir,
+    pub(crate) stage: PathBuf,
 }
 
 impl Rig {
-    fn new(tag: &str) -> Rig {
+    pub(crate) fn new(tag: &str) -> Rig {
         let t = TempDir::new(tag);
         let stage = t.path("data/cluster/outgoing");
         Rig { t, stage }
     }
 
-    fn src(&self, rel: &str) -> PathBuf {
+    pub(crate) fn src(&self, rel: &str) -> PathBuf {
         self.t.path(&format!("src/{rel}"))
     }
 }
 
-fn session(id: &str, cwd: &str, repo: Option<RepoFacts>, movable: Movable) -> SessionEntry {
+pub(crate) fn session(
+    id: &str,
+    cwd: &str,
+    repo: Option<RepoFacts>,
+    movable: Movable,
+) -> SessionEntry {
     SessionEntry {
         id: id.to_owned(),
         tool: Tool::Claude,
@@ -37,7 +42,7 @@ fn session(id: &str, cwd: &str, repo: Option<RepoFacts>, movable: Movable) -> Se
     }
 }
 
-fn facts(root: &Path) -> RepoFacts {
+pub(crate) fn facts(root: &Path) -> RepoFacts {
     RepoFacts {
         root: root.to_path_buf(),
         origin: Some("git@example.invalid:o/r.git".to_owned()),
@@ -52,7 +57,7 @@ fn facts(root: &Path) -> RepoFacts {
     }
 }
 
-fn read_manifest(stage: &Path, set: &str) -> Manifest {
+pub(crate) fn read_manifest(stage: &Path, set: &str) -> Manifest {
     let text = fs::read_to_string(stage.join(set).join("manifest.json")).unwrap();
     serde_json::from_str(&text).unwrap()
 }
@@ -138,7 +143,7 @@ fn manifest_records_each_session_and_whether_it_moves() {
     assert_eq!(read_manifest(&rig.stage, "s-1").sessions, p.sessions);
 }
 
-fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
+pub(crate) fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
     for entry in fs::read_dir(dir).unwrap() {
         let path = entry.unwrap().path();
         out.push(path.clone());

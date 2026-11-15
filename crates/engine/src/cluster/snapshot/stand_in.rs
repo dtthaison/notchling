@@ -1,7 +1,7 @@
 use super::repo_state::{Movable, RepoFacts};
 use crate::cluster::id::{NodeId, Tool};
 use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 pub const MAX_FILE: u64 = 100 * 1024 * 1024;
 
@@ -36,6 +36,12 @@ pub struct SetPlan {
 
 pub fn excluded(path: &Path) -> bool {
     let parts: Vec<_> = path.components().collect();
+    if parts
+        .iter()
+        .any(|part| matches!(part, Component::ParentDir))
+    {
+        return true;
+    }
     for dir in EXCLUDED_DIRS {
         let want: Vec<_> = Path::new(dir).components().collect();
         if parts.windows(want.len()).any(|window| window == want) {
