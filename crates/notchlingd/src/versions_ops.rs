@@ -270,6 +270,10 @@ impl VersionsOps {
             .collect()
     }
 
+    pub fn scanned(&self) -> bool {
+        lock(&self.state).tools.is_some()
+    }
+
     pub fn home(&self) -> PathBuf {
         self.roots.home.clone()
     }

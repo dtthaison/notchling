@@ -1,4 +1,5 @@
 use super::*;
+use notchling_engine::cluster::logins::argv_read_only;
 use notchling_engine::inbox::{ActionId, Item};
 use std::sync::atomic::{AtomicI64, AtomicUsize, Ordering};
 
@@ -50,13 +51,18 @@ impl Fake {
 }
 
 struct Installed {
-    codex: Option<String>,
+    codex: Mutex<Option<String>>,
     agy: bool,
+    scanned: std::sync::atomic::AtomicBool,
 }
 
 impl Installs for Installed {
     fn codex(&self) -> Option<String> {
-        self.codex.clone()
+        lock(&self.codex).clone()
+    }
+
+    fn scanned(&self) -> bool {
+        self.scanned.load(Ordering::SeqCst)
     }
 
     fn agy(&self) -> bool {
@@ -107,6 +113,7 @@ const ON: Option<(i32, &str)> = Some((0, "Logged in using ChatGPT"));
 const OFF: Option<(i32, &str)> = Some((1, "Not logged in"));
 
 struct Rig {
+    installed: Arc<Installed>,
     probe: Arc<LoginProbe>,
     notes: Arc<Fake>,
     status: Arc<Status>,
@@ -118,15 +125,13 @@ fn rig(answers: &[Option<(i32, &str)>], agy: bool, files: Files) -> Rig {
     let status = Status::new(answers);
     let now = Arc::new(AtomicI64::new(1_000));
     let clock = now.clone();
+    let installed = Arc::new(Installed {
+        codex: Mutex::new(Some("/usr/local/bin/codex".to_string())),
+        agy,
+        scanned: std::sync::atomic::AtomicBool::new(true),
+    });
     let probe = LoginProbe::new(
-        (
-            Arc::new(Installed {
-                codex: Some("/usr/local/bin/codex".to_string()),
-                agy,
-            }),
-            status.clone(),
-            files,
-        ),
+        (installed.clone(), status.clone(), files),
         (
             notes.clone(),
             Arc::new(move || clock.load(Ordering::SeqCst)),
@@ -134,6 +139,7 @@ fn rig(answers: &[Option<(i32, &str)>], agy: bool, files: Files) -> Rig {
         ("w 1".to_string(), "linux".to_string()),
     );
     Rig {
+        installed,
         probe,
         notes,
         status,
@@ -250,7 +256,8 @@ fn antigravity_is_probed_by_file_and_flips_the_same_way() {
 
 fn wait_for(r: &Rig, calls: usize) {
     for _ in 0..400 {
-        if r.status.count.load(Ordering::SeqCst) >= calls && !lock(&r.probe.inner).running {
+        if r.status.count.load(Ordering::SeqCst) >= calls && lock(&r.probe.inner).running.is_none()
+        {
             return;
         }
         std::thread::sleep(Duration::from_millis(10));
@@ -274,44 +281,6 @@ fn the_cache_lasts_ten_minutes_and_the_first_call_does_not_wait_for_the_probe() 
 }
 
 #[test]
-fn the_runner_refuses_a_command_that_could_write_a_login() {
-    for argv in [
-        vec!["/bin/sh", "-c", "codex login"],
-        vec!["codex", "login", "--device-auth"],
-        vec!["codex", "refresh"],
-        vec!["/bin/echo", "logout"],
-    ] {
-        let argv: Vec<String> = argv.into_iter().map(String::from).collect();
-        assert_eq!(SystemStatus.run(&argv, Duration::from_secs(1)), None);
-    }
-}
-
-#[cfg(unix)]
-#[test]
-fn the_runner_reads_output_and_the_exit_code_and_kills_a_slow_command() {
-    let said: Vec<String> = [
-        "/bin/sh",
-        "-c",
-        "echo Not logged in; echo oops 1>&2; exit 3",
-    ]
-    .into_iter()
-    .map(String::from)
-    .collect();
-    let (code, text) = SystemStatus.run(&said, Duration::from_secs(5)).unwrap();
-    assert_eq!(code, 3);
-    assert!(
-        text.contains("Not logged in") && text.contains("oops"),
-        "{text}"
-    );
-    let slow: Vec<String> = ["/bin/sleep", "30"].into_iter().map(String::from).collect();
-    let started = Instant::now();
-    assert_eq!(SystemStatus.run(&slow, Duration::from_millis(150)), None);
-    assert!(started.elapsed() < Duration::from_secs(5));
-    let gone: Vec<String> = vec!["/nonexistent/codex".into(), "login".into(), "status".into()];
-    assert_eq!(SystemStatus.run(&gone, Duration::from_secs(1)), None);
-}
-
-#[test]
 fn has_content_needs_a_non_empty_file_and_never_reads_it() {
     let dir = std::env::temp_dir().join(format!("nl-lp-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
@@ -324,4 +293,80 @@ fn has_content_needs_a_non_empty_file_and_never_reads_it() {
     assert!(!has_content(&dir));
     assert!(!has_content(&dir.join("missing")));
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn nothing_is_stamped_while_the_tool_scan_has_not_finished() {
+    let r = rig(&[ON], false, no_files());
+    r.installed.scanned.store(false, Ordering::SeqCst);
+    assert!(!r.probe.refresh());
+    assert!(lock(&r.probe.inner).at.is_none());
+    assert_eq!(r.status.count.load(Ordering::SeqCst), 0);
+    assert!(r.probe.logins().is_empty());
+    std::thread::sleep(Duration::from_millis(50));
+    r.probe
+        .refresh_when_ready(Duration::from_millis(30), Duration::from_millis(5));
+    assert_eq!(r.status.count.load(Ordering::SeqCst), 0);
+    assert!(lock(&r.probe.inner).running.is_none());
+    r.installed.scanned.store(true, Ordering::SeqCst);
+    r.probe.logins();
+    wait_for(&r, 1);
+    assert_eq!(r.probe.logins().get(&Tool::Codex), Some(&true));
+}
+
+#[test]
+fn a_scan_that_finishes_while_waiting_lets_the_probe_run() {
+    let r = rig(&[ON], false, no_files());
+    r.installed.scanned.store(false, Ordering::SeqCst);
+    let flag = r.installed.clone();
+    let later = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(60));
+        flag.scanned.store(true, Ordering::SeqCst);
+    });
+    r.probe
+        .refresh_when_ready(Duration::from_secs(5), Duration::from_millis(10));
+    later.join().unwrap();
+    assert_eq!(r.status.count.load(Ordering::SeqCst), 1);
+    assert_eq!(r.probe.logins().get(&Tool::Codex), Some(&true));
+}
+
+#[test]
+fn a_changed_install_is_probed_again_before_ten_minutes() {
+    let r = rig(&[ON, OFF], false, no_files());
+    r.probe.logins();
+    wait_for(&r, 1);
+    r.probe.logins();
+    std::thread::sleep(Duration::from_millis(50));
+    assert_eq!(r.status.count.load(Ordering::SeqCst), 1);
+    *lock(&r.installed.codex) = Some("/opt/homebrew/bin/codex".to_string());
+    r.probe.logins();
+    wait_for(&r, 2);
+    let calls = lock(&r.status.calls).clone();
+    assert_eq!(calls[1][0], "/opt/homebrew/bin/codex");
+}
+
+#[test]
+fn a_probe_stuck_for_a_minute_and_a_half_does_not_stop_probing_for_good() {
+    let r = rig(&[ON], false, no_files());
+    r.probe.logins();
+    wait_for(&r, 1);
+    let later = 1_000 + 600_001;
+    r.now.store(later, Ordering::SeqCst);
+    lock(&r.probe.inner).running = Some(later - 10_000);
+    r.probe.logins();
+    std::thread::sleep(Duration::from_millis(50));
+    assert_eq!(r.status.count.load(Ordering::SeqCst), 1, "busy under 90 s");
+    lock(&r.probe.inner).running = Some(later - 90_000);
+    r.probe.logins();
+    wait_for(&r, 2);
+}
+
+#[test]
+fn a_timed_out_probe_is_unknown_and_never_signed_out() {
+    let r = rig(&[OFF, None], false, no_files());
+    r.probe.refresh();
+    assert_eq!(r.probe.logins().get(&Tool::Codex), Some(&false));
+    r.probe.refresh();
+    assert_eq!(lock(&r.probe.inner).result.get(&Tool::Codex), None);
+    assert_eq!(r.notes.raised().len(), 1);
 }

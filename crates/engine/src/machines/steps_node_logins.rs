@@ -9,9 +9,17 @@ use std::path::Path;
 const NONE: &str = "@@none";
 const PRESENT: &str = "@@present";
 const MISSING: &str = "@@missing";
+const TIMEOUT: &str = "@@timeout";
 const EXIT: &str = "@@exit=";
 
-pub(super) const CODEX_SCRIPT: &str = "command -v codex >/dev/null 2>&1 || { echo @@none; exit 0; }; o=$(codex login status 2>&1 </dev/null); c=$?; printf '%s\\n' \"$o\" | head -c 400; echo; echo \"@@exit=$c\"";
+pub(super) const WAIT_TENTHS: u32 = 50;
+
+pub(super) fn codex_script(tenths: u32) -> String {
+    format!(
+        "command -v codex >/dev/null 2>&1 || {{ echo @@none; exit 0; }}; o=$(mktemp) || exit 0; codex login status >\"$o\" 2>&1 </dev/null & p=$!; i=0; while kill -0 $p 2>/dev/null && [ $i -lt {tenths} ]; do sleep 0.1; i=$((i+1)); done; if kill -0 $p 2>/dev/null; then kill $p 2>/dev/null; echo @@timeout; else wait $p; c=$?; head -c 400 \"$o\"; echo; echo \"@@exit=$c\"; fi; rm -f \"$o\""
+    )
+}
+
 pub(super) const AGY_SCRIPT: &str = "command -v agy >/dev/null 2>&1 || { echo @@none; exit 0; }; if [ -s \"$HOME/.gemini/jetski-standalone-oauth-token\" ]; then echo @@present; else echo @@missing; fi";
 
 pub(super) fn steps(m: &Machine) -> Vec<SetupStep> {
@@ -22,7 +30,7 @@ pub(super) fn steps(m: &Machine) -> Vec<SetupStep> {
             "Codex signed in",
             vec![StepId::REACHABLE],
             Cadence::EveryRefresh,
-            Probe::remote(CODEX_SCRIPT, parse_codex),
+            Probe::remote(codex_script(WAIT_TENTHS), parse_codex),
             StepFix::HowTo(how_to(Tool::Codex, &m.name)),
         ),
         SetupStep::new(
@@ -46,6 +54,9 @@ fn exit_code(text: &str) -> Option<i32> {
 fn parse_codex(out: &RemoteOutput, _ctx: &StepContext) -> CheckResult {
     if out.text.lines().any(|l| l.trim() == NONE) {
         return CheckResult::cant_tell("Codex isn't installed there");
+    }
+    if out.text.lines().any(|l| l.trim() == TIMEOUT) {
+        return CheckResult::cant_tell("Codex didn't answer in time there");
     }
     let Some(exit) = exit_code(&out.text) else {
         return CheckResult::cant_tell("couldn't ask Codex there");

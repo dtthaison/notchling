@@ -142,3 +142,62 @@ fn the_probes_read_the_file_without_opening_it() {
     assert!(codex.contains("codex login status"));
     assert!(!codex.contains("auth.json"));
 }
+
+#[cfg(unix)]
+mod on_this_machine {
+    use super::*;
+    use crate::machines::steps_node_logins::{codex_script, WAIT_TENTHS};
+    use std::os::unix::fs::PermissionsExt;
+    use std::process::Command;
+    use std::time::{Duration, Instant};
+
+    fn run_with(codex: Option<&str>, tenths: u32) -> (String, Duration) {
+        let dir =
+            std::env::temp_dir().join(format!("nl-codex-probe-{}-{}", std::process::id(), tenths));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        if let Some(body) = codex {
+            let path = dir.join("codex");
+            std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let started = Instant::now();
+        let out = Command::new("/bin/sh")
+            .arg("-c")
+            .arg(codex_script(tenths))
+            .env("PATH", format!("{}:/usr/bin:/bin", dir.display()))
+            .output()
+            .unwrap();
+        let text = String::from_utf8_lossy(&out.stdout).into_owned();
+        let _ = std::fs::remove_dir_all(&dir);
+        (text, started.elapsed())
+    }
+
+    #[test]
+    fn the_script_reports_the_exit_code_and_the_text() {
+        let rig = Rig::new(node_linux());
+        let (on, _) = run_with(Some("echo 'Logged in using ChatGPT'"), 20);
+        assert!(probe(&rig, &CODEX, &on, 0).is_pass(), "{on}");
+        let (off, _) = run_with(Some("echo 'Not logged in'; exit 1"), 20);
+        assert!(probe(&rig, &CODEX, &off, 0).is_fail(), "{off}");
+        let (none, _) = run_with(None, 20);
+        assert!(matches!(
+            probe(&rig, &CODEX, &none, 0),
+            CheckState::CantTell(_)
+        ));
+    }
+
+    #[test]
+    fn a_hung_codex_is_cut_and_reads_as_cant_tell_for_this_step_only() {
+        let rig = Rig::new(node_linux());
+        let (text, took) = run_with(Some("sleep 30"), 3);
+        assert!(text.contains("@@timeout"), "{text}");
+        assert!(took < Duration::from_secs(5), "{took:?}");
+        let state = probe(&rig, &CODEX, &text, 0);
+        assert!(matches!(state, CheckState::CantTell(_)), "{state:?}");
+        const { assert!(WAIT_TENTHS <= 50) };
+        assert!(crate::cluster::logins::read_only(&codex_script(
+            WAIT_TENTHS
+        )));
+    }
+}
