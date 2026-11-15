@@ -1,5 +1,6 @@
 pub mod blob;
 pub mod core;
+pub mod failover;
 pub mod fence;
 pub mod grant_files;
 mod grant_files_sys;
@@ -32,6 +33,8 @@ pub use versions::{compat, Compat, Purpose, Versions};
 
 #[cfg(test)]
 mod blob_tests;
+#[cfg(test)]
+mod failover_tests;
 #[cfg(test)]
 mod fence_tests;
 #[cfg(test)]

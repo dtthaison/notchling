@@ -1,0 +1,170 @@
+use serde::{Deserialize, Serialize};
+
+use super::id::NodeId;
+use super::members::{MemberState, Term};
+use super::state::ClusterState;
+
+pub const FENCE_LEAD_MS: u64 = 120_000;
+pub const RENEW_MS: u64 = 30_000;
+pub const REACH_MS: u64 = 10_000;
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Failover {
+    #[default]
+    #[serde(rename = "off")]
+    Off,
+    #[serde(rename = "30m")]
+    After30m,
+    #[serde(rename = "1h")]
+    After1h,
+}
+
+impl Failover {
+    pub fn delay_ms(self) -> Option<u64> {
+        match self {
+            Failover::Off => None,
+            Failover::After30m => Some(1_800_000),
+            Failover::After1h => Some(3_600_000),
+        }
+    }
+}
+
+pub fn failover_target(state: &ClusterState, ready: &dyn Fn(&NodeId) -> bool) -> Option<NodeId> {
+    state
+        .members
+        .values()
+        .filter(|m| {
+            m.state == MemberState::Active && m.can_be_master && m.id != state.home && ready(&m.id)
+        })
+        .min_by(|a, b| (a.joined_ms, &a.id).cmp(&(b.joined_ms, &b.id)))
+        .map(|m| m.id.clone())
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct PrimaryLease {
+    asked: Option<(u64, u64)>,
+    until: Option<u64>,
+    reported: Option<Failover>,
+}
+
+impl PrimaryLease {
+    pub fn ask(&mut self, now: u64) -> u64 {
+        let last = self.asked.map_or(0, |(seq, _)| seq);
+        let seq = now.max(last.saturating_add(1));
+        self.asked = Some((seq, now));
+        seq
+    }
+
+    pub fn granted(&mut self, seq: u64, reported: Failover) -> bool {
+        let Some((asked, sent)) = self.asked else {
+            return false;
+        };
+        if asked != seq {
+            return false;
+        }
+        self.reported = Some(reported);
+        self.until = reported.delay_ms().map(|d| sent.saturating_add(d));
+        true
+    }
+
+    pub fn reported(&self) -> Option<Failover> {
+        self.reported
+    }
+
+    pub fn gates_until(&self, armed: bool) -> u64 {
+        match (self.reported, self.until) {
+            (Some(Failover::Off), _) => u64::MAX,
+            (Some(_), Some(until)) => until.saturating_sub(FENCE_LEAD_MS),
+            _ if armed => 0,
+            _ => u64::MAX,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Grantor {
+    pub booted_at: u64,
+    pub last_grant: Option<u64>,
+    pub applied: Failover,
+    pub revoked: bool,
+}
+
+impl Grantor {
+    pub fn new(booted_at: u64) -> Grantor {
+        Grantor {
+            booted_at,
+            last_grant: None,
+            applied: Failover::Off,
+            revoked: false,
+        }
+    }
+
+    pub fn may_grant(&self, term: &Term, home: &NodeId, highest: &Term) -> bool {
+        !self.revoked && term == highest && *home == term.node
+    }
+
+    pub fn grant(&mut self, now: u64, applied: Failover) {
+        self.last_grant = Some(now);
+        self.applied = applied;
+    }
+
+    pub fn revoke(&mut self) {
+        self.revoked = true;
+    }
+
+    pub fn safe_after(&self) -> Option<u64> {
+        let delay = self.applied.delay_ms()?;
+        let last = self.last_grant?;
+        Some(
+            last.saturating_add(delay)
+                .max(self.booted_at.saturating_add(delay)),
+        )
+    }
+}
+
+pub fn auto_promote_due(
+    me: &NodeId,
+    state: &ClusterState,
+    grantor: &Grantor,
+    reaches_primary: bool,
+    now: u64,
+) -> bool {
+    state.failover != Failover::Off
+        && *me != state.home
+        && !grantor.revoked
+        && !reaches_primary
+        && state
+            .armed
+            .as_ref()
+            .is_some_and(|(node, term)| node == me && *term == state.term)
+        && grantor.safe_after().is_some_and(|after| now >= after)
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Safety {
+    Safe,
+    Relay,
+    NeedsConfirm(String),
+}
+
+pub fn promote_safety(
+    me: &NodeId,
+    state: &ClusterState,
+    grantor: &Grantor,
+    reaches_primary: bool,
+    now: u64,
+) -> Safety {
+    if reaches_primary {
+        return Safety::Relay;
+    }
+    if auto_promote_due(me, state, grantor, false, now) {
+        return Safety::Safe;
+    }
+    let primary = state
+        .members
+        .get(&state.home)
+        .map_or_else(|| state.home.to_string(), |m| m.name.clone());
+    Safety::NeedsConfirm(format!(
+        "{primary} can't be reached. If it's still running, its sessions keep going until it hears of this. Work it does after its last snapshot is kept as a copy on {primary}."
+    ))
+}

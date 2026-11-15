@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
 
+use super::failover::Failover;
 use super::id::NodeId;
 use super::jobs::Job;
 use super::members::{Member, Term};
@@ -132,6 +133,14 @@ pub fn load(cluster_dir: &Path) -> Result<Option<ClusterState>, String> {
             r.get(0)
         })
         .map_err(|e| e.to_string())?;
+    let failover = match get("failover")? {
+        Some(value) => read::<Failover>(&value)?,
+        None => Failover::Off,
+    };
+    let armed = match get("armed")? {
+        Some(value) => read::<Option<(NodeId, Term)>>(&value)?,
+        None => None,
+    };
     Ok(Some(ClusterState {
         id: read(&id)?,
         name: read(&name)?,
@@ -141,6 +150,8 @@ pub fn load(cluster_dir: &Path) -> Result<Option<ClusterState>, String> {
         members,
         jobs,
         seq: u64::try_from(seq).map_err(|e| e.to_string())?,
+        failover,
+        armed,
     }))
 }
 
@@ -195,6 +206,8 @@ fn apply(tx: &rusqlite::Transaction<'_>, change: &Change) -> Result<(), String> 
             )
             .map_err(es)?;
         }
+        Change::Failover(failover) => put_state(tx, "failover", &text(failover)?)?,
+        Change::Armed(armed) => put_state(tx, "armed", &text(armed)?)?,
         Change::Cluster {
             id,
             name,
@@ -219,6 +232,16 @@ fn apply(tx: &rusqlite::Transaction<'_>, change: &Change) -> Result<(), String> 
         }
     }
     Ok(())
+}
+
+fn put_state(tx: &rusqlite::Transaction<'_>, key: &str, value: &str) -> Result<(), String> {
+    tx.execute(
+        "INSERT INTO state (key, value) VALUES (?1, ?2)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        params![key, value],
+    )
+    .map(|_| ())
+    .map_err(|e| e.to_string())
 }
 
 pub fn wipe(cluster_dir: &Path) -> Result<(), String> {

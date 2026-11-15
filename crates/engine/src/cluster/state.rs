@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+use super::failover::Failover;
 use super::grants::SecretAllow;
 use super::id::{NodeId, Role};
 use super::jobs::{job_id, Job, JobSpec, JobState};
@@ -18,6 +19,10 @@ pub struct ClusterState {
     pub members: BTreeMap<NodeId, Member>,
     pub jobs: BTreeMap<String, Job>,
     pub seq: u64,
+    #[serde(default)]
+    pub failover: Failover,
+    #[serde(default)]
+    pub armed: Option<(NodeId, Term)>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -82,6 +87,13 @@ pub enum Command {
         session: Option<String>,
         detail: Option<String>,
     },
+    SetFailover {
+        failover: Failover,
+    },
+    Armed {
+        node: NodeId,
+        term: Term,
+    },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -97,6 +109,8 @@ pub enum Change {
     Member(Member),
     Dropped(NodeId),
     Job(Job),
+    Failover(Failover),
+    Armed(Option<(NodeId, Term)>),
     Cluster {
         id: String,
         name: String,
@@ -245,6 +259,8 @@ pub fn start(
         members: members.iter().map(|m| (m.id.clone(), m.clone())).collect(),
         jobs: BTreeMap::new(),
         seq: 0,
+        failover: Failover::Off,
+        armed: None,
     };
     let mut changes = vec![state.cluster_change()];
     changes.extend(members.into_iter().map(|m| {
@@ -391,6 +407,28 @@ pub fn apply(
                 job.detail = detail.clone();
             }
             vec![Change::Job(job.clone())]
+        }
+        Command::SetFailover { failover } => {
+            if state.failover == *failover {
+                return Ok(Applied::none());
+            }
+            state.failover = *failover;
+            state.armed = None;
+            vec![Change::Failover(*failover), Change::Armed(None)]
+        }
+        Command::Armed { node, term } => {
+            if *term != state.term || state.failover == Failover::Off || *node == state.home {
+                return Err(CommandError::BadTransition);
+            }
+            if !active_mut(state, node)?.can_be_master {
+                return Err(CommandError::BadTransition);
+            }
+            let armed = Some((node.clone(), term.clone()));
+            if state.armed == armed {
+                return Ok(Applied::none());
+            }
+            state.armed = armed.clone();
+            vec![Change::Armed(armed)]
         }
     };
     let entry = state.entry(now_ms, command);
