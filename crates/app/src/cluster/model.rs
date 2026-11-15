@@ -31,6 +31,7 @@ pub struct NodeRow {
     pub active: bool,
     pub primary: bool,
     pub client: bool,
+    pub headless: bool,
 }
 
 impl NodeRow {
@@ -40,6 +41,10 @@ impl NodeRow {
 
     pub fn offers_acting(&self) -> bool {
         self.offers_menu() && !self.me && !self.client
+    }
+
+    pub fn offers_install_hook(&self) -> bool {
+        self.offers_menu() && self.online && !self.me && self.headless
     }
 
     pub fn offers_remove(&self) -> bool {
@@ -268,6 +273,7 @@ fn row_of(member: &Value, me: &str, reference: Option<&Versions>) -> NodeRow {
         active: state == "active",
         primary: text(member, "role") == "home",
         client: flag(member, "client"),
+        headless: flag(member, "headless"),
     }
 }
 
@@ -393,6 +399,32 @@ impl ClusterModel {
                 install,
             },
         ))
+    }
+
+    pub fn toggle_install(&self, id: &str) -> Option<Request> {
+        let row = self.row(id).filter(|r| r.offers_acting())?;
+        let (acting, bridge, install) = row.desired;
+        Some(wire::desired(
+            &row.id,
+            Desired {
+                acting,
+                bridge,
+                install: !install,
+            },
+        ))
+    }
+
+    fn installable(&self, id: &str) -> Option<&NodeRow> {
+        let primary = self.row(&self.me).is_some_and(|r| r.primary);
+        self.row(id).filter(|r| primary && r.offers_install_hook())
+    }
+
+    pub fn install_plan(&self, id: &str) -> Option<Request> {
+        self.installable(id).map(|r| wire::install_plan(&r.id))
+    }
+
+    pub fn install_apply(&self, id: &str) -> Option<Request> {
+        self.installable(id).map(|r| wire::install_apply(&r.id))
     }
 
     pub fn remove(&self, id: &str) -> Option<Request> {

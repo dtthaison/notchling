@@ -259,6 +259,76 @@ fn older_term_call_is_refused() {
 }
 
 #[test]
+fn install_forward_from_a_primary_that_lost_its_term_is_refused() {
+    let (mut hub, m5, w1) = pair();
+    let newer = Term {
+        n: 3,
+        node: id("w1"),
+    };
+    hub.run(
+        &w1,
+        Input::Msg {
+            from: m5.clone(),
+            msg: Msg::HelloOk {
+                node: m5.clone(),
+                cluster: "c1".to_string(),
+                term: newer.clone(),
+                home: id("w1"),
+            },
+        },
+    );
+    for (call_id, (op, term)) in [
+        (
+            "install.apply",
+            Term {
+                n: 1,
+                node: id("m5"),
+            },
+        ),
+        (
+            "install.plan",
+            Term {
+                n: 1,
+                node: id("m5"),
+            },
+        ),
+        ("install.apply", newer.clone()),
+        ("install.plan", newer.clone()),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let effects = hub.run(
+            &w1,
+            Input::Msg {
+                from: m5.clone(),
+                msg: Msg::Call {
+                    id: 20 + call_id as u64,
+                    op: op.to_string(),
+                    args: json!({}),
+                    origin: Origin {
+                        node: m5.clone(),
+                        tier: OriginTier::App,
+                    },
+                    term,
+                },
+            },
+        );
+        assert!(run_locals(&effects).is_empty(), "{op}");
+        let refused = effects.iter().any(|e| {
+            matches!(
+                e,
+                Effect::Send {
+                    msg: Msg::Reply { err: Some(_), .. },
+                    ..
+                }
+            )
+        });
+        assert!(refused, "{op}");
+    }
+}
+
+#[test]
 fn newer_term_is_adopted() {
     let (mut hub, m5, w1) = pair();
     let newer = Term {

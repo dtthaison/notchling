@@ -70,6 +70,34 @@ impl ClusterSheetView {
                 })),
             );
         }
+        if row.offers_acting() {
+            let switch = id.clone();
+            items = items.child(
+                MenuItem::new(
+                    SharedString::from(format!("node-install-switch-{id}")),
+                    if row.desired.2 {
+                        t::cluster::install_switch_off()
+                    } else {
+                        t::cluster::install_switch_on()
+                    },
+                )
+                .build(a)
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.pick(&switch, ClusterModel::toggle_install, cx)
+                })),
+            );
+        }
+        if self.feed_offers_install(&id) {
+            let hook = id.clone();
+            items = items.child(
+                MenuItem::new(
+                    SharedString::from(format!("node-install-hook-{id}")),
+                    t::cluster::install_hook(),
+                )
+                .build(a)
+                .on_click(cx.listener(move |this, _, _, cx| this.install_hook(&hook, cx))),
+            );
+        }
         if row.offers_remove() {
             let remove = id.clone();
             items = items.child(menu_rule(a)).child(

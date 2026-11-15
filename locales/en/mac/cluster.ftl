@@ -52,6 +52,36 @@ cluster-remove-title = Remove This Node?
 cluster-remove-note = { $name } leaves the cluster and its sessions leave every list. It can join again with a new token.
 cluster-remove-confirm = Remove
 
+## Install Hook
+
+# Row menu item: puts Notchling's hook and skills into Claude Code's settings on a machine with no app.
+cluster-install-hook = Install Hook…
+# Row menu items that turn the node's Install switch on or off.
+cluster-install-switch-on = Turn Install On
+cluster-install-switch-off = Turn Install Off
+# Title of the plan shown before installing; $name is the node's name.
+cluster-install-title = Install the Hook on { $name }?
+# First line of that plan; $name is the node's name.
+cluster-install-intro = This changes Claude Code's settings on { $name }, not on this Mac:
+# Line of that plan naming the skills it writes; $names is a list of skill names.
+cluster-install-skills = Skills: { $names }
+cluster-install-confirm = Install
+# $name is the node's name.
+cluster-install-is-off = Install is off for { $name }. Turn Install On in its menu, then try again.
+# $name is the node's name.
+cluster-install-already = The hook is already installed on { $name }.
+# $name is the node's name, $error why its settings can't be edited.
+cluster-install-refused = The settings on { $name } can't be edited: { $error }
+# $name is the node's name.
+cluster-install-done = Installed the hook on { $name }.
+# $name is the node's name.
+cluster-install-nothing = Nothing was written on { $name }.
+# $name is the node's name, $error the reason.
+cluster-install-failed = Couldn't install the hook on { $name }: { $error }
+
+# Reason in the install error when the daemon's answer isn't a plan this app reads.
+cluster-install-unread = the plan isn't one this app reads
+
 ## Connection
 
 cluster-link-off = Not Connected

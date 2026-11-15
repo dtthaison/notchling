@@ -2,13 +2,39 @@ use crate::cluster_node::ClusterNode;
 use notchling_engine::cluster::policy::RULES;
 use notchling_engine::cluster::wire::{Origin, OriginTier};
 use notchling_engine::cluster::{LocalCmd, NodeId, Qualified};
-use notchling_local_api::{ApiError, Caller, ClientKind, ErrorCode, Tier};
+use notchling_local_api::{ops, ApiError, Caller, ClientKind, ErrorCode, Tier};
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
 pub const NODE_FOLLOW: &str = "node.follow";
 pub const FOLLOW_LEASE_MS: u64 = 60_000;
+
+const TO_NODE: [&str; 2] = [ops::INSTALL_PLAN, ops::INSTALL_APPLY];
+
+pub fn route_to_node(
+    op: &str,
+    args: &Value,
+    me: &NodeId,
+) -> Option<Result<(NodeId, Value), ApiError>> {
+    if !TO_NODE.contains(&op) {
+        return None;
+    }
+    let named = args.get("node").filter(|n| !n.is_null())?;
+    let Some(node) = named.as_str().and_then(NodeId::parse) else {
+        return Some(Err(ApiError::bad_request(
+            "node is the id of a machine in the cluster".to_string(),
+        )));
+    };
+    if node == *me {
+        return None;
+    }
+    let mut bare = args.clone();
+    if let Some(fields) = bare.as_object_mut() {
+        fields.remove("node");
+    }
+    Some(Ok((node, bare)))
+}
 
 pub fn route(op: &str, args: &Value, me: &NodeId) -> Option<(NodeId, Value)> {
     let field = RULES
@@ -43,7 +69,13 @@ impl Forward for NodeForward {
         if caller.client == ClientKind::Node {
             return None;
         }
-        let (to, bare) = route(op, args, self.node.me())?;
+        let (to, bare) = match route(op, args, self.node.me()) {
+            Some(routed) => routed,
+            None => match route_to_node(op, args, self.node.me())? {
+                Ok(routed) => routed,
+                Err(refused) => return Some(Err(refused)),
+            },
+        };
         if caller.tier != Tier::App {
             return Some(Err(ApiError::new(
                 ErrorCode::Forbidden,

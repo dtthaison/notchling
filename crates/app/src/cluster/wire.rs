@@ -57,6 +57,20 @@ pub fn failover(value: &str) -> Request {
     }
 }
 
+pub fn install_plan(node: &str) -> Request {
+    Request {
+        op: ops::INSTALL_PLAN,
+        args: json!({"node": node}),
+    }
+}
+
+pub fn install_apply(node: &str) -> Request {
+    Request {
+        op: ops::INSTALL_APPLY,
+        args: json!({"node": node}),
+    }
+}
+
 pub fn remove(node: &str) -> Request {
     Request {
         op: ops::CLUSTER_REMOVE,

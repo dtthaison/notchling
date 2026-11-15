@@ -1,4 +1,5 @@
 pub mod feed;
+pub mod install;
 pub mod model;
 pub mod renders;
 #[cfg(target_os = "macos")]
@@ -12,5 +13,7 @@ pub const HEIGHT: f32 = 560.0;
 
 #[cfg(test)]
 mod feed_tests;
+#[cfg(test)]
+mod install_tests;
 #[cfg(test)]
 mod model_tests;

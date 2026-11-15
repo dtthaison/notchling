@@ -139,6 +139,8 @@ pub const RULES: &[Rule] = &[
     rule("cluster.join.token", MEMBER, OriginTier::Agent, None, true),
     rule("cluster.join.token", MEMBER, OriginTier::App, None, true),
     rule("cluster.dispatch", MEMBER, OriginTier::Agent, None, true),
+    home_app("install.plan"),
+    home_app("install.apply"),
 ];
 
 fn stands(sender: &SenderFacts, sent: Sent) -> bool {

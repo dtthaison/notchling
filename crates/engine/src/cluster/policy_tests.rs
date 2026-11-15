@@ -250,3 +250,34 @@ fn node_sessions_is_for_clients_and_the_home() {
     assert!(check("node.sessions", &client, &origin("m1", OriginTier::Node)).is_ok());
     assert!(check("node.sessions", &home, &origin("m5", OriginTier::Node)).is_ok());
 }
+
+#[test]
+fn install_ops_are_the_homes_app_tier_alone() {
+    let home = facts("m5", Role::Home, true, MemberState::Active);
+    let plain_home = facts("m5", Role::Home, false, MemberState::Active);
+    let worker = facts("w1", Role::Worker, false, MemberState::Active);
+    let standby = facts("m2", Role::Standby, false, MemberState::Active);
+    let client = facts("m1", Role::Standby, true, MemberState::Active);
+    for op in ["install.plan", "install.apply"] {
+        for sender in [&home, &plain_home] {
+            let rule = check(op, sender, &origin("m5", OriginTier::App)).expect("rule");
+            assert_eq!(rule.id_field, None);
+            assert!(!rule.home_only);
+            for tier in [OriginTier::Agent, OriginTier::Node] {
+                assert!(check(op, sender, &origin("m5", tier)).is_err(), "{op}");
+            }
+        }
+        for (sender, name) in [(&worker, "w1"), (&standby, "m2"), (&client, "m1")] {
+            for tier in [OriginTier::App, OriginTier::Agent, OriginTier::Node] {
+                assert!(
+                    check(op, sender, &origin(name, tier)).is_err(),
+                    "{op} {name} {tier:?}"
+                );
+            }
+        }
+    }
+    assert!(
+        check("install.remove", &home, &origin("m5", OriginTier::App)).is_err(),
+        "install.remove is not forwarded"
+    );
+}

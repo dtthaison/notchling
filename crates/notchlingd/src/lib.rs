@@ -179,6 +179,8 @@ mod inbox_ops_tests;
 #[cfg(test)]
 mod install_events_tests;
 #[cfg(test)]
+mod install_ops_cluster_tests;
+#[cfg(test)]
 mod install_ops_fence_tests;
 #[cfg(test)]
 mod install_ops_tests;

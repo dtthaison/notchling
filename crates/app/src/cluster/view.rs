@@ -16,19 +16,30 @@ use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 use notchling_locale as t;
 
 use super::feed::ClusterFeed;
+use super::install::{applied_note, plan_of, Plan};
 use super::model::ClusterModel;
-use super::renders::{model_of, shown, Shown, STANDBY};
+use super::renders::{install_plan_reply, model_of, shown, Shown, STANDBY};
 use super::wire::{self, Request};
 use crate::accounts::flows::Alert;
 use crate::accounts::view_rows::{alert_overlay, Handler};
 use crate::sheets::view::{sheet_header, Dismiss};
+use crate::welcome::facts::HookFacts;
 
 const POLL: Duration = Duration::from_millis(500);
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct InstallAsk {
+    pub id: String,
+    pub name: String,
+    pub title: String,
+    pub lines: Vec<String>,
+}
 
 pub struct ClusterSheetView {
     feed: Arc<ClusterFeed>,
     pub(super) menu: Option<String>,
     pub(super) removing: Option<String>,
+    pub(super) installing: Option<InstallAsk>,
     name: Entity<TextEditor>,
     busy: bool,
     note: Option<(String, bool)>,
@@ -80,6 +91,7 @@ impl ClusterSheetView {
             feed,
             menu: None,
             removing: None,
+            installing: None,
             name: editor,
             busy: false,
             note: None,
@@ -194,6 +206,119 @@ impl ClusterSheetView {
             Some(request) => self.run(request, t::cluster::change_failed, cx),
             None => cx.notify(),
         }
+    }
+
+    pub(super) fn feed_offers_install(&self, id: &str) -> bool {
+        self.feed.snapshot().install_plan(id).is_some()
+    }
+
+    fn name_of(&self, id: &str) -> String {
+        self.feed
+            .snapshot()
+            .row(id)
+            .map(|r| r.name.clone())
+            .unwrap_or_default()
+    }
+
+    pub(super) fn install_hook(&mut self, id: &str, cx: &mut Context<Self>) {
+        let Some(request) = self.feed.snapshot().install_plan(id) else {
+            self.menu = None;
+            cx.notify();
+            return;
+        };
+        if self.busy || !self.feed.is_live() {
+            return;
+        }
+        let (id, name) = (id.to_owned(), self.name_of(id));
+        self.busy = true;
+        self.note = None;
+        self.menu = None;
+        let feed = self.feed.clone();
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move { asked(&feed, &request) })
+                .await;
+            this.update(cx, |view, cx| {
+                view.busy = false;
+                match result {
+                    Err(error) => {
+                        view.note = Some((t::cluster::install_failed(&name, &error), true));
+                    }
+                    Ok(facts) => match plan_of(&name, &facts) {
+                        Plan::Confirm { title, lines } => {
+                            view.installing = Some(InstallAsk {
+                                id,
+                                name,
+                                title,
+                                lines,
+                            });
+                        }
+                        Plan::Say { text, problem } => view.note = Some((text, problem)),
+                    },
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+        cx.notify();
+    }
+
+    fn install_confirmed(&mut self, cx: &mut Context<Self>) {
+        let Some(ask) = self.installing.take() else {
+            return;
+        };
+        let Some(request) = self.feed.snapshot().install_apply(&ask.id) else {
+            cx.notify();
+            return;
+        };
+        if self.busy || !self.feed.is_live() {
+            return;
+        }
+        self.busy = true;
+        self.note = None;
+        let feed = self.feed.clone();
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    let result = asked(&feed, &request);
+                    feed.refresh();
+                    result
+                })
+                .await;
+            this.update(cx, |view, cx| {
+                view.busy = false;
+                view.note = Some(match result {
+                    Ok(facts) => applied_note(&ask.name, &facts),
+                    Err(error) => (t::cluster::install_failed(&ask.name, &error), true),
+                });
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+        cx.notify();
+    }
+
+    fn install_alert(&self, a: Appearance, cx: &mut Context<Self>) -> Option<Div> {
+        let ask = self.installing.as_ref()?;
+        let alert = Alert {
+            title: ask.title.clone(),
+            message: ask.lines.join("\n"),
+            button: t::cluster::install_confirm().to_owned(),
+            destructive: false,
+        };
+        let on: Handler<Self, bool> = Rc::new(|this, yes, cx| {
+            if yes {
+                this.install_confirmed(cx);
+            } else {
+                this.installing = None;
+                cx.notify();
+            }
+        });
+        Some(alert_overlay(&alert, self.busy, a, cx, on))
     }
 
     fn connection(&self, model: &ClusterModel, a: Appearance, cx: &mut Context<Self>) -> Div {
@@ -374,6 +499,7 @@ impl Render for ClusterSheetView {
         )
         .on_click(cx.listener(|_, _, _, cx| cx.emit(Dismiss)));
         let alert = self.remove_alert(&model, a, cx);
+        let install = self.install_alert(a, cx);
         div()
             .id("cluster-sheet")
             .relative()
@@ -390,8 +516,14 @@ impl Render for ClusterSheetView {
             ))
             .child(scrollable(body))
             .children(alert)
+            .children(install)
             .part("Cluster View", a, cx)
     }
+}
+
+fn asked(feed: &ClusterFeed, request: &Request) -> Result<HookFacts, String> {
+    let reply = feed.send(request)?;
+    HookFacts::parse(&reply).ok_or_else(|| t::cluster::install_unread().to_owned())
 }
 
 struct ClusterRender {
@@ -415,6 +547,21 @@ pub fn build_render(name: &str, cx: &mut gpui::App) -> Option<AnyView> {
         let mut sheet = ClusterSheetView::fixed(feed, "MacBook", cx);
         if which == Shown::Menu {
             sheet.menu = Some(STANDBY.to_owned());
+        }
+        if which == Shown::Install || which == Shown::InstallOff {
+            let on = which == Shown::Install;
+            let facts = HookFacts::parse(&install_plan_reply(on)).unwrap_or_default();
+            match plan_of("mac-mini", &facts) {
+                Plan::Confirm { title, lines } => {
+                    sheet.installing = Some(InstallAsk {
+                        id: STANDBY.to_owned(),
+                        name: "mac-mini".to_owned(),
+                        title,
+                        lines,
+                    });
+                }
+                Plan::Say { text, problem } => sheet.note = Some((text, problem)),
+            }
         }
         sheet
     });
