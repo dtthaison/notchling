@@ -275,6 +275,10 @@ impl ClusterNode {
         status
     }
 
+    pub fn started(&self) -> bool {
+        !lock(&self.shared.status).is_null()
+    }
+
     pub fn submit(&self) -> Submit {
         Submit::new(self.tx.clone())
     }

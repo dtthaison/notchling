@@ -1,4 +1,4 @@
-use super::{parse, FailoverSink, KeyMirror, NodeSink, KEY};
+use super::{parse, FailoverSink, KeyMirror, NodeSink, SinkNode, KEY, STARTING};
 use crate::acting_ops_tests::{app, FakeRoom};
 use crate::cluster_node::Hooks;
 use crate::cluster_ops::{follow_switch, ClusterOps};
@@ -89,6 +89,7 @@ fn side(net: &Arc<MemNet>, name: &'static str, client: bool, preset: Option<&str
     opts.hooks = Some(hooks);
     opts.room = Some(room.clone());
     let n = node(net, opts);
+    eventually("the node has reported", || n.node.started());
     let flag = SwitchFlag::off(CLUSTER, CLUSTER_OFF);
     follow_switch(&flag, &n.node);
     flag.set(true);
@@ -115,6 +116,11 @@ fn join(
     preset: Option<&str>,
 ) -> Side {
     let joiner = side(net, name, client, preset);
+    admit(home, &joiner, client);
+    joiner
+}
+
+fn admit(home: &Side, joiner: &Side, client: bool) {
     let token = home.node.node.join_token().unwrap()["token"]
         .as_str()
         .unwrap()
@@ -132,7 +138,6 @@ fn join(
         online(&home.node.node.status(), &joiner.node.id())
             && online(&joiner.node.node.status(), &home.node.id())
     });
-    joiner
 }
 
 #[test]
@@ -147,10 +152,10 @@ fn app_change_is_journaled_on_primary() {
     eventually("the key follows the journal", || {
         home.key() == Some(json!("30m"))
     });
-    assert_eq!(
-        home.room.named(topics::SETTINGS_CHANGED),
-        vec![json!({"key": KEY, "value": "30m", "by": "cluster"})]
-    );
+    eventually("the change is announced", || {
+        home.room.named(topics::SETTINGS_CHANGED)
+            == vec![json!({"key": KEY, "value": "30m", "by": "cluster"})]
+    });
     home.set(Tier::App, "off").unwrap();
     eventually("off is journaled and mirrored", || {
         home.value() == "off" && home.key() == Some(json!("off"))
@@ -391,4 +396,87 @@ fn an_older_mirror_event_never_overwrites_a_newer_one() {
     let store = Settings::open(&tmp.path("settings.json")).unwrap();
     assert_eq!(store.raw(KEY), Some(&json!("1h")));
     assert_eq!(room.named(topics::SETTINGS_CHANGED).len(), 1);
+}
+
+#[test]
+fn a_rejoin_after_a_wipe_still_overwrites_the_key() {
+    let net = MemNet::new();
+    let a = start(&net, "fo-wipe-a");
+    let x = join(&net, &a, "fo-wipe-x", true, None);
+    a.set(Tier::App, "30m").unwrap();
+    eventually("x mirrors 30m", || x.key() == Some(json!("30m")));
+    a.node
+        .node
+        .local(LocalCmd::Remove { node: x.node.id() })
+        .unwrap();
+    eventually("x is wiped", || x.node.node.status()["cluster"].is_null());
+    let b = start(&net, "fo-wipe-b");
+    admit(&b, &x, true);
+    assert_eq!(b.value(), "off");
+    eventually("the key follows the new cluster's off", || {
+        x.value() == "off" && x.key() == Some(json!("off"))
+    });
+}
+
+#[test]
+fn a_started_node_reports_started() {
+    let net = MemNet::new();
+    let home = start(&net, "fo-started");
+    eventually("the first tick has reported", || home.node.node.started());
+}
+
+struct Fake {
+    started: bool,
+    cluster: bool,
+    journaled: std::sync::Mutex<Vec<Failover>>,
+}
+
+impl Fake {
+    fn sink(started: bool, cluster: bool) -> (Arc<Fake>, NodeSink) {
+        let fake = Arc::new(Fake {
+            started,
+            cluster,
+            journaled: std::sync::Mutex::new(Vec::new()),
+        });
+        (fake.clone(), NodeSink::over(fake))
+    }
+
+    fn calls(&self) -> usize {
+        self.journaled.lock().unwrap().len()
+    }
+}
+
+impl SinkNode for Fake {
+    fn started(&self) -> bool {
+        self.started
+    }
+
+    fn in_cluster(&self) -> bool {
+        self.cluster
+    }
+
+    fn journal(&self, value: Failover) -> Result<(), String> {
+        self.journaled.lock().unwrap().push(value);
+        Ok(())
+    }
+}
+
+#[test]
+fn a_set_before_the_node_has_reported_is_refused_and_never_unjournaled() {
+    let (fake, sink) = Fake::sink(false, false);
+    assert_eq!(sink.set(Failover::After30m), Err(STARTING.to_string()));
+    assert_eq!(fake.calls(), 0);
+    let (fake, sink) = Fake::sink(false, true);
+    assert_eq!(sink.set(Failover::After30m), Err(STARTING.to_string()));
+    assert_eq!(fake.calls(), 0);
+}
+
+#[test]
+fn a_started_node_in_no_cluster_lets_the_key_stand_and_one_in_a_cluster_journals() {
+    let (fake, sink) = Fake::sink(true, false);
+    assert_eq!(sink.set(Failover::After30m), Ok(()));
+    assert_eq!(fake.calls(), 0);
+    let (fake, sink) = Fake::sink(true, true);
+    assert_eq!(sink.set(Failover::After1h), Ok(()));
+    assert_eq!(*fake.journaled.lock().unwrap(), vec![Failover::After1h]);
 }

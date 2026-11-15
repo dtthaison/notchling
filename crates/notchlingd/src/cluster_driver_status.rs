@@ -71,8 +71,7 @@ impl Driver {
         };
         let order = match self.told_failover {
             Some((told, _)) if told == value => return,
-            Some((_, order)) => order + 1,
-            None => 1,
+            _ => crate::cluster_failover_setting::next_order(),
         };
         self.told_failover = Some((value, order));
         let hooks = self.hooks.clone();
