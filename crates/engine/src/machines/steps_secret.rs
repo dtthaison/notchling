@@ -9,6 +9,7 @@ use super::steps_node::{json_from, BINARY};
 use super::token_creation;
 use super::usage::{SecretFormat, SecretUsage};
 use crate::accounts::Secret;
+use crate::cluster::login_files::CLUSTER_LOGIN_ENTRY;
 use crate::lanes::quote;
 use crate::vault::{Redactor, VaultEntry, VaultRequest, VaultValue};
 use sha2::{Digest, Sha256};
@@ -51,11 +52,22 @@ fn cluster_login(m: &Machine) -> SetupStep {
             format!("{} cluster status --json", shell::path(BINARY)),
             parse_cluster_login,
         ),
-        StepFix::HowTo(format!(
-            "The cluster sends this. Save {} in the Secret Vault with an expiry date on the Mac that holds the vault; while that Mac is the primary it sends the token to {}. Then check again.",
-            m.claude_secret, m.name
-        )),
+        StepFix::HowTo(cluster_how_to(m)),
     )
+}
+
+fn cluster_how_to(m: &Machine) -> String {
+    let mut text = format!(
+        "The cluster sends this. In your own Terminal run claude setup-token, then save {CLUSTER_LOGIN_ENTRY} in the Secret Vault with an expiry date, and allow it on this machine (Secrets…). While the Mac that holds the vault is the primary it sends the token to {}. Then check again.",
+        m.name
+    );
+    if m.claude_secret != CLUSTER_LOGIN_ENTRY {
+        text.push_str(&format!(
+            " This machine's own Claude secret ({}) isn't used for the cluster login: the cluster sends {CLUSTER_LOGIN_ENTRY} only.",
+            m.claude_secret
+        ));
+    }
+    text
 }
 
 fn parse_cluster_login(out: &RemoteOutput, _ctx: &StepContext) -> CheckResult {
@@ -167,7 +179,9 @@ pub fn issues_token(m: &Machine, job: &SdWorkerSettings) -> SetupStep {
 pub fn usages(machines: &[Machine]) -> Vec<SecretUsage> {
     let mut list = Vec::new();
     for m in machines {
-        list.push(claude_usage(m));
+        if !cluster_sends_login(m) {
+            list.push(claude_usage(m));
+        }
         for job in &m.jobs {
             if let Some(settings) = &job.sd_worker {
                 list.push(issues_usage(m, settings));

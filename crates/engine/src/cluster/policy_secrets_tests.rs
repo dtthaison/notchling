@@ -134,3 +134,29 @@ fn only_the_vault_node_while_home_delivers_a_standing_login() {
         assert!(check("login.deliver", &vault, &origin("m5", tier)).is_err());
     }
 }
+
+#[test]
+fn the_home_or_the_vault_node_revokes_a_standing_login_and_nobody_else() {
+    let vault = vault_home("m5");
+    let promoted = facts("m1", Role::Home, true, MemberState::Active);
+    let mut standby_vault = facts("m5", Role::Standby, true, MemberState::Active);
+    standby_vault.is_vault = true;
+    for (who, sender) in [("m5", &vault), ("m1", &promoted), ("m5", &standby_vault)] {
+        assert!(
+            check("login.revoke", sender, &origin(who, OriginTier::Node)).is_ok(),
+            "{who}"
+        );
+    }
+    let standby = facts("m2", Role::Standby, true, MemberState::Active);
+    let worker = facts("w1", Role::Worker, false, MemberState::Active);
+    for (who, sender) in [("m2", &standby), ("w1", &worker)] {
+        assert_eq!(
+            check("login.revoke", sender, &origin(who, OriginTier::Node)).err(),
+            Some(Denied::NotAllowed),
+            "{who}"
+        );
+    }
+    for tier in [OriginTier::Agent, OriginTier::App] {
+        assert!(check("login.revoke", &vault, &origin("m5", tier)).is_err());
+    }
+}

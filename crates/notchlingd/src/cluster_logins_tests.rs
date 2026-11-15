@@ -17,7 +17,7 @@ struct Rig {
     skew: Arc<AtomicI64>,
 }
 
-fn rig_over(dir: Dir, home: &str) -> Rig {
+fn rig_with(dir: Dir, home: &str, enabled: bool) -> Rig {
     let fake = Arc::new(Fake::default());
     *fake.state.lock().unwrap() = Some(cluster(home, &[]));
     *fake.me.lock().unwrap() = Some(id("worker"));
@@ -25,9 +25,12 @@ fn rig_over(dir: Dir, home: &str) -> Rig {
     let skew = Arc::new(AtomicI64::new(0));
     let clock_skew = skew.clone();
     let hold = LoginHold::new(
-        Arc::new(LoginStore::new(dir.path())),
-        masks.clone(),
-        fake.clone(),
+        (
+            Arc::new(LoginStore::new(dir.path())),
+            masks.clone(),
+            fake.clone(),
+        ),
+        (dir.path(), enabled),
         Arc::new(move || now_ms() + clock_skew.load(Ordering::SeqCst)),
     );
     Rig {
@@ -37,6 +40,10 @@ fn rig_over(dir: Dir, home: &str) -> Rig {
         hold,
         skew,
     }
+}
+
+fn rig_over(dir: Dir, home: &str) -> Rig {
+    rig_with(dir, home, true)
 }
 
 fn rig(tag: &str) -> Rig {
@@ -259,7 +266,8 @@ fn the_calls_answer_only_login_deliver() {
     assert!(inner.calls.lock().unwrap().is_empty());
     let _ = calls.call("grant.revoke", &json!({}), &from_vault());
     assert_eq!(inner.calls.lock().unwrap().len(), 1);
-    assert_eq!(NODE_OPS, [LOGIN_DELIVER]);
+    assert_eq!(NODE_OPS, [LOGIN_DELIVER, LOGIN_REVOKE]);
+    assert_eq!(LOGIN_REVOKE, "login.revoke");
     assert_eq!(LOGIN_DELIVER, "login.deliver");
 }
 
@@ -287,4 +295,147 @@ fn the_versions_a_node_reports_follow_the_login_while_it_stands() {
     assert_eq!(report(&rig), Some(true));
     rig.skew.store(2 * 3_600_000, Ordering::SeqCst);
     assert_eq!(report(&rig), None);
+}
+
+fn session_row(rig: &Rig, session: &str, text: &str) -> Result<String, String> {
+    let name = crate::cluster_logins_jobs::lost_name(session);
+    if rig.masks.job_for_key(session).as_deref() != Some(name.as_str()) {
+        return Ok(masked(&rig.masks, "j-0123456789ab", text));
+    }
+    mask_tail(&rig.masks, &name, 0, &[], text.as_bytes(), true)
+        .map(|(out, _)| String::from_utf8(out).unwrap())
+}
+
+#[test]
+fn a_job_that_ran_with_the_current_token_stays_readable_after_a_restart() {
+    let rig = rig("login-job-same");
+    rig.hold.deliver(&from_vault(), &good()).expect("stored");
+    let token = rig.hold.token().expect("token");
+    rig.hold.launched("6ce4c19c", &token).expect("recorded");
+    let again = rig_over(rig.dir, "vault");
+    let out = session_row(&again, "6ce4c19c", &format!("x {MARKER} y")).expect("served");
+    assert!(!out.contains("NL-MARKER"));
+    assert!(again.masks.job_for_key("6ce4c19c").is_none());
+}
+
+#[test]
+fn a_job_that_ran_with_an_earlier_token_is_refused_after_a_restart() {
+    let rig = rig("login-job-old");
+    rig.hold.deliver(&from_vault(), &good()).expect("stored");
+    let old = rig.hold.token().expect("token");
+    rig.hold.launched("6ce4c19c", &old).expect("recorded");
+    rig.hold
+        .deliver(
+            &from_vault(),
+            &args("NL-MARKER-840", now_ms() + MINUTE * 40),
+        )
+        .expect("replaced");
+    let new = rig.hold.token().expect("token");
+    rig.hold.launched("6ce4c19d", &new).expect("recorded");
+    let again = rig_over(rig.dir, "vault");
+    let lost = session_row(&again, "6ce4c19c", &format!("x {MARKER} y"));
+    assert!(lost.is_err(), "an old-token job was served");
+    assert!(!lost.unwrap_err().contains("NL-MARKER"));
+    let kept = session_row(&again, "6ce4c19d", "x NL-MARKER-840 y").expect("served");
+    assert!(!kept.contains("NL-MARKER"));
+}
+
+#[test]
+fn after_the_login_is_gone_every_recorded_job_is_refused_after_a_restart() {
+    let rig = rig("login-job-gone");
+    rig.hold.deliver(&from_vault(), &good()).expect("stored");
+    let token = rig.hold.token().expect("token");
+    rig.hold.launched("6ce4c19c", &token).expect("recorded");
+    rig.hold.wipe();
+    let again = rig_over(rig.dir, "vault");
+    assert!(session_row(&again, "6ce4c19c", "x").is_err());
+}
+
+#[test]
+fn the_record_holds_a_hash_and_never_the_value() {
+    let rig = rig("login-job-file");
+    rig.hold.deliver(&from_vault(), &good()).expect("stored");
+    let token = rig.hold.token().expect("token");
+    rig.hold.launched("6ce4c19c", &token).expect("recorded");
+    let text = std::fs::read_to_string(rig.dir.path().join("logins/jobs.json")).expect("record");
+    assert!(!text.contains("NL-MARKER"), "the record held the value");
+    assert!(text.contains(&crate::cluster_logins_jobs::hash_of(&token)));
+}
+
+#[test]
+fn a_record_that_cannot_be_read_stops_new_launches() {
+    let rig = rig("login-job-bad");
+    rig.hold.deliver(&from_vault(), &good()).expect("stored");
+    std::fs::write(rig.dir.path().join("logins/jobs.json"), "{not json").unwrap();
+    let again = rig_over(rig.dir, "vault");
+    assert!(again.hold.token().is_none());
+    assert!(!again.hold.standing());
+}
+
+#[test]
+fn a_disabled_hold_takes_nothing_serves_nothing_and_removes_an_old_file() {
+    let rig = rig("login-off");
+    rig.hold.deliver(&from_vault(), &good()).expect("stored");
+    let off = rig_with(rig.dir, "vault", false);
+    assert!(!off.dir.path().join("logins/claude.json").exists());
+    let err = off.hold.deliver(&from_vault(), &good()).expect_err("off");
+    assert!(err.message.contains("inherit"));
+    assert!(off.hold.token().is_none());
+    assert!(!off.hold.standing());
+}
+
+#[test]
+fn the_cluster_login_is_off_in_this_build() {
+    const { assert!(!CLUSTER_LOGIN_ON) };
+}
+
+#[test]
+fn standing_and_token_agree_once_the_masks_are_full() {
+    let rig = rig("login-agree");
+    rig.hold.deliver(&from_vault(), &good()).expect("stored");
+    assert!(rig.hold.standing());
+    for n in 1..MAX_STANDING {
+        let value = format!("NL-MARKER-8{n:02}");
+        rig.masks
+            .add_standing(vec![("v".to_string(), GrantValue::new(value))])
+            .unwrap();
+    }
+    LoginStore::new(rig.dir.path())
+        .put(&notchling_engine::cluster::login_files::LoginFile {
+            tool: "claude".to_string(),
+            expires_ms: now_ms() + 30 * MINUTE,
+            value: GrantValue::new("NL-MARKER-899".to_string()),
+        })
+        .expect("a file the masks can't take");
+    assert!(rig.hold.token().is_none());
+    assert!(!rig.hold.standing());
+}
+
+#[test]
+fn the_home_or_the_vault_node_revokes_and_nobody_else() {
+    let rig = rig("login-revoke");
+    rig.hold.deliver(&from_vault(), &good()).expect("stored");
+    let from = |name: &str, tier| Origin {
+        node: id(name),
+        tier,
+    };
+    for origin in [
+        from("other", OriginTier::Node),
+        from("worker", OriginTier::Node),
+        from("vault", OriginTier::Agent),
+    ] {
+        assert!(rig.hold.revoke(&origin).is_err());
+    }
+    assert!(rig.hold.standing());
+    rig.hold
+        .revoke(&from("vault", OriginTier::Node))
+        .expect("revoked");
+    assert!(!rig.hold.standing());
+    let calls = LoginCalls::new(Arc::new(FakeCalls::default()), rig.hold.clone());
+    rig.hold.deliver(&from_vault(), &good()).expect("stored");
+    *rig.fake.state.lock().unwrap() = Some(cluster("other", &[]));
+    calls
+        .call(LOGIN_REVOKE, &json!({}), &from("other", OriginTier::Node))
+        .expect("the home revokes");
+    assert!(!rig.hold.standing());
 }

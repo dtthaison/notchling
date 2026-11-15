@@ -6,7 +6,7 @@ use crate::cluster_forward::{Forward, NoNodeForward, NodeForward};
 use crate::cluster_inbox::{InboxCalls, NetLink, NodeNet, Outbox};
 use crate::cluster_inbox_follow::Follow;
 use crate::cluster_join::{JoinAsker, JOIN_WAIT};
-use crate::cluster_logins::{LoginCalls, LoginEnv, LoginHold};
+use crate::cluster_logins::{LoginCalls, LoginEnv, LoginHold, CLUSTER_LOGIN_ON};
 use crate::cluster_logins_send::{LoginDeliverer, NodeOnline, Parts, Stamps};
 use crate::cluster_mirror::{FollowOps, Mirror, OnCap, TailSource, MIRROR_CAP, MIRROR_DIR};
 use crate::cluster_node::{
@@ -356,9 +356,12 @@ impl ClusterParts {
         let grants = GrantParts::new(&layout.cluster_dir());
         let view = Arc::new(NodeView::new(holder.clone()));
         let login = LoginHold::new(
-            Arc::new(LoginStore::new(&layout.cluster_dir())),
-            grants.masks.clone(),
-            view.clone(),
+            (
+                Arc::new(LoginStore::new(&layout.cluster_dir())),
+                grants.masks.clone(),
+                view.clone(),
+            ),
+            (&layout.cluster_dir(), CLUSTER_LOGIN_ON),
             clock_ms(),
         );
         let shells =
@@ -475,7 +478,9 @@ impl ClusterParts {
             let _ = holder.set(node.clone());
             mirror.spawn();
             janitor.spawn();
-            logins.spawn();
+            if CLUSTER_LOGIN_ON {
+                logins.spawn();
+            }
             let link = Arc::new(NetLink::new(net));
             inbox.set_link(link.clone());
             inbox.set_tap(outbox.tap());

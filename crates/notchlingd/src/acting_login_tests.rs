@@ -10,19 +10,28 @@ use std::sync::{Arc, Mutex};
 
 const MARKER: &str = "NL-MARKER-830";
 
-struct Held(Mutex<Option<GrantValue>>);
+struct Held {
+    token: Mutex<Option<GrantValue>>,
+    launched: Arc<Mutex<Vec<String>>>,
+}
 
 impl LoginEnv for Held {
     fn token(&self) -> Option<GrantValue> {
-        self.0.lock().unwrap().clone()
+        self.token.lock().unwrap().clone()
     }
 
     fn standing(&self) -> bool {
-        self.0.lock().unwrap().is_some()
+        self.token.lock().unwrap().is_some()
+    }
+
+    fn launched(&self, session: &str, token: &GrantValue) -> Result<(), String> {
+        assert!(token.expose() == MARKER);
+        self.launched.lock().unwrap().push(session.to_string());
+        Ok(())
     }
 }
 
-fn rig(token: Option<&str>) -> (Setup, Arc<FakeLauncher>) {
+fn rig(token: Option<&str>) -> (Setup, Arc<FakeLauncher>, Arc<Mutex<Vec<String>>>) {
     let fake = Arc::new(FakeLauncher::new());
     for n in 0..4 {
         fake.push_output(Ok(LaunchOutput::ok(&format!(
@@ -35,9 +44,13 @@ fn rig(token: Option<&str>) -> (Setup, Arc<FakeLauncher>) {
         lanes_file: PathBuf::from("/nonexistent/lanes.json"),
     };
     let s = setup_in(true, PROMPT, sessions(), roots, Some(launcher));
-    let held = Held(Mutex::new(token.map(|t| GrantValue::new(t.to_string()))));
+    let launched = Arc::new(Mutex::new(Vec::new()));
+    let held = Held {
+        token: Mutex::new(token.map(|t| GrantValue::new(t.to_string()))),
+        launched: launched.clone(),
+    };
     s.ops.attach_login(Arc::new(held));
-    (s, fake)
+    (s, fake, launched)
 }
 
 fn node() -> Caller {
@@ -67,7 +80,7 @@ fn env_keys(fake: &FakeLauncher) -> Vec<Vec<String>> {
 
 #[test]
 fn a_session_the_cluster_starts_gets_the_login_in_its_environment_only() {
-    let (s, fake) = rig(Some(MARKER));
+    let (s, fake, _) = rig(Some(MARKER));
     start(&s, &node());
     assert_eq!(env_keys(&fake), [vec![LOGIN_TOKEN_VAR.to_string()]]);
     let shown = format!("{:?}", fake.calls());
@@ -87,7 +100,7 @@ fn a_session_the_cluster_starts_gets_the_login_in_its_environment_only() {
 
 #[test]
 fn a_session_started_from_the_app_or_a_local_client_never_gets_it() {
-    let (s, fake) = rig(Some(MARKER));
+    let (s, fake, _) = rig(Some(MARKER));
     for client in [ClientKind::App, ClientKind::Cli, ClientKind::Hook] {
         start(&s, &caller(client));
     }
@@ -98,7 +111,7 @@ fn a_session_started_from_the_app_or_a_local_client_never_gets_it() {
 
 #[test]
 fn without_a_standing_login_nothing_is_added() {
-    let (s, fake) = rig(None);
+    let (s, fake, _) = rig(None);
     start(&s, &node());
     assert!(env_keys(&fake).iter().all(Vec::is_empty));
 }
@@ -117,4 +130,12 @@ fn a_daemon_with_no_login_attached_adds_nothing() {
     let s = setup_in(true, PROMPT, sessions(), roots, Some(launcher));
     start(&s, &node());
     assert!(env_keys(&fake).iter().all(Vec::is_empty));
+}
+
+#[test]
+fn the_session_a_login_launched_is_recorded_and_others_are_not() {
+    let (s, _fake, launched) = rig(Some(MARKER));
+    start(&s, &node());
+    start(&s, &caller(ClientKind::App));
+    assert_eq!(*launched.lock().unwrap(), ["6ce4c190".to_string()]);
 }

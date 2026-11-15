@@ -1,25 +1,23 @@
-use crate::cluster_logins::{LOGIN_DELIVER, LOGIN_ENTRY};
-use crate::grant_broker::{Audit, Clock, Link, Release, Vault, View, LOG_DOWN};
+use crate::cluster_logins::{LOGIN_DELIVER, LOGIN_ENTRY, LOGIN_REVOKE};
+pub use crate::cluster_logins_notes::DAY_MS;
+use crate::cluster_logins_notes::{settle, wanted, Notes};
+use crate::grant_broker::{Audit, Clock, Link, Release, Vault, View};
 use crate::grant_calls::Holder;
-use crate::inbox_ops::InboxOps;
 use crate::vault_ops::{ReleaseFor, VaultOps};
 use notchling_engine::cluster::grants::decode_env;
 use notchling_engine::cluster::login_files::{valid_token, CLAUDE};
 use notchling_engine::cluster::{ClusterState, Member, MemberState, NodeId};
-use notchling_engine::inbox::{Action, ActionId, Item, Kind, Source, State};
 use notchling_engine::vault::expiry::day_number;
 use notchling_engine::vault::VaultEntry;
 use notchling_engine::versions::Tool;
-use notchling_local_api::ApiError;
+use notchling_local_api::{ApiError, ErrorCode};
 use serde_json::{json, Value};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::Duration;
 
-pub const DAY_MS: i64 = 86_400_000;
-pub const NOTICE_DAYS: i64 = 14;
 pub const HOLD_MS: i64 = 10 * 60_000;
 pub const RESEND_MS: i64 = 10 * 60_000;
 const TICK: Duration = Duration::from_secs(10);
@@ -42,21 +40,6 @@ impl Entries for VaultOps {
 
 pub trait Online: Send + Sync {
     fn online(&self, node: &NodeId) -> bool;
-}
-
-pub trait Notes: Send + Sync {
-    fn raise(&self, item: Item);
-    fn withdraw(&self, id: &str);
-}
-
-impl Notes for InboxOps {
-    fn raise(&self, item: Item) {
-        InboxOps::raise(self, item, None);
-    }
-
-    fn withdraw(&self, id: &str) {
-        self.resolve(id, State::Withdrawn, None, None);
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -115,6 +98,20 @@ impl Stamps {
         }
     }
 
+    pub fn nodes(&self) -> Vec<NodeId> {
+        lock(&self.map)
+            .keys()
+            .filter_map(|id| NodeId::parse(id))
+            .collect()
+    }
+
+    pub fn remove(&self, node: &NodeId) {
+        let mut map = lock(&self.map);
+        if map.remove(node.as_str()).is_some() {
+            self.save(&map);
+        }
+    }
+
     pub fn get(&self, node: &NodeId) -> Option<Stamp> {
         lock(&self.map).get(node.as_str()).cloned()
     }
@@ -122,6 +119,10 @@ impl Stamps {
     pub fn set(&self, node: &NodeId, stamp: Stamp) {
         let mut map = lock(&self.map);
         map.insert(node.as_str().to_string(), stamp);
+        self.save(&map);
+    }
+
+    fn save(&self, map: &BTreeMap<String, Stamp>) {
         let Some(path) = &self.path else {
             return;
         };
@@ -138,7 +139,11 @@ impl Stamps {
 #[derive(Default)]
 struct Local {
     holds: BTreeMap<String, (String, i64)>,
-    raised: BTreeSet<String>,
+}
+
+enum Fail {
+    Denied,
+    Other,
 }
 
 pub struct LoginDeliverer {
@@ -209,37 +214,6 @@ fn due(stamp: Option<&Stamp>, entry: &VaultEntry, member: &Member, now: i64) -> 
     }
 }
 
-fn done_action() -> Vec<Action> {
-    vec![Action {
-        id: ActionId::Done,
-        label: "Done".to_string(),
-        primary: false,
-    }]
-}
-
-fn notice(id: String, kind: Kind, text: (String, String), node: Option<&NodeId>, now: i64) -> Item {
-    Item {
-        id,
-        kind,
-        title: text.0,
-        detail: text.1,
-        source: Source {
-            node: node.map(|n| n.to_string()),
-            session: None,
-            job: None,
-        },
-        created_ms: now,
-        expires_ms: None,
-        actions: done_action(),
-        state: State::Open,
-        answer: None,
-        answered_by: None,
-        seen: false,
-        open: None,
-        closed_ms: None,
-    }
-}
-
 impl LoginDeliverer {
     pub fn new(parts: Parts, stamps: Stamps, clock: Clock) -> Arc<LoginDeliverer> {
         Arc::new(LoginDeliverer {
@@ -277,7 +251,7 @@ impl LoginDeliverer {
         Ok(())
     }
 
-    fn send(&self, member: &Member) -> Result<Stamp, String> {
+    fn send(&self, member: &Member) -> Result<Stamp, Fail> {
         let who = ReleaseFor {
             node_name: member.name.clone(),
             job: format!("login:{CLAUDE}"),
@@ -286,42 +260,40 @@ impl LoginDeliverer {
         };
         let names = vec![LOGIN_ENTRY.to_string()];
         let still = || self.still(&member.id);
-        let released = self
-            .vault
-            .release(&who, &names, &still)
-            .map_err(|e| e.message.clone())?;
-        let refuse = |why: &str| {
+        let released = self.vault.release(&who, &names, &still).map_err(|e| {
+            if e.code == ErrorCode::NeedsApproval {
+                Fail::Denied
+            } else {
+                Fail::Other
+            }
+        })?;
+        let refuse = || {
             self.audit.refused(&member.id, &who, LOGIN_ENTRY);
-            why.to_string()
+            Fail::Other
         };
-        let (entry, packed) = released
-            .values
-            .first()
-            .ok_or_else(|| refuse("the vault answered with nothing"))?;
-        let env = decode_env(packed).map_err(|why| refuse(&why))?;
+        let (entry, packed) = released.values.first().ok_or_else(refuse)?;
+        let env = decode_env(packed).map_err(|_| refuse())?;
         let token = env
             .get(&entry.secret_var)
             .filter(|v| valid_token(v.expose()))
-            .ok_or_else(|| refuse("the login entry holds no token this machine can send"))?;
+            .ok_or_else(refuse)?;
         let now = (self.clock)();
         let expires = expires_of(entry)
             .filter(|at| *at > now)
-            .ok_or_else(|| refuse("the login entry has no expiry date in the future"))?;
-        still().map_err(|why| refuse(&why))?;
+            .ok_or_else(refuse)?;
+        still().map_err(|_| refuse())?;
         let release = Release {
             node: &member.id,
             who: &who,
             name: LOGIN_ENTRY,
             released: &released,
         };
-        self.audit
-            .released(&release)
-            .map_err(|_| LOG_DOWN.to_string())?;
-        still().map_err(|why| refuse(&why))?;
+        self.audit.released(&release).map_err(|_| Fail::Other)?;
+        still().map_err(|_| refuse())?;
         let args = json!({"tool": CLAUDE, "value": token.expose(), "expiresMs": expires});
         self.link
             .call(&member.id, LOGIN_DELIVER, args)
-            .map_err(|e| e.message.clone())?;
+            .map_err(|_| Fail::Other)?;
         Ok(Stamp {
             updated: entry.updated.clone(),
             expires: entry.expires.clone().unwrap_or_default(),
@@ -329,60 +301,24 @@ impl LoginDeliverer {
         })
     }
 
-    fn settle(&self, wanted: BTreeMap<String, Item>) {
-        let mut local = lock(&self.local);
-        let stale: Vec<String> = local
-            .raised
-            .iter()
-            .filter(|id| !wanted.contains_key(*id))
-            .cloned()
-            .collect();
-        for id in stale {
-            self.notes.withdraw(&id);
-            local.raised.remove(&id);
-        }
-        for (id, item) in wanted {
-            if local.raised.insert(id) {
-                self.notes.raise(item);
+    fn revoke_stale(&self, state: &ClusterState, sendable: bool) {
+        for node in self.stamps.nodes() {
+            let member = state
+                .members
+                .get(&node)
+                .filter(|m| m.state == MemberState::Active);
+            let Some(member) = member else {
+                self.stamps.remove(&node);
+                continue;
+            };
+            let keep = sendable && member.secrets.allows(LOGIN_ENTRY);
+            if keep || !self.online.online(&node) {
+                continue;
+            }
+            if self.link.call(&node, LOGIN_REVOKE, json!({})).is_ok() {
+                self.stamps.remove(&node);
             }
         }
-    }
-
-    fn notices(
-        &self,
-        entry: &VaultEntry,
-        members: &[Member],
-        expires: Option<i64>,
-        now: i64,
-    ) -> BTreeMap<String, Item> {
-        let mut wanted = BTreeMap::new();
-        match (expires, entry.expires.as_deref()) {
-            (Some(at), Some(day)) if at.saturating_sub(now) <= NOTICE_DAYS * DAY_MS => {
-                for m in members {
-                    let id = format!("login-needed:{}:{day}", m.id);
-                    let text = (
-                        format!("Claude Code's token for {} expires on {day}", m.name),
-                        format!(
-                            "Renew {LOGIN_ENTRY} in the Secret Vault with a new expiry date; the cluster sends it again."
-                        ),
-                    );
-                    wanted.insert(
-                        id.clone(),
-                        notice(id, Kind::LoginNeeded, text, Some(&m.id), now),
-                    );
-                }
-            }
-            (None, _) => {
-                let id = format!("login-no-expiry:{}", entry.updated);
-                let text = (
-                    format!("{LOGIN_ENTRY} has no expiry date, so it isn't sent to Workers"),
-                    "Set the day the token ends in the Secret Vault.".to_string(),
-                );
-                wanted.insert(id.clone(), notice(id, Kind::Notice, text, None, now));
-            }
-            _ => {}
-        }
-        wanted
     }
 
     pub fn reconcile(&self) {
@@ -393,17 +329,22 @@ impl LoginDeliverer {
         if state.vault != me || state.home != me {
             return;
         }
-        let Ok(Some(entry)) = self.entries.entry(LOGIN_ENTRY) else {
+        let Ok(found) = self.entries.entry(LOGIN_ENTRY) else {
             return;
         };
         let now = (self.clock)();
-        let expires = expires_of(&entry);
+        let expires = found.as_ref().and_then(expires_of);
         let members = eligible(&state, &me);
-        let wanted = self.notices(&entry, &members, expires, now);
-        self.settle(wanted);
-        if expires.is_none_or(|at| at <= now) {
+        let notes = match &found {
+            Some(entry) => wanted(entry, &members, expires, now),
+            None => BTreeMap::new(),
+        };
+        settle(self.notes.as_ref(), notes, found.as_ref());
+        let sendable = found.filter(|_| expires.is_some_and(|at| at > now));
+        self.revoke_stale(&state, sendable.is_some());
+        let Some(entry) = sendable else {
             return;
-        }
+        };
         let key = format!(
             "{}|{}",
             entry.updated,
@@ -426,10 +367,14 @@ impl LoginDeliverer {
                     lock(&self.local).holds.remove(member.id.as_str());
                     self.stamps.set(&member.id, stamp);
                 }
-                Err(_) => {
+                Err(fail) => {
+                    let until = match fail {
+                        Fail::Denied => i64::MAX,
+                        Fail::Other => now + HOLD_MS,
+                    };
                     lock(&self.local)
                         .holds
-                        .insert(member.id.as_str().to_string(), (key.clone(), now + HOLD_MS));
+                        .insert(member.id.as_str().to_string(), (key.clone(), until));
                 }
             }
         }

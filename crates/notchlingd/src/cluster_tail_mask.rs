@@ -109,9 +109,14 @@ impl MaskedTails {
                 .map(|j| j.id.clone()),
             _ => None,
         };
-        from_state
-            .or_else(|| self.masks.job_for_key(id))
-            .or_else(|| short.and_then(|key| self.masks.job_for_key(key)))
+        let keyed = self
+            .masks
+            .job_for_key(id)
+            .or_else(|| short.and_then(|key| self.masks.job_for_key(key)));
+        match keyed {
+            Some(lost) if self.masks.lost(&lost) => Some(lost),
+            keyed => from_state.or(keyed),
+        }
     }
 
     fn all_over(&self) -> bool {

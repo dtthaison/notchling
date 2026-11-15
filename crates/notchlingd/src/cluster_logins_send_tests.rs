@@ -1,12 +1,15 @@
 use super::*;
+use crate::cluster_logins::LOGIN_REVOKE;
 use crate::cluster_testkit::Dir;
 use crate::grant_use::tests::{cluster, id};
 use crate::vault_ops::{Looked, Released, Still};
 use notchling_engine::cluster::grants::{encode_env, SecretAllow};
 use notchling_engine::cluster::Versions;
+use notchling_engine::inbox::{ActionId, Item, Kind, State};
 use notchling_engine::vault::Kind as VaultKind;
 use notchling_engine::versions::Version;
 use notchling_local_api::ErrorCode;
+use std::collections::BTreeSet;
 use std::sync::atomic::AtomicI64;
 
 const MARKER: &str = "NL-MARKER-820";
@@ -33,6 +36,7 @@ struct Inner {
     online: BTreeSet<NodeId>,
     raised: Vec<Item>,
     withdrawn: Vec<String>,
+    book: BTreeMap<String, State>,
     during_release: Option<Hook>,
 }
 
@@ -181,11 +185,37 @@ impl Online for Fake {
 
 impl Notes for Fake {
     fn raise(&self, item: Item) {
-        self.with(|i| i.raised.push(item));
+        self.with(|i| match i.book.get(&item.id) {
+            Some(State::Open) => {}
+            Some(_) => {}
+            None => {
+                i.book.insert(item.id.clone(), State::Open);
+                i.raised.push(item);
+            }
+        });
     }
 
     fn withdraw(&self, id: &str) {
-        self.with(|i| i.withdrawn.push(id.to_string()));
+        self.with(|i| {
+            if i.book.get(id) == Some(&State::Open) {
+                i.book.insert(id.to_string(), State::Withdrawn);
+                i.withdrawn.push(id.to_string());
+            }
+        });
+    }
+
+    fn state(&self, id: &str) -> Option<State> {
+        self.with(|i| i.book.get(id).copied())
+    }
+
+    fn open_ids(&self) -> Vec<String> {
+        self.with(|i| {
+            i.book
+                .iter()
+                .filter(|(_, s)| **s == State::Open)
+                .map(|(id, _)| id.clone())
+                .collect()
+        })
     }
 }
 
@@ -225,6 +255,10 @@ fn state_with_workers() -> ClusterState {
 }
 
 fn rig_with(stamps: Stamps) -> Rig {
+    rig_notes(stamps, None)
+}
+
+fn rig_notes(stamps: Stamps, notes: Option<Arc<dyn Notes>>) -> Rig {
     let fake = Arc::new(Fake::default());
     fake.with(|i| {
         i.entry = Some(entry(Some(DAY), "t1"));
@@ -242,7 +276,7 @@ fn rig_with(stamps: Stamps) -> Rig {
             audit: fake.clone(),
             view: fake.clone(),
             online: fake.clone(),
-            notes: fake.clone(),
+            notes: notes.unwrap_or_else(|| fake.clone()),
         },
         stamps,
         Arc::new(move || read.load(Ordering::SeqCst)),
@@ -413,7 +447,7 @@ fn an_entry_that_has_expired_is_never_sent() {
 }
 
 #[test]
-fn a_refused_approval_waits_before_asking_again_and_a_changed_entry_asks_at_once() {
+fn a_denied_approval_is_not_asked_again_until_the_entry_changes() {
     let rig = rig();
     rig.only_worker();
     rig.fake.with(|i| {
@@ -423,15 +457,28 @@ fn a_refused_approval_waits_before_asking_again_and_a_changed_entry_asks_at_once
         ))
     });
     rig.deliverer.reconcile();
+    rig.pass(HOLD_MS * 100);
+    rig.pass(0);
+    rig.deliverer.reconcile();
+    assert_eq!(rig.fake.with(|i| i.releases), 1);
+    rig.fake.edit_entry(|e| e.updated = "t9".to_string());
+    rig.deliverer.reconcile();
+    assert_eq!(rig.fake.with(|i| i.releases), 2);
+    assert!(rig.fake.sends().is_empty());
+}
+
+#[test]
+fn another_refusal_waits_ten_minutes_before_asking_again() {
+    let rig = rig();
+    rig.only_worker();
+    rig.fake
+        .with(|i| i.release_err = Some(ApiError::new(ErrorCode::Failed, "the vault is busy")));
+    rig.deliverer.reconcile();
     rig.deliverer.reconcile();
     assert_eq!(rig.fake.with(|i| i.releases), 1);
     rig.pass(HOLD_MS + 1);
     rig.deliverer.reconcile();
     assert_eq!(rig.fake.with(|i| i.releases), 2);
-    rig.fake.edit_entry(|e| e.updated = "t9".to_string());
-    rig.deliverer.reconcile();
-    assert_eq!(rig.fake.with(|i| i.releases), 3);
-    assert!(rig.fake.sends().is_empty());
 }
 
 #[test]
@@ -622,4 +669,184 @@ fn every_eligible_node_gets_the_login_op_and_nothing_else() {
     }
     let nodes: BTreeSet<NodeId> = rig.fake.sends().into_iter().map(|s| s.0).collect();
     assert_eq!(nodes, [id("worker"), id("other")].into_iter().collect());
+}
+
+fn stamped(rig: &Rig) {
+    rig.only_worker();
+    rig.deliverer.reconcile();
+    assert_eq!(rig.fake.sends().len(), 1);
+}
+
+fn revokes(rig: &Rig) -> usize {
+    rig.fake
+        .sends()
+        .iter()
+        .filter(|s| s.1 == LOGIN_REVOKE)
+        .count()
+}
+
+#[test]
+fn taking_the_entry_off_the_allowlist_revokes_the_login_once() {
+    let rig = rig();
+    stamped(&rig);
+    rig.fake.edit_state(|s| {
+        s.members.get_mut(&id("worker")).unwrap().secrets =
+            SecretAllow::new(["other".to_string()], false);
+    });
+    rig.deliverer.reconcile();
+    assert_eq!(revokes(&rig), 1);
+    rig.deliverer.reconcile();
+    assert_eq!(revokes(&rig), 1);
+}
+
+#[test]
+fn deleting_the_entry_or_letting_it_expire_revokes_the_login() {
+    let rig = rig();
+    stamped(&rig);
+    rig.fake.with(|i| i.entry = None);
+    rig.deliverer.reconcile();
+    assert_eq!(revokes(&rig), 1);
+    let rig = self::rig();
+    stamped(&rig);
+    rig.pass(60 * DAY_MS);
+    rig.deliverer.reconcile();
+    assert_eq!(revokes(&rig), 1);
+}
+
+#[test]
+fn a_revoke_waits_for_the_node_and_a_removed_node_is_forgotten_without_one() {
+    let rig = rig();
+    stamped(&rig);
+    rig.fake.with(|i| i.entry = None);
+    rig.fake.with(|i| i.online.clear());
+    rig.deliverer.reconcile();
+    assert_eq!(revokes(&rig), 0);
+    rig.fake.with(|i| i.online.insert(id("worker")));
+    rig.deliverer.reconcile();
+    assert_eq!(revokes(&rig), 1);
+    let removed = self::rig();
+    stamped(&removed);
+    removed.fake.edit_state(|s| {
+        s.members.get_mut(&id("worker")).unwrap().state = MemberState::Removed;
+    });
+    removed.deliverer.reconcile();
+    removed.deliverer.reconcile();
+    assert_eq!(revokes(&removed), 0);
+}
+
+#[test]
+fn a_node_that_stays_eligible_is_never_revoked() {
+    let rig = rig();
+    stamped(&rig);
+    rig.deliverer.reconcile();
+    rig.pass(RESEND_MS * 3);
+    rig.fake.edit_state(|s| {
+        s.members.get_mut(&id("worker")).unwrap().versions = Some(versions(true, true));
+    });
+    rig.deliverer.reconcile();
+    assert_eq!(revokes(&rig), 0);
+}
+
+#[test]
+fn a_brief_flap_of_eligibility_keeps_the_notice_and_does_not_double_it() {
+    let rig = rig();
+    rig.only_worker();
+    rig.clock.store(noon("2026-12-20"), Ordering::SeqCst);
+    rig.deliverer.reconcile();
+    assert_eq!(rig.fake.with(|i| i.raised.len()), 1);
+    rig.fake.edit_state(|s| {
+        s.members.get_mut(&id("worker")).unwrap().versions = None;
+    });
+    rig.deliverer.reconcile();
+    assert!(rig.fake.with(|i| i.withdrawn.is_empty()));
+    rig.fake.edit_state(|s| {
+        s.members.get_mut(&id("worker")).unwrap().versions = Some(versions(true, false));
+    });
+    rig.deliverer.reconcile();
+    assert_eq!(rig.fake.with(|i| i.raised.len()), 1);
+    assert_eq!(rig.fake.open_ids().len(), 1);
+}
+
+#[test]
+fn deleting_the_entry_withdraws_its_open_notices() {
+    let rig = rig();
+    rig.only_worker();
+    rig.clock.store(noon("2026-12-20"), Ordering::SeqCst);
+    rig.deliverer.reconcile();
+    assert_eq!(rig.fake.open_ids().len(), 1);
+    rig.fake.with(|i| i.entry = None);
+    rig.deliverer.reconcile();
+    assert!(rig.fake.open_ids().is_empty());
+    assert_eq!(rig.fake.with(|i| i.withdrawn.len()), 1);
+}
+
+#[test]
+fn no_expiry_notice_needs_an_eligible_worker() {
+    let rig = rig();
+    rig.fake.edit_entry(|e| e.expires = None);
+    rig.fake.edit_state(|s| {
+        s.members.remove(&id("worker"));
+        s.members.remove(&id("other"));
+    });
+    rig.deliverer.reconcile();
+    assert!(rig.fake.with(|i| i.raised.is_empty()));
+}
+
+#[test]
+fn the_notices_survive_a_restart_that_withdraws_open_items() {
+    use crate::acting_ops_tests::FakeRoom;
+    use crate::inbox_ops::InboxOps;
+    let dir = Dir::new("login-notes-restart");
+    let open = |at: i64| {
+        let ops = InboxOps::with_clock(
+            dir.path().to_path_buf(),
+            Arc::new(FakeRoom::default()),
+            Arc::new(move || at),
+        );
+        ops.load();
+        ops
+    };
+    let first = open(1_000);
+    let rig = rig_notes(Stamps::in_memory(), Some(first.clone()));
+    rig.only_worker();
+    rig.clock.store(noon("2026-12-20"), Ordering::SeqCst);
+    rig.deliverer.reconcile();
+    assert_eq!(first.open_ids().len(), 1);
+    first.flush();
+    let second = open(2_000);
+    assert!(
+        second.open_ids().is_empty(),
+        "the load withdraws open items"
+    );
+    let rig = rig_notes(Stamps::in_memory(), Some(second.clone()));
+    rig.only_worker();
+    rig.clock.store(noon("2026-12-20"), Ordering::SeqCst);
+    rig.deliverer.reconcile();
+    rig.deliverer.reconcile();
+    let open_now = second.open_ids();
+    assert_eq!(open_now.len(), 1, "{open_now:?}");
+    assert!(open_now[0].ends_with("#2"), "{open_now:?}");
+}
+
+#[test]
+fn a_notice_the_user_marked_done_is_not_raised_again_after_a_restart() {
+    use crate::acting_ops_tests::FakeRoom;
+    use crate::inbox_ops::InboxOps;
+    let dir = Dir::new("login-notes-done");
+    let ops = InboxOps::with_clock(
+        dir.path().to_path_buf(),
+        Arc::new(FakeRoom::default()),
+        Arc::new(|| 1_000),
+    );
+    let rig = rig_notes(Stamps::in_memory(), Some(ops.clone()));
+    rig.only_worker();
+    rig.clock.store(noon("2026-12-20"), Ordering::SeqCst);
+    rig.deliverer.reconcile();
+    let id_open = ops.open_ids().remove(0);
+    ops.resolve(&id_open, State::Answered, Some(ActionId::Done), Some("app"));
+    let again = rig_notes(Stamps::in_memory(), Some(ops.clone()));
+    again.only_worker();
+    again.clock.store(noon("2026-12-20"), Ordering::SeqCst);
+    again.deliverer.reconcile();
+    assert!(ops.open_ids().is_empty());
 }

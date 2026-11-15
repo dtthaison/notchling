@@ -161,6 +161,7 @@ fn every_rule_names_a_known_op() {
         "grant.revoke",
         "grant.request",
         "login.deliver",
+        "login.revoke",
         "node.inbox",
     ];
     let wire = std::fs::read_to_string(concat!(

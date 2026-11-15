@@ -90,3 +90,41 @@ fn a_node_that_is_also_an_sd_worker_keeps_the_claude_env_step() {
     let (script, _) = remote(&step(&m, &StepId::CLAUDE_LOGIN));
     assert!(script.contains("claude.env"));
 }
+
+#[test]
+fn a_node_only_worker_has_no_claude_env_usage_and_an_sd_worker_node_keeps_it() {
+    let only = node_only();
+    assert!(super::steps_secret::usages(std::slice::from_ref(&only))
+        .iter()
+        .all(|u| u.remote_path != super::shell::CLAUDE_ENV));
+    let both = node_linux();
+    assert!(super::steps_secret::usages(std::slice::from_ref(&both))
+        .iter()
+        .any(|u| u.remote_path == super::shell::CLAUDE_ENV));
+}
+
+#[test]
+fn the_how_to_names_the_cluster_entry_the_allowlist_and_a_differing_secret() {
+    let mut m = node_only();
+    m.claude_secret = "my-own-claude".to_string();
+    let found = step(&m, &StepId::CLAUDE_LOGIN);
+    match &found.fix {
+        StepFix::HowTo(text) => {
+            assert!(
+                text.contains("claude-worker") && text.contains("expiry"),
+                "{text}"
+            );
+            assert!(text.contains("allow it on this machine"), "{text}");
+            assert!(
+                text.contains("my-own-claude") && text.contains("only"),
+                "{text}"
+            );
+        }
+        _ => panic!("a how-to"),
+    }
+    let same = node_only();
+    match &step(&same, &StepId::CLAUDE_LOGIN).fix {
+        StepFix::HowTo(text) => assert!(!text.contains("isn't used"), "{text}"),
+        _ => panic!("a how-to"),
+    }
+}
