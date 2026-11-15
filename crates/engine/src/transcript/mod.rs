@@ -8,6 +8,7 @@ pub mod errors;
 pub mod finished;
 pub mod glance;
 pub mod locate;
+pub mod message;
 pub mod model;
 pub mod restart;
 pub mod scan;

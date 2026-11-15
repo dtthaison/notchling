@@ -1,0 +1,12 @@
+{"type":"queue-operation","operation":"enqueue","timestamp":"2026-11-15T10:00:10.000Z","sessionId":"s-1","content":"hi"}
+{"type":"queue-operation","operation":"enqueue","timestamp":"2026-11-15T10:00:10.200Z","sessionId":"s-1","content":"hi"}
+{"type":"system","subtype":"stop_hook_summary","timestamp":"2026-11-15T10:00:11.000Z","sessionId":"s-1"}
+{"type":"queue-operation","operation":"dequeue","timestamp":"2026-11-15T10:00:12.500Z","sessionId":"s-1"}
+{"type":"queue-operation","operation":"dequeue","timestamp":"2026-11-15T10:00:12.500Z","sessionId":"s-1"}
+{"type":"user","message":{"role":"user","content":"hi\nhi"},"uuid":"u","timestamp":"2026-11-15T10:00:12.600Z","sessionId":"s-1","cwd":"/work/demo"}
+{"type":"assistant","message":{"id":"m","model":"claude-opus-5-5","role":"assistant","content":[{"type":"text","text":"Hello."}]},"uuid":"a","timestamp":"2026-11-15T10:00:20.000Z","sessionId":"s-1"}
+{"type":"queue-operation","operation":"enqueue","timestamp":"2026-11-15T10:00:30.000Z","sessionId":"s-1","content":"a"}
+{"type":"queue-operation","operation":"enqueue","timestamp":"2026-11-15T10:00:30.100Z","sessionId":"s-1","content":"b"}
+{"type":"queue-operation","operation":"dequeue","timestamp":"2026-11-15T10:00:31.000Z","sessionId":"s-1"}
+{"type":"queue-operation","operation":"dequeue","timestamp":"2026-11-15T10:00:31.000Z","sessionId":"s-1"}
+{"type":"user","message":{"role":"user","content":"a\nb"},"uuid":"u","timestamp":"2026-11-15T10:00:31.100Z","sessionId":"s-1","cwd":"/work/demo"}

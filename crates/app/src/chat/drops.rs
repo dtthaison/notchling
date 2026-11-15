@@ -1,6 +1,9 @@
 use std::path::{Path, PathBuf};
 
+use notchling_engine::transcript::message::{image_spans, split_pictures};
 use notchling_kit::text_edit::TextEdit;
+
+pub use notchling_engine::transcript::message::is_image;
 
 pub fn quoted(path: &Path) -> String {
     let text = path.to_string_lossy();
@@ -78,77 +81,6 @@ pub fn paths_text(paths: &[impl AsRef<Path>]) -> String {
         .join(" ")
 }
 
-const IMAGE_KINDS: [&str; 8] = [
-    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".heic", ".tiff", ".bmp",
-];
-
-pub fn is_image(path: &Path) -> bool {
-    let lower = path.to_string_lossy().to_lowercase();
-    IMAGE_KINDS.iter().any(|k| lower.ends_with(k))
-}
-
-fn image_spans(text: &str) -> Vec<(std::ops::Range<usize>, PathBuf)> {
-    let mut out = Vec::new();
-    let mut keep = |word: &mut String, from: usize, to: usize, bare_end: bool| {
-        let mut to = to;
-        if bare_end {
-            while let Some(c) = word.chars().last().filter(|c| ",.;:!?)".contains(*c)) {
-                word.pop();
-                to -= c.len_utf8();
-            }
-        }
-        let path = PathBuf::from(word.as_str());
-        if word.starts_with('/') && is_image(&path) {
-            out.push((from..to, path));
-        }
-        word.clear();
-    };
-    let mut word = String::new();
-    let mut from: Option<usize> = None;
-    let mut bare = false;
-    let mut chars = text.char_indices();
-    while let Some((at, c)) = chars.next() {
-        if !c.is_whitespace() && from.is_none() {
-            from = Some(at);
-        }
-        match c {
-            '\'' => {
-                let mut closed = false;
-                for (_, q) in chars.by_ref() {
-                    if q == '\'' {
-                        closed = true;
-                        break;
-                    }
-                    word.push(q);
-                }
-                if !closed {
-                    return out;
-                }
-                bare = false;
-            }
-            '\\' => {
-                if let Some((_, next)) = chars.next() {
-                    word.push(next);
-                }
-                bare = false;
-            }
-            c if c.is_whitespace() => {
-                if let Some(start) = from.take() {
-                    keep(&mut word, start, at, bare);
-                }
-            }
-            c => {
-                word.push(c);
-                bare = true;
-            }
-        }
-    }
-    if let Some(start) = from {
-        keep(&mut word, start, text.len(), bare);
-    }
-    out
-}
-
 pub fn image_words(text: &str) -> Vec<PathBuf> {
     let mut out: Vec<PathBuf> = Vec::new();
     for (_, path) in image_spans(text) {
@@ -160,51 +92,7 @@ pub fn image_words(text: &str) -> Vec<PathBuf> {
 }
 
 pub fn split_images(text: &str, exists: impl Fn(&Path) -> bool) -> (String, Vec<PathBuf>) {
-    let mut words = String::new();
-    let mut pictures: Vec<PathBuf> = Vec::new();
-    let mut at = 0;
-    for (range, path) in image_spans(text) {
-        if !exists(&path) {
-            continue;
-        }
-        let mut before = &text[at..range.start];
-        let mut end = range.end;
-        if let Some(cut) = before.strip_suffix(' ') {
-            before = cut;
-        } else if text[end..].starts_with(' ') {
-            end += 1;
-        }
-        words.push_str(before);
-        at = end;
-        if !pictures.contains(&path) {
-            pictures.push(path);
-        }
-    }
-    words.push_str(&text[at..]);
-    if !pictures.is_empty() {
-        words = one_blank_line_at_most(&words);
-    }
-    (words.trim().to_owned(), pictures)
-}
-
-fn one_blank_line_at_most(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    let mut blanks = 0;
-    for (i, line) in text.split('\n').enumerate() {
-        if line.trim().is_empty() {
-            blanks += 1;
-            if blanks > 1 {
-                continue;
-            }
-        } else {
-            blanks = 0;
-        }
-        if i > 0 {
-            out.push('\n');
-        }
-        out.push_str(line);
-    }
-    out
+    split_pictures(text, exists)
 }
 
 pub fn with_attachments(text: &str, files: &[PathBuf]) -> String {
