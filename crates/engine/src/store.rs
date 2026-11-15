@@ -6,7 +6,7 @@ use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
 
 pub const DB_NAME: &str = "notchling.db";
 
-const SCHEMA: i64 = 3;
+const SCHEMA: i64 = 4;
 
 const BUSY: Duration = Duration::from_secs(5);
 
@@ -96,7 +96,7 @@ fn private(_path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn migrate(db: &Connection) -> Result<(), String> {
+pub(crate) fn migrate(db: &Connection) -> Result<(), String> {
     let version: i64 = db
         .pragma_query_value(None, "user_version", |r| r.get(0))
         .map_err(|e| e.to_string())?;
@@ -113,7 +113,30 @@ fn migrate(db: &Connection) -> Result<(), String> {
          CREATE TABLE IF NOT EXISTS docs (name TEXT PRIMARY KEY, value TEXT NOT NULL);
          CREATE TABLE IF NOT EXISTS inbox (
              id TEXT PRIMARY KEY, value TEXT NOT NULL, updated_ms INTEGER NOT NULL);
-         PRAGMA user_version = 3;
+         CREATE TABLE IF NOT EXISTS outbox (
+             n INTEGER PRIMARY KEY AUTOINCREMENT,
+             id TEXT NOT NULL UNIQUE,
+             session TEXT NOT NULL,
+             tool TEXT NOT NULL,
+             kind TEXT NOT NULL,
+             text TEXT NOT NULL,
+             options TEXT,
+             via TEXT NOT NULL,
+             state TEXT NOT NULL,
+             why TEXT,
+             clear_box INTEGER NOT NULL DEFAULT 0,
+             queued_ms INTEGER NOT NULL,
+             updated_ms INTEGER NOT NULL,
+             attempt_ms INTEGER,
+             seen_before INTEGER,
+             queued_before INTEGER,
+             tries INTEGER NOT NULL DEFAULT 0,
+             next_ms INTEGER,
+             noticed_ms INTEGER
+         );
+         CREATE INDEX IF NOT EXISTS outbox_session ON outbox(session, n);
+         CREATE INDEX IF NOT EXISTS outbox_age ON outbox(queued_ms);
+         PRAGMA user_version = 4;
          COMMIT;",
         )
     })

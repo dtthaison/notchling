@@ -6,6 +6,12 @@ use serde_json::Value;
 
 const EDGE_CHARS: usize = 40;
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Seen {
+    pub enqueued: usize,
+    pub taken: usize,
+}
+
 fn squeezed(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
