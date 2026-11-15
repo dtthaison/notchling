@@ -4,6 +4,7 @@ use super::persist::CLUSTER_DIR;
 
 pub const MAX_COMMAND: usize = 64 * 1024;
 pub const ENV_PREFIXES: [&str; 2] = ["NOTCHLING_", "CLAUDE_CODE_"];
+pub const SECRETS_LATER: &str = "Secrets for jobs on another machine come in a later version";
 pub const CODEX_LATER: &str = "Codex jobs on another machine come in a later version";
 pub const JOBS_DIR: &str = "jobs";
 const MAX_JOB: usize = 64;

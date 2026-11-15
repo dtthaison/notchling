@@ -222,17 +222,23 @@ pub fn run_machine(args: &[String]) -> Option<i32> {
     let (machine, rest) = match take_machine(args) {
         Ok(taken) => taken,
         Err(e) => {
-            eprintln!("{}", e.message);
+            let _ = writeln!(std::io::stderr(), "{}", e.message);
             return Some(2);
         }
     };
     let machine = machine?;
     let Some(layout) = Layout::from_env(None) else {
-        eprintln!("notchling: no home folder in the environment");
+        let _ = writeln!(
+            std::io::stderr(),
+            "notchling: no home folder in the environment"
+        );
         return Some(2);
     };
     let Ok(cwd) = std::env::current_dir() else {
-        eprintln!("notchling: can't tell which folder this runs in");
+        let _ = writeln!(
+            std::io::stderr(),
+            "notchling: can't tell which folder this runs in"
+        );
         return Some(2);
     };
     let home = notchling_platform::paths::home().unwrap_or_else(|| layout.home());
@@ -240,7 +246,7 @@ pub fn run_machine(args: &[String]) -> Option<i32> {
         match Client::connect(&layout.socket, ClientKind::Cli, env!("CARGO_PKG_VERSION")) {
             Ok(client) => client,
             Err(e) => {
-                eprintln!("notchling: {e}");
+                let _ = writeln!(std::io::stderr(), "notchling: {e}");
                 return Some(2);
             }
         };

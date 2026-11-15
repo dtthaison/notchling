@@ -4,7 +4,7 @@ use super::{Effect, NodeCore, Target, Then, CALL_MS, DELEGATE_CALL_MS};
 use crate::cluster::id::{NodeId, Tool};
 use crate::cluster::jobs::{job_id, Job, JobSpec, JobState};
 use crate::cluster::members::MemberState;
-use crate::cluster::shell_job::CODEX_LATER;
+use crate::cluster::shell_job::{CODEX_LATER, SECRETS_LATER};
 use crate::cluster::state::Command;
 use crate::cluster::versions::{compat, Compat, Purpose, Versions};
 use crate::cluster::wire::{Origin, OriginTier, WireError};
@@ -49,6 +49,10 @@ impl NodeCore {
                 None => refusal("no_cluster", "this node is in no cluster"),
             };
             self.finish(target, Err(err), out);
+            return;
+        }
+        if let Err(e) = check_spec(&spec) {
+            self.finish(target, Err(e), out);
             return;
         }
         if tier != OriginTier::App && !spec.is_delegate() {
@@ -150,7 +154,11 @@ impl NodeCore {
             };
             ("delegate.run", origin, DELEGATE_CALL_MS)
         } else {
-            (Self::tool_op(spec.tool), self.node_origin(), CALL_MS)
+            let origin = Origin {
+                node: self.me.clone(),
+                tier: OriginTier::App,
+            };
+            (Self::tool_op(spec.tool), origin, CALL_MS)
         };
         let args = start_args(&spec, &job);
         let then = Then::Dispatch {
@@ -246,6 +254,7 @@ impl NodeCore {
         let delegate = found.is_some_and(|j| j.spec.is_delegate());
         let node = found.map(|j| j.spec.node.clone());
         let current = found.map(|j| j.state);
+        let has_session = found.is_some_and(|j| j.session.is_some());
         let reply = match result {
             Ok(reply) => reply,
             Err(e) => {
@@ -271,6 +280,14 @@ impl NodeCore {
                 state: JobState::Running,
                 session: session.clone(),
                 detail: warning.clone(),
+            };
+            let _ = self.apply(command, out);
+        } else if let (Some(state), Some(session), false) = (current, &session, has_session) {
+            let command = Command::JobState {
+                id: job.clone(),
+                state,
+                session: Some(session.clone()),
+                detail: None,
             };
             let _ = self.apply(command, out);
         }
@@ -326,6 +343,19 @@ fn job_reply(job: &Job, warning: Option<&str>) -> Value {
         "session": job.session,
         "warning": warning.or(job.detail.as_deref()),
     })
+}
+
+fn check_spec(spec: &JobSpec) -> Result<(), WireError> {
+    if !spec.secrets.is_empty() {
+        return Err(refusal("refused", SECRETS_LATER));
+    }
+    if spec.args.get("delegate").is_some() && !(spec.is_delegate() && spec.tool == Tool::Agy) {
+        return Err(refusal(
+            "bad_args",
+            "a delegate job runs on Antigravity only",
+        ));
+    }
+    Ok(())
 }
 
 fn start_args(spec: &JobSpec, job: &str) -> Value {

@@ -514,3 +514,113 @@ fn the_homes_own_job_hears_its_local_event() {
     );
     assert_eq!(state_of(&hub, &m5, "own"), JobState::Done);
 }
+
+fn refusal_to(hub: &Hub, who: &str) -> Result<Value, WireError> {
+    hub.seen
+        .iter()
+        .rev()
+        .find_map(|(n, e)| match e {
+            Effect::Answer { result, .. } if n == who => Some(result.clone()),
+            _ => None,
+        })
+        .expect("an answer")
+}
+
+#[test]
+fn a_tool_start_is_sent_with_the_app_origin() {
+    let (mut hub, m5, _w1) = pair();
+    hub.local(
+        &m5,
+        dispatch_as(
+            "k",
+            spec("w1", Tool::Shell, json!({"command": "printf ok"})),
+            OriginTier::App,
+        ),
+    );
+    let sent = hub
+        .seen
+        .iter()
+        .find_map(|(n, e)| match e {
+            Effect::Send {
+                msg: Msg::Call { op, origin, .. },
+                ..
+            } if n == "m5" && op == "shell.run" => Some(origin.clone()),
+            _ => None,
+        })
+        .expect("the call");
+    assert_eq!(
+        sent,
+        Origin {
+            node: m5.clone(),
+            tier: OriginTier::App
+        }
+    );
+}
+
+#[test]
+fn the_core_refuses_secrets_from_the_home_and_from_a_peer() {
+    let (mut hub, m5, _w1) = pair();
+    let mut with = spec("w1", Tool::Shell, json!({"command": "id"}));
+    with.secrets = vec!["gh".to_string()];
+    let effects = hub.local(&m5, dispatch_as("s", with.clone(), OriginTier::App));
+    assert!(matches!(
+        answers(&effects)[0],
+        Err(e) if e.message == "Secrets for jobs on another machine come in a later version"
+    ));
+    assert!(hub.core(&m5).state().expect("state").jobs.is_empty());
+
+    let mut hub = Hub::new();
+    let m5 = hub.add("m5", "macos", true);
+    let m1 = hub.add("m1", "macos", true);
+    let w1 = hub.add("w1", "linux", false);
+    hub.create("m5");
+    hub.join_as("m5", "m1", "macos", true, true);
+    hub.join("m5", "w1", "linux", false);
+    hub.link(&m1, &w1);
+    hub.local(&m1, dispatch_as("s", with, OriginTier::App));
+    let reply = refusal_to(&hub, "m1");
+    assert!(
+        matches!(&reply, Err(e) if e.message == "Secrets for jobs on another machine come in a later version"),
+        "{reply:?}"
+    );
+    assert!(hub.core(&m5).state().expect("state").jobs.is_empty());
+}
+
+#[test]
+fn a_delegate_array_needs_the_agy_tool() {
+    let (mut hub, m5, _w1) = pair();
+    for tool in [Tool::Shell, Tool::Claude] {
+        let mut odd = delegate_spec("w1");
+        odd.tool = tool;
+        let effects = hub.local(&m5, dispatch_as("odd", odd, OriginTier::App));
+        assert!(
+            matches!(answers(&effects)[0], Err(e) if e.code == "bad_args"),
+            "{tool:?}"
+        );
+    }
+    let not_a_list = spec("w1", Tool::Agy, json!({"delegate": "agy"}));
+    let effects = hub.local(&m5, dispatch_as("odd", not_a_list, OriginTier::App));
+    assert!(matches!(answers(&effects)[0], Err(e) if e.code == "bad_args"));
+    assert!(hub.core(&m5).state().expect("state").jobs.is_empty());
+}
+
+#[test]
+fn a_job_that_ended_before_its_start_reply_still_keeps_its_session() {
+    let (mut hub, m5, w1) = pair();
+    let call = shell_job(&mut hub, &m5, &w1);
+    hub.run(
+        &m5,
+        Input::Msg {
+            from: w1.clone(),
+            msg: job_event(&job_id("k"), "done"),
+        },
+    );
+    started(&mut hub, &w1, call);
+    let job = &hub.core(&m5).state().expect("state").jobs[&job_id("k")];
+    assert_eq!(job.state, JobState::Done);
+    assert_eq!(job.session.as_deref(), Some("shell:j"));
+    let listed = hub.core(&m5).status()["jobs"][0].clone();
+    assert_eq!(listed["state"], "done");
+    assert_eq!(listed["session"], "shell:j");
+    assert_eq!(listed["qualified"], json!(format!("{w1}/shell:j")));
+}

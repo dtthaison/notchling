@@ -1,15 +1,18 @@
 use super::{build, DispatchCalls, DispatchOps, NodeReporter};
 use crate::acting_ops_tests::app;
+use crate::acting_ops_tests::FakeRoom;
 use crate::cluster_dispatch_delegate::DelegateRunner;
 use crate::cluster_node::LocalCalls;
+use crate::cluster_switches::LateHandler;
 use crate::cluster_testkit::{eventually, member, online, pair, Dir, FakeCalls, Opts, TestNode};
+use crate::cluster_wiring::DaemonCalls;
 use crate::op_group::OpGroup;
 use crate::shell_jobs::{Reporter, ShellJobs};
 use notchling_cluster_net::MemNet;
 use notchling_engine::cluster::wire::{Origin, OriginTier};
 use notchling_engine::cluster::LocalCmd;
 use notchling_engine::versions::Tool as VTool;
-use notchling_local_api::{ApiError, Caller, ClientKind, ErrorCode, Tier};
+use notchling_local_api::{ApiError, Caller, ClientKind, ErrorCode, Handler, OpSpec, Tier};
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
 
@@ -74,7 +77,7 @@ fn dispatch_on_home_starts_session_on_worker() {
         calls[0].2,
         Origin {
             node: a.id(),
-            tier: OriginTier::Node
+            tier: OriginTier::App
         }
     );
 }
@@ -445,4 +448,75 @@ fn shell_stop_with_an_id_of_this_node_stops_the_local_job() {
 fn the_reporter_says_nothing_until_it_has_a_node() {
     let lonely = NodeReporter::default();
     lonely.report("j-1", notchling_engine::cluster::JobState::Done, None);
+}
+
+struct Starts(Mutex<Vec<(String, Tier, ClientKind)>>);
+
+impl Handler for Starts {
+    fn spec(&self, op: &str) -> Option<OpSpec> {
+        matches!(op, "session.new" | "agy.send").then_some(OpSpec::APP)
+    }
+
+    fn call(&self, caller: &Caller, op: &str, _args: &Value) -> Result<Value, ApiError> {
+        self.0
+            .lock()
+            .unwrap()
+            .push((op.to_string(), caller.tier, caller.client));
+        Ok(match op {
+            "session.new" => json!({"jobId": "c1"}),
+            _ => json!({"id": "agy:x", "sent": true}),
+        })
+    }
+}
+
+fn real_calls() -> (Arc<dyn LocalCalls>, Arc<Starts>, Arc<dyn Handler>) {
+    let starts = Arc::new(Starts(Mutex::new(Vec::new())));
+    let handler: Arc<dyn Handler> = starts.clone();
+    let late = Arc::new(LateHandler::default());
+    late.serve(&handler);
+    let calls: Arc<dyn LocalCalls> = DaemonCalls::new(late, Arc::new(FakeRoom::default()));
+    (calls, starts, handler)
+}
+
+#[test]
+fn a_home_dispatch_of_claude_and_agy_reaches_the_op_on_a_peer_and_on_the_home() {
+    let net = MemNet::new();
+    let (home_calls, home_starts, _keep_home) = real_calls();
+    let (worker_calls, worker_starts, _keep_worker) = real_calls();
+    let mut home = home_opts(&BOTH);
+    home.local = Some(home_calls);
+    let mut worker = worker_opts("macos", &BOTH);
+    worker.local = Some(worker_calls);
+    let (a, b) = pair(&net, home, worker);
+    let (ops, _dir) = ops_of(&a);
+    let agy = |node: &TestNode, key: &str| json!({"node": node.id(), "tool": "agy", "cwd": "/srv", "text": "hi", "key": key});
+    for (target, starts, tag) in [(&b, &worker_starts, "peer"), (&a, &home_starts, "home")] {
+        let claude = dispatch(&ops, &app(), claude_args(target, &format!("c-{tag}")));
+        let claude = claude.unwrap_or_else(|e| panic!("{tag}: {}", e.message));
+        assert_eq!(claude["session"], "c1", "{tag}");
+        let sent = dispatch(&ops, &app(), agy(target, &format!("a-{tag}")));
+        let sent = sent.unwrap_or_else(|e| panic!("{tag}: {}", e.message));
+        assert_eq!(sent["session"], "agy:x", "{tag}");
+        let seen = starts.0.lock().unwrap();
+        let ops_seen: Vec<&str> = seen.iter().map(|(op, _, _)| op.as_str()).collect();
+        assert_eq!(ops_seen, ["session.new", "agy.send"], "{tag}");
+        assert!(
+            seen.iter()
+                .all(|(_, tier, client)| *tier == Tier::App && *client == ClientKind::Node),
+            "{tag}"
+        );
+    }
+}
+
+#[test]
+fn an_agent_still_cannot_send_a_session_start_through_the_real_path() {
+    let net = MemNet::new();
+    let (worker_calls, worker_starts, _keep) = real_calls();
+    let mut worker = worker_opts("macos", &BOTH);
+    worker.local = Some(worker_calls);
+    let (a, b) = pair(&net, home_opts(&BOTH), worker);
+    let (ops, _dir) = ops_of(&a);
+    let err = dispatch(&ops, &agent(), claude_args(&b, "ag")).unwrap_err();
+    assert_eq!(err.code, ErrorCode::Forbidden);
+    assert!(worker_starts.0.lock().unwrap().is_empty());
 }

@@ -4,7 +4,7 @@ use crate::cluster_node::{ClusterNode, LocalCalls, DELEGATE_WAIT, LOCAL_WAIT};
 use crate::op_group::OpGroup;
 use crate::shell_jobs::{Reporter, ShellJobs};
 use notchling_engine::cluster::core::CALL_MS;
-use notchling_engine::cluster::shell_job::{CODEX_LATER, MAX_COMMAND};
+use notchling_engine::cluster::shell_job::{CODEX_LATER, MAX_COMMAND, SECRETS_LATER};
 use notchling_engine::cluster::wire::{Origin, OriginTier};
 use notchling_engine::cluster::{JobSpec, JobState, LocalCmd, NodeId, Qualified, Tool};
 use notchling_local_api::{ops, ApiError, Caller, ErrorCode, OpSpec, Tier};
@@ -15,7 +15,6 @@ use std::time::Duration;
 pub const NODE_SHELL_RUN: &str = "shell.run";
 pub const NODE_DELEGATE_RUN: &str = "delegate.run";
 pub const NODE_OPS: [&str; 2] = [NODE_SHELL_RUN, NODE_DELEGATE_RUN];
-pub const SECRETS_LATER: &str = "Secrets for jobs on another machine come in a later version";
 pub const JOBS_TOPIC: &str = "jobs";
 pub const JOB_STATE: &str = "job.state";
 
