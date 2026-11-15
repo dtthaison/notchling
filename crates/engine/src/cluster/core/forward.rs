@@ -1,5 +1,6 @@
 use serde_json::{json, Value};
 
+use super::link::clean_reason;
 use super::{Effect, NodeCore, OutCall, Seen, Target, Then, CALL_MS, DEDUPE_MS, WORKSPACE_CALL_MS};
 use crate::cluster::id::NodeId;
 use crate::cluster::members::Term;
@@ -139,7 +140,7 @@ impl NodeCore {
             let err = self.stale_error();
             out.push(self.publish(
                 "cluster.refused",
-                json!({"from": from, "op": op, "reason": "stale_term"}),
+                json!({"from": from, "op": clean_reason(&op), "reason": "stale_term"}),
             ));
             self.reply(&from, id, Err(err), out);
             return;
@@ -212,7 +213,7 @@ impl NodeCore {
     fn refused_call(&mut self, from: &NodeId, id: u64, op: &str, why: &str, out: &mut Vec<Effect>) {
         out.push(self.publish(
             "cluster.refused",
-            json!({"from": from, "op": op, "reason": why}),
+            json!({"from": from, "op": clean_reason(op), "reason": why}),
         ));
         self.reply(from, id, Err(WireError::new("forbidden", why)), out);
     }
@@ -249,7 +250,10 @@ impl NodeCore {
                         }
                     }
                 }
-                Err(e)
+                Err(WireError::new(
+                    &clean_reason(&e.code),
+                    clean_reason(&e.message),
+                ))
             }
             None => Ok(ok.unwrap_or(Value::Null)),
         };

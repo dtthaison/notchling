@@ -449,11 +449,26 @@ impl NodeCore {
     }
 }
 
-fn clean_reason(text: &str) -> String {
+pub(super) fn clean_reason(text: &str) -> String {
     text.chars()
         .take(REASON_MAX)
-        .map(|c| if c.is_control() { ' ' } else { c })
+        .map(|c| if c.is_control() || unseen(c) { ' ' } else { c })
         .collect()
+}
+
+fn unseen(c: char) -> bool {
+    matches!(
+        c,
+        '\u{ad}'
+            | '\u{61c}'
+            | '\u{180e}'
+            | '\u{200b}'..='\u{200f}'
+            | '\u{202a}'..='\u{202e}'
+            | '\u{2060}'..='\u{2064}'
+            | '\u{2066}'..='\u{206f}'
+            | '\u{feff}'
+            | '\u{fff9}'..='\u{fffb}'
+    )
 }
 
 fn would_dial(a: &Member, b: &NodeId, home: &NodeId) -> bool {
