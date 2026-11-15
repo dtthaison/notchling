@@ -272,13 +272,19 @@ from the app in this run, or `cluster.join` (below), or a restart of a headless 
 
 | Op | Tier | Args | Reply |
 | --- | --- | --- | --- |
-| `cluster.status` | agent | `{}` | `{cluster: {id, name, term, home, vault} \| null, me, members: [Member], link, listening, tailscale, error}` |
+| `cluster.status` | agent | `{}` | `{cluster: {id, name, term, home, vault} \| null, joining: {since, cluster, primary, answered} \| null, me, members: [Member], link, listening, tailscale, error}` |
 | `cluster.create` | app | `{name}` | the new cluster's state; this node is its home (primary) and reference |
 | `cluster.join.token` | agent | `{}` | `{token: "nlj1.…"}`, one use, 10 minutes; a non-home member asks its home |
 | `cluster.join` | agent | `{token}` | `{state: "pending" \| "joined"}` |
 | `cluster.member.set` | app | `{node, canBeMaster?, client?, reference?, acceptsDelegation?, headless?, desired?}` | the member as stored |
 | `cluster.remove` | app | `{node}` | the member as stored, `state: "removed"` |
 
+- `joining` (additive) is `null` unless this node's own `cluster.join` is in progress, then `{since, cluster,
+  primary, answered}`: `since` is the wall-clock ms when the join began, `cluster` the id from the token,
+  `primary` the node id of the home the token names, `answered` `false` until that home says the join waits for
+  approval, then `true`. `cluster` is `null` meanwhile; `joining` is back to `null` when the home approves,
+  denies or doesn't answer. The token itself is never in it. `cluster.changed` carries the same body, so it
+  fires when a join starts and when the home answers.
 - `Member` is `{id, name, role, canBeMaster, online, client, headless, reference, state, versions, load, desired,
   acceptsDelegation}`; `role` is `home`, `standby` or `worker`, `state` `pending`, `active` or `removed`,
   `load` `{cpu, memUsedMb, memTotalMb}` or `null`, `desired` `{acting, bridge, install}`.

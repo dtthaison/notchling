@@ -278,21 +278,21 @@ fn linger_off_needs_admin_fix() {
     let off = probe(
         &rig,
         &StepId::NODE_SERVICE,
-        "active=active\nlinger=Linger=no\n",
+        "active=active\nkillmode=KillMode=process\nlinger=Linger=no\n",
         0,
     );
     assert!(off.is_fail(), "{off:?}");
     let on = probe(
         &rig,
         &StepId::NODE_SERVICE,
-        "active=active\nlinger=Linger=yes\n",
+        "active=active\nkillmode=KillMode=process\nlinger=Linger=yes\n",
         0,
     );
     assert!(on.is_pass(), "{on:?}");
     assert!(probe(
         &rig,
         &StepId::NODE_SERVICE,
-        "active=inactive\nlinger=Linger=yes\n",
+        "active=inactive\nkillmode=KillMode=process\nlinger=Linger=yes\n",
         0
     )
     .is_fail());

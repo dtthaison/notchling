@@ -268,7 +268,7 @@ impl ClusterNode {
     pub fn status(&self) -> Value {
         let status = lock(&self.shared.status).clone();
         if status.is_null() {
-            return json!({"cluster": Value::Null, "me": self.me, "members": []});
+            return json!({"cluster": Value::Null, "joining": Value::Null, "me": self.me, "members": []});
         }
         status
     }

@@ -190,12 +190,12 @@ fn fix_displays_name_the_machine() {
     assert!(binary.contains("/usr/bin/scp -O -q -o BatchMode=yes -o ConnectTimeout=8 -- notchling-linux-x86_64 agent@w1.test:"));
     assert!(binary.contains("rm -f \"$HOME\"/'.local/bin/notchling.new'"));
     assert!(binary.contains("chmod 755"));
-    assert!(binary.contains("Work running on this machine stops"));
+    assert!(binary.contains("restarted service doesn't know"));
     assert!(binary.contains("XDG_RUNTIME_DIR"));
     assert!(!binary.contains('<'), "{binary}");
     let service = plan(&step(&rig.machine, &StepId::NODE_SERVICE)).display;
     assert!(service.contains("loginctl enable-linger 'agent'"));
-    assert!(service.contains("Work running on this machine stops"));
+    assert!(service.contains("restarted service doesn't know"));
     assert!(service.contains("mkdir -p"));
     assert!(service.contains("[ -S \"$XDG_RUNTIME_DIR/bus\" ]"));
     assert!(!service.contains("<user>"));

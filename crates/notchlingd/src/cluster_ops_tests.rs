@@ -91,6 +91,7 @@ fn a_node_that_could_not_start_says_why() {
         .unwrap();
     assert_eq!(status["cluster"], Value::Null);
     assert_eq!(status["error"], "no identity");
+    assert_eq!(status["joining"], Value::Null);
     let err = ops
         .call(
             &caller(Tier::App),

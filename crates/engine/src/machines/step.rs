@@ -120,6 +120,7 @@ pub struct Detected {
     pub sd_version: Option<String>,
     pub tools: Option<WorkerTools>,
     pub node: Option<String>,
+    pub notchling_app: Option<bool>,
 }
 
 impl Detected {
@@ -140,6 +141,7 @@ impl Detected {
         over(&mut d.sd_version, &new.sd_version);
         over(&mut d.tools, &new.tools);
         over(&mut d.node, &new.node);
+        over(&mut d.notchling_app, &new.notchling_app);
         d
     }
 }

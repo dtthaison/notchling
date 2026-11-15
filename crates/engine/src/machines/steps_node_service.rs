@@ -6,7 +6,7 @@ use super::step::{
 };
 use super::steps_machine::{cut, is_newline, trim_ws};
 use super::steps_node::{
-    first_text_line, machine_refusal, said, value_of, BINARY, LABEL, RUNTIME_DIR, UNIT,
+    first_text_line, machine_refusal, said, value_of, BINARY, LABEL, NOT_NEEDED, RUNTIME_DIR, UNIT,
 };
 use crate::lanes::quote;
 
@@ -22,8 +22,13 @@ const STATES: [&str; 8] = [
     "refreshing",
 ];
 
-pub(super) const STOPS_WORK: &str =
-    "Work running on this machine stops while the service restarts.";
+pub(super) fn stops_work(linux: bool) -> &'static str {
+    if linux {
+        "A restart leaves shell jobs and sessions running when the service file is up to date. The restarted service doesn't know the ones it started before."
+    } else {
+        "Work running on this machine stops while the service restarts."
+    }
+}
 
 pub(super) fn service(m: &Machine) -> SetupStep {
     let linux = m.is_linux();
@@ -44,7 +49,7 @@ pub(super) fn service(m: &Machine) -> SetupStep {
 
 fn linux_probe() -> String {
     format!(
-        "{RUNTIME_DIR}\necho \"active=$(systemctl --user is-active {UNIT} 2>&1 | head -1)\"\necho \"linger=$(loginctl show-user \"$(id -un)\" -p Linger 2>&1 | head -1)\""
+        "{RUNTIME_DIR}\necho \"active=$(systemctl --user is-active {UNIT} 2>&1 | head -1)\"\necho \"killmode=$(systemctl --user show {UNIT} -p KillMode 2>&1 | head -1)\"\necho \"linger=$(loginctl show-user \"$(id -un)\" -p Linger 2>&1 | head -1)\""
     )
 }
 
@@ -66,6 +71,15 @@ fn parse_linux(out: &RemoteOutput, _ctx: &StepContext) -> CheckResult {
     if active != "active" {
         return CheckResult::fail(format!("the service is {active}"));
     }
+    match value_of(&out.text, "killmode=") {
+        Some("KillMode=process") => {}
+        Some(mode) if mode.starts_with("KillMode=") => {
+            return CheckResult::fail("the service file is out of date");
+        }
+        _ => {
+            return CheckResult::cant_tell("the machine didn't say how the service restarts");
+        }
+    }
     let linger = value_of(&out.text, "linger=").unwrap_or("");
     if linger != "Linger=yes" {
         return CheckResult::fail(
@@ -75,7 +89,10 @@ fn parse_linux(out: &RemoteOutput, _ctx: &StepContext) -> CheckResult {
     CheckResult::pass("running, and it stays up after logout")
 }
 
-fn parse_mac(out: &RemoteOutput, _ctx: &StepContext) -> CheckResult {
+fn parse_mac(out: &RemoteOutput, ctx: &StepContext) -> CheckResult {
+    if ctx.machine.runs_app() {
+        return CheckResult::pass(NOT_NEEDED);
+    }
     let line = first_text_line(&out.text);
     if out.code == 0 && !line.is_empty() {
         return CheckResult::pass(line);
@@ -138,7 +155,8 @@ fn install_script() -> String {
 fn display(m: &Machine) -> String {
     let linux = m.is_linux();
     let head = format!(
-        "{STOPS_WORK}\nMake the folder the service logs to:\n{}\nWrite the service file as the worker user:\n{}",
+        "{}\nMake the folder the service logs to:\n{}\nWrite the service file as the worker user:\n{}",
+        stops_work(linux),
         log_folder_script(linux),
         install_script()
     );

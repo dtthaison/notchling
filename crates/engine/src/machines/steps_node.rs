@@ -18,6 +18,9 @@ pub const MAC_BUILD: &str = concat!("notchling ", env!("CARGO_PKG_VERSION"));
 
 pub(super) const BINARY: &str = "~/.local/bin/notchling";
 pub(super) const BINARY_NEW: &str = "~/.local/bin/notchling.new";
+pub(super) const APP_BINARY: &str = "/Applications/Notchling.app/Contents/MacOS/notchling";
+pub(super) const APP_DIR: &str = "/Applications/Notchling.app";
+pub(super) const NOT_NEEDED: &str = "Not needed: the Notchling app runs it";
 pub(super) const UNIT: &str = "notchlingd.service";
 pub(super) const LABEL: &str = "dev.notchling.daemon";
 pub(super) const RUNTIME_DIR: &str = r#"export XDG_RUNTIME_DIR="/run/user/$(id -u)""#;
@@ -30,7 +33,7 @@ pub fn dist_dir(data: &Path) -> PathBuf {
 }
 
 pub(super) fn steps(m: &Machine) -> Vec<SetupStep> {
-    vec![tailscale(m), binary(m), service(m), joined()]
+    vec![tailscale(m), binary(m), service(m), joined(m)]
 }
 
 fn tailscale(m: &Machine) -> SetupStep {
@@ -54,17 +57,28 @@ fn tailscale(m: &Machine) -> SetupStep {
     )
 }
 
-fn joined() -> SetupStep {
+fn joined(m: &Machine) -> SetupStep {
+    let app = m.runs_app();
     SetupStep::new(
         StepId::NODE_JOINED,
         "Joined the cluster",
         vec![StepId::NODE_SERVICE, StepId::NODE_TAILSCALE],
         Cadence::EveryRefresh,
         Probe::remote(
-            format!("{} cluster status --json", shell::path(BINARY)),
+            format!(
+                "{} cluster status --json",
+                shell::path(if app { APP_BINARY } else { BINARY })
+            ),
             parse_joined,
         ),
-        StepFix::Run(FixPlan::new(join_display(), false, join_fix)),
+        if app {
+            StepFix::HowTo(format!(
+                "On {}, open Cluster in Notchling's Chat and join with a token from Copy Join Token here.",
+                m.name
+            ))
+        } else {
+            StepFix::Run(FixPlan::new(join_display(), false, join_fix))
+        },
     )
 }
 
@@ -166,7 +180,13 @@ fn parse_joined(out: &RemoteOutput, ctx: &StepContext) -> CheckResult {
         });
     };
     let Some(theirs) = v["cluster"]["id"].as_str() else {
-        return CheckResult::fail("not in a cluster yet");
+        return match v["joining"].as_object() {
+            Some(joining) if joining.get("answered").and_then(Value::as_bool) == Some(true) => {
+                CheckResult::cant_tell("waiting for approval on this Mac")
+            }
+            Some(_) => CheckResult::cant_tell("joining; this Mac hasn't answered yet"),
+            None => CheckResult::fail("not in a cluster yet"),
+        };
     };
     if theirs != want {
         let name = v["cluster"]["name"].as_str().unwrap_or("");
