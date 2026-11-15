@@ -1,5 +1,5 @@
 use crate::acting_ops::bad;
-use crate::cluster_dispatch_delegate::{args_of, check, DelegateRunner};
+use crate::cluster_dispatch_delegate::{args_of, check, cut, DelegateRunner};
 use crate::cluster_node::{ClusterNode, LocalCalls, DELEGATE_WAIT, LOCAL_WAIT};
 use crate::cluster_workspace_send::{code_mode, Code, CodeSender};
 use crate::op_group::OpGroup;
@@ -345,8 +345,8 @@ impl DispatchCalls {
         let (exit, out, err) = self.runner.run(&list);
         Ok(json!({
             "exit": exit,
-            "out": self.shells.mask_text(&out),
-            "err": self.shells.mask_text(&err),
+            "out": cut(self.shells.mask_text(&out)),
+            "err": cut(self.shells.mask_text(&err)),
         }))
     }
 }
@@ -365,3 +365,7 @@ impl LocalCalls for DispatchCalls {
 #[cfg(test)]
 #[path = "cluster_dispatch_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "cluster_dispatch_masked_tests.rs"]
+mod masked_tests;

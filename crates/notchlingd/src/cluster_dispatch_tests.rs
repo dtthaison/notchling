@@ -6,9 +6,8 @@ use crate::cluster_node::LocalCalls;
 use crate::cluster_switches::LateHandler;
 use crate::cluster_testkit::{eventually, member, online, pair, Dir, FakeCalls, Opts, TestNode};
 use crate::cluster_wiring::DaemonCalls;
-use crate::grant_use::tests::{deliver_args, from_vault, rig, Rig as Grants, OTHER_JOB};
 use crate::op_group::OpGroup;
-use crate::shell_jobs::{Reporter, ShellGrants, ShellJobs};
+use crate::shell_jobs::{Reporter, ShellJobs};
 use notchling_cluster_net::MemNet;
 use notchling_engine::cluster::wire::{Origin, OriginTier};
 use notchling_engine::cluster::LocalCmd;
@@ -351,14 +350,6 @@ impl DelegateRunner for Runs {
     }
 }
 
-fn deliver(grants: &Grants, job: &str, name: &str, value: &str) {
-    let args = deliver_args(job, name, "V", value);
-    grants
-        .uses
-        .deliver(&from_vault(), &args)
-        .expect("accepted before the job starts here");
-}
-
 fn worker_calls(takes: bool) -> (DispatchCalls, Arc<Runs>, Arc<FakeCalls>, Dir) {
     let dir = Dir::new("calls");
     let shells = ShellJobs::new(dir.path().to_path_buf(), Arc::new(NodeReporter::default()));
@@ -368,7 +359,7 @@ fn worker_calls(takes: bool) -> (DispatchCalls, Arc<Runs>, Arc<FakeCalls>, Dir) 
     (calls, runs, inner, dir)
 }
 
-fn from_home() -> Origin {
+pub(super) fn from_home() -> Origin {
     Origin {
         node: notchling_engine::cluster::NodeId::parse("0123456789abcdef").unwrap(),
         tier: OriginTier::Agent,
@@ -383,37 +374,6 @@ fn delegate_run_reuses_the_engine_delegate_and_returns_its_outcome() {
     assert_eq!(out, json!({"exit": 0, "out": "done\n", "err": "careful\n"}));
     assert_eq!(runs.0.lock().unwrap().len(), 1);
     assert!(inner.calls.lock().unwrap().is_empty());
-}
-
-struct Reads(&'static str);
-
-impl DelegateRunner for Reads {
-    fn run(&self, _args: &[String]) -> (i32, String, String) {
-        (0, format!("out {}\n", self.0), format!("err {}\n", self.0))
-    }
-}
-
-#[test]
-fn delegate_run_masks_every_value_live_on_the_node_in_out_and_err() {
-    let grants = rig();
-    deliver(&grants, OTHER_JOB, "other-key", "NL-MARKER-OTHER-VALUE");
-    let dir = Dir::new("delegate-masked");
-    let shells = ShellJobs::new(dir.path().to_path_buf(), Arc::new(NodeReporter::default()))
-        .with_grants(ShellGrants {
-            masks: grants.masks.clone(),
-            roots: grants.roots.clone(),
-            reaped: Arc::new(|_: &str| {}),
-            ended: Arc::new(|_: &str| {}),
-        });
-    let inner = Arc::new(FakeCalls::default());
-    let runner = Arc::new(Reads("NL-MARKER-OTHER-VALUE"));
-    let calls = DispatchCalls::new(inner, shells, runner, Arc::new(|| true));
-    let args = json!({"args": ["agy", "--folder", "/srv", "--", "x"], "job": "j-1"});
-    let out = calls.call("delegate.run", &args, &from_home()).unwrap();
-    assert_eq!(
-        out,
-        json!({"exit": 0, "out": "out [secret other-key]\n", "err": "err [secret other-key]\n"})
-    );
 }
 
 #[test]

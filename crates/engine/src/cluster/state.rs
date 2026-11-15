@@ -379,10 +379,7 @@ pub fn apply(
             let term = state.term.clone();
             let job = state.jobs.get_mut(id).ok_or(CommandError::BadTransition)?;
             let records_session = *next == job.state && job.session.is_none() && session.is_some();
-            let notes_wait = *next == JobState::Dispatching
-                && job.state == JobState::Dispatching
-                && detail.is_some();
-            if !records_session && !notes_wait && !job.state.may_become(*next) {
+            if !records_session && !job.state.may_become(*next) {
                 return Err(CommandError::BadTransition);
             }
             job.state = *next;

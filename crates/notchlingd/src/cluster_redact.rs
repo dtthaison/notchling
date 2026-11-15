@@ -285,6 +285,7 @@ impl fmt::Debug for TailMasks {
     }
 }
 
+#[cfg(test)]
 pub fn mask_tail(
     masks: &TailMasks,
     job: &str,
