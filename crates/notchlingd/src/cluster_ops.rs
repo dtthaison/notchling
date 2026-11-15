@@ -1,4 +1,5 @@
 use crate::acting_ops::{bad, Room};
+use crate::cluster_failover_setting::parse;
 use crate::cluster_move_run::MoveRunner;
 use crate::cluster_node::{ClusterLog, ClusterNode};
 use crate::op_group::OpGroup;
@@ -10,11 +11,11 @@ use notchling_engine::cluster::wire::{Origin, OriginTier};
 use notchling_engine::cluster::{Desired, LocalCmd, NodeId};
 use notchling_events::kinds::security::SwitchCause;
 use notchling_events::spec::Outcome;
-use notchling_local_api::{ops, topics, ApiError, Caller, ErrorCode, OpSpec, Tier};
+use notchling_local_api::{ops, topics, ApiError, Caller, ClientKind, ErrorCode, OpSpec, Tier};
 use serde_json::{json, Value};
 use std::sync::Arc;
 
-pub const CLUSTER_OPS: [&str; 9] = [
+pub const CLUSTER_OPS: [&str; 10] = [
     ops::CLUSTER_STATUS,
     ops::CLUSTER_CREATE,
     ops::CLUSTER_JOIN_TOKEN,
@@ -24,6 +25,7 @@ pub const CLUSTER_OPS: [&str; 9] = [
     ops::CLUSTER_MAIN_SET,
     ops::CLUSTER_MOVE_HOME,
     ops::CLUSTER_MOVE_NOW,
+    ops::CLUSTER_FAILOVER_SET,
 ];
 
 pub struct ClusterOps {
@@ -208,6 +210,29 @@ impl ClusterOps {
         self.mover()?.move_now()
     }
 
+    fn join_token(&self, caller: &Caller, args: &Value) -> Result<Value, ApiError> {
+        let node = self.node()?;
+        if caller.client != ClientKind::Node {
+            return node.join_token();
+        }
+        let usage = "cluster.join.token from another node names who asked: {\"minter\": id}";
+        let minter = text(args, "minter", usage)
+            .ok()
+            .and_then(NodeId::parse)
+            .ok_or_else(|| bad(usage))?;
+        node.join_token_for(minter)
+    }
+
+    fn failover_set(&self, args: &Value) -> Result<Value, ApiError> {
+        let usage = "cluster.failover.set takes {\"value\": \"off\", \"30m\" or \"1h\"}";
+        let failover = args
+            .get("value")
+            .and_then(parse)
+            .ok_or_else(|| bad(usage))?;
+        self.node()?.local(LocalCmd::SetFailover { failover })?;
+        Ok(json!({"value": failover}))
+    }
+
     fn member_set(&self, args: &Value) -> Result<Value, ApiError> {
         let usage = "cluster.member.set takes {\"node\": id, \"canBeMaster\"?, \"client\"?, \"reference\"?, \"acceptsDelegation\"?, \"headless\"?, \"desired\"?}";
         let known = [
@@ -256,7 +281,8 @@ impl OpGroup for ClusterOps {
             | ops::CLUSTER_REMOVE
             | ops::CLUSTER_MAIN_SET
             | ops::CLUSTER_MOVE_HOME
-            | ops::CLUSTER_MOVE_NOW => Some(OpSpec::APP),
+            | ops::CLUSTER_MOVE_NOW
+            | ops::CLUSTER_FAILOVER_SET => Some(OpSpec::APP),
             _ => None,
         }
     }
@@ -268,7 +294,7 @@ impl OpGroup for ClusterOps {
                 let name = text(args, "name", "cluster.create takes {\"name\": text}")?;
                 self.node()?.create(name.trim())
             }
-            ops::CLUSTER_JOIN_TOKEN => self.node()?.join_token(),
+            ops::CLUSTER_JOIN_TOKEN => self.join_token(caller, args),
             ops::CLUSTER_JOIN => self.join(caller, args),
             ops::CLUSTER_MEMBER_SET => self.member_set(args),
             ops::CLUSTER_MAIN_SET => self.main_set(args),
@@ -278,6 +304,7 @@ impl OpGroup for ClusterOps {
                 let node = node_arg(args, "cluster.remove takes {\"node\": id}")?;
                 self.node()?.local(LocalCmd::Remove { node })
             }
+            ops::CLUSTER_FAILOVER_SET => self.failover_set(args),
             _ => Err(ApiError::internal(format!("{op} has no handler"))),
         }
     }

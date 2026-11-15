@@ -23,6 +23,8 @@ mod dup_tests;
 #[cfg(test)]
 mod edit_tests;
 #[cfg(test)]
+mod fence_slot_tests;
+#[cfg(test)]
 mod file_tests;
 #[cfg(test)]
 mod fuzz_tests;

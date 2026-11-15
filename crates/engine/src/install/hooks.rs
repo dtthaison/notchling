@@ -7,6 +7,10 @@ use serde_json::{json, Value};
 pub const PROMPT_TIMEOUT: u64 = 300;
 pub const PAGE_PRE_TIMEOUT: u64 = 60;
 pub const PAGE_TIMEOUT: u64 = 10;
+pub const FENCE_TIMEOUT: u64 = 30;
+pub const FENCE_FLAG: &str = "--fence";
+pub const FENCE_MATCHER: &str = "*";
+pub const FENCE_EVENT: &str = "PreToolUse";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Want {
@@ -19,6 +23,7 @@ pub enum Want {
 pub enum Category {
     Prompt,
     Pages,
+    Fence,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -29,7 +34,7 @@ pub struct Slot {
     pub timeout: u64,
 }
 
-pub const SLOTS: [Slot; 5] = [
+pub const SLOTS: [Slot; 6] = [
     Slot {
         category: Category::Prompt,
         event: "PreToolUse",
@@ -60,6 +65,12 @@ pub const SLOTS: [Slot; 5] = [
         matcher: "Artifact",
         timeout: PAGE_TIMEOUT,
     },
+    Slot {
+        category: Category::Fence,
+        event: FENCE_EVENT,
+        matcher: FENCE_MATCHER,
+        timeout: FENCE_TIMEOUT,
+    },
 ];
 
 #[derive(Clone, Debug)]
@@ -67,6 +78,7 @@ pub struct Wanted {
     pub command: String,
     pub prompt: Want,
     pub pages: Want,
+    pub fence: Want,
 }
 
 impl Wanted {
@@ -74,6 +86,14 @@ impl Wanted {
         match category {
             Category::Prompt => self.prompt,
             Category::Pages => self.pages,
+            Category::Fence => self.fence,
+        }
+    }
+
+    fn command_for(&self, slot: &Slot) -> String {
+        match slot.category {
+            Category::Fence => format!("{} {FENCE_FLAG}", self.command),
+            _ => self.command.clone(),
         }
     }
 }
@@ -229,6 +249,7 @@ pub fn plan_hooks(text: &str, wanted: &Wanted) -> Result<HookPlan, Refused> {
 
     for slot in &SLOTS {
         let want = wanted.want(slot.category);
+        let command = wanted.command_for(slot);
         if want == Want::Leave {
             continue;
         }
@@ -243,7 +264,7 @@ pub fn plan_hooks(text: &str, wanted: &Wanted) -> Result<HookPlan, Refused> {
         let keep = (want == Want::Install)
             .then(|| {
                 ours.iter().position(|e| {
-                    e.raw == wanted.command
+                    e.raw == command
                         && e.kind.as_deref() == Some("command")
                         && e.timeout == Some(slot.timeout)
                 })
@@ -260,7 +281,7 @@ pub fn plan_hooks(text: &str, wanted: &Wanted) -> Result<HookPlan, Refused> {
                 (_, Some(_)) => format!("remove {place}: a second copy of the hook"),
                 _ => format!(
                     "replace {place}: {} -> {} (timeout {} s)",
-                    entry.found.command, wanted.command, slot.timeout
+                    entry.found.command, command, slot.timeout
                 ),
             };
             changes.push(why);
@@ -273,7 +294,7 @@ pub fn plan_hooks(text: &str, wanted: &Wanted) -> Result<HookPlan, Refused> {
                     if ours.is_empty() {
                         changes.push(format!(
                             "add {place}: {} (timeout {} s)",
-                            wanted.command, slot.timeout
+                            command, slot.timeout
                         ));
                     }
                 }
@@ -317,7 +338,7 @@ pub fn plan_hooks(text: &str, wanted: &Wanted) -> Result<HookPlan, Refused> {
         out = remove_entry(&out, event, *group, *index)?;
     }
     for slot in &appends {
-        out = add_group(&out, slot, &group_json(slot, &wanted.command))?;
+        out = add_group(&out, slot, &group_json(slot, &wanted.command_for(slot)))?;
     }
 
     let after = jsonc::parse(&out)
@@ -325,7 +346,7 @@ pub fn plan_hooks(text: &str, wanted: &Wanted) -> Result<HookPlan, Refused> {
         .map_err(|_| refuse("the edit did not give valid JSON; nothing was written"))?;
     let adds: Vec<(&str, Value)> = appends
         .iter()
-        .map(|s| (s.event, group_json(s, &wanted.command).to_value()))
+        .map(|s| (s.event, group_json(s, &wanted.command_for(s)).to_value()))
         .collect();
     if after != model(before, &gone, &adds) {
         return Err(refuse(

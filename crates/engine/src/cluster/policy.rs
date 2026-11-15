@@ -152,12 +152,15 @@ pub const RULES: &[Rule] = &[
     client_home("cluster.main.set"),
     client_home("cluster.move_home"),
     client_home("cluster.move.now"),
+    client_home("cluster.failover.set"),
     rule("node.sessions", CLIENT, OriginTier::Node, None, false),
     rule("node.versions", MEMBER, OriginTier::Node, None, false),
     rule("node.load", MEMBER, OriginTier::Node, None, false),
     rule("cluster.join.token", MEMBER, OriginTier::Agent, None, true),
     rule("cluster.join.token", MEMBER, OriginTier::App, None, true),
     rule("cluster.dispatch", MEMBER, OriginTier::Agent, None, true),
+    home_app("install.plan"),
+    home_app("install.apply"),
 ];
 
 fn stands(sender: &SenderFacts, sent: Sent) -> bool {

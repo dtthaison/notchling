@@ -2,6 +2,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
+use super::claims::{hide_side_copies, put_claim, put_side_copy, touch, Claim, SideCopy};
+use super::failover::{ArmingId, Failover};
 use super::grants::SecretAllow;
 use super::id::{NodeId, Role};
 use super::jobs::{job_id, Job, JobSpec, JobState};
@@ -25,6 +27,15 @@ pub struct ClusterState {
     pub kept: BTreeSet<String>,
     #[serde(default)]
     pub ended: BTreeMap<String, i64>,
+    pub failover: Failover,
+    #[serde(default)]
+    pub armed: Option<(NodeId, Term)>,
+    #[serde(default)]
+    pub holders: BTreeMap<NodeId, ArmingId>,
+    #[serde(default)]
+    pub claims: BTreeMap<String, Claim>,
+    #[serde(default)]
+    pub side_copies: Vec<SideCopy>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -99,6 +110,31 @@ pub enum Command {
         #[serde(default)]
         kept: BTreeSet<String>,
     },
+    SetFailover {
+        failover: Failover,
+    },
+    Armed {
+        node: NodeId,
+        term: Term,
+        id: ArmingId,
+    },
+    Released {
+        node: NodeId,
+        seen: Option<ArmingId>,
+    },
+    Claim {
+        claim: Claim,
+    },
+    Touched {
+        session: String,
+    },
+    SideCopy {
+        copy: SideCopy,
+    },
+    HideSideCopy {
+        session: String,
+        node: NodeId,
+    },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -114,6 +150,11 @@ pub enum Change {
     Member(Member),
     Dropped(NodeId),
     Job(Job),
+    Failover(Failover),
+    Armed(Option<(NodeId, Term)>),
+    Holders(BTreeMap<NodeId, ArmingId>),
+    Claims(BTreeMap<String, Claim>),
+    SideCopies(Vec<SideCopy>),
     Cluster {
         id: String,
         name: String,
@@ -135,6 +176,7 @@ pub enum CommandError {
     Removed(NodeId),
     BadTransition,
     Exists,
+    TermTooLarge,
 }
 
 impl std::fmt::Display for CommandError {
@@ -145,6 +187,7 @@ impl std::fmt::Display for CommandError {
             CommandError::Removed(n) => write!(f, "{n} was removed"),
             CommandError::BadTransition => f.write_str("that change is not allowed now"),
             CommandError::Exists => f.write_str("already there"),
+            CommandError::TermTooLarge => f.write_str("that term is too large"),
         }
     }
 }
@@ -206,6 +249,22 @@ impl ClusterState {
         }
     }
 
+    fn disarm(&mut self, node: &NodeId, changes: &mut Vec<Change>) {
+        if self.armed.as_ref().is_some_and(|(n, _)| n == node) {
+            self.armed = None;
+            changes.push(Change::Armed(None));
+        }
+    }
+
+    fn forget_arming(&mut self, changes: &mut Vec<Change>) {
+        if self.armed.take().is_some() {
+            changes.push(Change::Armed(None));
+        }
+        if self.holders.remove(&self.home).is_some() {
+            changes.push(Change::Holders(self.holders.clone()));
+        }
+    }
+
     fn entry(&mut self, now_ms: i64, command: Command) -> JournalEntry {
         self.seq += 1;
         JournalEntry {
@@ -256,14 +315,19 @@ pub fn start(
             home,
             vault,
             members,
-        } => (
-            id.clone(),
-            name.clone(),
-            term.clone(),
-            home.clone(),
-            vault.clone(),
-            members.clone(),
-        ),
+        } => {
+            if !term.storable() {
+                return Err(CommandError::TermTooLarge);
+            }
+            (
+                id.clone(),
+                name.clone(),
+                term.clone(),
+                home.clone(),
+                vault.clone(),
+                members.clone(),
+            )
+        }
         _ => return Err(CommandError::BadTransition),
     };
     let mut state = ClusterState {
@@ -278,6 +342,11 @@ pub fn start(
         main: BTreeMap::new(),
         kept: BTreeSet::new(),
         ended: BTreeMap::new(),
+        failover: Failover::Off,
+        armed: None,
+        holders: BTreeMap::new(),
+        claims: BTreeMap::new(),
+        side_copies: Vec::new(),
     };
     let mut changes = vec![state.cluster_change()];
     changes.extend(members.into_iter().map(|m| {
@@ -304,12 +373,17 @@ pub fn apply(
             members,
         } => sync(state, id, name, term, home, vault, members)?,
         Command::Term { term } => {
+            if !term.storable() {
+                return Err(CommandError::TermTooLarge);
+            }
             if *term <= state.term {
                 return Err(CommandError::BadTransition);
             }
             state.term = term.clone();
             state.home = term.node.clone();
-            vec![state.cluster_change()]
+            let mut changes = vec![state.cluster_change()];
+            state.forget_arming(&mut changes);
+            changes
         }
         Command::ProposeJoin { member, .. } => propose(state, member, now_ms)?,
         Command::Approve {
@@ -347,7 +421,9 @@ pub fn apply(
             }
             let m = active_mut(state, node)?;
             m.state = MemberState::Removed;
-            vec![Change::Member(m.clone())]
+            let mut changes = vec![Change::Member(m.clone())];
+            state.disarm(node, &mut changes);
+            changes
         }
         Command::SetMember {
             node,
@@ -377,7 +453,11 @@ pub fn apply(
             if let Some(v) = desired {
                 m.desired = *v;
             }
-            vec![Change::Member(m.clone())]
+            let mut changes = vec![Change::Member(m.clone())];
+            if *can_be_master == Some(false) {
+                state.disarm(node, &mut changes);
+            }
+            changes
         }
         Command::SetAllow { node, allow } => {
             let next = SecretAllow::new(allow.names.iter().cloned(), allow.any);
@@ -395,6 +475,9 @@ pub fn apply(
                 .ok_or_else(|| CommandError::Unknown(node.clone()))?;
             if m.state == MemberState::Removed {
                 return Err(CommandError::Removed(node.clone()));
+            }
+            if m.versions.as_ref() == Some(versions) {
+                return Ok(Applied::none());
             }
             m.versions = Some(versions.clone());
             vec![Change::Member(m.clone())]
@@ -442,6 +525,87 @@ pub fn apply(
             state.ended = ended.clone();
             state.kept = kept.clone();
             vec![state.main_change()]
+        }
+        Command::SetFailover { failover } => {
+            if state.failover == *failover {
+                return Ok(Applied::none());
+            }
+            state.failover = *failover;
+            state.armed = None;
+            vec![Change::Failover(*failover), Change::Armed(None)]
+        }
+        Command::Armed { node, term, id } => {
+            if *term != state.term || state.failover == Failover::Off || *node == state.home {
+                return Err(CommandError::BadTransition);
+            }
+            if state.holders.keys().any(|other| other != node) {
+                return Err(CommandError::BadTransition);
+            }
+            let held = state.holders.get(node).cloned();
+            if held.as_ref().is_some_and(|h| id < h) {
+                return Err(CommandError::BadTransition);
+            }
+            if !active_mut(state, node)?.can_be_master {
+                return Err(CommandError::BadTransition);
+            }
+            let armed = Some((node.clone(), term.clone()));
+            if state.armed == armed && held.as_ref() == Some(id) {
+                return Ok(Applied::none());
+            }
+            state.armed = armed.clone();
+            state.holders.insert(node.clone(), id.clone());
+            vec![Change::Armed(armed), Change::Holders(state.holders.clone())]
+        }
+        Command::Released { node, seen } => {
+            if state
+                .holders
+                .get(node)
+                .is_some_and(|armed_at| seen.as_ref().is_none_or(|s| armed_at > s))
+            {
+                return Ok(Applied::none());
+            }
+            let held = state.holders.remove(node).is_some();
+            let mut changes = Vec::new();
+            if held {
+                changes.push(Change::Holders(state.holders.clone()));
+            }
+            let armed = state.armed.as_ref().is_some_and(|(n, _)| n == node);
+            if armed {
+                state.armed = None;
+                changes.push(Change::Armed(None));
+            }
+            if changes.is_empty() {
+                return Ok(Applied::none());
+            }
+            changes
+        }
+        Command::Claim { claim } => {
+            if !claim.term.storable() {
+                return Err(CommandError::TermTooLarge);
+            }
+            active_mut(state, &claim.node)?;
+            if !put_claim(&mut state.claims, claim) {
+                return Ok(Applied::none());
+            }
+            vec![Change::Claims(state.claims.clone())]
+        }
+        Command::Touched { session } => match touch(&mut state.claims, session) {
+            None => return Err(CommandError::BadTransition),
+            Some(false) => return Ok(Applied::none()),
+            Some(true) => vec![Change::Claims(state.claims.clone())],
+        },
+        Command::SideCopy { copy } => {
+            if !put_side_copy(&mut state.side_copies, copy, now_ms) {
+                return Ok(Applied::none());
+            }
+            vec![Change::SideCopies(state.side_copies.clone())]
+        }
+        Command::HideSideCopy { session, node } => {
+            match hide_side_copies(&mut state.side_copies, session, node) {
+                None => return Err(CommandError::BadTransition),
+                Some(false) => return Ok(Applied::none()),
+                Some(true) => vec![Change::SideCopies(state.side_copies.clone())],
+            }
         }
     };
     let entry = state.entry(now_ms, command);
@@ -538,10 +702,14 @@ fn sync(
     vault: &NodeId,
     members: &[Member],
 ) -> Result<Vec<Change>, CommandError> {
+    if !term.storable() {
+        return Err(CommandError::TermTooLarge);
+    }
     if id != state.id || *term < state.term {
         return Err(CommandError::BadTransition);
     }
     let mut changes = Vec::new();
+    let term_changed = state.term != *term;
     let head_changed =
         state.name != name || state.term != *term || state.home != *home || state.vault != *vault;
     state.name = name.to_string();
@@ -550,6 +718,9 @@ fn sync(
     state.vault = vault.clone();
     if head_changed {
         changes.push(state.cluster_change());
+    }
+    if term_changed {
+        state.forget_arming(&mut changes);
     }
     let gone: Vec<NodeId> = state
         .members

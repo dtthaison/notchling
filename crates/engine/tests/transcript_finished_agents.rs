@@ -113,3 +113,42 @@ fn a_missing_file_has_nothing_finished() {
     let path = s(&scratch.path("nope.jsonl"));
     assert!(finished::read(&path).is_empty());
 }
+
+fn stop_call(tool: &str, name: &str, input: &str) -> String {
+    format!(
+        r#"{{"type":"assistant","message":{{"id":"m-{tool}","role":"assistant","content":[{{"type":"tool_use","id":"{tool}","name":"{name}","input":{input}}}]}}}}"#
+    ) + "\n"
+}
+
+fn stop_result(tool: &str, error: bool) -> String {
+    format!(
+        r#"{{"type":"user","message":{{"role":"user","content":[{{"type":"tool_result","tool_use_id":"{tool}","is_error":{error},"content":"x"}}]}}}}"#
+    ) + "\n"
+}
+
+#[test]
+fn it_finds_the_stops_the_conversation_parser_finds() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let scratch = Scratch::new("finished-stops");
+    let sidechain =
+        stop_result("t5", false).replace(r#""type":"user""#, r#""type":"user","isSidechain":true"#);
+    let text = stop_call("t1", "TaskStop", r#"{"task_id":"s1"}"#)
+        + &stop_result("t1", false)
+        + &stop_call("t2", "KillShell", r#"{"shell_id":"s2"}"#)
+        + &stop_result("t2", false)
+        + &stop_call("t3", "TaskStop", r#"{"task_id":"s3"}"#)
+        + &stop_result("t3", true)
+        + &stop_call("t4", "TaskStop", "{}")
+        + &stop_result("t4", false)
+        + &stop_call("", "TaskStop", r#"{"task_id":"s7"}"#)
+        + &stop_result("", false)
+        + &stop_call("t5", "TaskStop", r#"{"task_id":"s5"}"#)
+        + &sidechain
+        + &stop_result("t6", false)
+        + &note("n1", "completed");
+    let path = s(&scratch.write("t.jsonl", &text));
+    let expected = conversation::read(&path).finished_agents;
+    assert_eq!(expected.len(), 3, "{expected:?}");
+    assert_eq!(expected.get("s1").map(String::as_str), Some("stopped"));
+    assert_eq!(*finished::read(&path), expected);
+}

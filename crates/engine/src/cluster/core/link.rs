@@ -1,9 +1,13 @@
 use serde_json::json;
 
-use super::{Dial, Effect, NodeCore, DIAL_BACKOFF_MS, JOIN_ANSWER_MS, OFFLINE_MS, PING_MS};
+use super::{
+    Dial, Effect, NodeCore, DIAL_BACKOFF_MS, JOIN_ANSWER_MS, MAX_TERM_STEP, OFFLINE_MS, PING_MS,
+    REASON_MAX,
+};
 use crate::cluster::id::NodeId;
 use crate::cluster::members::{Member, MemberState, Term};
 use crate::cluster::state::Command;
+use crate::cluster::text;
 use crate::cluster::versions::{compat, Compat, Purpose, Versions};
 use crate::cluster::wire::{Msg, WireError};
 
@@ -65,7 +69,22 @@ impl NodeCore {
                 self.changed = true;
             }
         }
+        self.forget_stranger(&peer);
         self.fail_calls_to(&peer, "offline", out);
+    }
+
+    fn forget_stranger(&mut self, peer: &NodeId) {
+        let member = self
+            .state
+            .as_ref()
+            .is_some_and(|s| s.members.contains_key(peer));
+        let token_home = self.joining.as_ref().is_some_and(|j| j.token.home == *peer);
+        if member || token_home {
+            return;
+        }
+        if self.peers.get(peer).is_some_and(|p| !p.linked) {
+            self.peers.remove(peer);
+        }
     }
 
     pub(super) fn drop_link(&mut self, peer: &NodeId, out: &mut Vec<Effect>) {
@@ -80,6 +99,7 @@ impl NodeCore {
             self.changed = true;
         }
         out.push(Effect::Close { peer: peer.clone() });
+        self.forget_stranger(peer);
         self.fail_calls_to(peer, "offline", out);
     }
 
@@ -162,7 +182,10 @@ impl NodeCore {
             return;
         }
         if let Some(t) = &term {
-            self.adopt(t, out);
+            if !self.adopt(t, &from, out) {
+                self.refuse(&from, "bad_term", true, out);
+                return;
+            }
         }
         self.greet(&from);
         let (home, term, cluster_id) = match &self.state {
@@ -180,19 +203,7 @@ impl NodeCore {
             out,
         );
         if self.is_home() {
-            let differs = self
-                .state
-                .as_ref()
-                .and_then(|s| s.members.get(&from))
-                .is_some_and(|m| m.versions.as_ref() != Some(&versions));
-            if differs {
-                let _ = self.apply(
-                    Command::Versions {
-                        node: from.clone(),
-                        versions,
-                    },
-                    out,
-                );
+            if self.record_versions(&from, versions, out).unwrap_or(false) {
                 self.push_members(None, out);
             } else {
                 self.push_members(Some(&from), out);
@@ -209,7 +220,7 @@ impl NodeCore {
         if !known {
             return;
         }
-        self.adopt(&term, out);
+        self.adopt(&term, &from, out);
         self.greet(&from);
     }
 
@@ -220,6 +231,7 @@ impl NodeCore {
         term: Option<Term>,
         out: &mut Vec<Effect>,
     ) {
+        let reason = clean_reason(&reason);
         if let Some(j) = &self.joining {
             if from == j.token.home {
                 if !j.answered {
@@ -235,14 +247,23 @@ impl NodeCore {
                 return;
             }
         }
-        let from_home = self.state.as_ref().is_some_and(|s| s.home == from);
-        if reason == "removed" && from_home {
+        let Some(state) = &self.state else {
+            return;
+        };
+        let known = state
+            .members
+            .get(&from)
+            .is_some_and(|m| m.state == MemberState::Active);
+        if !known {
+            return;
+        }
+        if reason == "removed" && state.home == from {
             self.wipe(out);
             return;
         }
         if reason == "stale_term" {
             if let Some(t) = term {
-                self.adopt(&t, out);
+                self.adopt(&t, &from, out);
             }
         }
         out.push(self.publish("cluster.refused", json!({"from": from, "reason": reason})));
@@ -254,36 +275,72 @@ impl NodeCore {
             out.push(Effect::Close { peer });
         }
         self.state = None;
+        self.primary_armed = false;
         self.peers.clear();
         self.dials.clear();
         self.out_calls.clear();
         self.local_runs.clear();
         self.seen.clear();
+        self.versions_gate.clear();
         self.joining = None;
         self.changed = true;
         out.push(Effect::Wipe);
     }
 
-    pub(super) fn adopt(&mut self, term: &Term, out: &mut Vec<Effect>) {
+    fn term_may_be_adopted(&self, term: &Term, sender: &NodeId) -> bool {
         let Some(state) = &self.state else {
-            return;
+            return false;
+        };
+        if !term.storable() {
+            return false;
+        }
+        let Some(limit) = state.term.n.checked_add(MAX_TERM_STEP) else {
+            return false;
+        };
+        if term.n > limit {
+            return false;
+        }
+        if term.node == self.me && *sender != self.me {
+            return false;
+        }
+        let may_be_primary = state.members.get(sender).is_some_and(|m| {
+            m.state == MemberState::Active && (m.can_be_master || state.home == m.id)
+        });
+        if !may_be_primary {
+            return false;
+        }
+        *sender == term.node
+            || state
+                .members
+                .get(&term.node)
+                .is_some_and(|m| m.state == MemberState::Active)
+    }
+
+    pub(super) fn adopt(&mut self, term: &Term, sender: &NodeId, out: &mut Vec<Effect>) -> bool {
+        let Some(state) = &self.state else {
+            return false;
         };
         if *term <= state.term {
-            return;
+            return true;
+        }
+        if !self.term_may_be_adopted(term, sender) {
+            return false;
         }
         let was_home = state.home == self.me;
         if self
             .apply(Command::Term { term: term.clone() }, out)
             .is_err()
         {
-            return;
+            return false;
         }
+        self.primary_armed = false;
         if was_home && term.node != self.me {
             out.push(Effect::SteppedDown {
                 term: term.clone(),
                 home: term.node.clone(),
             });
         }
+        true
     }
 
     pub(super) fn tick(&mut self, out: &mut Vec<Effect>) {
@@ -317,6 +374,7 @@ impl NodeCore {
         self.expire_calls(out);
         self.expire_join(out);
         self.prune_seen();
+        self.release_versions(out);
         self.dial(out);
     }
 
@@ -399,6 +457,10 @@ impl NodeCore {
         };
         WireError::new("stale_term", body.to_string())
     }
+}
+
+pub(super) fn clean_reason(text: &str) -> String {
+    text::clean(text, REASON_MAX)
 }
 
 fn would_dial(a: &Member, b: &NodeId, home: &NodeId) -> bool {

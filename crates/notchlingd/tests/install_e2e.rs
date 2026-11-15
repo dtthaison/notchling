@@ -106,7 +106,7 @@ fn a_real_daemon_plans_but_with_the_switch_off_writes_nothing() {
     assert_eq!(plan["plan"]["hooks"]["state"], "present");
     assert_eq!(
         plan["plan"]["hooks"]["changes"].as_array().unwrap().len(),
-        5
+        6
     );
     let file = plan["plan"]["hooks"]["file"].as_str().unwrap();
     assert_eq!(Path::new(file), root.join("claude/settings.json"));

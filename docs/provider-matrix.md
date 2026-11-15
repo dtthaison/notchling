@@ -82,7 +82,7 @@ Generated from crates/engine/src/contract by the provider_matrix test; NOTCHLING
 | --- | --- | --- | --- |
 | `setup.rules` | GAP: design: 0019 | GAP: design: 0019 | GAP: design: 0019 |
 | `setup.skills` | N: install::skills writes the notchling-* skills · unwired | N: install::skills writes the notchling-* skills · unwired | N: install::skills writes the notchling-* skills · unwired |
-| `setup.hooks` | N: install::hooks writes Notchling's five hooks · unwired | GAP: design: 0019 (planned not applicable) | GAP: design: 0019 (planned not applicable) |
+| `setup.hooks` | N: install::hooks writes Notchling's six hooks · unwired | GAP: design: 0019 (planned not applicable) | GAP: design: 0019 (planned not applicable) |
 
 ## Versions
 

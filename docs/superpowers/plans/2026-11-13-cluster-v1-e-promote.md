@@ -8,7 +8,7 @@
 
 **Tech Stack:** Rust (engine, notchlingd, local-api, GPUI app), plan B's core and simulator, plan D's sets, restore, handover and held queue, Claude Code hooks (`install/hooks.rs`), settings classes (decision 0020), `agentconsole.v1` (additive), Flutter.
 
-**Spec:** `docs/superpowers/specs/2026-11-13-notchling-cluster-design.md`: "Scope: v1 first" (Failover, Fencing, Notifications rows), "Failover", "Cut turns", review issues 1 (self-fencing doesn't reach the tools), 2 (clocks across sleep), 11 (notifications), invariants I1, I2, I7. The overview's "Decisions 2026-11-14" win where they differ (no short lease; the failover setting; manual promote; return of the old primary; proposals 4 to 6). Plans B, C (inbox federation) and D merged first. Plan F's decision (F Task 1) must be accepted before this plan ships.
+**Spec:** `docs/superpowers/specs/2026-11-13-notchling-cluster-design.md`: "Scope: v1 first" (Failover, Fencing, Notifications rows; v1 has no phone push, so Notifications here means the inbox, decided 2026-11-15), "Failover", "Cut turns", review issues 1 (self-fencing doesn't reach the tools), 2 (clocks across sleep), 11 (notifications), invariants I1, I2, I7. The overview's "Decisions 2026-11-14" win where they differ (no short lease; the failover setting; manual promote; return of the old primary; proposals 4 to 6). Plans B, C (inbox federation) and D merged first. The ship gate is the maintainer accepting this plan's decision record (`XXXX-cluster-failover-and-fencing`); plan F is dropped (maintainer, 2026-11-15: no FCM, no phone push in v1), so failover and promote notifications stay in the inbox and the phone sees them there when it connects.
 
 ## Global Constraints
 
@@ -306,7 +306,7 @@
 - [ ] **Step 1: Write.**
 - [ ] **Step 2: Run** the full checks, plus `~/flutter/bin/flutter test` and `~/flutter/bin/dart analyze`. Expected: clean, PASS.
 - [ ] **Step 3: Commit** `docs: failover, promote and fencing`.
-- [ ] **Ship gate:** plan F Task 1's decision accepted by the maintainer (spec: push decided before Promote ships).
+- [ ] **Ship gate:** the maintainer accepts this plan's decision record (`XXXX-cluster-failover-and-fencing`); failover and promote notifications stay in the inbox (the phone sees them in its inbox when it connects), since v1 has no phone push (decided 2026-11-15).
 
 ### Checkpoint 2: the live check (maintainer only)
 

@@ -489,30 +489,6 @@ fn running_background_shells_are_cut_steps() {
 }
 
 #[test]
-fn a_shell_stopped_by_taskstop_or_killshell_is_not_running() {
-    for (name, input) in [
-        ("TaskStop", "{\n  \"task_id\" : \"b1\"\n}"),
-        ("KillShell", "{\n  \"shell_id\" : \"b1\"\n}"),
-    ] {
-        let mut c = conv(vec![
-            ItemKind::user("go"),
-            ItemKind::Tools(vec![call(name, ToolKind::Other, input, true)]),
-        ]);
-        c.shells = vec![shell("b1", "git push"), shell("b2", "git push")];
-        assert_eq!(
-            cut_steps(&c),
-            vec![step("Bash", "Ran git push", true)],
-            "{name}"
-        );
-        let mut failed = call(name, ToolKind::Other, input, true);
-        failed.is_error = true;
-        let mut c = conv(vec![ItemKind::user("go"), ItemKind::Tools(vec![failed])]);
-        c.shells = vec![shell("b1", "git push")];
-        assert_eq!(cut_steps(&c).len(), 1, "{name} failed");
-    }
-}
-
-#[test]
 fn background_agents_without_a_notification_are_outward_cut_steps() {
     let mut launched = call("Agent", ToolKind::Agent, "push it", true);
     launched.id = "t-bg".into();

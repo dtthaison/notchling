@@ -344,3 +344,34 @@ fn a_standby_claiming_the_app_tier_gets_only_the_relayed_ops() {
         );
     }
 }
+
+#[test]
+fn install_ops_are_the_homes_app_tier_alone() {
+    let home = facts("m5", Role::Home, true, MemberState::Active);
+    let plain_home = facts("m5", Role::Home, false, MemberState::Active);
+    let worker = facts("w1", Role::Worker, false, MemberState::Active);
+    let standby = facts("m2", Role::Standby, false, MemberState::Active);
+    let client = facts("m1", Role::Standby, true, MemberState::Active);
+    for op in ["install.plan", "install.apply"] {
+        for sender in [&home, &plain_home] {
+            let rule = check(op, sender, &origin("m5", OriginTier::App)).expect("rule");
+            assert_eq!(rule.id_field, None);
+            assert!(!rule.home_only);
+            for tier in [OriginTier::Agent, OriginTier::Node] {
+                assert!(check(op, sender, &origin("m5", tier)).is_err(), "{op}");
+            }
+        }
+        for (sender, name) in [(&worker, "w1"), (&standby, "m2"), (&client, "m1")] {
+            for tier in [OriginTier::App, OriginTier::Agent, OriginTier::Node] {
+                assert!(
+                    check(op, sender, &origin(name, tier)).is_err(),
+                    "{op} {name} {tier:?}"
+                );
+            }
+        }
+    }
+    assert!(
+        check("install.remove", &home, &origin("m5", OriginTier::App)).is_err(),
+        "install.remove is not forwarded"
+    );
+}

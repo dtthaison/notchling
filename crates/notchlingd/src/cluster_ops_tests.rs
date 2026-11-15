@@ -321,3 +321,60 @@ fn main_set_from_a_client_reaches_the_home() {
     }
     assert_eq!(home.node.status()["kept"], json!(["job-1"]));
 }
+
+fn node_caller() -> Caller {
+    Caller {
+        tier: Tier::Agent,
+        client: ClientKind::Node,
+        peer: None,
+        pid: None,
+    }
+}
+
+#[test]
+fn a_token_asked_by_another_node_must_name_its_maker() {
+    let net = MemNet::new();
+    let (home, worker) = pair(&net, Opts::named("tokenhome"), Opts::named("tokenbox"));
+    let w = wired(&home, true);
+    for args in [
+        json!({}),
+        json!({"minter": ""}),
+        json!({"minter": "not-a-node"}),
+        json!({"minter": 7}),
+    ] {
+        let err = w
+            .ops
+            .call(&node_caller(), ops::CLUSTER_JOIN_TOKEN, &args)
+            .unwrap_err();
+        assert_eq!(err.code, ErrorCode::BadRequest, "{args}");
+    }
+    let made = w
+        .ops
+        .call(
+            &node_caller(),
+            ops::CLUSTER_JOIN_TOKEN,
+            &json!({"minter": worker.id()}),
+        )
+        .unwrap();
+    assert!(made["token"]
+        .as_str()
+        .is_some_and(|t| t.starts_with("nlj1.")));
+}
+
+#[test]
+fn a_local_callers_args_never_name_the_maker() {
+    let net = MemNet::new();
+    let (home, worker) = pair(&net, Opts::named("tokenhome2"), Opts::named("tokenbox2"));
+    let w = wired(&home, true);
+    let made = w
+        .ops
+        .call(
+            &caller(Tier::Agent),
+            ops::CLUSTER_JOIN_TOKEN,
+            &json!({"minter": worker.id()}),
+        )
+        .unwrap();
+    assert!(made["token"]
+        .as_str()
+        .is_some_and(|t| t.starts_with("nlj1.")));
+}

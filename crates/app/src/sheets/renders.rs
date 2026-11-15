@@ -18,7 +18,7 @@ use crate::accounts::menu::targets;
 use crate::accounts::renders::{snapshot, Shown as AccountsShown};
 use crate::cluster::model::ClusterModel;
 
-pub const VIEWS: [ViewSpec; 14] = [
+pub const VIEWS: [ViewSpec; 15] = [
     ViewSpec {
         name: "banner",
         size: (620.0, 260.0),
@@ -45,9 +45,14 @@ pub const VIEWS: [ViewSpec; 14] = [
         about: "the Settings sheet's General page with acting shown read-only (defaults), the Search section and the Chat section",
     },
     ViewSpec {
+        name: "settings-cluster",
+        size: (620.0, 1800.0),
+        about: "the Settings sheet's General page on a Mac in a cluster: Automatic Failover on After 30 Minutes with the machines named and the not ready line (made-up data)",
+    },
+    ViewSpec {
         name: "settings-agents",
         size: (620.0, 760.0),
-        about: "the Settings sheet's Agents page: Claude Code's Hooks with all five installed (fixture reply)",
+        about: "the Settings sheet's Agents page: Claude Code's Hooks with all six installed (fixture reply)",
     },
     ViewSpec {
         name: "settings-agents-partial",
@@ -62,7 +67,7 @@ pub const VIEWS: [ViewSpec; 14] = [
     ViewSpec {
         name: "settings-agents-detached",
         size: (620.0, 760.0),
-        about: "the Agents page's Hooks with no daemon attached: the five explained, none checked",
+        about: "the Agents page's Hooks with no daemon attached: the six explained, none checked",
     },
     ViewSpec {
         name: "settings-capabilities",
@@ -98,6 +103,7 @@ pub enum Shown {
     NewSessionWorker,
     TrustFolder,
     Settings,
+    SettingsCluster,
     SettingsAgents,
     SettingsAgentsPartial,
     SettingsAgentsEmpty,
@@ -116,6 +122,7 @@ pub fn shown(name: &str) -> Option<Shown> {
         "new-session-worker" => Shown::NewSessionWorker,
         "trust-folder" => Shown::TrustFolder,
         "settings" => Shown::Settings,
+        "settings-cluster" => Shown::SettingsCluster,
         "settings-agents" => Shown::SettingsAgents,
         "settings-agents-partial" => Shown::SettingsAgentsPartial,
         "settings-agents-empty" => Shown::SettingsAgentsEmpty,
@@ -135,6 +142,7 @@ pub fn acting(shown: Shown) -> Acting {
         Shown::Banner
         | Shown::NewSession
         | Shown::Settings
+        | Shown::SettingsCluster
         | Shown::SettingsAgents
         | Shown::SettingsAgentsPartial
         | Shown::SettingsAgentsEmpty
@@ -184,6 +192,7 @@ pub fn hooks(shown: Shown) -> HooksShown {
             hook("PreToolUse", "Artifact", "notchling", true),
             hook("PostToolUse", "Artifact", "notchling", true),
             hook("PostToolUseFailure", "Artifact", "notchling", true),
+            hook("PreToolUse", "*", "notchling", true),
         ],
     };
     let reply = json!({"on": false, "applied": false,
@@ -366,6 +375,13 @@ pub fn new_session(shown: Shown) -> NewSession {
     sheet
 }
 
+pub fn cluster_model() -> crate::cluster::model::ClusterModel {
+    use crate::cluster::renders::{status, ME, STANDBY};
+    let mut made_up = status();
+    made_up["failover"] = json!({"value": "30m", "armed": false, "target": STANDBY});
+    crate::cluster::model::ClusterModel::from_status(&made_up, ME)
+}
+
 pub fn banners() -> Banners {
     let mut source = Source::keeping_everything(DataRoot::for_render());
     let now = fixture_clock(&source.load(0).agents);
@@ -412,9 +428,9 @@ mod tests {
         assert_eq!(trust.stage, Stage::Untrusted);
         assert_eq!(acting(Shown::TrustFolder), Acting::On);
         assert_eq!(banners().all().len(), 4);
-        assert_eq!(hooks(Shown::SettingsAgents).lines().len(), 5);
-        assert_eq!(hooks(Shown::SettingsAgentsPartial).lines().len(), 6);
-        assert_eq!(hooks(Shown::SettingsAgentsEmpty).lines().len(), 5);
+        assert_eq!(hooks(Shown::SettingsAgents).lines().len(), 6);
+        assert_eq!(hooks(Shown::SettingsAgentsPartial).lines().len(), 7);
+        assert_eq!(hooks(Shown::SettingsAgentsEmpty).lines().len(), 6);
         assert_eq!(hooks(Shown::SettingsAgentsDetached), HooksShown::Detached);
         assert_eq!(page(Shown::Settings), Page::General);
         assert_eq!(page(Shown::SettingsAgents), Page::Agents);

@@ -10,8 +10,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-const BINARY: &str = "/opt/notchling/bin/notchling";
-const USER_SETTINGS: &str = r#"{
+pub(crate) const BINARY: &str = "/opt/notchling/bin/notchling";
+pub(crate) const USER_SETTINGS: &str = r#"{
   "env": { "API_TOKEN": "sk-ant-api03-NEVERSHOWN" },
   "hooks": {
     "PreToolUse": [
@@ -30,17 +30,17 @@ const SWIFT_HOOK: &str = r#"{
 }
 "#;
 
-struct Dir(PathBuf);
+pub(crate) struct Dir(PathBuf);
 
 impl Dir {
-    fn new(tag: &str) -> Dir {
+    pub(crate) fn new(tag: &str) -> Dir {
         let dir = std::env::temp_dir().join(format!("nl-installops-{tag}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         Dir(dir)
     }
 
-    fn path(&self, rel: &str) -> PathBuf {
+    pub(crate) fn path(&self, rel: &str) -> PathBuf {
         self.0.join(rel)
     }
 
@@ -73,7 +73,7 @@ impl Drop for Dir {
     }
 }
 
-fn rig(dir: &Dir, settings: Option<&str>) -> InstallSetup {
+pub(crate) fn rig(dir: &Dir, settings: Option<&str>) -> InstallSetup {
     for tool in [".claude", ".codex", ".gemini/config"] {
         fs::create_dir_all(dir.path(&format!("home/{tool}"))).unwrap();
     }
@@ -94,7 +94,7 @@ fn rig(dir: &Dir, settings: Option<&str>) -> InstallSetup {
     }
 }
 
-fn ops_for(setup: InstallSetup, on: bool) -> (InstallOps, Arc<SwitchFlag>) {
+pub(crate) fn ops_for(setup: InstallSetup, on: bool) -> (InstallOps, Arc<SwitchFlag>) {
     let switch = SwitchFlag::in_memory(INSTALL, INSTALL_OFF, on);
     let stamp = Mutex::new(1_794_000_000_000u64);
     let ops = InstallOps::new(setup, switch.clone()).with_clock(Box::new(move || {
@@ -105,11 +105,11 @@ fn ops_for(setup: InstallSetup, on: bool) -> (InstallOps, Arc<SwitchFlag>) {
     (ops, switch)
 }
 
-fn settings_text(dir: &Dir) -> String {
+pub(crate) fn settings_text(dir: &Dir) -> String {
     fs::read_to_string(dir.path("home/.claude/settings.json")).unwrap()
 }
 
-fn data(text: &str) -> Value {
+pub(crate) fn data(text: &str) -> Value {
     serde_json::from_str(text).unwrap()
 }
 
@@ -143,7 +143,7 @@ fn a_plan_works_with_the_switch_off_and_reads_only() {
     assert_eq!(plan["changed"], true);
     assert_eq!(plan["blocked"], Value::Null);
     assert_eq!(plan["hooks"]["state"], "present");
-    assert_eq!(plan["hooks"]["changes"].as_array().unwrap().len(), 5);
+    assert_eq!(plan["hooks"]["changes"].as_array().unwrap().len(), 6);
     assert!(plan["hooks"]["changes"][0]
         .as_str()
         .unwrap()
@@ -185,7 +185,7 @@ fn apply_and_remove_with_the_switch_off_answer_the_dry_run_and_write_nothing() {
     let apply = ops.run(ops::INSTALL_APPLY, &json!({})).unwrap();
     assert_eq!(
         apply["plan"]["hooks"]["changes"].as_array().unwrap().len(),
-        5
+        6
     );
     assert_eq!(apply["plan"]["action"], "install");
     let remove = ops.run(ops::INSTALL_REMOVE, &json!({})).unwrap();

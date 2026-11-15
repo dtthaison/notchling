@@ -707,6 +707,9 @@ impl Wired {
         relay.start();
         let _ = cluster.held().set(relay.clone());
         bridge.cluster().attach_relay(relay);
+        if let Some(sink) = cluster.failover_sink() {
+            settings.bind_failover(sink);
+        }
         Wired {
             acting,
             codex,

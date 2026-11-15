@@ -318,6 +318,7 @@ impl World {
             &home,
             LocalCmd::IssueToken {
                 secret: secret.clone(),
+                minter: home.clone(),
             },
         );
         let token = JoinToken {

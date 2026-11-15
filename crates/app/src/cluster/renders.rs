@@ -9,7 +9,7 @@ pub const STANDBY: &str = "1122334455667788";
 pub const WORKER: &str = "99aabbccddeeff00";
 pub const THIS_MAC: &str = "MacBook";
 
-pub const VIEWS: [ViewSpec; 6] = [
+pub const VIEWS: [ViewSpec; 8] = [
     ViewSpec {
         name: "cluster",
         size: (WIDTH, HEIGHT),
@@ -28,7 +28,17 @@ pub const VIEWS: [ViewSpec; 6] = [
     ViewSpec {
         name: "cluster-menu",
         size: (WIDTH, HEIGHT),
-        about: "the cluster sheet with the Standby row's menu open (made-up data)",
+        about: "the cluster sheet with the Standby row's menu open: Install Hook is offered on a Mac with no app (made-up data)",
+    },
+    ViewSpec {
+        name: "cluster-install",
+        size: (WIDTH, HEIGHT),
+        about: "the cluster sheet asking to install the hook on the headless Standby, with the plan shown first (made-up data)",
+    },
+    ViewSpec {
+        name: "cluster-install-off",
+        size: (WIDTH, HEIGHT),
+        about: "the cluster sheet after Install Hook on a Standby whose Install switch is off: the line that says so (made-up data)",
     },
     ViewSpec {
         name: "cluster-off",
@@ -50,6 +60,8 @@ pub enum Shown {
     Menu,
     Off,
     Joining,
+    Install,
+    InstallOff,
 }
 
 pub fn shown(name: &str) -> Option<Shown> {
@@ -60,6 +72,8 @@ pub fn shown(name: &str) -> Option<Shown> {
         "cluster-menu" => Some(Shown::Menu),
         "cluster-off" => Some(Shown::Off),
         "cluster-joining" => Some(Shown::Joining),
+        "cluster-install" => Some(Shown::Install),
+        "cluster-install-off" => Some(Shown::InstallOff),
         _ => None,
     }
 }
@@ -99,7 +113,7 @@ fn member(
         "canBeMaster": can_be_master,
         "online": online,
         "client": false,
-        "headless": false,
+        "headless": role == "standby",
         "reference": reference,
         "state": "active",
         "versions": versions,
@@ -200,12 +214,54 @@ pub fn model(full: bool) -> ClusterModel {
     ClusterModel::from_status(&if full { status() } else { empty() }, ME)
 }
 
+fn install_on() -> Value {
+    let mut status = status();
+    if let Some(members) = status["members"].as_array_mut() {
+        for member in members.iter_mut().filter(|m| m["id"] == STANDBY) {
+            member["desired"]["install"] = json!(true);
+        }
+    }
+    status
+}
+
 pub fn model_of(which: Shown) -> ClusterModel {
     match which {
         Shown::Empty => model(false),
         Shown::Many => ClusterModel::from_status(&many(), ME),
         Shown::Off => ClusterModel::from_status(&off(), ME),
         Shown::Joining => ClusterModel::from_status(&joining(true), ME),
-        Shown::Full | Shown::Menu => model(true),
+        Shown::Install => ClusterModel::from_status(&install_on(), ME),
+        Shown::Full | Shown::Menu | Shown::InstallOff => model(true),
     }
+}
+
+pub fn install_plan_reply(on: bool) -> Value {
+    json!({
+        "on": on,
+        "applied": false,
+        "message": "install is off",
+        "plan": {
+            "action": "install",
+            "changed": true,
+            "blocked": null,
+            "hooks": {
+                "file": "/home/maintainer/.claude/settings.json",
+                "state": "present",
+                "read_only": false,
+                "refused": null,
+                "changed": true,
+                "changes": [
+                    "add PreToolUse (AskUserQuestion): '/usr/local/bin/notchling' hook (timeout 300 s)",
+                    "add PermissionRequest (*): '/usr/local/bin/notchling' hook (timeout 300 s)",
+                    "add PreToolUse (*): '/usr/local/bin/notchling' hook --fence (timeout 30 s)",
+                ],
+                "notes": [],
+                "present": [],
+            },
+            "skills": [
+                {"name": "notchling-delegate", "tool": "claude", "path": "/x", "action": "write", "reason": null, "error": null},
+                {"name": "notchling-pages", "tool": "claude", "path": "/x", "action": "write", "reason": null, "error": null},
+            ],
+        },
+    })
 }

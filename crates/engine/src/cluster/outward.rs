@@ -9,16 +9,14 @@ mod shell;
 mod commands_tests;
 #[cfg(test)]
 mod shell_tests;
+#[cfg(test)]
+mod stopped_tests;
 
 const MCP_READS: [&str; 8] = [
     "get", "list", "search", "read", "fetch", "find", "view", "describe",
 ];
 
 const READ_ACTIONS: [&str; 5] = ["read", "get", "list", "view", "query"];
-
-const STOP_TOOLS: [&str; 2] = ["TaskStop", "KillShell"];
-
-const STOP_KEYS: [&str; 3] = ["task_id", "shell_id", "bash_id"];
 
 const MIN_AGENT_ID: usize = 6;
 
@@ -100,12 +98,10 @@ pub fn cut_steps(conv: &Conversation) -> Vec<CutStep> {
             outward: call_outward(call),
         })
         .collect();
-    let stopped = stopped_shells(conv);
     steps.extend(
         conv.shells
             .iter()
             .filter(|shell| !conv.finished_agents.contains_key(&shell.id))
-            .filter(|shell| !stopped.contains(&shell.id.as_str()))
             .map(|shell| CutStep {
                 tool: "Bash".to_string(),
                 summary: shell.title.clone(),
@@ -141,24 +137,6 @@ fn call_outward(call: &ToolCall) -> bool {
     }
     let input = serde_json::from_str(&call.input).unwrap_or_else(|_| json!({}));
     call.kind == ToolKind::Agent || is_outward(&call.name, &input)
-}
-
-fn stopped_shells(conv: &Conversation) -> Vec<&str> {
-    calls_in(&conv.items)
-        .filter(|call| call.finished && !call.is_error && STOP_TOOLS.contains(&call.name.as_str()))
-        .filter_map(|call| {
-            let input: Value = serde_json::from_str(&call.input).ok()?;
-            STOP_KEYS
-                .iter()
-                .find_map(|key| input.get(key).and_then(Value::as_str).map(String::from))
-        })
-        .filter_map(|id| {
-            conv.shells
-                .iter()
-                .find(|shell| shell.id == id)
-                .map(|shell| shell.id.as_str())
-        })
-        .collect()
 }
 
 fn agent_reported(conv: &Conversation, call: &ToolCall) -> bool {

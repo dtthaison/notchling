@@ -15,6 +15,7 @@ fn pending_joiner() -> (Hub, NodeId, NodeId) {
         &m5,
         LocalCmd::IssueToken {
             secret: "hush-secret".to_string(),
+            minter: m5.clone(),
         },
     );
     hub.tick(&w1, 5_000);

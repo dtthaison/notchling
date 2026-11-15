@@ -27,6 +27,7 @@ pub enum Command {
     Hook {
         socket: Option<PathBuf>,
     },
+    HookFence,
     Pages {
         query: String,
         json: bool,
@@ -97,6 +98,7 @@ pub fn usage() -> &'static str {
      notchling cluster join --token-stdin   join the cluster whose token is on stdin\n  \
      notchling service install|uninstall|print [--dir <folder>]\n  \
      notchling hook [--socket <path>]            Claude Code's hook: asks the daemon, passes on any trouble\n  \
+     notchling hook --fence                      Claude Code's PreToolUse hook for cluster sessions: reads the fence file only\n  \
      notchling --version | --help\n\n\
      NOTCHLING_DATA_ROOT=<dir> reads <dir>/claude and <dir>/notchling instead of your own folders.\n\
      service install writes the file and prints the command that loads it; it never loads it."
@@ -110,6 +112,10 @@ fn value(args: &mut impl Iterator<Item = String>, flag: &str) -> Result<PathBuf,
 }
 
 pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Command, String> {
+    let args: Vec<String> = args.into_iter().collect();
+    if args == ["hook", "--fence"] {
+        return Ok(Command::HookFence);
+    }
     let mut args = args.into_iter();
     let Some(first) = args.next() else {
         return Ok(Command::Help);
@@ -285,6 +291,15 @@ mod tests {
         );
         assert!(p(&["hook", "--json"]).is_err());
         assert!(usage().contains("notchling hook"));
+    }
+
+    #[test]
+    fn the_fence_flag_is_a_command_of_its_own() {
+        assert_eq!(p(&["hook", "--fence"]), Ok(Command::HookFence));
+        assert!(p(&["hook", "--fence", "--socket", "/tmp/s.sock"]).is_err());
+        assert!(p(&["hook", "--socket", "/tmp/s.sock", "--fence"]).is_err());
+        assert!(p(&["hook", "--fence", "--fence"]).is_err());
+        assert!(usage().contains("notchling hook --fence"));
     }
 
     #[test]

@@ -3,6 +3,8 @@ use std::path::{Path, PathBuf};
 
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
 
+use super::claims::{Claim, SideCopy};
+use super::failover::{ArmingId, Failover};
 use super::held::{Delivered, Held, HeldQueue};
 use super::id::NodeId;
 use super::jobs::Job;
@@ -237,10 +239,45 @@ pub fn load(cluster_dir: &Path) -> Result<Option<ClusterState>, String> {
     ) -> Result<T, String> {
         value.map_or_else(|| Ok(T::default()), |v| read(&v))
     }
+
+    let failover = match get("failover")? {
+        Some(value) => read::<Failover>(&value)?,
+        None => Failover::Off,
+    };
+    let armed = match get("armed")? {
+        Some(value) => read::<Option<(NodeId, Term)>>(&value)?,
+        None => None,
+    };
+    let holders = match get("holders")? {
+        Some(value) => read::<BTreeMap<NodeId, ArmingId>>(&value)?,
+        None => seeded_holders(&armed),
+    };
+    let claims = match get("claims")? {
+        Some(value) => read::<BTreeMap<String, Claim>>(&value)?,
+        None => BTreeMap::new(),
+    };
+    let side_copies = match get("side_copies")? {
+        Some(value) => read::<Vec<SideCopy>>(&value)?,
+        None => Vec::new(),
+    };
+    let term = read::<Term>(&term)?;
+    let terms = std::iter::once(&term)
+        .chain(armed.iter().map(|(_, t)| t))
+        .chain(holders.values().map(|h| &h.term))
+        .chain(jobs.values().map(|j| &j.term))
+        .chain(claims.values().map(|c| &c.term));
+    for stored in terms {
+        if !stored.storable() {
+            return Err(format!(
+                "cluster.db holds a term the journal can't store: {}",
+                stored.n
+            ));
+        }
+    }
     Ok(Some(ClusterState {
         id: read(&id)?,
         name: read(&name)?,
-        term: read::<Term>(&term)?,
+        term,
         home: read::<NodeId>(&home)?,
         vault: read::<NodeId>(&vault)?,
         members,
@@ -249,6 +286,11 @@ pub fn load(cluster_dir: &Path) -> Result<Option<ClusterState>, String> {
         main: stored(get("main")?)?,
         kept: stored(get("kept")?)?,
         ended: stored(get("ended")?)?,
+        failover,
+        armed,
+        holders,
+        claims,
+        side_copies,
     }))
 }
 
@@ -317,6 +359,14 @@ fn apply(tx: &rusqlite::Transaction<'_>, change: &Change) -> Result<(), String> 
                 .map_err(es)?;
             }
         }
+        Change::Failover(failover) => put_state(tx, "failover", &text(failover)?)?,
+        Change::Armed(armed) => {
+            keep_seeded_holders(tx)?;
+            put_state(tx, "armed", &text(armed)?)?;
+        }
+        Change::Holders(holders) => put_state(tx, "holders", &text(holders)?)?,
+        Change::Claims(claims) => put_state(tx, "claims", &text(claims)?)?,
+        Change::SideCopies(copies) => put_state(tx, "side_copies", &text(copies)?)?,
         Change::Cluster {
             id,
             name,
@@ -341,6 +391,53 @@ fn apply(tx: &rusqlite::Transaction<'_>, change: &Change) -> Result<(), String> 
         }
     }
     Ok(())
+}
+
+fn seeded_holders(armed: &Option<(NodeId, Term)>) -> BTreeMap<NodeId, ArmingId> {
+    armed
+        .iter()
+        .map(|(node, term)| {
+            (
+                node.clone(),
+                ArmingId {
+                    term: term.clone(),
+                    seq: 0,
+                },
+            )
+        })
+        .collect()
+}
+
+fn keep_seeded_holders(tx: &rusqlite::Transaction<'_>) -> Result<(), String> {
+    let es = |e: rusqlite::Error| e.to_string();
+    let value = |key: &str| -> Result<Option<String>, String> {
+        tx.query_row("SELECT value FROM state WHERE key = ?1", [key], |r| {
+            r.get(0)
+        })
+        .optional()
+        .map_err(es)
+    };
+    if value("holders")?.is_some() {
+        return Ok(());
+    }
+    let Some(armed) = value("armed")? else {
+        return Ok(());
+    };
+    let armed = read::<Option<(NodeId, Term)>>(&armed)?;
+    if armed.is_some() {
+        put_state(tx, "holders", &text(&seeded_holders(&armed))?)?;
+    }
+    Ok(())
+}
+
+fn put_state(tx: &rusqlite::Transaction<'_>, key: &str, value: &str) -> Result<(), String> {
+    tx.execute(
+        "INSERT INTO state (key, value) VALUES (?1, ?2)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        params![key, value],
+    )
+    .map(|_| ())
+    .map_err(|e| e.to_string())
 }
 
 pub fn wipe(cluster_dir: &Path) -> Result<(), String> {

@@ -98,6 +98,27 @@ pub fn desired(node: &str, desired: Desired) -> Request {
     }
 }
 
+pub fn failover(value: &str) -> Request {
+    Request {
+        op: ops::CLUSTER_FAILOVER_SET,
+        args: json!({"value": value}),
+    }
+}
+
+pub fn install_plan(node: &str) -> Request {
+    Request {
+        op: ops::INSTALL_PLAN,
+        args: json!({"node": node}),
+    }
+}
+
+pub fn install_apply(node: &str) -> Request {
+    Request {
+        op: ops::INSTALL_APPLY,
+        args: json!({"node": node}),
+    }
+}
+
 pub fn remove(node: &str) -> Request {
     Request {
         op: ops::CLUSTER_REMOVE,

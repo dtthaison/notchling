@@ -2,6 +2,7 @@ use crate::acting_ops::Room;
 use crate::cluster_blobs::Blobs;
 use crate::cluster_dispatch::{DispatchCalls, DispatchOps, NodeReporter};
 use crate::cluster_dispatch_delegate::RealDelegate;
+use crate::cluster_failover_setting::{FailoverSink, KeyMirror, NodeSink};
 use crate::cluster_forward::{Forward, NodeForward};
 use crate::cluster_join::{JoinAsker, JOIN_WAIT};
 use crate::cluster_main::{MainFollower, Originators, EVERY as MAIN_EVERY};
@@ -37,6 +38,7 @@ use crate::versions_ops::VersionsOps;
 use notchling_cluster_net::{load_or_make, Pins, TcpTls, PORT};
 use notchling_engine::bridge::net::bridge::host_name;
 use notchling_engine::cluster::core::SnapAsk;
+use notchling_engine::cluster::failover::Failover;
 use notchling_engine::cluster::versions::BridgeFacts;
 use notchling_engine::cluster::wire::{Origin, OriginTier};
 use notchling_engine::cluster::{Desired, NodeId};
@@ -152,6 +154,7 @@ pub struct ClusterHooks {
     pub inbox: Arc<InboxOps>,
     pub snaps: Arc<SnapRunner>,
     pub prompts: Arc<RemotePrompts>,
+    pub failover: KeyMirror,
 }
 
 impl Hooks for ClusterHooks {
@@ -185,6 +188,10 @@ impl Hooks for ClusterHooks {
 
     fn peer_prompt(&self, from: &NodeId, event: &str, data: &Value) {
         self.prompts.on_event(from, event, data);
+    }
+
+    fn failover(&self, value: Failover, order: u64) {
+        self.failover.follow(value, order);
     }
 }
 
@@ -467,6 +474,7 @@ impl ClusterParts {
             inbox,
             snaps: snap_run.clone(),
             prompts: prompts.clone(),
+            failover: KeyMirror::new(layout.data_dir.join("settings.json"), room.clone()),
         });
         let node = start_node(
             layout,
@@ -548,6 +556,11 @@ impl ClusterParts {
             link: move_link,
             held,
         }
+    }
+
+    pub fn failover_sink(&self) -> Option<Arc<dyn FailoverSink>> {
+        let node = self.node.as_ref().ok()?;
+        Some(Arc::new(NodeSink::new(node.clone())))
     }
 
     pub fn forward(&self) -> Option<Arc<dyn Forward>> {

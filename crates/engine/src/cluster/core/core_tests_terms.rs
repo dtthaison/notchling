@@ -1,12 +1,32 @@
 use serde_json::{json, Value};
 
 use super::{Effect, Input, LocalCmd, NodeCore, CALL_MS, DEDUPE_MS, PING_MS, WORKSPACE_CALL_MS};
-use crate::cluster::id::Tool;
-use crate::cluster::members::Term;
+use crate::cluster::id::{NodeId, Tool};
+use crate::cluster::members::{MemberState, Term};
 use crate::cluster::testkit::{id, versions};
 use crate::cluster::wire::{Msg, Origin, OriginTier};
 
-use super::core_tests::{answers, dispatch_cmd, pair, run_locals};
+use super::core_tests::{answers, dispatch_cmd, pair, run_locals, Hub};
+
+fn promotable_pair() -> (Hub, NodeId, NodeId) {
+    let mut hub = Hub::new();
+    let m5 = hub.add("m5", "macos", true);
+    let w1 = hub.add("w1", "macos", true);
+    hub.create("m5");
+    hub.join("m5", "w1", "macos", true);
+    (hub, m5, w1)
+}
+
+fn promotable_trio() -> (Hub, NodeId, NodeId, NodeId) {
+    let mut hub = Hub::new();
+    let m5 = hub.add("m5", "macos", true);
+    let w1 = hub.add("w1", "macos", true);
+    let p2 = hub.add("p2", "macos", true);
+    hub.create("m5");
+    hub.join("m5", "w1", "macos", true);
+    hub.join("m5", "p2", "macos", true);
+    (hub, m5, w1, p2)
+}
 
 #[test]
 fn call_reply_correlates_and_times_out() {
@@ -206,10 +226,10 @@ fn dedupe_forgets_after_its_window() {
 
 #[test]
 fn older_term_call_is_refused() {
-    let (mut hub, m5, w1) = pair();
+    let (mut hub, m5, w1, p2) = promotable_trio();
     let newer = Term {
         n: 3,
-        node: id("w1"),
+        node: p2.clone(),
     };
     hub.run(
         &w1,
@@ -219,7 +239,7 @@ fn older_term_call_is_refused() {
                 node: m5.clone(),
                 cluster: "c1".to_string(),
                 term: newer.clone(),
-                home: id("w1"),
+                home: p2.clone(),
             },
         },
     );
@@ -255,15 +275,130 @@ fn older_term_call_is_refused() {
     assert_eq!(err.code, "stale_term");
     let body: Value = serde_json::from_str(&err.message).expect("json");
     assert_eq!(body["term"]["n"], 3);
-    assert_eq!(body["home"], json!(id("w1")));
+    assert_eq!(body["home"], json!(p2));
+}
+
+#[test]
+fn install_forward_from_a_primary_that_lost_its_term_is_refused() {
+    let (mut hub, m5, w1, p2) = promotable_trio();
+    let newer = Term {
+        n: 3,
+        node: p2.clone(),
+    };
+    hub.run(
+        &w1,
+        Input::Msg {
+            from: m5.clone(),
+            msg: Msg::HelloOk {
+                node: m5.clone(),
+                cluster: "c1".to_string(),
+                term: newer.clone(),
+                home: p2.clone(),
+            },
+        },
+    );
+    for (call_id, (op, term)) in [
+        (
+            "install.apply",
+            Term {
+                n: 1,
+                node: id("m5"),
+            },
+        ),
+        (
+            "install.plan",
+            Term {
+                n: 1,
+                node: id("m5"),
+            },
+        ),
+        ("install.apply", newer.clone()),
+        ("install.plan", newer.clone()),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let effects = hub.run(
+            &w1,
+            Input::Msg {
+                from: m5.clone(),
+                msg: Msg::Call {
+                    id: 20 + call_id as u64,
+                    op: op.to_string(),
+                    args: json!({}),
+                    origin: Origin {
+                        node: m5.clone(),
+                        tier: OriginTier::App,
+                    },
+                    term,
+                },
+            },
+        );
+        assert!(run_locals(&effects).is_empty(), "{op}");
+        let refused = effects.iter().any(|e| {
+            matches!(
+                e,
+                Effect::Send {
+                    msg: Msg::Reply { err: Some(_), .. },
+                    ..
+                }
+            )
+        });
+        assert!(refused, "{op}");
+    }
+}
+
+#[test]
+fn a_call_stamped_with_a_newer_term_is_judged_after_adopting_it() {
+    for (op, tier) in [
+        ("install.apply", OriginTier::App),
+        ("install.plan", OriginTier::App),
+        ("session.new", OriginTier::Node),
+        ("shell.run", OriginTier::App),
+    ] {
+        let (mut hub, m5, w1, p2) = promotable_trio();
+        let newer = Term {
+            n: 2,
+            node: p2.clone(),
+        };
+        let effects = hub.run(
+            &w1,
+            Input::Msg {
+                from: m5.clone(),
+                msg: Msg::Call {
+                    id: 31,
+                    op: op.to_string(),
+                    args: json!({}),
+                    origin: Origin {
+                        node: m5.clone(),
+                        tier,
+                    },
+                    term: newer.clone(),
+                },
+            },
+        );
+        assert_eq!(hub.core(&w1).highest_term(), Some(&newer), "{op}");
+        assert_eq!(hub.core(&w1).state().expect("state").home, p2, "{op}");
+        assert!(run_locals(&effects).is_empty(), "{op} ran");
+        let refused = effects.iter().any(|e| {
+            matches!(
+                e,
+                Effect::Send {
+                    msg: Msg::Reply { err: Some(_), .. },
+                    ..
+                }
+            )
+        });
+        assert!(refused, "{op}");
+    }
 }
 
 #[test]
 fn newer_term_is_adopted() {
-    let (mut hub, m5, w1) = pair();
+    let (mut hub, m5, w1, p2) = promotable_trio();
     let newer = Term {
         n: 2,
-        node: id("w1"),
+        node: p2.clone(),
     };
     let effects = hub.run(
         &w1,
@@ -290,13 +425,13 @@ fn newer_term_is_adopted() {
         },
     );
     assert_eq!(hub.core(&w1).highest_term(), Some(&newer));
-    assert_eq!(hub.core(&w1).state().expect("state").home, id("w1"));
+    assert_eq!(hub.core(&w1).state().expect("state").home, p2);
     assert!(effects.iter().any(|e| matches!(e, Effect::Persist { .. })));
 }
 
 #[test]
 fn home_seeing_newer_term_steps_down() {
-    let (mut hub, m5, w1) = pair();
+    let (mut hub, m5, w1) = promotable_pair();
     let newer = Term {
         n: 2,
         node: id("w1"),
@@ -426,4 +561,275 @@ fn a_workers_node_sessions_call_is_refused() {
     );
     assert!(effects.iter().any(|e| matches!(e, Effect::Send { msg: Msg::Reply { err: Some(e), .. }, .. } if e.code == "forbidden")));
     assert!(run_locals(&effects).is_empty());
+}
+
+fn refused_reply(effects: &[Effect]) -> bool {
+    effects.iter().any(|e| {
+        matches!(
+            e,
+            Effect::Send {
+                msg: Msg::Reply { err: Some(_), .. },
+                ..
+            } | Effect::Send {
+                msg: Msg::Refused { .. },
+                ..
+            }
+        )
+    })
+}
+
+#[test]
+fn a_worker_cannot_forge_a_term_on_a_call() {
+    for (op, tier) in [
+        ("session.new", OriginTier::App),
+        ("install.apply", OriginTier::App),
+        ("node.load", OriginTier::Node),
+    ] {
+        let (mut hub, m5, w1) = pair();
+        let forged = Term {
+            n: 2,
+            node: id("w1"),
+        };
+        let effects = hub.run(
+            &m5,
+            Input::Msg {
+                from: w1.clone(),
+                msg: Msg::Call {
+                    id: 41,
+                    op: op.to_string(),
+                    args: json!({}),
+                    origin: Origin {
+                        node: w1.clone(),
+                        tier,
+                    },
+                    term: forged,
+                },
+            },
+        );
+        assert!(run_locals(&effects).is_empty(), "{op} ran");
+        assert!(refused_reply(&effects), "{op}");
+        let state = hub.core(&m5).state().expect("state");
+        assert_eq!(state.home, m5, "{op}");
+        assert_eq!(state.term.n, 1, "{op}");
+        assert!(
+            !effects
+                .iter()
+                .any(|e| matches!(e, Effect::SteppedDown { .. })),
+            "{op}"
+        );
+    }
+}
+
+#[test]
+fn a_forged_term_on_hello_and_refused_is_not_adopted() {
+    let (mut hub, m5, w1) = pair();
+    let forged = Term {
+        n: 5,
+        node: id("w1"),
+    };
+    let effects = hub.run(
+        &m5,
+        Input::Msg {
+            from: w1.clone(),
+            msg: Msg::Hello {
+                node: w1.clone(),
+                cluster: Some("c1".to_string()),
+                versions: versions("linux"),
+                boot_id: "boot".to_string(),
+                term: Some(forged.clone()),
+            },
+        },
+    );
+    assert!(refused_reply(&effects));
+    assert_eq!(hub.core(&m5).state().expect("state").home, m5);
+    hub.run(
+        &m5,
+        Input::Msg {
+            from: w1.clone(),
+            msg: Msg::Refused {
+                reason: "stale_term".to_string(),
+                term: Some(forged.clone()),
+                home: Some(w1.clone()),
+            },
+        },
+    );
+    let state = hub.core(&m5).state().expect("state");
+    assert_eq!(state.home, m5);
+    assert_eq!(state.term.n, 1);
+    let unknown = Term {
+        n: 6,
+        node: id("nobody"),
+    };
+    hub.run(
+        &m5,
+        Input::Msg {
+            from: w1.clone(),
+            msg: Msg::HelloOk {
+                node: w1.clone(),
+                cluster: "c1".to_string(),
+                term: unknown,
+                home: id("nobody"),
+            },
+        },
+    );
+    assert_eq!(hub.core(&m5).state().expect("state").home, m5);
+}
+
+#[test]
+fn a_forged_members_push_from_a_worker_is_not_followed() {
+    let (mut hub, m5, w1) = pair();
+    let state = hub.core(&m5).state().expect("state").clone();
+    let effects = hub.run(
+        &m5,
+        Input::Msg {
+            from: w1.clone(),
+            msg: Msg::Members {
+                term: Term {
+                    n: 2,
+                    node: id("w1"),
+                },
+                home: w1.clone(),
+                vault: None,
+                members: state.members.values().cloned().collect(),
+                failover: None,
+                armed: true,
+            },
+        },
+    );
+    assert!(refused_reply(&effects));
+    let after = hub.core(&m5).state().expect("state");
+    assert_eq!(after.home, m5);
+    assert_eq!(after.term.n, 1);
+    assert!(!effects
+        .iter()
+        .any(|e| matches!(e, Effect::SteppedDown { .. })));
+}
+
+#[test]
+fn a_real_promotes_term_is_still_adopted_everywhere() {
+    let (mut hub, m5, w1) = promotable_pair();
+    let newer = Term {
+        n: 2,
+        node: id("w1"),
+    };
+    let hello_ok = hub.run(
+        &m5,
+        Input::Msg {
+            from: w1.clone(),
+            msg: Msg::HelloOk {
+                node: w1.clone(),
+                cluster: "c1".to_string(),
+                term: newer.clone(),
+                home: id("w1"),
+            },
+        },
+    );
+    assert!(hello_ok
+        .iter()
+        .any(|e| matches!(e, Effect::SteppedDown { .. })));
+    assert_eq!(hub.core(&m5).state().expect("state").home, id("w1"));
+}
+
+#[test]
+fn the_primarys_armed_flag_is_forgotten_with_its_term() {
+    let (mut hub, m5, w1) = promotable_pair();
+    let state = hub.core(&w1).state().expect("state").clone();
+    let members: Vec<_> = state.members.values().cloned().collect();
+    hub.run(
+        &w1,
+        Input::Msg {
+            from: m5.clone(),
+            msg: Msg::Members {
+                term: state.term.clone(),
+                home: m5.clone(),
+                vault: None,
+                members,
+                failover: Some(crate::cluster::failover::Failover::After30m),
+                armed: true,
+            },
+        },
+    );
+    assert_eq!(hub.core(&w1).status()["failover"]["armed"], true);
+    hub.run(
+        &w1,
+        Input::Msg {
+            from: m5.clone(),
+            msg: Msg::HelloOk {
+                node: m5.clone(),
+                cluster: "c1".to_string(),
+                term: Term {
+                    n: 2,
+                    node: id("m5"),
+                },
+                home: m5.clone(),
+            },
+        },
+    );
+    assert_eq!(hub.core(&w1).status()["failover"]["armed"], false);
+}
+
+fn removed_list(hub: &Hub, who: &NodeId, source: &NodeId) -> Vec<crate::cluster::members::Member> {
+    let mut members: Vec<_> = hub
+        .core(source)
+        .state()
+        .expect("state")
+        .members
+        .values()
+        .cloned()
+        .collect();
+    for member in members.iter_mut().filter(|m| m.id == *who) {
+        member.state = MemberState::Removed;
+    }
+    members
+}
+
+#[test]
+fn a_forged_members_push_cannot_wipe_a_node() {
+    let (mut hub, m5, w1) = pair();
+    let on_primary = hub.run(
+        &m5,
+        Input::Msg {
+            from: w1.clone(),
+            msg: Msg::Members {
+                term: Term {
+                    n: 2,
+                    node: id("w1"),
+                },
+                home: w1.clone(),
+                vault: None,
+                members: removed_list(&hub, &m5, &m5),
+                failover: None,
+                armed: false,
+            },
+        },
+    );
+    assert!(refused_reply(&on_primary));
+    assert!(!on_primary.iter().any(|e| matches!(e, Effect::Wipe)));
+    assert_eq!(hub.core(&m5).state().expect("state").home, m5);
+
+    let (mut hub, m5, w1) = pair();
+    let w2 = hub.add("w2", "linux", false);
+    hub.join("m5", "w2", "linux", false);
+    hub.linked.push((w1.clone(), w2.clone()));
+    hub.run(&w1, Input::Linked { peer: w2.clone() });
+    hub.run(&w2, Input::Linked { peer: w1.clone() });
+    let state = hub.core(&w1).state().expect("state").clone();
+    assert_eq!(state.home, m5);
+    let forged = hub.run(
+        &w1,
+        Input::Msg {
+            from: w2.clone(),
+            msg: Msg::Members {
+                term: state.term.clone(),
+                home: w2.clone(),
+                vault: None,
+                members: removed_list(&hub, &w1, &m5),
+                failover: None,
+                armed: false,
+            },
+        },
+    );
+    assert!(refused_reply(&forged), "{forged:?}");
+    assert!(!forged.iter().any(|e| matches!(e, Effect::Wipe)));
+    assert_eq!(hub.core(&w1).state().expect("state").home, m5);
 }

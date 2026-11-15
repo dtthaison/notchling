@@ -1,5 +1,6 @@
 mod control;
 mod dispatch;
+mod failover_set;
 mod forward;
 mod join;
 mod link;
@@ -10,12 +11,14 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::{json, Value};
 
+use super::failover::Failover;
 use super::id::{NodeId, Tool};
 use super::jobs::JobSpec;
 use super::join::{JoinToken, Tokens};
 use super::members::{Desired, Member, MemberState, Term};
 use super::snapshot::{Observed, Trigger};
 use super::state::{role_of, Applied, Change, ClusterState, Command, CommandError, JournalEntry};
+use super::text::{plain, NAME_MAX};
 use super::versions::Versions;
 use super::wire::{Msg, Origin, OriginTier, WireError};
 use crate::sessions::Agent;
@@ -34,6 +37,10 @@ pub const STATUS_JOBS: usize = 50;
 pub const JOIN_ANSWER_MS: u64 = 15_000;
 pub const DIAL_BACKOFF_MS: (u64, u64) = (1_000, 60_000);
 pub const DEDUPE_MS: u64 = 300_000;
+pub const MAX_TERM_STEP: u64 = 64;
+pub const REASON_MAX: usize = 200;
+pub const PEER_STALE_TERM: &str = "peer_stale_term";
+pub const VERSIONS_GAP_MS: u64 = 10_000;
 
 #[derive(Clone, Debug)]
 pub enum Input {
@@ -73,6 +80,7 @@ pub enum LocalCmd {
     },
     IssueToken {
         secret: String,
+        minter: NodeId,
     },
     Approve {
         node: NodeId,
@@ -96,6 +104,9 @@ pub enum LocalCmd {
     },
     SetVersions {
         versions: Versions,
+    },
+    SetFailover {
+        failover: Failover,
     },
     Dispatch {
         key: String,
@@ -189,6 +200,8 @@ pub enum Effect {
         addr: Option<String>,
         can_be_master: bool,
         headless: bool,
+        minter: NodeId,
+        minter_name: String,
     },
     SteppedDown {
         term: Term,
@@ -209,6 +222,12 @@ struct Peer {
     last_heard: u64,
     last_ping: u64,
     last_hello: u64,
+}
+
+#[derive(Clone, Debug, Default)]
+struct VersionsGate {
+    last: Option<u64>,
+    held: Option<Versions>,
 }
 
 #[derive(Clone, Debug)]
@@ -270,6 +289,7 @@ pub struct NodeCore {
     out_calls: BTreeMap<u64, OutCall>,
     local_runs: BTreeMap<u64, Then>,
     seen: BTreeMap<(NodeId, u64), Seen>,
+    versions_gate: BTreeMap<NodeId, VersionsGate>,
     joining: Option<Joining>,
     next_wire: u64,
     next_local: u64,
@@ -278,6 +298,7 @@ pub struct NodeCore {
     aliases: BTreeMap<String, String>,
     snap: snap::SnapCore,
     fence: Option<String>,
+    primary_armed: bool,
     #[cfg(test)]
     pub(crate) skip_term_check: bool,
 }
@@ -303,6 +324,7 @@ impl NodeCore {
             out_calls: BTreeMap::new(),
             local_runs: BTreeMap::new(),
             seen: BTreeMap::new(),
+            versions_gate: BTreeMap::new(),
             joining: None,
             next_wire: 1,
             next_local: 1,
@@ -311,6 +333,7 @@ impl NodeCore {
             aliases: BTreeMap::new(),
             snap: snap::SnapCore::default(),
             fence: None,
+            primary_armed: false,
             #[cfg(test)]
             skip_term_check: false,
         }
@@ -367,7 +390,7 @@ impl NodeCore {
                 };
                 json!({
                     "id": m.id,
-                    "name": m.name,
+                    "name": shown_name(&m.name, &m.id),
                     "role": role,
                     "canBeMaster": m.can_be_master,
                     "online": m.id == self.me || online.contains(&m.id),
@@ -407,7 +430,7 @@ impl NodeCore {
         json!({
             "cluster": {
                 "id": state.id,
-                "name": state.name,
+                "name": plain(&state.name, NAME_MAX),
                 "term": state.term,
                 "home": state.home,
                 "vault": state.vault,
@@ -418,6 +441,7 @@ impl NodeCore {
             "jobs": jobs,
             "main": state.main.keys().collect::<Vec<_>>(),
             "kept": state.kept,
+            "failover": self.failover_status(state),
         })
     }
 
@@ -489,8 +513,8 @@ impl NodeCore {
                 entry,
                 changes: applied.changes.clone(),
             });
+            self.changed = true;
         }
-        self.changed = true;
         Ok(applied.changes)
     }
 
@@ -538,7 +562,7 @@ impl NodeCore {
         self.state
             .as_ref()
             .and_then(|s| s.members.get(id))
-            .map(|m| m.name.clone())
+            .map(|m| shown_name(&m.name, &m.id))
             .unwrap_or_else(|| id.to_string())
     }
 
@@ -565,18 +589,52 @@ impl NodeCore {
     }
 }
 
+pub(super) fn shown_name(name: &str, id: &NodeId) -> String {
+    let shown = plain(name, NAME_MAX);
+    if shown.is_empty() {
+        return id.to_string();
+    }
+    shown
+}
+
+pub(super) fn shown_members(members: Vec<Member>) -> Vec<Member> {
+    members
+        .into_iter()
+        .map(|mut m| {
+            m.name = shown_name(&m.name, &m.id);
+            m
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod core_tests;
 #[cfg(test)]
+mod core_tests_adopt;
+#[cfg(test)]
+mod core_tests_clean;
+#[cfg(test)]
 mod core_tests_dispatch;
 #[cfg(test)]
+mod core_tests_failover;
+#[cfg(test)]
+mod core_tests_flood;
+#[cfg(test)]
 mod core_tests_headless;
+#[cfg(test)]
+mod core_tests_heal;
 #[cfg(test)]
 mod core_tests_jobs;
 #[cfg(test)]
 mod core_tests_joining;
 #[cfg(test)]
 mod core_tests_main;
+#[cfg(test)]
+mod core_tests_minter;
+#[cfg(test)]
+mod core_tests_refused;
+#[cfg(test)]
+mod core_tests_relay;
 #[cfg(test)]
 mod core_tests_snap;
 #[cfg(test)]

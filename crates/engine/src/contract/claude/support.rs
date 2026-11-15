@@ -61,7 +61,7 @@ pub fn support(c: Capability) -> Support {
         Capability::DelegateCaller => Support::native("CLAUDE_CODE_SESSION_ID"),
         Capability::SetupRules => Support::gap("design: 0019"),
         Capability::SetupSkills => Support::native("install::skills writes the notchling-* skills"),
-        Capability::SetupHooks => Support::native("install::hooks writes Notchling's five hooks"),
+        Capability::SetupHooks => Support::native("install::hooks writes Notchling's six hooks"),
         Capability::VersionDetect => Support::gap("design: version-sync"),
         Capability::VersionUpdate => Support::gap("design: version-sync"),
         Capability::SearchText => Support::native("Transcript text in Search's sessions corpus"),

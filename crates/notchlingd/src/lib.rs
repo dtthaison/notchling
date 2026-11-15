@@ -24,6 +24,7 @@ pub mod cluster_cli;
 pub mod cluster_dispatch;
 pub mod cluster_dispatch_delegate;
 mod cluster_driver;
+pub mod cluster_failover_setting;
 pub mod cluster_forward;
 pub mod cluster_host_facts;
 pub mod cluster_join;
@@ -59,6 +60,7 @@ pub mod git_ops;
 mod held_guard;
 pub mod held_ops;
 pub mod hook;
+pub mod hook_fence;
 pub mod hook_ops;
 pub mod hook_output;
 pub mod hook_pages;
@@ -186,6 +188,8 @@ mod held_ops_tests;
 #[cfg(test)]
 mod held_race_tests;
 #[cfg(test)]
+mod hook_fence_tests;
+#[cfg(test)]
 mod hook_ops_tests;
 #[cfg(test)]
 mod hook_pages_tests;
@@ -199,6 +203,10 @@ mod inbox_ops_more_tests;
 mod inbox_ops_tests;
 #[cfg(test)]
 mod install_events_tests;
+#[cfg(test)]
+mod install_ops_cluster_tests;
+#[cfg(test)]
+mod install_ops_fence_tests;
 #[cfg(test)]
 mod install_ops_tests;
 #[cfg(test)]
@@ -323,6 +331,10 @@ pub fn run(command: Command) -> i32 {
         Command::Settings { args } => settings_cli::run(&args),
         Command::Cluster { args } => cluster_cli::run(&args),
         Command::Service { action, dir } => run_service(action, dir.as_deref()),
+        Command::HookFence => match Layout::from_env(None) {
+            Some(l) => hook_fence::run(&l),
+            None => 0,
+        },
         Command::Hook { socket } => match Layout::from_env(socket.as_deref()) {
             Some(l) => hook::run(&l),
             None => 0,

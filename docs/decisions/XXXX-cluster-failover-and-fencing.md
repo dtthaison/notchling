@@ -1,0 +1,57 @@
+# XXXX: Cluster v1 failover and fencing: a long lease from one Standby, a gate at every tool call
+
+## Context
+
+The primary of a cluster (the laptop m5) can vanish mid-turn: asleep in a bag, crashed, off the network. Its sessions are then stuck, and moving them to a Standby (m1) risks two machines running tool calls in the same session. Plan E of cluster v1 is how the primary's work moves, safely. Facts as of 2026-11-15:
+
+- [XXXX-cluster-v1-nodes](XXXX-cluster-v1-nodes.md) gives one primary, Standbys, Workers, terms `(n, node)` that only grow, and "no short lease". A primary that can't reach its Standby is never paused by that alone.
+- The spec's review found that self-fencing never reached the tools (a paused daemon doesn't stop `claude`), and that clocks differ across sleep. A fence has to act at the tool call and be measured on a clock that counts sleep (`platform::clock::boot_ms`).
+- A turn cut by a lost machine may have acted outward (a `git push`, a published page). Resuming must never repeat it.
+- Claude Code hooks run before every tool call, in a process that may not wait on a daemon. [0007](0007-local-api-tiers.md) accepts that an agent with a shell can rewrite any file at rest, the fence file included.
+- The maintainer decided on 2026-11-14 (overview): no short lease, a failover setting, manual promote, return of the old primary. On 2026-11-15 he decided plan F (FCM, phone push) is dropped: v1 has no phone push.
+
+## Decision
+
+- **Automatic Failover** is a setting, `clusterFailover`: Off (the default), 30 minutes or 1 hour. It is one value for the cluster, journaled by the primary, and the settings key only mirrors it: the journal wins, so a change made while the primary can't be reached fails and the key keeps the cluster's value. Its class is Ask ([0020](0020-agents-change-settings-by-class.md)): an agent may only ask, because the setting changes what runs where.
+- **One failover target.** With failover on, the first ready Can Be Master member by join order that isn't the primary is the target. Only it promotes by itself, and only once it is **armed**: it granted the primary a lease at the current term and the primary heard it. Every other Can Be Master machine is promoted by hand only.
+- **A long lease, measured by the primary.** The primary asks the target to renew every 30 seconds. The lease runs from the primary's ask on its own boot clock, never from the answer, so sleep counts and clocks need not agree. The primary's `Lease` gates run out `FENCE_LEAD_MS` (2 minutes) before the target may promote; a Standby that rebooted waits a whole delay. The invariant: for every node that may promote by itself at time P, the primary's gates close at least 2 minutes before P, across target changes and primary restarts.
+- **Holders, one at a time.** A node that may hold an unreleased grant is a **holder**, journaled with an arming id ordered by term then journal seq. A holder leaves only by a `Released` the primary journals when it reports Off; a setting change, a removal, a demotion or a new term never forgets one. At most one holder at a time: a new target stays unarmed (manual promote only) until the old holder is released. After a primary restart a holder with no hold in memory makes the gates 0 until it grants again or is released, and a new primary after a promote pauses its `Lease` sessions until every remaining holder is heard or released.
+- **A gate per session, at the tool call.** Each node with cluster sessions writes a fence file (`cluster/fence.json`: term, boot id, a gate per session, valid until a boot-clock time). A global `PreToolUse` hook, `notchling hook --fence`, reads only that file: no socket, no process, at most 64 KB. A gate is `Lease` (would move: passes until the lease runs out), `Free` (won't move: always passes), `Moved` (continues on another machine) or `Waiting` (another machine has newer work in it). A file that exists but can't be used waits and then denies, never passes; another boot id waits, so a stale file after a reboot never passes. The hook waits at most 20 seconds inside one 25-second budget, and its deny says what to do.
+- **The fence hook installs with Install Hook on every Mac**, in a cluster or not, as the sixth hook slot. Outside a cluster it always passes. A headless Standby gets it through Install Hook forwarded by the primary: a plan shown first, then apply, and only if that node's own `install` switch is on.
+- **Terms with node ids** fence every machine. A promote bumps the term before any session starts and pushes it; Workers refuse the older term from then on, and a primary that sees a higher term steps down at once and stops the sessions it lost.
+- **A manual promote relays when it can and asks when it can't show safety.** The candidate asks the primary directly and through each linked Can Be Master member for 10 seconds. Any answer means nothing moves and the phone's commands keep going through the relay. With none, an automatic promote at its deadline is safe; any other promote needs the maintainer to confirm the risk ("If it's still running, its sessions keep going until it hears of this"). The promote is a pure saga (`engine::cluster::promote`) and a machine with no snapshot controls jobs only.
+- **Claims, Take Back and side copies.** Ownership of a moving session is a claim with its own counter, so an old primary that comes back, a Take Back and Continue From This Copy settle on one owner, and the losing copy is kept. The owner records `touched` before the first tool call it lets through. Work an old primary did after the set its successor resumed from is a **side copy**: kept on that machine, never deleted, never merged; Hide only hides it from the list. Take Back moves side copies aside first and then hands the primary back. An old primary back while the newer one is off continues the sessions the newer one never touched and waits on the rest, offering Continue From This Copy; when unsure it waits.
+- **Cut steps are never rerun.** Classifying a step as outward fails safe: an uncertain parse counts as outward, a raw-word backstop catches the common write verbs, `gh`, `kubectl`, `helm` and MCP tools are outward unless a known read, and unfinished background work counts. A cut step raises an inbox item (Continue sends one reply, or Done); nothing is sent by itself. The maintainer accepted these rules on 2026-11-15.
+- **Codex turns are fenced in the daemon only**: a gated Codex session's `codex.send` asks the fence first and a gate that runs out interrupts a running turn. Codex CLI sessions started outside Notchling can't be fenced and are never main sessions; Antigravity and shell sessions are never main either.
+- **Notifications stay in the inbox.** Failover, primary-unreachable, paused-step and primary-back notices are inbox items; the phone sees them when it connects. There is no phone push in v1 (decided 2026-11-15), so a failover while the phone is away reaches it only as an item.
+- Promote, Take Back, Continue From This Copy and the risk confirm are maintainer acts only: app tier, or the phone with `acting` and the bridge on. An agent never gets them.
+
+## Consequences
+
+- With failover off nothing promotes by itself and nothing is paused, as the nodes decision says. With it on, a primary that can't reach its target pauses the sessions that would move 2 minutes before the deadline, and its next tool call in them is denied before it learns anything.
+- The safe side costs pauses: a target that is partitioned, removed or demoted and never heard from again keeps the primary's `Lease` sessions paused after its deadline, and there is no automatic failover after a target change until the old holder is released. The same goes for the new primary after a promote. Task 7 puts the replier's applied arming id on the wire so a stale reply can't release a newer arming.
+- A setting change is re-earned by a grant, so there are a few seconds without automatic failover after each change. The settings row and the cluster view say "Automatic failover: not ready" until then.
+- The fence file is a file an agent with a shell can rewrite: the accepted risk of every file ([0007](0007-local-api-tiers.md)). The fence stops the honest case (a paused or moved session), not a hostile one.
+- A false outward costs one inbox item at a promote; a false not-outward could rerun a push. We chose the item. About 3% of real background launches never get a finished notice and show as noise.
+- A confirmed-risk promote and Continue From This Copy can overlap two machines on purpose. The simulator reports those windows and fails on any other overlap.
+- Amends the nodes decision: "no short lease" stays, and a long one from one Standby is added, only with failover on.
+- The hook runs in every tool call on every Mac: one short process, which always passes outside a cluster.
+- Built so far: the pure parts (failover timing, fence file, outward and cut steps, the promote saga, claims, side copies and returns), the failover setting, the fence hook and its install slot, Install Hook for a headless Standby and the TaskStop parser fix. Not built: the core and simulator (Task 7), the fence in the daemon (Task 8, so nothing writes `fence.json` and the hook always passes), the promote, Take Back and Continue ops and the inbox items (Task 10), the phone's Machines popup (Task 12) and the app's Move to, Take Back and side copies (Task 13). They wait on plan D's tasks 7 to 13. Until they land, none of this runs; see [cluster-failover.md](../cluster-failover.md).
+
+## Open items for the maintainer
+
+- Confirm the reworded ship gate (below).
+- Whether the app offers a "Forget This Machine" that journals the release of a holder that is gone for good (rulings R21 and R45). Without it such a holder keeps the primary's sessions paused after its deadline.
+- Whether the fence hook installs on every Mac (as built, ruling R39) or only on cluster members; the change is one line in `InstallOps::wanted`.
+- Whether a Standby Mac not marked client may change the failover setting from its own Settings (as built it may not, R43).
+- Whether to keep Turn Install On/Off in a node's menu (R74), a small addition so Install Hook on a headless machine can be used from the app.
+
+## Status
+
+Proposed. The number is assigned at merge, and the PR that merges it renames this file.
+
+Ship gate: the maintainer accepts this record. Failover and promote notifications stay in the inbox (the phone sees them there when it connects), since v1 has no phone push (decided 2026-11-15). The gate no longer waits on plan F.
+
+## Date
+
+2026-11-15

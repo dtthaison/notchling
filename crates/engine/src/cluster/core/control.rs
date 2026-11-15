@@ -3,11 +3,15 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use super::{Effect, Joining, LocalCmd, NodeCore, Target, Then, CALL_MS, DELEGATE_CALL_MS};
+use super::{
+    shown_members, Effect, Joining, LocalCmd, NodeCore, Target, Then, CALL_MS, DELEGATE_CALL_MS,
+    VERSIONS_GAP_MS,
+};
+use crate::cluster::failover::{armed_at_current, Failover};
 use crate::cluster::id::NodeId;
 use crate::cluster::main_sessions::{aliases, reconcile};
 use crate::cluster::members::{Desired, Member, MemberState, Term};
-use crate::cluster::state::Command;
+use crate::cluster::state::{Command, CommandError};
 use crate::cluster::versions::Versions;
 use crate::cluster::wire::{Msg, Origin, OriginTier, WireError};
 use crate::sessions::Agent;
@@ -71,12 +75,14 @@ impl NodeCore {
                 };
                 self.finish(target, result, out);
             }
-            LocalCmd::IssueToken { secret } => {
-                let result = if self.is_home() {
-                    self.tokens.issue(secret, self.wall_ms);
-                    Ok(json!({}))
-                } else {
+            LocalCmd::IssueToken { secret, minter } => {
+                let result = if !self.is_home() {
                     Err(refusal("forbidden", "only the primary makes join tokens"))
+                } else if !self.may_mint(&minter) {
+                    Err(refusal("forbidden", "only a member makes join tokens"))
+                } else {
+                    self.tokens.issue(secret, minter, &self.me, self.wall_ms);
+                    Ok(json!({}))
                 };
                 self.finish(target, result, out);
             }
@@ -157,6 +163,7 @@ impl NodeCore {
                 self.finish(target, Ok(json!({})), out);
             }
             LocalCmd::SetVersions { versions } => self.set_versions(id, versions, out),
+            LocalCmd::SetFailover { failover } => self.local_failover(id, failover, out),
             LocalCmd::Dispatch { key, spec, tier } => {
                 if self.is_home() {
                     self.dispatch_here(target, key, spec, tier, out);
@@ -206,7 +213,13 @@ impl NodeCore {
         }
     }
 
-    fn relay_to_home(&mut self, local: u64, op: &str, args: Value, out: &mut Vec<Effect>) {
+    pub(super) fn relay_to_home(
+        &mut self,
+        local: u64,
+        op: &str,
+        args: Value,
+        out: &mut Vec<Effect>,
+    ) {
         let origin = Origin {
             node: self.me.clone(),
             tier: OriginTier::App,
@@ -267,8 +280,12 @@ impl NodeCore {
         let target = Target::Local(local);
         if self.is_home() {
             let me = self.me.clone();
-            let _ = self.apply(Command::Versions { node: me, versions }, out);
-            self.push_members(None, out);
+            if self
+                .apply(Command::Versions { node: me, versions }, out)
+                .is_ok_and(|changes| !changes.is_empty())
+            {
+                self.push_members(None, out);
+            }
             self.finish(target, Ok(json!({})), out);
             return;
         }
@@ -299,15 +316,11 @@ impl NodeCore {
         let result = match serde_json::from_value::<Versions>(args.clone()) {
             Ok(versions) => {
                 let from = from.clone();
-                match self.apply(
-                    Command::Versions {
-                        node: from,
-                        versions,
-                    },
-                    out,
-                ) {
-                    Ok(_) => {
-                        self.push_members(None, out);
+                match self.record_versions(&from, versions, out) {
+                    Ok(changed) => {
+                        if changed {
+                            self.push_members(None, out);
+                        }
                         Ok(json!({}))
                     }
                     Err(e) => Err(refusal("refused", e.to_string())),
@@ -316,6 +329,96 @@ impl NodeCore {
             Err(_) => Err(refusal("bad_args", "not a version report")),
         };
         self.finish(target, result, out);
+    }
+
+    pub(super) fn record_versions(
+        &mut self,
+        node: &NodeId,
+        versions: Versions,
+        out: &mut Vec<Effect>,
+    ) -> Result<bool, CommandError> {
+        let known = self.state.as_ref().and_then(|s| s.members.get(node));
+        let Some(member) = known.filter(|m| m.state != MemberState::Removed) else {
+            return self
+                .apply(
+                    Command::Versions {
+                        node: node.clone(),
+                        versions,
+                    },
+                    out,
+                )
+                .map(|changes| !changes.is_empty());
+        };
+        if member.versions.as_ref() == Some(&versions) {
+            if let Some(gate) = self.versions_gate.get_mut(node) {
+                gate.held = None;
+            }
+            return Ok(false);
+        }
+        let boot = self.boot_ms;
+        let gate = self.versions_gate.entry(node.clone()).or_default();
+        if gate
+            .last
+            .is_some_and(|at| boot.saturating_sub(at) < VERSIONS_GAP_MS)
+        {
+            gate.held = Some(versions);
+            return Ok(false);
+        }
+        gate.held = None;
+        let changes = self.apply(
+            Command::Versions {
+                node: node.clone(),
+                versions,
+            },
+            out,
+        )?;
+        if changes.is_empty() {
+            return Ok(false);
+        }
+        if let Some(gate) = self.versions_gate.get_mut(node) {
+            gate.last = Some(boot);
+        }
+        Ok(true)
+    }
+
+    pub(super) fn release_versions(&mut self, out: &mut Vec<Effect>) {
+        if !self.is_home() {
+            self.versions_gate.clear();
+            return;
+        }
+        let boot = self.boot_ms;
+        if let Some(state) = &self.state {
+            self.versions_gate.retain(|id, _| {
+                state
+                    .members
+                    .get(id)
+                    .is_some_and(|m| m.state == MemberState::Active)
+            });
+        }
+        let due: Vec<NodeId> = self
+            .versions_gate
+            .iter()
+            .filter(|(_, g)| {
+                g.held.is_some()
+                    && g.last
+                        .is_none_or(|at| boot.saturating_sub(at) >= VERSIONS_GAP_MS)
+            })
+            .map(|(id, _)| id.clone())
+            .collect();
+        let mut changed = false;
+        for node in due {
+            let Some(versions) = self
+                .versions_gate
+                .get_mut(&node)
+                .and_then(|g| g.held.take())
+            else {
+                continue;
+            };
+            changed |= self.record_versions(&node, versions, out).unwrap_or(false);
+        }
+        if changed {
+            self.push_members(None, out);
+        }
     }
 
     pub(super) fn native_member_set(
@@ -429,6 +532,15 @@ impl NodeCore {
         Ok(json!({}))
     }
 
+    fn may_mint(&self, minter: &NodeId) -> bool {
+        *minter == self.me
+            || self
+                .state
+                .as_ref()
+                .and_then(|s| s.members.get(minter))
+                .is_some_and(|m| m.state == MemberState::Active)
+    }
+
     pub(super) fn shared_members(&self) -> Vec<Member> {
         self.state
             .as_ref()
@@ -454,6 +566,8 @@ impl NodeCore {
             home: state.home.clone(),
             vault: Some(state.vault.clone()),
             members: self.shared_members(),
+            failover: Some(state.failover),
+            armed: armed_at_current(state),
         };
         let targets: Vec<NodeId> = match only {
             Some(n) => vec![n.clone()],
@@ -476,6 +590,7 @@ impl NodeCore {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn on_members(
         &mut self,
         from: NodeId,
@@ -483,6 +598,8 @@ impl NodeCore {
         home: NodeId,
         vault: Option<NodeId>,
         members: Vec<Member>,
+        failover: Option<Failover>,
+        armed: bool,
         out: &mut Vec<Effect>,
     ) {
         let Some(state) = &self.state else {
@@ -503,6 +620,14 @@ impl NodeCore {
             return;
         }
         let (id, name, old_vault) = (state.id.clone(), state.name.clone(), state.vault.clone());
+        if home != term.node || !self.adopt(&term, &from, out) {
+            self.refuse(&from, "bad_term", false, out);
+            return;
+        }
+        if self.state.as_ref().is_none_or(|s| s.home != from) {
+            self.refuse(&from, "bad_term", false, out);
+            return;
+        }
         let removed = members
             .iter()
             .any(|m| m.id == self.me && m.state == MemberState::Removed);
@@ -510,7 +635,6 @@ impl NodeCore {
             self.wipe(out);
             return;
         }
-        self.adopt(&term, out);
         let _ = self.apply(
             Command::Sync {
                 id,
@@ -518,9 +642,10 @@ impl NodeCore {
                 term,
                 home,
                 vault: vault.unwrap_or(old_vault),
-                members,
+                members: shown_members(members),
             },
             out,
         );
+        self.follow_failover(failover, armed, out);
     }
 }

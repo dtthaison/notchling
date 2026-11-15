@@ -1,8 +1,9 @@
 use serde_json::{json, Value};
 
+use super::link::clean_reason;
 use super::{
     Effect, NodeCore, OutCall, Seen, Target, Then, CALL_MS, DEDUPE_MS, MOVE_CALL_MS,
-    WORKSPACE_CALL_MS,
+    PEER_STALE_TERM, WORKSPACE_CALL_MS,
 };
 use crate::cluster::id::NodeId;
 use crate::cluster::members::{MemberState, Term};
@@ -73,7 +74,10 @@ impl NodeCore {
                 home,
                 vault,
                 members,
-            } => self.on_join_ok(from, cluster, name, term, home, vault, members, out),
+                failover,
+            } => self.on_join_ok(
+                from, cluster, name, term, home, vault, members, failover, out,
+            ),
             other => {
                 if !self.peers.get(&from).is_some_and(|p| p.greeted) {
                     return;
@@ -84,7 +88,9 @@ impl NodeCore {
                         home,
                         vault,
                         members,
-                    } => self.on_members(from, term, home, vault, members, out),
+                        failover,
+                        armed,
+                    } => self.on_members(from, term, home, vault, members, failover, armed, out),
                     Msg::Call {
                         id,
                         op,
@@ -180,30 +186,34 @@ impl NodeCore {
             return;
         };
         let my_term = state.term.clone();
-        let facts = state.members.get(&from).map(|m| SenderFacts {
-            id: m.id.clone(),
-            role: role_of(state, &m.id),
-            client: m.client,
-            state: m.state,
-            is_home: state.home == m.id,
-        });
         #[cfg(test)]
         let skip = self.skip_term_check
-            && facts
-                .as_ref()
-                .is_some_and(|_| role_of(state, &self.me) == crate::cluster::id::Role::Worker);
+            && state.members.contains_key(&from)
+            && role_of(state, &self.me) == crate::cluster::id::Role::Worker;
         #[cfg(not(test))]
         let skip = false;
         if !skip && term < my_term {
             let err = self.stale_error();
             out.push(self.publish(
                 "cluster.refused",
-                json!({"from": from, "op": op, "reason": "stale_term"}),
+                json!({"from": from, "op": clean_reason(&op), "reason": "stale_term"}),
             ));
             self.reply(&from, id, Err(err), out);
             return;
         }
-        self.adopt(&term, out);
+        if !self.adopt(&term, &from, out) {
+            self.refused_call(&from, id, &op, "bad_term", out);
+            return;
+        }
+        let facts = self.state.as_ref().and_then(|state| {
+            state.members.get(&from).map(|m| SenderFacts {
+                id: m.id.clone(),
+                role: role_of(state, &m.id),
+                client: m.client,
+                state: m.state,
+                is_home: state.home == m.id,
+            })
+        });
         let Some(facts) = facts else {
             self.refused_call(&from, id, &op, "not a member", out);
             return;
@@ -237,8 +247,15 @@ impl NodeCore {
             "cluster.member.set" => self.native_member_set(target, &args, out),
             "cluster.remove" => self.native_remove(target, &args, out),
             "cluster.main.set" => self.native_main_set(target, &args, out),
+            "cluster.failover.set" => self.native_failover_set(target, &args, out),
             "node.versions" => self.native_versions(target, &args, out),
             _ => {
+                let args = match &target {
+                    Target::Peer(minter, _) if op == "cluster.join.token" => {
+                        json!({"minter": minter})
+                    }
+                    _ => args,
+                };
                 let call = self.next_local;
                 self.next_local += 1;
                 self.local_runs.insert(call, Then::Reply(target));
@@ -256,7 +273,7 @@ impl NodeCore {
     fn refused_call(&mut self, from: &NodeId, id: u64, op: &str, why: &str, out: &mut Vec<Effect>) {
         out.push(self.publish(
             "cluster.refused",
-            json!({"from": from, "op": op, "reason": why}),
+            json!({"from": from, "op": clean_reason(op), "reason": why}),
         ));
         self.reply(from, id, Err(WireError::new("forbidden", why)), out);
     }
@@ -289,11 +306,14 @@ impl NodeCore {
                 if e.code == "stale_term" {
                     if let Ok(v) = serde_json::from_str::<Value>(&e.message) {
                         if let Ok(t) = serde_json::from_value::<Term>(v["term"].clone()) {
-                            self.adopt(&t, out);
+                            self.adopt(&t, &from, out);
                         }
                     }
                 }
-                Err(e)
+                Err(WireError::new(
+                    &clean_reason(&e.code),
+                    clean_reason(&e.message),
+                ))
             }
             None => Ok(ok.unwrap_or(Value::Null)),
         };
@@ -485,6 +505,7 @@ impl NodeCore {
         match target {
             Target::Local(local) => out.push(Effect::Answer { local, result }),
             Target::Peer(from, id) => {
+                let result = result.map_err(relayed);
                 let boot = self.boot_ms;
                 self.seen.insert(
                     (from.clone(), id),
@@ -499,4 +520,11 @@ impl NodeCore {
             }
         }
     }
+}
+
+fn relayed(e: WireError) -> WireError {
+    if e.code == "stale_term" {
+        return WireError::new(PEER_STALE_TERM, e.message);
+    }
+    e
 }

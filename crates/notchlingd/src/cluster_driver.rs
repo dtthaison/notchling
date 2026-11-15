@@ -6,6 +6,7 @@ use crate::cluster_node::{
 use notchling_cluster_net::{Conn, Listener};
 use notchling_engine::bridge::net::crypto::{hex, random_bytes, random_token};
 use notchling_engine::cluster::core::LocalCmd;
+use notchling_engine::cluster::failover::Failover;
 use notchling_engine::cluster::grants::SecretAllow;
 use notchling_engine::cluster::join::{decode_token, encode_token, JoinToken};
 use notchling_engine::cluster::persist;
@@ -58,6 +59,7 @@ pub(crate) struct Driver {
     last: BTreeMap<&'static str, Instant>,
     error: Option<String>,
     published: Value,
+    told_failover: Option<(Failover, u64)>,
     tailscale: bool,
     later: Vec<(Reply, Result<Value, WireError>)>,
 }
@@ -127,6 +129,7 @@ impl Driver {
             last: BTreeMap::new(),
             error,
             published: Value::Null,
+            told_failover: None,
             tailscale: false,
             later: Vec::new(),
         }
@@ -274,7 +277,7 @@ impl Driver {
             }
             In::Local(cmd, answer) => self.local_cmd(cmd, answer),
             In::Create(name, answer) => self.create(name, answer),
-            In::Token(answer) => self.token(answer),
+            In::Token(minter, answer) => self.token(minter, answer),
             In::Join(token, headless, answer) => self.join(&token, headless, answer),
             In::Core(input) => self.step(input),
             In::Link(on) => self.set_link(on),
@@ -290,10 +293,19 @@ impl Driver {
         NodeId::from_fingerprint(fp)
     }
 
+    fn impostor(&self, fp: &str) -> bool {
+        Driver::peer_of(fp)
+            .and_then(|id| self.core.state().and_then(|s| s.members.get(&id)))
+            .is_some_and(|m| m.fingerprint != fp)
+    }
+
     fn line(&mut self, fp: &str, line: &[u8]) {
         let Some(from) = Driver::peer_of(fp) else {
             return;
         };
+        if self.impostor(fp) {
+            return;
+        }
         let Ok(msg) = decode(line) else {
             return;
         };
@@ -353,7 +365,7 @@ impl Driver {
         self.local_cmd(LocalCmd::Create { id, name, me }, Some(answer));
     }
 
-    fn token(&mut self, answer: Answer) {
+    fn token(&mut self, minter: Option<NodeId>, answer: Answer) {
         let Some(state) = self.core.state() else {
             let _ = answer.send(Err(WireError::new(
                 "no_cluster",
@@ -361,6 +373,13 @@ impl Driver {
             )));
             return;
         };
+        if !self.core.is_home() && minter.is_some() {
+            let _ = answer.send(Err(WireError::new(
+                "forbidden",
+                "only the primary makes join tokens",
+            )));
+            return;
+        }
         if !self.core.is_home() {
             let (home, origin) = (
                 state.home.clone(),
@@ -396,7 +415,10 @@ impl Driver {
         let id = self.reply_id(Reply::Token(answer, token));
         self.step(Input::Local {
             id,
-            cmd: LocalCmd::IssueToken { secret },
+            cmd: LocalCmd::IssueToken {
+                secret,
+                minter: minter.unwrap_or_else(|| self.me.clone()),
+            },
         });
     }
 
@@ -525,6 +547,8 @@ impl Driver {
                 addr,
                 can_be_master,
                 headless,
+                minter,
+                minter_name,
             } => {
                 let ask = JoinAsk {
                     item,
@@ -535,6 +559,8 @@ impl Driver {
                     addr,
                     can_be_master,
                     headless,
+                    minter,
+                    minter_name,
                 };
                 let submit = Submit::new(self.tx.clone());
                 let hooks = self.hooks.clone();

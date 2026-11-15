@@ -216,6 +216,8 @@ pub fn stale_call_scenario(plant_skip: bool) -> (World, Result<(), Violation>) {
         },
     );
     world.run_for(3_000);
+    world.heal();
+    world.run_for(10_000);
     let result = check(&world);
     (world, result)
 }

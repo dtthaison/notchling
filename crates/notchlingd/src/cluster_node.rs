@@ -2,7 +2,10 @@ use crate::acting_ops::Room;
 use crate::cluster_driver::Driver;
 use crate::late_emit::Events as LogEvents;
 use notchling_cluster_net::{Conn, LinkEvents, Pins, Transport};
-use notchling_engine::cluster::core::{LocalCmd, SnapAsk, CALL_MS, DELEGATE_CALL_MS};
+use notchling_engine::cluster::core::{
+    LocalCmd, SnapAsk, CALL_MS, DELEGATE_CALL_MS, PEER_STALE_TERM,
+};
+use notchling_engine::cluster::failover::Failover;
 use notchling_engine::cluster::snapshot::Observed;
 use notchling_engine::cluster::wire::{Origin, WireError};
 use notchling_engine::cluster::{Desired, Input, NodeId, Versions};
@@ -39,6 +42,8 @@ pub struct JoinAsk {
     pub addr: Option<String>,
     pub can_be_master: bool,
     pub headless: bool,
+    pub minter: NodeId,
+    pub minter_name: String,
 }
 
 pub trait Hooks: Send + Sync {
@@ -51,6 +56,7 @@ pub trait Hooks: Send + Sync {
     fn peer_sessions(&self, _from: &NodeId) {}
     fn snapshot(&self, _ask: SnapAsk) {}
     fn peer_prompt(&self, _from: &NodeId, _event: &str, _data: &Value) {}
+    fn failover(&self, _value: Failover, _order: u64) {}
 }
 
 pub struct NoHooks;
@@ -93,7 +99,7 @@ pub(crate) enum In {
     DialDone(NodeId),
     Local(LocalCmd, Option<Answer>),
     Create(String, Answer),
-    Token(Answer),
+    Token(Option<NodeId>, Answer),
     Join(String, bool, Answer),
     Core(Input),
     Link(bool),
@@ -156,7 +162,7 @@ pub const KEPT_CODES: [&str; 3] = ["refused", "not_sent", "stale_term"];
 
 pub fn api_error(e: WireError) -> ApiError {
     let code = match e.code.as_str() {
-        "forbidden" | "stale_term" => ErrorCode::Forbidden,
+        "forbidden" | "stale_term" | PEER_STALE_TERM => ErrorCode::Forbidden,
         "bad_args" => ErrorCode::BadRequest,
         _ => ErrorCode::Failed,
     };
@@ -301,6 +307,10 @@ impl ClusterNode {
         status
     }
 
+    pub fn started(&self) -> bool {
+        !lock(&self.shared.status).is_null()
+    }
+
     pub fn submit(&self) -> Submit {
         Submit::new(self.tx.clone())
     }
@@ -381,7 +391,11 @@ impl ClusterNode {
     }
 
     pub fn join_token(&self) -> Result<Value, ApiError> {
-        self.wait(In::Token)
+        self.wait(|answer| In::Token(None, answer))
+    }
+
+    pub fn join_token_for(&self, minter: NodeId) -> Result<Value, ApiError> {
+        self.wait(|answer| In::Token(Some(minter), answer))
     }
 
     pub fn join(&self, token: &str, headless: bool) -> Result<Value, ApiError> {
