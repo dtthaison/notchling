@@ -2,21 +2,25 @@ use std::collections::BTreeSet;
 
 use serde_json::{json, Value};
 
-use super::secrets::{Path, StaleAccept, Stored, GRANT_LIFE_MS, JANITOR_MS, KNOWN_WAIT_MS};
+use super::secrets::{Path, Seen, StaleAccept, Stored, GRANT_LIFE_MS, JANITOR_MS, PENDING_MS};
 use super::world::World;
 use crate::cluster::id::NodeId;
+use crate::cluster::jobs::JobState;
 use crate::cluster::members::Term;
-use crate::cluster::wire::{Origin, WireError};
+use crate::cluster::wire::{Origin, OriginTier, WireError};
 
 fn refusal(why: impl Into<String>) -> WireError {
     WireError::new("forbidden", why)
 }
 
+fn live(state: JobState) -> bool {
+    matches!(state, JobState::Running | JobState::Dispatching)
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum Knows {
+pub(super) enum Standing {
     Live,
-    Ended,
-    Unknown,
+    Pending,
 }
 
 impl World {
@@ -35,33 +39,32 @@ impl World {
             .max()
     }
 
-    /// What this machine's own daemon knows about a job: a start ran here,
-    /// or its own process ended. A Worker's engine state holds no jobs, and
-    /// nothing the home knows reaches the Worker except by a message.
-    pub(super) fn knows_job(&self, node: &NodeId, job: &str) -> Knows {
+    pub(super) fn live_here(&self, node: &NodeId, job: &str) -> bool {
         let key = (node.clone(), job.to_string());
-        if self.secrets.local_ended.contains_key(&key) {
-            Knows::Ended
-        } else if self.secrets.started_on.contains(&key) {
-            Knows::Live
-        } else {
-            Knows::Unknown
+        self.secrets.started_on.contains(&key) && !self.secrets.local_ended.contains_key(&key)
+    }
+
+    pub(super) fn standing(&self, node: &NodeId, job: &str) -> Result<Standing, &'static str> {
+        let Some(state) = self.state_of(node) else {
+            return Err("the job isn't running");
+        };
+        match state.jobs.get(job) {
+            Some(found) if found.spec.node == *node && live(found.state) => Ok(Standing::Live),
+            Some(found) if found.spec.node == *node => Err("the job isn't running"),
+            Some(_) => Err("the job isn't running on this machine"),
+            None if self.live_here(node, job) => Ok(Standing::Live),
+            None => Ok(Standing::Pending),
         }
     }
 
-    pub(super) fn live_here(&self, node: &NodeId) -> BTreeSet<String> {
+    fn end_here(&mut self, node: &NodeId, job: &str) {
+        let key = (node.clone(), job.to_string());
         self.secrets
-            .started_on
-            .iter()
-            .filter(|(n, job)| {
-                n == node
-                    && !self
-                        .secrets
-                        .local_ended
-                        .contains_key(&(n.clone(), job.clone()))
-            })
-            .map(|(_, job)| job.clone())
-            .collect()
+            .local_ended
+            .entry(key.clone())
+            .or_insert(self.now);
+        self.secrets.holds.remove(&key);
+        self.secrets.hold_log.remove(&key);
     }
 
     pub(super) fn b_revoke_job(&mut self, node: &NodeId, call: u64, args: &Value) {
@@ -69,7 +72,8 @@ impl World {
         let target = args
             .get("node")
             .and_then(|n| serde_json::from_value::<NodeId>(n.clone()).ok());
-        if let (Some(job), Some(target), false) = (job, target, self.secrets.plant.keep_grants) {
+        let kept = self.secrets.plant.keep_grants || self.secrets.drop_revokes;
+        if let (Some(job), Some(target), false) = (job, target, kept) {
             self.forward_node_op(node, &target, "grant.revoke", json!({"job": job}));
         }
         self.finish_local(node, call, Ok(json!({})));
@@ -81,7 +85,7 @@ impl World {
         call: u64,
         (origin, args): (&Origin, &Value),
         arrived: (u64, u64),
-    ) -> bool {
+    ) {
         let state = self.state_of(node);
         let from_vault_home = state
             .as_ref()
@@ -100,35 +104,24 @@ impl World {
                 "grant.deliver takes {job, name, value, expiresMs}",
             );
             self.finish_local(node, call, bad);
-            return false;
+            return;
         };
         if !from_vault_home {
             let why = "only the vault node, while it is the primary, delivers a secret";
             self.finish_local(node, call, err("forbidden", why));
-            return false;
+            return;
         }
         let anything = self.secrets.plant.worker_accepts_anything;
-        match (self.knows_job(node, job), anything) {
-            (Knows::Ended, false) => {
-                let why = "the job isn't running";
-                self.finish_local(node, call, err("failed", why));
-                return false;
-            }
-            (Knows::Unknown, false) => {
-                if self.now.saturating_sub(arrived.0) < KNOWN_WAIT_MS {
-                    return true;
-                }
-                let why = "the job isn't running on this machine";
-                self.finish_local(node, call, err("failed", why));
-                return false;
-            }
-            _ => {}
+        let key = (node.clone(), job.to_string());
+        if self.secrets.local_ended.contains_key(&key) && !anything {
+            self.finish_local(node, call, err("failed", "the job isn't running"));
+            return;
         }
         let now = self.now as i64;
         let expires = asked.min(now.saturating_add(GRANT_LIFE_MS as i64));
         if expires <= now {
             self.finish_local(node, call, err("failed", "the grant has already expired"));
-            return false;
+            return;
         }
         let revoked = self.secrets.revokes.iter().any(|(at, n, j, names)| {
             *at > arrived.1
@@ -138,8 +131,16 @@ impl World {
         });
         if revoked {
             self.finish_local(node, call, err("failed", "the job isn't running"));
-            return false;
+            return;
         }
+        let standing = match self.standing(node, job) {
+            Ok(standing) => standing,
+            Err(_) if anything => Standing::Live,
+            Err(why) => {
+                self.finish_local(node, call, err("failed", why));
+                return;
+            }
+        };
         let (intended, release) = match self.secrets.mark_of(value) {
             Some(m) => (Some(m.target.clone()), m.release),
             None => (None, None),
@@ -164,20 +165,29 @@ impl World {
             intended,
             release,
         };
-        let key = (job.to_string(), name.clone());
+        let grant = (job.to_string(), name.clone());
         self.secrets
             .stores
             .entry(node.clone())
             .or_default()
-            .insert(key, stored);
+            .insert(grant, stored);
         self.secrets.record(node, Path::Store, value);
         self.secrets.stats.stored += 1;
+        if standing == Standing::Pending {
+            let now = self.now;
+            for book in [&mut self.secrets.holds, &mut self.secrets.hold_log] {
+                book.entry(key.clone())
+                    .and_modify(|since| {
+                        if now.saturating_sub(*since) >= PENDING_MS {
+                            *since = now;
+                        }
+                    })
+                    .or_insert(now);
+            }
+        }
         self.finish_local(node, call, Ok(json!({"stored": name})));
-        false
     }
 
-    /// A revoke removes what is stored and bars the delivers that arrived
-    /// before it. It does not end the job: a later fresh deliver is fine.
     pub(super) fn w_revoke(&mut self, node: &NodeId, call: u64, origin: &Origin, args: &Value) {
         let allowed = self
             .state_of(node)
@@ -204,21 +214,69 @@ impl World {
         }
         let removed = (before - store.len()) as u64;
         self.secrets.stats.revoked += removed;
+        if names.is_none() {
+            let key = (node.clone(), job.to_string());
+            self.secrets.holds.remove(&key);
+            self.secrets.hold_log.remove(&key);
+        }
         self.finish_local(node, call, Ok(json!({})));
     }
 
-    /// The Worker's janitor: a sweep at start, every 30 s, and when the set
-    /// of jobs running here changes. It sees only this machine's jobs.
+    fn seen_here(&mut self, n: &NodeId) -> (Seen, BTreeSet<String>) {
+        let now = self.now;
+        self.secrets
+            .holds
+            .retain(|(node, _), since| node != n || now.saturating_sub(*since) < PENDING_MS);
+        let Some(state) = self.state_of(n) else {
+            return (Seen::default(), BTreeSet::new());
+        };
+        let mine: std::collections::BTreeMap<String, bool> = state
+            .jobs
+            .values()
+            .filter(|j| j.spec.node == *n)
+            .map(|j| (j.id.clone(), live(j.state)))
+            .collect();
+        let alive = |job: &String| !state.jobs.contains_key(job) && self.live_here(n, job);
+        let local_live: BTreeSet<String> = self
+            .secrets
+            .started_on
+            .iter()
+            .filter(|(node, _)| node == n)
+            .map(|(_, job)| job.clone())
+            .filter(alive)
+            .collect();
+        let pending: BTreeSet<String> = self
+            .secrets
+            .holds
+            .keys()
+            .filter(|(node, job)| node == n && !state.jobs.contains_key(job))
+            .map(|(_, job)| job.clone())
+            .collect();
+        let held: BTreeSet<String> = mine
+            .iter()
+            .filter(|(_, up)| **up)
+            .map(|(job, _)| job.clone())
+            .chain(local_live.iter().cloned())
+            .chain(pending.iter().cloned())
+            .collect();
+        let seen = Seen {
+            mine,
+            live: local_live,
+            pending,
+        };
+        (seen, held)
+    }
+
     pub(super) fn secrets_tick(&mut self, n: &NodeId) {
         let now = self.now;
         self.secrets_resync(n);
-        let live = self.live_here(n);
-        let changed = self.secrets.live_seen.get(n) != Some(&live);
+        let (seen, held) = self.seen_here(n);
+        let changed = self.secrets.live_seen.get(n) != Some(&seen);
         let due = self.secrets.due.get(n).copied().unwrap_or(0);
         if !changed && now < due {
             return;
         }
-        self.secrets.live_seen.insert(n.clone(), live.clone());
+        self.secrets.live_seen.insert(n.clone(), seen);
         self.secrets.due.insert(n.clone(), now + JANITOR_MS);
         if self.secrets.plant.keep_grants {
             return;
@@ -228,16 +286,60 @@ impl World {
             return;
         };
         let before = store.len();
-        store.retain(|(job, _), g| g.expires_at > now && live.contains(job));
+        store.retain(|(job, _), g| g.expires_at > now && held.contains(job));
         s.stats.revoked += (before - store.len()) as u64;
     }
 
-    pub(super) fn secrets_started(&mut self, n: &NodeId, args: &Value) {
+    pub(super) fn observe_jobs(&mut self, n: &NodeId) {
+        let Some(state) = self.state_of(n) else {
+            return;
+        };
+        let now = self.now;
+        for job in state.jobs.values() {
+            if job.spec.node != *n || !live(job.state) {
+                self.secrets
+                    .done_seen
+                    .entry((n.clone(), job.id.clone()))
+                    .or_insert(now);
+            }
+        }
+    }
+
+    pub(super) fn secrets_started(
+        &mut self,
+        n: &NodeId,
+        (op, args, origin): (&str, &Value, &Origin),
+        ok: bool,
+    ) {
         self.secrets.record(n, Path::Argv, &args.to_string());
         let Some(job) = args.get("job").and_then(Value::as_str) else {
             return;
         };
-        self.secrets.started_on.insert((n.clone(), job.to_string()));
+        let key = (n.clone(), job.to_string());
+        let from_home = origin.tier == OriginTier::App
+            && self
+                .state_of(n)
+                .is_some_and(|state| origin.node == state.home);
+        let ended = self.secrets.local_ended.contains_key(&key);
+        let noted = match op {
+            "shell.run" => ok && !ended,
+            "session.new" | "agy.send" => from_home && !ended,
+            _ => false,
+        };
+        if !noted {
+            return;
+        }
+        if !ok {
+            self.end_here(n, job);
+            self.secrets.started_on.remove(&key);
+            if let Some(store) = self.secrets.stores.get_mut(n) {
+                store.retain(|(j, _), _| j != job);
+            }
+            return;
+        }
+        self.secrets.started_on.insert(key.clone());
+        self.secrets.holds.remove(&key);
+        self.secrets.hold_log.remove(&key);
         let names: Vec<String> = self
             .secrets
             .stores
@@ -252,10 +354,12 @@ impl World {
         self.consume_grants(n, job, &names);
     }
 
-    /// A child takes a grant at use, as `GrantStore::get` lets it: only a
-    /// grant still stored, not expired, for a job still running here.
+    pub(super) fn reap_here(&mut self, n: &NodeId, job: &str) {
+        self.end_here(n, job);
+    }
+
     pub(super) fn consume_grants(&mut self, n: &NodeId, job: &str, names: &[String]) {
-        if self.knows_job(n, job) != Knows::Live {
+        if self.standing(n, job) != Ok(Standing::Live) {
             return;
         }
         let now = self.now;

@@ -147,20 +147,7 @@ impl World {
                 "grant.attach" => self.b_attach(&node, call, &args),
                 "grant.request" => self.b_request(&node, call, &origin, &args),
                 "grant.revoke_job" => self.b_revoke_job(&node, call, &args),
-                "grant.deliver" => {
-                    if self.w_deliver(&node, call, (&origin, &args), arrived) {
-                        let at = self.now + 500;
-                        let ev = BrokerEv::Run {
-                            node,
-                            call,
-                            op,
-                            args,
-                            origin,
-                            arrived,
-                        };
-                        self.schedule(at, Event::Broker(ev));
-                    }
-                }
+                "grant.deliver" => self.w_deliver(&node, call, (&origin, &args), arrived),
                 "grant.revoke" => self.w_revoke(&node, call, &origin, &args),
                 "node.inbox" => self.mirror_in(&node, call, &origin, &args),
                 _ => self.owner_answer(&node, call, &origin, &args),
@@ -179,6 +166,9 @@ impl World {
         s.waiting.retain(|(node, _), _| node != n);
         s.consuming.retain(|(node, _), _| node != n);
         s.started_on.retain(|(node, _)| node != n);
+        s.local_ended.retain(|(node, _), _| node != n);
+        s.holds.retain(|(node, _), _| node != n);
+        s.hold_log.retain(|(node, _), _| node != n);
         s.live_seen.remove(n);
         s.due.insert(n.clone(), 0);
         self.mirrors_lost(n);

@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::cluster::core::Effect;
+use crate::cluster::core::{Effect, ATTACH_CALL_MS, CALL_MS};
 use crate::cluster::id::NodeId;
 use crate::cluster::members::Term;
 use crate::inbox::Book;
@@ -8,14 +8,10 @@ use crate::inbox::Book;
 pub const MARKER: &str = "NL-MARKER-";
 pub const JANITOR_MS: u64 = 30_000;
 pub const GRANT_LIFE_MS: u64 = 12 * 3_600_000;
-pub const KNOWN_WAIT_MS: u64 = 3_000;
-/// 30 s sweep, a 1 s tick and 1 s of margin, from when the Worker can know
-/// its job ended (its own process ending).
+pub const PENDING_MS: u64 = ATTACH_CALL_MS + CALL_MS;
+pub const PENDING_SLACK_MS: u64 = 2_000;
 pub const STEADY_MS: u64 = JANITOR_MS + 2_000;
-/// After a restart or a resume the janitor starts with a tick of its own;
-/// the bound is its own number, measured from the node coming up.
 pub const RECOVERY_MS: u64 = JANITOR_MS + 5_000;
-/// The daemon's outbox resends a full sync to a target after this long.
 pub const RESYNC_MS: u64 = 60_000;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -92,7 +88,6 @@ impl Path<'_> {
     }
 }
 
-/// What a grant holds: where it was meant to go and which release made it.
 #[derive(Clone, Debug)]
 pub(super) struct Stored {
     pub expires_at: u64,
@@ -102,8 +97,6 @@ pub(super) struct Stored {
     pub release: Option<usize>,
 }
 
-/// One release by a vault node, fixed when it happens: nothing here is
-/// looked up by (job, name) afterwards.
 #[derive(Clone, Debug)]
 pub struct Release {
     pub node: NodeId,
@@ -113,12 +106,10 @@ pub struct Release {
     pub vault: NodeId,
     pub job: String,
     pub target: NodeId,
-    /// Each asked name and the approval item that allowed it.
     pub asked: Vec<(String, Option<String>)>,
     pub at_ms: u64,
 }
 
-/// Where one marker value may go.
 #[derive(Clone, Debug)]
 pub(super) struct Mark {
     pub target: NodeId,
@@ -139,7 +130,13 @@ pub struct SimSecrets {
     pub(super) stores: BTreeMap<NodeId, BTreeMap<(String, String), Stored>>,
     pub(super) started_on: BTreeSet<(NodeId, String)>,
     pub(super) local_ended: BTreeMap<(NodeId, String), u64>,
-    pub(super) live_seen: BTreeMap<NodeId, BTreeSet<String>>,
+    pub(super) holds: BTreeMap<(NodeId, String), u64>,
+    pub(super) hold_log: BTreeMap<(NodeId, String), u64>,
+    pub(super) done_seen: BTreeMap<(NodeId, String), u64>,
+    pub(super) live_seen: BTreeMap<NodeId, Seen>,
+    pub(super) fail_starts: bool,
+    pub(super) drop_revokes: bool,
+    pub(super) wiped: BTreeMap<NodeId, u64>,
     pub(super) due: BTreeMap<NodeId, u64>,
     pub(super) revoke_seq: u64,
     pub(super) revokes: Vec<(u64, NodeId, String, Option<Vec<String>>)>,
@@ -165,7 +162,13 @@ pub struct SimSecrets {
     pub(super) stats: Stats,
 }
 
-/// Every `NL-MARKER-<digits>` in a text.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(super) struct Seen {
+    pub mine: BTreeMap<String, bool>,
+    pub live: BTreeSet<String>,
+    pub pending: BTreeSet<String>,
+}
+
 pub(super) fn tokens_in(text: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut rest = text;
@@ -227,7 +230,6 @@ impl SimSecrets {
         self.next_id
     }
 
-    /// A fresh marker value, bound to the one node it may reach.
     pub(super) fn new_mark(&mut self, target: &NodeId, release: Option<usize>) -> String {
         self.next_token += 1;
         let token = format!("{MARKER}{}", 1_000 + self.next_token);

@@ -17,6 +17,16 @@ impl World {
         node: &NodeId,
         names: &[&str],
     ) {
+        self.dispatch_tool(from, key, (node, Tool::Shell), names);
+    }
+
+    pub fn dispatch_tool(
+        &mut self,
+        from: &NodeId,
+        key: &str,
+        (node, tool): (&NodeId, Tool),
+        names: &[&str],
+    ) {
         let tier = if self.is_client(from) {
             OriginTier::App
         } else {
@@ -24,7 +34,7 @@ impl World {
         };
         let spec = JobSpec {
             node: node.clone(),
-            tool: Tool::Shell,
+            tool,
             cwd: "/srv/repo".to_string(),
             args: json!({"command": "run"}),
             secrets: names.iter().map(|n| n.to_string()).collect(),
@@ -59,11 +69,9 @@ impl World {
             return;
         };
         let node = found.spec.node.clone();
-        let now = self.now;
-        self.secrets
-            .local_ended
-            .entry((node.clone(), found.id.clone()))
-            .or_insert(now);
+        if found.spec.tool == Tool::Shell {
+            self.reap_here(&node, &found.id);
+        }
         let data = json!({"job": found.id, "state": "done"});
         let home = self
             .state_of(&home_view)
@@ -106,8 +114,6 @@ impl World {
         self.secrets.consuming.insert((node, call), found.id);
     }
 
-    /// A job that asked for a secret takes it when the answer to its request
-    /// reaches this machine, and only what the answer says was delivered.
     pub(super) fn consume_on_answer(
         &mut self,
         n: &NodeId,
@@ -197,8 +203,6 @@ impl World {
         }
     }
 
-    /// A deliver from the vault node's own origin, for a value carrying
-    /// marker values this test made up; the marker is bound to `node`.
     pub fn inject_deliver(
         &mut self,
         node: &NodeId,
@@ -224,8 +228,6 @@ impl World {
         }
     }
 
-    /// Record a release exactly as the broker would, without running it, and
-    /// return the value to deliver for it.
     pub fn register_release(
         &mut self,
         (home, job, target): (&NodeId, &str, &NodeId),
@@ -321,7 +323,6 @@ impl World {
         self.held_term()
     }
 
-    /// A grant with a known home on this node for a job nothing here runs.
     pub fn plant_orphan_grant(&mut self, node: &NodeId, job: &str, name: &str) {
         let stored = super::secrets::Stored {
             expires_at: self.now + 3_600_000,
@@ -338,10 +339,18 @@ impl World {
             .insert(key, stored);
     }
 
-    pub fn know_job(&mut self, node: &NodeId, job: &str) {
+    pub fn drop_revokes(&mut self, on: bool) {
+        self.secrets.drop_revokes = on;
+    }
+
+    pub fn fail_starts(&mut self, on: bool) {
+        self.secrets.fail_starts = on;
+    }
+
+    pub fn pending_on(&self, node: &NodeId, job: &str) -> bool {
         self.secrets
-            .started_on
-            .insert((node.clone(), job.to_string()));
+            .holds
+            .contains_key(&(node.clone(), job.to_string()))
     }
 
     pub fn forget_mirror(&mut self, node: &NodeId) {

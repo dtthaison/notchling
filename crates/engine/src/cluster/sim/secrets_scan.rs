@@ -68,9 +68,6 @@ impl World {
             .push(format!("{:>8} {:<4} {}", self.now, name, text));
     }
 
-    /// Plants go in through the same doors honest data uses: an effect the
-    /// node "emits" on its next step, a message to its inbox handler, a
-    /// trace line, a Book item.
     pub(super) fn plant_leak(&mut self, n: &NodeId, at: LeakAt, marker: &str) {
         let args = json!({"job": "j-leak", "note": marker});
         let term = self.state_of(n).map(|s| s.term).unwrap_or(Term {

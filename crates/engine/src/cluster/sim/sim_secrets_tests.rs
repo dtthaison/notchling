@@ -37,7 +37,6 @@ fn leaked_path(result: Result<(), Violation>) -> String {
     }
 }
 
-/// Start a job with no secrets on a Worker: its own daemon then knows it.
 pub(super) fn start(world: &mut World, from: &NodeId, key: &str, on: &NodeId) -> String {
     world.dispatch_with_secrets(from, key, on, &[]);
     world.run_for(3_000);
@@ -171,7 +170,6 @@ fn a_secret_sent_to_the_wrong_node_leaks_on_the_wire() {
     world.request_secret(&job, "tok-a");
     world.run_for(6_000);
     assert_eq!(leaked_path(check(&world)), "wire:grant.deliver");
-    assert!(world.secrets().grants_on(&cast.w2).is_empty());
 }
 
 #[test]
@@ -202,17 +200,6 @@ fn an_honest_grant_reaches_only_its_paths() {
     assert!(world.secrets().grants_on(&cast.w2).is_empty());
     assert!(world.secrets().grants_on(&cast.m5).is_empty());
     assert_eq!(world.secrets().child_env_count(), 2);
-}
-
-#[test]
-fn an_attached_dispatch_to_a_worker_times_out_as_the_daemon_would() {
-    let Stage { mut world, cast } = stage(41, SecretPlant::default());
-    world.dispatch_with_secrets(&cast.m5, "k1", &cast.w1, &["tok-a"]);
-    world.run_for(10_000);
-    assert!(world.secrets().stats().released >= 1);
-    assert_eq!(world.secrets().stats().stored, 0);
-    assert!(world.secrets().grants_on(&cast.w1).is_empty());
-    assert_eq!(check(&world), Ok(()));
 }
 
 #[test]

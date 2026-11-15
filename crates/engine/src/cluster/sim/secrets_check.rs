@@ -1,8 +1,9 @@
 use std::collections::BTreeMap;
 
 use super::invariants::Violation;
-use super::secrets::{RECOVERY_MS, STEADY_MS};
+use super::secrets::{PENDING_MS, PENDING_SLACK_MS, RECOVERY_MS, STEADY_MS};
 use super::world::World;
+use crate::cluster::jobs::JobState;
 use crate::cluster::logins::argv_read_only;
 use crate::inbox::{ActionId, State};
 
@@ -82,14 +83,29 @@ pub(super) fn check_secrets(world: &World) -> Result<(), Violation> {
         let up = world.up_since(node).unwrap_or(0);
         for ((job, _), grant) in store {
             let key = (node.clone(), job.clone());
-            if s.started_on.contains(&key) && !s.local_ended.contains_key(&key) {
-                continue;
-            }
-            let base = s.local_ended.get(&key).copied().unwrap_or(grant.stored_at);
+            let (base, slack) = match world.state_of(node) {
+                None => (
+                    grant.stored_at.max(s.wiped.get(node).copied().unwrap_or(0)),
+                    STEADY_MS,
+                ),
+                Some(state) => match state.jobs.get(job) {
+                    Some(found) if found.spec.node == *node && live(found.state) => continue,
+                    Some(_) => (
+                        s.done_seen.get(&key).copied().unwrap_or(grant.stored_at),
+                        STEADY_MS,
+                    ),
+                    None if world.live_here(node, job) => continue,
+                    None => match (s.hold_log.get(&key), s.local_ended.get(&key)) {
+                        (Some(since), _) => (since + PENDING_MS, PENDING_SLACK_MS),
+                        (None, Some(ended)) => (*ended, STEADY_MS),
+                        (None, None) => (grant.stored_at, STEADY_MS),
+                    },
+                },
+            };
             let (since, limit) = if up > base {
                 (up, RECOVERY_MS)
             } else {
-                (base, STEADY_MS)
+                (base, slack)
             };
             if now.saturating_sub(since) > limit {
                 return Err(Violation::GrantOutlivedJob {
@@ -100,4 +116,8 @@ pub(super) fn check_secrets(world: &World) -> Result<(), Violation> {
         }
     }
     Ok(())
+}
+
+fn live(state: JobState) -> bool {
+    matches!(state, JobState::Running | JobState::Dispatching)
 }

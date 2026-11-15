@@ -174,9 +174,6 @@ impl World {
         self.note_own(n, &own);
     }
 
-    /// The daemon's outbox: a full sync to a target it has not synced (or
-    /// not in the last 60 s), changes only to synced ones, a target that
-    /// goes offline dropped from the synced set.
     pub(super) fn secrets_resync(&mut self, owner: &NodeId) {
         let now = self.now;
         let targets: Vec<NodeId> = self

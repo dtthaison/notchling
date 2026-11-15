@@ -8,7 +8,7 @@ use crate::cluster::core::{Effect, Input};
 use crate::cluster::id::NodeId;
 use crate::cluster::members::{MemberState, Term};
 use crate::cluster::testkit::fp;
-use crate::cluster::wire::{Msg, Origin};
+use crate::cluster::wire::{Msg, Origin, WireError};
 
 const TICK_MS: u64 = 1_000;
 
@@ -168,7 +168,10 @@ impl World {
                     }
                 }
                 Effect::Persist { .. } => persisted = true,
-                Effect::Wipe => wiped = true,
+                Effect::Wipe => {
+                    wiped = true;
+                    self.secrets.wiped.insert(n.clone(), self.now);
+                }
                 Effect::Publish { .. } | Effect::SteppedDown { .. } => {}
                 Effect::RunLocal {
                     call,
@@ -206,6 +209,7 @@ impl World {
                 self.scan_persisted(n, &text);
             }
         }
+        self.observe_jobs(n);
         let after = self.core(n).and_then(|c| c.highest_term().cloned());
         if let (Some(b), Some(a)) = (&before, &after) {
             if a < b && self.violation.is_none() {
@@ -238,9 +242,14 @@ impl World {
         if self.route_run(n, call, (op, args), origin) {
             return;
         }
-        let result = self.host.run(n, op, args, term, self.now);
-        if START_OPS.contains(&op) {
-            self.secrets_started(n, args);
+        let starting = START_OPS.contains(&op);
+        let result = if starting && self.secrets.fail_starts {
+            Err(WireError::new("failed", "the tool didn't start"))
+        } else {
+            self.host.run(n, op, args, term, self.now)
+        };
+        if starting {
+            self.secrets_started(n, (op, args, origin), result.is_ok());
         }
         let at = self.now + 1 + self.rng.below(5);
         self.schedule(
