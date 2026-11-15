@@ -315,8 +315,7 @@ except where a tier is shown; the node-only ones come from another node's link a
 
 | Op | Sent by | Tier | Args | Reply |
 | --- | --- | --- | --- | --- |
-| `cluster.allow.set` | a client (app) to the home | app | `{node, names?, any?}` | `{}`; see above. Names are lowercased, at most 256; `any` is off by default |
-| `cluster.dispatch` | the app, or an agent | app, agent | adds `secrets: [name, …]` (at most 16, lowercased, no delegate job) | a job whose names the node doesn't allow is refused before it starts; one whose vault node isn't primary stays `Dispatching` ("Waiting for `<vault node>`") |
+| `cluster.dispatch` | the app, or an agent | app, agent | adds `secrets: [name, …]` (at most 16, lowercased, no delegate job) | a job whose names the node doesn't allow is refused before it starts; one whose vault node isn't primary stays `Dispatching` with the detail "Waiting for `<vault node>`, which holds the vault" |
 | `grant.attach` | this node's own core | node, local only | `{job, member, vaultName, vaultPrimary}` | `{delivered: [names]}` or `{waiting: reason}`; no other node can send it |
 | `grant.revoke_job` | this node's own core | node, local only | `{job, node}` | best effort; asked at every end of a job; the vault node then sends `grant.revoke` |
 | `grant.request` | a Worker's `vault.use`, for a running job | agent origin, to the vault node | `{job, names, command, folder}` | `{delivered: [names]}` or `{waiting: reason}`; the job must be on the sender and the sender must allow each name |
@@ -325,7 +324,7 @@ except where a tier is shown; the node-only ones come from another node's link a
 | `login.deliver` | the vault node, while it is home | node | `{tool: "claude", value, expiresMs}` | `{stored: "claude"}`, or a refusal while the login is off in this build |
 | `login.revoke` | the home or the vault node | node | `{}` | `{}`; deletes the Worker's login file |
 | `node.inbox` | any member to the home and Can Be Master members | node | `{event: "changed", item}`, `{event: "removed", id}` or `{event: "sync", items}` | `{ok: true}` |
-| `inbox.list` | a client (app) | app | as `inbox.list` | on a client that isn't the home: its own items plus the home's, ids qualified `<node>/<id>` |
+| `inbox.list` | a client (app) | app | `{}` | `{items: [Item], unread}`; on a client that isn't the home, its own items plus the home's, with the home's ids qualified `<node>/<id>` |
 | `inbox.answer` | a client (app) | app | `{id, action}` | an id of another node is forwarded to its owner, which takes the first answer only |
 | `vault.list`, `vault.save`, `vault.remove` | a client (app) | app | the same args plus `node` | with `node` set to the vault node's id, the call goes to that machine's vault; any other value is a bad request |
 
@@ -349,7 +348,7 @@ except where a tier is shown; the node-only ones come from another node's link a
   Worker is refused.
 - `cluster.status` members carry `secrets: {names, any}` and `versions.logins` (a map of tool to signed
   in, absent when the Worker could not tell). `node.versions` reports the logins: `codex` (from
-  `codex login status`), `agy` (whether `~/.gemini/jetski-standalone-oauth-token` exists, read as signed
+  `codex login status`), `agy` (whether `~/.gemini/jetski-standalone-oauth-token` exists and is not empty, read as signed
   out on Linux and as unknown on a Mac, where the login may be in the Keychain, which is never read)
   and `claude` only while the cluster login is on, which it is not in this build. The probes
   run off the driver thread, at most every 10 minutes, with a 5 s limit per command, and never refresh a

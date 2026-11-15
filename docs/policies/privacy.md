@@ -143,22 +143,31 @@ Only when `machines.json` lists a machine:
 Only when this machine is in a cluster (the `cluster` switch is on) and a job names a secret or asks for
 one:
 
-- A secret value crosses to the Worker that runs the job, over the cluster's pinned TLS link, and only
-  from the vault node (the Mac whose Keychain holds the vault) while it is the primary. A Worker's
-  allowlist, empty by default, says which names its jobs may carry, and an entry marked Ask me first
-  still waits for an Allow from the Mac or a paired phone.
-- On the Worker the value is a mode-600 file in `<data>/cluster/grants/<job>/`. It expires at the
-  earlier of 12 hours and the job's end, and is deleted when the job ends. It is never in a command
-  line, a log, an audit entry, the cluster's database, a snapshot or an inbox item, and the Worker
-  hides it in the job's output and in what other nodes read of it. The command `notchling secret`
-  runs gets it in its environment, as on the vault node.
-- The vault node's audit log records each release by name (never the value), and the cluster step log
+- A secret value crosses to the Worker that runs the job, over the cluster's pinned TLS link. Only the
+  vault node sends it: the Mac whose Keychain holds the vault, while it is the primary.
+- A Worker's allowlist, empty by default, says which names its jobs may carry. An entry marked Ask me
+  first still waits for an Allow from the Mac or a paired phone.
+- On the Worker the value is a mode-600 file in `<data>/cluster/grants/<job>/`. It expires 12 hours
+  after it was sent at the latest, and is deleted when the job ends. A Worker cut off from the cluster
+  keeps the file until it expires.
+- The value is never in a command line, a log, an audit entry, the cluster's database, a snapshot or an
+  inbox item. The command `notchling secret` runs gets it in its environment, as on the vault node.
+- The Worker hides the value in the job's shell log and in the text other nodes read of the job. That is
+  not complete:
+  - Triple escapes, JavaScript inside Go strings and base64 or other encodings of a value stay visible.
+  - `workspace.return` carries a job's repository changes unmasked, so a secret a job wrote into a file
+    travels with its branch.
+  - A Claude job on a Worker with no recorded session is served unmasked.
+- While a value is in use, the daemon holds it in memory as ordinary strings that are not wiped.
+- The vault node's audit log records each release by name, never the value, and the cluster step log
   records the call.
-- Inbox items from every node are mirrored to the primary and to each Can Be Master machine, and
-  that includes a secret approval's title, command (cut to 120 characters) and folder, never a value.
-- Notchling does not renew a login on a Worker. It reads whether Claude Code, Codex and Antigravity
-  are signed in (a status command's exit code, or whether a file exists, never its contents) and tells
-  the cluster yes or no. Claude Code's long-lived login is not sent to Workers in this build.
+- Inbox items from every node are mirrored to the primary and to each Can Be Master machine. That
+  includes a secret approval's title, command (cut to 120 characters) and folder, never a value.
+- Notchling does not renew a login on a Worker. A Worker tells the cluster whether Codex and
+  Antigravity are signed in: Codex's `login status` exit code and text, and whether Antigravity's token
+  file exists and is not empty, never its contents. A check that can't tell leaves the entry absent, and
+  a Mac's Antigravity can't be refused, since its login may be in the Keychain, which is never read.
+  Claude Code's long-lived login is not sent to Workers in this build.
 
 ## Tools Notchling starts
 
