@@ -97,6 +97,8 @@ pub mod snap_files;
 pub mod snap_observe;
 pub mod snap_recv;
 pub mod snap_repo;
+pub mod snap_restore;
+mod snap_restore_fs;
 pub mod snap_run;
 pub mod snap_send;
 pub mod switches;
@@ -227,6 +229,12 @@ mod snap_files_tests;
 mod snap_repo_safety_tests;
 #[cfg(all(test, unix))]
 mod snap_repo_tests;
+#[cfg(all(test, unix))]
+mod snap_restore_files_tests;
+#[cfg(all(test, unix))]
+mod snap_restore_testkit;
+#[cfg(all(test, unix))]
+mod snap_restore_tests;
 #[cfg(all(test, unix))]
 mod snap_testkit;
 #[cfg(test)]

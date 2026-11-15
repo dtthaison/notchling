@@ -13,6 +13,7 @@ pub mod members;
 pub mod outward;
 pub mod persist;
 pub mod policy;
+pub mod restore;
 pub mod shell_job;
 pub mod snapshot;
 pub mod standby_store;
@@ -55,6 +56,8 @@ mod main_sessions_tests;
 mod outward_tests;
 #[cfg(test)]
 mod policy_tests;
+#[cfg(test)]
+mod restore_tests;
 #[cfg(test)]
 mod shell_job_tests;
 #[cfg(test)]

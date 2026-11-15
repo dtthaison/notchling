@@ -39,6 +39,8 @@ pub(crate) fn session(
         cwd: cwd.to_owned(),
         repo,
         movable,
+        transcripts: Vec::new(),
+        files: Vec::new(),
     }
 }
 

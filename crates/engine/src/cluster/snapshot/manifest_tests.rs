@@ -26,6 +26,8 @@ fn manifest_round_trips_through_json() {
             cwd: "/work/x".to_owned(),
             repo: None,
             movable: Movable::No("/work/x isn't a git repository".to_owned()),
+            transcripts: Vec::new(),
+            files: Vec::new(),
         }],
         parts: vec![
             Part {

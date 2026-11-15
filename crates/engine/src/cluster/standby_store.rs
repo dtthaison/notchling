@@ -66,7 +66,7 @@ fn create_new(path: &Path) -> std::io::Result<File> {
     options.open(path)
 }
 
-fn open_plain(path: &Path) -> Result<File, String> {
+pub(crate) fn open_plain(path: &Path) -> Result<File, String> {
     let meta = fs::symlink_metadata(path).map_err(|e| io(path, e))?;
     if !meta.is_file() {
         return Err(format!("{} is not a plain file", path.display()));
@@ -81,7 +81,7 @@ fn open_plain(path: &Path) -> Result<File, String> {
     options.open(path).map_err(|e| io(path, e))
 }
 
-fn hash_range(path: &Path, from: u64, len: u64) -> Result<String, String> {
+pub(crate) fn hash_range(path: &Path, from: u64, len: u64) -> Result<String, String> {
     let mut file = open_plain(path)?;
     file.seek(SeekFrom::Start(from)).map_err(|e| io(path, e))?;
     let mut digest = Digest::default();
@@ -99,7 +99,7 @@ fn hash_range(path: &Path, from: u64, len: u64) -> Result<String, String> {
     Ok(digest.finish())
 }
 
-fn plain_len(path: &Path) -> Result<Option<u64>, String> {
+pub(crate) fn plain_len(path: &Path) -> Result<Option<u64>, String> {
     match fs::symlink_metadata(path) {
         Ok(meta) if meta.is_file() => Ok(Some(meta.len())),
         Ok(_) => Err(format!("{} is not a plain file", path.display())),
@@ -108,7 +108,7 @@ fn plain_len(path: &Path) -> Result<Option<u64>, String> {
     }
 }
 
-fn hash_file(path: &Path) -> Result<(u64, String), String> {
+pub(crate) fn hash_file(path: &Path) -> Result<(u64, String), String> {
     let len = plain_len(path)?.ok_or_else(|| format!("{} is missing", path.display()))?;
     Ok((len, hash_range(path, 0, len)?))
 }
@@ -274,6 +274,15 @@ impl StandbyStore {
         let mut text = String::new();
         file.take(64 * 1024 * 1024).read_to_string(&mut text).ok()?;
         serde_json::from_str(&text).ok()
+    }
+
+    pub fn stored(&self, set: &str, original: &Path) -> Option<PathBuf> {
+        valid_set(set).ok()?;
+        self.place(&self.sets().join(set), original).ok()
+    }
+
+    pub fn stored_tail(&self, original: &Path) -> Option<PathBuf> {
+        self.tail_path(original).ok()
     }
 
     pub fn current(&self) -> Option<Manifest> {

@@ -491,3 +491,20 @@ fn a_linked_worktrees_main_repository_inside_a_planned_directory_is_left_out() {
     assert!(!plan.files.contains(&rig.data().join("pages")));
     assert_eq!(plan.sessions[0].repo, None);
 }
+
+#[test]
+fn a_session_entry_names_the_files_its_restore_needs() {
+    let rig = Rig::new("plan-entry-paths");
+    let m = rig.session("abc", "x");
+    let path = PathBuf::from(m.transcript.clone().expect("transcript"));
+    let repos = BTreeMap::from([("abc".to_string(), Some(facts(Path::new("/work/repo"))))]);
+    let plan = rig.plan(&[m], &repos, &BTreeMap::new());
+    let entry = &plan.sessions[0];
+    assert_eq!(entry.transcripts, vec![path]);
+    assert!(entry
+        .files
+        .contains(&rig.home.path(".claude/projects/-p/abc")));
+    assert!(entry
+        .files
+        .contains(&rig.home.path(".claude/file-history/abc")));
+}

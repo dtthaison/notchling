@@ -43,6 +43,10 @@ pub struct SessionEntry {
     pub cwd: String,
     pub repo: Option<RepoFacts>,
     pub movable: Movable,
+    #[serde(default)]
+    pub transcripts: Vec<PathBuf>,
+    #[serde(default)]
+    pub files: Vec<PathBuf>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -184,7 +188,11 @@ fn session_paths(set: &ResumeSet) -> impl Iterator<Item = &PathBuf> {
         .chain(set.dirs.iter())
 }
 
-fn entry(m: &MainSession, repos: &BTreeMap<String, Option<RepoFacts>>) -> SessionEntry {
+fn entry(
+    m: &MainSession,
+    set: &ResumeSet,
+    repos: &BTreeMap<String, Option<RepoFacts>>,
+) -> SessionEntry {
     let (repo, verdict) = match repos.get(&m.id) {
         None => (
             None,
@@ -198,6 +206,8 @@ fn entry(m: &MainSession, repos: &BTreeMap<String, Option<RepoFacts>>) -> Sessio
         cwd: m.cwd.clone(),
         repo,
         movable: verdict,
+        transcripts: set.transcripts.clone(),
+        files: set.files.iter().chain(&set.dirs).cloned().collect(),
     }
 }
 
@@ -221,7 +231,11 @@ pub fn plan_set(
     let sets: Vec<ResumeSet> = order.iter().map(|m| resume_set(m, home)).collect();
     let dbs = vec![data.join(CLUSTER_DIR).join(CLUSTER_DB)];
     let shared = [data.join("pages"), bridge_devices(data)];
-    let mut sessions: Vec<SessionEntry> = order.iter().map(|m| entry(m, repos)).collect();
+    let mut sessions: Vec<SessionEntry> = order
+        .iter()
+        .zip(&sets)
+        .map(|(m, set)| entry(m, set, repos))
+        .collect();
 
     let every: Vec<&Path> = sets
         .iter()
