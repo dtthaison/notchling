@@ -63,7 +63,12 @@ pub(super) fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>)
     if removable && menu.confirm_remove {
         return Some(layer(menu, confirm_card(view, a, cx), cx));
     }
-    let mut items = menu_panel(a);
+    let keep = view.cluster_snapshot().keep_offer(&menu.row_id);
+    let mut items = if keep.is_some() {
+        menu_panel_wide(a)
+    } else {
+        menu_panel(a)
+    };
     items = match id {
         Some(id) => items.child(
             menu_item("row-copy-id", t::chat::copy_session_id(), a).on_click(cx.listener(
@@ -120,7 +125,7 @@ pub(super) fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>)
             held_item("row-remove", t::chat::remove_session(), control, a)
         });
     }
-    if let Some(offer) = view.cluster_snapshot().keep_offer(&menu.row_id) {
+    if let Some(offer) = keep {
         let row = menu.row_id.clone();
         items = items
             .child(menu_rule(a))

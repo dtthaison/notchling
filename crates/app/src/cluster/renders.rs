@@ -222,6 +222,12 @@ pub fn moving(step: &str) -> Value {
     status
 }
 
+pub fn keep_model(session: &str) -> ClusterModel {
+    let mut status = status();
+    status["main"] = json!([session]);
+    ClusterModel::from_status(&status, ME)
+}
+
 pub fn names() -> std::collections::BTreeMap<String, String> {
     [
         ("j-parser", "Fix the parser"),

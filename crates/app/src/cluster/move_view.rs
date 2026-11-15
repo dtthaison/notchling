@@ -133,8 +133,8 @@ impl ClusterSheetView {
                 })
                 .await;
             this.update(cx, |view, cx| {
-                if let Err(error) = result {
-                    view.note = Some((t::cluster::change_failed(&error), true));
+                if let Some(sheet) = view.move_sheet.as_mut() {
+                    sheet.failure = result.err();
                 }
                 cx.notify();
             })

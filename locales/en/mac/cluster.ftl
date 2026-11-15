@@ -91,6 +91,8 @@ cluster-move-cancel = Cancel
 # Button that stops waiting for sessions to finish their turns and stops the working ones now.
 cluster-move-now = Move Now
 cluster-move-close = Close
+# Shown in the Move sheet when Move Now fails; $error is the reason.
+cluster-move-now-failed = Couldn't move now: { $error }
 # Shown when the Move sheet's Move is pressed but the machine can no longer take the primary.
 cluster-move-unavailable = That machine can't take the primary right now.
 # Line on the cluster sheet while a move runs; $name is the machine that becomes the primary.

@@ -192,6 +192,7 @@ pub struct MoveSheet {
     pub to: String,
     pub to_name: String,
     pub phase: Phase,
+    pub failure: Option<String>,
 }
 
 pub type Names = BTreeMap<String, String>;
@@ -217,6 +218,7 @@ impl MoveSheet {
             to: to.to_owned(),
             to_name: to_name.to_owned(),
             phase: Phase::Confirm,
+            failure: None,
         }
     }
 
@@ -307,6 +309,12 @@ impl MoveSheet {
         for (id, why) in &status.failed {
             view.notes.push(Note {
                 text: t::cluster::move_failed(&shown(names, id), why),
+                problem: true,
+            });
+        }
+        if let Some(error) = &self.failure {
+            view.notes.push(Note {
+                text: t::cluster::move_now_failed(error),
                 problem: true,
             });
         }

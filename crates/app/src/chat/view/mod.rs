@@ -253,7 +253,12 @@ impl ChatView {
             view.render_simulator(&how, cx);
         }
         if let Ok(how) = std::env::var(ROW_MENU_ENV) {
-            let job = how == "job" || how == "confirm";
+            let job = how == "job" || how == "confirm" || how == "keep";
+            if how == "keep" {
+                view.cluster = Arc::new(crate::cluster::feed::ClusterFeed::fixed(
+                    crate::cluster::renders::keep_model("fix-the-bug"),
+                ));
+            }
             view.row_menu = Some(row_menu::RowMenu {
                 row_id: if job { "fix-the-bug" } else { "render-session" }.into(),
                 at: gpui::point(px(120.0), px(110.0)),

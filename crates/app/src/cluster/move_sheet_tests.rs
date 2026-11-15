@@ -227,3 +227,20 @@ fn a_finished_move_is_not_running() {
     assert!(!status_at("done").running());
     assert!(!status_at("undone").running());
 }
+
+#[test]
+fn a_failed_move_now_shows_in_the_move_sheet() {
+    let mut sheet = sheet();
+    let before = sheet.view(Some(&status_at("freeze")), &names());
+    assert!(!before
+        .notes
+        .iter()
+        .any(|n| n.text.contains("Couldn't move now")));
+    sheet.failure = Some("the move just left freeze".into());
+    let view = sheet.view(Some(&status_at("freeze")), &names());
+    assert!(view
+        .notes
+        .iter()
+        .any(|n| n.problem && n.text == "Couldn't move now: the move just left freeze"));
+    assert!(view.buttons.contains(&Button::MoveNow));
+}
