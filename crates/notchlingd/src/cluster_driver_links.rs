@@ -110,7 +110,6 @@ impl Driver {
         for (_, conn) in std::mem::take(&mut self.conns) {
             conn.close();
         }
-        // Stop the follows first, so none writes into the folder removed below.
         self.hooks.wiped();
         let outcome = match persist::wipe(&self.setup.cluster_dir)
             .and_then(|()| crate::cluster_mirror::wipe(&self.setup.cluster_dir))

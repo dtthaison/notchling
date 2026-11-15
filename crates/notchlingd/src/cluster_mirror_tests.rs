@@ -397,6 +397,53 @@ fn a_linked_cluster_folder_is_never_written_through() {
     assert_eq!(std::fs::read_dir(&outside).unwrap().count(), 0);
 }
 
+#[cfg(unix)]
+fn plant_through(r: &Rig, outside: &Path, below: &str) -> usize {
+    let planted = mirror_path(
+        &outside.join(below),
+        &owner(),
+        &qualified(),
+        &r.owner.file.to_string_lossy(),
+    )
+    .unwrap();
+    std::fs::create_dir_all(planted.parent().unwrap()).unwrap();
+    std::fs::write(&planted, b"planted bytes").unwrap();
+    std::fs::read(&planted).unwrap().len()
+}
+
+#[cfg(unix)]
+fn assert_not_followed_through(r: &Rig, planted: usize) {
+    r.mirror.follow(&qualified()).unwrap();
+    r.mirror.pull();
+    let asked = r.owner.asked.lock().unwrap().clone();
+    assert!(
+        asked.iter().all(|(from, _)| *from != planted as u64),
+        "{asked:?}"
+    );
+    assert_eq!(r.remote.rows()[0]["transcriptPath"], Value::Null);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_planted_file_behind_a_linked_mirror_folder_is_not_read_or_shown() {
+    let r = rig();
+    let outside = outside_with_nothing_in_it(&r);
+    let planted = plant_through(&r, &outside, "");
+    std::fs::create_dir_all(r.dir.path().join("cluster")).unwrap();
+    std::os::unix::fs::symlink(&outside, r.dir.path().join("cluster/mirror")).unwrap();
+    assert_not_followed_through(&r, planted);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_planted_file_behind_a_linked_cluster_folder_is_not_read_or_shown() {
+    let r = rig();
+    let outside = outside_with_nothing_in_it(&r);
+    let planted = plant_through(&r, &outside, "mirror");
+    std::os::unix::fs::symlink(&outside, r.dir.path().join("cluster")).unwrap();
+    assert_not_followed_through(&r, planted);
+}
+
 #[test]
 fn a_mirror_file_stops_growing_at_the_cap_and_nothing_is_deleted() {
     let r = rig_built(true, 6);

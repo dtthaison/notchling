@@ -15,13 +15,11 @@ pub const MIRROR_DIR: &str = "mirror";
 pub const FOLLOW_MS: u64 = 600_000;
 pub const MAX_FOLLOWS: usize = 16;
 const MAX_ROUNDS: usize = 8;
-/// A mirror file never grows past this; the follow stops instead.
 pub const MIRROR_CAP: u64 = 256 * 1024 * 1024;
 const MAX_SEEN: usize = 1024;
 const PULL_EVERY: Duration = Duration::from_secs(2);
 
 pub type Clock = Arc<dyn Fn() -> u64 + Send + Sync>;
-/// Told once per session whose mirror hit the cap, with the owning node.
 pub type OnCap = Arc<dyn Fn(&NodeId) + Send + Sync>;
 
 pub trait TailSource: Send + Sync {
@@ -58,8 +56,6 @@ fn bad(why: &str) -> ApiError {
     ApiError::new(ErrorCode::BadRequest, why)
 }
 
-/// The mirror file for one remote session: a name made from the qualified id,
-/// so no remote text picks the file, plus the original extension.
 pub fn mirror_path(
     dir: &Path,
     node: &NodeId,
@@ -84,13 +80,24 @@ fn is_real_dir(path: &Path) -> bool {
     std::fs::symlink_metadata(path).is_ok_and(|meta| meta.is_dir())
 }
 
-/// A mirror file counts only when it and its folders are real, not links.
 pub fn is_real_file(path: &Path) -> bool {
     let plain = std::fs::symlink_metadata(path).is_ok_and(|meta| meta.is_file());
-    plain && path.parent().is_some_and(is_real_dir)
+    plain && folders_are_real(path)
 }
 
-/// Makes `<cluster>/mirror/<node>`, refusing to go through a link at any level.
+fn folders_are_real(file: &Path) -> bool {
+    let Some(folder) = file.parent() else {
+        return false;
+    };
+    folder
+        .ancestors()
+        .take(3)
+        .all(|dir| match std::fs::symlink_metadata(dir) {
+            Ok(meta) => meta.is_dir(),
+            Err(e) => e.kind() == std::io::ErrorKind::NotFound,
+        })
+}
+
 fn ensure_real_dirs(folder: &Path) -> std::io::Result<()> {
     let refuse = || std::io::Error::other("a mirror folder is a link or not a folder");
     let mut chain: Vec<&Path> = folder.ancestors().take(3).collect();
@@ -138,7 +145,6 @@ pub struct Mirror {
     source: Arc<dyn TailSource>,
     clock: Clock,
     follows: Mutex<BTreeMap<String, Follow>>,
-    /// The last `gen` per mirror file; it outlives a follow that lapsed.
     seen: Mutex<BTreeMap<String, String>>,
     capped: Mutex<BTreeSet<String>>,
     cap: u64,
@@ -175,6 +181,9 @@ fn write_chunk(path: &Path, data: &[u8], reset: bool) -> std::io::Result<()> {
 }
 
 fn file_len(path: &Path) -> Option<u64> {
+    if !folders_are_real(path) {
+        return None;
+    }
     match std::fs::symlink_metadata(path) {
         Ok(meta) if meta.is_file() => Some(meta.len()),
         Ok(_) => None,
@@ -269,8 +278,6 @@ impl Mirror {
         Ok(json!({"following": true, "id": qualified, "until": until}))
     }
 
-    /// Forgets every follow and what was read. A pull already under way
-    /// writes nothing after this returns.
     pub fn clear(&self) {
         self.epoch.fetch_add(1, Ordering::SeqCst);
         let _quiet = lock(&self.writing);
@@ -313,8 +320,6 @@ impl Mirror {
         }
     }
 
-    /// Writes one chunk unless the mirror was wiped meanwhile or the file
-    /// would pass the cap. `Ok(false)` means the follow stopped.
     fn store(
         &self,
         key: &str,

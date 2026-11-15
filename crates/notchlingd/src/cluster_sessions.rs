@@ -413,7 +413,6 @@ impl RemoteSessions {
         Some(Value::Object(out))
     }
 
-    /// Every remote row, whatever its tool. Empty unless this node is a client.
     pub fn rows(&self) -> Vec<Value> {
         self.rows_for(true)
     }
@@ -435,12 +434,10 @@ impl RemoteSessions {
             .collect()
     }
 
-    /// The local list plus the Claude rows of other nodes, as the app reads it.
     pub fn merge(&self, local: &Value) -> Value {
         Self::joined(local, self.rows_for(false))
     }
 
-    /// The same with every tool's rows, for `tools: "all"`.
     pub fn merge_all(&self, local: &Value) -> Value {
         Self::joined(local, self.rows_for(true))
     }
@@ -505,7 +502,6 @@ impl Refresher {
     }
 }
 
-/// A row the way Agent serializes, for tests that stand in for a remote node.
 #[cfg(test)]
 pub(crate) fn agent_row(id: &str) -> Value {
     json!({

@@ -337,8 +337,6 @@ impl ClusterParts {
     }
 }
 
-/// Publishes `sessions.changed` one at a time, each from the local list as it
-/// is when its turn comes, so an older merge never lands after a newer one.
 pub struct Publisher {
     room: Arc<dyn Room>,
     remote: Arc<RemoteSessions>,
