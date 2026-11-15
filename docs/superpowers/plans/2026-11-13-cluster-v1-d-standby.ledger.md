@@ -8,3 +8,4 @@ gitdb: Ruling R4: filter drivers are blanked as engine::git::read does (filter_p
 gitdb: Ruling R5: an http(s) origin is recorded without its userinfo; ssh and scp forms keep their user — a set must never carry a credential — Needs the maintainer (a token-in-URL remote then needs m1's own git access, M11).
 gitdb: Ruling R6: snap_repo runs git through the Launcher it is given (the daemon's SandboxedLauncher, as git_ops), 10 s per call; submodules are not ignored, so a dirty submodule keeps a session from moving.
 gitdb: Task 4: dispatched (base 70cda366, sonnet high).
+gitdb: Task 4: implemented 80daee72 (29 engine + 16 daemon tests)
