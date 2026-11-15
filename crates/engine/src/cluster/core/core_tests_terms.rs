@@ -17,6 +17,17 @@ fn promotable_pair() -> (Hub, NodeId, NodeId) {
     (hub, m5, w1)
 }
 
+fn promotable_trio() -> (Hub, NodeId, NodeId, NodeId) {
+    let mut hub = Hub::new();
+    let m5 = hub.add("m5", "macos", true);
+    let w1 = hub.add("w1", "macos", true);
+    let p2 = hub.add("p2", "macos", true);
+    hub.create("m5");
+    hub.join("m5", "w1", "macos", true);
+    hub.join("m5", "p2", "macos", true);
+    (hub, m5, w1, p2)
+}
+
 #[test]
 fn call_reply_correlates_and_times_out() {
     let (mut hub, m5, w1) = pair();
@@ -215,10 +226,10 @@ fn dedupe_forgets_after_its_window() {
 
 #[test]
 fn older_term_call_is_refused() {
-    let (mut hub, m5, w1) = promotable_pair();
+    let (mut hub, m5, w1, p2) = promotable_trio();
     let newer = Term {
         n: 3,
-        node: id("w1"),
+        node: p2.clone(),
     };
     hub.run(
         &w1,
@@ -228,7 +239,7 @@ fn older_term_call_is_refused() {
                 node: m5.clone(),
                 cluster: "c1".to_string(),
                 term: newer.clone(),
-                home: id("w1"),
+                home: p2.clone(),
             },
         },
     );
@@ -264,15 +275,15 @@ fn older_term_call_is_refused() {
     assert_eq!(err.code, "stale_term");
     let body: Value = serde_json::from_str(&err.message).expect("json");
     assert_eq!(body["term"]["n"], 3);
-    assert_eq!(body["home"], json!(id("w1")));
+    assert_eq!(body["home"], json!(p2));
 }
 
 #[test]
 fn install_forward_from_a_primary_that_lost_its_term_is_refused() {
-    let (mut hub, m5, w1) = promotable_pair();
+    let (mut hub, m5, w1, p2) = promotable_trio();
     let newer = Term {
         n: 3,
-        node: id("w1"),
+        node: p2.clone(),
     };
     hub.run(
         &w1,
@@ -282,7 +293,7 @@ fn install_forward_from_a_primary_that_lost_its_term_is_refused() {
                 node: m5.clone(),
                 cluster: "c1".to_string(),
                 term: newer.clone(),
-                home: id("w1"),
+                home: p2.clone(),
             },
         },
     );
@@ -345,10 +356,10 @@ fn a_call_stamped_with_a_newer_term_is_judged_after_adopting_it() {
         ("session.new", OriginTier::Node),
         ("shell.run", OriginTier::App),
     ] {
-        let (mut hub, m5, w1) = promotable_pair();
+        let (mut hub, m5, w1, p2) = promotable_trio();
         let newer = Term {
             n: 2,
-            node: id("w1"),
+            node: p2.clone(),
         };
         let effects = hub.run(
             &w1,
@@ -367,7 +378,7 @@ fn a_call_stamped_with_a_newer_term_is_judged_after_adopting_it() {
             },
         );
         assert_eq!(hub.core(&w1).highest_term(), Some(&newer), "{op}");
-        assert_eq!(hub.core(&w1).state().expect("state").home, id("w1"), "{op}");
+        assert_eq!(hub.core(&w1).state().expect("state").home, p2, "{op}");
         assert!(run_locals(&effects).is_empty(), "{op} ran");
         let refused = effects.iter().any(|e| {
             matches!(
@@ -384,10 +395,10 @@ fn a_call_stamped_with_a_newer_term_is_judged_after_adopting_it() {
 
 #[test]
 fn newer_term_is_adopted() {
-    let (mut hub, m5, w1) = promotable_pair();
+    let (mut hub, m5, w1, p2) = promotable_trio();
     let newer = Term {
         n: 2,
-        node: id("w1"),
+        node: p2.clone(),
     };
     let effects = hub.run(
         &w1,
@@ -414,7 +425,7 @@ fn newer_term_is_adopted() {
         },
     );
     assert_eq!(hub.core(&w1).highest_term(), Some(&newer));
-    assert_eq!(hub.core(&w1).state().expect("state").home, id("w1"));
+    assert_eq!(hub.core(&w1).state().expect("state").home, p2);
     assert!(effects.iter().any(|e| matches!(e, Effect::Persist { .. })));
 }
 

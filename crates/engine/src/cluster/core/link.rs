@@ -294,6 +294,9 @@ impl NodeCore {
         if term.n > limit {
             return false;
         }
+        if term.node == self.me && *sender != self.me {
+            return false;
+        }
         let may_be_primary = state.members.get(sender).is_some_and(|m| {
             m.state == MemberState::Active && (m.can_be_master || state.home == m.id)
         });

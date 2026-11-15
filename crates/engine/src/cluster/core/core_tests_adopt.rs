@@ -469,3 +469,106 @@ fn a_promotes_term_is_adopted_from_each_way_it_can_arrive() {
     reply_stale(&mut hub, &m5, &w1, term.clone());
     assert_eq!(hub.core(&m5).state().expect("state").term, term);
 }
+
+fn three_promotables() -> (Hub, NodeId, NodeId, NodeId) {
+    let mut hub = Hub::new();
+    let m5 = hub.add("m5", "macos", true);
+    let w1 = hub.add("w1", "macos", true);
+    let p2 = hub.add("p2", "macos", true);
+    hub.create("m5");
+    hub.join("m5", "w1", "macos", true);
+    hub.join("m5", "p2", "macos", true);
+    relink(&mut hub, &w1, &p2);
+    (hub, m5, w1, p2)
+}
+
+fn still_at_the_first_term(hub: &Hub, who: &NodeId, home: &NodeId) -> bool {
+    let state = hub.core(who).state().expect("state");
+    state.home == *home && state.term.n == 1
+}
+
+#[test]
+fn a_promotable_cannot_make_the_receiver_primary_by_naming_it() {
+    let routes: [fn(&NodeId, Term) -> Msg; 4] =
+        [hello_ok, hello, |_, t| stale_refusal(t), call_stamped];
+    for (receiver, sender) in [("p2", "w1"), ("m5", "w1"), ("p2", "m5"), ("w1", "p2")] {
+        for route in routes {
+            let (mut hub, m5, _, _) = three_promotables();
+            let (receiver, sender) = (id(receiver), id(sender));
+            let named = Term {
+                n: 2,
+                node: receiver.clone(),
+            };
+            let effects = inject(&mut hub, &receiver, &sender, route(&sender, named));
+            assert!(
+                still_at_the_first_term(&hub, &receiver, &m5),
+                "{receiver} from {sender}: {effects:?}"
+            );
+            assert!(!effects
+                .iter()
+                .any(|e| matches!(e, Effect::Persist { .. } | Effect::SteppedDown { .. })));
+        }
+        let (mut hub, m5, _, _) = three_promotables();
+        let (receiver, sender) = (id(receiver), id(sender));
+        let named = Term {
+            n: 2,
+            node: receiver.clone(),
+        };
+        reply_stale(&mut hub, &receiver, &sender, named);
+        assert!(
+            still_at_the_first_term(&hub, &receiver, &m5),
+            "{receiver} from {sender}, reply"
+        );
+    }
+}
+
+#[test]
+fn naming_the_receiver_is_answered_bad_term_to_a_hello_and_a_call() {
+    let (mut hub, _, w1, p2) = three_promotables();
+    let named = Term {
+        n: 2,
+        node: p2.clone(),
+    };
+    let effects = inject(&mut hub, &p2, &w1, hello(&w1, named.clone()));
+    assert!(effects.iter().any(|e| matches!(
+        e,
+        Effect::Send { msg: Msg::Refused { reason, .. }, .. } if reason == "bad_term"
+    )));
+    let (mut hub, _, w1, p2) = three_promotables();
+    let effects = inject(&mut hub, &p2, &w1, call_stamped(&w1, named));
+    assert!(effects.iter().any(|e| matches!(
+        e,
+        Effect::Send { msg: Msg::Reply { err: Some(err), .. }, .. } if err.message == "bad_term"
+    )));
+}
+
+#[test]
+fn the_same_promotable_can_still_announce_its_own_term_to_the_receiver() {
+    let (mut hub, m5, w1, p2) = three_promotables();
+    let named = Term {
+        n: 2,
+        node: p2.clone(),
+    };
+    let effects = inject(&mut hub, &p2, &w1, stale_refusal(named));
+    assert!(!effects
+        .iter()
+        .any(|e| matches!(e, Effect::Persist { .. } | Effect::SteppedDown { .. })));
+    assert!(still_at_the_first_term(&hub, &p2, &m5));
+    let own = Term {
+        n: 2,
+        node: w1.clone(),
+    };
+    inject(&mut hub, &p2, &w1, stale_refusal(own.clone()));
+    assert_eq!(hub.core(&p2).state().expect("state").term, own);
+}
+
+#[test]
+fn a_node_still_announces_its_own_term_through_its_own_promote() {
+    let (mut hub, m5, w1, p2) = three_promotables();
+    promote(&mut hub, &w1);
+    for node in [&w1, &m5, &p2] {
+        let state = hub.core(node).state().expect("state");
+        assert_eq!(state.home, w1, "{node}");
+        assert_eq!(state.term.node, w1, "{node}");
+    }
+}
