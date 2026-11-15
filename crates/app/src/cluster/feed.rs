@@ -2,6 +2,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
+use notchling_engine::vault::entry::VaultEntry;
 use notchling_local_api::{topics, Client, ClientError, ClientKind, ConnectOptions, Event};
 use notchling_locale as t;
 use serde_json::Value;
@@ -11,6 +12,7 @@ use super::wire::{self, Request};
 use crate::actions::{Socket, Transport};
 use crate::chat::data::DataRoot;
 use crate::switches::feed::{config_for, FeedConfig};
+use crate::vault::store::Vault;
 
 const REFRESH_EVERY: Duration = Duration::from_secs(10);
 
@@ -71,6 +73,7 @@ impl Shared {
 pub struct ClusterFeed {
     shared: Arc<Shared>,
     transport: Option<Arc<dyn Transport>>,
+    remote_vault: Arc<Vault>,
 }
 
 impl ClusterFeed {
@@ -78,6 +81,7 @@ impl ClusterFeed {
         ClusterFeed {
             shared: Arc::new(Shared::new()),
             transport: None,
+            remote_vault: Arc::new(Vault::remote_fixed(Vec::new())),
         }
     }
 
@@ -85,6 +89,16 @@ impl ClusterFeed {
         let feed = ClusterFeed::none();
         *feed.shared.model() = model;
         feed
+    }
+
+    pub fn fixed_with_vault(model: ClusterModel, entries: Vec<VaultEntry>) -> ClusterFeed {
+        let mut feed = ClusterFeed::fixed(model);
+        feed.remote_vault = Arc::new(Vault::remote_fixed(entries));
+        feed
+    }
+
+    pub fn remote_vault(&self) -> Arc<Vault> {
+        self.remote_vault.clone()
     }
 
     pub fn for_run(root: Option<&DataRoot>) -> ClusterFeed {
@@ -107,6 +121,7 @@ impl ClusterFeed {
             .name("notchling-cluster-feed".into())
             .spawn(move || run(&config, &shared));
         if spawned.is_ok() {
+            feed.remote_vault = Arc::new(Vault::remote_over(transport.clone()));
             feed.transport = Some(transport);
         }
         feed

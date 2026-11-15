@@ -1,7 +1,8 @@
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use notchling_engine::vault::entry::{VaultEntry, VaultValue};
 use notchling_local_api::{ClientError, SOCKET_NAME};
+use notchling_locale as t;
 use serde_json::Value;
 
 use super::wire::{parse_entries, Call, Decision};
@@ -19,6 +20,15 @@ pub struct Snapshot {
 pub struct Vault {
     transport: Option<Box<dyn Transport>>,
     snapshot: Mutex<Snapshot>,
+    remote: Option<Mutex<Option<String>>>,
+}
+
+struct Shared(Arc<dyn Transport>);
+
+impl Transport for Shared {
+    fn call(&self, op: &str, args: Value) -> Result<Value, ClientError> {
+        self.0.call(op, args)
+    }
 }
 
 fn message(e: &ClientError) -> String {
@@ -37,6 +47,41 @@ impl Vault {
         Vault {
             transport: Some(transport),
             snapshot: Mutex::new(Snapshot::default()),
+            remote: None,
+        }
+    }
+
+    pub fn remote_over(transport: Arc<dyn Transport>) -> Vault {
+        Vault {
+            transport: Some(Box::new(Shared(transport))),
+            snapshot: Mutex::new(Snapshot::default()),
+            remote: Some(Mutex::new(None)),
+        }
+    }
+
+    pub fn remote_fixed(entries: Vec<VaultEntry>) -> Vault {
+        let mut vault = Vault::fixed(entries);
+        vault.remote = Some(Mutex::new(None));
+        vault
+    }
+
+    pub fn is_remote(&self) -> bool {
+        self.remote.is_some()
+    }
+
+    pub fn set_node(&self, node: Option<&str>) {
+        let Some(slot) = &self.remote else {
+            return;
+        };
+        let mut held = lock(slot);
+        let next = node.map(str::to_owned);
+        if *held != next {
+            let changed_hands = held.is_some();
+            *held = next;
+            drop(held);
+            if changed_hands {
+                self.update(|s| *s = Snapshot::default());
+            }
         }
     }
 
@@ -48,6 +93,7 @@ impl Vault {
                 entries,
                 error: None,
             }),
+            remote: None,
         }
     }
 
@@ -77,6 +123,12 @@ impl Vault {
         if self.transport.is_none() {
             return Err(crate::acting::DETACHED_MESSAGE.into());
         }
+        if let Some(slot) = &self.remote {
+            return match *lock(slot) {
+                Some(_) => Ok(()),
+                None => Err(t::cluster::vault_unknown().to_owned()),
+            };
+        }
         match switches.message(Switch::Vault) {
             Some(why) => Err(why.to_owned()),
             None => Ok(()),
@@ -88,7 +140,12 @@ impl Vault {
         let Some(transport) = &self.transport else {
             return Err(crate::acting::DETACHED_MESSAGE.into());
         };
-        transport.call(call.op, call.args.clone()).map_err(|e| {
+        let mut args = call.args.clone();
+        if let Some(slot) = &self.remote {
+            let node = lock(slot).clone().unwrap_or_default();
+            args["node"] = Value::String(node);
+        }
+        transport.call(call.op, args).map_err(|e| {
             if switches::detaches(&e) {
                 self.update(|s| *s = Snapshot::default());
                 return crate::acting::DETACHED_MESSAGE.to_owned();
@@ -106,7 +163,7 @@ impl Vault {
         if self.transport.is_none() {
             return;
         }
-        if !switches.is_on(Switch::Vault) {
+        if self.remote.is_none() && !switches.is_on(Switch::Vault) {
             self.update(|s| {
                 s.attached = switches.attached;
                 s.entries.clear();

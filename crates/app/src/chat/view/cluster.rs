@@ -9,8 +9,10 @@ use crate::acting::Control;
 use crate::chat::sidebar_node::{reply_control, reply_note, Nodes};
 use crate::cluster::feed::ClusterFeed;
 use crate::cluster::renders::{model, STANDBY, WORKER};
+use crate::cluster::secrets::VaultAccess;
 use crate::cluster::view::ClusterSheetView;
-use crate::mac::shell::AppCluster;
+use crate::mac::shell::{AppCluster, AppVault};
+use crate::vault::store::Vault;
 
 pub fn app_cluster(cx: &Context<ChatView>) -> Arc<ClusterFeed> {
     cx.try_global::<AppCluster>()
@@ -18,11 +20,25 @@ pub fn app_cluster(cx: &Context<ChatView>) -> Arc<ClusterFeed> {
         .unwrap_or_else(|| Arc::new(ClusterFeed::none()))
 }
 
+pub fn app_vault<V>(cx: &Context<V>) -> Arc<Vault> {
+    cx.try_global::<AppVault>()
+        .map(|v| v.0.clone())
+        .unwrap_or_else(|| Arc::new(Vault::fixed(Vec::new())))
+}
+
 impl ChatView {
     pub(super) fn open_cluster_sheet(&mut self, cx: &mut Context<Self>) {
         let feed = self.cluster.clone();
-        let entity = cx.new(|cx| ClusterSheetView::live(feed, cx));
+        let access = self.vault_access(cx);
+        let entity = cx.new(|cx| ClusterSheetView::live(feed, access, cx));
         self.show_sheet(entity, cx);
+    }
+
+    pub(super) fn vault_access(&self, cx: &Context<Self>) -> VaultAccess {
+        VaultAccess {
+            local: app_vault(cx),
+            switches: self.switches.clone(),
+        }
     }
 
     pub(super) fn cluster_tick(&mut self, cx: &mut Context<Self>) {

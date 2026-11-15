@@ -80,3 +80,51 @@ cluster-change-failed = Couldn't change the node: { $error }
 cluster-node-offline = { $name } is offline
 # Line under a session in the Sidebar when its node is offline; $name is the node's name.
 cluster-node-line-offline = { $name } · Offline
+
+## Logins
+
+# One tool's login on a node, in a row of them; $tool is the tool's name and $state one of the four words below.
+cluster-login = { $tool }: { $state }
+cluster-login-signed-in = Signed In
+cluster-login-signed-out = Signed Out
+cluster-login-not-installed = Not Installed
+# The node has not said whether the tool is signed in.
+cluster-login-unknown = Unknown
+
+## Secrets
+
+# A row menu item that opens the list of vault secrets a node may use.
+cluster-secrets = Secrets…
+# Title of the secrets editor; $name is the node's name.
+cluster-secrets-title = Secrets on { $name }
+cluster-secrets-about = A job on this machine can carry only the secrets checked here. Each is sent to the machine when the job starts and deleted when it ends.
+cluster-secrets-any = Any Secret
+cluster-secrets-any-about = Every secret in the vault, by name, on this machine. The list below stays as it is.
+cluster-secrets-reading = Reading the vault…
+cluster-secrets-empty = The vault has no secrets yet.
+# Beside a checked name that is no longer saved in the vault.
+cluster-secrets-gone = Not in the vault
+cluster-secrets-save = Save
+cluster-secrets-cancel = Cancel
+cluster-secrets-failed = Couldn't change the secrets: { $error }
+cluster-secrets-vault-failed = Couldn't read the vault: { $error }
+cluster-secrets-none = No secrets
+cluster-secrets-any-short = Any secret
+# Line on a node's row; $count is how many secrets it may carry.
+cluster-secrets-count = { $count ->
+    [one] { NUMBER($count) } secret
+   *[other] { NUMBER($count) } secrets
+}
+# Label of the picker of secrets in New Session on a Worker.
+cluster-secrets-picker = Secrets
+cluster-secrets-picker-none = This machine carries no secrets. Choose some in the cluster's Secrets… menu.
+# Under the picker while another machine is the primary; $name is the vault's machine.
+cluster-secrets-wait = New secrets wait for { $name }
+
+## Vault on another machine
+
+cluster-vault-tab-local = This Mac
+# Tab that shows the vault of the machine that holds it; $name is its name.
+cluster-vault-tab-remote = Vault on { $name }
+cluster-vault-offline = The vault is on { $name }, which is offline
+cluster-vault-unknown = This Mac doesn't know which machine holds the vault.

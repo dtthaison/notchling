@@ -1,10 +1,15 @@
 pub mod feed;
 pub mod model;
 pub mod renders;
+pub mod secrets;
+#[cfg(target_os = "macos")]
+pub mod secrets_view;
 #[cfg(target_os = "macos")]
 pub mod view;
 #[cfg(target_os = "macos")]
 mod view_rows;
+#[cfg(target_os = "macos")]
+mod view_secrets;
 pub mod wire;
 
 pub const WIDTH: f32 = 680.0;
@@ -14,3 +19,5 @@ pub const HEIGHT: f32 = 560.0;
 mod feed_tests;
 #[cfg(test)]
 mod model_tests;
+#[cfg(test)]
+mod secrets_tests;

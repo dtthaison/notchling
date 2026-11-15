@@ -11,8 +11,9 @@ use notchling_engine::vault::expiry::today_local;
 use notchling_engine::vault::url::renew_url;
 use notchling_kit::metric::{RADIUS_CARD, SIDE_PADDING};
 use notchling_kit::part::{ButtonKind, PartState};
-use notchling_kit::ui::{button, label, scrollable, window_appearance, KitStyled};
+use notchling_kit::ui::{button, label, scrollable, window_appearance, KitPart, KitStyled};
 use notchling_kit::{Appearance, Icon, Ink, TypeRole};
+use notchling_locale as t;
 
 use super::form::{Form, Typed};
 use super::form_view::{form_body, form_footer, FormEvent};
@@ -21,6 +22,9 @@ use super::renders::{self, Shown};
 use super::store::Vault;
 use crate::accounts::flows::Alert;
 use crate::accounts::view_rows::{alert_overlay, Handler};
+use crate::cluster::feed::ClusterFeed;
+use crate::cluster::model::VaultNode;
+use crate::cluster::secrets_view::vault_tabs;
 use crate::mac::gate;
 use crate::sheets::view::{sheet_header, Dismiss};
 use crate::switches::feed::SwitchFeed;
@@ -31,6 +35,8 @@ const REFRESH_EVERY: Duration = Duration::from_secs(5);
 pub struct VaultSheetView {
     vault: Arc<Vault>,
     feed: Arc<SwitchFeed>,
+    cluster: Arc<ClusterFeed>,
+    remote_tab: bool,
     form: Option<Form>,
     pub(super) removing: Option<String>,
     busy: bool,
@@ -50,11 +56,18 @@ fn now_secs() -> f64 {
 }
 
 impl VaultSheetView {
-    pub fn live(vault: Arc<Vault>, feed: Arc<SwitchFeed>, cx: &mut Context<Self>) -> Self {
+    pub fn live(
+        vault: Arc<Vault>,
+        feed: Arc<SwitchFeed>,
+        cluster: Arc<ClusterFeed>,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let view = VaultSheetView {
             seen_vault: feed.changes().vault,
             vault,
             feed,
+            cluster,
+            remote_tab: false,
             form: None,
             removing: None,
             busy: false,
@@ -92,6 +105,7 @@ impl VaultSheetView {
     pub fn fixed(
         vault: Arc<Vault>,
         feed: Arc<SwitchFeed>,
+        cluster: Arc<ClusterFeed>,
         form: Option<Form>,
         today: i64,
         cx: &mut Context<Self>,
@@ -101,6 +115,8 @@ impl VaultSheetView {
             fixed: Some((today, feed.switches())),
             vault,
             feed,
+            cluster,
+            remote_tab: false,
             form,
             removing: None,
             busy: false,
@@ -109,7 +125,41 @@ impl VaultSheetView {
         }
     }
 
+    fn remote(&self) -> Option<VaultNode> {
+        self.cluster
+            .snapshot()
+            .remote_vault()
+            .cloned()
+            .filter(|_| self.remote_tab)
+    }
+
+    fn store(&self) -> Arc<Vault> {
+        match self.remote() {
+            Some(node) => {
+                let store = self.cluster.remote_vault();
+                store.set_node(Some(&node.id));
+                store
+            }
+            None => self.vault.clone(),
+        }
+    }
+
+    fn show_tab(&mut self, remote: bool, cx: &mut Context<Self>) {
+        if self.remote_tab == remote {
+            return;
+        }
+        self.remote_tab = remote;
+        self.form = None;
+        self.removing = None;
+        self.note = None;
+        self.refresh(cx);
+        cx.notify();
+    }
+
     fn switches(&self) -> Switches {
+        if self.remote().is_some() {
+            return Switches::all_on();
+        }
         match &self.fixed {
             Some((_, s)) => *s,
             None => self.feed.switches(),
@@ -123,10 +173,11 @@ impl VaultSheetView {
     }
 
     fn refresh(&self, cx: &mut Context<Self>) {
-        if !self.vault.is_live() {
+        let vault = self.store();
+        if !vault.is_live() {
             return;
         }
-        let (vault, switches) = (self.vault.clone(), self.switches());
+        let switches = self.switches();
         cx.spawn(async move |this, cx| {
             cx.background_executor()
                 .spawn(async move { vault.refresh(&switches) })
@@ -142,12 +193,13 @@ impl VaultSheetView {
         after: impl FnOnce(&mut Self, Result<(), String>, &mut Context<Self>) + 'static,
         cx: &mut Context<Self>,
     ) {
-        if self.busy || !self.vault.is_live() {
+        let vault = self.store();
+        if self.busy || !vault.is_live() {
             return;
         }
         self.busy = true;
         self.note = None;
-        let (vault, switches) = (self.vault.clone(), self.switches());
+        let switches = self.switches();
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_executor()
@@ -176,7 +228,7 @@ impl VaultSheetView {
     }
 
     pub fn entry(&self, name: &str) -> Option<VaultEntry> {
-        self.vault
+        self.store()
             .snapshot()
             .entries
             .into_iter()
@@ -315,8 +367,14 @@ impl Render for VaultSheetView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let a = window_appearance(window);
         let switches = self.switches();
-        let snapshot = self.vault.snapshot();
+        let snapshot = self.store().snapshot();
         let today = self.today();
+        let remote = self.remote();
+        let mut tabs = None;
+        if let Some(node) = self.cluster.snapshot().remote_vault() {
+            let on: Handler<Self, bool> = Rc::new(|this, remote, cx| this.show_tab(remote, cx));
+            tabs = Some(vault_tabs(&node.name, remote.is_some(), a, cx, on));
+        }
         let (title, body, footer): (&str, AnyElement, Option<Div>) = match &self.form {
             Some(form) => {
                 let on: Handler<Self, FormEvent> =
@@ -335,6 +393,17 @@ impl Render for VaultSheetView {
                     )),
                 )
             }
+            None if remote.as_ref().is_some_and(|n| !n.online) => (
+                TITLE,
+                scrollable(div().id("vault-offline").p(px(SIDE_PADDING)).child(label(
+                    &t::cluster::vault_offline(remote.as_ref().map_or("", |n| &n.name)),
+                    TypeRole::Body,
+                    Ink::Needs,
+                    a,
+                )))
+                .into_any_element(),
+                None,
+            ),
             None => {
                 let l = list(&snapshot.entries, &switches, today, snapshot.error.clone());
                 (
@@ -395,7 +464,7 @@ impl Render for VaultSheetView {
             });
             alert_overlay(&alert, self.busy, a, cx, on)
         });
-        div()
+        let mut sheet = div()
             .id("vault-sheet")
             .track_focus(&self.focus)
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| this.key(event, cx)))
@@ -412,9 +481,14 @@ impl Render for VaultSheetView {
                 end.id("vault-header-end"),
                 a,
             ))
+            .children(tabs.filter(|_| self.form.is_none()))
             .child(body)
             .children(footer)
-            .children(alert)
+            .children(alert);
+        if remote.is_some() {
+            sheet = sheet.part("Remote Vault", a, cx);
+        }
+        sheet
     }
 }
 
@@ -457,14 +531,27 @@ pub fn build_render(name: &str, cx: &mut gpui::App) -> Option<AnyView> {
     let which = renders::shown(name)?;
     let vault = Arc::new(Vault::fixed(renders::entries()));
     let feed = Arc::new(SwitchFeed::fixed(Switches::all_on()));
+    let cluster = Arc::new(ClusterFeed::none());
     Some(match which {
         Shown::List => cx
-            .new(|cx| VaultSheetView::fixed(vault, feed, None, renders::TODAY, cx))
+            .new(|cx| VaultSheetView::fixed(vault, feed, cluster, None, renders::TODAY, cx))
             .into(),
         Shown::Form => {
             let form = Form::edit(&renders::entries()[0]);
-            cx.new(|cx| VaultSheetView::fixed(vault, feed, Some(form), renders::TODAY, cx))
+            cx.new(|cx| VaultSheetView::fixed(vault, feed, cluster, Some(form), renders::TODAY, cx))
                 .into()
+        }
+        Shown::Remote => {
+            let cluster = Arc::new(crate::cluster::renders::feed_with_remote_vault(
+                renders::entries(),
+            ));
+            cx.new(|cx| {
+                let mut sheet =
+                    VaultSheetView::fixed(vault, feed, cluster, None, renders::TODAY, cx);
+                sheet.remote_tab = true;
+                sheet
+            })
+            .into()
         }
         Shown::Approval => {
             let approval = super::approval::pending(&renders::approvals())

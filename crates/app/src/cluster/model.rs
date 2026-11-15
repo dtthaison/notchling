@@ -1,8 +1,10 @@
+use notchling_engine::cluster::grants::SecretAllow;
 use notchling_engine::cluster::{compat, Compat, Desired, Purpose, Tool as ClusterTool, Versions};
 use notchling_engine::versions::Tool as VersionTool;
 use notchling_locale as t;
 use serde_json::Value;
 
+use super::secrets::SecretsModel;
 use super::wire::{self, Request};
 
 const TOOLS: [(VersionTool, ClusterTool); 3] = [
@@ -10,6 +12,34 @@ const TOOLS: [(VersionTool, ClusterTool); 3] = [
     (VersionTool::Codex, ClusterTool::Codex),
     (VersionTool::Agy, ClusterTool::Agy),
 ];
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Login {
+    SignedIn,
+    SignedOut,
+    NotInstalled,
+    Unknown,
+}
+
+impl Login {
+    pub fn word(self) -> &'static str {
+        match self {
+            Login::SignedIn => t::cluster::login_signed_in(),
+            Login::SignedOut => t::cluster::login_signed_out(),
+            Login::NotInstalled => t::cluster::login_not_installed(),
+            Login::Unknown => t::cluster::login_unknown(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct VaultNode {
+    pub id: String,
+    pub name: String,
+    pub online: bool,
+    pub primary: bool,
+    pub me: bool,
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NodeRow {
@@ -23,6 +53,8 @@ pub struct NodeRow {
     pub cpu: Option<u8>,
     pub mem: Option<(u64, u64)>,
     pub tools: Vec<(String, Option<String>)>,
+    pub logins: Vec<(String, Login)>,
+    pub secrets: SecretAllow,
     pub warnings: Vec<String>,
     pub desired: (bool, bool, bool),
     pub me: bool,
@@ -39,6 +71,10 @@ impl NodeRow {
     }
 
     pub fn offers_acting(&self) -> bool {
+        self.offers_menu() && !self.me && !self.client
+    }
+
+    pub fn offers_secrets(&self) -> bool {
         self.offers_menu() && !self.me && !self.client
     }
 
@@ -66,6 +102,13 @@ impl NodeRow {
             &gigabytes(used),
             &gigabytes(total),
         ))
+    }
+
+    pub fn login_texts(&self) -> Vec<(String, Login)> {
+        self.logins
+            .iter()
+            .map(|(tool, login)| (t::cluster::login(tool, login.word()), *login))
+            .collect()
     }
 
     pub fn tool_texts(&self) -> Vec<String> {
@@ -123,6 +166,7 @@ pub struct ClusterModel {
     listening: bool,
     tailscale: bool,
     error: Option<String>,
+    vault: Option<VaultNode>,
 }
 
 fn role_word(role: &str) -> &'static str {
@@ -188,6 +232,36 @@ fn warnings_for(reference: &Versions, node: &Versions, name: &str) -> Vec<String
     out
 }
 
+fn login_of(versions: &Versions, tool: VersionTool) -> Login {
+    if !versions.tools.contains_key(&tool) {
+        return Login::NotInstalled;
+    }
+    match versions.logins.get(&tool) {
+        Some(true) => Login::SignedIn,
+        Some(false) => Login::SignedOut,
+        None => Login::Unknown,
+    }
+}
+
+fn secrets_of(member: &Value) -> SecretAllow {
+    member
+        .get("secrets")
+        .and_then(|s| serde_json::from_value(s.clone()).ok())
+        .unwrap_or_default()
+}
+
+fn vault_of(cluster: &Value, members: &[&Value], me: &str) -> Option<VaultNode> {
+    let id = text(cluster, "vault");
+    let member = members.iter().find(|m| text(m, "id") == id)?;
+    Some(VaultNode {
+        id: id.to_owned(),
+        name: text(member, "name").to_owned(),
+        online: id == me || flag(member, "online"),
+        primary: text(cluster, "home") == id,
+        me: id == me,
+    })
+}
+
 fn flag(member: &Value, key: &str) -> bool {
     member.get(key).and_then(Value::as_bool).unwrap_or(false)
 }
@@ -224,6 +298,15 @@ fn row_of(member: &Value, me: &str, reference: Option<&Versions>) -> NodeRow {
                 .collect()
         })
         .unwrap_or_default();
+    let logins = versions
+        .as_ref()
+        .map(|v| {
+            TOOLS
+                .iter()
+                .map(|(tool, _)| (tool.title().to_owned(), login_of(v, *tool)))
+                .collect()
+        })
+        .unwrap_or_default();
     let state = text(member, "state");
     NodeRow {
         me: id == me,
@@ -237,6 +320,8 @@ fn row_of(member: &Value, me: &str, reference: Option<&Versions>) -> NodeRow {
         cpu: number("cpu").map(|c| c.min(100) as u8),
         mem: number("memUsedMb").zip(number("memTotalMb")),
         tools,
+        logins,
+        secrets: secrets_of(member),
         warnings,
         desired: (
             desired_flag("acting"),
@@ -277,7 +362,12 @@ impl ClusterModel {
             .get("cluster")
             .filter(|c| c.is_object())
             .map(|c| text(c, "name").to_owned());
+        let vault = status
+            .get("cluster")
+            .filter(|c| c.is_object())
+            .and_then(|c| vault_of(c, &members, me));
         ClusterModel {
+            vault,
             loaded: true,
             cluster,
             me: me.to_owned(),
@@ -317,6 +407,14 @@ impl ClusterModel {
 
     pub fn me(&self) -> &str {
         &self.me
+    }
+
+    pub fn vault_node(&self) -> Option<&VaultNode> {
+        self.vault.as_ref()
+    }
+
+    pub fn remote_vault(&self) -> Option<&VaultNode> {
+        self.vault.as_ref().filter(|v| !v.me)
     }
 
     pub fn can_create(&self) -> bool {
@@ -368,6 +466,11 @@ impl ClusterModel {
                 install,
             },
         ))
+    }
+
+    pub fn set_secrets(&self, id: &str, secrets: &SecretsModel) -> Option<Request> {
+        let row = self.row(id).filter(|r| r.offers_secrets())?;
+        Some(wire::allow_set(&row.id, &secrets.request()))
     }
 
     pub fn remove(&self, id: &str) -> Option<Request> {

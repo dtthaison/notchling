@@ -9,6 +9,7 @@ use notchling_kit::{Appearance, Icon, IconSize, Ink, TypeRole};
 use notchling_locale as t;
 
 use super::model::{ClusterModel, NodeRow};
+use super::secrets_view::{login_line, secrets_line};
 use super::view::ClusterSheetView;
 use crate::mac::gate;
 
@@ -68,6 +69,17 @@ impl ClusterSheetView {
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.pick(&acting, ClusterModel::toggle_acting, cx)
                 })),
+            );
+        }
+        if row.offers_secrets() {
+            let secrets = id.clone();
+            items = items.child(
+                MenuItem::new(
+                    SharedString::from(format!("node-secrets-{id}")),
+                    t::cluster::secrets(),
+                )
+                .build(a)
+                .on_click(cx.listener(move |this, _, _, cx| this.open_secrets(&secrets, cx))),
             );
         }
         if row.offers_remove() {
@@ -166,6 +178,9 @@ impl ClusterSheetView {
         if !tools.is_empty() {
             body = body.child(label(&tools.join(" · "), TypeRole::Meta, Ink::TextFaint, a));
         }
+        body = body
+            .children(login_line(row, dim, a))
+            .children(secrets_line(row, dim, a));
         for warning in &row.warnings {
             body = body.child(
                 div()

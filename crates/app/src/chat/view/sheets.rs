@@ -75,7 +75,8 @@ impl ChatView {
             .map(|v| v.0.clone())
             .unwrap_or_else(|| Arc::new(Vault::fixed(Vec::new())));
         let feed = self.switches.clone();
-        let entity = cx.new(|cx| VaultSheetView::live(vault, feed, cx));
+        let cluster = self.cluster.clone();
+        let entity = cx.new(|cx| VaultSheetView::live(vault, feed, cluster, cx));
         self.show(entity, cx);
     }
 
@@ -85,7 +86,8 @@ impl ChatView {
             .map(|v| v.0.clone())
             .unwrap_or_else(|| Arc::new(Vault::fixed(Vec::new())));
         let feed = self.switches.clone();
-        let entity = cx.new(|cx| VaultSheetView::live(vault, feed, cx));
+        let cluster = self.cluster.clone();
+        let entity = cx.new(|cx| VaultSheetView::live(vault, feed, cluster, cx));
         entity.update(cx, |sheet, cx| {
             if let Some(entry) = sheet.entry(name) {
                 sheet.open_form(crate::vault::form::Form::edit(&entry), window, cx);
