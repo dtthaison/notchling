@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use serde::Deserialize;
 use serde_json::{json, Value};
 
@@ -137,8 +139,8 @@ impl NodeCore {
                     self.relay_to_home(id, "cluster.main.set", args, out);
                 }
             }
-            LocalCmd::MainSeen { agents } => {
-                self.main_seen(&agents, out);
+            LocalCmd::MainSeen { agents, codex_exec } => {
+                self.main_seen(&agents, &codex_exec, out);
                 self.finish(target, Ok(json!({})), out);
             }
             LocalCmd::SetVersions { versions } => self.set_versions(id, versions, out),
@@ -341,14 +343,25 @@ impl NodeCore {
         Ok(json!({}))
     }
 
-    fn main_seen(&mut self, agents: &[Agent], out: &mut Vec<Effect>) {
+    fn main_seen(
+        &mut self,
+        agents: &[Agent],
+        codex_exec: &BTreeSet<String>,
+        out: &mut Vec<Effect>,
+    ) {
         if !self.is_home() {
             return;
         }
         let Some(state) = &self.state else {
             return;
         };
-        let (main, ended) = reconcile(&state.main, &state.ended, agents, &state.kept, self.wall_ms);
+        let (main, ended) = reconcile(
+            &state.main,
+            &state.ended,
+            agents,
+            (&state.kept, codex_exec),
+            self.wall_ms,
+        );
         let _ = self.apply(Command::Main { main, ended }, out);
     }
 

@@ -272,12 +272,13 @@ from the app in this run, or `cluster.join` (below), or a restart of a headless 
 
 | Op | Tier | Args | Reply |
 | --- | --- | --- | --- |
-| `cluster.status` | agent | `{}` | `{cluster: {id, name, term, home, vault} \| null, me, members: [Member], link, listening, tailscale, error}` |
+| `cluster.status` | agent | `{}` | `{cluster: {id, name, term, home, vault} \| null, me, members: [Member], jobs, main: [session id], kept: [session id], link, listening, tailscale, error}` |
 | `cluster.create` | app | `{name}` | the new cluster's state; this node is its home (primary) and reference |
 | `cluster.join.token` | agent | `{}` | `{token: "nlj1.…"}`, one use, 10 minutes; a non-home member asks its home |
 | `cluster.join` | agent | `{token}` | `{state: "pending" \| "joined"}` |
 | `cluster.member.set` | app | `{node, canBeMaster?, client?, reference?, acceptsDelegation?, headless?, desired?}` | the member as stored |
 | `cluster.remove` | app | `{node}` | the member as stored, `state: "removed"` |
+| `cluster.main.set` | app | `{id, main}` | `{}`; `main: false` is "Keep on <machine>", `true` undoes it; the primary applies it (a client forwards it), the id is at most 256 bytes with no control characters |
 
 - `Member` is `{id, name, role, canBeMaster, online, client, headless, reference, state, versions, load, desired,
   acceptsDelegation}`; `role` is `home`, `standby` or `worker`, `state` `pending`, `active` or `removed`,

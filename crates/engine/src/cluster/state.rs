@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use super::grants::SecretAllow;
 use super::id::{NodeId, Role};
 use super::jobs::{job_id, Job, JobSpec, JobState};
-use super::main_sessions::MainSession;
+use super::main_sessions::{valid_id, MainSession};
 use super::members::{Desired, Member, MemberState, Term};
 use super::versions::Versions;
 
@@ -423,10 +423,15 @@ pub fn apply(
             }
             vec![Change::Job(job.clone())]
         }
-        Command::SetMain { session, main } => match set_main(state, session, *main) {
-            Some(change) => vec![change],
-            None => return Ok(Applied::none()),
-        },
+        Command::SetMain { session, main } => {
+            if !valid_id(session) {
+                return Err(CommandError::BadTransition);
+            }
+            match set_main(state, session, *main) {
+                Some(change) => vec![change],
+                None => return Ok(Applied::none()),
+            }
+        }
         Command::Main { main, ended } => {
             if state.main == *main && state.ended == *ended {
                 return Ok(Applied::none());

@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::id::Tool;
-use super::main_sessions::{is_main, may_be_main, reconcile, DAY_MS};
+use super::main_sessions::{is_main, may_be_main, reconcile, valid_id, DAY_MS, HEADLESS, NOT_YET};
 use super::state::{apply, start, Change, ClusterState, Command};
 use super::testkit::member;
 use crate::sessions::{Agent, AgentGroup, AgentTarget, NodeRef};
@@ -16,7 +16,7 @@ fn agent(id: &str) -> Agent {
         label: "Idle".to_string(),
         detail: None,
         since_ms: 5,
-        target: AgentTarget::Job(id.to_string()),
+        target: AgentTarget::Job("ab12cd34".to_string()),
         suggested_reply: None,
         transcript_path: Some(format!("/home/u/.claude/projects/p/{id}.jsonl")),
         host: "Background".to_string(),
@@ -131,7 +131,13 @@ fn set_main_is_journaled() {
 fn set_main_off_drops_a_main_session_and_the_monitor_does_not_bring_it_back() {
     let mut state = created();
     let seen = [agent("job-1")];
-    let (main, ended) = reconcile(&state.main, &state.ended, &seen, &state.kept, 100);
+    let (main, ended) = reconcile(
+        &state.main,
+        &state.ended,
+        &seen,
+        (&state.kept, &BTreeSet::new()),
+        100,
+    );
     apply(&mut state, Command::Main { main, ended }, 100).expect("main");
     assert!(state.main.contains_key("job-1"));
     apply(
@@ -144,40 +150,154 @@ fn set_main_off_drops_a_main_session_and_the_monitor_does_not_bring_it_back() {
     )
     .expect("set main");
     assert!(!state.main.contains_key("job-1"));
-    let (main, _) = reconcile(&state.main, &state.ended, &seen, &state.kept, 120);
+    let (main, _) = reconcile(
+        &state.main,
+        &state.ended,
+        &seen,
+        (&state.kept, &BTreeSet::new()),
+        120,
+    );
     assert!(!main.contains_key("job-1"));
 }
 
 #[test]
 fn ended_session_leaves_main_after_a_day() {
-    let kept = BTreeSet::new();
+    let kept = (&BTreeSet::new(), &BTreeSet::new());
     let live = [agent("job-1")];
-    let (main, ended) = reconcile(&BTreeMap::new(), &BTreeMap::new(), &live, &kept, 1_000);
+    let (main, ended) = reconcile(&BTreeMap::new(), &BTreeMap::new(), &live, kept, 1_000);
     assert_eq!(main["job-1"].tool, Tool::Claude);
     assert_eq!(main["job-1"].cwd, "/work/repo");
     assert_eq!(main["job-1"].since_ms, 1_000);
-    let (main, ended) = reconcile(&main, &ended, &[], &kept, 2_000);
+    let (main, ended) = reconcile(&main, &ended, &[], kept, 2_000);
     assert!(main.contains_key("job-1"));
-    let (main, ended) = reconcile(&main, &ended, &[], &kept, 2_000 + DAY_MS - 1);
+    let (main, ended) = reconcile(&main, &ended, &[], kept, 2_000 + DAY_MS - 1);
     assert!(main.contains_key("job-1"));
-    let back = reconcile(&main, &ended, &live, &kept, 3_000 + DAY_MS);
+    let back = reconcile(&main, &ended, &live, kept, 3_000 + DAY_MS);
     assert!(back.0.contains_key("job-1"));
     assert!(back.1.is_empty());
-    let (main, ended) = reconcile(&main, &ended, &[], &kept, 2_000 + DAY_MS);
+    let (main, ended) = reconcile(&main, &ended, &[], kept, 2_000 + DAY_MS);
     assert!(main.is_empty());
     assert!(ended.is_empty());
 }
 
 #[test]
 fn phone_started_session_is_main() {
-    let kept = BTreeSet::new();
-    let mut started = agent("codex:phone-1");
-    started.group = AgentGroup::Working;
-    started.since_ms = 50;
-    started.config_dir = None;
-    let (main, _) = reconcile(&BTreeMap::new(), &BTreeMap::new(), &[started], &kept, 60);
-    let one = &main["codex:phone-1"];
-    assert_eq!(one.tool, Tool::Codex);
+    let mut job = agent("1f2e3d4c-aaaa-bbbb-cccc-000000000001");
+    job.group = AgentGroup::Working;
+    job.since_ms = 50;
+    job.host = "Background".to_string();
+    job.config_dir = None;
+    let mut codex = agent("codex:phone-1");
+    codex.target = AgentTarget::Resume {
+        session_id: "phone-1".to_string(),
+        cwd: "/work/repo".to_string(),
+    };
+    let exec: BTreeSet<String> = ["codex:phone-1".to_string()].into();
+    let (main, _) = reconcile(
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &[job, codex],
+        (&BTreeSet::new(), &exec),
+        60,
+    );
+    let one = &main["1f2e3d4c-aaaa-bbbb-cccc-000000000001"];
+    assert_eq!(one.tool, Tool::Claude);
     assert_eq!(one.config_dir, None);
     assert_eq!(one.since_ms, 60);
+    assert_eq!(main["codex:phone-1"].tool, Tool::Codex);
+}
+
+#[test]
+fn headless_session_may_not() {
+    let mut headless = agent("sess-1");
+    headless.headless = true;
+    assert_eq!(may_be_main(&headless), Err(HEADLESS.to_string()));
+    assert!(!is_main(&headless, &BTreeSet::new()));
+}
+
+#[test]
+fn a_job_is_main_only_once_it_has_its_session_id_and_a_transcript() {
+    let mut fresh = agent("ab12cd34");
+    assert_eq!(may_be_main(&fresh), Err(NOT_YET.to_string()));
+    fresh.id = "sess-1".to_string();
+    fresh.transcript_path = None;
+    assert_eq!(may_be_main(&fresh), Err(NOT_YET.to_string()));
+    fresh.transcript_path = Some("/t.jsonl".to_string());
+    assert_eq!(may_be_main(&fresh), Ok(()));
+    let (main, _) = reconcile(
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &[agent("ab12cd34")],
+        (&BTreeSet::new(), &BTreeSet::new()),
+        10,
+    );
+    assert!(main.is_empty());
+}
+
+#[test]
+fn a_terminal_session_has_its_session_id_and_needs_no_transcript() {
+    let mut terminal = agent("sess-t");
+    terminal.target = AgentTarget::Process(4242);
+    terminal.transcript_path = None;
+    assert_eq!(may_be_main(&terminal), Ok(()));
+}
+
+#[test]
+fn keep_chosen_on_the_short_id_holds_after_the_session_id_appears() {
+    let kept: BTreeSet<String> = ["ab12cd34".to_string()].into();
+    assert!(!is_main(&agent("sess-1"), &kept));
+    let by_session: BTreeSet<String> = ["sess-1".to_string()].into();
+    assert!(!is_main(&agent("sess-1"), &by_session));
+    assert!(is_main(&agent("sess-2"), &BTreeSet::new()));
+}
+
+#[test]
+fn codex_is_main_only_when_notchling_started_it() {
+    let mut codex = agent("codex:c1");
+    codex.target = AgentTarget::Resume {
+        session_id: "c1".to_string(),
+        cwd: "/work/repo".to_string(),
+    };
+    let none = BTreeSet::new();
+    let (main, _) = reconcile(
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &[codex.clone(), agent("sess-1")],
+        (&none, &none),
+        1,
+    );
+    assert!(!main.contains_key("codex:c1"));
+    assert!(main.contains_key("sess-1"));
+    let exec: BTreeSet<String> = ["codex:c1".to_string()].into();
+    let (main, _) = reconcile(
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &[codex],
+        (&none, &exec),
+        1,
+    );
+    assert!(main.contains_key("codex:c1"));
+}
+
+#[test]
+fn session_ids_are_short_and_plain() {
+    assert!(valid_id("sess-1"));
+    assert!(valid_id(&"a".repeat(256)));
+    assert!(!valid_id(&"a".repeat(257)));
+    assert!(!valid_id(""));
+    assert!(!valid_id("a\nb"));
+    assert!(!valid_id("a\u{7f}b"));
+    let mut state = created();
+    for bad in ["", "x\ty", &"a".repeat(300)] {
+        let err = apply(
+            &mut state,
+            Command::SetMain {
+                session: bad.to_string(),
+                main: false,
+            },
+            1,
+        );
+        assert!(err.is_err());
+    }
+    assert!(state.kept.is_empty());
 }

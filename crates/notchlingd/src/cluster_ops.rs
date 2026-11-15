@@ -3,6 +3,7 @@ use crate::cluster_node::{ClusterLog, ClusterNode};
 use crate::op_group::OpGroup;
 use crate::switches::SwitchFlag;
 use notchling_engine::cluster::join::decode_token;
+use notchling_engine::cluster::main_sessions::valid_id;
 use notchling_engine::cluster::{Desired, LocalCmd, NodeId};
 use notchling_events::kinds::security::SwitchCause;
 use notchling_events::spec::Outcome;
@@ -116,6 +117,9 @@ impl ClusterOps {
     fn main_set(&self, args: &Value) -> Result<Value, ApiError> {
         let usage = "cluster.main.set takes {\"id\": session id, \"main\": true or false}";
         let session = text(args, "id", usage)?.to_string();
+        if !valid_id(&session) {
+            return Err(bad(usage));
+        }
         let main = args
             .get("main")
             .and_then(Value::as_bool)

@@ -3,11 +3,18 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 
 use super::id::Tool;
-use crate::sessions::Agent;
+use crate::sessions::{Agent, AgentTarget};
 
 pub const DAY_MS: i64 = 86_400_000;
 
 pub const NOT_MAIN: &str = "Only Claude Code and Codex sessions on the primary can move";
+pub const NOT_YET: &str = "That session has not started yet";
+pub const HEADLESS: &str = "A claude -p session can't move";
+pub const MAX_ID: usize = 256;
+
+pub fn valid_id(id: &str) -> bool {
+    !id.is_empty() && id.len() <= MAX_ID && !id.chars().any(char::is_control)
+}
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct MainSession {
@@ -36,15 +43,28 @@ pub fn may_be_main(agent: &Agent) -> Result<(), String> {
     let tool = tool_of_row(&agent.id);
     let movable_tool = matches!(tool, Tool::Claude | Tool::Codex);
     let here = agent.node.is_none() && agent.command.is_none();
-    if movable_tool && here && !agent.cwd.trim().is_empty() {
-        Ok(())
-    } else {
-        Err(NOT_MAIN.to_string())
+    if !(movable_tool && here && !agent.cwd.trim().is_empty()) {
+        return Err(NOT_MAIN.to_string());
     }
+    if agent.headless {
+        return Err(HEADLESS.to_string());
+    }
+    if let AgentTarget::Job(short) = &agent.target {
+        if agent.id == *short || agent.transcript_path.is_none() {
+            return Err(NOT_YET.to_string());
+        }
+    }
+    Ok(())
 }
 
 pub fn is_main(agent: &Agent, kept: &BTreeSet<String>) -> bool {
-    may_be_main(agent).is_ok() && !kept.contains(&agent.id)
+    if may_be_main(agent).is_err() || kept.contains(&agent.id) {
+        return false;
+    }
+    match &agent.target {
+        AgentTarget::Job(short) => !kept.contains(short),
+        _ => true,
+    }
 }
 
 fn member(agent: &Agent, now_ms: i64) -> MainSession {
@@ -63,12 +83,15 @@ pub fn reconcile(
     main: &BTreeMap<String, MainSession>,
     ended: &BTreeMap<String, i64>,
     agents: &[Agent],
-    kept: &BTreeSet<String>,
+    (kept, codex_exec): (&BTreeSet<String>, &BTreeSet<String>),
     now_ms: i64,
 ) -> (BTreeMap<String, MainSession>, BTreeMap<String, i64>) {
     let mut next = BTreeMap::new();
     let mut gone = BTreeMap::new();
-    for agent in agents.iter().filter(|a| is_main(a, kept)) {
+    let wanted = |a: &&Agent| {
+        is_main(a, kept) && (tool_of_row(&a.id) != Tool::Codex || codex_exec.contains(&a.id))
+    };
+    for agent in agents.iter().filter(wanted) {
         let mut entry = member(agent, now_ms);
         if let Some(old) = main.get(&agent.id) {
             entry.since_ms = old.since_ms;

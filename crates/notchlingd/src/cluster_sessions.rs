@@ -39,6 +39,10 @@ fn now_ms() -> u64 {
 
 pub trait LocalRows: Send + Sync {
     fn rows(&self) -> Result<Vec<Value>, ApiError>;
+
+    fn complete_rows(&self) -> Result<Option<Vec<Value>>, ApiError> {
+        self.rows().map(Some)
+    }
 }
 
 pub struct HandlerRows {
@@ -51,22 +55,35 @@ impl HandlerRows {
     }
 }
 
-impl LocalRows for HandlerRows {
-    fn rows(&self) -> Result<Vec<Value>, ApiError> {
+impl HandlerRows {
+    fn ask(&self) -> Result<(Vec<Value>, bool), ApiError> {
         let caller = Caller {
             tier: Tier::Agent,
             client: ClientKind::Node,
             peer: None,
             pid: None,
         };
-        let list =
-            self.handler
-                .get()?
-                .call(&caller, ops::SESSIONS_LIST, &json!({"tools": "all"}))?;
-        match list {
-            Value::Array(rows) => Ok(rows),
+        let (list, extras) = self.handler.get()?.call_with_extras(
+            &caller,
+            ops::SESSIONS_LIST,
+            &json!({"tools": "all"}),
+        );
+        let partial = extras.get("partial").and_then(Value::as_bool) == Some(true);
+        match list? {
+            Value::Array(rows) => Ok((rows, partial)),
             _ => Err(failed("the session list isn't a list")),
         }
+    }
+}
+
+impl LocalRows for HandlerRows {
+    fn rows(&self) -> Result<Vec<Value>, ApiError> {
+        self.ask().map(|(rows, _)| rows)
+    }
+
+    fn complete_rows(&self) -> Result<Option<Vec<Value>>, ApiError> {
+        let (rows, partial) = self.ask()?;
+        Ok((!partial).then_some(rows))
     }
 }
 

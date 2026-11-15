@@ -111,6 +111,7 @@ pub enum LocalCmd {
     },
     MainSeen {
         agents: Vec<Agent>,
+        codex_exec: BTreeSet<String>,
     },
 }
 

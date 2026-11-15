@@ -1,4 +1,7 @@
+use std::collections::BTreeSet;
+
 use super::core_tests::{answers, pair, Hub};
+use super::Effect;
 use super::LocalCmd;
 use crate::cluster::testkit::id;
 use crate::sessions::{Agent, AgentGroup, AgentTarget};
@@ -13,9 +16,9 @@ fn agent(id: &str) -> Agent {
         label: "Working".to_string(),
         detail: None,
         since_ms: 1,
-        target: AgentTarget::Job(id.to_string()),
+        target: AgentTarget::Job("ab12cd34".to_string()),
         suggested_reply: None,
-        transcript_path: None,
+        transcript_path: Some(format!("/t/{id}.jsonl")),
         host: "Background".to_string(),
         headless: false,
         config_dir: None,
@@ -42,12 +45,14 @@ fn the_home_keeps_main_current_from_the_session_list() {
     hub.local(
         &m5,
         LocalCmd::MainSeen {
-            agents: vec![agent("job-1"), agent("agy:x")],
+            agents: vec![agent("job-1"), agent("agy:x"), agent("codex:other")],
+            codex_exec: BTreeSet::new(),
         },
     );
     let state = hub.core(&m5).state().expect("state");
     assert!(state.main.contains_key("job-1"));
     assert!(!state.main.contains_key("agy:x"));
+    assert!(!state.main.contains_key("codex:other"));
 }
 
 #[test]
@@ -58,6 +63,7 @@ fn a_member_that_is_not_the_home_ignores_the_session_list() {
         &c1,
         LocalCmd::MainSeen {
             agents: vec![agent("job-1")],
+            codex_exec: BTreeSet::new(),
         },
     );
     assert!(hub.core(&c1).state().expect("state").main.is_empty());
@@ -71,6 +77,7 @@ fn keep_on_reaches_the_home_from_a_client() {
         &m5,
         LocalCmd::MainSeen {
             agents: vec![agent("job-1")],
+            codex_exec: BTreeSet::new(),
         },
     );
     hub.local(
@@ -104,6 +111,11 @@ fn a_worker_cannot_change_main_sessions() {
         },
     );
     assert!(hub.core(&m5).state().expect("state").kept.is_empty());
+    assert!(hub.seen.iter().any(|(_, e)| matches!(
+        e,
+        Effect::Publish { name, data, .. }
+            if name == "cluster.refused" && data["op"] == "cluster.main.set"
+    )));
 }
 
 #[test]

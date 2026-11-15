@@ -250,6 +250,8 @@ fn main_set_takes_a_session_and_a_flag() {
         json!({"id": "job-1"}),
         json!({"main": false}),
         json!({"id": "job-1", "main": "no"}),
+        json!({"id": "a".repeat(257), "main": false}),
+        json!({"id": "a\nb", "main": false}),
     ];
     for args in cases {
         let err = w

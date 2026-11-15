@@ -3,6 +3,9 @@ use crate::cluster_sessions::LocalRows;
 use notchling_engine::cluster::LocalCmd;
 use notchling_engine::sessions::Agent;
 use serde_json::Value;
+use std::collections::{BTreeSet, HashMap};
+use std::io::Read;
+use std::path::Path;
 use std::sync::mpsc::{channel, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -23,17 +26,77 @@ pub fn agents_of(rows: Vec<Value>) -> Vec<Agent> {
         .collect()
 }
 
-pub fn tick(node: &ClusterNode, rows: &dyn LocalRows) -> bool {
+pub const FIRST_LINE_MAX: usize = 64 * 1024;
+const EXEC: &str = "codex_exec";
+
+pub fn first_line(path: &Path) -> Option<String> {
+    let mut buf = Vec::new();
+    std::fs::File::open(path)
+        .ok()?
+        .take(FIRST_LINE_MAX as u64)
+        .read_to_end(&mut buf)
+        .ok()?;
+    let end = buf.iter().position(|b| *b == b'\n')?;
+    String::from_utf8(buf[..end].to_vec()).ok()
+}
+
+pub fn originator(line: &str) -> Option<String> {
+    let meta: Value = serde_json::from_str(line).ok()?;
+    if meta.get("type").and_then(Value::as_str) != Some("session_meta") {
+        return None;
+    }
+    meta.get("payload")?
+        .get("originator")?
+        .as_str()
+        .map(str::to_string)
+}
+
+#[derive(Default)]
+pub struct Originators {
+    seen: Mutex<HashMap<String, bool>>,
+}
+
+impl Originators {
+    pub fn exec_ids(&self, agents: &[Agent]) -> BTreeSet<String> {
+        let mut seen = self.seen.lock().unwrap_or_else(|e| e.into_inner());
+        let live: BTreeSet<&str> = agents
+            .iter()
+            .filter_map(|a| a.transcript_path.as_deref())
+            .collect();
+        seen.retain(|path, _| live.contains(path.as_str()));
+        let mut ids = BTreeSet::new();
+        for agent in agents.iter().filter(|a| a.id.starts_with("codex:")) {
+            let Some(path) = agent.transcript_path.as_deref() else {
+                continue;
+            };
+            let known = match seen.get(path) {
+                Some(known) => Some(*known),
+                None => first_line(Path::new(path))
+                    .and_then(|line| originator(&line))
+                    .map(|name| {
+                        seen.insert(path.to_string(), name == EXEC);
+                        name == EXEC
+                    }),
+            };
+            if known == Some(true) {
+                ids.insert(agent.id.clone());
+            }
+        }
+        ids
+    }
+}
+
+pub fn tick(node: &ClusterNode, rows: &dyn LocalRows, origins: &Originators) -> bool {
     if !is_home(&node.status()) {
         return false;
     }
-    let Ok(rows) = rows.rows() else {
+    let Ok(Some(rows)) = rows.complete_rows() else {
         return false;
     };
-    node.local(LocalCmd::MainSeen {
-        agents: agents_of(rows),
-    })
-    .is_ok()
+    let agents = agents_of(rows);
+    let codex_exec = origins.exec_ids(&agents);
+    node.local(LocalCmd::MainSeen { agents, codex_exec })
+        .is_ok()
 }
 
 pub struct MainFollower {
@@ -50,8 +113,9 @@ impl MainFollower {
         let spawned = std::thread::Builder::new()
             .name("cluster-main".into())
             .spawn(move || {
+                let origins = Originators::default();
                 while let Err(RecvTimeoutError::Timeout) = stopped.recv_timeout(every) {
-                    tick(&node, rows.as_ref());
+                    tick(&node, rows.as_ref(), &origins);
                 }
             });
         MainFollower {
