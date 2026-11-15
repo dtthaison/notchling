@@ -95,6 +95,11 @@ impl ChatView {
             .is_some_and(|id| self.remote_refused(id, action))
     }
 
+    pub(super) fn attach_refused(&self) -> bool {
+        self.selected_session()
+            .is_some_and(|s| !crate::chat::remote_control::takes_files(&s.agent))
+    }
+
     pub(super) fn refuse_selected(&mut self, action: Action, cx: &mut Context<Self>) -> bool {
         let Some(id) = self.selected.clone() else {
             return false;

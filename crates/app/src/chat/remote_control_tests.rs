@@ -116,3 +116,50 @@ fn drops_and_reveals_are_refused_on_remote_and_shell_job_rows() {
         None
     );
 }
+
+#[test]
+fn no_attach_affordance_on_remote_or_shell_job_rows() {
+    use super::remote_control::takes_files;
+    use super::sidebar::sidebar_model;
+    for id in [remote(STANDBY), remote(WORKER)] {
+        assert!(!takes_files(&agent(&id, None)), "{id}");
+    }
+    assert!(!takes_files(&agent("shell:j-1", Some("make"))));
+    assert!(!takes_files(&agent(&remote_shell(), Some("make"))));
+    assert!(takes_files(&agent("job-1", None)));
+
+    let rows = [
+        agent("job-1", None),
+        agent(&remote(STANDBY), None),
+        agent("shell:j-1", Some("make")),
+    ];
+    let sessions: Vec<_> = rows
+        .into_iter()
+        .map(|agent| super::data::Session {
+            agent,
+            tool: super::data::Tool::Claude,
+            transcript: None,
+        })
+        .collect();
+    let model = sidebar_model(
+        &sessions,
+        1_000_000_000_000,
+        None,
+        &crate::accounts::store::Snapshot::default(),
+        None,
+    );
+    let flags: Vec<(String, bool)> = model
+        .sections
+        .iter()
+        .flat_map(|s| &s.rows)
+        .map(|r| (r.id.clone(), r.takes_files))
+        .collect();
+    assert_eq!(flags.len(), 3);
+    for (id, takes) in flags {
+        assert_eq!(takes, id == "job-1", "{id}");
+    }
+}
+
+fn remote_shell() -> String {
+    format!("{STANDBY}/shell:j-9")
+}

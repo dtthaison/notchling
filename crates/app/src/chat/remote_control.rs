@@ -66,6 +66,10 @@ pub fn files_control(agent: &Agent, nodes: &Nodes) -> Option<Control> {
     })
 }
 
+pub fn takes_files(agent: &Agent) -> bool {
+    !remote::is_remote(agent) && !remote::is_shell(agent)
+}
+
 pub fn refused(control: Option<Control>) -> bool {
     control.is_some_and(|c| !c.enabled)
 }

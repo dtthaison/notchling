@@ -57,6 +57,9 @@ pub(super) struct Shown {
 
 fn shown(view: &ChatView) -> Option<Shown> {
     let session = view.selected_session()?;
+    if crate::chat::remote::is_remote(&session.agent) {
+        return None;
+    }
     super::tool::adapter(session).limits(view, session)
 }
 

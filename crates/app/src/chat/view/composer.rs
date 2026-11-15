@@ -412,6 +412,10 @@ impl ChatView {
 
     fn pick_add(&mut self, add: Add, window: &mut Window, cx: &mut Context<Self>) {
         self.composer.add_menu = false;
+        if add != Add::Slash && self.attach_refused() {
+            cx.notify();
+            return;
+        }
         match add {
             Add::Files => self.pick_paths(false, window, cx),
             Add::Folder => self.pick_paths(true, window, cx),
@@ -583,6 +587,9 @@ const THUMB_HEIGHT: f32 = 64.0;
 const FILE_TILE: f32 = 180.0;
 
 fn thumbnails(view: &ChatView, id: &str, a: Appearance, cx: &mut Context<ChatView>) -> Option<Div> {
+    if view.attach_refused() {
+        return None;
+    }
     let attached = view.attached(id);
     let mut tiles: Vec<(std::path::PathBuf, bool)> =
         attached.iter().map(|p| (p.clone(), true)).collect();
@@ -767,7 +774,9 @@ pub fn render(view: &ChatView, a: Appearance, window: &Window, cx: &mut Context<
         .flex()
         .items_center()
         .justify_between()
-        .child(add_button(view, control.enabled, a, cx).unwrap_or_else(div))
+        .child(
+            add_button(view, control.enabled && !view.attach_refused(), a, cx).unwrap_or_else(div),
+        )
         .children(action_button(act, control.enabled, a, cx));
     let accent_edge = hsla(Ink::Accent.color(a));
     let card = div()
@@ -799,12 +808,18 @@ pub fn render(view: &ChatView, a: Appearance, window: &Window, cx: &mut Context<
                 }))
                 .capture_key_down(cx.listener(|this, e: &KeyDownEvent, window, cx| {
                     let (k, m) = (&e.keystroke, &e.keystroke.modifiers);
-                    if is_add_files(&k.key, m.platform, m.shift, m.alt, m.control) {
+                    if is_add_files(&k.key, m.platform, m.shift, m.alt, m.control)
+                        && !this.attach_refused()
+                    {
                         this.pick_add(Add::Files, window, cx);
                         cx.stop_propagation();
                     }
                 }))
-                .drag_over::<ExternalPaths>(move |style, _, _, _| style.border_color(accent_edge))
+                .when(!view.attach_refused(), |c| {
+                    c.drag_over::<ExternalPaths>(move |style, _, _, _| {
+                        style.border_color(accent_edge)
+                    })
+                })
         })
         .part_at("Composer", Corner::BottomLeading, a, cx);
     let footer = div()

@@ -78,6 +78,12 @@ pub fn tick(view: &mut ChatView, cx: &mut Context<ChatView>) {
     if view.details_hidden || view.shell_probe.busy {
         return;
     }
+    if view
+        .selected_session()
+        .is_some_and(|s| crate::chat::remote::is_remote(&s.agent))
+    {
+        return;
+    }
     let now = now_ms();
     if now.saturating_sub(view.shell_probe.last_ms) < EVERY_MS {
         return;
