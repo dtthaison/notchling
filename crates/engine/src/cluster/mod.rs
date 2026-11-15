@@ -1,8 +1,10 @@
 pub mod core;
+pub mod fence;
 pub mod id;
 pub mod jobs;
 pub mod join;
 pub mod members;
+pub mod outward;
 pub mod persist;
 pub mod policy;
 pub mod state;
@@ -22,11 +24,15 @@ pub use state::{role_of, ClusterState, Command, JournalEntry};
 pub use versions::{compat, Compat, Purpose, Versions};
 
 #[cfg(test)]
+mod fence_tests;
+#[cfg(test)]
 mod id_tests;
 #[cfg(test)]
 mod jobs_tests;
 #[cfg(test)]
 mod join_tests;
+#[cfg(test)]
+mod outward_tests;
 #[cfg(test)]
 mod policy_tests;
 #[cfg(test)]
