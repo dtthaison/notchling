@@ -1,4 +1,5 @@
 mod accounts;
+mod bring_back;
 mod changes;
 mod changes_panel;
 mod cluster;
@@ -160,8 +161,10 @@ pub struct ChatView {
     phone_dot: bool,
     cluster: Arc<crate::cluster::feed::ClusterFeed>,
     seen_cluster: u64,
+    followed: Option<(String, i64)>,
     seen_nodes: crate::chat::sidebar_node::Nodes,
     remote_preview: bool,
+    remote_shell: bool,
     inbox: Arc<InboxFeed>,
     inbox_panel: Option<Entity<InboxPanelView>>,
     seen_inbox: u64,
@@ -267,8 +270,10 @@ impl ChatView {
         if switch(INBOX_ENV) {
             view.preview_inbox(cx);
         }
-        if switch(REMOTE_ENV) {
-            view.preview_remote();
+        match std::env::var(REMOTE_ENV).as_deref() {
+            Ok("1") => view.preview_remote(false),
+            Ok("shell") => view.preview_remote(true),
+            _ => {}
         }
         if let Ok(id) = std::env::var(PAGE_ENV) {
             view.page.preview(&id);
@@ -445,8 +450,10 @@ impl ChatView {
             phone_dot: false,
             cluster: cluster::app_cluster(cx),
             seen_cluster: 0,
+            followed: None,
             seen_nodes: Default::default(),
             remote_preview: false,
+            remote_shell: false,
             inbox: inbox::app_inbox(cx),
             inbox_panel: None,
             seen_inbox: 0,
@@ -489,7 +496,7 @@ impl ChatView {
         let idle = self
             .sessions
             .iter()
-            .find(|s| !self.tools.live.is_working(&s.agent.id) && !tool::of(s.tool).working(s))
+            .find(|s| !self.tools.live.is_working(&s.agent.id) && !tool::adapter(s).working(s))
             .map(|s| s.agent.id.clone());
         let Some(id) = idle else {
             return false;

@@ -40,7 +40,7 @@ pub struct ClusterSheetView {
 
 impl EventEmitter<Dismiss> for ClusterSheetView {}
 
-fn field_box(editor: &Entity<TextEditor>, focused: bool, a: Appearance) -> Div {
+pub(crate) fn field_box(editor: &Entity<TextEditor>, focused: bool, a: Appearance) -> Div {
     div()
         .min_h(px(CONTROL))
         .px(px(SPACE[1] + 2.0))

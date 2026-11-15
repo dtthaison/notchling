@@ -271,6 +271,9 @@ impl DataRoot {
         let Some(path) = &session.transcript else {
             return Arc::default();
         };
+        if super::remote::is_shell(&session.agent) {
+            return super::remote::shell_conversation_shared(path);
+        }
         let path = path.to_string_lossy();
         match session.tool {
             Tool::Claude => super::cleared::with_model(

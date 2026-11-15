@@ -12,6 +12,7 @@ use notchling_locale as t;
 use super::conversation_view::ConversationView;
 use super::ChatView;
 use crate::acting::Control;
+use crate::chat::remote_control::Action;
 use crate::mac::gate;
 use crate::mac::shell::AppOpinions;
 use crate::tools::second_opinion::tool_name;
@@ -76,12 +77,21 @@ pub fn opinion_button(
     chat: &WeakEntity<ChatView>,
     cx: &mut Context<ConversationView>,
 ) -> impl IntoElement {
-    let control = match store(cx) {
-        Some(_) => Control {
+    let held = chat
+        .read_with(cx, |view, _| {
+            view.selected
+                .as_deref()
+                .and_then(|id| view.remote_control(id, Action::Opinion))
+        })
+        .ok()
+        .flatten();
+    let control = match (held, store(cx)) {
+        (Some(held), _) => held,
+        (None, Some(_)) => Control {
             enabled: true,
             tooltip: Some(t::chat::second_opinion_tip()),
         },
-        None => Control {
+        (None, None) => Control {
             enabled: false,
             tooltip: Some(t::chat::no_store()),
         },

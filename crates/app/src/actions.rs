@@ -23,9 +23,16 @@ pub struct Socket {
 }
 
 pub const SESSION_CALL_TIMEOUT: Duration = Duration::from_secs(60);
+pub const CODE_CALL_TIMEOUT: Duration = Duration::from_secs(300);
 
 pub fn call_timeout(op: &str) -> Duration {
-    if op.starts_with("session.") || op == ops::FOLDER_TRUST {
+    if op == ops::CLUSTER_DISPATCH || op == ops::CLUSTER_RETURN {
+        CODE_CALL_TIMEOUT
+    } else if op.starts_with("session.")
+        || op == ops::FOLDER_TRUST
+        || op == ops::CLUSTER_FOLLOW
+        || op == ops::SHELL_STOP
+    {
         SESSION_CALL_TIMEOUT
     } else {
         CALL_TIMEOUT
@@ -285,8 +292,13 @@ mod tests {
             ops::SESSION_MOVE,
             ops::SESSION_STOP,
             ops::SESSION_REMOVE,
+            ops::CLUSTER_FOLLOW,
+            ops::SHELL_STOP,
         ] {
             assert_eq!(call_timeout(op), SESSION_CALL_TIMEOUT, "{op}");
+        }
+        for op in [ops::CLUSTER_DISPATCH, ops::CLUSTER_RETURN] {
+            assert_eq!(call_timeout(op), CODE_CALL_TIMEOUT, "{op}");
         }
         assert!(SESSION_CALL_TIMEOUT >= std::time::Duration::from_secs(60));
         assert_eq!(

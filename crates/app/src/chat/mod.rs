@@ -65,6 +65,14 @@ mod prompts_permission_tests;
 #[cfg(test)]
 mod question_parity_tests;
 pub mod reload;
+pub mod remote;
+pub mod remote_control;
+#[cfg(test)]
+mod remote_control_tests;
+#[cfg(test)]
+mod remote_prompt_tests;
+#[cfg(test)]
+mod remote_tests;
 pub mod renders;
 #[cfg(test)]
 mod reply_words_tests;

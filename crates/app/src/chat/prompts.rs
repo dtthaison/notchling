@@ -6,6 +6,7 @@ use notchling_engine::transcript::snapshot::PendingQuestion;
 use serde_json::Value;
 
 use super::markers::{self, DIALOG, NO_ALWAYS};
+use super::remote;
 use crate::acting::{Decision, Request};
 use crate::chat::data::Tool;
 use crate::chat::permission_text::{PREVIEW_COMMAND, PREVIEW_DESCRIPTION};
@@ -113,6 +114,9 @@ fn held(
     prompts: Option<&[Value]>,
     files: &HashMap<String, HookRequest>,
 ) -> Option<HookRequest> {
+    if remote::is_remote(agent) {
+        return remote::held_prompt(agent, prompts?);
+    }
     let session = agent.session_id();
     let mine = |request: &HookRequest| {
         request.session_id == agent.id || session.as_deref() == Some(request.session_id.as_str())
@@ -149,6 +153,12 @@ pub fn prompt_for(
             return Some(Prompt::Permission(Box::new(r.clone())));
         }
     }
+    if remote::is_remote(agent) {
+        return request
+            .as_ref()
+            .and_then(|r| r.question().cloned())
+            .map(Prompt::Question);
+    }
     let question = request
         .as_ref()
         .and_then(|r| r.question().cloned())
@@ -167,6 +177,7 @@ pub fn prompt_for(
 pub fn screen_read_key(agent: &Agent, tool: Tool) -> Option<String> {
     if tool != Tool::Claude
         || agent.command.is_some()
+        || remote::is_remote(agent)
         || agent.group != AgentGroup::NeedsInput
         || !matches!(agent.target, AgentTarget::Job(_))
     {

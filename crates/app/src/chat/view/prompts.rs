@@ -27,6 +27,7 @@ use crate::chat::prompts::{
     is_dialog, permission_request, preview_prompt, prompt_for, question_key, screen_question,
     screen_read_key, Preview, Prompt, NEEDS_PREFIX,
 };
+use crate::chat::remote_control::Action;
 use crate::mac::gate;
 use crate::notch::answer::{type_key, QuestionDraft, Typed};
 use crate::notch::requests::HookRequest;
@@ -191,6 +192,11 @@ impl ChatView {
                 enabled: true,
                 tooltip: None,
             };
+        }
+        if let Some(row) = self.selected.as_deref() {
+            if let Some(held) = self.remote_control(row, Action::Answer) {
+                return held;
+            }
         }
         self.acting(cx).control()
     }

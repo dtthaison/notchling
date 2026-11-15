@@ -384,6 +384,16 @@ impl ChatView {
             && held.is_none()
             && outgoing.is_empty();
         let empty_note = empty.then(|| match session.map(|s| s.tool) {
+            _ if session.is_some_and(|s| crate::chat::remote::is_shell(&s.agent)) => {
+                if session.is_some_and(crate::chat::remote::waiting_for_mirror) {
+                    t::cluster::shell_waiting()
+                } else {
+                    t::cluster::shell_empty()
+                }
+            }
+            _ if session.is_some_and(crate::chat::remote::waiting_for_mirror) => {
+                t::cluster::mirror_waiting()
+            }
             Some(Tool::Antigravity) if !self.tools.agy.as_ref().is_some_and(|c| c.open) => {
                 match self.acting_in(cx) {
                     Acting::On => t::chat::agy_loading(),

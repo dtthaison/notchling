@@ -13,10 +13,12 @@ use notchling_engine::versions::Tool;
 
 use super::banner::{Banner, Banners};
 use super::new_session::{accounts, folders, NewSession};
+use super::run_on::{Code, Remote, RunOn};
 use crate::accounts::menu::targets;
 use crate::accounts::renders::{snapshot, Shown as AccountsShown};
+use crate::cluster::model::ClusterModel;
 
-pub const VIEWS: [ViewSpec; 13] = [
+pub const VIEWS: [ViewSpec; 14] = [
     ViewSpec {
         name: "banner",
         size: (620.0, 260.0),
@@ -26,6 +28,11 @@ pub const VIEWS: [ViewSpec; 13] = [
         name: "new-session",
         size: (680.0, 460.0),
         about: "the New Session sheet, acting off: Start disabled (fixture data)",
+    },
+    ViewSpec {
+        name: "new-session-worker",
+        size: (680.0, 460.0),
+        about: "the New Session sheet with a Worker picked in Run On: a shell job to run there, a version warning under the node and a node that can't be picked (fixture data)",
     },
     ViewSpec {
         name: "trust-folder",
@@ -88,6 +95,7 @@ pub const VIEWS: [ViewSpec; 13] = [
 pub enum Shown {
     Banner,
     NewSession,
+    NewSessionWorker,
     TrustFolder,
     Settings,
     SettingsAgents,
@@ -105,6 +113,7 @@ pub fn shown(name: &str) -> Option<Shown> {
     Some(match name {
         "banner" => Shown::Banner,
         "new-session" => Shown::NewSession,
+        "new-session-worker" => Shown::NewSessionWorker,
         "trust-folder" => Shown::TrustFolder,
         "settings" => Shown::Settings,
         "settings-agents" => Shown::SettingsAgents,
@@ -122,7 +131,7 @@ pub fn shown(name: &str) -> Option<Shown> {
 
 pub fn acting(shown: Shown) -> Acting {
     match shown {
-        Shown::TrustFolder => Acting::On,
+        Shown::TrustFolder | Shown::NewSessionWorker => Acting::On,
         Shown::Banner
         | Shown::NewSession
         | Shown::Settings
@@ -312,6 +321,22 @@ pub fn client(shown: Shown) -> Option<ClientPart> {
     }
 }
 
+fn run_on_status() -> Value {
+    let mut status = crate::cluster::renders::status();
+    let members = status["members"].as_array_mut().into_iter().flatten();
+    for member in members {
+        match member["name"].as_str() {
+            Some("mac-mini") => member["versions"]["tools"]["claude"] = json!("2.1.318"),
+            Some("build-box") => {
+                member["online"] = json!(true);
+                member["versions"]["tools"]["claude"] = json!("2.1.320");
+            }
+            _ => {}
+        }
+    }
+    status
+}
+
 pub fn new_session(shown: Shown) -> NewSession {
     let mut source = Source::keeping_everything(DataRoot::for_render());
     let agents = source.load(0).agents;
@@ -321,7 +346,18 @@ pub fn new_session(shown: Shown) -> NewSession {
         accounts(&targets(&made_up), &agents, &made_up.providers.providers),
         folders(&saved, &agents),
         "",
-    );
+    )
+    .with_run_on(RunOn::from_cluster(&ClusterModel::from_status(
+        &run_on_status(),
+        crate::cluster::renders::ME,
+    )));
+    if shown == Shown::NewSessionWorker {
+        sheet.pick_remote(Remote::Shell);
+        sheet.pick_node(crate::cluster::renders::STANDBY);
+        sheet.pick_code(Code::Folder);
+        sheet.set_path("/srv/api");
+        sheet.set_text("make test");
+    }
     if shown == Shown::TrustFolder {
         sheet.pick_folder(0);
         sheet.start();

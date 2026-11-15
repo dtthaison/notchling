@@ -2,8 +2,8 @@ use notchling_locale as t;
 use std::sync::Arc;
 
 use gpui::{
-    div, prelude::*, px, Context, Div, EventEmitter, PathPromptOptions, Render, SharedString,
-    Stateful, Window,
+    div, prelude::*, px, AnyElement, Context, Div, Entity, EventEmitter, PathPromptOptions, Render,
+    SharedString, Stateful, Subscription, Window,
 };
 use notchling_kit::metric::{
     CONTROL, RADIUS_CARD, RADIUS_MD, SESSION_LINE_HEADING, SESSION_LINE_META, SESSION_ROW,
@@ -13,11 +13,12 @@ use notchling_kit::part::{ButtonKind, PartState};
 use notchling_kit::scrollbar::GUTTER;
 use notchling_kit::ui::{
     button, card, hsla, icon, icon as kit_icon, label, scrollable, spinner, tool_icon,
-    window_appearance, KitStyled, ToolMark,
+    window_appearance, KitStyled, TextEditor, TextEditorEvent, ToolMark,
 };
 use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 
 use super::new_session::{folder_title, parent_line, trust_text, NewSession, Plan, Section, Stage};
+use super::run_on_view::{code_column, run_on_column, tool_column};
 use crate::accounts::store::Accounts;
 use crate::acting::{Acting, Control};
 use crate::actions::Actions;
@@ -116,7 +117,7 @@ pub fn choice_row(
         )
 }
 
-fn column_title(text: &str, a: Appearance) -> Div {
+pub(super) fn column_title(text: &str, a: Appearance) -> Div {
     div().px(px(8.0)).pt(px(12.0)).pb(px(4.0)).child(label(
         text,
         TypeRole::Section,
@@ -144,8 +145,12 @@ fn section_title(section: Section, a: Appearance) -> Div {
 
 pub struct NewSessionView {
     pub model: NewSession,
+    pub path: Entity<TextEditor>,
+    pub text: Entity<TextEditor>,
     acts: Acts,
     accounts: Option<AccountsHandle>,
+    _path_events: Subscription,
+    _text_events: Subscription,
 }
 
 impl EventEmitter<Dismiss> for NewSessionView {}
@@ -153,11 +158,45 @@ impl EventEmitter<StartDraft> for NewSessionView {}
 impl EventEmitter<StartedJob> for NewSessionView {}
 
 impl NewSessionView {
-    pub fn new(model: NewSession, acts: Acts, accounts: Option<AccountsHandle>) -> NewSessionView {
+    pub fn new(
+        model: NewSession,
+        acts: Acts,
+        accounts: Option<AccountsHandle>,
+        cx: &mut Context<Self>,
+    ) -> NewSessionView {
+        let (typed_path, typed_text) = (model.target.path.clone(), model.target.text.clone());
+        let path =
+            cx.new(|cx| TextEditor::new(t::cluster::folder_placeholder(), 1, cx).single_line());
+        path.update(cx, |editor, cx| editor.set_text(&typed_path, cx));
+        let path_events = cx.subscribe(&path, |this, editor, event: &TextEditorEvent, cx| {
+            if *event == TextEditorEvent::Changed {
+                let typed = editor.read(cx).text().to_owned();
+                this.model.set_path(&typed);
+                cx.notify();
+            }
+        });
+        let text = cx.new(|cx| TextEditor::new("", 1, cx).single_line());
+        text.update(cx, |editor, cx| editor.set_text(&typed_text, cx));
+        let text_events =
+            cx.subscribe(
+                &text,
+                |this, editor, event: &TextEditorEvent, cx| match event {
+                    TextEditorEvent::Changed => {
+                        let typed = editor.read(cx).text().to_owned();
+                        this.model.set_text(&typed);
+                        cx.notify();
+                    }
+                    TextEditorEvent::Submit => this.start(cx),
+                },
+            );
         NewSessionView {
             model,
+            path,
+            text,
             acts,
             accounts,
+            _path_events: path_events,
+            _text_events: text_events,
         }
     }
 
@@ -179,12 +218,15 @@ impl NewSessionView {
                 .and_then(|v| v.get("jobId"))
                 .and_then(|j| j.as_str())
                 .map(str::to_owned);
+            let reply = result.as_ref().ok().cloned();
             let result = result.map(|_| ());
             this.update(cx, |view, cx| {
                 if let Some(job) = job {
                     cx.emit(StartedJob { job });
                 }
-                if let Some(next) = done(&mut view.model, result) {
+                if let (true, Some(reply)) = (view.model.on_worker(), &reply) {
+                    view.model.dispatched(reply);
+                } else if let Some(next) = done(&mut view.model, result) {
                     view.send(
                         next,
                         |m, r| {
@@ -206,6 +248,10 @@ impl NewSessionView {
     }
 
     fn start(&mut self, cx: &mut Context<Self>) {
+        if matches!(self.model.stage, Stage::Sent(_)) {
+            cx.emit(Dismiss);
+            return;
+        }
         if !self.model.start_control(self.acts.acting()).enabled {
             return;
         }
@@ -379,37 +425,50 @@ impl NewSessionView {
             .children(rows)
     }
 
-    fn folders(&self, a: Appearance, cx: &mut Context<Self>) -> Stateful<Div> {
+    fn folder_rows(&self, a: Appearance, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let folders = &self.model.folders;
-        let rows = folders.iter().enumerate().map(|(i, path)| {
-            choice_row(
-                format!("folder-{i}"),
-                &folder_title(path, folders),
-                &parent_line(path, &self.model.home),
-                self.model.folder == Some(i),
-                a,
-            )
-            .on_click(cx.listener(move |this, _, _, cx| {
-                this.model.pick_folder(i);
-                cx.notify();
-            }))
-        });
-        let choose = div()
-            .id("choose-folder")
-            .min_h(px(CONTROL))
-            .flex()
-            .items_center()
-            .px(px(10.0))
-            .rounded(px(RADIUS_MD))
-            .cursor_pointer()
-            .hover(move |s| s.bg(hsla(Ink::Raised.color(a))))
-            .child(label(
-                t::chat::sheet_choose_folder(),
-                TypeRole::Label,
-                Ink::AccentText,
-                a,
-            ))
-            .on_click(cx.listener(|this, _, _, cx| this.choose_folder(cx)));
+        let mut rows: Vec<AnyElement> = folders
+            .iter()
+            .enumerate()
+            .map(|(i, path)| {
+                choice_row(
+                    format!("folder-{i}"),
+                    &folder_title(path, folders),
+                    &parent_line(path, &self.model.home),
+                    self.model.folder == Some(i),
+                    a,
+                )
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.model.pick_folder(i);
+                    cx.notify();
+                }))
+                .into_any_element()
+            })
+            .collect();
+        rows.push(
+            div()
+                .id("choose-folder")
+                .min_h(px(CONTROL))
+                .flex()
+                .items_center()
+                .px(px(10.0))
+                .rounded(px(RADIUS_MD))
+                .cursor_pointer()
+                .hover(move |s| s.bg(hsla(Ink::Raised.color(a))))
+                .child(label(
+                    t::chat::sheet_choose_folder(),
+                    TypeRole::Label,
+                    Ink::AccentText,
+                    a,
+                ))
+                .on_click(cx.listener(|this, _, _, cx| this.choose_folder(cx)))
+                .into_any_element(),
+        );
+        rows
+    }
+
+    fn folders(&self, a: Appearance, cx: &mut Context<Self>) -> Stateful<Div> {
+        let rows = self.folder_rows(a, cx);
         div()
             .id("folders")
             .flex_1()
@@ -425,12 +484,12 @@ impl NewSessionView {
             .gap(px(4.0))
             .child(column_title(t::chat::sheet_folder(), a))
             .children(rows)
-            .child(choose)
     }
 
     fn footer(&self, a: Appearance, cx: &mut Context<Self>) -> Div {
         let control = self.model.start_control(self.acts.acting());
-        let failed = matches!(self.model.stage, Stage::Failed(_) | Stage::Untrusted);
+        let failed = matches!(self.model.stage, Stage::Failed(_) | Stage::Untrusted)
+            || self.model.on_worker() && self.model.node_row().is_some_and(|r| r.reason.is_some());
         let line = label(
             &self.model.footer(),
             TypeRole::Meta,
@@ -442,6 +501,7 @@ impl NewSessionView {
         .line_clamp(2);
         let title = match &self.model.stage {
             Stage::Confirm { button, .. } => button.clone(),
+            Stage::Sent(_) => t::cluster::sent_done().to_owned(),
             _ => t::chat::sheet_start().to_owned(),
         };
         let start = button(
@@ -563,6 +623,12 @@ impl NewSessionView {
 impl Render for NewSessionView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let a = window_appearance(window);
+        let worker = self.model.on_worker();
+        let folder_rows = if worker {
+            self.folder_rows(a, cx)
+        } else {
+            Vec::new()
+        };
         let cancel = button(
             "cancel",
             t::chat::sheet_cancel(),
@@ -590,8 +656,22 @@ impl Render for NewSessionView {
                     .flex_1()
                     .min_h(px(0.0))
                     .flex()
-                    .child(self.accounts(a, cx))
-                    .child(scrollable(self.folders(a, cx))),
+                    .children(
+                        self.model
+                            .run_on
+                            .offered()
+                            .then(|| run_on_column(self, a, cx)),
+                    )
+                    .child(if worker {
+                        tool_column(self, a, cx)
+                    } else {
+                        self.accounts(a, cx)
+                    })
+                    .child(scrollable(if worker {
+                        code_column(self, folder_rows, a, window, cx)
+                    } else {
+                        self.folders(a, cx)
+                    })),
             )
             .child(self.footer(a, cx))
             .children(self.trust_pop_up(a, cx))
@@ -610,8 +690,8 @@ pub fn build_render(name: &str, cx: &mut gpui::App) -> Option<gpui::AnyView> {
     };
     Some(match which {
         Shown::Banner => cx.new(|_| BannersView { banners: banners() }).into(),
-        Shown::NewSession | Shown::TrustFolder => cx
-            .new(|_| NewSessionView::new(new_session(which), acts, None))
+        Shown::NewSession | Shown::NewSessionWorker | Shown::TrustFolder => cx
+            .new(|cx| NewSessionView::new(new_session(which), acts, None, cx))
             .into(),
         _ => cx
             .new(|_| {

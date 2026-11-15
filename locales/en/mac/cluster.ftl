@@ -102,3 +102,64 @@ cluster-change-failed = Couldn't change the node: { $error }
 cluster-node-offline = { $name } is offline
 # Line under a session in the Sidebar when its node is offline; $name is the node's name.
 cluster-node-line-offline = { $name } · Offline
+
+## Run on
+
+# Title of the column in New Session that picks the machine a session runs on.
+cluster-run-on = Run On
+# Title of the column that picks the tool for a session on another machine.
+cluster-run-on-tool = Tool
+# A shell job: a command run on another machine.
+cluster-remote-shell = Shell Job
+# Under a tool on another machine; $node is the machine's name.
+cluster-uses-login = Uses { $node }'s own login
+# Under Shell Job in the tool column; $node is the machine's name.
+cluster-shell-detail = Runs a command on { $node }
+# Under This Mac in the Run On column.
+cluster-this-mac-detail = Where Notchling runs
+# Reason a machine can't be picked when Notchling has not read its versions yet; $name is its name.
+cluster-run-on-unread = Notchling hasn't read { $name }'s versions yet
+cluster-code-title = Code
+cluster-code-send = Send This Repository
+# Under Send This Repository; $node is the machine's name.
+cluster-code-send-detail = Copies this repository to { $node }
+cluster-code-folder = Use a Folder There
+# Under Use a Folder There; $node is the machine's name.
+cluster-code-folder-detail = A folder that is already on { $node }
+# Label of the field for a folder on another machine; $node is its name.
+cluster-folder-there = Folder on { $node }
+cluster-folder-placeholder = /home/me/project
+cluster-command-label = Command
+cluster-command-placeholder = make test
+cluster-first-message-label = First Message
+cluster-first-message-placeholder = What should it do?
+# Footer of New Session for a machine: $tool, $node and $folder are names.
+cluster-run-on-chosen = { $tool } on { $node } in { $folder }
+# Footer of New Session when a machine is picked and no folder yet; $node is its name.
+cluster-run-on-needs-folder = Choose a folder for { $node }.
+# Footer after a job started on a machine with a warning; $node is its name, $warning the text.
+cluster-started-with-warning = Started on { $node }. { $warning }
+cluster-sent-done = Done
+
+## Sessions on another machine
+
+# Why a button does nothing for a session on another machine.
+cluster-remote-not-here = Not available for a session on another machine yet.
+cluster-bring-back = Bring Back Branch
+cluster-bring-back-tip = Copies this job's work to a branch in the repository on this Mac
+# Shown after Bring Back Branch worked; $branch is the branch made.
+cluster-brought-back = Brought back as { $branch }.
+cluster-bring-back-failed = Couldn't bring the branch back: { $error }
+cluster-bring-back-busy = Bringing the branch back…
+cluster-bring-back-no-branch = Couldn't bring the branch back: the machine named no branch.
+cluster-mirror-waiting = Waiting for the conversation from the other machine…
+
+## Shell jobs
+
+cluster-shell-stop = Stop
+cluster-shell-stopping = Stopping…
+cluster-shell-running = Running
+cluster-shell-ended = Finished
+cluster-shell-waiting = Waiting for the log from the other machine…
+cluster-shell-empty = No output yet.
+cluster-shell-no-reply = A shell job takes no replies.

@@ -57,7 +57,7 @@ pub(super) struct Shown {
 
 fn shown(view: &ChatView) -> Option<Shown> {
     let session = view.selected_session()?;
-    super::tool::of(session.tool).limits(view, session)
+    super::tool::adapter(session).limits(view, session)
 }
 
 impl ChatView {

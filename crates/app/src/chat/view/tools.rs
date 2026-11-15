@@ -21,6 +21,8 @@ use crate::chat::claude_picker::{self, Hint, Kind};
 use crate::chat::data::{Session, Tool};
 use crate::chat::outgoing::Outgoing;
 use crate::chat::prompts::is_dialog;
+use crate::chat::remote::BringBack;
+use crate::chat::remote_control::Action;
 use crate::chat::run_command::RunHow;
 use crate::phone::bridge::now_ms;
 use crate::tools::agy_options::parse_config;
@@ -64,6 +66,7 @@ pub struct ChatTools {
     pub model_hints: HashMap<String, Hint>,
     pub effort_hints: HashMap<String, Hint>,
     pub stopping: Option<(String, i64)>,
+    pub bring_back: Option<(String, BringBack)>,
     pub retrying: Option<(String, i64)>,
     pub editor: Entity<TextEditor>,
     pub focus: FocusHandle,
@@ -107,6 +110,7 @@ impl ChatTools {
             model_hints: HashMap::new(),
             effort_hints: HashMap::new(),
             stopping: None,
+            bring_back: None,
             retrying: None,
             editor,
             focus,
@@ -235,10 +239,10 @@ impl ChatView {
                 tooltip: None,
             };
         };
-        if let Some(control) = self.remote_control(&session.agent.id) {
+        if let Some(control) = self.remote_control(&session.agent.id, Action::Reply) {
             return control;
         }
-        match super::tool::of(session.tool).refusal(self, session) {
+        match super::tool::adapter(session).refusal(self, session) {
             Some(why) if why == t::chat::agy_busy() && !gate.enabled => gate,
             Some(why) => Control {
                 enabled: false,
@@ -250,7 +254,7 @@ impl ChatView {
 
     pub(super) fn selected_working(&self) -> bool {
         self.selected_session().is_some_and(|s| {
-            self.tools.live.is_working(&s.agent.id) || super::tool::of(s.tool).working(s)
+            self.tools.live.is_working(&s.agent.id) || super::tool::adapter(s).working(s)
         })
     }
 
@@ -385,8 +389,11 @@ impl ChatView {
         let Some(session) = self.selected_session() else {
             return false;
         };
+        if self.remote_refused(&session.agent.id, Action::Slash) {
+            return false;
+        }
         let takes_replies = self.acting_in(cx) == Acting::On
-            && super::tool::of(session.tool)
+            && super::tool::adapter(session)
                 .refusal(self, session)
                 .is_none();
         crate::chat::run_command::available(
@@ -434,7 +441,10 @@ impl ChatView {
         if text.is_empty() {
             return;
         }
-        let tool = super::tool::of(session.tool);
+        if text.trim_start().starts_with('/') && self.refuse_selected(Action::Slash, cx) {
+            return;
+        }
+        let tool = super::tool::adapter(&session);
         if tool.intercept(self, &session, &text, cx) {
             return;
         }
@@ -525,6 +535,9 @@ impl ChatView {
         if self.tools.sending || !self.acting(cx).control().enabled {
             return;
         }
+        if self.refuse_selected(Action::Stop, cx) {
+            return;
+        }
         let Some(session) = self.selected_session() else {
             return;
         };
@@ -532,7 +545,7 @@ impl ChatView {
         if self.stopping() {
             return;
         }
-        let request = super::tool::of(session.tool).stop(&id);
+        let request = super::tool::adapter(session).stop(&id);
         self.tools.stopping = Some((id, now_ms()));
         self.spawn_send(
             request,
@@ -639,7 +652,7 @@ impl ChatView {
 
     pub(super) fn menus(&self, cx: &App) -> Vec<crate::chat::pickers::Menu> {
         match self.selected_session() {
-            Some(session) => super::tool::of(session.tool).menus(self, session, cx),
+            Some(session) => super::tool::adapter(session).menus(self, session, cx),
             None => Vec::new(),
         }
     }

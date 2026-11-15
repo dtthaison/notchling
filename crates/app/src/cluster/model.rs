@@ -23,6 +23,7 @@ pub struct NodeRow {
     pub cpu: Option<u8>,
     pub mem: Option<(u64, u64)>,
     pub tools: Vec<(String, Option<String>)>,
+    pub versions: Option<Versions>,
     pub warnings: Vec<String>,
     pub desired: (bool, bool, bool),
     pub me: bool,
@@ -120,6 +121,7 @@ pub struct ClusterModel {
     joining: Option<bool>,
     me: String,
     rows: Vec<NodeRow>,
+    reference: Option<Versions>,
     link: bool,
     listening: bool,
     tailscale: bool,
@@ -238,6 +240,7 @@ fn row_of(member: &Value, me: &str, reference: Option<&Versions>) -> NodeRow {
         cpu: number("cpu").map(|c| c.min(100) as u8),
         mem: number("memUsedMb").zip(number("memTotalMb")),
         tools,
+        versions,
         warnings,
         desired: (
             desired_flag("acting"),
@@ -291,6 +294,7 @@ impl ClusterModel {
                 .into_iter()
                 .map(|(_, _, m)| row_of(m, me, reference.as_ref()))
                 .collect(),
+            reference,
             link: flag(status, "link"),
             listening: status
                 .get("listening")
@@ -323,6 +327,10 @@ impl ClusterModel {
 
     pub fn me(&self) -> &str {
         &self.me
+    }
+
+    pub fn reference(&self) -> Option<&Versions> {
+        self.reference.as_ref()
     }
 
     pub fn can_create(&self) -> bool {

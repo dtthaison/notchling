@@ -24,7 +24,12 @@ pub mod models_rows;
 #[cfg(test)]
 mod models_rows_tests;
 pub mod new_session;
+#[cfg(test)]
+mod new_session_run_on_tests;
 pub mod renders;
+pub mod run_on;
+#[cfg(target_os = "macos")]
+pub mod run_on_view;
 #[cfg(target_os = "macos")]
 pub mod second_opinion_view;
 pub mod settings;

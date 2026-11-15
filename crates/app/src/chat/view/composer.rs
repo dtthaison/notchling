@@ -44,7 +44,7 @@ fn inset(base: f32, edge: f32) -> f32 {
 fn placeholder(view: &ChatView) -> &'static str {
     match view.selected_session() {
         Some(s) if is_draft(&s.agent.id) => t::chat::first_message_placeholder(),
-        Some(s) => super::tool::of(s.tool).placeholder(),
+        Some(s) => super::tool::adapter(s).placeholder(),
         None => t::chat::reply_placeholder(),
     }
 }
@@ -76,7 +76,14 @@ fn status(
     a: Appearance,
     cx: &Context<ChatView>,
 ) -> Option<Div> {
-    let (text, ink) = if let Some(error) = &view.tools.error {
+    let (text, ink) = if let Some(state) = view.bring_back_note() {
+        let ink = if state.failed() {
+            Ink::Needs
+        } else {
+            Ink::TextMuted
+        };
+        (sentence(&state.text()), ink)
+    } else if let Some(error) = &view.tools.error {
         (
             sentence(&error_text(error, view.prompt.is_shown())),
             Ink::Needs,
@@ -712,6 +719,12 @@ fn context_meter(
 }
 
 pub fn render(view: &ChatView, a: Appearance, window: &Window, cx: &mut Context<ChatView>) -> Div {
+    if let Some(session) = view
+        .selected_session()
+        .filter(|s| crate::chat::remote::is_shell(&s.agent))
+    {
+        return super::tool::shell_bar(view, session, a, cx);
+    }
     let mut control = view.composer_control(cx);
     if view.composer.preview.any() {
         control.enabled = true;
