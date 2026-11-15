@@ -61,6 +61,16 @@ pub fn load_or_make(dir: &Path) -> Result<Identity, Error> {
     }
 }
 
+pub fn stored_fingerprint(dir: &Path) -> Result<Option<String>, Error> {
+    let cert_path = dir.join(CERT_FILE);
+    if !plain_file(&cert_path)? {
+        return Ok(None);
+    }
+    let cert = CertificateDer::from_pem_file(&cert_path)
+        .map_err(|e| bad(format!("{} doesn't read: {e}", cert_path.display())))?;
+    Ok(Some(fingerprint(cert.as_ref())))
+}
+
 fn load(cert_path: &Path, key_path: &Path) -> Result<Identity, Error> {
     let cert = CertificateDer::from_pem_file(cert_path)
         .map_err(|e| bad(format!("{} doesn't read: {e}", cert_path.display())))?;

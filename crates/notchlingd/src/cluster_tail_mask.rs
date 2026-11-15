@@ -1,6 +1,6 @@
 use crate::cluster_node::LocalCalls;
 use crate::cluster_redact::{mask_tail, mask_with, JobMasks, TailMasks};
-use crate::cluster_sessions::{tail, LocalRows, NODE_TAIL};
+use crate::cluster_sessions::{tail, LocalRows, NODE_SESSIONS, NODE_TAIL};
 use crate::grant_broker::View;
 use crate::grant_roots::valid_job;
 use crate::shell_jobs::SESSION_PREFIX;
@@ -16,6 +16,8 @@ use std::sync::Arc;
 pub const UNMAPPED_LOST: &str =
     "this machine lost the masks of a job that had secrets; other output isn't served";
 const AGY_CONVERSATION: &str = "agy.conversation";
+const PROMPTS_LIST: &str = "prompts.list";
+const ROW_TEXT: [&str; 3] = ["detail", "suggestedReply", "command"];
 
 pub type Closed = Arc<dyn Fn(&str) -> bool + Send + Sync>;
 
@@ -44,6 +46,15 @@ fn lead_of(path: &Path, start: u64, want: usize) -> Result<Vec<u8>, ApiError> {
     Ok(lead)
 }
 
+fn blanked(mut row: Value) -> Value {
+    if let Some(fields) = row.as_object_mut() {
+        for key in ROW_TEXT {
+            fields.remove(key);
+        }
+    }
+    row
+}
+
 impl MaskedTails {
     pub fn new(
         inner: Arc<dyn LocalCalls>,
@@ -64,22 +75,26 @@ impl MaskedTails {
         if let Some(job) = id.strip_prefix(SESSION_PREFIX) {
             return valid_job(job).then(|| job.to_string());
         }
-        let state = self.view.state()?;
-        let me = self.view.me()?;
         let short = row
             .and_then(|r| r.get("target"))
             .and_then(|t| t.get("job"))
             .and_then(Value::as_str);
-        state
-            .jobs
-            .values()
-            .filter(|j| j.spec.node == me)
-            .find(|j| {
-                j.session
-                    .as_deref()
-                    .is_some_and(|s| s == id || Some(s) == short)
-            })
-            .map(|j| j.id.clone())
+        let from_state = match (self.view.state(), self.view.me()) {
+            (Some(state), Some(me)) => state
+                .jobs
+                .values()
+                .filter(|j| j.spec.node == me)
+                .find(|j| {
+                    j.session
+                        .as_deref()
+                        .is_some_and(|s| s == id || Some(s) == short)
+                })
+                .map(|j| j.id.clone()),
+            _ => None,
+        };
+        from_state
+            .or_else(|| self.masks.job_for_key(id))
+            .or_else(|| short.and_then(|key| self.masks.job_for_key(key)))
     }
 
     fn all_over(&self) -> bool {
@@ -109,11 +124,14 @@ impl MaskedTails {
         &self,
         job: Option<&str>,
         (offset, lead, bytes): (u64, &[u8], &[u8]),
-        at_end: bool,
+        (at_end, shell_log): (bool, bool),
     ) -> Result<Option<(Vec<u8>, u64)>, ApiError> {
         match job {
             Some(job) => {
                 if self.masks.state(job) == JobMasks::Never {
+                    return Ok(None);
+                }
+                if shell_log && self.masks.lost(job) {
                     return Ok(None);
                 }
                 mask_tail(&self.masks, job, offset, lead, bytes, at_end)
@@ -121,7 +139,7 @@ impl MaskedTails {
                     .map_err(failed)
             }
             None => {
-                if self.masks.any_lost() {
+                if self.masks.unidentified_lost() {
                     return Err(failed(UNMAPPED_LOST));
                 }
                 match self.masks.union() {
@@ -168,7 +186,11 @@ impl MaskedTails {
             None => self.all_over(),
         };
         let at_end = next >= size && over;
-        let Some((masked, held_next)) = self.mask(job.as_deref(), (start, &lead, &data), at_end)?
+        let Some((masked, held_next)) = self.mask(
+            job.as_deref(),
+            (start, &lead, &data),
+            (at_end, id.starts_with(SESSION_PREFIX)),
+        )?
         else {
             return Ok(out);
         };
@@ -190,10 +212,63 @@ impl MaskedTails {
             .find(|row| row.get("id").and_then(Value::as_str) == Some(id));
         let job = self.job_for(id, row);
         let text = reply.to_string();
-        let Some((masked, _)) = self.mask(job.as_deref(), (0, &[], text.as_bytes()), true)? else {
+        let Some((masked, _)) =
+            self.mask(job.as_deref(), (0, &[], text.as_bytes()), (true, false))?
+        else {
             return Ok(reply);
         };
         serde_json::from_slice(&masked).map_err(|_| failed("the conversation can't be masked"))
+    }
+
+    fn session_rows(&self, op: &str, args: &Value, origin: &Origin) -> Result<Value, ApiError> {
+        let reply = self.inner.call(op, args, origin)?;
+        let Value::Array(list) = reply else {
+            return Ok(reply);
+        };
+        let rows = list
+            .into_iter()
+            .map(|row| {
+                let id = row.get("id").and_then(Value::as_str).unwrap_or_default();
+                let job = self.job_for(id, Some(&row));
+                let text = row.to_string();
+                match self.mask(job.as_deref(), (0, &[], text.as_bytes()), (true, false)) {
+                    Ok(None) => row,
+                    Ok(Some((masked, _))) => {
+                        serde_json::from_slice(&masked).unwrap_or_else(|_| blanked(row))
+                    }
+                    Err(_) => blanked(row),
+                }
+            })
+            .collect();
+        Ok(Value::Array(rows))
+    }
+
+    fn prompts(&self, op: &str, args: &Value, origin: &Origin) -> Result<Value, ApiError> {
+        let reply = self.inner.call(op, args, origin)?;
+        let Value::Array(list) = reply else {
+            return Ok(reply);
+        };
+        let rows = self.rows.rows().unwrap_or_default();
+        let served = list
+            .into_iter()
+            .filter_map(|prompt| {
+                let id = prompt
+                    .get("sessionId")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                let row = rows
+                    .iter()
+                    .find(|row| row.get("id").and_then(Value::as_str) == Some(id));
+                let job = self.job_for(id, row);
+                let text = prompt.to_string();
+                match self.mask(job.as_deref(), (0, &[], text.as_bytes()), (true, false)) {
+                    Ok(None) => Some(prompt),
+                    Ok(Some((masked, _))) => serde_json::from_slice(&masked).ok(),
+                    Err(_) => None,
+                }
+            })
+            .collect();
+        Ok(Value::Array(served))
     }
 }
 
@@ -202,6 +277,8 @@ impl LocalCalls for MaskedTails {
         match op {
             NODE_TAIL => self.tail(args),
             AGY_CONVERSATION => self.conversation(op, args, origin),
+            PROMPTS_LIST => self.prompts(op, args, origin),
+            NODE_SESSIONS => self.session_rows(op, args, origin),
             _ => self.inner.call(op, args, origin),
         }
     }

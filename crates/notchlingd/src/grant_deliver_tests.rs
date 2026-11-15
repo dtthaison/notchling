@@ -258,6 +258,43 @@ fn no_marker_value_reaches_any_debug_or_error_text() {
     assert!(!format!("{:?}", rig.masks).contains("NL-MARKER"));
 }
 
+#[test]
+fn a_mark_records_the_keys_that_find_the_jobs_rows() {
+    let rig = rig();
+    deliver(&rig, &deliver_args(JOB, "one", "V", "NL-MARKER-1")).expect("stored");
+    let shell = rig.marks.marked();
+    assert_eq!(
+        shell[0].keys,
+        [format!("shell:{JOB}")],
+        "a shell job's row id"
+    );
+    let rig = rig_for_claude("c1");
+    deliver(&rig, &deliver_args(JOB, "one", "V", "NL-MARKER-1")).expect("stored");
+    assert_eq!(rig.marks.marked()[0].keys, ["c1".to_string()]);
+    let restarted = GrantParts::new(rig.dir.path());
+    assert_eq!(
+        restarted.masks.job_for_key("c1"),
+        Some(JOB.to_string()),
+        "a restart finds the job by its session"
+    );
+}
+
+#[test]
+fn a_mark_for_a_claude_job_not_yet_linked_has_no_keys() {
+    let rig = rig_for_claude("");
+    deliver(&rig, &deliver_args(JOB, "one", "V", "NL-MARKER-1")).expect("stored");
+    assert!(rig.marks.marked()[0].keys.is_empty());
+}
+
+fn rig_for_claude(session: &str) -> Rig {
+    let rig = rig();
+    let mut claude = job(JOB, "worker", JobState::Running);
+    claude.spec.tool = Tool::Claude;
+    claude.session = (!session.is_empty()).then(|| session.to_string());
+    *rig.fake.state.lock().unwrap() = Some(cluster("vault", &[claude]));
+    rig
+}
+
 fn answer_text(rig: &Rig) -> String {
     let got = rig
         .uses

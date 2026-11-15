@@ -1,13 +1,14 @@
 use crate::cluster_node::LocalCalls;
 use crate::cluster_redact::TailMasks;
 use crate::grant_broker::{Clock, View, GRANT_DELIVER, GRANT_REVOKE};
-use crate::grant_roots::{valid_job, GrantMarks, JobRoots};
+use crate::grant_roots::{valid_job, valid_key, GrantMarks, JobRoots};
+use crate::shell_jobs::SESSION_PREFIX;
 use crate::vault_caller::Processes;
 use crate::vault_ops::WorkerUse;
 use notchling_engine::cluster::grant_files::{GrantFile, GrantStore, GrantValue};
 use notchling_engine::cluster::grants::{decode_env, GRANT_TTL_MS};
 use notchling_engine::cluster::wire::{Origin, OriginTier};
-use notchling_engine::cluster::{ClusterState, JobState, NodeId};
+use notchling_engine::cluster::{ClusterState, JobState, NodeId, Tool};
 use notchling_engine::vault::{hide_forms, valid_name};
 use notchling_local_api::{ApiError, Caller, ErrorCode};
 use serde_json::{json, Map, Value};
@@ -22,7 +23,14 @@ const MAX_NAMES: usize = 16;
 const TEXT_MAX: usize = 4096;
 const POLL: Duration = Duration::from_millis(50);
 
-pub type Disk = Arc<dyn Fn() -> Option<NodeId> + Send + Sync>;
+#[derive(Clone, Debug)]
+pub enum OnDisk {
+    Nothing,
+    Unreadable,
+    Cluster { vault: NodeId, me: Option<NodeId> },
+}
+
+pub type Disk = Arc<dyn Fn() -> OnDisk + Send + Sync>;
 
 type Strings = BTreeMap<String, String>;
 
@@ -51,6 +59,18 @@ fn refused(message: impl Into<String>) -> ApiError {
 
 fn failed(message: impl Into<String>) -> ApiError {
     ApiError::new(ErrorCode::Failed, message)
+}
+
+pub fn keys_of(state: &ClusterState, job: &str) -> Vec<String> {
+    let Some(found) = state.jobs.get(job) else {
+        return Vec::new();
+    };
+    let key = if found.spec.tool == Tool::Shell {
+        Some(format!("{SESSION_PREFIX}{job}"))
+    } else {
+        found.session.clone()
+    };
+    key.into_iter().filter(|k| valid_key(k)).collect()
 }
 
 fn running(state: &ClusterState, me: &NodeId, job: &str) -> Option<JobState> {
@@ -106,7 +126,7 @@ impl GrantUse {
             procs,
             clock,
             known_wait: KNOWN_WAIT,
-            disk: Arc::new(|| None),
+            disk: Arc::new(|| OnDisk::Nothing),
         }
     }
 
@@ -153,7 +173,15 @@ impl GrantUse {
         }
     }
 
+    pub fn arrived(&self) -> u64 {
+        self.parts.2.now_seq()
+    }
+
     pub fn deliver(&self, origin: &Origin, args: &Value) -> Result<Value, ApiError> {
+        self.deliver_at(origin, args, self.parts.2.now_seq())
+    }
+
+    pub fn deliver_at(&self, origin: &Origin, args: &Value, since: u64) -> Result<Value, ApiError> {
         let (state, _) = self.known(origin)?;
         if origin.node != state.vault || state.home != state.vault {
             return Err(refused(
@@ -180,7 +208,6 @@ impl GrantUse {
             .get("expiresMs")
             .and_then(Value::as_i64)
             .ok_or_else(|| ApiError::bad_request(usage))?;
-        let since = self.parts.2.now_seq();
         let value = GrantValue::new(raw.to_string());
         let env = decode_env(&value).map_err(failed)?;
         let masked: Vec<(String, GrantValue)> = env
@@ -202,12 +229,14 @@ impl GrantUse {
         if self.parts.2.is_ended(job) || self.parts.2.revoked_since(job, &name, since) {
             return Err(failed(format!("job {job} isn't running")));
         }
-        match (self.view.state(), self.view.me()) {
-            (Some(state), Some(me)) if running(&state, &me, job).is_some_and(is_live) => {}
+        let keys = match (self.view.state(), self.view.me()) {
+            (Some(state), Some(me)) if running(&state, &me, job).is_some_and(is_live) => {
+                keys_of(&state, job)
+            }
             _ => return Err(failed(format!("job {job} isn't running"))),
-        }
+        };
         if !masked.is_empty() {
-            self.parts.1.mark(job).map_err(failed)?;
+            self.parts.1.mark_with(job, &keys).map_err(failed)?;
             self.parts.0.add(job, masked).map_err(failed)?;
         }
         self.store
@@ -336,9 +365,13 @@ impl WorkerUse for GrantUse {
     fn use_secrets(&self, caller: &Caller, args: &Value) -> Option<Result<Value, ApiError>> {
         let (Some(state), Some(me)) = (self.view.state(), self.view.me()) else {
             return match (self.disk)() {
-                None => None,
-                Some(vault) if self.view.me().as_ref() == Some(&vault) => None,
-                Some(_) => Some(Err(failed(NOT_LOADED))),
+                OnDisk::Nothing => None,
+                OnDisk::Cluster { vault, me } => {
+                    let own = self.view.me().or(me);
+                    own.is_none_or(|own| own != vault)
+                        .then(|| Err(failed(NOT_LOADED)))
+                }
+                OnDisk::Unreadable => Some(Err(failed(NOT_LOADED))),
             };
         };
         if state.vault == me {
@@ -364,8 +397,9 @@ impl UseCalls {
 
 impl LocalCalls for UseCalls {
     fn call(&self, op: &str, args: &Value, origin: &Origin) -> Result<Value, ApiError> {
+        let arrived = self.uses.arrived();
         match op {
-            GRANT_DELIVER => self.uses.deliver(origin, args),
+            GRANT_DELIVER => self.uses.deliver_at(origin, args, arrived),
             GRANT_REVOKE => self.uses.revoke(origin, args),
             _ => self.inner.call(op, args, origin),
         }

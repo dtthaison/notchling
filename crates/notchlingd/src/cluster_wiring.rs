@@ -22,7 +22,7 @@ use crate::grant_calls::{
     ClusterUseAudit, EventAudit, GrantCalls, InboxNotices, NodeAsker, NodeLink, NodeView,
 };
 use crate::grant_janitor::GrantJanitor;
-use crate::grant_use::{GrantUse, UseCalls};
+use crate::grant_use::{GrantUse, OnDisk, UseCalls};
 use crate::grant_wiring::GrantParts;
 use crate::inbox_ops::InboxOps;
 use crate::late_emit::Events;
@@ -232,13 +232,24 @@ fn clock() -> crate::cluster_mirror::Clock {
     Arc::new(|| u64::try_from(crate::acting_ops::now_ms()).unwrap_or(0))
 }
 
+pub(crate) fn on_disk(cluster_dir: &Path) -> OnDisk {
+    let state = match notchling_engine::cluster::persist::load(cluster_dir) {
+        Ok(Some(state)) => state,
+        Ok(None) => return OnDisk::Nothing,
+        Err(_) => return OnDisk::Unreadable,
+    };
+    let me = notchling_cluster_net::stored_fingerprint(&cluster_dir.join(IDENTITY_DIR))
+        .ok()
+        .flatten()
+        .and_then(|fingerprint| NodeId::from_fingerprint(&fingerprint));
+    OnDisk::Cluster {
+        vault: state.vault,
+        me,
+    }
+}
+
 fn disk_vault(dir: PathBuf) -> crate::grant_use::Disk {
-    Arc::new(move || {
-        notchling_engine::cluster::persist::load(&dir)
-            .ok()
-            .flatten()
-            .map(|state| state.vault)
-    })
+    Arc::new(move || on_disk(&dir))
 }
 
 fn clock_ms() -> crate::grant_broker::Clock {
@@ -520,3 +531,7 @@ mod tests;
 #[cfg(test)]
 #[path = "cluster_rejoin_tests.rs"]
 mod rejoin_tests;
+
+#[cfg(test)]
+#[path = "cluster_wiring_disk_tests.rs"]
+mod disk_tests;

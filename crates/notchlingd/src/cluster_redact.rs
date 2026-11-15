@@ -13,6 +13,7 @@ struct Masked {
     template: Option<Redactor>,
     ended: bool,
     lost: bool,
+    keys: Vec<String>,
 }
 
 #[derive(Default)]
@@ -71,6 +72,7 @@ impl TailMasks {
         let old = table.jobs.remove(job);
         let ended = old.as_ref().is_some_and(|m| m.ended);
         let lost = old.as_ref().is_some_and(|m| m.lost);
+        let keys = old.as_ref().map(|m| m.keys.clone()).unwrap_or_default();
         let mut all = old.map(|m| m.values).unwrap_or_default();
         for (name, value) in values {
             let known = all
@@ -91,6 +93,7 @@ impl TailMasks {
                 template: Some(template),
                 ended,
                 lost,
+                keys,
             },
         );
         Ok(())
@@ -133,16 +136,39 @@ impl TailMasks {
     }
 
     pub fn mark_granted(&self, job: &str) {
+        self.mark_granted_as(job, &[]);
+    }
+
+    pub fn mark_granted_as(&self, job: &str, keys: &[String]) {
+        let mut table = lock(&self.table);
+        let masked = table.jobs.entry(job.to_string()).or_insert(Masked {
+            generation: 0,
+            values: Vec::new(),
+            template: None,
+            ended: false,
+            lost: true,
+            keys: Vec::new(),
+        });
+        for key in keys {
+            if !masked.keys.contains(key) {
+                masked.keys.push(key.clone());
+            }
+        }
+    }
+
+    pub fn job_for_key(&self, key: &str) -> Option<String> {
         lock(&self.table)
             .jobs
-            .entry(job.to_string())
-            .or_insert(Masked {
-                generation: 0,
-                values: Vec::new(),
-                template: None,
-                ended: false,
-                lost: true,
-            });
+            .iter()
+            .find(|(_, m)| m.keys.iter().any(|k| k == key))
+            .map(|(job, _)| job.clone())
+    }
+
+    pub fn unidentified_lost(&self) -> bool {
+        lock(&self.table)
+            .jobs
+            .values()
+            .any(|m| (m.lost || m.template.is_none()) && m.keys.is_empty())
     }
 
     pub fn end_job(&self, job: &str) {

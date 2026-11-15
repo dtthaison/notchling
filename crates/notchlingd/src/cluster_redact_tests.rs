@@ -396,3 +396,18 @@ fn debug_lists_jobs_and_counts_only() {
     assert!(!format!("{:?}", grant("tok", "NL-MARKER-6-TOKEN-9876")).contains("NL-MARKER"));
     assert!(mask_for("tok") == "[secret tok]");
 }
+
+#[test]
+fn a_restored_job_is_found_by_its_session_keys() {
+    let masks = TailMasks::new();
+    masks.mark_granted_as("j1", &["c1".to_string(), "s-9".to_string()]);
+    masks.mark_granted_as("j2", &[]);
+    assert_eq!(masks.job_for_key("c1"), Some("j1".to_string()));
+    assert_eq!(masks.job_for_key("s-9"), Some("j1".to_string()));
+    assert_eq!(masks.job_for_key("c2"), None);
+    assert!(masks.unidentified_lost(), "j2 has no key");
+    masks.forget_job("j2");
+    assert!(!masks.unidentified_lost(), "j1 is identified");
+    masks.add("j3", vec![grant("api-token", TOKEN)]).unwrap();
+    assert!(!masks.unidentified_lost(), "a live job isn't lost");
+}

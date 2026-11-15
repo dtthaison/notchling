@@ -163,7 +163,7 @@ fn a_row_tied_to_no_job_is_masked_with_every_jobs_masks() {
 }
 
 #[test]
-fn a_row_tied_to_no_job_is_refused_while_any_job_lost_its_masks() {
+fn a_row_tied_to_no_job_is_refused_while_a_lost_job_has_no_known_session() {
     let r = rig("some-other-session");
     r.masks.mark_granted("j-ffffffffffff");
     r.append("anything\n");
@@ -235,11 +235,16 @@ fn an_agy_conversation_is_masked_for_its_job_and_for_unmapped_rows() {
 }
 
 #[test]
-fn a_job_that_lost_its_masks_is_not_served() {
-    let r = rig(&shell_id());
+fn a_claude_job_that_lost_its_masks_is_not_served() {
+    let mut running = job(JOB, "worker", JobState::Running);
+    running.session = Some("c1".to_string());
+    let r = rig_short("0b9e6c0e-1111-2222-3333-444455556666", Some("c1"));
+    *r.fake.state.lock().unwrap() = Some(cluster("vault", &[running]));
     r.masks.mark_granted(JOB);
     r.append("anything NL-MARKER-1\n");
-    let err = r.tail(&shell_id(), 0).expect_err("not served");
+    let err = r
+        .tail("0b9e6c0e-1111-2222-3333-444455556666", 0)
+        .expect_err("not served");
     assert!(err.message.contains(JOB));
     assert!(!err.message.contains("NL-MARKER"));
 }
@@ -378,3 +383,6 @@ fn mask_holds_across_chunk_boundaries_and_the_mirror_follows_by_source_offset() 
     assert!(text.ends_with("third [secret api-key]\n"));
     assert_eq!(text.matches("start ").count(), 1, "nothing was doubled");
 }
+
+#[path = "cluster_tail_lost_tests.rs"]
+mod lost;

@@ -116,24 +116,81 @@ fn a_grant_of_a_running_job_survives_a_sweep() {
     assert!(rig.store.get(JOB, "one", real_now()).unwrap().is_some());
 }
 
+fn unloaded(me: Option<&str>, disk: OnDisk) -> Option<Result<Value, ApiError>> {
+    let rig = rig_full(Arc::new(real_now), "worker", Arc::new(move || disk.clone()));
+    *rig.fake.state.lock().unwrap() = None;
+    *rig.fake.me.lock().unwrap() = me.map(id);
+    rig.uses
+        .use_secrets(&caller(700), &json!({"names": ["one"]}))
+}
+
+fn cluster_on_disk(own: Option<&str>) -> OnDisk {
+    OnDisk::Cluster {
+        vault: id("vault"),
+        me: own.map(id),
+    }
+}
+
 #[test]
 fn a_node_whose_cluster_is_not_loaded_yet_refuses_unless_it_is_the_vault_node() {
-    let on_disk = || -> Disk {
-        let vault = id("vault");
-        Arc::new(move || Some(vault.clone()))
-    };
-    let names = json!({"names": ["one"]});
-    let rig = rig_full(Arc::new(real_now), "worker", on_disk());
-    *rig.fake.state.lock().unwrap() = None;
-    let got = rig
-        .uses
-        .use_secrets(&caller(700), &names)
-        .expect("answered here");
+    let got = unloaded(Some("worker"), cluster_on_disk(Some("worker"))).expect("answered here");
     assert_eq!(got.expect_err("refused").message, NOT_LOADED);
-    let rig = rig_full(Arc::new(real_now), "vault", on_disk());
-    *rig.fake.state.lock().unwrap() = None;
-    assert!(rig.uses.use_secrets(&caller(700), &names).is_none());
-    let rig = rig_full(Arc::new(real_now), "worker", Arc::new(|| None));
-    *rig.fake.state.lock().unwrap() = None;
-    assert!(rig.uses.use_secrets(&caller(700), &names).is_none());
+    assert!(unloaded(Some("vault"), cluster_on_disk(Some("vault"))).is_none());
+    assert!(unloaded(Some("worker"), OnDisk::Nothing).is_none());
+}
+
+#[test]
+fn the_persisted_own_id_decides_when_the_node_is_not_up_yet() {
+    assert!(
+        unloaded(None, cluster_on_disk(Some("vault"))).is_none(),
+        "the vault node's own persisted id answers locally"
+    );
+    let got = unloaded(None, cluster_on_disk(Some("worker"))).expect("answered here");
+    assert_eq!(got.expect_err("refused").message, NOT_LOADED);
+    let got = unloaded(None, cluster_on_disk(None)).expect("answered here");
+    assert_eq!(
+        got.expect_err("refused").message,
+        NOT_LOADED,
+        "an unknown own id can't claim to be the vault"
+    );
+}
+
+#[test]
+fn a_persisted_cluster_that_cannot_be_read_is_not_taken_for_none() {
+    let got = unloaded(Some("vault"), OnDisk::Unreadable).expect("answered here");
+    assert_eq!(got.expect_err("refused").message, NOT_LOADED);
+    let got = unloaded(None, OnDisk::Unreadable).expect("answered here");
+    assert_eq!(got.expect_err("refused").message, NOT_LOADED);
+}
+
+#[test]
+fn a_revoke_handled_after_a_deliver_arrived_beats_it() {
+    let rig = rig();
+    let arrived = rig.uses.arrived();
+    rig.uses
+        .revoke(&from_vault(), &json!({"job": JOB}))
+        .expect("revoked");
+    let args = deliver_args(JOB, "one", "V", "NL-MARKER-1");
+    let err = rig
+        .uses
+        .deliver_at(&from_vault(), &args, arrived)
+        .expect_err("overtaken");
+    assert!(!err.message.contains("NL-MARKER"));
+    assert!(rig.store.get(JOB, "one", real_now()).unwrap().is_none());
+    assert!(rig.marks.list().is_empty());
+    deliver(&rig, JOB, "one", "NL-MARKER-1").expect("a deliver arriving later is fine");
+}
+
+#[test]
+fn the_dispatcher_stamps_a_deliver_when_it_arrives() {
+    let rig = rig();
+    let calls = UseCalls::new(
+        Arc::new(crate::cluster_testkit::FakeCalls::default()),
+        rig.uses.clone(),
+    );
+    let args = deliver_args(JOB, "one", "V", "NL-MARKER-1");
+    calls
+        .call(crate::grant_broker::GRANT_DELIVER, &args, &from_vault())
+        .expect("stored");
+    assert!(rig.store.get(JOB, "one", real_now()).unwrap().is_some());
 }

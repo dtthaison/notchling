@@ -9,7 +9,7 @@ pub mod tls;
 
 pub use addr::allowed;
 pub use frame::{LineReader, Outbox, MAX_LINE, OUTBOX};
-pub use identity::{load_or_make, Identity, CERT_FILE, KEY_FILE};
+pub use identity::{load_or_make, stored_fingerprint, Identity, CERT_FILE, KEY_FILE};
 pub use link::{Conn, LinkEvents, Listener, Transport};
 pub use listen::TcpTls;
 pub use mem::{MemNet, MemTransport};

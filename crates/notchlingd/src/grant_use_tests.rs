@@ -16,7 +16,7 @@ pub(crate) fn id(name: &str) -> NodeId {
     NodeId::from_fingerprint(&fingerprint(name.as_bytes())).expect("a node id")
 }
 
-fn member(name: &str) -> Member {
+pub(crate) fn member(name: &str) -> Member {
     Member {
         id: id(name),
         name: name.to_string(),
@@ -153,7 +153,7 @@ pub(crate) fn real_now() -> i64 {
 }
 
 pub(crate) fn rig_at(clock: Clock, me: &str) -> Rig {
-    rig_full(clock, me, Arc::new(|| None))
+    rig_full(clock, me, Arc::new(|| OnDisk::Nothing))
 }
 
 pub(crate) fn rig_full(clock: Clock, me: &str, disk: Disk) -> Rig {

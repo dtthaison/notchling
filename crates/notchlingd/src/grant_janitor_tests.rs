@@ -3,6 +3,7 @@ use crate::cluster_redact::JobMasks;
 use crate::grant_use::tests::{
     cluster, deliver_args, from_vault, job, put, real_now, rig, Rig, JOB, OTHER_JOB,
 };
+use notchling_engine::cluster::Tool;
 use std::sync::atomic::AtomicI64;
 
 fn janitor_at(rig: &Rig, clock: Clock) -> Arc<GrantJanitor> {
@@ -104,6 +105,95 @@ fn a_root_for_a_job_not_yet_in_the_state_is_kept() {
     janitor(&rig).tick().expect("swept");
     assert!(!rig.roots.is_ended(late));
     assert_eq!(rig.roots.rooted(), [late.to_string()]);
+}
+
+const TTL: i64 = 12 * 3_600_000;
+
+fn at(rig: &Rig, now: i64) -> Arc<GrantJanitor> {
+    janitor_at(rig, Arc::new(move || now))
+}
+
+fn keys(list: &[&str]) -> Vec<String> {
+    list.iter().map(|k| k.to_string()).collect()
+}
+
+fn finished(rig: &Rig) {
+    *rig.fake.state.lock().unwrap() = Some(cluster("vault", &[job(JOB, "worker", JobState::Done)]));
+}
+
+#[test]
+fn a_finished_jobs_mark_gets_one_end_time() {
+    let rig = rig();
+    rig.uses
+        .deliver(&from_vault(), &deliver_args(JOB, "one", "V", "NL-MARKER-1"))
+        .expect("stored");
+    at(&rig, 1_000).tick().expect("swept");
+    assert_eq!(rig.marks.marked()[0].ended_ms, None, "still running");
+    finished(&rig);
+    at(&rig, 5_000).tick().expect("swept");
+    at(&rig, 9_000).tick().expect("swept");
+    assert_eq!(rig.marks.marked()[0].ended_ms, Some(5_000));
+}
+
+#[test]
+fn a_lost_mark_ends_twelve_hours_after_its_job_ended() {
+    let rig = rig();
+    let one = keys(&["shell:j-0123456789ab"]);
+    rig.marks.mark_with(JOB, &one).unwrap();
+    rig.masks.mark_granted_as(JOB, &one);
+    finished(&rig);
+    let start = 1_000_000;
+    at(&rig, start).tick().expect("swept");
+    assert_eq!(rig.masks.state(JOB), JobMasks::Gone);
+    at(&rig, start + TTL - 1).tick().expect("swept");
+    assert_eq!(rig.masks.state(JOB), JobMasks::Gone, "not yet");
+    assert_eq!(rig.marks.list(), [JOB.to_string()]);
+    at(&rig, start + TTL).tick().expect("swept");
+    assert_eq!(rig.masks.state(JOB), JobMasks::Never, "its masks end");
+    assert!(rig.marks.list().is_empty(), "and its mark");
+    assert_eq!(rig.masks.job_for_key("shell:j-0123456789ab"), None);
+}
+
+#[test]
+fn a_job_with_live_masks_keeps_its_mark_past_the_twelve_hours() {
+    let rig = rig();
+    rig.uses
+        .deliver(&from_vault(), &deliver_args(JOB, "one", "V", "NL-MARKER-1"))
+        .expect("stored");
+    finished(&rig);
+    let start = real_now();
+    at(&rig, start).tick().expect("swept");
+    at(&rig, start + 2 * TTL).tick().expect("swept");
+    assert_eq!(rig.masks.state(JOB), JobMasks::Masked);
+    assert_eq!(rig.marks.list(), [JOB.to_string()]);
+}
+
+#[test]
+fn a_lost_mark_of_a_running_job_never_ends() {
+    let rig = rig();
+    let one = keys(&["shell:j-0123456789ab"]);
+    rig.marks.mark_with(JOB, &one).unwrap();
+    rig.masks.mark_granted_as(JOB, &one);
+    at(&rig, 1_000).tick().expect("swept");
+    at(&rig, 1_000 + 3 * TTL).tick().expect("swept");
+    assert_eq!(rig.masks.state(JOB), JobMasks::Gone);
+    assert_eq!(rig.marks.list(), [JOB.to_string()]);
+}
+
+#[test]
+fn the_janitor_fills_in_the_session_a_mark_lacked() {
+    let rig = rig();
+    rig.marks.mark_with(JOB, &[]).unwrap();
+    rig.masks.mark_granted(JOB);
+    assert!(rig.masks.unidentified_lost());
+    let mut claude = job(JOB, "worker", JobState::Running);
+    claude.spec.tool = Tool::Claude;
+    claude.session = Some("c1".to_string());
+    *rig.fake.state.lock().unwrap() = Some(cluster("vault", &[claude]));
+    at(&rig, 1_000).tick().expect("swept");
+    assert_eq!(rig.marks.marked()[0].keys, keys(&["c1"]));
+    assert_eq!(rig.masks.job_for_key("c1"), Some(JOB.to_string()));
+    assert!(!rig.masks.unidentified_lost());
 }
 
 #[test]

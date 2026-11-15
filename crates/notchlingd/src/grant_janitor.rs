@@ -1,7 +1,9 @@
 use crate::cluster_redact::TailMasks;
 use crate::grant_broker::{Clock, View};
-use crate::grant_roots::{GrantMarks, JobRoots};
+use crate::grant_roots::{GrantMarks, JobRoots, Marked};
+use crate::grant_use::keys_of;
 use notchling_engine::cluster::grant_files::GrantStore;
+use notchling_engine::cluster::grants::GRANT_TTL_MS;
 use notchling_engine::cluster::{ClusterState, JobState, NodeId};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -82,17 +84,41 @@ impl GrantJanitor {
             }
         }
         if let Some(state) = &state {
-            for job in self.parts.1.list() {
-                if !state.jobs.contains_key(&job) {
-                    self.parts.0.forget_job(&job);
-                    self.parts.1.remove(&job);
-                } else if !live.contains(&job) {
-                    self.parts.0.end_job(&job);
-                }
+            for marked in self.parts.1.marked() {
+                self.tend(state, &live, &marked, now);
             }
         }
         *lock(&self.last) = Some(jobs);
         swept
+    }
+
+    fn tend(&self, state: &ClusterState, live: &BTreeSet<String>, marked: &Marked, now: i64) {
+        let (masks, marks, _) = &self.parts;
+        let job = &marked.job;
+        if !state.jobs.contains_key(job) {
+            masks.forget_job(job);
+            marks.remove(job);
+            return;
+        }
+        if live.contains(job) {
+            let keys = keys_of(state, job);
+            if keys.iter().any(|k| !marked.keys.contains(k)) && marks.mark_with(job, &keys).is_ok()
+            {
+                masks.mark_granted_as(job, &keys);
+            }
+            return;
+        }
+        masks.end_job(job);
+        match marked.ended_ms {
+            None => {
+                let _ = marks.stamp_end(job, now);
+            }
+            Some(at) if now.saturating_sub(at) >= GRANT_TTL_MS && masks.lost(job) => {
+                masks.forget_job(job);
+                marks.remove(job);
+            }
+            Some(_) => {}
+        }
     }
 
     fn changed(&self) -> bool {

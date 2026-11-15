@@ -18,8 +18,8 @@ impl GrantParts {
     pub fn new(cluster_dir: &Path) -> GrantParts {
         let masks = Arc::new(TailMasks::new());
         let marks = Arc::new(GrantMarks::new(cluster_dir));
-        for job in marks.list() {
-            masks.mark_granted(&job);
+        for marked in marks.marked() {
+            masks.mark_granted_as(&marked.job, &marked.keys);
         }
         GrantParts {
             store: Arc::new(GrantStore::new(cluster_dir)),

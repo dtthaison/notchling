@@ -115,8 +115,39 @@ impl JobRoots {
     }
 }
 
+pub const KEY_MAX: usize = 200;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Marked {
+    pub job: String,
+    pub keys: Vec<String>,
+    pub ended_ms: Option<i64>,
+}
+
+pub fn valid_key(key: &str) -> bool {
+    !key.is_empty() && key.len() <= KEY_MAX && !key.chars().any(char::is_control)
+}
+
 pub struct GrantMarks {
     dir: PathBuf,
+}
+
+fn parse(text: &str) -> (Vec<String>, Option<i64>) {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(text) else {
+        return (Vec::new(), None);
+    };
+    let keys = value
+        .get("keys")
+        .and_then(|k| k.as_array())
+        .map(|list| {
+            list.iter()
+                .filter_map(|k| k.as_str())
+                .filter(|k| valid_key(k))
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default();
+    (keys, value.get("endedMs").and_then(|t| t.as_i64()))
 }
 
 impl GrantMarks {
@@ -126,18 +157,73 @@ impl GrantMarks {
         }
     }
 
+    fn read(&self, job: &str) -> Option<(Vec<String>, Option<i64>)> {
+        let path = self.dir.join(job);
+        if !std::fs::symlink_metadata(&path).is_ok_and(|m| m.is_file()) {
+            return None;
+        }
+        let text = std::fs::read_to_string(&path).unwrap_or_default();
+        Some(parse(&text))
+    }
+
+    fn write(&self, job: &str, keys: &[String], ended: Option<i64>) -> Result<(), String> {
+        notchling_platform::files::ensure_private_dir(&self.dir)
+            .map_err(|e| format!("the grant marks folder: {e}"))?;
+        let mut body = serde_json::json!({"keys": keys});
+        if let Some(at) = ended {
+            body["endedMs"] = serde_json::json!(at);
+        }
+        let text = format!("{body}\n");
+        notchling_platform::files::write_private_no_follow(&self.dir.join(job), text.as_bytes())
+            .map_err(|e| format!("the grant mark for {job}: {e}"))
+    }
+
     pub fn mark(&self, job: &str) -> Result<(), String> {
+        self.mark_with(job, &[])
+    }
+
+    pub fn mark_with(&self, job: &str, keys: &[String]) -> Result<(), String> {
         if !valid_job(job) {
             return Err("not a job id".to_string());
         }
-        notchling_platform::files::ensure_private_dir(&self.dir)
-            .map_err(|e| format!("the grant marks folder: {e}"))?;
-        let path = self.dir.join(job);
-        if std::fs::symlink_metadata(&path).is_ok_and(|m| m.is_file()) {
+        if keys.iter().any(|k| !valid_key(k)) {
+            return Err("a session key the mark can't hold".to_string());
+        }
+        let (mut all, ended) = self.read(job).unwrap_or_default();
+        let known = all.len();
+        for key in keys {
+            if !all.contains(key) {
+                all.push(key.clone());
+            }
+        }
+        if self.read(job).is_some() && all.len() == known {
             return Ok(());
         }
-        notchling_platform::files::write_private_no_follow(&path, b"granted\n")
-            .map_err(|e| format!("the grant mark for {job}: {e}"))
+        self.write(job, &all, ended)
+    }
+
+    pub fn stamp_end(&self, job: &str, now_ms: i64) -> Result<(), String> {
+        let (keys, ended) = self
+            .read(job)
+            .ok_or_else(|| format!("no grant mark for {job}"))?;
+        if ended.is_some() {
+            return Ok(());
+        }
+        self.write(job, &keys, Some(now_ms))
+    }
+
+    pub fn marked(&self) -> Vec<Marked> {
+        self.list()
+            .into_iter()
+            .filter_map(|job| {
+                let (keys, ended_ms) = self.read(&job)?;
+                Some(Marked {
+                    job,
+                    keys,
+                    ended_ms,
+                })
+            })
+            .collect()
     }
 
     pub fn list(&self) -> Vec<String> {
@@ -158,3 +244,7 @@ impl GrantMarks {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "grant_marks_tests.rs"]
+mod tests;
