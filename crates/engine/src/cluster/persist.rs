@@ -77,6 +77,17 @@ fn open(dir: &Path, create: bool) -> Result<Option<Connection>, String> {
     store::open_db(&path, &migrate).map(Some)
 }
 
+const INBOX_TABLE: &str = "CREATE TABLE IF NOT EXISTS inbox (
+    id TEXT PRIMARY KEY, value TEXT NOT NULL, updated_ms INTEGER NOT NULL)";
+
+pub fn open_inbox(dir: &Path, create: bool) -> Result<Option<Connection>, String> {
+    let Some(db) = open(dir, create)? else {
+        return Ok(None);
+    };
+    db.execute_batch(INBOX_TABLE).map_err(|e| e.to_string())?;
+    Ok(Some(db))
+}
+
 fn text<T: serde::Serialize>(value: &T) -> Result<String, String> {
     serde_json::to_string(value).map_err(|e| e.to_string())
 }

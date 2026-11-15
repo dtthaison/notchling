@@ -134,6 +134,7 @@ pub struct ClusterHooks {
     pub switches: Arc<HeadlessSwitches>,
     pub remote: Arc<RemoteSessions>,
     pub mirror: Arc<Mirror>,
+    pub inbox: Arc<InboxOps>,
 }
 
 impl Hooks for ClusterHooks {
@@ -146,8 +147,13 @@ impl Hooks for ClusterHooks {
     }
 
     fn wiped(&self) {
+        self.inbox.leave_cluster();
         self.mirror.clear();
         self.remote.clear();
+    }
+
+    fn in_cluster(&self) {
+        self.inbox.join_cluster();
     }
 
     fn peer_sessions(&self, from: &NodeId) {
@@ -334,10 +340,11 @@ impl ClusterParts {
             switches: switches.clone(),
         });
         let hooks: Arc<dyn Hooks> = Arc::new(ClusterHooks {
-            asker: JoinAsker::new(inbox, JOIN_WAIT),
+            asker: JoinAsker::new(inbox.clone(), JOIN_WAIT),
             switches,
             remote: remote.clone(),
             mirror: mirror.clone(),
+            inbox,
         });
         let node = start_node(layout, room.clone(), (local, hooks), versions, log.clone());
         let audit = log.clone();

@@ -9,6 +9,7 @@ use notchling_engine::cluster::core::LocalCmd;
 use notchling_engine::cluster::grants::SecretAllow;
 use notchling_engine::cluster::join::{decode_token, encode_token, JoinToken};
 use notchling_engine::cluster::persist;
+use notchling_engine::cluster::state::Change;
 use notchling_engine::cluster::wire::{decode, encode, Msg, Origin, OriginTier, WireError};
 use notchling_engine::cluster::{Desired, Effect, Input, Member, MemberState, NodeCore, NodeId};
 use notchling_events::kinds::security::ClusterStep;
@@ -425,6 +426,9 @@ impl Driver {
                 if let Err(why) = persist::save(&self.setup.cluster_dir, entry, changes) {
                     self.save_failed(why, rest.collect());
                     return;
+                }
+                if changes.iter().any(|c| matches!(c, Change::Cluster { .. })) {
+                    self.hooks.in_cluster();
                 }
                 continue;
             }

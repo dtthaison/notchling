@@ -3,7 +3,9 @@ use crate::inbox_events::events_of;
 use crate::late_emit::Events;
 use crate::op_group::OpGroup;
 use notchling_engine::bridge::inbox::InboxOutcome;
-use notchling_engine::inbox::{self, ActionId, Book, Change, Item, Kind, State};
+use notchling_engine::cluster::persist::{self as cluster_persist, CLUSTER_DB};
+use notchling_engine::inbox::{self, ActionId, Book, Change, Item, Kind, State, Store};
+use notchling_engine::store;
 use notchling_local_api::{ops, topics, ApiError, Caller, ClientKind, ErrorCode, OpSpec, Tier};
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
@@ -30,6 +32,7 @@ type Clock = Arc<dyn Fn() -> i64 + Send + Sync>;
 enum Msg {
     Changes(Vec<Change>),
     Flush(Sender<()>),
+    Move(Store),
 }
 
 struct Inner {
@@ -75,30 +78,66 @@ impl Inner {
 pub struct InboxOps {
     clock: Clock,
     data_dir: PathBuf,
+    cluster_dir: Mutex<Option<PathBuf>>,
+    store: Arc<Mutex<Store>>,
     inner: Mutex<Inner>,
     stop: Mutex<Option<Sender<()>>>,
     thread: Mutex<Option<JoinHandle<()>>>,
     writer: Mutex<Option<JoinHandle<()>>>,
 }
 
-fn write_loop(reads: Receiver<Msg>, data_dir: PathBuf, room: Arc<dyn Room>) {
+fn write_loop(
+    reads: Receiver<Msg>,
+    data_dir: PathBuf,
+    store: Arc<Mutex<Store>>,
+    room: Arc<dyn Room>,
+) {
     while let Ok(msg) = reads.recv() {
         match msg {
             Msg::Changes(changes) => {
                 for change in &changes {
-                    persist(&data_dir, change);
+                    let at = lock(&store).clone();
+                    persist(&at, change);
                     publish(room.as_ref(), change);
                 }
             }
             Msg::Flush(ack) => {
                 let _ = ack.send(());
             }
+            Msg::Move(to) => relocate(&store, &data_dir, to),
         }
     }
 }
 
-fn persist(data_dir: &Path, change: &Change) {
-    if let Err(why) = inbox::save(data_dir, change) {
+fn relocate(store: &Mutex<Store>, data_dir: &Path, to: Store) {
+    let from = lock(store).clone();
+    if from == to {
+        return;
+    }
+    let node_db = store::db_path(data_dir);
+    let moved = match (&from, &to) {
+        (Store::Node(_), Store::Cluster(dir)) => {
+            inbox::migrate_inbox(&node_db, &dir.join(CLUSTER_DB))
+        }
+        (Store::Cluster(dir), Store::Node(_)) => {
+            inbox::migrate_inbox_back(&dir.join(CLUSTER_DB), &node_db)
+        }
+        _ => Ok(0),
+    };
+    match moved {
+        Ok(_) => *lock(store) = to,
+        Err(why) => report(Err(format!(
+            "moving it failed: {why}; it stays where it was"
+        ))),
+    }
+}
+
+fn persist(at: &Store, change: &Change) {
+    report(inbox::save_to(at, change));
+}
+
+fn report(done: Result<(), String>) {
+    if let Err(why) = done {
         eprintln!("notchling: saving the inbox failed ({why})");
     }
 }
@@ -138,9 +177,11 @@ impl InboxOps {
     pub fn with_clock(data_dir: PathBuf, room: Arc<dyn Room>, clock: Clock) -> Arc<InboxOps> {
         let (writes, reads) = channel::<Msg>();
         let folder = data_dir.clone();
+        let store = Arc::new(Mutex::new(Store::Node(data_dir.clone())));
+        let writing = store.clone();
         let writer = std::thread::Builder::new()
             .name("notchling-inbox-writes".into())
-            .spawn(move || write_loop(reads, folder, room))
+            .spawn(move || write_loop(reads, folder, writing, room))
             .ok();
         let inner = Inner {
             book: Book::new(),
@@ -151,6 +192,8 @@ impl InboxOps {
         let ops = InboxOps {
             clock,
             data_dir,
+            cluster_dir: Mutex::new(None),
+            store,
             inner: Mutex::new(inner),
             stop: Mutex::new(None),
             thread: Mutex::new(None),
@@ -164,9 +207,42 @@ impl InboxOps {
         self
     }
 
+    pub fn with_cluster_dir(self: Arc<Self>, dir: PathBuf) -> Arc<InboxOps> {
+        *lock(&self.cluster_dir) = Some(dir);
+        self
+    }
+
+    pub fn join_cluster(&self) {
+        let dir = lock(&self.cluster_dir).clone();
+        if let Some(dir) = dir {
+            self.send_move(Store::Cluster(dir));
+        }
+    }
+
+    pub fn leave_cluster(&self) {
+        self.send_move(Store::Node(self.data_dir.clone()));
+        self.flush();
+    }
+
+    fn send_move(&self, to: Store) {
+        if let Some(writes) = &lock(&self.inner).writes {
+            let _ = writes.send(Msg::Move(to));
+        }
+    }
+
+    fn in_a_cluster(&self) -> bool {
+        let dir = lock(&self.cluster_dir).clone();
+        dir.is_some_and(|dir| matches!(cluster_persist::load(&dir), Ok(Some(_))))
+    }
+
     pub fn load(&self) {
         let now = (self.clock)();
-        let saved = inbox::load(&self.data_dir, now).unwrap_or_else(|why| {
+        if self.in_a_cluster() {
+            self.join_cluster();
+            self.flush();
+        }
+        let at = lock(&self.store).clone();
+        let saved = inbox::load_from(&at, now).unwrap_or_else(|why| {
             eprintln!("notchling: reading the inbox failed ({why}); starting it empty");
             Book::new()
         });

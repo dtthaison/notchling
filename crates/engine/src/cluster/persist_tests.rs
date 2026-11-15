@@ -194,3 +194,42 @@ fn the_database_is_private_and_a_link_in_its_place_is_refused() {
     .is_err());
     assert_eq!(fs::read(&target).expect("bytes"), b"");
 }
+
+#[test]
+fn the_inbox_table_is_added_to_an_existing_cluster_db() {
+    let tmp = TempDir::new("cluster-inbox-table");
+    let dir = tmp.path("cluster");
+    assert!(super::open_inbox(&dir, false).expect("none").is_none());
+    assert!(!dir.exists());
+    let (_, steps) = built();
+    save_all(&dir, &steps[..1]);
+    let db = super::open_inbox(&dir, false).expect("open").expect("db");
+    db.execute(
+        "INSERT INTO inbox (id, value, updated_ms) VALUES ('a', '{}', 1)",
+        [],
+    )
+    .expect("insert");
+    drop(db);
+    save_all(&dir, &steps[1..2]);
+    assert!(load(&dir).expect("load").is_some());
+    let db = super::open_inbox(&dir, false).expect("open").expect("db");
+    let n: i64 = db
+        .query_row("SELECT COUNT(*) FROM inbox", [], |r| r.get(0))
+        .expect("count");
+    assert_eq!(n, 1);
+}
+
+#[test]
+fn a_newer_cluster_db_is_not_opened_for_the_inbox() {
+    let tmp = TempDir::new("cluster-inbox-newer");
+    let dir = tmp.path("cluster");
+    fs::create_dir_all(&dir).expect("dir");
+    {
+        let db = rusqlite::Connection::open(dir.join(CLUSTER_DB)).expect("db");
+        db.execute_batch("PRAGMA user_version = 99;").expect("v");
+    }
+    assert_eq!(
+        super::open_inbox(&dir, true).err().as_deref(),
+        Some("cluster.db is from a newer Notchling")
+    );
+}

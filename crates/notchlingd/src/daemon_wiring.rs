@@ -447,8 +447,9 @@ impl Wired {
             &claude,
         ));
         acting.attach_codex(codex.clone());
-        let inbox =
-            InboxOps::new(layout.data_dir.clone(), room.clone()).with_events(events.clone());
+        let inbox = InboxOps::new(layout.data_dir.clone(), room.clone())
+            .with_events(events.clone())
+            .with_cluster_dir(layout.cluster_dir());
         let every = Arc::new(EverySession::new(layout));
         let bridge = Arc::new(
             BridgeOps::new(

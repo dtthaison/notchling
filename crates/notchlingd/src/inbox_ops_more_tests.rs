@@ -140,3 +140,147 @@ fn a_producer_answer_records_who_answered() {
     assert_eq!(last["item"]["answer"], "allow_always");
     assert_eq!(last["item"]["answered_by"], "mac");
 }
+
+fn in_cluster(cluster_dir: &std::path::Path) {
+    use notchling_engine::cluster::grants::SecretAllow;
+    use notchling_engine::cluster::id::fingerprint;
+    use notchling_engine::cluster::state::{start, Command};
+    use notchling_engine::cluster::{Desired, Member, MemberState, NodeId};
+    let fp = fingerprint(b"m5");
+    let home = Member {
+        id: NodeId::from_fingerprint(&fp).unwrap(),
+        name: "m5".to_string(),
+        fingerprint: fp,
+        addrs: vec!["100.64.0.2".to_string()],
+        port: 47823,
+        client: true,
+        can_be_master: true,
+        reference: false,
+        accepts_delegation: false,
+        headless: false,
+        state: MemberState::Active,
+        versions: Some(crate::cluster_versions::own()),
+        desired: Desired::default(),
+        joined_ms: 0,
+        secrets: SecretAllow::default(),
+    };
+    let (_, entry, changes) = start(
+        Command::Create {
+            id: "c1".to_string(),
+            name: "home".to_string(),
+            home,
+        },
+        1,
+    )
+    .unwrap();
+    notchling_engine::cluster::persist::save(cluster_dir, &entry, &changes).unwrap();
+}
+
+fn stored(db: &std::path::Path) -> Vec<String> {
+    let Ok(db) = rusqlite::Connection::open(db) else {
+        return Vec::new();
+    };
+    let Ok(mut query) = db.prepare("SELECT id FROM inbox ORDER BY rowid") else {
+        return Vec::new();
+    };
+    let rows = query
+        .query_map([], |r| r.get::<_, String>(0))
+        .unwrap()
+        .map(|r| r.unwrap())
+        .collect();
+    rows
+}
+
+#[test]
+fn an_inbox_already_running_follows_the_node_into_a_cluster() {
+    let r = rig();
+    let cluster_dir = r._tmp.path("cluster");
+    let ops = r.ops.clone().with_cluster_dir(cluster_dir.clone());
+    let node_db = r.dir.join("notchling.db");
+    let cluster_db = cluster_dir.join("cluster.db");
+    let calls = Arc::new(Calls::default());
+    ops.raise(item("a"), Some(calls.clone()));
+    ops.raise(item("b"), None);
+    ops.flush();
+    assert_eq!(stored(&node_db), ["a", "b"]);
+    ops.join_cluster();
+    ops.raise(item("c"), None);
+    let out = answer(&ops, "a", "allow");
+    assert_eq!(out["answered"], true);
+    let again = answer(&ops, "a", "deny");
+    assert_eq!(again["answered"], false);
+    ops.flush();
+    assert!(stored(&node_db).is_empty());
+    assert_eq!(stored(&cluster_db), ["a", "b", "c"]);
+    assert_eq!(calls.0.lock().unwrap().len(), 1);
+    ops.close();
+    let saved = inbox::load_from(&inbox::Store::Cluster(cluster_dir), NOW).unwrap();
+    let a = saved.items().into_iter().find(|i| i.id == "a").unwrap();
+    assert_eq!(a.state, State::Answered);
+    assert_eq!(a.answer, Some(ActionId::Allow));
+}
+
+#[test]
+fn a_restart_in_a_cluster_moves_rows_left_in_notchling_db() {
+    let r = rig();
+    let cluster_dir = r._tmp.path("cluster");
+    let node_db = r.dir.join("notchling.db");
+    let cluster_db = cluster_dir.join("cluster.db");
+    r.ops.raise(item("a"), None);
+    r.ops.raise(item("b"), None);
+    r.ops.flush();
+    r.ops.close();
+    in_cluster(&cluster_dir);
+    let reopened = InboxOps::with_clock(
+        r.dir.clone(),
+        Arc::new(FakeRoom::default()),
+        Arc::new(|| NOW + 5),
+    )
+    .with_cluster_dir(cluster_dir.clone());
+    reopened.load();
+    assert_eq!(reopened.items().len(), 2);
+    reopened.raise(item("c"), None);
+    reopened.flush();
+    assert!(stored(&node_db).is_empty());
+    assert_eq!(stored(&cluster_db), ["a", "b", "c"]);
+    reopened.close();
+}
+
+#[test]
+fn a_restart_without_a_cluster_keeps_the_inbox_in_notchling_db() {
+    let r = rig();
+    let cluster_dir = r._tmp.path("cluster");
+    r.ops.raise(item("a"), None);
+    r.ops.flush();
+    r.ops.close();
+    let reopened = InboxOps::with_clock(
+        r.dir.clone(),
+        Arc::new(FakeRoom::default()),
+        Arc::new(|| NOW + 5),
+    )
+    .with_cluster_dir(cluster_dir.clone());
+    reopened.load();
+    reopened.raise(item("b"), None);
+    reopened.flush();
+    assert_eq!(stored(&r.dir.join("notchling.db")), ["a", "b"]);
+    assert!(!cluster_dir.exists());
+    reopened.close();
+}
+
+#[test]
+fn leaving_a_cluster_brings_the_inbox_back_to_notchling_db() {
+    let r = rig();
+    let cluster_dir = r._tmp.path("cluster");
+    let ops = r.ops.clone().with_cluster_dir(cluster_dir.clone());
+    ops.raise(item("a"), None);
+    ops.join_cluster();
+    ops.raise(item("b"), None);
+    ops.flush();
+    assert_eq!(stored(&cluster_dir.join("cluster.db")), ["a", "b"]);
+    ops.leave_cluster();
+    ops.raise(item("c"), None);
+    ops.flush();
+    assert_eq!(stored(&r.dir.join("notchling.db")), ["a", "b", "c"]);
+    assert!(stored(&cluster_dir.join("cluster.db")).is_empty());
+    ops.close();
+}

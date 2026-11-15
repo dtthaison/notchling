@@ -236,6 +236,31 @@ fn an_unanswered_join_expires_and_is_denied() {
     assert!(!late.answered);
 }
 
+#[derive(Default)]
+struct Counts(std::sync::atomic::AtomicUsize);
+
+impl Hooks for Counts {
+    fn in_cluster(&self) {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+#[test]
+fn creating_and_joining_a_cluster_tells_the_hooks() {
+    use std::sync::atomic::Ordering;
+    let net = MemNet::new();
+    let (home_hook, worker_hook) = (Arc::new(Counts::default()), Arc::new(Counts::default()));
+    let mut h = Opts::named("hook-home");
+    h.hooks = Some(home_hook.clone());
+    let mut w = Opts::named("hook-worker");
+    w.hooks = Some(worker_hook.clone());
+    let (_home, _worker) = crate::cluster_testkit::pair(&net, h, w);
+    assert!(home_hook.0.load(Ordering::SeqCst) >= 1);
+    eventually("the joiner is told", || {
+        worker_hook.0.load(Ordering::SeqCst) >= 1
+    });
+}
+
 #[test]
 fn the_item_names_the_node_plainly() {
     let ask = JoinAsk {
