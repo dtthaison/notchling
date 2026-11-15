@@ -56,7 +56,7 @@ impl MachinesView {
         let add = match add_block {
             Some(why) => gate::tip_text(add, SharedString::from(why), a),
             None => add.on_click(cx.listener(|this, _, window, cx| {
-                this.open_sheet(Sheet::Add(AddForm::new()), window, cx)
+                this.open_sheet(Sheet::Add(Box::new(AddForm::new())), window, cx)
             })),
         };
         div()
@@ -265,7 +265,7 @@ impl MachinesView {
         let add = match add_block {
             Some(why) => gate::tip_text(add, SharedString::from(why), a),
             None => add.on_click(cx.listener(|this, _, window, cx| {
-                this.open_sheet(Sheet::Add(AddForm::new()), window, cx)
+                this.open_sheet(Sheet::Add(Box::new(AddForm::new())), window, cx)
             })),
         };
         div()

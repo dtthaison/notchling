@@ -2,9 +2,9 @@ use super::catalog;
 use super::engine::{Deps, SetupEngine};
 use super::engine_plan::{AdminAnswer, PlanKind};
 use super::github::NoGitHub;
-use super::registry::{AdminAccess, SdWorkerSettings};
+use super::registry::{AdminAccess, NodeSettings, SdWorkerSettings};
 use super::runner::{CommandResult, ScriptedRunner};
-use super::step::{Detected, MacFacts, NoOpener, StepFix, StepId};
+use super::step::{ClusterTokens, Detected, MacFacts, NoOpener, StepFix, StepId};
 use super::tests_engine_world::{linux, lock, mac, Secrets, Store, T0};
 use std::sync::Arc;
 
@@ -32,10 +32,32 @@ fn engine(machines: Vec<super::registry::Machine>, runner: Arc<ScriptedRunner>) 
     )
 }
 
+struct NoTokenAllowed;
+
+impl ClusterTokens for NoTokenAllowed {
+    fn join_token(&self) -> Result<String, String> {
+        panic!("a check or a plan asked for the join token")
+    }
+    fn cluster_id(&self) -> Result<Option<String>, String> {
+        Ok(Some("cluster-aaaa".into()))
+    }
+    fn can_be_master(&self, _machine: &str) -> Option<bool> {
+        None
+    }
+}
+
 fn worker_mac() -> super::registry::Machine {
     let mut m = mac("m1");
     m.set_sd_worker(Some(SdWorkerSettings::new("m1")));
+    m.node = Some(NodeSettings::default());
     m
+}
+
+fn node_vps() -> super::registry::Machine {
+    let mut vps = linux("vps-sing-1");
+    vps.set_sd_worker(Some(SdWorkerSettings::new("vps-sing-1")));
+    vps.node = Some(NodeSettings::default());
+    vps
 }
 
 fn echoing() -> Arc<ScriptedRunner> {
@@ -57,12 +79,19 @@ fn echoing() -> Arc<ScriptedRunner> {
 #[test]
 fn a_refresh_of_every_real_step_runs_only_read_only_probes_and_never_sends_a_value() {
     let runner = Arc::new(ScriptedRunner::new());
-    let mut vps = linux("vps-sing-1");
-    vps.set_sd_worker(Some(SdWorkerSettings::new("vps-sing-1")));
+    let mut vps = node_vps();
     vps.set_admin(AdminAccess::RootSsh);
-    let e = engine(vec![worker_mac(), vps], runner.clone());
+    let e = engine(vec![worker_mac(), vps], runner.clone())
+        .with_cluster(Arc::new(NoTokenAllowed), None);
     e.refresh(None, true);
     assert!(!runner.calls().is_empty());
+    assert!(
+        runner
+            .calls()
+            .iter()
+            .any(|c| c.text().contains("cluster status --json")),
+        "the node steps were probed"
+    );
     for call in runner.calls() {
         assert!(call.stdin.is_none(), "a check sends nothing: {call:?}");
         let text = call.text();
@@ -117,8 +146,7 @@ fn a_vault_value_reaches_the_machine_only_on_stdin_and_is_masked_everywhere() {
 
 #[test]
 fn the_admin_steps_of_the_real_catalog_are_the_pinned_ones() {
-    let mut vps = linux("vps-sing-1");
-    vps.set_sd_worker(Some(SdWorkerSettings::new("vps-sing-1")));
+    let vps = node_vps();
     let mut admin: Vec<String> = Vec::new();
     for m in [worker_mac(), vps.clone()] {
         let all = vec![worker_mac(), vps.clone()];
@@ -137,6 +165,7 @@ fn the_admin_steps_of_the_real_catalog_are_the_pinned_ones() {
         admin,
         vec![
             "m1/stays-awake",
+            "vps-sing-1/node-service",
             "vps-sing-1/base-tools",
             "vps-sing-1/service",
             "vps-sing-1/running"

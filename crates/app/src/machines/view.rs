@@ -40,7 +40,7 @@ pub struct MachinesView {
     pub(super) log_open: BTreeSet<String>,
     pub(super) how_to: BTreeMap<String, StepId>,
     seen_revision: u64,
-    fixed: bool,
+    pub(super) fixed: bool,
 }
 
 impl MachinesView {
@@ -145,7 +145,11 @@ impl MachinesView {
         }
         self.ask_mac(cx);
         let engine = self.model.parts.engine.clone();
-        Self::background(cx, move || engine.refresh(None, true), |_, _, _| {});
+        Self::background(
+            cx,
+            move || engine.refresh(None, true),
+            |view, _, cx| view.ask_cluster(cx),
+        );
     }
 
     pub(super) fn check(&mut self, machine: &str, cx: &mut Context<Self>) {
@@ -154,7 +158,11 @@ impl MachinesView {
         }
         let engine = self.model.parts.engine.clone();
         let names = vec![machine.to_owned()];
-        Self::background(cx, move || engine.refresh(Some(&names), true), |_, _, _| {});
+        Self::background(
+            cx,
+            move || engine.refresh(Some(&names), true),
+            |view, _, cx| view.ask_cluster(cx),
+        );
     }
 
     fn poll(&mut self, cx: &mut Context<Self>) {
@@ -167,6 +175,7 @@ impl MachinesView {
             move || poller.refresh(false),
             |view, _, cx| {
                 view.ask_mac(cx);
+                view.ask_cluster(cx);
                 view.reload(cx);
                 view.check_after_poll(cx);
             },
@@ -181,7 +190,10 @@ impl MachinesView {
         Self::background(
             cx,
             move || engine.refresh(None, false),
-            |view, _, _| view.model.checked(),
+            |view, _, cx| {
+                view.model.checked();
+                view.ask_cluster(cx);
+            },
         );
     }
 
@@ -219,7 +231,10 @@ impl MachinesView {
         Self::background(
             cx,
             move || run.execute(&engine),
-            |view, (done, outcome), _| view.model.finished(&done, &outcome),
+            |view, (done, outcome), cx| {
+                view.model.finished(&done, &outcome);
+                view.ask_cluster(cx);
+            },
         );
     }
 
@@ -317,7 +332,7 @@ impl MachinesView {
         if !form.can_add(&existing, can_add) {
             return;
         }
-        let form: AddForm = form.clone();
+        let form: AddForm = (**form).clone();
         let Some(check) = &form.check else {
             return;
         };

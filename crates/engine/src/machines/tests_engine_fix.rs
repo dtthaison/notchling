@@ -444,6 +444,35 @@ fn turning_the_worker_on_waits_for_every_step_before_it_but_off_never_does() {
 }
 
 #[test]
+fn node_steps_never_gate_the_workers_running_switch() {
+    let s = Setup::new(|_, _| {
+        vec![
+            StepBuilder::new("node-tailscale")
+                .title("Tailscale connected")
+                .build(),
+            StepBuilder::new("node-joined")
+                .title("Joined the cluster")
+                .build(),
+            StepBuilder::new("a").title("Token scope").build(),
+            StepBuilder::new("running")
+                .fix(StepFix::Toggle { needs_admin: false })
+                .build(),
+        ]
+    });
+    s.runner.on_script("toggle mac", CommandResult::ok(""));
+    let w = s.build();
+    w.answer("echo probe-node-tailscale", "stopped", 1);
+    w.answer("echo probe-node-joined", "not in a cluster", 1);
+    w.refresh("m1", false);
+    let on = w.click("m1", PlanKind::Running(true), AdminAnswer::None);
+    assert_eq!(on, FixOutcome::ok("Running is on"));
+    w.answer("echo probe-a", "too wide", 1);
+    w.refresh("m1", false);
+    let blocked = w.click("m1", PlanKind::Running(true), AdminAnswer::None);
+    assert_eq!(blocked, FixOutcome::fail("waits for Token scope"));
+}
+
+#[test]
 fn a_second_fix_on_a_machine_is_refused_even_after_both_passed_the_refusals() {
     use std::sync::mpsc::channel;
     let (started_tx, started) = channel::<()>();

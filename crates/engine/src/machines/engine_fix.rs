@@ -307,6 +307,9 @@ impl SetupEngine {
             if step.id == StepId::RUNNING {
                 return None;
             }
+            if step.id.is_node() {
+                continue;
+            }
             if !results.get(&step.id).is_some_and(|r| r.state.is_pass()) {
                 return Some(step.title);
             }

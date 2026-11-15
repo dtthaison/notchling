@@ -15,7 +15,7 @@ use notchling_engine::machines::registry::{
 use notchling_engine::machines::runner::Runner;
 use notchling_engine::machines::shell::is_safe_machine_path;
 use notchling_engine::machines::status::WorkerStatus;
-use notchling_engine::machines::step::StepId;
+use notchling_engine::machines::step::{ClusterTokens, StepId};
 use notchling_engine::machines::steps_secret::usages;
 use notchling_engine::vault::entry::VaultEntry;
 use notchling_engine::vault::expiry::today_local;
@@ -77,6 +77,7 @@ pub struct Parts {
     pub clock: Arc<dyn Fn() -> f64 + Send + Sync>,
     pub off: Option<&'static str>,
     pub versions: Arc<dyn MacVersions>,
+    pub cluster: Arc<dyn ClusterTokens>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -106,7 +107,7 @@ impl Tab {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Sheet {
     Fix(FixPrompt),
-    Add(AddForm),
+    Add(Box<AddForm>),
     Job(JobForm),
 }
 
@@ -157,6 +158,7 @@ pub struct MachinesModel {
     generation: u64,
     pub diff: Option<DiffSheet>,
     mac: Option<Result<MacSide, MacVersionsError>>,
+    pub(super) masters: BTreeMap<String, Option<bool>>,
 }
 
 impl MachinesModel {
@@ -189,6 +191,7 @@ impl MachinesModel {
             generation: 0,
             diff: None,
             mac: None,
+            masters: BTreeMap::new(),
         };
         model.refresh_machines();
         model.refresh_vault();
@@ -426,7 +429,10 @@ impl MachinesModel {
             .collect()
     }
 
-    fn commit(&mut self, change: impl FnOnce(&mut Vec<Machine>) -> bool) -> Result<(), String> {
+    pub(super) fn commit(
+        &mut self,
+        change: impl FnOnce(&mut Vec<Machine>) -> bool,
+    ) -> Result<(), String> {
         let saved = {
             let _writing = write_lock();
             let mut list = match self.parts.registry.load() {
