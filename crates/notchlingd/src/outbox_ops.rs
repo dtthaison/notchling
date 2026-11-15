@@ -168,6 +168,10 @@ impl OutboxOps {
         &self.roots
     }
 
+    pub fn acting(&self) -> &Arc<Acting> {
+        &self.acting
+    }
+
     pub fn load(&self, now_ms: i64) {
         let Ok(rows) = self.store.sending() else {
             return;
@@ -351,10 +355,15 @@ impl OutboxOps {
     }
 
     pub fn session_name(&self, key: &str) -> Option<String> {
-        self.agents()
+        let cached = self
+            .agents()
             .into_iter()
             .find(|a| a.outbox_key() == key)
-            .map(|a| a.name)
+            .map(|a| a.name);
+        if cached.is_some() || tool_of(key) != Tool::Claude {
+            return cached;
+        }
+        fresh::job_row(&self.roots, &Probes::from_proc(), key).map(|a| a.name)
     }
 
     pub(crate) fn resend_row(&self, id: &str) -> Result<Value, ApiError> {

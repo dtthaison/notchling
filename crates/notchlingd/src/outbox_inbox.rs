@@ -1,3 +1,4 @@
+use crate::acting::Acting;
 use crate::acting_ops::now_ms;
 use crate::inbox_ops::{InboxOps, Responder};
 use crate::outbox_ops::OutboxOps;
@@ -5,7 +6,7 @@ use notchling_engine::inbox::{Action, ActionId, Item, Kind, Source, State};
 use notchling_engine::outbox::Row;
 use notchling_events::kinds::agents::OutboxThen;
 use std::collections::HashMap;
-use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, Sender, TryRecvError};
+use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread::JoinHandle;
 use std::time::Duration;
@@ -22,10 +23,14 @@ enum Msg {
 
 struct Handoff {
     tx: Sender<Msg>,
+    acting: Arc<Acting>,
 }
 
 impl Responder for Handoff {
     fn answered(&self, item: &Item, action: ActionId) -> bool {
+        if !self.acting.is_on() {
+            return false;
+        }
         match action {
             ActionId::Send | ActionId::Discard => {
                 self.tx.send(Msg::Answer(item.id.clone(), action)).is_ok()
@@ -38,9 +43,9 @@ impl Responder for Handoff {
 pub struct OutboxNotice {
     outbox: Arc<OutboxOps>,
     inbox: Arc<InboxOps>,
-    noticed: Mutex<HashMap<String, Vec<String>>>,
+    noticed: Mutex<HashMap<String, (String, Vec<String>)>>,
     tx: Sender<Msg>,
-    rx: Mutex<Receiver<Msg>>,
+    rx: Mutex<Option<Receiver<Msg>>>,
     thread: Mutex<Option<JoinHandle<()>>>,
 }
 
@@ -86,7 +91,7 @@ impl OutboxNotice {
             inbox,
             noticed: Mutex::new(HashMap::new()),
             tx,
-            rx: Mutex::new(rx),
+            rx: Mutex::new(Some(rx)),
             thread: Mutex::new(None),
         })
     }
@@ -102,56 +107,64 @@ impl OutboxNotice {
             if store.mark_noticed(&ids, now_ms).is_err() {
                 continue;
             }
-            let name = self
-                .outbox
-                .session_name(&session)
-                .map(|n| plain(&n))
-                .filter(|n| !n.is_empty())
-                .unwrap_or_else(|| "the session".to_string());
-            let id = format!("outbox:{session}:{now_ms}");
-            let item = Item {
-                id: id.clone(),
-                kind: Kind::OutboxUnsent,
-                title: "Messages Not Sent".to_string(),
-                detail: detail(rows.len(), &name),
-                source: Source {
-                    node: None,
-                    session: Some(session),
-                    job: None,
-                },
-                created_ms: now_ms,
-                expires_ms: None,
-                actions: vec![
-                    Action {
-                        id: ActionId::Send,
-                        label: "Send".to_string(),
-                        primary: true,
-                    },
-                    Action {
-                        id: ActionId::Discard,
-                        label: "Discard".to_string(),
-                        primary: false,
-                    },
-                ],
-                state: State::Open,
-                answer: None,
-                answered_by: None,
-                seen: false,
-                open: None,
-                closed_ms: None,
-            };
-            lock(&self.noticed).insert(id, ids);
-            let responder = Arc::new(Handoff {
-                tx: self.tx.clone(),
-            });
-            self.inbox.raise(item, Some(responder));
+            for row in &rows {
+                self.outbox.emit_then(row, OutboxThen::Noticed);
+            }
+            self.raise(session, ids, now_ms);
         }
+    }
+
+    fn raise(&self, session: String, ids: Vec<String>, now_ms: i64) {
+        let name = self
+            .outbox
+            .session_name(&session)
+            .map(|n| plain(&n))
+            .filter(|n| !n.is_empty())
+            .unwrap_or_else(|| "the session".to_string());
+        let id = format!("outbox:{session}:{now_ms}");
+        let item = Item {
+            id: id.clone(),
+            kind: Kind::OutboxUnsent,
+            title: "Messages Not Sent".to_string(),
+            detail: detail(ids.len(), &name),
+            source: Source {
+                node: None,
+                session: Some(session.clone()),
+                job: None,
+            },
+            created_ms: now_ms,
+            expires_ms: None,
+            actions: vec![
+                Action {
+                    id: ActionId::Send,
+                    label: "Send".to_string(),
+                    primary: true,
+                },
+                Action {
+                    id: ActionId::Discard,
+                    label: "Discard".to_string(),
+                    primary: false,
+                },
+            ],
+            state: State::Open,
+            answer: None,
+            answered_by: None,
+            seen: false,
+            open: None,
+            closed_ms: None,
+        };
+        lock(&self.noticed).insert(id, (session, ids));
+        let responder = Arc::new(Handoff {
+            tx: self.tx.clone(),
+            acting: self.outbox.acting().clone(),
+        });
+        self.inbox.raise(item, Some(responder));
     }
 
     fn withdraw_gone(&self) {
         let open: Vec<(String, Vec<String>)> = lock(&self.noticed)
             .iter()
-            .map(|(id, ids)| (id.clone(), ids.clone()))
+            .map(|(id, (_, ids))| (id.clone(), ids.clone()))
             .collect();
         for (item, ids) in open {
             let store = self.outbox.store();
@@ -166,20 +179,34 @@ impl OutboxNotice {
     }
 
     pub fn drain(&self) {
-        loop {
-            let next = lock(&self.rx).try_recv();
-            match next {
-                Ok(Msg::Answer(item, action)) => self.apply(&item, action),
-                Ok(Msg::Stop) => {}
-                Err(TryRecvError::Empty | TryRecvError::Disconnected) => return,
+        let mut answers = Vec::new();
+        if let Some(rx) = lock(&self.rx).as_ref() {
+            while let Ok(msg) = rx.try_recv() {
+                answers.push(msg);
+            }
+        }
+        for msg in answers {
+            if let Msg::Answer(item, action) = msg {
+                self.apply(&item, action);
             }
         }
     }
 
     fn apply(&self, item: &str, action: ActionId) {
-        let Some(ids) = lock(&self.noticed).remove(item) else {
+        let Some((session, ids)) = lock(&self.noticed).remove(item) else {
             return;
         };
+        if !self.outbox.acting().is_on() {
+            let store = self.outbox.store();
+            let left: Vec<String> = ids
+                .into_iter()
+                .filter(|id| matches!(store.get(id), Ok(Some(_)) | Err(_)))
+                .collect();
+            if !left.is_empty() {
+                self.raise(session, left, now_ms());
+            }
+            return;
+        }
         match action {
             ActionId::Send => {
                 for id in &ids {
@@ -205,19 +232,21 @@ impl OutboxNotice {
         if thread.is_some() {
             return;
         }
+        let Some(rx) = lock(&self.rx).take() else {
+            return;
+        };
         let notice = self.clone();
         *thread = std::thread::Builder::new()
             .name("notchling-outbox-notice".into())
-            .spawn(move || notice.run())
+            .spawn(move || notice.run(rx))
             .ok();
     }
 
-    fn run(&self) {
+    fn run(&self, rx: Receiver<Msg>) {
         let mut swept = now_ms();
         self.sweep(swept);
         loop {
-            let next = lock(&self.rx).recv_timeout(LOOK_EVERY);
-            match next {
+            match rx.recv_timeout(LOOK_EVERY) {
                 Ok(Msg::Stop) | Err(RecvTimeoutError::Disconnected) => return,
                 Ok(Msg::Answer(item, action)) => self.apply(&item, action),
                 Err(RecvTimeoutError::Timeout) => {}

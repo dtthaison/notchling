@@ -1,6 +1,7 @@
 use crate::acting::Acting;
 use crate::acting_ops::ActingOps;
 use crate::acting_ops_tests::{row, sessions, setup_in, FakeRoom, Setup, PROMPT};
+use crate::late_emit::Events;
 use crate::outbox_courier::{ClaudeCourier, Clock, Courier, JobFiles};
 use crate::outbox_ops::{OutboxOps, SendArgs};
 use crate::outbox_postman::{Couriers, Postmen, Verifier};
@@ -11,6 +12,7 @@ use notchling_engine::reply::keys::ENTER;
 use notchling_engine::sessions::{Agent, Roots};
 use notchling_engine::transcript::queue_state::QueueState;
 use notchling_engine::transcript::sent::Seen;
+use notchling_events::{MemorySink, Salt};
 use serde_json::{json, Value};
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
@@ -161,6 +163,7 @@ pub(crate) struct Rig {
     pub human: Arc<Mutex<Vec<(u64, String)>>>,
     pub launched: Arc<Recorder>,
     pub safe: Arc<SafeModes>,
+    pub sink: Arc<MemorySink>,
 }
 
 pub(crate) struct Options {
@@ -242,13 +245,14 @@ pub(crate) fn rig_with(options: Options) -> Rig {
     let now: Clock = Arc::new(move || ticks.load(Ordering::SeqCst));
     let store = Arc::new(OutboxStore::in_memory_for_tests());
     let switch = acting.acting_switch();
+    let sink = Arc::new(MemorySink::new());
     let outbox = Arc::new(OutboxOps::new(
         store,
         Arc::new(Mutex::new(list)),
         roots,
         switch.clone(),
         room.clone(),
-        None,
+        Some(Events::fixed(sink.clone(), Salt([1; 32]))),
     ));
     let safe = Arc::new(SafeModes::default());
     let courier = Arc::new(ClaudeCourier::with_files(
@@ -282,6 +286,7 @@ pub(crate) fn rig_with(options: Options) -> Rig {
         human,
         launched,
         safe,
+        sink,
     }
 }
 
