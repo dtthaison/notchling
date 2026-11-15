@@ -195,7 +195,11 @@ impl SnapSender {
     }
 
     pub fn targets(&self) -> Vec<NodeId> {
-        self.inner.targets()
+        self.inner.candidates(true)
+    }
+
+    pub fn ready_targets(&self) -> Vec<NodeId> {
+        self.inner.candidates(false)
     }
 
     pub fn pinned(&self) -> BTreeSet<String> {
@@ -247,6 +251,10 @@ impl SnapSender {
 
 impl Inner {
     fn targets(&self) -> Vec<NodeId> {
+        self.candidates(true)
+    }
+
+    fn candidates(&self, online_only: bool) -> Vec<NodeId> {
         let Some(facts) = (self.parts.facts)() else {
             return Vec::new();
         };
@@ -256,7 +264,9 @@ impl Inner {
         facts
             .members
             .iter()
-            .filter(|m| m.id != facts.me && m.active && m.can_be_master && m.online)
+            .filter(|m| {
+                m.id != facts.me && m.active && m.can_be_master && (m.online || !online_only)
+            })
             .filter(|m| (self.parts.ready)(&m.id))
             .map(|m| m.id.clone())
             .collect()

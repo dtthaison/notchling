@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 
 use serde_json::json;
 
-use super::core_tests::Hub;
+use super::core_tests::{answers, Hub};
 use super::{Effect, Input, LocalCmd, SnapAsk};
 use crate::cluster::id::NodeId;
 use crate::cluster::snapshot::{Observed, SessionState, Trigger};
@@ -171,6 +171,10 @@ fn a_snapshot_command_asks_at_once_with_the_given_trigger() {
     let asks = snapshots(&effects);
     assert_eq!(asks.len(), 1);
     assert_eq!(asks[0].trigger, Trigger::Ready(id("m1")));
+    let answered = answers(&effects);
+    let reply = answered[0].as_ref().expect("an answer");
+    assert_eq!(reply["asked"], json!(asks[0].seq));
+    assert!(reply.get("set").is_none());
     let refused = hub.local(
         &id("m1"),
         LocalCmd::Snapshot {

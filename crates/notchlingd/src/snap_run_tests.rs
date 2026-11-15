@@ -1,11 +1,11 @@
-use super::{prune, take, Context, SnapRunner};
+use super::{prune, take, Context, Outcome, SnapRunner};
 use crate::snap_files_tests::{make_db, put};
 use crate::snap_testkit::{id_of, Fixture};
 use notchling_engine::cluster::core::SnapAsk;
 use notchling_engine::cluster::id::Tool;
 use notchling_engine::cluster::main_sessions::MainSession;
 use notchling_engine::cluster::members::Term;
-use notchling_engine::cluster::snapshot::{Movable, Trigger};
+use notchling_engine::cluster::snapshot::{Manifest, Movable, PartKind, Trigger};
 use notchling_engine::control::{FakeLauncher, LaunchError, Launcher, RealLauncher};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
@@ -211,5 +211,141 @@ fn a_failed_stage_is_reported() {
         .last_error()
         .is_some_and(|e| e.contains("still being written")));
     assert_eq!(runner.last_set(), None);
+    runner.close();
+}
+
+fn standby_copy(fx: &Fixture, node: u8) -> Vec<u8> {
+    let path = fx
+        .net
+        .member(&id_of(node))
+        .cluster
+        .join(format!("standby/{}/tails/parts", fx.primary))
+        .join(fx.transcript().strip_prefix("/").unwrap());
+    std::fs::read(path).unwrap_or_default()
+}
+
+fn grow(fx: &Fixture, len: usize) {
+    put(&fx.transcript(), &vec![b'x'; len]);
+}
+
+fn tail_from(ctx: &Context, set: &str) -> u64 {
+    let bytes = std::fs::read(ctx.outgoing().join(set).join("manifest.json")).unwrap();
+    let manifest: Manifest = serde_json::from_slice(&bytes).unwrap();
+    manifest
+        .parts
+        .iter()
+        .find_map(|p| match p.kind {
+            PartKind::Tail { from } => Some(from),
+            _ => None,
+        })
+        .expect("a tail part")
+}
+
+#[test]
+fn a_set_taken_while_every_ready_target_is_offline_is_sent_when_one_returns() {
+    let fx = Fixture::new("run-offline", &[(1, true), (2, true)]);
+    fx.make_ready(&[id_of(1), id_of(2)]);
+    let session = lay_out(&fx);
+    let ctx = context(&fx, real());
+    fx.net.set_online(&id_of(1), false);
+    fx.net.set_online(&id_of(2), false);
+    let set = take(
+        &fx.sender,
+        &ctx,
+        &ask(&fx, &session, 4),
+        crate::snap_files_tests::now_ms(),
+    )
+    .unwrap();
+    assert_eq!(set, Some("s-4".to_string()));
+    assert!(sets_in(&ctx).contains("s-4"));
+    assert!(fx.sender.pinned().contains("s-4"));
+    assert_eq!(fx.net.calls(&id_of(1), "snap.offer"), 0);
+    fx.net.set_online(&id_of(1), true);
+    assert_eq!(fx.sender.tick(), vec![id_of(1)]);
+    assert!(fx.sender.wait_idle(WAIT));
+    assert_eq!(
+        fx.store_of(&id_of(1)).current().map(|m| m.set),
+        Some("s-4".to_string())
+    );
+    assert_eq!(fx.store_of(&id_of(2)).current(), None);
+    fx.net.set_online(&id_of(2), true);
+    assert_eq!(fx.sender.tick(), vec![id_of(2)]);
+    assert!(fx.sender.wait_idle(WAIT));
+    assert_eq!(
+        fx.store_of(&id_of(2)).current().map(|m| m.set),
+        Some("s-4".to_string())
+    );
+}
+
+#[test]
+fn tails_are_planned_from_the_slowest_ready_target_even_when_it_is_offline() {
+    let fx = Fixture::new("run-slowest", &[(1, true), (2, true)]);
+    fx.make_ready(&[id_of(1), id_of(2)]);
+    let session = lay_out(&fx);
+    let ctx = context(&fx, real());
+    let now = crate::snap_files_tests::now_ms;
+    grow(&fx, 100);
+    take(&fx.sender, &ctx, &ask(&fx, &session, 1), now()).unwrap();
+    assert!(fx.sender.wait_idle(WAIT));
+    assert_eq!(standby_copy(&fx, 2).len(), 100);
+    fx.net.set_online(&id_of(2), false);
+    grow(&fx, 200);
+    take(&fx.sender, &ctx, &ask(&fx, &session, 2), now()).unwrap();
+    assert!(fx.sender.wait_idle(WAIT));
+    assert_eq!(standby_copy(&fx, 1).len(), 200);
+    assert_eq!(standby_copy(&fx, 2).len(), 100);
+    grow(&fx, 300);
+    take(&fx.sender, &ctx, &ask(&fx, &session, 3), now()).unwrap();
+    assert!(fx.sender.wait_idle(WAIT));
+    assert_eq!(tail_from(&ctx, "s-3"), 100);
+    assert_eq!(standby_copy(&fx, 1).len(), 300);
+    fx.net.set_online(&id_of(2), true);
+    assert_eq!(fx.sender.tick(), vec![id_of(2)]);
+    assert!(fx.sender.wait_idle(WAIT));
+    assert_eq!(fx.sender.last_error(&id_of(2)), None);
+    assert_eq!(
+        fx.store_of(&id_of(2)).current().map(|m| m.set),
+        Some("s-3".to_string())
+    );
+    assert_eq!(standby_copy(&fx, 2).len(), 300);
+}
+
+#[test]
+fn the_runner_says_what_became_of_each_ask() {
+    let fx = Fixture::new("run-outcome", &[(1, true)]);
+    let session = lay_out(&fx);
+    let ctx = context(&fx, real());
+    let runner = SnapRunner::spawn(Arc::new(take_sender(&fx)), ctx, Duration::from_millis(10));
+    runner.submit(ask(&fx, &session, 1));
+    assert!(runner.wait_idle(WAIT));
+    assert_eq!(runner.outcome(1), Some(Outcome::NoReadyTarget));
+    assert_eq!(runner.last_set(), None);
+    fx.make_ready(&[id_of(1)]);
+    runner.submit(ask(&fx, &session, 2));
+    assert!(runner.wait_idle(WAIT));
+    assert_eq!(runner.outcome(2), Some(Outcome::Staged("s-2".to_string())));
+    assert_eq!(runner.outcome(3), None);
+    runner.close();
+}
+
+#[test]
+fn a_busy_retry_gives_way_to_a_newer_ask_at_once() {
+    let fx = Fixture::new("run-supersede", &[(1, true)]);
+    fx.make_ready(&[id_of(1)]);
+    let session = lay_out(&fx);
+    std::fs::write(fx.transcript(), b"one\ntwo\nthree\n").unwrap();
+    let ctx = context(&fx, real());
+    let runner = SnapRunner::spawn(Arc::new(take_sender(&fx)), ctx, Duration::from_secs(60));
+    runner.submit(ask(&fx, &session, 8));
+    let start = std::time::Instant::now();
+    while runner.last_error().is_none() && start.elapsed() < WAIT {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(runner.last_error().is_some());
+    put(&fx.transcript(), b"one\ntwo\nthree\n");
+    runner.submit(ask(&fx, &session, 9));
+    assert!(runner.wait_idle(Duration::from_secs(10)));
+    assert_eq!(runner.outcome(8), Some(Outcome::Superseded));
+    assert_eq!(runner.outcome(9), Some(Outcome::Staged("s-9".to_string())));
     runner.close();
 }

@@ -59,7 +59,7 @@ pub fn take(
     ask: &SnapAsk,
     now_ms: i64,
 ) -> Result<Option<String>, String> {
-    let targets = sender.targets();
+    let targets = sender.ready_targets();
     if targets.is_empty() {
         return Ok(None);
     }
@@ -100,6 +100,16 @@ pub fn take(
     Ok(Some(set))
 }
 
+pub const KEEP_OUTCOMES: usize = 16;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Outcome {
+    Staged(String),
+    NoReadyTarget,
+    Superseded,
+    Failed(String),
+}
+
 #[derive(Default)]
 struct State {
     pending: Option<SnapAsk>,
@@ -107,6 +117,16 @@ struct State {
     stop: bool,
     error: Option<String>,
     last: Option<String>,
+    outcomes: BTreeMap<u64, Outcome>,
+}
+
+impl State {
+    fn record(&mut self, seq: u64, outcome: Outcome) {
+        self.outcomes.insert(seq, outcome);
+        while self.outcomes.len() > KEEP_OUTCOMES {
+            self.outcomes.pop_first();
+        }
+    }
 }
 
 struct Shared {
@@ -150,6 +170,10 @@ impl SnapRunner {
 
     pub fn last_error(&self) -> Option<String> {
         lock(&self.shared.state).error.clone()
+    }
+
+    pub fn outcome(&self, seq: u64) -> Option<Outcome> {
+        lock(&self.shared.state).outcomes.get(&seq).cloned()
     }
 
     pub fn last_set(&self) -> Option<String> {
@@ -212,20 +236,33 @@ impl Shared {
                 Ok(set) => {
                     let mut state = lock(&self.state);
                     state.error = None;
-                    state.last = set.or(state.last.take());
+                    let outcome = match set {
+                        Some(set) => {
+                            state.last = Some(set.clone());
+                            Outcome::Staged(set)
+                        }
+                        None => Outcome::NoReadyTarget,
+                    };
+                    state.record(ask.seq, outcome);
                     return;
                 }
                 Err(why) => {
                     let mut state = lock(&self.state);
-                    state.error = Some(why);
-                    if attempt == TRIES || state.stop {
+                    state.error = Some(why.clone());
+                    if state.pending.is_some() || state.stop {
+                        state.record(ask.seq, Outcome::Superseded);
                         return;
                     }
-                    let (state, _) = self
+                    if attempt == TRIES {
+                        state.record(ask.seq, Outcome::Failed(why));
+                        return;
+                    }
+                    let (mut state, _) = self
                         .wake
-                        .wait_timeout(state, self.retry)
+                        .wait_timeout_while(state, self.retry, |s| s.pending.is_none() && !s.stop)
                         .unwrap_or_else(|e| e.into_inner());
                     if state.pending.is_some() || state.stop {
+                        state.record(ask.seq, Outcome::Superseded);
                         return;
                     }
                 }

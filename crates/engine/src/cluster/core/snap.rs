@@ -126,9 +126,9 @@ impl NodeCore {
         } else {
             match self.snap_ask(trigger, self.wall_ms) {
                 Some(plan) => {
-                    let set = format!("s-{}", plan.seq);
+                    let seq = plan.seq;
                     out.push(Effect::Snapshot { plan });
-                    Ok(json!({ "set": set }))
+                    Ok(json!({ "asked": seq }))
                 }
                 None => Err(WireError::new(
                     "failed",
