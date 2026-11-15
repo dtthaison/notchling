@@ -1,5 +1,5 @@
 use notchling_engine::reply::exec::Pty;
-use notchling_engine::reply::keys::PASTE_START;
+use notchling_engine::reply::keys::{ENTER, PASTE_START};
 use notchling_engine::sessions::fresh::job_row;
 use notchling_engine::sessions::{Agent, AgentTarget, Probes, Roots};
 use notchling_engine::transcript::{restart, sent};
@@ -48,6 +48,7 @@ pub(crate) struct Guarded<'a> {
     pub(crate) guard: &'a dyn Fn() -> bool,
     pub(crate) refused: &'a AtomicBool,
     pub(crate) typed: &'a AtomicBool,
+    pub(crate) entered: Option<&'a AtomicBool>,
     pub(crate) checked: bool,
 }
 
@@ -63,7 +64,11 @@ impl Pty for Guarded<'_> {
         if bytes.starts_with(PASTE_START.as_bytes()) {
             self.typed.store(true, Ordering::SeqCst);
         }
-        self.inner.write(bytes)
+        let wrote = self.inner.write(bytes);
+        if let (Some(entered), true) = (self.entered, bytes == ENTER.as_bytes()) {
+            entered.store(true, Ordering::SeqCst);
+        }
+        wrote
     }
 
     fn wait_quiet(&mut self, quiet: Duration, timeout: Duration) -> bool {
@@ -90,3 +95,7 @@ impl Pty for Guarded<'_> {
         self.inner.now_ms()
     }
 }
+
+#[cfg(test)]
+#[path = "turn_gate_tests.rs"]
+mod tests;

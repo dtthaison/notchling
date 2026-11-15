@@ -25,7 +25,9 @@ use crate::limits_sources::{ClaudeLimits, ProviderLimits, SessionJobs};
 use crate::log_ops::LogOps;
 use crate::op_group::OpGroup;
 use crate::op_kinds;
+use crate::outbox_courier::{real_clock, ClaudeCourier};
 use crate::outbox_ops::OutboxOps;
+use crate::outbox_postman::{Couriers, NoVerify, Postmen};
 use crate::pages_ops::{PagesOps, PagesSetup};
 use crate::providers_daemon::ProviderStores;
 use crate::providers_ops::ProvidersOps;
@@ -347,6 +349,25 @@ fn outbox_ops(
     }
 }
 
+fn postmen_for(outbox: &Arc<OutboxOps>, acting: &Arc<ActingOps>, layout: &Layout) -> Postmen {
+    let courier = Arc::new(ClaudeCourier::new(
+        acting.clone(),
+        layout.roots(),
+        real_clock(),
+    ));
+    let resume = courier.clone();
+    outbox.set_resume(Arc::new(move |row| resume.resume(row)));
+    let postmen = Postmen::build(
+        outbox.clone(),
+        Couriers::claude_only(courier),
+        Arc::new(NoVerify),
+        acting.acting_switch(),
+        real_clock(),
+    );
+    outbox.set_wake(postmen.waker());
+    postmen
+}
+
 pub struct Wired {
     pub acting: Arc<ActingOps>,
     pub codex: Arc<CodexOps>,
@@ -360,6 +381,7 @@ pub struct Wired {
     pub catalog: Arc<CatalogService>,
     pub inbox: Arc<InboxOps>,
     pub outbox: Arc<OutboxOps>,
+    pub postmen: Postmen,
     pub vault: Arc<VaultOps>,
     pub install: Arc<InstallOps>,
     pub settings: Arc<SettingsOps>,
@@ -434,6 +456,7 @@ impl Wired {
         let inbox =
             InboxOps::new(layout.data_dir.clone(), room.clone()).with_events(events.clone());
         let outbox = Arc::new(outbox_ops(layout, &sessions, &acting, &room, &events));
+        let postmen = postmen_for(&outbox, &acting, layout);
         let every = Arc::new(EverySession::new(layout));
         let bridge = Arc::new(
             BridgeOps::new(
@@ -614,6 +637,7 @@ impl Wired {
             catalog,
             inbox,
             outbox,
+            postmen,
             vault,
             install: Arc::new(install),
             settings,
@@ -715,6 +739,7 @@ impl Wired {
         self.awake.spawn_loop();
         self.wake.spawn_loop();
         self.codex_children.start();
+        self.postmen.begin();
     }
 
     pub fn load(&self) {
@@ -722,6 +747,7 @@ impl Wired {
     }
 
     pub fn close(&self) {
+        self.postmen.stop();
         self.wake.close();
         self.codex_children.close();
         self.awake.close();

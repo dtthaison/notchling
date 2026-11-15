@@ -217,3 +217,21 @@ fn two_replies_on_one_fake_prompt() {
     want.extend(typed("b"));
     assert_eq!(pty.writes, want);
 }
+
+#[test]
+fn a_borrowed_pty_types_into_the_one_it_borrows() {
+    let mut fake = FakePrompt::idle();
+    let mut borrowed: Box<dyn Pty + '_> = Box::new(&mut fake);
+    let played = execute_clearing(
+        &plan::reply("a"),
+        borrowed.as_mut(),
+        &Markers,
+        &mut NoQueueLog,
+        &mut Vec::new(),
+        &Clearing::default(),
+    );
+    drop(borrowed);
+    assert_eq!(played, Ok(Outcome { taken: false }));
+    assert_eq!(fake.sent, ["a"]);
+    assert_eq!(fake.writes, typed("a"));
+}

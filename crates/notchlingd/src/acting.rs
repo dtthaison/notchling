@@ -1,6 +1,9 @@
 use serde_json::Value;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+
+pub type Watcher = Arc<dyn Fn(bool) + Send + Sync>;
 
 pub const ACTING_OFF: &str =
     "acting is off: the Swift app owns sessions until the maintainer turns this on";
@@ -9,6 +12,7 @@ pub const SETTINGS_NAME: &str = "notchlingd-settings.json";
 
 pub struct Acting {
     on: AtomicBool,
+    watchers: Mutex<Vec<Watcher>>,
 }
 
 impl Acting {
@@ -19,6 +23,7 @@ impl Acting {
     pub fn in_memory(on: bool) -> Acting {
         Acting {
             on: AtomicBool::new(on),
+            watchers: Mutex::new(Vec::new()),
         }
     }
 
@@ -27,7 +32,25 @@ impl Acting {
     }
 
     pub fn set(&self, on: bool) -> bool {
-        self.on.swap(on, Ordering::SeqCst) != on
+        let changed = self.on.swap(on, Ordering::SeqCst) != on;
+        if changed {
+            let watchers = self
+                .watchers
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .clone();
+            for watcher in watchers {
+                watcher(on);
+            }
+        }
+        changed
+    }
+
+    pub fn watch(&self, watcher: Watcher) {
+        self.watchers
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(watcher);
     }
 }
 
@@ -80,6 +103,18 @@ mod tests {
         std::fs::write(&file, "{\"acting\": true}").unwrap();
         assert!(file_says_on(&file));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn watchers_hear_each_change_once() {
+        let acting = Acting::off();
+        let heard = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let ear = heard.clone();
+        acting.watch(std::sync::Arc::new(move |on| ear.lock().unwrap().push(on)));
+        acting.set(true);
+        acting.set(true);
+        acting.set(false);
+        assert_eq!(*heard.lock().unwrap(), [true, false]);
     }
 
     #[test]

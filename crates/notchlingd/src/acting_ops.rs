@@ -3,10 +3,10 @@ use crate::acting_events::{attach_why, log_down, session_ref, who, why_of, PlayE
 use crate::agy_ops::AgyOps;
 use crate::catalog_ops::CatalogService;
 use crate::codex_ops::CodexOps;
-use crate::held_guard::{FromFiles, Guarded, Rest};
 use crate::hook_ops::Parents;
 use crate::late_emit::Events;
 use crate::prompts::{fit_list, question_json, Kind, Prompt, PromptStore};
+use crate::turn_gate::{FromFiles, Guarded, Rest};
 use crate::typing_locks::TypingLocks;
 use notchling_engine::control::{Command, LaunchError, LaunchOutput, Launcher, PtyScript};
 use notchling_engine::reply::exec::{
@@ -68,14 +68,18 @@ pub trait Room: Send + Sync {
 }
 
 pub trait Attacher: Send + Sync {
-    fn attach(&self, job: &str, config_dir: Option<&str>) -> Result<Box<dyn Pty>, ApiError>;
+    fn attach(&self, job: &str, config_dir: Option<&str>) -> Result<Box<dyn Pty + Send>, ApiError>;
     fn screen_check(&self) -> &dyn ScreenCheck;
 }
 
 pub struct NoTerminal;
 
 impl Attacher for NoTerminal {
-    fn attach(&self, _job: &str, _config_dir: Option<&str>) -> Result<Box<dyn Pty>, ApiError> {
+    fn attach(
+        &self,
+        _job: &str,
+        _config_dir: Option<&str>,
+    ) -> Result<Box<dyn Pty + Send>, ApiError> {
         Err(unimplemented("this daemon types into no session"))
     }
     fn screen_check(&self) -> &dyn ScreenCheck {
@@ -119,7 +123,7 @@ pub struct ActingOps {
     pub(crate) sessions: Arc<Mutex<Value>>,
     pub(crate) roots: Roots,
     pub(crate) room: Arc<dyn Room>,
-    attacher: Box<dyn Attacher>,
+    pub(crate) attacher: Box<dyn Attacher>,
     pub(crate) launcher: Arc<dyn Launcher>,
     pub(crate) pause: Pause,
     typing: TypingLocks,
@@ -131,7 +135,7 @@ pub struct ActingOps {
     codex: OnceLock<Arc<CodexOps>>,
     catalog: OnceLock<Arc<CatalogService>>,
     screen_file: Option<PathBuf>,
-    reply_screen_file: Option<PathBuf>,
+    pub(crate) reply_screen_file: Option<PathBuf>,
     pub(crate) held: crate::held_ops::HeldState,
     pub(crate) attempts: crate::reply_attempts::Attempts,
     pub(crate) rest: Box<dyn Rest>,
@@ -319,6 +323,14 @@ impl ActingOps {
         &self.typing
     }
 
+    pub(crate) fn attach(&self, agent: &Agent) -> Result<Box<dyn Pty + Send>, ApiError> {
+        let AgentTarget::Job(job) = &agent.target else {
+            return Err(bad("this session takes no replies"));
+        };
+        let config_dir = config_dir_for_job(&self.roots, job).or_else(|| agent.config_dir.clone());
+        self.attacher.attach(job, config_dir.as_deref())
+    }
+
     fn typing_lock(&self, agent: &Agent) -> Arc<Mutex<()>> {
         self.typing_locks().for_job(&typing_key(agent))
     }
@@ -448,6 +460,7 @@ impl ActingOps {
                 guard,
                 refused: &refused,
                 typed: &typed,
+                entered: None,
                 checked: false,
             }),
             None => pty,
@@ -824,7 +837,7 @@ impl QueueLog for NoLog {
 
 pub const BOX_SHOWN_MAX: usize = 1_000;
 
-fn shown_box(text: &str) -> String {
+pub(crate) fn shown_box(text: &str) -> String {
     match text.char_indices().nth(BOX_SHOWN_MAX) {
         Some((end, _)) => format!("{}…", &text[..end]),
         None => text.to_owned(),
@@ -924,7 +937,7 @@ fn typing_key(agent: &Agent) -> String {
     }
 }
 
-fn keep_screen(file: &Path, head: &[String], lines: &[String]) {
+pub(crate) fn keep_screen(file: &Path, head: &[String], lines: &[String]) {
     use std::io::Write;
     use std::os::unix::fs::OpenOptionsExt;
     use std::sync::atomic::{AtomicU64, Ordering};

@@ -35,7 +35,6 @@ pub mod daemon_wiring;
 pub mod delegate_cli;
 pub mod every_session;
 pub mod git_ops;
-mod held_guard;
 pub mod held_ops;
 pub mod hook;
 pub mod hook_ops;
@@ -65,7 +64,9 @@ pub mod log_rotate;
 pub mod log_start;
 pub mod op_group;
 pub mod op_kinds;
+pub mod outbox_courier;
 pub mod outbox_ops;
+pub mod outbox_postman;
 mod outbox_rows;
 pub mod pages_cli;
 pub mod pages_ops;
@@ -83,6 +84,7 @@ pub mod settings_cli;
 pub mod settings_ops;
 pub mod signals;
 pub mod switches;
+mod turn_gate;
 pub mod typing_locks;
 pub mod vault_args;
 pub mod vault_caller;
@@ -177,6 +179,8 @@ pub(crate) mod log_checks_tests;
 mod log_ops_tests;
 #[cfg(test)]
 mod log_retention_tests;
+#[cfg(test)]
+mod outbox_testkit;
 #[cfg(test)]
 mod pages_ops_tests;
 #[cfg(test)]

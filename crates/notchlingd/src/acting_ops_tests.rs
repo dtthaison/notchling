@@ -75,7 +75,7 @@ impl Pty for FakePty {
     }
 }
 
-type Attaches = Arc<Mutex<Vec<(String, Option<String>)>>>;
+pub(crate) type Attaches = Arc<Mutex<Vec<(String, Option<String>)>>>;
 
 #[derive(Default)]
 struct FakeAttacher {
@@ -88,7 +88,7 @@ struct FakeAttacher {
 }
 
 impl Attacher for FakeAttacher {
-    fn attach(&self, job: &str, config_dir: Option<&str>) -> Result<Box<dyn Pty>, ApiError> {
+    fn attach(&self, job: &str, config_dir: Option<&str>) -> Result<Box<dyn Pty + Send>, ApiError> {
         self.attached
             .lock()
             .unwrap()
@@ -118,7 +118,7 @@ impl Attacher for FakeAttacher {
 
 pub(crate) struct Trusting;
 
-impl crate::held_guard::Rest for Trusting {
+impl crate::turn_gate::Rest for Trusting {
     fn fresh(
         &self,
         agent: &notchling_engine::sessions::Agent,
@@ -629,7 +629,7 @@ struct GatedAttacher {
 }
 
 struct TaggedPty {
-    inner: Box<dyn Pty>,
+    inner: Box<dyn Pty + Send>,
     n: usize,
     order: Order,
 }
@@ -661,7 +661,7 @@ impl Pty for TaggedPty {
 }
 
 impl Attacher for GatedAttacher {
-    fn attach(&self, job: &str, config_dir: Option<&str>) -> Result<Box<dyn Pty>, ApiError> {
+    fn attach(&self, job: &str, config_dir: Option<&str>) -> Result<Box<dyn Pty + Send>, ApiError> {
         if job == self.hold {
             self.entered.fetch_add(1, Ordering::SeqCst);
             let (open, wake) = &*self.gate;
