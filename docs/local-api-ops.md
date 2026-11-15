@@ -330,8 +330,15 @@ except where a tier is shown; the node-only ones come from another node's link a
 
 - A grant's value never appears in a reply, an event, the audit log or a `Debug` print. `grant.*` and
   `login.*` arguments print as `Args(<hidden>)`.
-- `grant.deliver` waits up to 3 s for the job's record to reach the Worker, refuses a job that already
-  ended, clamps `expiresMs` to 12 hours from now and refuses a value it could not mask.
+- `grant.deliver` does not wait for a job record. A Worker knows its jobs from its own daemon: a shell job
+  from spawn to reap, a Claude or Antigravity job from its start op (`session.new` or `agy.send`).
+  - A job the cluster state lists elsewhere or finished, or one that ended here, is refused.
+  - A job that is live here is stored as live.
+  - Any other job is accepted as pending. Its grant is stored and held for 8.5 minutes (`PENDING_MS`,
+    the attach wait plus one call) from the first deliver, so the grant can arrive before the start op.
+  - The start op makes a pending grant the job's own. A whole-job `grant.revoke` drops the hold. The
+    janitor deletes a pending grant when its window has passed.
+  - `expiresMs` is clamped to 12 hours from now, and a value it could not mask is refused.
 - `grant.request` and a dispatch that names secrets wait up to 8 minutes (`ATTACH_CALL_MS`) for an
   Ask me first approval. The approval card is the inbox kind `secret_approval`, with Allow Once,
   Always Allow and Deny. The vault node's audit log records a release as `vault.secret_used` with the
@@ -345,7 +352,8 @@ except where a tier is shown; the node-only ones come from another node's link a
   "secret isn't available here: this command isn't part of a cluster job", and a machine whose cluster
   state hasn't loaded yet gets "secret isn't available yet: this machine's cluster is still loading".
   A process root is recorded for shell jobs only, so `vault.use` inside a Claude or Antigravity job on a
-  Worker is refused.
+  Worker is refused. A request that has to wait for the vault node answers "secret isn't available yet:
+  waiting for `<vault node>`, which holds the vault".
 - `cluster.status` members carry `secrets: {names, any}` and `versions.logins` (a map of tool to signed
   in, absent when the Worker could not tell). `node.versions` reports the logins: `codex` (from
   `codex login status`), `agy` (whether `~/.gemini/jetski-standalone-oauth-token` exists and is not empty, read as signed

@@ -148,8 +148,12 @@ one:
 - A Worker's allowlist, empty by default, says which names its jobs may carry. An entry marked Ask me
   first still waits for an Allow from the Mac or a paired phone.
 - On the Worker the value is a mode-600 file in `<data>/cluster/grants/<job>/`. It expires 12 hours
-  after it was sent at the latest, and is deleted when the job ends. A Worker cut off from the cluster
-  keeps the file until it expires.
+  after it was sent at the latest. A shell job's grants are deleted when it ends. A Claude or
+  Antigravity job has no end signal on the Worker, so its grants go when the cluster revokes them, at
+  expiry or when the daemon restarts. A Worker cut off from the cluster keeps the file until it
+  expires.
+- A value can arrive before its job starts. A Worker holds it for up to 8.5 minutes, and deletes it if
+  the job has not started by then.
 - The value is never in a command line, a log, an audit entry, the cluster's database, a snapshot or an
   inbox item. The command `notchling secret` runs gets it in its environment, as on the vault node.
 - The Worker hides the value in the job's shell log and in the text other nodes read of the job. That is
@@ -157,7 +161,8 @@ one:
   - Triple escapes, JavaScript inside Go strings and base64 or other encodings of a value stay visible.
   - `workspace.return` carries a job's repository changes unmasked, so a secret a job wrote into a file
     travels with its branch.
-  - A Claude job on a Worker with no recorded session is served unmasked.
+  - A Claude job's output is masked by the job it belongs to. Just after the job starts, or after a
+    restart that lost its masks, it is masked with other jobs' values only, or refused.
 - While a value is in use, the daemon holds it in memory as ordinary strings that are not wiped.
 - The vault node's audit log records each release by name, never the value, and the cluster step log
   records the call.
