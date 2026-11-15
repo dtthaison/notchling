@@ -30,6 +30,7 @@ pub const DEDUPE_MS: u64 = 300_000;
 pub const MAX_TERM_STEP: u64 = 64;
 pub const REASON_MAX: usize = 200;
 pub const PEER_STALE_TERM: &str = "peer_stale_term";
+pub const VERSIONS_GAP_MS: u64 = 10_000;
 
 #[derive(Clone, Debug)]
 pub enum Input {
@@ -183,6 +184,12 @@ struct Peer {
     last_hello: u64,
 }
 
+#[derive(Clone, Debug, Default)]
+struct VersionsGate {
+    last: Option<u64>,
+    held: Option<Versions>,
+}
+
 #[derive(Clone, Debug)]
 struct Dial {
     next_at: u64,
@@ -241,6 +248,7 @@ pub struct NodeCore {
     out_calls: BTreeMap<u64, OutCall>,
     local_runs: BTreeMap<u64, Then>,
     seen: BTreeMap<(NodeId, u64), Seen>,
+    versions_gate: BTreeMap<NodeId, VersionsGate>,
     joining: Option<Joining>,
     next_wire: u64,
     next_local: u64,
@@ -272,6 +280,7 @@ impl NodeCore {
             out_calls: BTreeMap::new(),
             local_runs: BTreeMap::new(),
             seen: BTreeMap::new(),
+            versions_gate: BTreeMap::new(),
             joining: None,
             next_wire: 1,
             next_local: 1,

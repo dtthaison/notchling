@@ -186,19 +186,7 @@ impl NodeCore {
             out,
         );
         if self.is_home() {
-            let differs = self
-                .state
-                .as_ref()
-                .and_then(|s| s.members.get(&from))
-                .is_some_and(|m| m.versions.as_ref() != Some(&versions));
-            if differs {
-                let _ = self.apply(
-                    Command::Versions {
-                        node: from.clone(),
-                        versions,
-                    },
-                    out,
-                );
+            if self.record_versions(&from, versions, out).unwrap_or(false) {
                 self.push_members(None, out);
             } else {
                 self.push_members(Some(&from), out);
@@ -276,6 +264,7 @@ impl NodeCore {
         self.out_calls.clear();
         self.local_runs.clear();
         self.seen.clear();
+        self.versions_gate.clear();
         self.joining = None;
         self.changed = true;
         out.push(Effect::Wipe);
@@ -368,6 +357,7 @@ impl NodeCore {
         self.expire_calls(out);
         self.expire_join(out);
         self.prune_seen();
+        self.release_versions(out);
         self.dial(out);
     }
 

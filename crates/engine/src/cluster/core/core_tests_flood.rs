@@ -1,10 +1,12 @@
 use serde_json::{json, Value};
 
 use super::core_tests::{pair, Hub};
-use super::{Effect, Input, LocalCmd};
+use super::core_tests_adopt::pair_of_promotables;
+use super::{Effect, Input, LocalCmd, VERSIONS_GAP_MS};
 use crate::cluster::id::NodeId;
 use crate::cluster::join::{JoinToken, MAX_OPEN_TOKENS, MAX_TOKENS_PER_MINTER};
 use crate::cluster::testkit::{fp, member, versions, versions_updated};
+use crate::cluster::versions::Versions;
 use crate::cluster::wire::{Msg, Origin, OriginTier};
 
 fn report(hub: &mut Hub, home: &NodeId, from: &NodeId, id: u64, args: Value) -> Vec<Effect> {
@@ -219,4 +221,209 @@ fn a_full_table_of_member_tokens_still_keeps_the_primarys() {
     assert!(!joins_with(&mut hub, &m5, "late1", "w0-0".to_string()));
     assert!(joins_with(&mut hub, &m5, "late2", "w1-0".to_string()));
     assert!(joins_with(&mut hub, &m5, "late3", "home".to_string()));
+}
+
+fn hello_with(hub: &mut Hub, home: &NodeId, from: &NodeId, versions: Versions) -> Vec<Effect> {
+    let term = hub.core(home).highest_term().cloned().expect("term");
+    hub.nodes.get_mut(home).expect("node").step(Input::Msg {
+        from: from.clone(),
+        msg: Msg::Hello {
+            node: from.clone(),
+            cluster: Some("c1".to_string()),
+            versions,
+            boot_id: "boot".to_string(),
+            term: Some(term),
+        },
+    })
+}
+
+fn members_sent_to(effects: &[Effect], to: &NodeId) -> bool {
+    effects.iter().any(|e| {
+        matches!(
+            e,
+            Effect::Send { to: peer, msg: Msg::Members { .. } } if peer == to
+        )
+    })
+}
+
+fn trio() -> (Hub, NodeId, NodeId, NodeId) {
+    let (mut hub, m5, w1) = pair();
+    let w2 = hub.add("w2", "linux", false);
+    hub.join("m5", "w2", "linux", false);
+    (hub, m5, w1, w2)
+}
+
+fn stored(hub: &Hub, home: &NodeId, who: &NodeId) -> Versions {
+    hub.core(home).state().expect("state").members[who]
+        .versions
+        .clone()
+        .expect("reported")
+}
+
+fn value(v: &Versions) -> Value {
+    serde_json::to_value(v).expect("versions")
+}
+
+#[test]
+fn a_member_flapping_between_two_reports_is_journaled_once_per_gap() {
+    let (mut hub, m5, w1) = pair();
+    let (a, b) = (versions_updated("linux"), versions("linux"));
+    let seq = hub.core(&m5).state().expect("state").seq;
+    let mut persisted_count = 0;
+    for id in 1..=40u64 {
+        let report_now = if id % 2 == 1 { &a } else { &b };
+        let effects = report(&mut hub, &m5, &w1, id, value(report_now));
+        assert!(replied_ok(&effects, id), "{effects:?}");
+        persisted_count += usize::from(persisted(&effects));
+    }
+    assert_eq!(persisted_count, 1);
+    assert_eq!(hub.core(&m5).state().expect("state").seq, seq + 1);
+    assert_eq!(stored(&hub, &m5, &w1), a);
+    let effects = hub.tick(&m5, VERSIONS_GAP_MS);
+    assert!(persisted(&effects), "the latest report is recorded");
+    assert_eq!(hub.core(&m5).state().expect("state").seq, seq + 2);
+    assert_eq!(stored(&hub, &m5, &w1), b);
+    let quiet = hub.tick(&m5, VERSIONS_GAP_MS);
+    assert!(!persisted(&quiet));
+    assert_eq!(hub.core(&m5).state().expect("state").seq, seq + 2);
+}
+
+#[test]
+fn a_held_report_is_pushed_to_every_member_when_it_is_recorded() {
+    let (mut hub, m5, w1, w2) = trio();
+    report(&mut hub, &m5, &w1, 1, value(&versions_updated("linux")));
+    report(&mut hub, &m5, &w1, 2, value(&versions("linux")));
+    let held = hub.tick(&m5, 1);
+    assert!(!persisted(&held));
+    assert!(!members_sent_to(&held, &w2));
+    let due = hub.tick(&m5, VERSIONS_GAP_MS);
+    assert!(persisted(&due));
+    assert!(members_sent_to(&due, &w1) && members_sent_to(&due, &w2));
+    assert!(due
+        .iter()
+        .any(|e| matches!(e, Effect::Publish { name, .. } if name == "cluster.changed")));
+}
+
+#[test]
+fn a_held_report_that_ends_up_equal_to_the_stored_one_is_never_journaled() {
+    let (mut hub, m5, w1) = pair();
+    let seq = hub.core(&m5).state().expect("state").seq;
+    report(&mut hub, &m5, &w1, 1, value(&versions_updated("linux")));
+    report(&mut hub, &m5, &w1, 2, value(&versions("linux")));
+    report(&mut hub, &m5, &w1, 3, value(&versions_updated("linux")));
+    let due = hub.tick(&m5, VERSIONS_GAP_MS);
+    assert!(!persisted(&due));
+    assert_eq!(hub.core(&m5).state().expect("state").seq, seq + 1);
+}
+
+#[test]
+fn a_change_after_a_quiet_gap_is_journaled_at_once() {
+    let (mut hub, m5, w1) = pair();
+    let seq = hub.core(&m5).state().expect("state").seq;
+    report(&mut hub, &m5, &w1, 1, value(&versions_updated("linux")));
+    hub.tick(&m5, VERSIONS_GAP_MS);
+    let effects = report(&mut hub, &m5, &w1, 2, value(&versions("linux")));
+    assert!(persisted(&effects));
+    assert!(pushed_members(&effects));
+    assert_eq!(hub.core(&m5).state().expect("state").seq, seq + 2);
+}
+
+#[test]
+fn each_member_has_its_own_gap() {
+    let (mut hub, m5, w1, w2) = trio();
+    let seq = hub.core(&m5).state().expect("state").seq;
+    assert!(persisted(&report(
+        &mut hub,
+        &m5,
+        &w1,
+        1,
+        value(&versions_updated("linux"))
+    )));
+    assert!(persisted(&report(
+        &mut hub,
+        &m5,
+        &w2,
+        2,
+        value(&versions_updated("linux"))
+    )));
+    assert_eq!(hub.core(&m5).state().expect("state").seq, seq + 2);
+}
+
+#[test]
+fn hellos_alternating_between_two_reports_are_journaled_once_per_gap() {
+    let (mut hub, m5, w1, w2) = trio();
+    let (a, b) = (versions_updated("linux"), versions("linux"));
+    let seq = hub.core(&m5).state().expect("state").seq;
+    let mut persisted_count = 0;
+    let mut broadcasts = 0;
+    for n in 0..40 {
+        let report_now = if n % 2 == 0 { &a } else { &b };
+        let effects = hello_with(&mut hub, &m5, &w1, report_now.clone());
+        persisted_count += usize::from(persisted(&effects));
+        broadcasts += usize::from(members_sent_to(&effects, &w2));
+    }
+    assert_eq!(persisted_count, 1);
+    assert_eq!(broadcasts, 1, "only the first change reaches the others");
+    assert_eq!(hub.core(&m5).state().expect("state").seq, seq + 1);
+    assert_eq!(stored(&hub, &m5, &w1), a);
+    let due = hub.tick(&m5, VERSIONS_GAP_MS);
+    assert!(persisted(&due));
+    assert!(members_sent_to(&due, &w2));
+    assert_eq!(stored(&hub, &m5, &w1), b);
+    assert_eq!(hub.core(&m5).state().expect("state").seq, seq + 2);
+}
+
+#[test]
+fn a_hello_repeating_the_stored_versions_is_not_journaled_or_broadcast() {
+    let (mut hub, m5, w1, w2) = trio();
+    let same = versions("linux");
+    let seq = hub.core(&m5).state().expect("state").seq;
+    for _ in 0..5 {
+        let effects = hello_with(&mut hub, &m5, &w1, same.clone());
+        assert!(!persisted(&effects));
+        assert!(members_sent_to(&effects, &w1));
+        assert!(!members_sent_to(&effects, &w2));
+    }
+    assert_eq!(hub.core(&m5).state().expect("state").seq, seq);
+}
+
+#[test]
+fn hello_and_the_versions_call_share_one_gap() {
+    let (mut hub, m5, w1) = pair();
+    let seq = hub.core(&m5).state().expect("state").seq;
+    assert!(persisted(&hello_with(
+        &mut hub,
+        &m5,
+        &w1,
+        versions_updated("linux")
+    )));
+    let effects = report(&mut hub, &m5, &w1, 1, value(&versions("linux")));
+    assert!(replied_ok(&effects, 1));
+    assert!(!persisted(&effects));
+    let held = hello_with(&mut hub, &m5, &w1, versions_updated("linux"));
+    assert!(!persisted(&held));
+    assert_eq!(hub.core(&m5).state().expect("state").seq, seq + 1);
+}
+
+#[test]
+fn a_held_report_is_dropped_when_the_home_steps_down() {
+    let (mut hub, m5, w1) = pair_of_promotables();
+    report(&mut hub, &m5, &w1, 1, value(&versions_updated("macos")));
+    report(&mut hub, &m5, &w1, 2, value(&versions("macos")));
+    hub.nodes.get_mut(&w1).expect("node").bump_term();
+    let term = hub.core(&w1).highest_term().cloned().expect("term");
+    hub.nodes.get_mut(&m5).expect("node").step(Input::Msg {
+        from: w1.clone(),
+        msg: Msg::HelloOk {
+            node: w1.clone(),
+            cluster: "c1".to_string(),
+            home: term.node.clone(),
+            term,
+        },
+    });
+    assert!(!hub.core(&m5).is_home());
+    let seq = hub.core(&m5).state().expect("state").seq;
+    let due = hub.tick(&m5, VERSIONS_GAP_MS);
+    assert!(!persisted(&due));
+    assert_eq!(hub.core(&m5).state().expect("state").seq, seq);
 }
