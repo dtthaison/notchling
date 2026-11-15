@@ -306,6 +306,59 @@ from the app in this run, or `cluster.join` (below), or a restart of a headless 
   as a `cluster.step` event (`call`, the op and the origin node as `peer`). `node.switch.set {switch, on}` from the home sets `acting`,
   `bridge` or `install` on a node with no app attached, recorded as a `switch.changed` event (cause `cluster_node`).
 
+### Cluster secrets, logins and inbox mirrors
+
+Cluster plan C ([decision XXXX](decisions/XXXX-cluster-secrets-and-logins.md)). `ClusterState.vault` is the vault node, the Mac whose Keychain holds the vault.
+Only it, while it is the primary, releases a value. None of the ops below is served on the local socket
+except where a tier is shown; the node-only ones come from another node's link and are checked by
+`policy::RULES` first.
+
+| Op | Sent by | Tier | Args | Reply |
+| --- | --- | --- | --- | --- |
+| `cluster.allow.set` | a client (app) to the home | app | `{node, names?, any?}` | `{}`; see above. Names are lowercased, at most 256; `any` is off by default |
+| `cluster.dispatch` | the app, or an agent | app, agent | adds `secrets: [name, …]` (at most 16, lowercased, no delegate job) | a job whose names the node doesn't allow is refused before it starts; one whose vault node isn't primary stays `Dispatching` ("Waiting for `<vault node>`") |
+| `grant.attach` | this node's own core | node, local only | `{job, member, vaultName, vaultPrimary}` | `{delivered: [names]}` or `{waiting: reason}`; no other node can send it |
+| `grant.revoke_job` | this node's own core | node, local only | `{job, node}` | best effort; asked at every end of a job; the vault node then sends `grant.revoke` |
+| `grant.request` | a Worker's `vault.use`, for a running job | agent origin, to the vault node | `{job, names, command, folder}` | `{delivered: [names]}` or `{waiting: reason}`; the job must be on the sender and the sender must allow each name |
+| `grant.deliver` | the vault node, while it is home | node | `{job, name, value, expiresMs}` | `{stored: name}`; `value` is the entry's environment as JSON (variable to string), at most 32 KiB |
+| `grant.revoke` | the home or the vault node | node | `{job, names?}` | `{}`; no `names` removes every grant of the job |
+| `login.deliver` | the vault node, while it is home | node | `{tool: "claude", value, expiresMs}` | `{stored: "claude"}`, or a refusal while the login is off in this build |
+| `login.revoke` | the home or the vault node | node | `{}` | `{}`; deletes the Worker's login file |
+| `node.inbox` | any member to the home and Can Be Master members | node | `{event: "changed", item}`, `{event: "removed", id}` or `{event: "sync", items}` | `{ok: true}` |
+| `inbox.list` | a client (app) | app | as `inbox.list` | on a client that isn't the home: its own items plus the home's, ids qualified `<node>/<id>` |
+| `inbox.answer` | a client (app) | app | `{id, action}` | an id of another node is forwarded to its owner, which takes the first answer only |
+| `vault.list`, `vault.save`, `vault.remove` | a client (app) | app | the same args plus `node` | with `node` set to the vault node's id, the call goes to that machine's vault; any other value is a bad request |
+
+- A grant's value never appears in a reply, an event, the audit log or a `Debug` print. `grant.*` and
+  `login.*` arguments print as `Args(<hidden>)`.
+- `grant.deliver` waits up to 3 s for the job's record to reach the Worker, refuses a job that already
+  ended, clamps `expiresMs` to 12 hours from now and refuses a value it could not mask.
+- `grant.request` and a dispatch that names secrets wait up to 8 minutes (`ATTACH_CALL_MS`) for an
+  Ask me first approval. The approval card is the inbox kind `secret_approval`, with Allow Once,
+  Always Allow and Deny. The vault node's audit log records a release as `vault.secret_used` with the
+  names, before the first send.
+- A `vault.list`, `vault.save` or `vault.remove` with `node` never falls back to this machine's vault:
+  with no cluster it says "this machine is in no cluster, so it has no other vault", with the vault
+  node offline "The vault is on `<name>`, which is offline". Without `node`, or with `null`, the local
+  vault answers. An agent-tier or node-tier caller is refused when it names `node`.
+- `vault.use` on a Worker (a node in a cluster that is not the vault node) answers from the grants of
+  the job that the caller's process belongs to. A caller outside every job's process tree gets
+  "secret isn't available here: this command isn't part of a cluster job", and a machine whose cluster
+  state hasn't loaded yet gets "secret isn't available yet: this machine's cluster is still loading".
+  A process root is recorded for shell jobs only, so `vault.use` inside a Claude or Antigravity job on a
+  Worker is refused.
+- `cluster.status` members carry `secrets: {names, any}` and `versions.logins` (a map of tool to signed
+  in, absent when the Worker could not tell). `node.versions` reports the logins: `codex` (from
+  `codex login status`), `agy` (whether `~/.gemini/jetski-standalone-oauth-token` exists, read as signed
+  out on Linux and as unknown on a Mac, where the login may be in the Keychain, which is never read)
+  and `claude` only while the cluster login is on, which it is not in this build. The probes
+  run off the driver thread, at most every 10 minutes, with a 5 s limit per command, and never refresh a
+  token. A tool known to be signed out (`false`) is refused at dispatch with "`<Tool>` isn't signed in on
+  `<node>`".
+- Inbox mirrors live in memory, are refilled by the owner's `sync` and are never written to the
+  receiver's inbox file. A mirrored item keeps its owner's qualified id, drops its `open` form ticket
+  and is cut to fixed lengths. A call with an id the sender doesn't own refuses the whole call.
+
 ## `codex_ops.rs`
 
 Milestone 5's Codex ops (E6a): `codex.send`, `codex.stop` and `codex.delete` over the engine's

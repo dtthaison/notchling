@@ -138,6 +138,28 @@ Only when `machines.json` lists a machine:
 - A fix runs on the machine only after you click and see its commands. Some fixes download installers
   there (Homebrew's tools, the GitHub CLI, Claude Code).
 
+## Cluster nodes: secrets and logins on a Worker
+
+Only when this machine is in a cluster (the `cluster` switch is on) and a job names a secret or asks for
+one:
+
+- A secret value crosses to the Worker that runs the job, over the cluster's pinned TLS link, and only
+  from the vault node (the Mac whose Keychain holds the vault) while it is the primary. A Worker's
+  allowlist, empty by default, says which names its jobs may carry, and an entry marked Ask me first
+  still waits for an Allow from the Mac or a paired phone.
+- On the Worker the value is a mode-600 file in `<data>/cluster/grants/<job>/`. It expires at the
+  earlier of 12 hours and the job's end, and is deleted when the job ends. It is never in a command
+  line, a log, an audit entry, the cluster's database, a snapshot or an inbox item, and the Worker
+  hides it in the job's output and in what other nodes read of it. The command `notchling secret`
+  runs gets it in its environment, as on the vault node.
+- The vault node's audit log records each release by name (never the value), and the cluster step log
+  records the call.
+- Inbox items from every node are mirrored to the primary and to each Can Be Master machine, and
+  that includes a secret approval's title, command (cut to 120 characters) and folder, never a value.
+- Notchling does not renew a login on a Worker. It reads whether Claude Code, Codex and Antigravity
+  are signed in (a status command's exit code, or whether a file exists, never its contents) and tells
+  the cluster yes or no. Claude Code's long-lived login is not sent to Workers in this build.
+
 ## Tools Notchling starts
 
 - **Claude Code.** Replies, answers, New Session and moves run `claude` (`claude attach`,
@@ -220,7 +242,8 @@ paired phone is shown. Cost tracking, the search index, the local copies of Arti
 list are local files. Vault values are in the Keychain, and agents reach them only through a socket
 on this Mac that answers only Notchling's own executable. A use of a secret is allowed from the
 Notchling app on the Mac, or from a paired phone through the inbox while the bridge, acting and the
-vault are on; the value itself never leaves the Mac.
+vault are on; the value itself never leaves the Mac, except to a cluster Worker for one job, as
+said above.
 
 ## Planned
 
