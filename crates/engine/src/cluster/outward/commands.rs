@@ -177,7 +177,7 @@ const CLOUD_ARGS: [&str; 22] = [
     "--name",
 ];
 
-const CLOUD_WRITES: [&str; 40] = [
+const CLOUD_WRITES: &[&str] = &[
     "delete",
     "create",
     "update",
@@ -218,6 +218,22 @@ const CLOUD_WRITES: [&str; 40] = [
     "trigger",
     "rollback",
     "rename",
+    "deallocate",
+    "restart",
+    "restore",
+    "suspend",
+    "resume",
+    "cancel",
+    "call",
+    "execute",
+    "pull",
+    "reboot",
+    "purge",
+    "failover",
+    "upgrade",
+    "scale",
+    "detach",
+    "login",
 ];
 
 const GCLOUD_READS: [&str; 8] = [
@@ -591,9 +607,6 @@ fn gcloud(args: &[String], az: bool) -> bool {
         GCLOUD_READS.contains(word)
             || (az && (word.starts_with("list-") || word.starts_with("show-")))
     });
-    let write = words
-        .iter()
-        .skip(1)
-        .any(|word| is_verb(word, &CLOUD_WRITES));
+    let write = words.iter().skip(1).any(|word| is_verb(word, CLOUD_WRITES));
     !read || write
 }

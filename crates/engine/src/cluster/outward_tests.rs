@@ -301,6 +301,8 @@ fn cut_artifact_with_unparseable_input_is_outward() {
 #[test]
 fn cut_steps_reads_unanswered_calls() {
     let c = read_fixture("cut-push.jsonl");
+    let steps = cut_steps(&c);
+    assert_eq!(steps, vec![step("Bash", "Push the notes branch", true)]);
     let last_tools = c
         .items
         .iter()
@@ -314,6 +316,71 @@ fn cut_steps_reads_unanswered_calls() {
     assert!(!cut.finished);
     assert_eq!(cut.input, "git push origin notes");
     assert_eq!(last_tools.iter().filter(|c| !c.finished).count(), 1);
+}
+
+#[test]
+fn non_ascii_mcp_names_do_not_panic() {
+    let input = json!({});
+    for name in ["mcp__a__é", "mcp__é__€", "mcp__é__éget_x", "mcp__€__€€€"] {
+        assert!(is_outward(name, &input), "{name}");
+    }
+    assert!(!is_outward("mcp__é__é_get", &input));
+    assert!(!is_outward("mcp__é__é_get_x", &input));
+    assert!(!is_outward("mcp__é__get_é", &input));
+}
+
+#[test]
+fn no_name_or_command_panics() {
+    let pieces = [
+        "mcp__", "é", "€", "__", "_", "get", "GET", "list", "-", "a", "x", "😀", "Ünï", "read",
+    ];
+    let mut names = Vec::new();
+    for a in pieces {
+        for b in pieces {
+            for c in pieces {
+                names.push(format!("{a}{b}{c}"));
+                names.push(format!("mcp__{a}__{b}{c}"));
+            }
+        }
+    }
+    assert!(names.len() > 500);
+    for name in &names {
+        let _ = is_outward(name, &json!({}));
+        let _ = is_outward("Bash", &json!({ "command": name }));
+        let _ = is_outward("Monitor", &json!({ "command": name }));
+    }
+    let bits = [
+        "$(",
+        ")",
+        "`",
+        "'",
+        "\"",
+        "<<",
+        "<<<",
+        "EOF",
+        "\n",
+        "#",
+        "é",
+        "&",
+        "|",
+        ";",
+        "(",
+        "$((",
+        "$'",
+        "bash -c",
+        "-co",
+        "env -S",
+        "script -c",
+        "=",
+    ];
+    for a in bits {
+        for b in bits {
+            for c in bits {
+                let command = format!("{a}{b} {c}");
+                let _ = is_outward("Bash", &json!({ "command": command }));
+            }
+        }
+    }
 }
 
 #[test]

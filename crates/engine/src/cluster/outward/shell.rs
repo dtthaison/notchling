@@ -84,7 +84,8 @@ fn segment_outward(seg: &Segment, depth: usize) -> bool {
     let Some((program, args)) = program_of(&seg.words) else {
         return false;
     };
-    let name = basename(program).to_ascii_lowercase();
+    let name = basename(&program).to_ascii_lowercase();
+    let args = args.as_slice();
     match name.as_str() {
         "sh" | "bash" | "zsh" | "dash" => shell_outward(args, seg, depth),
         "eval" => script_outward(&args.join(" "), depth + 1),
@@ -108,16 +109,18 @@ fn shell_outward(args: &[String], seg: &Segment, depth: usize) -> bool {
                 }
                 break;
             }
-            "-o" | "-O" | "+o" | "+O" | "--rcfile" | "--init-file" => at += 1,
+            "+o" | "+O" | "--rcfile" | "--init-file" => at += 1,
             flag if flag.starts_with("--") || flag == "-" || flag.starts_with('+') => {}
             flag if flag.starts_with('-') => {
+                let valued = flag.chars().filter(|c| matches!(c, 'o' | 'O')).count();
                 if flag.contains('c') {
                     let script = args
-                        .get(at)
+                        .get(at + valued)
                         .filter(|s| s.as_str() != "--")
-                        .or(args.get(at + 1));
+                        .or(args.get(at + valued + 1));
                     return script.is_some_and(|script| script_outward(script, depth + 1));
                 }
+                at += valued;
                 stdin |= flag.contains('s');
             }
             _ => {
@@ -167,11 +170,26 @@ fn skip_flags<'a>(words: &'a [String], with_arg: &[&str]) -> &'a [String] {
     &words[at.min(words.len())..]
 }
 
-fn flag_script<'a>(words: &'a [String], names: &[&str], with_arg: &[&str]) -> Option<&'a [String]> {
+fn attached<'a>(word: &'a str, name: &str) -> Option<&'a str> {
+    if name.starts_with("--") {
+        return word.strip_prefix(name)?.strip_prefix('=');
+    }
+    if word.starts_with("--") {
+        return None;
+    }
+    word.strip_prefix(name).filter(|value| !value.is_empty())
+}
+
+fn flag_script(words: &[String], names: &[&str], with_arg: &[&str]) -> Option<String> {
     let mut at = 0;
     while let Some(word) = words.get(at) {
-        if names.contains(&word.as_str()) {
-            return words.get(at + 1..at + 2);
+        for name in names {
+            if word == name {
+                return words.get(at + 1).cloned();
+            }
+            if let Some(value) = attached(word, name) {
+                return Some(value.to_string());
+            }
         }
         if with_arg.contains(&word.as_str()) {
             at += 2;
@@ -188,7 +206,7 @@ fn runs_package(subcommand: &str) -> bool {
     matches!(subcommand, "dlx" | "exec" | "x")
 }
 
-fn program_of(words: &[String]) -> Option<(&str, &[String])> {
+fn program_of(words: &[String]) -> Option<(String, Vec<String>)> {
     let mut rest = words;
     loop {
         let first = rest.first()?;
@@ -208,7 +226,7 @@ fn program_of(words: &[String]) -> Option<(&str, &[String])> {
                 if let Some(script) =
                     flag_script(after, &["-S", "--split-string"], &["-u", "-C", "-P"])
                 {
-                    return Some(("eval", script));
+                    return Some(("eval".to_string(), vec![script]));
                 }
                 skip_flags(after, &["-u", "-C", "-P"])
             }
@@ -219,7 +237,7 @@ fn program_of(words: &[String]) -> Option<(&str, &[String])> {
             "stdbuf" => skip_flags(after, &["-i", "-o", "-e"]),
             "script" => {
                 if let Some(script) = flag_script(after, &["-c", "--command"], &["-t", "-F"]) {
-                    return Some(("eval", script));
+                    return Some(("eval".to_string(), vec![script]));
                 }
                 skip_flags(after, &["-t"]).get(1..).unwrap_or(&[])
             }
@@ -235,10 +253,10 @@ fn program_of(words: &[String]) -> Option<(&str, &[String])> {
                     Some((sub, tail)) if runs_package(sub) => {
                         skip_flags(tail, &["-p", "--package"])
                     }
-                    _ => return Some((first.as_str(), after)),
+                    _ => return Some((first.clone(), after.to_vec())),
                 }
             }
-            _ => return Some((first.as_str(), after)),
+            _ => return Some((first.clone(), after.to_vec())),
         };
     }
 }
@@ -435,7 +453,8 @@ fn matching_paren(chars: &[char], start: usize) -> Option<usize> {
                     return Some(at);
                 }
             }
-            '<' if next == Some('<') && chars.get(at + 2) != Some(&'<') => {
+            '<' if next == Some('<') && chars.get(at + 2) == Some(&'<') => at += 2,
+            '<' if next == Some('<') => {
                 let (doc, end) = heredoc_at(chars, at + 2, 0);
                 pending.push(doc);
                 at = end.max(at + 2) - 1;

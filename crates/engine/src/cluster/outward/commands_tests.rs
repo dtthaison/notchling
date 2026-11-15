@@ -425,6 +425,17 @@ fn cloud_cli_table() {
         "az group create -n g",
         "az vm run-command invoke -n list-x",
         "az vm get-x",
+        "az vm deallocate list-vm",
+        "az vm restart -n x",
+        "az vm start list-vm",
+        "gcloud compute instances restart list-vm",
+        "gcloud run jobs execute get-job",
+        "gcloud auth login",
+        "az login",
+        "gcloud container clusters upgrade get-c",
+        "az webapp restore list-x",
+        "az vm resume list-vm",
+        "az aks scale -n list-x",
     ]);
     none_outward(&[
         "aws s3 ls",

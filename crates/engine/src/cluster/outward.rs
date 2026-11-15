@@ -50,7 +50,11 @@ fn mcp_outward(tool: &str) -> bool {
     };
     let name = &tool[5 + server.len() + 2..];
     let name = match name.get(..server.len() + 1) {
-        Some(head) if head[..server.len()].eq_ignore_ascii_case(server) && head.ends_with('_') => {
+        Some(head)
+            if head
+                .strip_suffix('_')
+                .is_some_and(|prefix| prefix.eq_ignore_ascii_case(server)) =>
+        {
             &name[server.len() + 1..]
         }
         _ => name,

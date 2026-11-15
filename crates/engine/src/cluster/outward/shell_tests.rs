@@ -126,6 +126,40 @@ fn a_here_string_is_the_script_of_a_shell() {
 }
 
 #[test]
+fn a_here_string_inside_a_substitution_is_not_a_heredoc() {
+    none_outward(&["echo \"$(grep x <<< y\nls\n)\"", "echo \"$(grep x <<<y)\""]);
+    all_outward(&["echo \"$(grep x <<< y\ngit push\n)\""]);
+}
+
+#[test]
+fn option_clusters_take_their_values_in_order() {
+    all_outward(&[
+        "bash -co errexit 'gh pr close 1'",
+        "bash -oc errexit 'gh pr close 1'",
+        "bash -coO errexit extglob 'gh pr close 1'",
+        "bash -co errexit -- 'gh pr close 1'",
+    ]);
+    none_outward(&["bash -co errexit 'ls'", "bash -oc errexit 'ls'"]);
+}
+
+#[test]
+fn long_and_attached_script_flags_run_the_script() {
+    all_outward(&[
+        "env --split-string='gh pr close 1'",
+        "env -S'gh pr close 1'",
+        "env FOO=1 --split-string='gh pr close 1'",
+        "script --command='gh pr close 1' /dev/null",
+        "script --command 'gh pr close 1' /dev/null",
+        "script -c'gh pr close 1' /dev/null",
+    ]);
+    none_outward(&[
+        "env --split-string='ls -la'",
+        "env -S'ls -la'",
+        "script --command='ls' /dev/null",
+    ]);
+}
+
+#[test]
 fn an_unquoted_heredoc_body_runs_its_substitutions() {
     all_outward(&[
         "cat <<EOF\n$(git push)\nEOF",
