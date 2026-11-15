@@ -18,6 +18,7 @@ pub const SIDE_PADDING: f32 = 16.0;
 pub const AVATAR: f32 = 30.0;
 pub const OPTION_BADGE: f32 = 22.0;
 pub const PILL_HEIGHT: f32 = 20.0;
+pub const OFFLINE_OPACITY: f32 = 0.5;
 pub const SEND_DISC: f32 = 30.0;
 pub const METER_BAR: f32 = 3.0;
 pub const PANEL_EDGE_HIT: f32 = 9.0;

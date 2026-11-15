@@ -7,6 +7,7 @@ pub mod activity;
 pub mod appearance;
 pub mod chat;
 pub mod cli;
+pub mod cluster;
 pub mod crash_log;
 pub mod dock;
 pub mod inbox;
