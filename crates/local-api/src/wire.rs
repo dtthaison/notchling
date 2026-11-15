@@ -124,6 +124,13 @@ pub mod ops {
     pub const CLUSTER_JOIN: &str = "cluster.join";
     pub const CLUSTER_MEMBER_SET: &str = "cluster.member.set";
     pub const CLUSTER_REMOVE: &str = "cluster.remove";
+
+    pub const SESSION_SEND: &str = "session.send";
+    pub const OUTBOX_LIST: &str = "outbox.list";
+    pub const OUTBOX_EDIT: &str = "outbox.edit";
+    pub const OUTBOX_REMOVE: &str = "outbox.remove";
+    pub const OUTBOX_RESEND: &str = "outbox.resend";
+    pub const OUTBOX_DISCARD: &str = "outbox.discard";
 }
 
 pub mod topics {
@@ -176,6 +183,10 @@ pub mod topics {
     pub const CLUSTER: &str = "cluster";
     pub const CLUSTER_CHANGED: &str = "cluster.changed";
     pub const CLUSTER_REFUSED: &str = "cluster.refused";
+
+    pub const OUTBOX: &str = "outbox";
+    pub const OUTBOX_CHANGED: &str = "outbox.changed";
+    pub const OUTBOX_REMOVED: &str = "outbox.removed";
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -379,6 +390,19 @@ pub fn event_line(event: &str, data: &Value) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_outbox_names_are_on_the_wire() {
+        assert_eq!(ops::SESSION_SEND, "session.send");
+        assert_eq!(ops::OUTBOX_LIST, "outbox.list");
+        assert_eq!(ops::OUTBOX_EDIT, "outbox.edit");
+        assert_eq!(ops::OUTBOX_REMOVE, "outbox.remove");
+        assert_eq!(ops::OUTBOX_RESEND, "outbox.resend");
+        assert_eq!(ops::OUTBOX_DISCARD, "outbox.discard");
+        assert_eq!(topics::OUTBOX, "outbox");
+        assert_eq!(topics::OUTBOX_CHANGED, "outbox.changed");
+        assert_eq!(topics::OUTBOX_REMOVED, "outbox.removed");
+    }
 
     #[test]
     fn a_request_reads_with_default_args() {

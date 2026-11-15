@@ -30,6 +30,24 @@ log_choice! {
 }
 
 log_choice! {
+    pub enum OutboxThen {
+        Queued = "queued",
+        InQueue = "in_queue",
+        Sent = "sent",
+        Unsure = "unsure",
+        Box = "box",
+        Stopped = "stopped",
+        Gone = "gone",
+        Edited = "edited",
+        Removed = "removed",
+        Discarded = "discarded",
+        SessionRemoved = "session_removed",
+        RestoredUnsure = "restored_unsure",
+        Noticed = "noticed",
+    }
+}
+
+log_choice! {
     pub enum StuckGuess {
         NoDequeueSeen = "no_dequeue_seen",
         ClaudeRestarted = "claude_restarted",
@@ -163,6 +181,25 @@ kinds! {
         fields {
             session: Ref<Session>,
             then: HeldThen,
+        }
+    }
+    SessionOutbox = "session.outbox", kv 1 {
+        title: "Outbox",
+        records: "A message entered or left a session's Outbox, and why.",
+        why: "Shows that a message waited, was sent, or needs you, without its text.",
+        default: On,
+        lock: Lock::Toggle,
+        sinks: ACTIVITY | DIAG,
+        durability: Durability::Push,
+        level: Level::Info,
+        emitters: &[Proc::Daemon],
+        agents_read: AgentsRead::Own,
+        keep_days: 30,
+        fields {
+            session: Ref<Session>,
+            then: OutboxThen,
+            chars: Count,
+            via: ReplyVia,
         }
     }
     SessionQueueStuck = "session.queue_stuck", kv 1 {

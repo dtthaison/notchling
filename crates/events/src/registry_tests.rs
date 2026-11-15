@@ -177,9 +177,25 @@ fn field_names_and_choices_are_well_formed() {
 }
 
 #[test]
-fn fifty_six_kinds() {
+fn session_outbox_has_no_text_fields() {
+    let outbox = spec("session.outbox");
+    let names: Vec<&str> = outbox.fields.iter().map(|f| f.name).collect();
+    assert_eq!(names, ["session", "then", "chars", "via"]);
+    let then = outbox.fields.iter().find(|f| f.name == "then").unwrap();
+    assert!(then.desc.choices.contains(&"in_queue"));
+    assert!(then.desc.choices.contains(&"restored_unsure"));
+    assert_eq!(outbox.durability, Durability::Push);
+    assert_eq!(outbox.keep_days, 30);
+    assert_eq!(outbox.emitters, &[Proc::Daemon]);
+    assert_eq!(outbox.agents_read, AgentsRead::Own);
+    assert!(outbox.sinks.has(Sinks::ACTIVITY) && outbox.sinks.has(Sinks::DIAG));
+    assert!(!outbox.sinks.has(Sinks::AUDIT));
+}
+
+#[test]
+fn fifty_seven_kinds() {
     let kinds = all();
-    assert_eq!(kinds.len(), 56);
+    assert_eq!(kinds.len(), 57);
     let off: Vec<&str> = kinds
         .iter()
         .filter(|k| k.default == DefaultState::Off)
