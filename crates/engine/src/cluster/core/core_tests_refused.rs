@@ -2,7 +2,7 @@ use serde_json::Value;
 
 use super::core_tests::{pair, Hub};
 use super::core_tests_adopt::pair_of_promotables;
-use super::{Effect, Input, LocalCmd};
+use super::{Effect, Input, LocalCmd, REASON_MAX};
 use crate::cluster::id::NodeId;
 use crate::cluster::join::JoinToken;
 use crate::cluster::members::Term;
@@ -131,6 +131,48 @@ fn removed_from_a_member_that_is_not_the_home_does_not_wipe() {
     assert!(!effects.iter().any(|e| matches!(e, Effect::Wipe)));
     assert!(hub.core(&m5).state().is_some());
     assert_eq!(published(&effects).len(), 1);
+}
+
+#[test]
+fn a_refusal_reason_is_capped_and_its_control_characters_replaced() {
+    let (mut hub, m5, w1) = pair();
+    let huge = "é".repeat(1 << 20);
+    let effects = step(&mut hub, &m5, &w1, refused(&huge, None));
+    let data = published(&effects);
+    assert_eq!(data.len(), 1);
+    let reason = data[0]["reason"].as_str().expect("reason");
+    assert_eq!(reason.chars().count(), REASON_MAX);
+    assert!(reason.chars().all(|c| c == 'é'));
+
+    let nasty = "\u{1b}[31mred\nline\u{0}\u{7f}";
+    let effects = step(&mut hub, &m5, &w1, refused(nasty, None));
+    let reason = published(&effects)[0]["reason"]
+        .as_str()
+        .expect("reason")
+        .to_string();
+    assert_eq!(reason, " [31mred line  ");
+    assert!(!reason.chars().any(char::is_control));
+}
+
+#[test]
+fn a_join_refusal_is_cleaned_before_it_is_shown_or_published() {
+    let (mut hub, m5, _) = pair();
+    let w3 = joining(&mut hub, &m5);
+    let reason = format!("\u{1b}[2J{}", "x".repeat(1 << 20));
+    let effects = step(&mut hub, &w3, &m5, refused(&reason, None));
+    let shown = effects
+        .iter()
+        .find_map(|e| match e {
+            Effect::Answer {
+                result: Err(err), ..
+            } => Some(err.message.clone()),
+            _ => None,
+        })
+        .expect("the joiner hears it");
+    assert_eq!(shown.chars().count(), REASON_MAX);
+    assert!(shown.starts_with(" [2Jxx"));
+    let data = published(&effects);
+    assert_eq!(data[0]["reason"].as_str().expect("reason"), shown);
 }
 
 #[test]

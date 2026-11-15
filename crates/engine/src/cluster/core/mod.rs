@@ -28,6 +28,7 @@ pub const JOIN_ANSWER_MS: u64 = 15_000;
 pub const DIAL_BACKOFF_MS: (u64, u64) = (1_000, 60_000);
 pub const DEDUPE_MS: u64 = 300_000;
 pub const MAX_TERM_STEP: u64 = 64;
+pub const REASON_MAX: usize = 200;
 
 #[derive(Clone, Debug)]
 pub enum Input {

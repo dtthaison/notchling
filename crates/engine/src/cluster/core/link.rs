@@ -2,6 +2,7 @@ use serde_json::json;
 
 use super::{
     Dial, Effect, NodeCore, DIAL_BACKOFF_MS, JOIN_ANSWER_MS, MAX_TERM_STEP, OFFLINE_MS, PING_MS,
+    REASON_MAX,
 };
 use crate::cluster::id::NodeId;
 use crate::cluster::members::{Member, MemberState, Term};
@@ -225,6 +226,7 @@ impl NodeCore {
         term: Option<Term>,
         out: &mut Vec<Effect>,
     ) {
+        let reason = clean_reason(&reason);
         if let Some(j) = &self.joining {
             if from == j.token.home {
                 if !j.answered {
@@ -445,6 +447,13 @@ impl NodeCore {
         };
         WireError::new("stale_term", body.to_string())
     }
+}
+
+fn clean_reason(text: &str) -> String {
+    text.chars()
+        .take(REASON_MAX)
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect()
 }
 
 fn would_dial(a: &Member, b: &NodeId, home: &NodeId) -> bool {
