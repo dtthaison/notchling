@@ -28,7 +28,6 @@ pub const DEDUPE_MS: u64 = 300_000;
 pub const ATTACH_CALL_MS: u64 = 8 * 60_000;
 pub const GRANT_ATTACH: &str = "grant.attach";
 pub const GRANT_REVOKE_JOB: &str = "grant.revoke_job";
-pub const WAITING: &str = "Waiting for ";
 
 #[derive(Clone, Debug)]
 pub enum Input {
@@ -244,7 +243,6 @@ pub struct NodeCore {
     dials: BTreeMap<NodeId, Dial>,
     out_calls: BTreeMap<u64, OutCall>,
     local_runs: BTreeMap<u64, Then>,
-    attaching: BTreeSet<String>,
     seen: BTreeMap<(NodeId, u64), Seen>,
     joining: Option<Joining>,
     next_wire: u64,
@@ -275,7 +273,6 @@ impl NodeCore {
             dials: BTreeMap::new(),
             out_calls: BTreeMap::new(),
             local_runs: BTreeMap::new(),
-            attaching: BTreeSet::new(),
             seen: BTreeMap::new(),
             joining: None,
             next_wire: 1,

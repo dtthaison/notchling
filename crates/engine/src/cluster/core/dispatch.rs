@@ -2,7 +2,6 @@ use serde_json::{json, Value};
 
 use super::{
     Effect, NodeCore, Target, Then, CALL_MS, DELEGATE_CALL_MS, GRANT_ATTACH, GRANT_REVOKE_JOB,
-    WAITING,
 };
 use crate::cluster::grants::attachable;
 use crate::cluster::id::{NodeId, Tool};
@@ -165,6 +164,11 @@ impl NodeCore {
             let text = format!("{name} holds the vault: a job there asks with notchling secret");
             return Err(refusal("refused", text));
         }
+        if state.home != state.vault {
+            let name = self.member_name(&state.vault);
+            let text = format!("{name} holds the vault; {DISPATCH_AGAIN}");
+            return Err(refusal("refused", text));
+        }
         let allow = state
             .members
             .get(&spec.node)
@@ -240,7 +244,6 @@ impl NodeCore {
         };
         let call = self.next_local;
         self.next_local += 1;
-        self.attaching.insert(job.clone());
         self.local_runs.insert(
             call,
             Then::Attach {
@@ -280,7 +283,6 @@ impl NodeCore {
         result: Result<Value, WireError>,
         out: &mut Vec<Effect>,
     ) {
-        self.attaching.remove(&job);
         if !self.is_home() {
             self.revoke_grants(&job, out);
             let text = "this machine is no longer the primary";
@@ -310,58 +312,11 @@ impl NodeCore {
                 self.finish(target, Err(e), out);
             }
             (Ok(_), Some(text)) => {
-                let detail: String = format!("{WAITING}{text}")
-                    .chars()
-                    .take(DETAIL_MAX)
-                    .collect();
-                let command = Command::JobState {
-                    id: job.clone(),
-                    state: JobState::Dispatching,
-                    session: None,
-                    detail: Some(detail),
-                };
-                let _ = self.apply(command, out);
-                let reply = self
-                    .state
-                    .as_ref()
-                    .and_then(|s| s.jobs.get(&job))
-                    .map(|j| job_reply(j, None))
-                    .unwrap_or(Value::Null);
-                self.finish(target, Ok(reply), out);
+                let why = format!("{text}; {DISPATCH_AGAIN}");
+                self.fail_job(&job, &why, out);
+                self.finish(target, Err(refusal("refused", why)), out);
             }
             (Ok(_), None) => self.start_tool(target, job, warning, out),
-        }
-    }
-
-    pub(super) fn retry_attach(&mut self, out: &mut Vec<Effect>) {
-        if !self.is_home() {
-            return;
-        }
-        let Some(state) = &self.state else {
-            return;
-        };
-        if state.vault != self.me {
-            return;
-        }
-        let ready: Vec<(String, JobSpec)> = state
-            .jobs
-            .values()
-            .filter(|j| {
-                j.state == JobState::Dispatching
-                    && !j.spec.secrets.is_empty()
-                    && j.detail.as_deref().is_some_and(|d| d.starts_with(WAITING))
-                    && !self.attaching.contains(&j.id)
-            })
-            .map(|j| (j.id.clone(), j.spec.clone()))
-            .collect();
-        for (job, spec) in ready {
-            let checked = self
-                .precheck(&spec, OriginTier::App)
-                .and_then(|warning| self.check_secrets(&spec).map(|_| warning));
-            match checked {
-                Ok(warning) => self.attach(Target::Nobody, job, warning, out),
-                Err(e) => self.fail_job(&job, &e.message, out),
-            }
         }
     }
 
@@ -468,8 +423,6 @@ impl NodeCore {
         let node = found.map(|j| j.spec.node.clone());
         let current = found.map(|j| j.state);
         let has_session = found.is_some_and(|j| j.session.is_some());
-        let stale =
-            found.is_some_and(|j| j.detail.as_deref().is_some_and(|d| d.starts_with(WAITING)));
         let reply = match result {
             Ok(reply) => reply,
             Err(e) => {
@@ -495,7 +448,7 @@ impl NodeCore {
                 id: job.clone(),
                 state: JobState::Running,
                 session: session.clone(),
-                detail: warning.clone().or_else(|| stale.then(String::new)),
+                detail: warning.clone(),
             };
             let _ = self.apply(command, out);
         } else if let (Some(state), Some(session), false) = (current, &session, has_session) {
@@ -553,6 +506,7 @@ impl NodeCore {
 
 const DETAIL_MAX: usize = 200;
 const MAX_ATTACHED: usize = 16;
+const DISPATCH_AGAIN: &str = "dispatch again when it is primary";
 
 fn job_reply(job: &Job, warning: Option<&str>) -> Value {
     json!({

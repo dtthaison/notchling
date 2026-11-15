@@ -156,13 +156,15 @@ one:
   the job has not started by then.
 - The value is never in a command line, a log, an audit entry, the cluster's database, a snapshot or an
   inbox item. The command `notchling secret` runs gets it in its environment, as on the vault node.
-- The Worker hides the value in the job's shell log and in the text other nodes read of the job. That is
-  not complete:
+- The Worker hides every value that is live on it, whichever job the value was granted to, in a job's
+  shell log, in the text other nodes read of the job and in a delegate job's reply. That is not
+  complete:
   - Triple escapes, JavaScript inside Go strings and base64 or other encodings of a value stay visible.
   - `workspace.return` carries a job's repository changes unmasked, so a secret a job wrote into a file
     travels with its branch.
-  - A Claude job's output is masked by the job it belongs to. Just after the job starts, or after a
-    restart that lost its masks, it is masked with other jobs' values only, or refused.
+  - A job's output is refused after a restart that lost its masks.
+  - Every job on a Worker runs as the same user, so a job can read another job's grant file. The masks
+    stop the value coming back to other machines, they do not stop another job reading it.
 - While a value is in use, the daemon holds it in memory as ordinary strings that are not wiped.
 - The vault node's audit log records each release by name, never the value, and the cluster step log
   records the call.

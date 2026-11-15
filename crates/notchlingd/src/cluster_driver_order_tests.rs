@@ -62,7 +62,8 @@ fn a_grant_attach_reads_a_state_that_already_holds_its_job() {
             spec,
             tier: OriginTier::App,
         };
-        a.node.local(cmd).unwrap();
+        let err = a.node.local(cmd).unwrap_err();
+        assert!(err.message.contains("dispatch again when it is primary"));
     }
     let saw = probe.saw.lock().unwrap().clone();
     assert!(saw.len() >= 25);

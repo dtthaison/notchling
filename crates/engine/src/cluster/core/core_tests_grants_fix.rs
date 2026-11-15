@@ -182,7 +182,7 @@ fn leaving_the_cluster_forgets_the_attaches_in_flight() {
     let (mut hub, m5, w1) = pair();
     allow(&mut hub, &m5, &["gh"]);
     hub.local(&m5, secret_job("k", &["gh"]));
-    assert!(!hub.core(&m5).attaching.is_empty());
+    assert!(!hub.core(&m5).local_runs.is_empty());
     let mut members: Vec<_> = hub
         .core(&m5)
         .state()
@@ -213,7 +213,7 @@ fn leaving_the_cluster_forgets_the_attaches_in_flight() {
         },
     );
     assert!(hub.core(&m5).state().is_none());
-    assert!(hub.core(&m5).attaching.is_empty());
+    assert!(hub.core(&m5).local_runs.is_empty());
 }
 
 #[test]

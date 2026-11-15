@@ -258,7 +258,6 @@ impl NodeCore {
         self.dials.clear();
         self.out_calls.clear();
         self.local_runs.clear();
-        self.attaching.clear();
         self.seen.clear();
         self.joining = None;
         self.changed = true;
@@ -316,7 +315,6 @@ impl NodeCore {
             }
         }
         self.expire_calls(out);
-        self.retry_attach(out);
         self.expire_join(out);
         self.prune_seen();
         self.dial(out);

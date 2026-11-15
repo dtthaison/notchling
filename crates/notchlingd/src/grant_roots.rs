@@ -326,6 +326,7 @@ impl GrantMarks {
             .map_err(|e| format!("the grant mark for {job}: {e}"))
     }
 
+    #[cfg(test)]
     pub fn mark(&self, job: &str) -> Result<(), String> {
         self.mark_with(job, &[])
     }
@@ -386,6 +387,7 @@ impl GrantMarks {
             .collect()
     }
 
+    #[cfg(test)]
     pub fn remove(&self, job: &str) {
         if valid_job(job) {
             let _ = std::fs::remove_file(self.dir.join(job));

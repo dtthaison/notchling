@@ -417,14 +417,6 @@ fn delegate_run_masks_every_value_live_on_the_node_in_out_and_err() {
 }
 
 #[test]
-fn delegate_run_without_any_live_value_answers_what_the_runner_said() {
-    let (calls, _runs, _inner, _dir) = worker_calls(true);
-    let args = json!({"args": ["agy", "--folder", "/srv", "--", "x"]});
-    let out = calls.call("delegate.run", &args, &from_home()).unwrap();
-    assert_eq!(out, json!({"exit": 0, "out": "done\n", "err": "careful\n"}));
-}
-
-#[test]
 fn delegate_run_refuses_when_this_node_does_not_take_delegation_or_args_are_unsafe() {
     let (calls, runs, _inner, _dir) = worker_calls(false);
     let args = json!({"args": ["agy", "--folder", "/srv", "--", "x"]});

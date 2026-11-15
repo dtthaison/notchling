@@ -1,7 +1,6 @@
 use crate::cluster_node::LocalCalls;
 use crate::cluster_testkit::{eventually, online, pair, Opts};
 use notchling_cluster_net::MemNet;
-use notchling_engine::cluster::core::WAITING;
 use notchling_engine::cluster::wire::{Origin, OriginTier};
 use notchling_engine::cluster::{Job, JobSpec, JobState, LocalCmd, Tool};
 use notchling_local_api::ApiError;
@@ -129,11 +128,17 @@ fn a_call_that_outlives_a_failed_save_cannot_complete_a_new_attach() {
     assert!(secret_jobs(&a, &fresh), "a stale call moved a job on");
     held.hold_attach.store(false, Ordering::SeqCst);
     for thread in threads {
-        thread.join().unwrap().unwrap();
+        let err = thread.join().unwrap().unwrap_err();
+        assert!(
+            err.message.ends_with("dispatch again when it is primary"),
+            "{err:?}"
+        );
     }
-    let waiting = |j: &Job| {
-        j.state == JobState::Dispatching
-            && j.detail.as_deref().is_some_and(|d| d.starts_with(WAITING))
+    let failed = |j: &Job| {
+        j.state == JobState::Failed
+            && j.detail
+                .as_deref()
+                .is_some_and(|d| d.ends_with("dispatch again when it is primary"))
     };
-    assert!(secret_jobs(&a, &waiting), "an attach result was lost");
+    assert!(secret_jobs(&a, &failed), "an attach result was lost");
 }

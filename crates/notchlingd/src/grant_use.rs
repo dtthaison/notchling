@@ -177,6 +177,7 @@ impl GrantUse {
         self.parts.2.now_seq()
     }
 
+    #[cfg(test)]
     pub fn deliver(&self, origin: &Origin, args: &Value) -> Result<Value, ApiError> {
         self.deliver_at(origin, args, self.parts.2.now_seq())
     }

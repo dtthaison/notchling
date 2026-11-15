@@ -1,6 +1,6 @@
 use serde_json::{json, Value};
 
-use super::{Effect, Input, LocalCmd, GRANT_ATTACH, GRANT_REVOKE_JOB, WAITING};
+use super::{Effect, Input, LocalCmd, GRANT_ATTACH, GRANT_REVOKE_JOB};
 use crate::cluster::id::{NodeId, Tool};
 use crate::cluster::jobs::{job_id, JobSpec, JobState};
 use crate::cluster::testkit::id;
@@ -131,7 +131,7 @@ fn a_refused_attach_fails_the_job_with_the_reason_and_revokes() {
 }
 
 #[test]
-fn a_waiting_attach_keeps_the_job_dispatching_and_answers_at_once() {
+fn a_waiting_attach_fails_the_dispatch_and_revokes_what_was_sent() {
     let (mut hub, m5, _w1) = pair();
     allow(&mut hub, &m5, &["gh"], false);
     let effects = hub.local(&m5, secret_job("k", &["gh"]));
@@ -142,18 +142,23 @@ fn a_waiting_attach_keeps_the_job_dispatching_and_answers_at_once() {
         call,
         Ok(json!({"waiting": "m5, which holds the vault"})),
     );
-    let answered = answers(&effects);
-    assert!(matches!(answered[0], Ok(v) if v["state"] == "dispatching"));
-    assert_eq!(state_of(&hub, &m5, "k"), JobState::Dispatching);
-    let detail = detail_of(&hub, &m5, "k").expect("a detail");
-    assert!(detail.starts_with(WAITING), "{detail}");
-    assert_eq!(detail, "Waiting for m5, which holds the vault");
+    let why = "m5, which holds the vault; dispatch again when it is primary";
+    assert!(matches!(
+        answers(&effects)[0],
+        Err(e) if e.code == "refused" && e.message == why
+    ));
+    assert_eq!(state_of(&hub, &m5, "k"), JobState::Failed);
+    assert_eq!(detail_of(&hub, &m5, "k").as_deref(), Some(why));
     assert_eq!(sent_calls(&effects, "shell.run"), 0);
+    let revoked = runs(&effects, GRANT_REVOKE_JOB);
+    assert_eq!(revoked.len(), 1);
+    assert_eq!(revoked[0].1["job"], json!(job_id("k")));
+    assert_eq!(revoked[0].1["node"], json!(id("w1")));
 }
 
 #[test]
-fn a_waiting_job_is_attached_again_when_the_vault_node_is_primary() {
-    let (mut hub, m5, w1) = pair();
+fn a_job_that_failed_waiting_is_never_attached_again() {
+    let (mut hub, m5, _w1) = pair();
     allow(&mut hub, &m5, &["gh"], false);
     let effects = hub.local(&m5, secret_job("k", &["gh"]));
     let (call, _) = runs(&effects, GRANT_ATTACH).remove(0);
@@ -163,21 +168,15 @@ fn a_waiting_job_is_attached_again_when_the_vault_node_is_primary() {
         call,
         Ok(json!({"waiting": "m5, which holds the vault"})),
     );
-    let effects = hub.tick(&m5, 1_000);
-    let again = runs(&effects, GRANT_ATTACH);
-    assert_eq!(again.len(), 1);
-    let quiet = hub.tick(&m5, 1_000);
-    assert!(runs(&quiet, GRANT_ATTACH).is_empty());
-    let effects = done(&mut hub, &m5, again[0].0, Ok(json!({"delivered": ["gh"]})));
-    assert_eq!(sent_calls(&effects, "shell.run"), 1);
-    let start = worker_start(&hub);
-    done(&mut hub, &w1, start, Ok(json!({"session": "shell:j"})));
-    assert_eq!(state_of(&hub, &m5, "k"), JobState::Running);
-    assert_eq!(detail_of(&hub, &m5, "k"), None);
+    for _ in 0..3 {
+        let quiet = hub.tick(&m5, 1_000);
+        assert!(runs(&quiet, GRANT_ATTACH).is_empty());
+    }
+    assert_eq!(state_of(&hub, &m5, "k"), JobState::Failed);
 }
 
 #[test]
-fn nothing_is_attached_while_another_node_is_primary() {
+fn a_dispatch_is_refused_while_another_node_holds_the_vault_and_is_not_primary() {
     let mut hub = Hub::new();
     let _m5 = hub.add("m5", "macos", true);
     let m1 = hub.add("m1", "macos", true);
@@ -198,19 +197,16 @@ fn nothing_is_attached_while_another_node_is_primary() {
     );
     assert!(answers(&effects)[0].is_ok());
     let effects = hub.local(&m1, secret_job("k", &["gh"]));
-    let attach = runs(&effects, GRANT_ATTACH);
-    assert_eq!(attach.len(), 1);
-    assert_eq!(attach[0].1["vaultPrimary"], false);
-    assert_eq!(attach[0].1["vaultName"], "m5");
-    done(
-        &mut hub,
-        &m1,
-        attach[0].0,
-        Ok(json!({"waiting": "m5, which holds the vault"})),
-    );
+    assert!(matches!(
+        answers(&effects)[0],
+        Err(e) if e.code == "refused"
+            && e.message == "m5 holds the vault; dispatch again when it is primary"
+    ));
+    assert!(runs(&effects, GRANT_ATTACH).is_empty());
+    assert!(runs(&effects, GRANT_REVOKE_JOB).is_empty());
+    assert!(hub.core(&m1).state().expect("state").jobs.is_empty());
     let quiet = hub.tick(&m1, 1_000);
     assert!(runs(&quiet, GRANT_ATTACH).is_empty());
-    assert_eq!(state_of(&hub, &m1, "k"), JobState::Dispatching);
 }
 
 #[test]

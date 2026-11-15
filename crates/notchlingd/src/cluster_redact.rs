@@ -153,6 +153,7 @@ impl TailMasks {
             .is_some_and(|m| m.lost || !m.live)
     }
 
+    #[cfg(test)]
     pub fn any_lost(&self) -> bool {
         lock(&self.table).jobs.values().any(|m| m.lost || !m.live)
     }
@@ -188,6 +189,7 @@ impl TailMasks {
         }
     }
 
+    #[cfg(test)]
     pub fn mark_granted(&self, job: &str) {
         self.mark_granted_as(job, &[]);
     }
@@ -246,6 +248,7 @@ impl TailMasks {
         }
     }
 
+    #[cfg(test)]
     pub fn forget_job(&self, job: &str) {
         lock(&self.table).jobs.remove(job);
     }
@@ -403,6 +406,7 @@ impl<W: Write> MaskedLog<W> {
         self.inner.flush()
     }
 
+    #[cfg(test)]
     pub fn get_ref(&self) -> &W {
         &self.inner
     }
