@@ -10,18 +10,15 @@ use notchling_engine::cluster::grants::{decode_env, GRANT_TTL_MS};
 use notchling_engine::cluster::wire::{Origin, OriginTier};
 use notchling_engine::cluster::{ClusterState, JobState, NodeId, Tool};
 use notchling_engine::vault::{hide_forms, valid_name};
-use notchling_local_api::{ApiError, Caller, ErrorCode};
+use notchling_local_api::{ops, ApiError, Caller, ErrorCode};
 use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
 
 pub const NOT_A_JOB: &str = "secret isn't available here: this command isn't part of a cluster job";
 pub const NOT_LOADED: &str = "secret isn't available yet: this machine's cluster is still loading";
-pub const KNOWN_WAIT: Duration = Duration::from_secs(3);
 const MAX_NAMES: usize = 16;
 const TEXT_MAX: usize = 4096;
-const POLL: Duration = Duration::from_millis(50);
 
 #[derive(Clone, Debug)]
 pub enum OnDisk {
@@ -49,7 +46,6 @@ pub struct GrantUse {
     asks: (Arc<dyn Asker>, Arc<dyn UseAudit>),
     procs: Arc<dyn Processes>,
     clock: Clock,
-    known_wait: Duration,
     disk: Disk,
 }
 
@@ -73,16 +69,24 @@ pub fn keys_of(state: &ClusterState, job: &str) -> Vec<String> {
     key.into_iter().filter(|k| valid_key(k)).collect()
 }
 
-fn running(state: &ClusterState, me: &NodeId, job: &str) -> Option<JobState> {
-    state
-        .jobs
-        .get(job)
-        .filter(|j| j.spec.node == *me)
-        .map(|j| j.state)
+pub fn keys_here(state: Option<&ClusterState>, roots: &JobRoots, job: &str) -> Vec<String> {
+    let mut keys = state.map(|s| keys_of(s, job)).unwrap_or_default();
+    for key in roots.keys(job) {
+        if !keys.contains(&key) {
+            keys.push(key);
+        }
+    }
+    keys
 }
 
 fn is_live(state: JobState) -> bool {
     matches!(state, JobState::Running | JobState::Dispatching)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Standing {
+    Live,
+    Pending,
 }
 
 fn canonical(list: &[Value]) -> Result<Vec<String>, ApiError> {
@@ -125,18 +129,12 @@ impl GrantUse {
             asks,
             procs,
             clock,
-            known_wait: KNOWN_WAIT,
             disk: Arc::new(|| OnDisk::Nothing),
         }
     }
 
     pub fn with_disk(mut self, disk: Disk) -> GrantUse {
         self.disk = disk;
-        self
-    }
-
-    pub fn with_known_wait(mut self, wait: Duration) -> GrantUse {
-        self.known_wait = wait;
         self
     }
 
@@ -155,21 +153,23 @@ impl GrantUse {
         Ok((state, me))
     }
 
-    fn wait_for_job(&self, job: &str) -> Result<(), ApiError> {
-        let until = Instant::now() + self.known_wait;
-        loop {
-            let (state, me) = match (self.view.state(), self.view.me()) {
-                (Some(state), Some(me)) => (state, me),
-                _ => return Err(failed("this node is in no cluster")),
-            };
-            match running(&state, &me, job) {
-                Some(s) if is_live(s) => return Ok(()),
-                Some(_) => return Err(failed(format!("job {job} isn't running"))),
-                None if Instant::now() >= until => {
-                    return Err(failed(format!("job {job} isn't running on this machine")))
-                }
-                None => std::thread::sleep(POLL),
-            }
+    fn standing(&self, state: &ClusterState, me: &NodeId, job: &str) -> Option<Standing> {
+        match state.jobs.get(job) {
+            Some(found) if found.spec.node == *me && is_live(found.state) => Some(Standing::Live),
+            Some(_) => None,
+            None if self.parts.2.is_live(job) => Some(Standing::Live),
+            None => Some(Standing::Pending),
+        }
+    }
+
+    fn live_here(&self, state: &ClusterState, me: &NodeId, job: &str) -> bool {
+        self.standing(state, me, job) == Some(Standing::Live)
+    }
+
+    fn not_here(state: &ClusterState, me: &NodeId, job: &str) -> ApiError {
+        match state.jobs.get(job) {
+            Some(found) if found.spec.node == *me => failed(format!("job {job} isn't running")),
+            _ => failed(format!("job {job} isn't running on this machine")),
         }
     }
 
@@ -219,7 +219,6 @@ impl GrantUse {
         if self.parts.2.is_ended(job) {
             return Err(failed(format!("job {job} isn't running")));
         }
-        self.wait_for_job(job)?;
         let now = (self.clock)();
         let expires = asked.min(now.saturating_add(GRANT_TTL_MS));
         if expires <= now {
@@ -229,11 +228,16 @@ impl GrantUse {
         if self.parts.2.is_ended(job) || self.parts.2.revoked_since(job, &name, since) {
             return Err(failed(format!("job {job} isn't running")));
         }
-        let keys = match (self.view.state(), self.view.me()) {
-            (Some(state), Some(me)) if running(&state, &me, job).is_some_and(is_live) => {
-                keys_of(&state, job)
-            }
+        let (state, me) = match (self.view.state(), self.view.me()) {
+            (Some(state), Some(me)) => (state, me),
             _ => return Err(failed(format!("job {job} isn't running"))),
+        };
+        let standing = self
+            .standing(&state, &me, job)
+            .ok_or_else(|| Self::not_here(&state, &me, job))?;
+        let keys = match standing {
+            Standing::Live => keys_here(Some(&state), &self.parts.2, job),
+            Standing::Pending => Vec::new(),
         };
         if !masked.is_empty() {
             self.parts.1.mark_with(job, &keys).map_err(failed)?;
@@ -247,7 +251,44 @@ impl GrantUse {
                 value,
             })
             .map_err(|why| failed(format!("the grant for {name} can't be stored: {why}")))?;
+        if standing == Standing::Pending {
+            self.parts.2.hold(job, now);
+        }
         Ok(json!({"stored": name}))
+    }
+
+    pub fn starting(&self, origin: &Origin, args: &Value) -> Option<String> {
+        if origin.tier != OriginTier::App {
+            return None;
+        }
+        let state = self.view.state()?;
+        if origin.node != state.home {
+            return None;
+        }
+        let job = args
+            .get("job")
+            .and_then(Value::as_str)
+            .filter(|j| valid_job(j))?;
+        self.parts.2.begin(job).then(|| job.to_string())
+    }
+
+    pub fn started(&self, job: &str, result: &Result<Value, ApiError>) {
+        match result {
+            Ok(reply) => {
+                let session = ["session", "id", "jobId"]
+                    .iter()
+                    .find_map(|field| reply.get(*field).and_then(Value::as_str));
+                if let Some(key) = session {
+                    self.parts.2.note_session(job, key);
+                }
+            }
+            Err(_) => {
+                let _gate = self.parts.2.gate();
+                self.parts.2.end(job);
+                let _ = self.store.remove_job(job);
+                self.parts.0.end_job(job);
+            }
+        }
     }
 
     pub fn revoke(&self, origin: &Origin, args: &Value) -> Result<Value, ApiError> {
@@ -274,7 +315,10 @@ impl GrantUse {
         let _gate = self.parts.2.gate();
         self.parts.2.note_revoke(job, names.as_deref());
         let result = match &names {
-            None => self.store.remove_job(job),
+            None => {
+                self.parts.2.release_pending(job);
+                self.store.remove_job(job)
+            }
             Some(names) => {
                 let mut first = Ok(());
                 for name in names {
@@ -352,9 +396,8 @@ impl GrantUse {
             .job_of(self.procs.as_ref(), pid)
             .ok_or_else(|| refused(NOT_A_JOB))?;
         *seen = job.clone();
-        match running(state, me, &job) {
-            Some(s) if is_live(s) => {}
-            _ => return Err(refused(format!("job {job} isn't running"))),
+        if !self.live_here(state, me, &job) {
+            return Err(refused(format!("job {job} isn't running")));
         }
         let said = (text_of(args, "folder"), text_of(args, "command"));
         let grants = self.fetch((&job, &state.vault), &names, said)?;
@@ -397,12 +440,22 @@ impl UseCalls {
     }
 }
 
+pub const START_OPS: [&str; 2] = [ops::SESSION_NEW, ops::AGY_SEND];
+
 impl LocalCalls for UseCalls {
     fn call(&self, op: &str, args: &Value, origin: &Origin) -> Result<Value, ApiError> {
         let arrived = self.uses.arrived();
         match op {
             GRANT_DELIVER => self.uses.deliver_at(origin, args, arrived),
             GRANT_REVOKE => self.uses.revoke(origin, args),
+            _ if START_OPS.contains(&op) => {
+                let job = self.uses.starting(origin, args);
+                let result = self.inner.call(op, args, origin);
+                if let Some(job) = job {
+                    self.uses.started(&job, &result);
+                }
+                result
+            }
             _ => self.inner.call(op, args, origin),
         }
     }

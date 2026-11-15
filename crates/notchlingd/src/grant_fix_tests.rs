@@ -38,40 +38,36 @@ fn a_restored_job_stays_unservable_after_a_later_grant() {
 }
 
 #[test]
-fn a_revoke_that_found_nothing_beats_a_deliver_still_waiting_for_its_job() {
+fn a_revoke_that_found_nothing_beats_a_deliver_that_arrived_before_it() {
     let rig = rig();
-    *rig.fake.state.lock().unwrap() = Some(cluster("vault", &[]));
-    let uses = rig.uses.clone();
-    let args = deliver_args(JOB, "one", "V", "NL-MARKER-1");
-    let waiting = std::thread::spawn(move || uses.deliver(&from_vault(), &args));
-    std::thread::sleep(Duration::from_millis(15));
+    let arrived = rig.uses.arrived();
     rig.uses
         .revoke(&from_vault(), &json!({"job": JOB}))
         .expect("revoked");
-    *rig.fake.state.lock().unwrap() =
-        Some(cluster("vault", &[job(JOB, "worker", JobState::Running)]));
-    let err = waiting.join().unwrap().expect_err("dropped");
+    let args = deliver_args(JOB, "one", "V", "NL-MARKER-1");
+    let err = rig
+        .uses
+        .deliver_at(&from_vault(), &args, arrived)
+        .expect_err("dropped");
     assert!(!err.message.contains("NL-MARKER"));
     assert!(rig.store.get(JOB, "one", real_now()).unwrap().is_none());
     assert!(rig.marks.list().is_empty());
     assert_eq!(rig.masks.state(JOB), JobMasks::Never);
+    assert!(!rig.roots.is_pending(JOB, real_now()));
     deliver(&rig, JOB, "one", "NL-MARKER-1").expect("a later deliver is fine");
 }
 
 #[test]
 fn a_revoke_of_other_names_does_not_stop_a_deliver() {
     let rig = rig();
-    *rig.fake.state.lock().unwrap() = Some(cluster("vault", &[]));
-    let uses = rig.uses.clone();
-    let args = deliver_args(JOB, "one", "V", "NL-MARKER-1");
-    let waiting = std::thread::spawn(move || uses.deliver(&from_vault(), &args));
-    std::thread::sleep(Duration::from_millis(15));
+    let arrived = rig.uses.arrived();
     rig.uses
         .revoke(&from_vault(), &json!({"job": JOB, "names": ["other"]}))
         .expect("revoked");
-    *rig.fake.state.lock().unwrap() =
-        Some(cluster("vault", &[job(JOB, "worker", JobState::Running)]));
-    waiting.join().unwrap().expect("stored");
+    let args = deliver_args(JOB, "one", "V", "NL-MARKER-1");
+    rig.uses
+        .deliver_at(&from_vault(), &args, arrived)
+        .expect("stored");
     assert!(rig.store.get(JOB, "one", real_now()).unwrap().is_some());
 }
 

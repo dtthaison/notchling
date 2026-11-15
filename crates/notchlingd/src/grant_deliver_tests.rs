@@ -7,42 +7,32 @@ fn deliver(rig: &Rig, args: &Value) -> Result<Value, ApiError> {
 }
 
 #[test]
-fn deliver_for_unknown_job_is_refused() {
+fn deliver_for_a_job_the_state_lists_elsewhere_or_finished_is_refused() {
     let rig = rig();
-    let args = deliver_args("j-ffffffffffff", "api-key", "API_TOKEN", "NL-MARKER-1");
-    let err = deliver(&rig, &args).expect_err("unknown job");
-    assert!(err.message.contains("isn't running"));
-    assert!(!err.message.contains("NL-MARKER"), "no value in the error");
-    assert!(rig
-        .store
-        .get("j-ffffffffffff", "api-key", real_now())
-        .unwrap()
-        .is_none());
-    assert!(rig.marks.list().is_empty(), "no mark for a refused grant");
-    assert_eq!(rig.masks.state("j-ffffffffffff"), JobMasks::Never);
     let other_node = job("j-aaaaaaaaaaaa", "other", JobState::Running);
     *rig.fake.state.lock().unwrap() = Some(cluster("vault", &[other_node]));
     let args = deliver_args("j-aaaaaaaaaaaa", "api-key", "API_TOKEN", "NL-MARKER-1");
-    assert!(deliver(&rig, &args).is_err(), "a job on another node");
+    let err = deliver(&rig, &args).expect_err("a job on another node");
+    assert!(err.message.contains("isn't running on this machine"));
+    assert!(!err.message.contains("NL-MARKER"), "no value in the error");
     let done = job(JOB, "worker", JobState::Done);
     *rig.fake.state.lock().unwrap() = Some(cluster("vault", &[done]));
     let args = deliver_args(JOB, "api-key", "API_TOKEN", "NL-MARKER-1");
-    assert!(deliver(&rig, &args).is_err(), "a finished job");
-}
-
-#[test]
-fn a_job_the_worker_learns_of_a_moment_late_is_accepted() {
-    let rig = rig();
-    let late = job("j-cccccccccccc", "worker", JobState::Dispatching);
-    let fake = rig.fake.clone();
-    let handle = std::thread::spawn(move || {
-        std::thread::sleep(Duration::from_millis(20));
-        *fake.state.lock().unwrap() = Some(cluster("vault", &[late]));
-    });
-    *rig.fake.state.lock().unwrap() = Some(cluster("vault", &[]));
-    let args = deliver_args("j-cccccccccccc", "api-key", "API_TOKEN", "NL-MARKER-1");
-    deliver(&rig, &args).expect("accepted once the job is known");
-    handle.join().unwrap();
+    let err = deliver(&rig, &args).expect_err("a finished job");
+    assert!(err.message.contains("isn't running"));
+    for gone in ["j-aaaaaaaaaaaa", JOB] {
+        assert!(rig
+            .store
+            .get(gone, "api-key", real_now())
+            .unwrap()
+            .is_none());
+        assert_eq!(rig.masks.state(gone), JobMasks::Never);
+    }
+    assert!(rig.marks.list().is_empty(), "no mark for a refused grant");
+    assert!(
+        !rig.roots.is_pending(JOB, real_now()),
+        "nothing held pending"
+    );
 }
 
 #[test]
@@ -260,7 +250,7 @@ fn no_marker_value_reaches_any_debug_or_error_text() {
 
 #[test]
 fn a_mark_records_the_keys_that_find_the_jobs_rows() {
-    let rig = rig();
+    let rig = rig_running_both();
     deliver(&rig, &deliver_args(JOB, "one", "V", "NL-MARKER-1")).expect("stored");
     let shell = rig.marks.marked();
     assert_eq!(

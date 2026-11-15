@@ -1,7 +1,7 @@
 use crate::cluster_redact::TailMasks;
 use crate::grant_broker::{Clock, View};
-use crate::grant_roots::{GrantMarks, JobRoots, Marked};
-use crate::grant_use::keys_of;
+use crate::grant_roots::{GrantMarks, JobRoots, Local, Marked};
+use crate::grant_use::keys_here;
 use notchling_engine::cluster::grant_files::GrantStore;
 use notchling_engine::cluster::grants::GRANT_TTL_MS;
 use notchling_engine::cluster::{ClusterState, JobState, NodeId};
@@ -22,13 +22,20 @@ pub struct GrantJanitor {
     parts: (Arc<TailMasks>, Arc<GrantMarks>, Arc<JobRoots>),
     view: Arc<dyn View>,
     clock: Clock,
-    last: Mutex<Option<Mine>>,
+    last: Mutex<Option<(Mine, Local)>>,
     nudged: Mutex<bool>,
     wake: Condvar,
     stop: AtomicBool,
 }
 
 type Mine = BTreeMap<String, (JobState, Option<String>)>;
+
+#[derive(Default)]
+struct Seen {
+    state: Option<ClusterState>,
+    mine: Mine,
+    local: Local,
+}
 
 fn mine(state: &ClusterState, me: &NodeId) -> Mine {
     state
@@ -69,40 +76,70 @@ impl GrantJanitor {
         })
     }
 
+    fn seen(&self, now: i64) -> Seen {
+        match (self.view.state(), self.view.me()) {
+            (Some(state), Some(me)) => {
+                let mut local = self.parts.2.local(now);
+                local.live.retain(|job, _| !state.jobs.contains_key(job));
+                local.pending.retain(|job| !state.jobs.contains_key(job));
+                Seen {
+                    mine: mine(&state, &me),
+                    local,
+                    state: Some(state),
+                }
+            }
+            (state, None) => Seen {
+                state,
+                ..Seen::default()
+            },
+            (None, Some(_)) => Seen::default(),
+        }
+    }
+
     pub fn tick(&self) -> Result<usize, String> {
         let _gate = self.parts.2.gate();
         let now = (self.clock)();
-        let state = self.view.state();
-        let me = self.view.me();
-        let jobs = match (&state, &me) {
-            (Some(state), Some(me)) => mine(state, me),
-            _ => Mine::new(),
-        };
-        let live = live_of(&jobs);
-        let swept = self.store.sweep(now, &live);
+        let seen = self.seen(now);
+        let live = live_of(&seen.mine);
+        let held: BTreeSet<String> = live
+            .iter()
+            .chain(seen.local.live.keys())
+            .chain(&seen.local.pending)
+            .cloned()
+            .collect();
+        let swept = self.store.sweep(now, &held);
         for job in self.parts.2.rooted() {
-            if jobs.get(&job).is_some_and(|(s, _)| !live_state(*s)) {
+            if seen.mine.get(&job).is_some_and(|(s, _)| !live_state(*s)) {
                 self.parts.2.end(&job);
             }
         }
-        if let Some(state) = &state {
+        if let Some(state) = &seen.state {
             for marked in self.parts.1.marked() {
-                self.tend(state, &live, &marked, now);
+                self.tend(state, (&live, &seen.local), &marked, now);
             }
         }
-        *lock(&self.last) = Some(jobs);
+        *lock(&self.last) = Some((seen.mine, seen.local));
         swept
     }
 
-    fn tend(&self, state: &ClusterState, live: &BTreeSet<String>, marked: &Marked, now: i64) {
-        let (masks, marks, _) = &self.parts;
+    fn tend(
+        &self,
+        state: &ClusterState,
+        (live, local): (&BTreeSet<String>, &Local),
+        marked: &Marked,
+        now: i64,
+    ) {
+        let (masks, marks, roots) = &self.parts;
         let job = &marked.job;
-        if live.contains(job) {
-            let keys = keys_of(state, job);
+        if live.contains(job) || local.live.contains_key(job) {
+            let keys = keys_here(Some(state), roots, job);
             if keys.iter().any(|k| !marked.keys.contains(k)) && marks.mark_with(job, &keys).is_ok()
             {
                 masks.mark_granted_as(job, &keys);
             }
+            return;
+        }
+        if local.pending.contains(job) {
             return;
         }
         masks.mark_granted_as(job, &marked.keys);
@@ -118,12 +155,9 @@ impl GrantJanitor {
         }
     }
 
-    fn changed(&self) -> bool {
-        let now = match (self.view.state(), self.view.me()) {
-            (Some(state), Some(me)) => mine(&state, &me),
-            _ => Mine::new(),
-        };
-        lock(&self.last).as_ref() != Some(&now)
+    pub(crate) fn changed(&self) -> bool {
+        let seen = self.seen((self.clock)());
+        lock(&self.last).as_ref() != Some(&(seen.mine, seen.local))
     }
 
     pub fn nudge(&self) {

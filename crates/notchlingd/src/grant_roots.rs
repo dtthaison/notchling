@@ -1,4 +1,6 @@
+use crate::shell_jobs::SESSION_PREFIX;
 use crate::vault_caller::Processes;
+use notchling_engine::cluster::core::{ATTACH_CALL_MS, CALL_MS};
 use std::collections::{BTreeMap, BTreeSet, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -6,7 +8,9 @@ use std::sync::{Mutex, MutexGuard};
 
 const WALK_MAX: usize = 64;
 const ENDED_MAX: usize = 512;
+const BEGUN_MAX: usize = 512;
 const REVOKES_MAX: usize = 512;
+pub const PENDING_MS: i64 = (ATTACH_CALL_MS + CALL_MS) as i64;
 pub const MARKS_DIR: &str = "grant-marks";
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -22,8 +26,17 @@ pub fn valid_job(job: &str) -> bool {
 #[derive(Default)]
 struct Roots {
     live: BTreeMap<String, u32>,
+    begun: BTreeMap<String, Vec<String>>,
+    begun_order: VecDeque<String>,
+    pending: BTreeMap<String, i64>,
     ended: BTreeSet<String>,
     order: VecDeque<String>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Local {
+    pub live: BTreeMap<String, Vec<String>>,
+    pub pending: BTreeSet<String>,
 }
 
 type Revoke = (u64, String, Option<BTreeSet<String>>);
@@ -49,12 +62,118 @@ impl JobRoots {
         if roots.ended.contains(job) {
             return;
         }
+        roots.pending.remove(job);
         roots.live.insert(job.to_string(), pid);
+    }
+
+    pub fn begin(&self, job: &str) -> bool {
+        if !valid_job(job) {
+            return false;
+        }
+        let mut roots = lock(&self.inner);
+        if roots.ended.contains(job) {
+            return false;
+        }
+        roots.pending.remove(job);
+        if !roots.begun.contains_key(job) {
+            roots.begun.insert(job.to_string(), Vec::new());
+            roots.begun_order.push_back(job.to_string());
+        }
+        while roots.begun_order.len() > BEGUN_MAX {
+            if let Some(oldest) = roots.begun_order.pop_front() {
+                roots.begun.remove(&oldest);
+            }
+        }
+        true
+    }
+
+    pub fn note_session(&self, job: &str, key: &str) {
+        if !valid_key(key) {
+            return;
+        }
+        let mut roots = lock(&self.inner);
+        if let Some(keys) = roots.begun.get_mut(job) {
+            if !keys.iter().any(|k| k == key) {
+                keys.push(key.to_string());
+            }
+        }
+    }
+
+    pub fn is_live(&self, job: &str) -> bool {
+        let roots = lock(&self.inner);
+        roots.live.contains_key(job) || roots.begun.contains_key(job)
+    }
+
+    pub fn hold(&self, job: &str, now_ms: i64) {
+        if !valid_job(job) {
+            return;
+        }
+        let mut roots = lock(&self.inner);
+        if roots.ended.contains(job)
+            || roots.live.contains_key(job)
+            || roots.begun.contains_key(job)
+        {
+            return;
+        }
+        roots
+            .pending
+            .entry(job.to_string())
+            .and_modify(|since| {
+                if now_ms.saturating_sub(*since) >= PENDING_MS {
+                    *since = now_ms;
+                }
+            })
+            .or_insert(now_ms);
+    }
+
+    pub fn release_pending(&self, job: &str) {
+        lock(&self.inner).pending.remove(job);
+    }
+
+    pub fn is_pending(&self, job: &str, now_ms: i64) -> bool {
+        lock(&self.inner)
+            .pending
+            .get(job)
+            .is_some_and(|since| now_ms.saturating_sub(*since) < PENDING_MS)
+    }
+
+    pub fn local(&self, now_ms: i64) -> Local {
+        let mut roots = lock(&self.inner);
+        roots
+            .pending
+            .retain(|_, since| now_ms.saturating_sub(*since) < PENDING_MS);
+        let mut live: BTreeMap<String, Vec<String>> = roots
+            .begun
+            .iter()
+            .map(|(job, keys)| (job.clone(), keys.clone()))
+            .collect();
+        for job in roots.live.keys() {
+            live.entry(job.clone())
+                .or_default()
+                .push(format!("{SESSION_PREFIX}{job}"));
+        }
+        Local {
+            live,
+            pending: roots.pending.keys().cloned().collect(),
+        }
+    }
+
+    pub fn keys(&self, job: &str) -> Vec<String> {
+        let roots = lock(&self.inner);
+        let mut keys = roots.begun.get(job).cloned().unwrap_or_default();
+        if roots.live.contains_key(job) {
+            keys.push(format!("{SESSION_PREFIX}{job}"));
+        }
+        keys
     }
 
     pub fn end(&self, job: &str) {
         let mut roots = lock(&self.inner);
         roots.live.remove(job);
+        if roots.begun.remove(job).is_some() {
+            roots.begun_order.retain(|j| j != job);
+        }
+        roots.pending.remove(job);
         if roots.ended.insert(job.to_string()) {
             roots.order.push_back(job.to_string());
         }
@@ -94,7 +213,13 @@ impl JobRoots {
     }
 
     pub fn rooted(&self) -> Vec<String> {
-        lock(&self.inner).live.keys().cloned().collect()
+        let roots = lock(&self.inner);
+        roots
+            .live
+            .keys()
+            .chain(roots.begun.keys())
+            .cloned()
+            .collect()
     }
 
     pub fn job_of(&self, procs: &dyn Processes, pid: u32) -> Option<String> {

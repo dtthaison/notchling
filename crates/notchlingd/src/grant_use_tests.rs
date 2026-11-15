@@ -1,13 +1,15 @@
 use super::*;
 use crate::cluster_testkit::Dir;
 use notchling_engine::cluster::grants::{encode_env, SecretAllow};
+use notchling_engine::cluster::state::{apply, start};
 use notchling_engine::cluster::{
-    fingerprint, Desired, Job, JobSpec, Member, MemberState, Term, Tool,
+    fingerprint, Command, Desired, Job, JobSpec, Member, MemberState, Term, Tool,
 };
 use notchling_local_api::{ClientKind, Tier};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::time::Duration;
 
 pub(crate) const JOB: &str = "j-0123456789ab";
 pub(crate) const OTHER_JOB: &str = "j-ba9876543210";
@@ -76,6 +78,31 @@ pub(crate) fn cluster(home: &str, jobs: &[Job]) -> ClusterState {
         jobs: jobs.iter().map(|j| (j.id.clone(), j.clone())).collect(),
         seq: 1,
     }
+}
+
+pub(crate) fn sync_from(home: &str) -> Command {
+    Command::Sync {
+        id: "c".to_string(),
+        name: "c".to_string(),
+        term: Term {
+            n: 1,
+            node: id(home),
+        },
+        home: id(home),
+        vault: id("vault"),
+        members: ["vault", "worker", "other"].map(member).to_vec(),
+    }
+}
+
+pub(crate) fn worker_state_with_home(home: &str) -> ClusterState {
+    let (mut state, _, _) = start(sync_from(home), 0).expect("a node joins from a sync");
+    apply(&mut state, sync_from(home), 1).expect("the home syncs again");
+    assert!(state.jobs.is_empty(), "a sync carries no jobs");
+    state
+}
+
+pub(crate) fn worker_state() -> ClusterState {
+    worker_state_with_home("vault")
 }
 
 #[derive(Default)]
@@ -160,13 +187,7 @@ pub(crate) fn rig_full(clock: Clock, me: &str, disk: Disk) -> Rig {
     let dir = Dir::new("grant-use");
     let fake = Arc::new(Fake::default());
     *fake.me.lock().unwrap() = Some(id(me));
-    *fake.state.lock().unwrap() = Some(cluster(
-        "vault",
-        &[
-            job(JOB, "worker", JobState::Running),
-            job(OTHER_JOB, "worker", JobState::Running),
-        ],
-    ));
+    *fake.state.lock().unwrap() = Some(worker_state());
     let store = Arc::new(GrantStore::new(dir.path()));
     let masks = Arc::new(TailMasks::new());
     let marks = Arc::new(GrantMarks::new(dir.path()));
@@ -180,7 +201,6 @@ pub(crate) fn rig_full(clock: Clock, me: &str, disk: Disk) -> Rig {
             (fake.clone(), fake.clone()),
             (Arc::new(tree), clock),
         )
-        .with_known_wait(Duration::from_millis(80))
         .with_disk(disk),
     );
     Rig {
@@ -196,6 +216,19 @@ pub(crate) fn rig_full(clock: Clock, me: &str, disk: Disk) -> Rig {
 
 pub(crate) fn rig() -> Rig {
     rig_at(Arc::new(real_now), "worker")
+}
+
+pub(crate) fn rig_knowing_jobs(jobs: &[Job]) -> Rig {
+    let rig = rig();
+    *rig.fake.state.lock().unwrap() = Some(cluster("vault", jobs));
+    rig
+}
+
+pub(crate) fn rig_running_both() -> Rig {
+    rig_knowing_jobs(&[
+        job(JOB, "worker", JobState::Running),
+        job(OTHER_JOB, "worker", JobState::Running),
+    ])
 }
 
 pub(crate) fn caller(pid: u32) -> Caller {
@@ -417,3 +450,5 @@ fn bad_arguments_are_refused_before_anything_is_read() {
 mod deliver;
 #[path = "grant_fix_tests.rs"]
 mod fixes;
+#[path = "grant_worker_tests.rs"]
+mod worker;

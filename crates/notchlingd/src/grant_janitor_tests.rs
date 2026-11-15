@@ -1,7 +1,8 @@
 use super::*;
 use crate::cluster_redact::JobMasks;
 use crate::grant_use::tests::{
-    cluster, deliver_args, from_vault, job, put, real_now, rig, Rig, JOB, OTHER_JOB,
+    cluster, deliver_args, from_vault, job, put, real_now, rig, rig_running_both, Rig, JOB,
+    OTHER_JOB,
 };
 use notchling_engine::cluster::Tool;
 use std::sync::atomic::AtomicI64;
@@ -73,7 +74,7 @@ fn a_finished_job_is_ended_and_its_grants_go() {
 
 #[test]
 fn a_pruned_job_record_keeps_its_masks_and_mark() {
-    let rig = rig();
+    let rig = rig_running_both();
     rig.uses
         .deliver(&from_vault(), &deliver_args(JOB, "one", "V", "NL-MARKER-1"))
         .expect("stored");
@@ -246,7 +247,7 @@ fn the_janitor_fills_in_the_session_a_mark_lacked() {
 
 #[test]
 fn the_thread_sweeps_on_a_state_change_and_stops() {
-    let rig = rig();
+    let rig = rig_running_both();
     put(&rig, JOB, "one", "V", "NL-MARKER-1");
     let clock = Arc::new(AtomicI64::new(real_now()));
     let ticking = clock.clone();
