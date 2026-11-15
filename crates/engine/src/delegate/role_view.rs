@@ -45,6 +45,7 @@ pub struct Choice {
     /// The catalog's one-line advice for this pick.
     pub advice: Option<String>,
     /// False while the tool's live list is unknown (Antigravity's before a session reported it).
+    /// The marked model is then shown as is, unless the catalog says it is not for the job.
     pub checked: bool,
 }
 
@@ -66,6 +67,9 @@ fn choice(
     let checked = !live.models.is_empty();
     let (model, note) = if checked {
         resolve(&pick.model, &pick.effort, role, roles.tool(name), live)
+    } else if roles.tool(name).excluded(&pick.model, &pick.effort, role) {
+        // Without a live list there is no successor to offer, but an excluded pick is never shown.
+        (None, Some(format!("{} is not for {role}", pick.model)))
     } else {
         (Some(pick.model.clone()), None)
     };

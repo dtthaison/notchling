@@ -134,11 +134,54 @@ fn a_reinstall_that_wrote_says_so_and_a_refused_one_says_the_switch_is_off() {
         Ok(t::settings::skills_reinstalled())
     );
     assert_eq!(
-        reinstall_result(Ok(json!({"on": false, "applied": false}))),
+        reinstall_result(Ok(json!({"on": false, "applied": false,
+            "message": "install is off: the Swift app owns hooks"}))),
         Err(t::settings::skills_switch_off().to_owned())
     );
     assert_eq!(
         reinstall_result(Err("a skill failed".into())),
         Err("a skill failed".to_owned())
     );
+}
+
+#[test]
+fn a_reply_that_is_neither_applied_nor_off_is_not_called_the_switch() {
+    for odd in [
+        json!({}),
+        json!({"on": true, "applied": false, "message": "disk full"}),
+        json!({"hello": 1}),
+    ] {
+        assert_eq!(
+            reinstall_result(Ok(odd)),
+            Err(t::settings::reply_unreadable().to_owned())
+        );
+    }
+}
+
+#[test]
+fn a_skill_that_failed_to_write_is_not_reported_as_up_to_date() {
+    let reply = json!({"on": true, "applied": true, "plan": {"skills": [
+        {"name": "notchling-pages", "tool": "claude", "action": "update", "error": null},
+        {"name": "notchling-delegate", "tool": "codex", "action": "write",
+         "error": "permission denied"}]}});
+    assert_eq!(
+        reinstall_result(Ok(reply)),
+        Err("notchling-delegate: permission denied".to_owned())
+    );
+}
+
+#[test]
+fn an_error_is_shown_beside_the_button_even_while_the_switch_is_off() {
+    let off = SkillsShown::from_reply(reply(
+        false,
+        vec![skill("notchling-pages", "claude", "write", None)],
+    ));
+    assert_eq!(
+        beside_button(&off, None),
+        Some((t::settings::skills_switch_off().to_owned(), false))
+    );
+    let failed = ("Couldn't make the override file: no space".to_owned(), true);
+    assert_eq!(beside_button(&off, Some(&failed)), Some(failed.clone()));
+    let on = SkillsShown::from_reply(reply(true, vec![]));
+    assert_eq!(beside_button(&on, None), None);
 }

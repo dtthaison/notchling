@@ -3319,103 +3319,107 @@ pub mod settings {
         SHOW_PET.get()
     }
 
-    pub const SKILL_INSTALLED: Text = Text(592);
+    pub fn skill_error(skill: &str, why: &str) -> String {
+        crate::format(Text(592), &[Arg::Str(skill), Arg::Str(why)])
+    }
+
+    pub const SKILL_INSTALLED: Text = Text(593);
 
     pub fn skill_installed() -> &'static str {
         SKILL_INSTALLED.get()
     }
 
-    pub const SKILL_LEFT_ALONE: Text = Text(593);
+    pub const SKILL_LEFT_ALONE: Text = Text(594);
 
     pub fn skill_left_alone() -> &'static str {
         SKILL_LEFT_ALONE.get()
     }
 
-    pub const SKILL_NOT_INSTALLED: Text = Text(594);
+    pub const SKILL_NOT_INSTALLED: Text = Text(595);
 
     pub fn skill_not_installed() -> &'static str {
         SKILL_NOT_INSTALLED.get()
     }
 
-    pub const SKILL_OUT_OF_DATE: Text = Text(595);
+    pub const SKILL_OUT_OF_DATE: Text = Text(596);
 
     pub fn skill_out_of_date() -> &'static str {
         SKILL_OUT_OF_DATE.get()
     }
 
-    pub const SKILL_TOOL_MISSING: Text = Text(596);
+    pub const SKILL_TOOL_MISSING: Text = Text(597);
 
     pub fn skill_tool_missing() -> &'static str {
         SKILL_TOOL_MISSING.get()
     }
 
-    pub const SKILLS_CHECKING: Text = Text(597);
+    pub const SKILLS_CHECKING: Text = Text(598);
 
     pub fn skills_checking() -> &'static str {
         SKILLS_CHECKING.get()
     }
 
-    pub const SKILLS_DETACHED: Text = Text(598);
+    pub const SKILLS_DETACHED: Text = Text(599);
 
     pub fn skills_detached() -> &'static str {
         SKILLS_DETACHED.get()
     }
 
-    pub const SKILLS_FOOTER: Text = Text(599);
+    pub const SKILLS_FOOTER: Text = Text(600);
 
     pub fn skills_footer() -> &'static str {
         SKILLS_FOOTER.get()
     }
 
-    pub const SKILLS_REINSTALL: Text = Text(600);
+    pub const SKILLS_REINSTALL: Text = Text(601);
 
     pub fn skills_reinstall() -> &'static str {
         SKILLS_REINSTALL.get()
     }
 
-    pub const SKILLS_REINSTALLED: Text = Text(601);
+    pub const SKILLS_REINSTALLED: Text = Text(602);
 
     pub fn skills_reinstalled() -> &'static str {
         SKILLS_REINSTALLED.get()
     }
 
-    pub const SKILLS_REINSTALLING: Text = Text(602);
+    pub const SKILLS_REINSTALLING: Text = Text(603);
 
     pub fn skills_reinstalling() -> &'static str {
         SKILLS_REINSTALLING.get()
     }
 
-    pub const SKILLS_SWITCH_OFF: Text = Text(603);
+    pub const SKILLS_SWITCH_OFF: Text = Text(604);
 
     pub fn skills_switch_off() -> &'static str {
         SKILLS_SWITCH_OFF.get()
     }
 
-    pub const SKILLS_TITLE: Text = Text(604);
+    pub const SKILLS_TITLE: Text = Text(605);
 
     pub fn skills_title() -> &'static str {
         SKILLS_TITLE.get()
     }
 
-    pub const TITLE: Text = Text(605);
+    pub const TITLE: Text = Text(606);
 
     pub fn title() -> &'static str {
         TITLE.get()
     }
 
-    pub const TOOL_ANTIGRAVITY: Text = Text(606);
+    pub const TOOL_ANTIGRAVITY: Text = Text(607);
 
     pub fn tool_antigravity() -> &'static str {
         TOOL_ANTIGRAVITY.get()
     }
 
-    pub const TOOL_CLAUDE_CODE: Text = Text(607);
+    pub const TOOL_CLAUDE_CODE: Text = Text(608);
 
     pub fn tool_claude_code() -> &'static str {
         TOOL_CLAUDE_CODE.get()
     }
 
-    pub const TOOL_CODEX: Text = Text(608);
+    pub const TOOL_CODEX: Text = Text(609);
 
     pub fn tool_codex() -> &'static str {
         TOOL_CODEX.get()
@@ -3426,329 +3430,329 @@ pub mod units {
     use crate::{Arg, Num, Text};
 
     pub fn age_days(n: impl Into<Num>) -> String {
-        crate::format(Text(609), &[Arg::Num(n.into())])
-    }
-
-    pub fn age_hours(n: impl Into<Num>) -> String {
         crate::format(Text(610), &[Arg::Num(n.into())])
     }
 
-    pub fn age_minutes(n: impl Into<Num>) -> String {
+    pub fn age_hours(n: impl Into<Num>) -> String {
         crate::format(Text(611), &[Arg::Num(n.into())])
     }
 
-    pub const AGE_NOW: Text = Text(612);
+    pub fn age_minutes(n: impl Into<Num>) -> String {
+        crate::format(Text(612), &[Arg::Num(n.into())])
+    }
+
+    pub const AGE_NOW: Text = Text(613);
 
     pub fn age_now() -> &'static str {
         AGE_NOW.get()
     }
 
-    pub const AM: Text = Text(613);
+    pub const AM: Text = Text(614);
 
     pub fn am() -> &'static str {
         AM.get()
     }
 
     pub fn clock(hour: impl Into<Num>, minute: &str, suffix: &str) -> String {
-        crate::format(Text(614), &[Arg::Num(hour.into()), Arg::Str(minute), Arg::Str(suffix)])
+        crate::format(Text(615), &[Arg::Num(hour.into()), Arg::Str(minute), Arg::Str(suffix)])
     }
 
     pub fn date_full(weekday: &str, month: &str, day: &str, year: &str, time: &str) -> String {
-        crate::format(Text(615), &[Arg::Str(weekday), Arg::Str(month), Arg::Str(day), Arg::Str(year), Arg::Str(time)])
+        crate::format(Text(616), &[Arg::Str(weekday), Arg::Str(month), Arg::Str(day), Arg::Str(year), Arg::Str(time)])
     }
 
     pub fn date_short(month: &str, day: &str) -> String {
-        crate::format(Text(616), &[Arg::Str(month), Arg::Str(day)])
+        crate::format(Text(617), &[Arg::Str(month), Arg::Str(day)])
     }
 
     pub fn date_year(month: &str, day: &str, year: &str) -> String {
-        crate::format(Text(617), &[Arg::Str(month), Arg::Str(day), Arg::Str(year)])
+        crate::format(Text(618), &[Arg::Str(month), Arg::Str(day), Arg::Str(year)])
     }
 
     pub fn duration_hours(hours: impl Into<Num>, minutes: impl Into<Num>) -> String {
-        crate::format(Text(618), &[Arg::Num(hours.into()), Arg::Num(minutes.into())])
+        crate::format(Text(619), &[Arg::Num(hours.into()), Arg::Num(minutes.into())])
     }
 
     pub fn duration_minutes(minutes: impl Into<Num>, seconds: &str) -> String {
-        crate::format(Text(619), &[Arg::Num(minutes.into()), Arg::Str(seconds)])
+        crate::format(Text(620), &[Arg::Num(minutes.into()), Arg::Str(seconds)])
     }
 
     pub fn duration_seconds(n: impl Into<Num>) -> String {
-        crate::format(Text(620), &[Arg::Num(n.into())])
+        crate::format(Text(621), &[Arg::Num(n.into())])
     }
 
     pub fn hours_ago(count: impl Into<Num>) -> String {
-        crate::format(Text(621), &[Arg::Num(count.into())])
+        crate::format(Text(622), &[Arg::Num(count.into())])
     }
 
-    pub const JUST_NOW: Text = Text(622);
+    pub const JUST_NOW: Text = Text(623);
 
     pub fn just_now() -> &'static str {
         JUST_NOW.get()
     }
 
-    pub const LIST_SEPARATOR: Text = Text(623);
+    pub const LIST_SEPARATOR: Text = Text(624);
 
     pub fn list_separator() -> &'static str {
         LIST_SEPARATOR.get()
     }
 
     pub fn millions(value: &str) -> String {
-        crate::format(Text(624), &[Arg::Str(value)])
+        crate::format(Text(625), &[Arg::Str(value)])
     }
 
     pub fn minutes_ago(count: impl Into<Num>) -> String {
-        crate::format(Text(625), &[Arg::Num(count.into())])
+        crate::format(Text(626), &[Arg::Num(count.into())])
     }
 
-    pub const MONTH_APR: Text = Text(626);
+    pub const MONTH_APR: Text = Text(627);
 
     pub fn month_apr() -> &'static str {
         MONTH_APR.get()
     }
 
-    pub const MONTH_AUG: Text = Text(627);
+    pub const MONTH_AUG: Text = Text(628);
 
     pub fn month_aug() -> &'static str {
         MONTH_AUG.get()
     }
 
-    pub const MONTH_DEC: Text = Text(628);
+    pub const MONTH_DEC: Text = Text(629);
 
     pub fn month_dec() -> &'static str {
         MONTH_DEC.get()
     }
 
-    pub const MONTH_FEB: Text = Text(629);
+    pub const MONTH_FEB: Text = Text(630);
 
     pub fn month_feb() -> &'static str {
         MONTH_FEB.get()
     }
 
-    pub const MONTH_JAN: Text = Text(630);
+    pub const MONTH_JAN: Text = Text(631);
 
     pub fn month_jan() -> &'static str {
         MONTH_JAN.get()
     }
 
-    pub const MONTH_JUL: Text = Text(631);
+    pub const MONTH_JUL: Text = Text(632);
 
     pub fn month_jul() -> &'static str {
         MONTH_JUL.get()
     }
 
-    pub const MONTH_JUN: Text = Text(632);
+    pub const MONTH_JUN: Text = Text(633);
 
     pub fn month_jun() -> &'static str {
         MONTH_JUN.get()
     }
 
-    pub const MONTH_LONG_APR: Text = Text(633);
+    pub const MONTH_LONG_APR: Text = Text(634);
 
     pub fn month_long_apr() -> &'static str {
         MONTH_LONG_APR.get()
     }
 
-    pub const MONTH_LONG_AUG: Text = Text(634);
+    pub const MONTH_LONG_AUG: Text = Text(635);
 
     pub fn month_long_aug() -> &'static str {
         MONTH_LONG_AUG.get()
     }
 
-    pub const MONTH_LONG_DEC: Text = Text(635);
+    pub const MONTH_LONG_DEC: Text = Text(636);
 
     pub fn month_long_dec() -> &'static str {
         MONTH_LONG_DEC.get()
     }
 
-    pub const MONTH_LONG_FEB: Text = Text(636);
+    pub const MONTH_LONG_FEB: Text = Text(637);
 
     pub fn month_long_feb() -> &'static str {
         MONTH_LONG_FEB.get()
     }
 
-    pub const MONTH_LONG_JAN: Text = Text(637);
+    pub const MONTH_LONG_JAN: Text = Text(638);
 
     pub fn month_long_jan() -> &'static str {
         MONTH_LONG_JAN.get()
     }
 
-    pub const MONTH_LONG_JUL: Text = Text(638);
+    pub const MONTH_LONG_JUL: Text = Text(639);
 
     pub fn month_long_jul() -> &'static str {
         MONTH_LONG_JUL.get()
     }
 
-    pub const MONTH_LONG_JUN: Text = Text(639);
+    pub const MONTH_LONG_JUN: Text = Text(640);
 
     pub fn month_long_jun() -> &'static str {
         MONTH_LONG_JUN.get()
     }
 
-    pub const MONTH_LONG_MAR: Text = Text(640);
+    pub const MONTH_LONG_MAR: Text = Text(641);
 
     pub fn month_long_mar() -> &'static str {
         MONTH_LONG_MAR.get()
     }
 
-    pub const MONTH_LONG_MAY: Text = Text(641);
+    pub const MONTH_LONG_MAY: Text = Text(642);
 
     pub fn month_long_may() -> &'static str {
         MONTH_LONG_MAY.get()
     }
 
-    pub const MONTH_LONG_NOV: Text = Text(642);
+    pub const MONTH_LONG_NOV: Text = Text(643);
 
     pub fn month_long_nov() -> &'static str {
         MONTH_LONG_NOV.get()
     }
 
-    pub const MONTH_LONG_OCT: Text = Text(643);
+    pub const MONTH_LONG_OCT: Text = Text(644);
 
     pub fn month_long_oct() -> &'static str {
         MONTH_LONG_OCT.get()
     }
 
-    pub const MONTH_LONG_SEP: Text = Text(644);
+    pub const MONTH_LONG_SEP: Text = Text(645);
 
     pub fn month_long_sep() -> &'static str {
         MONTH_LONG_SEP.get()
     }
 
-    pub const MONTH_MAR: Text = Text(645);
+    pub const MONTH_MAR: Text = Text(646);
 
     pub fn month_mar() -> &'static str {
         MONTH_MAR.get()
     }
 
-    pub const MONTH_MAY: Text = Text(646);
+    pub const MONTH_MAY: Text = Text(647);
 
     pub fn month_may() -> &'static str {
         MONTH_MAY.get()
     }
 
-    pub const MONTH_NOV: Text = Text(647);
+    pub const MONTH_NOV: Text = Text(648);
 
     pub fn month_nov() -> &'static str {
         MONTH_NOV.get()
     }
 
-    pub const MONTH_OCT: Text = Text(648);
+    pub const MONTH_OCT: Text = Text(649);
 
     pub fn month_oct() -> &'static str {
         MONTH_OCT.get()
     }
 
-    pub const MONTH_SEP: Text = Text(649);
+    pub const MONTH_SEP: Text = Text(650);
 
     pub fn month_sep() -> &'static str {
         MONTH_SEP.get()
     }
 
-    pub const PM: Text = Text(650);
+    pub const PM: Text = Text(651);
 
     pub fn pm() -> &'static str {
         PM.get()
     }
 
     pub fn reset_clock(weekday: &str, hour: impl Into<Num>, minute: &str, suffix: &str) -> String {
-        crate::format(Text(651), &[Arg::Str(weekday), Arg::Num(hour.into()), Arg::Str(minute), Arg::Str(suffix)])
+        crate::format(Text(652), &[Arg::Str(weekday), Arg::Num(hour.into()), Arg::Str(minute), Arg::Str(suffix)])
     }
 
     pub fn thousands(value: &str) -> String {
-        crate::format(Text(652), &[Arg::Str(value)])
+        crate::format(Text(653), &[Arg::Str(value)])
     }
 
-    pub const WEEKDAY_FRI: Text = Text(653);
+    pub const WEEKDAY_FRI: Text = Text(654);
 
     pub fn weekday_fri() -> &'static str {
         WEEKDAY_FRI.get()
     }
 
-    pub const WEEKDAY_LONG_FRIDAY: Text = Text(654);
+    pub const WEEKDAY_LONG_FRIDAY: Text = Text(655);
 
     pub fn weekday_long_friday() -> &'static str {
         WEEKDAY_LONG_FRIDAY.get()
     }
 
-    pub const WEEKDAY_LONG_MONDAY: Text = Text(655);
+    pub const WEEKDAY_LONG_MONDAY: Text = Text(656);
 
     pub fn weekday_long_monday() -> &'static str {
         WEEKDAY_LONG_MONDAY.get()
     }
 
-    pub const WEEKDAY_LONG_SATURDAY: Text = Text(656);
+    pub const WEEKDAY_LONG_SATURDAY: Text = Text(657);
 
     pub fn weekday_long_saturday() -> &'static str {
         WEEKDAY_LONG_SATURDAY.get()
     }
 
-    pub const WEEKDAY_LONG_SUNDAY: Text = Text(657);
+    pub const WEEKDAY_LONG_SUNDAY: Text = Text(658);
 
     pub fn weekday_long_sunday() -> &'static str {
         WEEKDAY_LONG_SUNDAY.get()
     }
 
-    pub const WEEKDAY_LONG_THURSDAY: Text = Text(658);
+    pub const WEEKDAY_LONG_THURSDAY: Text = Text(659);
 
     pub fn weekday_long_thursday() -> &'static str {
         WEEKDAY_LONG_THURSDAY.get()
     }
 
-    pub const WEEKDAY_LONG_TUESDAY: Text = Text(659);
+    pub const WEEKDAY_LONG_TUESDAY: Text = Text(660);
 
     pub fn weekday_long_tuesday() -> &'static str {
         WEEKDAY_LONG_TUESDAY.get()
     }
 
-    pub const WEEKDAY_LONG_WEDNESDAY: Text = Text(660);
+    pub const WEEKDAY_LONG_WEDNESDAY: Text = Text(661);
 
     pub fn weekday_long_wednesday() -> &'static str {
         WEEKDAY_LONG_WEDNESDAY.get()
     }
 
-    pub const WEEKDAY_MON: Text = Text(661);
+    pub const WEEKDAY_MON: Text = Text(662);
 
     pub fn weekday_mon() -> &'static str {
         WEEKDAY_MON.get()
     }
 
-    pub const WEEKDAY_SAT: Text = Text(662);
+    pub const WEEKDAY_SAT: Text = Text(663);
 
     pub fn weekday_sat() -> &'static str {
         WEEKDAY_SAT.get()
     }
 
-    pub const WEEKDAY_SUN: Text = Text(663);
+    pub const WEEKDAY_SUN: Text = Text(664);
 
     pub fn weekday_sun() -> &'static str {
         WEEKDAY_SUN.get()
     }
 
-    pub const WEEKDAY_THU: Text = Text(664);
+    pub const WEEKDAY_THU: Text = Text(665);
 
     pub fn weekday_thu() -> &'static str {
         WEEKDAY_THU.get()
     }
 
-    pub const WEEKDAY_TUE: Text = Text(665);
+    pub const WEEKDAY_TUE: Text = Text(666);
 
     pub fn weekday_tue() -> &'static str {
         WEEKDAY_TUE.get()
     }
 
-    pub const WEEKDAY_WED: Text = Text(666);
+    pub const WEEKDAY_WED: Text = Text(667);
 
     pub fn weekday_wed() -> &'static str {
         WEEKDAY_WED.get()
     }
 
     pub fn yesterday(time: &str) -> String {
-        crate::format(Text(667), &[Arg::Str(time)])
+        crate::format(Text(668), &[Arg::Str(time)])
     }
 }
 
-pub(crate) const COUNT: usize = 668;
+pub(crate) const COUNT: usize = 669;
 
 pub(crate) static KEYS: [(&str, Text); COUNT] = [
     ("chat-account-lane", Text(0)),
@@ -4343,82 +4347,83 @@ pub(crate) static KEYS: [(&str, Text); COUNT] = [
     ("settings-shortcut-recording", Text(589)),
     ("settings-show-last-reply", Text(590)),
     ("settings-show-pet", Text(591)),
-    ("settings-skill-installed", Text(592)),
-    ("settings-skill-left-alone", Text(593)),
-    ("settings-skill-not-installed", Text(594)),
-    ("settings-skill-out-of-date", Text(595)),
-    ("settings-skill-tool-missing", Text(596)),
-    ("settings-skills-checking", Text(597)),
-    ("settings-skills-detached", Text(598)),
-    ("settings-skills-footer", Text(599)),
-    ("settings-skills-reinstall", Text(600)),
-    ("settings-skills-reinstalled", Text(601)),
-    ("settings-skills-reinstalling", Text(602)),
-    ("settings-skills-switch-off", Text(603)),
-    ("settings-skills-title", Text(604)),
-    ("settings-title", Text(605)),
-    ("settings-tool-antigravity", Text(606)),
-    ("settings-tool-claude-code", Text(607)),
-    ("settings-tool-codex", Text(608)),
-    ("units-age-days", Text(609)),
-    ("units-age-hours", Text(610)),
-    ("units-age-minutes", Text(611)),
-    ("units-age-now", Text(612)),
-    ("units-am", Text(613)),
-    ("units-clock", Text(614)),
-    ("units-date-full", Text(615)),
-    ("units-date-short", Text(616)),
-    ("units-date-year", Text(617)),
-    ("units-duration-hours", Text(618)),
-    ("units-duration-minutes", Text(619)),
-    ("units-duration-seconds", Text(620)),
-    ("units-hours-ago", Text(621)),
-    ("units-just-now", Text(622)),
-    ("units-list-separator", Text(623)),
-    ("units-millions", Text(624)),
-    ("units-minutes-ago", Text(625)),
-    ("units-month-apr", Text(626)),
-    ("units-month-aug", Text(627)),
-    ("units-month-dec", Text(628)),
-    ("units-month-feb", Text(629)),
-    ("units-month-jan", Text(630)),
-    ("units-month-jul", Text(631)),
-    ("units-month-jun", Text(632)),
-    ("units-month-long-apr", Text(633)),
-    ("units-month-long-aug", Text(634)),
-    ("units-month-long-dec", Text(635)),
-    ("units-month-long-feb", Text(636)),
-    ("units-month-long-jan", Text(637)),
-    ("units-month-long-jul", Text(638)),
-    ("units-month-long-jun", Text(639)),
-    ("units-month-long-mar", Text(640)),
-    ("units-month-long-may", Text(641)),
-    ("units-month-long-nov", Text(642)),
-    ("units-month-long-oct", Text(643)),
-    ("units-month-long-sep", Text(644)),
-    ("units-month-mar", Text(645)),
-    ("units-month-may", Text(646)),
-    ("units-month-nov", Text(647)),
-    ("units-month-oct", Text(648)),
-    ("units-month-sep", Text(649)),
-    ("units-pm", Text(650)),
-    ("units-reset-clock", Text(651)),
-    ("units-thousands", Text(652)),
-    ("units-weekday-fri", Text(653)),
-    ("units-weekday-long-friday", Text(654)),
-    ("units-weekday-long-monday", Text(655)),
-    ("units-weekday-long-saturday", Text(656)),
-    ("units-weekday-long-sunday", Text(657)),
-    ("units-weekday-long-thursday", Text(658)),
-    ("units-weekday-long-tuesday", Text(659)),
-    ("units-weekday-long-wednesday", Text(660)),
-    ("units-weekday-mon", Text(661)),
-    ("units-weekday-sat", Text(662)),
-    ("units-weekday-sun", Text(663)),
-    ("units-weekday-thu", Text(664)),
-    ("units-weekday-tue", Text(665)),
-    ("units-weekday-wed", Text(666)),
-    ("units-yesterday", Text(667)),
+    ("settings-skill-error", Text(592)),
+    ("settings-skill-installed", Text(593)),
+    ("settings-skill-left-alone", Text(594)),
+    ("settings-skill-not-installed", Text(595)),
+    ("settings-skill-out-of-date", Text(596)),
+    ("settings-skill-tool-missing", Text(597)),
+    ("settings-skills-checking", Text(598)),
+    ("settings-skills-detached", Text(599)),
+    ("settings-skills-footer", Text(600)),
+    ("settings-skills-reinstall", Text(601)),
+    ("settings-skills-reinstalled", Text(602)),
+    ("settings-skills-reinstalling", Text(603)),
+    ("settings-skills-switch-off", Text(604)),
+    ("settings-skills-title", Text(605)),
+    ("settings-title", Text(606)),
+    ("settings-tool-antigravity", Text(607)),
+    ("settings-tool-claude-code", Text(608)),
+    ("settings-tool-codex", Text(609)),
+    ("units-age-days", Text(610)),
+    ("units-age-hours", Text(611)),
+    ("units-age-minutes", Text(612)),
+    ("units-age-now", Text(613)),
+    ("units-am", Text(614)),
+    ("units-clock", Text(615)),
+    ("units-date-full", Text(616)),
+    ("units-date-short", Text(617)),
+    ("units-date-year", Text(618)),
+    ("units-duration-hours", Text(619)),
+    ("units-duration-minutes", Text(620)),
+    ("units-duration-seconds", Text(621)),
+    ("units-hours-ago", Text(622)),
+    ("units-just-now", Text(623)),
+    ("units-list-separator", Text(624)),
+    ("units-millions", Text(625)),
+    ("units-minutes-ago", Text(626)),
+    ("units-month-apr", Text(627)),
+    ("units-month-aug", Text(628)),
+    ("units-month-dec", Text(629)),
+    ("units-month-feb", Text(630)),
+    ("units-month-jan", Text(631)),
+    ("units-month-jul", Text(632)),
+    ("units-month-jun", Text(633)),
+    ("units-month-long-apr", Text(634)),
+    ("units-month-long-aug", Text(635)),
+    ("units-month-long-dec", Text(636)),
+    ("units-month-long-feb", Text(637)),
+    ("units-month-long-jan", Text(638)),
+    ("units-month-long-jul", Text(639)),
+    ("units-month-long-jun", Text(640)),
+    ("units-month-long-mar", Text(641)),
+    ("units-month-long-may", Text(642)),
+    ("units-month-long-nov", Text(643)),
+    ("units-month-long-oct", Text(644)),
+    ("units-month-long-sep", Text(645)),
+    ("units-month-mar", Text(646)),
+    ("units-month-may", Text(647)),
+    ("units-month-nov", Text(648)),
+    ("units-month-oct", Text(649)),
+    ("units-month-sep", Text(650)),
+    ("units-pm", Text(651)),
+    ("units-reset-clock", Text(652)),
+    ("units-thousands", Text(653)),
+    ("units-weekday-fri", Text(654)),
+    ("units-weekday-long-friday", Text(655)),
+    ("units-weekday-long-monday", Text(656)),
+    ("units-weekday-long-saturday", Text(657)),
+    ("units-weekday-long-sunday", Text(658)),
+    ("units-weekday-long-thursday", Text(659)),
+    ("units-weekday-long-tuesday", Text(660)),
+    ("units-weekday-long-wednesday", Text(661)),
+    ("units-weekday-mon", Text(662)),
+    ("units-weekday-sat", Text(663)),
+    ("units-weekday-sun", Text(664)),
+    ("units-weekday-thu", Text(665)),
+    ("units-weekday-tue", Text(666)),
+    ("units-weekday-wed", Text(667)),
+    ("units-yesterday", Text(668)),
 ];
 
 pub(crate) static EN: [Body; COUNT] = [
@@ -5014,6 +5019,7 @@ pub(crate) static EN: [Body; COUNT] = [
     Body::Plain("Press a shortcut…"),
     Body::Plain("Show the last reply when peeking"),
     Body::Plain("Animate pet"),
+    Body::Parts(&[Part::Str(0), Part::Lit(": "), Part::Str(1)]),
     Body::Plain("Installed"),
     Body::Plain("Left alone"),
     Body::Plain("Not installed"),

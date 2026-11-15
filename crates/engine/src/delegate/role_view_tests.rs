@@ -183,3 +183,35 @@ fn a_model_the_catalog_says_is_not_for_the_job_is_never_shown_as_the_choice() {
     assert_eq!(flash.model, None);
     assert_eq!(flash.source, Source::Override);
 }
+
+#[test]
+fn an_excluded_pick_is_not_shown_even_when_the_live_list_is_unknown() {
+    let built = Roles::built_in();
+    let roles = user(
+        "excluded-unchecked",
+        r#"{"antigravity": {"picks": [{"model": "gemini-4-flash", "effort": "high", "roles": ["review"]},
+            {"model": "gemini-4-argon", "effort": "ultra", "roles": ["review"]}]}}"#,
+    );
+    let v = views(&roles, &built, &live(&[]), &live(&[]));
+    let choices = &of(&v, "review").choices;
+    let flash = choices
+        .iter()
+        .find(|c| c.marked == "gemini-4-flash")
+        .unwrap();
+    assert_eq!(flash.model, None);
+    assert!(!flash.checked);
+    assert_eq!(
+        flash.note.as_deref(),
+        Some("gemini-4-flash is not for review")
+    );
+    let ultra = choices
+        .iter()
+        .find(|c| c.marked == "gemini-4-argon")
+        .unwrap();
+    assert_eq!(ultra.model, None, "an excluded effort counts too");
+    let hydrogen = choices
+        .iter()
+        .find(|c| c.marked == "gemini-4-hydrogen")
+        .unwrap();
+    assert_eq!(hydrogen.model.as_deref(), Some("gemini-4-hydrogen"));
+}

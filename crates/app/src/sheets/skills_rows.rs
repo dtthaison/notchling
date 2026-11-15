@@ -191,13 +191,44 @@ impl SkillsShown {
     }
 }
 
-/// What a reinstall's reply says: `Ok` when it wrote (or had nothing to write), the daemon's
-/// own words when it refused or a skill failed.
+/// The line beside Reinstall Skills and whether it is an error: the last result (a failed
+/// reinstall, an override file that couldn't be made) first, so the standing switch note never
+/// hides it, else the switch note.
+pub fn beside_button(
+    skills: &SkillsShown,
+    result: Option<&(String, bool)>,
+) -> Option<(String, bool)> {
+    match result {
+        Some((text, failed)) => Some((text.clone(), *failed)),
+        None => skills.switch_note().map(|n| (n.to_owned(), false)),
+    }
+}
+
+/// What a reinstall's reply says: `Ok` when it wrote (or had nothing to write); the switch-off
+/// line when the daemon says `on: false`; the first skill's error when one failed; a reply
+/// that says none of these is one this app doesn't read.
 pub fn reinstall_result(reply: Result<Value, String>) -> Result<&'static str, String> {
     let reply = reply?;
+    if reply.get("on").and_then(Value::as_bool) == Some(false) {
+        return Err(t::settings::skills_switch_off().to_owned());
+    }
+    let failed = reply
+        .get("plan")
+        .and_then(|p| p.get("skills"))
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .find_map(|s| {
+            let why = s.get("error").and_then(Value::as_str)?;
+            let name = s.get("name").and_then(Value::as_str).unwrap_or_default();
+            Some(t::settings::skill_error(name, why))
+        });
+    if let Some(failed) = failed {
+        return Err(failed);
+    }
     if reply.get("applied").and_then(Value::as_bool) == Some(true) {
         Ok(t::settings::skills_reinstalled())
     } else {
-        Err(t::settings::skills_switch_off().to_owned())
+        Err(t::settings::reply_unreadable().to_owned())
     }
 }

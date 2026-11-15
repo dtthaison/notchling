@@ -627,3 +627,6 @@ settings-override-footer = An entry here replaces the built-in one for the same 
 
 # Shown on the Skills & Models page when the daemon's answer isn't in a shape this version of the app reads.
 settings-reply-unreadable = The daemon's answer isn't one this app reads.
+
+# Line under Reinstall Skills when one skill could not be written. $skill is the skill's folder name, $why what went wrong.
+settings-skill-error = { $skill }: { $why }

@@ -7,7 +7,7 @@ use notchling_locale as t;
 use super::client_view::{action, row_shell, Click};
 use super::models_rows::{ChoiceLine, ModelsShown, RoleLine, Source};
 use super::settings_hooks_view::tag;
-use super::skills_rows::{SkillLine, SkillState, SkillsShown, ToolSkills};
+use super::skills_rows::{beside_button, SkillLine, SkillState, SkillsShown, ToolSkills};
 
 #[derive(Clone)]
 pub struct SkillsHandlers {
@@ -129,11 +129,9 @@ fn skills_section(page: &SkillsPageState, h: &SkillsHandlers, a: Appearance, cx:
         &h.reinstall,
         a,
     ));
-    if let Some(why) = page.skills.switch_note() {
-        buttons = buttons.child(label(why, TypeRole::Meta, Ink::TextMuted, a).flex_1());
-    } else if let Some((text, failed)) = page.result {
-        let ink = if *failed { Ink::Needs } else { Ink::TextMuted };
-        buttons = buttons.child(label(text, TypeRole::Meta, ink, a).flex_1());
+    if let Some((text, failed)) = beside_button(page.skills, page.result) {
+        let ink = if failed { Ink::Needs } else { Ink::TextMuted };
+        buttons = buttons.child(label(&text, TypeRole::Meta, ink, a).flex_1());
     }
     out.child(buttons)
         .child(note(t::settings::skills_footer(), a))

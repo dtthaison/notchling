@@ -254,7 +254,7 @@ file and the daemon's own cache, and the one thing it writes is that cache.
   is the user's own entry, `live` when the marked model is gone and its successor stands in, else
   `built_in`. `model` is `null` when nothing live is in the marked model's family. `checked` is
   false while the tool's live list is unknown (Antigravity's, until a session reported it): `model`
-  is then the marked one, not verified. `note` is English text from the engine, the same as the
+  is then the marked one, not verified, or `null` with a `note` when the catalog says that model (or effort) is not for the role. `note` is English text from the engine, the same as the
   command line's `note:` line. `override.state` is `unreadable` for a file the loaders skip (not
   JSON, or not an object).
 - The same catalog is read elsewhere in the daemon: `cost.summary`'s prices (`cost_ops`), the

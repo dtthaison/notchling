@@ -542,3 +542,29 @@ fn a_tool_that_is_not_installed_is_flagged_so_settings_need_not_read_the_reason(
     let claude = skills.iter().find(|s| s["tool"] == "claude").unwrap();
     assert_eq!(claude["tool_missing"], false);
 }
+
+#[test]
+fn applying_only_skill_names_writes_skills_and_leaves_settings_json_alone() {
+    let dir = Dir::new("skillsonly");
+    let own = r#"{"hooks": {"PostToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": "guard-bash"}]}]}}"#;
+    let (ops, _) = ops_for(rig(&dir, Some(own)), true);
+    let plan = ops.run(ops::INSTALL_PLAN, &json!({})).unwrap();
+    let names: Vec<String> = plan["plan"]["skills"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["name"].as_str().unwrap().to_owned())
+        .collect();
+    assert!(!names.is_empty());
+    let reply = ops
+        .run(ops::INSTALL_APPLY, &json!({"what": names}))
+        .unwrap();
+    assert_eq!(reply["applied"], true);
+    assert_eq!(
+        fs::read_to_string(dir.path("home/.claude/settings.json")).unwrap(),
+        own
+    );
+    assert!(dir
+        .path("home/.claude/skills/notchling-delegate/SKILL.md")
+        .exists());
+}

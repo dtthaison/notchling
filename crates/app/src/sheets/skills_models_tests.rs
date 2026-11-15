@@ -70,3 +70,32 @@ fn with_no_daemon_both_parts_say_so() {
     assert_eq!(skills, SkillsShown::Detached);
     assert_eq!(models, super::models_rows::ModelsShown::Detached);
 }
+
+#[test]
+fn a_real_plan_reply_with_hooks_gives_skill_names_only_and_the_apply_leaves_the_hooks() {
+    let plan = json!({"on": true, "applied": false, "plan": {
+        "action": "install", "changed": true, "blocked": null,
+        "hooks": {"file": "/h/settings.json", "state": "present", "read_only": false,
+            "refused": null, "changed": true,
+            "changes": ["add PreToolUse (AskUserQuestion): hook"], "notes": [],
+            "present": [{"event": "PreToolUse", "matcher": "Artifact", "origin": "notchling",
+                "command": "x", "managed": true}]},
+        "skills": [
+            {"name": "notchling-pages", "tool": "claude", "action": "update", "reason": null,
+             "tool_missing": false, "error": null},
+            {"name": "notchling-delegate", "tool": "codex", "action": "write", "reason": null,
+             "tool_missing": false, "error": null}]}});
+    let shown = SkillsShown::from_reply(Ok(plan));
+    let names = shown.names();
+    assert_eq!(names, ["notchling-pages", "notchling-delegate"]);
+    for hook_part in ["prompt_hooks", "page_hooks"] {
+        assert!(!names.iter().any(|n| n == hook_part));
+    }
+    let (actions, fake) = rig();
+    reinstall(&actions, &names).unwrap();
+    let seen = fake.seen.lock().unwrap();
+    assert_eq!(
+        seen[0].1["what"],
+        json!(["notchling-pages", "notchling-delegate"])
+    );
+}
