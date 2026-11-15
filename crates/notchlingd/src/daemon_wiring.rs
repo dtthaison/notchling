@@ -700,6 +700,7 @@ impl Wired {
         if let Some(tell) = cluster.peer_teller() {
             outbox.set_tell(tell);
         }
+        outbox.set_remote(cluster.remote_outbox());
         Wired {
             acting,
             codex,

@@ -1,16 +1,18 @@
 use crate::acting_ops::Room;
 use crate::cluster_node::ClusterNode;
 use crate::cluster_sessions::{peers_of, Gate, NodeSource, Peer};
+use crate::outbox_ops::RemoteRows;
 use notchling_engine::cluster::{qualify, NodeId};
 use notchling_local_api::{topics, ApiError};
 use serde_json::{json, Value};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::Duration;
 
 pub const OUTBOX_LIST: &str = "outbox.list";
 pub const REFRESH_MS: u64 = 30_000;
+pub const RETRY_MS: u64 = 5_000;
 pub const MAX_ROWS: usize = 2_000;
 const LOOP_EVERY: Duration = Duration::from_secs(1);
 
@@ -32,10 +34,13 @@ impl OutboxSource for NodeSource {
     }
 }
 
+type Known = Vec<(String, Value)>;
+
 #[derive(Default)]
 struct Remote {
-    rows: BTreeMap<String, Value>,
+    rows: Known,
     next_at: Option<u64>,
+    heard: u64,
 }
 
 #[derive(Default)]
@@ -56,18 +61,22 @@ fn text<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
     value.get(key).and_then(Value::as_str)
 }
 
-fn qualified_rows(node: &NodeId, answer: Value) -> Option<BTreeMap<String, Value>> {
+fn qualified_rows(node: &NodeId, answer: Value) -> Option<Known> {
     let Value::Array(rows) = answer else {
         return None;
     };
-    let mut out = BTreeMap::new();
+    let mut seen = HashSet::new();
+    let mut out = Vec::new();
     for mut row in rows.into_iter().take(MAX_ROWS) {
         let (Some(id), Some(session)) = (text(&row, "id"), text(&row, "session")) else {
             continue;
         };
         let (id, session) = (id.to_string(), qualify(node, session));
+        if !seen.insert(id.clone()) {
+            continue;
+        }
         row["session"] = Value::String(session);
-        out.insert(id, row);
+        out.push((id, row));
     }
     Some(out)
 }
@@ -131,7 +140,7 @@ impl RemoteOutbox {
         if name == topics::OUTBOX_REMOVED {
             if let (Some(id), Some(session)) = (text(data, "id"), text(data, "session")) {
                 if let Some(remote) = lock(&self.book).nodes.get_mut(from) {
-                    remote.rows.remove(id);
+                    remote.rows.retain(|(known, _)| known != id);
                 }
                 let shown = qualify(from, session);
                 let why = text(data, "why").unwrap_or("removed");
@@ -142,6 +151,9 @@ impl RemoteOutbox {
                 );
             }
         }
+        if let Some(remote) = lock(&self.book).nodes.get_mut(from) {
+            remote.heard += 1;
+        }
         self.mark_dirty(from);
     }
 
@@ -150,7 +162,7 @@ impl RemoteOutbox {
             self.clear();
             return;
         }
-        let wanted: Vec<NodeId> = {
+        let wanted: Vec<(NodeId, u64)> = {
             let mut book = lock(&self.book);
             book.nodes.retain(|id, _| peers.iter().any(|p| p.id == *id));
             let dirty = std::mem::take(&mut book.dirty);
@@ -163,12 +175,12 @@ impl RemoteOutbox {
                 }
                 let due = remote.next_at.is_none_or(|at| now >= at);
                 if due || dirty.contains(&peer.id) {
-                    wanted.push(peer.id.clone());
+                    wanted.push((peer.id.clone(), remote.heard));
                 }
             }
             wanted
         };
-        for id in wanted {
+        for (id, heard) in wanted {
             let answer = source
                 .list(&id)
                 .ok()
@@ -178,10 +190,18 @@ impl RemoteOutbox {
                 let Some(remote) = book.nodes.get_mut(&id) else {
                     continue;
                 };
-                remote.next_at = Some(now + REFRESH_MS);
+                if remote.heard != heard {
+                    continue;
+                }
                 match answer {
-                    Some(fresh) => diff(&mut remote.rows, fresh),
-                    None => Vec::new(),
+                    Some(fresh) => {
+                        remote.next_at = Some(now + REFRESH_MS);
+                        diff(&mut remote.rows, fresh)
+                    }
+                    None => {
+                        remote.next_at = Some(now + RETRY_MS);
+                        Vec::new()
+                    }
                 }
             };
             for (name, data) in events {
@@ -191,24 +211,41 @@ impl RemoteOutbox {
     }
 }
 
-fn diff(
-    known: &mut BTreeMap<String, Value>,
-    fresh: BTreeMap<String, Value>,
-) -> Vec<(&'static str, Value)> {
+fn diff(known: &mut Known, fresh: Known) -> Vec<(&'static str, Value)> {
     let mut events = Vec::new();
-    for (id, row) in &fresh {
-        if known.get(id) != Some(row) {
-            events.push((topics::OUTBOX_CHANGED, json!({"row": row})));
+    {
+        let before: HashMap<&str, &Value> =
+            known.iter().map(|(id, row)| (id.as_str(), row)).collect();
+        let after: HashSet<&str> = fresh.iter().map(|(id, _)| id.as_str()).collect();
+        for (id, row) in &fresh {
+            if before.get(id.as_str()) != Some(&row) {
+                events.push((topics::OUTBOX_CHANGED, json!({"row": row})));
+            }
         }
-    }
-    for (id, row) in known.iter() {
-        if !fresh.contains_key(id) {
-            let session = text(row, "session").unwrap_or_default();
-            events.push((topics::OUTBOX_REMOVED, removal(id, session, "removed")));
+        for (id, row) in known.iter() {
+            if !after.contains(id.as_str()) {
+                let session = text(row, "session").unwrap_or_default();
+                events.push((topics::OUTBOX_REMOVED, removal(id, session, "removed")));
+            }
         }
     }
     *known = fresh;
     events
+}
+
+impl RemoteRows for RemoteOutbox {
+    fn rows(&self, session: Option<&str>) -> Vec<Value> {
+        if !self.listening() {
+            return Vec::new();
+        }
+        let book = lock(&self.book);
+        book.nodes
+            .values()
+            .flat_map(|remote| remote.rows.iter())
+            .filter(|(_, row)| session.is_none_or(|wanted| text(row, "session") == Some(wanted)))
+            .map(|(_, row)| row.clone())
+            .collect()
+    }
 }
 
 pub struct OutboxFollower {

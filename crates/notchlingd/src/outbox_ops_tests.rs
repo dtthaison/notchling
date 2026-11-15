@@ -3,7 +3,7 @@ use crate::acting_ops_tests::{app, code, row, sessions, FakeRoom, SESSION};
 use crate::event_assert::{of, text};
 use crate::late_emit::Events;
 use crate::op_group::OpGroup;
-use crate::outbox_ops::OutboxOps;
+use crate::outbox_ops::{OutboxOps, RemoteRows};
 use notchling_engine::outbox::{OutboxStore, State, Why};
 use notchling_engine::sessions::Roots;
 use notchling_events::{MemorySink, Salt};
@@ -198,6 +198,99 @@ fn codex_and_agy_ids_are_their_own_key() {
     let rows = call(&r, ops::OUTBOX_LIST, json!({})).unwrap();
     assert_eq!(rows[0]["tool"], "codex");
     assert_eq!(rows[1]["tool"], "antigravity");
+}
+
+const NODE: &str = "fedcba9876543210";
+
+struct Followed(Vec<Value>);
+
+impl RemoteRows for Followed {
+    fn rows(&self, session: Option<&str>) -> Vec<Value> {
+        self.0
+            .iter()
+            .filter(|row| session.is_none_or(|s| row["session"] == s))
+            .cloned()
+            .collect()
+    }
+}
+
+fn remote_row(id: &str, session: &str) -> Value {
+    json!({"id": id, "session": format!("{NODE}/{session}"), "tool": "claude", "kind": "prompt",
+        "text": "from the worker", "state": "queued", "position": 1, "queuedMs": 5, "updatedMs": 5,
+        "via": "chat"})
+}
+
+fn listed_ids(rows: &Value) -> Vec<String> {
+    rows.as_array()
+        .unwrap()
+        .iter()
+        .map(|row| row["id"].as_str().unwrap().to_string())
+        .collect()
+}
+
+#[test]
+fn a_list_for_all_sessions_includes_the_rows_of_remote_ones() {
+    let r = rig();
+    let local = id_of(&send(&r, "job-idle", "local words"));
+    r.ops.set_remote(Arc::new(Followed(vec![
+        remote_row("r1", "ab12cd34"),
+        remote_row("r2", "ef56ab78"),
+    ])));
+    let rows = call(&r, ops::OUTBOX_LIST, json!({})).unwrap();
+    assert_eq!(
+        listed_ids(&rows),
+        [local, "r1".to_string(), "r2".to_string()]
+    );
+    assert_eq!(rows[1]["session"], format!("{NODE}/ab12cd34"));
+}
+
+#[test]
+fn a_list_for_a_qualified_remote_session_is_that_sessions_remote_rows() {
+    let r = rig();
+    send(&r, "job-idle", "local words");
+    r.ops.set_remote(Arc::new(Followed(vec![
+        remote_row("r1", "ab12cd34"),
+        remote_row("r2", "ef56ab78"),
+    ])));
+    let rows = call(
+        &r,
+        ops::OUTBOX_LIST,
+        json!({"session": format!("{NODE}/ef56ab78")}),
+    )
+    .unwrap();
+    assert_eq!(listed_ids(&rows), ["r2"]);
+}
+
+#[test]
+fn a_list_for_a_local_session_leaves_the_remote_rows_out() {
+    let r = rig();
+    let local = id_of(&send(&r, "job-idle", "local words"));
+    r.ops
+        .set_remote(Arc::new(Followed(vec![remote_row("r1", "ab12cd34")])));
+    for key in ["idle0001", "job-idle", "codex:t1", "node-less"] {
+        let rows = call(&r, ops::OUTBOX_LIST, json!({"session": key})).unwrap();
+        let want: Vec<String> = if key == "idle0001" || key == "job-idle" {
+            vec![local.clone()]
+        } else {
+            Vec::new()
+        };
+        assert_eq!(listed_ids(&rows), want, "{key}");
+    }
+}
+
+#[test]
+fn a_list_with_no_cluster_is_the_local_rows_only() {
+    let r = rig();
+    let local = id_of(&send(&r, "job-idle", "local words"));
+    let rows = call(&r, ops::OUTBOX_LIST, json!({})).unwrap();
+    assert_eq!(listed_ids(&rows), [local]);
+    let none = call(
+        &r,
+        ops::OUTBOX_LIST,
+        json!({"session": format!("{NODE}/ab12cd34")}),
+    )
+    .unwrap();
+    assert!(none.as_array().unwrap().is_empty());
 }
 
 #[test]

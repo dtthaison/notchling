@@ -7,6 +7,7 @@ use crate::op_group::OpGroup;
 use crate::outbox_rows::{keeps_note, position_of, positions, reply_via, wire};
 use crate::outbox_settle::Settle;
 use crate::outbox_verify::count_row;
+use notchling_engine::cluster::Qualified;
 use notchling_engine::contract::Tool as RowTool;
 use notchling_engine::control::slash::opens_menu;
 use notchling_engine::outbox::{
@@ -30,6 +31,10 @@ pub type Check = Arc<dyn Fn(&str) -> Result<(), ApiError> + Send + Sync>;
 pub type Resume = Arc<dyn Fn(&Row) -> Result<(), ApiError> + Send + Sync>;
 pub type Clock = Arc<dyn Fn() -> i64 + Send + Sync>;
 pub type Tell = Arc<dyn Fn(&str, &str, &Value) + Send + Sync>;
+
+pub trait RemoteRows: Send + Sync {
+    fn rows(&self, session: Option<&str>) -> Vec<Value>;
+}
 
 const SAVE_FAILED: &str = "Couldn't save the message.";
 const EMPTY: &str = "Type a message first.";
@@ -62,6 +67,7 @@ pub struct OutboxOps {
     forget: Mutex<Option<Wake>>,
     resume: Mutex<Option<Resume>>,
     tell: Mutex<Option<Tell>>,
+    remote: Mutex<Option<Arc<dyn RemoteRows>>>,
     codex_check: OnceLock<Check>,
     agy_check: OnceLock<Check>,
     saving: bool,
@@ -153,6 +159,7 @@ impl OutboxOps {
             forget: Mutex::new(None),
             resume: Mutex::new(None),
             tell: Mutex::new(None),
+            remote: Mutex::new(None),
             codex_check: OnceLock::new(),
             agy_check: OnceLock::new(),
             saving: true,
@@ -250,6 +257,10 @@ impl OutboxOps {
 
     pub fn set_tell(&self, tell: Tell) {
         *lock(&self.tell) = Some(tell);
+    }
+
+    pub fn set_remote(&self, remote: Arc<dyn RemoteRows>) {
+        *lock(&self.remote) = Some(remote);
     }
 
     fn tell_peers(&self, name: &str, data: &Value) {
@@ -496,12 +507,21 @@ impl OutboxOps {
             .list(session.as_deref())
             .map_err(|_| save_failed())?;
         let notes = lock(&self.notes).clone();
-        let rows: Vec<Value> = rows
+        let mut rows: Vec<Value> = rows
             .iter()
             .zip(positions(&rows))
             .map(|(row, position)| wire(row, position, notes.get(&row.id).map(String::as_str)))
             .collect();
+        rows.extend(self.remote_rows(args.get("session").and_then(Value::as_str)));
         Ok(Value::Array(rows))
+    }
+
+    fn remote_rows(&self, asked: Option<&str>) -> Vec<Value> {
+        if asked.is_some_and(|s| Qualified::parse(s).is_none()) {
+            return Vec::new();
+        }
+        let remote = lock(&self.remote).clone();
+        remote.map_or_else(Vec::new, |remote| remote.rows(asked))
     }
 
     fn row(&self, args: &Value) -> Result<Row, ApiError> {

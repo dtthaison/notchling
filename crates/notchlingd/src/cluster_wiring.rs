@@ -20,7 +20,7 @@ use crate::cluster_workspace_send::{CodeSender, NodePeers, ReturnOps, Sender};
 use crate::inbox_ops::InboxOps;
 use crate::late_emit::Events;
 use crate::layout::Layout;
-use crate::outbox_ops::Tell;
+use crate::outbox_ops::{RemoteRows, Tell};
 use crate::shell_jobs::ShellJobs;
 use crate::switches::SwitchFlag;
 use crate::versions_ops::VersionsOps;
@@ -223,6 +223,7 @@ pub struct ClusterParts {
     publisher: Arc<Publisher>,
     refresher: Option<Refresher>,
     outbox_follower: Option<OutboxFollower>,
+    outbox: Arc<RemoteOutbox>,
     handler: Arc<LateHandler>,
 }
 
@@ -375,7 +376,7 @@ impl ClusterParts {
                 remote.clone(),
                 Arc::new(move || shown.publish()),
             ));
-            outbox_follower = Some(OutboxFollower::spawn(node.clone(), outbox));
+            outbox_follower = Some(OutboxFollower::spawn(node.clone(), outbox.clone()));
         }
         let ops = Arc::new(ClusterOps::new(node.clone(), link, room.clone(), audit));
         let code: Arc<dyn CodeSender> = sender.clone();
@@ -394,6 +395,7 @@ impl ClusterParts {
             publisher,
             refresher,
             outbox_follower,
+            outbox,
             handler,
         }
     }
@@ -408,6 +410,10 @@ impl ClusterParts {
         if let Ok(node) = &self.node {
             node.tell(topics::SESSIONS, topics::SESSIONS_CHANGED, json!({}));
         }
+    }
+
+    pub fn remote_outbox(&self) -> Arc<dyn RemoteRows> {
+        self.outbox.clone()
     }
 
     pub fn peer_teller(&self) -> Option<Tell> {
