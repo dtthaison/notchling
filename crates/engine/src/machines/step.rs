@@ -352,6 +352,14 @@ pub trait ClusterTokens: Send + Sync {
         let _ = node;
         self.can_be_master(machine)
     }
+    fn can_be_master_all(
+        &self,
+        asks: &[(String, Option<String>)],
+    ) -> BTreeMap<String, Option<bool>> {
+        asks.iter()
+            .map(|(name, node)| (name.clone(), self.can_be_master_of(name, node.as_deref())))
+            .collect()
+    }
 }
 
 pub struct NoCluster;

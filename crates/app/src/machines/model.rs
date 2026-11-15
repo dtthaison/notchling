@@ -107,7 +107,7 @@ impl Tab {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Sheet {
     Fix(FixPrompt),
-    Add(AddForm),
+    Add(Box<AddForm>),
     Job(JobForm),
 }
 

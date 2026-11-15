@@ -26,6 +26,7 @@ pub mod status;
 pub mod step;
 pub mod steps_machine;
 pub mod steps_node;
+mod steps_node_binary;
 pub mod steps_push;
 pub mod steps_replace;
 pub mod steps_repo;
@@ -87,6 +88,8 @@ mod tests_merge_git_b;
 mod tests_morning;
 #[cfg(test)]
 mod tests_node_steps;
+#[cfg(test)]
+mod tests_node_steps_b;
 #[cfg(test)]
 mod tests_poller;
 #[cfg(test)]

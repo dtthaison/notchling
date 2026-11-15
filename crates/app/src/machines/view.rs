@@ -156,7 +156,6 @@ impl MachinesView {
             return;
         }
         self.ask_mac(cx);
-        self.ask_cluster(cx);
         let engine = self.model.parts.engine.clone();
         Self::background(
             cx,
@@ -339,7 +338,7 @@ impl MachinesView {
         if !form.can_add(&existing, can_add) {
             return;
         }
-        let form: AddForm = form.clone();
+        let form: AddForm = (**form).clone();
         let Some(check) = &form.check else {
             return;
         };

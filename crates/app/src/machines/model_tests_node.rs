@@ -123,7 +123,7 @@ fn a_machine_is_matched_by_node_id_before_name() {
     assert_eq!(can_be_master_in(&s, "m1", Some(NODE_A)), Some(true));
     assert_eq!(can_be_master_in(&s, "other", Some(NODE_B)), Some(false));
     assert_eq!(can_be_master_in(&s, "other", None), None);
-    assert_eq!(can_be_master_in(&s, "m1", Some("cccc")), Some(false));
+    assert_eq!(can_be_master_in(&s, "m1", Some("cccc")), None);
     assert_eq!(
         can_be_master_in(&json!({"cluster": null, "members": []}), "m1", None),
         None
@@ -143,4 +143,43 @@ fn status_and_token_replies_are_read_plainly() {
     );
     assert_eq!(token_in(&json!({"token": ""})), None);
     assert_eq!(token_in(&json!({})), None);
+}
+
+struct Counting(std::sync::atomic::AtomicUsize);
+
+impl ClusterTokens for Counting {
+    fn join_token(&self) -> Result<String, String> {
+        Err("not asked".into())
+    }
+    fn cluster_id(&self) -> Option<String> {
+        None
+    }
+    fn can_be_master(&self, _machine: &str) -> Option<bool> {
+        None
+    }
+    fn can_be_master_all(
+        &self,
+        asks: &[(String, Option<String>)],
+    ) -> std::collections::BTreeMap<String, Option<bool>> {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        asks.iter().map(|(n, _)| (n.clone(), Some(true))).collect()
+    }
+}
+
+#[test]
+fn one_ask_serves_every_node_machine() {
+    let w = scripted_world(vec![mac("m1"), mac("m2"), mac("m3")]);
+    let mut model = w.model;
+    let counting = Arc::new(Counting(Default::default()));
+    model.parts.cluster = counting.clone();
+    for name in ["m1", "m2", "m3"] {
+        model.set_node(name, true);
+    }
+    model.ask_cluster();
+    assert_eq!(counting.0.load(std::sync::atomic::Ordering::SeqCst), 1);
+    let m3 = model.machine("m3").unwrap();
+    assert_eq!(
+        model.can_be_master_line(&m3).as_deref(),
+        Some("Can Be Master: Yes")
+    );
 }

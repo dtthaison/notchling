@@ -13,15 +13,7 @@ pub struct ClusterAsk {
 
 impl ClusterAsk {
     pub fn run(&self) -> BTreeMap<String, Option<bool>> {
-        self.asks
-            .iter()
-            .map(|(name, node)| {
-                (
-                    name.clone(),
-                    self.tokens.can_be_master_of(name, node.as_deref()),
-                )
-            })
-            .collect()
+        self.tokens.can_be_master_all(&self.asks)
     }
 }
 

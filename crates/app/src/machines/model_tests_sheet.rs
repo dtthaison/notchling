@@ -22,7 +22,7 @@ fn no_other_fix_starts_while_a_sheet_is_open() {
         w.model.request_send_again(&usage);
     }
     assert_eq!(fix_sheet(&w.model), &shown, "the sheet on show stays");
-    assert!(!w.model.open_sheet(Sheet::Add(AddForm::new())));
+    assert!(!w.model.open_sheet(Sheet::Add(Box::new(AddForm::new()))));
     assert_eq!(fix_sheet(&w.model), &shown);
     assert!(
         w.model.outcomes.is_empty() && w.model.update_notes.is_empty(),
@@ -32,7 +32,7 @@ fn no_other_fix_starts_while_a_sheet_is_open() {
     let run = w.model.confirm().expect("the shown plan runs");
     assert_eq!(run.kind, PlanKind::Fix(StepId::BASE_TOOLS));
     assert!(w.model.sheet().is_none());
-    assert!(w.model.open_sheet(Sheet::Add(AddForm::new())));
+    assert!(w.model.open_sheet(Sheet::Add(Box::new(AddForm::new()))));
 }
 
 #[test]
@@ -65,7 +65,7 @@ fn the_password_is_cleared_whenever_the_sheet_changes() {
     w.model.request_set_up(&StepId::STAYS_AWAKE, "m1");
     type_in(&mut w, "pw");
     w.model.cancel_sheet();
-    assert!(w.model.open_sheet(Sheet::Add(AddForm::new())));
+    assert!(w.model.open_sheet(Sheet::Add(Box::new(AddForm::new()))));
     assert_eq!(w.model.password_len(), 0);
     w.model.close_sheet();
     assert!(w.model.sheet().is_none());

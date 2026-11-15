@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use notchling_engine::machines::step::ClusterTokens;
@@ -52,6 +53,21 @@ impl ClusterTokens for DaemonTokens {
     fn can_be_master_of(&self, machine: &str, node: Option<&str>) -> Option<bool> {
         can_be_master_in(&self.status()?, machine, node)
     }
+
+    fn can_be_master_all(
+        &self,
+        asks: &[(String, Option<String>)],
+    ) -> BTreeMap<String, Option<bool>> {
+        let status = self.status();
+        asks.iter()
+            .map(|(name, node)| {
+                let flag = status
+                    .as_ref()
+                    .and_then(|s| can_be_master_in(s, name, node.as_deref()));
+                (name.clone(), flag)
+            })
+            .collect()
+    }
 }
 
 pub fn token_in(reply: &Value) -> Option<String> {
@@ -73,15 +89,9 @@ pub fn cluster_id_in(status: &Value) -> Option<String> {
 
 pub fn can_be_master_in(status: &Value, machine: &str, node: Option<&str>) -> Option<bool> {
     let members = status.get("members")?.as_array()?;
-    let by_id = node.and_then(|id| {
-        members
-            .iter()
-            .find(|m| m.get("id").and_then(Value::as_str) == Some(id))
-    });
-    let member = by_id.or_else(|| {
-        members
-            .iter()
-            .find(|m| m.get("name").and_then(Value::as_str) == Some(machine))
+    let member = members.iter().find(|m| match node {
+        Some(id) => m.get("id").and_then(Value::as_str) == Some(id),
+        None => m.get("name").and_then(Value::as_str) == Some(machine),
     })?;
     member.get("canBeMaster").and_then(Value::as_bool)
 }

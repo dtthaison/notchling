@@ -6,21 +6,21 @@ use super::step::{
     SetupStep, StepContext, StepFix, StepId,
 };
 use super::steps_machine::{cut, is_newline, trim_ws};
+use super::steps_node_binary::binary;
 use super::steps_sd::first_line_300;
 use crate::cluster::persist::CLUSTER_DIR;
 use crate::lanes::quote;
 use serde_json::Value;
-use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 
 pub const MAC_BUILD: &str = concat!("notchling ", env!("CARGO_PKG_VERSION"));
 
-const BINARY: &str = "~/.local/bin/notchling";
-const BINARY_NEW: &str = "~/.local/bin/notchling.new";
-const UNIT: &str = "notchlingd.service";
-const LABEL: &str = "dev.notchling.daemon";
+pub(super) const BINARY: &str = "~/.local/bin/notchling";
+pub(super) const BINARY_NEW: &str = "~/.local/bin/notchling.new";
+pub(super) const UNIT: &str = "notchlingd.service";
+pub(super) const LABEL: &str = "dev.notchling.daemon";
 const PLIST: &str = "~/Library/LaunchAgents/dev.notchling.daemon.plist";
-const RUNTIME_DIR: &str = r#"export XDG_RUNTIME_DIR="/run/user/$(id -u)""#;
+pub(super) const RUNTIME_DIR: &str = r#"export XDG_RUNTIME_DIR="/run/user/$(id -u)""#;
 
 const TAILSCALE_SCRIPT: &str = r#"t=tailscale; command -v tailscale >/dev/null 2>&1 || t=/Applications/Tailscale.app/Contents/MacOS/Tailscale; "$t" status --json --peers=false"#;
 
@@ -29,7 +29,7 @@ pub fn dist_dir(data: &Path) -> PathBuf {
 }
 
 pub(super) fn steps(m: &Machine) -> Vec<SetupStep> {
-    vec![tailscale(m), binary(), service(m), joined()]
+    vec![tailscale(m), binary(m), service(m), joined()]
 }
 
 fn tailscale(m: &Machine) -> SetupStep {
@@ -46,17 +46,6 @@ fn tailscale(m: &Machine) -> SetupStep {
     )
 }
 
-fn binary() -> SetupStep {
-    SetupStep::new(
-        StepId::NODE_BINARY,
-        "Notchling installed",
-        vec![StepId::REACHABLE],
-        Cadence::EveryRefresh,
-        Probe::remote(format!("{} --version", shell::path(BINARY)), parse_binary),
-        StepFix::Run(FixPlan::new(binary_display(), false, binary_fix)),
-    )
-}
-
 fn service(m: &Machine) -> SetupStep {
     let linux = m.is_linux();
     let (script, parse): (String, fn(&RemoteOutput, &StepContext) -> CheckResult) = if linux {
@@ -70,7 +59,7 @@ fn service(m: &Machine) -> SetupStep {
         vec![StepId::NODE_BINARY],
         Cadence::EveryRefresh,
         Probe::remote(script, parse),
-        StepFix::Run(FixPlan::new(service_display(linux), linux, service_fix)),
+        StepFix::Run(FixPlan::new(service_display(m), linux, service_fix)),
     )
 }
 
@@ -96,7 +85,7 @@ fn json_from(text: &str) -> Option<Value> {
         .ok()
 }
 
-fn first_text_line(text: &str) -> String {
+pub(super) fn first_text_line(text: &str) -> String {
     text.split(is_newline)
         .map(trim_ws)
         .find(|l| !l.is_empty())
@@ -144,17 +133,6 @@ fn parse_tailscale(out: &RemoteOutput, _ctx: &StepContext) -> CheckResult {
     }
 }
 
-fn parse_binary(out: &RemoteOutput, _ctx: &StepContext) -> CheckResult {
-    let line = first_text_line(&out.text);
-    if out.code != 0 || !line.starts_with("notchling ") {
-        return CheckResult::fail("notchling isn't installed in ~/.local/bin on the machine");
-    }
-    if line == MAC_BUILD {
-        return CheckResult::pass(line);
-    }
-    CheckResult::fail(format!("{line} there, this Mac has {MAC_BUILD}"))
-}
-
 fn linux_probe() -> String {
     format!(
         "{RUNTIME_DIR}\necho \"active=$(systemctl --user is-active {UNIT} 2>&1 | head -1)\"\necho \"linger=$(loginctl show-user \"$(id -un)\" -p Linger 2>&1 | head -1)\""
@@ -165,7 +143,7 @@ fn mac_probe() -> String {
     format!("launchctl print \"gui/$(id -u)/{LABEL}\"")
 }
 
-fn value_of<'a>(text: &'a str, key: &str) -> Option<&'a str> {
+pub(super) fn value_of<'a>(text: &'a str, key: &str) -> Option<&'a str> {
     text.split(is_newline)
         .find_map(|l| l.strip_prefix(key))
         .map(trim_ws)
@@ -256,14 +234,14 @@ fn parse_joined(out: &RemoteOutput, ctx: &StepContext) -> CheckResult {
     })
 }
 
-fn os_word(m: &Machine) -> Option<&'static str> {
+pub(super) fn os_word(m: &Machine) -> Option<&'static str> {
     match m.os? {
         MachineOs::MacOs => Some("macos"),
         MachineOs::Linux => Some("linux"),
     }
 }
 
-fn arch_word(m: &Machine) -> Option<String> {
+pub(super) fn arch_word(m: &Machine) -> Option<String> {
     let raw = m.abilities.as_ref()?.arch.as_deref()?;
     let arch = if raw == "arm64" { "aarch64" } else { raw };
     let plain = !arch.is_empty()
@@ -274,27 +252,7 @@ fn arch_word(m: &Machine) -> Option<String> {
     plain.then(|| arch.to_string())
 }
 
-fn hex(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
-}
-
-fn hash_script() -> String {
-    let new = shell::path(BINARY_NEW);
-    format!(
-        "if command -v sha256sum >/dev/null 2>&1; then sha256sum {new}; else shasum -a 256 {new}; fi"
-    )
-}
-
-fn binary_display() -> String {
-    let new = shell::path(BINARY_NEW);
-    let old = shell::path(BINARY);
-    format!(
-        "Copy the build for this machine from this Mac's cluster dist folder:\nmkdir -p ~/.local/bin\nscp -O notchling-<system>-<arch> <user>@<host>:.local/bin/notchling.new\nCheck its SHA-256 there against this Mac's:\n{}\nOnly when they match:\nmv -f {new} {old} && chmod 755 {old}",
-        hash_script()
-    )
-}
-
-fn said(ctx: &FixContext, r: &CommandResult) -> String {
+pub(super) fn said(ctx: &FixContext, r: &CommandResult) -> String {
     let text = if r.err.trim().is_empty() {
         &r.out
     } else {
@@ -303,95 +261,27 @@ fn said(ctx: &FixContext, r: &CommandResult) -> String {
     first_line_300(text, &|s| ctx.mask(s))
 }
 
-fn binary_fix(ctx: &FixContext) -> FixOutcome {
-    let m = &ctx.step.machine;
-    let (Some(os), Some(arch)) = (os_word(m), arch_word(m)) else {
-        return FixOutcome::fail("the machine's system and chip aren't known yet; check it first");
-    };
-    let name = format!("notchling-{os}-{arch}");
-    let Some(dist) = &ctx.step.dist_dir else {
-        return FixOutcome::fail(format!(
-            "Put a notchling build for {os}-{arch} in the cluster dist folder first."
-        ));
-    };
-    let path = dist.join(&name);
-    let Ok(bytes) = std::fs::read(&path) else {
-        return FixOutcome::fail(format!(
-            "Put a notchling build for {os}-{arch} in {} first.",
-            path.display()
-        ));
-    };
-    let digest = hex(&bytes);
-    let made = run::script(
-        ctx,
-        &format!("mkdir -p {}", shell::path("~/.local/bin")),
-        None,
-        60,
-    );
-    if made.code != 0 {
-        return FixOutcome::fail(format!(
-            "couldn't make ~/.local/bin (exit {}): {}",
-            made.code,
-            said(ctx, &made)
-        ));
-    }
-    let copied = run::local(
-        ctx,
-        vec![
-            "/usr/bin/scp".into(),
-            "-O".into(),
-            "-q".into(),
-            "-o".into(),
-            "BatchMode=yes".into(),
-            "-o".into(),
-            "ConnectTimeout=8".into(),
-            "--".into(),
-            path.to_string_lossy().into_owned(),
-            format!("{}@{}:.local/bin/notchling.new", m.user, m.host),
-        ],
-        None,
-        900,
-    );
-    if copied.code != 0 {
-        return FixOutcome::fail(format!(
-            "the copy failed (exit {}): {}",
-            copied.code,
-            said(ctx, &copied)
-        ));
-    }
-    let checked = run::script(ctx, &hash_script(), None, 120);
-    let theirs = checked.out.split_whitespace().next().unwrap_or("");
-    if checked.code != 0 || theirs != digest {
-        let _ = run::script(ctx, &format!("rm -f {}", shell::path(BINARY_NEW)), None, 60);
-        return FixOutcome::fail(
-            "the copy on the machine doesn't match this Mac's build; it was removed",
-        );
-    }
-    let new = shell::path(BINARY_NEW);
-    let old = shell::path(BINARY);
-    let moved = run::script(
-        ctx,
-        &format!("mv -f {new} {old} && chmod 755 {old}"),
-        None,
-        60,
-    );
-    if moved.code != 0 {
-        return FixOutcome::fail(format!(
-            "couldn't put the build in place (exit {}): {}",
-            moved.code,
-            said(ctx, &moved)
-        ));
-    }
-    FixOutcome::ok(format!("{name} copied and its hash matches"))
-}
-
-fn load_command(linux: bool) -> String {
+pub(super) fn load_command(linux: bool) -> String {
     if linux {
-        format!("systemctl --user daemon-reload && systemctl --user enable --now {UNIT}")
+        format!(
+            "systemctl --user daemon-reload && systemctl --user enable {UNIT} && systemctl --user restart {UNIT}"
+        )
     } else {
         format!(
-            "launchctl bootstrap \"gui/$(id -u)\" {}",
+            "u=\"gui/$(id -u)\"; launchctl enable \"$u/{LABEL}\"; if launchctl print \"$u/{LABEL}\" >/dev/null 2>&1; then launchctl kickstart -k \"$u/{LABEL}\"; else launchctl bootstrap \"$u\" {}; fi",
             shell::path(PLIST)
+        )
+    }
+}
+
+pub(super) fn restart_command(linux: bool) -> String {
+    if linux {
+        format!(
+            "{RUNTIME_DIR}\nif systemctl --user is-active --quiet {UNIT} 2>/dev/null; then systemctl --user restart {UNIT}; fi"
+        )
+    } else {
+        format!(
+            "u=\"gui/$(id -u)\"; if launchctl print \"$u/{LABEL}\" >/dev/null 2>&1; then launchctl kickstart -k \"$u/{LABEL}\"; fi"
         )
     }
 }
@@ -411,17 +301,18 @@ fn linger_query() -> &'static str {
     r#"loginctl show-user "$(id -un)" -p Linger"#
 }
 
-fn service_display(linux: bool) -> String {
+fn service_display(m: &Machine) -> String {
     let install = format!("{} service install", shell::path(BINARY));
-    if linux {
+    if m.is_linux() {
         format!(
-            "Write the service file as the worker user:\n{install}\nThen, as admin, keep the service running after logout:\nloginctl enable-linger <user>\n(skipped when {} already says Linger=yes)\nThen load it:\n{}",
+            "Write the service file as the worker user:\n{install}\nThen, as admin, keep the service running after logout:\nloginctl enable-linger {}\n(skipped when {} already says Linger=yes)\nThen load it:\n{}",
+            quote(&m.user),
             linger_query(),
             load_command(true)
         )
     } else {
         format!(
-            "Write the LaunchAgent:\n{install}\nThen load it:\n{}",
+            "Write the LaunchAgent:\n{install}\nThen load it, or restart it when it already runs:\n{}",
             load_command(false)
         )
     }

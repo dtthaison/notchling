@@ -37,7 +37,7 @@ fn tokens(cluster: Option<&str>) -> Arc<Tokens> {
     })
 }
 
-fn node_linux() -> Machine {
+pub(super) fn node_linux() -> Machine {
     let mut m = linux("w1");
     m.set_admin(AdminAccess::RootSsh);
     m.node = Some(NodeSettings::default());
@@ -45,18 +45,18 @@ fn node_linux() -> Machine {
     m
 }
 
-fn node_mac() -> Machine {
+pub(super) fn node_mac() -> Machine {
     let mut m = mac("m2");
     m.node = Some(NodeSettings::default());
     m.abilities.as_mut().unwrap().arch = Some("arm64".into());
     m
 }
 
-fn step(m: &Machine, id: &StepId) -> SetupStep {
+pub(super) fn step(m: &Machine, id: &StepId) -> SetupStep {
     find(&catalog::steps(m, std::slice::from_ref(m)), id)
 }
 
-fn probe(rig: &Rig, id: &StepId, text: &str, code: i32) -> CheckState {
+pub(super) fn probe(rig: &Rig, id: &StepId, text: &str, code: i32) -> CheckState {
     let (_, parse) = remote(&step(&rig.machine, id));
     parse(
         &RemoteOutput {
@@ -68,15 +68,19 @@ fn probe(rig: &Rig, id: &StepId, text: &str, code: i32) -> CheckState {
     .state
 }
 
-fn texts(calls: &[Recorded]) -> Vec<String> {
+pub(super) fn texts(calls: &[Recorded]) -> Vec<String> {
     calls.iter().map(|c| unquoted(&c.text())).collect()
 }
 
-fn hex(bytes: &[u8]) -> String {
+pub(super) fn hex(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
 
-fn fix_of(rig: &Rig, dist: Option<&std::path::Path>, cluster: Option<&str>) -> FixContext {
+pub(super) fn fix_of(
+    rig: &Rig,
+    dist: Option<&std::path::Path>,
+    cluster: Option<&str>,
+) -> FixContext {
     let mut ctx = rig.fix();
     ctx.step.dist_dir = dist.map(std::path::Path::to_path_buf);
     ctx.step.tokens = tokens(cluster);
@@ -228,7 +232,7 @@ fn service_fix_installs_and_loads_linux() {
     assert!(seen[0].contains("\"$HOME\"/'.local/bin/notchling' service install"));
     assert!(seen[1].contains("show-user"));
     assert!(seen[2].contains(
-        "systemctl --user daemon-reload && systemctl --user enable --now notchlingd.service"
+        "systemctl --user daemon-reload && systemctl --user enable notchlingd.service && systemctl --user restart notchlingd.service"
     ));
     assert!(seen[2].contains("XDG_RUNTIME_DIR"));
 }
@@ -244,8 +248,10 @@ fn service_fix_installs_and_loads_macos() {
     let seen = texts(&rig.calls());
     assert_eq!(seen.len(), 2, "{seen:?}");
     assert!(seen[0].contains("service install"));
+    assert!(seen[1].contains("launchctl enable"));
+    assert!(seen[1].contains("launchctl kickstart -k"));
     assert!(seen[1].contains(
-        "launchctl bootstrap \"gui/$(id -u)\" \"$HOME\"/'Library/LaunchAgents/dev.notchling.daemon.plist'"
+        "launchctl bootstrap \"$u\" \"$HOME\"/'Library/LaunchAgents/dev.notchling.daemon.plist'"
     ));
 }
 
@@ -304,7 +310,7 @@ fn linger_off_needs_admin_fix() {
     assert!(seen[enable].contains("root@w1.test"));
     let load = seen
         .iter()
-        .position(|t| t.contains("enable --now"))
+        .position(|t| t.contains("systemctl --user restart"))
         .unwrap();
     assert!(enable < load, "linger comes before the load: {seen:?}");
 }
