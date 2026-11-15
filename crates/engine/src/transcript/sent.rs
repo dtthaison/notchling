@@ -154,11 +154,15 @@ impl Queue {
             return;
         };
         let command = text.contains("<command-name>") && first.trim_start().starts_with('/');
-        if self.batch.len() == 1 && (names(first, text) || command) {
+        let one = self.batch.len() == 1;
+        let consumed = if one {
+            names(first, text) || command
+        } else {
+            squeezed(text) == squeezed(&self.batch.join("\n"))
+        };
+        if consumed {
             self.batch.clear();
-        } else if self.batch.len() > 1 && squeezed(text) == squeezed(&self.batch.join("\n")) {
-            self.batch.clear();
-        } else if self.batch.len() == 1 {
+        } else if one {
             if let Some(at) = self.waiting.iter().position(|e| names(e, text)) {
                 let first = self.batch.remove(0);
                 self.waiting.remove(at);
