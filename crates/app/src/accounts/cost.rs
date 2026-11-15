@@ -48,7 +48,11 @@ impl Range {
 }
 
 pub fn dollars(x: f64) -> String {
-    if x >= 1000.0 {
+    if !x.is_finite() || x.abs() < 0.005 {
+        "$0.00".to_owned()
+    } else if x < 0.0 {
+        format!("-{}", dollars(-x))
+    } else if x >= 1000.0 {
         format!("${:.1}k", x / 1000.0)
     } else if x >= 100.0 {
         format!("${}", x.round() as i64)
@@ -319,6 +323,18 @@ mod tests {
         assert_eq!(tokens(212_400_000.0), "212.4m");
         assert_eq!(tokens(54_700_000_000.0), "54.7b");
         assert_eq!(tokens(12.0), "12");
+    }
+
+    #[test]
+    fn zero_and_tiny_amounts_never_show_a_minus_sign() {
+        assert_eq!(dollars(0.0), "$0.00");
+        assert_eq!(dollars(-0.0), "$0.00");
+        assert_eq!(dollars(-0.004), "$0.00");
+        assert_eq!(dollars(-1e-12), "$0.00");
+        assert_eq!(dollars(0.004), "$0.00");
+        assert_eq!(dollars(f64::NAN), "$0.00");
+        assert_eq!(dollars(0.005), "$0.01");
+        assert_eq!(dollars(-3.2), "-$3.20");
     }
 
     fn reply() -> CostReply {

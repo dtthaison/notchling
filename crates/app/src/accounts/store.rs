@@ -11,7 +11,7 @@ use super::wire::{
     parse_add, parse_claude_list, parse_claude_usage, parse_cost, parse_lanes, parse_limits,
     parse_move_plan, parse_move_result, parse_outcome, parse_providers, parse_usage,
     still_refreshing, working_ticket, AddProgress, Call, ClaudeList, ClaudeUsage, CostReply, Lane,
-    LimitsStatus, MovePlan, MoveResult, Outcome, ProviderList,
+    LimitsStatus, MovePlan, MoveResult, Outcome, ProviderList, Renewal,
 };
 use crate::actions::{Socket, Transport};
 use crate::chat::data::DataRoot;
@@ -317,10 +317,16 @@ impl Accounts {
                 }
             }
         }
+        let renewing = self
+            .snapshot()
+            .claude_usage
+            .renewals
+            .values()
+            .any(|r| *r == Renewal::Renewing);
         let claude_usage = match (sync, forced.claude.take()) {
-            (false, _) => None,
+            (false, _) if !renewing => None,
             (true, Some(read)) => Some(read),
-            (true, None) => self
+            _ => self
                 .call(&Call::limits_usage(false))
                 .ok()
                 .map(|v| parse_claude_usage(&v)),
@@ -339,10 +345,11 @@ impl Accounts {
             }
             if sync {
                 s.usage = usage;
-                if let Some(read) = claude_usage {
-                    s.claude_usage = read;
-                }
-            } else if !on {
+            }
+            if let Some(read) = claude_usage.filter(|_| on) {
+                s.claude_usage = read;
+            }
+            if !sync && !on {
                 s.usage.clear();
                 s.claude_usage = ClaudeUsage::default();
             }

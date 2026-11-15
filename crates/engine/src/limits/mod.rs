@@ -2,6 +2,7 @@ pub mod claude;
 pub mod logic;
 pub mod mode;
 pub mod provider;
+pub mod renew;
 pub mod report;
 pub mod sources;
 pub mod text;
@@ -15,6 +16,8 @@ mod logic_tests;
 mod mode_tests;
 #[cfg(test)]
 mod provider_tests;
+#[cfg(test)]
+mod renew_tests;
 #[cfg(test)]
 mod usage_tests;
 

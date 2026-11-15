@@ -483,6 +483,35 @@ fn a_switch_the_daemon_is_still_running_is_followed_to_its_answer() {
 }
 
 #[test]
+fn a_login_still_being_renewed_is_read_again_without_forcing_until_it_is_done() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let renewing = Arc::new(AtomicBool::new(true));
+    let inner = daemon(true);
+    let r = renewing.clone();
+    let (store, calls) = fake(move |op, args| {
+        let mut reply = inner(op, args)?;
+        if op == "limits.usage" && r.load(Ordering::SeqCst) {
+            reply["renewals"] = json!({"a2": "renewing"});
+        }
+        Ok(reply)
+    });
+    let on = Switches::all_on();
+    store.refresh_all_at(&on, 1_000.0);
+    assert_eq!(
+        store.snapshot().claude_usage.renewals.get("a2"),
+        Some(&Renewal::Renewing)
+    );
+    renewing.store(false, Ordering::SeqCst);
+    store.refresh_at(&on, 1_005.0);
+    assert!(store.snapshot().claude_usage.renewals.is_empty());
+    let forced = log(&calls)
+        .into_iter()
+        .filter(|c| c == r#"limits.usage {"refresh":true}"#)
+        .count();
+    assert_eq!(forced, 1, "only the click forces a read");
+}
+
+#[test]
 fn a_late_refusal_is_the_error_shown() {
     let (store, _) = fake(|op, _| match op {
         "accounts.switch" => Ok(json!({"state": "working", "ticket": 3})),

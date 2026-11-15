@@ -587,7 +587,7 @@ that reads or writes a login sits behind the traits in
 | --- | --- | --- | --- |
 | `limits.status` | app | `{}` | see below |
 | `limits.set_mode` | app | `{provider, mode?, switch_at?}` | `{"provider", "mode", "switch_at"}` |
-| `limits.usage` | app | `{refresh?}` | each Claude Code account's limits, see [`crate::limits_usage`] |
+| `limits.usage` | app | `{refresh?}` | each Claude Code account's limits, see [`crate::limits_usage`]; `renewals: {id: "renewing" \| "failed"}` (absent when empty) names a login in use that a Refresh asked Claude Code to renew |
 | `cost.summary` | agent | `{range?}` | see [`crate::cost_ops`] |
 
 ```json

@@ -4,6 +4,7 @@ use crate::switches::SwitchFlag;
 use notchling_engine::accounts::claude::{ClaudeAccounts, SwitchWhy};
 use notchling_engine::accounts::http::{HttpRequest, USAGE_URL};
 use notchling_engine::control::{job_state_path, plan_respawn};
+use notchling_engine::limits::renew::{self, LoginRenewer, RenewState, Seat};
 use notchling_engine::limits::report::{Bar, BarKind, Group, UsageReport};
 use notchling_engine::limits::sources::{
     stopped_in, AccountInfo, ClaudeSource, LaneInfo, LimitWhy, ProviderAccountInfo, ProviderSource,
@@ -17,7 +18,7 @@ use notchling_engine::providers::AccountProvider;
 use notchling_engine::reply::plan as reply_plan;
 use notchling_engine::sessions::AgentTarget;
 use serde_json::Value;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, SystemTime};
 
@@ -34,7 +35,24 @@ pub struct ClaudeLimits {
     store: Arc<ClaudeAccounts>,
     usage: Mutex<HashMap<String, AccountUsage>>,
     errors: Mutex<HashMap<String, String>>,
+    expired: Mutex<BTreeSet<String>>,
+    renewal: Mutex<HashMap<String, RenewState>>,
+    renewer: Option<Arc<dyn LoginRenewer>>,
     now: Arc<dyn Fn() -> f64 + Send + Sync>,
+}
+
+struct Failure {
+    why: String,
+    expired_in_use: bool,
+}
+
+impl Failure {
+    fn new(why: &str) -> Failure {
+        Failure {
+            why: why.into(),
+            expired_in_use: false,
+        }
+    }
 }
 
 impl ClaudeLimits {
@@ -44,8 +62,16 @@ impl ClaudeLimits {
             store,
             usage: Mutex::new(HashMap::new()),
             errors: Mutex::new(HashMap::new()),
+            expired: Mutex::new(BTreeSet::new()),
+            renewal: Mutex::new(HashMap::new()),
+            renewer: None,
             now: Arc::new(now_secs),
         }
+    }
+
+    pub fn with_renewer(mut self, renewer: Arc<dyn LoginRenewer>) -> ClaudeLimits {
+        self.renewer = Some(renewer);
+        self
     }
 
     pub fn with_clock(mut self, now: Arc<dyn Fn() -> f64 + Send + Sync>) -> ClaudeLimits {
@@ -58,18 +84,23 @@ impl ClaudeLimits {
             || self.store.lanes().iter().any(|l| l.account_id == id)
     }
 
-    fn fetch(&self, id: &str, now: f64) -> Result<AccountUsage, String> {
+    fn fetch(&self, id: &str, now: f64) -> Result<AccountUsage, Failure> {
+        let in_use = self.in_use(id);
         let expired = || {
-            if self.in_use(id) {
-                "Its login has expired. Claude Code renews it the next time it runs."
+            if in_use {
+                Failure {
+                    why: "Its login has expired. Claude Code renews it the next time it runs."
+                        .into(),
+                    expired_in_use: true,
+                }
             } else {
-                "The saved login has expired. Add the account again to sign in."
+                Failure::new("The saved login has expired. Add the account again to sign in.")
             }
         };
         let token = match self.store.usage_token(id) {
             Ok(Some(token)) => token,
-            Ok(None) => return Err(expired().into()),
-            Err(_) => return Err("The login couldn't be read.".into()),
+            Ok(None) => return Err(expired()),
+            Err(_) => return Err(Failure::new("The login couldn't be read.")),
         };
         let reply = self
             .store
@@ -78,12 +109,14 @@ impl ClaudeLimits {
             .send(&HttpRequest::get(USAGE_URL, &token));
         match reply.json_ok() {
             Some(json) => Ok(parse_usage(&Value::Object(json), now)),
-            None if reply.status == 0 => Err("No answer from Anthropic. Try Refresh again.".into()),
-            None if matches!(reply.status, 401 | 403) => Err(expired().into()),
-            None => Err(format!(
-                "Anthropic answered with an error ({}).",
-                reply.status
-            )),
+            None if reply.status == 0 => {
+                Err(Failure::new("No answer from Anthropic. Try Refresh again."))
+            }
+            None if matches!(reply.status, 401 | 403) => Err(expired()),
+            None => Err(Failure {
+                why: format!("Anthropic answered with an error ({}).", reply.status),
+                expired_in_use: false,
+            }),
         }
     }
 
@@ -92,10 +125,64 @@ impl ClaudeLimits {
             Ok(usage) => {
                 lock(&self.usage).insert(id.to_string(), usage);
                 lock(&self.errors).remove(id);
+                lock(&self.expired).remove(id);
+                lock(&self.renewal).remove(id);
             }
-            Err(why) => {
-                lock(&self.errors).insert(id.to_string(), why);
+            Err(failure) => {
+                lock(&self.errors).insert(id.to_string(), failure.why);
+                let mut expired = lock(&self.expired);
+                if failure.expired_in_use {
+                    expired.insert(id.to_string());
+                } else {
+                    expired.remove(id);
+                }
             }
+        }
+    }
+
+    fn seats(&self) -> Vec<Seat> {
+        let main = self.store.snapshot().active.map(|account| Seat {
+            account,
+            config_dir: None,
+        });
+        let lanes = self.store.lanes().into_iter().map(|l| Seat {
+            account: l.account_id,
+            config_dir: Some(l.path),
+        });
+        main.into_iter().chain(lanes).collect()
+    }
+
+    fn renew_expired(&self) {
+        let Some(renewer) = self.renewer.as_deref() else {
+            return;
+        };
+        let expired = lock(&self.expired).clone();
+        let picked = renew::targets(&self.seats(), &expired, |dir| renewer.busy(dir));
+        if picked.is_empty() {
+            return;
+        }
+        lock(&self.renewal).extend(
+            picked
+                .iter()
+                .map(|s| (s.account.clone(), RenewState::Renewing)),
+        );
+        std::thread::scope(|scope| {
+            for seat in &picked {
+                scope.spawn(move || self.renew_one(renewer, seat));
+            }
+        });
+    }
+
+    fn renew_one(&self, renewer: &dyn LoginRenewer, seat: &Seat) {
+        let ran = renewer.renew(seat.config_dir.as_deref());
+        self.read(&seat.account, (self.now)());
+        let mut renewal = lock(&self.renewal);
+        let read_failed = lock(&self.errors).contains_key(&seat.account);
+        let still_expired = lock(&self.expired).contains(&seat.account);
+        if read_failed && (ran.is_err() || still_expired) {
+            renewal.insert(seat.account.clone(), RenewState::Failed);
+        } else {
+            renewal.remove(&seat.account);
         }
     }
 
@@ -105,6 +192,9 @@ impl ClaudeLimits {
         }
         let _ = self.store.sync();
         let now = (self.now)();
+        if force {
+            lock(&self.renewal).clear();
+        }
         for account in self.store.saved_list() {
             if !self.accounts.is_on() {
                 return;
@@ -112,6 +202,8 @@ impl ClaudeLimits {
             if account.needs_login {
                 lock(&self.usage).remove(&account.id);
                 lock(&self.errors).remove(&account.id);
+                lock(&self.expired).remove(&account.id);
+                lock(&self.renewal).remove(&account.id);
                 continue;
             }
             let due = force
@@ -121,6 +213,9 @@ impl ClaudeLimits {
             if due {
                 self.read(&account.id, now);
             }
+        }
+        if force {
+            self.renew_expired();
         }
     }
 }
@@ -136,6 +231,10 @@ impl ClaudeSource for ClaudeLimits {
 
     fn usage_error(&self, id: &str) -> Option<String> {
         lock(&self.errors).get(id).cloned()
+    }
+
+    fn renewal(&self, id: &str) -> Option<RenewState> {
+        lock(&self.renewal).get(id).copied()
     }
 
     fn accounts(&self) -> Vec<AccountInfo> {
@@ -375,6 +474,9 @@ impl StoppedJobs for SessionJobs {
     }
 }
 
+#[cfg(test)]
+#[path = "limits_renew_tests.rs"]
+mod renew_tests;
 #[cfg(test)]
 #[path = "limits_sources_tests.rs"]
 mod tests;

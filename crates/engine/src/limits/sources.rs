@@ -1,3 +1,4 @@
+use super::renew::RenewState;
 use super::report::UsageReport;
 use super::usage::AccountUsage;
 use crate::transcript::errors::{limit_hit_in_file, LimitHit};
@@ -33,6 +34,9 @@ pub trait ClaudeSource: Send + Sync {
     fn active_id(&self) -> Option<String>;
     fn usage(&self, id: &str) -> Option<AccountUsage>;
     fn usage_error(&self, _id: &str) -> Option<String> {
+        None
+    }
+    fn renewal(&self, _id: &str) -> Option<RenewState> {
         None
     }
     fn lanes(&self) -> Vec<LaneInfo>;
