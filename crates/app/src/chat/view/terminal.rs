@@ -23,6 +23,7 @@ use super::sidebar::HEADER_BUTTON;
 use super::ChatView;
 use crate::chat::format::short_path;
 use crate::chat::page_panel::panel_width;
+use crate::chat::remote_control::Action;
 use crate::chat::terminal::{
     boundary_at, bytes, grid, paste, rgb as cell_rgb, selected_text, shown_rows, word_at,
     Selection, Tabs, CELL, LINE,
@@ -219,6 +220,9 @@ impl ChatView {
         command: &str,
         cx: &mut Context<Self>,
     ) -> Result<(), String> {
+        if self.refuse_selected(Action::Terminal, cx) {
+            return Err(self.tools.error.clone().unwrap_or_default());
+        }
         let home = self.root.home.clone();
         let claude = notchling_engine::control::launcher::claude_path(&home);
         let claude = claude.to_string_lossy().into_owned();
@@ -256,6 +260,9 @@ impl ChatView {
     }
 
     pub(super) fn open_shell_output(&mut self, name: &str, path: &str, cx: &mut Context<Self>) {
+        if self.refuse_selected(Action::Terminal, cx) {
+            return;
+        }
         let home = self.root.home.clone();
         let cwd = self
             .selected_session()
@@ -286,6 +293,9 @@ impl ChatView {
     }
 
     pub(super) fn open_command_terminal(&mut self, command: &str, cx: &mut Context<Self>) {
+        if self.refuse_selected(Action::Terminal, cx) {
+            return;
+        }
         let home = self.root.home.clone();
         let cwd = self
             .selected_session()
@@ -323,6 +333,9 @@ impl ChatView {
             cx.notify();
             return;
         }
+        if self.refuse_selected(Action::Terminal, cx) {
+            return;
+        }
         if self.terminal.tabs.is_empty() {
             self.add_terminal(window, cx);
         }
@@ -338,6 +351,9 @@ impl ChatView {
     }
 
     pub(super) fn add_terminal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.refuse_selected(Action::Terminal, cx) {
+            return;
+        }
         let cwd = self
             .selected_session()
             .map(|s| s.agent.cwd.clone())

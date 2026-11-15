@@ -189,7 +189,9 @@ impl NodeCore {
                         local: id,
                         answered: false,
                         since: self.boot_ms,
+                        since_ms: self.wall_ms,
                     });
+                    self.changed = true;
                     self.dial(out);
                     return;
                 };

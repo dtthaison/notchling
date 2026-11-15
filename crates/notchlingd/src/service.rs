@@ -87,6 +87,7 @@ fn systemd_unit(spec: &ServiceSpec) -> String {
          [Service]\n\
          Type=simple\n\
          ExecStart={binary} daemon\n\
+         KillMode=process\n\
          Restart=on-failure\n\
          RestartSec=5\n\
          StandardOutput=append:{log}\n\
@@ -255,6 +256,22 @@ mod tests {
         assert!(unload_command(Os::Mac, f, 501).starts_with("launchctl bootout gui/501"));
         assert!(load_command(Os::Linux, f, 0).contains("enable --now notchlingd.service"));
         assert!(load_command(Os::Windows, Path::new(r"C:\x.xml"), 0).contains("/XML"));
+    }
+
+    #[test]
+    fn linux_unit_has_killmode_process() {
+        let spec = ServiceSpec {
+            binary: "/b/notchling".into(),
+            log: "/l/log".into(),
+        };
+        let unit = render(Os::Linux, &spec);
+        let service = unit
+            .split("[Service]")
+            .nth(1)
+            .and_then(|rest| rest.split("[Install]").next())
+            .unwrap_or("");
+        assert!(service.lines().any(|l| l == "KillMode=process"), "{unit}");
+        assert!(!render(Os::Mac, &spec).contains("KillMode"));
     }
 
     #[test]

@@ -448,3 +448,33 @@ fn recent_project_folder_names_decode() {
         ["/Users/me/my-app", "/Users/me/docs"]
     );
 }
+
+#[test]
+fn recent_projects_leave_out_folders_of_another_machine() {
+    let exists = |p: &str| p == "/srv/api" || p == "/Users/me/docs";
+    let mut remote = Session::new(
+        "00000000000000a1/j1",
+        "j1",
+        "/srv/api",
+        Control::ViewOnly,
+        SessionState::Done,
+    );
+    remote.node = Some(SessionNode {
+        id: "00000000000000a1".into(),
+        name: "build-box".into(),
+        online: true,
+    });
+    remote.status_updated_ms = 9.0;
+    let mine = Session::new(
+        "a",
+        "a",
+        "/Users/me/docs",
+        Control::ViewOnly,
+        SessionState::Done,
+    );
+    assert_eq!(
+        recent_projects(&[remote, mine], None, 30, &exists),
+        ["/Users/me/docs"],
+        "a path that exists here by chance is still the other machine's"
+    );
+}

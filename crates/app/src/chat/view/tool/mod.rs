@@ -9,6 +9,9 @@ use crate::chat::pickers::Menu;
 mod antigravity;
 mod claude;
 mod codex;
+mod shell_job;
+
+pub(super) use shell_job::bar as shell_bar;
 
 pub(super) struct AccountButton {
     pub text: String,
@@ -63,6 +66,13 @@ pub(super) fn of(tool: Tool) -> &'static dyn ChatTool {
     }
 }
 
+pub(super) fn adapter(session: &Session) -> &'static dyn ChatTool {
+    if crate::chat::remote::is_shell(&session.agent) {
+        return &shell_job::ShellJob;
+    }
+    of(session.tool)
+}
+
 fn active_email(view: &ChatView, provider: &str) -> Option<String> {
     let s = view.accounts.snapshot();
     let p = s.providers.providers.iter().find(|p| p.id == provider)?;
@@ -72,6 +82,9 @@ fn active_email(view: &ChatView, provider: &str) -> Option<String> {
         .find(|acc| &acc.id == active)
         .map(|acc| acc.email.clone())
 }
+
+#[cfg(test)]
+mod shell_job_tests;
 
 #[cfg(test)]
 mod tests {

@@ -66,6 +66,7 @@ fn input() -> ConversationInput {
         tasks_inset: false,
         selected: Some("s1".into()),
         can_run: false,
+        can_reveal: true,
         chat: WeakEntity::new_invalid(),
     }
 }

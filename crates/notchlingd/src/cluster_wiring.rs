@@ -14,6 +14,7 @@ use crate::cluster_node::{
     ClusterLog, ClusterNode, ClusterSetup, Hooks, JoinAsk, LocalCalls, NetSide, Probe, Submit, TICK,
 };
 use crate::cluster_ops::{follow_switch, ClusterOps};
+use crate::cluster_prompts::{NodePush, PromptFollower, RemotePrompts};
 use crate::cluster_sessions::{
     is_client, HandlerRows, NodeSource, Refresher, RemoteSessions, SessionCalls,
 };
@@ -148,6 +149,7 @@ pub struct ClusterHooks {
     pub mirror: Arc<Mirror>,
     pub inbox: Arc<InboxOps>,
     pub snaps: Arc<SnapRunner>,
+    pub prompts: Arc<RemotePrompts>,
 }
 
 impl Hooks for ClusterHooks {
@@ -177,6 +179,10 @@ impl Hooks for ClusterHooks {
 
     fn snapshot(&self, ask: SnapAsk) {
         self.snaps.submit(ask);
+    }
+
+    fn peer_prompt(&self, from: &NodeId, event: &str, data: &Value) {
+        self.prompts.on_event(from, event, data);
     }
 }
 
@@ -236,6 +242,8 @@ pub struct ClusterParts {
     pub remote: Arc<RemoteSessions>,
     pub snap: Arc<SnapSender>,
     pub gate: Arc<MoveGate>,
+    pub prompts: Arc<RemotePrompts>,
+    follower: Option<PromptFollower>,
     delegate: Arc<RealDelegate>,
     mirror: Arc<Mirror>,
     publisher: Arc<Publisher>,
@@ -438,6 +446,7 @@ impl ClusterParts {
             }),
             mover.clone(),
         ));
+        let prompts = RemotePrompts::new(room.clone(), remote.clone());
         let hooks: Arc<dyn Hooks> = Arc::new(ClusterHooks {
             asker: JoinAsker::new(inbox.clone(), JOIN_WAIT),
             switches,
@@ -445,14 +454,24 @@ impl ClusterParts {
             mirror: mirror.clone(),
             inbox,
             snaps: snap_run.clone(),
+            prompts: prompts.clone(),
         });
         let node = start_node(layout, room.clone(), (local, hooks), versions, log.clone());
         let audit = log.clone();
         let mut refresher = None;
         let mut main_follower = None;
         let mut snap_observer = None;
+        let mut follower = None;
         if let Ok(node) = &node {
             reporter.attach(node.clone());
+            let push = Arc::new(NodePush::default());
+            push.attach(node);
+            room.attach_prompt_push(push);
+            follower = Some(PromptFollower::spawn(
+                node.clone(),
+                prompts.clone(),
+                room.clone(),
+            ));
             follow_switch(&link, node);
             rejoin_on_start(&link, node, room.as_ref(), &audit);
             let _ = tail.0.set(NodeSource::new(node.clone()));
@@ -498,6 +517,8 @@ impl ClusterParts {
             remote,
             snap: snap.sender,
             gate: mover.gate().clone(),
+            prompts,
+            follower,
             mirror,
             publisher,
             refresher,
@@ -520,6 +541,10 @@ impl ClusterParts {
         }
     }
 
+    pub fn handler(&self) -> Arc<LateHandler> {
+        self.handler.clone()
+    }
+
     pub fn serve(&self, handler: &Arc<dyn Handler>) {
         self.handler.serve(handler);
     }
@@ -527,6 +552,9 @@ impl ClusterParts {
     pub fn close(&self) {
         self.delegate.stop();
         self.shells.close();
+        if let Some(follower) = &self.follower {
+            follower.close();
+        }
         self.mirror.close();
         if let Some(refresher) = &self.refresher {
             refresher.close();
@@ -549,6 +577,7 @@ pub struct Publisher {
     remote: Arc<RemoteSessions>,
     local: Arc<Mutex<Value>>,
     last: Mutex<Option<Value>>,
+    last_shell: Mutex<Option<Value>>,
 }
 
 impl Publisher {
@@ -562,10 +591,27 @@ impl Publisher {
             remote,
             local,
             last: Mutex::new(None),
+            last_shell: Mutex::new(None),
         }
     }
 
+    fn publish_shell(&self) {
+        let mut last = self.last_shell.lock().unwrap_or_else(|e| e.into_inner());
+        let shells = Value::Array(self.remote.shell_rows());
+        let changed = match last.as_ref() {
+            Some(seen) => *seen != shells,
+            None => shells.as_array().is_some_and(|rows| !rows.is_empty()),
+        };
+        if !changed {
+            return;
+        }
+        self.room
+            .publish(topics::SESSIONS, topics::SESSIONS_REMOTE_SHELL, &shells);
+        *last = Some(shells);
+    }
+
     pub fn publish(&self) {
+        self.publish_shell();
         let mut last = self.last.lock().unwrap_or_else(|e| e.into_inner());
         let local = self.local.lock().unwrap_or_else(|e| e.into_inner()).clone();
         let merged = self.remote.merge(&local);

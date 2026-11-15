@@ -170,6 +170,13 @@
       "moved": true
     },
     {
+      "name": "cluster",
+      "paths": [
+        "crates/app/src/cluster/**"
+      ],
+      "moved": true
+    },
+    {
       "name": "accounts",
       "paths": [
         "crates/app/src/accounts/**"

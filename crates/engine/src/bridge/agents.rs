@@ -1,9 +1,15 @@
-use super::model::{Control, Session, SessionState};
+use super::model::{Control, Session, SessionNode, SessionState};
 use crate::sessions::{Agent, AgentGroup, AgentTarget};
 
 pub fn session(agent: &Agent) -> Session {
-    let id = agent.session_id().unwrap_or_else(|| agent.id.clone());
+    let remote = agent.node.is_some();
+    let id = if remote {
+        agent.id.clone()
+    } else {
+        agent.session_id().unwrap_or_else(|| agent.id.clone())
+    };
     let control = match &agent.target {
+        AgentTarget::Job(_) if remote && agent.can_reply() => Control::Job(agent.id.clone()),
         AgentTarget::Job(job) if agent.can_reply() => Control::Job(job.clone()),
         _ => Control::ViewOnly,
     };
@@ -18,9 +24,14 @@ pub fn session(agent: &Agent) -> Session {
         session.project = agent.project.clone();
     }
     session.pid = match agent.target {
-        AgentTarget::Process(pid) => i32::try_from(pid).ok(),
+        AgentTarget::Process(pid) if !remote => i32::try_from(pid).ok(),
         _ => None,
     };
+    session.node = agent.node.as_ref().map(|node| SessionNode {
+        id: node.id.clone(),
+        name: node.name.clone(),
+        online: node.online,
+    });
     let job = matches!(agent.target, AgentTarget::Job(_));
     session.entrypoint = if agent.headless {
         "sdk".into()

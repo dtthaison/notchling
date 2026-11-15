@@ -21,6 +21,7 @@ use crate::acting::Acting;
 use crate::chat::data::Tool;
 use crate::chat::log::Change;
 use crate::chat::markdown_cache;
+use crate::chat::remote_control::Action;
 
 pub(super) struct ConversationState {
     pub list: ListState,
@@ -141,6 +142,7 @@ pub(super) struct ConversationInput {
     pub tasks_inset: bool,
     pub selected: Option<String>,
     pub can_run: bool,
+    pub can_reveal: bool,
     pub chat: WeakEntity<ChatView>,
 }
 
@@ -159,6 +161,7 @@ impl PartialEq for ConversationInput {
             && self.tasks_inset == other.tasks_inset
             && self.selected == other.selected
             && self.can_run == other.can_run
+            && self.can_reveal == other.can_reveal
     }
 }
 
@@ -384,6 +387,16 @@ impl ChatView {
             && held.is_none()
             && outgoing.is_empty();
         let empty_note = empty.then(|| match session.map(|s| s.tool) {
+            _ if session.is_some_and(|s| crate::chat::remote::is_shell(&s.agent)) => {
+                if session.is_some_and(crate::chat::remote::waiting_for_mirror) {
+                    t::cluster::shell_waiting()
+                } else {
+                    t::cluster::shell_empty()
+                }
+            }
+            _ if session.is_some_and(crate::chat::remote::waiting_for_mirror) => {
+                t::cluster::mirror_waiting()
+            }
             Some(Tool::Antigravity) if !self.tools.agy.as_ref().is_some_and(|c| c.open) => {
                 match self.acting_in(cx) {
                     Acting::On => t::chat::agy_loading(),
@@ -412,6 +425,7 @@ impl ChatView {
             tasks_inset: super::tasks::shown(self),
             selected: self.selected.clone(),
             can_run: self.run_available(cx),
+            can_reveal: !self.selected_refused(Action::Files),
             chat: WeakEntity::new_invalid(),
         }
     }

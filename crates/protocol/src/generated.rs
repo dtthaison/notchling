@@ -187,6 +187,17 @@ pub struct Takeover {
     pub busy: bool,
 }
 
+/// Additive: the node a session runs on in a cluster; an older phone ignores it. Absent for the Mac's own sessions.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SessionNode {
+    /// The node's id.
+    pub id: String,
+    /// The name to show.
+    pub name: String,
+    /// False while the node can't be reached; its sessions stay listed.
+    pub online: bool,
+}
+
 /// A cheap marker of Claude's newest reply. A new id means a new reply.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LastMessage {
@@ -256,6 +267,8 @@ pub struct Session {
     /// claude, codex or agy. Additive: an older Mac sends none, an older phone ignores it.
     #[serde(default = "default_session_tool")]
     pub tool: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub node: Option<SessionNode>,
 }
 
 fn default_session_tool() -> String {
@@ -1361,6 +1374,7 @@ pub fn roundtrip(name: &str, value: &Value) -> Option<Result<Value, serde_json::
         "PromptQuestion" => round::<PromptQuestion>(value),
         "Prompt" => round::<Prompt>(value),
         "Takeover" => round::<Takeover>(value),
+        "SessionNode" => round::<SessionNode>(value),
         "LastMessage" => round::<LastMessage>(value),
         "Limit" => round::<Limit>(value),
         "Facts" => round::<Facts>(value),

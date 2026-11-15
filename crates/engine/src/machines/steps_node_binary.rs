@@ -1,14 +1,14 @@
 use super::registry::Machine;
 use super::shell;
 use super::step::{
-    run, Cadence, CheckResult, FixContext, FixOutcome, FixPlan, Probe, RemoteOutput, SetupStep,
-    StepContext, StepFix, StepId,
+    run, Cadence, CheckResult, Detected, FixContext, FixOutcome, FixPlan, Probe, RemoteOutput,
+    SetupStep, StepContext, StepFix, StepId,
 };
 use super::steps_node::{
-    arch_word, first_text_line, machine_refusal, os_word, said, value_of, BINARY, BINARY_NEW,
-    MAC_BUILD,
+    arch_word, first_text_line, machine_refusal, os_word, said, value_of, APP_DIR, BINARY,
+    BINARY_NEW, MAC_BUILD, NOT_NEEDED,
 };
-use super::steps_node_service::{restart_command, STOPS_WORK};
+use super::steps_node_service::{restart_command, stops_work};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -25,14 +25,19 @@ pub(super) fn binary(m: &Machine) -> SetupStep {
         "Notchling installed",
         vec![StepId::REACHABLE],
         Cadence::EveryRefresh,
-        Probe::remote(probe_script(), parse_binary),
+        Probe::remote(probe_script(m), parse_binary),
         StepFix::Run(FixPlan::new(display(m), false, binary_fix)),
     )
 }
 
-fn probe_script() -> String {
+fn probe_script(m: &Machine) -> String {
+    let app = if m.is_linux() {
+        String::new()
+    } else {
+        format!("\nif test -d {APP_DIR}; then echo app=yes; else echo app=no; fi")
+    };
     format!(
-        "p={}\n\"$p\" --version 2>&1 | head -1\nif command -v sha256sum >/dev/null 2>&1; then h=$(sha256sum \"$p\" 2>/dev/null); else h=$(shasum -a 256 \"$p\" 2>/dev/null); fi\necho \"sha256=${{h%% *}}\"",
+        "p={}\n\"$p\" --version 2>&1 | head -1\nif command -v sha256sum >/dev/null 2>&1; then h=$(sha256sum \"$p\" 2>/dev/null); else h=$(shasum -a 256 \"$p\" 2>/dev/null); fi\necho \"sha256=${{h%% *}}\"{app}",
         shell::path(BINARY)
     )
 }
@@ -68,6 +73,32 @@ fn dist_path(m: &Machine, dist: Option<&PathBuf>) -> Option<PathBuf> {
 }
 
 fn parse_binary(out: &RemoteOutput, ctx: &StepContext) -> CheckResult {
+    let app = if ctx.machine.is_linux() {
+        None
+    } else {
+        match value_of(&out.text, "app=") {
+            Some("yes") => Some(true),
+            Some("no") => Some(false),
+            _ => None,
+        }
+    };
+    if app == Some(true) {
+        return CheckResult::pass(NOT_NEEDED).detected(Detected {
+            notchling_app: app,
+            ..Detected::default()
+        });
+    }
+    let result = binary_state(out, ctx);
+    match app {
+        Some(_) => result.detected(Detected {
+            notchling_app: app,
+            ..Detected::default()
+        }),
+        None => result,
+    }
+}
+
+fn binary_state(out: &RemoteOutput, ctx: &StepContext) -> CheckResult {
     let line = first_text_line(&out.text);
     let have = value_of(&out.text, "sha256=").unwrap_or("");
     if !line.starts_with("notchling ") {
@@ -140,7 +171,8 @@ fn display(m: &Machine) -> String {
     let new = shell::path(BINARY_NEW);
     let old = shell::path(BINARY);
     format!(
-        "{STOPS_WORK}\nCopy {file} from this Mac's cluster dist folder:\nmkdir -p ~/.local/bin\n{}\nCheck its SHA-256 there against this Mac's:\n{}\nWhen the copy fails or they differ, remove it:\nrm -f {new}\nOnly when they match, put it in place:\nchmod 755 {new} && mv -f {new} {old}\nThen restart the service if it runs:\n{}",
+        "{}\nCopy {file} from this Mac's cluster dist folder:\nmkdir -p ~/.local/bin\n{}\nCheck its SHA-256 there against this Mac's:\n{}\nWhen the copy fails or they differ, remove it:\nrm -f {new}\nOnly when they match, put it in place:\nchmod 755 {new} && mv -f {new} {old}\nThen restart the service if it runs:\n{}",
+        stops_work(m.is_linux()),
         scp_args(&file, m).join(" "),
         hash_script(),
         restart_command(m.is_linux())

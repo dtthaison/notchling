@@ -235,15 +235,20 @@ pub(super) fn render(m: &SidebarModel, a: Appearance, cx: &mut Context<ChatView>
                 false,
                 a,
             )
-            .on_click(cx.listener(move |this, _, _, cx| this.select(&id, cx)))
-            .drag_over::<ExternalPaths>(move |style, _, _, _| style.bg(over))
-            .on_drop::<ExternalPaths>(cx.listener(
-                move |this, paths: &ExternalPaths, w, cx| {
-                    this.select(&drop_id, cx);
-                    this.drop_paths(paths.paths(), w, cx);
-                    cx.stop_propagation();
-                },
-            ));
+            .on_click(cx.listener(move |this, _, _, cx| this.select(&id, cx)));
+            let row_el = if row.takes_files {
+                row_el
+                    .drag_over::<ExternalPaths>(move |style, _, _, _| style.bg(over))
+                    .on_drop::<ExternalPaths>(cx.listener(
+                        move |this, paths: &ExternalPaths, w, cx| {
+                            this.select(&drop_id, cx);
+                            this.drop_paths(paths.paths(), w, cx);
+                            cx.stop_propagation();
+                        },
+                    ))
+            } else {
+                row_el
+            };
             let row_el = super::row_menu::on_right_click(row_el, menu_id, cx)
                 .when(dimmed, |row| row.opacity(OFFLINE_OPACITY));
             list = list.child(row_el.part_at("Session Row", Corner::Trailing, a, cx));

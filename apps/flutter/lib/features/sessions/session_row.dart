@@ -5,6 +5,7 @@ import '../../app/widgets/kit.dart';
 import '../../app/widgets/motion.dart';
 import '../../core/protocol/models.dart';
 import '../../l10n/app_localizations.dart';
+import 'node_label.dart';
 import 'status_style.dart';
 
 String? activityLine(Session session) {
@@ -60,6 +61,7 @@ class SessionRow extends StatelessWidget {
       ?activity,
       if (running > 0) l10n.sessionsRunningSubagents(running),
       if (session.control == SessionControl.viewOnly) l10n.appViewOnly,
+      if (session.node != null) nodeSpoken(l10n, session.node!),
       time,
     ].join(', ');
 
@@ -148,6 +150,8 @@ class SessionRow extends StatelessWidget {
                                 const SizedBox(height: 1),
                                 Row(
                                   children: <Widget>[
+                                    if (session.node != null)
+                                      NodeLabelSlot(node: session.node!),
                                     if (session.control ==
                                         SessionControl.viewOnly)
                                       Padding(

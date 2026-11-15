@@ -91,6 +91,8 @@ mod tests_merge_git_b;
 #[cfg(test)]
 mod tests_morning;
 #[cfg(test)]
+mod tests_node_app;
+#[cfg(test)]
 mod tests_node_final;
 #[cfg(test)]
 mod tests_node_steps;

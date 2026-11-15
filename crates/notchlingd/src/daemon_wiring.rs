@@ -1,6 +1,6 @@
 use crate::account_history::DbSwitches;
 use crate::accounts_ops::AccountsOps;
-use crate::acting::Acting;
+use crate::acting::{Acting, ACTING_OFF};
 use crate::acting_ops::{ActingOps, Room};
 use crate::activity_ops::ActivityOps;
 use crate::agy_ops::AgyOps;
@@ -10,7 +10,8 @@ use crate::awake_ops::AwakeOps;
 use crate::bridge_backend::APPROVAL_WAIT;
 use crate::bridge_ops::{BridgeOps, BridgeSetup};
 use crate::catalog_ops::CatalogService;
-use crate::cluster_forward::Forward;
+use crate::cluster_forward::{acting_gated, Forward};
+use crate::cluster_prompts::RemotePrompts;
 use crate::cluster_sessions::RemoteSessions;
 use crate::cluster_wiring::ClusterParts;
 use crate::codex_children::CodexChildren;
@@ -53,7 +54,7 @@ use notchling_engine::versions::mac::Roots as VersionRoots;
 use notchling_engine::versions::Version;
 use notchling_events::{Emit, Salt};
 use notchling_local_api::{
-    ops, topics, ApiError, Caller, ClientKind, Handler, OpHome, OpSpec, Tier,
+    ops, topics, ApiError, Caller, ClientKind, ErrorCode, Handler, OpHome, OpSpec, Tier,
 };
 use serde_json::{Map, Value};
 use std::path::{Path, PathBuf};
@@ -73,6 +74,7 @@ pub struct Ops {
     forward: Option<Arc<dyn Forward>>,
     remote: Option<Arc<RemoteSessions>>,
     gate: Option<Arc<crate::cluster_move::MoveGate>>,
+    prompts: Option<Arc<RemotePrompts>>,
     topic_list: Vec<&'static str>,
     first: Arc<FirstScan>,
     first_wait: Duration,
@@ -93,6 +95,7 @@ impl Ops {
             forward: None,
             remote: None,
             gate: None,
+            prompts: None,
             topic_list: vec![topics::SESSIONS],
             first: FirstScan::open(),
             first_wait: FIRST_LIST_WAIT,
@@ -181,6 +184,11 @@ impl Ops {
         self
     }
 
+    pub fn with_remote_prompts(mut self, prompts: Arc<RemotePrompts>) -> Ops {
+        self.prompts = Some(prompts);
+        self
+    }
+
     pub fn with_first_scan(mut self, first: Arc<FirstScan>, wait: Duration) -> Ops {
         self.first = first;
         self.first_wait = wait;
@@ -195,6 +203,16 @@ fn every_tool(args: &Value) -> Result<bool, ApiError> {
         Some(Value::String(tools)) if tools == "all" => Ok(true),
         Some(_) => Err(ApiError::bad_request(
             "sessions.list takes {\"tools\": \"all\" | \"claude\"}",
+        )),
+    }
+}
+
+fn with_remote_shell(args: &Value) -> Result<bool, ApiError> {
+    match args.get("remote") {
+        None | Some(Value::Null) => Ok(false),
+        Some(Value::String(kind)) if kind == "shell" => Ok(true),
+        Some(_) => Err(ApiError::bad_request(
+            "sessions.list takes {\"remote\": \"shell\"}",
         )),
     }
 }
@@ -214,6 +232,7 @@ fn tagged(list: Value, tool: &str) -> Vec<Value> {
 impl Ops {
     fn sessions_list(&self, caller: &Caller, args: &Value) -> Result<(Value, bool), ApiError> {
         let every = every_tool(args)?;
+        let shell = with_remote_shell(args)?;
         let landed = self.first.wait(self.first_wait);
         let list = self
             .sessions
@@ -235,6 +254,9 @@ impl Ops {
         match &self.remote {
             Some(remote) if caller.client != ClientKind::Node && every => {
                 Ok((remote.merge_all(&list), landed))
+            }
+            Some(remote) if caller.client != ClientKind::Node && shell => {
+                Ok((remote.merge_shell(&list), landed))
             }
             Some(remote) if caller.client != ClientKind::Node => Ok((remote.merge(&list), landed)),
             _ => Ok((list, landed)),
@@ -303,6 +325,9 @@ impl Handler for Ops {
     }
 
     fn call(&self, caller: &Caller, op: &str, args: &Value) -> Result<Value, ApiError> {
+        if self.acting.as_ref().is_some_and(|a| !a.is_on()) && acting_gated(caller, op, args) {
+            return Err(ApiError::new(ErrorCode::Forbidden, ACTING_OFF));
+        }
         if let Some(gate) = &self.gate {
             let acting = self.acting.as_ref();
             gate.check(op, args, &|id| acting.and_then(|a| a.prompt_session(id)))?;
@@ -331,6 +356,13 @@ impl Handler for Ops {
         }
         match (op, &self.acting) {
             (ops::SESSIONS_LIST, _) => self.sessions_list(caller, args).map(|(list, _)| list),
+            (ops::PROMPTS_LIST, Some(acting)) => {
+                let local = acting.call(caller, op, args)?;
+                Ok(match &self.prompts {
+                    Some(prompts) => prompts.merge(local, caller),
+                    None => local,
+                })
+            }
             (op, Some(acting)) => acting.call(caller, op, args),
             (op, None) => Err(ApiError::internal(format!("{op} has no handler"))),
         }
@@ -636,6 +668,11 @@ impl Wired {
             events.clone(),
             sessions.clone(),
         );
+        bridge.cluster().attach(
+            cluster.handler(),
+            cluster.remote.clone(),
+            cluster.prompts.clone(),
+        );
         Wired {
             acting,
             codex,
@@ -731,6 +768,7 @@ impl Wired {
             .with_shells(self.cluster.shells.clone())
             .with_cluster(self.cluster.forward(), self.cluster.remote.clone())
             .with_move_gate(self.cluster.gate.clone())
+            .with_remote_prompts(self.cluster.prompts.clone())
             .with_group(Arc::new(git))
             .with_group(Arc::new(AwakeOps::new(self.awake.clone())))
             .with_group(self.codex_children.clone())

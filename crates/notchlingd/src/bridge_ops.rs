@@ -1,5 +1,6 @@
 use crate::acting_ops::{ActingOps, Room};
 use crate::bridge_backend::{Approvals, DaemonActing, DaemonSources};
+use crate::bridge_cluster::PhoneCluster;
 use crate::every_session::EverySession;
 use crate::inbox_ops::InboxOps;
 use crate::late_emit::Events;
@@ -42,6 +43,7 @@ pub struct BridgeOps {
     bridge: Bridge,
     approvals: Arc<Approvals>,
     room: Arc<dyn Room>,
+    cluster: Arc<PhoneCluster>,
     events: Option<Events>,
 }
 
@@ -55,6 +57,7 @@ impl BridgeOps {
         every: Arc<EverySession>,
     ) -> BridgeOps {
         let approvals = Arc::new(Approvals::new(room.clone(), setup.approval_wait));
+        let cluster = PhoneCluster::none();
         let backend = LiveBackend::new(
             DaemonSources {
                 sessions: sessions.clone(),
@@ -62,11 +65,13 @@ impl BridgeOps {
                 approvals: approvals.clone(),
                 inbox,
                 every,
+                cluster: cluster.clone(),
                 projects_dir: setup.projects_dir.clone(),
             },
             DaemonActing {
                 ops: acting,
                 sessions,
+                cluster: cluster.clone(),
             },
         );
         let mut config = BridgeConfig::new(setup.data_dir, setup.home, setup.images_dir)
@@ -85,8 +90,13 @@ impl BridgeOps {
             ),
             approvals,
             room,
+            cluster,
             events: None,
         }
+    }
+
+    pub fn cluster(&self) -> Arc<PhoneCluster> {
+        self.cluster.clone()
     }
 
     pub fn with_events(mut self, events: Events) -> BridgeOps {

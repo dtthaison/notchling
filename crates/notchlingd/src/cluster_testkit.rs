@@ -61,6 +61,66 @@ pub(crate) struct Counting {
     pub inner: MemTransport,
     pub listens: AtomicUsize,
     pub dials: AtomicUsize,
+    pub sent: Arc<Mutex<Vec<String>>>,
+}
+
+impl Counting {
+    pub(crate) fn sent_lines(&self) -> Vec<String> {
+        self.sent.lock().unwrap().clone()
+    }
+}
+
+struct TapConn {
+    inner: Arc<dyn Conn>,
+    sent: Arc<Mutex<Vec<String>>>,
+}
+
+impl Conn for TapConn {
+    fn id(&self) -> u64 {
+        self.inner.id()
+    }
+
+    fn send(&self, line: Vec<u8>) -> Result<(), Error> {
+        self.sent
+            .lock()
+            .unwrap()
+            .push(String::from_utf8_lossy(&line).into_owned());
+        self.inner.send(line)
+    }
+
+    fn peer_fingerprint(&self) -> String {
+        self.inner.peer_fingerprint()
+    }
+
+    fn is_open(&self) -> bool {
+        self.inner.is_open()
+    }
+
+    fn close(&self) {
+        self.inner.close()
+    }
+}
+
+struct TapEvents {
+    inner: Arc<dyn LinkEvents>,
+    sent: Arc<Mutex<Vec<String>>>,
+}
+
+impl LinkEvents for TapEvents {
+    fn opened(&self, conn: Arc<dyn Conn>) {
+        self.inner.opened(Arc::new(TapConn {
+            inner: conn,
+            sent: self.sent.clone(),
+        }));
+    }
+
+    fn line(&self, peer_fp: &str, line: Vec<u8>) {
+        self.inner.line(peer_fp, line);
+    }
+
+    fn closed(&self, peer_fp: &str, conn_id: u64) {
+        self.inner.closed(peer_fp, conn_id);
+    }
 }
 
 impl Transport for Counting {
@@ -76,11 +136,19 @@ impl Transport for Counting {
         events: Arc<dyn LinkEvents>,
     ) -> Result<Arc<dyn Conn>, Error> {
         self.dials.fetch_add(1, Ordering::SeqCst);
+        let events = Arc::new(TapEvents {
+            inner: events,
+            sent: self.sent.clone(),
+        });
         self.inner.dial(addrs, port, expect, events)
     }
 
     fn listen(&self, port: u16, events: Arc<dyn LinkEvents>) -> Result<Listener, Error> {
         self.listens.fetch_add(1, Ordering::SeqCst);
+        let events = Arc::new(TapEvents {
+            inner: events,
+            sent: self.sent.clone(),
+        });
         self.inner.listen(port, events)
     }
 }
@@ -186,6 +254,7 @@ pub(crate) fn node(net: &Arc<MemNet>, opts: Opts) -> TestNode {
         inner: MemTransport::on(net, &fp, pins.clone()),
         listens: AtomicUsize::new(0),
         dials: AtomicUsize::new(0),
+        sent: Arc::default(),
     });
     let room = opts.room.clone().unwrap_or_default();
     let calls = Arc::new(FakeCalls::default());

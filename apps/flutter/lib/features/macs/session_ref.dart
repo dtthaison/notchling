@@ -16,7 +16,12 @@ class SessionRef {
     return match == null ? null : SessionRef(match.group(1)!, match.group(2)!);
   }
 
-  static SessionRef fromPayload(String payload, {required String fallbackHost}) => parse(payload) ?? SessionRef(fallbackHost, payload);
+  static SessionRef fromPayload(String payload, {required String fallbackHost}) {
+    if (payload.startsWith(bareMark)) return SessionRef(fallbackHost, payload.substring(bareMark.length));
+    return parse(payload) ?? SessionRef(fallbackHost, payload);
+  }
+
+  static SessionRef? onComputer(String sessionId, {required bool manyComputers}) => manyComputers ? parse(sessionId) : null;
 
   SessionRef onHostIfUnknown(String defaultHost) => host.isEmpty ? SessionRef(defaultHost, id) : this;
 
@@ -30,9 +35,20 @@ class SessionRef {
   String toString() => 'SessionRef($qualified)';
 }
 
-String storageKey(String scope, String sessionId) => scope.isEmpty ? sessionId : '$scope/$sessionId';
+const String bareMark = '/';
 
-bool keyInScope(String scope, String key) => scope.isEmpty ? SessionRef.parse(key) == null : key.startsWith('$scope/');
+String storageKey(String scope, String sessionId) {
+  if (scope.isNotEmpty) return '$scope/$sessionId';
+  return SessionRef.parse(sessionId) == null ? sessionId : '$bareMark$sessionId';
+}
+
+bool keyInScope(String scope, String key) =>
+    scope.isEmpty ? key.startsWith(bareMark) || SessionRef.parse(key) == null : key.startsWith('$scope/');
+
+String? idInBareScope(String key) {
+  if (key.startsWith(bareMark)) return key.substring(bareMark.length);
+  return SessionRef.parse(key) == null ? key : null;
+}
 
 Session withSessionId(Session session, String id) => Session(
       id: id,
@@ -49,4 +65,5 @@ Session withSessionId(Session session, String id) => Session(
       activity: session.activity,
       facts: session.facts,
       lastMessage: session.lastMessage,
+      node: session.node,
     );

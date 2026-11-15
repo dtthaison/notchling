@@ -162,3 +162,99 @@ fn a_peer_event_on_a_topic_this_node_does_not_consume_is_dropped() {
         );
     }
 }
+
+fn prompt_event(name: &str) -> Msg {
+    Msg::Event {
+        topic: "prompts".to_string(),
+        name: name.to_string(),
+        data: json!({"id": "p1", "from": "someone else"}),
+    }
+}
+
+fn published(effects: &[Effect], name: &str) -> Option<serde_json::Value> {
+    effects.iter().find_map(|e| match e {
+        Effect::Publish { name: n, data, .. } if n == name => Some(data.clone()),
+        _ => None,
+    })
+}
+
+#[test]
+fn a_prompt_event_is_published_only_on_a_client_with_its_sender_named() {
+    let (mut hub, m5, w1) = pair();
+    for name in ["prompt.pending", "prompt.resolved"] {
+        let effects = hub.run(
+            &m5,
+            Input::Msg {
+                from: w1.clone(),
+                msg: prompt_event(name),
+            },
+        );
+        let data = published(&effects, name).expect("a client publishes it");
+        assert_eq!(data["from"], json!(w1));
+        assert_eq!(data["id"], json!("p1"));
+    }
+    let effects = hub.run(
+        &w1,
+        Input::Msg {
+            from: m5.clone(),
+            msg: prompt_event("prompt.pending"),
+        },
+    );
+    assert!(published(&effects, "prompt.pending").is_none());
+}
+
+#[test]
+fn a_prompt_event_with_another_name_or_from_a_stranger_is_dropped() {
+    let (mut hub, m5, w1) = pair();
+    let effects = hub.run(
+        &m5,
+        Input::Msg {
+            from: w1.clone(),
+            msg: prompt_event("prompt.other"),
+        },
+    );
+    assert!(published(&effects, "prompt.other").is_none());
+    let effects = hub.run(
+        &m5,
+        Input::Msg {
+            from: id("zz"),
+            msg: prompt_event("prompt.pending"),
+        },
+    );
+    assert!(published(&effects, "prompt.pending").is_none());
+}
+
+#[test]
+fn a_prompt_event_from_a_greeted_member_that_is_not_active_is_dropped() {
+    for state in [MemberState::Pending, MemberState::Removed] {
+        let (mut hub, m5, w1) = pair();
+        let effects = hub.run(
+            &m5,
+            Input::Msg {
+                from: w1.clone(),
+                msg: prompt_event("prompt.pending"),
+            },
+        );
+        assert!(
+            published(&effects, "prompt.pending").is_some(),
+            "{state:?}: active first"
+        );
+        let core = hub.nodes.get_mut(&m5).expect("home");
+        core.state
+            .as_mut()
+            .expect("state")
+            .members
+            .get_mut(&w1)
+            .expect("member")
+            .state = state;
+        assert!(core.peers.get(&w1).is_some_and(|p| p.greeted));
+        let effects = hub.run(
+            &m5,
+            Input::Msg {
+                from: w1.clone(),
+                msg: prompt_event("prompt.pending"),
+            },
+        );
+        assert!(published(&effects, "prompt.pending").is_none(), "{state:?}");
+    }
+}

@@ -4,6 +4,7 @@ Description=Notchling daemon
 [Service]
 Type=simple
 ExecStart="/home/me/.local/bin/notchling" daemon
+KillMode=process
 Restart=on-failure
 RestartSec=5
 StandardOutput=append:/home/me/.local/share/notchling/notchlingd.log

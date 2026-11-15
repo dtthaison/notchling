@@ -9,6 +9,7 @@ use crate::accounts::model::{ANTIGRAVITY, CODEX};
 use crate::accounts::wire::{Outcome, Provider, ProviderAccount};
 use crate::acting::{self, Acting, Control, Request};
 use crate::chat::data::{Session, Tool};
+use crate::sheets::run_on::{Remote, RunOn, RunTarget};
 use crate::tools::requests::{AGY_DRAFT_PREFIX, CODEX_DRAFT_PREFIX};
 
 pub const MAX_FOLDERS: usize = 30;
@@ -71,6 +72,7 @@ pub enum Stage {
     Trusting,
     Failed(String),
     Confirm { message: String, button: String },
+    Sent(String),
     Started,
 }
 
@@ -82,6 +84,8 @@ pub struct NewSession {
     pub folder: Option<usize>,
     pub stage: Stage,
     pub home: String,
+    pub run_on: RunOn,
+    pub target: RunTarget,
 }
 
 pub fn accounts(
@@ -261,12 +265,17 @@ impl NewSession {
             folders,
             stage: Stage::Choosing,
             home: home.to_owned(),
+            run_on: RunOn::default(),
+            target: RunTarget::default(),
         }
     }
 
     pub fn pick_account(&mut self, i: usize) {
         if i < self.accounts.len() {
             self.account = Some(i);
+            if !self.on_worker() {
+                self.target.remote = Remote::of_section(self.accounts[i].section);
+            }
             self.reset();
         }
     }
@@ -289,7 +298,7 @@ impl NewSession {
     fn reset(&mut self) {
         if matches!(
             self.stage,
-            Stage::Untrusted | Stage::Failed(_) | Stage::Confirm { .. }
+            Stage::Untrusted | Stage::Failed(_) | Stage::Confirm { .. } | Stage::Sent(_)
         ) {
             self.stage = Stage::Choosing;
         }
@@ -311,7 +320,11 @@ impl NewSession {
         if !gate.enabled {
             return gate;
         }
-        let ready = self.chosen().is_some() && !self.busy();
+        let ready = if self.on_worker() {
+            self.remote_ready()
+        } else {
+            self.chosen().is_some() && !self.busy()
+        };
         Control {
             enabled: ready,
             tooltip: None,
@@ -319,6 +332,9 @@ impl NewSession {
     }
 
     pub fn start(&mut self) -> Option<Request> {
+        if self.on_worker() {
+            return self.dispatch_request();
+        }
         let (account, folder) = self.chosen()?;
         let Pick::Claude(dir) = &account.pick else {
             return None;
@@ -329,6 +345,9 @@ impl NewSession {
     }
 
     pub fn plan(&mut self) -> Option<Plan> {
+        if self.on_worker() {
+            return self.dispatch_request().map(Plan::Request);
+        }
         let (account, folder) = self.chosen()?;
         let plan = match account.pick.clone() {
             Pick::Claude(_) => return self.start().map(Plan::Request),
@@ -390,7 +409,7 @@ impl NewSession {
     pub fn started(&mut self, result: Result<(), String>) {
         self.stage = match result {
             Ok(()) => Stage::Started,
-            Err(message) if acting::is_untrusted(&message) => Stage::Untrusted,
+            Err(message) if !self.on_worker() && acting::is_untrusted(&message) => Stage::Untrusted,
             Err(message) => Stage::Failed(message),
         };
     }
@@ -426,10 +445,13 @@ impl NewSession {
 
     pub fn footer(&self) -> String {
         match &self.stage {
-            Stage::Failed(message) | Stage::Confirm { message, .. } => message.clone(),
+            Stage::Failed(message) | Stage::Confirm { message, .. } | Stage::Sent(message) => {
+                message.clone()
+            }
             Stage::Untrusted => t::chat::sheet_untrusted().to_owned(),
             Stage::Starting => t::chat::sheet_starting().to_owned(),
             Stage::Trusting => t::chat::sheet_trusting().to_owned(),
+            Stage::Choosing | Stage::Started if self.on_worker() => self.remote_footer(),
             Stage::Choosing | Stage::Started => match self.chosen() {
                 Some((account, folder)) => t::chat::sheet_chosen(
                     &account.title,

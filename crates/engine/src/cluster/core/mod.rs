@@ -247,6 +247,7 @@ struct Joining {
     local: u64,
     answered: bool,
     since: u64,
+    since_ms: i64,
 }
 
 pub struct NodeCore {
@@ -339,7 +340,7 @@ impl NodeCore {
     pub fn status(&self) -> Value {
         let me = self.me.to_string();
         let Some(state) = &self.state else {
-            return json!({"cluster": Value::Null, "me": me, "members": [], "jobs": []});
+            return json!({"cluster": Value::Null, "joining": self.joining_status(), "me": me, "members": [], "jobs": []});
         };
         let online = self.online();
         let members: Vec<Value> = state
@@ -403,12 +404,25 @@ impl NodeCore {
                 "home": state.home,
                 "vault": state.vault,
             },
+            "joining": Value::Null,
             "me": me,
             "members": members,
             "jobs": jobs,
             "main": state.main.keys().collect::<Vec<_>>(),
             "kept": state.kept,
         })
+    }
+
+    fn joining_status(&self) -> Value {
+        match &self.joining {
+            Some(j) => json!({
+                "since": j.since_ms,
+                "cluster": j.token.cluster,
+                "primary": j.token.home,
+                "answered": j.answered,
+            }),
+            None => Value::Null,
+        }
     }
 
     pub fn step(&mut self, input: Input) -> Vec<Effect> {
@@ -551,6 +565,8 @@ mod core_tests_dispatch;
 mod core_tests_headless;
 #[cfg(test)]
 mod core_tests_jobs;
+#[cfg(test)]
+mod core_tests_joining;
 #[cfg(test)]
 mod core_tests_main;
 #[cfg(test)]

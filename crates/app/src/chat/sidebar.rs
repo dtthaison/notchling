@@ -20,6 +20,7 @@ pub struct SidebarRow {
     pub tool: Tool,
     pub config_dir: Option<String>,
     pub node: Option<super::sidebar_node::NodeLabel>,
+    pub takes_files: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -98,6 +99,7 @@ fn row(session: &Session, now_ms: i64) -> SidebarRow {
         tool: session.tool,
         config_dir: agent.config_dir.clone(),
         node: None,
+        takes_files: super::remote_control::takes_files(agent),
     }
 }
 

@@ -5,6 +5,8 @@ use notchling_engine::sessions::Agent;
 use notchling_engine::transcript::continued::find_earlier;
 use notchling_engine::transcript::locate::{find_transcript, successor};
 
+use crate::chat::remote::{self, Source};
+
 pub const MISS_RETRY: i64 = 30_000;
 
 #[derive(Clone, Debug, Default)]
@@ -22,8 +24,13 @@ impl Locator {
     }
 
     pub fn find(&mut self, agent: &Agent, projects: &Path, now_ms: i64) -> Option<PathBuf> {
+        match remote::source(agent) {
+            Source::Mirror(path) => return path.is_file().then_some(path),
+            Source::Pending => return None,
+            Source::Local => {}
+        }
         if agent.command.is_some() {
-            return None;
+            return remote::shell_log(agent);
         }
         let linked = agent
             .transcript_path

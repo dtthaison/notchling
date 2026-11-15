@@ -17,8 +17,10 @@ use crate::accounts::view::AccountsView;
 use crate::acting::Acting;
 use crate::actions::Actions;
 use crate::chat::data::Tool;
+use crate::chat::remote_control::Action;
 use crate::mac::shell::{AppActions, AppVault};
 use crate::sheets::new_session::{accounts, draft_session, folders, NewSession};
+use crate::sheets::run_on::RunOn;
 use crate::sheets::second_opinion_view::SecondOpinionView;
 use crate::sheets::settings_view::{SettingChanged, SettingsView};
 use crate::sheets::view::{AccountsHandle, Acts, Dismiss, NewSessionView, StartDraft, StartedJob};
@@ -128,13 +130,14 @@ impl ChatView {
         let home = self.root.home.to_string_lossy().into_owned();
         let snapshot = self.accounts.snapshot();
         let choices = accounts(&targets(&snapshot), &agents, &snapshot.providers.providers);
-        let model = NewSession::new(choices, folders(&[], &agents), &home);
+        let model = NewSession::new(choices, folders(&[], &agents), &home)
+            .with_run_on(RunOn::from_cluster(&self.cluster.snapshot()));
         let acts = self.acts(cx);
         let handle = self.accounts.is_live().then(|| AccountsHandle {
             store: self.accounts.clone(),
             feed: self.switches.clone(),
         });
-        let entity = cx.new(|_| NewSessionView::new(model, acts, handle));
+        let entity = cx.new(|cx| NewSessionView::new(model, acts, handle, cx));
         cx.subscribe(&entity, |this, _, e: &StartDraft, cx| {
             this.open_draft(&e.provider, &e.folder, cx)
         })
@@ -162,6 +165,9 @@ impl ChatView {
         anchor: &str,
         cx: &mut Context<Self>,
     ) {
+        if self.refuse_selected(Action::Opinion, cx) {
+            return;
+        }
         let Some(session) = self.selected_session() else {
             return;
         };

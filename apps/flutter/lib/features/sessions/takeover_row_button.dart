@@ -11,6 +11,7 @@ import '../../l10n/app_localizations.dart';
 import '../connection/bridge_errors.dart';
 import '../chat/takeover_flow.dart';
 import '../connection/connection.dart';
+import '../macs/macs_notifier.dart';
 import '../macs/session_ref.dart';
 import 'sessions_notifier.dart';
 
@@ -23,7 +24,7 @@ Future<void> runTakeover(
   final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
   final TakeoverChoice choice = await confirmTakeover(context, session);
   if (choice == TakeoverChoice.cancel || !context.mounted) return;
-  final SessionRef? on = SessionRef.parse(session.id);
+  final SessionRef? on = SessionRef.onComputer(session.id, manyComputers: ref.read(macsProvider).macs.length > 1);
   final BridgeClient? client = on == null
       ? ref.read(bridgeClientProvider)
       : ref.read(computerClientProvider(on.host));

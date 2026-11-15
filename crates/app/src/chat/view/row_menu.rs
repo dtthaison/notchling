@@ -17,6 +17,8 @@ use crate::acting::{Control, Request};
 use crate::chat::closed;
 use crate::chat::data::Session;
 use crate::chat::data::Tool;
+use crate::chat::remote::{self, bring_back_job};
+use crate::chat::remote_control::Action;
 use crate::chat::sidebar::copyable_id;
 use crate::chat::used;
 use crate::phone::bridge::now_ms;
@@ -52,8 +54,12 @@ pub(super) fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>)
     let id = copyable_id(&menu.row_id).map(str::to_owned);
     let session = view.sessions.iter().find(|s| s.agent.id == menu.row_id);
     let tool = session.map(|s| s.tool);
-    let removable = session
-        .is_some_and(|s| s.tool == Tool::Claude && matches!(s.agent.target, AgentTarget::Job(_)));
+    let remote = session.filter(|s| remote::is_remote(&s.agent));
+    let removable = session.is_some_and(|s| {
+        s.tool == Tool::Claude
+            && matches!(s.agent.target, AgentTarget::Job(_))
+            && !remote::is_remote(&s.agent)
+    });
     if removable && menu.confirm_remove {
         return Some(layer(menu, confirm_card(view, a, cx), cx));
     }
@@ -113,6 +119,25 @@ pub(super) fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>)
         } else {
             held_item("row-remove", t::chat::remove_session(), control, a)
         });
+    }
+    if let Some(session) = remote {
+        let id = session.agent.id.clone();
+        if let Some(control) = view.remote_control(&id, Action::Remove) {
+            items = items.child(held_item(
+                "row-remove",
+                t::chat::remove_session(),
+                control,
+                a,
+            ));
+        }
+        if bring_back_job(&session.agent).is_some() {
+            let control = view.remote_control(&id, Action::BringBack);
+            items = items.child(match control {
+                Some(control) => held_item("row-bring-back", t::cluster::bring_back(), control, a),
+                None => menu_item("row-bring-back", t::cluster::bring_back(), a)
+                    .on_click(cx.listener(move |this, _, _, cx| this.bring_back(id.clone(), cx))),
+            });
+        }
     }
     Some(layer(menu, items, cx))
 }
@@ -259,7 +284,10 @@ impl ChatView {
     }
 
     fn remove_row(&mut self, id: String, cx: &mut Context<Self>) {
-        if self.tools.sending || !self.acting_control(cx).enabled {
+        if self.tools.sending
+            || self.remote_refused(&id, Action::Remove)
+            || !self.acting_control(cx).enabled
+        {
             cx.notify();
             return;
         }

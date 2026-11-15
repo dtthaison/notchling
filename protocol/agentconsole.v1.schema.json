@@ -253,6 +253,30 @@
       ],
       "additionalProperties": true
     },
+    "SessionNode": {
+      "type": "object",
+      "description": "Additive: the node a session runs on in a cluster; an older phone ignores it. Absent for the Mac's own sessions.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "The node's id."
+        },
+        "name": {
+          "type": "string",
+          "description": "The name to show."
+        },
+        "online": {
+          "type": "boolean",
+          "description": "False while the node can't be reached; its sessions stay listed."
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "online"
+      ],
+      "additionalProperties": true
+    },
     "LastMessage": {
       "type": "object",
       "description": "A cheap marker of Claude's newest reply. A new id means a new reply.",
@@ -385,6 +409,9 @@
           "type": "string",
           "description": "claude, codex or agy. Additive: an older Mac sends none, an older phone ignores it.",
           "default": "claude"
+        },
+        "node": {
+          "$ref": "#/$defs/SessionNode"
         }
       },
       "required": [

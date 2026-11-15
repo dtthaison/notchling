@@ -100,6 +100,7 @@ impl Room for LateRoom {
         if let Some(handle) = self.0.get() {
             handle.publish(topic, event, data);
         }
+        self.1.relay(now_ms(), topic, event, data);
     }
 
     fn can_answer(&self) -> bool {
@@ -112,6 +113,10 @@ impl Room for LateRoom {
 
     fn can_answer_prompts(&self) -> bool {
         self.can_answer() || self.1.active(now_ms())
+    }
+
+    fn attach_prompt_push(&self, push: Arc<dyn crate::cluster_forward::PromptPush>) {
+        self.1.attach(push);
     }
 
     fn follow_prompts(&self, node: &str, lease_ms: u64) {

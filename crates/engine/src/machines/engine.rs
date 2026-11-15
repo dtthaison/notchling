@@ -137,6 +137,11 @@ pub fn applying(d: &Detected, m: &Machine) -> Machine {
         }
         m.abilities = Some(a);
     }
+    if let Some(app) = d.notchling_app {
+        let mut a = m.abilities.clone().unwrap_or_default();
+        a.notchling_app = Some(app);
+        m.abilities = Some(a);
+    }
     if let Some(home) = d.home.as_ref().filter(|h| shell::is_safe_machine_path(h)) {
         let mut a = m.abilities.clone().unwrap_or_default();
         a.home = Some(home.clone());

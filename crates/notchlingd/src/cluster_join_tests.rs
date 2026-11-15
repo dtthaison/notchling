@@ -321,3 +321,33 @@ fn the_item_names_the_node_plainly() {
     );
     assert_eq!(serde_json::to_value(item.kind).unwrap(), "node_join");
 }
+
+#[test]
+fn status_reports_joining_while_pending() {
+    let net = MemNet::new();
+    let h = home(&net, "jhomej", JOIN_WAIT);
+    let w = joiner(&net, "jboxj", "linux");
+    assert_eq!(w.node.status()["joining"], Value::Null);
+    let secret_token = token(&h.node);
+    let joined = w.node.join(&secret_token, false).unwrap();
+    assert_eq!(joined["state"], "pending", "{joined}");
+    let status = w.node.status();
+    assert_eq!(status["cluster"], Value::Null);
+    let joining = &status["joining"];
+    assert!(joining["since"].is_number(), "{status}");
+    assert_eq!(joining["primary"], json!(h.node.id()));
+    assert_eq!(joining["answered"], true);
+    assert!(!status.to_string().contains(&secret_token));
+    eventually("cluster.changed carries joining", || {
+        w.room
+            .named("cluster.changed")
+            .iter()
+            .any(|body| body["joining"]["answered"] == true && body["cluster"] == Value::Null)
+    });
+    let item = asked(&h);
+    h.inbox.decide(&item.id, ActionId::Allow, "mac").unwrap();
+    eventually("the joiner is in", || {
+        let now = w.node.status();
+        now["joining"] == Value::Null && now["cluster"] != Value::Null
+    });
+}

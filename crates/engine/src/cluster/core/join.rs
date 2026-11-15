@@ -191,6 +191,7 @@ impl NodeCore {
             return;
         }
         j.answered = true;
+        self.changed = true;
         let local = j.local;
         out.push(Effect::Answer {
             local,

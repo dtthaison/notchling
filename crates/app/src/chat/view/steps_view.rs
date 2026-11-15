@@ -73,7 +73,12 @@ fn diff_line(line: &DiffLine, a: Appearance) -> Div {
         )
 }
 
-fn diff_view(step: &ToolRow, a: Appearance, cx: &mut Context<ConversationView>) -> Div {
+fn diff_view(
+    step: &ToolRow,
+    reveal_ok: bool,
+    a: Appearance,
+    cx: &mut Context<ConversationView>,
+) -> Div {
     let path = Path::new(&step.input);
     let name = path
         .file_name()
@@ -111,7 +116,7 @@ fn diff_view(step: &ToolRow, a: Appearance, cx: &mut Context<ConversationView>) 
                         .min_w(px(0.0))
                         .elide(),
                 )
-                .child(
+                .children(reveal_ok.then(|| {
                     button(
                         SharedString::from(format!("reveal-{}", step.id)),
                         t::chat::show_in_finder(),
@@ -121,8 +126,8 @@ fn diff_view(step: &ToolRow, a: Appearance, cx: &mut Context<ConversationView>) 
                     )
                     .on_click(cx.listener(move |_, _, _, cx| {
                         cx.reveal_path(Path::new(&reveal));
-                    })),
-                ),
+                    }))
+                })),
         )
         .child(
             div()
@@ -135,6 +140,7 @@ fn diff_view(step: &ToolRow, a: Appearance, cx: &mut Context<ConversationView>) 
 
 fn step_detail(
     step: &ToolRow,
+    reveal_ok: bool,
     sel: &Sel,
     a: Appearance,
     cx: &mut Context<ConversationView>,
@@ -142,7 +148,7 @@ fn step_detail(
     let mut detail = div().pl(px(24.0)).flex().flex_col().gap(px(6.0));
     match steps::detail(step) {
         Detail::None => return None,
-        Detail::Diff => detail = detail.child(diff_view(step, a, cx)),
+        Detail::Diff => detail = detail.child(diff_view(step, reveal_ok, a, cx)),
         Detail::Text { input_title, .. } => {
             if let (Some(title), Some(text)) = (input_title, steps::input_text(step)) {
                 detail = detail.child(markdown::mono_box(
@@ -259,7 +265,9 @@ fn step_row(
         .flex_col()
         .gap(px(6.0))
         .child(line)
-        .when(open, |d| d.children(step_detail(step, sel, a, cx)))
+        .when(open, |d| {
+            d.children(step_detail(step, input.can_reveal, sel, a, cx))
+        })
 }
 
 fn step_chip(

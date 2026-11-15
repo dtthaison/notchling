@@ -7,6 +7,7 @@ use serde_json::{json, Value};
 use super::{now_ms, ChatView};
 use crate::chat::branch::{self, BranchModel};
 use crate::chat::git::{self, DiffText, Gate, GitModel, Why};
+use crate::chat::remote_control::Action;
 
 struct Answer {
     base: Option<String>,
@@ -79,6 +80,7 @@ impl ChatView {
 
     pub(super) fn selected_folder(&self) -> Option<String> {
         self.selected_session()
+            .filter(|s| !self.remote_refused(&s.agent.id, Action::Files))
             .map(|s| s.agent.cwd.clone())
             .filter(|cwd| !cwd.is_empty())
     }

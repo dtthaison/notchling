@@ -301,6 +301,10 @@ fn is_claude(row: &Value) -> bool {
         .is_none_or(|tool| tool == "claude")
 }
 
+fn is_shell(row: &Value) -> bool {
+    row.get("tool").and_then(Value::as_str) == Some("shell")
+}
+
 pub fn is_client(status: &Value) -> bool {
     let me = status.get("me").and_then(Value::as_str);
     status
@@ -434,7 +438,7 @@ impl RemoteSessions {
         self.rows_for(true)
     }
 
-    fn rows_for(&self, all: bool) -> Vec<Value> {
+    fn rows_where(&self, keep: impl Fn(&Value) -> bool) -> Vec<Value> {
         if !self.allowed() {
             return Vec::new();
         }
@@ -445,10 +449,29 @@ impl RemoteSessions {
                 remote
                     .rows
                     .iter()
-                    .filter(move |row| all || is_claude(row))
+                    .filter(|row| keep(row))
                     .filter_map(|row| self.shaped(node, remote, row))
             })
             .collect()
+    }
+
+    fn rows_for(&self, all: bool) -> Vec<Value> {
+        self.rows_where(|row| all || is_claude(row))
+    }
+
+    pub fn shell_rows(&self) -> Vec<Value> {
+        self.rows_where(is_shell)
+    }
+
+    pub fn merge_shell(&self, local: &Value) -> Value {
+        Self::joined(
+            local,
+            self.rows_where(|row| is_claude(row) || is_shell(row)),
+        )
+    }
+
+    pub fn claude_rows(&self) -> Vec<Value> {
+        self.rows_for(false)
     }
 
     pub fn merge(&self, local: &Value) -> Value {
@@ -466,6 +489,36 @@ impl RemoteSessions {
         };
         rows.extend(remote);
         Value::Array(rows)
+    }
+
+    pub fn mirror_of(&self, node: &NodeId, owner_path: &str) -> Option<String> {
+        let book = lock(&self.book);
+        let row =
+            book.nodes.get(node)?.rows.iter().find(|row| {
+                row.get("transcriptPath").and_then(Value::as_str) == Some(owner_path)
+            })?;
+        let qualified = qualify(node, row.get("id")?.as_str()?);
+        let path = mirror_path(&self.mirror, node, &qualified, owner_path)?;
+        is_real_file(&path).then(|| path.to_string_lossy().into_owned())
+    }
+
+    pub fn row_of(&self, node: &NodeId, owner_path: &str, session: &str) -> Option<String> {
+        let book = lock(&self.book);
+        let row = book.nodes.get(node)?.rows.iter().find(|row| {
+            let same_path = !owner_path.is_empty()
+                && row.get("transcriptPath").and_then(Value::as_str) == Some(owner_path);
+            let same_id =
+                !session.is_empty() && row.get("id").and_then(Value::as_str) == Some(session);
+            same_path
+                || same_id
+                || (!session.is_empty()
+                    && serde_json::from_value::<Agent>((*row).clone())
+                        .ok()
+                        .and_then(|agent| agent.session_id())
+                        .as_deref()
+                        == Some(session))
+        })?;
+        Some(qualify(node, row.get("id")?.as_str()?))
     }
 
     pub fn raw(&self, node: &NodeId, id: &str) -> Option<Value> {

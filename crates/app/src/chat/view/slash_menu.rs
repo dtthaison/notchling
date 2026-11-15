@@ -7,6 +7,7 @@ use notchling_kit::{Appearance, Ink, TypeRole};
 
 use super::ChatView;
 use crate::chat::data::Tool;
+use crate::chat::remote_control::Action;
 use crate::chat::slash_menu::{picked, query};
 
 impl ChatView {
@@ -14,7 +15,7 @@ impl ChatView {
         let Some(session) = self.selected_session() else {
             return Vec::new();
         };
-        if session.tool != Tool::Claude {
+        if session.tool != Tool::Claude || self.remote_refused(&session.agent.id, Action::Slash) {
             return Vec::new();
         }
         let Some((cwd, commands)) = &self.slash_commands else {
@@ -30,6 +31,9 @@ impl ChatView {
     pub(super) fn slash_typed(&mut self, text: &str) {
         self.slash.typed(text);
         if query(text).is_none() {
+            return;
+        }
+        if self.selected_refused(Action::Slash) {
             return;
         }
         let Some(cwd) = self.selected_session().map(|s| s.agent.cwd.clone()) else {

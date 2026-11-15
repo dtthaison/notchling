@@ -102,5 +102,5 @@ Set<String> hiddenSessionIds(Map<String, int> archived, List<Session> sessions) 
 
 Set<String> hiddenSessionIdsIn(Map<String, int> archived, List<Session> sessions, String scope) => <String>{
       for (final Session s in sessions)
-        if (archived[scope.isEmpty ? s.id : '$scope/${s.id}'] case final int at when s.lastActivity.millisecondsSinceEpoch <= at) s.id,
+        if (archived[storageKey(scope, s.id)] case final int at when s.lastActivity.millisecondsSinceEpoch <= at) s.id,
     };

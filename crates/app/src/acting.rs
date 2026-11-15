@@ -22,6 +22,10 @@ pub mod ops {
     pub const SESSION_COMMAND: &str = "session.command";
     pub const SESSION_QUESTION: &str = "session.question";
     pub const SESSION_HELD_DISCARD: &str = "session.held.discard";
+    pub const CLUSTER_DISPATCH: &str = "cluster.dispatch";
+    pub const CLUSTER_FOLLOW: &str = "cluster.follow";
+    pub const CLUSTER_RETURN: &str = "cluster.return";
+    pub const SHELL_STOP: &str = "shell.stop";
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -245,6 +249,22 @@ impl Request {
             ops::SESSION_MOVE,
             json!({ "id": id, "to_config_dir": to_config_dir }),
         )
+    }
+
+    pub fn cluster_follow(id: &str) -> Request {
+        Request::new(ops::CLUSTER_FOLLOW, json!({ "id": id }))
+    }
+
+    pub fn cluster_return(job: &str) -> Request {
+        Request::new(ops::CLUSTER_RETURN, json!({ "job": job }))
+    }
+
+    pub fn shell_stop(id: &str) -> Request {
+        Request::new(ops::SHELL_STOP, json!({ "id": id }))
+    }
+
+    pub fn cluster_dispatch(args: Value) -> Request {
+        Request::new(ops::CLUSTER_DISPATCH, args)
     }
 
     pub fn command(id: &str, command: &str) -> Request {

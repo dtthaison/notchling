@@ -394,6 +394,36 @@ class Takeover {
   final bool busy;
 }
 
+/// Additive: the node a session runs on in a cluster; an older phone ignores it. Absent for the Mac's own sessions.
+class SessionNode {
+  const SessionNode({
+    required this.id,
+    required this.name,
+    required this.online,
+  });
+
+  factory SessionNode.fromJson(JsonMap json) => SessionNode(
+    id: _need(json, 'id', _asString),
+    name: _need(json, 'name', _asString),
+    online: _need(json, 'online', _asBool),
+  );
+
+  JsonMap toJson() => <String, Object?>{
+    'id': id,
+    'name': name,
+    'online': online,
+  };
+
+  /// The node's id.
+  final String id;
+
+  /// The name to show.
+  final String name;
+
+  /// False while the node can't be reached; its sessions stay listed.
+  final bool online;
+}
+
 /// A cheap marker of Claude's newest reply. A new id means a new reply.
 class LastMessage {
   const LastMessage({
@@ -496,6 +526,7 @@ class Session {
     this.facts,
     this.lastMessage,
     this.tool = 'claude',
+    this.node,
   });
 
   factory Session.fromJson(JsonMap json) => Session(
@@ -516,6 +547,7 @@ class Session {
     facts: _maybe(json, 'facts', (Object? v) => Facts.fromJson(_asMap(v))),
     lastMessage: _maybe(json, 'lastMessage', (Object? v) => LastMessage.fromJson(_asMap(v))),
     tool: _maybe(json, 'tool', _asString) ?? 'claude',
+    node: _maybe(json, 'node', (Object? v) => SessionNode.fromJson(_asMap(v))),
   );
 
   JsonMap toJson() => <String, Object?>{
@@ -536,6 +568,7 @@ class Session {
     if (facts != null) 'facts': facts!.toJson(),
     if (lastMessage != null) 'lastMessage': lastMessage!.toJson(),
     'tool': tool,
+    if (node != null) 'node': node!.toJson(),
   };
 
   final String id;
@@ -569,6 +602,7 @@ class Session {
 
   /// claude, codex or agy. Additive: an older Mac sends none, an older phone ignores it.
   final String tool;
+  final SessionNode? node;
 }
 
 /// A picture a chat message refers to. Only this description travels in the chat; the bytes come from chat.image.
@@ -3407,6 +3441,7 @@ final Map<String, JsonMap Function(JsonMap)> roundtrips = <String, JsonMap Funct
   'PromptQuestion': (JsonMap json) => PromptQuestion.fromJson(json).toJson(),
   'Prompt': (JsonMap json) => Prompt.fromJson(json).toJson(),
   'Takeover': (JsonMap json) => Takeover.fromJson(json).toJson(),
+  'SessionNode': (JsonMap json) => SessionNode.fromJson(json).toJson(),
   'LastMessage': (JsonMap json) => LastMessage.fromJson(json).toJson(),
   'Limit': (JsonMap json) => Limit.fromJson(json).toJson(),
   'Facts': (JsonMap json) => Facts.fromJson(json).toJson(),

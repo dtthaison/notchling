@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
 
+use crate::chat::remote_control::Action;
 use crate::chat::run_command::RunHow;
 use gpui::{
     canvas, div, img, prelude::*, px, AnyElement, App, Context, CursorStyle, DragMoveEvent,
@@ -214,18 +215,22 @@ pub fn run_in_chat(command: &str, how: RunHow, window: &mut Window, cx: &mut App
 
 impl ChatView {
     pub(super) fn open_link(&mut self, url: String, window: &mut Window, cx: &mut Context<Self>) {
+        let files = !self.selected_refused(Action::Files);
         let folder = self
             .selected_session()
+            .filter(|_| files)
             .map(|s| s.agent.cwd.clone())
             .unwrap_or_default();
         let whole = Path::new(&url);
-        if whole.is_absolute() && whole.exists() {
+        if files && whole.is_absolute() && whole.exists() {
             self.open_path(whole.to_path_buf(), window, cx);
             return;
         }
-        if let Some(path) = crate::chat::drops::local_link(&url, &folder) {
-            self.open_path(path, window, cx);
-            return;
+        if files {
+            if let Some(path) = crate::chat::drops::local_link(&url, &folder) {
+                self.open_path(path, window, cx);
+                return;
+            }
         }
         if url.starts_with('/') {
             return;

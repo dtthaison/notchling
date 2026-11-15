@@ -53,6 +53,8 @@ pub struct MachineAbilities {
         skip_serializing_if = "Option::is_none"
     )]
     pub free_disk_gb: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notchling_app: Option<bool>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -235,6 +237,14 @@ impl Machine {
 
     pub fn is_linux(&self) -> bool {
         self.os == Some(MachineOs::Linux)
+    }
+
+    pub fn runs_app(&self) -> bool {
+        !self.is_linux()
+            && self
+                .abilities
+                .as_ref()
+                .is_some_and(|a| a.notchling_app == Some(true))
     }
 }
 

@@ -97,7 +97,7 @@ class NotificationService {
   }
 }
 
-String alertPayload(AlertEvent event) => event.session.qualified;
+String alertPayload(AlertEvent event) => event.host.isEmpty ? storageKey('', event.sessionId) : event.session.qualified;
 
 final Provider<void> notificationTapsProvider = Provider<void>((Ref ref) {
   final StreamSubscription<String> taps = ref.read(notificationServiceProvider).taps.listen((String payload) {

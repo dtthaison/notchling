@@ -44,7 +44,12 @@ impl ChatView {
         let asked = self.selected.clone();
         let wanted = self.loader_id(asked.as_deref());
         let view = self.source.view();
-        let (claude, live) = (view.agents, view.tools);
+        let shells = view.shells;
+        let claude = view.agents.map(|mut agents| {
+            agents.extend(shells);
+            agents
+        });
+        let live = view.tools;
         loader.files_prompts = view.prompts.is_none();
         loader.more_subagents = std::mem::take(&mut self.more_subagents);
         loader.open_groups = self.open_groups.clone();

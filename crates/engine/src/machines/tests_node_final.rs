@@ -238,7 +238,7 @@ fn a_failed_copy_removes_the_partial_file_and_the_sheet_shows_every_command() {
         "rm -f",
         "chmod 755",
         "XDG_RUNTIME_DIR",
-        "Work running on this machine stops",
+        "restarted service doesn't know",
     ] {
         assert!(shown.contains(part), "{part}: {shown}");
     }
@@ -247,7 +247,7 @@ fn a_failed_copy_removes_the_partial_file_and_the_sheet_shows_every_command() {
         "mkdir -p",
         "XDG_RUNTIME_DIR",
         "bus",
-        "Work running on this machine stops",
+        "restarted service doesn't know",
     ] {
         assert!(service.contains(part), "{part}: {service}");
     }

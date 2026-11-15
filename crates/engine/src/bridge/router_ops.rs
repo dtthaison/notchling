@@ -31,6 +31,10 @@ fn view_only() -> BridgeFailure {
     BridgeFailure::view_only("This session is open outside Notchling: view only.")
 }
 
+fn remote_photo() -> BridgeFailure {
+    BridgeFailure::invalid("Photos to a session on another computer come later.")
+}
+
 fn busy_sending() -> BridgeFailure {
     BridgeFailure::busy("An earlier message is still being sent to this session.")
 }
@@ -232,8 +236,12 @@ impl Router {
         if caption.chars().count() > MAX_TEXT_CHARACTERS {
             return Err(BridgeFailure::invalid("The caption is too long."));
         }
-        if self.session(session_id)?.control == Control::ViewOnly {
+        let target = self.session(session_id)?;
+        if target.control == Control::ViewOnly {
             return Err(view_only());
+        }
+        if target.node.is_some() {
+            return Err(remote_photo());
         }
         let upload_id = self.uploads.begin(
             connection.id,
@@ -278,6 +286,9 @@ impl Router {
         let target = self.session(&upload.session_id)?;
         if target.control == Control::ViewOnly {
             return Err(view_only());
+        }
+        if target.node.is_some() {
+            return Err(remote_photo());
         }
         self.exclusive(connection, &upload.session_id, busy_sending(), || {
             let file = self

@@ -17,6 +17,7 @@ use crate::accounts::menu::{
 use crate::accounts::model::{CLAUDE_CODE, CODEX};
 use crate::acting::{Control, Request};
 use crate::chat::data::Tool;
+use crate::chat::remote_control::Action;
 use crate::mac::gate;
 use crate::switches::Switch;
 
@@ -67,7 +68,7 @@ impl ChatView {
 
     pub(super) fn menu(&self) -> Option<AccountMenu> {
         let session = self.selected_session()?;
-        if session.tool != Tool::Claude {
+        if session.tool != Tool::Claude || self.remote_refused(&session.agent.id, Action::Move) {
             return None;
         }
         let agent = &session.agent;
@@ -96,6 +97,9 @@ impl ChatView {
 
     fn move_to(&mut self, target: Target, cx: &mut Context<Self>) {
         self.account_menu = false;
+        if self.refuse_selected(Action::Move, cx) {
+            return;
+        }
         let Some(id) = self.selected.clone() else {
             return;
         };
@@ -136,6 +140,9 @@ impl ChatView {
 
     fn move_all_to(&mut self, target: Target, cx: &mut Context<Self>) {
         self.account_menu = false;
+        if self.refuse_selected(Action::Move, cx) {
+            return;
+        }
         let account = match move_all_account(&target) {
             Ok(account) => account,
             Err(why) => {
@@ -179,7 +186,10 @@ pub(super) fn account_control(
     cx: &mut Context<ChatView>,
 ) -> Option<Stateful<Div>> {
     let session = view.selected_session()?;
-    let tool = super::tool::of(session.tool);
+    if view.remote_refused(&session.agent.id, Action::Move) {
+        return None;
+    }
+    let tool = super::tool::adapter(session);
     let super::tool::AccountButton { text, tip } = tool.account(view)?;
     let kind = if view.account_menu {
         ButtonKind::Secondary

@@ -2,7 +2,7 @@ use serde_json::{json, Value};
 
 use super::{Effect, NodeCore, OutCall, Seen, Target, Then, CALL_MS, DEDUPE_MS, WORKSPACE_CALL_MS};
 use crate::cluster::id::NodeId;
-use crate::cluster::members::Term;
+use crate::cluster::members::{MemberState, Term};
 use crate::cluster::policy::{check, SenderFacts};
 use crate::cluster::standby_store::SNAP_ACK;
 use crate::cluster::state::role_of;
@@ -80,6 +80,10 @@ impl NodeCore {
                             self.on_job_event(&from, &name, &data, out);
                             return;
                         }
+                        if topic == "prompts" {
+                            self.on_prompt_event(&from, topic, name, data, out);
+                            return;
+                        }
                         if topic != "sessions" {
                             return;
                         }
@@ -95,6 +99,35 @@ impl NodeCore {
                 }
             }
         }
+    }
+
+    fn on_prompt_event(
+        &mut self,
+        from: &NodeId,
+        topic: String,
+        name: String,
+        mut data: Value,
+        out: &mut Vec<Effect>,
+    ) {
+        if name != "prompt.pending" && name != "prompt.resolved" {
+            return;
+        }
+        let Some(state) = &self.state else {
+            return;
+        };
+        let sender_active = state
+            .members
+            .get(from)
+            .is_some_and(|m| m.state == MemberState::Active);
+        let me_client = state.members.get(&self.me).is_some_and(|m| m.client);
+        if !sender_active || !me_client {
+            return;
+        }
+        let Some(fields) = data.as_object_mut() else {
+            return;
+        };
+        fields.insert("from".to_string(), json!(from));
+        out.push(Effect::Publish { topic, name, data });
     }
 
     #[allow(clippy::too_many_arguments)]

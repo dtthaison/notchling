@@ -12,7 +12,7 @@ page in the same pull request.
   check. The Swift app has no third-party packages.
 - Its own calls go only to services you already use, with your own logins, for the features listed
   below: Anthropic, OpenAI (ChatGPT), GitHub and, if you set up the tunnel, Cloudflare. It also
-  reaches the machines you list in Machines, over `ssh`. Web pages you open load what they link to.
+  reaches the machines you list in Machines, over `ssh`, and the other machines of a cluster you create or join, over Tailscale (see The cluster). Web pages you open load what they link to.
 - The phone bridge and the internet tunnel are off until you turn them on.
 - The tools Notchling starts for you (Claude Code, Codex, Antigravity CLI, `ssh`, `gh`) send what they
   always send.
@@ -138,6 +138,42 @@ Only when `machines.json` lists a machine:
 - A fix runs on the machine only after you click and see its commands. Some fixes download installers
   there (Homebrew's tools, the GitHub CLI, Claude Code).
 
+## The cluster (other machines of yours)
+
+Only when you create a cluster or join one (the `cluster` switch is off at every start; a Worker you set up
+with Machines turns it on again by itself after a restart). The cluster is for your own machines, and nothing
+in it goes to a third party: no server of the project, no cloud relay, no address on the internet.
+
+- **How:** one TCP port (47823) on the machine's Tailscale addresses only, TLS 1.3 with both ends pinned by the
+  certificate's SHA-256 fingerprint. A machine that isn't a member is refused at the handshake, except that
+  while a join token is open (10 minutes, one use) the primary lets one unpinned machine in far enough to ask
+  to join; it must hold the token's secret, and nothing else it sends is answered until you Allow it in the
+  Inbox. A member waiting for your Allow is pinned but can do nothing. Tailscale itself is yours and is
+  outside this page.
+- **Between members, always:** the machine's name, OS, architecture, Notchling and tool versions, which tools it
+  has, its load (CPU and memory) and the member list with each member's role and settings.
+- **A client (a Mac with the app) receives, from the machines it follows:** their session lists (names,
+  folders, states, labels and the details a row shows), the whole transcript of a session you open in Chat or on
+  the phone, from its start (its text, tool calls and tool output), kept as a mirror file on your Mac, 0600, at
+  most 256 MiB each, until this Mac is removed from the cluster; it keeps pulling new lines for up to 10
+  minutes after you leave the session, and the permission and question prompts of their sessions with the tool's input.
+- **A client sends to the machine that owns a session:** your replies, answers, permission decisions
+  ("always" is never sent), interrupts and stop requests for that session.
+- **Dispatched work:** when you start a session, shell job or delegated job on a Worker, its command, its text,
+  its folder and its model go to that Worker, and its result (a job's state, a delegate's output) comes back.
+  Sending code makes a git bundle of the commits that aren't pushed (at most 256 MB) and the Worker clones
+  your repository's `origin` itself with its own credentials; bringing the work back sends the Worker's
+  commits to your Mac. Uncommitted files and ignored files are not sent.
+- **The phone** sees other machines' sessions only through your Mac, over the same bridge and pairing as before;
+  a Worker never talks to the phone.
+- **What never crosses:** Claude Code, Codex and Antigravity logins and tokens, lanes, the Secret Vault and its
+  values (a dispatch that names secrets is refused in this version), the Keychain, `settings.json` and your own
+  files except the commits above. A Worker uses its own tool logins.
+- **What a machine you removed keeps:** a machine that hears it was removed deletes `cluster.db`, the mirror
+  files, and the incoming and outgoing transfer files. It keeps `<data>/cluster/work` (the repositories and
+  worktrees of sent code), `jobs/` (shell job logs), `workspaces/` (notes on sent code) and `node/` (its own
+  identity) until you delete them.
+
 ## Tools Notchling starts
 
 - **Claude Code.** Replies, answers, New Session and moves run `claude` (`claude attach`,
@@ -216,7 +252,7 @@ Mac, and Settings > Activity reads the Activity store.
 ## What stays on the Mac
 
 Transcripts, conversations and search are read from files on this Mac and stay there, except what a
-paired phone is shown. Cost tracking, the search index, the local copies of Artifacts and the vault
+paired phone is shown and what the cluster shares (see The cluster). Cost tracking, the search index, the local copies of Artifacts and the vault
 list are local files. Vault values are in the Keychain, and agents reach them only through a socket
 on this Mac that answers only Notchling's own executable. A use of a secret is allowed from the
 Notchling app on the Mac, or from a paired phone through the inbox while the bridge, acting and the
@@ -229,9 +265,9 @@ None of these exist yet. Each will change this page when it lands.
 - **Crash reports**, opt-in only. Stable updates become automatic only after this privacy policy and
   opt-in, privacy-respecting crash reports exist.
 - **Update checks** (Phase 6): the app will read one signed update feed with Beta and Stable channels.
-- **Remote computers:** the desktop app and the phone will connect to other computers' Notchling the
-  way the phone connects today, with the same pairing. Accounts, lanes and the vault never leave
-  their computer.
+- **Remote computers outside the cluster:** the desktop app and the phone will connect to other
+  people's computers' Notchling the way the phone connects today, with the same pairing. Accounts,
+  lanes and the vault never leave their computer. Your own machines are the cluster, above.
 - **Tool versions** (see decision XXXX, tool versions follow the Mac). The Mac will read what the
   latest version of each tool is, on demand and at most hourly, sending nothing that identifies you:
   Claude Code's from `downloads.claude.ai`, Codex's from `registry.npmjs.org`, and Antigravity's from

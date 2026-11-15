@@ -773,6 +773,11 @@ impl ChatView {
     }
 
     fn add_annotation(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.attach_refused() {
+            self.simulator.note = Some(t::cluster::remote_not_here().into());
+            cx.notify();
+            return;
+        }
         let Some(n) = self.simulator.annotation.as_ref() else {
             return;
         };

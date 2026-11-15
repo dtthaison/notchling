@@ -103,7 +103,7 @@ impl ClusterOps {
                 status
             }
             Err(why) => {
-                json!({"cluster": Value::Null, "me": Value::Null, "members": [], "error": why})
+                json!({"cluster": Value::Null, "joining": Value::Null, "me": Value::Null, "members": [], "error": why})
             }
         }
     }

@@ -1,8 +1,9 @@
 use notchling_local_api::ops;
+use notchling_locale as t;
 use serde_json::{json, Value};
 
 use super::model::{ClusterModel, Line};
-use super::renders::{empty, model, status, ME, STANDBY, WORKER};
+use super::renders::{empty, joining, model, off, status, ME, STANDBY, WORKER};
 use super::wire;
 
 fn set_member(status: &mut Value, id: &str, key: &str, value: Value) {
@@ -324,4 +325,109 @@ fn every_cluster_render_is_known_and_the_long_one_has_many_rows() {
     assert_eq!(super::renders::shown("chat"), None);
     let many = super::renders::model_of(super::renders::Shown::Many);
     assert!(many.rows().len() >= 8);
+}
+
+#[test]
+fn switch_off_shows_hint() {
+    let off = ClusterModel::from_status(&off(), ME);
+    let hint = off.off_hint().expect("the switch is off");
+    assert!(hint.contains("off on this Mac"), "{hint}");
+    assert!(hint.contains("Turn it on"), "{hint}");
+    assert!(off.can_turn_on());
+    assert_eq!(model(true).off_hint(), None);
+    assert_eq!(ClusterModel::from_status(&empty(), ME).off_hint(), None);
+    assert_eq!(ClusterModel::default().off_hint(), None);
+    let mut broken = off_status_with_error();
+    broken["cluster"] = Value::Null;
+    assert_eq!(ClusterModel::from_status(&broken, ME).off_hint(), None);
+}
+
+fn off_status_with_error() -> Value {
+    let mut status = off();
+    status["error"] = json!("the cluster database can't be opened");
+    status
+}
+
+#[test]
+fn empty_sheet_offers_join() {
+    let none = ClusterModel::from_status(&empty(), ME);
+    assert!(none.can_join());
+    assert!(none.can_create());
+    assert!(!model(true).can_join());
+    assert!(!ClusterModel::default().can_join());
+    let mut broken = empty();
+    broken["error"] = json!("this machine can't be a cluster node");
+    assert!(!ClusterModel::from_status(&broken, ME).can_join());
+}
+
+#[test]
+fn join_sends_token_and_clears_it() {
+    let sent = wire::join("  nlj1.abc_DEF-123  ");
+    assert!(sent.clears_field());
+    let wire::JoinInput::Send(request) = sent else {
+        panic!("a token is sent");
+    };
+    assert_eq!(request.op, ops::CLUSTER_JOIN);
+    assert_eq!(request.args, json!({"token": "nlj1.abc_DEF-123"}));
+    assert_eq!(wire::join(""), wire::JoinInput::Nothing);
+    assert_eq!(wire::join("   "), wire::JoinInput::Nothing);
+    assert_eq!(wire::join("hello world"), wire::JoinInput::NotAToken);
+    assert!(!wire::join("hello world").clears_field());
+    assert!(!wire::join("").clears_field());
+}
+
+#[test]
+fn join_error_never_shows_token() {
+    let wire::JoinInput::Send(request) = wire::join("nlj1.SECRETVALUE") else {
+        panic!("a token is sent");
+    };
+    assert!(!format!("{request:?}").contains("SECRETVALUE"));
+    let shown = wire::without_token("bad token nlj1.SECRETVALUE here", &request.args);
+    assert_eq!(shown, "bad token [hidden] here");
+    assert_eq!(
+        wire::without_token("plain failure", &json!({})),
+        "plain failure"
+    );
+    let failed = t::cluster::join_failed(&shown);
+    assert!(!failed.contains("SECRETVALUE"), "{failed}");
+    assert!(!t::cluster::join_bad_token().contains("SECRETVALUE"));
+}
+
+#[test]
+fn joining_status_hides_forms() {
+    let waiting = ClusterModel::from_status(&joining(true), ME);
+    assert!(waiting.is_joining());
+    assert!(!waiting.can_create());
+    assert!(!waiting.can_join());
+    assert!(!waiting.can_copy_token());
+    assert!(!waiting.can_turn_on());
+    assert_eq!(waiting.cluster_name(), None);
+    assert!(waiting.rows().is_empty());
+    assert_eq!(waiting.joining_text(), Some(t::cluster::joining_waiting()));
+    let asking = ClusterModel::from_status(&joining(false), ME);
+    assert!(asking.is_joining());
+    assert_eq!(asking.joining_text(), Some(t::cluster::joining_asking()));
+    assert_ne!(asking.joining_text(), waiting.joining_text());
+    assert!(!ClusterModel::from_status(&empty(), ME).is_joining());
+    assert!(!model(true).is_joining());
+    let mut done = status();
+    done["joining"] = json!({"since": 1, "cluster": "c-1", "primary": STANDBY, "answered": true});
+    assert!(!ClusterModel::from_status(&done, ME).is_joining());
+}
+
+#[test]
+fn copy_token_hidden_when_not_connected() {
+    assert!(model(true).can_copy_token());
+    assert!(!ClusterModel::from_status(&empty(), ME).can_copy_token());
+    assert!(!ClusterModel::from_status(&off(), ME).can_copy_token());
+    let mut no_tailscale = status();
+    no_tailscale["tailscale"] = json!(false);
+    assert!(!ClusterModel::from_status(&no_tailscale, ME).can_copy_token());
+    let mut not_listening = status();
+    not_listening["listening"] = Value::Null;
+    assert!(!ClusterModel::from_status(&not_listening, ME).can_copy_token());
+    let mut broken = status();
+    broken["error"] = json!("trouble");
+    assert!(!ClusterModel::from_status(&broken, ME).can_copy_token());
+    assert!(!ClusterModel::default().can_copy_token());
 }

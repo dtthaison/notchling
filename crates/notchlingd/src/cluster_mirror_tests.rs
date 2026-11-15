@@ -300,7 +300,7 @@ fn only_a_known_session_of_another_node_can_be_followed() {
 }
 
 #[test]
-fn follows_are_capped() {
+fn a_full_book_drops_the_stalest_lease_for_a_new_one() {
     let r = rig();
     let rows: Vec<Value> = (0..MAX_FOLLOWS + 1)
         .map(|n| {
@@ -326,17 +326,25 @@ fn follows_are_capped() {
         2,
     );
     for n in 0..MAX_FOLLOWS {
+        r.now.fetch_add(1, Ordering::SeqCst);
         r.mirror.follow(&format!("{}/s{n}", owner())).unwrap();
     }
-    let err = r
-        .mirror
+    r.now.fetch_add(1, Ordering::SeqCst);
+    r.mirror.follow(&format!("{}/s0", owner())).unwrap();
+    assert_eq!(r.mirror.following(), MAX_FOLLOWS, "a renewal adds nothing");
+    r.now.fetch_add(1, Ordering::SeqCst);
+    r.mirror
         .follow(&format!("{}/s{}", owner(), MAX_FOLLOWS))
-        .unwrap_err();
-    assert_eq!(err.code, ErrorCode::Failed);
-    assert!(
-        r.mirror.follow(&format!("{}/s0", owner())).is_ok(),
-        "a renewal still works"
+        .unwrap();
+    assert_eq!(
+        r.mirror.following(),
+        MAX_FOLLOWS,
+        "a new one makes room, it is not refused"
     );
+    let kept = |n: usize| r.mirror.follows_of(&format!("{}/s{n}", owner()));
+    assert!(kept(0), "a renewed lease is not the stalest");
+    assert!(!kept(1), "the stalest lease went");
+    assert!(kept(MAX_FOLLOWS));
 }
 
 #[cfg(unix)]

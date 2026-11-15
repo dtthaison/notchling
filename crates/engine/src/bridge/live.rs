@@ -67,6 +67,7 @@ pub trait Sources: Send + Sync {
     ) -> Result<InboxOutcome, BridgeFailure> {
         Err(BridgeFailure::not_found("No such inbox item."))
     }
+    fn follow_remote(&self, _session: &Session) {}
     fn now_ms(&self) -> f64;
 }
 
@@ -264,6 +265,9 @@ impl<S: Sources, A: Acting> BridgeBackend for LiveBackend<S, A> {
             return self.foreign_messages(session_id);
         }
         let session = self.find(session_id)?;
+        if session.node.is_some() {
+            self.sources.follow_remote(&session);
+        }
         let path = match subagent_id {
             Some(sub) => session
                 .subagents
@@ -504,7 +508,7 @@ pub fn recent_projects(
     };
     let mut ordered: Vec<&Session> = sessions.iter().collect();
     ordered.sort_by(|a, b| b.last_activity_ms().total_cmp(&a.last_activity_ms()));
-    for session in ordered {
+    for session in ordered.into_iter().filter(|s| s.node.is_none()) {
         add(session.cwd.clone(), &mut result);
     }
     let mut entries: Vec<(String, std::time::SystemTime)> = projects_dir

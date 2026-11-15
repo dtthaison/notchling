@@ -42,6 +42,7 @@ fn input_for(session: &str, shown: Arc<Conversation>) -> ConversationInput {
         tasks_inset: false,
         selected: Some(session.into()),
         can_run: false,
+        can_reveal: true,
         chat: gpui::WeakEntity::new_invalid(),
     }
 }

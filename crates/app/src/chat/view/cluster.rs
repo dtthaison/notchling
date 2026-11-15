@@ -6,11 +6,14 @@ use notchling_engine::sessions::AgentGroup;
 
 use super::ChatView;
 use crate::acting::Control;
-use crate::chat::sidebar_node::{reply_control, reply_note, Nodes};
+use crate::acting::Request;
+use crate::chat::remote_control::{refused, remote_control, Action};
+use crate::chat::sidebar_node::{reply_note, Nodes};
 use crate::cluster::feed::ClusterFeed;
 use crate::cluster::renders::{model, STANDBY, WORKER};
 use crate::cluster::view::ClusterSheetView;
 use crate::mac::shell::AppCluster;
+use crate::phone::bridge::now_ms;
 
 pub fn app_cluster(cx: &Context<ChatView>) -> Arc<ClusterFeed> {
     cx.try_global::<AppCluster>()
@@ -26,6 +29,7 @@ impl ChatView {
     }
 
     pub(super) fn cluster_tick(&mut self, cx: &mut Context<Self>) {
+        self.follow_remote(cx);
         let generation = self.cluster.generation();
         if generation != self.seen_cluster {
             self.seen_cluster = generation;
@@ -38,6 +42,33 @@ impl ChatView {
         }
     }
 
+    pub(super) fn follow_remote(&mut self, cx: &mut Context<Self>) {
+        if self.remote_preview || self.root.fixture.is_some() {
+            return;
+        }
+        let Some(session) = self.selected_session() else {
+            return;
+        };
+        let row = session.agent.id.clone();
+        let now = now_ms();
+        if !self.followed.due(Some(session), now) || self.remote_refused(&row, Action::Reply) {
+            return;
+        }
+        let request = self.followed.begin(&row, now);
+        let actions = self.acts(cx).actions;
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move { actions.read(&Request::cluster_follow(&row)) })
+                .await;
+            this.update(cx, |view, _| {
+                view.followed.finish(request, result.is_ok(), now_ms());
+            })
+            .ok();
+        })
+        .detach();
+    }
+
     pub(super) fn nodes(&self) -> Nodes {
         Nodes::from_cluster(&self.cluster.snapshot())
     }
@@ -48,14 +79,44 @@ impl ChatView {
         reply_note(id, &self.nodes())
     }
 
-    pub(super) fn remote_control(&self, id: &str) -> Option<Control> {
-        Qualified::parse(id)?;
-        reply_control(id, &self.nodes())
+    pub(super) fn remote_control(&self, id: &str, action: Action) -> Option<Control> {
+        remote_control(id, &self.nodes(), action)
     }
 
-    pub(super) fn preview_remote(&mut self) {
+    pub(super) fn remote_refused(&self, id: &str, action: Action) -> bool {
+        refused(self.remote_control(id, action))
+    }
+
+    pub(super) fn selected_refused(&self, action: Action) -> bool {
+        self.selected
+            .as_deref()
+            .is_some_and(|id| self.remote_refused(id, action))
+    }
+
+    pub(super) fn attach_refused(&self) -> bool {
+        self.selected_session()
+            .is_some_and(|s| !crate::chat::remote_control::takes_files(&s.agent))
+    }
+
+    pub(super) fn refuse_selected(&mut self, action: Action, cx: &mut Context<Self>) -> bool {
+        let Some(id) = self.selected.clone() else {
+            return false;
+        };
+        let Some(control) = self.remote_control(&id, action).filter(|c| !c.enabled) else {
+            return false;
+        };
+        self.tools.error = control
+            .tooltip
+            .map(str::to_owned)
+            .or_else(|| reply_note(&id, &self.nodes()));
+        cx.notify();
+        true
+    }
+
+    pub(super) fn preview_remote(&mut self, shell: bool) {
         self.cluster = Arc::new(ClusterFeed::fixed(model(true)));
         self.remote_preview = true;
+        self.remote_shell = shell;
     }
 
     pub(super) fn apply_remote_preview(&mut self, cx: &mut Context<Self>) {
@@ -68,12 +129,23 @@ impl ChatView {
                 continue;
             }
             let node = match session.agent.group {
+                AgentGroup::Working if self.remote_shell => STANDBY,
                 AgentGroup::Working => WORKER,
                 AgentGroup::NeedsInput => STANDBY,
                 AgentGroup::Completed => continue,
             };
+            if self.remote_shell && session.agent.group == AgentGroup::Working {
+                session.agent.id = format!("{node}/shell:j-1");
+                session.agent.name = "make test".to_owned();
+                session.agent.command = Some("make test".to_owned());
+                session.agent.target = notchling_engine::sessions::AgentTarget::Process(42);
+                session.agent.host = "Shell".to_owned();
+                session.agent.transcript_path = None;
+                target = Some(session.agent.id.clone());
+                continue;
+            }
             session.agent.id = format!("{node}/{}", session.agent.id);
-            if node == WORKER {
+            if node == WORKER && !self.remote_shell {
                 target = Some(session.agent.id.clone());
             }
         }

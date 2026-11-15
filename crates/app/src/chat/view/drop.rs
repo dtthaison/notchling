@@ -71,6 +71,14 @@ impl ChatView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if let Some(session) = self.selected_session() {
+            let held = crate::chat::remote_control::files_control(&session.agent, &self.nodes());
+            if let Some(held) = held.filter(|c| !c.enabled) {
+                self.tools.error = held.tooltip.map(str::to_owned);
+                cx.notify();
+                return;
+            }
+        }
         let paths = drops::keep(
             paths,
             &self.root.data_dir.join("drops"),

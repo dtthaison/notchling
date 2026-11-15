@@ -289,6 +289,85 @@ mod over_a_socket {
         stop(running);
     }
 
+    struct ShellFake {
+        asked: Arc<Mutex<Vec<Value>>>,
+    }
+
+    fn shell_agent(id: &str) -> Agent {
+        Agent {
+            command: Some("make".into()),
+            host: "Shell".into(),
+            ..agent(id)
+        }
+    }
+
+    impl Handler for ShellFake {
+        fn spec(&self, op: &str) -> Option<OpSpec> {
+            (op == "sessions.list").then_some(OpSpec::AGENT)
+        }
+
+        fn call(&self, _: &Caller, _: &str, args: &Value) -> Result<Value, ApiError> {
+            self.asked
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .push(args.clone());
+            let mut rows = vec![agent("a")];
+            if args.get("remote").and_then(Value::as_str) == Some("shell") {
+                rows.push(shell_agent("00000000000000a1/shell:j1"));
+            }
+            Ok(serde_json::to_value(rows).expect("rows"))
+        }
+
+        fn topics(&self) -> &[&str] {
+            &["sessions"]
+        }
+    }
+
+    #[test]
+    fn remote_shell_rows_are_asked_for_kept_apart_and_followed() {
+        let scratch = Scratch::new("ss-shell");
+        let socket = scratch.path().join(SOCKET_NAME);
+        let asked = Arc::new(Mutex::new(Vec::new()));
+        let server = Server::bind(
+            ServerConfig {
+                socket: socket.clone(),
+                allowlist: Allowlist::empty(),
+                events: None,
+                version: "test".into(),
+                limits: Limits::default(),
+            },
+            Arc::new(ShellFake {
+                asked: asked.clone(),
+            }),
+        )
+        .expect("bind");
+        let running = server.spawn().expect("serve");
+        let source = SessionSource::start(config(&socket, None));
+        let view = wait_for(&source, "the list", |v| v.link == Link::Daemon);
+        assert_eq!(ids(&view), ["a"], "the notch's rows stay as they were");
+        let shells: Vec<_> = view.shells.iter().map(|a| a.id.as_str()).collect();
+        assert_eq!(shells, ["00000000000000a1/shell:j1"]);
+        assert_eq!(
+            asked.lock().unwrap()[0],
+            serde_json::json!({"remote": "shell"})
+        );
+        let next =
+            serde_json::to_value(vec![shell_agent("00000000000000a1/shell:j2")]).expect("rows");
+        running
+            .0
+            .publish("sessions", "sessions.remote.shell", &next);
+        let view = wait_for(&source, "the shell change", |v| {
+            v.shells.iter().any(|a| a.id == "00000000000000a1/shell:j2")
+        });
+        assert_eq!(view.shells.len(), 1);
+        assert_eq!(ids(&view), ["a"]);
+        running
+            .0
+            .publish("sessions", "sessions.remote.shell", &serde_json::json!([]));
+        wait_for(&source, "the shells gone", |v| v.shells.is_empty());
+        stop(running);
+    }
+
     struct CatalogFake {
         list: Value,
         models: Arc<Mutex<Value>>,
@@ -447,4 +526,31 @@ mod over_a_socket {
         }
         stop(running);
     }
+}
+
+#[cfg(unix)]
+#[test]
+fn only_another_machines_shell_rows_are_split_off() {
+    let shell = |id: &str, command: Option<&str>| Agent {
+        id: id.into(),
+        command: command.map(Into::into),
+        ..agent(id)
+    };
+    let rows = vec![
+        shell("00000000000000a1/shell:j1", Some("make")),
+        shell("00000000000000a1/s1", None),
+        shell("shell:local", Some("make")),
+        shell("00000000000000a1/agy:a", Some("x")),
+    ];
+    let (rest, shells) = split_shells(rows);
+    let ids = |rows: &[Agent]| rows.iter().map(|a| a.id.clone()).collect::<Vec<_>>();
+    assert_eq!(ids(&shells), ["00000000000000a1/shell:j1"]);
+    assert_eq!(
+        ids(&rest),
+        [
+            "00000000000000a1/s1",
+            "shell:local",
+            "00000000000000a1/agy:a"
+        ]
+    );
 }

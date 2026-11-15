@@ -184,6 +184,9 @@ void _sameSessions(String file, List<Object?> raw, List<Object?> again) {
     expect(model.facts?.limits.length, generated.facts?.limits.length, reason: file);
     expect(model.lastMessage?.id, generated.lastMessage?.id, reason: file);
     expect(model.activity, generated.activity, reason: file);
+    expect(model.node?.id, generated.node?.id, reason: file);
+    expect(model.node?.name, generated.node?.name, reason: file);
+    expect(model.node?.online, generated.node?.online, reason: file);
   }
   expect(again.length, raw.length, reason: file);
 }
