@@ -19,6 +19,9 @@ pub fn hash_of(token: &GrantValue) -> String {
     sha256_of(token.expose().as_bytes())
 }
 
+pub const RECORD_LOST: &str = "login-record";
+pub const OVERFLOW_LOST: &str = "login-overflow";
+
 pub fn lost_name(session: &str) -> String {
     format!("login-{session}")
 }

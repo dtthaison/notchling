@@ -52,6 +52,7 @@ struct Snap {
     me: Option<NodeId>,
     union: Option<Redactor>,
     blanket: bool,
+    login_blanket: bool,
 }
 
 fn blanked(mut row: Value) -> Value {
@@ -85,6 +86,7 @@ impl MaskedTails {
             me: self.view.me(),
             union: self.masks.union(),
             blanket: self.masks.unidentified_lost(),
+            login_blanket: self.masks.login_lost(),
         }
     }
 
@@ -142,6 +144,16 @@ impl MaskedTails {
         ended && (self.closed)(job)
     }
 
+    fn ran_claude(&self, snap: &Snap, job: &str) -> bool {
+        match (&snap.state, &snap.me) {
+            (Some(state), Some(me)) => state
+                .jobs
+                .get(job)
+                .is_some_and(|j| j.spec.node == *me && j.session.is_some()),
+            _ => false,
+        }
+    }
+
     fn mask(
         &self,
         snap: &Snap,
@@ -151,6 +163,9 @@ impl MaskedTails {
     ) -> Result<Option<(Vec<u8>, u64)>, ApiError> {
         match job {
             Some(job) => {
+                if snap.login_blanket && self.ran_claude(snap, job) {
+                    return Err(failed(UNMAPPED_LOST));
+                }
                 if self.masks.state(job) == JobMasks::Never {
                     return Ok(None);
                 }

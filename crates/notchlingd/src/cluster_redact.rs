@@ -1,3 +1,4 @@
+use crate::cluster_logins_jobs::{OVERFLOW_LOST, RECORD_LOST};
 use notchling_engine::cluster::grant_files::GrantValue;
 use notchling_engine::vault::{hide_forms, wipe, wipe_forms, Redactor};
 use std::collections::BTreeMap;
@@ -221,6 +222,16 @@ impl TailMasks {
             .jobs
             .values()
             .any(|m| (m.lost || m.template.is_none()) && m.keys.is_empty() && !m.released)
+    }
+
+    pub fn login_lost(&self) -> bool {
+        let table = lock(&self.table);
+        [RECORD_LOST, OVERFLOW_LOST].iter().any(|name| {
+            table
+                .jobs
+                .get(*name)
+                .is_some_and(|m| m.lost && m.keys.is_empty() && !m.released)
+        })
     }
 
     pub fn end_job(&self, job: &str) {

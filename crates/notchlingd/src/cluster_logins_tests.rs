@@ -383,6 +383,18 @@ fn an_unreadable_record_refuses_every_unmapped_row() {
 }
 
 #[test]
+fn the_stored_token_is_masked_at_start_even_when_the_record_is_unreadable() {
+    let rig = rig("login-job-stored");
+    rig.hold.deliver(&from_vault(), &good()).expect("stored");
+    std::fs::write(rig.dir.path().join("logins/jobs.json"), "{not json").unwrap();
+    let again = rig_over(rig.dir, "vault");
+    assert!(again.hold.token().is_none());
+    let out = masked(&again.masks, "j-0123456789ab", &format!("x {MARKER} y"));
+    assert!(!out.contains("NL-MARKER"), "{out}");
+    assert!(again.masks.login_lost());
+}
+
+#[test]
 fn recorded_jobs_are_lost_after_a_restart_even_while_the_login_is_off() {
     let rig = rig("login-job-off");
     rig.hold.deliver(&from_vault(), &good()).expect("stored");

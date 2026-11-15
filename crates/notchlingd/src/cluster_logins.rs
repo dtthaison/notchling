@@ -1,4 +1,4 @@
-use crate::cluster_logins_jobs::{hash_of, lost_name, LoginJobs};
+use crate::cluster_logins_jobs::{hash_of, lost_name, LoginJobs, OVERFLOW_LOST, RECORD_LOST};
 use crate::cluster_node::LocalCalls;
 use crate::cluster_redact::TailMasks;
 use crate::grant_broker::{Clock, View};
@@ -66,12 +66,21 @@ impl LoginHold {
         hold
     }
 
+    fn stored(&self) -> Option<GrantValue> {
+        let found = self.store.get(CLAUDE, (self.clock)()).ok().flatten()?;
+        self.masks
+            .add_standing(vec![(LOGIN_ENTRY.to_string(), found.value.clone())])
+            .ok()?;
+        Some(found.value)
+    }
+
     fn mark_lost(&self) {
+        let stored = self.stored();
         if !self.jobs.usable() {
-            self.masks.mark_granted_as(&lost_name("record"), &[]);
+            self.masks.mark_granted_as(RECORD_LOST, &[]);
             return;
         }
-        let current = self.token().map(|t| hash_of(&t));
+        let current = stored.as_ref().map(hash_of);
         for (session, hash) in self.jobs.all() {
             if current.as_deref() != Some(hash.as_str()) {
                 self.masks.mark_granted_as(&lost_name(&session), &[session]);
@@ -83,7 +92,7 @@ impl LoginHold {
             .iter()
             .any(|hash| current.as_deref() != Some(hash.as_str()))
         {
-            self.masks.mark_granted_as(&lost_name("overflow"), &[]);
+            self.masks.mark_granted_as(OVERFLOW_LOST, &[]);
         }
     }
 
@@ -167,11 +176,7 @@ impl LoginEnv for LoginHold {
         if !self.enabled || !self.jobs.usable() {
             return None;
         }
-        let found = self.store.get(CLAUDE, (self.clock)()).ok().flatten()?;
-        self.masks
-            .add_standing(vec![(LOGIN_ENTRY.to_string(), found.value.clone())])
-            .ok()?;
-        Some(found.value)
+        self.stored()
     }
 
     fn standing(&self) -> bool {

@@ -59,7 +59,7 @@ fn cluster_login(m: &Machine) -> SetupStep {
 pub(super) fn cluster_how_to(m: &Machine, on: bool) -> String {
     if !on {
         return format!(
-            "The cluster login isn't available in this build yet. Sign Claude Code in on {} yourself: in your own Terminal on that machine run claude setup-token.",
+            "The cluster login isn't available in this build yet. Sign Claude Code in on {} yourself: in your own Terminal on that machine run claude and sign in with /login. Notchling never renews that login.",
             m.name
         );
     }

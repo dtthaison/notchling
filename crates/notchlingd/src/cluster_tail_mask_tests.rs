@@ -172,6 +172,29 @@ fn a_row_tied_to_no_job_is_refused_while_a_lost_job_has_no_known_session() {
 }
 
 #[test]
+fn while_the_login_record_is_lost_a_claude_job_is_refused_but_a_shell_job_is_not() {
+    let mut running = job(JOB, "worker", JobState::Running);
+    running.session = Some("c1".to_string());
+    let r = rig_short("0b9e6c0e-1111-2222-3333-444455556666", Some("c1"));
+    *r.fake.state.lock().unwrap() = Some(cluster("vault", &[running]));
+    r.append("anything\n");
+    assert!(r.tail("0b9e6c0e-1111-2222-3333-444455556666", 0).is_ok());
+    for name in ["login-record", "login-overflow"] {
+        r.masks.mark_granted_as(name, &[]);
+        let err = r
+            .tail("0b9e6c0e-1111-2222-3333-444455556666", 0)
+            .expect_err("refused");
+        assert_eq!(err.message, UNMAPPED_LOST, "{name}");
+        r.masks.forget_job(name);
+    }
+    r.masks.mark_granted_as("login-record", &[]);
+    let shell = rig(&shell_id());
+    shell.masks.mark_granted_as("login-record", &[]);
+    shell.append("plain\n");
+    assert!(served(&shell.tail(&shell_id(), 0).unwrap()) == "plain\n");
+}
+
+#[test]
 fn a_row_with_no_masks_on_the_node_is_served_as_is() {
     let r = rig("some-other-session");
     r.append("plain\n");

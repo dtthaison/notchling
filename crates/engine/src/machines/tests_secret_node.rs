@@ -91,7 +91,7 @@ fn the_step_reads_the_nodes_own_status_and_has_no_fix_that_writes() {
     match &found.fix {
         StepFix::HowTo(text) => {
             assert!(
-                text.contains("setup-token") && text.contains("isn't available in this build"),
+                text.contains("/login") && text.contains("isn't available in this build"),
                 "{text}"
             );
             assert!(!text.contains("claude-worker"), "{text}");
@@ -157,9 +157,10 @@ fn while_the_login_is_off_the_how_to_says_to_sign_in_there_by_hand() {
     let text = cluster_how_to(&m, false);
     assert!(text.contains("isn't available in this build yet"), "{text}");
     assert!(
-        text.contains("yourself") && text.contains("setup-token"),
+        text.contains("yourself") && text.contains("/login") && text.contains("never renews"),
         "{text}"
     );
+    assert!(!text.contains("setup-token"), "{text}");
     assert!(
         !text.contains("claude-worker") && !text.contains("my-own-claude"),
         "{text}"
