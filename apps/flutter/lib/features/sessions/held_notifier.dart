@@ -93,7 +93,7 @@ class ComputerHeldNotifier extends Notifier<HeldState> {
   }
 
   Future<void> cancel(String heldId) => _act((BridgeClient client) async {
-        final ({bool done, bool delivered}) result = await client.heldCancel(heldId);
+        final ({bool done, bool delivered, bool inFlight}) result = await client.heldCancel(heldId: heldId);
         return result.done || result.delivered;
       });
 

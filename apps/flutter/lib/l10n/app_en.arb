@@ -224,6 +224,15 @@
   "@chatActivityIdle": {
     "description": "Not shown yet."
   },
+  "chatAnswerDelivered": "Your earlier answer ({answer}) was already delivered. Nothing more was sent.",
+  "@chatAnswerDelivered": {
+    "description": "Shown in the Chat screen under a permission or question card when the phone is asked to send a different answer but the first one was already delivered to the Mac, so nothing more is sent. $answer is the earlier answer, such as Allow.",
+    "placeholders": {
+      "answer": {
+        "type": "String"
+      }
+    }
+  },
   "chatAnswerFailed": "Couldn't send the answer. Please try again.",
   "@chatAnswerFailed": {
     "description": "Shown in the Chat screen."

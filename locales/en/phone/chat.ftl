@@ -242,3 +242,6 @@ chat-slash-help = Show help
 
 # Shown in the Chat screen under a permission or question card when the phone is asked to send a different answer while the first one may still be delivered. $answer is the earlier answer, such as Allow. Tapping an answer again sends it anyway.
 chat-answer-may-deliver = Your earlier answer ({ $answer }) may still be delivered. Tap again to send this one instead.
+
+# Shown in the Chat screen under a permission or question card when the phone is asked to send a different answer but the first one was already delivered to the Mac, so nothing more is sent. $answer is the earlier answer, such as Allow.
+chat-answer-delivered = Your earlier answer ({ $answer }) was already delivered. Nothing more was sent.

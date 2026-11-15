@@ -259,6 +259,7 @@ class BridgeClient {
 
   bool get inCluster => _sawCluster || _nodes.isNotEmpty;
   String get nodeName => _via?.name ?? profile.name;
+  String get holderKey => _via?.id ?? '';
 
   void _setStatus(ConnectionStatus next) {
     _status = next;
@@ -830,9 +831,9 @@ class BridgeClient {
     return (entries: _heldEntries(data), notices: _heldNotices(data));
   }
 
-  Future<({bool done, bool delivered})> heldCancel(String heldId) async {
-    final Json data = await request('held.cancel', <String, Object?>{'heldId': heldId});
-    return (done: data.boolean('cancelled'), delivered: data.boolean('delivered'));
+  Future<({bool done, bool delivered, bool inFlight})> heldCancel({String? heldId, String? key}) async {
+    final Json data = await request('held.cancel', <String, Object?>{'heldId': ?heldId, 'key': ?key});
+    return (done: data.boolean('cancelled'), delivered: data.boolean('delivered'), inFlight: data.boolean('inFlight'));
   }
 
   Future<bool> heldConfirm(String heldId) async {

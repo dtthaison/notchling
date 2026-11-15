@@ -5,7 +5,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/net/bridge_client.dart';
 import '../../core/net/command_key.dart';
-import '../../core/protocol/generated.dart' as wire;
 import '../../core/protocol/models.dart';
 import '../connection/connection.dart';
 import '../macs/computers.dart';
@@ -60,17 +59,19 @@ class PendingSend {
 }
 
 class AnswerConflict {
-  const AnswerConflict({required this.requestId, required this.earlier, required this.next});
+  const AnswerConflict({required this.requestId, required this.earlier, required this.next, this.delivered = false});
   final String requestId;
   final String earlier;
   final String next;
+  final bool delivered;
 }
 
 class _Attempt {
-  _Attempt(this.decision, this.key, this.matchesSummary);
+  _Attempt(this.decision, this.key, this.client);
   final String decision;
   final String key;
-  final bool matchesSummary;
+  final BridgeClient client;
+  String? node;
   String? heldId;
   bool unknown = false;
   bool inFlight = false;
@@ -352,32 +353,19 @@ class ChatNotifier extends Notifier<ChatState> {
   Future<void> allow(PendingPrompt prompt, {required bool allow}) => _answer(
         prompt.requestId,
         allow ? 'allow' : 'deny',
-        true,
         (BridgeClient client, String key) => client.promptAllow(prompt.requestId, allow: allow, key: key),
       );
 
   Future<void> choose(PendingPrompt prompt, List<int> choices) => _answer(
         prompt.requestId,
         'choice:${choices.join(',')}',
-        false,
         (BridgeClient client, String key) => client.promptChoose(prompt.requestId, choices.cast<Object>(), key: key),
       );
 
-  Future<String?> _heldEarlier(BridgeClient client, _Attempt earlier) async {
-    if (!earlier.matchesSummary) return null;
-    try {
-      final ({List<wire.HeldEntry> entries, List<wire.HeldNotice> notices}) held = await client.heldList();
-      final List<wire.HeldEntry> match = <wire.HeldEntry>[
-        for (final wire.HeldEntry e in held.entries)
-          if (e.op == 'prompt.answer' && e.summary.toLowerCase() == earlier.decision) e,
-      ];
-      return match.length == 1 ? match.single.id : null;
-    } on BridgeException catch (_) {
-      return null;
-    }
-  }
+  bool _checking = false;
 
-  Future<void> _answer(String requestId, String decision, bool matchesSummary, Future<String?> Function(BridgeClient client, String key) action) async {
+  Future<void> _answer(String requestId, String decision, Future<String?> Function(BridgeClient client, String key) action) async {
+    if (_checking) return;
     final BridgeClient? client = clientForSession(ref, sessionId);
     if (client == null) {
       state = state.copyWith(clearAnswerError: true, answerError: const BridgeException('disconnected', ''));
@@ -386,49 +374,53 @@ class ChatNotifier extends Notifier<ChatState> {
     _Attempt? attempt = _attempts[requestId];
     if (attempt != null && attempt.decision != decision) {
       final _Attempt earlier = attempt;
-      final String? heldId = earlier.heldId ?? ((earlier.unknown || earlier.inFlight) ? await _heldEarlier(client, earlier) : null);
-      if (!ref.mounted) return;
-      bool settled = false;
-      if (heldId != null) {
+      _checking = true;
+      try {
+        bool settled = false;
+        bool delivered = false;
         try {
-          final ({bool done, bool delivered}) result = await client.heldCancel(heldId);
+          final ({bool done, bool delivered, bool inFlight}) result = await client.heldCancel(key: earlier.key);
           if (!ref.mounted) return;
-          if (!result.done && result.delivered) {
-            _attempts.remove(requestId);
-            state = state.copyWith(clearAnswerError: true, clearAnswerConflict: true);
-            return;
-          }
-          settled = true;
+          delivered = result.delivered;
+          final bool sameMachine = identical(earlier.client, client) && earlier.node != null && earlier.node == client.holderKey;
+          settled = result.done || (!result.delivered && !result.inFlight && !earlier.unknown && !earlier.inFlight && sameMachine);
         } on BridgeException catch (_) {
-          settled = false;
+          if (!ref.mounted) return;
         }
-      } else if (!earlier.unknown && !earlier.inFlight) {
-        settled = true;
-      }
-      if (!settled) {
-        final AnswerConflict? asked = state.answerConflict;
-        final bool confirmed = asked != null && asked.requestId == requestId && asked.next == decision;
-        if (!confirmed) {
-          state = state.copyWith(answerConflict: AnswerConflict(requestId: requestId, earlier: earlier.decision, next: decision));
+        if (delivered) {
+          state = state.copyWith(answerConflict: AnswerConflict(requestId: requestId, earlier: earlier.decision, next: decision, delivered: true));
           return;
         }
+        if (!settled) {
+          final AnswerConflict? asked = state.answerConflict;
+          final bool confirmed = asked != null && !asked.delivered && asked.requestId == requestId && asked.next == decision;
+          if (!confirmed) {
+            state = state.copyWith(answerConflict: AnswerConflict(requestId: requestId, earlier: earlier.decision, next: decision));
+            return;
+          }
+        }
+      } finally {
+        _checking = false;
       }
-      _attempts.remove(requestId);
+      if (identical(_attempts[requestId], earlier)) _attempts.remove(requestId);
       attempt = null;
     }
-    attempt ??= _attempts[requestId] = _Attempt(decision, newCommandKey(), matchesSummary);
+    attempt ??= _attempts[requestId] = _Attempt(decision, newCommandKey(), client);
     final _Attempt current = attempt;
     current.inFlight = true;
+    final String node = client.holderKey;
     state = state.copyWith(clearAnswerError: true, clearAnswerConflict: true);
     try {
-      current.heldId = await action(client, current.key);
+      final String? heldId = await action(client, current.key);
+      current.heldId = heldId;
       current.inFlight = false;
       current.unknown = false;
-      if (current.heldId == null) _attempts.remove(requestId);
+      current.node = client.holderKey == node ? node : null;
+      if (heldId == null && identical(_attempts[requestId], current)) _attempts.remove(requestId);
     } on BridgeException catch (error) {
       current.inFlight = false;
       current.unknown = <String>['timeout', 'disconnected', 'internal'].contains(error.code);
-      if (!current.unknown) _attempts.remove(requestId);
+      if (!current.unknown && identical(_attempts[requestId], current)) _attempts.remove(requestId);
       if (!ref.mounted) return;
       state = state.copyWith(answerError: error);
     }

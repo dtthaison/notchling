@@ -168,6 +168,11 @@ class AppL10nEn extends AppL10n {
   String get chatActivityIdle => 'Idle';
 
   @override
+  String chatAnswerDelivered(String answer) {
+    return 'Your earlier answer ($answer) was already delivered. Nothing more was sent.';
+  }
+
+  @override
   String get chatAnswerFailed => 'Couldn\'t send the answer. Please try again.';
 
   @override

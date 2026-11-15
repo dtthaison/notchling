@@ -226,7 +226,7 @@ class _SessionChatState extends ConsumerState<_SessionChat> {
                             error: answerError == null ? null : bridgeErrorLine(l10n, answerError),
                             conflict: conflict == null || conflict.requestId != pending.requestId
                                 ? null
-                                : l10n.chatAnswerMayDeliver(switch (conflict.earlier) {
+                                : (conflict.delivered ? l10n.chatAnswerDelivered : l10n.chatAnswerMayDeliver)(switch (conflict.earlier) {
                                     'allow' => l10n.consentAllow,
                                     'deny' => l10n.consentDeny,
                                     final String other => other.replaceFirst('choice:', ''),

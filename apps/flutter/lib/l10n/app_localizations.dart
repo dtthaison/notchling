@@ -357,6 +357,12 @@ abstract class AppL10n {
   /// **'Idle'**
   String get chatActivityIdle;
 
+  /// Shown in the Chat screen under a permission or question card when the phone is asked to send a different answer but the first one was already delivered to the Mac, so nothing more is sent. $answer is the earlier answer, such as Allow.
+  ///
+  /// In en, this message translates to:
+  /// **'Your earlier answer ({answer}) was already delivered. Nothing more was sent.'**
+  String chatAnswerDelivered(String answer);
+
   /// Shown in the Chat screen.
   ///
   /// In en, this message translates to:
