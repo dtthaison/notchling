@@ -322,6 +322,20 @@ fn main_set_from_a_client_reaches_the_home() {
     assert_eq!(home.node.status()["kept"], json!(["job-1"]));
 }
 
+#[test]
+fn status_carries_what_replication_reports() {
+    let net = MemNet::new();
+    let n = node(&net, Opts::named("replication"));
+    let flag = SwitchFlag::off(CLUSTER, CLUSTER_OFF);
+    follow_switch(&flag, &n.node);
+    let ops = ClusterOps::new(Ok(n.node.clone()), flag, n.room.clone(), n.log.clone())
+        .with_replication(Arc::new(|_| json!([{"node": "x", "setAgeS": 7}])));
+    let status = ops
+        .call(&caller(Tier::Agent), ops::CLUSTER_STATUS, &json!({}))
+        .unwrap();
+    assert_eq!(status["replication"], json!([{"node": "x", "setAgeS": 7}]));
+}
+
 fn node_caller() -> Caller {
     Caller {
         tier: Tier::Agent,

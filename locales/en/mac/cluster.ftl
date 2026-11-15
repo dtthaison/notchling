@@ -59,6 +59,73 @@ cluster-remove-title = Remove This Node?
 cluster-remove-note = { $name } leaves the cluster and its sessions leave every list. It can join again with a new token.
 cluster-remove-confirm = Remove
 
+## Readiness and sets
+
+# Under a Can Be Master machine that can't take sets yet; $reason names the first check that fails.
+cluster-not-ready = Not ready: { $reason }
+# Reason in that line when the daemon says a machine isn't ready and names no check.
+cluster-not-ready-unknown = Notchling couldn't read why
+# Under a Can Be Master machine; $age is how long ago the last set arrived, such as 2 minutes ago.
+cluster-set-last = Last set { $age }
+# The same with the set's size in megabytes; $mb is a whole number.
+cluster-set-last-sized = Last set { $age } · { NUMBER($mb) } MB
+# Under a Can Be Master machine that holds no set yet.
+cluster-set-none = No set yet
+# Under a machine that missed sets while a session worked; $age is how long, such as 21m.
+cluster-set-behind = Behind: no new set for { $age }
+# The same when no set ever arrived.
+cluster-set-behind-none = Behind: no set has arrived yet
+
+## Move to a machine
+
+# Row menu item that hands the primary over to a Can Be Master machine; $name is its name.
+cluster-move-to = Move to { $name } Now…
+# Title of the Move sheet; $name is the machine that becomes the primary.
+cluster-move-title = Move the Primary to { $name }
+# Text of the Move sheet before anything starts; $name is the machine that becomes the primary.
+cluster-move-intro = { $name } becomes the primary. Sessions whose code is pushed move with it. The others keep running where they are, and { $name } lists them as remote sessions.
+# Text of the Move sheet while the request is out; $name is the machine.
+cluster-move-starting = Asking the primary to move to { $name }…
+cluster-move-start = Move the Primary
+cluster-move-cancel = Cancel
+# Button that stops waiting for sessions to finish their turns and stops the working ones now.
+cluster-move-now = Move Now
+cluster-move-close = Close
+# Shown when the Move sheet's Move is pressed but the machine can no longer take the primary.
+cluster-move-unavailable = That machine can't take the primary right now.
+# Line on the cluster sheet while a move runs; $name is the machine that becomes the primary.
+cluster-move-running = Moving the primary to { $name }…
+# Button beside that line that opens the Move sheet.
+cluster-move-show = Show
+# Heading above the sessions that move and the ones that stay.
+cluster-move-moving = Moving
+cluster-move-staying = Staying
+# Steps of a move, in order; $name is the machine that becomes the primary.
+cluster-move-step-prepare = Checking { $name }
+cluster-move-step-catch-up = Sending { $name } the newest set
+cluster-move-step-freeze = Waiting for the sessions to finish their turns
+cluster-move-step-final = Taking the final set
+cluster-move-step-stop = Stopping the moving sessions here
+cluster-move-step-switch = Making { $name } the primary
+cluster-move-step-resume = Starting the sessions on { $name }
+cluster-move-step-announce = Telling your machines and phones
+cluster-move-step-done = { $name } is the primary now
+# Shown when a move was undone before the switch; $reason is why.
+cluster-move-undone = Couldn't move the primary: { $reason }
+# Shown after Move Now; $names is a list of the sessions that were stopped mid-turn.
+cluster-move-cut = Stopped mid-turn, so their last step isn't finished: { $names }
+# A session that didn't start on the new primary; $name is the session, $why the reason.
+cluster-move-failed = { $name } didn't start on the new primary: { $why }
+
+## Keep on this Mac
+
+# Check in a session's menu; $machine is this Mac's name. On means the session isn't carried over by a Standby.
+cluster-keep-on = Keep on { $machine }
+# Under that check in the menu.
+cluster-keep-note = Other sessions continue on your Standby if this Mac goes away.
+# Shown when turning that check on or off failed; $error is the reason.
+cluster-keep-failed = Couldn't change that: { $error }
+
 ## Install Hook
 
 # Row menu item: puts Notchling's hook and skills into Claude Code's settings on a machine with no app.

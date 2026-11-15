@@ -98,6 +98,17 @@ impl ClusterSheetView {
                 .on_click(cx.listener(move |this, _, _, cx| this.install_hook(&hook, cx))),
             );
         }
+        if self.feed_offers_move(&id) {
+            let to = id.clone();
+            items = items.child(
+                MenuItem::new(
+                    SharedString::from(format!("node-move-{id}")),
+                    t::cluster::move_to(&row.name),
+                )
+                .build(a)
+                .on_click(cx.listener(move |this, _, _, cx| this.open_move(&to, cx))),
+            );
+        }
         if row.offers_remove() {
             let remove = id.clone();
             items = items.child(menu_rule(a)).child(
@@ -193,6 +204,35 @@ impl ClusterSheetView {
         let tools = row.tool_texts();
         if !tools.is_empty() {
             body = body.child(label(&tools.join(" · "), TypeRole::Meta, Ink::TextFaint, a));
+        }
+        if let Some(replication) = &row.replication {
+            if let Some(text) = replication.not_ready_text() {
+                body = body.child(
+                    div()
+                        .flex()
+                        .items_start()
+                        .gap(px(SPACE[0]))
+                        .child(icon(
+                            Icon::Warning,
+                            TypeRole::Meta.spec().size,
+                            Ink::Needs,
+                            a,
+                        ))
+                        .child(div().flex_1().min_w(px(0.0)).child(label(
+                            &text,
+                            TypeRole::Meta,
+                            Ink::Needs,
+                            a,
+                        ))),
+                );
+            } else {
+                if let Some(text) = replication.set_text() {
+                    body = body.child(label(&text, TypeRole::Meta, dim, a));
+                }
+                if let Some(text) = replication.behind_text() {
+                    body = body.child(label(&text, TypeRole::Meta, Ink::Needs, a));
+                }
+            }
         }
         for warning in &row.warnings {
             body = body.child(

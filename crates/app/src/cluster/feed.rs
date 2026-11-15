@@ -13,9 +13,11 @@ use crate::chat::data::DataRoot;
 use crate::switches::feed::{config_for, FeedConfig};
 
 const REFRESH_EVERY: Duration = Duration::from_secs(10);
+const MOVE_REFRESH_EVERY: Duration = Duration::from_secs(1);
 
 struct Shared {
     model: Mutex<ClusterModel>,
+    last: Mutex<Value>,
     generation: AtomicU64,
     stop: AtomicBool,
 }
@@ -24,6 +26,7 @@ impl Shared {
     fn new() -> Shared {
         Shared {
             model: Mutex::default(),
+            last: Mutex::new(Value::Null),
             generation: AtomicU64::new(0),
             stop: AtomicBool::new(false),
         }
@@ -37,7 +40,12 @@ impl Shared {
         self.generation.fetch_add(1, Ordering::SeqCst);
     }
 
+    fn remember(&self, status: &Value) {
+        *self.last.lock().unwrap_or_else(|e| e.into_inner()) = status.clone();
+    }
+
     fn load(&self, status: &Value) {
+        self.remember(status);
         let me = status.get("me").and_then(Value::as_str).unwrap_or("");
         let next = ClusterModel::from_status(status, me);
         let mut model = self.model();
@@ -50,11 +58,16 @@ impl Shared {
 
     fn apply(&self, event: &Event) {
         if event.event == topics::CLUSTER_CHANGED {
-            self.load(&event.data);
+            let merged = {
+                let last = self.last.lock().unwrap_or_else(|e| e.into_inner());
+                carried(&last, &event.data)
+            };
+            self.load(&merged);
         }
     }
 
     fn lost(&self) {
+        self.remember(&Value::Null);
         let mut model = self.model();
         if model.is_loaded() {
             *model = ClusterModel::default();
@@ -63,9 +76,43 @@ impl Shared {
         }
     }
 
+    fn refresh_every(&self) -> Duration {
+        if self.model().move_running() {
+            MOVE_REFRESH_EVERY
+        } else {
+            REFRESH_EVERY
+        }
+    }
+
     fn stopped(&self) -> bool {
         self.stop.load(Ordering::SeqCst)
     }
+}
+
+const READ_ONLY_KEYS: [&str; 2] = ["replication", "move"];
+
+pub(super) fn carried(last: &Value, event: &Value) -> Value {
+    let mut next = event.clone();
+    for key in READ_ONLY_KEYS {
+        if next.get(key).is_none() {
+            if let Some(old) = last.get(key) {
+                next[key] = old.clone();
+            }
+        }
+    }
+    let old_members = last.get("members").and_then(Value::as_array);
+    if let (Some(members), Some(old)) = (next["members"].as_array_mut(), old_members) {
+        for member in members.iter_mut().filter(|m| m.get("ready").is_none()) {
+            let ready = old
+                .iter()
+                .find(|o| o.get("id") == member.get("id"))
+                .and_then(|o| o.get("ready"));
+            if let Some(ready) = ready {
+                member["ready"] = ready.clone();
+            }
+        }
+    }
+    next
 }
 
 pub struct ClusterFeed {
@@ -197,7 +244,7 @@ fn follow(mut client: Client, shared: &Shared) {
             Ok(None) => {}
             Err(_) => return,
         }
-        if last.elapsed() >= REFRESH_EVERY {
+        if last.elapsed() >= shared.refresh_every() {
             last = Instant::now();
             let request = wire::status();
             match client.call(request.op, request.args) {

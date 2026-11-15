@@ -525,9 +525,15 @@ impl ClusterParts {
                 OBSERVE_EVERY,
             ));
         }
+        let replication_slot = sender_slot.clone();
         let ops = Arc::new(
             ClusterOps::new(node.clone(), link, room.clone(), audit)
                 .with_last_set(Arc::new(move || last_set.mb()))
+                .with_replication(Arc::new(move |now_ms| {
+                    replication_slot
+                        .get()
+                        .map_or_else(|| serde_json::json!([]), |s| s.replication(now_ms))
+                }))
                 .with_mover(runner.clone()),
         );
         let code: Arc<dyn CodeSender> = sender.clone();

@@ -116,6 +116,8 @@ struct Slot {
     queued: Option<Offered>,
     sending: Option<String>,
     sent: Option<String>,
+    sent_ms: Option<i64>,
+    sent_bytes: u64,
     failed: Option<Instant>,
     error: Option<String>,
 }
@@ -125,6 +127,7 @@ struct State {
     latest: Option<Offered>,
     slots: BTreeMap<NodeId, Slot>,
     held: BTreeMap<NodeId, u64>,
+    worked_ms: Option<i64>,
 }
 
 impl State {
@@ -199,6 +202,37 @@ impl SnapSender {
 
     pub fn last_set_mb(&self) -> u64 {
         self.last_set_bytes().div_ceil(1024 * 1024)
+    }
+
+    pub fn note_worked(&self, now_ms: i64) {
+        lock(&self.inner.state).worked_ms = Some(now_ms);
+    }
+
+    pub fn replication(&self, now_ms: i64) -> Value {
+        let Some(facts) = (self.inner.parts.facts)() else {
+            return json!([]);
+        };
+        if facts.home.as_ref() != Some(&facts.me) {
+            return json!([]);
+        }
+        let state = lock(&self.inner.state);
+        let age = |at: i64| (now_ms.saturating_sub(at).max(0) / 1000).max(0);
+        let entries: Vec<Value> = facts
+            .members
+            .iter()
+            .filter(|m| m.id != facts.me && m.active && m.can_be_master)
+            .map(|m| {
+                let slot = state.slots.get(&m.id);
+                let at = slot.and_then(|s| s.sent_ms);
+                json!({
+                    "node": m.id,
+                    "setAgeS": at.map(age),
+                    "sizeMb": at.and(slot).map(|s| s.sent_bytes.div_ceil(1024 * 1024)),
+                    "workedAgeS": state.worked_ms.map(age),
+                })
+            })
+            .collect();
+        Value::Array(entries)
     }
 
     pub fn tick(&self) -> Vec<NodeId> {
@@ -413,8 +447,10 @@ impl Inner {
                 slot.queued = None;
             }
             match result {
-                Ok(()) => {
+                Ok(bytes) => {
                     slot.sent = Some(offered.manifest.set.clone());
+                    slot.sent_ms = Some(offered.manifest.created_ms);
+                    slot.sent_bytes = bytes;
                     slot.failed = None;
                     slot.error = None;
                 }
@@ -439,7 +475,7 @@ impl Inner {
         self.parts.peers.call(id, op, args).map_err(|e| e.message)
     }
 
-    fn send(&self, id: &NodeId, offered: &Offered) -> Result<(), String> {
+    fn send(&self, id: &NodeId, offered: &Offered) -> Result<u64, String> {
         let mut lengths = self
             .parts
             .book
@@ -473,7 +509,7 @@ impl Inner {
             .parts
             .book
             .record(id, &manifest.set, lengths_of(&reply));
-        Ok(())
+        Ok(manifest.parts.iter().map(|p| p.len).sum())
     }
 
     fn send_part(

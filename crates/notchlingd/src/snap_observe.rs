@@ -192,14 +192,18 @@ pub fn now_ms() -> i64 {
     crate::acting_ops::now_ms()
 }
 
-pub fn tick(node: &ClusterNode, rows: &dyn LocalRows, known: &mut BTreeMap<String, Known>) -> bool {
+pub fn tick(
+    node: &ClusterNode,
+    rows: &dyn LocalRows,
+    known: &mut BTreeMap<String, Known>,
+) -> Option<Observed> {
     let status = node.status();
     if !is_home(&status) {
         known.clear();
-        return false;
+        return None;
     }
     let Ok(Some(rows)) = rows.complete_rows() else {
-        return false;
+        return None;
     };
     let probes = Probes {
         locked: &git_locked,
@@ -212,8 +216,8 @@ pub fn tick(node: &ClusterNode, rows: &dyn LocalRows, known: &mut BTreeMap<Strin
         now_ms(),
         &probes,
     );
-    node.observe(observed);
-    true
+    node.observe(observed.clone());
+    Some(observed)
 }
 
 pub struct SnapObserver {
@@ -234,7 +238,15 @@ impl SnapObserver {
                 let mut known = BTreeMap::new();
                 let mut watch = ReadyWatch::default();
                 while let Err(RecvTimeoutError::Timeout) = stopped.recv_timeout(every) {
-                    tick(&node, rows.as_ref(), &mut known);
+                    if let Some(seen) = tick(&node, rows.as_ref(), &mut known) {
+                        if seen
+                            .session_state
+                            .values()
+                            .any(|state| *state == SessionState::Working)
+                        {
+                            sender.note_worked(seen.now_ms);
+                        }
+                    }
                     watch_step(&node, &sender, &mut watch);
                     sender.tick();
                 }

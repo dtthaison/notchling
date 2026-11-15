@@ -98,6 +98,27 @@ pub fn desired(node: &str, desired: Desired) -> Request {
     }
 }
 
+pub fn main_set(session: &str, main: bool) -> Request {
+    Request {
+        op: ops::CLUSTER_MAIN_SET,
+        args: json!({"id": session, "main": main}),
+    }
+}
+
+pub fn move_home(to: &str) -> Request {
+    Request {
+        op: ops::CLUSTER_MOVE_HOME,
+        args: json!({"to": to}),
+    }
+}
+
+pub fn move_now() -> Request {
+    Request {
+        op: ops::CLUSTER_MOVE_NOW,
+        args: json!({}),
+    }
+}
+
 pub fn failover(value: &str) -> Request {
     Request {
         op: ops::CLUSTER_FAILOVER_SET,

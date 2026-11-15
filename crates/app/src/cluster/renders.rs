@@ -7,9 +7,10 @@ use crate::views::ViewSpec;
 pub const ME: &str = "a1b2c3d4e5f60718";
 pub const STANDBY: &str = "1122334455667788";
 pub const WORKER: &str = "99aabbccddeeff00";
+pub const STUDIO: &str = "5566778899aabbcc";
 pub const THIS_MAC: &str = "MacBook";
 
-pub const VIEWS: [ViewSpec; 8] = [
+pub const VIEWS: [ViewSpec; 10] = [
     ViewSpec {
         name: "cluster",
         size: (WIDTH, HEIGHT),
@@ -46,6 +47,16 @@ pub const VIEWS: [ViewSpec; 8] = [
         about: "the cluster sheet while the cluster switch is off: the hint and Turn On (made-up data)",
     },
     ViewSpec {
+        name: "cluster-replication",
+        size: (WIDTH, HEIGHT),
+        about: "the cluster sheet with three Can Be Master machines: one with a recent set, one behind, one not ready (made-up data)",
+    },
+    ViewSpec {
+        name: "cluster-move",
+        size: (WIDTH, 720.0),
+        about: "the Move sheet over the cluster sheet while the primary is moving to the Standby: sessions that move and stay, the steps, Move Now (made-up data)",
+    },
+    ViewSpec {
         name: "cluster-joining",
         size: (WIDTH, 300.0),
         about: "the cluster sheet while this Mac waits for the Primary to approve its join (made-up data)",
@@ -62,6 +73,8 @@ pub enum Shown {
     Joining,
     Install,
     InstallOff,
+    Replication,
+    Move,
 }
 
 pub fn shown(name: &str) -> Option<Shown> {
@@ -72,6 +85,8 @@ pub fn shown(name: &str) -> Option<Shown> {
         "cluster-menu" => Some(Shown::Menu),
         "cluster-off" => Some(Shown::Off),
         "cluster-joining" => Some(Shown::Joining),
+        "cluster-replication" => Some(Shown::Replication),
+        "cluster-move" => Some(Shown::Move),
         "cluster-install" => Some(Shown::Install),
         "cluster-install-off" => Some(Shown::InstallOff),
         _ => None,
@@ -123,7 +138,104 @@ fn member(
     })
 }
 
+fn ready_ok() -> Value {
+    json!({
+        "ok": true,
+        "reason": null,
+        "checks": [
+            {"id": "encrypted", "ok": true, "text": "disk encryption is on"},
+            {"id": "home", "ok": true, "text": "maintainer at /Users/maintainer"},
+            {"id": "space", "ok": true, "text": "212.0 GB free"},
+            {"id": "tools", "ok": true, "text": "Claude Code and Codex match"},
+        ],
+    })
+}
+
+fn ready_failing(reason: &str) -> Value {
+    json!({
+        "ok": false,
+        "reason": reason,
+        "checks": [
+            {"id": "encrypted", "ok": false, "text": reason},
+            {"id": "home", "ok": true, "text": "maintainer at /Users/maintainer"},
+            {"id": "space", "ok": true, "text": "180.0 GB free"},
+            {"id": "tools", "ok": true, "text": "Claude Code and Codex match"},
+        ],
+    })
+}
+
 pub fn status() -> Value {
+    let mut status = base_status();
+    set_member(&mut status, STANDBY, "ready", ready_ok());
+    status["replication"] = json!([
+        {"node": STANDBY, "setAgeS": 130, "sizeMb": 14, "workedAgeS": 40},
+    ]);
+    status
+}
+
+fn set_member(status: &mut Value, id: &str, key: &str, value: Value) {
+    if let Some(members) = status["members"].as_array_mut() {
+        for member in members.iter_mut().filter(|m| m["id"] == id) {
+            member[key] = value.clone();
+        }
+    }
+}
+
+pub fn replication() -> Value {
+    let mut status = status();
+    let mut studio = member(
+        STUDIO,
+        "mac-studio",
+        "standby",
+        true,
+        true,
+        versions("macos", "aarch64", Some("2.1.320"), "0.170.0"),
+        json!({"cpu": 4, "memUsedMb": 20480, "memTotalMb": 65536}),
+        false,
+    );
+    studio["ready"] = ready_failing("mac-studio has no disk encryption");
+    if let Some(members) = status["members"].as_array_mut() {
+        members.push(studio);
+    }
+    status["replication"] = json!([
+        {"node": STANDBY, "setAgeS": 1260, "sizeMb": 9, "workedAgeS": 300},
+        {"node": STUDIO, "setAgeS": null, "sizeMb": null, "workedAgeS": 300},
+    ]);
+    status
+}
+
+pub fn moving(step: &str) -> Value {
+    let mut status = status();
+    status["move"] = json!({
+        "to": STANDBY,
+        "step": step,
+        "moving": ["j-parser", "codex:c-docs", "j-tests"],
+        "staying": [
+            ["j-bench", "Its folder has changes that aren't pushed"],
+            ["j-fork", "Its branch isn't pushed yet"],
+        ],
+        "cut": if step == "freeze" { json!(["j-tests"]) } else { json!([]) },
+        "stopped": [],
+        "failed": [],
+        "reason": null,
+    });
+    status
+}
+
+pub fn names() -> std::collections::BTreeMap<String, String> {
+    [
+        ("j-parser", "Fix the parser"),
+        ("codex:c-docs", "Write the docs"),
+        ("j-tests", "Run the full test suite"),
+        ("j-bench", "Benchmark the sync"),
+        ("j-fork", "Try the fork"),
+    ]
+    .into_iter()
+    .map(|(id, name)| (id.to_owned(), name.to_owned()))
+    .collect()
+}
+
+fn base_status() -> Value {
     json!({
         "cluster": {"id": "c-1", "name": "Studio", "term": {"n": 1, "node": ME}, "home": ME, "vault": ME},
         "me": ME,
@@ -159,6 +271,8 @@ pub fn status() -> Value {
                 true,
             ),
         ],
+        "main": ["j-parser", "codex:c-docs", "j-tests"],
+        "kept": ["j-bench"],
         "link": true,
         "listening": [47823],
         "tailscale": true,
@@ -231,6 +345,8 @@ pub fn model_of(which: Shown) -> ClusterModel {
         Shown::Off => ClusterModel::from_status(&off(), ME),
         Shown::Joining => ClusterModel::from_status(&joining(true), ME),
         Shown::Install => ClusterModel::from_status(&install_on(), ME),
+        Shown::Replication => ClusterModel::from_status(&replication(), ME),
+        Shown::Move => ClusterModel::from_status(&moving("freeze"), ME),
         Shown::Full | Shown::Menu | Shown::InstallOff => model(true),
     }
 }

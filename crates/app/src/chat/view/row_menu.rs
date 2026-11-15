@@ -11,7 +11,7 @@ use notchling_kit::ui::{label, menu_note, menu_panel, menu_panel_wide, menu_rule
 use notchling_kit::{Appearance, Ink, TypeRole};
 use notchling_locale as t;
 
-use super::accounts::{held_item, menu_item};
+use super::accounts::{check_item, held_item, menu_item};
 use super::ChatView;
 use crate::acting::{Control, Request};
 use crate::chat::closed;
@@ -119,6 +119,21 @@ pub(super) fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>)
         } else {
             held_item("row-remove", t::chat::remove_session(), control, a)
         });
+    }
+    if let Some(offer) = view.cluster_snapshot().keep_offer(&menu.row_id) {
+        let row = menu.row_id.clone();
+        items = items
+            .child(menu_rule(a))
+            .child(
+                check_item(
+                    "row-keep",
+                    &t::cluster::keep_on(&offer.machine),
+                    offer.kept,
+                    a,
+                )
+                .on_click(cx.listener(move |this, _, _, cx| this.keep_on_machine(&row, cx))),
+            )
+            .child(menu_note(t::cluster::keep_note(), a));
     }
     if let Some(session) = remote {
         let id = session.agent.id.clone();

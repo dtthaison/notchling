@@ -310,6 +310,13 @@ from the app in this run, or `cluster.join` (below), or a restart of a headless 
   current set from the primary (the sum of the set's part lengths, 0 before one). So a Standby's own status and the
   primary's can differ on `space` while the sets are changing; the primary's figure is the one that decides whether
   a set is sent.
+- `cluster.status` adds `replication` (additive; `[]` on a machine that isn't the primary and before the daemon
+  has a sender): one `{node, setAgeS, sizeMb, workedAgeS}` per active Can Be Master member other than the primary.
+  `setAgeS` is the seconds, at the reply, since the set that machine last acknowledged was made, `sizeMb` the size
+  of what was sent for it (its tails, rounded up to MB), both `null` before any set arrived; `workedAgeS` is the
+  seconds since the primary last saw a main session working (`null` if never since the daemon started). The
+  app marks a machine behind when `setAgeS` is 900 or more and `workedAgeS` is smaller (a main session worked
+  after that set). `cluster.changed` events carry the status without it: read `cluster.status`.
 - `cluster.join` refuses `"this node is already in a cluster"`. With the switch off it turns the switch on
   when the app asks, or an agent while no app is attached (a headless machine), recorded
   as a `switch.changed` event (switch `cluster`, cause `user` or `cluster_join`); an agent's join while an app is

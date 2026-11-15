@@ -18,7 +18,8 @@ use notchling_locale as t;
 use super::feed::ClusterFeed;
 use super::install::{applied_note, plan_of, Plan};
 use super::model::ClusterModel;
-use super::renders::{install_plan_reply, model_of, shown, Shown, STANDBY, THIS_MAC};
+use super::move_sheet::{MoveSheet, Names};
+use super::renders::{install_plan_reply, model_of, names, shown, Shown, STANDBY, THIS_MAC};
 use super::wire::{self, Request};
 use crate::accounts::flows::Alert;
 use crate::accounts::view_rows::{alert_overlay, Handler};
@@ -36,14 +37,16 @@ pub(super) struct InstallAsk {
 }
 
 pub struct ClusterSheetView {
-    feed: Arc<ClusterFeed>,
+    pub(super) feed: Arc<ClusterFeed>,
     pub(super) menu: Option<String>,
+    pub(super) move_sheet: Option<MoveSheet>,
+    pub(super) names: Names,
     pub(super) removing: Option<String>,
     pub(super) installing: Option<InstallAsk>,
     name: Entity<TextEditor>,
     token: Entity<TextEditor>,
     busy: bool,
-    note: Option<(String, bool)>,
+    pub(super) note: Option<(String, bool)>,
     drawn: u64,
     _name_events: Subscription,
     _token_events: Subscription,
@@ -89,6 +92,11 @@ impl ClusterSheetView {
         view
     }
 
+    pub fn with_names(mut self, names: Names) -> ClusterSheetView {
+        self.names = names;
+        self
+    }
+
     pub fn fixed(feed: Arc<ClusterFeed>, name: &str, cx: &mut Context<Self>) -> ClusterSheetView {
         ClusterSheetView::build(feed, name, cx)
     }
@@ -111,6 +119,8 @@ impl ClusterSheetView {
         ClusterSheetView {
             feed,
             menu: None,
+            move_sheet: None,
+            names: Names::new(),
             removing: None,
             installing: None,
             name: editor,
@@ -250,6 +260,10 @@ impl ClusterSheetView {
             Some(request) => self.run(request, t::cluster::change_failed, cx),
             None => cx.notify(),
         }
+    }
+
+    pub(super) fn feed_offers_move(&self, id: &str) -> bool {
+        self.feed.snapshot().offers_move_now(id)
     }
 
     pub(super) fn feed_offers_install(&self, id: &str) -> bool {
@@ -571,6 +585,7 @@ impl Render for ClusterSheetView {
                 .child(self.join_form(token_focused, a, cx));
         } else {
             body = body.child(self.connection(&model, a, cx));
+            body = body.children(self.move_running_line(&model, a, cx));
             for row in model.rows() {
                 body = body.child(self.node_row(&row, a, cx));
             }
@@ -593,6 +608,7 @@ impl Render for ClusterSheetView {
         .on_click(cx.listener(|_, _, _, cx| cx.emit(Dismiss)));
         let alert = self.remove_alert(&model, a, cx);
         let install = self.install_alert(a, cx);
+        let moving = self.move_overlay(&model, a, cx);
         div()
             .id("cluster-sheet")
             .relative()
@@ -610,6 +626,7 @@ impl Render for ClusterSheetView {
             .child(scrollable(body))
             .children(alert)
             .children(install)
+            .children(moving)
             .part("Cluster View", a, cx)
     }
 }
@@ -640,6 +657,10 @@ pub fn build_render(name: &str, cx: &mut gpui::App) -> Option<AnyView> {
         let mut sheet = ClusterSheetView::fixed(feed, THIS_MAC, cx);
         if which == Shown::Menu {
             sheet.menu = Some(STANDBY.to_owned());
+        }
+        if which == Shown::Move {
+            sheet.move_sheet = Some(MoveSheet::running(STANDBY, "mac-mini"));
+            sheet.names = names();
         }
         if which == Shown::Install || which == Shown::InstallOff {
             let on = which == Shown::Install;

@@ -7,8 +7,8 @@ use notchling_local_api::{
 };
 use serde_json::{json, Value};
 
-use super::feed::ClusterFeed;
-use super::renders::{status, ME};
+use super::feed::{carried, ClusterFeed};
+use super::renders::{moving, replication, status, ME, STANDBY};
 use super::wire;
 use crate::actions::Transport;
 use crate::session_source::Backoff;
@@ -201,4 +201,29 @@ fn a_join_goes_to_the_daemon_and_an_error_never_carries_the_token() {
     drop(feed);
     handle.shutdown();
     let _ = thread.join();
+}
+
+#[test]
+fn an_event_keeps_the_readiness_and_set_facts_it_does_not_carry() {
+    let last = replication();
+    let mut event = status();
+    for member in event["members"].as_array_mut().expect("members") {
+        member.as_object_mut().expect("member").remove("ready");
+    }
+    event.as_object_mut().expect("status").remove("replication");
+    let next = carried(&last, &event);
+    assert_eq!(next["replication"], last["replication"]);
+    let ready = |status: &Value, id: &str| {
+        status["members"]
+            .as_array()
+            .and_then(|m| m.iter().find(|m| m["id"] == id))
+            .map(|m| m["ready"].clone())
+    };
+    assert_eq!(ready(&next, STANDBY), ready(&last, STANDBY));
+    assert_eq!(ready(&next, ME), Some(Value::Null));
+    let running = moving("freeze");
+    let again = carried(&running, &event);
+    assert_eq!(again["move"], running["move"]);
+    let fresh = carried(&Value::Null, &event);
+    assert!(fresh.get("replication").is_none());
 }

@@ -34,6 +34,7 @@ pub struct ClusterOps {
     room: Arc<dyn Room>,
     audit: ClusterLog,
     last_set_mb: Arc<dyn Fn() -> u64 + Send + Sync>,
+    replication: Arc<dyn Fn(i64) -> Value + Send + Sync>,
     mover: Option<Arc<MoveRunner>>,
 }
 
@@ -73,12 +74,21 @@ impl ClusterOps {
             room,
             audit,
             last_set_mb: Arc::new(|| 0),
+            replication: Arc::new(|_| json!([])),
             mover: None,
         }
     }
 
     pub fn with_last_set(mut self, last_set_mb: Arc<dyn Fn() -> u64 + Send + Sync>) -> ClusterOps {
         self.last_set_mb = last_set_mb;
+        self
+    }
+
+    pub fn with_replication(
+        mut self,
+        replication: Arc<dyn Fn(i64) -> Value + Send + Sync>,
+    ) -> ClusterOps {
+        self.replication = replication;
         self
     }
 
@@ -101,6 +111,7 @@ impl ClusterOps {
             Ok(node) => {
                 let mut status = node.status();
                 annotate(&mut status, (self.last_set_mb)());
+                status["replication"] = (self.replication)(crate::acting_ops::now_ms());
                 status["move"] = self.mover.as_ref().map_or(Value::Null, |m| m.status());
                 status
             }

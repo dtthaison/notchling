@@ -3,6 +3,7 @@ use std::sync::Arc;
 use gpui::{AppContext, Context};
 use notchling_engine::cluster::Qualified;
 use notchling_engine::sessions::AgentGroup;
+use notchling_locale as t;
 
 use super::ChatView;
 use crate::acting::Control;
@@ -10,6 +11,7 @@ use crate::acting::Request;
 use crate::chat::remote_control::{refused, remote_control, Action};
 use crate::chat::sidebar_node::{reply_note, Nodes};
 use crate::cluster::feed::ClusterFeed;
+use crate::cluster::move_sheet::Names;
 use crate::cluster::renders::{model, STANDBY, WORKER};
 use crate::cluster::view::ClusterSheetView;
 use crate::mac::shell::AppCluster;
@@ -24,8 +26,41 @@ pub fn app_cluster(cx: &Context<ChatView>) -> Arc<ClusterFeed> {
 impl ChatView {
     pub(super) fn open_cluster_sheet(&mut self, cx: &mut Context<Self>) {
         let feed = self.cluster.clone();
-        let entity = cx.new(|cx| ClusterSheetView::live(feed, cx));
+        let names: Names = self
+            .sessions
+            .iter()
+            .map(|s| (s.agent.id.clone(), s.agent.name.clone()))
+            .collect();
+        let entity = cx.new(|cx| ClusterSheetView::live(feed, cx).with_names(names));
         self.show_sheet(entity, cx);
+    }
+
+    pub(super) fn keep_on_machine(&mut self, row: &str, cx: &mut Context<Self>) {
+        self.row_menu = None;
+        let Some(request) = self.cluster.snapshot().keep_toggle(row) else {
+            cx.notify();
+            return;
+        };
+        let feed = self.cluster.clone();
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    let result = feed.send(&request);
+                    feed.refresh();
+                    result
+                })
+                .await;
+            this.update(cx, |view, cx| {
+                if let Err(error) = result {
+                    view.tools.error = Some(t::cluster::keep_failed(&error));
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+        cx.notify();
     }
 
     pub(super) fn cluster_tick(&mut self, cx: &mut Context<Self>) {
@@ -67,6 +102,10 @@ impl ChatView {
             .ok();
         })
         .detach();
+    }
+
+    pub(super) fn cluster_snapshot(&self) -> crate::cluster::model::ClusterModel {
+        self.cluster.snapshot()
     }
 
     pub(super) fn nodes(&self) -> Nodes {

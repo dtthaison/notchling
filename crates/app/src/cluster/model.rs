@@ -3,7 +3,12 @@ use notchling_engine::versions::Tool as VersionTool;
 use notchling_locale as t;
 use serde_json::Value;
 
+use super::move_sheet::MoveStatus;
+use super::replication::ReplicationRow;
 use super::wire::{self, Request};
+use crate::tools::requests::RowTool;
+use notchling_engine::cluster::Qualified;
+use std::collections::BTreeSet;
 
 const TOOLS: [(VersionTool, ClusterTool); 3] = [
     (VersionTool::Claude, ClusterTool::Claude),
@@ -33,6 +38,13 @@ pub struct NodeRow {
     pub primary: bool,
     pub client: bool,
     pub headless: bool,
+    pub replication: Option<ReplicationRow>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct KeepOffer {
+    pub machine: String,
+    pub kept: bool,
 }
 
 impl NodeRow {
@@ -147,6 +159,9 @@ pub struct ClusterModel {
     me: String,
     rows: Vec<NodeRow>,
     reference: Option<Versions>,
+    main: BTreeSet<String>,
+    kept: BTreeSet<String>,
+    moving: Option<MoveStatus>,
     link: bool,
     listening: bool,
     tailscale: bool,
@@ -224,8 +239,9 @@ fn text<'a>(member: &'a Value, key: &str) -> &'a str {
     member.get(key).and_then(Value::as_str).unwrap_or("")
 }
 
-fn row_of(member: &Value, me: &str, reference: Option<&Versions>) -> NodeRow {
+fn row_of(member: &Value, status: &Value, me: &str, reference: Option<&Versions>) -> NodeRow {
     let id = text(member, "id").to_owned();
+    let id_text = id.clone();
     let name = text(member, "name").to_owned();
     let versions = versions_of(member);
     let load = member.get("load").filter(|l| l.is_object());
@@ -278,7 +294,21 @@ fn row_of(member: &Value, me: &str, reference: Option<&Versions>) -> NodeRow {
         primary: text(member, "role") == "home",
         client: flag(member, "client"),
         headless: flag(member, "headless"),
+        replication: ReplicationRow::offered(member)
+            .then(|| ReplicationRow::from(status, &id_text)),
     }
+}
+
+fn id_set(status: &Value, key: &str) -> BTreeSet<String> {
+    status
+        .get(key)
+        .and_then(Value::as_array)
+        .map(|ids| {
+            ids.iter()
+                .filter_map(|id| id.as_str().map(str::to_owned))
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 impl ClusterModel {
@@ -319,9 +349,12 @@ impl ClusterModel {
             me: me.to_owned(),
             rows: ranked
                 .into_iter()
-                .map(|(_, _, m)| row_of(m, me, reference.as_ref()))
+                .map(|(_, _, m)| row_of(m, status, me, reference.as_ref()))
                 .collect(),
             reference,
+            main: id_set(status, "main"),
+            kept: id_set(status, "kept"),
+            moving: MoveStatus::of(status),
             link: flag(status, "link"),
             listening: status
                 .get("listening")
@@ -350,6 +383,66 @@ impl ClusterModel {
 
     pub fn rows(&self) -> Vec<NodeRow> {
         self.rows.clone()
+    }
+
+    pub fn move_status(&self) -> Option<&MoveStatus> {
+        self.moving.as_ref()
+    }
+
+    pub fn move_running(&self) -> bool {
+        self.moving.as_ref().is_some_and(MoveStatus::running)
+    }
+
+    pub fn primary_row(&self) -> Option<&NodeRow> {
+        self.rows.iter().find(|r| r.primary && r.active)
+    }
+
+    pub fn this_is_primary(&self) -> bool {
+        self.cluster.is_some() && self.row(&self.me).is_some_and(|r| r.primary && r.active)
+    }
+
+    pub fn offers_move_now(&self, id: &str) -> bool {
+        self.cluster.is_some()
+            && self.link
+            && !self.move_running()
+            && self.primary_row().is_some_and(|p| p.online)
+            && self.row(id).is_some_and(|r| {
+                r.active
+                    && r.online
+                    && r.can_be_master
+                    && !r.primary
+                    && r.replication.as_ref().is_some_and(|m| m.ready.is_ok())
+            })
+    }
+
+    pub fn move_home(&self, id: &str) -> Option<Request> {
+        self.offers_move_now(id).then(|| wire::move_home(id))
+    }
+
+    pub fn move_now(&self) -> Option<Request> {
+        self.move_running().then(wire::move_now)
+    }
+
+    pub fn keep_offer(&self, session: &str) -> Option<KeepOffer> {
+        if !self.this_is_primary() || Qualified::parse(session).is_some() {
+            return None;
+        }
+        if RowTool::of(session) == RowTool::Agy {
+            return None;
+        }
+        let kept = self.kept.contains(session);
+        if !kept && !self.main.contains(session) {
+            return None;
+        }
+        Some(KeepOffer {
+            machine: self.row(&self.me)?.name.clone(),
+            kept,
+        })
+    }
+
+    pub fn keep_toggle(&self, session: &str) -> Option<Request> {
+        let offer = self.keep_offer(session)?;
+        Some(wire::main_set(session, offer.kept))
     }
 
     pub fn row(&self, id: &str) -> Option<&NodeRow> {

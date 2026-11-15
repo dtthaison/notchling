@@ -324,3 +324,38 @@ fn a_cut_transfer_keeps_the_last_complete_set_and_resumes_with_the_missing_parts
     assert_eq!(read(&fx, 1), b"one\ntwo\n");
     assert!(fx.sender.last_error(&a).is_none());
 }
+
+fn entry(rows: &serde_json::Value, node: u8) -> &serde_json::Value {
+    rows.as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["node"] == id_of(node).to_string())
+        .unwrap()
+}
+
+#[test]
+fn replication_names_each_standbys_set_age_size_and_work() {
+    let fx = Fixture::new("send-replication", &[(1, true), (2, true)]);
+    fx.make_ready(&[id_of(1)]);
+    let (manifest, dir) = fx.stage(1, 0, b"one\ntwo\n");
+    let made = manifest.created_ms;
+    fx.sender.offer(manifest, dir);
+    assert!(fx.sender.wait_idle(WAIT));
+    let now = made + 125_000;
+    let before = fx.sender.replication(now);
+    assert_eq!(entry(&before, 1)["setAgeS"], 125);
+    assert_eq!(entry(&before, 1)["sizeMb"], 1);
+    assert!(entry(&before, 1)["workedAgeS"].is_null());
+    fx.sender.note_worked(made + 5_000);
+    let after = fx.sender.replication(now);
+    assert_eq!(entry(&after, 1)["workedAgeS"], 120);
+    assert!(entry(&after, 2)["setAgeS"].is_null());
+    assert!(entry(&after, 2)["sizeMb"].is_null());
+}
+
+#[test]
+fn a_machine_that_is_not_primary_reports_no_replication() {
+    let fx = Fixture::new("send-replication-nonprimary", &[(1, true)]);
+    *fx.net.home.lock().unwrap() = id_of(1);
+    assert_eq!(fx.sender.replication(1), serde_json::json!([]));
+}
