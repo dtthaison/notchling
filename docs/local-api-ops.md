@@ -572,7 +572,7 @@ Settings > Skills & Models lists the skills with `install.plan` (no `what`, so i
 hooks it ignores) and its Reinstall Skills button sends `install.apply {what: [<every skill name the
 plan listed>]}`, which leaves the hook entries alone. With the switch off the reply says so and nothing is
 written. A skill's `action` reads as: `unchanged` installed, `update` out of date, `write` not installed,
-`skip` with the reason "the tool is not installed here" the tool is missing, any other `skip` a folder
+`skip` with `tool_missing: true` the tool is missing, any other `skip` a folder
 Notchling doesn't own, left alone.
 
 The envelope:
@@ -589,7 +589,7 @@ The envelope:
      "present": [{"event": "PermissionRequest", "matcher": "*", "origin": "swift",
                   "command": "'/…/Notchling' --hook", "managed": false}]},
    "skills": [{"name": "notchling-pages", "tool": "claude", "path": "/…/skills/notchling-pages",
-               "action": "write", "reason": null, "error": null}]}}
+               "action": "write", "reason": null, "tool_missing": false, "error": null}]}}
 ```
 
 - `message` is there while the switch is off (and `applied` is false, and nothing was written).

@@ -420,6 +420,10 @@ fn a_skill_folder_that_is_not_ours_is_skipped_with_its_reason() {
         .unwrap()
         .contains("Swift app wrote it"));
     assert_eq!(
+        claude["tool_missing"], false,
+        "a folder left alone is not a missing tool"
+    );
+    assert_eq!(
         fs::read_to_string(swift.join("SKILL.md")).unwrap(),
         "---\nname: notchling-delegate\n---\nswift's\n"
     );
@@ -519,4 +523,22 @@ fn the_layout_puts_every_tool_where_the_swift_app_looked() {
         ]
     );
     assert!(InstallSetup::from_layout(&fixture, None).skills.is_empty());
+}
+
+#[test]
+fn a_tool_that_is_not_installed_is_flagged_so_settings_need_not_read_the_reason() {
+    let dir = Dir::new("toolmissing");
+    let setup = rig(&dir, None);
+    fs::remove_dir_all(dir.path("home/.codex")).unwrap();
+    let (ops, _) = ops_for(setup, true);
+    let reply = ops.run(ops::INSTALL_PLAN, &json!({})).unwrap();
+    let skills = reply["plan"]["skills"].as_array().unwrap();
+    let codex: Vec<_> = skills.iter().filter(|s| s["tool"] == "codex").collect();
+    assert!(!codex.is_empty());
+    for s in codex {
+        assert_eq!(s["action"], "skip");
+        assert_eq!(s["tool_missing"], true);
+    }
+    let claude = skills.iter().find(|s| s["tool"] == "claude").unwrap();
+    assert_eq!(claude["tool_missing"], false);
 }

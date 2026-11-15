@@ -65,7 +65,7 @@ fn choice(
     let name = catalog_name(tool);
     let checked = !live.models.is_empty();
     let (model, note) = if checked {
-        resolve(&pick.model, role, roles.tool(name), live)
+        resolve(&pick.model, &pick.effort, role, roles.tool(name), live)
     } else {
         (Some(pick.model.clone()), None)
     };

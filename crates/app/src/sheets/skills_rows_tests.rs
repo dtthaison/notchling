@@ -4,7 +4,8 @@ use serde_json::{json, Value};
 use super::skills_rows::*;
 
 fn skill(name: &str, tool: &str, action: &str, reason: Option<&str>) -> Value {
-    json!({"name": name, "tool": tool, "action": action, "reason": reason, "path": "/x", "error": null})
+    json!({"name": name, "tool": tool, "action": action, "reason": reason,
+        "tool_missing": reason == Some("the tool is not installed here"), "path": "/x", "error": null})
 }
 
 fn reply(on: bool, skills: Vec<Value>) -> Result<Value, String> {
@@ -14,20 +15,13 @@ fn reply(on: bool, skills: Vec<Value>) -> Result<Value, String> {
 #[test]
 fn each_plan_action_has_one_state_and_a_removal_has_none() {
     use SkillState::*;
-    assert_eq!(SkillState::of_plan("unchanged", None), Some(Installed));
-    assert_eq!(SkillState::of_plan("update", None), Some(OutOfDate));
-    assert_eq!(SkillState::of_plan("write", None), Some(NotInstalled));
-    assert_eq!(
-        SkillState::of_plan("skip", Some("the tool is not installed here")),
-        Some(ToolMissing)
-    );
-    assert_eq!(
-        SkillState::of_plan("skip", Some("it is a link; left alone")),
-        Some(LeftAlone)
-    );
-    assert_eq!(SkillState::of_plan("skip", None), Some(LeftAlone));
-    assert_eq!(SkillState::of_plan("remove", None), None);
-    assert_eq!(SkillState::of_plan("absent", None), None);
+    assert_eq!(SkillState::of_plan("unchanged", false), Some(Installed));
+    assert_eq!(SkillState::of_plan("update", false), Some(OutOfDate));
+    assert_eq!(SkillState::of_plan("write", false), Some(NotInstalled));
+    assert_eq!(SkillState::of_plan("skip", true), Some(ToolMissing));
+    assert_eq!(SkillState::of_plan("skip", false), Some(LeftAlone));
+    assert_eq!(SkillState::of_plan("remove", false), None);
+    assert_eq!(SkillState::of_plan("absent", false), None);
     assert_eq!(SkillState::Installed.word(), t::settings::skill_installed());
     assert_eq!(SkillState::OutOfDate.word(), "Out of date");
     assert_eq!(SkillState::NotInstalled.word(), "Not installed");

@@ -28,14 +28,12 @@ impl SkillState {
 
     /// The installer's action for one skill in one tool, as `install.plan` words it. A removal
     /// is never planned by an install, so it has no state.
-    pub fn of_plan(action: &str, reason: Option<&str>) -> Option<SkillState> {
+    pub fn of_plan(action: &str, tool_missing: bool) -> Option<SkillState> {
         match action {
             "unchanged" => Some(SkillState::Installed),
             "update" => Some(SkillState::OutOfDate),
             "write" => Some(SkillState::NotInstalled),
-            "skip" if reason.is_some_and(|r| r.contains("tool is not installed")) => {
-                Some(SkillState::ToolMissing)
-            }
+            "skip" if tool_missing => Some(SkillState::ToolMissing),
             "skip" => Some(SkillState::LeftAlone),
             _ => None,
         }
@@ -127,7 +125,10 @@ impl SkillsShown {
             };
             let (Some(tool), Some(state)) = (
                 SkillTool::of(tool),
-                SkillState::of_plan(action, text("reason")),
+                SkillState::of_plan(
+                    action,
+                    item.get("tool_missing").and_then(Value::as_bool) == Some(true),
+                ),
             ) else {
                 continue;
             };

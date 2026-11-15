@@ -411,6 +411,7 @@ fn skill_json(p: &SkillPlan) -> Value {
         "path": p.dir.to_string_lossy(),
         "action": p.action.as_str(),
         "reason": p.reason,
+        "tool_missing": p.reason.as_deref() == Some(install::skills::TOOL_MISSING),
         "error": null,
     })
 }

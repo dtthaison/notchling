@@ -161,3 +161,25 @@ fn json_carries_every_field() {
     assert_eq!(spec["checked"], true);
     assert_eq!(spec["note"], json!(null));
 }
+
+#[test]
+fn a_model_the_catalog_says_is_not_for_the_job_is_never_shown_as_the_choice() {
+    let built = Roles::built_in();
+    let roles = user(
+        "excluded",
+        r#"{"antigravity": {"picks": [{"model": "gemini-4-flash", "effort": "high", "roles": ["review"]}]}}"#,
+    );
+    let v = views(
+        &roles,
+        &built,
+        &live(&[]),
+        &live(&["gemini-4-flash", "gemini-4-hydrogen"]),
+    );
+    let flash = of(&v, "review")
+        .choices
+        .iter()
+        .find(|c| c.marked == "gemini-4-flash")
+        .unwrap();
+    assert_eq!(flash.model, None);
+    assert_eq!(flash.source, Source::Override);
+}

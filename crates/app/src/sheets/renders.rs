@@ -186,6 +186,7 @@ pub fn hooks(shown: Shown) -> HooksShown {
 
 fn plan_skill(name: &str, tool: &str, action: &str, reason: Option<&str>) -> Value {
     json!({"name": name, "tool": tool, "action": action, "reason": reason,
+        "tool_missing": reason.is_some_and(|r| r.contains("not installed")),
         "path": "/Users/me/.claude/skills/x", "error": null})
 }
 
