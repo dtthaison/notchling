@@ -1,4 +1,5 @@
 pub mod core;
+pub mod grant_files;
 pub mod grants;
 pub mod id;
 pub mod jobs;
@@ -22,6 +23,8 @@ pub use members::{Desired, Member, MemberState, Term};
 pub use state::{role_of, ClusterState, Command, JournalEntry};
 pub use versions::{compat, Compat, Purpose, Versions};
 
+#[cfg(test)]
+mod grant_files_tests;
 #[cfg(test)]
 mod grants_tests;
 #[cfg(test)]
