@@ -92,10 +92,7 @@ pub fn decide(a: &GrantAsk) -> GrantDecision {
         return GrantDecision::Refuse(format!("{} isn't allowed on {}", a.name, a.node.name));
     }
     if !a.vault_is_primary {
-        return GrantDecision::Wait(format!(
-            "{} waits for {}: the vault is there",
-            a.name, a.vault_name
-        ));
+        return GrantDecision::Wait(format!("{}, which holds the vault", a.vault_name));
     }
     if !a.exists {
         return GrantDecision::Refuse(format!(

@@ -140,13 +140,14 @@ fn a_waiting_attach_keeps_the_job_dispatching_and_answers_at_once() {
         &mut hub,
         &m5,
         call,
-        Ok(json!({"waiting": "gh waits for m5: the vault is there"})),
+        Ok(json!({"waiting": "m5, which holds the vault"})),
     );
     let answered = answers(&effects);
     assert!(matches!(answered[0], Ok(v) if v["state"] == "dispatching"));
     assert_eq!(state_of(&hub, &m5, "k"), JobState::Dispatching);
     let detail = detail_of(&hub, &m5, "k").expect("a detail");
     assert!(detail.starts_with(WAITING), "{detail}");
+    assert_eq!(detail, "Waiting for m5, which holds the vault");
     assert_eq!(sent_calls(&effects, "shell.run"), 0);
 }
 
@@ -160,7 +161,7 @@ fn a_waiting_job_is_attached_again_when_the_vault_node_is_primary() {
         &mut hub,
         &m5,
         call,
-        Ok(json!({"waiting": "gh waits for m5: the vault is there"})),
+        Ok(json!({"waiting": "m5, which holds the vault"})),
     );
     let effects = hub.tick(&m5, 1_000);
     let again = runs(&effects, GRANT_ATTACH);
@@ -205,7 +206,7 @@ fn nothing_is_attached_while_another_node_is_primary() {
         &mut hub,
         &m1,
         attach[0].0,
-        Ok(json!({"waiting": "gh waits for m5: the vault is there"})),
+        Ok(json!({"waiting": "m5, which holds the vault"})),
     );
     let quiet = hub.tick(&m1, 1_000);
     assert!(runs(&quiet, GRANT_ATTACH).is_empty());

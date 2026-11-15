@@ -321,7 +321,9 @@ impl GrantUse {
         let args = json!({"job": job, "names": missing, "command": command, "folder": folder});
         let reply = self.asks.0.request(vault, args)?;
         if let Some(why) = reply.get("waiting").and_then(Value::as_str) {
-            return Err(failed(why));
+            return Err(failed(format!(
+                "secret isn't available yet: waiting for {why}"
+            )));
         }
         held = self.held(job, names)?;
         match names.iter().zip(&held).find(|(_, g)| g.is_none()) {

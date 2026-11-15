@@ -124,7 +124,7 @@ fn grant_waits_while_vault_node_isnt_primary() {
     a.exists = false;
     assert_eq!(
         decide(&a),
-        GrantDecision::Wait("github waits for m1: the vault is there".to_string())
+        GrantDecision::Wait("m1, which holds the vault".to_string())
     );
 }
 

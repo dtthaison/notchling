@@ -339,10 +339,13 @@ fn missing_name_requests_from_home_once() {
 fn waiting_and_failed_requests_say_why_and_give_nothing() {
     let rig = rig();
     rig.roots.set(JOB, 500);
-    let why = "api-key waits for vault: the vault is there";
+    let why = "vault, which holds the vault";
     *rig.fake.reply.lock().unwrap() = Some(Ok(json!({"waiting": why})));
     let err = answer(&rig, 700, &["api-key"]).expect_err("waits");
-    assert_eq!(err.message, why);
+    assert_eq!(
+        err.message,
+        format!("secret isn't available yet: waiting for {why}")
+    );
     *rig.fake.reply.lock().unwrap() = Some(Err(ApiError::new(
         ErrorCode::Forbidden,
         "api-key isn't allowed on worker",
