@@ -160,6 +160,7 @@ pub(crate) struct Rig {
     pub writes: Arc<Mutex<Vec<String>>>,
     pub screen: Arc<Mutex<Vec<String>>>,
     pub deaf: Arc<AtomicBool>,
+    pub starting: Arc<std::sync::atomic::AtomicU64>,
     pub human: Arc<Mutex<Vec<(u64, String)>>>,
     pub launched: Arc<Recorder>,
     pub safe: Arc<SafeModes>,
@@ -216,6 +217,7 @@ pub(crate) fn rig_with(options: Options) -> Rig {
         attached,
         writes,
         deaf,
+        starting,
         screen,
         human,
         ..
@@ -230,7 +232,9 @@ pub(crate) fn rig_with(options: Options) -> Rig {
         Some(file) => ops.with_reply_screen_file(file),
         None => ops,
     };
-    let acting = Arc::new(ops);
+    let sink = Arc::new(MemorySink::new());
+    let events = Events::fixed(sink.clone(), Salt([1; 32]));
+    let acting = Arc::new(ops.with_events(events.clone()));
     let files = Arc::new(FakeFiles::default());
     let mut idle = agent(&list, "job-idle");
     idle.transcript_path = Some("/tmp/none/idle.jsonl".into());
@@ -245,15 +249,18 @@ pub(crate) fn rig_with(options: Options) -> Rig {
     let now: Clock = Arc::new(move || ticks.load(Ordering::SeqCst));
     let store = Arc::new(OutboxStore::in_memory_for_tests());
     let switch = acting.acting_switch();
-    let sink = Arc::new(MemorySink::new());
-    let outbox = Arc::new(OutboxOps::new(
-        store,
-        Arc::new(Mutex::new(list)),
-        roots,
-        switch.clone(),
-        room.clone(),
-        Some(Events::fixed(sink.clone(), Salt([1; 32]))),
-    ));
+    let outbox = Arc::new(
+        OutboxOps::new(
+            store,
+            Arc::new(Mutex::new(list)),
+            roots,
+            switch.clone(),
+            room.clone(),
+            Some(events),
+        )
+        .with_clock(now.clone()),
+    );
+    acting.attach_outbox(outbox.clone());
     let safe = Arc::new(SafeModes::default());
     let courier = Arc::new(ClaudeCourier::with_files(
         acting.clone(),
@@ -283,6 +290,7 @@ pub(crate) fn rig_with(options: Options) -> Rig {
         writes,
         screen,
         deaf,
+        starting,
         human,
         launched,
         safe,
@@ -291,6 +299,11 @@ pub(crate) fn rig_with(options: Options) -> Rig {
 }
 
 impl Rig {
+    pub(crate) fn threaded(&self) {
+        self.ops.set_wake(self.postmen.waker());
+        self.postmen.begin();
+    }
+
     pub(crate) fn send(&self, id: &str, text: &str) -> Row {
         self.send_with(id, text, false)
     }

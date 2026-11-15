@@ -1,47 +1,7 @@
 use notchling_engine::reply::exec::Pty;
 use notchling_engine::reply::keys::{ENTER, PASTE_START};
-use notchling_engine::sessions::fresh::job_row;
-use notchling_engine::sessions::{Agent, AgentTarget, Probes, Roots};
-use notchling_engine::transcript::{restart, sent};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
-
-pub(crate) trait Rest: Send + Sync {
-    fn fresh(&self, agent: &Agent) -> Option<Agent>;
-    fn restarted(&self, agent: &Agent, now_ms: i64) -> bool;
-    fn delivered(&self, agent: &Agent, text: &str, since_ms: i64) -> Option<bool>;
-}
-
-pub(crate) struct FromFiles {
-    roots: Roots,
-}
-
-impl FromFiles {
-    pub(crate) fn new(roots: Roots) -> FromFiles {
-        FromFiles { roots }
-    }
-}
-
-impl Rest for FromFiles {
-    fn fresh(&self, agent: &Agent) -> Option<Agent> {
-        let AgentTarget::Job(job) = &agent.target else {
-            return None;
-        };
-        job_row(&self.roots, &Probes::from_proc(), job)
-    }
-
-    fn restarted(&self, agent: &Agent, now_ms: i64) -> bool {
-        agent
-            .transcript_path
-            .as_deref()
-            .is_some_and(|path| restart::restarted(path, now_ms))
-    }
-
-    fn delivered(&self, agent: &Agent, text: &str, since_ms: i64) -> Option<bool> {
-        let path = agent.transcript_path.as_deref()?;
-        sent::sent_since(path, text, since_ms)
-    }
-}
 
 pub(crate) struct Guarded<'a> {
     pub(crate) inner: Box<dyn Pty + 'a>,

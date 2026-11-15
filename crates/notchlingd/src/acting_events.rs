@@ -6,8 +6,8 @@ use notchling_engine::sessions::Agent;
 use notchling_events::envelope::ActorTier;
 use notchling_events::field::{Count, Millis, Tool};
 use notchling_events::kinds::agents::{
-    AnswerKind, AnswerSurface, ControlAction, HeldThen, PromptKind, ReplyVia, SendResult,
-    SessionAnswered, SessionControl, SessionReply, SessionReplyHeld,
+    AnswerKind, AnswerSurface, ControlAction, PromptKind, ReplyVia, SendResult, SessionAnswered,
+    SessionControl, SessionReply,
 };
 use notchling_events::kinds::choices::{DoneOrFailed, FailWhy, SwitchName};
 use notchling_events::kinds::security::{SwitchCause, SwitchChanged};
@@ -20,17 +20,11 @@ pub(crate) const LOG_DOWN: &str = "the audit log can't be written";
 
 pub(crate) struct PlayError {
     pub(crate) err: ApiError,
-    pub(crate) why: FailWhy,
-    pub(crate) typed: bool,
 }
 
 impl From<ApiError> for PlayError {
     fn from(err: ApiError) -> PlayError {
-        PlayError {
-            err,
-            why: FailWhy::Other,
-            typed: false,
-        }
+        PlayError { err }
     }
 }
 
@@ -241,16 +235,6 @@ impl ActingOps {
             .and_then(Value::as_str)
             .map_or(0, |t| t.chars().count());
         self.note_reply(session, via, chars, Some(FailWhy::ActingOff), None, false);
-    }
-
-    pub(crate) fn note_held(&self, session: Ref<Session>, then: HeldThen) {
-        if let Some(events) = &self.events {
-            events.push(Event::new(
-                &SessionReplyHeld { session, then },
-                Outcome::Info,
-                now_ms(),
-            ));
-        }
     }
 
     pub(crate) fn note_answered(

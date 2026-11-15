@@ -35,7 +35,6 @@ pub mod daemon_wiring;
 pub mod delegate_cli;
 pub mod every_session;
 pub mod git_ops;
-pub mod held_ops;
 pub mod hook;
 pub mod hook_ops;
 pub mod hook_output;
@@ -70,6 +69,7 @@ pub mod outbox_ops;
 pub mod outbox_postman;
 mod outbox_rows;
 pub mod outbox_runners;
+mod outbox_settle;
 pub mod outbox_verify;
 pub mod pages_cli;
 pub mod pages_ops;
@@ -80,6 +80,7 @@ mod providers_gate;
 pub mod providers_ops;
 pub mod quiet_ops;
 mod reply_attempts;
+mod reply_outbox;
 mod reply_screen;
 pub mod service;
 pub mod settings_asks;
@@ -142,12 +143,6 @@ mod every_session_tests;
 mod git_ops_branch_tests;
 #[cfg(test)]
 mod git_ops_tests;
-#[cfg(test)]
-mod held_kept_tests;
-#[cfg(test)]
-mod held_ops_tests;
-#[cfg(test)]
-mod held_race_tests;
 #[cfg(test)]
 mod hook_ops_tests;
 #[cfg(test)]

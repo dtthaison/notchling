@@ -116,28 +116,6 @@ impl Attacher for FakeAttacher {
     }
 }
 
-pub(crate) struct Trusting;
-
-impl crate::turn_gate::Rest for Trusting {
-    fn fresh(
-        &self,
-        agent: &notchling_engine::sessions::Agent,
-    ) -> Option<notchling_engine::sessions::Agent> {
-        Some(agent.clone())
-    }
-    fn restarted(&self, _agent: &notchling_engine::sessions::Agent, _now_ms: i64) -> bool {
-        false
-    }
-    fn delivered(
-        &self,
-        _agent: &notchling_engine::sessions::Agent,
-        _text: &str,
-        _since_ms: i64,
-    ) -> Option<bool> {
-        Some(false)
-    }
-}
-
 pub(crate) const SESSION: &str = "6f1c2a9e-3b7d-4e21-9a0c-5d8e7f6a1b2c";
 
 pub(crate) fn row(id: &str, target: Value, group: &str, transcript: Option<&str>) -> Value {
@@ -214,7 +192,6 @@ pub(crate) fn setup_in(
     if let Some(launcher) = launcher {
         ops = ops.with_launcher(launcher, Box::new(|_| {}));
     }
-    ops = ops.with_rest(Box::new(Trusting));
     Setup {
         ops,
         room,
@@ -303,107 +280,6 @@ fn the_switch_is_read_set_and_announced() {
         .0,
         ErrorCode::BadRequest
     );
-}
-
-#[test]
-fn a_reply_types_the_plan_into_the_jobs_attach_terminal() {
-    let s = setup(true, PROMPT, sessions());
-    let out = s.ops.call(
-        &app(),
-        ops::SESSION_REPLY,
-        &json!({"id": "job-idle", "text": "hi\x1b[201~\r1"}),
-    );
-    assert_eq!(out.unwrap(), json!({"sent": true}));
-    assert_eq!(
-        *s.attached.lock().unwrap(),
-        vec![("idle0001".to_string(), Some("/lanes/b".to_string()))],
-        "the lane's config folder goes with the job"
-    );
-    assert_eq!(
-        *s.writes.lock().unwrap(),
-        vec![
-            keys::clear_input(),
-            "\x1b[200~hi[201~\r1\x1b[201~".to_string(),
-            "\r".to_string()
-        ]
-    );
-}
-
-#[test]
-fn a_reply_the_terminal_keeps_in_its_box_is_an_error_not_a_sent_one() {
-    let s = setup(true, PROMPT, sessions());
-    s.deaf.store(true, Ordering::SeqCst);
-    let (c, m) = code(s.ops.call(
-        &app(),
-        ops::SESSION_REPLY,
-        &json!({"id": "job-idle", "text": "hi"}),
-    ));
-    assert_eq!(c, ErrorCode::Failed);
-    assert!(
-        m.starts_with("The message is typed in the session's terminal but wasn't sent"),
-        "{m}"
-    );
-    s.deaf.store(false, Ordering::SeqCst);
-    let again = s.ops.call(
-        &app(),
-        ops::SESSION_REPLY,
-        &json!({"id": "job-idle", "text": "hi"}),
-    );
-    assert_eq!(
-        again.unwrap(),
-        json!({"sent": true}),
-        "a reply that failed holds nothing back"
-    );
-}
-
-#[test]
-fn a_reply_is_typed_only_at_the_prompt() {
-    let s = setup(true, &["Resume a session", "  1. fix-hook"], sessions());
-    let (c, m) = code(s.ops.call(
-        &app(),
-        ops::SESSION_REPLY,
-        &json!({"id": "job-idle", "text": "hi"}),
-    ));
-    assert_eq!(c, ErrorCode::Failed);
-    assert!(
-        m.starts_with("The session's terminal isn't at its prompt"),
-        "{m}"
-    );
-    assert!(s.writes.lock().unwrap().is_empty());
-}
-
-#[test]
-fn replies_go_only_to_background_jobs_and_never_into_a_dialog() {
-    let s = setup(true, PROMPT, sessions());
-    let (c, m) = code(s.ops.call(
-        &app(),
-        ops::SESSION_REPLY,
-        &json!({"id": "term", "text": "hi"}),
-    ));
-    assert_eq!(
-        (c, m.as_str()),
-        (ErrorCode::BadRequest, "this session takes no replies")
-    );
-    assert_eq!(
-        code(s.ops.call(
-            &app(),
-            ops::SESSION_REPLY,
-            &json!({"id": "nope", "text": "hi"})
-        ))
-        .0,
-        ErrorCode::BadRequest
-    );
-    assert!(s.attached.lock().unwrap().is_empty());
-
-    let dialog = setup(true, &["Do you want to proceed?", " 1. Yes"], sessions());
-    let (c, m) = code(dialog.ops.call(
-        &app(),
-        ops::SESSION_REPLY,
-        &json!({"id": "job-idle", "text": "1"}),
-    ));
-    assert_eq!(c, ErrorCode::Failed);
-    assert!(m.starts_with("The session is asking you something"), "{m}");
-    assert!(dialog.writes.lock().unwrap().is_empty());
 }
 
 #[test]
@@ -720,8 +596,7 @@ fn gated(
         roots,
         room,
         Box::new(attacher),
-    )
-    .with_rest(Box::new(Trusting));
+    );
     (Arc::new(ops), gate, entered, order)
 }
 
@@ -737,7 +612,10 @@ fn reply_in_thread(ops: &Arc<ActingOps>, id: &'static str, text: &'static str) -
     let (tx, rx) = std::sync::mpsc::channel();
     let ops = ops.clone();
     std::thread::spawn(move || {
-        let sent = ops.call(&app(), ops::SESSION_REPLY, &json!({"id": id, "text": text}));
+        let sent = ops
+            .agent(&json!({"id": id}))
+            .and_then(|agent| ops.nudge(&agent, text))
+            .map(|()| json!({"sent": true}));
         let _ = tx.send(sent);
     });
     rx

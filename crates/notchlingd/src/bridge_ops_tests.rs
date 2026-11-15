@@ -102,6 +102,19 @@ fn acting_ops(on: bool, sessions: Arc<Mutex<Value>>, room: Arc<FakeRoom>) -> Arc
     ))
 }
 
+fn with_outbox(acting: Arc<ActingOps>) -> Arc<ActingOps> {
+    let outbox = crate::outbox_ops::OutboxOps::new(
+        Arc::new(notchling_engine::outbox::OutboxStore::in_memory_for_tests()),
+        acting.sessions.clone(),
+        acting.roots.clone(),
+        acting.acting_switch(),
+        acting.room.clone(),
+        None,
+    );
+    acting.attach_outbox(Arc::new(outbox));
+    acting
+}
+
 fn bridge_ops(dir: &Path, lan: u16, tunnel: u16) -> (BridgeOps, Arc<FakeRoom>) {
     let room = Arc::new(FakeRoom::default());
     let sessions = Arc::new(Mutex::new(json!([])));
@@ -357,21 +370,27 @@ fn the_bridge_acts_only_through_the_acting_switch() {
         None
     )])));
     let off = DaemonActing {
-        ops: acting_ops(false, sessions.clone(), Arc::new(FakeRoom::default())),
+        ops: with_outbox(acting_ops(
+            false,
+            sessions.clone(),
+            Arc::new(FakeRoom::default()),
+        )),
         sessions: sessions.clone(),
     };
     let refused = off.send_message("hi", &job_session()).unwrap_err();
     assert_eq!(refused.message, ACTING_OFF);
 
     let on = DaemonActing {
-        ops: acting_ops(true, sessions.clone(), Arc::new(FakeRoom::default())),
+        ops: with_outbox(acting_ops(
+            true,
+            sessions.clone(),
+            Arc::new(FakeRoom::default()),
+        )),
         sessions,
     };
-    let typed = on.send_message("hi", &job_session()).unwrap_err();
-    assert!(
-        typed.message.contains("types into no session"),
-        "reached the terminal: {typed:?}"
-    );
+    on.send_message("hi", &job_session()).unwrap();
+    let outbox = on.ops.outbox().unwrap();
+    assert_eq!(outbox.store().list(Some("abc12345")).unwrap().len(), 1);
     let view_only = Session::new("s2", "n", "/tmp", Control::ViewOnly, SessionState::Running);
     assert!(on.send_message("hi", &view_only).is_err());
 }

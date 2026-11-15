@@ -1,6 +1,7 @@
 use crate::acting_ops_tests::{app, code, sessions, setup, setup_in, Setup, PROMPT, SESSION};
 use crate::event_assert::{of, results, text};
 use crate::late_emit::Events;
+use crate::outbox_testkit::{rig, rig_with, Options, Rig, DIALOG, IDLE, T0};
 use notchling_engine::control::{FakeLauncher, LaunchOutput, Launcher};
 use notchling_engine::sessions::Roots;
 use notchling_events::envelope::{Actor, ActorTier};
@@ -46,11 +47,23 @@ fn reply(s: &Setup, id: &str, text: &str) -> Result<Value, notchling_local_api::
         .call(&app(), ops::SESSION_REPLY, &json!({"id": id, "text": text}))
 }
 
+fn outbox() -> (Rig, Arc<MemorySink>) {
+    let r = rig();
+    r.threaded();
+    let sink = r.sink.clone();
+    (r, sink)
+}
+
+fn say(r: &Rig, id: &str, text: &str) -> Result<Value, notchling_local_api::ApiError> {
+    r.acting
+        .call(&app(), ops::SESSION_REPLY, &json!({"id": id, "text": text}))
+}
+
 #[test]
 fn reply_records_chars_not_text() {
-    let (s, sink) = watched(true, PROMPT);
+    let (r, sink) = outbox();
     let secret = "marker-text-4711";
-    reply(&s, "job-idle", secret).unwrap();
+    say(&r, "job-idle", secret).unwrap();
     let sent = of(&sink, "session.reply");
     assert_eq!(sent.len(), 1);
     assert_eq!(text(&sent[0], "chars").as_deref(), Some("16"));
@@ -62,16 +75,16 @@ fn reply_records_chars_not_text() {
 
 #[test]
 fn a_reply_from_the_notch_and_a_phone_say_so() {
-    let (s, sink) = watched(true, PROMPT);
-    s.ops
+    let (r, sink) = outbox();
+    r.acting
         .call(
             &app(),
             ops::SESSION_REPLY,
             &json!({"id": "job-idle", "text": "a", "from": "notch"}),
         )
         .unwrap();
-    let (s, phone_sink) = watched(true, PROMPT);
-    phone("d1").run(|| reply(&s, "job-idle", "b").unwrap());
+    let (r, phone_sink) = outbox();
+    phone("d1").run(|| say(&r, "job-idle", "b").unwrap());
     assert_eq!(
         text(&of(&sink, "session.reply")[0], "via").as_deref(),
         Some("notch")
@@ -84,18 +97,22 @@ fn a_reply_from_the_notch_and_a_phone_say_so() {
 
 #[test]
 fn reply_failure_maps_why() {
-    let (s, sink) = watched(true, &["Do you want to proceed?", " 1. Yes"]);
-    let e = reply(&s, "job-idle", "1").unwrap_err();
-    assert_eq!(e.code, ErrorCode::Failed);
-    let sent = of(&sink, "session.reply");
+    let r = rig_with(Options {
+        screen: DIALOG,
+        ..Options::default()
+    });
+    r.send("job-idle", "1");
+    r.postmen.postman(IDLE).pass(r.at(T0));
+    assert!(r.writes.lock().unwrap().is_empty());
+    let sent = of(&r.sink, "session.reply");
     assert_eq!(text(&sent[0], "result").as_deref(), Some("failed"));
     assert_eq!(text(&sent[0], "why").as_deref(), Some("dialog_open"));
 }
 
 #[test]
 fn a_session_that_takes_no_replies_is_other() {
-    let (s, sink) = watched(true, PROMPT);
-    reply(&s, "term", "hi").unwrap_err();
+    let (r, sink) = outbox();
+    say(&r, "term", "hi").unwrap_err();
     let sent = of(&sink, "session.reply");
     assert_eq!(text(&sent[0], "why").as_deref(), Some("other"));
 }
@@ -122,10 +139,10 @@ fn a_reply_to_a_session_that_does_not_exist_never_records_the_id_it_was_given() 
 
 #[test]
 fn agent_reply_commits_first_and_fails_closed() {
-    let (s, sink) = watched(true, PROMPT);
+    let (r, sink) = outbox();
     sink.fail_commits(true);
-    let e = s
-        .ops
+    let e = r
+        .acting
         .call(
             &agent(),
             ops::SESSION_REPLY,
@@ -134,10 +151,11 @@ fn agent_reply_commits_first_and_fails_closed() {
         .unwrap_err();
     assert_eq!(e.code, ErrorCode::Failed);
     assert_eq!(e.message, "the audit log can't be written");
-    assert!(s.writes.lock().unwrap().is_empty(), "nothing typed");
-    assert!(s.attached.lock().unwrap().is_empty());
+    assert!(r.writes.lock().unwrap().is_empty(), "nothing typed");
+    assert_eq!(r.attaches(), 0);
+    assert!(r.ops.store().list(None).unwrap().is_empty());
     sink.fail_commits(false);
-    s.ops
+    r.acting
         .call(
             &agent(),
             ops::SESSION_REPLY,
@@ -145,7 +163,7 @@ fn agent_reply_commits_first_and_fails_closed() {
         )
         .unwrap();
     assert_eq!(sink.commits(), 1);
-    assert_eq!(results(&sink, "session.reply"), ["sent"]);
+    assert_eq!(results(&sink, "session.reply"), ["sent", "sent"]);
     assert_eq!(
         text(&of(&sink, "session.reply")[0], "via").as_deref(),
         Some("agent")
@@ -178,33 +196,6 @@ fn permission_answer_records_session_answered() {
     assert_eq!(text(&answered[0], "by").as_deref(), Some("phone"));
     assert_eq!(text(&answered[0], "device").as_deref(), Some("d9"));
     assert_eq!(text(&answered[0], "session").as_deref(), Some(SESSION));
-}
-
-#[test]
-fn held_then_sent_records_reply_held_and_reply_via_held() {
-    let (s, sink) = watched(true, PROMPT);
-    let held = reply(&s, "job-a", "two").unwrap();
-    assert_eq!(held["state"], "queued");
-    assert_eq!(sink.names(), ["session.reply_held"]);
-    assert_eq!(
-        text(&of(&sink, "session.reply_held")[0], "then").as_deref(),
-        Some("sent_at_turn_end")
-    );
-    {
-        let mut list = s.ops.sessions.lock().unwrap();
-        for row in list.as_array_mut().unwrap() {
-            if row["id"] == json!("job-a") {
-                row["group"] = json!("completed");
-            }
-        }
-    }
-    s.ops.flush_held(5_000);
-    s.ops
-        .flush_held(5_000 + notchling_engine::reply::held::SETTLE_MS);
-    let sent = of(&sink, "session.reply");
-    assert_eq!(sent.len(), 1);
-    assert_eq!(text(&sent[0], "via").as_deref(), Some("held"));
-    assert_eq!(text(&sent[0], "chars").as_deref(), Some("3"));
 }
 
 #[test]

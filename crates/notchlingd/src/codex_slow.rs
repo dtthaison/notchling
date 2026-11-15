@@ -155,6 +155,7 @@ impl CodexOps {
         path: String,
     ) -> Result<Value, ApiError> {
         let job = DeleteJob {
+            outbox: self.outbox.get().cloned(),
             runs: self.runs.clone(),
             launcher: self.launcher.clone(),
             room: self.room.clone(),
@@ -207,6 +208,7 @@ fn announce_late(room: &dyn Room, draft: Option<&str>, late: Result<Sent, SendEr
 }
 
 struct DeleteJob {
+    outbox: Option<Arc<crate::outbox_ops::OutboxOps>>,
     runs: CodexRuns,
     launcher: Arc<dyn Launcher>,
     room: Arc<dyn Room>,
@@ -250,6 +252,9 @@ impl DeleteJob {
             &json!({"id": row_id(&self.session), "session": self.session,
                     "row": Value::Null, "deleted": true}),
         );
+        if let Some(outbox) = &self.outbox {
+            outbox.remove_session(&row_id(&self.session));
+        }
         Ok(())
     }
 }

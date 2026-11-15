@@ -34,8 +34,12 @@ impl ActingOps {
                 Ok(json!({"stopped": true}))
             }
             ops::SESSION_REMOVE => {
-                let plan = plan_remove(&self.agent(args)?, &self.roots).map_err(refused)?;
+                let agent = self.agent(args)?;
+                let plan = plan_remove(&agent, &self.roots).map_err(refused)?;
                 self.run(&plan)?;
+                if let Some(outbox) = self.outbox() {
+                    outbox.remove_session(&agent.outbox_key());
+                }
                 Ok(json!({"removed": true}))
             }
             ops::SESSION_NEW => self.new_session(args),

@@ -2,6 +2,7 @@ use crate::acting_ops::{ActingOps, Room};
 use crate::catalog_ops::CatalogService;
 use crate::every_session::EverySession;
 use crate::inbox_ops::InboxOps;
+use crate::op_group::OpGroup;
 use crate::prompts::{Kind, Prompt};
 use notchling_engine::bridge::agents;
 use notchling_engine::bridge::foreign::ForeignRow;
@@ -230,6 +231,9 @@ impl DaemonActing {
         let Control::Job(job) = &session.control else {
             return Err(BridgeFailure::view_only("This session is view only."));
         };
+        if job.starts_with("codex:") || job.starts_with("agy:") {
+            return Ok(job.clone());
+        }
         agents_of(&lock(&self.sessions))
             .into_iter()
             .find(|a| matches!(&a.target, AgentTarget::Job(j) if j == job))
@@ -245,8 +249,18 @@ impl Acting for DaemonActing {
 
     fn send_message(&self, text: &str, session: &Session) -> Result<(), BridgeFailure> {
         let id = self.row_of(session)?;
-        self.call(ops::SESSION_REPLY, json!({"id": id, "text": text}))
+        let outbox = self
+            .ops
+            .outbox()
+            .ok_or_else(|| BridgeFailure::internal("Couldn't save the message."))?;
+        outbox
+            .call(
+                &bridge_caller(),
+                ops::SESSION_SEND,
+                &json!({"id": id, "text": text, "via": "phone"}),
+            )
             .map(|_| ())
+            .map_err(failure)
     }
 
     fn send_now(&self, session: &Session) -> Result<(), BridgeFailure> {
@@ -330,18 +344,5 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn answers_become_option_numbers_or_text() {
-        let item = PromptQuestion {
-            header: "Pick".into(),
-            question: "Which?".into(),
-            options: vec!["Red".into(), "Blue".into()],
-            multi_select: false,
-        };
-        let out = answer_json(&["Blue".into(), "green".into()], &[item.clone(), item]);
-        assert_eq!(out, json!([[2], "green"]));
-    }
-}
+#[path = "bridge_backend_tests.rs"]
+mod tests;

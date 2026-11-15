@@ -5,6 +5,7 @@ use crate::agy_ops::valid_session;
 use crate::late_emit::Events;
 use crate::op_group::OpGroup;
 use crate::outbox_rows::{keeps_note, position_of, positions, reply_via, wire};
+use crate::outbox_settle::Settle;
 use crate::outbox_verify::count_row;
 use notchling_engine::contract::Tool as RowTool;
 use notchling_engine::control::slash::opens_menu;
@@ -27,6 +28,7 @@ use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 pub type Wake = Arc<dyn Fn(&str) + Send + Sync>;
 pub type Check = Arc<dyn Fn(&str) -> Result<(), ApiError> + Send + Sync>;
 pub type Resume = Arc<dyn Fn(&Row) -> Result<(), ApiError> + Send + Sync>;
+pub type Clock = Arc<dyn Fn() -> i64 + Send + Sync>;
 
 const SAVE_FAILED: &str = "Couldn't save the message.";
 const EMPTY: &str = "Type a message first.";
@@ -64,6 +66,8 @@ pub struct OutboxOps {
     codex_check: OnceLock<Check>,
     agy_check: OnceLock<Check>,
     saving: bool,
+    clock: Clock,
+    settle: Settle,
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -152,7 +156,22 @@ impl OutboxOps {
             codex_check: OnceLock::new(),
             agy_check: OnceLock::new(),
             saving: true,
+            clock: Arc::new(now_ms),
+            settle: Settle::default(),
         }
+    }
+
+    pub fn with_clock(mut self, clock: Clock) -> OutboxOps {
+        self.clock = clock;
+        self
+    }
+
+    pub(crate) fn now(&self) -> i64 {
+        (self.clock)()
+    }
+
+    pub(crate) fn settle(&self) -> &Settle {
+        &self.settle
     }
 
     pub fn without_store(mut self) -> OutboxOps {
@@ -284,6 +303,7 @@ impl OutboxOps {
             topics::OUTBOX_CHANGED,
             &json!({"row": wire}),
         );
+        self.settle.bump();
     }
 
     pub fn publish_removed(&self, id: &str, session: &str, why: &str) {
@@ -297,6 +317,7 @@ impl OutboxOps {
             topics::OUTBOX_REMOVED,
             &json!({"id": id, "session": session, "why": why}),
         );
+        self.settle.bump();
     }
 
     pub fn emit_then(&self, row: &Row, then: OutboxThen) {
@@ -558,7 +579,12 @@ impl OutboxOps {
     }
 
     fn discard(&self, args: &Value) -> Result<Value, ApiError> {
-        let key = self.key_of(text_arg(args, "session")?);
+        let count = self.discard_session(text_arg(args, "session")?)?;
+        Ok(json!({"discarded": count}))
+    }
+
+    pub(crate) fn discard_session(&self, id: &str) -> Result<usize, ApiError> {
+        let key = self.key_of(id);
         let rows = self
             .store
             .discard_session(&key)
@@ -567,11 +593,34 @@ impl OutboxOps {
             self.publish_removed(&row.id, &row.session, "discarded");
             self.emit_then(row, OutboxThen::Discarded);
         }
-        Ok(json!({"discarded": rows.len()}))
+        Ok(rows.len())
+    }
+
+    pub fn remove_session(&self, key: &str) {
+        let Ok(rows) = self.store.list(Some(key)) else {
+            return;
+        };
+        for row in rows {
+            if let Ok(true) = self.store.delete(&row.id) {
+                self.publish_removed(&row.id, &row.session, "session_removed");
+                self.emit_then(&row, OutboxThen::SessionRemoved);
+            }
+        }
+    }
+
+    pub(crate) fn give_back(&self, row: &Row) -> bool {
+        match self.store.remove(&row.id) {
+            Ok((Change::Done, _)) => {
+                self.publish_removed(&row.id, &row.session, "removed");
+                self.emit_then(row, OutboxThen::Removed);
+                true
+            }
+            _ => false,
+        }
     }
 }
 
-fn via_of(caller: &Caller, args: &Value) -> Via {
+pub(crate) fn via_of(caller: &Caller, args: &Value) -> Via {
     use notchling_events::kinds::agents::ReplyVia;
     match who(caller, args).via {
         ReplyVia::Notch => Via::Notch,

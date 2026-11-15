@@ -1,10 +1,8 @@
-use crate::acting_ops_tests::{app, code, sessions, setup, PROMPT};
+use crate::outbox_testkit::{rig, rig_with, Options, Rig, IDLE, NO_BOX, T0};
 use crate::reply_screen::head;
 use notchling_engine::reply::exec::Failure;
 use notchling_engine::reply::fake::STARTING;
 use notchling_engine::reply::keys;
-use notchling_local_api::{ops, ErrorCode};
-use serde_json::json;
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 
@@ -14,18 +12,27 @@ fn scratch(tag: &str) -> PathBuf {
     dir
 }
 
-fn reply(text: &str) -> serde_json::Value {
-    json!({"id": "job-idle", "text": text})
+fn kept(file: PathBuf, screen: &'static [&'static str]) -> Rig {
+    rig_with(Options {
+        screen,
+        reply_screen: Some(file),
+        ..Options::default()
+    })
+}
+
+fn try_once(r: &Rig, text: &str) -> bool {
+    let row = r.send("job-idle", text);
+    r.postmen.postman(IDLE).pass(r.at(T0));
+    r.row(&row.id).is_none()
 }
 
 #[test]
 fn a_reply_to_a_session_that_is_starting_is_sent_once_its_prompt_is_up() {
-    let s = setup(true, PROMPT, sessions());
-    s.starting.store(2_000, Ordering::SeqCst);
-    let out = s.ops.call(&app(), ops::SESSION_REPLY, &reply("hi"));
-    assert_eq!(out.unwrap(), json!({"sent": true}));
+    let r = rig();
+    r.starting.store(2_000, Ordering::SeqCst);
+    assert!(try_once(&r, "hi"));
     assert_eq!(
-        *s.writes.lock().unwrap(),
+        *r.writes.lock().unwrap(),
         vec![
             keys::clear_input(),
             keys::bracketed("hi"),
@@ -39,13 +46,10 @@ fn a_reply_to_a_session_that_is_starting_is_sent_once_its_prompt_is_up() {
 fn a_session_that_never_starts_gets_nothing_typed_and_says_it_did_not_open() {
     let dir = scratch("never");
     let file = dir.join("reply-screen.txt");
-    let s = setup(true, PROMPT, sessions());
-    let ops = s.ops.with_reply_screen_file(file.clone());
-    s.starting.store(600_000, Ordering::SeqCst);
-    let (c, m) = code(ops.call(&app(), ops::SESSION_REPLY, &reply("hi")));
-    assert_eq!(c, ErrorCode::Failed);
-    assert_eq!(m, "The session didn't open in time.");
-    assert!(s.writes.lock().unwrap().is_empty());
+    let r = kept(file.clone(), crate::acting_ops_tests::PROMPT);
+    r.starting.store(600_000, Ordering::SeqCst);
+    assert!(!try_once(&r, "hi"));
+    assert!(r.writes.lock().unwrap().is_empty());
     let kept = std::fs::read_to_string(&file).unwrap();
     assert!(
         kept.contains(&format!("await input: starting: {}", STARTING.trim())),
@@ -58,11 +62,9 @@ fn a_session_that_never_starts_gets_nothing_typed_and_says_it_did_not_open() {
 fn a_refused_replys_screen_is_kept_private_without_the_message() {
     let dir = scratch("kept");
     let file = dir.join("reply-screen.txt");
-    let s = setup(true, PROMPT, sessions());
-    let ops = s.ops.with_reply_screen_file(file.clone());
-    s.deaf.store(true, Ordering::SeqCst);
-    let refused = ops.call(&app(), ops::SESSION_REPLY, &reply("tell nobody"));
-    assert!(refused.is_err());
+    let r = kept(file.clone(), crate::acting_ops_tests::PROMPT);
+    r.deaf.store(true, Ordering::SeqCst);
+    try_once(&r, "tell nobody");
     let kept = std::fs::read_to_string(&file).unwrap();
     let lines: Vec<&str> = kept.lines().collect();
     assert_eq!(
@@ -96,9 +98,8 @@ fn a_refused_replys_screen_is_kept_private_without_the_message() {
     }
 
     std::fs::remove_file(&file).unwrap();
-    s.deaf.store(false, Ordering::SeqCst);
-    ops.call(&app(), ops::SESSION_REPLY, &reply("tell nobody"))
-        .unwrap();
+    r.deaf.store(false, Ordering::SeqCst);
+    assert!(try_once(&r, "tell nobody"));
     assert!(!file.exists(), "nothing is kept when the reply went in");
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -107,9 +108,8 @@ fn a_refused_replys_screen_is_kept_private_without_the_message() {
 fn a_screen_with_no_prompt_is_kept_as_it_is() {
     let dir = scratch("other");
     let file = dir.join("reply-screen.txt");
-    let s = setup(true, &["Resume a session", "  1. fix-hook"], sessions());
-    let ops = s.ops.with_reply_screen_file(file.clone());
-    assert!(ops.call(&app(), ops::SESSION_REPLY, &reply("hi")).is_err());
+    let r = kept(file.clone(), NO_BOX);
+    assert!(!try_once(&r, "hi"));
     let kept = std::fs::read_to_string(&file).unwrap();
     assert!(
         kept.contains("await input: no input box, cursor hidden, last row: 1. fix-hook"),

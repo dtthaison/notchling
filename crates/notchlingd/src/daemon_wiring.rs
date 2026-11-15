@@ -474,6 +474,7 @@ impl Wired {
         let inbox =
             InboxOps::new(layout.data_dir.clone(), room.clone()).with_events(events.clone());
         let outbox = Arc::new(outbox_ops(layout, &sessions, &acting, &room, &events));
+        acting.attach_outbox(outbox.clone());
         let agy = Arc::new(AgyOps::for_daemon(
             layout,
             acting.acting_switch(),
@@ -754,7 +755,6 @@ impl Wired {
     pub fn start(&self) {
         self.limits.spawn_loop();
         self.inbox.spawn_loop();
-        self.acting.spawn_held_loop();
         self.versions.start();
         self.awake.spawn_loop();
         self.wake.spawn_loop();
@@ -774,7 +774,6 @@ impl Wired {
         self.wake.close();
         self.codex_children.close();
         self.awake.close();
-        self.acting.stop_held_loop();
         self.acting.close();
         self.codex.close();
         self.agy.close();
