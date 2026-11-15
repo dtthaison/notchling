@@ -17,7 +17,7 @@ use notchling_locale as t;
 
 use super::feed::ClusterFeed;
 use super::model::ClusterModel;
-use super::renders::{model, shown};
+use super::renders::{model_of, shown, Shown, STANDBY};
 use super::wire::{self, Request};
 use crate::accounts::flows::Alert;
 use crate::accounts::view_rows::{alert_overlay, Handler};
@@ -328,6 +328,7 @@ impl Render for ClusterSheetView {
             .id("cluster-body")
             .flex_1()
             .min_h(px(0.0))
+            .overflow_y_scroll()
             .p(px(SIDE_PADDING))
             .flex()
             .flex_col()
@@ -346,6 +347,8 @@ impl Render for ClusterSheetView {
                 Ink::TextMuted,
                 a,
             ));
+        } else if let Some(error) = model.unbuilt_error() {
+            body = body.child(label(error, TypeRole::Body, Ink::Needs, a));
         } else if model.can_create() {
             body = body.child(self.create_form(self.name.read(cx).is_focused(window), a, cx));
         } else {
@@ -370,16 +373,6 @@ impl Render for ClusterSheetView {
             a,
         )
         .on_click(cx.listener(|_, _, _, cx| cx.emit(Dismiss)));
-        let click_away = self.menu.is_some().then(|| {
-            div()
-                .id("cluster-click-away")
-                .absolute()
-                .size_full()
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.menu = None;
-                    cx.notify();
-                }))
-        });
         let alert = self.remove_alert(&model, a, cx);
         div()
             .id("cluster-sheet")
@@ -396,7 +389,6 @@ impl Render for ClusterSheetView {
                 a,
             ))
             .child(scrollable(body))
-            .children(click_away)
             .children(alert)
             .part("Cluster View", a, cx)
     }
@@ -417,8 +409,14 @@ impl Render for ClusterRender {
 }
 
 pub fn build_render(name: &str, cx: &mut gpui::App) -> Option<AnyView> {
-    let full = shown(name)?;
-    let feed = Arc::new(ClusterFeed::fixed(model(full)));
-    let sheet = cx.new(|cx| ClusterSheetView::fixed(feed, "MacBook", cx));
+    let which = shown(name)?;
+    let feed = Arc::new(ClusterFeed::fixed(model_of(which)));
+    let sheet = cx.new(|cx| {
+        let mut sheet = ClusterSheetView::fixed(feed, "MacBook", cx);
+        if which == Shown::Menu {
+            sheet.menu = Some(STANDBY.to_owned());
+        }
+        sheet
+    });
     Some(cx.new(|_| ClusterRender { sheet }).into())
 }

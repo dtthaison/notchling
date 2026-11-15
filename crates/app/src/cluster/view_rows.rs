@@ -40,10 +40,7 @@ impl ClusterSheetView {
 
     fn row_menu(&self, row: &NodeRow, a: Appearance, cx: &mut Context<Self>) -> Div {
         let id = row.id.clone();
-        let mut items = menu_panel(a)
-            .absolute()
-            .right(px(SPACE[1]))
-            .top(px(SPACE[4] + SPACE[1]));
+        let mut items = menu_panel(a);
         let master = id.clone();
         items = items.child(
             MenuItem::new(
@@ -88,7 +85,24 @@ impl ClusterSheetView {
                 })),
             );
         }
-        items
+        div()
+            .absolute()
+            .right(px(SPACE[1]))
+            .top(px(SPACE[4] + SPACE[1]))
+            .child(
+                div()
+                    .id(SharedString::from(format!("cluster-click-away-{id}")))
+                    .absolute()
+                    .top(px(-4000.0))
+                    .left(px(-4000.0))
+                    .size(px(8000.0))
+                    .occlude()
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.menu = None;
+                        cx.notify();
+                    })),
+            )
+            .child(items)
     }
 
     pub(super) fn node_row(&self, row: &NodeRow, a: Appearance, cx: &mut Context<Self>) -> Div {

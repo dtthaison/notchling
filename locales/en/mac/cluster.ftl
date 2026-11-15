@@ -70,9 +70,13 @@ cluster-create-failed = Couldn't create the cluster: { $error }
 cluster-copy-token = Copy Join Token
 cluster-token-copied = Join token copied. It works once, for 10 minutes.
 cluster-token-failed = Couldn't make a join token: { $error }
+# Reason in the join token error when the daemon answers without a token.
+cluster-token-none = the daemon sent no token
 cluster-change-failed = Couldn't change the node: { $error }
 
 ## Sidebar
 
 # Shown in the reply box of a session on a node that is offline; $name is the node's name.
 cluster-node-offline = { $name } is offline
+# Line under a session in the Sidebar when its node is offline; $name is the node's name.
+cluster-node-line-offline = { $name } · Offline

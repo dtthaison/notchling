@@ -284,3 +284,44 @@ fn a_token_is_read_from_the_reply_and_nothing_else_is_kept() {
     assert_eq!(wire::token_of(&json!({"token": ""})), None);
     assert_eq!(wire::token_of(&json!({})), None);
 }
+
+#[test]
+fn a_node_that_could_not_be_built_shows_its_error_and_offers_no_create() {
+    let status = json!({"cluster": null, "me": null, "members": [], "error": "cluster.db: written by a newer Notchling"});
+    let model = ClusterModel::from_status(&status, "");
+    assert!(!model.can_create());
+    assert_eq!(
+        model.unbuilt_error(),
+        Some("cluster.db: written by a newer Notchling")
+    );
+    let with_me = json!({"cluster": null, "me": ME, "members": [], "error": "no keychain"});
+    let model = ClusterModel::from_status(&with_me, ME);
+    assert!(!model.can_create());
+    assert_eq!(model.unbuilt_error(), Some("no keychain"));
+}
+
+#[test]
+fn no_cluster_and_no_error_still_offers_create() {
+    let model = ClusterModel::from_status(&empty(), ME);
+    assert!(model.can_create());
+    assert_eq!(model.unbuilt_error(), None);
+    let mut status = status();
+    status["error"] = json!("link down");
+    let model = ClusterModel::from_status(&status, ME);
+    assert_eq!(
+        model.unbuilt_error(),
+        None,
+        "a built cluster keeps its rows"
+    );
+    assert!(!model.can_create());
+}
+
+#[test]
+fn every_cluster_render_is_known_and_the_long_one_has_many_rows() {
+    for spec in super::renders::VIEWS {
+        assert!(super::renders::shown(spec.name).is_some(), "{}", spec.name);
+    }
+    assert_eq!(super::renders::shown("chat"), None);
+    let many = super::renders::model_of(super::renders::Shown::Many);
+    assert!(many.rows().len() >= 8);
+}

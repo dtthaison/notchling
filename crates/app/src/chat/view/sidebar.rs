@@ -214,7 +214,8 @@ pub(super) fn render(m: &SidebarModel, a: Appearance, cx: &mut Context<ChatView>
             });
             let account = match &row.node {
                 Some(node) => {
-                    Some(node_line(&node.name, a).part_at("Session Node", Corner::Trailing, a, cx))
+                    let line = node_line(&node.line(), a);
+                    Some(line.part_at("Session Node", Corner::Trailing, a, cx))
                 }
                 None => account,
             };

@@ -320,7 +320,14 @@ impl ClusterModel {
     }
 
     pub fn can_create(&self) -> bool {
-        self.loaded && self.cluster.is_none()
+        self.loaded && self.cluster.is_none() && self.error.is_none()
+    }
+
+    pub fn unbuilt_error(&self) -> Option<&str> {
+        self.cluster
+            .is_none()
+            .then_some(self.error.as_deref())
+            .flatten()
     }
 
     pub fn can_copy_token(&self) -> bool {

@@ -38,6 +38,14 @@ pub struct NodeLabel {
 }
 
 impl NodeLabel {
+    pub fn line(&self) -> String {
+        if self.online {
+            self.name.clone()
+        } else {
+            t::cluster::node_line_offline(&self.name)
+        }
+    }
+
     pub fn reply_note(&self) -> Option<String> {
         (!self.online).then(|| t::cluster::node_offline(&self.name))
     }

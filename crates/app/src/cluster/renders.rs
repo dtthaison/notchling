@@ -8,7 +8,7 @@ pub const ME: &str = "a1b2c3d4e5f60718";
 pub const STANDBY: &str = "1122334455667788";
 pub const WORKER: &str = "99aabbccddeeff00";
 
-pub const VIEWS: [ViewSpec; 2] = [
+pub const VIEWS: [ViewSpec; 4] = [
     ViewSpec {
         name: "cluster",
         size: (WIDTH, HEIGHT),
@@ -19,12 +19,32 @@ pub const VIEWS: [ViewSpec; 2] = [
         size: (WIDTH, 300.0),
         about: "the cluster sheet before a cluster exists: Create Cluster (made-up data)",
     },
+    ViewSpec {
+        name: "cluster-many",
+        size: (WIDTH, HEIGHT),
+        about: "the cluster sheet with more machines than fit, so it scrolls (made-up data)",
+    },
+    ViewSpec {
+        name: "cluster-menu",
+        size: (WIDTH, HEIGHT),
+        about: "the cluster sheet with the Standby row's menu open (made-up data)",
+    },
 ];
 
-pub fn shown(name: &str) -> Option<bool> {
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Shown {
+    Full,
+    Empty,
+    Many,
+    Menu,
+}
+
+pub fn shown(name: &str) -> Option<Shown> {
     match name {
-        "cluster" => Some(true),
-        "cluster-empty" => Some(false),
+        "cluster" => Some(Shown::Full),
+        "cluster-empty" => Some(Shown::Empty),
+        "cluster-many" => Some(Shown::Many),
+        "cluster-menu" => Some(Shown::Menu),
         _ => None,
     }
 }
@@ -121,6 +141,36 @@ pub fn empty() -> Value {
     json!({"cluster": null, "me": ME, "members": [], "link": false, "listening": null, "tailscale": true, "error": null})
 }
 
+pub fn many() -> Value {
+    let mut status = status();
+    let extra: Vec<Value> = (1..=6)
+        .map(|n| {
+            member(
+                &format!("00000000000000{n:02x}"),
+                &format!("worker-{n}"),
+                "worker",
+                false,
+                n % 2 == 0,
+                versions("linux", "x86_64", None, "0.166.0"),
+                Value::Null,
+                false,
+            )
+        })
+        .collect();
+    if let Some(members) = status["members"].as_array_mut() {
+        members.extend(extra);
+    }
+    status
+}
+
 pub fn model(full: bool) -> ClusterModel {
     ClusterModel::from_status(&if full { status() } else { empty() }, ME)
+}
+
+pub fn model_of(which: Shown) -> ClusterModel {
+    match which {
+        Shown::Empty => model(false),
+        Shown::Many => ClusterModel::from_status(&many(), ME),
+        Shown::Full | Shown::Menu => model(true),
+    }
 }

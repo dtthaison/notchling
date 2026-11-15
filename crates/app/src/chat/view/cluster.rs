@@ -5,7 +5,8 @@ use notchling_engine::cluster::Qualified;
 use notchling_engine::sessions::AgentGroup;
 
 use super::ChatView;
-use crate::chat::sidebar_node::{reply_note, Nodes};
+use crate::acting::Control;
+use crate::chat::sidebar_node::{reply_control, reply_note, Nodes};
 use crate::cluster::feed::ClusterFeed;
 use crate::cluster::renders::{model, STANDBY, WORKER};
 use crate::cluster::view::ClusterSheetView;
@@ -28,8 +29,12 @@ impl ChatView {
         let generation = self.cluster.generation();
         if generation != self.seen_cluster {
             self.seen_cluster = generation;
-            self.redraw_chrome(cx);
-            cx.notify();
+            let nodes = self.nodes();
+            if nodes != self.seen_nodes {
+                self.seen_nodes = nodes;
+                self.redraw_chrome(cx);
+                cx.notify();
+            }
         }
     }
 
@@ -38,7 +43,14 @@ impl ChatView {
     }
 
     pub(super) fn offline_note(&self) -> Option<String> {
-        reply_note(self.selected.as_deref()?, &self.nodes())
+        let id = self.selected.as_deref()?;
+        Qualified::parse(id)?;
+        reply_note(id, &self.nodes())
+    }
+
+    pub(super) fn remote_control(&self, id: &str) -> Option<Control> {
+        Qualified::parse(id)?;
+        reply_control(id, &self.nodes())
     }
 
     pub(super) fn preview_remote(&mut self) {

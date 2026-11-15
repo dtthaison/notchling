@@ -3,6 +3,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use notchling_local_api::{topics, Client, ClientError, ClientKind, ConnectOptions, Event};
+use notchling_locale as t;
 use serde_json::Value;
 
 use super::model::ClusterModel;
@@ -137,7 +138,7 @@ impl ClusterFeed {
 
     pub fn token(&self) -> Result<String, String> {
         let reply = self.send(&wire::join_token())?;
-        wire::token_of(&reply).ok_or_else(|| "the daemon sent no token".to_owned())
+        wire::token_of(&reply).ok_or_else(|| t::cluster::token_none().to_owned())
     }
 
     pub fn refresh(&self) {

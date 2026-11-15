@@ -70,6 +70,11 @@ fn offline_remote_row_disables_reply() {
     let rows = rows(&model);
     assert!(!rows[0].node.as_ref().expect("label").online);
     assert!(rows[1].node.as_ref().expect("label").online);
+    assert_eq!(
+        rows[0].node.as_ref().expect("label").line(),
+        "build-box · Offline"
+    );
+    assert_eq!(rows[1].node.as_ref().expect("label").line(), "mac-mini");
 }
 
 #[test]

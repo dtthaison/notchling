@@ -20,7 +20,6 @@ use crate::chat::data::{Session, Tool};
 use crate::chat::outgoing::Outgoing;
 use crate::chat::prompts::is_dialog;
 use crate::chat::run_command::RunHow;
-use crate::chat::sidebar_node::reply_control;
 use crate::phone::bridge::now_ms;
 use crate::tools::agy_options::parse_config;
 use crate::tools::agy_permission::{held_prompt, HeldPrompt};
@@ -232,7 +231,7 @@ impl ChatView {
                 tooltip: None,
             };
         };
-        if let Some(control) = reply_control(&session.agent.id, &self.nodes()) {
+        if let Some(control) = self.remote_control(&session.agent.id) {
             return control;
         }
         match super::tool::of(session.tool).refusal(self, session) {
