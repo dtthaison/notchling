@@ -96,7 +96,34 @@ const PACKAGE_ARGS: [&str; 8] = [
     "--cwd",
 ];
 
-const DOCKER_ARGS: [&str; 6] = ["-H", "--host", "--context", "-c", "--config", "--log-level"];
+const DOCKER_ARGS: [&str; 13] = [
+    "-H",
+    "--host",
+    "--context",
+    "-c",
+    "--config",
+    "--log-level",
+    "-f",
+    "--file",
+    "-p",
+    "--project-name",
+    "--profile",
+    "--env-file",
+    "--project-directory",
+];
+
+const CARGO_ARGS: [&str; 5] = ["--manifest-path", "-C", "--target-dir", "--config", "-Z"];
+
+const FLY_ARGS: [&str; 8] = [
+    "-a",
+    "--app",
+    "-t",
+    "--access-token",
+    "-c",
+    "--config",
+    "-o",
+    "--org",
+];
 
 const RSYNC_ARGS: [&str; 24] = [
     "-e",
@@ -193,37 +220,55 @@ const CLOUD_WRITES: [&str; 40] = [
     "rename",
 ];
 
+const GCLOUD_READS: [&str; 8] = [
+    "list",
+    "describe",
+    "show",
+    "get",
+    "ls",
+    "info",
+    "get-iam-policy",
+    "get-value",
+];
+
 const CURL_ARG_FLAGS: &str = "oHuAebcmwxyYzECDrQ";
 
 pub fn outward(name: &str, args: &[String]) -> bool {
     match name {
         "git" => git(args),
         "gh" => gh(args),
-        "npm" | "pnpm" | "yarn" => package(args),
-        "cargo" => positionals(args, &[])
+        "npm" | "pnpm" | "yarn" | "bun" => package(args),
+        "cargo" => positionals(args, &CARGO_ARGS)
             .into_iter()
             .find(|word| !word.starts_with('+'))
             .is_some_and(|word| word == "publish"),
-        "docker" => docker(args),
+        "docker" => docker(args, false),
+        "docker-compose" => docker(args, true),
+        "notchling" => args.iter().any(|a| {
+            matches!(
+                a.as_str(),
+                "secret" | "--secret" | "delegate" | "--delegate"
+            )
+        }),
         "kubectl" => not_read(args, &KUBE_ARGS, &KUBE_READS),
         "helm" => not_read(args, &HELM_ARGS, &HELM_READS),
         "terraform" | "tofu" => terraform(args),
         "fly" | "flyctl" => fly(args),
-        "firebase" => positionals(args, &["-P", "--project", "--config"])
+        "firebase" | "firebase-tools" => positionals(args, &["-P", "--project", "--config"])
             .first()
             .is_some_and(|word| word.contains("deploy")),
-        "wrangler" => first_in(
-            args,
-            &["-c", "--config", "-e", "--env"],
-            &["deploy", "publish"],
-        ),
+        "wrangler" => positionals(args, &["-c", "--config", "-e", "--env"])
+            .iter()
+            .take(3)
+            .any(|word| matches!(*word, "deploy" | "publish")),
         "vercel" => args.iter().any(|a| a == "--prod" || a == "--production"),
         "curl" => curl(args),
         "wget" => wget(args),
         "ssh" | "scp" | "sftp" => true,
         "rsync" => rsync(args),
         "aws" => aws(args),
-        "gcloud" | "az" => gcloud(args),
+        "gcloud" => gcloud(args, false),
+        "az" => gcloud(args, true),
         _ => false,
     }
 }
@@ -246,12 +291,6 @@ fn positionals<'a>(args: &'a [String], with_arg: &[&str]) -> Vec<&'a str> {
         out.push(word);
     }
     out
-}
-
-fn first_in(args: &[String], with_arg: &[&str], verbs: &[&str]) -> bool {
-    positionals(args, with_arg)
-        .first()
-        .is_some_and(|word| verbs.contains(word))
 }
 
 fn not_read(args: &[String], with_arg: &[&str], reads: &[&str]) -> bool {
@@ -348,7 +387,9 @@ fn gh_api(args: &[String]) -> bool {
         return call.input
             || call.fields.iter().any(|field| {
                 field.strip_prefix("query=").is_some_and(|query| {
-                    query.starts_with('@') || query.to_ascii_lowercase().contains("mutation")
+                    query.starts_with('@')
+                        || query.contains('$')
+                        || query.to_ascii_lowercase().contains("mutation")
                 })
             });
     }
@@ -360,16 +401,18 @@ fn gh_api(args: &[String]) -> bool {
 
 fn package(args: &[String]) -> bool {
     let words = positionals(args, &PACKAGE_ARGS);
-    words.first() == Some(&"publish") || words.windows(2).any(|w| w == ["npm", "publish"])
+    words.contains(&"publish")
 }
 
-fn docker(args: &[String]) -> bool {
-    let words = positionals(args, &DOCKER_ARGS);
+fn docker(args: &[String], compose: bool) -> bool {
+    let mut words = positionals(args, &DOCKER_ARGS);
+    if compose {
+        words.insert(0, "compose");
+    }
     match words.as_slice() {
         ["push", ..] | ["image" | "manifest" | "compose" | "buildx", "push", ..] => true,
-        ["build" | "bake", ..] | ["buildx" | "builder" | "image", "build" | "bake", ..] => {
-            pushes(args)
-        }
+        ["build" | "bake", ..]
+        | ["buildx" | "builder" | "image" | "compose", "build" | "bake", ..] => pushes(args),
         _ => false,
     }
 }
@@ -402,7 +445,7 @@ fn terraform(args: &[String]) -> bool {
 }
 
 fn fly(args: &[String]) -> bool {
-    let words = positionals(args, &[]);
+    let words = positionals(args, &FLY_ARGS);
     matches!(
         words.as_slice(),
         ["deploy" | "scale" | "machine" | "machines", ..]
@@ -412,6 +455,10 @@ fn fly(args: &[String]) -> bool {
 }
 
 fn curl(args: &[String]) -> bool {
+    args.split(|a| a == "--next" || a == "-:").any(curl_request)
+}
+
+fn curl_request(args: &[String]) -> bool {
     let mut method: Option<String> = None;
     let (mut get, mut body, mut always) = (false, false, false);
     let mut at = 0;
@@ -499,37 +546,28 @@ fn rsync(args: &[String]) -> bool {
     words.len() >= 2 && words.last().is_some_and(|dest| remote(dest))
 }
 
-fn plain_word(word: &str) -> bool {
-    word.chars()
-        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
-}
-
 fn is_verb(word: &str, verbs: &[&str]) -> bool {
-    plain_word(word)
-        && verbs.iter().any(|verb| {
-            word == *verb
-                || word
-                    .strip_prefix(verb)
-                    .is_some_and(|rest| rest.starts_with('-'))
-        })
-}
-
-fn is_read_verb(word: &str) -> bool {
-    matches!(word, "ls" | "show" | "help" | "version")
-        || is_verb(word, &["describe", "list", "get"])
+    verbs.iter().any(|verb| {
+        word == *verb
+            || word
+                .strip_prefix(verb)
+                .is_some_and(|rest| rest.starts_with('-'))
+    })
 }
 
 fn aws(args: &[String]) -> bool {
     let words = positionals(args, &CLOUD_ARGS);
     match words.as_slice() {
-        [] => false,
-        ["help" | "version"] => false,
-        [_, operation, ..] => !is_read_verb(operation),
+        [] | ["help" | "version"] => false,
+        [_, operation, ..] => {
+            !(matches!(*operation, "ls" | "show" | "help" | "version")
+                || is_verb(operation, &["describe", "list", "get"]))
+        }
         [_] => true,
     }
 }
 
-fn gcloud(args: &[String]) -> bool {
+fn gcloud(args: &[String], az: bool) -> bool {
     let mut at = 0;
     while let Some(word) = args.get(at) {
         if !word.starts_with('-') || word == "-" {
@@ -549,7 +587,13 @@ fn gcloud(args: &[String]) -> bool {
     if words.is_empty() {
         return false;
     }
-    let read = words.iter().any(|word| is_read_verb(word));
-    let write = words.iter().any(|word| is_verb(word, &CLOUD_WRITES));
+    let read = words.iter().any(|word| {
+        GCLOUD_READS.contains(word)
+            || (az && (word.starts_with("list-") || word.starts_with("show-")))
+    });
+    let write = words
+        .iter()
+        .skip(1)
+        .any(|word| is_verb(word, &CLOUD_WRITES));
     !read || write
 }

@@ -151,6 +151,15 @@ fn oversized_file_waits() {
 }
 
 #[test]
+fn version_zero_waits() {
+    let mut f = file(&[("s1", Gate::Free)], "b1", 0);
+    f.v = 0;
+    let bytes = json(&f);
+    assert_eq!(parse(&bytes), None);
+    assert_eq!(decide_bytes(Some(&bytes), "s1", "b1", 0), Fence::Wait);
+}
+
+#[test]
 fn newer_version_waits() {
     let mut f = file(&[("s1", Gate::Free)], "b1", 0);
     f.v = FENCE_VERSION + 1;

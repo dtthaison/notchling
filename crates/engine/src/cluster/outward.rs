@@ -1,15 +1,24 @@
 use serde_json::{json, Value};
 
-use crate::transcript::model::{Conversation, ItemKind, ToolCall, ToolKind};
+use crate::transcript::model::{ChatItem, Conversation, ItemKind, ToolCall, ToolKind};
 
 mod commands;
 mod shell;
+
+#[cfg(test)]
+mod commands_tests;
+#[cfg(test)]
+mod shell_tests;
 
 const MCP_READS: [&str; 8] = [
     "get", "list", "search", "read", "fetch", "find", "view", "describe",
 ];
 
 const READ_ACTIONS: [&str; 5] = ["read", "get", "list", "view", "query"];
+
+const STOP_TOOLS: [&str; 2] = ["TaskStop", "KillShell"];
+
+const STOP_KEYS: [&str; 3] = ["task_id", "shell_id", "bash_id"];
 
 const MIN_AGENT_ID: usize = 6;
 
@@ -25,6 +34,7 @@ pub fn is_outward(tool: &str, input: &Value) -> bool {
     match tool {
         "Bash" => command.is_some_and(shell::is_outward),
         "Monitor" => command.is_none_or(shell::is_outward),
+        "Agent" | "Task" => true,
         "Artifact" | "ArtifactData" | "ArtifactComments" => artifact_outward(input),
         _ => mcp_outward(tool),
     }
@@ -35,13 +45,31 @@ fn mcp_outward(tool: &str) -> bool {
     let Some(rest) = lower.strip_prefix("mcp__") else {
         return false;
     };
-    let name = rest
-        .split_once("__")
-        .map_or(lower.as_str(), |(_, name)| name);
-    !MCP_READS.iter().any(|read| {
-        name.strip_prefix(read)
-            .is_some_and(|after| after.is_empty() || after.starts_with('_'))
-    })
+    let Some((server, _)) = rest.split_once("__") else {
+        return true;
+    };
+    let name = &tool[5 + server.len() + 2..];
+    let name = match name.get(..server.len() + 1) {
+        Some(head) if head[..server.len()].eq_ignore_ascii_case(server) && head.ends_with('_') => {
+            &name[server.len() + 1..]
+        }
+        _ => name,
+    };
+    !MCP_READS.iter().any(|read| reads_as(name, read))
+}
+
+fn reads_as(name: &str, read: &str) -> bool {
+    if !name.is_char_boundary(read.len()) || !name[..read.len()].eq_ignore_ascii_case(read) {
+        return false;
+    }
+    let verb = &name[..read.len()];
+    let after = &name[read.len()..];
+    match after.chars().next() {
+        None => true,
+        Some('-') => true,
+        Some('_') => !after.starts_with("__"),
+        Some(c) => c.is_ascii_uppercase() && verb.chars().all(|v| v.is_ascii_lowercase()),
+    }
 }
 
 fn artifact_outward(input: &Value) -> bool {
@@ -60,37 +88,29 @@ pub fn cut_steps(conv: &Conversation) -> Vec<CutStep> {
         .iter()
         .rposition(|item| matches!(item.kind, ItemKind::User { .. }))
         .map_or(0, |at| at + 1);
-    let calls: Vec<&ToolCall> = conv.items[start..]
-        .iter()
-        .filter_map(|item| match &item.kind {
-            ItemKind::Tools(calls) => Some(calls),
-            _ => None,
-        })
-        .flatten()
-        .collect();
-    let mut steps: Vec<CutStep> = calls
-        .iter()
+    let mut steps: Vec<CutStep> = calls_in(&conv.items[start..])
         .filter(|call| !call.finished)
         .map(|call| CutStep {
             tool: call.name.clone(),
             summary: call.title.clone(),
-            outward: call.kind == ToolKind::Agent || is_outward(&call.name, &input_of(call)),
+            outward: call_outward(call),
         })
         .collect();
+    let stopped = stopped_shells(conv);
     steps.extend(
         conv.shells
             .iter()
             .filter(|shell| !conv.finished_agents.contains_key(&shell.id))
+            .filter(|shell| !stopped.contains(&shell.id.as_str()))
             .map(|shell| CutStep {
                 tool: "Bash".to_string(),
                 summary: shell.title.clone(),
-                outward: is_outward("Bash", &json!({ "command": shell.command })),
+                outward: shell::is_outward(&shell.command),
             }),
     );
     steps.extend(
-        calls
-            .iter()
-            .filter(|call| call.kind == ToolKind::Agent && call.finished)
+        calls_in(&conv.items)
+            .filter(|call| call.kind == ToolKind::Agent && call.finished && !call.is_error)
             .filter(|call| !agent_reported(conv, call))
             .map(|call| CutStep {
                 tool: call.name.clone(),
@@ -101,6 +121,42 @@ pub fn cut_steps(conv: &Conversation) -> Vec<CutStep> {
     steps
 }
 
+fn calls_in(items: &[ChatItem]) -> impl Iterator<Item = &ToolCall> {
+    items
+        .iter()
+        .filter_map(|item| match &item.kind {
+            ItemKind::Tools(calls) => Some(calls),
+            _ => None,
+        })
+        .flatten()
+}
+
+fn call_outward(call: &ToolCall) -> bool {
+    if call.kind == ToolKind::Shell {
+        return shell::is_outward(&call.input);
+    }
+    let input = serde_json::from_str(&call.input).unwrap_or_else(|_| json!({}));
+    call.kind == ToolKind::Agent || is_outward(&call.name, &input)
+}
+
+fn stopped_shells(conv: &Conversation) -> Vec<&str> {
+    calls_in(&conv.items)
+        .filter(|call| call.finished && !call.is_error && STOP_TOOLS.contains(&call.name.as_str()))
+        .filter_map(|call| {
+            let input: Value = serde_json::from_str(&call.input).ok()?;
+            STOP_KEYS
+                .iter()
+                .find_map(|key| input.get(key).and_then(Value::as_str).map(String::from))
+        })
+        .filter_map(|id| {
+            conv.shells
+                .iter()
+                .find(|shell| shell.id == id)
+                .map(|shell| shell.id.as_str())
+        })
+        .collect()
+}
+
 fn agent_reported(conv: &Conversation, call: &ToolCall) -> bool {
     conv.finished_agents.contains_key(&call.id)
         || call.output.as_deref().is_some_and(|output| {
@@ -108,11 +164,4 @@ fn agent_reported(conv: &Conversation, call: &ToolCall) -> bool {
                 .keys()
                 .any(|id| id.len() >= MIN_AGENT_ID && output.contains(id.as_str()))
         })
-}
-
-fn input_of(call: &ToolCall) -> Value {
-    if call.kind == ToolKind::Shell {
-        return json!({ "command": call.input });
-    }
-    serde_json::from_str(&call.input).unwrap_or_else(|_| json!({}))
 }

@@ -72,7 +72,7 @@ pub fn parse(bytes: &[u8]) -> Option<FenceFile> {
         return None;
     }
     let f: FenceFile = serde_json::from_slice(bytes).ok()?;
-    if f.v > FENCE_VERSION {
+    if f.v == 0 || f.v > FENCE_VERSION {
         return None;
     }
     Some(f)

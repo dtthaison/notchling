@@ -17,6 +17,42 @@ const PACKAGE_FLAGS: [&str; 7] = [
     "--cwd",
 ];
 
+const RAW_WORDS: [&str; 18] = [
+    "push",
+    "publish",
+    "deploy",
+    "release",
+    "upload",
+    "send-email",
+    "apply",
+    "destroy",
+    "invoke",
+    "mutation",
+    "post",
+    "put",
+    "patch",
+    "delete",
+    "ssh",
+    "scp",
+    "sftp",
+    "rsync",
+];
+
+pub fn is_outward(command: &str) -> bool {
+    parsed_outward(command) || backstop(command)
+}
+
+pub(super) fn parsed_outward(command: &str) -> bool {
+    command.len() > MAX_BYTES || script_outward(command, 0)
+}
+
+fn backstop(command: &str) -> bool {
+    command
+        .to_ascii_lowercase()
+        .split(|c: char| !(c.is_ascii_alphanumeric() || c == '-'))
+        .any(|word| RAW_WORDS.contains(&word))
+}
+
 #[derive(Default)]
 struct Segment {
     words: Vec<String>,
@@ -24,24 +60,32 @@ struct Segment {
     heredoc: Option<String>,
 }
 
-pub fn is_outward(command: &str) -> bool {
-    command.len() > MAX_BYTES || script_outward(command, 0)
+#[derive(Default)]
+struct Split {
+    segments: Vec<Segment>,
+    nested: Vec<String>,
+    uncertain: bool,
 }
 
 fn script_outward(script: &str, depth: usize) -> bool {
     if depth > MAX_DEPTH {
         return true;
     }
-    let (segments, nested) = split(script);
-    nested.iter().any(|inner| script_outward(inner, depth + 1))
-        || segments.iter().any(|seg| segment_outward(seg, depth))
+    let split = split(script);
+    split.uncertain
+        || split
+            .nested
+            .iter()
+            .any(|inner| script_outward(inner, depth + 1))
+        || split.segments.iter().any(|seg| segment_outward(seg, depth))
 }
 
 fn segment_outward(seg: &Segment, depth: usize) -> bool {
     let Some((program, args)) = program_of(&seg.words) else {
         return false;
     };
-    match basename(program) {
+    let name = basename(program).to_ascii_lowercase();
+    match name.as_str() {
         "sh" | "bash" | "zsh" | "dash" => shell_outward(args, seg, depth),
         "eval" => script_outward(&args.join(" "), depth + 1),
         "watch" => script_outward(
@@ -53,11 +97,35 @@ fn segment_outward(seg: &Segment, depth: usize) -> bool {
 }
 
 fn shell_outward(args: &[String], seg: &Segment, depth: usize) -> bool {
-    if let Some(script) = inline_script(args) {
-        return script_outward(script, depth + 1);
-    }
-    if args.iter().any(|a| !a.starts_with('-')) {
-        return false;
+    let mut stdin = false;
+    let mut at = 0;
+    while let Some(arg) = args.get(at) {
+        at += 1;
+        match arg.as_str() {
+            "--" => {
+                if args.get(at).is_some() && !stdin {
+                    return false;
+                }
+                break;
+            }
+            "-o" | "-O" | "+o" | "+O" | "--rcfile" | "--init-file" => at += 1,
+            flag if flag.starts_with("--") || flag == "-" || flag.starts_with('+') => {}
+            flag if flag.starts_with('-') => {
+                if flag.contains('c') {
+                    let script = args
+                        .get(at)
+                        .filter(|s| s.as_str() != "--")
+                        .or(args.get(at + 1));
+                    return script.is_some_and(|script| script_outward(script, depth + 1));
+                }
+                stdin |= flag.contains('s');
+            }
+            _ => {
+                if !stdin {
+                    return false;
+                }
+            }
+        }
     }
     match &seg.heredoc {
         Some(body) => script_outward(body, depth + 1),
@@ -67,17 +135,6 @@ fn shell_outward(args: &[String], seg: &Segment, depth: usize) -> bool {
 
 fn basename(program: &str) -> &str {
     program.rsplit('/').next().unwrap_or(program)
-}
-
-fn inline_script(args: &[String]) -> Option<&str> {
-    let at = args.iter().position(|a| {
-        a == "-c" || (a.starts_with('-') && !a.starts_with("--") && a.contains('c'))
-    })?;
-    let script = args.get(at + 1)?;
-    if script == "--" {
-        return args.get(at + 2).map(String::as_str);
-    }
-    Some(script)
 }
 
 fn is_assignment(word: &str) -> bool {
@@ -110,6 +167,23 @@ fn skip_flags<'a>(words: &'a [String], with_arg: &[&str]) -> &'a [String] {
     &words[at.min(words.len())..]
 }
 
+fn flag_script<'a>(words: &'a [String], names: &[&str], with_arg: &[&str]) -> Option<&'a [String]> {
+    let mut at = 0;
+    while let Some(word) = words.get(at) {
+        if names.contains(&word.as_str()) {
+            return words.get(at + 1..at + 2);
+        }
+        if with_arg.contains(&word.as_str()) {
+            at += 2;
+        } else if word.starts_with('-') || is_assignment(word) {
+            at += 1;
+        } else {
+            break;
+        }
+    }
+    None
+}
+
 fn runs_package(subcommand: &str) -> bool {
     matches!(subcommand, "dlx" | "exec" | "x")
 }
@@ -130,15 +204,30 @@ fn program_of(words: &[String]) -> Option<(&str, &[String])> {
                     "-u", "-g", "-h", "-p", "-C", "-D", "-R", "-T", "-U", "-r", "-t",
                 ],
             ),
-            "env" => skip_flags(after, &["-u", "-C"]),
+            "env" => {
+                if let Some(script) =
+                    flag_script(after, &["-S", "--split-string"], &["-u", "-C", "-P"])
+                {
+                    return Some(("eval", script));
+                }
+                skip_flags(after, &["-u", "-C", "-P"])
+            }
             "command" | "nohup" | "exec" | "builtin" => skip_flags(after, &[]),
             "nice" => skip_flags(after, &["-n"]),
             "time" => skip_flags(after, &["-f", "-o"]),
             "caffeinate" => skip_flags(after, &["-t", "-w"]),
             "stdbuf" => skip_flags(after, &["-i", "-o", "-e"]),
-            "script" => skip_flags(after, &["-t"]).get(1..).unwrap_or(&[]),
+            "script" => {
+                if let Some(script) = flag_script(after, &["-c", "--command"], &["-t", "-F"]) {
+                    return Some(("eval", script));
+                }
+                skip_flags(after, &["-t"]).get(1..).unwrap_or(&[])
+            }
             "timeout" => skip_flags(after, &["-s", "-k"]).get(1..).unwrap_or(&[]),
-            "xargs" => skip_flags(after, &["-I", "-n", "-P", "-d", "-L", "-E", "-s", "-a"]),
+            "xargs" => skip_flags(
+                after,
+                &["-I", "-n", "-P", "-d", "-L", "-E", "-s", "-a", "-J"],
+            ),
             "npx" | "bunx" | "pnpx" => skip_flags(after, &["-p", "--package"]),
             "npm" | "pnpm" | "yarn" | "bun" => {
                 let inner = skip_flags(after, &PACKAGE_FLAGS);
@@ -162,8 +251,13 @@ struct Splitter {
     in_word: bool,
     quoted: bool,
     drop_next: bool,
+    here_next: bool,
+    here: Option<String>,
     piped: bool,
     nested: Vec<String>,
+    depth: i32,
+    backtick: bool,
+    uncertain: bool,
 }
 
 impl Splitter {
@@ -179,7 +273,10 @@ impl Splitter {
         let word = std::mem::take(&mut self.word);
         self.in_word = false;
         self.quoted = false;
-        if self.drop_next {
+        if self.here_next {
+            self.here_next = false;
+            self.here = Some(word);
+        } else if self.drop_next {
             self.drop_next = false;
         } else {
             self.words.push(word);
@@ -189,13 +286,16 @@ impl Splitter {
     fn end_segment(&mut self) {
         self.end_word();
         self.drop_next = false;
+        self.here_next = false;
         if !self.words.is_empty() {
             self.segments.push(Segment {
                 words: std::mem::take(&mut self.words),
                 piped: self.piped,
-                heredoc: None,
+                heredoc: self.here.take(),
             });
             self.piped = false;
+        } else {
+            self.here = None;
         }
     }
 
@@ -209,6 +309,7 @@ impl Splitter {
 struct Heredoc {
     delimiter: String,
     strip_tabs: bool,
+    expands: bool,
     segment: usize,
 }
 
@@ -221,11 +322,14 @@ fn heredoc_at(chars: &[char], mut at: usize, segment: usize) -> (Heredoc, usize)
         at += 1;
     }
     let mut delimiter = String::new();
+    let mut expands = true;
     while let Some(&c) = chars.get(at) {
         if c.is_whitespace() || ";|&()<>".contains(c) {
             break;
         }
-        if !matches!(c, '\'' | '"' | '\\') {
+        if matches!(c, '\'' | '"' | '\\') {
+            expands = false;
+        } else {
             delimiter.push(c);
         }
         at += 1;
@@ -234,10 +338,34 @@ fn heredoc_at(chars: &[char], mut at: usize, segment: usize) -> (Heredoc, usize)
         Heredoc {
             delimiter,
             strip_tabs,
+            expands,
             segment,
         },
         at,
     )
+}
+
+fn take_body(chars: &[char], mut at: usize, doc: &Heredoc) -> (Vec<String>, usize, bool) {
+    let mut body = Vec::new();
+    while at < chars.len() {
+        let end = chars[at..]
+            .iter()
+            .position(|&c| c == '\n')
+            .map_or(chars.len(), |p| at + p);
+        let line: String = chars[at..end].iter().collect();
+        at = (end + 1).min(chars.len());
+        let line = line.trim_end_matches('\r');
+        let line = if doc.strip_tabs {
+            line.trim_start_matches('\t')
+        } else {
+            line
+        };
+        if line == doc.delimiter {
+            return (body, at, true);
+        }
+        body.push(line.to_string());
+    }
+    (body, at, false)
 }
 
 fn read_bodies(
@@ -247,27 +375,14 @@ fn read_bodies(
     pending: &mut Vec<Heredoc>,
 ) -> usize {
     for doc in pending.drain(..) {
-        let mut body: Vec<String> = Vec::new();
-        while at < chars.len() {
-            let end = chars[at..]
-                .iter()
-                .position(|&c| c == '\n')
-                .map_or(chars.len(), |p| at + p);
-            let line: String = chars[at..end].iter().collect();
-            at = (end + 1).min(chars.len());
-            let line = line.trim_end_matches('\r');
-            let line = if doc.strip_tabs {
-                line.trim_start_matches('\t')
-            } else {
-                line
-            };
-            if line == doc.delimiter {
-                break;
-            }
-            body.push(line.to_string());
+        let (lines, next, found) = take_body(chars, at, &doc);
+        at = next;
+        out.uncertain |= !found || doc.delimiter.is_empty();
+        let text = lines.join("\n");
+        if doc.expands {
+            scan_substitutions(&text, out);
         }
         if let Some(seg) = out.segments.get_mut(doc.segment) {
-            let text = body.join("\n");
             seg.heredoc = Some(match seg.heredoc.take() {
                 Some(before) => format!("{before}\n{text}"),
                 None => text,
@@ -277,21 +392,96 @@ fn read_bodies(
     at
 }
 
-fn matching_paren(chars: &[char], start: usize) -> usize {
+fn word_start(previous: Option<char>) -> bool {
+    previous.is_none_or(|c| c.is_whitespace() || ";|&(<>".contains(c))
+}
+
+fn matching_paren(chars: &[char], start: usize) -> Option<usize> {
     let mut depth = 1;
-    let mut end = start;
-    while end < chars.len() {
-        match chars[end] {
+    let mut pending: Vec<Heredoc> = Vec::new();
+    let mut at = start;
+    while at < chars.len() {
+        let c = chars[at];
+        let next = chars.get(at + 1).copied();
+        match c {
+            '\\' => at += 1,
+            '\'' => {
+                at += 1;
+                while at < chars.len() && chars[at] != '\'' {
+                    at += 1;
+                }
+            }
+            '"' => {
+                at += 1;
+                while at < chars.len() && chars[at] != '"' {
+                    at += usize::from(chars[at] == '\\') + 1;
+                }
+            }
+            '$' if next == Some('\'') => {
+                at += 2;
+                while at < chars.len() && chars[at] != '\'' {
+                    at += usize::from(chars[at] == '\\') + 1;
+                }
+            }
+            '#' if word_start(at.checked_sub(1).map(|p| chars[p])) => {
+                while at + 1 < chars.len() && chars[at + 1] != '\n' {
+                    at += 1;
+                }
+            }
             '(' => depth += 1,
-            ')' => depth -= 1,
+            ')' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(at);
+                }
+            }
+            '<' if next == Some('<') && chars.get(at + 2) != Some(&'<') => {
+                let (doc, end) = heredoc_at(chars, at + 2, 0);
+                pending.push(doc);
+                at = end.max(at + 2) - 1;
+            }
+            '\n' if !pending.is_empty() => {
+                for doc in pending.drain(..) {
+                    at = take_body(chars, at + 1, &doc).1 - 1;
+                }
+            }
             _ => {}
         }
-        if depth == 0 {
-            break;
-        }
-        end += 1;
+        at += 1;
     }
-    end.min(chars.len())
+    None
+}
+
+fn scan_substitutions(text: &str, out: &mut Splitter) {
+    let chars: Vec<char> = text.chars().collect();
+    let mut at = 0;
+    while at < chars.len() {
+        match chars[at] {
+            '\\' => at += 1,
+            '$' if chars.get(at + 1) == Some(&'(') => match matching_paren(&chars, at + 2) {
+                Some(end) => {
+                    out.nested.push(chars[at + 2..end].iter().collect());
+                    at = end;
+                }
+                None => {
+                    out.uncertain = true;
+                    return;
+                }
+            },
+            '`' => match chars[at + 1..].iter().position(|&c| c == '`') {
+                Some(p) => {
+                    out.nested.push(chars[at + 1..at + 1 + p].iter().collect());
+                    at += 1 + p;
+                }
+                None => {
+                    out.uncertain = true;
+                    return;
+                }
+            },
+            _ => {}
+        }
+        at += 1;
+    }
 }
 
 fn double_quoted(chars: &[char], mut at: usize, out: &mut Splitter) -> usize {
@@ -300,33 +490,35 @@ fn double_quoted(chars: &[char], mut at: usize, out: &mut Splitter) -> usize {
     while at < chars.len() && chars[at] != '"' {
         let c = chars[at];
         if c == '\\' && at + 1 < chars.len() {
-            at += 1;
-            out.word.push(chars[at]);
-            at += 1;
+            out.word.push(chars[at + 1]);
+            at += 2;
         } else if c == '$' && chars.get(at + 1) == Some(&'(') {
-            let end = matching_paren(chars, at + 2);
+            let Some(end) = matching_paren(chars, at + 2) else {
+                out.uncertain = true;
+                return chars.len();
+            };
             out.nested.push(chars[at + 2..end].iter().collect());
-            out.word
-                .extend(chars[at..(end + 1).min(chars.len())].iter());
+            out.word.extend(chars[at..=end].iter());
             at = end + 1;
         } else if c == '`' {
-            let end = chars[at + 1..]
-                .iter()
-                .position(|&x| x == '`')
-                .map_or(chars.len(), |p| at + 1 + p);
+            let Some(p) = chars[at + 1..].iter().position(|&x| x == '`') else {
+                out.uncertain = true;
+                return chars.len();
+            };
+            let end = at + 1 + p;
             out.nested.push(chars[at + 1..end].iter().collect());
-            out.word
-                .extend(chars[at..(end + 1).min(chars.len())].iter());
+            out.word.extend(chars[at..=end].iter());
             at = end + 1;
         } else {
             out.word.push(c);
             at += 1;
         }
     }
+    out.uncertain |= at >= chars.len();
     at + 1
 }
 
-fn split(script: &str) -> (Vec<Segment>, Vec<String>) {
+fn split(script: &str) -> Split {
     let chars: Vec<char> = script.chars().collect();
     let mut out = Splitter::default();
     let mut pending: Vec<Heredoc> = Vec::new();
@@ -343,7 +535,38 @@ fn split(script: &str) -> (Vec<Segment>, Vec<String>) {
                     out.word.push(chars[at]);
                     at += 1;
                 }
+                out.uncertain |= at >= chars.len();
                 at += 1;
+            }
+            '$' if next == Some('\'') => {
+                out.in_word = true;
+                out.quoted = true;
+                at += 1;
+                while at < chars.len() && chars[at] != '\'' {
+                    if chars[at] == '\\' && at + 1 < chars.len() {
+                        at += 1;
+                    }
+                    out.word.push(chars[at]);
+                    at += 1;
+                }
+                out.uncertain |= at >= chars.len();
+                at += 1;
+            }
+            '$' if next == Some('(') && chars.get(at + 1) == Some(&'(') => {
+                out.in_word = true;
+                match matching_paren(&chars, at + 1) {
+                    Some(end) => {
+                        let inner: String = chars[at + 1..end].iter().collect();
+                        if inner.chars().any(|c| c.is_ascii_alphabetic()) {
+                            out.nested.push(inner);
+                        }
+                        at = end + 1;
+                    }
+                    None => {
+                        out.uncertain = true;
+                        at = chars.len();
+                    }
+                }
             }
             '"' => at = double_quoted(&chars, at, &mut out),
             '\\' => {
@@ -366,7 +589,19 @@ fn split(script: &str) -> (Vec<Segment>, Vec<String>) {
                     at = read_bodies(&chars, at, &mut out, &mut pending);
                 }
             }
-            ';' | '(' | ')' | '`' => out.end_segment(),
+            '(' => {
+                out.depth += 1;
+                out.end_segment();
+            }
+            ')' => {
+                out.depth -= 1;
+                out.end_segment();
+            }
+            '`' => {
+                out.backtick = !out.backtick;
+                out.end_segment();
+            }
+            ';' => out.end_segment(),
             '|' => {
                 out.end_segment();
                 if next == Some('|') {
@@ -376,17 +611,22 @@ fn split(script: &str) -> (Vec<Segment>, Vec<String>) {
                 }
             }
             '&' => {
-                let previous = at.checked_sub(2).and_then(|p| chars.get(p)).copied();
                 if next == Some('&') {
                     at += 1;
                     out.end_segment();
-                } else if matches!(previous, Some('<' | '>')) || next == Some('>') {
+                } else if next == Some('>') {
+                    out.end_word();
                     out.push(c);
                 } else {
                     out.end_segment();
                 }
             }
-            '<' if next == Some('<') && chars.get(at + 1) != Some(&'<') => {
+            '<' if next == Some('<') && chars.get(at + 1) == Some(&'<') => {
+                at += 2;
+                out.end_word();
+                out.here_next = true;
+            }
+            '<' if next == Some('<') => {
                 let (doc, end) = heredoc_at(&chars, at + 1, out.segments.len());
                 pending.push(doc);
                 at = end;
@@ -408,5 +648,10 @@ fn split(script: &str) -> (Vec<Segment>, Vec<String>) {
         }
     }
     out.end_segment();
-    (out.segments, out.nested)
+    out.uncertain |= out.depth != 0 || out.backtick || !pending.is_empty();
+    Split {
+        segments: out.segments,
+        nested: out.nested,
+        uncertain: out.uncertain,
+    }
 }
