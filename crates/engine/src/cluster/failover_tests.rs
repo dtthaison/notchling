@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
 
 use super::failover::{
-    arming_id, auto_promote_due, failover_target, promote_safety, Failover, Grantor, PrimaryLease,
-    Safety, FENCE_LEAD_MS, REACH_MS, RENEW_MS,
+    arming_id, auto_promote_due, failover_target, promote_safety, ArmingId, Failover, Grantor,
+    PrimaryLease, Safety, FENCE_LEAD_MS, REACH_MS, RENEW_MS,
 };
 use super::id::NodeId;
 use super::members::Term;
@@ -73,8 +73,18 @@ fn arm(state: &mut ClusterState, name: &str) {
     .expect("armed");
 }
 
-fn held() -> BTreeMap<NodeId, u64> {
-    BTreeMap::from([(id("m1"), 0)])
+fn held() -> BTreeMap<NodeId, ArmingId> {
+    BTreeMap::from([(id("m1"), aid(1))])
+}
+
+pub(super) fn aid(seq: u64) -> ArmingId {
+    ArmingId {
+        term: Term {
+            n: 1,
+            node: id("m5"),
+        },
+        seq,
+    }
 }
 
 pub(super) fn all_ready(_: &NodeId) -> bool {
@@ -142,20 +152,20 @@ fn not_ready_machine_is_never_target() {
 fn lease_runs_from_the_ask_not_the_answer() {
     let mut lease = PrimaryLease::new(0);
     let seq = lease.ask(&id("m1"), 1_000);
-    lease.granted(&id("m1"), seq, Failover::After30m, 0);
+    lease.granted(&id("m1"), seq, Failover::After30m, None);
     assert_eq!(
         lease.gates_until(&held()),
         1_000 + HALF_HOUR - FENCE_LEAD_MS
     );
     let next = lease.ask(&id("m1"), 31_000);
     assert!(next > seq);
-    lease.granted(&id("m1"), next, Failover::After30m, 0);
+    lease.granted(&id("m1"), next, Failover::After30m, None);
     assert_eq!(
         lease.gates_until(&held()),
         31_000 + HALF_HOUR - FENCE_LEAD_MS
     );
     let later = lease.ask(&id("m1"), 61_000);
-    lease.granted(&id("m1"), later, Failover::After1h, 0);
+    lease.granted(&id("m1"), later, Failover::After1h, None);
     assert_eq!(lease.gates_until(&held()), 61_000 + HOUR - FENCE_LEAD_MS);
 }
 
@@ -165,14 +175,14 @@ fn stale_echo_is_ignored() {
     let first = lease.ask(&id("m1"), 1_000);
     let second = lease.ask(&id("m1"), 31_000);
     assert_ne!(first, second);
-    lease.granted(&id("m1"), first, Failover::After30m, 0);
+    lease.granted(&id("m1"), first, Failover::After30m, None);
     assert_eq!(lease.gates_until(&held()), 0);
-    lease.granted(&id("m1"), second, Failover::After30m, 0);
+    lease.granted(&id("m1"), second, Failover::After30m, None);
     let deadline = lease.gates_until(&held());
     assert_eq!(deadline, 31_000 + HALF_HOUR - FENCE_LEAD_MS);
-    lease.granted(&id("m1"), first, Failover::After1h, 0);
-    lease.granted(&id("m1"), first, Failover::Off, 0);
-    lease.granted(&id("m1"), second + 1_000, Failover::Off, 0);
+    lease.granted(&id("m1"), first, Failover::After1h, None);
+    lease.granted(&id("m1"), first, Failover::Off, None);
+    lease.granted(&id("m1"), second + 1_000, Failover::Off, None);
     assert_eq!(lease.gates_until(&held()), deadline);
 }
 
@@ -180,14 +190,14 @@ fn stale_echo_is_ignored() {
 fn off_never_expires() {
     let mut lease = PrimaryLease::new(0);
     let seq = lease.ask(&id("m1"), 1_000);
-    lease.granted(&id("m1"), seq, Failover::Off, 0);
+    lease.granted(&id("m1"), seq, Failover::Off, None);
     assert_eq!(lease.gates_until(&held()), 0);
     assert_eq!(lease.gates_until(&BTreeMap::new()), u64::MAX);
     let on = lease.ask(&id("m1"), 31_000);
-    lease.granted(&id("m1"), on, Failover::After1h, 0);
+    lease.granted(&id("m1"), on, Failover::After1h, None);
     assert_ne!(lease.gates_until(&held()), u64::MAX);
     let off = lease.ask(&id("m1"), 61_000);
-    lease.granted(&id("m1"), off, Failover::Off, 0);
+    lease.granted(&id("m1"), off, Failover::Off, None);
     assert_eq!(lease.gates_until(&held()), 0);
     assert_eq!(lease.gates_until(&BTreeMap::new()), u64::MAX);
 }
@@ -200,7 +210,7 @@ fn unarmed_target_never_expires() {
     let seq = lease.ask(&id("m1"), 1_000);
     assert_eq!(lease.gates_until(&BTreeMap::new()), u64::MAX);
     assert_eq!(lease.gates_until(&held()), 0);
-    lease.granted(&id("m1"), seq, Failover::After30m, 0);
+    lease.granted(&id("m1"), seq, Failover::After30m, None);
     assert_eq!(
         lease.gates_until(&held()),
         1_000 + HALF_HOUR - FENCE_LEAD_MS
@@ -211,7 +221,7 @@ fn unarmed_target_never_expires() {
 fn a_held_deadline_outlives_an_armed_reset() {
     let mut lease = PrimaryLease::new(0);
     let seq = lease.ask(&id("m1"), 1_000);
-    lease.granted(&id("m1"), seq, Failover::After30m, 0);
+    lease.granted(&id("m1"), seq, Failover::After30m, None);
     assert_eq!(
         lease.gates_until(&BTreeMap::new()),
         1_000 + HALF_HOUR - FENCE_LEAD_MS
@@ -331,7 +341,7 @@ fn target_promotes_only_after_primary_fence() {
             let grant_real = ask_real + 700;
             let mut lease = PrimaryLease::new(0);
             let seq = lease.ask(&id("m1"), primary_clock(ask_real));
-            lease.granted(&id("m1"), seq, failover, 0);
+            lease.granted(&id("m1"), seq, failover, None);
             let gates = lease.gates_until(&held());
             let mut gates_end_real = ask_real;
             while primary_clock(gates_end_real) < gates {
@@ -462,7 +472,7 @@ fn gates_follow_the_delay_the_target_reported() {
     let mut grantor = Grantor::new(0);
     let first = lease.ask(&id("m1"), 1_000);
     grantor.grant(1_200, Failover::After1h);
-    lease.granted(&id("m1"), first, Failover::After1h, 0);
+    lease.granted(&id("m1"), first, Failover::After1h, None);
     assert_eq!(lease.gates_until(&held()), 1_000 + HOUR - FENCE_LEAD_MS);
 
     set(&mut state, Failover::After30m);
@@ -480,7 +490,7 @@ fn gates_follow_the_delay_the_target_reported() {
     grantor.grant(31_200, Failover::After30m);
     let heard = lease.ask(&id("m1"), 61_000);
     grantor.grant(61_200, Failover::After30m);
-    lease.granted(&id("m1"), heard, Failover::After30m, 0);
+    lease.granted(&id("m1"), heard, Failover::After30m, None);
     assert_eq!(
         lease.gates_until(&held()),
         61_000 + HALF_HOUR - FENCE_LEAD_MS
@@ -510,7 +520,7 @@ fn turning_off_stops_the_target_at_once() {
     grantor.grant(1_000, Failover::After30m);
     let mut lease = PrimaryLease::new(0);
     let seq = lease.ask(&id("m1"), 900);
-    lease.granted(&id("m1"), seq, Failover::After30m, 0);
+    lease.granted(&id("m1"), seq, Failover::After30m, None);
     assert!(auto_promote_due(
         &id("m1"),
         &state,
@@ -535,7 +545,7 @@ fn turning_off_stops_the_target_at_once() {
 
     grantor.grant(31_000, Failover::Off);
     let off = lease.ask(&id("m1"), 31_000);
-    lease.granted(&id("m1"), off, Failover::Off, 0);
+    lease.granted(&id("m1"), off, Failover::Off, None);
     assert_eq!(lease.gates_until(&BTreeMap::new()), u64::MAX);
     assert_eq!(grantor.safe_after(), None);
 }
@@ -551,7 +561,7 @@ fn turning_on_arms_only_after_a_grant() {
             Command::Armed {
                 node: id("m1"),
                 term: term.clone(),
-                id: 1,
+                id: aid(1),
             },
             320
         )
@@ -602,7 +612,7 @@ fn arming_is_checked_and_idempotent() {
             Command::Armed {
                 node: id(node),
                 term: at,
-                id: 1,
+                id: aid(1),
             },
             330,
         );
@@ -611,7 +621,7 @@ fn arming_is_checked_and_idempotent() {
     assert_eq!(state.armed, None);
     arm(&mut state, "m1");
     let seq = state.seq;
-    let same = state.holders[&id("m1")];
+    let same = state.holders[&id("m1")].clone();
     let again = apply(
         &mut state,
         Command::Armed {
@@ -681,7 +691,7 @@ fn failover_and_arming_survive_the_cluster_db() {
         Command::Armed {
             node: m1.id.clone(),
             term: state.term.clone(),
-            id: 7,
+            id: aid(7),
         },
     ];
     for command in commands {

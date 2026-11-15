@@ -46,7 +46,7 @@ pub fn failover_target(state: &ClusterState, ready: &dyn Fn(&NodeId) -> bool) ->
 struct Hold {
     reported: Failover,
     until: Option<u64>,
-    seen: u64,
+    seen: Option<ArmingId>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -70,7 +70,13 @@ impl PrimaryLease {
         self.next_seq
     }
 
-    pub fn granted(&mut self, node: &NodeId, seq: u64, reported: Failover, seen: u64) -> bool {
+    pub fn granted(
+        &mut self,
+        node: &NodeId,
+        seq: u64,
+        reported: Failover,
+        seen: Option<ArmingId>,
+    ) -> bool {
         match self.asked.get(node) {
             Some((asked, _)) if *asked == seq => {}
             _ => return false,
@@ -90,7 +96,7 @@ impl PrimaryLease {
         true
     }
 
-    pub fn released(&mut self, node: &NodeId, seq: u64, seen: u64) -> bool {
+    pub fn released(&mut self, node: &NodeId, seq: u64, seen: Option<ArmingId>) -> bool {
         self.granted(node, seq, Failover::Off, seen)
     }
 
@@ -98,17 +104,20 @@ impl PrimaryLease {
         self.holds.get(node).map(|h| h.reported)
     }
 
-    pub fn releasable(&self, holders: &BTreeMap<NodeId, u64>) -> Vec<(NodeId, u64)> {
+    pub fn releasable(
+        &self,
+        holders: &BTreeMap<NodeId, ArmingId>,
+    ) -> Vec<(NodeId, Option<ArmingId>)> {
         holders
             .keys()
             .filter_map(|n| {
                 let hold = self.holds.get(n)?;
-                (hold.reported == Failover::Off).then(|| (n.clone(), hold.seen))
+                (hold.reported == Failover::Off).then(|| (n.clone(), hold.seen.clone()))
             })
             .collect()
     }
 
-    pub fn gates_until(&self, holders: &BTreeMap<NodeId, u64>) -> u64 {
+    pub fn gates_until(&self, holders: &BTreeMap<NodeId, ArmingId>) -> u64 {
         let mut gate = u64::MAX;
         let known = self
             .holds
@@ -174,13 +183,24 @@ impl Grantor {
     }
 }
 
-pub fn arming_id(state: &ClusterState) -> u64 {
-    let local = (state.term.n << 32) | ((state.seq + 1) & 0xFFFF_FFFF);
-    state
-        .holders
-        .values()
-        .max()
-        .map_or(local, |top| local.max(top.saturating_add(1)))
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct ArmingId {
+    pub term: Term,
+    pub seq: u64,
+}
+
+pub fn arming_id(state: &ClusterState) -> ArmingId {
+    let next = ArmingId {
+        term: state.term.clone(),
+        seq: state.seq + 1,
+    };
+    match state.holders.values().max() {
+        Some(top) if *top >= next => ArmingId {
+            term: top.term.clone(),
+            seq: top.seq + 1,
+        },
+        _ => next,
+    }
 }
 
 pub fn armed_at_current(state: &ClusterState) -> bool {

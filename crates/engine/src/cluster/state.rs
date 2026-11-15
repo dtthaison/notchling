@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use super::failover::Failover;
+use super::failover::{ArmingId, Failover};
 use super::grants::SecretAllow;
 use super::id::{NodeId, Role};
 use super::jobs::{job_id, Job, JobSpec, JobState};
@@ -24,7 +24,7 @@ pub struct ClusterState {
     #[serde(default)]
     pub armed: Option<(NodeId, Term)>,
     #[serde(default)]
-    pub holders: BTreeMap<NodeId, u64>,
+    pub holders: BTreeMap<NodeId, ArmingId>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -95,12 +95,11 @@ pub enum Command {
     Armed {
         node: NodeId,
         term: Term,
-        #[serde(default)]
-        id: u64,
+        id: ArmingId,
     },
     Released {
         node: NodeId,
-        seen: u64,
+        seen: Option<ArmingId>,
     },
 }
 
@@ -119,7 +118,7 @@ pub enum Change {
     Job(Job),
     Failover(Failover),
     Armed(Option<(NodeId, Term)>),
-    Holders(BTreeMap<NodeId, u64>),
+    Holders(BTreeMap<NodeId, ArmingId>),
     Cluster {
         id: String,
         name: String,
@@ -454,26 +453,29 @@ pub fn apply(
             if *term != state.term || state.failover == Failover::Off || *node == state.home {
                 return Err(CommandError::BadTransition);
             }
-            let held = state.holders.get(node).copied();
-            if held.is_some_and(|h| *id < h) {
+            if state.holders.keys().any(|other| other != node) {
+                return Err(CommandError::BadTransition);
+            }
+            let held = state.holders.get(node).cloned();
+            if held.as_ref().is_some_and(|h| id < h) {
                 return Err(CommandError::BadTransition);
             }
             if !active_mut(state, node)?.can_be_master {
                 return Err(CommandError::BadTransition);
             }
             let armed = Some((node.clone(), term.clone()));
-            if state.armed == armed && held == Some(*id) {
+            if state.armed == armed && held.as_ref() == Some(id) {
                 return Ok(Applied::none());
             }
             state.armed = armed.clone();
-            state.holders.insert(node.clone(), *id);
+            state.holders.insert(node.clone(), id.clone());
             vec![Change::Armed(armed), Change::Holders(state.holders.clone())]
         }
         Command::Released { node, seen } => {
             if state
                 .holders
                 .get(node)
-                .is_some_and(|armed_at| armed_at > seen)
+                .is_some_and(|armed_at| seen.as_ref().is_none_or(|s| armed_at > s))
             {
                 return Ok(Applied::none());
             }

@@ -2,7 +2,7 @@ use serde_json::{json, Value};
 
 use super::core_tests::{answers, pair, Hub};
 use super::{Effect, Input, LocalCmd};
-use crate::cluster::failover::Failover;
+use crate::cluster::failover::{ArmingId, Failover};
 use crate::cluster::id::NodeId;
 use crate::cluster::members::Term;
 use crate::cluster::state::Command;
@@ -33,8 +33,12 @@ fn unlink(hub: &mut Hub, a: &NodeId, b: &NodeId) {
     hub.run(b, Input::Unlinked { peer: a.clone() });
 }
 
-fn arm(hub: &mut Hub, home: &NodeId, node: &NodeId, id: u64) {
+fn arm(hub: &mut Hub, home: &NodeId, node: &NodeId, seq: u64) {
     let term: Term = hub.core(home).state().expect("state").term.clone();
+    let id = ArmingId {
+        term: term.clone(),
+        seq,
+    };
     let mut out = Vec::new();
     hub.nodes
         .get_mut(home)

@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
 
-use super::failover::Failover;
+use super::failover::{ArmingId, Failover};
 use super::id::NodeId;
 use super::jobs::Job;
 use super::members::{Member, Term};
@@ -142,8 +142,8 @@ pub fn load(cluster_dir: &Path) -> Result<Option<ClusterState>, String> {
         None => None,
     };
     let holders = match get("holders")? {
-        Some(value) => read::<BTreeMap<NodeId, u64>>(&value)?,
-        None => armed.iter().map(|(node, _)| (node.clone(), 0)).collect(),
+        Some(value) => read::<BTreeMap<NodeId, ArmingId>>(&value)?,
+        None => seeded_holders(&armed),
     };
     Ok(Some(ClusterState {
         id: read(&id)?,
@@ -212,7 +212,10 @@ fn apply(tx: &rusqlite::Transaction<'_>, change: &Change) -> Result<(), String> 
             .map_err(es)?;
         }
         Change::Failover(failover) => put_state(tx, "failover", &text(failover)?)?,
-        Change::Armed(armed) => put_state(tx, "armed", &text(armed)?)?,
+        Change::Armed(armed) => {
+            keep_seeded_holders(tx)?;
+            put_state(tx, "armed", &text(armed)?)?;
+        }
         Change::Holders(holders) => put_state(tx, "holders", &text(holders)?)?,
         Change::Cluster {
             id,
@@ -236,6 +239,43 @@ fn apply(tx: &rusqlite::Transaction<'_>, change: &Change) -> Result<(), String> 
                 .map_err(es)?;
             }
         }
+    }
+    Ok(())
+}
+
+fn seeded_holders(armed: &Option<(NodeId, Term)>) -> BTreeMap<NodeId, ArmingId> {
+    armed
+        .iter()
+        .map(|(node, term)| {
+            (
+                node.clone(),
+                ArmingId {
+                    term: term.clone(),
+                    seq: 0,
+                },
+            )
+        })
+        .collect()
+}
+
+fn keep_seeded_holders(tx: &rusqlite::Transaction<'_>) -> Result<(), String> {
+    let es = |e: rusqlite::Error| e.to_string();
+    let value = |key: &str| -> Result<Option<String>, String> {
+        tx.query_row("SELECT value FROM state WHERE key = ?1", [key], |r| {
+            r.get(0)
+        })
+        .optional()
+        .map_err(es)
+    };
+    if value("holders")?.is_some() {
+        return Ok(());
+    }
+    let Some(armed) = value("armed")? else {
+        return Ok(());
+    };
+    let armed = read::<Option<(NodeId, Term)>>(&armed)?;
+    if armed.is_some() {
+        put_state(tx, "holders", &text(&seeded_holders(&armed))?)?;
     }
     Ok(())
 }
