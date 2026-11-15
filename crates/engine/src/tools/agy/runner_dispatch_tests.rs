@@ -117,3 +117,30 @@ fn dispatch_after_starting_went_off_sends_nothing() {
         .is_empty());
     assert!(!rig.runner.is_working(SESSION));
 }
+
+#[test]
+fn dispatch_timeout_does_not_clear_a_replaced_session() {
+    let load = Arc::new(Mutex::new(None));
+    let rig = rig_with(holding_load(load.clone()), Some("/fake/agy"));
+    let runner = rig.runner.clone();
+    let sending = std::thread::spawn(move || {
+        runner.dispatch("x", "first", "/work", Duration::from_millis(600))
+    });
+    wait_for_load(&load);
+    let replacement = rig.runner.inner.launch("/work").unwrap();
+    replacement.lock().working = true;
+    rig.runner
+        .inner
+        .lock_live()
+        .insert("x".to_string(), replacement);
+    assert!(rig.runner.is_working("x"));
+    let got = sending.join().unwrap();
+    assert_eq!(
+        got,
+        Err(RunError::Start("Antigravity took too long to load.".into()))
+    );
+    assert!(
+        rig.runner.is_working("x"),
+        "the replacement's turn is still its own"
+    );
+}

@@ -1,5 +1,6 @@
 use super::*;
 use crate::chat::outgoing::GRACE_MS;
+use notchling_engine::sessions::{Agent, AgentGroup, AgentTarget};
 use notchling_engine::transcript::model::{ChatItem, Conversation, ItemKind};
 use notchling_local_api::Event;
 use serde_json::{json, Value};
@@ -270,4 +271,42 @@ fn a_removed_row_that_was_never_seen_leaves_no_sent_bubble() {
     let mut feed = OutboxFeed::default();
     assert!(!feed.apply(&removed("ghost", "s1", "sent"), 0));
     assert!(feed.bubbles("s1").is_empty());
+}
+
+fn job_agent(id: &str, job: &str) -> Agent {
+    Agent {
+        id: id.into(),
+        name: "job".into(),
+        project: "p".into(),
+        cwd: "/w/p".into(),
+        group: AgentGroup::Working,
+        label: "Working".into(),
+        detail: None,
+        since_ms: 1,
+        target: AgentTarget::Job(job.into()),
+        suggested_reply: None,
+        transcript_path: None,
+        host: "Background".into(),
+        headless: false,
+        config_dir: None,
+        command: None,
+        resume_session_id: None,
+        at_prompt: false,
+    }
+}
+
+#[test]
+fn agent_accessors_follow_the_outbox_key_not_the_row_id() {
+    let agent = job_agent("6f1c2a9e-3b7d-4e21-9a0c-5d8e7f6a1b2c", "ab12cd34");
+    let mut feed = OutboxFeed::default();
+    feed.seed(&[wire("o1", "ab12cd34", "queued", None, "hello")]);
+    assert_eq!(feed.rows_for(&agent).len(), 1);
+    assert_eq!(feed.bubbles_for(&agent)[0].text, "hello");
+    assert!(feed.rows("6f1c2a9e-3b7d-4e21-9a0c-5d8e7f6a1b2c").is_empty());
+
+    feed.apply(&removed("o1", "ab12cd34", "sent"), 20_000);
+    assert_eq!(feed.bubbles_for(&agent)[0].status, Status::Sent);
+    let shown = user_items(&[("hello", 21.0)]);
+    assert!(feed.settle_for(&agent, &shown, 22_000));
+    assert!(feed.bubbles_for(&agent).is_empty());
 }

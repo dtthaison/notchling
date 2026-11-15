@@ -1,5 +1,5 @@
 use super::config::{AgyCommand, ConfigOption, Permission};
-use super::live::{cancelled, Inner, Job, Told, CLAIM_CANCELLED, CLAIM_QUEUED, MAX_OPEN};
+use super::live::{cancelled, Inner, Job, Live, Told, CLAIM_CANCELLED, CLAIM_QUEUED, MAX_OPEN};
 use crate::tools::acp::Spawner;
 use crate::transcript::model::Conversation;
 use serde_json::{json, Value};
@@ -176,7 +176,7 @@ impl Runner {
     }
 
     pub fn prompt(&self, id: &str, text: &str, folder: &str) -> Result<(), RunError> {
-        self.queue_prompt(id, text, folder, None)
+        self.queue_prompt(id, text, folder, None).map(|_| ())
     }
 
     pub fn dispatch(
@@ -192,7 +192,7 @@ impl Runner {
             tx,
             claim: claim.clone(),
         };
-        self.queue_prompt(id, text, folder, Some(told))?;
+        let queued = self.queue_prompt(id, text, folder, Some(told))?;
         match rx.recv_timeout(wait) {
             Ok(result) => result,
             Err(RecvTimeoutError::Timeout) => {
@@ -208,9 +208,7 @@ impl Runner {
                         Err(_) => Err(RunError::Pending),
                     };
                 }
-                if let Some(live) = self.inner.get(id) {
-                    live.lock().working = false;
-                }
+                queued.lock().working = false;
                 Err(RunError::Start(format!("{NAME} took too long to load.")))
             }
             Err(RecvTimeoutError::Disconnected) => Err(RunError::Start(format!(
@@ -225,7 +223,7 @@ impl Runner {
         text: &str,
         folder: &str,
         told: Option<Told>,
-    ) -> Result<(), RunError> {
+    ) -> Result<Arc<Live>, RunError> {
         let inner = &self.inner;
         let retry = inner.get(id).is_some_and(|l| l.lock().failed_at.is_some());
         let live = inner.open(id, folder, retry)?;
@@ -243,6 +241,7 @@ impl Runner {
             id.to_string(),
             text.to_string(),
         );
+        let queued = live.clone();
         let job: Job = Box::new(move || runner.begin_prompt(&l, &id, &text, told));
         let now = {
             let mut st = live.lock();
@@ -256,7 +255,7 @@ impl Runner {
         if let Some(job) = now {
             job();
         }
-        Ok(())
+        Ok(queued)
     }
 
     pub fn cancel(&self, id: &str) {

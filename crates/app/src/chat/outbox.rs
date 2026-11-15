@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
 use notchling_engine::outbox::{Kind, State, Tool, Via, Why};
+use notchling_engine::sessions::Agent;
 use notchling_engine::transcript::model::Conversation;
 use notchling_local_api::{topics, Event};
 use serde_json::Value;
@@ -162,8 +163,31 @@ impl OutboxFeed {
         }
     }
 
+    pub fn clear_rows(&mut self) {
+        self.rows.clear();
+    }
+
+    pub fn reseed_rows(&mut self, fresh: OutboxFeed) {
+        self.rows = fresh.rows;
+        for (session, list) in fresh.sent {
+            self.sent.entry(session).or_default().extend(list);
+        }
+    }
+
     pub fn rows(&self, session: &str) -> &[OutboxRow] {
         self.rows.get(session).map_or(&[], Vec::as_slice)
+    }
+
+    pub fn rows_for(&self, agent: &Agent) -> &[OutboxRow] {
+        self.rows(&agent.outbox_key())
+    }
+
+    pub fn bubbles_for(&self, agent: &Agent) -> Vec<Bubble> {
+        self.bubbles(&agent.outbox_key())
+    }
+
+    pub fn settle_for(&mut self, agent: &Agent, conversation: &Conversation, now_ms: i64) -> bool {
+        self.settle(&agent.outbox_key(), conversation, now_ms)
     }
 
     pub fn apply(&mut self, event: &Event, now_ms: i64) -> bool {

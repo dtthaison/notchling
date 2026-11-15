@@ -191,10 +191,22 @@ impl Shared {
         }
     }
 
-    fn set_outbox(&self, outbox: OutboxFeed) {
+    fn reseed_outbox(&self, fresh: OutboxFeed) {
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
-        if state.outbox != outbox {
-            state.outbox = outbox;
+        let mut next = state.outbox.clone();
+        next.reseed_rows(fresh);
+        if state.outbox != next {
+            state.outbox = next;
+            state.generation += 1;
+        }
+    }
+
+    fn clear_outbox_rows(&self) {
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        let mut next = state.outbox.clone();
+        next.clear_rows();
+        if state.outbox != next {
+            state.outbox = next;
             state.generation += 1;
         }
     }
@@ -329,7 +341,7 @@ fn run(config: SourceConfig, shared: &Shared) {
         match connect(&config, &mut tried_start) {
             Ok((client, agents, prompts, outbox)) => {
                 shared.set_prompts(prompts);
-                shared.set_outbox(outbox);
+                shared.reseed_outbox(outbox);
                 shared.set(Link::Daemon, Some(agents));
                 failures = 0;
                 follow(client, shared);
@@ -344,7 +356,7 @@ fn run(config: SourceConfig, shared: &Shared) {
             return;
         }
         shared.set_prompts(None);
-        shared.set_outbox(OutboxFeed::default());
+        shared.clear_outbox_rows();
         shared.reset_tools();
         shared.set(link, None);
         sleep(config.backoff.delay(failures.saturating_sub(1)), shared);

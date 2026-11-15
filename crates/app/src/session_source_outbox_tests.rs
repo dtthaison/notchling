@@ -184,6 +184,62 @@ fn a_new_daemon_reseeds_the_outbox_from_its_list() {
 }
 
 #[test]
+fn a_sent_bubble_survives_a_reconnect_until_the_transcript_shows_it() {
+    let scratch = Scratch::new("sso-sent-redo");
+    let socket = scratch.path().join(SOCKET_NAME);
+    let rows = Arc::new(Mutex::new(vec![wire("o1", "queued", "first")]));
+    let first = serve(&socket, true, &rows);
+    let source = SessionSource::start(config(&socket));
+    wait_for(&source, "the listed row", |v| {
+        !v.outbox.rows("ab12cd34").is_empty()
+    });
+    first.0.publish(
+        "outbox",
+        "outbox.removed",
+        &json!({"id": "o1", "session": "ab12cd34", "why": "sent"}),
+    );
+    wait_for(&source, "the sent bubble", |v| {
+        !v.outbox.bubbles("ab12cd34").is_empty()
+    });
+    first.0.shutdown();
+    let _ = first.1.join();
+    wait_for(&source, "the fallback", View::daemon_down);
+    assert_eq!(
+        source.view().outbox.bubbles("ab12cd34")[0].status,
+        Status::Sent
+    );
+
+    let again = Arc::new(Mutex::new(vec![wire("o2", "queued", "two")]));
+    let second = serve(&socket, true, &again);
+    let view = wait_for(&source, "the second list", |v| {
+        v.outbox.rows("ab12cd34").len() == 1
+    });
+    let bubbles = view.outbox.bubbles("ab12cd34");
+    assert_eq!(bubbles.len(), 2);
+    assert_eq!(bubbles[0].status, Status::Sent);
+    assert_eq!(bubbles[0].text, "first");
+
+    let shown = Conversation {
+        items: vec![ChatItem {
+            id: "u1".into(),
+            kind: ItemKind::User {
+                text: "first".into(),
+                images: 0,
+                merged: false,
+            },
+            date: Some(now_ms() as f64 / 1000.0 + 5.0),
+        }],
+        ..Conversation::default()
+    };
+    source.settle_outbox("ab12cd34", &shown);
+    let bubbles = source.view().outbox.bubbles("ab12cd34");
+    assert_eq!(bubbles.len(), 1);
+    assert_eq!(bubbles[0].text, "two");
+    second.0.shutdown();
+    let _ = second.1.join();
+}
+
+#[test]
 fn the_agent_tier_follows_no_outbox() {
     let scratch = Scratch::new("sso-agent");
     let socket = scratch.path().join(SOCKET_NAME);
