@@ -26,6 +26,7 @@ use crate::log_ops::LogOps;
 use crate::op_group::OpGroup;
 use crate::op_kinds;
 use crate::outbox_courier::{real_clock, ClaudeCourier};
+use crate::outbox_inbox::OutboxNotice;
 use crate::outbox_ops::OutboxOps;
 use crate::outbox_postman::{Couriers, Postmen};
 use crate::outbox_runners::{link_agy, link_codex, AgyCourier, CodexCourier};
@@ -398,6 +399,7 @@ pub struct Wired {
     pub inbox: Arc<InboxOps>,
     pub outbox: Arc<OutboxOps>,
     pub postmen: Postmen,
+    pub outbox_notice: Arc<OutboxNotice>,
     pub vault: Arc<VaultOps>,
     pub install: Arc<InstallOps>,
     pub settings: Arc<SettingsOps>,
@@ -479,6 +481,7 @@ impl Wired {
         ));
         acting.attach_agy(agy.clone());
         let postmen = postmen_for(&outbox, &acting, layout, &codex, &agy);
+        let outbox_notice = OutboxNotice::new(outbox.clone(), inbox.clone());
         let every = Arc::new(EverySession::new(layout));
         let bridge = Arc::new(
             BridgeOps::new(
@@ -654,6 +657,7 @@ impl Wired {
             inbox,
             outbox,
             postmen,
+            outbox_notice,
             vault,
             install: Arc::new(install),
             settings,
@@ -756,6 +760,7 @@ impl Wired {
         self.wake.spawn_loop();
         self.codex_children.start();
         self.postmen.begin();
+        self.outbox_notice.spawn_loop();
     }
 
     pub fn load(&self) {
@@ -764,6 +769,7 @@ impl Wired {
     }
 
     pub fn close(&self) {
+        self.outbox_notice.close();
         self.postmen.stop();
         self.wake.close();
         self.codex_children.close();

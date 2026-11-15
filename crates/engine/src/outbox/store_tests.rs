@@ -380,6 +380,35 @@ fn discard_keeps_sending_row() {
 }
 
 #[test]
+fn discard_rows_removes_only_the_named_rows_and_never_a_sending_one() {
+    let store = OutboxStore::in_memory_for_tests();
+    let a = store.insert(&new("s", "a"), 1).unwrap();
+    let b = store.insert(&new("s", "b"), 2).unwrap();
+    let c = store.insert(&new("s", "c"), 3).unwrap();
+    let d = store.insert(&new("s", "d"), 4).unwrap();
+    store
+        .set_state(&b.id, &[State::Queued], State::InQueue, None, None, 5)
+        .unwrap();
+    store.take(&c.id, 6).unwrap();
+    let ids = vec![
+        a.id.clone(),
+        b.id.clone(),
+        c.id.clone(),
+        "missing".to_string(),
+    ];
+    let gone = store.discard_rows(&ids).unwrap();
+    let texts: Vec<_> = gone.iter().map(|r| r.text.as_str()).collect();
+    assert_eq!(texts, vec!["a", "b"]);
+    let left: Vec<_> = store
+        .list(None)
+        .unwrap()
+        .into_iter()
+        .map(|r| r.id)
+        .collect();
+    assert_eq!(left, vec![c.id, d.id]);
+}
+
+#[test]
 fn rekey_moves_rows() {
     let store = OutboxStore::in_memory_for_tests();
     store.insert(&new("old", "a"), 1).unwrap();

@@ -65,6 +65,7 @@ pub mod log_start;
 pub mod op_group;
 pub mod op_kinds;
 pub mod outbox_courier;
+pub mod outbox_inbox;
 pub mod outbox_ops;
 pub mod outbox_postman;
 mod outbox_rows;

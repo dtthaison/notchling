@@ -350,6 +350,17 @@ impl OutboxOps {
             .map_or_else(|| Ref::new(key), |a| session_ref(&a))
     }
 
+    pub fn session_name(&self, key: &str) -> Option<String> {
+        self.agents()
+            .into_iter()
+            .find(|a| a.outbox_key() == key)
+            .map(|a| a.name)
+    }
+
+    pub(crate) fn resend_row(&self, id: &str) -> Result<Value, ApiError> {
+        self.resend(&json!({"id": id, "clear_box": true, "resume": true}))
+    }
+
     fn key_of(&self, id: &str) -> String {
         if tool_of(id) != Tool::Claude {
             return foreign_key(id).unwrap_or_else(|| id.to_string());

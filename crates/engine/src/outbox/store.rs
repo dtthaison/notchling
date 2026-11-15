@@ -353,6 +353,27 @@ impl OutboxStore {
         Ok(rows)
     }
 
+    pub fn discard_rows(&self, ids: &[String]) -> Result<Vec<Row>, String> {
+        let mut db = self.lock();
+        let tx = db
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(db_err)?;
+        let mut gone = Vec::new();
+        for id in ids {
+            let Some(row) = fetch(&tx, id)? else {
+                continue;
+            };
+            if row.state == State::Sending {
+                continue;
+            }
+            tx.execute("DELETE FROM outbox WHERE id = ?1", [id])
+                .map_err(db_err)?;
+            gone.push(row);
+        }
+        tx.commit().map_err(db_err)?;
+        Ok(gone)
+    }
+
     pub fn rekey(&self, from: &str, to: &str) -> Result<usize, String> {
         self.lock()
             .execute(
