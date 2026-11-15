@@ -9,7 +9,7 @@ use super::steps_node::{json_from, BINARY};
 use super::token_creation;
 use super::usage::{SecretFormat, SecretUsage};
 use crate::accounts::Secret;
-use crate::cluster::login_files::CLUSTER_LOGIN_ENTRY;
+use crate::cluster::login_files::{CLUSTER_LOGIN_ENTRY, CLUSTER_LOGIN_ON};
 use crate::lanes::quote;
 use crate::vault::{Redactor, VaultEntry, VaultRequest, VaultValue};
 use sha2::{Digest, Sha256};
@@ -50,13 +50,19 @@ fn cluster_login(m: &Machine) -> SetupStep {
         Cadence::EveryRefresh,
         Probe::remote(
             format!("{} cluster status --json", shell::path(BINARY)),
-            parse_cluster_login,
+            |out, ctx| cluster_login_result(out, ctx, CLUSTER_LOGIN_ON),
         ),
-        StepFix::HowTo(cluster_how_to(m)),
+        StepFix::HowTo(cluster_how_to(m, CLUSTER_LOGIN_ON)),
     )
 }
 
-fn cluster_how_to(m: &Machine) -> String {
+pub(super) fn cluster_how_to(m: &Machine, on: bool) -> String {
+    if !on {
+        return format!(
+            "The cluster login isn't available in this build yet. Sign Claude Code in on {} yourself: in your own Terminal on that machine run claude setup-token.",
+            m.name
+        );
+    }
     let mut text = format!(
         "The cluster sends this. In your own Terminal run claude setup-token, then save {CLUSTER_LOGIN_ENTRY} in the Secret Vault with an expiry date, and allow it on this machine (Secrets…). While the Mac that holds the vault is the primary it sends the token to {}. Then check again.",
         m.name
@@ -70,7 +76,11 @@ fn cluster_how_to(m: &Machine) -> String {
     text
 }
 
-fn parse_cluster_login(out: &RemoteOutput, _ctx: &StepContext) -> CheckResult {
+pub(super) fn cluster_login_result(
+    out: &RemoteOutput,
+    _ctx: &StepContext,
+    on: bool,
+) -> CheckResult {
     let Some(status) = json_from(&out.text) else {
         return CheckResult::cant_tell("the Notchling service there didn't answer");
     };
@@ -88,6 +98,8 @@ fn parse_cluster_login(out: &RemoteOutput, _ctx: &StepContext) -> CheckResult {
     }
     if member["versions"]["logins"]["claude"].as_bool() == Some(true) {
         CheckResult::pass(SENT_BY_THE_CLUSTER)
+    } else if !on {
+        CheckResult::cant_tell("the cluster login isn't available in this build yet")
     } else {
         CheckResult::fail(
             "not sent yet: the Mac that holds the vault sends it while it is the primary",

@@ -373,6 +373,74 @@ fn a_record_that_cannot_be_read_stops_new_launches() {
 }
 
 #[test]
+fn an_unreadable_record_refuses_every_unmapped_row() {
+    let rig = rig("login-job-blanket");
+    rig.hold.deliver(&from_vault(), &good()).expect("stored");
+    assert!(!rig.masks.unidentified_lost());
+    std::fs::write(rig.dir.path().join("logins/jobs.json"), "{not json").unwrap();
+    let again = rig_over(rig.dir, "vault");
+    assert!(again.masks.unidentified_lost());
+}
+
+#[test]
+fn recorded_jobs_are_lost_after_a_restart_even_while_the_login_is_off() {
+    let rig = rig("login-job-off");
+    rig.hold.deliver(&from_vault(), &good()).expect("stored");
+    let token = rig.hold.token().expect("token");
+    rig.hold.launched("6ce4c19c", &token).expect("recorded");
+    let off = rig_with(rig.dir, "vault", false);
+    assert!(session_row(&off, "6ce4c19c", &format!("x {MARKER} y")).is_err());
+    assert!(!off.masks.unidentified_lost());
+}
+
+#[test]
+fn a_full_record_keeps_taking_launches_and_folds_the_older_hashes_into_an_overflow() {
+    let dir = Dir::new("login-job-cap");
+    let logins = dir.path().join("logins");
+    let jobs = crate::cluster_logins_jobs::LoginJobs::load_capped(&logins, 4);
+    for n in 0..4 {
+        jobs.record(&format!("old{n}"), "hash-old")
+            .expect("recorded");
+    }
+    for n in 0..4 {
+        jobs.record(&format!("new{n}"), "hash-new")
+            .expect("recorded");
+        assert!(jobs.usable());
+    }
+    assert!(jobs.all().len() <= 4);
+    let kept = jobs.all();
+    let overflow = jobs.overflow();
+    for n in 0..4 {
+        let old = format!("old{n}");
+        let new = format!("new{n}");
+        assert!(kept.iter().any(|(s, _)| *s == old) || overflow.contains(&"hash-old".to_string()));
+        assert!(kept.iter().any(|(s, _)| *s == new) || overflow.contains(&"hash-new".to_string()));
+    }
+    let again = crate::cluster_logins_jobs::LoginJobs::load_capped(&logins, 4);
+    assert_eq!(again.overflow(), jobs.overflow());
+    assert_eq!(again.all(), jobs.all());
+}
+
+#[test]
+fn an_overflow_of_an_earlier_token_refuses_unmapped_rows_after_a_restart_but_the_current_one_does_not(
+) {
+    let rig = rig("login-job-overflow");
+    rig.hold.deliver(&from_vault(), &good()).expect("stored");
+    let current = crate::cluster_logins_jobs::hash_of(&rig.hold.token().expect("token"));
+    let file = rig.dir.path().join("logins/jobs.json");
+    std::fs::write(
+        &file,
+        format!(r#"{{"v":1,"jobs":{{}},"overflow":["{current}"]}}"#),
+    )
+    .unwrap();
+    let same = rig_over(rig.dir, "vault");
+    assert!(!same.masks.unidentified_lost());
+    std::fs::write(&file, r#"{"v":1,"jobs":{},"overflow":["beef"]}"#).unwrap();
+    let other = rig_over(same.dir, "vault");
+    assert!(other.masks.unidentified_lost());
+}
+
+#[test]
 fn a_disabled_hold_takes_nothing_serves_nothing_and_removes_an_old_file() {
     let rig = rig("login-off");
     rig.hold.deliver(&from_vault(), &good()).expect("stored");

@@ -11,6 +11,7 @@ use super::grant_files_sys::{verify_file_private, Dir, NO_UNIX};
 
 pub const CLAUDE: &str = "claude";
 pub const CLUSTER_LOGIN_ENTRY: &str = "claude-worker";
+pub const CLUSTER_LOGIN_ON: bool = false;
 pub const LOGINS_DIR: &str = "logins";
 const FILE_VERSION: u32 = 1;
 

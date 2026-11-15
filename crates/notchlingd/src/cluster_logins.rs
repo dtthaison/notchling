@@ -16,7 +16,7 @@ pub const LOGIN_DELIVER: &str = "login.deliver";
 pub const LOGIN_REVOKE: &str = "login.revoke";
 pub const NODE_OPS: [&str; 2] = [LOGIN_DELIVER, LOGIN_REVOKE];
 pub const LOGIN_ENTRY: &str = CLUSTER_LOGIN_ENTRY;
-pub const CLUSTER_LOGIN_ON: bool = false;
+pub use notchling_engine::cluster::login_files::CLUSTER_LOGIN_ON;
 pub const OFF_MESSAGE: &str =
     "this build doesn't take a cluster login: Claude Code's background host would inherit it";
 
@@ -61,15 +61,30 @@ impl LoginHold {
         });
         if !enabled {
             hold.wipe();
-            return hold;
         }
-        let current = hold.token().map(|t| hash_of(&t));
-        for (session, hash) in hold.jobs.all() {
+        hold.mark_lost();
+        hold
+    }
+
+    fn mark_lost(&self) {
+        if !self.jobs.usable() {
+            self.masks.mark_granted_as(&lost_name("record"), &[]);
+            return;
+        }
+        let current = self.token().map(|t| hash_of(&t));
+        for (session, hash) in self.jobs.all() {
             if current.as_deref() != Some(hash.as_str()) {
-                hold.masks.mark_granted_as(&lost_name(&session), &[session]);
+                self.masks.mark_granted_as(&lost_name(&session), &[session]);
             }
         }
-        hold
+        if self
+            .jobs
+            .overflow()
+            .iter()
+            .any(|hash| current.as_deref() != Some(hash.as_str()))
+        {
+            self.masks.mark_granted_as(&lost_name("overflow"), &[]);
+        }
     }
 
     pub fn wipe(&self) {

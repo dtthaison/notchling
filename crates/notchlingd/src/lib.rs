@@ -40,6 +40,7 @@ pub mod cluster_logins_send;
 pub mod cluster_mirror;
 pub mod cluster_node;
 pub mod cluster_ops;
+pub mod cluster_publisher;
 pub mod cluster_redact;
 pub mod cluster_sessions;
 pub mod cluster_switches;

@@ -1,5 +1,5 @@
 use self::release::Who;
-pub use self::release::{Looked, ReleaseFor, Released, Still};
+pub use self::release::{was_denied, Looked, ReleaseFor, Released, Still, DENIED};
 use self::vault_events::{Trail, LOG_DOWN};
 use crate::acting_ops::Room;
 use crate::inbox_ops::InboxOps;

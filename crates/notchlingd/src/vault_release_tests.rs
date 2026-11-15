@@ -143,6 +143,7 @@ fn a_denied_release_gives_nothing_and_is_audited_as_denied() {
         (e.code, e.message.as_str()),
         (ErrorCode::NeedsApproval, "The user didn't allow it.")
     );
+    assert!(crate::vault_ops::was_denied(&e));
     assert_eq!(results(&s.sink, "vault.secret_used"), ["denied"]);
     assert!(!format!("{:?}", s.sink.events()).contains(TOKEN));
 }
@@ -182,6 +183,7 @@ fn ask_first_with_no_app_reads_no_value() {
     let reads = *s.item.reads.lock().unwrap();
     let e = failure(s.ops.release(&who(), &names(&["gh"]), &ok));
     assert_eq!(e.code, ErrorCode::NeedsApproval);
+    assert!(!crate::vault_ops::was_denied(&e));
     assert_eq!(*s.item.reads.lock().unwrap(), reads);
     assert_eq!(results(&s.sink, "vault.secret_used"), ["no_app"]);
 }

@@ -3,14 +3,14 @@ pub use crate::cluster_logins_notes::DAY_MS;
 use crate::cluster_logins_notes::{settle, wanted, Notes};
 use crate::grant_broker::{Audit, Clock, Link, Release, Vault, View};
 use crate::grant_calls::Holder;
-use crate::vault_ops::{ReleaseFor, VaultOps};
+use crate::vault_ops::{was_denied, ReleaseFor, VaultOps};
 use notchling_engine::cluster::grants::decode_env;
 use notchling_engine::cluster::login_files::{valid_token, CLAUDE};
 use notchling_engine::cluster::{ClusterState, Member, MemberState, NodeId};
 use notchling_engine::vault::expiry::day_number;
 use notchling_engine::vault::VaultEntry;
 use notchling_engine::versions::Tool;
-use notchling_local_api::{ApiError, ErrorCode};
+use notchling_local_api::ApiError;
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -139,6 +139,7 @@ impl Stamps {
 #[derive(Default)]
 struct Local {
     holds: BTreeMap<String, (String, i64)>,
+    revoke_holds: BTreeMap<String, i64>,
 }
 
 enum Fail {
@@ -251,7 +252,7 @@ impl LoginDeliverer {
         Ok(())
     }
 
-    fn send(&self, member: &Member) -> Result<Stamp, Fail> {
+    fn send(&self, member: &Member) -> Result<(), Fail> {
         let who = ReleaseFor {
             node_name: member.name.clone(),
             job: format!("login:{CLAUDE}"),
@@ -261,7 +262,7 @@ impl LoginDeliverer {
         let names = vec![LOGIN_ENTRY.to_string()];
         let still = || self.still(&member.id);
         let released = self.vault.release(&who, &names, &still).map_err(|e| {
-            if e.code == ErrorCode::NeedsApproval {
+            if was_denied(&e) {
                 Fail::Denied
             } else {
                 Fail::Other
@@ -291,17 +292,19 @@ impl LoginDeliverer {
         self.audit.released(&release).map_err(|_| Fail::Other)?;
         still().map_err(|_| refuse())?;
         let args = json!({"tool": CLAUDE, "value": token.expose(), "expiresMs": expires});
-        self.link
-            .call(&member.id, LOGIN_DELIVER, args)
-            .map_err(|_| Fail::Other)?;
-        Ok(Stamp {
+        let stamp = Stamp {
             updated: entry.updated.clone(),
             expires: entry.expires.clone().unwrap_or_default(),
             sent_ms: now,
-        })
+        };
+        self.stamps.set(&member.id, stamp);
+        self.link
+            .call(&member.id, LOGIN_DELIVER, args)
+            .map_err(|_| Fail::Other)?;
+        Ok(())
     }
 
-    fn revoke_stale(&self, state: &ClusterState, sendable: bool) {
+    fn revoke_stale(&self, state: &ClusterState, sendable: bool, now: i64) {
         for node in self.stamps.nodes() {
             let member = state
                 .members
@@ -312,11 +315,20 @@ impl LoginDeliverer {
                 continue;
             };
             let keep = sendable && member.secrets.allows(LOGIN_ENTRY);
-            if keep || !self.online.online(&node) {
+            let held = lock(&self.local)
+                .revoke_holds
+                .get(node.as_str())
+                .is_some_and(|until| now < *until);
+            if keep || held || !self.online.online(&node) {
                 continue;
             }
             if self.link.call(&node, LOGIN_REVOKE, json!({})).is_ok() {
+                lock(&self.local).revoke_holds.remove(node.as_str());
                 self.stamps.remove(&node);
+            } else {
+                lock(&self.local)
+                    .revoke_holds
+                    .insert(node.as_str().to_string(), now + HOLD_MS);
             }
         }
     }
@@ -341,7 +353,7 @@ impl LoginDeliverer {
         };
         settle(self.notes.as_ref(), notes, found.as_ref());
         let sendable = found.filter(|_| expires.is_some_and(|at| at > now));
-        self.revoke_stale(&state, sendable.is_some());
+        self.revoke_stale(&state, sendable.is_some(), now);
         let Some(entry) = sendable else {
             return;
         };
@@ -363,9 +375,8 @@ impl LoginDeliverer {
                 continue;
             }
             match self.send(member) {
-                Ok(stamp) => {
+                Ok(()) => {
                     lock(&self.local).holds.remove(member.id.as_str());
-                    self.stamps.set(&member.id, stamp);
                 }
                 Err(fail) => {
                     let until = match fail {

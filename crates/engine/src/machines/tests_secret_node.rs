@@ -1,7 +1,7 @@
 use super::catalog;
 use super::fakes_b::*;
-use super::step::{CheckState, StepFix, StepId};
-use super::steps_secret::SENT_BY_THE_CLUSTER;
+use super::step::{CheckState, RemoteOutput, StepFix, StepId};
+use super::steps_secret::{cluster_how_to, cluster_login_result, SENT_BY_THE_CLUSTER};
 use super::tests_node_steps::{node_linux, probe, step};
 
 const ME: &str = "0123456789abcdef0123456789abcdef";
@@ -31,13 +31,41 @@ fn a_node_without_an_sd_worker_says_sent_by_the_cluster_when_it_holds_the_login(
     assert_eq!(SENT_BY_THE_CLUSTER, "Sent by the cluster");
 }
 
+fn result(rig: &Rig, logins: &str, on: bool) -> CheckState {
+    let out = RemoteOutput {
+        text: status(logins),
+        code: 0,
+    };
+    cluster_login_result(&out, &rig.step(), on).state
+}
+
 #[test]
-fn the_step_fails_until_the_node_reports_a_standing_login() {
+fn with_the_cluster_login_on_the_step_fails_until_the_node_reports_a_standing_login() {
     let rig = Rig::new(node_only());
     for logins in [r#"{"claude":false}"#, r#"{}"#, r#"{"codex":true}"#] {
-        let state = probe(&rig, &StepId::CLAUDE_LOGIN, &status(logins), 0);
+        let state = result(&rig, logins, true);
         assert!(state.is_fail(), "{logins}: {state:?}");
     }
+    assert!(matches!(
+        result(&rig, r#"{"claude":true}"#, true),
+        CheckState::Pass(_)
+    ));
+}
+
+#[test]
+fn while_the_cluster_login_is_off_a_missing_login_cannot_be_told_and_is_no_failure() {
+    const { assert!(!crate::cluster::login_files::CLUSTER_LOGIN_ON) };
+    let rig = Rig::new(node_only());
+    for logins in [r#"{"claude":false}"#, r#"{}"#] {
+        let state = result(&rig, logins, false);
+        assert!(matches!(state, CheckState::CantTell(_)), "{state:?}");
+        let real = probe(&rig, &StepId::CLAUDE_LOGIN, &status(logins), 0);
+        assert!(matches!(real, CheckState::CantTell(_)), "{real:?}");
+    }
+    assert!(matches!(
+        result(&rig, r#"{"claude":true}"#, false),
+        CheckState::Pass(_)
+    ));
 }
 
 #[test]
@@ -63,9 +91,10 @@ fn the_step_reads_the_nodes_own_status_and_has_no_fix_that_writes() {
     match &found.fix {
         StepFix::HowTo(text) => {
             assert!(
-                text.contains("claude-worker") && text.contains("expiry"),
+                text.contains("setup-token") && text.contains("isn't available in this build"),
                 "{text}"
             );
+            assert!(!text.contains("claude-worker"), "{text}");
         }
         _ => panic!("the cluster sends the login; the step has a how-to, not a Fix"),
     }
@@ -104,27 +133,35 @@ fn a_node_only_worker_has_no_claude_env_usage_and_an_sd_worker_node_keeps_it() {
 }
 
 #[test]
-fn the_how_to_names_the_cluster_entry_the_allowlist_and_a_differing_secret() {
+fn with_the_login_on_the_how_to_names_the_cluster_entry_the_allowlist_and_a_differing_secret() {
     let mut m = node_only();
     m.claude_secret = "my-own-claude".to_string();
-    let found = step(&m, &StepId::CLAUDE_LOGIN);
-    match &found.fix {
-        StepFix::HowTo(text) => {
-            assert!(
-                text.contains("claude-worker") && text.contains("expiry"),
-                "{text}"
-            );
-            assert!(text.contains("allow it on this machine"), "{text}");
-            assert!(
-                text.contains("my-own-claude") && text.contains("only"),
-                "{text}"
-            );
-        }
-        _ => panic!("a how-to"),
-    }
+    let text = cluster_how_to(&m, true);
+    assert!(
+        text.contains("claude-worker") && text.contains("expiry"),
+        "{text}"
+    );
+    assert!(text.contains("allow it on this machine"), "{text}");
+    assert!(
+        text.contains("my-own-claude") && text.contains("only"),
+        "{text}"
+    );
     let same = node_only();
-    match &step(&same, &StepId::CLAUDE_LOGIN).fix {
-        StepFix::HowTo(text) => assert!(!text.contains("isn't used"), "{text}"),
-        _ => panic!("a how-to"),
-    }
+    assert!(!cluster_how_to(&same, true).contains("isn't used"));
+}
+
+#[test]
+fn while_the_login_is_off_the_how_to_says_to_sign_in_there_by_hand() {
+    let mut m = node_only();
+    m.claude_secret = "my-own-claude".to_string();
+    let text = cluster_how_to(&m, false);
+    assert!(text.contains("isn't available in this build yet"), "{text}");
+    assert!(
+        text.contains("yourself") && text.contains("setup-token"),
+        "{text}"
+    );
+    assert!(
+        !text.contains("claude-worker") && !text.contains("my-own-claude"),
+        "{text}"
+    );
 }

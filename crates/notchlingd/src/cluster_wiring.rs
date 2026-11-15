@@ -13,6 +13,7 @@ use crate::cluster_node::{
     ClusterLog, ClusterNode, ClusterSetup, Hooks, JoinAsk, LocalCalls, NetSide, Probe, Submit, TICK,
 };
 use crate::cluster_ops::{follow_switch, ClusterOps};
+pub use crate::cluster_publisher::Publisher;
 use crate::cluster_sessions::{
     is_client, HandlerRows, NodeSource, Refresher, RemoteSessions, SessionCalls,
 };
@@ -552,40 +553,6 @@ pub fn forwarder(node: &Result<Arc<ClusterNode>, String>) -> Arc<dyn Forward> {
     match node {
         Ok(node) => Arc::new(NodeForward::new(node.clone())),
         Err(_) => Arc::new(NoNodeForward),
-    }
-}
-
-pub struct Publisher {
-    room: Arc<dyn Room>,
-    remote: Arc<RemoteSessions>,
-    local: Arc<Mutex<Value>>,
-    last: Mutex<Option<Value>>,
-}
-
-impl Publisher {
-    pub fn new(
-        room: Arc<dyn Room>,
-        remote: Arc<RemoteSessions>,
-        local: Arc<Mutex<Value>>,
-    ) -> Publisher {
-        Publisher {
-            room,
-            remote,
-            local,
-            last: Mutex::new(None),
-        }
-    }
-
-    pub fn publish(&self) {
-        let mut last = self.last.lock().unwrap_or_else(|e| e.into_inner());
-        let local = self.local.lock().unwrap_or_else(|e| e.into_inner()).clone();
-        let merged = self.remote.merge(&local);
-        if last.as_ref() == Some(&merged) {
-            return;
-        }
-        self.room
-            .publish(topics::SESSIONS, topics::SESSIONS_CHANGED, &merged);
-        *last = Some(merged);
     }
 }
 

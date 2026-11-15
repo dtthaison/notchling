@@ -13,6 +13,17 @@ pub struct ReleaseFor {
     pub folder: String,
 }
 
+pub const DENIED: &str = "denied";
+
+pub fn was_denied(error: &ApiError) -> bool {
+    error
+        .data
+        .as_ref()
+        .and_then(|d| d.get(DENIED))
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+}
+
 pub type Still<'a> = dyn Fn() -> Result<(), String> + 'a;
 
 pub(super) enum Who<'a> {
@@ -74,7 +85,11 @@ impl VaultOps {
                         State::Expired => SecretResult::Expired,
                         _ => SecretResult::Cancelled,
                     };
-                    return Err((said_no("The user didn't allow it."), why));
+                    let mut error = said_no("The user didn't allow it.");
+                    if why == SecretResult::Denied {
+                        error = error.with_data(json!({ DENIED: true }));
+                    }
+                    return Err((error, why));
                 }
                 Decision::Once => {}
                 Decision::Always => {
