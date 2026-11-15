@@ -4,7 +4,7 @@ use super::claims::Claim;
 use super::failover::{arming_id, Failover, Grantor, REACH_MS};
 use super::failover_tests::{cluster, HALF_HOUR, HOUR};
 use super::id::Tool;
-use super::members::{MemberState, Term};
+use super::members::{MemberState, Term, MAX_TERM_N};
 use super::outward::CutStep;
 use super::promote::{
     next, Facts, MovingSession, Promote, PromoteAction, PromoteEvent, PromoteStep, RestoredSession,
@@ -739,4 +739,42 @@ fn announce_closes_the_saga() {
     assert!(run.feed(PromoteEvent::Announced).is_empty());
     assert_eq!(run.p.step, PromoteStep::Done);
     assert!(run.p.is_terminal());
+}
+
+#[test]
+fn a_term_that_cannot_grow_fails_the_promote_cleanly() {
+    let mut run = Run::new(false, true);
+    let mut f = plain();
+    f.state.term.n = MAX_TERM_N;
+    run.begin(f);
+    let actions = run.quiet_reach();
+    assert!(
+        matches!(&actions[..], [PromoteAction::Fail { .. }]),
+        "{actions:?}"
+    );
+    assert!(failed(&run).is_some_and(|r| r.contains("can't go any higher")));
+    assert!(!run.all.iter().any(is_term));
+    assert!(!run.all.iter().any(|a| matches!(a, PromoteAction::Revoke)));
+    assert!(run.p.is_terminal());
+}
+
+#[test]
+fn the_last_storable_term_is_still_a_promote() {
+    let mut run = Run::new(false, true);
+    let mut f = plain();
+    f.state.term.n = MAX_TERM_N - 1;
+    run.begin(f);
+    run.quiet_reach();
+    assert_eq!(run.p.step, PromoteStep::Bump);
+    let want = Term {
+        n: MAX_TERM_N,
+        node: id("m1"),
+    };
+    assert!(run
+        .all
+        .contains(&PromoteAction::Journal(Box::new(Command::Term {
+            term: want.clone()
+        }))));
+    run.feed(PromoteEvent::Bumped(Ok(())));
+    assert!(run.all.contains(&PromoteAction::PushTerm { term: want }));
 }

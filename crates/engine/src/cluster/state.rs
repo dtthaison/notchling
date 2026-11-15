@@ -155,6 +155,7 @@ pub enum CommandError {
     Removed(NodeId),
     BadTransition,
     Exists,
+    TermTooLarge,
 }
 
 impl std::fmt::Display for CommandError {
@@ -165,6 +166,7 @@ impl std::fmt::Display for CommandError {
             CommandError::Removed(n) => write!(f, "{n} was removed"),
             CommandError::BadTransition => f.write_str("that change is not allowed now"),
             CommandError::Exists => f.write_str("already there"),
+            CommandError::TermTooLarge => f.write_str("that term is too large"),
         }
     }
 }
@@ -284,14 +286,19 @@ pub fn start(
             home,
             vault,
             members,
-        } => (
-            id.clone(),
-            name.clone(),
-            term.clone(),
-            home.clone(),
-            vault.clone(),
-            members.clone(),
-        ),
+        } => {
+            if !term.storable() {
+                return Err(CommandError::TermTooLarge);
+            }
+            (
+                id.clone(),
+                name.clone(),
+                term.clone(),
+                home.clone(),
+                vault.clone(),
+                members.clone(),
+            )
+        }
         _ => return Err(CommandError::BadTransition),
     };
     let mut state = ClusterState {
@@ -334,6 +341,9 @@ pub fn apply(
             members,
         } => sync(state, id, name, term, home, vault, members)?,
         Command::Term { term } => {
+            if !term.storable() {
+                return Err(CommandError::TermTooLarge);
+            }
             if *term <= state.term {
                 return Err(CommandError::BadTransition);
             }
@@ -517,6 +527,9 @@ pub fn apply(
             changes
         }
         Command::Claim { claim } => {
+            if !claim.term.storable() {
+                return Err(CommandError::TermTooLarge);
+            }
             active_mut(state, &claim.node)?;
             if !put_claim(&mut state.claims, claim) {
                 return Ok(Applied::none());
@@ -624,6 +637,9 @@ fn sync(
     vault: &NodeId,
     members: &[Member],
 ) -> Result<Vec<Change>, CommandError> {
+    if !term.storable() {
+        return Err(CommandError::TermTooLarge);
+    }
     if id != state.id || *term < state.term {
         return Err(CommandError::BadTransition);
     }

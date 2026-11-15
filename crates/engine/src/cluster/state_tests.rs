@@ -2,7 +2,7 @@ use serde_json::json;
 
 use super::id::{Role, Tool};
 use super::jobs::{job_id, JobSpec, JobState};
-use super::members::{can_be_master_default, Desired, MemberState, Term};
+use super::members::{can_be_master_default, Desired, MemberState, Term, MAX_TERM_N};
 use super::state::{apply, role_of, start, ClusterState, Command, CommandError};
 use super::testkit::{id, member, versions};
 
@@ -455,4 +455,56 @@ fn state_round_trips_through_json() {
     let text = serde_json::to_string(&state).expect("json");
     let back: ClusterState = serde_json::from_str(&text).expect("state");
     assert_eq!(back, state);
+}
+
+#[test]
+fn a_term_no_database_can_store_is_refused_everywhere() {
+    let mut state = created();
+    joined(&mut state, "m1", "macos", true);
+    let before = state.clone();
+    for n in [MAX_TERM_N + 1, u64::MAX] {
+        let term = Term { n, node: id("m1") };
+        let moved = apply(&mut state, Command::Term { term: term.clone() }, 80);
+        assert_eq!(moved.err(), Some(CommandError::TermTooLarge), "{n}");
+        let members: Vec<_> = state.members.values().cloned().collect();
+        let synced = apply(
+            &mut state,
+            Command::Sync {
+                id: "c1".to_string(),
+                name: "home".to_string(),
+                term: term.clone(),
+                home: id("m1"),
+                vault: id("m5"),
+                members: members.clone(),
+            },
+            81,
+        );
+        assert_eq!(synced.err(), Some(CommandError::TermTooLarge), "{n}");
+        let started = start(
+            Command::Sync {
+                id: "c1".to_string(),
+                name: "home".to_string(),
+                term,
+                home: id("m1"),
+                vault: id("m5"),
+                members,
+            },
+            82,
+        );
+        assert_eq!(started.err(), Some(CommandError::TermTooLarge), "{n}");
+    }
+    assert_eq!(state, before);
+}
+
+#[test]
+fn the_largest_storable_term_is_still_accepted() {
+    let mut state = created();
+    joined(&mut state, "m1", "macos", true);
+    let top = Term {
+        n: MAX_TERM_N,
+        node: id("m1"),
+    };
+    apply(&mut state, Command::Term { term: top.clone() }, 80).expect("term");
+    assert_eq!(state.term, top);
+    assert_eq!(state.home, id("m1"));
 }

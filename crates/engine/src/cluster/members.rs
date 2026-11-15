@@ -12,6 +12,14 @@ pub struct Term {
     pub node: NodeId,
 }
 
+pub const MAX_TERM_N: u64 = i64::MAX as u64;
+
+impl Term {
+    pub fn storable(&self) -> bool {
+        self.n <= MAX_TERM_N
+    }
+}
+
 impl fmt::Display for Term {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}.{}", self.n, self.node)

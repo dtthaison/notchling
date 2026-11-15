@@ -3,7 +3,7 @@ use std::sync::Arc;
 use super::claims::Claim;
 use super::failover::{promote_safety, Failover, Grantor, Safety, REACH_MS};
 use super::id::{NodeId, Tool};
-use super::members::{MemberState, Term};
+use super::members::{MemberState, Term, MAX_TERM_N};
 use super::outward::CutStep;
 use super::returns::{continue_here, Notice};
 use super::snapshot::repo_state::Movable;
@@ -259,20 +259,28 @@ fn confirm(q: &mut Promote, now: u64) -> Vec<PromoteAction> {
     }
 }
 
-fn new_term(facts: &Facts, me: &NodeId) -> Term {
-    Term {
-        n: facts.state.term.n.saturating_add(1),
-        node: me.clone(),
+fn new_term(facts: &Facts, me: &NodeId) -> Result<Term, String> {
+    match facts.state.term.n.checked_add(1) {
+        Some(n) if n <= MAX_TERM_N => Ok(Term {
+            n,
+            node: me.clone(),
+        }),
+        _ => Err(format!(
+            "{} can't be promoted: the cluster's term can't go any higher",
+            name(&facts.state, me)
+        )),
     }
 }
 
 fn bump(q: &mut Promote, facts: &Facts) -> Vec<PromoteAction> {
+    let term = match new_term(facts, &q.node) {
+        Ok(term) => term,
+        Err(reason) => return fail(q, reason),
+    };
     q.step = PromoteStep::Bump;
     vec![
         PromoteAction::Revoke,
-        PromoteAction::Journal(Box::new(Command::Term {
-            term: new_term(facts, &q.node),
-        })),
+        PromoteAction::Journal(Box::new(Command::Term { term })),
     ]
 }
 
@@ -289,9 +297,11 @@ fn bumped(q: &mut Promote, now: u64) -> Vec<PromoteAction> {
     let Some(facts) = q.facts.clone() else {
         return fail(q, "promote has no facts".to_string());
     };
-    let mut actions = vec![PromoteAction::PushTerm {
-        term: new_term(&facts, &q.node),
-    }];
+    let term = match new_term(&facts, &q.node) {
+        Ok(term) => term,
+        Err(reason) => return fail(q, reason),
+    };
+    let mut actions = vec![PromoteAction::PushTerm { term }];
     let sessions: Vec<String> = moving(&facts).iter().map(|s| s.id.clone()).collect();
     if sessions.is_empty() {
         actions.extend(hold(q, now));
@@ -310,7 +320,10 @@ fn restored(q: &mut Promote, done: Vec<RestoredSession>, now: u64) -> Vec<Promot
     let Some(set) = &facts.set else {
         return hold(q, now);
     };
-    let term = new_term(&facts, &q.node);
+    let term = match new_term(&facts, &q.node) {
+        Ok(term) => term,
+        Err(reason) => return fail(q, reason),
+    };
     let mut actions = Vec::new();
     for session in moving(&facts) {
         let Some(found) = done.iter().find(|r| r.session == session.id) else {
