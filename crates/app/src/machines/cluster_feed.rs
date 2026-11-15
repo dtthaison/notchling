@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
+use notchling_engine::cluster::ready::{checks_in, Checks};
 use notchling_engine::machines::step::ClusterTokens;
 use notchling_local_api::{ops, Client, ClientError, ClientKind, ConnectOptions, CALL_TIMEOUT};
 use serde_json::{json, Value};
@@ -16,6 +17,7 @@ type CachedId = (Instant, Result<Option<String>, String>);
 pub struct DaemonTokens {
     socket: PathBuf,
     id: Mutex<Option<CachedId>>,
+    seen: Mutex<Option<(Instant, Option<Value>)>>,
 }
 
 impl DaemonTokens {
@@ -23,7 +25,20 @@ impl DaemonTokens {
         DaemonTokens {
             socket,
             id: Mutex::new(None),
+            seen: Mutex::new(None),
         }
+    }
+
+    fn recent_status(&self) -> Option<Value> {
+        let mut cached = self.seen.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((at, status)) = cached.as_ref() {
+            if at.elapsed() < ID_TTL {
+                return status.clone();
+            }
+        }
+        let status = self.status().ok();
+        *cached = Some((Instant::now(), status.clone()));
+        status
     }
 
     fn call(&self, op: &str) -> Result<Value, String> {
@@ -70,6 +85,10 @@ impl ClusterTokens for DaemonTokens {
 
     fn can_be_master(&self, _machine: &str) -> Option<bool> {
         None
+    }
+
+    fn master_checks(&self, node: Option<&str>) -> Option<Checks> {
+        checks_in(&self.recent_status()?, node?)
     }
 
     fn can_be_master_of(&self, _machine: &str, node: Option<&str>) -> Option<bool> {

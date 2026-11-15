@@ -25,6 +25,7 @@ pub mod shell;
 pub mod status;
 pub mod step;
 pub mod steps_machine;
+pub mod steps_master;
 pub mod steps_node;
 mod steps_node_binary;
 mod steps_node_service;
@@ -75,6 +76,8 @@ mod tests_forms;
 mod tests_machine_steps;
 #[cfg(test)]
 mod tests_machine_tools;
+#[cfg(test)]
+mod tests_master_steps;
 #[cfg(test)]
 mod tests_merge;
 #[cfg(test)]

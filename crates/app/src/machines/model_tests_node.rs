@@ -161,6 +161,8 @@ fn a_daemon_that_is_down_is_an_error_not_no_cluster() {
     assert_eq!(tokens.cluster_id(), Err(NOT_RUNNING.to_string()));
     assert_eq!(tokens.cluster_id(), Err(NOT_RUNNING.to_string()));
     assert_eq!(tokens.can_be_master_of("m1", Some(NODE_A)), None);
+    assert_eq!(tokens.master_checks(Some(NODE_A)), None);
+    assert_eq!(tokens.master_checks(None), None);
 }
 
 #[test]

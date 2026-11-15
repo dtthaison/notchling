@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use super::id::{tool_of, Tool};
+use super::ready::HostFacts;
 use crate::versions::{self, Version};
 
 pub const NODE_PROTO: u32 = 1;
@@ -23,6 +24,8 @@ pub struct Versions {
     pub tools: BTreeMap<versions::Tool, Version>,
     #[serde(default)]
     pub logins: BTreeMap<versions::Tool, bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host: Option<HostFacts>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

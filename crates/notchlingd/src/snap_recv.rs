@@ -244,10 +244,6 @@ pub struct Snap {
     pub node: Arc<SnapNode>,
 }
 
-pub fn no_member_is_ready(_member: &NodeId) -> bool {
-    false
-}
-
 pub fn build(
     cluster: PathBuf,
     blobs: Arc<Blobs>,

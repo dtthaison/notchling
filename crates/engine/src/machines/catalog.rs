@@ -2,7 +2,7 @@ use super::engine::Catalog;
 use super::registry::{Machine, MachineOs};
 use super::step::{SetupStep, StepId};
 use super::{
-    steps_machine, steps_node, steps_repo, steps_sd, steps_secret, steps_selfupdate,
+    steps_machine, steps_master, steps_node, steps_repo, steps_sd, steps_secret, steps_selfupdate,
     steps_versions, token_scope,
 };
 use std::sync::Arc;
@@ -15,6 +15,7 @@ pub fn steps(m: &Machine, all: &[Machine]) -> Vec<SetupStep> {
         out.push(step);
         if reachable && m.node.is_some() {
             out.extend(steps_node::steps(m));
+            out.extend(steps_master::steps(m));
         }
         if after {
             out.push(steps_secret::claude_login(m));

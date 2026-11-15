@@ -14,6 +14,7 @@ pub fn own() -> Versions {
         arch: std::env::consts::ARCH.to_string(),
         tools: BTreeMap::new(),
         logins: BTreeMap::new(),
+        host: None,
     }
 }
 

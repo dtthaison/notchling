@@ -4,6 +4,7 @@ use crate::op_group::OpGroup;
 use crate::switches::SwitchFlag;
 use notchling_engine::cluster::join::decode_token;
 use notchling_engine::cluster::main_sessions::valid_id;
+use notchling_engine::cluster::ready::annotate;
 use notchling_engine::cluster::{Desired, LocalCmd, NodeId};
 use notchling_events::kinds::security::SwitchCause;
 use notchling_events::spec::Outcome;
@@ -26,6 +27,7 @@ pub struct ClusterOps {
     link: Arc<SwitchFlag>,
     room: Arc<dyn Room>,
     audit: ClusterLog,
+    last_set_mb: Arc<dyn Fn() -> u64 + Send + Sync>,
 }
 
 fn text<'a>(args: &'a Value, key: &str, usage: &str) -> Result<&'a str, ApiError> {
@@ -63,7 +65,13 @@ impl ClusterOps {
             link,
             room,
             audit,
+            last_set_mb: Arc::new(|| 0),
         }
+    }
+
+    pub fn with_last_set(mut self, last_set_mb: Arc<dyn Fn() -> u64 + Send + Sync>) -> ClusterOps {
+        self.last_set_mb = last_set_mb;
+        self
     }
 
     fn node(&self) -> Result<&Arc<ClusterNode>, ApiError> {
@@ -77,7 +85,11 @@ impl ClusterOps {
 
     fn status(&self) -> Value {
         match &self.node {
-            Ok(node) => node.status(),
+            Ok(node) => {
+                let mut status = node.status();
+                annotate(&mut status, (self.last_set_mb)());
+                status
+            }
             Err(why) => {
                 json!({"cluster": Value::Null, "me": Value::Null, "members": [], "error": why})
             }

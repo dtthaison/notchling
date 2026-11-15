@@ -22,6 +22,7 @@ use crate::late_emit::Events;
 use crate::layout::Layout;
 use crate::shell_jobs::ShellJobs;
 use crate::snap_observe::{SnapObserver, EVERY as OBSERVE_EVERY};
+use crate::snap_ready::{last_set_mb_of, predicate, SenderSlot};
 use crate::snap_recv::{self, SnapCalls};
 use crate::snap_run::{Context as SnapContext, SnapRunner, RETRY as STAGE_RETRY};
 use crate::snap_send::SnapSender;
@@ -262,7 +263,15 @@ fn start_node(
     let loopback = loopback_ok(std::env::var_os(LOOPBACK_ENV).as_deref(), exe.as_deref());
     let pins = Pins::default();
     let transport = Arc::new(TcpTls::new(identity, pins.clone(), loopback));
-    let probe: Probe = Box::new(move || with_tools(versions.tool_versions()));
+    let host = crate::cluster_host_facts::real(
+        Arc::new(RealLauncher::with_claude(PathBuf::from("claude"))),
+        layout.home(),
+    );
+    let probe: Probe = Box::new(move || {
+        let mut found = with_tools(versions.tool_versions());
+        found.host = Some(host.facts());
+        found
+    });
     let setup = ClusterSetup {
         cluster_dir,
         fixture: layout.fixture,
@@ -340,12 +349,14 @@ impl ClusterParts {
         let git: Arc<dyn Launcher> = launcher.clone();
         let blobs = Blobs::new(layout.cluster_dir());
         let workspace = Workspace::new(layout.cluster_dir(), launcher.clone(), blobs.clone());
+        let sender_slot: SenderSlot = Arc::new(OnceLock::new());
         let snap = snap_recv::build(
             layout.cluster_dir(),
             blobs,
             holder.clone(),
-            Arc::new(snap_recv::no_member_is_ready),
+            predicate(holder.clone(), sender_slot.clone()),
         );
+        let _ = sender_slot.set(snap.sender.clone());
         let snap_run = Arc::new(SnapRunner::spawn(
             snap.sender.clone(),
             SnapContext {
@@ -411,7 +422,11 @@ impl ClusterParts {
                 OBSERVE_EVERY,
             ));
         }
-        let ops = Arc::new(ClusterOps::new(node.clone(), link, room.clone(), audit));
+        let last_set = sender_slot.clone();
+        let ops = Arc::new(
+            ClusterOps::new(node.clone(), link, room.clone(), audit)
+                .with_last_set(Arc::new(move || last_set_mb_of(&last_set))),
+        );
         let code: Arc<dyn CodeSender> = sender.clone();
         let dispatch = DispatchOps::with_code(node.clone(), shells.clone(), Some(code));
         let returns = ReturnOps::new(sender);

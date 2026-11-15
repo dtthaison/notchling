@@ -1,6 +1,7 @@
 use crate::cluster_main::{agents_of, is_home};
 use crate::cluster_node::ClusterNode;
 use crate::cluster_sessions::LocalRows;
+use crate::snap_ready::{watch_step, ReadyWatch};
 use crate::snap_send::SnapSender;
 use notchling_engine::cluster::snapshot::{Observed, SessionState};
 use notchling_engine::sessions::{Agent, AgentGroup};
@@ -231,8 +232,10 @@ impl SnapObserver {
             .name("snap-observe".into())
             .spawn(move || {
                 let mut known = BTreeMap::new();
+                let mut watch = ReadyWatch::default();
                 while let Err(RecvTimeoutError::Timeout) = stopped.recv_timeout(every) {
                     tick(&node, rows.as_ref(), &mut known);
+                    watch_step(&node, &sender, &mut watch);
                     sender.tick();
                 }
             });

@@ -36,6 +36,10 @@ impl StepId {
     pub const NODE_BINARY: StepId = StepId(Cow::Borrowed("node-binary"));
     pub const NODE_SERVICE: StepId = StepId(Cow::Borrowed("node-service"));
     pub const NODE_JOINED: StepId = StepId(Cow::Borrowed("node-joined"));
+    pub const MASTER_ENCRYPTED: StepId = StepId(Cow::Borrowed("master-encrypted"));
+    pub const MASTER_SAME_HOME: StepId = StepId(Cow::Borrowed("master-same-home"));
+    pub const MASTER_SPACE: StepId = StepId(Cow::Borrowed("master-space"));
+    pub const MASTER_TOOLS: StepId = StepId(Cow::Borrowed("master-tools"));
 
     pub fn self_update(tool: Tool) -> StepId {
         StepId(Cow::Owned(format!("self-update:{}", tool.name())))
@@ -364,6 +368,10 @@ pub trait ClusterTokens: Send + Sync {
             .map(|(name, node)| (name.clone(), self.can_be_master_of(name, node.as_deref())))
             .collect()
     }
+    fn master_checks(&self, node: Option<&str>) -> Option<crate::cluster::ready::Checks> {
+        let _ = node;
+        None
+    }
 }
 
 pub struct NoCluster;
@@ -406,6 +414,7 @@ pub struct StepContext {
     pub masks: Masks,
     pub tokens: Arc<dyn ClusterTokens>,
     pub dist_dir: Option<PathBuf>,
+    pub node: Option<String>,
 }
 
 impl StepContext {

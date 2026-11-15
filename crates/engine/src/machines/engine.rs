@@ -252,11 +252,28 @@ impl SetupEngine {
 
     pub fn steps(&self, m: &Machine) -> Vec<SetupStep> {
         let all = self.current_machines();
-        (self.catalog.steps)(&self.overlaid(m), &all)
+        let list = (self.catalog.steps)(&self.overlaid(m), &all);
+        super::steps_master::only_masters(
+            list,
+            self.tokens.as_ref(),
+            self.node_of(&m.name).as_deref(),
+        )
+    }
+
+    fn node_of(&self, machine: &str) -> Option<String> {
+        lock(&self.state)
+            .facts
+            .get(machine)
+            .and_then(|d| d.node.clone())
     }
 
     pub(super) fn step_list(&self, m: &Machine) -> Vec<SetupStep> {
         let list = (self.catalog.steps)(m, &self.current_machines());
+        let list = super::steps_master::only_masters(
+            list,
+            self.tokens.as_ref(),
+            self.node_of(&m.name).as_deref(),
+        );
         let tools = lock(&self.state)
             .facts
             .get(&m.name)
@@ -297,6 +314,7 @@ impl SetupEngine {
             masks: masks.clone(),
             tokens: self.tokens.clone(),
             dist_dir: self.dist_dir.clone(),
+            node: self.node_of(&m.name),
         }
     }
 

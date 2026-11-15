@@ -169,6 +169,14 @@ impl SnapSender {
         targets
     }
 
+    pub fn last_set_mb(&self) -> u64 {
+        let state = lock(&self.inner.state);
+        state.latest.as_ref().map_or(0, |o| {
+            let bytes: u64 = o.manifest.parts.iter().map(|p| p.len).sum();
+            bytes.div_ceil(1024 * 1024)
+        })
+    }
+
     pub fn tick(&self) -> Vec<NodeId> {
         let mut started = Vec::new();
         for id in self.inner.targets() {
