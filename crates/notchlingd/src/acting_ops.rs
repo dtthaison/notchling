@@ -320,9 +320,26 @@ impl ActingOps {
     }
 
     fn typing_lock(&self, agent: &Agent) -> Arc<Mutex<()>> {
-        match &agent.target {
-            AgentTarget::Job(job) => self.typing_locks().for_job(job),
-            _ => self.typing_locks().for_job(&agent.id),
+        self.typing_locks().for_job(&typing_key(agent))
+    }
+
+    fn locked<R>(&self, agent: &Agent, then: impl FnOnce(&Agent) -> R) -> R {
+        let mut current = agent.clone();
+        loop {
+            let lock = self.typing_lock(&current);
+            let one = lock.lock().unwrap_or_else(|e| e.into_inner());
+            let fresh = self
+                .agents_now()
+                .into_iter()
+                .find(|a| a.id == current.id)
+                .unwrap_or_else(|| current.clone());
+            if typing_key(&fresh) == typing_key(&current) {
+                let result = then(&fresh);
+                drop(one);
+                return result;
+            }
+            drop(one);
+            current = fresh;
         }
     }
 
@@ -342,9 +359,7 @@ impl ActingOps {
         plan: &Plan,
         log: &mut dyn QueueLog,
     ) -> Result<Outcome, PlayError> {
-        let lock = self.typing_lock(agent);
-        let _one = lock.lock().unwrap_or_else(|e| e.into_inner());
-        self.play_locked(agent, plan, log, None)
+        self.locked(agent, |agent| self.play_locked(agent, plan, log, None))
     }
 
     pub(crate) fn play_reply(
@@ -363,9 +378,9 @@ impl ActingOps {
         log: &mut dyn QueueLog,
         clear_box: bool,
     ) -> Result<Outcome, PlayError> {
-        let lock = self.typing_lock(agent);
-        let _one = lock.lock().unwrap_or_else(|e| e.into_inner());
-        self.play_inner(agent, plan, log, None, None, clear_box)
+        self.locked(agent, |agent| {
+            self.play_inner(agent, plan, log, None, None, clear_box)
+        })
     }
 
     pub(crate) fn play_guarded(
@@ -375,9 +390,9 @@ impl ActingOps {
         log: &mut dyn QueueLog,
         guard: &dyn Fn() -> bool,
     ) -> Result<Outcome, PlayError> {
-        let lock = self.typing_lock(agent);
-        let _one = lock.lock().unwrap_or_else(|e| e.into_inner());
-        self.play_inner(agent, plan, log, None, Some(guard), false)
+        self.locked(agent, |agent| {
+            self.play_inner(agent, plan, log, None, Some(guard), false)
+        })
     }
 
     fn play_locked(
@@ -555,28 +570,28 @@ impl ActingOps {
 
     fn interrupt(&self, args: &Value) -> Result<Value, ApiError> {
         let id = text_arg(args, "id")?.to_string();
-        let lock = self.typing_lock(&self.agent(args)?);
-        let _one = lock.lock().unwrap_or_else(|e| e.into_inner());
-        let agent = self.agent(args)?;
-        let working = agent.group == AgentGroup::Working;
-        {
-            let mut marks = self.stopping.lock().unwrap_or_else(|e| e.into_inner());
-            marks.retain(|_, at| at.elapsed() < STOPPING_FOR);
-            if working && marks.contains_key(&id) {
-                return Ok(json!({"sent": false, "stopping": true}));
+        let first = self.agent(args)?;
+        self.locked(&first, |agent| {
+            let working = agent.group == AgentGroup::Working;
+            {
+                let mut marks = self.stopping.lock().unwrap_or_else(|e| e.into_inner());
+                marks.retain(|_, at| at.elapsed() < STOPPING_FOR);
+                if working && marks.contains_key(&id) {
+                    return Ok(json!({"sent": false, "stopping": true}));
+                }
             }
-        }
-        let plan = plan::interrupt(working).map_err(|e| match e {
-            PlanError::NotWorking => bad(
-                "the session isn't working, so there's nothing to stop (Esc on an idle session opens rewind)",
-            ),
-        })?;
-        self.play_locked(&agent, &plan, &mut NoLog, None)?;
-        self.stopping
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .insert(id, Instant::now());
-        Ok(json!({"sent": true}))
+            let plan = plan::interrupt(working).map_err(|e| match e {
+                PlanError::NotWorking => bad(
+                    "the session isn't working, so there's nothing to stop (Esc on an idle session opens rewind)",
+                ),
+            })?;
+            self.play_locked(agent, &plan, &mut NoLog, None)?;
+            self.stopping
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert(id, Instant::now());
+            Ok(json!({"sent": true}))
+        })
     }
 
     fn take_back(&self, args: &Value) -> Result<Value, ApiError> {
@@ -669,16 +684,14 @@ impl ActingOps {
         }
         let expect = expect_arg(args)?;
         let agent = self.agent(args)?;
-        {
-            let lock = self.typing_lock(&agent);
-            let _one = lock.lock().unwrap_or_else(|e| e.into_inner());
+        self.locked(&agent, |agent| {
             self.play_locked(
-                &agent,
+                agent,
                 &plan::permission(decision, &expect),
                 &mut NoLog,
                 Some(&expect),
-            )?;
-        }
+            )
+        })?;
         self.note_answered(
             session_ref(&agent),
             PromptKind::Permission,
@@ -759,19 +772,24 @@ impl ActingOps {
             AgentTarget::Job(job) if agent.can_reply() => job.clone(),
             _ => return Err(bad("this session has no terminal to read")),
         };
-        let lock = self.typing_lock(&agent);
-        let _one = lock.lock().unwrap_or_else(|e| e.into_inner());
-        let config_dir = config_dir_for_job(&self.roots, &job).or_else(|| agent.config_dir.clone());
-        let mut pty = self.attacher.attach(&job, config_dir.as_deref())?;
-        let read = read_question(pty.as_mut(), &job)
-            .map_err(|f| ApiError::new(ErrorCode::Failed, f.to_string()))?;
-        Ok(match read {
-            Some(q) => {
-                let mut out = question_json(&q);
-                out["id"] = json!(q.tool_use_id);
-                out
-            }
-            None => json!({"items": []}),
+        self.locked(&agent, |agent| {
+            let job = match &agent.target {
+                AgentTarget::Job(now) => now.clone(),
+                _ => job,
+            };
+            let config_dir =
+                config_dir_for_job(&self.roots, &job).or_else(|| agent.config_dir.clone());
+            let mut pty = self.attacher.attach(&job, config_dir.as_deref())?;
+            let read = read_question(pty.as_mut(), &job)
+                .map_err(|f| ApiError::new(ErrorCode::Failed, f.to_string()))?;
+            Ok(match read {
+                Some(q) => {
+                    let mut out = question_json(&q);
+                    out["id"] = json!(q.tool_use_id);
+                    out
+                }
+                None => json!({"items": []}),
+            })
         })
     }
 }
@@ -899,18 +917,33 @@ pub(crate) fn now_ms() -> i64 {
     notchling_engine::reply::popall::now_ms()
 }
 
+fn typing_key(agent: &Agent) -> String {
+    match &agent.target {
+        AgentTarget::Job(job) => job.clone(),
+        _ => agent.id.clone(),
+    }
+}
+
 fn keep_screen(file: &Path, head: &[String], lines: &[String]) {
     use std::io::Write;
     use std::os::unix::fs::OpenOptionsExt;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static WRITES: AtomicU64 = AtomicU64::new(0);
     if let Some(dir) = file.parent() {
         let _ = std::fs::create_dir_all(dir);
     }
-    let _ = std::fs::remove_file(file);
+    let mut name = file.as_os_str().to_os_string();
+    name.push(format!(
+        ".{}.{}.tmp",
+        std::process::id(),
+        WRITES.fetch_add(1, Ordering::Relaxed)
+    ));
+    let temp = PathBuf::from(name);
     let Ok(mut out) = std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
         .mode(0o600)
-        .open(file)
+        .open(&temp)
     else {
         return;
     };
@@ -920,5 +953,9 @@ fn keep_screen(file: &Path, head: &[String], lines: &[String]) {
     let _ = writeln!(out, "----- screen ({} lines) -----", lines.len());
     for line in lines {
         let _ = writeln!(out, "{line}");
+    }
+    drop(out);
+    if std::fs::rename(&temp, file).is_err() {
+        let _ = std::fs::remove_file(&temp);
     }
 }

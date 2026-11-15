@@ -4,7 +4,6 @@ use notchling_engine::control::Launcher;
 use notchling_engine::reply::exec::{Markers, Pty, ScreenCheck};
 use notchling_engine::reply::fake::{FakePrompt, RULE};
 use notchling_engine::reply::keys;
-use notchling_engine::reply::plan;
 use notchling_engine::sessions::Roots;
 use notchling_local_api::{ops, ApiError, Caller, ClientKind, ErrorCode, OpSpec, Tier};
 use serde_json::{json, Value};
@@ -624,7 +623,7 @@ struct GatedAttacher {
     inner: FakeAttacher,
     hold: &'static str,
     gate: Gate,
-    entered: Arc<AtomicBool>,
+    entered: Arc<std::sync::atomic::AtomicUsize>,
     order: Order,
     count: std::sync::atomic::AtomicUsize,
 }
@@ -664,7 +663,7 @@ impl Pty for TaggedPty {
 impl Attacher for GatedAttacher {
     fn attach(&self, job: &str, config_dir: Option<&str>) -> Result<Box<dyn Pty>, ApiError> {
         if job == self.hold {
-            self.entered.store(true, Ordering::SeqCst);
+            self.entered.fetch_add(1, Ordering::SeqCst);
             let (open, wake) = &*self.gate;
             let mut open = open.lock().unwrap();
             while !*open {
@@ -683,12 +682,20 @@ impl Attacher for GatedAttacher {
     }
 }
 
-fn gated(hold: &'static str) -> (Arc<ActingOps>, Gate, Arc<AtomicBool>, Order) {
+fn gated(
+    hold: &'static str,
+) -> (
+    Arc<ActingOps>,
+    Gate,
+    Arc<std::sync::atomic::AtomicUsize>,
+    Order,
+) {
     let mut list = sessions();
     let second = row("job-idle2", json!({"job": "idle0002"}), "completed", None);
     list.as_array_mut().unwrap().push(second);
     let gate: Gate = Arc::new((Mutex::new(false), std::sync::Condvar::new()));
-    let (entered, order) = (Arc::new(AtomicBool::new(false)), Order::default());
+    let entered = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let order = Order::default();
     let inner = FakeAttacher {
         screen: Arc::new(Mutex::new(PROMPT.iter().map(|s| s.to_string()).collect())),
         ..FakeAttacher::default()
@@ -740,7 +747,7 @@ fn reply_in_thread(ops: &Arc<ActingOps>, id: &'static str, text: &'static str) -
 fn locks_are_per_session() {
     let (ops, gate, entered, _order) = gated("idle0001");
     let slow = reply_in_thread(&ops, "job-idle", "to a");
-    while !entered.load(Ordering::SeqCst) {
+    while entered.load(Ordering::SeqCst) == 0 {
         std::thread::sleep(Duration::from_millis(2));
     }
     let other = reply_in_thread(&ops, "job-idle2", "to b");
@@ -754,26 +761,63 @@ fn locks_are_per_session() {
     assert_eq!(slow.unwrap(), json!({"sent": true}));
 }
 
+fn question_in_thread(ops: &Arc<ActingOps>, id: &'static str) -> Sent {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let ops = ops.clone();
+    std::thread::spawn(move || {
+        let _ = tx.send(ops.call(&app(), ops::SESSION_QUESTION, &json!({"id": id})));
+    });
+    rx
+}
+
 #[test]
-fn answer_and_reply_to_one_session_never_interleave() {
-    let (ops, gate, _entered, order) = gated("none");
-    open_gate(&gate);
-    let agent = ops.agent(&json!({"id": "job-idle"})).unwrap();
-    let typing: Vec<_> = ["one", "two"]
-        .into_iter()
-        .map(|text| {
-            let (ops, agent) = (ops.clone(), agent.clone());
-            std::thread::spawn(move || {
-                ops.play(&agent, &plan::reply(text), &mut crate::acting_ops::NoLog)
-                    .is_ok()
-            })
-        })
-        .collect();
-    for one in typing {
-        assert!(one.join().unwrap());
+fn reply_and_question_to_one_session_never_attach_together() {
+    let (ops, gate, entered, _order) = gated("idle0001");
+    let reply = reply_in_thread(&ops, "job-idle", "to a");
+    while entered.load(Ordering::SeqCst) == 0 {
+        std::thread::sleep(Duration::from_millis(2));
     }
-    let tags: Vec<usize> = order.lock().unwrap().iter().map(|(n, _)| *n).collect();
-    assert!(tags.len() >= 4, "{tags:?}");
-    let changes = tags.windows(2).filter(|w| w[0] != w[1]).count();
-    assert_eq!(changes, 1, "one call's keys, then the other's: {tags:?}");
+    let question = question_in_thread(&ops, "job-idle");
+    std::thread::sleep(Duration::from_millis(150));
+    let inside = entered.load(Ordering::SeqCst);
+    open_gate(&gate);
+    assert_eq!(inside, 1, "the second op waited for the first one's lock");
+    assert!(reply.recv_timeout(Duration::from_secs(5)).unwrap().is_ok());
+    assert!(question
+        .recv_timeout(Duration::from_secs(5))
+        .unwrap()
+        .is_ok());
+}
+
+#[test]
+fn interrupt_locks_the_job_the_session_moved_to() {
+    let (ops, gate, _entered, _order) = gated("none");
+    open_gate(&gate);
+    let old = ops.typing_locks().for_job("abcd1234");
+    let new = ops.typing_locks().for_job("moved001");
+    let old_guard = old.lock().unwrap();
+    let new_guard = new.lock().unwrap();
+    let (tx, rx) = std::sync::mpsc::channel();
+    let caller_ops = ops.clone();
+    std::thread::spawn(move || {
+        let _ = tx.send(caller_ops.call(&app(), ops::SESSION_INTERRUPT, &json!({"id": "job-a"})));
+    });
+    std::thread::sleep(Duration::from_millis(100));
+    {
+        let mut list = ops.sessions.lock().unwrap();
+        let row = list
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|r| r["id"] == "job-a")
+            .unwrap();
+        row["target"] = json!({"job": "moved001"});
+    }
+    drop(old_guard);
+    assert!(
+        rx.recv_timeout(Duration::from_millis(200)).is_err(),
+        "typed into the new job without its lock"
+    );
+    drop(new_guard);
+    assert!(rx.recv_timeout(Duration::from_secs(5)).unwrap().is_ok());
 }
