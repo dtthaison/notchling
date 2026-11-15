@@ -62,7 +62,10 @@ pub(in crate::chat::view) fn bar(
 ) -> Div {
     let running = ShellJob.working(session);
     let stopping = view.stopping();
-    let status = if let Some(note) = view.offline_note() {
+    let note = view.bring_back_note();
+    let status = if let Some(state) = note {
+        state.text()
+    } else if let Some(note) = view.offline_note() {
         note
     } else if let Some(error) = &view.tools.error {
         sentence(error)
@@ -73,7 +76,8 @@ pub(in crate::chat::view) fn bar(
     } else {
         t::cluster::shell_ended().to_owned()
     };
-    let ink = if view.tools.error.is_some() {
+    let ink = if note.is_some_and(|n| n.failed()) || (note.is_none() && view.tools.error.is_some())
+    {
         Ink::Needs
     } else {
         Ink::TextMuted

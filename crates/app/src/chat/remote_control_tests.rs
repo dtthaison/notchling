@@ -75,3 +75,44 @@ fn remote_row_offers_no_terminal_or_move() {
         );
     }
 }
+
+fn agent(id: &str, command: Option<&str>) -> notchling_engine::sessions::Agent {
+    use notchling_engine::sessions::{Agent, AgentGroup, AgentTarget};
+    Agent {
+        id: id.into(),
+        name: "job".into(),
+        project: "api".into(),
+        cwd: "/srv/api".into(),
+        group: AgentGroup::Working,
+        label: "Working".into(),
+        detail: None,
+        since_ms: 1,
+        target: AgentTarget::Process(1),
+        suggested_reply: None,
+        transcript_path: None,
+        host: "Shell".into(),
+        headless: false,
+        config_dir: None,
+        command: command.map(str::to_owned),
+        resume_session_id: None,
+        at_prompt: false,
+        node: None,
+    }
+}
+
+#[test]
+fn drops_and_reveals_are_refused_on_remote_and_shell_job_rows() {
+    use super::remote_control::files_control;
+    let nodes = nodes();
+    for id in [remote(STANDBY), remote(WORKER), remote("ffffffffffffffff")] {
+        let held = files_control(&agent(&id, None), &nodes).expect("gated");
+        assert!(!held.enabled, "{id}");
+    }
+    let shell = files_control(&agent("shell:j-1", Some("make")), &nodes).expect("gated");
+    assert!(!shell.enabled);
+    assert_eq!(files_control(&agent("job-1", None), &nodes), None);
+    assert_eq!(
+        files_control(&agent("job-1", Some("not a shell id")), &nodes),
+        None
+    );
+}

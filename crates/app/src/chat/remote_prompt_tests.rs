@@ -136,3 +136,26 @@ fn remote_answer_uses_qualified_id() {
         assert_eq!(request.args["decision"], json!(decision.wire()));
     }
 }
+
+#[test]
+fn remote_prompt_matches_row_by_row_id() {
+    let agent = remote_agent("job-1", None);
+    let other = remote_agent("job-2", None);
+    let qualified = format!("{STANDBY}/p1");
+    let mut prompt = permission(&qualified, &format!("{STANDBY}/session-uuid"), Value::Null);
+    prompt["rowId"] = json!(agent.id);
+    let Some(Prompt::Permission(shown)) = show(&agent, std::slice::from_ref(&prompt)) else {
+        panic!("shown on the row named by rowId")
+    };
+    assert_eq!(shown.id, qualified);
+    assert!(!shown.can_always_allow);
+    assert_eq!(show(&other, std::slice::from_ref(&prompt)), None);
+
+    let mut elsewhere = permission(&qualified, &agent.id, Value::Null);
+    elsewhere["rowId"] = json!(other.id);
+    assert_eq!(
+        show(&agent, &[elsewhere]),
+        None,
+        "a rowId naming another row wins over the session id"
+    );
+}

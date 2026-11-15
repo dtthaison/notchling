@@ -186,6 +186,9 @@ pub(super) fn account_control(
     cx: &mut Context<ChatView>,
 ) -> Option<Stateful<Div>> {
     let session = view.selected_session()?;
+    if view.remote_refused(&session.agent.id, Action::Move) {
+        return None;
+    }
     let tool = super::tool::adapter(session);
     let super::tool::AccountButton { text, tip } = tool.account(view)?;
     let kind = if view.account_menu {

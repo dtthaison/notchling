@@ -278,7 +278,7 @@ impl ChatView {
     }
 
     pub(super) fn discard_held(&mut self, cx: &mut Context<Self>) {
-        if self.tools.sending {
+        if self.tools.sending || self.refuse_selected(Action::Reply, cx) {
             return;
         }
         let Some(id) = self.selected_session().map(|s| s.agent.id.clone()) else {
@@ -652,6 +652,7 @@ impl ChatView {
 
     pub(super) fn menus(&self, cx: &App) -> Vec<crate::chat::pickers::Menu> {
         match self.selected_session() {
+            Some(session) if self.remote_refused(&session.agent.id, Action::Slash) => Vec::new(),
             Some(session) => super::tool::adapter(session).menus(self, session, cx),
             None => Vec::new(),
         }
@@ -716,7 +717,10 @@ impl ChatView {
 
     pub(super) fn pick_claude(&mut self, kind: Kind, value: &str, cx: &mut Context<Self>) {
         self.tools.picker = None;
-        if self.tools.sending || !self.composer_control(cx).enabled {
+        if self.tools.sending
+            || !self.composer_control(cx).enabled
+            || self.refuse_selected(Action::Slash, cx)
+        {
             cx.notify();
             return;
         }

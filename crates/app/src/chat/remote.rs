@@ -215,8 +215,13 @@ pub fn bring_back_outcome(reply: Result<Value, String>) -> BringBack {
 
 pub fn held_prompt(agent: &Agent, list: &[Value]) -> Option<HookRequest> {
     let mirror = agent.transcript_path.as_deref();
+    let by_row = |p: &&Value| p.get("rowId").and_then(Value::as_str) == Some(agent.id.as_str());
+    let has_row = |p: &&Value| p.get("rowId").and_then(Value::as_str).is_some();
     list.iter()
         .filter(|p| {
+            if has_row(p) {
+                return by_row(p);
+            }
             let named = p.get("sessionId").and_then(Value::as_str) == Some(agent.id.as_str());
             let path = p.get("transcriptPath").and_then(Value::as_str);
             named || (mirror.is_some() && path == mirror)

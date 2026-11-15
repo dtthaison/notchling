@@ -24,6 +24,7 @@ use crate::chat::inspector::{
     fact_icon, fact_text, inspector_listed, Inspector, Mark, ShellRow, SubagentRow, TaskRow,
 };
 use crate::chat::paging::Counts;
+use crate::chat::remote_control::Action;
 use crate::chat::shell_list::Listing;
 use notchling_engine::transcript::model::Conversation;
 
@@ -55,6 +56,7 @@ fn toggle_folded(cx: &mut App, window: WindowId, section: &'static str) {
 pub struct DetailsModel {
     pub i: Inspector,
     pub folder: Option<(String, String)>,
+    pub reveal: bool,
     pub git: Option<Arc<GitModel>>,
     pub changes: Option<Summary>,
 }
@@ -71,6 +73,7 @@ fn model_of(
     DetailsModel {
         i: inspector_listed(conversation, subagents, subagent_counts, shells, writers),
         folder,
+        reveal: true,
         git,
         changes: None,
     }
@@ -91,6 +94,7 @@ pub(super) fn model(view: &ChatView, _: &App) -> DetailsModel {
         view.git_for_details(),
     );
     model.changes = view.changes_summary();
+    model.reveal = !view.selected_refused(Action::Files);
     model
 }
 
@@ -98,6 +102,7 @@ pub fn render(m: &DetailsModel, a: Appearance, cx: &mut Context<ChatView>) -> An
     Panel {
         i: m.i.clone(),
         folder: m.folder.clone(),
+        reveal: m.reveal,
         a,
         chat: cx.entity().downgrade(),
         git: m.git.clone(),
@@ -110,6 +115,7 @@ pub fn render(m: &DetailsModel, a: Appearance, cx: &mut Context<ChatView>) -> An
 struct Panel {
     i: Inspector,
     folder: Option<(String, String)>,
+    reveal: bool,
     a: Appearance,
     chat: WeakEntity<ChatView>,
     git: Option<Arc<GitModel>>,
@@ -137,7 +143,7 @@ impl RenderOnce for Panel {
         let facts = {
             let mut rows: Vec<Div> = Vec::new();
             if let Some((shown, full)) = &self.folder {
-                rows.push(folder_row(shown, full, a));
+                rows.push(folder_row(shown, full, self.reveal, a));
             }
             rows.extend(
                 i.facts
@@ -327,11 +333,14 @@ pub(super) fn fact_row(shape: Icon, text: &str, a: Appearance) -> Div {
         )
 }
 
-fn folder_row(shown: &str, full: &str, a: Appearance) -> Div {
+fn folder_row(shown: &str, full: &str, reveal: bool, a: Appearance) -> Div {
     let full = full.to_owned();
+    let row = fact_row(Icon::Folder, shown, a);
+    if !reveal {
+        return div().child(row);
+    }
     div().child(
-        fact_row(Icon::Folder, shown, a)
-            .id("inspector-folder")
+        row.id("inspector-folder")
             .cursor_pointer()
             .on_click(move |_, _, cx| cx.reveal_path(Path::new(&full))),
     )

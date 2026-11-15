@@ -543,7 +543,10 @@ impl ChatView {
             return None;
         }
         let session = self.selected_session()?;
-        if session.tool != crate::chat::data::Tool::Claude || !session.agent.can_reply() {
+        if session.tool != crate::chat::data::Tool::Claude
+            || !session.agent.can_reply()
+            || self.remote_refused(&session.agent.id, crate::chat::remote_control::Action::Stop)
+        {
             return None;
         }
         let retrying = self.tools.retrying.as_ref().is_some_and(|(row, at)| {

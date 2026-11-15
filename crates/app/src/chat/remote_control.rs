@@ -1,5 +1,8 @@
 use notchling_locale as t;
 
+use notchling_engine::sessions::Agent;
+
+use super::remote;
 use super::sidebar_node::{node_label, reply_control, Nodes};
 use crate::acting::Control;
 
@@ -50,6 +53,16 @@ pub fn remote_control(row_id: &str, nodes: &Nodes, action: Action) -> Option<Con
     Some(Control {
         enabled: false,
         tooltip: Some(t::cluster::remote_not_here()),
+    })
+}
+
+pub fn files_control(agent: &Agent, nodes: &Nodes) -> Option<Control> {
+    if let Some(held) = remote_control(&agent.id, nodes, Action::Files) {
+        return Some(held);
+    }
+    remote::is_shell(agent).then(|| Control {
+        enabled: false,
+        tooltip: Some(t::cluster::shell_no_reply()),
     })
 }
 
