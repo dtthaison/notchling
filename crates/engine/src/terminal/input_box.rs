@@ -32,15 +32,19 @@ fn letters(text: &str) -> String {
     text.chars().filter(|c| c.is_alphanumeric()).collect()
 }
 
-fn without_chips(text: &str) -> String {
+fn strip_chips(text: &str) -> (String, usize) {
     let mut out = String::new();
+    let mut chips = 0;
     let mut rest = text;
     while let Some(at) = rest.find("[Image#") {
         out.push_str(&rest[..at]);
         let tail = &rest[at + "[Image#".len()..];
         let digits = tail.chars().take_while(char::is_ascii_digit).count();
         match tail[digits..].strip_prefix(']') {
-            Some(after) if digits > 0 => rest = after,
+            Some(after) if digits > 0 => {
+                chips += 1;
+                rest = after;
+            }
             _ => {
                 out.push_str("[Image#");
                 rest = tail;
@@ -48,7 +52,103 @@ fn without_chips(text: &str) -> String {
         }
     }
     out.push_str(rest);
-    out
+    (out, chips)
+}
+
+const PICTURE_EXTENSIONS: [&str; 5] = [".png", ".jpg", ".jpeg", ".gif", ".webp"];
+const PICTURES_MAX: usize = 8;
+
+fn path_starts(text: &str) -> bool {
+    let text = text.strip_prefix(['"', '\'']).unwrap_or(text);
+    let mut chars = text.chars();
+    match chars.next() {
+        Some('/') => true,
+        Some(c) if c.is_ascii_alphabetic() => {
+            chars.next() == Some(':') && chars.next() == Some('\\')
+        }
+        _ => false,
+    }
+}
+
+fn path_pieces(line: &str) -> Vec<&str> {
+    let mut pieces = Vec::new();
+    let mut from = 0;
+    for (at, c) in line.char_indices() {
+        if c == ' ' && path_starts(&line[at + 1..]) {
+            pieces.push(&line[from..at]);
+            from = at + 1;
+        }
+    }
+    pieces.push(&line[from..]);
+    pieces.retain(|piece| !piece.trim().is_empty());
+    pieces
+}
+
+fn is_picture(piece: &str) -> bool {
+    let piece = piece.trim();
+    if !path_starts(piece) {
+        return false;
+    }
+    let bare = match piece.as_bytes() {
+        [first @ (b'"' | b'\''), .., last] if first == last => &piece[1..piece.len() - 1],
+        _ => piece,
+    };
+    let bare = bare.to_ascii_lowercase();
+    PICTURE_EXTENSIONS.iter().any(|ext| bare.ends_with(ext))
+}
+
+struct Message {
+    pieces: Vec<(String, bool)>,
+}
+
+impl Message {
+    fn of(text: &str) -> Message {
+        let mut pieces = Vec::new();
+        for line in text.split('\n') {
+            let parts = path_pieces(line);
+            if parts.len() > 1 && !parts.iter().all(|part| path_starts(part.trim_start())) {
+                pieces.push((letters(line), false));
+                continue;
+            }
+            pieces.extend(parts.iter().map(|part| (letters(part), is_picture(part))));
+        }
+        Message { pieces }
+    }
+
+    fn pictures(&self) -> usize {
+        self.pieces.iter().filter(|(_, picture)| *picture).count()
+    }
+
+    fn kept(&self, gone: impl Fn(usize) -> bool) -> String {
+        let mut nth = 0;
+        let mut kept = String::new();
+        for (words, picture) in &self.pieces {
+            let read = *picture && gone(nth);
+            nth += usize::from(*picture);
+            if !read {
+                kept.push_str(words);
+            }
+        }
+        kept
+    }
+
+    fn without(&self, chips: usize) -> Vec<String> {
+        let pictures = self.pictures();
+        if chips > pictures {
+            return Vec::new();
+        }
+        if pictures > PICTURES_MAX {
+            return match chips {
+                0 => vec![self.kept(|_| false)],
+                n if n == pictures => vec![self.kept(|_| true)],
+                _ => Vec::new(),
+            };
+        }
+        (0..1usize << pictures)
+            .filter(|mask| mask.count_ones() as usize == chips)
+            .map(|mask| self.kept(|nth| mask >> nth & 1 == 1))
+            .collect()
+    }
 }
 
 fn folded(typed: &str) -> bool {
@@ -84,19 +184,28 @@ impl Input {
         rows.join("\n")
     }
 
+    fn shown(&self) -> String {
+        self.held.iter().map(|row| squeezed(row)).collect()
+    }
+
     pub fn leftover_of(&self, earlier: &[String]) -> bool {
-        let shown: String = self.held.iter().map(|row| squeezed(row)).collect();
+        let (shown, chips) = strip_chips(&self.shown());
         let typed: String = shown.chars().skip(1).collect();
         if self.empty || folded(&typed) || folded(&shown) {
             return false;
         }
-        let have = letters(&without_chips(&shown));
+        let have = letters(&shown);
         let size = have.chars().count();
         size > 0
             && earlier.iter().any(|text| {
-                let want = letters(text);
-                have == want
-                    || (size >= MIN_PART && (want.starts_with(&have) || want.ends_with(&have)))
+                let mut wants = Message::of(text).without(chips);
+                if chips > 0 {
+                    wants.push(letters(text));
+                }
+                wants.iter().any(|want| {
+                    have == *want
+                        || (size >= MIN_PART && (want.starts_with(&have) || want.ends_with(&have)))
+                })
             })
     }
 
@@ -119,9 +228,13 @@ impl Input {
             Fill::Whole | Fill::Folded => true,
             Fill::Empty => false,
             Fill::Part | Fill::Foreign => {
-                let shown: String = self.held.iter().map(|row| squeezed(row)).collect();
-                let want = letters(text);
-                !want.is_empty() && letters(&shown).contains(&want)
+                let (shown, chips) = strip_chips(&self.shown());
+                let message = Message::of(text);
+                let have = letters(&shown);
+                message
+                    .without(chips.min(message.pictures()))
+                    .iter()
+                    .any(|want| !want.is_empty() && have.contains(want))
             }
         }
     }
@@ -130,19 +243,26 @@ impl Input {
         if self.empty && !self.shows(text) {
             return Fill::Empty;
         }
-        let shown: String = self.held.iter().map(|row| squeezed(row)).collect();
+        let (shown, chips) = strip_chips(&self.shown());
+        let message = Message::of(text);
+        if chips > message.pictures() {
+            return Fill::Foreign;
+        }
         let typed: String = shown.chars().skip(1).collect();
         if folded(&typed) || folded(&shown) {
             return Fill::Folded;
         }
-        let want = letters(text);
-        if want.is_empty() {
+        let wants = message.without(chips);
+        if chips == 0 && wants.iter().all(String::is_empty) {
             return Fill::Whole;
         }
         let have = letters(&shown);
-        if have == want {
+        if wants.contains(&have) {
             Fill::Whole
-        } else if !have.is_empty() && want.starts_with(&have) {
+        } else if wants.iter().any(|want| match have.is_empty() {
+            true => chips > 0 && !want.is_empty(),
+            false => want.starts_with(&have),
+        }) {
             Fill::Part
         } else {
             Fill::Foreign
@@ -520,5 +640,175 @@ mod tests {
         assert!(!is_rule("  ────────────────────────────────"));
         assert!(!is_rule("- - - - - - - - - - - - - - - - -"));
         assert!(is_rule(RULE_LINE));
+    }
+
+    const WORDS: &str = "i want click refresh it will refresh is it ok?";
+    const SHOT: &str = "/Users/me/Library/Application Support/Notchling/drops/1794723941465/Screenshot 2026-11-15 at 1.25.35 PM.png";
+
+    fn with_shot(words: &str) -> String {
+        format!("{words}\n\n'{SHOT}'")
+    }
+
+    #[test]
+    fn a_picture_path_the_session_turned_into_a_chip_is_still_the_message() {
+        let text = with_shot(WORDS);
+        let seen = box_of(&["❯\u{a0}[Image #48]i want click refresh it will refresh is it ok?"]);
+        assert_eq!(seen.fill(&text), Fill::Whole);
+        assert!(seen.carries(&text));
+        let narrow = box_of(&[
+            "❯\u{a0}[Image #48]i want click refresh it will",
+            "  refresh is it ok?",
+        ]);
+        assert_eq!(
+            narrow.fill(&text),
+            Fill::Whole,
+            "wrapping and the chip's number do not matter"
+        );
+        let two = "Say only the word race.\n\n/tmp/shots/one.png /tmp/shots/two.jpg";
+        let both = box_of(&["❯\u{a0}[Image #5] [Image #6]Say only the word race."]);
+        assert_eq!(both.fill(two), Fill::Whole);
+        let before = "'/tmp/a b.PNG'\n\nlook at this";
+        assert_eq!(
+            box_of(&["❯\u{a0}[Image #1]look at this"]).fill(before),
+            Fill::Whole
+        );
+        assert_eq!(
+            box_of(&["❯\u{a0}[Image #1]"]).fill("'/tmp/a b.png'"),
+            Fill::Whole
+        );
+    }
+
+    #[test]
+    fn chips_that_are_in_before_their_words_are_a_part_of_the_message() {
+        let text = with_shot(WORDS);
+        assert_eq!(box_of(&["❯\u{a0}[Image #48]"]).fill(&text), Fill::Part);
+        assert_eq!(
+            box_of(&["❯\u{a0}[Image #48]i want click"]).fill(&text),
+            Fill::Part
+        );
+        assert_eq!(box_of(&["❯\u{a0}[Image #48]"]).fill("hello"), Fill::Foreign);
+    }
+
+    #[test]
+    fn a_picture_the_session_could_not_read_stays_a_path_in_the_box() {
+        let text = with_shot(WORDS);
+        let unread = box_of(&[
+            "❯\u{a0}i want click refresh it will refresh is it ok?",
+            &format!("  '{SHOT}'"),
+        ]);
+        assert_eq!(
+            unread.fill(&text),
+            Fill::Whole,
+            "the whole paste went in as it was"
+        );
+        let two = "look\n\n/tmp/a.png /tmp/b.png";
+        assert_eq!(
+            box_of(&["❯\u{a0}[Image #3]look", "  /tmp/b.png"]).fill(two),
+            Fill::Whole,
+            "one of two was read"
+        );
+        assert_eq!(
+            box_of(&["❯\u{a0}[Image #3]look", "  /tmp/a.png"]).fill(two),
+            Fill::Whole
+        );
+        assert_eq!(
+            box_of(&["❯\u{a0}[Image #3]look", "  /tmp/c.png"]).fill(two),
+            Fill::Foreign
+        );
+    }
+
+    #[test]
+    fn many_pictures_are_all_read_or_none_of_them() {
+        let paths: Vec<String> = (0..9).map(|n| format!("/tmp/p{n}.png")).collect();
+        let text = format!("look\n\n{}", paths.join(" "));
+        let chips: String = (1..=9).map(|n| format!("[Image #{n}]")).collect();
+        let all = format!("❯\u{a0}{chips}look");
+        assert_eq!(box_of(&[&all]).fill(&text), Fill::Whole);
+        assert_eq!(
+            box_of(&["❯\u{a0}[Image #1]look"]).fill(&text),
+            Fill::Foreign
+        );
+        let some = format!("❯\u{a0}[Image #1] [Image #2]look {}", paths[2..].join(" "));
+        assert_eq!(box_of(&[&some]).fill(&text), Fill::Foreign);
+    }
+
+    #[test]
+    fn a_chip_that_is_not_one_of_our_pictures_is_somebody_elses() {
+        let text = with_shot(WORDS);
+        assert_eq!(
+            box_of(&["❯\u{a0}[Image #9]Fix the tests"]).fill("Fix the tests"),
+            Fill::Foreign,
+            "a message with no picture"
+        );
+        assert_eq!(
+            box_of(&["❯\u{a0}[Image #1] [Image #2]i want click refresh it will refresh is it ok?"])
+                .fill(&text),
+            Fill::Foreign,
+            "more chips than pictures"
+        );
+        assert_eq!(
+            box_of(&["❯\u{a0}[Image #48]i want click refresh it will refresh is it ok? and mine"])
+                .fill(&text),
+            Fill::Foreign
+        );
+        assert_eq!(
+            box_of(&["❯\u{a0}[Image #48]a draft of my own"]).fill(&text),
+            Fill::Foreign
+        );
+        let not_a_picture = "see /tmp/notes.png now";
+        assert_eq!(
+            box_of(&["❯\u{a0}[Image #1]see now"]).fill(not_a_picture),
+            Fill::Foreign,
+            "a path inside a sentence is never read as a picture"
+        );
+    }
+
+    #[test]
+    fn a_long_message_with_a_picture_folds_after_its_chip() {
+        let text = with_shot(&"word ".repeat(300));
+        let seen = box_of(&["❯\u{a0}[Image #2] [Pasted text #3 +20 lines]"]);
+        assert_eq!(seen.fill(&text), Fill::Folded);
+        assert!(seen.carries(&text));
+        let foreign = box_of(&["❯\u{a0}[Image #2] [Image #3] [Pasted text #4 +20 lines]"]);
+        assert_eq!(foreign.fill(&text), Fill::Foreign);
+    }
+
+    #[test]
+    fn a_box_with_chips_carries_the_message_with_more_typed_beside_it() {
+        let text = with_shot(WORDS);
+        let more =
+            box_of(&["❯\u{a0}[Image #48]i want click refresh it will refresh is it ok?more"]);
+        assert_eq!(more.fill(&text), Fill::Foreign);
+        assert!(more.carries(&text));
+        let own = box_of(&["❯\u{a0}[Image #48]my own words"]);
+        assert!(!own.carries(&text));
+        assert!(!box_of(&["❯"]).carries(&text));
+    }
+
+    #[test]
+    fn our_own_message_left_with_its_chips_is_a_leftover_even_when_short() {
+        let earlier = [with_shot("ok")];
+        assert!(box_of(&["❯\u{a0}[Image #47]ok"]).leftover_of(&earlier));
+        let long = [with_shot(WORDS)];
+        let left = box_of(&["❯\u{a0}[Image #47]i want click refresh it will refresh is it ok?"]);
+        assert!(left.leftover_of(&long));
+        assert!(left.leftover_of(&[with_shot("ok"), with_shot(WORDS)]));
+        assert!(!box_of(&["❯\u{a0}[Image #47]fine"]).leftover_of(&earlier));
+        assert!(
+            !box_of(&["❯\u{a0}[Image #47]"]).leftover_of(&[format!("'{SHOT}'")]),
+            "a chip alone could be a picture the person pasted"
+        );
+        assert!(!box_of(&["❯\u{a0}[Image #47] [Pasted text #48 +20 lines]"]).leftover_of(&long));
+    }
+
+    #[test]
+    fn the_recorded_chip_screens_read_as_the_message_that_made_them() {
+        let two = "Say only the word race.\n\n/tmp/shots/one.png /tmp/shots/two.jpg";
+        let recorded = Input {
+            held: vec!["❯\u{a0}[Image #5] [Image #6]Say only the word race.".to_string()],
+            empty: false,
+        };
+        assert_eq!(recorded.fill(two), Fill::Whole);
+        assert_eq!(recorded.fill("Say only the word ok."), Fill::Foreign);
     }
 }

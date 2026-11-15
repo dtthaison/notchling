@@ -146,3 +146,27 @@ fn a_recorded_screen_with_a_draft_nobody_sent_is_refused_until_the_person_asks()
     assert_eq!(pty.writes, typed("What changed?"));
     assert!(pty.now_ms() > 0);
 }
+
+#[test]
+fn a_recorded_screen_with_our_own_unsent_picture_message_is_cleared_and_the_retry_goes_once() {
+    let text = "i want click refresh it will refresh is it ok?\n\n'/Users/me/Library/Application Support/Notchling/drops/1794723941465/Screenshot 2026-11-15 at 1.25.35 PM.png'";
+    let left = read("picture-after-words.txt");
+    assert_eq!(
+        left.held,
+        ["❯\u{a0}[Image #48]i want click refresh it will refresh is it ok?"]
+    );
+    assert!(left.leftover_of(&[text.to_string()]));
+
+    let mut pty = prompt_of("picture-after-words.txt").reading_pictures();
+    let clearing = Clearing {
+        earlier: vec![text.to_string()],
+        any: false,
+    };
+    let out = send(&mut pty, text, &clearing);
+    assert_eq!(out, Ok(Outcome { taken: false }));
+    assert_eq!(
+        pty.sent,
+        ["[Image #1]i want click refresh it will refresh is it ok?"]
+    );
+    assert_eq!(pty.writes, typed(text));
+}

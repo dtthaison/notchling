@@ -4,6 +4,7 @@ use super::keys::{self, timing::*};
 use super::plan;
 
 const WITH_PICTURES: &str = "What changed?\n\n/tmp/shots/one.png /tmp/shots/two.jpg";
+const WITH_SHOT: &str = "i want click refresh it will refresh is it ok?\n\n'/Users/me/Library/Application Support/Notchling/drops/1794723941465/Screenshot 2026-11-15 at 1.25.35 PM.png'";
 
 fn typed(text: &str) -> Vec<String> {
     vec![
@@ -177,4 +178,47 @@ fn the_new_failures_say_what_happened_and_what_to_do() {
         Failure::NotSent.to_string(),
         "The message is typed in the session's terminal but wasn't sent. Press Return there, or send it again."
     );
+}
+
+#[test]
+fn a_message_whose_pictures_the_session_turned_into_chips_is_sent_once() {
+    let mut pty = FakePrompt::idle().reading_pictures().pasting_for(400);
+    assert_eq!(send(&mut pty, WITH_SHOT), Ok(Outcome { taken: false }));
+    assert_eq!(
+        pty.sent,
+        ["[Image #1]i want click refresh it will refresh is it ok?"]
+    );
+    assert_eq!(
+        pty.writes,
+        typed(WITH_SHOT),
+        "one clear, one paste, one Enter"
+    );
+    assert_eq!(pty.held(), Some(""));
+
+    let mut pty = FakePrompt::idle().reading_pictures();
+    assert_eq!(send(&mut pty, WITH_PICTURES), Ok(Outcome { taken: false }));
+    assert_eq!(pty.sent, ["[Image #1] [Image #2]What changed?"]);
+    assert_eq!(pty.writes, typed(WITH_PICTURES));
+}
+
+#[test]
+fn a_chipped_message_the_session_ignores_is_not_sent_and_gets_one_enter() {
+    let mut pty = FakePrompt::idle().reading_pictures().deaf();
+    assert_eq!(send(&mut pty, WITH_PICTURES), Err(Failure::NotSent));
+    assert!(pty.sent.is_empty());
+    assert_eq!(
+        pty.writes,
+        typed(WITH_PICTURES),
+        "one Enter, never a second"
+    );
+}
+
+#[test]
+fn text_a_person_types_beside_the_chips_is_never_sent_with_them() {
+    let mut pty = FakePrompt::idle()
+        .reading_pictures()
+        .typing(ATTACH_QUIET_MS + KEY_PAUSE_MS + 10, "my own words");
+    assert_eq!(send(&mut pty, WITH_PICTURES), Err(Failure::Mixed));
+    assert!(pty.sent.is_empty());
+    assert_eq!(pty.writes, typed(WITH_PICTURES)[..2], "no Enter");
 }

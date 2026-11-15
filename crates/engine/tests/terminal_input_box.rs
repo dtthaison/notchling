@@ -2,7 +2,7 @@ mod common;
 
 use common::notchling_fixture;
 use notchling_engine::reply::keys;
-use notchling_engine::terminal::input_box::{self, Input};
+use notchling_engine::terminal::input_box::{self, Fill, Input};
 use notchling_engine::terminal::TerminalScreen;
 use std::path::Path;
 
@@ -204,4 +204,25 @@ fn the_transcript_view_has_no_input_box_and_is_no_dialog() {
     assert_eq!(cursor, None, "its cursor is hidden");
     assert!(!keys::dialog_open(&lines));
     assert_eq!(input_box::read(&lines, cursor), None);
+}
+
+#[test]
+fn recorded_screens_with_picture_chips_read_as_the_message_that_made_them() {
+    let two = "Say only the word race.\n\n/tmp/shots/one.png /tmp/shots/two.jpg";
+    let left = read("pictures-left-unsent.txt");
+    assert_eq!(left.fill(two), Fill::Whole);
+    assert!(left.carries(two));
+    assert_eq!(left.fill("Say only the word ok."), Fill::Foreign);
+    assert_eq!(left.fill("Say only the word race."), Fill::Foreign);
+
+    let shot = "i want click refresh it will refresh is it ok?\n\n'/Users/me/Library/Application Support/Notchling/drops/1794723941465/Screenshot 2026-11-15 at 1.25.35 PM.png'";
+    let seen = read("picture-after-words.txt");
+    assert_eq!(
+        seen.held,
+        ["❯\u{a0}[Image #48]i want click refresh it will refresh is it ok?"]
+    );
+    assert!(!seen.empty);
+    assert_eq!(seen.fill(shot), Fill::Whole);
+    assert!(seen.carries(shot));
+    assert_eq!(seen.fill(two), Fill::Foreign);
 }

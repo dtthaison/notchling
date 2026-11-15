@@ -6,6 +6,8 @@ use super::keys::{self, timing::*};
 use super::plan;
 
 const EARLIER: &str = "Please run the whole suite again and tell me what failed";
+const WITH_SHOT: &str = "i want click refresh it will refresh is it ok?\n\n'/Users/me/Library/Application Support/Notchling/drops/1794723941465/Screenshot 2026-11-15 at 1.25.35 PM.png'";
+const CHIPPED: &str = "[Image #47]i want click refresh it will refresh is it ok?";
 
 fn typed(text: &str) -> Vec<String> {
     vec![
@@ -201,4 +203,41 @@ fn a_box_that_holds_exactly_the_message_is_still_cleared_without_any_asking() {
     assert_eq!(out, Ok(Outcome { taken: false }));
     assert_eq!(pty.sent, ["now fix it"]);
     assert_eq!(pty.writes, typed("now fix it"));
+}
+
+#[test]
+fn our_message_left_in_the_box_as_a_chip_and_words_is_cleared_and_sent_once() {
+    let mut pty = FakePrompt::idle().reading_pictures().holding(CHIPPED);
+    let (out, trail) = send(&mut pty, WITH_SHOT, &Clearing::default());
+    assert_eq!(out, Ok(Outcome { taken: false }), "{trail:#?}");
+    assert_eq!(
+        pty.sent,
+        ["[Image #1]i want click refresh it will refresh is it ok?"]
+    );
+    assert_eq!(
+        pty.writes,
+        typed(WITH_SHOT),
+        "one clear, one paste, one Enter"
+    );
+}
+
+#[test]
+fn an_earlier_try_with_a_picture_is_ours_even_when_its_words_are_short() {
+    let earlier = Clearing {
+        earlier: vec!["ok\n\n'/tmp/shots/a b.png'".to_string()],
+        any: false,
+    };
+    let mut pty = FakePrompt::idle().holding("[Image #47]ok");
+    let (out, trail) = send(&mut pty, "now fix it", &earlier);
+    assert_eq!(out, Ok(Outcome { taken: false }), "{trail:#?}");
+    assert_eq!(pty.sent, ["now fix it"]);
+    assert!(
+        trail.iter().any(|l| l.contains("an earlier try of ours")),
+        "{trail:#?}"
+    );
+
+    let mut pty = FakePrompt::idle().holding("[Image #47]ok");
+    let (out, _) = send(&mut pty, "now fix it", &Clearing::default());
+    assert_eq!(out, Err(Failure::NotCleared), "nothing says it is ours");
+    assert!(pty.writes.is_empty());
 }
