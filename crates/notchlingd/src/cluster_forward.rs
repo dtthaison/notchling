@@ -64,6 +64,14 @@ impl NodeForward {
     }
 }
 
+impl NodeForward {
+    fn is_home(&self) -> bool {
+        let status = self.node.status();
+        let home = status.pointer("/cluster/home").and_then(Value::as_str);
+        home == Some(self.node.me().as_str())
+    }
+}
+
 impl Forward for NodeForward {
     fn forward(&self, caller: &Caller, op: &str, args: &Value) -> Option<Result<Value, ApiError>> {
         if caller.client == ClientKind::Node {
@@ -72,7 +80,13 @@ impl Forward for NodeForward {
         let (to, bare) = match route(op, args, self.node.me()) {
             Some(routed) => routed,
             None => match route_to_node(op, args, self.node.me())? {
-                Ok(routed) => routed,
+                Ok(routed) if self.is_home() => routed,
+                Ok(_) => {
+                    return Some(Err(ApiError::new(
+                        ErrorCode::Forbidden,
+                        "only the primary can install on another machine",
+                    )))
+                }
                 Err(refused) => return Some(Err(refused)),
             },
         };

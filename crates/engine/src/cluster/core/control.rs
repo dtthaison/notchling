@@ -422,7 +422,10 @@ impl NodeCore {
             self.wipe(out);
             return;
         }
-        self.adopt(&term, out);
+        if home != term.node || !self.adopt(&term, out) {
+            self.refuse(&from, "bad_term", false, out);
+            return;
+        }
         let _ = self.apply(
             Command::Sync {
                 id,

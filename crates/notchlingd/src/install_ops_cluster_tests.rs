@@ -193,3 +193,20 @@ fn a_call_that_came_from_a_node_never_forwards_again() {
         .is_none());
     assert_eq!(settings_text(&target.dir), USER_SETTINGS);
 }
+
+#[test]
+fn only_the_primary_forwards_an_install() {
+    let target = node_with_install("not-home", true);
+    let (home, worker) = cluster(&target);
+    let from_worker = NodeForward::new(worker.node.clone())
+        .forward(&app(), ops::INSTALL_APPLY, &json!({"node": home.id()}))
+        .expect("never falls through to the worker's own daemon");
+    let refused = from_worker.unwrap_err();
+    assert_eq!(refused.code, ErrorCode::Forbidden);
+    assert_eq!(
+        refused.message,
+        "only the primary can install on another machine"
+    );
+    assert!(home.calls.calls.lock().unwrap().is_empty());
+    assert_eq!(settings_text(&target.dir), USER_SETTINGS);
+}

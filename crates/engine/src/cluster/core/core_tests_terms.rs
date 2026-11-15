@@ -1,12 +1,21 @@
 use serde_json::{json, Value};
 
 use super::{Effect, Input, LocalCmd, NodeCore, CALL_MS, DEDUPE_MS, PING_MS, WORKSPACE_CALL_MS};
-use crate::cluster::id::Tool;
+use crate::cluster::id::{NodeId, Tool};
 use crate::cluster::members::Term;
 use crate::cluster::testkit::{id, versions};
 use crate::cluster::wire::{Msg, Origin, OriginTier};
 
-use super::core_tests::{answers, dispatch_cmd, pair, run_locals};
+use super::core_tests::{answers, dispatch_cmd, pair, run_locals, Hub};
+
+fn promotable_pair() -> (Hub, NodeId, NodeId) {
+    let mut hub = Hub::new();
+    let m5 = hub.add("m5", "macos", true);
+    let w1 = hub.add("w1", "macos", true);
+    hub.create("m5");
+    hub.join("m5", "w1", "macos", true);
+    (hub, m5, w1)
+}
 
 #[test]
 fn call_reply_correlates_and_times_out() {
@@ -206,7 +215,7 @@ fn dedupe_forgets_after_its_window() {
 
 #[test]
 fn older_term_call_is_refused() {
-    let (mut hub, m5, w1) = pair();
+    let (mut hub, m5, w1) = promotable_pair();
     let newer = Term {
         n: 3,
         node: id("w1"),
@@ -260,7 +269,7 @@ fn older_term_call_is_refused() {
 
 #[test]
 fn install_forward_from_a_primary_that_lost_its_term_is_refused() {
-    let (mut hub, m5, w1) = pair();
+    let (mut hub, m5, w1) = promotable_pair();
     let newer = Term {
         n: 3,
         node: id("w1"),
@@ -336,7 +345,7 @@ fn a_call_stamped_with_a_newer_term_is_judged_after_adopting_it() {
         ("session.new", OriginTier::Node),
         ("shell.run", OriginTier::App),
     ] {
-        let (mut hub, m5, w1) = pair();
+        let (mut hub, m5, w1) = promotable_pair();
         let newer = Term {
             n: 2,
             node: id("w1"),
@@ -375,7 +384,7 @@ fn a_call_stamped_with_a_newer_term_is_judged_after_adopting_it() {
 
 #[test]
 fn newer_term_is_adopted() {
-    let (mut hub, m5, w1) = pair();
+    let (mut hub, m5, w1) = promotable_pair();
     let newer = Term {
         n: 2,
         node: id("w1"),
@@ -411,7 +420,7 @@ fn newer_term_is_adopted() {
 
 #[test]
 fn home_seeing_newer_term_steps_down() {
-    let (mut hub, m5, w1) = pair();
+    let (mut hub, m5, w1) = promotable_pair();
     let newer = Term {
         n: 2,
         node: id("w1"),
@@ -541,4 +550,209 @@ fn a_workers_node_sessions_call_is_refused() {
     );
     assert!(effects.iter().any(|e| matches!(e, Effect::Send { msg: Msg::Reply { err: Some(e), .. }, .. } if e.code == "forbidden")));
     assert!(run_locals(&effects).is_empty());
+}
+
+fn refused_reply(effects: &[Effect]) -> bool {
+    effects.iter().any(|e| {
+        matches!(
+            e,
+            Effect::Send {
+                msg: Msg::Reply { err: Some(_), .. },
+                ..
+            } | Effect::Send {
+                msg: Msg::Refused { .. },
+                ..
+            }
+        )
+    })
+}
+
+#[test]
+fn a_worker_cannot_forge_a_term_on_a_call() {
+    for (op, tier) in [
+        ("session.new", OriginTier::App),
+        ("install.apply", OriginTier::App),
+        ("node.load", OriginTier::Node),
+    ] {
+        let (mut hub, m5, w1) = pair();
+        let forged = Term {
+            n: 2,
+            node: id("w1"),
+        };
+        let effects = hub.run(
+            &m5,
+            Input::Msg {
+                from: w1.clone(),
+                msg: Msg::Call {
+                    id: 41,
+                    op: op.to_string(),
+                    args: json!({}),
+                    origin: Origin {
+                        node: w1.clone(),
+                        tier,
+                    },
+                    term: forged,
+                },
+            },
+        );
+        assert!(run_locals(&effects).is_empty(), "{op} ran");
+        assert!(refused_reply(&effects), "{op}");
+        let state = hub.core(&m5).state().expect("state");
+        assert_eq!(state.home, m5, "{op}");
+        assert_eq!(state.term.n, 1, "{op}");
+        assert!(
+            !effects
+                .iter()
+                .any(|e| matches!(e, Effect::SteppedDown { .. })),
+            "{op}"
+        );
+    }
+}
+
+#[test]
+fn a_forged_term_on_hello_and_refused_is_not_adopted() {
+    let (mut hub, m5, w1) = pair();
+    let forged = Term {
+        n: 5,
+        node: id("w1"),
+    };
+    let effects = hub.run(
+        &m5,
+        Input::Msg {
+            from: w1.clone(),
+            msg: Msg::Hello {
+                node: w1.clone(),
+                cluster: Some("c1".to_string()),
+                versions: versions("linux"),
+                boot_id: "boot".to_string(),
+                term: Some(forged.clone()),
+            },
+        },
+    );
+    assert!(refused_reply(&effects));
+    assert_eq!(hub.core(&m5).state().expect("state").home, m5);
+    hub.run(
+        &m5,
+        Input::Msg {
+            from: w1.clone(),
+            msg: Msg::Refused {
+                reason: "stale_term".to_string(),
+                term: Some(forged.clone()),
+                home: Some(w1.clone()),
+            },
+        },
+    );
+    let state = hub.core(&m5).state().expect("state");
+    assert_eq!(state.home, m5);
+    assert_eq!(state.term.n, 1);
+    let unknown = Term {
+        n: 6,
+        node: id("nobody"),
+    };
+    hub.run(
+        &m5,
+        Input::Msg {
+            from: w1.clone(),
+            msg: Msg::HelloOk {
+                node: w1.clone(),
+                cluster: "c1".to_string(),
+                term: unknown,
+                home: id("nobody"),
+            },
+        },
+    );
+    assert_eq!(hub.core(&m5).state().expect("state").home, m5);
+}
+
+#[test]
+fn a_forged_members_push_from_a_worker_is_not_followed() {
+    let (mut hub, m5, w1) = pair();
+    let state = hub.core(&m5).state().expect("state").clone();
+    let effects = hub.run(
+        &m5,
+        Input::Msg {
+            from: w1.clone(),
+            msg: Msg::Members {
+                term: Term {
+                    n: 2,
+                    node: id("w1"),
+                },
+                home: w1.clone(),
+                vault: None,
+                members: state.members.values().cloned().collect(),
+                failover: None,
+                armed: true,
+            },
+        },
+    );
+    assert!(refused_reply(&effects));
+    let after = hub.core(&m5).state().expect("state");
+    assert_eq!(after.home, m5);
+    assert_eq!(after.term.n, 1);
+    assert!(!effects
+        .iter()
+        .any(|e| matches!(e, Effect::SteppedDown { .. })));
+}
+
+#[test]
+fn a_real_promotes_term_is_still_adopted_everywhere() {
+    let (mut hub, m5, w1) = promotable_pair();
+    let newer = Term {
+        n: 2,
+        node: id("w1"),
+    };
+    let hello_ok = hub.run(
+        &m5,
+        Input::Msg {
+            from: w1.clone(),
+            msg: Msg::HelloOk {
+                node: w1.clone(),
+                cluster: "c1".to_string(),
+                term: newer.clone(),
+                home: id("w1"),
+            },
+        },
+    );
+    assert!(hello_ok
+        .iter()
+        .any(|e| matches!(e, Effect::SteppedDown { .. })));
+    assert_eq!(hub.core(&m5).state().expect("state").home, id("w1"));
+}
+
+#[test]
+fn the_primarys_armed_flag_is_forgotten_with_its_term() {
+    let (mut hub, m5, w1) = promotable_pair();
+    let state = hub.core(&w1).state().expect("state").clone();
+    let members: Vec<_> = state.members.values().cloned().collect();
+    hub.run(
+        &w1,
+        Input::Msg {
+            from: m5.clone(),
+            msg: Msg::Members {
+                term: state.term.clone(),
+                home: m5.clone(),
+                vault: None,
+                members,
+                failover: Some(crate::cluster::failover::Failover::After30m),
+                armed: true,
+            },
+        },
+    );
+    assert_eq!(hub.core(&w1).status()["failover"]["armed"], true);
+    hub.run(
+        &w1,
+        Input::Msg {
+            from: m5.clone(),
+            msg: Msg::HelloOk {
+                node: m5.clone(),
+                cluster: "c1".to_string(),
+                term: Term {
+                    n: 2,
+                    node: id("m5"),
+                },
+                home: m5.clone(),
+            },
+        },
+    );
+    assert_eq!(hub.core(&w1).status()["failover"]["armed"], false);
 }

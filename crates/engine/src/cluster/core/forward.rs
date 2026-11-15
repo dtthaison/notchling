@@ -144,7 +144,10 @@ impl NodeCore {
             self.reply(&from, id, Err(err), out);
             return;
         }
-        self.adopt(&term, out);
+        if !self.adopt(&term, out) {
+            self.refused_call(&from, id, &op, "bad_term", out);
+            return;
+        }
         let facts = self.state.as_ref().and_then(|state| {
             state.members.get(&from).map(|m| SenderFacts {
                 id: m.id.clone(),

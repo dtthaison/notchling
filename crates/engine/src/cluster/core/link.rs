@@ -162,7 +162,10 @@ impl NodeCore {
             return;
         }
         if let Some(t) = &term {
-            self.adopt(t, out);
+            if !self.adopt(t, out) {
+                self.refuse(&from, "bad_term", true, out);
+                return;
+            }
         }
         self.greet(&from);
         let (home, term, cluster_id) = match &self.state {
@@ -254,6 +257,7 @@ impl NodeCore {
             out.push(Effect::Close { peer });
         }
         self.state = None;
+        self.primary_armed = false;
         self.peers.clear();
         self.dials.clear();
         self.out_calls.clear();
@@ -264,26 +268,42 @@ impl NodeCore {
         out.push(Effect::Wipe);
     }
 
-    pub(super) fn adopt(&mut self, term: &Term, out: &mut Vec<Effect>) {
+    pub(super) fn term_comes_from_a_promotable(&self, term: &Term) -> bool {
         let Some(state) = &self.state else {
-            return;
+            return false;
+        };
+        *term <= state.term
+            || state
+                .members
+                .get(&term.node)
+                .is_some_and(|m| m.state == MemberState::Active && m.can_be_master)
+    }
+
+    pub(super) fn adopt(&mut self, term: &Term, out: &mut Vec<Effect>) -> bool {
+        if !self.term_comes_from_a_promotable(term) {
+            return false;
+        }
+        let Some(state) = &self.state else {
+            return false;
         };
         if *term <= state.term {
-            return;
+            return true;
         }
         let was_home = state.home == self.me;
         if self
             .apply(Command::Term { term: term.clone() }, out)
             .is_err()
         {
-            return;
+            return false;
         }
+        self.primary_armed = false;
         if was_home && term.node != self.me {
             out.push(Effect::SteppedDown {
                 term: term.clone(),
                 home: term.node.clone(),
             });
         }
+        true
     }
 
     pub(super) fn tick(&mut self, out: &mut Vec<Effect>) {
