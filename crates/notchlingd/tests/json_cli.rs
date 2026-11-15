@@ -245,3 +245,42 @@ fn delegate_models_json_lists_the_codex_cache() {
     assert_eq!(code, 0);
     assert!(text.starts_with("codex (--model <slug> --effort <level>):\n  gpt-a  efforts: low, medium (default medium)\n"));
 }
+
+#[test]
+fn delegate_models_for_names_the_model_to_use() {
+    let dir = scratch("for-role");
+    let root = dir.0.join("root");
+    std::fs::create_dir_all(root.join("codex")).unwrap();
+    std::fs::write(
+        root.join("codex/models_cache.json"),
+        r#"{"models":[{"slug":"gpt-6-astra","priority":1,"visibility":"list"}]}"#,
+    )
+    .unwrap();
+    let (code, out, _) = run(&root, &["delegate-models", "--for", "review-final"]);
+    assert_eq!(
+        (code, out.as_str()),
+        (0, "codex --model gpt-6-astra --effort xhigh\n")
+    );
+
+    std::fs::write(
+        root.join("codex/models_cache.json"),
+        r#"{"models":[{"slug":"gpt-5-sol","priority":1,"visibility":"list"}]}"#,
+    )
+    .unwrap();
+    let (code, out, _) = run(&root, &["delegate-models", "--for", "review-final"]);
+    assert_eq!(
+        (code, out.as_str()),
+        (1, "no model for review-final; run delegate-models\n")
+    );
+
+    let (code, out, _) = run(&root, &["delegate-models", "--for", "poetry"]);
+    assert_eq!(code, 1);
+    assert!(
+        out.starts_with("no model marked for poetry; run delegate-models"),
+        "{out}"
+    );
+
+    let (code, out, _) = run(&root, &["delegate-models", "codex"]);
+    assert_eq!(code, 0);
+    assert!(out.contains("gpt-5-sol"), "{out}");
+}

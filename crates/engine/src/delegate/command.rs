@@ -3,7 +3,8 @@ use super::deps::Deps;
 use super::options::{self, Tool};
 use super::outcome::{render, to_json, Outcome};
 use super::record::{Delegation, Recorder};
-use super::{agy_pick, agy_run, codex_run, media};
+use super::{agy_pick, agy_run, codex_run, media, role_models};
+use crate::catalog::roles::Roles;
 use crate::tools::codex::models;
 use crate::transcript::util::now_secs;
 use std::io::Write;
@@ -113,7 +114,12 @@ fn usage_error(err: &mut dyn Write, message: &str) -> i32 {
 }
 
 pub fn models_listing(args: &[String], deps: &Deps, out: &mut dyn Write) -> i32 {
+    let (args, role) = role_models::split_for(args);
+    if let Some(role) = role {
+        return role_models::run_for(role, deps, out);
+    }
     let only = args.first().and_then(|a| Tool::from_name(a));
+    let roles = Roles::load(deps.catalog_file.as_deref());
     let mut lines: Vec<String> = Vec::new();
     if only != Some(Tool::Agy) {
         lines.push("codex (--model <slug> --effort <level>):".into());
@@ -127,11 +133,13 @@ pub fn models_listing(args: &[String], deps: &Deps, out: &mut dyn Write) -> i32 
                 .map(|d| format!(" (default {d})"))
                 .unwrap_or_default();
             lines.push(format!(
-                "  {}  efforts: {}{default}",
+                "  {}  efforts: {}{default}{}",
                 m.slug,
-                m.efforts.join(", ")
+                m.efforts.join(", "),
+                role_models::suffix(roles.tool("codex"), &m.slug)
             ));
         }
+        lines.extend(role_models::effort_lines(roles.tool("codex")));
     }
     if only != Some(Tool::Codex) {
         lines.push("agy (--model <model> --effort low|medium|high):".into());
@@ -147,8 +155,10 @@ pub fn models_listing(args: &[String], deps: &Deps, out: &mut dyn Write) -> i32 
                     } else {
                         format!("  efforts: {}", levels.join(", "))
                     };
-                    lines.push(format!("  {model}{efforts}"));
+                    let marks = role_models::suffix(roles.tool("antigravity"), &model);
+                    lines.push(format!("  {model}{efforts}{marks}"));
                 }
+                lines.extend(role_models::effort_lines(roles.tool("antigravity")));
             }
             None => lines.push("  (couldn't run agy models)".into()),
         }
@@ -158,7 +168,12 @@ pub fn models_listing(args: &[String], deps: &Deps, out: &mut dyn Write) -> i32 
 }
 
 pub fn models_listing_json(args: &[String], deps: &Deps, out: &mut dyn Write) -> i32 {
+    let (args, role) = role_models::split_for(args);
+    if let Some(role) = role {
+        return role_models::run_for(role, deps, out);
+    }
     let only = args.first().and_then(|a| Tool::from_name(a));
+    let roles = Roles::load(deps.catalog_file.as_deref());
     let mut root = serde_json::Map::new();
     if only != Some(Tool::Agy) {
         let models: Vec<serde_json::Value> = models::load(&deps.codex_home)
@@ -176,10 +191,14 @@ pub fn models_listing_json(args: &[String], deps: &Deps, out: &mut dyn Write) ->
                 if let Some(w) = m.context_window {
                     v["contextWindow"] = w.into();
                 }
+                role_models::json_fields(roles.tool("codex"), &m.slug, &mut v);
                 v
             })
             .collect();
-        root.insert("codex".into(), serde_json::json!({ "models": models }));
+        root.insert(
+            "codex".into(),
+            serde_json::json!({ "models": models, "notForEfforts": role_models::efforts_json(roles.tool("codex")) }),
+        );
     }
     if only != Some(Tool::Codex) {
         let listing = deps
@@ -191,13 +210,17 @@ pub fn models_listing_json(args: &[String], deps: &Deps, out: &mut dyn Write) ->
             .map(|l| {
                 agy_pick::models(&l)
                     .into_iter()
-                    .map(|(model, efforts)| serde_json::json!({"model": model, "efforts": efforts}))
+                    .map(|(model, efforts)| {
+                        let mut v = serde_json::json!({"model": model, "efforts": efforts});
+                        role_models::json_fields(roles.tool("antigravity"), &model, &mut v);
+                        v
+                    })
                     .collect()
             })
             .unwrap_or_default();
         root.insert(
             "agy".into(),
-            serde_json::json!({ "available": available, "models": models }),
+            serde_json::json!({ "available": available, "models": models, "notForEfforts": role_models::efforts_json(roles.tool("antigravity")) }),
         );
     }
     let value = serde_json::Value::Object(root);

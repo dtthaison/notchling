@@ -71,7 +71,7 @@ fn fail<T>(message: impl Into<String>) -> Result<T, ParseError> {
     })
 }
 
-pub const USAGE: &str = "Usage: notchling delegate <codex|agy> [--model <m>] [--effort <e>] [--folder <dir>] [--out <dir>]\n                         [--write] [--session <id>] [--timeout <seconds>] [--json] -- <prompt>\n       notchling delegate-models [codex|agy]";
+pub const USAGE: &str = "Usage: notchling delegate <codex|agy> [--model <m>] [--effort <e>] [--folder <dir>] [--out <dir>]\n                         [--write] [--session <id>] [--timeout <seconds>] [--json] -- <prompt>\n       notchling delegate-models [codex|agy] [--json]\n       notchling delegate-models --for <role>";
 
 pub const MAX_DEPTH: u32 = 2;
 pub const DEPTH_VARIABLE: &str = "NOTCHLING_DELEGATE_DEPTH";

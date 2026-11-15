@@ -31,11 +31,25 @@ It blocks until the other tool's turn ends; nothing polls. Run it in the backgro
 
 Output: a header line (tool, model, effort, time, tokens), `Session:`, `Generated:` and `Copied to:` file paths, any `Declined` permissions, then the other agent's reply. Read files it names before relying on them, and tell the user which tool and model did the work.
 
+## Which model for a review
+
+Pick it from Notchling, not from memory: `'{binary}' delegate-models --for <role>` prints the tool, model and effort to use, one line per pick (`codex --model <m> --effort <e>`), and a `note:` when the marked model is gone or a newer one exists in its family.
+
+- `review`: after each task.
+- `review-final`: the final review of a branch.
+- `review-secrets`: code touching secrets, vault, auth or accounts. It prints two picks; run both.
+- `spec-check`: a builder check of a spec.
+
+`'{binary}' delegate-models` shows each model's roles and what it is not for (never review with those). If `--for` says no model is marked, run `delegate-models` and choose.
+
+- agy can't run commands in a review: put the diff and the task text in files under `.review/` and point it at them. Codex can run `git diff` itself.
+- The output is another model's opinion: check each finding against the code before fixing it.
+
 ## Examples
 
 ```sh
 '{binary}' delegate codex --out ./assets -- 'Generate a 1024x1024 app icon: a paper plane, flat, blue on white.'
-'{binary}' delegate agy --model gemini-4-argon --effort high --folder . -- 'Review the uncommitted changes (git diff HEAD) for bugs. List each with file:line and why. Do not change files.'
+'{binary}' delegate agy --model <model> --effort high --folder . -- 'Review the uncommitted changes (git diff HEAD) for bugs. List each with file:line and why. Do not change files.'
 '{binary}' delegate codex --model {codex_model} --effort high --write --folder ./site -- 'Add a dark mode to styles.css.'
 ```
 
@@ -111,6 +125,24 @@ mod tests {
             assert!(TEMPLATE.contains(flag), "{flag}");
         }
         assert_eq!(NAME, "notchling-delegate");
+    }
+
+    #[test]
+    fn the_skill_sends_the_model_choice_to_the_catalog() {
+        let text = content("/Apps/N", SkillTool::Claude, None);
+        assert!(text.contains("## Which model for a review"));
+        assert!(text.contains("'/Apps/N' delegate-models --for <role>"));
+        for role in crate::catalog::roles::Roles::built_in().all_roles() {
+            assert!(text.contains(&format!("`{role}`")), "{role}");
+        }
+        for name in ["gpt-6", "astra", "hydrogen"] {
+            assert!(
+                !text.contains(name),
+                "{name} is in the catalog, not the skill"
+            );
+        }
+        assert!(text.contains(".review/"));
+        assert!(text.contains("check each finding against the code"));
     }
 
     #[test]

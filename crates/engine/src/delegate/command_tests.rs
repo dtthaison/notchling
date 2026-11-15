@@ -262,11 +262,11 @@ fn delegate_models_lists_both_tools() {
     });
     assert_eq!(
         listing(&rig, &[]),
-        "codex (--model <slug> --effort <level>):\n  gpt-a  efforts: low, medium (default medium)\n  gpt-b  efforts: \nagy (--model <model> --effort low|medium|high):\n  gemini-4-argon  efforts: medium, high\n  flash"
+        "codex (--model <slug> --effort <level>):\n  gpt-a  efforts: low, medium (default medium)\n  gpt-b  efforts: \nagy (--model <model> --effort low|medium|high):\n  gemini-4-argon  efforts: medium, high  [review-secrets, spec-check at high]\n    use: Builder check of a spec; second reviewer for code touching secrets, vault, auth or accounts. Cannot run commands: use files under .review/.\n  flash  [not for review]\n  not for review: effort ultra"
     );
     assert_eq!(
         listing(&rig, &["agy"]),
-        "agy (--model <model> --effort low|medium|high):\n  gemini-4-argon  efforts: medium, high\n  flash"
+        "agy (--model <model> --effort low|medium|high):\n  gemini-4-argon  efforts: medium, high  [review-secrets, spec-check at high]\n    use: Builder check of a spec; second reviewer for code touching secrets, vault, auth or accounts. Cannot run commands: use files under .review/.\n  flash  [not for review]\n  not for review: effort ultra"
     );
     assert!(listing(&rig, &["codex"]).starts_with("codex ("));
     assert!(!listing(&rig, &["Codex"]).contains("agy ("));
