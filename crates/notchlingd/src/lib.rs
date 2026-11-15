@@ -81,6 +81,7 @@ pub mod settings_cli;
 pub mod settings_ops;
 pub mod signals;
 pub mod switches;
+pub mod typing_locks;
 pub mod vault_args;
 pub mod vault_caller;
 pub mod vault_cli;

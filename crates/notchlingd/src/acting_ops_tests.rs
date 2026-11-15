@@ -4,6 +4,7 @@ use notchling_engine::control::Launcher;
 use notchling_engine::reply::exec::{Markers, Pty, ScreenCheck};
 use notchling_engine::reply::fake::{FakePrompt, RULE};
 use notchling_engine::reply::keys;
+use notchling_engine::reply::plan;
 use notchling_engine::sessions::Roots;
 use notchling_local_api::{ops, ApiError, Caller, ClientKind, ErrorCode, OpSpec, Tier};
 use serde_json::{json, Value};
@@ -614,4 +615,165 @@ fn prompts_list_trims_an_oversized_prompt_instead_of_failing() {
     let trimmed = rows.iter().find(|p| p["id"] == json!(big.id)).unwrap();
     assert_eq!(trimmed["trimmed"], true);
     assert_eq!(trimmed["summary"], "/w/big.txt");
+}
+
+type Gate = Arc<(Mutex<bool>, std::sync::Condvar)>;
+type Order = Arc<Mutex<Vec<(usize, String)>>>;
+
+struct GatedAttacher {
+    inner: FakeAttacher,
+    hold: &'static str,
+    gate: Gate,
+    entered: Arc<AtomicBool>,
+    order: Order,
+    count: std::sync::atomic::AtomicUsize,
+}
+
+struct TaggedPty {
+    inner: Box<dyn Pty>,
+    n: usize,
+    order: Order,
+}
+
+impl Pty for TaggedPty {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<()> {
+        self.order
+            .lock()
+            .unwrap()
+            .push((self.n, String::from_utf8_lossy(bytes).into_owned()));
+        std::thread::sleep(Duration::from_millis(3));
+        self.inner.write(bytes)
+    }
+    fn wait_quiet(&mut self, quiet: Duration, timeout: Duration) -> bool {
+        self.inner.wait_quiet(quiet, timeout)
+    }
+    fn screen(&mut self) -> Vec<String> {
+        self.inner.screen()
+    }
+    fn cursor(&mut self) -> Option<(usize, usize)> {
+        self.inner.cursor()
+    }
+    fn sleep(&mut self, d: Duration) {
+        self.inner.sleep(d)
+    }
+    fn now_ms(&self) -> u64 {
+        self.inner.now_ms()
+    }
+}
+
+impl Attacher for GatedAttacher {
+    fn attach(&self, job: &str, config_dir: Option<&str>) -> Result<Box<dyn Pty>, ApiError> {
+        if job == self.hold {
+            self.entered.store(true, Ordering::SeqCst);
+            let (open, wake) = &*self.gate;
+            let mut open = open.lock().unwrap();
+            while !*open {
+                open = wake.wait(open).unwrap();
+            }
+        }
+        let n = self.count.fetch_add(1, Ordering::SeqCst);
+        Ok(Box::new(TaggedPty {
+            inner: self.inner.attach(job, config_dir)?,
+            n,
+            order: self.order.clone(),
+        }))
+    }
+    fn screen_check(&self) -> &dyn ScreenCheck {
+        &Markers
+    }
+}
+
+fn gated(hold: &'static str) -> (Arc<ActingOps>, Gate, Arc<AtomicBool>, Order) {
+    let mut list = sessions();
+    let second = row("job-idle2", json!({"job": "idle0002"}), "completed", None);
+    list.as_array_mut().unwrap().push(second);
+    let gate: Gate = Arc::new((Mutex::new(false), std::sync::Condvar::new()));
+    let (entered, order) = (Arc::new(AtomicBool::new(false)), Order::default());
+    let inner = FakeAttacher {
+        screen: Arc::new(Mutex::new(PROMPT.iter().map(|s| s.to_string()).collect())),
+        ..FakeAttacher::default()
+    };
+    let attacher = GatedAttacher {
+        inner,
+        hold,
+        gate: gate.clone(),
+        entered: entered.clone(),
+        order: order.clone(),
+        count: Default::default(),
+    };
+    let roots = Roots {
+        main_dir: fixture_claude(),
+        lanes_file: PathBuf::from("/nonexistent/lanes.json"),
+    };
+    let room = Arc::new(FakeRoom::default());
+    room.app.store(true, Ordering::SeqCst);
+    let ops = ActingOps::new(
+        Arc::new(Acting::in_memory(true)),
+        Arc::new(Mutex::new(list)),
+        roots,
+        room,
+        Box::new(attacher),
+    )
+    .with_rest(Box::new(Trusting));
+    (Arc::new(ops), gate, entered, order)
+}
+
+fn open_gate(gate: &Gate) {
+    let (flag, wake) = &**gate;
+    *flag.lock().unwrap() = true;
+    wake.notify_all();
+}
+
+type Sent = std::sync::mpsc::Receiver<Result<Value, ApiError>>;
+
+fn reply_in_thread(ops: &Arc<ActingOps>, id: &'static str, text: &'static str) -> Sent {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let ops = ops.clone();
+    std::thread::spawn(move || {
+        let sent = ops.call(&app(), ops::SESSION_REPLY, &json!({"id": id, "text": text}));
+        let _ = tx.send(sent);
+    });
+    rx
+}
+
+#[test]
+fn locks_are_per_session() {
+    let (ops, gate, entered, _order) = gated("idle0001");
+    let slow = reply_in_thread(&ops, "job-idle", "to a");
+    while !entered.load(Ordering::SeqCst) {
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    let other = reply_in_thread(&ops, "job-idle2", "to b");
+    let done = other.recv_timeout(Duration::from_secs(5));
+    open_gate(&gate);
+    assert_eq!(
+        done.expect("b is typed while a's attach hangs").unwrap(),
+        json!({"sent": true})
+    );
+    let slow = slow.recv_timeout(Duration::from_secs(5)).unwrap();
+    assert_eq!(slow.unwrap(), json!({"sent": true}));
+}
+
+#[test]
+fn answer_and_reply_to_one_session_never_interleave() {
+    let (ops, gate, _entered, order) = gated("none");
+    open_gate(&gate);
+    let agent = ops.agent(&json!({"id": "job-idle"})).unwrap();
+    let typing: Vec<_> = ["one", "two"]
+        .into_iter()
+        .map(|text| {
+            let (ops, agent) = (ops.clone(), agent.clone());
+            std::thread::spawn(move || {
+                ops.play(&agent, &plan::reply(text), &mut crate::acting_ops::NoLog)
+                    .is_ok()
+            })
+        })
+        .collect();
+    for one in typing {
+        assert!(one.join().unwrap());
+    }
+    let tags: Vec<usize> = order.lock().unwrap().iter().map(|(n, _)| *n).collect();
+    assert!(tags.len() >= 4, "{tags:?}");
+    let changes = tags.windows(2).filter(|w| w[0] != w[1]).count();
+    assert_eq!(changes, 1, "one call's keys, then the other's: {tags:?}");
 }

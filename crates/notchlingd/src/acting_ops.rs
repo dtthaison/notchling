@@ -7,6 +7,7 @@ use crate::held_guard::{FromFiles, Guarded, Rest};
 use crate::hook_ops::Parents;
 use crate::late_emit::Events;
 use crate::prompts::{fit_list, question_json, Kind, Prompt, PromptStore};
+use crate::typing_locks::TypingLocks;
 use notchling_engine::control::{Command, LaunchError, LaunchOutput, Launcher, PtyScript};
 use notchling_engine::reply::exec::{
     execute_clearing, Clearing, Failure, Outcome, Pty, QueueLog, ScreenCheck, TranscriptLog,
@@ -121,7 +122,7 @@ pub struct ActingOps {
     attacher: Box<dyn Attacher>,
     pub(crate) launcher: Arc<dyn Launcher>,
     pub(crate) pause: Pause,
-    typing: Mutex<()>,
+    typing: TypingLocks,
     pub(crate) tick: Duration,
     pub(crate) parent_of: Parents,
     stopping: Mutex<HashMap<String, Instant>>,
@@ -155,7 +156,7 @@ impl ActingOps {
             attacher,
             launcher: Arc::new(NoLaunch),
             pause: Box::new(|ms| std::thread::sleep(Duration::from_millis(ms))),
-            typing: Mutex::new(()),
+            typing: TypingLocks::new(),
             tick: Duration::from_millis(250),
             parent_of: Box::new(crate::hook::parent_pid),
             stopping: Mutex::new(HashMap::new()),
@@ -314,6 +315,17 @@ impl ActingOps {
             .unwrap_or_default()
     }
 
+    pub(crate) fn typing_locks(&self) -> &TypingLocks {
+        &self.typing
+    }
+
+    fn typing_lock(&self, agent: &Agent) -> Arc<Mutex<()>> {
+        match &agent.target {
+            AgentTarget::Job(job) => self.typing_locks().for_job(job),
+            _ => self.typing_locks().for_job(&agent.id),
+        }
+    }
+
     pub(crate) fn agent(&self, args: &Value) -> Result<Agent, ApiError> {
         let id = text_arg(args, "id")?;
         let list = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
@@ -330,7 +342,8 @@ impl ActingOps {
         plan: &Plan,
         log: &mut dyn QueueLog,
     ) -> Result<Outcome, PlayError> {
-        let _one = self.typing.lock().unwrap_or_else(|e| e.into_inner());
+        let lock = self.typing_lock(agent);
+        let _one = lock.lock().unwrap_or_else(|e| e.into_inner());
         self.play_locked(agent, plan, log, None)
     }
 
@@ -350,7 +363,8 @@ impl ActingOps {
         log: &mut dyn QueueLog,
         clear_box: bool,
     ) -> Result<Outcome, PlayError> {
-        let _one = self.typing.lock().unwrap_or_else(|e| e.into_inner());
+        let lock = self.typing_lock(agent);
+        let _one = lock.lock().unwrap_or_else(|e| e.into_inner());
         self.play_inner(agent, plan, log, None, None, clear_box)
     }
 
@@ -361,7 +375,8 @@ impl ActingOps {
         log: &mut dyn QueueLog,
         guard: &dyn Fn() -> bool,
     ) -> Result<Outcome, PlayError> {
-        let _one = self.typing.lock().unwrap_or_else(|e| e.into_inner());
+        let lock = self.typing_lock(agent);
+        let _one = lock.lock().unwrap_or_else(|e| e.into_inner());
         self.play_inner(agent, plan, log, None, Some(guard), false)
     }
 
@@ -540,7 +555,8 @@ impl ActingOps {
 
     fn interrupt(&self, args: &Value) -> Result<Value, ApiError> {
         let id = text_arg(args, "id")?.to_string();
-        let _one = self.typing.lock().unwrap_or_else(|e| e.into_inner());
+        let lock = self.typing_lock(&self.agent(args)?);
+        let _one = lock.lock().unwrap_or_else(|e| e.into_inner());
         let agent = self.agent(args)?;
         let working = agent.group == AgentGroup::Working;
         {
@@ -654,7 +670,8 @@ impl ActingOps {
         let expect = expect_arg(args)?;
         let agent = self.agent(args)?;
         {
-            let _one = self.typing.lock().unwrap_or_else(|e| e.into_inner());
+            let lock = self.typing_lock(&agent);
+            let _one = lock.lock().unwrap_or_else(|e| e.into_inner());
             self.play_locked(
                 &agent,
                 &plan::permission(decision, &expect),
@@ -742,7 +759,8 @@ impl ActingOps {
             AgentTarget::Job(job) if agent.can_reply() => job.clone(),
             _ => return Err(bad("this session has no terminal to read")),
         };
-        let _one = self.typing.lock().unwrap_or_else(|e| e.into_inner());
+        let lock = self.typing_lock(&agent);
+        let _one = lock.lock().unwrap_or_else(|e| e.into_inner());
         let config_dir = config_dir_for_job(&self.roots, &job).or_else(|| agent.config_dir.clone());
         let mut pty = self.attacher.attach(&job, config_dir.as_deref())?;
         let read = read_question(pty.as_mut(), &job)
