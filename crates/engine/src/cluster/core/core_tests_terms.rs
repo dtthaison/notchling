@@ -1,6 +1,6 @@
 use serde_json::{json, Value};
 
-use super::{Effect, Input, LocalCmd, NodeCore, CALL_MS, DEDUPE_MS, PING_MS};
+use super::{Effect, Input, LocalCmd, NodeCore, CALL_MS, DEDUPE_MS, PING_MS, WORKSPACE_CALL_MS};
 use crate::cluster::id::Tool;
 use crate::cluster::members::Term;
 use crate::cluster::testkit::{id, versions};
@@ -365,5 +365,65 @@ fn highest_term_survives_restart() {
             },
         },
     });
+    assert!(run_locals(&effects).is_empty());
+}
+
+#[test]
+fn workspace_calls_wait_longer_than_plain_calls() {
+    let (mut hub, m5, w1) = pair();
+    let origin = Origin {
+        node: m5.clone(),
+        tier: OriginTier::App,
+    };
+    let forward = |op: &str| LocalCmd::Forward {
+        node: w1.clone(),
+        op: op.to_string(),
+        args: json!({}),
+        origin: origin.clone(),
+    };
+    let timeouts = |hub: &super::core_tests::Hub, from: usize| {
+        hub.seen[from..]
+            .iter()
+            .filter(
+                |(_, e)| matches!(e, Effect::Answer { result: Err(err), .. } if err.code == "timeout"),
+            )
+            .count()
+    };
+    assert!(answers(&hub.local(&m5, forward("workspace.prepare"))).is_empty());
+    let start = hub.seen.len();
+    for _ in 0..=(CALL_MS / PING_MS) {
+        hub.tick_all(PING_MS);
+    }
+    assert_eq!(
+        timeouts(&hub, start),
+        0,
+        "a clone may take longer than a plain call"
+    );
+    for _ in 0..(WORKSPACE_CALL_MS / PING_MS) {
+        hub.tick_all(PING_MS);
+    }
+    assert_eq!(timeouts(&hub, start), 1);
+}
+
+#[test]
+fn a_workers_node_sessions_call_is_refused() {
+    let (mut hub, m5, w1) = pair();
+    let effects = hub.run(
+        &m5,
+        Input::Msg {
+            from: w1.clone(),
+            msg: Msg::Call {
+                id: 11,
+                op: "node.sessions".to_string(),
+                args: json!({}),
+                origin: Origin {
+                    node: w1.clone(),
+                    tier: OriginTier::Node,
+                },
+                term: hub.core(&m5).highest_term().cloned().expect("term"),
+            },
+        },
+    );
+    assert!(effects.iter().any(|e| matches!(e, Effect::Send { msg: Msg::Reply { err: Some(e), .. }, .. } if e.code == "forbidden")));
     assert!(run_locals(&effects).is_empty());
 }

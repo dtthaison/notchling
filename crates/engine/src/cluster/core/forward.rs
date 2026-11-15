@@ -1,11 +1,10 @@
 use serde_json::{json, Value};
 
-use super::{Effect, NodeCore, OutCall, Seen, Target, Then, CALL_MS, DEDUPE_MS};
-use crate::cluster::id::{qualify, NodeId};
-use crate::cluster::jobs::JobState;
+use super::{Effect, NodeCore, OutCall, Seen, Target, Then, CALL_MS, DEDUPE_MS, WORKSPACE_CALL_MS};
+use crate::cluster::id::NodeId;
 use crate::cluster::members::Term;
 use crate::cluster::policy::{check, SenderFacts};
-use crate::cluster::state::{role_of, Command};
+use crate::cluster::state::role_of;
 use crate::cluster::wire::{Msg, Origin, OriginTier, WireError};
 
 impl NodeCore {
@@ -71,7 +70,21 @@ impl NodeCore {
                         term,
                     } => self.on_call(from, id, op, args, origin, term, out),
                     Msg::Reply { id, ok, err } => self.on_reply(from, id, ok, err, out),
-                    Msg::Event { topic, name, data } => {
+                    Msg::Event {
+                        topic,
+                        name,
+                        mut data,
+                    } => {
+                        if topic == "jobs" {
+                            self.on_job_event(&from, &name, &data, out);
+                            return;
+                        }
+                        if topic != "sessions" {
+                            return;
+                        }
+                        if let Some(fields) = data.as_object_mut() {
+                            fields.insert("from".to_string(), json!(from));
+                        }
                         out.push(Effect::Publish { topic, name, data })
                     }
                     Msg::Ping { boot_ms } => self.on_ping(&from, boot_ms, out),
@@ -147,7 +160,9 @@ impl NodeCore {
             }
         };
         if rule.home_only && !self.is_home() {
-            self.refused_call(&from, id, &op, "not the primary", out);
+            let name = self.state.as_ref().map(|s| self.member_name(&s.home));
+            let why = format!("{} is primary now", name.unwrap_or_default());
+            self.refused_call(&from, id, &op, &why, out);
             return;
         }
         self.seen.insert(
@@ -266,7 +281,12 @@ impl NodeCore {
             );
             return;
         }
-        self.call_out(&node, op, args, origin, Then::Reply(target), out);
+        let wait = if op.starts_with("workspace.") {
+            WORKSPACE_CALL_MS
+        } else {
+            CALL_MS
+        };
+        self.call_out_within(&node, op, args, origin, (Then::Reply(target), wait), out);
     }
 
     pub(super) fn current_term(&self) -> Term {
@@ -288,6 +308,18 @@ impl NodeCore {
         then: Then,
         out: &mut Vec<Effect>,
     ) {
+        self.call_out_within(to, op, args, origin, (then, CALL_MS), out);
+    }
+
+    pub(super) fn call_out_within(
+        &mut self,
+        to: &NodeId,
+        op: String,
+        args: Value,
+        origin: Origin,
+        (then, wait): (Then, u64),
+        out: &mut Vec<Effect>,
+    ) {
         let id = self.next_wire;
         self.next_wire += 1;
         let term = self.current_term();
@@ -295,7 +327,7 @@ impl NodeCore {
             id,
             OutCall {
                 to: to.clone(),
-                deadline: self.boot_ms + CALL_MS,
+                deadline: self.boot_ms + wait,
                 then,
             },
         );
@@ -382,56 +414,8 @@ impl NodeCore {
                 warning,
                 target,
             } => {
-                let node = self
-                    .state
-                    .as_ref()
-                    .and_then(|s| s.jobs.get(&job))
-                    .map(|j| j.spec.node.clone());
-                match result {
-                    Ok(v) => {
-                        let session = v
-                            .get("session")
-                            .or_else(|| v.get("id"))
-                            .and_then(|s| s.as_str())
-                            .map(str::to_string);
-                        let _ = self.apply(
-                            Command::JobState {
-                                id: job.clone(),
-                                state: JobState::Running,
-                                session: session.clone(),
-                                detail: warning.clone(),
-                            },
-                            out,
-                        );
-                        let qualified = match (&node, &session) {
-                            (Some(n), Some(s)) => Some(qualify(n, s)),
-                            _ => None,
-                        };
-                        self.finish(
-                            target,
-                            Ok(json!({
-                                "job": job,
-                                "state": "running",
-                                "session": session,
-                                "qualified": qualified,
-                                "warning": warning,
-                            })),
-                            out,
-                        );
-                    }
-                    Err(e) => {
-                        let _ = self.apply(
-                            Command::JobState {
-                                id: job,
-                                state: JobState::Failed,
-                                session: None,
-                                detail: Some(e.message.clone()),
-                            },
-                            out,
-                        );
-                        self.finish(target, Err(e), out);
-                    }
-                }
+                let result = self.dispatched(job, warning, result, out);
+                self.finish(target, result, out);
             }
         }
     }

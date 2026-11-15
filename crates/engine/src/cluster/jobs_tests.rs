@@ -12,6 +12,8 @@ fn transitions_table() {
     let all = [Dispatching, Running, Done, Failed, Interrupted, Lost];
     let allowed = [
         (Dispatching, Running),
+        (Dispatching, Done),
+        (Dispatching, Interrupted),
         (Dispatching, Failed),
         (Running, Done),
         (Running, Failed),

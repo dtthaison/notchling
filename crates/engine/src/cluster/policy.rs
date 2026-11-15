@@ -76,6 +76,10 @@ const fn client_app(op: &'static str) -> Rule {
     rule(op, CLIENT, OriginTier::App, Some("id"), false)
 }
 
+const fn client_plain(op: &'static str) -> Rule {
+    rule(op, CLIENT, OriginTier::App, None, false)
+}
+
 const fn client_home(op: &'static str) -> Rule {
     rule(op, CLIENT_ONLY, OriginTier::App, None, true)
 }
@@ -102,13 +106,13 @@ pub const RULES: &[Rule] = &[
     home_node("node.switch.set"),
     home_app("node.switch.set"),
     home_node("node.put"),
-    home_app("node.put"),
+    client_plain("node.put"),
     home_node("node.put.end"),
-    home_app("node.put.end"),
+    client_plain("node.put.end"),
     home_node("workspace.prepare"),
-    home_app("workspace.prepare"),
+    client_plain("workspace.prepare"),
     home_node("workspace.return"),
-    home_app("workspace.return"),
+    client_plain("workspace.return"),
     rule("delegate.run", HOME, OriginTier::Agent, None, false),
     client_app("session.reply"),
     client_app("session.answer"),
@@ -123,11 +127,12 @@ pub const RULES: &[Rule] = &[
     client_app("agy.conversation"),
     client_app("prompts.list"),
     client_app("node.tail"),
+    client_plain("node.follow"),
     client_app("shell.stop"),
     client_home("cluster.dispatch"),
     client_home("cluster.member.set"),
     client_home("cluster.remove"),
-    rule("node.sessions", MEMBER, OriginTier::Node, None, false),
+    rule("node.sessions", CLIENT, OriginTier::Node, None, false),
     rule("node.versions", MEMBER, OriginTier::Node, None, false),
     rule("node.load", MEMBER, OriginTier::Node, None, false),
     rule("cluster.join.token", MEMBER, OriginTier::Agent, None, true),

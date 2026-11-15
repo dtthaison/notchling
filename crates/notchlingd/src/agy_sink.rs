@@ -117,6 +117,7 @@ impl Shared {
             command: None,
             resume_session_id: None,
             at_prompt: false,
+            node: None,
         };
         serde_json::to_value(agent).unwrap_or(Value::Null)
     }

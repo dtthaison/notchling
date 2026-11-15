@@ -242,6 +242,7 @@ mod tests {
             command: None,
             resume_session_id: None,
             at_prompt: false,
+            node: None,
         }
     }
 

@@ -17,9 +17,17 @@ pub(crate) struct FakeRoom {
     pub events: Mutex<Vec<(String, Value)>>,
     pub app: AtomicBool,
     pub following: Mutex<Vec<String>>,
+    pub followers: crate::cluster_forward::PromptFollowers,
 }
 
 impl Room for FakeRoom {
+    fn can_answer_prompts(&self) -> bool {
+        self.can_answer() || self.followers.active(crate::acting_ops::now_ms())
+    }
+    fn follow_prompts(&self, node: &str, lease_ms: u64) {
+        self.followers
+            .follow(node, crate::acting_ops::now_ms() + lease_ms as i64);
+    }
     fn publish(&self, _topic: &str, event: &str, data: &Value) {
         self.events
             .lock()

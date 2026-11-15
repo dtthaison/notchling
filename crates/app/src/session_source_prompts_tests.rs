@@ -69,6 +69,7 @@ fn row(id: &str) -> Agent {
         command: None,
         resume_session_id: None,
         at_prompt: false,
+        node: None,
     }
 }
 

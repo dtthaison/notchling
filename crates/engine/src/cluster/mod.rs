@@ -1,3 +1,4 @@
+pub mod blob;
 pub mod core;
 pub mod fence;
 pub mod grant_files;
@@ -11,9 +12,11 @@ pub mod outward;
 pub mod persist;
 pub mod policy;
 pub mod snapshot;
+pub mod shell_job;
 pub mod state;
 pub mod versions;
 pub mod wire;
+pub mod workspace;
 
 #[cfg(test)]
 pub mod sim;
@@ -36,6 +39,8 @@ mod grant_files_tests;
 #[cfg(test)]
 mod grants_tests;
 #[cfg(test)]
+mod blob_tests;
+#[cfg(test)]
 mod id_tests;
 #[cfg(test)]
 mod jobs_tests;
@@ -46,8 +51,12 @@ mod outward_tests;
 #[cfg(test)]
 mod policy_tests;
 #[cfg(test)]
+mod shell_job_tests;
+#[cfg(test)]
 mod state_tests;
 #[cfg(test)]
 mod versions_tests;
 #[cfg(test)]
 mod wire_tests;
+#[cfg(test)]
+mod workspace_tests;
