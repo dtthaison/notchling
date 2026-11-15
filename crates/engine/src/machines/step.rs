@@ -57,6 +57,10 @@ impl StepId {
     pub fn raw(&self) -> &str {
         &self.0
     }
+
+    pub fn is_node(&self) -> bool {
+        self.0.starts_with("node-")
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -346,7 +350,7 @@ impl Opener for NoOpener {
 
 pub trait ClusterTokens: Send + Sync {
     fn join_token(&self) -> Result<String, String>;
-    fn cluster_id(&self) -> Option<String>;
+    fn cluster_id(&self) -> Result<Option<String>, String>;
     fn can_be_master(&self, machine: &str) -> Option<bool>;
     fn can_be_master_of(&self, machine: &str, node: Option<&str>) -> Option<bool> {
         let _ = node;
@@ -368,8 +372,8 @@ impl ClusterTokens for NoCluster {
     fn join_token(&self) -> Result<String, String> {
         Err("the cluster isn't available here".into())
     }
-    fn cluster_id(&self) -> Option<String> {
-        None
+    fn cluster_id(&self) -> Result<Option<String>, String> {
+        Err("the cluster isn't available here".into())
     }
     fn can_be_master(&self, _machine: &str) -> Option<bool> {
         None

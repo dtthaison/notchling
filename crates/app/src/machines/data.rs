@@ -137,9 +137,7 @@ impl Setup {
         let cluster: Arc<dyn ClusterTokens> = if self.fixture {
             Arc::new(NoCluster)
         } else {
-            Arc::new(DaemonTokens {
-                socket: self.data_dir.join(SOCKET_NAME),
-            })
+            Arc::new(DaemonTokens::new(self.data_dir.join(SOCKET_NAME)))
         };
         let engine = Arc::new(
             SetupEngine::new(deps, catalog::standard())

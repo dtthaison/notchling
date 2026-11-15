@@ -22,8 +22,8 @@ impl ClusterTokens for Tokens {
     fn join_token(&self) -> Result<String, String> {
         self.token.clone()
     }
-    fn cluster_id(&self) -> Option<String> {
-        self.cluster.clone()
+    fn cluster_id(&self) -> Result<Option<String>, String> {
+        Ok(self.cluster.clone())
     }
     fn can_be_master(&self, _machine: &str) -> Option<bool> {
         None
@@ -228,13 +228,14 @@ fn service_fix_installs_and_loads_linux() {
     let out = (plan(&step).run)(&ctx);
     assert!(out.ok, "{}", out.message);
     let seen = texts(&rig.calls());
-    assert_eq!(seen.len(), 3, "{seen:?}");
-    assert!(seen[0].contains("\"$HOME\"/'.local/bin/notchling' service install"));
-    assert!(seen[1].contains("show-user"));
-    assert!(seen[2].contains(
+    assert_eq!(seen.len(), 4, "{seen:?}");
+    assert!(seen[0].contains("mkdir -p \"$d\""));
+    assert!(seen[1].contains("\"$HOME\"/'.local/bin/notchling' service install"));
+    assert!(seen[2].contains("show-user"));
+    assert!(seen[3].contains(
         "systemctl --user daemon-reload && systemctl --user enable notchlingd.service && systemctl --user restart notchlingd.service"
     ));
-    assert!(seen[2].contains("XDG_RUNTIME_DIR"));
+    assert!(seen[3].contains("XDG_RUNTIME_DIR"));
 }
 
 #[test]
@@ -246,11 +247,12 @@ fn service_fix_installs_and_loads_macos() {
     let out = (plan(&step).run)(&ctx);
     assert!(out.ok, "{}", out.message);
     let seen = texts(&rig.calls());
-    assert_eq!(seen.len(), 2, "{seen:?}");
-    assert!(seen[0].contains("service install"));
-    assert!(seen[1].contains("launchctl enable"));
-    assert!(seen[1].contains("launchctl kickstart -k"));
-    assert!(seen[1].contains(
+    assert_eq!(seen.len(), 3, "{seen:?}");
+    assert!(seen[0].contains("mkdir -p \"$HOME/Library/Application Support/Notchling\""));
+    assert!(seen[1].contains("service install"));
+    assert!(seen[2].contains("launchctl enable"));
+    assert!(seen[2].contains("launchctl kickstart -k"));
+    assert!(seen[2].contains(
         "launchctl bootstrap \"$u\" \"$HOME\"/'Library/LaunchAgents/dev.notchling.daemon.plist'"
     ));
 }
@@ -316,12 +318,23 @@ fn linger_off_needs_admin_fix() {
 }
 
 #[test]
-fn mac_service_probe_reads_launchctl() {
+fn mac_service_probe_asks_the_daemon_read_only() {
     let rig = Rig::new(node_mac());
-    let running = "dev.notchling.daemon = {\n\tstate = running\n}";
-    assert!(probe(&rig, &StepId::NODE_SERVICE, running, 0).is_pass());
-    assert!(probe(&rig, &StepId::NODE_SERVICE, "\tstate = waiting", 0).is_fail());
-    assert!(probe(&rig, &StepId::NODE_SERVICE, "Could not find service", 113).is_fail());
+    let (script, _) = remote(&step(&rig.machine, &StepId::NODE_SERVICE));
+    assert!(
+        script.ends_with("'.local/bin/notchling' status"),
+        "{script}"
+    );
+    assert!(probe(&rig, &StepId::NODE_SERVICE, "running, pid 4242\n", 0).is_pass());
+    assert!(probe(&rig, &StepId::NODE_SERVICE, "no daemon is running\n", 3).is_fail());
+    assert!(probe(&rig, &StepId::NODE_SERVICE, "", 0).is_fail());
+    assert!(probe(
+        &rig,
+        &StepId::NODE_SERVICE,
+        "notchling: command not found",
+        127
+    )
+    .is_fail());
 }
 
 fn status_json(cluster: &str, me: &str) -> String {
@@ -381,9 +394,19 @@ fn joined_probe_fails_plainly_when_this_mac_has_no_cluster() {
 #[test]
 fn join_fix_sends_token_on_stdin_only() {
     let rig = Rig::new(node_linux());
-    rig.runner.on(
+    rig.runner.on_with(
         |a| a.last().is_some_and(|s| s.contains("cluster join")),
         super::runner::CommandResult::new(2, "", &format!("the token {TOKEN} was refused\n")),
+        vec![
+            (
+                super::runner::Channel::Stdout,
+                format!("joining with {TOKEN}\n"),
+            ),
+            (
+                super::runner::Channel::Stderr,
+                format!("{TOKEN} was refused\n"),
+            ),
+        ],
     );
     let log = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
     let sink = log.clone();
@@ -405,7 +428,11 @@ fn join_fix_sends_token_on_stdin_only() {
         assert!(c.env.iter().all(|(_, v)| !v.contains(TOKEN)));
     }
     assert!(unquoted(&calls[0].text()).contains("cluster join --token-stdin"));
-    assert!(log.lock().unwrap().iter().all(|t| !t.contains(TOKEN)));
+    assert!(
+        log.lock().unwrap().iter().all(|t| !t.contains(TOKEN)),
+        "{:?}",
+        log.lock().unwrap()
+    );
 
     let ok_rig = Rig::new(node_linux());
     ok_rig.runner.on(

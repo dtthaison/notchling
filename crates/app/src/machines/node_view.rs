@@ -7,6 +7,18 @@ use super::jobs_view::switch;
 use super::view::MachinesView;
 
 impl MachinesView {
+    pub(super) fn ask_cluster(&mut self, cx: &mut Context<Self>) {
+        if self.fixed {
+            return;
+        }
+        let ask = self.model.cluster_ask();
+        Self::background(
+            cx,
+            move || ask.run(),
+            |view, answer, _| view.model.set_masters(answer),
+        );
+    }
+
     pub(super) fn node_row(
         &self,
         machine: &Machine,

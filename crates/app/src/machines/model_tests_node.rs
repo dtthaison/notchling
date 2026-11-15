@@ -5,7 +5,25 @@ use notchling_engine::machines::step::{ClusterTokens, StepId};
 use serde_json::{json, Value};
 
 use super::cluster_feed::{can_be_master_in, cluster_id_in, token_in};
+use super::cluster_feed::{DaemonTokens, NOT_RUNNING};
+use super::model::MachinesModel;
 use super::model_tests::{lock, mac, scripted_world};
+
+fn ask(model: &mut MachinesModel, nodes: &[(&str, &str)]) {
+    let nodes: Vec<(String, String)> = nodes
+        .iter()
+        .map(|(n, id)| (n.to_string(), id.to_string()))
+        .collect();
+    let answer = model
+        .cluster_ask_with(|name| {
+            nodes
+                .iter()
+                .find(|(n, _)| n == name)
+                .map(|(_, id)| id.clone())
+        })
+        .run();
+    model.set_masters(answer);
+}
 
 struct FromStatus(Value);
 
@@ -13,14 +31,14 @@ impl ClusterTokens for FromStatus {
     fn join_token(&self) -> Result<String, String> {
         Err("not asked".into())
     }
-    fn cluster_id(&self) -> Option<String> {
-        cluster_id_in(&self.0)
+    fn cluster_id(&self) -> Result<Option<String>, String> {
+        Ok(cluster_id_in(&self.0))
     }
-    fn can_be_master(&self, machine: &str) -> Option<bool> {
-        can_be_master_in(&self.0, machine, None)
+    fn can_be_master(&self, _machine: &str) -> Option<bool> {
+        None
     }
-    fn can_be_master_of(&self, machine: &str, node: Option<&str>) -> Option<bool> {
-        can_be_master_in(&self.0, machine, node)
+    fn can_be_master_of(&self, _machine: &str, node: Option<&str>) -> Option<bool> {
+        can_be_master_in(&self.0, node?)
     }
 }
 
@@ -95,7 +113,7 @@ fn can_be_master_line_reads_cluster_status() {
         Some("Can Be Master: Not in the cluster yet")
     );
 
-    model.ask_cluster();
+    ask(&mut model, &[("m1", NODE_B)]);
     assert_eq!(
         model.can_be_master_line(&m1).as_deref(),
         Some("Can Be Master: No")
@@ -109,7 +127,7 @@ fn can_be_master_line_reads_cluster_status() {
         "cluster": {"id": "c1"},
         "members": [{"id": NODE_B, "name": "m1", "canBeMaster": true}],
     })));
-    model.ask_cluster();
+    ask(&mut model, &[("m1", NODE_B)]);
     assert_eq!(
         model.can_be_master_line(&m1).as_deref(),
         Some("Can Be Master: Yes")
@@ -117,15 +135,35 @@ fn can_be_master_line_reads_cluster_status() {
 }
 
 #[test]
-fn a_machine_is_matched_by_node_id_before_name() {
-    let s = status();
-    assert_eq!(can_be_master_in(&s, "m1", None), Some(false));
-    assert_eq!(can_be_master_in(&s, "m1", Some(NODE_A)), Some(true));
-    assert_eq!(can_be_master_in(&s, "other", Some(NODE_B)), Some(false));
-    assert_eq!(can_be_master_in(&s, "other", None), None);
-    assert_eq!(can_be_master_in(&s, "m1", Some("cccc")), None);
+fn a_machine_with_no_node_id_is_never_matched_by_name() {
+    let w = scripted_world(vec![mac("m1")]);
+    let mut model = w.model;
+    model.parts.cluster = Arc::new(FromStatus(status()));
+    model.set_node("m1", true);
+    ask(&mut model, &[]);
+    let m1 = model.machine("m1").unwrap();
     assert_eq!(
-        can_be_master_in(&json!({"cluster": null, "members": []}), "m1", None),
+        model.can_be_master_line(&m1).as_deref(),
+        Some("Can Be Master: Not in the cluster yet")
+    );
+}
+
+#[test]
+fn a_daemon_that_is_down_is_an_error_not_no_cluster() {
+    let tokens = DaemonTokens::new(std::env::temp_dir().join("notchling-no-such-daemon.sock"));
+    assert_eq!(tokens.cluster_id(), Err(NOT_RUNNING.to_string()));
+    assert_eq!(tokens.cluster_id(), Err(NOT_RUNNING.to_string()));
+    assert_eq!(tokens.can_be_master_of("m1", Some(NODE_A)), None);
+}
+
+#[test]
+fn a_machine_is_matched_by_node_id_only() {
+    let s = status();
+    assert_eq!(can_be_master_in(&s, NODE_A), Some(true));
+    assert_eq!(can_be_master_in(&s, NODE_B), Some(false));
+    assert_eq!(can_be_master_in(&s, "cccc"), None);
+    assert_eq!(
+        can_be_master_in(&json!({"cluster": null, "members": []}), NODE_A),
         None
     );
 }
@@ -151,8 +189,8 @@ impl ClusterTokens for Counting {
     fn join_token(&self) -> Result<String, String> {
         Err("not asked".into())
     }
-    fn cluster_id(&self) -> Option<String> {
-        None
+    fn cluster_id(&self) -> Result<Option<String>, String> {
+        Ok(None)
     }
     fn can_be_master(&self, _machine: &str) -> Option<bool> {
         None
@@ -175,7 +213,7 @@ fn one_ask_serves_every_node_machine() {
     for name in ["m1", "m2", "m3"] {
         model.set_node(name, true);
     }
-    model.ask_cluster();
+    ask(&mut model, &[("m1", NODE_A), ("m2", NODE_B)]);
     assert_eq!(counting.0.load(std::sync::atomic::Ordering::SeqCst), 1);
     let m3 = model.machine("m3").unwrap();
     assert_eq!(

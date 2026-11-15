@@ -5,9 +5,10 @@ use super::step::{
     StepContext, StepFix, StepId,
 };
 use super::steps_node::{
-    arch_word, first_text_line, os_word, restart_command, said, value_of, BINARY, BINARY_NEW,
+    arch_word, first_text_line, machine_refusal, os_word, said, value_of, BINARY, BINARY_NEW,
     MAC_BUILD,
 };
+use super::steps_node_service::{restart_command, STOPS_WORK};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -68,10 +69,15 @@ fn dist_path(m: &Machine, dist: Option<&PathBuf>) -> Option<PathBuf> {
 
 fn parse_binary(out: &RemoteOutput, ctx: &StepContext) -> CheckResult {
     let line = first_text_line(&out.text);
+    let have = value_of(&out.text, "sha256=").unwrap_or("");
     if !line.starts_with("notchling ") {
+        if !have.is_empty() {
+            return CheckResult::fail(format!(
+                "notchling is in ~/.local/bin on the machine but doesn't run: {line}"
+            ));
+        }
         return CheckResult::fail("notchling isn't installed in ~/.local/bin on the machine");
     }
-    let have = value_of(&out.text, "sha256=").unwrap_or("");
     let want = dist_path(&ctx.machine, ctx.dist_dir.as_ref()).and_then(|p| file_hash(&p));
     match want {
         Some(want) if !have.is_empty() => {
@@ -102,6 +108,21 @@ fn scp_target(m: &Machine) -> String {
     format!("{}@{host}:.local/bin/notchling.new", m.user)
 }
 
+fn scp_args(from: &str, m: &Machine) -> Vec<String> {
+    vec![
+        "/usr/bin/scp".into(),
+        "-O".into(),
+        "-q".into(),
+        "-o".into(),
+        "BatchMode=yes".into(),
+        "-o".into(),
+        "ConnectTimeout=8".into(),
+        "--".into(),
+        from.into(),
+        scp_target(m),
+    ]
+}
+
 fn display(m: &Machine) -> String {
     let file = format!(
         "notchling-{}-{}",
@@ -111,8 +132,8 @@ fn display(m: &Machine) -> String {
     let new = shell::path(BINARY_NEW);
     let old = shell::path(BINARY);
     format!(
-        "Copy {file} from this Mac's cluster dist folder:\nmkdir -p ~/.local/bin\nscp -O {file} {}\nCheck its SHA-256 there against this Mac's:\n{}\nOnly when they match, put it in place:\nmv -f {new} {old} && chmod 755 {old}\nThen restart the service if it runs:\n{}",
-        scp_target(m),
+        "{STOPS_WORK}\nCopy {file} from this Mac's cluster dist folder:\nmkdir -p ~/.local/bin\n{}\nCheck its SHA-256 there against this Mac's:\n{}\nWhen the copy fails or they differ, remove it:\nrm -f {new}\nOnly when they match, put it in place:\nchmod 755 {new} && mv -f {new} {old}\nThen restart the service if it runs:\n{}",
+        scp_args(&file, m).join(" "),
         hash_script(),
         restart_command(m.is_linux())
     )
@@ -120,6 +141,9 @@ fn display(m: &Machine) -> String {
 
 fn binary_fix(ctx: &FixContext) -> FixOutcome {
     let m = &ctx.step.machine;
+    if let Some(why) = machine_refusal(m) {
+        return FixOutcome::fail(why);
+    }
     let (Some(os), Some(arch)) = (os_word(m), arch_word(m)) else {
         return FixOutcome::fail("the machine's system and chip aren't known yet; check it first");
     };
@@ -149,24 +173,9 @@ fn binary_fix(ctx: &FixContext) -> FixOutcome {
             said(ctx, &made)
         ));
     }
-    let copied = run::local(
-        ctx,
-        vec![
-            "/usr/bin/scp".into(),
-            "-O".into(),
-            "-q".into(),
-            "-o".into(),
-            "BatchMode=yes".into(),
-            "-o".into(),
-            "ConnectTimeout=8".into(),
-            "--".into(),
-            path.to_string_lossy().into_owned(),
-            scp_target(m),
-        ],
-        None,
-        900,
-    );
+    let copied = run::local(ctx, scp_args(&path.to_string_lossy(), m), None, 900);
     if copied.code != 0 {
+        let _ = run::script(ctx, &format!("rm -f {}", shell::path(BINARY_NEW)), None, 60);
         return FixOutcome::fail(format!(
             "the copy failed (exit {}): {}",
             copied.code,
@@ -185,7 +194,7 @@ fn binary_fix(ctx: &FixContext) -> FixOutcome {
     let old = shell::path(BINARY);
     let moved = run::script(
         ctx,
-        &format!("mv -f {new} {old} && chmod 755 {old}"),
+        &format!("chmod 755 {new} && mv -f {new} {old}"),
         None,
         60,
     );

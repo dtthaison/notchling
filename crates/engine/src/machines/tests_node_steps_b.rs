@@ -1,7 +1,8 @@
 use super::fakes_b::*;
 use super::runner::CommandResult;
 use super::step::{CheckState, RemoteOutput, StepId};
-use super::steps_node::{load_command, restart_command, MAC_BUILD};
+use super::steps_node::MAC_BUILD;
+use super::steps_node_service::{load_command, restart_command};
 use super::tests_node_steps::{fix_of, hex, node_linux, node_mac, step, texts};
 
 const BUILD: &[u8] = b"the mac's build";
@@ -160,10 +161,17 @@ fn scp_brackets_an_ipv6_host() {
 fn fix_displays_name_the_machine() {
     let rig = Rig::new(node_linux());
     let binary = plan(&step(&rig.machine, &StepId::NODE_BINARY)).display;
-    assert!(binary.contains("scp -O notchling-linux-x86_64 agent@w1.test:"));
+    assert!(binary.contains("/usr/bin/scp -O -q -o BatchMode=yes -o ConnectTimeout=8 -- notchling-linux-x86_64 agent@w1.test:"));
+    assert!(binary.contains("rm -f \"$HOME\"/'.local/bin/notchling.new'"));
+    assert!(binary.contains("chmod 755"));
+    assert!(binary.contains("Work running on this machine stops"));
+    assert!(binary.contains("XDG_RUNTIME_DIR"));
     assert!(!binary.contains('<'), "{binary}");
     let service = plan(&step(&rig.machine, &StepId::NODE_SERVICE)).display;
     assert!(service.contains("loginctl enable-linger 'agent'"));
+    assert!(service.contains("Work running on this machine stops"));
+    assert!(service.contains("mkdir -p"));
+    assert!(service.contains("[ -S \"$XDG_RUNTIME_DIR/bus\" ]"));
     assert!(!service.contains("<user>"));
     let again = plan(&step(&rig.machine, &StepId::NODE_BINARY)).display;
     assert_eq!(binary, again);

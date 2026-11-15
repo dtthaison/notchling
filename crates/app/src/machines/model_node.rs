@@ -33,19 +33,21 @@ impl MachinesModel {
     }
 
     pub fn cluster_ask(&self) -> ClusterAsk {
+        self.cluster_ask_with(|name| {
+            self.parts
+                .engine
+                .results(name)
+                .get(&StepId::NODE_JOINED)
+                .and_then(|r| r.detected.node.clone())
+        })
+    }
+
+    pub(super) fn cluster_ask_with(&self, node_of: impl Fn(&str) -> Option<String>) -> ClusterAsk {
         let asks = self
             .machines
             .iter()
             .filter(|m| m.node.is_some())
-            .map(|m| {
-                let node = self
-                    .parts
-                    .engine
-                    .results(&m.name)
-                    .get(&StepId::NODE_JOINED)
-                    .and_then(|r| r.detected.node.clone());
-                (m.name.clone(), node)
-            })
+            .map(|m| (m.name.clone(), node_of(&m.name)))
             .collect();
         ClusterAsk {
             tokens: self.parts.cluster.clone(),
@@ -55,11 +57,6 @@ impl MachinesModel {
 
     pub fn set_masters(&mut self, answer: BTreeMap<String, Option<bool>>) {
         self.masters = answer;
-    }
-
-    pub fn ask_cluster(&mut self) {
-        let answer = self.cluster_ask().run();
-        self.set_masters(answer);
     }
 
     pub fn can_be_master_line(&self, machine: &Machine) -> Option<String> {

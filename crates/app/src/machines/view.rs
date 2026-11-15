@@ -40,7 +40,7 @@ pub struct MachinesView {
     pub(super) log_open: BTreeSet<String>,
     pub(super) how_to: BTreeMap<String, StepId>,
     seen_revision: u64,
-    fixed: bool,
+    pub(super) fixed: bool,
 }
 
 impl MachinesView {
@@ -135,18 +135,6 @@ impl MachinesView {
             cx,
             move || versions.get(),
             |view, answer, _| view.model.set_mac_versions(answer),
-        );
-    }
-
-    pub(super) fn ask_cluster(&mut self, cx: &mut Context<Self>) {
-        if self.fixed {
-            return;
-        }
-        let ask = self.model.cluster_ask();
-        Self::background(
-            cx,
-            move || ask.run(),
-            |view, answer, _| view.model.set_masters(answer),
         );
     }
 
