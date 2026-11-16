@@ -24,10 +24,11 @@ Most of them come from the design, [revision 2](https://github.com/dtthaison/not
 | [0014](0014-app-data-in-sqlite.md) | The app's own data in SQLite, and search by bm25 | Accepted |
 | [0015](0015-one-chat-interface-per-tool.md) | Chat's parts are shared; each tool is one adapter behind one interface | Proposed, amended by 0016 |
 | [0016](0016-provider-interface-in-the-engine.md) | One provider interface per tool, in the engine, and model data from a catalog | Proposed |
-| [0017](0017-rust-notes-load-by-default.md) | The Rust notes load by default; the Swift notes are read on demand | Proposed |
+| [0017](0017-rust-notes-load-by-default.md) | The Rust notes load by default; the Swift notes are read on demand | Proposed, amended by 0021 |
 | [0018](0018-chat-state-per-area.md) | Chat's state per screen area, the transcript as a log, selection on the model, the conversation as a list | Proposed |
 | [0019](0019-agent-instructions-per-tool.md) | The skills, rules and hooks Notchling installs in each agent tool, owned file by file | Proposed |
 | [0020](0020-agents-change-settings-by-class.md) | Agents read every setting and change one by its class: free at once, ask through the Inbox, never the switches | Proposed |
+| [0021](0021-notes-read-on-demand.md) | The root `AGENTS.md` is one page and imports nothing; the working notes are one file per topic in `docs/notes/`, read on demand | Proposed |
 | [XXXX](XXXX-localization-fluent-source.md) | One English source in Fluent, every platform's words generated from it | Accepted |
 | [XXXX](XXXX-one-typed-event-stream.md) | One typed event stream: kinds in a registry, fields from a closed list with no text, the daemon the only writer, a sealed Audit | Proposed |
 | [XXXX](XXXX-provider-capability-contract.md) | One capability contract for every tool: 39 capabilities in four states, two shrink-only files, a conformance suite and a generated matrix | Proposed |

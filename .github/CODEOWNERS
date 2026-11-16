@@ -49,6 +49,7 @@
 /docs/architecture.md @dtthaison
 /docs/superpowers/ @dtthaison
 /docs/agents/ @dtthaison
+/docs/notes/ @dtthaison
 /apps/flutter/lib/features/pairing/ @dtthaison
 /locales/languages.json @dtthaison
 /locales/*/consent.ftl @dtthaison

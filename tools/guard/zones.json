@@ -29,6 +29,7 @@
     "!docs/architecture.md",
     "!docs/superpowers/**",
     "!docs/agents/**",
+    "!docs/notes/**",
     "apps/flutter/lib/features/**",
     "!apps/flutter/lib/features/pairing/**",
     "apps/flutter/lib/l10n/**",

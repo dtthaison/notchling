@@ -8,11 +8,13 @@ from typing import Dict, List, Optional
 
 ROOT = Path(__file__).resolve().parents[3]
 OLD = Path(__file__).resolve().parent / "fixtures" / "notes-before-phase3.txt"
-DOCS = ["AGENTS.md", "legacy/macos/Sources/AGENTS.md", "crates/AGENTS.md"]
+NOTES = sorted(f"docs/notes/{p.name}" for p in (ROOT / "docs" / "notes").glob("*.md"))
+DOCS = ["AGENTS.md", "legacy/macos/Sources/AGENTS.md", "crates/AGENTS.md"] + NOTES
 LATER_DOCS = ["ARCHITECTURE.md"]
 RETIRED: Dict[str, str] = {}
 RENAMED = {"mobile" + "/": "apps/flutter/"}
 ROOT_MAX_LINES = 80
+ROOT_MAX_BYTES = 6 * 1024
 ROOT_CLAUDE_MD = b"@AGENTS.md\n"
 
 SPAN = re.compile(r"`([^`\n]+)`")
@@ -94,16 +96,22 @@ class ManualMoveTests(unittest.TestCase):
     def test_claude_md_is_one_import(self):
         self.assertEqual((ROOT / "CLAUDE.md").read_bytes(), ROOT_CLAUDE_MD)
 
-    def test_root_ends_by_importing_the_rust_notes(self):
+    def test_root_imports_nothing_and_indexes_every_note(self):
         text = self.read("AGENTS.md")
-        lines = [line for line in text.splitlines() if line.strip()]
-        self.assertEqual(lines[-1], "@crates/AGENTS.md")
+        self.assertEqual([line for line in text.splitlines() if IMPORT.match(line)], [])
         self.assertIn("(legacy/macos/Sources/AGENTS.md)", text)
         self.assertIn("(apps/flutter/AGENTS.md)", text)
+        self.assertIn("crates/AGENTS.md", text)
+        self.assertGreater(len(NOTES), 0)
+        self.assertEqual([n for n in NOTES if n not in text], [], "every docs/notes file has a line in the root index")
 
     def test_root_is_short(self):
         count = len(self.read("AGENTS.md").splitlines())
         self.assertLessEqual(count, ROOT_MAX_LINES, "the root AGENTS.md points to the layers; details go there")
+
+    def test_root_is_small(self):
+        size = len((ROOT / "AGENTS.md").read_bytes())
+        self.assertLessEqual(size, ROOT_MAX_BYTES, "every Claude Code session loads the root AGENTS.md; details go in docs/notes/")
 
     def test_imports_resolve(self):
         for name in DOCS:

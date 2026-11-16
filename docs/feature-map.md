@@ -88,7 +88,7 @@ The phone stays Flutter; its parts are P0 to P3, and it isn't ported. Rules for 
 
 ## Rust workspace (`crates/`)
 
-The Rust app, ported part by part from Phase 7, is the app on the maintainer's Mac since 2026-11-11; its working notes are [crates/AGENTS.md](../crates/AGENTS.md). A crate's `Cargo.toml` and `build.rs` are protected even where its code is `auto`. Every folder under `crates/*/src/` is named here, in full or as `src/<folder>/` in its crate's row (`GUARD-FEATURE-MAP`).
+The Rust app, ported part by part from Phase 7, is the app on the maintainer's Mac since 2026-11-11; its working notes are [crates/AGENTS.md](../crates/AGENTS.md) and one file per topic in [docs/notes/](notes/). A crate's `Cargo.toml` and `build.rs` are protected even where its code is `auto`. Every folder under `crates/*/src/` is named here, in full or as `src/<folder>/` in its crate's row (`GUARD-FEATURE-MAP`).
 
 | Area | Folders and files | Tests | Zone | Parts |
 | --- | --- | --- | --- | --- |

@@ -6,7 +6,7 @@ The rest of the manual, in layers:
 
 | What | Where |
 | --- | --- |
-| Instructions for agents (and a quick start for people) | [AGENTS.md](AGENTS.md), [crates/AGENTS.md](crates/AGENTS.md), [legacy/macos/Sources/AGENTS.md](legacy/macos/Sources/AGENTS.md), [apps/flutter/AGENTS.md](apps/flutter/AGENTS.md) |
+| Instructions for agents (and a quick start for people) | [AGENTS.md](AGENTS.md), [crates/AGENTS.md](crates/AGENTS.md), [docs/notes/](docs/notes/), [legacy/macos/Sources/AGENTS.md](legacy/macos/Sources/AGENTS.md), [apps/flutter/AGENTS.md](apps/flutter/AGENTS.md) |
 | What Notchling is and won't be | [docs/goals.md](docs/goals.md) |
 | How the parts fit, and why | [ARCHITECTURE.md](ARCHITECTURE.md), [docs/decisions/](docs/decisions/) |
 | Rules, each with its check | [docs/rules.md](docs/rules.md) |
@@ -67,12 +67,12 @@ A pull request may also get a `review-agent` status from the review agent. It is
 
 - Chat's views (`legacy/macos/Sources/Notchling/Chat/Views/`), the notch's views (`NotchView`, `NotchRows`, `NotchPeek`, `NotchDetail`, `NotchCardParts`, `TabPerch`, `Notch/Pet/`), Search, the design kit and `Pages/PagesWindow.swift`.
 - The transcript readers: `Chat/ConversationReader.swift`, `Agents/TranscriptReader.swift`, `Agents/CodexSessions.swift`, `Agents/ACPTranscript.swift`, and ConsoleCore's `ChatTranscript.swift`, `SubagentReader.swift` and `TranscriptFacts.swift`.
-- `docs/`, except the manual's layers (`docs/goals.md`, `docs/rules.md`, `docs/decisions/`, `docs/policies/`), `docs/dev-profile.md`, `docs/feature-map.md`, `docs/architecture.md`, `docs/agents/` and `docs/superpowers/`.
+- `docs/`, except the manual's layers (`docs/goals.md`, `docs/rules.md`, `docs/decisions/`, `docs/policies/`), `docs/dev-profile.md`, `docs/feature-map.md`, `docs/architecture.md`, `docs/agents/`, `docs/notes/` and `docs/superpowers/`.
 - The phone's `apps/flutter/lib/features/`, except `pairing/`.
 - New files under `legacy/macos/Tests/`, `legacy/macos/Fixtures/` and `apps/flutter/test/`. Changing an existing test or golden is protected.
 - In the Rust tree: `crates/app/` and `crates/kit/` (except their `Cargo.toml` and `build.rs`), and the engine's transcript and search modules (`crates/engine/src/transcript/`, `crates/engine/src/search/`, not written yet).
 
-Everything else waits for the maintainer: logins, Keychain, the vault, lanes, Machines, the hook, replies and terminals, the phone bridge and pairing, `.github/`, `tools/`, the build and release scripts, `protocol/` and the generated types, the rest of `crates/` and the Cargo files, every `AGENTS.md` and `CLAUDE.md`, and `.claude/`.
+Everything else waits for the maintainer: logins, Keychain, the vault, lanes, Machines, the hook, replies and terminals, the phone bridge and pairing, `.github/`, `tools/`, the build and release scripts, `protocol/` and the generated types, the rest of `crates/` and the Cargo files, every `AGENTS.md` and `CLAUDE.md`, `docs/notes/`, and `.claude/`.
 
 A file in the zone still goes to the maintainer when the change adds a process launch, a pty, AppleScript, dynamic loading, a network call, Keychain access, a file write, or a protected type used from outside its own files (the capability check). It also goes to him when it edits, deletes or skips an existing test, or adds invisible Unicode. [docs/feature-map.md](docs/feature-map.md) gives the zone for each area.
 
@@ -137,7 +137,7 @@ Notchling works on your actual Claude Code, Claude Desktop, Codex and Antigravit
 - Never paste real tokens, cookies or `~/.claude.json` contents into issues or pull requests.
 - Use the [dev profile](docs/dev-profile.md) so a dev build doesn't write hooks and skills into your real `~/.claude`. It can't isolate Keychain.
 
-[crates/AGENTS.md](crates/AGENTS.md) (the Rust app) and [legacy/macos/Sources/AGENTS.md](legacy/macos/Sources/AGENTS.md) (the Swift app it replaced) have the architecture in one pass and a list of things that bit before. They are written for agents but read fine for people too.
+[docs/notes/](docs/notes/) (the Rust app, one file per topic, listed in [AGENTS.md](AGENTS.md) and [crates/AGENTS.md](crates/AGENTS.md)) and [legacy/macos/Sources/AGENTS.md](legacy/macos/Sources/AGENTS.md) (the Swift app it replaced) have the architecture in one pass and a list of things that bit before. They are written for agents but read fine for people too.
 
 ## Code style
 

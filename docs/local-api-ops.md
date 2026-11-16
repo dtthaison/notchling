@@ -1,6 +1,6 @@
 # Local API ops: wire shapes
 
-What each `notchling daemon` op takes and returns, tier by tier. Moved from the module docs of `crates/notchlingd/src/*_ops.rs` when the code lost its comments; the serde types next to each module are the final word. The socket, framing and tiers are in [crates/AGENTS.md](../crates/AGENTS.md) and [decision 0007](decisions/0007-local-api-tiers.md).
+What each `notchling daemon` op takes and returns, tier by tier. Moved from the module docs of `crates/notchlingd/src/*_ops.rs` when the code lost its comments; the serde types next to each module are the final word. The socket, framing and tiers are in [docs/notes/daemon.md](notes/daemon.md) and [decision 0007](decisions/0007-local-api-tiers.md).
 
 ## `accounts_ops.rs`
 
