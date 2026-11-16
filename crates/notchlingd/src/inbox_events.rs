@@ -10,9 +10,11 @@ fn kind_of(kind: Kind) -> ItemKind {
         Kind::SecretRequest => ItemKind::SecretRequest,
         Kind::LimitNotice => ItemKind::LimitNotice,
         Kind::ActionFailed => ItemKind::ActionFailed,
-        Kind::Notice | Kind::VersionCheckFailed | Kind::VersionDrift | Kind::NodeJoin => {
-            ItemKind::Notice
-        }
+        Kind::Notice
+        | Kind::VersionCheckFailed
+        | Kind::VersionDrift
+        | Kind::NodeJoin
+        | Kind::OutboxUnsent => ItemKind::Notice,
         Kind::SettingChange => ItemKind::SettingChange,
     }
 }

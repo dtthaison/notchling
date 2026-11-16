@@ -246,7 +246,11 @@ impl Transcript {
 
 fn chunk_item(kind: &str, text: String) -> ItemKind {
     match kind {
-        "user_message_chunk" => ItemKind::User { text, images: 0 },
+        "user_message_chunk" => ItemKind::User {
+            text,
+            images: 0,
+            merged: false,
+        },
         "agent_thought_chunk" => ItemKind::Thinking { seconds: 0.0, text },
         _ => ItemKind::Assistant { text },
     }

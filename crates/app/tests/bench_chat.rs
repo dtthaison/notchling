@@ -255,6 +255,22 @@ fn bench_idle_working_requests_few_frames() {
 
 #[test]
 #[ignore = "opens a window; a Mac with a display"]
+fn bench_three_outbox_rows_change_no_count() {
+    let plain = bench_for("idle", 4);
+    let rows = bench_with("idle", 4, &[("NOTCHLING_RENDER_OUTBOX", "three")]);
+    for part in ["conversation", "sidebar", "details", "rows"] {
+        assert!(
+            count(&rows, part) <= count(&plain, part),
+            "{part} with three Outbox rows: {rows}, without: {plain}"
+        );
+    }
+    let scroll = bench_with("scroll", 3, &[("NOTCHLING_RENDER_OUTBOX", "three")]);
+    assert_eq!(count(&scroll, "sidebar"), 0, "{scroll}");
+    assert_eq!(count(&scroll, "details"), 0, "{scroll}");
+}
+
+#[test]
+#[ignore = "opens a window; a Mac with a display"]
 fn bench_sending_requests_few_frames() {
     let root = TempRoot::new(TURNS);
     let result = run("sending", 10, &root, |_| {});

@@ -1,16 +1,18 @@
 use super::config::{AgyCommand, ConfigOption, Permission};
-use super::live::{cancelled, Inner, Job, MAX_OPEN};
+use super::live::{cancelled, Inner, Job, Live, Told, CLAIM_CANCELLED, CLAIM_QUEUED, MAX_OPEN};
 use crate::tools::acp::Spawner;
 use crate::transcript::model::Conversation;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::fmt;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::mpsc::channel;
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
+use std::sync::mpsc::{channel, RecvTimeoutError};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 pub const NAME: &str = "Antigravity";
+
+const WRITE_GRACE: Duration = Duration::from_millis(500);
 
 pub const NO_BINARY: &str = "Couldn't find the agy command. Install Antigravity CLI first.";
 
@@ -58,6 +60,7 @@ pub enum RunError {
     Refused(String),
     Start(String),
     NotAllowed,
+    Pending,
 }
 
 impl fmt::Display for RunError {
@@ -67,6 +70,9 @@ impl fmt::Display for RunError {
             RunError::Busy => f.write_str("a turn is running; send again when it ends"),
             RunError::Refused(why) | RunError::Start(why) => f.write_str(why),
             RunError::NotAllowed => f.write_str("starting Antigravity sessions is switched off"),
+            RunError::Pending => {
+                f.write_str("the message is still waiting for Antigravity to load")
+            }
         }
     }
 }
@@ -170,6 +176,54 @@ impl Runner {
     }
 
     pub fn prompt(&self, id: &str, text: &str, folder: &str) -> Result<(), RunError> {
+        self.queue_prompt(id, text, folder, None).map(|_| ())
+    }
+
+    pub fn dispatch(
+        &self,
+        id: &str,
+        text: &str,
+        folder: &str,
+        wait: Duration,
+    ) -> Result<(), RunError> {
+        let (tx, rx) = channel();
+        let claim = Arc::new(AtomicU8::new(CLAIM_QUEUED));
+        let told = Told {
+            tx,
+            claim: claim.clone(),
+        };
+        let queued = self.queue_prompt(id, text, folder, Some(told))?;
+        match rx.recv_timeout(wait) {
+            Ok(result) => result,
+            Err(RecvTimeoutError::Timeout) => {
+                let cancelled = claim.compare_exchange(
+                    CLAIM_QUEUED,
+                    CLAIM_CANCELLED,
+                    Ordering::SeqCst,
+                    Ordering::SeqCst,
+                );
+                if cancelled.is_err() {
+                    return match rx.recv_timeout(WRITE_GRACE) {
+                        Ok(result) => result,
+                        Err(_) => Err(RunError::Pending),
+                    };
+                }
+                queued.lock().working = false;
+                Err(RunError::Start(format!("{NAME} took too long to load.")))
+            }
+            Err(RecvTimeoutError::Disconnected) => Err(RunError::Start(format!(
+                "{NAME} closed before the message went out."
+            ))),
+        }
+    }
+
+    fn queue_prompt(
+        &self,
+        id: &str,
+        text: &str,
+        folder: &str,
+        told: Option<Told>,
+    ) -> Result<Arc<Live>, RunError> {
         let inner = &self.inner;
         let retry = inner.get(id).is_some_and(|l| l.lock().failed_at.is_some());
         let live = inner.open(id, folder, retry)?;
@@ -187,7 +241,8 @@ impl Runner {
             id.to_string(),
             text.to_string(),
         );
-        let job: Job = Box::new(move || runner.begin_prompt(&l, &id, &text));
+        let queued = live.clone();
+        let job: Job = Box::new(move || runner.begin_prompt(&l, &id, &text, told));
         let now = {
             let mut st = live.lock();
             if st.loaded || st.load_error.is_some() {
@@ -200,7 +255,7 @@ impl Runner {
         if let Some(job) = now {
             job();
         }
-        Ok(())
+        Ok(queued)
     }
 
     pub fn cancel(&self, id: &str) {

@@ -11,18 +11,21 @@ impl Global for SavedDrafts {}
 use notchling_engine::catalog::{ModelInfo, Tool as CatalogTool};
 use notchling_engine::tools::agy::ConfigOption;
 use notchling_engine::tools::codex::models;
+use notchling_engine::transcript::model::Conversation;
 use serde_json::Value;
 
+use super::outbox_rows::{begin, Editing};
 use super::ChatView;
 use crate::acting::{Acting, Control, Request};
 use crate::actions::SendFailure;
-use crate::chat::box_holds::BoxHolds;
 use crate::chat::claude_picker::{self, Hint, Kind};
 use crate::chat::data::{Session, Tool};
+use crate::chat::outbox::{deliver, drop_covered, forget, hidden_queued, unbubbled, Bubble};
 use crate::chat::outgoing::Outgoing;
 use crate::chat::prompts::is_dialog;
 use crate::chat::remote::BringBack;
 use crate::chat::remote_control::Action;
+use crate::chat::rows::{tail_rows, Row};
 use crate::chat::run_command::RunHow;
 use crate::phone::bridge::now_ms;
 use crate::tools::agy_options::parse_config;
@@ -50,7 +53,8 @@ pub struct ChatTools {
     pub drafts: HashMap<String, String>,
     pub sending: bool,
     pub error: Option<String>,
-    pub boxed: Option<BoxHolds>,
+    pub editing: Option<Editing>,
+    pub edit_round: u64,
     pub picks: HashMap<String, Pick>,
     pub agy: Option<AgyConversation>,
     pub agy_fetched: Option<(String, u64)>,
@@ -94,7 +98,8 @@ impl ChatTools {
                 .unwrap_or_default(),
             sending: false,
             error: None,
-            boxed: None,
+            editing: None,
+            edit_round: 0,
             picks: HashMap::new(),
             agy: None,
             agy_fetched: None,
@@ -122,12 +127,15 @@ impl ChatTools {
         self.drafts.get(id).map(String::as_str).unwrap_or("")
     }
 
-    fn delivered(&mut self, row: &str, text: &str, now_ms: i64) {
-        if let Some(out) = self.outgoing.get_mut(row).and_then(|list| {
-            list.iter_mut()
-                .find(|o| o.text == text && o.delivered_at.is_none())
-        }) {
-            out.delivered(now_ms);
+    fn delivered(&mut self, row: &str, text: &str, now_ms: i64, outbox: Option<&str>) {
+        if let Some(list) = self.outgoing.get_mut(row) {
+            deliver(list, text, now_ms, outbox);
+        }
+    }
+
+    pub(super) fn forget_outbox(&mut self, id: &str) {
+        for list in self.outgoing.values_mut() {
+            forget(list, id);
         }
     }
 
@@ -143,7 +151,8 @@ impl ChatTools {
 impl ChatView {
     pub(super) fn outgoing_texts(&self) -> Vec<String> {
         let now = now_ms();
-        self.selected
+        let texts: Vec<String> = self
+            .selected
             .as_deref()
             .and_then(|row| self.tools.outgoing.get(row))
             .map(|list| {
@@ -152,7 +161,40 @@ impl ChatView {
                     .map(|o| o.text.clone())
                     .collect()
             })
-            .unwrap_or_default()
+            .unwrap_or_default();
+        unbubbled(texts, &self.outbox_bubbles())
+    }
+
+    pub(super) fn tail_rows_for(&self, shown: &Conversation) -> Vec<Row> {
+        if self.open_subagent.is_some() {
+            return tail_rows(&shown.queued, None, &[], &[], false);
+        }
+        let hidden = match (&self.outbox_preview, self.selected_session()) {
+            (None, Some(session)) => {
+                hidden_queued(&shown.queued, &self.source.outbox_rows(&session.agent))
+            }
+            _ => None,
+        };
+        let outboxed = self
+            .selected_session()
+            .is_some_and(|s| !is_draft(&s.agent.id));
+        tail_rows(
+            &shown.queued,
+            hidden,
+            &self.outbox_bubbles(),
+            &self.outgoing_texts(),
+            outboxed,
+        )
+    }
+
+    pub(super) fn outbox_bubbles(&self) -> Vec<Bubble> {
+        if let Some(preview) = &self.outbox_preview {
+            return preview.clone();
+        }
+        match self.selected_session() {
+            Some(session) => self.source.outbox_bubbles(&session.agent),
+            None => Vec::new(),
+        }
     }
 
     pub(super) fn acting(&self, cx: &mut Context<Self>) -> Acting {
@@ -258,45 +300,6 @@ impl ChatView {
         })
     }
 
-    pub(super) fn held_text(&self) -> Option<String> {
-        let session = self.selected_session()?;
-        if session.tool != Tool::Claude {
-            return None;
-        }
-        let shown = self.tools.live.held.get(&session.agent.id).cloned();
-        shown.or_else(|| self.held_preview.as_ref().map(|(text, _)| text.clone()))
-    }
-
-    pub(super) fn held_note(&self) -> Option<String> {
-        let session = self.selected_session()?;
-        let shown = self.tools.live.held_note.get(&session.agent.id).cloned();
-        shown.or_else(|| {
-            self.held_preview
-                .as_ref()
-                .and_then(|(_, note)| note.clone())
-        })
-    }
-
-    pub(super) fn discard_held(&mut self, cx: &mut Context<Self>) {
-        if self.tools.sending || self.refuse_selected(Action::Reply, cx) {
-            return;
-        }
-        let Some(id) = self.selected_session().map(|s| s.agent.id.clone()) else {
-            return;
-        };
-        self.spawn_send(
-            Request::held_discard(&id),
-            move |view, result, _| match result {
-                Ok(_) => {
-                    view.tools.live.held.remove(&id);
-                    view.tools.live.held_note.remove(&id);
-                }
-                Err(message) => view.tools.error = Some(message),
-            },
-            cx,
-        );
-    }
-
     pub(super) fn selected_held_working(&self) -> bool {
         self.selected_session()
             .is_some_and(|s| s.tool == Tool::Antigravity)
@@ -333,7 +336,6 @@ impl ChatView {
         let actions = self.acts(cx).actions;
         self.tools.sending = true;
         self.tools.error = None;
-        self.tools.boxed = None;
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_executor()
@@ -360,29 +362,9 @@ impl ChatView {
         if self.tools.starting.contains_key(&session.agent.id) {
             return;
         }
-        let files = self.attached(&session.agent.id);
+        let files = self.reply_files(&session.agent.id);
         let text = crate::chat::drops::with_attachments(self.tools.editor.read(cx).text(), &files);
-        self.dispatch(session, text, true, false, cx);
-    }
-
-    pub(super) fn send_text_clearing_box(&mut self, cx: &mut Context<Self>) {
-        if self.tools.sending || !self.composer_control(cx).enabled {
-            return;
-        }
-        let Some(session) = self.selected_session().cloned() else {
-            return;
-        };
-        if self.tools.starting.contains_key(&session.agent.id) {
-            return;
-        }
-        let files = self.attached(&session.agent.id);
-        let text = crate::chat::drops::with_attachments(self.tools.editor.read(cx).text(), &files);
-        self.dispatch(session, text, true, true, cx);
-    }
-
-    pub(super) fn box_holds(&self) -> Option<&BoxHolds> {
-        let row = self.selected.as_deref()?;
-        self.tools.boxed.as_ref().filter(|held| held.row == row)
+        self.dispatch(session, text, true, cx);
     }
 
     pub(super) fn run_available(&self, cx: &App) -> bool {
@@ -424,19 +406,11 @@ impl ChatView {
             session,
             crate::chat::run_command::message(command),
             false,
-            false,
             cx,
         );
     }
 
-    fn dispatch(
-        &mut self,
-        session: Session,
-        text: String,
-        from_box: bool,
-        clear_box: bool,
-        cx: &mut Context<Self>,
-    ) {
+    fn dispatch(&mut self, session: Session, text: String, from_box: bool, cx: &mut Context<Self>) {
         let id = session.agent.id.clone();
         if text.is_empty() {
             return;
@@ -448,15 +422,19 @@ impl ChatView {
         if tool.intercept(self, &session, &text, cx) {
             return;
         }
-        let request = tool.send(self, &session, &text);
-        let request = if clear_box {
-            request.clearing_box()
-        } else {
-            request
-        };
+        let editing = self
+            .tools
+            .editing
+            .clone()
+            .filter(|e| from_box && e.chat_row == id);
+        let begun = begin(editing.as_ref(), tool.send(self, &session, &text), &text);
+        if let Some(editing) = editing {
+            self.submit_edit(editing, begun.request, text, cx);
+            return;
+        }
         let queues = tool.queues();
         if from_box {
-            self.put_draft(&id, String::new(), cx);
+            self.put_draft(&id, begun.draft_after.unwrap_or_default(), cx);
             self.set_attached(&id, &[], cx);
         }
         self.tools
@@ -467,14 +445,12 @@ impl ChatView {
         self.follow_sent_now(cx);
         let sent_text = text;
         self.spawn_send_full(
-            request,
+            begun.request,
             move |view, result, cx| match result {
                 Ok(reply) => {
-                    view.tools.delivered(&id, &sent_text, now_ms());
-                    if let Some(held) = reply.get("held").and_then(|h| h.as_str()) {
-                        view.tools.take_outgoing(&id, &sent_text);
-                        view.tools.live.held.insert(id.clone(), held.to_owned());
-                    } else if queues {
+                    let boxed = reply.get("outboxId").and_then(Value::as_str);
+                    view.tools.delivered(&id, &sent_text, now_ms(), boxed);
+                    if reply.get("outboxId").is_none() && queues {
                         match sent_state(&reply) {
                             Sent::Queued(_) => {
                                 view.tools.take_outgoing(&id, &sent_text);
@@ -514,11 +490,6 @@ impl ChatView {
                             format!("{sent_text}\n\n{typed}")
                         };
                         view.put_draft(&id, back, cx);
-                    }
-                    let held = BoxHolds::from_data(&id, failure.data.as_ref());
-                    if let Some(held) = held.filter(|_| from_box) {
-                        view.tools.boxed = Some(held);
-                        return;
                     }
                     let asking = is_dialog(&failure.message);
                     view.tools.error = Some(failure.message);
@@ -590,7 +561,7 @@ impl ChatView {
                                 view.tools.retrying = None;
                                 match result {
                                     Ok(_) => {
-                                        view.tools.delivered(&row, &sent, now_ms());
+                                        view.tools.delivered(&row, &sent, now_ms(), None);
                                         view.conversation_state(cx, |s| s.follow_sent = true);
                                         view.reload_now(cx);
                                     }
@@ -774,10 +745,16 @@ impl ChatView {
     pub(super) fn sync_tools(&mut self, cx: &mut Context<Self>) {
         let view = self.source.view();
         self.tools.live = view.tools;
+        drop_covered(&mut self.tools.outgoing, |row| {
+            self.source.outbox_covers(row)
+        });
         self.follow_starting_drafts(cx);
         let Some(session) = self.selected_session().cloned() else {
             return;
         };
+        self.source
+            .settle_outbox_for(&session.agent, &self.conversation);
+        self.leave_lost_edit(&session.agent, cx);
         let id = session.agent.id;
         let now = now_ms();
         if let Some(list) = self.tools.outgoing.get_mut(&id) {

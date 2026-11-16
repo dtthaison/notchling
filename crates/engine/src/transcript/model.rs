@@ -16,13 +16,31 @@ pub struct ChatItem {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data", rename_all = "snake_case")]
 pub enum ItemKind {
-    User { text: String, images: usize },
-    Assistant { text: String },
-    Thinking { seconds: f64, text: String },
+    User {
+        text: String,
+        images: usize,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        merged: bool,
+    },
+    Assistant {
+        text: String,
+    },
+    Thinking {
+        seconds: f64,
+        text: String,
+    },
     Tools(Vec<ToolCall>),
-    TurnEnd { seconds: f64, model: Option<String> },
-    Notice { text: String, symbol: String },
-    CommandOutput { text: String },
+    TurnEnd {
+        seconds: f64,
+        model: Option<String>,
+    },
+    Notice {
+        text: String,
+        symbol: String,
+    },
+    CommandOutput {
+        text: String,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -181,6 +199,7 @@ impl ItemKind {
         ItemKind::User {
             text: text.to_string(),
             images: 0,
+            merged: false,
         }
     }
 

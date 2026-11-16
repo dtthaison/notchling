@@ -41,14 +41,15 @@ to move it needs `acting` on as well.
 
 ## `acting_ops.rs`
 
-Milestone 3's ops: acting on sessions (E3b, E4), the `acting` switch, the held prompts and the
+Milestone 3's ops: acting on sessions (E3b, E4), the `acting` switch, the prompts a hook holds and the
 hook's request. Built and switched off: while [`Acting`] is off every acting op answers
 `forbidden` with [`ACTING_OFF`], nothing is typed, and `hook.request` passes.
 
 | Op | Tier | Args | Reply |
 | --- | --- | --- | --- |
-| `session.reply` | app | `{id, text, clear_box?: bool}` | `{"sent": true}`, or `{"sent": true, "state": "queued", "waiting": 1, "held": <text>}` when the session is working or just got a message (below) |
-| `session.held.discard` | app | `{id}` | `{"discarded": true}` when a held text was forgotten (and `session.held` says `text: null`), `{"discarded": false}` when none was held |
+| `session.reply` | app | `{id, text, clear_box?: bool}` | `{"sent": true}`, or the queued shape `{"sent": true, "state": "queued", "waiting": <position>, "outboxId"}`; it saves an Outbox row and waits up to 50 s (below) |
+| `session.send`, `outbox.*` | app | see [`outbox_ops.rs`](#outbox_opsrs) | |
+| `session.held.discard` | app | `{id}` | `{"discarded": true}` when it removed any message waiting in the session's Outbox, `{"discarded": false}` when none waited; kept for older clients, it is `outbox.discard` of that session |
 | `session.answer` | app | `{id, answers: [[n...] or "text"], question?: {items}}` | `{"answered": "hook" or "terminal", "promptId"?}` |
 | `session.permission` | app | `{id, decision: "allow"/"deny"/"always", message?}` | `{"decided": decision, "promptId"}` |
 | `session.permission` (no hook) | app | `{id: <row id>, decision, expect: {tool, summary}}` | `{"decided": decision, "answered": "terminal"}` |
@@ -75,6 +76,19 @@ option's digit only (Allow "Yes", Always the "don't ask again" one, Deny the "No
 waits for the dialog to go. Never Enter, Esc or Ctrl+C. A deny message isn't taken there.
 
 The hook is who its process is, never what it says: see [`crate::hook_ops`].
+
+### `session.reply` on the Outbox
+
+`session.reply` is kept for the cluster (it forwards a remote session's reply to the owner node), older apps and agents. It does what `session.send` does (below), then waits up to 50 s (`REPLY_WAIT_MS`, under the app's 60 s call timeout) for the saved message to settle, and answers:
+
+- `{"sent": true}` once the message is Sent (the transcript shows the model took it, or for Codex and Antigravity the turn went out).
+- `{"sent": true, "state": "queued", "waiting": <position>, "outboxId": "<id>"}` at once when the message reaches Claude Code's own queue (`in_queue`), and at 50 s when it is still queued, waiting or sending. The message stays in the Outbox and goes in when its turn comes; nothing is typed twice.
+- `failed` when the message needs the person. The saved message is removed first, because the caller puts the text back in its reply box. A message that found other text in the session's input box (`box`) is `failed` "The session's input box holds other text, so the message wasn't sent." with `err.data` `{"why": "not_cleared", "box"?: "<the text>"}` (`box` is what the input box holds, cut at 1000 characters, left out when it can't be read; it goes to the caller only, never to the audit log, an event or `reply-screen.txt`). A message that may already be in the session (`unsure`) is `failed` "It may already be in the session. Check the session before sending it again." (it does not say the message wasn't sent, because sending it again could type it twice) A stopped session is `failed` "The session is stopped." and one that is gone "No such session."
+- `failed` "The message was removed." when something else removed the message while the call waited (Remove, Drop, Discard or the session being removed). It is never answered `sent`.
+
+Whatever `session.send` refuses, `session.reply` refuses the same way, before anything is saved. `clear_box` is `true`, `false` or absent; anything else is `bad_request`. An agent's reply also writes its `session.reply` event before the message is saved.
+
+What may be cleared. A box that holds the whole message, or the whole or a start or an end (at least 10 letters and digits) of a text this daemon tried to put in that session and did not see go out (the last five per session, 12 hours, in memory), is cleared with the reply's usual keys (Ctrl+E, Ctrl+U, Backspace per line; never Ctrl+K, Esc or Ctrl+C) and the new message goes on. Any other text is never typed over. `clear_box: true` (on `session.send` or `session.reply`, or `outbox.resend {clear_box: true}` for a message already saved) clears the box with those keys whatever it holds, checks that it is empty (a box that does not empty, or that a person typed into meanwhile, is `box` again, with nothing pasted and no Enter) and then types and sends as usual. A folded paste (`[Pasted text #N +M lines]`) is only ever cleared that way. The error's `data` is a general, additive part of the wire: `{"code", "message", "data"?}`.
 
 ## `activity_ops.rs`
 
@@ -133,15 +147,14 @@ work.
 | `agy.state` | app | no | `{id}` | `{id, open, loading, loadError, working, title, folder, config, commands, permission, elsewhere}` |
 | `agy.conversation` | app | no | `{id, peek?}` | `{id, open, loading, loadError, working, conversation, truncated, omitted}`: the conversation the open runner holds (`transcript::model::Conversation` as JSON); not open, an empty one with `open: false`; one another `agy` holds (`elsewhere`), read from Antigravity's log with `elsewhere` set to what to say. A long one is its newest items within about 512 KB (`truncated: true`, `omitted` = how many older items were left out), since a reply is one 1 MiB line. `peek: true` doesn't count as use, so a list read every few seconds never keeps an idle process alive |
 | `agy.open` | app | yes | `{id}` | `{id, loading: true}`: starts `agy acp` in the session's own folder and loads it; while another `agy` holds the session (a delegation) it starts nothing and answers `{id, loading: false, elsewhere}` ([`crate::agy_elsewhere`]) |
-| `agy.send` | app | yes | `{id, text}` or `{draft_folder, text}` | `{id, sent: true}`; a draft starts the session first |
+| `agy.send` | app | yes | `{id, text}` or `{draft_folder, text}` | with `id` (an existing session): `{id, sent: true, outboxId}` at once, the message saved in the Outbox; with `draft_folder`: `{id, sent: true}` after the session was started |
 | `agy.cancel` | app | yes | `{id}` | `{cancelled: true}` |
 | `agy.set_option` | app | yes | `{id, option, value}` | `{requested: true}`: the session's own options only |
 | `agy.permission` | app | yes | `{id, rpc_id, option_id?}` | `{outcome}`; no `option_id` cancels |
 
 `id` is a row id, `agy:<session>`. A session's folder comes from the summaries copy or from the
 session this daemon started, never from the caller; a draft's `draft_folder` is an absolute
-folder that exists. One turn runs per session: `agy.send` while one runs is `failed` ("busy"), and while another `agy`
-holds the session it is `failed` with what Chat says.
+folder that exists. One turn runs per session. `agy.send {id}` saves the message in the Outbox (like `session.send`) and answers at once; while a turn runs it waits its turn, in order, instead of failing "busy". It counts Sent only when `session/prompt` was written to the agent (not while the prompt waits behind a session load); a load that fails keeps it waiting with the error as its note, and a turn cut after it was written is `unsure`. While another `agy` holds the session (a delegation) the call is `failed` with what Chat says, before anything is saved. A draft's first message and `draft_folder` still start the session directly.
 
 Events ([`crate::agy_sink`]): `session.changed {id, session, row, change, error?}` on `tools`
 (as Codex's; chunks at most every 250 ms), and on `prompts` (app tier) `agy.permission.pending`
@@ -524,47 +537,11 @@ signal.
 
 | Op | Args | Reply |
 | --- | --- | --- |
-| `codex.send` | `{id \| draft_folder, text, model?, effort?, draft?}` | `{"id": "codex:<session>", "session", "state": "started"}`, or `"state": "queued", "waiting": n` behind the session's running turn, or `{"state": "starting", "draft"}` for a new session Codex hasn't named within 4.5 s |
+| `codex.send` | `{id \| draft_folder, text, model?, effort?, draft?}` | with `id` (an existing session): `{"id": "codex:<session>", "session", "state": "queued", "waiting": <position>, "outboxId"}` at once, the message saved in the Outbox; with `draft_folder` (a new session): `{"id": "codex:<session>", "session", "state": "started"}`, or `{"state": "starting", "draft"}` for a session Codex hasn't named within 4.5 s |
 | `codex.stop` | `{id}` | `{"stopped": bool}`: SIGINT to the running turn; false when none runs |
 | `codex.delete` | `{id}` | `{"deleted": true}`: stops the turn, drops what waits, runs `codex delete --force`; `{"deleted": false, "state": "deleting"}` when that takes over 4.5 s |
 
-`session.reply` answers `{"sent": true}` only after the session's input box took the text and let
-go of it. Anything else is `failed` with what happened, and nothing is reported sent: the terminal
-isn't at its prompt (nothing was typed), its input box holds text that isn't ours, it never took the
-text (the box is on screen and still empty), or the text is typed there but Enter didn't send it.
-Sending again is safe: a reply clears the box first. A session whose process Claude Code had
-stopped is started by the attach, and the reply waits for its prompt (up to 15 s) before any key;
-one that never comes up is `failed` with "The session didn't open in time." and nothing typed.
-
-What may be cleared. A box that holds the whole message, or the whole or a start or an end (at least
-10 letters and digits) of a text this daemon tried to put in that session and did not see go out
-(the last five per session, 12 hours, in memory), is cleared with the reply's usual keys (Ctrl+E,
-Ctrl+U, Backspace per line; never Ctrl+K, Esc or Ctrl+C) and the new message goes on. Any other
-text is never typed over: the call is `failed` with the message "The session's input box holds
-other text, so the message wasn't sent." and `err.data` `{"why": "not_cleared", "box"?: "<the text>"}`
-(`box` is what the input box holds, cut at 1000 characters, left out when it can't be read; it is
-sent to the caller only, never written to the audit log, an event or `reply-screen.txt`). Sending
-the same call again with `clear_box: true` clears the box with those keys whatever it holds,
-checks that it is empty (a box that does not empty, or that a person typed into meanwhile, is
-`not_cleared` again, with nothing pasted and no Enter) and then types and sends as usual. A folded
-paste (`[Pasted text #N +M lines]`) is only ever cleared that way. `clear_box` is `true`, `false`
-or absent; anything else is `bad_request`. A reply that is held for a working session ignores it
-(the text is typed later, as before). The error's `data` is a general, additive part of the wire:
-`{"code", "message", "data"?}`.
-
-A reply to a Claude Code job that is working, or that got a message less than 20 s ago and
-hasn't shown work yet, is held by the daemon and not typed (`held_ops.rs`, engine `reply::held`).
-There is one held entry per session: every message sent meanwhile joins it, separated by a blank
-line, and the reply carries the whole held text (`held`). When the row is `completed` and can take
-replies, the daemon types the held text as one message (a 1 s tick, only while `acting` is on).
-Each change is an event on topic `tools`: `session.held {id, text, note?}`, with `text: null` when
-nothing is held any more. A held text is never dropped by a failure: when typing it failed or was
-refused, it stays held and the event carries a short `note` ("Waiting — the terminal box has other
-text", or what went wrong); a client shows it beside the held text, and `session.held.discard`
-forgets the text. The daemon tries again no sooner than 30 s later. A text that may already be in
-the session's box is typed again only when the transcript shows it was not sent meanwhile; when
-the transcript cannot say, it stays held with the note and only the user decides. The held text lives in the daemon's memory only, so a daemon restart
-drops it; it is never in Claude Code's own queue.
+`codex.send {id}` saves the message in the Outbox like `session.send` and answers at once. The session's postman starts the turn when the session is idle (`Waits for the current turn` otherwise, in order) and counts the message Sent only when the process was started with the prompt; one cut after it started, by acting going off, is `unsure` ("May already be in"), and one that could not start waits. Its options (`model`, `effort`) are checked again when it is delivered. A draft's first message and `draft_folder` still start the session directly and are not an Outbox row; later messages are. `codex.send` is refused with `forbidden` while `acting` is off, as before; messages already saved wait.
 
 `id` is a row id (`codex:<session>`). `draft_folder` starts a new session in that folder and
 the reply comes once `thread.started` names it, or `starting` if that takes over 4.5 s (a call
@@ -872,6 +849,53 @@ that reads or writes a login sits behind the traits in
   `switch_at` (80 to 99, refused outside it) or both. Antigravity refuses `notifyAndSwitch`.
 - Every message the watchers say goes out as `limits.notice {"at", "text"}` on the `limits`
   topic (app tier), for the app to show.
+
+## `outbox_ops.rs`
+
+The Outbox ([design](superpowers/specs/2026-11-15-outbox-design.md), [decision](decisions/XXXX-outbox.md)): a message to a session is saved in the daemon's `outbox` table first and a postman per session types or starts it as soon as the session can take it, in order. App tier, served by `OutboxOps`. Every op but `outbox.list` is refused with `forbidden` and [`ACTING_OFF`] while the `acting` switch is off (messages already saved wait); `outbox.list` only reads.
+
+| Op | Args | Reply |
+| --- | --- | --- |
+| `session.send` | `{id, text, clear_box?: bool, options?: {model?, effort?}, via?}` | `{"outboxId", "session", "state": "queued", "position": n}`; `position` is 1 for the head of the session's mailbox |
+| `outbox.list` | `{session?}` | `[row...]` in order, every session or one; on a client node whose app follows the `outbox` topic, a list of every session (or of a qualified remote `session`, when it is not forwarded) also holds the remote rows the daemon already knows, after the local ones, each with `session` qualified `<node>/<session>` and in the owner's queue order |
+| `outbox.edit` | `{id, text}` | `{"edited": true}` |
+| `outbox.remove` | `{id}` | `{"removed": true}` |
+| `outbox.resend` | `{id, clear_box?: bool, resume?: bool}` | `{"state": "queued"}` |
+| `outbox.discard` | `{session}` | `{"discarded": n}`: how many rows it removed |
+
+`id` of `session.send` is a row id from `sessions.list` (a Claude Code job, `codex:<session>` or `agy:<session>`). `session` of `outbox.list` and `outbox.discard` is such a row id too (a bare session key is accepted); the rows carry the session's key (the job's short id, `codex:<id>`, `agy:<id>`), which survives `/clear`, a respawn and a move. `id` of the other ops is a row's own id (`outbox.list`'s `id`, the `outboxId` of a send). `options` (Codex `model` and `effort`) is read only when it is an object and is checked again at delivery with `codex.send`'s rules. `via` is `chat`, `notch`, `phone` or `agent`; left out it comes from the caller.
+
+`session.send` refuses before anything is saved (all `bad_request` unless noted):
+
+- `id is needed`, `text is needed` when an argument is missing or not a string.
+- `Type a message first.` for empty text; `That message is over 100 KB.` for text over 100 KB.
+- `No such session.` for an id the daemon doesn't know, and for a Codex or Antigravity session with no rollout or summary.
+- `Reply in its terminal.` for a session that takes no replies (another terminal app, an `exec` command job).
+- `That command opens a menu; open the session's terminal.` for a Claude Code slash command that opens a menu (`/plugin`, `/mcp`, ...).
+- `Start the session with codex.send or agy.send.` for a draft id (`codex-new:`, `agy-new:`).
+- `failed`: an Antigravity session another `agy` holds (what Chat says), `200 messages are already waiting for this session.`, `Couldn't save the message.`
+
+`outbox.edit`, `.remove` and `.resend` refuse with:
+
+- `bad_request` `No such message.` when the row is gone.
+- `failed` `It's being sent.` on a row that `outbox.remove` finds `sending`, or that `outbox.edit` finds `sending` or `unsure` (an `unsure` message may already be in the session, so it can only be sent again or removed); `failed` `It's in the session's queue.` on an `in_queue` row (edit and remove). Discard removes an `in_queue` row, since it is an explicit act.
+- `outbox.edit` also refuses empty text, text over 100 KB and a menu command (the `session.send` words). A successful edit puts the row back to `queued` (from `queued`, `waiting`, `box`, `stopped` or `gone`), keeps its place and clears its back-off and Clear Box choice.
+- `outbox.resend` is Send Again on `unsure` (the person decided it may go again), Clear Box and Send on `box` (`clear_box: true`, else `bad_request` `The box has other text; clear it to send.`), Resume and Send on `stopped` (`resume: true`, else `bad_request` `Resume the session to send.`; `failed` `Resume isn't available.` without a resumer) and Try Now on a `waiting` row whose `why` is `retry`. Any other row is `bad_request` `There's nothing to send again.`; a row that changed meanwhile is `failed` `The message changed; try again.`
+
+`outbox.discard` removes every row of the session except one that is `sending`, `in_queue` ones included.
+
+A row on the wire: `{id, session, tool, kind, text, state, position, queuedMs, updatedMs, via, why?, box?, error?}`.
+
+- `tool` is `claude`, `codex` or `antigravity`; `kind` is `prompt` or `command` (a Claude Code message that starts with `/`); `via` is as above; `position` counts from 1 within its session.
+- `state` is `queued`, `waiting`, `sending`, `in_queue` (in Claude Code's own queue; the model has not read it yet), `unsure` (may already be in; the person decides), `box` (the session's input box holds other text), `stopped` or `gone`.
+- `why` is a code for `waiting` (`dialog`, `queue`, `turn`, `retry`), `unsure` (`not_found`, `restart`, `dropped`), `box` (`not_cleared`, `mixed`); there is none for `in_queue`.
+- `box` (a `box` row only) is the text the input box holds and `error` (a Codex or Antigravity `retry` row only) is what went wrong. Both live in the daemon's memory, so a restart drops them, and neither is ever written to a log, an event or the audit.
+
+Sent, removed, discarded and dropped rows are deleted, not listed. A row never expires by age; one that has waited 7 days is raised once in the Inbox (kind `outbox_unsent`, Send and Discard).
+
+Topic `outbox` (app tier, so an agent never reads message text): `outbox.changed {row}` after every insert or change, and `outbox.removed {id, session, why}` with `why` `sent`, `removed`, `discarded` or `session_removed`. A client reads the list once and follows the topic. Events, audit and Activity carry `session.outbox` with the row's change, its length and `via`, never its text.
+
+Cluster. A session belongs to the node that runs it and its mailbox stays there. `session.send` with a qualified id (`<node>/<job>`), and `outbox.edit`, `.remove`, `.resend`, `.discard` and `.list` with a qualified `session` argument, are forwarded to that node, which runs them on its own Outbox (`policy.rs`: `session.send` by `id`, the others by `session`). The row id of `outbox.edit`, `.remove` and `.resend` names no node, so the app adds the row's qualified `session` beside it and the daemon ignores it on the node that owns the row. Only the app, from a client or home node, may forward; a Worker may not. A node tells its peers `outbox.changed` (with no data) and `outbox.removed {id, session, why}` and never message text; a client node whose app follows the topic asks the owner for its list and publishes the rows with `session` qualified as `<node>/<session>`, and only the difference from the last list, in the owner's queue order. That list is also what `outbox.list` adds to its answer (so an app that reconnects, or a second app, is seeded without waiting for a row to change). A list answer that was started before a peer event arrived is dropped and asked again at once, so a `sent` removal is never undone by an older list; a failed ask is tried again after 5 s, not 30.
 
 ## `pages_ops.rs`
 

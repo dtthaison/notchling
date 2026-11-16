@@ -5,7 +5,10 @@ use crate::agy_phone::{LogReads, PhoneRead};
 use crate::agy_sink::{lock, now_secs, row_id, DaemonSink, Shared, Started};
 use crate::catalog_ops::CatalogService;
 use crate::layout::Layout;
+use crate::outbox_ops::{OutboxOps, SendArgs};
+use crate::outbox_runners::Delivery;
 use crate::pages_ops::Titles;
+use notchling_engine::outbox::Via;
 use notchling_engine::search::index::TitledSession;
 use notchling_engine::tools::acp::{RealSpawner, Spawner};
 use notchling_engine::tools::agy::summaries::{self, Row};
@@ -13,11 +16,16 @@ use notchling_engine::tools::agy::{self, RunError, Runner, Timing};
 use notchling_engine::tools::codex::plan::MAX_PROMPT_BYTES;
 use notchling_local_api::{ops, topics, ApiError, ErrorCode, OpSpec};
 use serde_json::{json, Value};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use std::time::Duration;
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 const COPY_REUSE: Duration = Duration::from_secs(3);
+
+const DISPATCH_WAIT: Duration = Duration::from_secs(30);
+
+const HELD_FRESH: Duration = Duration::from_secs(3);
 
 pub const SESSIONS: &str = ops::AGY_SESSIONS;
 pub const STATE: &str = ops::AGY_STATE;
@@ -44,6 +52,7 @@ pub struct AgySetup {
     pub home: PathBuf,
     pub binary: Option<String>,
     pub start_wait: Duration,
+    pub dispatch_wait: Duration,
     pub timing: Timing,
 }
 
@@ -54,6 +63,8 @@ pub struct AgyOps {
     setup: AgySetup,
     elsewhere: Arc<Elsewhere>,
     logs: LogReads,
+    outbox: OnceLock<Arc<OutboxOps>>,
+    held: Mutex<HashMap<String, (Instant, bool)>>,
 }
 
 fn bad(message: impl Into<String>) -> ApiError {
@@ -105,6 +116,8 @@ impl AgyOps {
             logs: LogReads::new(setup.root.clone()),
             setup,
             elsewhere,
+            outbox: OnceLock::new(),
+            held: Mutex::new(HashMap::new()),
         }
     }
 
@@ -360,6 +373,16 @@ impl AgyOps {
         }
         if args.get("id").is_some() {
             let session = self.session_arg(args)?;
+            if let Some(outbox) = self.outbox.get() {
+                let row = outbox.send(&SendArgs {
+                    id: row_id(&session),
+                    text: text.to_string(),
+                    clear_box: false,
+                    options: None,
+                    via: Via::Chat,
+                })?;
+                return Ok(json!({"id": row_id(&session), "sent": true, "outboxId": row.id}));
+            }
             let folder = self.folder_for(&session)?;
             if let Some(holder) = self.elsewhere.check(&session) {
                 return Err(failed(holder.note()));
@@ -402,6 +425,62 @@ impl AgyOps {
         Ok(json!({"id": row_id(&session), "sent": true}))
     }
 
+    pub(crate) fn attach_outbox(&self, outbox: Arc<OutboxOps>) {
+        let _ = self.outbox.set(outbox);
+    }
+
+    pub(crate) fn check_session(&self, session: &str) -> Result<(), ApiError> {
+        self.folder_for(session)
+            .map_err(|_| bad("No such session."))?;
+        match self.elsewhere.check(session) {
+            Some(holder) => Err(failed(holder.note())),
+            None => Ok(()),
+        }
+    }
+
+    pub(crate) fn is_busy(&self, session: &str) -> bool {
+        self.runner.is_working(session) || self.held(session)
+    }
+
+    fn held(&self, session: &str) -> bool {
+        let cached = lock(&self.held).get(session).copied();
+        if let Some((_, held)) = cached.filter(|(at, _)| at.elapsed() < HELD_FRESH) {
+            return held;
+        }
+        let held = self.elsewhere.check(session).is_some();
+        let mut cache = lock(&self.held);
+        cache.retain(|_, (at, _)| at.elapsed() < HELD_FRESH);
+        cache.insert(session.to_string(), (Instant::now(), held));
+        held
+    }
+
+    pub(crate) fn deliver(&self, session: &str, text: &str) -> Result<(), Delivery> {
+        if !self.acting.is_on() {
+            return Err(Delivery::Busy);
+        }
+        let folder = self
+            .folder_for(session)
+            .map_err(|e| Delivery::Failed(e.message))?;
+        if self.elsewhere.check(session).is_some() {
+            return Err(Delivery::Busy);
+        }
+        let sent = self
+            .runner
+            .dispatch(session, text, &folder, self.setup.dispatch_wait);
+        let off = !self.acting.is_on();
+        if off {
+            self.acting_off();
+        }
+        match sent {
+            Ok(()) if off => Err(Delivery::Cut),
+            Ok(()) => Ok(()),
+            Err(RunError::Pending) => Err(Delivery::Cut),
+            Err(RunError::Busy | RunError::NotAllowed) => Err(Delivery::Busy),
+            Err(_) if off => Err(Delivery::Busy),
+            Err(other) => Err(Delivery::Failed(run_error(other).message)),
+        }
+    }
+
     fn settle(&self) {
         if !self.acting.is_on() {
             self.acting_off();
@@ -426,7 +505,7 @@ impl AgyOps {
     fn session_arg(&self, args: &Value) -> Result<String, ApiError> {
         let id = text_arg(args, "id")?;
         id.strip_prefix("agy:")
-            .filter(|s| !s.is_empty() && !s.contains(['/', '\\']))
+            .filter(|s| valid_session(s))
             .map(String::from)
             .ok_or_else(|| bad("id is an Antigravity row id, agy:<session>"))
     }
@@ -441,6 +520,10 @@ impl AgyOps {
             .map(|r| r.folder)
             .ok_or_else(|| bad(format!("no Antigravity session {session}")))
     }
+}
+
+pub(crate) fn valid_session(session: &str) -> bool {
+    !session.is_empty() && !session.contains(['/', '\\'])
 }
 
 fn since(row: &Value) -> f64 {
@@ -477,6 +560,7 @@ impl AgyOps {
                 home,
                 binary: binary.map(|p| p.to_string_lossy().into_owned()),
                 start_wait: Duration::from_secs(4),
+                dispatch_wait: DISPATCH_WAIT,
                 timing: Timing::default(),
             },
         )
@@ -485,4 +569,4 @@ impl AgyOps {
 
 #[cfg(test)]
 #[path = "agy_ops_tests.rs"]
-mod tests;
+pub(crate) mod tests;

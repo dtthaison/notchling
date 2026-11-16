@@ -1,6 +1,7 @@
 use crate::acting::{Acting, ACTING_OFF};
 use crate::acting_ops::{bad, broad_folder, forbidden, text_arg, Room};
 use crate::layout::Layout;
+use crate::outbox_ops::OutboxOps;
 use notchling_engine::control::{Command, Launcher, RealLauncher};
 use notchling_engine::sessions::AgentGroup;
 use notchling_engine::tools::codex::list::{find_rollout, session as row_of};
@@ -18,7 +19,7 @@ use notchling_local_api::{ops, topics, ApiError, ErrorCode, OpSpec};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
 pub const CODEX_OPS: [&str; 3] = [ops::CODEX_SEND, ops::CODEX_STOP, ops::CODEX_DELETE];
@@ -48,6 +49,7 @@ pub struct CodexOps {
     resolve: Resolver,
     room: Arc<dyn Room>,
     reply_wait_ms: AtomicU64,
+    outbox: OnceLock<Arc<OutboxOps>>,
 }
 
 impl CodexOps {
@@ -75,6 +77,7 @@ impl CodexOps {
             resolve: Box::new(move || system_codex(&found)),
             room,
             reply_wait_ms: AtomicU64::new(REPLY_WAIT.as_millis() as u64),
+            outbox: OnceLock::new(),
         }
     }
 
@@ -167,6 +170,9 @@ impl CodexOps {
         let (session, folder) = match (args.get("id"), args.get("draft_folder")) {
             (Some(_), None) => {
                 let session = Self::session_arg(args)?;
+                if let Some(outbox) = self.outbox.get() {
+                    return self.enqueue(outbox, &session, text, &pick);
+                }
                 let folder = self.folder_of(&session)?;
                 (Some(session), folder)
             }
@@ -367,4 +373,4 @@ use slow::{send_error, sent_json};
 
 #[cfg(test)]
 #[path = "codex_ops_tests.rs"]
-mod tests;
+pub(crate) mod tests;

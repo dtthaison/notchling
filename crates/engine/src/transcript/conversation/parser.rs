@@ -65,6 +65,24 @@ impl Parser {
     }
 
     fn oversized_result(&mut self, head: &[u8]) {
+        self.oversized_output(head);
+        if self.oversized_ends_batch(head) {
+            self.queue.end_batch();
+        }
+    }
+
+    fn oversized_ends_batch(&self, head: &[u8]) -> bool {
+        if !self.include_sidechain && has(head, br#""isSidechain":true"#) {
+            return false;
+        }
+        let Some(message) = find(head, br#""message":"#) else {
+            return false;
+        };
+        let top = &head[..message];
+        has(top, br#""type":"user""#) || has(top, br#""type":"assistant""#)
+    }
+
+    fn oversized_output(&mut self, head: &[u8]) {
         let Some(id) = oversized_tool_result(head) else {
             return;
         };
@@ -149,8 +167,14 @@ impl Parser {
         }
         match kind {
             "system" => self.system(&obj, date),
-            "assistant" => self.assistant(&obj, date),
-            "user" => self.user(&obj, date),
+            "assistant" => {
+                self.queue.end_batch();
+                self.assistant(&obj, date);
+            }
+            "user" => {
+                self.user(&obj, date);
+                self.queue.end_batch();
+            }
             "queue-operation" => self.queue.operation(&obj),
             "attachment" => self.attachment(&obj, date),
             _ => {}
@@ -398,6 +422,7 @@ impl Parser {
                 self.c.facts.model = Some(id);
             }
             if let Some(kind) = user_item(text, 0) {
+                let kind = self.merged_kind(kind, text);
                 self.append_user(kind, date, true);
             }
             return;
@@ -422,6 +447,7 @@ impl Parser {
         }
         if !text.is_empty() || images > 0 {
             if let Some(kind) = user_item(&text, images) {
+                let kind = self.merged_kind(kind, &text);
                 self.append_user(kind, date, true);
             }
         }
@@ -521,7 +547,19 @@ impl Parser {
                 .count();
         }
         if let Some(kind @ ItemKind::User { .. }) = user_item(&text, images) {
+            let kind = self.merged_kind(kind, &text);
             self.append(kind, date);
+        }
+    }
+
+    fn merged_kind(&mut self, kind: ItemKind, raw: &str) -> ItemKind {
+        match kind {
+            ItemKind::User { text, images, .. } => ItemKind::User {
+                text,
+                images,
+                merged: self.queue.merged(raw),
+            },
+            other => other,
         }
     }
 

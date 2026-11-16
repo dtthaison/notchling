@@ -6,6 +6,7 @@ use notchling_kit::metric::RADIUS_CARD;
 use notchling_kit::ui::{card, hsla, label, KitStyled};
 use notchling_kit::{Appearance, Ink, TypeRole};
 
+use super::outbox_rows::attachments_for;
 use super::ChatView;
 use crate::chat::drops;
 
@@ -47,6 +48,10 @@ impl ChatView {
         drops::attachments_from(self.tools.draft(&drops::attachments_key(row)))
     }
 
+    pub(super) fn reply_files(&self, row: &str) -> Vec<PathBuf> {
+        attachments_for(self.tools.editing.as_ref(), row, self.attached(row))
+    }
+
     pub(super) fn set_attached(&mut self, row: &str, files: &[PathBuf], cx: &mut Context<Self>) {
         let key = drops::attachments_key(row);
         self.put_draft(&key, drops::attachments_text(files), cx);
@@ -78,6 +83,12 @@ impl ChatView {
                 cx.notify();
                 return;
             }
+        }
+        if self.editing_here() {
+            self.tools
+                .editor
+                .update(cx, |editor, _| editor.focus(window));
+            return;
         }
         let paths = drops::keep(
             paths,

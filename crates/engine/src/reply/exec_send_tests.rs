@@ -1,4 +1,6 @@
-use super::exec::{execute, execute_noting, Failure, Markers, NoQueueLog, Outcome, Pty};
+use super::exec::{
+    execute, execute_clearing, execute_noting, Clearing, Failure, Markers, NoQueueLog, Outcome, Pty,
+};
 use super::fake::{FakePrompt, RULE, STARTING};
 use super::keys::{self, timing::*};
 use super::plan;
@@ -178,6 +180,61 @@ fn the_new_failures_say_what_happened_and_what_to_do() {
         Failure::NotSent.to_string(),
         "The message is typed in the session's terminal but wasn't sent. Press Return there, or send it again."
     );
+}
+
+#[test]
+fn reply_in_is_reply_without_attach_and_detach() {
+    let open = plan::reply_in("hi");
+    assert_eq!(open.steps, plan::reply("hi").steps[1..]);
+    assert!(open.detach.is_empty());
+    assert_eq!(open.reply_text(), Some("hi"));
+}
+
+#[test]
+fn two_replies_on_one_fake_prompt() {
+    let mut pty = FakePrompt::idle();
+    let run = |plan: &plan::Plan, pty: &mut FakePrompt| {
+        execute_clearing(
+            plan,
+            pty,
+            &Markers,
+            &mut NoQueueLog,
+            &mut Vec::new(),
+            &Clearing::default(),
+        )
+    };
+    assert_eq!(
+        run(&plan::reply("a"), &mut pty),
+        Ok(Outcome { taken: false })
+    );
+    assert_eq!(pty.held(), Some(""));
+    assert_eq!(
+        run(&plan::reply_in("b"), &mut pty),
+        Ok(Outcome { taken: false })
+    );
+    assert_eq!(pty.sent, ["a", "b"]);
+    assert_eq!(pty.held(), Some(""));
+    let mut want = typed("a");
+    want.extend(typed("b"));
+    assert_eq!(pty.writes, want);
+}
+
+#[test]
+fn a_borrowed_pty_types_into_the_one_it_borrows() {
+    let mut fake = FakePrompt::idle();
+    let mut borrowed: Box<dyn Pty + '_> = Box::new(&mut fake);
+    let played = execute_clearing(
+        &plan::reply("a"),
+        borrowed.as_mut(),
+        &Markers,
+        &mut NoQueueLog,
+        &mut Vec::new(),
+        &Clearing::default(),
+    );
+    drop(borrowed);
+    assert_eq!(played, Ok(Outcome { taken: false }));
+    assert_eq!(fake.sent, ["a"]);
+    assert_eq!(fake.writes, typed("a"));
 }
 
 #[test]

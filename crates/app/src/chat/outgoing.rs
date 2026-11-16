@@ -9,6 +9,7 @@ pub struct Outgoing {
     pub seen: usize,
     pub delivered_at: Option<i64>,
     pub sent_at: i64,
+    pub boxed: Option<String>,
 }
 
 impl Outgoing {
@@ -18,6 +19,7 @@ impl Outgoing {
             seen: copies(text, conversation),
             delivered_at: None,
             sent_at: now_ms,
+            boxed: None,
         }
     }
 
@@ -86,6 +88,7 @@ mod tests {
                     kind: ItemKind::User {
                         text: (*t).to_owned(),
                         images: 0,
+                        merged: false,
                     },
                     date: None,
                 })

@@ -57,6 +57,7 @@ pub trait Hooks: Send + Sync {
     fn snapshot(&self, _ask: SnapAsk) {}
     fn peer_prompt(&self, _from: &NodeId, _event: &str, _data: &Value) {}
     fn failover(&self, _value: Failover, _order: u64) {}
+    fn peer_outbox(&self, _from: &NodeId, _name: &str, _data: &Value) {}
 }
 
 pub struct NoHooks;

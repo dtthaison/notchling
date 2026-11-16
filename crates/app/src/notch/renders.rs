@@ -117,6 +117,8 @@ pub struct Scene {
     pub tab: usize,
 }
 
+pub const MESSAGE_ENV: &str = "NOTCHLING_RENDER_NOTCH_MESSAGE";
+
 pub const PERCH_WINDOW: AxFrame = AxFrame {
     x: 60.0,
     y: 92.0,
@@ -144,6 +146,13 @@ pub fn scene(shown: Shown) -> Scene {
     let mut model = NotchModel::default();
     model.now_ms = now;
     model.update(loaded.agents, loaded.snapshots, loaded.requests);
+    if std::env::var_os(MESSAGE_ENV).is_some() {
+        for group in [AgentGroup::Working, AgentGroup::Completed] {
+            if let Some(agent) = model.agents.iter().find(|a| a.group == group) {
+                model.message_needs.insert(agent.id.clone());
+            }
+        }
+    }
     let pick = |model: &NotchModel, wanted: &dyn Fn(&NotchModel, &str) -> bool| {
         model
             .agents
@@ -230,6 +239,13 @@ pub fn scene(shown: Shown) -> Scene {
         }
     };
     model.go(state.unwrap_or(NotchState::List));
+    if let Ok(how) = std::env::var(MESSAGE_ENV) {
+        model.tab = if how == "done" {
+            AgentGroup::Completed
+        } else {
+            AgentGroup::Working
+        };
+    }
     scene.model = model;
     scene
 }

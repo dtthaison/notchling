@@ -304,3 +304,28 @@ fn migration_refuses_paths_that_are_not_the_databases() {
     assert!(migrate_inbox(&node_db, &other).is_err());
     assert!(migrate_inbox(&other, &cluster_db).is_err());
 }
+
+#[test]
+fn outbox_unsent_kind_and_its_actions_use_their_wire_words() {
+    assert_eq!(
+        serde_json::to_value(Kind::OutboxUnsent).unwrap(),
+        serde_json::json!("outbox_unsent")
+    );
+    assert_eq!(
+        serde_json::to_value([ActionId::Send, ActionId::Discard]).unwrap(),
+        serde_json::json!(["send", "discard"])
+    );
+    let tmp = TempDir::new("inbox-outbox-kind");
+    let dir = tmp.path("data");
+    let mut a = item("outbox:s:1", 1, State::Open);
+    a.kind = Kind::OutboxUnsent;
+    a.actions = vec![Action {
+        id: ActionId::Send,
+        label: "Send".to_string(),
+        primary: true,
+    }];
+    save(&dir, &Change::Raised(a.clone())).unwrap();
+    let book = load(&dir, 2).unwrap();
+    assert_eq!(book.items().len(), 1);
+    assert_eq!(book.items()[0].kind, Kind::OutboxUnsent);
+}

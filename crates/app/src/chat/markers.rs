@@ -30,6 +30,8 @@ pub fn effort_command(level: &str) -> String {
     format!("/effort {level}")
 }
 
+pub const OUTBOX_BUBBLE: &str = "Outbox Bubble";
+
 pub fn bubble_part(queued: bool, sending: bool) -> &'static str {
     match (queued, sending) {
         (_, true) => "Sending Bubble",

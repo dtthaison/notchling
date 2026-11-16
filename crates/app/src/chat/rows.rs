@@ -5,6 +5,7 @@ use notchling_kit::Icon;
 use notchling_locale as t;
 
 use super::format::{duration, model_name};
+use super::outbox::{Bubble, Status};
 
 pub const OUTPUT_LINES: usize = 12;
 
@@ -15,7 +16,8 @@ pub enum Row {
         images: usize,
         queued: bool,
         sending: bool,
-        note: Option<String>,
+        outbox: Option<Bubble>,
+        merged: bool,
     },
     Assistant {
         text: String,
@@ -181,12 +183,17 @@ fn tool_row(call: &ToolCall) -> ToolRow {
 
 pub fn row_of(item: &ChatItem) -> Row {
     match &item.kind {
-        ItemKind::User { text, images } => Row::User {
+        ItemKind::User {
+            text,
+            images,
+            merged,
+        } => Row::User {
             text: text.clone(),
             images: *images,
             queued: false,
             sending: false,
-            note: None,
+            outbox: None,
+            merged: *merged,
         },
         ItemKind::Assistant { text } => Row::Assistant { text: text.clone() },
         ItemKind::Thinking { seconds, text } => Row::Thinking {
@@ -221,31 +228,52 @@ pub fn rows(conversation: &Conversation) -> Vec<Row> {
         images: 0,
         queued: true,
         sending: false,
-        note: None,
+        outbox: None,
+        merged: false,
     }));
     out
 }
 
-pub fn with_held(mut rows: Vec<Row>, held: Option<&str>) -> Vec<Row> {
-    rows.extend(held.map(|text| Row::User {
+fn queued_user(text: &str, sending: bool, outbox: Option<Bubble>) -> Row {
+    Row::User {
         text: text.to_owned(),
         images: 0,
         queued: true,
-        sending: false,
-        note: None,
-    }));
-    rows
+        sending,
+        outbox,
+        merged: false,
+    }
 }
 
-pub fn with_outgoing(mut rows: Vec<Row>, outgoing: &[String]) -> Vec<Row> {
-    rows.extend(outgoing.iter().map(|text| Row::User {
-        text: text.clone(),
-        images: 0,
-        queued: true,
-        sending: true,
-        note: None,
-    }));
-    rows
+pub fn tail_rows(
+    queued: &[String],
+    hidden: Option<usize>,
+    bubbles: &[Bubble],
+    outgoing: &[String],
+    outboxed: bool,
+) -> Vec<Row> {
+    let own = queued
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| Some(*i) != hidden)
+        .map(|(_, text)| queued_user(text, false, None));
+    let kept = bubbles
+        .iter()
+        .map(|bubble| queued_user(&bubble.text, false, Some(bubble.clone())));
+    let flying = outgoing.iter().map(|text| {
+        if outboxed {
+            let bubble = Bubble {
+                id: String::new(),
+                text: text.clone(),
+                status: Status::Queued,
+                buttons: Vec::new(),
+            };
+            queued_user(text, false, Some(bubble))
+        } else {
+            queued_user(text, true, None)
+        }
+    });
+    own.chain(kept).chain(flying).collect()
 }
 
 #[cfg(test)]
@@ -259,6 +287,18 @@ mod tests {
             kind,
             date: None,
         }
+    }
+
+    #[test]
+    fn a_merged_message_becomes_a_merged_row() {
+        let kind = |merged| ItemKind::User {
+            text: "ok\nok".into(),
+            images: 0,
+            merged,
+        };
+        let merged = |row: Row| matches!(row, Row::User { merged: true, .. });
+        assert!(merged(row_of(&item(kind(true)))));
+        assert!(!merged(row_of(&item(kind(false)))));
     }
 
     #[test]
@@ -304,7 +344,8 @@ mod tests {
                 images: 0,
                 queued: false,
                 sending: false,
-                note: None,
+                outbox: None,
+                merged: false,
             }
         );
         assert_eq!(
@@ -348,18 +389,16 @@ mod tests {
                 images: 0,
                 queued: true,
                 sending: false,
-                note: None,
+                outbox: None,
+                merged: false,
             }
         );
     }
 
     #[test]
     fn messages_on_their_way_follow_as_bubbles_marked_sending() {
-        let c = Conversation {
-            queued: vec!["queued one".into()],
-            ..Conversation::default()
-        };
-        let rows = with_outgoing(rows(&c), &["Fix the build".to_owned()]);
+        let queued = vec!["queued one".to_owned()];
+        let rows = tail_rows(&queued, None, &[], &["Fix the build".to_owned()], false);
         assert_eq!(rows.len(), 2);
         assert_eq!(
             rows[1],
@@ -368,9 +407,30 @@ mod tests {
                 images: 0,
                 queued: true,
                 sending: true,
-                note: None,
+                outbox: None,
+                merged: false,
             }
         );
+    }
+
+    #[test]
+    fn an_outbox_send_in_flight_reads_as_queued_and_the_matching_queued_entry_is_hidden() {
+        let queued = vec!["first".to_owned(), "ok then".to_owned()];
+        let rows = tail_rows(&queued, Some(1), &[], &["next".to_owned()], true);
+        assert_eq!(rows.len(), 2);
+        assert!(matches!(&rows[0], Row::User { text, .. } if text == "first"));
+        let Row::User {
+            outbox, sending, ..
+        } = &rows[1]
+        else {
+            panic!("a user row");
+        };
+        assert!(!sending);
+        assert_eq!(
+            outbox.as_ref().map(|b| b.status.clone()),
+            Some(Status::Queued)
+        );
+        assert!(outbox.as_ref().is_some_and(|b| b.buttons.is_empty()));
     }
 
     #[test]

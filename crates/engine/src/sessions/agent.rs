@@ -65,6 +65,14 @@ impl Agent {
         self.can_reply() && (self.group == AgentGroup::Completed || self.at_prompt)
     }
 
+    pub fn outbox_key(&self) -> String {
+        match (&self.target, &self.node) {
+            (AgentTarget::Job(job), Some(node)) => format!("{}/{job}", node.id),
+            (AgentTarget::Job(job), None) => job.clone(),
+            _ => self.id.clone(),
+        }
+    }
+
     pub fn session_id(&self) -> Option<String> {
         match &self.target {
             AgentTarget::Resume { session_id, .. } => {
@@ -104,61 +112,5 @@ pub(crate) fn sample(target: AgentTarget, transcript: Option<&str>) -> Agent {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn session_ids() {
-        let job = sample(
-            AgentTarget::Job("ab12".into()),
-            Some("/h/.claude/projects/p/1f2e-uuid.jsonl"),
-        );
-        assert_eq!(job.session_id().as_deref(), Some("1f2e-uuid"));
-        assert_eq!(
-            sample(AgentTarget::Job("ab12".into()), None).session_id(),
-            None
-        );
-        let resume = sample(
-            AgentTarget::Resume {
-                session_id: "s1".into(),
-                cwd: "/tmp".into(),
-            },
-            None,
-        );
-        assert_eq!(resume.session_id().as_deref(), Some("s1"));
-        let empty = sample(
-            AgentTarget::Resume {
-                session_id: String::new(),
-                cwd: "/tmp".into(),
-            },
-            None,
-        );
-        assert_eq!(empty.session_id(), None);
-    }
-
-    #[test]
-    fn the_node_field_is_absent_unless_set_and_old_rows_read() {
-        let mut a = sample(AgentTarget::Job("ab".into()), None);
-        let plain = serde_json::to_value(&a).unwrap();
-        assert!(plain.get("node").is_none(), "{plain}");
-        let back: Agent = serde_json::from_value(plain).unwrap();
-        assert_eq!(back.node, None);
-        a.node = Some(NodeRef {
-            id: "0123456789abcdef".into(),
-            name: "w1".into(),
-            online: false,
-        });
-        let row = serde_json::to_value(&a).unwrap();
-        assert_eq!(row["node"]["online"], false);
-        assert_eq!(serde_json::from_value::<Agent>(row).unwrap(), a);
-    }
-
-    #[test]
-    fn only_conversation_jobs_take_replies() {
-        let mut a = sample(AgentTarget::Job("ab".into()), None);
-        assert!(a.can_reply());
-        a.command = Some("make".into());
-        assert!(!a.can_reply());
-        assert!(!sample(AgentTarget::Process(5), None).can_reply());
-    }
-}
+#[path = "agent_tests.rs"]
+mod tests;

@@ -125,6 +125,12 @@
     {"name":"session","type":"ref:session","optional":false,"list":false,"choices":[]},
     {"name":"then","type":"choice","optional":false,"list":false,"choices":["sent_at_turn_end","replaced","cancelled","session_gone","other"]}
   ]},
+  {"name":"session.outbox","kv":1,"group":"agents","lock":"toggle","sinks":["activity","diagnostics"],"default":"on","durability":"push","emitters":["daemon"],"retired":false,"fields":[
+    {"name":"session","type":"ref:session","optional":false,"list":false,"choices":[]},
+    {"name":"then","type":"choice","optional":false,"list":false,"choices":["queued","in_queue","sent","unsure","box","stopped","gone","edited","removed","discarded","session_removed","restored_unsure","noticed","other"]},
+    {"name":"chars","type":"count","optional":false,"list":false,"choices":[]},
+    {"name":"via","type":"choice","optional":false,"list":false,"choices":["chat","notch","phone","held","agent","other"]}
+  ]},
   {"name":"session.queue_stuck","kv":1,"group":"agents","lock":"toggle","sinks":["activity","diagnostics"],"default":"on","durability":"push","emitters":["app"],"retired":false,"fields":[
     {"name":"session","type":"ref:session","optional":false,"list":false,"choices":[]},
     {"name":"waited_ms","type":"millis","optional":false,"list":false,"choices":[]},

@@ -17,8 +17,6 @@ pub struct ToolLive {
     pub errors: BTreeMap<String, String>,
     pub named: BTreeMap<String, String>,
     pub unstarted: BTreeMap<String, String>,
-    pub held: BTreeMap<String, String>,
-    pub held_note: BTreeMap<String, String>,
     pub generation: u64,
 }
 
@@ -80,24 +78,6 @@ impl ToolLive {
                     }
                     _ => {}
                 }
-            }
-            topics::SESSION_HELD => {
-                let Some(id) = text(data, "id") else {
-                    return false;
-                };
-                match text(data, "text").filter(|t| !t.is_empty()) {
-                    Some(held) => {
-                        self.held.insert(id.to_owned(), held.to_owned());
-                        match text(data, "note").filter(|n| !n.is_empty()) {
-                            Some(note) => self.held_note.insert(id.to_owned(), note.to_owned()),
-                            None => self.held_note.remove(id),
-                        };
-                    }
-                    None => {
-                        self.held.remove(id);
-                        self.held_note.remove(id);
-                    }
-                };
             }
             topics::SESSION_CHANGED => {
                 let Some(id) = text(data, "id") else {
@@ -244,48 +224,6 @@ mod tests {
             at_prompt: false,
             node: None,
         }
-    }
-
-    #[test]
-    fn a_held_messages_state_comes_and_goes_with_its_events() {
-        let mut live = ToolLive::default();
-        live.apply(&event(
-            "session.held",
-            json!({"id": "job-a", "text": "two", "note": "Waiting — the terminal box has other text"}),
-        ));
-        assert_eq!(
-            live.held_note["job-a"],
-            "Waiting — the terminal box has other text"
-        );
-        live.apply(&event(
-            "session.held",
-            json!({"id": "job-a", "text": "two\n\nthree"}),
-        ));
-        assert!(live.held_note.is_empty(), "an event without one clears it");
-        live.apply(&event(
-            "session.held",
-            json!({"id": "job-a", "text": "two", "note": "x"}),
-        ));
-        live.apply(&event("session.held", json!({"id": "job-a", "text": null})));
-        assert!(live.held.is_empty() && live.held_note.is_empty());
-    }
-
-    #[test]
-    fn a_held_message_is_set_replaced_and_cleared_by_its_event() {
-        let mut live = ToolLive::default();
-        assert!(live.apply(&event(
-            "session.held",
-            json!({"id": "job-a", "text": "two"})
-        )));
-        assert_eq!(live.held["job-a"], "two");
-        live.apply(&event(
-            "session.held",
-            json!({"id": "job-a", "text": "two\n\nthree"}),
-        ));
-        assert_eq!(live.held["job-a"], "two\n\nthree");
-        live.apply(&event("session.held", json!({"id": "job-a", "text": null})));
-        assert!(live.held.is_empty());
-        assert!(!live.apply(&event("session.held", json!({"text": "x"}))));
     }
 
     #[test]

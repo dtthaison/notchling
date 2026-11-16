@@ -23,7 +23,7 @@ impl ClaudeAttacher {
 }
 
 impl Attacher for ClaudeAttacher {
-    fn attach(&self, job: &str, config_dir: Option<&str>) -> Result<Box<dyn Pty>, ApiError> {
+    fn attach(&self, job: &str, config_dir: Option<&str>) -> Result<Box<dyn Pty + Send>, ApiError> {
         let terminal = LiveTerminal::spawn(&attach_command(&self.claude, job, config_dir))
             .map_err(|e| ApiError::new(ErrorCode::Failed, format!("couldn't attach: {e}")))?;
         Ok(Box::new(terminal))

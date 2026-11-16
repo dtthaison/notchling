@@ -64,6 +64,21 @@ pub fn add_menu(tool: Tool) -> Vec<AddItem> {
     items
 }
 
+pub fn add_allowed(add: Add, editing: bool) -> bool {
+    !editing || add == Add::Slash
+}
+
+pub fn add_menu_for(tool: Tool, editing: bool) -> Vec<AddItem> {
+    add_menu(tool)
+        .into_iter()
+        .filter(|item| add_allowed(item.add, editing))
+        .collect()
+}
+
+pub fn takes_drops(in_subagent: bool, composer_on: bool, editing: bool) -> bool {
+    !in_subagent && composer_on && !editing
+}
+
 pub fn with_slash(text: &str) -> String {
     if text.starts_with('/') {
         text.to_owned()
@@ -111,6 +126,30 @@ mod tests {
         let codex: Vec<_> = add_menu(Tool::Codex).iter().map(|i| i.add).collect();
         assert_eq!(codex, [Add::Files, Add::Folder]);
         assert_eq!(add_menu(Tool::Claude)[0].shortcut, Some("⌘U"));
+    }
+
+    #[test]
+    fn editing_an_outbox_row_offers_no_files_or_folders() {
+        let claude: Vec<_> = add_menu_for(Tool::Claude, true)
+            .iter()
+            .map(|i| i.add)
+            .collect();
+        assert_eq!(claude, [Add::Slash]);
+        assert!(add_menu_for(Tool::Codex, true).is_empty());
+        assert_eq!(add_menu_for(Tool::Codex, false), add_menu(Tool::Codex));
+        assert_eq!(add_menu_for(Tool::Claude, false), add_menu(Tool::Claude));
+        assert!(!add_allowed(Add::Files, true));
+        assert!(!add_allowed(Add::Folder, true));
+        assert!(add_allowed(Add::Slash, true));
+        assert!(add_allowed(Add::Files, false));
+    }
+
+    #[test]
+    fn nothing_is_dropped_on_the_column_while_editing_or_in_a_subagent() {
+        assert!(takes_drops(false, true, false));
+        assert!(!takes_drops(false, true, true));
+        assert!(!takes_drops(true, true, false));
+        assert!(!takes_drops(false, false, false));
     }
 
     #[test]

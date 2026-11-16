@@ -3,7 +3,6 @@ pub mod bench_fixture;
 pub mod blocks;
 #[cfg(test)]
 mod blocks_tests;
-pub mod box_holds;
 pub mod branch;
 pub mod branch_rows;
 #[cfg(test)]
@@ -48,6 +47,7 @@ pub mod markdown;
 pub mod markdown_cache;
 pub mod markers;
 pub mod message_meta;
+pub mod outbox;
 pub mod outgoing;
 pub mod page_panel;
 pub mod paging;

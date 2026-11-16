@@ -64,6 +64,16 @@ impl Driver {
             }
             return;
         }
+        if topic == topics::OUTBOX {
+            if let Some(from) = data
+                .get("from")
+                .and_then(Value::as_str)
+                .and_then(NodeId::parse)
+            {
+                self.hooks.peer_outbox(&from, name, data);
+            }
+            return;
+        }
         if topic != topics::CLUSTER || name == topics::CLUSTER_CHANGED {
             return;
         }

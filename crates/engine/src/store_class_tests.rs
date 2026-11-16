@@ -35,7 +35,7 @@ fn every_table_in_notchling_db_has_a_class() {
 #[test]
 fn inbox_is_the_only_cluster_table() {
     assert_eq!(table_class("inbox"), Some(Class::Cluster));
-    for name in ["meta", "settings", "drafts", "docs"] {
+    for name in ["meta", "settings", "drafts", "docs", "outbox"] {
         assert_eq!(table_class(name), Some(Class::Node), "{name}");
     }
     assert_eq!(table_class("nonsense"), None);

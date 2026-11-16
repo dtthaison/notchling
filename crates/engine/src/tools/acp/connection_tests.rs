@@ -220,6 +220,24 @@ fn a_broken_pipe_ends_the_connection_like_a_death() {
     assert_eq!(heard(&rx), Heard::Exit(None));
 }
 
+#[test]
+fn a_request_says_whether_it_was_written() {
+    let (conn, process, _rx) = rig();
+    assert!(conn.request("session/prompt", json!({}), Box::new(|_| {})));
+    assert_eq!(process.requests("session/prompt").len(), 1);
+    conn.close();
+    let (tx, rx) = channel();
+    let written = conn.request(
+        "session/prompt",
+        json!({}),
+        Box::new(move |r| {
+            let _ = tx.send(r);
+        }),
+    );
+    assert!(!written);
+    assert_eq!(done(&rx), Err("Antigravity isn't running.".to_string()));
+}
+
 #[cfg(unix)]
 struct Stuck {
     conn: Connection,

@@ -82,8 +82,8 @@ chat-no-reply-yet = · No reply yet
 chat-latest = Latest
 chat-sending-note = Sending…
 chat-queued-note = Queued
-# The link on a message that waits for a session and could not be typed yet: it forgets the message.
-chat-held-discard = Discard
+# The caption under your message when Claude Code took it together with another one as a single prompt.
+chat-merged = Sent together with another message
 # $count is the number of pictures sent with a message.
 chat-images = { $count ->
     [one] { $count } image
@@ -198,11 +198,31 @@ chat-messages-wait = { $count ->
     [one] { $count } message waits for this turn to end.
    *[other] { $count } messages wait for this turn to end.
 }
+# The status lines under a message Notchling keeps until the session takes it.
+chat-outbox-queued = Queued
+chat-outbox-retry = Queued · couldn't reach the terminal, trying again
+chat-outbox-dialog = Waiting: dialog open
+chat-outbox-turn = Waits for the current turn
+chat-outbox-sending = Sending
+chat-outbox-in-queue = Queued in the session
+chat-outbox-sent = Sent
+chat-outbox-maybe = May already be in the session
 # $text is what the session's terminal box holds, on one line and cut when long.
-chat-box-holds = The session's input box holds other text, so nothing was sent: { $text }
-chat-box-holds-unread = The session's input box holds other text, so nothing was sent.
-# The button that deletes the text in the session's terminal box, then sends the message in the reply box.
-chat-box-clear-send = Clear Box and Send
+chat-outbox-box = Box has other text: { $text }
+chat-outbox-stopped = Session stopped
+chat-outbox-gone = Session not found
+# The buttons on those messages.
+chat-outbox-edit = Edit
+chat-outbox-remove = Remove
+chat-outbox-send-again = Send Again
+chat-outbox-drop = Drop
+# The button that deletes the text in the session's terminal box, then sends the message.
+chat-outbox-clear-send = Clear Box and Send
+chat-outbox-resume-send = Resume and Send
+# The line above the reply box while a queued message is being edited.
+chat-outbox-editing = Editing a queued message
+# The note when a queued message was taken before its edit went in.
+chat-outbox-already-sent = Already sent
 chat-add-files = Add files or photos
 chat-add-folder = Add folder
 chat-slash-commands = Slash commands

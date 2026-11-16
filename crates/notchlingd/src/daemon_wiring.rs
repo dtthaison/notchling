@@ -30,6 +30,12 @@ use crate::limits_sources::{ClaudeLimits, ProviderLimits, SessionJobs};
 use crate::log_ops::LogOps;
 use crate::op_group::OpGroup;
 use crate::op_kinds;
+use crate::outbox_courier::{real_clock, ClaudeCourier};
+use crate::outbox_inbox::OutboxNotice;
+use crate::outbox_ops::OutboxOps;
+use crate::outbox_postman::{Couriers, Postmen};
+use crate::outbox_runners::{link_agy, link_codex, AgyCourier, CodexCourier};
+use crate::outbox_verify::{SafeModes, TranscriptVerifier};
 use crate::pages_ops::{PagesOps, PagesSetup};
 use crate::providers_daemon::ProviderStores;
 use crate::providers_ops::ProvidersOps;
@@ -52,6 +58,7 @@ use notchling_engine::delegate::skill::SkillTool;
 use notchling_engine::git::SandboxedLauncher;
 use notchling_engine::install::skills::SkillSpec;
 use notchling_engine::limits::renew::ClaudeRenewer;
+use notchling_engine::outbox::OutboxStore;
 use notchling_engine::vault::skill as vault_skill;
 use notchling_engine::versions::mac::Roots as VersionRoots;
 use notchling_engine::versions::Version;
@@ -410,6 +417,65 @@ fn bridge_setup(layout: &Layout, ports: (u16, u16)) -> BridgeSetup {
     }
 }
 
+fn outbox_ops(
+    layout: &Layout,
+    sessions: &Arc<Mutex<Value>>,
+    acting: &Arc<ActingOps>,
+    room: &Arc<dyn Room>,
+    events: &Events,
+) -> OutboxOps {
+    let (store, saving) = match OutboxStore::open(&layout.data_dir) {
+        Ok(store) => (store, true),
+        Err(_) => (OutboxStore::in_memory_for_tests(), false),
+    };
+    let ops = OutboxOps::new(
+        Arc::new(store),
+        sessions.clone(),
+        layout.roots(),
+        acting.acting_switch(),
+        room.clone(),
+        Some(events.clone()),
+    );
+    if saving {
+        ops
+    } else {
+        ops.without_store()
+    }
+}
+
+fn postmen_for(
+    outbox: &Arc<OutboxOps>,
+    acting: &Arc<ActingOps>,
+    layout: &Layout,
+    codex: &Arc<CodexOps>,
+    agy: &Arc<AgyOps>,
+) -> Postmen {
+    link_codex(outbox, codex);
+    link_agy(outbox, agy);
+    let safe = Arc::new(SafeModes::default());
+    let courier = Arc::new(ClaudeCourier::new(
+        acting.clone(),
+        layout.roots(),
+        real_clock(),
+        safe.clone(),
+    ));
+    let resume = courier.clone();
+    outbox.set_resume(Arc::new(move |row| resume.resume(row)));
+    let postmen = Postmen::build(
+        outbox.clone(),
+        Couriers {
+            claude: courier,
+            codex: Arc::new(CodexCourier::new(codex.clone())),
+            antigravity: Arc::new(AgyCourier::new(agy.clone())),
+        },
+        Arc::new(TranscriptVerifier::new(layout.roots(), safe)),
+        acting.acting_switch(),
+        real_clock(),
+    );
+    outbox.set_wake(postmen.waker());
+    postmen
+}
+
 pub struct Wired {
     pub acting: Arc<ActingOps>,
     pub codex: Arc<CodexOps>,
@@ -422,6 +488,9 @@ pub struct Wired {
     pub limits: Arc<LimitsOps>,
     pub catalog: Arc<CatalogService>,
     pub inbox: Arc<InboxOps>,
+    pub outbox: Arc<OutboxOps>,
+    pub postmen: Postmen,
+    pub outbox_notice: Arc<OutboxNotice>,
     pub vault: Arc<VaultOps>,
     pub install: Arc<InstallOps>,
     pub settings: Arc<SettingsOps>,
@@ -496,6 +565,16 @@ impl Wired {
         let inbox = InboxOps::new(layout.data_dir.clone(), room.clone())
             .with_events(events.clone())
             .with_cluster_dir(layout.cluster_dir());
+        let outbox = Arc::new(outbox_ops(layout, &sessions, &acting, &room, &events));
+        acting.attach_outbox(outbox.clone());
+        let agy = Arc::new(AgyOps::for_daemon(
+            layout,
+            acting.acting_switch(),
+            room.clone(),
+        ));
+        acting.attach_agy(agy.clone());
+        let postmen = postmen_for(&outbox, &acting, layout, &codex, &agy);
+        let outbox_notice = OutboxNotice::new(outbox.clone(), inbox.clone());
         let every = Arc::new(EverySession::new(layout));
         let bridge = Arc::new(
             BridgeOps::new(
@@ -513,12 +592,6 @@ impl Wired {
                     .join(crate::cluster_wiring::IDENTITY_DIR),
             ),
         );
-        let agy = Arc::new(AgyOps::for_daemon(
-            layout,
-            acting.acting_switch(),
-            room.clone(),
-        ));
-        acting.attach_agy(agy.clone());
         let awake = Arc::new(AwakeLoop::for_daemon(
             layout,
             sessions.clone(),
@@ -710,6 +783,10 @@ impl Wired {
         if let Some(sink) = cluster.failover_sink() {
             settings.bind_failover(sink);
         }
+        if let Some(tell) = cluster.peer_teller() {
+            outbox.set_tell(tell);
+        }
+        outbox.set_remote(cluster.remote_outbox());
         Wired {
             acting,
             codex,
@@ -722,6 +799,9 @@ impl Wired {
             limits,
             catalog,
             inbox,
+            outbox,
+            postmen,
+            outbox_notice,
             vault,
             install: Arc::new(install),
             settings,
@@ -795,6 +875,7 @@ impl Wired {
             .with_group(self.limits.clone())
             .with_group(self.catalog.clone())
             .with_group(self.inbox.clone())
+            .with_group(self.outbox.clone())
             .with_group(self.vault.clone())
             .with_group(self.settings.clone())
             .with_group(self.versions.clone())
@@ -824,22 +905,25 @@ impl Wired {
     pub fn start(&self) {
         self.limits.spawn_loop();
         self.inbox.spawn_loop();
-        self.acting.spawn_held_loop();
         self.versions.start();
         self.awake.spawn_loop();
         self.wake.spawn_loop();
         self.codex_children.start();
+        self.postmen.begin();
+        self.outbox_notice.spawn_loop();
     }
 
     pub fn load(&self) {
         self.inbox.load();
+        self.outbox.load(crate::acting_ops::now_ms());
     }
 
     pub fn close(&self) {
+        self.outbox_notice.close();
+        self.postmen.stop();
         self.wake.close();
         self.codex_children.close();
         self.awake.close();
-        self.acting.stop_held_loop();
         self.acting.close();
         self.codex.close();
         self.agy.close();

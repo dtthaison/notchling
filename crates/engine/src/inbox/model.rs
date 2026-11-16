@@ -12,6 +12,7 @@ pub enum Kind {
     VersionCheckFailed,
     VersionDrift,
     NodeJoin,
+    OutboxUnsent,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
@@ -25,6 +26,8 @@ pub enum ActionId {
     Cancel,
     Done,
     Open,
+    Send,
+    Discard,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]

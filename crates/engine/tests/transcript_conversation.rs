@@ -9,7 +9,24 @@ fn user(text: &str) -> ItemKind {
     ItemKind::User {
         text: text.into(),
         images: 0,
+        merged: false,
     }
+}
+
+fn merged_user(text: &str) -> ItemKind {
+    ItemKind::User {
+        text: text.into(),
+        images: 0,
+        merged: true,
+    }
+}
+
+fn users(c: &Conversation) -> Vec<ItemKind> {
+    c.items
+        .iter()
+        .filter(|i| matches!(i.kind, ItemKind::User { .. }))
+        .map(|i| i.kind.clone())
+        .collect()
 }
 
 fn read_lines_as_file(lines: &[&str]) -> Conversation {
@@ -441,4 +458,159 @@ fn write_results_show_created_files_as_added_lines() {
             },
         ]
     );
+}
+
+#[test]
+fn merged_prompt_is_marked() {
+    let path =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/queue/merged.jsonl");
+    let c = conversation::read(&s(&path));
+    assert_eq!(
+        users(&c),
+        [
+            user("Check the repo"),
+            merged_user("check the logs\nthen run tests"),
+            merged_user("ok\nok"),
+            user("one alone"),
+        ]
+    );
+    assert!(c.queued.is_empty());
+}
+
+#[test]
+fn merged_attachment_is_marked() {
+    let c = read_lines_as_file(&[
+        r#"{"type":"queue-operation","operation":"enqueue","timestamp":"2026-11-15T10:00:10.000Z","content":"first"}"#,
+        r#"{"type":"queue-operation","operation":"enqueue","timestamp":"2026-11-15T10:00:10.100Z","content":"second"}"#,
+        r#"{"type":"queue-operation","operation":"dequeue","timestamp":"2026-11-15T10:00:12.500Z"}"#,
+        r#"{"type":"queue-operation","operation":"dequeue","timestamp":"2026-11-15T10:00:12.500Z"}"#,
+        r#"{"type":"attachment","attachment":{"type":"queued_command","prompt":"first\nsecond","commandMode":"prompt"},"timestamp":"2026-11-15T10:00:12.600Z"}"#,
+    ]);
+    assert_eq!(users(&c), [merged_user("first\nsecond")]);
+}
+
+#[test]
+fn single_dequeue_is_not_merged() {
+    let c = read_lines_as_file(&[
+        r#"{"type":"queue-operation","operation":"enqueue","timestamp":"2026-11-15T10:00:10.000Z","content":"first"}"#,
+        r#"{"type":"queue-operation","operation":"enqueue","timestamp":"2026-11-15T10:00:10.100Z","content":"second"}"#,
+        r#"{"type":"queue-operation","operation":"dequeue","timestamp":"2026-11-15T10:00:12.500Z"}"#,
+        r#"{"type":"user","message":{"role":"user","content":"first\nsecond"},"timestamp":"2026-11-15T10:00:12.600Z"}"#,
+    ]);
+    assert_eq!(users(&c), [user("first\nsecond")]);
+}
+
+const ENQUEUE_TWO: [&str; 2] = [
+    r#"{"type":"queue-operation","operation":"enqueue","timestamp":"2026-11-15T10:00:10.000Z","content":"first"}"#,
+    r#"{"type":"queue-operation","operation":"enqueue","timestamp":"2026-11-15T10:00:10.100Z","content":"second"}"#,
+];
+
+const DEQUEUE_TWO: [&str; 2] = [
+    r#"{"type":"queue-operation","operation":"dequeue","timestamp":"2026-11-15T10:00:12.500Z"}"#,
+    r#"{"type":"queue-operation","operation":"dequeue","timestamp":"2026-11-15T10:00:12.500Z"}"#,
+];
+
+const TYPED_JOINED: &str = r#"{"type":"user","message":{"role":"user","content":"first\nsecond"},"timestamp":"2026-11-15T10:05:00.000Z"}"#;
+
+fn after_a_batch(between: &[&str]) -> Vec<ItemKind> {
+    let mut lines: Vec<&str> = ENQUEUE_TWO.to_vec();
+    lines.extend(DEQUEUE_TWO);
+    lines.extend(between);
+    lines.push(TYPED_JOINED);
+    users(&read_lines_as_file(&lines))
+}
+
+#[test]
+fn a_batch_does_not_outlive_an_assistant_line() {
+    let assistant = r#"{"type":"assistant","message":{"id":"m1","model":"claude-opus-5-5","role":"assistant","content":[{"type":"text","text":"Working."}]},"timestamp":"2026-11-15T10:00:13.000Z"}"#;
+    assert_eq!(after_a_batch(&[assistant]), [user("first\nsecond")]);
+}
+
+#[test]
+fn a_batch_does_not_outlive_a_tool_result_line() {
+    let result = r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"ok"}]},"timestamp":"2026-11-15T10:00:13.000Z"}"#;
+    assert_eq!(after_a_batch(&[result]), [user("first\nsecond")]);
+}
+
+#[test]
+fn a_batch_does_not_outlive_a_meta_user_line() {
+    let meta = r#"{"type":"user","isMeta":true,"message":{"role":"user","content":"Caveat: local command output"},"timestamp":"2026-11-15T10:00:13.000Z"}"#;
+    assert_eq!(after_a_batch(&[meta]), [user("first\nsecond")]);
+}
+
+fn big_assistant() -> String {
+    let pad = "x".repeat(450_000);
+    format!(
+        r#"{{"type":"assistant","message":{{"id":"m9","model":"claude-opus-5-5","role":"assistant","content":[{{"type":"text","text":"{pad}"}}]}},"timestamp":"2026-11-15T10:00:13.000Z"}}"#
+    )
+}
+
+fn big_tool_result() -> String {
+    let pad = "x".repeat(450_000);
+    format!(
+        r#"{{"type":"user","message":{{"role":"user","content":[{{"type":"tool_result","tool_use_id":"t1","content":"{pad}"}}]}},"timestamp":"2026-11-15T10:00:13.000Z"}}"#
+    )
+}
+
+#[test]
+fn a_batch_does_not_outlive_an_oversized_tool_result_line() {
+    let big = big_tool_result();
+    assert_eq!(after_a_batch(&[&big]), [user("first\nsecond")]);
+}
+
+#[test]
+fn a_batch_does_not_outlive_an_oversized_assistant_line() {
+    let big = big_assistant();
+    assert_eq!(after_a_batch(&[&big]), [user("first\nsecond")]);
+}
+
+#[test]
+fn a_whole_oversized_line_handed_to_the_parser_ends_the_batch_too() {
+    let mut parser = conversation::Parser::new();
+    for line in ENQUEUE_TWO.iter().chain(DEQUEUE_TWO.iter()) {
+        parser.consume(line.as_bytes());
+    }
+    parser.consume(big_tool_result().as_bytes());
+    parser.consume(TYPED_JOINED.as_bytes());
+    assert_eq!(users(&parser.conversation()), [user("first\nsecond")]);
+}
+
+#[test]
+fn an_oversized_system_line_leaves_the_batch_alone() {
+    let pad = "x".repeat(450_000);
+    let big = format!(
+        r#"{{"type":"system","subtype":"stop_hook_summary","content":"{pad}","timestamp":"2026-11-15T10:00:12.550Z"}}"#
+    );
+    assert_eq!(after_a_batch(&[&big]), [merged_user("first\nsecond")]);
+}
+
+#[test]
+fn an_oversized_line_of_a_subagent_leaves_the_batch_alone() {
+    let pad = "x".repeat(450_000);
+    let big = format!(
+        r#"{{"isSidechain":true,"type":"assistant","message":{{"id":"m9","role":"assistant","content":[{{"type":"text","text":"{pad}"}}]}},"timestamp":"2026-11-15T10:00:12.550Z"}}"#
+    );
+    assert_eq!(after_a_batch(&[&big]), [merged_user("first\nsecond")]);
+}
+
+#[test]
+fn system_attachment_and_progress_lines_leave_the_batch_alone() {
+    let between = [
+        r#"{"type":"system","subtype":"stop_hook_summary","timestamp":"2026-11-15T10:00:12.550Z"}"#,
+        r#"{"type":"attachment","attachment":{"type":"token_usage","used":1000,"total":200000},"timestamp":"2026-11-15T10:00:12.560Z"}"#,
+        r#"{"type":"progress","data":{"type":"hook_progress"},"timestamp":"2026-11-15T10:00:12.570Z"}"#,
+    ];
+    assert_eq!(after_a_batch(&between), [merged_user("first\nsecond")]);
+}
+
+#[test]
+fn two_dequeues_with_another_line_are_not_merged() {
+    let c = read_lines_as_file(&[
+        r#"{"type":"queue-operation","operation":"enqueue","timestamp":"2026-11-15T10:00:10.000Z","content":"first"}"#,
+        r#"{"type":"queue-operation","operation":"enqueue","timestamp":"2026-11-15T10:00:10.100Z","content":"second"}"#,
+        r#"{"type":"queue-operation","operation":"dequeue","timestamp":"2026-11-15T10:00:12.500Z"}"#,
+        r#"{"type":"queue-operation","operation":"dequeue","timestamp":"2026-11-15T10:00:12.500Z"}"#,
+        r#"{"type":"user","message":{"role":"user","content":"something else"},"timestamp":"2026-11-15T10:00:12.600Z"}"#,
+    ]);
+    assert_eq!(users(&c), [user("something else")]);
 }

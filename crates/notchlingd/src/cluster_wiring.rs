@@ -15,6 +15,7 @@ use crate::cluster_node::{
     ClusterLog, ClusterNode, ClusterSetup, Hooks, JoinAsk, LocalCalls, NetSide, Probe, Submit, TICK,
 };
 use crate::cluster_ops::{follow_switch, ClusterOps};
+use crate::cluster_outbox::{OutboxFollower, RemoteOutbox};
 use crate::cluster_prompts::{NodePush, PromptFollower, RemotePrompts};
 use crate::cluster_relay_wiring::{HeldActs, HeldSlot};
 use crate::cluster_sessions::{
@@ -27,6 +28,7 @@ use crate::cluster_workspace_send::{CodeSender, NodePeers, ReturnOps, Sender};
 use crate::inbox_ops::InboxOps;
 use crate::late_emit::Events;
 use crate::layout::Layout;
+use crate::outbox_ops::{RemoteRows, Tell};
 use crate::shell_jobs::ShellJobs;
 use crate::snap_observe::{SnapObserver, EVERY as OBSERVE_EVERY};
 use crate::snap_ready::{predicate, LastSet, SenderSlot};
@@ -155,6 +157,7 @@ pub struct ClusterHooks {
     pub snaps: Arc<SnapRunner>,
     pub prompts: Arc<RemotePrompts>,
     pub failover: KeyMirror,
+    pub outbox: Arc<RemoteOutbox>,
 }
 
 impl Hooks for ClusterHooks {
@@ -170,6 +173,7 @@ impl Hooks for ClusterHooks {
         let kept = self.inbox.leave_cluster();
         self.mirror.clear();
         self.remote.clear();
+        self.outbox.clear();
         kept
     }
 
@@ -192,6 +196,10 @@ impl Hooks for ClusterHooks {
 
     fn failover(&self, value: Failover, order: u64) {
         self.failover.follow(value, order);
+    }
+
+    fn peer_outbox(&self, from: &NodeId, name: &str, data: &Value) {
+        self.outbox.peer_event(from, name, data);
     }
 }
 
@@ -260,6 +268,8 @@ pub struct ClusterParts {
     main_follower: Option<MainFollower>,
     snap_run: Arc<SnapRunner>,
     snap_observer: Option<SnapObserver>,
+    outbox_follower: Option<OutboxFollower>,
+    outbox: Arc<RemoteOutbox>,
     handler: Arc<LateHandler>,
     link: Arc<LateLink>,
     held: HeldSlot,
@@ -342,6 +352,15 @@ impl ClusterParts {
         let remote = Arc::new(RemoteSessions::new(mirror_dir.clone()).with_gate(Arc::new(
             move || gate.get().is_some_and(|node| is_client(&node.status())),
         )));
+        let outbox_gate = holder.clone();
+        let outbox = Arc::new(RemoteOutbox::new(
+            room.clone(),
+            Arc::new(move || {
+                outbox_gate
+                    .get()
+                    .is_some_and(|node| is_client(&node.status()))
+            }),
+        ));
         let publisher = Arc::new(Publisher::new(room.clone(), remote.clone(), sessions));
         let tail = Arc::new(LateTail::default());
         let capped: OnCap = {
@@ -477,6 +496,7 @@ impl ClusterParts {
             snaps: snap_run.clone(),
             prompts: prompts.clone(),
             failover: KeyMirror::new(layout.data_dir.join("settings.json"), room.clone()),
+            outbox: outbox.clone(),
         });
         let node = start_node(
             layout,
@@ -491,6 +511,7 @@ impl ClusterParts {
         let mut main_follower = None;
         let mut snap_observer = None;
         let mut follower = None;
+        let mut outbox_follower = None;
         if let Ok(node) = &node {
             reporter.attach(node.clone());
             let push = Arc::new(NodePush::default());
@@ -525,6 +546,7 @@ impl ClusterParts {
                 snap.sender.clone(),
                 OBSERVE_EVERY,
             ));
+            outbox_follower = Some(OutboxFollower::spawn(node.clone(), outbox.clone()));
         }
         let replication_slot = sender_slot.clone();
         let ops = Arc::new(
@@ -559,6 +581,8 @@ impl ClusterParts {
             main_follower,
             snap_run,
             snap_observer,
+            outbox_follower,
+            outbox,
             handler,
             link: move_link,
             held,
@@ -595,6 +619,17 @@ impl ClusterParts {
         self.held.clone()
     }
 
+    pub fn remote_outbox(&self) -> Arc<dyn RemoteRows> {
+        self.outbox.clone()
+    }
+
+    pub fn peer_teller(&self) -> Option<Tell> {
+        let node = self.node.as_ref().ok()?.clone();
+        Some(Arc::new(move |topic, name, data| {
+            node.tell(topic, name, data.clone());
+        }))
+    }
+
     pub fn serve(&self, handler: &Arc<dyn Handler>) {
         self.handler.serve(handler);
     }
@@ -622,6 +657,9 @@ impl ClusterParts {
             observer.close();
         }
         self.snap_run.close();
+        if let Some(follower) = &self.outbox_follower {
+            follower.close();
+        }
         if let Ok(node) = &self.node {
             node.close();
         }

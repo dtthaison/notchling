@@ -183,6 +183,110 @@ fn forward_from_worker_is_refused() {
 }
 
 #[test]
+fn session_send_is_forwarded_to_owner() {
+    let net = MemNet::new();
+    let (a, b) = pair(&net, client_home(), Opts::named("worker"));
+    let forward = NodeForward::new(a.node.clone());
+    let args = json!({"id": format!("{}/abc", b.id()), "text": "hi", "clear_box": true});
+    let out = forward
+        .forward(&app(), "session.send", &args)
+        .expect("routed")
+        .unwrap();
+    assert_eq!(out, json!({"session": "s-session.send"}));
+    let calls = b.calls.calls.lock().unwrap();
+    assert_eq!(calls.len(), 1, "{calls:?}");
+    assert_eq!(calls[0].0, "session.send");
+    assert_eq!(
+        calls[0].1,
+        json!({"id": "abc", "text": "hi", "clear_box": true})
+    );
+    assert_eq!(
+        calls[0].2,
+        Origin {
+            node: a.id(),
+            tier: OriginTier::App
+        }
+    );
+}
+
+#[test]
+fn route_by_session_hands_the_owner_the_bare_session() {
+    let qualified = format!("{}/ab12cd34", other());
+    for op in [
+        "outbox.edit",
+        "outbox.remove",
+        "outbox.resend",
+        "outbox.list",
+        "outbox.discard",
+    ] {
+        let args = json!({"id": "o1", "session": qualified, "text": "hi"});
+        assert_eq!(
+            route(op, &args, &me()),
+            Some((
+                other(),
+                json!({"id": "o1", "session": "ab12cd34", "text": "hi"})
+            )),
+            "{op}"
+        );
+        let local = json!({"id": "o1", "session": "ab12cd34"});
+        assert_eq!(route(op, &local, &me()), None, "{op}");
+        let own = json!({"id": "o1", "session": format!("{}/ab12cd34", me())});
+        assert_eq!(route(op, &own, &me()), None, "{op}");
+    }
+    assert_eq!(route("outbox.list", &json!({}), &me()), None);
+    assert_eq!(
+        route(
+            "outbox.edit",
+            &json!({"id": format!("{}/o1", other())}),
+            &me()
+        ),
+        None,
+        "the row id is never the routing key"
+    );
+}
+
+#[test]
+fn outbox_ops_are_forwarded_by_session() {
+    let net = MemNet::new();
+    let (a, b) = pair(&net, client_home(), Opts::named("worker"));
+    let forward = NodeForward::new(a.node.clone());
+    let session = format!("{}/codex:t1", b.id());
+    let cases = [
+        (
+            "outbox.edit",
+            json!({"id": "o1", "session": session, "text": "hi"}),
+        ),
+        ("outbox.remove", json!({"id": "o1", "session": session})),
+        (
+            "outbox.resend",
+            json!({"id": "o1", "session": session, "resume": true}),
+        ),
+        ("outbox.list", json!({"session": session})),
+        ("outbox.discard", json!({"session": session})),
+    ];
+    for (op, args) in &cases {
+        let out = forward.forward(&app(), op, args).expect("routed").unwrap();
+        assert_eq!(out, json!({"session": format!("s-{op}")}));
+    }
+    let calls = b.calls.calls.lock().unwrap();
+    assert_eq!(calls.len(), cases.len(), "{calls:?}");
+    for ((op, args), call) in cases.iter().zip(calls.iter()) {
+        let mut bare = args.clone();
+        bare["session"] = json!("codex:t1");
+        assert_eq!(call.0, *op);
+        assert_eq!(call.1, bare, "{op}");
+    }
+    drop(calls);
+    let agent = caller_of(Tier::Agent, ClientKind::Cli);
+    let err = forward
+        .forward(&agent, "outbox.remove", &cases[1].1)
+        .expect("routed")
+        .unwrap_err();
+    assert_eq!(err.code, ErrorCode::Forbidden);
+    assert_eq!(b.calls.calls.lock().unwrap().len(), cases.len());
+}
+
+#[test]
 fn the_lease_on_prompts_runs_out() {
     let followers = PromptFollowers::default();
     assert!(!followers.active(0));

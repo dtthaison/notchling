@@ -18,7 +18,9 @@ use notchling_locale as t;
 use super::render_map::WindowRegion;
 use super::ChatView;
 use crate::chat::claude_picker::Kind;
-use crate::chat::composer::{action, add_menu, is_add_files, with_slash, Action, Add, AddItem};
+use crate::chat::composer::{
+    action, add_allowed, add_menu_for, is_add_files, with_slash, Action, Add, AddItem,
+};
 use crate::chat::pickers;
 use crate::chat::prompts::error_text;
 use crate::mac::gate;
@@ -110,32 +112,8 @@ fn status(
     )
 }
 
-fn box_holds_row(
-    view: &ChatView,
-    ready: bool,
-    a: Appearance,
-    cx: &mut Context<ChatView>,
-) -> Option<Div> {
-    let held = view.box_holds()?;
-    let (state, ink) = if ready {
-        (PartState::Rest, Ink::Text)
-    } else {
-        (PartState::Disabled, Ink::TextFaint)
-    };
-    let button = button_with(
-        "clear-box-send",
-        label(t::chat::box_clear_send(), TypeRole::Label, ink, a),
-        ButtonKind::Secondary,
-        state,
-        a,
-    )
-    .flex_shrink_0();
-    let button = if ready {
-        button.on_click(cx.listener(|this, _, _, cx| this.send_text_clearing_box(cx)))
-    } else {
-        button
-    };
-    Some(
+fn editing_row(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Option<Div> {
+    view.editing_here().then(|| {
         div()
             .mx(px(SIDE_PADDING))
             .pb(px(6.0))
@@ -144,14 +122,25 @@ fn box_holds_row(
             .gap(px(8.0))
             .child(
                 div().flex_1().min_w(px(0.0)).child(
-                    label(&sentence(&held.line()), TypeRole::Meta, Ink::Needs, a)
+                    label(t::chat::outbox_editing(), TypeRole::Meta, Ink::TextMuted, a)
                         .w_full()
                         .elide(),
                 ),
             )
-            .child(button.part_at("Clear Box Button", Corner::Top, a, cx))
-            .part_at("Box Holds Notice", Corner::Trailing, a, cx),
-    )
+            .child(
+                button_with(
+                    "edit-cancel",
+                    label(t::chat::cancel(), TypeRole::Label, Ink::Text, a),
+                    ButtonKind::Ghost,
+                    PartState::Rest,
+                    a,
+                )
+                .flex_shrink_0()
+                .on_click(cx.listener(|this, _, _, cx| this.cancel_edit(cx)))
+                .part_at("Cancel Edit Button", Corner::Top, a, cx),
+            )
+            .part_at("Editing Notice", Corner::Trailing, a, cx)
+    })
 }
 
 fn open_menu(view: &ChatView) -> Option<(String, bool)> {
@@ -412,7 +401,7 @@ impl ChatView {
 
     fn pick_add(&mut self, add: Add, window: &mut Window, cx: &mut Context<Self>) {
         self.composer.add_menu = false;
-        if add != Add::Slash && self.attach_refused() {
+        if !add_allowed(add, self.editing_here()) || (add != Add::Slash && self.attach_refused()) {
             cx.notify();
             return;
         }
@@ -521,6 +510,8 @@ fn add_button(
     cx: &mut Context<ChatView>,
 ) -> Option<Div> {
     let session = view.selected_session()?;
+    let items = add_menu_for(session.tool, view.editing_here());
+    let enabled = enabled && !items.is_empty();
     let open = enabled && view.composer.menu_open();
     let kind = if open {
         ButtonKind::Secondary
@@ -546,7 +537,7 @@ fn add_button(
         })
         .part_at("Add Button", Corner::Top, a, cx);
     let menu = open.then(|| {
-        let rows = add_menu(session.tool)
+        let rows = items
             .into_iter()
             .enumerate()
             .map(|(i, item)| add_row(i, item, a, cx))
@@ -590,7 +581,7 @@ fn thumbnails(view: &ChatView, id: &str, a: Appearance, cx: &mut Context<ChatVie
     if view.attach_refused() {
         return None;
     }
-    let attached = view.attached(id);
+    let attached = view.reply_files(id);
     let mut tiles: Vec<(std::path::PathBuf, bool)> =
         attached.iter().map(|p| (p.clone(), true)).collect();
     for path in crate::chat::drops::image_words(view.tools.editor.read(cx).text()) {
@@ -739,7 +730,7 @@ pub fn render(view: &ChatView, a: Appearance, window: &Window, cx: &mut Context<
     let id = view.selected.clone().unwrap_or_default();
     let empty = !view.composer.preview.typed
         && view.tools.draft(&id).trim().is_empty()
-        && view.attached(&id).is_empty();
+        && view.reply_files(&id).is_empty();
     let focused = control.enabled && view.tools.focus.is_focused(window);
     let edge = if focused { EDGE_FOCUSED } else { EDGE_REST };
     let edge_color = if focused {
@@ -779,6 +770,7 @@ pub fn render(view: &ChatView, a: Appearance, window: &Window, cx: &mut Context<
         )
         .children(action_button(act, control.enabled, a, cx));
     let accent_edge = hsla(Ink::Accent.color(a));
+    let editing = view.editing_here();
     let card = div()
         .id("composer")
         .mx(px(SIDE_PADDING))
@@ -810,16 +802,15 @@ pub fn render(view: &ChatView, a: Appearance, window: &Window, cx: &mut Context<
                     let (k, m) = (&e.keystroke, &e.keystroke.modifiers);
                     if is_add_files(&k.key, m.platform, m.shift, m.alt, m.control)
                         && !this.attach_refused()
+                        && add_allowed(Add::Files, this.editing_here())
                     {
                         this.pick_add(Add::Files, window, cx);
                         cx.stop_propagation();
                     }
                 }))
-                .when(!view.attach_refused(), |c| {
-                    c.drag_over::<ExternalPaths>(move |style, _, _, _| {
-                        style.border_color(accent_edge)
-                    })
-                })
+        })
+        .when(control.enabled && !editing && !view.attach_refused(), |c| {
+            c.drag_over::<ExternalPaths>(move |style, _, _, _| style.border_color(accent_edge))
         })
         .part_at("Composer", Corner::BottomLeading, a, cx);
     let footer = div()
@@ -862,12 +853,7 @@ pub fn render(view: &ChatView, a: Appearance, window: &Window, cx: &mut Context<
                     &activity, stalled, shell, a, cx,
                 ))
         }))
-        .children(box_holds_row(
-            view,
-            control.enabled && !empty && !view.tools.sending,
-            a,
-            cx,
-        ))
+        .children(editing_row(view, a, cx))
         .child(card)
         .child(footer)
         .children(super::slash_menu::render(view, a, cx))

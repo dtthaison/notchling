@@ -113,3 +113,13 @@ fn item_id_is_hashed_in_activity() {
         })
     ));
 }
+
+#[test]
+fn an_outbox_notice_is_logged_as_a_notice() {
+    let (r, sink) = watched();
+    let mut a = item("outbox:s:1");
+    a.kind = notchling_engine::inbox::Kind::OutboxUnsent;
+    r.ops.raise(a, None);
+    let raised = &of(&sink, "inbox.raised")[0];
+    assert_eq!(text(raised, "item_kind").as_deref(), Some("notice"));
+}

@@ -4,12 +4,23 @@ use crate::tools::acp::{Connection, Handler, Spawner, METHOD_NOT_FOUND};
 use crate::transcript::acp::Transcript;
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU8, AtomicUsize, Ordering};
+use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, Weak};
 
 pub const MAX_OPEN: usize = 8;
 
 pub(super) type Job = Box<dyn FnOnce() + Send>;
+
+pub(super) const CLAIM_QUEUED: u8 = 0;
+pub(super) const CLAIM_DISPATCHED: u8 = 1;
+pub(super) const CLAIM_CANCELLED: u8 = 2;
+
+#[derive(Clone)]
+pub(super) struct Told {
+    pub(super) tx: Sender<Result<(), RunError>>,
+    pub(super) claim: Arc<AtomicU8>,
+}
 
 pub(super) struct Live {
     pub(super) conn: Connection,
@@ -280,33 +291,62 @@ impl Inner {
         self.emit(live, Change::LoadFailed(message.to_string()));
     }
 
-    pub(super) fn begin_prompt(self: &Arc<Self>, live: &Arc<Live>, id: &str, text: &str) {
+    pub(super) fn begin_prompt(
+        self: &Arc<Self>,
+        live: &Arc<Live>,
+        id: &str,
+        text: &str,
+        told: Option<Told>,
+    ) {
+        if let Some(told) = &told {
+            let won = told.claim.compare_exchange(
+                CLAIM_QUEUED,
+                CLAIM_DISPATCHED,
+                Ordering::SeqCst,
+                Ordering::SeqCst,
+            );
+            if won.is_err() {
+                return;
+            }
+        }
         let now = (self.now)();
+        let allowed = self.may_start.get().is_none_or(|may| may());
         let failed = {
             let mut st = live.lock();
-            match st.load_error.clone() {
-                Some(e) => {
-                    st.working = false;
-                    Some(e)
-                }
+            let failed = match st.load_error.clone() {
+                Some(e) => Some(RunError::Start(e)),
+                None if !allowed => Some(RunError::NotAllowed),
+                None => None,
+            };
+            match failed {
+                Some(_) => st.working = false,
                 None => {
                     st.last_used = now;
                     st.transcript.begin_turn(now);
-                    None
                 }
             }
+            failed
         };
         if let Some(e) = failed {
-            self.emit(live, Change::TurnEnded(Some(e)));
+            self.emit(live, Change::TurnEnded(Some(e.to_string())));
+            if let Some(told) = told {
+                let _ = told.tx.send(Err(e));
+            }
             return;
         }
         self.emit(live, Change::TurnStarted);
         let (runner, l) = (self.clone(), live.clone());
-        live.conn.request(
+        let written = live.conn.request(
             "session/prompt",
             json!({"sessionId": id, "prompt": [{"type": "text", "text": text}]}),
             Box::new(move |result| runner.turn_done(&l, result)),
         );
+        if let Some(told) = told {
+            let _ = told.tx.send(match written {
+                true => Ok(()),
+                false => Err(RunError::Start(format!("{NAME} isn't running."))),
+            });
+        }
     }
 
     pub(super) fn turn_done(&self, live: &Arc<Live>, result: Result<Value, String>) {

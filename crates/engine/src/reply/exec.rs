@@ -20,6 +20,30 @@ pub trait Pty {
     }
 }
 
+impl<P: Pty + ?Sized> Pty for &mut P {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<()> {
+        (**self).write(bytes)
+    }
+    fn wait_quiet(&mut self, quiet: Duration, timeout: Duration) -> bool {
+        (**self).wait_quiet(quiet, timeout)
+    }
+    fn screen(&mut self) -> Vec<String> {
+        (**self).screen()
+    }
+    fn cursor(&mut self) -> Option<(usize, usize)> {
+        (**self).cursor()
+    }
+    fn sleep(&mut self, duration: Duration) {
+        (**self).sleep(duration)
+    }
+    fn now_ms(&self) -> u64 {
+        (**self).now_ms()
+    }
+    fn wait_attached(&mut self, quiet: Duration, timeout: Duration, busy: Duration) -> bool {
+        (**self).wait_attached(quiet, timeout, busy)
+    }
+}
+
 pub fn wait_attached(
     pty: &mut dyn Pty,
     quiet: Duration,

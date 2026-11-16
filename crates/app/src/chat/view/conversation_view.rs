@@ -22,6 +22,7 @@ use crate::chat::data::Tool;
 use crate::chat::log::Change;
 use crate::chat::markdown_cache;
 use crate::chat::remote_control::Action;
+use crate::chat::rows::Row;
 
 pub(super) struct ConversationState {
     pub list: ListState,
@@ -133,9 +134,7 @@ pub(super) struct ConversationInput {
     pub subagent: Option<SubagentShown>,
     pub session: Option<SessionShown>,
     pub held_working: bool,
-    pub held: Option<String>,
-    pub held_note: Option<String>,
-    pub outgoing: Vec<String>,
+    pub tail: Vec<Row>,
     pub loading: bool,
     pub empty_note: Option<&'static str>,
     pub subagents: Vec<(Option<String>, String)>,
@@ -152,9 +151,7 @@ impl PartialEq for ConversationInput {
             && self.subagent == other.subagent
             && self.session == other.session
             && self.held_working == other.held_working
-            && self.held == other.held
-            && self.held_note == other.held_note
-            && self.outgoing == other.outgoing
+            && self.tail == other.tail
             && self.loading == other.loading
             && self.empty_note == other.empty_note
             && self.subagents == other.subagents
@@ -371,21 +368,8 @@ impl ChatView {
             .as_ref()
             .and_then(|o| o.conversation.clone())
             .unwrap_or_else(|| self.conversation.clone());
-        let outgoing = if self.open_subagent.is_some() {
-            Vec::new()
-        } else {
-            self.outgoing_texts()
-        };
-        let held = if self.open_subagent.is_some() {
-            None
-        } else {
-            self.held_text()
-        };
-        let held_note = held.as_ref().and_then(|_| self.held_note());
-        let empty = shown.items.is_empty()
-            && shown.queued.is_empty()
-            && held.is_none()
-            && outgoing.is_empty();
+        let tail = self.tail_rows_for(&shown);
+        let empty = shown.items.is_empty() && tail.is_empty();
         let empty_note = empty.then(|| match session.map(|s| s.tool) {
             _ if session.is_some_and(|s| crate::chat::remote::is_shell(&s.agent)) => {
                 if session.is_some_and(crate::chat::remote::waiting_for_mirror) {
@@ -416,9 +400,7 @@ impl ChatView {
                 working: s.agent.group == notchling_engine::sessions::agent::AgentGroup::Working,
             }),
             held_working: self.selected_held_working(),
-            held,
-            held_note,
-            outgoing,
+            tail,
             loading: self.loading,
             empty_note,
             subagents: crate::chat::subagent_view::links(&self.subagents),

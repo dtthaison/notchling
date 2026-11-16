@@ -177,6 +177,13 @@ pub fn reply(text: &str) -> Plan {
     }
 }
 
+pub fn reply_in(text: &str) -> Plan {
+    let mut plan = reply(text);
+    plan.steps.remove(0);
+    plan.detach.clear();
+    plan
+}
+
 pub fn interrupt(working: bool) -> Result<Plan, PlanError> {
     if !working {
         return Err(PlanError::NotWorking);

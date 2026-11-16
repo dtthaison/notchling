@@ -1,12 +1,13 @@
 use crate::acting::{Acting, ACTING_OFF};
-use crate::acting_events::{attach_why, log_down, session_ref, who, why_of, PlayError, Who};
+use crate::acting_events::{log_down, session_ref, who, PlayError, Who};
 use crate::agy_ops::AgyOps;
 use crate::catalog_ops::CatalogService;
 use crate::codex_ops::CodexOps;
-use crate::held_guard::{FromFiles, Guarded, Rest};
 use crate::hook_ops::Parents;
 use crate::late_emit::Events;
+use crate::outbox_ops::OutboxOps;
 use crate::prompts::{fit_list, question_json, Kind, Prompt, PromptStore};
+use crate::typing_locks::TypingLocks;
 use notchling_engine::control::{Command, LaunchError, LaunchOutput, Launcher, PtyScript};
 use notchling_engine::reply::exec::{
     execute_clearing, Clearing, Failure, Outcome, Pty, QueueLog, ScreenCheck, TranscriptLog,
@@ -19,14 +20,13 @@ use notchling_engine::reply::read::read_question;
 use notchling_engine::sessions::jobs::config_dir_for_job;
 use notchling_engine::sessions::{Agent, AgentGroup, AgentTarget, Roots};
 use notchling_engine::terminal::input_box;
-use notchling_events::kinds::agents::{AnswerKind, HeldThen, PromptKind};
-use notchling_events::kinds::choices::{DoneOrFailed, FailWhy};
+use notchling_events::kinds::agents::{AnswerKind, PromptKind};
+use notchling_events::kinds::choices::DoneOrFailed;
 use notchling_events::{Ref, Session};
 use notchling_local_api::{ops, topics, ApiError, Caller, ClientKind, ErrorCode, OpSpec, Tier};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -72,14 +72,18 @@ pub trait Room: Send + Sync {
 }
 
 pub trait Attacher: Send + Sync {
-    fn attach(&self, job: &str, config_dir: Option<&str>) -> Result<Box<dyn Pty>, ApiError>;
+    fn attach(&self, job: &str, config_dir: Option<&str>) -> Result<Box<dyn Pty + Send>, ApiError>;
     fn screen_check(&self) -> &dyn ScreenCheck;
 }
 
 pub struct NoTerminal;
 
 impl Attacher for NoTerminal {
-    fn attach(&self, _job: &str, _config_dir: Option<&str>) -> Result<Box<dyn Pty>, ApiError> {
+    fn attach(
+        &self,
+        _job: &str,
+        _config_dir: Option<&str>,
+    ) -> Result<Box<dyn Pty + Send>, ApiError> {
         Err(unimplemented("this daemon types into no session"))
     }
     fn screen_check(&self) -> &dyn ScreenCheck {
@@ -123,10 +127,10 @@ pub struct ActingOps {
     pub(crate) sessions: Arc<Mutex<Value>>,
     pub(crate) roots: Roots,
     pub(crate) room: Arc<dyn Room>,
-    attacher: Box<dyn Attacher>,
+    pub(crate) attacher: Box<dyn Attacher>,
     pub(crate) launcher: Arc<dyn Launcher>,
     pub(crate) pause: Pause,
-    typing: Mutex<()>,
+    typing: TypingLocks,
     pub(crate) tick: Duration,
     pub(crate) parent_of: Parents,
     stopping: Mutex<HashMap<String, Instant>>,
@@ -134,11 +138,10 @@ pub struct ActingOps {
     agy: OnceLock<Arc<AgyOps>>,
     codex: OnceLock<Arc<CodexOps>>,
     catalog: OnceLock<Arc<CatalogService>>,
+    outbox: OnceLock<Arc<OutboxOps>>,
     screen_file: Option<PathBuf>,
-    reply_screen_file: Option<PathBuf>,
-    pub(crate) held: crate::held_ops::HeldState,
+    pub(crate) reply_screen_file: Option<PathBuf>,
     pub(crate) attempts: crate::reply_attempts::Attempts,
-    pub(crate) rest: Box<dyn Rest>,
     pub(crate) events: Option<Events>,
 }
 
@@ -154,13 +157,12 @@ impl ActingOps {
             acting,
             prompts: PromptStore::default(),
             sessions,
-            rest: Box::new(FromFiles::new(roots.clone())),
             roots,
             room,
             attacher,
             launcher: Arc::new(NoLaunch),
             pause: Box::new(|ms| std::thread::sleep(Duration::from_millis(ms))),
-            typing: Mutex::new(()),
+            typing: TypingLocks::new(),
             tick: Duration::from_millis(250),
             parent_of: Box::new(crate::hook::parent_pid),
             stopping: Mutex::new(HashMap::new()),
@@ -168,9 +170,9 @@ impl ActingOps {
             agy: OnceLock::new(),
             codex: OnceLock::new(),
             catalog: OnceLock::new(),
+            outbox: OnceLock::new(),
             screen_file: None,
             reply_screen_file: None,
-            held: crate::held_ops::HeldState::default(),
             attempts: crate::reply_attempts::Attempts::default(),
             events: None,
         }
@@ -202,6 +204,14 @@ impl ActingOps {
         let _ = self.catalog.set(catalog);
     }
 
+    pub fn attach_outbox(&self, outbox: Arc<OutboxOps>) {
+        let _ = self.outbox.set(outbox);
+    }
+
+    pub(crate) fn outbox(&self) -> Option<&Arc<OutboxOps>> {
+        self.outbox.get()
+    }
+
     pub(crate) fn catalog(&self) -> &CatalogService {
         self.catalog
             .get_or_init(|| Arc::new(CatalogService::built_in()))
@@ -215,12 +225,6 @@ impl ActingOps {
     #[cfg(test)]
     pub(crate) fn age_refusals(&self, by: Duration) {
         age(&self.refused, by);
-    }
-
-    #[cfg(test)]
-    pub(crate) fn with_rest(mut self, rest: Box<dyn Rest>) -> ActingOps {
-        self.rest = rest;
-        self
     }
 
     pub fn with_launcher(mut self, launcher: Arc<dyn Launcher>, pause: Pause) -> ActingOps {
@@ -323,6 +327,42 @@ impl ActingOps {
             .unwrap_or_default()
     }
 
+    pub(crate) fn typing_locks(&self) -> &TypingLocks {
+        &self.typing
+    }
+
+    pub(crate) fn attach(&self, agent: &Agent) -> Result<Box<dyn Pty + Send>, ApiError> {
+        let AgentTarget::Job(job) = &agent.target else {
+            return Err(bad("this session takes no replies"));
+        };
+        let config_dir = config_dir_for_job(&self.roots, job).or_else(|| agent.config_dir.clone());
+        self.attacher.attach(job, config_dir.as_deref())
+    }
+
+    fn typing_lock(&self, agent: &Agent) -> Arc<Mutex<()>> {
+        self.typing_locks().for_job(&typing_key(agent))
+    }
+
+    fn locked<R>(&self, agent: &Agent, then: impl FnOnce(&Agent) -> R) -> R {
+        let mut current = agent.clone();
+        loop {
+            let lock = self.typing_lock(&current);
+            let one = lock.lock().unwrap_or_else(|e| e.into_inner());
+            let fresh = self
+                .agents_now()
+                .into_iter()
+                .find(|a| a.id == current.id)
+                .unwrap_or_else(|| current.clone());
+            if typing_key(&fresh) == typing_key(&current) {
+                let result = then(&fresh);
+                drop(one);
+                return result;
+            }
+            drop(one);
+            current = fresh;
+        }
+    }
+
     pub(crate) fn agent(&self, args: &Value) -> Result<Agent, ApiError> {
         let id = text_arg(args, "id")?;
         let list = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
@@ -339,39 +379,7 @@ impl ActingOps {
         plan: &Plan,
         log: &mut dyn QueueLog,
     ) -> Result<Outcome, PlayError> {
-        let _one = self.typing.lock().unwrap_or_else(|e| e.into_inner());
-        self.play_locked(agent, plan, log, None)
-    }
-
-    pub(crate) fn play_reply(
-        &self,
-        agent: &Agent,
-        text: &str,
-        clear_box: bool,
-    ) -> Result<Outcome, PlayError> {
-        self.play_clearing(agent, &plan::reply(text), &mut NoLog, clear_box)
-    }
-
-    pub(crate) fn play_clearing(
-        &self,
-        agent: &Agent,
-        plan: &Plan,
-        log: &mut dyn QueueLog,
-        clear_box: bool,
-    ) -> Result<Outcome, PlayError> {
-        let _one = self.typing.lock().unwrap_or_else(|e| e.into_inner());
-        self.play_inner(agent, plan, log, None, None, clear_box)
-    }
-
-    pub(crate) fn play_guarded(
-        &self,
-        agent: &Agent,
-        plan: &Plan,
-        log: &mut dyn QueueLog,
-        guard: &dyn Fn() -> bool,
-    ) -> Result<Outcome, PlayError> {
-        let _one = self.typing.lock().unwrap_or_else(|e| e.into_inner());
-        self.play_inner(agent, plan, log, None, Some(guard), false)
+        self.locked(agent, |agent| self.play_locked(agent, plan, log, None))
     }
 
     fn play_locked(
@@ -381,7 +389,7 @@ impl ActingOps {
         log: &mut dyn QueueLog,
         keep: Option<&Expected>,
     ) -> Result<Outcome, PlayError> {
-        self.play_inner(agent, plan, log, keep, None, false)
+        self.play_inner(agent, plan, log, keep)
     }
 
     fn play_inner(
@@ -390,8 +398,6 @@ impl ActingOps {
         plan: &Plan,
         log: &mut dyn QueueLog,
         keep: Option<&Expected>,
-        guard: Option<&dyn Fn() -> bool>,
-        clear_box: bool,
     ) -> Result<Outcome, PlayError> {
         if plan.is_empty() {
             return Ok(Outcome::default());
@@ -404,11 +410,7 @@ impl ActingOps {
         let pty = self
             .attacher
             .attach(&job, config_dir.as_deref())
-            .map_err(|err| PlayError {
-                why: attach_why(&err),
-                err,
-                typed: false,
-            })?;
+            .map_err(|err| PlayError { err })?;
         let mut trail = Vec::new();
         let began = now_ms();
         let clearing = Clearing {
@@ -416,32 +418,11 @@ impl ActingOps {
                 Some(_) => self.attempts.recent(&agent.id, began),
                 None => Vec::new(),
             },
-            any: clear_box,
+            any: false,
         };
         let check = self.attacher.screen_check();
-        let refused = AtomicBool::new(false);
-        let typed = AtomicBool::new(false);
-        let mut pty: Box<dyn Pty + '_> = match guard {
-            Some(guard) => Box::new(Guarded {
-                inner: pty,
-                guard,
-                refused: &refused,
-                typed: &typed,
-                checked: false,
-            }),
-            None => pty,
-        };
+        let mut pty = pty;
         let played = execute_clearing(plan, pty.as_mut(), check, log, &mut trail, &clearing);
-        if refused.load(Ordering::SeqCst) {
-            return Err(PlayError {
-                why: FailWhy::NotIdle,
-                err: ApiError::new(
-                    ErrorCode::Failed,
-                    "The session started a new turn, so nothing was typed.",
-                ),
-                typed: false,
-            });
-        }
         if let (Err(failure), Some(expect), Some(file)) = (&played, keep, &self.screen_file) {
             if failure.is_permission_refusal() {
                 let head = [
@@ -480,44 +461,8 @@ impl ActingOps {
                 }
                 err = err.with_data(data);
             }
-            PlayError {
-                why: why_of(&f),
-                typed: typed.load(Ordering::SeqCst),
-                err,
-            }
+            PlayError { err }
         })
-    }
-
-    fn reply(&self, caller: &Caller, args: &Value) -> Result<Value, ApiError> {
-        let text = text_arg(args, "text")?;
-        if text.trim().is_empty() {
-            return Err(bad("the reply is empty"));
-        }
-        let agent = self.agent(args)?;
-        let via = who(caller, args).via;
-        let session = session_ref(&agent);
-        let chars = text.chars().count();
-        let by_agent = caller.tier == Tier::Agent;
-        if by_agent && !self.note_reply(session.clone(), via, chars, None, None, true) {
-            return Err(log_down());
-        }
-        let started = Instant::now();
-        let clear_box = clear_box_arg(args)?;
-        let sent = self.reply_or_hold(&agent, text, crate::held_ops::now_ms(), clear_box);
-        match &sent {
-            Ok(value) if value.get("state").and_then(Value::as_str) == Some("queued") => {
-                self.note_held(session, HeldThen::SentAtTurnEnd);
-            }
-            Ok(_) if !by_agent => {
-                let waited = u64::try_from(started.elapsed().as_millis()).ok();
-                self.note_reply(session, via, chars, None, waited, false);
-            }
-            Ok(_) => {}
-            Err(failure) => {
-                self.note_reply(session, via, chars, Some(failure.why), None, false);
-            }
-        }
-        sent.map_err(ApiError::from)
     }
 
     fn controlled(&self, caller: &Caller, op: &str, args: &Value) -> Result<Value, ApiError> {
@@ -549,27 +494,28 @@ impl ActingOps {
 
     fn interrupt(&self, args: &Value) -> Result<Value, ApiError> {
         let id = text_arg(args, "id")?.to_string();
-        let _one = self.typing.lock().unwrap_or_else(|e| e.into_inner());
-        let agent = self.agent(args)?;
-        let working = agent.group == AgentGroup::Working;
-        {
-            let mut marks = self.stopping.lock().unwrap_or_else(|e| e.into_inner());
-            marks.retain(|_, at| at.elapsed() < STOPPING_FOR);
-            if working && marks.contains_key(&id) {
-                return Ok(json!({"sent": false, "stopping": true}));
+        let first = self.agent(args)?;
+        self.locked(&first, |agent| {
+            let working = agent.group == AgentGroup::Working;
+            {
+                let mut marks = self.stopping.lock().unwrap_or_else(|e| e.into_inner());
+                marks.retain(|_, at| at.elapsed() < STOPPING_FOR);
+                if working && marks.contains_key(&id) {
+                    return Ok(json!({"sent": false, "stopping": true}));
+                }
             }
-        }
-        let plan = plan::interrupt(working).map_err(|e| match e {
-            PlanError::NotWorking => bad(
-                "the session isn't working, so there's nothing to stop (Esc on an idle session opens rewind)",
-            ),
-        })?;
-        self.play_locked(&agent, &plan, &mut NoLog, None)?;
-        self.stopping
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .insert(id, Instant::now());
-        Ok(json!({"sent": true}))
+            let plan = plan::interrupt(working).map_err(|e| match e {
+                PlanError::NotWorking => bad(
+                    "the session isn't working, so there's nothing to stop (Esc on an idle session opens rewind)",
+                ),
+            })?;
+            self.play_locked(agent, &plan, &mut NoLog, None)?;
+            self.stopping
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert(id, Instant::now());
+            Ok(json!({"sent": true}))
+        })
     }
 
     fn take_back(&self, args: &Value) -> Result<Value, ApiError> {
@@ -667,15 +613,14 @@ impl ActingOps {
         }
         let expect = expect_arg(args)?;
         let agent = self.agent(args)?;
-        {
-            let _one = self.typing.lock().unwrap_or_else(|e| e.into_inner());
+        self.locked(&agent, |agent| {
             self.play_locked(
-                &agent,
+                agent,
                 &plan::permission(decision, &expect),
                 &mut NoLog,
                 Some(&expect),
-            )?;
-        }
+            )
+        })?;
         self.note_answered(
             session_ref(&agent),
             PromptKind::Permission,
@@ -752,22 +697,28 @@ impl ActingOps {
             ));
         }
         let agent = self.agent(args)?;
-        let job = match &agent.target {
-            AgentTarget::Job(job) if agent.can_reply() => job.clone(),
-            _ => return Err(bad("this session has no terminal to read")),
-        };
-        let _one = self.typing.lock().unwrap_or_else(|e| e.into_inner());
-        let config_dir = config_dir_for_job(&self.roots, &job).or_else(|| agent.config_dir.clone());
-        let mut pty = self.attacher.attach(&job, config_dir.as_deref())?;
-        let read = read_question(pty.as_mut(), &job)
-            .map_err(|f| ApiError::new(ErrorCode::Failed, f.to_string()))?;
-        Ok(match read {
-            Some(q) => {
-                let mut out = question_json(&q);
-                out["id"] = json!(q.tool_use_id);
-                out
-            }
-            None => json!({"items": []}),
+        let no_terminal = || bad("this session has no terminal to read");
+        if !matches!(&agent.target, AgentTarget::Job(_) if agent.can_reply()) {
+            return Err(no_terminal());
+        }
+        self.locked(&agent, |agent| {
+            let job = match &agent.target {
+                AgentTarget::Job(now) if agent.can_reply() => now.clone(),
+                _ => return Err(no_terminal()),
+            };
+            let config_dir =
+                config_dir_for_job(&self.roots, &job).or_else(|| agent.config_dir.clone());
+            let mut pty = self.attacher.attach(&job, config_dir.as_deref())?;
+            let read = read_question(pty.as_mut(), &job)
+                .map_err(|f| ApiError::new(ErrorCode::Failed, f.to_string()))?;
+            Ok(match read {
+                Some(q) => {
+                    let mut out = question_json(&q);
+                    out["id"] = json!(q.tool_use_id);
+                    out
+                }
+                None => json!({"items": []}),
+            })
         })
     }
 }
@@ -802,18 +753,10 @@ impl QueueLog for NoLog {
 
 pub const BOX_SHOWN_MAX: usize = 1_000;
 
-fn shown_box(text: &str) -> String {
+pub(crate) fn shown_box(text: &str) -> String {
     match text.char_indices().nth(BOX_SHOWN_MAX) {
         Some((end, _)) => format!("{}…", &text[..end]),
         None => text.to_owned(),
-    }
-}
-
-fn clear_box_arg(args: &Value) -> Result<bool, ApiError> {
-    match args.get("clear_box") {
-        None | Some(Value::Null) => Ok(false),
-        Some(Value::Bool(on)) => Ok(*on),
-        Some(_) => Err(bad("clear_box is true or false")),
     }
 }
 
@@ -895,18 +838,33 @@ pub(crate) fn now_ms() -> i64 {
     notchling_engine::reply::popall::now_ms()
 }
 
-fn keep_screen(file: &Path, head: &[String], lines: &[String]) {
+fn typing_key(agent: &Agent) -> String {
+    match &agent.target {
+        AgentTarget::Job(job) => job.clone(),
+        _ => agent.id.clone(),
+    }
+}
+
+pub(crate) fn keep_screen(file: &Path, head: &[String], lines: &[String]) {
     use std::io::Write;
     use std::os::unix::fs::OpenOptionsExt;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static WRITES: AtomicU64 = AtomicU64::new(0);
     if let Some(dir) = file.parent() {
         let _ = std::fs::create_dir_all(dir);
     }
-    let _ = std::fs::remove_file(file);
+    let mut name = file.as_os_str().to_os_string();
+    name.push(format!(
+        ".{}.{}.tmp",
+        std::process::id(),
+        WRITES.fetch_add(1, Ordering::Relaxed)
+    ));
+    let temp = PathBuf::from(name);
     let Ok(mut out) = std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
         .mode(0o600)
-        .open(file)
+        .open(&temp)
     else {
         return;
     };
@@ -916,5 +874,9 @@ fn keep_screen(file: &Path, head: &[String], lines: &[String]) {
     let _ = writeln!(out, "----- screen ({} lines) -----", lines.len());
     for line in lines {
         let _ = writeln!(out, "{line}");
+    }
+    drop(out);
+    if std::fs::rename(&temp, file).is_err() {
+        let _ = std::fs::remove_file(&temp);
     }
 }

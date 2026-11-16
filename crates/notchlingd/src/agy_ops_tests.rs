@@ -8,10 +8,10 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Mutex;
 use std::time::Instant;
 
-const RECORDING: &str =
+pub(crate) const RECORDING: &str =
     include_str!("../../../legacy/macos/Tests/NotchlingTests/Fixtures/acp-agy.jsonl");
-const SESSION: &str = "d67413c2-a0f3-4381-8a8e-e98b541d6d76";
-const ROW: &str = "agy:d67413c2-a0f3-4381-8a8e-e98b541d6d76";
+pub(crate) const SESSION: &str = "d67413c2-a0f3-4381-8a8e-e98b541d6d76";
+pub(crate) const ROW: &str = "agy:d67413c2-a0f3-4381-8a8e-e98b541d6d76";
 
 fn scratch(tag: &str) -> PathBuf {
     static N: AtomicU32 = AtomicU32::new(0);
@@ -65,16 +65,26 @@ fn civil(days: i64) -> (i64, i64, i64) {
     (yoe + era * 400 + i64::from(m <= 2), m, d)
 }
 
-struct Rig {
-    root: PathBuf,
-    copies: PathBuf,
-    ops: AgyOps,
-    room: Arc<FakeRoom>,
-    spawner: Arc<FakeSpawner>,
-    folder: PathBuf,
+pub(crate) struct Rig {
+    pub(crate) root: PathBuf,
+    pub(crate) copies: PathBuf,
+    pub(crate) ops: Arc<AgyOps>,
+    pub(crate) room: Arc<FakeRoom>,
+    pub(crate) spawner: Arc<FakeSpawner>,
+    pub(crate) folder: PathBuf,
+    pub(crate) acting: Arc<Acting>,
 }
 
-fn rig_with(on: bool, spawner: FakeSpawner, binary: Option<&str>) -> Rig {
+pub(crate) fn rig_with(on: bool, spawner: FakeSpawner, binary: Option<&str>) -> Rig {
+    rig_full(on, spawner, binary, Duration::from_secs(10))
+}
+
+pub(crate) fn rig_full(
+    on: bool,
+    spawner: FakeSpawner,
+    binary: Option<&str>,
+    dispatch_wait: Duration,
+) -> Rig {
     let folder = scratch("work");
     let room = Arc::new(FakeRoom::default());
     let acting = Arc::new(Acting::in_memory(on));
@@ -91,29 +101,31 @@ fn rig_with(on: bool, spawner: FakeSpawner, binary: Option<&str>) -> Rig {
             home: scratch("home"),
             binary: binary.map(String::from),
             start_wait: Duration::from_secs(10),
+            dispatch_wait,
             timing: Timing::default(),
         },
     );
     Rig {
         root,
         copies,
-        ops,
+        ops: Arc::new(ops),
         room,
         spawner,
         folder,
+        acting,
     }
 }
 
-fn rig(on: bool) -> Rig {
+pub(crate) fn rig(on: bool) -> Rig {
     rig_with(on, FakeSpawner::replaying(RECORDING), Some("/fake/agy"))
 }
 
 impl Rig {
-    fn wait(&self, event: &str) -> Value {
+    pub(crate) fn wait(&self, event: &str) -> Value {
         self.wait_n(event, 1).remove(0)
     }
 
-    fn wait_n(&self, event: &str, n: usize) -> Vec<Value> {
+    pub(crate) fn wait_n(&self, event: &str, n: usize) -> Vec<Value> {
         let end = Instant::now() + Duration::from_secs(10);
         loop {
             let found = self.room.named(event);
@@ -125,7 +137,7 @@ impl Rig {
         }
     }
 
-    fn change(&self, change: &str) {
+    pub(crate) fn change(&self, change: &str) {
         let end = Instant::now() + Duration::from_secs(10);
         while !self
             .room
@@ -138,15 +150,15 @@ impl Rig {
         }
     }
 
-    fn call(&self, op: &str, args: Value) -> Result<Value, ApiError> {
+    pub(crate) fn call(&self, op: &str, args: Value) -> Result<Value, ApiError> {
         self.ops.call(op, &args)
     }
 
-    fn process(&self) -> FakeHandle {
+    pub(crate) fn process(&self) -> FakeHandle {
         self.spawner.spawned().remove(0)
     }
 
-    fn loaded(&self) -> FakeHandle {
+    pub(crate) fn loaded(&self) -> FakeHandle {
         self.call(OPEN, json!({"id": ROW})).unwrap();
         self.change("loaded");
         self.process()
@@ -251,7 +263,7 @@ fn the_conversation_read_works_with_acting_off_and_follows_the_open_runner() {
     );
     use crate::daemon::Ops;
     use notchling_local_api::Handler;
-    let ops = Ops::new(Arc::new(Mutex::new(json!([])))).with_agy(Arc::new(rig.ops));
+    let ops = Ops::new(Arc::new(Mutex::new(json!([])))).with_agy(rig.ops);
     assert_eq!(ops.spec(CONVERSATION), Some(OpSpec::APP));
     let read = ops.call(&app(), CONVERSATION, &json!({"id": ROW})).unwrap();
     assert_eq!(read["open"], true);
@@ -554,7 +566,7 @@ fn the_daemons_handler_routes_them_with_their_tiers() {
     use crate::daemon::Ops;
     use notchling_local_api::Handler;
     let rig = rig(false);
-    let ops = Ops::new(Arc::new(Mutex::new(json!([])))).with_agy(Arc::new(rig.ops));
+    let ops = Ops::new(Arc::new(Mutex::new(json!([])))).with_agy(rig.ops);
     assert_eq!(ops.spec(SESSIONS), Some(OpSpec::AGENT));
     assert_eq!(ops.spec(SEND), Some(OpSpec::APP));
     assert!(ops.call(&app(), SESSIONS, &json!({})).is_ok());

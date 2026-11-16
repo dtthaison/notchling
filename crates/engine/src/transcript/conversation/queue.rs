@@ -1,3 +1,4 @@
+use crate::transcript::sent::joined;
 use crate::transcript::typed::typed_prompt;
 use crate::transcript::util::str_of;
 use serde_json::Value;
@@ -6,6 +7,7 @@ use serde_json::Value;
 pub(super) struct Queue {
     items: Vec<String>,
     dequeued: Option<(usize, String)>,
+    batch: Vec<String>,
 }
 
 impl Queue {
@@ -16,11 +18,17 @@ impl Queue {
     pub(super) fn operation(&mut self, obj: &Value) {
         let content = str_of(obj, "content").unwrap_or("").to_string();
         self.dequeued = None;
-        match str_of(obj, "operation") {
+        let operation = str_of(obj, "operation");
+        if operation != Some("dequeue") {
+            self.batch.clear();
+        }
+        match operation {
             Some("enqueue") => self.items.push(content),
             Some("dequeue") => {
                 if !self.items.is_empty() {
-                    self.dequeued = Some((0, self.items.remove(0)));
+                    let entry = self.items.remove(0);
+                    self.batch.push(entry.clone());
+                    self.dequeued = Some((0, entry));
                 }
             }
             Some("remove" | "popAll") => {
@@ -30,6 +38,14 @@ impl Queue {
             }
             _ => {}
         }
+    }
+
+    pub(super) fn end_batch(&mut self) {
+        self.batch.clear();
+    }
+
+    pub(super) fn merged(&mut self, text: &str) -> bool {
+        joined(&std::mem::take(&mut self.batch), text)
     }
 
     pub(super) fn user_line(&mut self, line: &Value) {

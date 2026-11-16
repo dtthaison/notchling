@@ -6,6 +6,7 @@ use std::time::{Duration, Instant};
 
 use notchling_engine::catalog::{ModelInfo, Tool as CatalogTool};
 use notchling_engine::sessions::Agent;
+use notchling_engine::transcript::model::Conversation;
 use notchling_local_api::{
     ensure_daemon, ops, topics, Client, ClientError, ClientKind, ConnectOptions, Event, Started,
     SOCKET_NAME,
@@ -13,6 +14,7 @@ use notchling_local_api::{
 use serde_json::Value;
 
 use crate::chat::data::DataRoot;
+use crate::chat::outbox::{Bubble, OutboxFeed, OutboxRow};
 use crate::tools::live::ToolLive;
 
 pub type Starter = Arc<dyn Fn(&Path) -> Result<Started, ClientError> + Send + Sync>;
@@ -87,6 +89,7 @@ pub struct View {
     pub shells: Vec<Agent>,
     pub prompts: Option<Vec<Value>>,
     pub tools: ToolLive,
+    pub outbox: OutboxFeed,
     pub answered: HashSet<String>,
     pub link: Link,
     pub generation: u64,
@@ -115,6 +118,7 @@ struct State {
     shells: Vec<Agent>,
     prompts: Option<Vec<Value>>,
     tools: ToolLive,
+    outbox: OutboxFeed,
     catalog: HashMap<CatalogTool, Vec<ModelInfo>>,
     catalog_generation: u64,
     answered: HashSet<String>,
@@ -186,13 +190,39 @@ impl Shared {
                     self.set_prompts(prompts);
                 }
             }
-            topics::CODEX_TURN | topics::SESSION_CHANGED | topics::SESSION_HELD => {
+            topics::OUTBOX_CHANGED | topics::OUTBOX_REMOVED => {
+                let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+                if state.outbox.apply(&event, now_ms()) {
+                    state.generation += 1;
+                }
+            }
+            topics::CODEX_TURN | topics::SESSION_CHANGED => {
                 let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
                 if state.tools.apply(&event) {
                     state.generation += 1;
                 }
             }
             _ => {}
+        }
+    }
+
+    fn reseed_outbox(&self, fresh: OutboxFeed) {
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        let mut next = state.outbox.clone();
+        next.reseed_rows(fresh);
+        if state.outbox != next {
+            state.outbox = next;
+            state.generation += 1;
+        }
+    }
+
+    fn clear_outbox_rows(&self) {
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        let mut next = state.outbox.clone();
+        next.clear_rows();
+        if state.outbox != next {
+            state.outbox = next;
+            state.generation += 1;
         }
     }
 
@@ -226,6 +256,7 @@ impl SessionSource {
                     shells: Vec::new(),
                     prompts: None,
                     tools: ToolLive::default(),
+                    outbox: OutboxFeed::default(),
                     catalog: HashMap::new(),
                     catalog_generation: 0,
                     answered: HashSet::new(),
@@ -264,6 +295,7 @@ impl SessionSource {
             shells: state.shells.clone(),
             prompts: state.prompts.clone(),
             tools: state.tools.clone(),
+            outbox: state.outbox.clone(),
             answered: state.answered.clone(),
             link: state.link,
             generation: state.generation,
@@ -287,6 +319,35 @@ impl SessionSource {
     pub fn held(&self) -> (Option<Vec<Value>>, HashSet<String>) {
         let state = self.shared.state.lock().unwrap_or_else(|e| e.into_inner());
         (state.prompts.clone(), state.answered.clone())
+    }
+
+    pub fn outbox_bubbles(&self, agent: &Agent) -> Vec<Bubble> {
+        let state = self.shared.state.lock().unwrap_or_else(|e| e.into_inner());
+        state.outbox.bubbles_for(agent)
+    }
+
+    pub fn outbox_covers(&self, id: &str) -> bool {
+        let state = self.shared.state.lock().unwrap_or_else(|e| e.into_inner());
+        state.outbox.covers(id)
+    }
+
+    pub fn outbox_rows(&self, agent: &Agent) -> Vec<OutboxRow> {
+        let state = self.shared.state.lock().unwrap_or_else(|e| e.into_inner());
+        state.outbox.rows_for(agent).to_vec()
+    }
+
+    pub fn settle_outbox_for(&self, agent: &Agent, conversation: &Conversation) {
+        let mut state = self.shared.state.lock().unwrap_or_else(|e| e.into_inner());
+        if state.outbox.settle_for(agent, conversation, now_ms()) {
+            state.generation += 1;
+        }
+    }
+
+    pub fn settle_outbox(&self, session: &str, conversation: &Conversation) {
+        let mut state = self.shared.state.lock().unwrap_or_else(|e| e.into_inner());
+        if state.outbox.settle(session, conversation, now_ms()) {
+            state.generation += 1;
+        }
     }
 
     pub fn mark_answered(&self, key: &str) {
@@ -317,9 +378,10 @@ fn run(config: SourceConfig, shared: &Shared) {
     while !shared.stopped() {
         let mut link = Link::Down;
         match connect(&config, &mut tried_start) {
-            Ok((client, agents, shells, prompts)) => {
+            Ok((client, agents, shells, prompts, outbox)) => {
                 shared.set_prompts(prompts);
                 shared.set_shells(shells);
+                shared.reseed_outbox(outbox);
                 shared.set(Link::Daemon, Some(agents));
                 failures = 0;
                 follow(client, shared);
@@ -335,13 +397,12 @@ fn run(config: SourceConfig, shared: &Shared) {
         }
         shared.set_prompts(None);
         shared.set_shells(Vec::new());
+        shared.clear_outbox_rows();
         shared.reset_tools();
         shared.set(link, None);
         sleep(config.backoff.delay(failures.saturating_sub(1)), shared);
     }
 }
-
-type Connected = (Client, Vec<Agent>, Vec<Agent>, Option<Vec<Value>>);
 
 pub fn remote_shells(rows: Vec<Agent>) -> Vec<Agent> {
     rows.into_iter()
@@ -353,6 +414,14 @@ pub fn split_shells(rows: Vec<Agent>) -> (Vec<Agent>, Vec<Agent>) {
     rows.into_iter()
         .partition(|a| !(crate::chat::remote::is_remote(a) && crate::chat::remote::is_shell(a)))
 }
+
+type Connected = (
+    Client,
+    Vec<Agent>,
+    Vec<Agent>,
+    Option<Vec<Value>>,
+    OutboxFeed,
+);
 
 fn connect(config: &SourceConfig, tried_start: &mut bool) -> Result<Connected, ClientError> {
     let options = ConnectOptions {
@@ -380,9 +449,22 @@ fn connect(config: &SourceConfig, tried_start: &mut bool) -> Result<Connected, C
         Ok(_) | Err(ClientError::Api(_)) => {}
         Err(e) => return Err(e),
     }
+    let outboxed = match client.subscribe(&[topics::OUTBOX]) {
+        Ok(_) => true,
+        Err(ClientError::Api(_)) => false,
+        Err(e) => return Err(e),
+    };
     let (mut agents, mut shells) = split_shells(
         client.call_as::<Vec<Agent>>(ops::SESSIONS_LIST, serde_json::json!({"remote": "shell"}))?,
     );
+    let mut outbox = OutboxFeed::default();
+    if outboxed {
+        match client.call(ops::OUTBOX_LIST, serde_json::json!({})) {
+            Ok(Value::Array(list)) => outbox.seed(&list),
+            Ok(_) | Err(ClientError::Api(_)) => {}
+            Err(e) => return Err(e),
+        }
+    }
     let mut prompts = match followed {
         true => match client.call(ops::PROMPTS_LIST, serde_json::json!({})) {
             Ok(Value::Array(list)) => Some(list),
@@ -403,6 +485,9 @@ fn connect(config: &SourceConfig, tried_start: &mut bool) -> Result<Connected, C
                     shells = remote_shells(rows);
                 }
             }
+            topics::OUTBOX_CHANGED | topics::OUTBOX_REMOVED => {
+                outbox.apply(&event, now_ms());
+            }
             _ => {
                 if let Some(list) = &mut prompts {
                     held_change(list, &event);
@@ -410,7 +495,13 @@ fn connect(config: &SourceConfig, tried_start: &mut bool) -> Result<Connected, C
             }
         }
     }
-    Ok((client, agents, shells, prompts))
+    Ok((client, agents, shells, prompts, outbox))
+}
+
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis() as i64)
 }
 
 fn held_change(list: &mut Vec<Value>, event: &Event) {
@@ -503,3 +594,7 @@ mod tests;
 #[cfg(all(test, unix))]
 #[path = "session_source_prompts_tests.rs"]
 mod prompts_tests;
+
+#[cfg(all(test, unix))]
+#[path = "session_source_outbox_tests.rs"]
+mod outbox_tests;

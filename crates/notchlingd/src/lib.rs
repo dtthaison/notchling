@@ -36,6 +36,7 @@ pub mod cluster_move_run;
 pub mod cluster_move_snaps;
 pub mod cluster_node;
 pub mod cluster_ops;
+pub mod cluster_outbox;
 pub mod cluster_prompts;
 mod cluster_prompts_book;
 mod cluster_prompts_clean;
@@ -57,8 +58,6 @@ pub mod daemon_wiring;
 pub mod delegate_cli;
 pub mod every_session;
 pub mod git_ops;
-mod held_guard;
-pub mod held_ops;
 pub mod hook;
 pub mod hook_fence;
 pub mod hook_ops;
@@ -88,6 +87,14 @@ pub mod log_rotate;
 pub mod log_start;
 pub mod op_group;
 pub mod op_kinds;
+pub mod outbox_courier;
+pub mod outbox_inbox;
+pub mod outbox_ops;
+pub mod outbox_postman;
+mod outbox_rows;
+pub mod outbox_runners;
+mod outbox_settle;
+pub mod outbox_verify;
 pub mod pages_cli;
 pub mod pages_ops;
 pub mod prompts;
@@ -97,6 +104,7 @@ mod providers_gate;
 pub mod providers_ops;
 pub mod quiet_ops;
 mod reply_attempts;
+mod reply_outbox;
 mod reply_screen;
 pub mod service;
 pub mod settings_asks;
@@ -116,6 +124,8 @@ mod snap_restore_fs;
 pub mod snap_run;
 pub mod snap_send;
 pub mod switches;
+mod turn_gate;
+pub mod typing_locks;
 pub mod vault_args;
 pub mod vault_caller;
 pub mod vault_cli;
@@ -184,12 +194,6 @@ mod git_ops_branch_tests;
 #[cfg(test)]
 mod git_ops_tests;
 #[cfg(test)]
-mod held_kept_tests;
-#[cfg(test)]
-mod held_ops_tests;
-#[cfg(test)]
-mod held_race_tests;
-#[cfg(test)]
 mod hook_fence_tests;
 #[cfg(test)]
 mod hook_ops_tests;
@@ -229,6 +233,8 @@ pub(crate) mod log_checks_tests;
 mod log_ops_tests;
 #[cfg(test)]
 mod log_retention_tests;
+#[cfg(test)]
+mod outbox_testkit;
 #[cfg(test)]
 mod pages_ops_tests;
 #[cfg(test)]

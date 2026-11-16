@@ -28,7 +28,8 @@ fn user(text: &str) -> Row {
         images: 0,
         queued: false,
         sending: false,
-        note: None,
+        outbox: None,
+        merged: false,
     }
 }
 

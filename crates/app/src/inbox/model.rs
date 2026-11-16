@@ -36,6 +36,8 @@ fn decided(answer: Option<ActionId>) -> &'static str {
         Some(ActionId::Cancel) => "Cancelled",
         Some(ActionId::Done) => "Done",
         Some(ActionId::Open) => "Saved",
+        Some(ActionId::Send) => "Sent",
+        Some(ActionId::Discard) => "Discarded",
         None => "Answered",
     }
 }

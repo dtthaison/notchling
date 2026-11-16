@@ -83,3 +83,70 @@ fn a_session_file_of_a_dead_process_is_not_the_live_status() {
     let row = job_row(&roots(&dir), &Probes::from_proc(), "be50d36a").unwrap();
     assert!(!row.at_prompt);
 }
+
+#[test]
+fn job_state_reads_the_job_file_and_knows_a_folder_without_one() {
+    let dir = TempDir::new("fresh-state");
+    assert_eq!(job_state(&roots(&dir), "be50d36a"), None);
+    dir.write("claude/jobs/be50d36a/other.txt", "x");
+    assert_eq!(job_state(&roots(&dir), "be50d36a").as_deref(), Some(""));
+    dir.write("claude/jobs/be50d36a/state.json", &job("stopped", 0, "x"));
+    assert_eq!(
+        job_state(&roots(&dir), "be50d36a").as_deref(),
+        Some("stopped")
+    );
+    for odd in ["", "..", "a/b"] {
+        assert_eq!(job_state(&roots(&dir), odd), None, "{odd:?}");
+    }
+}
+
+#[test]
+fn job_status_is_the_live_session_files_status() {
+    let dir = TempDir::new("fresh-status");
+    dir.write("claude/jobs/be50d36a/state.json", &job("done", 0, "x"));
+    let probes = Probes::from_proc();
+    assert_eq!(job_status(&roots(&dir), &probes, "be50d36a"), None);
+    dir.write("claude/sessions/1.json", &live("waiting"));
+    assert_eq!(
+        job_status(&roots(&dir), &probes, "be50d36a").as_deref(),
+        Some("waiting")
+    );
+}
+
+#[test]
+fn job_process_is_the_pid_and_start_the_files_record() {
+    let dir = TempDir::new("fresh-process");
+    dir.write("claude/jobs/be50d36a/state.json", &job("done", 0, "x"));
+    assert_eq!(
+        job_process(&roots(&dir), &Probes::from_proc(), "be50d36a"),
+        None
+    );
+    let mut file: serde_json::Value = serde_json::from_str(&live("busy")).unwrap();
+    file["startedAt"] = json!(1_794_000_000_000_i64);
+    dir.write("claude/sessions/1.json", &file.to_string());
+    assert_eq!(
+        job_process(&roots(&dir), &Probes::from_proc(), "be50d36a"),
+        Some((std::process::id(), Some(1_794_000_000_000)))
+    );
+}
+
+#[test]
+fn job_process_ignores_a_session_file_of_a_dead_pid() {
+    let dir = TempDir::new("fresh-process-dead");
+    dir.write("claude/jobs/be50d36a/state.json", &job("done", 0, "x"));
+    let mut old: serde_json::Value = serde_json::from_str(&live("busy")).unwrap();
+    old["pid"] = json!(4_000_000_000_u64);
+    old["startedAt"] = json!(1_i64);
+    dir.write("claude/sessions/0.json", &old.to_string());
+    assert_eq!(
+        job_process(&roots(&dir), &Probes::from_proc(), "be50d36a"),
+        None
+    );
+    let mut file: serde_json::Value = serde_json::from_str(&live("busy")).unwrap();
+    file["startedAt"] = json!(2_i64);
+    dir.write("claude/sessions/1.json", &file.to_string());
+    assert_eq!(
+        job_process(&roots(&dir), &Probes::from_proc(), "be50d36a"),
+        Some((std::process::id(), Some(2)))
+    );
+}

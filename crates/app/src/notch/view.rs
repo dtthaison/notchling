@@ -355,9 +355,13 @@ impl NotchView {
             );
         let mut lines: Vec<Div> = Vec::new();
         if agent.group == AgentGroup::Completed {
-            let reply = snapshot
-                .and_then(|s| s.last_reply().map(str::to_owned))
-                .or_else(|| agent.detail.clone());
+            let reply = if m.message_needs_you(agent) {
+                Some(m.status_line(agent))
+            } else {
+                snapshot
+                    .and_then(|s| s.last_reply().map(str::to_owned))
+                    .or_else(|| agent.detail.clone())
+            };
             lines.extend(reply.map(|t| text(one_line(&t), TypeRole::Meta, Ink::TextMuted)));
         } else {
             if let Some(prompt) = snapshot.and_then(|s| s.last_prompt.as_deref()) {

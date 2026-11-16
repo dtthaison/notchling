@@ -1,0 +1,5 @@
+{"type":"queue-operation","operation":"enqueue","timestamp":"2026-11-15T10:00:10.000Z","sessionId":"s-1","content":"git branch"}
+{"type":"queue-operation","operation":"dequeue","timestamp":"2026-11-15T10:00:11.000Z","sessionId":"s-1"}
+{"type":"system","subtype":"turn_duration","timestamp":"2026-11-15T10:00:11.800Z","sessionId":"s-1","durationMs":1000}
+{"type":"user","message":{"role":"user","content":"<bash-input>git branch</bash-input>"},"uuid":"u","timestamp":"2026-11-15T10:00:12.000Z","sessionId":"s-1","cwd":"/work/demo"}
+{"type":"user","message":{"role":"user","content":"<bash-stdout>* main</bash-stdout><bash-stderr></bash-stderr>"},"uuid":"u","timestamp":"2026-11-15T10:00:13.000Z","sessionId":"s-1","cwd":"/work/demo"}

@@ -70,7 +70,11 @@ struct DialogAttacher {
 }
 
 impl Attacher for DialogAttacher {
-    fn attach(&self, job: &str, _config_dir: Option<&str>) -> Result<Box<dyn Pty>, ApiError> {
+    fn attach(
+        &self,
+        job: &str,
+        _config_dir: Option<&str>,
+    ) -> Result<Box<dyn Pty + Send>, ApiError> {
         self.attached.lock().unwrap().push(job.to_string());
         Ok(Box::new(DialogPty {
             screen: self.screen.clone(),

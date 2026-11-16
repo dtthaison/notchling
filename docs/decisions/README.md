@@ -39,6 +39,7 @@ Most of them come from the design, [revision 2](https://github.com/dtthaison/not
 | [XXXX](XXXX-cluster-standby-and-handover.md) | Cluster v1 Standby and handover: sets at every turn end, only pushed sessions move, a Standby relays or holds the phone's commands | Proposed |
 | [XXXX](XXXX-skills-follow-the-app-data-follows-the-source.md) | Skills follow the app, data follows the source: skill text without changing data, commands as the stable contract, model data from catalog, override and live lists | Accepted |
 | [XXXX](XXXX-phone-push.md) | Phone push: FCM, ids only, sent by the primary or by any Can Be Master machine while it is silent; dropped for v1 (no phone push) | Dropped |
+| [XXXX](XXXX-outbox.md) | The Outbox: messages to a session saved first, one postman per session, delivered like the terminal, never twice | Proposed |
 
 0001 was written before records had a Status section. Its status is Accepted.
 

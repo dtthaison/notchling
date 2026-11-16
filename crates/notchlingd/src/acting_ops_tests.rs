@@ -88,7 +88,7 @@ impl Pty for FakePty {
     }
 }
 
-type Attaches = Arc<Mutex<Vec<(String, Option<String>)>>>;
+pub(crate) type Attaches = Arc<Mutex<Vec<(String, Option<String>)>>>;
 
 #[derive(Default)]
 struct FakeAttacher {
@@ -101,7 +101,7 @@ struct FakeAttacher {
 }
 
 impl Attacher for FakeAttacher {
-    fn attach(&self, job: &str, config_dir: Option<&str>) -> Result<Box<dyn Pty>, ApiError> {
+    fn attach(&self, job: &str, config_dir: Option<&str>) -> Result<Box<dyn Pty + Send>, ApiError> {
         self.attached
             .lock()
             .unwrap()
@@ -126,28 +126,6 @@ impl Attacher for FakeAttacher {
     }
     fn screen_check(&self) -> &dyn ScreenCheck {
         &Markers
-    }
-}
-
-pub(crate) struct Trusting;
-
-impl crate::held_guard::Rest for Trusting {
-    fn fresh(
-        &self,
-        agent: &notchling_engine::sessions::Agent,
-    ) -> Option<notchling_engine::sessions::Agent> {
-        Some(agent.clone())
-    }
-    fn restarted(&self, _agent: &notchling_engine::sessions::Agent, _now_ms: i64) -> bool {
-        false
-    }
-    fn delivered(
-        &self,
-        _agent: &notchling_engine::sessions::Agent,
-        _text: &str,
-        _since_ms: i64,
-    ) -> Option<bool> {
-        Some(false)
     }
 }
 
@@ -227,7 +205,6 @@ pub(crate) fn setup_in(
     if let Some(launcher) = launcher {
         ops = ops.with_launcher(launcher, Box::new(|_| {}));
     }
-    ops = ops.with_rest(Box::new(Trusting));
     Setup {
         ops,
         room,
@@ -316,107 +293,6 @@ fn the_switch_is_read_set_and_announced() {
         .0,
         ErrorCode::BadRequest
     );
-}
-
-#[test]
-fn a_reply_types_the_plan_into_the_jobs_attach_terminal() {
-    let s = setup(true, PROMPT, sessions());
-    let out = s.ops.call(
-        &app(),
-        ops::SESSION_REPLY,
-        &json!({"id": "job-idle", "text": "hi\x1b[201~\r1"}),
-    );
-    assert_eq!(out.unwrap(), json!({"sent": true}));
-    assert_eq!(
-        *s.attached.lock().unwrap(),
-        vec![("idle0001".to_string(), Some("/lanes/b".to_string()))],
-        "the lane's config folder goes with the job"
-    );
-    assert_eq!(
-        *s.writes.lock().unwrap(),
-        vec![
-            keys::clear_input(),
-            "\x1b[200~hi[201~\r1\x1b[201~".to_string(),
-            "\r".to_string()
-        ]
-    );
-}
-
-#[test]
-fn a_reply_the_terminal_keeps_in_its_box_is_an_error_not_a_sent_one() {
-    let s = setup(true, PROMPT, sessions());
-    s.deaf.store(true, Ordering::SeqCst);
-    let (c, m) = code(s.ops.call(
-        &app(),
-        ops::SESSION_REPLY,
-        &json!({"id": "job-idle", "text": "hi"}),
-    ));
-    assert_eq!(c, ErrorCode::Failed);
-    assert!(
-        m.starts_with("The message is typed in the session's terminal but wasn't sent"),
-        "{m}"
-    );
-    s.deaf.store(false, Ordering::SeqCst);
-    let again = s.ops.call(
-        &app(),
-        ops::SESSION_REPLY,
-        &json!({"id": "job-idle", "text": "hi"}),
-    );
-    assert_eq!(
-        again.unwrap(),
-        json!({"sent": true}),
-        "a reply that failed holds nothing back"
-    );
-}
-
-#[test]
-fn a_reply_is_typed_only_at_the_prompt() {
-    let s = setup(true, &["Resume a session", "  1. fix-hook"], sessions());
-    let (c, m) = code(s.ops.call(
-        &app(),
-        ops::SESSION_REPLY,
-        &json!({"id": "job-idle", "text": "hi"}),
-    ));
-    assert_eq!(c, ErrorCode::Failed);
-    assert!(
-        m.starts_with("The session's terminal isn't at its prompt"),
-        "{m}"
-    );
-    assert!(s.writes.lock().unwrap().is_empty());
-}
-
-#[test]
-fn replies_go_only_to_background_jobs_and_never_into_a_dialog() {
-    let s = setup(true, PROMPT, sessions());
-    let (c, m) = code(s.ops.call(
-        &app(),
-        ops::SESSION_REPLY,
-        &json!({"id": "term", "text": "hi"}),
-    ));
-    assert_eq!(
-        (c, m.as_str()),
-        (ErrorCode::BadRequest, "this session takes no replies")
-    );
-    assert_eq!(
-        code(s.ops.call(
-            &app(),
-            ops::SESSION_REPLY,
-            &json!({"id": "nope", "text": "hi"})
-        ))
-        .0,
-        ErrorCode::BadRequest
-    );
-    assert!(s.attached.lock().unwrap().is_empty());
-
-    let dialog = setup(true, &["Do you want to proceed?", " 1. Yes"], sessions());
-    let (c, m) = code(dialog.ops.call(
-        &app(),
-        ops::SESSION_REPLY,
-        &json!({"id": "job-idle", "text": "1"}),
-    ));
-    assert_eq!(c, ErrorCode::Failed);
-    assert!(m.starts_with("The session is asking you something"), "{m}");
-    assert!(dialog.writes.lock().unwrap().is_empty());
 }
 
 #[test]
@@ -627,4 +503,235 @@ fn prompts_list_trims_an_oversized_prompt_instead_of_failing() {
     let trimmed = rows.iter().find(|p| p["id"] == json!(big.id)).unwrap();
     assert_eq!(trimmed["trimmed"], true);
     assert_eq!(trimmed["summary"], "/w/big.txt");
+}
+
+type Gate = Arc<(Mutex<bool>, std::sync::Condvar)>;
+type Order = Arc<Mutex<Vec<(usize, String)>>>;
+
+struct GatedAttacher {
+    inner: FakeAttacher,
+    hold: &'static str,
+    gate: Gate,
+    entered: Arc<std::sync::atomic::AtomicUsize>,
+    order: Order,
+    count: std::sync::atomic::AtomicUsize,
+}
+
+struct TaggedPty {
+    inner: Box<dyn Pty + Send>,
+    n: usize,
+    order: Order,
+}
+
+impl Pty for TaggedPty {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<()> {
+        self.order
+            .lock()
+            .unwrap()
+            .push((self.n, String::from_utf8_lossy(bytes).into_owned()));
+        std::thread::sleep(Duration::from_millis(3));
+        self.inner.write(bytes)
+    }
+    fn wait_quiet(&mut self, quiet: Duration, timeout: Duration) -> bool {
+        self.inner.wait_quiet(quiet, timeout)
+    }
+    fn screen(&mut self) -> Vec<String> {
+        self.inner.screen()
+    }
+    fn cursor(&mut self) -> Option<(usize, usize)> {
+        self.inner.cursor()
+    }
+    fn sleep(&mut self, d: Duration) {
+        self.inner.sleep(d)
+    }
+    fn now_ms(&self) -> u64 {
+        self.inner.now_ms()
+    }
+}
+
+impl Attacher for GatedAttacher {
+    fn attach(&self, job: &str, config_dir: Option<&str>) -> Result<Box<dyn Pty + Send>, ApiError> {
+        if job == self.hold {
+            self.entered.fetch_add(1, Ordering::SeqCst);
+            let (open, wake) = &*self.gate;
+            let mut open = open.lock().unwrap();
+            while !*open {
+                open = wake.wait(open).unwrap();
+            }
+        }
+        let n = self.count.fetch_add(1, Ordering::SeqCst);
+        Ok(Box::new(TaggedPty {
+            inner: self.inner.attach(job, config_dir)?,
+            n,
+            order: self.order.clone(),
+        }))
+    }
+    fn screen_check(&self) -> &dyn ScreenCheck {
+        &Markers
+    }
+}
+
+fn gated(
+    hold: &'static str,
+) -> (
+    Arc<ActingOps>,
+    Gate,
+    Arc<std::sync::atomic::AtomicUsize>,
+    Order,
+) {
+    let mut list = sessions();
+    let second = row("job-idle2", json!({"job": "idle0002"}), "completed", None);
+    list.as_array_mut().unwrap().push(second);
+    let gate: Gate = Arc::new((Mutex::new(false), std::sync::Condvar::new()));
+    let entered = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let order = Order::default();
+    let inner = FakeAttacher {
+        screen: Arc::new(Mutex::new(PROMPT.iter().map(|s| s.to_string()).collect())),
+        ..FakeAttacher::default()
+    };
+    let attacher = GatedAttacher {
+        inner,
+        hold,
+        gate: gate.clone(),
+        entered: entered.clone(),
+        order: order.clone(),
+        count: Default::default(),
+    };
+    let roots = Roots {
+        main_dir: fixture_claude(),
+        lanes_file: PathBuf::from("/nonexistent/lanes.json"),
+    };
+    let room = Arc::new(FakeRoom::default());
+    room.app.store(true, Ordering::SeqCst);
+    let ops = ActingOps::new(
+        Arc::new(Acting::in_memory(true)),
+        Arc::new(Mutex::new(list)),
+        roots,
+        room,
+        Box::new(attacher),
+    );
+    (Arc::new(ops), gate, entered, order)
+}
+
+fn open_gate(gate: &Gate) {
+    let (flag, wake) = &**gate;
+    *flag.lock().unwrap() = true;
+    wake.notify_all();
+}
+
+type Sent = std::sync::mpsc::Receiver<Result<Value, ApiError>>;
+
+fn reply_in_thread(ops: &Arc<ActingOps>, id: &'static str, text: &'static str) -> Sent {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let ops = ops.clone();
+    std::thread::spawn(move || {
+        let sent = ops
+            .agent(&json!({"id": id}))
+            .and_then(|agent| ops.nudge(&agent, text))
+            .map(|()| json!({"sent": true}));
+        let _ = tx.send(sent);
+    });
+    rx
+}
+
+#[test]
+fn locks_are_per_session() {
+    let (ops, gate, entered, _order) = gated("idle0001");
+    let slow = reply_in_thread(&ops, "job-idle", "to a");
+    while entered.load(Ordering::SeqCst) == 0 {
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    let other = reply_in_thread(&ops, "job-idle2", "to b");
+    let done = other.recv_timeout(Duration::from_secs(5));
+    open_gate(&gate);
+    assert_eq!(
+        done.expect("b is typed while a's attach hangs").unwrap(),
+        json!({"sent": true})
+    );
+    let slow = slow.recv_timeout(Duration::from_secs(5)).unwrap();
+    assert_eq!(slow.unwrap(), json!({"sent": true}));
+}
+
+fn question_in_thread(ops: &Arc<ActingOps>, id: &'static str) -> Sent {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let ops = ops.clone();
+    std::thread::spawn(move || {
+        let _ = tx.send(ops.call(&app(), ops::SESSION_QUESTION, &json!({"id": id})));
+    });
+    rx
+}
+
+#[test]
+fn reply_and_question_to_one_session_never_attach_together() {
+    let (ops, gate, entered, _order) = gated("idle0001");
+    let reply = reply_in_thread(&ops, "job-idle", "to a");
+    while entered.load(Ordering::SeqCst) == 0 {
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    let question = question_in_thread(&ops, "job-idle");
+    std::thread::sleep(Duration::from_millis(150));
+    let inside = entered.load(Ordering::SeqCst);
+    open_gate(&gate);
+    assert_eq!(inside, 1, "the second op waited for the first one's lock");
+    assert!(reply.recv_timeout(Duration::from_secs(5)).unwrap().is_ok());
+    assert!(question
+        .recv_timeout(Duration::from_secs(5))
+        .unwrap()
+        .is_ok());
+}
+
+#[test]
+fn interrupt_locks_the_job_the_session_moved_to() {
+    let (ops, gate, _entered, _order) = gated("none");
+    open_gate(&gate);
+    let old = ops.typing_locks().for_job("abcd1234");
+    let new = ops.typing_locks().for_job("moved001");
+    let old_guard = old.lock().unwrap();
+    let new_guard = new.lock().unwrap();
+    let (tx, rx) = std::sync::mpsc::channel();
+    let caller_ops = ops.clone();
+    std::thread::spawn(move || {
+        let _ = tx.send(caller_ops.call(&app(), ops::SESSION_INTERRUPT, &json!({"id": "job-a"})));
+    });
+    std::thread::sleep(Duration::from_millis(100));
+    {
+        let mut list = ops.sessions.lock().unwrap();
+        let row = list
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|r| r["id"] == "job-a")
+            .unwrap();
+        row["target"] = json!({"job": "moved001"});
+    }
+    drop(old_guard);
+    assert!(
+        rx.recv_timeout(Duration::from_millis(200)).is_err(),
+        "typed into the new job without its lock"
+    );
+    drop(new_guard);
+    assert!(rx.recv_timeout(Duration::from_secs(5)).unwrap().is_ok());
+}
+
+#[test]
+fn question_refuses_a_session_that_left_its_job_while_waiting() {
+    let (ops, gate, _entered, _order) = gated("none");
+    open_gate(&gate);
+    let old = ops.typing_locks().for_job("abcd1234");
+    let old_guard = old.lock().unwrap();
+    let asked = question_in_thread(&ops, "job-a");
+    std::thread::sleep(Duration::from_millis(100));
+    {
+        let mut list = ops.sessions.lock().unwrap();
+        let row = list
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|r| r["id"] == "job-a")
+            .unwrap();
+        row["target"] = json!({"process": 4242});
+    }
+    drop(old_guard);
+    let read = asked.recv_timeout(Duration::from_secs(5)).unwrap();
+    assert_eq!(code(read).0, ErrorCode::BadRequest);
 }
