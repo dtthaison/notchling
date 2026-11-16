@@ -163,7 +163,7 @@ fn a_forwarded_token_call_names_the_calling_member_whatever_its_args_say() {
         msg: Msg::Call {
             id: 3,
             op: "cluster.join.token".to_string(),
-            args: json!({"minter": m5}),
+            args: json!({"minter": m5}).into(),
             origin: Origin {
                 node: w1.clone(),
                 tier: OriginTier::Agent,
@@ -180,5 +180,5 @@ fn a_forwarded_token_call_names_the_calling_member_whatever_its_args_say() {
         .collect();
     assert_eq!(runs.len(), 1, "{effects:?}");
     assert_eq!(runs[0].0, "cluster.join.token");
-    assert_eq!(runs[0].1, json!({"minter": w1}));
+    assert_eq!(runs[0].1, json!({"minter": w1}).into());
 }

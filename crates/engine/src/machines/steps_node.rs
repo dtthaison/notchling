@@ -82,7 +82,7 @@ fn joined(m: &Machine) -> SetupStep {
     )
 }
 
-fn json_from(text: &str) -> Option<Value> {
+pub(super) fn json_from(text: &str) -> Option<Value> {
     let start = text.find('{')?;
     serde_json::Deserializer::from_str(&text[start..])
         .into_iter::<Value>()

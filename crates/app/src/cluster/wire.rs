@@ -140,6 +140,19 @@ pub fn install_apply(node: &str) -> Request {
     }
 }
 
+pub fn allow_set(node: &str, allow: &Value) -> Request {
+    let mut args = json!({"node": node});
+    for key in ["names", "any"] {
+        if let Some(value) = allow.get(key) {
+            args[key] = value.clone();
+        }
+    }
+    Request {
+        op: ops::CLUSTER_ALLOW_SET,
+        args,
+    }
+}
+
 pub fn remove(node: &str) -> Request {
     Request {
         op: ops::CLUSTER_REMOVE,

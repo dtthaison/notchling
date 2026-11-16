@@ -14,7 +14,8 @@ fn kind_of(kind: Kind) -> ItemKind {
         | Kind::VersionCheckFailed
         | Kind::VersionDrift
         | Kind::NodeJoin
-        | Kind::OutboxUnsent => ItemKind::Notice,
+        | Kind::OutboxUnsent
+        | Kind::LoginNeeded => ItemKind::Notice,
         Kind::SettingChange => ItemKind::SettingChange,
     }
 }

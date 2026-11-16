@@ -20,7 +20,7 @@ use super::snapshot::{Observed, Trigger};
 use super::state::{role_of, Applied, Change, ClusterState, Command, CommandError, JournalEntry};
 use super::text::{plain, NAME_MAX};
 use super::versions::Versions;
-use super::wire::{Msg, Origin, OriginTier, WireError};
+use super::wire::{Args, Msg, Origin, OriginTier, WireError};
 use crate::sessions::Agent;
 
 pub use forward::call_wait;
@@ -41,6 +41,9 @@ pub const MAX_TERM_STEP: u64 = 64;
 pub const REASON_MAX: usize = 200;
 pub const PEER_STALE_TERM: &str = "peer_stale_term";
 pub const VERSIONS_GAP_MS: u64 = 10_000;
+pub const ATTACH_CALL_MS: u64 = 8 * 60_000;
+pub const GRANT_ATTACH: &str = "grant.attach";
+pub const GRANT_REVOKE_JOB: &str = "grant.revoke_job";
 
 #[derive(Clone, Debug)]
 pub enum Input {
@@ -108,6 +111,11 @@ pub enum LocalCmd {
     SetFailover {
         failover: Failover,
     },
+    SetAllow {
+        node: NodeId,
+        names: Option<Vec<String>>,
+        any: Option<bool>,
+    },
     Dispatch {
         key: String,
         spec: JobSpec,
@@ -116,7 +124,7 @@ pub enum LocalCmd {
     Forward {
         node: NodeId,
         op: String,
-        args: Value,
+        args: Args,
         origin: Origin,
     },
     JobEvent {
@@ -183,7 +191,7 @@ pub enum Effect {
     RunLocal {
         call: u64,
         op: String,
-        args: Value,
+        args: Args,
         origin: Origin,
         term: Term,
     },
@@ -240,12 +248,18 @@ struct Dial {
 enum Target {
     Local(u64),
     Peer(NodeId, u64),
+    Nobody,
 }
 
 #[derive(Clone, Debug)]
 enum Then {
     Reply(Target),
     Dispatch {
+        job: String,
+        warning: Option<String>,
+        target: Target,
+    },
+    Attach {
         job: String,
         warning: Option<String>,
         target: Target,
@@ -351,6 +365,16 @@ impl NodeCore {
         self
     }
 
+    pub fn counters(&self) -> (u64, u64) {
+        (self.next_wire, self.next_local)
+    }
+
+    pub fn with_counters(mut self, (wire, local): (u64, u64)) -> NodeCore {
+        self.next_wire = self.next_wire.max(wire);
+        self.next_local = self.next_local.max(local);
+        self
+    }
+
     pub fn me(&self) -> &NodeId {
         &self.me
     }
@@ -408,6 +432,7 @@ impl NodeCore {
                     "versions": m.versions,
                     "desired": m.desired,
                     "acceptsDelegation": m.accepts_delegation,
+                    "secrets": m.secrets,
                 })
             })
             .collect();
@@ -627,6 +652,8 @@ mod core_tests_failover;
 #[cfg(test)]
 mod core_tests_flood;
 #[cfg(test)]
+mod core_tests_grants_fix;
+#[cfg(test)]
 mod core_tests_headless;
 #[cfg(test)]
 mod core_tests_heal;
@@ -642,6 +669,8 @@ mod core_tests_minter;
 mod core_tests_refused;
 #[cfg(test)]
 mod core_tests_relay;
+#[cfg(test)]
+mod core_tests_secrets;
 #[cfg(test)]
 mod core_tests_snap;
 #[cfg(test)]

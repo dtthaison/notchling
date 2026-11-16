@@ -60,7 +60,7 @@ impl Peers for NodePeers {
             LocalCmd::Forward {
                 node: node.clone(),
                 op: op.to_string(),
-                args,
+                args: args.into(),
                 origin,
             },
             within,

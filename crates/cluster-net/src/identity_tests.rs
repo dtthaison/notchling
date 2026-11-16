@@ -76,3 +76,15 @@ fn two_folders_make_two_identities() {
     let b = load_or_make(&scratch.path().join("b")).unwrap();
     assert_ne!(a.fingerprint, b.fingerprint);
 }
+
+#[test]
+fn a_stored_fingerprint_is_read_without_making_an_identity() {
+    let scratch = Scratch::new();
+    let dir = scratch.path().join("node");
+    assert!(stored_fingerprint(&dir).unwrap().is_none());
+    assert!(!dir.exists(), "nothing was made");
+    let made = load_or_make(&dir).unwrap();
+    assert_eq!(stored_fingerprint(&dir).unwrap(), Some(made.fingerprint));
+    std::fs::write(dir.join(CERT_FILE), b"not a certificate").unwrap();
+    assert!(stored_fingerprint(&dir).is_err());
+}

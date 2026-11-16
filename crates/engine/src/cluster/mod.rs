@@ -11,6 +11,8 @@ pub mod held;
 pub mod id;
 pub mod jobs;
 pub mod join;
+pub mod login_files;
+pub mod logins;
 pub mod main_sessions;
 pub mod members;
 pub mod move_home;
@@ -57,6 +59,8 @@ mod grant_files_hostile_tests;
 #[cfg(test)]
 mod grant_files_tests;
 #[cfg(test)]
+mod grants_env_tests;
+#[cfg(test)]
 mod grants_tests;
 #[cfg(test)]
 mod held_tests;
@@ -72,6 +76,10 @@ mod main_sessions_tests;
 mod move_home_tests;
 #[cfg(test)]
 mod outward_tests;
+#[cfg(test)]
+mod policy_inbox_tests;
+#[cfg(test)]
+mod policy_secrets_tests;
 #[cfg(test)]
 mod policy_tests;
 #[cfg(test)]

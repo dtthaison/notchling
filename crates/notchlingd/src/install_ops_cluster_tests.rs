@@ -106,7 +106,7 @@ fn only_app_origin_from_home() {
             let sent = home.node.local(LocalCmd::Forward {
                 node: worker.id(),
                 op: op.to_string(),
-                args: json!({}),
+                args: json!({}).into(),
                 origin: Origin {
                     node: home.id(),
                     tier,
@@ -128,7 +128,7 @@ fn only_app_origin_from_home() {
     let from_worker = worker.node.local(LocalCmd::Forward {
         node: home.id(),
         op: ops::INSTALL_APPLY.to_string(),
-        args: json!({}),
+        args: json!({}).into(),
         origin: Origin {
             node: worker.id(),
             tier: OriginTier::App,

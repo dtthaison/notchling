@@ -128,7 +128,7 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 
 impl Launcher for FakeLauncher {
     fn run(&self, command: &Command, timeout: Duration) -> Result<LaunchOutput, LaunchError> {
-        lock(&self.calls).push(Call::Run(command.clone(), timeout));
+        lock(&self.calls).push(Call::Run(command.keys_only(), timeout));
         let delay = *lock(&self.delay);
         if !delay.is_zero() {
             std::thread::sleep(delay);
@@ -139,7 +139,9 @@ impl Launcher for FakeLauncher {
     }
 
     fn run_pty(&self, script: &PtyScript) -> Result<bool, LaunchError> {
-        lock(&self.calls).push(Call::Pty(script.clone()));
+        let mut shown = script.clone();
+        shown.command = shown.command.keys_only();
+        lock(&self.calls).push(Call::Pty(shown));
         lock(&self.pty).pop_front().unwrap_or(Ok(true))
     }
 }
@@ -320,6 +322,9 @@ impl RealLauncher {
                 Some(v) => process.env(key, v),
                 None => process.env_remove(key),
             };
+        }
+        for (key, value) in &command.secret_env {
+            process.env(key, value.expose());
         }
         let mut child = process
             .spawn()

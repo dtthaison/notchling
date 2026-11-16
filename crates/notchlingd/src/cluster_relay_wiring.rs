@@ -46,7 +46,7 @@ impl Wire for NodeWire {
             LocalCmd::Forward {
                 node: to.clone(),
                 op: op.to_string(),
-                args,
+                args: args.into(),
                 origin: Origin {
                     node,
                     tier: OriginTier::App,

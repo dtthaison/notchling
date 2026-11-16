@@ -153,8 +153,8 @@ impl VaultOps {
         &self,
         ticket: &str,
         names: &[&str],
-        command: &str,
-        folder: &str,
+        (command, folder): (&str, &str),
+        by: Option<&ReleaseFor>,
     ) -> Raised {
         let Some(inbox) = &self.inbox else {
             return Raised::none();
@@ -163,7 +163,15 @@ impl VaultOps {
         let mut raised = item(
             approval_item_id(ticket),
             ItemKind::SecretApproval,
-            format!("Allow {} for {command}", names.join(", ")),
+            match by {
+                Some(grant) => format!(
+                    "{command} on {} (job {}) wants {}",
+                    grant.node_name,
+                    grant.job,
+                    names.join(", ")
+                ),
+                None => format!("Allow {} for {command}", names.join(", ")),
+            },
             folder.to_string(),
         );
         let lasts = self.timing.approval_wait + self.timing.slice;

@@ -11,8 +11,8 @@ use crate::vault::entry::valid_name;
 
 pub const EXCLUDED_DIRS: &[&str] = &["cluster/grants", "cluster/logins", "cluster/incoming"];
 
-const MAX_FILE_BYTES: u64 = 256 * 1024;
-const MAX_VALUE_BYTES: usize = 32 * 1024;
+pub(super) const MAX_FILE_BYTES: u64 = 256 * 1024;
+pub(super) const MAX_VALUE_BYTES: usize = 32 * 1024;
 const FILE_VERSION: u32 = 1;
 
 fn wipe(bytes: &mut [u8]) {
@@ -22,7 +22,7 @@ fn wipe(bytes: &mut [u8]) {
     std::sync::atomic::compiler_fence(std::sync::atomic::Ordering::SeqCst);
 }
 
-fn wipe_vec(bytes: &mut Vec<u8>) {
+pub(super) fn wipe_vec(bytes: &mut Vec<u8>) {
     let capacity = bytes.capacity();
     bytes.resize(capacity, 0);
     wipe(bytes);
@@ -177,7 +177,7 @@ fn read_grant(mut file: std::fs::File, path: &Path) -> Result<GrantFile, String>
 
 use super::grant_files_sys::{is_not_a_folder, verify_file_private, Dir, NO_UNIX};
 
-fn clock_ms() -> i64 {
+pub(super) fn clock_ms() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))

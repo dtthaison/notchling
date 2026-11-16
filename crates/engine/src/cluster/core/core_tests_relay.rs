@@ -42,7 +42,7 @@ fn load_call(hub: &mut Hub, from: &NodeId, to: &NodeId) -> Vec<Effect> {
         LocalCmd::Forward {
             node: to.clone(),
             op: "node.load".to_string(),
-            args: json!({}),
+            args: json!({}).into(),
             origin: node_origin(from),
         },
     )

@@ -236,7 +236,7 @@ pub(super) fn run_locals(effects: &[Effect]) -> Vec<(u64, String, Value)> {
     effects
         .iter()
         .filter_map(|e| match e {
-            Effect::RunLocal { call, op, args, .. } => Some((*call, op.clone(), args.clone())),
+            Effect::RunLocal { call, op, args, .. } => Some((*call, op.clone(), (**args).clone())),
             _ => None,
         })
         .collect()

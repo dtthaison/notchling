@@ -11,6 +11,7 @@ fn facts(name: &str, role: Role, client: bool, state: MemberState) -> SenderFact
         client,
         state,
         is_home: role == Role::Home,
+        is_vault: false,
     }
 }
 
@@ -165,6 +166,12 @@ fn every_rule_names_a_known_op() {
         "cluster.member.set",
         "cluster.remove",
         "cluster.join.token",
+        "grant.deliver",
+        "grant.revoke",
+        "grant.request",
+        "login.deliver",
+        "login.revoke",
+        "node.inbox",
     ];
     let wire = std::fs::read_to_string(concat!(
         env!("CARGO_MANIFEST_DIR"),

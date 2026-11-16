@@ -20,10 +20,16 @@ use super::install::{applied_note, plan_of, Plan};
 use super::model::ClusterModel;
 use super::move_sheet::{MoveSheet, Names};
 use super::renders::{install_plan_reply, model_of, names, shown, Shown, STANDBY, THIS_MAC};
+use super::secrets::VaultAccess;
+use super::secrets_view::{editor_body, editor_footer, editor_title, Editor, SecretsEvent};
+use super::view_secrets::{secrets_fixture, Editing};
 use super::wire::{self, Request};
 use crate::accounts::flows::Alert;
 use crate::accounts::view_rows::{alert_overlay, Handler};
 use crate::sheets::view::{sheet_header, Dismiss};
+use crate::switches::feed::SwitchFeed;
+use crate::switches::Switches;
+use crate::vault::store::Vault;
 use crate::welcome::facts::HookFacts;
 
 const POLL: Duration = Duration::from_millis(500);
@@ -38,6 +44,8 @@ pub(super) struct InstallAsk {
 
 pub struct ClusterSheetView {
     pub(super) feed: Arc<ClusterFeed>,
+    pub(super) access: VaultAccess,
+    pub(super) editing: Option<Editing>,
     pub(super) menu: Option<String>,
     pub(super) move_sheet: Option<MoveSheet>,
     pub(super) names: Names,
@@ -45,7 +53,7 @@ pub struct ClusterSheetView {
     pub(super) installing: Option<InstallAsk>,
     name: Entity<TextEditor>,
     token: Entity<TextEditor>,
-    busy: bool,
+    pub(super) busy: bool,
     pub(super) note: Option<(String, bool)>,
     drawn: u64,
     _name_events: Subscription,
@@ -73,8 +81,12 @@ fn this_mac() -> String {
 }
 
 impl ClusterSheetView {
-    pub fn live(feed: Arc<ClusterFeed>, cx: &mut Context<Self>) -> ClusterSheetView {
-        let view = ClusterSheetView::build(feed, &this_mac(), cx);
+    pub fn live(
+        feed: Arc<ClusterFeed>,
+        access: VaultAccess,
+        cx: &mut Context<Self>,
+    ) -> ClusterSheetView {
+        let view = ClusterSheetView::build(feed, access, &this_mac(), cx);
         cx.spawn(async move |this, cx| loop {
             cx.background_executor().timer(POLL).await;
             let alive = this.update(cx, |view, cx| {
@@ -97,11 +109,21 @@ impl ClusterSheetView {
         self
     }
 
-    pub fn fixed(feed: Arc<ClusterFeed>, name: &str, cx: &mut Context<Self>) -> ClusterSheetView {
-        ClusterSheetView::build(feed, name, cx)
+    pub fn fixed(
+        feed: Arc<ClusterFeed>,
+        access: VaultAccess,
+        name: &str,
+        cx: &mut Context<Self>,
+    ) -> ClusterSheetView {
+        ClusterSheetView::build(feed, access, name, cx)
     }
 
-    fn build(feed: Arc<ClusterFeed>, name: &str, cx: &mut Context<Self>) -> ClusterSheetView {
+    fn build(
+        feed: Arc<ClusterFeed>,
+        access: VaultAccess,
+        name: &str,
+        cx: &mut Context<Self>,
+    ) -> ClusterSheetView {
         let editor = cx.new(|cx| TextEditor::new(t::cluster::name_label(), 1, cx).single_line());
         editor.update(cx, |editor, cx| editor.set_text(name, cx));
         let events = cx.subscribe(&editor, |this, _, event: &TextEditorEvent, cx| {
@@ -118,6 +140,8 @@ impl ClusterSheetView {
         });
         ClusterSheetView {
             feed,
+            access,
+            editing: None,
             menu: None,
             move_sheet: None,
             names: Names::new(),
@@ -609,6 +633,35 @@ impl Render for ClusterSheetView {
         let alert = self.remove_alert(&model, a, cx);
         let install = self.install_alert(a, cx);
         let moving = self.move_overlay(&model, a, cx);
+        let on: Handler<Self, SecretsEvent> =
+            Rc::new(|this, event, cx| this.secrets_event(event, cx));
+        let editor = self.editing.as_ref().map(|e| Editor {
+            name: &e.name,
+            model: e.model.as_ref(),
+            error: e.error.as_deref(),
+            busy: self.busy,
+        });
+        let (title, content, footer) = match &editor {
+            Some(editor) => (
+                editor_title(editor.name),
+                scrollable(
+                    div()
+                        .id("cluster-secrets-body")
+                        .flex_1()
+                        .min_h(px(0.0))
+                        .overflow_y_scroll()
+                        .p(px(SIDE_PADDING))
+                        .child(editor_body(editor, a, cx, &on)),
+                )
+                .into_any_element(),
+                Some(editor_footer(editor, a, cx, &on)),
+            ),
+            None => (
+                t::cluster::title().to_owned(),
+                scrollable(body).into_any_element(),
+                None,
+            ),
+        };
         div()
             .id("cluster-sheet")
             .relative()
@@ -619,11 +672,12 @@ impl Render for ClusterSheetView {
             .overflow_hidden()
             .child(sheet_header(
                 Icon::Server,
-                t::cluster::title(),
+                &title,
                 div().id("cluster-header-end").child(done),
                 a,
             ))
-            .child(scrollable(body))
+            .child(content)
+            .children(footer)
             .children(alert)
             .children(install)
             .children(moving)
@@ -653,8 +707,12 @@ impl Render for ClusterRender {
 pub fn build_render(name: &str, cx: &mut gpui::App) -> Option<AnyView> {
     let which = shown(name)?;
     let feed = Arc::new(ClusterFeed::fixed(model_of(which)));
+    let access = VaultAccess {
+        local: Arc::new(Vault::fixed(Vec::new())),
+        switches: Arc::new(SwitchFeed::fixed(Switches::all_on())),
+    };
     let sheet = cx.new(|cx| {
-        let mut sheet = ClusterSheetView::fixed(feed, THIS_MAC, cx);
+        let mut sheet = ClusterSheetView::fixed(feed, access, THIS_MAC, cx);
         if which == Shown::Menu {
             sheet.menu = Some(STANDBY.to_owned());
         }
@@ -676,6 +734,9 @@ pub fn build_render(name: &str, cx: &mut gpui::App) -> Option<AnyView> {
                 }
                 Plan::Say { text, problem } => sheet.note = Some((text, problem)),
             }
+        }
+        if which == Shown::Secrets {
+            sheet.editing = Some(secrets_fixture(&sheet.feed.snapshot()));
         }
         sheet
     });

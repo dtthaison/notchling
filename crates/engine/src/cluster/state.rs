@@ -504,8 +504,8 @@ pub fn apply(
             if session.is_some() {
                 job.session = session.clone();
             }
-            if detail.is_some() {
-                job.detail = detail.clone();
+            if let Some(text) = detail {
+                job.detail = Some(text.clone()).filter(|t| !t.is_empty());
             }
             vec![Change::Job(job.clone())]
         }

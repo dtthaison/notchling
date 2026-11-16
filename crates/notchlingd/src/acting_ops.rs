@@ -139,6 +139,7 @@ pub struct ActingOps {
     codex: OnceLock<Arc<CodexOps>>,
     catalog: OnceLock<Arc<CatalogService>>,
     outbox: OnceLock<Arc<OutboxOps>>,
+    pub(crate) login: OnceLock<Arc<dyn crate::cluster_logins::LoginEnv>>,
     screen_file: Option<PathBuf>,
     pub(crate) reply_screen_file: Option<PathBuf>,
     pub(crate) attempts: crate::reply_attempts::Attempts,
@@ -171,6 +172,7 @@ impl ActingOps {
             codex: OnceLock::new(),
             catalog: OnceLock::new(),
             outbox: OnceLock::new(),
+            login: OnceLock::new(),
             screen_file: None,
             reply_screen_file: None,
             attempts: crate::reply_attempts::Attempts::default(),
@@ -210,6 +212,10 @@ impl ActingOps {
 
     pub(crate) fn outbox(&self) -> Option<&Arc<OutboxOps>> {
         self.outbox.get()
+    }
+
+    pub fn attach_login(&self, login: Arc<dyn crate::cluster_logins::LoginEnv>) {
+        let _ = self.login.set(login);
     }
 
     pub(crate) fn catalog(&self) -> &CatalogService {
@@ -476,7 +482,7 @@ impl ActingOps {
         let result = match op {
             ops::SESSION_INTERRUPT => self.interrupt(args),
             ops::SESSION_TAKE_BACK => self.take_back(args),
-            _ => self.control(op, args),
+            _ => self.control(caller, op, args),
         };
         if let Some(target) = &target {
             match (&result, by_agent) {

@@ -210,6 +210,21 @@ fn the_environment_is_scrubbed_of_notchling_and_claude_code_variables() {
 }
 
 #[test]
+fn a_shell_job_never_sees_the_claude_code_login_token() {
+    let rig = rig("login-env");
+    std::env::set_var("CLAUDE_CODE_OAUTH_TOKEN", "NL-MARKER-831");
+    rig.run("j-5b", "env; echo \"argv: $0 $*\"").unwrap();
+    rig.reporter.wait("j-5b");
+    std::env::remove_var("CLAUDE_CODE_OAUTH_TOKEN");
+    let log = std::fs::read_to_string(rig.log("j-5b")).unwrap();
+    assert!(!log.contains("NL-MARKER"), "a shell job saw the token");
+    assert!(
+        !log.contains("CLAUDE_CODE_OAUTH_TOKEN"),
+        "the variable reached the job"
+    );
+}
+
+#[test]
 fn the_job_runs_in_the_folder_it_was_given() {
     let rig = rig("cwd");
     rig.run("j-6", "pwd").unwrap();

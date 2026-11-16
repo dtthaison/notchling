@@ -14,7 +14,7 @@ pub use launcher::{Call, FakeLauncher, LaunchError, LaunchOutput, Launcher, Real
 pub use move_all::{plan_move_all_jobs, JobMove, MoveAllPlan, MoveJob};
 pub use plan::{
     Command, Expect, KeyStep, Outcome, Plan, PlanError, PtyScript, Quiet, RunStep, Step,
-    CONFIG_DIR_VAR,
+    CONFIG_DIR_VAR, LOGIN_TOKEN_VAR,
 };
 pub use run::{execute, job_id_in_launch_output, ControlError, Report};
 pub use session::{
@@ -26,6 +26,8 @@ pub use takeover::{offers_takeover, prompt_for, TakeoverState};
 pub use trust::plan_trust_folder;
 pub use wake::{Nudge, WakeResumer};
 
+#[cfg(test)]
+mod launcher_secret_tests;
 #[cfg(test)]
 mod run_tests;
 #[cfg(test)]

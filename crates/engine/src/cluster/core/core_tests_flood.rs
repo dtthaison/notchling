@@ -16,7 +16,7 @@ fn report(hub: &mut Hub, home: &NodeId, from: &NodeId, id: u64, args: Value) -> 
         msg: Msg::Call {
             id,
             op: "node.versions".to_string(),
-            args,
+            args: args.into(),
             origin: Origin {
                 node: from.clone(),
                 tier: OriginTier::Node,

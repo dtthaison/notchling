@@ -2,12 +2,13 @@ use serde_json::Value;
 
 use super::host::START_OPS;
 use super::invariants::Violation;
+use super::secrets_broker::BrokerEv;
 use super::world::{Event, World};
 use crate::cluster::core::{Effect, Input};
 use crate::cluster::id::NodeId;
 use crate::cluster::members::{MemberState, Term};
 use crate::cluster::testkit::fp;
-use crate::cluster::wire::Msg;
+use crate::cluster::wire::{Msg, Origin, WireError};
 
 const TICK_MS: u64 = 1_000;
 
@@ -33,6 +34,7 @@ impl World {
                         wall_ms: wall,
                     },
                 );
+                self.secrets_tick(&node);
                 let at = self.now + TICK_MS;
                 self.schedule(at, Event::Tick { node, gen });
             }
@@ -70,6 +72,7 @@ impl World {
                 target,
                 token,
             } => self.snap_step(&home, &target, token),
+            Event::Broker(ev) => self.broker_event(ev),
             other => self.hand_event(other),
         }
     }
@@ -117,21 +120,21 @@ impl World {
 
     pub(super) fn step(&mut self, n: &NodeId, input: Input) {
         let before = self.core(n).and_then(|c| c.highest_term().cloned());
-        let effects = match self.nodes.get_mut(n).and_then(|x| x.core.as_mut()) {
+        let mut effects = match self.nodes.get_mut(n).and_then(|x| x.core.as_mut()) {
             Some(core) => core.step(input),
             None => return,
         };
+        effects.extend(self.take_planted(n));
         self.after_step(n, before, effects);
     }
 
     pub(super) fn after_step(&mut self, n: &NodeId, before: Option<Term>, effects: Vec<Effect>) {
-        let name = self.name_of(n);
         let mut persisted = false;
         let mut wiped = false;
         self.step_sends.clear();
         for effect in effects {
-            self.trace
-                .push(format!("{:>8} {:<4} {}", self.now, name, summary(&effect)));
+            self.push_trace(n, &summary(&effect));
+            self.scan_effect(n, &effect);
             match effect {
                 Effect::Send { to, msg } => self.send(n, &to, msg),
                 Effect::Dial {
@@ -171,17 +174,32 @@ impl World {
                     }
                 }
                 Effect::Persist { .. } => persisted = true,
-                Effect::Wipe => wiped = true,
+                Effect::Wipe => {
+                    wiped = true;
+                    self.secrets.wiped.insert(n.clone(), self.now);
+                }
                 Effect::Snapshot { plan } => self.snap_stage(n, plan),
                 Effect::Publish { .. } | Effect::SteppedDown { .. } | Effect::AdoptStaged => {}
                 Effect::RunLocal {
                     call,
                     op,
                     args,
+                    origin,
                     term,
-                    ..
-                } => self.run_local(n, call, &op, &args, &term, before.as_ref()),
-                Effect::Answer { local, result } => self.answers.push((n.clone(), local, result)),
+                } => self.run_local(n, (call, &op, &args, &origin), &term, before.as_ref()),
+                Effect::Answer { local, result } => {
+                    self.consume_on_answer(n, local, &result);
+                    if self.secrets.waiting.contains_key(&(n.clone(), local)) {
+                        let ev = BrokerEv::Answer {
+                            node: n.clone(),
+                            local,
+                            result: result.clone(),
+                        };
+                        let at = self.now + 1;
+                        self.schedule(at, Event::Broker(ev));
+                    }
+                    self.answers.push((n.clone(), local, result));
+                }
                 Effect::JoinRequest { node, .. } => self.join_requests.push((n.clone(), node)),
             }
         }
@@ -192,6 +210,13 @@ impl World {
                 node.journal = node.core.as_ref().and_then(|c| c.state().cloned());
             }
         }
+        if persisted && !wiped {
+            if let Some(state) = self.core(n).and_then(|c| c.state()) {
+                let text = super::secrets_scan::ser(state);
+                self.scan_persisted(n, &text);
+            }
+        }
+        self.observe_jobs(n);
         let after = self.core(n).and_then(|c| c.highest_term().cloned());
         if let (Some(b), Some(a)) = (&before, &after) {
             if a < b && self.violation.is_none() {
@@ -209,9 +234,7 @@ impl World {
     fn run_local(
         &mut self,
         n: &NodeId,
-        call: u64,
-        op: &str,
-        args: &Value,
+        (call, op, args, origin): (u64, &str, &Value, &Origin),
         term: &Term,
         before: Option<&Term>,
     ) {
@@ -227,7 +250,18 @@ impl World {
             self.run_takeover(n, call, args);
             return;
         }
-        let result = self.host.run(n, op, args, term, self.now);
+        if self.route_run(n, call, (op, args), origin) {
+            return;
+        }
+        let starting = START_OPS.contains(&op);
+        let result = if starting && self.secrets.fail_starts {
+            Err(WireError::new("failed", "the tool didn't start"))
+        } else {
+            self.host.run(n, op, args, term, self.now)
+        };
+        if starting {
+            self.secrets_started(n, (op, args, origin), result.is_ok());
+        }
         let at = self.now + 1 + self.rng.below(5);
         self.schedule(
             at,
@@ -240,6 +274,7 @@ impl World {
     }
 
     pub(super) fn send(&mut self, from: &NodeId, to: &NodeId, msg: Msg) {
+        self.scan_wire(from, to, &msg);
         if let Msg::Call { op, args, .. } = &msg {
             if START_OPS.contains(&op.as_str()) && self.violation.is_none() {
                 let home_sees_active = self

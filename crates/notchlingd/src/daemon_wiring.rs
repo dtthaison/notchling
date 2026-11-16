@@ -754,7 +754,7 @@ impl Wired {
                     })
                 })
             }),
-            inbox.clone(),
+            (inbox.clone(), vault.clone()),
             events.clone(),
             sessions.clone(),
         );
@@ -787,6 +787,7 @@ impl Wired {
             outbox.set_tell(tell);
         }
         outbox.set_remote(cluster.remote_outbox());
+        acting.attach_login(cluster.login.clone());
         Wired {
             acting,
             codex,

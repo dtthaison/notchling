@@ -8,7 +8,7 @@ use notchling_engine::cluster::core::{
 use notchling_engine::cluster::failover::Failover;
 use notchling_engine::cluster::snapshot::Observed;
 use notchling_engine::cluster::wire::{Origin, WireError};
-use notchling_engine::cluster::{Desired, Input, NodeId, Versions};
+use notchling_engine::cluster::{ClusterState, Desired, Input, NodeId, Versions};
 use notchling_events::kinds::choices::SwitchName;
 use notchling_events::kinds::security::{
     ClusterStep, ClusterStepTaken, SwitchCause, SwitchChanged,
@@ -147,6 +147,7 @@ impl LinkEvents for Events {
 pub(crate) struct Shared {
     pub status: Mutex<Value>,
     pub rejoin: Mutex<Option<NodeId>>,
+    pub state: Mutex<Option<ClusterState>>,
 }
 
 pub(crate) fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -207,6 +208,9 @@ pub(crate) fn known_node_ops() -> &'static [&'static str] {
         names.extend(crate::cluster_workspace::NODE_OPS);
         names.extend(crate::snap_recv::SNAP_OPS);
         names.extend(crate::cluster_move::MOVE_OPS);
+        names.extend(crate::grant_broker::NODE_OPS);
+        names.extend(crate::cluster_logins::NODE_OPS);
+        names.extend(crate::cluster_inbox::NODE_OPS);
         names
     })
 }
@@ -311,6 +315,10 @@ impl ClusterNode {
 
     pub fn started(&self) -> bool {
         !lock(&self.shared.status).is_null()
+    }
+
+    pub fn state(&self) -> Option<ClusterState> {
+        lock(&self.shared.state).clone()
     }
 
     pub fn submit(&self) -> Submit {

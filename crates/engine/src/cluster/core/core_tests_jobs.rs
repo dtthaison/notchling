@@ -431,7 +431,9 @@ fn a_stepped_down_home_says_who_is_primary_now() {
             msg: Msg::Call {
                 id: 77,
                 op: "cluster.dispatch".to_string(),
-                args: json!({"key": "k", "spec": spec("m5", Tool::Shell, json!({"command": "id"}))}),
+                args:
+                    json!({"key": "k", "spec": spec("m5", Tool::Shell, json!({"command": "id"}))})
+                        .into(),
                 origin: Origin {
                     node: m1.clone(),
                     tier: OriginTier::App,
@@ -558,14 +560,14 @@ fn a_tool_start_is_sent_with_the_app_origin() {
 }
 
 #[test]
-fn the_core_refuses_secrets_from_the_home_and_from_a_peer() {
+fn the_core_refuses_secrets_off_the_allowlist_from_the_home_and_from_a_peer() {
     let (mut hub, m5, _w1) = pair();
     let mut with = spec("w1", Tool::Shell, json!({"command": "id"}));
     with.secrets = vec!["gh".to_string()];
     let effects = hub.local(&m5, dispatch_as("s", with.clone(), OriginTier::App));
     assert!(matches!(
         answers(&effects)[0],
-        Err(e) if e.message == "Secrets for jobs on another machine come in a later version"
+        Err(e) if e.message == "gh isn't allowed on that machine"
     ));
     assert!(hub.core(&m5).state().expect("state").jobs.is_empty());
 
@@ -580,7 +582,7 @@ fn the_core_refuses_secrets_from_the_home_and_from_a_peer() {
     hub.local(&m1, dispatch_as("s", with, OriginTier::App));
     let reply = refusal_to(&hub, "m1");
     assert!(
-        matches!(&reply, Err(e) if e.message == "Secrets for jobs on another machine come in a later version"),
+        matches!(&reply, Err(e) if e.message == "gh isn't allowed on that machine"),
         "{reply:?}"
     );
     assert!(hub.core(&m5).state().expect("state").jobs.is_empty());

@@ -392,3 +392,60 @@ fn a_local_callers_args_never_name_the_maker() {
         .as_str()
         .is_some_and(|t| t.starts_with("nlj1.")));
 }
+
+#[test]
+fn allow_set_replaces_the_names_and_keeps_what_it_is_not_told() {
+    let net = MemNet::new();
+    let (home, worker) = pair(&net, Opts::named("home10"), Opts::named("worker10"));
+    let w = wired(&home, true);
+    let set = |args: Value| {
+        w.ops
+            .call(&caller(Tier::App), ops::CLUSTER_ALLOW_SET, &args)
+            .unwrap()
+    };
+    set(json!({"node": worker.id(), "names": ["GH", "db"]}));
+    let status = home.node.status();
+    let m = member(&status, &worker.id()).unwrap();
+    assert_eq!(m["secrets"]["names"], json!(["db", "gh"]), "{m}");
+    assert_eq!(m["secrets"]["any"], false);
+    set(json!({"node": worker.id(), "any": true}));
+    let status = home.node.status();
+    let m = member(&status, &worker.id()).unwrap();
+    assert_eq!(m["secrets"]["names"], json!(["db", "gh"]), "{m}");
+    assert_eq!(m["secrets"]["any"], true);
+    set(json!({"node": worker.id(), "names": [], "any": false}));
+    let status = home.node.status();
+    let m = member(&status, &worker.id()).unwrap();
+    assert_eq!(m["secrets"], json!({"names": [], "any": false}), "{m}");
+}
+
+#[test]
+fn allow_set_is_app_tier_and_checks_its_arguments() {
+    let net = MemNet::new();
+    let (home, worker) = pair(&net, Opts::named("home11"), Opts::named("worker11"));
+    let w = wired(&home, true);
+    assert_eq!(w.ops.spec(ops::CLUSTER_ALLOW_SET), Some(OpSpec::APP));
+    let cases = [
+        json!({}),
+        json!({"node": worker.id(), "names": "gh"}),
+        json!({"node": worker.id(), "names": [1]}),
+        json!({"node": worker.id(), "any": "yes"}),
+        json!({"node": worker.id(), "bogus": true}),
+    ];
+    for args in cases {
+        let e = w
+            .ops
+            .call(&caller(Tier::App), ops::CLUSTER_ALLOW_SET, &args)
+            .unwrap_err();
+        assert_eq!(e.code, ErrorCode::BadRequest, "{args}");
+    }
+    let spaced = json!({"node": worker.id(), "names": ["has space"]});
+    let e = w
+        .ops
+        .call(&caller(Tier::App), ops::CLUSTER_ALLOW_SET, &spaced)
+        .unwrap_err();
+    assert_eq!(e.code, ErrorCode::Failed);
+    let status = home.node.status();
+    let m = member(&status, &worker.id()).unwrap();
+    assert_eq!(m["secrets"], json!({"names": [], "any": false}), "{m}");
+}

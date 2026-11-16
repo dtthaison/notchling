@@ -133,6 +133,7 @@ pub mod ops {
     pub const SHELL_STOP: &str = "shell.stop";
     pub const CLUSTER_RETURN: &str = "cluster.return";
     pub const CLUSTER_FAILOVER_SET: &str = "cluster.failover.set";
+    pub const CLUSTER_ALLOW_SET: &str = "cluster.allow.set";
 
     pub const SESSION_SEND: &str = "session.send";
     pub const OUTBOX_LIST: &str = "outbox.list";

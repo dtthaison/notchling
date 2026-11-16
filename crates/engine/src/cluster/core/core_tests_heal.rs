@@ -12,7 +12,7 @@ fn the_drivers_load_call(hub: &mut Hub, from: &NodeId, to: &NodeId) {
         LocalCmd::Forward {
             node: to.clone(),
             op: "node.load".to_string(),
-            args: json!({}),
+            args: json!({}).into(),
             origin: Origin {
                 node: from.clone(),
                 tier: OriginTier::Node,

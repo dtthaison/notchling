@@ -40,7 +40,7 @@ fn call_reply_correlates_and_times_out() {
         LocalCmd::Forward {
             node: w1.clone(),
             op: "node.load".to_string(),
-            args: json!({}),
+            args: json!({}).into(),
             origin: origin.clone(),
         },
     );
@@ -78,7 +78,7 @@ fn call_reply_correlates_and_times_out() {
         LocalCmd::Forward {
             node: w1.clone(),
             op: "node.load".to_string(),
-            args: json!({}),
+            args: json!({}).into(),
             origin,
         },
     );
@@ -106,7 +106,7 @@ fn incoming_call_from_worker_to_dispatch_is_refused() {
             msg: Msg::Call {
                 id: 9,
                 op: "session.new".to_string(),
-                args: json!({}),
+                args: json!({}).into(),
                 origin: Origin {
                     node: w1.clone(),
                     tier: OriginTier::Node,
@@ -129,7 +129,7 @@ fn duplicate_call_runs_once() {
     let call = Msg::Call {
         id: 5,
         op: "session.new".to_string(),
-        args: json!({"cwd": "/x"}),
+        args: json!({"cwd": "/x"}).into(),
         origin: Origin {
             node: m5.clone(),
             tier: OriginTier::Node,
@@ -188,7 +188,7 @@ fn dedupe_forgets_after_its_window() {
     let call = Msg::Call {
         id: 5,
         op: "session.new".to_string(),
-        args: json!({}),
+        args: json!({}).into(),
         origin: Origin {
             node: m5.clone(),
             tier: OriginTier::Node,
@@ -251,7 +251,7 @@ fn older_term_call_is_refused() {
             msg: Msg::Call {
                 id: 11,
                 op: "session.new".to_string(),
-                args: json!({}),
+                args: json!({}).into(),
                 origin: Origin {
                     node: m5.clone(),
                     tier: OriginTier::Node,
@@ -325,7 +325,7 @@ fn install_forward_from_a_primary_that_lost_its_term_is_refused() {
                 msg: Msg::Call {
                     id: 20 + call_id as u64,
                     op: op.to_string(),
-                    args: json!({}),
+                    args: json!({}).into(),
                     origin: Origin {
                         node: m5.clone(),
                         tier: OriginTier::App,
@@ -368,7 +368,7 @@ fn a_call_stamped_with_a_newer_term_is_judged_after_adopting_it() {
                 msg: Msg::Call {
                     id: 31,
                     op: op.to_string(),
-                    args: json!({}),
+                    args: json!({}).into(),
                     origin: Origin {
                         node: m5.clone(),
                         tier,
@@ -415,7 +415,7 @@ fn newer_term_is_adopted() {
             msg: Msg::Call {
                 id: 2,
                 op: "node.load".to_string(),
-                args: json!({}),
+                args: json!({}).into(),
                 origin: Origin {
                     node: m5.clone(),
                     tier: OriginTier::Node,
@@ -489,7 +489,7 @@ fn highest_term_survives_restart() {
         msg: Msg::Call {
             id: 1,
             op: "node.load".to_string(),
-            args: json!({}),
+            args: json!({}).into(),
             origin: Origin {
                 node: m5.clone(),
                 tier: OriginTier::Node,
@@ -513,7 +513,7 @@ fn workspace_calls_wait_longer_than_plain_calls() {
     let forward = |op: &str| LocalCmd::Forward {
         node: w1.clone(),
         op: op.to_string(),
-        args: json!({}),
+        args: json!({}).into(),
         origin: origin.clone(),
     };
     let timeouts = |hub: &super::core_tests::Hub, from: usize| {
@@ -550,7 +550,7 @@ fn a_workers_node_sessions_call_is_refused() {
             msg: Msg::Call {
                 id: 11,
                 op: "node.sessions".to_string(),
-                args: json!({}),
+                args: json!({}).into(),
                 origin: Origin {
                     node: w1.clone(),
                     tier: OriginTier::Node,
@@ -597,7 +597,7 @@ fn a_worker_cannot_forge_a_term_on_a_call() {
                 msg: Msg::Call {
                     id: 41,
                     op: op.to_string(),
-                    args: json!({}),
+                    args: json!({}).into(),
                     origin: Origin {
                         node: w1.clone(),
                         tier,

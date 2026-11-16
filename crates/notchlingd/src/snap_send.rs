@@ -65,7 +65,7 @@ impl SnapPeers for NodeSnapPeers {
             LocalCmd::Forward {
                 node: node.clone(),
                 op: op.to_string(),
-                args,
+                args: args.into(),
                 origin,
             },
             WORKSPACE_WAIT,

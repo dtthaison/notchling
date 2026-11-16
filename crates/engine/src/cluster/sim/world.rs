@@ -5,6 +5,8 @@ use serde_json::Value;
 use super::host::SimHost;
 use super::invariants::Violation;
 use super::net::SimNet;
+use super::secrets::SimSecrets;
+use super::secrets_broker::BrokerEv;
 use super::snaps::Snaps;
 use super::Rng;
 use crate::cluster::core::{Input, LocalCmd, NodeCore};
@@ -51,6 +53,7 @@ pub(super) enum Event {
         target: NodeId,
         token: u64,
     },
+    Broker(BrokerEv),
 }
 
 pub(super) struct SimNode {
@@ -64,6 +67,7 @@ pub(super) struct SimNode {
     pub(super) suspended: bool,
     pub(super) held: Vec<Event>,
     pub(super) boot_origin: u64,
+    pub(super) up_since: u64,
     pub(super) boot_n: u32,
     pub(super) drift: i64,
     pub(super) skew: i64,
@@ -90,6 +94,7 @@ pub struct World {
     pub(super) skip_term_check: bool,
     pub(super) step_sends: Vec<((u64, u64), NodeId)>,
     pub(super) snaps: Snaps,
+    pub(super) secrets: SimSecrets,
 }
 
 impl World {
@@ -112,6 +117,7 @@ impl World {
             skip_term_check: false,
             step_sends: Vec::new(),
             snaps: Snaps::default(),
+            secrets: SimSecrets::default(),
         }
     }
 
@@ -169,6 +175,10 @@ impl World {
 
     pub fn is_alive(&self, n: &NodeId) -> bool {
         self.nodes.get(n).is_some_and(|x| x.alive)
+    }
+
+    pub fn up_since(&self, n: &NodeId) -> Option<u64> {
+        self.nodes.get(n).map(|x| x.up_since)
     }
 
     pub fn is_suspended(&self, n: &NodeId) -> bool {
@@ -239,6 +249,7 @@ impl World {
             suspended: false,
             held: Vec::new(),
             boot_origin: self.now,
+            up_since: self.now,
             boot_n: 0,
             drift,
             skew,
@@ -399,6 +410,7 @@ impl World {
                 },
             );
         }
+        self.secrets_crashed(n);
         self.trace_line(n, "crash");
     }
 
@@ -411,6 +423,7 @@ impl World {
         }
         node.alive = true;
         node.boot_origin = self.now;
+        node.up_since = self.now;
         node.boot_n += 1;
         self.boot_core(n);
         self.trace_line(n, "restart");
@@ -436,6 +449,7 @@ impl World {
             return;
         }
         node.suspended = false;
+        node.up_since = self.now;
         node.tick_gen += 1;
         let gen = node.tick_gen;
         let held = std::mem::take(&mut node.held);
@@ -496,9 +510,7 @@ impl World {
     }
 
     pub(super) fn trace_line(&mut self, n: &NodeId, text: &str) {
-        let name = self.name_of(n);
-        self.trace
-            .push(format!("{:>8} {:<4} {}", self.now, name, text));
+        self.push_trace(n, text);
     }
 
     pub fn pending_join(&self, joiner: &NodeId) -> bool {

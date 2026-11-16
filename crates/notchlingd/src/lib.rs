@@ -24,10 +24,24 @@ pub mod cluster_cli;
 pub mod cluster_dispatch;
 pub mod cluster_dispatch_delegate;
 mod cluster_driver;
+#[cfg(test)]
+mod cluster_driver_order_tests;
+#[cfg(test)]
+mod cluster_driver_rebuild_tests;
 pub mod cluster_failover_setting;
 pub mod cluster_forward;
 pub mod cluster_host_facts;
+pub mod cluster_inbox;
+pub mod cluster_inbox_follow;
+#[cfg(test)]
+pub(crate) mod cluster_inbox_testkit;
 pub mod cluster_join;
+pub mod cluster_logins;
+pub mod cluster_logins_jobs;
+pub mod cluster_logins_notes;
+pub mod cluster_logins_probe;
+pub mod cluster_logins_run;
+pub mod cluster_logins_send;
 pub mod cluster_main;
 pub mod cluster_mirror;
 pub mod cluster_move;
@@ -40,11 +54,13 @@ pub mod cluster_outbox;
 pub mod cluster_prompts;
 mod cluster_prompts_book;
 mod cluster_prompts_clean;
+pub mod cluster_publisher;
 pub mod cluster_redact;
 pub mod cluster_relay;
 pub mod cluster_relay_wiring;
 pub mod cluster_sessions;
 pub mod cluster_switches;
+pub mod cluster_tail_mask;
 pub mod cluster_versions;
 pub mod cluster_wiring;
 pub mod cluster_workspace;
@@ -58,6 +74,12 @@ pub mod daemon_wiring;
 pub mod delegate_cli;
 pub mod every_session;
 pub mod git_ops;
+pub mod grant_broker;
+pub mod grant_calls;
+pub mod grant_janitor;
+pub mod grant_roots;
+pub mod grant_use;
+pub mod grant_wiring;
 pub mod hook;
 pub mod hook_fence;
 pub mod hook_ops;
@@ -65,6 +87,7 @@ pub mod hook_output;
 pub mod hook_pages;
 pub mod host_id;
 mod inbox_events;
+pub mod inbox_mirrors;
 pub mod inbox_ops;
 pub mod install_ops;
 pub mod late_emit;
@@ -145,6 +168,8 @@ mod accounts_ops_log_tests;
 mod accounts_ops_tests;
 #[cfg(test)]
 mod acting_events_tests;
+#[cfg(test)]
+mod acting_login_tests;
 #[cfg(test)]
 mod acting_ops_tests;
 #[cfg(test)]

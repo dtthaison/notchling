@@ -1,3 +1,5 @@
+use self::release::Who;
+pub use self::release::{was_denied, Looked, ReleaseFor, Released, Still, DENIED};
 use self::vault_events::{Trail, LOG_DOWN};
 use crate::acting_ops::Room;
 use crate::inbox_ops::InboxOps;
@@ -19,7 +21,7 @@ use notchling_events::kinds::secrets::{Approval, EntryAction, RequestResult, Sec
 use notchling_local_api::{ops, topics, ApiError, Caller, ClientKind, ErrorCode, OpSpec, Tier};
 use serde_json::{json, Map, Value};
 use std::collections::BTreeSet;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 pub const APPROVAL_WAIT: Duration = Duration::from_secs(300);
@@ -61,7 +63,12 @@ impl Default for VaultTiming {
     }
 }
 
+pub trait WorkerUse: Send + Sync {
+    fn use_secrets(&self, caller: &Caller, args: &Value) -> Option<Result<Value, ApiError>>;
+}
+
 pub struct VaultOps {
+    worker: OnceLock<Arc<dyn WorkerUse>>,
     switch: Arc<SwitchFlag>,
     store: Arc<VaultStore>,
     room: Arc<dyn Room>,
@@ -84,6 +91,7 @@ fn said_no(message: &str) -> ApiError {
 impl VaultOps {
     pub fn new(switch: Arc<SwitchFlag>, store: VaultStore, room: Arc<dyn Room>) -> VaultOps {
         let ops = VaultOps {
+            worker: OnceLock::new(),
             switch,
             store: Arc::new(store),
             room,
@@ -134,6 +142,10 @@ impl VaultOps {
         .with_inbox(inbox)
     }
 
+    pub fn set_worker(&self, worker: Arc<dyn WorkerUse>) {
+        let _ = self.worker.set(worker);
+    }
+
     pub fn with_inbox(mut self, inbox: Arc<InboxOps>) -> VaultOps {
         self.inbox = Some(inbox);
         self
@@ -177,6 +189,11 @@ impl VaultOps {
     }
 
     pub fn call(&self, caller: &Caller, op: &str, args: &Value) -> Result<Value, ApiError> {
+        if op == ops::VAULT_USE {
+            if let Some(answer) = self.worker.get().and_then(|w| w.use_secrets(caller, args)) {
+                return answer;
+            }
+        }
         if !self.switch.is_on() {
             self.off_hook().run();
             return Err(self.switch.refusal());
@@ -272,86 +289,13 @@ impl VaultOps {
         let command = text(args, "command", MAX_COMMAND)
             .map_err(none)?
             .unwrap_or_default();
-        let all = self.entries().map_err(none)?;
-        let mut picked: Vec<VaultEntry> = Vec::new();
-        for name in &names {
-            let id = name.to_lowercase();
-            match all.iter().find(|e| e.id() == id) {
-                Some(e) if !picked.iter().any(|p| p.id() == id) => picked.push(e.clone()),
-                Some(_) => {}
-                None => {
-                    let saved = if all.is_empty() {
-                        "none".to_string()
-                    } else {
-                        all.iter()
-                            .map(|e| e.name.clone())
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    };
-                    let which = if valid_name(name) {
-                        format!("No secret named {name}.")
-                    } else {
-                        "No secret by that name.".to_string()
-                    };
-                    return Err(none(failed(format!(
-                        "{which} Saved: {saved}. Ask the user for it with secret-request."
-                    ))));
-                }
-            }
-        }
-        trail.names = picked.iter().map(|e| e.name.clone()).collect();
-        let fail = |e: ApiError| (e, SecretResult::Failed);
-        let asking: Vec<VaultEntry> = picked.iter().filter(|e| e.asks()).cloned().collect();
-        if !asking.is_empty() {
-            let asked = self
-                .approve(caller, &asking, &command, &folder)
-                .map_err(|r| (r.err, r.result))?;
-            trail.approval = Approval::Asked;
-            trail.by = Some(asked.by);
-            trail.device = asked.device.clone();
-            trail.waited_ms = Some(asked.waited_ms);
-            if !self.switch.is_on() {
-                return Err((self.switch.refusal(), SecretResult::Cancelled));
-            }
-            match asked.decision {
-                Decision::Deny => {
-                    let why = match asked.state {
-                        State::Answered => SecretResult::Denied,
-                        State::Expired => SecretResult::Expired,
-                        _ => SecretResult::Cancelled,
-                    };
-                    return Err((said_no("The user didn't allow it."), why));
-                }
-                Decision::Once => {}
-                Decision::Always => {
-                    let ids: BTreeSet<String> = asking.iter().map(VaultEntry::id).collect();
-                    self.store
-                        .stop_asking(&ids)
-                        .map_err(|e| fail(failed(e.to_string())))?;
-                    let names: Vec<&str> = asking.iter().map(|e| e.name.as_str()).collect();
-                    self.publish_changed(&names, false);
-                    for name in &names {
-                        self.note_entry(name, EntryAction::AskFirstOff);
-                    }
-                }
-            }
-        }
-        let mut pairs = Vec::new();
-        for entry in picked {
-            match self.store.value(&entry) {
-                Ok(Some(value)) => pairs.push((entry, value)),
-                Ok(None) => {
-                    return Err(fail(failed(format!(
-                        "{} has no value saved. Ask the user to update it with secret-request {}.",
-                        entry.name, entry.name
-                    ))))
-                }
-                Err(e) => return Err(fail(failed(e.to_string()))),
-            }
-        }
-        if !self.switch.is_on() {
-            return Err((self.switch.refusal(), SecretResult::Cancelled));
-        }
+        let always = || Ok(());
+        let pairs = self.release_picked(
+            &Who::Caller(caller),
+            &names,
+            (&folder, &command),
+            (trail, &always),
+        )?;
         let (env, hide) = list::environment(&pairs);
         Ok(json!({"env": env, "hide": hide}))
     }
@@ -434,6 +378,8 @@ impl VaultOps {
 mod asks;
 #[path = "vault_inbox.rs"]
 mod inbox;
+#[path = "vault_release.rs"]
+mod release;
 #[path = "vault_events.rs"]
 mod vault_events;
 
@@ -444,11 +390,17 @@ mod events_tests;
 #[path = "vault_ops_pending_tests.rs"]
 mod pending_tests;
 #[cfg(test)]
+#[path = "vault_release_tests.rs"]
+mod release_tests;
+#[cfg(test)]
 #[path = "vault_ops_tests.rs"]
 mod tests;
 #[cfg(test)]
 #[path = "vault_ops_inbox_tests.rs"]
 mod vault_ops_inbox_tests;
+#[cfg(test)]
+#[path = "vault_ops_worker_tests.rs"]
+mod worker_tests;
 
 impl OpGroup for VaultOps {
     fn spec(&self, op: &str) -> Option<OpSpec> {

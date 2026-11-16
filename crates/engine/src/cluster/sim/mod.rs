@@ -4,6 +4,14 @@ mod move_scenario;
 mod net;
 mod run;
 mod scenario;
+mod secrets;
+mod secrets_actions;
+mod secrets_broker;
+mod secrets_check;
+mod secrets_inbox;
+mod secrets_scan;
+mod secrets_scenario;
+mod secrets_worker;
 mod snap_scenario;
 mod snaps;
 mod world;
@@ -13,6 +21,7 @@ pub use invariants::{check, Violation};
 pub use move_scenario::{move_cast, run_move_seed, run_move_world, MoveCast, PendingMove};
 pub use net::SimNet;
 pub use scenario::{run_seed, run_seed_with, run_world, stale_call_scenario, Failure, Plant};
+pub use secrets::{LeakAt, SecretPlant, SimSecrets, Stats};
 pub use snap_scenario::{run_snap_seed, run_snap_world, snap_cast, SnapCast};
 pub use snaps::SnapPlant;
 pub use world::World;
@@ -47,5 +56,9 @@ impl Rng {
 
 #[cfg(test)]
 mod move_tests;
+#[cfg(test)]
+mod sim_secrets_more_tests;
+#[cfg(test)]
+mod sim_secrets_tests;
 #[cfg(test)]
 mod sim_tests;

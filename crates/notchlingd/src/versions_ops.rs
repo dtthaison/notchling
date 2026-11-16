@@ -260,6 +260,24 @@ impl VersionsOps {
             .collect()
     }
 
+    pub fn tool_paths(&self) -> BTreeMap<Tool, String> {
+        let state = lock(&self.state);
+        state
+            .tools
+            .iter()
+            .flatten()
+            .map(|(tool, installed)| (*tool, installed.path.clone()))
+            .collect()
+    }
+
+    pub fn scanned(&self) -> bool {
+        lock(&self.state).tools.is_some()
+    }
+
+    pub fn home(&self) -> PathBuf {
+        self.roots.home.clone()
+    }
+
     pub fn set_exe(&self, exe: Option<PathBuf>) {
         *lock(&self.exe) = exe;
     }

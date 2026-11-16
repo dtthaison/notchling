@@ -6,10 +6,15 @@ pub mod move_sheet;
 mod move_view;
 pub mod renders;
 pub mod replication;
+pub mod secrets;
+#[cfg(target_os = "macos")]
+pub mod secrets_view;
 #[cfg(target_os = "macos")]
 pub mod view;
 #[cfg(target_os = "macos")]
 mod view_rows;
+#[cfg(target_os = "macos")]
+mod view_secrets;
 pub mod wire;
 
 pub const WIDTH: f32 = 680.0;
@@ -25,3 +30,5 @@ mod model_tests;
 mod move_sheet_tests;
 #[cfg(test)]
 mod replication_tests;
+#[cfg(test)]
+mod secrets_tests;

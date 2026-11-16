@@ -48,8 +48,7 @@ impl RealDelegate {
     }
 }
 
-fn capped(bytes: Vec<u8>) -> String {
-    let text = String::from_utf8_lossy(&bytes).into_owned();
+pub fn cut(text: String) -> String {
     if text.len() <= OUTPUT_CAP {
         return text;
     }
@@ -75,7 +74,8 @@ impl DelegateRunner for RealDelegate {
         };
         let (mut out, mut err) = (Vec::new(), Vec::new());
         let code = command::run(args, &ctx, deps, &mut out, &mut err);
-        (code, capped(out), capped(err))
+        let text = |bytes: Vec<u8>| String::from_utf8_lossy(&bytes).into_owned();
+        (code, text(out), text(err))
     }
 }
 

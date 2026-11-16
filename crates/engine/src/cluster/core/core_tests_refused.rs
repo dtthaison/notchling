@@ -271,7 +271,7 @@ fn a_peers_reply_error_is_cleaned_and_capped_before_the_local_caller_sees_it() {
         LocalCmd::Forward {
             node: w1.clone(),
             op: "node.load".to_string(),
-            args: json!({}),
+            args: json!({}).into(),
             origin: Origin {
                 node: m5.clone(),
                 tier: OriginTier::Node,
@@ -304,7 +304,7 @@ fn a_stale_term_reply_is_still_read_before_its_text_is_cleaned() {
         LocalCmd::Forward {
             node: w1.clone(),
             op: "node.load".to_string(),
-            args: json!({}),
+            args: json!({}).into(),
             origin: Origin {
                 node: m5.clone(),
                 tier: OriginTier::Node,
@@ -363,7 +363,7 @@ fn an_op_a_peer_names_is_cleaned_before_it_is_published() {
         let call = Msg::Call {
             id: 5,
             op,
-            args: json!({}),
+            args: json!({}).into(),
             origin: Origin {
                 node: w1.clone(),
                 tier: OriginTier::Node,

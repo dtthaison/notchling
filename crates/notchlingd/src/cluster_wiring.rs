@@ -3,8 +3,13 @@ use crate::cluster_blobs::Blobs;
 use crate::cluster_dispatch::{DispatchCalls, DispatchOps, NodeReporter};
 use crate::cluster_dispatch_delegate::RealDelegate;
 use crate::cluster_failover_setting::{FailoverSink, KeyMirror, NodeSink};
-use crate::cluster_forward::{Forward, NodeForward};
+use crate::cluster_forward::{Forward, NoNodeForward, NodeForward};
+use crate::cluster_inbox::{InboxCalls, NetLink, NodeNet, Outbox};
+use crate::cluster_inbox_follow::Follow;
 use crate::cluster_join::{JoinAsker, JOIN_WAIT};
+use crate::cluster_logins::{LoginCalls, LoginEnv, LoginHold, CLUSTER_LOGIN_ON};
+use crate::cluster_logins_probe::{has_content, LoginProbe, SystemStatus};
+use crate::cluster_logins_send::{LoginDeliverer, NodeOnline, Parts, Stamps};
 use crate::cluster_main::{MainFollower, Originators, EVERY as MAIN_EVERY};
 use crate::cluster_mirror::{FollowOps, Mirror, OnCap, TailSource, MIRROR_CAP, MIRROR_DIR};
 use crate::cluster_move::{LateLink, MoveGate, MoveParts, Mover, RealActs, RealRestorer};
@@ -17,14 +22,23 @@ use crate::cluster_node::{
 use crate::cluster_ops::{follow_switch, ClusterOps};
 use crate::cluster_outbox::{OutboxFollower, RemoteOutbox};
 use crate::cluster_prompts::{NodePush, PromptFollower, RemotePrompts};
+pub use crate::cluster_publisher::Publisher;
 use crate::cluster_relay_wiring::{HeldActs, HeldSlot};
 use crate::cluster_sessions::{
     is_client, HandlerRows, NodeSource, Refresher, RemoteSessions, SessionCalls,
 };
 use crate::cluster_switches::{HeadlessSwitches, LateHandler, NodeCalls, OpsPanel};
-use crate::cluster_versions::{own, with_tools};
+use crate::cluster_tail_mask::MaskedTails;
+use crate::cluster_versions::{own, with_logins, with_probed, with_tools};
 use crate::cluster_workspace::{Workspace, WorkspaceCalls};
 use crate::cluster_workspace_send::{CodeSender, NodePeers, ReturnOps, Sender};
+use crate::grant_broker::GrantBroker;
+use crate::grant_calls::{
+    ClusterUseAudit, EventAudit, GrantCalls, InboxNotices, NodeAsker, NodeLink, NodeView,
+};
+use crate::grant_janitor::GrantJanitor;
+use crate::grant_use::{GrantUse, OnDisk, UseCalls};
+use crate::grant_wiring::GrantParts;
 use crate::inbox_ops::InboxOps;
 use crate::late_emit::Events;
 use crate::layout::Layout;
@@ -36,11 +50,14 @@ use crate::snap_recv::{self, SnapCalls};
 use crate::snap_run::{Context as SnapContext, SnapRunner, RETRY as STAGE_RETRY};
 use crate::snap_send::SnapSender;
 use crate::switches::SwitchFlag;
+use crate::vault_caller::SystemProcesses;
+use crate::vault_ops::VaultOps;
 use crate::versions_ops::VersionsOps;
 use notchling_cluster_net::{load_or_make, Pins, TcpTls, PORT};
 use notchling_engine::bridge::net::bridge::host_name;
 use notchling_engine::cluster::core::{SnapAsk, VERSIONS_GAP_MS};
 use notchling_engine::cluster::failover::Failover;
+use notchling_engine::cluster::login_files::LoginStore;
 use notchling_engine::cluster::versions::BridgeFacts;
 use notchling_engine::cluster::wire::{Origin, OriginTier};
 use notchling_engine::cluster::{Desired, NodeId};
@@ -158,6 +175,7 @@ pub struct ClusterHooks {
     pub prompts: Arc<RemotePrompts>,
     pub failover: KeyMirror,
     pub outbox: Arc<RemoteOutbox>,
+    pub login: Arc<LoginHold>,
 }
 
 impl Hooks for ClusterHooks {
@@ -174,6 +192,8 @@ impl Hooks for ClusterHooks {
         self.mirror.clear();
         self.remote.clear();
         self.outbox.clear();
+        self.inbox.clear_mirrors();
+        self.login.wipe();
         kept
     }
 
@@ -261,8 +281,12 @@ pub struct ClusterParts {
     pub gate: Arc<MoveGate>,
     pub prompts: Arc<RemotePrompts>,
     follower: Option<PromptFollower>,
+    pub login: Arc<LoginHold>,
+    logins: Arc<LoginDeliverer>,
     delegate: Arc<RealDelegate>,
     mirror: Arc<Mirror>,
+    janitor: Arc<GrantJanitor>,
+    inbox_out: Arc<Outbox>,
     publisher: Arc<Publisher>,
     refresher: Option<Refresher>,
     main_follower: Option<MainFollower>,
@@ -280,6 +304,34 @@ fn clock() -> crate::cluster_mirror::Clock {
     Arc::new(|| u64::try_from(crate::acting_ops::now_ms()).unwrap_or(0))
 }
 
+pub(crate) fn on_disk(cluster_dir: &Path) -> OnDisk {
+    let state = match notchling_engine::cluster::persist::load(cluster_dir) {
+        Ok(Some(state)) => state,
+        Ok(None) => return OnDisk::Nothing,
+        Err(_) => return OnDisk::Unreadable,
+    };
+    let me = notchling_cluster_net::stored_fingerprint(&cluster_dir.join(IDENTITY_DIR))
+        .ok()
+        .flatten()
+        .and_then(|fingerprint| NodeId::from_fingerprint(&fingerprint));
+    OnDisk::Cluster {
+        vault: state.vault,
+        me,
+    }
+}
+
+fn disk_vault(dir: PathBuf) -> crate::grant_use::Disk {
+    Arc::new(move || on_disk(&dir))
+}
+
+fn clock_i64() -> crate::cluster_inbox::Clock {
+    Arc::new(crate::acting_ops::now_ms)
+}
+
+fn clock_ms() -> crate::grant_broker::Clock {
+    Arc::new(crate::acting_ops::now_ms)
+}
+
 fn node_name() -> String {
     let name = host_name().unwrap_or_else(|| "node".to_string());
     name.strip_suffix(".local").unwrap_or(&name).to_string()
@@ -293,7 +345,7 @@ fn start_node(
     links: (Arc<dyn LocalCalls>, Arc<dyn Hooks>),
     versions: Arc<VersionsOps>,
     bridge: BridgeFactsFn,
-    log: ClusterLog,
+    (log, login, probed): (ClusterLog, Arc<LoginHold>, Arc<LoginProbe>),
 ) -> Result<Arc<ClusterNode>, String> {
     let cluster_dir = layout.cluster_dir();
     let identity = load_or_make(&cluster_dir.join(IDENTITY_DIR)).map_err(|e| e.to_string())?;
@@ -307,7 +359,10 @@ fn start_node(
         layout.home(),
     );
     let probe: Probe = Box::new(move || {
-        let mut found = with_tools(versions.tool_versions());
+        let mut found = with_probed(
+            with_logins(with_tools(versions.tool_versions()), login.standing()),
+            probed.logins(),
+        );
         found.host = host.facts();
         found.bridge = bridge();
         found
@@ -338,7 +393,7 @@ impl ClusterParts {
         room: Arc<dyn Room>,
         link: Arc<SwitchFlag>,
         versions: (Arc<VersionsOps>, BridgeFactsFn),
-        inbox: Arc<InboxOps>,
+        (inbox, vault): (Arc<InboxOps>, Arc<VaultOps>),
         events: Events,
         sessions: Arc<Mutex<Value>>,
     ) -> ClusterParts {
@@ -382,17 +437,36 @@ impl ClusterParts {
             (MIRROR_CAP, capped),
         );
         let reporter = Arc::new(NodeReporter::default());
-        let shells = ShellJobs::new(layout.data_dir.clone(), reporter.clone());
+        let grants = GrantParts::new(&layout.cluster_dir());
+        let view = Arc::new(NodeView::new(holder.clone()));
+        let login = LoginHold::new(
+            (
+                Arc::new(LoginStore::new(&layout.cluster_dir())),
+                grants.masks.clone(),
+                view.clone(),
+            ),
+            (&layout.cluster_dir(), CLUSTER_LOGIN_ON),
+            clock_ms(),
+        );
+        let shells =
+            ShellJobs::new(layout.data_dir.clone(), reporter.clone()).with_grants(grants.shell());
         let delegate = Arc::new(RealDelegate::new(layout));
         let asks = holder.clone();
         let takes: crate::cluster_dispatch::Takes = Arc::new(move || {
             asks.get()
                 .is_some_and(|node| accepts_delegation(&node.status()))
         });
-        let sessions_calls: Arc<dyn LocalCalls> = Arc::new(SessionCalls::new(
-            DaemonCalls::new(handler.clone(), room.clone()),
+        let closing = shells.clone();
+        let sessions_calls: Arc<dyn LocalCalls> = Arc::new(MaskedTails::new(
+            Arc::new(SessionCalls::new(
+                DaemonCalls::new(handler.clone(), room.clone()),
+                Arc::new(HandlerRows::new(handler.clone())),
+                room.clone(),
+            )),
             Arc::new(HandlerRows::new(handler.clone())),
-            room.clone(),
+            (grants.masks.clone(), view.clone()),
+            Arc::new(move |job: &str| closing.log_closed(job)),
+            (grants.roots.clone(), clock_ms()),
         ));
         let launcher: Arc<dyn Launcher> =
             Arc::new(RealLauncher::with_claude(PathBuf::from("claude")));
@@ -431,6 +505,56 @@ impl ClusterParts {
             Arc::new(WorkspaceCalls::new(sessions_calls, workspace)),
             snap.node.clone(),
         ));
+        let uses = Arc::new(
+            GrantUse::new(
+                grants.store.clone(),
+                grants.parts(),
+                view.clone(),
+                (
+                    Arc::new(NodeAsker::new(holder.clone())),
+                    Arc::new(ClusterUseAudit::new(log.clone())),
+                ),
+                (Arc::new(SystemProcesses), clock_ms()),
+            )
+            .with_disk(disk_vault(layout.cluster_dir())),
+        );
+        vault.set_worker(uses.clone());
+        let janitor = GrantJanitor::new(
+            grants.store.clone(),
+            grants.parts(),
+            view.clone(),
+            clock_ms(),
+        );
+        let workspace_calls: Arc<dyn LocalCalls> = Arc::new(UseCalls::new(workspace_calls, uses));
+        let logins = LoginDeliverer::new(
+            Parts {
+                vault: vault.clone(),
+                entries: vault.clone(),
+                link: Arc::new(NodeLink::new(holder.clone())),
+                audit: Arc::new(EventAudit::new(vault.clone(), log.clone())),
+                view: view.clone(),
+                online: Arc::new(NodeOnline::new(holder.clone())),
+                notes: inbox.clone(),
+            },
+            Stamps::load(&layout.cluster_dir()),
+            clock_ms(),
+        );
+        let broker = Arc::new(GrantBroker::new(
+            (
+                vault.clone(),
+                Arc::new(NodeLink::new(holder.clone())),
+                Arc::new(EventAudit::new(vault, log.clone())),
+            ),
+            Arc::new(InboxNotices::new(inbox.clone())),
+            view,
+            clock_ms(),
+        ));
+        let granting: Arc<dyn LocalCalls> = Arc::new(GrantCalls::new(workspace_calls, broker));
+        let granting: Arc<dyn LocalCalls> = Arc::new(LoginCalls::new(granting, login.clone()));
+        let net = Arc::new(NodeNet::new(holder.clone()));
+        let granting: Arc<dyn LocalCalls> =
+            Arc::new(InboxCalls::new(granting, net.clone(), inbox.clone()));
+        let inbox_out = Outbox::new(net.clone(), inbox.clone(), clock_i64());
         let move_link = Arc::new(LateLink::default());
         let held: HeldSlot = Arc::new(OnceLock::new());
         let mover = Mover::new(MoveParts {
@@ -477,7 +601,7 @@ impl ClusterParts {
         let local: Arc<dyn LocalCalls> = Arc::new(MoveCalls::new(
             Arc::new(NodeCalls {
                 inner: Arc::new(DispatchCalls::new(
-                    workspace_calls,
+                    granting,
                     shells.clone(),
                     delegate.clone(),
                     takes,
@@ -492,19 +616,29 @@ impl ClusterParts {
             switches,
             remote: remote.clone(),
             mirror: mirror.clone(),
-            inbox,
+            inbox: inbox.clone(),
             snaps: snap_run.clone(),
             prompts: prompts.clone(),
             failover: KeyMirror::new(layout.data_dir.join("settings.json"), room.clone()),
             outbox: outbox.clone(),
+            login: login.clone(),
         });
+        let probed = LoginProbe::new(
+            (
+                versions.0.clone(),
+                Arc::new(SystemStatus),
+                Arc::new(has_content),
+            ),
+            (inbox.clone(), Arc::new(crate::acting_ops::now_ms)),
+            (node_name(), std::env::consts::OS.to_string()),
+        );
         let node = start_node(
             layout,
             room.clone(),
             (local, hooks),
             versions.0,
             versions.1,
-            log.clone(),
+            (log.clone(), login.clone(), probed),
         );
         let audit = log.clone();
         let mut refresher = None;
@@ -528,6 +662,15 @@ impl ClusterParts {
             let _ = holder.set(node.clone());
             let _ = move_link.0.set(node.clone());
             mirror.spawn();
+            janitor.spawn();
+            if CLUSTER_LOGIN_ON {
+                logins.spawn();
+            }
+            let link = Arc::new(NetLink::new(net));
+            inbox.set_link(link.clone());
+            inbox.set_tap(inbox_out.tap());
+            inbox_out.follow(Follow::new(inbox.clone(), link));
+            inbox_out.spawn();
             let shown = publisher.clone();
             refresher = Some(Refresher::spawn(
                 node.clone(),
@@ -575,7 +718,11 @@ impl ClusterParts {
             gate: mover.gate().clone(),
             prompts,
             follower,
+            login,
+            logins,
             mirror,
+            janitor,
+            inbox_out,
             publisher,
             refresher,
             main_follower,
@@ -596,8 +743,7 @@ impl ClusterParts {
     }
 
     pub fn forward(&self) -> Option<Arc<dyn Forward>> {
-        let node = self.node.as_ref().ok()?;
-        Some(Arc::new(NodeForward::new(node.clone())))
+        Some(forwarder(&self.node))
     }
 
     pub fn local_changed(&self) {
@@ -647,6 +793,9 @@ impl ClusterParts {
             follower.close();
         }
         self.mirror.close();
+        self.janitor.close();
+        self.logins.close();
+        self.inbox_out.close();
         if let Some(refresher) = &self.refresher {
             refresher.close();
         }
@@ -666,55 +815,10 @@ impl ClusterParts {
     }
 }
 
-pub struct Publisher {
-    room: Arc<dyn Room>,
-    remote: Arc<RemoteSessions>,
-    local: Arc<Mutex<Value>>,
-    last: Mutex<Option<Value>>,
-    last_shell: Mutex<Option<Value>>,
-}
-
-impl Publisher {
-    pub fn new(
-        room: Arc<dyn Room>,
-        remote: Arc<RemoteSessions>,
-        local: Arc<Mutex<Value>>,
-    ) -> Publisher {
-        Publisher {
-            room,
-            remote,
-            local,
-            last: Mutex::new(None),
-            last_shell: Mutex::new(None),
-        }
-    }
-
-    fn publish_shell(&self) {
-        let mut last = self.last_shell.lock().unwrap_or_else(|e| e.into_inner());
-        let shells = Value::Array(self.remote.shell_rows());
-        let changed = match last.as_ref() {
-            Some(seen) => *seen != shells,
-            None => shells.as_array().is_some_and(|rows| !rows.is_empty()),
-        };
-        if !changed {
-            return;
-        }
-        self.room
-            .publish(topics::SESSIONS, topics::SESSIONS_REMOTE_SHELL, &shells);
-        *last = Some(shells);
-    }
-
-    pub fn publish(&self) {
-        self.publish_shell();
-        let mut last = self.last.lock().unwrap_or_else(|e| e.into_inner());
-        let local = self.local.lock().unwrap_or_else(|e| e.into_inner()).clone();
-        let merged = self.remote.merge(&local);
-        if last.as_ref() == Some(&merged) {
-            return;
-        }
-        self.room
-            .publish(topics::SESSIONS, topics::SESSIONS_CHANGED, &merged);
-        *last = Some(merged);
+pub fn forwarder(node: &Result<Arc<ClusterNode>, String>) -> Arc<dyn Forward> {
+    match node {
+        Ok(node) => Arc::new(NodeForward::new(node.clone())),
+        Err(_) => Arc::new(NoNodeForward),
     }
 }
 
@@ -725,3 +829,7 @@ mod tests;
 #[cfg(test)]
 #[path = "cluster_rejoin_tests.rs"]
 mod rejoin_tests;
+
+#[cfg(test)]
+#[path = "cluster_wiring_disk_tests.rs"]
+mod disk_tests;

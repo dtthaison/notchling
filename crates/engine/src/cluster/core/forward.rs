@@ -2,8 +2,8 @@ use serde_json::{json, Value};
 
 use super::link::clean_reason;
 use super::{
-    Effect, NodeCore, OutCall, Seen, Target, Then, CALL_MS, DEDUPE_MS, MOVE_CALL_MS,
-    PEER_STALE_TERM, WORKSPACE_CALL_MS,
+    Effect, NodeCore, OutCall, Seen, Target, Then, ATTACH_CALL_MS, CALL_MS, DEDUPE_MS,
+    MOVE_CALL_MS, PEER_STALE_TERM, WORKSPACE_CALL_MS,
 };
 use crate::cluster::id::NodeId;
 use crate::cluster::members::{MemberState, Term};
@@ -26,6 +26,8 @@ pub fn call_wait(op: &str, args: &Value) -> u64 {
     }
     if op.starts_with("workspace.") || op.starts_with("snap.") {
         WORKSPACE_CALL_MS
+    } else if op == "grant.request" {
+        ATTACH_CALL_MS
     } else {
         CALL_MS
     }
@@ -97,7 +99,7 @@ impl NodeCore {
                         args,
                         origin,
                         term,
-                    } => self.on_call(from, id, op, args, origin, term, out),
+                    } => self.on_call(from, id, op, args.into_inner(), origin, term, out),
                     Msg::Reply { id, ok, err } => self.on_reply(from, id, ok, err, out),
                     Msg::Event {
                         topic,
@@ -228,6 +230,7 @@ impl NodeCore {
                 client: m.client,
                 state: m.state,
                 is_home: state.home == m.id,
+                is_vault: state.vault == m.id,
             })
         });
         let Some(facts) = facts else {
@@ -241,6 +244,14 @@ impl NodeCore {
                 return;
             }
         };
+        if rule.vault_only && self.state.as_ref().is_some_and(|s| s.vault != self.me) {
+            let why = match &self.state {
+                Some(s) => format!("{} holds the vault", self.member_name(&s.vault)),
+                None => "not in a cluster".to_string(),
+            };
+            self.refused_call(&from, id, &op, &why, out);
+            return;
+        }
         if rule.home_only && !self.is_home() {
             let name = self.state.as_ref().map(|s| self.member_name(&s.home));
             let why = format!("{} is primary now", name.unwrap_or_default());
@@ -264,6 +275,7 @@ impl NodeCore {
             "cluster.remove" => self.native_remove(target, &args, out),
             "cluster.main.set" => self.native_main_set(target, &args, out),
             "cluster.failover.set" => self.native_failover_set(target, &args, out),
+            "cluster.allow.set" => self.native_allow_set(target, &args, out),
             "node.versions" => self.native_versions(target, &args, out),
             _ => {
                 let args = match &target {
@@ -278,7 +290,7 @@ impl NodeCore {
                 out.push(Effect::RunLocal {
                     call,
                     op,
-                    args,
+                    args: args.into(),
                     origin,
                     term,
                 });
@@ -354,7 +366,7 @@ impl NodeCore {
             out.push(Effect::RunLocal {
                 call,
                 op,
-                args,
+                args: args.into(),
                 origin,
                 term,
             });
@@ -428,7 +440,7 @@ impl NodeCore {
             Msg::Call {
                 id,
                 op,
-                args,
+                args: args.into(),
                 origin,
                 term,
             },
@@ -509,6 +521,11 @@ impl NodeCore {
                 let result = self.dispatched(job, warning, result, out);
                 self.finish(target, result, out);
             }
+            Then::Attach {
+                job,
+                warning,
+                target,
+            } => self.attached(job, warning, target, result, out),
         }
     }
 
@@ -519,6 +536,7 @@ impl NodeCore {
         out: &mut Vec<Effect>,
     ) {
         match target {
+            Target::Nobody => {}
             Target::Local(local) => out.push(Effect::Answer { local, result }),
             Target::Peer(from, id) => {
                 let result = result.map_err(relayed);

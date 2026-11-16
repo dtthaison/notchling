@@ -8,6 +8,7 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, OnceLock};
 
 pub const NODE_FOLLOW: &str = "node.follow";
+pub const VAULT_RELAYED: [&str; 3] = [ops::VAULT_LIST, ops::VAULT_SAVE, ops::VAULT_REMOVE];
 pub const FOLLOW_LEASE_MS: u64 = 60_000;
 
 const TO_NODE: [&str; 2] = [ops::INSTALL_PLAN, ops::INSTALL_APPLY];
@@ -80,6 +81,19 @@ pub trait Forward: Send + Sync {
     fn forward(&self, caller: &Caller, op: &str, args: &Value) -> Option<Result<Value, ApiError>>;
 }
 
+pub struct NoNodeForward;
+
+impl Forward for NoNodeForward {
+    fn forward(&self, _caller: &Caller, op: &str, args: &Value) -> Option<Result<Value, ApiError>> {
+        let named = !matches!(args.get("node"), None | Some(Value::Null));
+        if !VAULT_RELAYED.contains(&op) || !named {
+            return None;
+        }
+        let text = "this machine is in no cluster, so it has no other vault";
+        Some(Err(ApiError::new(ErrorCode::Failed, text)))
+    }
+}
+
 pub struct NodeForward {
     node: Arc<ClusterNode>,
 }
@@ -96,12 +110,81 @@ impl NodeForward {
         let home = status.pointer("/cluster/home").and_then(Value::as_str);
         home == Some(self.node.me().as_str())
     }
+
+    fn to_vault(&self, caller: &Caller, op: &str, args: &Value) -> Option<Result<Value, ApiError>> {
+        let wanted = match args.get("node") {
+            None | Some(Value::Null) => return None,
+            Some(Value::String(text)) => text.as_str(),
+            Some(_) => return Some(Err(ApiError::bad_request("node is a machine id"))),
+        };
+        if caller.tier != Tier::App {
+            return Some(Err(ApiError::new(
+                ErrorCode::Forbidden,
+                "only the Notchling app uses another machine's vault",
+            )));
+        }
+        let status = self.node.status();
+        let Some(vault) = status
+            .pointer("/cluster/vault")
+            .and_then(Value::as_str)
+            .and_then(NodeId::parse)
+        else {
+            let text = "this machine is in no cluster, so it has no other vault";
+            return Some(Err(ApiError::new(ErrorCode::Failed, text)));
+        };
+        let member = |id: &NodeId| {
+            status
+                .get("members")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .find(|m| m.get("id").and_then(Value::as_str) == Some(id.as_str()))
+                .cloned()
+        };
+        let named = |id: &NodeId| {
+            member(id)
+                .and_then(|m| m.get("name").and_then(Value::as_str).map(str::to_string))
+                .unwrap_or_else(|| id.to_string())
+        };
+        if NodeId::parse(wanted).as_ref() != Some(&vault) {
+            return Some(Err(ApiError::bad_request(
+                "that machine doesn't hold the vault",
+            )));
+        }
+        if vault == *self.node.me() {
+            return None;
+        }
+        let online = member(&vault)
+            .and_then(|m| m.get("online").and_then(Value::as_bool))
+            .unwrap_or(false);
+        if !online {
+            let text = format!("The vault is on {}, which is offline", named(&vault));
+            return Some(Err(ApiError::new(ErrorCode::Failed, text)));
+        }
+        let mut bare = args.clone();
+        if let Some(fields) = bare.as_object_mut() {
+            fields.remove("node");
+        }
+        let origin = Origin {
+            node: self.node.me().clone(),
+            tier: OriginTier::App,
+        };
+        Some(self.node.local(LocalCmd::Forward {
+            node: vault,
+            op: op.to_string(),
+            args: bare.into(),
+            origin,
+        }))
+    }
 }
 
 impl Forward for NodeForward {
     fn forward(&self, caller: &Caller, op: &str, args: &Value) -> Option<Result<Value, ApiError>> {
         if caller.client == ClientKind::Node {
             return None;
+        }
+        if VAULT_RELAYED.contains(&op) {
+            return self.to_vault(caller, op, args);
         }
         let (to, bare) = match route(op, args, self.node.me()) {
             Some(routed) => routed,
@@ -129,7 +212,7 @@ impl Forward for NodeForward {
         Some(self.node.local(LocalCmd::Forward {
             node: to,
             op: op.to_string(),
-            args: bare,
+            args: bare.into(),
             origin,
         }))
     }

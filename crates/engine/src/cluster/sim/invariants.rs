@@ -17,6 +17,13 @@ pub enum Violation {
     StandbyAhead { node: NodeId, set: String },
     TornSet { node: NodeId, set: String },
     MovedUnpushed { session: String, node: NodeId },
+    SecretLeaked { node: NodeId, path: String },
+    GrantOnWrongNode { job: String, node: NodeId },
+    GrantOutlivedJob { job: String, node: NodeId },
+    RefreshOnWorker { node: NodeId },
+    AnswerTwice { item: String },
+    ReleasedOffPrimary { node: NodeId, term: Term },
+    ReleasedWithoutAllow { job: String },
 }
 
 pub fn check(world: &World) -> Result<(), Violation> {
@@ -76,8 +83,8 @@ pub fn check(world: &World) -> Result<(), Violation> {
             return Err(Violation::JobStartedTwice { job: key.0.clone() });
         }
     }
-    match snap_violation(world) {
-        Some(v) => Err(v),
-        None => Ok(()),
+    if let Some(v) = snap_violation(world) {
+        return Err(v);
     }
+    super::secrets_check::check_secrets(world)
 }

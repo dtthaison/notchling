@@ -2,12 +2,14 @@ use super::registry::{Machine, MachineOs, SdWorkerSettings};
 use super::runner::{Channel, OutputSink};
 use super::shell;
 use super::step::{
-    run, Cadence, CheckResult, FixContext, FixOutcome, FixPlan, Probe, SecretSource, SetupStep,
-    StepFix, StepId,
+    run, Cadence, CheckResult, FixContext, FixOutcome, FixPlan, Probe, RemoteOutput, SecretSource,
+    SetupStep, StepContext, StepFix, StepId,
 };
+use super::steps_node::{json_from, BINARY};
 use super::token_creation;
 use super::usage::{SecretFormat, SecretUsage};
 use crate::accounts::Secret;
+use crate::cluster::login_files::{CLUSTER_LOGIN_ENTRY, CLUSTER_LOGIN_ON};
 use crate::lanes::quote;
 use crate::vault::{Redactor, VaultEntry, VaultRequest, VaultValue};
 use sha2::{Digest, Sha256};
@@ -34,7 +36,81 @@ pub fn issues_usage(m: &Machine, job: &SdWorkerSettings) -> SecretUsage {
     }
 }
 
+pub const SENT_BY_THE_CLUSTER: &str = "Sent by the cluster";
+
+fn cluster_sends_login(m: &Machine) -> bool {
+    m.node.is_some() && m.sd_worker().is_none()
+}
+
+fn cluster_login(m: &Machine) -> SetupStep {
+    SetupStep::new(
+        StepId::CLAUDE_LOGIN,
+        "Claude login",
+        vec![StepId::REACHABLE, StepId::NODE_JOINED],
+        Cadence::EveryRefresh,
+        Probe::remote(
+            format!("{} cluster status --json", shell::path(BINARY)),
+            |out, ctx| cluster_login_result(out, ctx, CLUSTER_LOGIN_ON),
+        ),
+        StepFix::HowTo(cluster_how_to(m, CLUSTER_LOGIN_ON)),
+    )
+}
+
+pub(super) fn cluster_how_to(m: &Machine, on: bool) -> String {
+    if !on {
+        return format!(
+            "The cluster login isn't available in this build yet. Sign Claude Code in on {} yourself: in your own Terminal on that machine run claude and sign in with /login. Notchling never renews that login.",
+            m.name
+        );
+    }
+    let mut text = format!(
+        "The cluster sends this. In your own Terminal run claude setup-token, then save {CLUSTER_LOGIN_ENTRY} in the Secret Vault with an expiry date, and allow it on this machine (Secrets…). While the Mac that holds the vault is the primary it sends the token to {}. Then check again.",
+        m.name
+    );
+    if m.claude_secret != CLUSTER_LOGIN_ENTRY {
+        text.push_str(&format!(
+            " This machine's own Claude secret ({}) isn't used for the cluster login: the cluster sends {CLUSTER_LOGIN_ENTRY} only.",
+            m.claude_secret
+        ));
+    }
+    text
+}
+
+pub(super) fn cluster_login_result(
+    out: &RemoteOutput,
+    _ctx: &StepContext,
+    on: bool,
+) -> CheckResult {
+    let Some(status) = json_from(&out.text) else {
+        return CheckResult::cant_tell("the Notchling service there didn't answer");
+    };
+    let me = status["me"].as_str().unwrap_or("");
+    let member = status["members"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|m| m["id"].as_str() == Some(me));
+    let Some(member) = member else {
+        return CheckResult::cant_tell("this machine isn't in the cluster's list yet");
+    };
+    if member["versions"].is_null() {
+        return CheckResult::cant_tell("the node hasn't reported its logins yet");
+    }
+    if member["versions"]["logins"]["claude"].as_bool() == Some(true) {
+        CheckResult::pass(SENT_BY_THE_CLUSTER)
+    } else if !on {
+        CheckResult::cant_tell("the cluster login isn't available in this build yet")
+    } else {
+        CheckResult::fail(
+            "not sent yet: the Mac that holds the vault sends it while it is the primary",
+        )
+    }
+}
+
 pub fn claude_login(m: &Machine) -> SetupStep {
+    if cluster_sends_login(m) {
+        return cluster_login(m);
+    }
     let usage = claude_usage(m);
     let request = VaultRequest {
         name: usage.name.clone(),
@@ -115,7 +191,9 @@ pub fn issues_token(m: &Machine, job: &SdWorkerSettings) -> SetupStep {
 pub fn usages(machines: &[Machine]) -> Vec<SecretUsage> {
     let mut list = Vec::new();
     for m in machines {
-        list.push(claude_usage(m));
+        if !cluster_sends_login(m) {
+            list.push(claude_usage(m));
+        }
         for job in &m.jobs {
             if let Some(settings) = &job.sd_worker {
                 list.push(issues_usage(m, settings));

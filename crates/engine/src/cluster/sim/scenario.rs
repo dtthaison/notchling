@@ -1,6 +1,8 @@
 use serde_json::json;
 
 use super::invariants::{check, Violation};
+use super::secrets::SecretPlant;
+use super::secrets_scenario::{secrets_setup, VAULT};
 use super::world::World;
 use crate::cluster::core::LocalCmd;
 use crate::cluster::id::{NodeId, Tool};
@@ -13,6 +15,7 @@ const TRACE_TAIL: usize = 40;
 pub struct Plant {
     pub double_start: bool,
     pub skip_term_check: bool,
+    pub secrets: SecretPlant,
 }
 
 #[derive(Clone, Debug)]
@@ -32,14 +35,14 @@ impl std::fmt::Display for Failure {
     }
 }
 
-struct Cast {
-    m5: NodeId,
-    m1: NodeId,
-    w1: NodeId,
-    w2: NodeId,
+pub(super) struct Cast {
+    pub m5: NodeId,
+    pub m1: NodeId,
+    pub w1: NodeId,
+    pub w2: NodeId,
 }
 
-fn setup(world: &mut World) -> Cast {
+pub(super) fn setup(world: &mut World) -> Cast {
     let m5 = world.add_node("m5", true);
     let m1 = world.add_node("m1", true);
     let w1 = world.add_node("w1", false);
@@ -52,7 +55,13 @@ fn setup(world: &mut World) -> Cast {
     Cast { m5, m1, w1, w2 }
 }
 
-fn dispatch(world: &mut World, from: &NodeId, key: &str, node: &NodeId, tool: Tool) {
+fn dispatch(
+    world: &mut World,
+    from: &NodeId,
+    key: &str,
+    (node, tool): (&NodeId, Tool),
+    secrets: Vec<String>,
+) {
     let tier = if world.is_client(from) {
         OriginTier::App
     } else {
@@ -67,7 +76,7 @@ fn dispatch(world: &mut World, from: &NodeId, key: &str, node: &NodeId, tool: To
                 tool,
                 cwd: "/srv/repo".to_string(),
                 args: json!({"prompt": "go"}),
-                secrets: Vec::new(),
+                secrets,
             },
             tier,
         },
@@ -83,6 +92,8 @@ pub fn run_world(seed: u64, steps: usize, plant: Plant) -> (World, Result<(), Vi
         world.plant_skip_term_check();
     }
     let cast = setup(&mut world);
+    secrets_setup(&mut world, &cast);
+    world.plant_secrets(plant.secrets);
     let everyone = [
         cast.m5.clone(),
         cast.m1.clone(),
@@ -92,6 +103,7 @@ pub fn run_world(seed: u64, steps: usize, plant: Plant) -> (World, Result<(), Vi
     let macs = [cast.m5.clone(), cast.m1.clone()];
     let mut keys: Vec<String> = Vec::new();
     if let Err(v) = check(&world) {
+        world.note_stats();
         return (world, Err(v));
     }
     for step in 0..steps {
@@ -118,7 +130,19 @@ pub fn run_world(seed: u64, steps: usize, plant: Plant) -> (World, Result<(), Vi
                     8 => Tool::Agy,
                     _ => Tool::Claude,
                 };
-                dispatch(&mut world, &from, &key, &node, tool);
+                let secrets = if world.rng().chance(35) {
+                    let n = 1 + world.rng().below(2) as usize;
+                    (0..n)
+                        .map(|_| {
+                            VAULT[world.rng().below(VAULT.len() as u64) as usize]
+                                .0
+                                .to_string()
+                        })
+                        .collect()
+                } else {
+                    Vec::new()
+                };
+                dispatch(&mut world, &from, &key, (&node, tool), secrets);
             }
             30..=37 => {
                 let a = pick(&mut world, &everyone);
@@ -157,6 +181,10 @@ pub fn run_world(seed: u64, steps: usize, plant: Plant) -> (World, Result<(), Vi
                 let to = pick(&mut world, &macs);
                 world.bump_term(&to);
             }
+            74..=75 => world.secrets_action(0),
+            76..=77 => world.secrets_action(1),
+            78..=80 => world.secrets_action(2),
+            81 => world.secrets_action(3),
             _ => {
                 let ms = 500 + world.rng().below(8_000);
                 world.run_for(ms);
@@ -165,9 +193,11 @@ pub fn run_world(seed: u64, steps: usize, plant: Plant) -> (World, Result<(), Vi
         let settle = 150 + world.rng().below(1_500);
         world.run_for(settle);
         if let Err(v) = check(&world) {
+            world.note_stats();
             return (world, Err(v));
         }
     }
+    world.note_stats();
     (world, Ok(()))
 }
 
@@ -208,7 +238,7 @@ pub fn stale_call_scenario(plant_skip: bool) -> (World, Result<(), Violation>) {
         LocalCmd::Forward {
             node: w1.clone(),
             op: "session.reply".to_string(),
-            args: json!({"id": "s1", "text": "hello"}),
+            args: json!({"id": "s1", "text": "hello"}).into(),
             origin: Origin {
                 node: m5.clone(),
                 tier: OriginTier::App,

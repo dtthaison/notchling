@@ -538,7 +538,7 @@ impl World {
         let msg = Msg::Call {
             id: ACK_ID_BASE + self.snaps.next_ack,
             op: "snap.ack".to_string(),
-            args: json!({"set": set.set, "lengths": lengths}),
+            args: json!({"set": set.set, "lengths": lengths}).into(),
             origin: Origin {
                 node: target.clone(),
                 tier: OriginTier::Node,

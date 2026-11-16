@@ -13,6 +13,7 @@ pub enum Kind {
     VersionDrift,
     NodeJoin,
     OutboxUnsent,
+    LoginNeeded,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]

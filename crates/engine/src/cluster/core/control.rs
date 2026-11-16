@@ -4,9 +4,11 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use super::{
-    shown_members, Effect, Joining, LocalCmd, NodeCore, Target, Then, CALL_MS, DELEGATE_CALL_MS,
+    shown_members, Effect, Joining, LocalCmd, NodeCore, Target, Then, ATTACH_CALL_MS, CALL_MS,
+    DELEGATE_CALL_MS,
 };
 use crate::cluster::failover::{armed_at_current, Failover};
+use crate::cluster::grants::SecretAllow;
 use crate::cluster::id::NodeId;
 use crate::cluster::main_sessions::{aliases, reconcile};
 use crate::cluster::members::{Desired, Member, MemberState, Term};
@@ -30,6 +32,15 @@ struct SetArgs {
     headless: Option<bool>,
     #[serde(default)]
     desired: Option<Desired>,
+}
+
+#[derive(Deserialize)]
+struct AllowArgs {
+    node: NodeId,
+    #[serde(default)]
+    names: Option<Vec<String>>,
+    #[serde(default)]
+    any: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -163,6 +174,15 @@ impl NodeCore {
             }
             LocalCmd::SetVersions { versions } => self.set_versions(id, versions, out),
             LocalCmd::SetFailover { failover } => self.local_failover(id, failover, out),
+            LocalCmd::SetAllow { node, names, any } => {
+                if self.is_home() {
+                    let result = self.set_allow(AllowArgs { node, names, any }, out);
+                    self.finish(target, result, out);
+                } else {
+                    let args = json!({"node": node, "names": names, "any": any});
+                    self.relay_to_home(id, "cluster.allow.set", args, out);
+                }
+            }
             LocalCmd::Dispatch { key, spec, tier } => {
                 if self.is_home() {
                     self.dispatch_here(target, key, spec, tier, out);
@@ -173,8 +193,10 @@ impl NodeCore {
                     };
                     let wait = if spec.is_delegate() {
                         DELEGATE_CALL_MS + CALL_MS
-                    } else {
+                    } else if spec.secrets.is_empty() {
                         CALL_MS
+                    } else {
+                        ATTACH_CALL_MS + CALL_MS
                     };
                     let args = json!({"key": key, "spec": spec});
                     self.relay_to_home_within(id, "cluster.dispatch", args, origin, wait, out);
@@ -185,7 +207,7 @@ impl NodeCore {
                 op,
                 args,
                 origin,
-            } => self.forward(id, node, op, args, origin, out),
+            } => self.forward(id, node, op, args.into_inner(), origin, out),
             LocalCmd::JobEvent { name, data } => {
                 let me = self.me.clone();
                 self.on_job_event(&me, &name, &data, out);
@@ -446,6 +468,14 @@ impl NodeCore {
         self.finish(target, result, out);
     }
 
+    pub(super) fn native_allow_set(&mut self, target: Target, args: &Value, out: &mut Vec<Effect>) {
+        let result = match serde_json::from_value::<AllowArgs>(args.clone()) {
+            Ok(a) => self.set_allow(a, out),
+            Err(_) => Err(refusal("bad_args", "not an allowlist change")),
+        };
+        self.finish(target, result, out);
+    }
+
     fn set_main(
         &mut self,
         session: String,
@@ -499,6 +529,29 @@ impl NodeCore {
             }
         }
         let _ = self.apply(Command::Main { main, ended, kept }, out);
+    }
+
+    fn set_allow(&mut self, a: AllowArgs, out: &mut Vec<Effect>) -> Result<Value, WireError> {
+        let current = self
+            .state
+            .as_ref()
+            .and_then(|s| s.members.get(&a.node))
+            .map(|m| m.secrets.clone())
+            .ok_or_else(|| refusal("refused", "that machine isn't a member"))?;
+        let names = a
+            .names
+            .unwrap_or_else(|| current.names.iter().cloned().collect());
+        let allow = SecretAllow::new(names, a.any.unwrap_or(current.any));
+        self.apply(
+            Command::SetAllow {
+                node: a.node,
+                allow,
+            },
+            out,
+        )
+        .map_err(|e| refusal("refused", e.to_string()))?;
+        self.push_members(None, out);
+        Ok(json!({}))
     }
 
     fn set_member(&mut self, a: SetArgs, out: &mut Vec<Effect>) -> Result<Value, WireError> {

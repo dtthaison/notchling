@@ -1,7 +1,8 @@
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use notchling_engine::vault::entry::{VaultEntry, VaultValue};
 use notchling_local_api::{ClientError, SOCKET_NAME};
+use notchling_locale as t;
 use serde_json::Value;
 
 use super::wire::{parse_entries, Call, Decision};
@@ -19,6 +20,15 @@ pub struct Snapshot {
 pub struct Vault {
     transport: Option<Box<dyn Transport>>,
     snapshot: Mutex<Snapshot>,
+    remote: Option<Mutex<Option<String>>>,
+}
+
+struct Shared(Arc<dyn Transport>);
+
+impl Transport for Shared {
+    fn call(&self, op: &str, args: Value) -> Result<Value, ClientError> {
+        self.0.call(op, args)
+    }
 }
 
 fn message(e: &ClientError) -> String {
@@ -37,6 +47,40 @@ impl Vault {
         Vault {
             transport: Some(transport),
             snapshot: Mutex::new(Snapshot::default()),
+            remote: None,
+        }
+    }
+
+    pub fn remote_over(transport: Arc<dyn Transport>) -> Vault {
+        Vault {
+            transport: Some(Box::new(Shared(transport))),
+            snapshot: Mutex::new(Snapshot::default()),
+            remote: Some(Mutex::new(None)),
+        }
+    }
+
+    pub fn remote_fixed(entries: Vec<VaultEntry>) -> Vault {
+        let mut vault = Vault::fixed(entries);
+        vault.remote = Some(Mutex::new(None));
+        vault
+    }
+
+    pub fn is_remote(&self) -> bool {
+        self.remote.is_some()
+    }
+
+    pub fn set_node(&self, node: Option<&str>) {
+        let Some(slot) = &self.remote else {
+            return;
+        };
+        let mut held = lock(slot);
+        let next = node.map(str::to_owned);
+        if *held != next {
+            *held = next;
+            drop(held);
+            if self.transport.is_some() {
+                self.update(|s| *s = Snapshot::default());
+            }
         }
     }
 
@@ -48,6 +92,7 @@ impl Vault {
                 entries,
                 error: None,
             }),
+            remote: None,
         }
     }
 
@@ -77,18 +122,45 @@ impl Vault {
         if self.transport.is_none() {
             return Err(crate::acting::DETACHED_MESSAGE.into());
         }
+        if let Some(slot) = &self.remote {
+            return match *lock(slot) {
+                Some(_) => Ok(()),
+                None => Err(t::cluster::vault_unknown().to_owned()),
+            };
+        }
         match switches.message(Switch::Vault) {
             Some(why) => Err(why.to_owned()),
             None => Ok(()),
         }
     }
 
+    fn current_node(&self) -> Option<String> {
+        self.remote.as_ref().and_then(|slot| lock(slot).clone())
+    }
+
     fn send(&self, switches: &Switches, call: &Call) -> Result<Value, String> {
+        self.send_at(switches, call, None)
+    }
+
+    fn send_at(
+        &self,
+        switches: &Switches,
+        call: &Call,
+        pinned: Option<&str>,
+    ) -> Result<Value, String> {
         self.gate(switches)?;
         let Some(transport) = &self.transport else {
             return Err(crate::acting::DETACHED_MESSAGE.into());
         };
-        transport.call(call.op, call.args.clone()).map_err(|e| {
+        let mut args = call.args.clone();
+        if self.remote.is_some() {
+            let node = self.current_node().unwrap_or_default();
+            if pinned.is_some_and(|p| p != node) {
+                return Err(t::cluster::vault_moved().to_owned());
+            }
+            args["node"] = Value::String(pinned.map_or(node, str::to_owned));
+        }
+        transport.call(call.op, args).map_err(|e| {
             if switches::detaches(&e) {
                 self.update(|s| *s = Snapshot::default());
                 return crate::acting::DETACHED_MESSAGE.to_owned();
@@ -106,7 +178,7 @@ impl Vault {
         if self.transport.is_none() {
             return;
         }
-        if !switches.is_on(Switch::Vault) {
+        if self.remote.is_none() && !switches.is_on(Switch::Vault) {
             self.update(|s| {
                 s.attached = switches.attached;
                 s.entries.clear();
@@ -114,7 +186,11 @@ impl Vault {
             });
             return;
         }
+        let asked = self.current_node();
         if let Ok(v) = self.send(switches, &Call::list()) {
+            if self.current_node() != asked {
+                return;
+            }
             self.update(|s| {
                 s.attached = true;
                 s.entries = parse_entries(&v);
@@ -131,7 +207,19 @@ impl Vault {
         replacing: Option<&str>,
         request: Option<&str>,
     ) -> Result<(), String> {
-        let v = self.send(switches, &Call::save(entry, value, replacing, request))?;
+        self.save_at(None, switches, entry, value, (replacing, request))
+    }
+
+    pub fn save_at(
+        &self,
+        pinned: Option<&str>,
+        switches: &Switches,
+        entry: &VaultEntry,
+        value: Option<&VaultValue>,
+        (replacing, request): (Option<&str>, Option<&str>),
+    ) -> Result<(), String> {
+        let call = Call::save(entry, value, replacing, request);
+        let v = self.send_at(switches, &call, pinned)?;
         if let Ok(saved) = serde_json::from_value::<VaultEntry>(v["entry"].clone()) {
             self.update(|s| {
                 s.entries
@@ -145,7 +233,16 @@ impl Vault {
     }
 
     pub fn remove(&self, switches: &Switches, name: &str) -> Result<(), String> {
-        self.send(switches, &Call::remove(name))?;
+        self.remove_at(None, switches, name)
+    }
+
+    pub fn remove_at(
+        &self,
+        pinned: Option<&str>,
+        switches: &Switches,
+        name: &str,
+    ) -> Result<(), String> {
+        self.send_at(switches, &Call::remove(name), pinned)?;
         self.update(|s| {
             s.entries.retain(|e| e.name != name);
             s.error = None;
@@ -290,6 +387,52 @@ mod tests {
             fixed.snapshot().entries.len(),
             1,
             "a render keeps what it was given"
+        );
+    }
+
+    #[test]
+    fn a_remote_vault_forgets_its_list_when_the_node_changes_even_from_none() {
+        let remote = Vault::remote_over(Arc::new(NoCalls));
+        remote.update(|s| {
+            s.attached = true;
+            s.entries = vec![VaultEntry::new("old", Kind::Token)];
+        });
+        remote.set_node(Some("node-a"));
+        assert!(remote.snapshot().entries.is_empty());
+    }
+
+    struct NoCalls;
+
+    impl Transport for NoCalls {
+        fn call(&self, _: &str, _: Value) -> Result<Value, ClientError> {
+            Ok(Value::Null)
+        }
+    }
+
+    #[test]
+    fn a_pinned_node_goes_with_the_call_or_the_call_is_refused() {
+        let calls: Arc<Mutex<Vec<Value>>> = Arc::default();
+        struct Record(Arc<Mutex<Vec<Value>>>);
+        impl Transport for Record {
+            fn call(&self, _: &str, args: Value) -> Result<Value, ClientError> {
+                self.0.lock().expect("calls").push(args);
+                Ok(json!({"removed": true}))
+            }
+        }
+        let remote = Vault::remote_over(Arc::new(Record(calls.clone())));
+        let on = Switches::all_on();
+        remote.set_node(Some("node-a"));
+        remote.remove_at(Some("node-a"), &on, "x").expect("pinned");
+        assert_eq!(calls.lock().expect("calls")[0]["node"], "node-a");
+        remote.set_node(Some("node-b"));
+        let entry = VaultEntry::new("x", Kind::Token);
+        let refused = remote.save_at(Some("node-a"), &on, &entry, None, (None, None));
+        assert!(refused.is_err());
+        assert!(remote.remove_at(Some("node-a"), &on, "x").is_err());
+        assert_eq!(
+            calls.lock().expect("calls").len(),
+            1,
+            "nothing reached node-b"
         );
     }
 }

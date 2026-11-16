@@ -1,16 +1,17 @@
 use crate::acting_ops::{bad, text_arg, ActingOps, NoLog};
 use crate::catalog_ops::CatalogService;
 use notchling_engine::catalog::Tool;
+use notchling_engine::cluster::grant_files::GrantValue;
 use notchling_engine::control::session::home_of;
 use notchling_engine::control::slash::{route, Route};
 use notchling_engine::control::{
     claude_json_for, execute, plan_move, plan_new_session, plan_remove, plan_stop,
-    plan_trust_folder, ControlError, NewSession, Outcome, Plan, PlanError, Step,
+    plan_trust_folder, ControlError, NewSession, Outcome, Plan, PlanError, Step, LOGIN_TOKEN_VAR,
 };
 use notchling_engine::delegate::agy_trust::claude_trusts;
 use notchling_engine::reply::plan as keys_plan;
 use notchling_engine::sessions::lanes::lane_at_path;
-use notchling_local_api::{ops, ApiError, ErrorCode};
+use notchling_local_api::{ops, ApiError, Caller, ClientKind, ErrorCode};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -26,7 +27,12 @@ fn refused(e: PlanError) -> ApiError {
 }
 
 impl ActingOps {
-    pub(crate) fn control(&self, op: &str, args: &Value) -> Result<Value, ApiError> {
+    pub(crate) fn control(
+        &self,
+        caller: &Caller,
+        op: &str,
+        args: &Value,
+    ) -> Result<Value, ApiError> {
         match op {
             ops::SESSION_STOP => {
                 let plan = plan_stop(&self.agent(args)?, &self.roots).map_err(refused)?;
@@ -42,7 +48,7 @@ impl ActingOps {
                 }
                 Ok(json!({"removed": true}))
             }
-            ops::SESSION_NEW => self.new_session(args),
+            ops::SESSION_NEW => self.new_session(caller, args),
             ops::FOLDER_TRUST => {
                 let folder = folder_arg(args)?;
                 let dir = self.config_dir_arg(args, "config_dir")?;
@@ -104,7 +110,7 @@ impl ActingOps {
         let _ = store.finish_onboarding(&lane);
     }
 
-    fn new_session(&self, args: &Value) -> Result<Value, ApiError> {
+    fn new_session(&self, caller: &Caller, args: &Value) -> Result<Value, ApiError> {
         let folder = folder_arg(args)?;
         let dir = self.config_dir_arg(args, "config_dir")?;
         self.onboard_lane(dir.as_deref());
@@ -116,8 +122,14 @@ impl ActingOps {
             trust: false,
         })
         .map_err(refused)?;
+        let (plan, token) = self.with_login(caller, plan);
         match self.run_raw(&plan) {
-            Ok(job) => Ok(json!({"jobId": job})),
+            Ok(job) => {
+                if let (Some(token), Some(job), Some(login)) = (&token, &job, self.login.get()) {
+                    let _ = login.launched(job, token);
+                }
+                Ok(json!({"jobId": job}))
+            }
             Err(e) => {
                 if matches!(e, ControlError::Untrusted(_)) {
                     if let Ok(real) = std::fs::canonicalize(folder) {
@@ -128,6 +140,19 @@ impl ActingOps {
                 }
                 Err(failed(e))
             }
+        }
+    }
+
+    fn with_login(&self, caller: &Caller, plan: Plan) -> (Plan, Option<GrantValue>) {
+        if caller.client != ClientKind::Node {
+            return (plan, None);
+        }
+        match self.login.get().and_then(|login| login.token()) {
+            Some(token) => (
+                plan.with_claude_secret_env(LOGIN_TOKEN_VAR, &token),
+                Some(token),
+            ),
+            None => (plan, None),
         }
     }
 

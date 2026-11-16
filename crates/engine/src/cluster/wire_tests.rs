@@ -13,7 +13,7 @@ fn encodes_one_line_and_round_trips() {
     let msg = Msg::Call {
         id: 7,
         op: "session.new".to_string(),
-        args: json!({"cwd": "/tmp"}),
+        args: json!({"cwd": "/tmp"}).into(),
         origin: Origin {
             node: id("m5"),
             tier: OriginTier::Node,
@@ -70,7 +70,7 @@ fn call_and_hello_carry_term() {
     let call = Msg::Call {
         id: 1,
         op: "node.load".to_string(),
-        args: json!({}),
+        args: json!({}).into(),
         origin: Origin {
             node: id("w1"),
             tier: OriginTier::Node,

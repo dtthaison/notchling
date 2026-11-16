@@ -299,6 +299,7 @@ from the app in this run, or `cluster.join` (below), or a restart of a headless 
 | `cluster.dispatch` | agent (the app for anything but a delegate; see Dispatch) | `{node, key, tool: "claude" \| "agy" \| "shell", cwd, model?, text?, command?, code?: "folder" \| "send", secrets?}` or `{node, key, delegate: [args]}` | `{job, state, session, qualified, warning}`; a delegate adds `{exit, out, err}` |
 | `shell.stop` | app | `{id: "shell:<job>"}`, or `"<node>/shell:<job>"` for a job on another node | `{stopped: bool}` |
 | `cluster.return` | app | `{job}` | `{job, branch: "notchling/<node name slug>/<job>", node: <the node's name>}` |
+| `cluster.allow.set` | app | `{node, names?, any?}` | `{}`; `names` replaces the vault secrets a job on that machine may carry, `any` allows every name; a field left out stays as it was; relayed to the home from a client |
 
 - `cluster.status` carries `move`, the last handover's state (kept in `move-saga.json`, so it stays after the move ends and after a restart, until the next move starts; `null` when there was none): `{to, step, moving, staying: [[id, reason]], cut, stopped, failed: [[id, why]], reason}`. `cluster.changed` events carry no `move`: read `cluster.status`, as the app does every second while a move runs. `step` is `prepare`, `catch_up`, `freeze`, `final_snapshot`, `stop_old`, `switch`, `resume`, `announce`, `done` or `undone` (then `reason` says why). From `freeze` until the move ends the primary refuses `session.reply`, `session.answer`, `session.permission` and `codex.send` for a moving session with `"That session is moving to <machine>"`. From `final_snapshot` until it ends the primary is fenced: `session.new`, `session.move`, `cluster.dispatch`, `cluster.main.set` and `cluster.return` answer `"The primary is moving to <machine>"`, and no snapshot but the final one is taken (a turn end, the timer or a newly ready Standby waits until the move ends). Inbox items raised on the old primary in that window stay there and are named in the announce notice's detail.
 - Node-only ops of the handover (Node tier, sent by the primary, answered by the machine that hosts or takes the sessions; none is an app or agent op): `move.freeze {sessions, to}`, `move.stop {sessions}` (`claude stop` or `codex.stop`; a successful `claude stop` counts as stopped, the session list isn't read again, R110), `move.switch {id, name, term, vault, members, sessions, set}` (the new primary checks the cluster, the term and its own membership, that it holds the final set `set` complete and that Claude Code trusts each moving session's folder, all before anything changes; then restores into a staging folder and takes term `term`, swapping the database in right before the takeover persists; any refusal answers code `refused`, a handover already running there answers `"A handover is in progress here"`, and a repeat for a term it already holds answers Ok), `move.resume {sessions: [id]}` (only from the machine that handed over, only while the receiver still holds that term; starts Claude Code sessions with `claude --bg --resume` and their recorded flags, skips ones already running or already started by an earlier try, and a repeat that arrives while one still runs waits for it; sends no message), `move.undo {sessions}` (unfreezes and restarts the stopped sessions).
@@ -527,6 +528,66 @@ The session ops that are forwarded (`session.new`, `codex.send`, `agy.open`, `ag
 `.conversation`, `prompts.list` and `shell.stop` from a client or the home at app origin. `cluster.dispatch`,
 `cluster.member.set` and `cluster.remove` reach the home from a client at app origin, and `cluster.join.token`
 and a delegate `cluster.dispatch` from any member to the home.
+
+### Cluster secrets, logins and inbox mirrors
+
+Cluster plan C ([decision XXXX](decisions/XXXX-cluster-secrets-and-logins.md)). `ClusterState.vault` is the vault node, the Mac whose Keychain holds the vault.
+Only it, while it is the primary, releases a value. None of the ops below is served on the local socket
+except where a tier is shown; the node-only ones come from another node's link and are checked by
+`policy::RULES` first.
+
+| Op | Sent by | Tier | Args | Reply |
+| --- | --- | --- | --- | --- |
+| `cluster.dispatch` | the app, or an agent | app, agent | adds `secrets: [name, …]` (at most 16, lowercased, no delegate job) | a job whose names the node doesn't allow is refused before it starts; one whose vault node isn't primary is refused with "`<vault node>` holds the vault; dispatch again when it is primary", and no job is made |
+| `grant.attach` | this node's own core | node, local only | `{job, member, vaultName, vaultPrimary}` | `{delivered: [names]}` or `{waiting: reason}`; no other node can send it. The core fails the dispatch on `waiting` ("`<reason>`; dispatch again when it is primary") and revokes what was sent |
+| `grant.revoke_job` | this node's own core | node, local only | `{job, node}` | best effort; asked at every end of a job; the vault node then sends `grant.revoke` |
+| `grant.request` | a Worker's `vault.use`, for a running job | agent origin, to the vault node | `{job, names, command, folder}` | `{delivered: [names]}` or `{waiting: reason}`; the job must be on the sender and the sender must allow each name |
+| `grant.deliver` | the vault node, while it is home | node | `{job, name, value, expiresMs}` | `{stored: name}`; `value` is the entry's environment as JSON (variable to string), at most 32 KiB |
+| `grant.revoke` | the home or the vault node | node | `{job, names?}` | `{}`; no `names` removes every grant of the job |
+| `login.deliver` | the vault node, while it is home | node | `{tool: "claude", value, expiresMs}` | `{stored: "claude"}`, or a refusal while the login is off in this build |
+| `login.revoke` | the home or the vault node | node | `{}` | `{}`; deletes the Worker's login file |
+| `node.inbox` | any member to the home and Can Be Master members | node | `{event: "changed", item}`, `{event: "removed", id}` or `{event: "sync", items}` | `{ok: true}` |
+| `inbox.list` | a client (app) | app | `{}` | `{items: [Item], unread}`; on a client that isn't the home, its own items plus the home's, with the home's ids qualified `<node>/<id>` |
+| `inbox.answer` | a client (app) | app | `{id, action, by?}` | an id of another node is forwarded to its owner, which takes the first answer only. `by` (`mac` or `phone`) is read only from a node-link caller; from anyone else it is ignored and the answer counts as `mac` |
+| `vault.list`, `vault.save`, `vault.remove` | a client (app) | app | the same args plus `node` | with `node` set to the vault node's id, the call goes to that machine's vault; any other value is a bad request |
+
+- A grant's value never appears in a reply, an event, the audit log or a `Debug` print. `grant.*` and
+  `login.*` arguments print as `Args(<hidden>)`.
+- `grant.deliver` does not wait for a job record. A Worker knows its jobs from its own daemon: a shell job
+  from spawn to reap, a Claude or Antigravity job from its start op (`session.new` or `agy.send`).
+  - A job the cluster state lists elsewhere or finished, or one that ended here, is refused.
+  - A job that is live here is stored as live.
+  - Any other job is accepted as pending. Its grant is stored and held for 8.5 minutes (`PENDING_MS`,
+    the attach wait plus one call) from the first deliver, so the grant can arrive before the start op.
+  - The start op makes a pending grant the job's own. A whole-job `grant.revoke` drops the hold. The
+    janitor deletes a pending grant when its window has passed.
+  - `expiresMs` is clamped to 12 hours from now, and a value it could not mask is refused.
+- `grant.request` and a dispatch that names secrets wait up to 8 minutes (`ATTACH_CALL_MS`) for an
+  Ask me first approval. The approval card is the inbox kind `secret_approval`, with Allow Once,
+  Always Allow and Deny. The vault node's audit log records a release as `vault.secret_used` with the
+  names, before the first send.
+- A `vault.list`, `vault.save` or `vault.remove` with `node` never falls back to this machine's vault:
+  with no cluster it says "this machine is in no cluster, so it has no other vault", with the vault
+  node offline "The vault is on `<name>`, which is offline". Without `node`, or with `null`, the local
+  vault answers. An agent-tier or node-tier caller is refused when it names `node`.
+- `vault.use` on a Worker (a node in a cluster that is not the vault node) answers from the grants of
+  the job that the caller's process belongs to. A caller outside every job's process tree gets
+  "secret isn't available here: this command isn't part of a cluster job", and a machine whose cluster
+  state hasn't loaded yet gets "secret isn't available yet: this machine's cluster is still loading".
+  A process root is recorded for shell jobs only, so `vault.use` inside a Claude or Antigravity job on a
+  Worker is refused. A request that has to wait for the vault node answers "secret isn't available yet:
+  waiting for `<vault node>`, which holds the vault". A vault node that is not the primary usually answers "no job" instead, since its state has none of the Worker's jobs unless it dispatched the job itself. A dispatch that names secrets while another machine is primary is refused with "`<vault node>` holds the vault; dispatch again when it is primary".
+- `cluster.status` members carry `secrets: {names, any}` and `versions.logins` (a map of tool to signed
+  in, absent when the Worker could not tell). `node.versions` reports the logins: `codex` (from
+  `codex login status`), `agy` (whether `~/.gemini/jetski-standalone-oauth-token` exists and is not empty, read as signed
+  out on Linux and as unknown on a Mac, where the login may be in the Keychain, which is never read)
+  and `claude` only while the cluster login is on, which it is not in this build. The probes
+  run off the driver thread, at most every 10 minutes, with a 5 s limit per command, and never refresh a
+  token. A tool known to be signed out (`false`) is refused at dispatch with "`<Tool>` isn't signed in on
+  `<node>`".
+- Inbox mirrors live in memory, are refilled by the owner's `sync` and are never written to the
+  receiver's inbox file. A mirrored item keeps its owner's qualified id, drops its `open` form ticket
+  and is cut to fixed lengths. A call with an id the sender doesn't own refuses the whole call.
 
 ## `codex_ops.rs`
 

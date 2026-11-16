@@ -1,7 +1,8 @@
+use self::status::answer;
 use crate::acting_ops::Room;
 use crate::cluster_node::{
-    wire_error, Answer, ClusterLog, ClusterSetup, Hooks, In, JoinAsk, LocalCalls, NetSide, Parts,
-    Shared, Submit,
+    lock, wire_error, Answer, ClusterLog, ClusterSetup, Hooks, In, JoinAsk, LocalCalls, NetSide,
+    Parts, Shared, Submit,
 };
 use notchling_cluster_net::{Conn, Listener};
 use notchling_engine::bridge::net::crypto::{hex, random_bytes, random_token};
@@ -242,7 +243,7 @@ impl Driver {
                 cmd: LocalCmd::Forward {
                     node,
                     op: "node.load".to_string(),
-                    args: json!({}),
+                    args: json!({}).into(),
                     origin,
                 },
             });
@@ -392,7 +393,7 @@ impl Driver {
             let cmd = LocalCmd::Forward {
                 node: home,
                 op: "cluster.join.token".to_string(),
-                args: json!({}),
+                args: json!({}).into(),
                 origin,
             };
             self.local_cmd(cmd, Some(answer));
@@ -445,6 +446,7 @@ impl Driver {
     fn step(&mut self, input: Input) {
         let effects = self.core.step(input);
         let mut rest = effects.into_iter();
+        let mut runs = Vec::new();
         while let Some(effect) = rest.next() {
             if matches!(effect, Effect::AdoptStaged) {
                 if let Err(why) = crate::snap_restore_fs::adopt_staged(&self.setup.cluster_dir) {
@@ -455,7 +457,8 @@ impl Driver {
             }
             if let Effect::Persist { entry, changes } = &effect {
                 if let Err(why) = persist::save(&self.setup.cluster_dir, entry, changes) {
-                    self.save_failed(why, rest.collect());
+                    let rest = self.revoke_unsaved(runs, rest.collect());
+                    self.save_failed(why, rest);
                     return;
                 }
                 if changes.iter().any(|c| matches!(c, Change::Cluster { .. })) {
@@ -463,6 +466,14 @@ impl Driver {
                 }
                 continue;
             }
+            if matches!(effect, Effect::RunLocal { .. }) {
+                runs.push(effect);
+                continue;
+            }
+            self.effect(effect);
+        }
+        *lock(&self.shared.state) = self.core.state().cloned();
+        for effect in runs {
             self.effect(effect);
         }
     }
@@ -490,7 +501,8 @@ impl Driver {
             self.setup.client,
         )
         .with_boot_id(self.boot_id.clone())
-        .with_versions_gap(self.setup.versions_gap_ms);
+        .with_versions_gap(self.setup.versions_gap_ms)
+        .with_counters(self.core.counters());
         self.step(Input::Tick {
             boot_ms: self.boot_ms(),
             wall_ms: now_ms(),
@@ -534,7 +546,7 @@ impl Driver {
                 args,
                 origin,
                 ..
-            } => self.run_local(call, op, args, origin),
+            } => self.run_local(call, op, args.into_inner(), origin),
             Effect::Answer { local, result } => {
                 if let Some(reply) = self.replies.remove(&local) {
                     self.answered(reply, result);
@@ -620,18 +632,6 @@ impl Driver {
             let result = Err(failed("no thread for the call"));
             let _ = self.tx.send(In::Core(Input::LocalDone { call, result }));
         }
-    }
-}
-
-fn answer(reply: Reply, result: Result<Value, WireError>) {
-    match reply {
-        Reply::Wait(tx) => {
-            let _ = tx.send(result);
-        }
-        Reply::Token(tx, token) => {
-            let _ = tx.send(result.map(|_| json!({"token": token})));
-        }
-        Reply::Load(_) => {}
     }
 }
 

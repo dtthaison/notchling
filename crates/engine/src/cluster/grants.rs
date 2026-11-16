@@ -1,7 +1,8 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
+use super::grant_files::GrantValue;
 use super::jobs::{Job, JobSpec, JobState};
 use super::members::{Member, MemberState};
 use crate::vault::entry::valid_name;
@@ -91,10 +92,7 @@ pub fn decide(a: &GrantAsk) -> GrantDecision {
         return GrantDecision::Refuse(format!("{} isn't allowed on {}", a.name, a.node.name));
     }
     if !a.vault_is_primary {
-        return GrantDecision::Wait(format!(
-            "{} waits for {}: the vault is there",
-            a.name, a.vault_name
-        ));
+        return GrantDecision::Wait(format!("{}, which holds the vault", a.vault_name));
     }
     if !a.exists {
         return GrantDecision::Refuse(format!(
@@ -127,4 +125,19 @@ pub fn attachable(spec: &JobSpec, allow: &SecretAllow) -> Result<(), String> {
 
 fn shown(name: &str) -> String {
     name.chars().take(64).collect()
+}
+
+pub fn encode_env(env: &BTreeMap<String, String>) -> Result<GrantValue, String> {
+    serde_json::to_string(env)
+        .map(GrantValue::new)
+        .map_err(|_| "the environment can't be encoded".to_string())
+}
+
+pub fn decode_env(value: &GrantValue) -> Result<BTreeMap<String, GrantValue>, String> {
+    let raw: BTreeMap<String, String> = serde_json::from_str(value.expose())
+        .map_err(|_| "the granted environment is malformed".to_string())?;
+    Ok(raw
+        .into_iter()
+        .map(|(name, text)| (name, GrantValue::new(text)))
+        .collect())
 }

@@ -195,7 +195,7 @@ fn ack_from(hub: &mut Hub, who: &str, set: &str, length: u64) {
             msg: Msg::Call {
                 id: length + 100,
                 op: "snap.ack".to_string(),
-                args: json!({"set": set, "lengths": {"/t/sess-1.jsonl": length}}),
+                args: json!({"set": set, "lengths": {"/t/sess-1.jsonl": length}}).into(),
                 origin: Origin {
                     node: id(who),
                     tier: OriginTier::Node,
@@ -250,7 +250,7 @@ fn an_ack_with_a_relative_path_is_ignored() {
             msg: Msg::Call {
                 id: 1,
                 op: "snap.ack".to_string(),
-                args: json!({"set": "s-1", "lengths": {"t/sess-1.jsonl": 5}}),
+                args: json!({"set": "s-1", "lengths": {"t/sess-1.jsonl": 5}}).into(),
                 origin: Origin {
                     node: id("m1"),
                     tier: OriginTier::Node,

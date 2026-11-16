@@ -262,3 +262,60 @@ cluster-shell-ended = Finished
 cluster-shell-waiting = Waiting for the log from the other machine…
 cluster-shell-empty = No output yet.
 cluster-shell-no-reply = A shell job takes no replies.
+
+## Logins
+
+# One tool's login on a node, in a row of them; $tool is the tool's name and $state one of the four words below.
+cluster-login = { $tool }: { $state }
+cluster-login-signed-in = Signed In
+cluster-login-signed-out = Signed Out
+cluster-login-not-installed = Not Installed
+# The node has not said whether the tool is signed in.
+cluster-login-unknown = Unknown
+
+## Secrets
+
+# A row menu item that opens the list of vault secrets a node may use.
+cluster-secrets = Secrets…
+# Title of the secrets editor; $name is the node's name.
+cluster-secrets-title = Secrets on { $name }
+cluster-secrets-about = A job on this machine can carry only the secrets checked here. Each is sent to the machine when the job starts and deleted when it ends.
+cluster-secrets-any = Any Secret
+cluster-secrets-any-about = Every secret in the vault, by name, on this machine. Your checked names are kept for when this is off.
+cluster-secrets-reading = Reading the vault…
+cluster-secrets-empty = The vault has no secrets yet.
+# Beside a checked name that is no longer saved in the vault.
+cluster-secrets-gone = Not in the vault
+cluster-secrets-save = Save
+cluster-secrets-cancel = Cancel
+cluster-secrets-failed = Couldn't change the secrets: { $error }
+cluster-secrets-vault-failed = Couldn't read the vault: { $error }
+# Shown when Save finds the machine can no longer take secrets (removed, inactive or a client).
+cluster-secrets-node-gone = This machine can't take secrets any more, so nothing was saved.
+# Under the list when the most secrets are checked; $max is the limit.
+cluster-secrets-cap = At most { $max } secrets. Uncheck one to choose another.
+cluster-secrets-none = No secrets
+cluster-secrets-any-short = Any secret
+# Line on a node's row; $count is how many secrets it may carry.
+cluster-secrets-count = { $count ->
+    [one] { NUMBER($count) } secret
+   *[other] { NUMBER($count) } secrets
+}
+# Label of the picker of secrets in New Session on a Worker.
+cluster-secrets-picker = Secrets
+cluster-secrets-picker-none = This machine carries no secrets. Choose some in the cluster's Secrets… menu.
+# Under the picker while another machine is the primary; $name is the vault's machine.
+cluster-secrets-wait = New secrets wait for { $name }
+
+## Vault on another machine
+
+cluster-vault-tab-local = This Mac
+# Tab that shows the vault of the machine that holds it; $name is its name.
+cluster-vault-tab-remote = Vault on { $name }
+cluster-vault-offline = The vault is on { $name }, which is offline
+cluster-vault-unknown = This Mac doesn't know which machine holds the vault.
+cluster-vault-unreachable = Can't reach the vault. Nothing was saved or removed.
+# Shown when the machine a form or a removal was opened for is no longer the one this Mac would send it to.
+cluster-vault-moved = The vault changed while this was open, so nothing was saved or removed. Open it again.
+# Tab label while this Mac can't tell which machine holds the vault.
+cluster-vault-tab-unknown = Vault on Another Machine

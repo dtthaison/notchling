@@ -109,7 +109,7 @@ fn call_stamped(from: &NodeId, term: Term) -> Msg {
     Msg::Call {
         id: 77,
         op: "node.load".to_string(),
-        args: json!({}),
+        args: json!({}).into(),
         origin: Origin {
             node: from.clone(),
             tier: OriginTier::Node,
@@ -142,7 +142,7 @@ fn reply_stale(hub: &mut Hub, n: &NodeId, from: &NodeId, term: Term) {
         LocalCmd::Forward {
             node: from.clone(),
             op: "node.load".to_string(),
-            args: json!({}),
+            args: json!({}).into(),
             origin: Origin {
                 node: n.clone(),
                 tier: OriginTier::Node,

@@ -100,7 +100,7 @@ fn a_client_member_relays_to_the_primary_and_never_journals_it_first() {
         matches!(
             e,
             Effect::Send { msg: Msg::Call { op, args, .. }, .. }
-                if op == "cluster.failover.set" && args == &json!({"failover": "1h"})
+                if op == "cluster.failover.set" && **args == json!({"failover": "1h"})
         )
     });
     assert!(relayed);

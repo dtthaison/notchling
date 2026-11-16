@@ -1,4 +1,4 @@
-use super::{checked, loopback_ok, node_caller, DaemonCalls};
+use super::{checked, forwarder, loopback_ok, node_caller, DaemonCalls};
 use crate::acting_ops_tests::FakeRoom;
 use crate::cluster_node::LocalCalls;
 use crate::cluster_switches::LateHandler;
@@ -162,4 +162,25 @@ fn a_node_takes_delegation_only_when_its_own_member_says_so() {
     assert!(!super::accepts_delegation(
         &json!({"cluster": null, "me": "a", "members": []})
     ));
+}
+
+#[test]
+fn a_node_that_failed_to_start_never_sends_a_named_vault_op_to_the_local_vault() {
+    let forward = forwarder(&Err("no identity".to_string()));
+    let app = Caller {
+        tier: Tier::App,
+        client: ClientKind::App,
+        peer: None,
+        pid: None,
+    };
+    for op in ["vault.list", "vault.save", "vault.remove"] {
+        let named = json!({"node": "0123456789abcdef"});
+        let err = forward.forward(&app, op, &named).unwrap().unwrap_err();
+        assert_eq!(err.code, ErrorCode::Failed, "{op}");
+        assert!(err.message.contains("no cluster"), "{op}");
+        assert!(forward.forward(&app, op, &json!({})).is_none(), "{op}");
+        assert!(forward.forward(&app, op, &json!({"node": null})).is_none());
+    }
+    let named = json!({"node": "0123456789abcdef"});
+    assert!(forward.forward(&app, "session.reply", &named).is_none());
 }

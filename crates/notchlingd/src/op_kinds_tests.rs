@@ -45,7 +45,7 @@ const OWN_QUIET: [&str; 8] = [
     ops::CODEX_CHILDREN,
 ];
 
-const NEVER_QUIET: [&str; 100] = [
+const NEVER_QUIET: [&str; 101] = [
     ops::HELLO,
     ops::LOG_VERIFY,
     ops::LOG_CHAIN_START,
@@ -141,6 +141,7 @@ const NEVER_QUIET: [&str; 100] = [
     ops::CLUSTER_MAIN_SET,
     ops::CLUSTER_MOVE_HOME,
     ops::CLUSTER_MOVE_NOW,
+    ops::CLUSTER_ALLOW_SET,
     ops::CLUSTER_FOLLOW,
     ops::CLUSTER_DISPATCH,
     ops::SHELL_STOP,

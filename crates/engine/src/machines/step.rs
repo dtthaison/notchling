@@ -40,6 +40,8 @@ impl StepId {
     pub const MASTER_SAME_HOME: StepId = StepId(Cow::Borrowed("master-same-home"));
     pub const MASTER_SPACE: StepId = StepId(Cow::Borrowed("master-space"));
     pub const MASTER_TOOLS: StepId = StepId(Cow::Borrowed("master-tools"));
+    pub const NODE_CODEX_LOGIN: StepId = StepId(Cow::Borrowed("node-codex-login"));
+    pub const NODE_AGY_LOGIN: StepId = StepId(Cow::Borrowed("node-agy-login"));
 
     pub fn self_update(tool: Tool) -> StepId {
         StepId(Cow::Owned(format!("self-update:{}", tool.name())))

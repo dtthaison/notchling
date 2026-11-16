@@ -187,13 +187,51 @@ in it goes to a third party: no server of the project, no cloud relay, no addres
   answers and new sessions to the primary. If the primary can't be reached either, that machine holds them in
   its `cluster.db` until they are sent once or you cancel them. A Worker never talks to the phone.
 - **What never crosses:** Claude Code, Codex and Antigravity logins and tokens, lanes, the Secret Vault and its
-  values (a dispatch that names secrets is refused in this version), the Keychain, `settings.json` and your own
+  values (except the named secrets a job on a Worker may carry, described in the next section), the Keychain, `settings.json` and your own
   files except the commits and the sets above. A Worker and a Standby use their own tool logins.
 - **What a machine you removed keeps:** a machine that hears it was removed deletes `cluster.db`, the mirror
   files, and the incoming and outgoing transfer files. It keeps `<data>/cluster/work` (the repositories and
   worktrees of sent code), `jobs/` (shell job logs), `workspaces/` (notes on sent code), `node/` (its own
   identity), and, on a Can Be Master machine, `standby/` (the primary's sets) and `copies/` (files a handover
   set aside) until you delete them.
+
+## Cluster nodes: secrets and logins on a Worker
+
+Only when this machine is in a cluster (the `cluster` switch is on) and a job names a secret or asks for
+one:
+
+- A secret value crosses to the Worker that runs the job, over the cluster's pinned TLS link. Only the
+  vault node sends it: the Mac whose Keychain holds the vault, while it is the primary.
+- A Worker's allowlist, empty by default, says which names its jobs may carry. An entry marked Ask me
+  first still waits for an Allow from the Mac or a paired phone.
+- On the Worker the value is a mode-600 file in `<data>/cluster/grants/<job>/`. It expires 12 hours
+  after it was sent at the latest. A shell job's grants are deleted when it ends. A Claude or
+  Antigravity job has no end signal on the Worker, so its grants go when the cluster revokes them, at
+  expiry or when the daemon restarts. A Worker cut off from the cluster keeps the file until it
+  expires.
+- A value can arrive before its job starts. A Worker holds it for up to 8.5 minutes, and deletes it if
+  the job has not started by then.
+- The value is never in a command line, a log, an audit entry, the cluster's database, a snapshot or an
+  inbox item. The command `notchling secret` runs gets it in its environment, as on the vault node.
+- The Worker hides every value that is live on it, whichever job the value was granted to, in a job's
+  shell log, in the text other nodes read of the job and in a delegate job's reply. That is not
+  complete:
+  - Triple escapes, JavaScript inside Go strings and base64 or other encodings of a value stay visible.
+  - `workspace.return` carries a job's repository changes unmasked, so a secret a job wrote into a file
+    travels with its branch.
+  - A job's output is refused after a restart that lost its masks.
+  - Every job on a Worker runs as the same user, so a job can read another job's grant file. The masks
+    stop the value coming back to other machines, they do not stop another job reading it.
+- While a value is in use, the daemon holds it in memory as ordinary strings that are not wiped.
+- The vault node's audit log records each release by name, never the value, and the cluster step log
+  records the call.
+- Inbox items from every node are mirrored to the primary and to each Can Be Master machine. That
+  includes a secret approval's title, command (cut to 120 characters) and folder, never a value.
+- Notchling does not renew a login on a Worker. A Worker tells the cluster whether Codex and
+  Antigravity are signed in: Codex's `login status` exit code and text, and whether Antigravity's token
+  file exists and is not empty, never its contents. A check that can't tell leaves the entry absent, and
+  a Mac's Antigravity can't be refused, since its login may be in the Keychain, which is never read.
+  Claude Code's long-lived login is not sent to Workers in this build.
 
 ## Tools Notchling starts
 
@@ -280,7 +318,8 @@ paired phone is shown and what the cluster shares (see The cluster). Cost tracki
 list are local files. Vault values are in the Keychain, and agents reach them only through a socket
 on this Mac that answers only Notchling's own executable. A use of a secret is allowed from the
 Notchling app on the Mac, or from a paired phone through the inbox while the bridge, acting and the
-vault are on; the value itself never leaves the Mac.
+vault are on; the value itself never leaves the Mac, except to a cluster Worker for one job, as
+said above.
 
 ## Planned
 
