@@ -324,6 +324,7 @@ fn enrich_takes_the_last_reply_and_context() {
     };
     conversation.facts.context_tokens = 1234;
     conversation.facts.model = Some("gpt-6".into());
+    conversation.facts.effort = Some("high".into());
     let mut s = session(&row("codex:s", SINCE), false, None).expect("codex");
     enrich(&mut s, &conversation);
     let last = s.last_message.clone().expect("last message");
@@ -332,6 +333,7 @@ fn enrich_takes_the_last_reply_and_context() {
     let facts = s.facts.expect("facts");
     assert_eq!(facts.context_tokens, Some(1234));
     assert_eq!(facts.model.as_deref(), Some("gpt-6"));
+    assert_eq!(facts.effort.as_deref(), Some("high"));
 }
 
 #[test]

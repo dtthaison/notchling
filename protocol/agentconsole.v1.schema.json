@@ -332,6 +332,10 @@
         "model": {
           "type": "string"
         },
+        "effort": {
+          "type": "string",
+          "description": "The reasoning effort on the session's latest reply (\"high\", \"xhigh\"). Absent when the transcript doesn't say; older Macs never send it."
+        },
         "limits": {
           "type": "array",
           "items": {

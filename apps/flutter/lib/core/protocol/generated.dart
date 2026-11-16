@@ -482,6 +482,7 @@ class Facts {
     this.contextTokens,
     this.contextWindow,
     this.model,
+    this.effort,
     required this.limits,
   });
 
@@ -489,6 +490,7 @@ class Facts {
     contextTokens: _maybe(json, 'contextTokens', _asInt),
     contextWindow: _maybe(json, 'contextWindow', _asInt),
     model: _maybe(json, 'model', _asString),
+    effort: _maybe(json, 'effort', _asString),
     limits: _need(json, 'limits', (Object? v) => _asList<Limit>(v, (Object? e) => Limit.fromJson(_asMap(e)))),
   );
 
@@ -496,6 +498,7 @@ class Facts {
     if (contextTokens != null) 'contextTokens': contextTokens,
     if (contextWindow != null) 'contextWindow': contextWindow,
     if (model != null) 'model': model,
+    if (effort != null) 'effort': effort,
     'limits': <Object?>[for (final Limit e in limits) e.toJson()],
   };
 
@@ -504,6 +507,9 @@ class Facts {
   /// Absent when the window is unknown.
   final int? contextWindow;
   final String? model;
+
+  /// The reasoning effort on the session's latest reply ("high", "xhigh"). Absent when the transcript doesn't say; older Macs never send it.
+  final String? effort;
   final List<Limit> limits;
 }
 

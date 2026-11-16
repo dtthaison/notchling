@@ -77,6 +77,7 @@ pub fn sessions() -> Vec<Session> {
         context_tokens: Some(52_000),
         context_window: Some(400_000),
         model: Some("claude-opus-5-5".into()),
+        effort: Some("xhigh".into()),
         limits: vec![
             Limit {
                 label: "5h".into(),

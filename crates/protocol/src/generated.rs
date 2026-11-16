@@ -231,6 +231,9 @@ pub struct Facts {
     pub context_window: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    /// The reasoning effort on the session's latest reply ("high", "xhigh"). Absent when the transcript doesn't say; older Macs never send it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
     pub limits: Vec<Limit>,
 }
 

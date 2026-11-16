@@ -9,6 +9,7 @@
         "facts": {
           "contextTokens": 52000,
           "contextWindow": 400000,
+          "effort": "xhigh",
           "limits": [
             {
               "label": "5h",

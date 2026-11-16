@@ -239,6 +239,7 @@ class SessionFacts {
     this.contextTokens,
     this.contextWindow,
     this.model,
+    this.effort,
     this.limits = const <LimitMeter>[],
   });
 
@@ -250,6 +251,7 @@ class SessionFacts {
         ? (json['contextWindow']! as num).toInt()
         : null,
     model: json.strOrNull('model'),
+    effort: json.strOrNull('effort'),
     limits: json['limits'] is List<Object?>
         ? json.objects('limits').map(LimitMeter.fromJson).toList()
         : const <LimitMeter>[],
@@ -258,6 +260,7 @@ class SessionFacts {
   final int? contextTokens;
   final int? contextWindow;
   final String? model;
+  final String? effort;
   final List<LimitMeter> limits;
 
   double? get contextFraction =>

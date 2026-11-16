@@ -462,6 +462,7 @@ pub fn enrich(
             .and_then(window)
             .and_then(|w| i64::try_from(w).ok()),
         model: facts.model.clone(),
+        effort: facts.effort.clone(),
         limits: limits.to_vec(),
     });
 }
