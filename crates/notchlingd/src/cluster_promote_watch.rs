@@ -151,18 +151,18 @@ fn report(
     (outage, name): (Outage, &str),
     confirmed: bool,
 ) {
-    let term = outage.0;
+    let start_id = format!("promote-start:{}:{}", outage.0, outage.1);
     let title = format!("Couldn't move to {name}");
     match promoter.start(confirmed) {
         Ok(answer) => {
             if let Some(risk) = answer["needsConfirm"].as_str() {
                 match confirmed {
                     false => raise_confirm(promoter, items, (outage, name), risk),
-                    true => items.failed(&format!("promote-start:{term}"), &title, risk),
+                    true => items.failed(&start_id, &title, risk),
                 }
             }
         }
-        Err(e) => items.failed(&format!("promote-start:{term}"), &title, &e.message),
+        Err(e) => items.failed(&start_id, &title, &e.message),
     }
 }
 

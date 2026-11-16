@@ -497,3 +497,26 @@ fn a_restored_takeover_adds_the_snapshots_own_side_copies() {
     assert!(answers(&effects)[0].is_ok());
     assert_eq!(hub.core(&m1).state().expect("state").side_copies, vec![old]);
 }
+
+#[test]
+fn a_restored_takeover_keeps_the_live_path_of_a_moved_side_copy() {
+    let (mut hub, m5, m1) = trio();
+    let mut live = copy("sess-1", &m1, "set-1", 90);
+    live.path = Some("/moved/here".to_string());
+    hub.core_mut(&m1).state.as_mut().expect("state").side_copies = vec![live.clone()];
+    let mut older = copy("sess-1", &m1, "set-1", 40);
+    older.path = Some("/original/path".to_string());
+    older.hidden = true;
+    let mut restored = restored_state(&hub, &m5, 900);
+    restored.side_copies = vec![older];
+    let mut takeover = takeover_for(&hub, &m5, &m1);
+    takeover.restored = Some(restored);
+    let effects = take(&mut hub, &m1, takeover);
+    assert!(answers(&effects)[0].is_ok());
+    let mut want = live;
+    want.hidden = true;
+    assert_eq!(
+        hub.core(&m1).state().expect("state").side_copies,
+        vec![want]
+    );
+}

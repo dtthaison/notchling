@@ -1,5 +1,5 @@
 use crate::cluster_move_tests::{logged, one, Spec, S2};
-use crate::cluster_promote_kit::{rig, rig_with, Rig, CUT_PUSH};
+use crate::cluster_promote_kit::{rig, rig_with, Rig, BOOT_MS, CUT_PUSH};
 use crate::inbox_ops_tests::item;
 use crate::snap_restore_testkit::S1;
 use notchling_engine::cluster::claims::Claim;
@@ -160,8 +160,30 @@ fn a_failed_restore_changes_no_term() {
         .as_str()
         .unwrap()
         .contains("the disk is full"));
-    let item = r.item("promote-failed:2").expect("a notice");
+    let item = r
+        .item(&format!("promote-failed:2:{BOOT_MS}"))
+        .expect("a notice");
     assert_eq!(item.kind, Kind::ActionFailed);
+}
+
+#[test]
+fn a_second_failed_promote_in_the_same_term_raises_its_own_notice() {
+    let r = rig();
+    unreachable_primary(&r);
+    *r.p.to.restore.fail.lock().unwrap() = Some("the disk is full".to_string());
+    go(&r, true);
+    r.finish();
+    let first = format!("promote-failed:2:{BOOT_MS}");
+    r.p.to.inbox.resolve(&first, State::Withdrawn, None, None);
+    let later = BOOT_MS + 60_000;
+    r.clock.store(later, std::sync::atomic::Ordering::SeqCst);
+    go(&r, true);
+    r.finish();
+    let second = r
+        .item(&format!("promote-failed:2:{later}"))
+        .expect("a second notice");
+    assert_eq!(second.state, State::Open);
+    assert_eq!(r.item(&first).expect("the first").state, State::Withdrawn);
 }
 
 #[test]
@@ -281,7 +303,7 @@ fn a_claim_that_could_not_be_recorded_starts_nothing() {
     go(&r, true);
     r.finish();
     assert!(logged(&r.p).is_empty(), "{:?}", logged(&r.p));
-    let item = r.item(&format!("promote-resume:{S1}")).expect("a notice");
+    let item = r.item(&format!("promote-resume:2:{S1}")).expect("a notice");
     assert_eq!(item.kind, Kind::ActionFailed);
     assert!(item.detail.contains("no home"));
     assert_eq!(r.promoter.status()["step"], "done");

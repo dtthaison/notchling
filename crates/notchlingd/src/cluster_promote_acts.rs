@@ -80,10 +80,11 @@ impl Promoter {
         }
         let failed = std::mem::take(&mut ctx.failed);
         let me = self.p.mover.me()?;
+        let term = ctx.facts.state.term.n.saturating_add(1);
         for (session, why) in &failed {
             let title = format!("Couldn't start {session} on {}", name_of(ctx, &me));
             self.items()
-                .failed(&format!("promote-resume:{session}"), &title, why);
+                .failed(&format!("promote-resume:{term}:{session}"), &title, why);
         }
         Some(PromoteEvent::Resumed { failed })
     }
@@ -95,8 +96,11 @@ impl Promoter {
         }
         let term = ctx.facts.state.term.n.saturating_add(1);
         let title = "The move to this machine stopped";
-        self.items()
-            .failed(&format!("promote-failed:{term}"), title, &reason);
+        self.items().failed(
+            &format!("promote-failed:{term}:{}", ctx.run),
+            title,
+            &reason,
+        );
     }
 
     fn probe(&self, primary: &NodeId, via: &[NodeId], within_ms: u64) -> PromoteEvent {

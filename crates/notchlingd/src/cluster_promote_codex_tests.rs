@@ -48,7 +48,7 @@ fn a_failed_codex_claim_is_reported_and_keeps_the_gate() {
     r.promoter.start(true).expect("an answer");
     r.finish();
     let item = r
-        .item(&format!("promote-resume:{CODEX1}"))
+        .item(&format!("promote-resume:2:{CODEX1}"))
         .expect("a notice");
     assert_eq!(item.kind, Kind::ActionFailed);
     assert!(item.detail.contains("no home"));

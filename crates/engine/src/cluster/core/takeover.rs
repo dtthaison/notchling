@@ -197,9 +197,11 @@ impl NodeCore {
         let claims_changed = next.claims != claims_before;
         let next_claims = next.claims.clone();
         if let Some(restored) = &t.restored {
-            for copy in &restored.side_copies {
-                put_side_copy(&mut next.side_copies, copy, self.wall_ms);
+            let mut merged = restored.side_copies.clone();
+            for copy in &next.side_copies {
+                put_side_copy(&mut merged, copy, self.wall_ms);
             }
+            next.side_copies = merged;
         }
         let next_copies = next.side_copies.clone();
         self.state = Some(next);

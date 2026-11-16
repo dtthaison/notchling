@@ -147,6 +147,7 @@ pub(crate) struct Ctx {
     pub failed: Vec<(String, String)>,
     pub unclaimed: BTreeMap<String, String>,
     pub steps: BTreeMap<String, usize>,
+    pub run: u64,
 }
 
 impl Ctx {
@@ -314,6 +315,7 @@ impl Promoter {
             failed: Vec::new(),
             unclaimed: BTreeMap::new(),
             steps: BTreeMap::new(),
+            run: (self.p.boot.now)(),
         };
         let mut events: VecDeque<PromoteEvent> = VecDeque::from([PromoteEvent::Begin(facts)]);
         while let Some(event) = events.pop_front() {
