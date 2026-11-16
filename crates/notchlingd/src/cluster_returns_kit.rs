@@ -26,6 +26,7 @@ pub(crate) struct RecLink {
     pub app_calls: Mutex<Vec<(NodeId, String, Value)>>,
     pub app_answer: Mutex<Result<Value, WireError>>,
     pub fail: Mutex<Option<String>>,
+    pub rival: Mutex<Option<Command>>,
     pub log: Log,
 }
 
@@ -76,11 +77,29 @@ impl Link for RecLink {
         self.log.lock().unwrap().push(note);
         self.records.lock().unwrap().push((command.clone(), tier));
         let mut state = persist::load(&self.cluster).unwrap().unwrap();
+        if let Some(rival) = self.rival.lock().unwrap().take() {
+            let applied = apply(&mut state, rival, 1_000).unwrap();
+            if let Some(entry) = applied.entry {
+                persist::save(&self.cluster, &entry, &applied.changes).unwrap();
+            }
+        }
+        let session = match &command {
+            Command::Claim { claim } => Some(claim.session.clone()),
+            _ => None,
+        };
         let applied = apply(&mut state, command, 1_000)
             .map_err(|e| WireError::new("refused", e.to_string()))?;
-        if let Some(entry) = applied.entry {
-            persist::save(&self.cluster, &entry, &applied.changes).unwrap();
-        }
+        let Some(entry) = applied.entry else {
+            let held = session.and_then(|s| state.claims.get(&s).map(|c| c.node.clone()));
+            return match held {
+                Some(node) if node != self.me => Err(WireError::new(
+                    "refused",
+                    "another machine holds a newer claim on that session",
+                )),
+                _ => Ok(()),
+            };
+        };
+        persist::save(&self.cluster, &entry, &applied.changes).unwrap();
         Ok(())
     }
 
@@ -206,6 +225,7 @@ pub(crate) fn kit(tag: &str, mut seed: Seed) -> Kit {
         app_calls: Mutex::default(),
         app_answer: Mutex::new(Ok(json!({"started": true}))),
         fail: Mutex::default(),
+        rival: Mutex::default(),
         log: log.clone(),
     });
     let rows = Arc::new(Rows::default());

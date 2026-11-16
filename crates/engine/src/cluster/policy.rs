@@ -45,6 +45,7 @@ const CLIENT: &[Sent] = &[Sent::Client, Sent::Home];
 const CLIENT_ONLY: &[Sent] = &[Sent::Client];
 const MEMBER: &[Sent] = &[Sent::Member];
 const PHONE_RELAY: &[Sent] = &[Sent::Client, Sent::Standby];
+const STANDBY: &[Sent] = &[Sent::Standby];
 const VAULT_HOME: &[Sent] = &[Sent::Vault];
 const CLEAR: &[Sent] = &[Sent::Home, Sent::VaultNode];
 
@@ -182,6 +183,7 @@ pub const RULES: &[Rule] = &[
     client_home("cluster.move.now"),
     client_home("cluster.failover.set"),
     client_plain("cluster.promote"),
+    rule("cluster.promote", STANDBY, OriginTier::App, None, false),
     rule("cluster.record", MEMBER, OriginTier::Node, None, true),
     rule("cluster.record", CLIENT, OriginTier::App, None, true),
     rule("node.sessions", CLIENT, OriginTier::Node, None, false),

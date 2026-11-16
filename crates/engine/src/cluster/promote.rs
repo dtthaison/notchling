@@ -338,12 +338,10 @@ fn restored(q: &mut Promote, done: Vec<RestoredSession>, now: u64) -> Vec<Promot
             session.base_len,
         );
         actions.push(PromoteAction::Journal(Box::new(Command::Claim { claim })));
-        if session.tool == Tool::Claude {
-            actions.push(PromoteAction::Resume {
-                session: session.id.clone(),
-                flags: session.flags.clone(),
-            });
-        }
+        actions.push(PromoteAction::Resume {
+            session: session.id.clone(),
+            flags: session.flags.clone(),
+        });
         q.resumed.push(found.clone());
     }
     if !actions

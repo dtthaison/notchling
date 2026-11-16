@@ -520,7 +520,7 @@ fn record_that_changes_nothing_writes_no_entry() {
     let mark = hub.seen.len();
     let effects = record_node(&mut hub, &m1, claim_cmd(claim("s1", &m1, 1)));
     assert_eq!(journaled(&effects), 0);
-    assert_eq!(answered(&hub, mark, "m1").expect("ok")["changed"], false);
+    assert!(answered(&hub, mark, "m1").is_err());
     let home_wrote = hub.seen[mark..]
         .iter()
         .any(|(n, e)| n == "m5" && matches!(e, Effect::Persist { .. }));

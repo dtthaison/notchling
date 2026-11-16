@@ -98,14 +98,32 @@ impl NodeCore {
             return Err(WireError::new("forbidden", "only the primary records this"));
         }
         self.admit_record(who, tier, &command)?;
+        let claimed = match &command {
+            Command::Claim { claim } => Some(claim.session.clone()),
+            _ => None,
+        };
         let changes = self
             .apply(command, out)
             .map_err(|e| refused(e.to_string()))?;
         if changes.is_empty() {
+            if let Some(session) = claimed {
+                if self.held_by_another(&session, who) {
+                    return Err(refused(
+                        "another machine holds a newer claim on that session",
+                    ));
+                }
+            }
             return Ok(json!({"changed": false}));
         }
         self.push_members(None, out);
         Ok(json!({"changed": true}))
+    }
+
+    fn held_by_another(&self, session: &str, who: &NodeId) -> bool {
+        self.state
+            .as_ref()
+            .and_then(|s| s.claims.get(session))
+            .is_some_and(|held| held.node != *who)
     }
 
     fn admit_record(

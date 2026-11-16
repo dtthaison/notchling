@@ -409,17 +409,32 @@ fn in_cluster(dir: &Path, main: BTreeMap<String, MainSession>) {
     persist::save(dir, &entry, &changes).unwrap();
 }
 
+pub(crate) const CODEX1: &str = "codex:cccccccc-1111-4111-8111-cccccccccccc";
+
+fn tool_of(id: &str) -> Tool {
+    if id.starts_with("codex:") {
+        Tool::Codex
+    } else {
+        Tool::Claude
+    }
+}
+
+fn transcript_path(w: &World, id: &str) -> PathBuf {
+    match id.strip_prefix("codex:") {
+        Some(uuid) => w.at(&format!(
+            ".codex/sessions/2026/11/16/rollout-x-{uuid}.jsonl"
+        )),
+        None => w.at(&format!(".claude/projects/p/{id}.jsonl")),
+    }
+}
+
 fn session(w: &World, id: &str, flags: &[&str]) -> MainSession {
     MainSession {
         id: id.to_string(),
-        tool: Tool::Claude,
+        tool: tool_of(id),
         cwd: w.repo.display().to_string(),
         config_dir: None,
-        transcript: Some(
-            w.at(&format!(".claude/projects/p/{id}.jsonl"))
-                .display()
-                .to_string(),
-        ),
+        transcript: Some(transcript_path(w, id).display().to_string()),
         respawn: flags.iter().map(|f| f.to_string()).collect(),
         since_ms: 1,
     }
@@ -526,6 +541,7 @@ pub(crate) fn pair(specs: &[Spec], before_stage: &dyn Fn(&World)) -> Pair {
         let path = PathBuf::from(main.transcript.clone().unwrap());
         crate::snap_files_tests::put(&path, b"one\ntwo\n");
         let mut entry = w.entry(spec.id, &w.repo, &[&path], &[]);
+        entry.tool = tool_of(spec.id);
         if !spec.movable {
             entry.movable = Movable::No("It has commits that aren't pushed".to_string());
         }

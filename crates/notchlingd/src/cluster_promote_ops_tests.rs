@@ -1,7 +1,7 @@
 use crate::acting_ops_tests::FakeRoom;
 use crate::cluster_ops::ClusterOps;
 use crate::cluster_promote_kit::{rig, Rig};
-use crate::cluster_testkit::{node, pair, Opts, TestNode};
+use crate::cluster_testkit::{eventually, node, online, pair, Opts, TestNode};
 use crate::cluster_wiring::{checked, node_caller};
 use crate::switches::{SwitchFlag, CLUSTER, CLUSTER_OFF};
 use notchling_cluster_net::MemNet;
@@ -163,4 +163,43 @@ fn status_carries_the_promote_and_no_takeover_time() {
     let shown = status_of(&r, &o);
     assert_eq!(shown["promote"]["step"], "relayed");
     assert_eq!(shown["promote"]["node"], json!(r.b()));
+}
+
+fn standby_pair(net: &Arc<MemNet>) -> (TestNode, TestNode) {
+    let a = node(net, Opts::named("home"));
+    let b = node(net, Opts::named("standby"));
+    a.node.set_link(true);
+    b.node.set_link(true);
+    a.node.create("home").unwrap();
+    let token = a.node.join_token().unwrap()["token"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    b.node.join(&token, false).unwrap();
+    a.node
+        .local(notchling_engine::cluster::LocalCmd::Approve {
+            node: b.id(),
+            client: false,
+            can_be_master: true,
+        })
+        .unwrap();
+    eventually("both see both online", || {
+        online(&a.node.status(), &b.id()) && online(&b.node.status(), &a.id())
+    });
+    (a, b)
+}
+
+#[test]
+fn a_phone_on_a_standby_without_an_app_can_promote_another_machine() {
+    let net = MemNet::new();
+    let (a, b) = standby_pair(&net);
+    let o = ops_on(&b);
+    let args = json!({"node": a.id(), "confirmed": true});
+    let answer = crate::op_group::OpGroup::call(&o, &app(), ops::CLUSTER_PROMOTE, &args).unwrap();
+    assert_eq!(answer, json!({"session": "s-cluster.promote"}));
+    let calls = a.calls.calls.lock().unwrap();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].0, "cluster.promote");
+    assert_eq!(calls[0].2.node, b.id());
+    assert_eq!(calls[0].2.tier, OriginTier::App);
 }

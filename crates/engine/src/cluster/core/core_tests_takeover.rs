@@ -4,14 +4,16 @@ use serde_json::json;
 
 use super::core_tests::{answers, dispatch_cmd, Hub};
 use super::{call_wait, Effect, LocalCmd, Takeover, CALL_MS, MOVE_CALL_MS};
-use crate::cluster::claims::Claim;
+use crate::cluster::claims::{Claim, SideCopy};
 use crate::cluster::id::{NodeId, Tool};
 use crate::cluster::jobs::{job_id, Job, JobSpec, JobState};
 use crate::cluster::main_sessions::MainSession;
 use crate::cluster::members::Term;
+use crate::cluster::persist::{load, save};
 use crate::cluster::state::Change;
 use crate::cluster::testkit::id;
 use crate::cluster::wire::Msg;
+use crate::sessions::testutil::TempDir;
 
 fn trio() -> (Hub, NodeId, NodeId) {
     let mut hub = Hub::new();
@@ -440,4 +442,58 @@ fn r175_a_takeover_from_an_older_node_without_claims_changes_none() {
     let effects = take(&mut hub, &m1, takeover);
     assert!(answers(&effects)[0].is_ok());
     assert_eq!(claims_of(&hub, &m1), vec![own]);
+}
+
+fn copy(session: &str, node: &NodeId, base: &str, extra: u64) -> SideCopy {
+    SideCopy {
+        session: session.to_string(),
+        node: node.clone(),
+        base_set: base.to_string(),
+        extra_bytes: extra,
+        repo_changed: false,
+        path: None,
+        at_ms: 7,
+        hidden: false,
+    }
+}
+
+#[test]
+fn a_restored_takeover_keeps_the_side_copies_recorded_after_the_snapshot() {
+    let (mut hub, m5, m1) = trio();
+    let mut live_hidden = copy("sess-1", &m1, "set-1", 90);
+    live_hidden.hidden = true;
+    live_hidden.path = Some("/moved/here".to_string());
+    let live_new = copy("sess-2", &m1, "set-2", 5);
+    hub.core_mut(&m1).state.as_mut().expect("state").side_copies =
+        vec![live_hidden.clone(), live_new.clone()];
+    let mut restored = restored_state(&hub, &m5, 900);
+    restored.side_copies = vec![copy("sess-1", &m1, "set-1", 40)];
+    let mut takeover = takeover_for(&hub, &m5, &m1);
+    takeover.restored = Some(restored);
+    let effects = take(&mut hub, &m1, takeover);
+    assert!(answers(&effects)[0].is_ok());
+    let want = vec![live_hidden, live_new];
+    assert_eq!(hub.core(&m1).state().expect("state").side_copies, want);
+    let tmp = TempDir::new("takeover-copies");
+    let dir = tmp.path("cluster");
+    for e in &effects {
+        if let Effect::Persist { entry, changes } = e {
+            save(&dir, entry, changes).expect("save");
+        }
+    }
+    let loaded = load(&dir).expect("load").expect("state");
+    assert_eq!(loaded.side_copies, want);
+}
+
+#[test]
+fn a_restored_takeover_adds_the_snapshots_own_side_copies() {
+    let (mut hub, m5, m1) = trio();
+    let mut restored = restored_state(&hub, &m5, 900);
+    let old = copy("sess-1", &m5, "set-1", 40);
+    restored.side_copies = vec![old.clone()];
+    let mut takeover = takeover_for(&hub, &m5, &m1);
+    takeover.restored = Some(restored);
+    let effects = take(&mut hub, &m1, takeover);
+    assert!(answers(&effects)[0].is_ok());
+    assert_eq!(hub.core(&m1).state().expect("state").side_copies, vec![old]);
 }

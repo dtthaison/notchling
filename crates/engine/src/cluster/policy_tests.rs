@@ -542,11 +542,10 @@ fn a_client_or_the_primary_may_send_a_promote_at_the_app_tier_only() {
 }
 
 #[test]
-fn a_standby_without_an_app_and_a_worker_cannot_send_a_promote() {
-    let standby = facts("m2", Role::Standby, false, MemberState::Active);
+fn a_worker_and_a_removed_member_cannot_send_a_promote() {
     let worker = facts("w1", Role::Worker, false, MemberState::Active);
     let removed = facts("m1", Role::Standby, true, MemberState::Removed);
-    for (sender, name) in [(&standby, "m2"), (&worker, "w1"), (&removed, "m1")] {
+    for (sender, name) in [(&worker, "w1"), (&removed, "m1")] {
         for tier in [OriginTier::App, OriginTier::Node, OriginTier::Agent] {
             assert!(
                 check("cluster.promote", sender, &origin(name, tier)).is_err(),

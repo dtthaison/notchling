@@ -51,6 +51,7 @@ struct Continuing {
     replier: Arc<dyn Replier>,
     clock: Arc<dyn Fn() -> i64 + Send + Sync>,
     session: String,
+    term: u64,
 }
 
 impl Responder for Continuing {
@@ -70,12 +71,12 @@ impl Continuing {
         }
         let (inbox, replier, clock) =
             (self.inbox.clone(), self.replier.clone(), self.clock.clone());
-        let session = self.session.clone();
+        let (session, term) = (self.session.clone(), self.term);
         std::thread::Builder::new()
             .name("cluster-promote-continue".into())
             .spawn(move || {
                 if let Err(why) = replier.reply(&session, CONTINUE_TEXT) {
-                    let id = format!("paused-step-failed:{session}");
+                    let id = format!("paused-step-failed:{term}:{session}");
                     let title = "Couldn't send Continue".to_string();
                     raise_notice(&inbox, clock(), &id, (Kind::ActionFailed, &title, &why));
                 }
@@ -98,8 +99,8 @@ impl Items {
         (self.clock)()
     }
 
-    pub fn paused_step(&self, session: &str, k: usize, old: &str, step: &CutStep) {
-        let id = format!("paused-step:{session}:{k}");
+    pub fn paused_step(&self, term: u64, session: &str, k: usize, old: &str, step: &CutStep) {
+        let id = format!("paused-step:{term}:{session}:{k}");
         let summary = plain(&step.summary, SUMMARY_MAX);
         let title = format!(
             "{} dropped while {summary} was running. Check, then Continue.",
@@ -127,6 +128,7 @@ impl Items {
             replier: self.replier.clone(),
             clock: self.clock.clone(),
             session: session.to_string(),
+            term,
         });
         self.inbox.raise(item, Some(responder));
     }

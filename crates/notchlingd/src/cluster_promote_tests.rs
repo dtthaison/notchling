@@ -5,6 +5,7 @@ use crate::snap_restore_testkit::S1;
 use notchling_engine::cluster::claims::Claim;
 use notchling_engine::cluster::members::Term;
 use notchling_engine::cluster::move_home::NO_PROOF;
+use notchling_engine::cluster::outward::CutStep;
 use notchling_engine::cluster::state::Command;
 use notchling_engine::cluster::wire::WireError;
 use notchling_engine::inbox::{ActionId, Kind, State};
@@ -300,7 +301,7 @@ fn cut_outward_step_raises_paused_step_item() {
     cut_the_push(&r);
     go(&r, true);
     r.finish();
-    let id = format!("paused-step:{S1}:0");
+    let id = format!("paused-step:2:{S1}:0");
     let found = r.item(&id).expect("an item");
     assert_eq!(found.kind, Kind::PausedStep);
     assert_eq!(
@@ -325,13 +326,32 @@ fn a_session_with_nothing_cut_raises_no_item() {
 }
 
 #[test]
+fn a_later_promotes_paused_step_is_its_own_item() {
+    let r = rig();
+    let step = CutStep {
+        tool: "Bash".to_string(),
+        summary: "Push the notes branch".to_string(),
+        outward: true,
+    };
+    let items = r.promoter.items();
+    items.paused_step(2, S1, 0, "m5", &step);
+    let first = format!("paused-step:2:{S1}:0");
+    r.p.to.inbox.decide(&first, ActionId::Done, "mac").unwrap();
+    assert_eq!(r.item(&first).unwrap().state, State::Answered);
+    items.paused_step(6, S1, 0, "m5", &step);
+    let second = format!("paused-step:6:{S1}:0");
+    assert_eq!(r.item(&second).expect("its own item").state, State::Open);
+    assert_eq!(r.item(&first).unwrap().state, State::Answered);
+}
+
+#[test]
 fn continue_sends_one_reply() {
     let r = rig();
     unreachable_primary(&r);
     cut_the_push(&r);
     go(&r, true);
     r.finish();
-    let id = format!("paused-step:{S1}:0");
+    let id = format!("paused-step:2:{S1}:0");
     let outcome = r.p.to.inbox.decide(&id, ActionId::Continue, "mac").unwrap();
     assert!(outcome.answered);
     crate::cluster_testkit::eventually("the reply goes", || {
@@ -357,7 +377,7 @@ fn continue_waits_while_acting_is_off() {
     go(&r, true);
     r.finish();
     r.acting.set(false);
-    let id = format!("paused-step:{S1}:0");
+    let id = format!("paused-step:2:{S1}:0");
     let outcome =
         r.p.to
             .inbox
@@ -376,10 +396,10 @@ fn a_failed_continue_says_so() {
     go(&r, true);
     r.finish();
     *r.replier.fail.lock().unwrap() = Some("acting is off".to_string());
-    let id = format!("paused-step:{S1}:0");
+    let id = format!("paused-step:2:{S1}:0");
     r.p.to.inbox.decide(&id, ActionId::Continue, "mac").unwrap();
     crate::cluster_testkit::eventually("the notice", || {
-        r.item(&format!("paused-step-failed:{S1}")).is_some()
+        r.item(&format!("paused-step-failed:2:{S1}")).is_some()
     });
 }
 
@@ -390,7 +410,7 @@ fn done_closes_paused_step() {
     cut_the_push(&r);
     go(&r, true);
     r.finish();
-    let id = format!("paused-step:{S1}:0");
+    let id = format!("paused-step:2:{S1}:0");
     let outcome = r.p.to.inbox.decide(&id, ActionId::Done, "mac").unwrap();
     assert!(outcome.answered);
     assert_eq!(r.item(&id).unwrap().state, State::Answered);

@@ -40,6 +40,21 @@ fn a_failed_claim_record_starts_nothing() {
 }
 
 #[test]
+fn a_competing_newer_claim_that_wins_first_keeps_the_loser_from_starting() {
+    let k = kit("claim-rival", seed_after_promote(&[(S1, 1)]));
+    *k.link.rival.lock().unwrap() = Some(Command::Claim {
+        claim: claim(S1, "m1", 9),
+    });
+    let rows = k.mover.start_here(&[S1.to_string()]);
+    let why = rows[0].1.clone().unwrap_err();
+    assert!(why.contains("newer claim"), "{why}");
+    assert_eq!(k.logged(), vec![format!("record claim {S1} 2")]);
+    assert_eq!(k.state().claims[S1].node, node("m1"));
+    k.w.keeper.tick();
+    assert_eq!(k.w.gate(S1), Some(Gate::Moved { to: "m1".into() }));
+}
+
+#[test]
 fn a_session_nobody_claimed_starts_without_a_claim() {
     let k = kit("claim-none", seed_after_promote(&[]));
     let rows = k.mover.start_here(&[S1.to_string()]);

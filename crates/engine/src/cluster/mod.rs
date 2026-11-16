@@ -86,6 +86,8 @@ mod policy_inbox_tests;
 #[cfg(test)]
 mod policy_secrets_tests;
 #[cfg(test)]
+mod policy_promote_tests;
+#[cfg(test)]
 mod policy_tests;
 #[cfg(test)]
 mod promote_tests;

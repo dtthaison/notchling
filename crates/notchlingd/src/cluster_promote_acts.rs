@@ -58,8 +58,9 @@ impl Promoter {
             PromoteAction::RunHeld => Some(PromoteEvent::HeldRun),
             PromoteAction::PausedStep { session, step } => {
                 let old = name_of(ctx, &ctx.facts.state.home);
+                let term = ctx.facts.state.term.n.saturating_add(1);
                 let k = ctx.steps.entry(session.clone()).or_default();
-                self.items().paused_step(&session, *k, &old, &step);
+                self.items().paused_step(term, &session, *k, &old, &step);
                 *k += 1;
                 None
             }

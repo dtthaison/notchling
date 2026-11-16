@@ -653,6 +653,8 @@ mod core_tests_adopt;
 #[cfg(test)]
 mod core_tests_claims;
 #[cfg(test)]
+mod core_tests_claims_lose;
+#[cfg(test)]
 mod core_tests_clean;
 #[cfg(test)]
 mod core_tests_dispatch;
