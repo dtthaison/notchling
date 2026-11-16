@@ -180,6 +180,8 @@ fn an_older_members_message_without_the_fields_changes_nothing() {
         members,
         failover: None,
         armed: false,
+        claims: Vec::new(),
+        side_copies: Vec::new(),
     };
     hub.run(&m1, Input::Msg { from: m5, msg });
     assert_eq!(failover_of(&hub, &m1), Failover::After30m);

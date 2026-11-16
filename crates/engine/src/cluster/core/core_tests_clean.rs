@@ -243,6 +243,8 @@ fn member_names_in_the_primarys_push_are_cleaned_before_they_are_journaled_or_pu
         members,
         failover: None,
         armed: false,
+        claims: Vec::new(),
+        side_copies: Vec::new(),
     };
     hub.run(
         &w1,

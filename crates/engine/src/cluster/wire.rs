@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use super::claims::{Claim, SideCopy};
 use super::failover::Failover;
 use super::id::NodeId;
 use super::members::{Member, Term};
@@ -127,6 +128,10 @@ pub enum Msg {
         failover: Option<Failover>,
         #[serde(default)]
         armed: bool,
+        #[serde(default)]
+        claims: Vec<Claim>,
+        #[serde(default)]
+        side_copies: Vec<SideCopy>,
     },
     Call {
         id: u64,

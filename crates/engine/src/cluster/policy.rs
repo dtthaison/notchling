@@ -181,6 +181,8 @@ pub const RULES: &[Rule] = &[
     client_home("cluster.move_home"),
     client_home("cluster.move.now"),
     client_home("cluster.failover.set"),
+    rule("cluster.record", MEMBER, OriginTier::Node, None, true),
+    rule("cluster.record", MEMBER, OriginTier::App, None, true),
     rule("node.sessions", CLIENT, OriginTier::Node, None, false),
     rule("node.versions", MEMBER, OriginTier::Node, None, false),
     rule("node.load", MEMBER, OriginTier::Node, None, false),
