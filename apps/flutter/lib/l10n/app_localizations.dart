@@ -1089,13 +1089,7 @@ abstract class AppL10n {
   /// **'Answered on the Mac: {action}'**
   String inboxAnsweredOnMac(String action);
 
-  /// Body of that question. $machine is the name of the machine that has the newer copy, such as m1.
-  ///
-  /// In en, this message translates to:
-  /// **'The newer copy on {machine} is kept beside it.'**
-  String inboxConfirmContinueBody(String machine);
-
-  /// Body of that question when the machine's name is not known.
+  /// Body of that question.
   ///
   /// In en, this message translates to:
   /// **'The newer copy on the other machine is kept beside it.'**
@@ -1298,6 +1292,12 @@ abstract class AppL10n {
   /// In en, this message translates to:
   /// **'Move anyway?'**
   String get machinesRiskTitle;
+
+  /// Spoken description of one machine in the Machines popup. $name is the machine's name, such as m1. $detail is what the row says under the name, such as Controls jobs only.
+  ///
+  /// In en, this message translates to:
+  /// **'{name}, {detail}'**
+  String machinesRowLabel(String name, String detail);
 
   /// Title of the popup the phone opens when no primary machine can be reached.
   ///

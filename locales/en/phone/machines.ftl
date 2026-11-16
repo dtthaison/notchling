@@ -9,6 +9,11 @@ machines-intro = Your main machine can't be reached. Pick the machine that shoul
 # Shown in the Machines popup when no other machine is online.
 machines-empty = No other machine is online.
 
+# Spoken description of one machine in the Machines popup.
+# $name is the machine's name, such as m1.
+# $detail is what the row says under the name, such as Controls jobs only.
+machines-row-label = { $name }, { $detail }
+
 # One machine in the Machines popup that holds a copy of the sessions.
 # $time is the clock time of the copy, such as 14:02.
 machines-resume = Can resume old sessions · copy from { $time }

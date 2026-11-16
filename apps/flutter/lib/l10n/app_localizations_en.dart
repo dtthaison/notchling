@@ -569,11 +569,6 @@ class AppL10nEn extends AppL10n {
   }
 
   @override
-  String inboxConfirmContinueBody(String machine) {
-    return 'The newer copy on $machine is kept beside it.';
-  }
-
-  @override
   String get inboxConfirmContinueBodyUnnamed =>
       'The newer copy on the other machine is kept beside it.';
 
@@ -694,6 +689,11 @@ class AppL10nEn extends AppL10n {
 
   @override
   String get machinesRiskTitle => 'Move anyway?';
+
+  @override
+  String machinesRowLabel(String name, String detail) {
+    return '$name, $detail';
+  }
 
   @override
   String get machinesTitle => 'Choose a Machine';

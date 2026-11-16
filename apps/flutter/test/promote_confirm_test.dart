@@ -98,7 +98,7 @@ void main() {
     await show(tester, socket);
     await press(tester, 'Continue From This Copy');
     expect(find.text('Continue Session s1 here?'), findsOneWidget);
-    expect(find.text('The newer copy on m1 is kept beside it.'), findsOneWidget);
+    expect(find.text('The newer copy on the other machine is kept beside it.'), findsOneWidget);
     expect(answers(socket), isEmpty);
 
     await tester.tap(find.text('Cancel'));

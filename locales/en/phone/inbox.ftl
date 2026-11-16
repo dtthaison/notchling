@@ -49,8 +49,4 @@ inbox-confirm-take-back-body = This machine becomes the primary again. Sessions 
 inbox-confirm-continue-title = Continue { $title } here?
 
 # Body of that question.
-# $machine is the name of the machine that has the newer copy, such as m1.
-inbox-confirm-continue-body = The newer copy on { $machine } is kept beside it.
-
-# Body of that question when the machine's name is not known.
 inbox-confirm-continue-body-unnamed = The newer copy on the other machine is kept beside it.

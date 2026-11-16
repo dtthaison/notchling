@@ -13,7 +13,6 @@ import '../features/connection/subscription_sync.dart';
 import '../features/sessions/held_notifier.dart';
 import '../features/inbox/inbox_notifier.dart';
 import '../features/inbox/inbox_screen.dart';
-import '../features/machines/machines_notifier.dart';
 import '../features/machines/machines_sheet.dart';
 import '../features/macs/macs_notifier.dart';
 import '../features/macs/macs_screen.dart';
@@ -148,11 +147,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
       bridgeClientProvider,
       (BridgeClient? previous, BridgeClient? next) => _bind(next),
     );
-    ref.listen<String?>(machinesOfferProvider, (String? previous, String? next) {
-      if (next == null || next == previous) return;
-      if (ref.read(lifecycleProvider) != AppLifecycleState.resumed) return;
-      unawaited(showMachinesSheet(context, ref));
-    });
+    listenMachinesOffers(context, ref);
     final int tab = ref.watch(activeTabProvider);
     final bool hideBar =
         tab == 1 &&

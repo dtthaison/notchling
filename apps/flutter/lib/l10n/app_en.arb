@@ -753,18 +753,9 @@
       }
     }
   },
-  "inboxConfirmContinueBody": "The newer copy on {machine} is kept beside it.",
-  "@inboxConfirmContinueBody": {
-    "description": "Body of that question. $machine is the name of the machine that has the newer copy, such as m1.",
-    "placeholders": {
-      "machine": {
-        "type": "String"
-      }
-    }
-  },
   "inboxConfirmContinueBodyUnnamed": "The newer copy on the other machine is kept beside it.",
   "@inboxConfirmContinueBodyUnnamed": {
-    "description": "Body of that question when the machine's name is not known."
+    "description": "Body of that question."
   },
   "inboxConfirmContinueTitle": "Continue {title} here?",
   "@inboxConfirmContinueTitle": {
@@ -935,6 +926,18 @@
   "machinesRiskTitle": "Move anyway?",
   "@machinesRiskTitle": {
     "description": "Title of the risk question that follows a move the Mac wants confirmed."
+  },
+  "machinesRowLabel": "{name}, {detail}",
+  "@machinesRowLabel": {
+    "description": "Spoken description of one machine in the Machines popup. $name is the machine's name, such as m1. $detail is what the row says under the name, such as Controls jobs only.",
+    "placeholders": {
+      "name": {
+        "type": "String"
+      },
+      "detail": {
+        "type": "String"
+      }
+    }
   },
   "machinesTitle": "Choose a Machine",
   "@machinesTitle": {

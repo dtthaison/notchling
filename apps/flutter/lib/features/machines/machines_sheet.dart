@@ -6,32 +6,67 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../app/theme/tokens.dart';
 import '../../core/net/bridge_client.dart';
 import '../../l10n/app_localizations.dart';
+import '../../app/notifications.dart' show lifecycleProvider;
 import '../connection/bridge_errors.dart';
 import '../connection/connection.dart';
+import 'confirm_dialog.dart';
 import 'machines_models.dart';
 import 'machines_notifier.dart';
 
-Future<void> showMachinesSheet(BuildContext context, WidgetRef ref) async {
-  List<PromoteMachine>? machines;
+Future<bool> showMachinesSheet(BuildContext context, WidgetRef ref) async {
+  final MachinesPopupNotifier popup = ref.read(machinesPopupProvider.notifier);
+  if (!popup.begin()) return false;
   try {
-    machines = await ref.read(machinesProvider.future);
-  } on BridgeException {
+    final BridgeClient? client = ref.read(bridgeClientProvider);
+    if (client == null) return false;
+    List<PromoteMachine>? machines;
+    try {
+      machines = await loadMachines(client);
+    } on BridgeException {
+      return false;
+    }
+    if (machines == null || !context.mounted || !identical(ref.read(bridgeClientProvider), client)) return false;
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      showDragHandle: true,
+      builder: (BuildContext context) => MachinesSheet(machines: machines!, client: client),
+    );
+    return true;
+  } finally {
+    popup.end();
+  }
+}
+
+void listenMachinesOffers(BuildContext context, WidgetRef ref) {
+  ref.listen<MachinesOffer?>(machinesOfferProvider, (MachinesOffer? previous, MachinesOffer? next) {
+    unawaited(offerMachinesSheet(context, ref));
+  });
+  ref.listen<AppLifecycleState>(lifecycleProvider, (AppLifecycleState? previous, AppLifecycleState next) {
+    if (next == AppLifecycleState.resumed) unawaited(offerMachinesSheet(context, ref));
+  });
+}
+
+Future<void> offerMachinesSheet(BuildContext context, WidgetRef ref) async {
+  final MachinesPopupNotifier popup = ref.read(machinesPopupProvider.notifier);
+  final MachinesOffer? offer = ref.read(machinesOfferProvider);
+  if (offer == null) {
+    if (ref.read(connectionStatusProvider).phase == LinkPhase.connected) popup.resolved();
     return;
   }
-  if (machines == null || !context.mounted) return;
-  await showModalBottomSheet<void>(
-    context: context,
-    isScrollControlled: true,
-    useSafeArea: true,
-    showDragHandle: true,
-    builder: (BuildContext context) => MachinesSheet(machines: machines!),
-  );
+  if (ref.read(lifecycleProvider) != AppLifecycleState.resumed) return;
+  final MachinesPopupState state = ref.read(machinesPopupProvider);
+  if (state.busy || state.dismissed.contains(offer.hostId)) return;
+  popup.dismiss(offer.hostId);
+  await showMachinesSheet(context, ref);
 }
 
 class MachinesSheet extends ConsumerStatefulWidget {
-  const MachinesSheet({super.key, required this.machines});
+  const MachinesSheet({super.key, required this.machines, required this.client});
 
   final List<PromoteMachine> machines;
+  final BridgeClient client;
 
   @override
   ConsumerState<MachinesSheet> createState() => _MachinesSheetState();
@@ -39,23 +74,14 @@ class MachinesSheet extends ConsumerStatefulWidget {
 
 class _MachinesSheetState extends ConsumerState<MachinesSheet> {
   bool _sending = false;
-  String? _message;
+  bool _picking = false;
+  List<String> _lines = const <String>[];
   bool _failed = false;
 
-  Future<bool> _ask({required String title, required String body, required String action}) async {
-    final AppL10n l10n = AppL10n.of(context);
-    final bool? yes = await showDialog<bool>(
-      context: context,
-      builder: (BuildContext context) => AlertDialog(
-        title: Text(title),
-        content: Text(body),
-        actions: <Widget>[
-          TextButton(onPressed: () => Navigator.pop(context, false), child: Text(l10n.appCancel)),
-          TextButton(onPressed: () => Navigator.pop(context, true), child: Text(action)),
-        ],
-      ),
-    );
-    return yes == true;
+  bool _sameComputer() {
+    if (identical(ref.read(bridgeClientProvider), widget.client)) return true;
+    if (mounted) Navigator.of(context).maybePop();
+    return false;
   }
 
   String _confirmBody(AppL10n l10n, PromoteMachine machine) {
@@ -66,48 +92,54 @@ class _MachinesSheetState extends ConsumerState<MachinesSheet> {
   }
 
   Future<void> _pick(PromoteMachine machine) async {
-    if (_sending || !machine.pickable) return;
-    final AppL10n l10n = AppL10n.of(context);
-    final BridgeClient? client = ref.read(bridgeClientProvider);
-    if (client == null) return;
-    final bool yes = await _ask(
-      title: l10n.machinesConfirmTitle(machine.name),
-      body: _confirmBody(l10n, machine),
-      action: l10n.machinesMove,
-    );
-    if (!yes || !mounted) return;
-    await _send(client, machine, confirmed: false);
+    if (_sending || _picking || !machine.pickable) return;
+    setState(() => _picking = true);
+    try {
+      final AppL10n l10n = AppL10n.of(context);
+      final bool yes = await askConfirm(
+        context,
+        title: l10n.machinesConfirmTitle(machine.name),
+        body: _confirmBody(l10n, machine),
+        action: l10n.machinesMove,
+      );
+      if (!yes || !mounted || !_sameComputer()) return;
+      await _send(machine, confirmed: false);
+    } finally {
+      if (mounted) setState(() => _picking = false);
+    }
   }
 
-  Future<void> _send(BridgeClient client, PromoteMachine machine, {required bool confirmed}) async {
+  Future<void> _send(PromoteMachine machine, {required bool confirmed}) async {
     final AppL10n l10n = AppL10n.of(context);
     setState(() {
       _sending = true;
-      _message = null;
+      _lines = const <String>[];
     });
     try {
-      final PromoteAnswer answer = await promoteMachine(client, machine.id, confirmed: confirmed);
+      final PromoteAnswer answer = await promoteMachine(widget.client, machine.id, confirmed: confirmed);
       if (!mounted) return;
       final String? risk = answer.needsConfirm;
       if (risk != null) {
         setState(() => _sending = false);
-        final bool yes = await _ask(title: l10n.machinesRiskTitle, body: risk, action: l10n.machinesMoveAnyway);
-        if (yes && mounted) await _send(client, machine, confirmed: true);
+        final bool yes = await askConfirm(context, title: l10n.machinesRiskTitle, body: risk, action: l10n.machinesMoveAnyway);
+        if (yes && mounted && _sameComputer()) await _send(machine, confirmed: true);
         return;
       }
       setState(() {
         _sending = false;
         _failed = false;
-        _message = answer.relayed
-            ? ((answer.text ?? '').isEmpty ? l10n.machinesRelayedFallback : answer.text)
-            : l10n.machinesMoving(machine.name);
+        _lines = <String>[
+          answer.relayed
+              ? ((answer.text ?? '').isEmpty ? l10n.machinesRelayedFallback : answer.text!)
+              : l10n.machinesMoving(machine.name),
+        ];
       });
     } on BridgeException catch (error) {
       if (!mounted) return;
       setState(() {
         _sending = false;
         _failed = true;
-        _message = '${l10n.machinesFailed}\n${bridgeErrorLine(l10n, error)}';
+        _lines = <String>[l10n.machinesFailed, bridgeErrorLine(l10n, error)];
       });
     }
   }
@@ -125,7 +157,7 @@ class _MachinesSheetState extends ConsumerState<MachinesSheet> {
     final AppL10n l10n = AppL10n.of(context);
     final Kit kit = Kit.of(context);
     final List<PromoteMachine> online = widget.machines.where((PromoteMachine m) => m.online).toList();
-    final String? message = _message;
+    final String message = _lines.join('\n');
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -143,7 +175,7 @@ class _MachinesSheetState extends ConsumerState<MachinesSheet> {
                   children: <Widget>[for (final PromoteMachine machine in online) _row(context, l10n, kit, machine)],
                 ),
         ),
-        if (message != null)
+        if (_lines.isNotEmpty)
           Padding(
             padding: const EdgeInsets.all(Space.lg),
             child: Semantics(
@@ -164,12 +196,12 @@ class _MachinesSheetState extends ConsumerState<MachinesSheet> {
   }
 
   Widget _row(BuildContext context, AppL10n l10n, Kit kit, PromoteMachine machine) {
-    final bool enabled = machine.pickable && !_sending;
+    final bool enabled = machine.pickable && !_sending && !_picking;
     final String subtitle = _subtitle(l10n, machine);
     return Semantics(
       button: true,
       enabled: machine.pickable,
-      label: '${machine.name}, $subtitle',
+      label: l10n.machinesRowLabel(machine.name, subtitle),
       excludeSemantics: true,
       onTap: enabled ? () => unawaited(_pick(machine)) : null,
       child: InkWell(

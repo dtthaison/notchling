@@ -10,6 +10,7 @@ import '../../core/protocol/models.dart';
 import '../../l10n/app_localizations.dart';
 import '../../core/net/bridge_client.dart';
 import '../connection/bridge_errors.dart';
+import '../connection/connection.dart';
 import '../machines/machines_notifier.dart';
 import '../machines/machines_sheet.dart';
 import 'inbox_notifier.dart';
@@ -71,7 +72,7 @@ class InboxScreen extends ConsumerWidget {
   }
 }
 
-class InboxCard extends ConsumerWidget {
+class InboxCard extends ConsumerStatefulWidget {
   const InboxCard({super.key, required this.item, required this.busy, this.error, this.declined = false, this.lead = false});
 
   final InboxItem item;
@@ -79,6 +80,19 @@ class InboxCard extends ConsumerWidget {
   final BridgeException? error;
   final bool declined;
   final bool lead;
+
+  @override
+  ConsumerState<InboxCard> createState() => _InboxCardState();
+}
+
+class _InboxCardState extends ConsumerState<InboxCard> {
+  bool _asking = false;
+
+  InboxItem get item => widget.item;
+  bool get busy => widget.busy;
+  BridgeException? get error => widget.error;
+  bool get declined => widget.declined;
+  bool get lead => widget.lead;
 
   String _result(AppL10n l10n) {
     switch (item.state) {
@@ -93,7 +107,7 @@ class InboxCard extends ConsumerWidget {
   }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final AppL10n l10n = AppL10n.of(context);
     final Kit kit = Kit.of(context);
     return Semantics(
@@ -118,7 +132,7 @@ class InboxCard extends ConsumerWidget {
                 spacing: Space.sm,
                 runSpacing: Space.sm,
                 children: <Widget>[
-                  for (final InboxAction action in item.actions) _button(context, ref, l10n, action),
+                  for (final InboxAction action in item.actions) _button(context, l10n, action),
                   if (noPrimaryKinds.contains(item.kind))
                     SecondaryButton(
                       label: l10n.machinesChoose,
@@ -143,16 +157,24 @@ class InboxCard extends ConsumerWidget {
     );
   }
 
-  Future<void> _answer(BuildContext context, WidgetRef ref, InboxAction action) async {
-    if (!await confirmInboxAction(context, ref, item, action)) return;
-    await ref.read(inboxProvider.notifier).answer(item, action.id);
+  Future<void> _answer(BuildContext context, InboxAction action) async {
+    if (_asking) return;
+    final BridgeClient? client = ref.read(bridgeClientProvider);
+    setState(() => _asking = true);
+    try {
+      final bool yes = await confirmInboxAction(context, ref, item, action);
+      if (!yes || !context.mounted) return;
+      await ref.read(inboxProvider.notifier).answer(item, action.id, expected: client);
+    } finally {
+      if (mounted) setState(() => _asking = false);
+    }
   }
 
-  Widget _button(BuildContext context, WidgetRef ref, AppL10n l10n, InboxAction action) {
+  Widget _button(BuildContext context, AppL10n l10n, InboxAction action) {
     if (action.id == 'open') {
       return SecondaryButton(label: l10n.inboxOpenOnMac, icon: Icons.laptop_mac, onPressed: null);
     }
-    final VoidCallback? press = busy ? null : () => unawaited(_answer(context, ref, action));
+    final VoidCallback? press = busy || _asking ? null : () => unawaited(_answer(context, action));
     return action.primary && lead
         ? PrimaryButton(label: action.label, semanticLabel: '${action.label}, ${item.title}', onPressed: press)
         : SecondaryButton(label: action.label, semanticLabel: '${action.label}, ${item.title}', onPressed: press);

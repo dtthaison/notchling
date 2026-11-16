@@ -111,9 +111,9 @@ class InboxNotifier extends Notifier<InboxState> {
     if (client != null) await _load(client);
   }
 
-  Future<void> answer(InboxItem item, String action) async {
+  Future<void> answer(InboxItem item, String action, {BridgeClient? expected}) async {
     final BridgeClient? client = ref.read(bridgeClientProvider);
-    if (client == null || state.busy.contains(item.id)) return;
+    if (client == null || (expected != null && !identical(expected, client)) || state.busy.contains(item.id)) return;
     state = state.copyWith(
       busy: <String>{...state.busy, item.id},
       errors: <String, BridgeException>{...state.errors}..remove(item.id),
