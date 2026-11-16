@@ -130,9 +130,11 @@ impl Driver {
         } else {
             Err("the inbox could not be kept".to_string())
         };
+        let fence = crate::cluster_fence::wipe(&self.setup.cluster_dir);
         let outcome = match first
             .and_then(|()| crate::cluster_mirror::wipe(&self.setup.cluster_dir))
             .and_then(|()| crate::cluster_blobs::wipe(&self.setup.cluster_dir))
+            .and(fence)
         {
             Ok(()) => Outcome::Ok,
             Err(_) => Outcome::Failed,

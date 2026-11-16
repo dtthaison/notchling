@@ -397,6 +397,7 @@ impl ClusterParts {
         events: Events,
         sessions: Arc<Mutex<Value>>,
     ) -> ClusterParts {
+        let _ = crate::cluster_fence::drop_stale_at_start(&layout.cluster_dir());
         let log = ClusterLog::new(events);
         let handler = Arc::new(LateHandler::default());
         let panel = Arc::new(OpsPanel::new(handler.clone()));

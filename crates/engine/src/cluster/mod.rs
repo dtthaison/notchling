@@ -75,6 +75,8 @@ mod main_sessions_tests;
 #[cfg(test)]
 mod move_home_tests;
 #[cfg(test)]
+mod move_home_unfenced_tests;
+#[cfg(test)]
 mod outward_tests;
 #[cfg(test)]
 mod policy_inbox_tests;
