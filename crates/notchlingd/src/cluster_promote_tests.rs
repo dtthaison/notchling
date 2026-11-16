@@ -458,4 +458,15 @@ fn an_unrelated_item_is_left_alone() {
     assert!(r.open_ids().contains(&"other".to_string()));
 }
 
+#[test]
+fn a_promote_does_not_take_over_while_a_handover_switches() {
+    let r = rig();
+    unreachable_primary(&r);
+    let held = r.promoter.p.mover.begin_switch(9).expect("the switch");
+    go(&r, true);
+    r.finish();
+    assert!(r.p.to.link.took.lock().unwrap().is_empty());
+    drop(held);
+}
+
 use crate::cluster_move::Link;

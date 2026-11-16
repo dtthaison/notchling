@@ -249,7 +249,12 @@ impl Promoter {
         }
         let began = self.begin(confirmed);
         if began.is_err() {
-            lock(&self.run).busy = false;
+            let running = lock(&self.thread)
+                .as_ref()
+                .is_some_and(|handle| !handle.is_finished());
+            if !running {
+                lock(&self.run).busy = false;
+            }
         }
         began
     }

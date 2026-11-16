@@ -283,3 +283,18 @@ fn the_thread_ticks_and_closes() {
     thread.close();
     thread.close();
 }
+
+#[test]
+fn the_confirm_item_is_withdrawn_when_the_primary_returns() {
+    let r = rig();
+    let w = raised(&r);
+    r.p.to
+        .inbox
+        .decide(UNREACHABLE, ActionId::MoveHere, "mac")
+        .unwrap();
+    crate::cluster_testkit::eventually("the confirm item", || open(&r, CONFIRM).is_some());
+    r.finish();
+    home_online(&r, true);
+    w.tick();
+    assert!(open(&r, CONFIRM).is_none());
+}

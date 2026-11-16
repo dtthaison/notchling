@@ -251,7 +251,13 @@ impl Watcher {
             }
             ids
         };
-        for id in gone {
+        let confirms: Vec<String> = gone
+            .iter()
+            .filter_map(|id| id.strip_prefix("primary-unreachable:"))
+            .filter_map(|n| n.parse::<u64>().ok())
+            .map(confirm_id)
+            .collect();
+        for id in gone.into_iter().chain(confirms) {
             self.promoter
                 .items()
                 .inbox

@@ -21,6 +21,7 @@ impl Mover {
                 "{name} can't be primary: it isn't an active Can Be Master member"
             )));
         }
+        let _busy = self.begin_switch(takeover.term.n)?;
         if takeover.sessions.is_empty() {
             return self.p.link.take_primary(takeover).map_err(api_error);
         }
