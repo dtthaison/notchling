@@ -28,6 +28,7 @@ pub fn versions(os: &str) -> Versions {
         arch: "arm64".to_string(),
         tools,
         logins: BTreeMap::new(),
+        own_logins: BTreeMap::new(),
         host: None,
         bridge: None,
     }

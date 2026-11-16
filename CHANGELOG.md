@@ -26,6 +26,7 @@ Notable changes to Notchling. The format follows [Keep a Changelog](https://keep
 
 ### Fixed
 
+- The cluster sheet showed Antigravity as Not Installed on a machine that has it, because the version check only read the old `agy 1.4.2` form and agy 1.5.9 prints just `1.5.9`. It also showed Claude Code as Unknown on a machine where you are signed in; it now says Signed In when that machine has its own Claude Code login, and shows the cluster's Worker Login (On or Off) apart from it on machines that run jobs.
 - Clicking an `.html` file in Chat (a link or path in a message, or a new file in the Details Panel's Git section) now shows it as a page, with scripts off, instead of its source. The header's Page and Source buttons switch between them, and a changed file's diff still opens first, with the page one click away.
 - The Artifact pages library saves again. Since the Rust app replaced the Swift one, published pages were no longer copied to `~/Library/Application Support/Notchling/pages`, reads of a saved link no longer came from the local copy, and a failed read no longer pointed at it. `notchling hook` now handles the Artifact tool's events itself, with or without the app running.
 - A background shell stopped with `TaskStop` or `KillShell` now shows as Stopped in Chat's Details Panel instead of being counted as still running.

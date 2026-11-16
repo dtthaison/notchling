@@ -237,6 +237,7 @@ fn versions(with_claude: bool, logged_in: bool) -> Versions {
         arch: "x86_64".to_string(),
         tools,
         logins,
+        own_logins: BTreeMap::new(),
         host: None,
         bridge: None,
     }

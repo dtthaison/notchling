@@ -51,6 +51,19 @@ pub fn login_line(row: &NodeRow, dim: Ink, a: Appearance) -> Option<Div> {
         };
         line = line.child(label(text, TypeRole::Meta, ink, a));
     }
+    if let Some((text, on)) = row.worker_login_text() {
+        let ink = if dim == Ink::TextFaint || !on {
+            dim
+        } else {
+            Ink::Done
+        };
+        line = line.child(label("·", TypeRole::Meta, dim, a)).child(label(
+            &text,
+            TypeRole::Meta,
+            ink,
+            a,
+        ));
+    }
     Some(line)
 }
 

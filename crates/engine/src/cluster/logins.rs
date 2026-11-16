@@ -23,6 +23,21 @@ pub fn codex_state(exit: i32, text: &str) -> Option<bool> {
     (exit != 0 && text.to_ascii_lowercase().contains("not logged in")).then_some(false)
 }
 
+pub const CLAUDE_PROFILE_FILE: &str = ".claude.json";
+
+#[derive(serde::Deserialize)]
+struct ClaudeConfig {
+    #[serde(rename = "oauthAccount")]
+    account: Option<serde_json::Map<String, serde_json::Value>>,
+}
+
+pub fn claude_profile_signed_in(text: &str) -> bool {
+    serde_json::from_str::<ClaudeConfig>(text)
+        .ok()
+        .and_then(|config| config.account)
+        .is_some_and(|account| !account.is_empty())
+}
+
 pub fn agy_signed_in(files: &dyn Fn(&Path) -> bool, home: &Path) -> bool {
     files(&home.join(AGY_LOGIN_FILE))
 }
@@ -164,3 +179,7 @@ pub fn needed_text(tool: Tool, node: &str) -> (String, String) {
 #[cfg(test)]
 #[path = "logins_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "logins_own_tests.rs"]
+mod own_tests;

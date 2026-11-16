@@ -14,7 +14,7 @@ pub fn cli_output(tool: Tool, text: &str) -> Option<Version> {
     let word = match tool {
         Tool::Claude => line.strip_suffix(" (Claude Code)").unwrap_or(line),
         Tool::Codex => line.strip_prefix("codex-cli ")?,
-        Tool::Agy => line.strip_prefix("agy ")?,
+        Tool::Agy => line.strip_prefix("agy ").unwrap_or(line),
         Tool::Notchling => line.strip_prefix("notchling ")?,
     };
     Version::parse(word)

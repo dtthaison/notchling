@@ -272,6 +272,12 @@ cluster-login-signed-out = Signed Out
 cluster-login-not-installed = Not Installed
 # The node has not said whether the tool is signed in.
 cluster-login-unknown = Unknown
+# After a node's tool logins, for a machine that runs the cluster's jobs. $state is one of the two words below.
+cluster-worker-login = Worker Login: { $state }
+# The cluster has sent this machine its own Claude Code login for jobs.
+cluster-worker-login-on = On
+# No cluster login is on this machine; jobs use the machine's own Claude Code login.
+cluster-worker-login-off = Off
 
 ## Secrets
 

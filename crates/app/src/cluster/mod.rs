@@ -25,6 +25,8 @@ mod feed_tests;
 #[cfg(test)]
 mod install_tests;
 #[cfg(test)]
+mod login_own_tests;
+#[cfg(test)]
 mod model_tests;
 #[cfg(test)]
 mod move_sheet_tests;
