@@ -122,6 +122,10 @@ impl Hub {
         &self.nodes[who]
     }
 
+    pub(super) fn core_mut(&mut self, who: &NodeId) -> &mut NodeCore {
+        self.nodes.get_mut(who).expect("node")
+    }
+
     pub(super) fn effects_of(&self, name: &str) -> Vec<&Effect> {
         self.seen
             .iter()

@@ -1,8 +1,10 @@
+use crate::cluster_fence::{clear_moved, mark_moved};
 use crate::cluster_node::ClusterNode;
 use crate::cluster_sessions::LocalRows;
 use crate::inbox_ops::InboxOps;
 use notchling_engine::cluster::core::Takeover;
 use notchling_engine::cluster::main_sessions::MainSession;
+use notchling_engine::cluster::members::Term;
 use notchling_engine::cluster::move_home::{
     left_behind, moving_text, resume_call_ms, FinalSet, MoveFacts, StopResult, SwitchResult,
     ToFacts,
@@ -627,7 +629,67 @@ impl Mover {
         })
     }
 
+    fn fence_keys(&self, main: &BTreeMap<String, MainSession>, ids: &[String]) -> Vec<String> {
+        let mut keys = Vec::new();
+        for id in ids {
+            keys.push(id.clone());
+            let conversation = main
+                .get(id)
+                .filter(|session| session.tool == Tool::Claude)
+                .and_then(|session| session.transcript.as_deref())
+                .and_then(conversation_of);
+            keys.extend(conversation);
+        }
+        keys.sort();
+        keys.dedup();
+        keys
+    }
+
+    fn fence_moved(&self, me: Option<NodeId>, to: &NodeId, term: u64, keys: &[String]) {
+        let Some(me) = me.or_else(|| self.me()) else {
+            return;
+        };
+        let at = Term {
+            n: term,
+            node: to.clone(),
+        };
+        let name = self.name_of(to);
+        if let Err(why) = mark_moved(&self.p.cluster, &me, at, keys, &name) {
+            self.notice(
+                "cluster-move-fence",
+                Kind::ActionFailed,
+                "Couldn't pause the moved sessions on this machine",
+                &why,
+            );
+        }
+    }
+
+    fn unfence_started(&self, main: &BTreeMap<String, MainSession>, rows: &Started) {
+        let started: Vec<String> = rows
+            .iter()
+            .filter(|(_, result)| result.is_ok())
+            .map(|(id, _)| id.clone())
+            .collect();
+        let _ = clear_moved(&self.p.cluster, &self.fence_keys(main, &started));
+    }
+
     pub fn switch(
+        &self,
+        to: &NodeId,
+        sessions: &[String],
+        set: Option<&str>,
+        term: u64,
+    ) -> SwitchResult {
+        let me = self.me();
+        let keys = self.fence_keys(&self.mains(), sessions);
+        let result = self.switch_link(to, sessions, set, term);
+        if matches!(result, SwitchResult::Done) {
+            self.fence_moved(me, to, term, &keys);
+        }
+        result
+    }
+
+    fn switch_link(
         &self,
         to: &NodeId,
         sessions: &[String],
@@ -697,10 +759,12 @@ impl Mover {
 
     pub fn start_here(&self, sessions: &[String]) -> Started {
         let main = self.mains();
-        sessions
+        let rows: Started = sessions
             .iter()
             .map(|id| (id.clone(), self.start_one(&main, id)))
-            .collect()
+            .collect();
+        self.unfence_started(&main, &rows);
+        rows
     }
 
     pub fn restart(&self, sessions: &[String], unless_live: &[String]) -> Started {
@@ -721,6 +785,7 @@ impl Mover {
                 results.push((id.clone(), self.start_one(&main, id)));
             }
         }
+        self.unfence_started(&main, &results);
         results
     }
 
