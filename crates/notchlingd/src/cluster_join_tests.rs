@@ -194,22 +194,64 @@ fn token_is_one_time() {
     assert!(member(&h.node.node.status(), &b.id()).is_none());
 }
 
+fn app_joiner(net: &Arc<MemNet>, name: &'static str) -> TestNode {
+    let mut opts = Opts::named(name);
+    opts.os = "macos";
+    opts.client = true;
+    let n = node(net, opts);
+    n.node.set_link(true);
+    n
+}
+
 #[test]
-fn join_token_from_client_node_is_minted_by_home() {
+fn a_member_without_an_app_gets_no_join_token_from_home() {
     let net = MemNet::new();
-    let h = home(&net, "jhome6", JOIN_WAIT);
-    let w = joiner(&net, "jbox6", "linux");
+    let h = home(&net, "jhome6n", JOIN_WAIT);
+    let w = joiner(&net, "jbox6n", "linux");
     w.node.join(&token(&h.node), false).unwrap();
     let item = asked(&h);
     h.inbox.decide(&item.id, ActionId::Allow, "mac").unwrap();
     eventually("active", || online(&w.node.status(), &h.node.id()));
+    assert!(w.node.join_token().is_err());
+    assert!(h.node.calls.calls.lock().unwrap().is_empty());
+}
+
+#[test]
+fn join_token_from_client_node_is_minted_by_home() {
+    let net = MemNet::new();
+    let h = home(&net, "jhome6", JOIN_WAIT);
+    let w = app_joiner(&net, "jbox6");
+    w.node.join(&token(&h.node), false).unwrap();
+    let item = asked(&h);
+    h.inbox.decide(&item.id, ActionId::Allow, "mac").unwrap();
+    eventually("active", || online(&w.node.status(), &h.node.id()));
+    h.node
+        .node
+        .local(notchling_engine::cluster::LocalCmd::SetMember {
+            node: w.id(),
+            can_be_master: None,
+            client: Some(true),
+            reference: None,
+            accepts_delegation: None,
+            headless: None,
+            desired: None,
+        })
+        .unwrap();
+    eventually("a client at the home", || {
+        h.node.node.status()["members"]
+            .as_array()
+            .is_some_and(|all| {
+                all.iter()
+                    .any(|m| m["id"] == json!(w.id()) && m["client"] == json!(true))
+            })
+    });
     let answer = w.node.join_token().unwrap();
     assert_eq!(answer, json!({"session": "s-cluster.join.token"}));
     let calls = h.node.calls.calls.lock().unwrap().clone();
     assert_eq!(calls.len(), 1, "{calls:?}");
     assert_eq!(calls[0].0, "cluster.join.token");
     assert_eq!(calls[0].2.node, w.id());
-    assert_eq!(calls[0].2.tier, OriginTier::Agent);
+    assert_eq!(calls[0].2.tier, OriginTier::App);
     assert_eq!(calls[0].1, json!({"minter": w.id()}));
     let minted = token(&h.node);
     assert_eq!(decode_token(&minted).unwrap().home, h.node.id());

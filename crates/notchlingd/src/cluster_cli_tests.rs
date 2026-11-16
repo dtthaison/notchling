@@ -45,7 +45,7 @@ fn cli_join_reads_token_from_stdin_only() {
 #[test]
 fn the_other_commands_parse() {
     assert_eq!(parse(&words(&["status"])).unwrap().sub, Sub::Status);
-    assert_eq!(parse(&words(&["token"])).unwrap().sub, Sub::Token);
+    assert!(parse(&words(&["token"])).is_err());
     let with_socket = parse(&words(&["status", "--json", "--socket", "/tmp/s"])).unwrap();
     assert!(with_socket.json);
     assert_eq!(with_socket.socket, Some(PathBuf::from("/tmp/s")));

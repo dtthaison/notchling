@@ -110,15 +110,8 @@ fn unknown_op_is_not_allowed() {
 }
 
 #[test]
-fn member_may_ask_for_a_join_token_and_a_delegate_dispatch() {
+fn member_may_ask_for_a_delegate_dispatch() {
     let worker = facts("w1", Role::Worker, false, MemberState::Active);
-    let rule = check(
-        "cluster.join.token",
-        &worker,
-        &origin("w1", OriginTier::Agent),
-    )
-    .expect("rule");
-    assert!(rule.home_only);
     assert!(check(
         "cluster.dispatch",
         &worker,
@@ -475,6 +468,29 @@ fn only_a_client_or_the_home_records_from_its_app() {
         check("cluster.record", &worker, &origin("w1", OriginTier::App)).err(),
         Some(Denied::TierTooHigh)
     );
+}
+
+#[test]
+fn only_an_app_client_may_ask_for_a_join_token() {
+    let client = facts("m1", Role::Standby, true, MemberState::Active);
+    let rule = check(
+        "cluster.join.token",
+        &client,
+        &origin("m1", OriginTier::App),
+    )
+    .expect("rule");
+    assert!(rule.home_only);
+    for tier in [OriginTier::Agent, OriginTier::Node] {
+        assert!(check("cluster.join.token", &client, &origin("m1", tier)).is_err());
+    }
+    let standby = facts("m2", Role::Standby, false, MemberState::Active);
+    for tier in [OriginTier::App, OriginTier::Agent, OriginTier::Node] {
+        assert!(check("cluster.join.token", &standby, &origin("m2", tier)).is_err());
+    }
+    let worker = facts("w1", Role::Worker, false, MemberState::Active);
+    for tier in [OriginTier::App, OriginTier::Agent, OriginTier::Node] {
+        assert!(check("cluster.join.token", &worker, &origin("w1", tier)).is_err());
+    }
 }
 
 #[test]

@@ -287,7 +287,7 @@ from the app in this run, or `cluster.join` (below), or a restart of a headless 
 | --- | --- | --- | --- |
 | `cluster.status` | agent | `{}` | `{cluster: {id, name, term, home, vault} \| null, joining: {since, cluster, primary, answered} \| null, me, members: [Member], jobs: [Job], main: [session id], kept: [session id], claims: [Claim], sideCopies: [SideCopy], waiting: [{session, node, name, title}], link, listening, tailscale, error}`; `jobs` is the 50 newest dispatched jobs, `[]` with no cluster, each `{id, node, tool, cwd, state, session, qualified, detail, createdMs}` |
 | `cluster.create` | app | `{name}` | `{cluster: <id>}`; this node is its home (primary) and reference, and `cluster.status` has the rest |
-| `cluster.join.token` | agent | `{}` | `{token: "nlj1.…"}`, one use, 10 minutes, at most 16 open at once (the oldest is dropped); a non-home member asks its home, which records that member as the maker |
+| `cluster.join.token` | app | `{}` | `{token: "nlj1.…"}`, one use, 10 minutes, at most 16 open at once (the oldest is dropped); a non-home member asks its home, which records that member as the maker. Only the app may ask (maintainer 2026-11-16): a terminal or agent is refused, so there is no `notchling cluster token`, and the home answers a forwarded call only from a client member at app origin |
 | `cluster.join` | agent | `{token}` | `{state: "pending" \| "joined"}` |
 | `cluster.member.set` | app | `{node, canBeMaster?, client?, reference?, acceptsDelegation?, headless?, desired?}` | `{}`; `cluster.status` shows the member as stored |
 | `cluster.remove` | app | `{node}` | `{}`; the member shows `state: "removed"` in `cluster.status` |
@@ -536,8 +536,8 @@ The session ops that are forwarded (`session.new`, `codex.send`, `agy.open`, `ag
 `codex.stop`, `agy.cancel`, `shell.stop`) are accepted from the home at node or app origin; `session.reply`,
 `.answer`, `.permission`, `.interrupt`, `.stop`, `codex.send`, `.stop`, `agy.send`, `.cancel`, `.permission`,
 `.conversation`, `prompts.list` and `shell.stop` from a client or the home at app origin. `cluster.dispatch`,
-`cluster.member.set` and `cluster.remove` reach the home from a client at app origin, and `cluster.join.token`
-and a delegate `cluster.dispatch` from any member to the home.
+`cluster.member.set`, `cluster.remove` and `cluster.join.token` reach the home from a client at app origin (a Standby
+or Worker without the app is refused a join token), and a delegate `cluster.dispatch` from any member to the home.
 
 ### Cluster secrets, logins and inbox mirrors
 

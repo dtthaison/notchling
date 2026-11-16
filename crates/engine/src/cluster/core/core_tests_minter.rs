@@ -154,31 +154,52 @@ fn only_a_member_can_be_named_as_the_maker_of_a_token() {
     assert!(!hub.core(&m5).pin_set().1);
 }
 
-#[test]
-fn a_forwarded_token_call_names_the_calling_member_whatever_its_args_say() {
-    let (mut hub, m5, w1) = pair();
-    let term = hub.core(&m5).highest_term().cloned().expect("term");
-    let effects = hub.nodes.get_mut(&m5).expect("node").step(Input::Msg {
-        from: w1.clone(),
+fn token_call(hub: &mut Hub, home: &NodeId, from: &NodeId, tier: OriginTier) -> Vec<Effect> {
+    let term = hub.core(home).highest_term().cloned().expect("term");
+    hub.nodes.get_mut(home).expect("node").step(Input::Msg {
+        from: from.clone(),
         msg: Msg::Call {
             id: 3,
             op: "cluster.join.token".to_string(),
-            args: json!({"minter": m5}).into(),
+            args: json!({"minter": home}).into(),
             origin: Origin {
-                node: w1.clone(),
-                tier: OriginTier::Agent,
+                node: from.clone(),
+                tier,
             },
             term,
         },
-    });
-    let runs: Vec<_> = effects
+    })
+}
+
+fn token_runs(effects: &[Effect]) -> Vec<(String, crate::cluster::wire::Args)> {
+    effects
         .iter()
         .filter_map(|e| match e {
             Effect::RunLocal { op, args, .. } => Some((op.clone(), args.clone())),
             _ => None,
         })
-        .collect();
+        .collect()
+}
+
+#[test]
+fn a_forwarded_token_call_names_the_calling_member_whatever_its_args_say() {
+    let mut hub = Hub::new();
+    let m5 = hub.add("m5", "macos", true);
+    let m1 = hub.add("m1", "macos", true);
+    hub.create("m5");
+    hub.join_as("m5", "m1", "macos", true, false);
+    let effects = token_call(&mut hub, &m5, &m1, OriginTier::App);
+    let runs = token_runs(&effects);
     assert_eq!(runs.len(), 1, "{effects:?}");
     assert_eq!(runs[0].0, "cluster.join.token");
-    assert_eq!(runs[0].1, json!({"minter": w1}).into());
+    assert_eq!(runs[0].1, json!({"minter": m1}).into());
+}
+
+#[test]
+fn a_member_without_an_app_or_an_agent_gets_no_token() {
+    let (mut hub, m5, w1) = pair();
+    for tier in [OriginTier::App, OriginTier::Agent] {
+        let effects = token_call(&mut hub, &m5, &w1, tier);
+        assert!(token_runs(&effects).is_empty(), "{tier:?}: {effects:?}");
+    }
 }

@@ -387,7 +387,7 @@ impl Driver {
                 state.home.clone(),
                 Origin {
                     node: self.me.clone(),
-                    tier: OriginTier::Agent,
+                    tier: OriginTier::App,
                 },
             );
             let cmd = LocalCmd::Forward {

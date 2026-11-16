@@ -4,7 +4,7 @@ use serde_json::{json, Value};
 use std::io::{BufRead, Write};
 use std::path::PathBuf;
 
-pub const USAGE: &str = "Usage: notchling cluster status [--json]\n       notchling cluster token\n       notchling cluster join --token-stdin [--json]";
+pub const USAGE: &str = "Usage: notchling cluster status [--json]\n       notchling cluster join --token-stdin [--json]";
 pub const TOKEN_ON_STDIN: &str = "pass the token on stdin: notchling cluster join --token-stdin";
 
 const TOKEN_MAX: usize = 4096;
@@ -16,7 +16,6 @@ pub const TROUBLE: i32 = 2;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Sub {
     Status,
-    Token,
     Join,
 }
 
@@ -48,7 +47,6 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
     }
     let sub = match words.as_slice() {
         ["status"] => Sub::Status,
-        ["token"] => Sub::Token,
         ["join"] if stdin => Sub::Join,
         ["join", ..] => return Err(TOKEN_ON_STDIN.to_string()),
         _ => return Err(USAGE.to_string()),
@@ -154,7 +152,6 @@ pub fn run_with(
         client.set_timeout(CALL_TIMEOUT + CALL_TIMEOUT);
         match (&parsed.sub, token) {
             (Sub::Status, _) => client.call(ops::CLUSTER_STATUS, json!({})),
-            (Sub::Token, _) => client.call(ops::CLUSTER_JOIN_TOKEN, json!({})),
             (Sub::Join, token) => client.call(ops::CLUSTER_JOIN, json!({"token": token})),
         }
     });
@@ -171,7 +168,6 @@ pub fn run_with(
     } else {
         match parsed.sub {
             Sub::Status => status_lines(&reply).join("\n"),
-            Sub::Token => text(&reply, "token").to_string(),
             Sub::Join if text(&reply, "state") == "joined" => "Joined the cluster.".to_string(),
             Sub::Join => {
                 "Asked to join; the cluster's primary must allow it in its Inbox.".to_string()

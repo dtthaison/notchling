@@ -52,11 +52,7 @@ fn status_is_agent_tier() {
     let net = MemNet::new();
     let n = node(&net, Opts::named("tiers"));
     let w = wired(&n, false);
-    let agent = [
-        ops::CLUSTER_STATUS,
-        ops::CLUSTER_JOIN_TOKEN,
-        ops::CLUSTER_JOIN,
-    ];
+    let agent = [ops::CLUSTER_STATUS, ops::CLUSTER_JOIN];
     for op in CLUSTER_OPS {
         let want = if agent.contains(&op) {
             OpSpec::AGENT
@@ -383,7 +379,7 @@ fn a_local_callers_args_never_name_the_maker() {
     let made = w
         .ops
         .call(
-            &caller(Tier::Agent),
+            &caller(Tier::App),
             ops::CLUSTER_JOIN_TOKEN,
             &json!({"minter": worker.id()}),
         )
