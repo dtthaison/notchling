@@ -38,6 +38,7 @@ Most of them come from the design, [revision 2](https://github.com/dtthaison/not
 | [XXXX](XXXX-cluster-failover-and-fencing.md) | Cluster v1 failover and fencing: a long lease from one Standby, a gate at every tool call, claims and side copies that are never deleted | Proposed |
 | [XXXX](XXXX-cluster-standby-and-handover.md) | Cluster v1 Standby and handover: sets at every turn end, only pushed sessions move, a Standby relays or holds the phone's commands | Proposed |
 | [XXXX](XXXX-skills-follow-the-app-data-follows-the-source.md) | Skills follow the app, data follows the source: skill text without changing data, commands as the stable contract, model data from catalog, override and live lists | Accepted |
+| [XXXX](XXXX-phone-push.md) | Phone push: FCM, ids only, sent by the primary or by any Can Be Master machine while it is silent; dropped for v1 (no phone push) | Dropped |
 
 0001 was written before records had a Status section. Its status is Accepted.
 
@@ -46,6 +47,7 @@ Most of them come from the design, [revision 2](https://github.com/dtthaison/not
 - **Proposed**: written down, not settled. The record says what would settle it.
 - **Accepted**: in force. The maintainer decided it (*(decided)* in the design), or it came from the reviews (*(review)*) and is part of the approved revision 2.
 - **Superseded by NNNN**: a newer record replaced it.
+- **Dropped**: the maintainer decided not to build it. The record stays so the reasoning isn't lost and can be picked up again.
 
 The design marks some choices *(my call)*: the designer's, open to change. A record whose core is one of those is Proposed. An Accepted record that contains one names it in its Status.
 
