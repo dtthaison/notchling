@@ -47,6 +47,7 @@ impl ClusterSheetView {
             .unwrap_or_default();
         let primary = model
             .primary_row()
+            .filter(|r| r.id != status.to)
             .map(|r| r.name.clone())
             .unwrap_or_default();
         self.move_sheet = Some(MoveSheet::running(&status.to, &name).with_from(&primary));

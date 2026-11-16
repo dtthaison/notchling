@@ -309,13 +309,13 @@ impl ClusterSheetView {
         Some(block)
     }
 
-    fn copy_row(&self, row: &CopyRow, a: Appearance, cx: &mut Context<Self>) -> Div {
+    fn copy_row(&self, index: usize, row: &CopyRow, a: Appearance, cx: &mut Context<Self>) -> Div {
         let (session, node) = (row.session.clone(), row.node.clone());
         let mut buttons = div().flex().items_center().gap(px(SPACE[0]));
         if let Some(path) = row.open.clone() {
             buttons = buttons.child(
                 button(
-                    SharedString::from(format!("copy-open-{}-{}", row.session, row.node)),
+                    SharedString::from(format!("copy-open-{index}-{}-{}", row.session, row.node)),
                     t::cluster::copy_open(),
                     ButtonKind::Secondary,
                     PartState::Rest,
@@ -328,7 +328,7 @@ impl ClusterSheetView {
         }
         buttons = buttons.child(
             button(
-                SharedString::from(format!("copy-hide-{}-{}", row.session, row.node)),
+                SharedString::from(format!("copy-hide-{index}-{}-{}", row.session, row.node)),
                 t::cluster::copy_hide(),
                 ButtonKind::Ghost,
                 self.button_state(),
@@ -363,8 +363,8 @@ impl ClusterSheetView {
             return None;
         }
         let mut list = div().flex().flex_col().gap(px(SPACE[1]));
-        for row in &rows {
-            list = list.child(self.copy_row(row, a, cx));
+        for (index, row) in rows.iter().enumerate() {
+            list = list.child(self.copy_row(index, row, a, cx));
         }
         Some(
             card(a)

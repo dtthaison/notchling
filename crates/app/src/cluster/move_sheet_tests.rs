@@ -280,6 +280,11 @@ fn move_sheet_shows_unfenced() {
         .notes
         .iter()
         .any(|n| n.text.starts_with("The old primary couldn't pause")));
+    let blank = sheet().with_from("").view(Some(&status), &names());
+    assert!(blank
+        .notes
+        .iter()
+        .any(|n| n.text.starts_with("The old primary couldn't pause")));
 
     let clean = named.view(Some(&status_at("done")), &names());
     assert!(!clean

@@ -233,7 +233,7 @@ impl MoveSheet {
     }
 
     pub fn with_from(mut self, name: &str) -> MoveSheet {
-        self.from_name = Some(name.to_owned());
+        self.from_name = Some(name.to_owned()).filter(|n| !n.is_empty());
         self
     }
 

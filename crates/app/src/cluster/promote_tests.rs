@@ -152,6 +152,11 @@ fn the_promote_sheet_asks_before_it_sends_anything() {
     assert_eq!(request.args, json!({"node": STANDBY}));
     assert_eq!(ask.phase, PromotePhase::Starting);
     assert!(ask.start(&model).is_none());
+
+    let mut late = sheet();
+    let back = model_in(status(), STANDBY);
+    assert!(late.start(&back).is_none());
+    assert!(matches!(late.phase, PromotePhase::Refused(_)));
 }
 
 #[test]
@@ -183,6 +188,7 @@ fn risk_confirm_only_when_asked() {
     assert_eq!(second.op, ops::CLUSTER_PROMOTE);
     assert_eq!(second.args, json!({"node": STANDBY, "confirmed": true}));
     assert_eq!(risky.phase, PromotePhase::Starting);
+    assert!(risky.start(&model).is_none());
 
     let mut refused = sheet();
     refused.start(&model).unwrap();
