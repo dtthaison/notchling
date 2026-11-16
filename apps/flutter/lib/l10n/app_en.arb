@@ -258,6 +258,18 @@
   "@chatAttachPhoto": {
     "description": "Shown in the Chat screen."
   },
+  "chatCompactConfirm": "Compact this session's context? Claude summarises the conversation so far to free room. This cannot be undone.",
+  "@chatCompactConfirm": {
+    "description": "Body of the dialog that asks before compacting a session."
+  },
+  "chatCompactTitle": "Compact context",
+  "@chatCompactTitle": {
+    "description": "Title of the dialog that asks before compacting a session."
+  },
+  "chatCompactTooltip": "Compact",
+  "@chatCompactTooltip": {
+    "description": "Tooltip of the Compact button in the Chat composer and the confirm button of its dialog."
+  },
   "chatCompactionTitle": "Conversation compacted",
   "@chatCompactionTitle": {
     "description": "Shown in the Chat screen."
@@ -286,6 +298,34 @@
   "@chatCopyCode": {
     "description": "Shown in the Chat screen."
   },
+  "chatEffortChip": "Effort",
+  "@chatEffortChip": {
+    "description": "The Effort button in the Chat composer, before a level is known."
+  },
+  "chatEffortHigh": "High",
+  "@chatEffortHigh": {
+    "description": "An effort level in the Chat composer."
+  },
+  "chatEffortLow": "Low",
+  "@chatEffortLow": {
+    "description": "An effort level in the Chat composer."
+  },
+  "chatEffortMax": "Max",
+  "@chatEffortMax": {
+    "description": "An effort level in the Chat composer."
+  },
+  "chatEffortMedium": "Medium",
+  "@chatEffortMedium": {
+    "description": "An effort level in the Chat composer."
+  },
+  "chatEffortSheetTitle": "Choose an effort level",
+  "@chatEffortSheetTitle": {
+    "description": "Title of the sheet that lists effort levels in the Chat composer."
+  },
+  "chatEffortXhigh": "Extra High",
+  "@chatEffortXhigh": {
+    "description": "An effort level in the Chat composer."
+  },
   "chatEmpty": "No messages yet.",
   "@chatEmpty": {
     "description": "Shown in the Chat screen."
@@ -301,6 +341,18 @@
   "chatLoadOlder": "Load older messages",
   "@chatLoadOlder": {
     "description": "Shown in the Chat screen."
+  },
+  "chatModelChip": "Model",
+  "@chatModelChip": {
+    "description": "The Model button in the Chat composer, before a model is known."
+  },
+  "chatModelOlder": "More models",
+  "@chatModelOlder": {
+    "description": "Heading of the older models in the model sheet."
+  },
+  "chatModelSheetTitle": "Choose a model",
+  "@chatModelSheetTitle": {
+    "description": "Title of the sheet that lists models in the Chat composer."
   },
   "chatMultiSelectOnMac": "This question allows several answers. Answer it on the Mac.",
   "@chatMultiSelectOnMac": {

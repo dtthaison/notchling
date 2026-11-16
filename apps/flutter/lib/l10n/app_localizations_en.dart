@@ -190,6 +190,16 @@ class AppL10nEn extends AppL10n {
   String get chatAttachPhoto => 'Attach a photo';
 
   @override
+  String get chatCompactConfirm =>
+      'Compact this session\'s context? Claude summarises the conversation so far to free room. This cannot be undone.';
+
+  @override
+  String get chatCompactTitle => 'Compact context';
+
+  @override
+  String get chatCompactTooltip => 'Compact';
+
+  @override
   String get chatCompactionTitle => 'Conversation compacted';
 
   @override
@@ -211,6 +221,27 @@ class AppL10nEn extends AppL10n {
   String get chatCopyCode => 'Copy';
 
   @override
+  String get chatEffortChip => 'Effort';
+
+  @override
+  String get chatEffortHigh => 'High';
+
+  @override
+  String get chatEffortLow => 'Low';
+
+  @override
+  String get chatEffortMax => 'Max';
+
+  @override
+  String get chatEffortMedium => 'Medium';
+
+  @override
+  String get chatEffortSheetTitle => 'Choose an effort level';
+
+  @override
+  String get chatEffortXhigh => 'Extra High';
+
+  @override
   String get chatEmpty => 'No messages yet.';
 
   @override
@@ -221,6 +252,15 @@ class AppL10nEn extends AppL10n {
 
   @override
   String get chatLoadOlder => 'Load older messages';
+
+  @override
+  String get chatModelChip => 'Model';
+
+  @override
+  String get chatModelOlder => 'More models';
+
+  @override
+  String get chatModelSheetTitle => 'Choose a model';
 
   @override
   String get chatMultiSelectOnMac =>

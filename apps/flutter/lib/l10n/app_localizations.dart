@@ -393,6 +393,24 @@ abstract class AppL10n {
   /// **'Attach a photo'**
   String get chatAttachPhoto;
 
+  /// Body of the dialog that asks before compacting a session.
+  ///
+  /// In en, this message translates to:
+  /// **'Compact this session\'s context? Claude summarises the conversation so far to free room. This cannot be undone.'**
+  String get chatCompactConfirm;
+
+  /// Title of the dialog that asks before compacting a session.
+  ///
+  /// In en, this message translates to:
+  /// **'Compact context'**
+  String get chatCompactTitle;
+
+  /// Tooltip of the Compact button in the Chat composer and the confirm button of its dialog.
+  ///
+  /// In en, this message translates to:
+  /// **'Compact'**
+  String get chatCompactTooltip;
+
   /// Shown in the Chat screen.
   ///
   /// In en, this message translates to:
@@ -435,6 +453,48 @@ abstract class AppL10n {
   /// **'Copy'**
   String get chatCopyCode;
 
+  /// The Effort button in the Chat composer, before a level is known.
+  ///
+  /// In en, this message translates to:
+  /// **'Effort'**
+  String get chatEffortChip;
+
+  /// An effort level in the Chat composer.
+  ///
+  /// In en, this message translates to:
+  /// **'High'**
+  String get chatEffortHigh;
+
+  /// An effort level in the Chat composer.
+  ///
+  /// In en, this message translates to:
+  /// **'Low'**
+  String get chatEffortLow;
+
+  /// An effort level in the Chat composer.
+  ///
+  /// In en, this message translates to:
+  /// **'Max'**
+  String get chatEffortMax;
+
+  /// An effort level in the Chat composer.
+  ///
+  /// In en, this message translates to:
+  /// **'Medium'**
+  String get chatEffortMedium;
+
+  /// Title of the sheet that lists effort levels in the Chat composer.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose an effort level'**
+  String get chatEffortSheetTitle;
+
+  /// An effort level in the Chat composer.
+  ///
+  /// In en, this message translates to:
+  /// **'Extra High'**
+  String get chatEffortXhigh;
+
   /// Shown in the Chat screen.
   ///
   /// In en, this message translates to:
@@ -458,6 +518,24 @@ abstract class AppL10n {
   /// In en, this message translates to:
   /// **'Load older messages'**
   String get chatLoadOlder;
+
+  /// The Model button in the Chat composer, before a model is known.
+  ///
+  /// In en, this message translates to:
+  /// **'Model'**
+  String get chatModelChip;
+
+  /// Heading of the older models in the model sheet.
+  ///
+  /// In en, this message translates to:
+  /// **'More models'**
+  String get chatModelOlder;
+
+  /// Title of the sheet that lists models in the Chat composer.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose a model'**
+  String get chatModelSheetTitle;
 
   /// Shown in the Chat screen.
   ///

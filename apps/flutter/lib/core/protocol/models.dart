@@ -307,6 +307,7 @@ class Session {
     this.facts,
     this.lastMessage,
     this.node,
+    this.tool = 'claude',
   });
 
   factory Session.fromJson(Json json) {
@@ -333,6 +334,7 @@ class Session {
           ? SessionFacts.fromJson(json.object('facts'))
           : null,
       node: SessionNode.tryParse(json['node']),
+      tool: json.strOrNull('tool') ?? 'claude',
     );
   }
 
@@ -356,6 +358,8 @@ class Session {
   final LastMessage? lastMessage;
 
   final SessionNode? node;
+
+  final String tool;
 
   int get runningSubagents => subagents.where((Subagent s) => s.running).length;
   bool get canMessage => control != SessionControl.viewOnly;
