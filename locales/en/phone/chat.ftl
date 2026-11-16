@@ -273,6 +273,9 @@ chat-effort-sheet-title = Choose an effort level
 # Heading of the older models in the model sheet.
 chat-model-older = More models
 
+# Beside the model or effort the user just picked in the Chat composer, until the session reports it back.
+chat-pick-pending = Applying
+
 # An effort level in the Chat composer.
 chat-effort-low = Low
 

@@ -681,6 +681,12 @@ abstract class AppL10n {
   /// **'Send a photo'**
   String get chatPhotoTitle;
 
+  /// Beside the model or effort the user just picked in the Chat composer, until the session reports it back.
+  ///
+  /// In en, this message translates to:
+  /// **'Applying'**
+  String get chatPickPending;
+
   /// Shown in the Chat screen.
   ///
   /// In en, this message translates to:

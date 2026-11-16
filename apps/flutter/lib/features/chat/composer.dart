@@ -38,6 +38,7 @@ class Composer extends StatefulWidget {
     this.onSendText,
     this.model,
     this.effort,
+    this.models,
   });
 
   final TextEditingController controller;
@@ -67,6 +68,7 @@ class Composer extends StatefulWidget {
   final void Function(String text)? onSendText;
   final String? model;
   final String? effort;
+  final List<ModelChoice>? models;
 
   @override
   State<Composer> createState() => _ComposerState();
@@ -355,6 +357,7 @@ class _ComposerState extends State<Composer> {
                         child: ComposerControls(
                           model: widget.model,
                           effort: widget.effort,
+                          models: widget.models,
                           enabled: !sending,
                           onSend: widget.onSendText!,
                         ),

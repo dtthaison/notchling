@@ -455,6 +455,10 @@
   "@chatPhotoTitle": {
     "description": "Shown in the Chat screen."
   },
+  "chatPickPending": "Applying",
+  "@chatPickPending": {
+    "description": "Beside the model or effort the user just picked in the Chat composer, until the session reports it back."
+  },
   "chatPictureClose": "Close picture",
   "@chatPictureClose": {
     "description": "Shown in the Chat screen."

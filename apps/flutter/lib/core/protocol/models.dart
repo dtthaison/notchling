@@ -218,6 +218,27 @@ class LastMessage {
   final String text;
 }
 
+class ModelChoice {
+  const ModelChoice({required this.id, required this.name});
+
+  static List<ModelChoice>? listOrNull(Object? raw) {
+    if (raw is! List<Object?>) return null;
+    final List<ModelChoice> models = <ModelChoice>[];
+    for (final Object? item in raw) {
+      if (item is! Map<Object?, Object?>) continue;
+      final Json json = item.cast<String, Object?>();
+      final String id = json.strOrNull('id') ?? '';
+      if (id.isEmpty) continue;
+      final String name = json.strOrNull('name') ?? '';
+      models.add(ModelChoice(id: id, name: name.isEmpty ? id : name));
+    }
+    return models.isEmpty ? null : models;
+  }
+
+  final String id;
+  final String name;
+}
+
 class LimitMeter {
   const LimitMeter({required this.label, required this.percent, this.resetsAt});
 
