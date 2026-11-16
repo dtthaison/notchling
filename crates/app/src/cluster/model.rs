@@ -5,6 +5,7 @@ use notchling_locale as t;
 use serde_json::Value;
 
 use super::move_sheet::MoveStatus;
+use super::promote::PromoteInfo;
 use super::replication::ReplicationRow;
 use super::secrets::SecretsModel;
 use super::wire::{self, Request};
@@ -179,6 +180,7 @@ pub struct FailoverStatus {
     pub value: String,
     pub armed: bool,
     pub target: Option<String>,
+    pub takes_over_at: Option<i64>,
 }
 
 fn failover_of(status: &Value) -> Option<FailoverStatus> {
@@ -190,6 +192,7 @@ fn failover_of(status: &Value) -> Option<FailoverStatus> {
             .get("target")
             .and_then(Value::as_str)
             .map(str::to_owned),
+        takes_over_at: failover.get("takesOverAt").and_then(Value::as_i64),
     })
 }
 
@@ -199,6 +202,7 @@ pub struct ClusterModel {
     cluster: Option<String>,
     joining: Option<bool>,
     failover: Option<FailoverStatus>,
+    pub(super) promote: PromoteInfo,
     me: String,
     rows: Vec<NodeRow>,
     reference: Option<Versions>,
@@ -436,6 +440,7 @@ impl ClusterModel {
             cluster,
             joining,
             failover: failover_of(status),
+            promote: PromoteInfo::of(status),
             me: me.to_owned(),
             rows: ranked
                 .into_iter()
@@ -477,6 +482,10 @@ impl ClusterModel {
 
     pub fn move_status(&self) -> Option<&MoveStatus> {
         self.moving.as_ref()
+    }
+
+    pub fn link_on(&self) -> bool {
+        self.link
     }
 
     pub fn move_running(&self) -> bool {

@@ -3,7 +3,7 @@ use notchling_kit::labels::Corner;
 use notchling_kit::metric::SPACE;
 use notchling_kit::part::{ButtonKind, PartState};
 use notchling_kit::ui::{
-    card, icon, icon_button, label, menu_panel, menu_rule, KitPart, KitStyled, MenuItem,
+    button, card, icon, icon_button, label, menu_panel, menu_rule, KitPart, KitStyled, MenuItem,
 };
 use notchling_kit::{Appearance, Icon, IconSize, Ink, TypeRole};
 use notchling_locale as t;
@@ -110,6 +110,16 @@ impl ClusterSheetView {
                 .on_click(cx.listener(move |this, _, _, cx| this.open_move(&to, cx))),
             );
         }
+        if self.feed_offers_take_back(&id) {
+            items = items.child(
+                MenuItem::new(
+                    SharedString::from(format!("node-take-back-{id}")),
+                    t::cluster::take_back(),
+                )
+                .build(a)
+                .on_click(cx.listener(|this, _, _, cx| this.open_take_back(cx))),
+            );
+        }
         if row.offers_secrets() {
             let secrets = id.clone();
             items = items.child(
@@ -179,6 +189,18 @@ impl ClusterSheetView {
             .gap(px(SPACE[1]))
             .child(div().flex_1().min_w(px(0.0)).child(title));
         head = head.child(label(row.state_word(), TypeRole::Meta, Ink::TextMuted, a));
+        if self.feed_offers_take_back(&row.id) {
+            head = head.child(
+                button(
+                    SharedString::from(format!("node-take-back-button-{id}")),
+                    t::cluster::take_back(),
+                    ButtonKind::Secondary,
+                    PartState::Rest,
+                    a,
+                )
+                .on_click(cx.listener(|this, _, _, cx| this.open_take_back(cx))),
+            );
+        }
         if row.offers_menu() {
             let open = self.menu.as_deref() == Some(row.id.as_str());
             let more = icon_button(

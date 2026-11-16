@@ -4,6 +4,10 @@ pub mod model;
 pub mod move_sheet;
 #[cfg(target_os = "macos")]
 mod move_view;
+pub mod promote;
+pub mod promote_sheet;
+#[cfg(target_os = "macos")]
+mod promote_view;
 pub mod renders;
 pub mod replication;
 pub mod secrets;
@@ -28,6 +32,8 @@ mod install_tests;
 mod model_tests;
 #[cfg(test)]
 mod move_sheet_tests;
+#[cfg(test)]
+mod promote_tests;
 #[cfg(test)]
 mod replication_tests;
 #[cfg(test)]

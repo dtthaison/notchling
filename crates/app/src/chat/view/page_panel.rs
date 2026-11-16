@@ -207,6 +207,18 @@ pub fn follow_link(url: &str, window: &mut Window, cx: &mut App) {
     }
 }
 
+pub fn open_file_in_chat(path: &Path, window: &mut Window, cx: &mut App) -> bool {
+    match window.root::<ChatView>() {
+        Some(Some(chat)) => {
+            chat.update(cx, |view, cx| {
+                view.open_path(path.to_path_buf(), window, cx)
+            });
+            true
+        }
+        _ => false,
+    }
+}
+
 pub fn run_in_chat(command: &str, how: RunHow, window: &mut Window, cx: &mut App) {
     if let Some(Some(chat)) = window.root::<ChatView>() {
         chat.update(cx, |view, cx| view.run_command(command, how, cx));

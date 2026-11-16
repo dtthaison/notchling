@@ -119,6 +119,38 @@ pub fn move_now() -> Request {
     }
 }
 
+pub fn promote(node: &str, confirmed: bool) -> Request {
+    let mut args = json!({"node": node});
+    if confirmed {
+        args["confirmed"] = json!(true);
+    }
+    Request {
+        op: ops::CLUSTER_PROMOTE,
+        args,
+    }
+}
+
+pub fn take_back() -> Request {
+    Request {
+        op: ops::CLUSTER_TAKE_BACK,
+        args: json!({}),
+    }
+}
+
+pub fn continue_here(session: &str) -> Request {
+    Request {
+        op: ops::CLUSTER_CONTINUE_HERE,
+        args: json!({"id": session}),
+    }
+}
+
+pub fn hide_side_copy(session: &str, node: &str) -> Request {
+    Request {
+        op: ops::CLUSTER_SIDE_COPY_HIDE,
+        args: json!({"session": session, "node": node}),
+    }
+}
+
 pub fn failover(value: &str) -> Request {
     Request {
         op: ops::CLUSTER_FAILOVER_SET,

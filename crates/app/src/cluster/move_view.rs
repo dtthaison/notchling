@@ -10,6 +10,7 @@ use super::model::ClusterModel;
 use super::move_sheet::{
     Button, MoveSheet, MoveView, Note, Phase, SessionLine, StepLine, StepState,
 };
+use super::promote::{MoveKind, PromoteSheet};
 use super::view::ClusterSheetView;
 
 const MOVE_MAX_HEIGHT: f32 = 640.0;
@@ -18,12 +19,20 @@ impl ClusterSheetView {
     pub(super) fn open_move(&mut self, id: &str, cx: &mut Context<Self>) {
         self.menu = None;
         let model = self.feed.snapshot();
-        if model.move_home(id).is_none() {
-            cx.notify();
-            return;
-        }
         let name = model.row(id).map(|r| r.name.clone()).unwrap_or_default();
-        self.move_sheet = Some(MoveSheet::new(id, &name));
+        let primary = model
+            .primary_row()
+            .map(|r| r.name.clone())
+            .unwrap_or_default();
+        match model.move_kind(id) {
+            Some(MoveKind::Handover) => {
+                self.move_sheet = Some(MoveSheet::new(id, &name).with_from(&primary));
+            }
+            Some(MoveKind::Promote) => {
+                self.promote_sheet = Some(PromoteSheet::new(id, &name, &primary));
+            }
+            None => {}
+        }
         cx.notify();
     }
 
@@ -36,7 +45,11 @@ impl ClusterSheetView {
             .row(&status.to)
             .map(|r| r.name.clone())
             .unwrap_or_default();
-        self.move_sheet = Some(MoveSheet::running(&status.to, &name));
+        let primary = model
+            .primary_row()
+            .map(|r| r.name.clone())
+            .unwrap_or_default();
+        self.move_sheet = Some(MoveSheet::running(&status.to, &name).with_from(&primary));
         cx.notify();
     }
 
@@ -77,10 +90,15 @@ impl ClusterSheetView {
 
     fn close_move(&mut self, cx: &mut Context<Self>) {
         self.move_sheet = None;
+        self.promote_sheet = None;
         cx.notify();
     }
 
     fn start_move(&mut self, cx: &mut Context<Self>) {
+        if self.promote_sheet.is_some() {
+            self.start_promote(cx);
+            return;
+        }
         let Some(sheet) = self.move_sheet.as_mut() else {
             return;
         };
@@ -146,13 +164,18 @@ impl ClusterSheetView {
     fn move_button(&self, which: Button, a: Appearance, cx: &mut Context<Self>) -> Div {
         let (id, title, kind) = match which {
             Button::Start => ("move-start", t::cluster::move_start(), ButtonKind::Primary),
+            Button::Anyway => (
+                "move-anyway",
+                t::cluster::move_anyway(),
+                ButtonKind::Primary,
+            ),
             Button::Cancel => ("move-cancel", t::cluster::move_cancel(), ButtonKind::Ghost),
             Button::MoveNow => ("move-now", t::cluster::move_now(), ButtonKind::Secondary),
             Button::Close => ("move-close", t::cluster::move_close(), ButtonKind::Ghost),
         };
         let clickable = button(id, title, kind, PartState::Rest, a).on_click(cx.listener(
             move |this, _, _, cx| match which {
-                Button::Start => this.start_move(cx),
+                Button::Start | Button::Anyway => this.start_move(cx),
                 Button::MoveNow => this.move_now(cx),
                 Button::Cancel | Button::Close => this.close_move(cx),
             },
@@ -166,8 +189,14 @@ impl ClusterSheetView {
         a: Appearance,
         cx: &mut Context<Self>,
     ) -> Option<Div> {
-        let sheet = self.move_sheet.as_ref()?;
-        let view = sheet.view(model.move_status(), &self.names);
+        let (view, waiting) = match (&self.promote_sheet, &self.move_sheet) {
+            (Some(sheet), _) => (sheet.view(model), sheet.waiting()),
+            (None, Some(sheet)) => (
+                sheet.view(model.move_status(), &self.names),
+                sheet.phase == Phase::Starting,
+            ),
+            (None, None) => return None,
+        };
         let mut buttons = div()
             .pt(px(SPACE[1]))
             .flex()
@@ -176,7 +205,6 @@ impl ClusterSheetView {
         for which in &view.buttons {
             buttons = buttons.child(self.move_button(*which, a, cx));
         }
-        let waiting = sheet.phase == Phase::Starting;
         Some(
             div()
                 .absolute()
@@ -265,6 +293,7 @@ fn steps_block(view: &MoveView, a: Appearance) -> Option<Div> {
 fn step_line(step: &StepLine, a: Appearance) -> Div {
     let (glyph, ink) = match step.state {
         StepState::Done => (Icon::Check, Ink::Done),
+        StepState::Problem => (Icon::Warning, Ink::Needs),
         StepState::Current => (Icon::Working, Ink::Working),
         StepState::Waiting => (Icon::Clock, Ink::TextFaint),
     };

@@ -3,7 +3,7 @@ use serde_json::json;
 
 use super::model::ClusterModel;
 use super::move_sheet::{Button, MoveSheet, MoveStatus, Phase, Step, StepState, RUN};
-use super::renders::{moving, names, status, ME, STANDBY};
+use super::renders::{moving, names, status, unfenced, ME, STANDBY};
 
 fn status_at(step: &str) -> MoveStatus {
     MoveStatus::of(&moving(step)).expect("a move in the status")
@@ -243,4 +243,47 @@ fn a_failed_move_now_shows_in_the_move_sheet() {
         .iter()
         .any(|n| n.problem && n.text == "Couldn't move now: the move just left freeze"));
     assert!(view.buttons.contains(&Button::MoveNow));
+}
+
+#[test]
+fn move_sheet_shows_unfenced() {
+    let status = MoveStatus::of(&unfenced("done")).expect("a move in the status");
+    assert_eq!(
+        status.unfenced.as_deref(),
+        Some("MacBook didn't answer the pause request")
+    );
+    let named = sheet().with_from("MacBook");
+    let view = named.view(Some(&status), &names());
+    let note = view
+        .notes
+        .iter()
+        .find(|n| n.text.contains("couldn't pause"))
+        .expect("the unfenced note");
+    assert!(note.problem);
+    assert_eq!(
+        note.text,
+        "MacBook couldn't pause Fix the parser, Write the docs, Run the full test suite. \
+         They may run on both machines until it stops them. \
+         MacBook didn't answer the pause request"
+    );
+    assert_eq!(view.buttons, [Button::Close]);
+    let problems: Vec<&str> = view
+        .steps
+        .iter()
+        .filter(|s| s.state == StepState::Problem)
+        .map(|s| s.text.as_str())
+        .collect();
+    assert_eq!(problems, ["Making mac-mini the primary"]);
+
+    let unnamed = sheet().view(Some(&status), &names());
+    assert!(unnamed
+        .notes
+        .iter()
+        .any(|n| n.text.starts_with("The old primary couldn't pause")));
+
+    let clean = named.view(Some(&status_at("done")), &names());
+    assert!(!clean
+        .notes
+        .iter()
+        .any(|n| n.text.contains("couldn't pause")));
 }

@@ -79,7 +79,8 @@ impl Shared {
     }
 
     fn refresh_every(&self) -> Duration {
-        if self.model().move_running() {
+        let model = self.model();
+        if model.move_running() || model.promote_running() {
             MOVE_REFRESH_EVERY
         } else {
             REFRESH_EVERY
@@ -91,7 +92,7 @@ impl Shared {
     }
 }
 
-const READ_ONLY_KEYS: [&str; 2] = ["replication", "move"];
+const READ_ONLY_KEYS: [&str; 4] = ["replication", "move", "promote", "waiting"];
 
 pub(super) fn carried(last: &Value, event: &Value) -> Value {
     let mut next = event.clone();
@@ -100,6 +101,12 @@ pub(super) fn carried(last: &Value, event: &Value) -> Value {
             if let Some(old) = last.get(key) {
                 next[key] = old.clone();
             }
+        }
+    }
+    let takeover = last.pointer("/failover/takesOverAt").cloned();
+    if let (Some(failover), Some(takeover)) = (next.get_mut("failover"), takeover) {
+        if failover.get("takesOverAt").is_none() {
+            failover["takesOverAt"] = takeover;
         }
     }
     let old_members = last.get("members").and_then(Value::as_array);

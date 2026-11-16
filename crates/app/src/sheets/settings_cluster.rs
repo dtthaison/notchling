@@ -48,8 +48,9 @@ pub fn row(model: &ClusterModel) -> Option<FailoverRow> {
         }
         (true, _, _) => t::settings::cluster_failover_no_standby().to_owned(),
     };
-    let not_ready =
-        (on && standby.is_some() && !failover.armed).then(t::settings::cluster_failover_not_ready);
+    let not_ready = model
+        .failover_not_ready()
+        .then(t::settings::cluster_failover_not_ready);
     Some(FailoverRow {
         title: t::settings::cluster_failover(),
         options: CHOICES
