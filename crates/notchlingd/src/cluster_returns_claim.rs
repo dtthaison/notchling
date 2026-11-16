@@ -21,12 +21,14 @@ impl Mover {
         id: &str,
         main: &BTreeMap<String, MainSession>,
     ) -> Result<(), String> {
-        let Some(state) = persist::load(&self.p.cluster).ok().flatten() else {
+        let loaded = persist::load(&self.p.cluster)
+            .map_err(|why| format!("this machine's cluster record can't be read: {why}"))?;
+        let Some(state) = loaded else {
             return Ok(());
         };
-        let Some(me) = self.me() else {
-            return Ok(());
-        };
+        let me = self
+            .me()
+            .ok_or_else(|| "this machine's cluster node isn't up yet".to_string())?;
         let Some(previous) = state.claims.get(id).filter(|c| c.node != me) else {
             return Ok(());
         };

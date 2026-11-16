@@ -219,3 +219,50 @@ fn unknown_repo_facts_count_as_changed() {
     ));
     assert!(repo.changed("/work", None));
 }
+
+#[test]
+fn a_session_still_running_here_is_checked_again_until_it_stops() {
+    let k = kit("step-live", seed_after_promote(&[(S1, 1)]));
+    k.write_transcript(S1, 10);
+    k.rows
+        .0
+        .lock()
+        .unwrap()
+        .push(crate::cluster_returns_kit::agent_row(
+            S1,
+            "x",
+            notchling_engine::sessions::AgentGroup::Working,
+        ));
+    k.was_primary(1);
+    k.returns.tick();
+    assert!(copies(&k).is_empty());
+    k.write_transcript(S1, 60);
+    k.rows.0.lock().unwrap().clear();
+    k.returns.tick();
+    let recorded = copies(&k);
+    assert_eq!(recorded.len(), 1);
+    let Command::SideCopy { copy } = &recorded[0] else {
+        panic!("a side copy");
+    };
+    assert_eq!(copy.extra_bytes, 50);
+    k.write_transcript(S1, 90);
+    k.returns.tick();
+    assert_eq!(copies(&k).len(), 1);
+}
+
+#[test]
+fn a_primary_back_item_from_before_a_restart_is_withdrawn() {
+    let k = kit("back-restart", seed_after_promote(&[(S1, 1)]));
+    k.was_primary(1);
+    k.returns.tick();
+    assert_eq!(k.item("primary-back:2").unwrap().state, State::Open);
+    let again = crate::cluster_returns::Returns::new(crate::cluster_returns::ReturnsParts {
+        mover: k.mover.clone(),
+        repo: k.repo.clone(),
+        acting: k.acting.clone(),
+        data: k.dir.clone(),
+        waiting: k.waiting.clone(),
+    });
+    again.withdraw_back_except(None);
+    assert_eq!(k.item("primary-back:2").unwrap().state, State::Withdrawn);
+}

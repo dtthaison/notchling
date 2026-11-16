@@ -5,6 +5,7 @@ use crate::inbox_ops::Responder;
 use notchling_engine::cluster::text::{plain, NAME_MAX};
 use notchling_engine::cluster::Member;
 use notchling_engine::inbox::{ActionId, Item, Kind, State};
+use std::collections::BTreeSet;
 use std::sync::{Arc, Weak};
 
 const TITLE_MAX: usize = 80;
@@ -71,16 +72,24 @@ impl Responder for Waits {
             ActionId::WaitFor => true,
             ActionId::ContinueHere if returns.p.acting.is_on() => {
                 let session = self.session.clone();
-                spawn("cluster-continue-here", move || {
-                    if let Err(e) = returns.continue_here(&session) {
-                        let title = format!("Couldn't continue {}", returns.title_of(&session));
-                        returns.failed(
+                returns.remember(|m| m.continuing.insert(session.clone()));
+                let runner = returns.clone();
+                let spawned = spawn("cluster-continue-here", move || {
+                    let result = runner.continue_here(&session);
+                    runner.remember(|m| m.continuing.remove(&session));
+                    if let Err(e) = result {
+                        let title = format!("Couldn't continue {}", runner.title_of(&session));
+                        runner.failed(
                             &format!("continue-here-failed:{session}"),
                             &title,
                             &e.message,
                         );
                     }
-                })
+                });
+                if !spawned {
+                    returns.remember(|m| m.continuing.remove(&self.session));
+                }
+                spawned
             }
             _ => false,
         }
@@ -136,30 +145,31 @@ impl Returns {
 
     pub(crate) fn withdraw_back_except(&self, term: Option<u64>) {
         let keep = term.map(back_id);
-        let gone: Vec<String> = self.remember(|m| {
-            let ids: Vec<String> = m
-                .raised
-                .iter()
-                .filter(|id| id.starts_with("primary-back:") && Some(*id) != keep.as_ref())
-                .cloned()
-                .collect();
+        let others = |id: &String| id.starts_with("primary-back:") && Some(id) != keep.as_ref();
+        let mut gone: BTreeSet<String> = self.remember(|m| {
+            let ids: Vec<String> = m.raised.iter().filter(|id| others(id)).cloned().collect();
             for id in &ids {
                 m.raised.remove(id);
             }
-            ids
+            ids.into_iter().collect()
         });
+        let inbox = &self.p.mover.p.inbox;
+        gone.extend(
+            inbox
+                .own_items()
+                .into_iter()
+                .filter(|item| item.kind == Kind::PrimaryBack && item.state == State::Open)
+                .map(|item| item.id)
+                .filter(others),
+        );
         for id in gone {
-            self.p
-                .mover
-                .p
-                .inbox
-                .resolve(&id, State::Withdrawn, None, None);
+            inbox.resolve(&id, State::Withdrawn, None, None);
         }
     }
 
     pub(crate) fn close_waits(&self, session: &str, state: State, answer: Option<ActionId>) {
         let inbox = &self.p.mover.p.inbox;
-        for item in inbox.items() {
+        for item in inbox.own_items() {
             if is_waits_of(&item, session) && item.state == State::Open {
                 inbox.resolve(&item.id, state, answer, None);
             }
@@ -169,7 +179,7 @@ impl Returns {
     pub(crate) fn sync_waiting(self: &Arc<Self>) {
         let list = self.p.waiting.list();
         let inbox = &self.p.mover.p.inbox;
-        let items = inbox.items();
+        let items = inbox.own_items();
         for item in &items {
             let stale = item.kind == Kind::SessionWaits
                 && item.state == State::Open
@@ -181,6 +191,9 @@ impl Returns {
             }
         }
         for waits in &list {
+            if self.remember(|m| m.continuing.contains(&waits.session)) {
+                continue;
+            }
             let own: Vec<&Item> = items
                 .iter()
                 .filter(|i| is_waits_of(i, &waits.session))

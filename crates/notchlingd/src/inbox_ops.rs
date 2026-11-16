@@ -579,6 +579,10 @@ impl InboxOps {
         self.view(true)
     }
 
+    pub fn own_items(&self) -> Vec<Item> {
+        lock(&self.inner).book.items()
+    }
+
     fn forward(
         &self,
         owner: Qualified,

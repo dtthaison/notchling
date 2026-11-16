@@ -122,7 +122,10 @@ impl Returns {
                 unrecorded.push(session);
             }
         }
-        for session in fresh.iter().filter(|s| !unrecorded.contains(s)) {
+        let settled = fresh
+            .iter()
+            .filter(|s| !unrecorded.contains(s) && !self.p.mover.live(s));
+        for session in settled {
             if let Some(claim) = state.claims.get(session) {
                 self.remember(|m| m.copied.insert((session.clone(), claim.n)));
             }

@@ -40,6 +40,7 @@ pub(crate) struct Memory {
     pub copied: BTreeSet<(String, u64)>,
     pub touched: BTreeSet<(String, u64)>,
     pub tried: BTreeSet<(String, u64)>,
+    pub continuing: BTreeSet<String>,
 }
 
 pub struct Returns {
@@ -170,6 +171,12 @@ impl Returns {
             .remove(id)
             .map_err(|why| failed(format!("{id} is claimed here, but it still waits: {why}")))?;
         self.close_waits(id, State::Answered, Some(ActionId::ContinueHere));
+        let started = self.p.mover.start_here(&[id.to_string()]);
+        if let Some((_, Err(why))) = started.into_iter().next() {
+            return Err(failed(format!(
+                "{id} is claimed here, but it didn't start: {why}"
+            )));
+        }
         Ok(json!({"id": id, "claimed": true}))
     }
 

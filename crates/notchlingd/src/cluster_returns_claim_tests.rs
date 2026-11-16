@@ -80,3 +80,16 @@ fn take_back_after_a_promote_leaves_no_moved_gate() {
     assert!(k.w.acts.stops.lock().unwrap().is_empty());
     assert!(matches!(k.recorded()[0], Command::Claim { .. }));
 }
+
+#[test]
+fn an_unreadable_cluster_record_claims_nothing_and_says_so() {
+    let k = kit("claim-unreadable", seed_after_promote(&[(S1, 1)]));
+    let main = k.state().main;
+    let db =
+        k.w.cluster
+            .join(notchling_engine::cluster::persist::CLUSTER_DB);
+    std::fs::write(&db, b"not a database").unwrap();
+    let why = k.mover.claim_here(S1, &main).unwrap_err();
+    assert!(why.contains("can't be read"), "{why}");
+    assert!(k.logged().is_empty());
+}

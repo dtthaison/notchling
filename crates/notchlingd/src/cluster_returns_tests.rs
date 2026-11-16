@@ -211,6 +211,38 @@ fn continue_here_claims_the_session() {
         k.item(&format!("session-waits:{S1}")).unwrap().state,
         State::Answered
     );
+    assert!(
+        k.logged().contains(&format!("start {S1}")),
+        "{:?}",
+        k.logged()
+    );
+    assert_eq!(
+        k.recorded()
+            .iter()
+            .filter(|c| matches!(c, Command::Claim { .. }))
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn a_session_continued_here_is_not_asked_about_again_while_it_is_claimed() {
+    let k = kit("continue-busy", seed_after_promote(&[(S1, 1)]));
+    k.returns.add_waiting(S1, &node("m1")).unwrap();
+    k.returns.tick();
+    let id = format!("session-waits:{S1}");
+    k.returns.remember(|m| m.continuing.insert(S1.to_string()));
+    k.w.inbox
+        .resolve(&id, State::Answered, Some(ActionId::ContinueHere), None);
+    k.returns.tick();
+    let open: Vec<String> =
+        k.w.inbox
+            .items()
+            .into_iter()
+            .filter(|i| i.state == State::Open && i.kind == Kind::SessionWaits)
+            .map(|i| i.id)
+            .collect();
+    assert!(open.is_empty(), "{open:?}");
 }
 
 #[test]
