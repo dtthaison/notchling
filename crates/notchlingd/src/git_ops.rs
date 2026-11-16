@@ -1,3 +1,4 @@
+use crate::every_session::EverySession;
 use crate::op_group::OpGroup;
 use crate::pages_ops::Titles;
 use notchling_engine::control::Launcher;
@@ -71,6 +72,16 @@ pub fn live_folders(
                 }
             }
         }
+        out.sort();
+        out.dedup();
+        out
+    })
+}
+
+pub fn listed_folders(base: Folders, every: Arc<EverySession>) -> Folders {
+    Arc::new(move || {
+        let mut out = base();
+        out.extend(every.folders(crate::acting_ops::now_ms()));
         out.sort();
         out.dedup();
         out

@@ -224,6 +224,8 @@ mod every_session_tests;
 #[cfg(test)]
 mod git_ops_branch_tests;
 #[cfg(test)]
+mod git_ops_listed_tests;
+#[cfg(test)]
 mod git_ops_tests;
 #[cfg(test)]
 mod hook_fence_tests;

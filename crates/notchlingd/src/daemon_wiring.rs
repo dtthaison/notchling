@@ -20,7 +20,7 @@ use crate::codex_children::CodexChildren;
 use crate::codex_ops::CodexOps;
 use crate::daemon::{FirstScan, FIRST_LIST_WAIT};
 use crate::every_session::{EverySession, CLAUDE};
-use crate::git_ops::{live_folders, GitOps};
+use crate::git_ops::{listed_folders, live_folders, GitOps};
 use crate::inbox_ops::InboxOps;
 use crate::install_ops::{InstallOps, InstallSetup};
 use crate::late_emit::{Events, LateEmit, LateSalt};
@@ -838,11 +838,14 @@ impl Wired {
         first_scan: Arc<FirstScan>,
         first_wait: Duration,
     ) -> Ops {
-        let folders = live_folders(
-            sessions.clone(),
-            self.agy.titles(),
-            layout.codex_dir().join("sessions"),
-            layout.fixture,
+        let folders = listed_folders(
+            live_folders(
+                sessions.clone(),
+                self.agy.titles(),
+                layout.codex_dir().join("sessions"),
+                layout.fixture,
+            ),
+            self.every.clone(),
         );
         let claude = claude_path(Path::new(&home_of(&layout.roots())));
         let git = GitOps::new(
