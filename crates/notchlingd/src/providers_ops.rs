@@ -332,12 +332,19 @@ impl ProvidersOps {
             None => None,
         };
         let mut reports = serde_json::Map::new();
+        let mut standing = serde_json::Map::new();
         for account in p.state().accounts {
             if let Some(report) = p.usage_report(&account.id) {
-                reports.insert(account.id, report.to_json());
+                reports.insert(account.id.clone(), report.to_json());
+            }
+            if let Some(s) = p.standing(&account.id).filter(|s| !s.is_empty()) {
+                standing.insert(account.id, s.to_json());
             }
         }
         let mut reply = json!({"provider": p.id().as_str(), "reports": reports});
+        if !standing.is_empty() {
+            reply["standing"] = Value::Object(standing);
+        }
         if done.is_none() {
             reply["refreshing"] = json!(true);
         }

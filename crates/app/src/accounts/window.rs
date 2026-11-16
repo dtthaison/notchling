@@ -83,7 +83,12 @@ impl Render for LimitBarsView {
     fn render(&mut self, window: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         let a = window_appearance(window);
         let now = renders::NOW;
-        let codex = limits::groups(&renders::codex_report(), now, Zone::UTC);
+        let codex = limits::codex_groups(
+            Some(&renders::codex_report()),
+            Some(&renders::codex_standing()),
+            now,
+            Zone::UTC,
+        );
         let agy = limits::groups(&renders::antigravity_report(), now, Zone::UTC);
         let snapshot = renders::snapshot(Shown::Claude);
         let windows = snapshot

@@ -1,11 +1,12 @@
 use super::live::{auth_path, write_live, LOCK_WAIT};
 use super::login::{self, Identity, RunningWork};
+use super::standing::standing;
 use crate::accounts::book::{self, Saved};
 use crate::accounts::chunked::{self, Plain};
 use crate::accounts::generic_password::{Keychain, KeychainError};
 use crate::accounts::procs::{Apps, LoginChild, LoginSpawn, Procs};
 use crate::docfile::DocFile;
-use crate::providers::usage::{GroupedUsage, UsageReport};
+use crate::providers::usage::{GroupedUsage, Standing, UsageReport};
 use crate::providers::{
     AccountError, AccountProvider, AddProgress, AddStarted, Capabilities, Confirmation, HttpClient,
     HttpRequest, ProviderAccount, ProviderId, ProviderState, Trust,
@@ -67,6 +68,7 @@ struct Inner {
     accounts: Vec<Saved>,
     active: Option<String>,
     usage: HashMap<String, GroupedUsage>,
+    standing: HashMap<String, Standing>,
     fetched: HashMap<String, f64>,
     busy: bool,
     sign_in_url: Option<String>,
@@ -245,6 +247,14 @@ impl CodexStore {
             let (plan, usage) = login::usage(&data, now);
             let mut inner = lock(&self.inner);
             inner.fetched.insert(account.id.clone(), now);
+            match standing(&data) {
+                Some(s) => {
+                    inner.standing.insert(account.id.clone(), s);
+                }
+                None => {
+                    inner.standing.remove(&account.id);
+                }
+            }
             if let Some(u) = usage {
                 inner.usage.insert(account.id.clone(), u);
             }
@@ -380,6 +390,10 @@ impl AccountProvider for CodexStore {
         lock(&self.inner).usage.get(account).map(UsageReport::from)
     }
 
+    fn standing(&self, account: &str) -> Option<Standing> {
+        lock(&self.inner).standing.get(account).cloned()
+    }
+
     fn switch_to(&self, id: &str) -> Result<(), AccountError> {
         let _op = lock(&self.op);
         lock(&self.inner).busy = true;
@@ -484,6 +498,7 @@ impl AccountProvider for CodexStore {
         let mut inner = lock(&self.inner);
         inner.accounts.retain(|a| a.id != id);
         inner.usage.remove(id);
+        inner.standing.remove(id);
         let accounts = inner.accounts.clone();
         self.save_book(&accounts);
     }

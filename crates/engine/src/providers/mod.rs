@@ -6,7 +6,10 @@ pub mod usage;
 mod tests;
 
 pub use http::{FakeHttp, HttpClient, HttpRequest, HttpResponse, Trust};
-pub use usage::{Bar, Group, GroupedGroup, GroupedUsage, Kind, UsageReport, UsageWindow};
+pub use usage::{
+    Bar, Credits, Group, GroupedGroup, GroupedUsage, Kind, Reached, Standing, UsageReport,
+    UsageWindow,
+};
 
 use std::fmt;
 use std::sync::Arc;
@@ -169,6 +172,9 @@ pub trait AccountProvider: Send + Sync {
     fn state(&self) -> ProviderState;
     fn sync(&self, force: bool);
     fn usage_report(&self, _account: &str) -> Option<UsageReport> {
+        None
+    }
+    fn standing(&self, _account: &str) -> Option<Standing> {
         None
     }
     fn switch_to(&self, id: &str) -> Result<(), AccountError>;

@@ -954,11 +954,13 @@ false`, names no active account, and does not even ask whether an app is install
 | Op | Args | Reply |
 | --- | --- | --- |
 | `providers.list` | `{sync?: bool}` (default true) | `{"accounts_on", "providers": [{id, title, capabilities, available, state: {accounts: [{id, email, plan, needs_login, switchable}], active_id, busy, adding, sign_in_url, unlisted_active_title}}], "syncing"?: true}` |
-| `providers.usage` | `{provider, refresh?: bool}` | `{"provider", "reports": {<account id>: {fetched, groups: [{name, bars: [{label, kind, percent, resets_at}]}]}}, "refreshing"?: true}` |
+| `providers.usage` | `{provider, refresh?: bool}` | `{"provider", "reports": {<account id>: {fetched, groups: [{name, bars: [{label, kind, percent, resets_at}]}]}}, "standing"?: {<account id>: {reached: "credits" \| "limit" \| null, credits: {unlimited, balance} \| null}}, "refreshing"?: true}` |
 | `providers.switch` | `{provider, id, confirm?: bool}` | `{"state": "switched", provider, id}`, `{"state": "needs_confirmation", confirmation: {title, message, button}}` (pass `confirm: true` after asking), or `{"state": "switching"}` when it takes over 4.5 s; code `failed` with the reason otherwise |
 | `providers.add.begin` | `{provider, confirm?: bool}` | `{"state": "waiting", provider, sign_in_url?}`, `needs_confirmation` as above, or `{"state": "starting"}` |
 | `providers.add.cancel` | `{provider}` | `{"cancelled": true}`, or `{"state": "cancelling"}` |
 | `providers.remove` | `{provider, id}` | `{"removed": true}`: forgets the saved login; the account stays signed in if it is the one in use |
+
+`percent` in a bar is always the share used, whatever the tool's own page shows (ChatGPT's usage page shows what is left; the app turns it over for Codex). `standing` is only for an account whose last read said it is blocked (`reached`: `credits` when the workspace has no credits, `limit` for any other refusal) or has credits to show (`unlimited`, or a plain positive `balance` string); an account with neither is absent, and so is the whole key when none has one. Only Codex fills it today.
 
 `provider` is `codex`, `antigravity` or `claudeDesktop`. Events on topic `providers` (app tier):
 `providers.changed {provider, reason: "sync" | "usage" | "switch" | "add" | "remove", state?,

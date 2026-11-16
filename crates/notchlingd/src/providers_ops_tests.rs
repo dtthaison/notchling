@@ -409,6 +409,42 @@ fn usage_reports_the_limits_the_provider_read_and_never_a_token() {
     assert!(!format!("{req:?}").contains("Bearer"));
 }
 
+const TEAM_BLOCKED: &str =
+    include_str!("../../engine/tests/fixtures/codex/wham-usage-team-blocked.json");
+
+#[test]
+fn usage_carries_the_standing_only_for_an_account_that_has_one() {
+    let rig = Rig::new("usage-standing", true, FakeProcs::new(), FakeApps::new());
+    std::fs::write(rig.codex_auth(), codex_login("a@example.com", "u1", "w1")).unwrap();
+    rig.http.ok(200, TEAM_BLOCKED);
+    let reply = rig
+        .call(
+            ops::PROVIDERS_USAGE,
+            json!({"provider": "codex", "refresh": true}),
+        )
+        .unwrap();
+    assert_eq!(
+        reply["standing"]["u1:w1"],
+        json!({"reached": "credits", "credits": null})
+    );
+    assert_eq!(
+        reply["reports"]["u1:w1"]["groups"][0]["bars"][0]["percent"],
+        100.0
+    );
+    no_secrets(&reply);
+    rig.http.ok(
+        200,
+        r#"{"rate_limit":{"allowed":true,"primary_window":{"used_percent":1,"limit_window_seconds":18000}}}"#,
+    );
+    let calm = rig
+        .call(
+            ops::PROVIDERS_USAGE,
+            json!({"provider": "codex", "refresh": true}),
+        )
+        .unwrap();
+    assert!(calm.get("standing").is_none(), "{calm}");
+}
+
 #[test]
 fn bad_arguments_are_bad_requests() {
     let rig = Rig::new("bad", true, FakeProcs::new(), FakeApps::new());

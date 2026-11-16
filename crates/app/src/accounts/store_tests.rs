@@ -524,3 +524,61 @@ fn a_late_refusal_is_the_error_shown() {
     assert_eq!(e, "No saved login for this account.");
     assert_eq!(store.snapshot().error.as_deref(), Some(e.as_str()));
 }
+
+fn daemon_with_standing() -> impl Fn(&str, &Value) -> Result<Value, ClientError> + Send + Sync {
+    let base = daemon(true);
+    move |op, args| {
+        let mut reply = base(op, args)?;
+        if op == "providers.usage" {
+            reply["standing"] = json!({"u:a": {"reached": "credits", "credits": null}});
+        }
+        Ok(reply)
+    }
+}
+
+#[test]
+fn a_providers_standing_lands_in_the_snapshot_by_every_path_that_reads_usage() {
+    use notchling_engine::providers::usage::Reached;
+    let on = Switches::all_on();
+    let reached = |store: &Accounts| {
+        store
+            .snapshot()
+            .standing
+            .get("codex")
+            .and_then(|m| m.get("u:a"))
+            .and_then(|s| s.reached)
+    };
+    let (store, _) = fake(daemon_with_standing());
+    store.refresh_at(&on, 1_000.0);
+    assert_eq!(reached(&store), Some(Reached::Credits), "an ordinary read");
+    let (store, _) = fake(daemon_with_standing());
+    store.refresh_all_at(&on, 1_000.0);
+    assert_eq!(
+        reached(&store),
+        Some(Reached::Credits),
+        "the refresh button"
+    );
+    let (store, _) = fake(daemon_with_standing());
+    store.refresh_usage(&on, "codex").unwrap();
+    assert_eq!(
+        reached(&store),
+        Some(Reached::Credits),
+        "one provider afresh"
+    );
+    let (store, _) = fake(daemon(true));
+    store.refresh_at(&on, 1_000.0);
+    assert_eq!(reached(&store), None, "a daemon with no standing says none");
+    assert!(store.snapshot().standing["codex"].is_empty());
+}
+
+#[test]
+fn a_standing_that_goes_away_is_forgotten_at_the_next_read() {
+    let on = Switches::all_on();
+    let (store, _) = fake(daemon_with_standing());
+    store.refresh_at(&on, 1_000.0);
+    assert!(!store.snapshot().standing["codex"].is_empty());
+    let (calm, _) = fake(daemon(true));
+    calm.refresh_at(&on, 1_000.0);
+    calm.refresh_at(&on, 1_031.0);
+    assert!(calm.snapshot().standing["codex"].is_empty());
+}

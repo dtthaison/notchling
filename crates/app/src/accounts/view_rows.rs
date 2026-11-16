@@ -46,6 +46,9 @@ fn relative(percent: f64) -> gpui::DefiniteLength {
     gpui::relative((percent / 100.0).clamp(0.0, 1.0) as f32)
 }
 
+const VALUE_WIDTH: f32 = 36.0;
+const LEFT_VALUE_WIDTH: f32 = 66.0;
+
 pub fn limit_line(line: &LimitLine, a: Appearance) -> Div {
     div()
         .flex()
@@ -59,7 +62,11 @@ pub fn limit_line(line: &LimitLine, a: Appearance) -> Div {
         .child(bar(line.percent, line.fill, 6.0, a))
         .child(
             label(&line.percent_text, TypeRole::Label, Ink::Text, a)
-                .w(px(36.0))
+                .w(px(if line.left {
+                    LEFT_VALUE_WIDTH
+                } else {
+                    VALUE_WIDTH
+                }))
                 .text_right(),
         )
         .child(
@@ -84,6 +91,14 @@ pub fn limit_groups(groups: &[LimitGroup], a: Appearance) -> Div {
         }
         for line in &group.lines {
             block = block.child(limit_line(line, a));
+        }
+        for note in &group.notes {
+            let ink = if note.warning {
+                Ink::Needs
+            } else {
+                Ink::TextMuted
+            };
+            block = block.child(label(&note.text, TypeRole::Meta, ink, a));
         }
         column = column.child(block);
     }

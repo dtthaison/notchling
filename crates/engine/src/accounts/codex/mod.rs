@@ -1,7 +1,10 @@
 pub mod live;
 pub mod login;
+pub mod standing;
 pub mod store;
 
+#[cfg(test)]
+mod standing_tests;
 #[cfg(test)]
 mod store_long_tests;
 #[cfg(test)]

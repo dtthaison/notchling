@@ -160,6 +160,7 @@ fn claude_page(s: &Snapshot, switches: &Switches, busy: bool, now: f64, zone: Zo
                 RowContent::Limits(vec![LimitGroup {
                     name: None,
                     lines: windows.clone(),
+                    notes: Vec::new(),
                 }])
             } else if let Some(report) = report {
                 if report.is_empty() {
@@ -260,6 +261,7 @@ fn provider_page(
     zone: Zone,
 ) -> Page {
     let reports = s.usage.get(&p.id);
+    let standing = s.standing.get(&p.id);
     let rows = p
         .accounts
         .iter()
@@ -270,9 +272,15 @@ fn provider_page(
                     .then(|| desktop_limits(s, &a.id))
                     .flatten()
             });
-            let content = match report {
-                Some(report) => RowContent::Limits(limits::groups(report, now, zone)),
-                None => match (p.id.as_str(), in_use) {
+            let codex_groups = (p.id == CODEX)
+                .then(|| {
+                    limits::codex_groups(report, standing.and_then(|m| m.get(&a.id)), now, zone)
+                })
+                .filter(|g| !g.is_empty());
+            let content = match (codex_groups, report) {
+                (Some(groups), _) => RowContent::Limits(groups),
+                (None, Some(report)) => RowContent::Limits(limits::groups(report, now, zone)),
+                (None, None) => match (p.id.as_str(), in_use) {
                     (CODEX, false) => RowContent::Text {
                         text: "Limits show again once you switch to it.".into(),
                         warning: false,
