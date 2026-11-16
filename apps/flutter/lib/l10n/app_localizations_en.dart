@@ -254,6 +254,42 @@ class AppL10nEn extends AppL10n {
   String get chatLoadOlder => 'Load older messages';
 
   @override
+  String get chatMarkArrow => 'Arrow';
+
+  @override
+  String get chatMarkBox => 'Box';
+
+  @override
+  String get chatMarkCircle => 'Circle';
+
+  @override
+  String get chatMarkClear => 'Clear';
+
+  @override
+  String get chatMarkFailed => 'Could not prepare the picture';
+
+  @override
+  String get chatMarkNext => 'Next';
+
+  @override
+  String get chatMarkPen => 'Pen';
+
+  @override
+  String get chatMarkRed => 'Red';
+
+  @override
+  String get chatMarkRendering => 'Preparing the picture';
+
+  @override
+  String get chatMarkUndo => 'Undo';
+
+  @override
+  String get chatMarkWhite => 'White';
+
+  @override
+  String get chatMarkYellow => 'Yellow';
+
+  @override
   String get chatModelChip => 'Model';
 
   @override
@@ -306,6 +342,9 @@ class AppL10nEn extends AppL10n {
 
   @override
   String get chatPictureFailed => 'Could not load the picture';
+
+  @override
+  String get chatPictureMarkup => 'Mark up';
 
   @override
   String get chatPictureOpen => 'Open picture';

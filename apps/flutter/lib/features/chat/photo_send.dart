@@ -71,21 +71,26 @@ Future<void> pickAndSendPhoto(BuildContext context, WidgetRef ref, String sessio
     return;
   }
   if (bytes == null || !context.mounted) return;
-  final bool sent = await Navigator.of(context).push<bool>(
+  final bool sent = await previewAndSend(context, ref, sessionId, bytes);
+  if (sent) messenger.showSnackBar(SnackBar(content: Text(l10n.chatPhotoSent)));
+}
+
+Future<void> Function(String caption, void Function(double fraction) onProgress) photoSender(WidgetRef ref, String sessionId, Uint8List bytes) {
+  return (String caption, void Function(double) onProgress) async {
+    final BridgeClient? client = ref.read(bridgeClientProvider);
+    if (client == null || !client.isConnected) throw const BridgeException('disconnected', '');
+    await client.sessionImage(sessionId, bytes, caption: caption, onProgress: onProgress);
+  };
+}
+
+Future<bool> previewAndSend(BuildContext context, WidgetRef ref, String sessionId, Uint8List bytes) async {
+  return await Navigator.of(context).push<bool>(
         MaterialPageRoute<bool>(
           fullscreenDialog: true,
-          builder: (BuildContext route) => PhotoPreview(
-            bytes: bytes!,
-            send: (String caption, void Function(double) onProgress) async {
-              final BridgeClient? client = ref.read(bridgeClientProvider);
-              if (client == null || !client.isConnected) throw const BridgeException('disconnected', '');
-              await client.sessionImage(sessionId, bytes!, caption: caption, onProgress: onProgress);
-            },
-          ),
+          builder: (BuildContext route) => PhotoPreview(bytes: bytes, send: photoSender(ref, sessionId, bytes)),
         ),
       ) ??
       false;
-  if (sent) messenger.showSnackBar(SnackBar(content: Text(l10n.chatPhotoSent)));
 }
 
 class PhotoPreview extends StatefulWidget {

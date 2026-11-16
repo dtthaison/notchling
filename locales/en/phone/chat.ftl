@@ -287,3 +287,42 @@ chat-effort-xhigh = Extra High
 
 # An effort level in the Chat composer.
 chat-effort-max = Max
+
+# Title of the picture editor and the button that opens it in the picture viewer.
+chat-picture-markup = Mark up
+
+# A drawing tool in the picture editor.
+chat-mark-pen = Pen
+
+# A drawing tool in the picture editor.
+chat-mark-circle = Circle
+
+# A drawing tool in the picture editor.
+chat-mark-box = Box
+
+# A drawing tool in the picture editor.
+chat-mark-arrow = Arrow
+
+# Tooltip of the button that removes the last mark in the picture editor.
+chat-mark-undo = Undo
+
+# Tooltip of the button that removes every mark in the picture editor.
+chat-mark-clear = Clear
+
+# Button of the picture editor that goes on to the caption and Send.
+chat-mark-next = Next
+
+# Shown in the picture editor while the marks are drawn into the picture.
+chat-mark-rendering = Preparing the picture
+
+# Shown in the picture editor when the marked picture could not be made.
+chat-mark-failed = Could not prepare the picture
+
+# Name of a mark colour in the picture editor.
+chat-mark-red = Red
+
+# Name of a mark colour in the picture editor.
+chat-mark-yellow = Yellow
+
+# Name of a mark colour in the picture editor.
+chat-mark-white = White

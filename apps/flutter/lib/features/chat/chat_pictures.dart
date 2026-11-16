@@ -11,7 +11,9 @@ import '../../core/protocol/models.dart';
 import '../../l10n/app_localizations.dart';
 import '../connection/connection.dart';
 import '../macs/computers.dart';
+import '../../app/widgets/common.dart';
 import 'chat_cache.dart';
+import 'markup_editor.dart';
 
 const int thumbnailWidth = 480;
 const int viewerWidth = 1600;
@@ -180,7 +182,7 @@ class _PictureThumbnailState extends ConsumerState<PictureThumbnail> {
   }
 }
 
-class PictureViewer extends StatefulWidget {
+class PictureViewer extends ConsumerStatefulWidget {
   const PictureViewer({super.key, required this.sessionId, required this.images, this.initial = 0, this.preview});
   final String sessionId;
   final List<ChatImage> images;
@@ -188,13 +190,28 @@ class PictureViewer extends StatefulWidget {
   final Uint8List? preview;
 
   @override
-  State<PictureViewer> createState() => _PictureViewerState();
+  ConsumerState<PictureViewer> createState() => _PictureViewerState();
 }
 
-class _PictureViewerState extends State<PictureViewer> {
+class _PictureViewerState extends ConsumerState<PictureViewer> {
   late final PageController _pages = PageController(initialPage: widget.initial);
   late int _index = widget.initial;
   bool _zoomed = false;
+  final Map<String, Uint8List> _bytes = <String, Uint8List>{};
+
+  Future<void> _markup() async {
+    final Uint8List? bytes = _bytes[widget.images[_index].id];
+    if (bytes == null) return;
+    final bool sent =
+        await Navigator.of(context).push<bool>(
+          MaterialPageRoute<bool>(
+            fullscreenDialog: true,
+            builder: (_) => MarkupEditor(sessionId: widget.sessionId, bytes: bytes),
+          ),
+        ) ??
+        false;
+    if (sent && mounted) Navigator.of(context).pop();
+  }
 
   @override
   void dispose() {
@@ -214,6 +231,17 @@ class _PictureViewerState extends State<PictureViewer> {
         title: count > 1 ? Text('${_index + 1} / $count', style: Kit.of(context).label) : null,
         centerTitle: true,
       ),
+      bottomNavigationBar: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(Space.md),
+          child: SecondaryButton(
+            key: const ValueKey<String>('picture-markup'),
+            label: l10n.chatPictureMarkup,
+            icon: Icons.draw_outlined,
+            onPressed: _bytes.containsKey(widget.images[_index].id) ? () => unawaited(_markup()) : null,
+          ),
+        ),
+      ),
       body: PageView.builder(
         controller: _pages,
         physics: _zoomed ? const NeverScrollableScrollPhysics() : const PageScrollPhysics(),
@@ -230,6 +258,7 @@ class _PictureViewerState extends State<PictureViewer> {
           onZoom: (bool zoomed) {
             if (zoomed != _zoomed) setState(() => _zoomed = zoomed);
           },
+          onBytes: (Uint8List bytes) => setState(() => _bytes[widget.images[index].id] = bytes),
         ),
       ),
     );
@@ -237,11 +266,12 @@ class _PictureViewerState extends State<PictureViewer> {
 }
 
 class _PicturePage extends ConsumerStatefulWidget {
-  const _PicturePage({super.key, required this.sessionId, required this.image, required this.preview, required this.onZoom});
+  const _PicturePage({super.key, required this.sessionId, required this.image, required this.preview, required this.onZoom, required this.onBytes});
   final String sessionId;
   final ChatImage image;
   final Uint8List? preview;
   final ValueChanged<bool> onZoom;
+  final ValueChanged<Uint8List> onBytes;
 
   @override
   ConsumerState<_PicturePage> createState() => _PicturePageState();
@@ -257,6 +287,12 @@ class _PicturePageState extends ConsumerState<_PicturePage> {
   void initState() {
     super.initState();
     _transform.addListener(_reportZoom);
+    final Uint8List? preview = widget.preview;
+    if (preview != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) widget.onBytes(preview);
+      });
+    }
     unawaited(_load());
   }
 
@@ -275,7 +311,10 @@ class _PicturePageState extends ConsumerState<_PicturePage> {
     if (_shown == null) {
       try {
         final Uint8List thumb = await loader.load(widget.sessionId, widget.image);
-        if (mounted && !_sharp) setState(() => _shown = thumb);
+        if (mounted && !_sharp) {
+          setState(() => _shown = thumb);
+          widget.onBytes(thumb);
+        }
       } on BridgeException catch (error) {
         debugPrint('PictureViewer thumbnail(${widget.image.id}): ${error.code} ${error.message}');
       }
@@ -287,6 +326,7 @@ class _PicturePageState extends ConsumerState<_PicturePage> {
           _shown = bytes;
           _sharp = true;
         });
+        widget.onBytes(bytes);
       }
     } on BridgeException catch (error) {
       debugPrint('PictureViewer(${widget.image.id}): ${error.code} ${error.message}');
