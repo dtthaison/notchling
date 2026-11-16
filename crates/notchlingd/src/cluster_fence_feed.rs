@@ -1,6 +1,7 @@
 use crate::cluster_fence_keeper::Feed;
 use crate::cluster_move::Mover;
 use crate::cluster_node::ClusterNode;
+use crate::cluster_returns_waiting::Waiting;
 use crate::snap_ready::LastSet;
 use crate::snap_send::SnapSender;
 use notchling_engine::cluster::fence_gates::SetView;
@@ -15,6 +16,7 @@ pub struct RealFeed {
     sender: Arc<SnapSender>,
     last: Arc<LastSet>,
     mover: Arc<Mover>,
+    waiting: Arc<Waiting>,
 }
 
 impl RealFeed {
@@ -22,13 +24,14 @@ impl RealFeed {
         node: Arc<OnceLock<Arc<ClusterNode>>>,
         sender: Arc<SnapSender>,
         last: Arc<LastSet>,
-        mover: Arc<Mover>,
+        (mover, waiting): (Arc<Mover>, Arc<Waiting>),
     ) -> RealFeed {
         RealFeed {
             node,
             sender,
             last,
             mover,
+            waiting,
         }
     }
 }
@@ -66,7 +69,7 @@ impl Feed for RealFeed {
     }
 
     fn waiting(&self) -> BTreeMap<String, String> {
-        BTreeMap::new()
+        self.waiting.gates()
     }
 
     fn live(&self, id: &str) -> bool {

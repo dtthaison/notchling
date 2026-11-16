@@ -67,6 +67,14 @@ pub mod cluster_publisher;
 pub mod cluster_redact;
 pub mod cluster_relay;
 pub mod cluster_relay_wiring;
+pub mod cluster_returns;
+mod cluster_returns_aside;
+mod cluster_returns_claim;
+mod cluster_returns_items;
+mod cluster_returns_step;
+mod cluster_returns_touch;
+pub mod cluster_returns_waiting;
+mod cluster_returns_wire;
 pub mod cluster_sessions;
 pub mod cluster_switches;
 pub mod cluster_tail_mask;
@@ -234,6 +242,20 @@ mod cluster_promote_watch_tests;
 mod cluster_redact_tests;
 #[cfg(test)]
 mod cluster_relay_testkit;
+#[cfg(test)]
+mod cluster_returns_claim_tests;
+#[cfg(test)]
+pub(crate) mod cluster_returns_kit;
+#[cfg(test)]
+mod cluster_returns_ops_tests;
+#[cfg(test)]
+mod cluster_returns_step_tests;
+#[cfg(test)]
+mod cluster_returns_tests;
+#[cfg(test)]
+mod cluster_returns_touch_tests;
+#[cfg(test)]
+mod cluster_returns_waiting_tests;
 #[cfg(test)]
 mod cluster_testkit;
 #[cfg(test)]

@@ -31,6 +31,8 @@ use crate::cluster_promote_watch::{WatchThread, Watcher, EVERY as PROMOTE_EVERY}
 use crate::cluster_prompts::{NodePush, PromptFollower, RemotePrompts};
 pub use crate::cluster_publisher::Publisher;
 use crate::cluster_relay_wiring::{HeldActs, HeldSlot};
+use crate::cluster_returns_step::{ReturnsThread, EVERY as RETURNS_EVERY};
+use crate::cluster_returns_wire::{returns_for, waiting_for};
 use crate::cluster_sessions::{
     is_client, HandlerRows, NodeSource, Refresher, RemoteSessions, SessionCalls,
 };
@@ -302,6 +304,7 @@ pub struct ClusterParts {
     fence_keeper: Arc<Keeper>,
     fence_thread: Option<KeeperThread>,
     promote_thread: Option<WatchThread>,
+    returns_thread: Option<ReturnsThread>,
     outbox_follower: Option<OutboxFollower>,
     outbox: Arc<RemoteOutbox>,
     handler: Arc<LateHandler>,
@@ -611,6 +614,7 @@ impl ClusterParts {
                 read: Arc::new(SandboxedLauncher::new(move_launcher.clone())),
             }),
         });
+        let waiting = waiting_for(layout, &mover);
         let fence_keeper = Keeper::new(
             layout.cluster_dir(),
             KeeperParts {
@@ -618,7 +622,7 @@ impl ClusterParts {
                     holder.clone(),
                     snap.sender.clone(),
                     last_set.clone(),
-                    mover.clone(),
+                    (mover.clone(), waiting.clone()),
                 )),
                 acts: mover.p.acts.clone(),
                 inbox: inbox.clone(),
@@ -626,6 +630,7 @@ impl ClusterParts {
             },
         );
         let runner = MoveRunner::new(mover.clone(), layout.cluster_dir());
+        let returns = returns_for(layout, (&mover, &acting), (move_launcher.clone(), &waiting));
         let promoter = Promoter::new(PromoteParts {
             mover: mover.clone(),
             cluster: move_link.clone(),
@@ -687,6 +692,7 @@ impl ClusterParts {
         let mut snap_observer = None;
         let mut fence_thread = None;
         let mut promote_thread = None;
+        let mut returns_thread = None;
         let mut follower = None;
         let mut outbox_follower = None;
         if let Ok(node) = &node {
@@ -741,6 +747,7 @@ impl ClusterParts {
                 ),
                 PROMOTE_EVERY,
             ));
+            returns_thread = Some(ReturnsThread::spawn(returns.clone(), RETURNS_EVERY));
             outbox_follower = Some(OutboxFollower::spawn(node.clone(), outbox.clone()));
         }
         let replication_slot = sender_slot.clone();
@@ -753,7 +760,8 @@ impl ClusterParts {
                         .map_or_else(|| serde_json::json!([]), |s| s.replication(now_ms))
                 }))
                 .with_mover(runner.clone())
-                .with_promoter(promoter.clone()),
+                .with_promoter(promoter.clone())
+                .with_returns(returns),
         );
         let code: Arc<dyn CodeSender> = sender.clone();
         let dispatch = DispatchOps::with_code(node.clone(), shells.clone(), Some(code));
@@ -784,6 +792,7 @@ impl ClusterParts {
             fence_keeper,
             fence_thread,
             promote_thread,
+            returns_thread,
             outbox_follower,
             outbox,
             handler,
@@ -869,6 +878,9 @@ impl ClusterParts {
             thread.close();
         }
         if let Some(thread) = &self.promote_thread {
+            thread.close();
+        }
+        if let Some(thread) = &self.returns_thread {
             thread.close();
         }
         self.snap_run.close();

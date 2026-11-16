@@ -366,6 +366,25 @@ impl Link for FakeLink {
     fn fence(&self, reason: Option<String>) {
         self.fences.lock().unwrap().push(reason);
     }
+
+    fn record(
+        &self,
+        _command: Command,
+        _tier: OriginTier,
+        _within: Duration,
+    ) -> Result<(), WireError> {
+        Err(WireError::new("not_sent", "this link records nothing"))
+    }
+
+    fn call_app(
+        &self,
+        _to: &NodeId,
+        _op: &str,
+        _args: Value,
+        _within: Duration,
+    ) -> Result<Value, WireError> {
+        Err(WireError::new("not_sent", "this link forwards nothing"))
+    }
 }
 
 fn in_cluster(dir: &Path, main: BTreeMap<String, MainSession>) {

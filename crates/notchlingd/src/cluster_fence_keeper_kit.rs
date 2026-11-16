@@ -66,6 +66,7 @@ pub(crate) struct Seed {
     pub main: Vec<(String, Tool)>,
     pub claims: Vec<Claim>,
     pub home: &'static str,
+    pub transcripts: BTreeMap<String, String>,
 }
 
 impl Default for Seed {
@@ -76,6 +77,7 @@ impl Default for Seed {
             main: mains(&[(S1, Tool::Claude)]),
             claims: Vec::new(),
             home: "m5",
+            transcripts: BTreeMap::new(),
         }
     }
 }
@@ -236,7 +238,13 @@ pub(crate) fn persist_state(cluster: &std::path::Path, seed: &Seed) {
         main: seed
             .main
             .iter()
-            .map(|(id, tool)| (id.to_string(), main_session(id, *tool)))
+            .map(|(id, tool)| {
+                let mut session = main_session(id, *tool);
+                if let Some(path) = seed.transcripts.get(id) {
+                    session.transcript = Some(path.clone());
+                }
+                (id.to_string(), session)
+            })
             .collect(),
         kept: BTreeSet::new(),
         ended: BTreeMap::new(),

@@ -3,6 +3,7 @@ use crate::cluster_failover_setting::parse;
 use crate::cluster_move_run::MoveRunner;
 use crate::cluster_node::{ClusterLog, ClusterNode};
 use crate::cluster_promote::Promoter;
+use crate::cluster_returns::Returns;
 use crate::op_group::OpGroup;
 use crate::switches::SwitchFlag;
 use notchling_engine::cluster::join::decode_token;
@@ -17,7 +18,7 @@ use serde_json::{json, Value};
 use std::sync::Arc;
 use std::time::Duration;
 
-pub const CLUSTER_OPS: [&str; 12] = [
+pub const CLUSTER_OPS: [&str; 15] = [
     ops::CLUSTER_STATUS,
     ops::CLUSTER_CREATE,
     ops::CLUSTER_JOIN_TOKEN,
@@ -30,8 +31,12 @@ pub const CLUSTER_OPS: [&str; 12] = [
     ops::CLUSTER_FAILOVER_SET,
     ops::CLUSTER_ALLOW_SET,
     ops::CLUSTER_PROMOTE,
+    ops::CLUSTER_TAKE_BACK,
+    ops::CLUSTER_CONTINUE_HERE,
+    ops::CLUSTER_SIDE_COPY_HIDE,
 ];
 
+const ID_MAX: usize = 200;
 pub const PROMOTE_WAIT: Duration = Duration::from_secs(60);
 
 pub struct ClusterOps {
@@ -43,6 +48,7 @@ pub struct ClusterOps {
     replication: Arc<dyn Fn(i64) -> Value + Send + Sync>,
     mover: Option<Arc<MoveRunner>>,
     promoter: Option<Arc<Promoter>>,
+    returns: Option<Arc<Returns>>,
 }
 
 fn text<'a>(args: &'a Value, key: &str, usage: &str) -> Result<&'a str, ApiError> {
@@ -84,6 +90,7 @@ impl ClusterOps {
             replication: Arc::new(|_| json!([])),
             mover: None,
             promoter: None,
+            returns: None,
         }
     }
 
@@ -110,6 +117,55 @@ impl ClusterOps {
         self
     }
 
+    pub fn with_returns(mut self, returns: Arc<Returns>) -> ClusterOps {
+        self.returns = Some(returns);
+        self
+    }
+
+    fn returns(&self) -> Result<&Arc<Returns>, ApiError> {
+        self.returns.as_ref().ok_or_else(|| {
+            ApiError::new(
+                ErrorCode::Failed,
+                "this machine can't take back the primary",
+            )
+        })
+    }
+
+    fn take_back(&self, args: &Value) -> Result<Value, ApiError> {
+        let usage = "cluster.take_back takes {}";
+        if !args.is_null() && args.as_object().is_none_or(|o| !o.is_empty()) {
+            return Err(bad(usage));
+        }
+        self.returns()?.take_back()
+    }
+
+    fn continue_here(&self, args: &Value) -> Result<Value, ApiError> {
+        let usage = "cluster.continue_here takes {\"id\": session id}";
+        let fields = args.as_object().ok_or_else(|| bad(usage))?;
+        if fields.len() != 1 {
+            return Err(bad(usage));
+        }
+        let id = text(args, "id", usage)?;
+        if id.len() > ID_MAX {
+            return Err(bad(usage));
+        }
+        self.returns()?.continue_here(id)
+    }
+
+    fn side_copy_hide(&self, args: &Value) -> Result<Value, ApiError> {
+        let usage = "cluster.side_copy.hide takes {\"session\": id, \"node\": id}";
+        let fields = args.as_object().ok_or_else(|| bad(usage))?;
+        if fields.len() != 2 {
+            return Err(bad(usage));
+        }
+        let session = text(args, "session", usage)?;
+        if session.len() > ID_MAX {
+            return Err(bad(usage));
+        }
+        let node = node_arg(args, usage)?;
+        self.returns()?.hide(session, &node)
+    }
+
     fn node(&self) -> Result<&Arc<ClusterNode>, ApiError> {
         self.node.as_ref().map_err(|why| {
             ApiError::new(
@@ -127,6 +183,10 @@ impl ClusterOps {
                 status["replication"] = (self.replication)(crate::acting_ops::now_ms());
                 status["move"] = self.mover.as_ref().map_or(Value::Null, |m| m.status());
                 status["promote"] = self.promoter.as_ref().map_or(Value::Null, |p| p.status());
+                status["waiting"] = self
+                    .returns
+                    .as_ref()
+                    .map_or_else(|| json!([]), |r| r.waiting());
                 if status["failover"].is_object() {
                     status["failover"]["takesOverAt"] = Value::Null;
                 }
@@ -376,7 +436,10 @@ impl OpGroup for ClusterOps {
             | ops::CLUSTER_MOVE_NOW
             | ops::CLUSTER_FAILOVER_SET
             | ops::CLUSTER_ALLOW_SET
-            | ops::CLUSTER_PROMOTE => Some(OpSpec::APP),
+            | ops::CLUSTER_PROMOTE
+            | ops::CLUSTER_TAKE_BACK
+            | ops::CLUSTER_CONTINUE_HERE
+            | ops::CLUSTER_SIDE_COPY_HIDE => Some(OpSpec::APP),
             _ => None,
         }
     }
@@ -396,6 +459,9 @@ impl OpGroup for ClusterOps {
             ops::CLUSTER_MOVE_NOW => self.move_now(args),
             ops::CLUSTER_ALLOW_SET => self.allow_set(args),
             ops::CLUSTER_PROMOTE => self.promote(args),
+            ops::CLUSTER_TAKE_BACK => self.take_back(args),
+            ops::CLUSTER_CONTINUE_HERE => self.continue_here(args),
+            ops::CLUSTER_SIDE_COPY_HIDE => self.side_copy_hide(args),
             ops::CLUSTER_REMOVE => {
                 let node = node_arg(args, "cluster.remove takes {\"node\": id}")?;
                 self.node()?.local(LocalCmd::Remove { node })
