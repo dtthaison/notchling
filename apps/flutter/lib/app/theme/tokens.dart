@@ -29,6 +29,12 @@ abstract final class _Palette {
   static const Color red600 = Color(0xFFC2362B);
 }
 
+abstract final class MarkInk {
+  static const Color red = Color(0xFFFF2D2D);
+  static const Color yellow = Color(0xFFFFD60A);
+  static const Color white = Color(0xFFFFFFFF);
+}
+
 abstract final class Radii {
   static const double sm = 10;
   static const double md = 16;

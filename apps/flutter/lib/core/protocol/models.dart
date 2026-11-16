@@ -239,6 +239,7 @@ class SessionFacts {
     this.contextTokens,
     this.contextWindow,
     this.model,
+    this.effort,
     this.limits = const <LimitMeter>[],
   });
 
@@ -250,6 +251,7 @@ class SessionFacts {
         ? (json['contextWindow']! as num).toInt()
         : null,
     model: json.strOrNull('model'),
+    effort: json.strOrNull('effort'),
     limits: json['limits'] is List<Object?>
         ? json.objects('limits').map(LimitMeter.fromJson).toList()
         : const <LimitMeter>[],
@@ -258,6 +260,7 @@ class SessionFacts {
   final int? contextTokens;
   final int? contextWindow;
   final String? model;
+  final String? effort;
   final List<LimitMeter> limits;
 
   double? get contextFraction =>
@@ -304,6 +307,7 @@ class Session {
     this.facts,
     this.lastMessage,
     this.node,
+    this.tool = 'claude',
   });
 
   factory Session.fromJson(Json json) {
@@ -330,6 +334,7 @@ class Session {
           ? SessionFacts.fromJson(json.object('facts'))
           : null,
       node: SessionNode.tryParse(json['node']),
+      tool: json.strOrNull('tool') ?? 'claude',
     );
   }
 
@@ -353,6 +358,8 @@ class Session {
   final LastMessage? lastMessage;
 
   final SessionNode? node;
+
+  final String tool;
 
   int get runningSubagents => subagents.where((Subagent s) => s.running).length;
   bool get canMessage => control != SessionControl.viewOnly;

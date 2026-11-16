@@ -258,6 +258,18 @@
   "@chatAttachPhoto": {
     "description": "Shown in the Chat screen."
   },
+  "chatCompactConfirm": "Compact this session's context? Claude summarises the conversation so far to free room. This cannot be undone.",
+  "@chatCompactConfirm": {
+    "description": "Body of the dialog that asks before compacting a session."
+  },
+  "chatCompactTitle": "Compact context",
+  "@chatCompactTitle": {
+    "description": "Title of the dialog that asks before compacting a session."
+  },
+  "chatCompactTooltip": "Compact",
+  "@chatCompactTooltip": {
+    "description": "Tooltip of the Compact button in the Chat composer and the confirm button of its dialog."
+  },
   "chatCompactionTitle": "Conversation compacted",
   "@chatCompactionTitle": {
     "description": "Shown in the Chat screen."
@@ -286,6 +298,34 @@
   "@chatCopyCode": {
     "description": "Shown in the Chat screen."
   },
+  "chatEffortChip": "Effort",
+  "@chatEffortChip": {
+    "description": "The Effort button in the Chat composer, before a level is known."
+  },
+  "chatEffortHigh": "High",
+  "@chatEffortHigh": {
+    "description": "An effort level in the Chat composer."
+  },
+  "chatEffortLow": "Low",
+  "@chatEffortLow": {
+    "description": "An effort level in the Chat composer."
+  },
+  "chatEffortMax": "Max",
+  "@chatEffortMax": {
+    "description": "An effort level in the Chat composer."
+  },
+  "chatEffortMedium": "Medium",
+  "@chatEffortMedium": {
+    "description": "An effort level in the Chat composer."
+  },
+  "chatEffortSheetTitle": "Choose an effort level",
+  "@chatEffortSheetTitle": {
+    "description": "Title of the sheet that lists effort levels in the Chat composer."
+  },
+  "chatEffortXhigh": "Extra High",
+  "@chatEffortXhigh": {
+    "description": "An effort level in the Chat composer."
+  },
   "chatEmpty": "No messages yet.",
   "@chatEmpty": {
     "description": "Shown in the Chat screen."
@@ -301,6 +341,66 @@
   "chatLoadOlder": "Load older messages",
   "@chatLoadOlder": {
     "description": "Shown in the Chat screen."
+  },
+  "chatMarkArrow": "Arrow",
+  "@chatMarkArrow": {
+    "description": "A drawing tool in the picture editor."
+  },
+  "chatMarkBox": "Box",
+  "@chatMarkBox": {
+    "description": "A drawing tool in the picture editor."
+  },
+  "chatMarkCircle": "Circle",
+  "@chatMarkCircle": {
+    "description": "A drawing tool in the picture editor."
+  },
+  "chatMarkClear": "Clear",
+  "@chatMarkClear": {
+    "description": "Tooltip of the button that removes every mark in the picture editor."
+  },
+  "chatMarkFailed": "Could not prepare the picture",
+  "@chatMarkFailed": {
+    "description": "Shown in the picture editor when the marked picture could not be made."
+  },
+  "chatMarkNext": "Next",
+  "@chatMarkNext": {
+    "description": "Button of the picture editor that goes on to the caption and Send."
+  },
+  "chatMarkPen": "Pen",
+  "@chatMarkPen": {
+    "description": "A drawing tool in the picture editor."
+  },
+  "chatMarkRed": "Red",
+  "@chatMarkRed": {
+    "description": "Name of a mark colour in the picture editor."
+  },
+  "chatMarkRendering": "Preparing the picture",
+  "@chatMarkRendering": {
+    "description": "Shown in the picture editor while the marks are drawn into the picture."
+  },
+  "chatMarkUndo": "Undo",
+  "@chatMarkUndo": {
+    "description": "Tooltip of the button that removes the last mark in the picture editor."
+  },
+  "chatMarkWhite": "White",
+  "@chatMarkWhite": {
+    "description": "Name of a mark colour in the picture editor."
+  },
+  "chatMarkYellow": "Yellow",
+  "@chatMarkYellow": {
+    "description": "Name of a mark colour in the picture editor."
+  },
+  "chatModelChip": "Model",
+  "@chatModelChip": {
+    "description": "The Model button in the Chat composer, before a model is known."
+  },
+  "chatModelOlder": "More models",
+  "@chatModelOlder": {
+    "description": "Heading of the older models in the model sheet."
+  },
+  "chatModelSheetTitle": "Choose a model",
+  "@chatModelSheetTitle": {
+    "description": "Title of the sheet that lists models in the Chat composer."
   },
   "chatMultiSelectOnMac": "This question allows several answers. Answer it on the Mac.",
   "@chatMultiSelectOnMac": {
@@ -362,6 +462,10 @@
   "chatPictureFailed": "Could not load the picture",
   "@chatPictureFailed": {
     "description": "Shown in the Chat screen."
+  },
+  "chatPictureMarkup": "Mark up",
+  "@chatPictureMarkup": {
+    "description": "Title of the picture editor and the button that opens it in the picture viewer."
   },
   "chatPictureOpen": "Open picture",
   "@chatPictureOpen": {

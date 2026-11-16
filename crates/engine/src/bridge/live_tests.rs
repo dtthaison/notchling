@@ -18,7 +18,7 @@ use std::sync::{Arc, Mutex};
 fn transcript(dir: &TempDir) -> String {
     let lines = [
         r#"{"type":"user","uuid":"u1","timestamp":"2026-11-01T09:40:00Z","message":{"role":"user","content":"Fix the crash"}}"#,
-        r#"{"type":"assistant","uuid":"a1","timestamp":"2026-11-01T09:41:00Z","message":{"id":"msg_1","role":"assistant","model":"claude-opus-5-5","content":[{"type":"text","text":"  The crash was a nil optional.\n"}],"usage":{"input_tokens":50000,"cache_read_input_tokens":1000,"output_tokens":1000}}}"#,
+        r#"{"type":"assistant","effort":"xhigh","uuid":"a1","timestamp":"2026-11-01T09:41:00Z","message":{"id":"msg_1","role":"assistant","model":"claude-opus-5-5","content":[{"type":"text","text":"  The crash was a nil optional.\n"}],"usage":{"input_tokens":50000,"cache_read_input_tokens":1000,"output_tokens":1000}}}"#,
         r#"{"type":"assistant","uuid":"a2","timestamp":"2026-11-01T09:42:00Z","message":{"id":"msg_2","role":"assistant","model":"claude-opus-5-5","content":[{"type":"tool_use","id":"toolu_1","name":"Edit","input":{"file_path":"/src/app/main.swift","old_string":"a","new_string":"b"}}]}}"#,
     ];
     dir.write("projects/app/s1.jsonl", &(lines.join("\n") + "\n"))
@@ -53,6 +53,7 @@ fn enrich_adds_activity_the_newest_reply_and_facts() {
     assert_eq!(facts.context_tokens, Some(52_000));
     assert_eq!(facts.context_window, Some(400_000));
     assert_eq!(facts.model.as_deref(), Some("claude-opus-5-5"));
+    assert_eq!(facts.effort.as_deref(), Some("xhigh"));
     assert_eq!(facts.limits, limits);
 }
 

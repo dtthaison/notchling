@@ -248,3 +248,81 @@ chat-answer-may-deliver = Your earlier answer ({ $answer }) may still be deliver
 
 # Shown in the Chat screen under a permission or question card when the phone is asked to send a different answer but the first one was already delivered to the Mac, so nothing more is sent. $answer is the earlier answer, such as Allow.
 chat-answer-delivered = Your earlier answer ({ $answer }) was already delivered. Nothing more was sent.
+
+# The Model button in the Chat composer, before a model is known.
+chat-model-chip = Model
+
+# The Effort button in the Chat composer, before a level is known.
+chat-effort-chip = Effort
+
+# Tooltip of the Compact button in the Chat composer and the confirm button of its dialog.
+chat-compact-tooltip = Compact
+
+# Title of the dialog that asks before compacting a session.
+chat-compact-title = Compact context
+
+# Body of the dialog that asks before compacting a session.
+chat-compact-confirm = Compact this session's context? Claude summarises the conversation so far to free room. This cannot be undone.
+
+# Title of the sheet that lists models in the Chat composer.
+chat-model-sheet-title = Choose a model
+
+# Title of the sheet that lists effort levels in the Chat composer.
+chat-effort-sheet-title = Choose an effort level
+
+# Heading of the older models in the model sheet.
+chat-model-older = More models
+
+# An effort level in the Chat composer.
+chat-effort-low = Low
+
+# An effort level in the Chat composer.
+chat-effort-medium = Medium
+
+# An effort level in the Chat composer.
+chat-effort-high = High
+
+# An effort level in the Chat composer.
+chat-effort-xhigh = Extra High
+
+# An effort level in the Chat composer.
+chat-effort-max = Max
+
+# Title of the picture editor and the button that opens it in the picture viewer.
+chat-picture-markup = Mark up
+
+# A drawing tool in the picture editor.
+chat-mark-pen = Pen
+
+# A drawing tool in the picture editor.
+chat-mark-circle = Circle
+
+# A drawing tool in the picture editor.
+chat-mark-box = Box
+
+# A drawing tool in the picture editor.
+chat-mark-arrow = Arrow
+
+# Tooltip of the button that removes the last mark in the picture editor.
+chat-mark-undo = Undo
+
+# Tooltip of the button that removes every mark in the picture editor.
+chat-mark-clear = Clear
+
+# Button of the picture editor that goes on to the caption and Send.
+chat-mark-next = Next
+
+# Shown in the picture editor while the marks are drawn into the picture.
+chat-mark-rendering = Preparing the picture
+
+# Shown in the picture editor when the marked picture could not be made.
+chat-mark-failed = Could not prepare the picture
+
+# Name of a mark colour in the picture editor.
+chat-mark-red = Red
+
+# Name of a mark colour in the picture editor.
+chat-mark-yellow = Yellow
+
+# Name of a mark colour in the picture editor.
+chat-mark-white = White

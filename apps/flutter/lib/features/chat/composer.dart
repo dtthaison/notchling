@@ -8,6 +8,7 @@ import '../../core/protocol/models.dart';
 import '../voice/mic_button.dart';
 import '../voice/voice_controller.dart';
 import 'chat_notifier.dart';
+import 'composer_controls.dart';
 import '../../app/widgets/kit.dart';
 import '../../app/widgets/motion.dart';
 import 'shell_command.dart';
@@ -34,6 +35,9 @@ class Composer extends StatefulWidget {
     this.commands = const <SlashCommand>[],
     this.folder,
     this.onAttach,
+    this.onSendText,
+    this.model,
+    this.effort,
   });
 
   final TextEditingController controller;
@@ -59,6 +63,10 @@ class Composer extends StatefulWidget {
   final String? folder;
 
   final VoidCallback? onAttach;
+
+  final void Function(String text)? onSendText;
+  final String? model;
+  final String? effort;
 
   @override
   State<Composer> createState() => _ComposerState();
@@ -340,7 +348,20 @@ class _ComposerState extends State<Composer> {
                       ),
                     ),
                   MicButton(state: widget.voice, onPressed: widget.onMic),
-                  const Spacer(),
+                  if (widget.onSendText != null)
+                    Expanded(
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: ComposerControls(
+                          model: widget.model,
+                          effort: widget.effort,
+                          enabled: !sending,
+                          onSend: widget.onSendText!,
+                        ),
+                      ),
+                    )
+                  else
+                    const Spacer(),
                   Padding(
                     padding: const EdgeInsets.all(2),
                     child: SendDisc(

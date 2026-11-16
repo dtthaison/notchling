@@ -230,6 +230,22 @@ fn queries(run: &mut Run) {
     );
     phone.rig.backend.with(|s| s.models.clear());
     phone.rig.backend.with(|s| {
+        if let Some(facts) = s.sessions[0].facts.as_mut() {
+            facts.effort = None;
+        }
+    });
+    run.round_trip(
+        &phone,
+        "SessionsListRequest",
+        none(),
+        Some("SessionsListResponse.no-effort"),
+    );
+    phone.rig.backend.with(|s| {
+        if let Some(facts) = s.sessions[0].facts.as_mut() {
+            facts.effort = Some("xhigh".into());
+        }
+    });
+    phone.rig.backend.with(|s| {
         s.sessions[1].node = Some(super::model::SessionNode {
             id: "0123456789abcdef".into(),
             name: "mac-mini".into(),

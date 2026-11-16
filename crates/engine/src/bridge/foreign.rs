@@ -151,6 +151,7 @@ pub fn enrich(session: &mut Session, conversation: &Conversation) {
             context_tokens: (facts.context_tokens > 0).then_some(facts.context_tokens as i64),
             context_window: None,
             model: facts.model.clone(),
+            effort: facts.effort.clone(),
             limits: Vec::new(),
         });
     }

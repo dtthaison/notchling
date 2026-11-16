@@ -181,9 +181,11 @@ void _sameSessions(String file, List<Object?> raw, List<Object?> again) {
     expect(model.takeover?.available, generated.takeover?.available, reason: file);
     expect(model.takeover?.stoppable ?? false, generated.takeover?.stoppable ?? false, reason: file);
     expect(model.facts?.contextTokens, generated.facts?.contextTokens, reason: file);
+    expect(model.facts?.effort, generated.facts?.effort, reason: file);
     expect(model.facts?.limits.length, generated.facts?.limits.length, reason: file);
     expect(model.lastMessage?.id, generated.lastMessage?.id, reason: file);
     expect(model.activity, generated.activity, reason: file);
+    expect(model.tool, generated.tool, reason: file);
     expect(model.node?.id, generated.node?.id, reason: file);
     expect(model.node?.name, generated.node?.name, reason: file);
     expect(model.node?.online, generated.node?.online, reason: file);

@@ -393,6 +393,24 @@ abstract class AppL10n {
   /// **'Attach a photo'**
   String get chatAttachPhoto;
 
+  /// Body of the dialog that asks before compacting a session.
+  ///
+  /// In en, this message translates to:
+  /// **'Compact this session\'s context? Claude summarises the conversation so far to free room. This cannot be undone.'**
+  String get chatCompactConfirm;
+
+  /// Title of the dialog that asks before compacting a session.
+  ///
+  /// In en, this message translates to:
+  /// **'Compact context'**
+  String get chatCompactTitle;
+
+  /// Tooltip of the Compact button in the Chat composer and the confirm button of its dialog.
+  ///
+  /// In en, this message translates to:
+  /// **'Compact'**
+  String get chatCompactTooltip;
+
   /// Shown in the Chat screen.
   ///
   /// In en, this message translates to:
@@ -435,6 +453,48 @@ abstract class AppL10n {
   /// **'Copy'**
   String get chatCopyCode;
 
+  /// The Effort button in the Chat composer, before a level is known.
+  ///
+  /// In en, this message translates to:
+  /// **'Effort'**
+  String get chatEffortChip;
+
+  /// An effort level in the Chat composer.
+  ///
+  /// In en, this message translates to:
+  /// **'High'**
+  String get chatEffortHigh;
+
+  /// An effort level in the Chat composer.
+  ///
+  /// In en, this message translates to:
+  /// **'Low'**
+  String get chatEffortLow;
+
+  /// An effort level in the Chat composer.
+  ///
+  /// In en, this message translates to:
+  /// **'Max'**
+  String get chatEffortMax;
+
+  /// An effort level in the Chat composer.
+  ///
+  /// In en, this message translates to:
+  /// **'Medium'**
+  String get chatEffortMedium;
+
+  /// Title of the sheet that lists effort levels in the Chat composer.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose an effort level'**
+  String get chatEffortSheetTitle;
+
+  /// An effort level in the Chat composer.
+  ///
+  /// In en, this message translates to:
+  /// **'Extra High'**
+  String get chatEffortXhigh;
+
   /// Shown in the Chat screen.
   ///
   /// In en, this message translates to:
@@ -458,6 +518,96 @@ abstract class AppL10n {
   /// In en, this message translates to:
   /// **'Load older messages'**
   String get chatLoadOlder;
+
+  /// A drawing tool in the picture editor.
+  ///
+  /// In en, this message translates to:
+  /// **'Arrow'**
+  String get chatMarkArrow;
+
+  /// A drawing tool in the picture editor.
+  ///
+  /// In en, this message translates to:
+  /// **'Box'**
+  String get chatMarkBox;
+
+  /// A drawing tool in the picture editor.
+  ///
+  /// In en, this message translates to:
+  /// **'Circle'**
+  String get chatMarkCircle;
+
+  /// Tooltip of the button that removes every mark in the picture editor.
+  ///
+  /// In en, this message translates to:
+  /// **'Clear'**
+  String get chatMarkClear;
+
+  /// Shown in the picture editor when the marked picture could not be made.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not prepare the picture'**
+  String get chatMarkFailed;
+
+  /// Button of the picture editor that goes on to the caption and Send.
+  ///
+  /// In en, this message translates to:
+  /// **'Next'**
+  String get chatMarkNext;
+
+  /// A drawing tool in the picture editor.
+  ///
+  /// In en, this message translates to:
+  /// **'Pen'**
+  String get chatMarkPen;
+
+  /// Name of a mark colour in the picture editor.
+  ///
+  /// In en, this message translates to:
+  /// **'Red'**
+  String get chatMarkRed;
+
+  /// Shown in the picture editor while the marks are drawn into the picture.
+  ///
+  /// In en, this message translates to:
+  /// **'Preparing the picture'**
+  String get chatMarkRendering;
+
+  /// Tooltip of the button that removes the last mark in the picture editor.
+  ///
+  /// In en, this message translates to:
+  /// **'Undo'**
+  String get chatMarkUndo;
+
+  /// Name of a mark colour in the picture editor.
+  ///
+  /// In en, this message translates to:
+  /// **'White'**
+  String get chatMarkWhite;
+
+  /// Name of a mark colour in the picture editor.
+  ///
+  /// In en, this message translates to:
+  /// **'Yellow'**
+  String get chatMarkYellow;
+
+  /// The Model button in the Chat composer, before a model is known.
+  ///
+  /// In en, this message translates to:
+  /// **'Model'**
+  String get chatModelChip;
+
+  /// Heading of the older models in the model sheet.
+  ///
+  /// In en, this message translates to:
+  /// **'More models'**
+  String get chatModelOlder;
+
+  /// Title of the sheet that lists models in the Chat composer.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose a model'**
+  String get chatModelSheetTitle;
 
   /// Shown in the Chat screen.
   ///
@@ -542,6 +692,12 @@ abstract class AppL10n {
   /// In en, this message translates to:
   /// **'Could not load the picture'**
   String get chatPictureFailed;
+
+  /// Title of the picture editor and the button that opens it in the picture viewer.
+  ///
+  /// In en, this message translates to:
+  /// **'Mark up'**
+  String get chatPictureMarkup;
 
   /// Shown in the Chat screen.
   ///

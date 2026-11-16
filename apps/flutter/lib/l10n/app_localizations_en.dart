@@ -190,6 +190,16 @@ class AppL10nEn extends AppL10n {
   String get chatAttachPhoto => 'Attach a photo';
 
   @override
+  String get chatCompactConfirm =>
+      'Compact this session\'s context? Claude summarises the conversation so far to free room. This cannot be undone.';
+
+  @override
+  String get chatCompactTitle => 'Compact context';
+
+  @override
+  String get chatCompactTooltip => 'Compact';
+
+  @override
   String get chatCompactionTitle => 'Conversation compacted';
 
   @override
@@ -211,6 +221,27 @@ class AppL10nEn extends AppL10n {
   String get chatCopyCode => 'Copy';
 
   @override
+  String get chatEffortChip => 'Effort';
+
+  @override
+  String get chatEffortHigh => 'High';
+
+  @override
+  String get chatEffortLow => 'Low';
+
+  @override
+  String get chatEffortMax => 'Max';
+
+  @override
+  String get chatEffortMedium => 'Medium';
+
+  @override
+  String get chatEffortSheetTitle => 'Choose an effort level';
+
+  @override
+  String get chatEffortXhigh => 'Extra High';
+
+  @override
   String get chatEmpty => 'No messages yet.';
 
   @override
@@ -221,6 +252,51 @@ class AppL10nEn extends AppL10n {
 
   @override
   String get chatLoadOlder => 'Load older messages';
+
+  @override
+  String get chatMarkArrow => 'Arrow';
+
+  @override
+  String get chatMarkBox => 'Box';
+
+  @override
+  String get chatMarkCircle => 'Circle';
+
+  @override
+  String get chatMarkClear => 'Clear';
+
+  @override
+  String get chatMarkFailed => 'Could not prepare the picture';
+
+  @override
+  String get chatMarkNext => 'Next';
+
+  @override
+  String get chatMarkPen => 'Pen';
+
+  @override
+  String get chatMarkRed => 'Red';
+
+  @override
+  String get chatMarkRendering => 'Preparing the picture';
+
+  @override
+  String get chatMarkUndo => 'Undo';
+
+  @override
+  String get chatMarkWhite => 'White';
+
+  @override
+  String get chatMarkYellow => 'Yellow';
+
+  @override
+  String get chatModelChip => 'Model';
+
+  @override
+  String get chatModelOlder => 'More models';
+
+  @override
+  String get chatModelSheetTitle => 'Choose a model';
 
   @override
   String get chatMultiSelectOnMac =>
@@ -266,6 +342,9 @@ class AppL10nEn extends AppL10n {
 
   @override
   String get chatPictureFailed => 'Could not load the picture';
+
+  @override
+  String get chatPictureMarkup => 'Mark up';
 
   @override
   String get chatPictureOpen => 'Open picture';
