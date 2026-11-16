@@ -184,13 +184,15 @@ impl Source {
     fn foreign_rows(&mut self, live: &ToolLive, now_ms: i64) -> Vec<Agent> {
         let days = self.root.fixture.is_none().then_some(14);
         let sessions = self.root.codex_dir.join("sessions");
-        let mut rows: Vec<Agent> = codex_list::rollouts(&sessions, days, now_ms, 30)
-            .iter()
-            .filter_map(|path| codex_list::session(path))
-            .collect();
-        rows.extend(self.agy_list.rows(now_ms));
         let delegated =
             crate::chat::delegated::hidden(&crate::chat::delegated::read(&self.root.data_dir));
+        let mut rows: Vec<Agent> =
+            codex_list::rollouts_skipping(&sessions, days, now_ms, 30, &delegated)
+                .shown
+                .iter()
+                .filter_map(|path| codex_list::session(path))
+                .collect();
+        rows.extend(self.agy_list.rows(now_ms));
         rows.retain(|row| !delegated.contains(&row.id));
         live.overlay(&mut rows);
         foreign::visible(rows, now_ms)

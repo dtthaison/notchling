@@ -7,6 +7,7 @@ use notchling_engine::sessions::{Agent, AgentGroup, AgentTarget};
 use notchling_engine::tools::agy::summaries::{self, Row};
 use notchling_engine::tools::codex::list as codex_list;
 use serde_json::{json, Value};
+use std::collections::HashSet;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -116,20 +117,27 @@ impl EverySession {
     }
 
     fn read(&self, now_ms: i64) -> Vec<Agent> {
-        let mut rows = self.codex(now_ms);
-        rows.extend(self.antigravity(now_ms));
         let hidden = delegate_jobs::hidden(&delegate_jobs::read(&self.data_dir));
+        let mut rows = self.codex(now_ms, &hidden);
+        rows.extend(self.antigravity(now_ms));
         rows.retain(|agent| !hidden.contains(&agent.id));
         rows
     }
 
-    fn codex(&self, now_ms: i64) -> Vec<Agent> {
-        codex_list::rollouts(&self.codex_sessions, self.within_days, now_ms, CODEX_SCAN)
-            .iter()
-            .filter(|path| !is_child(path))
-            .take(CODEX_ROWS)
-            .filter_map(|path| codex_list::session(path))
-            .collect()
+    fn codex(&self, now_ms: i64, hidden: &HashSet<String>) -> Vec<Agent> {
+        codex_list::rollouts_skipping(
+            &self.codex_sessions,
+            self.within_days,
+            now_ms,
+            CODEX_SCAN,
+            hidden,
+        )
+        .shown
+        .iter()
+        .filter(|path| !is_child(path))
+        .take(CODEX_ROWS)
+        .filter_map(|path| codex_list::session(path))
+        .collect()
     }
 
     fn antigravity(&self, now_ms: i64) -> Vec<Agent> {
