@@ -61,6 +61,16 @@ pub trait Sources: Send + Sync {
     fn relay(&self) -> Option<Arc<dyn Relay>> {
         None
     }
+    fn cluster_machines(&self) -> Vec<wire::ClusterMachine> {
+        Vec::new()
+    }
+    fn cluster_promote(
+        &self,
+        _node: &str,
+        _confirmed: bool,
+    ) -> Result<serde_json::Value, BridgeFailure> {
+        Err(BridgeFailure::invalid("This Mac isn't in a cluster."))
+    }
     fn inbox_items(&self) -> Vec<Item> {
         Vec::new()
     }
@@ -408,6 +418,18 @@ impl<S: Sources, A: Acting> BridgeBackend for LiveBackend<S, A> {
 
     fn relay(&self) -> Option<Arc<dyn Relay>> {
         self.sources.relay()
+    }
+
+    fn cluster_machines(&self) -> Vec<wire::ClusterMachine> {
+        self.sources.cluster_machines()
+    }
+
+    fn cluster_promote(
+        &self,
+        node: &str,
+        confirmed: bool,
+    ) -> Result<serde_json::Value, BridgeFailure> {
+        self.sources.cluster_promote(node, confirmed)
     }
 
     fn inbox_items(&self) -> Vec<Item> {

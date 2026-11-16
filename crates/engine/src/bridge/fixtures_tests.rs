@@ -141,6 +141,7 @@ fn every_fixture_is_captured_or_accepted() {
     uploads(&mut run);
     subscriptions(&mut run);
     inbox(&mut run);
+    machines(&mut run);
     relay(&mut run);
     errors(&mut run);
     binary_frames();
@@ -585,6 +586,58 @@ fn inbox(run: &mut Run) {
     phone.rig.hub.tick(phone.rig.backend.as_ref());
     let removed = phone.io.texts().last().cloned().expect("removed event");
     run.capture("InboxRemovedEvent", &removed, |_| {});
+}
+
+fn machines(run: &mut Run) {
+    let phone = connect();
+    let ask = |run: &mut Run, request: &str, patch: Value, response: &str| {
+        let texts = run.round_trip(&phone, request, patch, None);
+        let reply = texts.last().expect("a reply").clone();
+        run.capture(response, &reply, |_| {});
+    };
+    let none = || json!({});
+    ask(
+        run,
+        "ClusterMachinesRequest",
+        none(),
+        "ClusterMachinesResponse.empty",
+    );
+    phone.rig.backend.with(|s| s.machines = cluster_machines());
+    ask(
+        run,
+        "ClusterMachinesRequest",
+        none(),
+        "ClusterMachinesResponse",
+    );
+    let risk = "m5 can't be reached, so Notchling can't show that its work is safe on m1. Work m5 did after 14:02 stays on m5.";
+    let relayed = json!({"relayed": true, "text": "m5 is reachable through m1; nothing moved"});
+    let answers = [
+        (
+            "ClusterPromoteRequest",
+            none(),
+            json!({ "needsConfirm": risk }),
+            "ClusterPromoteResponse.needs-confirm",
+        ),
+        (
+            "ClusterPromoteRequest.confirmed",
+            none(),
+            json!({"step": "bump"}),
+            "ClusterPromoteResponse",
+        ),
+        (
+            "ClusterPromoteRequest",
+            json!({"id": 54}),
+            relayed,
+            "ClusterPromoteResponse.relayed",
+        ),
+    ];
+    for (request, patch, answer, response) in answers {
+        phone
+            .rig
+            .backend
+            .with(|s| s.promote_answer = Some(Ok(answer)));
+        ask(run, request, patch, response);
+    }
 }
 
 fn errors(run: &mut Run) {

@@ -109,6 +109,10 @@ pub struct FakeState {
     pub inbox_answer_devices: Vec<Option<String>>,
     pub acting_off: bool,
     pub relay: Option<Arc<dyn Relay>>,
+    pub machines: Vec<wire::ClusterMachine>,
+    pub machine_calls: usize,
+    pub promote_answer: Option<Result<Value, BridgeFailure>>,
+    pub promotes: Vec<(String, bool)>,
 }
 
 #[derive(Default)]
@@ -234,6 +238,20 @@ impl BridgeBackend for FakeBackend {
     }
     fn relay(&self) -> Option<Arc<dyn Relay>> {
         self.with(|s| s.relay.clone())
+    }
+    fn cluster_machines(&self) -> Vec<wire::ClusterMachine> {
+        self.with(|s| {
+            s.machine_calls += 1;
+            s.machines.clone()
+        })
+    }
+    fn cluster_promote(&self, node: &str, confirmed: bool) -> Result<Value, BridgeFailure> {
+        self.with(|s| {
+            s.promotes.push((node.to_string(), confirmed));
+            s.promote_answer
+                .clone()
+                .unwrap_or(Ok(json!({"step": "bump"})))
+        })
     }
     fn inbox_items(&self) -> Vec<Item> {
         self.with(|s| s.inbox.clone())

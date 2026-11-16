@@ -7,6 +7,7 @@ use super::model::{
 use super::relay::Relay;
 use super::wire::BridgeFailure;
 use crate::inbox::{ActionId, Item};
+use notchling_protocol::generated as wire;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -104,6 +105,18 @@ pub trait BridgeBackend: Send + Sync {
 
     fn relay(&self) -> Option<Arc<dyn Relay>> {
         None
+    }
+
+    fn cluster_machines(&self) -> Vec<wire::ClusterMachine> {
+        Vec::new()
+    }
+
+    fn cluster_promote(
+        &self,
+        _node: &str,
+        _confirmed: bool,
+    ) -> Result<serde_json::Value, BridgeFailure> {
+        Err(BridgeFailure::invalid("This Mac isn't in a cluster."))
     }
 
     fn inbox_items(&self) -> Vec<Item> {

@@ -13,6 +13,7 @@ pub mod net;
 pub mod relay;
 pub mod router;
 mod router_inbox;
+mod router_machines;
 mod router_ops;
 mod router_relay;
 pub mod snapshot;
@@ -45,6 +46,8 @@ mod inbox_tests;
 mod live_tests;
 #[cfg(test)]
 mod router_cluster_tests;
+#[cfg(test)]
+mod router_machines_tests;
 #[cfg(test)]
 mod router_relay_tests;
 #[cfg(test)]

@@ -10,7 +10,10 @@ import '../../core/protocol/models.dart';
 import '../../l10n/app_localizations.dart';
 import '../../core/net/bridge_client.dart';
 import '../connection/bridge_errors.dart';
+import '../machines/machines_notifier.dart';
+import '../machines/machines_sheet.dart';
 import 'inbox_notifier.dart';
+import 'promote_confirm.dart';
 
 class InboxScreen extends ConsumerWidget {
   const InboxScreen({super.key});
@@ -116,6 +119,12 @@ class InboxCard extends ConsumerWidget {
                 runSpacing: Space.sm,
                 children: <Widget>[
                   for (final InboxAction action in item.actions) _button(context, ref, l10n, action),
+                  if (noPrimaryKinds.contains(item.kind))
+                    SecondaryButton(
+                      label: l10n.machinesChoose,
+                      icon: Icons.computer,
+                      onPressed: () => unawaited(showMachinesSheet(context, ref)),
+                    ),
                 ],
               )
             else
@@ -134,11 +143,16 @@ class InboxCard extends ConsumerWidget {
     );
   }
 
+  Future<void> _answer(BuildContext context, WidgetRef ref, InboxAction action) async {
+    if (!await confirmInboxAction(context, ref, item, action)) return;
+    await ref.read(inboxProvider.notifier).answer(item, action.id);
+  }
+
   Widget _button(BuildContext context, WidgetRef ref, AppL10n l10n, InboxAction action) {
     if (action.id == 'open') {
       return SecondaryButton(label: l10n.inboxOpenOnMac, icon: Icons.laptop_mac, onPressed: null);
     }
-    final VoidCallback? press = busy ? null : () => unawaited(ref.read(inboxProvider.notifier).answer(item, action.id));
+    final VoidCallback? press = busy ? null : () => unawaited(_answer(context, ref, action));
     return action.primary && lead
         ? PrimaryButton(label: action.label, semanticLabel: '${action.label}, ${item.title}', onPressed: press)
         : SecondaryButton(label: action.label, semanticLabel: '${action.label}, ${item.title}', onPressed: press);

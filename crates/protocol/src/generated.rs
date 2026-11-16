@@ -530,7 +530,7 @@ pub struct VizSpec {
 /// One button an inbox item offers.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct InboxAction {
-    /// One of allow, allow_once, allow_always, deny, continue, cancel, done, open. open is for the Mac only: the phone shows it disabled and the Mac refuses it.
+    /// One of allow, allow_once, allow_always, deny, continue, cancel, done, open, and, from a cluster, move_here, move_anyway, take_back, keep, wait_for and continue_here. open is for the Mac only: the phone shows it disabled and the Mac refuses it. move_here, move_anyway, take_back and continue_here change where sessions run, so a phone asks before it answers with one.
     pub id: String,
     pub label: String,
     /// The main button of the item.
@@ -542,7 +542,7 @@ pub struct InboxAction {
 #[serde(rename_all = "camelCase")]
 pub struct InboxItem {
     pub id: String,
-    /// secret_approval, secret_request, limit_notice, action_failed or notice; a phone treats a kind it doesn't know as notice.
+    /// secret_approval, secret_request, limit_notice, action_failed or notice, and, from a cluster, primary_unreachable (and its confirm item, primary-unreachable:N:confirm), no_primary, primary_back and session_waits; a phone treats a kind it doesn't know as notice.
     pub kind: String,
     pub title: String,
     pub detail: String,
@@ -1589,6 +1589,91 @@ pub struct HeldChangedEvent {
     pub notices: Option<Vec<HeldNotice>>,
 }
 
+/// A machine of the cluster, for the phone's Machines popup. Online or not, Can Be Master or not.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClusterMachine {
+    /// The node's id.
+    pub id: String,
+    /// The name to show.
+    pub name: String,
+    pub online: bool,
+    /// False: the machine only controls jobs, it is listed but can't be picked.
+    pub can_be_master: bool,
+    /// True when the machine's own readiness checks pass.
+    pub ready: bool,
+    /// Wall time in milliseconds since 1970 of the newest snapshot set the machine holds; absent when it holds none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub set_at: Option<i64>,
+    /// canBeMaster, ready and a set: sessions continue there from setAt.
+    pub can_resume: bool,
+}
+
+/// Additive: the machines a phone can pick when no primary is reachable. An older Mac answers invalid, and the phone hides the popup. Paired phone only.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ClusterMachinesRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<Value>,
+    pub op: String,
+}
+
+/// Additive: move the primary to a machine now, when the old primary can't be reached. Handled on the Mac the phone reached and never held or relayed. Needs the Mac to be allowed to act.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ClusterPromoteRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<Value>,
+    pub op: String,
+    /// The machine's id, from cluster.machines.
+    pub node: String,
+    /// True after the person saw the text of an earlier needsConfirm answer and chose Move Anyway.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confirmed: Option<bool>,
+}
+
+/// The machines of the cluster this Mac knows.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ClusterMachinesResponse {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<Value>,
+    pub ok: bool,
+    /// The answer.
+    pub data: ClusterMachinesResponseData,
+}
+
+/// The answer.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ClusterMachinesResponseData {
+    pub machines: Vec<ClusterMachine>,
+}
+
+/// What the promote did. One of step, relayed or needsConfirm.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ClusterPromoteResponse {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<Value>,
+    pub ok: bool,
+    /// The answer.
+    pub data: ClusterPromoteResponseData,
+}
+
+/// The answer.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClusterPromoteResponseData {
+    /// Where the promote is; it goes on after this answer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub step: Option<String>,
+    /// True when the old primary was reachable through another machine: nothing moved.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub relayed: Option<bool>,
+    /// With relayed: the words to show, such as m5 is reachable through m1; nothing moved.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+    /// The risk the person must accept first; ask again with confirmed true to go on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub needs_confirm: Option<String>,
+}
+
 fn round<T: DeserializeOwned + Serialize>(value: &Value) -> Result<Value, serde_json::Error> {
     let typed: T = serde_json::from_value(value.clone())?;
     serde_json::to_value(typed)
@@ -1696,6 +1781,11 @@ pub fn roundtrip(name: &str, value: &Value) -> Option<Result<Value, serde_json::
         "HeldCancelResponse" => round::<HeldCancelResponse>(value),
         "HeldConfirmResponse" => round::<HeldConfirmResponse>(value),
         "HeldChangedEvent" => round::<HeldChangedEvent>(value),
+        "ClusterMachine" => round::<ClusterMachine>(value),
+        "ClusterMachinesRequest" => round::<ClusterMachinesRequest>(value),
+        "ClusterPromoteRequest" => round::<ClusterPromoteRequest>(value),
+        "ClusterMachinesResponse" => round::<ClusterMachinesResponse>(value),
+        "ClusterPromoteResponse" => round::<ClusterPromoteResponse>(value),
         _ => return None,
     })
 }

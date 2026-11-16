@@ -1089,6 +1089,54 @@ abstract class AppL10n {
   /// **'Answered on the Mac: {action}'**
   String inboxAnsweredOnMac(String action);
 
+  /// Body of that question. $machine is the name of the machine that has the newer copy, such as m1.
+  ///
+  /// In en, this message translates to:
+  /// **'The newer copy on {machine} is kept beside it.'**
+  String inboxConfirmContinueBody(String machine);
+
+  /// Body of that question when the machine's name is not known.
+  ///
+  /// In en, this message translates to:
+  /// **'The newer copy on the other machine is kept beside it.'**
+  String get inboxConfirmContinueBodyUnnamed;
+
+  /// Title of the question before a waiting session continues from this machine's copy. $title is the session's name.
+  ///
+  /// In en, this message translates to:
+  /// **'Continue {title} here?'**
+  String inboxConfirmContinueTitle(String title);
+
+  /// Title of the question before an inbox answer that moves the primary although safety can't be shown.
+  ///
+  /// In en, this message translates to:
+  /// **'Move anyway?'**
+  String get inboxConfirmMoveAnywayTitle;
+
+  /// Body of that question.
+  ///
+  /// In en, this message translates to:
+  /// **'Sessions continue here from the newest copy this machine holds. Work the old machine did after that is kept on it.'**
+  String get inboxConfirmMoveHereBody;
+
+  /// Title of the question before the inbox answer that moves the primary here.
+  ///
+  /// In en, this message translates to:
+  /// **'Move to this machine now?'**
+  String get inboxConfirmMoveHereTitle;
+
+  /// Body of that question.
+  ///
+  /// In en, this message translates to:
+  /// **'This machine becomes the primary again. Sessions that moved away come back when their turn ends.'**
+  String get inboxConfirmTakeBackBody;
+
+  /// Title of the question before the inbox answer that takes the primary back.
+  ///
+  /// In en, this message translates to:
+  /// **'Take Back?'**
+  String get inboxConfirmTakeBackTitle;
+
   /// Shown in the Inbox.
   ///
   /// In en, this message translates to:
@@ -1148,6 +1196,114 @@ abstract class AppL10n {
   /// In en, this message translates to:
   /// **'English'**
   String get languageName;
+
+  /// Button in an inbox card that opens the Machines popup.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose a Machine'**
+  String get machinesChoose;
+
+  /// Body of that question for a machine with a copy. $time is the clock time of the copy, such as 14:02. $old is the name of the machine that can't be reached, such as m5.
+  ///
+  /// In en, this message translates to:
+  /// **'Sessions continue there from {time}. Work {old} did after that is kept on {old}.'**
+  String machinesConfirmBody(String time, String old);
+
+  /// Body of that question for a machine that holds no copy of the sessions. $machine is the machine's name, such as m3.
+  ///
+  /// In en, this message translates to:
+  /// **'{machine} holds no copy of your sessions, so it will only control jobs. Work done on the old machine stays there.'**
+  String machinesConfirmBodyJobs(String machine);
+
+  /// Body of that question for a machine with a copy when the old machine's name is not known. $time is the clock time of the copy, such as 14:02.
+  ///
+  /// In en, this message translates to:
+  /// **'Sessions continue there from {time}. Work the old machine did after that is kept on it.'**
+  String machinesConfirmBodyUnnamed(String time);
+
+  /// Title of the question before a session moves to a machine. $machine is the machine's name, such as m1.
+  ///
+  /// In en, this message translates to:
+  /// **'Move to {machine} now?'**
+  String machinesConfirmTitle(String machine);
+
+  /// Shown in the Machines popup when no other machine is online.
+  ///
+  /// In en, this message translates to:
+  /// **'No other machine is online.'**
+  String get machinesEmpty;
+
+  /// Shown when a move could not be started.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t start the move. Try again.'**
+  String get machinesFailed;
+
+  /// Shown under the title of the Machines popup.
+  ///
+  /// In en, this message translates to:
+  /// **'Your main machine can\'t be reached. Pick the machine that should take over.'**
+  String get machinesIntro;
+
+  /// One machine in the Machines popup that holds no copy of the sessions.
+  ///
+  /// In en, this message translates to:
+  /// **'Controls jobs only'**
+  String get machinesJobsOnly;
+
+  /// Button that sends the move.
+  ///
+  /// In en, this message translates to:
+  /// **'Move'**
+  String get machinesMove;
+
+  /// Button that sends the move after the risk was shown.
+  ///
+  /// In en, this message translates to:
+  /// **'Move Anyway'**
+  String get machinesMoveAnyway;
+
+  /// Shown after a move was sent. $machine is the machine's name, such as m1.
+  ///
+  /// In en, this message translates to:
+  /// **'Moving to {machine}. Sessions continue there soon.'**
+  String machinesMoving(String machine);
+
+  /// One machine in the Machines popup that is not allowed to be the primary. It can't be picked.
+  ///
+  /// In en, this message translates to:
+  /// **'Can Be Master is off'**
+  String get machinesNotMaster;
+
+  /// One machine in the Machines popup that is not ready to take over.
+  ///
+  /// In en, this message translates to:
+  /// **'Not ready to take over'**
+  String get machinesNotReady;
+
+  /// Shown when the Mac says the old machine can be reached and nothing moved but gave no words.
+  ///
+  /// In en, this message translates to:
+  /// **'The old machine is reachable through another machine; nothing moved.'**
+  String get machinesRelayedFallback;
+
+  /// One machine in the Machines popup that holds a copy of the sessions. $time is the clock time of the copy, such as 14:02.
+  ///
+  /// In en, this message translates to:
+  /// **'Can resume old sessions · copy from {time}'**
+  String machinesResume(String time);
+
+  /// Title of the risk question that follows a move the Mac wants confirmed.
+  ///
+  /// In en, this message translates to:
+  /// **'Move anyway?'**
+  String get machinesRiskTitle;
+
+  /// Title of the popup the phone opens when no primary machine can be reached.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose a Machine'**
+  String get machinesTitle;
 
   /// Shown in the Paired Macs screen.
   ///
