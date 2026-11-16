@@ -197,10 +197,10 @@ class _PictureViewerState extends ConsumerState<PictureViewer> {
   late final PageController _pages = PageController(initialPage: widget.initial);
   late int _index = widget.initial;
   bool _zoomed = false;
-  final Map<String, Uint8List> _bytes = <String, Uint8List>{};
+  final Map<String, Uint8List> _sharp = <String, Uint8List>{};
 
   Future<void> _markup() async {
-    final Uint8List? bytes = _bytes[widget.images[_index].id];
+    final Uint8List? bytes = _sharp[widget.images[_index].id];
     if (bytes == null) return;
     final bool sent =
         await Navigator.of(context).push<bool>(
@@ -238,7 +238,7 @@ class _PictureViewerState extends ConsumerState<PictureViewer> {
             key: const ValueKey<String>('picture-markup'),
             label: l10n.chatPictureMarkup,
             icon: Icons.draw_outlined,
-            onPressed: _bytes.containsKey(widget.images[_index].id) ? () => unawaited(_markup()) : null,
+            onPressed: _sharp.containsKey(widget.images[_index].id) ? () => unawaited(_markup()) : null,
           ),
         ),
       ),
@@ -258,7 +258,7 @@ class _PictureViewerState extends ConsumerState<PictureViewer> {
           onZoom: (bool zoomed) {
             if (zoomed != _zoomed) setState(() => _zoomed = zoomed);
           },
-          onBytes: (Uint8List bytes) => setState(() => _bytes[widget.images[index].id] = bytes),
+          onSharp: (Uint8List bytes) => setState(() => _sharp[widget.images[index].id] = bytes),
         ),
       ),
     );
@@ -266,12 +266,12 @@ class _PictureViewerState extends ConsumerState<PictureViewer> {
 }
 
 class _PicturePage extends ConsumerStatefulWidget {
-  const _PicturePage({super.key, required this.sessionId, required this.image, required this.preview, required this.onZoom, required this.onBytes});
+  const _PicturePage({super.key, required this.sessionId, required this.image, required this.preview, required this.onZoom, required this.onSharp});
   final String sessionId;
   final ChatImage image;
   final Uint8List? preview;
   final ValueChanged<bool> onZoom;
-  final ValueChanged<Uint8List> onBytes;
+  final ValueChanged<Uint8List> onSharp;
 
   @override
   ConsumerState<_PicturePage> createState() => _PicturePageState();
@@ -280,19 +280,13 @@ class _PicturePage extends ConsumerStatefulWidget {
 class _PicturePageState extends ConsumerState<_PicturePage> {
   late Uint8List? _shown = widget.preview;
   bool _sharp = false;
-  bool _failed = false;
+  bool _sharpFailed = false;
   final TransformationController _transform = TransformationController();
 
   @override
   void initState() {
     super.initState();
     _transform.addListener(_reportZoom);
-    final Uint8List? preview = widget.preview;
-    if (preview != null) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) widget.onBytes(preview);
-      });
-    }
     unawaited(_load());
   }
 
@@ -308,13 +302,11 @@ class _PicturePageState extends ConsumerState<_PicturePage> {
 
   Future<void> _load() async {
     final ChatPictureLoader loader = ref.read(chatPictureLoaderProvider);
+    if (_sharpFailed) setState(() => _sharpFailed = false);
     if (_shown == null) {
       try {
         final Uint8List thumb = await loader.load(widget.sessionId, widget.image);
-        if (mounted && !_sharp) {
-          setState(() => _shown = thumb);
-          widget.onBytes(thumb);
-        }
+        if (mounted && !_sharp) setState(() => _shown = thumb);
       } on BridgeException catch (error) {
         debugPrint('PictureViewer thumbnail(${widget.image.id}): ${error.code} ${error.message}');
       }
@@ -326,17 +318,32 @@ class _PicturePageState extends ConsumerState<_PicturePage> {
           _shown = bytes;
           _sharp = true;
         });
-        widget.onBytes(bytes);
+        widget.onSharp(bytes);
       }
     } on BridgeException catch (error) {
       debugPrint('PictureViewer(${widget.image.id}): ${error.code} ${error.message}');
-      if (mounted && _shown == null) setState(() => _failed = true);
+      if (mounted) setState(() => _sharpFailed = true);
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final AppL10n l10n = AppL10n.of(context);
+    final Kit kit = Kit.of(context);
     final Uint8List? shown = _shown;
+    final Widget retry = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        Flexible(child: Text(l10n.chatPictureFailed, style: kit.labelSm, textAlign: TextAlign.center)),
+        const SizedBox(width: Space.sm),
+        TextButton(
+          key: const ValueKey<String>('picture-retry'),
+          style: TextButton.styleFrom(minimumSize: const Size(Metric.minTarget, Metric.minTarget)),
+          onPressed: () => unawaited(_load()),
+          child: Text(l10n.appRetry),
+        ),
+      ],
+    );
     final Widget picture = shown != null
         ? InteractiveViewer(
             transformationController: _transform,
@@ -345,15 +352,25 @@ class _PicturePageState extends ConsumerState<_PicturePage> {
             child: Center(child: Image.memory(shown, fit: BoxFit.contain, gaplessPlayback: true)),
           )
         : Center(
-            child: _failed
-                ? Text(AppL10n.of(context).chatPictureFailed, style: Kit.of(context).labelSm)
+            child: _sharpFailed
+                ? retry
                 : const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2)),
           );
     return Stack(
       fit: StackFit.expand,
       children: <Widget>[
         picture,
-        if (!_sharp && shown != null) const Positioned(top: 0, left: 0, right: 0, child: LinearProgressIndicator(minHeight: 2)),
+        if (!_sharp && shown != null && !_sharpFailed) const Positioned(top: 0, left: 0, right: 0, child: LinearProgressIndicator(minHeight: 2)),
+        if (_sharpFailed && shown != null)
+          Positioned(
+            left: Space.md,
+            right: Space.md,
+            bottom: Space.sm,
+            child: DecoratedBox(
+              decoration: BoxDecoration(color: kit.sidebar, borderRadius: BorderRadius.circular(Radii.md)),
+              child: Padding(padding: const EdgeInsets.symmetric(horizontal: Space.md), child: retry),
+            ),
+          ),
       ],
     );
   }
