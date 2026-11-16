@@ -271,6 +271,7 @@ fn stale_lease_and_free_entries_are_dropped() {
     assert_eq!(w.gate(S1), Some(Gate::Free));
 }
 
+#[cfg(unix)]
 #[test]
 fn writes_only_on_change() {
     use std::os::unix::fs::MetadataExt;
@@ -312,6 +313,7 @@ fn the_file_carries_the_term_node_boot_and_cluster() {
     let _ = BOOT;
 }
 
+#[cfg(unix)]
 #[test]
 fn fence_file_is_atomic_and_0600() {
     use std::os::unix::fs::PermissionsExt;
@@ -328,6 +330,7 @@ fn fence_file_is_atomic_and_0600() {
     assert_eq!(names, vec!["fence.json".to_string()], "no temp file left");
 }
 
+#[cfg(unix)]
 #[test]
 fn planted_link_is_refused() {
     let w = world("link", two());
