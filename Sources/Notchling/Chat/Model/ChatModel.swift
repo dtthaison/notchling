@@ -117,6 +117,10 @@ final class ChatModel: ObservableObject {
     /// The selected background session attached in a terminal sheet, for a command that opens a menu.
     @Published var terminal: TerminalSession?
     @Published var drafts: [String: String] = [:]
+    /// Made once, for the environment: SwiftUI can't compare closures, so a fresh one in every ChatView body counted
+    /// as a change and ran the body of every view reading it (every message's markdown) on each keystroke.
+    lazy var runCommandAction: (String, String?) -> Void = { [weak self] script, folder in self?.runCommand(script, in: folder) }
+    lazy var openDelegatedAction: (SecondOpinion) -> Void = { [weak self] run in self?.openDelegatedSession(run) }
     /// Files dropped on a session's reply box, shown as thumbnails above it; their paths go after the text on send.
     @Published var attachments: [String: [URL]] = [:]
     @Published var pending: [String: Pending] = [:]

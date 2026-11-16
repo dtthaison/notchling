@@ -18,7 +18,7 @@ struct AssistantMessage: View {
     var body: some View {
         // Full width, no avatar: the card and its place on the left already say who wrote it.
         HStack(alignment: .top, spacing: 0) {
-            MarkdownView(text: text)
+            MarkdownView(text: text).equatable()
                 .padding(.horizontal, 14).padding(.vertical, 12)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .kitCard()
@@ -92,7 +92,7 @@ struct UserBubble: View {
                             .fixedSize(horizontal: false, vertical: true)
                     } else if !text.isEmpty {
                         // Your own messages can hold tables and code too (pastes), so they get markdown.
-                        MarkdownView(text: text)
+                        MarkdownView(text: text).equatable()
                     }
                 }
                 }

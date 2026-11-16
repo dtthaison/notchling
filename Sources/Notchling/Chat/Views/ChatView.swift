@@ -70,9 +70,9 @@ struct ChatView: View {
         .environment(\.chatFolder, model.selected?.cwd)
         .environment(\.secondOpinion, model.selected.map { agent in
             SecondOpinionContext(store: model.secondOpinions, session: agent.id, folder: agent.cwd,
-                                 open: { [weak model] run in model?.openDelegatedSession(run) })
+                                 open: model.openDelegatedAction)
         })
-        .environment(\.runCommand, { [weak model] script, folder in model?.runCommand(script, in: folder) })
+        .environment(\.runCommand, model.runCommandAction)
         .kitNoFocusRing()
         .frame(minWidth: 720, minHeight: 460)
     }

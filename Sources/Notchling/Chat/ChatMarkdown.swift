@@ -167,10 +167,14 @@ enum MarkdownParser {
 }
 
 /// Renders markdown blocks with the kit's type and colors.
-struct MarkdownView: View {
+/// Equatable on its text, and used with `.equatable()` in the conversation: Chat's model publishes the draft
+/// on every keystroke, and without it each message's body ran again, parsing its markdown and checking its paths
+/// and media on disk, so typing slowed down with every message on screen.
+struct MarkdownView: View, Equatable {
+    static func == (a: MarkdownView, b: MarkdownView) -> Bool { a.text == b.text }
+
     let text: String
     @Environment(\.chatFolder) private var folder
-    @Environment(\.runCommand) private var runCommand
 
     /// Folders named in this message, then the session's: relative paths and commands are read there.
     private var bases: [String] { ChatPaths.bases(in: text, cwd: folder) }
@@ -268,17 +272,31 @@ struct MarkdownView: View {
             }
             .fixedSize(horizontal: false, vertical: true)
         case .code(let language, let text):
-            let command = runCommand == nil ? nil : ChatPaths.command(language: language, text: text)
-            CodeBlockView(language: language, text: text,
-                          run: command.map { script in
-                              let dir = ChatPaths.directory(for: script, bases: bases)
-                              return CodeBlockView.Run(directory: dir) { runCommand?(script, dir) }
-                          })
+            RunnableCodeBlock(language: language, text: text, bases: bases)
         case .table(let header, let rows):
             TableBlockView(header: header, rows: rows)
         case .rule:
             Rectangle().fill(KitInk.hairline).frame(height: 1).padding(.vertical, 4)
         }
+    }
+}
+
+/// A code block that offers Run where Chat can run commands. It reads the action from the environment itself, so
+/// the message around it doesn't: a closure can't be compared, and a message that read one ran its body again on
+/// every update of the window.
+private struct RunnableCodeBlock: View {
+    let language: String
+    let text: String
+    let bases: [String]
+    @Environment(\.runCommand) private var runCommand
+
+    var body: some View {
+        let command = runCommand == nil ? nil : ChatPaths.command(language: language, text: text)
+        CodeBlockView(language: language, text: text,
+                      run: command.map { script in
+                          let dir = ChatPaths.directory(for: script, bases: bases)
+                          return CodeBlockView.Run(directory: dir) { runCommand?(script, dir) }
+                      })
     }
 }
 
