@@ -515,7 +515,7 @@ and answers them before `Ops` (`cluster_switches`, `cluster_sessions`, `cluster_
 | `delegate.run` | the home (agent) | `{args, job}` | `{exit, out, err}` |
 | `node.versions` | any member (node) | the sender's versions | `{}` |
 | `node.load` | any member (node) | `{}` | `{cpu, memUsedMb, memTotalMb}` or `null` |
-| `cluster.record` | any member, to the home (node; app for a hide) | `{command}`: a `claim`, `touched`, `side_copy` or `hide_side_copy` command | `{changed}`; anything else is `bad_args`; relayed to the home from a member |
+| `cluster.record` | any member, to the home (node; app, from a client or the home, for a hide) | `{command}`: a `claim`, `touched`, `side_copy` or `hide_side_copy` command | `{changed}`; anything else is `bad_args`; relayed to the home from a member |
 | `snap.offer` | the home (node), to a Can Be Master member | `{manifest}` | `{missing: [part], lengths: {path: length}}`: the parts the receiver still lacks and the transcript lengths it holds; refused from anyone but the primary, on the primary itself and on a machine that isn't Can Be Master |
 | `snap.part` | as `snap.offer` | `{set, part, transfer}`, or `{set, part, files: [{rel, transfer}]}` for a folder | `{ok: true}`; the bytes came first by `node.put`, and the part is checked against the manifest's hash |
 | `snap.commit` | as `snap.offer` | `{set}` | `{set, lengths}`; the set becomes current only when every part is there and checks, the receiver keeps the two newest, then sends `snap.ack` to the home |

@@ -477,6 +477,13 @@ fn only_a_client_or_the_home_records_from_its_app() {
 }
 
 #[test]
+fn a_standby_without_an_app_cannot_record_from_the_app_tier() {
+    let standby = facts("m2", Role::Standby, false, MemberState::Active);
+    assert!(check("cluster.record", &standby, &origin("m2", OriginTier::App)).is_err());
+    assert!(check("cluster.record", &standby, &origin("m2", OriginTier::Node)).is_ok());
+}
+
+#[test]
 fn an_agent_never_records_and_a_record_names_its_own_sender() {
     let client = facts("m1", Role::Standby, true, MemberState::Active);
     assert!(check("cluster.record", &client, &origin("m1", OriginTier::Agent)).is_err());
