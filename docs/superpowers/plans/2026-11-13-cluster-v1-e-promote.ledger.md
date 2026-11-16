@@ -236,3 +236,4 @@ e3: Ruling R218: Keep, Wait For and Hide need no `acting`; Take Back and Continu
 e3: Ruling R219: a claim's `base_set` is the claiming node's newest StandbyStore set, else the previous claim's; a side copy re-recorded with `hidden=false` stays hidden at the home (hidden is ORed, R204).
 e3: Ruling R220: nothing writes `waiting.json` in production in this wave; `Returns::add_waiting` is the door for Task 7's return-with-the-primary-off detection (left with Task 7, R201).
 e3: Task 10b review: dispatched to agy (gemini-4-hydrogen high, file reads only).
+e3: Task 12 (phone: the bridge's `cluster.machines` and `cluster.promote`, the Machines popup, inbox confirms): dispatched (base 821e079e, sonnet high), in parallel with Task 13 and Task 10b's review.
