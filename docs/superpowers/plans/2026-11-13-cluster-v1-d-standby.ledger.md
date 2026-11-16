@@ -323,3 +323,7 @@ d2: Ruling R198 (D11-2): when the cancel by key says nothing was found and the a
 d2: Ruling R199 (B1): the daemon calls `ClusterParts::recover_moves` right after the first scan (server serving, inbox loaded, held relay set), not `ClusterParts::build`; a move journaled before a restart is therefore recovered a few hundred ms later than before.
 d2: Ruling R200 (B2): a straight send is saved to `cluster.db` after `note_sent` and after a forget, outside any lock across `wire.call`; a failed save is ignored as on the other paths (the in-memory record still holds). Costs one database write per straight-relayed command on a Standby.
 d2: Final fix round re-review (agy gemini-4-hydrogen high, on 29d6a113..e3f40751): Approved, no defects. B1 and B2 fixed (R199, R200), parked minors D6-D12 closed (R190-R198), cluster_relay_tests.rs split. Lane d2 complete.
+
+d2: Maintainer accepted 2026-11-16: R179 stands as proposed — no cancel for a move that is already running in v1; the sheet's Cancel before Move is enough.
+d2: Maintainer accepted 2026-11-16: R190 stands as proposed — up to 3 s extra on a takeover from reading the login shell PATH is accepted, and the R97 Unicode-folding gap is accepted for v1.
+d2: Maintainer handed 2026-11-16 to lane E: R175 (claims restored from a snapshot set carried in the handover, so a primary restored from a set gets the claims journaled after that set's last copy) and R176 (a fence hook that stops the old primary's session after a handover); D keeps its rulings as written.
