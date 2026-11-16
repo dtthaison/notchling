@@ -408,12 +408,14 @@ class Surface extends StatelessWidget {
       child: CustomPaint(
         foregroundPainter: outline == null ? _EdgePainter(shape, kit) : null,
         child: DecoratedBox(
-          decoration: ShapeDecoration(
-            color: fill ?? kit.card,
-            shape: shape,
-            shadows: shadows.isEmpty ? null : shadows,
+          decoration: BoxDecoration(
+            borderRadius: r,
+            boxShadow: shadows.isEmpty ? null : shadows,
           ),
-          child: content,
+          child: DecoratedBox(
+            decoration: ShapeDecoration(color: fill ?? kit.card, shape: shape),
+            child: content,
+          ),
         ),
       ),
     );
