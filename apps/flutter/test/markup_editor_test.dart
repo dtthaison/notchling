@@ -57,7 +57,7 @@ void main() {
   test('a picture is fitted into the viewport and a zoomed one cannot leave an empty edge', () {
     expect(fittedSize(const Size(400, 400), 2), const Size(400, 200));
     expect(fittedSize(const Size(400, 400), 0.5), const Size(200, 400));
-    expect(clampPan(const Offset(500, 500), 1, const Size(400, 400), const Size(400, 200)), Offset.zero.translate(0, 0));
+    expect(clampPan(const Offset(500, 500), 1, const Size(400, 400), const Size(400, 200)), Offset.zero);
     final Offset wide = clampPan(const Offset(500, 0), 2, const Size(400, 400), const Size(400, 200));
     expect(wide.dx, 200);
     final ({double zoom, Offset pan}) next = zoomAround(
