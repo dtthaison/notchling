@@ -49,11 +49,17 @@ pub mod cluster_main;
 pub mod cluster_mirror;
 pub mod cluster_move;
 pub mod cluster_move_calls;
+pub mod cluster_move_promote;
 pub mod cluster_move_run;
 pub mod cluster_move_snaps;
 pub mod cluster_node;
 pub mod cluster_ops;
 pub mod cluster_outbox;
+pub mod cluster_promote;
+mod cluster_promote_acts;
+mod cluster_promote_facts;
+pub mod cluster_promote_items;
+pub mod cluster_promote_watch;
 pub mod cluster_prompts;
 mod cluster_prompts_book;
 mod cluster_prompts_clean;
@@ -214,6 +220,16 @@ mod cluster_move_fix2_tests;
 mod cluster_move_fix_tests;
 #[cfg(test)]
 mod cluster_move_tests;
+#[cfg(test)]
+pub(crate) mod cluster_promote_kit;
+#[cfg(test)]
+mod cluster_promote_ops_tests;
+#[cfg(test)]
+mod cluster_promote_reach_tests;
+#[cfg(test)]
+mod cluster_promote_tests;
+#[cfg(test)]
+mod cluster_promote_watch_tests;
 #[cfg(test)]
 mod cluster_redact_tests;
 #[cfg(test)]

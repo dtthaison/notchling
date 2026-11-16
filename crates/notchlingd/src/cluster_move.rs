@@ -747,7 +747,7 @@ impl Mover {
             .collect())
     }
 
-    fn mains(&self) -> BTreeMap<String, MainSession> {
+    pub(crate) fn mains(&self) -> BTreeMap<String, MainSession> {
         persist::load(&self.p.cluster)
             .ok()
             .flatten()

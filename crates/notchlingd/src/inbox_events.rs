@@ -15,7 +15,13 @@ fn kind_of(kind: Kind) -> ItemKind {
         | Kind::VersionDrift
         | Kind::NodeJoin
         | Kind::OutboxUnsent
-        | Kind::LoginNeeded => ItemKind::Notice,
+        | Kind::LoginNeeded
+        | Kind::PrimaryUnreachable
+        | Kind::Failover
+        | Kind::PausedStep
+        | Kind::NoPrimary
+        | Kind::PrimaryBack
+        | Kind::SessionWaits => ItemKind::Notice,
         Kind::SettingChange => ItemKind::SettingChange,
     }
 }

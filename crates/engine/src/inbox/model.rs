@@ -14,6 +14,12 @@ pub enum Kind {
     NodeJoin,
     OutboxUnsent,
     LoginNeeded,
+    PrimaryUnreachable,
+    Failover,
+    PausedStep,
+    NoPrimary,
+    PrimaryBack,
+    SessionWaits,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
@@ -29,6 +35,12 @@ pub enum ActionId {
     Open,
     Send,
     Discard,
+    MoveHere,
+    MoveAnyway,
+    TakeBack,
+    Keep,
+    ContinueHere,
+    WaitFor,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]

@@ -187,7 +187,7 @@ impl Mover {
         answer
     }
 
-    fn stage_and_take(
+    pub(crate) fn stage_and_take(
         &self,
         mut takeover: Takeover,
         primary: &NodeId,

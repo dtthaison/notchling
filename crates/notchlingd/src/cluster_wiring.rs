@@ -1,3 +1,4 @@
+use crate::acting::Acting;
 use crate::acting_ops::Room;
 use crate::cluster_blobs::Blobs;
 use crate::cluster_dispatch::{DispatchCalls, DispatchOps, NodeReporter};
@@ -25,6 +26,8 @@ use crate::cluster_node::{
 };
 use crate::cluster_ops::{follow_switch, ClusterOps};
 use crate::cluster_outbox::{OutboxFollower, RemoteOutbox};
+use crate::cluster_promote::{DaemonReplier, PromoteParts, Promoter};
+use crate::cluster_promote_watch::{WatchThread, Watcher, EVERY as PROMOTE_EVERY};
 use crate::cluster_prompts::{NodePush, PromptFollower, RemotePrompts};
 pub use crate::cluster_publisher::Publisher;
 use crate::cluster_relay_wiring::{HeldActs, HeldSlot};
@@ -298,6 +301,7 @@ pub struct ClusterParts {
     snap_observer: Option<SnapObserver>,
     fence_keeper: Arc<Keeper>,
     fence_thread: Option<KeeperThread>,
+    promote_thread: Option<WatchThread>,
     outbox_follower: Option<OutboxFollower>,
     outbox: Arc<RemoteOutbox>,
     handler: Arc<LateHandler>,
@@ -401,7 +405,7 @@ impl ClusterParts {
         versions: (Arc<VersionsOps>, BridgeFactsFn),
         (inbox, vault): (Arc<InboxOps>, Arc<VaultOps>),
         events: Events,
-        sessions: Arc<Mutex<Value>>,
+        (sessions, acting): (Arc<Mutex<Value>>, Arc<Acting>),
     ) -> ClusterParts {
         let _ = crate::cluster_fence::drop_stale_at_start(&layout.cluster_dir());
         if let OnDisk::Cluster { me: Some(me), .. } = on_disk(&layout.cluster_dir()) {
@@ -622,6 +626,19 @@ impl ClusterParts {
             },
         );
         let runner = MoveRunner::new(mover.clone(), layout.cluster_dir());
+        let promoter = Promoter::new(PromoteParts {
+            mover: mover.clone(),
+            cluster: move_link.clone(),
+            replier: Arc::new(DaemonReplier {
+                daemon: DaemonCalls::new(handler.clone(), room.clone()),
+                me: {
+                    let holder = holder.clone();
+                    Arc::new(move || holder.get().map(|node| node.me().clone()))
+                },
+            }),
+            acting,
+            boot: Boot::real(),
+        });
         let local: Arc<dyn LocalCalls> = Arc::new(MoveCalls::new(
             Arc::new(NodeCalls {
                 inner: Arc::new(DispatchCalls::new(
@@ -669,6 +686,7 @@ impl ClusterParts {
         let mut main_follower = None;
         let mut snap_observer = None;
         let mut fence_thread = None;
+        let mut promote_thread = None;
         let mut follower = None;
         let mut outbox_follower = None;
         if let Ok(node) = &node {
@@ -715,6 +733,14 @@ impl ClusterParts {
                 OBSERVE_EVERY,
             ));
             fence_thread = Some(KeeperThread::spawn(fence_keeper.clone(), FENCE_EVERY));
+            let status_link = move_link.clone();
+            promote_thread = Some(WatchThread::spawn(
+                Watcher::new(
+                    promoter.clone(),
+                    Arc::new(move || crate::cluster_move::Link::status(&*status_link)),
+                ),
+                PROMOTE_EVERY,
+            ));
             outbox_follower = Some(OutboxFollower::spawn(node.clone(), outbox.clone()));
         }
         let replication_slot = sender_slot.clone();
@@ -726,7 +752,8 @@ impl ClusterParts {
                         .get()
                         .map_or_else(|| serde_json::json!([]), |s| s.replication(now_ms))
                 }))
-                .with_mover(runner.clone()),
+                .with_mover(runner.clone())
+                .with_promoter(promoter.clone()),
         );
         let code: Arc<dyn CodeSender> = sender.clone();
         let dispatch = DispatchOps::with_code(node.clone(), shells.clone(), Some(code));
@@ -756,6 +783,7 @@ impl ClusterParts {
             snap_observer,
             fence_keeper,
             fence_thread,
+            promote_thread,
             outbox_follower,
             outbox,
             handler,
@@ -838,6 +866,9 @@ impl ClusterParts {
             observer.close();
         }
         if let Some(thread) = &self.fence_thread {
+            thread.close();
+        }
+        if let Some(thread) = &self.promote_thread {
             thread.close();
         }
         self.snap_run.close();

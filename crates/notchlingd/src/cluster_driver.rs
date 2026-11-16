@@ -610,6 +610,11 @@ impl Driver {
             let _ = self.tx.send(In::Core(Input::LocalDone { call, result }));
             return;
         }
+        if op == "node.reach" {
+            let result = Ok(self.reach(&args));
+            let _ = self.tx.send(In::Core(Input::LocalDone { call, result }));
+            return;
+        }
         let (local, tx, log) = (self.local.clone(), self.tx.clone(), self.audit.clone());
         let spawned = std::thread::Builder::new()
             .name("cluster-call".into())

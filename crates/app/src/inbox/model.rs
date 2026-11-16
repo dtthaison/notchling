@@ -38,6 +38,11 @@ fn decided(answer: Option<ActionId>) -> &'static str {
         Some(ActionId::Open) => "Saved",
         Some(ActionId::Send) => "Sent",
         Some(ActionId::Discard) => "Discarded",
+        Some(ActionId::MoveHere | ActionId::MoveAnyway) => "Moved",
+        Some(ActionId::TakeBack) => "Taken Back",
+        Some(ActionId::Keep) => "Kept",
+        Some(ActionId::ContinueHere) => "Continued Here",
+        Some(ActionId::WaitFor) => "Waiting",
         None => "Answered",
     }
 }
