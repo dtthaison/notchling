@@ -406,11 +406,14 @@ fn session_send_forwards_to_owner() {
 fn worker_may_not_send() {
     let worker = facts("w1", Role::Worker, false, MemberState::Active);
     let standby = facts("m2", Role::Standby, false, MemberState::Active);
-    for (name, sender) in [("w1", &worker), ("m2", &standby)] {
+    for (name, sender, app_denied) in [
+        ("w1", &worker, Denied::TierTooHigh),
+        ("m2", &standby, Denied::NotAllowed),
+    ] {
         for op in ["session.send"].into_iter().chain(OUTBOX_OPS) {
             assert_eq!(
                 check(op, sender, &origin(name, OriginTier::App)).err(),
-                Some(Denied::TierTooHigh),
+                Some(app_denied),
                 "{op}"
             );
             assert_eq!(

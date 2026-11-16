@@ -11,6 +11,7 @@ use crate::cluster::testkit::id;
 use crate::cluster::wire::{Msg, Origin, OriginTier};
 
 use super::core_tests::{answers, pair, run_locals, Hub};
+use super::core_tests_adopt::pair_of_promotables;
 
 fn secret_job(key: &str, names: &[&str]) -> LocalCmd {
     super::core_tests_secrets::secret_job(key, names)
@@ -129,7 +130,7 @@ fn every_job_revokes_at_its_end_whether_or_not_it_named_secrets() {
 
 #[test]
 fn an_attach_that_finishes_after_stepping_down_starts_nothing_and_revokes() {
-    let (mut hub, m5, w1) = pair();
+    let (mut hub, m5, w1) = pair_of_promotables();
     allow(&mut hub, &m5, &["gh"]);
     let effects = hub.local(&m5, secret_job("k", &["gh"]));
     let call = attach_call(&effects);
@@ -179,7 +180,7 @@ fn an_attach_that_finishes_after_stepping_down_starts_nothing_and_revokes() {
 
 #[test]
 fn leaving_the_cluster_forgets_the_attaches_in_flight() {
-    let (mut hub, m5, w1) = pair();
+    let (mut hub, m5, w1) = pair_of_promotables();
     allow(&mut hub, &m5, &["gh"]);
     hub.local(&m5, secret_job("k", &["gh"]));
     assert!(!hub.core(&m5).local_runs.is_empty());
