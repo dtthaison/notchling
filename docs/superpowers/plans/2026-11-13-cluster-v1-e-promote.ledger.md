@@ -258,3 +258,4 @@ e3: Ruling R227: the bridge audits `cluster.promote` and `cluster.promote:refuse
 e3: Ruling R228: the phone's Continue From This Copy question names the other machine from the item's `wait_for` label ("Wait for m1"), else "the other machine"; the session title comes from the sessions list, else the item title — costs a wrong-looking name only if the Mac's label wording changes.
 e3: Ruling R229: `cluster.machines` lists every active member, online or not; the phone shows the online ones.
 e3: Task 12 review: dispatched to agy (gemini-4-hydrogen high, file reads only).
+e3: Task 14 (docs pass, R91) and Task 13's Machines window line ("Automatic failover: not ready" through a new `ClusterTokens` default method): dispatched (base c51f6c0a, sonnet high each), in parallel with Task 12's review.
