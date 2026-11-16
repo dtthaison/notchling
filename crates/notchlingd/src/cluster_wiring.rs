@@ -3,6 +3,10 @@ use crate::cluster_blobs::Blobs;
 use crate::cluster_dispatch::{DispatchCalls, DispatchOps, NodeReporter};
 use crate::cluster_dispatch_delegate::RealDelegate;
 use crate::cluster_failover_setting::{FailoverSink, KeyMirror, NodeSink};
+use crate::cluster_fence_feed::RealFeed;
+use crate::cluster_fence_keeper::{
+    write_at_start, Boot, Keeper, KeeperParts, KeeperThread, EVERY as FENCE_EVERY,
+};
 use crate::cluster_forward::{Forward, NoNodeForward, NodeForward};
 use crate::cluster_inbox::{InboxCalls, NetLink, NodeNet, Outbox};
 use crate::cluster_inbox_follow::Follow;
@@ -292,6 +296,8 @@ pub struct ClusterParts {
     main_follower: Option<MainFollower>,
     snap_run: Arc<SnapRunner>,
     snap_observer: Option<SnapObserver>,
+    fence_keeper: Arc<Keeper>,
+    fence_thread: Option<KeeperThread>,
     outbox_follower: Option<OutboxFollower>,
     outbox: Arc<RemoteOutbox>,
     handler: Arc<LateHandler>,
@@ -398,6 +404,9 @@ impl ClusterParts {
         sessions: Arc<Mutex<Value>>,
     ) -> ClusterParts {
         let _ = crate::cluster_fence::drop_stale_at_start(&layout.cluster_dir());
+        if let OnDisk::Cluster { me: Some(me), .. } = on_disk(&layout.cluster_dir()) {
+            let _ = write_at_start(&layout.cluster_dir(), &me);
+        }
         let log = ClusterLog::new(events);
         let handler = Arc::new(LateHandler::default());
         let panel = Arc::new(OpsPanel::new(handler.clone()));
@@ -598,6 +607,20 @@ impl ClusterParts {
                 read: Arc::new(SandboxedLauncher::new(move_launcher.clone())),
             }),
         });
+        let fence_keeper = Keeper::new(
+            layout.cluster_dir(),
+            KeeperParts {
+                feed: Arc::new(RealFeed::new(
+                    holder.clone(),
+                    snap.sender.clone(),
+                    last_set.clone(),
+                    mover.clone(),
+                )),
+                acts: mover.p.acts.clone(),
+                inbox: inbox.clone(),
+                boot: Boot::real(),
+            },
+        );
         let runner = MoveRunner::new(mover.clone(), layout.cluster_dir());
         let local: Arc<dyn LocalCalls> = Arc::new(MoveCalls::new(
             Arc::new(NodeCalls {
@@ -645,6 +668,7 @@ impl ClusterParts {
         let mut refresher = None;
         let mut main_follower = None;
         let mut snap_observer = None;
+        let mut fence_thread = None;
         let mut follower = None;
         let mut outbox_follower = None;
         if let Ok(node) = &node {
@@ -690,6 +714,7 @@ impl ClusterParts {
                 snap.sender.clone(),
                 OBSERVE_EVERY,
             ));
+            fence_thread = Some(KeeperThread::spawn(fence_keeper.clone(), FENCE_EVERY));
             outbox_follower = Some(OutboxFollower::spawn(node.clone(), outbox.clone()));
         }
         let replication_slot = sender_slot.clone();
@@ -729,6 +754,8 @@ impl ClusterParts {
             main_follower,
             snap_run,
             snap_observer,
+            fence_keeper,
+            fence_thread,
             outbox_follower,
             outbox,
             handler,
@@ -736,6 +763,10 @@ impl ClusterParts {
             held,
             runner,
         }
+    }
+
+    pub fn fence_keeper(&self) -> &Arc<Keeper> {
+        &self.fence_keeper
     }
 
     pub fn failover_sink(&self) -> Option<Arc<dyn FailoverSink>> {
@@ -805,6 +836,9 @@ impl ClusterParts {
         }
         if let Some(observer) = &self.snap_observer {
             observer.close();
+        }
+        if let Some(thread) = &self.fence_thread {
+            thread.close();
         }
         self.snap_run.close();
         if let Some(follower) = &self.outbox_follower {

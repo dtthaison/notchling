@@ -30,6 +30,8 @@ mod cluster_driver_order_tests;
 mod cluster_driver_rebuild_tests;
 pub mod cluster_failover_setting;
 pub mod cluster_fence;
+pub mod cluster_fence_feed;
+pub mod cluster_fence_keeper;
 pub mod cluster_forward;
 pub mod cluster_host_facts;
 pub mod cluster_inbox;
@@ -67,6 +69,7 @@ pub mod cluster_wiring;
 pub mod cluster_workspace;
 pub mod cluster_workspace_send;
 pub mod codex_children;
+pub mod codex_fence;
 pub mod codex_ops;
 pub mod control_ops;
 pub mod cost_ops;
@@ -189,6 +192,12 @@ mod bridge_models_tests;
 mod catalog_ops_tests;
 #[cfg(test)]
 mod catalog_roles_tests;
+#[cfg(test)]
+mod cluster_fence_keeper_kit;
+#[cfg(test)]
+mod cluster_fence_keeper_stop_tests;
+#[cfg(test)]
+mod cluster_fence_keeper_tests;
 #[cfg(test)]
 mod cluster_fence_stale_tests;
 #[cfg(test)]

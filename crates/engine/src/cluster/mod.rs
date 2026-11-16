@@ -4,6 +4,7 @@ pub mod claims;
 pub mod core;
 pub mod failover;
 pub mod fence;
+pub mod fence_gates;
 pub mod grant_files;
 mod grant_files_sys;
 pub mod grants;
@@ -52,6 +53,8 @@ mod claims_tests;
 mod failover_lease_tests;
 #[cfg(test)]
 mod failover_tests;
+#[cfg(test)]
+mod fence_gates_tests;
 #[cfg(test)]
 mod fence_tests;
 #[cfg(test)]

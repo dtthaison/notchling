@@ -1,9 +1,11 @@
 use notchling_engine::cluster::fence::{
     parse, FenceFile, Gate, FENCE_FILE, FENCE_VERSION, MAX_FENCE_BYTES,
 };
+use notchling_engine::cluster::main_sessions::MainSession;
 use notchling_engine::cluster::members::Term;
 use notchling_engine::cluster::persist;
-use notchling_engine::cluster::NodeId;
+use notchling_engine::cluster::{NodeId, Tool};
+use notchling_engine::control::session::conversation_of;
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::io::Write;
@@ -193,6 +195,74 @@ pub fn clear_moved(cluster: &Path, keys: &[String]) -> Result<(), String> {
         return Ok(());
     }
     put(cluster, &fence, stamp.as_deref())
+}
+
+pub fn fence_keys(main: &BTreeMap<String, MainSession>, ids: &[String]) -> Vec<String> {
+    let mut keys = Vec::new();
+    for id in ids {
+        keys.push(id.clone());
+        let conversation = main
+            .get(id)
+            .filter(|session| session.tool == Tool::Claude)
+            .and_then(|session| session.transcript.as_deref())
+            .and_then(conversation_of);
+        keys.extend(conversation);
+    }
+    keys.sort();
+    keys.dedup();
+    keys
+}
+
+pub struct Wanted<'a> {
+    pub me: &'a NodeId,
+    pub term: Term,
+    pub cluster: &'a str,
+    pub valid_until: u64,
+    pub gates: &'a BTreeMap<String, Gate>,
+}
+
+pub fn sync_gates(cluster: &Path, want: &Wanted) -> Result<bool, String> {
+    let _serial = serial();
+    let held = load(cluster)?;
+    let mine = |held: &Held| {
+        held.cluster
+            .as_deref()
+            .is_none_or(|stamp| stamp == want.cluster)
+    };
+    let (before, term) = match &held {
+        Some(held) if mine(held) => (held.fence.sessions.clone(), held.fence.term.clone()),
+        _ => (BTreeMap::new(), want.term.clone()),
+    };
+    let mut sessions: BTreeMap<String, Gate> = before
+        .into_iter()
+        .filter(|(_, gate)| matches!(gate, Gate::Moved { .. }))
+        .collect();
+    for (key, gate) in want.gates {
+        match gate {
+            Gate::Moved { .. } | Gate::Waiting { .. } => {
+                sessions.insert(key.clone(), gate.clone());
+            }
+            Gate::Lease | Gate::Free => {
+                sessions.entry(key.clone()).or_insert_with(|| gate.clone());
+            }
+        }
+    }
+    let next = FenceFile {
+        v: FENCE_VERSION,
+        term: term.max(want.term.clone()),
+        node: want.me.clone(),
+        boot_id: notchling_platform::clock::boot_id().unwrap_or_default(),
+        valid_until: want.valid_until,
+        sessions,
+    };
+    let same = held
+        .as_ref()
+        .is_some_and(|held| held.fence == next && held.cluster.as_deref() == Some(want.cluster));
+    if same {
+        return Ok(false);
+    }
+    put(cluster, &next, Some(want.cluster))?;
+    Ok(true)
 }
 
 fn remove(cluster: &Path) -> Result<(), String> {

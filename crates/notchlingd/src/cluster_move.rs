@@ -1,4 +1,4 @@
-use crate::cluster_fence::{clear_moved, mark_moved_in};
+use crate::cluster_fence::{clear_moved, fence_keys, mark_moved_in};
 use crate::cluster_node::ClusterNode;
 use crate::cluster_sessions::LocalRows;
 use crate::inbox_ops::InboxOps;
@@ -631,22 +631,6 @@ impl Mover {
         })
     }
 
-    fn fence_keys(&self, main: &BTreeMap<String, MainSession>, ids: &[String]) -> Vec<String> {
-        let mut keys = Vec::new();
-        for id in ids {
-            keys.push(id.clone());
-            let conversation = main
-                .get(id)
-                .filter(|session| session.tool == Tool::Claude)
-                .and_then(|session| session.transcript.as_deref())
-                .and_then(conversation_of);
-            keys.extend(conversation);
-        }
-        keys.sort();
-        keys.dedup();
-        keys
-    }
-
     fn fence_moved(
         &self,
         me: Option<NodeId>,
@@ -678,7 +662,7 @@ impl Mover {
     }
 
     fn lift(&self, main: &BTreeMap<String, MainSession>, id: &str) {
-        let keys = self.fence_keys(main, &[id.to_string()]);
+        let keys = fence_keys(main, &[id.to_string()]);
         if let Err(why) = clear_moved(&self.p.cluster, &keys) {
             self.notice(
                 &format!("cluster-move-lift-{id}"),
@@ -697,7 +681,7 @@ impl Mover {
         term: u64,
     ) -> SwitchResult {
         let me = self.me();
-        let keys = self.fence_keys(&self.mains(), sessions);
+        let keys = fence_keys(&self.mains(), sessions);
         let result = self.switch_link(to, sessions, set, term);
         if !matches!(result, SwitchResult::Done) {
             return result;
@@ -839,24 +823,33 @@ impl Mover {
     }
 
     pub fn notice(&self, id: &str, kind: Kind, title: &str, detail: &str) {
-        self.p.inbox.raise(
-            Item {
-                id: id.to_string(),
-                kind,
-                title: title.to_string(),
-                detail: detail.to_string(),
-                source: Source::default(),
-                created_ms: self.now(),
-                expires_ms: None,
-                actions: Vec::new(),
-                state: ItemState::Open,
-                answer: None,
-                answered_by: None,
-                seen: false,
-                open: None,
-                closed_ms: None,
-            },
-            None,
-        );
+        raise_notice(&self.p.inbox, self.now(), id, (kind, title, detail));
     }
+}
+
+pub fn raise_notice(
+    inbox: &InboxOps,
+    now: i64,
+    id: &str,
+    (kind, title, detail): (Kind, &str, &str),
+) {
+    inbox.raise(
+        Item {
+            id: id.to_string(),
+            kind,
+            title: title.to_string(),
+            detail: detail.to_string(),
+            source: Source::default(),
+            created_ms: now,
+            expires_ms: None,
+            actions: Vec::new(),
+            state: ItemState::Open,
+            answer: None,
+            answered_by: None,
+            seen: false,
+            open: None,
+            closed_ms: None,
+        },
+        None,
+    );
 }
