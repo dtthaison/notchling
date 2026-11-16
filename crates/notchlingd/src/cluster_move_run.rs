@@ -1,8 +1,8 @@
 use crate::cluster_move::{failed, lock, Mover, Started};
 use crate::cluster_move_calls::write_durably;
 use notchling_engine::cluster::move_home::{
-    announce_notice, next, prepare, step_name, unsaved, MoveAction, MoveEvent, MoveSaga, MoveStep,
-    StopResult, RESUME_TRIES,
+    announce_notice, next, prepare, step_name, unfenced_notice, unsaved, MoveAction, MoveEvent,
+    MoveSaga, MoveStep, StopResult, RESUME_TRIES,
 };
 use notchling_engine::cluster::versions::RESUME_PROOF_RECORDED;
 use notchling_engine::cluster::NodeId;
@@ -113,6 +113,7 @@ impl MoveRunner {
                     "cut": s.cut,
                     "stopped": s.stopped,
                     "failed": s.failed,
+                    "unfenced": s.unfenced,
                     "reason": reason,
                 })
             }
@@ -271,14 +272,17 @@ impl MoveRunner {
             .final_ms
             .map(|at| mover.stragglers(at))
             .unwrap_or_default();
-        let detail = if left.is_empty() {
-            String::new()
-        } else {
-            format!(
+        let mut lines = Vec::new();
+        if let Some(why) = &saga.unfenced {
+            lines.push(unfenced_notice(&saga.moving, why).1);
+        }
+        if !left.is_empty() {
+            lines.push(format!(
                 "Raised on this machine during the move, still here: {}",
                 left.join(", ")
-            )
-        };
+            ));
+        }
+        let detail = lines.join("\n");
         mover.notice(
             &format!("cluster-move-{}", saga.started_ms),
             Kind::Notice,

@@ -1,4 +1,4 @@
-use crate::cluster_fence::{clear_moved, mark_moved};
+use crate::cluster_fence::{clear_moved, mark_moved_in};
 use crate::cluster_node::ClusterNode;
 use crate::cluster_sessions::LocalRows;
 use crate::inbox_ops::InboxOps;
@@ -6,8 +6,8 @@ use notchling_engine::cluster::core::Takeover;
 use notchling_engine::cluster::main_sessions::MainSession;
 use notchling_engine::cluster::members::Term;
 use notchling_engine::cluster::move_home::{
-    left_behind, moving_text, resume_call_ms, FinalSet, MoveFacts, StopResult, SwitchResult,
-    ToFacts,
+    left_behind, moving_text, resume_call_ms, unfenced_notice, FinalSet, MoveFacts, StopResult,
+    SwitchResult, ToFacts,
 };
 use notchling_engine::cluster::move_home::{
     MOVE_FREEZE, MOVE_RESUME, MOVE_STOP, MOVE_SWITCH, MOVE_UNDO,
@@ -33,6 +33,8 @@ use std::time::Duration;
 pub const MOVE_OPS: [&str; 5] = [MOVE_FREEZE, MOVE_STOP, MOVE_SWITCH, MOVE_RESUME, MOVE_UNDO];
 pub const SNAP_WAIT: Duration = Duration::from_secs(5 * 60);
 pub const SWITCH_WAIT: Duration = Duration::from_secs(5 * 60 + 5);
+pub const FENCE_TRIES: u32 = 3;
+pub const FENCE_PAUSE: Duration = Duration::from_millis(150);
 pub const FENCED_OPS: [&str; 5] = [
     ops::SESSION_NEW,
     ops::SESSION_MOVE,
@@ -645,32 +647,46 @@ impl Mover {
         keys
     }
 
-    fn fence_moved(&self, me: Option<NodeId>, to: &NodeId, term: u64, keys: &[String]) {
-        let Some(me) = me.or_else(|| self.me()) else {
-            return;
-        };
+    fn fence_moved(
+        &self,
+        me: Option<NodeId>,
+        to: &NodeId,
+        term: u64,
+        keys: &[String],
+    ) -> Result<(), String> {
+        let me = me
+            .or_else(|| self.me())
+            .ok_or_else(|| "this machine's cluster node has no id".to_string())?;
         let at = Term {
             n: term,
             node: to.clone(),
         };
         let name = self.name_of(to);
-        if let Err(why) = mark_moved(&self.p.cluster, &me, at, keys, &name) {
+        let status = self.p.link.status();
+        let cluster = status["cluster"]["id"].as_str();
+        let mut last = String::new();
+        for attempt in 0..FENCE_TRIES {
+            if attempt > 0 {
+                std::thread::sleep(FENCE_PAUSE);
+            }
+            match mark_moved_in(&self.p.cluster, &me, at.clone(), keys, &name, cluster) {
+                Ok(()) => return Ok(()),
+                Err(why) => last = why,
+            }
+        }
+        Err(last)
+    }
+
+    fn lift(&self, main: &BTreeMap<String, MainSession>, id: &str) {
+        let keys = self.fence_keys(main, &[id.to_string()]);
+        if let Err(why) = clear_moved(&self.p.cluster, &keys) {
             self.notice(
-                "cluster-move-fence",
+                &format!("cluster-move-lift-{id}"),
                 Kind::ActionFailed,
-                "Couldn't pause the moved sessions on this machine",
+                &format!("Couldn't lift the pause on {id} on this machine"),
                 &why,
             );
         }
-    }
-
-    fn unfence_started(&self, main: &BTreeMap<String, MainSession>, rows: &Started) {
-        let started: Vec<String> = rows
-            .iter()
-            .filter(|(_, result)| result.is_ok())
-            .map(|(id, _)| id.clone())
-            .collect();
-        let _ = clear_moved(&self.p.cluster, &self.fence_keys(main, &started));
     }
 
     pub fn switch(
@@ -683,10 +699,17 @@ impl Mover {
         let me = self.me();
         let keys = self.fence_keys(&self.mains(), sessions);
         let result = self.switch_link(to, sessions, set, term);
-        if matches!(result, SwitchResult::Done) {
-            self.fence_moved(me, to, term, &keys);
+        if !matches!(result, SwitchResult::Done) {
+            return result;
         }
-        result
+        match self.fence_moved(me, to, term, &keys) {
+            Ok(()) => SwitchResult::Done,
+            Err(why) => {
+                let (title, detail) = unfenced_notice(sessions, &why);
+                self.notice("cluster-move-fence", Kind::ActionFailed, &title, &detail);
+                SwitchResult::DoneUnfenced(why)
+            }
+        }
     }
 
     fn switch_link(
@@ -751,20 +774,27 @@ impl Mover {
     fn start_one(&self, main: &BTreeMap<String, MainSession>, id: &str) -> Result<(), String> {
         match main.get(id) {
             None => Err("this machine has no record of it".to_string()),
-            Some(session) if session.tool != Tool::Claude => Ok(()),
-            Some(_) if self.live(id) => Ok(()),
-            Some(session) => self.p.acts.start_claude(session),
+            Some(session) if session.tool != Tool::Claude => {
+                self.lift(main, id);
+                Ok(())
+            }
+            Some(_) if self.live(id) => {
+                self.lift(main, id);
+                Ok(())
+            }
+            Some(session) => {
+                self.lift(main, id);
+                self.p.acts.start_claude(session)
+            }
         }
     }
 
     pub fn start_here(&self, sessions: &[String]) -> Started {
         let main = self.mains();
-        let rows: Started = sessions
+        sessions
             .iter()
             .map(|id| (id.clone(), self.start_one(&main, id)))
-            .collect();
-        self.unfence_started(&main, &rows);
-        rows
+            .collect()
     }
 
     pub fn restart(&self, sessions: &[String], unless_live: &[String]) -> Started {
@@ -774,8 +804,14 @@ impl Mover {
             .map(|id| {
                 let result = match main.get(id) {
                     None => Err("this machine has no record of it".to_string()),
-                    Some(session) if session.tool != Tool::Claude => Ok(()),
-                    Some(session) => self.p.acts.start_claude(session),
+                    Some(session) if session.tool != Tool::Claude => {
+                        self.lift(&main, id);
+                        Ok(())
+                    }
+                    Some(session) => {
+                        self.lift(&main, id);
+                        self.p.acts.start_claude(session)
+                    }
                 };
                 (id.clone(), result)
             })
@@ -785,7 +821,6 @@ impl Mover {
                 results.push((id.clone(), self.start_one(&main, id)));
             }
         }
-        self.unfence_started(&main, &results);
         results
     }
 

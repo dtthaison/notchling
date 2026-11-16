@@ -105,6 +105,14 @@ impl EverySession {
         self.agents(now_ms).iter().map(foreign_row).collect()
     }
 
+    pub fn folders(&self, now_ms: i64) -> Vec<PathBuf> {
+        self.agents(now_ms)
+            .into_iter()
+            .filter(|agent| !agent.cwd.is_empty())
+            .map(|agent| PathBuf::from(agent.cwd))
+            .collect()
+    }
+
     pub fn values(&self, now_ms: i64) -> Vec<Value> {
         self.agents(now_ms)
             .iter()

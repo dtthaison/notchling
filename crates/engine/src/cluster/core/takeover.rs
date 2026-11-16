@@ -40,6 +40,14 @@ fn refused(why: &str) -> WireError {
     WireError::new(REFUSED, why)
 }
 
+fn admissible(state: &ClusterState, claim: &Claim) -> bool {
+    claim.term.storable()
+        && state
+            .members
+            .get(&claim.node)
+            .is_some_and(|m| m.state == MemberState::Active)
+}
+
 pub fn eligible(t: &Takeover, me: &NodeId) -> bool {
     t.members
         .iter()
@@ -166,12 +174,6 @@ impl NodeCore {
             next.ended = restored.ended.clone();
             next.seq = next.seq.max(restored.seq);
         }
-        let claims_before = next.claims.clone();
-        let from_set = t.restored.iter().flat_map(|r| r.claims.values());
-        for claim in from_set.chain(t.claims.iter()) {
-            put_claim(&mut next.claims, claim);
-        }
-        let claims_changed = next.claims != claims_before;
         let command = Command::Sync {
             id: t.id.clone(),
             name: t.name.clone(),
@@ -182,6 +184,17 @@ impl NodeCore {
         };
         let applied =
             apply(&mut next, command, self.wall_ms).map_err(|e| refused(&e.to_string()))?;
+        let claims_before = next.claims.clone();
+        let from_set = t.restored.iter().flat_map(|r| r.claims.values());
+        let admitted: Vec<Claim> = from_set
+            .chain(t.claims.iter())
+            .filter(|claim| admissible(&next, claim))
+            .cloned()
+            .collect();
+        for claim in &admitted {
+            put_claim(&mut next.claims, claim);
+        }
+        let claims_changed = next.claims != claims_before;
         let next_claims = next.claims.clone();
         self.state = Some(next);
         self.changed = true;

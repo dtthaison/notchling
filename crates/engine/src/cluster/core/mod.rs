@@ -676,4 +676,6 @@ mod core_tests_snap;
 #[cfg(test)]
 mod core_tests_takeover;
 #[cfg(test)]
+mod core_tests_takeover_members;
+#[cfg(test)]
 mod core_tests_terms;

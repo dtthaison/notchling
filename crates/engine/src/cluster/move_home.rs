@@ -70,6 +70,8 @@ pub struct MoveSaga {
     pub set: Option<String>,
     #[serde(default)]
     pub final_ms: Option<i64>,
+    #[serde(default)]
+    pub unfenced: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -113,6 +115,7 @@ pub struct FinalSet {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SwitchResult {
     Done,
+    DoneUnfenced(String),
     Refused(String),
     NotSent(String),
     Lost(String),
@@ -178,6 +181,19 @@ pub fn failure_notice(reason: &str) -> String {
 
 pub fn announce_notice(name: &str) -> String {
     format!("{name} is primary now")
+}
+
+pub fn unfenced_notice(sessions: &[String], why: &str) -> (String, String) {
+    let names = sessions.join(", ");
+    let detail = if sessions.len() == 1 {
+        format!("{why}. It may run on both machines until you stop it here.")
+    } else {
+        format!("{why}. They may run on both machines until you stop them here.")
+    };
+    (
+        format!("Couldn't pause {names} on this machine after the move"),
+        detail,
+    )
 }
 
 pub fn step_name(step: &MoveStep) -> &'static str {
@@ -277,6 +293,7 @@ impl MoveSaga {
             maybe_sent: false,
             set: None,
             final_ms: None,
+            unfenced: None,
         }
     }
 
@@ -539,6 +556,12 @@ fn switched(s: &MoveSaga, result: SwitchResult) -> (MoveSaga, Vec<MoveAction>) {
     match result {
         SwitchResult::Done => {
             next.step = MoveStep::Resume;
+            let sessions = next.moving.clone();
+            (next, vec![MoveAction::Resume { sessions }])
+        }
+        SwitchResult::DoneUnfenced(why) => {
+            next.step = MoveStep::Resume;
+            next.unfenced = Some(why);
             let sessions = next.moving.clone();
             (next, vec![MoveAction::Resume { sessions }])
         }

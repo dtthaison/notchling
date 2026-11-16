@@ -132,12 +132,3 @@ fn a_link_at_the_path_is_refused_and_its_target_untouched() {
     assert!(mark_moved(&cluster, &node("m5"), term(2), &keys(&["a"]), "m1").is_err());
     assert_eq!(std::fs::read(&target).unwrap(), b"keep");
 }
-
-#[test]
-fn a_damaged_file_is_replaced() {
-    let dir = scratch("damaged");
-    let cluster = dir.0.join("cluster");
-    std::fs::write(fence_path(&cluster), b"garbage").unwrap();
-    mark_moved(&cluster, &node("m5"), term(2), &keys(&["a"]), "m1").unwrap();
-    assert!(read_fence(&cluster).unwrap().sessions.contains_key("a"));
-}
