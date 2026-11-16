@@ -130,7 +130,7 @@ Future<Uint8List> renderMarkup(ui.Image image, List<Mark> marks) async {
     final ByteData? data = await flat.toByteData(
       format: ui.ImageByteFormat.png,
     );
-    if (data == null) throw StateError('the picture could not be encoded');
+    if (data == null) throw StateError('png');
     return data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes);
   } finally {
     flat.dispose();

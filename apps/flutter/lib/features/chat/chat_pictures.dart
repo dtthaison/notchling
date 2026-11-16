@@ -228,7 +228,7 @@ class _PictureViewerState extends ConsumerState<PictureViewer> {
       appBar: AppBar(
         backgroundColor: Kit.dark.sidebar,
         leading: IconButton(tooltip: l10n.chatPictureClose, icon: const Icon(Icons.close), onPressed: () => Navigator.of(context).pop()),
-        title: count > 1 ? Text('${_index + 1} / $count', style: Kit.of(context).label) : null,
+        title: count > 1 ? Text(<int>[_index + 1, count].join(' / '), style: Kit.of(context).label) : null,
         centerTitle: true,
       ),
       bottomNavigationBar: SafeArea(

@@ -35,8 +35,10 @@ String modelShortName(String id) {
     if (part.length > 2 || int.tryParse(part) == null) break;
     version.add(part);
   }
-  return version.isEmpty ? family : '$family ${version.join('.')}';
+  return version.isEmpty ? family : <String>[family, version.join('.')].join(' ');
 }
+
+String _command(String name, String argument) => <String>[name, argument].join(' ');
 
 String effortTitle(AppL10n l10n, String level) => switch (level) {
   'low' => l10n.chatEffortLow,
@@ -93,7 +95,7 @@ class _ComposerControlsState extends State<ComposerControls> {
     );
     if (id == null || !mounted) return;
     setState(() => _pickedModel = id);
-    widget.onSend('/model $id');
+    widget.onSend(_command('/model', id));
   }
 
   Future<void> _pickEffort() async {
@@ -110,7 +112,7 @@ class _ComposerControlsState extends State<ComposerControls> {
     );
     if (level == null || !mounted) return;
     setState(() => _pickedEffort = level);
-    widget.onSend('/effort $level');
+    widget.onSend(_command('/effort', level));
   }
 
   Future<void> _compact() async {
