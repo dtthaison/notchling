@@ -4,11 +4,10 @@ use notchling_engine::machines::registry::NodeSettings;
 use notchling_engine::machines::step::{ClusterTokens, StepId};
 use serde_json::{json, Value};
 
-use super::cluster_feed::{can_be_master_in, cluster_id_in, failover_not_ready_in, token_in};
+use super::cluster_feed::{can_be_master_in, cluster_id_in, token_in};
 use super::cluster_feed::{DaemonTokens, NOT_RUNNING};
 use super::model::MachinesModel;
 use super::model_tests::{lock, mac, scripted_world};
-use crate::cluster::renders::{status as cluster_status, with_failover};
 
 fn ask(model: &mut MachinesModel, nodes: &[(&str, &str)]) {
     let nodes: Vec<(String, String)> = nodes
@@ -230,78 +229,4 @@ fn one_ask_serves_every_node_machine() {
         model.can_be_master_line(&m3).as_deref(),
         Some("Can Be Master: Yes")
     );
-}
-
-struct FailoverFrom(Value);
-
-impl ClusterTokens for FailoverFrom {
-    fn join_token(&self) -> Result<String, String> {
-        Err("not asked".into())
-    }
-    fn cluster_id(&self) -> Result<Option<String>, String> {
-        Ok(None)
-    }
-    fn can_be_master(&self, _machine: &str) -> Option<bool> {
-        None
-    }
-    fn failover_not_ready(&self) -> bool {
-        failover_not_ready_in(&self.0)
-    }
-}
-
-fn failover_ask(model: &mut MachinesModel, status: Value) {
-    model.parts.cluster = Arc::new(FailoverFrom(status));
-    let not_ready = model.cluster_ask_with(|_| None).failover_not_ready();
-    model.set_failover_not_ready(not_ready);
-}
-
-#[test]
-fn failover_not_ready_shows_in_machines() {
-    let w = scripted_world(vec![mac("m1")]);
-    let mut model = w.model;
-    assert_eq!(model.failover_not_ready_line(), None);
-    failover_ask(
-        &mut model,
-        with_failover(cluster_status(), "30m", false, None),
-    );
-    assert_eq!(
-        model.failover_not_ready_line(),
-        Some("Automatic failover: not ready")
-    );
-}
-
-#[test]
-fn failover_not_ready_clears_in_machines() {
-    let w = scripted_world(vec![mac("m1")]);
-    let mut model = w.model;
-    let base = cluster_status();
-    failover_ask(&mut model, with_failover(base.clone(), "30m", false, None));
-    assert!(model.failover_not_ready_line().is_some());
-    failover_ask(&mut model, with_failover(base.clone(), "30m", true, None));
-    assert_eq!(model.failover_not_ready_line(), None);
-    failover_ask(&mut model, with_failover(base.clone(), "30m", false, None));
-    assert!(model.failover_not_ready_line().is_some());
-    failover_ask(&mut model, with_failover(base, "off", false, None));
-    assert_eq!(model.failover_not_ready_line(), None);
-}
-
-#[test]
-fn daemon_tokens_read_failover_readiness_from_status() {
-    let base = cluster_status();
-    assert!(failover_not_ready_in(&with_failover(
-        base.clone(),
-        "1h",
-        false,
-        None
-    )));
-    assert!(!failover_not_ready_in(&with_failover(
-        base.clone(),
-        "1h",
-        true,
-        None
-    )));
-    assert!(!failover_not_ready_in(&base));
-    assert!(!failover_not_ready_in(&json!({})));
-    let tokens = DaemonTokens::new(std::env::temp_dir().join("notchling-no-such-daemon.sock"));
-    assert!(!tokens.failover_not_ready());
 }

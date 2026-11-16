@@ -176,15 +176,6 @@ impl MachinesView {
                 column = column.child(label(note, TypeRole::Meta, Ink::Expired, a));
             }
         }
-        if let Some(text) = self.model.failover_not_ready_line() {
-            column = column.child(
-                Self::banner(Icon::Warning, text, Ink::Expired, None, a).part(
-                    "Failover Not Ready",
-                    a,
-                    cx,
-                ),
-            );
-        }
         if let Some(text) = self.model.versions_banner() {
             column = column.child(
                 Self::banner(Icon::Info, text, Ink::AccentText, None, a).part(

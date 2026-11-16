@@ -11,7 +11,6 @@ use super::renders::{
     STANDBY,
 };
 use crate::inbox::model::InboxModel;
-use crate::sheets::settings_cluster;
 
 const NOW: i64 = 1_800_000_000_000;
 const AFTERNOON: i64 = (20_000 * 86_400 + 15 * 3_600 + 30 * 60) * 1_000;
@@ -42,59 +41,14 @@ fn promoting(step: &str, started: i64) -> Value {
 }
 
 #[test]
-fn failover_not_ready_until_first_grant_at_current_term() {
-    let model = model_in(with_failover(silent(), "30m", false, None), STANDBY);
-    assert!(model.failover_not_ready());
-    let notes = model.failover_notes(0);
-    assert_eq!(notes.len(), 1);
-    assert_eq!(notes[0].text, "Automatic failover: not ready");
-    assert!(notes[0].problem);
-    let row = settings_cluster::row(&model).expect("a failover row");
-    assert_eq!(row.not_ready, Some("Automatic failover: not ready"));
-
-    let off = model_in(with_failover(silent(), "off", false, None), STANDBY);
-    assert!(!off.failover_not_ready());
-    assert!(off.failover_notes(0).is_empty());
-    assert_eq!(settings_cluster::row(&off).unwrap().not_ready, None);
-
-    let mut no_target = with_failover(silent(), "1h", false, None);
-    no_target["failover"]["target"] = Value::Null;
-    let none = model_in(no_target, STANDBY);
-    assert!(!none.failover_not_ready());
-    assert_eq!(settings_cluster::row(&none).unwrap().not_ready, None);
-}
-
-#[test]
-fn failover_not_ready_clears_on_grant() {
-    let model = model_in(with_failover(silent(), "30m", true, None), STANDBY);
-    assert!(!model.failover_not_ready());
-    assert!(model.failover_notes(0).is_empty());
-    assert_eq!(settings_cluster::row(&model).unwrap().not_ready, None);
-}
-
-#[test]
-fn takeover_time_shows_when_failover_on() {
-    let on = with_failover(silent(), "30m", true, Some(AFTERNOON));
-    let notes = model_in(on.clone(), STANDBY).failover_notes(0);
-    assert_eq!(notes.len(), 1);
-    assert_eq!(
-        notes[0].text,
-        "mac-mini takes over at 3:30 PM if MacBook stays unreachable."
-    );
-    assert!(!notes[0].problem);
-
-    let off = with_failover(silent(), "off", true, Some(AFTERNOON));
-    assert!(model_in(off, STANDBY).failover_notes(0).is_empty());
-
-    let no_time = with_failover(silent(), "30m", true, None);
-    assert!(model_in(no_time, STANDBY).failover_notes(0).is_empty());
-
-    let mut heard = with_failover(status(), "30m", true, Some(AFTERNOON));
-    heard["me"] = json!(STANDBY);
-    assert!(model_in(heard, STANDBY).failover_notes(0).is_empty());
-
-    let shifted = model_in(on, STANDBY).failover_notes(2 * 3_600);
-    assert!(shifted[0].text.contains("5:30 PM"), "{}", shifted[0].text);
+fn no_failover_line_while_failover_is_unavailable() {
+    let plain = model_in(silent(), STANDBY);
+    for armed in [false, true] {
+        let status = with_failover(silent(), "30m", armed, Some(AFTERNOON));
+        let model = model_in(status, STANDBY);
+        assert_eq!(model, plain, "nothing in the view reads the failover value");
+        assert!(model.offers_promote(STANDBY), "moving by hand still works");
+    }
 }
 
 #[test]
@@ -489,24 +443,18 @@ fn paused_step_item_shows_continue_and_done() {
 }
 
 #[test]
-fn events_keep_the_promote_waiting_and_takeover_time() {
+fn events_keep_the_promote_and_waiting() {
     let mut last = with_failover(promoting("bump", 4), "30m", true, Some(AFTERNOON));
     last["waiting"] = json!([waiting_entry("j-parser", ME, "MacBook", None)]);
     let mut event = last.clone();
     for key in ["promote", "waiting"] {
         event.as_object_mut().unwrap().remove(key);
     }
-    event["failover"]
-        .as_object_mut()
-        .unwrap()
-        .remove("takesOverAt");
     let merged = carried(&last, &event);
     assert_eq!(merged["promote"], last["promote"]);
     assert_eq!(merged["waiting"], last["waiting"]);
-    assert_eq!(merged["failover"]["takesOverAt"], json!(AFTERNOON));
 
-    let fresh = json!({"promote": null, "failover": {"value": "off", "takesOverAt": null}});
+    let fresh = json!({"promote": null});
     let merged = carried(&last, &fresh);
     assert_eq!(merged["promote"], Value::Null);
-    assert_eq!(merged["failover"]["takesOverAt"], Value::Null);
 }

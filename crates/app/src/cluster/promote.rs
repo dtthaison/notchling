@@ -1,12 +1,10 @@
-use notchling_engine::pages::clock::civil_at;
 use notchling_locale as t;
 use serde_json::Value;
 
 use super::model::{ClusterModel, NodeRow};
-use super::move_sheet::{shown, Names, Note};
+use super::move_sheet::{shown, Names};
 use super::replication::ago;
 use super::wire::{self, Request};
-use crate::chat::message_meta::clock_text;
 
 pub use super::promote_sheet::{PromotePhase, PromoteSheet};
 
@@ -221,46 +219,6 @@ impl ClusterModel {
 
     fn name_of(&self, id: &str) -> Option<&str> {
         self.row(id).map(|r| r.name.as_str())
-    }
-
-    fn failover_target(&self) -> Option<&NodeRow> {
-        let target = self.failover()?.target.as_deref()?;
-        self.row(target).filter(|r| r.active)
-    }
-
-    pub fn failover_not_ready(&self) -> bool {
-        self.failover()
-            .is_some_and(|f| f.value != "off" && !f.armed && self.failover_target().is_some())
-    }
-
-    fn takeover_line(&self, offset_secs: i64) -> Option<String> {
-        let failover = self.failover().filter(|f| f.value != "off")?;
-        let at = failover.takes_over_at?;
-        let standby = self.failover_target()?;
-        let primary = self.silent_primary()?;
-        let time = civil_at(at as f64 / 1000.0, offset_secs);
-        Some(t::cluster::takes_over(
-            &standby.name,
-            &clock_text(time.hour, time.minute),
-            &primary.name,
-        ))
-    }
-
-    pub fn failover_notes(&self, offset_secs: i64) -> Vec<Note> {
-        let mut notes = Vec::new();
-        if self.failover_not_ready() {
-            notes.push(Note {
-                text: t::settings::cluster_failover_not_ready().to_owned(),
-                problem: true,
-            });
-        }
-        if let Some(text) = self.takeover_line(offset_secs) {
-            notes.push(Note {
-                text,
-                problem: false,
-            });
-        }
-        notes
     }
 
     pub fn promote_status(&self) -> Option<&PromoteStatus> {

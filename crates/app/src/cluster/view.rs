@@ -635,7 +635,6 @@ impl Render for ClusterSheetView {
                 .child(self.join_form(token_focused, a, cx));
         } else {
             body = body.child(self.connection(&model, a, cx));
-            body = body.children(self.failover_lines(&model, a));
             body = body.children(self.move_running_line(&model, a, cx));
             body = body.children(self.promote_running_line(&model, a, cx));
             body = body.children(self.waiting_block(&model, a, cx));

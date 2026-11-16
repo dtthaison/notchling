@@ -178,11 +178,6 @@ cluster-continue-note = Continue { $title } here? The newer copy on { $machine }
 # $error is the reason.
 cluster-continue-failed = Couldn't continue it here: { $error }
 
-## Failover
-
-# $standby is the machine that takes over, $time a clock time such as 3:30 PM, $primary the silent primary.
-cluster-takes-over = { $standby } takes over at { $time } if { $primary } stays unreachable.
-
 ## Keep on this Mac
 
 # Check in a session's menu; $machine is this Mac's name. On means the session isn't carried over by a Standby.

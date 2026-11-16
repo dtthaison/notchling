@@ -14,11 +14,8 @@ impl MachinesView {
         let ask = self.model.cluster_ask();
         Self::background(
             cx,
-            move || (ask.run(), ask.failover_not_ready()),
-            |view, (answer, not_ready), _| {
-                view.model.set_masters(answer);
-                view.model.set_failover_not_ready(not_ready);
-            },
+            move || ask.run(),
+            |view, answer, _| view.model.set_masters(answer),
         );
     }
 

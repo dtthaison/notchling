@@ -151,13 +151,6 @@ pub fn hide_side_copy(session: &str, node: &str) -> Request {
     }
 }
 
-pub fn failover(value: &str) -> Request {
-    Request {
-        op: ops::CLUSTER_FAILOVER_SET,
-        args: json!({"value": value}),
-    }
-}
-
 pub fn install_plan(node: &str) -> Request {
     Request {
         op: ops::INSTALL_PLAN,

@@ -654,7 +654,7 @@ impl Render for SettingsView {
                     ),
             );
             if at == CLUSTER_AFTER {
-                list = list.children(self.cluster_section(&mut n, a, cx));
+                list = list.children(self.cluster_section(a, cx));
             }
         }
         if self.page == Page::Agents {

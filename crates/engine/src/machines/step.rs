@@ -376,9 +376,6 @@ pub trait ClusterTokens: Send + Sync {
         let _ = node;
         None
     }
-    fn failover_not_ready(&self) -> bool {
-        false
-    }
 }
 
 pub struct NoCluster;

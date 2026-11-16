@@ -2,11 +2,10 @@ use std::path::Path;
 use std::rc::Rc;
 
 use gpui::{div, prelude::*, px, Context, Div, SharedString, Window};
-use notchling_engine::pages::clock::local_offset_secs;
 use notchling_kit::metric::SPACE;
 use notchling_kit::part::{ButtonKind, PartState};
-use notchling_kit::ui::{button, card, icon, label, KitPart, KitStyled};
-use notchling_kit::{Appearance, Icon, Ink, TypeRole};
+use notchling_kit::ui::{button, card, label, KitPart, KitStyled};
+use notchling_kit::{Appearance, Ink, TypeRole};
 use notchling_locale as t;
 
 use super::model::ClusterModel;
@@ -20,10 +19,6 @@ use crate::sheets::view::Dismiss;
 
 fn heading(text: &str, a: Appearance) -> Div {
     div().child(label(text, TypeRole::Label, Ink::TextFaint, a))
-}
-
-fn note_icon(a: Appearance) -> gpui::AnyElement {
-    icon(Icon::Warning, TypeRole::Meta.spec().size, Ink::Needs, a).into_any_element()
 }
 
 fn alert_of(ask: Ask) -> Alert {
@@ -46,32 +41,6 @@ impl ClusterSheetView {
         } else {
             PartState::Rest
         }
-    }
-
-    pub(super) fn failover_lines(&self, model: &ClusterModel, a: Appearance) -> Vec<Div> {
-        let offset = local_offset_secs(self.now() as f64 / 1000.0);
-        model
-            .failover_notes(offset)
-            .into_iter()
-            .map(|note| {
-                let ink = if note.problem {
-                    Ink::Needs
-                } else {
-                    Ink::TextMuted
-                };
-                div()
-                    .flex()
-                    .items_start()
-                    .gap(px(SPACE[0]))
-                    .when(note.problem, |row| row.child(note_icon(a)))
-                    .child(div().flex_1().min_w(px(0.0)).child(label(
-                        &note.text,
-                        TypeRole::Meta,
-                        ink,
-                        a,
-                    )))
-            })
-            .collect()
     }
 
     pub(super) fn promote_running_line(

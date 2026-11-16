@@ -63,7 +63,7 @@ pub const VIEWS: [ViewSpec; 14] = [
     ViewSpec {
         name: "cluster-promote",
         size: (WIDTH, 1000.0),
-        about: "the cluster sheet while the primary is silent, on its Standby: Move to Now asking to confirm a risk, a side copy, a waiting session and the failover not-ready line (made-up data)",
+        about: "the cluster sheet while the primary is silent, on its Standby: Move to Now asking to confirm a risk, a side copy and a waiting session, with no failover line though the status says 30m (made-up data)",
     },
     ViewSpec {
         name: "cluster-take-back",

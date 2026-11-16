@@ -3,7 +3,6 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use crate::cluster::model::ClusterModel;
 use notchling_engine::cluster::ready::{checks_in, Checks};
 use notchling_engine::machines::step::ClusterTokens;
 use notchling_local_api::{ops, Client, ClientError, ClientKind, ConnectOptions, CALL_TIMEOUT};
@@ -96,11 +95,6 @@ impl ClusterTokens for DaemonTokens {
         can_be_master_in(&self.status().ok()?, node?)
     }
 
-    fn failover_not_ready(&self) -> bool {
-        self.recent_status()
-            .is_some_and(|status| failover_not_ready_in(&status))
-    }
-
     fn can_be_master_all(
         &self,
         asks: &[(String, Option<String>)],
@@ -116,11 +110,6 @@ impl ClusterTokens for DaemonTokens {
             })
             .collect()
     }
-}
-
-pub fn failover_not_ready_in(status: &Value) -> bool {
-    let me = status.get("me").and_then(Value::as_str).unwrap_or_default();
-    ClusterModel::from_status(status, me).failover_not_ready()
 }
 
 pub fn token_in(reply: &Value) -> Option<String> {

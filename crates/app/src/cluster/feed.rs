@@ -103,12 +103,6 @@ pub(super) fn carried(last: &Value, event: &Value) -> Value {
             }
         }
     }
-    let takeover = last.pointer("/failover/takesOverAt").cloned();
-    if let (Some(failover), Some(takeover)) = (next.get_mut("failover"), takeover) {
-        if failover.get("takesOverAt").is_none() {
-            failover["takesOverAt"] = takeover;
-        }
-    }
     let old_members = last.get("members").and_then(Value::as_array);
     if let (Some(members), Some(old)) = (next["members"].as_array_mut(), old_members) {
         for member in members.iter_mut().filter(|m| m.get("ready").is_none()) {

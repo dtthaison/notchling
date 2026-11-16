@@ -1,11 +1,12 @@
 # When the laptop is gone
 
-> **Status, 2026-11-16: you can move by hand; nothing moves by itself yet.**
+> **Status, 2026-11-16: you move by hand; nothing moves by itself, and in v1 nothing will.**
 >
-> **Works now:** Move to <name> Now from the phone's Machines popup and from the app (a handover when the primary is online, a promote when it isn't), the fence in the daemon (a session that moved is denied its next tool call on the old primary), Take Back and Keep on the old primary, side copies (Open, Hide), the inbox items for all of it, and the Automatic Failover setting.
+> **Works now:** Move to <name> Now from the phone's Machines popup and from the app (a handover when the primary is online, a promote when it isn't), the fence in the daemon (a session that moved is denied its next tool call on the old primary), Take Back and Keep on the old primary, side copies (Open, Hide) and the inbox items for all of it.
+>
+> **Automatic failover is not in v1 (the maintainer decided on 2026-11-16).** Settings > Cluster says "Not available yet" in the Automatic Failover row and offers no choice. There is no lease, no arming and no automatic promote, so the primary never pauses sessions ahead of a deadline and a Standby never promotes by itself. Move by hand with Move to <name> Now.
 >
 > **Not built yet (the maintainer hasn't decided):**
-> - **Automatic Failover does nothing.** With it on, the row says "Automatic failover: not ready" and stays that way; there is no lease, so the primary never pauses sessions ahead of a deadline and the Standby never promotes by itself. The cluster view's "takes over at" line stays empty. Move by hand.
 > - **Waiting sessions never appear.** The detection of an old primary that comes back while the newer one is off isn't built, so nothing raises "waits for m1", and Continue From This Copy can't succeed while the newer primary is off (see below).
 > - **Resume is refused.** A move or promote that would resume sessions is refused with "Moving the primary needs the resume proof first" until the maintainer records the resume proof (M5).
 >
@@ -21,12 +22,7 @@ Today the file holds the "this session continues on another machine" answer (aft
 
 ## Automatic Failover
 
-Settings > Cluster, on a Mac in a cluster. Off by default.
-
-- **Off**: nothing moves by itself. You move m5's work by hand (below).
-- **After 30 Minutes** or **After 1 Hour**: meant to make m1 take over after that long without m5, with m5 pausing the sessions that would move 2 minutes before. **Not acting yet**: the setting is saved and shared with the cluster, and that is all.
-
-An agent can't turn it on without asking you in the inbox.
+Not available in v1. Settings > Cluster, on a Mac in a cluster, shows the row with "Not available yet" and the way to move by hand; there is nothing to choose. Nothing moves by itself: you move m5's work with Move to <name> Now, in the cluster view or from the phone's Machines popup (below). The daemon still keeps the `clusterFailover` value for when automatic failover is built, but nothing reads it.
 
 ## From the phone
 
@@ -51,7 +47,6 @@ In the cluster view (Chat's footer), a Can Be Master Standby's row has **Move to
 - If the primary is online, this is the handover: it waits for working sessions to end their turns, then makes that machine the primary.
 - If the primary can't be reached, it is the promote. A sheet says "m5 can't be reached. m1 becomes the primary from its last set. Work m5 did after that stays on m5 as a side copy." and shows its steps as they run (Checking, Looking for m5, Making m1 the primary, Restoring the sessions from the last set, Starting the sessions on m1, Sending the messages that were held, Listing what needs a look). **Move Anyway** appears only if the Mac named a risk.
 - The Move sheet warns when the old primary couldn't pause the moved sessions after the switch ("They may run on both machines until it stops them").
-- The Settings row and the cluster view show "Automatic failover: not ready" while failover is on (always, for now), and "m1 takes over at <time> if m5 stays unreachable" once that is built.
 
 ## After the move
 

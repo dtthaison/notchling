@@ -175,33 +175,11 @@ impl Line {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct FailoverStatus {
-    pub value: String,
-    pub armed: bool,
-    pub target: Option<String>,
-    pub takes_over_at: Option<i64>,
-}
-
-fn failover_of(status: &Value) -> Option<FailoverStatus> {
-    let failover = status.get("failover").filter(|f| f.is_object())?;
-    Some(FailoverStatus {
-        value: text(failover, "value").to_owned(),
-        armed: flag(failover, "armed"),
-        target: failover
-            .get("target")
-            .and_then(Value::as_str)
-            .map(str::to_owned),
-        takes_over_at: failover.get("takesOverAt").and_then(Value::as_i64),
-    })
-}
-
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ClusterModel {
     loaded: bool,
     cluster: Option<String>,
     joining: Option<bool>,
-    failover: Option<FailoverStatus>,
     pub(super) promote: PromoteInfo,
     me: String,
     rows: Vec<NodeRow>,
@@ -439,7 +417,6 @@ impl ClusterModel {
             loaded: true,
             cluster,
             joining,
-            failover: failover_of(status),
             promote: PromoteInfo::of(status),
             me: me.to_owned(),
             rows: ranked
@@ -470,10 +447,6 @@ impl ClusterModel {
 
     pub fn cluster_name(&self) -> Option<&str> {
         self.cluster.as_deref()
-    }
-
-    pub fn failover(&self) -> Option<&FailoverStatus> {
-        self.failover.as_ref()
     }
 
     pub fn rows(&self) -> Vec<NodeRow> {
