@@ -32,7 +32,10 @@ class DiskChatCache implements ChatCache {
 
   String _key(String value) => sha1.convert(utf8.encode(value)).toString().substring(0, 24);
 
-  Future<File> _messagesFile(String sessionId) async => File('${(await _root()).path}/chat_cache/${_key(sessionId)}.json');
+  /// v2: Macs before this cut every message at 3000 characters, and the phone only asks for what is newer than its
+  /// copy, so a cut copy would never be replaced. Each session's v1 file is dropped the first time it is read.
+  Future<File> _messagesFile(String sessionId) async => File('${(await _root()).path}/chat_cache_v2/${_key(sessionId)}.json');
+  Future<File> _legacyMessagesFile(String sessionId) async => File('${(await _root()).path}/chat_cache/${_key(sessionId)}.json');
   Future<File> _imageFile(String sessionId, String imageId, int width) async =>
       File('${(await _root()).path}/chat_images/${_key(sessionId)}/${_key(imageId)}-$width.jpg');
 
@@ -42,6 +45,8 @@ class DiskChatCache implements ChatCache {
   @override
   Future<List<ChatMessage>> loadMessages(String sessionId) async {
     try {
+      final File legacy = await _legacyMessagesFile(sessionId);
+      if (legacy.existsSync()) await legacy.delete();
       final File file = await _messagesFile(sessionId);
       if (!file.existsSync()) return const <ChatMessage>[];
       final Object? decoded = jsonDecode(await file.readAsString());

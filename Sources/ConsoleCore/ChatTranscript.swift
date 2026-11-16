@@ -15,7 +15,10 @@ public enum ChatTranscript {
     public static let tailBytes: UInt64 = 2_000_000
     /// Screenshots and long tool output: nothing the chat shows, and slow to decode.
     public static let maxLineBytes = 100_000
-    public static let maxTextCharacters = 3000
+    /// Claude's own lines may be bigger: a long answer is one line, and skipping it lost the whole reply.
+    public static let maxAssistantLineBytes = 1_000_000
+    /// A whole long answer reaches the phone (3000 cut most reports off mid-way); this only stops a runaway one.
+    public static let maxTextCharacters = 100_000
     public static let defaultLimit = 200
 
     public static func read(url: URL, isMain: Bool, limit: Int = defaultLimit) -> ChatParseResult {
@@ -210,7 +213,8 @@ public enum ChatTranscript {
             var stripped: [(base64Length: Int, size: (Int, Int)?)] = []
             // A line with pictures is big because of the base64; that is cut out first, and only then is the size judged.
             if line.contains("\"type\":\"base64\"") { (line, stripped) = ChatImages.stripBase64(from: line) }
-            if line.utf8.count > maxLineBytes { continue }
+            let bytes = line.utf8.count
+            if bytes > maxLineBytes, bytes > maxAssistantLineBytes || !line.contains("\"type\":\"assistant\"") { continue }
             let object: [String: Any]
             do {
                 guard let decoded = try JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any] else {

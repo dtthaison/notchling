@@ -48,22 +48,32 @@ final class ChatTranscriptTests: XCTestCase {
         XCTAssertTrue(ChatTranscript.read(url: url, isMain: true).messages.isEmpty)
     }
 
-    func testLongTextIsCappedAt3000Characters() throws {
+    func testLongTextIsCappedOnlyWhenRunaway() throws {
         let tree = try makeFixtures()
-        let url = try writeLines([assistantLine(String(repeating: "x", count: 3500), uuid: "long")], in: tree, name: "long.jsonl")
+        let cap = ChatTranscript.maxTextCharacters
+        let url = try writeLines([assistantLine(String(repeating: "x", count: cap + 500), uuid: "long")], in: tree, name: "long.jsonl")
         let message = try XCTUnwrap(ChatTranscript.read(url: url, isMain: true).messages.first)
-        XCTAssertEqual(message.text.count, 3000)
+        XCTAssertEqual(message.text.count, cap)
         XCTAssertTrue(message.text.hasSuffix("…"))
 
-        let short = try writeLines([assistantLine(String(repeating: "y", count: 3000), uuid: "exact")], in: tree, name: "exact.jsonl")
-        XCTAssertEqual(ChatTranscript.read(url: short, isMain: true).messages.first?.text.count, 3000)
+        let short = try writeLines([assistantLine(String(repeating: "y", count: cap), uuid: "exact")], in: tree, name: "exact.jsonl")
+        XCTAssertEqual(ChatTranscript.read(url: short, isMain: true).messages.first?.text.count, cap)
+    }
+
+    /// A long Vietnamese report is one line over 100 KB; it used to vanish, and below that it was cut at 3000 characters.
+    func testLongAnswerOver100KBArrivesWhole() throws {
+        let tree = try makeFixtures()
+        let answer = String(repeating: "Đã kiểm tra và sửa lỗi hiển thị. ", count: 2800)
+        XCTAssertGreaterThan(answer.utf8.count, ChatTranscript.maxLineBytes)
+        let url = try writeLines([assistantLine(answer, uuid: "report")], in: tree, name: "report.jsonl")
+        XCTAssertEqual(ChatTranscript.read(url: url, isMain: true).messages.first?.text, answer.trimmingCharacters(in: .whitespaces))
     }
 
     func testLinesOver100KBAreSkipped() throws {
         let tree = try makeFixtures()
         let url = try writeLines([
             assistantLine("before", uuid: "u1"),
-            assistantLine(String(repeating: "z", count: 150_000), uuid: "huge"),
+            #"{"type":"user","uuid":"huge","message":{"role":"user","content":"\#(String(repeating: "z", count: 150_000))"}}"#,
             #"{"type":"user","uuid":"u3","message":{"role":"user","content":"after"}}"#,
         ], in: tree, name: "huge.jsonl")
         XCTAssertEqual(ChatTranscript.read(url: url, isMain: true).messages.map(\.text), ["before", "after"])
