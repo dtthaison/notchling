@@ -18,6 +18,8 @@ mod conversation_words_tests;
 pub mod data;
 pub mod delegated;
 #[cfg(test)]
+mod delegated_cap_tests;
+#[cfg(test)]
 mod details_words_tests;
 pub mod drafts;
 pub mod drops;

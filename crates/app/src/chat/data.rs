@@ -243,7 +243,15 @@ impl DataRoot {
             .collect();
         locator.retain(&agents);
         let days = self.fixture.is_none().then_some(14);
-        for path in codex_list::rollouts(&self.codex_dir.join("sessions"), days, now_ms, 30) {
+        let hidden = super::delegated::hidden(&self.delegations());
+        let rollouts = codex_list::rollouts_skipping(
+            &self.codex_dir.join("sessions"),
+            days,
+            now_ms,
+            30,
+            &hidden,
+        );
+        for path in rollouts.shown.into_iter().chain(rollouts.skipped) {
             if let Some(agent) = codex_list::session(&path) {
                 out.push(Session {
                     agent,

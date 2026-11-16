@@ -218,6 +218,8 @@ mod daemon_tests;
 #[cfg(test)]
 mod event_assert;
 #[cfg(test)]
+mod every_session_cap_tests;
+#[cfg(test)]
 mod every_session_tests;
 #[cfg(test)]
 mod git_ops_branch_tests;

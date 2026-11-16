@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
@@ -35,14 +35,51 @@ fn numbered_dirs(dir: &Path, digits: usize) -> Vec<(u32, PathBuf)> {
     out
 }
 
+pub const MAX_SCANNED: usize = 1_000;
+
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct Rollouts {
+    pub shown: Vec<PathBuf>,
+    pub skipped: Vec<PathBuf>,
+}
+
+pub fn rollout_session(name: &str) -> Option<&str> {
+    let rest = name.strip_prefix("rollout-")?.strip_suffix(".jsonl")?;
+    if rest.as_bytes().get(19) != Some(&b'-') {
+        return None;
+    }
+    rest.get(20..).filter(|id| !id.is_empty())
+}
+
+fn is_skipped(path: &Path, skip: &HashSet<String>) -> bool {
+    if skip.is_empty() {
+        return false;
+    }
+    path.file_name()
+        .and_then(|n| n.to_str())
+        .and_then(rollout_session)
+        .is_some_and(|id| skip.contains(&format!("codex:{id}")))
+}
+
 pub fn rollouts(
     sessions_dir: &Path,
     within_days: Option<i64>,
     now_ms: i64,
     limit: usize,
 ) -> Vec<PathBuf> {
+    rollouts_skipping(sessions_dir, within_days, now_ms, limit, &HashSet::new()).shown
+}
+
+pub fn rollouts_skipping(
+    sessions_dir: &Path,
+    within_days: Option<i64>,
+    now_ms: i64,
+    limit: usize,
+    skip: &HashSet<String>,
+) -> Rollouts {
     let today = now_ms.div_euclid(86_400_000);
-    let mut out = Vec::new();
+    let mut out = Rollouts::default();
+    let mut scanned = 0;
     'years: for (year, year_dir) in numbered_dirs(sessions_dir, 4) {
         for (month, month_dir) in numbered_dirs(&year_dir, 2) {
             for (day, day_dir) in numbered_dirs(&month_dir, 2) {
@@ -64,14 +101,23 @@ pub fn rollouts(
                     })
                     .collect();
                 files.sort_by(|a, b| b.cmp(a));
-                out.extend(files);
-                if out.len() >= limit {
+                files.truncate(MAX_SCANNED - scanned);
+                scanned += files.len();
+                for file in files {
+                    if is_skipped(&file, skip) {
+                        out.skipped.push(file);
+                    } else {
+                        out.shown.push(file);
+                    }
+                }
+                if out.shown.len() >= limit || scanned >= MAX_SCANNED {
                     break 'years;
                 }
             }
         }
     }
-    out.truncate(limit);
+    out.shown.truncate(limit);
+    out.skipped.truncate(limit);
     out
 }
 
