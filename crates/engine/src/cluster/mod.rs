@@ -101,6 +101,8 @@ mod state_tests;
 #[cfg(test)]
 mod text_tests;
 #[cfg(test)]
+mod versions_own_tests;
+#[cfg(test)]
 mod versions_tests;
 #[cfg(test)]
 mod wire_tests;

@@ -581,7 +581,12 @@ except where a tier is shown; the node-only ones come from another node's link a
   in, absent when the Worker could not tell). `node.versions` reports the logins: `codex` (from
   `codex login status`), `agy` (whether `~/.gemini/jetski-standalone-oauth-token` exists and is not empty, read as signed
   out on Linux and as unknown on a Mac, where the login may be in the Keychain, which is never read)
-  and `claude` only while the cluster login is on, which it is not in this build. The probes
+  and `claude` only while the cluster login is on, which it is not in this build (it means the cluster's
+  Worker login, never the machine's own). The machine's own Claude Code login is `versions.own_logins`
+  (additive, a map of tool to `true`, omitted when empty; older nodes ignore it): `claude` is `true` when
+  `~/.claude.json` has a non-empty `oauthAccount` object, and the entry is left out otherwise, since a
+  machine can run Claude Code without one. Only the profile is read, never a token or the Keychain, and it
+  never affects dispatch. The probes
   run off the driver thread, at most every 10 minutes, with a 5 s limit per command, and never refresh a
   token. A tool known to be signed out (`false`) is refused at dispatch with "`<Tool>` isn't signed in on
   `<node>`".

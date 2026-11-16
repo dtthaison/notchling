@@ -1,12 +1,14 @@
 use crate::cluster_logins_notes::{base_of, notice, raise_once, Notes, VARIANTS};
 use notchling_engine::cluster::logins::{
-    needed_text, probe, Flip, Sources, StatusRunner, Tracker, EVERY,
+    claude_profile_signed_in, needed_text, probe, Flip, Sources, StatusRunner, Tracker,
+    CLAUDE_PROFILE_FILE, EVERY,
 };
 use notchling_engine::inbox::{Kind, State};
 use notchling_engine::versions::Tool;
 use std::collections::BTreeMap;
+use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::time::{Duration, Instant};
 
 pub use crate::cluster_logins_run::SystemStatus;
@@ -21,6 +23,9 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 }
 
 pub type Files = Arc<dyn Fn(&Path) -> bool + Send + Sync>;
+pub type OwnCheck = Arc<dyn Fn(&Path) -> bool + Send + Sync>;
+
+const PROFILE_MAX_BYTES: u64 = 64 * 1024 * 1024;
 pub type Clock = Arc<dyn Fn() -> i64 + Send + Sync>;
 
 pub trait Installs: Send + Sync {
@@ -52,8 +57,20 @@ pub fn has_content(path: &Path) -> bool {
     std::fs::metadata(path).is_ok_and(|m| m.is_file() && m.len() > 0)
 }
 
+pub fn has_claude_profile(home: &Path) -> bool {
+    let Ok(file) = std::fs::File::open(home.join(CLAUDE_PROFILE_FILE)) else {
+        return false;
+    };
+    let mut data = Vec::new();
+    if file.take(PROFILE_MAX_BYTES).read_to_end(&mut data).is_err() {
+        return false;
+    }
+    std::str::from_utf8(&data).is_ok_and(claude_profile_signed_in)
+}
+
 struct Inner {
     result: BTreeMap<Tool, bool>,
+    own: bool,
     at: Option<i64>,
     running: Option<i64>,
     tracker: Tracker,
@@ -64,6 +81,7 @@ pub struct LoginProbe {
     installs: Arc<dyn Installs>,
     runner: Arc<dyn StatusRunner>,
     files: Files,
+    own_check: OnceLock<OwnCheck>,
     notes: Arc<dyn Notes>,
     clock: Clock,
     node: String,
@@ -93,18 +111,32 @@ impl LoginProbe {
             installs,
             runner,
             files,
+            own_check: OnceLock::new(),
             notes,
             clock,
             node,
             os,
             inner: Mutex::new(Inner {
                 result: BTreeMap::new(),
+                own: false,
                 at: None,
                 running: None,
                 tracker: Tracker::default(),
                 key: None,
             }),
         })
+    }
+
+    pub fn set_own(&self, check: OwnCheck) {
+        let _ = self.own_check.set(check);
+    }
+
+    pub fn own_logins(&self) -> BTreeMap<Tool, bool> {
+        let mut out = BTreeMap::new();
+        if lock(&self.inner).own {
+            out.insert(Tool::Claude, true);
+        }
+        out
     }
 
     pub fn logins(self: &Arc<Self>) -> BTreeMap<Tool, bool> {
@@ -158,10 +190,12 @@ impl LoginProbe {
             home: &home,
         };
         let found = probe(&src, self.runner.as_ref(), self.files.as_ref());
+        let own = self.own_check.get().is_some_and(|check| check(&home));
         let flips = {
             let mut inner = lock(&self.inner);
             let flips = inner.tracker.update(&found);
             inner.result = found;
+            inner.own = own;
             inner.at = Some((self.clock)());
             inner.key = Some((codex, agy));
             inner.running = None;

@@ -206,6 +206,8 @@ mod cluster_move_fix_tests;
 #[cfg(test)]
 mod cluster_move_tests;
 #[cfg(test)]
+mod cluster_node_tools_tests;
+#[cfg(test)]
 mod cluster_redact_tests;
 #[cfg(test)]
 mod cluster_relay_testkit;

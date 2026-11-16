@@ -33,6 +33,8 @@ mod method_tests;
 #[cfg(test)]
 mod mismatch_tests;
 #[cfg(test)]
+mod parse_agy_tests;
+#[cfg(test)]
 mod parse_tests;
 #[cfg(test)]
 mod record_tests;

@@ -60,6 +60,7 @@ pub struct NodeRow {
     pub tools: Vec<(String, Option<String>)>,
     pub versions: Option<Versions>,
     pub logins: Vec<(String, Login)>,
+    pub worker_login: Option<bool>,
     pub secrets: SecretAllow,
     pub warnings: Vec<String>,
     pub desired: (bool, bool, bool),
@@ -127,6 +128,16 @@ impl NodeRow {
             .iter()
             .map(|(tool, login)| (t::cluster::login(tool, login.word()), *login))
             .collect()
+    }
+
+    pub fn worker_login_text(&self) -> Option<(String, bool)> {
+        let on = self.worker_login.filter(|_| self.offers_secrets())?;
+        let word = if on {
+            t::cluster::worker_login_on()
+        } else {
+            t::cluster::worker_login_off()
+        };
+        Some((t::cluster::worker_login(word), on))
     }
 
     pub fn tool_texts(&self) -> Vec<String> {
@@ -279,11 +290,19 @@ fn login_of(versions: &Versions, tool: VersionTool) -> Login {
     if !versions.tools.contains_key(&tool) {
         return Login::NotInstalled;
     }
-    match versions.logins.get(&tool) {
-        Some(true) => Login::SignedIn,
-        Some(false) => Login::SignedOut,
-        None => Login::Unknown,
+    let own = versions.own_logins.get(&tool).copied();
+    match (versions.logins.get(&tool).copied(), own) {
+        (Some(true), _) | (_, Some(true)) => Login::SignedIn,
+        (Some(false), _) | (_, Some(false)) => Login::SignedOut,
+        (None, None) => Login::Unknown,
     }
+}
+
+fn worker_login_of(versions: &Versions) -> Option<bool> {
+    versions
+        .tools
+        .contains_key(&VersionTool::Claude)
+        .then(|| versions.logins.get(&VersionTool::Claude) == Some(&true))
 }
 
 fn secrets_of(member: &Value) -> SecretAllow {
@@ -351,6 +370,7 @@ fn row_of(member: &Value, status: &Value, me: &str, reference: Option<&Versions>
                 .collect()
         })
         .unwrap_or_default();
+    let worker_login = versions.as_ref().and_then(worker_login_of);
     let state = text(member, "state");
     NodeRow {
         me: id == me,
@@ -366,6 +386,7 @@ fn row_of(member: &Value, status: &Value, me: &str, reference: Option<&Versions>
         tools,
         versions,
         logins,
+        worker_login,
         secrets: secrets_of(member),
         warnings,
         desired: (

@@ -14,6 +14,7 @@ pub fn own() -> Versions {
         arch: std::env::consts::ARCH.to_string(),
         tools: BTreeMap::new(),
         logins: BTreeMap::new(),
+        own_logins: BTreeMap::new(),
         host: None,
         bridge: None,
     }
@@ -41,6 +42,11 @@ pub fn with_probed(mut versions: Versions, probed: BTreeMap<Tool, bool>) -> Vers
     for (tool, signed_in) in probed {
         versions.logins.entry(tool).or_insert(signed_in);
     }
+    versions
+}
+
+pub fn with_own(mut versions: Versions, own: BTreeMap<Tool, bool>) -> Versions {
+    versions.own_logins.extend(own);
     versions
 }
 

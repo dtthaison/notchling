@@ -8,7 +8,7 @@ use crate::cluster_inbox::{InboxCalls, NetLink, NodeNet, Outbox};
 use crate::cluster_inbox_follow::Follow;
 use crate::cluster_join::{JoinAsker, JOIN_WAIT};
 use crate::cluster_logins::{LoginCalls, LoginEnv, LoginHold, CLUSTER_LOGIN_ON};
-use crate::cluster_logins_probe::{has_content, LoginProbe, SystemStatus};
+use crate::cluster_logins_probe::{has_claude_profile, has_content, LoginProbe, SystemStatus};
 use crate::cluster_logins_send::{LoginDeliverer, NodeOnline, Parts, Stamps};
 use crate::cluster_main::{MainFollower, Originators, EVERY as MAIN_EVERY};
 use crate::cluster_mirror::{FollowOps, Mirror, OnCap, TailSource, MIRROR_CAP, MIRROR_DIR};
@@ -29,7 +29,7 @@ use crate::cluster_sessions::{
 };
 use crate::cluster_switches::{HeadlessSwitches, LateHandler, NodeCalls, OpsPanel};
 use crate::cluster_tail_mask::MaskedTails;
-use crate::cluster_versions::{own, with_logins, with_probed, with_tools};
+use crate::cluster_versions::{own, with_logins, with_own, with_probed, with_tools};
 use crate::cluster_workspace::{Workspace, WorkspaceCalls};
 use crate::cluster_workspace_send::{CodeSender, NodePeers, ReturnOps, Sender};
 use crate::grant_broker::GrantBroker;
@@ -363,6 +363,7 @@ fn start_node(
             with_logins(with_tools(versions.tool_versions()), login.standing()),
             probed.logins(),
         );
+        found = with_own(found, probed.own_logins());
         found.host = host.facts();
         found.bridge = bridge();
         found
@@ -633,6 +634,7 @@ impl ClusterParts {
             (inbox.clone(), Arc::new(crate::acting_ops::now_ms)),
             (node_name(), std::env::consts::OS.to_string()),
         );
+        probed.set_own(Arc::new(has_claude_profile));
         let node = start_node(
             layout,
             room.clone(),
