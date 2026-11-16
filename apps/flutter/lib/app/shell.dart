@@ -231,11 +231,17 @@ class _HomeShellState extends ConsumerState<HomeShell> {
                 children: <Widget>[
                   const ConnectionBanner(),
                   Expanded(
-                    child: tab == 2
-                        ? const VisualizeScreen()
-                        : tab == 3
-                        ? const InboxScreen()
-                        : Row(
+                    child: IndexedStack(
+                      sizing: StackFit.expand,
+                      index: tab == 2
+                          ? 1
+                          : tab == 3
+                          ? 2
+                          : 0,
+                      children: <Widget>[
+                        _TabSlot(
+                          active: tab != 2 && tab != 3,
+                          child: Row(
                             children: <Widget>[
                               SizedBox(
                                 width: 360,
@@ -245,6 +251,17 @@ class _HomeShellState extends ConsumerState<HomeShell> {
                               const Expanded(child: ChatScreen()),
                             ],
                           ),
+                        ),
+                        if (tab == 2)
+                          const VisualizeScreen()
+                        else
+                          const SizedBox.shrink(),
+                        if (tab == 3)
+                          const InboxScreen()
+                        else
+                          const SizedBox.shrink(),
+                      ],
+                    ),
                   ),
                 ],
               ),
